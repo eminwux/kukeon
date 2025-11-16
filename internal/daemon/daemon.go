@@ -1,0 +1,51 @@
+// Copyright 2025 Emiliano Spinella (eminwux)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// SPDX-License-Identifier: Apache-2.0
+
+package core
+
+import (
+	"context"
+	"log/slog"
+
+	"github.com/eminwux/kukeon/internal/daemon/runner"
+	"github.com/eminwux/kukeon/pkg/api/apidaemon"
+)
+
+type Controller struct {
+	ctx    context.Context
+	logger *slog.Logger
+	runner *runner.Runner
+}
+
+func NewController() *Controller {
+	return &Controller{}
+}
+
+func (c *Controller) Start() error {
+	return nil
+}
+
+func (c *Controller) Stop() error {
+	return nil
+}
+
+func (c *Controller) Restart() error {
+	return nil
+}
+
+func (c *Controller) Status() (apidaemon.Status, error) {
+	return apidaemon.StatusRunning, nil
+}

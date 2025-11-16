@@ -1,0 +1,26 @@
+{
+  "[go]": {
+    "editor.insertSpaces": true,
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "golang.go"
+  },
+  "[go.mod]": {
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "always"
+    }
+  },
+
+  "go.toolsManagement.autoUpdate": true,
+  "go.vetOnSave": "workspace",
+
+  "go.lintTool": "golangci-lint",
+  "go.lintFlags": ["--path-mode=abs"],
+  "go.lintOnSave": "workspace",
+
+  "go.formatTool": "custom",
+  "go.alternateTools": {
+    "customFormatter": "golangci-lint"
+  },
+  "go.formatFlags": ["fmt", "--stdin"]
+}
