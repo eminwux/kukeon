@@ -16,18 +16,22 @@
 
 package errdefs
 
-import "errors"
+import (
+	"errors"
+)
 
 var (
 	ErrWriteMetadata          = errors.New("failed to write metadata file")
 	ErrConfig                 = errors.New("config error")
 	ErrLoggerNotFound         = errors.New("logger not found in context")
 	ErrNetworkNotFound        = errors.New("network not found")
+	ErrCreateNetwork          = errors.New("failed to create network")
 	ErrConnectContainerd      = errors.New("failed to connect to containerd")
 	ErrCheckNamespaceExists   = errors.New("failed to check if namespace exists")
 	ErrNamespaceAlreadyExists = errors.New("namespace already exists")
 	ErrCreateNamespace        = errors.New("failed to create namespace")
 	ErrCreateRealm            = errors.New("failed to create realm")
+	ErrCreateRealmCgroup      = errors.New("failed to create realm cgroup")
 	ErrInitCniManager         = errors.New("failed to initiate cni manager")
 	ErrRealmNotFound          = errors.New("realm not found")
 	ErrGetRealm               = errors.New("failed to get realm")
@@ -39,4 +43,13 @@ var (
 	ErrConversionFailed       = errors.New("conversion failed")
 	ErrDefaultingFailed       = errors.New("defaulting failed")
 	ErrCheckNetworkExists     = errors.New("failed to check if network exists")
+	ErrGetSpace               = errors.New("failed to get space")
+	ErrSpaceNotFound          = errors.New("space not found")
+	ErrSpaceDocRequired       = errors.New("space document is required")
+	ErrSpaceNameRequired      = errors.New("space name is required")
+	ErrRealmNameRequired      = errors.New("realm name is required")
+	ErrUpdateSpaceMetadata    = errors.New("failed to update space metadata")
+	ErrCreateSpace            = errors.New("failed to create space")
+	ErrCreateSpaceCgroup      = errors.New("failed to create space cgroup")
+	ErrNetworkAlreadyExists   = errors.New("network already exists")
 )

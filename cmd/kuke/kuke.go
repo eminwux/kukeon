@@ -105,7 +105,7 @@ func setupKukeCmd(rootCmd *cobra.Command) error {
 }
 
 func setPersistentLoggingFlags(rootCmd *cobra.Command) error {
-	rootCmd.PersistentFlags().String("run-path", "/tmp/kukeon", "Run path for the kukeon runtime")
+	rootCmd.PersistentFlags().String("run-path", "/opt/kukeon", "Run path for the kukeon runtime")
 	if err := viper.BindPFlag(config.KUKEON_ROOT_RUN_PATH.ViperKey, rootCmd.PersistentFlags().Lookup("run-path")); err != nil {
 		return err
 	}

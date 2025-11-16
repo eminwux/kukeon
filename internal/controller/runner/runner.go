@@ -21,22 +21,30 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/cni"
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/fs"
+	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 type Runner interface {
-	CreateRealm(spec *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error)
-	NamespaceExists(namespace string) (bool, error)
+	BootstrapCNI(cfgDir, cacheDir, binDir string) (cni.BootstrapReport, error)
+
 	GetRealm(doc *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error)
+	CreateRealm(spec *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error)
+	ExistsRealmContainerdNamespace(namespace string) (bool, error)
+
+	GetSpace(doc *v1beta1.SpaceDoc) (*v1beta1.SpaceDoc, error)
+	CreateSpace(doc *v1beta1.SpaceDoc) (*v1beta1.SpaceDoc, error)
+	ExistsSpaceCNIConfig(doc *v1beta1.SpaceDoc) (bool, error)
 }
 
 type Exec struct {
@@ -64,6 +72,20 @@ func NewRunner(ctx context.Context, logger *slog.Logger, opts Options) Runner {
 	}
 }
 
+func (r *Exec) GetRealm(doc *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error) {
+	// Get realm metadata
+	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonRealmMetadataSubDir, doc.Metadata.Name)
+	metadataFilePath := filepath.Join(metadataRunPath, consts.KukeonMetadataFile)
+	realmDoc, err := metadata.ReadMetadata[v1beta1.RealmDoc](r.ctx, r.logger, metadataFilePath)
+	if err != nil {
+		if errors.Is(err, errdefs.ErrMissingMetadataFile) {
+			return nil, errdefs.ErrRealmNotFound
+		}
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
+	}
+	return &realmDoc, nil
+}
+
 func (r *Exec) CreateRealm(doc *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error) {
 	r.logger.Debug("run-path", "run-path", r.opts.RunPath)
 
@@ -74,7 +96,11 @@ func (r *Exec) CreateRealm(doc *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error) {
 
 	// Realm found, check if namespace exists
 	if rDoc != nil {
-		return r.ensureRealmNamespace(rDoc)
+		doc, err = r.ensureRealmContainerdNamespace(rDoc)
+		if err != nil {
+			return nil, err
+		}
+		return r.ensureRealmCgroup(doc)
 	}
 
 	// Realm not found, normalize request to internal then emit external doc for storage
@@ -94,108 +120,7 @@ func (r *Exec) CreateRealm(doc *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error) {
 	return r.provisionNewRealm(rDocNew)
 }
 
-func (r *Exec) UpdateRealmMetadata(doc *v1beta1.RealmDoc) error {
-	metadataRunPath := filepath.Join(r.opts.RunPath, "realms", doc.Metadata.Name)
-	metadataFilePath := filepath.Join(metadataRunPath, "metadata.json")
-	err := metadata.WriteMetadata(r.ctx, r.logger, doc, metadataFilePath)
-	if err != nil {
-		r.logger.Error("failed to write metadata", "err", fmt.Sprintf("%v", err))
-		return fmt.Errorf("%w: %w", errdefs.ErrWriteMetadata, err)
-	}
-	return nil
-}
-
-func (r *Exec) ensureRealmNamespace(doc *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error) {
-	// Ensure containerd namespace exists for the realm described by doc
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	if err := r.ctrClient.Connect(); err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
-	}
-	defer r.ctrClient.Close()
-
-	exists, err := r.ctrClient.ExistsNamespace(doc.Spec.Namespace)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrCheckNamespaceExists, err)
-	}
-	if !exists {
-		if err = r.ctrClient.CreateNamespace(doc.Spec.Namespace); err != nil {
-			return nil, fmt.Errorf("%w: %w", errdefs.ErrCreateNamespace, err)
-		}
-		r.logger.InfoContext(r.ctx, "recreated missing containerd namespace for realm", "namespace", doc.Spec.Namespace)
-	}
-	return doc, nil
-}
-
-func (r *Exec) provisionNewRealm(doc *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error) {
-	// Update realm metadata
-	if err := r.UpdateRealmMetadata(doc); err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrUpdateRealmMetadata, err)
-	}
-
-	// Create realm namespace
-	if err := r.CreateRealmNamespace(doc); err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrCreateRealmNamespace, err)
-	}
-
-	// Update realm state
-	doc.Status.State = v1beta1.RealmStateReady
-	if err := r.UpdateRealmMetadata(doc); err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrUpdateRealmMetadata, err)
-	}
-	return doc, nil
-}
-
-func (r *Exec) CreateRealmNamespace(doc *v1beta1.RealmDoc) error {
-	// Create realm namespace
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-
-	err := r.ctrClient.Connect()
-	if err != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
-	}
-	defer r.ctrClient.Close()
-
-	exists, err := r.ctrClient.ExistsNamespace(doc.Spec.Namespace)
-	if err != nil {
-		r.logger.InfoContext(r.ctx, "failed to check if kukeon namespace exists", "err", fmt.Sprintf("%v", err))
-		return fmt.Errorf("%w: %w", errdefs.ErrCheckNamespaceExists, err)
-	}
-
-	if exists {
-		r.logger.InfoContext(r.ctx, "kukeon namespace already exists", "namespace", doc.Spec.Namespace)
-		return errdefs.ErrNamespaceAlreadyExists
-	}
-
-	fmt.Fprintf(os.Stdout, "Creating containerd namespace '%s'\n", doc.Spec.Namespace)
-	err = r.ctrClient.CreateNamespace(doc.Spec.Namespace)
-	if err != nil {
-		r.logger.InfoContext(r.ctx, "failed to create kukeon namespace", "err", fmt.Sprintf("%v", err))
-		return fmt.Errorf("%w: %w", errdefs.ErrCreateNamespace, err)
-	}
-	r.logger.InfoContext(r.ctx, "created kukeon namespace", "namespace", doc.Spec.Namespace)
-
-	return nil
-}
-
-func (r *Exec) GetRealm(doc *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error) {
-	// Get realm metadata
-	metadataRunPath := filepath.Join(r.opts.RunPath, "realms", doc.Metadata.Name)
-	metadataFilePath := filepath.Join(metadataRunPath, "metadata.json")
-	realmDoc, err := metadata.ReadMetadata[v1beta1.RealmDoc](r.ctx, r.logger, metadataFilePath)
-	if err != nil {
-		if errors.Is(err, errdefs.ErrMissingMetadataFile) {
-			return nil, errdefs.ErrRealmNotFound
-		}
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
-	}
-	return &realmDoc, nil
-}
-
-func (r *Exec) NamespaceExists(namespace string) (bool, error) {
+func (r *Exec) ExistsRealmContainerdNamespace(namespace string) (bool, error) {
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
@@ -206,35 +131,102 @@ func (r *Exec) NamespaceExists(namespace string) (bool, error) {
 	return r.ctrClient.ExistsNamespace(namespace)
 }
 
-func (r *Exec) CreateSpace(_ string, _ string) error {
+func (r *Exec) GetSpace(doc *v1beta1.SpaceDoc) (*v1beta1.SpaceDoc, error) {
+	// Get space metadata
+	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonSpaceMetadataSubDir, doc.Metadata.Name)
+	metadataFilePath := filepath.Join(metadataRunPath, consts.KukeonMetadataFile)
+	spaceDoc, err := metadata.ReadMetadata[v1beta1.SpaceDoc](r.ctx, r.logger, metadataFilePath)
+	if err != nil {
+		if errors.Is(err, errdefs.ErrMissingMetadataFile) {
+			return nil, errdefs.ErrSpaceNotFound
+		}
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
+	}
+	return &spaceDoc, nil
+}
+
+func (r *Exec) CreateSpace(doc *v1beta1.SpaceDoc) (*v1beta1.SpaceDoc, error) {
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
 
-	var err error
-	err = r.ctrClient.Connect()
-	if err != nil {
-		return fmt.Errorf("failed to connect to containerd: %w", err)
+	sDoc, err := r.GetSpace(doc)
+	if err != nil && !errors.Is(err, errdefs.ErrSpaceNotFound) {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
 	}
-	defer r.ctrClient.Close()
 
-	var mgr *cni.Manager
-	mgr, err = cni.NewManager(
+	realmName := doc.Spec.RealmID
+	if sDoc != nil && sDoc.Spec.RealmID != "" {
+		realmName = sDoc.Spec.RealmID
+	}
+	if realmName == "" {
+		return nil, errdefs.ErrRealmNameRequired
+	}
+	realmDoc, realmErr := r.GetRealm(&v1beta1.RealmDoc{
+		Metadata: v1beta1.RealmMetadata{
+			Name: realmName,
+		},
+	})
+	if realmErr != nil {
+		return nil, realmErr
+	}
+
+	// Space found, ensure CNI config exists
+	if sDoc != nil {
+		spaceDocEnsured, ensureErr := r.ensureSpaceCNIConfig(sDoc)
+		if ensureErr != nil {
+			return nil, ensureErr
+		}
+		return r.ensureSpaceCgroup(spaceDocEnsured, realmDoc)
+	}
+
+	// Space not found, normalize request to internal then emit external doc for storage
+	var internalSpace intmodel.Space
+	var version v1beta1.Version
+	internalSpace, version, err = apischeme.NormalizeSpace(*doc)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	internalSpace.Status.State = intmodel.SpaceStateCreating
+	sDocNewExt, err := apischeme.BuildSpaceExternalFromInternal(internalSpace, version)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	sDocNew := &sDocNewExt
+
+	return r.provisionNewSpace(sDocNew)
+}
+
+func (r *Exec) ExistsSpaceCNIConfig(doc *v1beta1.SpaceDoc) (bool, error) {
+	if doc == nil {
+		return false, errdefs.ErrSpaceDocRequired
+	}
+	mgr, err := cni.NewManager(
 		r.cniConf.CniBinDir,
-		r.cniConf.CniConfigFile,
 		r.cniConf.CniConfigDir,
 		r.cniConf.CniCacheDir,
 	)
 	if err != nil {
-		r.logger.Error("could not initializa cni manager")
-		return fmt.Errorf("%w: %w", errdefs.ErrInitCniManager, err)
+		return false, fmt.Errorf("%w: %w", errdefs.ErrInitCniManager, err)
 	}
 
-	_, _, err = mgr.NetworkExists("hola")
+	confPath, err := fs.SpaceNetworkConfigPath(r.opts.RunPath, doc.Metadata.Name)
 	if err != nil {
-		r.logger.Error("could not check if network exists", "err", fmt.Sprintf("%v", err))
-		return fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
+		return false, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
+	}
+	networkName, err := naming.BuildSpaceNetworkName(doc)
+	if err != nil {
+		return false, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
 
-	return nil
+	exists, _, err := mgr.ExistsNetworkConfig(networkName, confPath)
+	if err != nil && !errors.Is(err, errdefs.ErrNetworkNotFound) {
+		return false, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
+	}
+	return exists, nil
+}
+
+func (r *Exec) BootstrapCNI(cfgDir, cacheDir, binDir string) (cni.BootstrapReport, error) {
+	// Delegate to cni package bootstrap; empty params will default.
+	return cni.BootstrapCNI(cfgDir, cacheDir, binDir)
 }

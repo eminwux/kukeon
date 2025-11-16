@@ -31,11 +31,11 @@ type SpaceMetadata struct {
 
 type SpaceSpec struct {
 	RealmID string `json:"realmId" yaml:"realmId"`
-	ID      string `json:"id"      yaml:"id"`
 }
 
 type SpaceStatus struct {
-	State SpaceState `json:"state" yaml:"state"`
+	State      SpaceState `json:"state"                yaml:"state"`
+	CgroupPath string     `json:"cgroupPath,omitempty" yaml:"cgroupPath,omitempty"`
 }
 
 type SpaceState int

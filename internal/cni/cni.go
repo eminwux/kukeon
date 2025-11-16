@@ -19,7 +19,7 @@ package cni
 import (
 	"context"
 	"encoding/json"
-	"io/fs"
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -27,12 +27,9 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
-const (
-	defaultCniConfFile = "/etc/cni/net.d/10-kykeon-main-default.conflist"
-	defaultCniConfDir  = "/etc/cni/net.d"
-	defaultCniBinDir   = "/opt/cni/bin"
-	defaultCniCacheDir = "/var/lib/kukeon/cni-cache"
-)
+// defaults moved to config.go
+
+// models and defaults moved to config.go
 
 type Manager struct {
 	cniConf libcni.CNI
@@ -41,13 +38,12 @@ type Manager struct {
 }
 
 type Conf struct {
-	CniConfigFile string
-	CniConfigDir  string
-	CniBinDir     string
-	CniCacheDir   string
+	CniConfigDir string
+	CniBinDir    string
+	CniCacheDir  string
 }
 
-func NewManager(cniBinDir, cniConfFile, cniConfigDir, cniCacheDir string) (*Manager, error) {
+func NewManager(cniBinDir, cniConfigDir, cniCacheDir string) (*Manager, error) {
 	// cniBinDir: where plugins live, e.g. /opt/cni/bin
 	// cacheDir: something like /var/lib/kukeon/cni-cache
 
@@ -56,10 +52,6 @@ func NewManager(cniBinDir, cniConfFile, cniConfigDir, cniCacheDir string) (*Mana
 		cniCacheDir,
 		nil,
 	)
-
-	if cniConfFile == "" {
-		cniConfFile = defaultCniConfFile
-	}
 
 	if cniConfigDir == "" {
 		cniConfigDir = defaultCniConfDir
@@ -73,19 +65,15 @@ func NewManager(cniBinDir, cniConfFile, cniConfigDir, cniCacheDir string) (*Mana
 		cniCacheDir = defaultCniCacheDir
 	}
 
-	netConf, err := libcni.ConfListFromFile(cniConfFile)
-	if err != nil {
-		return nil, err
-	}
+	var netConf *libcni.NetworkConfigList
 
 	return &Manager{
 		cniConf: cniConf,
 		netConf: netConf,
 		conf: Conf{
-			CniConfigFile: cniConfFile,
-			CniConfigDir:  cniConfigDir,
-			CniBinDir:     cniBinDir,
-			CniCacheDir:   cniCacheDir,
+			CniConfigDir: cniConfigDir,
+			CniBinDir:    cniBinDir,
+			CniCacheDir:  cniCacheDir,
 		},
 	}, nil
 }
@@ -110,48 +98,57 @@ func (m *Manager) DelContainerFromNetwork(ctx context.Context, containerID, netn
 	return m.cniConf.DelNetworkList(ctx, m.netConf, rt)
 }
 
-func (m *Manager) NetworkExists(networkName string) (bool, string, error) {
-	var foundFile string
+func (m *Manager) ExistsNetworkConfig(networkName, configPath string) (bool, string, error) {
+	if configPath == "" {
+		configPath = filepath.Join(m.conf.CniConfigDir, networkName+".conflist")
+	}
 
-	err := filepath.WalkDir(m.conf.CniConfigDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if d.IsDir() {
-			return nil
-		}
-
-		// Only parse files ending with .conflist or .conf
-		if filepath.Ext(path) != ".conf" && filepath.Ext(path) != ".conflist" {
-			return nil
-		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-
-		var raw map[string]interface{}
-		if err = json.Unmarshal(data, &raw); err != nil {
-			return err
-		}
-
-		if name, ok := raw["name"].(string); ok {
-			if name == networkName {
-				foundFile = path
-				return filepath.SkipDir // stop scanning early
-			}
-		}
-
-		return nil
-	})
+	data, err := os.ReadFile(configPath)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, "", errdefs.ErrNetworkNotFound
+		}
 		return false, "", err
 	}
-	if foundFile == "" {
+
+	var raw map[string]interface{}
+	if uErr := json.Unmarshal(data, &raw); uErr != nil {
+		return false, "", uErr
+	}
+
+	if name, ok := raw["name"].(string); !ok || name != networkName {
 		return false, "", errdefs.ErrNetworkNotFound
 	}
 
-	return true, foundFile, nil
+	return true, configPath, nil
+}
+
+// CreateNetworkWithConfig creates a CNI network conflist file using the provided NetworkConfig.
+func (m *Manager) CreateNetworkWithConfig(cfg NetworkConfig) (string, error) {
+	bridge := cfg.BridgeName
+	if bridge == "" {
+		bridge = defaultBridgeName
+	}
+	subnet := cfg.SubnetCIDR
+	if subnet == "" {
+		subnet = defaultSubnetCIDR
+	}
+	out, err := BuildDefaultConflist(cfg.Name, bridge, subnet)
+	if err != nil {
+		return "", err
+	}
+	target := filepath.Join(m.conf.CniConfigDir, cfg.Name+".conflist")
+	if writeErr := os.WriteFile(target, out, 0o600); writeErr != nil {
+		return "", writeErr
+	}
+	return target, nil
+}
+
+// CreateNetwork is a backward-compatible helper using discrete params.
+func (m *Manager) CreateNetwork(networkName, bridgeName, subnetCIDR string) (string, error) {
+	return m.CreateNetworkWithConfig(NetworkConfig{
+		Name:       networkName,
+		BridgeName: bridgeName,
+		SubnetCIDR: subnetCIDR,
+	})
 }
