@@ -45,6 +45,12 @@ type Runner interface {
 	GetSpace(doc *v1beta1.SpaceDoc) (*v1beta1.SpaceDoc, error)
 	CreateSpace(doc *v1beta1.SpaceDoc) (*v1beta1.SpaceDoc, error)
 	ExistsSpaceCNIConfig(doc *v1beta1.SpaceDoc) (bool, error)
+
+	GetStack(doc *v1beta1.StackDoc) (*v1beta1.StackDoc, error)
+	CreateStack(doc *v1beta1.StackDoc) (*v1beta1.StackDoc, error)
+
+	GetCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error)
+	CreateCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error)
 }
 
 type Exec struct {
@@ -224,6 +230,72 @@ func (r *Exec) ExistsSpaceCNIConfig(doc *v1beta1.SpaceDoc) (bool, error) {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
 	return exists, nil
+}
+
+func (r *Exec) GetStack(doc *v1beta1.StackDoc) (*v1beta1.StackDoc, error) {
+	// Get stack metadata
+	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonStackMetadataSubDir, doc.Metadata.Name)
+	metadataFilePath := filepath.Join(metadataRunPath, consts.KukeonMetadataFile)
+	stackDoc, err := metadata.ReadMetadata[v1beta1.StackDoc](r.ctx, r.logger, metadataFilePath)
+	if err != nil {
+		if errors.Is(err, errdefs.ErrMissingMetadataFile) {
+			return nil, errdefs.ErrStackNotFound
+		}
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrGetStack, err)
+	}
+	return &stackDoc, nil
+}
+
+func (r *Exec) CreateStack(doc *v1beta1.StackDoc) (*v1beta1.StackDoc, error) {
+	if r.ctrClient == nil {
+		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
+	}
+
+	sDoc, err := r.GetStack(doc)
+	if err != nil && !errors.Is(err, errdefs.ErrStackNotFound) {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrGetStack, err)
+	}
+
+	// Stack found, ensure cgroup exists
+	if sDoc != nil {
+		return r.ensureStackCgroup(sDoc)
+	}
+
+	// Stack not found, create new stack
+	return r.provisionNewStack(doc)
+}
+
+func (r *Exec) GetCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error) {
+	// Get cell metadata
+	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonCellMetadataSubDir, doc.Metadata.Name)
+	metadataFilePath := filepath.Join(metadataRunPath, consts.KukeonMetadataFile)
+	cellDoc, err := metadata.ReadMetadata[v1beta1.CellDoc](r.ctx, r.logger, metadataFilePath)
+	if err != nil {
+		if errors.Is(err, errdefs.ErrMissingMetadataFile) {
+			return nil, errdefs.ErrCellNotFound
+		}
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
+	}
+	return &cellDoc, nil
+}
+
+func (r *Exec) CreateCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error) {
+	if r.ctrClient == nil {
+		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
+	}
+
+	cDoc, err := r.GetCell(doc)
+	if err != nil && !errors.Is(err, errdefs.ErrCellNotFound) {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
+	}
+
+	// Cell found, ensure cgroup exists
+	if cDoc != nil {
+		return r.ensureCellCgroup(cDoc)
+	}
+
+	// Cell not found, create new cell
+	return r.provisionNewCell(doc)
 }
 
 func (r *Exec) BootstrapCNI(cfgDir, cacheDir, binDir string) (cni.BootstrapReport, error) {

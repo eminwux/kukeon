@@ -17,21 +17,28 @@
 package consts
 
 const (
+	KukeonCgroupRoot = "/kukeon"
+
+	KukeonMetadataFile = "metadata.json"
+
 	KukeonRealmName           = "kuke-system"
 	KukeonRealmNamespace      = "kukeon.io"
 	KukeonRealmLabelKey       = "realm.kukeon.io"
 	KukeonRealmMetadataSubDir = "realms"
-	KukeonCgroupRoot          = "/kukeon"
 
 	KukeonSpaceName           = "kuke-space"
 	KukeonSpaceLabelKey       = "space.kukeon.io"
 	KukeonSpaceMetadataSubDir = "spaces"
 
+	KukeonStackName           = "kuke-stack"
+	KukeonStackLabelKey       = "stack.kukeon.io"
 	KukeonStackMetadataSubDir = "stacks"
 
+	KukeonCellName           = "kuke-cell"
+	KukeonCellLabelKey       = "cell.kukeon.io"
 	KukeonCellMetadataSubDir = "cells"
 
+	KukeonContainerName           = "kuke-container"
+	KukeonContainerLabelKey       = "container.kukeon.io"
 	KukeonContainerMetadataSubDir = "containers"
-
-	KukeonMetadataFile = "metadata.json"
 )
