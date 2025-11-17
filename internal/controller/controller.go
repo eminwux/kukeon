@@ -90,6 +90,18 @@ func (b *Exec) Bootstrap() (BootstrapReport, error) {
 	report.SpaceCreated = !report.SpaceMetadataExistsPre && report.SpaceMetadataExistsPost
 	report.SpaceCNINetworkCreated = !report.SpaceCNINetworkExistsPre && report.SpaceCNINetworkExistsPost
 
+	// Bootstrap default stack
+	report, err = b.bootstrapStack(report)
+	if err != nil {
+		return report, err
+	}
+
+	// Bootstrap default cell
+	report, err = b.bootstrapCell(report)
+	if err != nil {
+		return report, err
+	}
+
 	return report, nil
 }
 

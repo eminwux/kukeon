@@ -30,11 +30,14 @@ type StackMetadata struct {
 }
 
 type StackSpec struct {
-	ID string `json:"id" yaml:"id"`
+	ID      string `json:"id"      yaml:"id"`
+	RealmID string `json:"realmId" yaml:"realmId"`
+	SpaceID string `json:"spaceId" yaml:"spaceId"`
 }
 
 type StackStatus struct {
-	State StackState `json:"state" yaml:"state"`
+	State      StackState `json:"state"      yaml:"state"`
+	CgroupPath string     `json:"cgroupPath" yaml:"cgroupPath"`
 }
 
 type StackState int

@@ -47,3 +47,45 @@ func DefaultSpaceSpec(realm *v1beta1.RealmDoc, space *v1beta1.SpaceDoc) ctr.Cgro
 		},
 	}
 }
+
+func DefaultStackSpec(realm *v1beta1.RealmDoc, space *v1beta1.SpaceDoc, stack *v1beta1.StackDoc) ctr.CgroupSpec {
+	group := fmt.Sprintf(
+		"%s/%s/%s/%s",
+		consts.KukeonCgroupRoot,
+		realm.Metadata.Name,
+		space.Metadata.Name,
+		stack.Metadata.Name,
+	)
+	return ctr.CgroupSpec{
+		Group: group,
+		Resources: ctr.CgroupResources{
+			CPU:    nil,
+			Memory: nil,
+			IO:     nil,
+		},
+	}
+}
+
+func DefaultCellSpec(
+	realm *v1beta1.RealmDoc,
+	space *v1beta1.SpaceDoc,
+	stack *v1beta1.StackDoc,
+	cell *v1beta1.CellDoc,
+) ctr.CgroupSpec {
+	group := fmt.Sprintf(
+		"%s/%s/%s/%s/%s",
+		consts.KukeonCgroupRoot,
+		realm.Metadata.Name,
+		space.Metadata.Name,
+		stack.Metadata.Name,
+		cell.Metadata.Name,
+	)
+	return ctr.CgroupSpec{
+		Group: group,
+		Resources: ctr.CgroupResources{
+			CPU:    nil,
+			Memory: nil,
+			IO:     nil,
+		},
+	}
+}

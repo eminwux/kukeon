@@ -66,6 +66,22 @@ type BootstrapReport struct {
 	SpaceCgroupExistsPre      bool
 	SpaceCgroupExistsPost     bool
 	SpaceCgroupCreated        bool
+
+	StackName               string
+	StackMetadataExistsPre  bool
+	StackMetadataExistsPost bool
+	StackCreated            bool
+	StackCgroupExistsPre    bool
+	StackCgroupExistsPost   bool
+	StackCgroupCreated      bool
+
+	CellName               string
+	CellMetadataExistsPre  bool
+	CellMetadataExistsPost bool
+	CellCreated            bool
+	CellCgroupExistsPre    bool
+	CellCgroupExistsPost   bool
+	CellCgroupCreated      bool
 }
 
 func (b *Exec) bootstrapRealm(report BootstrapReport) (BootstrapReport, error) {
@@ -207,6 +223,130 @@ func (b *Exec) bootstrapSpace(report BootstrapReport) (BootstrapReport, error) {
 	report.SpaceCreated = !report.SpaceMetadataExistsPre && report.SpaceMetadataExistsPost
 	report.SpaceCNINetworkCreated = !report.SpaceCNINetworkExistsPre && report.SpaceCNINetworkExistsPost
 	report.SpaceCgroupCreated = !report.SpaceCgroupExistsPre && report.SpaceCgroupExistsPost
+
+	return report, nil
+}
+
+func (b *Exec) bootstrapStack(report BootstrapReport) (BootstrapReport, error) {
+	var err error
+	stackDoc := &v1beta1.StackDoc{
+		Metadata: v1beta1.StackMetadata{
+			Name: consts.KukeonStackName,
+			Labels: map[string]string{
+				consts.KukeonRealmLabelKey: consts.KukeonRealmName,
+				consts.KukeonSpaceLabelKey: consts.KukeonSpaceName,
+				consts.KukeonStackLabelKey: consts.KukeonStackName,
+			},
+		},
+		Spec: v1beta1.StackSpec{
+			ID:      consts.KukeonStackName,
+			RealmID: consts.KukeonRealmName,
+			SpaceID: consts.KukeonSpaceName,
+		},
+	}
+	stackName := stackDoc.Metadata.Name
+
+	// Fill static fields
+	report.StackName = stackName
+
+	// Try to read existing stack metadata (best-effort)
+	stackDocPre, err := b.runner.GetStack(stackDoc)
+	if err != nil {
+		if errors.Is(err, errdefs.ErrStackNotFound) {
+			report.StackMetadataExistsPre = false
+		} else {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrGetStack, err)
+		}
+	} else {
+		report.StackMetadataExistsPre = true
+		report.StackCgroupExistsPre = stackDocPre.Status.CgroupPath != ""
+	}
+
+	// Create or reconcile stack
+	_, err = b.runner.CreateStack(stackDoc)
+	if err != nil {
+		return report, fmt.Errorf("%w: %w", errdefs.ErrCreateStack, err)
+	}
+
+	// Post-state checks
+	stackDocPost, err := b.runner.GetStack(stackDoc)
+	if err != nil {
+		if errors.Is(err, errdefs.ErrStackNotFound) {
+			report.StackMetadataExistsPost = false
+		} else {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrGetStack, err)
+		}
+	} else {
+		report.StackMetadataExistsPost = true
+		report.StackCgroupExistsPost = stackDocPost.Status.CgroupPath != ""
+	}
+
+	// Derived outcomes
+	report.StackCreated = !report.StackMetadataExistsPre && report.StackMetadataExistsPost
+	report.StackCgroupCreated = !report.StackCgroupExistsPre && report.StackCgroupExistsPost
+
+	return report, nil
+}
+
+func (b *Exec) bootstrapCell(report BootstrapReport) (BootstrapReport, error) {
+	var err error
+	cellDoc := &v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{
+			Name: consts.KukeonCellName,
+			Labels: map[string]string{
+				consts.KukeonRealmLabelKey: consts.KukeonRealmName,
+				consts.KukeonSpaceLabelKey: consts.KukeonSpaceName,
+				consts.KukeonStackLabelKey: consts.KukeonStackName,
+				consts.KukeonCellLabelKey:  consts.KukeonCellName,
+			},
+		},
+		Spec: v1beta1.CellSpec{
+			ID:      consts.KukeonCellName,
+			RealmID: consts.KukeonRealmName,
+			SpaceID: consts.KukeonSpaceName,
+			StackID: consts.KukeonStackName,
+		},
+	}
+	cellName := cellDoc.Metadata.Name
+
+	// Fill static fields
+	report.CellName = cellName
+
+	// Try to read existing cell metadata (best-effort)
+	cellDocPre, err := b.runner.GetCell(cellDoc)
+	if err != nil {
+		if errors.Is(err, errdefs.ErrCellNotFound) {
+			report.CellMetadataExistsPre = false
+		} else {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
+		}
+	} else {
+		report.CellMetadataExistsPre = true
+		report.CellCgroupExistsPre = cellDocPre.Status.CgroupPath != ""
+	}
+
+	// Create or reconcile cell
+	_, err = b.runner.CreateCell(cellDoc)
+	if err != nil {
+		return report, fmt.Errorf("%w: %w", errdefs.ErrCreateCell, err)
+	}
+
+	// Post-state checks
+	cellDocPost, err := b.runner.GetCell(cellDoc)
+	if err != nil {
+		if errors.Is(err, errdefs.ErrCellNotFound) {
+			report.CellMetadataExistsPost = false
+		} else {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
+		}
+	} else {
+		report.CellMetadataExistsPost = true
+		report.CellCgroupExistsPost = cellDocPost.Status.CgroupPath != ""
+	}
+
+	// Derived outcomes
+	report.CellCreated = !report.CellMetadataExistsPre && report.CellMetadataExistsPost
+	report.CellCgroupCreated = !report.CellCgroupExistsPre && report.CellCgroupExistsPost
 
 	return report, nil
 }

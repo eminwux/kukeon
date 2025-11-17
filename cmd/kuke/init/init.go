@@ -104,6 +104,8 @@ func printBootstrapReport(cmd *cobra.Command, report controller.BootstrapReport)
 	cmd.Println("Actions:")
 	printRealmActions(cmd, report)
 	printSpaceActions(cmd, report)
+	printStackActions(cmd, report)
+	printCellActions(cmd, report)
 	printCNIActions(cmd, report)
 }
 
@@ -112,6 +114,8 @@ func printHeader(cmd *cobra.Command, report controller.BootstrapReport) {
 		report.RealmContainerdNamespaceCreated ||
 		report.SpaceCreated ||
 		report.SpaceCNINetworkCreated ||
+		report.StackCreated ||
+		report.CellCreated ||
 		report.CniConfigDirCreated ||
 		report.CniCacheDirCreated ||
 		report.CniBinDirCreated
@@ -174,6 +178,36 @@ func printSpaceActions(cmd *cobra.Command, report controller.BootstrapReport) {
 		report.SpaceCgroupExistsPre,
 		report.SpaceCgroupExistsPost,
 		report.SpaceCgroupCreated,
+	)
+}
+
+func printStackActions(cmd *cobra.Command, report controller.BootstrapReport) {
+	if report.StackCreated {
+		cmd.Println("  - stack: created")
+	} else {
+		cmd.Println("  - stack: already existed")
+	}
+	printCgroupAction(
+		cmd,
+		"stack",
+		report.StackCgroupExistsPre,
+		report.StackCgroupExistsPost,
+		report.StackCgroupCreated,
+	)
+}
+
+func printCellActions(cmd *cobra.Command, report controller.BootstrapReport) {
+	if report.CellCreated {
+		cmd.Println("  - cell: created")
+	} else {
+		cmd.Println("  - cell: already existed")
+	}
+	printCgroupAction(
+		cmd,
+		"cell",
+		report.CellCgroupExistsPre,
+		report.CellCgroupExistsPost,
+		report.CellCgroupCreated,
 	)
 }
 

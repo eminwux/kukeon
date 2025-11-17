@@ -47,3 +47,25 @@ func (r *Exec) UpdateSpaceMetadata(doc *v1beta1.SpaceDoc) error {
 	}
 	return nil
 }
+
+func (r *Exec) UpdateStackMetadata(doc *v1beta1.StackDoc) error {
+	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonStackMetadataSubDir, doc.Metadata.Name)
+	metadataFilePath := filepath.Join(metadataRunPath, consts.KukeonMetadataFile)
+	err := metadata.WriteMetadata(r.ctx, r.logger, doc, metadataFilePath)
+	if err != nil {
+		r.logger.Error("failed to write metadata", "err", fmt.Sprintf("%v", err))
+		return fmt.Errorf("%w: %w", errdefs.ErrWriteMetadata, err)
+	}
+	return nil
+}
+
+func (r *Exec) UpdateCellMetadata(doc *v1beta1.CellDoc) error {
+	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonCellMetadataSubDir, doc.Metadata.Name)
+	metadataFilePath := filepath.Join(metadataRunPath, consts.KukeonMetadataFile)
+	err := metadata.WriteMetadata(r.ctx, r.logger, doc, metadataFilePath)
+	if err != nil {
+		r.logger.Error("failed to write metadata", "err", fmt.Sprintf("%v", err))
+		return fmt.Errorf("%w: %w", errdefs.ErrWriteMetadata, err)
+	}
+	return nil
+}
