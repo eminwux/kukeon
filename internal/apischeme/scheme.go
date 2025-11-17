@@ -85,3 +85,60 @@ func NormalizeRealm(req ext.RealmDoc) (intmodel.Realm, ext.Version, error) {
 	}
 	return internal, version, nil
 }
+
+// ConvertSpaceDocToInternal converts an external SpaceDoc to the internal hub type.
+func ConvertSpaceDocToInternal(in ext.SpaceDoc) (intmodel.Space, error) {
+	switch in.APIVersion {
+	case VersionV1Beta1, "": // default/empty treated as v1beta1
+		return intmodel.Space{
+			Metadata: intmodel.SpaceMetadata{
+				Name:   in.Metadata.Name,
+				Labels: in.Metadata.Labels,
+			},
+			Spec: intmodel.SpaceSpec{
+				RealmName: in.Spec.RealmID,
+			},
+			Status: intmodel.SpaceStatus{
+				State: intmodel.SpaceState(in.Status.State),
+			},
+		}, nil
+	default:
+		return intmodel.Space{}, fmt.Errorf("unsupported apiVersion for Space: %s", in.APIVersion)
+	}
+}
+
+// BuildSpaceExternalFromInternal emits an external SpaceDoc for a given version from an internal hub object.
+func BuildSpaceExternalFromInternal(in intmodel.Space, apiVersion ext.Version) (ext.SpaceDoc, error) {
+	switch apiVersion {
+	case VersionV1Beta1, "": // default to v1beta1
+		return ext.SpaceDoc{
+			APIVersion: VersionV1Beta1,
+			Kind:       ext.KindSpace,
+			Metadata: ext.SpaceMetadata{
+				Name:   in.Metadata.Name,
+				Labels: in.Metadata.Labels,
+			},
+			Spec: ext.SpaceSpec{
+				RealmID: in.Spec.RealmName,
+			},
+			Status: ext.SpaceStatus{
+				State: ext.SpaceState(in.Status.State),
+			},
+		}, nil
+	default:
+		return ext.SpaceDoc{}, fmt.Errorf("unsupported output apiVersion for Space: %s", apiVersion)
+	}
+}
+
+// NormalizeSpace takes an external SpaceDoc request and returns an internal object and chosen apiVersion.
+func NormalizeSpace(req ext.SpaceDoc) (intmodel.Space, ext.Version, error) {
+	version := req.APIVersion
+	if version == "" {
+		version = VersionV1Beta1
+	}
+	internal, err := ConvertSpaceDocToInternal(req)
+	if err != nil {
+		return intmodel.Space{}, "", err
+	}
+	return internal, version, nil
+}

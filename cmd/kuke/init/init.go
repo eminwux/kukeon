@@ -94,24 +94,124 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Cobra prints to stdout
-	if report.RealmCreated || report.NamespaceCreated {
-		cmd.Println("Initialized Kukeon runtime")
-	} else {
-		cmd.Println("Kukeon runtime already initialized")
-	}
-	cmd.Println(fmt.Sprintf("Realm: %s (namespace: %s)", report.RealmName, report.Namespace))
-	switch {
-	case report.RealmCreated && report.NamespaceCreated:
-		cmd.Println("Status: created realm and namespace")
-	case report.RealmCreated && !report.NamespaceCreated:
-		cmd.Println("Status: created realm; namespace existed")
-	case !report.RealmCreated && report.NamespaceCreated:
-		cmd.Println("Status: realm existed; created namespace")
-	default:
-		cmd.Println("Status: realm and namespace existed")
-	}
-	cmd.Println(fmt.Sprintf("Run path: %s", report.RunPath))
-	cmd.Println(fmt.Sprintf("realm metadata exists: %t", report.RealmMetadataExistsPost))
-	cmd.Println(fmt.Sprintf("container namespace exists: %t", report.NamespaceExistsPost))
+	printBootstrapReport(cmd, report)
 	return nil
+}
+
+func printBootstrapReport(cmd *cobra.Command, report controller.BootstrapReport) {
+	printHeader(cmd, report)
+	printOverview(cmd, report)
+	cmd.Println("Actions:")
+	printRealmActions(cmd, report)
+	printSpaceActions(cmd, report)
+	printCNIActions(cmd, report)
+}
+
+func printHeader(cmd *cobra.Command, report controller.BootstrapReport) {
+	anyCreated := report.RealmCreated ||
+		report.RealmContainerdNamespaceCreated ||
+		report.SpaceCreated ||
+		report.SpaceCNINetworkCreated ||
+		report.CniConfigDirCreated ||
+		report.CniCacheDirCreated ||
+		report.CniBinDirCreated
+	if anyCreated {
+		cmd.Println("Initialized Kukeon runtime")
+		return
+	}
+	cmd.Println("Kukeon runtime already initialized")
+}
+
+func printOverview(cmd *cobra.Command, report controller.BootstrapReport) {
+	cmd.Println(fmt.Sprintf(
+		"Realm: %s (namespace: %s)",
+		report.RealmName,
+		report.RealmContainerdNamespace,
+	))
+	cmd.Println(fmt.Sprintf("Run path: %s", report.RunPath))
+}
+
+func printRealmActions(cmd *cobra.Command, report controller.BootstrapReport) {
+	if report.RealmCreated {
+		cmd.Println("  - realm: created")
+	} else {
+		cmd.Println("  - realm: already existed")
+	}
+	if report.RealmContainerdNamespaceCreated {
+		cmd.Println("  - containerd namespace: created")
+	} else {
+		cmd.Println("  - containerd namespace: already existed")
+	}
+	printCgroupAction(
+		cmd,
+		"realm",
+		report.RealmCgroupExistsPre,
+		report.RealmCgroupExistsPost,
+		report.RealmCgroupCreated,
+	)
+}
+
+func printSpaceActions(cmd *cobra.Command, report controller.BootstrapReport) {
+	if report.SpaceCreated {
+		cmd.Println("  - space: created")
+	} else {
+		cmd.Println("  - space: already existed")
+	}
+	if report.SpaceCNINetworkCreated {
+		cmd.Println(fmt.Sprintf(
+			"  - network %q: created",
+			report.SpaceCNINetworkName,
+		))
+	} else {
+		cmd.Println(fmt.Sprintf(
+			"  - network %q: already existed",
+			report.SpaceCNINetworkName,
+		))
+	}
+	printCgroupAction(
+		cmd,
+		"space",
+		report.SpaceCgroupExistsPre,
+		report.SpaceCgroupExistsPost,
+		report.SpaceCgroupCreated,
+	)
+}
+
+func printCNIActions(cmd *cobra.Command, report controller.BootstrapReport) {
+	printDirAction(
+		cmd,
+		"CNI config dir",
+		report.CniConfigDir,
+		report.CniConfigDirCreated,
+		report.CniConfigDirExistsPost,
+	)
+	printDirAction(cmd, "CNI cache dir", report.CniCacheDir, report.CniCacheDirCreated, report.CniCacheDirExistsPost)
+	printDirAction(cmd, "CNI bin dir", report.CniBinDir, report.CniBinDirCreated, report.CniBinDirExistsPost)
+}
+
+func printDirAction(cmd *cobra.Command, label string, path string, created bool, existsPost bool) {
+	if created {
+		cmd.Println(fmt.Sprintf("  - %s %q: created", label, path))
+		return
+	}
+	if existsPost {
+		cmd.Println(fmt.Sprintf("  - %s %q: already existed", label, path))
+		return
+	}
+	cmd.Println(fmt.Sprintf("  - %s %q: not created", label, path))
+}
+
+func printCgroupAction(cmd *cobra.Command, label string, existedPre bool, existsPost bool, created bool) {
+	switch {
+	case created:
+		cmd.Println(fmt.Sprintf("  - %s cgroup: created", label))
+	case existsPost:
+		cmd.Println(fmt.Sprintf("  - %s cgroup: already existed", label))
+	default:
+		if existedPre {
+			cmd.Println(fmt.Sprintf("  - %s cgroup: missing (was previously present)", label))
+		} else {
+			cmd.Println(fmt.Sprintf("  - %s cgroup: missing", label))
+		}
+	}
 }

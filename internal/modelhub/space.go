@@ -14,24 +14,34 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package consts
+package modelhub
+
+type Space struct {
+	Metadata SpaceMetadata
+	Spec     SpaceSpec
+	Status   SpaceStatus
+}
+
+type SpaceMetadata struct {
+	Name   string
+	Labels map[string]string
+}
+
+type SpaceSpec struct {
+	RealmName string
+}
+
+type SpaceStatus struct {
+	State SpaceState
+}
+
+type SpaceState int
 
 const (
-	KukeonRealmName           = "kuke-system"
-	KukeonRealmNamespace      = "kukeon.io"
-	KukeonRealmLabelKey       = "realm.kukeon.io"
-	KukeonRealmMetadataSubDir = "realms"
-	KukeonCgroupRoot          = "/kukeon"
-
-	KukeonSpaceName           = "kuke-space"
-	KukeonSpaceLabelKey       = "space.kukeon.io"
-	KukeonSpaceMetadataSubDir = "spaces"
-
-	KukeonStackMetadataSubDir = "stacks"
-
-	KukeonCellMetadataSubDir = "cells"
-
-	KukeonContainerMetadataSubDir = "containers"
-
-	KukeonMetadataFile = "metadata.json"
+	SpaceStatePending SpaceState = iota
+	SpaceStateCreating
+	SpaceStateReady
+	SpaceStateDeleting
+	SpaceStateFailed
+	SpaceStateUnknown
 )

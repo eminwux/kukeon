@@ -34,7 +34,8 @@ type RealmSpec struct {
 }
 
 type RealmStatus struct {
-	State RealmState `json:"state"`
+	State      RealmState `json:"state"`
+	CgroupPath string     `json:"cgroupPath,omitempty" yaml:"cgroupPath,omitempty"`
 }
 
 type RealmState int
