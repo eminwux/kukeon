@@ -30,6 +30,7 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/cgroups"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -46,11 +47,15 @@ type Runner interface {
 	CreateSpace(doc *v1beta1.SpaceDoc) (*v1beta1.SpaceDoc, error)
 	ExistsSpaceCNIConfig(doc *v1beta1.SpaceDoc) (bool, error)
 
+	GetCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error)
+	CreateCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error)
+	StartCell(doc *v1beta1.CellDoc) error
+	ExistsCellPauseContainer(doc *v1beta1.CellDoc) (bool, error)
+
 	GetStack(doc *v1beta1.StackDoc) (*v1beta1.StackDoc, error)
 	CreateStack(doc *v1beta1.StackDoc) (*v1beta1.StackDoc, error)
 
-	GetCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error)
-	CreateCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error)
+	ExistsCgroup(doc any) (bool, error)
 }
 
 type Exec struct {
@@ -124,6 +129,188 @@ func (r *Exec) CreateRealm(doc *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error) {
 	rDocNew := &rDocNewExt
 
 	return r.provisionNewRealm(rDocNew)
+}
+
+func (r *Exec) ExistsCellPauseContainer(doc *v1beta1.CellDoc) (bool, error) {
+	if doc == nil {
+		return false, errdefs.ErrCellNotFound
+	}
+
+	cellName := doc.Metadata.Name
+	if cellName == "" {
+		return false, errdefs.ErrCellNotFound
+	}
+
+	realmID := doc.Spec.RealmID
+	if realmID == "" {
+		return false, errdefs.ErrRealmNameRequired
+	}
+
+	spaceID := doc.Spec.SpaceID
+	if spaceID == "" {
+		return false, errdefs.ErrSpaceNameRequired
+	}
+
+	// Initialize ctr client if needed
+	if r.ctrClient == nil {
+		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
+	}
+	if err := r.ctrClient.Connect(); err != nil {
+		return false, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	defer r.ctrClient.Close()
+
+	// Get realm to access namespace
+	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
+		Metadata: v1beta1.RealmMetadata{
+			Name: realmID,
+		},
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to get realm: %w", err)
+	}
+
+	// Set namespace to realm namespace
+	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+
+	// Generate container ID (same as createCellContainers)
+	containerID := naming.BuildContainerName(realmID, spaceID, cellName, "pause")
+
+	// Check if container exists
+	exists, err := r.ctrClient.ExistsContainer(r.ctx, containerID)
+	if err != nil {
+		return false, fmt.Errorf("failed to check if pause container exists: %w", err)
+	}
+
+	return exists, nil
+}
+
+func (r *Exec) ExistsCgroup(doc any) (bool, error) {
+	// Initialize ctr client if needed
+	if r.ctrClient == nil {
+		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
+	}
+	if err := r.ctrClient.Connect(); err != nil {
+		return false, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	defer r.ctrClient.Close()
+
+	var spec ctr.CgroupSpec
+	var err error
+
+	// Build cgroup spec based on doc type
+	switch d := doc.(type) {
+	case *v1beta1.RealmDoc:
+		if d == nil {
+			return false, errdefs.ErrRealmNotFound
+		}
+		spec = cgroups.DefaultRealmSpec(d)
+
+	case *v1beta1.SpaceDoc:
+		if d == nil {
+			return false, errdefs.ErrSpaceNotFound
+		}
+		if d.Spec.RealmID == "" {
+			return false, errdefs.ErrRealmNameRequired
+		}
+		realmDoc, realmErr := r.GetRealm(&v1beta1.RealmDoc{
+			Metadata: v1beta1.RealmMetadata{
+				Name: d.Spec.RealmID,
+			},
+		})
+		if realmErr != nil {
+			return false, fmt.Errorf("failed to get realm: %w", realmErr)
+		}
+		spec = cgroups.DefaultSpaceSpec(realmDoc, d)
+
+	case *v1beta1.StackDoc:
+		if d == nil {
+			return false, errdefs.ErrStackNotFound
+		}
+		if d.Spec.RealmID == "" {
+			return false, errdefs.ErrRealmNameRequired
+		}
+		if d.Spec.SpaceID == "" {
+			return false, errdefs.ErrSpaceNameRequired
+		}
+		realmDoc, realmErr := r.GetRealm(&v1beta1.RealmDoc{
+			Metadata: v1beta1.RealmMetadata{
+				Name: d.Spec.RealmID,
+			},
+		})
+		if realmErr != nil {
+			return false, fmt.Errorf("failed to get realm: %w", realmErr)
+		}
+		spaceDoc, spaceErr := r.GetSpace(&v1beta1.SpaceDoc{
+			Metadata: v1beta1.SpaceMetadata{
+				Name: d.Spec.SpaceID,
+			},
+		})
+		if spaceErr != nil {
+			return false, fmt.Errorf("failed to get space: %w", spaceErr)
+		}
+		spec = cgroups.DefaultStackSpec(realmDoc, spaceDoc, d)
+
+	case *v1beta1.CellDoc:
+		if d == nil {
+			return false, errdefs.ErrCellNotFound
+		}
+		if d.Spec.RealmID == "" {
+			return false, errdefs.ErrRealmNameRequired
+		}
+		if d.Spec.SpaceID == "" {
+			return false, errdefs.ErrSpaceNameRequired
+		}
+		if d.Spec.StackID == "" {
+			return false, errdefs.ErrStackNameRequired
+		}
+		realmDoc, realmErr := r.GetRealm(&v1beta1.RealmDoc{
+			Metadata: v1beta1.RealmMetadata{
+				Name: d.Spec.RealmID,
+			},
+		})
+		if realmErr != nil {
+			return false, fmt.Errorf("failed to get realm: %w", realmErr)
+		}
+		spaceDoc, spaceErr := r.GetSpace(&v1beta1.SpaceDoc{
+			Metadata: v1beta1.SpaceMetadata{
+				Name: d.Spec.SpaceID,
+			},
+		})
+		if spaceErr != nil {
+			return false, fmt.Errorf("failed to get space: %w", spaceErr)
+		}
+		stackDoc, stackErr := r.GetStack(&v1beta1.StackDoc{
+			Metadata: v1beta1.StackMetadata{
+				Name: d.Spec.StackID,
+			},
+		})
+		if stackErr != nil {
+			return false, fmt.Errorf("failed to get stack: %w", stackErr)
+		}
+		spec = cgroups.DefaultCellSpec(realmDoc, spaceDoc, stackDoc, d)
+
+	default:
+		return false, fmt.Errorf("unsupported doc type: %T", doc)
+	}
+
+	// Build the cgroup path
+	spec, _, err = r.buildCgroupPath(spec)
+	if err != nil {
+		return false, fmt.Errorf("failed to build cgroup path: %w", err)
+	}
+
+	// Check if cgroup exists
+	_, err = r.ctrClient.LoadCgroup(spec.Group, spec.Mountpoint)
+	if err != nil {
+		// Check if error is "cgroup path does not exist"
+		if err.Error() == "cgroup path does not exist" {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check if cgroup exists: %w", err)
+	}
+
+	return true, nil
 }
 
 func (r *Exec) ExistsRealmContainerdNamespace(namespace string) (bool, error) {
@@ -291,7 +478,31 @@ func (r *Exec) CreateCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error) {
 
 	// Cell found, ensure cgroup exists
 	if cDoc != nil {
-		return r.ensureCellCgroup(cDoc)
+		cellDocEnsured, ensureErr := r.ensureCellCgroup(cDoc)
+		if ensureErr != nil {
+			return nil, ensureErr
+		}
+		// Merge containers from the new doc into the existing cell document
+		// This ensures containers specified in the new doc are created even if
+		// they weren't in the stored cell document
+		if len(doc.Spec.Containers) > 0 {
+			// Create a map of existing container IDs to avoid duplicates
+			existingContainerIDs := make(map[string]bool)
+			for _, container := range cellDocEnsured.Spec.Containers {
+				existingContainerIDs[container.ID] = true
+			}
+			// Add containers from the new doc that don't already exist
+			for _, container := range doc.Spec.Containers {
+				if !existingContainerIDs[container.ID] {
+					cellDocEnsured.Spec.Containers = append(cellDocEnsured.Spec.Containers, container)
+				}
+			}
+		}
+		_, ensureErr = r.ensureCellContainers(cellDocEnsured)
+		if ensureErr != nil {
+			return nil, ensureErr
+		}
+		return cellDocEnsured, nil
 	}
 
 	// Cell not found, create new cell

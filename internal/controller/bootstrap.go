@@ -75,13 +75,19 @@ type BootstrapReport struct {
 	StackCgroupExistsPost   bool
 	StackCgroupCreated      bool
 
-	CellName               string
-	CellMetadataExistsPre  bool
-	CellMetadataExistsPost bool
-	CellCreated            bool
-	CellCgroupExistsPre    bool
-	CellCgroupExistsPost   bool
-	CellCgroupCreated      bool
+	CellName                     string
+	CellMetadataExistsPre        bool
+	CellMetadataExistsPost       bool
+	CellCreated                  bool
+	CellCgroupExistsPre          bool
+	CellCgroupExistsPost         bool
+	CellCgroupCreated            bool
+	CellPauseContainerExistsPre  bool
+	CellPauseContainerExistsPost bool
+	CellPauseContainerCreated    bool
+	CellStartedPre               bool
+	CellStartedPost              bool
+	CellStarted                  bool
 }
 
 func (b *Exec) bootstrapRealm(report BootstrapReport) (BootstrapReport, error) {
@@ -100,7 +106,11 @@ func (b *Exec) bootstrapRealm(report BootstrapReport) (BootstrapReport, error) {
 		}
 	} else {
 		report.RealmMetadataExistsPre = true
-		report.RealmCgroupExistsPre = realmDocPre.Status.CgroupPath != ""
+		cgroupExists, cgroupErr := b.runner.ExistsCgroup(realmDocPre)
+		if cgroupErr != nil {
+			return report, fmt.Errorf("failed to check if realm cgroup exists: %w", cgroupErr)
+		}
+		report.RealmCgroupExistsPre = cgroupExists
 	}
 	nsExistsPre, err := b.runner.ExistsRealmContainerdNamespace(consts.KukeonRealmNamespace)
 	if err != nil {
@@ -138,7 +148,11 @@ func (b *Exec) bootstrapRealm(report BootstrapReport) (BootstrapReport, error) {
 		}
 	} else {
 		report.RealmMetadataExistsPost = true
-		report.RealmCgroupExistsPost = realmDocPost.Status.CgroupPath != ""
+		cgroupExists, cgroupErr := b.runner.ExistsCgroup(realmDocPost)
+		if cgroupErr != nil {
+			return report, fmt.Errorf("failed to check if realm cgroup exists: %w", cgroupErr)
+		}
+		report.RealmCgroupExistsPost = cgroupExists
 	}
 	nsExistsPost, err := b.runner.ExistsRealmContainerdNamespace(consts.KukeonRealmNamespace)
 	if err != nil {
@@ -185,7 +199,11 @@ func (b *Exec) bootstrapSpace(report BootstrapReport) (BootstrapReport, error) {
 		}
 	} else {
 		report.SpaceMetadataExistsPre = true
-		report.SpaceCgroupExistsPre = spaceDocPre.Status.CgroupPath != ""
+		cgroupExists, cgroupErr := b.runner.ExistsCgroup(spaceDocPre)
+		if cgroupErr != nil {
+			return report, fmt.Errorf("failed to check if space cgroup exists: %w", cgroupErr)
+		}
+		report.SpaceCgroupExistsPre = cgroupExists
 	}
 
 	// Ensure network exists for the space (createSpace will also ensure)
@@ -211,7 +229,11 @@ func (b *Exec) bootstrapSpace(report BootstrapReport) (BootstrapReport, error) {
 		}
 	} else {
 		report.SpaceMetadataExistsPost = true
-		report.SpaceCgroupExistsPost = spaceDocPost.Status.CgroupPath != ""
+		cgroupExists, cgroupErr := b.runner.ExistsCgroup(spaceDocPost)
+		if cgroupErr != nil {
+			return report, fmt.Errorf("failed to check if space cgroup exists: %w", cgroupErr)
+		}
+		report.SpaceCgroupExistsPost = cgroupExists
 	}
 	exists, err = b.runner.ExistsSpaceCNIConfig(spaceDoc)
 	if err != nil {
@@ -259,7 +281,11 @@ func (b *Exec) bootstrapStack(report BootstrapReport) (BootstrapReport, error) {
 		}
 	} else {
 		report.StackMetadataExistsPre = true
-		report.StackCgroupExistsPre = stackDocPre.Status.CgroupPath != ""
+		cgroupExists, cgroupErr := b.runner.ExistsCgroup(stackDocPre)
+		if cgroupErr != nil {
+			return report, fmt.Errorf("failed to check if stack cgroup exists: %w", cgroupErr)
+		}
+		report.StackCgroupExistsPre = cgroupExists
 	}
 
 	// Create or reconcile stack
@@ -278,7 +304,11 @@ func (b *Exec) bootstrapStack(report BootstrapReport) (BootstrapReport, error) {
 		}
 	} else {
 		report.StackMetadataExistsPost = true
-		report.StackCgroupExistsPost = stackDocPost.Status.CgroupPath != ""
+		cgroupExists, cgroupErr := b.runner.ExistsCgroup(stackDocPost)
+		if cgroupErr != nil {
+			return report, fmt.Errorf("failed to check if stack cgroup exists: %w", cgroupErr)
+		}
+		report.StackCgroupExistsPost = cgroupExists
 	}
 
 	// Derived outcomes
@@ -305,6 +335,23 @@ func (b *Exec) bootstrapCell(report BootstrapReport) (BootstrapReport, error) {
 			RealmID: consts.KukeonRealmName,
 			SpaceID: consts.KukeonSpaceName,
 			StackID: consts.KukeonStackName,
+			Containers: []v1beta1.ContainerSpec{
+				{
+					ID: naming.BuildContainerName(
+						consts.KukeonRealmName,
+						consts.KukeonSpaceName,
+						consts.KukeonCellName,
+						"debian",
+					),
+					RealmID: consts.KukeonRealmName,
+					SpaceID: consts.KukeonSpaceName,
+					StackID: consts.KukeonStackName,
+					CellID:  consts.KukeonCellName,
+					Image:   "docker.io/library/debian:stable-slim",
+					Command: "sleep",
+					Args:    []string{"infinity"},
+				},
+			},
 		},
 	}
 	cellName := cellDoc.Metadata.Name
@@ -322,13 +369,33 @@ func (b *Exec) bootstrapCell(report BootstrapReport) (BootstrapReport, error) {
 		}
 	} else {
 		report.CellMetadataExistsPre = true
-		report.CellCgroupExistsPre = cellDocPre.Status.CgroupPath != ""
+		cgroupExists, cgroupErr := b.runner.ExistsCgroup(cellDocPre)
+		if cgroupErr != nil {
+			return report, fmt.Errorf("failed to check if cell cgroup exists: %w", cgroupErr)
+		}
+		report.CellCgroupExistsPre = cgroupExists
+		// Check if pause container exists pre (only if cell exists)
+		pauseExistsPre, pauseErr := b.runner.ExistsCellPauseContainer(cellDocPre)
+		if pauseErr != nil {
+			return report, fmt.Errorf("failed to check if pause container exists: %w", pauseErr)
+		}
+		report.CellPauseContainerExistsPre = pauseExistsPre
+		// Check if containers are started pre (best-effort, only if cell exists)
+		// For now, we assume containers are not started pre
+		// This could be enhanced later to check task status
+		report.CellStartedPre = false
 	}
 
 	// Create or reconcile cell
 	_, err = b.runner.CreateCell(cellDoc)
 	if err != nil {
 		return report, fmt.Errorf("%w: %w", errdefs.ErrCreateCell, err)
+	}
+
+	// Start cell containers
+	err = b.runner.StartCell(cellDoc)
+	if err != nil {
+		return report, fmt.Errorf("failed to start cell containers: %w", err)
 	}
 
 	// Post-state checks
@@ -341,12 +408,27 @@ func (b *Exec) bootstrapCell(report BootstrapReport) (BootstrapReport, error) {
 		}
 	} else {
 		report.CellMetadataExistsPost = true
-		report.CellCgroupExistsPost = cellDocPost.Status.CgroupPath != ""
+		cgroupExists, cgroupErr := b.runner.ExistsCgroup(cellDocPost)
+		if cgroupErr != nil {
+			return report, fmt.Errorf("failed to check if cell cgroup exists: %w", cgroupErr)
+		}
+		report.CellCgroupExistsPost = cgroupExists
+		// Check if pause container exists post
+		pauseExistsPost, pauseErr := b.runner.ExistsCellPauseContainer(cellDocPost)
+		if pauseErr != nil {
+			return report, fmt.Errorf("failed to check if pause container exists: %w", pauseErr)
+		}
+		report.CellPauseContainerExistsPost = pauseExistsPost
+		// Check if containers are started post
+		// After StartCell succeeds, containers should be started
+		report.CellStartedPost = true
 	}
 
 	// Derived outcomes
 	report.CellCreated = !report.CellMetadataExistsPre && report.CellMetadataExistsPost
 	report.CellCgroupCreated = !report.CellCgroupExistsPre && report.CellCgroupExistsPost
+	report.CellPauseContainerCreated = !report.CellPauseContainerExistsPre && report.CellPauseContainerExistsPost
+	report.CellStarted = !report.CellStartedPre && report.CellStartedPost
 
 	return report, nil
 }

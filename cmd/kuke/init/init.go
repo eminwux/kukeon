@@ -116,6 +116,8 @@ func printHeader(cmd *cobra.Command, report controller.BootstrapReport) {
 		report.SpaceCNINetworkCreated ||
 		report.StackCreated ||
 		report.CellCreated ||
+		report.CellPauseContainerCreated ||
+		report.CellStarted ||
 		report.CniConfigDirCreated ||
 		report.CniCacheDirCreated ||
 		report.CniBinDirCreated
@@ -208,6 +210,20 @@ func printCellActions(cmd *cobra.Command, report controller.BootstrapReport) {
 		report.CellCgroupExistsPre,
 		report.CellCgroupExistsPost,
 		report.CellCgroupCreated,
+	)
+	printCgroupAction(
+		cmd,
+		"cell pause container",
+		report.CellPauseContainerExistsPre,
+		report.CellPauseContainerExistsPost,
+		report.CellPauseContainerCreated,
+	)
+	printCgroupAction(
+		cmd,
+		"cell containers",
+		report.CellStartedPre,
+		report.CellStartedPost,
+		report.CellStarted,
 	)
 }
 

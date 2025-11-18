@@ -769,6 +769,12 @@ func (r *Exec) provisionNewCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error) 
 	// Persist cgroup path in metadata
 	doc.Status.CgroupPath = cgroupPath
 
+	// Create pause container and all containers for the cell
+	_, err = r.createCellContainers(doc)
+	if err != nil {
+		return nil, err
+	}
+
 	// Update realm state
 	doc.Status.State = v1beta1.CellStateReady
 	if err = r.UpdateCellMetadata(doc); err != nil {
