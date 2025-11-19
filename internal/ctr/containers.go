@@ -1,0 +1,755 @@
+// Copyright 2025 Emiliano Spinella (eminwux)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// SPDX-License-Identifier: Apache-2.0
+
+package ctr
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"syscall"
+	"time"
+
+	apitypes "github.com/containerd/containerd/api/types"
+	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/pkg/cio"
+	"github.com/containerd/containerd/v2/pkg/namespaces"
+	"github.com/containerd/containerd/v2/pkg/oci"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+)
+
+var (
+	errEmptyContainerID  = errors.New("ctr: container id is required")
+	errContainerExists   = errors.New("ctr: container already exists")
+	errContainerNotFound = errors.New("ctr: container not found")
+	errTaskNotFound      = errors.New("ctr: task not found")
+	errTaskNotRunning    = errors.New("ctr: task is not running")
+	errInvalidImage      = errors.New("ctr: image reference is required")
+)
+
+// formatError recursively unwraps errors and formats the full error chain.
+// Returns a string in the format "error1: error2: error3" showing all nested errors.
+func formatError(err error) string {
+	if err == nil {
+		return "<nil>"
+	}
+
+	var parts []string
+	current := err
+
+	for current != nil {
+		parts = append(parts, current.Error())
+		current = errors.Unwrap(current)
+	}
+
+	// Join all error messages with ": " separator
+	result := ""
+	var resultSb61 strings.Builder
+	for i, part := range parts {
+		if i > 0 {
+			resultSb61.WriteString(": ")
+		}
+		resultSb61.WriteString(part)
+	}
+	result += resultSb61.String()
+
+	return result
+}
+
+// ContainerSpec describes how to create a new container.
+type ContainerSpec struct {
+	// ID is the unique identifier for the container.
+	ID string
+	// Image is the image reference to use for the container.
+	Image string
+	// SnapshotKey is the key for the snapshot. If empty, defaults to ID.
+	SnapshotKey string
+	// Snapshotter is the snapshotter to use. If empty, uses default.
+	Snapshotter string
+	// Runtime is the runtime configuration.
+	Runtime *ContainerRuntime
+	// SpecOpts are OCI spec options to apply.
+	SpecOpts []oci.SpecOpts
+	// Labels are key-value pairs to attach to the container.
+	Labels map[string]string
+}
+
+// ContainerRuntime describes the runtime configuration.
+type ContainerRuntime struct {
+	// Name is the runtime name (e.g., "io.containerd.runc.v2").
+	Name string
+	// Options are runtime-specific options.
+	Options interface{}
+}
+
+// TaskSpec describes how to create a new task.
+type TaskSpec struct {
+	// IO is the IO configuration for the task.
+	IO *TaskIO
+	// Options are task creation options.
+	Options []containerd.NewTaskOpts
+}
+
+// TaskIO describes the IO configuration for a task.
+type TaskIO struct {
+	// Stdin is the path to stdin (if any).
+	Stdin string
+	// Stdout is the path to stdout (if any).
+	Stdout string
+	// Stderr is the path to stderr (if any).
+	Stderr string
+	// Terminal indicates if the task should have a TTY.
+	Terminal bool
+}
+
+// ContainerDeleteOptions describes options for deleting a container.
+type ContainerDeleteOptions struct {
+	// SnapshotCleanup indicates whether to clean up snapshots.
+	SnapshotCleanup bool
+}
+
+// StopContainerOptions describes options for stopping a container.
+type StopContainerOptions struct {
+	// Signal is the signal to send (defaults to SIGTERM).
+	Signal string
+	// Timeout is the timeout for graceful shutdown.
+	Timeout *time.Duration
+	// Force indicates whether to force kill if timeout is exceeded.
+	Force bool
+}
+
+// namespaceCtx returns a context with the namespace set.
+func (c *client) namespaceCtx(ctx context.Context) context.Context {
+	c.namespaceMu.RLock()
+	defer c.namespaceMu.RUnlock()
+	return namespaces.WithNamespace(ctx, c.namespace)
+}
+
+// SetNamespace sets the namespace for subsequent operations.
+func (c *client) SetNamespace(namespace string) {
+	c.namespaceMu.Lock()
+	defer c.namespaceMu.Unlock()
+	c.namespace = namespace
+	c.logger.DebugContext(c.ctx, "set namespace", "namespace", namespace)
+}
+
+// Namespace returns the current namespace.
+func (c *client) Namespace() string {
+	c.namespaceMu.RLock()
+	defer c.namespaceMu.RUnlock()
+	return c.namespace
+}
+
+// storeContainer stores a container in the cache.
+func (c *client) storeContainer(id string, container containerd.Container) {
+	c.containersMu.Lock()
+	defer c.containersMu.Unlock()
+	if c.containers == nil {
+		c.containers = make(map[string]containerd.Container)
+	}
+	c.containers[id] = container
+}
+
+// loadContainer loads a container from cache or containerd.
+func (c *client) loadContainer(ctx context.Context, id string) (containerd.Container, error) {
+	c.containersMu.RLock()
+	if container, ok := c.containers[id]; ok {
+		c.containersMu.RUnlock()
+		return container, nil
+	}
+	c.containersMu.RUnlock()
+
+	nsCtx := c.namespaceCtx(ctx)
+	container, err := c.cClient.LoadContainer(nsCtx, id)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errContainerNotFound, err)
+	}
+	c.storeContainer(id, container)
+	return container, nil
+}
+
+// dropContainer removes a container from the cache.
+func (c *client) dropContainer(id string) {
+	c.containersMu.Lock()
+	defer c.containersMu.Unlock()
+	if c.containers != nil {
+		delete(c.containers, id)
+	}
+}
+
+// storeTask stores a task in the cache.
+func (c *client) storeTask(id string, task containerd.Task) {
+	c.tasksMu.Lock()
+	defer c.tasksMu.Unlock()
+	if c.tasks == nil {
+		c.tasks = make(map[string]containerd.Task)
+	}
+	c.tasks[id] = task
+}
+
+// loadTask loads a task from cache or container.
+func (c *client) loadTask(ctx context.Context, id string) (containerd.Task, error) {
+	c.tasksMu.RLock()
+	if task, ok := c.tasks[id]; ok {
+		c.tasksMu.RUnlock()
+		return task, nil
+	}
+	c.tasksMu.RUnlock()
+
+	container, err := c.loadContainer(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	nsCtx := c.namespaceCtx(ctx)
+	task, err := container.Task(nsCtx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errTaskNotFound, err)
+	}
+	c.storeTask(id, task)
+	return task, nil
+}
+
+// dropTask removes a task from the cache.
+func (c *client) dropTask(id string) {
+	c.tasksMu.Lock()
+	defer c.tasksMu.Unlock()
+	if c.tasks != nil {
+		delete(c.tasks, id)
+	}
+}
+
+// ensureImageUnpacked ensures that an image is unpacked for the given snapshotter.
+// If the image is not unpacked, it will be unpacked. Returns an error if unpacking fails.
+func (c *client) ensureImageUnpacked(ctx context.Context, image containerd.Image, snapshotter string) error {
+	nsCtx := c.namespaceCtx(ctx)
+
+	// Check if image is already unpacked
+	unpacked, err := image.IsUnpacked(nsCtx, snapshotter)
+	if err != nil {
+		c.logger.WarnContext(
+			ctx,
+			"failed to check if image is unpacked",
+			"image",
+			image.Name(),
+			"snapshotter",
+			snapshotter,
+			"err",
+			formatError(err),
+		)
+		// Continue to attempt unpack even if check failed
+	} else if unpacked {
+		c.logger.DebugContext(ctx, "image already unpacked", "image", image.Name(), "snapshotter", snapshotter)
+		return nil
+	}
+
+	// Image is not unpacked, unpack it
+	c.logger.DebugContext(ctx, "unpacking image", "image", image.Name(), "snapshotter", snapshotter)
+	err = image.Unpack(nsCtx, snapshotter)
+	if err != nil {
+		c.logger.ErrorContext(
+			ctx,
+			"failed to unpack image",
+			"image",
+			image.Name(),
+			"snapshotter",
+			snapshotter,
+			"err",
+			formatError(err),
+		)
+		return fmt.Errorf("failed to unpack image %s: %w", image.Name(), err)
+	}
+
+	c.logger.DebugContext(ctx, "image unpacked successfully", "image", image.Name(), "snapshotter", snapshotter)
+	return nil
+}
+
+// CreateContainer creates a new container with the provided spec.
+func (c *client) CreateContainer(ctx context.Context, spec ContainerSpec) (containerd.Container, error) {
+	if err := validateContainerSpec(spec); err != nil {
+		return nil, err
+	}
+
+	nsCtx := c.namespaceCtx(ctx)
+
+	// Check if container already exists
+	_, err := c.cClient.LoadContainer(nsCtx, spec.ID)
+	if err == nil {
+		c.logger.WarnContext(ctx, "container already exists", "id", spec.ID)
+		return nil, errContainerExists
+	}
+
+	// Pull the image if needed
+	image, err := c.cClient.GetImage(nsCtx, spec.Image)
+	if err != nil {
+		c.logger.DebugContext(ctx, "image not found locally, pulling", "image", spec.Image)
+		image, err = c.cClient.Pull(nsCtx, spec.Image)
+		if err != nil {
+			c.logger.ErrorContext(ctx, "failed to pull image", "image", spec.Image, "err", formatError(err))
+			return nil, fmt.Errorf("failed to pull image %s: %w", spec.Image, err)
+		}
+	}
+
+	// Ensure image is unpacked before creating container
+	// Use spec.Snapshotter if provided, otherwise empty string for default snapshotter
+	if err = c.ensureImageUnpacked(ctx, image, spec.Snapshotter); err != nil {
+		return nil, fmt.Errorf("failed to ensure image is unpacked: %w", err)
+	}
+
+	// Determine snapshot key
+	snapshotKey := spec.SnapshotKey
+	if snapshotKey == "" {
+		snapshotKey = spec.ID
+	}
+
+	// Build container options
+	opts := []containerd.NewContainerOpts{
+		containerd.WithImage(image),
+		containerd.WithNewSnapshot(snapshotKey, image),
+		containerd.WithNewSpec(spec.SpecOpts...),
+	}
+
+	if spec.Snapshotter != "" {
+		opts = append(opts, containerd.WithSnapshotter(spec.Snapshotter))
+	}
+
+	if spec.Runtime != nil && spec.Runtime.Name != "" {
+		opts = append(opts, containerd.WithRuntime(spec.Runtime.Name, spec.Runtime.Options))
+	}
+
+	if spec.Labels != nil {
+		opts = append(opts, containerd.WithContainerLabels(spec.Labels))
+	}
+
+	container, err := c.cClient.NewContainer(nsCtx, spec.ID, opts...)
+	if err != nil {
+		c.logger.ErrorContext(ctx, "failed to create container", "id", spec.ID, "err", formatError(err))
+		return nil, fmt.Errorf("failed to create container: %w", err)
+	}
+
+	c.storeContainer(spec.ID, container)
+	c.logger.InfoContext(ctx, "created container", "id", spec.ID, "image", spec.Image)
+	return container, nil
+}
+
+// GetContainer retrieves a container by ID.
+func (c *client) GetContainer(ctx context.Context, id string) (containerd.Container, error) {
+	if id == "" {
+		return nil, errEmptyContainerID
+	}
+	return c.loadContainer(ctx, id)
+}
+
+// ListContainers lists all containers matching the provided filters.
+func (c *client) ListContainers(ctx context.Context, filters ...string) ([]containerd.Container, error) {
+	nsCtx := c.namespaceCtx(ctx)
+
+	containers, err := c.cClient.Containers(nsCtx, filters...)
+	if err != nil {
+		c.logger.ErrorContext(ctx, "failed to list containers", "err", formatError(err))
+		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	// Update cache
+	for _, container := range containers {
+		c.storeContainer(container.ID(), container)
+	}
+
+	c.logger.DebugContext(ctx, "listed containers", "count", len(containers))
+	return containers, nil
+}
+
+// ExistsContainer checks if a container exists.
+func (c *client) ExistsContainer(ctx context.Context, id string) (bool, error) {
+	if id == "" {
+		return false, errEmptyContainerID
+	}
+
+	nsCtx := c.namespaceCtx(ctx)
+	_, err := c.cClient.LoadContainer(nsCtx, id)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// DeleteContainer deletes a container.
+func (c *client) DeleteContainer(ctx context.Context, id string, opts ContainerDeleteOptions) error {
+	if id == "" {
+		return errEmptyContainerID
+	}
+
+	container, err := c.loadContainer(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	nsCtx := c.namespaceCtx(ctx)
+
+	// Try to get and delete the task if it exists
+	task, err := container.Task(nsCtx, nil)
+	if err == nil {
+		// Task exists, delete it first
+		_, err = task.Delete(nsCtx, containerd.WithProcessKill)
+		if err != nil {
+			c.logger.WarnContext(ctx, "failed to delete task", "id", id, "err", formatError(err))
+		}
+		c.dropTask(id)
+	}
+
+	// Delete container
+	deleteOpts := []containerd.DeleteOpts{}
+	if opts.SnapshotCleanup {
+		deleteOpts = append(deleteOpts, containerd.WithSnapshotCleanup)
+	}
+
+	err = container.Delete(nsCtx, deleteOpts...)
+	if err != nil {
+		c.logger.ErrorContext(ctx, "failed to delete container", "id", id, "err", formatError(err))
+		return fmt.Errorf("failed to delete container: %w", err)
+	}
+
+	c.dropContainer(id)
+	c.logger.InfoContext(ctx, "deleted container", "id", id)
+	return nil
+}
+
+// StartContainer creates and starts a task for the container.
+func (c *client) StartContainer(ctx context.Context, id string, spec TaskSpec) (containerd.Task, error) {
+	if id == "" {
+		return nil, errEmptyContainerID
+	}
+
+	container, err := c.loadContainer(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	nsCtx := c.namespaceCtx(ctx)
+
+	// Check if task already exists
+	existingTask, err := container.Task(nsCtx, nil)
+	if err == nil {
+		// Task exists, check if it's running
+		var status containerd.Status
+		status, err = existingTask.Status(nsCtx)
+		if err == nil && status.Status == containerd.Running {
+			c.logger.WarnContext(ctx, "task already running", "id", id)
+			c.storeTask(id, existingTask)
+			return existingTask, nil
+		}
+		// Task exists but is not running (stopped), delete it before creating a new one
+		c.logger.DebugContext(ctx, "deleting stopped task", "id", id)
+		_, err = existingTask.Delete(nsCtx, containerd.WithProcessKill)
+		if err != nil {
+			c.logger.WarnContext(ctx, "failed to delete stopped task", "id", id, "err", formatError(err))
+		}
+		c.dropTask(id)
+	}
+
+	// Build IO creator
+	var ioCreator cio.Creator
+	if spec.IO != nil {
+		if spec.IO.Terminal {
+			ioCreator = cio.NewCreator(cio.WithStreams(nil, nil, nil), cio.WithTerminal)
+		} else {
+			ioCreator = cio.NewCreator(cio.WithStreams(nil, nil, nil))
+		}
+	} else {
+		// Default: no IO streams
+		ioCreator = cio.NullIO
+	}
+
+	// Build task options
+	taskOpts := spec.Options
+
+	// Create new task
+	task, err := container.NewTask(nsCtx, ioCreator, taskOpts...)
+	if err != nil {
+		c.logger.ErrorContext(ctx, "failed to create task", "id", id, "err", formatError(err))
+		return nil, fmt.Errorf("failed to create task: %w", err)
+	}
+
+	// Start the task
+	err = task.Start(nsCtx)
+	if err != nil {
+		c.logger.ErrorContext(ctx, "failed to start task", "id", id, "err", formatError(err))
+		// Clean up task on failure
+		_, _ = task.Delete(nsCtx, containerd.WithProcessKill)
+		return nil, fmt.Errorf("failed to start task: %w", err)
+	}
+
+	c.storeTask(id, task)
+	c.logger.InfoContext(ctx, "started container", "id", id)
+	return task, nil
+}
+
+// StopContainer stops a running container task.
+func (c *client) StopContainer(
+	ctx context.Context,
+	id string,
+	opts StopContainerOptions,
+) (*containerd.ExitStatus, error) {
+	if id == "" {
+		return nil, errEmptyContainerID
+	}
+
+	task, err := c.loadTask(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	nsCtx := c.namespaceCtx(ctx)
+
+	// Check task status
+	status, err := task.Status(nsCtx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task status: %w", err)
+	}
+
+	if status.Status != containerd.Running {
+		c.logger.WarnContext(ctx, "task is not running", "id", id, "status", status.Status)
+		return nil, errTaskNotRunning
+	}
+
+	// Determine signal
+	signal := syscall.SIGTERM
+	if opts.Signal != "" {
+		// Parse signal string to syscall.Signal
+		// For now, support common signals
+		switch opts.Signal {
+		case "SIGTERM", "TERM":
+			signal = syscall.SIGTERM
+		case "SIGKILL", "KILL":
+			signal = syscall.SIGKILL
+		case "SIGINT", "INT":
+			signal = syscall.SIGINT
+		case "SIGSTOP", "STOP":
+			signal = syscall.SIGSTOP
+		default:
+			signal = syscall.SIGTERM
+		}
+	}
+
+	// Send signal to task
+	err = task.Kill(nsCtx, signal)
+	if err != nil {
+		c.logger.ErrorContext(ctx, "failed to kill task", "id", id, "signal", signal, "err", formatError(err))
+		return nil, fmt.Errorf("failed to kill task: %w", err)
+	}
+
+	// Wait for task to exit
+	timeout := opts.Timeout
+	if timeout == nil {
+		defaultTimeout := 10 * time.Second
+		timeout = &defaultTimeout
+	}
+
+	waitCtx, cancel := context.WithTimeout(nsCtx, *timeout)
+	defer cancel()
+
+	exitChan, err := task.Wait(waitCtx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to wait for task: %w", err)
+	}
+
+	var exitStatus containerd.ExitStatus
+	select {
+	case exitStatus = <-exitChan:
+		// Task exited
+	case <-waitCtx.Done():
+		if errors.Is(waitCtx.Err(), context.DeadlineExceeded) {
+			if opts.Force {
+				// Force kill
+				c.logger.WarnContext(ctx, "timeout exceeded, force killing", "id", id)
+				err = task.Kill(nsCtx, syscall.SIGKILL)
+				if err != nil {
+					return nil, fmt.Errorf("failed to force kill task: %w", err)
+				}
+				// Wait again after force kill
+				var exitChan2 <-chan containerd.ExitStatus
+				exitChan2, err = task.Wait(nsCtx)
+				if err != nil {
+					return nil, fmt.Errorf("failed to wait for task after force kill: %w", err)
+				}
+				exitStatus = <-exitChan2
+			} else {
+				return nil, fmt.Errorf("timeout waiting for task to stop: %w", waitCtx.Err())
+			}
+		} else {
+			return nil, fmt.Errorf("context cancelled: %w", waitCtx.Err())
+		}
+	}
+
+	c.logger.InfoContext(ctx, "stopped container", "id", id, "exit_code", exitStatus.ExitCode())
+	return &exitStatus, nil
+}
+
+// TaskStatus returns the current status of a task.
+func (c *client) TaskStatus(ctx context.Context, id string) (containerd.Status, error) {
+	if id == "" {
+		return containerd.Status{}, errEmptyContainerID
+	}
+
+	task, err := c.loadTask(ctx, id)
+	if err != nil {
+		return containerd.Status{}, err
+	}
+
+	nsCtx := c.namespaceCtx(ctx)
+	status, err := task.Status(nsCtx)
+	if err != nil {
+		c.logger.ErrorContext(ctx, "failed to get task status", "id", id, "err", formatError(err))
+		return containerd.Status{}, fmt.Errorf("failed to get task status: %w", err)
+	}
+
+	return status, nil
+}
+
+// TaskMetrics returns the metrics for a task.
+func (c *client) TaskMetrics(ctx context.Context, id string) (*apitypes.Metric, error) {
+	if id == "" {
+		return nil, errEmptyContainerID
+	}
+
+	task, err := c.loadTask(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	nsCtx := c.namespaceCtx(ctx)
+	metrics, err := task.Metrics(nsCtx)
+	if err != nil {
+		c.logger.ErrorContext(ctx, "failed to get task metrics", "id", id, "err", formatError(err))
+		return nil, fmt.Errorf("failed to get task metrics: %w", err)
+	}
+
+	return metrics, nil
+}
+
+// validateContainerSpec validates a container spec.
+func validateContainerSpec(spec ContainerSpec) error {
+	if spec.ID == "" {
+		return errEmptyContainerID
+	}
+	if spec.Image == "" {
+		return errInvalidImage
+	}
+	return nil
+}
+
+// CreateContainerFromSpec converts a v1beta1.ContainerSpec to ctr.ContainerSpec and creates the container.
+func (c *client) CreateContainerFromSpec(
+	ctx context.Context,
+	containerSpec *v1beta1.ContainerSpec,
+	cellName, realmID, spaceID string,
+) (containerd.Container, error) {
+	if containerSpec == nil {
+		return nil, errors.New("container spec is nil")
+	}
+
+	if containerSpec.ID == "" {
+		return nil, errEmptyContainerID
+	}
+
+	if containerSpec.Image == "" {
+		return nil, errInvalidImage
+	}
+
+	// Build labels
+	labels := make(map[string]string)
+	// Add kukeon-specific labels
+	labels["kukeon.io/container-type"] = "container"
+	labels["kukeon.io/cell"] = cellName
+	labels["kukeon.io/space"] = spaceID
+	labels["kukeon.io/realm"] = realmID
+	if containerSpec.CellID != "" {
+		labels["kukeon.io/cell-id"] = containerSpec.CellID
+	}
+	if containerSpec.StackID != "" {
+		labels["kukeon.io/stack-id"] = containerSpec.StackID
+	}
+
+	// Build OCI spec options
+	specOpts := []oci.SpecOpts{
+		oci.WithDefaultPathEnv,
+	}
+
+	// Set hostname to container ID if not empty
+	if containerSpec.ID != "" {
+		specOpts = append(specOpts, oci.WithHostname(containerSpec.ID))
+	}
+
+	// Set command and args
+	if containerSpec.Command != "" {
+		args := []string{containerSpec.Command}
+		if len(containerSpec.Args) > 0 {
+			args = append(args, containerSpec.Args...)
+		}
+		specOpts = append(specOpts, oci.WithProcessArgs(args...))
+	} else if len(containerSpec.Args) > 0 {
+		specOpts = append(specOpts, oci.WithProcessArgs(containerSpec.Args...))
+	}
+
+	// Set environment variables
+	if len(containerSpec.Env) > 0 {
+		specOpts = append(specOpts, oci.WithEnv(containerSpec.Env))
+	}
+
+	// Set privileged mode if specified
+	if containerSpec.Privileged {
+		specOpts = append(specOpts, oci.WithPrivileged)
+	}
+
+	// Convert to ctr.ContainerSpec
+	ctrSpec := ContainerSpec{
+		ID:       containerSpec.ID,
+		Image:    containerSpec.Image,
+		Labels:   labels,
+		SpecOpts: specOpts,
+	}
+
+	// Create the container
+	container, err := c.CreateContainer(ctx, ctrSpec)
+	if err != nil {
+		c.logger.ErrorContext(
+			ctx,
+			"failed to create container from spec",
+			"id",
+			containerSpec.ID,
+			"cell",
+			cellName,
+			"err",
+			formatError(err),
+		)
+		return nil, fmt.Errorf("failed to create container from spec: %w", err)
+	}
+
+	c.logger.InfoContext(
+		ctx,
+		"created container from spec",
+		"id",
+		containerSpec.ID,
+		"cell",
+		cellName,
+		"space",
+		spaceID,
+		"realm",
+		realmID,
+	)
+	return container, nil
+}

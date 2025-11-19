@@ -62,4 +62,5 @@ var (
 	ErrCellNotFound           = errors.New("cell not found")
 	ErrGetCell                = errors.New("failed to get cell")
 	ErrCreateCell             = errors.New("failed to create cell")
+	ErrCreatePauseContainer   = errors.New("failed to create pause container")
 )

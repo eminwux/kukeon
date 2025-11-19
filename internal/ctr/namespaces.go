@@ -26,7 +26,9 @@ func (c *client) CreateNamespace(namespace string) error {
 	c.logger.DebugContext(c.ctx, "creating namespace", "namespace", namespace)
 	namespaces := c.cClient.NamespaceService()
 
-	err := namespaces.Create(c.ctx, namespace, nil)
+	// Use background context to avoid cancellation issues
+	ctx := context.Background()
+	err := namespaces.Create(ctx, namespace, nil)
 	if err != nil {
 		c.logger.ErrorContext(
 			c.ctx,
@@ -76,7 +78,9 @@ func (c *client) GetNamespace(namespace string) (string, error) {
 	c.logger.DebugContext(c.ctx, "getting namespace", "namespace", namespace)
 	namespaces := c.cClient.NamespaceService()
 
-	nsList, err := namespaces.List(c.ctx)
+	// Use background context to avoid cancellation issues
+	ctx := context.Background()
+	nsList, err := namespaces.List(ctx)
 	if err != nil {
 		c.logger.Error("failed to list containerd namespaces: %v", "err", fmt.Sprintf("%v", err))
 		return "", err

@@ -30,10 +30,11 @@ type CellMetadata struct {
 }
 
 type CellSpec struct {
-	ID      string `json:"id"      yaml:"id"`
-	RealmID string `json:"realmId" yaml:"realmId"`
-	SpaceID string `json:"spaceId" yaml:"spaceId"`
-	StackID string `json:"stackId" yaml:"stackId"`
+	ID         string          `json:"id"         yaml:"id"`
+	RealmID    string          `json:"realmId"    yaml:"realmId"`
+	SpaceID    string          `json:"spaceId"    yaml:"spaceId"`
+	StackID    string          `json:"stackId"    yaml:"stackId"`
+	Containers []ContainerSpec `json:"containers" yaml:"containers"`
 }
 
 type CellStatus struct {
