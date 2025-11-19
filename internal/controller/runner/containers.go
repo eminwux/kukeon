@@ -23,11 +23,21 @@ import (
 
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/oci"
+	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
+
+func appendCellLogFields(fields []any, cellID, cellName string) []any {
+	fields = append(fields, "cell", cellID)
+	if cellName != "" && cellName != cellID {
+		fields = append(fields, "cellName", cellName)
+	}
+	return fields
+}
 
 // createCellContainers creates the pause container and all containers defined in the CellDoc.
 // The pause container is created first, then all containers in doc.Spec.Containers are created.
@@ -36,9 +46,14 @@ func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 		return nil, errdefs.ErrCellNotFound
 	}
 
-	cellName := doc.Metadata.Name
+	cellName := strings.TrimSpace(doc.Metadata.Name)
 	if cellName == "" {
 		return nil, errdefs.ErrCellNotFound
+	}
+
+	cellID := doc.Spec.ID
+	if cellID == "" {
+		return nil, errdefs.ErrCellIDRequired
 	}
 
 	realmID := doc.Spec.RealmID
@@ -49,6 +64,16 @@ func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 	spaceID := doc.Spec.SpaceID
 	if spaceID == "" {
 		return nil, errdefs.ErrSpaceNameRequired
+	}
+
+	stackID := doc.Spec.StackID
+	if stackID == "" {
+		return nil, errdefs.ErrStackNameRequired
+	}
+
+	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(spaceID)
+	if cniErr != nil {
+		return nil, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
 
 	// Create a background context for containerd operations
@@ -82,7 +107,7 @@ func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
 
 	// Generate container ID
-	containerID := naming.BuildContainerName(realmID, spaceID, cellName, "pause")
+	containerID := naming.BuildContainerName(realmID, spaceID, cellID, "pause")
 
 	// Use default pause image (busybox with sleep)
 	image := "docker.io/library/busybox:latest"
@@ -96,9 +121,13 @@ func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 	}
 	// Add kukeon-specific labels
 	labels["kukeon.io/container-type"] = "pause"
-	labels["kukeon.io/cell"] = cellName
+	labels["kukeon.io/cell"] = cellID
+	if cellName != "" {
+		labels["kukeon.io/cell-name"] = cellName
+	}
 	labels["kukeon.io/space"] = spaceID
 	labels["kukeon.io/realm"] = realmID
+	labels["kukeon.io/stack"] = stackID
 
 	// Create container spec with minimal OCI spec options
 	// The pause container should run a minimal command that keeps it alive
@@ -112,59 +141,84 @@ func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 	}
 
 	containerSpec := ctr.ContainerSpec{
-		ID:       containerID,
-		Image:    image,
-		Labels:   labels,
-		SpecOpts: specOpts,
+		ID:            containerID,
+		Image:         image,
+		Labels:        labels,
+		SpecOpts:      specOpts,
+		CNIConfigPath: cniConfigPath,
 	}
 
 	container, err := r.ctrClient.CreateContainer(ctrCtx, containerSpec)
 	if err != nil {
+		logFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		logFields = append(
+			logFields,
+			"space",
+			spaceID,
+			"realm",
+			realmID,
+			"cniConfig",
+			cniConfigPath,
+			"err",
+			fmt.Sprintf("%v", err),
+		)
 		r.logger.ErrorContext(
 			r.ctx,
 			"failed to create pause container",
-			"id",
-			containerID,
-			"cell",
-			cellName,
-			"err",
-			fmt.Sprintf("%v", err),
+			logFields...,
 		)
 		return nil, fmt.Errorf("%w: %w", errdefs.ErrCreatePauseContainer, err)
 	}
 
+	infoFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+	infoFields = append(infoFields, "space", spaceID, "realm", realmID, "cniConfig", cniConfigPath)
 	r.logger.InfoContext(
 		r.ctx,
 		"created pause container",
-		"id",
-		containerID,
-		"cell",
-		cellName,
-		"space",
-		spaceID,
-		"realm",
-		realmID,
+		infoFields...,
 	)
 
 	// Create all containers defined in the CellDoc
-	for _, containerSpec := range doc.Spec.Containers {
+	for i := range doc.Spec.Containers {
+		containerSpec := doc.Spec.Containers[i]
+		if containerSpec.CellID == "" {
+			containerSpec.CellID = cellID
+		}
+		if containerSpec.SpaceID == "" {
+			containerSpec.SpaceID = spaceID
+		}
+		if containerSpec.RealmID == "" {
+			containerSpec.RealmID = realmID
+		}
+		if containerSpec.StackID == "" {
+			containerSpec.StackID = stackID
+		}
+		if containerSpec.CNIConfigPath == "" {
+			containerSpec.CNIConfigPath = cniConfigPath
+		}
+		doc.Spec.Containers[i] = containerSpec
+
 		_, err = r.ctrClient.CreateContainerFromSpec(
 			ctrCtx,
 			&containerSpec,
-			cellName,
-			realmID,
-			spaceID,
 		)
 		if err != nil {
+			fields := appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+			fields = append(
+				fields,
+				"space",
+				spaceID,
+				"realm",
+				realmID,
+				"cniConfig",
+				containerSpec.CNIConfigPath,
+				"err",
+				fmt.Sprintf("%v", err),
+			)
 			r.logger.ErrorContext(
 				r.ctx,
 				"failed to create container from CellDoc",
-				"id",
-				containerSpec.ID,
-				"cell",
-				cellName,
-				"err",
-				fmt.Sprintf("%v", err),
+				fields...,
 			)
 			return nil, fmt.Errorf("failed to create container %s: %w", containerSpec.ID, err)
 		}
@@ -181,9 +235,14 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 		return nil, errdefs.ErrCellNotFound
 	}
 
-	cellName := doc.Metadata.Name
+	cellName := strings.TrimSpace(doc.Metadata.Name)
 	if cellName == "" {
 		return nil, errdefs.ErrCellNotFound
+	}
+
+	cellID := doc.Spec.ID
+	if cellID == "" {
+		return nil, errdefs.ErrCellIDRequired
 	}
 
 	realmID := doc.Spec.RealmID
@@ -194,6 +253,16 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 	spaceID := doc.Spec.SpaceID
 	if spaceID == "" {
 		return nil, errdefs.ErrSpaceNameRequired
+	}
+
+	stackID := doc.Spec.StackID
+	if stackID == "" {
+		return nil, errdefs.ErrStackNameRequired
+	}
+
+	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(spaceID)
+	if cniErr != nil {
+		return nil, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
 
 	// Create a background context for containerd operations
@@ -227,20 +296,17 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
 
 	// Generate container ID (same as createCellContainers)
-	containerID := naming.BuildContainerName(realmID, spaceID, cellName, "pause")
+	containerID := naming.BuildContainerName(realmID, spaceID, cellID, "pause")
 
 	// Check if container exists
 	exists, err := r.ctrClient.ExistsContainer(ctrCtx, containerID)
 	if err != nil {
+		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
 		r.logger.ErrorContext(
 			r.ctx,
 			"failed to check if pause container exists",
-			"id",
-			containerID,
-			"cell",
-			cellName,
-			"err",
-			fmt.Sprintf("%v", err),
+			fields...,
 		)
 		return nil, fmt.Errorf("failed to check if pause container exists: %w", err)
 	}
@@ -249,45 +315,32 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 		// Container exists, load and return it
 		container, loadErr := r.ctrClient.GetContainer(ctrCtx, containerID)
 		if loadErr != nil {
+			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+			fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", loadErr))
 			r.logger.WarnContext(
 				r.ctx,
 				"pause container exists but failed to load",
-				"id",
-				containerID,
-				"cell",
-				cellName,
-				"err",
-				fmt.Sprintf("%v", loadErr),
+				fields...,
 			)
 			return nil, fmt.Errorf("failed to load existing pause container: %w", loadErr)
 		}
+		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		fields = append(fields, "space", spaceID, "realm", realmID)
 		r.logger.DebugContext(
 			r.ctx,
 			"pause container exists",
-			"id",
-			containerID,
-			"cell",
-			cellName,
-			"space",
-			spaceID,
-			"realm",
-			realmID,
+			fields...,
 		)
 		return container, nil
 	}
 
 	// Container doesn't exist, create it
+	createFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+	createFields = append(createFields, "space", spaceID, "realm", realmID, "cniConfig", cniConfigPath)
 	r.logger.InfoContext(
 		r.ctx,
 		"pause container does not exist, creating",
-		"id",
-		containerID,
-		"cell",
-		cellName,
-		"space",
-		spaceID,
-		"realm",
-		realmID,
+		createFields...,
 	)
 
 	// Use default pause image (busybox with sleep)
@@ -302,9 +355,13 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 	}
 	// Add kukeon-specific labels
 	labels["kukeon.io/container-type"] = "pause"
-	labels["kukeon.io/cell"] = cellName
+	labels["kukeon.io/cell"] = cellID
+	if cellName != "" {
+		labels["kukeon.io/cell-name"] = cellName
+	}
 	labels["kukeon.io/space"] = spaceID
 	labels["kukeon.io/realm"] = realmID
+	labels["kukeon.io/stack"] = stackID
 
 	// Create container spec with minimal OCI spec options
 	// The pause container should run a minimal command that keeps it alive
@@ -318,76 +375,91 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 	}
 
 	containerSpec := ctr.ContainerSpec{
-		ID:       containerID,
-		Image:    image,
-		Labels:   labels,
-		SpecOpts: specOpts,
+		ID:            containerID,
+		Image:         image,
+		Labels:        labels,
+		SpecOpts:      specOpts,
+		CNIConfigPath: cniConfigPath,
 	}
 
 	container, createErr := r.ctrClient.CreateContainer(ctrCtx, containerSpec)
 	if createErr != nil {
+		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		fields = append(
+			fields,
+			"space",
+			spaceID,
+			"realm",
+			realmID,
+			"cniConfig",
+			cniConfigPath,
+			"err",
+			fmt.Sprintf("%v", createErr),
+		)
 		r.logger.ErrorContext(
 			r.ctx,
 			"failed to create pause container",
-			"id",
-			containerID,
-			"cell",
-			cellName,
-			"err",
-			fmt.Sprintf("%v", createErr),
+			fields...,
 		)
 		return nil, fmt.Errorf("%w: %w", errdefs.ErrCreatePauseContainer, createErr)
 	}
 
+	ensuredFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+	ensuredFields = append(ensuredFields, "space", spaceID, "realm", realmID, "cniConfig", cniConfigPath)
 	r.logger.InfoContext(
 		r.ctx,
 		"ensured pause container exists",
-		"id",
-		containerID,
-		"cell",
-		cellName,
-		"space",
-		spaceID,
-		"realm",
-		realmID,
+		ensuredFields...,
 	)
 
 	// Ensure all containers defined in the CellDoc exist
-	for _, containerSpec := range doc.Spec.Containers {
+	for i := range doc.Spec.Containers {
+		containerSpec := doc.Spec.Containers[i]
+		if containerSpec.CNIConfigPath == "" {
+			containerSpec.CNIConfigPath = cniConfigPath
+			doc.Spec.Containers[i] = containerSpec
+		}
+
 		exists, err = r.ctrClient.ExistsContainer(ctrCtx, containerSpec.ID)
 		if err != nil {
+			fields := appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+			fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
 			r.logger.ErrorContext(
 				r.ctx,
 				"failed to check if container exists",
-				"id",
-				containerSpec.ID,
-				"cell",
-				cellName,
-				"err",
-				fmt.Sprintf("%v", err),
+				fields...,
 			)
 			return nil, fmt.Errorf("failed to check if container %s exists: %w", containerSpec.ID, err)
 		}
 
 		if !exists {
+			fields := appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+			fields = append(fields, "space", spaceID, "realm", realmID, "cniConfig", containerSpec.CNIConfigPath)
 			r.logger.InfoContext(
 				r.ctx,
 				"container does not exist, creating",
-				"id",
-				containerSpec.ID,
-				"cell",
-				cellName,
-				"space",
-				spaceID,
-				"realm",
-				realmID,
+				fields...,
 			)
+			if containerSpec.CellID == "" {
+				containerSpec.CellID = cellID
+			}
+			if containerSpec.SpaceID == "" {
+				containerSpec.SpaceID = spaceID
+			}
+			if containerSpec.RealmID == "" {
+				containerSpec.RealmID = realmID
+			}
+			if containerSpec.StackID == "" {
+				containerSpec.StackID = stackID
+			}
+			if containerSpec.CNIConfigPath == "" {
+				containerSpec.CNIConfigPath = cniConfigPath
+				doc.Spec.Containers[i] = containerSpec
+			}
+
 			_, err = r.ctrClient.CreateContainerFromSpec(
 				ctrCtx,
 				&containerSpec,
-				cellName,
-				realmID,
-				spaceID,
 			)
 			if err != nil {
 				// Check if the error indicates the container already exists
@@ -395,44 +467,41 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 				// was created between the existence check and creation attempt
 				errMsg := err.Error()
 				if strings.Contains(errMsg, "container already exists") {
+					debugFields := appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+					debugFields = append(debugFields, "space", spaceID, "realm", realmID)
 					r.logger.DebugContext(
 						r.ctx,
 						"container already exists (race condition), skipping",
-						"id",
-						containerSpec.ID,
-						"cell",
-						cellName,
-						"space",
-						spaceID,
-						"realm",
-						realmID,
+						debugFields...,
 					)
 					continue
 				}
+				fields = appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+				fields = append(
+					fields,
+					"space",
+					spaceID,
+					"realm",
+					realmID,
+					"cniConfig",
+					containerSpec.CNIConfigPath,
+					"err",
+					fmt.Sprintf("%v", err),
+				)
 				r.logger.ErrorContext(
 					r.ctx,
 					"failed to create container from CellDoc",
-					"id",
-					containerSpec.ID,
-					"cell",
-					cellName,
-					"err",
-					fmt.Sprintf("%v", err),
+					fields...,
 				)
 				return nil, fmt.Errorf("failed to create container %s: %w", containerSpec.ID, err)
 			}
 		} else {
+			fields := appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+			fields = append(fields, "space", spaceID, "realm", realmID)
 			r.logger.DebugContext(
 				r.ctx,
 				"container exists",
-				"id",
-				containerSpec.ID,
-				"cell",
-				cellName,
-				"space",
-				spaceID,
-				"realm",
-				realmID,
+				fields...,
 			)
 		}
 	}
@@ -447,9 +516,14 @@ func (r *Exec) StartCell(doc *v1beta1.CellDoc) error {
 		return errdefs.ErrCellNotFound
 	}
 
-	cellName := doc.Metadata.Name
+	cellName := strings.TrimSpace(doc.Metadata.Name)
 	if cellName == "" {
 		return errdefs.ErrCellNotFound
+	}
+
+	cellID := doc.Spec.ID
+	if cellID == "" {
+		return errdefs.ErrCellIDRequired
 	}
 
 	realmID := doc.Spec.RealmID
@@ -460,6 +534,16 @@ func (r *Exec) StartCell(doc *v1beta1.CellDoc) error {
 	spaceID := doc.Spec.SpaceID
 	if spaceID == "" {
 		return errdefs.ErrSpaceNameRequired
+	}
+
+	stackID := doc.Spec.StackID
+	if stackID == "" {
+		return errdefs.ErrStackNameRequired
+	}
+
+	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(spaceID)
+	if cniErr != nil {
+		return fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
 
 	// Create a background context for containerd operations
@@ -495,67 +579,193 @@ func (r *Exec) StartCell(doc *v1beta1.CellDoc) error {
 	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
 
 	// Generate pause container ID
-	containerID := naming.BuildContainerName(realmID, spaceID, cellName, "pause")
+	containerID := naming.BuildContainerName(realmID, spaceID, cellID, "pause")
 
 	// Start pause container
-	_, err = r.ctrClient.StartContainer(ctrCtx, containerID, ctr.TaskSpec{})
+	pauseTask, err := r.ctrClient.StartContainer(ctrCtx, ctr.ContainerSpec{ID: containerID}, ctr.TaskSpec{})
 	if err != nil {
+		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
 		r.logger.ErrorContext(
 			r.ctx,
 			"failed to start pause container",
-			"id",
-			containerID,
-			"cell",
-			cellName,
-			"err",
-			fmt.Sprintf("%v", err),
+			fields...,
 		)
 		return fmt.Errorf("failed to start pause container %s: %w", containerID, err)
 	}
 
-	r.logger.InfoContext(
-		r.ctx,
-		"started pause container",
-		"id",
-		containerID,
-		"cell",
-		cellName,
+	pausePID := pauseTask.Pid()
+	if pausePID == 0 {
+		return fmt.Errorf("pause container %s has invalid pid (0)", containerID)
+	}
+
+	namespacePaths := ctr.NamespacePaths{
+		Net: fmt.Sprintf("/proc/%d/ns/net", pausePID),
+		IPC: fmt.Sprintf("/proc/%d/ns/ipc", pausePID),
+		UTS: fmt.Sprintf("/proc/%d/ns/uts", pausePID),
+	}
+
+	// Log CNI paths being used for debugging
+	// Note: NewManager applies defaults AFTER creating the CNI config,
+	// so if cniBinDir is empty, the CNI config will have an empty path array
+	cniBinDir := r.cniConf.CniBinDir
+	cniConfigDir := r.cniConf.CniConfigDir
+	cniCacheDir := r.cniConf.CniCacheDir
+	debugFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+	debugFields = append(
+		debugFields,
 		"space",
 		spaceID,
 		"realm",
 		realmID,
+		"stack",
+		stackID,
+		"cniBinDir",
+		cniBinDir,
+		"cniConfigDir",
+		cniConfigDir,
+		"cniCacheDir",
+		cniCacheDir,
+	)
+	if cniBinDir == "" {
+		debugFields = append(debugFields, "cniBinDirDefault", "/opt/cni/bin")
+	}
+	if cniConfigDir == "" {
+		debugFields = append(debugFields, "cniConfigDirDefault", "/opt/cni/net.d")
+	}
+	if cniCacheDir == "" {
+		debugFields = append(debugFields, "cniCacheDirDefault", "/opt/cni/cache")
+	}
+	r.logger.DebugContext(
+		r.ctx,
+		"creating CNI manager",
+		debugFields...,
 	)
 
-	// Start all containers defined in the CellDoc
-	for _, containerSpec := range doc.Spec.Containers {
-		_, err = r.ctrClient.StartContainer(ctrCtx, containerSpec.ID, ctr.TaskSpec{})
-		if err != nil {
-			r.logger.ErrorContext(
-				r.ctx,
-				"failed to start container from CellDoc",
-				"id",
-				containerSpec.ID,
-				"cell",
-				cellName,
-				"err",
-				fmt.Sprintf("%v", err),
-			)
-			return fmt.Errorf("failed to start container %s: %w", containerSpec.ID, err)
-		}
+	cniMgr, mgrErr := cni.NewManager(
+		r.cniConf.CniBinDir,
+		r.cniConf.CniConfigDir,
+		r.cniConf.CniCacheDir,
+	)
+	if mgrErr != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrInitCniManager, mgrErr)
+	}
 
-		r.logger.InfoContext(
-			r.ctx,
-			"started container",
-			"id",
-			containerSpec.ID,
-			"cell",
-			cellName,
+	if loadErr := cniMgr.LoadNetworkConfigList(cniConfigPath); loadErr != nil {
+		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		fields = append(
+			fields,
 			"space",
 			spaceID,
 			"realm",
 			realmID,
+			"cniConfig",
+			cniConfigPath,
+			"err",
+			fmt.Sprintf("%v", loadErr),
+		)
+		r.logger.ErrorContext(
+			r.ctx,
+			"failed to load CNI config",
+			fields...,
+		)
+		return fmt.Errorf("failed to load CNI config %s: %w", cniConfigPath, loadErr)
+	}
+
+	netnsPath := namespacePaths.Net
+	if addErr := cniMgr.AddContainerToNetwork(ctrCtx, containerID, netnsPath); addErr != nil {
+		// Log the actual CNI bin dir value being used (may be empty, which causes the error)
+		// Note: NewManager creates CNI config with this value BEFORE applying defaults,
+		// so if empty, the CNI config will search in an empty path array
+		cniBinDirValue := r.cniConf.CniBinDir
+		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		fields = append(
+			fields,
+			"space",
+			spaceID,
+			"realm",
+			realmID,
+			"cniConfig",
+			cniConfigPath,
+			"netns",
+			netnsPath,
+			"cniBinDir",
+			cniBinDirValue,
+			"err",
+			fmt.Sprintf("%v", addErr),
+		)
+		if cniBinDirValue == "" {
+			fields = append(
+				fields,
+				"cniBinDirNote",
+				"empty path - CNI config was created with empty plugin search path, default /opt/cni/bin not applied to CNI config",
+			)
+		}
+		r.logger.ErrorContext(
+			r.ctx,
+			"failed to attach pause container to network",
+			fields...,
+		)
+		return fmt.Errorf("failed to attach pause container %s to network: %w", containerID, addErr)
+	}
+
+	infoFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+	infoFields = append(infoFields, "space", spaceID, "realm", realmID, "pid", pausePID, "cniConfig", cniConfigPath)
+	r.logger.InfoContext(
+		r.ctx,
+		"started pause container",
+		infoFields...,
+	)
+
+	// Start all containers defined in the CellDoc
+	for _, containerSpec := range doc.Spec.Containers {
+		specWithNamespaces := ctr.JoinContainerNamespaces(
+			ctr.ContainerSpec{ID: containerSpec.ID},
+			namespacePaths,
+		)
+
+		_, err = r.ctrClient.StartContainer(ctrCtx, specWithNamespaces, ctr.TaskSpec{})
+		if err != nil {
+			fields := appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+			fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
+			r.logger.ErrorContext(
+				r.ctx,
+				"failed to start container from CellDoc",
+				fields...,
+			)
+			return fmt.Errorf("failed to start container %s: %w", containerSpec.ID, err)
+		}
+
+		fields := appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+		fields = append(fields, "space", spaceID, "realm", realmID)
+		r.logger.InfoContext(
+			r.ctx,
+			"started container",
+			fields...,
 		)
 	}
 
 	return nil
+}
+
+func (r *Exec) resolveSpaceCNIConfigPath(spaceID string) (string, error) {
+	spaceDoc, err := r.GetSpace(&v1beta1.SpaceDoc{
+		Metadata: v1beta1.SpaceMetadata{
+			Name: spaceID,
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
+	}
+
+	confPath := strings.TrimSpace(spaceDoc.Spec.CNIConfigPath)
+	if confPath != "" {
+		return confPath, nil
+	}
+
+	confPath, err = fs.SpaceNetworkConfigPath(r.opts.RunPath, spaceDoc.Metadata.Name)
+	if err != nil {
+		return "", fmt.Errorf("failed to build default space CNI config path: %w", err)
+	}
+	return confPath, nil
 }

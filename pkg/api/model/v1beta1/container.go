@@ -46,6 +46,7 @@ type ContainerSpec struct {
 	Networks        []string  `json:"networks"        yaml:"networks"`
 	NetworksAliases []string  `json:"networksAliases" yaml:"networksAliases"`
 	Privileged      bool      `json:"privileged"      yaml:"privileged"`
+	CNIConfigPath   string    `json:"cniConfigPath,omitempty" yaml:"cniConfigPath,omitempty"`
 	RestartPolicy   string    `json:"restartPolicy"   yaml:"restartPolicy"`
 	RestartCount    int       `json:"restartCount"    yaml:"restartCount"`
 	RestartTime     time.Time `json:"restartTime"     yaml:"restartTime"`

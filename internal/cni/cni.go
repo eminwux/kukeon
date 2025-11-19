@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -47,12 +48,7 @@ func NewManager(cniBinDir, cniConfigDir, cniCacheDir string) (*Manager, error) {
 	// cniBinDir: where plugins live, e.g. /opt/cni/bin
 	// cacheDir: something like /var/lib/kukeon/cni-cache
 
-	cniConf := libcni.NewCNIConfigWithCacheDir(
-		[]string{cniBinDir},
-		cniCacheDir,
-		nil,
-	)
-
+	// Apply defaults BEFORE creating the CNI config to ensure non-empty paths
 	if cniConfigDir == "" {
 		cniConfigDir = defaultCniConfDir
 	}
@@ -64,6 +60,12 @@ func NewManager(cniBinDir, cniConfigDir, cniCacheDir string) (*Manager, error) {
 	if cniCacheDir == "" {
 		cniCacheDir = defaultCniCacheDir
 	}
+
+	cniConf := libcni.NewCNIConfigWithCacheDir(
+		[]string{cniBinDir},
+		cniCacheDir,
+		nil,
+	)
 
 	var netConf *libcni.NetworkConfigList
 
@@ -79,6 +81,10 @@ func NewManager(cniBinDir, cniConfigDir, cniCacheDir string) (*Manager, error) {
 }
 
 func (m *Manager) AddContainerToNetwork(ctx context.Context, containerID, netnsPath string) error {
+	if m.netConf == nil {
+		return errdefs.ErrNetworkConfigNotLoaded
+	}
+
 	rt := &libcni.RuntimeConf{
 		ContainerID: containerID,
 		NetNS:       netnsPath, // e.g. /proc/<pid>/ns/net
@@ -90,12 +96,30 @@ func (m *Manager) AddContainerToNetwork(ctx context.Context, containerID, netnsP
 }
 
 func (m *Manager) DelContainerFromNetwork(ctx context.Context, containerID, netnsPath string) error {
+	if m.netConf == nil {
+		return errdefs.ErrNetworkConfigNotLoaded
+	}
+
 	rt := &libcni.RuntimeConf{
 		ContainerID: containerID,
 		NetNS:       netnsPath,
 		IfName:      "eth0",
 	}
 	return m.cniConf.DelNetworkList(ctx, m.netConf, rt)
+}
+
+func (m *Manager) LoadNetworkConfigList(configPath string) error {
+	if configPath == "" {
+		return errors.New("network config path is required")
+	}
+
+	conf, err := libcni.ConfListFromFile(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load CNI config list %s: %w", configPath, err)
+	}
+
+	m.netConf = conf
+	return nil
 }
 
 func (m *Manager) ExistsNetworkConfig(networkName, configPath string) (bool, string, error) {

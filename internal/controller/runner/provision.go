@@ -199,6 +199,13 @@ func (r *Exec) ensureSpaceCNIConfig(doc *v1beta1.SpaceDoc) (*v1beta1.SpaceDoc, e
 			return nil, fmt.Errorf("%w: %w", errdefs.ErrCreateNetwork, writeErr)
 		}
 	}
+	specUpdated := doc.Spec.CNIConfigPath != confPath
+	doc.Spec.CNIConfigPath = confPath
+	if specUpdated {
+		if updateErr := r.UpdateSpaceMetadata(doc); updateErr != nil {
+			return nil, fmt.Errorf("%w: %w", errdefs.ErrUpdateSpaceMetadata, updateErr)
+		}
+	}
 	r.logger.InfoContext(
 		r.ctx,
 		"space network exists",
@@ -247,6 +254,7 @@ func (r *Exec) createSpaceCNIConfig(doc *v1beta1.SpaceDoc) error {
 		r.logger.InfoContext(r.ctx, "failed to create space network", "err", fmt.Sprintf("%v", writeErr))
 		return fmt.Errorf("%w: %w", errdefs.ErrCreateNetwork, writeErr)
 	}
+	doc.Spec.CNIConfigPath = confPath
 	r.logger.InfoContext(
 		r.ctx,
 		"created space network",

@@ -26,14 +26,25 @@ import (
 
 	apitypes "github.com/containerd/containerd/api/types"
 	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/core/containers"
 	"github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/containerd/v2/pkg/oci"
+	"github.com/containerd/typeurl/v2"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
+)
+
+const (
+	cniConfigAnnotation = "io.kukeon.cni.config"
 )
 
 var (
 	errEmptyContainerID  = errors.New("ctr: container id is required")
+	errEmptyCellID       = errors.New("ctr: cell id is required")
+	errEmptySpaceID      = errors.New("ctr: space id is required")
+	errEmptyRealmID      = errors.New("ctr: realm id is required")
+	errEmptyStackID      = errors.New("ctr: stack id is required")
 	errContainerExists   = errors.New("ctr: container already exists")
 	errContainerNotFound = errors.New("ctr: container not found")
 	errTaskNotFound      = errors.New("ctr: task not found")
@@ -86,6 +97,85 @@ type ContainerSpec struct {
 	SpecOpts []oci.SpecOpts
 	// Labels are key-value pairs to attach to the container.
 	Labels map[string]string
+	// CNIConfigPath is the path to the CNI configuration to use for this container.
+	CNIConfigPath string
+}
+
+// JoinContainerNamespaces returns a copy of spec with namespace spec options applied.
+func JoinContainerNamespaces(spec ContainerSpec, ns NamespacePaths) ContainerSpec {
+	specCopy := spec
+	specCopy.SpecOpts = cloneSpecOpts(spec.SpecOpts)
+	specCopy.SpecOpts = append(specCopy.SpecOpts, namespaceSpecOpts(ns)...)
+	return specCopy
+}
+
+func cloneSpecOpts(opts []oci.SpecOpts) []oci.SpecOpts {
+	if len(opts) == 0 {
+		return nil
+	}
+	cloned := make([]oci.SpecOpts, len(opts))
+	copy(cloned, opts)
+	return cloned
+}
+
+func namespaceSpecOpts(ns NamespacePaths) []oci.SpecOpts {
+	var opts []oci.SpecOpts
+	if ns.Net != "" {
+		opts = append(opts, withNamespacePathOpt(runtimespec.NetworkNamespace, ns.Net))
+	}
+	if ns.IPC != "" {
+		opts = append(opts, withNamespacePathOpt(runtimespec.IPCNamespace, ns.IPC))
+	}
+	if ns.UTS != "" {
+		opts = append(opts, withNamespacePathOpt(runtimespec.UTSNamespace, ns.UTS))
+	}
+	if ns.PID != "" {
+		opts = append(opts, withNamespacePathOpt(runtimespec.PIDNamespace, ns.PID))
+	}
+	return opts
+}
+
+func withNamespacePathOpt(nsType runtimespec.LinuxNamespaceType, path string) oci.SpecOpts {
+	return func(_ context.Context, _ oci.Client, _ *containers.Container, s *runtimespec.Spec) error {
+		if s.Linux == nil {
+			s.Linux = &runtimespec.Linux{}
+		}
+
+		for i := range s.Linux.Namespaces {
+			if s.Linux.Namespaces[i].Type == nsType {
+				s.Linux.Namespaces[i].Path = path
+				return nil
+			}
+		}
+
+		s.Linux.Namespaces = append(s.Linux.Namespaces, runtimespec.LinuxNamespace{
+			Type: nsType,
+			Path: path,
+		})
+		return nil
+	}
+}
+
+func (c *client) applySpecOpts(ctx context.Context, container containerd.Container, opts []oci.SpecOpts) error {
+	if len(opts) == 0 {
+		return nil
+	}
+
+	ociSpec, err := container.Spec(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load container spec: %w", err)
+	}
+
+	for _, opt := range opts {
+		if err = opt(ctx, c.cClient, nil, ociSpec); err != nil {
+			return fmt.Errorf("failed to apply spec option: %w", err)
+		}
+	}
+
+	if err = container.Update(ctx, withUpdatedSpec(ociSpec)); err != nil {
+		return fmt.Errorf("failed to persist updated spec: %w", err)
+	}
+	return nil
 }
 
 // ContainerRuntime describes the runtime configuration.
@@ -130,6 +220,20 @@ type StopContainerOptions struct {
 	Timeout *time.Duration
 	// Force indicates whether to force kill if timeout is exceeded.
 	Force bool
+}
+
+func withUpdatedSpec(spec *oci.Spec) containerd.UpdateContainerOpts {
+	return func(_ context.Context, _ *containerd.Client, c *containers.Container) error {
+		if spec == nil {
+			return errors.New("oci spec is nil")
+		}
+		anySpec, err := typeurl.MarshalAnyToProto(spec)
+		if err != nil {
+			return err
+		}
+		c.Spec = anySpec
+		return nil
+	}
 }
 
 // namespaceCtx returns a context with the namespace set.
@@ -316,11 +420,20 @@ func (c *client) CreateContainer(ctx context.Context, spec ContainerSpec) (conta
 		snapshotKey = spec.ID
 	}
 
+	// Build OCI spec options, injecting annotations when needed
+	specOpts := make([]oci.SpecOpts, 0, len(spec.SpecOpts)+1)
+	specOpts = append(specOpts, spec.SpecOpts...)
+	if spec.CNIConfigPath != "" {
+		specOpts = append(specOpts, oci.WithAnnotations(map[string]string{
+			cniConfigAnnotation: spec.CNIConfigPath,
+		}))
+	}
+
 	// Build container options
 	opts := []containerd.NewContainerOpts{
 		containerd.WithImage(image),
 		containerd.WithNewSnapshot(snapshotKey, image),
-		containerd.WithNewSpec(spec.SpecOpts...),
+		containerd.WithNewSpec(specOpts...),
 	}
 
 	if spec.Snapshotter != "" {
@@ -429,17 +542,27 @@ func (c *client) DeleteContainer(ctx context.Context, id string, opts ContainerD
 }
 
 // StartContainer creates and starts a task for the container.
-func (c *client) StartContainer(ctx context.Context, id string, spec TaskSpec) (containerd.Task, error) {
-	if id == "" {
+func (c *client) StartContainer(
+	ctx context.Context,
+	containerSpec ContainerSpec,
+	taskSpec TaskSpec,
+) (containerd.Task, error) {
+	if containerSpec.ID == "" {
 		return nil, errEmptyContainerID
 	}
 
-	container, err := c.loadContainer(ctx, id)
+	container, err := c.loadContainer(ctx, containerSpec.ID)
 	if err != nil {
 		return nil, err
 	}
 
 	nsCtx := c.namespaceCtx(ctx)
+
+	if len(containerSpec.SpecOpts) > 0 {
+		if err = c.applySpecOpts(nsCtx, container, containerSpec.SpecOpts); err != nil {
+			return nil, err
+		}
+	}
 
 	// Check if task already exists
 	existingTask, err := container.Task(nsCtx, nil)
@@ -448,23 +571,23 @@ func (c *client) StartContainer(ctx context.Context, id string, spec TaskSpec) (
 		var status containerd.Status
 		status, err = existingTask.Status(nsCtx)
 		if err == nil && status.Status == containerd.Running {
-			c.logger.WarnContext(ctx, "task already running", "id", id)
-			c.storeTask(id, existingTask)
+			c.logger.WarnContext(ctx, "task already running", "id", containerSpec.ID)
+			c.storeTask(containerSpec.ID, existingTask)
 			return existingTask, nil
 		}
 		// Task exists but is not running (stopped), delete it before creating a new one
-		c.logger.DebugContext(ctx, "deleting stopped task", "id", id)
+		c.logger.DebugContext(ctx, "deleting stopped task", "id", containerSpec.ID)
 		_, err = existingTask.Delete(nsCtx, containerd.WithProcessKill)
 		if err != nil {
-			c.logger.WarnContext(ctx, "failed to delete stopped task", "id", id, "err", formatError(err))
+			c.logger.WarnContext(ctx, "failed to delete stopped task", "id", containerSpec.ID, "err", formatError(err))
 		}
-		c.dropTask(id)
+		c.dropTask(containerSpec.ID)
 	}
 
 	// Build IO creator
 	var ioCreator cio.Creator
-	if spec.IO != nil {
-		if spec.IO.Terminal {
+	if taskSpec.IO != nil {
+		if taskSpec.IO.Terminal {
 			ioCreator = cio.NewCreator(cio.WithStreams(nil, nil, nil), cio.WithTerminal)
 		} else {
 			ioCreator = cio.NewCreator(cio.WithStreams(nil, nil, nil))
@@ -475,26 +598,26 @@ func (c *client) StartContainer(ctx context.Context, id string, spec TaskSpec) (
 	}
 
 	// Build task options
-	taskOpts := spec.Options
+	taskOpts := taskSpec.Options
 
 	// Create new task
 	task, err := container.NewTask(nsCtx, ioCreator, taskOpts...)
 	if err != nil {
-		c.logger.ErrorContext(ctx, "failed to create task", "id", id, "err", formatError(err))
+		c.logger.ErrorContext(ctx, "failed to create task", "id", containerSpec.ID, "err", formatError(err))
 		return nil, fmt.Errorf("failed to create task: %w", err)
 	}
 
 	// Start the task
 	err = task.Start(nsCtx)
 	if err != nil {
-		c.logger.ErrorContext(ctx, "failed to start task", "id", id, "err", formatError(err))
+		c.logger.ErrorContext(ctx, "failed to start task", "id", containerSpec.ID, "err", formatError(err))
 		// Clean up task on failure
 		_, _ = task.Delete(nsCtx, containerd.WithProcessKill)
 		return nil, fmt.Errorf("failed to start task: %w", err)
 	}
 
-	c.storeTask(id, task)
-	c.logger.InfoContext(ctx, "started container", "id", id)
+	c.storeTask(containerSpec.ID, task)
+	c.logger.InfoContext(ctx, "started container", "id", containerSpec.ID)
 	return task, nil
 }
 
@@ -656,7 +779,6 @@ func validateContainerSpec(spec ContainerSpec) error {
 func (c *client) CreateContainerFromSpec(
 	ctx context.Context,
 	containerSpec *v1beta1.ContainerSpec,
-	cellName, realmID, spaceID string,
 ) (containerd.Container, error) {
 	if containerSpec == nil {
 		return nil, errors.New("container spec is nil")
@@ -670,19 +792,35 @@ func (c *client) CreateContainerFromSpec(
 		return nil, errInvalidImage
 	}
 
+	if containerSpec.CellID == "" {
+		return nil, errEmptyCellID
+	}
+
+	if containerSpec.SpaceID == "" {
+		return nil, errEmptySpaceID
+	}
+
+	if containerSpec.RealmID == "" {
+		return nil, errEmptyRealmID
+	}
+
+	if containerSpec.StackID == "" {
+		return nil, errEmptyStackID
+	}
+
+	cellID := containerSpec.CellID
+	spaceID := containerSpec.SpaceID
+	realmID := containerSpec.RealmID
+	stackID := containerSpec.StackID
+
 	// Build labels
 	labels := make(map[string]string)
 	// Add kukeon-specific labels
 	labels["kukeon.io/container-type"] = "container"
-	labels["kukeon.io/cell"] = cellName
+	labels["kukeon.io/cell"] = cellID
 	labels["kukeon.io/space"] = spaceID
 	labels["kukeon.io/realm"] = realmID
-	if containerSpec.CellID != "" {
-		labels["kukeon.io/cell-id"] = containerSpec.CellID
-	}
-	if containerSpec.StackID != "" {
-		labels["kukeon.io/stack-id"] = containerSpec.StackID
-	}
+	labels["kukeon.io/stack"] = stackID
 
 	// Build OCI spec options
 	specOpts := []oci.SpecOpts{
@@ -717,10 +855,11 @@ func (c *client) CreateContainerFromSpec(
 
 	// Convert to ctr.ContainerSpec
 	ctrSpec := ContainerSpec{
-		ID:       containerSpec.ID,
-		Image:    containerSpec.Image,
-		Labels:   labels,
-		SpecOpts: specOpts,
+		ID:            containerSpec.ID,
+		Image:         containerSpec.Image,
+		Labels:        labels,
+		SpecOpts:      specOpts,
+		CNIConfigPath: containerSpec.CNIConfigPath,
 	}
 
 	// Create the container
@@ -732,7 +871,7 @@ func (c *client) CreateContainerFromSpec(
 			"id",
 			containerSpec.ID,
 			"cell",
-			cellName,
+			cellID,
 			"err",
 			formatError(err),
 		)
@@ -745,7 +884,7 @@ func (c *client) CreateContainerFromSpec(
 		"id",
 		containerSpec.ID,
 		"cell",
-		cellName,
+		cellID,
 		"space",
 		spaceID,
 		"realm",
