@@ -30,7 +30,8 @@ type SpaceMetadata struct {
 }
 
 type SpaceSpec struct {
-	RealmID string `json:"realmId" yaml:"realmId"`
+	RealmID       string `json:"realmId"                 yaml:"realmId"`
+	CNIConfigPath string `json:"cniConfigPath,omitempty" yaml:"cniConfigPath,omitempty"`
 }
 
 type SpaceStatus struct {

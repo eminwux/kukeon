@@ -64,7 +64,7 @@ type Client interface {
 	ListContainers(ctx context.Context, filters ...string) ([]containerd.Container, error)
 	ExistsContainer(ctx context.Context, id string) (bool, error)
 	DeleteContainer(ctx context.Context, id string, opts ContainerDeleteOptions) error
-	StartContainer(ctx context.Context, id string, spec TaskSpec) (containerd.Task, error)
+	StartContainer(ctx context.Context, spec ContainerSpec, taskSpec TaskSpec) (containerd.Task, error)
 	StopContainer(ctx context.Context, id string, opts StopContainerOptions) (*containerd.ExitStatus, error)
 	TaskStatus(ctx context.Context, id string) (containerd.Status, error)
 	TaskMetrics(ctx context.Context, id string) (*apitypes.Metric, error)
@@ -73,8 +73,15 @@ type Client interface {
 	CreateContainerFromSpec(
 		ctx context.Context,
 		containerSpec *v1beta1.ContainerSpec,
-		cellName, realmID, spaceID string,
 	) (containerd.Container, error)
+}
+
+// NamespacePaths describes the namespace file paths a container should join.
+type NamespacePaths struct {
+	Net string
+	IPC string
+	UTS string
+	PID string
 }
 
 func NewClient(ctx context.Context, logger *slog.Logger, socket string) Client {
