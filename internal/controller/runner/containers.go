@@ -31,6 +31,7 @@ import (
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/util/fs"
+	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -109,8 +110,11 @@ func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 	// Set namespace to realm namespace
 	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
 
-	// Use just "pause" as the container name
-	containerID := "pause"
+	// Generate container ID with cell identifier for uniqueness
+	containerID, err := naming.BuildPauseContainerName(spaceID, stackID, cellID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build pause container name: %w", err)
+	}
 
 	// Use default pause image (busybox with sleep)
 	image := "docker.io/library/busybox:latest"
@@ -199,15 +203,30 @@ func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 		if containerSpec.CNIConfigPath == "" {
 			containerSpec.CNIConfigPath = cniConfigPath
 		}
-		doc.Spec.Containers[i] = containerSpec
 
-		// Use container name directly for containerd operations
-		_, err = r.ctrClient.CreateContainerFromSpec(
-			ctrCtx,
-			&containerSpec,
+		// Build container ID using hierarchical format for containerd operations
+		// Don't modify containerSpec.ID in the document - keep it as the base name
+		containerID, err = naming.BuildContainerName(
+			containerSpec.SpaceID,
+			containerSpec.StackID,
+			containerSpec.CellID,
+			containerSpec.ID,
 		)
 		if err != nil {
-			fields := appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+			return nil, fmt.Errorf("failed to build container name: %w", err)
+		}
+
+		// Create a copy with the full hierarchical ID for containerd operations
+		containerSpecCopy := containerSpec
+		containerSpecCopy.ID = containerID
+
+		// Use container name with hierarchical format for containerd operations
+		_, err = r.ctrClient.CreateContainerFromSpec(
+			ctrCtx,
+			&containerSpecCopy,
+		)
+		if err != nil {
+			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 			fields = append(
 				fields,
 				"space",
@@ -224,7 +243,7 @@ func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 				"failed to create container from CellDoc",
 				fields...,
 			)
-			return nil, fmt.Errorf("failed to create container %s: %w", containerSpec.ID, err)
+			return nil, fmt.Errorf("failed to create container %s: %w", containerID, err)
 		}
 	}
 
@@ -299,8 +318,11 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 	// Set namespace to realm namespace
 	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
 
-	// Use just "pause" as the container name
-	containerID := "pause"
+	// Generate container ID with cell identifier for uniqueness
+	containerID, err := naming.BuildPauseContainerName(spaceID, stackID, cellID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build pause container name: %w", err)
+	}
 
 	// Check if container exists
 	exists, err := r.ctrClient.ExistsContainer(ctrCtx, containerID)
@@ -437,23 +459,34 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 		if containerSpec.StackID == "" {
 			containerSpec.StackID = stackID
 		}
-		doc.Spec.Containers[i] = containerSpec
 
-		// Use container name directly for containerd operations
-		exists, err = r.ctrClient.ExistsContainer(ctrCtx, containerSpec.ID)
+		// Build container ID using hierarchical format for containerd operations
+		// Don't modify containerSpec.ID in the document - keep it as the base name
+		containerID, err = naming.BuildContainerName(
+			containerSpec.SpaceID,
+			containerSpec.StackID,
+			containerSpec.CellID,
+			containerSpec.ID,
+		)
 		if err != nil {
-			fields := appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+			return nil, fmt.Errorf("failed to build container name: %w", err)
+		}
+
+		// Use container name with hierarchical format for containerd operations
+		exists, err = r.ctrClient.ExistsContainer(ctrCtx, containerID)
+		if err != nil {
+			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 			fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
 			r.logger.ErrorContext(
 				r.ctx,
 				"failed to check if container exists",
 				fields...,
 			)
-			return nil, fmt.Errorf("failed to check if container %s exists: %w", containerSpec.ID, err)
+			return nil, fmt.Errorf("failed to check if container %s exists: %w", containerID, err)
 		}
 
 		if !exists {
-			fields := appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 			fields = append(fields, "space", spaceID, "realm", realmID, "cniConfig", containerSpec.CNIConfigPath)
 			r.logger.InfoContext(
 				r.ctx,
@@ -465,10 +498,13 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 				doc.Spec.Containers[i] = containerSpec
 			}
 
-			// Use container name directly for containerd operations
+			// Container doesn't exist, create it
+			// Create a copy with the full hierarchical ID for containerd operations
+			containerSpecCopy := containerSpec
+			containerSpecCopy.ID = containerID
 			_, err = r.ctrClient.CreateContainerFromSpec(
 				ctrCtx,
-				&containerSpec,
+				&containerSpecCopy,
 			)
 			if err != nil {
 				// Check if the error indicates the container already exists
@@ -476,7 +512,7 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 				// was created between the existence check and creation attempt
 				errMsg := err.Error()
 				if strings.Contains(errMsg, "container already exists") {
-					debugFields := appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+					debugFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 					debugFields = append(debugFields, "space", spaceID, "realm", realmID)
 					r.logger.DebugContext(
 						r.ctx,
@@ -485,7 +521,7 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 					)
 					continue
 				}
-				fields = appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+				fields = appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 				fields = append(
 					fields,
 					"space",
@@ -502,10 +538,10 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 					"failed to create container from CellDoc",
 					fields...,
 				)
-				return nil, fmt.Errorf("failed to create container %s: %w", containerSpec.ID, err)
+				return nil, fmt.Errorf("failed to create container %s: %w", containerID, err)
 			}
 		} else {
-			fields := appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 			fields = append(fields, "space", spaceID, "realm", realmID)
 			r.logger.DebugContext(
 				r.ctx,
@@ -587,8 +623,11 @@ func (r *Exec) StartCell(doc *v1beta1.CellDoc) error {
 	// Set namespace to realm namespace
 	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
 
-	// Use just "pause" as the container name
-	containerID := "pause"
+	// Generate container ID with cell identifier for uniqueness
+	containerID, err := naming.BuildPauseContainerName(spaceID, stackID, cellID)
+	if err != nil {
+		return fmt.Errorf("failed to build pause container name: %w", err)
+	}
 
 	// Start pause container
 	pauseTask, err := r.ctrClient.StartContainer(ctrCtx, ctr.ContainerSpec{ID: containerID}, ctr.TaskSpec{})
@@ -753,25 +792,36 @@ func (r *Exec) StartCell(doc *v1beta1.CellDoc) error {
 
 	// Start all containers defined in the CellDoc
 	for _, containerSpec := range doc.Spec.Containers {
-		// Use container name directly for containerd operations
+		// Build container ID using hierarchical format
+		containerID, err = naming.BuildContainerName(
+			containerSpec.SpaceID,
+			containerSpec.StackID,
+			containerSpec.CellID,
+			containerSpec.ID,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to build container name: %w", err)
+		}
+
+		// Use container name with UUID for containerd operations
 		specWithNamespaces := ctr.JoinContainerNamespaces(
-			ctr.ContainerSpec{ID: containerSpec.ID},
+			ctr.ContainerSpec{ID: containerID},
 			namespacePaths,
 		)
 
 		_, err = r.ctrClient.StartContainer(ctrCtx, specWithNamespaces, ctr.TaskSpec{})
 		if err != nil {
-			fields := appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 			fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
 			r.logger.ErrorContext(
 				r.ctx,
 				"failed to start container from CellDoc",
 				fields...,
 			)
-			return fmt.Errorf("failed to start container %s: %w", containerSpec.ID, err)
+			return fmt.Errorf("failed to start container %s: %w", containerID, err)
 		}
 
-		fields := appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 		fields = append(fields, "space", spaceID, "realm", realmID)
 		r.logger.InfoContext(
 			r.ctx,
@@ -913,15 +963,27 @@ func (r *Exec) StopCell(doc *v1beta1.CellDoc) error {
 
 	// Stop all workload containers first
 	for _, containerSpec := range doc.Spec.Containers {
-		// Use container name directly for containerd operations
+		// Build container ID using hierarchical format
+		var containerID string
+		containerID, err = naming.BuildContainerName(
+			containerSpec.SpaceID,
+			containerSpec.StackID,
+			containerSpec.CellID,
+			containerSpec.ID,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to build container name: %w", err)
+		}
+
+		// Use container name with UUID for containerd operations
 		timeout := 5 * time.Second
-		_, err = r.ctrClient.StopContainer(ctrCtx, containerSpec.ID, ctr.StopContainerOptions{
+		_, err = r.ctrClient.StopContainer(ctrCtx, containerID, ctr.StopContainerOptions{
 			Force:   true,
 			Timeout: &timeout,
 		})
 		if err != nil {
 			// Log warning but continue with other containers
-			fields := appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 			fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
 			r.logger.WarnContext(
 				r.ctx,
@@ -932,7 +994,7 @@ func (r *Exec) StopCell(doc *v1beta1.CellDoc) error {
 			continue
 		}
 
-		fields := appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 		fields = append(fields, "space", spaceID, "realm", realmID)
 		r.logger.InfoContext(
 			r.ctx,
@@ -942,7 +1004,10 @@ func (r *Exec) StopCell(doc *v1beta1.CellDoc) error {
 	}
 
 	// Stop pause container last and detach from CNI
-	pauseContainerID := "pause"
+	pauseContainerID, err := naming.BuildPauseContainerName(spaceID, stackID, cellID)
+	if err != nil {
+		return fmt.Errorf("failed to build pause container name: %w", err)
+	}
 
 	// Detach pause container from CNI network
 	r.detachPauseContainerFromCNI(
@@ -1052,11 +1117,23 @@ func (r *Exec) KillCell(doc *v1beta1.CellDoc) error {
 
 	// Kill all workload containers first
 	for _, containerSpec := range doc.Spec.Containers {
-		// Use container name directly for containerd operations
-		err = r.killContainerTask(ctrCtx, containerSpec.ID, realmDoc.Spec.Namespace)
+		// Build container ID using hierarchical format
+		var containerID string
+		containerID, err = naming.BuildContainerName(
+			containerSpec.SpaceID,
+			containerSpec.StackID,
+			containerSpec.CellID,
+			containerSpec.ID,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to build container name: %w", err)
+		}
+
+		// Use container name with UUID for containerd operations
+		err = r.killContainerTask(ctrCtx, containerID, realmDoc.Spec.Namespace)
 		if err != nil {
 			// Log warning but continue with other containers
-			fields := appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 			fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
 			r.logger.WarnContext(
 				r.ctx,
@@ -1067,7 +1144,7 @@ func (r *Exec) KillCell(doc *v1beta1.CellDoc) error {
 			continue
 		}
 
-		fields := appendCellLogFields([]any{"id", containerSpec.ID}, cellID, cellName)
+		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 		fields = append(fields, "space", spaceID, "realm", realmID)
 		r.logger.InfoContext(
 			r.ctx,
@@ -1077,7 +1154,10 @@ func (r *Exec) KillCell(doc *v1beta1.CellDoc) error {
 	}
 
 	// Kill pause container last and detach from CNI
-	pauseContainerID := "pause"
+	pauseContainerID, err := naming.BuildPauseContainerName(spaceID, stackID, cellID)
+	if err != nil {
+		return fmt.Errorf("failed to build pause container name: %w", err)
+	}
 
 	// Detach pause container from CNI network
 	r.detachPauseContainerFromCNI(

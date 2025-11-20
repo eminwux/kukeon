@@ -383,29 +383,71 @@ func (r *Exec) PurgeCell(doc *v1beta1.CellDoc) error {
 		if err != nil {
 			r.logger.WarnContext(r.ctx, "failed to get network name", "error", err)
 		} else {
-			// Find all containers matching cell pattern
-			pattern := fmt.Sprintf("%s-%s-%s", cellDoc.Spec.RealmID, cellDoc.Spec.SpaceID, cellDoc.Metadata.Name)
-			r.logger.DebugContext(r.ctx, "finding containers by pattern for cell", "pattern", pattern)
-			var containers []string
-			containers, err = r.findContainersByPattern(r.ctx, realmDoc.Spec.Namespace, pattern)
+			// Build container names from the cell document using the same naming scheme as creation
+			// This ensures we match the actual container names (using underscores, not hyphens)
+			var containerIDs []string
+
+			// Get IDs from cell document, with fallbacks
+			spaceID := cellDoc.Spec.SpaceID
+			stackID := cellDoc.Spec.StackID
+			cellID := cellDoc.Spec.ID
+			if cellID == "" {
+				cellID = cellDoc.Metadata.Name
+			}
+
+			// Add pause container
+			var pauseContainerID string
+			pauseContainerID, err = naming.BuildPauseContainerName(spaceID, stackID, cellID)
 			if err != nil {
-				r.logger.WarnContext(r.ctx, "failed to find containers by pattern", "pattern", pattern, "error", err)
+				r.logger.WarnContext(r.ctx, "failed to build pause container name", "error", err)
 			} else {
-				r.logger.DebugContext(r.ctx, "found containers matching cell pattern", "count", len(containers), "pattern", pattern)
-				if len(containers) > 0 {
-					r.logger.InfoContext(r.ctx, "purging CNI resources for cell containers", "count", len(containers))
-					ctrCtx := context.Background()
-					for i, containerID := range containers {
-						r.logger.DebugContext(r.ctx, "processing container for CNI purge", "index", i+1, "total", len(containers), "id", containerID)
-						// Try to get netns path
-						r.logger.DebugContext(r.ctx, "getting container netns path", "id", containerID)
-						netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
-						// Purge CNI resources
-						r.logger.DebugContext(r.ctx, "purging CNI resources for container", "id", containerID, "network", networkName)
-						_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
-					}
-					r.logger.InfoContext(r.ctx, "completed purging CNI resources for cell containers", "count", len(containers))
+				containerIDs = append(containerIDs, pauseContainerID)
+			}
+
+			// Add all containers from the cell spec
+			for _, containerSpec := range cellDoc.Spec.Containers {
+				// Use container spec IDs if available, otherwise fall back to cell doc IDs
+				containerSpaceID := containerSpec.SpaceID
+				if containerSpaceID == "" {
+					containerSpaceID = spaceID
 				}
+				containerStackID := containerSpec.StackID
+				if containerStackID == "" {
+					containerStackID = stackID
+				}
+				containerCellID := containerSpec.CellID
+				if containerCellID == "" {
+					containerCellID = cellID
+				}
+				containerName := containerSpec.ID
+				if containerName == "" {
+					r.logger.WarnContext(r.ctx, "container spec has empty ID, skipping", "index", len(containerIDs))
+					continue
+				}
+
+				var containerID string
+				containerID, err = naming.BuildContainerName(containerSpaceID, containerStackID, containerCellID, containerName)
+				if err != nil {
+					r.logger.WarnContext(r.ctx, "failed to build container name", "container", containerName, "error", err)
+					continue
+				}
+				containerIDs = append(containerIDs, containerID)
+			}
+
+			r.logger.DebugContext(r.ctx, "built container IDs from cell document", "count", len(containerIDs))
+			if len(containerIDs) > 0 {
+				r.logger.InfoContext(r.ctx, "purging CNI resources for cell containers", "count", len(containerIDs))
+				ctrCtx := context.Background()
+				for i, containerID := range containerIDs {
+					r.logger.DebugContext(r.ctx, "processing container for CNI purge", "index", i+1, "total", len(containerIDs), "id", containerID)
+					// Try to get netns path
+					r.logger.DebugContext(r.ctx, "getting container netns path", "id", containerID)
+					netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
+					// Purge CNI resources
+					r.logger.DebugContext(r.ctx, "purging CNI resources for container", "id", containerID, "network", networkName)
+					_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
+				}
+				r.logger.InfoContext(r.ctx, "completed purging CNI resources for cell containers", "count", len(containerIDs))
 			}
 		}
 	}

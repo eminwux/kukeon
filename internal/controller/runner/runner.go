@@ -157,6 +157,11 @@ func (r *Exec) ExistsCellPauseContainer(doc *v1beta1.CellDoc) (bool, error) {
 		return false, errdefs.ErrCellNotFound
 	}
 
+	cellID := doc.Spec.ID
+	if cellID == "" {
+		return false, errdefs.ErrCellIDRequired
+	}
+
 	realmID := doc.Spec.RealmID
 	if realmID == "" {
 		return false, errdefs.ErrRealmNameRequired
@@ -189,8 +194,16 @@ func (r *Exec) ExistsCellPauseContainer(doc *v1beta1.CellDoc) (bool, error) {
 	// Set namespace to realm namespace
 	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
 
-	// Generate container ID (same as createCellContainers)
-	containerID := "pause"
+	// Generate container ID with cell identifier for uniqueness
+	// Need to get spaceID and stackID from doc
+	stackID := doc.Spec.StackID
+	if stackID == "" {
+		return false, errdefs.ErrStackNameRequired
+	}
+	containerID, err := naming.BuildPauseContainerName(spaceID, stackID, cellID)
+	if err != nil {
+		return false, fmt.Errorf("failed to build pause container name: %w", err)
+	}
 
 	// Check if container exists
 	exists, err := r.ctrClient.ExistsContainer(r.ctx, containerID)
@@ -571,31 +584,54 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 	// Delete all containers in the cell (workload + pause)
 	ctrCtx := context.Background()
 	for _, containerSpec := range cellDoc.Spec.Containers {
-		// Use container name directly for containerd operations
-		// Stop and delete the container
-		_, err = r.ctrClient.StopContainer(ctrCtx, containerSpec.ID, ctr.StopContainerOptions{})
+		// Build container ID using hierarchical format
+		var containerID string
+		containerID, err = naming.BuildContainerName(
+			containerSpec.SpaceID,
+			containerSpec.StackID,
+			containerSpec.CellID,
+			containerSpec.ID,
+		)
 		if err != nil {
 			r.logger.WarnContext(
 				r.ctx,
-				"failed to stop container, continuing with deletion",
+				"failed to build container name, skipping",
 				"container",
 				containerSpec.ID,
 				"error",
 				err,
 			)
+			continue
 		}
 
-		err = r.ctrClient.DeleteContainer(ctrCtx, containerSpec.ID, ctr.ContainerDeleteOptions{
+		// Use container name with UUID for containerd operations
+		// Stop and delete the container
+		_, err = r.ctrClient.StopContainer(ctrCtx, containerID, ctr.StopContainerOptions{})
+		if err != nil {
+			r.logger.WarnContext(
+				r.ctx,
+				"failed to stop container, continuing with deletion",
+				"container",
+				containerID,
+				"error",
+				err,
+			)
+		}
+
+		err = r.ctrClient.DeleteContainer(ctrCtx, containerID, ctr.ContainerDeleteOptions{
 			SnapshotCleanup: true,
 		})
 		if err != nil {
-			r.logger.WarnContext(r.ctx, "failed to delete container", "container", containerSpec.ID, "error", err)
+			r.logger.WarnContext(r.ctx, "failed to delete container", "container", containerID, "error", err)
 			// Continue with other containers
 		}
 	}
 
 	// Delete pause container
-	pauseContainerID := "pause"
+	pauseContainerID, err := naming.BuildPauseContainerName(cellDoc.Spec.SpaceID, cellDoc.Spec.StackID, cellDoc.Spec.ID)
+	if err != nil {
+		return fmt.Errorf("failed to build pause container name: %w", err)
+	}
 
 	// Clean up CNI network configuration before stopping/deleting the pause container
 	// Try to get the task to retrieve the netns path
