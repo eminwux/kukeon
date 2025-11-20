@@ -65,4 +65,7 @@ var (
 	ErrCreateCell             = errors.New("failed to create cell")
 	ErrCreatePauseContainer   = errors.New("failed to create pause container")
 	ErrNetworkConfigNotLoaded = errors.New("network config not loaded")
+	ErrCellNameRequired       = errors.New("cell name is required")
+	ErrContainerNameRequired  = errors.New("container name is required")
+	ErrInvalidImage           = errors.New("invalid image reference")
 )

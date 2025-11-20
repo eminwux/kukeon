@@ -100,4 +100,42 @@ var (
 	KUKE_INIT_REALM = DefineKV("KUKE_INIT_REALM", "kuke/init/realm")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_INIT_SPACE = DefineKV("KUKE_INIT_SPACE", "kuke/init/space")
+
+	// Create command variables
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_REALM_NAME = DefineKV("KUKE_CREATE_REALM_NAME", "kuke/create/realm/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_SPACE_NAME = DefineKV("KUKE_CREATE_SPACE_NAME", "kuke/create/space/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_SPACE_REALM = DefineKV("KUKE_CREATE_SPACE_REALM", "kuke/create/space/realm")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_STACK_NAME = DefineKV("KUKE_CREATE_STACK_NAME", "kuke/create/stack/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_STACK_REALM = DefineKV("KUKE_CREATE_STACK_REALM", "kuke/create/stack/realm")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_STACK_SPACE = DefineKV("KUKE_CREATE_STACK_SPACE", "kuke/create/stack/space")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CELL_NAME = DefineKV("KUKE_CREATE_CELL_NAME", "kuke/create/cell/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CELL_REALM = DefineKV("KUKE_CREATE_CELL_REALM", "kuke/create/cell/realm")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CELL_SPACE = DefineKV("KUKE_CREATE_CELL_SPACE", "kuke/create/cell/space")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CELL_STACK = DefineKV("KUKE_CREATE_CELL_STACK", "kuke/create/cell/stack")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_NAME = DefineKV("KUKE_CREATE_CONTAINER_NAME", "kuke/create/container/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_REALM = DefineKV("KUKE_CREATE_CONTAINER_REALM", "kuke/create/container/realm")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_SPACE = DefineKV("KUKE_CREATE_CONTAINER_SPACE", "kuke/create/container/space")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_STACK = DefineKV("KUKE_CREATE_CONTAINER_STACK", "kuke/create/container/stack")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_CELL = DefineKV("KUKE_CREATE_CONTAINER_CELL", "kuke/create/container/cell")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_IMAGE = DefineKV(
+		"KUKE_CREATE_CONTAINER_IMAGE",
+		"kuke/create/container/image",
+		"docker.io/library/debian:latest",
+	)
 )
