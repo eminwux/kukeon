@@ -564,14 +564,12 @@ func (b *Exec) CreateContainer(opts CreateContainerOptions) (CreateContainerResu
 		return res, errdefs.ErrInvalidImage
 	}
 
-	containerID := naming.BuildContainerName(realm, space, cell, containerName)
-
 	res.RealmName = realm
 	res.SpaceName = space
 	res.StackName = stack
 	res.CellName = cell
 	res.ContainerName = containerName
-	res.ContainerID = containerID
+	res.ContainerID = containerName // Container ID is now just the container name
 
 	doc := &v1beta1.CellDoc{
 		Metadata: v1beta1.CellMetadata{
@@ -584,7 +582,7 @@ func (b *Exec) CreateContainer(opts CreateContainerOptions) (CreateContainerResu
 			StackID: stack,
 			Containers: []v1beta1.ContainerSpec{
 				{
-					ID:      containerID,
+					ID:      containerName, // Store just the container name, not the full ID
 					RealmID: realm,
 					SpaceID: space,
 					StackID: stack,
@@ -606,14 +604,14 @@ func (b *Exec) CreateContainer(opts CreateContainerOptions) (CreateContainerResu
 	}
 
 	res.CellMetadataExistsPre = true
-	res.ContainerExistsPre = containerSpecExists(cellDocPre.Spec.Containers, containerID)
+	res.ContainerExistsPre = containerSpecExists(cellDocPre.Spec.Containers, containerName)
 
 	if _, err = b.runner.CreateCell(doc); err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrCreateCell, err)
 	}
 
 	if err = b.runner.StartCell(doc); err != nil {
-		return res, fmt.Errorf("failed to start container %s: %w", containerID, err)
+		return res, fmt.Errorf("failed to start container %s: %w", containerName, err)
 	}
 
 	cellDocPost, err := b.runner.GetCell(doc)
@@ -622,7 +620,7 @@ func (b *Exec) CreateContainer(opts CreateContainerOptions) (CreateContainerResu
 	}
 
 	res.CellMetadataExistsPost = true
-	res.ContainerExistsPost = containerSpecExists(cellDocPost.Spec.Containers, containerID)
+	res.ContainerExistsPost = containerSpecExists(cellDocPost.Spec.Containers, containerName)
 	res.ContainerCreated = !res.ContainerExistsPre && res.ContainerExistsPost
 	res.Started = true
 

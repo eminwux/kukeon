@@ -161,12 +161,8 @@ func printContainers(cmd *cobra.Command, containers []*v1beta1.ContainerSpec, fo
 		rows := make([][]string, 0, len(containers))
 
 		for _, c := range containers {
-			// Extract container name from ID (format: realm-space-cell-name)
+			// Container ID now stores just the container name
 			containerName := c.ID
-			parts := strings.Split(c.ID, "-")
-			if len(parts) >= 4 {
-				containerName = strings.Join(parts[3:], "-")
-			}
 
 			state := "Unknown"
 			// ContainerSpec doesn't have a State field, so we'll use "-"

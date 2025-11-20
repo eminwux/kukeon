@@ -252,18 +252,8 @@ func (b *Exec) GetContainer(name, realmName, spaceName, stackName, cellName stri
 		return nil, fmt.Errorf("failed to get cell %q: %w", cellName, err)
 	}
 
-	// Find container in cell spec
-	// Container ID format: realmID-spaceID-cellName-containerName
+	// Find container in cell spec by name (ID now stores just the container name)
 	for _, container := range cellDoc.Spec.Containers {
-		// Extract the container name from the ID (last component after splitting by -)
-		parts := strings.Split(container.ID, "-")
-		if len(parts) >= 4 {
-			containerNameFromID := strings.Join(parts[3:], "-")
-			if containerNameFromID == name {
-				return &container, nil
-			}
-		}
-		// Also check if ID matches directly (in case user provides full ID)
 		if container.ID == name {
 			return &container, nil
 		}

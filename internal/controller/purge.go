@@ -22,7 +22,6 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
-	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -436,13 +435,10 @@ func (b *Exec) PurgeContainer(name, realmName, spaceName, stackName, cellName st
 		Purged:        []string{},
 	}
 
-	// Build container ID
-	containerID := naming.BuildContainerName(realmName, spaceName, cellName, name)
-
-	// Check if container exists in cell metadata
+	// Check if container exists in cell metadata by name (ID now stores just the container name)
 	var foundContainer *v1beta1.ContainerSpec
 	for i := range cellDoc.Spec.Containers {
-		if cellDoc.Spec.Containers[i].ID == containerID {
+		if cellDoc.Spec.Containers[i].ID == name {
 			foundContainer = &cellDoc.Spec.Containers[i]
 			break
 		}
@@ -459,8 +455,8 @@ func (b *Exec) PurgeContainer(name, realmName, spaceName, stackName, cellName st
 		}
 	}
 
-	// Perform comprehensive purge (works even if container not in metadata)
-	if err = b.runner.PurgeContainer(containerID, realmDoc.Spec.Namespace); err != nil {
+	// Use container name directly for containerd operations
+	if err = b.runner.PurgeContainer(name, realmDoc.Spec.Namespace); err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
 	} else {
 		result.Purged = append(result.Purged, "cni-resources", "ipam-allocation", "cache-entries")

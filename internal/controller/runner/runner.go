@@ -52,6 +52,12 @@ type Runner interface {
 	GetCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error)
 	CreateCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error)
 	StartCell(doc *v1beta1.CellDoc) error
+	StopCell(doc *v1beta1.CellDoc) error
+	StopContainer(doc *v1beta1.CellDoc, containerID string) error
+	KillCell(doc *v1beta1.CellDoc) error
+	KillContainer(doc *v1beta1.CellDoc, containerID string) error
+	DeleteContainer(doc *v1beta1.CellDoc, containerID string) error
+	UpdateCellMetadata(doc *v1beta1.CellDoc) error
 	ExistsCellPauseContainer(doc *v1beta1.CellDoc) (bool, error)
 	DeleteCell(doc *v1beta1.CellDoc) error
 
@@ -184,7 +190,7 @@ func (r *Exec) ExistsCellPauseContainer(doc *v1beta1.CellDoc) (bool, error) {
 	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
 
 	// Generate container ID (same as createCellContainers)
-	containerID := naming.BuildContainerName(realmID, spaceID, cellName, "pause")
+	containerID := "pause"
 
 	// Check if container exists
 	exists, err := r.ctrClient.ExistsContainer(r.ctx, containerID)
@@ -565,6 +571,7 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 	// Delete all containers in the cell (workload + pause)
 	ctrCtx := context.Background()
 	for _, containerSpec := range cellDoc.Spec.Containers {
+		// Use container name directly for containerd operations
 		// Stop and delete the container
 		_, err = r.ctrClient.StopContainer(ctrCtx, containerSpec.ID, ctr.StopContainerOptions{})
 		if err != nil {
@@ -588,12 +595,7 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 	}
 
 	// Delete pause container
-	pauseContainerID := naming.BuildContainerName(
-		cellDoc.Spec.RealmID,
-		cellDoc.Spec.SpaceID,
-		cellDoc.Metadata.Name,
-		"pause",
-	)
+	pauseContainerID := "pause"
 
 	// Clean up CNI network configuration before stopping/deleting the pause container
 	// Try to get the task to retrieve the netns path

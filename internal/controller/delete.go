@@ -22,7 +22,6 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
-	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -377,12 +376,10 @@ func (b *Exec) DeleteContainer(name, realmName, spaceName, stackName, cellName s
 		return nil, err
 	}
 
-	// Find container in cell
-	// Use the naming utility to build container ID
-	containerID := naming.BuildContainerName(realmName, spaceName, cellName, name)
+	// Find container in cell by name (ID now stores just the container name)
 	var foundContainer *v1beta1.ContainerSpec
 	for i := range cellDoc.Spec.Containers {
-		if cellDoc.Spec.Containers[i].ID == containerID {
+		if cellDoc.Spec.Containers[i].ID == name {
 			foundContainer = &cellDoc.Spec.Containers[i]
 			break
 		}
@@ -402,10 +399,24 @@ func (b *Exec) DeleteContainer(name, realmName, spaceName, stackName, cellName s
 	}
 
 	// Delete container from containerd (via runner)
-	// Note: This requires a DeleteContainer method on the runner
-	// For now, we'll need to implement this at the runner level
-	// The container should be stopped and deleted from containerd
-	// and then removed from the cell's Spec.Containers list
+	if err = b.runner.DeleteContainer(cellDoc, name); err != nil {
+		return nil, fmt.Errorf("failed to delete container %s: %w", name, err)
+	}
+
+	// Remove container from cell's Spec.Containers list
+	var updatedContainers []v1beta1.ContainerSpec
+	for _, container := range cellDoc.Spec.Containers {
+		if container.ID != name {
+			updatedContainers = append(updatedContainers, container)
+		}
+	}
+	cellDoc.Spec.Containers = updatedContainers
+
+	// Update cell metadata to persist the change
+	if err = b.runner.UpdateCellMetadata(cellDoc); err != nil {
+		return nil, fmt.Errorf("failed to update cell metadata: %w", err)
+	}
+
 	result.Deleted = append(result.Deleted, "container", "task")
 	return result, nil
 }

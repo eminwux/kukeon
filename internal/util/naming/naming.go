@@ -46,10 +46,3 @@ func BuildSpaceNetworkName(doc *v1beta1.SpaceDoc) (string, error) {
 	}
 	return fmt.Sprintf("%s-%s", realmName, spaceName), nil
 }
-
-// BuildContainerName constructs the canonical container name for a container.
-// The format is: containerID-realmID-spaceID-cellName
-// This can be used for any container ID (e.g., "pause", "debian").
-func BuildContainerName(realmID, spaceID, cellName, containerID string) string {
-	return fmt.Sprintf("%s-%s-%s-%s", realmID, spaceID, cellName, containerID)
-}
