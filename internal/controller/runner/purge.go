@@ -1,0 +1,743 @@
+// Copyright 2025 Emiliano Spinella (eminwux)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// SPDX-License-Identifier: Apache-2.0
+
+package runner
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/eminwux/kukeon/internal/cni"
+	"github.com/eminwux/kukeon/internal/consts"
+	"github.com/eminwux/kukeon/internal/ctr"
+	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/util/cgroups"
+	"github.com/eminwux/kukeon/internal/util/naming"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+)
+
+// purgeCNIForContainer removes all CNI-related resources for a specific container.
+func (r *Exec) purgeCNIForContainer(ctx context.Context, containerID, netnsPath, networkName string) error {
+	var purged []string
+
+	// Try to call CNI DEL if netns is available
+	if netnsPath != "" {
+		cniConfigPath, err := r.findCNIConfigPath(networkName)
+		if err == nil {
+			var cniMgr *cni.Manager
+			cniMgr, err = cni.NewManager(
+				r.cniConf.CniBinDir,
+				r.cniConf.CniConfigDir,
+				r.cniConf.CniCacheDir,
+			)
+			if err == nil {
+				if err = cniMgr.LoadNetworkConfigList(cniConfigPath); err == nil {
+					if err = cniMgr.DelContainerFromNetwork(ctx, containerID, netnsPath); err == nil {
+						purged = append(purged, "cni-del")
+						r.logger.DebugContext(ctx, "called CNI DEL for container", "container", containerID)
+					} else {
+						r.logger.WarnContext(ctx, "failed to call CNI DEL", "container", containerID, "error", err)
+					}
+				}
+			}
+		}
+	}
+
+	// Remove IPAM allocation files
+	if networkName != "" {
+		ipamDir := filepath.Join("/var/lib/cni/networks", networkName)
+		ipamFile := filepath.Join(ipamDir, containerID)
+		if err := os.Remove(ipamFile); err == nil {
+			purged = append(purged, "ipam-allocation")
+			r.logger.DebugContext(ctx, "removed IPAM allocation", "container", containerID, "file", ipamFile)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			r.logger.WarnContext(ctx, "failed to remove IPAM allocation", "container", containerID, "error", err)
+		}
+	}
+
+	// Remove CNI cache entries
+	cacheDirs := []string{
+		filepath.Join(r.cniConf.CniCacheDir, "results"),
+		"/var/lib/cni/results",
+		"/opt/cni/cache/results",
+	}
+
+	for _, cacheDir := range cacheDirs {
+		if cacheDir == "" {
+			continue
+		}
+		// CNI results files are typically named with container ID
+		// Pattern: {containerID} or {containerID}-{networkName}
+		patterns := []string{
+			containerID,
+			fmt.Sprintf("%s-*", containerID),
+		}
+
+		for _, pattern := range patterns {
+			matches, err := filepath.Glob(filepath.Join(cacheDir, pattern))
+			if err == nil {
+				for _, match := range matches {
+					if err = os.Remove(match); err == nil {
+						purged = append(purged, fmt.Sprintf("cache-entry:%s", filepath.Base(match)))
+						r.logger.DebugContext(ctx, "removed CNI cache entry", "container", containerID, "file", match)
+					} else if !errors.Is(err, os.ErrNotExist) {
+						r.logger.WarnContext(ctx, "failed to remove CNI cache entry", "container", containerID, "file", match, "error", err)
+					}
+				}
+			}
+		}
+	}
+
+	if len(purged) > 0 {
+		r.logger.InfoContext(ctx, "purged CNI resources for container", "container", containerID, "purged", purged)
+	}
+
+	return nil
+}
+
+// purgeCNIForNetwork removes all CNI-related resources for an entire network.
+func (r *Exec) purgeCNIForNetwork(ctx context.Context, networkName string) error {
+	if networkName == "" {
+		return nil
+	}
+
+	var purged []string
+
+	// Remove entire network directory from /var/lib/cni/networks/
+	networkDir := filepath.Join("/var/lib/cni/networks", networkName)
+	if err := os.RemoveAll(networkDir); err == nil {
+		purged = append(purged, "network-directory")
+		r.logger.DebugContext(ctx, "removed CNI network directory", "network", networkName, "dir", networkDir)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		r.logger.WarnContext(ctx, "failed to remove CNI network directory", "network", networkName, "error", err)
+	}
+
+	// Remove all related cache entries (files containing network name)
+	cacheDirs := []string{
+		filepath.Join(r.cniConf.CniCacheDir, "results"),
+		"/var/lib/cni/results",
+		"/opt/cni/cache/results",
+	}
+
+	for _, cacheDir := range cacheDirs {
+		if cacheDir == "" {
+			continue
+		}
+		entries, err := os.ReadDir(cacheDir)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			r.logger.WarnContext(ctx, "failed to read cache directory", "dir", cacheDir, "error", err)
+			continue
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			// Check if filename contains network name
+			if strings.Contains(entry.Name(), networkName) {
+				filePath := filepath.Join(cacheDir, entry.Name())
+				if err = os.Remove(filePath); err == nil {
+					purged = append(purged, fmt.Sprintf("cache-entry:%s", entry.Name()))
+					r.logger.DebugContext(
+						ctx,
+						"removed CNI cache entry for network",
+						"network",
+						networkName,
+						"file",
+						filePath,
+					)
+				} else if !errors.Is(err, os.ErrNotExist) {
+					r.logger.WarnContext(ctx, "failed to remove CNI cache entry", "network", networkName, "file", filePath, "error", err)
+				}
+			}
+		}
+	}
+
+	if len(purged) > 0 {
+		r.logger.InfoContext(ctx, "purged CNI resources for network", "network", networkName, "purged", purged)
+	}
+
+	return nil
+}
+
+// findOrphanedContainers lists all containers in containerd namespace matching a pattern,
+// and returns container IDs that are not tracked in metadata.
+func (r *Exec) findOrphanedContainers(ctx context.Context, namespace, pattern string) ([]string, error) {
+	if r.ctrClient == nil {
+		r.logger.DebugContext(ctx, "initializing containerd client for finding orphaned containers")
+		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
+	}
+	if err := r.ctrClient.Connect(); err != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	defer r.ctrClient.Close()
+
+	// Set namespace
+	oldNamespace := r.ctrClient.Namespace()
+	r.logger.DebugContext(
+		ctx,
+		"setting namespace for container listing",
+		"namespace",
+		namespace,
+		"old_namespace",
+		oldNamespace,
+	)
+	r.ctrClient.SetNamespace(namespace)
+	defer r.ctrClient.SetNamespace(oldNamespace)
+
+	// List all containers
+	r.logger.DebugContext(ctx, "listing containers from containerd", "namespace", namespace, "pattern", pattern)
+	containers, err := r.ctrClient.ListContainers(ctx)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "failed to list containers", "error", err)
+		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+	r.logger.DebugContext(ctx, "listed containers from containerd", "count", len(containers))
+
+	var orphaned []string
+	for _, container := range containers {
+		containerID := container.ID()
+		// Check if container ID matches the pattern
+		if pattern != "" && !strings.Contains(containerID, pattern) {
+			continue
+		}
+		orphaned = append(orphaned, containerID)
+	}
+	r.logger.DebugContext(
+		ctx,
+		"filtered orphaned containers",
+		"total_listed",
+		len(containers),
+		"matching_pattern",
+		len(orphaned),
+		"pattern",
+		pattern,
+	)
+
+	return orphaned, nil
+}
+
+// findCNIConfigPath attempts to find the CNI config path for a network.
+// It tries to resolve by network name or by searching known locations.
+func (r *Exec) findCNIConfigPath(networkName string) (string, error) {
+	// Try to find config in standard location
+	configPath := filepath.Join(r.cniConf.CniConfigDir, networkName+".conflist")
+	if _, err := os.Stat(configPath); err == nil {
+		return configPath, nil
+	}
+
+	// Try to find in run path (space network configs)
+	// This requires listing spaces, which we'll do as a fallback
+	return "", fmt.Errorf("CNI config not found for network %q", networkName)
+}
+
+// getContainerNetnsPath attempts to get the network namespace path for a container.
+func (r *Exec) getContainerNetnsPath(ctx context.Context, containerID string) (string, error) {
+	if r.ctrClient == nil {
+		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
+	}
+	if err := r.ctrClient.Connect(); err != nil {
+		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+
+	container, err := r.ctrClient.GetContainer(ctx, containerID)
+	if err != nil {
+		return "", err
+	}
+
+	task, err := container.Task(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+
+	pid := task.Pid()
+	if pid > 0 {
+		return fmt.Sprintf("/proc/%d/ns/net", pid), nil
+	}
+
+	return "", errors.New("container task has no PID")
+}
+
+// findContainersByPattern finds all containers matching a naming pattern.
+// Pattern format: realm-space-stack-cell or realm-space-stack-cell-container.
+func (r *Exec) findContainersByPattern(ctx context.Context, namespace, pattern string) ([]string, error) {
+	r.logger.DebugContext(ctx, "finding containers by pattern", "namespace", namespace, "pattern", pattern)
+	containers, err := r.findOrphanedContainers(ctx, namespace, pattern)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "failed to find orphaned containers for pattern", "pattern", pattern, "error", err)
+		return nil, err
+	}
+
+	// Filter containers that match the exact pattern
+	var matched []string
+	patternParts := strings.Split(pattern, "-")
+	for _, containerID := range containers {
+		containerParts := strings.Split(containerID, "-")
+		if len(containerParts) < len(patternParts) {
+			continue
+		}
+		// Check if container ID starts with pattern
+		if strings.HasPrefix(containerID, pattern) {
+			matched = append(matched, containerID)
+		}
+	}
+	r.logger.DebugContext(
+		ctx,
+		"filtered containers by pattern",
+		"total_found",
+		len(containers),
+		"matched",
+		len(matched),
+		"pattern",
+		pattern,
+	)
+
+	return matched, nil
+}
+
+// getSpaceNetworkName gets the network name for a space.
+func (r *Exec) getSpaceNetworkName(spaceDoc *v1beta1.SpaceDoc) (string, error) {
+	return naming.BuildSpaceNetworkName(spaceDoc)
+}
+
+// PurgeCell performs comprehensive cleanup of a cell, including CNI resources and orphaned containers.
+func (r *Exec) PurgeCell(doc *v1beta1.CellDoc) error {
+	if doc == nil {
+		return errdefs.ErrCellNotFound
+	}
+
+	// First, perform standard delete
+	if err := r.DeleteCell(doc); err != nil {
+		// Log but continue with purge even if delete fails
+		r.logger.WarnContext(r.ctx, "delete failed, continuing with purge", "error", err)
+	}
+
+	// Get cell document to access containers and metadata
+	cellDoc, err := r.GetCell(doc)
+	if err != nil && !errors.Is(err, errdefs.ErrCellNotFound) {
+		return fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
+	}
+
+	// If cell doesn't exist, still try to purge orphaned resources
+	if errors.Is(err, errdefs.ErrCellNotFound) {
+		cellDoc = doc // Use provided doc for pattern matching
+	}
+
+	// Initialize ctr client if needed
+	if r.ctrClient == nil {
+		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
+	}
+	if err = r.ctrClient.Connect(); err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	defer r.ctrClient.Close()
+
+	// Get realm to access namespace
+	var realmDoc *v1beta1.RealmDoc
+	realmDoc, err = r.GetRealm(&v1beta1.RealmDoc{
+		Metadata: v1beta1.RealmMetadata{
+			Name: cellDoc.Spec.RealmID,
+		},
+	})
+	if err != nil {
+		r.logger.WarnContext(r.ctx, "failed to get realm for purge", "error", err)
+		return nil // Continue anyway
+	}
+
+	// Set namespace
+	r.logger.DebugContext(r.ctx, "setting namespace for cell purge", "namespace", realmDoc.Spec.Namespace)
+	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+
+	// Get space for network name
+	var spaceDoc *v1beta1.SpaceDoc
+	spaceDoc, err = r.GetSpace(&v1beta1.SpaceDoc{
+		Metadata: v1beta1.SpaceMetadata{
+			Name: cellDoc.Spec.SpaceID,
+		},
+	})
+	if err != nil {
+		r.logger.WarnContext(r.ctx, "failed to get space for purge", "error", err)
+	} else {
+		var networkName string
+		networkName, err = r.getSpaceNetworkName(spaceDoc)
+		if err != nil {
+			r.logger.WarnContext(r.ctx, "failed to get network name", "error", err)
+		} else {
+			// Build container names from the cell document using the same naming scheme as creation
+			// This ensures we match the actual container names (using underscores, not hyphens)
+			var containerIDs []string
+
+			// Get IDs from cell document, with fallbacks
+			spaceID := cellDoc.Spec.SpaceID
+			stackID := cellDoc.Spec.StackID
+			cellID := cellDoc.Spec.ID
+			if cellID == "" {
+				cellID = cellDoc.Metadata.Name
+			}
+
+			// Add pause container
+			var pauseContainerID string
+			pauseContainerID, err = naming.BuildPauseContainerName(spaceID, stackID, cellID)
+			if err != nil {
+				r.logger.WarnContext(r.ctx, "failed to build pause container name", "error", err)
+			} else {
+				containerIDs = append(containerIDs, pauseContainerID)
+			}
+
+			// Add all containers from the cell spec
+			for _, containerSpec := range cellDoc.Spec.Containers {
+				// Use container spec IDs if available, otherwise fall back to cell doc IDs
+				containerSpaceID := containerSpec.SpaceID
+				if containerSpaceID == "" {
+					containerSpaceID = spaceID
+				}
+				containerStackID := containerSpec.StackID
+				if containerStackID == "" {
+					containerStackID = stackID
+				}
+				containerCellID := containerSpec.CellID
+				if containerCellID == "" {
+					containerCellID = cellID
+				}
+				containerName := containerSpec.ID
+				if containerName == "" {
+					r.logger.WarnContext(r.ctx, "container spec has empty ID, skipping", "index", len(containerIDs))
+					continue
+				}
+
+				var containerID string
+				containerID, err = naming.BuildContainerName(containerSpaceID, containerStackID, containerCellID, containerName)
+				if err != nil {
+					r.logger.WarnContext(r.ctx, "failed to build container name", "container", containerName, "error", err)
+					continue
+				}
+				containerIDs = append(containerIDs, containerID)
+			}
+
+			r.logger.DebugContext(r.ctx, "built container IDs from cell document", "count", len(containerIDs))
+			if len(containerIDs) > 0 {
+				r.logger.InfoContext(r.ctx, "purging CNI resources for cell containers", "count", len(containerIDs))
+				ctrCtx := context.Background()
+				for i, containerID := range containerIDs {
+					r.logger.DebugContext(r.ctx, "processing container for CNI purge", "index", i+1, "total", len(containerIDs), "id", containerID)
+					// Try to get netns path
+					r.logger.DebugContext(r.ctx, "getting container netns path", "id", containerID)
+					netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
+					// Purge CNI resources
+					r.logger.DebugContext(r.ctx, "purging CNI resources for container", "id", containerID, "network", networkName)
+					_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
+				}
+				r.logger.InfoContext(r.ctx, "completed purging CNI resources for cell containers", "count", len(containerIDs))
+			}
+		}
+	}
+
+	// Force remove cell cgroup if it still exists
+	stackDoc, err := r.GetStack(&v1beta1.StackDoc{
+		Metadata: v1beta1.StackMetadata{
+			Name: cellDoc.Spec.StackID,
+		},
+	})
+	if err == nil && spaceDoc != nil {
+		spec := cgroups.DefaultCellSpec(realmDoc, spaceDoc, stackDoc, cellDoc)
+		mountpoint := r.ctrClient.GetCgroupMountpoint()
+		_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
+	}
+
+	// Remove metadata directory completely
+	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonCellMetadataSubDir, cellDoc.Metadata.Name)
+	_ = os.RemoveAll(metadataRunPath)
+
+	return nil
+}
+
+// PurgeSpace performs comprehensive cleanup of a space, including CNI resources and orphaned containers.
+func (r *Exec) PurgeSpace(doc *v1beta1.SpaceDoc) error {
+	if doc == nil {
+		return errdefs.ErrSpaceNotFound
+	}
+
+	// First, perform standard delete
+	if err := r.DeleteSpace(doc); err != nil {
+		r.logger.WarnContext(r.ctx, "delete failed, continuing with purge", "error", err)
+	}
+
+	// Get space document
+	spaceDoc, err := r.GetSpace(doc)
+	if err != nil && !errors.Is(err, errdefs.ErrSpaceNotFound) {
+		return fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
+	}
+
+	if errors.Is(err, errdefs.ErrSpaceNotFound) {
+		spaceDoc = doc
+	}
+
+	// Get realm
+	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
+		Metadata: v1beta1.RealmMetadata{
+			Name: spaceDoc.Spec.RealmID,
+		},
+	})
+	if err != nil {
+		r.logger.WarnContext(r.ctx, "failed to get realm for purge", "error", err)
+		return nil
+	}
+
+	// Get network name
+	networkName, err := r.getSpaceNetworkName(spaceDoc)
+	if err == nil {
+		// Purge entire network
+		_ = r.purgeCNIForNetwork(r.ctx, networkName)
+	}
+
+	// Find all containers in space
+	if r.ctrClient == nil {
+		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
+	}
+	if err = r.ctrClient.Connect(); err == nil {
+		defer r.ctrClient.Close()
+		r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+
+		pattern := fmt.Sprintf("%s-%s", spaceDoc.Spec.RealmID, spaceDoc.Metadata.Name)
+		var containers []string
+		containers, err = r.findContainersByPattern(r.ctx, realmDoc.Spec.Namespace, pattern)
+		if err == nil {
+			ctrCtx := context.Background()
+			for _, containerID := range containers {
+				netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
+				_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
+			}
+		}
+	}
+
+	// Force remove space cgroup
+	spec := cgroups.DefaultSpaceSpec(realmDoc, spaceDoc)
+	if r.ctrClient != nil {
+		mountpoint := r.ctrClient.GetCgroupMountpoint()
+		_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
+	}
+
+	// Remove metadata directory completely
+	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonSpaceMetadataSubDir, spaceDoc.Metadata.Name)
+	_ = os.RemoveAll(metadataRunPath)
+
+	return nil
+}
+
+// PurgeStack performs comprehensive cleanup of a stack, including CNI resources and orphaned containers.
+func (r *Exec) PurgeStack(doc *v1beta1.StackDoc) error {
+	if doc == nil {
+		return errdefs.ErrStackNotFound
+	}
+
+	// First, perform standard delete
+	if err := r.DeleteStack(doc); err != nil {
+		r.logger.WarnContext(r.ctx, "delete failed, continuing with purge", "error", err)
+	}
+
+	// Get stack document
+	stackDoc, err := r.GetStack(doc)
+	if err != nil && !errors.Is(err, errdefs.ErrStackNotFound) {
+		return fmt.Errorf("%w: %w", errdefs.ErrGetStack, err)
+	}
+
+	if errors.Is(err, errdefs.ErrStackNotFound) {
+		stackDoc = doc
+	}
+
+	// Get realm and space
+	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
+		Metadata: v1beta1.RealmMetadata{
+			Name: stackDoc.Spec.RealmID,
+		},
+	})
+	if err != nil {
+		r.logger.WarnContext(r.ctx, "failed to get realm for purge", "error", err)
+		return nil
+	}
+
+	spaceDoc, err := r.GetSpace(&v1beta1.SpaceDoc{
+		Metadata: v1beta1.SpaceMetadata{
+			Name: stackDoc.Spec.SpaceID,
+		},
+	})
+	if err != nil {
+		r.logger.WarnContext(r.ctx, "failed to get space for purge", "error", err)
+		return nil
+	}
+
+	networkName, _ := r.getSpaceNetworkName(spaceDoc)
+
+	// Find all containers in stack
+	if r.ctrClient == nil {
+		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
+	}
+	if err = r.ctrClient.Connect(); err == nil {
+		defer r.ctrClient.Close()
+		r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+
+		pattern := fmt.Sprintf("%s-%s-%s", stackDoc.Spec.RealmID, stackDoc.Spec.SpaceID, stackDoc.Metadata.Name)
+		var containers []string
+		containers, err = r.findContainersByPattern(r.ctx, realmDoc.Spec.Namespace, pattern)
+		if err == nil {
+			ctrCtx := context.Background()
+			for _, containerID := range containers {
+				netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
+				_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
+			}
+		}
+	}
+
+	// Force remove stack cgroup
+	spec := cgroups.DefaultStackSpec(realmDoc, spaceDoc, stackDoc)
+	if r.ctrClient != nil {
+		mountpoint := r.ctrClient.GetCgroupMountpoint()
+		_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
+	}
+
+	// Remove metadata directory completely
+	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonStackMetadataSubDir, stackDoc.Metadata.Name)
+	_ = os.RemoveAll(metadataRunPath)
+
+	return nil
+}
+
+// PurgeRealm performs comprehensive cleanup of a realm, including all child resources, CNI resources, and orphaned containers.
+func (r *Exec) PurgeRealm(doc *v1beta1.RealmDoc) error {
+	if doc == nil {
+		return errdefs.ErrRealmNotFound
+	}
+
+	// First, perform standard delete
+	if err := r.DeleteRealm(doc); err != nil {
+		r.logger.WarnContext(r.ctx, "delete failed, continuing with purge", "error", err)
+	}
+
+	// Get realm document
+	realmDoc, err := r.GetRealm(doc)
+	if err != nil && !errors.Is(err, errdefs.ErrRealmNotFound) {
+		return fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
+	}
+
+	if errors.Is(err, errdefs.ErrRealmNotFound) {
+		realmDoc = doc
+	}
+
+	// Initialize ctr client
+	if r.ctrClient == nil {
+		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
+	}
+	if err = r.ctrClient.Connect(); err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	defer r.ctrClient.Close()
+
+	// List ALL containers in namespace (even orphaned ones)
+	r.logger.DebugContext(r.ctx, "starting to find orphaned containers", "namespace", realmDoc.Spec.Namespace)
+	containers, err := r.findOrphanedContainers(r.ctx, realmDoc.Spec.Namespace, "")
+	if err != nil {
+		r.logger.WarnContext(r.ctx, "failed to find orphaned containers", "error", err)
+	} else {
+		r.logger.DebugContext(r.ctx, "found orphaned containers", "count", len(containers))
+		if len(containers) > 0 {
+			r.logger.InfoContext(r.ctx, "processing orphaned containers for deletion", "count", len(containers))
+			ctrCtx := context.Background()
+			for i, containerID := range containers {
+				r.logger.DebugContext(r.ctx, "processing container", "index", i+1, "total", len(containers), "id", containerID)
+				// Try to delete container
+				r.logger.DebugContext(r.ctx, "stopping container", "id", containerID)
+				_, _ = r.ctrClient.StopContainer(ctrCtx, containerID, ctr.StopContainerOptions{})
+				r.logger.DebugContext(r.ctx, "deleting container", "id", containerID)
+				_ = r.ctrClient.DeleteContainer(ctrCtx, containerID, ctr.ContainerDeleteOptions{
+					SnapshotCleanup: true,
+				})
+
+				// Get netns and purge CNI
+				r.logger.DebugContext(r.ctx, "getting container netns path", "id", containerID)
+				netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
+				// Try to determine network name from container ID pattern
+				// Container ID format: realm-space-cell-container
+				parts := strings.Split(containerID, "-")
+				if len(parts) >= 2 {
+					networkName := fmt.Sprintf("%s-%s", parts[0], parts[1])
+					r.logger.DebugContext(r.ctx, "purging CNI resources for container", "id", containerID, "network", networkName)
+					_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
+				}
+				r.logger.DebugContext(r.ctx, "completed processing container", "id", containerID)
+			}
+			r.logger.InfoContext(r.ctx, "completed processing all orphaned containers", "count", len(containers))
+		}
+	}
+
+	// Remove all metadata directories for realm and children
+	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonRealmMetadataSubDir, realmDoc.Metadata.Name)
+	_ = os.RemoveAll(metadataRunPath)
+
+	// Force remove realm cgroup
+	spec := cgroups.DefaultRealmSpec(realmDoc)
+	mountpoint := r.ctrClient.GetCgroupMountpoint()
+	_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
+
+	return nil
+}
+
+// PurgeContainer performs comprehensive cleanup of a container, including CNI resources.
+func (r *Exec) PurgeContainer(containerID string, namespace string) error {
+	if containerID == "" {
+		return errdefs.ErrContainerNameRequired
+	}
+
+	// Initialize ctr client
+	if r.ctrClient == nil {
+		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
+	}
+	if err := r.ctrClient.Connect(); err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	defer r.ctrClient.Close()
+
+	r.ctrClient.SetNamespace(namespace)
+
+	ctrCtx := context.Background()
+
+	// Try to stop and delete container
+	_, _ = r.ctrClient.StopContainer(ctrCtx, containerID, ctr.StopContainerOptions{})
+	_ = r.ctrClient.DeleteContainer(ctrCtx, containerID, ctr.ContainerDeleteOptions{
+		SnapshotCleanup: true,
+	})
+
+	// Get netns path if container is running
+	netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
+
+	// Try to determine network name from container ID
+	parts := strings.Split(containerID, "-")
+	networkName := ""
+	if len(parts) >= 2 {
+		networkName = fmt.Sprintf("%s-%s", parts[0], parts[1])
+	}
+
+	// Purge CNI resources
+	_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
+
+	return nil
+}

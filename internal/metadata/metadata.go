@@ -146,3 +146,42 @@ func ReadRaw(ctx context.Context, logger *slog.Logger, file string) ([]byte, err
 	}
 	return data, nil
 }
+
+// DeleteMetadata removes a metadata file and its directory if empty.
+func DeleteMetadata(ctx context.Context, logger *slog.Logger, file string) error {
+	logger.DebugContext(ctx, "deleting metadata", "file", file)
+
+	if !existsFilePath(file) {
+		logger.DebugContext(ctx, "metadata file does not exist, skipping deletion", "file", file)
+		return nil // Idempotent: file doesn't exist, consider it deleted
+	}
+
+	// Delete the metadata file
+	if err := os.Remove(file); err != nil {
+		logger.ErrorContext(ctx, "failed to delete metadata file", "file", file, "error", err)
+		return fmt.Errorf("failed to delete metadata file %s: %w", file, err)
+	}
+
+	logger.InfoContext(ctx, "deleted metadata file", "file", file)
+
+	// Try to remove the parent directory if it's empty
+	dir := filepath.Dir(file)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		// Directory might not exist or we can't read it - that's OK
+		logger.DebugContext(ctx, "could not read directory, skipping directory removal", "dir", dir, "error", err)
+		return nil
+	}
+
+	// If directory is empty (only . and ..), remove it
+	if len(entries) == 0 {
+		if err = os.Remove(dir); err != nil {
+			logger.DebugContext(ctx, "could not remove empty directory", "dir", dir, "error", err)
+			// Don't fail if we can't remove the directory
+		} else {
+			logger.DebugContext(ctx, "removed empty metadata directory", "dir", dir)
+		}
+	}
+
+	return nil
+}

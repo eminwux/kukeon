@@ -337,12 +337,7 @@ func (b *Exec) bootstrapCell(report BootstrapReport) (BootstrapReport, error) {
 			StackID: consts.KukeonStackName,
 			Containers: []v1beta1.ContainerSpec{
 				{
-					ID: naming.BuildContainerName(
-						consts.KukeonRealmName,
-						consts.KukeonSpaceName,
-						consts.KukeonCellName,
-						"debian",
-					),
+					ID:      "debian", // Store just the container name, not the full ID
 					RealmID: consts.KukeonRealmName,
 					SpaceID: consts.KukeonSpaceName,
 					StackID: consts.KukeonStackName,

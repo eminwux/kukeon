@@ -506,25 +506,34 @@ func (c *client) DeleteContainer(ctx context.Context, id string, opts ContainerD
 		return errEmptyContainerID
 	}
 
+	c.logger.DebugContext(ctx, "starting to delete container", "id", id, "snapshot_cleanup", opts.SnapshotCleanup)
 	container, err := c.loadContainer(ctx, id)
 	if err != nil {
+		c.logger.DebugContext(ctx, "failed to load container for deletion", "id", id, "error", err)
 		return err
 	}
 
 	nsCtx := c.namespaceCtx(ctx)
 
 	// Try to get and delete the task if it exists
+	c.logger.DebugContext(ctx, "checking for task to delete", "id", id)
 	task, err := container.Task(nsCtx, nil)
 	if err == nil {
 		// Task exists, delete it first
+		c.logger.DebugContext(ctx, "deleting task", "id", id)
 		_, err = task.Delete(nsCtx, containerd.WithProcessKill)
 		if err != nil {
 			c.logger.WarnContext(ctx, "failed to delete task", "id", id, "err", formatError(err))
+		} else {
+			c.logger.DebugContext(ctx, "deleted task", "id", id)
 		}
 		c.dropTask(id)
+	} else {
+		c.logger.DebugContext(ctx, "no task found for container", "id", id)
 	}
 
 	// Delete container
+	c.logger.DebugContext(ctx, "deleting container from containerd", "id", id)
 	deleteOpts := []containerd.DeleteOpts{}
 	if opts.SnapshotCleanup {
 		deleteOpts = append(deleteOpts, containerd.WithSnapshotCleanup)
@@ -631,16 +640,20 @@ func (c *client) StopContainer(
 		return nil, errEmptyContainerID
 	}
 
+	c.logger.DebugContext(ctx, "starting to stop container", "id", id)
 	task, err := c.loadTask(ctx, id)
 	if err != nil {
+		c.logger.DebugContext(ctx, "failed to load task for container", "id", id, "error", err)
 		return nil, err
 	}
 
 	nsCtx := c.namespaceCtx(ctx)
 
 	// Check task status
+	c.logger.DebugContext(ctx, "checking task status", "id", id)
 	status, err := task.Status(nsCtx)
 	if err != nil {
+		c.logger.DebugContext(ctx, "failed to get task status", "id", id, "error", err)
 		return nil, fmt.Errorf("failed to get task status: %w", err)
 	}
 

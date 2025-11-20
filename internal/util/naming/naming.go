@@ -17,6 +17,7 @@
 package naming
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -47,9 +48,48 @@ func BuildSpaceNetworkName(doc *v1beta1.SpaceDoc) (string, error) {
 	return fmt.Sprintf("%s-%s", realmName, spaceName), nil
 }
 
-// BuildContainerName constructs the canonical container name for a container.
-// The format is: containerID-realmID-spaceID-cellName
-// This can be used for any container ID (e.g., "pause", "debian").
-func BuildContainerName(realmID, spaceID, cellName, containerID string) string {
-	return fmt.Sprintf("%s-%s-%s-%s", realmID, spaceID, cellName, containerID)
+// BuildPauseContainerName constructs a pause container name using hierarchical format.
+// Format: {spaceName}__{stackName}__{cellName}__pause
+// Validates that all parameters are non-empty.
+func BuildPauseContainerName(spaceName, stackName, cellName string) (string, error) {
+	spaceName = strings.TrimSpace(spaceName)
+	stackName = strings.TrimSpace(stackName)
+	cellName = strings.TrimSpace(cellName)
+
+	if spaceName == "" {
+		return "", errors.New("space name cannot be empty")
+	}
+	if stackName == "" {
+		return "", errors.New("stack name cannot be empty")
+	}
+	if cellName == "" {
+		return "", errors.New("cell name cannot be empty")
+	}
+
+	return fmt.Sprintf("%s_%s_%s_pause", spaceName, stackName, cellName), nil
+}
+
+// BuildContainerName constructs a container name using hierarchical format.
+// Format: {spaceName}__{stackName}__{cellName}__{containerName}
+// Validates that all parameters are non-empty.
+func BuildContainerName(spaceName, stackName, cellName, containerName string) (string, error) {
+	spaceName = strings.TrimSpace(spaceName)
+	stackName = strings.TrimSpace(stackName)
+	cellName = strings.TrimSpace(cellName)
+	containerName = strings.TrimSpace(containerName)
+
+	if spaceName == "" {
+		return "", errors.New("space name cannot be empty")
+	}
+	if stackName == "" {
+		return "", errors.New("stack name cannot be empty")
+	}
+	if cellName == "" {
+		return "", errors.New("cell name cannot be empty")
+	}
+	if containerName == "" {
+		return "", errors.New("container name cannot be empty")
+	}
+
+	return fmt.Sprintf("%s_%s_%s_%s", spaceName, stackName, cellName, containerName), nil
 }

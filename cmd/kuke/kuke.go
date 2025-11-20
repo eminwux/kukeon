@@ -25,7 +25,14 @@ import (
 	"path/filepath"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	createcmd "github.com/eminwux/kukeon/cmd/kuke/create"
+	deletecmd "github.com/eminwux/kukeon/cmd/kuke/delete"
+	getcmd "github.com/eminwux/kukeon/cmd/kuke/get"
 	initcmd "github.com/eminwux/kukeon/cmd/kuke/init"
+	killcmd "github.com/eminwux/kukeon/cmd/kuke/kill"
+	purgecmd "github.com/eminwux/kukeon/cmd/kuke/purge"
+	startcmd "github.com/eminwux/kukeon/cmd/kuke/start"
+	stopcmd "github.com/eminwux/kukeon/cmd/kuke/stop"
 	"github.com/eminwux/kukeon/cmd/kuke/version"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -89,6 +96,13 @@ func NewKukeCmd() (*cobra.Command, error) {
 
 func setupKukeCmd(rootCmd *cobra.Command) error {
 	rootCmd.AddCommand(initcmd.NewInitCmd())
+	rootCmd.AddCommand(createcmd.NewCreateCmd())
+	rootCmd.AddCommand(getcmd.NewGetCmd())
+	rootCmd.AddCommand(deletecmd.NewDeleteCmd())
+	rootCmd.AddCommand(startcmd.NewStartCmd())
+	rootCmd.AddCommand(stopcmd.NewStopCmd())
+	rootCmd.AddCommand(killcmd.NewKillCmd())
+	rootCmd.AddCommand(purgecmd.NewPurgeCmd())
 	rootCmd.AddCommand(version.NewVersionCmd())
 
 	// Persistent flags
