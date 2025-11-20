@@ -208,4 +208,30 @@ var (
 	KUKE_DELETE_FORCE = DefineKV("KUKE_DELETE_FORCE", "kuke/delete/force")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_DELETE_CASCADE = DefineKV("KUKE_DELETE_CASCADE", "kuke/delete/cascade")
+
+	// Purge command variables
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_PURGE_SPACE_REALM = DefineKV("KUKE_PURGE_SPACE_REALM", "kuke/purge/space/realm")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_PURGE_STACK_REALM = DefineKV("KUKE_PURGE_STACK_REALM", "kuke/purge/stack/realm")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_PURGE_STACK_SPACE = DefineKV("KUKE_PURGE_STACK_SPACE", "kuke/purge/stack/space")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_PURGE_CELL_REALM = DefineKV("KUKE_PURGE_CELL_REALM", "kuke/purge/cell/realm")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_PURGE_CELL_SPACE = DefineKV("KUKE_PURGE_CELL_SPACE", "kuke/purge/cell/space")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_PURGE_CELL_STACK = DefineKV("KUKE_PURGE_CELL_STACK", "kuke/purge/cell/stack")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_PURGE_CONTAINER_REALM = DefineKV("KUKE_PURGE_CONTAINER_REALM", "kuke/purge/container/realm")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_PURGE_CONTAINER_SPACE = DefineKV("KUKE_PURGE_CONTAINER_SPACE", "kuke/purge/container/space")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_PURGE_CONTAINER_STACK = DefineKV("KUKE_PURGE_CONTAINER_STACK", "kuke/purge/container/stack")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_PURGE_CONTAINER_CELL = DefineKV("KUKE_PURGE_CONTAINER_CELL", "kuke/purge/container/cell")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_PURGE_FORCE = DefineKV("KUKE_PURGE_FORCE", "kuke/purge/force")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_PURGE_CASCADE = DefineKV("KUKE_PURGE_CASCADE", "kuke/purge/cascade")
 )

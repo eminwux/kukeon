@@ -60,6 +60,12 @@ type Runner interface {
 	DeleteStack(doc *v1beta1.StackDoc) error
 
 	ExistsCgroup(doc any) (bool, error)
+
+	PurgeRealm(doc *v1beta1.RealmDoc) error
+	PurgeSpace(doc *v1beta1.SpaceDoc) error
+	PurgeStack(doc *v1beta1.StackDoc) error
+	PurgeCell(doc *v1beta1.CellDoc) error
+	PurgeContainer(containerID, namespace string) error
 }
 
 type Exec struct {
