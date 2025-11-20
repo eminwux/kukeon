@@ -176,3 +176,41 @@ func (m *Manager) CreateNetwork(networkName, bridgeName, subnetCIDR string) (str
 		SubnetCIDR: subnetCIDR,
 	})
 }
+
+// DeleteNetwork removes a CNI network config file from the filesystem.
+func (m *Manager) DeleteNetwork(networkName, configPath string) error {
+	if networkName == "" {
+		return errors.New("network name is required")
+	}
+
+	if configPath == "" {
+		configPath = filepath.Join(m.conf.CniConfigDir, networkName+".conflist")
+	}
+
+	// Check if file exists
+	_, err := os.Stat(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// Idempotent: file doesn't exist, consider it deleted
+			return nil
+		}
+		return fmt.Errorf("failed to check network config file: %w", err)
+	}
+
+	// Verify the file contains the expected network name
+	exists, actualPath, err := m.ExistsNetworkConfig(networkName, configPath)
+	if err != nil && !errors.Is(err, errdefs.ErrNetworkNotFound) {
+		return fmt.Errorf("failed to verify network config: %w", err)
+	}
+	if !exists {
+		// Network config doesn't match or doesn't exist
+		return nil
+	}
+
+	// Delete the config file
+	if err = os.Remove(actualPath); err != nil {
+		return fmt.Errorf("failed to delete network config file %s: %w", actualPath, err)
+	}
+
+	return nil
+}

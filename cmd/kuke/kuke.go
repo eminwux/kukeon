@@ -26,6 +26,7 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	createcmd "github.com/eminwux/kukeon/cmd/kuke/create"
+	"github.com/eminwux/kukeon/cmd/kuke/delete"
 	getcmd "github.com/eminwux/kukeon/cmd/kuke/get"
 	initcmd "github.com/eminwux/kukeon/cmd/kuke/init"
 	"github.com/eminwux/kukeon/cmd/kuke/version"
@@ -93,6 +94,7 @@ func setupKukeCmd(rootCmd *cobra.Command) error {
 	rootCmd.AddCommand(initcmd.NewInitCmd())
 	rootCmd.AddCommand(createcmd.NewCreateCmd())
 	rootCmd.AddCommand(getcmd.NewGetCmd())
+	rootCmd.AddCommand(deletecmd.NewDeleteCmd())
 	rootCmd.AddCommand(version.NewVersionCmd())
 
 	// Persistent flags

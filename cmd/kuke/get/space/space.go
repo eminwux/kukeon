@@ -17,6 +17,7 @@
 package space
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 

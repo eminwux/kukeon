@@ -17,6 +17,7 @@
 package cell
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 

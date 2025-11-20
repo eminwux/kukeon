@@ -70,6 +70,7 @@ type Client interface {
 	TaskMetrics(ctx context.Context, id string) (*apitypes.Metric, error)
 	NewCgroup(spec CgroupSpec) (*cgroup2.Manager, error)
 	LoadCgroup(group string, mountpoint string) (*cgroup2.Manager, error)
+	DeleteCgroup(group, mountpoint string) error
 	CreateContainerFromSpec(
 		ctx context.Context,
 		containerSpec *v1beta1.ContainerSpec,

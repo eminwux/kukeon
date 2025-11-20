@@ -17,6 +17,7 @@
 package stack
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
