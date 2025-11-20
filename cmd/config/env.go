@@ -138,4 +138,38 @@ var (
 		"kuke/create/container/image",
 		"docker.io/library/debian:latest",
 	)
+
+	// Get command variables
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_REALM_NAME = DefineKV("KUKE_GET_REALM_NAME", "kuke/get/realm/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_SPACE_NAME = DefineKV("KUKE_GET_SPACE_NAME", "kuke/get/space/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_SPACE_REALM = DefineKV("KUKE_GET_SPACE_REALM", "kuke/get/space/realm")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_STACK_NAME = DefineKV("KUKE_GET_STACK_NAME", "kuke/get/stack/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_STACK_REALM = DefineKV("KUKE_GET_STACK_REALM", "kuke/get/stack/realm")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_STACK_SPACE = DefineKV("KUKE_GET_STACK_SPACE", "kuke/get/stack/space")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_CELL_NAME = DefineKV("KUKE_GET_CELL_NAME", "kuke/get/cell/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_CELL_REALM = DefineKV("KUKE_GET_CELL_REALM", "kuke/get/cell/realm")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_CELL_SPACE = DefineKV("KUKE_GET_CELL_SPACE", "kuke/get/cell/space")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_CELL_STACK = DefineKV("KUKE_GET_CELL_STACK", "kuke/get/cell/stack")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_CONTAINER_NAME = DefineKV("KUKE_GET_CONTAINER_NAME", "kuke/get/container/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_CONTAINER_REALM = DefineKV("KUKE_GET_CONTAINER_REALM", "kuke/get/container/realm")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_CONTAINER_SPACE = DefineKV("KUKE_GET_CONTAINER_SPACE", "kuke/get/container/space")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_CONTAINER_STACK = DefineKV("KUKE_GET_CONTAINER_STACK", "kuke/get/container/stack")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_CONTAINER_CELL = DefineKV("KUKE_GET_CONTAINER_CELL", "kuke/get/container/cell")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_OUTPUT = DefineKV("KUKE_GET_OUTPUT", "kuke/get/output")
 )
