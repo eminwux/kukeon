@@ -103,7 +103,17 @@ func printCellResult(cmd *cobra.Command, result controller.CreateCellResult) {
 	)
 	shared.PrintCreationOutcome(cmd, "metadata", result.MetadataExistsPost, result.Created)
 	shared.PrintCreationOutcome(cmd, "cgroup", result.CgroupExistsPost, result.CgroupCreated)
-	shared.PrintCreationOutcome(cmd, "pause container", result.PauseExistsPost, result.PauseCreated)
+	shared.PrintCreationOutcome(cmd, "root container", result.RootContainerExistsPost, result.RootContainerCreated)
+
+	if len(result.Containers) == 0 {
+		cmd.Println("  - containers: none defined")
+	} else {
+		for _, container := range result.Containers {
+			label := fmt.Sprintf("container %q", container.Name)
+			shared.PrintCreationOutcome(cmd, label, container.ExistsPost, container.Created)
+		}
+	}
+
 	if result.Started {
 		cmd.Println("  - containers: started")
 	} else {

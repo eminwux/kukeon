@@ -63,7 +63,7 @@ var (
 	ErrCellIDRequired          = errors.New("cell id is required")
 	ErrGetCell                 = errors.New("failed to get cell")
 	ErrCreateCell              = errors.New("failed to create cell")
-	ErrCreatePauseContainer    = errors.New("failed to create pause container")
+	ErrCreateRootContainer     = errors.New("failed to create root container")
 	ErrNetworkConfigNotLoaded  = errors.New("network config not loaded")
 	ErrCellNameRequired        = errors.New("cell name is required")
 	ErrContainerNameRequired   = errors.New("container name is required")

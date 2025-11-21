@@ -23,16 +23,18 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/cni"
-	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
 // SpaceNetworkConfigPath returns the path to the space's network conflist file.
-func SpaceNetworkConfigPath(baseRunPath, spaceName string) (string, error) {
+func SpaceNetworkConfigPath(baseRunPath, realmName, spaceName string) (string, error) {
 	if strings.TrimSpace(spaceName) == "" {
 		return "", fmt.Errorf("%w: space name is required", errdefs.ErrConfig)
 	}
-	return filepath.Join(baseRunPath, consts.KukeonSpaceMetadataSubDir, spaceName, "network.conflist"), nil
+	if strings.TrimSpace(realmName) == "" {
+		return "", fmt.Errorf("%w: realm name is required", errdefs.ErrConfig)
+	}
+	return filepath.Join(RealmMetadataDir(baseRunPath, realmName), spaceName, "network.conflist"), nil
 }
 
 // WriteSpaceNetworkConfig writes the network conflist at the provided path.

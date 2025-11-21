@@ -25,10 +25,10 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/cni"
-	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/util/cgroups"
+	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -374,6 +374,9 @@ func (r *Exec) PurgeCell(doc *v1beta1.CellDoc) error {
 		Metadata: v1beta1.SpaceMetadata{
 			Name: cellDoc.Spec.SpaceID,
 		},
+		Spec: v1beta1.SpaceSpec{
+			RealmID: cellDoc.Spec.RealmID,
+		},
 	})
 	if err != nil {
 		r.logger.WarnContext(r.ctx, "failed to get space for purge", "error", err)
@@ -395,13 +398,13 @@ func (r *Exec) PurgeCell(doc *v1beta1.CellDoc) error {
 				cellID = cellDoc.Metadata.Name
 			}
 
-			// Add pause container
-			var pauseContainerID string
-			pauseContainerID, err = naming.BuildPauseContainerName(spaceID, stackID, cellID)
+			// Add root container
+			var rootContainerID string
+			rootContainerID, err = naming.BuildRootContainerName(spaceID, stackID, cellID)
 			if err != nil {
-				r.logger.WarnContext(r.ctx, "failed to build pause container name", "error", err)
+				r.logger.WarnContext(r.ctx, "failed to build root container name", "error", err)
 			} else {
-				containerIDs = append(containerIDs, pauseContainerID)
+				containerIDs = append(containerIDs, rootContainerID)
 			}
 
 			// Add all containers from the cell spec
@@ -457,6 +460,10 @@ func (r *Exec) PurgeCell(doc *v1beta1.CellDoc) error {
 		Metadata: v1beta1.StackMetadata{
 			Name: cellDoc.Spec.StackID,
 		},
+		Spec: v1beta1.StackSpec{
+			RealmID: cellDoc.Spec.RealmID,
+			SpaceID: cellDoc.Spec.SpaceID,
+		},
 	})
 	if err == nil && spaceDoc != nil {
 		spec := cgroups.DefaultCellSpec(realmDoc, spaceDoc, stackDoc, cellDoc)
@@ -465,7 +472,13 @@ func (r *Exec) PurgeCell(doc *v1beta1.CellDoc) error {
 	}
 
 	// Remove metadata directory completely
-	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonCellMetadataSubDir, cellDoc.Metadata.Name)
+	metadataRunPath := fs.CellMetadataDir(
+		r.opts.RunPath,
+		cellDoc.Spec.RealmID,
+		cellDoc.Spec.SpaceID,
+		cellDoc.Spec.StackID,
+		cellDoc.Metadata.Name,
+	)
 	_ = os.RemoveAll(metadataRunPath)
 
 	return nil
@@ -538,7 +551,11 @@ func (r *Exec) PurgeSpace(doc *v1beta1.SpaceDoc) error {
 	}
 
 	// Remove metadata directory completely
-	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonSpaceMetadataSubDir, spaceDoc.Metadata.Name)
+	metadataRunPath := fs.SpaceMetadataDir(
+		r.opts.RunPath,
+		spaceDoc.Spec.RealmID,
+		spaceDoc.Metadata.Name,
+	)
 	_ = os.RemoveAll(metadataRunPath)
 
 	return nil
@@ -580,6 +597,9 @@ func (r *Exec) PurgeStack(doc *v1beta1.StackDoc) error {
 		Metadata: v1beta1.SpaceMetadata{
 			Name: stackDoc.Spec.SpaceID,
 		},
+		Spec: v1beta1.SpaceSpec{
+			RealmID: stackDoc.Spec.RealmID,
+		},
 	})
 	if err != nil {
 		r.logger.WarnContext(r.ctx, "failed to get space for purge", "error", err)
@@ -616,7 +636,12 @@ func (r *Exec) PurgeStack(doc *v1beta1.StackDoc) error {
 	}
 
 	// Remove metadata directory completely
-	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonStackMetadataSubDir, stackDoc.Metadata.Name)
+	metadataRunPath := fs.StackMetadataDir(
+		r.opts.RunPath,
+		stackDoc.Spec.RealmID,
+		stackDoc.Spec.SpaceID,
+		stackDoc.Metadata.Name,
+	)
 	_ = os.RemoveAll(metadataRunPath)
 
 	return nil
@@ -690,7 +715,7 @@ func (r *Exec) PurgeRealm(doc *v1beta1.RealmDoc) error {
 	}
 
 	// Remove all metadata directories for realm and children
-	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonRealmMetadataSubDir, realmDoc.Metadata.Name)
+	metadataRunPath := fs.RealmMetadataDir(r.opts.RunPath, realmDoc.Metadata.Name)
 	_ = os.RemoveAll(metadataRunPath)
 
 	// Force remove realm cgroup

@@ -27,6 +27,7 @@ import (
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
+	"github.com/eminwux/kukeon/internal/util/fs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -48,7 +49,7 @@ func (b *Exec) GetRealm(name string) (*v1beta1.RealmDoc, error) {
 
 // ListRealms lists all realms.
 func (b *Exec) ListRealms() ([]*v1beta1.RealmDoc, error) {
-	realmsDir := filepath.Join(b.opts.RunPath, consts.KukeonRealmMetadataSubDir)
+	realmsDir := b.opts.RunPath
 	return listResources[v1beta1.RealmDoc](b.ctx, b.logger, realmsDir)
 }
 
@@ -66,6 +67,9 @@ func (b *Exec) GetSpace(name, realmName string) (*v1beta1.SpaceDoc, error) {
 	doc := &v1beta1.SpaceDoc{
 		Metadata: v1beta1.SpaceMetadata{
 			Name: name,
+		},
+		Spec: v1beta1.SpaceSpec{
+			RealmID: realmName,
 		},
 	}
 
@@ -85,10 +89,18 @@ func (b *Exec) GetSpace(name, realmName string) (*v1beta1.SpaceDoc, error) {
 
 // ListSpaces lists all spaces, optionally filtered by realm.
 func (b *Exec) ListSpaces(realmName string) ([]*v1beta1.SpaceDoc, error) {
-	spacesDir := filepath.Join(b.opts.RunPath, consts.KukeonSpaceMetadataSubDir)
-	spaces, err := listResources[v1beta1.SpaceDoc](b.ctx, b.logger, spacesDir)
+	realmDirs, err := b.listRealmDirs(realmName)
 	if err != nil {
 		return nil, err
+	}
+
+	spaces := make([]*v1beta1.SpaceDoc, 0)
+	for _, dir := range realmDirs {
+		items, listErr := listResources[v1beta1.SpaceDoc](b.ctx, b.logger, dir)
+		if listErr != nil {
+			return nil, listErr
+		}
+		spaces = append(spaces, items...)
 	}
 
 	// Filter by realm if specified
@@ -124,6 +136,10 @@ func (b *Exec) GetStack(name, realmName, spaceName string) (*v1beta1.StackDoc, e
 		Metadata: v1beta1.StackMetadata{
 			Name: name,
 		},
+		Spec: v1beta1.StackSpec{
+			RealmID: realmName,
+			SpaceID: spaceName,
+		},
 	}
 
 	stackDoc, err := b.runner.GetStack(doc)
@@ -146,10 +162,18 @@ func (b *Exec) GetStack(name, realmName, spaceName string) (*v1beta1.StackDoc, e
 
 // ListStacks lists all stacks, optionally filtered by realm and/or space.
 func (b *Exec) ListStacks(realmName, spaceName string) ([]*v1beta1.StackDoc, error) {
-	stacksDir := filepath.Join(b.opts.RunPath, consts.KukeonStackMetadataSubDir)
-	stacks, err := listResources[v1beta1.StackDoc](b.ctx, b.logger, stacksDir)
+	spaceDirs, err := b.listSpaceDirs(realmName, spaceName)
 	if err != nil {
 		return nil, err
+	}
+
+	stacks := make([]*v1beta1.StackDoc, 0)
+	for _, dir := range spaceDirs {
+		items, listErr := listResources[v1beta1.StackDoc](b.ctx, b.logger, dir)
+		if listErr != nil {
+			return nil, listErr
+		}
+		stacks = append(stacks, items...)
 	}
 
 	// Filter by realm and/or space if specified
@@ -191,6 +215,11 @@ func (b *Exec) GetCell(name, realmName, spaceName, stackName string) (*v1beta1.C
 		Metadata: v1beta1.CellMetadata{
 			Name: name,
 		},
+		Spec: v1beta1.CellSpec{
+			RealmID: realmName,
+			SpaceID: spaceName,
+			StackID: stackName,
+		},
 	}
 
 	cellDoc, err := b.runner.GetCell(doc)
@@ -217,10 +246,18 @@ func (b *Exec) GetCell(name, realmName, spaceName, stackName string) (*v1beta1.C
 
 // ListCells lists all cells, optionally filtered by realm, space, and/or stack.
 func (b *Exec) ListCells(realmName, spaceName, stackName string) ([]*v1beta1.CellDoc, error) {
-	cellsDir := filepath.Join(b.opts.RunPath, consts.KukeonCellMetadataSubDir)
-	cells, err := listResources[v1beta1.CellDoc](b.ctx, b.logger, cellsDir)
+	stackDirs, err := b.listStackDirs(realmName, spaceName, stackName)
 	if err != nil {
 		return nil, err
+	}
+
+	cells := make([]*v1beta1.CellDoc, 0)
+	for _, dir := range stackDirs {
+		items, listErr := listResources[v1beta1.CellDoc](b.ctx, b.logger, dir)
+		if listErr != nil {
+			return nil, listErr
+		}
+		cells = append(cells, items...)
 	}
 
 	// Filter by realm, space, and/or stack if specified
@@ -269,7 +306,8 @@ func (b *Exec) ListContainers(realmName, spaceName, stackName, cellName string) 
 
 	if cellName != "" {
 		// Get specific cell
-		cell, err := b.GetCell(cellName, realmName, spaceName, stackName)
+		var cell *v1beta1.CellDoc
+		cell, err = b.GetCell(cellName, realmName, spaceName, stackName)
 		if err != nil {
 			return nil, err
 		}
@@ -285,6 +323,10 @@ func (b *Exec) ListContainers(realmName, spaceName, stackName, cellName string) 
 	// Extract containers from cells
 	containers := make([]*v1beta1.ContainerSpec, 0)
 	for _, cell := range cells {
+		if cell.Spec.RootContainer != nil {
+			cell.Spec.RootContainer.Root = true
+			containers = append(containers, cell.Spec.RootContainer)
+		}
 		for i := range cell.Spec.Containers {
 			containers = append(containers, &cell.Spec.Containers[i])
 		}
@@ -313,10 +355,10 @@ func listResources[T any](ctx context.Context, logger *slog.Logger, dir string) 
 		}
 
 		metadataPath := filepath.Join(dir, entry.Name(), consts.KukeonMetadataFile)
-		doc, err := metadata.ReadMetadata[T](ctx, logger, metadataPath)
-		if err != nil {
+		doc, readErr := metadata.ReadMetadata[T](ctx, logger, metadataPath)
+		if readErr != nil {
 			// Skip files that can't be read (might be incomplete or corrupted)
-			logger.DebugContext(ctx, "skipping metadata file", "path", metadataPath, "error", err)
+			logger.DebugContext(ctx, "skipping metadata file", "path", metadataPath, "error", readErr)
 			continue
 		}
 
@@ -324,4 +366,116 @@ func listResources[T any](ctx context.Context, logger *slog.Logger, dir string) 
 	}
 
 	return results, nil
+}
+
+func (b *Exec) listRealmDirs(realmName string) ([]string, error) {
+	base := b.opts.RunPath
+	if strings.TrimSpace(realmName) != "" {
+		dir := fs.RealmMetadataDir(b.opts.RunPath, realmName)
+		info, err := os.Stat(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return []string{}, nil
+			}
+			return nil, fmt.Errorf("failed to stat realm dir %q: %w", dir, err)
+		}
+		if !info.IsDir() {
+			return []string{}, nil
+		}
+		return []string{dir}, nil
+	}
+
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("failed to read realm directory %q: %w", base, err)
+	}
+
+	dirs := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			dirs = append(dirs, filepath.Join(base, entry.Name()))
+		}
+	}
+	return dirs, nil
+}
+
+func (b *Exec) listSpaceDirs(realmName, spaceName string) ([]string, error) {
+	realmDirs, err := b.listRealmDirs(realmName)
+	if err != nil {
+		return nil, err
+	}
+
+	dirs := make([]string, 0)
+	for _, realmDir := range realmDirs {
+		if strings.TrimSpace(spaceName) != "" {
+			dir := filepath.Join(realmDir, spaceName)
+			info, statErr := os.Stat(dir)
+			if statErr != nil {
+				if os.IsNotExist(statErr) {
+					continue
+				}
+				return nil, fmt.Errorf("failed to stat space dir %q: %w", dir, statErr)
+			}
+			if info.IsDir() {
+				dirs = append(dirs, dir)
+			}
+			continue
+		}
+
+		entries, readErr := os.ReadDir(realmDir)
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				continue
+			}
+			return nil, fmt.Errorf("failed to read realm dir %q: %w", realmDir, readErr)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				dirs = append(dirs, filepath.Join(realmDir, entry.Name()))
+			}
+		}
+	}
+	return dirs, nil
+}
+
+func (b *Exec) listStackDirs(realmName, spaceName, stackName string) ([]string, error) {
+	spaceDirs, err := b.listSpaceDirs(realmName, spaceName)
+	if err != nil {
+		return nil, err
+	}
+
+	dirs := make([]string, 0)
+	for _, spaceDir := range spaceDirs {
+		if strings.TrimSpace(stackName) != "" {
+			dir := filepath.Join(spaceDir, stackName)
+			info, statErr := os.Stat(dir)
+			if statErr != nil {
+				if os.IsNotExist(statErr) {
+					continue
+				}
+				return nil, fmt.Errorf("failed to stat stack dir %q: %w", dir, statErr)
+			}
+			if info.IsDir() {
+				dirs = append(dirs, dir)
+			}
+			continue
+		}
+
+		entries, readErr := os.ReadDir(spaceDir)
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				continue
+			}
+			return nil, fmt.Errorf("failed to read space dir %q: %w", spaceDir, readErr)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				dirs = append(dirs, filepath.Join(spaceDir, entry.Name()))
+			}
+		}
+	}
+	return dirs, nil
 }

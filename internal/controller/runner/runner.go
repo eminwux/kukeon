@@ -21,11 +21,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
+	"strings"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/cni"
-	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
@@ -58,7 +57,7 @@ type Runner interface {
 	KillContainer(doc *v1beta1.CellDoc, containerID string) error
 	DeleteContainer(doc *v1beta1.CellDoc, containerID string) error
 	UpdateCellMetadata(doc *v1beta1.CellDoc) error
-	ExistsCellPauseContainer(doc *v1beta1.CellDoc) (bool, error)
+	ExistsCellRootContainer(doc *v1beta1.CellDoc) (bool, error)
 	DeleteCell(doc *v1beta1.CellDoc) error
 
 	GetStack(doc *v1beta1.StackDoc) (*v1beta1.StackDoc, error)
@@ -101,8 +100,7 @@ func NewRunner(ctx context.Context, logger *slog.Logger, opts Options) Runner {
 
 func (r *Exec) GetRealm(doc *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error) {
 	// Get realm metadata
-	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonRealmMetadataSubDir, doc.Metadata.Name)
-	metadataFilePath := filepath.Join(metadataRunPath, consts.KukeonMetadataFile)
+	metadataFilePath := fs.RealmMetadataPath(r.opts.RunPath, doc.Metadata.Name)
 	realmDoc, err := metadata.ReadMetadata[v1beta1.RealmDoc](r.ctx, r.logger, metadataFilePath)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrMissingMetadataFile) {
@@ -147,7 +145,7 @@ func (r *Exec) CreateRealm(doc *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error) {
 	return r.provisionNewRealm(rDocNew)
 }
 
-func (r *Exec) ExistsCellPauseContainer(doc *v1beta1.CellDoc) (bool, error) {
+func (r *Exec) ExistsCellRootContainer(doc *v1beta1.CellDoc) (bool, error) {
 	if doc == nil {
 		return false, errdefs.ErrCellNotFound
 	}
@@ -200,15 +198,15 @@ func (r *Exec) ExistsCellPauseContainer(doc *v1beta1.CellDoc) (bool, error) {
 	if stackID == "" {
 		return false, errdefs.ErrStackNameRequired
 	}
-	containerID, err := naming.BuildPauseContainerName(spaceID, stackID, cellID)
+	containerID, err := naming.BuildRootContainerName(spaceID, stackID, cellID)
 	if err != nil {
-		return false, fmt.Errorf("failed to build pause container name: %w", err)
+		return false, fmt.Errorf("failed to build root container name: %w", err)
 	}
 
 	// Check if container exists
 	exists, err := r.ctrClient.ExistsContainer(r.ctx, containerID)
 	if err != nil {
-		return false, fmt.Errorf("failed to check if pause container exists: %w", err)
+		return false, fmt.Errorf("failed to check if root container exists: %w", err)
 	}
 
 	return exists, nil
@@ -274,6 +272,9 @@ func (r *Exec) ExistsCgroup(doc any) (bool, error) {
 			Metadata: v1beta1.SpaceMetadata{
 				Name: d.Spec.SpaceID,
 			},
+			Spec: v1beta1.SpaceSpec{
+				RealmID: d.Spec.RealmID,
+			},
 		})
 		if spaceErr != nil {
 			return false, fmt.Errorf("failed to get space: %w", spaceErr)
@@ -305,6 +306,9 @@ func (r *Exec) ExistsCgroup(doc any) (bool, error) {
 			Metadata: v1beta1.SpaceMetadata{
 				Name: d.Spec.SpaceID,
 			},
+			Spec: v1beta1.SpaceSpec{
+				RealmID: d.Spec.RealmID,
+			},
 		})
 		if spaceErr != nil {
 			return false, fmt.Errorf("failed to get space: %w", spaceErr)
@@ -312,6 +316,10 @@ func (r *Exec) ExistsCgroup(doc any) (bool, error) {
 		stackDoc, stackErr := r.GetStack(&v1beta1.StackDoc{
 			Metadata: v1beta1.StackMetadata{
 				Name: d.Spec.StackID,
+			},
+			Spec: v1beta1.StackSpec{
+				RealmID: d.Spec.RealmID,
+				SpaceID: d.Spec.SpaceID,
 			},
 		})
 		if stackErr != nil {
@@ -354,9 +362,12 @@ func (r *Exec) ExistsRealmContainerdNamespace(namespace string) (bool, error) {
 }
 
 func (r *Exec) GetSpace(doc *v1beta1.SpaceDoc) (*v1beta1.SpaceDoc, error) {
+	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	if realmName == "" {
+		return nil, errdefs.ErrRealmNameRequired
+	}
 	// Get space metadata
-	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonSpaceMetadataSubDir, doc.Metadata.Name)
-	metadataFilePath := filepath.Join(metadataRunPath, consts.KukeonMetadataFile)
+	metadataFilePath := fs.SpaceMetadataPath(r.opts.RunPath, realmName, doc.Metadata.Name)
 	spaceDoc, err := metadata.ReadMetadata[v1beta1.SpaceDoc](r.ctx, r.logger, metadataFilePath)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrMissingMetadataFile) {
@@ -423,6 +434,10 @@ func (r *Exec) ExistsSpaceCNIConfig(doc *v1beta1.SpaceDoc) (bool, error) {
 	if doc == nil {
 		return false, errdefs.ErrSpaceDocRequired
 	}
+	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	if realmName == "" {
+		return false, errdefs.ErrRealmNameRequired
+	}
 	mgr, err := cni.NewManager(
 		r.cniConf.CniBinDir,
 		r.cniConf.CniConfigDir,
@@ -432,7 +447,7 @@ func (r *Exec) ExistsSpaceCNIConfig(doc *v1beta1.SpaceDoc) (bool, error) {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrInitCniManager, err)
 	}
 
-	confPath, err := fs.SpaceNetworkConfigPath(r.opts.RunPath, doc.Metadata.Name)
+	confPath, err := fs.SpaceNetworkConfigPath(r.opts.RunPath, realmName, doc.Metadata.Name)
 	if err != nil {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
@@ -449,9 +464,16 @@ func (r *Exec) ExistsSpaceCNIConfig(doc *v1beta1.SpaceDoc) (bool, error) {
 }
 
 func (r *Exec) GetStack(doc *v1beta1.StackDoc) (*v1beta1.StackDoc, error) {
+	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	if realmName == "" {
+		return nil, errdefs.ErrRealmNameRequired
+	}
+	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	if spaceName == "" {
+		return nil, errdefs.ErrSpaceNameRequired
+	}
 	// Get stack metadata
-	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonStackMetadataSubDir, doc.Metadata.Name)
-	metadataFilePath := filepath.Join(metadataRunPath, consts.KukeonMetadataFile)
+	metadataFilePath := fs.StackMetadataPath(r.opts.RunPath, realmName, spaceName, doc.Metadata.Name)
 	stackDoc, err := metadata.ReadMetadata[v1beta1.StackDoc](r.ctx, r.logger, metadataFilePath)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrMissingMetadataFile) {
@@ -482,9 +504,20 @@ func (r *Exec) CreateStack(doc *v1beta1.StackDoc) (*v1beta1.StackDoc, error) {
 }
 
 func (r *Exec) GetCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error) {
+	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	if realmName == "" {
+		return nil, errdefs.ErrRealmNameRequired
+	}
+	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	if spaceName == "" {
+		return nil, errdefs.ErrSpaceNameRequired
+	}
+	stackName := strings.TrimSpace(doc.Spec.StackID)
+	if stackName == "" {
+		return nil, errdefs.ErrStackNameRequired
+	}
 	// Get cell metadata
-	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonCellMetadataSubDir, doc.Metadata.Name)
-	metadataFilePath := filepath.Join(metadataRunPath, consts.KukeonMetadataFile)
+	metadataFilePath := fs.CellMetadataPath(r.opts.RunPath, realmName, spaceName, stackName, doc.Metadata.Name)
 	cellDoc, err := metadata.ReadMetadata[v1beta1.CellDoc](r.ctx, r.logger, metadataFilePath)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrMissingMetadataFile) {
@@ -581,7 +614,7 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 	// Set namespace to realm namespace
 	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
 
-	// Delete all containers in the cell (workload + pause)
+	// Delete all containers in the cell (workload + root)
 	ctrCtx := context.Background()
 	for _, containerSpec := range cellDoc.Spec.Containers {
 		// Build container ID using hierarchical format
@@ -627,15 +660,15 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 		}
 	}
 
-	// Delete pause container
-	pauseContainerID, err := naming.BuildPauseContainerName(cellDoc.Spec.SpaceID, cellDoc.Spec.StackID, cellDoc.Spec.ID)
+	// Delete root container
+	rootContainerID, err := naming.BuildRootContainerName(cellDoc.Spec.SpaceID, cellDoc.Spec.StackID, cellDoc.Spec.ID)
 	if err != nil {
-		return fmt.Errorf("failed to build pause container name: %w", err)
+		return fmt.Errorf("failed to build root container name: %w", err)
 	}
 
-	// Clean up CNI network configuration before stopping/deleting the pause container
+	// Clean up CNI network configuration before stopping/deleting the root container
 	// Try to get the task to retrieve the netns path
-	container, loadErr := r.ctrClient.GetContainer(ctrCtx, pauseContainerID)
+	container, loadErr := r.ctrClient.GetContainer(ctrCtx, rootContainerID)
 	if loadErr == nil {
 		// Try to get the task to get PID and netns path
 		task, taskErr := container.Task(ctrCtx, nil)
@@ -645,7 +678,7 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 				netnsPath := fmt.Sprintf("/proc/%d/ns/net", pid)
 
 				// Get CNI config path
-				cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(cellDoc.Spec.SpaceID)
+				cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(cellDoc.Spec.RealmID, cellDoc.Spec.SpaceID)
 				if cniErr == nil {
 					// Create CNI manager and remove container from network
 					cniMgr, mgrErr := cni.NewManager(
@@ -655,13 +688,13 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 					)
 					if mgrErr == nil {
 						if configLoadErr := cniMgr.LoadNetworkConfigList(cniConfigPath); configLoadErr == nil {
-							delErr := cniMgr.DelContainerFromNetwork(ctrCtx, pauseContainerID, netnsPath)
+							delErr := cniMgr.DelContainerFromNetwork(ctrCtx, rootContainerID, netnsPath)
 							if delErr != nil {
 								r.logger.WarnContext(
 									r.ctx,
-									"failed to remove pause container from CNI network, continuing with deletion",
+									"failed to remove root container from CNI network, continuing with deletion",
 									"container",
-									pauseContainerID,
+									rootContainerID,
 									"netns",
 									netnsPath,
 									"error",
@@ -670,9 +703,9 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 							} else {
 								r.logger.InfoContext(
 									r.ctx,
-									"removed pause container from CNI network",
+									"removed root container from CNI network",
 									"container",
-									pauseContainerID,
+									rootContainerID,
 									"netns",
 									netnsPath,
 								)
@@ -682,7 +715,7 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 								r.ctx,
 								"failed to load CNI config for cleanup",
 								"container",
-								pauseContainerID,
+								rootContainerID,
 								"config",
 								cniConfigPath,
 								"error",
@@ -694,7 +727,7 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 							r.ctx,
 							"failed to create CNI manager for cleanup",
 							"container",
-							pauseContainerID,
+							rootContainerID,
 							"error",
 							mgrErr,
 						)
@@ -704,7 +737,7 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 						r.ctx,
 						"failed to resolve CNI config path for cleanup",
 						"container",
-						pauseContainerID,
+						rootContainerID,
 						"error",
 						cniErr,
 					)
@@ -713,9 +746,9 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 		} else {
 			r.logger.DebugContext(
 				r.ctx,
-				"pause container task not found, skipping CNI cleanup",
+				"root container task not found, skipping CNI cleanup",
 				"container",
-				pauseContainerID,
+				rootContainerID,
 				"error",
 				taskErr,
 			)
@@ -723,31 +756,31 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 	} else {
 		r.logger.DebugContext(
 			r.ctx,
-			"pause container not found, skipping CNI cleanup",
+			"root container not found, skipping CNI cleanup",
 			"container",
-			pauseContainerID,
+			rootContainerID,
 			"error",
 			loadErr,
 		)
 	}
 
-	_, err = r.ctrClient.StopContainer(ctrCtx, pauseContainerID, ctr.StopContainerOptions{})
+	_, err = r.ctrClient.StopContainer(ctrCtx, rootContainerID, ctr.StopContainerOptions{})
 	if err != nil {
 		r.logger.WarnContext(
 			r.ctx,
-			"failed to stop pause container, continuing with deletion",
+			"failed to stop root container, continuing with deletion",
 			"container",
-			pauseContainerID,
+			rootContainerID,
 			"error",
 			err,
 		)
 	}
 
-	err = r.ctrClient.DeleteContainer(ctrCtx, pauseContainerID, ctr.ContainerDeleteOptions{
+	err = r.ctrClient.DeleteContainer(ctrCtx, rootContainerID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 	if err != nil {
-		r.logger.WarnContext(r.ctx, "failed to delete pause container", "container", pauseContainerID, "error", err)
+		r.logger.WarnContext(r.ctx, "failed to delete root container", "container", rootContainerID, "error", err)
 		// Continue with cgroup and metadata deletion
 	}
 
@@ -789,8 +822,13 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 	}
 
 	// Delete cell metadata
-	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonCellMetadataSubDir, cellDoc.Metadata.Name)
-	metadataFilePath := filepath.Join(metadataRunPath, consts.KukeonMetadataFile)
+	metadataFilePath := fs.CellMetadataPath(
+		r.opts.RunPath,
+		cellDoc.Spec.RealmID,
+		cellDoc.Spec.SpaceID,
+		cellDoc.Spec.StackID,
+		cellDoc.Metadata.Name,
+	)
 	if err = metadata.DeleteMetadata(r.ctx, r.logger, metadataFilePath); err != nil {
 		return fmt.Errorf("%w: failed to delete cell metadata: %w", errdefs.ErrDeleteCell, err)
 	}
@@ -836,6 +874,9 @@ func (r *Exec) DeleteStack(doc *v1beta1.StackDoc) error {
 		Metadata: v1beta1.SpaceMetadata{
 			Name: stackDoc.Spec.SpaceID,
 		},
+		Spec: v1beta1.SpaceSpec{
+			RealmID: stackDoc.Spec.RealmID,
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to get space: %w", err)
@@ -851,8 +892,12 @@ func (r *Exec) DeleteStack(doc *v1beta1.StackDoc) error {
 	}
 
 	// Delete stack metadata
-	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonStackMetadataSubDir, stackDoc.Metadata.Name)
-	metadataFilePath := filepath.Join(metadataRunPath, consts.KukeonMetadataFile)
+	metadataFilePath := fs.StackMetadataPath(
+		r.opts.RunPath,
+		stackDoc.Spec.RealmID,
+		stackDoc.Spec.SpaceID,
+		stackDoc.Metadata.Name,
+	)
 	if err = metadata.DeleteMetadata(r.ctx, r.logger, metadataFilePath); err != nil {
 		return fmt.Errorf("%w: failed to delete stack metadata: %w", errdefs.ErrDeleteStack, err)
 	}
@@ -901,7 +946,7 @@ func (r *Exec) DeleteSpace(doc *v1beta1.SpaceDoc) error {
 		r.logger.WarnContext(r.ctx, "failed to build network name, skipping CNI config deletion", "error", err)
 	} else {
 		var confPath string
-		confPath, err = r.resolveSpaceCNIConfigPath(spaceDoc.Metadata.Name)
+		confPath, err = r.resolveSpaceCNIConfigPath(spaceDoc.Spec.RealmID, spaceDoc.Metadata.Name)
 		if err == nil {
 			var mgr *cni.Manager
 			mgr, err = cni.NewManager(
@@ -928,8 +973,11 @@ func (r *Exec) DeleteSpace(doc *v1beta1.SpaceDoc) error {
 	}
 
 	// Delete space metadata
-	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonSpaceMetadataSubDir, spaceDoc.Metadata.Name)
-	metadataFilePath := filepath.Join(metadataRunPath, consts.KukeonMetadataFile)
+	metadataFilePath := fs.SpaceMetadataPath(
+		r.opts.RunPath,
+		spaceDoc.Spec.RealmID,
+		spaceDoc.Metadata.Name,
+	)
 	if err = metadata.DeleteMetadata(r.ctx, r.logger, metadataFilePath); err != nil {
 		return fmt.Errorf("%w: failed to delete space metadata: %w", errdefs.ErrDeleteSpace, err)
 	}
@@ -984,8 +1032,7 @@ func (r *Exec) DeleteRealm(doc *v1beta1.RealmDoc) error {
 	}
 
 	// Delete realm metadata
-	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonRealmMetadataSubDir, realmDoc.Metadata.Name)
-	metadataFilePath := filepath.Join(metadataRunPath, consts.KukeonMetadataFile)
+	metadataFilePath := fs.RealmMetadataPath(r.opts.RunPath, realmDoc.Metadata.Name)
 	if err = metadata.DeleteMetadata(r.ctx, r.logger, metadataFilePath); err != nil {
 		return fmt.Errorf("%w: failed to delete realm metadata: %w", errdefs.ErrDeleteRealm, err)
 	}

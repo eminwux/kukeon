@@ -48,10 +48,10 @@ func BuildSpaceNetworkName(doc *v1beta1.SpaceDoc) (string, error) {
 	return fmt.Sprintf("%s-%s", realmName, spaceName), nil
 }
 
-// BuildPauseContainerName constructs a pause container name using hierarchical format.
-// Format: {spaceName}__{stackName}__{cellName}__pause
+// BuildRootContainerName constructs a root container name using hierarchical format.
+// Format: {spaceName}__{stackName}__{cellName}__root
 // Validates that all parameters are non-empty.
-func BuildPauseContainerName(spaceName, stackName, cellName string) (string, error) {
+func BuildRootContainerName(spaceName, stackName, cellName string) (string, error) {
 	spaceName = strings.TrimSpace(spaceName)
 	stackName = strings.TrimSpace(stackName)
 	cellName = strings.TrimSpace(cellName)
@@ -66,7 +66,7 @@ func BuildPauseContainerName(spaceName, stackName, cellName string) (string, err
 		return "", errors.New("cell name cannot be empty")
 	}
 
-	return fmt.Sprintf("%s_%s_%s_pause", spaceName, stackName, cellName), nil
+	return fmt.Sprintf("%s_%s_%s_root", spaceName, stackName, cellName), nil
 }
 
 // BuildContainerName constructs a container name using hierarchical format.

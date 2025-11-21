@@ -18,6 +18,7 @@ package container
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
@@ -157,12 +158,11 @@ func printContainers(cmd *cobra.Command, containers []*v1beta1.ContainerSpec, fo
 			return nil
 		}
 
-		headers := []string{"NAME", "REALM", "SPACE", "STACK", "CELL", "IMAGE", "STATE"}
+		headers := []string{"NAME", "REALM", "SPACE", "STACK", "CELL", "ROOT", "IMAGE", "STATE"}
 		rows := make([][]string, 0, len(containers))
 
 		for _, c := range containers {
-			// Container ID now stores just the container name
-			containerName := c.ID
+			containerName := containerDisplayName(c)
 
 			state := "Unknown"
 			// ContainerSpec doesn't have a State field, so we'll use "-"
@@ -174,6 +174,7 @@ func printContainers(cmd *cobra.Command, containers []*v1beta1.ContainerSpec, fo
 				c.SpaceID,
 				c.StackID,
 				c.CellID,
+				strconv.FormatBool(c.Root),
 				c.Image,
 				state,
 			})
@@ -184,4 +185,18 @@ func printContainers(cmd *cobra.Command, containers []*v1beta1.ContainerSpec, fo
 	default:
 		return shared.PrintYAML(containers)
 	}
+}
+
+func containerDisplayName(c *v1beta1.ContainerSpec) string {
+	if c == nil {
+		return ""
+	}
+	if c.Root {
+		return "root"
+	}
+	id := strings.TrimSpace(c.ID)
+	if id == "" {
+		return "-"
+	}
+	return id
 }

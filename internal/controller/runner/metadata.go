@@ -18,17 +18,15 @@ package runner
 
 import (
 	"fmt"
-	"path/filepath"
 
-	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
+	"github.com/eminwux/kukeon/internal/util/fs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 func (r *Exec) UpdateRealmMetadata(doc *v1beta1.RealmDoc) error {
-	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonRealmMetadataSubDir, doc.Metadata.Name)
-	metadataFilePath := filepath.Join(metadataRunPath, consts.KukeonMetadataFile)
+	metadataFilePath := fs.RealmMetadataPath(r.opts.RunPath, doc.Metadata.Name)
 	err := metadata.WriteMetadata(r.ctx, r.logger, doc, metadataFilePath)
 	if err != nil {
 		r.logger.Error("failed to write metadata", "err", fmt.Sprintf("%v", err))
@@ -38,8 +36,11 @@ func (r *Exec) UpdateRealmMetadata(doc *v1beta1.RealmDoc) error {
 }
 
 func (r *Exec) UpdateSpaceMetadata(doc *v1beta1.SpaceDoc) error {
-	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonSpaceMetadataSubDir, doc.Metadata.Name)
-	metadataFilePath := filepath.Join(metadataRunPath, consts.KukeonMetadataFile)
+	metadataFilePath := fs.SpaceMetadataPath(
+		r.opts.RunPath,
+		doc.Spec.RealmID,
+		doc.Metadata.Name,
+	)
 	err := metadata.WriteMetadata(r.ctx, r.logger, doc, metadataFilePath)
 	if err != nil {
 		r.logger.Error("failed to write metadata", "err", fmt.Sprintf("%v", err))
@@ -49,8 +50,12 @@ func (r *Exec) UpdateSpaceMetadata(doc *v1beta1.SpaceDoc) error {
 }
 
 func (r *Exec) UpdateStackMetadata(doc *v1beta1.StackDoc) error {
-	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonStackMetadataSubDir, doc.Metadata.Name)
-	metadataFilePath := filepath.Join(metadataRunPath, consts.KukeonMetadataFile)
+	metadataFilePath := fs.StackMetadataPath(
+		r.opts.RunPath,
+		doc.Spec.RealmID,
+		doc.Spec.SpaceID,
+		doc.Metadata.Name,
+	)
 	err := metadata.WriteMetadata(r.ctx, r.logger, doc, metadataFilePath)
 	if err != nil {
 		r.logger.Error("failed to write metadata", "err", fmt.Sprintf("%v", err))
@@ -60,8 +65,13 @@ func (r *Exec) UpdateStackMetadata(doc *v1beta1.StackDoc) error {
 }
 
 func (r *Exec) UpdateCellMetadata(doc *v1beta1.CellDoc) error {
-	metadataRunPath := filepath.Join(r.opts.RunPath, consts.KukeonCellMetadataSubDir, doc.Metadata.Name)
-	metadataFilePath := filepath.Join(metadataRunPath, consts.KukeonMetadataFile)
+	metadataFilePath := fs.CellMetadataPath(
+		r.opts.RunPath,
+		doc.Spec.RealmID,
+		doc.Spec.SpaceID,
+		doc.Spec.StackID,
+		doc.Metadata.Name,
+	)
 	err := metadata.WriteMetadata(r.ctx, r.logger, doc, metadataFilePath)
 	if err != nil {
 		r.logger.Error("failed to write metadata", "err", fmt.Sprintf("%v", err))
