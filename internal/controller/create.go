@@ -323,6 +323,9 @@ func (b *Exec) CreateStack(opts CreateStackOptions) (CreateStackResult, error) {
 			Metadata: v1beta1.SpaceMetadata{
 				Name: space,
 			},
+			Spec: v1beta1.SpaceSpec{
+				RealmID: realm,
+			},
 		})
 		if spaceErr != nil {
 			return res, fmt.Errorf("space %q not found at run-path %q: %w", space, b.opts.RunPath, spaceErr)
@@ -350,6 +353,9 @@ func (b *Exec) CreateStack(opts CreateStackOptions) (CreateStackResult, error) {
 		_, spaceErr := b.runner.GetSpace(&v1beta1.SpaceDoc{
 			Metadata: v1beta1.SpaceMetadata{
 				Name: space,
+			},
+			Spec: v1beta1.SpaceSpec{
+				RealmID: realm,
 			},
 		})
 		if spaceErr != nil {

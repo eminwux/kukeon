@@ -75,7 +75,7 @@ func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 		return nil, errdefs.ErrStackNameRequired
 	}
 
-	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(spaceID)
+	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmID, spaceID)
 	if cniErr != nil {
 		return nil, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
@@ -283,7 +283,7 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 		return nil, errdefs.ErrStackNameRequired
 	}
 
-	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(spaceID)
+	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmID, spaceID)
 	if cniErr != nil {
 		return nil, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
@@ -586,7 +586,7 @@ func (r *Exec) StartCell(doc *v1beta1.CellDoc) error {
 		return errdefs.ErrStackNameRequired
 	}
 
-	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(spaceID)
+	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmID, spaceID)
 	if cniErr != nil {
 		return fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
@@ -927,7 +927,7 @@ func (r *Exec) StopCell(doc *v1beta1.CellDoc) error {
 		return errdefs.ErrStackNameRequired
 	}
 
-	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(spaceID)
+	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmID, spaceID)
 	if cniErr != nil {
 		return fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
@@ -1081,7 +1081,7 @@ func (r *Exec) KillCell(doc *v1beta1.CellDoc) error {
 		return errdefs.ErrStackNameRequired
 	}
 
-	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(spaceID)
+	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmID, spaceID)
 	if cniErr != nil {
 		return fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
@@ -1508,10 +1508,13 @@ func (r *Exec) DeleteContainer(doc *v1beta1.CellDoc, containerID string) error {
 	return nil
 }
 
-func (r *Exec) resolveSpaceCNIConfigPath(spaceID string) (string, error) {
+func (r *Exec) resolveSpaceCNIConfigPath(realmID, spaceID string) (string, error) {
 	spaceDoc, err := r.GetSpace(&v1beta1.SpaceDoc{
 		Metadata: v1beta1.SpaceMetadata{
 			Name: spaceID,
+		},
+		Spec: v1beta1.SpaceSpec{
+			RealmID: realmID,
 		},
 	})
 	if err != nil {
@@ -1523,7 +1526,7 @@ func (r *Exec) resolveSpaceCNIConfigPath(spaceID string) (string, error) {
 		return confPath, nil
 	}
 
-	confPath, err = fs.SpaceNetworkConfigPath(r.opts.RunPath, spaceDoc.Metadata.Name)
+	confPath, err = fs.SpaceNetworkConfigPath(r.opts.RunPath, realmID, spaceDoc.Metadata.Name)
 	if err != nil {
 		return "", fmt.Errorf("failed to build default space CNI config path: %w", err)
 	}

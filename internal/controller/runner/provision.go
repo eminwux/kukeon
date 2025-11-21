@@ -184,7 +184,7 @@ func (r *Exec) ensureSpaceCNIConfig(doc *v1beta1.SpaceDoc) (*v1beta1.SpaceDoc, e
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
-	confPath, err := fs.SpaceNetworkConfigPath(r.opts.RunPath, doc.Metadata.Name)
+	confPath, err := fs.SpaceNetworkConfigPath(r.opts.RunPath, doc.Spec.RealmID, doc.Metadata.Name)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
@@ -234,7 +234,7 @@ func (r *Exec) createSpaceCNIConfig(doc *v1beta1.SpaceDoc) error {
 	if err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
-	confPath, err := fs.SpaceNetworkConfigPath(r.opts.RunPath, doc.Metadata.Name)
+	confPath, err := fs.SpaceNetworkConfigPath(r.opts.RunPath, doc.Spec.RealmID, doc.Metadata.Name)
 	if err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
@@ -668,6 +668,9 @@ func (r *Exec) createStackCgroup(doc *v1beta1.StackDoc) (string, error) {
 		Metadata: v1beta1.SpaceMetadata{
 			Name: doc.Spec.SpaceID,
 		},
+		Spec: v1beta1.SpaceSpec{
+			RealmID: doc.Spec.RealmID,
+		},
 	})
 	if err != nil {
 		return "", err
@@ -728,6 +731,9 @@ func (r *Exec) ensureStackCgroup(doc *v1beta1.StackDoc) (*v1beta1.StackDoc, erro
 	spaceDoc, err := r.GetSpace(&v1beta1.SpaceDoc{
 		Metadata: v1beta1.SpaceMetadata{
 			Name: doc.Spec.SpaceID,
+		},
+		Spec: v1beta1.SpaceSpec{
+			RealmID: doc.Spec.RealmID,
 		},
 	})
 	if err != nil {
@@ -815,6 +821,9 @@ func (r *Exec) createCellCgroup(doc *v1beta1.CellDoc) (string, error) {
 		Metadata: v1beta1.SpaceMetadata{
 			Name: doc.Spec.SpaceID,
 		},
+		Spec: v1beta1.SpaceSpec{
+			RealmID: doc.Spec.RealmID,
+		},
 	})
 	if err != nil {
 		return "", err
@@ -822,6 +831,10 @@ func (r *Exec) createCellCgroup(doc *v1beta1.CellDoc) (string, error) {
 	stackDoc, err := r.GetStack(&v1beta1.StackDoc{
 		Metadata: v1beta1.StackMetadata{
 			Name: doc.Spec.StackID,
+		},
+		Spec: v1beta1.StackSpec{
+			RealmID: doc.Spec.RealmID,
+			SpaceID: doc.Spec.SpaceID,
 		},
 	})
 	if err != nil {
@@ -892,6 +905,9 @@ func (r *Exec) ensureCellCgroup(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error) 
 		Metadata: v1beta1.SpaceMetadata{
 			Name: doc.Spec.SpaceID,
 		},
+		Spec: v1beta1.SpaceSpec{
+			RealmID: doc.Spec.RealmID,
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -900,6 +916,10 @@ func (r *Exec) ensureCellCgroup(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error) 
 	stackDoc, err := r.GetStack(&v1beta1.StackDoc{
 		Metadata: v1beta1.StackMetadata{
 			Name: doc.Spec.StackID,
+		},
+		Spec: v1beta1.StackSpec{
+			RealmID: doc.Spec.RealmID,
+			SpaceID: doc.Spec.SpaceID,
 		},
 	})
 	if err != nil {
