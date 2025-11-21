@@ -323,6 +323,10 @@ func (b *Exec) ListContainers(realmName, spaceName, stackName, cellName string) 
 	// Extract containers from cells
 	containers := make([]*v1beta1.ContainerSpec, 0)
 	for _, cell := range cells {
+		if cell.Spec.RootContainer != nil {
+			cell.Spec.RootContainer.Root = true
+			containers = append(containers, cell.Spec.RootContainer)
+		}
 		for i := range cell.Spec.Containers {
 			containers = append(containers, &cell.Spec.Containers[i])
 		}

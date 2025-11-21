@@ -75,19 +75,19 @@ type BootstrapReport struct {
 	StackCgroupExistsPost   bool
 	StackCgroupCreated      bool
 
-	CellName                     string
-	CellMetadataExistsPre        bool
-	CellMetadataExistsPost       bool
-	CellCreated                  bool
-	CellCgroupExistsPre          bool
-	CellCgroupExistsPost         bool
-	CellCgroupCreated            bool
-	CellPauseContainerExistsPre  bool
-	CellPauseContainerExistsPost bool
-	CellPauseContainerCreated    bool
-	CellStartedPre               bool
-	CellStartedPost              bool
-	CellStarted                  bool
+	CellName                    string
+	CellMetadataExistsPre       bool
+	CellMetadataExistsPost      bool
+	CellCreated                 bool
+	CellCgroupExistsPre         bool
+	CellCgroupExistsPost        bool
+	CellCgroupCreated           bool
+	CellRootContainerExistsPre  bool
+	CellRootContainerExistsPost bool
+	CellRootContainerCreated    bool
+	CellStartedPre              bool
+	CellStartedPost             bool
+	CellStarted                 bool
 }
 
 func (b *Exec) bootstrapRealm(report BootstrapReport) (BootstrapReport, error) {
@@ -370,12 +370,12 @@ func (b *Exec) bootstrapCell(report BootstrapReport) (BootstrapReport, error) {
 			return report, fmt.Errorf("failed to check if cell cgroup exists: %w", cgroupErr)
 		}
 		report.CellCgroupExistsPre = cgroupExists
-		// Check if pause container exists pre (only if cell exists)
-		pauseExistsPre, pauseErr := b.runner.ExistsCellPauseContainer(cellDocPre)
-		if pauseErr != nil {
-			return report, fmt.Errorf("failed to check if pause container exists: %w", pauseErr)
+		// Check if root container exists pre (only if cell exists)
+		rootExistsPre, rootErr := b.runner.ExistsCellRootContainer(cellDocPre)
+		if rootErr != nil {
+			return report, fmt.Errorf("failed to check if root container exists: %w", rootErr)
 		}
-		report.CellPauseContainerExistsPre = pauseExistsPre
+		report.CellRootContainerExistsPre = rootExistsPre
 		// Check if containers are started pre (best-effort, only if cell exists)
 		// For now, we assume containers are not started pre
 		// This could be enhanced later to check task status
@@ -409,12 +409,12 @@ func (b *Exec) bootstrapCell(report BootstrapReport) (BootstrapReport, error) {
 			return report, fmt.Errorf("failed to check if cell cgroup exists: %w", cgroupErr)
 		}
 		report.CellCgroupExistsPost = cgroupExists
-		// Check if pause container exists post
-		pauseExistsPost, pauseErr := b.runner.ExistsCellPauseContainer(cellDocPost)
-		if pauseErr != nil {
-			return report, fmt.Errorf("failed to check if pause container exists: %w", pauseErr)
+		// Check if root container exists post
+		rootExistsPost, rootErr := b.runner.ExistsCellRootContainer(cellDocPost)
+		if rootErr != nil {
+			return report, fmt.Errorf("failed to check if root container exists: %w", rootErr)
 		}
-		report.CellPauseContainerExistsPost = pauseExistsPost
+		report.CellRootContainerExistsPost = rootExistsPost
 		// Check if containers are started post
 		// After StartCell succeeds, containers should be started
 		report.CellStartedPost = true
@@ -423,7 +423,7 @@ func (b *Exec) bootstrapCell(report BootstrapReport) (BootstrapReport, error) {
 	// Derived outcomes
 	report.CellCreated = !report.CellMetadataExistsPre && report.CellMetadataExistsPost
 	report.CellCgroupCreated = !report.CellCgroupExistsPre && report.CellCgroupExistsPost
-	report.CellPauseContainerCreated = !report.CellPauseContainerExistsPre && report.CellPauseContainerExistsPost
+	report.CellRootContainerCreated = !report.CellRootContainerExistsPre && report.CellRootContainerExistsPost
 	report.CellStarted = !report.CellStartedPre && report.CellStartedPost
 
 	return report, nil

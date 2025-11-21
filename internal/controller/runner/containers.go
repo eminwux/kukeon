@@ -26,10 +26,10 @@ import (
 
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
-	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	ctrutil "github.com/eminwux/kukeon/internal/util/ctr"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -43,8 +43,8 @@ func appendCellLogFields(fields []any, cellID, cellName string) []any {
 	return fields
 }
 
-// createCellContainers creates the pause container and all containers defined in the CellDoc.
-// The pause container is created first, then all containers in doc.Spec.Containers are created.
+// createCellContainers creates the root container and all containers defined in the CellDoc.
+// The root container is created first, then all containers in doc.Spec.Containers are created.
 func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container, error) {
 	if doc == nil {
 		return nil, errdefs.ErrCellNotFound
@@ -111,49 +111,23 @@ func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
 
 	// Generate container ID with cell identifier for uniqueness
-	containerID, err := naming.BuildPauseContainerName(spaceID, stackID, cellID)
+	containerID, err := naming.BuildRootContainerName(spaceID, stackID, cellID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build pause container name: %w", err)
+		return nil, fmt.Errorf("failed to build root container name: %w", err)
 	}
 
-	// Use default pause image (busybox with sleep)
-	image := "docker.io/library/busybox:latest"
+	rootContainerSpec := ensureCellRootContainerSpec(
+		doc,
+		containerID,
+		cellID,
+		realmID,
+		spaceID,
+		stackID,
+		cniConfigPath,
+	)
 
-	// Build labels
-	labels := make(map[string]string)
-	if doc.Metadata.Labels != nil {
-		for k, v := range doc.Metadata.Labels {
-			labels[k] = v
-		}
-	}
-	// Add kukeon-specific labels
-	labels["kukeon.io/container-type"] = "pause"
-	labels["kukeon.io/cell"] = cellID
-	if cellName != "" {
-		labels["kukeon.io/cell-name"] = cellName
-	}
-	labels["kukeon.io/space"] = spaceID
-	labels["kukeon.io/realm"] = realmID
-	labels["kukeon.io/stack"] = stackID
-
-	// Create container spec with minimal OCI spec options
-	// The pause container should run a minimal command that keeps it alive
-	specOpts := []oci.SpecOpts{
-		// Run sleep infinity to keep container alive
-		oci.WithProcessArgs("sleep", "infinity"),
-		// Set hostname to container ID
-		oci.WithHostname(containerID),
-		// Keep the container running in the background
-		oci.WithDefaultPathEnv,
-	}
-
-	containerSpec := ctr.ContainerSpec{
-		ID:            containerID,
-		Image:         image,
-		Labels:        labels,
-		SpecOpts:      specOpts,
-		CNIConfigPath: cniConfigPath,
-	}
+	rootLabels := buildRootContainerLabels(doc, cellID, cellName, spaceID, stackID, realmID)
+	containerSpec := ctrutil.BuildRootContainerSpec(rootContainerSpec, rootLabels)
 
 	container, err := r.ctrClient.CreateContainer(ctrCtx, containerSpec)
 	if err != nil {
@@ -171,17 +145,17 @@ func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 		)
 		r.logger.ErrorContext(
 			r.ctx,
-			"failed to create pause container",
+			"failed to create root container",
 			logFields...,
 		)
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrCreatePauseContainer, err)
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrCreateRootContainer, err)
 	}
 
 	infoFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 	infoFields = append(infoFields, "space", spaceID, "realm", realmID, "cniConfig", cniConfigPath)
 	r.logger.InfoContext(
 		r.ctx,
-		"created pause container",
+		"created root container",
 		infoFields...,
 	)
 
@@ -250,9 +224,9 @@ func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 	return container, nil
 }
 
-// ensureCellContainers ensures the pause container and all containers defined in the CellDoc exist.
-// The pause container is ensured first, then all containers in doc.Spec.Containers are ensured.
-// If any container doesn't exist, it is created. Returns the pause container or an error.
+// ensureCellContainers ensures the root container and all containers defined in the CellDoc exist.
+// The root container is ensured first, then all containers in doc.Spec.Containers are ensured.
+// If any container doesn't exist, it is created. Returns the root container or an error.
 func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container, error) {
 	if doc == nil {
 		return nil, errdefs.ErrCellNotFound
@@ -319,9 +293,9 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
 
 	// Generate container ID with cell identifier for uniqueness
-	containerID, err := naming.BuildPauseContainerName(spaceID, stackID, cellID)
+	containerID, err := naming.BuildRootContainerName(spaceID, stackID, cellID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build pause container name: %w", err)
+		return nil, fmt.Errorf("failed to build root container name: %w", err)
 	}
 
 	// Check if container exists
@@ -331,10 +305,10 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
 		r.logger.ErrorContext(
 			r.ctx,
-			"failed to check if pause container exists",
+			"failed to check if root container exists",
 			fields...,
 		)
-		return nil, fmt.Errorf("failed to check if pause container exists: %w", err)
+		return nil, fmt.Errorf("failed to check if root container exists: %w", err)
 	}
 
 	if exists {
@@ -345,16 +319,16 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 			fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", loadErr))
 			r.logger.WarnContext(
 				r.ctx,
-				"pause container exists but failed to load",
+				"root container exists but failed to load",
 				fields...,
 			)
-			return nil, fmt.Errorf("failed to load existing pause container: %w", loadErr)
+			return nil, fmt.Errorf("failed to load existing root container: %w", loadErr)
 		}
 		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 		fields = append(fields, "space", spaceID, "realm", realmID)
 		r.logger.DebugContext(
 			r.ctx,
-			"pause container exists",
+			"root container exists",
 			fields...,
 		)
 		return container, nil
@@ -365,48 +339,21 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 	createFields = append(createFields, "space", spaceID, "realm", realmID, "cniConfig", cniConfigPath)
 	r.logger.InfoContext(
 		r.ctx,
-		"pause container does not exist, creating",
+		"root container does not exist, creating",
 		createFields...,
 	)
 
-	// Use default pause image (busybox with sleep)
-	image := "docker.io/library/busybox:latest"
-
-	// Build labels
-	labels := make(map[string]string)
-	if doc.Metadata.Labels != nil {
-		for k, v := range doc.Metadata.Labels {
-			labels[k] = v
-		}
-	}
-	// Add kukeon-specific labels
-	labels["kukeon.io/container-type"] = "pause"
-	labels["kukeon.io/cell"] = cellID
-	if cellName != "" {
-		labels["kukeon.io/cell-name"] = cellName
-	}
-	labels["kukeon.io/space"] = spaceID
-	labels["kukeon.io/realm"] = realmID
-	labels["kukeon.io/stack"] = stackID
-
-	// Create container spec with minimal OCI spec options
-	// The pause container should run a minimal command that keeps it alive
-	specOpts := []oci.SpecOpts{
-		// Run sleep infinity to keep container alive
-		oci.WithProcessArgs("sleep", "infinity"),
-		// Set hostname to container ID
-		oci.WithHostname(containerID),
-		// Keep the container running in the background
-		oci.WithDefaultPathEnv,
-	}
-
-	containerSpec := ctr.ContainerSpec{
-		ID:            containerID,
-		Image:         image,
-		Labels:        labels,
-		SpecOpts:      specOpts,
-		CNIConfigPath: cniConfigPath,
-	}
+	rootContainerSpec := ensureCellRootContainerSpec(
+		doc,
+		containerID,
+		cellID,
+		realmID,
+		spaceID,
+		stackID,
+		cniConfigPath,
+	)
+	rootLabels := buildRootContainerLabels(doc, cellID, cellName, spaceID, stackID, realmID)
+	containerSpec := ctrutil.BuildRootContainerSpec(rootContainerSpec, rootLabels)
 
 	container, createErr := r.ctrClient.CreateContainer(ctrCtx, containerSpec)
 	if createErr != nil {
@@ -424,17 +371,17 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 		)
 		r.logger.ErrorContext(
 			r.ctx,
-			"failed to create pause container",
+			"failed to create root container",
 			fields...,
 		)
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrCreatePauseContainer, createErr)
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrCreateRootContainer, createErr)
 	}
 
 	ensuredFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 	ensuredFields = append(ensuredFields, "space", spaceID, "realm", realmID, "cniConfig", cniConfigPath)
 	r.logger.InfoContext(
 		r.ctx,
-		"ensured pause container exists",
+		"ensured root container exists",
 		ensuredFields...,
 	)
 
@@ -554,8 +501,80 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 	return container, nil
 }
 
-// StartCell starts the pause container and all containers defined in the CellDoc.
-// The pause container is started first, then all containers in doc.Spec.Containers are started.
+func ensureCellRootContainerSpec(
+	doc *v1beta1.CellDoc,
+	containerID,
+	cellID,
+	realmID,
+	spaceID,
+	stackID,
+	cniConfigPath string,
+) *v1beta1.ContainerSpec {
+	if doc == nil {
+		return nil
+	}
+
+	if doc.Spec.RootContainer == nil {
+		doc.Spec.RootContainer = ctrutil.DefaultRootContainerSpec(
+			containerID,
+			cellID,
+			realmID,
+			spaceID,
+			stackID,
+			cniConfigPath,
+		)
+		return doc.Spec.RootContainer
+	}
+
+	rootSpec := doc.Spec.RootContainer
+	rootSpec.Root = true
+	if rootSpec.ID == "" {
+		rootSpec.ID = containerID
+	}
+	if rootSpec.CellID == "" {
+		rootSpec.CellID = cellID
+	}
+	if rootSpec.RealmID == "" {
+		rootSpec.RealmID = realmID
+	}
+	if rootSpec.SpaceID == "" {
+		rootSpec.SpaceID = spaceID
+	}
+	if rootSpec.StackID == "" {
+		rootSpec.StackID = stackID
+	}
+	if rootSpec.CNIConfigPath == "" {
+		rootSpec.CNIConfigPath = cniConfigPath
+	}
+	return rootSpec
+}
+
+func buildRootContainerLabels(
+	doc *v1beta1.CellDoc,
+	cellID,
+	cellName,
+	spaceID,
+	stackID,
+	realmID string,
+) map[string]string {
+	labels := make(map[string]string)
+	if doc != nil && doc.Metadata.Labels != nil {
+		for k, v := range doc.Metadata.Labels {
+			labels[k] = v
+		}
+	}
+	labels["kukeon.io/cell"] = cellID
+	if cellName != "" {
+		labels["kukeon.io/cell-name"] = cellName
+	}
+	labels["kukeon.io/space"] = spaceID
+	labels["kukeon.io/realm"] = realmID
+	labels["kukeon.io/stack"] = stackID
+	return labels
+}
+
+// StartCell starts the root container and all containers defined in the CellDoc.
+// The root container is started first, then all containers in doc.Spec.Containers are started.
 func (r *Exec) StartCell(doc *v1beta1.CellDoc) error {
 	if doc == nil {
 		return errdefs.ErrCellNotFound
@@ -624,33 +643,33 @@ func (r *Exec) StartCell(doc *v1beta1.CellDoc) error {
 	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
 
 	// Generate container ID with cell identifier for uniqueness
-	containerID, err := naming.BuildPauseContainerName(spaceID, stackID, cellID)
+	containerID, err := naming.BuildRootContainerName(spaceID, stackID, cellID)
 	if err != nil {
-		return fmt.Errorf("failed to build pause container name: %w", err)
+		return fmt.Errorf("failed to build root container name: %w", err)
 	}
 
-	// Start pause container
-	pauseTask, err := r.ctrClient.StartContainer(ctrCtx, ctr.ContainerSpec{ID: containerID}, ctr.TaskSpec{})
+	// Start root container
+	rootTask, err := r.ctrClient.StartContainer(ctrCtx, ctr.ContainerSpec{ID: containerID}, ctr.TaskSpec{})
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
 		r.logger.ErrorContext(
 			r.ctx,
-			"failed to start pause container",
+			"failed to start root container",
 			fields...,
 		)
-		return fmt.Errorf("failed to start pause container %s: %w", containerID, err)
+		return fmt.Errorf("failed to start root container %s: %w", containerID, err)
 	}
 
-	pausePID := pauseTask.Pid()
-	if pausePID == 0 {
-		return fmt.Errorf("pause container %s has invalid pid (0)", containerID)
+	rootPID := rootTask.Pid()
+	if rootPID == 0 {
+		return fmt.Errorf("root container %s has invalid pid (0)", containerID)
 	}
 
 	namespacePaths := ctr.NamespacePaths{
-		Net: fmt.Sprintf("/proc/%d/ns/net", pausePID),
-		IPC: fmt.Sprintf("/proc/%d/ns/ipc", pausePID),
-		UTS: fmt.Sprintf("/proc/%d/ns/uts", pausePID),
+		Net: fmt.Sprintf("/proc/%d/ns/net", rootPID),
+		IPC: fmt.Sprintf("/proc/%d/ns/ipc", rootPID),
+		UTS: fmt.Sprintf("/proc/%d/ns/uts", rootPID),
 	}
 
 	// Log CNI paths being used for debugging
@@ -741,7 +760,7 @@ func (r *Exec) StartCell(doc *v1beta1.CellDoc) error {
 			)
 			r.logger.DebugContext(
 				r.ctx,
-				"pause container already attached to network, skipping",
+				"root container already attached to network, skipping",
 				fields...,
 			)
 			// Continue execution - container is already attached
@@ -775,18 +794,18 @@ func (r *Exec) StartCell(doc *v1beta1.CellDoc) error {
 			}
 			r.logger.ErrorContext(
 				r.ctx,
-				"failed to attach pause container to network",
+				"failed to attach root container to network",
 				fields...,
 			)
-			return fmt.Errorf("failed to attach pause container %s to network: %w", containerID, addErr)
+			return fmt.Errorf("failed to attach root container %s to network: %w", containerID, addErr)
 		}
 	}
 
 	infoFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-	infoFields = append(infoFields, "space", spaceID, "realm", realmID, "pid", pausePID, "cniConfig", cniConfigPath)
+	infoFields = append(infoFields, "space", spaceID, "realm", realmID, "pid", rootPID, "cniConfig", cniConfigPath)
 	r.logger.InfoContext(
 		r.ctx,
-		"started pause container",
+		"started root container",
 		infoFields...,
 	)
 
@@ -833,24 +852,24 @@ func (r *Exec) StartCell(doc *v1beta1.CellDoc) error {
 	return nil
 }
 
-// detachPauseContainerFromCNI detaches the pause container from the CNI network.
+// detachRootContainerFromCNI detaches the root container from the CNI network.
 // It handles the case where the container might not exist or might already be detached.
 // This function logs warnings for non-critical failures but continues execution.
-func (r *Exec) detachPauseContainerFromCNI(
+func (r *Exec) detachRootContainerFromCNI(
 	ctrCtx context.Context,
-	pauseContainerID, cniConfigPath, cellID, cellName, spaceID, realmID, realmNamespace string,
+	rootContainerID, cniConfigPath, cellID, cellName, spaceID, realmID, realmNamespace string,
 ) {
-	// Get pause container to check if it exists and get its task
-	pauseContainer, err := r.ctrClient.GetContainer(ctrCtx, pauseContainerID)
+	// Get root container to check if it exists and get its task
+	rootContainer, err := r.ctrClient.GetContainer(ctrCtx, rootContainerID)
 	if err == nil {
 		// Container exists, try to get its task to detach from CNI
 		nsCtx := namespaces.WithNamespace(ctrCtx, realmNamespace)
-		pauseTask, taskErr := pauseContainer.Task(nsCtx, nil)
+		rootTask, taskErr := rootContainer.Task(nsCtx, nil)
 		if taskErr == nil {
 			// Task exists, get PID and detach from CNI
-			pausePID := pauseTask.Pid()
-			if pausePID > 0 {
-				netnsPath := fmt.Sprintf("/proc/%d/ns/net", pausePID)
+			rootPID := rootTask.Pid()
+			if rootPID > 0 {
+				netnsPath := fmt.Sprintf("/proc/%d/ns/net", rootPID)
 
 				// Create CNI manager and detach from network
 				cniMgr, mgrErr := cni.NewManager(
@@ -860,9 +879,9 @@ func (r *Exec) detachPauseContainerFromCNI(
 				)
 				if mgrErr == nil {
 					if loadErr := cniMgr.LoadNetworkConfigList(cniConfigPath); loadErr == nil {
-						if delErr := cniMgr.DelContainerFromNetwork(ctrCtx, pauseContainerID, netnsPath); delErr != nil {
+						if delErr := cniMgr.DelContainerFromNetwork(ctrCtx, rootContainerID, netnsPath); delErr != nil {
 							// Log warning but continue - network might already be detached
-							fields := appendCellLogFields([]any{"id", pauseContainerID}, cellID, cellName)
+							fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
 							fields = append(
 								fields,
 								"space",
@@ -876,15 +895,15 @@ func (r *Exec) detachPauseContainerFromCNI(
 							)
 							r.logger.WarnContext(
 								r.ctx,
-								"failed to detach pause container from network, continuing",
+								"failed to detach root container from network, continuing",
 								fields...,
 							)
 						} else {
-							fields := appendCellLogFields([]any{"id", pauseContainerID}, cellID, cellName)
+							fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
 							fields = append(fields, "space", spaceID, "realm", realmID, "netns", netnsPath)
 							r.logger.InfoContext(
 								r.ctx,
-								"detached pause container from network",
+								"detached root container from network",
 								fields...,
 							)
 						}
@@ -895,8 +914,8 @@ func (r *Exec) detachPauseContainerFromCNI(
 	}
 }
 
-// StopCell stops all containers in the cell (workload containers first, then pause container).
-// It detaches the pause container from the CNI network before stopping it.
+// StopCell stops all containers in the cell (workload containers first, then root container).
+// It detaches the root container from the CNI network before stopping it.
 func (r *Exec) StopCell(doc *v1beta1.CellDoc) error {
 	if doc == nil {
 		return errdefs.ErrCellNotFound
@@ -1003,16 +1022,16 @@ func (r *Exec) StopCell(doc *v1beta1.CellDoc) error {
 		)
 	}
 
-	// Stop pause container last and detach from CNI
-	pauseContainerID, err := naming.BuildPauseContainerName(spaceID, stackID, cellID)
+	// Stop root container last and detach from CNI
+	rootContainerID, err := naming.BuildRootContainerName(spaceID, stackID, cellID)
 	if err != nil {
-		return fmt.Errorf("failed to build pause container name: %w", err)
+		return fmt.Errorf("failed to build root container name: %w", err)
 	}
 
-	// Detach pause container from CNI network
-	r.detachPauseContainerFromCNI(
+	// Detach root container from CNI network
+	r.detachRootContainerFromCNI(
 		ctrCtx,
-		pauseContainerID,
+		rootContainerID,
 		cniConfigPath,
 		cellID,
 		cellName,
@@ -1021,27 +1040,27 @@ func (r *Exec) StopCell(doc *v1beta1.CellDoc) error {
 		realmDoc.Spec.Namespace,
 	)
 
-	// Stop pause container
+	// Stop root container
 	timeout := 5 * time.Second
-	_, err = r.ctrClient.StopContainer(ctrCtx, pauseContainerID, ctr.StopContainerOptions{
+	_, err = r.ctrClient.StopContainer(ctrCtx, rootContainerID, ctr.StopContainerOptions{
 		Force:   true,
 		Timeout: &timeout,
 	})
 	if err != nil {
-		fields := appendCellLogFields([]any{"id", pauseContainerID}, cellID, cellName)
+		fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
 		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
 		r.logger.WarnContext(
 			r.ctx,
-			"failed to stop pause container",
+			"failed to stop root container",
 			fields...,
 		)
-		// Don't fail the whole operation if pause container stop fails
+		// Don't fail the whole operation if root container stop fails
 	} else {
-		fields := appendCellLogFields([]any{"id", pauseContainerID}, cellID, cellName)
+		fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
 		fields = append(fields, "space", spaceID, "realm", realmID)
 		r.logger.InfoContext(
 			r.ctx,
-			"stopped pause container",
+			"stopped root container",
 			fields...,
 		)
 	}
@@ -1049,8 +1068,8 @@ func (r *Exec) StopCell(doc *v1beta1.CellDoc) error {
 	return nil
 }
 
-// KillCell immediately force-kills all containers in a cell (workload containers first, then pause container).
-// It detaches the pause container from the CNI network before killing it.
+// KillCell immediately force-kills all containers in a cell (workload containers first, then root container).
+// It detaches the root container from the CNI network before killing it.
 func (r *Exec) KillCell(doc *v1beta1.CellDoc) error {
 	if doc == nil {
 		return errdefs.ErrCellNotFound
@@ -1153,16 +1172,16 @@ func (r *Exec) KillCell(doc *v1beta1.CellDoc) error {
 		)
 	}
 
-	// Kill pause container last and detach from CNI
-	pauseContainerID, err := naming.BuildPauseContainerName(spaceID, stackID, cellID)
+	// Kill root container last and detach from CNI
+	rootContainerID, err := naming.BuildRootContainerName(spaceID, stackID, cellID)
 	if err != nil {
-		return fmt.Errorf("failed to build pause container name: %w", err)
+		return fmt.Errorf("failed to build root container name: %w", err)
 	}
 
-	// Detach pause container from CNI network
-	r.detachPauseContainerFromCNI(
+	// Detach root container from CNI network
+	r.detachRootContainerFromCNI(
 		ctrCtx,
-		pauseContainerID,
+		rootContainerID,
 		cniConfigPath,
 		cellID,
 		cellName,
@@ -1171,23 +1190,23 @@ func (r *Exec) KillCell(doc *v1beta1.CellDoc) error {
 		realmDoc.Spec.Namespace,
 	)
 
-	// Kill pause container
-	err = r.killContainerTask(ctrCtx, pauseContainerID, realmDoc.Spec.Namespace)
+	// Kill root container
+	err = r.killContainerTask(ctrCtx, rootContainerID, realmDoc.Spec.Namespace)
 	if err != nil {
-		fields := appendCellLogFields([]any{"id", pauseContainerID}, cellID, cellName)
+		fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
 		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
 		r.logger.WarnContext(
 			r.ctx,
-			"failed to kill pause container",
+			"failed to kill root container",
 			fields...,
 		)
-		// Don't fail the whole operation if pause container kill fails
+		// Don't fail the whole operation if root container kill fails
 	} else {
-		fields := appendCellLogFields([]any{"id", pauseContainerID}, cellID, cellName)
+		fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
 		fields = append(fields, "space", spaceID, "realm", realmID)
 		r.logger.InfoContext(
 			r.ctx,
-			"killed pause container",
+			"killed root container",
 			fields...,
 		)
 	}

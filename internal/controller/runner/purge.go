@@ -398,13 +398,13 @@ func (r *Exec) PurgeCell(doc *v1beta1.CellDoc) error {
 				cellID = cellDoc.Metadata.Name
 			}
 
-			// Add pause container
-			var pauseContainerID string
-			pauseContainerID, err = naming.BuildPauseContainerName(spaceID, stackID, cellID)
+			// Add root container
+			var rootContainerID string
+			rootContainerID, err = naming.BuildRootContainerName(spaceID, stackID, cellID)
 			if err != nil {
-				r.logger.WarnContext(r.ctx, "failed to build pause container name", "error", err)
+				r.logger.WarnContext(r.ctx, "failed to build root container name", "error", err)
 			} else {
-				containerIDs = append(containerIDs, pauseContainerID)
+				containerIDs = append(containerIDs, rootContainerID)
 			}
 
 			// Add all containers from the cell spec

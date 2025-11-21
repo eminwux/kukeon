@@ -37,6 +37,7 @@ type ContainerSpec struct {
 	SpaceID         string    `json:"spaceId"         yaml:"spaceId"`
 	StackID         string    `json:"stackId"         yaml:"stackId"`
 	CellID          string    `json:"cellId"          yaml:"cellId"`
+	Root            bool      `json:"root,omitempty"  yaml:"root,omitempty"`
 	Image           string    `json:"image"           yaml:"image"`
 	Command         string    `json:"command"         yaml:"command"`
 	Args            []string  `json:"args"            yaml:"args"`

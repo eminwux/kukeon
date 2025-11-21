@@ -392,18 +392,27 @@ type CreateCellResult struct {
 	StackName string
 	Labels    map[string]string
 
-	MetadataExistsPre  bool
-	MetadataExistsPost bool
-	CgroupExistsPre    bool
-	CgroupExistsPost   bool
-	CgroupCreated      bool
-	PauseExistsPre     bool
-	PauseExistsPost    bool
-	PauseCreated       bool
-	StartedPre         bool
-	StartedPost        bool
-	Started            bool
-	Created            bool
+	MetadataExistsPre       bool
+	MetadataExistsPost      bool
+	CgroupExistsPre         bool
+	CgroupExistsPost        bool
+	CgroupCreated           bool
+	RootContainerExistsPre  bool
+	RootContainerExistsPost bool
+	RootContainerCreated    bool
+	StartedPre              bool
+	StartedPost             bool
+	Started                 bool
+	Created                 bool
+
+	Containers []ContainerCreationOutcome
+}
+
+type ContainerCreationOutcome struct {
+	Name       string
+	ExistsPre  bool
+	ExistsPost bool
+	Created    bool
 }
 
 func (b *Exec) CreateCell(opts CreateCellOptions) (CreateCellResult, error) {
@@ -454,6 +463,8 @@ func (b *Exec) CreateCell(opts CreateCellOptions) (CreateCellResult, error) {
 		},
 	}
 
+	preContainerExists := make(map[string]bool)
+
 	cellDocPre, err := b.runner.GetCell(doc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
@@ -467,9 +478,15 @@ func (b *Exec) CreateCell(opts CreateCellOptions) (CreateCellResult, error) {
 		if err != nil {
 			return res, fmt.Errorf("failed to check if cell cgroup exists: %w", err)
 		}
-		res.PauseExistsPre, err = b.runner.ExistsCellPauseContainer(cellDocPre)
+		res.RootContainerExistsPre, err = b.runner.ExistsCellRootContainer(cellDocPre)
 		if err != nil {
-			return res, fmt.Errorf("failed to check pause container: %w", err)
+			return res, fmt.Errorf("failed to check root container: %w", err)
+		}
+		for _, container := range cellDocPre.Spec.Containers {
+			id := strings.TrimSpace(container.ID)
+			if id != "" {
+				preContainerExists[id] = true
+			}
 		}
 		res.StartedPre = false
 	}
@@ -481,6 +498,8 @@ func (b *Exec) CreateCell(opts CreateCellOptions) (CreateCellResult, error) {
 	if err = b.runner.StartCell(doc); err != nil {
 		return res, fmt.Errorf("failed to start cell containers: %w", err)
 	}
+
+	postContainerExists := make(map[string]bool)
 
 	cellDocPost, err := b.runner.GetCell(doc)
 	if err != nil {
@@ -495,17 +514,37 @@ func (b *Exec) CreateCell(opts CreateCellOptions) (CreateCellResult, error) {
 		if err != nil {
 			return res, fmt.Errorf("failed to check if cell cgroup exists: %w", err)
 		}
-		res.PauseExistsPost, err = b.runner.ExistsCellPauseContainer(cellDocPost)
+		res.RootContainerExistsPost, err = b.runner.ExistsCellRootContainer(cellDocPost)
 		if err != nil {
-			return res, fmt.Errorf("failed to check pause container: %w", err)
+			return res, fmt.Errorf("failed to check root container: %w", err)
+		}
+		for _, container := range cellDocPost.Spec.Containers {
+			id := strings.TrimSpace(container.ID)
+			if id != "" {
+				postContainerExists[id] = true
+			}
 		}
 		res.StartedPost = true
 	}
 
 	res.Created = !res.MetadataExistsPre && res.MetadataExistsPost
 	res.CgroupCreated = !res.CgroupExistsPre && res.CgroupExistsPost
-	res.PauseCreated = !res.PauseExistsPre && res.PauseExistsPost
+	res.RootContainerCreated = !res.RootContainerExistsPre && res.RootContainerExistsPost
 	res.Started = !res.StartedPre && res.StartedPost
+
+	for _, container := range doc.Spec.Containers {
+		id := strings.TrimSpace(container.ID)
+		if id == "" {
+			continue
+		}
+		created := !preContainerExists[id] && postContainerExists[id]
+		res.Containers = append(res.Containers, ContainerCreationOutcome{
+			Name:       id,
+			ExistsPre:  preContainerExists[id],
+			ExistsPost: postContainerExists[id],
+			Created:    created,
+		})
+	}
 
 	return res, nil
 }
