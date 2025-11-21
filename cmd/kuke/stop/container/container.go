@@ -22,10 +22,18 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/stop/shared"
+	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+type containerController interface {
+	StopContainer(name, realmName, spaceName, stackName, cellName string) (*controller.StopContainerResult, error)
+}
+
+// MockControllerKey is used to inject mock controllers in tests via context.
+type MockControllerKey struct{}
 
 func NewContainerCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -35,11 +43,6 @@ func NewContainerCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctrl, err := shared.ControllerFromCmd(cmd)
-			if err != nil {
-				return err
-			}
-
 			name := strings.TrimSpace(args[0])
 			realm := strings.TrimSpace(viper.GetString(config.KUKE_STOP_CONTAINER_REALM.ViperKey))
 			space := strings.TrimSpace(viper.GetString(config.KUKE_STOP_CONTAINER_SPACE.ViperKey))
@@ -57,6 +60,18 @@ func NewContainerCmd() *cobra.Command {
 			}
 			if cell == "" {
 				return fmt.Errorf("%w (--cell)", errdefs.ErrCellNameRequired)
+			}
+
+			// Check for mock controller in context (for testing)
+			var ctrl containerController
+			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(containerController); ok {
+				ctrl = mockCtrl
+			} else {
+				realCtrl, err := shared.ControllerFromCmd(cmd)
+				if err != nil {
+					return err
+				}
+				ctrl = realCtrl
 			}
 
 			result, err := ctrl.StopContainer(name, realm, space, stack, cell)

@@ -22,10 +22,20 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
+	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+// SpaceController defines the interface for space deletion operations.
+// It is exported for use in tests.
+type SpaceController interface {
+	DeleteSpace(name, realm string, force, cascade bool) (*controller.DeleteSpaceResult, error)
+}
+
+// MockControllerKey is used to inject mock controllers in tests via context.
+type MockControllerKey struct{}
 
 func NewSpaceCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -35,9 +45,16 @@ func NewSpaceCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctrl, err := shared.ControllerFromCmd(cmd)
-			if err != nil {
-				return err
+			// Check for mock controller in context (for testing)
+			var ctrl SpaceController
+			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(SpaceController); ok {
+				ctrl = mockCtrl
+			} else {
+				realCtrl, err := shared.ControllerFromCmd(cmd)
+				if err != nil {
+					return err
+				}
+				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
 			name := strings.TrimSpace(args[0])
@@ -64,4 +81,15 @@ func NewSpaceCmd() *cobra.Command {
 	_ = viper.BindPFlag(config.KUKE_DELETE_SPACE_REALM.ViperKey, cmd.Flags().Lookup("realm"))
 
 	return cmd
+}
+
+type controllerWrapper struct {
+	ctrl *controller.Exec
+}
+
+func (w *controllerWrapper) DeleteSpace(
+	name, realm string,
+	force, cascade bool,
+) (*controller.DeleteSpaceResult, error) {
+	return w.ctrl.DeleteSpace(name, realm, force, cascade)
 }

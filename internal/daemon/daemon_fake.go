@@ -14,7 +14,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package daemon_test
+package daemon
 
 type DaemonFake struct{}
 

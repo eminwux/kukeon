@@ -41,6 +41,13 @@ import (
 	"github.com/spf13/viper"
 )
 
+type ConfigLoader interface {
+	LoadConfig() error
+}
+
+// MockConfigLoaderKey is used to inject mock config loaders in tests via context.
+type MockConfigLoaderKey struct{}
+
 func NewKukeCmd() (*cobra.Command, error) {
 	cmd := &cobra.Command{
 		Use:   "kuke",
@@ -75,9 +82,20 @@ func NewKukeCmd() (*cobra.Command, error) {
 				)
 			}
 
-			err := LoadConfig()
+			// Check for mock config loader in context (for testing)
+			var loader ConfigLoader
+			if mockLoader, ok := cmd.Context().Value(MockConfigLoaderKey{}).(ConfigLoader); ok {
+				loader = mockLoader
+			} else {
+				loader = &realConfigLoader{}
+			}
+
+			err := loader.LoadConfig()
 			if err != nil {
-				logger.DebugContext(cmd.Context(), "config error", "error", err)
+				// Only log if logger was created (verbose mode)
+				if logger != nil {
+					logger.DebugContext(cmd.Context(), "config error", "error", err)
+				}
 				return fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
 			}
 			return nil
@@ -87,14 +105,14 @@ func NewKukeCmd() (*cobra.Command, error) {
 		},
 	}
 
-	if err := setupKukeCmd(cmd); err != nil {
+	if err := SetupKukeCmd(cmd); err != nil {
 		return nil, fmt.Errorf("failed to setup kukeon command: %w", err)
 	}
 
 	return cmd, nil
 }
 
-func setupKukeCmd(rootCmd *cobra.Command) error {
+func SetupKukeCmd(rootCmd *cobra.Command) error {
 	rootCmd.AddCommand(initcmd.NewInitCmd())
 	rootCmd.AddCommand(createcmd.NewCreateCmd())
 	rootCmd.AddCommand(getcmd.NewGetCmd())
@@ -106,19 +124,19 @@ func setupKukeCmd(rootCmd *cobra.Command) error {
 	rootCmd.AddCommand(version.NewVersionCmd())
 
 	// Persistent flags
-	if err := setPersistentLoggingFlags(rootCmd); err != nil {
+	if err := SetPersistentLoggingFlags(rootCmd); err != nil {
 		return err
 	}
 
 	// Bind Non-persistent Flags to Viper
-	if err := setFlags(rootCmd); err != nil {
+	if err := SetFlags(rootCmd); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func setPersistentLoggingFlags(rootCmd *cobra.Command) error {
+func SetPersistentLoggingFlags(rootCmd *cobra.Command) error {
 	rootCmd.PersistentFlags().String("run-path", "/opt/kukeon", "Run path for the kukeon runtime")
 	if err := viper.BindPFlag(config.KUKEON_ROOT_RUN_PATH.ViperKey, rootCmd.PersistentFlags().Lookup("run-path")); err != nil {
 		return err
@@ -148,7 +166,7 @@ func setPersistentLoggingFlags(rootCmd *cobra.Command) error {
 	return nil
 }
 
-func setFlags(_ *cobra.Command) error {
+func SetFlags(_ *cobra.Command) error {
 	// rootCmd.Flags().String("terminal-id", "", "Optional terminal ID (random if omitted)")
 	// if err := viper.BindPFlag(config.KUKEON_ROOT_TERM_ID.ViperKey, rootCmd.Flags().Lookup("terminal-id")); err != nil {
 	// 	return err
@@ -157,7 +175,13 @@ func setFlags(_ *cobra.Command) error {
 	return nil
 }
 
-func LoadConfig() error {
+type realConfigLoader struct{}
+
+func (r *realConfigLoader) LoadConfig() error {
+	return loadConfig()
+}
+
+func loadConfig() error {
 	var configFile string
 	if viper.GetString(config.KUKEON_ROOT_CONFIG_FILE.ViperKey) == "" {
 		configFile = config.DefaultConfigFile()
@@ -176,12 +200,15 @@ func LoadConfig() error {
 	runPath = viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey)
 	if runPath == "" {
 		runPath = config.DefaultRunPath()
-		_ = config.KUKEON_ROOT_RUN_PATH.Set(runPath)
+		viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, runPath)
 	}
 	_ = config.KUKEON_ROOT_RUN_PATH.BindEnv()
 
 	_ = config.KUKEON_ROOT_LOG_LEVEL.BindEnv()
-	config.KUKEON_ROOT_LOG_LEVEL.SetDefault("info")
+	logLevel := viper.GetString(config.KUKEON_ROOT_LOG_LEVEL.ViperKey)
+	if logLevel == "" {
+		viper.Set(config.KUKEON_ROOT_LOG_LEVEL.ViperKey, "info")
+	}
 
 	if err := viper.ReadInConfig(); err != nil {
 		// File not found is OK if ENV is set
@@ -192,4 +219,9 @@ func LoadConfig() error {
 	}
 
 	return nil
+}
+
+// LoadConfig is a public wrapper for backward compatibility.
+func LoadConfig() error {
+	return loadConfig()
 }

@@ -23,10 +23,30 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
+	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+)
+
+type CellController interface {
+	GetCell(name, realm, space, stack string) (*v1beta1.CellDoc, error)
+	ListCells(realm, space, stack string) ([]*v1beta1.CellDoc, error)
+}
+
+type cellController = CellController // internal alias for backward compatibility
+
+// MockControllerKey is used to inject mock controllers in tests via context.
+type MockControllerKey struct{}
+
+var (
+	ParseOutputFormat = shared.ParseOutputFormat
+	YAMLPrinter       = shared.PrintYAML
+	JSONPrinter       = shared.PrintJSON
+	TablePrinter      = shared.PrintTable
+	RunPrintCell      = printCell
+	RunPrintCells     = printCells
 )
 
 func NewCellCmd() *cobra.Command {
@@ -38,14 +58,20 @@ func NewCellCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctrl, err := shared.ControllerFromCmd(cmd)
-			if err != nil {
-				return err
+			var ctrl cellController
+			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(CellController); ok {
+				ctrl = mockCtrl
+			} else {
+				realCtrl, err := shared.ControllerFromCmd(cmd)
+				if err != nil {
+					return err
+				}
+				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
-			outputFormat, err := shared.ParseOutputFormat(cmd)
-			if err != nil {
-				return err
+			outputFormat, formatErr := ParseOutputFormat(cmd)
+			if formatErr != nil {
+				return formatErr
 			}
 
 			realm := strings.TrimSpace(viper.GetString(config.KUKE_GET_CELL_REALM.ViperKey))
@@ -85,9 +111,9 @@ func NewCellCmd() *cobra.Command {
 					return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
 				}
 
-				cell, err := ctrl.GetCell(name, realm, space, stack)
-				if err != nil {
-					if errors.Is(err, errdefs.ErrCellNotFound) {
+				cell, getErr := ctrl.GetCell(name, realm, space, stack)
+				if getErr != nil {
+					if errors.Is(getErr, errdefs.ErrCellNotFound) {
 						return fmt.Errorf(
 							"cell %q not found in realm %q, space %q, stack %q",
 							name,
@@ -96,19 +122,19 @@ func NewCellCmd() *cobra.Command {
 							stack,
 						)
 					}
-					return err
+					return getErr
 				}
 
-				return printCell(cmd, cell, outputFormat)
+				return RunPrintCell(cmd, cell, outputFormat)
 			}
 
 			// List cells (optionally filtered by realm, space, and/or stack)
-			cells, err := ctrl.ListCells(realm, space, stack)
-			if err != nil {
-				return err
+			cells, listErr := ctrl.ListCells(realm, space, stack)
+			if listErr != nil {
+				return listErr
 			}
 
-			return printCells(cmd, cells, outputFormat)
+			return RunPrintCells(cmd, cells, outputFormat)
 		},
 	}
 
@@ -129,26 +155,26 @@ func NewCellCmd() *cobra.Command {
 	return cmd
 }
 
-func printCell(cmd *cobra.Command, cell interface{}, format shared.OutputFormat) error {
+func printCell(_ *cobra.Command, cell interface{}, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return shared.PrintYAML(cell)
+		return YAMLPrinter(cell)
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(cell)
+		return JSONPrinter(cell)
 	case shared.OutputFormatTable:
 		// For single resource, show full YAML by default
-		return shared.PrintYAML(cell)
+		return YAMLPrinter(cell)
 	default:
-		return shared.PrintYAML(cell)
+		return YAMLPrinter(cell)
 	}
 }
 
 func printCells(cmd *cobra.Command, cells []*v1beta1.CellDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return shared.PrintYAML(cells)
+		return YAMLPrinter(cells)
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(cells)
+		return JSONPrinter(cells)
 	case shared.OutputFormatTable:
 		if len(cells) == 0 {
 			cmd.Println("No cells found.")
@@ -175,9 +201,21 @@ func printCells(cmd *cobra.Command, cells []*v1beta1.CellDoc, format shared.Outp
 			})
 		}
 
-		shared.PrintTable(cmd, headers, rows)
+		TablePrinter(cmd, headers, rows)
 		return nil
 	default:
-		return shared.PrintYAML(cells)
+		return YAMLPrinter(cells)
 	}
+}
+
+type controllerWrapper struct {
+	ctrl *controller.Exec
+}
+
+func (w *controllerWrapper) GetCell(name, realm, space, stack string) (*v1beta1.CellDoc, error) {
+	return w.ctrl.GetCell(name, realm, space, stack)
+}
+
+func (w *controllerWrapper) ListCells(realm, space, stack string) ([]*v1beta1.CellDoc, error) {
+	return w.ctrl.ListCells(realm, space, stack)
 }

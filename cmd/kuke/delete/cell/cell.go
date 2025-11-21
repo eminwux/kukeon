@@ -22,10 +22,18 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
+	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+type cellController interface {
+	DeleteCell(name, realm, space, stack string) (*controller.DeleteCellResult, error)
+}
+
+// MockControllerKey is used to inject mock controllers in tests via context.
+type MockControllerKey struct{}
 
 func NewCellCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -35,9 +43,16 @@ func NewCellCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctrl, err := shared.ControllerFromCmd(cmd)
-			if err != nil {
-				return err
+			// Check for mock controller in context (for testing)
+			var ctrl cellController
+			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(cellController); ok {
+				ctrl = mockCtrl
+			} else {
+				realCtrl, err := shared.ControllerFromCmd(cmd)
+				if err != nil {
+					return err
+				}
+				ctrl = realCtrl
 			}
 
 			name := strings.TrimSpace(args[0])

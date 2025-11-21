@@ -23,10 +23,35 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
+	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+)
+
+type ContainerController interface {
+	GetContainer(name, realmName, spaceName, stackName, cellName string) (*v1beta1.ContainerSpec, error)
+	ListContainers(realmName, spaceName, stackName, cellName string) ([]*v1beta1.ContainerSpec, error)
+}
+
+type containerController = ContainerController // internal alias for backward compatibility
+
+// MockControllerKey is used to inject mock controllers in tests via context.
+type MockControllerKey struct{}
+
+type (
+	printObjectFunc  func(interface{}) error
+	tablePrinterFunc func(*cobra.Command, []string, [][]string)
+)
+
+var (
+	// YAMLPrinter is exported for testing.
+	YAMLPrinter printObjectFunc = shared.PrintYAML
+	// JSONPrinter is exported for testing.
+	JSONPrinter printObjectFunc = shared.PrintJSON
+	// TablePrinter is exported for testing.
+	TablePrinter tablePrinterFunc = shared.PrintTable
 )
 
 func NewContainerCmd() *cobra.Command {
@@ -37,79 +62,7 @@ func NewContainerCmd() *cobra.Command {
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctrl, err := shared.ControllerFromCmd(cmd)
-			if err != nil {
-				return err
-			}
-
-			outputFormat, err := shared.ParseOutputFormat(cmd)
-			if err != nil {
-				return err
-			}
-
-			realm := strings.TrimSpace(viper.GetString(config.KUKE_GET_CONTAINER_REALM.ViperKey))
-			if realm == "" {
-				realm, _ = cmd.Flags().GetString("realm")
-				realm = strings.TrimSpace(realm)
-			}
-
-			space := strings.TrimSpace(viper.GetString(config.KUKE_GET_CONTAINER_SPACE.ViperKey))
-			if space == "" {
-				space, _ = cmd.Flags().GetString("space")
-				space = strings.TrimSpace(space)
-			}
-
-			stack := strings.TrimSpace(viper.GetString(config.KUKE_GET_CONTAINER_STACK.ViperKey))
-			if stack == "" {
-				stack, _ = cmd.Flags().GetString("stack")
-				stack = strings.TrimSpace(stack)
-			}
-
-			cell := strings.TrimSpace(viper.GetString(config.KUKE_GET_CONTAINER_CELL.ViperKey))
-			if cell == "" {
-				cell, _ = cmd.Flags().GetString("cell")
-				cell = strings.TrimSpace(cell)
-			}
-
-			var name string
-			if len(args) > 0 {
-				name = strings.TrimSpace(args[0])
-			} else {
-				name = strings.TrimSpace(viper.GetString(config.KUKE_GET_CONTAINER_NAME.ViperKey))
-			}
-
-			if name != "" {
-				// Get single container (requires realm, space, stack, and cell)
-				if realm == "" {
-					return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
-				}
-				if space == "" {
-					return fmt.Errorf("%w (--space)", errdefs.ErrSpaceNameRequired)
-				}
-				if stack == "" {
-					return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
-				}
-				if cell == "" {
-					return fmt.Errorf("%w (--cell)", errdefs.ErrCellNameRequired)
-				}
-
-				container, err := ctrl.GetContainer(name, realm, space, stack, cell)
-				if err != nil {
-					return err
-				}
-
-				return printContainer(cmd, container, outputFormat)
-			}
-
-			// List containers (optionally filtered by realm, space, stack, and/or cell)
-			containers, err := ctrl.ListContainers(realm, space, stack, cell)
-			if err != nil {
-				return err
-			}
-
-			return printContainers(cmd, containers, outputFormat)
-		},
+		RunE:          runContainerCmd,
 	}
 
 	cmd.Flags().String("realm", "", "Filter containers by realm name")
@@ -132,26 +85,136 @@ func NewContainerCmd() *cobra.Command {
 	return cmd
 }
 
-func printContainer(cmd *cobra.Command, container interface{}, format shared.OutputFormat) error {
+func runContainerCmd(cmd *cobra.Command, args []string) error {
+	return runContainerCmdWithDeps(
+		cmd,
+		args,
+		YAMLPrinter,
+		JSONPrinter,
+		TablePrinter,
+	)
+}
+
+func runContainerCmdWithDeps(
+	cmd *cobra.Command,
+	args []string,
+	printYAML printObjectFunc,
+	printJSON printObjectFunc,
+	printTable tablePrinterFunc,
+) error {
+	var ctrl containerController
+	if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(ContainerController); ok {
+		ctrl = mockCtrl
+	} else {
+		realCtrl, err := shared.ControllerFromCmd(cmd)
+		if err != nil {
+			return err
+		}
+		ctrl = &controllerWrapper{ctrl: realCtrl}
+	}
+
+	outputFormat, err := shared.ParseOutputFormat(cmd)
+	if err != nil {
+		return err
+	}
+
+	realm := strings.TrimSpace(viper.GetString(config.KUKE_GET_CONTAINER_REALM.ViperKey))
+	if realm == "" {
+		realm, _ = cmd.Flags().GetString("realm")
+		realm = strings.TrimSpace(realm)
+	}
+
+	space := strings.TrimSpace(viper.GetString(config.KUKE_GET_CONTAINER_SPACE.ViperKey))
+	if space == "" {
+		space, _ = cmd.Flags().GetString("space")
+		space = strings.TrimSpace(space)
+	}
+
+	stack := strings.TrimSpace(viper.GetString(config.KUKE_GET_CONTAINER_STACK.ViperKey))
+	if stack == "" {
+		stack, _ = cmd.Flags().GetString("stack")
+		stack = strings.TrimSpace(stack)
+	}
+
+	cell := strings.TrimSpace(viper.GetString(config.KUKE_GET_CONTAINER_CELL.ViperKey))
+	if cell == "" {
+		cell, _ = cmd.Flags().GetString("cell")
+		cell = strings.TrimSpace(cell)
+	}
+
+	var name string
+	if len(args) > 0 {
+		name = strings.TrimSpace(args[0])
+	} else {
+		name = strings.TrimSpace(viper.GetString(config.KUKE_GET_CONTAINER_NAME.ViperKey))
+	}
+
+	if name != "" {
+		// Get single container (requires realm, space, stack, and cell)
+		if realm == "" {
+			return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
+		}
+		if space == "" {
+			return fmt.Errorf("%w (--space)", errdefs.ErrSpaceNameRequired)
+		}
+		if stack == "" {
+			return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
+		}
+		if cell == "" {
+			return fmt.Errorf("%w (--cell)", errdefs.ErrCellNameRequired)
+		}
+
+		var container *v1beta1.ContainerSpec
+		container, err = ctrl.GetContainer(name, realm, space, stack, cell)
+		if err != nil {
+			return err
+		}
+
+		return printContainer(cmd, container, outputFormat, printYAML, printJSON)
+	}
+
+	// List containers (optionally filtered by realm, space, stack, and/or cell)
+	containers, err := ctrl.ListContainers(realm, space, stack, cell)
+	if err != nil {
+		return err
+	}
+
+	return printContainers(cmd, containers, outputFormat, printYAML, printJSON, printTable)
+}
+
+func printContainer(
+	_ *cobra.Command,
+	container interface{},
+	format shared.OutputFormat,
+	printYAML printObjectFunc,
+	printJSON printObjectFunc,
+) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return shared.PrintYAML(container)
+		return printYAML(container)
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(container)
+		return printJSON(container)
 	case shared.OutputFormatTable:
 		// For single resource, show full YAML by default
-		return shared.PrintYAML(container)
+		return printYAML(container)
 	default:
-		return shared.PrintYAML(container)
+		return printYAML(container)
 	}
 }
 
-func printContainers(cmd *cobra.Command, containers []*v1beta1.ContainerSpec, format shared.OutputFormat) error {
+func printContainers(
+	cmd *cobra.Command,
+	containers []*v1beta1.ContainerSpec,
+	format shared.OutputFormat,
+	printYAML printObjectFunc,
+	printJSON printObjectFunc,
+	printTable tablePrinterFunc,
+) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return shared.PrintYAML(containers)
+		return printYAML(containers)
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(containers)
+		return printJSON(containers)
 	case shared.OutputFormatTable:
 		if len(containers) == 0 {
 			cmd.Println("No containers found.")
@@ -180,10 +243,10 @@ func printContainers(cmd *cobra.Command, containers []*v1beta1.ContainerSpec, fo
 			})
 		}
 
-		shared.PrintTable(cmd, headers, rows)
+		printTable(cmd, headers, rows)
 		return nil
 	default:
-		return shared.PrintYAML(containers)
+		return printYAML(containers)
 	}
 }
 
@@ -199,4 +262,20 @@ func containerDisplayName(c *v1beta1.ContainerSpec) string {
 		return "-"
 	}
 	return id
+}
+
+type controllerWrapper struct {
+	ctrl *controller.Exec
+}
+
+func (w *controllerWrapper) GetContainer(
+	name, realmName, spaceName, stackName, cellName string,
+) (*v1beta1.ContainerSpec, error) {
+	return w.ctrl.GetContainer(name, realmName, spaceName, stackName, cellName)
+}
+
+func (w *controllerWrapper) ListContainers(
+	realmName, spaceName, stackName, cellName string,
+) ([]*v1beta1.ContainerSpec, error) {
+	return w.ctrl.ListContainers(realmName, spaceName, stackName, cellName)
 }

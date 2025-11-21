@@ -30,6 +30,20 @@ import (
 
 type rootFactory func() (*cobra.Command, error)
 
+type factoryMap map[string]rootFactory
+
+// mockFactoryMapKey is used to inject mock factory maps in tests via context.
+type mockFactoryMapKey struct{}
+
+func getFactories(ctx context.Context) factoryMap {
+	if mockFactories, ok := ctx.Value(mockFactoryMapKey{}).(factoryMap); ok {
+		return mockFactories
+	}
+	return factoryMap{
+		"kuke": kuke.NewKukeCmd,
+	}
+}
+
 func execRoot(root *cobra.Command) int {
 	if err := root.Execute(); err != nil {
 		return 1
@@ -54,10 +68,8 @@ func main() {
 	// Select which subtree to run based on the executable name
 	exe := filepath.Base(os.Args[0])
 
-	// Decide which subtree to run by prepending the name as the first arg
-	factories := map[string]rootFactory{
-		"kuke": kuke.NewKukeCmd,
-	}
+	// Get factories (may be mocked via context in tests)
+	factories := getFactories(ctx)
 
 	if factory, ok := factories[exe]; ok {
 		os.Exit(runWithFactory(ctx, factory))

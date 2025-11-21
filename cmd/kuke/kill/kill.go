@@ -28,6 +28,14 @@ import (
 	"github.com/spf13/viper"
 )
 
+type killController interface {
+	KillCell(name, realmName, spaceName, stackName string) (*controller.KillCellResult, error)
+	KillContainer(name, realmName, spaceName, stackName, cellName string) (*controller.KillContainerResult, error)
+}
+
+// MockControllerKey is used to inject mock controllers in tests via context.
+type MockControllerKey struct{}
+
 // NewKillCmd builds the `kuke kill` command that handles killing cells or containers.
 func NewKillCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -38,9 +46,16 @@ func NewKillCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctrl, err := shared.ControllerFromCmd(cmd)
-			if err != nil {
-				return err
+			// Check for mock controller in context (for testing)
+			var ctrl killController
+			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(killController); ok {
+				ctrl = mockCtrl
+			} else {
+				realCtrl, err := shared.ControllerFromCmd(cmd)
+				if err != nil {
+					return err
+				}
+				ctrl = realCtrl
 			}
 
 			resourceType := strings.ToLower(strings.TrimSpace(args[0]))
@@ -63,8 +78,7 @@ func NewKillCmd() *cobra.Command {
 
 			switch resourceType {
 			case "cell":
-				var result *controller.KillCellResult
-				result, err = ctrl.KillCell(resourceName, realm, space, stack)
+				result, err := ctrl.KillCell(resourceName, realm, space, stack)
 				if err != nil {
 					return err
 				}
@@ -75,8 +89,7 @@ func NewKillCmd() *cobra.Command {
 				if cell == "" {
 					return fmt.Errorf("%w (--cell)", errdefs.ErrCellNameRequired)
 				}
-				var result *controller.KillContainerResult
-				result, err = ctrl.KillContainer(resourceName, realm, space, stack, cell)
+				result, err := ctrl.KillContainer(resourceName, realm, space, stack, cell)
 				if err != nil {
 					return err
 				}

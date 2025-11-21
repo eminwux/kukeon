@@ -28,6 +28,13 @@ import (
 	"github.com/spf13/viper"
 )
 
+type containerController interface {
+	CreateContainer(opts controller.CreateContainerOptions) (controller.CreateContainerResult, error)
+}
+
+// MockControllerKey is used to inject mock controllers in tests via context.
+type MockControllerKey struct{}
+
 func NewContainerCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "container [name]",
@@ -81,9 +88,17 @@ func NewContainerCmd() *cobra.Command {
 				return err
 			}
 
-			ctrl, err := shared.ControllerFromCmd(cmd)
-			if err != nil {
-				return err
+			// Check for mock controller in context (for testing)
+			var ctrl containerController
+			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(containerController); ok {
+				ctrl = mockCtrl
+			} else {
+				var realCtrl *controller.Exec
+				realCtrl, err = shared.ControllerFromCmd(cmd)
+				if err != nil {
+					return err
+				}
+				ctrl = realCtrl
 			}
 
 			result, err := ctrl.CreateContainer(controller.CreateContainerOptions{
@@ -142,4 +157,9 @@ func printContainerResult(cmd *cobra.Command, result controller.CreateContainerR
 	} else {
 		cmd.Println("  - container: not started")
 	}
+}
+
+// PrintContainerResult is exported for testing purposes.
+func PrintContainerResult(cmd *cobra.Command, result controller.CreateContainerResult) {
+	printContainerResult(cmd, result)
 }

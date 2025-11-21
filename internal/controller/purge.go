@@ -311,7 +311,7 @@ func (b *Exec) PurgeStack(name, realmName, spaceName string, force, cascade bool
 
 // PurgeCell purges a cell with comprehensive cleanup. Always purges all containers first.
 // If force is true, skips validation.
-func (b *Exec) PurgeCell(name, realmName, spaceName, stackName string, force, cascade bool) (*PurgeCellResult, error) {
+func (b *Exec) PurgeCell(name, realmName, spaceName, stackName string, _ bool, _ bool) (*PurgeCellResult, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, errdefs.ErrCellNameRequired

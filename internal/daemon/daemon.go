@@ -14,20 +14,17 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package core
+package daemon
 
 import (
-	"context"
-	"log/slog"
-
-	"github.com/eminwux/kukeon/internal/daemon/runner"
 	"github.com/eminwux/kukeon/pkg/api/apidaemon"
 )
 
 type Controller struct {
-	ctx    context.Context
-	logger *slog.Logger
-	runner *runner.Runner
+	// TODO: These fields are reserved for future implementation
+	// ctx    context.Context
+	// logger *slog.Logger
+	// runner *runner.Runner
 }
 
 func NewController() *Controller {

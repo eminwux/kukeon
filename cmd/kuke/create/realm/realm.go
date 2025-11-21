@@ -24,6 +24,13 @@ import (
 	"github.com/spf13/viper"
 )
 
+type realmController interface {
+	CreateRealm(opts controller.CreateRealmOptions) (controller.CreateRealmResult, error)
+}
+
+// MockControllerKey is used to inject mock controllers in tests via context.
+type MockControllerKey struct{}
+
 func NewRealmCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "realm [name]",
@@ -47,9 +54,17 @@ func NewRealmCmd() *cobra.Command {
 				return err
 			}
 
-			ctrl, err := shared.ControllerFromCmd(cmd)
-			if err != nil {
-				return err
+			// Check for mock controller in context (for testing)
+			var ctrl realmController
+			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(realmController); ok {
+				ctrl = mockCtrl
+			} else {
+				var realCtrl *controller.Exec
+				realCtrl, err = shared.ControllerFromCmd(cmd)
+				if err != nil {
+					return err
+				}
+				ctrl = realCtrl
 			}
 
 			result, err := ctrl.CreateRealm(controller.CreateRealmOptions{
@@ -79,4 +94,9 @@ func printRealmResult(cmd *cobra.Command, result controller.CreateRealmResult) {
 		result.ContainerdNamespaceCreated,
 	)
 	shared.PrintCreationOutcome(cmd, "cgroup", result.CgroupExistsPost, result.CgroupCreated)
+}
+
+// PrintRealmResult is exported for testing purposes.
+func PrintRealmResult(cmd *cobra.Command, result controller.CreateRealmResult) {
+	printRealmResult(cmd, result)
 }

@@ -23,11 +23,43 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
+	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+type SpaceController interface {
+	GetSpace(name, realm string) (*v1beta1.SpaceDoc, error)
+	ListSpaces(realm string) ([]*v1beta1.SpaceDoc, error)
+}
+
+type spaceController = SpaceController // internal alias for backward compatibility
+
+// MockControllerKey is used to inject mock controllers in tests via context.
+type MockControllerKey struct{}
+
+type printObjectFunc func(interface{}) error
+
+var (
+	// YAMLPrinter is exported for testing.
+	YAMLPrinter printObjectFunc = shared.PrintYAML
+	// JSONPrinter is exported for testing.
+	JSONPrinter printObjectFunc = shared.PrintJSON
+)
+
+var (
+	printYAML printObjectFunc = YAMLPrinter
+	printJSON printObjectFunc = JSONPrinter
+)
+
+type tablePrinterFunc func(*cobra.Command, []string, [][]string)
+
+// TablePrinter is exported for testing.
+var TablePrinter tablePrinterFunc = shared.PrintTable
+
+var printTable tablePrinterFunc = TablePrinter
 
 func NewSpaceCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -38,14 +70,20 @@ func NewSpaceCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctrl, err := shared.ControllerFromCmd(cmd)
-			if err != nil {
-				return err
+			var ctrl spaceController
+			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(SpaceController); ok {
+				ctrl = mockCtrl
+			} else {
+				realCtrl, err := shared.ControllerFromCmd(cmd)
+				if err != nil {
+					return err
+				}
+				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
-			outputFormat, err := shared.ParseOutputFormat(cmd)
-			if err != nil {
-				return err
+			outputFormat, parseErr := shared.ParseOutputFormat(cmd)
+			if parseErr != nil {
+				return parseErr
 			}
 
 			realm := strings.TrimSpace(viper.GetString(config.KUKE_GET_SPACE_REALM.ViperKey))
@@ -67,21 +105,21 @@ func NewSpaceCmd() *cobra.Command {
 					return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
 				}
 
-				space, err := ctrl.GetSpace(name, realm)
-				if err != nil {
-					if errors.Is(err, errdefs.ErrSpaceNotFound) {
+				space, getErr := ctrl.GetSpace(name, realm)
+				if getErr != nil {
+					if errors.Is(getErr, errdefs.ErrSpaceNotFound) {
 						return fmt.Errorf("space %q not found in realm %q", name, realm)
 					}
-					return err
+					return getErr
 				}
 
-				return printSpace(cmd, space, outputFormat)
+				return printSpace(space, outputFormat)
 			}
 
 			// List spaces (optionally filtered by realm)
-			spaces, err := ctrl.ListSpaces(realm)
-			if err != nil {
-				return err
+			spaces, listErr := ctrl.ListSpaces(realm)
+			if listErr != nil {
+				return listErr
 			}
 
 			return printSpaces(cmd, spaces, outputFormat)
@@ -99,26 +137,26 @@ func NewSpaceCmd() *cobra.Command {
 	return cmd
 }
 
-func printSpace(cmd *cobra.Command, space interface{}, format shared.OutputFormat) error {
+func printSpace(space interface{}, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return shared.PrintYAML(space)
+		return YAMLPrinter(space)
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(space)
+		return JSONPrinter(space)
 	case shared.OutputFormatTable:
 		// For single resource, show full YAML by default
-		return shared.PrintYAML(space)
+		return YAMLPrinter(space)
 	default:
-		return shared.PrintYAML(space)
+		return YAMLPrinter(space)
 	}
 }
 
 func printSpaces(cmd *cobra.Command, spaces []*v1beta1.SpaceDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return shared.PrintYAML(spaces)
+		return YAMLPrinter(spaces)
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(spaces)
+		return JSONPrinter(spaces)
 	case shared.OutputFormatTable:
 		if len(spaces) == 0 {
 			cmd.Println("No spaces found.")
@@ -143,9 +181,21 @@ func printSpaces(cmd *cobra.Command, spaces []*v1beta1.SpaceDoc, format shared.O
 			})
 		}
 
-		shared.PrintTable(cmd, headers, rows)
+		TablePrinter(cmd, headers, rows)
 		return nil
 	default:
-		return shared.PrintYAML(spaces)
+		return YAMLPrinter(spaces)
 	}
+}
+
+type controllerWrapper struct {
+	ctrl *controller.Exec
+}
+
+func (w *controllerWrapper) GetSpace(name, realm string) (*v1beta1.SpaceDoc, error) {
+	return w.ctrl.GetSpace(name, realm)
+}
+
+func (w *controllerWrapper) ListSpaces(realm string) ([]*v1beta1.SpaceDoc, error) {
+	return w.ctrl.ListSpaces(realm)
 }
