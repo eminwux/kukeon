@@ -140,6 +140,55 @@ func TestNewPurgeCmdRun(t *testing.T) {
 	}
 }
 
+func TestNewPurgeCmd_AutocompleteRegistration(t *testing.T) {
+	cmd := purge.NewPurgeCmd()
+
+	// Verify that ValidArgsFunction is registered (completion function registration is verified by Cobra)
+	if cmd.ValidArgsFunction == nil {
+		t.Fatal("expected ValidArgsFunction to be registered")
+	}
+
+	// Test the completion function directly
+	completions, _ := cmd.ValidArgsFunction(cmd, []string{}, "")
+	expected := []string{"realm", "space", "stack", "cell", "container"}
+	if len(completions) != len(expected) {
+		t.Fatalf("expected %d completions, got %d", len(expected), len(completions))
+	}
+
+	for _, exp := range expected {
+		found := false
+		for _, comp := range completions {
+			if comp == exp {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected completion %q not found", exp)
+		}
+	}
+
+	// Test prefix filtering
+	filtered, _ := cmd.ValidArgsFunction(cmd, []string{}, "c")
+	expectedFiltered := []string{"cell", "container"}
+	if len(filtered) != len(expectedFiltered) {
+		t.Fatalf("expected %d filtered completions, got %d", len(expectedFiltered), len(filtered))
+	}
+
+	for _, exp := range expectedFiltered {
+		found := false
+		for _, comp := range filtered {
+			if comp == exp {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected filtered completion %q not found", exp)
+		}
+	}
+}
+
 // Helper function to convert bool to string for flag setting.
 func boolToString(b bool) string {
 	if b {

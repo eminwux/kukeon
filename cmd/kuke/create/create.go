@@ -17,6 +17,8 @@
 package create
 
 import (
+	"strings"
+
 	cellcmd "github.com/eminwux/kukeon/cmd/kuke/create/cell"
 	containercmd "github.com/eminwux/kukeon/cmd/kuke/create/container"
 	realmcmd "github.com/eminwux/kukeon/cmd/kuke/create/realm"
@@ -37,6 +39,8 @@ func NewCreateCmd() *cobra.Command {
 		},
 	}
 
+	cmd.ValidArgsFunction = completeCreateSubcommands
+
 	cmd.AddCommand(
 		realmcmd.NewRealmCmd(),
 		spacecmd.NewSpaceCmd(),
@@ -46,4 +50,22 @@ func NewCreateCmd() *cobra.Command {
 	)
 
 	return cmd
+}
+
+// completeCreateSubcommands provides shell completion for create subcommand names.
+func completeCreateSubcommands(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	subcommands := []string{"realm", "space", "stack", "cell", "container"}
+
+	if toComplete == "" {
+		return subcommands, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	matches := make([]string, 0, len(subcommands))
+	for _, subcmd := range subcommands {
+		if strings.HasPrefix(subcmd, toComplete) {
+			matches = append(matches, subcmd)
+		}
+	}
+
+	return matches, cobra.ShellCompDirectiveNoFileComp
 }

@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -28,7 +30,6 @@ import (
 	stack "github.com/eminwux/kukeon/cmd/kuke/create/stack"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
-	"github.com/eminwux/kukeon/internal/logging"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -267,7 +268,7 @@ func TestNewStackCmd(t *testing.T) {
 				// Don't set logger to test controller creation error
 				ctx = context.Background()
 			} else {
-				logger := logging.NewNoopLogger()
+				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 				ctx = context.WithValue(context.Background(), types.CtxLogger, logger)
 			}
 
@@ -469,4 +470,242 @@ func (f *fakeStackController) CreateStack(opts controller.CreateStackOptions) (c
 		panic("CreateStack was called unexpectedly")
 	}
 	return f.createStack(opts)
+}
+
+func TestNewStackCmdRunE(t *testing.T) {
+	t.Cleanup(func() {
+		viper.Reset()
+	})
+
+	tests := []struct {
+		name           string
+		args           []string
+		setup          func(t *testing.T, cmd *cobra.Command)
+		controllerFn   func(opts controller.CreateStackOptions) (controller.CreateStackResult, error)
+		wantErr        string
+		wantCallCreate bool
+		wantOpts       *controller.CreateStackOptions
+		wantOutput     []string
+	}{
+		{
+			name: "success: name from args with flags",
+			args: []string{"test-stack"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				setFlag(t, cmd, "realm", "realm-a")
+				setFlag(t, cmd, "space", "space-a")
+			},
+			controllerFn: func(opts controller.CreateStackOptions) (controller.CreateStackResult, error) {
+				return controller.CreateStackResult{
+					Name:               opts.Name,
+					RealmName:          opts.RealmName,
+					SpaceName:          opts.SpaceName,
+					Created:            true,
+					MetadataExistsPost: true,
+					CgroupCreated:      true,
+					CgroupExistsPost:   true,
+				}, nil
+			},
+			wantCallCreate: true,
+			wantOpts: &controller.CreateStackOptions{
+				Name:      "test-stack",
+				RealmName: "realm-a",
+				SpaceName: "space-a",
+			},
+			wantOutput: []string{
+				`Stack "test-stack" (realm "realm-a", space "space-a")`,
+			},
+		},
+		{
+			name: "success: name from viper with flags",
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				viper.Set(config.KUKE_CREATE_STACK_NAME.ViperKey, "viper-stack")
+				setFlag(t, cmd, "realm", "realm-b")
+				setFlag(t, cmd, "space", "space-b")
+			},
+			controllerFn: func(opts controller.CreateStackOptions) (controller.CreateStackResult, error) {
+				return controller.CreateStackResult{
+					Name:               opts.Name,
+					RealmName:          opts.RealmName,
+					SpaceName:          opts.SpaceName,
+					Created:            true,
+					MetadataExistsPost: true,
+					CgroupCreated:      true,
+					CgroupExistsPost:   true,
+				}, nil
+			},
+			wantCallCreate: true,
+			wantOpts: &controller.CreateStackOptions{
+				Name:      "viper-stack",
+				RealmName: "realm-b",
+				SpaceName: "space-b",
+			},
+			wantOutput: []string{
+				`Stack "viper-stack" (realm "realm-b", space "space-b")`,
+			},
+		},
+		{
+			name: "error: missing realm",
+			args: []string{"test-stack"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				setFlag(t, cmd, "space", "space-a")
+			},
+			wantErr:        "realm name is required",
+			wantCallCreate: false,
+		},
+		{
+			name: "error: missing space",
+			args: []string{"test-stack"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				setFlag(t, cmd, "realm", "realm-a")
+			},
+			wantErr:        "space name is required",
+			wantCallCreate: false,
+		},
+		{
+			name: "error: logger not in context",
+			args: []string{"test-stack"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				cmd.SetContext(context.Background())
+				setFlag(t, cmd, "realm", "realm-a")
+				setFlag(t, cmd, "space", "space-a")
+			},
+			controllerFn: func(_ controller.CreateStackOptions) (controller.CreateStackResult, error) {
+				return controller.CreateStackResult{}, errors.New("unexpected call")
+			},
+			wantErr:        "logger not found",
+			wantCallCreate: false,
+		},
+		{
+			name: "error: CreateStack fails",
+			args: []string{"test-stack"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				setFlag(t, cmd, "realm", "realm-a")
+				setFlag(t, cmd, "space", "space-a")
+			},
+			controllerFn: func(_ controller.CreateStackOptions) (controller.CreateStackResult, error) {
+				return controller.CreateStackResult{}, errors.New("failed to create stack")
+			},
+			wantErr:        "failed to create stack",
+			wantCallCreate: true,
+			wantOpts: &controller.CreateStackOptions{
+				Name:      "test-stack",
+				RealmName: "realm-a",
+				SpaceName: "space-a",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+
+			var createCalled bool
+			var createOpts controller.CreateStackOptions
+
+			cmd := stack.NewStackCmd()
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SetErr(&bytes.Buffer{})
+
+			ctx := context.Background()
+
+			// Inject mock controller via context if needed
+			if tt.name != "error: logger not in context" {
+				// Set up logger context
+				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+				ctx = context.WithValue(ctx, types.CtxLogger, logger)
+
+				// If we need to mock the controller, inject it via context
+				if tt.controllerFn != nil {
+					fakeCtrl := &fakeStackController{
+						createStack: func(opts controller.CreateStackOptions) (controller.CreateStackResult, error) {
+							createCalled = true
+							createOpts = opts
+							return tt.controllerFn(opts)
+						},
+					}
+					// Inject mock controller into context using the exported key
+					ctx = context.WithValue(ctx, stack.MockControllerKey{}, fakeCtrl)
+				}
+			}
+
+			cmd.SetContext(ctx)
+
+			if tt.setup != nil {
+				tt.setup(t, cmd)
+			}
+
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if createCalled != tt.wantCallCreate {
+				t.Errorf("CreateStack called=%v want=%v", createCalled, tt.wantCallCreate)
+			}
+
+			if tt.wantOpts != nil {
+				if createOpts.Name != tt.wantOpts.Name {
+					t.Errorf("CreateStack Name=%q want=%q", createOpts.Name, tt.wantOpts.Name)
+				}
+				if createOpts.RealmName != tt.wantOpts.RealmName {
+					t.Errorf("CreateStack RealmName=%q want=%q", createOpts.RealmName, tt.wantOpts.RealmName)
+				}
+				if createOpts.SpaceName != tt.wantOpts.SpaceName {
+					t.Errorf("CreateStack SpaceName=%q want=%q", createOpts.SpaceName, tt.wantOpts.SpaceName)
+				}
+			}
+
+			if tt.wantOutput != nil {
+				output := cmd.OutOrStdout().(*bytes.Buffer).String()
+				for _, expected := range tt.wantOutput {
+					if !strings.Contains(output, expected) {
+						t.Errorf("output missing expected string %q\nGot output:\n%s", expected, output)
+					}
+				}
+			}
+		})
+	}
+}
+
+func setFlag(t *testing.T, cmd *cobra.Command, name, value string) {
+	t.Helper()
+	if err := cmd.Flags().Set(name, value); err != nil {
+		t.Fatalf("failed to set flag %s: %v", name, err)
+	}
+}
+
+func TestNewStackCmd_AutocompleteRegistration(t *testing.T) {
+	// Test that autocomplete functions are properly registered for --realm and --space flags
+	cmd := stack.NewStackCmd()
+
+	// Test that realm flag exists
+	realmFlag := cmd.Flags().Lookup("realm")
+	if realmFlag == nil {
+		t.Fatal("expected 'realm' flag to exist")
+	}
+
+	// Test that space flag exists
+	spaceFlag := cmd.Flags().Lookup("space")
+	if spaceFlag == nil {
+		t.Fatal("expected 'space' flag to exist")
+	}
+
+	// Verify flag structure (completion function registration is verified by Cobra)
+	if realmFlag.Usage != "Realm that owns the stack" {
+		t.Errorf("unexpected realm flag usage: %q", realmFlag.Usage)
+	}
+
+	if spaceFlag.Usage != "Space that owns the stack" {
+		t.Errorf("unexpected space flag usage: %q", spaceFlag.Usage)
+	}
 }

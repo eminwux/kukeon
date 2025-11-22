@@ -386,3 +386,39 @@ func setFlag(t *testing.T, cmd *cobra.Command, name, value string) {
 		t.Fatalf("failed to set flag %s: %v", name, err)
 	}
 }
+
+func TestNewCellCmd_AutocompleteRegistration(t *testing.T) {
+	cmd := cell.NewCellCmd()
+
+	// Test that ValidArgsFunction is set to CompleteCellNames
+	if cmd.ValidArgsFunction == nil {
+		t.Fatal("expected ValidArgsFunction to be set")
+	}
+
+	// Test that realm flag exists
+	realmFlag := cmd.Flags().Lookup("realm")
+	if realmFlag == nil {
+		t.Fatal("expected 'realm' flag to exist")
+	}
+	if realmFlag.Usage != "Realm that owns the cell" {
+		t.Errorf("unexpected realm flag usage: %q", realmFlag.Usage)
+	}
+
+	// Test that space flag exists
+	spaceFlag := cmd.Flags().Lookup("space")
+	if spaceFlag == nil {
+		t.Fatal("expected 'space' flag to exist")
+	}
+	if spaceFlag.Usage != "Space that owns the cell" {
+		t.Errorf("unexpected space flag usage: %q", spaceFlag.Usage)
+	}
+
+	// Test that stack flag exists
+	stackFlag := cmd.Flags().Lookup("stack")
+	if stackFlag == nil {
+		t.Fatal("expected 'stack' flag to exist")
+	}
+	if stackFlag.Usage != "Stack that owns the cell" {
+		t.Errorf("unexpected stack flag usage: %q", stackFlag.Usage)
+	}
+}

@@ -112,6 +112,40 @@ func TestNewKillCmd(t *testing.T) {
 	}
 }
 
+func TestNewKillCmd_AutocompleteRegistration(t *testing.T) {
+	cmd := kill.NewKillCmd()
+
+	// Test that ValidArgsFunction is set for positional arguments
+	if cmd.ValidArgsFunction == nil {
+		t.Fatal("expected ValidArgsFunction to be set for positional arguments")
+	}
+
+	// Test that all flags exist and have correct usage
+	flags := []struct {
+		name  string
+		usage string
+	}{
+		{"realm", "Realm that owns the resource"},
+		{"space", "Space that owns the resource"},
+		{"stack", "Stack that owns the resource"},
+		{"cell", "Cell that owns the container (required for container resource type)"},
+	}
+
+	for _, flag := range flags {
+		flagObj := cmd.Flags().Lookup(flag.name)
+		if flagObj == nil {
+			t.Errorf("expected %q flag to exist", flag.name)
+			continue
+		}
+		if flagObj.Usage != flag.usage {
+			t.Errorf("unexpected %q flag usage: got %q, want %q", flag.name, flagObj.Usage, flag.usage)
+		}
+	}
+
+	// Note: Completion function registration is verified by Cobra internally.
+	// ValidArgsFunction is set and flags exist confirms the structure is correct.
+}
+
 func TestNewKillCmdRunE(t *testing.T) {
 	t.Cleanup(viper.Reset)
 

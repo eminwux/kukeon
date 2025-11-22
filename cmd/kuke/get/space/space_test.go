@@ -320,3 +320,40 @@ func (f *fakeSpaceController) ListSpaces(realm string) ([]*v1beta1.SpaceDoc, err
 	}
 	return f.listSpacesFn(realm)
 }
+
+func TestNewSpaceCmd_AutocompleteRegistration(t *testing.T) {
+	cmd := space.NewSpaceCmd()
+
+	// Test that ValidArgsFunction is set for positional argument
+	if cmd.ValidArgsFunction == nil {
+		t.Fatal("expected ValidArgsFunction to be set")
+	}
+
+	// Test that realm flag exists
+	realmFlag := cmd.Flags().Lookup("realm")
+	if realmFlag == nil {
+		t.Fatal("expected 'realm' flag to exist")
+	}
+
+	// Verify flag structure (completion function registration is verified by Cobra)
+	if realmFlag.Usage != "Filter spaces by realm name" {
+		t.Errorf("unexpected realm flag usage: %q", realmFlag.Usage)
+	}
+
+	// Test that output flag exists
+	outputFlag := cmd.Flags().Lookup("output")
+	if outputFlag == nil {
+		t.Fatal("expected 'output' flag to exist")
+	}
+
+	// Verify flag structure (completion function registration is verified by Cobra)
+	if outputFlag.Usage != "Output format (yaml, json, table). Default: table for list, yaml for single resource" {
+		t.Errorf("unexpected output flag usage: %q", outputFlag.Usage)
+	}
+
+	// Test that -o flag exists (shorthand for output)
+	// In Cobra, shorthand flags are accessed via the main flag's Shorthand property
+	if outputFlag.Shorthand != "o" {
+		t.Fatalf("expected output flag to have shorthand 'o', got %q", outputFlag.Shorthand)
+	}
+}

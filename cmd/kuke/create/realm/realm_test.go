@@ -19,6 +19,7 @@ package realm_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -398,6 +399,245 @@ func TestNewRealmCmd_CommandStructure(t *testing.T) {
 
 	if namespaceFlag.Usage != "Containerd namespace for the realm (defaults to the realm name)" {
 		t.Errorf("unexpected namespace flag usage: %q", namespaceFlag.Usage)
+	}
+}
+
+func TestNewRealmCmdRunE(t *testing.T) {
+	t.Cleanup(func() {
+		viper.Reset()
+	})
+
+	tests := []struct {
+		name           string
+		args           []string
+		setup          func(t *testing.T, cmd *cobra.Command)
+		controllerFn   func(opts controller.CreateRealmOptions) (controller.CreateRealmResult, error)
+		wantErr        string
+		wantCallCreate bool
+		wantOpts       *controller.CreateRealmOptions
+		wantOutput     []string
+	}{
+		{
+			name: "success: name from args",
+			args: []string{"test-realm"},
+			setup: func(_ *testing.T, _ *cobra.Command) {
+				// No setup needed
+			},
+			controllerFn: func(opts controller.CreateRealmOptions) (controller.CreateRealmResult, error) {
+				return controller.CreateRealmResult{
+					Name:                          opts.Name,
+					Namespace:                     opts.Namespace,
+					Created:                       true,
+					MetadataExistsPost:            true,
+					ContainerdNamespaceCreated:    true,
+					ContainerdNamespaceExistsPost: true,
+					CgroupCreated:                 true,
+					CgroupExistsPost:              true,
+				}, nil
+			},
+			wantCallCreate: true,
+			wantOpts: &controller.CreateRealmOptions{
+				Name:      "test-realm",
+				Namespace: "",
+			},
+			wantOutput: []string{
+				`Realm "test-realm"`,
+			},
+		},
+		{
+			name: "success: name from viper",
+			setup: func(_ *testing.T, _ *cobra.Command) {
+				viper.Set(config.KUKE_CREATE_REALM_NAME.ViperKey, "viper-realm")
+			},
+			controllerFn: func(opts controller.CreateRealmOptions) (controller.CreateRealmResult, error) {
+				return controller.CreateRealmResult{
+					Name:                          opts.Name,
+					Namespace:                     opts.Namespace,
+					Created:                       true,
+					MetadataExistsPost:            true,
+					ContainerdNamespaceCreated:    true,
+					ContainerdNamespaceExistsPost: true,
+					CgroupCreated:                 true,
+					CgroupExistsPost:              true,
+				}, nil
+			},
+			wantCallCreate: true,
+			wantOpts: &controller.CreateRealmOptions{
+				Name:      "viper-realm",
+				Namespace: "",
+			},
+			wantOutput: []string{
+				`Realm "viper-realm"`,
+			},
+		},
+		{
+			name: "success: with namespace flag",
+			args: []string{"test-realm"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				setFlag(t, cmd, "namespace", "custom-ns")
+			},
+			controllerFn: func(opts controller.CreateRealmOptions) (controller.CreateRealmResult, error) {
+				return controller.CreateRealmResult{
+					Name:                          opts.Name,
+					Namespace:                     opts.Namespace,
+					Created:                       true,
+					MetadataExistsPost:            true,
+					ContainerdNamespaceCreated:    true,
+					ContainerdNamespaceExistsPost: true,
+					CgroupCreated:                 true,
+					CgroupExistsPost:              true,
+				}, nil
+			},
+			wantCallCreate: true,
+			wantOpts: &controller.CreateRealmOptions{
+				Name:      "test-realm",
+				Namespace: "custom-ns",
+			},
+			wantOutput: []string{
+				`namespace "custom-ns"`,
+			},
+		},
+		{
+			name: "error: missing name",
+			setup: func(_ *testing.T, _ *cobra.Command) {
+				// Don't set name in args or viper
+			},
+			wantErr:        "realm name is required",
+			wantCallCreate: false,
+		},
+		{
+			name: "error: logger not in context",
+			args: []string{"test-realm"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				cmd.SetContext(context.Background())
+			},
+			controllerFn: func(_ controller.CreateRealmOptions) (controller.CreateRealmResult, error) {
+				return controller.CreateRealmResult{}, errors.New("unexpected call")
+			},
+			wantErr:        "logger not found",
+			wantCallCreate: false,
+		},
+		{
+			name: "error: CreateRealm fails",
+			args: []string{"test-realm"},
+			setup: func(_ *testing.T, _ *cobra.Command) {
+				// No setup needed
+			},
+			controllerFn: func(_ controller.CreateRealmOptions) (controller.CreateRealmResult, error) {
+				return controller.CreateRealmResult{}, errdefs.ErrCreateRealm
+			},
+			wantErr:        "failed to create realm",
+			wantCallCreate: true,
+			wantOpts: &controller.CreateRealmOptions{
+				Name:      "test-realm",
+				Namespace: "",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+
+			var createCalled bool
+			var createOpts controller.CreateRealmOptions
+
+			cmd := realm.NewRealmCmd()
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SetErr(&bytes.Buffer{})
+
+			ctx := context.Background()
+
+			// Inject mock controller via context if needed
+			if tt.name != "error: logger not in context" {
+				// Set up logger context
+				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+				ctx = context.WithValue(ctx, types.CtxLogger, logger)
+
+				// If we need to mock the controller, inject it via context
+				if tt.controllerFn != nil {
+					fakeCtrl := &fakeRealmController{
+						createRealmFn: func(opts controller.CreateRealmOptions) (controller.CreateRealmResult, error) {
+							createCalled = true
+							createOpts = opts
+							return tt.controllerFn(opts)
+						},
+					}
+					// Inject mock controller into context using the exported key
+					ctx = context.WithValue(ctx, realm.MockControllerKey{}, fakeCtrl)
+				}
+			}
+
+			cmd.SetContext(ctx)
+
+			if tt.setup != nil {
+				tt.setup(t, cmd)
+			}
+
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if createCalled != tt.wantCallCreate {
+				t.Errorf("CreateRealm called=%v want=%v", createCalled, tt.wantCallCreate)
+			}
+
+			if tt.wantOpts != nil {
+				if createOpts.Name != tt.wantOpts.Name {
+					t.Errorf("CreateRealm Name=%q want=%q", createOpts.Name, tt.wantOpts.Name)
+				}
+				if createOpts.Namespace != tt.wantOpts.Namespace {
+					t.Errorf("CreateRealm Namespace=%q want=%q", createOpts.Namespace, tt.wantOpts.Namespace)
+				}
+			}
+
+			if tt.wantOutput != nil {
+				output := cmd.OutOrStdout().(*bytes.Buffer).String()
+				for _, expected := range tt.wantOutput {
+					if !strings.Contains(output, expected) {
+						t.Errorf("output missing expected string %q\nGot output:\n%s", expected, output)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestNewRealmCmd_AutocompleteRegistration(t *testing.T) {
+	cmd := realm.NewRealmCmd()
+
+	// Test that ValidArgsFunction is NOT set (create realm is the only command without autocomplete)
+	if cmd.ValidArgsFunction != nil {
+		t.Fatal("expected ValidArgsFunction to be nil for create realm command")
+	}
+
+	// Test that namespace flag exists
+	namespaceFlag := cmd.Flags().Lookup("namespace")
+	if namespaceFlag == nil {
+		t.Fatal("expected 'namespace' flag to exist")
+	}
+
+	// Verify flag structure (completion function registration is verified by Cobra)
+	if namespaceFlag.Usage != "Containerd namespace for the realm (defaults to the realm name)" {
+		t.Errorf("unexpected namespace flag usage: %q", namespaceFlag.Usage)
+	}
+}
+
+func setFlag(t *testing.T, cmd *cobra.Command, name, value string) {
+	t.Helper()
+	if err := cmd.Flags().Set(name, value); err != nil {
+		t.Fatalf("failed to set flag %s: %v", name, err)
 	}
 }
 

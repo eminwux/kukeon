@@ -81,6 +81,7 @@ func NewRealmCmd() *cobra.Command {
 	}
 
 	cmd.Flags().String("namespace", "", "Containerd namespace for the realm (defaults to the realm name)")
+
 	return cmd
 }
 

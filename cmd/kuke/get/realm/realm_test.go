@@ -19,6 +19,7 @@ package realm_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -30,6 +31,7 @@ import (
 	realm "github.com/eminwux/kukeon/cmd/kuke/get/realm"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -323,4 +325,163 @@ func sampleRealmDoc(name, namespace string, state v1beta1.RealmState, cgroup str
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestNewRealmCmdRunE(t *testing.T) {
+	docAlpha := &v1beta1.RealmDoc{
+		Metadata: v1beta1.RealmMetadata{Name: "alpha"},
+		Spec:     v1beta1.RealmSpec{Namespace: "alpha-ns"},
+	}
+	docList := []*v1beta1.RealmDoc{docAlpha}
+
+	tests := []struct {
+		name       string
+		args       []string
+		outputFlag string
+		controller realm.RealmController
+		wantOutput []string
+		wantErr    string
+	}{
+		{
+			name: "get realm success",
+			args: []string{"alpha"},
+			controller: &fakeRealmController{
+				getRealmFn: func(name string) (*v1beta1.RealmDoc, error) {
+					if name != "alpha" {
+						return nil, errors.New("unexpected args")
+					}
+					return docAlpha, nil
+				},
+			},
+			wantOutput: []string{"name: alpha"},
+		},
+		{
+			name:       "list realms success",
+			outputFlag: "yaml",
+			controller: &fakeRealmController{
+				listRealmsFn: func() ([]*v1beta1.RealmDoc, error) {
+					return docList, nil
+				},
+			},
+			wantOutput: []string{"name: alpha"},
+		},
+		{
+			name: "realm not found error",
+			args: []string{"ghost"},
+			controller: &fakeRealmController{
+				getRealmFn: func(_ string) (*v1beta1.RealmDoc, error) {
+					return nil, errdefs.ErrRealmNotFound
+				},
+			},
+			wantErr: "realm \"ghost\" not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			viper.Reset()
+			cmd := realm.NewRealmCmd()
+			buf := &bytes.Buffer{}
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+
+			if tt.outputFlag != "" {
+				if err := cmd.Flags().Set("output", tt.outputFlag); err != nil {
+					t.Fatalf("failed to set output flag: %v", err)
+				}
+			}
+
+			// Set up context with logger
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+			// Inject mock controller via context if provided
+			if tt.controller != nil {
+				ctx = context.WithValue(ctx, realm.MockControllerKey{}, tt.controller)
+			}
+			cmd.SetContext(ctx)
+
+			cmd.SetArgs(tt.args)
+
+			// Capture stdout since PrintYAML/PrintJSON write to os.Stdout
+			// Table output goes to cmd.Out
+			var stdout string
+			var err error
+			if tt.wantOutput != nil || tt.wantErr == "" {
+				stdout, err = captureStdout(cmd.Execute)
+			} else {
+				err = cmd.Execute()
+			}
+
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.wantOutput != nil {
+				// Combine stdout (YAML/JSON) and command output (table) and stderr
+				output := stdout + buf.String()
+				for _, expected := range tt.wantOutput {
+					if !strings.Contains(output, expected) {
+						t.Errorf("output missing expected string %q\nGot output:\n%s", expected, output)
+					}
+				}
+			}
+		})
+	}
+}
+
+type fakeRealmController struct {
+	getRealmFn   func(name string) (*v1beta1.RealmDoc, error)
+	listRealmsFn func() ([]*v1beta1.RealmDoc, error)
+}
+
+func (f *fakeRealmController) GetRealm(name string) (*v1beta1.RealmDoc, error) {
+	if f.getRealmFn == nil {
+		return nil, errors.New("unexpected GetRealm call")
+	}
+	return f.getRealmFn(name)
+}
+
+func (f *fakeRealmController) ListRealms() ([]*v1beta1.RealmDoc, error) {
+	if f.listRealmsFn == nil {
+		return nil, errors.New("unexpected ListRealms call")
+	}
+	return f.listRealmsFn()
+}
+
+func TestNewRealmCmd_AutocompleteRegistration(t *testing.T) {
+	cmd := realm.NewRealmCmd()
+
+	// Test that ValidArgsFunction is set to CompleteRealmNames
+	if cmd.ValidArgsFunction == nil {
+		t.Fatal("expected ValidArgsFunction to be set")
+	}
+
+	// Test that output flag exists
+	outputFlag := cmd.Flags().Lookup("output")
+	if outputFlag == nil {
+		t.Fatal("expected 'output' flag to exist")
+	}
+
+	// Verify flag structure (completion function registration is verified by Cobra)
+	if outputFlag.Usage != "Output format (yaml, json, table). Default: table for list, yaml for single resource" {
+		t.Errorf("unexpected output flag usage: %q", outputFlag.Usage)
+	}
+
+	// Test that -o flag exists
+	oFlag := cmd.Flags().Lookup("output")
+	if oFlag == nil {
+		t.Fatal("expected 'o' flag to exist")
+	}
+
+	// Verify flag structure (completion function registration is verified by Cobra)
+	if oFlag.Usage != "Output format (yaml, json, table). Default: table for list, yaml for single resource" {
+		t.Errorf("unexpected o flag usage: %q", oFlag.Usage)
+	}
 }

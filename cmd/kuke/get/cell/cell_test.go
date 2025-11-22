@@ -470,6 +470,55 @@ func sampleCellDoc(name, realm, space, stack string, state v1beta1.CellState, cg
 	}
 }
 
+func TestNewCellCmd_AutocompleteRegistration(t *testing.T) {
+	cmd := cell.NewCellCmd()
+
+	// Test that ValidArgsFunction is set to CompleteCellNames
+	if cmd.ValidArgsFunction == nil {
+		t.Fatal("expected ValidArgsFunction to be set")
+	}
+
+	// Test that realm flag exists
+	realmFlag := cmd.Flags().Lookup("realm")
+	if realmFlag == nil {
+		t.Fatal("expected 'realm' flag to exist")
+	}
+	if realmFlag.Usage != "Filter cells by realm name" {
+		t.Errorf("unexpected realm flag usage: %q", realmFlag.Usage)
+	}
+
+	// Test that space flag exists
+	spaceFlag := cmd.Flags().Lookup("space")
+	if spaceFlag == nil {
+		t.Fatal("expected 'space' flag to exist")
+	}
+	if spaceFlag.Usage != "Filter cells by space name" {
+		t.Errorf("unexpected space flag usage: %q", spaceFlag.Usage)
+	}
+
+	// Test that stack flag exists
+	stackFlag := cmd.Flags().Lookup("stack")
+	if stackFlag == nil {
+		t.Fatal("expected 'stack' flag to exist")
+	}
+	if stackFlag.Usage != "Filter cells by stack name" {
+		t.Errorf("unexpected stack flag usage: %q", stackFlag.Usage)
+	}
+
+	// Test that output flag exists
+	outputFlag := cmd.Flags().Lookup("output")
+	if outputFlag == nil {
+		t.Fatal("expected 'output' flag to exist")
+	}
+	if outputFlag.Usage != "Output format (yaml, json, table). Default: table for list, yaml for single resource" {
+		t.Errorf("unexpected output flag usage: %q", outputFlag.Usage)
+	}
+	// Verify that output flag has shorthand 'o'
+	if outputFlag.Shorthand != "o" {
+		t.Errorf("expected output flag shorthand to be 'o', got %q", outputFlag.Shorthand)
+	}
+}
+
 func setFlag(t *testing.T, cmd *cobra.Command, name, value string) {
 	t.Helper()
 	if err := cmd.Flags().Set(name, value); err != nil {

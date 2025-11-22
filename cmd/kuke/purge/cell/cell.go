@@ -95,5 +95,13 @@ func NewCellCmd() *cobra.Command {
 	cmd.Flags().String("stack", "", "Stack that owns the cell")
 	_ = viper.BindPFlag(config.KUKE_PURGE_CELL_STACK.ViperKey, cmd.Flags().Lookup("stack"))
 
+	// Register autocomplete for positional argument
+	cmd.ValidArgsFunction = config.CompleteCellNames
+
+	// Register autocomplete functions for flags
+	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
+	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
+	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
+
 	return cmd
 }

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
 	stack "github.com/eminwux/kukeon/cmd/kuke/get/stack"
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -462,4 +464,204 @@ func stubTablePrinter(t *testing.T, stub func(*cobra.Command, []string, [][]stri
 	t.Cleanup(func() {
 		stack.TablePrinter = prev
 	})
+}
+
+func TestNewStackCmdRunE(t *testing.T) {
+	origPrintYAML := stack.YAMLPrinter
+	t.Cleanup(func() {
+		stack.YAMLPrinter = origPrintYAML
+	})
+
+	docAlpha := &v1beta1.StackDoc{
+		Metadata: v1beta1.StackMetadata{Name: "alpha"},
+		Spec:     v1beta1.StackSpec{RealmID: "realm-a", SpaceID: "space-a"},
+	}
+	docList := []*v1beta1.StackDoc{docAlpha}
+
+	tests := []struct {
+		name        string
+		args        []string
+		realmFlag   string
+		spaceFlag   string
+		outputFlag  string
+		controller  stack.StackController
+		wantPrinted interface{}
+		wantErr     string
+	}{
+		{
+			name:      "get stack success",
+			args:      []string{"alpha"},
+			realmFlag: "realm-a",
+			spaceFlag: "space-a",
+			controller: &fakeStackController{
+				getStack: func(name, realm, space string) (*v1beta1.StackDoc, error) {
+					if name != "alpha" || realm != "realm-a" || space != "space-a" {
+						return nil, errors.New("unexpected args")
+					}
+					return docAlpha, nil
+				},
+			},
+			wantPrinted: docAlpha,
+		},
+		{
+			name:       "list stacks success",
+			realmFlag:  "realm-a",
+			spaceFlag:  "space-a",
+			outputFlag: "yaml",
+			controller: &fakeStackController{
+				listStacks: func(realm, space string) ([]*v1beta1.StackDoc, error) {
+					if realm != "realm-a" || space != "space-a" {
+						return nil, errors.New("unexpected args")
+					}
+					return docList, nil
+				},
+			},
+			wantPrinted: docList,
+		},
+		{
+			name:      "missing realm for single stack",
+			args:      []string{"alpha"},
+			spaceFlag: "space-a",
+			controller: &fakeStackController{
+				getStack: func(_, _, _ string) (*v1beta1.StackDoc, error) {
+					return nil, errors.New("unexpected call")
+				},
+			},
+			wantErr: "realm name is required",
+		},
+		{
+			name:      "missing space for single stack",
+			args:      []string{"alpha"},
+			realmFlag: "realm-a",
+			controller: &fakeStackController{
+				getStack: func(_, _, _ string) (*v1beta1.StackDoc, error) {
+					return nil, errors.New("unexpected call")
+				},
+			},
+			wantErr: "space name is required",
+		},
+		{
+			name:      "stack not found error",
+			args:      []string{"ghost"},
+			realmFlag: "realm-a",
+			spaceFlag: "space-a",
+			controller: &fakeStackController{
+				getStack: func(_, _, _ string) (*v1beta1.StackDoc, error) {
+					return nil, errdefs.ErrStackNotFound
+				},
+			},
+			wantErr: "stack \"ghost\" not found in realm \"realm-a\", space \"space-a\"",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			viper.Reset()
+			cmd := stack.NewStackCmd()
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SetErr(&bytes.Buffer{})
+
+			if tt.realmFlag != "" {
+				if err := cmd.Flags().Set("realm", tt.realmFlag); err != nil {
+					t.Fatalf("failed to set realm flag: %v", err)
+				}
+			}
+			if tt.spaceFlag != "" {
+				if err := cmd.Flags().Set("space", tt.spaceFlag); err != nil {
+					t.Fatalf("failed to set space flag: %v", err)
+				}
+			}
+			if tt.outputFlag != "" {
+				if err := cmd.Flags().Set("output", tt.outputFlag); err != nil {
+					t.Fatalf("failed to set output flag: %v", err)
+				}
+			}
+
+			// Set up context with logger
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+			// Inject mock controller via context if provided
+			if tt.controller != nil {
+				ctx = context.WithValue(ctx, stack.MockControllerKey{}, tt.controller)
+			}
+			cmd.SetContext(ctx)
+
+			var printed interface{}
+			stack.YAMLPrinter = func(doc interface{}) error {
+				printed = doc
+				return nil
+			}
+
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+				}
+				if printed != nil {
+					t.Fatalf("expected no printer call, got %v", printed)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantPrinted != nil {
+				if !reflect.DeepEqual(printed, tt.wantPrinted) {
+					t.Fatalf("printed doc mismatch, got %v want %v", printed, tt.wantPrinted)
+				}
+			} else if printed != nil {
+				t.Fatalf("expected no printer call, got %v", printed)
+			}
+		})
+	}
+}
+
+func TestNewStackCmd_AutocompleteRegistration(t *testing.T) {
+	cmd := stack.NewStackCmd()
+
+	// Test that ValidArgsFunction is set to CompleteStackNames
+	if cmd.ValidArgsFunction == nil {
+		t.Fatal("expected ValidArgsFunction to be set")
+	}
+
+	// Test that realm flag exists
+	realmFlag := cmd.Flags().Lookup("realm")
+	if realmFlag == nil {
+		t.Fatal("expected 'realm' flag to exist")
+	}
+
+	// Verify flag structure (completion function registration is verified by Cobra)
+	if realmFlag.Usage != "Filter stacks by realm name" {
+		t.Errorf("unexpected realm flag usage: %q", realmFlag.Usage)
+	}
+
+	// Test that space flag exists
+	spaceFlag := cmd.Flags().Lookup("space")
+	if spaceFlag == nil {
+		t.Fatal("expected 'space' flag to exist")
+	}
+
+	// Verify flag structure (completion function registration is verified by Cobra)
+	if spaceFlag.Usage != "Filter stacks by space name" {
+		t.Errorf("unexpected space flag usage: %q", spaceFlag.Usage)
+	}
+
+	// Test that output flag exists
+	outputFlag := cmd.Flags().Lookup("output")
+	if outputFlag == nil {
+		t.Fatal("expected 'output' flag to exist")
+	}
+
+	// Verify flag structure (completion function registration is verified by Cobra)
+	if outputFlag.Usage != "Output format (yaml, json, table). Default: table for list, yaml for single resource" {
+		t.Errorf("unexpected output flag usage: %q", outputFlag.Usage)
+	}
+
+	// Verify that output flag has shorthand 'o'
+	if outputFlag.Shorthand != "o" {
+		t.Errorf("expected output flag to have shorthand 'o', got %q", outputFlag.Shorthand)
+	}
 }

@@ -95,6 +95,9 @@ func NewSpaceCmd() *cobra.Command {
 	cmd.Flags().String("realm", "", "Realm that will own the space")
 	_ = viper.BindPFlag(config.KUKE_CREATE_SPACE_REALM.ViperKey, cmd.Flags().Lookup("realm"))
 
+	// Register autocomplete function for --realm flag
+	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
+
 	return cmd
 }
 

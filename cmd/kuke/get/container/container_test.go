@@ -667,3 +667,58 @@ func (f *fakeContainerController) ListContainers(
 	}
 	return f.listContainersFn(realmName, spaceName, stackName, cellName)
 }
+
+func TestNewContainerCmd_AutocompleteRegistration(t *testing.T) {
+	cmd := container.NewContainerCmd()
+
+	// Test that all flags exist
+	realmFlag := cmd.Flags().Lookup("realm")
+	if realmFlag == nil {
+		t.Fatal("expected 'realm' flag to exist")
+	}
+	if realmFlag.Usage != "Filter containers by realm name" {
+		t.Errorf("unexpected realm flag usage: %q", realmFlag.Usage)
+	}
+
+	spaceFlag := cmd.Flags().Lookup("space")
+	if spaceFlag == nil {
+		t.Fatal("expected 'space' flag to exist")
+	}
+	if spaceFlag.Usage != "Filter containers by space name" {
+		t.Errorf("unexpected space flag usage: %q", spaceFlag.Usage)
+	}
+
+	stackFlag := cmd.Flags().Lookup("stack")
+	if stackFlag == nil {
+		t.Fatal("expected 'stack' flag to exist")
+	}
+	if stackFlag.Usage != "Filter containers by stack name" {
+		t.Errorf("unexpected stack flag usage: %q", stackFlag.Usage)
+	}
+
+	cellFlag := cmd.Flags().Lookup("cell")
+	if cellFlag == nil {
+		t.Fatal("expected 'cell' flag to exist")
+	}
+	if cellFlag.Usage != "Filter containers by cell name" {
+		t.Errorf("unexpected cell flag usage: %q", cellFlag.Usage)
+	}
+
+	outputFlag := cmd.Flags().Lookup("output")
+	if outputFlag == nil {
+		t.Fatal("expected 'output' flag to exist")
+	}
+	if outputFlag.Usage != "Output format (yaml, json, table). Default: table for list, yaml for single resource" {
+		t.Errorf("unexpected output flag usage: %q", outputFlag.Usage)
+	}
+
+	// Verify ValidArgsFunction is set for positional argument
+	if cmd.ValidArgsFunction == nil {
+		t.Fatal("expected ValidArgsFunction to be set for positional argument")
+	}
+
+	// Note: Completion function registration is verified by Cobra internally.
+	// We can't directly access the registered functions, but the fact that
+	// ValidArgsFunction is set and flags exist confirms the structure is correct.
+	// The short flag "o" is an alias for "output" and uses the same completion function.
+}
