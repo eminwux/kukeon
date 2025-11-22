@@ -40,15 +40,6 @@ type cellController = CellController // internal alias for backward compatibilit
 // MockControllerKey is used to inject mock controllers in tests via context.
 type MockControllerKey struct{}
 
-var (
-	ParseOutputFormat = shared.ParseOutputFormat
-	YAMLPrinter       = shared.PrintYAML
-	JSONPrinter       = shared.PrintJSON
-	TablePrinter      = shared.PrintTable
-	RunPrintCell      = printCell
-	RunPrintCells     = printCells
-)
-
 func NewCellCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "cell [name]",
@@ -69,7 +60,7 @@ func NewCellCmd() *cobra.Command {
 				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
-			outputFormat, formatErr := ParseOutputFormat(cmd)
+			outputFormat, formatErr := shared.ParseOutputFormat(cmd)
 			if formatErr != nil {
 				return formatErr
 			}
@@ -125,7 +116,7 @@ func NewCellCmd() *cobra.Command {
 					return getErr
 				}
 
-				return RunPrintCell(cmd, cell, outputFormat)
+				return printCell(cmd, cell, outputFormat)
 			}
 
 			// List cells (optionally filtered by realm, space, and/or stack)
@@ -134,7 +125,7 @@ func NewCellCmd() *cobra.Command {
 				return listErr
 			}
 
-			return RunPrintCells(cmd, cells, outputFormat)
+			return printCells(cmd, cells, outputFormat)
 		},
 	}
 
@@ -158,23 +149,23 @@ func NewCellCmd() *cobra.Command {
 func printCell(_ *cobra.Command, cell interface{}, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return YAMLPrinter(cell)
+		return shared.PrintYAML(cell)
 	case shared.OutputFormatJSON:
-		return JSONPrinter(cell)
+		return shared.PrintJSON(cell)
 	case shared.OutputFormatTable:
 		// For single resource, show full YAML by default
-		return YAMLPrinter(cell)
+		return shared.PrintYAML(cell)
 	default:
-		return YAMLPrinter(cell)
+		return shared.PrintYAML(cell)
 	}
 }
 
 func printCells(cmd *cobra.Command, cells []*v1beta1.CellDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return YAMLPrinter(cells)
+		return shared.PrintYAML(cells)
 	case shared.OutputFormatJSON:
-		return JSONPrinter(cells)
+		return shared.PrintJSON(cells)
 	case shared.OutputFormatTable:
 		if len(cells) == 0 {
 			cmd.Println("No cells found.")
@@ -201,10 +192,10 @@ func printCells(cmd *cobra.Command, cells []*v1beta1.CellDoc, format shared.Outp
 			})
 		}
 
-		TablePrinter(cmd, headers, rows)
+		shared.PrintTable(cmd, headers, rows)
 		return nil
 	default:
-		return YAMLPrinter(cells)
+		return shared.PrintYAML(cells)
 	}
 }
 
