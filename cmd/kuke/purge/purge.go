@@ -17,6 +17,8 @@
 package purge
 
 import (
+	"strings"
+
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/purge/cell"
 	"github.com/eminwux/kukeon/cmd/kuke/purge/container"
@@ -39,6 +41,8 @@ func NewPurgeCmd() *cobra.Command {
 		},
 	}
 
+	cmd.ValidArgsFunction = completePurgeSubcommands
+
 	// Add persistent --cascade flag
 	cmd.PersistentFlags().
 		Bool("cascade", false, "Automatically purge child resources recursively (does not apply to containers)")
@@ -57,4 +61,22 @@ func NewPurgeCmd() *cobra.Command {
 	)
 
 	return cmd
+}
+
+// completePurgeSubcommands provides shell completion for purge subcommand names.
+func completePurgeSubcommands(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	subcommands := []string{"realm", "space", "stack", "cell", "container"}
+
+	if toComplete == "" {
+		return subcommands, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	matches := make([]string, 0, len(subcommands))
+	for _, subcmd := range subcommands {
+		if strings.HasPrefix(subcmd, toComplete) {
+			matches = append(matches, subcmd)
+		}
+	}
+
+	return matches, cobra.ShellCompDirectiveNoFileComp
 }

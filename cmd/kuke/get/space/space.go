@@ -134,6 +134,18 @@ func NewSpaceCmd() *cobra.Command {
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
 
+	// Register autocomplete for positional argument
+	cmd.ValidArgsFunction = config.CompleteSpaceNames
+
+	// Register autocomplete function for --realm flag
+	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
+
+	// Register autocomplete function for --output flag
+	_ = cmd.RegisterFlagCompletionFunc("output", config.CompleteOutputFormat)
+
+	// Register autocomplete function for -o flag
+	_ = cmd.RegisterFlagCompletionFunc("o", config.CompleteOutputFormat)
+
 	return cmd
 }
 

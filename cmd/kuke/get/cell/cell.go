@@ -143,6 +143,16 @@ func NewCellCmd() *cobra.Command {
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
 
+	// Register autocomplete for positional argument
+	cmd.ValidArgsFunction = config.CompleteCellNames
+
+	// Register autocomplete functions for flags
+	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
+	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
+	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
+	_ = cmd.RegisterFlagCompletionFunc("output", config.CompleteOutputFormat)
+	_ = cmd.RegisterFlagCompletionFunc("o", config.CompleteOutputFormat)
+
 	return cmd
 }
 

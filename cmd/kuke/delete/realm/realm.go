@@ -19,6 +19,7 @@ package realm
 import (
 	"strings"
 
+	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/spf13/cobra"
@@ -67,6 +68,9 @@ func NewRealmCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	// Register autocomplete for positional argument
+	cmd.ValidArgsFunction = config.CompleteRealmNames
 
 	return cmd
 }

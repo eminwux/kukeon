@@ -114,5 +114,46 @@ func NewKillCmd() *cobra.Command {
 	cmd.Flags().String("cell", "", "Cell that owns the container (required for container resource type)")
 	_ = viper.BindPFlag(config.KUKE_KILL_CELL.ViperKey, cmd.Flags().Lookup("cell"))
 
+	// Register autocomplete functions for flags and positional arguments
+	cmd.ValidArgsFunction = completeKillArgs
+	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
+	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
+	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
+	_ = cmd.RegisterFlagCompletionFunc("cell", config.CompleteCellNames)
+
 	return cmd
+}
+
+// completeKillArgs provides shell completion for kill command positional arguments.
+// When len(args) == 0, completes resource-type ("cell" or "container").
+// When len(args) == 1, completes resource-name based on the resource-type.
+func completeKillArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// First argument: resource-type
+	if len(args) == 0 {
+		resourceTypes := []string{"cell", "container"}
+		matches := make([]string, 0, len(resourceTypes))
+		for _, rt := range resourceTypes {
+			if toComplete == "" || strings.HasPrefix(rt, toComplete) {
+				matches = append(matches, rt)
+			}
+		}
+		return matches, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	// Second argument: resource-name (depends on resource-type)
+	if len(args) == 1 {
+		resourceType := strings.ToLower(strings.TrimSpace(args[0]))
+		switch resourceType {
+		case "cell":
+			return config.CompleteCellNames(cmd, args, toComplete)
+		case "container":
+			return config.CompleteContainerNames(cmd, args, toComplete)
+		default:
+			// Unknown resource type, return empty
+			return []string{}, cobra.ShellCompDirectiveNoFileComp
+		}
+	}
+
+	// More than 2 args, return empty
+	return []string{}, cobra.ShellCompDirectiveNoFileComp
 }

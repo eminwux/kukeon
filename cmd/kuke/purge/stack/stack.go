@@ -88,5 +88,10 @@ func NewStackCmd() *cobra.Command {
 	cmd.Flags().String("space", "", "Space that owns the stack")
 	_ = viper.BindPFlag(config.KUKE_PURGE_STACK_SPACE.ViperKey, cmd.Flags().Lookup("space"))
 
+	// Register autocomplete functions
+	cmd.ValidArgsFunction = config.CompleteStackNames
+	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
+	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
+
 	return cmd
 }

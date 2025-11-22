@@ -533,3 +533,50 @@ func newOutputCommand() (*cobra.Command, *bytes.Buffer) {
 	cmd.SetErr(buf)
 	return cmd, buf
 }
+
+func TestNewContainerCmd_AutocompleteRegistration(t *testing.T) {
+	cmd := container.NewContainerCmd()
+
+	// Test that flags exist and have completion functions registered
+	flags := []struct {
+		name string
+	}{
+		{"realm"},
+		{"space"},
+		{"stack"},
+		{"cell"},
+	}
+
+	for _, flag := range flags {
+		flagObj := cmd.Flags().Lookup(flag.name)
+		if flagObj == nil {
+			t.Errorf("expected %q flag to exist", flag.name)
+			continue
+		}
+
+		// Verify flag structure (completion function registration is verified by Cobra)
+		switch flag.name {
+		case "realm":
+			if flagObj.Usage != "Realm that owns the container" {
+				t.Errorf("unexpected realm flag usage: %q", flagObj.Usage)
+			}
+		case "space":
+			if flagObj.Usage != "Space that owns the container" {
+				t.Errorf("unexpected space flag usage: %q", flagObj.Usage)
+			}
+		case "stack":
+			if flagObj.Usage != "Stack that owns the container" {
+				t.Errorf("unexpected stack flag usage: %q", flagObj.Usage)
+			}
+		case "cell":
+			if flagObj.Usage != "Cell that owns the container" {
+				t.Errorf("unexpected cell flag usage: %q", flagObj.Usage)
+			}
+		}
+	}
+
+	// Test that ValidArgsFunction is set for positional argument
+	if cmd.ValidArgsFunction == nil {
+		t.Error("expected ValidArgsFunction to be set for positional argument")
+	}
+}

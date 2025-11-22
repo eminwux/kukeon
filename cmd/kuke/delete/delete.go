@@ -17,6 +17,8 @@
 package deletecmd
 
 import (
+	"strings"
+
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/cell"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/container"
@@ -39,6 +41,8 @@ func NewDeleteCmd() *cobra.Command {
 		},
 	}
 
+	cmd.ValidArgsFunction = completeDeleteSubcommands
+
 	// Add persistent --cascade flag
 	cmd.PersistentFlags().
 		Bool("cascade", false, "Automatically delete child resources recursively (does not apply to containers)")
@@ -57,4 +61,22 @@ func NewDeleteCmd() *cobra.Command {
 	)
 
 	return cmd
+}
+
+// completeDeleteSubcommands provides shell completion for delete subcommand names.
+func completeDeleteSubcommands(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	subcommands := []string{"realm", "space", "stack", "cell", "container"}
+
+	if toComplete == "" {
+		return subcommands, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	matches := make([]string, 0, len(subcommands))
+	for _, subcmd := range subcommands {
+		if strings.HasPrefix(subcmd, toComplete) {
+			matches = append(matches, subcmd)
+		}
+	}
+
+	return matches, cobra.ShellCompDirectiveNoFileComp
 }

@@ -333,6 +333,15 @@ func TestNewRealmCmdRunE(t *testing.T) {
 	}
 }
 
+func TestNewRealmCmd_AutocompleteRegistration(t *testing.T) {
+	cmd := realm.NewRealmCmd()
+
+	// Test that ValidArgsFunction is set to CompleteRealmNames
+	if cmd.ValidArgsFunction == nil {
+		t.Fatal("expected ValidArgsFunction to be set")
+	}
+}
+
 // fakePurgeRealmController provides a mock implementation for testing PurgeRealm.
 type fakePurgeRealmController struct {
 	purgeRealmFn func(name string, force, cascade bool) (*controller.PurgeRealmResult, error)

@@ -99,5 +99,12 @@ func NewContainerCmd() *cobra.Command {
 	cmd.Flags().String("cell", "", "Cell that owns the container")
 	_ = viper.BindPFlag(config.KUKE_PURGE_CONTAINER_CELL.ViperKey, cmd.Flags().Lookup("cell"))
 
+	// Register autocomplete functions for flags and positional argument
+	cmd.ValidArgsFunction = config.CompleteContainerNames
+	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
+	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
+	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
+	_ = cmd.RegisterFlagCompletionFunc("cell", config.CompleteCellNames)
+
 	return cmd
 }

@@ -19,6 +19,7 @@ package realm_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -299,6 +300,348 @@ func TestNewRealmCmd(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestNewRealmCmdRunE(t *testing.T) {
+	t.Cleanup(func() {
+		viper.Reset()
+	})
+
+	tests := []struct {
+		name           string
+		args           []string
+		setup          func(t *testing.T, cmd *cobra.Command)
+		controllerFn   func(name string, force, cascade bool) (*controller.DeleteRealmResult, error)
+		wantErr        string
+		wantCallDelete bool
+		wantOpts       *struct {
+			name    string
+			force   bool
+			cascade bool
+		}
+		wantOutput []string
+	}{
+		{
+			name: "success: delete realm with default flags",
+			args: []string{"test-realm"},
+			setup: func(_ *testing.T, _ *cobra.Command) {
+				// No flags set, defaults to false
+			},
+			controllerFn: func(name string, force, cascade bool) (*controller.DeleteRealmResult, error) {
+				if name != "test-realm" {
+					t.Fatalf("expected name %q, got %q", "test-realm", name)
+				}
+				if force {
+					t.Fatalf("expected force to be false, got true")
+				}
+				if cascade {
+					t.Fatalf("expected cascade to be false, got true")
+				}
+				return &controller.DeleteRealmResult{
+					RealmName: name,
+					Deleted:   []string{"metadata", "cgroup", "network"},
+				}, nil
+			},
+			wantCallDelete: true,
+			wantOpts: &struct {
+				name    string
+				force   bool
+				cascade bool
+			}{
+				name:    "test-realm",
+				force:   false,
+				cascade: false,
+			},
+			wantOutput: []string{`Deleted realm "test-realm"`},
+		},
+		{
+			name: "success: delete realm with force flag",
+			args: []string{"test-realm"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				// Set up parent command for persistent flags
+				parentCmd := &cobra.Command{Use: "delete"}
+				parentCmd.PersistentFlags().Bool("force", false, "")
+				parentCmd.PersistentFlags().Bool("cascade", false, "")
+				_ = viper.BindPFlag(config.KUKE_DELETE_FORCE.ViperKey, parentCmd.PersistentFlags().Lookup("force"))
+				_ = viper.BindPFlag(config.KUKE_DELETE_CASCADE.ViperKey, parentCmd.PersistentFlags().Lookup("cascade"))
+				parentCmd.AddCommand(cmd)
+				// Set flag on parent's persistent flags (child inherits them)
+				if err := parentCmd.PersistentFlags().Set("force", "true"); err != nil {
+					t.Fatalf("failed to set force flag: %v", err)
+				}
+			},
+			controllerFn: func(name string, force, cascade bool) (*controller.DeleteRealmResult, error) {
+				if !force {
+					t.Fatalf("expected force to be true, got false")
+				}
+				return &controller.DeleteRealmResult{
+					RealmName: name,
+					Deleted:   []string{"metadata", "cgroup", "network"},
+				}, nil
+			},
+			wantCallDelete: true,
+			wantOpts: &struct {
+				name    string
+				force   bool
+				cascade bool
+			}{
+				name:    "test-realm",
+				force:   true,
+				cascade: false,
+			},
+			wantOutput: []string{`Deleted realm "test-realm"`},
+		},
+		{
+			name: "success: delete realm with cascade flag",
+			args: []string{"test-realm"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				// Set up parent command for persistent flags
+				parentCmd := &cobra.Command{Use: "delete"}
+				parentCmd.PersistentFlags().Bool("force", false, "")
+				parentCmd.PersistentFlags().Bool("cascade", false, "")
+				_ = viper.BindPFlag(config.KUKE_DELETE_FORCE.ViperKey, parentCmd.PersistentFlags().Lookup("force"))
+				_ = viper.BindPFlag(config.KUKE_DELETE_CASCADE.ViperKey, parentCmd.PersistentFlags().Lookup("cascade"))
+				parentCmd.AddCommand(cmd)
+				// Set flag on parent's persistent flags (child inherits them)
+				if err := parentCmd.PersistentFlags().Set("cascade", "true"); err != nil {
+					t.Fatalf("failed to set cascade flag: %v", err)
+				}
+			},
+			controllerFn: func(name string, force, cascade bool) (*controller.DeleteRealmResult, error) {
+				if !cascade {
+					t.Fatalf("expected cascade to be true, got false")
+				}
+				return &controller.DeleteRealmResult{
+					RealmName: name,
+					Deleted:   []string{"space:space1", "space:space2", "metadata", "cgroup", "network"},
+				}, nil
+			},
+			wantCallDelete: true,
+			wantOpts: &struct {
+				name    string
+				force   bool
+				cascade bool
+			}{
+				name:    "test-realm",
+				force:   false,
+				cascade: true,
+			},
+			wantOutput: []string{`Deleted realm "test-realm"`},
+		},
+		{
+			name: "success: name trimming whitespace",
+			args: []string{"  test-realm  "},
+			setup: func(_ *testing.T, _ *cobra.Command) {
+				// No flags set
+			},
+			controllerFn: func(name string, force, cascade bool) (*controller.DeleteRealmResult, error) {
+				if name != "test-realm" {
+					t.Fatalf("expected trimmed name %q, got %q", "test-realm", name)
+				}
+				return &controller.DeleteRealmResult{
+					RealmName: name,
+					Deleted:   []string{"metadata", "cgroup", "network"},
+				}, nil
+			},
+			wantCallDelete: true,
+			wantOpts: &struct {
+				name    string
+				force   bool
+				cascade bool
+			}{
+				name:    "test-realm",
+				force:   false,
+				cascade: false,
+			},
+			wantOutput: []string{`Deleted realm "test-realm"`},
+		},
+		{
+			name: "error: logger not in context",
+			args: []string{"test-realm"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				cmd.SetContext(context.Background())
+			},
+			controllerFn: func(_ string, _ bool, _ bool) (*controller.DeleteRealmResult, error) {
+				return nil, errors.New("unexpected call")
+			},
+			wantErr:        "logger not found",
+			wantCallDelete: false,
+		},
+		{
+			name: "error: DeleteRealm fails",
+			args: []string{"test-realm"},
+			setup: func(_ *testing.T, _ *cobra.Command) {
+				// No flags set
+			},
+			controllerFn: func(_ string, _ bool, _ bool) (*controller.DeleteRealmResult, error) {
+				return nil, errdefs.ErrDeleteRealm
+			},
+			wantErr:        "failed to delete realm",
+			wantCallDelete: true,
+			wantOpts: &struct {
+				name    string
+				force   bool
+				cascade bool
+			}{
+				name:    "test-realm",
+				force:   false,
+				cascade: false,
+			},
+		},
+		{
+			name: "error: DeleteRealm returns realm not found",
+			args: []string{"nonexistent-realm"},
+			setup: func(_ *testing.T, _ *cobra.Command) {
+				// No flags set
+			},
+			controllerFn: func(_ string, _ bool, _ bool) (*controller.DeleteRealmResult, error) {
+				return nil, errdefs.ErrRealmNotFound
+			},
+			wantErr:        "realm not found",
+			wantCallDelete: true,
+			wantOpts: &struct {
+				name    string
+				force   bool
+				cascade bool
+			}{
+				name:    "nonexistent-realm",
+				force:   false,
+				cascade: false,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+
+			runPath := t.TempDir()
+			viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, runPath)
+			viper.Set(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey, filepath.Join(runPath, "containerd.sock"))
+
+			var deleteCalled bool
+			var deleteOpts struct {
+				name    string
+				force   bool
+				cascade bool
+			}
+
+			cmd := realm.NewRealmCmd()
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SetErr(&bytes.Buffer{})
+
+			ctx := context.Background()
+
+			// Inject mock controller via context if needed
+			if tt.name != "error: logger not in context" {
+				// Set up logger context
+				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+				ctx = context.WithValue(ctx, types.CtxLogger, logger)
+
+				// If we need to mock the controller, inject it via context
+				if tt.controllerFn != nil {
+					fakeCtrl := &fakeRealmController{
+						deleteRealmFn: func(name string, force, cascade bool) (*controller.DeleteRealmResult, error) {
+							deleteCalled = true
+							deleteOpts.name = name
+							deleteOpts.force = force
+							deleteOpts.cascade = cascade
+							return tt.controllerFn(name, force, cascade)
+						},
+					}
+					// Inject mock controller into context
+					ctx = context.WithValue(ctx, realm.MockControllerKey{}, fakeCtrl)
+				}
+			}
+
+			cmd.SetContext(ctx)
+
+			if tt.setup != nil {
+				tt.setup(t, cmd)
+			}
+
+			// If setup created a parent command, use it for execution
+			// Otherwise, create one for persistent flags
+			var isParentCmd bool
+			var execCmd *cobra.Command
+			if cmd.Parent() != nil {
+				// Setup created a parent, use it
+				execCmd = cmd.Parent()
+				execCmd.SetContext(ctx)
+				execCmd.SetOut(cmd.OutOrStdout())
+				execCmd.SetErr(cmd.ErrOrStderr())
+				execCmd.SetArgs(append([]string{"realm"}, tt.args...))
+				isParentCmd = true
+			} else {
+				// Create parent command for persistent flags
+				parentCmd := &cobra.Command{Use: "delete"}
+				parentCmd.PersistentFlags().Bool("force", false, "")
+				parentCmd.PersistentFlags().Bool("cascade", false, "")
+				_ = viper.BindPFlag(config.KUKE_DELETE_FORCE.ViperKey, parentCmd.PersistentFlags().Lookup("force"))
+				_ = viper.BindPFlag(config.KUKE_DELETE_CASCADE.ViperKey, parentCmd.PersistentFlags().Lookup("cascade"))
+				parentCmd.AddCommand(cmd)
+				parentCmd.SetContext(ctx)
+				parentCmd.SetOut(cmd.OutOrStdout())
+				parentCmd.SetErr(cmd.ErrOrStderr())
+				parentCmd.SetArgs(append([]string{"realm"}, tt.args...))
+				execCmd = parentCmd
+				isParentCmd = true
+			}
+
+			// Only set args if we didn't create/use a parent command
+			if !isParentCmd {
+				execCmd = cmd
+				execCmd.SetArgs(tt.args)
+			}
+
+			err := execCmd.Execute()
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if deleteCalled != tt.wantCallDelete {
+				t.Errorf("DeleteRealm called=%v want=%v", deleteCalled, tt.wantCallDelete)
+			}
+
+			if tt.wantOpts != nil {
+				if deleteOpts.name != tt.wantOpts.name {
+					t.Errorf("DeleteRealm name=%q want=%q", deleteOpts.name, tt.wantOpts.name)
+				}
+				if deleteOpts.force != tt.wantOpts.force {
+					t.Errorf("DeleteRealm force=%v want=%v", deleteOpts.force, tt.wantOpts.force)
+				}
+				if deleteOpts.cascade != tt.wantOpts.cascade {
+					t.Errorf("DeleteRealm cascade=%v want=%v", deleteOpts.cascade, tt.wantOpts.cascade)
+				}
+			}
+
+			if tt.wantOutput != nil {
+				output := execCmd.OutOrStdout().(*bytes.Buffer).String()
+				for _, expected := range tt.wantOutput {
+					if !strings.Contains(output, expected) {
+						t.Errorf("output missing expected string %q\nGot output:\n%s", expected, output)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestNewRealmCmd_AutocompleteRegistration(t *testing.T) {
+	cmd := realm.NewRealmCmd()
+
+	// Test that ValidArgsFunction is set to CompleteRealmNames
+	if cmd.ValidArgsFunction == nil {
+		t.Fatal("expected ValidArgsFunction to be set")
 	}
 }
 

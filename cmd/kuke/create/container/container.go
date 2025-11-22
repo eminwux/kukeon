@@ -138,6 +138,13 @@ func NewContainerCmd() *cobra.Command {
 	cmd.Flags().String("command", "", "Command to run in the container")
 	cmd.Flags().StringArray("args", []string{}, "Arguments to pass to the command")
 
+	// Register autocomplete functions for flags and positional argument
+	cmd.ValidArgsFunction = config.CompleteContainerNames
+	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
+	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
+	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
+	_ = cmd.RegisterFlagCompletionFunc("cell", config.CompleteCellNames)
+
 	return cmd
 }
 

@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	autocompletecmd "github.com/eminwux/kukeon/cmd/kuke/autocomplete"
 	createcmd "github.com/eminwux/kukeon/cmd/kuke/create"
 	deletecmd "github.com/eminwux/kukeon/cmd/kuke/delete"
 	getcmd "github.com/eminwux/kukeon/cmd/kuke/get"
@@ -121,6 +122,7 @@ func SetupKukeCmd(rootCmd *cobra.Command) error {
 	rootCmd.AddCommand(stopcmd.NewStopCmd())
 	rootCmd.AddCommand(killcmd.NewKillCmd())
 	rootCmd.AddCommand(purgecmd.NewPurgeCmd())
+	rootCmd.AddCommand(autocompletecmd.NewAutocompleteCmd())
 	rootCmd.AddCommand(version.NewVersionCmd())
 
 	// Persistent flags

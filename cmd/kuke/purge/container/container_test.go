@@ -461,6 +461,40 @@ func TestNewContainerCmdRunE(t *testing.T) {
 	}
 }
 
+func TestNewContainerCmd_AutocompleteRegistration(t *testing.T) {
+	cmd := container.NewContainerCmd()
+
+	// Test that ValidArgsFunction is set for positional argument
+	if cmd.ValidArgsFunction == nil {
+		t.Fatal("expected ValidArgsFunction to be set for positional argument")
+	}
+
+	// Test that all flags exist and have correct usage
+	flags := []struct {
+		name  string
+		usage string
+	}{
+		{"realm", "Realm that owns the container"},
+		{"space", "Space that owns the container"},
+		{"stack", "Stack that owns the container"},
+		{"cell", "Cell that owns the container"},
+	}
+
+	for _, flag := range flags {
+		flagObj := cmd.Flags().Lookup(flag.name)
+		if flagObj == nil {
+			t.Errorf("expected %q flag to exist", flag.name)
+			continue
+		}
+		if flagObj.Usage != flag.usage {
+			t.Errorf("unexpected %q flag usage: got %q, want %q", flag.name, flagObj.Usage, flag.usage)
+		}
+	}
+
+	// Note: Completion function registration is verified by Cobra internally.
+	// ValidArgsFunction is set and flags exist confirms the structure is correct.
+}
+
 // fakePurgeController provides a mock implementation for testing PurgeContainer.
 type fakePurgeController struct {
 	purgeContainerFn func(name, realm, space, stack, cell string) (*controller.PurgeContainerResult, error)

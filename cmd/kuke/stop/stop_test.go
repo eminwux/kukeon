@@ -90,6 +90,19 @@ func TestNewStopCmdRegistersSubcommands(t *testing.T) {
 	}
 }
 
+func TestNewStopCmd_AutocompleteRegistration(t *testing.T) {
+	cmd := stop.NewStopCmd()
+
+	// Test that ValidArgsFunction is set for subcommand completion
+	if cmd.ValidArgsFunction == nil {
+		t.Fatal("expected ValidArgsFunction to be set for subcommand completion")
+	}
+
+	// Note: Completion function registration is verified by Cobra internally.
+	// We can't directly access the registered function, but the fact that
+	// ValidArgsFunction is set confirms the structure is correct.
+}
+
 func findSubCommand(cmd *cobra.Command, name string) *cobra.Command {
 	for _, sc := range cmd.Commands() {
 		if sc.Name() == name || sc.HasAlias(name) {

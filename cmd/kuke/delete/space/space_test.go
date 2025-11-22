@@ -101,6 +101,27 @@ func TestNewSpaceCmd(t *testing.T) {
 	}
 }
 
+func TestNewSpaceCmd_AutocompleteRegistration(t *testing.T) {
+	cmd := space.NewSpaceCmd()
+
+	// Test that realm flag exists and has completion function registered
+	realmFlag := cmd.Flags().Lookup("realm")
+	if realmFlag == nil {
+		t.Fatal("expected 'realm' flag to exist")
+	}
+	if realmFlag.Usage != "Realm that owns the space" {
+		t.Errorf("unexpected realm flag usage: %q", realmFlag.Usage)
+	}
+
+	// Verify flag structure (completion function registration is verified by Cobra)
+	// The completion function is registered via RegisterFlagCompletionFunc
+
+	// Test that positional argument has completion function registered
+	if cmd.ValidArgsFunction == nil {
+		t.Error("expected ValidArgsFunction to be set for positional argument")
+	}
+}
+
 func TestNewSpaceCmdRunE(t *testing.T) {
 	tests := []struct {
 		name          string

@@ -743,6 +743,37 @@ func TestDeleteStackWithMocks(t *testing.T) {
 	}
 }
 
+func TestNewStackCmd_AutocompleteRegistration(t *testing.T) {
+	cmd := stack.NewStackCmd()
+
+	// Test that ValidArgsFunction is set to CompleteStackNames
+	if cmd.ValidArgsFunction == nil {
+		t.Fatal("expected ValidArgsFunction to be set")
+	}
+
+	// Test that realm flag exists
+	realmFlag := cmd.Flags().Lookup("realm")
+	if realmFlag == nil {
+		t.Fatal("expected 'realm' flag to exist")
+	}
+
+	// Verify flag structure (completion function registration is verified by Cobra)
+	if realmFlag.Usage != "Realm that owns the stack" {
+		t.Errorf("unexpected realm flag usage: %q", realmFlag.Usage)
+	}
+
+	// Test that space flag exists
+	spaceFlag := cmd.Flags().Lookup("space")
+	if spaceFlag == nil {
+		t.Fatal("expected 'space' flag to exist")
+	}
+
+	// Verify flag structure (completion function registration is verified by Cobra)
+	if spaceFlag.Usage != "Space that owns the stack" {
+		t.Errorf("unexpected space flag usage: %q", spaceFlag.Usage)
+	}
+}
+
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }

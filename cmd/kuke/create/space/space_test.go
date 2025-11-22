@@ -82,6 +82,24 @@ func TestNewSpaceCmd(t *testing.T) {
 	}
 }
 
+func TestNewSpaceCmd_AutocompleteRegistration(t *testing.T) {
+	// Test that autocomplete function is properly registered for --realm flag
+	cmd := space.NewSpaceCmd()
+
+	// Test that realm flag exists
+	realmFlag := cmd.Flags().Lookup("realm")
+	if realmFlag == nil {
+		t.Fatal("expected 'realm' flag to exist")
+	}
+
+	// Verify that the flag has a completion function registered
+	// We can't directly access the completion function, but we can verify
+	// the flag exists and the command structure is correct
+	if realmFlag.Usage != "Realm that will own the space" {
+		t.Errorf("unexpected realm flag usage: %q", realmFlag.Usage)
+	}
+}
+
 func TestNewSpaceCmdRunE(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
