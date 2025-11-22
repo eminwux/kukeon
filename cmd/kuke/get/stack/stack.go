@@ -23,10 +23,30 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
+	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+)
+
+type StackController interface {
+	GetStack(name, realmName, spaceName string) (*v1beta1.StackDoc, error)
+	ListStacks(realmName, spaceName string) ([]*v1beta1.StackDoc, error)
+}
+
+type stackController = StackController // internal alias for backward compatibility
+
+// MockControllerKey is used to inject mock controllers in tests via context.
+type MockControllerKey struct{}
+
+var (
+	ParseOutputFormat = shared.ParseOutputFormat
+	YAMLPrinter       = shared.PrintYAML
+	JSONPrinter       = shared.PrintJSON
+	TablePrinter      = shared.PrintTable
+	RunPrintStack     = printStack
+	RunPrintStacks    = printStacks
 )
 
 func NewStackCmd() *cobra.Command {
@@ -38,12 +58,18 @@ func NewStackCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctrl, err := shared.ControllerFromCmd(cmd)
-			if err != nil {
-				return err
+			var ctrl stackController
+			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(StackController); ok {
+				ctrl = mockCtrl
+			} else {
+				realCtrl, err := shared.ControllerFromCmd(cmd)
+				if err != nil {
+					return err
+				}
+				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
-			outputFormat, err := shared.ParseOutputFormat(cmd)
+			outputFormat, err := ParseOutputFormat(cmd)
 			if err != nil {
 				return err
 			}
@@ -84,7 +110,7 @@ func NewStackCmd() *cobra.Command {
 					return err
 				}
 
-				return printStack(cmd, stack, outputFormat)
+				return RunPrintStack(cmd, stack, outputFormat)
 			}
 
 			// List stacks (optionally filtered by realm and/or space)
@@ -93,7 +119,7 @@ func NewStackCmd() *cobra.Command {
 				return err
 			}
 
-			return printStacks(cmd, stacks, outputFormat)
+			return RunPrintStacks(cmd, stacks, outputFormat)
 		},
 	}
 
@@ -111,26 +137,26 @@ func NewStackCmd() *cobra.Command {
 	return cmd
 }
 
-func printStack(cmd *cobra.Command, stack interface{}, format shared.OutputFormat) error {
+func printStack(_ *cobra.Command, stack interface{}, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return shared.PrintYAML(stack)
+		return YAMLPrinter(stack)
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(stack)
+		return JSONPrinter(stack)
 	case shared.OutputFormatTable:
 		// For single resource, show full YAML by default
-		return shared.PrintYAML(stack)
+		return YAMLPrinter(stack)
 	default:
-		return shared.PrintYAML(stack)
+		return YAMLPrinter(stack)
 	}
 }
 
 func printStacks(cmd *cobra.Command, stacks []*v1beta1.StackDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return shared.PrintYAML(stacks)
+		return YAMLPrinter(stacks)
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(stacks)
+		return JSONPrinter(stacks)
 	case shared.OutputFormatTable:
 		if len(stacks) == 0 {
 			cmd.Println("No stacks found.")
@@ -156,9 +182,21 @@ func printStacks(cmd *cobra.Command, stacks []*v1beta1.StackDoc, format shared.O
 			})
 		}
 
-		shared.PrintTable(cmd, headers, rows)
+		TablePrinter(cmd, headers, rows)
 		return nil
 	default:
-		return shared.PrintYAML(stacks)
+		return YAMLPrinter(stacks)
 	}
+}
+
+type controllerWrapper struct {
+	ctrl *controller.Exec
+}
+
+func (w *controllerWrapper) GetStack(name, realmName, spaceName string) (*v1beta1.StackDoc, error) {
+	return w.ctrl.GetStack(name, realmName, spaceName)
+}
+
+func (w *controllerWrapper) ListStacks(realmName, spaceName string) ([]*v1beta1.StackDoc, error) {
+	return w.ctrl.ListStacks(realmName, spaceName)
 }

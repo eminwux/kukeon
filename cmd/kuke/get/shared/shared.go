@@ -51,7 +51,11 @@ func ParseOutputFormat(cmd *cobra.Command) (OutputFormat, error) {
 		return OutputFormatTable, nil
 	}
 
-	format := OutputFormat(strings.ToLower(strings.TrimSpace(output)))
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return OutputFormatTable, nil
+	}
+	format := OutputFormat(strings.ToLower(trimmed))
 	switch format {
 	case OutputFormatYAML, OutputFormatJSON, OutputFormatTable:
 		return format, nil

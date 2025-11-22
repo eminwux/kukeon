@@ -28,6 +28,21 @@ import (
 	"github.com/spf13/viper"
 )
 
+type spaceController interface {
+	CreateSpace(opts controller.CreateSpaceOptions) (controller.CreateSpaceResult, error)
+}
+
+// MockControllerKey is used to inject mock controllers in tests via context.
+type MockControllerKey struct{}
+
+type controllerWrapper struct {
+	ctrl *controller.Exec
+}
+
+func (w *controllerWrapper) CreateSpace(opts controller.CreateSpaceOptions) (controller.CreateSpaceResult, error) {
+	return w.ctrl.CreateSpace(opts)
+}
+
 func NewSpaceCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "space [name]",
@@ -51,9 +66,17 @@ func NewSpaceCmd() *cobra.Command {
 				return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
 			}
 
-			ctrl, err := shared.ControllerFromCmd(cmd)
-			if err != nil {
-				return err
+			// Check for mock controller in context (for testing)
+			var ctrl spaceController
+			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(spaceController); ok {
+				ctrl = mockCtrl
+			} else {
+				var realCtrl *controller.Exec
+				realCtrl, err = shared.ControllerFromCmd(cmd)
+				if err != nil {
+					return err
+				}
+				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
 			result, err := ctrl.CreateSpace(controller.CreateSpaceOptions{
@@ -80,4 +103,9 @@ func printSpaceResult(cmd *cobra.Command, result controller.CreateSpaceResult) {
 	shared.PrintCreationOutcome(cmd, "metadata", result.MetadataExistsPost, result.Created)
 	shared.PrintCreationOutcome(cmd, "network", result.CNINetworkExistsPost, result.CNINetworkCreated)
 	shared.PrintCreationOutcome(cmd, "cgroup", result.CgroupExistsPost, result.CgroupCreated)
+}
+
+// PrintSpaceResult is exported for testing purposes.
+func PrintSpaceResult(cmd *cobra.Command, result controller.CreateSpaceResult) {
+	printSpaceResult(cmd, result)
 }

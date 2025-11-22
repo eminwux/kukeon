@@ -20,8 +20,16 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/kuke/purge/shared"
+	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/spf13/cobra"
 )
+
+type realmController interface {
+	PurgeRealm(name string, force, cascade bool) (*controller.PurgeRealmResult, error)
+}
+
+// MockControllerKey is used to inject mock controllers in tests via context.
+type MockControllerKey struct{}
 
 func NewRealmCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -31,9 +39,16 @@ func NewRealmCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctrl, err := shared.ControllerFromCmd(cmd)
-			if err != nil {
-				return err
+			// Check for mock controller in context (for testing)
+			var ctrl realmController
+			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(realmController); ok {
+				ctrl = mockCtrl
+			} else {
+				realCtrl, err := shared.ControllerFromCmd(cmd)
+				if err != nil {
+					return err
+				}
+				ctrl = realCtrl
 			}
 
 			name := strings.TrimSpace(args[0])

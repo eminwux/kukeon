@@ -23,11 +23,22 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
+	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+type RealmController interface {
+	GetRealm(name string) (*v1beta1.RealmDoc, error)
+	ListRealms() ([]*v1beta1.RealmDoc, error)
+}
+
+type realmController = RealmController // internal alias for backward compatibility
+
+// MockControllerKey is used to inject mock controllers in tests via context.
+type MockControllerKey struct{}
 
 func NewRealmCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -38,9 +49,15 @@ func NewRealmCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctrl, err := shared.ControllerFromCmd(cmd)
-			if err != nil {
-				return err
+			var ctrl realmController
+			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(RealmController); ok {
+				ctrl = mockCtrl
+			} else {
+				realCtrl, err := shared.ControllerFromCmd(cmd)
+				if err != nil {
+					return err
+				}
+				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
 			outputFormat, err := shared.ParseOutputFormat(cmd)
@@ -86,7 +103,7 @@ func NewRealmCmd() *cobra.Command {
 	return cmd
 }
 
-func printRealm(cmd *cobra.Command, realm interface{}, format shared.OutputFormat) error {
+func printRealm(_ *cobra.Command, realm interface{}, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
 		return shared.PrintYAML(realm)
@@ -135,4 +152,16 @@ func printRealms(cmd *cobra.Command, realms []*v1beta1.RealmDoc, format shared.O
 	default:
 		return shared.PrintYAML(realms)
 	}
+}
+
+type controllerWrapper struct {
+	ctrl *controller.Exec
+}
+
+func (w *controllerWrapper) GetRealm(name string) (*v1beta1.RealmDoc, error) {
+	return w.ctrl.GetRealm(name)
+}
+
+func (w *controllerWrapper) ListRealms() ([]*v1beta1.RealmDoc, error) {
+	return w.ctrl.ListRealms()
 }

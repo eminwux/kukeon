@@ -24,12 +24,32 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type VersionProvider interface {
+	Version() string
+}
+
+// MockVersionProviderKey is used to inject mock version providers in tests via context.
+type MockVersionProviderKey struct{}
+
+type configVersionProvider struct{}
+
+func (p *configVersionProvider) Version() string {
+	return config.Version
+}
+
 func NewVersionCmd() *cobra.Command {
 	versionCmd := &cobra.Command{
 		Use:   "version",
 		Short: "Print the version number",
-		Run: func(_ *cobra.Command, _ []string) {
-			fmt.Fprintln(os.Stdout, config.Version)
+		Run: func(cmd *cobra.Command, _ []string) {
+			var provider VersionProvider
+			if mockProvider, ok := cmd.Context().Value(MockVersionProviderKey{}).(VersionProvider); ok {
+				provider = mockProvider
+			} else {
+				provider = &configVersionProvider{}
+			}
+
+			fmt.Fprintln(os.Stdout, provider.Version())
 		},
 	}
 	return versionCmd

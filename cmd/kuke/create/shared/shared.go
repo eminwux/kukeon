@@ -67,9 +67,9 @@ func RequireNameArg(cmd *cobra.Command, args []string, resource string) (string,
 }
 
 // RequireNameArgOrDefault wraps RequireNameArg but falls back to the provided
-// default value if no positional argument is supplied.
+// default value if no positional argument is supplied or if the argument is empty/whitespace.
 func RequireNameArgOrDefault(cmd *cobra.Command, args []string, resource string, fallback string) (string, error) {
-	if len(args) == 0 {
+	if len(args) == 0 || (len(args) > 0 && strings.TrimSpace(args[0]) == "") {
 		fallback = strings.TrimSpace(fallback)
 		if fallback != "" {
 			args = []string{fallback}

@@ -20,8 +20,18 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
+	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/spf13/cobra"
 )
+
+// RealmController defines the interface for realm deletion operations.
+// It is exported for use in tests.
+type RealmController interface {
+	DeleteRealm(name string, force, cascade bool) (*controller.DeleteRealmResult, error)
+}
+
+// MockControllerKey is used to inject mock controllers in tests via context.
+type MockControllerKey struct{}
 
 func NewRealmCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -31,9 +41,16 @@ func NewRealmCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctrl, err := shared.ControllerFromCmd(cmd)
-			if err != nil {
-				return err
+			// Check for mock controller in context (for testing)
+			var ctrl RealmController
+			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(RealmController); ok {
+				ctrl = mockCtrl
+			} else {
+				realCtrl, err := shared.ControllerFromCmd(cmd)
+				if err != nil {
+					return err
+				}
+				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
 			name := strings.TrimSpace(args[0])
@@ -52,4 +69,12 @@ func NewRealmCmd() *cobra.Command {
 	}
 
 	return cmd
+}
+
+type controllerWrapper struct {
+	ctrl *controller.Exec
+}
+
+func (w *controllerWrapper) DeleteRealm(name string, force, cascade bool) (*controller.DeleteRealmResult, error) {
+	return w.ctrl.DeleteRealm(name, force, cascade)
 }

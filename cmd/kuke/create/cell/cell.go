@@ -28,6 +28,13 @@ import (
 	"github.com/spf13/viper"
 )
 
+type cellController interface {
+	CreateCell(opts controller.CreateCellOptions) (controller.CreateCellResult, error)
+}
+
+// MockControllerKey is used to inject mock controllers in tests via context.
+type MockControllerKey struct{}
+
 func NewCellCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "cell [name]",
@@ -35,50 +42,7 @@ func NewCellCmd() *cobra.Command {
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			name, err := shared.RequireNameArgOrDefault(
-				cmd,
-				args,
-				"cell",
-				viper.GetString(config.KUKE_CREATE_CELL_NAME.ViperKey),
-			)
-			if err != nil {
-				return err
-			}
-
-			realm := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_REALM.ViperKey))
-			if realm == "" {
-				return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
-			}
-
-			space := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_SPACE.ViperKey))
-			if space == "" {
-				return fmt.Errorf("%w (--space)", errdefs.ErrSpaceNameRequired)
-			}
-
-			stack := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_STACK.ViperKey))
-			if stack == "" {
-				return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
-			}
-
-			ctrl, err := shared.ControllerFromCmd(cmd)
-			if err != nil {
-				return err
-			}
-
-			result, err := ctrl.CreateCell(controller.CreateCellOptions{
-				Name:      name,
-				RealmName: realm,
-				SpaceName: space,
-				StackName: stack,
-			})
-			if err != nil {
-				return err
-			}
-
-			printCellResult(cmd, result)
-			return nil
-		},
+		RunE:          runCreateCell,
 	}
 
 	cmd.Flags().String("realm", "", "Realm that owns the cell")
@@ -91,6 +55,58 @@ func NewCellCmd() *cobra.Command {
 	_ = viper.BindPFlag(config.KUKE_CREATE_CELL_STACK.ViperKey, cmd.Flags().Lookup("stack"))
 
 	return cmd
+}
+
+func runCreateCell(cmd *cobra.Command, args []string) error {
+	name, err := shared.RequireNameArgOrDefault(
+		cmd,
+		args,
+		"cell",
+		viper.GetString(config.KUKE_CREATE_CELL_NAME.ViperKey),
+	)
+	if err != nil {
+		return err
+	}
+
+	realm := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_REALM.ViperKey))
+	if realm == "" {
+		return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
+	}
+
+	space := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_SPACE.ViperKey))
+	if space == "" {
+		return fmt.Errorf("%w (--space)", errdefs.ErrSpaceNameRequired)
+	}
+
+	stack := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_STACK.ViperKey))
+	if stack == "" {
+		return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
+	}
+
+	// Check for mock controller in context (for testing)
+	var ctrl cellController
+	if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(cellController); ok {
+		ctrl = mockCtrl
+	} else {
+		realCtrl, ctrlErr := shared.ControllerFromCmd(cmd)
+		if ctrlErr != nil {
+			return ctrlErr
+		}
+		ctrl = realCtrl
+	}
+
+	result, err := ctrl.CreateCell(controller.CreateCellOptions{
+		Name:      name,
+		RealmName: realm,
+		SpaceName: space,
+		StackName: stack,
+	})
+	if err != nil {
+		return err
+	}
+
+	printCellResult(cmd, result)
+	return nil
 }
 
 func printCellResult(cmd *cobra.Command, result controller.CreateCellResult) {
@@ -119,4 +135,9 @@ func printCellResult(cmd *cobra.Command, result controller.CreateCellResult) {
 	} else {
 		cmd.Println("  - containers: not started")
 	}
+}
+
+// PrintCellResult is exported for testing purposes.
+func PrintCellResult(cmd *cobra.Command, result controller.CreateCellResult) {
+	printCellResult(cmd, result)
 }
