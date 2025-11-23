@@ -24,12 +24,13 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/purge/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type containerController interface {
-	PurgeContainer(name, realm, space, stack, cell string) (*controller.PurgeContainerResult, error)
+	PurgeContainer(doc *v1beta1.ContainerDoc) (controller.PurgeContainerResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -52,7 +53,7 @@ func NewContainerCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				ctrl = realCtrl
+				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
 			name := strings.TrimSpace(args[0])
@@ -74,12 +75,35 @@ func NewContainerCmd() *cobra.Command {
 				return fmt.Errorf("%w (--cell)", errdefs.ErrCellNameRequired)
 			}
 
-			result, err := ctrl.PurgeContainer(name, realm, space, stack, cell)
+			containerDoc := &v1beta1.ContainerDoc{
+				APIVersion: v1beta1.APIVersionV1Beta1,
+				Kind:       v1beta1.KindContainer,
+				Metadata: v1beta1.ContainerMetadata{
+					Name:   name,
+					Labels: map[string]string{},
+				},
+				Spec: v1beta1.ContainerSpec{
+					ID:      name,
+					RealmID: realm,
+					SpaceID: space,
+					StackID: stack,
+					CellID:  cell,
+				},
+			}
+
+			result, err := ctrl.PurgeContainer(containerDoc)
 			if err != nil {
 				return err
 			}
 
-			cmd.Printf("Purged container %q from cell %q\n", result.ContainerName, result.CellName)
+			containerName := name
+			cellName := cell
+			if result.ContainerDoc != nil {
+				containerName = strings.TrimSpace(result.ContainerDoc.Metadata.Name)
+				cellName = strings.TrimSpace(result.ContainerDoc.Spec.CellID)
+			}
+
+			cmd.Printf("Purged container %q from cell %q\n", containerName, cellName)
 			if len(result.Purged) > 0 {
 				cmd.Printf("Additional resources purged: %v\n", result.Purged)
 			}
@@ -107,4 +131,14 @@ func NewContainerCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("cell", config.CompleteCellNames)
 
 	return cmd
+}
+
+type controllerWrapper struct {
+	ctrl *controller.Exec
+}
+
+func (w *controllerWrapper) PurgeContainer(
+	doc *v1beta1.ContainerDoc,
+) (controller.PurgeContainerResult, error) {
+	return w.ctrl.PurgeContainer(doc)
 }

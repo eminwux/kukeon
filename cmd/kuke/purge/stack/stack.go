@@ -17,6 +17,7 @@
 package stack
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -24,12 +25,13 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/purge/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type stackController interface {
-	PurgeStack(name, realm, space string, force, cascade bool) (*controller.PurgeStackResult, error)
+	PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (*controller.PurgeStackResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -52,7 +54,7 @@ func NewStackCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				ctrl = realCtrl
+				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
 			name := strings.TrimSpace(args[0])
@@ -69,7 +71,17 @@ func NewStackCmd() *cobra.Command {
 			force := shared.ParseForceFlag(cmd)
 			cascade := shared.ParseCascadeFlag(cmd)
 
-			result, err := ctrl.PurgeStack(name, realm, space, force, cascade)
+			doc := &v1beta1.StackDoc{
+				Metadata: v1beta1.StackMetadata{
+					Name: name,
+				},
+				Spec: v1beta1.StackSpec{
+					RealmID: realm,
+					SpaceID: space,
+				},
+			}
+
+			result, err := ctrl.PurgeStack(doc, force, cascade)
 			if err != nil {
 				return err
 			}
@@ -94,4 +106,26 @@ func NewStackCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
 
 	return cmd
+}
+
+type controllerWrapper struct {
+	ctrl *controller.Exec
+}
+
+func (w *controllerWrapper) PurgeStack(
+	doc *v1beta1.StackDoc,
+	force, cascade bool,
+) (*controller.PurgeStackResult, error) {
+	if w == nil || w.ctrl == nil {
+		return nil, errors.New("controller not initialized")
+	}
+	if doc == nil {
+		return nil, errdefs.ErrStackNameRequired
+	}
+
+	name := strings.TrimSpace(doc.Metadata.Name)
+	realm := strings.TrimSpace(doc.Spec.RealmID)
+	space := strings.TrimSpace(doc.Spec.SpaceID)
+
+	return w.ctrl.PurgeStack(name, realm, space, force, cascade)
 }

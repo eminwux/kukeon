@@ -24,12 +24,13 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/purge/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type cellController interface {
-	PurgeCell(name, realm, space, stack string, force, cascade bool) (*controller.PurgeCellResult, error)
+	PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (controller.PurgeCellResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -52,7 +53,7 @@ func NewCellCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				ctrl = realCtrl
+				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
 			name := strings.TrimSpace(args[0])
@@ -73,12 +74,32 @@ func NewCellCmd() *cobra.Command {
 			force := shared.ParseForceFlag(cmd)
 			cascade := shared.ParseCascadeFlag(cmd) // Ignored for cells, but parsed for consistency
 
-			result, err := ctrl.PurgeCell(name, realm, space, stack, force, cascade)
+			doc := &v1beta1.CellDoc{
+				Metadata: v1beta1.CellMetadata{
+					Name: name,
+				},
+				Spec: v1beta1.CellSpec{
+					RealmID: realm,
+					SpaceID: space,
+					StackID: stack,
+				},
+			}
+
+			result, err := ctrl.PurgeCell(doc, force, cascade)
 			if err != nil {
 				return err
 			}
 
-			cmd.Printf("Purged cell %q from stack %q\n", result.CellName, result.StackName)
+			cellName := name
+			stackName := stack
+			if result.CellDoc != nil {
+				cellName = result.CellDoc.Metadata.Name
+				if result.CellDoc.Spec.StackID != "" {
+					stackName = result.CellDoc.Spec.StackID
+				}
+			}
+
+			cmd.Printf("Purged cell %q from stack %q\n", cellName, stackName)
 			if len(result.Purged) > 0 {
 				cmd.Printf("Additional resources purged: %v\n", result.Purged)
 			}
@@ -104,4 +125,12 @@ func NewCellCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
 
 	return cmd
+}
+
+type controllerWrapper struct {
+	ctrl *controller.Exec
+}
+
+func (w *controllerWrapper) PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (controller.PurgeCellResult, error) {
+	return w.ctrl.PurgeCell(doc, force, cascade)
 }

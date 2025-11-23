@@ -30,6 +30,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -209,12 +210,12 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				"cell":  "my-cell",
 			},
 			controller: &fakePurgeController{
-				purgeContainerFn: func(name, _, _, _, _ string) (*controller.PurgeContainerResult, error) {
+				purgeContainerFn: func(doc *v1beta1.ContainerDoc) (controller.PurgeContainerResult, error) {
 					// Should not reach here due to validation, but if it does, expect empty name
-					if name == "" {
-						return nil, errdefs.ErrContainerNameRequired
+					if doc == nil || strings.TrimSpace(doc.Metadata.Name) == "" {
+						return controller.PurgeContainerResult{}, errdefs.ErrContainerNameRequired
 					}
-					return nil, errors.New("unexpected call")
+					return controller.PurgeContainerResult{}, errors.New("unexpected call")
 				},
 			},
 			wantErr: "container name is required",
@@ -244,12 +245,18 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				"cell":  "my-cell",
 			},
 			controller: &fakePurgeController{
-				purgeContainerFn: func(name, realm, space, stack, cell string) (*controller.PurgeContainerResult, error) {
-					if name != "my-container" || realm != "my-realm" || space != "my-space" || stack != "my-stack" ||
-						cell != "my-cell" {
-						return nil, errors.New("unexpected args")
+				purgeContainerFn: func(doc *v1beta1.ContainerDoc) (controller.PurgeContainerResult, error) {
+					if doc == nil {
+						return controller.PurgeContainerResult{}, errors.New("nil doc")
 					}
-					return nil, errors.New("container not found")
+					if doc.Metadata.Name != "my-container" ||
+						doc.Spec.RealmID != "my-realm" ||
+						doc.Spec.SpaceID != "my-space" ||
+						doc.Spec.StackID != "my-stack" ||
+						doc.Spec.CellID != "my-cell" {
+						return controller.PurgeContainerResult{}, errors.New("unexpected args")
+					}
+					return controller.PurgeContainerResult{}, errors.New("container not found")
 				},
 			},
 			wantErr: "container not found",
@@ -264,8 +271,8 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				"cell":  "my-cell",
 			},
 			controller: &fakePurgeController{
-				purgeContainerFn: func(_ string, _ string, _ string, _ string, _ string) (*controller.PurgeContainerResult, error) {
-					return nil, errdefs.ErrDeleteContainer
+				purgeContainerFn: func(_ *v1beta1.ContainerDoc) (controller.PurgeContainerResult, error) {
+					return controller.PurgeContainerResult{}, errdefs.ErrDeleteContainer
 				},
 			},
 			wantErr: "failed to delete container",
@@ -280,19 +287,30 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				"cell":  "my-cell",
 			},
 			controller: &fakePurgeController{
-				purgeContainerFn: func(name, realm, space, stack, cell string) (*controller.PurgeContainerResult, error) {
-					if name != "my-container" || realm != "my-realm" || space != "my-space" || stack != "my-stack" ||
-						cell != "my-cell" {
-						return nil, errors.New("unexpected args")
+				purgeContainerFn: func(doc *v1beta1.ContainerDoc) (controller.PurgeContainerResult, error) {
+					if doc == nil {
+						return controller.PurgeContainerResult{}, errors.New("nil doc")
 					}
-					return &controller.PurgeContainerResult{
-						ContainerName: "my-container",
-						RealmName:     "my-realm",
-						SpaceName:     "my-space",
-						StackName:     "my-stack",
-						CellName:      "my-cell",
-						Deleted:       []string{"container", "task"},
-						Purged:        []string{},
+					if doc.Metadata.Name != "my-container" ||
+						doc.Spec.RealmID != "my-realm" ||
+						doc.Spec.SpaceID != "my-space" ||
+						doc.Spec.StackID != "my-stack" ||
+						doc.Spec.CellID != "my-cell" {
+						return controller.PurgeContainerResult{}, errors.New("unexpected args")
+					}
+					return controller.PurgeContainerResult{
+						ContainerDoc: &v1beta1.ContainerDoc{
+							Metadata: v1beta1.ContainerMetadata{
+								Name: "my-container",
+							},
+							Spec: v1beta1.ContainerSpec{
+								RealmID: "my-realm",
+								SpaceID: "my-space",
+								StackID: "my-stack",
+								CellID:  "my-cell",
+							},
+						},
+						Deleted: []string{"container", "task"},
 					}, nil
 				},
 			},
@@ -310,19 +328,31 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				"cell":  "my-cell",
 			},
 			controller: &fakePurgeController{
-				purgeContainerFn: func(name, realm, space, stack, cell string) (*controller.PurgeContainerResult, error) {
-					if name != "my-container" || realm != "my-realm" || space != "my-space" || stack != "my-stack" ||
-						cell != "my-cell" {
-						return nil, errors.New("unexpected args")
+				purgeContainerFn: func(doc *v1beta1.ContainerDoc) (controller.PurgeContainerResult, error) {
+					if doc == nil {
+						return controller.PurgeContainerResult{}, errors.New("nil doc")
 					}
-					return &controller.PurgeContainerResult{
-						ContainerName: "my-container",
-						RealmName:     "my-realm",
-						SpaceName:     "my-space",
-						StackName:     "my-stack",
-						CellName:      "my-cell",
-						Deleted:       []string{"container"},
-						Purged:        []string{"cni-resources", "ipam-allocation", "cache-entries"},
+					if doc.Metadata.Name != "my-container" ||
+						doc.Spec.RealmID != "my-realm" ||
+						doc.Spec.SpaceID != "my-space" ||
+						doc.Spec.StackID != "my-stack" ||
+						doc.Spec.CellID != "my-cell" {
+						return controller.PurgeContainerResult{}, errors.New("unexpected args")
+					}
+					return controller.PurgeContainerResult{
+						ContainerDoc: &v1beta1.ContainerDoc{
+							Metadata: v1beta1.ContainerMetadata{
+								Name: "my-container",
+							},
+							Spec: v1beta1.ContainerSpec{
+								RealmID: "my-realm",
+								SpaceID: "my-space",
+								StackID: "my-stack",
+								CellID:  "my-cell",
+							},
+						},
+						Deleted: []string{"container"},
+						Purged:  []string{"cni-resources", "ipam-allocation", "cache-entries"},
 					}, nil
 				},
 			},
@@ -341,20 +371,29 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				"cell":  "  my-cell  ",
 			},
 			controller: &fakePurgeController{
-				purgeContainerFn: func(name, realm, space, stack, cell string) (*controller.PurgeContainerResult, error) {
+				purgeContainerFn: func(doc *v1beta1.ContainerDoc) (controller.PurgeContainerResult, error) {
 					// Verify that trimming happened
-					if name != "my-container" || realm != "my-realm" || space != "my-space" || stack != "my-stack" ||
-						cell != "my-cell" {
-						return nil, errors.New("unexpected trimmed args")
+					if doc == nil ||
+						doc.Metadata.Name != "my-container" ||
+						doc.Spec.RealmID != "my-realm" ||
+						doc.Spec.SpaceID != "my-space" ||
+						doc.Spec.StackID != "my-stack" ||
+						doc.Spec.CellID != "my-cell" {
+						return controller.PurgeContainerResult{}, errors.New("unexpected trimmed args")
 					}
-					return &controller.PurgeContainerResult{
-						ContainerName: "my-container",
-						RealmName:     "my-realm",
-						SpaceName:     "my-space",
-						StackName:     "my-stack",
-						CellName:      "my-cell",
-						Deleted:       []string{"container"},
-						Purged:        []string{},
+					return controller.PurgeContainerResult{
+						ContainerDoc: &v1beta1.ContainerDoc{
+							Metadata: v1beta1.ContainerMetadata{
+								Name: "my-container",
+							},
+							Spec: v1beta1.ContainerSpec{
+								RealmID: "my-realm",
+								SpaceID: "my-space",
+								StackID: "my-stack",
+								CellID:  "my-cell",
+							},
+						},
+						Deleted: []string{"container"},
 					}, nil
 				},
 			},
@@ -372,20 +411,30 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				config.KUKE_PURGE_CONTAINER_CELL.ViperKey:  "viper-cell",
 			},
 			controller: &fakePurgeController{
-				purgeContainerFn: func(name, realm, space, stack, cell string) (*controller.PurgeContainerResult, error) {
-					if name != "my-container" || realm != "viper-realm" || space != "viper-space" ||
-						stack != "viper-stack" ||
-						cell != "viper-cell" {
-						return nil, errors.New("unexpected args from viper")
+				purgeContainerFn: func(doc *v1beta1.ContainerDoc) (controller.PurgeContainerResult, error) {
+					if doc == nil {
+						return controller.PurgeContainerResult{}, errors.New("nil doc")
 					}
-					return &controller.PurgeContainerResult{
-						ContainerName: "my-container",
-						RealmName:     "viper-realm",
-						SpaceName:     "viper-space",
-						StackName:     "viper-stack",
-						CellName:      "viper-cell",
-						Deleted:       []string{"container"},
-						Purged:        []string{},
+					if doc.Metadata.Name != "my-container" ||
+						doc.Spec.RealmID != "viper-realm" ||
+						doc.Spec.SpaceID != "viper-space" ||
+						doc.Spec.StackID != "viper-stack" ||
+						doc.Spec.CellID != "viper-cell" {
+						return controller.PurgeContainerResult{}, errors.New("unexpected args from viper")
+					}
+					return controller.PurgeContainerResult{
+						ContainerDoc: &v1beta1.ContainerDoc{
+							Metadata: v1beta1.ContainerMetadata{
+								Name: "my-container",
+							},
+							Spec: v1beta1.ContainerSpec{
+								RealmID: "viper-realm",
+								SpaceID: "viper-space",
+								StackID: "viper-stack",
+								CellID:  "viper-cell",
+							},
+						},
+						Deleted: []string{"container"},
 					}, nil
 				},
 			},
@@ -497,14 +546,14 @@ func TestNewContainerCmd_AutocompleteRegistration(t *testing.T) {
 
 // fakePurgeController provides a mock implementation for testing PurgeContainer.
 type fakePurgeController struct {
-	purgeContainerFn func(name, realm, space, stack, cell string) (*controller.PurgeContainerResult, error)
+	purgeContainerFn func(doc *v1beta1.ContainerDoc) (controller.PurgeContainerResult, error)
 }
 
 func (f *fakePurgeController) PurgeContainer(
-	name, realm, space, stack, cell string,
-) (*controller.PurgeContainerResult, error) {
+	doc *v1beta1.ContainerDoc,
+) (controller.PurgeContainerResult, error) {
 	if f.purgeContainerFn == nil {
-		return nil, errors.New("unexpected PurgeContainer call")
+		return controller.PurgeContainerResult{}, errors.New("unexpected PurgeContainer call")
 	}
-	return f.purgeContainerFn(name, realm, space, stack, cell)
+	return f.purgeContainerFn(doc)
 }

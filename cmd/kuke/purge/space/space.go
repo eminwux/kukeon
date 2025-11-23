@@ -24,12 +24,13 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/purge/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type spaceController interface {
-	PurgeSpace(name, realmName string, force, cascade bool) (*controller.PurgeSpaceResult, error)
+	PurgeSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (controller.PurgeSpaceResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -52,7 +53,7 @@ func NewSpaceCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				ctrl = realCtrl
+				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
 			name := strings.TrimSpace(args[0])
@@ -65,12 +66,38 @@ func NewSpaceCmd() *cobra.Command {
 			force := shared.ParseForceFlag(cmd)
 			cascade := shared.ParseCascadeFlag(cmd)
 
-			result, err := ctrl.PurgeSpace(name, realm, force, cascade)
+			doc := &v1beta1.SpaceDoc{
+				Metadata: v1beta1.SpaceMetadata{
+					Name: name,
+				},
+				Spec: v1beta1.SpaceSpec{
+					RealmID: realm,
+				},
+			}
+
+			result, err := ctrl.PurgeSpace(doc, force, cascade)
 			if err != nil {
 				return err
 			}
 
-			cmd.Printf("Purged space %q from realm %q\n", result.SpaceName, result.RealmName)
+			spaceName := name
+			realmName := realm
+			if result.SpaceDoc != nil {
+				if trimmed := strings.TrimSpace(result.SpaceDoc.Metadata.Name); trimmed != "" {
+					spaceName = trimmed
+				}
+				if trimmed := strings.TrimSpace(result.SpaceDoc.Spec.RealmID); trimmed != "" {
+					realmName = trimmed
+				}
+			}
+
+			cmd.Printf("Purged space %q from realm %q\n", spaceName, realmName)
+			cmd.Printf(
+				"Deleted resources -> metadata:%t cgroup:%t cni:%t\n",
+				result.MetadataDeleted,
+				result.CgroupDeleted,
+				result.CNINetworkDeleted,
+			)
 			if len(result.Purged) > 0 {
 				cmd.Printf("Additional resources purged: %v\n", result.Purged)
 			}
@@ -88,4 +115,15 @@ func NewSpaceCmd() *cobra.Command {
 	cmd.ValidArgsFunction = config.CompleteSpaceNames
 
 	return cmd
+}
+
+type controllerWrapper struct {
+	ctrl *controller.Exec
+}
+
+func (w *controllerWrapper) PurgeSpace(
+	doc *v1beta1.SpaceDoc,
+	force, cascade bool,
+) (controller.PurgeSpaceResult, error) {
+	return w.ctrl.PurgeSpace(doc, force, cascade)
 }

@@ -22,11 +22,12 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/purge/shared"
 	"github.com/eminwux/kukeon/internal/controller"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 )
 
 type realmController interface {
-	PurgeRealm(name string, force, cascade bool) (*controller.PurgeRealmResult, error)
+	PurgeRealm(doc *v1beta1.RealmDoc, force, cascade bool) (controller.PurgeRealmResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -49,7 +50,7 @@ func NewRealmCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				ctrl = realCtrl
+				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
 			name := strings.TrimSpace(args[0])
@@ -57,12 +58,23 @@ func NewRealmCmd() *cobra.Command {
 			force := shared.ParseForceFlag(cmd)
 			cascade := shared.ParseCascadeFlag(cmd)
 
-			result, err := ctrl.PurgeRealm(name, force, cascade)
+			doc := &v1beta1.RealmDoc{
+				Metadata: v1beta1.RealmMetadata{
+					Name: name,
+				},
+			}
+
+			result, err := ctrl.PurgeRealm(doc, force, cascade)
 			if err != nil {
 				return err
 			}
 
-			cmd.Printf("Purged realm %q\n", result.RealmName)
+			realmName := name
+			if result.RealmDoc != nil {
+				realmName = result.RealmDoc.Metadata.Name
+			}
+
+			cmd.Printf("Purged realm %q\n", realmName)
 			if len(result.Purged) > 0 {
 				cmd.Printf("Additional resources purged: %v\n", result.Purged)
 			}
@@ -74,4 +86,15 @@ func NewRealmCmd() *cobra.Command {
 	cmd.ValidArgsFunction = config.CompleteRealmNames
 
 	return cmd
+}
+
+type controllerWrapper struct {
+	ctrl *controller.Exec
+}
+
+func (w *controllerWrapper) PurgeRealm(
+	doc *v1beta1.RealmDoc,
+	force, cascade bool,
+) (controller.PurgeRealmResult, error) {
+	return w.ctrl.PurgeRealm(doc, force, cascade)
 }
