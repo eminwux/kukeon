@@ -30,11 +30,7 @@ import (
 )
 
 type containerController interface {
-	GetRealm(doc *v1beta1.RealmDoc) (controller.GetRealmResult, error)
-	CreateContainer(
-		realmDoc *v1beta1.RealmDoc,
-		opts controller.CreateContainerOptions,
-	) (controller.CreateContainerResult, error)
+	CreateContainer(doc *v1beta1.ContainerDoc) (controller.CreateContainerResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -93,6 +89,22 @@ func NewContainerCmd() *cobra.Command {
 				return err
 			}
 
+			containerDoc := &v1beta1.ContainerDoc{
+				Metadata: v1beta1.ContainerMetadata{
+					Name: name,
+				},
+				Spec: v1beta1.ContainerSpec{
+					ID:      name,
+					RealmID: realm,
+					SpaceID: space,
+					StackID: stack,
+					CellID:  cell,
+					Image:   image,
+					Command: command,
+					Args:    argsList,
+				},
+			}
+
 			// Check for mock controller in context (for testing)
 			var ctrl containerController
 			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(containerController); ok {
@@ -106,30 +118,7 @@ func NewContainerCmd() *cobra.Command {
 				ctrl = realCtrl
 			}
 
-			// Fetch RealmDoc
-			realmDoc := &v1beta1.RealmDoc{
-				Metadata: v1beta1.RealmMetadata{
-					Name: realm,
-				},
-			}
-			getResult, err := ctrl.GetRealm(realmDoc)
-			if err != nil {
-				return fmt.Errorf("failed to get realm %q: %w", realm, err)
-			}
-			if getResult.RealmDoc == nil {
-				return fmt.Errorf("realm %q not found", realm)
-			}
-			realmDoc = getResult.RealmDoc
-
-			createResult, err := ctrl.CreateContainer(realmDoc, controller.CreateContainerOptions{
-				SpaceName:     space,
-				StackName:     stack,
-				CellName:      cell,
-				ContainerName: name,
-				Image:         image,
-				Command:       command,
-				Args:          argsList,
-			})
+			createResult, err := ctrl.CreateContainer(containerDoc)
 			if err != nil {
 				return err
 			}

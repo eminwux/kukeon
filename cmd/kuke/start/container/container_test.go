@@ -28,8 +28,8 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	container "github.com/eminwux/kukeon/cmd/kuke/start/container"
 	"github.com/eminwux/kukeon/cmd/types"
-	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -45,10 +45,10 @@ func TestNewContainerCmdRunE(t *testing.T) {
 		name          string
 		args          []string
 		setup         func(t *testing.T, cmd *cobra.Command)
-		controllerFn  func(name, realm, space, stack, cell string) (*controller.StartContainerResult, error)
+		controllerFn  func(doc *v1beta1.ContainerDoc) (container.StartContainerResult, error)
 		wantErr       string
 		wantCallStart bool
-		wantOpts      *struct {
+		wantDocFields *struct {
 			name  string
 			realm string
 			space string
@@ -66,18 +66,14 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "stack", "stack-a")
 				setFlag(t, cmd, "cell", "cell-a")
 			},
-			controllerFn: func(name, realm, space, stack, cell string) (*controller.StartContainerResult, error) {
-				return &controller.StartContainerResult{
-					ContainerName: name,
-					RealmName:     realm,
-					SpaceName:     space,
-					StackName:     stack,
-					CellName:      cell,
-					Started:       true,
+			controllerFn: func(doc *v1beta1.ContainerDoc) (container.StartContainerResult, error) {
+				return container.StartContainerResult{
+					ContainerDoc: doc,
+					Started:      true,
 				}, nil
 			},
 			wantCallStart: true,
-			wantOpts: &struct {
+			wantDocFields: &struct {
 				name  string
 				realm string
 				space string
@@ -101,18 +97,14 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				viper.Set(config.KUKE_START_CONTAINER_STACK.ViperKey, "stack-b")
 				viper.Set(config.KUKE_START_CONTAINER_CELL.ViperKey, "cell-b")
 			},
-			controllerFn: func(name, realm, space, stack, cell string) (*controller.StartContainerResult, error) {
-				return &controller.StartContainerResult{
-					ContainerName: name,
-					RealmName:     realm,
-					SpaceName:     space,
-					StackName:     stack,
-					CellName:      cell,
-					Started:       true,
+			controllerFn: func(doc *v1beta1.ContainerDoc) (container.StartContainerResult, error) {
+				return container.StartContainerResult{
+					ContainerDoc: doc,
+					Started:      true,
 				}, nil
 			},
 			wantCallStart: true,
-			wantOpts: &struct {
+			wantDocFields: &struct {
 				name  string
 				realm string
 				space string
@@ -136,18 +128,14 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "stack", "  stack-a  ")
 				setFlag(t, cmd, "cell", "  cell-a  ")
 			},
-			controllerFn: func(name, realm, space, stack, cell string) (*controller.StartContainerResult, error) {
-				return &controller.StartContainerResult{
-					ContainerName: name,
-					RealmName:     realm,
-					SpaceName:     space,
-					StackName:     stack,
-					CellName:      cell,
-					Started:       true,
+			controllerFn: func(doc *v1beta1.ContainerDoc) (container.StartContainerResult, error) {
+				return container.StartContainerResult{
+					ContainerDoc: doc,
+					Started:      true,
 				}, nil
 			},
 			wantCallStart: true,
-			wantOpts: &struct {
+			wantDocFields: &struct {
 				name  string
 				realm string
 				space string
@@ -276,12 +264,12 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "stack", "stack-a")
 				setFlag(t, cmd, "cell", "cell-a")
 			},
-			controllerFn: func(_, _, _, _, _ string) (*controller.StartContainerResult, error) {
-				return nil, errdefs.ErrCellNotFound
+			controllerFn: func(_ *v1beta1.ContainerDoc) (container.StartContainerResult, error) {
+				return container.StartContainerResult{}, errdefs.ErrCellNotFound
 			},
 			wantErr:       "cell not found",
 			wantCallStart: true,
-			wantOpts: &struct {
+			wantDocFields: &struct {
 				name  string
 				realm string
 				space string
@@ -302,13 +290,7 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			t.Cleanup(viper.Reset)
 
 			var startCalled bool
-			var startOpts struct {
-				name  string
-				realm string
-				space string
-				stack string
-				cell  string
-			}
+			var receivedDoc *v1beta1.ContainerDoc
 
 			cmd := container.NewContainerCmd()
 			cmd.SetOut(&bytes.Buffer{})
@@ -325,14 +307,10 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				// If we need to mock the controller, inject it via context
 				if tt.controllerFn != nil {
 					fakeCtrl := &fakeControllerExec{
-						startContainerFn: func(name, realm, space, stack, cell string) (*controller.StartContainerResult, error) {
+						startContainerFn: func(doc *v1beta1.ContainerDoc) (container.StartContainerResult, error) {
 							startCalled = true
-							startOpts.name = name
-							startOpts.realm = realm
-							startOpts.space = space
-							startOpts.stack = stack
-							startOpts.cell = cell
-							return tt.controllerFn(name, realm, space, stack, cell)
+							receivedDoc = doc
+							return tt.controllerFn(doc)
 						},
 					}
 					// Inject mock controller into context
@@ -365,21 +343,25 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				t.Errorf("StartContainer called=%v want=%v", startCalled, tt.wantCallStart)
 			}
 
-			if tt.wantOpts != nil {
-				if startOpts.name != tt.wantOpts.name {
-					t.Errorf("StartContainer name=%q want=%q", startOpts.name, tt.wantOpts.name)
+			if tt.wantDocFields != nil {
+				if receivedDoc == nil {
+					t.Fatal("expected StartContainer to receive a container doc")
 				}
-				if startOpts.realm != tt.wantOpts.realm {
-					t.Errorf("StartContainer realm=%q want=%q", startOpts.realm, tt.wantOpts.realm)
+				gotDoc := struct {
+					name  string
+					realm string
+					space string
+					stack string
+					cell  string
+				}{
+					name:  strings.TrimSpace(receivedDoc.Metadata.Name),
+					realm: strings.TrimSpace(receivedDoc.Spec.RealmID),
+					space: strings.TrimSpace(receivedDoc.Spec.SpaceID),
+					stack: strings.TrimSpace(receivedDoc.Spec.StackID),
+					cell:  strings.TrimSpace(receivedDoc.Spec.CellID),
 				}
-				if startOpts.space != tt.wantOpts.space {
-					t.Errorf("StartContainer space=%q want=%q", startOpts.space, tt.wantOpts.space)
-				}
-				if startOpts.stack != tt.wantOpts.stack {
-					t.Errorf("StartContainer stack=%q want=%q", startOpts.stack, tt.wantOpts.stack)
-				}
-				if startOpts.cell != tt.wantOpts.cell {
-					t.Errorf("StartContainer cell=%q want=%q", startOpts.cell, tt.wantOpts.cell)
+				if *tt.wantDocFields != gotDoc {
+					t.Errorf("StartContainer doc mismatch: got %#v want %#v", gotDoc, *tt.wantDocFields)
 				}
 			}
 
@@ -396,16 +378,14 @@ func TestNewContainerCmdRunE(t *testing.T) {
 }
 
 type fakeControllerExec struct {
-	startContainerFn func(name, realm, space, stack, cell string) (*controller.StartContainerResult, error)
+	startContainerFn func(doc *v1beta1.ContainerDoc) (container.StartContainerResult, error)
 }
 
-func (f *fakeControllerExec) StartContainer(
-	name, realm, space, stack, cell string,
-) (*controller.StartContainerResult, error) {
+func (f *fakeControllerExec) StartContainer(doc *v1beta1.ContainerDoc) (container.StartContainerResult, error) {
 	if f.startContainerFn == nil {
-		return nil, errors.New("unexpected StartContainer call")
+		return container.StartContainerResult{}, errors.New("unexpected StartContainer call")
 	}
-	return f.startContainerFn(name, realm, space, stack, cell)
+	return f.startContainerFn(doc)
 }
 
 func TestNewContainerCmd_AutocompleteRegistration(t *testing.T) {

@@ -236,18 +236,18 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				"cell":  "my-cell",
 			},
 			controller: &fakeDeleteController{
-				deleteContainerFn: func(doc *v1beta1.ContainerDoc) (*controller.DeleteContainerResult, error) {
+				deleteContainerFn: func(doc *v1beta1.ContainerDoc) (controller.DeleteContainerResult, error) {
 					if doc == nil {
-						return nil, errors.New("doc should not be nil")
+						return controller.DeleteContainerResult{}, errors.New("doc should not be nil")
 					}
 					if doc.Metadata.Name != "my-container" ||
 						doc.Spec.RealmID != "my-realm" ||
 						doc.Spec.SpaceID != "my-space" ||
 						doc.Spec.StackID != "my-stack" ||
 						doc.Spec.CellID != "my-cell" {
-						return nil, errors.New("unexpected args")
+						return controller.DeleteContainerResult{}, errors.New("unexpected args")
 					}
-					return nil, errors.New("container not found")
+					return controller.DeleteContainerResult{}, errors.New("container not found")
 				},
 			},
 			wantErr: "container not found",
@@ -262,8 +262,8 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				"cell":  "my-cell",
 			},
 			controller: &fakeDeleteController{
-				deleteContainerFn: func(_ *v1beta1.ContainerDoc) (*controller.DeleteContainerResult, error) {
-					return nil, errdefs.ErrDeleteContainer
+				deleteContainerFn: func(_ *v1beta1.ContainerDoc) (controller.DeleteContainerResult, error) {
+					return controller.DeleteContainerResult{}, errdefs.ErrDeleteContainer
 				},
 			},
 			wantErr: "failed to delete container",
@@ -278,14 +278,14 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				"cell":  "my-cell",
 			},
 			controller: &fakeDeleteController{
-				deleteContainerFn: func(doc *v1beta1.ContainerDoc) (*controller.DeleteContainerResult, error) {
+				deleteContainerFn: func(doc *v1beta1.ContainerDoc) (controller.DeleteContainerResult, error) {
 					if doc.Metadata.Name != "my-container" || doc.Spec.RealmID != "my-realm" ||
 						doc.Spec.SpaceID != "my-space" ||
 						doc.Spec.StackID != "my-stack" ||
 						doc.Spec.CellID != "my-cell" {
-						return nil, errors.New("unexpected args")
+						return controller.DeleteContainerResult{}, errors.New("unexpected args")
 					}
-					return &controller.DeleteContainerResult{
+					return controller.DeleteContainerResult{
 						ContainerDoc: &v1beta1.ContainerDoc{
 							Metadata: v1beta1.ContainerMetadata{
 								Name: "my-container",
@@ -314,15 +314,15 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				"cell":  "  my-cell  ",
 			},
 			controller: &fakeDeleteController{
-				deleteContainerFn: func(doc *v1beta1.ContainerDoc) (*controller.DeleteContainerResult, error) {
+				deleteContainerFn: func(doc *v1beta1.ContainerDoc) (controller.DeleteContainerResult, error) {
 					// Verify that trimming happened
 					if doc.Metadata.Name != "my-container" || doc.Spec.RealmID != "my-realm" ||
 						doc.Spec.SpaceID != "my-space" ||
 						doc.Spec.StackID != "my-stack" ||
 						doc.Spec.CellID != "my-cell" {
-						return nil, errors.New("unexpected trimmed args")
+						return controller.DeleteContainerResult{}, errors.New("unexpected trimmed args")
 					}
-					return &controller.DeleteContainerResult{
+					return controller.DeleteContainerResult{
 						ContainerDoc: &v1beta1.ContainerDoc{
 							Metadata: v1beta1.ContainerMetadata{
 								Name: "my-container",
@@ -351,14 +351,14 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				config.KUKE_DELETE_CONTAINER_CELL.ViperKey:  "viper-cell",
 			},
 			controller: &fakeDeleteController{
-				deleteContainerFn: func(doc *v1beta1.ContainerDoc) (*controller.DeleteContainerResult, error) {
+				deleteContainerFn: func(doc *v1beta1.ContainerDoc) (controller.DeleteContainerResult, error) {
 					if doc.Metadata.Name != "my-container" || doc.Spec.RealmID != "viper-realm" ||
 						doc.Spec.SpaceID != "viper-space" ||
 						doc.Spec.StackID != "viper-stack" ||
 						doc.Spec.CellID != "viper-cell" {
-						return nil, errors.New("unexpected args from viper")
+						return controller.DeleteContainerResult{}, errors.New("unexpected args from viper")
 					}
-					return &controller.DeleteContainerResult{
+					return controller.DeleteContainerResult{
 						ContainerDoc: &v1beta1.ContainerDoc{
 							Metadata: v1beta1.ContainerMetadata{
 								Name: "my-container",
@@ -481,14 +481,14 @@ func TestNewContainerCmd_AutocompleteRegistration(t *testing.T) {
 
 // fakeDeleteController provides a mock implementation for testing DeleteContainer.
 type fakeDeleteController struct {
-	deleteContainerFn func(doc *v1beta1.ContainerDoc) (*controller.DeleteContainerResult, error)
+	deleteContainerFn func(doc *v1beta1.ContainerDoc) (controller.DeleteContainerResult, error)
 }
 
 func (f *fakeDeleteController) DeleteContainer(
 	doc *v1beta1.ContainerDoc,
-) (*controller.DeleteContainerResult, error) {
+) (controller.DeleteContainerResult, error) {
 	if f.deleteContainerFn == nil {
-		return nil, errors.New("unexpected DeleteContainer call")
+		return controller.DeleteContainerResult{}, errors.New("unexpected DeleteContainer call")
 	}
 	return f.deleteContainerFn(doc)
 }

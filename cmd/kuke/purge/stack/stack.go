@@ -31,7 +31,7 @@ import (
 )
 
 type stackController interface {
-	PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (*controller.PurgeStackResult, error)
+	PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (controller.PurgeStackResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -86,7 +86,18 @@ func NewStackCmd() *cobra.Command {
 				return err
 			}
 
-			cmd.Printf("Purged stack %q from space %q\n", result.StackName, result.SpaceName)
+			stackName := name
+			spaceName := space
+			if result.StackDoc != nil {
+				if trimmed := strings.TrimSpace(result.StackDoc.Metadata.Name); trimmed != "" {
+					stackName = trimmed
+				}
+				if trimmed := strings.TrimSpace(result.StackDoc.Spec.SpaceID); trimmed != "" {
+					spaceName = trimmed
+				}
+			}
+
+			cmd.Printf("Purged stack %q from space %q\n", stackName, spaceName)
 			if len(result.Purged) > 0 {
 				cmd.Printf("Additional resources purged: %v\n", result.Purged)
 			}
@@ -115,17 +126,14 @@ type controllerWrapper struct {
 func (w *controllerWrapper) PurgeStack(
 	doc *v1beta1.StackDoc,
 	force, cascade bool,
-) (*controller.PurgeStackResult, error) {
+) (controller.PurgeStackResult, error) {
+	var zero controller.PurgeStackResult
 	if w == nil || w.ctrl == nil {
-		return nil, errors.New("controller not initialized")
+		return zero, errors.New("controller not initialized")
 	}
 	if doc == nil {
-		return nil, errdefs.ErrStackNameRequired
+		return zero, errdefs.ErrStackNameRequired
 	}
 
-	name := strings.TrimSpace(doc.Metadata.Name)
-	realm := strings.TrimSpace(doc.Spec.RealmID)
-	space := strings.TrimSpace(doc.Spec.SpaceID)
-
-	return w.ctrl.PurgeStack(name, realm, space, force, cascade)
+	return w.ctrl.PurgeStack(doc, force, cascade)
 }

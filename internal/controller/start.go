@@ -27,21 +27,14 @@ import (
 
 // StartCellResult reports the outcome of starting a cell.
 type StartCellResult struct {
-	CellName  string
-	RealmName string
-	SpaceName string
-	StackName string
-	Started   bool
+	CellDoc *v1beta1.CellDoc
+	Started bool
 }
 
 // StartContainerResult reports the outcome of starting a container.
 type StartContainerResult struct {
-	ContainerName string
-	RealmName     string
-	SpaceName     string
-	StackName     string
-	CellName      string
-	Started       bool
+	ContainerDoc *v1beta1.ContainerDoc
+	Started      bool
 }
 
 // validateAndGetCell validates and trims cell parameters, then retrieves the cell document.
@@ -99,67 +92,73 @@ func (b *Exec) validateAndGetCell(
 }
 
 // StartCell starts all containers in a cell and updates the cell metadata state.
-func (b *Exec) StartCell(name, realmName, spaceName, stackName string) (*StartCellResult, error) {
-	name, realmName, spaceName, stackName, cellDoc, err := b.validateAndGetCell(name, realmName, spaceName, stackName)
-	if err != nil {
-		return nil, err
+func (b *Exec) StartCell(doc *v1beta1.CellDoc) (StartCellResult, error) {
+	var res StartCellResult
+	if doc == nil {
+		return res, errdefs.ErrCellNameRequired
 	}
 
-	result := &StartCellResult{
-		CellName:  name,
-		RealmName: realmName,
-		SpaceName: spaceName,
-		StackName: stackName,
+	name := strings.TrimSpace(doc.Metadata.Name)
+	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	stackName := strings.TrimSpace(doc.Spec.StackID)
+
+	_, _, _, _, cellDoc, err := b.validateAndGetCell(name, realmName, spaceName, stackName)
+	if err != nil {
+		return res, err
 	}
+
+	res.CellDoc = cellDoc
 
 	// Start all containers in the cell
 	if err = b.runner.StartCell(cellDoc); err != nil {
-		return nil, fmt.Errorf("failed to start cell containers: %w", err)
+		return res, fmt.Errorf("failed to start cell containers: %w", err)
 	}
 
 	// Update cell metadata state to Ready
 	cellDoc.Status.State = v1beta1.CellStateReady
 	if err = b.runner.UpdateCellMetadata(cellDoc); err != nil {
-		return nil, fmt.Errorf("failed to update cell metadata: %w", err)
+		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
-	result.Started = true
-	return result, nil
+	res.Started = true
+	return res, nil
 }
 
 // StartContainer starts a specific container in a cell and updates the cell metadata.
-func (b *Exec) StartContainer(name, realmName, spaceName, stackName, cellName string) (*StartContainerResult, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return nil, errdefs.ErrContainerNameRequired
-	}
-	realmName = strings.TrimSpace(realmName)
-	if realmName == "" {
-		return nil, errdefs.ErrRealmNameRequired
-	}
-	spaceName = strings.TrimSpace(spaceName)
-	if spaceName == "" {
-		return nil, errdefs.ErrSpaceNameRequired
-	}
-	stackName = strings.TrimSpace(stackName)
-	if stackName == "" {
-		return nil, errdefs.ErrStackNameRequired
-	}
-	cellName = strings.TrimSpace(cellName)
-	if cellName == "" {
-		return nil, errdefs.ErrCellNameRequired
+func (b *Exec) StartContainer(doc *v1beta1.ContainerDoc) (StartContainerResult, error) {
+	var res StartContainerResult
+	if doc == nil {
+		return res, errdefs.ErrContainerNameRequired
 	}
 
-	result := &StartContainerResult{
-		ContainerName: name,
-		RealmName:     realmName,
-		SpaceName:     spaceName,
-		StackName:     stackName,
-		CellName:      cellName,
+	name := strings.TrimSpace(doc.Metadata.Name)
+	if name == "" {
+		return res, errdefs.ErrContainerNameRequired
+	}
+
+	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	if realmName == "" {
+		return res, errdefs.ErrRealmNameRequired
+	}
+
+	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	if spaceName == "" {
+		return res, errdefs.ErrSpaceNameRequired
+	}
+
+	stackName := strings.TrimSpace(doc.Spec.StackID)
+	if stackName == "" {
+		return res, errdefs.ErrStackNameRequired
+	}
+
+	cellName := strings.TrimSpace(doc.Spec.CellID)
+	if cellName == "" {
+		return res, errdefs.ErrCellNameRequired
 	}
 
 	// Get cell document
-	doc := &v1beta1.CellDoc{
+	cellLookup := &v1beta1.CellDoc{
 		Metadata: v1beta1.CellMetadata{
 			Name: cellName,
 		},
@@ -169,10 +168,10 @@ func (b *Exec) StartContainer(name, realmName, spaceName, stackName, cellName st
 			StackID: stackName,
 		},
 	}
-	getResult, err := b.GetCell(doc)
+	getResult, err := b.GetCell(cellLookup)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
-			return nil, fmt.Errorf(
+			return res, fmt.Errorf(
 				"cell %q not found in realm %q, space %q, stack %q",
 				cellName,
 				realmName,
@@ -180,11 +179,11 @@ func (b *Exec) StartContainer(name, realmName, spaceName, stackName, cellName st
 				stackName,
 			)
 		}
-		return nil, err
+		return res, err
 	}
 	cellDoc := getResult.CellDoc
 	if cellDoc == nil {
-		return nil, fmt.Errorf("cell %q not found", cellName)
+		return res, fmt.Errorf("cell %q not found", cellName)
 	}
 
 	// Find container in cell spec by name (ID now stores just the container name)
@@ -197,12 +196,12 @@ func (b *Exec) StartContainer(name, realmName, spaceName, stackName, cellName st
 	}
 
 	if foundContainer == nil {
-		return nil, fmt.Errorf("container %q not found in cell %q", name, cellName)
+		return res, fmt.Errorf("container %q not found in cell %q", name, cellName)
 	}
 
 	// Start the cell (which will start all containers including this one)
 	// The StartCell method handles starting individual containers if they exist
-	doc = &v1beta1.CellDoc{
+	cellDocToStart := &v1beta1.CellDoc{
 		Metadata: v1beta1.CellMetadata{
 			Name: cellName,
 		},
@@ -216,16 +215,35 @@ func (b *Exec) StartContainer(name, realmName, spaceName, stackName, cellName st
 			},
 		},
 	}
-	if err = b.runner.StartCell(doc); err != nil {
-		return nil, fmt.Errorf("failed to start container %s: %w", name, err)
+	if err = b.runner.StartCell(cellDocToStart); err != nil {
+		return res, fmt.Errorf("failed to start container %s: %w", name, err)
 	}
 
 	// Update cell metadata state to Ready
 	cellDoc.Status.State = v1beta1.CellStateReady
 	if err = b.runner.UpdateCellMetadata(cellDoc); err != nil {
-		return nil, fmt.Errorf("failed to update cell metadata: %w", err)
+		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
-	result.Started = true
-	return result, nil
+	containerSpec := *foundContainer
+	containerSpec.RealmID = realmName
+	containerSpec.SpaceID = spaceName
+	containerSpec.StackID = stackName
+	containerSpec.CellID = cellName
+
+	res.ContainerDoc = &v1beta1.ContainerDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindContainer,
+		Metadata: v1beta1.ContainerMetadata{
+			Name:   containerSpec.ID,
+			Labels: map[string]string{},
+		},
+		Spec: containerSpec,
+		Status: v1beta1.ContainerStatus{
+			State: v1beta1.ContainerStateReady,
+		},
+	}
+	res.Started = true
+
+	return res, nil
 }

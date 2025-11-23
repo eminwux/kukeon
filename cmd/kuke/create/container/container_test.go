@@ -240,23 +240,9 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 				fakeCtrl := &fakeContainerController{
-					createContainerFn: func(realmDoc *v1beta1.RealmDoc, opts controller.CreateContainerOptions) (controller.CreateContainerResult, error) {
+					createContainerFn: func(doc *v1beta1.ContainerDoc) (controller.CreateContainerResult, error) {
 						return controller.CreateContainerResult{
-							ContainerDoc: &v1beta1.ContainerDoc{
-								APIVersion: v1beta1.APIVersionV1Beta1,
-								Kind:       v1beta1.KindContainer,
-								Metadata: v1beta1.ContainerMetadata{
-									Name: opts.ContainerName,
-								},
-								Spec: v1beta1.ContainerSpec{
-									ID:      opts.ContainerName,
-									RealmID: realmDoc.Metadata.Name,
-									SpaceID: opts.SpaceName,
-									StackID: opts.StackName,
-									CellID:  opts.CellName,
-									Image:   opts.Image,
-								},
-							},
+							ContainerDoc:        doc,
 							ContainerCreated:    true,
 							ContainerExistsPost: true,
 							Started:             true,
@@ -285,22 +271,9 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 				fakeCtrl := &fakeContainerController{
-					createContainerFn: func(realmDoc *v1beta1.RealmDoc, opts controller.CreateContainerOptions) (controller.CreateContainerResult, error) {
+					createContainerFn: func(doc *v1beta1.ContainerDoc) (controller.CreateContainerResult, error) {
 						return controller.CreateContainerResult{
-							ContainerDoc: &v1beta1.ContainerDoc{
-								APIVersion: v1beta1.APIVersionV1Beta1,
-								Kind:       v1beta1.KindContainer,
-								Metadata: v1beta1.ContainerMetadata{
-									Name: opts.ContainerName,
-								},
-								Spec: v1beta1.ContainerSpec{
-									ID:      opts.ContainerName,
-									RealmID: realmDoc.Metadata.Name,
-									SpaceID: opts.SpaceName,
-									StackID: opts.StackName,
-									CellID:  opts.CellName,
-								},
-							},
+							ContainerDoc:        doc,
 							ContainerCreated:    false,
 							ContainerExistsPost: true,
 							Started:             false,
@@ -329,7 +302,7 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 				fakeCtrl := &fakeContainerController{
-					createContainerFn: func(_ *v1beta1.RealmDoc, _ controller.CreateContainerOptions) (controller.CreateContainerResult, error) {
+					createContainerFn: func(_ *v1beta1.ContainerDoc) (controller.CreateContainerResult, error) {
 						return controller.CreateContainerResult{}, errors.New("failed to create container")
 					},
 				}
@@ -550,34 +523,16 @@ func TestPrintContainerResult(t *testing.T) {
 // Test helpers
 
 type fakeContainerController struct {
-	getRealmFn        func(doc *v1beta1.RealmDoc) (controller.GetRealmResult, error)
-	createContainerFn func(realmDoc *v1beta1.RealmDoc, opts controller.CreateContainerOptions) (controller.CreateContainerResult, error)
-}
-
-func (f *fakeContainerController) GetRealm(doc *v1beta1.RealmDoc) (controller.GetRealmResult, error) {
-	if f.getRealmFn == nil {
-		return controller.GetRealmResult{
-			RealmDoc: &v1beta1.RealmDoc{
-				Metadata: v1beta1.RealmMetadata{
-					Name: doc.Metadata.Name,
-				},
-			},
-			MetadataExists:            true,
-			CgroupExists:              true,
-			ContainerdNamespaceExists: true,
-		}, nil
-	}
-	return f.getRealmFn(doc)
+	createContainerFn func(doc *v1beta1.ContainerDoc) (controller.CreateContainerResult, error)
 }
 
 func (f *fakeContainerController) CreateContainer(
-	realmDoc *v1beta1.RealmDoc,
-	opts controller.CreateContainerOptions,
+	doc *v1beta1.ContainerDoc,
 ) (controller.CreateContainerResult, error) {
 	if f.createContainerFn == nil {
 		return controller.CreateContainerResult{}, errors.New("unexpected CreateContainer call")
 	}
-	return f.createContainerFn(realmDoc, opts)
+	return f.createContainerFn(doc)
 }
 
 func newOutputCommand() (*cobra.Command, *bytes.Buffer) {

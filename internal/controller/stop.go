@@ -27,46 +27,76 @@ import (
 
 // StopCellResult reports the outcome of stopping a cell.
 type StopCellResult struct {
-	CellName  string
-	RealmName string
-	SpaceName string
-	StackName string
-	Stopped   bool
+	CellDoc *v1beta1.CellDoc
+	Stopped bool
 }
 
 // StopContainerResult reports the outcome of stopping a container.
 type StopContainerResult struct {
-	ContainerName string
-	RealmName     string
-	SpaceName     string
-	StackName     string
-	CellName      string
-	Stopped       bool
+	ContainerDoc *v1beta1.ContainerDoc
+	Stopped      bool
 }
 
 // StopCell stops all containers in a cell and updates the cell metadata state.
-func (b *Exec) StopCell(name, realmName, spaceName, stackName string) (*StopCellResult, error) {
-	name, realmName, spaceName, stackName, cellDoc, err := b.validateAndGetCell(name, realmName, spaceName, stackName)
-	if err != nil {
-		return nil, err
+func (b *Exec) StopCell(doc *v1beta1.CellDoc) (StopCellResult, error) {
+	var result StopCellResult
+	if doc == nil {
+		return result, errdefs.ErrCellNameRequired
 	}
 
-	result := &StopCellResult{
-		CellName:  name,
-		RealmName: realmName,
-		SpaceName: spaceName,
-		StackName: stackName,
+	if doc.Metadata.Labels == nil {
+		doc.Metadata.Labels = make(map[string]string)
 	}
+	if doc.APIVersion == "" {
+		doc.APIVersion = v1beta1.APIVersionV1Beta1
+	}
+	if doc.Kind == "" {
+		doc.Kind = v1beta1.KindCell
+	}
+
+	name := strings.TrimSpace(doc.Metadata.Name)
+	if name == "" {
+		name = strings.TrimSpace(doc.Spec.ID)
+	}
+	if name == "" {
+		return result, errdefs.ErrCellNameRequired
+	}
+	doc.Metadata.Name = name
+	doc.Spec.ID = name
+
+	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	if realmName == "" {
+		return result, errdefs.ErrRealmNameRequired
+	}
+	doc.Spec.RealmID = realmName
+
+	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	if spaceName == "" {
+		return result, errdefs.ErrSpaceNameRequired
+	}
+	doc.Spec.SpaceID = spaceName
+
+	stackName := strings.TrimSpace(doc.Spec.StackID)
+	if stackName == "" {
+		return result, errdefs.ErrStackNameRequired
+	}
+	doc.Spec.StackID = stackName
+
+	_, _, _, _, cellDoc, err := b.validateAndGetCell(name, realmName, spaceName, stackName)
+	if err != nil {
+		return result, err
+	}
+	result.CellDoc = cellDoc
 
 	// Stop all containers in the cell
 	if err = b.runner.StopCell(cellDoc); err != nil {
-		return nil, fmt.Errorf("failed to stop cell containers: %w", err)
+		return result, fmt.Errorf("failed to stop cell containers: %w", err)
 	}
 
 	// Update cell metadata state to Pending (stopped)
 	cellDoc.Status.State = v1beta1.CellStatePending
 	if err = b.runner.UpdateCellMetadata(cellDoc); err != nil {
-		return nil, fmt.Errorf("failed to update cell metadata: %w", err)
+		return result, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
 	result.Stopped = true
@@ -74,38 +104,60 @@ func (b *Exec) StopCell(name, realmName, spaceName, stackName string) (*StopCell
 }
 
 // StopContainer stops a specific container in a cell and updates the cell metadata.
-func (b *Exec) StopContainer(name, realmName, spaceName, stackName, cellName string) (*StopContainerResult, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return nil, errdefs.ErrContainerNameRequired
-	}
-	realmName = strings.TrimSpace(realmName)
-	if realmName == "" {
-		return nil, errdefs.ErrRealmNameRequired
-	}
-	spaceName = strings.TrimSpace(spaceName)
-	if spaceName == "" {
-		return nil, errdefs.ErrSpaceNameRequired
-	}
-	stackName = strings.TrimSpace(stackName)
-	if stackName == "" {
-		return nil, errdefs.ErrStackNameRequired
-	}
-	cellName = strings.TrimSpace(cellName)
-	if cellName == "" {
-		return nil, errdefs.ErrCellNameRequired
+func (b *Exec) StopContainer(doc *v1beta1.ContainerDoc) (StopContainerResult, error) {
+	var res StopContainerResult
+	if doc == nil {
+		return res, errdefs.ErrContainerNameRequired
 	}
 
-	result := &StopContainerResult{
-		ContainerName: name,
-		RealmName:     realmName,
-		SpaceName:     spaceName,
-		StackName:     stackName,
-		CellName:      cellName,
+	if doc.Metadata.Labels == nil {
+		doc.Metadata.Labels = make(map[string]string)
 	}
+	if doc.APIVersion == "" {
+		doc.APIVersion = v1beta1.APIVersionV1Beta1
+	}
+	if doc.Kind == "" {
+		doc.Kind = v1beta1.KindContainer
+	}
+
+	name := strings.TrimSpace(doc.Metadata.Name)
+	if name == "" {
+		name = strings.TrimSpace(doc.Spec.ID)
+	}
+	if name == "" {
+		return res, errdefs.ErrContainerNameRequired
+	}
+	doc.Metadata.Name = name
+	doc.Spec.ID = name
+
+	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	if realmName == "" {
+		return res, errdefs.ErrRealmNameRequired
+	}
+	doc.Spec.RealmID = realmName
+
+	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	if spaceName == "" {
+		return res, errdefs.ErrSpaceNameRequired
+	}
+	doc.Spec.SpaceID = spaceName
+
+	stackName := strings.TrimSpace(doc.Spec.StackID)
+	if stackName == "" {
+		return res, errdefs.ErrStackNameRequired
+	}
+	doc.Spec.StackID = stackName
+
+	cellName := strings.TrimSpace(doc.Spec.CellID)
+	if cellName == "" {
+		return res, errdefs.ErrCellNameRequired
+	}
+	doc.Spec.CellID = cellName
+
+	res.ContainerDoc = doc
 
 	// Get cell document
-	doc := &v1beta1.CellDoc{
+	cellDocReq := &v1beta1.CellDoc{
 		Metadata: v1beta1.CellMetadata{
 			Name: cellName,
 		},
@@ -115,10 +167,10 @@ func (b *Exec) StopContainer(name, realmName, spaceName, stackName, cellName str
 			StackID: stackName,
 		},
 	}
-	getResult, err := b.GetCell(doc)
+	getResult, err := b.GetCell(cellDocReq)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
-			return nil, fmt.Errorf(
+			return res, fmt.Errorf(
 				"cell %q not found in realm %q, space %q, stack %q",
 				cellName,
 				realmName,
@@ -126,24 +178,24 @@ func (b *Exec) StopContainer(name, realmName, spaceName, stackName, cellName str
 				stackName,
 			)
 		}
-		return nil, err
+		return res, err
 	}
 	cellDoc := getResult.CellDoc
 	if cellDoc == nil {
-		return nil, fmt.Errorf("cell %q not found", cellName)
+		return res, fmt.Errorf("cell %q not found", cellName)
 	}
 
 	// Stop the specific container (pass container name, runner will build full ID)
 	if err = b.runner.StopContainer(cellDoc, name); err != nil {
-		return nil, fmt.Errorf("failed to stop container %s: %w", name, err)
+		return res, fmt.Errorf("failed to stop container %s: %w", name, err)
 	}
 
 	// Update cell metadata (state remains Ready if other containers are running)
 	// The state management can be enhanced later to track individual container states
 	if err = b.runner.UpdateCellMetadata(cellDoc); err != nil {
-		return nil, fmt.Errorf("failed to update cell metadata: %w", err)
+		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
-	result.Stopped = true
-	return result, nil
+	res.Stopped = true
+	return res, nil
 }

@@ -26,13 +26,6 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
-// CreateRealmOptions captures the inputs required to create or reconcile a realm.
-type CreateRealmOptions struct {
-	Name      string
-	Namespace string
-	Labels    map[string]string
-}
-
 // CreateRealmResult reports the reconciliation outcomes for a realm.
 type CreateRealmResult struct {
 	RealmDoc *v1beta1.RealmDoc
@@ -499,19 +492,6 @@ func (b *Exec) CreateCell(doc *v1beta1.CellDoc) (CreateCellResult, error) {
 	return res, nil
 }
 
-// CreateContainerOptions captures inputs required to add a workload container to a cell.
-type CreateContainerOptions struct {
-	SpaceName string
-	StackName string
-	CellName  string
-
-	ContainerName string
-	Image         string
-	Command       string
-	Args          []string
-	Labels        map[string]string
-}
-
 // CreateContainerResult reports reconciliation outcomes for container creation within a cell.
 type CreateContainerResult struct {
 	ContainerDoc *v1beta1.ContainerDoc
@@ -524,39 +504,46 @@ type CreateContainerResult struct {
 	Started                bool
 }
 
-func (b *Exec) CreateContainer(realmDoc *v1beta1.RealmDoc, opts CreateContainerOptions) (CreateContainerResult, error) {
+func (b *Exec) CreateContainer(doc *v1beta1.ContainerDoc) (CreateContainerResult, error) {
 	var res CreateContainerResult
 
-	if realmDoc == nil {
-		return res, errdefs.ErrRealmNameRequired
+	if doc == nil {
+		return res, errdefs.ErrContainerNameRequired
 	}
 
-	realm := strings.TrimSpace(realmDoc.Metadata.Name)
-	if realm == "" {
-		return res, errdefs.ErrRealmNameRequired
+	containerName := strings.TrimSpace(doc.Metadata.Name)
+	if containerName == "" {
+		containerName = strings.TrimSpace(doc.Spec.ID)
 	}
-	space := strings.TrimSpace(opts.SpaceName)
-	if space == "" {
-		return res, errdefs.ErrSpaceNameRequired
-	}
-	stack := strings.TrimSpace(opts.StackName)
-	if stack == "" {
-		return res, errdefs.ErrStackNameRequired
-	}
-	cell := strings.TrimSpace(opts.CellName)
-	if cell == "" {
-		return res, errdefs.ErrCellNameRequired
-	}
-	containerName := strings.TrimSpace(opts.ContainerName)
 	if containerName == "" {
 		return res, errdefs.ErrContainerNameRequired
 	}
-	image := strings.TrimSpace(opts.Image)
+	if strings.TrimSpace(doc.Spec.ID) == "" {
+		doc.Spec.ID = containerName
+	}
+
+	realm := strings.TrimSpace(doc.Spec.RealmID)
+	if realm == "" {
+		return res, errdefs.ErrRealmNameRequired
+	}
+	space := strings.TrimSpace(doc.Spec.SpaceID)
+	if space == "" {
+		return res, errdefs.ErrSpaceNameRequired
+	}
+	stack := strings.TrimSpace(doc.Spec.StackID)
+	if stack == "" {
+		return res, errdefs.ErrStackNameRequired
+	}
+	cell := strings.TrimSpace(doc.Spec.CellID)
+	if cell == "" {
+		return res, errdefs.ErrCellNameRequired
+	}
+	image := strings.TrimSpace(doc.Spec.Image)
 	if image == "" {
 		return res, errdefs.ErrInvalidImage
 	}
 
-	doc := &v1beta1.CellDoc{
+	cellDoc := &v1beta1.CellDoc{
 		Metadata: v1beta1.CellMetadata{
 			Name: cell,
 		},
@@ -567,20 +554,20 @@ func (b *Exec) CreateContainer(realmDoc *v1beta1.RealmDoc, opts CreateContainerO
 			StackID: stack,
 			Containers: []v1beta1.ContainerSpec{
 				{
-					ID:      containerName, // Store just the container name, not the full ID
+					ID:      doc.Spec.ID, // Store just the container name, not the full ID
 					RealmID: realm,
 					SpaceID: space,
 					StackID: stack,
 					CellID:  cell,
 					Image:   image,
-					Command: opts.Command,
-					Args:    opts.Args,
+					Command: doc.Spec.Command,
+					Args:    doc.Spec.Args,
 				},
 			},
 		},
 	}
 
-	cellDocPre, err := b.runner.GetCell(doc)
+	cellDocPre, err := b.runner.GetCell(cellDoc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return res, fmt.Errorf("cell %q not found", cell)
@@ -591,15 +578,15 @@ func (b *Exec) CreateContainer(realmDoc *v1beta1.RealmDoc, opts CreateContainerO
 	res.CellMetadataExistsPre = true
 	res.ContainerExistsPre = containerSpecExists(cellDocPre.Spec.Containers, containerName)
 
-	if _, err = b.runner.CreateCell(doc); err != nil {
+	if _, err = b.runner.CreateCell(cellDoc); err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrCreateCell, err)
 	}
 
-	if err = b.runner.StartCell(doc); err != nil {
+	if err = b.runner.StartCell(cellDoc); err != nil {
 		return res, fmt.Errorf("failed to start container %s: %w", containerName, err)
 	}
 
-	cellDocPost, err := b.runner.GetCell(doc)
+	cellDocPost, err := b.runner.GetCell(cellDoc)
 	if err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 	}
@@ -619,8 +606,8 @@ func (b *Exec) CreateContainer(realmDoc *v1beta1.RealmDoc, opts CreateContainerO
 	}
 
 	if containerSpec != nil {
-		// Use labels from options if provided, otherwise empty map
-		labels := opts.Labels
+		// Use labels from doc if provided, otherwise empty map
+		labels := doc.Metadata.Labels
 		if labels == nil {
 			labels = make(map[string]string)
 		}

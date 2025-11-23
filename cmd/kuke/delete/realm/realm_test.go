@@ -107,7 +107,7 @@ func TestNewRealmCmd(t *testing.T) {
 			forceFlag:   false,
 			cascadeFlag: false,
 			controller: &fakeRealmController{
-				deleteRealmFn: func(doc *v1beta1.RealmDoc, force, cascade bool) (*controller.DeleteRealmResult, error) {
+				deleteRealmFn: func(doc *v1beta1.RealmDoc, force, cascade bool) (controller.DeleteRealmResult, error) {
 					if doc.Metadata.Name != "test-realm" {
 						t.Fatalf("expected name %q, got %q", "test-realm", doc.Metadata.Name)
 					}
@@ -117,7 +117,7 @@ func TestNewRealmCmd(t *testing.T) {
 					if cascade {
 						t.Fatalf("expected cascade to be false, got true")
 					}
-					return &controller.DeleteRealmResult{
+					return controller.DeleteRealmResult{
 						RealmDoc: &v1beta1.RealmDoc{
 							Metadata: v1beta1.RealmMetadata{
 								Name: "test-realm",
@@ -135,11 +135,11 @@ func TestNewRealmCmd(t *testing.T) {
 			forceFlag:   false,
 			cascadeFlag: false,
 			controller: &fakeRealmController{
-				deleteRealmFn: func(doc *v1beta1.RealmDoc, _ bool, _ bool) (*controller.DeleteRealmResult, error) {
+				deleteRealmFn: func(doc *v1beta1.RealmDoc, _ bool, _ bool) (controller.DeleteRealmResult, error) {
 					if doc.Metadata.Name != "test-realm" {
 						t.Fatalf("expected trimmed name %q, got %q", "test-realm", doc.Metadata.Name)
 					}
-					return &controller.DeleteRealmResult{
+					return controller.DeleteRealmResult{
 						RealmDoc: &v1beta1.RealmDoc{
 							Metadata: v1beta1.RealmMetadata{
 								Name: "test-realm",
@@ -157,7 +157,7 @@ func TestNewRealmCmd(t *testing.T) {
 			forceFlag:   true,
 			cascadeFlag: false,
 			controller: &fakeRealmController{
-				deleteRealmFn: func(doc *v1beta1.RealmDoc, force bool, cascade bool) (*controller.DeleteRealmResult, error) {
+				deleteRealmFn: func(doc *v1beta1.RealmDoc, force bool, cascade bool) (controller.DeleteRealmResult, error) {
 					if doc.Metadata.Name != "test-realm" {
 						t.Fatalf("expected name %q, got %q", "test-realm", doc.Metadata.Name)
 					}
@@ -167,7 +167,7 @@ func TestNewRealmCmd(t *testing.T) {
 					if cascade {
 						t.Fatalf("expected cascade to be false, got true")
 					}
-					return &controller.DeleteRealmResult{
+					return controller.DeleteRealmResult{
 						RealmDoc: &v1beta1.RealmDoc{
 							Metadata: v1beta1.RealmMetadata{
 								Name: "test-realm",
@@ -185,7 +185,7 @@ func TestNewRealmCmd(t *testing.T) {
 			forceFlag:   false,
 			cascadeFlag: true,
 			controller: &fakeRealmController{
-				deleteRealmFn: func(doc *v1beta1.RealmDoc, force bool, cascade bool) (*controller.DeleteRealmResult, error) {
+				deleteRealmFn: func(doc *v1beta1.RealmDoc, force bool, cascade bool) (controller.DeleteRealmResult, error) {
 					if doc.Metadata.Name != "test-realm" {
 						t.Fatalf("expected name %q, got %q", "test-realm", doc.Metadata.Name)
 					}
@@ -195,7 +195,7 @@ func TestNewRealmCmd(t *testing.T) {
 					if !cascade {
 						t.Fatalf("expected cascade to be true, got false")
 					}
-					return &controller.DeleteRealmResult{
+					return controller.DeleteRealmResult{
 						RealmDoc: &v1beta1.RealmDoc{
 							Metadata: v1beta1.RealmMetadata{
 								Name: "test-realm",
@@ -213,7 +213,7 @@ func TestNewRealmCmd(t *testing.T) {
 			forceFlag:   true,
 			cascadeFlag: true,
 			controller: &fakeRealmController{
-				deleteRealmFn: func(doc *v1beta1.RealmDoc, force bool, cascade bool) (*controller.DeleteRealmResult, error) {
+				deleteRealmFn: func(doc *v1beta1.RealmDoc, force bool, cascade bool) (controller.DeleteRealmResult, error) {
 					if doc.Metadata.Name != "test-realm" {
 						t.Fatalf("expected name %q, got %q", "test-realm", doc.Metadata.Name)
 					}
@@ -223,7 +223,7 @@ func TestNewRealmCmd(t *testing.T) {
 					if !cascade {
 						t.Fatalf("expected cascade to be true, got false")
 					}
-					return &controller.DeleteRealmResult{
+					return controller.DeleteRealmResult{
 						RealmDoc: &v1beta1.RealmDoc{
 							Metadata: v1beta1.RealmMetadata{
 								Name: "test-realm",
@@ -239,8 +239,8 @@ func TestNewRealmCmd(t *testing.T) {
 			name: "DeleteRealm error propagation",
 			args: []string{"test-realm"},
 			controller: &fakeRealmController{
-				deleteRealmFn: func(_ *v1beta1.RealmDoc, _ bool, _ bool) (*controller.DeleteRealmResult, error) {
-					return nil, errdefs.ErrDeleteRealm
+				deleteRealmFn: func(_ *v1beta1.RealmDoc, _ bool, _ bool) (controller.DeleteRealmResult, error) {
+					return controller.DeleteRealmResult{}, errdefs.ErrDeleteRealm
 				},
 			},
 			expectErr:     true,
@@ -250,8 +250,8 @@ func TestNewRealmCmd(t *testing.T) {
 			name: "DeleteRealm returns realm not found error",
 			args: []string{"nonexistent-realm"},
 			controller: &fakeRealmController{
-				deleteRealmFn: func(_ *v1beta1.RealmDoc, _ bool, _ bool) (*controller.DeleteRealmResult, error) {
-					return nil, errdefs.ErrRealmNotFound
+				deleteRealmFn: func(_ *v1beta1.RealmDoc, _ bool, _ bool) (controller.DeleteRealmResult, error) {
+					return controller.DeleteRealmResult{}, errdefs.ErrRealmNotFound
 				},
 			},
 			expectErr:     true,
@@ -342,7 +342,7 @@ func TestNewRealmCmdRunE(t *testing.T) {
 		name           string
 		args           []string
 		setup          func(t *testing.T, cmd *cobra.Command)
-		controllerFn   func(doc *v1beta1.RealmDoc, force, cascade bool) (*controller.DeleteRealmResult, error)
+		controllerFn   func(doc *v1beta1.RealmDoc, force, cascade bool) (controller.DeleteRealmResult, error)
 		wantErr        string
 		wantCallDelete bool
 		wantOpts       *struct {
@@ -358,7 +358,7 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			setup: func(_ *testing.T, _ *cobra.Command) {
 				// No flags set, defaults to false
 			},
-			controllerFn: func(doc *v1beta1.RealmDoc, force, cascade bool) (*controller.DeleteRealmResult, error) {
+			controllerFn: func(doc *v1beta1.RealmDoc, force, cascade bool) (controller.DeleteRealmResult, error) {
 				if doc.Metadata.Name != "test-realm" {
 					t.Fatalf("expected name %q, got %q", "test-realm", doc.Metadata.Name)
 				}
@@ -368,7 +368,7 @@ func TestNewRealmCmdRunE(t *testing.T) {
 				if cascade {
 					t.Fatalf("expected cascade to be false, got true")
 				}
-				return &controller.DeleteRealmResult{
+				return controller.DeleteRealmResult{
 					RealmDoc: doc,
 					Deleted:  []string{"metadata", "cgroup", "network"},
 				}, nil
@@ -401,11 +401,11 @@ func TestNewRealmCmdRunE(t *testing.T) {
 					t.Fatalf("failed to set force flag: %v", err)
 				}
 			},
-			controllerFn: func(doc *v1beta1.RealmDoc, force, _ bool) (*controller.DeleteRealmResult, error) {
+			controllerFn: func(doc *v1beta1.RealmDoc, force, _ bool) (controller.DeleteRealmResult, error) {
 				if !force {
 					t.Fatalf("expected force to be true, got false")
 				}
-				return &controller.DeleteRealmResult{
+				return controller.DeleteRealmResult{
 					RealmDoc: doc,
 					Deleted:  []string{"metadata", "cgroup", "network"},
 				}, nil
@@ -438,11 +438,11 @@ func TestNewRealmCmdRunE(t *testing.T) {
 					t.Fatalf("failed to set cascade flag: %v", err)
 				}
 			},
-			controllerFn: func(doc *v1beta1.RealmDoc, _, cascade bool) (*controller.DeleteRealmResult, error) {
+			controllerFn: func(doc *v1beta1.RealmDoc, _, cascade bool) (controller.DeleteRealmResult, error) {
 				if !cascade {
 					t.Fatalf("expected cascade to be true, got false")
 				}
-				return &controller.DeleteRealmResult{
+				return controller.DeleteRealmResult{
 					RealmDoc: doc,
 					Deleted:  []string{"space:space1", "space:space2", "metadata", "cgroup", "network"},
 				}, nil
@@ -465,11 +465,11 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			setup: func(_ *testing.T, _ *cobra.Command) {
 				// No flags set
 			},
-			controllerFn: func(doc *v1beta1.RealmDoc, _, _ bool) (*controller.DeleteRealmResult, error) {
+			controllerFn: func(doc *v1beta1.RealmDoc, _, _ bool) (controller.DeleteRealmResult, error) {
 				if doc.Metadata.Name != "test-realm" {
 					t.Fatalf("expected trimmed name %q, got %q", "test-realm", doc.Metadata.Name)
 				}
-				return &controller.DeleteRealmResult{
+				return controller.DeleteRealmResult{
 					RealmDoc: doc,
 					Deleted:  []string{"metadata", "cgroup", "network"},
 				}, nil
@@ -492,8 +492,8 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			setup: func(t *testing.T, cmd *cobra.Command) {
 				cmd.SetContext(context.Background())
 			},
-			controllerFn: func(_ *v1beta1.RealmDoc, _ bool, _ bool) (*controller.DeleteRealmResult, error) {
-				return nil, errors.New("unexpected call")
+			controllerFn: func(_ *v1beta1.RealmDoc, _ bool, _ bool) (controller.DeleteRealmResult, error) {
+				return controller.DeleteRealmResult{}, errors.New("unexpected call")
 			},
 			wantErr:        "logger not found",
 			wantCallDelete: false,
@@ -504,8 +504,8 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			setup: func(_ *testing.T, _ *cobra.Command) {
 				// No flags set
 			},
-			controllerFn: func(_ *v1beta1.RealmDoc, _ bool, _ bool) (*controller.DeleteRealmResult, error) {
-				return nil, errdefs.ErrDeleteRealm
+			controllerFn: func(_ *v1beta1.RealmDoc, _ bool, _ bool) (controller.DeleteRealmResult, error) {
+				return controller.DeleteRealmResult{}, errdefs.ErrDeleteRealm
 			},
 			wantErr:        "failed to delete realm",
 			wantCallDelete: true,
@@ -525,11 +525,11 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			setup: func(_ *testing.T, _ *cobra.Command) {
 				// No flags set
 			},
-			controllerFn: func(doc *v1beta1.RealmDoc, _ bool, _ bool) (*controller.DeleteRealmResult, error) {
+			controllerFn: func(doc *v1beta1.RealmDoc, _ bool, _ bool) (controller.DeleteRealmResult, error) {
 				if doc.Metadata.Name != "nonexistent-realm" {
 					t.Fatalf("expected name %q, got %q", "nonexistent-realm", doc.Metadata.Name)
 				}
-				return nil, errdefs.ErrRealmNotFound
+				return controller.DeleteRealmResult{}, errdefs.ErrRealmNotFound
 			},
 			wantErr:        "realm not found",
 			wantCallDelete: true,
@@ -575,7 +575,7 @@ func TestNewRealmCmdRunE(t *testing.T) {
 				// If we need to mock the controller, inject it via context
 				if tt.controllerFn != nil {
 					fakeCtrl := &fakeRealmController{
-						deleteRealmFn: func(doc *v1beta1.RealmDoc, force, cascade bool) (*controller.DeleteRealmResult, error) {
+						deleteRealmFn: func(doc *v1beta1.RealmDoc, force, cascade bool) (controller.DeleteRealmResult, error) {
 							deleteCalled = true
 							deleteOpts.doc = doc
 							deleteOpts.force = force
@@ -683,13 +683,13 @@ func testLogger() *slog.Logger {
 }
 
 type fakeRealmController struct {
-	deleteRealmFn func(doc *v1beta1.RealmDoc, force, cascade bool) (*controller.DeleteRealmResult, error)
+	deleteRealmFn func(doc *v1beta1.RealmDoc, force, cascade bool) (controller.DeleteRealmResult, error)
 }
 
 func (f *fakeRealmController) DeleteRealm(
 	doc *v1beta1.RealmDoc,
 	force, cascade bool,
-) (*controller.DeleteRealmResult, error) {
+) (controller.DeleteRealmResult, error) {
 	if f.deleteRealmFn == nil {
 		panic("DeleteRealm was called unexpectedly")
 	}

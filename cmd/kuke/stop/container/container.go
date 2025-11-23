@@ -24,12 +24,13 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/stop/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type containerController interface {
-	StopContainer(name, realmName, spaceName, stackName, cellName string) (*controller.StopContainerResult, error)
+	StopContainer(doc *v1beta1.ContainerDoc) (controller.StopContainerResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -71,15 +72,33 @@ func NewContainerCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				ctrl = realCtrl
+				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
-			result, err := ctrl.StopContainer(name, realm, space, stack, cell)
+			containerDoc := newContainerDoc(name, realm, space, stack, cell)
+
+			result, err := ctrl.StopContainer(containerDoc)
 			if err != nil {
 				return err
 			}
 
-			cmd.Printf("Stopped container %q from cell %q\n", result.ContainerName, result.CellName)
+			printDoc := containerDoc
+			stopped := true
+			if result != (controller.StopContainerResult{}) {
+				if result.ContainerDoc != nil {
+					printDoc = result.ContainerDoc
+				}
+				stopped = result.Stopped
+			}
+
+			containerName := containerNameFromDoc(printDoc, name)
+			cellName := cellNameFromDoc(printDoc, cell)
+
+			if stopped {
+				cmd.Printf("Stopped container %q from cell %q\n", containerName, cellName)
+			} else {
+				cmd.Printf("Container %q was already stopped in cell %q\n", containerName, cellName)
+			}
 			return nil
 		},
 	}
@@ -104,4 +123,129 @@ func NewContainerCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("cell", config.CompleteCellNames)
 
 	return cmd
+}
+
+type controllerWrapper struct {
+	ctrl *controller.Exec
+}
+
+func (w *controllerWrapper) StopContainer(doc *v1beta1.ContainerDoc) (controller.StopContainerResult, error) {
+	if doc == nil {
+		return controller.StopContainerResult{}, errdefs.ErrContainerNameRequired
+	}
+
+	fillDocDefaults(
+		doc,
+		strings.TrimSpace(doc.Metadata.Name),
+		strings.TrimSpace(doc.Spec.RealmID),
+		strings.TrimSpace(doc.Spec.SpaceID),
+		strings.TrimSpace(doc.Spec.StackID),
+		strings.TrimSpace(doc.Spec.CellID),
+	)
+
+	name := strings.TrimSpace(doc.Metadata.Name)
+	if name == "" {
+		return controller.StopContainerResult{}, errdefs.ErrContainerNameRequired
+	}
+	realm := strings.TrimSpace(doc.Spec.RealmID)
+	if realm == "" {
+		return controller.StopContainerResult{}, errdefs.ErrRealmNameRequired
+	}
+	space := strings.TrimSpace(doc.Spec.SpaceID)
+	if space == "" {
+		return controller.StopContainerResult{}, errdefs.ErrSpaceNameRequired
+	}
+	stack := strings.TrimSpace(doc.Spec.StackID)
+	if stack == "" {
+		return controller.StopContainerResult{}, errdefs.ErrStackNameRequired
+	}
+	cell := strings.TrimSpace(doc.Spec.CellID)
+	if cell == "" {
+		return controller.StopContainerResult{}, errdefs.ErrCellNameRequired
+	}
+
+	res, err := w.ctrl.StopContainer(doc)
+	if err != nil {
+		return controller.StopContainerResult{}, err
+	}
+
+	if res.ContainerDoc == nil {
+		res.ContainerDoc = newContainerDoc(name, realm, space, stack, cell)
+	} else {
+		fillDocDefaults(res.ContainerDoc, name, realm, space, stack, cell)
+	}
+
+	return res, nil
+}
+
+func newContainerDoc(name, realm, space, stack, cell string) *v1beta1.ContainerDoc {
+	return &v1beta1.ContainerDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindContainer,
+		Metadata: v1beta1.ContainerMetadata{
+			Name:   strings.TrimSpace(name),
+			Labels: make(map[string]string),
+		},
+		Spec: v1beta1.ContainerSpec{
+			ID:      strings.TrimSpace(name),
+			RealmID: strings.TrimSpace(realm),
+			SpaceID: strings.TrimSpace(space),
+			StackID: strings.TrimSpace(stack),
+			CellID:  strings.TrimSpace(cell),
+		},
+	}
+}
+
+func fillDocDefaults(doc *v1beta1.ContainerDoc, name, realm, space, stack, cell string) {
+	if doc == nil {
+		return
+	}
+	if doc.APIVersion == "" {
+		doc.APIVersion = v1beta1.APIVersionV1Beta1
+	}
+	if doc.Kind == "" {
+		doc.Kind = v1beta1.KindContainer
+	}
+	if strings.TrimSpace(doc.Metadata.Name) == "" {
+		doc.Metadata.Name = strings.TrimSpace(name)
+	}
+	if strings.TrimSpace(doc.Spec.ID) == "" {
+		doc.Spec.ID = strings.TrimSpace(name)
+	}
+	if strings.TrimSpace(doc.Spec.RealmID) == "" {
+		doc.Spec.RealmID = strings.TrimSpace(realm)
+	}
+	if strings.TrimSpace(doc.Spec.SpaceID) == "" {
+		doc.Spec.SpaceID = strings.TrimSpace(space)
+	}
+	if strings.TrimSpace(doc.Spec.StackID) == "" {
+		doc.Spec.StackID = strings.TrimSpace(stack)
+	}
+	if strings.TrimSpace(doc.Spec.CellID) == "" {
+		doc.Spec.CellID = strings.TrimSpace(cell)
+	}
+	if doc.Metadata.Labels == nil {
+		doc.Metadata.Labels = make(map[string]string)
+	}
+}
+
+func containerNameFromDoc(doc *v1beta1.ContainerDoc, defaultName string) string {
+	if doc != nil {
+		if trimmed := strings.TrimSpace(doc.Metadata.Name); trimmed != "" {
+			return trimmed
+		}
+		if trimmed := strings.TrimSpace(doc.Spec.ID); trimmed != "" {
+			return trimmed
+		}
+	}
+	return defaultName
+}
+
+func cellNameFromDoc(doc *v1beta1.ContainerDoc, defaultCell string) string {
+	if doc != nil {
+		if trimmed := strings.TrimSpace(doc.Spec.CellID); trimmed != "" {
+			return trimmed
+		}
+	}
+	return defaultCell
 }

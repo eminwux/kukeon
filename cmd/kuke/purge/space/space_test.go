@@ -211,8 +211,6 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 						return controller.PurgeSpaceResult{}, errors.New("unexpected args")
 					}
 					return controller.PurgeSpaceResult{
-						SpaceName: "my-space",
-						RealmName: "my-realm",
 						SpaceDoc: &v1beta1.SpaceDoc{
 							Metadata: v1beta1.SpaceMetadata{Name: "my-space"},
 							Spec:     v1beta1.SpaceSpec{RealmID: "my-realm"},
@@ -241,8 +239,6 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 						return controller.PurgeSpaceResult{}, errors.New("unexpected args")
 					}
 					return controller.PurgeSpaceResult{
-						SpaceName: "my-space",
-						RealmName: "my-realm",
 						SpaceDoc: &v1beta1.SpaceDoc{
 							Metadata: v1beta1.SpaceMetadata{Name: "my-space"},
 							Spec:     v1beta1.SpaceSpec{RealmID: "my-realm"},
@@ -274,8 +270,6 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 						return controller.PurgeSpaceResult{}, errors.New("unexpected trimmed args")
 					}
 					return controller.PurgeSpaceResult{
-						SpaceName: "my-space",
-						RealmName: "my-realm",
 						SpaceDoc: &v1beta1.SpaceDoc{
 							Metadata: v1beta1.SpaceMetadata{Name: "my-space"},
 							Spec:     v1beta1.SpaceSpec{RealmID: "my-realm"},
@@ -304,8 +298,6 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 						return controller.PurgeSpaceResult{}, errors.New("unexpected args from viper")
 					}
 					return controller.PurgeSpaceResult{
-						SpaceName: "my-space",
-						RealmName: "viper-realm",
 						SpaceDoc: &v1beta1.SpaceDoc{
 							Metadata: v1beta1.SpaceMetadata{Name: "my-space"},
 							Spec:     v1beta1.SpaceSpec{RealmID: "viper-realm"},
@@ -338,8 +330,6 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 						return controller.PurgeSpaceResult{}, errors.New("unexpected args")
 					}
 					return controller.PurgeSpaceResult{
-						SpaceName: "my-space",
-						RealmName: "my-realm",
 						SpaceDoc: &v1beta1.SpaceDoc{
 							Metadata: v1beta1.SpaceMetadata{Name: "my-space"},
 							Spec:     v1beta1.SpaceSpec{RealmID: "my-realm"},
@@ -373,8 +363,6 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 						return controller.PurgeSpaceResult{}, errors.New("unexpected args")
 					}
 					return controller.PurgeSpaceResult{
-						SpaceName: "my-space",
-						RealmName: "my-realm",
 						SpaceDoc: &v1beta1.SpaceDoc{
 							Metadata: v1beta1.SpaceMetadata{Name: "my-space"},
 							Spec:     v1beta1.SpaceSpec{RealmID: "my-realm"},
@@ -409,8 +397,6 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 						return controller.PurgeSpaceResult{}, errors.New("unexpected args")
 					}
 					return controller.PurgeSpaceResult{
-						SpaceName: "my-space",
-						RealmName: "my-realm",
 						SpaceDoc: &v1beta1.SpaceDoc{
 							Metadata: v1beta1.SpaceMetadata{Name: "my-space"},
 							Spec:     v1beta1.SpaceSpec{RealmID: "my-realm"},

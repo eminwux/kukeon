@@ -30,7 +30,7 @@ import (
 )
 
 type cellController interface {
-	DeleteCell(doc *v1beta1.CellDoc) (*controller.DeleteCellResult, error)
+	DeleteCell(doc *v1beta1.CellDoc) (controller.DeleteCellResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.

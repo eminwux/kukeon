@@ -32,7 +32,7 @@ import (
 // SpaceController defines the interface for space deletion operations.
 // It is exported for use in tests.
 type SpaceController interface {
-	DeleteSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (*controller.DeleteSpaceResult, error)
+	DeleteSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (controller.DeleteSpaceResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -115,6 +115,6 @@ type controllerWrapper struct {
 func (w *controllerWrapper) DeleteSpace(
 	doc *v1beta1.SpaceDoc,
 	force, cascade bool,
-) (*controller.DeleteSpaceResult, error) {
+) (controller.DeleteSpaceResult, error) {
 	return w.ctrl.DeleteSpace(doc, force, cascade)
 }

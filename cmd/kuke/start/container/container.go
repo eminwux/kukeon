@@ -24,12 +24,19 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/start/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
+// StartContainerResult exposes the started container doc plus controller booleans.
+type StartContainerResult struct {
+	ContainerDoc *v1beta1.ContainerDoc
+	Started      bool
+}
+
 type containerController interface {
-	StartContainer(name, realmName, spaceName, stackName, cellName string) (*controller.StartContainerResult, error)
+	StartContainer(doc *v1beta1.ContainerDoc) (StartContainerResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -52,7 +59,7 @@ func NewContainerCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				ctrl = realCtrl
+				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
 			name := strings.TrimSpace(args[0])
@@ -74,12 +81,23 @@ func NewContainerCmd() *cobra.Command {
 				return fmt.Errorf("%w (--cell)", errdefs.ErrCellNameRequired)
 			}
 
-			result, err := ctrl.StartContainer(name, realm, space, stack, cell)
+			containerDoc := newContainerDoc(name, realm, space, stack, cell)
+
+			result, err := ctrl.StartContainer(containerDoc)
 			if err != nil {
 				return err
 			}
 
-			cmd.Printf("Started container %q from cell %q\n", result.ContainerName, result.CellName)
+			doc := result.ContainerDoc
+			if doc == nil {
+				doc = containerDoc
+			}
+
+			cmd.Printf(
+				"Started container %q from cell %q\n",
+				strings.TrimSpace(doc.Metadata.Name),
+				strings.TrimSpace(doc.Spec.CellID),
+			)
 			return nil
 		},
 	}
@@ -104,4 +122,55 @@ func NewContainerCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("cell", config.CompleteCellNames)
 
 	return cmd
+}
+
+func newContainerDoc(name, realm, space, stack, cell string) *v1beta1.ContainerDoc {
+	return &v1beta1.ContainerDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindContainer,
+		Metadata: v1beta1.ContainerMetadata{
+			Name:   strings.TrimSpace(name),
+			Labels: make(map[string]string),
+		},
+		Spec: v1beta1.ContainerSpec{
+			ID:      strings.TrimSpace(name),
+			RealmID: strings.TrimSpace(realm),
+			SpaceID: strings.TrimSpace(space),
+			StackID: strings.TrimSpace(stack),
+			CellID:  strings.TrimSpace(cell),
+		},
+	}
+}
+
+type controllerWrapper struct {
+	ctrl *controller.Exec
+}
+
+func (w *controllerWrapper) StartContainer(doc *v1beta1.ContainerDoc) (StartContainerResult, error) {
+	if doc == nil {
+		return StartContainerResult{}, errdefs.ErrContainerNameRequired
+	}
+
+	name := strings.TrimSpace(doc.Metadata.Name)
+	realm := strings.TrimSpace(doc.Spec.RealmID)
+	space := strings.TrimSpace(doc.Spec.SpaceID)
+	stack := strings.TrimSpace(doc.Spec.StackID)
+	cell := strings.TrimSpace(doc.Spec.CellID)
+
+	sanitizedDoc := newContainerDoc(name, realm, space, stack, cell)
+
+	res, err := w.ctrl.StartContainer(sanitizedDoc)
+	if err != nil {
+		return StartContainerResult{}, err
+	}
+
+	resultDoc := sanitizedDoc
+	if res.ContainerDoc != nil {
+		resultDoc = res.ContainerDoc
+	}
+
+	return StartContainerResult{
+		ContainerDoc: resultDoc,
+		Started:      res.Started,
+	}, nil
 }

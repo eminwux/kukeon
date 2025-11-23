@@ -29,7 +29,7 @@ import (
 // RealmController defines the interface for realm deletion operations.
 // It is exported for use in tests.
 type RealmController interface {
-	DeleteRealm(doc *v1beta1.RealmDoc, force, cascade bool) (*controller.DeleteRealmResult, error)
+	DeleteRealm(doc *v1beta1.RealmDoc, force, cascade bool) (controller.DeleteRealmResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -96,6 +96,6 @@ type controllerWrapper struct {
 func (w *controllerWrapper) DeleteRealm(
 	doc *v1beta1.RealmDoc,
 	force, cascade bool,
-) (*controller.DeleteRealmResult, error) {
+) (controller.DeleteRealmResult, error) {
 	return w.ctrl.DeleteRealm(doc, force, cascade)
 }

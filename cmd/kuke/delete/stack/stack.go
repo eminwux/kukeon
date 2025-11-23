@@ -32,7 +32,7 @@ import (
 // StackController defines the interface for stack deletion operations.
 // It is exported for use in tests.
 type StackController interface {
-	DeleteStack(doc *v1beta1.StackDoc, force, cascade bool) (*controller.DeleteStackResult, error)
+	DeleteStack(doc *v1beta1.StackDoc, force, cascade bool) (controller.DeleteStackResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.

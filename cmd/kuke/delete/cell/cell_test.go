@@ -46,7 +46,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 		name           string
 		args           []string
 		setup          func(t *testing.T, cmd *cobra.Command)
-		controllerFn   func(doc *v1beta1.CellDoc) (*controller.DeleteCellResult, error)
+		controllerFn   func(doc *v1beta1.CellDoc) (controller.DeleteCellResult, error)
 		wantErr        string
 		wantCallDelete bool
 		wantOpts       *struct {
@@ -65,8 +65,8 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			controllerFn: func(doc *v1beta1.CellDoc) (*controller.DeleteCellResult, error) {
-				return &controller.DeleteCellResult{
+			controllerFn: func(doc *v1beta1.CellDoc) (controller.DeleteCellResult, error) {
+				return controller.DeleteCellResult{
 					CellDoc:           doc,
 					ContainersDeleted: true,
 					CgroupDeleted:     true,
@@ -95,8 +95,8 @@ func TestNewCellCmdRunE(t *testing.T) {
 				viper.Set(config.KUKE_DELETE_CELL_SPACE.ViperKey, "space-b")
 				viper.Set(config.KUKE_DELETE_CELL_STACK.ViperKey, "stack-b")
 			},
-			controllerFn: func(doc *v1beta1.CellDoc) (*controller.DeleteCellResult, error) {
-				return &controller.DeleteCellResult{
+			controllerFn: func(doc *v1beta1.CellDoc) (controller.DeleteCellResult, error) {
+				return controller.DeleteCellResult{
 					CellDoc:           doc,
 					ContainersDeleted: true,
 					CgroupDeleted:     true,
@@ -125,8 +125,8 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "  space-a  ")
 				setFlag(t, cmd, "stack", "  stack-a  ")
 			},
-			controllerFn: func(doc *v1beta1.CellDoc) (*controller.DeleteCellResult, error) {
-				return &controller.DeleteCellResult{
+			controllerFn: func(doc *v1beta1.CellDoc) (controller.DeleteCellResult, error) {
+				return controller.DeleteCellResult{
 					CellDoc:           doc,
 					ContainersDeleted: true,
 					CgroupDeleted:     true,
@@ -230,8 +230,8 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			controllerFn: func(_ *v1beta1.CellDoc) (*controller.DeleteCellResult, error) {
-				return nil, errdefs.ErrDeleteCell
+			controllerFn: func(_ *v1beta1.CellDoc) (controller.DeleteCellResult, error) {
+				return controller.DeleteCellResult{}, errdefs.ErrDeleteCell
 			},
 			wantErr:        "failed to delete cell",
 			wantCallDelete: true,
@@ -255,8 +255,8 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			controllerFn: func(_ *v1beta1.CellDoc) (*controller.DeleteCellResult, error) {
-				return nil, errdefs.ErrCellNotFound
+			controllerFn: func(_ *v1beta1.CellDoc) (controller.DeleteCellResult, error) {
+				return controller.DeleteCellResult{}, errdefs.ErrCellNotFound
 			},
 			wantErr:        "cell not found",
 			wantCallDelete: true,
@@ -296,7 +296,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 				// If we need to mock the controller, inject it via context
 				if tt.controllerFn != nil {
 					fakeCtrl := &fakeControllerExec{
-						deleteCellFn: func(doc *v1beta1.CellDoc) (*controller.DeleteCellResult, error) {
+						deleteCellFn: func(doc *v1beta1.CellDoc) (controller.DeleteCellResult, error) {
 							deleteCalled = true
 							deleteDoc = doc
 							return tt.controllerFn(doc)
@@ -360,12 +360,12 @@ func TestNewCellCmdRunE(t *testing.T) {
 }
 
 type fakeControllerExec struct {
-	deleteCellFn func(doc *v1beta1.CellDoc) (*controller.DeleteCellResult, error)
+	deleteCellFn func(doc *v1beta1.CellDoc) (controller.DeleteCellResult, error)
 }
 
-func (f *fakeControllerExec) DeleteCell(doc *v1beta1.CellDoc) (*controller.DeleteCellResult, error) {
+func (f *fakeControllerExec) DeleteCell(doc *v1beta1.CellDoc) (controller.DeleteCellResult, error) {
 	if f.deleteCellFn == nil {
-		return nil, errors.New("unexpected DeleteCell call")
+		return controller.DeleteCellResult{}, errors.New("unexpected DeleteCell call")
 	}
 	return f.deleteCellFn(doc)
 }

@@ -27,85 +27,105 @@ import (
 
 // KillCellResult reports the outcome of killing a cell.
 type KillCellResult struct {
-	CellName  string
-	RealmName string
-	SpaceName string
-	StackName string
-	Killed    bool
+	CellDoc *v1beta1.CellDoc
+	Killed  bool
 }
 
 // KillContainerResult reports the outcome of killing a container.
 type KillContainerResult struct {
-	ContainerName string
-	RealmName     string
-	SpaceName     string
-	StackName     string
-	CellName      string
-	Killed        bool
+	ContainerDoc *v1beta1.ContainerDoc
+	Killed       bool
 }
 
 // KillCell immediately force-kills all containers in a cell and updates the cell metadata state.
-func (b *Exec) KillCell(name, realmName, spaceName, stackName string) (*KillCellResult, error) {
-	name, realmName, spaceName, stackName, cellDoc, err := b.validateAndGetCell(name, realmName, spaceName, stackName)
-	if err != nil {
-		return nil, err
+func (b *Exec) KillCell(doc *v1beta1.CellDoc) (KillCellResult, error) {
+	var res KillCellResult
+	if doc == nil {
+		return res, errdefs.ErrCellNameRequired
 	}
 
-	result := &KillCellResult{
-		CellName:  name,
-		RealmName: realmName,
-		SpaceName: spaceName,
-		StackName: stackName,
+	name := strings.TrimSpace(doc.Metadata.Name)
+	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	stackName := strings.TrimSpace(doc.Spec.StackID)
+
+	_, _, _, _, cellDoc, err := b.validateAndGetCell(name, realmName, spaceName, stackName)
+	if err != nil {
+		return res, err
 	}
+	res.CellDoc = cellDoc
 
 	// Kill all containers in the cell
 	if err = b.runner.KillCell(cellDoc); err != nil {
-		return nil, fmt.Errorf("failed to kill cell containers: %w", err)
+		return res, fmt.Errorf("failed to kill cell containers: %w", err)
 	}
 
 	// Update cell metadata state to Pending (killed)
 	cellDoc.Status.State = v1beta1.CellStatePending
 	if err = b.runner.UpdateCellMetadata(cellDoc); err != nil {
-		return nil, fmt.Errorf("failed to update cell metadata: %w", err)
+		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
-	result.Killed = true
-	return result, nil
+	res.Killed = true
+	return res, nil
 }
 
 // KillContainer immediately force-kills a specific container in a cell and updates the cell metadata.
-func (b *Exec) KillContainer(name, realmName, spaceName, stackName, cellName string) (*KillContainerResult, error) {
+func (b *Exec) KillContainer(doc *v1beta1.ContainerDoc) (KillContainerResult, error) {
+	var res KillContainerResult
+	if doc == nil {
+		return res, errdefs.ErrContainerNameRequired
+	}
+
+	if doc.Metadata.Labels == nil {
+		doc.Metadata.Labels = make(map[string]string)
+	}
+	if doc.APIVersion == "" {
+		doc.APIVersion = v1beta1.APIVersionV1Beta1
+	}
+	if doc.Kind == "" {
+		doc.Kind = v1beta1.KindContainer
+	}
+
+	name := strings.TrimSpace(doc.Metadata.Name)
+	if name == "" {
+		name = strings.TrimSpace(doc.Spec.ID)
+	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, errdefs.ErrContainerNameRequired
+		return res, errdefs.ErrContainerNameRequired
 	}
-	realmName = strings.TrimSpace(realmName)
-	if realmName == "" {
-		return nil, errdefs.ErrRealmNameRequired
-	}
-	spaceName = strings.TrimSpace(spaceName)
-	if spaceName == "" {
-		return nil, errdefs.ErrSpaceNameRequired
-	}
-	stackName = strings.TrimSpace(stackName)
-	if stackName == "" {
-		return nil, errdefs.ErrStackNameRequired
-	}
-	cellName = strings.TrimSpace(cellName)
-	if cellName == "" {
-		return nil, errdefs.ErrCellNameRequired
-	}
+	doc.Metadata.Name = name
+	doc.Spec.ID = name
 
-	result := &KillContainerResult{
-		ContainerName: name,
-		RealmName:     realmName,
-		SpaceName:     spaceName,
-		StackName:     stackName,
-		CellName:      cellName,
+	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	if realmName == "" {
+		return res, errdefs.ErrRealmNameRequired
 	}
+	doc.Spec.RealmID = realmName
+
+	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	if spaceName == "" {
+		return res, errdefs.ErrSpaceNameRequired
+	}
+	doc.Spec.SpaceID = spaceName
+
+	stackName := strings.TrimSpace(doc.Spec.StackID)
+	if stackName == "" {
+		return res, errdefs.ErrStackNameRequired
+	}
+	doc.Spec.StackID = stackName
+
+	cellName := strings.TrimSpace(doc.Spec.CellID)
+	if cellName == "" {
+		return res, errdefs.ErrCellNameRequired
+	}
+	doc.Spec.CellID = cellName
+
+	res.ContainerDoc = doc
 
 	// Get cell document
-	doc := &v1beta1.CellDoc{
+	cellLookup := &v1beta1.CellDoc{
 		Metadata: v1beta1.CellMetadata{
 			Name: cellName,
 		},
@@ -115,10 +135,10 @@ func (b *Exec) KillContainer(name, realmName, spaceName, stackName, cellName str
 			StackID: stackName,
 		},
 	}
-	getResult, err := b.GetCell(doc)
+	getResult, err := b.GetCell(cellLookup)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
-			return nil, fmt.Errorf(
+			return res, fmt.Errorf(
 				"cell %q not found in realm %q, space %q, stack %q",
 				cellName,
 				realmName,
@@ -126,11 +146,11 @@ func (b *Exec) KillContainer(name, realmName, spaceName, stackName, cellName str
 				stackName,
 			)
 		}
-		return nil, err
+		return res, err
 	}
 	cellDoc := getResult.CellDoc
 	if cellDoc == nil {
-		return nil, fmt.Errorf("cell %q not found", cellName)
+		return res, fmt.Errorf("cell %q not found", cellName)
 	}
 
 	// Find container in cell spec by name (ID now stores just the container name)
@@ -143,20 +163,28 @@ func (b *Exec) KillContainer(name, realmName, spaceName, stackName, cellName str
 	}
 
 	if foundContainer == nil {
-		return nil, fmt.Errorf("container %q not found in cell %q", name, cellName)
+		return res, fmt.Errorf("container %q not found in cell %q", name, cellName)
 	}
+
+	// Update the doc spec to match the stored container details.
+	doc.Spec = *foundContainer
+	doc.Spec.ID = name
+	doc.Spec.RealmID = realmName
+	doc.Spec.SpaceID = spaceName
+	doc.Spec.StackID = stackName
+	doc.Spec.CellID = cellName
 
 	// Kill the specific container (pass container name, runner will build full ID)
 	if err = b.runner.KillContainer(cellDoc, name); err != nil {
-		return nil, fmt.Errorf("failed to kill container %s: %w", name, err)
+		return res, fmt.Errorf("failed to kill container %s: %w", name, err)
 	}
 
 	// Update cell metadata (state remains Ready if other containers are running)
 	// The state management can be enhanced later to track individual container states
 	if err = b.runner.UpdateCellMetadata(cellDoc); err != nil {
-		return nil, fmt.Errorf("failed to update cell metadata: %w", err)
+		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
-	result.Killed = true
-	return result, nil
+	res.Killed = true
+	return res, nil
 }
