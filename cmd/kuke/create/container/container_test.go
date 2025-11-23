@@ -29,6 +29,7 @@ import (
 	container "github.com/eminwux/kukeon/cmd/kuke/create/container"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -239,14 +240,23 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 				fakeCtrl := &fakeContainerController{
-					createContainerFn: func(opts controller.CreateContainerOptions) (controller.CreateContainerResult, error) {
+					createContainerFn: func(realmDoc *v1beta1.RealmDoc, opts controller.CreateContainerOptions) (controller.CreateContainerResult, error) {
 						return controller.CreateContainerResult{
-							RealmName:           opts.RealmName,
-							SpaceName:           opts.SpaceName,
-							StackName:           opts.StackName,
-							CellName:            opts.CellName,
-							ContainerName:       opts.ContainerName,
-							ContainerID:         "container-123",
+							ContainerDoc: &v1beta1.ContainerDoc{
+								APIVersion: v1beta1.APIVersionV1Beta1,
+								Kind:       v1beta1.KindContainer,
+								Metadata: v1beta1.ContainerMetadata{
+									Name: opts.ContainerName,
+								},
+								Spec: v1beta1.ContainerSpec{
+									ID:      opts.ContainerName,
+									RealmID: realmDoc.Metadata.Name,
+									SpaceID: opts.SpaceName,
+									StackID: opts.StackName,
+									CellID:  opts.CellName,
+									Image:   opts.Image,
+								},
+							},
 							ContainerCreated:    true,
 							ContainerExistsPost: true,
 							Started:             true,
@@ -257,7 +267,7 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				cmd.SetContext(ctx)
 			},
 			wantOutput: []string{
-				"Container \"my-container\" (ID: \"container-123\")",
+				"Container \"my-container\" (ID: \"my-container\")",
 				"container: created",
 				"container: started",
 			},
@@ -275,14 +285,22 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 				fakeCtrl := &fakeContainerController{
-					createContainerFn: func(opts controller.CreateContainerOptions) (controller.CreateContainerResult, error) {
+					createContainerFn: func(realmDoc *v1beta1.RealmDoc, opts controller.CreateContainerOptions) (controller.CreateContainerResult, error) {
 						return controller.CreateContainerResult{
-							RealmName:           opts.RealmName,
-							SpaceName:           opts.SpaceName,
-							StackName:           opts.StackName,
-							CellName:            opts.CellName,
-							ContainerName:       opts.ContainerName,
-							ContainerID:         "existing-456",
+							ContainerDoc: &v1beta1.ContainerDoc{
+								APIVersion: v1beta1.APIVersionV1Beta1,
+								Kind:       v1beta1.KindContainer,
+								Metadata: v1beta1.ContainerMetadata{
+									Name: opts.ContainerName,
+								},
+								Spec: v1beta1.ContainerSpec{
+									ID:      opts.ContainerName,
+									RealmID: realmDoc.Metadata.Name,
+									SpaceID: opts.SpaceName,
+									StackID: opts.StackName,
+									CellID:  opts.CellName,
+								},
+							},
 							ContainerCreated:    false,
 							ContainerExistsPost: true,
 							Started:             false,
@@ -311,7 +329,7 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 				fakeCtrl := &fakeContainerController{
-					createContainerFn: func(_ controller.CreateContainerOptions) (controller.CreateContainerResult, error) {
+					createContainerFn: func(_ *v1beta1.RealmDoc, _ controller.CreateContainerOptions) (controller.CreateContainerResult, error) {
 						return controller.CreateContainerResult{}, errors.New("failed to create container")
 					},
 				}
@@ -400,18 +418,26 @@ func TestPrintContainerResult(t *testing.T) {
 		{
 			name: "container created and started",
 			result: controller.CreateContainerResult{
-				RealmName:           "my-realm",
-				SpaceName:           "my-space",
-				StackName:           "my-stack",
-				CellName:            "my-cell",
-				ContainerName:       "my-container",
-				ContainerID:         "container-123",
+				ContainerDoc: &v1beta1.ContainerDoc{
+					APIVersion: v1beta1.APIVersionV1Beta1,
+					Kind:       v1beta1.KindContainer,
+					Metadata: v1beta1.ContainerMetadata{
+						Name: "my-container",
+					},
+					Spec: v1beta1.ContainerSpec{
+						ID:      "my-container",
+						RealmID: "my-realm",
+						SpaceID: "my-space",
+						StackID: "my-stack",
+						CellID:  "my-cell",
+					},
+				},
 				ContainerCreated:    true,
 				ContainerExistsPost: true,
 				Started:             true,
 			},
 			wantOutput: []string{
-				"Container \"my-container\" (ID: \"container-123\")",
+				"Container \"my-container\" (ID: \"my-container\")",
 				"in cell \"my-cell\"",
 				"realm \"my-realm\"",
 				"space \"my-space\"",
@@ -423,12 +449,20 @@ func TestPrintContainerResult(t *testing.T) {
 		{
 			name: "container already existed and not started",
 			result: controller.CreateContainerResult{
-				RealmName:           "my-realm",
-				SpaceName:           "my-space",
-				StackName:           "my-stack",
-				CellName:            "my-cell",
-				ContainerName:       "existing-container",
-				ContainerID:         "existing-456",
+				ContainerDoc: &v1beta1.ContainerDoc{
+					APIVersion: v1beta1.APIVersionV1Beta1,
+					Kind:       v1beta1.KindContainer,
+					Metadata: v1beta1.ContainerMetadata{
+						Name: "existing-container",
+					},
+					Spec: v1beta1.ContainerSpec{
+						ID:      "existing-container",
+						RealmID: "my-realm",
+						SpaceID: "my-space",
+						StackID: "my-stack",
+						CellID:  "my-cell",
+					},
+				},
 				ContainerCreated:    false,
 				ContainerExistsPost: true,
 				Started:             false,
@@ -446,19 +480,13 @@ func TestPrintContainerResult(t *testing.T) {
 		{
 			name: "container missing",
 			result: controller.CreateContainerResult{
-				RealmName:           "my-realm",
-				SpaceName:           "my-space",
-				StackName:           "my-stack",
-				CellName:            "my-cell",
-				ContainerName:       "missing-container",
-				ContainerID:         "missing-789",
+				ContainerDoc:        nil,
 				ContainerCreated:    false,
 				ContainerExistsPost: false,
 				Started:             false,
 			},
 			wantOutput: []string{
-				"Container \"missing-container\"",
-				"container: missing",
+				"Container created (details unavailable)",
 				"container: not started",
 			},
 			notWantOutput: []string{
@@ -470,12 +498,20 @@ func TestPrintContainerResult(t *testing.T) {
 		{
 			name: "container created but not started",
 			result: controller.CreateContainerResult{
-				RealmName:           "my-realm",
-				SpaceName:           "my-space",
-				StackName:           "my-stack",
-				CellName:            "my-cell",
-				ContainerName:       "stopped-container",
-				ContainerID:         "stopped-123",
+				ContainerDoc: &v1beta1.ContainerDoc{
+					APIVersion: v1beta1.APIVersionV1Beta1,
+					Kind:       v1beta1.KindContainer,
+					Metadata: v1beta1.ContainerMetadata{
+						Name: "stopped-container",
+					},
+					Spec: v1beta1.ContainerSpec{
+						ID:      "stopped-container",
+						RealmID: "my-realm",
+						SpaceID: "my-space",
+						StackID: "my-stack",
+						CellID:  "my-cell",
+					},
+				},
 				ContainerCreated:    true,
 				ContainerExistsPost: true,
 				Started:             false,
@@ -514,16 +550,29 @@ func TestPrintContainerResult(t *testing.T) {
 // Test helpers
 
 type fakeContainerController struct {
-	createContainerFn func(opts controller.CreateContainerOptions) (controller.CreateContainerResult, error)
+	getRealmFn        func(name string) (*v1beta1.RealmDoc, error)
+	createContainerFn func(realmDoc *v1beta1.RealmDoc, opts controller.CreateContainerOptions) (controller.CreateContainerResult, error)
+}
+
+func (f *fakeContainerController) GetRealm(name string) (*v1beta1.RealmDoc, error) {
+	if f.getRealmFn == nil {
+		return &v1beta1.RealmDoc{
+			Metadata: v1beta1.RealmMetadata{
+				Name: name,
+			},
+		}, nil
+	}
+	return f.getRealmFn(name)
 }
 
 func (f *fakeContainerController) CreateContainer(
+	realmDoc *v1beta1.RealmDoc,
 	opts controller.CreateContainerOptions,
 ) (controller.CreateContainerResult, error) {
 	if f.createContainerFn == nil {
 		return controller.CreateContainerResult{}, errors.New("unexpected CreateContainer call")
 	}
-	return f.createContainerFn(opts)
+	return f.createContainerFn(realmDoc, opts)
 }
 
 func newOutputCommand() (*cobra.Command, *bytes.Buffer) {

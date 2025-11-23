@@ -24,12 +24,17 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type containerController interface {
-	CreateContainer(opts controller.CreateContainerOptions) (controller.CreateContainerResult, error)
+	GetRealm(name string) (*v1beta1.RealmDoc, error)
+	CreateContainer(
+		realmDoc *v1beta1.RealmDoc,
+		opts controller.CreateContainerOptions,
+	) (controller.CreateContainerResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -101,8 +106,13 @@ func NewContainerCmd() *cobra.Command {
 				ctrl = realCtrl
 			}
 
-			result, err := ctrl.CreateContainer(controller.CreateContainerOptions{
-				RealmName:     realm,
+			// Fetch RealmDoc
+			realmDoc, err := ctrl.GetRealm(realm)
+			if err != nil {
+				return fmt.Errorf("failed to get realm %q: %w", realm, err)
+			}
+
+			result, err := ctrl.CreateContainer(realmDoc, controller.CreateContainerOptions{
 				SpaceName:     space,
 				StackName:     stack,
 				CellName:      cell,
@@ -149,15 +159,19 @@ func NewContainerCmd() *cobra.Command {
 }
 
 func printContainerResult(cmd *cobra.Command, result controller.CreateContainerResult) {
-	cmd.Printf(
-		"Container %q (ID: %q) in cell %q (realm %q, space %q, stack %q)\n",
-		result.ContainerName,
-		result.ContainerID,
-		result.CellName,
-		result.RealmName,
-		result.SpaceName,
-		result.StackName,
-	)
+	if result.ContainerDoc != nil {
+		cmd.Printf(
+			"Container %q (ID: %q) in cell %q (realm %q, space %q, stack %q)\n",
+			result.ContainerDoc.Metadata.Name,
+			result.ContainerDoc.Spec.ID,
+			result.ContainerDoc.Spec.CellID,
+			result.ContainerDoc.Spec.RealmID,
+			result.ContainerDoc.Spec.SpaceID,
+			result.ContainerDoc.Spec.StackID,
+		)
+	} else {
+		cmd.Println("Container created (details unavailable)")
+	}
 	shared.PrintCreationOutcome(cmd, "container", result.ContainerExistsPost, result.ContainerCreated)
 	if result.Started {
 		cmd.Println("  - container: started")

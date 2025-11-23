@@ -23,7 +23,6 @@ import (
 
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -36,10 +35,8 @@ type CreateRealmOptions struct {
 
 // CreateRealmResult reports the reconciliation outcomes for a realm.
 type CreateRealmResult struct {
-	Name   string
-	Labels map[string]string
+	RealmDoc *v1beta1.RealmDoc
 
-	Namespace                     string
 	MetadataExistsPre             bool
 	MetadataExistsPost            bool
 	CgroupExistsPre               bool
@@ -51,34 +48,30 @@ type CreateRealmResult struct {
 	Created                       bool
 }
 
-func (b *Exec) CreateRealm(opts CreateRealmOptions) (CreateRealmResult, error) {
+func (b *Exec) CreateRealm(doc *v1beta1.RealmDoc) (CreateRealmResult, error) {
 	var res CreateRealmResult
 
-	name := strings.TrimSpace(opts.Name)
+	if doc == nil {
+		return res, errdefs.ErrRealmNameRequired
+	}
+
+	name := strings.TrimSpace(doc.Metadata.Name)
 	if name == "" {
 		return res, errdefs.ErrRealmNameRequired
 	}
-	namespace := strings.TrimSpace(opts.Namespace)
+	namespace := strings.TrimSpace(doc.Spec.Namespace)
 	if namespace == "" {
 		namespace = name
+		// Update doc with default namespace
+		doc.Spec.Namespace = namespace
 	}
-	defaultLabels := map[string]string{
-		consts.KukeonRealmLabelKey: namespace,
+
+	// Ensure default labels are set
+	if doc.Metadata.Labels == nil {
+		doc.Metadata.Labels = make(map[string]string)
 	}
-	labels := mergeLabels(defaultLabels, opts.Labels)
-
-	res.Name = name
-	res.Namespace = namespace
-	res.Labels = labels
-
-	doc := &v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
-			Name:   name,
-			Labels: labels,
-		},
-		Spec: v1beta1.RealmSpec{
-			Namespace: namespace,
-		},
+	if _, exists := doc.Metadata.Labels[consts.KukeonRealmLabelKey]; !exists {
+		doc.Metadata.Labels[consts.KukeonRealmLabelKey] = namespace
 	}
 
 	realmDocPre, err := b.runner.GetRealm(doc)
@@ -118,6 +111,7 @@ func (b *Exec) CreateRealm(opts CreateRealmOptions) (CreateRealmResult, error) {
 		if err != nil {
 			return res, fmt.Errorf("failed to check if realm cgroup exists: %w", err)
 		}
+		res.RealmDoc = realmDocPost
 	}
 
 	res.ContainerdNamespaceExistsPost, err = b.runner.ExistsRealmContainerdNamespace(namespace)
@@ -132,19 +126,9 @@ func (b *Exec) CreateRealm(opts CreateRealmOptions) (CreateRealmResult, error) {
 	return res, nil
 }
 
-// CreateSpaceOptions captures inputs required to create a space.
-type CreateSpaceOptions struct {
-	Name      string
-	RealmName string
-	Labels    map[string]string
-}
-
 // CreateSpaceResult reports reconciliation outcomes for a space.
 type CreateSpaceResult struct {
-	Name        string
-	RealmName   string
-	Labels      map[string]string
-	NetworkName string
+	SpaceDoc *v1beta1.SpaceDoc
 
 	MetadataExistsPre    bool
 	MetadataExistsPost   bool
@@ -157,43 +141,32 @@ type CreateSpaceResult struct {
 	Created              bool
 }
 
-func (b *Exec) CreateSpace(opts CreateSpaceOptions) (CreateSpaceResult, error) {
+func (b *Exec) CreateSpace(doc *v1beta1.SpaceDoc) (CreateSpaceResult, error) {
 	var res CreateSpaceResult
 
-	name := strings.TrimSpace(opts.Name)
+	if doc == nil {
+		return res, errdefs.ErrSpaceNameRequired
+	}
+
+	name := strings.TrimSpace(doc.Metadata.Name)
 	if name == "" {
 		return res, errdefs.ErrSpaceNameRequired
 	}
-	realm := strings.TrimSpace(opts.RealmName)
+	realm := strings.TrimSpace(doc.Spec.RealmID)
 	if realm == "" {
 		return res, errdefs.ErrRealmNameRequired
 	}
 
-	defaultLabels := map[string]string{
-		consts.KukeonRealmLabelKey: realm,
-		consts.KukeonSpaceLabelKey: name,
+	// Ensure default labels are set
+	if doc.Metadata.Labels == nil {
+		doc.Metadata.Labels = make(map[string]string)
 	}
-	labels := mergeLabels(defaultLabels, opts.Labels)
-
-	res.Name = name
-	res.RealmName = realm
-	res.Labels = labels
-
-	doc := &v1beta1.SpaceDoc{
-		Metadata: v1beta1.SpaceMetadata{
-			Name:   name,
-			Labels: labels,
-		},
-		Spec: v1beta1.SpaceSpec{
-			RealmID: realm,
-		},
+	if _, exists := doc.Metadata.Labels[consts.KukeonRealmLabelKey]; !exists {
+		doc.Metadata.Labels[consts.KukeonRealmLabelKey] = realm
 	}
-
-	networkName, err := naming.BuildSpaceNetworkName(doc)
-	if err != nil {
-		return res, err
+	if _, exists := doc.Metadata.Labels[consts.KukeonSpaceLabelKey]; !exists {
+		doc.Metadata.Labels[consts.KukeonSpaceLabelKey] = name
 	}
-	res.NetworkName = networkName
 
 	spaceDocPre, err := b.runner.GetSpace(doc)
 	if err != nil {
@@ -232,6 +205,7 @@ func (b *Exec) CreateSpace(opts CreateSpaceOptions) (CreateSpaceResult, error) {
 		if err != nil {
 			return res, fmt.Errorf("failed to check if space cgroup exists: %w", err)
 		}
+		res.SpaceDoc = spaceDocPost
 	}
 
 	res.CNINetworkExistsPost, err = b.runner.ExistsSpaceCNIConfig(doc)
@@ -246,20 +220,9 @@ func (b *Exec) CreateSpace(opts CreateSpaceOptions) (CreateSpaceResult, error) {
 	return res, nil
 }
 
-// CreateStackOptions captures inputs required to create a stack.
-type CreateStackOptions struct {
-	Name      string
-	RealmName string
-	SpaceName string
-	Labels    map[string]string
-}
-
 // CreateStackResult reports reconciliation outcomes for a stack.
 type CreateStackResult struct {
-	Name      string
-	RealmName string
-	SpaceName string
-	Labels    map[string]string
+	StackDoc *v1beta1.StackDoc
 
 	MetadataExistsPre  bool
 	MetadataExistsPost bool
@@ -269,44 +232,43 @@ type CreateStackResult struct {
 	Created            bool
 }
 
-func (b *Exec) CreateStack(opts CreateStackOptions) (CreateStackResult, error) {
+func (b *Exec) CreateStack(doc *v1beta1.StackDoc) (CreateStackResult, error) {
 	var res CreateStackResult
 
-	name := strings.TrimSpace(opts.Name)
+	if doc == nil {
+		return res, errdefs.ErrStackNameRequired
+	}
+
+	name := strings.TrimSpace(doc.Metadata.Name)
 	if name == "" {
 		return res, errdefs.ErrStackNameRequired
 	}
-	realm := strings.TrimSpace(opts.RealmName)
+	realm := strings.TrimSpace(doc.Spec.RealmID)
 	if realm == "" {
 		return res, errdefs.ErrRealmNameRequired
 	}
-	space := strings.TrimSpace(opts.SpaceName)
+	space := strings.TrimSpace(doc.Spec.SpaceID)
 	if space == "" {
 		return res, errdefs.ErrSpaceNameRequired
 	}
 
-	defaultLabels := map[string]string{
-		consts.KukeonRealmLabelKey: realm,
-		consts.KukeonSpaceLabelKey: space,
-		consts.KukeonStackLabelKey: name,
+	// Ensure default labels are set
+	if doc.Metadata.Labels == nil {
+		doc.Metadata.Labels = make(map[string]string)
 	}
-	labels := mergeLabels(defaultLabels, opts.Labels)
+	if _, exists := doc.Metadata.Labels[consts.KukeonRealmLabelKey]; !exists {
+		doc.Metadata.Labels[consts.KukeonRealmLabelKey] = realm
+	}
+	if _, exists := doc.Metadata.Labels[consts.KukeonSpaceLabelKey]; !exists {
+		doc.Metadata.Labels[consts.KukeonSpaceLabelKey] = space
+	}
+	if _, exists := doc.Metadata.Labels[consts.KukeonStackLabelKey]; !exists {
+		doc.Metadata.Labels[consts.KukeonStackLabelKey] = name
+	}
 
-	res.Name = name
-	res.RealmName = realm
-	res.SpaceName = space
-	res.Labels = labels
-
-	doc := &v1beta1.StackDoc{
-		Metadata: v1beta1.StackMetadata{
-			Name:   name,
-			Labels: labels,
-		},
-		Spec: v1beta1.StackSpec{
-			ID:      name,
-			RealmID: realm,
-			SpaceID: space,
-		},
+	// Ensure Spec.ID is set
+	if doc.Spec.ID == "" {
+		doc.Spec.ID = name
 	}
 
 	stackDocPre, err := b.runner.GetStack(doc)
@@ -365,6 +327,7 @@ func (b *Exec) CreateStack(opts CreateStackOptions) (CreateStackResult, error) {
 		if err != nil {
 			return res, fmt.Errorf("failed to check if stack cgroup exists: %w", err)
 		}
+		res.StackDoc = stackDocPost
 	}
 
 	res.Created = !res.MetadataExistsPre && res.MetadataExistsPost
@@ -373,24 +336,9 @@ func (b *Exec) CreateStack(opts CreateStackOptions) (CreateStackResult, error) {
 	return res, nil
 }
 
-// CreateCellOptions captures inputs required to create a cell.
-type CreateCellOptions struct {
-	Name      string
-	RealmName string
-	SpaceName string
-	StackName string
-	Labels    map[string]string
-
-	Containers []v1beta1.ContainerSpec
-}
-
 // CreateCellResult reports reconciliation outcomes for a cell.
 type CreateCellResult struct {
-	Name      string
-	RealmName string
-	SpaceName string
-	StackName string
-	Labels    map[string]string
+	CellDoc *v1beta1.CellDoc
 
 	MetadataExistsPre       bool
 	MetadataExistsPost      bool
@@ -415,53 +363,54 @@ type ContainerCreationOutcome struct {
 	Created    bool
 }
 
-func (b *Exec) CreateCell(opts CreateCellOptions) (CreateCellResult, error) {
+func (b *Exec) CreateCell(doc *v1beta1.CellDoc) (CreateCellResult, error) {
 	var res CreateCellResult
 
-	name := strings.TrimSpace(opts.Name)
+	if doc == nil {
+		return res, errdefs.ErrCellNameRequired
+	}
+
+	name := strings.TrimSpace(doc.Metadata.Name)
 	if name == "" {
 		return res, errdefs.ErrCellNameRequired
 	}
-	realm := strings.TrimSpace(opts.RealmName)
+	realm := strings.TrimSpace(doc.Spec.RealmID)
 	if realm == "" {
 		return res, errdefs.ErrRealmNameRequired
 	}
-	space := strings.TrimSpace(opts.SpaceName)
+	space := strings.TrimSpace(doc.Spec.SpaceID)
 	if space == "" {
 		return res, errdefs.ErrSpaceNameRequired
 	}
-	stack := strings.TrimSpace(opts.StackName)
+	stack := strings.TrimSpace(doc.Spec.StackID)
 	if stack == "" {
 		return res, errdefs.ErrStackNameRequired
 	}
 
-	defaultLabels := map[string]string{
-		consts.KukeonRealmLabelKey: realm,
-		consts.KukeonSpaceLabelKey: space,
-		consts.KukeonStackLabelKey: stack,
-		consts.KukeonCellLabelKey:  name,
+	// Ensure default labels are set
+	if doc.Metadata.Labels == nil {
+		doc.Metadata.Labels = make(map[string]string)
 	}
-	labels := mergeLabels(defaultLabels, opts.Labels)
-
-	res.Name = name
-	res.RealmName = realm
-	res.SpaceName = space
-	res.StackName = stack
-	res.Labels = labels
-
-	doc := &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
-			Name:   name,
-			Labels: labels,
-		},
-		Spec: v1beta1.CellSpec{
-			ID:         name,
-			RealmID:    realm,
-			SpaceID:    space,
-			StackID:    stack,
-			Containers: ensureContainerOwnership(opts.Containers, realm, space, stack, name),
-		},
+	if _, exists := doc.Metadata.Labels[consts.KukeonRealmLabelKey]; !exists {
+		doc.Metadata.Labels[consts.KukeonRealmLabelKey] = realm
 	}
+	if _, exists := doc.Metadata.Labels[consts.KukeonSpaceLabelKey]; !exists {
+		doc.Metadata.Labels[consts.KukeonSpaceLabelKey] = space
+	}
+	if _, exists := doc.Metadata.Labels[consts.KukeonStackLabelKey]; !exists {
+		doc.Metadata.Labels[consts.KukeonStackLabelKey] = stack
+	}
+	if _, exists := doc.Metadata.Labels[consts.KukeonCellLabelKey]; !exists {
+		doc.Metadata.Labels[consts.KukeonCellLabelKey] = name
+	}
+
+	// Ensure Spec.ID is set
+	if doc.Spec.ID == "" {
+		doc.Spec.ID = name
+	}
+
+	// Ensure container ownership
+	doc.Spec.Containers = ensureContainerOwnership(doc.Spec.Containers, realm, space, stack, name)
 
 	preContainerExists := make(map[string]bool)
 
@@ -525,6 +474,7 @@ func (b *Exec) CreateCell(opts CreateCellOptions) (CreateCellResult, error) {
 			}
 		}
 		res.StartedPost = true
+		res.CellDoc = cellDocPost
 	}
 
 	res.Created = !res.MetadataExistsPre && res.MetadataExistsPost
@@ -551,7 +501,6 @@ func (b *Exec) CreateCell(opts CreateCellOptions) (CreateCellResult, error) {
 
 // CreateContainerOptions captures inputs required to add a workload container to a cell.
 type CreateContainerOptions struct {
-	RealmName string
 	SpaceName string
 	StackName string
 	CellName  string
@@ -565,13 +514,7 @@ type CreateContainerOptions struct {
 
 // CreateContainerResult reports reconciliation outcomes for container creation within a cell.
 type CreateContainerResult struct {
-	RealmName string
-	SpaceName string
-	StackName string
-	CellName  string
-
-	ContainerName string
-	ContainerID   string
+	ContainerDoc *v1beta1.ContainerDoc
 
 	CellMetadataExistsPre  bool
 	CellMetadataExistsPost bool
@@ -581,10 +524,14 @@ type CreateContainerResult struct {
 	Started                bool
 }
 
-func (b *Exec) CreateContainer(opts CreateContainerOptions) (CreateContainerResult, error) {
+func (b *Exec) CreateContainer(realmDoc *v1beta1.RealmDoc, opts CreateContainerOptions) (CreateContainerResult, error) {
 	var res CreateContainerResult
 
-	realm := strings.TrimSpace(opts.RealmName)
+	if realmDoc == nil {
+		return res, errdefs.ErrRealmNameRequired
+	}
+
+	realm := strings.TrimSpace(realmDoc.Metadata.Name)
 	if realm == "" {
 		return res, errdefs.ErrRealmNameRequired
 	}
@@ -608,13 +555,6 @@ func (b *Exec) CreateContainer(opts CreateContainerOptions) (CreateContainerResu
 	if image == "" {
 		return res, errdefs.ErrInvalidImage
 	}
-
-	res.RealmName = realm
-	res.SpaceName = space
-	res.StackName = stack
-	res.CellName = cell
-	res.ContainerName = containerName
-	res.ContainerID = containerName // Container ID is now just the container name
 
 	doc := &v1beta1.CellDoc{
 		Metadata: v1beta1.CellMetadata{
@@ -668,6 +608,36 @@ func (b *Exec) CreateContainer(opts CreateContainerOptions) (CreateContainerResu
 	res.ContainerExistsPost = containerSpecExists(cellDocPost.Spec.Containers, containerName)
 	res.ContainerCreated = !res.ContainerExistsPre && res.ContainerExistsPost
 	res.Started = true
+
+	// Construct ContainerDoc from the created container spec
+	var containerSpec *v1beta1.ContainerSpec
+	for i := range cellDocPost.Spec.Containers {
+		if cellDocPost.Spec.Containers[i].ID == containerName {
+			containerSpec = &cellDocPost.Spec.Containers[i]
+			break
+		}
+	}
+
+	if containerSpec != nil {
+		// Use labels from options if provided, otherwise empty map
+		labels := opts.Labels
+		if labels == nil {
+			labels = make(map[string]string)
+		}
+
+		res.ContainerDoc = &v1beta1.ContainerDoc{
+			APIVersion: v1beta1.APIVersionV1Beta1,
+			Kind:       v1beta1.KindContainer,
+			Metadata: v1beta1.ContainerMetadata{
+				Name:   containerName,
+				Labels: labels,
+			},
+			Spec: *containerSpec,
+			Status: v1beta1.ContainerStatus{
+				State: v1beta1.ContainerStateReady,
+			},
+		}
+	}
 
 	return res, nil
 }

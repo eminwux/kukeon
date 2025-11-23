@@ -24,12 +24,13 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type cellController interface {
-	CreateCell(opts controller.CreateCellOptions) (controller.CreateCellResult, error)
+	CreateCell(doc *v1beta1.CellDoc) (controller.CreateCellResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -88,6 +89,18 @@ func runCreateCell(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
 	}
 
+	// Build v1beta1.CellDoc from command arguments
+	doc := &v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{
+			Name: name,
+		},
+		Spec: v1beta1.CellSpec{
+			RealmID: realm,
+			SpaceID: space,
+			StackID: stack,
+		},
+	}
+
 	// Check for mock controller in context (for testing)
 	var ctrl cellController
 	if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(cellController); ok {
@@ -100,12 +113,7 @@ func runCreateCell(cmd *cobra.Command, args []string) error {
 		ctrl = realCtrl
 	}
 
-	result, err := ctrl.CreateCell(controller.CreateCellOptions{
-		Name:      name,
-		RealmName: realm,
-		SpaceName: space,
-		StackName: stack,
-	})
+	result, err := ctrl.CreateCell(doc)
 	if err != nil {
 		return err
 	}
@@ -115,12 +123,19 @@ func runCreateCell(cmd *cobra.Command, args []string) error {
 }
 
 func printCellResult(cmd *cobra.Command, result controller.CreateCellResult) {
+	var name, realm, space, stack string
+	if result.CellDoc != nil {
+		name = result.CellDoc.Metadata.Name
+		realm = result.CellDoc.Spec.RealmID
+		space = result.CellDoc.Spec.SpaceID
+		stack = result.CellDoc.Spec.StackID
+	}
 	cmd.Printf(
 		"Cell %q (realm %q, space %q, stack %q)\n",
-		result.Name,
-		result.RealmName,
-		result.SpaceName,
-		result.StackName,
+		name,
+		realm,
+		space,
+		stack,
 	)
 	shared.PrintCreationOutcome(cmd, "metadata", result.MetadataExistsPost, result.Created)
 	shared.PrintCreationOutcome(cmd, "cgroup", result.CgroupExistsPost, result.CgroupCreated)
