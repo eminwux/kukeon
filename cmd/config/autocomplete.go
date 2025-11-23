@@ -27,9 +27,18 @@ import (
 	"github.com/spf13/viper"
 )
 
+// MockControllerKey is used to inject mock controllers in tests via context.
+type MockControllerKey struct{}
+
 // controllerFromCmd creates a controller.Exec from the command context.
 // This duplicates the logic from cmd/kuke/create/shared to avoid import cycles.
+// If a mock controller is provided in the context, it will be used instead of creating a real one.
 func controllerFromCmd(cmd *cobra.Command) (*controller.Exec, error) {
+	// Check for mock controller in context (for testing)
+	if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(*controller.Exec); ok {
+		return mockCtrl, nil
+	}
+
 	logger, ok := cmd.Context().Value(types.CtxLogger).(*slog.Logger)
 	if !ok || logger == nil {
 		return nil, errdefs.ErrLoggerNotFound

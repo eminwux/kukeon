@@ -105,7 +105,17 @@ func (b *Exec) KillContainer(name, realmName, spaceName, stackName, cellName str
 	}
 
 	// Get cell document
-	cellDoc, err := b.GetCell(cellName, realmName, spaceName, stackName)
+	doc := &v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{
+			Name: cellName,
+		},
+		Spec: v1beta1.CellSpec{
+			RealmID: realmName,
+			SpaceID: spaceName,
+			StackID: stackName,
+		},
+	}
+	getResult, err := b.GetCell(doc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return nil, fmt.Errorf(
@@ -117,6 +127,10 @@ func (b *Exec) KillContainer(name, realmName, spaceName, stackName, cellName str
 			)
 		}
 		return nil, err
+	}
+	cellDoc := getResult.CellDoc
+	if cellDoc == nil {
+		return nil, fmt.Errorf("cell %q not found", cellName)
 	}
 
 	// Find container in cell spec by name (ID now stores just the container name)

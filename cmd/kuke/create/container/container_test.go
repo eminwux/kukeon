@@ -550,19 +550,24 @@ func TestPrintContainerResult(t *testing.T) {
 // Test helpers
 
 type fakeContainerController struct {
-	getRealmFn        func(name string) (*v1beta1.RealmDoc, error)
+	getRealmFn        func(doc *v1beta1.RealmDoc) (controller.GetRealmResult, error)
 	createContainerFn func(realmDoc *v1beta1.RealmDoc, opts controller.CreateContainerOptions) (controller.CreateContainerResult, error)
 }
 
-func (f *fakeContainerController) GetRealm(name string) (*v1beta1.RealmDoc, error) {
+func (f *fakeContainerController) GetRealm(doc *v1beta1.RealmDoc) (controller.GetRealmResult, error) {
 	if f.getRealmFn == nil {
-		return &v1beta1.RealmDoc{
-			Metadata: v1beta1.RealmMetadata{
-				Name: name,
+		return controller.GetRealmResult{
+			RealmDoc: &v1beta1.RealmDoc{
+				Metadata: v1beta1.RealmMetadata{
+					Name: doc.Metadata.Name,
+				},
 			},
+			MetadataExists:            true,
+			CgroupExists:              true,
+			ContainerdNamespaceExists: true,
 		}, nil
 	}
-	return f.getRealmFn(name)
+	return f.getRealmFn(doc)
 }
 
 func (f *fakeContainerController) CreateContainer(

@@ -17,7 +17,6 @@
 package stack
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -31,7 +30,7 @@ import (
 )
 
 type StackController interface {
-	GetStack(name, realmName, spaceName string) (*v1beta1.StackDoc, error)
+	GetStack(doc *v1beta1.StackDoc) (controller.GetStackResult, error)
 	ListStacks(realmName, spaceName string) ([]*v1beta1.StackDoc, error)
 }
 
@@ -102,15 +101,25 @@ func NewStackCmd() *cobra.Command {
 					return fmt.Errorf("%w (--space)", errdefs.ErrSpaceNameRequired)
 				}
 
-				stack, err := ctrl.GetStack(name, realm, space)
-				if err != nil {
-					if errors.Is(err, errdefs.ErrStackNotFound) {
-						return fmt.Errorf("stack %q not found in realm %q, space %q", name, realm, space)
-					}
-					return err
+				doc := &v1beta1.StackDoc{
+					Metadata: v1beta1.StackMetadata{
+						Name: name,
+					},
+					Spec: v1beta1.StackSpec{
+						RealmID: realm,
+						SpaceID: space,
+					},
 				}
 
-				return RunPrintStack(cmd, stack, outputFormat)
+				result, err := ctrl.GetStack(doc)
+				if err != nil {
+					return err
+				}
+				if !result.MetadataExists {
+					return fmt.Errorf("stack %q not found in realm %q, space %q", name, realm, space)
+				}
+
+				return RunPrintStack(cmd, result.StackDoc, outputFormat)
 			}
 
 			// List stacks (optionally filtered by realm and/or space)
@@ -202,8 +211,8 @@ type controllerWrapper struct {
 	ctrl *controller.Exec
 }
 
-func (w *controllerWrapper) GetStack(name, realmName, spaceName string) (*v1beta1.StackDoc, error) {
-	return w.ctrl.GetStack(name, realmName, spaceName)
+func (w *controllerWrapper) GetStack(doc *v1beta1.StackDoc) (controller.GetStackResult, error) {
+	return w.ctrl.GetStack(doc)
 }
 
 func (w *controllerWrapper) ListStacks(realmName, spaceName string) ([]*v1beta1.StackDoc, error) {

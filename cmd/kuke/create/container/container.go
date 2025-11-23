@@ -30,7 +30,7 @@ import (
 )
 
 type containerController interface {
-	GetRealm(name string) (*v1beta1.RealmDoc, error)
+	GetRealm(doc *v1beta1.RealmDoc) (controller.GetRealmResult, error)
 	CreateContainer(
 		realmDoc *v1beta1.RealmDoc,
 		opts controller.CreateContainerOptions,
@@ -107,12 +107,21 @@ func NewContainerCmd() *cobra.Command {
 			}
 
 			// Fetch RealmDoc
-			realmDoc, err := ctrl.GetRealm(realm)
+			realmDoc := &v1beta1.RealmDoc{
+				Metadata: v1beta1.RealmMetadata{
+					Name: realm,
+				},
+			}
+			getResult, err := ctrl.GetRealm(realmDoc)
 			if err != nil {
 				return fmt.Errorf("failed to get realm %q: %w", realm, err)
 			}
+			if getResult.RealmDoc == nil {
+				return fmt.Errorf("realm %q not found", realm)
+			}
+			realmDoc = getResult.RealmDoc
 
-			result, err := ctrl.CreateContainer(realmDoc, controller.CreateContainerOptions{
+			createResult, err := ctrl.CreateContainer(realmDoc, controller.CreateContainerOptions{
 				SpaceName:     space,
 				StackName:     stack,
 				CellName:      cell,
@@ -125,7 +134,7 @@ func NewContainerCmd() *cobra.Command {
 				return err
 			}
 
-			printContainerResult(cmd, result)
+			printContainerResult(cmd, createResult)
 			return nil
 		},
 	}

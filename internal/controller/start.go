@@ -67,7 +67,17 @@ func (b *Exec) validateAndGetCell(
 	}
 
 	// Get cell document
-	cellDoc, err := b.GetCell(name, realmName, spaceName, stackName)
+	doc := &v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{
+			Name: name,
+		},
+		Spec: v1beta1.CellSpec{
+			RealmID: realmName,
+			SpaceID: spaceName,
+			StackID: stackName,
+		},
+	}
+	result, err := b.GetCell(doc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return "", "", "", "", nil, fmt.Errorf(
@@ -79,6 +89,10 @@ func (b *Exec) validateAndGetCell(
 			)
 		}
 		return "", "", "", "", nil, err
+	}
+	cellDoc := result.CellDoc
+	if cellDoc == nil {
+		return "", "", "", "", nil, fmt.Errorf("cell %q not found", name)
 	}
 
 	return name, realmName, spaceName, stackName, cellDoc, nil
@@ -145,7 +159,17 @@ func (b *Exec) StartContainer(name, realmName, spaceName, stackName, cellName st
 	}
 
 	// Get cell document
-	cellDoc, err := b.GetCell(cellName, realmName, spaceName, stackName)
+	doc := &v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{
+			Name: cellName,
+		},
+		Spec: v1beta1.CellSpec{
+			RealmID: realmName,
+			SpaceID: spaceName,
+			StackID: stackName,
+		},
+	}
+	getResult, err := b.GetCell(doc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return nil, fmt.Errorf(
@@ -157,6 +181,10 @@ func (b *Exec) StartContainer(name, realmName, spaceName, stackName, cellName st
 			)
 		}
 		return nil, err
+	}
+	cellDoc := getResult.CellDoc
+	if cellDoc == nil {
+		return nil, fmt.Errorf("cell %q not found", cellName)
 	}
 
 	// Find container in cell spec by name (ID now stores just the container name)
@@ -174,7 +202,7 @@ func (b *Exec) StartContainer(name, realmName, spaceName, stackName, cellName st
 
 	// Start the cell (which will start all containers including this one)
 	// The StartCell method handles starting individual containers if they exist
-	doc := &v1beta1.CellDoc{
+	doc = &v1beta1.CellDoc{
 		Metadata: v1beta1.CellMetadata{
 			Name: cellName,
 		},

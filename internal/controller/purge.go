@@ -79,7 +79,12 @@ func (b *Exec) PurgeRealm(name string, force, cascade bool) (*PurgeRealmResult, 
 	}
 
 	// Get realm document
-	_, err := b.GetRealm(name)
+	realmDoc := &v1beta1.RealmDoc{
+		Metadata: v1beta1.RealmMetadata{
+			Name: name,
+		},
+	}
+	_, err := b.GetRealm(realmDoc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrRealmNotFound) {
 			return nil, fmt.Errorf("realm %q not found", name)
@@ -156,7 +161,15 @@ func (b *Exec) PurgeSpace(name, realmName string, force, cascade bool) (*PurgeSp
 	}
 
 	// Get space document
-	_, err := b.GetSpace(name, realmName)
+	doc := &v1beta1.SpaceDoc{
+		Metadata: v1beta1.SpaceMetadata{
+			Name: name,
+		},
+		Spec: v1beta1.SpaceSpec{
+			RealmID: realmName,
+		},
+	}
+	_, err := b.GetSpace(doc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrSpaceNotFound) {
 			return nil, fmt.Errorf("space %q not found in realm %q", name, realmName)
@@ -206,7 +219,7 @@ func (b *Exec) PurgeSpace(name, realmName string, force, cascade bool) (*PurgeSp
 	}
 
 	// Perform comprehensive purge
-	doc := &v1beta1.SpaceDoc{
+	doc = &v1beta1.SpaceDoc{
 		Metadata: v1beta1.SpaceMetadata{
 			Name: name,
 		},
@@ -240,12 +253,21 @@ func (b *Exec) PurgeStack(name, realmName, spaceName string, force, cascade bool
 	}
 
 	// Get stack document
-	_, err := b.GetStack(name, realmName, spaceName)
+	doc := &v1beta1.StackDoc{
+		Metadata: v1beta1.StackMetadata{
+			Name: name,
+		},
+		Spec: v1beta1.StackSpec{
+			RealmID: realmName,
+			SpaceID: spaceName,
+		},
+	}
+	getResult, err := b.GetStack(doc)
 	if err != nil {
-		if errors.Is(err, errdefs.ErrStackNotFound) {
-			return nil, fmt.Errorf("stack %q not found in realm %q, space %q", name, realmName, spaceName)
-		}
 		return nil, err
+	}
+	if !getResult.MetadataExists {
+		return nil, fmt.Errorf("stack %q not found in realm %q, space %q", name, realmName, spaceName)
 	}
 
 	result := &PurgeStackResult{
@@ -291,7 +313,7 @@ func (b *Exec) PurgeStack(name, realmName, spaceName string, force, cascade bool
 	}
 
 	// Perform comprehensive purge
-	doc := &v1beta1.StackDoc{
+	doc = &v1beta1.StackDoc{
 		Metadata: v1beta1.StackMetadata{
 			Name: name,
 		},
@@ -330,7 +352,17 @@ func (b *Exec) PurgeCell(name, realmName, spaceName, stackName string, _ bool, _
 	}
 
 	// Get cell document
-	_, err := b.GetCell(name, realmName, spaceName, stackName)
+	doc := &v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{
+			Name: name,
+		},
+		Spec: v1beta1.CellSpec{
+			RealmID: realmName,
+			SpaceID: spaceName,
+			StackID: stackName,
+		},
+	}
+	_, err := b.GetCell(doc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return nil, fmt.Errorf(
@@ -362,7 +394,7 @@ func (b *Exec) PurgeCell(name, realmName, spaceName, stackName string, _ bool, _
 	}
 
 	// Perform comprehensive purge
-	doc := &v1beta1.CellDoc{
+	doc = &v1beta1.CellDoc{
 		Metadata: v1beta1.CellMetadata{
 			Name: name,
 		},
@@ -405,7 +437,17 @@ func (b *Exec) PurgeContainer(name, realmName, spaceName, stackName, cellName st
 	}
 
 	// Get cell to find container
-	cellDoc, err := b.GetCell(cellName, realmName, spaceName, stackName)
+	cellDoc := &v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{
+			Name: cellName,
+		},
+		Spec: v1beta1.CellSpec{
+			RealmID: realmName,
+			SpaceID: spaceName,
+			StackID: stackName,
+		},
+	}
+	getResult, err := b.GetCell(cellDoc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return nil, fmt.Errorf(
@@ -418,11 +460,24 @@ func (b *Exec) PurgeContainer(name, realmName, spaceName, stackName, cellName st
 		}
 		return nil, err
 	}
+	cellDoc = getResult.CellDoc
+	if cellDoc == nil {
+		return nil, fmt.Errorf("cell %q not found", cellName)
+	}
 
 	// Get realm to get namespace
-	realmDoc, err := b.GetRealm(realmName)
+	realmDocInput := &v1beta1.RealmDoc{
+		Metadata: v1beta1.RealmMetadata{
+			Name: realmName,
+		},
+	}
+	realmGetResult, err := b.GetRealm(realmDocInput)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get realm: %w", err)
+	}
+	realmDoc := realmGetResult.RealmDoc
+	if realmDoc == nil {
+		return nil, fmt.Errorf("realm %q not found", realmName)
 	}
 
 	result := &PurgeContainerResult{

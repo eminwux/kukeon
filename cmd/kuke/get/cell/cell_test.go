@@ -31,6 +31,7 @@ import (
 	cell "github.com/eminwux/kukeon/cmd/kuke/get/cell"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
@@ -259,11 +260,16 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "stack", "stack-a")
 			},
 			controller: &fakeCellController{
-				getCellFn: func(name, realm, space, stack string) (*v1beta1.CellDoc, error) {
-					if name != "alpha" || realm != "realm-a" || space != "space-a" || stack != "stack-a" {
-						return nil, errors.New("unexpected get args")
+				getCellFn: func(doc *v1beta1.CellDoc) (controller.GetCellResult, error) {
+					if doc.Metadata.Name != "alpha" || doc.Spec.RealmID != "realm-a" || doc.Spec.SpaceID != "space-a" || doc.Spec.StackID != "stack-a" {
+						return controller.GetCellResult{}, errors.New("unexpected get args")
 					}
-					return singleDoc, nil
+					return controller.GetCellResult{
+						CellDoc:              singleDoc,
+						MetadataExists:       true,
+						CgroupExists:         true,
+						RootContainerExists:  true,
+					}, nil
 				},
 			},
 			expectMatch: "name: alpha",
@@ -277,11 +283,16 @@ func TestNewCellCmdRunE(t *testing.T) {
 				viper.Set(config.KUKE_GET_CELL_STACK.ViperKey, "stack-a")
 			},
 			controller: &fakeCellController{
-				getCellFn: func(name, realm, space, stack string) (*v1beta1.CellDoc, error) {
-					if name != "alpha" || realm != "realm-a" || space != "space-a" || stack != "stack-a" {
-						return nil, errors.New("unexpected get args")
+				getCellFn: func(doc *v1beta1.CellDoc) (controller.GetCellResult, error) {
+					if doc.Metadata.Name != "alpha" || doc.Spec.RealmID != "realm-a" || doc.Spec.SpaceID != "space-a" || doc.Spec.StackID != "stack-a" {
+						return controller.GetCellResult{}, errors.New("unexpected get args")
 					}
-					return singleDoc, nil
+					return controller.GetCellResult{
+						CellDoc:              singleDoc,
+						MetadataExists:       true,
+						CgroupExists:         true,
+						RootContainerExists:  true,
+					}, nil
 				},
 			},
 			expectMatch: "name: alpha",
@@ -317,8 +328,8 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "stack", "stack-a")
 			},
 			controller: &fakeCellController{
-				getCellFn: func(_, _, _, _ string) (*v1beta1.CellDoc, error) {
-					return nil, errdefs.ErrCellNotFound
+				getCellFn: func(_ *v1beta1.CellDoc) (controller.GetCellResult, error) {
+					return controller.GetCellResult{}, errdefs.ErrCellNotFound
 				},
 			},
 			wantErr: `cell "ghost" not found`,
@@ -432,15 +443,15 @@ func captureStdout(fn func() error) (string, error) {
 }
 
 type fakeCellController struct {
-	getCellFn   func(name, realm, space, stack string) (*v1beta1.CellDoc, error)
+	getCellFn   func(doc *v1beta1.CellDoc) (controller.GetCellResult, error)
 	listCellsFn func(realm, space, stack string) ([]*v1beta1.CellDoc, error)
 }
 
-func (f *fakeCellController) GetCell(name, realm, space, stack string) (*v1beta1.CellDoc, error) {
+func (f *fakeCellController) GetCell(doc *v1beta1.CellDoc) (controller.GetCellResult, error) {
 	if f.getCellFn == nil {
-		return nil, errors.New("unexpected GetCell call")
+		return controller.GetCellResult{}, errors.New("unexpected GetCell call")
 	}
-	return f.getCellFn(name, realm, space, stack)
+	return f.getCellFn(doc)
 }
 
 func (f *fakeCellController) ListCells(realm, space, stack string) ([]*v1beta1.CellDoc, error) {

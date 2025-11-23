@@ -31,6 +31,7 @@ import (
 	realm "github.com/eminwux/kukeon/cmd/kuke/get/realm"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
 	"github.com/eminwux/kukeon/internal/util/fs"
@@ -346,11 +347,16 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			name: "get realm success",
 			args: []string{"alpha"},
 			controller: &fakeRealmController{
-				getRealmFn: func(name string) (*v1beta1.RealmDoc, error) {
-					if name != "alpha" {
-						return nil, errors.New("unexpected args")
+				getRealmFn: func(doc *v1beta1.RealmDoc) (controller.GetRealmResult, error) {
+					if doc.Metadata.Name != "alpha" {
+						return controller.GetRealmResult{}, errors.New("unexpected args")
 					}
-					return docAlpha, nil
+					return controller.GetRealmResult{
+						RealmDoc:       docAlpha,
+						MetadataExists: true,
+						CgroupExists:   true,
+						ContainerdNamespaceExists: true,
+					}, nil
 				},
 			},
 			wantOutput: []string{"name: alpha"},
@@ -369,8 +375,8 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			name: "realm not found error",
 			args: []string{"ghost"},
 			controller: &fakeRealmController{
-				getRealmFn: func(_ string) (*v1beta1.RealmDoc, error) {
-					return nil, errdefs.ErrRealmNotFound
+				getRealmFn: func(_ *v1beta1.RealmDoc) (controller.GetRealmResult, error) {
+					return controller.GetRealmResult{}, errdefs.ErrRealmNotFound
 				},
 			},
 			wantErr: "realm \"ghost\" not found",
@@ -437,15 +443,15 @@ func TestNewRealmCmdRunE(t *testing.T) {
 }
 
 type fakeRealmController struct {
-	getRealmFn   func(name string) (*v1beta1.RealmDoc, error)
+	getRealmFn   func(doc *v1beta1.RealmDoc) (controller.GetRealmResult, error)
 	listRealmsFn func() ([]*v1beta1.RealmDoc, error)
 }
 
-func (f *fakeRealmController) GetRealm(name string) (*v1beta1.RealmDoc, error) {
+func (f *fakeRealmController) GetRealm(doc *v1beta1.RealmDoc) (controller.GetRealmResult, error) {
 	if f.getRealmFn == nil {
-		return nil, errors.New("unexpected GetRealm call")
+		return controller.GetRealmResult{}, errors.New("unexpected GetRealm call")
 	}
-	return f.getRealmFn(name)
+	return f.getRealmFn(doc)
 }
 
 func (f *fakeRealmController) ListRealms() ([]*v1beta1.RealmDoc, error) {
