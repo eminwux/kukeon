@@ -24,6 +24,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -31,7 +32,7 @@ import (
 // SpaceController defines the interface for space deletion operations.
 // It is exported for use in tests.
 type SpaceController interface {
-	DeleteSpace(name, realm string, force, cascade bool) (*controller.DeleteSpaceResult, error)
+	DeleteSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (*controller.DeleteSpaceResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -67,12 +68,30 @@ func NewSpaceCmd() *cobra.Command {
 			force := shared.ParseForceFlag(cmd)
 			cascade := shared.ParseCascadeFlag(cmd)
 
-			result, err := ctrl.DeleteSpace(name, realm, force, cascade)
+			spaceDoc := &v1beta1.SpaceDoc{
+				Metadata: v1beta1.SpaceMetadata{
+					Name: name,
+				},
+				Spec: v1beta1.SpaceSpec{
+					RealmID: realm,
+				},
+			}
+
+			result, err := ctrl.DeleteSpace(spaceDoc, force, cascade)
 			if err != nil {
 				return err
 			}
 
-			cmd.Printf("Deleted space %q from realm %q\n", result.SpaceName, result.RealmName)
+			spaceName := result.SpaceName
+			if spaceName == "" && result.SpaceDoc != nil {
+				spaceName = result.SpaceDoc.Metadata.Name
+			}
+			realmName := result.RealmName
+			if realmName == "" && result.SpaceDoc != nil {
+				realmName = result.SpaceDoc.Spec.RealmID
+			}
+
+			cmd.Printf("Deleted space %q from realm %q\n", spaceName, realmName)
 			return nil
 		},
 	}
@@ -94,8 +113,8 @@ type controllerWrapper struct {
 }
 
 func (w *controllerWrapper) DeleteSpace(
-	name, realm string,
+	doc *v1beta1.SpaceDoc,
 	force, cascade bool,
 ) (*controller.DeleteSpaceResult, error) {
-	return w.ctrl.DeleteSpace(name, realm, force, cascade)
+	return w.ctrl.DeleteSpace(doc, force, cascade)
 }

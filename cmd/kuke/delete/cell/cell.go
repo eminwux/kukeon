@@ -24,12 +24,13 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type cellController interface {
-	DeleteCell(name, realm, space, stack string) (*controller.DeleteCellResult, error)
+	DeleteCell(doc *v1beta1.CellDoc) (*controller.DeleteCellResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -70,12 +71,23 @@ func NewCellCmd() *cobra.Command {
 				return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
 			}
 
-			result, err := ctrl.DeleteCell(name, realm, space, stack)
+			doc := &v1beta1.CellDoc{
+				Metadata: v1beta1.CellMetadata{
+					Name: name,
+				},
+				Spec: v1beta1.CellSpec{
+					RealmID: realm,
+					SpaceID: space,
+					StackID: stack,
+				},
+			}
+
+			result, err := ctrl.DeleteCell(doc)
 			if err != nil {
 				return err
 			}
 
-			cmd.Printf("Deleted cell %q from stack %q\n", result.CellName, result.StackName)
+			cmd.Printf("Deleted cell %q from stack %q\n", result.CellDoc.Metadata.Name, result.CellDoc.Spec.StackID)
 			return nil
 		},
 	}

@@ -125,7 +125,15 @@ func (b *Exec) PurgeRealm(name string, force, cascade bool) (*PurgeRealmResult, 
 	}
 
 	// Perform standard delete first
-	deleteResult, err := b.DeleteRealm(name, force, cascade)
+	deleteDoc := &v1beta1.RealmDoc{
+		Metadata: v1beta1.RealmMetadata{
+			Name: name,
+		},
+		Spec: v1beta1.RealmSpec{
+			Namespace: name,
+		},
+	}
+	deleteResult, err := b.DeleteRealm(deleteDoc, force, cascade)
 	if err != nil {
 		// Log but continue with purge
 		result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
@@ -211,7 +219,7 @@ func (b *Exec) PurgeSpace(name, realmName string, force, cascade bool) (*PurgeSp
 	}
 
 	// Perform standard delete first
-	deleteResult, err := b.DeleteSpace(name, realmName, force, cascade)
+	deleteResult, err := b.DeleteSpace(doc, force, cascade)
 	if err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
 	} else {
@@ -305,7 +313,7 @@ func (b *Exec) PurgeStack(name, realmName, spaceName string, force, cascade bool
 	}
 
 	// Perform standard delete first
-	deleteResult, err := b.DeleteStack(name, realmName, spaceName, force, cascade)
+	deleteResult, err := b.DeleteStack(doc, force, cascade)
 	if err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
 	} else {
@@ -386,11 +394,19 @@ func (b *Exec) PurgeCell(name, realmName, spaceName, stackName string, _ bool, _
 	}
 
 	// Perform standard delete first
-	deleteResult, err := b.DeleteCell(name, realmName, spaceName, stackName)
+	deleteResult, err := b.DeleteCell(doc)
 	if err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
 	} else {
-		result.Deleted = deleteResult.Deleted
+		if deleteResult.ContainersDeleted {
+			result.Deleted = append(result.Deleted, "containers")
+		}
+		if deleteResult.CgroupDeleted {
+			result.Deleted = append(result.Deleted, "cgroup")
+		}
+		if deleteResult.MetadataDeleted {
+			result.Deleted = append(result.Deleted, "metadata")
+		}
 	}
 
 	// Perform comprehensive purge
@@ -502,7 +518,17 @@ func (b *Exec) PurgeContainer(name, realmName, spaceName, stackName, cellName st
 	// Perform standard delete if container is in metadata
 	if foundContainer != nil {
 		var deleteResult *DeleteContainerResult
-		deleteResult, err = b.DeleteContainer(name, realmName, spaceName, stackName, cellName)
+		deleteResult, err = b.DeleteContainer(&v1beta1.ContainerDoc{
+			Metadata: v1beta1.ContainerMetadata{
+				Name: name,
+			},
+			Spec: v1beta1.ContainerSpec{
+				RealmID: realmName,
+				SpaceID: spaceName,
+				StackID: stackName,
+				CellID:  cellName,
+			},
+		})
 		if err != nil {
 			result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
 		} else {

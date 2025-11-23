@@ -24,12 +24,13 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type containerController interface {
-	DeleteContainer(name, realm, space, stack, cell string) (*controller.DeleteContainerResult, error)
+	DeleteContainer(doc *v1beta1.ContainerDoc) (*controller.DeleteContainerResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -74,12 +75,24 @@ func NewContainerCmd() *cobra.Command {
 				return fmt.Errorf("%w (--cell)", errdefs.ErrCellNameRequired)
 			}
 
-			result, err := ctrl.DeleteContainer(name, realm, space, stack, cell)
+			containerDoc := &v1beta1.ContainerDoc{
+				Metadata: v1beta1.ContainerMetadata{
+					Name: name,
+				},
+				Spec: v1beta1.ContainerSpec{
+					RealmID: realm,
+					SpaceID: space,
+					StackID: stack,
+					CellID:  cell,
+				},
+			}
+
+			_, err := ctrl.DeleteContainer(containerDoc)
 			if err != nil {
 				return err
 			}
 
-			cmd.Printf("Deleted container %q from cell %q\n", result.ContainerName, result.CellName)
+			cmd.Printf("Deleted container %q from cell %q\n", name, cell)
 			return nil
 		},
 	}

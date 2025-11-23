@@ -27,15 +27,24 @@ import (
 
 // DeleteRealmResult reports what was deleted during realm deletion.
 type DeleteRealmResult struct {
-	RealmName string
-	Deleted   []string // Resources that were deleted (metadata, cgroup, namespace, cascaded resources)
+	RealmDoc                   *v1beta1.RealmDoc
+	Deleted                    []string // Resources that were deleted (metadata, cgroup, namespace, cascaded resources)
+	MetadataDeleted            bool
+	CgroupDeleted              bool
+	ContainerdNamespaceDeleted bool
 }
 
 // DeleteSpaceResult reports what was deleted during space deletion.
 type DeleteSpaceResult struct {
 	SpaceName string
 	RealmName string
-	Deleted   []string // Resources that were deleted (metadata, cgroup, network, cascaded resources)
+	SpaceDoc  *v1beta1.SpaceDoc
+
+	MetadataDeleted   bool
+	CgroupDeleted     bool
+	CNINetworkDeleted bool
+
+	Deleted []string // Resources that were deleted (metadata, cgroup, network, cascaded resources)
 }
 
 // DeleteStackResult reports what was deleted during stack deletion.
@@ -43,53 +52,64 @@ type DeleteStackResult struct {
 	StackName string
 	RealmName string
 	SpaceName string
-	Deleted   []string // Resources that were deleted (metadata, cgroup, cascaded resources)
+	StackDoc  *v1beta1.StackDoc
+
+	MetadataDeleted bool
+	CgroupDeleted   bool
+
+	Deleted []string // Resources that were deleted (metadata, cgroup, cascaded resources)
 }
 
 // DeleteCellResult reports what was deleted during cell deletion.
 type DeleteCellResult struct {
-	CellName  string
-	RealmName string
-	SpaceName string
-	StackName string
-	Deleted   []string // Resources that were deleted (containers, cgroup, metadata)
+	CellDoc           *v1beta1.CellDoc
+	ContainersDeleted bool
+	CgroupDeleted     bool
+	MetadataDeleted   bool
 }
 
-// DeleteContainerResult reports what was deleted during container deletion.
+// DeleteContainerResult mirrors GetContainerResult but also reports what was deleted.
 type DeleteContainerResult struct {
-	ContainerName string
-	RealmName     string
-	SpaceName     string
-	StackName     string
-	CellName      string
-	Deleted       []string // Resources that were deleted (container, task)
+	ContainerDoc       *v1beta1.ContainerDoc
+	CellMetadataExists bool
+	ContainerExists    bool
+	Deleted            []string // Resources that were deleted (container, task)
 }
 
 // DeleteRealm deletes a realm. If cascade is true, deletes all spaces first.
 // If force is true, skips validation of child resources.
-func (b *Exec) DeleteRealm(name string, force, cascade bool) (*DeleteRealmResult, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
+func (b *Exec) DeleteRealm(doc *v1beta1.RealmDoc, force, cascade bool) (*DeleteRealmResult, error) {
+	if doc == nil {
 		return nil, errdefs.ErrRealmNameRequired
 	}
 
-	// Get realm document
-	realmDoc := &v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
-			Name: name,
-		},
+	name := strings.TrimSpace(doc.Metadata.Name)
+	if name == "" {
+		return nil, errdefs.ErrRealmNameRequired
 	}
-	_, err := b.GetRealm(realmDoc)
+	doc.Metadata.Name = name
+
+	namespace := strings.TrimSpace(doc.Spec.Namespace)
+	if namespace == "" {
+		namespace = name
+	}
+	doc.Spec.Namespace = namespace
+
+	// Ensure realm exists and capture its latest state
+	getResult, err := b.GetRealm(doc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrRealmNotFound) {
 			return nil, fmt.Errorf("realm %q not found", name)
 		}
 		return nil, err
 	}
+	if !getResult.MetadataExists || getResult.RealmDoc == nil {
+		return nil, fmt.Errorf("realm %q not found", name)
+	}
 
 	result := &DeleteRealmResult{
-		RealmName: name,
-		Deleted:   []string{},
+		RealmDoc: getResult.RealmDoc,
+		Deleted:  []string{},
 	}
 
 	// If cascade, delete all spaces first
@@ -100,7 +120,7 @@ func (b *Exec) DeleteRealm(name string, force, cascade bool) (*DeleteRealmResult
 			return nil, fmt.Errorf("failed to list spaces: %w", err)
 		}
 		for _, space := range spaces {
-			_, err = b.DeleteSpace(space.Metadata.Name, name, force, cascade)
+			_, err = b.DeleteSpace(space, force, cascade)
 			if err != nil {
 				return nil, fmt.Errorf("failed to delete space %q: %w", space.Metadata.Name, err)
 			}
@@ -117,52 +137,63 @@ func (b *Exec) DeleteRealm(name string, force, cascade bool) (*DeleteRealmResult
 		}
 	}
 
-	// Delete realm
-	doc := &v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
-			Name: name,
-		},
-	}
-	if err = b.runner.DeleteRealm(doc); err != nil {
+	// Delete realm via runner and capture detailed outcome
+	outcome, err := b.runner.DeleteRealm(getResult.RealmDoc)
+	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errdefs.ErrDeleteRealm, err)
 	}
 
-	result.Deleted = append(result.Deleted, "metadata", "cgroup", "namespace")
+	result.MetadataDeleted = outcome.MetadataDeleted
+	result.CgroupDeleted = outcome.CgroupDeleted
+	result.ContainerdNamespaceDeleted = outcome.ContainerdNamespaceDeleted
+
+	if outcome.MetadataDeleted {
+		result.Deleted = append(result.Deleted, "metadata")
+	}
+	if outcome.CgroupDeleted {
+		result.Deleted = append(result.Deleted, "cgroup")
+	}
+	if outcome.ContainerdNamespaceDeleted {
+		result.Deleted = append(result.Deleted, "namespace")
+	}
+
 	return result, nil
 }
 
 // DeleteSpace deletes a space. If cascade is true, deletes all stacks first.
 // If force is true, skips validation of child resources.
-func (b *Exec) DeleteSpace(name, realmName string, force, cascade bool) (*DeleteSpaceResult, error) {
-	name = strings.TrimSpace(name)
+func (b *Exec) DeleteSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (*DeleteSpaceResult, error) {
+	if doc == nil {
+		return nil, errdefs.ErrSpaceNameRequired
+	}
+
+	name := strings.TrimSpace(doc.Metadata.Name)
 	if name == "" {
 		return nil, errdefs.ErrSpaceNameRequired
 	}
-	realmName = strings.TrimSpace(realmName)
+	doc.Metadata.Name = name
+
+	realmName := strings.TrimSpace(doc.Spec.RealmID)
 	if realmName == "" {
 		return nil, errdefs.ErrRealmNameRequired
 	}
+	doc.Spec.RealmID = realmName
 
-	// Get space document
-	doc := &v1beta1.SpaceDoc{
-		Metadata: v1beta1.SpaceMetadata{
-			Name: name,
-		},
-		Spec: v1beta1.SpaceSpec{
-			RealmID: realmName,
-		},
-	}
-	_, err := b.GetSpace(doc)
+	getResult, err := b.GetSpace(doc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrSpaceNotFound) {
 			return nil, fmt.Errorf("space %q not found in realm %q", name, realmName)
 		}
 		return nil, err
 	}
+	if !getResult.MetadataExists || getResult.SpaceDoc == nil {
+		return nil, fmt.Errorf("space %q not found in realm %q", name, realmName)
+	}
 
 	result := &DeleteSpaceResult{
 		SpaceName: name,
 		RealmName: realmName,
+		SpaceDoc:  getResult.SpaceDoc,
 		Deleted:   []string{},
 	}
 
@@ -174,7 +205,10 @@ func (b *Exec) DeleteSpace(name, realmName string, force, cascade bool) (*Delete
 			return nil, fmt.Errorf("failed to list stacks: %w", err)
 		}
 		for _, stack := range stacks {
-			_, err = b.DeleteStack(stack.Metadata.Name, realmName, name, force, cascade)
+			if stack == nil {
+				continue
+			}
+			_, err = b.DeleteStack(stack, force, cascade)
 			if err != nil {
 				return nil, fmt.Errorf("failed to delete stack %q: %w", stack.Metadata.Name, err)
 			}
@@ -192,53 +226,50 @@ func (b *Exec) DeleteSpace(name, realmName string, force, cascade bool) (*Delete
 	}
 
 	// Delete space
-	doc = &v1beta1.SpaceDoc{
-		Metadata: v1beta1.SpaceMetadata{
-			Name: name,
-		},
-		Spec: v1beta1.SpaceSpec{
-			RealmID: realmName,
-		},
-	}
-	if err = b.runner.DeleteSpace(doc); err != nil {
+	if err = b.runner.DeleteSpace(getResult.SpaceDoc); err != nil {
 		return nil, fmt.Errorf("%w: %w", errdefs.ErrDeleteSpace, err)
 	}
 
+	result.MetadataDeleted = true
+	result.CgroupDeleted = true
+	result.CNINetworkDeleted = true
 	result.Deleted = append(result.Deleted, "metadata", "cgroup", "network")
 	return result, nil
 }
 
 // DeleteStack deletes a stack. If cascade is true, deletes all cells first.
 // If force is true, skips validation of child resources.
-func (b *Exec) DeleteStack(name, realmName, spaceName string, force, cascade bool) (*DeleteStackResult, error) {
-	name = strings.TrimSpace(name)
+func (b *Exec) DeleteStack(doc *v1beta1.StackDoc, force, cascade bool) (*DeleteStackResult, error) {
+	if doc == nil {
+		return nil, errdefs.ErrStackNameRequired
+	}
+
+	name := strings.TrimSpace(doc.Metadata.Name)
 	if name == "" {
 		return nil, errdefs.ErrStackNameRequired
 	}
-	realmName = strings.TrimSpace(realmName)
+	doc.Metadata.Name = name
+
+	realmName := strings.TrimSpace(doc.Spec.RealmID)
 	if realmName == "" {
 		return nil, errdefs.ErrRealmNameRequired
 	}
-	spaceName = strings.TrimSpace(spaceName)
+	doc.Spec.RealmID = realmName
+
+	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
 	if spaceName == "" {
 		return nil, errdefs.ErrSpaceNameRequired
 	}
+	doc.Spec.SpaceID = spaceName
 
-	// Get stack document
-	doc := &v1beta1.StackDoc{
-		Metadata: v1beta1.StackMetadata{
-			Name: name,
-		},
-		Spec: v1beta1.StackSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-		},
-	}
 	getResult, err := b.GetStack(doc)
 	if err != nil {
+		if errors.Is(err, errdefs.ErrStackNotFound) {
+			return nil, fmt.Errorf("stack %q not found in realm %q, space %q", name, realmName, spaceName)
+		}
 		return nil, err
 	}
-	if !getResult.MetadataExists {
+	if !getResult.MetadataExists || getResult.StackDoc == nil {
 		return nil, fmt.Errorf("stack %q not found in realm %q, space %q", name, realmName, spaceName)
 	}
 
@@ -246,6 +277,7 @@ func (b *Exec) DeleteStack(name, realmName, spaceName string, force, cascade boo
 		StackName: name,
 		RealmName: realmName,
 		SpaceName: spaceName,
+		StackDoc:  getResult.StackDoc,
 		Deleted:   []string{},
 	}
 
@@ -257,7 +289,7 @@ func (b *Exec) DeleteStack(name, realmName, spaceName string, force, cascade boo
 			return nil, fmt.Errorf("failed to list cells: %w", err)
 		}
 		for _, cell := range cells {
-			_, err = b.DeleteCell(cell.Metadata.Name, realmName, spaceName, name)
+			_, err = b.DeleteCell(cell)
 			if err != nil {
 				return nil, fmt.Errorf("failed to delete cell %q: %w", cell.Metadata.Name, err)
 			}
@@ -275,55 +307,46 @@ func (b *Exec) DeleteStack(name, realmName, spaceName string, force, cascade boo
 	}
 
 	// Delete stack
-	doc = &v1beta1.StackDoc{
-		Metadata: v1beta1.StackMetadata{
-			Name: name,
-		},
-		Spec: v1beta1.StackSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-		},
-	}
-	if err = b.runner.DeleteStack(doc); err != nil {
+	if err = b.runner.DeleteStack(getResult.StackDoc); err != nil {
 		return nil, fmt.Errorf("%w: %w", errdefs.ErrDeleteStack, err)
 	}
 
+	result.MetadataDeleted = true
+	result.CgroupDeleted = true
 	result.Deleted = append(result.Deleted, "metadata", "cgroup")
 	return result, nil
 }
 
 // DeleteCell deletes a cell. Always deletes all containers first.
-func (b *Exec) DeleteCell(
-	name, realmName, spaceName, stackName string,
-) (*DeleteCellResult, error) {
-	name = strings.TrimSpace(name)
+func (b *Exec) DeleteCell(doc *v1beta1.CellDoc) (*DeleteCellResult, error) {
+	if doc == nil {
+		return nil, errdefs.ErrCellNameRequired
+	}
+
+	name := strings.TrimSpace(doc.Metadata.Name)
 	if name == "" {
 		return nil, errdefs.ErrCellNameRequired
 	}
-	realmName = strings.TrimSpace(realmName)
+	doc.Metadata.Name = name
+
+	realmName := strings.TrimSpace(doc.Spec.RealmID)
 	if realmName == "" {
 		return nil, errdefs.ErrRealmNameRequired
 	}
-	spaceName = strings.TrimSpace(spaceName)
+	doc.Spec.RealmID = realmName
+
+	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
 	if spaceName == "" {
 		return nil, errdefs.ErrSpaceNameRequired
 	}
-	stackName = strings.TrimSpace(stackName)
+	doc.Spec.SpaceID = spaceName
+
+	stackName := strings.TrimSpace(doc.Spec.StackID)
 	if stackName == "" {
 		return nil, errdefs.ErrStackNameRequired
 	}
+	doc.Spec.StackID = stackName
 
-	// Get cell document
-	doc := &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
-			Name: name,
-		},
-		Spec: v1beta1.CellSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-			StackID: stackName,
-		},
-	}
 	getResult, err := b.GetCell(doc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
@@ -343,62 +366,56 @@ func (b *Exec) DeleteCell(
 	}
 
 	result := &DeleteCellResult{
-		CellName:  name,
-		RealmName: realmName,
-		SpaceName: spaceName,
-		StackName: stackName,
-		Deleted:   []string{},
+		CellDoc: cellDoc,
 	}
 
 	// Always delete all containers in cell first
-	// Containers are always deleted with cells
-	containers := cellDoc.Spec.Containers
-	result.Deleted = append(result.Deleted, fmt.Sprintf("containers:%d", len(containers)))
-
-	// Delete cell
-	doc = &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
-			Name: name,
-		},
-		Spec: v1beta1.CellSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-			StackID: stackName,
-		},
+	if len(cellDoc.Spec.Containers) > 0 {
+		result.ContainersDeleted = true
 	}
-	if err = b.runner.DeleteCell(doc); err != nil {
+
+	if err = b.runner.DeleteCell(cellDoc); err != nil {
 		return nil, fmt.Errorf("%w: %w", errdefs.ErrDeleteCell, err)
 	}
 
-	result.Deleted = append(result.Deleted, "cgroup", "metadata")
+	result.CgroupDeleted = true
+	result.MetadataDeleted = true
 	return result, nil
 }
 
 // DeleteContainer deletes a single container. Cascade flag is not applicable.
-func (b *Exec) DeleteContainer(name, realmName, spaceName, stackName, cellName string) (*DeleteContainerResult, error) {
-	name = strings.TrimSpace(name)
+func (b *Exec) DeleteContainer(doc *v1beta1.ContainerDoc) (*DeleteContainerResult, error) {
+	if doc == nil {
+		return nil, errdefs.ErrContainerNameRequired
+	}
+
+	name := strings.TrimSpace(doc.Metadata.Name)
 	if name == "" {
 		return nil, errdefs.ErrContainerNameRequired
 	}
-	realmName = strings.TrimSpace(realmName)
+	realmName := strings.TrimSpace(doc.Spec.RealmID)
 	if realmName == "" {
 		return nil, errdefs.ErrRealmNameRequired
 	}
-	spaceName = strings.TrimSpace(spaceName)
+	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
 	if spaceName == "" {
 		return nil, errdefs.ErrSpaceNameRequired
 	}
-	stackName = strings.TrimSpace(stackName)
+	stackName := strings.TrimSpace(doc.Spec.StackID)
 	if stackName == "" {
 		return nil, errdefs.ErrStackNameRequired
 	}
-	cellName = strings.TrimSpace(cellName)
+	cellName := strings.TrimSpace(doc.Spec.CellID)
 	if cellName == "" {
 		return nil, errdefs.ErrCellNameRequired
 	}
 
+	result := &DeleteContainerResult{
+		Deleted: []string{},
+	}
+
 	// Get cell to find container
-	doc := &v1beta1.CellDoc{
+	cellDoc := &v1beta1.CellDoc{
 		Metadata: v1beta1.CellMetadata{
 			Name: cellName,
 		},
@@ -408,10 +425,11 @@ func (b *Exec) DeleteContainer(name, realmName, spaceName, stackName, cellName s
 			StackID: stackName,
 		},
 	}
-	getResult, err := b.GetCell(doc)
+	getResult, err := b.GetCell(cellDoc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
-			return nil, fmt.Errorf(
+			result.CellMetadataExists = false
+			return result, fmt.Errorf(
 				"cell %q not found in realm %q, space %q, stack %q",
 				cellName,
 				realmName,
@@ -419,11 +437,12 @@ func (b *Exec) DeleteContainer(name, realmName, spaceName, stackName, cellName s
 				stackName,
 			)
 		}
-		return nil, err
+		return result, err
 	}
-	cellDoc := getResult.CellDoc
+	result.CellMetadataExists = getResult.MetadataExists
+	cellDoc = getResult.CellDoc
 	if cellDoc == nil {
-		return nil, fmt.Errorf("cell %q not found", cellName)
+		return result, fmt.Errorf("cell %q not found", cellName)
 	}
 
 	// Find container in cell by name (ID now stores just the container name)
@@ -436,21 +455,30 @@ func (b *Exec) DeleteContainer(name, realmName, spaceName, stackName, cellName s
 	}
 
 	if foundContainer == nil {
-		return nil, fmt.Errorf("container %q not found in cell %q", name, cellName)
+		return result, fmt.Errorf("container %q not found in cell %q", name, cellName)
 	}
 
-	result := &DeleteContainerResult{
-		ContainerName: name,
-		RealmName:     realmName,
-		SpaceName:     spaceName,
-		StackName:     stackName,
-		CellName:      cellName,
-		Deleted:       []string{},
+	result.ContainerExists = true
+	labels := doc.Metadata.Labels
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+	result.ContainerDoc = &v1beta1.ContainerDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindContainer,
+		Metadata: v1beta1.ContainerMetadata{
+			Name:   name,
+			Labels: labels,
+		},
+		Spec: *foundContainer,
+		Status: v1beta1.ContainerStatus{
+			State: v1beta1.ContainerStateReady,
+		},
 	}
 
 	// Delete container from containerd (via runner)
 	if err = b.runner.DeleteContainer(cellDoc, name); err != nil {
-		return nil, fmt.Errorf("failed to delete container %s: %w", name, err)
+		return result, fmt.Errorf("failed to delete container %s: %w", name, err)
 	}
 
 	// Remove container from cell's Spec.Containers list
@@ -464,7 +492,7 @@ func (b *Exec) DeleteContainer(name, realmName, spaceName, stackName, cellName s
 
 	// Update cell metadata to persist the change
 	if err = b.runner.UpdateCellMetadata(cellDoc); err != nil {
-		return nil, fmt.Errorf("failed to update cell metadata: %w", err)
+		return result, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
 	result.Deleted = append(result.Deleted, "container", "task")
