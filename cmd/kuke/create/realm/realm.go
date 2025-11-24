@@ -20,12 +20,13 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
 	"github.com/eminwux/kukeon/internal/controller"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type realmController interface {
-	CreateRealm(opts controller.CreateRealmOptions) (controller.CreateRealmResult, error)
+	CreateRealm(doc *v1beta1.RealmDoc) (controller.CreateRealmResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -54,6 +55,16 @@ func NewRealmCmd() *cobra.Command {
 				return err
 			}
 
+			// Build v1beta1.RealmDoc from command arguments
+			doc := &v1beta1.RealmDoc{
+				Metadata: v1beta1.RealmMetadata{
+					Name: name,
+				},
+				Spec: v1beta1.RealmSpec{
+					Namespace: namespace,
+				},
+			}
+
 			// Check for mock controller in context (for testing)
 			var ctrl realmController
 			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(realmController); ok {
@@ -67,10 +78,7 @@ func NewRealmCmd() *cobra.Command {
 				ctrl = realCtrl
 			}
 
-			result, err := ctrl.CreateRealm(controller.CreateRealmOptions{
-				Name:      name,
-				Namespace: namespace,
-			})
+			result, err := ctrl.CreateRealm(doc)
 			if err != nil {
 				return err
 			}
@@ -86,7 +94,12 @@ func NewRealmCmd() *cobra.Command {
 }
 
 func printRealmResult(cmd *cobra.Command, result controller.CreateRealmResult) {
-	cmd.Printf("Realm %q (namespace %q)\n", result.Name, result.Namespace)
+	var name, namespace string
+	if result.RealmDoc != nil {
+		name = result.RealmDoc.Metadata.Name
+		namespace = result.RealmDoc.Spec.Namespace
+	}
+	cmd.Printf("Realm %q (namespace %q)\n", name, namespace)
 	shared.PrintCreationOutcome(cmd, "metadata", result.MetadataExistsPost, result.Created)
 	shared.PrintCreationOutcome(
 		cmd,

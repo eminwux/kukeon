@@ -30,6 +30,7 @@ import (
 	stack "github.com/eminwux/kukeon/cmd/kuke/create/stack"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -54,7 +55,7 @@ func TestNewStackCmd(t *testing.T) {
 		setupPrints     func(t *testing.T)
 		wantErrSub      string
 		wantOutputSubs  []string
-		verifyCreateOpt func(t *testing.T, opts controller.CreateStackOptions)
+		verifyCreateDoc func(t *testing.T, doc *v1beta1.StackDoc)
 	}{
 		{
 			name:       "missing realm flag",
@@ -86,26 +87,32 @@ func TestNewStackCmd(t *testing.T) {
 			name:    "name from args with trimming",
 			cliArgs: []string{" stack-name ", "--realm", "realm-a", "--space", "space-a"},
 			controller: &fakeStackController{
-				createStack: func(opts controller.CreateStackOptions) (controller.CreateStackResult, error) {
-					if opts.Name != "stack-name" {
-						t.Fatalf("unexpected name: %q", opts.Name)
+				createStack: func(doc *v1beta1.StackDoc) (controller.CreateStackResult, error) {
+					if doc.Metadata.Name != "stack-name" {
+						t.Fatalf("unexpected name: %q", doc.Metadata.Name)
 					}
 					return controller.CreateStackResult{
-						Name:      "stack-name",
-						RealmName: "realm-a",
-						SpaceName: "space-a",
+						StackDoc: &v1beta1.StackDoc{
+							Metadata: v1beta1.StackMetadata{
+								Name: "stack-name",
+							},
+							Spec: v1beta1.StackSpec{
+								RealmID: "realm-a",
+								SpaceID: "space-a",
+							},
+						},
 					}, nil
 				},
 			},
-			verifyCreateOpt: func(t *testing.T, opts controller.CreateStackOptions) {
-				if opts.Name != "stack-name" {
-					t.Fatalf("expected name %q, got %q", "stack-name", opts.Name)
+			verifyCreateDoc: func(t *testing.T, doc *v1beta1.StackDoc) {
+				if doc.Metadata.Name != "stack-name" {
+					t.Fatalf("expected name %q, got %q", "stack-name", doc.Metadata.Name)
 				}
-				if opts.RealmName != "realm-a" {
-					t.Fatalf("expected realm %q, got %q", "realm-a", opts.RealmName)
+				if doc.Spec.RealmID != "realm-a" {
+					t.Fatalf("expected realm %q, got %q", "realm-a", doc.Spec.RealmID)
 				}
-				if opts.SpaceName != "space-a" {
-					t.Fatalf("expected space %q, got %q", "space-a", opts.SpaceName)
+				if doc.Spec.SpaceID != "space-a" {
+					t.Fatalf("expected space %q, got %q", "space-a", doc.Spec.SpaceID)
 				}
 			},
 			setupPrints: func(_ *testing.T) {
@@ -118,20 +125,26 @@ func TestNewStackCmd(t *testing.T) {
 			viperName: "default-stack",
 			cliArgs:   []string{"--realm", "realm-a", "--space", "space-a"},
 			controller: &fakeStackController{
-				createStack: func(opts controller.CreateStackOptions) (controller.CreateStackResult, error) {
-					if opts.Name != "default-stack" {
-						t.Fatalf("unexpected name: %q", opts.Name)
+				createStack: func(doc *v1beta1.StackDoc) (controller.CreateStackResult, error) {
+					if doc.Metadata.Name != "default-stack" {
+						t.Fatalf("unexpected name: %q", doc.Metadata.Name)
 					}
 					return controller.CreateStackResult{
-						Name:      "default-stack",
-						RealmName: "realm-a",
-						SpaceName: "space-a",
+						StackDoc: &v1beta1.StackDoc{
+							Metadata: v1beta1.StackMetadata{
+								Name: "default-stack",
+							},
+							Spec: v1beta1.StackSpec{
+								RealmID: "realm-a",
+								SpaceID: "space-a",
+							},
+						},
 					}, nil
 				},
 			},
-			verifyCreateOpt: func(t *testing.T, opts controller.CreateStackOptions) {
-				if opts.Name != "default-stack" {
-					t.Fatalf("expected name %q, got %q", "default-stack", opts.Name)
+			verifyCreateDoc: func(t *testing.T, doc *v1beta1.StackDoc) {
+				if doc.Metadata.Name != "default-stack" {
+					t.Fatalf("expected name %q, got %q", "default-stack", doc.Metadata.Name)
 				}
 			},
 			setupPrints: func(_ *testing.T) {
@@ -142,26 +155,32 @@ func TestNewStackCmd(t *testing.T) {
 			name:    "realm and space trimming whitespace",
 			cliArgs: []string{"stack-name", "--realm", " realm-a ", "--space", "\tspace-a"},
 			controller: &fakeStackController{
-				createStack: func(opts controller.CreateStackOptions) (controller.CreateStackResult, error) {
-					if opts.RealmName != "realm-a" {
-						t.Fatalf("expected trimmed realm %q, got %q", "realm-a", opts.RealmName)
+				createStack: func(doc *v1beta1.StackDoc) (controller.CreateStackResult, error) {
+					if doc.Spec.RealmID != "realm-a" {
+						t.Fatalf("expected trimmed realm %q, got %q", "realm-a", doc.Spec.RealmID)
 					}
-					if opts.SpaceName != "space-a" {
-						t.Fatalf("expected trimmed space %q, got %q", "space-a", opts.SpaceName)
+					if doc.Spec.SpaceID != "space-a" {
+						t.Fatalf("expected trimmed space %q, got %q", "space-a", doc.Spec.SpaceID)
 					}
 					return controller.CreateStackResult{
-						Name:      "stack-name",
-						RealmName: "realm-a",
-						SpaceName: "space-a",
+						StackDoc: &v1beta1.StackDoc{
+							Metadata: v1beta1.StackMetadata{
+								Name: "stack-name",
+							},
+							Spec: v1beta1.StackSpec{
+								RealmID: "realm-a",
+								SpaceID: "space-a",
+							},
+						},
 					}, nil
 				},
 			},
-			verifyCreateOpt: func(t *testing.T, opts controller.CreateStackOptions) {
-				if opts.RealmName != "realm-a" {
-					t.Fatalf("expected trimmed realm %q, got %q", "realm-a", opts.RealmName)
+			verifyCreateDoc: func(t *testing.T, doc *v1beta1.StackDoc) {
+				if doc.Spec.RealmID != "realm-a" {
+					t.Fatalf("expected trimmed realm %q, got %q", "realm-a", doc.Spec.RealmID)
 				}
-				if opts.SpaceName != "space-a" {
-					t.Fatalf("expected trimmed space %q, got %q", "space-a", opts.SpaceName)
+				if doc.Spec.SpaceID != "space-a" {
+					t.Fatalf("expected trimmed space %q, got %q", "space-a", doc.Spec.SpaceID)
 				}
 			},
 			setupPrints: func(_ *testing.T) {
@@ -178,7 +197,7 @@ func TestNewStackCmd(t *testing.T) {
 			name:    "CreateStack error propagation",
 			cliArgs: []string{"stack-name", "--realm", "realm-a", "--space", "space-a"},
 			controller: &fakeStackController{
-				createStack: func(_ controller.CreateStackOptions) (controller.CreateStackResult, error) {
+				createStack: func(_ *v1beta1.StackDoc) (controller.CreateStackResult, error) {
 					return controller.CreateStackResult{}, errors.New("create stack failed")
 				},
 			},
@@ -188,11 +207,17 @@ func TestNewStackCmd(t *testing.T) {
 			name:    "success with created resources",
 			cliArgs: []string{"stack-name", "--realm", "realm-a", "--space", "space-a"},
 			controller: &fakeStackController{
-				createStack: func(_ controller.CreateStackOptions) (controller.CreateStackResult, error) {
+				createStack: func(_ *v1beta1.StackDoc) (controller.CreateStackResult, error) {
 					return controller.CreateStackResult{
-						Name:               "stack-name",
-						RealmName:          "realm-a",
-						SpaceName:          "space-a",
+						StackDoc: &v1beta1.StackDoc{
+							Metadata: v1beta1.StackMetadata{
+								Name: "stack-name",
+							},
+							Spec: v1beta1.StackSpec{
+								RealmID: "realm-a",
+								SpaceID: "space-a",
+							},
+						},
 						MetadataExistsPost: true,
 						CgroupExistsPost:   true,
 						Created:            true,
@@ -211,11 +236,17 @@ func TestNewStackCmd(t *testing.T) {
 			name:    "success with existing resources",
 			cliArgs: []string{"stack-name", "--realm", "realm-a", "--space", "space-a"},
 			controller: &fakeStackController{
-				createStack: func(_ controller.CreateStackOptions) (controller.CreateStackResult, error) {
+				createStack: func(_ *v1beta1.StackDoc) (controller.CreateStackResult, error) {
 					return controller.CreateStackResult{
-						Name:               "stack-name",
-						RealmName:          "realm-a",
-						SpaceName:          "space-a",
+						StackDoc: &v1beta1.StackDoc{
+							Metadata: v1beta1.StackMetadata{
+								Name: "stack-name",
+							},
+							Spec: v1beta1.StackSpec{
+								RealmID: "realm-a",
+								SpaceID: "space-a",
+							},
+						},
 						MetadataExistsPost: true,
 						CgroupExistsPost:   true,
 						Created:            false,
@@ -231,11 +262,17 @@ func TestNewStackCmd(t *testing.T) {
 			name:    "success with mixed states",
 			cliArgs: []string{"stack-name", "--realm", "realm-a", "--space", "space-a"},
 			controller: &fakeStackController{
-				createStack: func(_ controller.CreateStackOptions) (controller.CreateStackResult, error) {
+				createStack: func(_ *v1beta1.StackDoc) (controller.CreateStackResult, error) {
 					return controller.CreateStackResult{
-						Name:               "stack-name",
-						RealmName:          "realm-a",
-						SpaceName:          "space-a",
+						StackDoc: &v1beta1.StackDoc{
+							Metadata: v1beta1.StackMetadata{
+								Name: "stack-name",
+							},
+							Spec: v1beta1.StackSpec{
+								RealmID: "realm-a",
+								SpaceID: "space-a",
+							},
+						},
 						MetadataExistsPost: true,
 						CgroupExistsPost:   true,
 						Created:            true,
@@ -274,12 +311,12 @@ func TestNewStackCmd(t *testing.T) {
 
 			// Inject mock controller via context if needed
 			if tt.controller != nil {
-				// Capture CreateStack options if verifyCreateOpt is provided
-				if tt.verifyCreateOpt != nil {
+				// Capture CreateStack doc if verifyCreateDoc is provided
+				if tt.verifyCreateDoc != nil {
 					originalCreateStack := tt.controller.createStack
-					tt.controller.createStack = func(opts controller.CreateStackOptions) (controller.CreateStackResult, error) {
-						tt.verifyCreateOpt(t, opts)
-						return originalCreateStack(opts)
+					tt.controller.createStack = func(doc *v1beta1.StackDoc) (controller.CreateStackResult, error) {
+						tt.verifyCreateDoc(t, doc)
+						return originalCreateStack(doc)
 					}
 				}
 				ctx = context.WithValue(ctx, stack.MockControllerKey{}, tt.controller)
@@ -329,9 +366,15 @@ func TestPrintStackResult(t *testing.T) {
 		{
 			name: "all resources created",
 			result: controller.CreateStackResult{
-				Name:               "stack-a",
-				RealmName:          "realm-a",
-				SpaceName:          "space-a",
+				StackDoc: &v1beta1.StackDoc{
+					Metadata: v1beta1.StackMetadata{
+						Name: "stack-a",
+					},
+					Spec: v1beta1.StackSpec{
+						RealmID: "realm-a",
+						SpaceID: "space-a",
+					},
+				},
 				MetadataExistsPost: true,
 				CgroupExistsPost:   true,
 				Created:            true,
@@ -344,9 +387,15 @@ func TestPrintStackResult(t *testing.T) {
 		{
 			name: "all resources already existed",
 			result: controller.CreateStackResult{
-				Name:               "stack-b",
-				RealmName:          "realm-b",
-				SpaceName:          "space-b",
+				StackDoc: &v1beta1.StackDoc{
+					Metadata: v1beta1.StackMetadata{
+						Name: "stack-b",
+					},
+					Spec: v1beta1.StackSpec{
+						RealmID: "realm-b",
+						SpaceID: "space-b",
+					},
+				},
 				MetadataExistsPost: true,
 				CgroupExistsPost:   true,
 				Created:            false,
@@ -359,9 +408,15 @@ func TestPrintStackResult(t *testing.T) {
 		{
 			name: "metadata created, cgroup existed",
 			result: controller.CreateStackResult{
-				Name:               "stack-c",
-				RealmName:          "realm-c",
-				SpaceName:          "space-c",
+				StackDoc: &v1beta1.StackDoc{
+					Metadata: v1beta1.StackMetadata{
+						Name: "stack-c",
+					},
+					Spec: v1beta1.StackSpec{
+						RealmID: "realm-c",
+						SpaceID: "space-c",
+					},
+				},
 				MetadataExistsPost: true,
 				CgroupExistsPost:   true,
 				Created:            true,
@@ -374,9 +429,15 @@ func TestPrintStackResult(t *testing.T) {
 		{
 			name: "metadata existed, cgroup created",
 			result: controller.CreateStackResult{
-				Name:               "stack-d",
-				RealmName:          "realm-d",
-				SpaceName:          "space-d",
+				StackDoc: &v1beta1.StackDoc{
+					Metadata: v1beta1.StackMetadata{
+						Name: "stack-d",
+					},
+					Spec: v1beta1.StackSpec{
+						RealmID: "realm-d",
+						SpaceID: "space-d",
+					},
+				},
 				MetadataExistsPost: true,
 				CgroupExistsPost:   true,
 				Created:            false,
@@ -389,9 +450,15 @@ func TestPrintStackResult(t *testing.T) {
 		{
 			name: "metadata missing, cgroup missing",
 			result: controller.CreateStackResult{
-				Name:               "stack-e",
-				RealmName:          "realm-e",
-				SpaceName:          "space-e",
+				StackDoc: &v1beta1.StackDoc{
+					Metadata: v1beta1.StackMetadata{
+						Name: "stack-e",
+					},
+					Spec: v1beta1.StackSpec{
+						RealmID: "realm-e",
+						SpaceID: "space-e",
+					},
+				},
 				MetadataExistsPost: false,
 				CgroupExistsPost:   false,
 				Created:            false,
@@ -462,14 +529,14 @@ func TestPrintStackResult(t *testing.T) {
 }
 
 type fakeStackController struct {
-	createStack func(opts controller.CreateStackOptions) (controller.CreateStackResult, error)
+	createStack func(doc *v1beta1.StackDoc) (controller.CreateStackResult, error)
 }
 
-func (f *fakeStackController) CreateStack(opts controller.CreateStackOptions) (controller.CreateStackResult, error) {
+func (f *fakeStackController) CreateStack(doc *v1beta1.StackDoc) (controller.CreateStackResult, error) {
 	if f.createStack == nil {
 		panic("CreateStack was called unexpectedly")
 	}
-	return f.createStack(opts)
+	return f.createStack(doc)
 }
 
 func TestNewStackCmdRunE(t *testing.T) {
@@ -481,10 +548,10 @@ func TestNewStackCmdRunE(t *testing.T) {
 		name           string
 		args           []string
 		setup          func(t *testing.T, cmd *cobra.Command)
-		controllerFn   func(opts controller.CreateStackOptions) (controller.CreateStackResult, error)
+		controllerFn   func(doc *v1beta1.StackDoc) (controller.CreateStackResult, error)
 		wantErr        string
 		wantCallCreate bool
-		wantOpts       *controller.CreateStackOptions
+		wantDoc        *v1beta1.StackDoc
 		wantOutput     []string
 	}{
 		{
@@ -494,11 +561,17 @@ func TestNewStackCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "realm", "realm-a")
 				setFlag(t, cmd, "space", "space-a")
 			},
-			controllerFn: func(opts controller.CreateStackOptions) (controller.CreateStackResult, error) {
+			controllerFn: func(doc *v1beta1.StackDoc) (controller.CreateStackResult, error) {
 				return controller.CreateStackResult{
-					Name:               opts.Name,
-					RealmName:          opts.RealmName,
-					SpaceName:          opts.SpaceName,
+					StackDoc: &v1beta1.StackDoc{
+						Metadata: v1beta1.StackMetadata{
+							Name: doc.Metadata.Name,
+						},
+						Spec: v1beta1.StackSpec{
+							RealmID: doc.Spec.RealmID,
+							SpaceID: doc.Spec.SpaceID,
+						},
+					},
 					Created:            true,
 					MetadataExistsPost: true,
 					CgroupCreated:      true,
@@ -506,10 +579,14 @@ func TestNewStackCmdRunE(t *testing.T) {
 				}, nil
 			},
 			wantCallCreate: true,
-			wantOpts: &controller.CreateStackOptions{
-				Name:      "test-stack",
-				RealmName: "realm-a",
-				SpaceName: "space-a",
+			wantDoc: &v1beta1.StackDoc{
+				Metadata: v1beta1.StackMetadata{
+					Name: "test-stack",
+				},
+				Spec: v1beta1.StackSpec{
+					RealmID: "realm-a",
+					SpaceID: "space-a",
+				},
 			},
 			wantOutput: []string{
 				`Stack "test-stack" (realm "realm-a", space "space-a")`,
@@ -522,11 +599,17 @@ func TestNewStackCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "realm", "realm-b")
 				setFlag(t, cmd, "space", "space-b")
 			},
-			controllerFn: func(opts controller.CreateStackOptions) (controller.CreateStackResult, error) {
+			controllerFn: func(doc *v1beta1.StackDoc) (controller.CreateStackResult, error) {
 				return controller.CreateStackResult{
-					Name:               opts.Name,
-					RealmName:          opts.RealmName,
-					SpaceName:          opts.SpaceName,
+					StackDoc: &v1beta1.StackDoc{
+						Metadata: v1beta1.StackMetadata{
+							Name: doc.Metadata.Name,
+						},
+						Spec: v1beta1.StackSpec{
+							RealmID: doc.Spec.RealmID,
+							SpaceID: doc.Spec.SpaceID,
+						},
+					},
 					Created:            true,
 					MetadataExistsPost: true,
 					CgroupCreated:      true,
@@ -534,10 +617,14 @@ func TestNewStackCmdRunE(t *testing.T) {
 				}, nil
 			},
 			wantCallCreate: true,
-			wantOpts: &controller.CreateStackOptions{
-				Name:      "viper-stack",
-				RealmName: "realm-b",
-				SpaceName: "space-b",
+			wantDoc: &v1beta1.StackDoc{
+				Metadata: v1beta1.StackMetadata{
+					Name: "viper-stack",
+				},
+				Spec: v1beta1.StackSpec{
+					RealmID: "realm-b",
+					SpaceID: "space-b",
+				},
 			},
 			wantOutput: []string{
 				`Stack "viper-stack" (realm "realm-b", space "space-b")`,
@@ -569,7 +656,7 @@ func TestNewStackCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "realm", "realm-a")
 				setFlag(t, cmd, "space", "space-a")
 			},
-			controllerFn: func(_ controller.CreateStackOptions) (controller.CreateStackResult, error) {
+			controllerFn: func(_ *v1beta1.StackDoc) (controller.CreateStackResult, error) {
 				return controller.CreateStackResult{}, errors.New("unexpected call")
 			},
 			wantErr:        "logger not found",
@@ -582,15 +669,19 @@ func TestNewStackCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "realm", "realm-a")
 				setFlag(t, cmd, "space", "space-a")
 			},
-			controllerFn: func(_ controller.CreateStackOptions) (controller.CreateStackResult, error) {
+			controllerFn: func(_ *v1beta1.StackDoc) (controller.CreateStackResult, error) {
 				return controller.CreateStackResult{}, errors.New("failed to create stack")
 			},
 			wantErr:        "failed to create stack",
 			wantCallCreate: true,
-			wantOpts: &controller.CreateStackOptions{
-				Name:      "test-stack",
-				RealmName: "realm-a",
-				SpaceName: "space-a",
+			wantDoc: &v1beta1.StackDoc{
+				Metadata: v1beta1.StackMetadata{
+					Name: "test-stack",
+				},
+				Spec: v1beta1.StackSpec{
+					RealmID: "realm-a",
+					SpaceID: "space-a",
+				},
 			},
 		},
 	}
@@ -600,7 +691,7 @@ func TestNewStackCmdRunE(t *testing.T) {
 			t.Cleanup(viper.Reset)
 
 			var createCalled bool
-			var createOpts controller.CreateStackOptions
+			var createDoc *v1beta1.StackDoc
 
 			cmd := stack.NewStackCmd()
 			cmd.SetOut(&bytes.Buffer{})
@@ -617,10 +708,10 @@ func TestNewStackCmdRunE(t *testing.T) {
 				// If we need to mock the controller, inject it via context
 				if tt.controllerFn != nil {
 					fakeCtrl := &fakeStackController{
-						createStack: func(opts controller.CreateStackOptions) (controller.CreateStackResult, error) {
+						createStack: func(doc *v1beta1.StackDoc) (controller.CreateStackResult, error) {
 							createCalled = true
-							createOpts = opts
-							return tt.controllerFn(opts)
+							createDoc = doc
+							return tt.controllerFn(doc)
 						},
 					}
 					// Inject mock controller into context using the exported key
@@ -653,15 +744,18 @@ func TestNewStackCmdRunE(t *testing.T) {
 				t.Errorf("CreateStack called=%v want=%v", createCalled, tt.wantCallCreate)
 			}
 
-			if tt.wantOpts != nil {
-				if createOpts.Name != tt.wantOpts.Name {
-					t.Errorf("CreateStack Name=%q want=%q", createOpts.Name, tt.wantOpts.Name)
+			if tt.wantDoc != nil {
+				if createDoc == nil {
+					t.Fatal("CreateStack was called with nil doc")
 				}
-				if createOpts.RealmName != tt.wantOpts.RealmName {
-					t.Errorf("CreateStack RealmName=%q want=%q", createOpts.RealmName, tt.wantOpts.RealmName)
+				if createDoc.Metadata.Name != tt.wantDoc.Metadata.Name {
+					t.Errorf("CreateStack Name=%q want=%q", createDoc.Metadata.Name, tt.wantDoc.Metadata.Name)
 				}
-				if createOpts.SpaceName != tt.wantOpts.SpaceName {
-					t.Errorf("CreateStack SpaceName=%q want=%q", createOpts.SpaceName, tt.wantOpts.SpaceName)
+				if createDoc.Spec.RealmID != tt.wantDoc.Spec.RealmID {
+					t.Errorf("CreateStack RealmID=%q want=%q", createDoc.Spec.RealmID, tt.wantDoc.Spec.RealmID)
+				}
+				if createDoc.Spec.SpaceID != tt.wantDoc.Spec.SpaceID {
+					t.Errorf("CreateStack SpaceID=%q want=%q", createDoc.Spec.SpaceID, tt.wantDoc.Spec.SpaceID)
 				}
 			}
 

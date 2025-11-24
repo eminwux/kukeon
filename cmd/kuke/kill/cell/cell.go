@@ -21,7 +21,7 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
-	"github.com/eminwux/kukeon/cmd/kuke/stop/shared"
+	"github.com/eminwux/kukeon/cmd/kuke/kill/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -29,27 +29,28 @@ import (
 	"github.com/spf13/viper"
 )
 
-type StopCellResult = controller.StopCellResult
+type KillCellResult = controller.KillCellResult
 
 type cellController interface {
-	StopCell(doc *v1beta1.CellDoc) (StopCellResult, error)
+	KillCell(doc *v1beta1.CellDoc) (KillCellResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
 type MockControllerKey struct{}
 
+// NewCellCmd builds the `kuke kill cell` subcommand.
 func NewCellCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "cell [name]",
-		Short:         "Stop a cell",
+		Short:         "Kill a cell",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := strings.TrimSpace(args[0])
-			realm := strings.TrimSpace(viper.GetString(config.KUKE_STOP_CELL_REALM.ViperKey))
-			space := strings.TrimSpace(viper.GetString(config.KUKE_STOP_CELL_SPACE.ViperKey))
-			stack := strings.TrimSpace(viper.GetString(config.KUKE_STOP_CELL_STACK.ViperKey))
+			realm := strings.TrimSpace(viper.GetString(config.KUKE_KILL_CELL_REALM.ViperKey))
+			space := strings.TrimSpace(viper.GetString(config.KUKE_KILL_CELL_SPACE.ViperKey))
+			stack := strings.TrimSpace(viper.GetString(config.KUKE_KILL_CELL_STACK.ViperKey))
 
 			if realm == "" {
 				return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
@@ -61,7 +62,6 @@ func NewCellCmd() *cobra.Command {
 				return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
 			}
 
-			// Check for mock controller in context (for testing)
 			var ctrl cellController
 			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(cellController); ok {
 				ctrl = mockCtrl
@@ -70,80 +70,57 @@ func NewCellCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				ctrl = &controllerWrapper{ctrl: realCtrl}
+				ctrl = realCtrl
 			}
 
 			cellDoc := &v1beta1.CellDoc{
 				APIVersion: v1beta1.APIVersionV1Beta1,
 				Kind:       v1beta1.KindCell,
 				Metadata: v1beta1.CellMetadata{
-					Name:   name,
-					Labels: make(map[string]string),
+					Name: name,
 				},
 				Spec: v1beta1.CellSpec{
-					ID:      name,
 					RealmID: realm,
 					SpaceID: space,
 					StackID: stack,
 				},
 			}
 
-			result, err := ctrl.StopCell(cellDoc)
+			result, err := ctrl.KillCell(cellDoc)
 			if err != nil {
 				return err
 			}
 
 			targetDoc := result.CellDoc
-			if targetDoc == nil {
-				targetDoc = cellDoc
-			}
-
-			outputCell := strings.TrimSpace(name)
-			outputStack := strings.TrimSpace(stack)
+			stackName := stack
+			cellName := name
 			if targetDoc != nil {
 				if metaName := strings.TrimSpace(targetDoc.Metadata.Name); metaName != "" {
-					outputCell = metaName
-				} else if specID := strings.TrimSpace(targetDoc.Spec.ID); specID != "" {
-					outputCell = specID
+					cellName = metaName
 				}
-
 				if specStack := strings.TrimSpace(targetDoc.Spec.StackID); specStack != "" {
-					outputStack = specStack
+					stackName = specStack
 				}
 			}
 
-			cmd.Printf("Stopped cell %q from stack %q\n", outputCell, outputStack)
+			cmd.Printf("Killed cell %q from stack %q\n", cellName, stackName)
 			return nil
 		},
 	}
 
 	cmd.Flags().String("realm", "", "Realm that owns the cell")
-	_ = viper.BindPFlag(config.KUKE_STOP_CELL_REALM.ViperKey, cmd.Flags().Lookup("realm"))
+	_ = viper.BindPFlag(config.KUKE_KILL_CELL_REALM.ViperKey, cmd.Flags().Lookup("realm"))
 
 	cmd.Flags().String("space", "", "Space that owns the cell")
-	_ = viper.BindPFlag(config.KUKE_STOP_CELL_SPACE.ViperKey, cmd.Flags().Lookup("space"))
+	_ = viper.BindPFlag(config.KUKE_KILL_CELL_SPACE.ViperKey, cmd.Flags().Lookup("space"))
 
 	cmd.Flags().String("stack", "", "Stack that owns the cell")
-	_ = viper.BindPFlag(config.KUKE_STOP_CELL_STACK.ViperKey, cmd.Flags().Lookup("stack"))
+	_ = viper.BindPFlag(config.KUKE_KILL_CELL_STACK.ViperKey, cmd.Flags().Lookup("stack"))
 
-	// Register autocomplete for positional argument
 	cmd.ValidArgsFunction = config.CompleteCellNames
-
-	// Register autocomplete functions for flags
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
 	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
 
 	return cmd
-}
-
-type controllerWrapper struct {
-	ctrl *controller.Exec
-}
-
-func (w *controllerWrapper) StopCell(doc *v1beta1.CellDoc) (StopCellResult, error) {
-	if doc == nil {
-		return StopCellResult{}, fmt.Errorf("%w", errdefs.ErrCellNameRequired)
-	}
-	return w.ctrl.StopCell(doc)
 }

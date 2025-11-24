@@ -654,7 +654,7 @@ func (r *Exec) PurgeRealm(doc *v1beta1.RealmDoc) error {
 	}
 
 	// First, perform standard delete
-	if err := r.DeleteRealm(doc); err != nil {
+	if _, err := r.DeleteRealm(doc); err != nil {
 		r.logger.WarnContext(r.ctx, "delete failed, continuing with purge", "error", err)
 	}
 

@@ -24,6 +24,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -31,7 +32,7 @@ import (
 // StackController defines the interface for stack deletion operations.
 // It is exported for use in tests.
 type StackController interface {
-	DeleteStack(name, realm, space string, force, cascade bool) (*controller.DeleteStackResult, error)
+	DeleteStack(doc *v1beta1.StackDoc, force, cascade bool) (controller.DeleteStackResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -71,7 +72,17 @@ func NewStackCmd() *cobra.Command {
 			force := shared.ParseForceFlag(cmd)
 			cascade := shared.ParseCascadeFlag(cmd)
 
-			result, err := ctrl.DeleteStack(name, realm, space, force, cascade)
+			stackDoc := &v1beta1.StackDoc{
+				Metadata: v1beta1.StackMetadata{
+					Name: name,
+				},
+				Spec: v1beta1.StackSpec{
+					RealmID: realm,
+					SpaceID: space,
+				},
+			}
+
+			result, err := ctrl.DeleteStack(stackDoc, force, cascade)
 			if err != nil {
 				return err
 			}

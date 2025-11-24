@@ -30,6 +30,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -147,12 +148,12 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 				"realm": "my-realm",
 			},
 			controller: &fakePurgeController{
-				purgeSpaceFn: func(name, _ string, _ bool, _ bool) (*controller.PurgeSpaceResult, error) {
+				purgeSpaceFn: func(doc *v1beta1.SpaceDoc, _ bool, _ bool) (controller.PurgeSpaceResult, error) {
 					// Should not reach here due to validation, but if it does, expect empty name
-					if name == "" {
-						return nil, errdefs.ErrSpaceNameRequired
+					if doc == nil || doc.Metadata.Name == "" {
+						return controller.PurgeSpaceResult{}, errdefs.ErrSpaceNameRequired
 					}
-					return nil, errors.New("unexpected call")
+					return controller.PurgeSpaceResult{}, errors.New("unexpected call")
 				},
 			},
 			wantErr: "space name is required",
@@ -176,11 +177,11 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 				"realm": "my-realm",
 			},
 			controller: &fakePurgeController{
-				purgeSpaceFn: func(name, realm string, _ bool, _ bool) (*controller.PurgeSpaceResult, error) {
-					if name != "my-space" || realm != "my-realm" {
-						return nil, errors.New("unexpected args")
+				purgeSpaceFn: func(doc *v1beta1.SpaceDoc, _ bool, _ bool) (controller.PurgeSpaceResult, error) {
+					if doc == nil || doc.Metadata.Name != "my-space" || doc.Spec.RealmID != "my-realm" {
+						return controller.PurgeSpaceResult{}, errors.New("unexpected args")
 					}
-					return nil, errors.New("space not found")
+					return controller.PurgeSpaceResult{}, errors.New("space not found")
 				},
 			},
 			wantErr: "space not found",
@@ -192,8 +193,8 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 				"realm": "my-realm",
 			},
 			controller: &fakePurgeController{
-				purgeSpaceFn: func(_ string, _ string, _ bool, _ bool) (*controller.PurgeSpaceResult, error) {
-					return nil, errdefs.ErrSpaceNotFound
+				purgeSpaceFn: func(_ *v1beta1.SpaceDoc, _ bool, _ bool) (controller.PurgeSpaceResult, error) {
+					return controller.PurgeSpaceResult{}, errdefs.ErrSpaceNotFound
 				},
 			},
 			wantErr: "space not found",
@@ -205,20 +206,25 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 				"realm": "my-realm",
 			},
 			controller: &fakePurgeController{
-				purgeSpaceFn: func(name, realm string, _ bool, _ bool) (*controller.PurgeSpaceResult, error) {
-					if name != "my-space" || realm != "my-realm" {
-						return nil, errors.New("unexpected args")
+				purgeSpaceFn: func(doc *v1beta1.SpaceDoc, _ bool, _ bool) (controller.PurgeSpaceResult, error) {
+					if doc == nil || doc.Metadata.Name != "my-space" || doc.Spec.RealmID != "my-realm" {
+						return controller.PurgeSpaceResult{}, errors.New("unexpected args")
 					}
-					return &controller.PurgeSpaceResult{
-						SpaceName: "my-space",
-						RealmName: "my-realm",
-						Deleted:   []string{"space"},
-						Purged:    []string{},
+					return controller.PurgeSpaceResult{
+						SpaceDoc: &v1beta1.SpaceDoc{
+							Metadata: v1beta1.SpaceMetadata{Name: "my-space"},
+							Spec:     v1beta1.SpaceSpec{RealmID: "my-realm"},
+						},
+						MetadataDeleted:   true,
+						CgroupDeleted:     true,
+						CNINetworkDeleted: true,
+						Deleted:           []string{"space"},
 					}, nil
 				},
 			},
 			wantOutput: []string{
 				"Purged space \"my-space\" from realm \"my-realm\"",
+				"Deleted resources -> metadata:true cgroup:true cni:true",
 			},
 		},
 		{
@@ -228,20 +234,26 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 				"realm": "my-realm",
 			},
 			controller: &fakePurgeController{
-				purgeSpaceFn: func(name, realm string, _ bool, _ bool) (*controller.PurgeSpaceResult, error) {
-					if name != "my-space" || realm != "my-realm" {
-						return nil, errors.New("unexpected args")
+				purgeSpaceFn: func(doc *v1beta1.SpaceDoc, _ bool, _ bool) (controller.PurgeSpaceResult, error) {
+					if doc == nil || doc.Metadata.Name != "my-space" || doc.Spec.RealmID != "my-realm" {
+						return controller.PurgeSpaceResult{}, errors.New("unexpected args")
 					}
-					return &controller.PurgeSpaceResult{
-						SpaceName: "my-space",
-						RealmName: "my-realm",
-						Deleted:   []string{"space"},
-						Purged:    []string{"cni-network", "orphaned-containers"},
+					return controller.PurgeSpaceResult{
+						SpaceDoc: &v1beta1.SpaceDoc{
+							Metadata: v1beta1.SpaceMetadata{Name: "my-space"},
+							Spec:     v1beta1.SpaceSpec{RealmID: "my-realm"},
+						},
+						MetadataDeleted:   true,
+						CgroupDeleted:     true,
+						CNINetworkDeleted: false,
+						Deleted:           []string{"space"},
+						Purged:            []string{"cni-network", "orphaned-containers"},
 					}, nil
 				},
 			},
 			wantOutput: []string{
 				"Purged space \"my-space\" from realm \"my-realm\"",
+				"Deleted resources -> metadata:true cgroup:true cni:false",
 				"Additional resources purged: [cni-network orphaned-containers]",
 			},
 		},
@@ -252,21 +264,26 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 				"realm": "  my-realm  ",
 			},
 			controller: &fakePurgeController{
-				purgeSpaceFn: func(name, realm string, _ bool, _ bool) (*controller.PurgeSpaceResult, error) {
+				purgeSpaceFn: func(doc *v1beta1.SpaceDoc, _ bool, _ bool) (controller.PurgeSpaceResult, error) {
 					// Verify that trimming happened
-					if name != "my-space" || realm != "my-realm" {
-						return nil, errors.New("unexpected trimmed args")
+					if doc == nil || doc.Metadata.Name != "my-space" || doc.Spec.RealmID != "my-realm" {
+						return controller.PurgeSpaceResult{}, errors.New("unexpected trimmed args")
 					}
-					return &controller.PurgeSpaceResult{
-						SpaceName: "my-space",
-						RealmName: "my-realm",
-						Deleted:   []string{"space"},
-						Purged:    []string{},
+					return controller.PurgeSpaceResult{
+						SpaceDoc: &v1beta1.SpaceDoc{
+							Metadata: v1beta1.SpaceMetadata{Name: "my-space"},
+							Spec:     v1beta1.SpaceSpec{RealmID: "my-realm"},
+						},
+						MetadataDeleted:   true,
+						CgroupDeleted:     true,
+						CNINetworkDeleted: true,
+						Deleted:           []string{"space"},
 					}, nil
 				},
 			},
 			wantOutput: []string{
 				"Purged space \"my-space\" from realm \"my-realm\"",
+				"Deleted resources -> metadata:true cgroup:true cni:true",
 			},
 		},
 		{
@@ -276,20 +293,25 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 				config.KUKE_PURGE_SPACE_REALM.ViperKey: "viper-realm",
 			},
 			controller: &fakePurgeController{
-				purgeSpaceFn: func(name, realm string, _ bool, _ bool) (*controller.PurgeSpaceResult, error) {
-					if name != "my-space" || realm != "viper-realm" {
-						return nil, errors.New("unexpected args from viper")
+				purgeSpaceFn: func(doc *v1beta1.SpaceDoc, _ bool, _ bool) (controller.PurgeSpaceResult, error) {
+					if doc == nil || doc.Metadata.Name != "my-space" || doc.Spec.RealmID != "viper-realm" {
+						return controller.PurgeSpaceResult{}, errors.New("unexpected args from viper")
 					}
-					return &controller.PurgeSpaceResult{
-						SpaceName: "my-space",
-						RealmName: "viper-realm",
-						Deleted:   []string{"space"},
-						Purged:    []string{},
+					return controller.PurgeSpaceResult{
+						SpaceDoc: &v1beta1.SpaceDoc{
+							Metadata: v1beta1.SpaceMetadata{Name: "my-space"},
+							Spec:     v1beta1.SpaceSpec{RealmID: "viper-realm"},
+						},
+						MetadataDeleted:   true,
+						CgroupDeleted:     true,
+						CNINetworkDeleted: true,
+						Deleted:           []string{"space"},
 					}, nil
 				},
 			},
 			wantOutput: []string{
 				"Purged space \"my-space\" from realm \"viper-realm\"",
+				"Deleted resources -> metadata:true cgroup:true cni:true",
 			},
 		},
 		{
@@ -300,20 +322,29 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 				"force": "true",
 			},
 			controller: &fakePurgeController{
-				purgeSpaceFn: func(_ string, _ string, force bool, _ bool) (*controller.PurgeSpaceResult, error) {
+				purgeSpaceFn: func(doc *v1beta1.SpaceDoc, force bool, _ bool) (controller.PurgeSpaceResult, error) {
 					if !force {
-						return nil, errors.New("force flag not parsed correctly")
+						return controller.PurgeSpaceResult{}, errors.New("force flag not parsed correctly")
 					}
-					return &controller.PurgeSpaceResult{
-						SpaceName: "my-space",
-						RealmName: "my-realm",
-						Deleted:   []string{"space"},
-						Purged:    []string{},
+					if doc == nil || doc.Metadata.Name != "my-space" || doc.Spec.RealmID != "my-realm" {
+						return controller.PurgeSpaceResult{}, errors.New("unexpected args")
+					}
+					return controller.PurgeSpaceResult{
+						SpaceDoc: &v1beta1.SpaceDoc{
+							Metadata: v1beta1.SpaceMetadata{Name: "my-space"},
+							Spec:     v1beta1.SpaceSpec{RealmID: "my-realm"},
+						},
+						MetadataDeleted:   true,
+						CgroupDeleted:     true,
+						CNINetworkDeleted: true,
+						Force:             true,
+						Deleted:           []string{"space"},
 					}, nil
 				},
 			},
 			wantOutput: []string{
 				"Purged space \"my-space\" from realm \"my-realm\"",
+				"Deleted resources -> metadata:true cgroup:true cni:true",
 			},
 		},
 		{
@@ -324,20 +355,29 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 				"cascade": "true",
 			},
 			controller: &fakePurgeController{
-				purgeSpaceFn: func(_ string, _ string, _ bool, cascade bool) (*controller.PurgeSpaceResult, error) {
+				purgeSpaceFn: func(doc *v1beta1.SpaceDoc, _ bool, cascade bool) (controller.PurgeSpaceResult, error) {
 					if !cascade {
-						return nil, errors.New("cascade flag not parsed correctly")
+						return controller.PurgeSpaceResult{}, errors.New("cascade flag not parsed correctly")
 					}
-					return &controller.PurgeSpaceResult{
-						SpaceName: "my-space",
-						RealmName: "my-realm",
-						Deleted:   []string{"space"},
-						Purged:    []string{},
+					if doc == nil || doc.Metadata.Name != "my-space" || doc.Spec.RealmID != "my-realm" {
+						return controller.PurgeSpaceResult{}, errors.New("unexpected args")
+					}
+					return controller.PurgeSpaceResult{
+						SpaceDoc: &v1beta1.SpaceDoc{
+							Metadata: v1beta1.SpaceMetadata{Name: "my-space"},
+							Spec:     v1beta1.SpaceSpec{RealmID: "my-realm"},
+						},
+						MetadataDeleted:   true,
+						CgroupDeleted:     true,
+						CNINetworkDeleted: true,
+						Cascade:           true,
+						Deleted:           []string{"space"},
 					}, nil
 				},
 			},
 			wantOutput: []string{
 				"Purged space \"my-space\" from realm \"my-realm\"",
+				"Deleted resources -> metadata:true cgroup:true cni:true",
 			},
 		},
 		{
@@ -349,20 +389,30 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 				"cascade": "true",
 			},
 			controller: &fakePurgeController{
-				purgeSpaceFn: func(_ string, _ string, force bool, cascade bool) (*controller.PurgeSpaceResult, error) {
+				purgeSpaceFn: func(doc *v1beta1.SpaceDoc, force bool, cascade bool) (controller.PurgeSpaceResult, error) {
 					if !force || !cascade {
-						return nil, errors.New("flags not parsed correctly")
+						return controller.PurgeSpaceResult{}, errors.New("flags not parsed correctly")
 					}
-					return &controller.PurgeSpaceResult{
-						SpaceName: "my-space",
-						RealmName: "my-realm",
-						Deleted:   []string{"space"},
-						Purged:    []string{},
+					if doc == nil || doc.Metadata.Name != "my-space" || doc.Spec.RealmID != "my-realm" {
+						return controller.PurgeSpaceResult{}, errors.New("unexpected args")
+					}
+					return controller.PurgeSpaceResult{
+						SpaceDoc: &v1beta1.SpaceDoc{
+							Metadata: v1beta1.SpaceMetadata{Name: "my-space"},
+							Spec:     v1beta1.SpaceSpec{RealmID: "my-realm"},
+						},
+						MetadataDeleted:   true,
+						CgroupDeleted:     true,
+						CNINetworkDeleted: true,
+						Force:             true,
+						Cascade:           true,
+						Deleted:           []string{"space"},
 					}, nil
 				},
 			},
 			wantOutput: []string{
 				"Purged space \"my-space\" from realm \"my-realm\"",
+				"Deleted resources -> metadata:true cgroup:true cni:true",
 			},
 		},
 	}
@@ -454,15 +504,15 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 
 // fakePurgeController provides a mock implementation for testing PurgeSpace.
 type fakePurgeController struct {
-	purgeSpaceFn func(name, realmName string, force, cascade bool) (*controller.PurgeSpaceResult, error)
+	purgeSpaceFn func(doc *v1beta1.SpaceDoc, force, cascade bool) (controller.PurgeSpaceResult, error)
 }
 
 func (f *fakePurgeController) PurgeSpace(
-	name, realmName string,
+	doc *v1beta1.SpaceDoc,
 	force, cascade bool,
-) (*controller.PurgeSpaceResult, error) {
+) (controller.PurgeSpaceResult, error) {
 	if f.purgeSpaceFn == nil {
-		return nil, errors.New("unexpected PurgeSpace call")
+		return controller.PurgeSpaceResult{}, errors.New("unexpected PurgeSpace call")
 	}
-	return f.purgeSpaceFn(name, realmName, force, cascade)
+	return f.purgeSpaceFn(doc, force, cascade)
 }

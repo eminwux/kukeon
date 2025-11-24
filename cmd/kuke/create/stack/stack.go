@@ -24,12 +24,13 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type stackController interface {
-	CreateStack(opts controller.CreateStackOptions) (controller.CreateStackResult, error)
+	CreateStack(doc *v1beta1.StackDoc) (controller.CreateStackResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -89,8 +90,8 @@ type controllerWrapper struct {
 	ctrl *controller.Exec
 }
 
-func (w *controllerWrapper) CreateStack(opts controller.CreateStackOptions) (controller.CreateStackResult, error) {
-	return w.ctrl.CreateStack(opts)
+func (w *controllerWrapper) CreateStack(doc *v1beta1.StackDoc) (controller.CreateStackResult, error) {
+	return w.ctrl.CreateStack(doc)
 }
 
 func runCreateStackWithDeps(
@@ -124,11 +125,18 @@ func runCreateStackWithDeps(
 		return err
 	}
 
-	result, err := ctrl.CreateStack(controller.CreateStackOptions{
-		Name:      name,
-		RealmName: realm,
-		SpaceName: space,
-	})
+	doc := &v1beta1.StackDoc{
+		Metadata: v1beta1.StackMetadata{
+			Name: name,
+		},
+		Spec: v1beta1.StackSpec{
+			ID:      name,
+			RealmID: realm,
+			SpaceID: space,
+		},
+	}
+
+	result, err := ctrl.CreateStack(doc)
 	if err != nil {
 		return err
 	}
@@ -138,7 +146,11 @@ func runCreateStackWithDeps(
 }
 
 func printStackResult(cmd *cobra.Command, result controller.CreateStackResult, printOutcome printOutcomeFunc) {
-	cmd.Printf("Stack %q (realm %q, space %q)\n", result.Name, result.RealmName, result.SpaceName)
+	if result.StackDoc == nil {
+		cmd.Printf("Stack (realm %q, space %q)\n", "", "")
+	} else {
+		cmd.Printf("Stack %q (realm %q, space %q)\n", result.StackDoc.Metadata.Name, result.StackDoc.Spec.RealmID, result.StackDoc.Spec.SpaceID)
+	}
 	printOutcome(cmd, "metadata", result.MetadataExistsPost, result.Created)
 	printOutcome(cmd, "cgroup", result.CgroupExistsPost, result.CgroupCreated)
 }

@@ -398,7 +398,7 @@ func TestPrintContainers(t *testing.T) {
 }
 
 func TestNewContainerCmdRunE(t *testing.T) {
-	containerAlpha := &v1beta1.ContainerSpec{
+	containerAlphaSpec := &v1beta1.ContainerSpec{
 		ID:      "alpha",
 		RealmID: "earth",
 		SpaceID: "mars",
@@ -406,7 +406,19 @@ func TestNewContainerCmdRunE(t *testing.T) {
 		CellID:  "jupiter",
 		Image:   "nginx:latest",
 	}
-	containerList := []*v1beta1.ContainerSpec{containerAlpha}
+	containerAlphaDoc := &v1beta1.ContainerDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindContainer,
+		Metadata: v1beta1.ContainerMetadata{
+			Name:   "alpha",
+			Labels: make(map[string]string),
+		},
+		Spec: *containerAlphaSpec,
+		Status: v1beta1.ContainerStatus{
+			State: v1beta1.ContainerStateReady,
+		},
+	}
+	containerList := []*v1beta1.ContainerSpec{containerAlphaSpec}
 
 	tests := []struct {
 		name        string
@@ -428,14 +440,20 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			stackFlag: "venus",
 			cellFlag:  "jupiter",
 			controller: &fakeContainerController{
-				getContainerFn: func(name string, realm, space, stack, cell string) (*v1beta1.ContainerSpec, error) {
-					if name != "alpha" || realm != "earth" || space != "mars" || stack != "venus" || cell != "jupiter" {
-						return nil, errors.New("unexpected args")
+				getContainerFn: func(doc *v1beta1.ContainerDoc) (container.GetContainerResult, error) {
+					if doc.Metadata.Name != "alpha" || doc.Spec.RealmID != "earth" || doc.Spec.SpaceID != "mars" ||
+						doc.Spec.StackID != "venus" ||
+						doc.Spec.CellID != "jupiter" {
+						return container.GetContainerResult{}, errors.New("unexpected args")
 					}
-					return containerAlpha, nil
+					return container.GetContainerResult{
+						ContainerDoc:       containerAlphaDoc,
+						CellMetadataExists: true,
+						ContainerExists:    true,
+					}, nil
 				},
 			},
-			wantPrinted: containerAlpha,
+			wantPrinted: containerAlphaDoc,
 		},
 		{
 			name:       "list containers success",
@@ -501,8 +519,8 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			stackFlag: "venus",
 			cellFlag:  "jupiter",
 			controller: &fakeContainerController{
-				getContainerFn: func(_ string, _ string, _ string, _ string, _ string) (*v1beta1.ContainerSpec, error) {
-					return nil, errdefs.ErrContainerNameRequired
+				getContainerFn: func(_ *v1beta1.ContainerDoc) (container.GetContainerResult, error) {
+					return container.GetContainerResult{}, errdefs.ErrContainerNameRequired
 				},
 			},
 			wantErr: "container name is required",
@@ -515,8 +533,8 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			stackFlag: "venus",
 			cellFlag:  "jupiter",
 			controller: &fakeContainerController{
-				getContainerFn: func(_ string, _ string, _ string, _ string, _ string) (*v1beta1.ContainerSpec, error) {
-					return nil, errors.New("controller error")
+				getContainerFn: func(_ *v1beta1.ContainerDoc) (container.GetContainerResult, error) {
+					return container.GetContainerResult{}, errors.New("controller error")
 				},
 			},
 			wantErr: "controller error",
@@ -537,14 +555,41 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			stackFlag: "venus",
 			cellFlag:  "jupiter",
 			controller: &fakeContainerController{
-				getContainerFn: func(name string, _ string, _ string, _ string, _ string) (*v1beta1.ContainerSpec, error) {
-					if name != "beta" {
-						return nil, errors.New("unexpected name")
+				getContainerFn: func(doc *v1beta1.ContainerDoc) (container.GetContainerResult, error) {
+					if doc.Metadata.Name != "beta" {
+						return container.GetContainerResult{}, errors.New("unexpected name")
 					}
-					return containerAlpha, nil
+					betaDoc := &v1beta1.ContainerDoc{
+						APIVersion: v1beta1.APIVersionV1Beta1,
+						Kind:       v1beta1.KindContainer,
+						Metadata: v1beta1.ContainerMetadata{
+							Name:   "beta",
+							Labels: make(map[string]string),
+						},
+						Spec: *containerAlphaSpec,
+						Status: v1beta1.ContainerStatus{
+							State: v1beta1.ContainerStateReady,
+						},
+					}
+					return container.GetContainerResult{
+						ContainerDoc:       betaDoc,
+						CellMetadataExists: true,
+						ContainerExists:    true,
+					}, nil
 				},
 			},
-			wantPrinted: containerAlpha,
+			wantPrinted: &v1beta1.ContainerDoc{
+				APIVersion: v1beta1.APIVersionV1Beta1,
+				Kind:       v1beta1.KindContainer,
+				Metadata: v1beta1.ContainerMetadata{
+					Name:   "beta",
+					Labels: make(map[string]string),
+				},
+				Spec: *containerAlphaSpec,
+				Status: v1beta1.ContainerStatus{
+					State: v1beta1.ContainerStateReady,
+				},
+			},
 		},
 	}
 
@@ -646,17 +691,17 @@ func TestNewContainerCmdRunE(t *testing.T) {
 }
 
 type fakeContainerController struct {
-	getContainerFn   func(name, realm, space, stack, cell string) (*v1beta1.ContainerSpec, error)
+	getContainerFn   func(doc *v1beta1.ContainerDoc) (container.GetContainerResult, error)
 	listContainersFn func(realm, space, stack, cell string) ([]*v1beta1.ContainerSpec, error)
 }
 
 func (f *fakeContainerController) GetContainer(
-	name, realmName, spaceName, stackName, cellName string,
-) (*v1beta1.ContainerSpec, error) {
+	doc *v1beta1.ContainerDoc,
+) (container.GetContainerResult, error) {
 	if f.getContainerFn == nil {
-		return nil, errors.New("unexpected GetContainer call")
+		return container.GetContainerResult{}, errors.New("unexpected GetContainer call")
 	}
-	return f.getContainerFn(name, realmName, spaceName, stackName, cellName)
+	return f.getContainerFn(doc)
 }
 
 func (f *fakeContainerController) ListContainers(

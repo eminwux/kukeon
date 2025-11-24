@@ -30,8 +30,11 @@ import (
 	"github.com/spf13/viper"
 )
 
+// GetContainerResult is an alias for controller.GetContainerResult
+type GetContainerResult = controller.GetContainerResult
+
 type ContainerController interface {
-	GetContainer(name, realmName, spaceName, stackName, cellName string) (*v1beta1.ContainerSpec, error)
+	GetContainer(doc *v1beta1.ContainerDoc) (GetContainerResult, error)
 	ListContainers(realmName, spaceName, stackName, cellName string) ([]*v1beta1.ContainerSpec, error)
 }
 
@@ -175,13 +178,33 @@ func runContainerCmdWithDeps(
 			return fmt.Errorf("%w (--cell)", errdefs.ErrCellNameRequired)
 		}
 
-		var container *v1beta1.ContainerSpec
-		container, err = ctrl.GetContainer(name, realm, space, stack, cell)
+		// Construct ContainerDoc from command args/flags
+		containerDoc := &v1beta1.ContainerDoc{
+			APIVersion: v1beta1.APIVersionV1Beta1,
+			Kind:       v1beta1.KindContainer,
+			Metadata: v1beta1.ContainerMetadata{
+				Name:   name,
+				Labels: make(map[string]string),
+			},
+			Spec: v1beta1.ContainerSpec{
+				ID:      name,
+				RealmID: realm,
+				SpaceID: space,
+				StackID: stack,
+				CellID:  cell,
+			},
+		}
+
+		result, err := ctrl.GetContainer(containerDoc)
 		if err != nil {
 			return err
 		}
 
-		return printContainer(cmd, container, outputFormat, printYAML, printJSON)
+		if result.ContainerDoc == nil {
+			return fmt.Errorf("container %q not found", name)
+		}
+
+		return printContainer(cmd, result.ContainerDoc, outputFormat, printYAML, printJSON)
 	}
 
 	// List containers (optionally filtered by realm, space, stack, and/or cell)
@@ -280,9 +303,9 @@ type controllerWrapper struct {
 }
 
 func (w *controllerWrapper) GetContainer(
-	name, realmName, spaceName, stackName, cellName string,
-) (*v1beta1.ContainerSpec, error) {
-	return w.ctrl.GetContainer(name, realmName, spaceName, stackName, cellName)
+	doc *v1beta1.ContainerDoc,
+) (GetContainerResult, error) {
+	return w.ctrl.GetContainer(doc)
 }
 
 func (w *controllerWrapper) ListContainers(

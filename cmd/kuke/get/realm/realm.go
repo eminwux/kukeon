@@ -31,7 +31,7 @@ import (
 )
 
 type RealmController interface {
-	GetRealm(name string) (*v1beta1.RealmDoc, error)
+	GetRealm(doc *v1beta1.RealmDoc) (controller.GetRealmResult, error)
 	ListRealms() ([]*v1beta1.RealmDoc, error)
 }
 
@@ -74,7 +74,13 @@ func NewRealmCmd() *cobra.Command {
 
 			if name != "" {
 				// Get single realm
-				realm, err := ctrl.GetRealm(name)
+				doc := &v1beta1.RealmDoc{
+					Metadata: v1beta1.RealmMetadata{
+						Name: name,
+					},
+				}
+				var result controller.GetRealmResult
+				result, err = ctrl.GetRealm(doc)
 				if err != nil {
 					if errors.Is(err, errdefs.ErrRealmNotFound) {
 						return fmt.Errorf("realm %q not found", name)
@@ -82,7 +88,11 @@ func NewRealmCmd() *cobra.Command {
 					return err
 				}
 
-				return printRealm(cmd, realm, outputFormat)
+				if result.RealmDoc == nil {
+					return fmt.Errorf("realm %q not found", name)
+				}
+
+				return printRealm(cmd, result.RealmDoc, outputFormat)
 			}
 
 			// List all realms
@@ -167,8 +177,8 @@ type controllerWrapper struct {
 	ctrl *controller.Exec
 }
 
-func (w *controllerWrapper) GetRealm(name string) (*v1beta1.RealmDoc, error) {
-	return w.ctrl.GetRealm(name)
+func (w *controllerWrapper) GetRealm(doc *v1beta1.RealmDoc) (controller.GetRealmResult, error) {
+	return w.ctrl.GetRealm(doc)
 }
 
 func (w *controllerWrapper) ListRealms() ([]*v1beta1.RealmDoc, error) {

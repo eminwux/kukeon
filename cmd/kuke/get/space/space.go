@@ -31,7 +31,7 @@ import (
 )
 
 type SpaceController interface {
-	GetSpace(name, realm string) (*v1beta1.SpaceDoc, error)
+	GetSpace(doc *v1beta1.SpaceDoc) (controller.GetSpaceResult, error)
 	ListSpaces(realm string) ([]*v1beta1.SpaceDoc, error)
 }
 
@@ -105,7 +105,16 @@ func NewSpaceCmd() *cobra.Command {
 					return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
 				}
 
-				space, getErr := ctrl.GetSpace(name, realm)
+				doc := &v1beta1.SpaceDoc{
+					Metadata: v1beta1.SpaceMetadata{
+						Name: name,
+					},
+					Spec: v1beta1.SpaceSpec{
+						RealmID: realm,
+					},
+				}
+
+				result, getErr := ctrl.GetSpace(doc)
 				if getErr != nil {
 					if errors.Is(getErr, errdefs.ErrSpaceNotFound) {
 						return fmt.Errorf("space %q not found in realm %q", name, realm)
@@ -113,7 +122,11 @@ func NewSpaceCmd() *cobra.Command {
 					return getErr
 				}
 
-				return printSpace(space, outputFormat)
+				if result.SpaceDoc == nil {
+					return fmt.Errorf("space %q not found in realm %q", name, realm)
+				}
+
+				return printSpace(result.SpaceDoc, outputFormat)
 			}
 
 			// List spaces (optionally filtered by realm)
@@ -204,8 +217,8 @@ type controllerWrapper struct {
 	ctrl *controller.Exec
 }
 
-func (w *controllerWrapper) GetSpace(name, realm string) (*v1beta1.SpaceDoc, error) {
-	return w.ctrl.GetSpace(name, realm)
+func (w *controllerWrapper) GetSpace(doc *v1beta1.SpaceDoc) (controller.GetSpaceResult, error) {
+	return w.ctrl.GetSpace(doc)
 }
 
 func (w *controllerWrapper) ListSpaces(realm string) ([]*v1beta1.SpaceDoc, error) {

@@ -24,12 +24,14 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/util/naming"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type spaceController interface {
-	CreateSpace(opts controller.CreateSpaceOptions) (controller.CreateSpaceResult, error)
+	CreateSpace(doc *v1beta1.SpaceDoc) (controller.CreateSpaceResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -39,8 +41,8 @@ type controllerWrapper struct {
 	ctrl *controller.Exec
 }
 
-func (w *controllerWrapper) CreateSpace(opts controller.CreateSpaceOptions) (controller.CreateSpaceResult, error) {
-	return w.ctrl.CreateSpace(opts)
+func (w *controllerWrapper) CreateSpace(doc *v1beta1.SpaceDoc) (controller.CreateSpaceResult, error) {
+	return w.ctrl.CreateSpace(doc)
 }
 
 func NewSpaceCmd() *cobra.Command {
@@ -79,10 +81,16 @@ func NewSpaceCmd() *cobra.Command {
 				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
-			result, err := ctrl.CreateSpace(controller.CreateSpaceOptions{
-				Name:      name,
-				RealmName: realm,
-			})
+			doc := &v1beta1.SpaceDoc{
+				Metadata: v1beta1.SpaceMetadata{
+					Name: name,
+				},
+				Spec: v1beta1.SpaceSpec{
+					RealmID: realm,
+				},
+			}
+
+			result, err := ctrl.CreateSpace(doc)
 			if err != nil {
 				return err
 			}
@@ -102,7 +110,22 @@ func NewSpaceCmd() *cobra.Command {
 }
 
 func printSpaceResult(cmd *cobra.Command, result controller.CreateSpaceResult) {
-	cmd.Printf("Space %q (realm %q, network %q)\n", result.Name, result.RealmName, result.NetworkName)
+	if result.SpaceDoc == nil {
+		cmd.Printf("Space (metadata missing)\n")
+		shared.PrintCreationOutcome(cmd, "metadata", result.MetadataExistsPost, result.Created)
+		shared.PrintCreationOutcome(cmd, "network", result.CNINetworkExistsPost, result.CNINetworkCreated)
+		shared.PrintCreationOutcome(cmd, "cgroup", result.CgroupExistsPost, result.CgroupCreated)
+		return
+	}
+
+	name := result.SpaceDoc.Metadata.Name
+	realm := result.SpaceDoc.Spec.RealmID
+	networkName, err := naming.BuildSpaceNetworkName(result.SpaceDoc)
+	if err != nil {
+		networkName = "<unknown>"
+	}
+
+	cmd.Printf("Space %q (realm %q, network %q)\n", name, realm, networkName)
 	shared.PrintCreationOutcome(cmd, "metadata", result.MetadataExistsPost, result.Created)
 	shared.PrintCreationOutcome(cmd, "network", result.CNINetworkExistsPost, result.CNINetworkCreated)
 	shared.PrintCreationOutcome(cmd, "cgroup", result.CgroupExistsPost, result.CgroupCreated)

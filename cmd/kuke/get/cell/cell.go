@@ -31,7 +31,7 @@ import (
 )
 
 type CellController interface {
-	GetCell(name, realm, space, stack string) (*v1beta1.CellDoc, error)
+	GetCell(doc *v1beta1.CellDoc) (controller.GetCellResult, error)
 	ListCells(realm, space, stack string) ([]*v1beta1.CellDoc, error)
 }
 
@@ -102,7 +102,17 @@ func NewCellCmd() *cobra.Command {
 					return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
 				}
 
-				cell, getErr := ctrl.GetCell(name, realm, space, stack)
+				doc := &v1beta1.CellDoc{
+					Metadata: v1beta1.CellMetadata{
+						Name: name,
+					},
+					Spec: v1beta1.CellSpec{
+						RealmID: realm,
+						SpaceID: space,
+						StackID: stack,
+					},
+				}
+				result, getErr := ctrl.GetCell(doc)
 				if getErr != nil {
 					if errors.Is(getErr, errdefs.ErrCellNotFound) {
 						return fmt.Errorf(
@@ -116,7 +126,7 @@ func NewCellCmd() *cobra.Command {
 					return getErr
 				}
 
-				return printCell(cmd, cell, outputFormat)
+				return printCell(cmd, result.CellDoc, outputFormat)
 			}
 
 			// List cells (optionally filtered by realm, space, and/or stack)
@@ -213,8 +223,8 @@ type controllerWrapper struct {
 	ctrl *controller.Exec
 }
 
-func (w *controllerWrapper) GetCell(name, realm, space, stack string) (*v1beta1.CellDoc, error) {
-	return w.ctrl.GetCell(name, realm, space, stack)
+func (w *controllerWrapper) GetCell(doc *v1beta1.CellDoc) (controller.GetCellResult, error) {
+	return w.ctrl.GetCell(doc)
 }
 
 func (w *controllerWrapper) ListCells(realm, space, stack string) ([]*v1beta1.CellDoc, error) {

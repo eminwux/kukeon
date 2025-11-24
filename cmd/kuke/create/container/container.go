@@ -24,12 +24,13 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type containerController interface {
-	CreateContainer(opts controller.CreateContainerOptions) (controller.CreateContainerResult, error)
+	CreateContainer(doc *v1beta1.ContainerDoc) (controller.CreateContainerResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -88,6 +89,22 @@ func NewContainerCmd() *cobra.Command {
 				return err
 			}
 
+			containerDoc := &v1beta1.ContainerDoc{
+				Metadata: v1beta1.ContainerMetadata{
+					Name: name,
+				},
+				Spec: v1beta1.ContainerSpec{
+					ID:      name,
+					RealmID: realm,
+					SpaceID: space,
+					StackID: stack,
+					CellID:  cell,
+					Image:   image,
+					Command: command,
+					Args:    argsList,
+				},
+			}
+
 			// Check for mock controller in context (for testing)
 			var ctrl containerController
 			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(containerController); ok {
@@ -101,21 +118,12 @@ func NewContainerCmd() *cobra.Command {
 				ctrl = realCtrl
 			}
 
-			result, err := ctrl.CreateContainer(controller.CreateContainerOptions{
-				RealmName:     realm,
-				SpaceName:     space,
-				StackName:     stack,
-				CellName:      cell,
-				ContainerName: name,
-				Image:         image,
-				Command:       command,
-				Args:          argsList,
-			})
+			createResult, err := ctrl.CreateContainer(containerDoc)
 			if err != nil {
 				return err
 			}
 
-			printContainerResult(cmd, result)
+			printContainerResult(cmd, createResult)
 			return nil
 		},
 	}
@@ -149,15 +157,19 @@ func NewContainerCmd() *cobra.Command {
 }
 
 func printContainerResult(cmd *cobra.Command, result controller.CreateContainerResult) {
-	cmd.Printf(
-		"Container %q (ID: %q) in cell %q (realm %q, space %q, stack %q)\n",
-		result.ContainerName,
-		result.ContainerID,
-		result.CellName,
-		result.RealmName,
-		result.SpaceName,
-		result.StackName,
-	)
+	if result.ContainerDoc != nil {
+		cmd.Printf(
+			"Container %q (ID: %q) in cell %q (realm %q, space %q, stack %q)\n",
+			result.ContainerDoc.Metadata.Name,
+			result.ContainerDoc.Spec.ID,
+			result.ContainerDoc.Spec.CellID,
+			result.ContainerDoc.Spec.RealmID,
+			result.ContainerDoc.Spec.SpaceID,
+			result.ContainerDoc.Spec.StackID,
+		)
+	} else {
+		cmd.Println("Container created (details unavailable)")
+	}
 	shared.PrintCreationOutcome(cmd, "container", result.ContainerExistsPost, result.ContainerCreated)
 	if result.Started {
 		cmd.Println("  - container: started")

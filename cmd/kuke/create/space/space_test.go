@@ -30,6 +30,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -119,14 +120,19 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			args:      []string{"my-space"},
 			realmFlag: "my-realm",
 			controller: &fakeSpaceController{
-				createSpaceFn: func(opts controller.CreateSpaceOptions) (controller.CreateSpaceResult, error) {
-					if opts.Name != "my-space" || opts.RealmName != "my-realm" {
+				createSpaceFn: func(doc *v1beta1.SpaceDoc) (controller.CreateSpaceResult, error) {
+					if doc.Metadata.Name != "my-space" || doc.Spec.RealmID != "my-realm" {
 						return controller.CreateSpaceResult{}, errors.New("unexpected options")
 					}
 					return controller.CreateSpaceResult{
-						Name:                 "my-space",
-						RealmName:            "my-realm",
-						NetworkName:          "net-my-space",
+						SpaceDoc: &v1beta1.SpaceDoc{
+							Metadata: v1beta1.SpaceMetadata{
+								Name: "my-space",
+							},
+							Spec: v1beta1.SpaceSpec{
+								RealmID: "my-realm",
+							},
+						},
 						Created:              true,
 						CNINetworkCreated:    true,
 						CgroupCreated:        true,
@@ -137,7 +143,7 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 				},
 			},
 			wantOutput: []string{
-				`Space "my-space" (realm "my-realm", network "net-my-space")`,
+				`Space "my-space" (realm "my-realm", network "my-realm-my-space")`,
 				"  - metadata: created",
 				"  - network: created",
 				"  - cgroup: created",
@@ -148,14 +154,19 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			realmFlag:  "my-realm",
 			nameConfig: "config-space",
 			controller: &fakeSpaceController{
-				createSpaceFn: func(opts controller.CreateSpaceOptions) (controller.CreateSpaceResult, error) {
-					if opts.Name != "config-space" || opts.RealmName != "my-realm" {
+				createSpaceFn: func(doc *v1beta1.SpaceDoc) (controller.CreateSpaceResult, error) {
+					if doc.Metadata.Name != "config-space" || doc.Spec.RealmID != "my-realm" {
 						return controller.CreateSpaceResult{}, errors.New("unexpected options")
 					}
 					return controller.CreateSpaceResult{
-						Name:                 "config-space",
-						RealmName:            "my-realm",
-						NetworkName:          "net-config-space",
+						SpaceDoc: &v1beta1.SpaceDoc{
+							Metadata: v1beta1.SpaceMetadata{
+								Name: "config-space",
+							},
+							Spec: v1beta1.SpaceSpec{
+								RealmID: "my-realm",
+							},
+						},
 						Created:              true,
 						CNINetworkCreated:    true,
 						CgroupCreated:        true,
@@ -166,7 +177,7 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 				},
 			},
 			wantOutput: []string{
-				`Space "config-space" (realm "my-realm", network "net-config-space")`,
+				`Space "config-space" (realm "my-realm", network "my-realm-config-space")`,
 				"  - metadata: created",
 				"  - network: created",
 				"  - cgroup: created",
@@ -177,11 +188,16 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			args:      []string{"existing-space"},
 			realmFlag: "my-realm",
 			controller: &fakeSpaceController{
-				createSpaceFn: func(_ controller.CreateSpaceOptions) (controller.CreateSpaceResult, error) {
+				createSpaceFn: func(_ *v1beta1.SpaceDoc) (controller.CreateSpaceResult, error) {
 					return controller.CreateSpaceResult{
-						Name:                 "existing-space",
-						RealmName:            "my-realm",
-						NetworkName:          "net-existing-space",
+						SpaceDoc: &v1beta1.SpaceDoc{
+							Metadata: v1beta1.SpaceMetadata{
+								Name: "existing-space",
+							},
+							Spec: v1beta1.SpaceSpec{
+								RealmID: "my-realm",
+							},
+						},
 						Created:              false,
 						CNINetworkCreated:    false,
 						CgroupCreated:        false,
@@ -192,7 +208,7 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 				},
 			},
 			wantOutput: []string{
-				`Space "existing-space" (realm "my-realm", network "net-existing-space")`,
+				`Space "existing-space" (realm "my-realm", network "my-realm-existing-space")`,
 				"  - metadata: already existed",
 				"  - network: already existed",
 				"  - cgroup: already existed",
@@ -203,11 +219,16 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			args:      []string{"mixed-space"},
 			realmFlag: "my-realm",
 			controller: &fakeSpaceController{
-				createSpaceFn: func(_ controller.CreateSpaceOptions) (controller.CreateSpaceResult, error) {
+				createSpaceFn: func(_ *v1beta1.SpaceDoc) (controller.CreateSpaceResult, error) {
 					return controller.CreateSpaceResult{
-						Name:                 "mixed-space",
-						RealmName:            "my-realm",
-						NetworkName:          "net-mixed-space",
+						SpaceDoc: &v1beta1.SpaceDoc{
+							Metadata: v1beta1.SpaceMetadata{
+								Name: "mixed-space",
+							},
+							Spec: v1beta1.SpaceSpec{
+								RealmID: "my-realm",
+							},
+						},
 						Created:              true,
 						CNINetworkCreated:    false,
 						CgroupCreated:        true,
@@ -218,7 +239,7 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 				},
 			},
 			wantOutput: []string{
-				`Space "mixed-space" (realm "my-realm", network "net-mixed-space")`,
+				`Space "mixed-space" (realm "my-realm", network "my-realm-mixed-space")`,
 				"  - metadata: created",
 				"  - network: already existed",
 				"  - cgroup: created",
@@ -266,7 +287,7 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			// Inject mock controller via context if needed
 			if tt.controller != nil {
 				if tt.createSpaceErr != nil {
-					tt.controller.createSpaceFn = func(controller.CreateSpaceOptions) (controller.CreateSpaceResult, error) {
+					tt.controller.createSpaceFn = func(*v1beta1.SpaceDoc) (controller.CreateSpaceResult, error) {
 						return controller.CreateSpaceResult{}, tt.createSpaceErr
 					}
 				}
@@ -323,9 +344,14 @@ func TestPrintSpaceResult(t *testing.T) {
 		{
 			name: "all created",
 			result: controller.CreateSpaceResult{
-				Name:                 "test-space",
-				RealmName:            "test-realm",
-				NetworkName:          "net-test",
+				SpaceDoc: &v1beta1.SpaceDoc{
+					Metadata: v1beta1.SpaceMetadata{
+						Name: "test-space",
+					},
+					Spec: v1beta1.SpaceSpec{
+						RealmID: "test-realm",
+					},
+				},
 				Created:              true,
 				CNINetworkCreated:    true,
 				CgroupCreated:        true,
@@ -334,7 +360,7 @@ func TestPrintSpaceResult(t *testing.T) {
 				CgroupExistsPost:     true,
 			},
 			wantOutput: []string{
-				`Space "test-space" (realm "test-realm", network "net-test")`,
+				`Space "test-space" (realm "test-realm", network "test-realm-test-space")`,
 				"  - metadata: created",
 				"  - network: created",
 				"  - cgroup: created",
@@ -343,9 +369,14 @@ func TestPrintSpaceResult(t *testing.T) {
 		{
 			name: "all already existed",
 			result: controller.CreateSpaceResult{
-				Name:                 "existing-space",
-				RealmName:            "existing-realm",
-				NetworkName:          "net-existing",
+				SpaceDoc: &v1beta1.SpaceDoc{
+					Metadata: v1beta1.SpaceMetadata{
+						Name: "existing-space",
+					},
+					Spec: v1beta1.SpaceSpec{
+						RealmID: "existing-realm",
+					},
+				},
 				Created:              false,
 				CNINetworkCreated:    false,
 				CgroupCreated:        false,
@@ -354,7 +385,7 @@ func TestPrintSpaceResult(t *testing.T) {
 				CgroupExistsPost:     true,
 			},
 			wantOutput: []string{
-				`Space "existing-space" (realm "existing-realm", network "net-existing")`,
+				`Space "existing-space" (realm "existing-realm", network "existing-realm-existing-space")`,
 				"  - metadata: already existed",
 				"  - network: already existed",
 				"  - cgroup: already existed",
@@ -363,9 +394,14 @@ func TestPrintSpaceResult(t *testing.T) {
 		{
 			name: "mixed states",
 			result: controller.CreateSpaceResult{
-				Name:                 "mixed-space",
-				RealmName:            "mixed-realm",
-				NetworkName:          "net-mixed",
+				SpaceDoc: &v1beta1.SpaceDoc{
+					Metadata: v1beta1.SpaceMetadata{
+						Name: "mixed-space",
+					},
+					Spec: v1beta1.SpaceSpec{
+						RealmID: "mixed-realm",
+					},
+				},
 				Created:              true,
 				CNINetworkCreated:    false,
 				CgroupCreated:        true,
@@ -374,7 +410,7 @@ func TestPrintSpaceResult(t *testing.T) {
 				CgroupExistsPost:     true,
 			},
 			wantOutput: []string{
-				`Space "mixed-space" (realm "mixed-realm", network "net-mixed")`,
+				`Space "mixed-space" (realm "mixed-realm", network "mixed-realm-mixed-space")`,
 				"  - metadata: created",
 				"  - network: already existed",
 				"  - cgroup: created",
@@ -383,9 +419,14 @@ func TestPrintSpaceResult(t *testing.T) {
 		{
 			name: "missing resources",
 			result: controller.CreateSpaceResult{
-				Name:                 "missing-space",
-				RealmName:            "missing-realm",
-				NetworkName:          "net-missing",
+				SpaceDoc: &v1beta1.SpaceDoc{
+					Metadata: v1beta1.SpaceMetadata{
+						Name: "missing-space",
+					},
+					Spec: v1beta1.SpaceSpec{
+						RealmID: "missing-realm",
+					},
+				},
 				Created:              false,
 				CNINetworkCreated:    false,
 				CgroupCreated:        false,
@@ -394,7 +435,7 @@ func TestPrintSpaceResult(t *testing.T) {
 				CgroupExistsPost:     false,
 			},
 			wantOutput: []string{
-				`Space "missing-space" (realm "missing-realm", network "net-missing")`,
+				`Space "missing-space" (realm "missing-realm", network "missing-realm-missing-space")`,
 				"  - metadata: missing",
 				"  - network: missing",
 				"  - cgroup: missing",
@@ -403,9 +444,14 @@ func TestPrintSpaceResult(t *testing.T) {
 		{
 			name: "metadata created but network and cgroup missing",
 			result: controller.CreateSpaceResult{
-				Name:                 "partial-space",
-				RealmName:            "partial-realm",
-				NetworkName:          "net-partial",
+				SpaceDoc: &v1beta1.SpaceDoc{
+					Metadata: v1beta1.SpaceMetadata{
+						Name: "partial-space",
+					},
+					Spec: v1beta1.SpaceSpec{
+						RealmID: "partial-realm",
+					},
+				},
 				Created:              true,
 				CNINetworkCreated:    false,
 				CgroupCreated:        false,
@@ -414,7 +460,7 @@ func TestPrintSpaceResult(t *testing.T) {
 				CgroupExistsPost:     false,
 			},
 			wantOutput: []string{
-				`Space "partial-space" (realm "partial-realm", network "net-partial")`,
+				`Space "partial-space" (realm "partial-realm", network "partial-realm-partial-space")`,
 				"  - metadata: created",
 				"  - network: missing",
 				"  - cgroup: missing",
@@ -448,12 +494,12 @@ func TestPrintSpaceResult(t *testing.T) {
 
 // fakeSpaceController implements spaceController for testing.
 type fakeSpaceController struct {
-	createSpaceFn func(opts controller.CreateSpaceOptions) (controller.CreateSpaceResult, error)
+	createSpaceFn func(doc *v1beta1.SpaceDoc) (controller.CreateSpaceResult, error)
 }
 
-func (f *fakeSpaceController) CreateSpace(opts controller.CreateSpaceOptions) (controller.CreateSpaceResult, error) {
+func (f *fakeSpaceController) CreateSpace(doc *v1beta1.SpaceDoc) (controller.CreateSpaceResult, error) {
 	if f.createSpaceFn == nil {
 		return controller.CreateSpaceResult{}, errors.New("unexpected CreateSpace call")
 	}
-	return f.createSpaceFn(opts)
+	return f.createSpaceFn(doc)
 }

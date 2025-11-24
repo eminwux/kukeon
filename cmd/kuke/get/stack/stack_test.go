@@ -30,7 +30,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
 	stack "github.com/eminwux/kukeon/cmd/kuke/get/stack"
 	"github.com/eminwux/kukeon/cmd/types"
-	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/controller"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -55,9 +55,9 @@ func TestNewStackCmd(t *testing.T) {
 			name:    "requires realm when name provided",
 			cliArgs: []string{"demo", "--space", "space-a"},
 			controller: &fakeStackController{
-				getStack: func(_, _, _ string) (*v1beta1.StackDoc, error) {
+				getStack: func(_ *v1beta1.StackDoc) (controller.GetStackResult, error) {
 					t.Fatalf("GetStack should not be called when realm is missing")
-					return nil, errors.New("unreachable")
+					return controller.GetStackResult{}, errors.New("unreachable")
 				},
 				listStacks: func(_, _ string) ([]*v1beta1.StackDoc, error) {
 					return nil, errors.New("unexpected list call")
@@ -69,9 +69,9 @@ func TestNewStackCmd(t *testing.T) {
 			name:    "requires space when name provided",
 			cliArgs: []string{"demo", "--realm", "realm-a"},
 			controller: &fakeStackController{
-				getStack: func(_, _, _ string) (*v1beta1.StackDoc, error) {
+				getStack: func(_ *v1beta1.StackDoc) (controller.GetStackResult, error) {
 					t.Fatalf("GetStack should not be called when space is missing")
-					return nil, errors.New("unreachable")
+					return controller.GetStackResult{}, errors.New("unreachable")
 				},
 				listStacks: func(_, _ string) ([]*v1beta1.StackDoc, error) {
 					return nil, errors.New("unexpected list call")
@@ -83,11 +83,14 @@ func TestNewStackCmd(t *testing.T) {
 			name:    "gets single stack with provided flags",
 			cliArgs: []string{"demo", "--realm", " realm-a ", "--space", "\tspace-a"},
 			controller: &fakeStackController{
-				getStack: func(name, realm, space string) (*v1beta1.StackDoc, error) {
-					if name != "demo" || realm != "realm-a" || space != "space-a" {
-						t.Fatalf("unexpected GetStack inputs: %q %q %q", name, realm, space)
+				getStack: func(doc *v1beta1.StackDoc) (controller.GetStackResult, error) {
+					if doc.Metadata.Name != "demo" || doc.Spec.RealmID != "realm-a" || doc.Spec.SpaceID != "space-a" {
+						t.Fatalf("unexpected GetStack inputs: name=%q realm=%q space=%q", doc.Metadata.Name, doc.Spec.RealmID, doc.Spec.SpaceID)
 					}
-					return &v1beta1.StackDoc{Metadata: v1beta1.StackMetadata{Name: "demo"}}, nil
+					return controller.GetStackResult{
+						StackDoc:       &v1beta1.StackDoc{Metadata: v1beta1.StackMetadata{Name: "demo"}},
+						MetadataExists: true,
+					}, nil
 				},
 				listStacks: func(_, _ string) ([]*v1beta1.StackDoc, error) {
 					return nil, errors.New("unexpected list call")
@@ -111,8 +114,8 @@ func TestNewStackCmd(t *testing.T) {
 			viperRealm: " realm-x ",
 			viperSpace: "\tspace-x",
 			controller: &fakeStackController{
-				getStack: func(_, _, _ string) (*v1beta1.StackDoc, error) {
-					return nil, errors.New("unexpected get call")
+				getStack: func(_ *v1beta1.StackDoc) (controller.GetStackResult, error) {
+					return controller.GetStackResult{}, errors.New("unexpected get call")
 				},
 				listStacks: func(realm, space string) ([]*v1beta1.StackDoc, error) {
 					if realm != "realm-x" || space != "space-x" {
@@ -141,8 +144,8 @@ func TestNewStackCmd(t *testing.T) {
 		{
 			name: "propagates list errors",
 			controller: &fakeStackController{
-				getStack: func(_, _, _ string) (*v1beta1.StackDoc, error) {
-					return nil, errors.New("unexpected get call")
+				getStack: func(_ *v1beta1.StackDoc) (controller.GetStackResult, error) {
+					return controller.GetStackResult{}, errors.New("unexpected get call")
 				},
 				listStacks: func(_, _ string) ([]*v1beta1.StackDoc, error) {
 					return nil, errors.New("boom")
@@ -393,15 +396,15 @@ func TestPrintStacks(t *testing.T) {
 }
 
 type fakeStackController struct {
-	getStack   func(name, realmName, spaceName string) (*v1beta1.StackDoc, error)
+	getStack   func(doc *v1beta1.StackDoc) (controller.GetStackResult, error)
 	listStacks func(realmName, spaceName string) ([]*v1beta1.StackDoc, error)
 }
 
-func (f *fakeStackController) GetStack(name, realmName, spaceName string) (*v1beta1.StackDoc, error) {
+func (f *fakeStackController) GetStack(doc *v1beta1.StackDoc) (controller.GetStackResult, error) {
 	if f.getStack == nil {
 		panic("GetStack was called unexpectedly")
 	}
-	return f.getStack(name, realmName, spaceName)
+	return f.getStack(doc)
 }
 
 func (f *fakeStackController) ListStacks(realmName, spaceName string) ([]*v1beta1.StackDoc, error) {
@@ -494,11 +497,14 @@ func TestNewStackCmdRunE(t *testing.T) {
 			realmFlag: "realm-a",
 			spaceFlag: "space-a",
 			controller: &fakeStackController{
-				getStack: func(name, realm, space string) (*v1beta1.StackDoc, error) {
-					if name != "alpha" || realm != "realm-a" || space != "space-a" {
-						return nil, errors.New("unexpected args")
+				getStack: func(doc *v1beta1.StackDoc) (controller.GetStackResult, error) {
+					if doc.Metadata.Name != "alpha" || doc.Spec.RealmID != "realm-a" || doc.Spec.SpaceID != "space-a" {
+						return controller.GetStackResult{}, errors.New("unexpected args")
 					}
-					return docAlpha, nil
+					return controller.GetStackResult{
+						StackDoc:       docAlpha,
+						MetadataExists: true,
+					}, nil
 				},
 			},
 			wantPrinted: docAlpha,
@@ -523,8 +529,8 @@ func TestNewStackCmdRunE(t *testing.T) {
 			args:      []string{"alpha"},
 			spaceFlag: "space-a",
 			controller: &fakeStackController{
-				getStack: func(_, _, _ string) (*v1beta1.StackDoc, error) {
-					return nil, errors.New("unexpected call")
+				getStack: func(_ *v1beta1.StackDoc) (controller.GetStackResult, error) {
+					return controller.GetStackResult{}, errors.New("unexpected call")
 				},
 			},
 			wantErr: "realm name is required",
@@ -534,8 +540,8 @@ func TestNewStackCmdRunE(t *testing.T) {
 			args:      []string{"alpha"},
 			realmFlag: "realm-a",
 			controller: &fakeStackController{
-				getStack: func(_, _, _ string) (*v1beta1.StackDoc, error) {
-					return nil, errors.New("unexpected call")
+				getStack: func(_ *v1beta1.StackDoc) (controller.GetStackResult, error) {
+					return controller.GetStackResult{}, errors.New("unexpected call")
 				},
 			},
 			wantErr: "space name is required",
@@ -546,8 +552,10 @@ func TestNewStackCmdRunE(t *testing.T) {
 			realmFlag: "realm-a",
 			spaceFlag: "space-a",
 			controller: &fakeStackController{
-				getStack: func(_, _, _ string) (*v1beta1.StackDoc, error) {
-					return nil, errdefs.ErrStackNotFound
+				getStack: func(_ *v1beta1.StackDoc) (controller.GetStackResult, error) {
+					return controller.GetStackResult{
+						MetadataExists: false,
+					}, nil
 				},
 			},
 			wantErr: "stack \"ghost\" not found in realm \"realm-a\", space \"space-a\"",

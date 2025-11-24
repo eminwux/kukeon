@@ -21,7 +21,7 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
-	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
+	"github.com/eminwux/kukeon/cmd/kuke/kill/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -30,37 +30,26 @@ import (
 )
 
 type containerController interface {
-	DeleteContainer(doc *v1beta1.ContainerDoc) (controller.DeleteContainerResult, error)
+	KillContainer(doc *v1beta1.ContainerDoc) (controller.KillContainerResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
 type MockControllerKey struct{}
 
+// NewContainerCmd builds the `kuke kill container` subcommand.
 func NewContainerCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "container [name]",
-		Short:         "Delete a container",
+		Short:         "Kill a container",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Check for mock controller in context (for testing)
-			var ctrl containerController
-			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(containerController); ok {
-				ctrl = mockCtrl
-			} else {
-				realCtrl, err := shared.ControllerFromCmd(cmd)
-				if err != nil {
-					return err
-				}
-				ctrl = realCtrl
-			}
-
 			name := strings.TrimSpace(args[0])
-			realm := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CONTAINER_REALM.ViperKey))
-			space := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CONTAINER_SPACE.ViperKey))
-			stack := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CONTAINER_STACK.ViperKey))
-			cell := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CONTAINER_CELL.ViperKey))
+			realm := strings.TrimSpace(viper.GetString(config.KUKE_KILL_CONTAINER_REALM.ViperKey))
+			space := strings.TrimSpace(viper.GetString(config.KUKE_KILL_CONTAINER_SPACE.ViperKey))
+			stack := strings.TrimSpace(viper.GetString(config.KUKE_KILL_CONTAINER_STACK.ViperKey))
+			cell := strings.TrimSpace(viper.GetString(config.KUKE_KILL_CONTAINER_CELL.ViperKey))
 
 			if realm == "" {
 				return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
@@ -75,11 +64,26 @@ func NewContainerCmd() *cobra.Command {
 				return fmt.Errorf("%w (--cell)", errdefs.ErrCellNameRequired)
 			}
 
+			var ctrl containerController
+			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(containerController); ok {
+				ctrl = mockCtrl
+			} else {
+				realCtrl, err := shared.ControllerFromCmd(cmd)
+				if err != nil {
+					return err
+				}
+				ctrl = realCtrl
+			}
+
 			containerDoc := &v1beta1.ContainerDoc{
+				APIVersion: v1beta1.APIVersionV1Beta1,
+				Kind:       v1beta1.KindContainer,
 				Metadata: v1beta1.ContainerMetadata{
-					Name: name,
+					Name:   name,
+					Labels: make(map[string]string),
 				},
 				Spec: v1beta1.ContainerSpec{
+					ID:      name,
 					RealmID: realm,
 					SpaceID: space,
 					StackID: stack,
@@ -87,29 +91,42 @@ func NewContainerCmd() *cobra.Command {
 				},
 			}
 
-			_, err := ctrl.DeleteContainer(containerDoc)
+			result, err := ctrl.KillContainer(containerDoc)
 			if err != nil {
 				return err
 			}
 
-			cmd.Printf("Deleted container %q from cell %q\n", name, cell)
+			containerName := name
+			cellName := cell
+			if result.ContainerDoc != nil {
+				if trimmed := strings.TrimSpace(result.ContainerDoc.Metadata.Name); trimmed != "" {
+					containerName = trimmed
+				} else if trimmed = strings.TrimSpace(result.ContainerDoc.Spec.ID); trimmed != "" {
+					containerName = trimmed
+				}
+
+				if trimmed := strings.TrimSpace(result.ContainerDoc.Spec.CellID); trimmed != "" {
+					cellName = trimmed
+				}
+			}
+
+			cmd.Printf("Killed container %q from cell %q\n", containerName, cellName)
 			return nil
 		},
 	}
 
 	cmd.Flags().String("realm", "", "Realm that owns the container")
-	_ = viper.BindPFlag(config.KUKE_DELETE_CONTAINER_REALM.ViperKey, cmd.Flags().Lookup("realm"))
+	_ = viper.BindPFlag(config.KUKE_KILL_CONTAINER_REALM.ViperKey, cmd.Flags().Lookup("realm"))
 
 	cmd.Flags().String("space", "", "Space that owns the container")
-	_ = viper.BindPFlag(config.KUKE_DELETE_CONTAINER_SPACE.ViperKey, cmd.Flags().Lookup("space"))
+	_ = viper.BindPFlag(config.KUKE_KILL_CONTAINER_SPACE.ViperKey, cmd.Flags().Lookup("space"))
 
 	cmd.Flags().String("stack", "", "Stack that owns the container")
-	_ = viper.BindPFlag(config.KUKE_DELETE_CONTAINER_STACK.ViperKey, cmd.Flags().Lookup("stack"))
+	_ = viper.BindPFlag(config.KUKE_KILL_CONTAINER_STACK.ViperKey, cmd.Flags().Lookup("stack"))
 
 	cmd.Flags().String("cell", "", "Cell that owns the container")
-	_ = viper.BindPFlag(config.KUKE_DELETE_CONTAINER_CELL.ViperKey, cmd.Flags().Lookup("cell"))
+	_ = viper.BindPFlag(config.KUKE_KILL_CONTAINER_CELL.ViperKey, cmd.Flags().Lookup("cell"))
 
-	// Register autocomplete functions for flags and positional argument
 	cmd.ValidArgsFunction = config.CompleteContainerNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)

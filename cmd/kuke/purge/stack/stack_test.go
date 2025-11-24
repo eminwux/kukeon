@@ -30,6 +30,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -155,12 +156,11 @@ func TestNewStackCmdRunE(t *testing.T) {
 				"space": "my-space",
 			},
 			controller: &fakeStackController{
-				purgeStackFn: func(name, _, _ string, _, _ bool) (*controller.PurgeStackResult, error) {
-					// Should not reach here due to validation, but if it does, expect empty name
-					if name == "" {
-						return nil, errdefs.ErrStackNameRequired
+				purgeStackFn: func(doc *v1beta1.StackDoc, _, _ bool) (controller.PurgeStackResult, error) {
+					if doc == nil || doc.Metadata.Name == "" {
+						return controller.PurgeStackResult{}, errdefs.ErrStackNameRequired
 					}
-					return nil, errors.New("unexpected call")
+					return controller.PurgeStackResult{}, errors.New("unexpected call")
 				},
 			},
 			wantErr: "stack name is required",
@@ -186,11 +186,12 @@ func TestNewStackCmdRunE(t *testing.T) {
 				"space": "my-space",
 			},
 			controller: &fakeStackController{
-				purgeStackFn: func(name, realm, space string, _, _ bool) (*controller.PurgeStackResult, error) {
-					if name != "my-stack" || realm != "my-realm" || space != "my-space" {
-						return nil, errors.New("unexpected args")
+				purgeStackFn: func(doc *v1beta1.StackDoc, _, _ bool) (controller.PurgeStackResult, error) {
+					if doc.Metadata.Name != "my-stack" || doc.Spec.RealmID != "my-realm" ||
+						doc.Spec.SpaceID != "my-space" {
+						return controller.PurgeStackResult{}, errors.New("unexpected args")
 					}
-					return nil, errors.New("stack not found")
+					return controller.PurgeStackResult{}, errors.New("stack not found")
 				},
 			},
 			wantErr: "stack not found",
@@ -203,8 +204,8 @@ func TestNewStackCmdRunE(t *testing.T) {
 				"space": "my-space",
 			},
 			controller: &fakeStackController{
-				purgeStackFn: func(_, _, _ string, _, _ bool) (*controller.PurgeStackResult, error) {
-					return nil, errdefs.ErrStackNotFound
+				purgeStackFn: func(_ *v1beta1.StackDoc, _, _ bool) (controller.PurgeStackResult, error) {
+					return controller.PurgeStackResult{}, errdefs.ErrStackNotFound
 				},
 			},
 			wantErr: "stack not found",
@@ -217,21 +218,26 @@ func TestNewStackCmdRunE(t *testing.T) {
 				"space": "my-space",
 			},
 			controller: &fakeStackController{
-				purgeStackFn: func(name, realm, space string, force, cascade bool) (*controller.PurgeStackResult, error) {
-					if name != "my-stack" || realm != "my-realm" || space != "my-space" {
-						return nil, errors.New("unexpected args")
+				purgeStackFn: func(doc *v1beta1.StackDoc, force, cascade bool) (controller.PurgeStackResult, error) {
+					if doc.Metadata.Name != "my-stack" || doc.Spec.RealmID != "my-realm" ||
+						doc.Spec.SpaceID != "my-space" {
+						return controller.PurgeStackResult{}, errors.New("unexpected args")
 					}
 					if force {
-						return nil, errors.New("unexpected force flag")
+						return controller.PurgeStackResult{}, errors.New("unexpected force flag")
 					}
 					if cascade {
-						return nil, errors.New("unexpected cascade flag")
+						return controller.PurgeStackResult{}, errors.New("unexpected cascade flag")
 					}
-					return &controller.PurgeStackResult{
-						StackName: "my-stack",
-						RealmName: "my-realm",
-						SpaceName: "my-space",
-						Purged:    []string{"cni-resources", "orphaned-containers"},
+					return controller.PurgeStackResult{
+						StackDoc: &v1beta1.StackDoc{
+							Metadata: v1beta1.StackMetadata{Name: "my-stack"},
+							Spec: v1beta1.StackSpec{
+								RealmID: "my-realm",
+								SpaceID: "my-space",
+							},
+						},
+						Purged: []string{"cni-resources", "orphaned-containers"},
 					}, nil
 				},
 			},
@@ -248,12 +254,16 @@ func TestNewStackCmdRunE(t *testing.T) {
 				"space": "my-space",
 			},
 			controller: &fakeStackController{
-				purgeStackFn: func(_, _, _ string, _, _ bool) (*controller.PurgeStackResult, error) {
-					return &controller.PurgeStackResult{
-						StackName: "my-stack",
-						RealmName: "my-realm",
-						SpaceName: "my-space",
-						Purged:    []string{},
+				purgeStackFn: func(_ *v1beta1.StackDoc, _, _ bool) (controller.PurgeStackResult, error) {
+					return controller.PurgeStackResult{
+						StackDoc: &v1beta1.StackDoc{
+							Metadata: v1beta1.StackMetadata{Name: "my-stack"},
+							Spec: v1beta1.StackSpec{
+								RealmID: "my-realm",
+								SpaceID: "my-space",
+							},
+						},
+						Purged: []string{},
 					}, nil
 				},
 			},
@@ -269,16 +279,20 @@ func TestNewStackCmdRunE(t *testing.T) {
 				"space": "  my-space  ",
 			},
 			controller: &fakeStackController{
-				purgeStackFn: func(name, realm, space string, _, _ bool) (*controller.PurgeStackResult, error) {
-					// Verify that trimming happened
-					if name != "my-stack" || realm != "my-realm" || space != "my-space" {
-						return nil, errors.New("unexpected trimmed args")
+				purgeStackFn: func(doc *v1beta1.StackDoc, _, _ bool) (controller.PurgeStackResult, error) {
+					if doc.Metadata.Name != "my-stack" || doc.Spec.RealmID != "my-realm" ||
+						doc.Spec.SpaceID != "my-space" {
+						return controller.PurgeStackResult{}, errors.New("unexpected trimmed args")
 					}
-					return &controller.PurgeStackResult{
-						StackName: "my-stack",
-						RealmName: "my-realm",
-						SpaceName: "my-space",
-						Purged:    []string{"cni-resources"},
+					return controller.PurgeStackResult{
+						StackDoc: &v1beta1.StackDoc{
+							Metadata: v1beta1.StackMetadata{Name: "my-stack"},
+							Spec: v1beta1.StackSpec{
+								RealmID: "my-realm",
+								SpaceID: "my-space",
+							},
+						},
+						Purged: []string{"cni-resources"},
 					}, nil
 				},
 			},
@@ -294,15 +308,20 @@ func TestNewStackCmdRunE(t *testing.T) {
 				config.KUKE_PURGE_STACK_SPACE.ViperKey: "viper-space",
 			},
 			controller: &fakeStackController{
-				purgeStackFn: func(name, realm, space string, _, _ bool) (*controller.PurgeStackResult, error) {
-					if name != "my-stack" || realm != "viper-realm" || space != "viper-space" {
-						return nil, errors.New("unexpected args from viper")
+				purgeStackFn: func(doc *v1beta1.StackDoc, _, _ bool) (controller.PurgeStackResult, error) {
+					if doc.Metadata.Name != "my-stack" || doc.Spec.RealmID != "viper-realm" ||
+						doc.Spec.SpaceID != "viper-space" {
+						return controller.PurgeStackResult{}, errors.New("unexpected args from viper")
 					}
-					return &controller.PurgeStackResult{
-						StackName: "my-stack",
-						RealmName: "viper-realm",
-						SpaceName: "viper-space",
-						Purged:    []string{},
+					return controller.PurgeStackResult{
+						StackDoc: &v1beta1.StackDoc{
+							Metadata: v1beta1.StackMetadata{Name: "my-stack"},
+							Spec: v1beta1.StackSpec{
+								RealmID: "viper-realm",
+								SpaceID: "viper-space",
+							},
+						},
+						Purged: []string{},
 					}, nil
 				},
 			},
@@ -319,18 +338,22 @@ func TestNewStackCmdRunE(t *testing.T) {
 			},
 			forceFlag: true,
 			controller: &fakeStackController{
-				purgeStackFn: func(_, _, _ string, force, cascade bool) (*controller.PurgeStackResult, error) {
+				purgeStackFn: func(_ *v1beta1.StackDoc, force, cascade bool) (controller.PurgeStackResult, error) {
 					if !force {
-						return nil, errors.New("expected force to be true")
+						return controller.PurgeStackResult{}, errors.New("expected force to be true")
 					}
 					if cascade {
-						return nil, errors.New("unexpected cascade flag")
+						return controller.PurgeStackResult{}, errors.New("unexpected cascade flag")
 					}
-					return &controller.PurgeStackResult{
-						StackName: "my-stack",
-						RealmName: "my-realm",
-						SpaceName: "my-space",
-						Purged:    []string{},
+					return controller.PurgeStackResult{
+						StackDoc: &v1beta1.StackDoc{
+							Metadata: v1beta1.StackMetadata{Name: "my-stack"},
+							Spec: v1beta1.StackSpec{
+								RealmID: "my-realm",
+								SpaceID: "my-space",
+							},
+						},
+						Purged: []string{},
 					}, nil
 				},
 			},
@@ -347,18 +370,22 @@ func TestNewStackCmdRunE(t *testing.T) {
 			},
 			cascadeFlag: true,
 			controller: &fakeStackController{
-				purgeStackFn: func(_, _, _ string, force, cascade bool) (*controller.PurgeStackResult, error) {
+				purgeStackFn: func(_ *v1beta1.StackDoc, force, cascade bool) (controller.PurgeStackResult, error) {
 					if force {
-						return nil, errors.New("unexpected force flag")
+						return controller.PurgeStackResult{}, errors.New("unexpected force flag")
 					}
 					if !cascade {
-						return nil, errors.New("expected cascade to be true")
+						return controller.PurgeStackResult{}, errors.New("expected cascade to be true")
 					}
-					return &controller.PurgeStackResult{
-						StackName: "my-stack",
-						RealmName: "my-realm",
-						SpaceName: "my-space",
-						Purged:    []string{},
+					return controller.PurgeStackResult{
+						StackDoc: &v1beta1.StackDoc{
+							Metadata: v1beta1.StackMetadata{Name: "my-stack"},
+							Spec: v1beta1.StackSpec{
+								RealmID: "my-realm",
+								SpaceID: "my-space",
+							},
+						},
+						Purged: []string{},
 					}, nil
 				},
 			},
@@ -376,18 +403,22 @@ func TestNewStackCmdRunE(t *testing.T) {
 			forceFlag:   true,
 			cascadeFlag: true,
 			controller: &fakeStackController{
-				purgeStackFn: func(_, _, _ string, force, cascade bool) (*controller.PurgeStackResult, error) {
+				purgeStackFn: func(_ *v1beta1.StackDoc, force, cascade bool) (controller.PurgeStackResult, error) {
 					if !force {
-						return nil, errors.New("expected force to be true")
+						return controller.PurgeStackResult{}, errors.New("expected force to be true")
 					}
 					if !cascade {
-						return nil, errors.New("expected cascade to be true")
+						return controller.PurgeStackResult{}, errors.New("expected cascade to be true")
 					}
-					return &controller.PurgeStackResult{
-						StackName: "my-stack",
-						RealmName: "my-realm",
-						SpaceName: "my-space",
-						Purged:    []string{},
+					return controller.PurgeStackResult{
+						StackDoc: &v1beta1.StackDoc{
+							Metadata: v1beta1.StackMetadata{Name: "my-stack"},
+							Spec: v1beta1.StackSpec{
+								RealmID: "my-realm",
+								SpaceID: "my-space",
+							},
+						},
+						Purged: []string{},
 					}, nil
 				},
 			},
@@ -500,16 +531,23 @@ func TestForceAndCascadeFlags(t *testing.T) {
 			name:    "force flag parsing",
 			cliArgs: []string{"stack-name", "--realm", "realm-a", "--space", "space-a", "--force"},
 			controller: &fakeStackController{
-				purgeStackFn: func(_, _, _ string, force, cascade bool) (*controller.PurgeStackResult, error) {
+				purgeStackFn: func(doc *v1beta1.StackDoc, force, cascade bool) (controller.PurgeStackResult, error) {
 					if !force {
 						t.Errorf("expected force to be true, got false")
 					}
 					if cascade {
 						t.Errorf("expected cascade to be false, got true")
 					}
-					return &controller.PurgeStackResult{
-						StackName: "stack-name",
-						SpaceName: "space-a",
+					if doc.Metadata.Name != "stack-name" || doc.Spec.SpaceID != "space-a" {
+						t.Errorf("unexpected stack doc: %+v", doc)
+					}
+					return controller.PurgeStackResult{
+						StackDoc: &v1beta1.StackDoc{
+							Metadata: v1beta1.StackMetadata{Name: "stack-name"},
+							Spec: v1beta1.StackSpec{
+								SpaceID: "space-a",
+							},
+						},
 					}, nil
 				},
 			},
@@ -520,16 +558,23 @@ func TestForceAndCascadeFlags(t *testing.T) {
 			name:    "cascade flag parsing",
 			cliArgs: []string{"stack-name", "--realm", "realm-a", "--space", "space-a", "--cascade"},
 			controller: &fakeStackController{
-				purgeStackFn: func(_, _, _ string, force, cascade bool) (*controller.PurgeStackResult, error) {
+				purgeStackFn: func(doc *v1beta1.StackDoc, force, cascade bool) (controller.PurgeStackResult, error) {
 					if force {
 						t.Errorf("expected force to be false, got true")
 					}
 					if !cascade {
 						t.Errorf("expected cascade to be true, got false")
 					}
-					return &controller.PurgeStackResult{
-						StackName: "stack-name",
-						SpaceName: "space-a",
+					if doc.Metadata.Name != "stack-name" || doc.Spec.SpaceID != "space-a" {
+						t.Errorf("unexpected stack doc: %+v", doc)
+					}
+					return controller.PurgeStackResult{
+						StackDoc: &v1beta1.StackDoc{
+							Metadata: v1beta1.StackMetadata{Name: "stack-name"},
+							Spec: v1beta1.StackSpec{
+								SpaceID: "space-a",
+							},
+						},
 					}, nil
 				},
 			},
@@ -540,16 +585,23 @@ func TestForceAndCascadeFlags(t *testing.T) {
 			name:    "both flags parsing",
 			cliArgs: []string{"stack-name", "--realm", "realm-a", "--space", "space-a", "--force", "--cascade"},
 			controller: &fakeStackController{
-				purgeStackFn: func(_, _, _ string, force, cascade bool) (*controller.PurgeStackResult, error) {
+				purgeStackFn: func(doc *v1beta1.StackDoc, force, cascade bool) (controller.PurgeStackResult, error) {
 					if !force {
 						t.Errorf("expected force to be true, got false")
 					}
 					if !cascade {
 						t.Errorf("expected cascade to be true, got false")
 					}
-					return &controller.PurgeStackResult{
-						StackName: "stack-name",
-						SpaceName: "space-a",
+					if doc.Metadata.Name != "stack-name" || doc.Spec.SpaceID != "space-a" {
+						t.Errorf("unexpected stack doc: %+v", doc)
+					}
+					return controller.PurgeStackResult{
+						StackDoc: &v1beta1.StackDoc{
+							Metadata: v1beta1.StackMetadata{Name: "stack-name"},
+							Spec: v1beta1.StackSpec{
+								SpaceID: "space-a",
+							},
+						},
 					}, nil
 				},
 			},
@@ -609,17 +661,17 @@ func TestForceAndCascadeFlags(t *testing.T) {
 
 // fakeStackController provides a mock implementation for testing PurgeStack.
 type fakeStackController struct {
-	purgeStackFn func(name, realm, space string, force, cascade bool) (*controller.PurgeStackResult, error)
+	purgeStackFn func(doc *v1beta1.StackDoc, force, cascade bool) (controller.PurgeStackResult, error)
 }
 
 func (f *fakeStackController) PurgeStack(
-	name, realm, space string,
+	doc *v1beta1.StackDoc,
 	force, cascade bool,
-) (*controller.PurgeStackResult, error) {
+) (controller.PurgeStackResult, error) {
 	if f.purgeStackFn == nil {
-		return nil, errors.New("unexpected PurgeStack call")
+		return controller.PurgeStackResult{}, errors.New("unexpected PurgeStack call")
 	}
-	return f.purgeStackFn(name, realm, space, force, cascade)
+	return f.purgeStackFn(doc, force, cascade)
 }
 
 func TestNewStackCmd_AutocompleteRegistration(t *testing.T) {

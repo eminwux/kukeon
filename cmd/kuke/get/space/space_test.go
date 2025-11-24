@@ -29,6 +29,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
 	space "github.com/eminwux/kukeon/cmd/kuke/get/space"
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
@@ -202,11 +203,13 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			args:      []string{"alpha"},
 			realmFlag: "earth",
 			controller: &fakeSpaceController{
-				getSpaceFn: func(name, realm string) (*v1beta1.SpaceDoc, error) {
-					if name != "alpha" || realm != "earth" {
-						return nil, errors.New("unexpected args")
+				getSpaceFn: func(doc *v1beta1.SpaceDoc) (controller.GetSpaceResult, error) {
+					if doc.Metadata.Name != "alpha" || doc.Spec.RealmID != "earth" {
+						return controller.GetSpaceResult{}, errors.New("unexpected args")
 					}
-					return docAlpha, nil
+					return controller.GetSpaceResult{
+						SpaceDoc: docAlpha,
+					}, nil
 				},
 			},
 			wantPrinted: docAlpha,
@@ -234,8 +237,8 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			args:      []string{"ghost"},
 			realmFlag: "earth",
 			controller: &fakeSpaceController{
-				getSpaceFn: func(_ string, _ string) (*v1beta1.SpaceDoc, error) {
-					return nil, errdefs.ErrSpaceNotFound
+				getSpaceFn: func(_ *v1beta1.SpaceDoc) (controller.GetSpaceResult, error) {
+					return controller.GetSpaceResult{}, errdefs.ErrSpaceNotFound
 				},
 			},
 			wantErr: "space \"ghost\" not found in realm \"earth\"",
@@ -303,15 +306,15 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 }
 
 type fakeSpaceController struct {
-	getSpaceFn   func(name, realm string) (*v1beta1.SpaceDoc, error)
+	getSpaceFn   func(doc *v1beta1.SpaceDoc) (controller.GetSpaceResult, error)
 	listSpacesFn func(realm string) ([]*v1beta1.SpaceDoc, error)
 }
 
-func (f *fakeSpaceController) GetSpace(name, realm string) (*v1beta1.SpaceDoc, error) {
+func (f *fakeSpaceController) GetSpace(doc *v1beta1.SpaceDoc) (controller.GetSpaceResult, error) {
 	if f.getSpaceFn == nil {
-		return nil, errors.New("unexpected GetSpace call")
+		return controller.GetSpaceResult{}, errors.New("unexpected GetSpace call")
 	}
-	return f.getSpaceFn(name, realm)
+	return f.getSpaceFn(doc)
 }
 
 func (f *fakeSpaceController) ListSpaces(realm string) ([]*v1beta1.SpaceDoc, error) {

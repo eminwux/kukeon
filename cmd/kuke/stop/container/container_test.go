@@ -30,11 +30,20 @@ import (
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 var _ = container.NewContainerCmd // ensure container package is linked in
+
+type docExpectation struct {
+	name  string
+	realm string
+	space string
+	stack string
+	cell  string
+}
 
 func TestNewContainerCmdRunE(t *testing.T) {
 	t.Cleanup(func() {
@@ -45,17 +54,11 @@ func TestNewContainerCmdRunE(t *testing.T) {
 		name         string
 		args         []string
 		setup        func(t *testing.T, cmd *cobra.Command)
-		controllerFn func(name, realm, space, stack, cell string) (*controller.StopContainerResult, error)
+		controllerFn func(doc *v1beta1.ContainerDoc) (controller.StopContainerResult, error)
 		wantErr      string
 		wantCallStop bool
-		wantOpts     *struct {
-			name  string
-			realm string
-			space string
-			stack string
-			cell  string
-		}
-		wantOutput []string
+		wantDoc      *docExpectation
+		wantOutput   []string
 	}{
 		{
 			name: "success: all flags provided",
@@ -66,24 +69,11 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "stack", "stack-a")
 				setFlag(t, cmd, "cell", "cell-a")
 			},
-			controllerFn: func(name, realm, space, stack, cell string) (*controller.StopContainerResult, error) {
-				return &controller.StopContainerResult{
-					ContainerName: name,
-					RealmName:     realm,
-					SpaceName:     space,
-					StackName:     stack,
-					CellName:      cell,
-					Stopped:       true,
-				}, nil
+			controllerFn: func(doc *v1beta1.ContainerDoc) (controller.StopContainerResult, error) {
+				return buildStopResult(doc, true), nil
 			},
 			wantCallStop: true,
-			wantOpts: &struct {
-				name  string
-				realm string
-				space string
-				stack string
-				cell  string
-			}{
+			wantDoc: &docExpectation{
 				name:  "test-container",
 				realm: "realm-a",
 				space: "space-a",
@@ -101,24 +91,11 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				viper.Set(config.KUKE_STOP_CONTAINER_STACK.ViperKey, "stack-b")
 				viper.Set(config.KUKE_STOP_CONTAINER_CELL.ViperKey, "cell-b")
 			},
-			controllerFn: func(name, realm, space, stack, cell string) (*controller.StopContainerResult, error) {
-				return &controller.StopContainerResult{
-					ContainerName: name,
-					RealmName:     realm,
-					SpaceName:     space,
-					StackName:     stack,
-					CellName:      cell,
-					Stopped:       true,
-				}, nil
+			controllerFn: func(doc *v1beta1.ContainerDoc) (controller.StopContainerResult, error) {
+				return buildStopResult(doc, true), nil
 			},
 			wantCallStop: true,
-			wantOpts: &struct {
-				name  string
-				realm string
-				space string
-				stack string
-				cell  string
-			}{
+			wantDoc: &docExpectation{
 				name:  "viper-container",
 				realm: "realm-b",
 				space: "space-b",
@@ -136,24 +113,11 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "stack", "  stack-a  ")
 				setFlag(t, cmd, "cell", "  cell-a  ")
 			},
-			controllerFn: func(name, realm, space, stack, cell string) (*controller.StopContainerResult, error) {
-				return &controller.StopContainerResult{
-					ContainerName: name,
-					RealmName:     realm,
-					SpaceName:     space,
-					StackName:     stack,
-					CellName:      cell,
-					Stopped:       true,
-				}, nil
+			controllerFn: func(doc *v1beta1.ContainerDoc) (controller.StopContainerResult, error) {
+				return buildStopResult(doc, true), nil
 			},
 			wantCallStop: true,
-			wantOpts: &struct {
-				name  string
-				realm string
-				space string
-				stack string
-				cell  string
-			}{
+			wantDoc: &docExpectation{
 				name:  "test-container",
 				realm: "realm-a",
 				space: "space-a",
@@ -161,6 +125,28 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				cell:  "cell-a",
 			},
 			wantOutput: []string{`Stopped container "test-container" from cell "cell-a"`},
+		},
+		{
+			name: "success: container already stopped",
+			args: []string{"stopped-container"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				setFlag(t, cmd, "realm", "realm-a")
+				setFlag(t, cmd, "space", "space-a")
+				setFlag(t, cmd, "stack", "stack-a")
+				setFlag(t, cmd, "cell", "cell-a")
+			},
+			controllerFn: func(doc *v1beta1.ContainerDoc) (controller.StopContainerResult, error) {
+				return buildStopResult(doc, false), nil
+			},
+			wantCallStop: true,
+			wantDoc: &docExpectation{
+				name:  "stopped-container",
+				realm: "realm-a",
+				space: "space-a",
+				stack: "stack-a",
+				cell:  "cell-a",
+			},
+			wantOutput: []string{`Container "stopped-container" was already stopped in cell "cell-a"`},
 		},
 		{
 			name: "error: missing realm",
@@ -276,18 +262,12 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "stack", "stack-a")
 				setFlag(t, cmd, "cell", "missing-cell")
 			},
-			controllerFn: func(_ string, _ string, _ string, _ string, _ string) (*controller.StopContainerResult, error) {
-				return nil, errdefs.ErrCellNotFound
+			controllerFn: func(_ *v1beta1.ContainerDoc) (controller.StopContainerResult, error) {
+				return controller.StopContainerResult{}, errdefs.ErrCellNotFound
 			},
 			wantErr:      "cell not found",
 			wantCallStop: true,
-			wantOpts: &struct {
-				name  string
-				realm string
-				space string
-				stack string
-				cell  string
-			}{
+			wantDoc: &docExpectation{
 				name:  "test-container",
 				realm: "realm-a",
 				space: "space-a",
@@ -304,18 +284,12 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "stack", "stack-a")
 				setFlag(t, cmd, "cell", "cell-a")
 			},
-			controllerFn: func(_ string, _ string, _ string, _ string, _ string) (*controller.StopContainerResult, error) {
-				return nil, errors.New("failed to stop container")
+			controllerFn: func(_ *v1beta1.ContainerDoc) (controller.StopContainerResult, error) {
+				return controller.StopContainerResult{}, errors.New("failed to stop container")
 			},
 			wantErr:      "failed to stop container",
 			wantCallStop: true,
-			wantOpts: &struct {
-				name  string
-				realm string
-				space string
-				stack string
-				cell  string
-			}{
+			wantDoc: &docExpectation{
 				name:  "test-container",
 				realm: "realm-a",
 				space: "space-a",
@@ -330,13 +304,7 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			t.Cleanup(viper.Reset)
 
 			var stopCalled bool
-			var stopOpts struct {
-				name  string
-				realm string
-				space string
-				stack string
-				cell  string
-			}
+			var stopDoc docExpectation
 
 			cmd := container.NewContainerCmd()
 			cmd.SetOut(&bytes.Buffer{})
@@ -352,15 +320,19 @@ func TestNewContainerCmdRunE(t *testing.T) {
 
 				// If we need to mock the controller, inject it via context
 				if tt.controllerFn != nil {
-					fakeCtrl := &fakeControllerExec{
-						stopContainerFn: func(name, realm, space, stack, cell string) (*controller.StopContainerResult, error) {
+					fakeCtrl := &fakeController{
+						stopContainerFn: func(doc *v1beta1.ContainerDoc) (controller.StopContainerResult, error) {
 							stopCalled = true
-							stopOpts.name = name
-							stopOpts.realm = realm
-							stopOpts.space = space
-							stopOpts.stack = stack
-							stopOpts.cell = cell
-							return tt.controllerFn(name, realm, space, stack, cell)
+							if doc != nil {
+								stopDoc.name = strings.TrimSpace(doc.Metadata.Name)
+								stopDoc.realm = strings.TrimSpace(doc.Spec.RealmID)
+								stopDoc.space = strings.TrimSpace(doc.Spec.SpaceID)
+								stopDoc.stack = strings.TrimSpace(doc.Spec.StackID)
+								stopDoc.cell = strings.TrimSpace(doc.Spec.CellID)
+							} else {
+								stopDoc = docExpectation{}
+							}
+							return tt.controllerFn(doc)
 						},
 					}
 					// Inject mock controller into context
@@ -393,23 +365,7 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				t.Errorf("StopContainer called=%v want=%v", stopCalled, tt.wantCallStop)
 			}
 
-			if tt.wantOpts != nil {
-				if stopOpts.name != tt.wantOpts.name {
-					t.Errorf("StopContainer name=%q want=%q", stopOpts.name, tt.wantOpts.name)
-				}
-				if stopOpts.realm != tt.wantOpts.realm {
-					t.Errorf("StopContainer realm=%q want=%q", stopOpts.realm, tt.wantOpts.realm)
-				}
-				if stopOpts.space != tt.wantOpts.space {
-					t.Errorf("StopContainer space=%q want=%q", stopOpts.space, tt.wantOpts.space)
-				}
-				if stopOpts.stack != tt.wantOpts.stack {
-					t.Errorf("StopContainer stack=%q want=%q", stopOpts.stack, tt.wantOpts.stack)
-				}
-				if stopOpts.cell != tt.wantOpts.cell {
-					t.Errorf("StopContainer cell=%q want=%q", stopOpts.cell, tt.wantOpts.cell)
-				}
-			}
+			assertDocExpectation(t, stopDoc, tt.wantDoc)
 
 			if tt.wantOutput != nil {
 				output := cmd.OutOrStdout().(*bytes.Buffer).String()
@@ -457,17 +413,49 @@ func TestNewContainerCmd_AutocompleteRegistration(t *testing.T) {
 	// ValidArgsFunction is set and flags exist confirms the structure is correct.
 }
 
-type fakeControllerExec struct {
-	stopContainerFn func(name, realm, space, stack, cell string) (*controller.StopContainerResult, error)
+func buildStopResult(doc *v1beta1.ContainerDoc, stopped bool) controller.StopContainerResult {
+	if doc == nil {
+		return controller.StopContainerResult{}
+	}
+
+	return controller.StopContainerResult{
+		Stopped:      stopped,
+		ContainerDoc: doc,
+	}
 }
 
-func (f *fakeControllerExec) StopContainer(
-	name, realmName, spaceName, stackName, cellName string,
-) (*controller.StopContainerResult, error) {
-	if f.stopContainerFn == nil {
-		return nil, errors.New("unexpected StopContainer call")
+func assertDocExpectation(t *testing.T, got docExpectation, want *docExpectation) {
+	t.Helper()
+	if want == nil {
+		return
 	}
-	return f.stopContainerFn(name, realmName, spaceName, stackName, cellName)
+
+	if got.name != want.name {
+		t.Errorf("ContainerDoc metadata.name=%q want=%q", got.name, want.name)
+	}
+	if got.realm != want.realm {
+		t.Errorf("ContainerDoc spec.realm=%q want=%q", got.realm, want.realm)
+	}
+	if got.space != want.space {
+		t.Errorf("ContainerDoc spec.space=%q want=%q", got.space, want.space)
+	}
+	if got.stack != want.stack {
+		t.Errorf("ContainerDoc spec.stack=%q want=%q", got.stack, want.stack)
+	}
+	if got.cell != want.cell {
+		t.Errorf("ContainerDoc spec.cell=%q want=%q", got.cell, want.cell)
+	}
+}
+
+type fakeController struct {
+	stopContainerFn func(doc *v1beta1.ContainerDoc) (controller.StopContainerResult, error)
+}
+
+func (f *fakeController) StopContainer(doc *v1beta1.ContainerDoc) (controller.StopContainerResult, error) {
+	if f.stopContainerFn == nil {
+		return controller.StopContainerResult{}, errors.New("unexpected StopContainer call")
+	}
+	return f.stopContainerFn(doc)
 }
 
 func setFlag(t *testing.T, cmd *cobra.Command, name, value string) {

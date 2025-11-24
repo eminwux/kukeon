@@ -90,6 +90,18 @@ func NormalizeRealm(req ext.RealmDoc) (intmodel.Realm, ext.Version, error) {
 func ConvertSpaceDocToInternal(in ext.SpaceDoc) (intmodel.Space, error) {
 	switch in.APIVersion {
 	case VersionV1Beta1, "": // default/empty treated as v1beta1
+		// Map external state to internal state (indices differ due to Creating/Deleting states)
+		var intState intmodel.SpaceState
+		switch in.Status.State {
+		case ext.SpaceStatePending:
+			intState = intmodel.SpaceStatePending
+		case ext.SpaceStateReady:
+			intState = intmodel.SpaceStateReady
+		case ext.SpaceStateFailed:
+			intState = intmodel.SpaceStateFailed
+		default:
+			intState = intmodel.SpaceStateUnknown
+		}
 		return intmodel.Space{
 			Metadata: intmodel.SpaceMetadata{
 				Name:   in.Metadata.Name,
@@ -99,7 +111,7 @@ func ConvertSpaceDocToInternal(in ext.SpaceDoc) (intmodel.Space, error) {
 				RealmName: in.Spec.RealmID,
 			},
 			Status: intmodel.SpaceStatus{
-				State: intmodel.SpaceState(in.Status.State),
+				State: intState,
 			},
 		}, nil
 	default:
@@ -111,6 +123,18 @@ func ConvertSpaceDocToInternal(in ext.SpaceDoc) (intmodel.Space, error) {
 func BuildSpaceExternalFromInternal(in intmodel.Space, apiVersion ext.Version) (ext.SpaceDoc, error) {
 	switch apiVersion {
 	case VersionV1Beta1, "": // default to v1beta1
+		// Map internal state to external state (indices differ due to Creating/Deleting states)
+		var extState ext.SpaceState
+		switch in.Status.State {
+		case intmodel.SpaceStatePending:
+			extState = ext.SpaceStatePending
+		case intmodel.SpaceStateCreating, intmodel.SpaceStateReady:
+			extState = ext.SpaceStateReady
+		case intmodel.SpaceStateDeleting, intmodel.SpaceStateFailed:
+			extState = ext.SpaceStateFailed
+		default:
+			extState = ext.SpaceStateUnknown
+		}
 		return ext.SpaceDoc{
 			APIVersion: VersionV1Beta1,
 			Kind:       ext.KindSpace,
@@ -122,7 +146,7 @@ func BuildSpaceExternalFromInternal(in intmodel.Space, apiVersion ext.Version) (
 				RealmID: in.Spec.RealmName,
 			},
 			Status: ext.SpaceStatus{
-				State: ext.SpaceState(in.Status.State),
+				State: extState,
 			},
 		}, nil
 	default:
@@ -139,6 +163,323 @@ func NormalizeSpace(req ext.SpaceDoc) (intmodel.Space, ext.Version, error) {
 	internal, err := ConvertSpaceDocToInternal(req)
 	if err != nil {
 		return intmodel.Space{}, "", err
+	}
+	return internal, version, nil
+}
+
+// ConvertStackDocToInternal converts an external StackDoc to the internal hub type.
+func ConvertStackDocToInternal(in ext.StackDoc) (intmodel.Stack, error) {
+	switch in.APIVersion {
+	case VersionV1Beta1, "": // default/empty treated as v1beta1
+		return intmodel.Stack{
+			Metadata: intmodel.StackMetadata{
+				Name:   in.Metadata.Name,
+				Labels: in.Metadata.Labels,
+			},
+			Spec: intmodel.StackSpec{
+				ID:        in.Spec.ID,
+				RealmName: in.Spec.RealmID,
+				SpaceName: in.Spec.SpaceID,
+			},
+			Status: intmodel.StackStatus{
+				State:      intmodel.StackState(in.Status.State),
+				CgroupPath: in.Status.CgroupPath,
+			},
+		}, nil
+	default:
+		return intmodel.Stack{}, fmt.Errorf("unsupported apiVersion for Stack: %s", in.APIVersion)
+	}
+}
+
+// BuildStackExternalFromInternal emits an external StackDoc for a given version from an internal hub object.
+func BuildStackExternalFromInternal(in intmodel.Stack, apiVersion ext.Version) (ext.StackDoc, error) {
+	switch apiVersion {
+	case VersionV1Beta1, "": // default to v1beta1
+		return ext.StackDoc{
+			APIVersion: VersionV1Beta1,
+			Kind:       ext.KindStack,
+			Metadata: ext.StackMetadata{
+				Name:   in.Metadata.Name,
+				Labels: in.Metadata.Labels,
+			},
+			Spec: ext.StackSpec{
+				ID:      in.Spec.ID,
+				RealmID: in.Spec.RealmName,
+				SpaceID: in.Spec.SpaceName,
+			},
+			Status: ext.StackStatus{
+				State:      ext.StackState(in.Status.State),
+				CgroupPath: in.Status.CgroupPath,
+			},
+		}, nil
+	default:
+		return ext.StackDoc{}, fmt.Errorf("unsupported output apiVersion for Stack: %s", apiVersion)
+	}
+}
+
+// NormalizeStack takes an external StackDoc request and returns an internal object and chosen apiVersion.
+func NormalizeStack(req ext.StackDoc) (intmodel.Stack, ext.Version, error) {
+	version := req.APIVersion
+	if version == "" {
+		version = VersionV1Beta1
+	}
+	internal, err := ConvertStackDocToInternal(req)
+	if err != nil {
+		return intmodel.Stack{}, "", err
+	}
+	return internal, version, nil
+}
+
+// ConvertContainerDocToInternal converts an external ContainerDoc to the internal hub type.
+func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, error) {
+	switch in.APIVersion {
+	case VersionV1Beta1, "": // default/empty treated as v1beta1
+		return intmodel.Container{
+			Metadata: intmodel.ContainerMetadata{
+				Name:   in.Metadata.Name,
+				Labels: in.Metadata.Labels,
+			},
+			Spec: intmodel.ContainerSpec{
+				ID:              in.Spec.ID,
+				RealmName:       in.Spec.RealmID,
+				SpaceName:       in.Spec.SpaceID,
+				StackName:       in.Spec.StackID,
+				CellName:        in.Spec.CellID,
+				Root:            in.Spec.Root,
+				Image:           in.Spec.Image,
+				Command:         in.Spec.Command,
+				Args:            in.Spec.Args,
+				Env:             in.Spec.Env,
+				Ports:           in.Spec.Ports,
+				Volumes:         in.Spec.Volumes,
+				Networks:        in.Spec.Networks,
+				NetworksAliases: in.Spec.NetworksAliases,
+				Privileged:      in.Spec.Privileged,
+				CNIConfigPath:   in.Spec.CNIConfigPath,
+				RestartPolicy:   in.Spec.RestartPolicy,
+				RestartCount:    in.Spec.RestartCount,
+				RestartTime:     in.Spec.RestartTime,
+				StartTime:       in.Spec.StartTime,
+				FinishTime:      in.Spec.FinishTime,
+				ExitCode:        in.Spec.ExitCode,
+				ExitSignal:      in.Spec.ExitSignal,
+			},
+			Status: intmodel.ContainerStatus{
+				State: intmodel.ContainerState(in.Status.State),
+			},
+		}, nil
+	default:
+		return intmodel.Container{}, fmt.Errorf("unsupported apiVersion for Container: %s", in.APIVersion)
+	}
+}
+
+// BuildContainerExternalFromInternal emits an external ContainerDoc for a given version from an internal hub object.
+func BuildContainerExternalFromInternal(in intmodel.Container, apiVersion ext.Version) (ext.ContainerDoc, error) {
+	switch apiVersion {
+	case VersionV1Beta1, "": // default to v1beta1
+		return ext.ContainerDoc{
+			APIVersion: VersionV1Beta1,
+			Kind:       ext.KindContainer,
+			Metadata: ext.ContainerMetadata{
+				Name:   in.Metadata.Name,
+				Labels: in.Metadata.Labels,
+			},
+			Spec: ext.ContainerSpec{
+				ID:              in.Spec.ID,
+				RealmID:         in.Spec.RealmName,
+				SpaceID:         in.Spec.SpaceName,
+				StackID:         in.Spec.StackName,
+				CellID:          in.Spec.CellName,
+				Root:            in.Spec.Root,
+				Image:           in.Spec.Image,
+				Command:         in.Spec.Command,
+				Args:            in.Spec.Args,
+				Env:             in.Spec.Env,
+				Ports:           in.Spec.Ports,
+				Networks:        in.Spec.Networks,
+				NetworksAliases: in.Spec.NetworksAliases,
+				Privileged:      in.Spec.Privileged,
+				CNIConfigPath:   in.Spec.CNIConfigPath,
+				RestartPolicy:   in.Spec.RestartPolicy,
+				RestartCount:    in.Spec.RestartCount,
+				RestartTime:     in.Spec.RestartTime,
+				StartTime:       in.Spec.StartTime,
+				FinishTime:      in.Spec.FinishTime,
+				ExitCode:        in.Spec.ExitCode,
+				ExitSignal:      in.Spec.ExitSignal,
+				Volumes:         in.Spec.Volumes,
+			},
+			Status: ext.ContainerStatus{
+				State: ext.ContainerState(in.Status.State),
+			},
+		}, nil
+	default:
+		return ext.ContainerDoc{}, fmt.Errorf("unsupported output apiVersion for Container: %s", apiVersion)
+	}
+}
+
+// NormalizeContainer takes an external ContainerDoc request and returns an internal object and chosen apiVersion.
+func NormalizeContainer(req ext.ContainerDoc) (intmodel.Container, ext.Version, error) {
+	version := req.APIVersion
+	if version == "" {
+		version = VersionV1Beta1
+	}
+	internal, err := ConvertContainerDocToInternal(req)
+	if err != nil {
+		return intmodel.Container{}, "", err
+	}
+	return internal, version, nil
+}
+
+// convertContainerSpecToInternal converts an external ContainerSpec to the internal ContainerSpec type.
+// This is used for nested ContainerSpecs in CellSpec.
+func convertContainerSpecToInternal(in ext.ContainerSpec) intmodel.ContainerSpec {
+	return intmodel.ContainerSpec{
+		ID:              in.ID,
+		RealmName:       in.RealmID,
+		SpaceName:       in.SpaceID,
+		StackName:       in.StackID,
+		CellName:        in.CellID,
+		Root:            in.Root,
+		Image:           in.Image,
+		Command:         in.Command,
+		Args:            in.Args,
+		Env:             in.Env,
+		Ports:           in.Ports,
+		Volumes:         in.Volumes,
+		Networks:        in.Networks,
+		NetworksAliases: in.NetworksAliases,
+		Privileged:      in.Privileged,
+		CNIConfigPath:   in.CNIConfigPath,
+		RestartPolicy:   in.RestartPolicy,
+		RestartCount:    in.RestartCount,
+		RestartTime:     in.RestartTime,
+		StartTime:       in.StartTime,
+		FinishTime:      in.FinishTime,
+		ExitCode:        in.ExitCode,
+		ExitSignal:      in.ExitSignal,
+	}
+}
+
+// buildContainerSpecExternalFromInternal converts an internal ContainerSpec to the external ContainerSpec type.
+// This is used for nested ContainerSpecs in CellSpec.
+func buildContainerSpecExternalFromInternal(in intmodel.ContainerSpec) ext.ContainerSpec {
+	return ext.ContainerSpec{
+		ID:              in.ID,
+		RealmID:         in.RealmName,
+		SpaceID:         in.SpaceName,
+		StackID:         in.StackName,
+		CellID:          in.CellName,
+		Root:            in.Root,
+		Image:           in.Image,
+		Command:         in.Command,
+		Args:            in.Args,
+		Env:             in.Env,
+		Ports:           in.Ports,
+		Volumes:         in.Volumes,
+		Networks:        in.Networks,
+		NetworksAliases: in.NetworksAliases,
+		Privileged:      in.Privileged,
+		CNIConfigPath:   in.CNIConfigPath,
+		RestartPolicy:   in.RestartPolicy,
+		RestartCount:    in.RestartCount,
+		RestartTime:     in.RestartTime,
+		StartTime:       in.StartTime,
+		FinishTime:      in.FinishTime,
+		ExitCode:        in.ExitCode,
+		ExitSignal:      in.ExitSignal,
+	}
+}
+
+// ConvertCellDocToInternal converts an external CellDoc to the internal hub type.
+func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
+	switch in.APIVersion {
+	case VersionV1Beta1, "": // default/empty treated as v1beta1
+		cell := intmodel.Cell{
+			Metadata: intmodel.CellMetadata{
+				Name:   in.Metadata.Name,
+				Labels: in.Metadata.Labels,
+			},
+			Spec: intmodel.CellSpec{
+				ID:        in.Spec.ID,
+				RealmName: in.Spec.RealmID,
+				SpaceName: in.Spec.SpaceID,
+				StackName: in.Spec.StackID,
+			},
+			Status: intmodel.CellStatus{
+				State:      intmodel.CellState(in.Status.State),
+				CgroupPath: in.Status.CgroupPath,
+			},
+		}
+
+		// Convert nested RootContainer if present
+		if in.Spec.RootContainer != nil {
+			rootContainer := convertContainerSpecToInternal(*in.Spec.RootContainer)
+			cell.Spec.RootContainer = &rootContainer
+		}
+
+		// Convert nested Containers slice
+		cell.Spec.Containers = make([]intmodel.ContainerSpec, len(in.Spec.Containers))
+		for i, extContainer := range in.Spec.Containers {
+			cell.Spec.Containers[i] = convertContainerSpecToInternal(extContainer)
+		}
+
+		return cell, nil
+	default:
+		return intmodel.Cell{}, fmt.Errorf("unsupported apiVersion for Cell: %s", in.APIVersion)
+	}
+}
+
+// BuildCellExternalFromInternal emits an external CellDoc for a given version from an internal hub object.
+func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ext.CellDoc, error) {
+	switch apiVersion {
+	case VersionV1Beta1, "": // default to v1beta1
+		cell := ext.CellDoc{
+			APIVersion: VersionV1Beta1,
+			Kind:       ext.KindCell,
+			Metadata: ext.CellMetadata{
+				Name:   in.Metadata.Name,
+				Labels: in.Metadata.Labels,
+			},
+			Spec: ext.CellSpec{
+				ID:      in.Spec.ID,
+				RealmID: in.Spec.RealmName,
+				SpaceID: in.Spec.SpaceName,
+				StackID: in.Spec.StackName,
+			},
+			Status: ext.CellStatus{
+				State:      ext.CellState(in.Status.State),
+				CgroupPath: in.Status.CgroupPath,
+			},
+		}
+
+		// Convert nested RootContainer if present
+		if in.Spec.RootContainer != nil {
+			rootContainer := buildContainerSpecExternalFromInternal(*in.Spec.RootContainer)
+			cell.Spec.RootContainer = &rootContainer
+		}
+
+		// Convert nested Containers slice
+		cell.Spec.Containers = make([]ext.ContainerSpec, len(in.Spec.Containers))
+		for i, intContainer := range in.Spec.Containers {
+			cell.Spec.Containers[i] = buildContainerSpecExternalFromInternal(intContainer)
+		}
+
+		return cell, nil
+	default:
+		return ext.CellDoc{}, fmt.Errorf("unsupported output apiVersion for Cell: %s", apiVersion)
+	}
+}
+
+// NormalizeCell takes an external CellDoc request and returns an internal object and chosen apiVersion.
+func NormalizeCell(req ext.CellDoc) (intmodel.Cell, ext.Version, error) {
+	version := req.APIVersion
+	if version == "" {
+		version = VersionV1Beta1
+	}
+	internal, err := ConvertCellDocToInternal(req)
+	if err != nil {
+		return intmodel.Cell{}, "", err
 	}
 	return internal, version, nil
 }

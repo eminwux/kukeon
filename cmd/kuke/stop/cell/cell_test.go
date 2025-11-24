@@ -28,8 +28,8 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	cell "github.com/eminwux/kukeon/cmd/kuke/stop/cell"
 	"github.com/eminwux/kukeon/cmd/types"
-	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -45,10 +45,10 @@ func TestNewCellCmdRunE(t *testing.T) {
 		name         string
 		args         []string
 		setup        func(t *testing.T, cmd *cobra.Command)
-		controllerFn func(name, realm, space, stack string) (*controller.StopCellResult, error)
+		controllerFn func(doc *v1beta1.CellDoc) (cell.StopCellResult, error)
 		wantErr      string
 		wantCallStop bool
-		wantOpts     *struct {
+		wantDoc      *struct {
 			name  string
 			realm string
 			space string
@@ -64,17 +64,14 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			controllerFn: func(name, realm, space, stack string) (*controller.StopCellResult, error) {
-				return &controller.StopCellResult{
-					CellName:  name,
-					RealmName: realm,
-					SpaceName: space,
-					StackName: stack,
-					Stopped:   true,
+			controllerFn: func(doc *v1beta1.CellDoc) (cell.StopCellResult, error) {
+				return cell.StopCellResult{
+					CellDoc: doc,
+					Stopped: true,
 				}, nil
 			},
 			wantCallStop: true,
-			wantOpts: &struct {
+			wantDoc: &struct {
 				name  string
 				realm string
 				space string
@@ -95,17 +92,14 @@ func TestNewCellCmdRunE(t *testing.T) {
 				viper.Set(config.KUKE_STOP_CELL_SPACE.ViperKey, "space-b")
 				viper.Set(config.KUKE_STOP_CELL_STACK.ViperKey, "stack-b")
 			},
-			controllerFn: func(name, realm, space, stack string) (*controller.StopCellResult, error) {
-				return &controller.StopCellResult{
-					CellName:  name,
-					RealmName: realm,
-					SpaceName: space,
-					StackName: stack,
-					Stopped:   true,
+			controllerFn: func(doc *v1beta1.CellDoc) (cell.StopCellResult, error) {
+				return cell.StopCellResult{
+					CellDoc: doc,
+					Stopped: true,
 				}, nil
 			},
 			wantCallStop: true,
-			wantOpts: &struct {
+			wantDoc: &struct {
 				name  string
 				realm string
 				space string
@@ -126,17 +120,14 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "  space-a  ")
 				setFlag(t, cmd, "stack", "  stack-a  ")
 			},
-			controllerFn: func(name, realm, space, stack string) (*controller.StopCellResult, error) {
-				return &controller.StopCellResult{
-					CellName:  name,
-					RealmName: realm,
-					SpaceName: space,
-					StackName: stack,
-					Stopped:   true,
+			controllerFn: func(doc *v1beta1.CellDoc) (cell.StopCellResult, error) {
+				return cell.StopCellResult{
+					CellDoc: doc,
+					Stopped: true,
 				}, nil
 			},
 			wantCallStop: true,
-			wantOpts: &struct {
+			wantDoc: &struct {
 				name  string
 				realm string
 				space string
@@ -232,12 +223,12 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			controllerFn: func(_, _, _, _ string) (*controller.StopCellResult, error) {
-				return nil, errdefs.ErrCellNotFound
+			controllerFn: func(_ *v1beta1.CellDoc) (cell.StopCellResult, error) {
+				return cell.StopCellResult{}, errdefs.ErrCellNotFound
 			},
 			wantErr:      "cell not found",
 			wantCallStop: true,
-			wantOpts: &struct {
+			wantDoc: &struct {
 				name  string
 				realm string
 				space string
@@ -257,12 +248,12 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			controllerFn: func(_, _, _, _ string) (*controller.StopCellResult, error) {
-				return nil, errors.New("failed to stop cell containers")
+			controllerFn: func(_ *v1beta1.CellDoc) (cell.StopCellResult, error) {
+				return cell.StopCellResult{}, errors.New("failed to stop cell containers")
 			},
 			wantErr:      "failed to stop cell containers",
 			wantCallStop: true,
-			wantOpts: &struct {
+			wantDoc: &struct {
 				name  string
 				realm string
 				space string
@@ -281,7 +272,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 			t.Cleanup(viper.Reset)
 
 			var stopCalled bool
-			var stopOpts struct {
+			var stopDoc struct {
 				name  string
 				realm string
 				space string
@@ -303,13 +294,15 @@ func TestNewCellCmdRunE(t *testing.T) {
 				// If we need to mock the controller, inject it via context
 				if tt.controllerFn != nil {
 					fakeCtrl := &fakeControllerExec{
-						stopCellFn: func(name, realm, space, stack string) (*controller.StopCellResult, error) {
+						stopCellFn: func(doc *v1beta1.CellDoc) (cell.StopCellResult, error) {
 							stopCalled = true
-							stopOpts.name = name
-							stopOpts.realm = realm
-							stopOpts.space = space
-							stopOpts.stack = stack
-							return tt.controllerFn(name, realm, space, stack)
+							if doc != nil {
+								stopDoc.name = strings.TrimSpace(doc.Metadata.Name)
+								stopDoc.realm = strings.TrimSpace(doc.Spec.RealmID)
+								stopDoc.space = strings.TrimSpace(doc.Spec.SpaceID)
+								stopDoc.stack = strings.TrimSpace(doc.Spec.StackID)
+							}
+							return tt.controllerFn(doc)
 						},
 					}
 					// Inject mock controller into context
@@ -342,18 +335,18 @@ func TestNewCellCmdRunE(t *testing.T) {
 				t.Errorf("StopCell called=%v want=%v", stopCalled, tt.wantCallStop)
 			}
 
-			if tt.wantOpts != nil {
-				if stopOpts.name != tt.wantOpts.name {
-					t.Errorf("StopCell name=%q want=%q", stopOpts.name, tt.wantOpts.name)
+			if tt.wantDoc != nil {
+				if stopDoc.name != tt.wantDoc.name {
+					t.Errorf("StopCell name=%q want=%q", stopDoc.name, tt.wantDoc.name)
 				}
-				if stopOpts.realm != tt.wantOpts.realm {
-					t.Errorf("StopCell realm=%q want=%q", stopOpts.realm, tt.wantOpts.realm)
+				if stopDoc.realm != tt.wantDoc.realm {
+					t.Errorf("StopCell realm=%q want=%q", stopDoc.realm, tt.wantDoc.realm)
 				}
-				if stopOpts.space != tt.wantOpts.space {
-					t.Errorf("StopCell space=%q want=%q", stopOpts.space, tt.wantOpts.space)
+				if stopDoc.space != tt.wantDoc.space {
+					t.Errorf("StopCell space=%q want=%q", stopDoc.space, tt.wantDoc.space)
 				}
-				if stopOpts.stack != tt.wantOpts.stack {
-					t.Errorf("StopCell stack=%q want=%q", stopOpts.stack, tt.wantOpts.stack)
+				if stopDoc.stack != tt.wantDoc.stack {
+					t.Errorf("StopCell stack=%q want=%q", stopDoc.stack, tt.wantDoc.stack)
 				}
 			}
 
@@ -370,16 +363,14 @@ func TestNewCellCmdRunE(t *testing.T) {
 }
 
 type fakeControllerExec struct {
-	stopCellFn func(name, realm, space, stack string) (*controller.StopCellResult, error)
+	stopCellFn func(doc *v1beta1.CellDoc) (cell.StopCellResult, error)
 }
 
-func (f *fakeControllerExec) StopCell(
-	name, realmName, spaceName, stackName string,
-) (*controller.StopCellResult, error) {
+func (f *fakeControllerExec) StopCell(doc *v1beta1.CellDoc) (cell.StopCellResult, error) {
 	if f.stopCellFn == nil {
-		return nil, errors.New("unexpected StopCell call")
+		return cell.StopCellResult{}, errors.New("unexpected StopCell call")
 	}
-	return f.stopCellFn(name, realmName, spaceName, stackName)
+	return f.stopCellFn(doc)
 }
 
 func setFlag(t *testing.T, cmd *cobra.Command, name, value string) {

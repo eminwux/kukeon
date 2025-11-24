@@ -30,6 +30,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -45,7 +46,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 		name          string
 		args          []string
 		setup         func(t *testing.T, cmd *cobra.Command)
-		controllerFn  func(name, realm, space, stack string) (*controller.StartCellResult, error)
+		controllerFn  func(doc *v1beta1.CellDoc) (controller.StartCellResult, error)
 		wantErr       string
 		wantCallStart bool
 		wantOpts      *struct {
@@ -64,13 +65,10 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			controllerFn: func(name, realm, space, stack string) (*controller.StartCellResult, error) {
-				return &controller.StartCellResult{
-					CellName:  name,
-					RealmName: realm,
-					SpaceName: space,
-					StackName: stack,
-					Started:   true,
+			controllerFn: func(doc *v1beta1.CellDoc) (controller.StartCellResult, error) {
+				return controller.StartCellResult{
+					CellDoc: doc,
+					Started: true,
 				}, nil
 			},
 			wantCallStart: true,
@@ -95,13 +93,10 @@ func TestNewCellCmdRunE(t *testing.T) {
 				viper.Set(config.KUKE_START_CELL_SPACE.ViperKey, "space-b")
 				viper.Set(config.KUKE_START_CELL_STACK.ViperKey, "stack-b")
 			},
-			controllerFn: func(name, realm, space, stack string) (*controller.StartCellResult, error) {
-				return &controller.StartCellResult{
-					CellName:  name,
-					RealmName: realm,
-					SpaceName: space,
-					StackName: stack,
-					Started:   true,
+			controllerFn: func(doc *v1beta1.CellDoc) (controller.StartCellResult, error) {
+				return controller.StartCellResult{
+					CellDoc: doc,
+					Started: true,
 				}, nil
 			},
 			wantCallStart: true,
@@ -126,13 +121,10 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "  space-a  ")
 				setFlag(t, cmd, "stack", "  stack-a  ")
 			},
-			controllerFn: func(name, realm, space, stack string) (*controller.StartCellResult, error) {
-				return &controller.StartCellResult{
-					CellName:  name,
-					RealmName: realm,
-					SpaceName: space,
-					StackName: stack,
-					Started:   true,
+			controllerFn: func(doc *v1beta1.CellDoc) (controller.StartCellResult, error) {
+				return controller.StartCellResult{
+					CellDoc: doc,
+					Started: true,
 				}, nil
 			},
 			wantCallStart: true,
@@ -232,8 +224,8 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			controllerFn: func(_ string, _ string, _ string, _ string) (*controller.StartCellResult, error) {
-				return nil, errdefs.ErrCellNotFound
+			controllerFn: func(_ *v1beta1.CellDoc) (controller.StartCellResult, error) {
+				return controller.StartCellResult{}, errdefs.ErrCellNotFound
 			},
 			wantErr:       "cell not found",
 			wantCallStart: true,
@@ -256,12 +248,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 			t.Cleanup(viper.Reset)
 
 			var startCalled bool
-			var startOpts struct {
-				name  string
-				realm string
-				space string
-				stack string
-			}
+			var startDoc *v1beta1.CellDoc
 
 			cmd := cell.NewCellCmd()
 			cmd.SetOut(&bytes.Buffer{})
@@ -278,13 +265,10 @@ func TestNewCellCmdRunE(t *testing.T) {
 				// If we need to mock the controller, inject it via context
 				if tt.controllerFn != nil {
 					fakeCtrl := &fakeControllerExec{
-						startCellFn: func(name, realm, space, stack string) (*controller.StartCellResult, error) {
+						startCellFn: func(doc *v1beta1.CellDoc) (controller.StartCellResult, error) {
 							startCalled = true
-							startOpts.name = name
-							startOpts.realm = realm
-							startOpts.space = space
-							startOpts.stack = stack
-							return tt.controllerFn(name, realm, space, stack)
+							startDoc = doc
+							return tt.controllerFn(doc)
 						},
 					}
 					// Inject mock controller into context
@@ -318,17 +302,20 @@ func TestNewCellCmdRunE(t *testing.T) {
 			}
 
 			if tt.wantOpts != nil {
-				if startOpts.name != tt.wantOpts.name {
-					t.Errorf("StartCell name=%q want=%q", startOpts.name, tt.wantOpts.name)
+				if startDoc == nil {
+					t.Fatal("StartCell doc nil")
 				}
-				if startOpts.realm != tt.wantOpts.realm {
-					t.Errorf("StartCell realm=%q want=%q", startOpts.realm, tt.wantOpts.realm)
+				if startDoc.Metadata.Name != tt.wantOpts.name {
+					t.Errorf("StartCell metadata name=%q want=%q", startDoc.Metadata.Name, tt.wantOpts.name)
 				}
-				if startOpts.space != tt.wantOpts.space {
-					t.Errorf("StartCell space=%q want=%q", startOpts.space, tt.wantOpts.space)
+				if startDoc.Spec.RealmID != tt.wantOpts.realm {
+					t.Errorf("StartCell realm=%q want=%q", startDoc.Spec.RealmID, tt.wantOpts.realm)
 				}
-				if startOpts.stack != tt.wantOpts.stack {
-					t.Errorf("StartCell stack=%q want=%q", startOpts.stack, tt.wantOpts.stack)
+				if startDoc.Spec.SpaceID != tt.wantOpts.space {
+					t.Errorf("StartCell space=%q want=%q", startDoc.Spec.SpaceID, tt.wantOpts.space)
+				}
+				if startDoc.Spec.StackID != tt.wantOpts.stack {
+					t.Errorf("StartCell stack=%q want=%q", startDoc.Spec.StackID, tt.wantOpts.stack)
 				}
 			}
 
@@ -345,14 +332,14 @@ func TestNewCellCmdRunE(t *testing.T) {
 }
 
 type fakeControllerExec struct {
-	startCellFn func(name, realm, space, stack string) (*controller.StartCellResult, error)
+	startCellFn func(doc *v1beta1.CellDoc) (controller.StartCellResult, error)
 }
 
-func (f *fakeControllerExec) StartCell(name, realm, space, stack string) (*controller.StartCellResult, error) {
+func (f *fakeControllerExec) StartCell(doc *v1beta1.CellDoc) (controller.StartCellResult, error) {
 	if f.startCellFn == nil {
-		return nil, errors.New("unexpected StartCell call")
+		return controller.StartCellResult{}, errors.New("unexpected StartCell call")
 	}
-	return f.startCellFn(name, realm, space, stack)
+	return f.startCellFn(doc)
 }
 
 func setFlag(t *testing.T, cmd *cobra.Command, name, value string) {
