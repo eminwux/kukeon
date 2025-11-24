@@ -39,6 +39,7 @@ type MockControllerKey struct{}
 func NewSpaceCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "space [name]",
+		Aliases:       []string{"sp"},
 		Short:         "Purge a space with comprehensive cleanup",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,

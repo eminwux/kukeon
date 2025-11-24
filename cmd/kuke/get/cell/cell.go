@@ -43,7 +43,7 @@ type MockControllerKey struct{}
 func NewCellCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "cell [name]",
-		Aliases:       []string{"cells"},
+		Aliases:       []string{"cells", "ce"},
 		Short:         "Get or list cell information",
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,

@@ -39,6 +39,7 @@ type MockControllerKey struct{}
 func NewCellCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "cell [name]",
+		Aliases:       []string{"ce"},
 		Short:         "Delete a cell",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,

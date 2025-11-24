@@ -39,6 +39,7 @@ type MockControllerKey struct{}
 func NewContainerCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "container [name]",
+		Aliases:       []string{"co"},
 		Short:         "Create a new container inside a cell",
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
@@ -104,6 +105,9 @@ func NewContainerCmd() *cobra.Command {
 					Args:    argsList,
 				},
 			}
+
+			// Ensure all nested structs are initialized
+			containerDoc = v1beta1.NewContainerDoc(containerDoc)
 
 			// Check for mock controller in context (for testing)
 			var ctrl containerController

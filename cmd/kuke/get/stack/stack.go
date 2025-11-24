@@ -39,19 +39,10 @@ type stackController = StackController // internal alias for backward compatibil
 // MockControllerKey is used to inject mock controllers in tests via context.
 type MockControllerKey struct{}
 
-var (
-	ParseOutputFormat = shared.ParseOutputFormat
-	YAMLPrinter       = shared.PrintYAML
-	JSONPrinter       = shared.PrintJSON
-	TablePrinter      = shared.PrintTable
-	RunPrintStack     = printStack
-	RunPrintStacks    = printStacks
-)
-
 func NewStackCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "stack [name]",
-		Aliases:       []string{"stacks"},
+		Aliases:       []string{"stacks", "st"},
 		Short:         "Get or list stack information",
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
@@ -68,7 +59,7 @@ func NewStackCmd() *cobra.Command {
 				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
-			outputFormat, err := ParseOutputFormat(cmd)
+			outputFormat, err := shared.ParseOutputFormat(cmd)
 			if err != nil {
 				return err
 			}
@@ -119,7 +110,7 @@ func NewStackCmd() *cobra.Command {
 					return fmt.Errorf("stack %q not found in realm %q, space %q", name, realm, space)
 				}
 
-				return RunPrintStack(cmd, result.StackDoc, outputFormat)
+				return printStack(cmd, result.StackDoc, outputFormat)
 			}
 
 			// List stacks (optionally filtered by realm and/or space)
@@ -128,7 +119,7 @@ func NewStackCmd() *cobra.Command {
 				return err
 			}
 
-			return RunPrintStacks(cmd, stacks, outputFormat)
+			return printStacks(cmd, stacks, outputFormat)
 		},
 	}
 
@@ -158,23 +149,23 @@ func NewStackCmd() *cobra.Command {
 func printStack(_ *cobra.Command, stack interface{}, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return YAMLPrinter(stack)
+		return shared.PrintYAML(stack)
 	case shared.OutputFormatJSON:
-		return JSONPrinter(stack)
+		return shared.PrintJSON(stack)
 	case shared.OutputFormatTable:
 		// For single resource, show full YAML by default
-		return YAMLPrinter(stack)
+		return shared.PrintYAML(stack)
 	default:
-		return YAMLPrinter(stack)
+		return shared.PrintYAML(stack)
 	}
 }
 
 func printStacks(cmd *cobra.Command, stacks []*v1beta1.StackDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return YAMLPrinter(stacks)
+		return shared.PrintYAML(stacks)
 	case shared.OutputFormatJSON:
-		return JSONPrinter(stacks)
+		return shared.PrintJSON(stacks)
 	case shared.OutputFormatTable:
 		if len(stacks) == 0 {
 			cmd.Println("No stacks found.")
@@ -200,10 +191,10 @@ func printStacks(cmd *cobra.Command, stacks []*v1beta1.StackDoc, format shared.O
 			})
 		}
 
-		TablePrinter(cmd, headers, rows)
+		shared.PrintTable(cmd, headers, rows)
 		return nil
 	default:
-		return YAMLPrinter(stacks)
+		return shared.PrintYAML(stacks)
 	}
 }
 

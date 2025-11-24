@@ -34,8 +34,9 @@ import (
 // inherited automatically via Cobra's command tree.
 func NewDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "delete",
-		Short: "Delete Kukeon resources (realm, space, stack, cell, container)",
+		Use:     "delete [name]",
+		Aliases: []string{"d"},
+		Short:   "Delete Kukeon resources (realm, space, stack, cell, container)",
 		Run: func(cmd *cobra.Command, _ []string) {
 			_ = cmd.Help()
 		},

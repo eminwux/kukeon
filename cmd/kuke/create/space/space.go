@@ -48,6 +48,7 @@ func (w *controllerWrapper) CreateSpace(doc *v1beta1.SpaceDoc) (controller.Creat
 func NewSpaceCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "space [name]",
+		Aliases:       []string{"sp"},
 		Short:         "Create or reconcile a space within a realm",
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,

@@ -39,6 +39,7 @@ type MockControllerKey struct{}
 func NewCellCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "cell [name]",
+		Aliases:       []string{"ce"},
 		Short:         "Create or reconcile a cell within a stack",
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
@@ -100,6 +101,9 @@ func runCreateCell(cmd *cobra.Command, args []string) error {
 			StackID: stack,
 		},
 	}
+
+	// Ensure all nested structs are initialized
+	doc = v1beta1.NewCellDoc(doc)
 
 	// Check for mock controller in context (for testing)
 	var ctrl cellController

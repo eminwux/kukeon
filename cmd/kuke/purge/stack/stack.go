@@ -40,6 +40,7 @@ type MockControllerKey struct{}
 func NewStackCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "stack [name]",
+		Aliases:       []string{"st"},
 		Short:         "Purge a stack with comprehensive cleanup",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,

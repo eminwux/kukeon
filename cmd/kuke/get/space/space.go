@@ -40,31 +40,10 @@ type spaceController = SpaceController // internal alias for backward compatibil
 // MockControllerKey is used to inject mock controllers in tests via context.
 type MockControllerKey struct{}
 
-type printObjectFunc func(interface{}) error
-
-var (
-	// YAMLPrinter is exported for testing.
-	YAMLPrinter printObjectFunc = shared.PrintYAML
-	// JSONPrinter is exported for testing.
-	JSONPrinter printObjectFunc = shared.PrintJSON
-)
-
-var (
-	printYAML printObjectFunc = YAMLPrinter
-	printJSON printObjectFunc = JSONPrinter
-)
-
-type tablePrinterFunc func(*cobra.Command, []string, [][]string)
-
-// TablePrinter is exported for testing.
-var TablePrinter tablePrinterFunc = shared.PrintTable
-
-var printTable tablePrinterFunc = TablePrinter
-
 func NewSpaceCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "space [name]",
-		Aliases:       []string{"spaces"},
+		Aliases:       []string{"spaces", "sp"},
 		Short:         "Get or list space information",
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
@@ -165,23 +144,23 @@ func NewSpaceCmd() *cobra.Command {
 func printSpace(space interface{}, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return YAMLPrinter(space)
+		return shared.PrintYAML(space)
 	case shared.OutputFormatJSON:
-		return JSONPrinter(space)
+		return shared.PrintJSON(space)
 	case shared.OutputFormatTable:
 		// For single resource, show full YAML by default
-		return YAMLPrinter(space)
+		return shared.PrintYAML(space)
 	default:
-		return YAMLPrinter(space)
+		return shared.PrintYAML(space)
 	}
 }
 
 func printSpaces(cmd *cobra.Command, spaces []*v1beta1.SpaceDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return YAMLPrinter(spaces)
+		return shared.PrintYAML(spaces)
 	case shared.OutputFormatJSON:
-		return JSONPrinter(spaces)
+		return shared.PrintJSON(spaces)
 	case shared.OutputFormatTable:
 		if len(spaces) == 0 {
 			cmd.Println("No spaces found.")
@@ -206,10 +185,10 @@ func printSpaces(cmd *cobra.Command, spaces []*v1beta1.SpaceDoc, format shared.O
 			})
 		}
 
-		TablePrinter(cmd, headers, rows)
+		shared.PrintTable(cmd, headers, rows)
 		return nil
 	default:
-		return YAMLPrinter(spaces)
+		return shared.PrintYAML(spaces)
 	}
 }
 

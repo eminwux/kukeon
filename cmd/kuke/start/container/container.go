@@ -45,6 +45,7 @@ type MockControllerKey struct{}
 func NewContainerCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "container [name]",
+		Aliases:       []string{"co"},
 		Short:         "Start a container",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,

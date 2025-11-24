@@ -47,16 +47,16 @@ type ContainerSpec struct {
 	Privileged      bool
 	CNIConfigPath   string
 	RestartPolicy   string
-	RestartCount    int
-	RestartTime     time.Time
-	StartTime       time.Time
-	FinishTime      time.Time
-	ExitCode        int
-	ExitSignal      string
 }
 
 type ContainerStatus struct {
-	State ContainerState
+	State        ContainerState
+	RestartCount int
+	RestartTime  time.Time
+	StartTime    time.Time
+	FinishTime   time.Time
+	ExitCode     int
+	ExitSignal   string
 }
 
 type ContainerState int

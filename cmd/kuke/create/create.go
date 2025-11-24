@@ -32,8 +32,9 @@ import (
 // inherited automatically via Cobra's command tree.
 func NewCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "create",
-		Short: "Create Kukeon resources (realm, space, stack, cell, container)",
+		Use:     "create",
+		Aliases: []string{"c"},
+		Short:   "Create Kukeon resources (realm, space, stack, cell, container)",
 		Run: func(cmd *cobra.Command, _ []string) {
 			_ = cmd.Help()
 		},

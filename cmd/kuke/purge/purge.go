@@ -34,8 +34,9 @@ import (
 // inherited automatically via Cobra's command tree.
 func NewPurgeCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "purge",
-		Short: "Purge Kukeon resources with comprehensive cleanup (realm, space, stack, cell, container)",
+		Use:     "purge [name]",
+		Aliases: []string{"p"},
+		Short:   "Purge Kukeon resources with comprehensive cleanup (realm, space, stack, cell, container)",
 		Run: func(cmd *cobra.Command, _ []string) {
 			_ = cmd.Help()
 		},
