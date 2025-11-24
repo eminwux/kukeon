@@ -44,6 +44,7 @@ type (
 func NewStackCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "stack [name]",
+		Aliases:       []string{"st"},
 		Short:         "Create or reconcile a stack within a space",
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,

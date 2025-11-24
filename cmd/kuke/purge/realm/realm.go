@@ -36,6 +36,7 @@ type MockControllerKey struct{}
 func NewRealmCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "realm [name]",
+		Aliases:       []string{"r"},
 		Short:         "Purge a realm with comprehensive cleanup",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,

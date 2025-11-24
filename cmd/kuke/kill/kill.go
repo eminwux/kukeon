@@ -29,8 +29,9 @@ import (
 // inherited automatically via Cobra's command tree.
 func NewKillCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "kill",
-		Short: "Kill Kukeon resources (cell, container)",
+		Use:     "kill [name]",
+		Aliases: []string{"k"},
+		Short:   "Kill Kukeon resources (cell, container)",
 		Run: func(cmd *cobra.Command, _ []string) {
 			_ = cmd.Help()
 		},

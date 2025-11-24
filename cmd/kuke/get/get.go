@@ -32,8 +32,9 @@ import (
 // inherited automatically via Cobra's command tree.
 func NewGetCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "get",
-		Short: "Get or list Kukeon resources (realm, space, stack, cell, container)",
+		Use:     "get [name]",
+		Aliases: []string{"g"},
+		Short:   "Get or list Kukeon resources (realm, space, stack, cell, container)",
 		Run: func(cmd *cobra.Command, _ []string) {
 			_ = cmd.Help()
 		},

@@ -22,7 +22,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"reflect"
+	"os"
 	"strings"
 	"testing"
 
@@ -177,11 +177,28 @@ func TestPrintSpaces(t *testing.T) {
 	}
 }
 
+func captureStdout(fn func() error) (string, error) {
+	origStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		return "", err
+	}
+
+	os.Stdout = w
+	runErr := fn()
+	_ = w.Close()
+	os.Stdout = origStdout
+
+	var buf bytes.Buffer
+	_, copyErr := io.Copy(&buf, r)
+	_ = r.Close()
+	if copyErr != nil {
+		return "", copyErr
+	}
+	return buf.String(), runErr
+}
+
 func TestNewSpaceCmdRunE(t *testing.T) {
-	origPrintYAML := space.YAMLPrinter
-	t.Cleanup(func() {
-		space.YAMLPrinter = origPrintYAML
-	})
 
 	docAlpha := &v1beta1.SpaceDoc{
 		Metadata: v1beta1.SpaceMetadata{Name: "alpha"},
@@ -190,13 +207,13 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 	docList := []*v1beta1.SpaceDoc{docAlpha}
 
 	tests := []struct {
-		name        string
-		args        []string
-		realmFlag   string
-		outputFlag  string
-		controller  space.SpaceController
-		wantPrinted interface{}
-		wantErr     string
+		name       string
+		args       []string
+		realmFlag  string
+		outputFlag string
+		controller space.SpaceController
+		wantOutput []string
+		wantErr    string
 	}{
 		{
 			name:      "get space success",
@@ -212,7 +229,7 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 					}, nil
 				},
 			},
-			wantPrinted: docAlpha,
+			wantOutput: []string{"name: alpha"},
 		},
 		{
 			name:       "list spaces success",
@@ -225,7 +242,7 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 					return docList, nil
 				},
 			},
-			wantPrinted: docList,
+			wantOutput: []string{"name: alpha"},
 		},
 		{
 			name:    "missing realm for single space",
@@ -249,8 +266,9 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			viper.Reset()
 			cmd := space.NewSpaceCmd()
-			cmd.SetOut(&bytes.Buffer{})
-			cmd.SetErr(&bytes.Buffer{})
+			buf := &bytes.Buffer{}
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
 
 			if tt.realmFlag != "" {
 				if err := cmd.Flags().Set("realm", tt.realmFlag); err != nil {
@@ -272,21 +290,21 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			}
 			cmd.SetContext(ctx)
 
-			var printed interface{}
-			space.YAMLPrinter = func(doc interface{}) error {
-				printed = doc
-				return nil
-			}
-
 			cmd.SetArgs(tt.args)
-			err := cmd.Execute()
+
+			// Capture stdout since PrintYAML/PrintJSON write to os.Stdout
+			// Table output goes to cmd.Out
+			var stdout string
+			var err error
+			if tt.wantOutput != nil || tt.wantErr == "" {
+				stdout, err = captureStdout(cmd.Execute)
+			} else {
+				err = cmd.Execute()
+			}
 
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
-				}
-				if printed != nil {
-					t.Fatalf("expected no printer call, got %v", printed)
 				}
 				return
 			}
@@ -294,12 +312,15 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if tt.wantPrinted != nil {
-				if !reflect.DeepEqual(printed, tt.wantPrinted) {
-					t.Fatalf("printed doc mismatch, got %v want %v", printed, tt.wantPrinted)
+
+			if tt.wantOutput != nil {
+				// Combine stdout (YAML/JSON) and command output (table) and stderr
+				output := stdout + buf.String()
+				for _, expected := range tt.wantOutput {
+					if !strings.Contains(output, expected) {
+						t.Errorf("output missing expected string %q\nGot output:\n%s", expected, output)
+					}
 				}
-			} else if printed != nil {
-				t.Fatalf("expected no printer call, got %v", printed)
 			}
 		})
 	}

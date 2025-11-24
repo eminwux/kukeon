@@ -567,6 +567,20 @@ func (b *Exec) CreateContainer(doc *v1beta1.ContainerDoc) (CreateContainerResult
 		},
 	}
 
+	// Log the container spec being created
+	b.logger.DebugContext(
+		b.ctx,
+		"creating container in cell",
+		"containerName", containerName,
+		"cell", cell,
+		"realm", realm,
+		"space", space,
+		"stack", stack,
+		"image", image,
+		"command", doc.Spec.Command,
+		"containerSpecID", doc.Spec.ID,
+	)
+
 	cellDocPre, err := b.runner.GetCell(cellDoc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
@@ -578,11 +592,43 @@ func (b *Exec) CreateContainer(doc *v1beta1.ContainerDoc) (CreateContainerResult
 	res.CellMetadataExistsPre = true
 	res.ContainerExistsPre = containerSpecExists(cellDocPre.Spec.Containers, containerName)
 
-	if _, err = b.runner.CreateCell(cellDoc); err != nil {
+	// Log before calling CreateCell
+	b.logger.DebugContext(
+		b.ctx,
+		"calling CreateCell to merge container",
+		"containerName", containerName,
+		"cell", cell,
+		"containerExistsPre", res.ContainerExistsPre,
+		"containersInCellDoc", len(cellDoc.Spec.Containers),
+	)
+
+	// CreateCell returns the CellDoc with merged containers - we must use this
+	// returned document for StartCell to ensure we're starting the containers
+	// that were actually created
+	cellDocCreated, err := b.runner.CreateCell(cellDoc)
+	if err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrCreateCell, err)
 	}
 
-	if err = b.runner.StartCell(cellDoc); err != nil {
+	// Log after CreateCell returns
+	b.logger.DebugContext(
+		b.ctx,
+		"CreateCell returned successfully",
+		"containerName", containerName,
+		"cell", cell,
+		"containersInCreatedCellDoc", len(cellDocCreated.Spec.Containers),
+	)
+
+	// Use the CellDoc returned from CreateCell, which has the containers properly merged
+	b.logger.DebugContext(
+		b.ctx,
+		"calling StartCell to start containers",
+		"containerName", containerName,
+		"cell", cell,
+		"containersToStart", len(cellDocCreated.Spec.Containers),
+	)
+
+	if err = b.runner.StartCell(cellDocCreated); err != nil {
 		return res, fmt.Errorf("failed to start container %s: %w", containerName, err)
 	}
 
@@ -627,26 +673,6 @@ func (b *Exec) CreateContainer(doc *v1beta1.ContainerDoc) (CreateContainerResult
 	}
 
 	return res, nil
-}
-
-func mergeLabels(base, overrides map[string]string) map[string]string {
-	merged := make(map[string]string)
-	for k, v := range base {
-		if strings.TrimSpace(k) == "" {
-			continue
-		}
-		merged[k] = v
-	}
-	for k, v := range overrides {
-		if strings.TrimSpace(k) == "" {
-			continue
-		}
-		merged[k] = v
-	}
-	if len(merged) == 0 {
-		return nil
-	}
-	return merged
 }
 
 func ensureContainerOwnership(

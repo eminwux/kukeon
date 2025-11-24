@@ -24,6 +24,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	ctrutil "github.com/eminwux/kukeon/internal/util/ctr"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -39,6 +40,7 @@ type MockControllerKey struct{}
 func NewContainerCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "container [name]",
+		Aliases:       []string{"co"},
 		Short:         "Create a new container inside a cell",
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
@@ -77,6 +79,9 @@ func NewContainerCmd() *cobra.Command {
 			image := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_IMAGE.ViperKey))
 			if image == "" {
 				image = "docker.io/library/debian:latest"
+			} else {
+				// Normalize image reference to fully qualified format
+				image = ctrutil.NormalizeImageReference(image)
 			}
 
 			command, err := cmd.Flags().GetString("command")
@@ -104,6 +109,9 @@ func NewContainerCmd() *cobra.Command {
 					Args:    argsList,
 				},
 			}
+
+			// Ensure all nested structs are initialized
+			containerDoc = v1beta1.NewContainerDoc(containerDoc)
 
 			// Check for mock controller in context (for testing)
 			var ctrl containerController

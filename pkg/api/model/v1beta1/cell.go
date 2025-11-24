@@ -65,3 +65,70 @@ func (c *CellState) String() string {
 	}
 	return StateUnknownStr
 }
+
+// NewCellDoc creates a CellDoc ensuring all nested structs are initialized.
+func NewCellDoc(from *CellDoc) *CellDoc {
+	if from == nil {
+		return &CellDoc{
+			APIVersion: "",
+			Kind:       "",
+			Metadata: CellMetadata{
+				Name:   "",
+				Labels: map[string]string{},
+			},
+			Spec: CellSpec{
+				ID:            "",
+				RealmID:       "",
+				SpaceID:       "",
+				StackID:       "",
+				RootContainer: nil,
+				Containers:    []ContainerSpec{},
+			},
+			Status: CellStatus{
+				State:      CellStateUnknown,
+				CgroupPath: "",
+			},
+		}
+	}
+
+	out := *from
+
+	if out.Metadata.Labels == nil {
+		out.Metadata.Labels = map[string]string{}
+	} else {
+		labels := make(map[string]string, len(out.Metadata.Labels))
+		for k, v := range out.Metadata.Labels {
+			labels[k] = v
+		}
+		out.Metadata.Labels = labels
+	}
+
+	if out.Spec.RootContainer != nil {
+		rootContainer := *out.Spec.RootContainer
+		rootContainer.Args = cloneSlice(rootContainer.Args)
+		rootContainer.Env = cloneSlice(rootContainer.Env)
+		rootContainer.Ports = cloneSlice(rootContainer.Ports)
+		rootContainer.Volumes = cloneSlice(rootContainer.Volumes)
+		rootContainer.Networks = cloneSlice(rootContainer.Networks)
+		rootContainer.NetworksAliases = cloneSlice(rootContainer.NetworksAliases)
+		out.Spec.RootContainer = &rootContainer
+	}
+
+	if out.Spec.Containers == nil {
+		out.Spec.Containers = []ContainerSpec{}
+	} else {
+		containers := make([]ContainerSpec, len(out.Spec.Containers))
+		for i, container := range out.Spec.Containers {
+			containers[i] = container
+			containers[i].Args = cloneSlice(container.Args)
+			containers[i].Env = cloneSlice(container.Env)
+			containers[i].Ports = cloneSlice(container.Ports)
+			containers[i].Volumes = cloneSlice(container.Volumes)
+			containers[i].Networks = cloneSlice(container.Networks)
+			containers[i].NetworksAliases = cloneSlice(container.NetworksAliases)
+		}
+		out.Spec.Containers = containers
+	}
+
+	return &out
+}

@@ -35,7 +35,7 @@ func TestNewDeleteCmdMetadata(t *testing.T) {
 		{
 			name: "use statement",
 			check: func(t *testing.T, cmd *cobra.Command) {
-				if cmd.Use != "delete" {
+				if cmd.Use != "delete [name]" {
 					t.Fatalf("expected Use to be %q, got %q", "delete", cmd.Use)
 				}
 			},

@@ -33,8 +33,8 @@ func TestNewStopCmdMetadata(t *testing.T) {
 		{
 			name: "use statement",
 			check: func(t *testing.T, cmd *cobra.Command) {
-				if cmd.Use != "stop" {
-					t.Fatalf("expected Use to be %q, got %q", "stop", cmd.Use)
+				if cmd.Use != "stop [name]" {
+					t.Fatalf("expected Use to be %q, got %q", "stop [name]", cmd.Use)
 				}
 			},
 		},

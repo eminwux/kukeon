@@ -60,7 +60,7 @@ var (
 func NewContainerCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "container [name]",
-		Aliases:       []string{"containers"},
+		Aliases:       []string{"containers", "co"},
 		Short:         "Get or list container information",
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,

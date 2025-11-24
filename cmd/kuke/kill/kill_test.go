@@ -27,8 +27,8 @@ import (
 func TestNewKillCmdMetadata(t *testing.T) {
 	cmd := killcmd.NewKillCmd()
 
-	if cmd.Use != "kill" {
-		t.Fatalf("unexpected Use: got %q want %q", cmd.Use, "kill")
+	if cmd.Use != "kill [name]" {
+		t.Fatalf("unexpected Use: got %q want %q", cmd.Use, "kill [name]")
 	}
 
 	if cmd.Short != "Kill Kukeon resources (cell, container)" {

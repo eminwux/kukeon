@@ -38,6 +38,7 @@ type MockControllerKey struct{}
 func NewRealmCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "realm [name]",
+		Aliases:       []string{"r"},
 		Short:         "Delete a realm",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,

@@ -29,8 +29,9 @@ import (
 // inherited automatically via Cobra's command tree.
 func NewStopCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "stop",
-		Short: "Stop Kukeon resources (cell, container)",
+		Use:     "stop [name]",
+		Aliases: []string{"sto"},
+		Short:   "Stop Kukeon resources (cell, container)",
 		Run: func(cmd *cobra.Command, _ []string) {
 			_ = cmd.Help()
 		},

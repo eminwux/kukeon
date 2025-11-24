@@ -257,15 +257,15 @@ func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, err
 				Privileged:      in.Spec.Privileged,
 				CNIConfigPath:   in.Spec.CNIConfigPath,
 				RestartPolicy:   in.Spec.RestartPolicy,
-				RestartCount:    in.Spec.RestartCount,
-				RestartTime:     in.Spec.RestartTime,
-				StartTime:       in.Spec.StartTime,
-				FinishTime:      in.Spec.FinishTime,
-				ExitCode:        in.Spec.ExitCode,
-				ExitSignal:      in.Spec.ExitSignal,
 			},
 			Status: intmodel.ContainerStatus{
-				State: intmodel.ContainerState(in.Status.State),
+				State:        intmodel.ContainerState(in.Status.State),
+				RestartCount: in.Status.RestartCount,
+				RestartTime:  in.Status.RestartTime,
+				StartTime:    in.Status.StartTime,
+				FinishTime:   in.Status.FinishTime,
+				ExitCode:     in.Status.ExitCode,
+				ExitSignal:   in.Status.ExitSignal,
 			},
 		}, nil
 	default:
@@ -296,21 +296,21 @@ func BuildContainerExternalFromInternal(in intmodel.Container, apiVersion ext.Ve
 				Args:            in.Spec.Args,
 				Env:             in.Spec.Env,
 				Ports:           in.Spec.Ports,
+				Volumes:         in.Spec.Volumes,
 				Networks:        in.Spec.Networks,
 				NetworksAliases: in.Spec.NetworksAliases,
 				Privileged:      in.Spec.Privileged,
 				CNIConfigPath:   in.Spec.CNIConfigPath,
 				RestartPolicy:   in.Spec.RestartPolicy,
-				RestartCount:    in.Spec.RestartCount,
-				RestartTime:     in.Spec.RestartTime,
-				StartTime:       in.Spec.StartTime,
-				FinishTime:      in.Spec.FinishTime,
-				ExitCode:        in.Spec.ExitCode,
-				ExitSignal:      in.Spec.ExitSignal,
-				Volumes:         in.Spec.Volumes,
 			},
 			Status: ext.ContainerStatus{
-				State: ext.ContainerState(in.Status.State),
+				State:        ext.ContainerState(in.Status.State),
+				RestartCount: in.Status.RestartCount,
+				RestartTime:  in.Status.RestartTime,
+				StartTime:    in.Status.StartTime,
+				FinishTime:   in.Status.FinishTime,
+				ExitCode:     in.Status.ExitCode,
+				ExitSignal:   in.Status.ExitSignal,
 			},
 		}, nil
 	default:
@@ -352,12 +352,6 @@ func convertContainerSpecToInternal(in ext.ContainerSpec) intmodel.ContainerSpec
 		Privileged:      in.Privileged,
 		CNIConfigPath:   in.CNIConfigPath,
 		RestartPolicy:   in.RestartPolicy,
-		RestartCount:    in.RestartCount,
-		RestartTime:     in.RestartTime,
-		StartTime:       in.StartTime,
-		FinishTime:      in.FinishTime,
-		ExitCode:        in.ExitCode,
-		ExitSignal:      in.ExitSignal,
 	}
 }
 
@@ -382,12 +376,6 @@ func buildContainerSpecExternalFromInternal(in intmodel.ContainerSpec) ext.Conta
 		Privileged:      in.Privileged,
 		CNIConfigPath:   in.CNIConfigPath,
 		RestartPolicy:   in.RestartPolicy,
-		RestartCount:    in.RestartCount,
-		RestartTime:     in.RestartTime,
-		StartTime:       in.StartTime,
-		FinishTime:      in.FinishTime,
-		ExitCode:        in.ExitCode,
-		ExitSignal:      in.ExitSignal,
 	}
 }
 
