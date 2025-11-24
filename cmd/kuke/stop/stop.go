@@ -29,7 +29,7 @@ import (
 // inherited automatically via Cobra's command tree.
 func NewStopCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "stop",
+		Use:     "stop [name]",
 		Aliases: []string{"sto"},
 		Short:   "Stop Kukeon resources (cell, container)",
 		Run: func(cmd *cobra.Command, _ []string) {

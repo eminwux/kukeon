@@ -298,6 +298,9 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 		return nil, fmt.Errorf("failed to build root container name: %w", err)
 	}
 
+	// Declare container variable to be used in both branches
+	var container containerd.Container
+
 	// Check if container exists
 	exists, err := r.ctrClient.ExistsContainer(ctrCtx, containerID)
 	if err != nil {
@@ -312,8 +315,9 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 	}
 
 	if exists {
-		// Container exists, load and return it
-		container, loadErr := r.ctrClient.GetContainer(ctrCtx, containerID)
+		// Container exists, load it but continue to process other containers
+		var loadErr error
+		container, loadErr = r.ctrClient.GetContainer(ctrCtx, containerID)
 		if loadErr != nil {
 			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 			fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", loadErr))
@@ -331,63 +335,105 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 			"root container exists",
 			fields...,
 		)
-		return container, nil
-	}
-
-	// Container doesn't exist, create it
-	createFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-	createFields = append(createFields, "space", spaceID, "realm", realmID, "cniConfig", cniConfigPath)
-	r.logger.InfoContext(
-		r.ctx,
-		"root container does not exist, creating",
-		createFields...,
-	)
-
-	rootContainerSpec := ensureCellRootContainerSpec(
-		doc,
-		containerID,
-		cellID,
-		realmID,
-		spaceID,
-		stackID,
-		cniConfigPath,
-	)
-	rootLabels := buildRootContainerLabels(doc, cellID, cellName, spaceID, stackID, realmID)
-	containerSpec := ctrutil.BuildRootContainerSpec(rootContainerSpec, rootLabels)
-
-	container, createErr := r.ctrClient.CreateContainer(ctrCtx, containerSpec)
-	if createErr != nil {
-		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-		fields = append(
-			fields,
-			"space",
-			spaceID,
-			"realm",
-			realmID,
-			"cniConfig",
-			cniConfigPath,
-			"err",
-			fmt.Sprintf("%v", createErr),
-		)
-		r.logger.ErrorContext(
+		// Don't return early - continue to process other containers in the CellDoc
+	} else {
+		// Container doesn't exist, create it
+		createFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		createFields = append(createFields, "space", spaceID, "realm", realmID, "cniConfig", cniConfigPath)
+		r.logger.InfoContext(
 			r.ctx,
-			"failed to create root container",
-			fields...,
+			"root container does not exist, creating",
+			createFields...,
 		)
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrCreateRootContainer, createErr)
+
+		rootContainerSpec := ensureCellRootContainerSpec(
+			doc,
+			containerID,
+			cellID,
+			realmID,
+			spaceID,
+			stackID,
+			cniConfigPath,
+		)
+		rootLabels := buildRootContainerLabels(doc, cellID, cellName, spaceID, stackID, realmID)
+		containerSpec := ctrutil.BuildRootContainerSpec(rootContainerSpec, rootLabels)
+
+		var createErr error
+		container, createErr = r.ctrClient.CreateContainer(ctrCtx, containerSpec)
+		if createErr != nil {
+			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+			fields = append(
+				fields,
+				"space",
+				spaceID,
+				"realm",
+				realmID,
+				"cniConfig",
+				cniConfigPath,
+				"err",
+				fmt.Sprintf("%v", createErr),
+			)
+			r.logger.ErrorContext(
+				r.ctx,
+				"failed to create root container",
+				fields...,
+			)
+			return nil, fmt.Errorf("%w: %w", errdefs.ErrCreateRootContainer, createErr)
+		}
+
+		ensuredFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		ensuredFields = append(ensuredFields, "space", spaceID, "realm", realmID, "cniConfig", cniConfigPath)
+		r.logger.InfoContext(
+			r.ctx,
+			"ensured root container exists",
+			ensuredFields...,
+		)
 	}
 
-	ensuredFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-	ensuredFields = append(ensuredFields, "space", spaceID, "realm", realmID, "cniConfig", cniConfigPath)
-	r.logger.InfoContext(
+	// Log how many containers we're about to process
+	containerCountFields := appendCellLogFields([]any{"cell", cellID}, cellID, cellName)
+	containerCountFields = append(
+		containerCountFields,
+		"space",
+		spaceID,
+		"realm",
+		realmID,
+		"stack",
+		stackID,
+		"containerCount",
+		len(doc.Spec.Containers),
+	)
+	r.logger.DebugContext(
 		r.ctx,
-		"ensured root container exists",
-		ensuredFields...,
+		"processing containers from CellDoc",
+		containerCountFields...,
 	)
 
 	// Ensure all containers defined in the CellDoc exist
 	for i := range doc.Spec.Containers {
 		containerSpec := doc.Spec.Containers[i]
+
+		// Log which container we're processing
+		processFields := appendCellLogFields([]any{"cell", cellID}, cellID, cellName)
+		processFields = append(
+			processFields,
+			"space",
+			spaceID,
+			"realm",
+			realmID,
+			"stack",
+			stackID,
+			"containerName",
+			containerSpec.ID,
+			"containerIndex",
+			i,
+		)
+		r.logger.DebugContext(
+			r.ctx,
+			"processing container from CellDoc",
+			processFields...,
+		)
+
 		if containerSpec.CNIConfigPath == "" {
 			containerSpec.CNIConfigPath = cniConfigPath
 			doc.Spec.Containers[i] = containerSpec
@@ -419,18 +465,76 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 			return nil, fmt.Errorf("failed to build container name: %w", err)
 		}
 
+		// Log the hierarchical container ID we built
+		idFields := appendCellLogFields([]any{"cell", cellID}, cellID, cellName)
+		idFields = append(
+			idFields,
+			"space",
+			spaceID,
+			"realm",
+			realmID,
+			"stack",
+			stackID,
+			"containerName",
+			containerSpec.ID,
+			"hierarchicalID",
+			containerID,
+		)
+		r.logger.DebugContext(
+			r.ctx,
+			"built hierarchical container ID",
+			idFields...,
+		)
+
 		// Use container name with hierarchical format for containerd operations
 		exists, err = r.ctrClient.ExistsContainer(ctrCtx, containerID)
 		if err != nil {
-			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-			fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
-			r.logger.ErrorContext(
-				r.ctx,
-				"failed to check if container exists",
-				fields...,
-			)
-			return nil, fmt.Errorf("failed to check if container %s exists: %w", containerID, err)
+			// Check if the error indicates the container doesn't exist
+			// In that case, treat it as "doesn't exist" (false) rather than a fatal error
+			if errors.Is(err, ctr.ErrContainerNotFound) {
+				// Container doesn't exist, which is fine - we'll create it
+				exists = false
+			} else {
+				// Some other error occurred
+				fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+				fields = append(
+					fields,
+					"space",
+					spaceID,
+					"realm",
+					realmID,
+					"containerName",
+					containerSpec.ID,
+					"err",
+					fmt.Sprintf("%v", err),
+				)
+				r.logger.ErrorContext(
+					r.ctx,
+					"failed to check if container exists",
+					fields...,
+				)
+				return nil, fmt.Errorf("failed to check if container %s exists: %w", containerID, err)
+			}
 		}
+
+		// Log the existence check result
+		existsFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		existsFields = append(
+			existsFields,
+			"space",
+			spaceID,
+			"realm",
+			realmID,
+			"containerName",
+			containerSpec.ID,
+			"exists",
+			exists,
+		)
+		r.logger.DebugContext(
+			r.ctx,
+			"checked container existence",
+			existsFields...,
+		)
 
 		if !exists {
 			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
@@ -449,15 +553,39 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 			// Create a copy with the full hierarchical ID for containerd operations
 			containerSpecCopy := containerSpec
 			containerSpecCopy.ID = containerID
-			_, err = r.ctrClient.CreateContainerFromSpec(
+
+			// Log container spec details before creation
+			createSpecFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+			createSpecFields = append(
+				createSpecFields,
+				"space",
+				spaceID,
+				"realm",
+				realmID,
+				"stack",
+				stackID,
+				"containerName",
+				containerSpec.ID,
+				"image",
+				containerSpec.Image,
+				"command",
+				containerSpec.Command,
+			)
+			r.logger.DebugContext(
+				r.ctx,
+				"creating container with spec",
+				createSpecFields...,
+			)
+
+			createdContainer, containerCreateErr := r.ctrClient.CreateContainerFromSpec(
 				ctrCtx,
 				&containerSpecCopy,
 			)
-			if err != nil {
+			if containerCreateErr != nil {
 				// Check if the error indicates the container already exists
 				// This can happen due to race conditions where the container
 				// was created between the existence check and creation attempt
-				errMsg := err.Error()
+				errMsg := containerCreateErr.Error()
 				if strings.Contains(errMsg, "container already exists") {
 					debugFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 					debugFields = append(debugFields, "space", spaceID, "realm", realmID)
@@ -468,9 +596,9 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 					)
 					continue
 				}
-				fields = appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-				fields = append(
-					fields,
+				errorFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+				errorFields = append(
+					errorFields,
 					"space",
 					spaceID,
 					"realm",
@@ -478,14 +606,31 @@ func (r *Exec) ensureCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 					"cniConfig",
 					containerSpec.CNIConfigPath,
 					"err",
-					fmt.Sprintf("%v", err),
+					fmt.Sprintf("%v", containerCreateErr),
 				)
 				r.logger.ErrorContext(
 					r.ctx,
 					"failed to create container from CellDoc",
-					fields...,
+					errorFields...,
 				)
-				return nil, fmt.Errorf("failed to create container %s: %w", containerID, err)
+				return nil, fmt.Errorf("failed to create container %s: %w", containerID, containerCreateErr)
+			}
+			if createdContainer != nil {
+				successFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+				successFields = append(
+					successFields,
+					"space",
+					spaceID,
+					"realm",
+					realmID,
+					"containerName",
+					containerSpec.ID,
+				)
+				r.logger.InfoContext(
+					r.ctx,
+					"created container from CellDoc",
+					successFields...,
+				)
 			}
 		} else {
 			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
@@ -822,6 +967,15 @@ func (r *Exec) StartCell(doc *v1beta1.CellDoc) error {
 			return fmt.Errorf("failed to build container name: %w", err)
 		}
 
+		// Log which container we're attempting to start
+		startFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		startFields = append(startFields, "space", spaceID, "realm", realmID, "containerName", containerSpec.ID)
+		r.logger.DebugContext(
+			r.ctx,
+			"attempting to start container from CellDoc",
+			startFields...,
+		)
+
 		// Use container name with UUID for containerd operations
 		specWithNamespaces := ctr.JoinContainerNamespaces(
 			ctr.ContainerSpec{ID: containerID},
@@ -1022,23 +1176,22 @@ func (r *Exec) StopCell(doc *v1beta1.CellDoc) error {
 		)
 	}
 
-	// Stop root container last and detach from CNI
+	// Stop root container last (after all workload containers are stopped)
 	rootContainerID, err := naming.BuildRootContainerName(spaceID, stackID, cellID)
 	if err != nil {
 		return fmt.Errorf("failed to build root container name: %w", err)
 	}
 
-	// Detach root container from CNI network
-	r.detachRootContainerFromCNI(
-		ctrCtx,
-		rootContainerID,
-		cniConfigPath,
-		cellID,
-		cellName,
-		spaceID,
-		realmID,
-		realmDoc.Spec.Namespace,
-	)
+	// Get root container's PID before stopping (needed for CNI detach)
+	var rootPID uint32
+	rootContainer, err := r.ctrClient.GetContainer(ctrCtx, rootContainerID)
+	if err == nil {
+		nsCtx := namespaces.WithNamespace(ctrCtx, realmDoc.Spec.Namespace)
+		rootTask, taskErr := rootContainer.Task(nsCtx, nil)
+		if taskErr == nil {
+			rootPID = rootTask.Pid()
+		}
+	}
 
 	// Stop root container
 	timeout := 5 * time.Second
@@ -1063,6 +1216,49 @@ func (r *Exec) StopCell(doc *v1beta1.CellDoc) error {
 			"stopped root container",
 			fields...,
 		)
+	}
+
+	// Detach root container from CNI network after it's stopped
+	// Use the PID we captured before stopping
+	if rootPID > 0 {
+		netnsPath := fmt.Sprintf("/proc/%d/ns/net", rootPID)
+		cniMgr, mgrErr := cni.NewManager(
+			r.cniConf.CniBinDir,
+			r.cniConf.CniConfigDir,
+			r.cniConf.CniCacheDir,
+		)
+		if mgrErr == nil {
+			if loadErr := cniMgr.LoadNetworkConfigList(cniConfigPath); loadErr == nil {
+				if delErr := cniMgr.DelContainerFromNetwork(ctrCtx, rootContainerID, netnsPath); delErr != nil {
+					// Log warning but continue - network might already be detached
+					fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
+					fields = append(
+						fields,
+						"space",
+						spaceID,
+						"realm",
+						realmID,
+						"netns",
+						netnsPath,
+						"err",
+						fmt.Sprintf("%v", delErr),
+					)
+					r.logger.WarnContext(
+						r.ctx,
+						"failed to detach root container from network, continuing",
+						fields...,
+					)
+				} else {
+					fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
+					fields = append(fields, "space", spaceID, "realm", realmID, "netns", netnsPath)
+					r.logger.InfoContext(
+						r.ctx,
+						"detached root container from network",
+						fields...,
+					)
+				}
+			}
+		}
 	}
 
 	return nil
@@ -1485,29 +1681,57 @@ func (r *Exec) DeleteContainer(doc *v1beta1.CellDoc, containerID string) error {
 	// Set namespace to realm namespace
 	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
 
+	// Build hierarchical container ID for containerd operations
+	stackID := doc.Spec.StackID
+	if stackID == "" {
+		return errdefs.ErrStackNameRequired
+	}
+
+	hierarchicalContainerID, err := naming.BuildContainerName(
+		spaceID,
+		stackID,
+		cellID,
+		containerID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to build container name: %w", err)
+	}
+
 	// Create a background context for containerd operations
 	ctrCtx := context.Background()
 
-	// Stop the container
-	_, err = r.ctrClient.StopContainer(ctrCtx, containerID, ctr.StopContainerOptions{})
+	// Stop the container using hierarchical ID
+	_, err = r.ctrClient.StopContainer(ctrCtx, hierarchicalContainerID, ctr.StopContainerOptions{})
 	if err != nil {
 		r.logger.WarnContext(
 			r.ctx,
 			"failed to stop container, continuing with deletion",
 			"container",
 			containerID,
+			"hierarchicalID",
+			hierarchicalContainerID,
 			"error",
 			err,
 		)
 	}
 
-	// Delete the container from containerd
-	err = r.ctrClient.DeleteContainer(ctrCtx, containerID, ctr.ContainerDeleteOptions{
+	// Delete the container from containerd using hierarchical ID
+	err = r.ctrClient.DeleteContainer(ctrCtx, hierarchicalContainerID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 	if err != nil {
-		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
+		fields := appendCellLogFields([]any{"id", hierarchicalContainerID}, cellID, cellName)
+		fields = append(
+			fields,
+			"space",
+			spaceID,
+			"realm",
+			realmID,
+			"containerName",
+			containerID,
+			"err",
+			fmt.Sprintf("%v", err),
+		)
 		r.logger.ErrorContext(
 			r.ctx,
 			"failed to delete container",
@@ -1516,8 +1740,8 @@ func (r *Exec) DeleteContainer(doc *v1beta1.CellDoc, containerID string) error {
 		return fmt.Errorf("failed to delete container %s: %w", containerID, err)
 	}
 
-	fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-	fields = append(fields, "space", spaceID, "realm", realmID)
+	fields := appendCellLogFields([]any{"id", hierarchicalContainerID}, cellID, cellName)
+	fields = append(fields, "space", spaceID, "realm", realmID, "containerName", containerID)
 	r.logger.InfoContext(
 		r.ctx,
 		"deleted container",

@@ -17,6 +17,8 @@
 package ctrutil
 
 import (
+	"strings"
+
 	"github.com/containerd/containerd/v2/pkg/oci"
 	internalctr "github.com/eminwux/kukeon/internal/ctr"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -135,4 +137,42 @@ func copyLabels(src map[string]string) map[string]string {
 		dst[k] = v
 	}
 	return dst
+}
+
+// NormalizeImageReference normalizes an image reference to a fully qualified format.
+// Examples:
+//   - "debian:latest" -> "docker.io/library/debian:latest"
+//   - "alpine" -> "docker.io/library/alpine:latest"
+//   - "user/image:tag" -> "docker.io/user/image:tag"
+//   - "docker.io/library/debian:latest" -> "docker.io/library/debian:latest" (unchanged)
+//   - "registry.example.com/image:tag" -> "registry.example.com/image:tag" (unchanged)
+func NormalizeImageReference(image string) string {
+	if image == "" {
+		return image
+	}
+
+	// If it already contains a registry (has "://" or starts with a known registry), return as-is
+	if strings.Contains(image, "://") {
+		return image
+	}
+
+	// Check if it starts with a known registry (contains a dot before the first slash, or is a known registry)
+	firstSlash := strings.Index(image, "/")
+	if firstSlash > 0 {
+		// Check if the part before the first slash looks like a registry (contains a dot or is a known registry)
+		registryPart := image[:firstSlash]
+		if strings.Contains(registryPart, ".") || strings.Contains(registryPart, ":") {
+			// Already has a registry, return as-is
+			return image
+		}
+		// No registry, add docker.io prefix
+		return "docker.io/" + image
+	}
+
+	// No slash means it's a library image
+	// Add default tag if not present
+	if !strings.Contains(image, ":") {
+		image += ":latest"
+	}
+	return "docker.io/library/" + image
 }

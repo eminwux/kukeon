@@ -37,8 +37,8 @@ func TestNewStartCmdMetadata(t *testing.T) {
 		{
 			name: "use statement",
 			check: func(t *testing.T, cmd *cobra.Command) {
-				if cmd.Use != "start" {
-					t.Fatalf("expected Use to be %q, got %q", "start", cmd.Use)
+				if cmd.Use != "start [name]" {
+					t.Fatalf("expected Use to be %q, got %q", "start [name]", cmd.Use)
 				}
 			},
 		},

@@ -31,8 +31,8 @@ func TestNewPurgeCmd(t *testing.T) {
 
 	cmd := purge.NewPurgeCmd()
 
-	if cmd.Use != "purge" {
-		t.Errorf("Use mismatch: got %q, want %q", cmd.Use, "purge")
+	if cmd.Use != "purge [name]" {
+		t.Errorf("Use mismatch: got %q, want %q", cmd.Use, "purge [name]")
 	}
 
 	expectedShort := "Purge Kukeon resources with comprehensive cleanup (realm, space, stack, cell, container)"

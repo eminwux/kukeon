@@ -30,6 +30,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/containerd/v2/pkg/oci"
+	"github.com/containerd/errdefs"
 	"github.com/containerd/typeurl/v2"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
@@ -46,7 +47,7 @@ var (
 	errEmptyRealmID      = errors.New("ctr: realm id is required")
 	errEmptyStackID      = errors.New("ctr: stack id is required")
 	errContainerExists   = errors.New("ctr: container already exists")
-	errContainerNotFound = errors.New("ctr: container not found")
+	ErrContainerNotFound = errors.New("ctr: container not found")
 	errTaskNotFound      = errors.New("ctr: task not found")
 	errTaskNotRunning    = errors.New("ctr: task is not running")
 	errInvalidImage      = errors.New("ctr: image reference is required")
@@ -280,7 +281,12 @@ func (c *client) loadContainer(ctx context.Context, id string) (containerd.Conta
 	nsCtx := c.namespaceCtx(ctx)
 	container, err := c.cClient.LoadContainer(nsCtx, id)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errContainerNotFound, err)
+		// Only wrap "not found" errors with ErrContainerNotFound
+		// Other errors (connection failures, permission errors, etc.) should be returned as-is
+		if errdefs.IsNotFound(err) {
+			return nil, fmt.Errorf("%w: %w", ErrContainerNotFound, err)
+		}
+		return nil, err
 	}
 	c.storeContainer(id, container)
 	return container, nil
@@ -495,6 +501,11 @@ func (c *client) ExistsContainer(ctx context.Context, id string) (bool, error) {
 	nsCtx := c.namespaceCtx(ctx)
 	_, err := c.cClient.LoadContainer(nsCtx, id)
 	if err != nil {
+		// Only wrap "not found" errors with ErrContainerNotFound so callers can use errors.Is to check
+		// Other errors (connection failures, permission errors, etc.) should be returned as-is
+		if errdefs.IsNotFound(err) {
+			return false, fmt.Errorf("%w: %w", ErrContainerNotFound, err)
+		}
 		return false, err
 	}
 	return true, nil
@@ -716,13 +727,28 @@ func (c *client) StopContainer(
 				if err != nil {
 					return nil, fmt.Errorf("failed to force kill task: %w", err)
 				}
-				// Wait again after force kill
+				// Wait again after force kill with timeout
+				forceKillTimeout := 5 * time.Second
+				forceKillCtx, forceKillCancel := context.WithTimeout(nsCtx, forceKillTimeout)
+				defer forceKillCancel()
 				var exitChan2 <-chan containerd.ExitStatus
-				exitChan2, err = task.Wait(nsCtx)
+				exitChan2, err = task.Wait(forceKillCtx)
 				if err != nil {
 					return nil, fmt.Errorf("failed to wait for task after force kill: %w", err)
 				}
-				exitStatus = <-exitChan2
+				select {
+				case exitStatus = <-exitChan2:
+					// Task exited
+				case <-forceKillCtx.Done():
+					// Still didn't exit after force kill, verify status
+					finalStatus, statusErr := task.Status(nsCtx)
+					if statusErr == nil && finalStatus.Status == containerd.Running {
+						return nil, fmt.Errorf("task %s is still running after force kill", id)
+					}
+					// Task might have exited between wait and status check
+					// Return a default exit status
+					exitStatus = containerd.ExitStatus{}
+				}
 			} else {
 				return nil, fmt.Errorf("timeout waiting for task to stop: %w", waitCtx.Err())
 			}
@@ -732,6 +758,24 @@ func (c *client) StopContainer(
 	}
 
 	c.logger.InfoContext(ctx, "stopped container", "id", id, "exit_code", exitStatus.ExitCode())
+
+	// Verify task is actually stopped
+	finalStatus, err := task.Status(nsCtx)
+	if err != nil {
+		c.logger.WarnContext(ctx, "failed to verify task status after stop", "id", id, "err", formatError(err))
+		// Continue anyway - we got exit status
+	} else if finalStatus.Status == containerd.Running {
+		c.logger.WarnContext(ctx, "task still running after stop, force killing again", "id", id)
+		// Force kill again
+		_ = task.Kill(nsCtx, syscall.SIGKILL)
+		// Wait a bit and check again
+		time.Sleep(100 * time.Millisecond)
+		finalStatus, _ = task.Status(nsCtx)
+		if finalStatus.Status == containerd.Running {
+			return nil, fmt.Errorf("task %s is still running after stop attempt", id)
+		}
+	}
+
 	return &exitStatus, nil
 }
 
