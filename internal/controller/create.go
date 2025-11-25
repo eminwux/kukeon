@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -87,8 +88,22 @@ func (b *Exec) CreateRealm(doc *v1beta1.RealmDoc) (CreateRealmResult, error) {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrCheckNamespaceExists, err)
 	}
 
-	if _, err = b.runner.CreateRealm(doc); err != nil && !errors.Is(err, errdefs.ErrNamespaceAlreadyExists) {
+	// Convert external doc to internal model at boundary
+	realm, version, err := apischeme.NormalizeRealm(*doc)
+	if err != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
+	// Call runner with internal type
+	resultRealm, err := b.runner.CreateRealm(realm)
+	if err != nil && !errors.Is(err, errdefs.ErrNamespaceAlreadyExists) {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrCreateRealm, err)
+	}
+
+	// Convert result back to external model at boundary
+	resultDoc, err := apischeme.BuildRealmExternalFromInternal(resultRealm, version)
+	if err != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
 	realmDocPost, err := b.runner.GetRealm(doc)
@@ -104,7 +119,8 @@ func (b *Exec) CreateRealm(doc *v1beta1.RealmDoc) (CreateRealmResult, error) {
 		if err != nil {
 			return res, fmt.Errorf("failed to check if realm cgroup exists: %w", err)
 		}
-		res.RealmDoc = realmDocPost
+		// Use the result from CreateRealm instead of GetRealm to ensure consistency
+		res.RealmDoc = &resultDoc
 	}
 
 	res.ContainerdNamespaceExistsPost, err = b.runner.ExistsRealmContainerdNamespace(namespace)
@@ -181,8 +197,22 @@ func (b *Exec) CreateSpace(doc *v1beta1.SpaceDoc) (CreateSpaceResult, error) {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
 
-	if _, err = b.runner.CreateSpace(doc); err != nil {
+	// Convert external doc to internal model at boundary
+	space, version, err := apischeme.NormalizeSpace(*doc)
+	if err != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
+	// Call runner with internal type
+	resultSpace, err := b.runner.CreateSpace(space)
+	if err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrCreateSpace, err)
+	}
+
+	// Convert result back to external model at boundary
+	resultDoc, err := apischeme.BuildSpaceExternalFromInternal(resultSpace, version)
+	if err != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
 	spaceDocPost, err := b.runner.GetSpace(doc)
@@ -198,7 +228,8 @@ func (b *Exec) CreateSpace(doc *v1beta1.SpaceDoc) (CreateSpaceResult, error) {
 		if err != nil {
 			return res, fmt.Errorf("failed to check if space cgroup exists: %w", err)
 		}
-		res.SpaceDoc = spaceDocPost
+		// Use the result from CreateSpace instead of GetSpace to ensure consistency
+		res.SpaceDoc = &resultDoc
 	}
 
 	res.CNINetworkExistsPost, err = b.runner.ExistsSpaceCNIConfig(doc)
@@ -291,8 +322,22 @@ func (b *Exec) CreateStack(doc *v1beta1.StackDoc) (CreateStackResult, error) {
 		}
 	}
 
-	if _, err = b.runner.CreateStack(doc); err != nil {
+	// Convert external doc to internal model at boundary
+	stack, version, err := apischeme.NormalizeStack(*doc)
+	if err != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
+	// Call runner with internal type
+	resultStack, err := b.runner.CreateStack(stack)
+	if err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrCreateStack, err)
+	}
+
+	// Convert result back to external model at boundary
+	resultDoc, err := apischeme.BuildStackExternalFromInternal(resultStack, version)
+	if err != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
 	stackDocPost, err := b.runner.GetStack(doc)
@@ -320,7 +365,8 @@ func (b *Exec) CreateStack(doc *v1beta1.StackDoc) (CreateStackResult, error) {
 		if err != nil {
 			return res, fmt.Errorf("failed to check if stack cgroup exists: %w", err)
 		}
-		res.StackDoc = stackDocPost
+		// Use the result from CreateStack instead of GetStack to ensure consistency
+		res.StackDoc = &resultDoc
 	}
 
 	res.Created = !res.MetadataExistsPre && res.MetadataExistsPost
@@ -433,11 +479,26 @@ func (b *Exec) CreateCell(doc *v1beta1.CellDoc) (CreateCellResult, error) {
 		res.StartedPre = false
 	}
 
-	if _, err = b.runner.CreateCell(doc); err != nil {
+	// Convert external doc to internal model at boundary
+	cell, version, err := apischeme.NormalizeCell(*doc)
+	if err != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
+	// Call runner with internal type
+	resultCell, err := b.runner.CreateCell(cell)
+	if err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrCreateCell, err)
 	}
 
-	if err = b.runner.StartCell(doc); err != nil {
+	// Convert result back to external model at boundary
+	resultDoc, err := apischeme.BuildCellExternalFromInternal(resultCell, version)
+	if err != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
+	// Use the result doc for StartCell
+	if err = b.runner.StartCell(&resultDoc); err != nil {
 		return res, fmt.Errorf("failed to start cell containers: %w", err)
 	}
 
@@ -467,7 +528,8 @@ func (b *Exec) CreateCell(doc *v1beta1.CellDoc) (CreateCellResult, error) {
 			}
 		}
 		res.StartedPost = true
-		res.CellDoc = cellDocPost
+		// Use the result from CreateCell instead of GetCell to ensure consistency
+		res.CellDoc = &resultDoc
 	}
 
 	res.Created = !res.MetadataExistsPre && res.MetadataExistsPost
@@ -602,12 +664,24 @@ func (b *Exec) CreateContainer(doc *v1beta1.ContainerDoc) (CreateContainerResult
 		"containersInCellDoc", len(cellDoc.Spec.Containers),
 	)
 
-	// CreateCell returns the CellDoc with merged containers - we must use this
-	// returned document for StartCell to ensure we're starting the containers
+	// Convert external doc to internal model at boundary
+	cellInternal, version, err := apischeme.NormalizeCell(*cellDoc)
+	if err != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
+	// CreateCell returns the Cell with merged containers - we must use this
+	// returned cell for StartCell to ensure we're starting the containers
 	// that were actually created
-	cellDocCreated, err := b.runner.CreateCell(cellDoc)
+	resultCell, err := b.runner.CreateCell(cellInternal)
 	if err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrCreateCell, err)
+	}
+
+	// Convert result back to external model at boundary for StartCell
+	cellDocCreated, err := apischeme.BuildCellExternalFromInternal(resultCell, version)
+	if err != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
 	// Log after CreateCell returns
@@ -628,7 +702,7 @@ func (b *Exec) CreateContainer(doc *v1beta1.ContainerDoc) (CreateContainerResult
 		"containersToStart", len(cellDocCreated.Spec.Containers),
 	)
 
-	if err = b.runner.StartCell(cellDocCreated); err != nil {
+	if err = b.runner.StartCell(&cellDocCreated); err != nil {
 		return res, fmt.Errorf("failed to start container %s: %w", containerName, err)
 	}
 

@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/util/naming"
@@ -118,19 +119,25 @@ func (b *Exec) bootstrapRealm(report BootstrapReport) (BootstrapReport, error) {
 	}
 	report.RealmContainerdNamespaceExistsPre = nsExistsPre
 
-	_, err = b.runner.CreateRealm(
-		&v1beta1.RealmDoc{
-			Metadata: v1beta1.RealmMetadata{
-				Name: consts.KukeonRealmName,
-				Labels: map[string]string{
-					consts.KukeonRealmLabelKey: consts.KukeonRealmNamespace,
-				},
-			},
-			Spec: v1beta1.RealmSpec{
-				Namespace: consts.KukeonRealmNamespace,
+	realmDoc := &v1beta1.RealmDoc{
+		Metadata: v1beta1.RealmMetadata{
+			Name: consts.KukeonRealmName,
+			Labels: map[string]string{
+				consts.KukeonRealmLabelKey: consts.KukeonRealmNamespace,
 			},
 		},
-	)
+		Spec: v1beta1.RealmSpec{
+			Namespace: consts.KukeonRealmNamespace,
+		},
+	}
+
+	// Convert external doc to internal model at boundary
+	realm, _, err := apischeme.NormalizeRealm(*realmDoc)
+	if err != nil {
+		return report, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
+	_, err = b.runner.CreateRealm(realm)
 	if err != nil && !errors.Is(err, errdefs.ErrNamespaceAlreadyExists) {
 		return report, fmt.Errorf("%w: %w", errdefs.ErrCreateRealm, err)
 	}
@@ -213,8 +220,14 @@ func (b *Exec) bootstrapSpace(report BootstrapReport) (BootstrapReport, error) {
 	}
 	report.SpaceCNINetworkExistsPre = exists
 
+	// Convert external doc to internal model at boundary
+	space, _, err := apischeme.NormalizeSpace(*spaceDoc)
+	if err != nil {
+		return report, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
 	// Create or reconcile space
-	_, err = b.runner.CreateSpace(spaceDoc)
+	_, err = b.runner.CreateSpace(space)
 	if err != nil {
 		return report, fmt.Errorf("%w: %w", errdefs.ErrCreateSpace, err)
 	}
@@ -288,8 +301,14 @@ func (b *Exec) bootstrapStack(report BootstrapReport) (BootstrapReport, error) {
 		report.StackCgroupExistsPre = cgroupExists
 	}
 
+	// Convert external doc to internal model at boundary
+	stack, _, err := apischeme.NormalizeStack(*stackDoc)
+	if err != nil {
+		return report, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
 	// Create or reconcile stack
-	_, err = b.runner.CreateStack(stackDoc)
+	_, err = b.runner.CreateStack(stack)
 	if err != nil {
 		return report, fmt.Errorf("%w: %w", errdefs.ErrCreateStack, err)
 	}
@@ -382,8 +401,14 @@ func (b *Exec) bootstrapCell(report BootstrapReport) (BootstrapReport, error) {
 		report.CellStartedPre = false
 	}
 
+	// Convert external doc to internal model at boundary
+	cell, _, err := apischeme.NormalizeCell(*cellDoc)
+	if err != nil {
+		return report, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
 	// Create or reconcile cell
-	_, err = b.runner.CreateCell(cellDoc)
+	_, err = b.runner.CreateCell(cell)
 	if err != nil {
 		return report, fmt.Errorf("%w: %w", errdefs.ErrCreateCell, err)
 	}
