@@ -41,7 +41,8 @@ func ConvertRealmDocToInternal(in ext.RealmDoc) (intmodel.Realm, error) {
 				Namespace: in.Spec.Namespace,
 			},
 			Status: intmodel.RealmStatus{
-				State: intmodel.RealmState(in.Status.State),
+				State:      intmodel.RealmState(in.Status.State),
+				CgroupPath: in.Status.CgroupPath,
 			},
 		}, nil
 	default:
@@ -64,7 +65,8 @@ func BuildRealmExternalFromInternal(in intmodel.Realm, apiVersion ext.Version) (
 				Namespace: in.Spec.Namespace,
 			},
 			Status: ext.RealmStatus{
-				State: ext.RealmState(in.Status.State),
+				State:      ext.RealmState(in.Status.State),
+				CgroupPath: in.Status.CgroupPath,
 			},
 		}, nil
 	default:
@@ -108,10 +110,12 @@ func ConvertSpaceDocToInternal(in ext.SpaceDoc) (intmodel.Space, error) {
 				Labels: in.Metadata.Labels,
 			},
 			Spec: intmodel.SpaceSpec{
-				RealmName: in.Spec.RealmID,
+				RealmName:     in.Spec.RealmID,
+				CNIConfigPath: in.Spec.CNIConfigPath,
 			},
 			Status: intmodel.SpaceStatus{
-				State: intState,
+				State:      intState,
+				CgroupPath: in.Status.CgroupPath,
 			},
 		}, nil
 	default:
@@ -143,10 +147,12 @@ func BuildSpaceExternalFromInternal(in intmodel.Space, apiVersion ext.Version) (
 				Labels: in.Metadata.Labels,
 			},
 			Spec: ext.SpaceSpec{
-				RealmID: in.Spec.RealmName,
+				RealmID:       in.Spec.RealmName,
+				CNIConfigPath: in.Spec.CNIConfigPath,
 			},
 			Status: ext.SpaceStatus{
-				State: extState,
+				State:      extState,
+				CgroupPath: in.Status.CgroupPath,
 			},
 		}, nil
 	default:

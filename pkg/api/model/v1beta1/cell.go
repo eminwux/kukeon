@@ -39,8 +39,10 @@ type CellSpec struct {
 }
 
 type CellStatus struct {
-	State      CellState `json:"state"      yaml:"state"`
-	CgroupPath string    `json:"cgroupPath" yaml:"cgroupPath"`
+	State         CellState         `json:"state"                   yaml:"state"`
+	CgroupPath    string            `json:"cgroupPath"              yaml:"cgroupPath"`
+	RootContainer *ContainerSpec    `json:"rootContainer,omitempty" yaml:"rootContainer,omitempty"`
+	Containers    []ContainerStatus `json:"containers"              yaml:"containers"`
 }
 
 type CellState int

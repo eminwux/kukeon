@@ -180,7 +180,7 @@ func (b *Exec) bootstrapSpace(report BootstrapReport) (BootstrapReport, error) {
 		},
 	}
 	spaceName := spaceDoc.Metadata.Name
-	spaceNet, err := naming.BuildSpaceNetworkName(spaceDoc)
+	spaceNet, err := naming.BuildSpaceNetworkName(spaceDoc.Spec.RealmID, spaceName)
 	if err != nil {
 		return report, fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
 	}

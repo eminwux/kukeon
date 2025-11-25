@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -115,11 +117,20 @@ func (b *Exec) StartCell(doc *v1beta1.CellDoc) (StartCellResult, error) {
 		return res, fmt.Errorf("failed to start cell containers: %w", err)
 	}
 
+	// Convert to internal model for UpdateCellMetadata
+	cell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
+	if err != nil {
+		return res, fmt.Errorf("failed to convert cell to internal model: %w", err)
+	}
+	cell.Status.State = intmodel.CellStateReady
+
 	// Update cell metadata state to Ready
-	cellDoc.Status.State = v1beta1.CellStateReady
-	if err = b.runner.UpdateCellMetadata(cellDoc); err != nil {
+	if err = b.runner.UpdateCellMetadata(cell); err != nil {
 		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
+
+	// Update cellDoc for response
+	cellDoc.Status.State = v1beta1.CellStateReady
 
 	res.Started = true
 	return res, nil
@@ -219,11 +230,20 @@ func (b *Exec) StartContainer(doc *v1beta1.ContainerDoc) (StartContainerResult, 
 		return res, fmt.Errorf("failed to start container %s: %w", name, err)
 	}
 
+	// Convert to internal model for UpdateCellMetadata
+	cell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
+	if err != nil {
+		return res, fmt.Errorf("failed to convert cell to internal model: %w", err)
+	}
+	cell.Status.State = intmodel.CellStateReady
+
 	// Update cell metadata state to Ready
-	cellDoc.Status.State = v1beta1.CellStateReady
-	if err = b.runner.UpdateCellMetadata(cellDoc); err != nil {
+	if err = b.runner.UpdateCellMetadata(cell); err != nil {
 		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
+
+	// Update cellDoc for response
+	cellDoc.Status.State = v1beta1.CellStateReady
 
 	containerSpec := *foundContainer
 	containerSpec.RealmID = realmName

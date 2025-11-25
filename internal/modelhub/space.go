@@ -28,11 +28,13 @@ type SpaceMetadata struct {
 }
 
 type SpaceSpec struct {
-	RealmName string
+	RealmName     string
+	CNIConfigPath string
 }
 
 type SpaceStatus struct {
-	State SpaceState
+	State      SpaceState
+	CgroupPath string
 }
 
 type SpaceState int

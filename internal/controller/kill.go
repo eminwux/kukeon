@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -60,11 +62,20 @@ func (b *Exec) KillCell(doc *v1beta1.CellDoc) (KillCellResult, error) {
 		return res, fmt.Errorf("failed to kill cell containers: %w", err)
 	}
 
+	// Convert to internal model for UpdateCellMetadata
+	cell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
+	if err != nil {
+		return res, fmt.Errorf("failed to convert cell to internal model: %w", err)
+	}
+	cell.Status.State = intmodel.CellStatePending
+
 	// Update cell metadata state to Pending (killed)
-	cellDoc.Status.State = v1beta1.CellStatePending
-	if err = b.runner.UpdateCellMetadata(cellDoc); err != nil {
+	if err = b.runner.UpdateCellMetadata(cell); err != nil {
 		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
+
+	// Update cellDoc for response
+	cellDoc.Status.State = v1beta1.CellStatePending
 
 	res.Killed = true
 	return res, nil
@@ -179,9 +190,15 @@ func (b *Exec) KillContainer(doc *v1beta1.ContainerDoc) (KillContainerResult, er
 		return res, fmt.Errorf("failed to kill container %s: %w", name, err)
 	}
 
+	// Convert to internal model for UpdateCellMetadata
+	cell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
+	if err != nil {
+		return res, fmt.Errorf("failed to convert cell to internal model: %w", err)
+	}
+
 	// Update cell metadata (state remains Ready if other containers are running)
 	// The state management can be enhanced later to track individual container states
-	if err = b.runner.UpdateCellMetadata(cellDoc); err != nil {
+	if err = b.runner.UpdateCellMetadata(cell); err != nil {
 		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
