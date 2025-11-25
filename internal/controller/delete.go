@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -493,8 +494,14 @@ func (b *Exec) DeleteContainer(doc *v1beta1.ContainerDoc) (DeleteContainerResult
 	}
 	cellDoc.Spec.Containers = updatedContainers
 
+	// Convert to internal model for UpdateCellMetadata
+	cell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
+	if err != nil {
+		return res, fmt.Errorf("failed to convert cell to internal model: %w", err)
+	}
+
 	// Update cell metadata to persist the change
-	if err = b.runner.UpdateCellMetadata(cellDoc); err != nil {
+	if err = b.runner.UpdateCellMetadata(cell); err != nil {
 		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 

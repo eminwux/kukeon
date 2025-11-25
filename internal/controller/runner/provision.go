@@ -17,16 +17,22 @@
 package runner
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/metadata"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/cgroups"
+	ctrutil "github.com/eminwux/kukeon/internal/util/ctr"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -43,35 +49,37 @@ type ensureCgroupParams struct {
 	updateMetadata func() error
 }
 
-func (r *Exec) provisionNewRealm(doc *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error) {
+func (r *Exec) provisionNewRealm(realm intmodel.Realm) (intmodel.Realm, error) {
 	// Update realm metadata
-	if err := r.UpdateRealmMetadata(doc); err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrUpdateRealmMetadata, err)
+	if err := r.UpdateRealmMetadata(realm); err != nil {
+		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateRealmMetadata, err)
 	}
 
 	// Create realm namespace
-	if err := r.createRealmContainerdNamespace(doc); err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrCreateRealmNamespace, err)
+	if err := r.createRealmContainerdNamespace(realm); err != nil {
+		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrCreateRealmNamespace, err)
 	}
 
 	// Create realm cgroup
-	cgroupPath, err := r.createRealmCgroup(doc)
+	cgroupPath, err := r.createRealmCgroup(realm)
 	if err != nil {
-		return nil, err
+		return intmodel.Realm{}, err
 	}
 
-	// Persist cgroup path in metadata
-	doc.Status.CgroupPath = cgroupPath
+	// Update CgroupPath and state in internal model
+	realm.Status.CgroupPath = cgroupPath
+	realm.Status.State = intmodel.RealmStateReady
 
-	// Update realm state
-	doc.Status.State = v1beta1.RealmStateReady
-	if err = r.UpdateRealmMetadata(doc); err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrUpdateRealmMetadata, err)
+	// Always update metadata after cgroup creation to ensure CgroupPath is saved
+	// (similar to ensureRealmCgroup pattern for consistency)
+	if err = r.UpdateRealmMetadata(realm); err != nil {
+		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateRealmMetadata, err)
 	}
-	return doc, nil
+
+	return realm, nil
 }
 
-func (r *Exec) createRealmContainerdNamespace(doc *v1beta1.RealmDoc) error {
+func (r *Exec) createRealmContainerdNamespace(realm intmodel.Realm) error {
 	// Create realm containerd namespace
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
@@ -83,93 +91,89 @@ func (r *Exec) createRealmContainerdNamespace(doc *v1beta1.RealmDoc) error {
 	}
 	defer r.ctrClient.Close()
 
-	exists, err := r.ctrClient.ExistsNamespace(doc.Spec.Namespace)
+	exists, err := r.ctrClient.ExistsNamespace(realm.Spec.Namespace)
 	if err != nil {
 		r.logger.InfoContext(r.ctx, "failed to check if kukeon namespace exists", "err", fmt.Sprintf("%v", err))
 		return fmt.Errorf("%w: %w", errdefs.ErrCheckNamespaceExists, err)
 	}
 
 	if exists {
-		r.logger.InfoContext(r.ctx, "kukeon namespace already exists", "namespace", doc.Spec.Namespace)
+		r.logger.InfoContext(r.ctx, "kukeon namespace already exists", "namespace", realm.Spec.Namespace)
 		return errdefs.ErrNamespaceAlreadyExists
 	}
 
-	fmt.Fprintf(os.Stdout, "Creating containerd namespace '%s'\n", doc.Spec.Namespace)
-	err = r.ctrClient.CreateNamespace(doc.Spec.Namespace)
+	fmt.Fprintf(os.Stdout, "Creating containerd namespace '%s'\n", realm.Spec.Namespace)
+	err = r.ctrClient.CreateNamespace(realm.Spec.Namespace)
 	if err != nil {
 		r.logger.InfoContext(r.ctx, "failed to create kukeon namespace", "err", fmt.Sprintf("%v", err))
 		return fmt.Errorf("%w: %w", errdefs.ErrCreateNamespace, err)
 	}
-	r.logger.InfoContext(r.ctx, "created kukeon namespace", "namespace", doc.Spec.Namespace)
+	r.logger.InfoContext(r.ctx, "created kukeon namespace", "namespace", realm.Spec.Namespace)
 
 	return nil
 }
 
-func (r *Exec) ensureRealmContainerdNamespace(doc *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error) {
-	// Ensure containerd namespace exists for the realm described by doc
+func (r *Exec) ensureRealmContainerdNamespace(realm intmodel.Realm) (intmodel.Realm, error) {
+	// Ensure containerd namespace exists for the realm
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
 	if err := r.ctrClient.Connect(); err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 	defer r.ctrClient.Close()
 
-	exists, err := r.ctrClient.ExistsNamespace(doc.Spec.Namespace)
+	exists, err := r.ctrClient.ExistsNamespace(realm.Spec.Namespace)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrCheckNamespaceExists, err)
+		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrCheckNamespaceExists, err)
 	}
 	if !exists {
-		if err = r.ctrClient.CreateNamespace(doc.Spec.Namespace); err != nil {
-			return nil, fmt.Errorf("%w: %w", errdefs.ErrCreateNamespace, err)
+		if err = r.ctrClient.CreateNamespace(realm.Spec.Namespace); err != nil {
+			return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrCreateNamespace, err)
 		}
-		r.logger.InfoContext(r.ctx, "recreated missing containerd namespace for realm", "namespace", doc.Spec.Namespace)
+		r.logger.InfoContext(
+			r.ctx,
+			"recreated missing containerd namespace for realm",
+			"namespace",
+			realm.Spec.Namespace,
+		)
 	}
-	return doc, nil
+	return realm, nil
 }
 
-func (r *Exec) provisionNewSpace(doc *v1beta1.SpaceDoc) (*v1beta1.SpaceDoc, error) {
+func (r *Exec) provisionNewSpace(space intmodel.Space) (intmodel.Space, error) {
 	// Update space metadata
-	if err := r.UpdateSpaceMetadata(doc); err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrUpdateSpaceMetadata, err)
+	if err := r.UpdateSpaceMetadata(space); err != nil {
+		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateSpaceMetadata, err)
 	}
 
 	// Create space network (strict create)
-	if networkErr := r.createSpaceCNIConfig(doc); networkErr != nil {
-		return nil, networkErr
-	}
-
-	if doc.Spec.RealmID == "" {
-		return nil, errdefs.ErrRealmNameRequired
-	}
-	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
-			Name: doc.Spec.RealmID,
-		},
-	})
+	cniConfigPath, err := r.createSpaceCNIConfig(space)
 	if err != nil {
-		return nil, err
+		return intmodel.Space{}, err
 	}
+	// Update internal model with CNIConfigPath
+	space.Spec.CNIConfigPath = cniConfigPath
 
 	// Create space cgroup
-	if createErr := r.createSpaceCgroup(doc, realmDoc); createErr != nil {
-		return nil, createErr
+	cgroupPath, createErr := r.createSpaceCgroup(space)
+	if createErr != nil {
+		return intmodel.Space{}, createErr
 	}
 
-	// Persist cgroup path in space metadata
-	if updateErr := r.UpdateSpaceMetadata(doc); updateErr != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrUpdateSpaceMetadata, updateErr)
+	// Update CgroupPath and state in internal model
+	space.Status.CgroupPath = cgroupPath
+	space.Status.State = intmodel.SpaceStateReady
+
+	// Update space metadata
+	if updateErr := r.UpdateSpaceMetadata(space); updateErr != nil {
+		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateSpaceMetadata, updateErr)
 	}
 
-	// Update space state
-	doc.Status.State = v1beta1.SpaceStateReady
-	if updateErr := r.UpdateSpaceMetadata(doc); updateErr != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrUpdateSpaceMetadata, updateErr)
-	}
-	return doc, nil
+	return space, nil
 }
 
-func (r *Exec) ensureSpaceCNIConfig(doc *v1beta1.SpaceDoc) (*v1beta1.SpaceDoc, error) {
+func (r *Exec) ensureSpaceCNIConfig(space intmodel.Space) (intmodel.Space, error) {
 	// Initialize CNI manager
 	mgr, err := cni.NewManager(
 		r.cniConf.CniBinDir,
@@ -177,49 +181,83 @@ func (r *Exec) ensureSpaceCNIConfig(doc *v1beta1.SpaceDoc) (*v1beta1.SpaceDoc, e
 		r.cniConf.CniCacheDir,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrInitCniManager, err)
+		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrInitCniManager, err)
 	}
 
-	networkName, err := naming.BuildSpaceNetworkName(doc)
+	// Convert to external model for other operations (CNIConfigPath handling)
+	spaceDoc, err := apischeme.BuildSpaceExternalFromInternal(space, apischeme.VersionV1Beta1)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
+		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
-	confPath, err := fs.SpaceNetworkConfigPath(r.opts.RunPath, doc.Spec.RealmID, doc.Metadata.Name)
+
+	networkName, err := naming.BuildSpaceNetworkName(space.Spec.RealmName, space.Metadata.Name)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
+		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
+	}
+	confPath, err := fs.SpaceNetworkConfigPath(r.opts.RunPath, space.Spec.RealmName, space.Metadata.Name)
+	if err != nil {
+		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
 
 	// Ensure a network exists for this space
 	exists, _, err := mgr.ExistsNetworkConfig(networkName, confPath)
 	if err != nil && !errors.Is(err, errdefs.ErrNetworkNotFound) {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
+		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
 	if !exists {
 		if writeErr := fs.WriteSpaceNetworkConfig(confPath, networkName); writeErr != nil {
-			return nil, fmt.Errorf("%w: %w", errdefs.ErrCreateNetwork, writeErr)
+			return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrCreateNetwork, writeErr)
 		}
 	}
-	specUpdated := doc.Spec.CNIConfigPath != confPath
-	doc.Spec.CNIConfigPath = confPath
+	specUpdated := spaceDoc.Spec.CNIConfigPath != confPath
 	if specUpdated {
-		if updateErr := r.UpdateSpaceMetadata(doc); updateErr != nil {
-			return nil, fmt.Errorf("%w: %w", errdefs.ErrUpdateSpaceMetadata, updateErr)
+		spaceDoc.Spec.CNIConfigPath = confPath
+		// Convert back to internal model for UpdateSpaceMetadata
+		// Note: CNIConfigPath will be lost in internal model, but UpdateSpaceMetadata
+		// converts to external which will have CNIConfigPath from spaceDoc
+		// Actually, we need to preserve CNIConfigPath, so we'll convert spaceDoc which has it
+		updatedSpace, err := apischeme.ConvertSpaceDocToInternal(spaceDoc)
+		if err != nil {
+			return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+		}
+		// Preserve any internal-only fields that might have been set
+		updatedSpace.Status.CgroupPath = space.Status.CgroupPath
+		// UpdateSpaceMetadata will convert to external, but CNIConfigPath is not in internal model
+		// So we need to ensure it's preserved. Since UpdateSpaceMetadata converts internal->external,
+		// and CNIConfigPath is not in internal, we need to handle this differently.
+		// Solution: Call UpdateSpaceMetadata with spaceDoc directly converted, but that requires
+		// changing UpdateSpaceMetadata signature... Actually, we can build external from the
+		// updatedSpace and then manually set CNIConfigPath before saving.
+		spaceDocForSave, err := apischeme.BuildSpaceExternalFromInternal(updatedSpace, apischeme.VersionV1Beta1)
+		if err != nil {
+			return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+		}
+		// Preserve CNIConfigPath from the original spaceDoc
+		spaceDocForSave.Spec.CNIConfigPath = spaceDoc.Spec.CNIConfigPath
+		// Now save using the external model directly
+		metadataFilePath := fs.SpaceMetadataPath(
+			r.opts.RunPath,
+			spaceDocForSave.Spec.RealmID,
+			spaceDocForSave.Metadata.Name,
+		)
+		if updateErr := metadata.WriteMetadata(r.ctx, r.logger, spaceDocForSave, metadataFilePath); updateErr != nil {
+			return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateSpaceMetadata, updateErr)
 		}
 	}
 	r.logger.InfoContext(
 		r.ctx,
 		"space network exists",
 		"space",
-		doc.Metadata.Name,
+		space.Metadata.Name,
 		"network",
 		networkName,
 		"conf",
 		confPath,
 	)
-	return doc, nil
+	return space, nil
 }
 
-func (r *Exec) createSpaceCNIConfig(doc *v1beta1.SpaceDoc) error {
+func (r *Exec) createSpaceCNIConfig(space intmodel.Space) (string, error) {
 	// Initialize CNI manager
 	mgr, err := cni.NewManager(
 		r.cniConf.CniBinDir,
@@ -227,45 +265,44 @@ func (r *Exec) createSpaceCNIConfig(doc *v1beta1.SpaceDoc) error {
 		r.cniConf.CniCacheDir,
 	)
 	if err != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrInitCniManager, err)
+		return "", fmt.Errorf("%w: %w", errdefs.ErrInitCniManager, err)
 	}
 
-	networkName, err := naming.BuildSpaceNetworkName(doc)
+	networkName, err := naming.BuildSpaceNetworkName(space.Spec.RealmName, space.Metadata.Name)
 	if err != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
+		return "", fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
-	confPath, err := fs.SpaceNetworkConfigPath(r.opts.RunPath, doc.Spec.RealmID, doc.Metadata.Name)
+	confPath, err := fs.SpaceNetworkConfigPath(r.opts.RunPath, space.Spec.RealmName, space.Metadata.Name)
 	if err != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
+		return "", fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
 
 	// Check if network already exists
 	exists, _, err := mgr.ExistsNetworkConfig(networkName, confPath)
 	if err != nil && !errors.Is(err, errdefs.ErrNetworkNotFound) {
-		return fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
+		return "", fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
 	if exists {
 		r.logger.InfoContext(r.ctx, "space network already exists", "network", networkName)
-		return errdefs.ErrNetworkAlreadyExists
+		return "", errdefs.ErrNetworkAlreadyExists
 	}
 
 	fmt.Fprintf(os.Stdout, "Creating space network '%s'\n", networkName)
 	if writeErr := fs.WriteSpaceNetworkConfig(confPath, networkName); writeErr != nil {
 		r.logger.InfoContext(r.ctx, "failed to create space network", "err", fmt.Sprintf("%v", writeErr))
-		return fmt.Errorf("%w: %w", errdefs.ErrCreateNetwork, writeErr)
+		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateNetwork, writeErr)
 	}
-	doc.Spec.CNIConfigPath = confPath
 	r.logger.InfoContext(
 		r.ctx,
 		"created space network",
 		"space",
-		doc.Metadata.Name,
+		space.Metadata.Name,
 		"network",
 		networkName,
 		"conf",
 		confPath,
 	)
-	return nil
+	return confPath, nil
 }
 
 // buildCgroupPath discovers the cgroup mountpoint and current process cgroup path,
@@ -488,79 +525,79 @@ func (r *Exec) ensureCgroupInternal(params ensureCgroupParams) error {
 	return nil
 }
 
-func (r *Exec) ensureSpaceCgroup(doc *v1beta1.SpaceDoc, realm *v1beta1.RealmDoc) (*v1beta1.SpaceDoc, error) {
+func (r *Exec) ensureSpaceCgroup(space intmodel.Space, realm *v1beta1.RealmDoc) (intmodel.Space, error) {
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
 	if err := r.ctrClient.Connect(); err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 	defer r.ctrClient.Close()
 
-	spec := cgroups.DefaultSpaceSpec(realm, doc)
+	// Convert to external model for cgroups.DefaultSpaceSpec (requires external models)
+	spaceDoc, err := apischeme.BuildSpaceExternalFromInternal(space, apischeme.VersionV1Beta1)
+	if err != nil {
+		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
 
-	err := r.ensureCgroupInternal(ensureCgroupParams{
+	spec := cgroups.DefaultSpaceSpec(realm, &spaceDoc)
+
+	// Capture space for closure
+	spaceForUpdate := space
+	ensureErr := r.ensureCgroupInternal(ensureCgroupParams{
 		spec:       spec,
-		docName:    doc.Metadata.Name,
-		cgroupPath: &doc.Status.CgroupPath,
+		docName:    spaceDoc.Metadata.Name,
+		cgroupPath: &spaceDoc.Status.CgroupPath,
 		createErr:  errdefs.ErrCreateSpaceCgroup,
 		updateErr:  errdefs.ErrUpdateSpaceMetadata,
 		logLabel:   "space",
 		updateMetadata: func() error {
-			return r.UpdateSpaceMetadata(doc)
+			// Update internal model's CgroupPath from external model
+			spaceForUpdate.Status.CgroupPath = spaceDoc.Status.CgroupPath
+			return r.UpdateSpaceMetadata(spaceForUpdate)
+		},
+	})
+	if ensureErr != nil {
+		return intmodel.Space{}, ensureErr
+	}
+
+	// Update internal model's CgroupPath from external model after ensureCgroupInternal
+	space.Status.CgroupPath = spaceDoc.Status.CgroupPath
+
+	// Always update metadata after ensureCgroupInternal to ensure CgroupPath is saved
+	// (closure may not have been called if cgroup already existed with path)
+	if spaceDoc.Status.CgroupPath != "" {
+		if err := r.UpdateSpaceMetadata(space); err != nil {
+			return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateSpaceMetadata, err)
+		}
+	}
+
+	return space, nil
+}
+
+func (r *Exec) createSpaceCgroup(space intmodel.Space) (string, error) {
+	// Extract realm name from space and validate
+	if space.Spec.RealmName == "" {
+		return "", errdefs.ErrRealmNameRequired
+	}
+
+	// Fetch the realm internally
+	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
+		Metadata: v1beta1.RealmMetadata{
+			Name: space.Spec.RealmName,
 		},
 	})
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
-	return doc, nil
-}
-
-func (r *Exec) createSpaceCgroup(doc *v1beta1.SpaceDoc, realm *v1beta1.RealmDoc) error {
-	spec := cgroups.DefaultSpaceSpec(realm, doc)
-
-	// Ensure client is initialized and connected
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	if err := r.ctrClient.Connect(); err != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
-	}
-	defer r.ctrClient.Close()
-
-	// Build the cgroup path
-	spec, _, err := r.buildCgroupPath(spec)
+	// Convert space to external model for DefaultSpaceSpec
+	spaceDoc, err := apischeme.BuildSpaceExternalFromInternal(space, apischeme.VersionV1Beta1)
 	if err != nil {
-		return err
+		return "", fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
-	// Create the cgroup
-	cgroupPath, createErr := r.createCgroupInternal(spec)
-	if createErr != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrCreateSpaceCgroup, createErr)
-	}
-
-	doc.Status.CgroupPath = cgroupPath
-	if updateErr := r.UpdateSpaceMetadata(doc); updateErr != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrUpdateSpaceMetadata, updateErr)
-	}
-
-	r.logger.InfoContext(
-		r.ctx,
-		"created space cgroup",
-		"space",
-		doc.Metadata.Name,
-		"realm",
-		realm.Metadata.Name,
-		"path",
-		cgroupPath,
-	)
-	return nil
-}
-
-func (r *Exec) createRealmCgroup(doc *v1beta1.RealmDoc) (string, error) {
-	spec := cgroups.DefaultRealmSpec(doc)
+	spec := cgroups.DefaultSpaceSpec(realmDoc, &spaceDoc)
 
 	// Ensure client is initialized and connected
 	if r.ctrClient == nil {
@@ -572,7 +609,50 @@ func (r *Exec) createRealmCgroup(doc *v1beta1.RealmDoc) (string, error) {
 	defer r.ctrClient.Close()
 
 	// Build the cgroup path
-	spec, _, err := r.buildCgroupPath(spec)
+	spec, _, err = r.buildCgroupPath(spec)
+	if err != nil {
+		return "", err
+	}
+
+	// Create the cgroup
+	cgroupPath, createErr := r.createCgroupInternal(spec)
+	if createErr != nil {
+		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateSpaceCgroup, createErr)
+	}
+
+	r.logger.InfoContext(
+		r.ctx,
+		"created space cgroup",
+		"space",
+		spaceDoc.Metadata.Name,
+		"realm",
+		realmDoc.Metadata.Name,
+		"path",
+		cgroupPath,
+	)
+	return cgroupPath, nil
+}
+
+func (r *Exec) createRealmCgroup(realm intmodel.Realm) (string, error) {
+	// Convert to external model for DefaultRealmSpec (requires external model)
+	realmDoc, err := apischeme.BuildRealmExternalFromInternal(realm, apischeme.VersionV1Beta1)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
+	spec := cgroups.DefaultRealmSpec(&realmDoc)
+
+	// Ensure client is initialized and connected
+	if r.ctrClient == nil {
+		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
+	}
+	if err := r.ctrClient.Connect(); err != nil {
+		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	defer r.ctrClient.Close()
+
+	// Build the cgroup path
+	spec, _, err = r.buildCgroupPath(spec)
 	if err != nil {
 		return "", err
 	}
@@ -583,100 +663,130 @@ func (r *Exec) createRealmCgroup(doc *v1beta1.RealmDoc) (string, error) {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateRealmCgroup, createErr)
 	}
 
-	doc.Status.CgroupPath = cgroupPath
 	r.logger.InfoContext(
 		r.ctx,
 		"created realm cgroup",
 		"realm",
-		doc.Metadata.Name,
+		realmDoc.Metadata.Name,
 		"path",
 		cgroupPath,
 	)
 	return cgroupPath, nil
 }
 
-func (r *Exec) ensureRealmCgroup(doc *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error) {
+func (r *Exec) ensureRealmCgroup(realm intmodel.Realm) (intmodel.Realm, error) {
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
 	if err := r.ctrClient.Connect(); err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 	defer r.ctrClient.Close()
 
-	spec := cgroups.DefaultRealmSpec(doc)
+	// Convert to external model for cgroups.DefaultRealmSpec (requires external model)
+	realmDoc, err := apischeme.BuildRealmExternalFromInternal(realm, apischeme.VersionV1Beta1)
+	if err != nil {
+		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
 
-	err := r.ensureCgroupInternal(ensureCgroupParams{
+	spec := cgroups.DefaultRealmSpec(&realmDoc)
+
+	// Capture realm for closure
+	realmForUpdate := realm
+	ensureErr := r.ensureCgroupInternal(ensureCgroupParams{
 		spec:       spec,
-		docName:    doc.Metadata.Name,
-		cgroupPath: &doc.Status.CgroupPath,
+		docName:    realmDoc.Metadata.Name,
+		cgroupPath: &realmDoc.Status.CgroupPath,
 		createErr:  errdefs.ErrCreateRealmCgroup,
 		updateErr:  errdefs.ErrUpdateRealmMetadata,
 		logLabel:   "realm",
 		updateMetadata: func() error {
-			return r.UpdateRealmMetadata(doc)
+			// Update internal model's CgroupPath from external model
+			realmForUpdate.Status.CgroupPath = realmDoc.Status.CgroupPath
+			return r.UpdateRealmMetadata(realmForUpdate)
 		},
 	})
-	if err != nil {
-		return nil, err
+	if ensureErr != nil {
+		return intmodel.Realm{}, ensureErr
 	}
 
-	return doc, nil
+	// Update internal model's CgroupPath from external model after ensureCgroupInternal
+	realm.Status.CgroupPath = realmDoc.Status.CgroupPath
+
+	// Always update metadata after ensureCgroupInternal to ensure CgroupPath is saved
+	// (closure may not have been called if cgroup already existed with path)
+	if realmDoc.Status.CgroupPath != "" {
+		if err := r.UpdateRealmMetadata(realm); err != nil {
+			return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateRealmMetadata, err)
+		}
+	}
+
+	return realm, nil
 }
 
-func (r *Exec) provisionNewStack(doc *v1beta1.StackDoc) (*v1beta1.StackDoc, error) {
-	// Update realm metadata
-	if err := r.UpdateStackMetadata(doc); err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrUpdateStackMetadata, err)
+func (r *Exec) provisionNewStack(stack intmodel.Stack) (intmodel.Stack, error) {
+	// Update stack metadata
+	if err := r.UpdateStackMetadata(stack); err != nil {
+		return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateStackMetadata, err)
 	}
 
-	// Create realm cgroup
-	cgroupPath, err := r.createStackCgroup(doc)
+	// Create stack cgroup
+	cgroupPath, err := r.createStackCgroup(stack)
 	if err != nil {
-		return nil, err
+		return intmodel.Stack{}, err
 	}
 
-	// Persist cgroup path in metadata
-	doc.Status.CgroupPath = cgroupPath
+	// Update CgroupPath and state in internal model
+	stack.Status.CgroupPath = cgroupPath
+	stack.Status.State = intmodel.StackStateReady
 
-	// Update realm state
-	doc.Status.State = v1beta1.StackStateReady
-	if err = r.UpdateStackMetadata(doc); err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrUpdateStackMetadata, err)
+	// Update stack metadata
+	if err = r.UpdateStackMetadata(stack); err != nil {
+		return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateStackMetadata, err)
 	}
-	return doc, nil
+
+	return stack, nil
 }
 
-func (r *Exec) createStackCgroup(doc *v1beta1.StackDoc) (string, error) {
-	if doc.Spec.RealmID == "" {
+func (r *Exec) createStackCgroup(stack intmodel.Stack) (string, error) {
+	// Extract realm and space names from stack and validate
+	if stack.Spec.RealmName == "" {
 		return "", errdefs.ErrRealmNameRequired
 	}
-	if doc.Spec.SpaceID == "" {
+	if stack.Spec.SpaceName == "" {
 		return "", errdefs.ErrSpaceNameRequired
 	}
 
+	// Fetch the realm internally
 	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
 		Metadata: v1beta1.RealmMetadata{
-			Name: doc.Spec.RealmID,
+			Name: stack.Spec.RealmName,
 		},
 	})
 	if err != nil {
 		return "", err
 	}
 
+	// Fetch the space internally
 	spaceDoc, err := r.GetSpace(&v1beta1.SpaceDoc{
 		Metadata: v1beta1.SpaceMetadata{
-			Name: doc.Spec.SpaceID,
+			Name: stack.Spec.SpaceName,
 		},
 		Spec: v1beta1.SpaceSpec{
-			RealmID: doc.Spec.RealmID,
+			RealmID: stack.Spec.RealmName,
 		},
 	})
 	if err != nil {
 		return "", err
 	}
 
-	spec := cgroups.DefaultStackSpec(realmDoc, spaceDoc, doc)
+	// Convert stack to external model for DefaultStackSpec
+	stackDoc, err := apischeme.BuildStackExternalFromInternal(stack, apischeme.VersionV1Beta1)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
+	spec := cgroups.DefaultStackSpec(realmDoc, spaceDoc, &stackDoc)
 
 	// Ensure client is initialized and connected
 	if r.ctrClient == nil {
@@ -699,153 +809,194 @@ func (r *Exec) createStackCgroup(doc *v1beta1.StackDoc) (string, error) {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateStackCgroup, createErr)
 	}
 
-	doc.Status.CgroupPath = cgroupPath
 	r.logger.InfoContext(
 		r.ctx,
 		"created stack cgroup",
 		"stack",
-		doc.Metadata.Name,
+		stackDoc.Metadata.Name,
 		"path",
 		cgroupPath,
 	)
 	return cgroupPath, nil
 }
 
-func (r *Exec) ensureStackCgroup(doc *v1beta1.StackDoc) (*v1beta1.StackDoc, error) {
-	if doc.Spec.RealmID == "" {
-		return nil, errdefs.ErrRealmNameRequired
+func (r *Exec) ensureStackCgroup(stack intmodel.Stack) (intmodel.Stack, error) {
+	realmName := strings.TrimSpace(stack.Spec.RealmName)
+	if realmName == "" {
+		return intmodel.Stack{}, errdefs.ErrRealmNameRequired
 	}
-	if doc.Spec.SpaceID == "" {
-		return nil, errdefs.ErrSpaceNameRequired
+	spaceName := strings.TrimSpace(stack.Spec.SpaceName)
+	if spaceName == "" {
+		return intmodel.Stack{}, errdefs.ErrSpaceNameRequired
+	}
+
+	stackDoc, err := apischeme.BuildStackExternalFromInternal(stack, apischeme.VersionV1Beta1)
+	if err != nil {
+		return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
 	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
 		Metadata: v1beta1.RealmMetadata{
-			Name: doc.Spec.RealmID,
+			Name: realmName,
 		},
 	})
 	if err != nil {
-		return nil, err
+		return intmodel.Stack{}, err
 	}
 
 	spaceDoc, err := r.GetSpace(&v1beta1.SpaceDoc{
 		Metadata: v1beta1.SpaceMetadata{
-			Name: doc.Spec.SpaceID,
+			Name: spaceName,
 		},
 		Spec: v1beta1.SpaceSpec{
-			RealmID: doc.Spec.RealmID,
+			RealmID: realmName,
 		},
 	})
 	if err != nil {
-		return nil, err
+		return intmodel.Stack{}, err
 	}
 
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
 	if err = r.ctrClient.Connect(); err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+		return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 	defer r.ctrClient.Close()
 
-	spec := cgroups.DefaultStackSpec(realmDoc, spaceDoc, doc)
+	spec := cgroups.DefaultStackSpec(realmDoc, spaceDoc, &stackDoc)
 
+	// Capture stack for closure
+	stackForUpdate := stack
 	ensureErr := r.ensureCgroupInternal(ensureCgroupParams{
 		spec:       spec,
-		docName:    doc.Metadata.Name,
-		cgroupPath: &doc.Status.CgroupPath,
+		docName:    stackDoc.Metadata.Name,
+		cgroupPath: &stackDoc.Status.CgroupPath,
 		createErr:  errdefs.ErrCreateStackCgroup,
 		updateErr:  errdefs.ErrUpdateStackMetadata,
 		logLabel:   "stack",
 		updateMetadata: func() error {
-			return r.UpdateStackMetadata(doc)
+			// Update internal model's CgroupPath from external model
+			stackForUpdate.Status.CgroupPath = stackDoc.Status.CgroupPath
+			return r.UpdateStackMetadata(stackForUpdate)
 		},
 	})
 	if ensureErr != nil {
-		return nil, ensureErr
+		return intmodel.Stack{}, ensureErr
 	}
 
-	return doc, nil
+	// Update internal model's CgroupPath from external model after ensureCgroupInternal
+	stack.Status.CgroupPath = stackDoc.Status.CgroupPath
+
+	// Always update metadata after ensureCgroupInternal to ensure CgroupPath is saved
+	// (closure may not have been called if cgroup already existed with path)
+	if stackDoc.Status.CgroupPath != "" {
+		if err := r.UpdateStackMetadata(stack); err != nil {
+			return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateStackMetadata, err)
+		}
+	}
+
+	return stack, nil
 }
 
-func (r *Exec) provisionNewCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error) {
-	// Update realm metadata
-	if err := r.UpdateCellMetadata(doc); err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
+func (r *Exec) provisionNewCell(cell intmodel.Cell) (intmodel.Cell, error) {
+	// Update cell metadata
+	if err := r.UpdateCellMetadata(cell); err != nil {
+		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
 	}
 
-	// Create realm cgroup
-	cgroupPath, err := r.createCellCgroup(doc)
+	// Create cell cgroup
+	cgroupPath, err := r.createCellCgroup(cell)
 	if err != nil {
-		return nil, err
+		return intmodel.Cell{}, err
 	}
 
-	// Persist cgroup path in metadata
-	doc.Status.CgroupPath = cgroupPath
+	// Update internal model with cgroup path
+	cell.Status.CgroupPath = cgroupPath
 
-	// Create pause container and all containers for the cell
-	_, err = r.createCellContainers(doc)
+	// Convert to external model for createCellContainers (requires external model)
+	cellDoc, err := apischeme.BuildCellExternalFromInternal(cell, apischeme.VersionV1Beta1)
 	if err != nil {
-		return nil, err
+		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
-	// Update realm state
-	doc.Status.State = v1beta1.CellStateReady
-	if err = r.UpdateCellMetadata(doc); err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
+	// Create pause container and all containers for the cell (requires external model)
+	_, err = r.createCellContainers(&cellDoc)
+	if err != nil {
+		return intmodel.Cell{}, err
 	}
-	return doc, nil
+
+	// Update cell state in internal model
+	cell.Status.State = intmodel.CellStateReady
+
+	// Update cell metadata
+	if err = r.UpdateCellMetadata(cell); err != nil {
+		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
+	}
+
+	return cell, nil
 }
 
-func (r *Exec) createCellCgroup(doc *v1beta1.CellDoc) (string, error) {
-	if doc.Spec.RealmID == "" {
+func (r *Exec) createCellCgroup(cell intmodel.Cell) (string, error) {
+	// Extract realm, space, and stack names from cell and validate
+	if cell.Spec.RealmName == "" {
 		return "", errdefs.ErrRealmNameRequired
 	}
-	if doc.Spec.SpaceID == "" {
+	if cell.Spec.SpaceName == "" {
 		return "", errdefs.ErrSpaceNameRequired
 	}
-	if doc.Spec.StackID == "" {
+	if cell.Spec.StackName == "" {
 		return "", errdefs.ErrStackNameRequired
 	}
 
+	// Fetch the realm internally
 	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
 		Metadata: v1beta1.RealmMetadata{
-			Name: doc.Spec.RealmID,
+			Name: cell.Spec.RealmName,
 		},
 	})
 	if err != nil {
 		return "", err
 	}
 
+	// Fetch the space internally
 	spaceDoc, err := r.GetSpace(&v1beta1.SpaceDoc{
 		Metadata: v1beta1.SpaceMetadata{
-			Name: doc.Spec.SpaceID,
+			Name: cell.Spec.SpaceName,
 		},
 		Spec: v1beta1.SpaceSpec{
-			RealmID: doc.Spec.RealmID,
+			RealmID: cell.Spec.RealmName,
 		},
 	})
 	if err != nil {
 		return "", err
 	}
+
+	// Fetch the stack internally
 	stackDoc, err := r.GetStack(&v1beta1.StackDoc{
 		Metadata: v1beta1.StackMetadata{
-			Name: doc.Spec.StackID,
+			Name: cell.Spec.StackName,
 		},
 		Spec: v1beta1.StackSpec{
-			RealmID: doc.Spec.RealmID,
-			SpaceID: doc.Spec.SpaceID,
+			RealmID: cell.Spec.RealmName,
+			SpaceID: cell.Spec.SpaceName,
 		},
 	})
 	if err != nil {
 		return "", err
+	}
+
+	// Convert cell to external model for DefaultCellSpec
+	cellDoc, err := apischeme.BuildCellExternalFromInternal(cell, apischeme.VersionV1Beta1)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
 	spec := cgroups.DefaultCellSpec(
 		realmDoc,
 		spaceDoc,
 		stackDoc,
-		doc,
+		&cellDoc,
 	)
 
 	// Ensure client is initialized and connected
@@ -866,90 +1017,806 @@ func (r *Exec) createCellCgroup(doc *v1beta1.CellDoc) (string, error) {
 	// Create the cgroup
 	cgroupPath, createErr := r.createCgroupInternal(spec)
 	if createErr != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateStackCgroup, createErr)
+		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateCellCgroup, createErr)
 	}
 
-	doc.Status.CgroupPath = cgroupPath
 	r.logger.InfoContext(
 		r.ctx,
-		"created stack cgroup",
-		"stack",
-		doc.Metadata.Name,
+		"created cell cgroup",
+		"cell",
+		cellDoc.Metadata.Name,
 		"path",
 		cgroupPath,
 	)
 	return cgroupPath, nil
 }
 
-func (r *Exec) ensureCellCgroup(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error) {
-	if doc.Spec.RealmID == "" {
-		return nil, errdefs.ErrRealmNameRequired
+func (r *Exec) ensureCellCgroup(cell intmodel.Cell) (intmodel.Cell, error) {
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
+	if realmName == "" {
+		return intmodel.Cell{}, errdefs.ErrRealmNameRequired
 	}
-	if doc.Spec.SpaceID == "" {
-		return nil, errdefs.ErrSpaceNameRequired
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
+	if spaceName == "" {
+		return intmodel.Cell{}, errdefs.ErrSpaceNameRequired
 	}
-	if doc.Spec.StackID == "" {
-		return nil, errdefs.ErrStackNameRequired
+	stackName := strings.TrimSpace(cell.Spec.StackName)
+	if stackName == "" {
+		return intmodel.Cell{}, errdefs.ErrStackNameRequired
+	}
+
+	cellDoc, err := apischeme.BuildCellExternalFromInternal(cell, apischeme.VersionV1Beta1)
+	if err != nil {
+		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
 	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
 		Metadata: v1beta1.RealmMetadata{
-			Name: doc.Spec.RealmID,
+			Name: realmName,
 		},
 	})
 	if err != nil {
-		return nil, err
+		return intmodel.Cell{}, err
 	}
 
 	spaceDoc, err := r.GetSpace(&v1beta1.SpaceDoc{
 		Metadata: v1beta1.SpaceMetadata{
-			Name: doc.Spec.SpaceID,
+			Name: spaceName,
 		},
 		Spec: v1beta1.SpaceSpec{
-			RealmID: doc.Spec.RealmID,
+			RealmID: realmName,
 		},
 	})
 	if err != nil {
-		return nil, err
+		return intmodel.Cell{}, err
 	}
 
 	stackDoc, err := r.GetStack(&v1beta1.StackDoc{
 		Metadata: v1beta1.StackMetadata{
-			Name: doc.Spec.StackID,
+			Name: stackName,
 		},
 		Spec: v1beta1.StackSpec{
-			RealmID: doc.Spec.RealmID,
-			SpaceID: doc.Spec.SpaceID,
+			RealmID: realmName,
+			SpaceID: spaceName,
 		},
 	})
 	if err != nil {
-		return nil, err
+		return intmodel.Cell{}, err
 	}
 
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
 	if err = r.ctrClient.Connect(); err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 	defer r.ctrClient.Close()
 
-	spec := cgroups.DefaultCellSpec(realmDoc, spaceDoc, stackDoc, doc)
+	spec := cgroups.DefaultCellSpec(realmDoc, spaceDoc, stackDoc, &cellDoc)
 
+	// Capture cell for closure
+	cellForUpdate := cell
 	ensureErr := r.ensureCgroupInternal(ensureCgroupParams{
 		spec:       spec,
-		docName:    doc.Metadata.Name,
-		cgroupPath: &doc.Status.CgroupPath,
+		docName:    cellDoc.Metadata.Name,
+		cgroupPath: &cellDoc.Status.CgroupPath,
 		createErr:  errdefs.ErrCreateStackCgroup,
 		updateErr:  errdefs.ErrUpdateStackMetadata,
 		logLabel:   "stack",
 		updateMetadata: func() error {
-			return r.UpdateCellMetadata(doc)
+			// Update internal model's CgroupPath from external model
+			cellForUpdate.Status.CgroupPath = cellDoc.Status.CgroupPath
+			return r.UpdateCellMetadata(cellForUpdate)
 		},
 	})
 	if ensureErr != nil {
-		return nil, ensureErr
+		return intmodel.Cell{}, ensureErr
 	}
 
-	return doc, nil
+	// Update internal model's CgroupPath from external model after ensureCgroupInternal
+	cell.Status.CgroupPath = cellDoc.Status.CgroupPath
+
+	// Always update metadata after ensureCgroupInternal to ensure CgroupPath is saved
+	// (closure may not have been called if cgroup already existed with path)
+	if cellDoc.Status.CgroupPath != "" {
+		if err := r.UpdateCellMetadata(cell); err != nil {
+			return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
+		}
+	}
+
+	return cell, nil
+}
+
+// createCellContainers creates the root container and all containers defined in the CellDoc.
+// The root container is created first, then all containers in doc.Spec.Containers are created.
+func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container, error) {
+	if doc == nil {
+		return nil, errdefs.ErrCellNotFound
+	}
+
+	cellName := strings.TrimSpace(doc.Metadata.Name)
+	if cellName == "" {
+		return nil, errdefs.ErrCellNotFound
+	}
+
+	cellID := strings.TrimSpace(doc.Spec.ID)
+	if cellID == "" {
+		return nil, errdefs.ErrCellIDRequired
+	}
+
+	realmID := strings.TrimSpace(doc.Spec.RealmID)
+	if realmID == "" {
+		return nil, errdefs.ErrRealmNameRequired
+	}
+
+	spaceID := strings.TrimSpace(doc.Spec.SpaceID)
+	if spaceID == "" {
+		return nil, errdefs.ErrSpaceNameRequired
+	}
+
+	stackID := strings.TrimSpace(doc.Spec.StackID)
+	if stackID == "" {
+		return nil, errdefs.ErrStackNameRequired
+	}
+
+	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmID, spaceID)
+	if cniErr != nil {
+		return nil, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
+	}
+
+	// Create a background context for containerd operations
+	// This ensures operations complete even if the parent context is canceled
+	// The logger is passed separately, so we don't need to preserve context values
+	ctrCtx := context.Background()
+
+	// Initialize ctr client if needed
+	// Use background context for client creation to avoid cancellation issues
+	if r.ctrClient == nil {
+		r.ctrClient = ctr.NewClient(context.Background(), r.logger, r.opts.ContainerdSocket)
+	}
+
+	err := r.ctrClient.Connect()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	defer r.ctrClient.Close()
+
+	// Get realm to access namespace
+	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
+		Metadata: v1beta1.RealmMetadata{
+			Name: realmID,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get realm: %w", err)
+	}
+
+	// Set namespace to realm namespace
+	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+
+	// Generate container ID with cell identifier for uniqueness
+	containerID, err := naming.BuildRootContainerName(spaceID, stackID, cellID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build root container name: %w", err)
+	}
+
+	rootContainerSpec := ensureCellRootContainerSpec(
+		doc,
+		containerID,
+		cellID,
+		realmID,
+		spaceID,
+		stackID,
+		cniConfigPath,
+	)
+
+	rootLabels := buildRootContainerLabels(doc, cellID, cellName, spaceID, stackID, realmID)
+	containerSpec := ctrutil.BuildRootContainerSpec(rootContainerSpec, rootLabels)
+
+	container, err := r.ctrClient.CreateContainer(ctrCtx, containerSpec)
+	if err != nil {
+		logFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		logFields = append(
+			logFields,
+			"space",
+			spaceID,
+			"realm",
+			realmID,
+			"cniConfig",
+			cniConfigPath,
+			"err",
+			fmt.Sprintf("%v", err),
+		)
+		r.logger.ErrorContext(
+			r.ctx,
+			"failed to create root container",
+			logFields...,
+		)
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrCreateRootContainer, err)
+	}
+
+	infoFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+	infoFields = append(infoFields, "space", spaceID, "realm", realmID, "cniConfig", cniConfigPath)
+	r.logger.InfoContext(
+		r.ctx,
+		"created root container",
+		infoFields...,
+	)
+
+	// Create all containers defined in the CellDoc
+	for i := range doc.Spec.Containers {
+		containerSpec := doc.Spec.Containers[i]
+		if containerSpec.CellID == "" {
+			containerSpec.CellID = cellID
+		}
+		if containerSpec.SpaceID == "" {
+			containerSpec.SpaceID = spaceID
+		}
+		if containerSpec.RealmID == "" {
+			containerSpec.RealmID = realmID
+		}
+		if containerSpec.StackID == "" {
+			containerSpec.StackID = stackID
+		}
+		if containerSpec.CNIConfigPath == "" {
+			containerSpec.CNIConfigPath = cniConfigPath
+		}
+
+		// Build container ID using hierarchical format for containerd operations
+		// Don't modify containerSpec.ID in the document - keep it as the base name
+		containerID, err = naming.BuildContainerName(
+			containerSpec.SpaceID,
+			containerSpec.StackID,
+			containerSpec.CellID,
+			containerSpec.ID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build container name: %w", err)
+		}
+
+		// Create a copy with the full hierarchical ID for containerd operations
+		containerSpecCopy := containerSpec
+		containerSpecCopy.ID = containerID
+
+		// Use container name with hierarchical format for containerd operations
+		_, err = r.ctrClient.CreateContainerFromSpec(
+			ctrCtx,
+			&containerSpecCopy,
+		)
+		if err != nil {
+			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+			fields = append(
+				fields,
+				"space",
+				spaceID,
+				"realm",
+				realmID,
+				"cniConfig",
+				containerSpec.CNIConfigPath,
+				"err",
+				fmt.Sprintf("%v", err),
+			)
+			r.logger.ErrorContext(
+				r.ctx,
+				"failed to create container from CellDoc",
+				fields...,
+			)
+			return nil, fmt.Errorf("failed to create container %s: %w", containerID, err)
+		}
+	}
+
+	return container, nil
+}
+
+// ensureCellContainers ensures the root container and all containers defined in the CellDoc exist.
+// The root container is ensured first, then all containers in doc.Spec.Containers are ensured.
+// If any container doesn't exist, it is created. Returns the root container or an error.
+func (r *Exec) ensureCellContainers(cell intmodel.Cell) (containerd.Container, error) {
+	cellName := strings.TrimSpace(cell.Metadata.Name)
+	if cellName == "" {
+		return nil, errdefs.ErrCellNotFound
+	}
+
+	cellID := cell.Spec.ID
+	if cellID == "" {
+		return nil, errdefs.ErrCellIDRequired
+	}
+
+	realmName := cell.Spec.RealmName
+	if realmName == "" {
+		return nil, errdefs.ErrRealmNameRequired
+	}
+
+	spaceName := cell.Spec.SpaceName
+	if spaceName == "" {
+		return nil, errdefs.ErrSpaceNameRequired
+	}
+
+	stackName := cell.Spec.StackName
+	if stackName == "" {
+		return nil, errdefs.ErrStackNameRequired
+	}
+
+	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmName, spaceName)
+	if cniErr != nil {
+		return nil, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
+	}
+
+	// Create a background context for containerd operations
+	// This ensures operations complete even if the parent context is canceled
+	// The logger is passed separately, so we don't need to preserve context values
+	ctrCtx := context.Background()
+
+	// Initialize ctr client if needed
+	// Use background context for client creation to avoid cancellation issues
+	if r.ctrClient == nil {
+		r.ctrClient = ctr.NewClient(context.Background(), r.logger, r.opts.ContainerdSocket)
+	}
+
+	err := r.ctrClient.Connect()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	defer r.ctrClient.Close()
+
+	// Get realm to access namespace
+	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
+		Metadata: v1beta1.RealmMetadata{
+			Name: realmName,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get realm: %w", err)
+	}
+
+	// Set namespace to realm namespace
+	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+
+	// Generate container ID with cell identifier for uniqueness
+	containerID, err := naming.BuildRootContainerName(spaceName, stackName, cellID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build root container name: %w", err)
+	}
+
+	// Declare container variable to be used in both branches
+	var container containerd.Container
+
+	// Check if container exists
+	exists, err := r.ctrClient.ExistsContainer(ctrCtx, containerID)
+	if err != nil {
+		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		fields = append(fields, "space", spaceName, "realm", realmName, "err", fmt.Sprintf("%v", err))
+		r.logger.ErrorContext(
+			r.ctx,
+			"failed to check if root container exists",
+			fields...,
+		)
+		return nil, fmt.Errorf("failed to check if root container exists: %w", err)
+	}
+
+	if exists {
+		// Container exists, load it but continue to process other containers
+		var loadErr error
+		container, loadErr = r.ctrClient.GetContainer(ctrCtx, containerID)
+		if loadErr != nil {
+			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+			fields = append(fields, "space", spaceName, "realm", realmName, "err", fmt.Sprintf("%v", loadErr))
+			r.logger.WarnContext(
+				r.ctx,
+				"root container exists but failed to load",
+				fields...,
+			)
+			return nil, fmt.Errorf("failed to load existing root container: %w", loadErr)
+		}
+		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		fields = append(fields, "space", spaceName, "realm", realmName)
+		r.logger.DebugContext(
+			r.ctx,
+			"root container exists",
+			fields...,
+		)
+		// Don't return early - continue to process other containers in the cell
+	} else {
+		// Container doesn't exist, create it
+		createFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		createFields = append(createFields, "space", spaceName, "realm", realmName, "cniConfig", cniConfigPath)
+		r.logger.InfoContext(
+			r.ctx,
+			"root container does not exist, creating",
+			createFields...,
+		)
+
+		// Convert cell to external for helper functions that require external model
+		cellDoc, err := apischeme.BuildCellExternalFromInternal(cell, apischeme.VersionV1Beta1)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+		}
+
+		rootContainerSpec := ensureCellRootContainerSpec(
+			&cellDoc,
+			containerID,
+			cellID,
+			realmName,
+			spaceName,
+			stackName,
+			cniConfigPath,
+		)
+		rootLabels := buildRootContainerLabels(&cellDoc, cellID, cellName, spaceName, stackName, realmName)
+		containerSpec := ctrutil.BuildRootContainerSpec(rootContainerSpec, rootLabels)
+
+		var createErr error
+		container, createErr = r.ctrClient.CreateContainer(ctrCtx, containerSpec)
+		if createErr != nil {
+			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+			fields = append(
+				fields,
+				"space",
+				spaceName,
+				"realm",
+				realmName,
+				"cniConfig",
+				cniConfigPath,
+				"err",
+				fmt.Sprintf("%v", createErr),
+			)
+			r.logger.ErrorContext(
+				r.ctx,
+				"failed to create root container",
+				fields...,
+			)
+			return nil, fmt.Errorf("%w: %w", errdefs.ErrCreateRootContainer, createErr)
+		}
+
+		ensuredFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		ensuredFields = append(ensuredFields, "space", spaceName, "realm", realmName, "cniConfig", cniConfigPath)
+		r.logger.InfoContext(
+			r.ctx,
+			"ensured root container exists",
+			ensuredFields...,
+		)
+	}
+
+	// Log how many containers we're about to process
+	containerCountFields := appendCellLogFields([]any{"cell", cellID}, cellID, cellName)
+	containerCountFields = append(
+		containerCountFields,
+		"space",
+		spaceName,
+		"realm",
+		realmName,
+		"stack",
+		stackName,
+		"containerCount",
+		len(cell.Spec.Containers),
+	)
+	r.logger.DebugContext(
+		r.ctx,
+		"processing containers from cell",
+		containerCountFields...,
+	)
+
+	// Ensure all containers defined in the cell exist
+	for i := range cell.Spec.Containers {
+		containerSpec := cell.Spec.Containers[i]
+
+		// Log which container we're processing
+		processFields := appendCellLogFields([]any{"cell", cellID}, cellID, cellName)
+		processFields = append(
+			processFields,
+			"space",
+			spaceName,
+			"realm",
+			realmName,
+			"stack",
+			stackName,
+			"containerName",
+			containerSpec.ID,
+			"containerIndex",
+			i,
+		)
+		r.logger.DebugContext(
+			r.ctx,
+			"processing container from cell",
+			processFields...,
+		)
+
+		if containerSpec.CNIConfigPath == "" {
+			containerSpec.CNIConfigPath = cniConfigPath
+			cell.Spec.Containers[i] = containerSpec
+		}
+
+		// Ensure container spec has required names
+		if containerSpec.CellName == "" {
+			containerSpec.CellName = cellID
+		}
+		if containerSpec.SpaceName == "" {
+			containerSpec.SpaceName = spaceName
+		}
+		if containerSpec.RealmName == "" {
+			containerSpec.RealmName = realmName
+		}
+		if containerSpec.StackName == "" {
+			containerSpec.StackName = stackName
+		}
+
+		// Build container ID using hierarchical format for containerd operations
+		// Don't modify containerSpec.ID in the document - keep it as the base name
+		containerID, err = naming.BuildContainerName(
+			containerSpec.SpaceName,
+			containerSpec.StackName,
+			containerSpec.CellName,
+			containerSpec.ID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build container name: %w", err)
+		}
+
+		// Log the hierarchical container ID we built
+		idFields := appendCellLogFields([]any{"cell", cellID}, cellID, cellName)
+		idFields = append(
+			idFields,
+			"space",
+			spaceName,
+			"realm",
+			realmName,
+			"stack",
+			stackName,
+			"containerName",
+			containerSpec.ID,
+			"hierarchicalID",
+			containerID,
+		)
+		r.logger.DebugContext(
+			r.ctx,
+			"built hierarchical container ID",
+			idFields...,
+		)
+
+		// Use container name with hierarchical format for containerd operations
+		exists, err = r.ctrClient.ExistsContainer(ctrCtx, containerID)
+		if err != nil {
+			// Check if the error indicates the container doesn't exist
+			// In that case, treat it as "doesn't exist" (false) rather than a fatal error
+			if errors.Is(err, ctr.ErrContainerNotFound) {
+				// Container doesn't exist, which is fine - we'll create it
+				exists = false
+			} else {
+				// Some other error occurred
+				fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+				fields = append(
+					fields,
+					"space",
+					spaceName,
+					"realm",
+					realmName,
+					"containerName",
+					containerSpec.ID,
+					"err",
+					fmt.Sprintf("%v", err),
+				)
+				r.logger.ErrorContext(
+					r.ctx,
+					"failed to check if container exists",
+					fields...,
+				)
+				return nil, fmt.Errorf("failed to check if container %s exists: %w", containerID, err)
+			}
+		}
+
+		// Log the existence check result
+		existsFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		existsFields = append(
+			existsFields,
+			"space",
+			spaceName,
+			"realm",
+			realmName,
+			"containerName",
+			containerSpec.ID,
+			"exists",
+			exists,
+		)
+		r.logger.DebugContext(
+			r.ctx,
+			"checked container existence",
+			existsFields...,
+		)
+
+		if !exists {
+			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+			fields = append(fields, "space", spaceName, "realm", realmName, "cniConfig", containerSpec.CNIConfigPath)
+			r.logger.InfoContext(
+				r.ctx,
+				"container does not exist, creating",
+				fields...,
+			)
+			if containerSpec.CNIConfigPath == "" {
+				containerSpec.CNIConfigPath = cniConfigPath
+				cell.Spec.Containers[i] = containerSpec
+			}
+
+			// Container doesn't exist, create it
+			// Convert internal container spec to external for CreateContainerFromSpec
+			extContainerSpec := v1beta1.ContainerSpec{
+				ID:              containerID, // Use hierarchical ID
+				RealmID:         containerSpec.RealmName,
+				SpaceID:         containerSpec.SpaceName,
+				StackID:         containerSpec.StackName,
+				CellID:          containerSpec.CellName,
+				Root:            containerSpec.Root,
+				Image:           containerSpec.Image,
+				Command:         containerSpec.Command,
+				Args:            containerSpec.Args,
+				Env:             containerSpec.Env,
+				Ports:           containerSpec.Ports,
+				Volumes:         containerSpec.Volumes,
+				Networks:        containerSpec.Networks,
+				NetworksAliases: containerSpec.NetworksAliases,
+				Privileged:      containerSpec.Privileged,
+				CNIConfigPath:   containerSpec.CNIConfigPath,
+				RestartPolicy:   containerSpec.RestartPolicy,
+			}
+
+			// Log container spec details before creation
+			createSpecFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+			createSpecFields = append(
+				createSpecFields,
+				"space",
+				spaceName,
+				"realm",
+				realmName,
+				"stack",
+				stackName,
+				"containerName",
+				containerSpec.ID,
+				"image",
+				containerSpec.Image,
+				"command",
+				containerSpec.Command,
+			)
+			r.logger.DebugContext(
+				r.ctx,
+				"creating container with spec",
+				createSpecFields...,
+			)
+
+			createdContainer, containerCreateErr := r.ctrClient.CreateContainerFromSpec(
+				ctrCtx,
+				&extContainerSpec,
+			)
+			if containerCreateErr != nil {
+				// Check if the error indicates the container already exists
+				// This can happen due to race conditions where the container
+				// was created between the existence check and creation attempt
+				errMsg := containerCreateErr.Error()
+				if strings.Contains(errMsg, "container already exists") {
+					debugFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+					debugFields = append(debugFields, "space", spaceName, "realm", realmName)
+					r.logger.DebugContext(
+						r.ctx,
+						"container already exists (race condition), skipping",
+						debugFields...,
+					)
+					continue
+				}
+				errorFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+				errorFields = append(
+					errorFields,
+					"space",
+					spaceName,
+					"realm",
+					realmName,
+					"cniConfig",
+					containerSpec.CNIConfigPath,
+					"err",
+					fmt.Sprintf("%v", containerCreateErr),
+				)
+				r.logger.ErrorContext(
+					r.ctx,
+					"failed to create container from cell",
+					errorFields...,
+				)
+				return nil, fmt.Errorf("failed to create container %s: %w", containerID, containerCreateErr)
+			}
+			if createdContainer != nil {
+				successFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+				successFields = append(
+					successFields,
+					"space",
+					spaceName,
+					"realm",
+					realmName,
+					"containerName",
+					containerSpec.ID,
+				)
+				r.logger.InfoContext(
+					r.ctx,
+					"created container from cell",
+					successFields...,
+				)
+			}
+		} else {
+			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+			fields = append(fields, "space", spaceName, "realm", realmName)
+			r.logger.DebugContext(
+				r.ctx,
+				"container exists",
+				fields...,
+			)
+		}
+	}
+
+	return container, nil
+}
+
+func ensureCellRootContainerSpec(
+	doc *v1beta1.CellDoc,
+	containerID,
+	cellID,
+	realmID,
+	spaceID,
+	stackID,
+	cniConfigPath string,
+) *v1beta1.ContainerSpec {
+	if doc == nil {
+		return nil
+	}
+
+	if doc.Spec.RootContainer == nil {
+		doc.Spec.RootContainer = ctrutil.DefaultRootContainerSpec(
+			containerID,
+			cellID,
+			realmID,
+			spaceID,
+			stackID,
+			cniConfigPath,
+		)
+		return doc.Spec.RootContainer
+	}
+
+	rootSpec := doc.Spec.RootContainer
+	rootSpec.Root = true
+	if rootSpec.ID == "" {
+		rootSpec.ID = containerID
+	}
+	if rootSpec.CellID == "" {
+		rootSpec.CellID = cellID
+	}
+	if rootSpec.RealmID == "" {
+		rootSpec.RealmID = realmID
+	}
+	if rootSpec.SpaceID == "" {
+		rootSpec.SpaceID = spaceID
+	}
+	if rootSpec.StackID == "" {
+		rootSpec.StackID = stackID
+	}
+	if rootSpec.CNIConfigPath == "" {
+		rootSpec.CNIConfigPath = cniConfigPath
+	}
+	return rootSpec
+}
+
+func buildRootContainerLabels(
+	doc *v1beta1.CellDoc,
+	cellID,
+	cellName,
+	spaceID,
+	stackID,
+	realmID string,
+) map[string]string {
+	labels := make(map[string]string)
+	if doc != nil && doc.Metadata.Labels != nil {
+		for k, v := range doc.Metadata.Labels {
+			labels[k] = v
+		}
+	}
+	labels["kukeon.io/cell"] = cellID
+	if cellName != "" {
+		labels["kukeon.io/cell-name"] = cellName
+	}
+	labels["kukeon.io/space"] = spaceID
+	labels["kukeon.io/realm"] = realmID
+	labels["kukeon.io/stack"] = stackID
+	return labels
 }

@@ -121,7 +121,7 @@ func printSpaceResult(cmd *cobra.Command, result controller.CreateSpaceResult) {
 
 	name := result.SpaceDoc.Metadata.Name
 	realm := result.SpaceDoc.Spec.RealmID
-	networkName, err := naming.BuildSpaceNetworkName(result.SpaceDoc)
+	networkName, err := naming.BuildSpaceNetworkName(realm, name)
 	if err != nil {
 		networkName = "<unknown>"
 	}

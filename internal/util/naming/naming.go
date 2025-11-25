@@ -21,27 +21,16 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // BuildSpaceNetworkName constructs the canonical network name for a space.
-func BuildSpaceNetworkName(doc *v1beta1.SpaceDoc) (string, error) {
-	if doc == nil {
-		return "", errdefs.ErrSpaceDocRequired
-	}
-	spaceName := strings.TrimSpace(doc.Metadata.Name)
+func BuildSpaceNetworkName(realmName, spaceName string) (string, error) {
+	spaceName = strings.TrimSpace(spaceName)
 	if spaceName == "" {
 		return "", errdefs.ErrSpaceNameRequired
 	}
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
-	if realmName == "" && doc.Metadata.Labels != nil {
-		if realmLabel, ok := doc.Metadata.Labels[consts.KukeonRealmLabelKey]; ok &&
-			strings.TrimSpace(realmLabel) != "" {
-			realmName = strings.TrimSpace(realmLabel)
-		}
-	}
+	realmName = strings.TrimSpace(realmName)
 	if realmName == "" {
 		return "", errdefs.ErrRealmNameRequired
 	}

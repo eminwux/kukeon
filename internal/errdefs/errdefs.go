@@ -52,6 +52,7 @@ var (
 	ErrCreateSpace             = errors.New("failed to create space")
 	ErrCreateSpaceCgroup       = errors.New("failed to create space cgroup")
 	ErrCreateStackCgroup       = errors.New("failed to create stack cgroup")
+	ErrCreateCellCgroup        = errors.New("failed to create cell cgroup")
 	ErrStackNotFound           = errors.New("stack not found")
 	ErrGetStack                = errors.New("failed to get stack")
 	ErrCreateStack             = errors.New("failed to create stack")

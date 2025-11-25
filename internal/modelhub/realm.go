@@ -32,7 +32,8 @@ type RealmSpec struct {
 }
 
 type RealmStatus struct {
-	State RealmState
+	State      RealmState
+	CgroupPath string
 }
 
 type RealmState int

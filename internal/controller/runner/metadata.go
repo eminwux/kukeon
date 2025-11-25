@@ -19,15 +19,22 @@ package runner
 import (
 	"fmt"
 
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
-func (r *Exec) UpdateRealmMetadata(doc *v1beta1.RealmDoc) error {
-	metadataFilePath := fs.RealmMetadataPath(r.opts.RunPath, doc.Metadata.Name)
-	err := metadata.WriteMetadata(r.ctx, r.logger, doc, metadataFilePath)
+func (r *Exec) UpdateRealmMetadata(realm intmodel.Realm) error {
+	// Convert to external model for filesystem boundary
+	realmDoc, err := apischeme.BuildRealmExternalFromInternal(realm, apischeme.VersionV1Beta1)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
+	metadataFilePath := fs.RealmMetadataPath(r.opts.RunPath, realmDoc.Metadata.Name)
+	err = metadata.WriteMetadata(r.ctx, r.logger, realmDoc, metadataFilePath)
 	if err != nil {
 		r.logger.Error("failed to write metadata", "err", fmt.Sprintf("%v", err))
 		return fmt.Errorf("%w: %w", errdefs.ErrWriteMetadata, err)
@@ -35,13 +42,19 @@ func (r *Exec) UpdateRealmMetadata(doc *v1beta1.RealmDoc) error {
 	return nil
 }
 
-func (r *Exec) UpdateSpaceMetadata(doc *v1beta1.SpaceDoc) error {
+func (r *Exec) UpdateSpaceMetadata(space intmodel.Space) error {
+	// Convert to external model for filesystem boundary
+	spaceDoc, err := apischeme.BuildSpaceExternalFromInternal(space, apischeme.VersionV1Beta1)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
 	metadataFilePath := fs.SpaceMetadataPath(
 		r.opts.RunPath,
-		doc.Spec.RealmID,
-		doc.Metadata.Name,
+		spaceDoc.Spec.RealmID,
+		spaceDoc.Metadata.Name,
 	)
-	err := metadata.WriteMetadata(r.ctx, r.logger, doc, metadataFilePath)
+	err = metadata.WriteMetadata(r.ctx, r.logger, spaceDoc, metadataFilePath)
 	if err != nil {
 		r.logger.Error("failed to write metadata", "err", fmt.Sprintf("%v", err))
 		return fmt.Errorf("%w: %w", errdefs.ErrWriteMetadata, err)
@@ -49,14 +62,20 @@ func (r *Exec) UpdateSpaceMetadata(doc *v1beta1.SpaceDoc) error {
 	return nil
 }
 
-func (r *Exec) UpdateStackMetadata(doc *v1beta1.StackDoc) error {
+func (r *Exec) UpdateStackMetadata(stack intmodel.Stack) error {
+	// Convert to external model for filesystem boundary
+	stackDoc, err := apischeme.BuildStackExternalFromInternal(stack, apischeme.VersionV1Beta1)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
 	metadataFilePath := fs.StackMetadataPath(
 		r.opts.RunPath,
-		doc.Spec.RealmID,
-		doc.Spec.SpaceID,
-		doc.Metadata.Name,
+		stackDoc.Spec.RealmID,
+		stackDoc.Spec.SpaceID,
+		stackDoc.Metadata.Name,
 	)
-	err := metadata.WriteMetadata(r.ctx, r.logger, doc, metadataFilePath)
+	err = metadata.WriteMetadata(r.ctx, r.logger, stackDoc, metadataFilePath)
 	if err != nil {
 		r.logger.Error("failed to write metadata", "err", fmt.Sprintf("%v", err))
 		return fmt.Errorf("%w: %w", errdefs.ErrWriteMetadata, err)
@@ -64,15 +83,21 @@ func (r *Exec) UpdateStackMetadata(doc *v1beta1.StackDoc) error {
 	return nil
 }
 
-func (r *Exec) UpdateCellMetadata(doc *v1beta1.CellDoc) error {
+func (r *Exec) UpdateCellMetadata(cell intmodel.Cell) error {
+	// Convert to external model for filesystem boundary
+	cellDoc, err := apischeme.BuildCellExternalFromInternal(cell, apischeme.VersionV1Beta1)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
 	metadataFilePath := fs.CellMetadataPath(
 		r.opts.RunPath,
-		doc.Spec.RealmID,
-		doc.Spec.SpaceID,
-		doc.Spec.StackID,
-		doc.Metadata.Name,
+		cellDoc.Spec.RealmID,
+		cellDoc.Spec.SpaceID,
+		cellDoc.Spec.StackID,
+		cellDoc.Metadata.Name,
 	)
-	err := metadata.WriteMetadata(r.ctx, r.logger, doc, metadataFilePath)
+	err = metadata.WriteMetadata(r.ctx, r.logger, cellDoc, metadataFilePath)
 	if err != nil {
 		r.logger.Error("failed to write metadata", "err", fmt.Sprintf("%v", err))
 		return fmt.Errorf("%w: %w", errdefs.ErrWriteMetadata, err)
