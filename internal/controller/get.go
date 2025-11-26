@@ -186,7 +186,7 @@ func (b *Exec) GetSpace(doc *v1beta1.SpaceDoc) (GetSpaceResult, error) {
 		res.SpaceDoc = &spaceDoc
 	}
 
-	res.CNINetworkExists, err = b.runner.ExistsSpaceCNIConfig(doc)
+	res.CNINetworkExists, err = b.runner.ExistsSpaceCNIConfig(lookupSpace)
 	if err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
@@ -380,7 +380,7 @@ func (b *Exec) GetCell(doc *v1beta1.CellDoc) (GetCellResult, error) {
 		if err != nil {
 			return res, fmt.Errorf("failed to check if cell cgroup exists: %w", err)
 		}
-		res.RootContainerExists, err = b.runner.ExistsCellRootContainer(&cellDoc)
+		res.RootContainerExists, err = b.runner.ExistsCellRootContainer(internalCell)
 		if err != nil {
 			return res, fmt.Errorf("failed to check root container: %w", err)
 		}

@@ -52,36 +52,50 @@ func (r *Exec) ExistsRealmContainerdNamespace(namespace string) (bool, error) {
 	return r.ctrClient.ExistsNamespace(namespace)
 }
 
-func (r *Exec) ExistsCellRootContainer(doc *v1beta1.CellDoc) (bool, error) {
-	if doc == nil {
-		return false, errdefs.ErrCellNotFound
-	}
-
-	cellName := doc.Metadata.Name
+func (r *Exec) ExistsCellRootContainer(cell intmodel.Cell) (bool, error) {
+	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
-		return false, errdefs.ErrCellNotFound
+		return false, errdefs.ErrCellNameRequired
 	}
-
-	cellID := doc.Spec.ID
-	if cellID == "" {
-		return false, errdefs.ErrCellIDRequired
-	}
-
-	realmID := doc.Spec.RealmID
-	if realmID == "" {
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
+	if realmName == "" {
 		return false, errdefs.ErrRealmNameRequired
 	}
-
-	spaceID := doc.Spec.SpaceID
-	if spaceID == "" {
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
+	if spaceName == "" {
 		return false, errdefs.ErrSpaceNameRequired
+	}
+	stackName := strings.TrimSpace(cell.Spec.StackName)
+	if stackName == "" {
+		return false, errdefs.ErrStackNameRequired
+	}
+
+	// Get the cell document to access cell ID
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: cellName,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
+		},
+	}
+	internalCell, err := r.GetCell(lookupCell)
+	if err != nil {
+		return false, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
+	}
+
+	cellID := internalCell.Spec.ID
+	if cellID == "" {
+		return false, errdefs.ErrCellIDRequired
 	}
 
 	// Initialize ctr client if needed
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
-	if err := r.ctrClient.Connect(); err != nil {
+	if err = r.ctrClient.Connect(); err != nil {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 	defer r.ctrClient.Close()
@@ -89,7 +103,7 @@ func (r *Exec) ExistsCellRootContainer(doc *v1beta1.CellDoc) (bool, error) {
 	// Get realm to access namespace
 	lookupRealm := intmodel.Realm{
 		Metadata: intmodel.RealmMetadata{
-			Name: realmID,
+			Name: realmName,
 		},
 	}
 
@@ -98,22 +112,16 @@ func (r *Exec) ExistsCellRootContainer(doc *v1beta1.CellDoc) (bool, error) {
 		return false, fmt.Errorf("failed to get realm: %w", err)
 	}
 
-	// Convert internal realm back to external for accessing namespace
-	realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
-	if convertErr != nil {
-		return false, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	namespace := internalRealm.Spec.Namespace
+	if namespace == "" {
+		return false, fmt.Errorf("realm %q has no namespace", realmName)
 	}
 
 	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+	r.ctrClient.SetNamespace(namespace)
 
 	// Generate container ID with cell identifier for uniqueness
-	// Need to get spaceID and stackID from doc
-	stackID := doc.Spec.StackID
-	if stackID == "" {
-		return false, errdefs.ErrStackNameRequired
-	}
-	containerID, err := naming.BuildRootContainerName(spaceID, stackID, cellID)
+	containerID, err := naming.BuildRootContainerName(spaceName, stackName, cellID)
 	if err != nil {
 		return false, fmt.Errorf("failed to build root container name: %w", err)
 	}
@@ -301,11 +309,12 @@ func (r *Exec) ExistsCgroup(doc any) (bool, error) {
 	return true, nil
 }
 
-func (r *Exec) ExistsSpaceCNIConfig(doc *v1beta1.SpaceDoc) (bool, error) {
-	if doc == nil {
-		return false, errdefs.ErrSpaceDocRequired
+func (r *Exec) ExistsSpaceCNIConfig(space intmodel.Space) (bool, error) {
+	spaceName := strings.TrimSpace(space.Metadata.Name)
+	if spaceName == "" {
+		return false, errdefs.ErrSpaceNameRequired
 	}
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(space.Spec.RealmName)
 	if realmName == "" {
 		return false, errdefs.ErrRealmNameRequired
 	}
@@ -318,11 +327,11 @@ func (r *Exec) ExistsSpaceCNIConfig(doc *v1beta1.SpaceDoc) (bool, error) {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrInitCniManager, err)
 	}
 
-	confPath, err := fs.SpaceNetworkConfigPath(r.opts.RunPath, realmName, doc.Metadata.Name)
+	confPath, err := fs.SpaceNetworkConfigPath(r.opts.RunPath, realmName, spaceName)
 	if err != nil {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
-	networkName, err := naming.BuildSpaceNetworkName(realmName, doc.Metadata.Name)
+	networkName, err := naming.BuildSpaceNetworkName(realmName, spaceName)
 	if err != nil {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}

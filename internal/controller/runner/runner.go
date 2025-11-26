@@ -23,7 +23,6 @@ import (
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/ctr"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 type Runner interface {
@@ -36,7 +35,7 @@ type Runner interface {
 
 	GetSpace(space intmodel.Space) (intmodel.Space, error)
 	CreateSpace(space intmodel.Space) (intmodel.Space, error)
-	ExistsSpaceCNIConfig(doc *v1beta1.SpaceDoc) (bool, error)
+	ExistsSpaceCNIConfig(space intmodel.Space) (bool, error)
 	DeleteSpace(space intmodel.Space) error
 
 	GetCell(cell intmodel.Cell) (intmodel.Cell, error)
@@ -48,7 +47,7 @@ type Runner interface {
 	KillContainer(cell intmodel.Cell, containerID string) error
 	DeleteContainer(cell intmodel.Cell, containerID string) error
 	UpdateCellMetadata(cell intmodel.Cell) error
-	ExistsCellRootContainer(doc *v1beta1.CellDoc) (bool, error)
+	ExistsCellRootContainer(cell intmodel.Cell) (bool, error)
 	DeleteCell(cell intmodel.Cell) error
 
 	GetStack(stack intmodel.Stack) (intmodel.Stack, error)

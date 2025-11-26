@@ -239,7 +239,7 @@ func (b *Exec) bootstrapSpace(report BootstrapReport) (BootstrapReport, error) {
 	}
 
 	// Ensure network exists for the space (createSpace will also ensure)
-	exists, err := b.runner.ExistsSpaceCNIConfig(spaceDoc)
+	exists, err := b.runner.ExistsSpaceCNIConfig(lookupSpace)
 	if err != nil {
 		return report, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
@@ -278,7 +278,7 @@ func (b *Exec) bootstrapSpace(report BootstrapReport) (BootstrapReport, error) {
 		}
 		report.SpaceCgroupExistsPost = cgroupExists
 	}
-	exists, err = b.runner.ExistsSpaceCNIConfig(spaceDoc)
+	exists, err = b.runner.ExistsSpaceCNIConfig(lookupSpace)
 	if err != nil {
 		return report, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
@@ -465,7 +465,7 @@ func (b *Exec) bootstrapCell(report BootstrapReport) (BootstrapReport, error) {
 		}
 		report.CellCgroupExistsPre = cgroupExists
 		// Check if root container exists pre (only if cell exists)
-		rootExistsPre, rootErr := b.runner.ExistsCellRootContainer(&cellDocPreExternal)
+		rootExistsPre, rootErr := b.runner.ExistsCellRootContainer(internalCellPre)
 		if rootErr != nil {
 			return report, fmt.Errorf("failed to check if root container exists: %w", rootErr)
 		}
@@ -531,7 +531,7 @@ func (b *Exec) bootstrapCell(report BootstrapReport) (BootstrapReport, error) {
 		}
 		report.CellCgroupExistsPost = cgroupExists
 		// Check if root container exists post
-		rootExistsPost, rootErr := b.runner.ExistsCellRootContainer(&cellDocPostExternal)
+		rootExistsPost, rootErr := b.runner.ExistsCellRootContainer(internalCellPost)
 		if rootErr != nil {
 			return report, fmt.Errorf("failed to check if root container exists: %w", rootErr)
 		}

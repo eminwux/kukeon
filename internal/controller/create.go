@@ -226,7 +226,7 @@ func (b *Exec) CreateSpace(doc *v1beta1.SpaceDoc) (CreateSpaceResult, error) {
 		}
 	}
 
-	res.CNINetworkExistsPre, err = b.runner.ExistsSpaceCNIConfig(doc)
+	res.CNINetworkExistsPre, err = b.runner.ExistsSpaceCNIConfig(lookupSpace)
 	if err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
@@ -272,7 +272,7 @@ func (b *Exec) CreateSpace(doc *v1beta1.SpaceDoc) (CreateSpaceResult, error) {
 		res.SpaceDoc = &resultDoc
 	}
 
-	res.CNINetworkExistsPost, err = b.runner.ExistsSpaceCNIConfig(doc)
+	res.CNINetworkExistsPost, err = b.runner.ExistsSpaceCNIConfig(lookupSpace)
 	if err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
@@ -553,7 +553,7 @@ func (b *Exec) CreateCell(doc *v1beta1.CellDoc) (CreateCellResult, error) {
 		if err != nil {
 			return res, fmt.Errorf("failed to check if cell cgroup exists: %w", err)
 		}
-		res.RootContainerExistsPre, err = b.runner.ExistsCellRootContainer(&cellDocPreExternal)
+		res.RootContainerExistsPre, err = b.runner.ExistsCellRootContainer(internalCellPre)
 		if err != nil {
 			return res, fmt.Errorf("failed to check root container: %w", err)
 		}
@@ -620,7 +620,7 @@ func (b *Exec) CreateCell(doc *v1beta1.CellDoc) (CreateCellResult, error) {
 		if err != nil {
 			return res, fmt.Errorf("failed to check if cell cgroup exists: %w", err)
 		}
-		res.RootContainerExistsPost, err = b.runner.ExistsCellRootContainer(&cellDocPostExternal)
+		res.RootContainerExistsPost, err = b.runner.ExistsCellRootContainer(internalCellPost)
 		if err != nil {
 			return res, fmt.Errorf("failed to check root container: %w", err)
 		}
