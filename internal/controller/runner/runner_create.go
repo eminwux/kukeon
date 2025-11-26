@@ -24,32 +24,26 @@ import (
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 func (r *Exec) CreateRealm(realm intmodel.Realm) (intmodel.Realm, error) {
 	r.logger.Debug("run-path", "run-path", r.opts.RunPath)
 
-	// Build minimal external doc for GetRealm lookup
-	lookupDoc := &v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
+	// Build minimal internal realm for GetRealm lookup
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
 			Name: realm.Metadata.Name,
 		},
 	}
 
-	// Get existing realm (returns external model)
-	rDoc, err := r.GetRealm(lookupDoc)
+	// Get existing realm (returns internal model)
+	existingRealm, err := r.GetRealm(lookupRealm)
 	if err != nil && !errors.Is(err, errdefs.ErrRealmNotFound) {
 		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
 	}
 
 	// Realm found, check if namespace exists
-	if rDoc != nil {
-		existingRealm, _, normalizeErr := apischeme.NormalizeRealm(*rDoc)
-		if normalizeErr != nil {
-			return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, normalizeErr)
-		}
-
+	if err == nil {
 		ensuredRealm, ensureErr := r.ensureRealmContainerdNamespace(existingRealm)
 		if ensureErr != nil {
 			return intmodel.Realm{}, ensureErr
@@ -78,30 +72,25 @@ func (r *Exec) CreateStack(stack intmodel.Stack) (intmodel.Stack, error) {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
 
-	// Build minimal external doc for GetStack lookup
-	lookupDoc := &v1beta1.StackDoc{
-		Metadata: v1beta1.StackMetadata{
+	// Build minimal internal stack for GetStack lookup
+	lookupStack := intmodel.Stack{
+		Metadata: intmodel.StackMetadata{
 			Name: stack.Metadata.Name,
 		},
-		Spec: v1beta1.StackSpec{
-			RealmID: stack.Spec.RealmName,
-			SpaceID: stack.Spec.SpaceName,
+		Spec: intmodel.StackSpec{
+			RealmName: stack.Spec.RealmName,
+			SpaceName: stack.Spec.SpaceName,
 		},
 	}
 
-	// Get existing stack (returns external model)
-	sDoc, err := r.GetStack(lookupDoc)
+	// Get existing stack (returns internal model)
+	existingStack, err := r.GetStack(lookupStack)
 	if err != nil && !errors.Is(err, errdefs.ErrStackNotFound) {
 		return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrGetStack, err)
 	}
 
 	// Stack found, ensure cgroup exists
-	if sDoc != nil {
-		existingStack, _, normalizeErr := apischeme.NormalizeStack(*sDoc)
-		if normalizeErr != nil {
-			return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, normalizeErr)
-		}
-
+	if err == nil {
 		ensuredStack, ensureErr := r.ensureStackCgroup(existingStack)
 		if ensureErr != nil {
 			return intmodel.Stack{}, ensureErr
@@ -124,31 +113,26 @@ func (r *Exec) CreateCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
 
-	// Build minimal external doc for GetCell lookup
-	lookupDoc := &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
+	// Build minimal internal cell for GetCell lookup
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
 			Name: cell.Metadata.Name,
 		},
-		Spec: v1beta1.CellSpec{
-			RealmID: cell.Spec.RealmName,
-			SpaceID: cell.Spec.SpaceName,
-			StackID: cell.Spec.StackName,
+		Spec: intmodel.CellSpec{
+			RealmName: cell.Spec.RealmName,
+			SpaceName: cell.Spec.SpaceName,
+			StackName: cell.Spec.StackName,
 		},
 	}
 
-	// Get existing cell (returns external model)
-	cDoc, err := r.GetCell(lookupDoc)
+	// Get existing cell (returns internal model)
+	existingCell, err := r.GetCell(lookupCell)
 	if err != nil && !errors.Is(err, errdefs.ErrCellNotFound) {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 	}
 
 	// Cell found, ensure cgroup exists
-	if cDoc != nil {
-		existingCell, _, normalizeErr := apischeme.NormalizeCell(*cDoc)
-		if normalizeErr != nil {
-			return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, normalizeErr)
-		}
-
+	if !errors.Is(err, errdefs.ErrCellNotFound) {
 		ensuredCell, ensureErr := r.ensureCellCgroup(existingCell)
 		if ensureErr != nil {
 			return intmodel.Cell{}, ensureErr
@@ -235,28 +219,24 @@ func (r *Exec) CreateSpace(space intmodel.Space) (intmodel.Space, error) {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
 
-	// Build minimal external doc for GetSpace lookup
-	lookupDoc := &v1beta1.SpaceDoc{
-		Metadata: v1beta1.SpaceMetadata{
+	// Build minimal internal space for GetSpace lookup
+	lookupSpace := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{
 			Name: space.Metadata.Name,
 		},
-		Spec: v1beta1.SpaceSpec{
-			RealmID: space.Spec.RealmName,
+		Spec: intmodel.SpaceSpec{
+			RealmName: space.Spec.RealmName,
 		},
 	}
 
-	// Get existing space (returns external model)
-	sDoc, err := r.GetSpace(lookupDoc)
+	// Get existing space (returns internal model)
+	existingSpace, err := r.GetSpace(lookupSpace)
 	if err != nil && !errors.Is(err, errdefs.ErrSpaceNotFound) {
 		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
 	}
 
 	realmName := space.Spec.RealmName
-	if sDoc != nil {
-		existingSpace, _, normalizeErr := apischeme.NormalizeSpace(*sDoc)
-		if normalizeErr != nil {
-			return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, normalizeErr)
-		}
+	if err == nil {
 		if existingSpace.Spec.RealmName != "" {
 			realmName = existingSpace.Spec.RealmName
 		}
@@ -264,28 +244,33 @@ func (r *Exec) CreateSpace(space intmodel.Space) (intmodel.Space, error) {
 	if realmName == "" {
 		return intmodel.Space{}, errdefs.ErrRealmNameRequired
 	}
-	realmDoc, realmErr := r.GetRealm(&v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
+
+	// Build minimal internal realm for GetRealm lookup
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
 			Name: realmName,
 		},
-	})
+	}
+
+	internalRealm, realmErr := r.GetRealm(lookupRealm)
 	if realmErr != nil {
 		return intmodel.Space{}, realmErr
 	}
 
-	// Space found, ensure CNI config exists
-	if sDoc != nil {
-		existingSpace, _, normalizeErr := apischeme.NormalizeSpace(*sDoc)
-		if normalizeErr != nil {
-			return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, normalizeErr)
-		}
+	// Convert internal realm back to external for ensureSpaceCgroup
+	realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
+	if convertErr != nil {
+		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
 
+	// Space found, ensure CNI config exists
+	if err == nil {
 		ensuredSpace, ensureErr := r.ensureSpaceCNIConfig(existingSpace)
 		if ensureErr != nil {
 			return intmodel.Space{}, ensureErr
 		}
 
-		ensuredSpace, ensureErr = r.ensureSpaceCgroup(ensuredSpace, realmDoc)
+		ensuredSpace, ensureErr = r.ensureSpaceCgroup(ensuredSpace, &realmDoc)
 		if ensureErr != nil {
 			return intmodel.Space{}, ensureErr
 		}

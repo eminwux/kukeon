@@ -24,6 +24,7 @@ import (
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -68,7 +69,14 @@ func (b *Exec) CreateRealm(doc *v1beta1.RealmDoc) (CreateRealmResult, error) {
 		doc.Metadata.Labels[consts.KukeonRealmLabelKey] = namespace
 	}
 
-	realmDocPre, err := b.runner.GetRealm(doc)
+	// Build minimal internal realm for GetRealm lookup
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: name,
+		},
+	}
+
+	internalRealmPre, err := b.runner.GetRealm(lookupRealm)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrRealmNotFound) {
 			res.MetadataExistsPre = false
@@ -77,7 +85,12 @@ func (b *Exec) CreateRealm(doc *v1beta1.RealmDoc) (CreateRealmResult, error) {
 		}
 	} else {
 		res.MetadataExistsPre = true
-		res.CgroupExistsPre, err = b.runner.ExistsCgroup(realmDocPre)
+		// Convert internal realm back to external for ExistsCgroup
+		realmDocPre, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealmPre, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		res.CgroupExistsPre, err = b.runner.ExistsCgroup(&realmDocPre)
 		if err != nil {
 			return res, fmt.Errorf("failed to check if realm cgroup exists: %w", err)
 		}
@@ -106,7 +119,8 @@ func (b *Exec) CreateRealm(doc *v1beta1.RealmDoc) (CreateRealmResult, error) {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
-	realmDocPost, err := b.runner.GetRealm(doc)
+	// Build minimal internal realm for GetRealm lookup (after creation)
+	internalRealmPost, err := b.runner.GetRealm(lookupRealm)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrRealmNotFound) {
 			res.MetadataExistsPost = false
@@ -115,7 +129,12 @@ func (b *Exec) CreateRealm(doc *v1beta1.RealmDoc) (CreateRealmResult, error) {
 		}
 	} else {
 		res.MetadataExistsPost = true
-		res.CgroupExistsPost, err = b.runner.ExistsCgroup(realmDocPost)
+		// Convert internal realm back to external for ExistsCgroup
+		realmDocPost, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealmPost, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		res.CgroupExistsPost, err = b.runner.ExistsCgroup(&realmDocPost)
 		if err != nil {
 			return res, fmt.Errorf("failed to check if realm cgroup exists: %w", err)
 		}
@@ -177,7 +196,17 @@ func (b *Exec) CreateSpace(doc *v1beta1.SpaceDoc) (CreateSpaceResult, error) {
 		doc.Metadata.Labels[consts.KukeonSpaceLabelKey] = name
 	}
 
-	spaceDocPre, err := b.runner.GetSpace(doc)
+	// Build minimal internal space for GetSpace lookup
+	lookupSpace := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{
+			Name: name,
+		},
+		Spec: intmodel.SpaceSpec{
+			RealmName: realm,
+		},
+	}
+
+	internalSpacePre, err := b.runner.GetSpace(lookupSpace)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrSpaceNotFound) {
 			res.MetadataExistsPre = false
@@ -186,7 +215,12 @@ func (b *Exec) CreateSpace(doc *v1beta1.SpaceDoc) (CreateSpaceResult, error) {
 		}
 	} else {
 		res.MetadataExistsPre = true
-		res.CgroupExistsPre, err = b.runner.ExistsCgroup(spaceDocPre)
+		// Convert internal space back to external for ExistsCgroup
+		spaceDocPre, convertErr := apischeme.BuildSpaceExternalFromInternal(internalSpacePre, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		res.CgroupExistsPre, err = b.runner.ExistsCgroup(&spaceDocPre)
 		if err != nil {
 			return res, fmt.Errorf("failed to check if space cgroup exists: %w", err)
 		}
@@ -215,7 +249,8 @@ func (b *Exec) CreateSpace(doc *v1beta1.SpaceDoc) (CreateSpaceResult, error) {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
-	spaceDocPost, err := b.runner.GetSpace(doc)
+	// Build minimal internal space for GetSpace lookup (after creation)
+	internalSpacePost, err := b.runner.GetSpace(lookupSpace)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrSpaceNotFound) {
 			res.MetadataExistsPost = false
@@ -224,7 +259,12 @@ func (b *Exec) CreateSpace(doc *v1beta1.SpaceDoc) (CreateSpaceResult, error) {
 		}
 	} else {
 		res.MetadataExistsPost = true
-		res.CgroupExistsPost, err = b.runner.ExistsCgroup(spaceDocPost)
+		// Convert internal space back to external for ExistsCgroup
+		spaceDocPost, convertErr := apischeme.BuildSpaceExternalFromInternal(internalSpacePost, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		res.CgroupExistsPost, err = b.runner.ExistsCgroup(&spaceDocPost)
 		if err != nil {
 			return res, fmt.Errorf("failed to check if space cgroup exists: %w", err)
 		}
@@ -295,7 +335,17 @@ func (b *Exec) CreateStack(doc *v1beta1.StackDoc) (CreateStackResult, error) {
 		doc.Spec.ID = name
 	}
 
-	stackDocPre, err := b.runner.GetStack(doc)
+	// Build minimal internal stack for GetStack lookup
+	lookupStackPre := intmodel.Stack{
+		Metadata: intmodel.StackMetadata{
+			Name: name,
+		},
+		Spec: intmodel.StackSpec{
+			RealmName: realm,
+			SpaceName: space,
+		},
+	}
+	internalStackPre, err := b.runner.GetStack(lookupStackPre)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrStackNotFound) {
 			res.MetadataExistsPre = false
@@ -305,18 +355,24 @@ func (b *Exec) CreateStack(doc *v1beta1.StackDoc) (CreateStackResult, error) {
 	} else {
 		res.MetadataExistsPre = true
 		// Verify space exists before checking cgroup to provide better error message
-		_, spaceErr := b.runner.GetSpace(&v1beta1.SpaceDoc{
-			Metadata: v1beta1.SpaceMetadata{
+		verifySpace := intmodel.Space{
+			Metadata: intmodel.SpaceMetadata{
 				Name: space,
 			},
-			Spec: v1beta1.SpaceSpec{
-				RealmID: realm,
+			Spec: intmodel.SpaceSpec{
+				RealmName: realm,
 			},
-		})
+		}
+		_, spaceErr := b.runner.GetSpace(verifySpace)
 		if spaceErr != nil {
 			return res, fmt.Errorf("space %q not found at run-path %q: %w", space, b.opts.RunPath, spaceErr)
 		}
-		res.CgroupExistsPre, err = b.runner.ExistsCgroup(stackDocPre)
+		// Convert internal stack back to external for ExistsCgroup
+		stackDocPre, convertErr := apischeme.BuildStackExternalFromInternal(internalStackPre, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		res.CgroupExistsPre, err = b.runner.ExistsCgroup(&stackDocPre)
 		if err != nil {
 			return res, fmt.Errorf("failed to check if stack cgroup exists: %w", err)
 		}
@@ -340,7 +396,17 @@ func (b *Exec) CreateStack(doc *v1beta1.StackDoc) (CreateStackResult, error) {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
-	stackDocPost, err := b.runner.GetStack(doc)
+	// Build minimal internal stack for GetStack lookup
+	lookupStackPost := intmodel.Stack{
+		Metadata: intmodel.StackMetadata{
+			Name: name,
+		},
+		Spec: intmodel.StackSpec{
+			RealmName: realm,
+			SpaceName: space,
+		},
+	}
+	internalStackPost, err := b.runner.GetStack(lookupStackPost)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrStackNotFound) {
 			res.MetadataExistsPost = false
@@ -350,18 +416,24 @@ func (b *Exec) CreateStack(doc *v1beta1.StackDoc) (CreateStackResult, error) {
 	} else {
 		res.MetadataExistsPost = true
 		// Verify space exists before checking cgroup to provide better error message
-		_, spaceErr := b.runner.GetSpace(&v1beta1.SpaceDoc{
-			Metadata: v1beta1.SpaceMetadata{
+		verifySpace := intmodel.Space{
+			Metadata: intmodel.SpaceMetadata{
 				Name: space,
 			},
-			Spec: v1beta1.SpaceSpec{
-				RealmID: realm,
+			Spec: intmodel.SpaceSpec{
+				RealmName: realm,
 			},
-		})
+		}
+		_, spaceErr := b.runner.GetSpace(verifySpace)
 		if spaceErr != nil {
 			return res, fmt.Errorf("space %q not found at run-path %q: %w", space, b.opts.RunPath, spaceErr)
 		}
-		res.CgroupExistsPost, err = b.runner.ExistsCgroup(stackDocPost)
+		// Convert internal stack back to external for ExistsCgroup
+		stackDocPost, convertErr := apischeme.BuildStackExternalFromInternal(internalStackPost, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		res.CgroupExistsPost, err = b.runner.ExistsCgroup(&stackDocPost)
 		if err != nil {
 			return res, fmt.Errorf("failed to check if stack cgroup exists: %w", err)
 		}
@@ -453,7 +525,17 @@ func (b *Exec) CreateCell(doc *v1beta1.CellDoc) (CreateCellResult, error) {
 
 	preContainerExists := make(map[string]bool)
 
-	cellDocPre, err := b.runner.GetCell(doc)
+	lookupCellPre := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: doc.Metadata.Name,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: doc.Spec.RealmID,
+			SpaceName: doc.Spec.SpaceID,
+			StackName: doc.Spec.StackID,
+		},
+	}
+	internalCellPre, err := b.runner.GetCell(lookupCellPre)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			res.MetadataExistsPre = false
@@ -462,15 +544,20 @@ func (b *Exec) CreateCell(doc *v1beta1.CellDoc) (CreateCellResult, error) {
 		}
 	} else {
 		res.MetadataExistsPre = true
-		res.CgroupExistsPre, err = b.runner.ExistsCgroup(cellDocPre)
+		// Convert internal cell back to external for ExistsCgroup and ExistsCellRootContainer
+		cellDocPreExternal, convertErr := apischeme.BuildCellExternalFromInternal(internalCellPre, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		res.CgroupExistsPre, err = b.runner.ExistsCgroup(&cellDocPreExternal)
 		if err != nil {
 			return res, fmt.Errorf("failed to check if cell cgroup exists: %w", err)
 		}
-		res.RootContainerExistsPre, err = b.runner.ExistsCellRootContainer(cellDocPre)
+		res.RootContainerExistsPre, err = b.runner.ExistsCellRootContainer(&cellDocPreExternal)
 		if err != nil {
 			return res, fmt.Errorf("failed to check root container: %w", err)
 		}
-		for _, container := range cellDocPre.Spec.Containers {
+		for _, container := range cellDocPreExternal.Spec.Containers {
 			id := strings.TrimSpace(container.ID)
 			if id != "" {
 				preContainerExists[id] = true
@@ -504,7 +591,17 @@ func (b *Exec) CreateCell(doc *v1beta1.CellDoc) (CreateCellResult, error) {
 
 	postContainerExists := make(map[string]bool)
 
-	cellDocPost, err := b.runner.GetCell(doc)
+	lookupCellPost := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: doc.Metadata.Name,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: doc.Spec.RealmID,
+			SpaceName: doc.Spec.SpaceID,
+			StackName: doc.Spec.StackID,
+		},
+	}
+	internalCellPost, err := b.runner.GetCell(lookupCellPost)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			res.MetadataExistsPost = false
@@ -513,15 +610,20 @@ func (b *Exec) CreateCell(doc *v1beta1.CellDoc) (CreateCellResult, error) {
 		}
 	} else {
 		res.MetadataExistsPost = true
-		res.CgroupExistsPost, err = b.runner.ExistsCgroup(cellDocPost)
+		// Convert internal cell back to external for ExistsCgroup and ExistsCellRootContainer
+		cellDocPostExternal, convertErr := apischeme.BuildCellExternalFromInternal(internalCellPost, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		res.CgroupExistsPost, err = b.runner.ExistsCgroup(&cellDocPostExternal)
 		if err != nil {
 			return res, fmt.Errorf("failed to check if cell cgroup exists: %w", err)
 		}
-		res.RootContainerExistsPost, err = b.runner.ExistsCellRootContainer(cellDocPost)
+		res.RootContainerExistsPost, err = b.runner.ExistsCellRootContainer(&cellDocPostExternal)
 		if err != nil {
 			return res, fmt.Errorf("failed to check root container: %w", err)
 		}
-		for _, container := range cellDocPost.Spec.Containers {
+		for _, container := range cellDocPostExternal.Spec.Containers {
 			id := strings.TrimSpace(container.ID)
 			if id != "" {
 				postContainerExists[id] = true
@@ -643,7 +745,17 @@ func (b *Exec) CreateContainer(doc *v1beta1.ContainerDoc) (CreateContainerResult
 		"containerSpecID", doc.Spec.ID,
 	)
 
-	cellDocPre, err := b.runner.GetCell(cellDoc)
+	lookupCellPre := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: cellDoc.Metadata.Name,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: cellDoc.Spec.RealmID,
+			SpaceName: cellDoc.Spec.SpaceID,
+			StackName: cellDoc.Spec.StackID,
+		},
+	}
+	internalCellPre, err := b.runner.GetCell(lookupCellPre)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return res, fmt.Errorf("cell %q not found", cell)
@@ -652,7 +764,12 @@ func (b *Exec) CreateContainer(doc *v1beta1.ContainerDoc) (CreateContainerResult
 	}
 
 	res.CellMetadataExistsPre = true
-	res.ContainerExistsPre = containerSpecExists(cellDocPre.Spec.Containers, containerName)
+	// Convert internal cell back to external to access Containers field
+	cellDocPreExternal, convertErr := apischeme.BuildCellExternalFromInternal(internalCellPre, apischeme.VersionV1Beta1)
+	if convertErr != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+	res.ContainerExistsPre = containerSpecExists(cellDocPreExternal.Spec.Containers, containerName)
 
 	// Log before calling CreateCell
 	b.logger.DebugContext(
@@ -706,21 +823,39 @@ func (b *Exec) CreateContainer(doc *v1beta1.ContainerDoc) (CreateContainerResult
 		return res, fmt.Errorf("failed to start container %s: %w", containerName, err)
 	}
 
-	cellDocPost, err := b.runner.GetCell(cellDoc)
+	lookupCellPost := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: cellDoc.Metadata.Name,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: cellDoc.Spec.RealmID,
+			SpaceName: cellDoc.Spec.SpaceID,
+			StackName: cellDoc.Spec.StackID,
+		},
+	}
+	internalCellPost, err := b.runner.GetCell(lookupCellPost)
 	if err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 	}
 
 	res.CellMetadataExistsPost = true
-	res.ContainerExistsPost = containerSpecExists(cellDocPost.Spec.Containers, containerName)
+	// Convert internal cell back to external to access Containers field
+	cellDocPostExternal, convertErr := apischeme.BuildCellExternalFromInternal(
+		internalCellPost,
+		apischeme.VersionV1Beta1,
+	)
+	if convertErr != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+	res.ContainerExistsPost = containerSpecExists(cellDocPostExternal.Spec.Containers, containerName)
 	res.ContainerCreated = !res.ContainerExistsPre && res.ContainerExistsPost
 	res.Started = true
 
 	// Construct ContainerDoc from the created container spec
 	var containerSpec *v1beta1.ContainerSpec
-	for i := range cellDocPost.Spec.Containers {
-		if cellDocPost.Spec.Containers[i].ID == containerName {
-			containerSpec = &cellDocPost.Spec.Containers[i]
+	for i := range cellDocPostExternal.Spec.Containers {
+		if cellDocPostExternal.Spec.Containers[i].ID == containerName {
+			containerSpec = &cellDocPostExternal.Spec.Containers[i]
 			break
 		}
 	}

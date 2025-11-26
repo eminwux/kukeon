@@ -23,10 +23,11 @@ import (
 	"syscall"
 
 	"github.com/containerd/containerd/v2/pkg/namespaces"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 func appendCellLogFields(fields []any, cellID, cellName string) []any {
@@ -146,16 +147,23 @@ func (r *Exec) killContainerTask(ctrCtx context.Context, containerID, realmNames
 }
 
 func (r *Exec) resolveSpaceCNIConfigPath(realmID, spaceID string) (string, error) {
-	spaceDoc, err := r.GetSpace(&v1beta1.SpaceDoc{
-		Metadata: v1beta1.SpaceMetadata{
+	lookupSpace := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{
 			Name: spaceID,
 		},
-		Spec: v1beta1.SpaceSpec{
-			RealmID: realmID,
+		Spec: intmodel.SpaceSpec{
+			RealmName: realmID,
 		},
-	})
+	}
+	internalSpace, err := r.GetSpace(lookupSpace)
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
+	}
+
+	// Convert internal space back to external for accessing CNIConfigPath
+	spaceDoc, convertErr := apischeme.BuildSpaceExternalFromInternal(internalSpace, apischeme.VersionV1Beta1)
+	if convertErr != nil {
+		return "", fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
 	}
 
 	confPath := strings.TrimSpace(spaceDoc.Spec.CNIConfigPath)

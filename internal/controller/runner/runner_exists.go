@@ -22,9 +22,11 @@ import (
 	"os"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/cgroups"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
@@ -85,13 +87,21 @@ func (r *Exec) ExistsCellRootContainer(doc *v1beta1.CellDoc) (bool, error) {
 	defer r.ctrClient.Close()
 
 	// Get realm to access namespace
-	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
 			Name: realmID,
 		},
-	})
+	}
+
+	internalRealm, err := r.GetRealm(lookupRealm)
 	if err != nil {
 		return false, fmt.Errorf("failed to get realm: %w", err)
+	}
+
+	// Convert internal realm back to external for accessing namespace
+	realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
+	if convertErr != nil {
+		return false, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
 	}
 
 	// Set namespace to realm namespace
@@ -145,15 +155,21 @@ func (r *Exec) ExistsCgroup(doc any) (bool, error) {
 		if d.Spec.RealmID == "" {
 			return false, errdefs.ErrRealmNameRequired
 		}
-		realmDoc, realmErr := r.GetRealm(&v1beta1.RealmDoc{
-			Metadata: v1beta1.RealmMetadata{
+		lookupRealm := intmodel.Realm{
+			Metadata: intmodel.RealmMetadata{
 				Name: d.Spec.RealmID,
 			},
-		})
+		}
+		internalRealm, realmErr := r.GetRealm(lookupRealm)
 		if realmErr != nil {
 			return false, fmt.Errorf("failed to get realm: %w", realmErr)
 		}
-		spec = cgroups.DefaultSpaceSpec(realmDoc, d)
+		// Convert internal realm back to external for DefaultSpaceSpec
+		realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return false, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		spec = cgroups.DefaultSpaceSpec(&realmDoc, d)
 
 	case *v1beta1.StackDoc:
 		if d == nil {
@@ -165,26 +181,38 @@ func (r *Exec) ExistsCgroup(doc any) (bool, error) {
 		if d.Spec.SpaceID == "" {
 			return false, errdefs.ErrSpaceNameRequired
 		}
-		realmDoc, realmErr := r.GetRealm(&v1beta1.RealmDoc{
-			Metadata: v1beta1.RealmMetadata{
+		lookupRealm := intmodel.Realm{
+			Metadata: intmodel.RealmMetadata{
 				Name: d.Spec.RealmID,
 			},
-		})
+		}
+		internalRealm, realmErr := r.GetRealm(lookupRealm)
 		if realmErr != nil {
 			return false, fmt.Errorf("failed to get realm: %w", realmErr)
 		}
-		spaceDoc, spaceErr := r.GetSpace(&v1beta1.SpaceDoc{
-			Metadata: v1beta1.SpaceMetadata{
+		// Convert internal realm back to external for DefaultStackSpec
+		realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return false, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		lookupSpace := intmodel.Space{
+			Metadata: intmodel.SpaceMetadata{
 				Name: d.Spec.SpaceID,
 			},
-			Spec: v1beta1.SpaceSpec{
-				RealmID: d.Spec.RealmID,
+			Spec: intmodel.SpaceSpec{
+				RealmName: d.Spec.RealmID,
 			},
-		})
+		}
+		internalSpace, spaceErr := r.GetSpace(lookupSpace)
 		if spaceErr != nil {
 			return false, fmt.Errorf("failed to get space: %w", spaceErr)
 		}
-		spec = cgroups.DefaultStackSpec(realmDoc, spaceDoc, d)
+		// Convert internal space back to external for DefaultStackSpec
+		spaceDoc, convertSpaceErr := apischeme.BuildSpaceExternalFromInternal(internalSpace, apischeme.VersionV1Beta1)
+		if convertSpaceErr != nil {
+			return false, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertSpaceErr)
+		}
+		spec = cgroups.DefaultStackSpec(&realmDoc, &spaceDoc, d)
 
 	case *v1beta1.CellDoc:
 		if d == nil {
@@ -199,38 +227,56 @@ func (r *Exec) ExistsCgroup(doc any) (bool, error) {
 		if d.Spec.StackID == "" {
 			return false, errdefs.ErrStackNameRequired
 		}
-		realmDoc, realmErr := r.GetRealm(&v1beta1.RealmDoc{
-			Metadata: v1beta1.RealmMetadata{
+		lookupRealm := intmodel.Realm{
+			Metadata: intmodel.RealmMetadata{
 				Name: d.Spec.RealmID,
 			},
-		})
+		}
+		internalRealm, realmErr := r.GetRealm(lookupRealm)
 		if realmErr != nil {
 			return false, fmt.Errorf("failed to get realm: %w", realmErr)
 		}
-		spaceDoc, spaceErr := r.GetSpace(&v1beta1.SpaceDoc{
-			Metadata: v1beta1.SpaceMetadata{
+		// Convert internal realm back to external for DefaultCellSpec
+		realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return false, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		lookupSpace := intmodel.Space{
+			Metadata: intmodel.SpaceMetadata{
 				Name: d.Spec.SpaceID,
 			},
-			Spec: v1beta1.SpaceSpec{
-				RealmID: d.Spec.RealmID,
+			Spec: intmodel.SpaceSpec{
+				RealmName: d.Spec.RealmID,
 			},
-		})
+		}
+		internalSpace, spaceErr := r.GetSpace(lookupSpace)
 		if spaceErr != nil {
 			return false, fmt.Errorf("failed to get space: %w", spaceErr)
 		}
-		stackDoc, stackErr := r.GetStack(&v1beta1.StackDoc{
-			Metadata: v1beta1.StackMetadata{
+		// Convert internal space back to external for DefaultCellSpec
+		spaceDoc, convertSpaceErr := apischeme.BuildSpaceExternalFromInternal(internalSpace, apischeme.VersionV1Beta1)
+		if convertSpaceErr != nil {
+			return false, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertSpaceErr)
+		}
+		lookupStack := intmodel.Stack{
+			Metadata: intmodel.StackMetadata{
 				Name: d.Spec.StackID,
 			},
-			Spec: v1beta1.StackSpec{
-				RealmID: d.Spec.RealmID,
-				SpaceID: d.Spec.SpaceID,
+			Spec: intmodel.StackSpec{
+				RealmName: d.Spec.RealmID,
+				SpaceName: d.Spec.SpaceID,
 			},
-		})
+		}
+		internalStack, stackErr := r.GetStack(lookupStack)
 		if stackErr != nil {
 			return false, fmt.Errorf("failed to get stack: %w", stackErr)
 		}
-		spec = cgroups.DefaultCellSpec(realmDoc, spaceDoc, stackDoc, d)
+		// Convert internal stack back to external for DefaultCellSpec
+		stackDoc, convertStackErr := apischeme.BuildStackExternalFromInternal(internalStack, apischeme.VersionV1Beta1)
+		if convertStackErr != nil {
+			return false, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertStackErr)
+		}
+		spec = cgroups.DefaultCellSpec(&realmDoc, &spaceDoc, &stackDoc, d)
 
 	default:
 		return false, fmt.Errorf("unsupported doc type: %T", doc)

@@ -23,6 +23,7 @@ import (
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -95,10 +96,13 @@ func (b *Exec) bootstrapRealm(report BootstrapReport) (BootstrapReport, error) {
 	var err error
 
 	// Pre-state
-	realmDocPre, err := b.runner.GetRealm(&v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{Name: consts.KukeonRealmName},
-		Spec:     v1beta1.RealmSpec{Namespace: consts.KukeonRealmNamespace},
-	})
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: consts.KukeonRealmName,
+		},
+	}
+
+	internalRealmPre, err := b.runner.GetRealm(lookupRealm)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrRealmNotFound) {
 			report.RealmMetadataExistsPre = false
@@ -107,7 +111,12 @@ func (b *Exec) bootstrapRealm(report BootstrapReport) (BootstrapReport, error) {
 		}
 	} else {
 		report.RealmMetadataExistsPre = true
-		cgroupExists, cgroupErr := b.runner.ExistsCgroup(realmDocPre)
+		// Convert internal realm back to external for ExistsCgroup
+		realmDocPre, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealmPre, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		cgroupExists, cgroupErr := b.runner.ExistsCgroup(&realmDocPre)
 		if cgroupErr != nil {
 			return report, fmt.Errorf("failed to check if realm cgroup exists: %w", cgroupErr)
 		}
@@ -143,10 +152,7 @@ func (b *Exec) bootstrapRealm(report BootstrapReport) (BootstrapReport, error) {
 	}
 
 	// Post-state
-	realmDocPost, err := b.runner.GetRealm(&v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{Name: consts.KukeonRealmName},
-		Spec:     v1beta1.RealmSpec{Namespace: consts.KukeonRealmNamespace},
-	})
+	internalRealmPost, err := b.runner.GetRealm(lookupRealm)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrRealmNotFound) {
 			report.RealmMetadataExistsPost = false
@@ -155,7 +161,12 @@ func (b *Exec) bootstrapRealm(report BootstrapReport) (BootstrapReport, error) {
 		}
 	} else {
 		report.RealmMetadataExistsPost = true
-		cgroupExists, cgroupErr := b.runner.ExistsCgroup(realmDocPost)
+		// Convert internal realm back to external for ExistsCgroup
+		realmDocPost, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealmPost, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		cgroupExists, cgroupErr := b.runner.ExistsCgroup(&realmDocPost)
 		if cgroupErr != nil {
 			return report, fmt.Errorf("failed to check if realm cgroup exists: %w", cgroupErr)
 		}
@@ -197,7 +208,16 @@ func (b *Exec) bootstrapSpace(report BootstrapReport) (BootstrapReport, error) {
 	report.SpaceCNINetworkName = spaceNet
 
 	// Try to read existing space metadata (best-effort)
-	spaceDocPre, err := b.runner.GetSpace(spaceDoc)
+	lookupSpace := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{
+			Name: spaceName,
+		},
+		Spec: intmodel.SpaceSpec{
+			RealmName: consts.KukeonRealmName,
+		},
+	}
+
+	internalSpacePre, err := b.runner.GetSpace(lookupSpace)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrSpaceNotFound) {
 			report.SpaceMetadataExistsPre = false
@@ -206,7 +226,12 @@ func (b *Exec) bootstrapSpace(report BootstrapReport) (BootstrapReport, error) {
 		}
 	} else {
 		report.SpaceMetadataExistsPre = true
-		cgroupExists, cgroupErr := b.runner.ExistsCgroup(spaceDocPre)
+		// Convert internal space back to external for ExistsCgroup
+		spaceDocPre, convertErr := apischeme.BuildSpaceExternalFromInternal(internalSpacePre, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		cgroupExists, cgroupErr := b.runner.ExistsCgroup(&spaceDocPre)
 		if cgroupErr != nil {
 			return report, fmt.Errorf("failed to check if space cgroup exists: %w", cgroupErr)
 		}
@@ -233,7 +258,7 @@ func (b *Exec) bootstrapSpace(report BootstrapReport) (BootstrapReport, error) {
 	}
 
 	// Post-state checks
-	spaceDocPost, err := b.runner.GetSpace(spaceDoc)
+	internalSpacePost, err := b.runner.GetSpace(lookupSpace)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrSpaceNotFound) {
 			report.SpaceMetadataExistsPost = false
@@ -242,7 +267,12 @@ func (b *Exec) bootstrapSpace(report BootstrapReport) (BootstrapReport, error) {
 		}
 	} else {
 		report.SpaceMetadataExistsPost = true
-		cgroupExists, cgroupErr := b.runner.ExistsCgroup(spaceDocPost)
+		// Convert internal space back to external for ExistsCgroup
+		spaceDocPost, convertErr := apischeme.BuildSpaceExternalFromInternal(internalSpacePost, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		cgroupExists, cgroupErr := b.runner.ExistsCgroup(&spaceDocPost)
 		if cgroupErr != nil {
 			return report, fmt.Errorf("failed to check if space cgroup exists: %w", cgroupErr)
 		}
@@ -284,8 +314,18 @@ func (b *Exec) bootstrapStack(report BootstrapReport) (BootstrapReport, error) {
 	// Fill static fields
 	report.StackName = stackName
 
+	// Build minimal internal stack for GetStack lookup
+	lookupStackPre := intmodel.Stack{
+		Metadata: intmodel.StackMetadata{
+			Name: stackDoc.Metadata.Name,
+		},
+		Spec: intmodel.StackSpec{
+			RealmName: stackDoc.Spec.RealmID,
+			SpaceName: stackDoc.Spec.SpaceID,
+		},
+	}
 	// Try to read existing stack metadata (best-effort)
-	stackDocPre, err := b.runner.GetStack(stackDoc)
+	internalStackPre, err := b.runner.GetStack(lookupStackPre)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrStackNotFound) {
 			report.StackMetadataExistsPre = false
@@ -294,7 +334,12 @@ func (b *Exec) bootstrapStack(report BootstrapReport) (BootstrapReport, error) {
 		}
 	} else {
 		report.StackMetadataExistsPre = true
-		cgroupExists, cgroupErr := b.runner.ExistsCgroup(stackDocPre)
+		// Convert internal stack back to external for ExistsCgroup
+		stackDocPre, convertErr := apischeme.BuildStackExternalFromInternal(internalStackPre, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		cgroupExists, cgroupErr := b.runner.ExistsCgroup(&stackDocPre)
 		if cgroupErr != nil {
 			return report, fmt.Errorf("failed to check if stack cgroup exists: %w", cgroupErr)
 		}
@@ -313,8 +358,18 @@ func (b *Exec) bootstrapStack(report BootstrapReport) (BootstrapReport, error) {
 		return report, fmt.Errorf("%w: %w", errdefs.ErrCreateStack, err)
 	}
 
+	// Build minimal internal stack for GetStack lookup (post)
+	lookupStackPost := intmodel.Stack{
+		Metadata: intmodel.StackMetadata{
+			Name: stackDoc.Metadata.Name,
+		},
+		Spec: intmodel.StackSpec{
+			RealmName: stackDoc.Spec.RealmID,
+			SpaceName: stackDoc.Spec.SpaceID,
+		},
+	}
 	// Post-state checks
-	stackDocPost, err := b.runner.GetStack(stackDoc)
+	internalStackPost, err := b.runner.GetStack(lookupStackPost)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrStackNotFound) {
 			report.StackMetadataExistsPost = false
@@ -323,7 +378,12 @@ func (b *Exec) bootstrapStack(report BootstrapReport) (BootstrapReport, error) {
 		}
 	} else {
 		report.StackMetadataExistsPost = true
-		cgroupExists, cgroupErr := b.runner.ExistsCgroup(stackDocPost)
+		// Convert internal stack back to external for ExistsCgroup
+		stackDocPost, convertErr := apischeme.BuildStackExternalFromInternal(internalStackPost, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		cgroupExists, cgroupErr := b.runner.ExistsCgroup(&stackDocPost)
 		if cgroupErr != nil {
 			return report, fmt.Errorf("failed to check if stack cgroup exists: %w", cgroupErr)
 		}
@@ -375,7 +435,17 @@ func (b *Exec) bootstrapCell(report BootstrapReport) (BootstrapReport, error) {
 	report.CellName = cellName
 
 	// Try to read existing cell metadata (best-effort)
-	cellDocPre, err := b.runner.GetCell(cellDoc)
+	lookupCellPre := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: cellDoc.Metadata.Name,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: cellDoc.Spec.RealmID,
+			SpaceName: cellDoc.Spec.SpaceID,
+			StackName: cellDoc.Spec.StackID,
+		},
+	}
+	internalCellPre, err := b.runner.GetCell(lookupCellPre)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			report.CellMetadataExistsPre = false
@@ -384,13 +454,18 @@ func (b *Exec) bootstrapCell(report BootstrapReport) (BootstrapReport, error) {
 		}
 	} else {
 		report.CellMetadataExistsPre = true
-		cgroupExists, cgroupErr := b.runner.ExistsCgroup(cellDocPre)
+		// Convert internal cell back to external for ExistsCgroup and ExistsCellRootContainer
+		cellDocPreExternal, convertErr := apischeme.BuildCellExternalFromInternal(internalCellPre, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		cgroupExists, cgroupErr := b.runner.ExistsCgroup(&cellDocPreExternal)
 		if cgroupErr != nil {
 			return report, fmt.Errorf("failed to check if cell cgroup exists: %w", cgroupErr)
 		}
 		report.CellCgroupExistsPre = cgroupExists
 		// Check if root container exists pre (only if cell exists)
-		rootExistsPre, rootErr := b.runner.ExistsCellRootContainer(cellDocPre)
+		rootExistsPre, rootErr := b.runner.ExistsCellRootContainer(&cellDocPreExternal)
 		if rootErr != nil {
 			return report, fmt.Errorf("failed to check if root container exists: %w", rootErr)
 		}
@@ -420,7 +495,17 @@ func (b *Exec) bootstrapCell(report BootstrapReport) (BootstrapReport, error) {
 	}
 
 	// Post-state checks
-	cellDocPost, err := b.runner.GetCell(cellDoc)
+	lookupCellPost := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: cellDoc.Metadata.Name,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: cellDoc.Spec.RealmID,
+			SpaceName: cellDoc.Spec.SpaceID,
+			StackName: cellDoc.Spec.StackID,
+		},
+	}
+	internalCellPost, err := b.runner.GetCell(lookupCellPost)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			report.CellMetadataExistsPost = false
@@ -429,13 +514,18 @@ func (b *Exec) bootstrapCell(report BootstrapReport) (BootstrapReport, error) {
 		}
 	} else {
 		report.CellMetadataExistsPost = true
-		cgroupExists, cgroupErr := b.runner.ExistsCgroup(cellDocPost)
+		// Convert internal cell back to external for ExistsCgroup and ExistsCellRootContainer
+		cellDocPostExternal, convertErr := apischeme.BuildCellExternalFromInternal(internalCellPost, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		cgroupExists, cgroupErr := b.runner.ExistsCgroup(&cellDocPostExternal)
 		if cgroupErr != nil {
 			return report, fmt.Errorf("failed to check if cell cgroup exists: %w", cgroupErr)
 		}
 		report.CellCgroupExistsPost = cgroupExists
 		// Check if root container exists post
-		rootExistsPost, rootErr := b.runner.ExistsCellRootContainer(cellDocPost)
+		rootExistsPost, rootErr := b.runner.ExistsCellRootContainer(&cellDocPostExternal)
 		if rootErr != nil {
 			return report, fmt.Errorf("failed to check if root container exists: %w", rootErr)
 		}

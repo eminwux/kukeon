@@ -27,6 +27,7 @@ import (
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -85,17 +86,18 @@ func (r *Exec) StopCell(doc *v1beta1.CellDoc) error {
 	defer r.ctrClient.Close()
 
 	// Get realm to access namespace
-	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
 			Name: realmID,
 		},
-	})
+	}
+	internalRealm, err := r.GetRealm(lookupRealm)
 	if err != nil {
 		return fmt.Errorf("failed to get realm: %w", err)
 	}
 
 	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
 
 	// Stop all workload containers first
 	for _, containerSpec := range doc.Spec.Containers {
@@ -149,7 +151,7 @@ func (r *Exec) StopCell(doc *v1beta1.CellDoc) error {
 	var rootPID uint32
 	rootContainer, err := r.ctrClient.GetContainer(ctrCtx, rootContainerID)
 	if err == nil {
-		nsCtx := namespaces.WithNamespace(ctrCtx, realmDoc.Spec.Namespace)
+		nsCtx := namespaces.WithNamespace(ctrCtx, internalRealm.Spec.Namespace)
 		rootTask, taskErr := rootContainer.Task(nsCtx, nil)
 		if taskErr == nil {
 			rootPID = rootTask.Pid()
@@ -275,17 +277,18 @@ func (r *Exec) StopContainer(doc *v1beta1.CellDoc, containerID string) error {
 	defer r.ctrClient.Close()
 
 	// Get realm to access namespace
-	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
 			Name: realmID,
 		},
-	})
+	}
+	internalRealm, err := r.GetRealm(lookupRealm)
 	if err != nil {
 		return fmt.Errorf("failed to get realm: %w", err)
 	}
 
 	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
 
 	// Use container name directly for containerd operations
 	timeout := 5 * time.Second

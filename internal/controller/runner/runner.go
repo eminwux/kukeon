@@ -29,17 +29,17 @@ import (
 type Runner interface {
 	BootstrapCNI(cfgDir, cacheDir, binDir string) (cni.BootstrapReport, error)
 
-	GetRealm(doc *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error)
+	GetRealm(realm intmodel.Realm) (intmodel.Realm, error)
 	CreateRealm(realm intmodel.Realm) (intmodel.Realm, error)
 	ExistsRealmContainerdNamespace(namespace string) (bool, error)
 	DeleteRealm(doc *v1beta1.RealmDoc) (DeleteRealmOutcome, error)
 
-	GetSpace(doc *v1beta1.SpaceDoc) (*v1beta1.SpaceDoc, error)
+	GetSpace(space intmodel.Space) (intmodel.Space, error)
 	CreateSpace(space intmodel.Space) (intmodel.Space, error)
 	ExistsSpaceCNIConfig(doc *v1beta1.SpaceDoc) (bool, error)
 	DeleteSpace(doc *v1beta1.SpaceDoc) error
 
-	GetCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error)
+	GetCell(cell intmodel.Cell) (intmodel.Cell, error)
 	CreateCell(cell intmodel.Cell) (intmodel.Cell, error)
 	StartCell(doc *v1beta1.CellDoc) error
 	StopCell(doc *v1beta1.CellDoc) error
@@ -51,7 +51,7 @@ type Runner interface {
 	ExistsCellRootContainer(doc *v1beta1.CellDoc) (bool, error)
 	DeleteCell(doc *v1beta1.CellDoc) error
 
-	GetStack(doc *v1beta1.StackDoc) (*v1beta1.StackDoc, error)
+	GetStack(stack intmodel.Stack) (intmodel.Stack, error)
 	CreateStack(stack intmodel.Stack) (intmodel.Stack, error)
 	DeleteStack(doc *v1beta1.StackDoc) error
 
