@@ -90,13 +90,19 @@ func (b *Exec) StopCell(doc *v1beta1.CellDoc) (StopCellResult, error) {
 	}
 	result.CellDoc = cellDoc
 
+	// Convert external cell to internal for runner.StopCell
+	internalCell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
+	if err != nil {
+		return result, fmt.Errorf("failed to convert cell to internal model: %w", err)
+	}
+
 	// Stop all containers in the cell
-	if err = b.runner.StopCell(cellDoc); err != nil {
+	if err = b.runner.StopCell(internalCell); err != nil {
 		return result, fmt.Errorf("failed to stop cell containers: %w", err)
 	}
 
-	// Convert to internal model for UpdateCellMetadata
-	cell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
+	// Use the same internal cell for UpdateCellMetadata
+	cell := internalCell
 	if err != nil {
 		return result, fmt.Errorf("failed to convert cell to internal model: %w", err)
 	}
@@ -196,13 +202,19 @@ func (b *Exec) StopContainer(doc *v1beta1.ContainerDoc) (StopContainerResult, er
 		return res, fmt.Errorf("cell %q not found", cellName)
 	}
 
+	// Convert external cell to internal for runner.StopContainer
+	internalCell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
+	if err != nil {
+		return res, fmt.Errorf("failed to convert cell to internal model: %w", err)
+	}
+
 	// Stop the specific container (pass container name, runner will build full ID)
-	if err = b.runner.StopContainer(cellDoc, name); err != nil {
+	if err = b.runner.StopContainer(internalCell, name); err != nil {
 		return res, fmt.Errorf("failed to stop container %s: %w", name, err)
 	}
 
-	// Convert to internal model for UpdateCellMetadata
-	cell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
+	// Use the same internal cell for UpdateCellMetadata
+	cell := internalCell
 	if err != nil {
 		return res, fmt.Errorf("failed to convert cell to internal model: %w", err)
 	}

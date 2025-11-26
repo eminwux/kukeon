@@ -42,8 +42,8 @@ type Runner interface {
 	GetCell(cell intmodel.Cell) (intmodel.Cell, error)
 	CreateCell(cell intmodel.Cell) (intmodel.Cell, error)
 	StartCell(cell intmodel.Cell) error
-	StopCell(doc *v1beta1.CellDoc) error
-	StopContainer(doc *v1beta1.CellDoc, containerID string) error
+	StopCell(cell intmodel.Cell) error
+	StopContainer(cell intmodel.Cell, containerID string) error
 	KillCell(cell intmodel.Cell) error
 	KillContainer(cell intmodel.Cell, containerID string) error
 	DeleteContainer(cell intmodel.Cell, containerID string) error
