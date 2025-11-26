@@ -525,7 +525,27 @@ func (r *Exec) ensureCgroupInternal(params ensureCgroupParams) error {
 	return nil
 }
 
-func (r *Exec) ensureSpaceCgroup(space intmodel.Space, realm *v1beta1.RealmDoc) (intmodel.Space, error) {
+func (r *Exec) ensureSpaceCgroup(space intmodel.Space) (intmodel.Space, error) {
+	// Extract realm name from space and validate
+	if space.Spec.RealmName == "" {
+		return intmodel.Space{}, errdefs.ErrRealmNameRequired
+	}
+
+	// Fetch the realm internally and convert to external for DefaultSpaceSpec
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: space.Spec.RealmName,
+		},
+	}
+	internalRealm, err := r.GetRealm(lookupRealm)
+	if err != nil {
+		return intmodel.Space{}, err
+	}
+	realmDoc, convertRealmErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
+	if convertRealmErr != nil {
+		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertRealmErr)
+	}
+
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
@@ -540,7 +560,7 @@ func (r *Exec) ensureSpaceCgroup(space intmodel.Space, realm *v1beta1.RealmDoc) 
 		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
-	spec := cgroups.DefaultSpaceSpec(realm, &spaceDoc)
+	spec := cgroups.DefaultSpaceSpec(&realmDoc, &spaceDoc)
 
 	// Capture space for closure
 	spaceForUpdate := space
@@ -941,14 +961,8 @@ func (r *Exec) provisionNewCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	// Update internal model with cgroup path
 	cell.Status.CgroupPath = cgroupPath
 
-	// Convert to external model for createCellContainers (requires external model)
-	cellDoc, err := apischeme.BuildCellExternalFromInternal(cell, apischeme.VersionV1Beta1)
-	if err != nil {
-		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-
-	// Create pause container and all containers for the cell (requires external model)
-	_, err = r.createCellContainers(&cellDoc)
+	// Create pause container and all containers for the cell
+	_, err = r.createCellContainers(cell)
 	if err != nil {
 		return intmodel.Cell{}, err
 	}
@@ -1188,39 +1202,35 @@ func (r *Exec) ensureCellCgroup(cell intmodel.Cell) (intmodel.Cell, error) {
 	return cell, nil
 }
 
-// createCellContainers creates the root container and all containers defined in the CellDoc.
-// The root container is created first, then all containers in doc.Spec.Containers are created.
-func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container, error) {
-	if doc == nil {
-		return nil, errdefs.ErrCellNotFound
-	}
-
-	cellName := strings.TrimSpace(doc.Metadata.Name)
+// createCellContainers creates the root container and all containers defined in the Cell.
+// The root container is created first, then all containers in cell.Spec.Containers are created.
+func (r *Exec) createCellContainers(cell intmodel.Cell) (containerd.Container, error) {
+	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
-		return nil, errdefs.ErrCellNotFound
+		return nil, errdefs.ErrCellNameRequired
 	}
 
-	cellID := strings.TrimSpace(doc.Spec.ID)
+	cellID := cell.Spec.ID
 	if cellID == "" {
 		return nil, errdefs.ErrCellIDRequired
 	}
 
-	realmID := strings.TrimSpace(doc.Spec.RealmID)
-	if realmID == "" {
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
+	if realmName == "" {
 		return nil, errdefs.ErrRealmNameRequired
 	}
 
-	spaceID := strings.TrimSpace(doc.Spec.SpaceID)
-	if spaceID == "" {
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
+	if spaceName == "" {
 		return nil, errdefs.ErrSpaceNameRequired
 	}
 
-	stackID := strings.TrimSpace(doc.Spec.StackID)
-	if stackID == "" {
+	stackName := strings.TrimSpace(cell.Spec.StackName)
+	if stackName == "" {
 		return nil, errdefs.ErrStackNameRequired
 	}
 
-	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmID, spaceID)
+	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmName, spaceName)
 	if cniErr != nil {
 		return nil, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
@@ -1245,7 +1255,7 @@ func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 	// Get realm to access namespace
 	lookupRealm := intmodel.Realm{
 		Metadata: intmodel.RealmMetadata{
-			Name: realmID,
+			Name: realmName,
 		},
 	}
 	internalRealm, err := r.GetRealm(lookupRealm)
@@ -1253,27 +1263,36 @@ func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 		return nil, fmt.Errorf("failed to get realm: %w", err)
 	}
 
+	namespace := internalRealm.Spec.Namespace
+	if namespace == "" {
+		return nil, fmt.Errorf("realm %q has no namespace", realmName)
+	}
+
 	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
+	r.ctrClient.SetNamespace(namespace)
 
 	// Generate container ID with cell identifier for uniqueness
-	containerID, err := naming.BuildRootContainerName(spaceID, stackID, cellID)
+	containerID, err := naming.BuildRootContainerName(spaceName, stackName, cellID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build root container name: %w", err)
 	}
 
-	rootContainerSpec := ensureCellRootContainerSpec(
-		doc,
-		containerID,
-		cellID,
-		realmID,
-		spaceID,
-		stackID,
-		cniConfigPath,
-	)
+	// Convert cell to external for helper functions that require external model
+	cellDoc, err := apischeme.BuildCellExternalFromInternal(cell, apischeme.VersionV1Beta1)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
 
-	rootLabels := buildRootContainerLabels(doc, cellID, cellName, spaceID, stackID, realmID)
-	containerSpec := ctrutil.BuildRootContainerSpec(rootContainerSpec, rootLabels)
+	rootContainerSpec, err := r.ensureCellRootContainerSpec(cell)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert internal ContainerSpec to external for BuildRootContainerSpec
+	rootContainerSpecExternal := convertContainerSpecInternalToExternal(rootContainerSpec)
+
+	rootLabels := buildRootContainerLabels(&cellDoc, cellID, cellName, spaceName, stackName, realmName)
+	containerSpec := ctrutil.BuildRootContainerSpec(rootContainerSpecExternal, rootLabels)
 
 	container, err := r.ctrClient.CreateContainer(ctrCtx, containerSpec)
 	if err != nil {
@@ -1281,9 +1300,9 @@ func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 		logFields = append(
 			logFields,
 			"space",
-			spaceID,
+			spaceName,
 			"realm",
-			realmID,
+			realmName,
 			"cniConfig",
 			cniConfigPath,
 			"err",
@@ -1298,61 +1317,81 @@ func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 	}
 
 	infoFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-	infoFields = append(infoFields, "space", spaceID, "realm", realmID, "cniConfig", cniConfigPath)
+	infoFields = append(infoFields, "space", spaceName, "realm", realmName, "cniConfig", cniConfigPath)
 	r.logger.InfoContext(
 		r.ctx,
 		"created root container",
 		infoFields...,
 	)
 
-	// Create all containers defined in the CellDoc
-	for i := range doc.Spec.Containers {
-		containerSpec := doc.Spec.Containers[i]
-		if containerSpec.CellID == "" {
-			containerSpec.CellID = cellID
+	// Create all containers defined in the cell
+	for i := range cell.Spec.Containers {
+		containerSpec := cell.Spec.Containers[i]
+
+		// Ensure container spec has required names
+		if containerSpec.CellName == "" {
+			containerSpec.CellName = cellID
 		}
-		if containerSpec.SpaceID == "" {
-			containerSpec.SpaceID = spaceID
+		if containerSpec.SpaceName == "" {
+			containerSpec.SpaceName = spaceName
 		}
-		if containerSpec.RealmID == "" {
-			containerSpec.RealmID = realmID
+		if containerSpec.RealmName == "" {
+			containerSpec.RealmName = realmName
 		}
-		if containerSpec.StackID == "" {
-			containerSpec.StackID = stackID
+		if containerSpec.StackName == "" {
+			containerSpec.StackName = stackName
 		}
 		if containerSpec.CNIConfigPath == "" {
 			containerSpec.CNIConfigPath = cniConfigPath
 		}
+		cell.Spec.Containers[i] = containerSpec
 
 		// Build container ID using hierarchical format for containerd operations
 		// Don't modify containerSpec.ID in the document - keep it as the base name
 		containerID, err = naming.BuildContainerName(
-			containerSpec.SpaceID,
-			containerSpec.StackID,
-			containerSpec.CellID,
+			containerSpec.SpaceName,
+			containerSpec.StackName,
+			containerSpec.CellName,
 			containerSpec.ID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build container name: %w", err)
 		}
 
-		// Create a copy with the full hierarchical ID for containerd operations
-		containerSpecCopy := containerSpec
-		containerSpecCopy.ID = containerID
+		// Convert internal container spec to external for CreateContainerFromSpec
+		extContainerSpec := v1beta1.ContainerSpec{
+			ID:              containerID, // Use hierarchical ID
+			RealmID:         containerSpec.RealmName,
+			SpaceID:         containerSpec.SpaceName,
+			StackID:         containerSpec.StackName,
+			CellID:          containerSpec.CellName,
+			Root:            containerSpec.Root,
+			Image:           containerSpec.Image,
+			Command:         containerSpec.Command,
+			Args:            containerSpec.Args,
+			Env:             containerSpec.Env,
+			Ports:           containerSpec.Ports,
+			Volumes:         containerSpec.Volumes,
+			Networks:        containerSpec.Networks,
+			NetworksAliases: containerSpec.NetworksAliases,
+			Privileged:      containerSpec.Privileged,
+			CNIConfigPath:   containerSpec.CNIConfigPath,
+			RestartPolicy:   containerSpec.RestartPolicy,
+		}
 
 		// Use container name with hierarchical format for containerd operations
 		_, err = r.ctrClient.CreateContainerFromSpec(
 			ctrCtx,
-			&containerSpecCopy,
+			&extContainerSpec,
 		)
 		if err != nil {
 			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 			fields = append(
 				fields,
 				"space",
-				spaceID,
+				spaceName,
 				"realm",
-				realmID,
+				realmName,
 				"cniConfig",
 				containerSpec.CNIConfigPath,
 				"err",
@@ -1360,7 +1399,7 @@ func (r *Exec) createCellContainers(doc *v1beta1.CellDoc) (containerd.Container,
 			)
 			r.logger.ErrorContext(
 				r.ctx,
-				"failed to create container from CellDoc",
+				"failed to create container from cell",
 				fields...,
 			)
 			return nil, fmt.Errorf("failed to create container %s: %w", containerID, err)
@@ -1495,17 +1534,16 @@ func (r *Exec) ensureCellContainers(cell intmodel.Cell) (containerd.Container, e
 			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 		}
 
-		rootContainerSpec := ensureCellRootContainerSpec(
-			&cellDoc,
-			containerID,
-			cellID,
-			realmName,
-			spaceName,
-			stackName,
-			cniConfigPath,
-		)
+		rootContainerSpec, err := r.ensureCellRootContainerSpec(cell)
+		if err != nil {
+			return nil, err
+		}
+
+		// Convert internal ContainerSpec to external for BuildRootContainerSpec
+		rootContainerSpecExternal := convertContainerSpecInternalToExternal(rootContainerSpec)
+
 		rootLabels := buildRootContainerLabels(&cellDoc, cellID, cellName, spaceName, stackName, realmName)
-		containerSpec := ctrutil.BuildRootContainerSpec(rootContainerSpec, rootLabels)
+		containerSpec := ctrutil.BuildRootContainerSpec(rootContainerSpecExternal, rootLabels)
 
 		var createErr error
 		container, createErr = r.ctrClient.CreateContainer(ctrCtx, containerSpec)
@@ -1812,52 +1850,133 @@ func (r *Exec) ensureCellContainers(cell intmodel.Cell) (containerd.Container, e
 	return container, nil
 }
 
-func ensureCellRootContainerSpec(
-	doc *v1beta1.CellDoc,
-	containerID,
-	cellID,
-	realmID,
-	spaceID,
-	stackID,
-	cniConfigPath string,
-) *v1beta1.ContainerSpec {
-	if doc == nil {
-		return nil
+func (r *Exec) ensureCellRootContainerSpec(cell intmodel.Cell) (intmodel.ContainerSpec, error) {
+	// Extract cell ID and validate
+	cellID := strings.TrimSpace(cell.Spec.ID)
+	if cellID == "" {
+		return intmodel.ContainerSpec{}, errdefs.ErrCellIDRequired
 	}
 
-	if doc.Spec.RootContainer == nil {
-		doc.Spec.RootContainer = ctrutil.DefaultRootContainerSpec(
+	// Extract and validate realm name
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
+	if realmName == "" {
+		return intmodel.ContainerSpec{}, errdefs.ErrRealmNameRequired
+	}
+
+	// Extract and validate space name
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
+	if spaceName == "" {
+		return intmodel.ContainerSpec{}, errdefs.ErrSpaceNameRequired
+	}
+
+	// Extract and validate stack name
+	stackName := strings.TrimSpace(cell.Spec.StackName)
+	if stackName == "" {
+		return intmodel.ContainerSpec{}, errdefs.ErrStackNameRequired
+	}
+
+	// Resolve CNI config path
+	cniConfigPath, err := r.resolveSpaceCNIConfigPath(realmName, spaceName)
+	if err != nil {
+		return intmodel.ContainerSpec{}, fmt.Errorf("failed to resolve space CNI config: %w", err)
+	}
+
+	// Generate container ID
+	containerID, err := naming.BuildRootContainerName(spaceName, stackName, cellID)
+	if err != nil {
+		return intmodel.ContainerSpec{}, fmt.Errorf("failed to build root container name: %w", err)
+	}
+
+	// Work with internal model's RootContainer if it exists
+	var rootSpec intmodel.ContainerSpec
+	if cell.Spec.RootContainer != nil {
+		rootSpec = *cell.Spec.RootContainer
+	} else {
+		// Create default root container spec using external helper, then convert to internal
+		externalSpec := ctrutil.DefaultRootContainerSpec(
 			containerID,
 			cellID,
-			realmID,
-			spaceID,
-			stackID,
+			realmName,
+			spaceName,
+			stackName,
 			cniConfigPath,
 		)
-		return doc.Spec.RootContainer
+		// Convert external spec to internal model
+		rootSpec = convertContainerSpecExternalToInternal(externalSpec)
 	}
 
-	rootSpec := doc.Spec.RootContainer
+	// Ensure required fields are set
 	rootSpec.Root = true
 	if rootSpec.ID == "" {
 		rootSpec.ID = containerID
 	}
-	if rootSpec.CellID == "" {
-		rootSpec.CellID = cellID
+	if rootSpec.CellName == "" {
+		rootSpec.CellName = cellID
 	}
-	if rootSpec.RealmID == "" {
-		rootSpec.RealmID = realmID
+	if rootSpec.RealmName == "" {
+		rootSpec.RealmName = realmName
 	}
-	if rootSpec.SpaceID == "" {
-		rootSpec.SpaceID = spaceID
+	if rootSpec.SpaceName == "" {
+		rootSpec.SpaceName = spaceName
 	}
-	if rootSpec.StackID == "" {
-		rootSpec.StackID = stackID
+	if rootSpec.StackName == "" {
+		rootSpec.StackName = stackName
 	}
 	if rootSpec.CNIConfigPath == "" {
 		rootSpec.CNIConfigPath = cniConfigPath
 	}
-	return rootSpec
+
+	return rootSpec, nil
+}
+
+// convertContainerSpecExternalToInternal converts a v1beta1.ContainerSpec to intmodel.ContainerSpec.
+func convertContainerSpecExternalToInternal(external *v1beta1.ContainerSpec) intmodel.ContainerSpec {
+	if external == nil {
+		return intmodel.ContainerSpec{}
+	}
+
+	return intmodel.ContainerSpec{
+		ID:              external.ID,
+		RealmName:       external.RealmID,
+		SpaceName:       external.SpaceID,
+		StackName:       external.StackID,
+		CellName:        external.CellID,
+		Root:            external.Root,
+		Image:           external.Image,
+		Command:         external.Command,
+		Args:            external.Args,
+		Env:             external.Env,
+		Ports:           external.Ports,
+		Volumes:         external.Volumes,
+		Networks:        external.Networks,
+		NetworksAliases: external.NetworksAliases,
+		Privileged:      external.Privileged,
+		CNIConfigPath:   external.CNIConfigPath,
+		RestartPolicy:   external.RestartPolicy,
+	}
+}
+
+// convertContainerSpecInternalToExternal converts an intmodel.ContainerSpec to v1beta1.ContainerSpec.
+func convertContainerSpecInternalToExternal(internal intmodel.ContainerSpec) *v1beta1.ContainerSpec {
+	return &v1beta1.ContainerSpec{
+		ID:              internal.ID,
+		RealmID:         internal.RealmName,
+		SpaceID:         internal.SpaceName,
+		StackID:         internal.StackName,
+		CellID:          internal.CellName,
+		Root:            internal.Root,
+		Image:           internal.Image,
+		Command:         internal.Command,
+		Args:            internal.Args,
+		Env:             internal.Env,
+		Ports:           internal.Ports,
+		Volumes:         internal.Volumes,
+		Networks:        internal.Networks,
+		NetworksAliases: internal.NetworksAliases,
+		Privileged:      internal.Privileged,
+		CNIConfigPath:   internal.CNIConfigPath,
+		RestartPolicy:   internal.RestartPolicy,
+	}
 }
 
 func buildRootContainerLabels(

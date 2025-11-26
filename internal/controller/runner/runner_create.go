@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -245,24 +244,6 @@ func (r *Exec) CreateSpace(space intmodel.Space) (intmodel.Space, error) {
 		return intmodel.Space{}, errdefs.ErrRealmNameRequired
 	}
 
-	// Build minimal internal realm for GetRealm lookup
-	lookupRealm := intmodel.Realm{
-		Metadata: intmodel.RealmMetadata{
-			Name: realmName,
-		},
-	}
-
-	internalRealm, realmErr := r.GetRealm(lookupRealm)
-	if realmErr != nil {
-		return intmodel.Space{}, realmErr
-	}
-
-	// Convert internal realm back to external for ensureSpaceCgroup
-	realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
-	if convertErr != nil {
-		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-	}
-
 	// Space found, ensure CNI config exists
 	if err == nil {
 		ensuredSpace, ensureErr := r.ensureSpaceCNIConfig(existingSpace)
@@ -270,7 +251,7 @@ func (r *Exec) CreateSpace(space intmodel.Space) (intmodel.Space, error) {
 			return intmodel.Space{}, ensureErr
 		}
 
-		ensuredSpace, ensureErr = r.ensureSpaceCgroup(ensuredSpace, &realmDoc)
+		ensuredSpace, ensureErr = r.ensureSpaceCgroup(ensuredSpace)
 		if ensureErr != nil {
 			return intmodel.Space{}, ensureErr
 		}
