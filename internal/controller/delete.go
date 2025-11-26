@@ -139,8 +139,14 @@ func (b *Exec) DeleteRealm(doc *v1beta1.RealmDoc, force, cascade bool) (DeleteRe
 		}
 	}
 
+	// Convert external realm to internal for runner.DeleteRealm
+	internalRealm, _, convertErr := apischeme.NormalizeRealm(*getResult.RealmDoc)
+	if convertErr != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+
 	// Delete realm via runner and capture detailed outcome
-	outcome, err := b.runner.DeleteRealm(getResult.RealmDoc)
+	outcome, err := b.runner.DeleteRealm(internalRealm)
 	if err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrDeleteRealm, err)
 	}
@@ -228,8 +234,14 @@ func (b *Exec) DeleteSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (DeleteSp
 		}
 	}
 
+	// Convert external space to internal for runner.DeleteSpace
+	internalSpace, _, convertErr := apischeme.NormalizeSpace(*getResult.SpaceDoc)
+	if convertErr != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+
 	// Delete space
-	if err = b.runner.DeleteSpace(getResult.SpaceDoc); err != nil {
+	if err = b.runner.DeleteSpace(internalSpace); err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrDeleteSpace, err)
 	}
 
@@ -310,8 +322,14 @@ func (b *Exec) DeleteStack(doc *v1beta1.StackDoc, force, cascade bool) (DeleteSt
 		}
 	}
 
+	// Convert external stack to internal for runner.DeleteStack
+	internalStack, _, convertErr := apischeme.NormalizeStack(*getResult.StackDoc)
+	if convertErr != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+
 	// Delete stack
-	if err = b.runner.DeleteStack(getResult.StackDoc); err != nil {
+	if err = b.runner.DeleteStack(internalStack); err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrDeleteStack, err)
 	}
 
@@ -379,7 +397,13 @@ func (b *Exec) DeleteCell(doc *v1beta1.CellDoc) (DeleteCellResult, error) {
 		res.ContainersDeleted = true
 	}
 
-	if err = b.runner.DeleteCell(cellDoc); err != nil {
+	// Convert external cell to internal for runner.DeleteCell
+	internalCell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
+	if err != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
+	if err = b.runner.DeleteCell(internalCell); err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrDeleteCell, err)
 	}
 
@@ -480,8 +504,14 @@ func (b *Exec) DeleteContainer(doc *v1beta1.ContainerDoc) (DeleteContainerResult
 		},
 	}
 
+	// Convert external cell to internal for runner.DeleteContainer
+	internalCell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
+	if err != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
 	// Delete container from containerd (via runner)
-	if err = b.runner.DeleteContainer(cellDoc, name); err != nil {
+	if err = b.runner.DeleteContainer(internalCell, name); err != nil {
 		return res, fmt.Errorf("failed to delete container %s: %w", name, err)
 	}
 

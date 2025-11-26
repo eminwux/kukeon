@@ -32,12 +32,12 @@ type Runner interface {
 	GetRealm(realm intmodel.Realm) (intmodel.Realm, error)
 	CreateRealm(realm intmodel.Realm) (intmodel.Realm, error)
 	ExistsRealmContainerdNamespace(namespace string) (bool, error)
-	DeleteRealm(doc *v1beta1.RealmDoc) (DeleteRealmOutcome, error)
+	DeleteRealm(realm intmodel.Realm) (DeleteRealmOutcome, error)
 
 	GetSpace(space intmodel.Space) (intmodel.Space, error)
 	CreateSpace(space intmodel.Space) (intmodel.Space, error)
 	ExistsSpaceCNIConfig(doc *v1beta1.SpaceDoc) (bool, error)
-	DeleteSpace(doc *v1beta1.SpaceDoc) error
+	DeleteSpace(space intmodel.Space) error
 
 	GetCell(cell intmodel.Cell) (intmodel.Cell, error)
 	CreateCell(cell intmodel.Cell) (intmodel.Cell, error)
@@ -46,14 +46,14 @@ type Runner interface {
 	StopContainer(doc *v1beta1.CellDoc, containerID string) error
 	KillCell(doc *v1beta1.CellDoc) error
 	KillContainer(doc *v1beta1.CellDoc, containerID string) error
-	DeleteContainer(doc *v1beta1.CellDoc, containerID string) error
+	DeleteContainer(cell intmodel.Cell, containerID string) error
 	UpdateCellMetadata(cell intmodel.Cell) error
 	ExistsCellRootContainer(doc *v1beta1.CellDoc) (bool, error)
-	DeleteCell(doc *v1beta1.CellDoc) error
+	DeleteCell(cell intmodel.Cell) error
 
 	GetStack(stack intmodel.Stack) (intmodel.Stack, error)
 	CreateStack(stack intmodel.Stack) (intmodel.Stack, error)
-	DeleteStack(doc *v1beta1.StackDoc) error
+	DeleteStack(stack intmodel.Stack) error
 
 	ExistsCgroup(doc any) (bool, error)
 

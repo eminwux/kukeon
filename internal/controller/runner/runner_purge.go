@@ -40,7 +40,17 @@ func (r *Exec) PurgeCell(doc *v1beta1.CellDoc) error {
 	}
 
 	// First, perform standard delete
-	if err := r.DeleteCell(doc); err != nil {
+	lookupCellForDelete := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: doc.Metadata.Name,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: doc.Spec.RealmID,
+			SpaceName: doc.Spec.SpaceID,
+			StackName: doc.Spec.StackID,
+		},
+	}
+	if err := r.DeleteCell(lookupCellForDelete); err != nil {
 		// Log but continue with purge even if delete fails
 		r.logger.WarnContext(r.ctx, "delete failed, continuing with purge", "error", err)
 	}
@@ -241,7 +251,15 @@ func (r *Exec) PurgeSpace(doc *v1beta1.SpaceDoc) error {
 	}
 
 	// First, perform standard delete
-	if err := r.DeleteSpace(doc); err != nil {
+	lookupSpaceForDelete := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{
+			Name: doc.Metadata.Name,
+		},
+		Spec: intmodel.SpaceSpec{
+			RealmName: doc.Spec.RealmID,
+		},
+	}
+	if err := r.DeleteSpace(lookupSpaceForDelete); err != nil {
 		r.logger.WarnContext(r.ctx, "delete failed, continuing with purge", "error", err)
 	}
 
@@ -346,7 +364,16 @@ func (r *Exec) PurgeStack(doc *v1beta1.StackDoc) error {
 	}
 
 	// First, perform standard delete
-	if err := r.DeleteStack(doc); err != nil {
+	lookupStackForDelete := intmodel.Stack{
+		Metadata: intmodel.StackMetadata{
+			Name: doc.Metadata.Name,
+		},
+		Spec: intmodel.StackSpec{
+			RealmName: doc.Spec.RealmID,
+			SpaceName: doc.Spec.SpaceID,
+		},
+	}
+	if err := r.DeleteStack(lookupStackForDelete); err != nil {
 		r.logger.WarnContext(r.ctx, "delete failed, continuing with purge", "error", err)
 	}
 
@@ -467,7 +494,12 @@ func (r *Exec) PurgeRealm(doc *v1beta1.RealmDoc) error {
 	}
 
 	// First, perform standard delete
-	if _, err := r.DeleteRealm(doc); err != nil {
+	lookupRealmForDelete := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: doc.Metadata.Name,
+		},
+	}
+	if _, err := r.DeleteRealm(lookupRealmForDelete); err != nil {
 		r.logger.WarnContext(r.ctx, "delete failed, continuing with purge", "error", err)
 	}
 

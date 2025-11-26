@@ -32,38 +32,38 @@ import (
 	"github.com/eminwux/kukeon/internal/util/cgroups"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // DeleteContainer stops and deletes a specific container in a cell from containerd.
-func (r *Exec) DeleteContainer(doc *v1beta1.CellDoc, containerID string) error {
-	if doc == nil {
-		return errdefs.ErrCellNotFound
-	}
-
+func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 	containerID = strings.TrimSpace(containerID)
 	if containerID == "" {
 		return errors.New("container ID is required")
 	}
 
-	cellName := strings.TrimSpace(doc.Metadata.Name)
+	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
-		return errdefs.ErrCellNotFound
+		return errdefs.ErrCellNameRequired
 	}
 
-	cellID := doc.Spec.ID
+	cellID := strings.TrimSpace(cell.Spec.ID)
 	if cellID == "" {
 		return errdefs.ErrCellIDRequired
 	}
 
-	realmID := doc.Spec.RealmID
-	if realmID == "" {
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
+	if realmName == "" {
 		return errdefs.ErrRealmNameRequired
 	}
 
-	spaceID := doc.Spec.SpaceID
-	if spaceID == "" {
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
+	if spaceName == "" {
 		return errdefs.ErrSpaceNameRequired
+	}
+
+	stackName := strings.TrimSpace(cell.Spec.StackName)
+	if stackName == "" {
+		return errdefs.ErrStackNameRequired
 	}
 
 	// Initialize ctr client if needed
@@ -78,7 +78,7 @@ func (r *Exec) DeleteContainer(doc *v1beta1.CellDoc, containerID string) error {
 	// Get realm to access namespace
 	lookupRealm := intmodel.Realm{
 		Metadata: intmodel.RealmMetadata{
-			Name: realmID,
+			Name: realmName,
 		},
 	}
 	internalRealm, err := r.GetRealm(lookupRealm)
@@ -95,14 +95,10 @@ func (r *Exec) DeleteContainer(doc *v1beta1.CellDoc, containerID string) error {
 	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
 
 	// Build hierarchical container ID for containerd operations
-	stackID := doc.Spec.StackID
-	if stackID == "" {
-		return errdefs.ErrStackNameRequired
-	}
 
 	hierarchicalContainerID, err := naming.BuildContainerName(
-		spaceID,
-		stackID,
+		spaceName,
+		stackName,
 		cellID,
 		containerID,
 	)
@@ -137,9 +133,9 @@ func (r *Exec) DeleteContainer(doc *v1beta1.CellDoc, containerID string) error {
 		fields = append(
 			fields,
 			"space",
-			spaceID,
+			spaceName,
 			"realm",
-			realmID,
+			realmName,
 			"containerName",
 			containerID,
 			"err",
@@ -154,7 +150,7 @@ func (r *Exec) DeleteContainer(doc *v1beta1.CellDoc, containerID string) error {
 	}
 
 	fields := appendCellLogFields([]any{"id", hierarchicalContainerID}, cellID, cellName)
-	fields = append(fields, "space", spaceID, "realm", realmID, "containerName", containerID)
+	fields = append(fields, "space", spaceName, "realm", realmName, "containerName", containerID)
 	r.logger.InfoContext(
 		r.ctx,
 		"deleted container",
@@ -164,20 +160,33 @@ func (r *Exec) DeleteContainer(doc *v1beta1.CellDoc, containerID string) error {
 	return nil
 }
 
-func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
-	if doc == nil {
-		return errdefs.ErrCellNotFound
+func (r *Exec) DeleteCell(cell intmodel.Cell) error {
+	cellName := strings.TrimSpace(cell.Metadata.Name)
+	if cellName == "" {
+		return errdefs.ErrCellNameRequired
+	}
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
+	}
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
+	if spaceName == "" {
+		return errdefs.ErrSpaceNameRequired
+	}
+	stackName := strings.TrimSpace(cell.Spec.StackName)
+	if stackName == "" {
+		return errdefs.ErrStackNameRequired
 	}
 
 	// Get the cell document to access all containers
 	lookupCell := intmodel.Cell{
 		Metadata: intmodel.CellMetadata{
-			Name: doc.Metadata.Name,
+			Name: cellName,
 		},
 		Spec: intmodel.CellSpec{
-			RealmName: doc.Spec.RealmID,
-			SpaceName: doc.Spec.SpaceID,
-			StackName: doc.Spec.StackID,
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
 		},
 	}
 	internalCell, err := r.GetCell(lookupCell)
@@ -457,19 +466,28 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 	return nil
 }
 
-func (r *Exec) DeleteStack(doc *v1beta1.StackDoc) error {
-	if doc == nil {
-		return errdefs.ErrStackNotFound
+func (r *Exec) DeleteStack(stack intmodel.Stack) error {
+	stackName := strings.TrimSpace(stack.Metadata.Name)
+	if stackName == "" {
+		return errdefs.ErrStackNameRequired
+	}
+	realmName := strings.TrimSpace(stack.Spec.RealmName)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
+	}
+	spaceName := strings.TrimSpace(stack.Spec.SpaceName)
+	if spaceName == "" {
+		return errdefs.ErrSpaceNameRequired
 	}
 
-	// Convert external doc to internal for GetStack lookup
+	// Get the stack document
 	lookupStack := intmodel.Stack{
 		Metadata: intmodel.StackMetadata{
-			Name: doc.Metadata.Name,
+			Name: stackName,
 		},
 		Spec: intmodel.StackSpec{
-			RealmName: doc.Spec.RealmID,
-			SpaceName: doc.Spec.SpaceID,
+			RealmName: realmName,
+			SpaceName: spaceName,
 		},
 	}
 	internalStack, err := r.GetStack(lookupStack)
@@ -552,18 +570,23 @@ func (r *Exec) DeleteStack(doc *v1beta1.StackDoc) error {
 	return nil
 }
 
-func (r *Exec) DeleteSpace(doc *v1beta1.SpaceDoc) error {
-	if doc == nil {
-		return errdefs.ErrSpaceNotFound
+func (r *Exec) DeleteSpace(space intmodel.Space) error {
+	spaceName := strings.TrimSpace(space.Metadata.Name)
+	if spaceName == "" {
+		return errdefs.ErrSpaceNameRequired
+	}
+	realmName := strings.TrimSpace(space.Spec.RealmName)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
 	}
 
-	// Convert external doc to internal for GetSpace lookup
+	// Get the space document
 	lookupSpace := intmodel.Space{
 		Metadata: intmodel.SpaceMetadata{
-			Name: doc.Metadata.Name,
+			Name: spaceName,
 		},
 		Spec: intmodel.SpaceSpec{
-			RealmName: doc.Spec.RealmID,
+			RealmName: realmName,
 		},
 	}
 	internalSpace, err := r.GetSpace(lookupSpace)
@@ -658,17 +681,18 @@ func (r *Exec) DeleteSpace(doc *v1beta1.SpaceDoc) error {
 	return nil
 }
 
-func (r *Exec) DeleteRealm(doc *v1beta1.RealmDoc) (DeleteRealmOutcome, error) {
+func (r *Exec) DeleteRealm(realm intmodel.Realm) (DeleteRealmOutcome, error) {
 	var outcome DeleteRealmOutcome
 
-	if doc == nil {
-		return outcome, errdefs.ErrRealmNotFound
+	realmName := strings.TrimSpace(realm.Metadata.Name)
+	if realmName == "" {
+		return outcome, errdefs.ErrRealmNameRequired
 	}
 
 	// Get the realm document
 	lookupRealm := intmodel.Realm{
 		Metadata: intmodel.RealmMetadata{
-			Name: doc.Metadata.Name,
+			Name: realmName,
 		},
 	}
 	internalRealm, err := r.GetRealm(lookupRealm)
