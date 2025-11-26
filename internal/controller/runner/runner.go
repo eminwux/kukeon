@@ -57,11 +57,11 @@ type Runner interface {
 
 	ExistsCgroup(doc any) (bool, error)
 
-	PurgeRealm(doc *v1beta1.RealmDoc) error
-	PurgeSpace(doc *v1beta1.SpaceDoc) error
-	PurgeStack(doc *v1beta1.StackDoc) error
-	PurgeCell(doc *v1beta1.CellDoc) error
-	PurgeContainer(containerID, namespace string) error
+	PurgeRealm(realm intmodel.Realm) error
+	PurgeSpace(space intmodel.Space) error
+	PurgeStack(stack intmodel.Stack) error
+	PurgeCell(cell intmodel.Cell) error
+	PurgeContainer(realm intmodel.Realm, containerID string) error
 }
 
 // DeleteRealmOutcome reports which realm resources were deleted successfully.

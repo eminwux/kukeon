@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -170,17 +171,19 @@ func (b *Exec) PurgeRealm(doc *v1beta1.RealmDoc, force, cascade bool) (PurgeReal
 	}
 
 	// Perform comprehensive purge
-	purgeDoc := &v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
-			Name: name,
-		},
-	}
-	if err = b.runner.PurgeRealm(purgeDoc); err != nil {
-		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
+	// Convert external realm to internal for runner.PurgeRealm
+	internalRealm, _, convertErr := apischeme.NormalizeRealm(*getResult.RealmDoc)
+	if convertErr != nil {
+		result.Purged = append(result.Purged, fmt.Sprintf("purge-conversion-error:%v", convertErr))
 		result.PurgeSucceeded = false
 	} else {
-		result.Purged = append(result.Purged, "orphaned-containers", "cni-resources", "all-metadata")
-		result.PurgeSucceeded = true
+		if err = b.runner.PurgeRealm(internalRealm); err != nil {
+			result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
+			result.PurgeSucceeded = false
+		} else {
+			result.Purged = append(result.Purged, "orphaned-containers", "cni-resources", "all-metadata")
+			result.PurgeSucceeded = true
+		}
 	}
 
 	return result, nil
@@ -276,20 +279,19 @@ func (b *Exec) PurgeSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (PurgeSpac
 	}
 
 	// Perform comprehensive purge
-	purgeDoc := &v1beta1.SpaceDoc{
-		Metadata: v1beta1.SpaceMetadata{
-			Name: name,
-		},
-		Spec: v1beta1.SpaceSpec{
-			RealmID: realmName,
-		},
-	}
-	if err = b.runner.PurgeSpace(purgeDoc); err != nil {
-		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
+	// Convert external space to internal for runner.PurgeSpace
+	internalSpace, _, convertErr := apischeme.NormalizeSpace(*getResult.SpaceDoc)
+	if convertErr != nil {
+		result.Purged = append(result.Purged, fmt.Sprintf("purge-conversion-error:%v", convertErr))
 		result.PurgeSucceeded = false
 	} else {
-		result.Purged = append(result.Purged, "cni-network", "cni-cache", "orphaned-containers", "all-metadata")
-		result.PurgeSucceeded = true
+		if err = b.runner.PurgeSpace(internalSpace); err != nil {
+			result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
+			result.PurgeSucceeded = false
+		} else {
+			result.Purged = append(result.Purged, "cni-network", "cni-cache", "orphaned-containers", "all-metadata")
+			result.PurgeSucceeded = true
+		}
 	}
 
 	return result, nil
@@ -380,19 +382,16 @@ func (b *Exec) PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (PurgeStac
 	}
 
 	// Perform comprehensive purge
-	purgeDoc := &v1beta1.StackDoc{
-		Metadata: v1beta1.StackMetadata{
-			Name: name,
-		},
-		Spec: v1beta1.StackSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-		},
-	}
-	if err = b.runner.PurgeStack(purgeDoc); err != nil {
-		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
+	// Convert external stack to internal for runner.PurgeStack
+	internalStack, _, convertErr := apischeme.NormalizeStack(*getResult.StackDoc)
+	if convertErr != nil {
+		result.Purged = append(result.Purged, fmt.Sprintf("purge-conversion-error:%v", convertErr))
 	} else {
-		result.Purged = append(result.Purged, "cni-resources", "orphaned-containers", "all-metadata")
+		if err = b.runner.PurgeStack(internalStack); err != nil {
+			result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
+		} else {
+			result.Purged = append(result.Purged, "cni-resources", "orphaned-containers", "all-metadata")
+		}
 	}
 
 	return result, nil
@@ -478,12 +477,19 @@ func (b *Exec) PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (PurgeCellRe
 	}
 
 	// Perform comprehensive purge
-	if err = b.runner.PurgeCell(doc); err != nil {
-		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
+	// Convert external cell to internal for runner.PurgeCell
+	internalCell, _, convertErr := apischeme.NormalizeCell(*getResult.CellDoc)
+	if convertErr != nil {
+		result.Purged = append(result.Purged, fmt.Sprintf("purge-conversion-error:%v", convertErr))
 		result.PurgeSucceeded = false
 	} else {
-		result.Purged = append(result.Purged, "cni-resources", "orphaned-containers", "all-metadata")
-		result.PurgeSucceeded = true
+		if err = b.runner.PurgeCell(internalCell); err != nil {
+			result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
+			result.PurgeSucceeded = false
+		} else {
+			result.Purged = append(result.Purged, "cni-resources", "orphaned-containers", "all-metadata")
+			result.PurgeSucceeded = true
+		}
 	}
 
 	return result, nil
@@ -563,7 +569,7 @@ func (b *Exec) PurgeContainer(doc *v1beta1.ContainerDoc) (PurgeContainerResult, 
 		result.ContainerExists = false
 	}
 
-	// Get realm to determine namespace for runtime cleanup
+	// Get realm to pass to runner.PurgeContainer
 	realmDocInput := &v1beta1.RealmDoc{
 		Metadata: v1beta1.RealmMetadata{
 			Name: realmName,
@@ -573,16 +579,21 @@ func (b *Exec) PurgeContainer(doc *v1beta1.ContainerDoc) (PurgeContainerResult, 
 	if err != nil {
 		return result, fmt.Errorf("failed to get realm: %w", err)
 	}
-	realmDoc := realmGetResult.RealmDoc
-	if realmDoc == nil {
+	if realmGetResult.RealmDoc == nil {
 		return result, fmt.Errorf("realm %q not found", realmName)
 	}
 
-	// Use container name directly for containerd operations
-	if err = b.runner.PurgeContainer(name, realmDoc.Spec.Namespace); err != nil {
-		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
+	// Convert external realm to internal for runner.PurgeContainer
+	internalRealm, _, convertErr := apischeme.NormalizeRealm(*realmGetResult.RealmDoc)
+	if convertErr != nil {
+		result.Purged = append(result.Purged, fmt.Sprintf("purge-conversion-error:%v", convertErr))
 	} else {
-		result.Purged = append(result.Purged, "cni-resources", "ipam-allocation", "cache-entries")
+		// Use container name directly for containerd operations
+		if err = b.runner.PurgeContainer(internalRealm, name); err != nil {
+			result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
+		} else {
+			result.Purged = append(result.Purged, "cni-resources", "ipam-allocation", "cache-entries")
+		}
 	}
 
 	return result, nil

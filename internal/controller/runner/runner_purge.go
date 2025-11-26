@@ -34,20 +34,33 @@ import (
 )
 
 // PurgeCell performs comprehensive cleanup of a cell, including CNI resources and orphaned containers.
-func (r *Exec) PurgeCell(doc *v1beta1.CellDoc) error {
-	if doc == nil {
-		return errdefs.ErrCellNotFound
+func (r *Exec) PurgeCell(cell intmodel.Cell) error {
+	cellName := strings.TrimSpace(cell.Metadata.Name)
+	if cellName == "" {
+		return errdefs.ErrCellNameRequired
+	}
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
+	}
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
+	if spaceName == "" {
+		return errdefs.ErrSpaceNameRequired
+	}
+	stackName := strings.TrimSpace(cell.Spec.StackName)
+	if stackName == "" {
+		return errdefs.ErrStackNameRequired
 	}
 
 	// First, perform standard delete
 	lookupCellForDelete := intmodel.Cell{
 		Metadata: intmodel.CellMetadata{
-			Name: doc.Metadata.Name,
+			Name: cellName,
 		},
 		Spec: intmodel.CellSpec{
-			RealmName: doc.Spec.RealmID,
-			SpaceName: doc.Spec.SpaceID,
-			StackName: doc.Spec.StackID,
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
 		},
 	}
 	if err := r.DeleteCell(lookupCellForDelete); err != nil {
@@ -58,12 +71,12 @@ func (r *Exec) PurgeCell(doc *v1beta1.CellDoc) error {
 	// Get cell document to access containers and metadata
 	lookupCell := intmodel.Cell{
 		Metadata: intmodel.CellMetadata{
-			Name: doc.Metadata.Name,
+			Name: cellName,
 		},
 		Spec: intmodel.CellSpec{
-			RealmName: doc.Spec.RealmID,
-			SpaceName: doc.Spec.SpaceID,
-			StackName: doc.Spec.StackID,
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
 		},
 	}
 	internalCell, err := r.GetCell(lookupCell)
@@ -74,7 +87,12 @@ func (r *Exec) PurgeCell(doc *v1beta1.CellDoc) error {
 
 	// If cell doesn't exist, still try to purge orphaned resources
 	if errors.Is(err, errdefs.ErrCellNotFound) {
-		cellDoc = doc // Use provided doc for pattern matching
+		// Use provided cell for fallback (convert to external)
+		externalCell, convertErr := apischeme.BuildCellExternalFromInternal(cell, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		cellDoc = &externalCell
 	} else {
 		// Convert internal cell back to external for use in rest of function
 		externalCell, convertErr := apischeme.BuildCellExternalFromInternal(internalCell, apischeme.VersionV1Beta1)
@@ -245,47 +263,61 @@ func (r *Exec) PurgeCell(doc *v1beta1.CellDoc) error {
 }
 
 // PurgeSpace performs comprehensive cleanup of a space, including CNI resources and orphaned containers.
-func (r *Exec) PurgeSpace(doc *v1beta1.SpaceDoc) error {
-	if doc == nil {
-		return errdefs.ErrSpaceNotFound
+func (r *Exec) PurgeSpace(space intmodel.Space) error {
+	spaceName := strings.TrimSpace(space.Metadata.Name)
+	if spaceName == "" {
+		return errdefs.ErrSpaceNameRequired
+	}
+	realmName := strings.TrimSpace(space.Spec.RealmName)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
 	}
 
 	// First, perform standard delete
 	lookupSpaceForDelete := intmodel.Space{
 		Metadata: intmodel.SpaceMetadata{
-			Name: doc.Metadata.Name,
+			Name: spaceName,
 		},
 		Spec: intmodel.SpaceSpec{
-			RealmName: doc.Spec.RealmID,
+			RealmName: realmName,
 		},
 	}
 	if err := r.DeleteSpace(lookupSpaceForDelete); err != nil {
 		r.logger.WarnContext(r.ctx, "delete failed, continuing with purge", "error", err)
 	}
 
-	// Convert external doc to internal for GetSpace lookup
+	// Get space document via internal model to ensure metadata accuracy
 	lookupSpace := intmodel.Space{
 		Metadata: intmodel.SpaceMetadata{
-			Name: doc.Metadata.Name,
+			Name: spaceName,
 		},
 		Spec: intmodel.SpaceSpec{
-			RealmName: doc.Spec.RealmID,
+			RealmName: realmName,
 		},
 	}
 	internalSpace, err := r.GetSpace(lookupSpace)
+	var spaceDoc *v1beta1.SpaceDoc
 	if err != nil && !errors.Is(err, errdefs.ErrSpaceNotFound) {
 		return fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
 	}
 
-	// Convert internal space back to external for use in rest of function
-	var spaceDoc *v1beta1.SpaceDoc
 	if errors.Is(err, errdefs.ErrSpaceNotFound) {
-		spaceDoc = doc
+		// Use provided space for fallback (convert to external)
+		externalSpace, convertErr := apischeme.BuildSpaceExternalFromInternal(space, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		spaceDoc = &externalSpace
 	} else {
 		spaceDocExternal, convertErr := apischeme.BuildSpaceExternalFromInternal(internalSpace, apischeme.VersionV1Beta1)
 		if convertErr != nil {
 			r.logger.WarnContext(r.ctx, "failed to convert space to external model", "error", convertErr)
-			spaceDoc = doc
+			// Use provided space as fallback
+			externalSpace, fallbackErr := apischeme.BuildSpaceExternalFromInternal(space, apischeme.VersionV1Beta1)
+			if fallbackErr != nil {
+				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, fallbackErr)
+			}
+			spaceDoc = &externalSpace
 		} else {
 			spaceDoc = &spaceDocExternal
 		}
@@ -358,49 +390,67 @@ func (r *Exec) PurgeSpace(doc *v1beta1.SpaceDoc) error {
 }
 
 // PurgeStack performs comprehensive cleanup of a stack, including CNI resources and orphaned containers.
-func (r *Exec) PurgeStack(doc *v1beta1.StackDoc) error {
-	if doc == nil {
-		return errdefs.ErrStackNotFound
+func (r *Exec) PurgeStack(stack intmodel.Stack) error {
+	stackName := strings.TrimSpace(stack.Metadata.Name)
+	if stackName == "" {
+		return errdefs.ErrStackNameRequired
+	}
+	realmName := strings.TrimSpace(stack.Spec.RealmName)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
+	}
+	spaceName := strings.TrimSpace(stack.Spec.SpaceName)
+	if spaceName == "" {
+		return errdefs.ErrSpaceNameRequired
 	}
 
 	// First, perform standard delete
 	lookupStackForDelete := intmodel.Stack{
 		Metadata: intmodel.StackMetadata{
-			Name: doc.Metadata.Name,
+			Name: stackName,
 		},
 		Spec: intmodel.StackSpec{
-			RealmName: doc.Spec.RealmID,
-			SpaceName: doc.Spec.SpaceID,
+			RealmName: realmName,
+			SpaceName: spaceName,
 		},
 	}
 	if err := r.DeleteStack(lookupStackForDelete); err != nil {
 		r.logger.WarnContext(r.ctx, "delete failed, continuing with purge", "error", err)
 	}
 
-	// Convert external doc to internal for GetStack lookup
+	// Get stack document via internal model to ensure metadata accuracy
 	lookupStack := intmodel.Stack{
 		Metadata: intmodel.StackMetadata{
-			Name: doc.Metadata.Name,
+			Name: stackName,
 		},
 		Spec: intmodel.StackSpec{
-			RealmName: doc.Spec.RealmID,
-			SpaceName: doc.Spec.SpaceID,
+			RealmName: realmName,
+			SpaceName: spaceName,
 		},
 	}
 	internalStack, err := r.GetStack(lookupStack)
+	var stackDoc *v1beta1.StackDoc
 	if err != nil && !errors.Is(err, errdefs.ErrStackNotFound) {
 		return fmt.Errorf("%w: %w", errdefs.ErrGetStack, err)
 	}
 
-	// Convert internal stack back to external for use in rest of function
-	var stackDoc *v1beta1.StackDoc
 	if errors.Is(err, errdefs.ErrStackNotFound) {
-		stackDoc = doc
+		// Use provided stack for fallback (convert to external)
+		externalStack, convertErr := apischeme.BuildStackExternalFromInternal(stack, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		stackDoc = &externalStack
 	} else {
 		stackDocExternal, convertStackErr := apischeme.BuildStackExternalFromInternal(internalStack, apischeme.VersionV1Beta1)
 		if convertStackErr != nil {
 			r.logger.WarnContext(r.ctx, "failed to convert stack to external model", "error", convertStackErr)
-			stackDoc = doc
+			// Use provided stack as fallback
+			externalStack, fallbackErr := apischeme.BuildStackExternalFromInternal(stack, apischeme.VersionV1Beta1)
+			if fallbackErr != nil {
+				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, fallbackErr)
+			}
+			stackDoc = &externalStack
 		} else {
 			stackDoc = &stackDocExternal
 		}
@@ -488,15 +538,16 @@ func (r *Exec) PurgeStack(doc *v1beta1.StackDoc) error {
 }
 
 // PurgeRealm performs comprehensive cleanup of a realm, including all child resources, CNI resources, and orphaned containers.
-func (r *Exec) PurgeRealm(doc *v1beta1.RealmDoc) error {
-	if doc == nil {
-		return errdefs.ErrRealmNotFound
+func (r *Exec) PurgeRealm(realm intmodel.Realm) error {
+	realmName := strings.TrimSpace(realm.Metadata.Name)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
 	}
 
 	// First, perform standard delete
 	lookupRealmForDelete := intmodel.Realm{
 		Metadata: intmodel.RealmMetadata{
-			Name: doc.Metadata.Name,
+			Name: realmName,
 		},
 	}
 	if _, err := r.DeleteRealm(lookupRealmForDelete); err != nil {
@@ -506,17 +557,22 @@ func (r *Exec) PurgeRealm(doc *v1beta1.RealmDoc) error {
 	// Get realm document via internal model to ensure metadata accuracy
 	lookupRealm := intmodel.Realm{
 		Metadata: intmodel.RealmMetadata{
-			Name: doc.Metadata.Name,
+			Name: realmName,
 		},
 	}
 	internalRealm, err := r.GetRealm(lookupRealm)
+	var realmDoc *v1beta1.RealmDoc
 	if err != nil && !errors.Is(err, errdefs.ErrRealmNotFound) {
 		return fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
 	}
 
-	var realmDoc *v1beta1.RealmDoc
 	if errors.Is(err, errdefs.ErrRealmNotFound) {
-		realmDoc = doc
+		// Use provided realm for fallback (convert to external)
+		externalRealm, convertErr := apischeme.BuildRealmExternalFromInternal(realm, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		realmDoc = &externalRealm
 	} else {
 		externalRealm, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
 		if convertErr != nil {
@@ -584,16 +640,38 @@ func (r *Exec) PurgeRealm(doc *v1beta1.RealmDoc) error {
 }
 
 // PurgeContainer performs comprehensive cleanup of a container, including CNI resources.
-func (r *Exec) PurgeContainer(containerID string, namespace string) error {
+func (r *Exec) PurgeContainer(realm intmodel.Realm, containerID string) error {
+	containerID = strings.TrimSpace(containerID)
 	if containerID == "" {
 		return errdefs.ErrContainerNameRequired
+	}
+
+	realmName := strings.TrimSpace(realm.Metadata.Name)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
+	}
+
+	// Get realm to access namespace
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: realmName,
+		},
+	}
+	internalRealm, err := r.GetRealm(lookupRealm)
+	if err != nil {
+		return fmt.Errorf("failed to get realm: %w", err)
+	}
+
+	namespace := internalRealm.Spec.Namespace
+	if namespace == "" {
+		return fmt.Errorf("realm %q has no namespace", realmName)
 	}
 
 	// Initialize ctr client
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
-	if err := r.ctrClient.Connect(); err != nil {
+	if err = r.ctrClient.Connect(); err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 	defer r.ctrClient.Close()
