@@ -584,8 +584,9 @@ func (b *Exec) CreateCell(doc *v1beta1.CellDoc) (CreateCellResult, error) {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
-	// Use the result doc for StartCell
-	if err = b.runner.StartCell(&resultDoc); err != nil {
+	// Convert external cell to internal for runner.StartCell (use the same internal cell from CreateCell)
+	// Since resultCell is already internal, we can use it directly
+	if err = b.runner.StartCell(resultCell); err != nil {
 		return res, fmt.Errorf("failed to start cell containers: %w", err)
 	}
 
@@ -819,7 +820,8 @@ func (b *Exec) CreateContainer(doc *v1beta1.ContainerDoc) (CreateContainerResult
 		"containersToStart", len(cellDocCreated.Spec.Containers),
 	)
 
-	if err = b.runner.StartCell(&cellDocCreated); err != nil {
+	// Use the same internal cell from CreateCell for runner.StartCell
+	if err = b.runner.StartCell(resultCell); err != nil {
 		return res, fmt.Errorf("failed to start container %s: %w", containerName, err)
 	}
 

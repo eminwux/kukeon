@@ -488,8 +488,14 @@ func (b *Exec) bootstrapCell(report BootstrapReport) (BootstrapReport, error) {
 		return report, fmt.Errorf("%w: %w", errdefs.ErrCreateCell, err)
 	}
 
+	// Convert external cell to internal for runner.StartCell
+	internalCell, convertErr := apischeme.ConvertCellDocToInternal(*cellDoc)
+	if convertErr != nil {
+		return report, fmt.Errorf("failed to convert cell to internal model: %w", convertErr)
+	}
+
 	// Start cell containers
-	err = b.runner.StartCell(cellDoc)
+	err = b.runner.StartCell(internalCell)
 	if err != nil {
 		return report, fmt.Errorf("failed to start cell containers: %w", err)
 	}

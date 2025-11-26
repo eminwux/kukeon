@@ -112,13 +112,19 @@ func (b *Exec) StartCell(doc *v1beta1.CellDoc) (StartCellResult, error) {
 
 	res.CellDoc = cellDoc
 
+	// Convert external cell to internal for runner.StartCell
+	internalCell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
+	if err != nil {
+		return res, fmt.Errorf("failed to convert cell to internal model: %w", err)
+	}
+
 	// Start all containers in the cell
-	if err = b.runner.StartCell(cellDoc); err != nil {
+	if err = b.runner.StartCell(internalCell); err != nil {
 		return res, fmt.Errorf("failed to start cell containers: %w", err)
 	}
 
-	// Convert to internal model for UpdateCellMetadata
-	cell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
+	// Use the same internal cell for UpdateCellMetadata
+	cell := internalCell
 	if err != nil {
 		return res, fmt.Errorf("failed to convert cell to internal model: %w", err)
 	}
@@ -226,7 +232,13 @@ func (b *Exec) StartContainer(doc *v1beta1.ContainerDoc) (StartContainerResult, 
 			},
 		},
 	}
-	if err = b.runner.StartCell(cellDocToStart); err != nil {
+	// Convert external cell to internal for runner.StartCell
+	internalCellToStart, convertErr := apischeme.ConvertCellDocToInternal(*cellDocToStart)
+	if convertErr != nil {
+		return res, fmt.Errorf("failed to convert cell to internal model: %w", convertErr)
+	}
+
+	if err = b.runner.StartCell(internalCellToStart); err != nil {
 		return res, fmt.Errorf("failed to start container %s: %w", name, err)
 	}
 

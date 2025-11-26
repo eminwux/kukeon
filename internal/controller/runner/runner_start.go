@@ -27,40 +27,58 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/naming"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // StartCell starts the root container and all containers defined in the CellDoc.
 // The root container is started first, then all containers in doc.Spec.Containers are started.
-func (r *Exec) StartCell(doc *v1beta1.CellDoc) error {
-	if doc == nil {
-		return errdefs.ErrCellNotFound
-	}
-
-	cellName := strings.TrimSpace(doc.Metadata.Name)
+func (r *Exec) StartCell(cell intmodel.Cell) error {
+	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
-		return errdefs.ErrCellNotFound
+		return errdefs.ErrCellNameRequired
+	}
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
+	}
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
+	if spaceName == "" {
+		return errdefs.ErrSpaceNameRequired
+	}
+	stackName := strings.TrimSpace(cell.Spec.StackName)
+	if stackName == "" {
+		return errdefs.ErrStackNameRequired
 	}
 
-	cellID := doc.Spec.ID
+	// Get the cell document to access all containers
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: cellName,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
+		},
+	}
+	internalCell, err := r.GetCell(lookupCell)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
+	}
+
+	// Convert internal cell back to external for accessing container specs
+	cellDoc, convertErr := apischeme.BuildCellExternalFromInternal(internalCell, apischeme.VersionV1Beta1)
+	if convertErr != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+
+	cellID := cellDoc.Spec.ID
 	if cellID == "" {
 		return errdefs.ErrCellIDRequired
 	}
 
-	realmID := doc.Spec.RealmID
-	if realmID == "" {
-		return errdefs.ErrRealmNameRequired
-	}
-
-	spaceID := doc.Spec.SpaceID
-	if spaceID == "" {
-		return errdefs.ErrSpaceNameRequired
-	}
-
-	stackID := doc.Spec.StackID
-	if stackID == "" {
-		return errdefs.ErrStackNameRequired
-	}
+	realmID := cellDoc.Spec.RealmID
+	spaceID := cellDoc.Spec.SpaceID
+	stackID := cellDoc.Spec.StackID
 
 	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmID, spaceID)
 	if cniErr != nil {
@@ -80,7 +98,7 @@ func (r *Exec) StartCell(doc *v1beta1.CellDoc) error {
 	}
 	r.ctrClient = ctr.NewClient(context.Background(), r.logger, r.opts.ContainerdSocket)
 
-	err := r.ctrClient.Connect()
+	err = r.ctrClient.Connect()
 	if err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
@@ -96,14 +114,14 @@ func (r *Exec) StartCell(doc *v1beta1.CellDoc) error {
 	if err != nil {
 		return fmt.Errorf("failed to get realm: %w", err)
 	}
-	// Convert internal realm back to external for accessing namespace
-	realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
-	if convertErr != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+
+	namespace := internalRealm.Spec.Namespace
+	if namespace == "" {
+		return fmt.Errorf("realm %q has no namespace", realmID)
 	}
 
 	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+	r.ctrClient.SetNamespace(namespace)
 
 	// Generate container ID with cell identifier for uniqueness
 	containerID, err := naming.BuildRootContainerName(spaceID, stackID, cellID)
@@ -273,7 +291,7 @@ func (r *Exec) StartCell(doc *v1beta1.CellDoc) error {
 	)
 
 	// Start all containers defined in the CellDoc
-	for _, containerSpec := range doc.Spec.Containers {
+	for _, containerSpec := range cellDoc.Spec.Containers {
 		// Build container ID using hierarchical format
 		containerID, err = naming.BuildContainerName(
 			containerSpec.SpaceID,
