@@ -44,8 +44,8 @@ type Runner interface {
 	StartCell(doc *v1beta1.CellDoc) error
 	StopCell(doc *v1beta1.CellDoc) error
 	StopContainer(doc *v1beta1.CellDoc, containerID string) error
-	KillCell(doc *v1beta1.CellDoc) error
-	KillContainer(doc *v1beta1.CellDoc, containerID string) error
+	KillCell(cell intmodel.Cell) error
+	KillContainer(cell intmodel.Cell, containerID string) error
 	DeleteContainer(cell intmodel.Cell, containerID string) error
 	UpdateCellMetadata(cell intmodel.Cell) error
 	ExistsCellRootContainer(doc *v1beta1.CellDoc) (bool, error)

@@ -57,8 +57,14 @@ func (b *Exec) KillCell(doc *v1beta1.CellDoc) (KillCellResult, error) {
 	}
 	res.CellDoc = cellDoc
 
+	// Convert external cell to internal for runner.KillCell
+	internalCell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
+	if err != nil {
+		return res, fmt.Errorf("failed to convert cell to internal model: %w", err)
+	}
+
 	// Kill all containers in the cell
-	if err = b.runner.KillCell(cellDoc); err != nil {
+	if err = b.runner.KillCell(internalCell); err != nil {
 		return res, fmt.Errorf("failed to kill cell containers: %w", err)
 	}
 
@@ -185,8 +191,14 @@ func (b *Exec) KillContainer(doc *v1beta1.ContainerDoc) (KillContainerResult, er
 	doc.Spec.StackID = stackName
 	doc.Spec.CellID = cellName
 
+	// Convert external cell to internal for runner.KillContainer
+	internalCell, convertErr := apischeme.ConvertCellDocToInternal(*cellDoc)
+	if convertErr != nil {
+		return res, fmt.Errorf("failed to convert cell to internal model: %w", convertErr)
+	}
+
 	// Kill the specific container (pass container name, runner will build full ID)
-	if err = b.runner.KillContainer(cellDoc, name); err != nil {
+	if err = b.runner.KillContainer(internalCell, name); err != nil {
 		return res, fmt.Errorf("failed to kill container %s: %w", name, err)
 	}
 
