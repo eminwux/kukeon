@@ -143,7 +143,6 @@ func (r *Exec) PurgeCell(cell intmodel.Cell) error {
 		},
 	}
 	space, err := r.GetSpace(lookupSpace)
-	spaceFound := err == nil
 	if err != nil {
 		r.logger.WarnContext(r.ctx, "failed to get space for purge", "error", err)
 	} else {
@@ -222,32 +221,14 @@ func (r *Exec) PurgeCell(cell intmodel.Cell) error {
 	}
 
 	// Force remove cell cgroup if it still exists
-	lookupStack := intmodel.Stack{
-		Metadata: intmodel.StackMetadata{
-			Name: cellDoc.Spec.StackID,
-		},
-		Spec: intmodel.StackSpec{
-			RealmName: cellDoc.Spec.RealmID,
-			SpaceName: cellDoc.Spec.SpaceID,
-		},
+	// Use internalCell if available, otherwise use provided cell as fallback
+	cellForSpec := internalCell
+	if errors.Is(err, errdefs.ErrCellNotFound) {
+		cellForSpec = cell
 	}
-	internalStack, stackErr := r.GetStack(lookupStack)
-	if stackErr == nil && spaceFound {
-		// Convert internal space back to external for DefaultCellSpec
-		spaceDocExternal, convertSpaceErr := apischeme.BuildSpaceExternalFromInternal(space, apischeme.VersionV1Beta1)
-		if convertSpaceErr == nil {
-			// Convert internal stack back to external for DefaultCellSpec
-			stackDoc, convertStackErr := apischeme.BuildStackExternalFromInternal(
-				internalStack,
-				apischeme.VersionV1Beta1,
-			)
-			if convertStackErr == nil {
-				spec := cgroups.DefaultCellSpec(&realmDoc, &spaceDocExternal, &stackDoc, cellDoc)
-				mountpoint := r.ctrClient.GetCgroupMountpoint()
-				_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
-			}
-		}
-	}
+	spec := cgroups.DefaultCellSpec(cellForSpec)
+	mountpoint := r.ctrClient.GetCgroupMountpoint()
+	_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
 
 	// Remove metadata directory completely
 	metadataRunPath := fs.CellMetadataDir(
@@ -372,7 +353,12 @@ func (r *Exec) PurgeSpace(space intmodel.Space) error {
 	}
 
 	// Force remove space cgroup
-	spec := cgroups.DefaultSpaceSpec(&realmDoc, spaceDoc)
+	// Use internalSpace if available, otherwise use provided space as fallback
+	spaceForSpec := internalSpace
+	if errors.Is(err, errdefs.ErrSpaceNotFound) {
+		spaceForSpec = space
+	}
+	spec := cgroups.DefaultSpaceSpec(spaceForSpec)
 	if r.ctrClient != nil {
 		mountpoint := r.ctrClient.GetCgroupMountpoint()
 		_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
@@ -490,12 +476,6 @@ func (r *Exec) PurgeStack(stack intmodel.Stack) error {
 		r.logger.WarnContext(r.ctx, "failed to get space for purge", "error", err)
 		return nil
 	}
-	// Convert internal space back to external for DefaultStackSpec
-	spaceDoc, convertSpaceErr := apischeme.BuildSpaceExternalFromInternal(internalSpace, apischeme.VersionV1Beta1)
-	if convertSpaceErr != nil {
-		r.logger.WarnContext(r.ctx, "failed to convert space to external model", "error", convertSpaceErr)
-		return nil
-	}
 	networkName, _ := r.getSpaceNetworkName(internalSpace)
 
 	// Find all containers in stack
@@ -519,7 +499,12 @@ func (r *Exec) PurgeStack(stack intmodel.Stack) error {
 	}
 
 	// Force remove stack cgroup
-	spec := cgroups.DefaultStackSpec(&realmDoc, &spaceDoc, stackDoc)
+	// Use internalStack if available, otherwise use provided stack as fallback
+	stackForSpec := internalStack
+	if errors.Is(err, errdefs.ErrStackNotFound) {
+		stackForSpec = stack
+	}
+	spec := cgroups.DefaultStackSpec(stackForSpec)
 	if r.ctrClient != nil {
 		mountpoint := r.ctrClient.GetCgroupMountpoint()
 		_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
@@ -632,7 +617,12 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) error {
 	_ = os.RemoveAll(metadataRunPath)
 
 	// Force remove realm cgroup
-	spec := cgroups.DefaultRealmSpec(realmDoc)
+	// Use internalRealm if available, otherwise use provided realm as fallback
+	realmForSpec := internalRealm
+	if errors.Is(err, errdefs.ErrRealmNotFound) {
+		realmForSpec = realm
+	}
+	spec := cgroups.DefaultRealmSpec(realmForSpec)
 	mountpoint := r.ctrClient.GetCgroupMountpoint()
 	_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
 

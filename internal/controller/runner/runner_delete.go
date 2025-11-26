@@ -403,52 +403,12 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 	}
 
 	// Delete cell cgroup
-	// Get space and stack to build proper cgroup spec (realmDoc already fetched above)
-	lookupSpace := intmodel.Space{
-		Metadata: intmodel.SpaceMetadata{
-			Name: cellDoc.Spec.SpaceID,
-		},
-		Spec: intmodel.SpaceSpec{
-			RealmName: cellDoc.Spec.RealmID,
-		},
-	}
-	internalSpace, spaceErr := r.GetSpace(lookupSpace)
-	if spaceErr != nil {
-		r.logger.WarnContext(r.ctx, "failed to get space for cgroup deletion", "error", spaceErr)
-	} else {
-		// Convert internal space back to external for DefaultCellSpec
-		spaceDoc, convertSpaceErr := apischeme.BuildSpaceExternalFromInternal(internalSpace, apischeme.VersionV1Beta1)
-		if convertSpaceErr != nil {
-			r.logger.WarnContext(r.ctx, "failed to convert space for cgroup deletion", "error", convertSpaceErr)
-		} else {
-			lookupStack := intmodel.Stack{
-				Metadata: intmodel.StackMetadata{
-					Name: cellDoc.Spec.StackID,
-				},
-				Spec: intmodel.StackSpec{
-					RealmName: cellDoc.Spec.RealmID,
-					SpaceName: cellDoc.Spec.SpaceID,
-				},
-			}
-			internalStack, stackErr := r.GetStack(lookupStack)
-			if stackErr != nil {
-				r.logger.WarnContext(r.ctx, "failed to get stack for cgroup deletion", "error", stackErr)
-			} else {
-				// Convert internal stack back to external for DefaultCellSpec
-				stackDoc, convertStackErr := apischeme.BuildStackExternalFromInternal(internalStack, apischeme.VersionV1Beta1)
-				if convertStackErr != nil {
-					r.logger.WarnContext(r.ctx, "failed to convert stack for cgroup deletion", "error", convertStackErr)
-				} else {
-					spec := cgroups.DefaultCellSpec(&realmDoc, &spaceDoc, &stackDoc, &cellDoc)
-					mountpoint := r.ctrClient.GetCgroupMountpoint()
-					cgroupErr := r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
-					if cgroupErr != nil {
-						r.logger.WarnContext(r.ctx, "failed to delete cell cgroup", "cgroup", spec.Group, "error", cgroupErr)
-						// Continue with metadata deletion
-					}
-				}
-			}
-		}
+	spec := cgroups.DefaultCellSpec(internalCell)
+	mountpoint := r.ctrClient.GetCgroupMountpoint()
+	err = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
+	if err != nil {
+		r.logger.WarnContext(r.ctx, "failed to delete cell cgroup", "cgroup", spec.Group, "error", err)
+		// Continue with metadata deletion
 	}
 
 	// Delete cell metadata
@@ -513,42 +473,8 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 	}
 	defer r.ctrClient.Close()
 
-	// Get realm and space to build cgroup spec
-	lookupRealm := intmodel.Realm{
-		Metadata: intmodel.RealmMetadata{
-			Name: internalStack.Spec.RealmName,
-		},
-	}
-	internalRealm, err := r.GetRealm(lookupRealm)
-	if err != nil {
-		return fmt.Errorf("failed to get realm: %w", err)
-	}
-	// Convert internal realm back to external for DefaultStackSpec
-	realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
-	if convertErr != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-	}
-
-	lookupSpace := intmodel.Space{
-		Metadata: intmodel.SpaceMetadata{
-			Name: internalStack.Spec.SpaceName,
-		},
-		Spec: intmodel.SpaceSpec{
-			RealmName: internalStack.Spec.RealmName,
-		},
-	}
-	internalSpace, err := r.GetSpace(lookupSpace)
-	if err != nil {
-		return fmt.Errorf("failed to get space: %w", err)
-	}
-	// Convert internal space back to external for DefaultStackSpec
-	spaceDoc, convertSpaceErr := apischeme.BuildSpaceExternalFromInternal(internalSpace, apischeme.VersionV1Beta1)
-	if convertSpaceErr != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertSpaceErr)
-	}
-
 	// Delete stack cgroup
-	spec := cgroups.DefaultStackSpec(&realmDoc, &spaceDoc, &stackDoc)
+	spec := cgroups.DefaultStackSpec(internalStack)
 	mountpoint := r.ctrClient.GetCgroupMountpoint()
 	err = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
 	if err != nil {
@@ -613,21 +539,6 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 	defer r.ctrClient.Close()
 
 	// Get realm to build cgroup spec
-	lookupRealm := intmodel.Realm{
-		Metadata: intmodel.RealmMetadata{
-			Name: spaceDoc.Spec.RealmID,
-		},
-	}
-	internalRealm, err := r.GetRealm(lookupRealm)
-	if err != nil {
-		return fmt.Errorf("failed to get realm: %w", err)
-	}
-	// Convert internal realm back to external for DefaultSpaceSpec
-	realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
-	if convertErr != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-	}
-
 	// Delete CNI network config
 	var networkName string
 	realmID := spaceDoc.Spec.RealmID
@@ -660,7 +571,7 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 	}
 
 	// Delete space cgroup
-	spec := cgroups.DefaultSpaceSpec(&realmDoc, &spaceDoc)
+	spec := cgroups.DefaultSpaceSpec(internalSpace)
 	mountpoint := r.ctrClient.GetCgroupMountpoint()
 	err = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
 	if err != nil {
@@ -719,7 +630,7 @@ func (r *Exec) DeleteRealm(realm intmodel.Realm) (DeleteRealmOutcome, error) {
 	defer r.ctrClient.Close()
 
 	// Delete realm cgroup
-	spec := cgroups.DefaultRealmSpec(&realmDoc)
+	spec := cgroups.DefaultRealmSpec(internalRealm)
 	mountpoint := r.ctrClient.GetCgroupMountpoint()
 	err = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
 	if err != nil {

@@ -21,11 +21,11 @@ import (
 
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/ctr"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
-func DefaultRealmSpec(doc *v1beta1.RealmDoc) ctr.CgroupSpec {
-	group := fmt.Sprintf("%s/%s", consts.KukeonCgroupRoot, doc.Metadata.Name)
+func DefaultRealmSpec(realm intmodel.Realm) ctr.CgroupSpec {
+	group := fmt.Sprintf("%s/%s", consts.KukeonCgroupRoot, realm.Metadata.Name)
 	return ctr.CgroupSpec{
 		Group: group,
 		Resources: ctr.CgroupResources{
@@ -36,8 +36,8 @@ func DefaultRealmSpec(doc *v1beta1.RealmDoc) ctr.CgroupSpec {
 	}
 }
 
-func DefaultSpaceSpec(realm *v1beta1.RealmDoc, space *v1beta1.SpaceDoc) ctr.CgroupSpec {
-	group := fmt.Sprintf("%s/%s/%s", consts.KukeonCgroupRoot, realm.Metadata.Name, space.Metadata.Name)
+func DefaultSpaceSpec(space intmodel.Space) ctr.CgroupSpec {
+	group := fmt.Sprintf("%s/%s/%s", consts.KukeonCgroupRoot, space.Spec.RealmName, space.Metadata.Name)
 	return ctr.CgroupSpec{
 		Group: group,
 		Resources: ctr.CgroupResources{
@@ -48,12 +48,12 @@ func DefaultSpaceSpec(realm *v1beta1.RealmDoc, space *v1beta1.SpaceDoc) ctr.Cgro
 	}
 }
 
-func DefaultStackSpec(realm *v1beta1.RealmDoc, space *v1beta1.SpaceDoc, stack *v1beta1.StackDoc) ctr.CgroupSpec {
+func DefaultStackSpec(stack intmodel.Stack) ctr.CgroupSpec {
 	group := fmt.Sprintf(
 		"%s/%s/%s/%s",
 		consts.KukeonCgroupRoot,
-		realm.Metadata.Name,
-		space.Metadata.Name,
+		stack.Spec.RealmName,
+		stack.Spec.SpaceName,
 		stack.Metadata.Name,
 	)
 	return ctr.CgroupSpec{
@@ -66,18 +66,13 @@ func DefaultStackSpec(realm *v1beta1.RealmDoc, space *v1beta1.SpaceDoc, stack *v
 	}
 }
 
-func DefaultCellSpec(
-	realm *v1beta1.RealmDoc,
-	space *v1beta1.SpaceDoc,
-	stack *v1beta1.StackDoc,
-	cell *v1beta1.CellDoc,
-) ctr.CgroupSpec {
+func DefaultCellSpec(cell intmodel.Cell) ctr.CgroupSpec {
 	group := fmt.Sprintf(
 		"%s/%s/%s/%s/%s",
 		consts.KukeonCgroupRoot,
-		realm.Metadata.Name,
-		space.Metadata.Name,
-		stack.Metadata.Name,
+		cell.Spec.RealmName,
+		cell.Spec.SpaceName,
+		cell.Spec.StackName,
 		cell.Metadata.Name,
 	)
 	return ctr.CgroupSpec{

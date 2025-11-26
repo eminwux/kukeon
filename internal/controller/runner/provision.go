@@ -531,21 +531,6 @@ func (r *Exec) ensureSpaceCgroup(space intmodel.Space) (intmodel.Space, error) {
 		return intmodel.Space{}, errdefs.ErrRealmNameRequired
 	}
 
-	// Fetch the realm internally and convert to external for DefaultSpaceSpec
-	lookupRealm := intmodel.Realm{
-		Metadata: intmodel.RealmMetadata{
-			Name: space.Spec.RealmName,
-		},
-	}
-	internalRealm, err := r.GetRealm(lookupRealm)
-	if err != nil {
-		return intmodel.Space{}, err
-	}
-	realmDoc, convertRealmErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
-	if convertRealmErr != nil {
-		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertRealmErr)
-	}
-
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
@@ -554,13 +539,13 @@ func (r *Exec) ensureSpaceCgroup(space intmodel.Space) (intmodel.Space, error) {
 	}
 	defer r.ctrClient.Close()
 
-	// Convert to external model for cgroups.DefaultSpaceSpec (requires external models)
+	spec := cgroups.DefaultSpaceSpec(space)
+
+	// Convert to external model for ensureCgroupInternal (requires external model for CgroupPath updates)
 	spaceDoc, err := apischeme.BuildSpaceExternalFromInternal(space, apischeme.VersionV1Beta1)
 	if err != nil {
 		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
-
-	spec := cgroups.DefaultSpaceSpec(&realmDoc, &spaceDoc)
 
 	// Capture space for closure
 	spaceForUpdate := space
@@ -601,7 +586,7 @@ func (r *Exec) createSpaceCgroup(space intmodel.Space) (string, error) {
 		return "", errdefs.ErrRealmNameRequired
 	}
 
-	// Fetch the realm internally and convert to external for DefaultSpaceSpec
+	// Fetch the realm internally for DefaultSpaceSpec
 	lookupRealm := intmodel.Realm{
 		Metadata: intmodel.RealmMetadata{
 			Name: space.Spec.RealmName,
@@ -611,18 +596,8 @@ func (r *Exec) createSpaceCgroup(space intmodel.Space) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	realmDoc, convertRealmErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
-	if convertRealmErr != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertRealmErr)
-	}
 
-	// Convert space to external model for DefaultSpaceSpec
-	spaceDoc, err := apischeme.BuildSpaceExternalFromInternal(space, apischeme.VersionV1Beta1)
-	if err != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-
-	spec := cgroups.DefaultSpaceSpec(&realmDoc, &spaceDoc)
+	spec := cgroups.DefaultSpaceSpec(space)
 
 	// Ensure client is initialized and connected
 	if r.ctrClient == nil {
@@ -649,9 +624,9 @@ func (r *Exec) createSpaceCgroup(space intmodel.Space) (string, error) {
 		r.ctx,
 		"created space cgroup",
 		"space",
-		spaceDoc.Metadata.Name,
+		space.Metadata.Name,
 		"realm",
-		realmDoc.Metadata.Name,
+		internalRealm.Metadata.Name,
 		"path",
 		cgroupPath,
 	)
@@ -659,13 +634,7 @@ func (r *Exec) createSpaceCgroup(space intmodel.Space) (string, error) {
 }
 
 func (r *Exec) createRealmCgroup(realm intmodel.Realm) (string, error) {
-	// Convert to external model for DefaultRealmSpec (requires external model)
-	realmDoc, err := apischeme.BuildRealmExternalFromInternal(realm, apischeme.VersionV1Beta1)
-	if err != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-
-	spec := cgroups.DefaultRealmSpec(&realmDoc)
+	spec := cgroups.DefaultRealmSpec(realm)
 
 	// Ensure client is initialized and connected
 	if r.ctrClient == nil {
@@ -677,6 +646,7 @@ func (r *Exec) createRealmCgroup(realm intmodel.Realm) (string, error) {
 	defer r.ctrClient.Close()
 
 	// Build the cgroup path
+	var err error
 	spec, _, err = r.buildCgroupPath(spec)
 	if err != nil {
 		return "", err
@@ -692,7 +662,7 @@ func (r *Exec) createRealmCgroup(realm intmodel.Realm) (string, error) {
 		r.ctx,
 		"created realm cgroup",
 		"realm",
-		realmDoc.Metadata.Name,
+		realm.Metadata.Name,
 		"path",
 		cgroupPath,
 	)
@@ -708,13 +678,13 @@ func (r *Exec) ensureRealmCgroup(realm intmodel.Realm) (intmodel.Realm, error) {
 	}
 	defer r.ctrClient.Close()
 
-	// Convert to external model for cgroups.DefaultRealmSpec (requires external model)
+	spec := cgroups.DefaultRealmSpec(realm)
+
+	// Convert to external model for ensureCgroupInternal (requires external model for CgroupPath updates)
 	realmDoc, err := apischeme.BuildRealmExternalFromInternal(realm, apischeme.VersionV1Beta1)
 	if err != nil {
 		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
-
-	spec := cgroups.DefaultRealmSpec(&realmDoc)
 
 	// Capture realm for closure
 	realmForUpdate := realm
@@ -782,52 +752,13 @@ func (r *Exec) createStackCgroup(stack intmodel.Stack) (string, error) {
 		return "", errdefs.ErrSpaceNameRequired
 	}
 
-	// Fetch the realm internally and convert to external for DefaultStackSpec
-	lookupRealm := intmodel.Realm{
-		Metadata: intmodel.RealmMetadata{
-			Name: stack.Spec.RealmName,
-		},
-	}
-	internalRealm, err := r.GetRealm(lookupRealm)
-	if err != nil {
-		return "", err
-	}
-	realmDoc, convertRealmErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
-	if convertRealmErr != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertRealmErr)
-	}
-
-	// Fetch the space internally
-	lookupSpace := intmodel.Space{
-		Metadata: intmodel.SpaceMetadata{
-			Name: stack.Spec.SpaceName,
-		},
-		Spec: intmodel.SpaceSpec{
-			RealmName: stack.Spec.RealmName,
-		},
-	}
-	internalSpace, err := r.GetSpace(lookupSpace)
-	if err != nil {
-		return "", err
-	}
-	// Convert internal space back to external for DefaultStackSpec
-	spaceDoc, convertSpaceErr := apischeme.BuildSpaceExternalFromInternal(internalSpace, apischeme.VersionV1Beta1)
-	if convertSpaceErr != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertSpaceErr)
-	}
-
-	// Convert stack to external model for DefaultStackSpec
-	stackDoc, err := apischeme.BuildStackExternalFromInternal(stack, apischeme.VersionV1Beta1)
-	if err != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-
-	spec := cgroups.DefaultStackSpec(&realmDoc, &spaceDoc, &stackDoc)
+	spec := cgroups.DefaultStackSpec(stack)
 
 	// Ensure client is initialized and connected
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
+	var err error
 	if err = r.ctrClient.Connect(); err != nil {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
@@ -849,7 +780,7 @@ func (r *Exec) createStackCgroup(stack intmodel.Stack) (string, error) {
 		r.ctx,
 		"created stack cgroup",
 		"stack",
-		stackDoc.Metadata.Name,
+		stack.Metadata.Name,
 		"path",
 		cgroupPath,
 	)
@@ -871,38 +802,6 @@ func (r *Exec) ensureStackCgroup(stack intmodel.Stack) (intmodel.Stack, error) {
 		return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
-	lookupRealm := intmodel.Realm{
-		Metadata: intmodel.RealmMetadata{
-			Name: realmName,
-		},
-	}
-	internalRealm, err := r.GetRealm(lookupRealm)
-	if err != nil {
-		return intmodel.Stack{}, err
-	}
-	realmDoc, convertRealmErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
-	if convertRealmErr != nil {
-		return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertRealmErr)
-	}
-
-	lookupSpace := intmodel.Space{
-		Metadata: intmodel.SpaceMetadata{
-			Name: spaceName,
-		},
-		Spec: intmodel.SpaceSpec{
-			RealmName: realmName,
-		},
-	}
-	internalSpace, err := r.GetSpace(lookupSpace)
-	if err != nil {
-		return intmodel.Stack{}, err
-	}
-	// Convert internal space back to external for DefaultStackSpec
-	spaceDoc, convertSpaceErr := apischeme.BuildSpaceExternalFromInternal(internalSpace, apischeme.VersionV1Beta1)
-	if convertSpaceErr != nil {
-		return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertSpaceErr)
-	}
-
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
@@ -911,7 +810,7 @@ func (r *Exec) ensureStackCgroup(stack intmodel.Stack) (intmodel.Stack, error) {
 	}
 	defer r.ctrClient.Close()
 
-	spec := cgroups.DefaultStackSpec(&realmDoc, &spaceDoc, &stackDoc)
+	spec := cgroups.DefaultStackSpec(stack)
 
 	// Capture stack for closure
 	stackForUpdate := stack
@@ -990,77 +889,13 @@ func (r *Exec) createCellCgroup(cell intmodel.Cell) (string, error) {
 		return "", errdefs.ErrStackNameRequired
 	}
 
-	// Fetch the realm internally and convert to external for DefaultCellSpec
-	lookupRealm := intmodel.Realm{
-		Metadata: intmodel.RealmMetadata{
-			Name: cell.Spec.RealmName,
-		},
-	}
-	internalRealm, err := r.GetRealm(lookupRealm)
-	if err != nil {
-		return "", err
-	}
-	realmDoc, convertRealmErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
-	if convertRealmErr != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertRealmErr)
-	}
-
-	// Fetch the space internally
-	lookupSpace := intmodel.Space{
-		Metadata: intmodel.SpaceMetadata{
-			Name: cell.Spec.SpaceName,
-		},
-		Spec: intmodel.SpaceSpec{
-			RealmName: cell.Spec.RealmName,
-		},
-	}
-	internalSpace, err := r.GetSpace(lookupSpace)
-	if err != nil {
-		return "", err
-	}
-	// Convert internal space back to external for DefaultCellSpec
-	spaceDoc, convertSpaceErr := apischeme.BuildSpaceExternalFromInternal(internalSpace, apischeme.VersionV1Beta1)
-	if convertSpaceErr != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertSpaceErr)
-	}
-
-	// Fetch the stack internally
-	lookupStack := intmodel.Stack{
-		Metadata: intmodel.StackMetadata{
-			Name: cell.Spec.StackName,
-		},
-		Spec: intmodel.StackSpec{
-			RealmName: cell.Spec.RealmName,
-			SpaceName: cell.Spec.SpaceName,
-		},
-	}
-	internalStack, err := r.GetStack(lookupStack)
-	if err != nil {
-		return "", err
-	}
-	// Convert internal stack back to external for DefaultCellSpec
-	stackDoc, convertStackErr := apischeme.BuildStackExternalFromInternal(internalStack, apischeme.VersionV1Beta1)
-	if convertStackErr != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertStackErr)
-	}
-
-	// Convert cell to external model for DefaultCellSpec
-	cellDoc, err := apischeme.BuildCellExternalFromInternal(cell, apischeme.VersionV1Beta1)
-	if err != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-
-	spec := cgroups.DefaultCellSpec(
-		&realmDoc,
-		&spaceDoc,
-		&stackDoc,
-		&cellDoc,
-	)
+	spec := cgroups.DefaultCellSpec(cell)
 
 	// Ensure client is initialized and connected
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
+	var err error
 	if err = r.ctrClient.Connect(); err != nil {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
@@ -1082,7 +917,7 @@ func (r *Exec) createCellCgroup(cell intmodel.Cell) (string, error) {
 		r.ctx,
 		"created cell cgroup",
 		"cell",
-		cellDoc.Metadata.Name,
+		cell.Metadata.Name,
 		"path",
 		cgroupPath,
 	)
@@ -1108,57 +943,6 @@ func (r *Exec) ensureCellCgroup(cell intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
-	lookupRealm := intmodel.Realm{
-		Metadata: intmodel.RealmMetadata{
-			Name: realmName,
-		},
-	}
-	internalRealm, err := r.GetRealm(lookupRealm)
-	if err != nil {
-		return intmodel.Cell{}, err
-	}
-	realmDoc, convertRealmErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
-	if convertRealmErr != nil {
-		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertRealmErr)
-	}
-
-	lookupSpace := intmodel.Space{
-		Metadata: intmodel.SpaceMetadata{
-			Name: spaceName,
-		},
-		Spec: intmodel.SpaceSpec{
-			RealmName: realmName,
-		},
-	}
-	internalSpace, err := r.GetSpace(lookupSpace)
-	if err != nil {
-		return intmodel.Cell{}, err
-	}
-	// Convert internal space back to external for DefaultCellSpec
-	spaceDoc, convertSpaceErr := apischeme.BuildSpaceExternalFromInternal(internalSpace, apischeme.VersionV1Beta1)
-	if convertSpaceErr != nil {
-		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertSpaceErr)
-	}
-
-	lookupStack := intmodel.Stack{
-		Metadata: intmodel.StackMetadata{
-			Name: stackName,
-		},
-		Spec: intmodel.StackSpec{
-			RealmName: realmName,
-			SpaceName: spaceName,
-		},
-	}
-	internalStack, err := r.GetStack(lookupStack)
-	if err != nil {
-		return intmodel.Cell{}, err
-	}
-	// Convert internal stack back to external for DefaultCellSpec
-	stackDoc, convertStackErr := apischeme.BuildStackExternalFromInternal(internalStack, apischeme.VersionV1Beta1)
-	if convertStackErr != nil {
-		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertStackErr)
-	}
-
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
@@ -1167,7 +951,7 @@ func (r *Exec) ensureCellCgroup(cell intmodel.Cell) (intmodel.Cell, error) {
 	}
 	defer r.ctrClient.Close()
 
-	spec := cgroups.DefaultCellSpec(&realmDoc, &spaceDoc, &stackDoc, &cellDoc)
+	spec := cgroups.DefaultCellSpec(cell)
 
 	// Capture cell for closure
 	cellForUpdate := cell
