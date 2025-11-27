@@ -22,8 +22,10 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -32,7 +34,7 @@ import (
 // StackController defines the interface for stack deletion operations.
 // It is exported for use in tests.
 type StackController interface {
-	DeleteStack(doc *v1beta1.StackDoc, force, cascade bool) (controller.DeleteStackResult, error)
+	DeleteStack(stack intmodel.Stack, force, cascade bool) (controller.DeleteStackResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -56,7 +58,7 @@ func NewStackCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				ctrl = realCtrl
+				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
 			name := strings.TrimSpace(args[0])
@@ -83,7 +85,13 @@ func NewStackCmd() *cobra.Command {
 				},
 			}
 
-			result, err := ctrl.DeleteStack(stackDoc, force, cascade)
+			// Convert at boundary before calling controller
+			stackInternal, _, err := apischeme.NormalizeStack(*stackDoc)
+			if err != nil {
+				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+			}
+
+			result, err := ctrl.DeleteStack(stackInternal, force, cascade)
 			if err != nil {
 				return err
 			}
@@ -105,4 +113,15 @@ func NewStackCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
 
 	return cmd
+}
+
+type controllerWrapper struct {
+	ctrl *controller.Exec
+}
+
+func (w *controllerWrapper) DeleteStack(
+	stack intmodel.Stack,
+	force, cascade bool,
+) (controller.DeleteStackResult, error) {
+	return w.ctrl.DeleteStack(stack, force, cascade)
 }

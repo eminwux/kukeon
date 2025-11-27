@@ -113,6 +113,11 @@ func (b *Exec) PurgeRealm(doc *v1beta1.RealmDoc, force, cascade bool) (PurgeReal
 		Purged:   []string{},
 	}
 
+	internalRealm, realmVersion, convertErr := apischeme.NormalizeRealm(*getResult.RealmDoc)
+	if convertErr != nil {
+		return result, fmt.Errorf("failed to convert realm %q: %w", name, convertErr)
+	}
+
 	// If cascade, purge all spaces first
 	if cascade {
 		var spaces []*v1beta1.SpaceDoc
@@ -148,42 +153,29 @@ func (b *Exec) PurgeRealm(doc *v1beta1.RealmDoc, force, cascade bool) (PurgeReal
 	}
 
 	// Perform standard delete first
-	deleteDoc := &v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
-			Name: name,
-		},
-		Spec: v1beta1.RealmSpec{
-			Namespace: name,
-		},
-	}
-	deleteResult, err := b.DeleteRealm(deleteDoc, force, cascade)
+	deleteResult, err := b.DeleteRealm(internalRealm, force, cascade)
 	if err != nil {
 		// Log but continue with purge
 		result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
 		result.RealmDeleted = false
 	} else {
-		result.Deleted = deleteResult.Deleted
+		result.Deleted = append(result.Deleted, deleteResult.Deleted...)
 		result.RealmDeleted = true
-		// Update RealmDoc from delete result if available
-		if deleteResult.RealmDoc != nil {
-			result.RealmDoc = deleteResult.RealmDoc
+		realmDocExternal, buildErr := apischeme.BuildRealmExternalFromInternal(deleteResult.Realm, realmVersion)
+		if buildErr != nil {
+			result.Purged = append(result.Purged, fmt.Sprintf("delete-conversion-error:%v", buildErr))
+		} else {
+			result.RealmDoc = &realmDocExternal
 		}
 	}
 
 	// Perform comprehensive purge
-	// Convert external realm to internal for runner.PurgeRealm
-	internalRealm, _, convertErr := apischeme.NormalizeRealm(*getResult.RealmDoc)
-	if convertErr != nil {
-		result.Purged = append(result.Purged, fmt.Sprintf("purge-conversion-error:%v", convertErr))
+	if err = b.runner.PurgeRealm(internalRealm); err != nil {
+		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
 		result.PurgeSucceeded = false
 	} else {
-		if err = b.runner.PurgeRealm(internalRealm); err != nil {
-			result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
-			result.PurgeSucceeded = false
-		} else {
-			result.Purged = append(result.Purged, "orphaned-containers", "cni-resources", "all-metadata")
-			result.PurgeSucceeded = true
-		}
+		result.Purged = append(result.Purged, "orphaned-containers", "cni-resources", "all-metadata")
+		result.PurgeSucceeded = true
 	}
 
 	return result, nil
@@ -229,6 +221,11 @@ func (b *Exec) PurgeSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (PurgeSpac
 		Purged:   []string{},
 	}
 
+	internalSpace, spaceVersion, convertErr := apischeme.NormalizeSpace(*getResult.SpaceDoc)
+	if convertErr != nil {
+		return result, fmt.Errorf("failed to convert space %q: %w", name, convertErr)
+	}
+
 	// If cascade, purge all stacks first (recursively cascades to cells)
 	if cascade {
 		var stacks []*v1beta1.StackDoc
@@ -265,7 +262,7 @@ func (b *Exec) PurgeSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (PurgeSpac
 	}
 
 	// Perform standard delete first
-	deleteResult, err := b.DeleteSpace(doc, force, cascade)
+	deleteResult, err := b.DeleteSpace(internalSpace, force, cascade)
 	if err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
 	} else {
@@ -273,25 +270,21 @@ func (b *Exec) PurgeSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (PurgeSpac
 		result.MetadataDeleted = deleteResult.MetadataDeleted
 		result.CgroupDeleted = deleteResult.CgroupDeleted
 		result.CNINetworkDeleted = deleteResult.CNINetworkDeleted
-		if deleteResult.SpaceDoc != nil {
-			result.SpaceDoc = deleteResult.SpaceDoc
+		spaceDocExternal, buildErr := apischeme.BuildSpaceExternalFromInternal(deleteResult.Space, spaceVersion)
+		if buildErr != nil {
+			result.Purged = append(result.Purged, fmt.Sprintf("delete-conversion-error:%v", buildErr))
+		} else {
+			result.SpaceDoc = &spaceDocExternal
 		}
 	}
 
 	// Perform comprehensive purge
-	// Convert external space to internal for runner.PurgeSpace
-	internalSpace, _, convertErr := apischeme.NormalizeSpace(*getResult.SpaceDoc)
-	if convertErr != nil {
-		result.Purged = append(result.Purged, fmt.Sprintf("purge-conversion-error:%v", convertErr))
+	if err = b.runner.PurgeSpace(internalSpace); err != nil {
+		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
 		result.PurgeSucceeded = false
 	} else {
-		if err = b.runner.PurgeSpace(internalSpace); err != nil {
-			result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
-			result.PurgeSucceeded = false
-		} else {
-			result.Purged = append(result.Purged, "cni-network", "cni-cache", "orphaned-containers", "all-metadata")
-			result.PurgeSucceeded = true
-		}
+		result.Purged = append(result.Purged, "cni-network", "cni-cache", "orphaned-containers", "all-metadata")
+		result.PurgeSucceeded = true
 	}
 
 	return result, nil
@@ -344,6 +337,11 @@ func (b *Exec) PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (PurgeStac
 		Purged:   []string{},
 	}
 
+	internalStack, stackVersion, convertErr := apischeme.NormalizeStack(*stackDoc)
+	if convertErr != nil {
+		return result, fmt.Errorf("failed to convert stack %q: %w", name, convertErr)
+	}
+
 	// If cascade, purge all cells first
 	if cascade {
 		var cells []*v1beta1.CellDoc
@@ -371,27 +369,24 @@ func (b *Exec) PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (PurgeStac
 	}
 
 	// Perform standard delete first
-	deleteResult, err := b.DeleteStack(doc, force, cascade)
+	deleteResult, err := b.DeleteStack(internalStack, force, cascade)
 	if err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
 	} else {
-		result.Deleted = deleteResult.Deleted
-		if deleteResult.StackDoc != nil {
-			result.StackDoc = deleteResult.StackDoc
+		result.Deleted = append(result.Deleted, deleteResult.Deleted...)
+		stackDocExternal, buildErr := apischeme.BuildStackExternalFromInternal(deleteResult.Stack, stackVersion)
+		if buildErr != nil {
+			result.Purged = append(result.Purged, fmt.Sprintf("delete-conversion-error:%v", buildErr))
+		} else {
+			result.StackDoc = &stackDocExternal
 		}
 	}
 
 	// Perform comprehensive purge
-	// Convert external stack to internal for runner.PurgeStack
-	internalStack, _, convertErr := apischeme.NormalizeStack(*getResult.StackDoc)
-	if convertErr != nil {
-		result.Purged = append(result.Purged, fmt.Sprintf("purge-conversion-error:%v", convertErr))
+	if err = b.runner.PurgeStack(internalStack); err != nil {
+		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
 	} else {
-		if err = b.runner.PurgeStack(internalStack); err != nil {
-			result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
-		} else {
-			result.Purged = append(result.Purged, "cni-resources", "orphaned-containers", "all-metadata")
-		}
+		result.Purged = append(result.Purged, "cni-resources", "orphaned-containers", "all-metadata")
 	}
 
 	return result, nil
@@ -453,8 +448,13 @@ func (b *Exec) PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (PurgeCellRe
 		Purged:  []string{},
 	}
 
+	internalCell, cellVersion, convertErr := apischeme.NormalizeCell(*getResult.CellDoc)
+	if convertErr != nil {
+		return result, fmt.Errorf("failed to convert cell %q: %w", name, convertErr)
+	}
+
 	// Perform standard delete first
-	deleteResult, err := b.DeleteCell(doc)
+	deleteResult, err := b.DeleteCell(internalCell)
 	if err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
 	} else {
@@ -471,25 +471,21 @@ func (b *Exec) PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (PurgeCellRe
 		if deleteResult.MetadataDeleted {
 			result.Deleted = append(result.Deleted, "metadata")
 		}
-		if deleteResult.CellDoc != nil {
-			result.CellDoc = deleteResult.CellDoc
+		cellDocExternal, buildErr := apischeme.BuildCellExternalFromInternal(deleteResult.Cell, cellVersion)
+		if buildErr != nil {
+			result.Purged = append(result.Purged, fmt.Sprintf("delete-conversion-error:%v", buildErr))
+		} else {
+			result.CellDoc = &cellDocExternal
 		}
 	}
 
 	// Perform comprehensive purge
-	// Convert external cell to internal for runner.PurgeCell
-	internalCell, _, convertErr := apischeme.NormalizeCell(*getResult.CellDoc)
-	if convertErr != nil {
-		result.Purged = append(result.Purged, fmt.Sprintf("purge-conversion-error:%v", convertErr))
+	if err = b.runner.PurgeCell(internalCell); err != nil {
+		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
 		result.PurgeSucceeded = false
 	} else {
-		if err = b.runner.PurgeCell(internalCell); err != nil {
-			result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
-			result.PurgeSucceeded = false
-		} else {
-			result.Purged = append(result.Purged, "cni-resources", "orphaned-containers", "all-metadata")
-			result.PurgeSucceeded = true
-		}
+		result.Purged = append(result.Purged, "cni-resources", "orphaned-containers", "all-metadata")
+		result.PurgeSucceeded = true
 	}
 
 	return result, nil
@@ -508,6 +504,11 @@ func (b *Exec) PurgeContainer(doc *v1beta1.ContainerDoc) (PurgeContainerResult, 
 		ContainerDoc: sanitizedDoc,
 		Deleted:      []string{},
 		Purged:       []string{},
+	}
+
+	containerInternal, containerVersion, convertErr := apischeme.NormalizeContainer(*sanitizedDoc)
+	if convertErr != nil {
+		return result, fmt.Errorf("failed to convert container %q: %w", name, convertErr)
 	}
 
 	// Get cell to find container metadata
@@ -554,13 +555,16 @@ func (b *Exec) PurgeContainer(doc *v1beta1.ContainerDoc) (PurgeContainerResult, 
 	if foundContainer != nil {
 		result.ContainerExists = true
 		var deleteResult DeleteContainerResult
-		deleteResult, err = b.DeleteContainer(result.ContainerDoc)
+		deleteResult, err = b.DeleteContainer(containerInternal)
 		if err != nil {
 			result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
 		} else {
 			result.Deleted = append(result.Deleted, deleteResult.Deleted...)
-			if deleteResult.ContainerDoc != nil {
-				result.ContainerDoc = deleteResult.ContainerDoc
+			containerDocExternal, buildErr := apischeme.BuildContainerExternalFromInternal(deleteResult.Container, containerVersion)
+			if buildErr != nil {
+				result.Purged = append(result.Purged, fmt.Sprintf("delete-conversion-error:%v", buildErr))
+			} else {
+				result.ContainerDoc = &containerDocExternal
 			}
 			result.CellMetadataExists = deleteResult.CellMetadataExists
 			result.ContainerExists = deleteResult.ContainerExists

@@ -30,7 +30,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -46,7 +46,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 		name           string
 		args           []string
 		setup          func(t *testing.T, cmd *cobra.Command)
-		controllerFn   func(doc *v1beta1.CellDoc) (controller.DeleteCellResult, error)
+		controllerFn   func(cell intmodel.Cell) (controller.DeleteCellResult, error)
 		wantErr        string
 		wantCallDelete bool
 		wantOpts       *struct {
@@ -65,9 +65,9 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			controllerFn: func(doc *v1beta1.CellDoc) (controller.DeleteCellResult, error) {
+			controllerFn: func(cell intmodel.Cell) (controller.DeleteCellResult, error) {
 				return controller.DeleteCellResult{
-					CellDoc:           doc,
+					Cell:              cell,
 					ContainersDeleted: true,
 					CgroupDeleted:     true,
 					MetadataDeleted:   true,
@@ -95,9 +95,9 @@ func TestNewCellCmdRunE(t *testing.T) {
 				viper.Set(config.KUKE_DELETE_CELL_SPACE.ViperKey, "space-b")
 				viper.Set(config.KUKE_DELETE_CELL_STACK.ViperKey, "stack-b")
 			},
-			controllerFn: func(doc *v1beta1.CellDoc) (controller.DeleteCellResult, error) {
+			controllerFn: func(cell intmodel.Cell) (controller.DeleteCellResult, error) {
 				return controller.DeleteCellResult{
-					CellDoc:           doc,
+					Cell:              cell,
 					ContainersDeleted: true,
 					CgroupDeleted:     true,
 					MetadataDeleted:   true,
@@ -125,9 +125,9 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "  space-a  ")
 				setFlag(t, cmd, "stack", "  stack-a  ")
 			},
-			controllerFn: func(doc *v1beta1.CellDoc) (controller.DeleteCellResult, error) {
+			controllerFn: func(cell intmodel.Cell) (controller.DeleteCellResult, error) {
 				return controller.DeleteCellResult{
-					CellDoc:           doc,
+					Cell:              cell,
 					ContainersDeleted: true,
 					CgroupDeleted:     true,
 					MetadataDeleted:   true,
@@ -230,7 +230,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			controllerFn: func(_ *v1beta1.CellDoc) (controller.DeleteCellResult, error) {
+			controllerFn: func(_ intmodel.Cell) (controller.DeleteCellResult, error) {
 				return controller.DeleteCellResult{}, errdefs.ErrDeleteCell
 			},
 			wantErr:        "failed to delete cell",
@@ -255,7 +255,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			controllerFn: func(_ *v1beta1.CellDoc) (controller.DeleteCellResult, error) {
+			controllerFn: func(_ intmodel.Cell) (controller.DeleteCellResult, error) {
 				return controller.DeleteCellResult{}, errdefs.ErrCellNotFound
 			},
 			wantErr:        "cell not found",
@@ -279,7 +279,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 			t.Cleanup(viper.Reset)
 
 			var deleteCalled bool
-			var deleteDoc *v1beta1.CellDoc
+			var deleteCell intmodel.Cell
 
 			cmd := cell.NewCellCmd()
 			cmd.SetOut(&bytes.Buffer{})
@@ -296,10 +296,10 @@ func TestNewCellCmdRunE(t *testing.T) {
 				// If we need to mock the controller, inject it via context
 				if tt.controllerFn != nil {
 					fakeCtrl := &fakeControllerExec{
-						deleteCellFn: func(doc *v1beta1.CellDoc) (controller.DeleteCellResult, error) {
+						deleteCellFn: func(cell intmodel.Cell) (controller.DeleteCellResult, error) {
 							deleteCalled = true
-							deleteDoc = doc
-							return tt.controllerFn(doc)
+							deleteCell = cell
+							return tt.controllerFn(cell)
 						},
 					}
 					// Inject mock controller into context
@@ -332,18 +332,18 @@ func TestNewCellCmdRunE(t *testing.T) {
 				t.Errorf("DeleteCell called=%v want=%v", deleteCalled, tt.wantCallDelete)
 			}
 
-			if tt.wantOpts != nil && deleteDoc != nil {
-				if deleteDoc.Metadata.Name != tt.wantOpts.name {
-					t.Errorf("DeleteCell name=%q want=%q", deleteDoc.Metadata.Name, tt.wantOpts.name)
+			if tt.wantOpts != nil && deleteCell.Metadata.Name != "" {
+				if deleteCell.Metadata.Name != tt.wantOpts.name {
+					t.Errorf("DeleteCell name=%q want=%q", deleteCell.Metadata.Name, tt.wantOpts.name)
 				}
-				if deleteDoc.Spec.RealmID != tt.wantOpts.realm {
-					t.Errorf("DeleteCell realm=%q want=%q", deleteDoc.Spec.RealmID, tt.wantOpts.realm)
+				if deleteCell.Spec.RealmName != tt.wantOpts.realm {
+					t.Errorf("DeleteCell realm=%q want=%q", deleteCell.Spec.RealmName, tt.wantOpts.realm)
 				}
-				if deleteDoc.Spec.SpaceID != tt.wantOpts.space {
-					t.Errorf("DeleteCell space=%q want=%q", deleteDoc.Spec.SpaceID, tt.wantOpts.space)
+				if deleteCell.Spec.SpaceName != tt.wantOpts.space {
+					t.Errorf("DeleteCell space=%q want=%q", deleteCell.Spec.SpaceName, tt.wantOpts.space)
 				}
-				if deleteDoc.Spec.StackID != tt.wantOpts.stack {
-					t.Errorf("DeleteCell stack=%q want=%q", deleteDoc.Spec.StackID, tt.wantOpts.stack)
+				if deleteCell.Spec.StackName != tt.wantOpts.stack {
+					t.Errorf("DeleteCell stack=%q want=%q", deleteCell.Spec.StackName, tt.wantOpts.stack)
 				}
 			}
 
@@ -360,14 +360,14 @@ func TestNewCellCmdRunE(t *testing.T) {
 }
 
 type fakeControllerExec struct {
-	deleteCellFn func(doc *v1beta1.CellDoc) (controller.DeleteCellResult, error)
+	deleteCellFn func(cell intmodel.Cell) (controller.DeleteCellResult, error)
 }
 
-func (f *fakeControllerExec) DeleteCell(doc *v1beta1.CellDoc) (controller.DeleteCellResult, error) {
+func (f *fakeControllerExec) DeleteCell(cell intmodel.Cell) (controller.DeleteCellResult, error) {
 	if f.deleteCellFn == nil {
 		return controller.DeleteCellResult{}, errors.New("unexpected DeleteCell call")
 	}
-	return f.deleteCellFn(doc)
+	return f.deleteCellFn(cell)
 }
 
 func setFlag(t *testing.T, cmd *cobra.Command, name, value string) {

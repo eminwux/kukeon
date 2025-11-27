@@ -31,7 +31,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -164,15 +164,12 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			forceFlag:   false,
 			cascadeFlag: false,
 			controller: &fakeSpaceController{
-				deleteSpaceFn: func(doc *v1beta1.SpaceDoc, force, cascade bool) (controller.DeleteSpaceResult, error) {
-					if doc == nil {
-						t.Fatal("expected space doc, got nil")
+				deleteSpaceFn: func(space intmodel.Space, force, cascade bool) (controller.DeleteSpaceResult, error) {
+					if space.Metadata.Name != "test-space" {
+						t.Fatalf("expected name %q, got %q", "test-space", space.Metadata.Name)
 					}
-					if doc.Metadata.Name != "test-space" {
-						t.Fatalf("expected name %q, got %q", "test-space", doc.Metadata.Name)
-					}
-					if doc.Spec.RealmID != "test-realm" {
-						t.Fatalf("expected realm %q, got %q", "test-realm", doc.Spec.RealmID)
+					if space.Spec.RealmName != "test-realm" {
+						t.Fatalf("expected realm %q, got %q", "test-realm", space.Spec.RealmName)
 					}
 					if force {
 						t.Fatalf("expected force to be false, got true")
@@ -183,6 +180,7 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 					return controller.DeleteSpaceResult{
 						SpaceName: "test-space",
 						RealmName: "test-realm",
+						Space:     space,
 						Deleted:   []string{"metadata", "cgroup", "network"},
 					}, nil
 				},
@@ -196,19 +194,17 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			forceFlag:   false,
 			cascadeFlag: false,
 			controller: &fakeSpaceController{
-				deleteSpaceFn: func(doc *v1beta1.SpaceDoc, _, _ bool) (controller.DeleteSpaceResult, error) {
-					if doc == nil {
-						t.Fatal("expected space doc, got nil")
+				deleteSpaceFn: func(space intmodel.Space, _, _ bool) (controller.DeleteSpaceResult, error) {
+					if space.Metadata.Name != "test-space" {
+						t.Fatalf("expected trimmed name %q, got %q", "test-space", space.Metadata.Name)
 					}
-					if doc.Metadata.Name != "test-space" {
-						t.Fatalf("expected trimmed name %q, got %q", "test-space", doc.Metadata.Name)
-					}
-					if doc.Spec.RealmID != "test-realm" {
-						t.Fatalf("expected trimmed realm %q, got %q", "test-realm", doc.Spec.RealmID)
+					if space.Spec.RealmName != "test-realm" {
+						t.Fatalf("expected trimmed realm %q, got %q", "test-realm", space.Spec.RealmName)
 					}
 					return controller.DeleteSpaceResult{
 						SpaceName: "test-space",
 						RealmName: "test-realm",
+						Space:     space,
 						Deleted:   []string{"metadata", "cgroup", "network"},
 					}, nil
 				},
@@ -222,7 +218,7 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			forceFlag:   true,
 			cascadeFlag: false,
 			controller: &fakeSpaceController{
-				deleteSpaceFn: func(_ *v1beta1.SpaceDoc, force, cascade bool) (controller.DeleteSpaceResult, error) {
+				deleteSpaceFn: func(space intmodel.Space, force, cascade bool) (controller.DeleteSpaceResult, error) {
 					if !force {
 						t.Fatalf("expected force to be true, got false")
 					}
@@ -232,6 +228,7 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 					return controller.DeleteSpaceResult{
 						SpaceName: "test-space",
 						RealmName: "test-realm",
+						Space:     space,
 						Deleted:   []string{"metadata", "cgroup", "network"},
 					}, nil
 				},
@@ -245,7 +242,7 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			forceFlag:   false,
 			cascadeFlag: true,
 			controller: &fakeSpaceController{
-				deleteSpaceFn: func(_ *v1beta1.SpaceDoc, force, cascade bool) (controller.DeleteSpaceResult, error) {
+				deleteSpaceFn: func(space intmodel.Space, force, cascade bool) (controller.DeleteSpaceResult, error) {
 					if force {
 						t.Fatalf("expected force to be false, got true")
 					}
@@ -255,6 +252,7 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 					return controller.DeleteSpaceResult{
 						SpaceName: "test-space",
 						RealmName: "test-realm",
+						Space:     space,
 						Deleted:   []string{"stack:stack1", "stack:stack2", "metadata", "cgroup", "network"},
 					}, nil
 				},
@@ -268,7 +266,7 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			forceFlag:   true,
 			cascadeFlag: true,
 			controller: &fakeSpaceController{
-				deleteSpaceFn: func(_ *v1beta1.SpaceDoc, force, cascade bool) (controller.DeleteSpaceResult, error) {
+				deleteSpaceFn: func(space intmodel.Space, force, cascade bool) (controller.DeleteSpaceResult, error) {
 					if !force {
 						t.Fatalf("expected force to be true, got false")
 					}
@@ -278,6 +276,7 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 					return controller.DeleteSpaceResult{
 						SpaceName: "test-space",
 						RealmName: "test-realm",
+						Space:     space,
 						Deleted:   []string{"stack:stack1", "metadata", "cgroup", "network"},
 					}, nil
 				},
@@ -289,7 +288,7 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			args:      []string{"test-space"},
 			realmFlag: "test-realm",
 			controller: &fakeSpaceController{
-				deleteSpaceFn: func(_ *v1beta1.SpaceDoc, _, _ bool) (controller.DeleteSpaceResult, error) {
+				deleteSpaceFn: func(_ intmodel.Space, _, _ bool) (controller.DeleteSpaceResult, error) {
 					return controller.DeleteSpaceResult{}, errors.New("space deletion failed")
 				},
 			},
@@ -301,7 +300,7 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			args:      []string{"nonexistent-space"},
 			realmFlag: "test-realm",
 			controller: &fakeSpaceController{
-				deleteSpaceFn: func(_ *v1beta1.SpaceDoc, _, _ bool) (controller.DeleteSpaceResult, error) {
+				deleteSpaceFn: func(_ intmodel.Space, _, _ bool) (controller.DeleteSpaceResult, error) {
 					return controller.DeleteSpaceResult{}, errdefs.ErrSpaceNotFound
 				},
 			},
@@ -313,7 +312,7 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			args:      []string{"test-space"},
 			realmFlag: "test-realm",
 			controller: &fakeSpaceController{
-				deleteSpaceFn: func(_ *v1beta1.SpaceDoc, _, _ bool) (controller.DeleteSpaceResult, error) {
+				deleteSpaceFn: func(_ intmodel.Space, _, _ bool) (controller.DeleteSpaceResult, error) {
 					return controller.DeleteSpaceResult{}, errdefs.ErrDeleteSpace
 				},
 			},
@@ -402,17 +401,17 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 }
 
 type fakeSpaceController struct {
-	deleteSpaceFn func(doc *v1beta1.SpaceDoc, force, cascade bool) (controller.DeleteSpaceResult, error)
+	deleteSpaceFn func(space intmodel.Space, force, cascade bool) (controller.DeleteSpaceResult, error)
 }
 
 func (f *fakeSpaceController) DeleteSpace(
-	doc *v1beta1.SpaceDoc,
+	space intmodel.Space,
 	force, cascade bool,
 ) (controller.DeleteSpaceResult, error) {
 	if f.deleteSpaceFn == nil {
 		panic("DeleteSpace was called unexpectedly")
 	}
-	return f.deleteSpaceFn(doc, force, cascade)
+	return f.deleteSpaceFn(space, force, cascade)
 }
 
 func testLogger() *slog.Logger {

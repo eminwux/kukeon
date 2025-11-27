@@ -23,12 +23,13 @@ import (
 
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // DeleteRealmResult reports what was deleted during realm deletion.
 type DeleteRealmResult struct {
-	RealmDoc                   *v1beta1.RealmDoc
+	Realm                      intmodel.Realm
 	Deleted                    []string // Resources that were deleted (metadata, cgroup, namespace, cascaded resources)
 	MetadataDeleted            bool
 	CgroupDeleted              bool
@@ -39,7 +40,7 @@ type DeleteRealmResult struct {
 type DeleteSpaceResult struct {
 	SpaceName string
 	RealmName string
-	SpaceDoc  *v1beta1.SpaceDoc
+	Space     intmodel.Space
 
 	MetadataDeleted   bool
 	CgroupDeleted     bool
@@ -53,7 +54,7 @@ type DeleteStackResult struct {
 	StackName string
 	RealmName string
 	SpaceName string
-	StackDoc  *v1beta1.StackDoc
+	Stack     intmodel.Stack
 
 	MetadataDeleted bool
 	CgroupDeleted   bool
@@ -63,7 +64,7 @@ type DeleteStackResult struct {
 
 // DeleteCellResult reports what was deleted during cell deletion.
 type DeleteCellResult struct {
-	CellDoc           *v1beta1.CellDoc
+	Cell              intmodel.Cell
 	ContainersDeleted bool
 	CgroupDeleted     bool
 	MetadataDeleted   bool
@@ -71,7 +72,7 @@ type DeleteCellResult struct {
 
 // DeleteContainerResult mirrors GetContainerResult but also reports what was deleted.
 type DeleteContainerResult struct {
-	ContainerDoc       *v1beta1.ContainerDoc
+	Container          intmodel.Container
 	CellMetadataExists bool
 	ContainerExists    bool
 	Deleted            []string // Resources that were deleted (container, task)
@@ -79,26 +80,32 @@ type DeleteContainerResult struct {
 
 // DeleteRealm deletes a realm. If cascade is true, deletes all spaces first.
 // If force is true, skips validation of child resources.
-func (b *Exec) DeleteRealm(doc *v1beta1.RealmDoc, force, cascade bool) (DeleteRealmResult, error) {
+func (b *Exec) DeleteRealm(realm intmodel.Realm, force, cascade bool) (DeleteRealmResult, error) {
 	var res DeleteRealmResult
-	if doc == nil {
-		return res, errdefs.ErrRealmNameRequired
-	}
 
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(realm.Metadata.Name)
 	if name == "" {
 		return res, errdefs.ErrRealmNameRequired
 	}
-	doc.Metadata.Name = name
 
-	namespace := strings.TrimSpace(doc.Spec.Namespace)
+	namespace := strings.TrimSpace(realm.Spec.Namespace)
 	if namespace == "" {
 		namespace = name
 	}
-	doc.Spec.Namespace = namespace
+
+	// Build minimal lookup realm for GetRealm (still uses external types)
+	lookupDoc := &v1beta1.RealmDoc{
+		Metadata: v1beta1.RealmMetadata{
+			Name: name,
+		},
+		Spec: v1beta1.RealmSpec{
+			Namespace: namespace,
+		},
+	}
 
 	// Ensure realm exists and capture its latest state
-	getResult, err := b.GetRealm(doc)
+	// Note: GetRealm still uses external types, but we'll convert the result
+	getResult, err := b.GetRealm(lookupDoc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrRealmNotFound) {
 			return res, fmt.Errorf("realm %q not found", name)
@@ -109,9 +116,15 @@ func (b *Exec) DeleteRealm(doc *v1beta1.RealmDoc, force, cascade bool) (DeleteRe
 		return res, fmt.Errorf("realm %q not found", name)
 	}
 
+	// Convert GetRealm result to internal for rest of method
+	internalRealm, _, convertErr := apischeme.NormalizeRealm(*getResult.RealmDoc)
+	if convertErr != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+
 	res = DeleteRealmResult{
-		RealmDoc: getResult.RealmDoc,
-		Deleted:  []string{},
+		Realm:   internalRealm,
+		Deleted: []string{},
 	}
 
 	// If cascade, delete all spaces first
@@ -121,12 +134,18 @@ func (b *Exec) DeleteRealm(doc *v1beta1.RealmDoc, force, cascade bool) (DeleteRe
 		if err != nil {
 			return res, fmt.Errorf("failed to list spaces: %w", err)
 		}
-		for _, space := range spaces {
-			_, err = b.DeleteSpace(space, force, cascade)
-			if err != nil {
-				return res, fmt.Errorf("failed to delete space %q: %w", space.Metadata.Name, err)
+		for _, spaceDoc := range spaces {
+			// Convert external space to internal at boundary
+			var spaceInternal intmodel.Space
+			spaceInternal, _, convertErr = apischeme.NormalizeSpace(*spaceDoc)
+			if convertErr != nil {
+				return res, fmt.Errorf("failed to convert space %q: %w", spaceDoc.Metadata.Name, convertErr)
 			}
-			res.Deleted = append(res.Deleted, fmt.Sprintf("space:%s", space.Metadata.Name))
+			_, err = b.DeleteSpace(spaceInternal, force, cascade)
+			if err != nil {
+				return res, fmt.Errorf("failed to delete space %q: %w", spaceDoc.Metadata.Name, err)
+			}
+			res.Deleted = append(res.Deleted, fmt.Sprintf("space:%s", spaceDoc.Metadata.Name))
 		}
 	} else if !force {
 		// Validate no spaces exist
@@ -137,12 +156,6 @@ func (b *Exec) DeleteRealm(doc *v1beta1.RealmDoc, force, cascade bool) (DeleteRe
 		if len(spaces) > 0 {
 			return res, fmt.Errorf("%w: realm %q has %d space(s). Use --cascade to delete them or --force to skip validation", errdefs.ErrResourceHasDependencies, name, len(spaces))
 		}
-	}
-
-	// Convert external realm to internal for runner.DeleteRealm
-	internalRealm, _, convertErr := apischeme.NormalizeRealm(*getResult.RealmDoc)
-	if convertErr != nil {
-		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
 	}
 
 	// Delete realm via runner and capture detailed outcome
@@ -170,25 +183,30 @@ func (b *Exec) DeleteRealm(doc *v1beta1.RealmDoc, force, cascade bool) (DeleteRe
 
 // DeleteSpace deletes a space. If cascade is true, deletes all stacks first.
 // If force is true, skips validation of child resources.
-func (b *Exec) DeleteSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (DeleteSpaceResult, error) {
+func (b *Exec) DeleteSpace(space intmodel.Space, force, cascade bool) (DeleteSpaceResult, error) {
 	var res DeleteSpaceResult
-	if doc == nil {
-		return res, errdefs.ErrSpaceNameRequired
-	}
 
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(space.Metadata.Name)
 	if name == "" {
 		return res, errdefs.ErrSpaceNameRequired
 	}
-	doc.Metadata.Name = name
 
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(space.Spec.RealmName)
 	if realmName == "" {
 		return res, errdefs.ErrRealmNameRequired
 	}
-	doc.Spec.RealmID = realmName
 
-	getResult, err := b.GetSpace(doc)
+	// Build minimal lookup doc for GetSpace (still uses external types)
+	lookupDoc := &v1beta1.SpaceDoc{
+		Metadata: v1beta1.SpaceMetadata{
+			Name: name,
+		},
+		Spec: v1beta1.SpaceSpec{
+			RealmID: realmName,
+		},
+	}
+
+	getResult, err := b.GetSpace(lookupDoc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrSpaceNotFound) {
 			return res, fmt.Errorf("space %q not found in realm %q", name, realmName)
@@ -199,10 +217,16 @@ func (b *Exec) DeleteSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (DeleteSp
 		return res, fmt.Errorf("space %q not found in realm %q", name, realmName)
 	}
 
+	// Convert GetSpace result to internal for rest of method
+	internalSpace, _, convertErr := apischeme.NormalizeSpace(*getResult.SpaceDoc)
+	if convertErr != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+
 	res = DeleteSpaceResult{
 		SpaceName: name,
 		RealmName: realmName,
-		SpaceDoc:  getResult.SpaceDoc,
+		Space:     internalSpace,
 		Deleted:   []string{},
 	}
 
@@ -213,15 +237,21 @@ func (b *Exec) DeleteSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (DeleteSp
 		if err != nil {
 			return res, fmt.Errorf("failed to list stacks: %w", err)
 		}
-		for _, stack := range stacks {
-			if stack == nil {
+		for _, stackDoc := range stacks {
+			if stackDoc == nil {
 				continue
 			}
-			_, err = b.DeleteStack(stack, force, cascade)
-			if err != nil {
-				return res, fmt.Errorf("failed to delete stack %q: %w", stack.Metadata.Name, err)
+			// Convert external stack to internal at boundary
+			var stackInternal intmodel.Stack
+			stackInternal, _, convertErr = apischeme.NormalizeStack(*stackDoc)
+			if convertErr != nil {
+				return res, fmt.Errorf("failed to convert stack %q: %w", stackDoc.Metadata.Name, convertErr)
 			}
-			res.Deleted = append(res.Deleted, fmt.Sprintf("stack:%s", stack.Metadata.Name))
+			_, err = b.DeleteStack(stackInternal, force, cascade)
+			if err != nil {
+				return res, fmt.Errorf("failed to delete stack %q: %w", stackDoc.Metadata.Name, err)
+			}
+			res.Deleted = append(res.Deleted, fmt.Sprintf("stack:%s", stackDoc.Metadata.Name))
 		}
 	} else if !force {
 		// Validate no stacks exist
@@ -232,12 +262,6 @@ func (b *Exec) DeleteSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (DeleteSp
 		if len(stacks) > 0 {
 			return res, fmt.Errorf("%w: space %q has %d stack(s). Use --cascade to delete them or --force to skip validation", errdefs.ErrResourceHasDependencies, name, len(stacks))
 		}
-	}
-
-	// Convert external space to internal for runner.DeleteSpace
-	internalSpace, _, convertErr := apischeme.NormalizeSpace(*getResult.SpaceDoc)
-	if convertErr != nil {
-		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
 	}
 
 	// Delete space
@@ -254,31 +278,36 @@ func (b *Exec) DeleteSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (DeleteSp
 
 // DeleteStack deletes a stack. If cascade is true, deletes all cells first.
 // If force is true, skips validation of child resources.
-func (b *Exec) DeleteStack(doc *v1beta1.StackDoc, force, cascade bool) (DeleteStackResult, error) {
+func (b *Exec) DeleteStack(stack intmodel.Stack, force, cascade bool) (DeleteStackResult, error) {
 	var res DeleteStackResult
-	if doc == nil {
-		return res, errdefs.ErrStackNameRequired
-	}
 
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(stack.Metadata.Name)
 	if name == "" {
 		return res, errdefs.ErrStackNameRequired
 	}
-	doc.Metadata.Name = name
 
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(stack.Spec.RealmName)
 	if realmName == "" {
 		return res, errdefs.ErrRealmNameRequired
 	}
-	doc.Spec.RealmID = realmName
 
-	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	spaceName := strings.TrimSpace(stack.Spec.SpaceName)
 	if spaceName == "" {
 		return res, errdefs.ErrSpaceNameRequired
 	}
-	doc.Spec.SpaceID = spaceName
 
-	getResult, err := b.GetStack(doc)
+	// Build minimal lookup doc for GetStack (still uses external types)
+	lookupDoc := &v1beta1.StackDoc{
+		Metadata: v1beta1.StackMetadata{
+			Name: name,
+		},
+		Spec: v1beta1.StackSpec{
+			RealmID: realmName,
+			SpaceID: spaceName,
+		},
+	}
+
+	getResult, err := b.GetStack(lookupDoc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrStackNotFound) {
 			return res, fmt.Errorf("stack %q not found in realm %q, space %q", name, realmName, spaceName)
@@ -289,11 +318,17 @@ func (b *Exec) DeleteStack(doc *v1beta1.StackDoc, force, cascade bool) (DeleteSt
 		return res, fmt.Errorf("stack %q not found in realm %q, space %q", name, realmName, spaceName)
 	}
 
+	// Convert GetStack result to internal for rest of method
+	internalStack, _, convertErr := apischeme.NormalizeStack(*getResult.StackDoc)
+	if convertErr != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+
 	res = DeleteStackResult{
 		StackName: name,
 		RealmName: realmName,
 		SpaceName: spaceName,
-		StackDoc:  getResult.StackDoc,
+		Stack:     internalStack,
 		Deleted:   []string{},
 	}
 
@@ -304,12 +339,18 @@ func (b *Exec) DeleteStack(doc *v1beta1.StackDoc, force, cascade bool) (DeleteSt
 		if err != nil {
 			return res, fmt.Errorf("failed to list cells: %w", err)
 		}
-		for _, cell := range cells {
-			_, err = b.DeleteCell(cell)
-			if err != nil {
-				return res, fmt.Errorf("failed to delete cell %q: %w", cell.Metadata.Name, err)
+		for _, cellDoc := range cells {
+			// Convert external cell to internal at boundary
+			var cellInternal intmodel.Cell
+			cellInternal, _, convertErr = apischeme.NormalizeCell(*cellDoc)
+			if convertErr != nil {
+				return res, fmt.Errorf("failed to convert cell %q: %w", cellDoc.Metadata.Name, convertErr)
 			}
-			res.Deleted = append(res.Deleted, fmt.Sprintf("cell:%s", cell.Metadata.Name))
+			_, err = b.DeleteCell(cellInternal)
+			if err != nil {
+				return res, fmt.Errorf("failed to delete cell %q: %w", cellDoc.Metadata.Name, err)
+			}
+			res.Deleted = append(res.Deleted, fmt.Sprintf("cell:%s", cellDoc.Metadata.Name))
 		}
 	} else if !force {
 		// Validate no cells exist
@@ -320,12 +361,6 @@ func (b *Exec) DeleteStack(doc *v1beta1.StackDoc, force, cascade bool) (DeleteSt
 		if len(cells) > 0 {
 			return res, fmt.Errorf("%w: stack %q has %d cell(s). Use --cascade to delete them or --force to skip validation", errdefs.ErrResourceHasDependencies, name, len(cells))
 		}
-	}
-
-	// Convert external stack to internal for runner.DeleteStack
-	internalStack, _, convertErr := apischeme.NormalizeStack(*getResult.StackDoc)
-	if convertErr != nil {
-		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
 	}
 
 	// Delete stack
@@ -340,37 +375,42 @@ func (b *Exec) DeleteStack(doc *v1beta1.StackDoc, force, cascade bool) (DeleteSt
 }
 
 // DeleteCell deletes a cell. Always deletes all containers first.
-func (b *Exec) DeleteCell(doc *v1beta1.CellDoc) (DeleteCellResult, error) {
+func (b *Exec) DeleteCell(cell intmodel.Cell) (DeleteCellResult, error) {
 	var res DeleteCellResult
-	if doc == nil {
-		return res, errdefs.ErrCellNameRequired
-	}
 
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(cell.Metadata.Name)
 	if name == "" {
 		return res, errdefs.ErrCellNameRequired
 	}
-	doc.Metadata.Name = name
 
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
 	if realmName == "" {
 		return res, errdefs.ErrRealmNameRequired
 	}
-	doc.Spec.RealmID = realmName
 
-	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
 	if spaceName == "" {
 		return res, errdefs.ErrSpaceNameRequired
 	}
-	doc.Spec.SpaceID = spaceName
 
-	stackName := strings.TrimSpace(doc.Spec.StackID)
+	stackName := strings.TrimSpace(cell.Spec.StackName)
 	if stackName == "" {
 		return res, errdefs.ErrStackNameRequired
 	}
-	doc.Spec.StackID = stackName
 
-	getResult, err := b.GetCell(doc)
+	// Build minimal lookup doc for GetCell (still uses external types)
+	lookupDoc := &v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{
+			Name: name,
+		},
+		Spec: v1beta1.CellSpec{
+			RealmID: realmName,
+			SpaceID: spaceName,
+			StackID: stackName,
+		},
+	}
+
+	getResult, err := b.GetCell(lookupDoc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return res, fmt.Errorf(
@@ -388,19 +428,19 @@ func (b *Exec) DeleteCell(doc *v1beta1.CellDoc) (DeleteCellResult, error) {
 		return res, fmt.Errorf("cell %q not found", name)
 	}
 
+	// Convert GetCell result to internal for rest of method
+	internalCell, _, convertErr := apischeme.NormalizeCell(*cellDoc)
+	if convertErr != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+
 	res = DeleteCellResult{
-		CellDoc: cellDoc,
+		Cell: internalCell,
 	}
 
 	// Always delete all containers in cell first
-	if len(cellDoc.Spec.Containers) > 0 {
+	if len(internalCell.Spec.Containers) > 0 {
 		res.ContainersDeleted = true
-	}
-
-	// Convert external cell to internal for runner.DeleteCell
-	internalCell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
-	if err != nil {
-		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
 	if err = b.runner.DeleteCell(internalCell); err != nil {
@@ -413,36 +453,33 @@ func (b *Exec) DeleteCell(doc *v1beta1.CellDoc) (DeleteCellResult, error) {
 }
 
 // DeleteContainer deletes a single container. Cascade flag is not applicable.
-func (b *Exec) DeleteContainer(doc *v1beta1.ContainerDoc) (DeleteContainerResult, error) {
+func (b *Exec) DeleteContainer(container intmodel.Container) (DeleteContainerResult, error) {
 	var res DeleteContainerResult
-	if doc == nil {
-		return res, errdefs.ErrContainerNameRequired
-	}
 
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(container.Metadata.Name)
 	if name == "" {
 		return res, errdefs.ErrContainerNameRequired
 	}
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(container.Spec.RealmName)
 	if realmName == "" {
 		return res, errdefs.ErrRealmNameRequired
 	}
-	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	spaceName := strings.TrimSpace(container.Spec.SpaceName)
 	if spaceName == "" {
 		return res, errdefs.ErrSpaceNameRequired
 	}
-	stackName := strings.TrimSpace(doc.Spec.StackID)
+	stackName := strings.TrimSpace(container.Spec.StackName)
 	if stackName == "" {
 		return res, errdefs.ErrStackNameRequired
 	}
-	cellName := strings.TrimSpace(doc.Spec.CellID)
+	cellName := strings.TrimSpace(container.Spec.CellName)
 	if cellName == "" {
 		return res, errdefs.ErrCellNameRequired
 	}
 
 	res.Deleted = []string{}
 
-	// Get cell to find container
+	// Build minimal lookup doc for GetCell (still uses external types)
 	cellDoc := &v1beta1.CellDoc{
 		Metadata: v1beta1.CellMetadata{
 			Name: cellName,
@@ -473,11 +510,17 @@ func (b *Exec) DeleteContainer(doc *v1beta1.ContainerDoc) (DeleteContainerResult
 		return res, fmt.Errorf("cell %q not found", cellName)
 	}
 
-	// Find container in cell by name (ID now stores just the container name)
-	var foundContainer *v1beta1.ContainerSpec
-	for i := range cellDoc.Spec.Containers {
-		if cellDoc.Spec.Containers[i].ID == name {
-			foundContainer = &cellDoc.Spec.Containers[i]
+	// Convert GetCell result to internal for rest of method
+	internalCell, _, convertErr := apischeme.NormalizeCell(*cellDoc)
+	if convertErr != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+
+	// Find container in cell by name
+	var foundContainer *intmodel.ContainerSpec
+	for i := range internalCell.Spec.Containers {
+		if internalCell.Spec.Containers[i].ID == name {
+			foundContainer = &internalCell.Spec.Containers[i]
 			break
 		}
 	}
@@ -487,28 +530,19 @@ func (b *Exec) DeleteContainer(doc *v1beta1.ContainerDoc) (DeleteContainerResult
 	}
 
 	res.ContainerExists = true
-	labels := doc.Metadata.Labels
-	if labels == nil {
-		labels = make(map[string]string)
-	}
-	res.ContainerDoc = &v1beta1.ContainerDoc{
-		APIVersion: v1beta1.APIVersionV1Beta1,
-		Kind:       v1beta1.KindContainer,
-		Metadata: v1beta1.ContainerMetadata{
+
+	// Build result container from found container spec
+	resultContainer := intmodel.Container{
+		Metadata: intmodel.ContainerMetadata{
 			Name:   name,
-			Labels: labels,
+			Labels: container.Metadata.Labels,
 		},
 		Spec: *foundContainer,
-		Status: v1beta1.ContainerStatus{
-			State: v1beta1.ContainerStateReady,
+		Status: intmodel.ContainerStatus{
+			State: intmodel.ContainerStateReady,
 		},
 	}
-
-	// Convert external cell to internal for runner.DeleteContainer
-	internalCell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
-	if err != nil {
-		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
+	res.Container = resultContainer
 
 	// Delete container from containerd (via runner)
 	if err = b.runner.DeleteContainer(internalCell, name); err != nil {
@@ -516,22 +550,16 @@ func (b *Exec) DeleteContainer(doc *v1beta1.ContainerDoc) (DeleteContainerResult
 	}
 
 	// Remove container from cell's Spec.Containers list
-	var updatedContainers []v1beta1.ContainerSpec
-	for _, container := range cellDoc.Spec.Containers {
-		if container.ID != name {
-			updatedContainers = append(updatedContainers, container)
+	var updatedContainers []intmodel.ContainerSpec
+	for _, containerSpec := range internalCell.Spec.Containers {
+		if containerSpec.ID != name {
+			updatedContainers = append(updatedContainers, containerSpec)
 		}
 	}
-	cellDoc.Spec.Containers = updatedContainers
-
-	// Convert to internal model for UpdateCellMetadata
-	cell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
-	if err != nil {
-		return res, fmt.Errorf("failed to convert cell to internal model: %w", err)
-	}
+	internalCell.Spec.Containers = updatedContainers
 
 	// Update cell metadata to persist the change
-	if err = b.runner.UpdateCellMetadata(cell); err != nil {
+	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {
 		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
