@@ -22,15 +22,17 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/kill/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type containerController interface {
-	KillContainer(doc *v1beta1.ContainerDoc) (controller.KillContainerResult, error)
+	KillContainer(container intmodel.Container) (controller.KillContainerResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -92,23 +94,25 @@ func NewContainerCmd() *cobra.Command {
 				},
 			}
 
-			result, err := ctrl.KillContainer(containerDoc)
+			// Convert at boundary before calling controller
+			containerInternal, _, err := apischeme.NormalizeContainer(*containerDoc)
+			if err != nil {
+				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+			}
+
+			result, err := ctrl.KillContainer(containerInternal)
 			if err != nil {
 				return err
 			}
 
-			containerName := name
-			cellName := cell
-			if result.ContainerDoc != nil {
-				if trimmed := strings.TrimSpace(result.ContainerDoc.Metadata.Name); trimmed != "" {
-					containerName = trimmed
-				} else if trimmed = strings.TrimSpace(result.ContainerDoc.Spec.ID); trimmed != "" {
-					containerName = trimmed
-				}
-
-				if trimmed := strings.TrimSpace(result.ContainerDoc.Spec.CellID); trimmed != "" {
-					cellName = trimmed
-				}
+			// Use container from result for output
+			containerName := result.Container.Metadata.Name
+			cellName := result.Container.Spec.CellName
+			if containerName == "" {
+				containerName = name
+			}
+			if cellName == "" {
+				cellName = cell
 			}
 
 			cmd.Printf("Killed container %q from cell %q\n", containerName, cellName)

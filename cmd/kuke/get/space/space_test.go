@@ -229,9 +229,9 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 					// Convert docAlpha to internal for result
 					spaceInternal, _, _ := apischeme.NormalizeSpace(*docAlpha)
 					return controller.GetSpaceResult{
-						Space:          spaceInternal,
-						MetadataExists: true,
-						CgroupExists:   true,
+						Space:            spaceInternal,
+						MetadataExists:   true,
+						CgroupExists:     true,
 						CNINetworkExists: true,
 					}, nil
 				},

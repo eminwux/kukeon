@@ -269,10 +269,10 @@ func TestNewCellCmdRunE(t *testing.T) {
 					// Convert singleDoc to internal for result
 					cellInternal, _, _ := apischeme.NormalizeCell(*singleDoc)
 					return controller.GetCellResult{
-						Cell:                 cellInternal,
-						MetadataExists:       true,
-						CgroupExists:         true,
-						RootContainerExists:  true,
+						Cell:                cellInternal,
+						MetadataExists:      true,
+						CgroupExists:        true,
+						RootContainerExists: true,
 					}, nil
 				},
 			},
@@ -294,10 +294,10 @@ func TestNewCellCmdRunE(t *testing.T) {
 					// Convert singleDoc to internal for result
 					cellInternal, _, _ := apischeme.NormalizeCell(*singleDoc)
 					return controller.GetCellResult{
-						Cell:                 cellInternal,
-						MetadataExists:       true,
-						CgroupExists:         true,
-						RootContainerExists:  true,
+						Cell:                cellInternal,
+						MetadataExists:      true,
+						CgroupExists:        true,
+						RootContainerExists: true,
 					}, nil
 				},
 			},

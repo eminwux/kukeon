@@ -356,10 +356,10 @@ func TestNewRealmCmdRunE(t *testing.T) {
 					// Convert docAlpha to internal for result
 					realmInternal, _, _ := apischeme.NormalizeRealm(*docAlpha)
 					return controller.GetRealmResult{
-						Realm:                      realmInternal,
-						MetadataExists:             true,
-						CgroupExists:               true,
-						ContainerdNamespaceExists:  true,
+						Realm:                     realmInternal,
+						MetadataExists:            true,
+						CgroupExists:              true,
+						ContainerdNamespaceExists: true,
 					}, nil
 				},
 			},
