@@ -22,16 +22,17 @@ import (
 
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller/runner"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 type Controller interface {
 	Bootstrap() (BootstrapReport, error)
-	CreateRealm(doc *v1beta1.RealmDoc) (CreateRealmResult, error)
-	CreateSpace(doc *v1beta1.SpaceDoc) (CreateSpaceResult, error)
-	CreateStack(doc *v1beta1.StackDoc) (CreateStackResult, error)
-	CreateCell(doc *v1beta1.CellDoc) (CreateCellResult, error)
-	CreateContainer(doc *v1beta1.ContainerDoc) (CreateContainerResult, error)
+	CreateRealm(realm intmodel.Realm) (CreateRealmResult, error)
+	CreateSpace(space intmodel.Space) (CreateSpaceResult, error)
+	CreateStack(stack intmodel.Stack) (CreateStackResult, error)
+	CreateCell(cell intmodel.Cell) (CreateCellResult, error)
+	CreateContainer(container intmodel.Container) (CreateContainerResult, error)
 	DeleteRealm(doc *v1beta1.RealmDoc, force, cascade bool) (DeleteRealmResult, error)
 	DeleteSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (DeleteSpaceResult, error)
 	DeleteStack(doc *v1beta1.StackDoc, force, cascade bool) (DeleteStackResult, error)

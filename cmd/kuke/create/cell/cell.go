@@ -22,15 +22,17 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type cellController interface {
-	CreateCell(doc *v1beta1.CellDoc) (controller.CreateCellResult, error)
+	CreateCell(cell intmodel.Cell) (controller.CreateCellResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -105,6 +107,12 @@ func runCreateCell(cmd *cobra.Command, args []string) error {
 	// Ensure all nested structs are initialized
 	doc = v1beta1.NewCellDoc(doc)
 
+	// Convert at boundary before calling controller
+	cell, version, err := apischeme.NormalizeCell(*doc)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
 	// Check for mock controller in context (for testing)
 	var ctrl cellController
 	if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(cellController); ok {
@@ -117,30 +125,38 @@ func runCreateCell(cmd *cobra.Command, args []string) error {
 		ctrl = realCtrl
 	}
 
-	result, err := ctrl.CreateCell(doc)
+	// Call controller with internal type
+	result, err := ctrl.CreateCell(cell)
 	if err != nil {
 		return err
 	}
 
-	printCellResult(cmd, result)
+	printCellResult(cmd, result, version)
 	return nil
 }
 
-func printCellResult(cmd *cobra.Command, result controller.CreateCellResult) {
-	var name, realm, space, stack string
-	if result.CellDoc != nil {
-		name = result.CellDoc.Metadata.Name
-		realm = result.CellDoc.Spec.RealmID
-		space = result.CellDoc.Spec.SpaceID
-		stack = result.CellDoc.Spec.StackID
+func printCellResult(cmd *cobra.Command, result controller.CreateCellResult, version v1beta1.Version) {
+	// Convert result back to external for output
+	resultDoc, err := apischeme.BuildCellExternalFromInternal(result.Cell, version)
+	if err != nil {
+		// Fallback to internal type if conversion fails
+		cmd.Printf(
+			"Cell %q (realm %q, space %q, stack %q)\n",
+			result.Cell.Metadata.Name,
+			result.Cell.Spec.RealmName,
+			result.Cell.Spec.SpaceName,
+			result.Cell.Spec.StackName,
+		)
+		cmd.Printf("Warning: failed to convert result for output: %v\n", err)
+	} else {
+		cmd.Printf(
+			"Cell %q (realm %q, space %q, stack %q)\n",
+			resultDoc.Metadata.Name,
+			resultDoc.Spec.RealmID,
+			resultDoc.Spec.SpaceID,
+			resultDoc.Spec.StackID,
+		)
 	}
-	cmd.Printf(
-		"Cell %q (realm %q, space %q, stack %q)\n",
-		name,
-		realm,
-		space,
-		stack,
-	)
 	shared.PrintCreationOutcome(cmd, "metadata", result.MetadataExistsPost, result.Created)
 	shared.PrintCreationOutcome(cmd, "cgroup", result.CgroupExistsPost, result.CgroupCreated)
 	shared.PrintCreationOutcome(cmd, "root container", result.RootContainerExistsPost, result.RootContainerCreated)
@@ -162,6 +178,6 @@ func printCellResult(cmd *cobra.Command, result controller.CreateCellResult) {
 }
 
 // PrintCellResult is exported for testing purposes.
-func PrintCellResult(cmd *cobra.Command, result controller.CreateCellResult) {
-	printCellResult(cmd, result)
+func PrintCellResult(cmd *cobra.Command, result controller.CreateCellResult, version v1beta1.Version) {
+	printCellResult(cmd, result, version)
 }

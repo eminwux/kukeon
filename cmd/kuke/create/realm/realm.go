@@ -17,16 +17,21 @@
 package realm
 
 import (
+	"fmt"
+
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
+	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type realmController interface {
-	CreateRealm(doc *v1beta1.RealmDoc) (controller.CreateRealmResult, error)
+	CreateRealm(realm intmodel.Realm) (controller.CreateRealmResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -66,6 +71,12 @@ func NewRealmCmd() *cobra.Command {
 				},
 			}
 
+			// Convert at boundary before calling controller
+			realm, version, err := apischeme.NormalizeRealm(*doc)
+			if err != nil {
+				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+			}
+
 			// Check for mock controller in context (for testing)
 			var ctrl realmController
 			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(realmController); ok {
@@ -79,12 +90,13 @@ func NewRealmCmd() *cobra.Command {
 				ctrl = realCtrl
 			}
 
-			result, err := ctrl.CreateRealm(doc)
+			// Call controller with internal type
+			result, err := ctrl.CreateRealm(realm)
 			if err != nil {
 				return err
 			}
 
-			printRealmResult(cmd, result)
+			printRealmResult(cmd, result, version)
 			return nil
 		},
 	}
@@ -94,13 +106,16 @@ func NewRealmCmd() *cobra.Command {
 	return cmd
 }
 
-func printRealmResult(cmd *cobra.Command, result controller.CreateRealmResult) {
-	var name, namespace string
-	if result.RealmDoc != nil {
-		name = result.RealmDoc.Metadata.Name
-		namespace = result.RealmDoc.Spec.Namespace
+func printRealmResult(cmd *cobra.Command, result controller.CreateRealmResult, version v1beta1.Version) {
+	// Convert result back to external for output
+	resultDoc, err := apischeme.BuildRealmExternalFromInternal(result.Realm, version)
+	if err != nil {
+		// Fallback to internal type if conversion fails
+		cmd.Printf("Realm %q (namespace %q)\n", result.Realm.Metadata.Name, result.Realm.Spec.Namespace)
+		cmd.Printf("Warning: failed to convert result for output: %v\n", err)
+	} else {
+		cmd.Printf("Realm %q (namespace %q)\n", resultDoc.Metadata.Name, resultDoc.Spec.Namespace)
 	}
-	cmd.Printf("Realm %q (namespace %q)\n", name, namespace)
 	shared.PrintCreationOutcome(cmd, "metadata", result.MetadataExistsPost, result.Created)
 	shared.PrintCreationOutcome(
 		cmd,
@@ -112,6 +127,6 @@ func printRealmResult(cmd *cobra.Command, result controller.CreateRealmResult) {
 }
 
 // PrintRealmResult is exported for testing purposes.
-func PrintRealmResult(cmd *cobra.Command, result controller.CreateRealmResult) {
-	printRealmResult(cmd, result)
+func PrintRealmResult(cmd *cobra.Command, result controller.CreateRealmResult, version v1beta1.Version) {
+	printRealmResult(cmd, result, version)
 }

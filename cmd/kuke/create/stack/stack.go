@@ -22,15 +22,17 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type stackController interface {
-	CreateStack(doc *v1beta1.StackDoc) (controller.CreateStackResult, error)
+	CreateStack(stack intmodel.Stack) (controller.CreateStackResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -91,8 +93,8 @@ type controllerWrapper struct {
 	ctrl *controller.Exec
 }
 
-func (w *controllerWrapper) CreateStack(doc *v1beta1.StackDoc) (controller.CreateStackResult, error) {
-	return w.ctrl.CreateStack(doc)
+func (w *controllerWrapper) CreateStack(stack intmodel.Stack) (controller.CreateStackResult, error) {
+	return w.ctrl.CreateStack(stack)
 }
 
 func runCreateStackWithDeps(
@@ -126,6 +128,7 @@ func runCreateStackWithDeps(
 		return err
 	}
 
+	// Build v1beta1.StackDoc from command arguments
 	doc := &v1beta1.StackDoc{
 		Metadata: v1beta1.StackMetadata{
 			Name: name,
@@ -137,26 +140,52 @@ func runCreateStackWithDeps(
 		},
 	}
 
-	result, err := ctrl.CreateStack(doc)
+	// Convert at boundary before calling controller
+	stack, version, err := apischeme.NormalizeStack(*doc)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
+	// Call controller with internal type
+	result, err := ctrl.CreateStack(stack)
 	if err != nil {
 		return err
 	}
 
-	printStackResult(cmd, result, printOutcome)
+	printStackResult(cmd, result, printOutcome, version)
 	return nil
 }
 
-func printStackResult(cmd *cobra.Command, result controller.CreateStackResult, printOutcome printOutcomeFunc) {
-	if result.StackDoc == nil {
-		cmd.Printf("Stack (realm %q, space %q)\n", "", "")
+func printStackResult(
+	cmd *cobra.Command,
+	result controller.CreateStackResult,
+	printOutcome printOutcomeFunc,
+	version v1beta1.Version,
+) {
+	// Convert result back to external for output
+	resultDoc, err := apischeme.BuildStackExternalFromInternal(result.Stack, version)
+	if err != nil {
+		// Fallback to internal type if conversion fails
+		cmd.Printf(
+			"Stack %q (realm %q, space %q)\n",
+			result.Stack.Metadata.Name,
+			result.Stack.Spec.RealmName,
+			result.Stack.Spec.SpaceName,
+		)
+		cmd.Printf("Warning: failed to convert result for output: %v\n", err)
 	} else {
-		cmd.Printf("Stack %q (realm %q, space %q)\n", result.StackDoc.Metadata.Name, result.StackDoc.Spec.RealmID, result.StackDoc.Spec.SpaceID)
+		cmd.Printf("Stack %q (realm %q, space %q)\n", resultDoc.Metadata.Name, resultDoc.Spec.RealmID, resultDoc.Spec.SpaceID)
 	}
 	printOutcome(cmd, "metadata", result.MetadataExistsPost, result.Created)
 	printOutcome(cmd, "cgroup", result.CgroupExistsPost, result.CgroupCreated)
 }
 
 // PrintStackResult is exported for testing purposes.
-func PrintStackResult(cmd *cobra.Command, result controller.CreateStackResult, printOutcome printOutcomeFunc) {
-	printStackResult(cmd, result, printOutcome)
+func PrintStackResult(
+	cmd *cobra.Command,
+	result controller.CreateStackResult,
+	printOutcome printOutcomeFunc,
+	version v1beta1.Version,
+) {
+	printStackResult(cmd, result, printOutcome, version)
 }

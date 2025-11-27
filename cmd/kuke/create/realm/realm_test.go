@@ -32,6 +32,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -46,11 +47,11 @@ func TestPrintRealmResult(t *testing.T) {
 		{
 			name: "all resources created",
 			result: controller.CreateRealmResult{
-				RealmDoc: &v1beta1.RealmDoc{
-					Metadata: v1beta1.RealmMetadata{
+				Realm: intmodel.Realm{
+					Metadata: intmodel.RealmMetadata{
 						Name: "test-realm",
 					},
-					Spec: v1beta1.RealmSpec{
+					Spec: intmodel.RealmSpec{
 						Namespace: "test-ns",
 					},
 				},
@@ -71,11 +72,11 @@ func TestPrintRealmResult(t *testing.T) {
 		{
 			name: "all resources already existed",
 			result: controller.CreateRealmResult{
-				RealmDoc: &v1beta1.RealmDoc{
-					Metadata: v1beta1.RealmMetadata{
+				Realm: intmodel.Realm{
+					Metadata: intmodel.RealmMetadata{
 						Name: "existing-realm",
 					},
-					Spec: v1beta1.RealmSpec{
+					Spec: intmodel.RealmSpec{
 						Namespace: "existing-ns",
 					},
 				},
@@ -96,11 +97,11 @@ func TestPrintRealmResult(t *testing.T) {
 		{
 			name: "metadata created, others existed",
 			result: controller.CreateRealmResult{
-				RealmDoc: &v1beta1.RealmDoc{
-					Metadata: v1beta1.RealmMetadata{
+				Realm: intmodel.Realm{
+					Metadata: intmodel.RealmMetadata{
 						Name: "mixed-realm",
 					},
-					Spec: v1beta1.RealmSpec{
+					Spec: intmodel.RealmSpec{
 						Namespace: "mixed-ns",
 					},
 				},
@@ -121,11 +122,11 @@ func TestPrintRealmResult(t *testing.T) {
 		{
 			name: "namespace created, others existed",
 			result: controller.CreateRealmResult{
-				RealmDoc: &v1beta1.RealmDoc{
-					Metadata: v1beta1.RealmMetadata{
+				Realm: intmodel.Realm{
+					Metadata: intmodel.RealmMetadata{
 						Name: "ns-created",
 					},
-					Spec: v1beta1.RealmSpec{
+					Spec: intmodel.RealmSpec{
 						Namespace: "ns-created-ns",
 					},
 				},
@@ -146,11 +147,11 @@ func TestPrintRealmResult(t *testing.T) {
 		{
 			name: "cgroup created, others existed",
 			result: controller.CreateRealmResult{
-				RealmDoc: &v1beta1.RealmDoc{
-					Metadata: v1beta1.RealmMetadata{
+				Realm: intmodel.Realm{
+					Metadata: intmodel.RealmMetadata{
 						Name: "cgroup-created",
 					},
-					Spec: v1beta1.RealmSpec{
+					Spec: intmodel.RealmSpec{
 						Namespace: "cgroup-created-ns",
 					},
 				},
@@ -171,11 +172,11 @@ func TestPrintRealmResult(t *testing.T) {
 		{
 			name: "metadata missing",
 			result: controller.CreateRealmResult{
-				RealmDoc: &v1beta1.RealmDoc{
-					Metadata: v1beta1.RealmMetadata{
+				Realm: intmodel.Realm{
+					Metadata: intmodel.RealmMetadata{
 						Name: "missing-metadata",
 					},
-					Spec: v1beta1.RealmSpec{
+					Spec: intmodel.RealmSpec{
 						Namespace: "missing-ns",
 					},
 				},
@@ -196,11 +197,11 @@ func TestPrintRealmResult(t *testing.T) {
 		{
 			name: "namespace missing",
 			result: controller.CreateRealmResult{
-				RealmDoc: &v1beta1.RealmDoc{
-					Metadata: v1beta1.RealmMetadata{
+				Realm: intmodel.Realm{
+					Metadata: intmodel.RealmMetadata{
 						Name: "missing-ns",
 					},
-					Spec: v1beta1.RealmSpec{
+					Spec: intmodel.RealmSpec{
 						Namespace: "missing-ns-name",
 					},
 				},
@@ -221,11 +222,11 @@ func TestPrintRealmResult(t *testing.T) {
 		{
 			name: "cgroup missing",
 			result: controller.CreateRealmResult{
-				RealmDoc: &v1beta1.RealmDoc{
-					Metadata: v1beta1.RealmMetadata{
+				Realm: intmodel.Realm{
+					Metadata: intmodel.RealmMetadata{
 						Name: "missing-cgroup",
 					},
-					Spec: v1beta1.RealmSpec{
+					Spec: intmodel.RealmSpec{
 						Namespace: "missing-cgroup-ns",
 					},
 				},
@@ -246,11 +247,11 @@ func TestPrintRealmResult(t *testing.T) {
 		{
 			name: "all missing",
 			result: controller.CreateRealmResult{
-				RealmDoc: &v1beta1.RealmDoc{
-					Metadata: v1beta1.RealmMetadata{
+				Realm: intmodel.Realm{
+					Metadata: intmodel.RealmMetadata{
 						Name: "all-missing",
 					},
-					Spec: v1beta1.RealmSpec{
+					Spec: intmodel.RealmSpec{
 						Namespace: "all-missing-ns",
 					},
 				},
@@ -277,7 +278,7 @@ func TestPrintRealmResult(t *testing.T) {
 			cmd.SetOut(buf)
 			cmd.SetErr(buf)
 
-			realm.PrintRealmResult(cmd, tt.result)
+			realm.PrintRealmResult(cmd, tt.result, v1beta1.APIVersionV1Beta1)
 
 			output := buf.String()
 			for _, match := range tt.expectMatch {
@@ -372,20 +373,14 @@ func TestNewRealmCmd(t *testing.T) {
 			if !tt.expectErr && tt.expectMatch != "" {
 				ctx := cmd.Context()
 				mockCtrl := &fakeRealmController{
-					createRealmFn: func(doc *v1beta1.RealmDoc) (controller.CreateRealmResult, error) {
-						namespace := doc.Spec.Namespace
+					createRealmFn: func(realm intmodel.Realm) (controller.CreateRealmResult, error) {
+						namespace := realm.Spec.Namespace
 						if namespace == "" {
-							namespace = doc.Metadata.Name
+							namespace = realm.Metadata.Name
 						}
+						realm.Spec.Namespace = namespace
 						return controller.CreateRealmResult{
-							RealmDoc: &v1beta1.RealmDoc{
-								Metadata: v1beta1.RealmMetadata{
-									Name: doc.Metadata.Name,
-								},
-								Spec: v1beta1.RealmSpec{
-									Namespace: namespace,
-								},
-							},
+							Realm:                         realm,
 							Created:                       true,
 							ContainerdNamespaceCreated:    true,
 							CgroupCreated:                 true,
@@ -472,10 +467,10 @@ func TestNewRealmCmdRunE(t *testing.T) {
 		name           string
 		args           []string
 		setup          func(t *testing.T, cmd *cobra.Command)
-		controllerFn   func(doc *v1beta1.RealmDoc) (controller.CreateRealmResult, error)
+		controllerFn   func(realm intmodel.Realm) (controller.CreateRealmResult, error)
 		wantErr        string
 		wantCallCreate bool
-		wantDoc        *v1beta1.RealmDoc
+		wantRealm      intmodel.Realm
 		wantOutput     []string
 	}{
 		{
@@ -484,20 +479,14 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			setup: func(_ *testing.T, _ *cobra.Command) {
 				// No setup needed
 			},
-			controllerFn: func(doc *v1beta1.RealmDoc) (controller.CreateRealmResult, error) {
-				namespace := doc.Spec.Namespace
+			controllerFn: func(realm intmodel.Realm) (controller.CreateRealmResult, error) {
+				namespace := realm.Spec.Namespace
 				if namespace == "" {
-					namespace = doc.Metadata.Name
+					namespace = realm.Metadata.Name
 				}
+				realm.Spec.Namespace = namespace
 				return controller.CreateRealmResult{
-					RealmDoc: &v1beta1.RealmDoc{
-						Metadata: v1beta1.RealmMetadata{
-							Name: doc.Metadata.Name,
-						},
-						Spec: v1beta1.RealmSpec{
-							Namespace: namespace,
-						},
-					},
+					Realm:                         realm,
 					Created:                       true,
 					MetadataExistsPost:            true,
 					ContainerdNamespaceCreated:    true,
@@ -507,11 +496,11 @@ func TestNewRealmCmdRunE(t *testing.T) {
 				}, nil
 			},
 			wantCallCreate: true,
-			wantDoc: &v1beta1.RealmDoc{
-				Metadata: v1beta1.RealmMetadata{
+			wantRealm: intmodel.Realm{
+				Metadata: intmodel.RealmMetadata{
 					Name: "test-realm",
 				},
-				Spec: v1beta1.RealmSpec{
+				Spec: intmodel.RealmSpec{
 					Namespace: "",
 				},
 			},
@@ -524,20 +513,14 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			setup: func(_ *testing.T, _ *cobra.Command) {
 				viper.Set(config.KUKE_CREATE_REALM_NAME.ViperKey, "viper-realm")
 			},
-			controllerFn: func(doc *v1beta1.RealmDoc) (controller.CreateRealmResult, error) {
-				namespace := doc.Spec.Namespace
+			controllerFn: func(realm intmodel.Realm) (controller.CreateRealmResult, error) {
+				namespace := realm.Spec.Namespace
 				if namespace == "" {
-					namespace = doc.Metadata.Name
+					namespace = realm.Metadata.Name
 				}
+				realm.Spec.Namespace = namespace
 				return controller.CreateRealmResult{
-					RealmDoc: &v1beta1.RealmDoc{
-						Metadata: v1beta1.RealmMetadata{
-							Name: doc.Metadata.Name,
-						},
-						Spec: v1beta1.RealmSpec{
-							Namespace: namespace,
-						},
-					},
+					Realm:                         realm,
 					Created:                       true,
 					MetadataExistsPost:            true,
 					ContainerdNamespaceCreated:    true,
@@ -547,11 +530,11 @@ func TestNewRealmCmdRunE(t *testing.T) {
 				}, nil
 			},
 			wantCallCreate: true,
-			wantDoc: &v1beta1.RealmDoc{
-				Metadata: v1beta1.RealmMetadata{
+			wantRealm: intmodel.Realm{
+				Metadata: intmodel.RealmMetadata{
 					Name: "viper-realm",
 				},
-				Spec: v1beta1.RealmSpec{
+				Spec: intmodel.RealmSpec{
 					Namespace: "",
 				},
 			},
@@ -565,16 +548,9 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			setup: func(t *testing.T, cmd *cobra.Command) {
 				setFlag(t, cmd, "namespace", "custom-ns")
 			},
-			controllerFn: func(doc *v1beta1.RealmDoc) (controller.CreateRealmResult, error) {
+			controllerFn: func(realm intmodel.Realm) (controller.CreateRealmResult, error) {
 				return controller.CreateRealmResult{
-					RealmDoc: &v1beta1.RealmDoc{
-						Metadata: v1beta1.RealmMetadata{
-							Name: doc.Metadata.Name,
-						},
-						Spec: v1beta1.RealmSpec{
-							Namespace: doc.Spec.Namespace,
-						},
-					},
+					Realm:                         realm,
 					Created:                       true,
 					MetadataExistsPost:            true,
 					ContainerdNamespaceCreated:    true,
@@ -584,11 +560,11 @@ func TestNewRealmCmdRunE(t *testing.T) {
 				}, nil
 			},
 			wantCallCreate: true,
-			wantDoc: &v1beta1.RealmDoc{
-				Metadata: v1beta1.RealmMetadata{
+			wantRealm: intmodel.Realm{
+				Metadata: intmodel.RealmMetadata{
 					Name: "test-realm",
 				},
-				Spec: v1beta1.RealmSpec{
+				Spec: intmodel.RealmSpec{
 					Namespace: "custom-ns",
 				},
 			},
@@ -610,7 +586,7 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			setup: func(t *testing.T, cmd *cobra.Command) {
 				cmd.SetContext(context.Background())
 			},
-			controllerFn: func(_ *v1beta1.RealmDoc) (controller.CreateRealmResult, error) {
+			controllerFn: func(_ intmodel.Realm) (controller.CreateRealmResult, error) {
 				return controller.CreateRealmResult{}, errors.New("unexpected call")
 			},
 			wantErr:        "logger not found",
@@ -622,16 +598,16 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			setup: func(_ *testing.T, _ *cobra.Command) {
 				// No setup needed
 			},
-			controllerFn: func(_ *v1beta1.RealmDoc) (controller.CreateRealmResult, error) {
+			controllerFn: func(_ intmodel.Realm) (controller.CreateRealmResult, error) {
 				return controller.CreateRealmResult{}, errdefs.ErrCreateRealm
 			},
 			wantErr:        "failed to create realm",
 			wantCallCreate: true,
-			wantDoc: &v1beta1.RealmDoc{
-				Metadata: v1beta1.RealmMetadata{
+			wantRealm: intmodel.Realm{
+				Metadata: intmodel.RealmMetadata{
 					Name: "test-realm",
 				},
-				Spec: v1beta1.RealmSpec{
+				Spec: intmodel.RealmSpec{
 					Namespace: "",
 				},
 			},
@@ -643,7 +619,7 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			t.Cleanup(viper.Reset)
 
 			var createCalled bool
-			var createDoc *v1beta1.RealmDoc
+			var createRealm intmodel.Realm
 
 			cmd := realm.NewRealmCmd()
 			cmd.SetOut(&bytes.Buffer{})
@@ -660,10 +636,10 @@ func TestNewRealmCmdRunE(t *testing.T) {
 				// If we need to mock the controller, inject it via context
 				if tt.controllerFn != nil {
 					fakeCtrl := &fakeRealmController{
-						createRealmFn: func(doc *v1beta1.RealmDoc) (controller.CreateRealmResult, error) {
+						createRealmFn: func(realm intmodel.Realm) (controller.CreateRealmResult, error) {
 							createCalled = true
-							createDoc = doc
-							return tt.controllerFn(doc)
+							createRealm = realm
+							return tt.controllerFn(realm)
 						},
 					}
 					// Inject mock controller into context using the exported key
@@ -696,15 +672,19 @@ func TestNewRealmCmdRunE(t *testing.T) {
 				t.Errorf("CreateRealm called=%v want=%v", createCalled, tt.wantCallCreate)
 			}
 
-			if tt.wantDoc != nil {
-				if createDoc == nil {
-					t.Fatalf("CreateRealm doc is nil, want %+v", tt.wantDoc)
+			if tt.wantRealm.Metadata.Name != "" {
+				if !createCalled {
+					t.Fatalf("CreateRealm not called, but wantRealm specified")
 				}
-				if createDoc.Metadata.Name != tt.wantDoc.Metadata.Name {
-					t.Errorf("CreateRealm Name=%q want=%q", createDoc.Metadata.Name, tt.wantDoc.Metadata.Name)
+				if createRealm.Metadata.Name != tt.wantRealm.Metadata.Name {
+					t.Errorf("CreateRealm Name=%q want=%q", createRealm.Metadata.Name, tt.wantRealm.Metadata.Name)
 				}
-				if createDoc.Spec.Namespace != tt.wantDoc.Spec.Namespace {
-					t.Errorf("CreateRealm Namespace=%q want=%q", createDoc.Spec.Namespace, tt.wantDoc.Spec.Namespace)
+				if createRealm.Spec.Namespace != tt.wantRealm.Spec.Namespace {
+					t.Errorf(
+						"CreateRealm Namespace=%q want=%q",
+						createRealm.Spec.Namespace,
+						tt.wantRealm.Spec.Namespace,
+					)
 				}
 			}
 
@@ -799,12 +779,12 @@ func testLogger() *slog.Logger {
 }
 
 type fakeRealmController struct {
-	createRealmFn func(doc *v1beta1.RealmDoc) (controller.CreateRealmResult, error)
+	createRealmFn func(realm intmodel.Realm) (controller.CreateRealmResult, error)
 }
 
-func (f *fakeRealmController) CreateRealm(doc *v1beta1.RealmDoc) (controller.CreateRealmResult, error) {
+func (f *fakeRealmController) CreateRealm(realm intmodel.Realm) (controller.CreateRealmResult, error) {
 	if f.createRealmFn == nil {
 		return controller.CreateRealmResult{}, errdefs.ErrCreateRealm
 	}
-	return f.createRealmFn(doc)
+	return f.createRealmFn(realm)
 }
