@@ -104,13 +104,13 @@ func NewRealmCmd() *cobra.Command {
 				}
 
 				// Convert result back to external for printing
-				var realmDoc v1beta1.RealmDoc
-				realmDoc, err = apischeme.BuildRealmExternalFromInternal(result.Realm, apischeme.VersionV1Beta1)
+				var realmDoc *v1beta1.RealmDoc
+				realmDoc, err = fs.ConvertRealmToExternal(result.Realm)
 				if err != nil {
-					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+					return err
 				}
 
-				return printRealm(cmd, &realmDoc, outputFormat)
+				return printRealm(cmd, realmDoc, outputFormat)
 			}
 
 			// List all realms

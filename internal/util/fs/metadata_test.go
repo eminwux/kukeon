@@ -42,19 +42,6 @@ func TestDetectMetadataVersion(t *testing.T) {
 				data, _ := json.Marshal(doc)
 				return data
 			}(),
-			wantVersion: v1beta1.Version("v1beta1"), // DefaultVersion returns as-is when not empty
-			wantErr:     false,
-		},
-		{
-			name: "valid kukeon/v1beta1 metadata",
-			raw: func() []byte {
-				doc := map[string]interface{}{
-					"apiVersion": "kukeon/v1beta1",
-					"kind":       "Realm",
-				}
-				data, _ := json.Marshal(doc)
-				return data
-			}(),
 			wantVersion: v1beta1.APIVersionV1Beta1,
 			wantErr:     false,
 		},

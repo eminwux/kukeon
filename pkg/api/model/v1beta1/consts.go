@@ -18,7 +18,7 @@ package v1beta1
 
 const (
 	// APIVersionV1Beta1 is the canonical API version for this package.
-	APIVersionV1Beta1 Version = "kukeon/v1beta1"
+	APIVersionV1Beta1 Version = "v1beta1"
 )
 
 // Kinds.

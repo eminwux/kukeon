@@ -115,12 +115,12 @@ func NewSpaceCmd() *cobra.Command {
 				}
 
 				// Convert result back to external for printing
-				spaceDoc, err := apischeme.BuildSpaceExternalFromInternal(result.Space, apischeme.VersionV1Beta1)
+				spaceDoc, err := fs.ConvertSpaceToExternal(result.Space)
 				if err != nil {
-					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+					return err
 				}
 
-				return printSpace(&spaceDoc, outputFormat)
+				return printSpace(spaceDoc, outputFormat)
 			}
 
 			// List spaces (optionally filtered by realm)

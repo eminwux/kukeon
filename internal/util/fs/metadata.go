@@ -156,3 +156,51 @@ func ConvertContainerSpecListToExternal(internalSpecs []intmodel.ContainerSpec) 
 	}
 	return externalSpecs, nil
 }
+
+// ConvertCellToExternal converts an internal cell to an external cell doc.
+func ConvertCellToExternal(internalCell intmodel.Cell) (*v1beta1.CellDoc, error) {
+	cellDoc, convertErr := apischeme.BuildCellExternalFromInternal(internalCell, apischeme.VersionV1Beta1)
+	if convertErr != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+	return &cellDoc, nil
+}
+
+// ConvertStackToExternal converts an internal stack to an external stack doc.
+func ConvertStackToExternal(internalStack intmodel.Stack) (*v1beta1.StackDoc, error) {
+	stackDoc, convertErr := apischeme.BuildStackExternalFromInternal(internalStack, apischeme.VersionV1Beta1)
+	if convertErr != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+	return &stackDoc, nil
+}
+
+// ConvertSpaceToExternal converts an internal space to an external space doc.
+func ConvertSpaceToExternal(internalSpace intmodel.Space) (*v1beta1.SpaceDoc, error) {
+	spaceDoc, convertErr := apischeme.BuildSpaceExternalFromInternal(internalSpace, apischeme.VersionV1Beta1)
+	if convertErr != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+	return &spaceDoc, nil
+}
+
+// ConvertRealmToExternal converts an internal realm to an external realm doc.
+func ConvertRealmToExternal(internalRealm intmodel.Realm) (*v1beta1.RealmDoc, error) {
+	realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
+	if convertErr != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+	return &realmDoc, nil
+}
+
+// ConvertContainerToExternal converts an internal container to an external container doc.
+func ConvertContainerToExternal(internalContainer intmodel.Container) (*v1beta1.ContainerDoc, error) {
+	containerDoc, convertErr := apischeme.BuildContainerExternalFromInternal(
+		internalContainer,
+		apischeme.VersionV1Beta1,
+	)
+	if convertErr != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+	return &containerDoc, nil
+}

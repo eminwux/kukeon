@@ -147,12 +147,12 @@ func NewCellCmd() *cobra.Command {
 				}
 
 				// Convert result back to external for printing
-				cellDoc, err := apischeme.BuildCellExternalFromInternal(result.Cell, apischeme.VersionV1Beta1)
+				cellDoc, err := fs.ConvertCellToExternal(result.Cell)
 				if err != nil {
-					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+					return err
 				}
 
-				return printCell(cmd, &cellDoc, outputFormat)
+				return printCell(cmd, cellDoc, outputFormat)
 			}
 
 			// List cells (optionally filtered by realm, space, and/or stack)

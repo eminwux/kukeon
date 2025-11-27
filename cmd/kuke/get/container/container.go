@@ -216,16 +216,12 @@ func runContainerCmdWithDeps(
 		}
 
 		// Convert result back to external for printing
-		var containerDocResult v1beta1.ContainerDoc
-		containerDocResult, err = apischeme.BuildContainerExternalFromInternal(
-			result.Container,
-			apischeme.VersionV1Beta1,
-		)
+		containerDoc, err = fs.ConvertContainerToExternal(result.Container)
 		if err != nil {
-			return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+			return err
 		}
 
-		return printContainer(cmd, &containerDocResult, outputFormat, printYAML, printJSON)
+		return printContainer(cmd, containerDoc, outputFormat, printYAML, printJSON)
 	}
 
 	// List containers (optionally filtered by realm, space, stack, and/or cell)

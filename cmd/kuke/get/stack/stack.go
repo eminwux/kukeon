@@ -122,13 +122,13 @@ func NewStackCmd() *cobra.Command {
 				}
 
 				// Convert result back to external for printing
-				var stackDoc v1beta1.StackDoc
-				stackDoc, err = apischeme.BuildStackExternalFromInternal(result.Stack, apischeme.VersionV1Beta1)
+				var stackDoc *v1beta1.StackDoc
+				stackDoc, err = fs.ConvertStackToExternal(result.Stack)
 				if err != nil {
-					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+					return err
 				}
 
-				return printStack(cmd, &stackDoc, outputFormat)
+				return printStack(cmd, stackDoc, outputFormat)
 			}
 
 			// List stacks (optionally filtered by realm and/or space)
