@@ -21,19 +21,19 @@ const (
 
 	KukeonMetadataFile = "metadata.json"
 
-	KukeonRealmName      = "kuke-system"
+	KukeonRealmName      = "default"
 	KukeonRealmNamespace = "kukeon.io"
 	KukeonRealmLabelKey  = "realm.kukeon.io"
 
-	KukeonSpaceName     = "kuke-space"
+	KukeonSpaceName     = "default"
 	KukeonSpaceLabelKey = "space.kukeon.io"
 
-	KukeonStackName     = "kuke-stack"
+	KukeonStackName     = "default"
 	KukeonStackLabelKey = "stack.kukeon.io"
 
-	KukeonCellName     = "kuke-cell"
+	KukeonCellName     = "kukeon"
 	KukeonCellLabelKey = "cell.kukeon.io"
 
-	KukeonContainerName     = "kuke-container"
+	KukeonContainerName     = "kukeond"
 	KukeonContainerLabelKey = "container.kukeon.io"
 )
