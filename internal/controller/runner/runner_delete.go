@@ -27,41 +27,42 @@ import (
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/cgroups"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // DeleteContainer stops and deletes a specific container in a cell from containerd.
-func (r *Exec) DeleteContainer(doc *v1beta1.CellDoc, containerID string) error {
-	if doc == nil {
-		return errdefs.ErrCellNotFound
-	}
-
+func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 	containerID = strings.TrimSpace(containerID)
 	if containerID == "" {
 		return errors.New("container ID is required")
 	}
 
-	cellName := strings.TrimSpace(doc.Metadata.Name)
+	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
-		return errdefs.ErrCellNotFound
+		return errdefs.ErrCellNameRequired
 	}
 
-	cellID := doc.Spec.ID
+	cellID := strings.TrimSpace(cell.Spec.ID)
 	if cellID == "" {
 		return errdefs.ErrCellIDRequired
 	}
 
-	realmID := doc.Spec.RealmID
-	if realmID == "" {
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
+	if realmName == "" {
 		return errdefs.ErrRealmNameRequired
 	}
 
-	spaceID := doc.Spec.SpaceID
-	if spaceID == "" {
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
+	if spaceName == "" {
 		return errdefs.ErrSpaceNameRequired
+	}
+
+	stackName := strings.TrimSpace(cell.Spec.StackName)
+	if stackName == "" {
+		return errdefs.ErrStackNameRequired
 	}
 
 	// Initialize ctr client if needed
@@ -74,27 +75,24 @@ func (r *Exec) DeleteContainer(doc *v1beta1.CellDoc, containerID string) error {
 	defer r.ctrClient.Close()
 
 	// Get realm to access namespace
-	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
-			Name: realmID,
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: realmName,
 		},
-	})
+	}
+	internalRealm, err := r.GetRealm(lookupRealm)
 	if err != nil {
 		return fmt.Errorf("failed to get realm: %w", err)
 	}
 
 	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
 
 	// Build hierarchical container ID for containerd operations
-	stackID := doc.Spec.StackID
-	if stackID == "" {
-		return errdefs.ErrStackNameRequired
-	}
 
 	hierarchicalContainerID, err := naming.BuildContainerName(
-		spaceID,
-		stackID,
+		spaceName,
+		stackName,
 		cellID,
 		containerID,
 	)
@@ -129,9 +127,9 @@ func (r *Exec) DeleteContainer(doc *v1beta1.CellDoc, containerID string) error {
 		fields = append(
 			fields,
 			"space",
-			spaceID,
+			spaceName,
 			"realm",
-			realmID,
+			realmName,
 			"containerName",
 			containerID,
 			"err",
@@ -146,7 +144,7 @@ func (r *Exec) DeleteContainer(doc *v1beta1.CellDoc, containerID string) error {
 	}
 
 	fields := appendCellLogFields([]any{"id", hierarchicalContainerID}, cellID, cellName)
-	fields = append(fields, "space", spaceID, "realm", realmID, "containerName", containerID)
+	fields = append(fields, "space", spaceName, "realm", realmName, "containerName", containerID)
 	r.logger.InfoContext(
 		r.ctx,
 		"deleted container",
@@ -156,13 +154,36 @@ func (r *Exec) DeleteContainer(doc *v1beta1.CellDoc, containerID string) error {
 	return nil
 }
 
-func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
-	if doc == nil {
-		return errdefs.ErrCellNotFound
+func (r *Exec) DeleteCell(cell intmodel.Cell) error {
+	cellName := strings.TrimSpace(cell.Metadata.Name)
+	if cellName == "" {
+		return errdefs.ErrCellNameRequired
+	}
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
+	}
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
+	if spaceName == "" {
+		return errdefs.ErrSpaceNameRequired
+	}
+	stackName := strings.TrimSpace(cell.Spec.StackName)
+	if stackName == "" {
+		return errdefs.ErrStackNameRequired
 	}
 
 	// Get the cell document to access all containers
-	cellDoc, err := r.GetCell(doc)
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: cellName,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
+		},
+	}
+	internalCell, err := r.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			// Idempotent: cell doesn't exist, consider it deleted
@@ -181,28 +202,48 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 	defer r.ctrClient.Close()
 
 	// Get realm to access namespace
-	var realmDoc *v1beta1.RealmDoc
-	realmDoc, err = r.GetRealm(&v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
-			Name: cellDoc.Spec.RealmID,
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: internalCell.Spec.RealmName,
 		},
-	})
+	}
+	internalRealm, err := r.GetRealm(lookupRealm)
 	if err != nil {
 		return fmt.Errorf("failed to get realm: %w", err)
 	}
 
 	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
+
+	cellSpaceName := internalCell.Spec.SpaceName
+	cellStackName := internalCell.Spec.StackName
+	cellID := internalCell.Spec.ID
+	if strings.TrimSpace(cellID) == "" {
+		cellID = internalCell.Metadata.Name
+	}
 
 	// Delete all containers in the cell (workload + root)
 	ctrCtx := context.Background()
-	for _, containerSpec := range cellDoc.Spec.Containers {
+	for _, containerSpec := range internalCell.Spec.Containers {
+		containerSpaceName := containerSpec.SpaceName
+		if strings.TrimSpace(containerSpaceName) == "" {
+			containerSpaceName = cellSpaceName
+		}
+		containerStackName := containerSpec.StackName
+		if strings.TrimSpace(containerStackName) == "" {
+			containerStackName = cellStackName
+		}
+		containerCellName := containerSpec.CellName
+		if strings.TrimSpace(containerCellName) == "" {
+			containerCellName = cellID
+		}
+
 		// Build container ID using hierarchical format
 		var containerID string
 		containerID, err = naming.BuildContainerName(
-			containerSpec.SpaceID,
-			containerSpec.StackID,
-			containerSpec.CellID,
+			containerSpaceName,
+			containerStackName,
+			containerCellName,
 			containerSpec.ID,
 		)
 		if err != nil {
@@ -241,7 +282,7 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 	}
 
 	// Delete root container
-	rootContainerID, err := naming.BuildRootContainerName(cellDoc.Spec.SpaceID, cellDoc.Spec.StackID, cellDoc.Spec.ID)
+	rootContainerID, err := naming.BuildRootContainerName(cellSpaceName, cellStackName, cellID)
 	if err != nil {
 		return fmt.Errorf("failed to build root container name: %w", err)
 	}
@@ -258,7 +299,7 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 				netnsPath := fmt.Sprintf("/proc/%d/ns/net", pid)
 
 				// Get CNI config path
-				cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(cellDoc.Spec.RealmID, cellDoc.Spec.SpaceID)
+				cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(internalCell.Spec.RealmName, cellSpaceName)
 				if cniErr == nil {
 					// Create CNI manager and remove container from network
 					cniMgr, mgrErr := cni.NewManager(
@@ -365,49 +406,21 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 	}
 
 	// Delete cell cgroup
-	// Get space and stack to build proper cgroup spec
-	var spaceDoc *v1beta1.SpaceDoc
-	spaceDoc, err = r.GetSpace(&v1beta1.SpaceDoc{
-		Metadata: v1beta1.SpaceMetadata{
-			Name: cellDoc.Spec.SpaceID,
-		},
-		Spec: v1beta1.SpaceSpec{
-			RealmID: cellDoc.Spec.RealmID,
-		},
-	})
+	spec := cgroups.DefaultCellSpec(internalCell)
+	mountpoint := r.ctrClient.GetCgroupMountpoint()
+	err = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
 	if err != nil {
-		r.logger.WarnContext(r.ctx, "failed to get space for cgroup deletion", "error", err)
-	} else {
-		var stackDoc *v1beta1.StackDoc
-		stackDoc, err = r.GetStack(&v1beta1.StackDoc{
-			Metadata: v1beta1.StackMetadata{
-				Name: cellDoc.Spec.StackID,
-			},
-			Spec: v1beta1.StackSpec{
-				RealmID: cellDoc.Spec.RealmID,
-				SpaceID: cellDoc.Spec.SpaceID,
-			},
-		})
-		if err != nil {
-			r.logger.WarnContext(r.ctx, "failed to get stack for cgroup deletion", "error", err)
-		} else {
-			spec := cgroups.DefaultCellSpec(realmDoc, spaceDoc, stackDoc, cellDoc)
-			mountpoint := r.ctrClient.GetCgroupMountpoint()
-			err = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
-			if err != nil {
-				r.logger.WarnContext(r.ctx, "failed to delete cell cgroup", "cgroup", spec.Group, "error", err)
-				// Continue with metadata deletion
-			}
-		}
+		r.logger.WarnContext(r.ctx, "failed to delete cell cgroup", "cgroup", spec.Group, "error", err)
+		// Continue with metadata deletion
 	}
 
 	// Delete cell metadata
 	metadataFilePath := fs.CellMetadataPath(
 		r.opts.RunPath,
-		cellDoc.Spec.RealmID,
-		cellDoc.Spec.SpaceID,
-		cellDoc.Spec.StackID,
-		cellDoc.Metadata.Name,
+		internalCell.Spec.RealmName,
+		cellSpaceName,
+		cellStackName,
+		internalCell.Metadata.Name,
 	)
 	if err = metadata.DeleteMetadata(r.ctx, r.logger, metadataFilePath); err != nil {
 		return fmt.Errorf("%w: failed to delete cell metadata: %w", errdefs.ErrDeleteCell, err)
@@ -416,13 +429,31 @@ func (r *Exec) DeleteCell(doc *v1beta1.CellDoc) error {
 	return nil
 }
 
-func (r *Exec) DeleteStack(doc *v1beta1.StackDoc) error {
-	if doc == nil {
-		return errdefs.ErrStackNotFound
+func (r *Exec) DeleteStack(stack intmodel.Stack) error {
+	stackName := strings.TrimSpace(stack.Metadata.Name)
+	if stackName == "" {
+		return errdefs.ErrStackNameRequired
+	}
+	realmName := strings.TrimSpace(stack.Spec.RealmName)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
+	}
+	spaceName := strings.TrimSpace(stack.Spec.SpaceName)
+	if spaceName == "" {
+		return errdefs.ErrSpaceNameRequired
 	}
 
 	// Get the stack document
-	stackDoc, err := r.GetStack(doc)
+	lookupStack := intmodel.Stack{
+		Metadata: intmodel.StackMetadata{
+			Name: stackName,
+		},
+		Spec: intmodel.StackSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+		},
+	}
+	internalStack, err := r.GetStack(lookupStack)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrStackNotFound) {
 			// Idempotent: stack doesn't exist, consider it deleted
@@ -430,7 +461,6 @@ func (r *Exec) DeleteStack(doc *v1beta1.StackDoc) error {
 		}
 		return fmt.Errorf("%w: %w", errdefs.ErrGetStack, err)
 	}
-
 	// Initialize ctr client if needed
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
@@ -440,30 +470,8 @@ func (r *Exec) DeleteStack(doc *v1beta1.StackDoc) error {
 	}
 	defer r.ctrClient.Close()
 
-	// Get realm and space to build cgroup spec
-	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
-			Name: stackDoc.Spec.RealmID,
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to get realm: %w", err)
-	}
-
-	spaceDoc, err := r.GetSpace(&v1beta1.SpaceDoc{
-		Metadata: v1beta1.SpaceMetadata{
-			Name: stackDoc.Spec.SpaceID,
-		},
-		Spec: v1beta1.SpaceSpec{
-			RealmID: stackDoc.Spec.RealmID,
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to get space: %w", err)
-	}
-
 	// Delete stack cgroup
-	spec := cgroups.DefaultStackSpec(realmDoc, spaceDoc, stackDoc)
+	spec := cgroups.DefaultStackSpec(internalStack)
 	mountpoint := r.ctrClient.GetCgroupMountpoint()
 	err = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
 	if err != nil {
@@ -474,9 +482,9 @@ func (r *Exec) DeleteStack(doc *v1beta1.StackDoc) error {
 	// Delete stack metadata
 	metadataFilePath := fs.StackMetadataPath(
 		r.opts.RunPath,
-		stackDoc.Spec.RealmID,
-		stackDoc.Spec.SpaceID,
-		stackDoc.Metadata.Name,
+		internalStack.Spec.RealmName,
+		internalStack.Spec.SpaceName,
+		internalStack.Metadata.Name,
 	)
 	if err = metadata.DeleteMetadata(r.ctx, r.logger, metadataFilePath); err != nil {
 		return fmt.Errorf("%w: failed to delete stack metadata: %w", errdefs.ErrDeleteStack, err)
@@ -485,13 +493,26 @@ func (r *Exec) DeleteStack(doc *v1beta1.StackDoc) error {
 	return nil
 }
 
-func (r *Exec) DeleteSpace(doc *v1beta1.SpaceDoc) error {
-	if doc == nil {
-		return errdefs.ErrSpaceNotFound
+func (r *Exec) DeleteSpace(space intmodel.Space) error {
+	spaceName := strings.TrimSpace(space.Metadata.Name)
+	if spaceName == "" {
+		return errdefs.ErrSpaceNameRequired
+	}
+	realmName := strings.TrimSpace(space.Spec.RealmName)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
 	}
 
 	// Get the space document
-	spaceDoc, err := r.GetSpace(doc)
+	lookupSpace := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{
+			Name: spaceName,
+		},
+		Spec: intmodel.SpaceSpec{
+			RealmName: realmName,
+		},
+	}
+	internalSpace, err := r.GetSpace(lookupSpace)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrSpaceNotFound) {
 			// Idempotent: space doesn't exist, consider it deleted
@@ -499,7 +520,6 @@ func (r *Exec) DeleteSpace(doc *v1beta1.SpaceDoc) error {
 		}
 		return fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
 	}
-
 	// Initialize ctr client if needed
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
@@ -510,30 +530,21 @@ func (r *Exec) DeleteSpace(doc *v1beta1.SpaceDoc) error {
 	defer r.ctrClient.Close()
 
 	// Get realm to build cgroup spec
-	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
-			Name: spaceDoc.Spec.RealmID,
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to get realm: %w", err)
-	}
-
 	// Delete CNI network config
 	var networkName string
-	realmID := spaceDoc.Spec.RealmID
-	if realmID == "" && spaceDoc.Metadata.Labels != nil {
-		if realmLabel, ok := spaceDoc.Metadata.Labels[consts.KukeonRealmLabelKey]; ok &&
+	realmName = internalSpace.Spec.RealmName
+	if realmName == "" && internalSpace.Metadata.Labels != nil {
+		if realmLabel, ok := internalSpace.Metadata.Labels[consts.KukeonRealmLabelKey]; ok &&
 			strings.TrimSpace(realmLabel) != "" {
-			realmID = strings.TrimSpace(realmLabel)
+			realmName = strings.TrimSpace(realmLabel)
 		}
 	}
-	networkName, err = naming.BuildSpaceNetworkName(realmID, spaceDoc.Metadata.Name)
+	networkName, err = naming.BuildSpaceNetworkName(realmName, internalSpace.Metadata.Name)
 	if err != nil {
 		r.logger.WarnContext(r.ctx, "failed to build network name, skipping CNI config deletion", "error", err)
 	} else {
 		var confPath string
-		confPath, err = r.resolveSpaceCNIConfigPath(spaceDoc.Spec.RealmID, spaceDoc.Metadata.Name)
+		confPath, err = r.resolveSpaceCNIConfigPath(realmName, internalSpace.Metadata.Name)
 		if err == nil {
 			var mgr *cni.Manager
 			mgr, err = cni.NewManager(
@@ -551,7 +562,7 @@ func (r *Exec) DeleteSpace(doc *v1beta1.SpaceDoc) error {
 	}
 
 	// Delete space cgroup
-	spec := cgroups.DefaultSpaceSpec(realmDoc, spaceDoc)
+	spec := cgroups.DefaultSpaceSpec(internalSpace)
 	mountpoint := r.ctrClient.GetCgroupMountpoint()
 	err = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
 	if err != nil {
@@ -562,8 +573,8 @@ func (r *Exec) DeleteSpace(doc *v1beta1.SpaceDoc) error {
 	// Delete space metadata
 	metadataFilePath := fs.SpaceMetadataPath(
 		r.opts.RunPath,
-		spaceDoc.Spec.RealmID,
-		spaceDoc.Metadata.Name,
+		internalSpace.Spec.RealmName,
+		internalSpace.Metadata.Name,
 	)
 	if err = metadata.DeleteMetadata(r.ctx, r.logger, metadataFilePath); err != nil {
 		return fmt.Errorf("%w: failed to delete space metadata: %w", errdefs.ErrDeleteSpace, err)
@@ -572,15 +583,21 @@ func (r *Exec) DeleteSpace(doc *v1beta1.SpaceDoc) error {
 	return nil
 }
 
-func (r *Exec) DeleteRealm(doc *v1beta1.RealmDoc) (DeleteRealmOutcome, error) {
+func (r *Exec) DeleteRealm(realm intmodel.Realm) (DeleteRealmOutcome, error) {
 	var outcome DeleteRealmOutcome
 
-	if doc == nil {
-		return outcome, errdefs.ErrRealmNotFound
+	realmName := strings.TrimSpace(realm.Metadata.Name)
+	if realmName == "" {
+		return outcome, errdefs.ErrRealmNameRequired
 	}
 
 	// Get the realm document
-	realmDoc, err := r.GetRealm(doc)
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: realmName,
+		},
+	}
+	internalRealm, err := r.GetRealm(lookupRealm)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrRealmNotFound) {
 			// Idempotent: realm doesn't exist, consider it deleted
@@ -588,7 +605,6 @@ func (r *Exec) DeleteRealm(doc *v1beta1.RealmDoc) (DeleteRealmOutcome, error) {
 		}
 		return outcome, fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
 	}
-
 	// Initialize ctr client if needed
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
@@ -599,7 +615,7 @@ func (r *Exec) DeleteRealm(doc *v1beta1.RealmDoc) (DeleteRealmOutcome, error) {
 	defer r.ctrClient.Close()
 
 	// Delete realm cgroup
-	spec := cgroups.DefaultRealmSpec(realmDoc)
+	spec := cgroups.DefaultRealmSpec(internalRealm)
 	mountpoint := r.ctrClient.GetCgroupMountpoint()
 	err = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
 	if err != nil {
@@ -610,12 +626,12 @@ func (r *Exec) DeleteRealm(doc *v1beta1.RealmDoc) (DeleteRealmOutcome, error) {
 	}
 
 	// Delete containerd namespace
-	if err = r.ctrClient.DeleteNamespace(realmDoc.Spec.Namespace); err != nil {
+	if err = r.ctrClient.DeleteNamespace(internalRealm.Spec.Namespace); err != nil {
 		r.logger.WarnContext(
 			r.ctx,
 			"failed to delete containerd namespace",
 			"namespace",
-			realmDoc.Spec.Namespace,
+			internalRealm.Spec.Namespace,
 			"error",
 			err,
 		)
@@ -625,7 +641,7 @@ func (r *Exec) DeleteRealm(doc *v1beta1.RealmDoc) (DeleteRealmOutcome, error) {
 	}
 
 	// Delete realm metadata
-	metadataFilePath := fs.RealmMetadataPath(r.opts.RunPath, realmDoc.Metadata.Name)
+	metadataFilePath := fs.RealmMetadataPath(r.opts.RunPath, internalRealm.Metadata.Name)
 	if err = metadata.DeleteMetadata(r.ctx, r.logger, metadataFilePath); err != nil {
 		return outcome, fmt.Errorf("%w: failed to delete realm metadata: %w", errdefs.ErrDeleteRealm, err)
 	}

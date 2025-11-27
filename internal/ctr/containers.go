@@ -32,7 +32,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/typeurl/v2"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -832,15 +832,11 @@ func validateContainerSpec(spec ContainerSpec) error {
 	return nil
 }
 
-// CreateContainerFromSpec converts a v1beta1.ContainerSpec to ctr.ContainerSpec and creates the container.
+// CreateContainerFromSpec converts an internal ContainerSpec to ctr.ContainerSpec and creates the container.
 func (c *client) CreateContainerFromSpec(
 	ctx context.Context,
-	containerSpec *v1beta1.ContainerSpec,
+	containerSpec intmodel.ContainerSpec,
 ) (containerd.Container, error) {
-	if containerSpec == nil {
-		return nil, errors.New("container spec is nil")
-	}
-
 	if containerSpec.ID == "" {
 		return nil, errEmptyContainerID
 	}
@@ -849,26 +845,26 @@ func (c *client) CreateContainerFromSpec(
 		return nil, errInvalidImage
 	}
 
-	if containerSpec.CellID == "" {
+	if containerSpec.CellName == "" {
 		return nil, errEmptyCellID
 	}
 
-	if containerSpec.SpaceID == "" {
+	if containerSpec.SpaceName == "" {
 		return nil, errEmptySpaceID
 	}
 
-	if containerSpec.RealmID == "" {
+	if containerSpec.RealmName == "" {
 		return nil, errEmptyRealmID
 	}
 
-	if containerSpec.StackID == "" {
+	if containerSpec.StackName == "" {
 		return nil, errEmptyStackID
 	}
 
-	cellID := containerSpec.CellID
-	spaceID := containerSpec.SpaceID
-	realmID := containerSpec.RealmID
-	stackID := containerSpec.StackID
+	cellID := containerSpec.CellName
+	spaceID := containerSpec.SpaceName
+	realmID := containerSpec.RealmName
+	stackID := containerSpec.StackName
 
 	// Build labels
 	labels := make(map[string]string)

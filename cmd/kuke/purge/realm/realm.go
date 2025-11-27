@@ -17,17 +17,21 @@
 package realm
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/purge/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
+	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 )
 
 type realmController interface {
-	PurgeRealm(doc *v1beta1.RealmDoc, force, cascade bool) (controller.PurgeRealmResult, error)
+	PurgeRealm(realm intmodel.Realm, force, cascade bool) (controller.PurgeRealmResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -65,14 +69,21 @@ func NewRealmCmd() *cobra.Command {
 				},
 			}
 
-			result, err := ctrl.PurgeRealm(doc, force, cascade)
+			// Convert at boundary before calling controller
+			realmInternal, _, err := apischeme.NormalizeRealm(*doc)
+			if err != nil {
+				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+			}
+
+			result, err := ctrl.PurgeRealm(realmInternal, force, cascade)
 			if err != nil {
 				return err
 			}
 
-			realmName := name
-			if result.RealmDoc != nil {
-				realmName = result.RealmDoc.Metadata.Name
+			// Use realm from result for output
+			realmName := result.Realm.Metadata.Name
+			if realmName == "" {
+				realmName = name
 			}
 
 			cmd.Printf("Purged realm %q\n", realmName)
@@ -94,8 +105,8 @@ type controllerWrapper struct {
 }
 
 func (w *controllerWrapper) PurgeRealm(
-	doc *v1beta1.RealmDoc,
+	realm intmodel.Realm,
 	force, cascade bool,
 ) (controller.PurgeRealmResult, error) {
-	return w.ctrl.PurgeRealm(doc, force, cascade)
+	return w.ctrl.PurgeRealm(realm, force, cascade)
 }

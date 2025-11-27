@@ -22,8 +22,10 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	ctrutil "github.com/eminwux/kukeon/internal/util/ctr"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
@@ -31,7 +33,7 @@ import (
 )
 
 type containerController interface {
-	CreateContainer(doc *v1beta1.ContainerDoc) (controller.CreateContainerResult, error)
+	CreateContainer(container intmodel.Container) (controller.CreateContainerResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -113,6 +115,12 @@ func NewContainerCmd() *cobra.Command {
 			// Ensure all nested structs are initialized
 			containerDoc = v1beta1.NewContainerDoc(containerDoc)
 
+			// Convert at boundary before calling controller
+			containerInternal, version, err := apischeme.NormalizeContainer(*containerDoc)
+			if err != nil {
+				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+			}
+
 			// Check for mock controller in context (for testing)
 			var ctrl containerController
 			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(containerController); ok {
@@ -126,12 +134,13 @@ func NewContainerCmd() *cobra.Command {
 				ctrl = realCtrl
 			}
 
-			createResult, err := ctrl.CreateContainer(containerDoc)
+			// Call controller with internal type
+			createResult, err := ctrl.CreateContainer(containerInternal)
 			if err != nil {
 				return err
 			}
 
-			printContainerResult(cmd, createResult)
+			printContainerResult(cmd, createResult, version)
 			return nil
 		},
 	}
@@ -164,19 +173,31 @@ func NewContainerCmd() *cobra.Command {
 	return cmd
 }
 
-func printContainerResult(cmd *cobra.Command, result controller.CreateContainerResult) {
-	if result.ContainerDoc != nil {
+func printContainerResult(cmd *cobra.Command, result controller.CreateContainerResult, version v1beta1.Version) {
+	// Convert result back to external for output
+	resultDoc, err := apischeme.BuildContainerExternalFromInternal(result.Container, version)
+	if err != nil {
+		// Fallback to internal type if conversion fails
 		cmd.Printf(
 			"Container %q (ID: %q) in cell %q (realm %q, space %q, stack %q)\n",
-			result.ContainerDoc.Metadata.Name,
-			result.ContainerDoc.Spec.ID,
-			result.ContainerDoc.Spec.CellID,
-			result.ContainerDoc.Spec.RealmID,
-			result.ContainerDoc.Spec.SpaceID,
-			result.ContainerDoc.Spec.StackID,
+			result.Container.Metadata.Name,
+			result.Container.Spec.ID,
+			result.Container.Spec.CellName,
+			result.Container.Spec.RealmName,
+			result.Container.Spec.SpaceName,
+			result.Container.Spec.StackName,
 		)
+		cmd.Printf("Warning: failed to convert result for output: %v\n", err)
 	} else {
-		cmd.Println("Container created (details unavailable)")
+		cmd.Printf(
+			"Container %q (ID: %q) in cell %q (realm %q, space %q, stack %q)\n",
+			resultDoc.Metadata.Name,
+			resultDoc.Spec.ID,
+			resultDoc.Spec.CellID,
+			resultDoc.Spec.RealmID,
+			resultDoc.Spec.SpaceID,
+			resultDoc.Spec.StackID,
+		)
 	}
 	shared.PrintCreationOutcome(cmd, "container", result.ContainerExistsPost, result.ContainerCreated)
 	if result.Started {
@@ -187,6 +208,6 @@ func printContainerResult(cmd *cobra.Command, result controller.CreateContainerR
 }
 
 // PrintContainerResult is exported for testing purposes.
-func PrintContainerResult(cmd *cobra.Command, result controller.CreateContainerResult) {
-	printContainerResult(cmd, result)
+func PrintContainerResult(cmd *cobra.Command, result controller.CreateContainerResult, version v1beta1.Version) {
+	printContainerResult(cmd, result, version)
 }

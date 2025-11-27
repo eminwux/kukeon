@@ -22,15 +22,17 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type cellController interface {
-	DeleteCell(doc *v1beta1.CellDoc) (controller.DeleteCellResult, error)
+	DeleteCell(cell intmodel.Cell) (controller.DeleteCellResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -83,12 +85,26 @@ func NewCellCmd() *cobra.Command {
 				},
 			}
 
-			result, err := ctrl.DeleteCell(doc)
+			// Convert at boundary before calling controller
+			cellInternal, _, err := apischeme.NormalizeCell(*doc)
+			if err != nil {
+				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+			}
+
+			result, err := ctrl.DeleteCell(cellInternal)
 			if err != nil {
 				return err
 			}
 
-			cmd.Printf("Deleted cell %q from stack %q\n", result.CellDoc.Metadata.Name, result.CellDoc.Spec.StackID)
+			cellName := result.Cell.Metadata.Name
+			if cellName == "" {
+				cellName = name
+			}
+			stackName := result.Cell.Spec.StackName
+			if stackName == "" {
+				stackName = stack
+			}
+			cmd.Printf("Deleted cell %q from stack %q\n", cellName, stackName)
 			return nil
 		},
 	}

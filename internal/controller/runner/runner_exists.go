@@ -25,10 +25,10 @@ import (
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/cgroups"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 func (r *Exec) ExistsRealmContainerdNamespace(namespace string) (bool, error) {
@@ -50,60 +50,76 @@ func (r *Exec) ExistsRealmContainerdNamespace(namespace string) (bool, error) {
 	return r.ctrClient.ExistsNamespace(namespace)
 }
 
-func (r *Exec) ExistsCellRootContainer(doc *v1beta1.CellDoc) (bool, error) {
-	if doc == nil {
-		return false, errdefs.ErrCellNotFound
-	}
-
-	cellName := doc.Metadata.Name
+func (r *Exec) ExistsCellRootContainer(cell intmodel.Cell) (bool, error) {
+	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
-		return false, errdefs.ErrCellNotFound
+		return false, errdefs.ErrCellNameRequired
 	}
-
-	cellID := doc.Spec.ID
-	if cellID == "" {
-		return false, errdefs.ErrCellIDRequired
-	}
-
-	realmID := doc.Spec.RealmID
-	if realmID == "" {
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
+	if realmName == "" {
 		return false, errdefs.ErrRealmNameRequired
 	}
-
-	spaceID := doc.Spec.SpaceID
-	if spaceID == "" {
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
+	if spaceName == "" {
 		return false, errdefs.ErrSpaceNameRequired
+	}
+	stackName := strings.TrimSpace(cell.Spec.StackName)
+	if stackName == "" {
+		return false, errdefs.ErrStackNameRequired
+	}
+
+	// Get the cell document to access cell ID
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: cellName,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
+		},
+	}
+	internalCell, err := r.GetCell(lookupCell)
+	if err != nil {
+		return false, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
+	}
+
+	cellID := internalCell.Spec.ID
+	if cellID == "" {
+		return false, errdefs.ErrCellIDRequired
 	}
 
 	// Initialize ctr client if needed
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
-	if err := r.ctrClient.Connect(); err != nil {
+	if err = r.ctrClient.Connect(); err != nil {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 	defer r.ctrClient.Close()
 
 	// Get realm to access namespace
-	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
-			Name: realmID,
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: realmName,
 		},
-	})
+	}
+
+	internalRealm, err := r.GetRealm(lookupRealm)
 	if err != nil {
 		return false, fmt.Errorf("failed to get realm: %w", err)
 	}
 
+	namespace := internalRealm.Spec.Namespace
+	if namespace == "" {
+		return false, fmt.Errorf("realm %q has no namespace", realmName)
+	}
+
 	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+	r.ctrClient.SetNamespace(namespace)
 
 	// Generate container ID with cell identifier for uniqueness
-	// Need to get spaceID and stackID from doc
-	stackID := doc.Spec.StackID
-	if stackID == "" {
-		return false, errdefs.ErrStackNameRequired
-	}
-	containerID, err := naming.BuildRootContainerName(spaceID, stackID, cellID)
+	containerID, err := naming.BuildRootContainerName(spaceName, stackName, cellID)
 	if err != nil {
 		return false, fmt.Errorf("failed to build root container name: %w", err)
 	}
@@ -132,105 +148,32 @@ func (r *Exec) ExistsCgroup(doc any) (bool, error) {
 
 	// Build cgroup spec based on doc type
 	switch d := doc.(type) {
-	case *v1beta1.RealmDoc:
-		if d == nil {
+	case intmodel.Realm:
+		if d.Metadata.Name == "" {
 			return false, errdefs.ErrRealmNotFound
 		}
 		spec = cgroups.DefaultRealmSpec(d)
 
-	case *v1beta1.SpaceDoc:
-		if d == nil {
+	case intmodel.Space:
+		if d.Metadata.Name == "" {
 			return false, errdefs.ErrSpaceNotFound
 		}
-		if d.Spec.RealmID == "" {
+		if d.Spec.RealmName == "" {
 			return false, errdefs.ErrRealmNameRequired
 		}
-		realmDoc, realmErr := r.GetRealm(&v1beta1.RealmDoc{
-			Metadata: v1beta1.RealmMetadata{
-				Name: d.Spec.RealmID,
-			},
-		})
-		if realmErr != nil {
-			return false, fmt.Errorf("failed to get realm: %w", realmErr)
-		}
-		spec = cgroups.DefaultSpaceSpec(realmDoc, d)
+		spec = cgroups.DefaultSpaceSpec(d)
 
-	case *v1beta1.StackDoc:
-		if d == nil {
+	case intmodel.Stack:
+		if d.Metadata.Name == "" {
 			return false, errdefs.ErrStackNotFound
 		}
-		if d.Spec.RealmID == "" {
-			return false, errdefs.ErrRealmNameRequired
-		}
-		if d.Spec.SpaceID == "" {
-			return false, errdefs.ErrSpaceNameRequired
-		}
-		realmDoc, realmErr := r.GetRealm(&v1beta1.RealmDoc{
-			Metadata: v1beta1.RealmMetadata{
-				Name: d.Spec.RealmID,
-			},
-		})
-		if realmErr != nil {
-			return false, fmt.Errorf("failed to get realm: %w", realmErr)
-		}
-		spaceDoc, spaceErr := r.GetSpace(&v1beta1.SpaceDoc{
-			Metadata: v1beta1.SpaceMetadata{
-				Name: d.Spec.SpaceID,
-			},
-			Spec: v1beta1.SpaceSpec{
-				RealmID: d.Spec.RealmID,
-			},
-		})
-		if spaceErr != nil {
-			return false, fmt.Errorf("failed to get space: %w", spaceErr)
-		}
-		spec = cgroups.DefaultStackSpec(realmDoc, spaceDoc, d)
+		spec = cgroups.DefaultStackSpec(d)
 
-	case *v1beta1.CellDoc:
-		if d == nil {
+	case intmodel.Cell:
+		if d.Metadata.Name == "" {
 			return false, errdefs.ErrCellNotFound
 		}
-		if d.Spec.RealmID == "" {
-			return false, errdefs.ErrRealmNameRequired
-		}
-		if d.Spec.SpaceID == "" {
-			return false, errdefs.ErrSpaceNameRequired
-		}
-		if d.Spec.StackID == "" {
-			return false, errdefs.ErrStackNameRequired
-		}
-		realmDoc, realmErr := r.GetRealm(&v1beta1.RealmDoc{
-			Metadata: v1beta1.RealmMetadata{
-				Name: d.Spec.RealmID,
-			},
-		})
-		if realmErr != nil {
-			return false, fmt.Errorf("failed to get realm: %w", realmErr)
-		}
-		spaceDoc, spaceErr := r.GetSpace(&v1beta1.SpaceDoc{
-			Metadata: v1beta1.SpaceMetadata{
-				Name: d.Spec.SpaceID,
-			},
-			Spec: v1beta1.SpaceSpec{
-				RealmID: d.Spec.RealmID,
-			},
-		})
-		if spaceErr != nil {
-			return false, fmt.Errorf("failed to get space: %w", spaceErr)
-		}
-		stackDoc, stackErr := r.GetStack(&v1beta1.StackDoc{
-			Metadata: v1beta1.StackMetadata{
-				Name: d.Spec.StackID,
-			},
-			Spec: v1beta1.StackSpec{
-				RealmID: d.Spec.RealmID,
-				SpaceID: d.Spec.SpaceID,
-			},
-		})
-		if stackErr != nil {
-			return false, fmt.Errorf("failed to get stack: %w", stackErr)
-		}
-		spec = cgroups.DefaultCellSpec(realmDoc, spaceDoc, stackDoc, d)
+		spec = cgroups.DefaultCellSpec(d)
 
 	default:
 		return false, fmt.Errorf("unsupported doc type: %T", doc)
@@ -255,11 +198,12 @@ func (r *Exec) ExistsCgroup(doc any) (bool, error) {
 	return true, nil
 }
 
-func (r *Exec) ExistsSpaceCNIConfig(doc *v1beta1.SpaceDoc) (bool, error) {
-	if doc == nil {
-		return false, errdefs.ErrSpaceDocRequired
+func (r *Exec) ExistsSpaceCNIConfig(space intmodel.Space) (bool, error) {
+	spaceName := strings.TrimSpace(space.Metadata.Name)
+	if spaceName == "" {
+		return false, errdefs.ErrSpaceNameRequired
 	}
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(space.Spec.RealmName)
 	if realmName == "" {
 		return false, errdefs.ErrRealmNameRequired
 	}
@@ -272,11 +216,11 @@ func (r *Exec) ExistsSpaceCNIConfig(doc *v1beta1.SpaceDoc) (bool, error) {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrInitCniManager, err)
 	}
 
-	confPath, err := fs.SpaceNetworkConfigPath(r.opts.RunPath, realmName, doc.Metadata.Name)
+	confPath, err := fs.SpaceNetworkConfigPath(r.opts.RunPath, realmName, spaceName)
 	if err != nil {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
-	networkName, err := naming.BuildSpaceNetworkName(realmName, doc.Metadata.Name)
+	networkName, err := naming.BuildSpaceNetworkName(realmName, spaceName)
 	if err != nil {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}

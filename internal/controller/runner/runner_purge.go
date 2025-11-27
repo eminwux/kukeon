@@ -23,36 +23,70 @@ import (
 	"os"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/cgroups"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // PurgeCell performs comprehensive cleanup of a cell, including CNI resources and orphaned containers.
-func (r *Exec) PurgeCell(doc *v1beta1.CellDoc) error {
-	if doc == nil {
-		return errdefs.ErrCellNotFound
+func (r *Exec) PurgeCell(cell intmodel.Cell) error {
+	cellName := strings.TrimSpace(cell.Metadata.Name)
+	if cellName == "" {
+		return errdefs.ErrCellNameRequired
+	}
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
+	}
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
+	if spaceName == "" {
+		return errdefs.ErrSpaceNameRequired
+	}
+	stackName := strings.TrimSpace(cell.Spec.StackName)
+	if stackName == "" {
+		return errdefs.ErrStackNameRequired
 	}
 
 	// First, perform standard delete
-	if err := r.DeleteCell(doc); err != nil {
+	lookupCellForDelete := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: cellName,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
+		},
+	}
+	if err := r.DeleteCell(lookupCellForDelete); err != nil {
 		// Log but continue with purge even if delete fails
 		r.logger.WarnContext(r.ctx, "delete failed, continuing with purge", "error", err)
 	}
 
-	// Get cell document to access containers and metadata
-	cellDoc, err := r.GetCell(doc)
+	// Get cell to access containers and metadata
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: cellName,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
+		},
+	}
+	internalCell, err := r.GetCell(lookupCell)
 	if err != nil && !errors.Is(err, errdefs.ErrCellNotFound) {
 		return fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 	}
 
-	// If cell doesn't exist, still try to purge orphaned resources
-	if errors.Is(err, errdefs.ErrCellNotFound) {
-		cellDoc = doc // Use provided doc for pattern matching
+	// Use internalCell if available, otherwise use provided cell as fallback
+	cellForOps := internalCell
+	cellNotFound := errors.Is(err, errdefs.ErrCellNotFound)
+	if cellNotFound {
+		cellForOps = cell
 	}
 
 	// Initialize ctr client if needed
@@ -65,137 +99,120 @@ func (r *Exec) PurgeCell(doc *v1beta1.CellDoc) error {
 	defer r.ctrClient.Close()
 
 	// Get realm to access namespace
-	var realmDoc *v1beta1.RealmDoc
-	realmDoc, err = r.GetRealm(&v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
-			Name: cellDoc.Spec.RealmID,
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: cellForOps.Spec.RealmName,
 		},
-	})
+	}
+	internalRealm, err := r.GetRealm(lookupRealm)
 	if err != nil {
 		r.logger.WarnContext(r.ctx, "failed to get realm for purge", "error", err)
 		return nil // Continue anyway
 	}
 
 	// Set namespace
-	r.logger.DebugContext(r.ctx, "setting namespace for cell purge", "namespace", realmDoc.Spec.Namespace)
-	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+	r.logger.DebugContext(r.ctx, "setting namespace for cell purge", "namespace", internalRealm.Spec.Namespace)
+	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
 
 	// Get space for network name
-	var spaceDoc *v1beta1.SpaceDoc
-	spaceDoc, err = r.GetSpace(&v1beta1.SpaceDoc{
-		Metadata: v1beta1.SpaceMetadata{
-			Name: cellDoc.Spec.SpaceID,
+	lookupSpace := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{
+			Name: cellForOps.Spec.SpaceName,
 		},
-		Spec: v1beta1.SpaceSpec{
-			RealmID: cellDoc.Spec.RealmID,
+		Spec: intmodel.SpaceSpec{
+			RealmName: cellForOps.Spec.RealmName,
 		},
-	})
+	}
+	space, err := r.GetSpace(lookupSpace)
 	if err != nil {
 		r.logger.WarnContext(r.ctx, "failed to get space for purge", "error", err)
 	} else {
-		// Convert to internal model
-		space, convertErr := apischeme.ConvertSpaceDocToInternal(*spaceDoc)
-		if convertErr != nil {
-			r.logger.WarnContext(r.ctx, "failed to convert space to internal model", "error", convertErr)
+		var networkName string
+		networkName, err = r.getSpaceNetworkName(space)
+		if err != nil {
+			r.logger.WarnContext(r.ctx, "failed to get network name", "error", err)
 		} else {
-			var networkName string
-			networkName, err = r.getSpaceNetworkName(space)
+			// Build container names from the cell using the same naming scheme as creation
+			// This ensures we match the actual container names (using underscores, not hyphens)
+			var containerIDs []string
+
+			// Get names from cell spec, with fallbacks
+			cellSpaceName := cellForOps.Spec.SpaceName
+			cellStackName := cellForOps.Spec.StackName
+			cellID := cellForOps.Spec.ID
+			if cellID == "" {
+				cellID = cellForOps.Metadata.Name
+			}
+
+			// Add root container
+			var rootContainerID string
+			rootContainerID, err = naming.BuildRootContainerName(cellSpaceName, cellStackName, cellID)
 			if err != nil {
-				r.logger.WarnContext(r.ctx, "failed to get network name", "error", err)
+				r.logger.WarnContext(r.ctx, "failed to build root container name", "error", err)
 			} else {
-				// Build container names from the cell document using the same naming scheme as creation
-				// This ensures we match the actual container names (using underscores, not hyphens)
-				var containerIDs []string
+				containerIDs = append(containerIDs, rootContainerID)
+			}
 
-				// Get IDs from cell document, with fallbacks
-				spaceID := cellDoc.Spec.SpaceID
-				stackID := cellDoc.Spec.StackID
-				cellID := cellDoc.Spec.ID
-				if cellID == "" {
-					cellID = cellDoc.Metadata.Name
+			// Add all containers from the cell spec
+			for _, containerSpec := range cellForOps.Spec.Containers {
+				// Use container spec names if available, otherwise fall back to cell spec names
+				containerSpaceName := containerSpec.SpaceName
+				if containerSpaceName == "" {
+					containerSpaceName = cellSpaceName
+				}
+				containerStackName := containerSpec.StackName
+				if containerStackName == "" {
+					containerStackName = cellStackName
+				}
+				containerCellName := containerSpec.CellName
+				if containerCellName == "" {
+					containerCellName = cellID
+				}
+				containerName := containerSpec.ID
+				if containerName == "" {
+					r.logger.WarnContext(r.ctx, "container spec has empty ID, skipping", "index", len(containerIDs))
+					continue
 				}
 
-				// Add root container
-				var rootContainerID string
-				rootContainerID, err = naming.BuildRootContainerName(spaceID, stackID, cellID)
+				var containerID string
+				containerID, err = naming.BuildContainerName(containerSpaceName, containerStackName, containerCellName, containerName)
 				if err != nil {
-					r.logger.WarnContext(r.ctx, "failed to build root container name", "error", err)
-				} else {
-					containerIDs = append(containerIDs, rootContainerID)
+					r.logger.WarnContext(r.ctx, "failed to build container name", "container", containerName, "error", err)
+					continue
 				}
+				containerIDs = append(containerIDs, containerID)
+			}
 
-				// Add all containers from the cell spec
-				for _, containerSpec := range cellDoc.Spec.Containers {
-					// Use container spec IDs if available, otherwise fall back to cell doc IDs
-					containerSpaceID := containerSpec.SpaceID
-					if containerSpaceID == "" {
-						containerSpaceID = spaceID
-					}
-					containerStackID := containerSpec.StackID
-					if containerStackID == "" {
-						containerStackID = stackID
-					}
-					containerCellID := containerSpec.CellID
-					if containerCellID == "" {
-						containerCellID = cellID
-					}
-					containerName := containerSpec.ID
-					if containerName == "" {
-						r.logger.WarnContext(r.ctx, "container spec has empty ID, skipping", "index", len(containerIDs))
-						continue
-					}
-
-					var containerID string
-					containerID, err = naming.BuildContainerName(containerSpaceID, containerStackID, containerCellID, containerName)
-					if err != nil {
-						r.logger.WarnContext(r.ctx, "failed to build container name", "container", containerName, "error", err)
-						continue
-					}
-					containerIDs = append(containerIDs, containerID)
+			r.logger.DebugContext(r.ctx, "built container IDs from cell", "count", len(containerIDs))
+			if len(containerIDs) > 0 {
+				r.logger.InfoContext(r.ctx, "purging CNI resources for cell containers", "count", len(containerIDs))
+				ctrCtx := context.Background()
+				for i, containerID := range containerIDs {
+					r.logger.DebugContext(r.ctx, "processing container for CNI purge", "index", i+1, "total", len(containerIDs), "id", containerID)
+					// Try to get netns path
+					r.logger.DebugContext(r.ctx, "getting container netns path", "id", containerID)
+					netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
+					// Purge CNI resources
+					r.logger.DebugContext(r.ctx, "purging CNI resources for container", "id", containerID, "network", networkName)
+					_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
 				}
-
-				r.logger.DebugContext(r.ctx, "built container IDs from cell document", "count", len(containerIDs))
-				if len(containerIDs) > 0 {
-					r.logger.InfoContext(r.ctx, "purging CNI resources for cell containers", "count", len(containerIDs))
-					ctrCtx := context.Background()
-					for i, containerID := range containerIDs {
-						r.logger.DebugContext(r.ctx, "processing container for CNI purge", "index", i+1, "total", len(containerIDs), "id", containerID)
-						// Try to get netns path
-						r.logger.DebugContext(r.ctx, "getting container netns path", "id", containerID)
-						netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
-						// Purge CNI resources
-						r.logger.DebugContext(r.ctx, "purging CNI resources for container", "id", containerID, "network", networkName)
-						_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
-					}
-					r.logger.InfoContext(r.ctx, "completed purging CNI resources for cell containers", "count", len(containerIDs))
-				}
+				r.logger.InfoContext(r.ctx, "completed purging CNI resources for cell containers", "count", len(containerIDs))
 			}
 		}
 	}
 
 	// Force remove cell cgroup if it still exists
-	stackDoc, err := r.GetStack(&v1beta1.StackDoc{
-		Metadata: v1beta1.StackMetadata{
-			Name: cellDoc.Spec.StackID,
-		},
-		Spec: v1beta1.StackSpec{
-			RealmID: cellDoc.Spec.RealmID,
-			SpaceID: cellDoc.Spec.SpaceID,
-		},
-	})
-	if err == nil && spaceDoc != nil {
-		spec := cgroups.DefaultCellSpec(realmDoc, spaceDoc, stackDoc, cellDoc)
-		mountpoint := r.ctrClient.GetCgroupMountpoint()
-		_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
-	}
+	spec := cgroups.DefaultCellSpec(cellForOps)
+	mountpoint := r.ctrClient.GetCgroupMountpoint()
+	_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
 
 	// Remove metadata directory completely
 	metadataRunPath := fs.CellMetadataDir(
 		r.opts.RunPath,
-		cellDoc.Spec.RealmID,
-		cellDoc.Spec.SpaceID,
-		cellDoc.Spec.StackID,
-		cellDoc.Metadata.Name,
+		cellForOps.Spec.RealmName,
+		cellForOps.Spec.SpaceName,
+		cellForOps.Spec.StackName,
+		cellForOps.Metadata.Name,
 	)
 	_ = os.RemoveAll(metadataRunPath)
 
@@ -203,32 +220,57 @@ func (r *Exec) PurgeCell(doc *v1beta1.CellDoc) error {
 }
 
 // PurgeSpace performs comprehensive cleanup of a space, including CNI resources and orphaned containers.
-func (r *Exec) PurgeSpace(doc *v1beta1.SpaceDoc) error {
-	if doc == nil {
-		return errdefs.ErrSpaceNotFound
+func (r *Exec) PurgeSpace(space intmodel.Space) error {
+	spaceName := strings.TrimSpace(space.Metadata.Name)
+	if spaceName == "" {
+		return errdefs.ErrSpaceNameRequired
+	}
+	realmName := strings.TrimSpace(space.Spec.RealmName)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
 	}
 
 	// First, perform standard delete
-	if err := r.DeleteSpace(doc); err != nil {
+	lookupSpaceForDelete := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{
+			Name: spaceName,
+		},
+		Spec: intmodel.SpaceSpec{
+			RealmName: realmName,
+		},
+	}
+	if err := r.DeleteSpace(lookupSpaceForDelete); err != nil {
 		r.logger.WarnContext(r.ctx, "delete failed, continuing with purge", "error", err)
 	}
 
-	// Get space document
-	spaceDoc, err := r.GetSpace(doc)
+	// Get space via internal model to ensure metadata accuracy
+	lookupSpace := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{
+			Name: spaceName,
+		},
+		Spec: intmodel.SpaceSpec{
+			RealmName: realmName,
+		},
+	}
+	internalSpace, err := r.GetSpace(lookupSpace)
 	if err != nil && !errors.Is(err, errdefs.ErrSpaceNotFound) {
 		return fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
 	}
 
-	if errors.Is(err, errdefs.ErrSpaceNotFound) {
-		spaceDoc = doc
+	// Use internalSpace if available, otherwise use provided space as fallback
+	spaceForOps := internalSpace
+	spaceNotFound := errors.Is(err, errdefs.ErrSpaceNotFound)
+	if spaceNotFound {
+		spaceForOps = space
 	}
 
 	// Get realm
-	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
-			Name: spaceDoc.Spec.RealmID,
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: spaceForOps.Spec.RealmName,
 		},
-	})
+	}
+	internalRealm, err := r.GetRealm(lookupRealm)
 	if err != nil {
 		r.logger.WarnContext(r.ctx, "failed to get realm for purge", "error", err)
 		return nil
@@ -236,11 +278,8 @@ func (r *Exec) PurgeSpace(doc *v1beta1.SpaceDoc) error {
 
 	// Get network name
 	var networkName string
-	space, convertErr := apischeme.ConvertSpaceDocToInternal(*spaceDoc)
-	if convertErr != nil {
-		r.logger.WarnContext(r.ctx, "failed to convert space to internal model", "error", convertErr)
-	} else {
-		networkName, err = r.getSpaceNetworkName(space)
+	if !spaceNotFound {
+		networkName, err = r.getSpaceNetworkName(internalSpace)
 		if err == nil {
 			// Purge entire network
 			_ = r.purgeCNIForNetwork(r.ctx, networkName)
@@ -253,11 +292,11 @@ func (r *Exec) PurgeSpace(doc *v1beta1.SpaceDoc) error {
 	}
 	if err = r.ctrClient.Connect(); err == nil {
 		defer r.ctrClient.Close()
-		r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+		r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
 
-		pattern := fmt.Sprintf("%s-%s", spaceDoc.Spec.RealmID, spaceDoc.Metadata.Name)
+		pattern := fmt.Sprintf("%s-%s", spaceForOps.Spec.RealmName, spaceForOps.Metadata.Name)
 		var containers []string
-		containers, err = r.findContainersByPattern(r.ctx, realmDoc.Spec.Namespace, pattern)
+		containers, err = r.findContainersByPattern(r.ctx, internalRealm.Spec.Namespace, pattern)
 		if err == nil {
 			ctrCtx := context.Background()
 			for _, containerID := range containers {
@@ -268,7 +307,7 @@ func (r *Exec) PurgeSpace(doc *v1beta1.SpaceDoc) error {
 	}
 
 	// Force remove space cgroup
-	spec := cgroups.DefaultSpaceSpec(realmDoc, spaceDoc)
+	spec := cgroups.DefaultSpaceSpec(spaceForOps)
 	if r.ctrClient != nil {
 		mountpoint := r.ctrClient.GetCgroupMountpoint()
 		_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
@@ -277,8 +316,8 @@ func (r *Exec) PurgeSpace(doc *v1beta1.SpaceDoc) error {
 	// Remove metadata directory completely
 	metadataRunPath := fs.SpaceMetadataDir(
 		r.opts.RunPath,
-		spaceDoc.Spec.RealmID,
-		spaceDoc.Metadata.Name,
+		spaceForOps.Spec.RealmName,
+		spaceForOps.Metadata.Name,
 	)
 	_ = os.RemoveAll(metadataRunPath)
 
@@ -286,57 +325,79 @@ func (r *Exec) PurgeSpace(doc *v1beta1.SpaceDoc) error {
 }
 
 // PurgeStack performs comprehensive cleanup of a stack, including CNI resources and orphaned containers.
-func (r *Exec) PurgeStack(doc *v1beta1.StackDoc) error {
-	if doc == nil {
-		return errdefs.ErrStackNotFound
+func (r *Exec) PurgeStack(stack intmodel.Stack) error {
+	stackName := strings.TrimSpace(stack.Metadata.Name)
+	if stackName == "" {
+		return errdefs.ErrStackNameRequired
+	}
+	realmName := strings.TrimSpace(stack.Spec.RealmName)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
+	}
+	spaceName := strings.TrimSpace(stack.Spec.SpaceName)
+	if spaceName == "" {
+		return errdefs.ErrSpaceNameRequired
 	}
 
 	// First, perform standard delete
-	if err := r.DeleteStack(doc); err != nil {
+	lookupStackForDelete := intmodel.Stack{
+		Metadata: intmodel.StackMetadata{
+			Name: stackName,
+		},
+		Spec: intmodel.StackSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+		},
+	}
+	if err := r.DeleteStack(lookupStackForDelete); err != nil {
 		r.logger.WarnContext(r.ctx, "delete failed, continuing with purge", "error", err)
 	}
 
-	// Get stack document
-	stackDoc, err := r.GetStack(doc)
-	if err != nil && !errors.Is(err, errdefs.ErrStackNotFound) {
-		return fmt.Errorf("%w: %w", errdefs.ErrGetStack, err)
+	// Get stack document via internal model to ensure metadata accuracy
+	lookupStack := intmodel.Stack{
+		Metadata: intmodel.StackMetadata{
+			Name: stackName,
+		},
+		Spec: intmodel.StackSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+		},
 	}
-
-	if errors.Is(err, errdefs.ErrStackNotFound) {
-		stackDoc = doc
+	internalStack, getStackErr := r.GetStack(lookupStack)
+	stackForOps := stack
+	if getStackErr == nil {
+		stackForOps = internalStack
+	} else if !errors.Is(getStackErr, errdefs.ErrStackNotFound) {
+		return fmt.Errorf("%w: %w", errdefs.ErrGetStack, getStackErr)
 	}
 
 	// Get realm and space
-	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
-			Name: stackDoc.Spec.RealmID,
+	lookupRealmForStack := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: stackForOps.Spec.RealmName,
 		},
-	})
+	}
+	internalRealmForStack, err := r.GetRealm(lookupRealmForStack)
 	if err != nil {
 		r.logger.WarnContext(r.ctx, "failed to get realm for purge", "error", err)
 		return nil
 	}
+	realmNamespace := internalRealmForStack.Spec.Namespace
 
-	spaceDoc, err := r.GetSpace(&v1beta1.SpaceDoc{
-		Metadata: v1beta1.SpaceMetadata{
-			Name: stackDoc.Spec.SpaceID,
+	lookupSpace := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{
+			Name: stackForOps.Spec.SpaceName,
 		},
-		Spec: v1beta1.SpaceSpec{
-			RealmID: stackDoc.Spec.RealmID,
+		Spec: intmodel.SpaceSpec{
+			RealmName: stackForOps.Spec.RealmName,
 		},
-	})
+	}
+	internalSpace, err := r.GetSpace(lookupSpace)
 	if err != nil {
 		r.logger.WarnContext(r.ctx, "failed to get space for purge", "error", err)
 		return nil
 	}
-
-	// Convert to internal model
-	space, convertErr := apischeme.ConvertSpaceDocToInternal(*spaceDoc)
-	if convertErr != nil {
-		r.logger.WarnContext(r.ctx, "failed to convert space to internal model", "error", convertErr)
-		return nil
-	}
-	networkName, _ := r.getSpaceNetworkName(space)
+	networkName, _ := r.getSpaceNetworkName(internalSpace)
 
 	// Find all containers in stack
 	if r.ctrClient == nil {
@@ -344,11 +405,16 @@ func (r *Exec) PurgeStack(doc *v1beta1.StackDoc) error {
 	}
 	if err = r.ctrClient.Connect(); err == nil {
 		defer r.ctrClient.Close()
-		r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+		r.ctrClient.SetNamespace(realmNamespace)
 
-		pattern := fmt.Sprintf("%s-%s-%s", stackDoc.Spec.RealmID, stackDoc.Spec.SpaceID, stackDoc.Metadata.Name)
+		pattern := fmt.Sprintf(
+			"%s-%s-%s",
+			stackForOps.Spec.RealmName,
+			stackForOps.Spec.SpaceName,
+			stackForOps.Metadata.Name,
+		)
 		var containers []string
-		containers, err = r.findContainersByPattern(r.ctx, realmDoc.Spec.Namespace, pattern)
+		containers, err = r.findContainersByPattern(r.ctx, realmNamespace, pattern)
 		if err == nil {
 			ctrCtx := context.Background()
 			for _, containerID := range containers {
@@ -359,7 +425,7 @@ func (r *Exec) PurgeStack(doc *v1beta1.StackDoc) error {
 	}
 
 	// Force remove stack cgroup
-	spec := cgroups.DefaultStackSpec(realmDoc, spaceDoc, stackDoc)
+	spec := cgroups.DefaultStackSpec(stackForOps)
 	if r.ctrClient != nil {
 		mountpoint := r.ctrClient.GetCgroupMountpoint()
 		_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
@@ -368,9 +434,9 @@ func (r *Exec) PurgeStack(doc *v1beta1.StackDoc) error {
 	// Remove metadata directory completely
 	metadataRunPath := fs.StackMetadataDir(
 		r.opts.RunPath,
-		stackDoc.Spec.RealmID,
-		stackDoc.Spec.SpaceID,
-		stackDoc.Metadata.Name,
+		stackForOps.Spec.RealmName,
+		stackForOps.Spec.SpaceName,
+		stackForOps.Metadata.Name,
 	)
 	_ = os.RemoveAll(metadataRunPath)
 
@@ -378,24 +444,38 @@ func (r *Exec) PurgeStack(doc *v1beta1.StackDoc) error {
 }
 
 // PurgeRealm performs comprehensive cleanup of a realm, including all child resources, CNI resources, and orphaned containers.
-func (r *Exec) PurgeRealm(doc *v1beta1.RealmDoc) error {
-	if doc == nil {
-		return errdefs.ErrRealmNotFound
+func (r *Exec) PurgeRealm(realm intmodel.Realm) error {
+	realmName := strings.TrimSpace(realm.Metadata.Name)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
 	}
 
 	// First, perform standard delete
-	if _, err := r.DeleteRealm(doc); err != nil {
+	lookupRealmForDelete := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: realmName,
+		},
+	}
+	if _, err := r.DeleteRealm(lookupRealmForDelete); err != nil {
 		r.logger.WarnContext(r.ctx, "delete failed, continuing with purge", "error", err)
 	}
 
-	// Get realm document
-	realmDoc, err := r.GetRealm(doc)
+	// Get realm via internal model to ensure metadata accuracy
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: realmName,
+		},
+	}
+	internalRealm, err := r.GetRealm(lookupRealm)
 	if err != nil && !errors.Is(err, errdefs.ErrRealmNotFound) {
 		return fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
 	}
 
-	if errors.Is(err, errdefs.ErrRealmNotFound) {
-		realmDoc = doc
+	// Use internalRealm if available, otherwise use provided realm as fallback
+	realmForOps := internalRealm
+	realmNotFound := errors.Is(err, errdefs.ErrRealmNotFound)
+	if realmNotFound {
+		realmForOps = realm
 	}
 
 	// Initialize ctr client
@@ -408,8 +488,8 @@ func (r *Exec) PurgeRealm(doc *v1beta1.RealmDoc) error {
 	defer r.ctrClient.Close()
 
 	// List ALL containers in namespace (even orphaned ones)
-	r.logger.DebugContext(r.ctx, "starting to find orphaned containers", "namespace", realmDoc.Spec.Namespace)
-	containers, err := r.findOrphanedContainers(r.ctx, realmDoc.Spec.Namespace, "")
+	r.logger.DebugContext(r.ctx, "starting to find orphaned containers", "namespace", realmForOps.Spec.Namespace)
+	containers, err := r.findOrphanedContainers(r.ctx, realmForOps.Spec.Namespace, "")
 	if err != nil {
 		r.logger.WarnContext(r.ctx, "failed to find orphaned containers", "error", err)
 	} else {
@@ -445,11 +525,11 @@ func (r *Exec) PurgeRealm(doc *v1beta1.RealmDoc) error {
 	}
 
 	// Remove all metadata directories for realm and children
-	metadataRunPath := fs.RealmMetadataDir(r.opts.RunPath, realmDoc.Metadata.Name)
+	metadataRunPath := fs.RealmMetadataDir(r.opts.RunPath, realmForOps.Metadata.Name)
 	_ = os.RemoveAll(metadataRunPath)
 
 	// Force remove realm cgroup
-	spec := cgroups.DefaultRealmSpec(realmDoc)
+	spec := cgroups.DefaultRealmSpec(realmForOps)
 	mountpoint := r.ctrClient.GetCgroupMountpoint()
 	_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
 
@@ -457,16 +537,38 @@ func (r *Exec) PurgeRealm(doc *v1beta1.RealmDoc) error {
 }
 
 // PurgeContainer performs comprehensive cleanup of a container, including CNI resources.
-func (r *Exec) PurgeContainer(containerID string, namespace string) error {
+func (r *Exec) PurgeContainer(realm intmodel.Realm, containerID string) error {
+	containerID = strings.TrimSpace(containerID)
 	if containerID == "" {
 		return errdefs.ErrContainerNameRequired
+	}
+
+	realmName := strings.TrimSpace(realm.Metadata.Name)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
+	}
+
+	// Get realm to access namespace
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: realmName,
+		},
+	}
+	internalRealm, err := r.GetRealm(lookupRealm)
+	if err != nil {
+		return fmt.Errorf("failed to get realm: %w", err)
+	}
+
+	namespace := internalRealm.Spec.Namespace
+	if namespace == "" {
+		return fmt.Errorf("realm %q has no namespace", realmName)
 	}
 
 	// Initialize ctr client
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
-	if err := r.ctrClient.Connect(); err != nil {
+	if err = r.ctrClient.Connect(); err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 	defer r.ctrClient.Close()

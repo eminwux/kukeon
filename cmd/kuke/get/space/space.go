@@ -23,16 +23,19 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/fs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type SpaceController interface {
-	GetSpace(doc *v1beta1.SpaceDoc) (controller.GetSpaceResult, error)
-	ListSpaces(realm string) ([]*v1beta1.SpaceDoc, error)
+	GetSpace(space intmodel.Space) (controller.GetSpaceResult, error)
+	ListSpaces(realm string) ([]intmodel.Space, error)
 }
 
 type spaceController = SpaceController // internal alias for backward compatibility
@@ -93,7 +96,13 @@ func NewSpaceCmd() *cobra.Command {
 					},
 				}
 
-				result, getErr := ctrl.GetSpace(doc)
+				// Convert at boundary before calling controller
+				spaceInternal, _, err := apischeme.NormalizeSpace(*doc)
+				if err != nil {
+					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				}
+
+				result, getErr := ctrl.GetSpace(spaceInternal)
 				if getErr != nil {
 					if errors.Is(getErr, errdefs.ErrSpaceNotFound) {
 						return fmt.Errorf("space %q not found in realm %q", name, realm)
@@ -101,20 +110,32 @@ func NewSpaceCmd() *cobra.Command {
 					return getErr
 				}
 
-				if result.SpaceDoc == nil {
+				if !result.MetadataExists {
 					return fmt.Errorf("space %q not found in realm %q", name, realm)
 				}
 
-				return printSpace(result.SpaceDoc, outputFormat)
+				// Convert result back to external for printing
+				spaceDoc, err := fs.ConvertSpaceToExternal(result.Space)
+				if err != nil {
+					return err
+				}
+
+				return printSpace(spaceDoc, outputFormat)
 			}
 
 			// List spaces (optionally filtered by realm)
-			spaces, listErr := ctrl.ListSpaces(realm)
+			internalSpaces, listErr := ctrl.ListSpaces(realm)
 			if listErr != nil {
 				return listErr
 			}
 
-			return printSpaces(cmd, spaces, outputFormat)
+			// Convert internal spaces to external for printing
+			externalSpaces, err := fs.ConvertSpaceListToExternal(internalSpaces)
+			if err != nil {
+				return err
+			}
+
+			return printSpaces(cmd, externalSpaces, outputFormat)
 		},
 	}
 
@@ -196,10 +217,10 @@ type controllerWrapper struct {
 	ctrl *controller.Exec
 }
 
-func (w *controllerWrapper) GetSpace(doc *v1beta1.SpaceDoc) (controller.GetSpaceResult, error) {
-	return w.ctrl.GetSpace(doc)
+func (w *controllerWrapper) GetSpace(space intmodel.Space) (controller.GetSpaceResult, error) {
+	return w.ctrl.GetSpace(space)
 }
 
-func (w *controllerWrapper) ListSpaces(realm string) ([]*v1beta1.SpaceDoc, error) {
+func (w *controllerWrapper) ListSpaces(realm string) ([]intmodel.Space, error) {
 	return w.ctrl.ListSpaces(realm)
 }

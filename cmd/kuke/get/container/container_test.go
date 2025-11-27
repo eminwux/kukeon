@@ -29,7 +29,9 @@ import (
 	container "github.com/eminwux/kukeon/cmd/kuke/get/container"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -440,14 +442,16 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			stackFlag: "venus",
 			cellFlag:  "jupiter",
 			controller: &fakeContainerController{
-				getContainerFn: func(doc *v1beta1.ContainerDoc) (container.GetContainerResult, error) {
-					if doc.Metadata.Name != "alpha" || doc.Spec.RealmID != "earth" || doc.Spec.SpaceID != "mars" ||
-						doc.Spec.StackID != "venus" ||
-						doc.Spec.CellID != "jupiter" {
+				getContainerFn: func(ctr intmodel.Container) (container.GetContainerResult, error) {
+					if ctr.Metadata.Name != "alpha" || ctr.Spec.RealmName != "earth" || ctr.Spec.SpaceName != "mars" ||
+						ctr.Spec.StackName != "venus" ||
+						ctr.Spec.CellName != "jupiter" {
 						return container.GetContainerResult{}, errors.New("unexpected args")
 					}
+					// Convert containerAlphaDoc to internal for result
+					containerInternal, _, _ := apischeme.NormalizeContainer(*containerAlphaDoc)
 					return container.GetContainerResult{
-						ContainerDoc:       containerAlphaDoc,
+						Container:          containerInternal,
 						CellMetadataExists: true,
 						ContainerExists:    true,
 					}, nil
@@ -459,11 +463,16 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			name:       "list containers success",
 			outputFlag: "yaml",
 			controller: &fakeContainerController{
-				listContainersFn: func(realm string, space, stack, cell string) ([]*v1beta1.ContainerSpec, error) {
+				listContainersFn: func(realm string, space, stack, cell string) ([]intmodel.ContainerSpec, error) {
 					if realm != "" || space != "" || stack != "" || cell != "" {
 						return nil, errors.New("unexpected filters")
 					}
-					return containerList, nil
+					// Convert containerList to internal types
+					internalContainers := make([]intmodel.ContainerSpec, 0, len(containerList))
+					for _, extSpec := range containerList {
+						internalContainers = append(internalContainers, convertContainerSpecToInternalTest(*extSpec))
+					}
+					return internalContainers, nil
 				},
 			},
 			wantPrinted: containerList,
@@ -476,11 +485,16 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			cellFlag:   "jupiter",
 			outputFlag: "json",
 			controller: &fakeContainerController{
-				listContainersFn: func(realm string, space, stack, cell string) ([]*v1beta1.ContainerSpec, error) {
+				listContainersFn: func(realm string, space, stack, cell string) ([]intmodel.ContainerSpec, error) {
 					if realm != "earth" || space != "mars" || stack != "venus" || cell != "jupiter" {
 						return nil, errors.New("unexpected filters")
 					}
-					return containerList, nil
+					// Convert containerList to internal types
+					internalContainers := make([]intmodel.ContainerSpec, 0, len(containerList))
+					for _, extSpec := range containerList {
+						internalContainers = append(internalContainers, convertContainerSpecToInternalTest(*extSpec))
+					}
+					return internalContainers, nil
 				},
 			},
 			wantPrinted: containerList,
@@ -519,7 +533,7 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			stackFlag: "venus",
 			cellFlag:  "jupiter",
 			controller: &fakeContainerController{
-				getContainerFn: func(_ *v1beta1.ContainerDoc) (container.GetContainerResult, error) {
+				getContainerFn: func(_ intmodel.Container) (container.GetContainerResult, error) {
 					return container.GetContainerResult{}, errdefs.ErrContainerNameRequired
 				},
 			},
@@ -533,7 +547,7 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			stackFlag: "venus",
 			cellFlag:  "jupiter",
 			controller: &fakeContainerController{
-				getContainerFn: func(_ *v1beta1.ContainerDoc) (container.GetContainerResult, error) {
+				getContainerFn: func(_ intmodel.Container) (container.GetContainerResult, error) {
 					return container.GetContainerResult{}, errors.New("controller error")
 				},
 			},
@@ -542,7 +556,7 @@ func TestNewContainerCmdRunE(t *testing.T) {
 		{
 			name: "controller error for list containers",
 			controller: &fakeContainerController{
-				listContainersFn: func(_ string, _ string, _ string, _ string) ([]*v1beta1.ContainerSpec, error) {
+				listContainersFn: func(_ string, _ string, _ string, _ string) ([]intmodel.ContainerSpec, error) {
 					return nil, errors.New("list error")
 				},
 			},
@@ -555,8 +569,8 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			stackFlag: "venus",
 			cellFlag:  "jupiter",
 			controller: &fakeContainerController{
-				getContainerFn: func(doc *v1beta1.ContainerDoc) (container.GetContainerResult, error) {
-					if doc.Metadata.Name != "beta" {
+				getContainerFn: func(ctr intmodel.Container) (container.GetContainerResult, error) {
+					if ctr.Metadata.Name != "beta" {
 						return container.GetContainerResult{}, errors.New("unexpected name")
 					}
 					betaDoc := &v1beta1.ContainerDoc{
@@ -571,8 +585,10 @@ func TestNewContainerCmdRunE(t *testing.T) {
 							State: v1beta1.ContainerStateReady,
 						},
 					}
+					// Convert betaDoc to internal for result
+					containerInternal, _, _ := apischeme.NormalizeContainer(*betaDoc)
 					return container.GetContainerResult{
-						ContainerDoc:       betaDoc,
+						Container:          containerInternal,
 						CellMetadataExists: true,
 						ContainerExists:    true,
 					}, nil
@@ -691,22 +707,22 @@ func TestNewContainerCmdRunE(t *testing.T) {
 }
 
 type fakeContainerController struct {
-	getContainerFn   func(doc *v1beta1.ContainerDoc) (container.GetContainerResult, error)
-	listContainersFn func(realm, space, stack, cell string) ([]*v1beta1.ContainerSpec, error)
+	getContainerFn   func(ctr intmodel.Container) (container.GetContainerResult, error)
+	listContainersFn func(realm, space, stack, cell string) ([]intmodel.ContainerSpec, error)
 }
 
 func (f *fakeContainerController) GetContainer(
-	doc *v1beta1.ContainerDoc,
+	ctr intmodel.Container,
 ) (container.GetContainerResult, error) {
 	if f.getContainerFn == nil {
 		return container.GetContainerResult{}, errors.New("unexpected GetContainer call")
 	}
-	return f.getContainerFn(doc)
+	return f.getContainerFn(ctr)
 }
 
 func (f *fakeContainerController) ListContainers(
 	realmName, spaceName, stackName, cellName string,
-) ([]*v1beta1.ContainerSpec, error) {
+) ([]intmodel.ContainerSpec, error) {
 	if f.listContainersFn == nil {
 		return nil, errors.New("unexpected ListContainers call")
 	}
@@ -766,4 +782,27 @@ func TestNewContainerCmd_AutocompleteRegistration(t *testing.T) {
 	// We can't directly access the registered functions, but the fact that
 	// ValidArgsFunction is set and flags exist confirms the structure is correct.
 	// The short flag "o" is an alias for "output" and uses the same completion function.
+}
+
+// convertContainerSpecToInternalTest converts an external ContainerSpec to internal ContainerSpec for testing.
+func convertContainerSpecToInternalTest(in v1beta1.ContainerSpec) intmodel.ContainerSpec {
+	return intmodel.ContainerSpec{
+		ID:              in.ID,
+		RealmName:       in.RealmID,
+		SpaceName:       in.SpaceID,
+		StackName:       in.StackID,
+		CellName:        in.CellID,
+		Root:            in.Root,
+		Image:           in.Image,
+		Command:         in.Command,
+		Args:            in.Args,
+		Env:             in.Env,
+		Ports:           in.Ports,
+		Volumes:         in.Volumes,
+		Networks:        in.Networks,
+		NetworksAliases: in.NetworksAliases,
+		Privileged:      in.Privileged,
+		CNIConfigPath:   in.CNIConfigPath,
+		RestartPolicy:   in.RestartPolicy,
+	}
 }

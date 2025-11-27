@@ -29,6 +29,7 @@ import (
 	container "github.com/eminwux/kukeon/cmd/kuke/create/container"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -240,9 +241,9 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 				fakeCtrl := &fakeContainerController{
-					createContainerFn: func(doc *v1beta1.ContainerDoc) (controller.CreateContainerResult, error) {
+					createContainerFn: func(container intmodel.Container) (controller.CreateContainerResult, error) {
 						return controller.CreateContainerResult{
-							ContainerDoc:        doc,
+							Container:           container,
 							ContainerCreated:    true,
 							ContainerExistsPost: true,
 							Started:             true,
@@ -271,9 +272,9 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 				fakeCtrl := &fakeContainerController{
-					createContainerFn: func(doc *v1beta1.ContainerDoc) (controller.CreateContainerResult, error) {
+					createContainerFn: func(container intmodel.Container) (controller.CreateContainerResult, error) {
 						return controller.CreateContainerResult{
-							ContainerDoc:        doc,
+							Container:           container,
 							ContainerCreated:    false,
 							ContainerExistsPost: true,
 							Started:             false,
@@ -302,7 +303,7 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 				fakeCtrl := &fakeContainerController{
-					createContainerFn: func(_ *v1beta1.ContainerDoc) (controller.CreateContainerResult, error) {
+					createContainerFn: func(_ intmodel.Container) (controller.CreateContainerResult, error) {
 						return controller.CreateContainerResult{}, errors.New("failed to create container")
 					},
 				}
@@ -391,18 +392,16 @@ func TestPrintContainerResult(t *testing.T) {
 		{
 			name: "container created and started",
 			result: controller.CreateContainerResult{
-				ContainerDoc: &v1beta1.ContainerDoc{
-					APIVersion: v1beta1.APIVersionV1Beta1,
-					Kind:       v1beta1.KindContainer,
-					Metadata: v1beta1.ContainerMetadata{
+				Container: intmodel.Container{
+					Metadata: intmodel.ContainerMetadata{
 						Name: "my-container",
 					},
-					Spec: v1beta1.ContainerSpec{
-						ID:      "my-container",
-						RealmID: "my-realm",
-						SpaceID: "my-space",
-						StackID: "my-stack",
-						CellID:  "my-cell",
+					Spec: intmodel.ContainerSpec{
+						ID:        "my-container",
+						RealmName: "my-realm",
+						SpaceName: "my-space",
+						StackName: "my-stack",
+						CellName:  "my-cell",
 					},
 				},
 				ContainerCreated:    true,
@@ -422,18 +421,16 @@ func TestPrintContainerResult(t *testing.T) {
 		{
 			name: "container already existed and not started",
 			result: controller.CreateContainerResult{
-				ContainerDoc: &v1beta1.ContainerDoc{
-					APIVersion: v1beta1.APIVersionV1Beta1,
-					Kind:       v1beta1.KindContainer,
-					Metadata: v1beta1.ContainerMetadata{
+				Container: intmodel.Container{
+					Metadata: intmodel.ContainerMetadata{
 						Name: "existing-container",
 					},
-					Spec: v1beta1.ContainerSpec{
-						ID:      "existing-container",
-						RealmID: "my-realm",
-						SpaceID: "my-space",
-						StackID: "my-stack",
-						CellID:  "my-cell",
+					Spec: intmodel.ContainerSpec{
+						ID:        "existing-container",
+						RealmName: "my-realm",
+						SpaceName: "my-space",
+						StackName: "my-stack",
+						CellName:  "my-cell",
 					},
 				},
 				ContainerCreated:    false,
@@ -453,13 +450,13 @@ func TestPrintContainerResult(t *testing.T) {
 		{
 			name: "container missing",
 			result: controller.CreateContainerResult{
-				ContainerDoc:        nil,
+				Container:           intmodel.Container{},
 				ContainerCreated:    false,
 				ContainerExistsPost: false,
 				Started:             false,
 			},
 			wantOutput: []string{
-				"Container created (details unavailable)",
+				"Container",
 				"container: not started",
 			},
 			notWantOutput: []string{
@@ -471,18 +468,16 @@ func TestPrintContainerResult(t *testing.T) {
 		{
 			name: "container created but not started",
 			result: controller.CreateContainerResult{
-				ContainerDoc: &v1beta1.ContainerDoc{
-					APIVersion: v1beta1.APIVersionV1Beta1,
-					Kind:       v1beta1.KindContainer,
-					Metadata: v1beta1.ContainerMetadata{
+				Container: intmodel.Container{
+					Metadata: intmodel.ContainerMetadata{
 						Name: "stopped-container",
 					},
-					Spec: v1beta1.ContainerSpec{
-						ID:      "stopped-container",
-						RealmID: "my-realm",
-						SpaceID: "my-space",
-						StackID: "my-stack",
-						CellID:  "my-cell",
+					Spec: intmodel.ContainerSpec{
+						ID:        "stopped-container",
+						RealmName: "my-realm",
+						SpaceName: "my-space",
+						StackName: "my-stack",
+						CellName:  "my-cell",
 					},
 				},
 				ContainerCreated:    true,
@@ -502,7 +497,7 @@ func TestPrintContainerResult(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd, buf := newOutputCommand()
-			container.PrintContainerResult(cmd, tt.result)
+			container.PrintContainerResult(cmd, tt.result, v1beta1.APIVersionV1Beta1)
 			output := buf.String()
 
 			for _, want := range tt.wantOutput {
@@ -523,16 +518,16 @@ func TestPrintContainerResult(t *testing.T) {
 // Test helpers
 
 type fakeContainerController struct {
-	createContainerFn func(doc *v1beta1.ContainerDoc) (controller.CreateContainerResult, error)
+	createContainerFn func(container intmodel.Container) (controller.CreateContainerResult, error)
 }
 
 func (f *fakeContainerController) CreateContainer(
-	doc *v1beta1.ContainerDoc,
+	container intmodel.Container,
 ) (controller.CreateContainerResult, error) {
 	if f.createContainerFn == nil {
 		return controller.CreateContainerResult{}, errors.New("unexpected CreateContainer call")
 	}
-	return f.createContainerFn(doc)
+	return f.createContainerFn(container)
 }
 
 func newOutputCommand() (*cobra.Command, *bytes.Buffer) {

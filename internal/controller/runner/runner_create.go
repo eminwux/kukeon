@@ -20,150 +20,121 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
-func (r *Exec) CreateRealm(doc *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error) {
+func (r *Exec) CreateRealm(realm intmodel.Realm) (intmodel.Realm, error) {
 	r.logger.Debug("run-path", "run-path", r.opts.RunPath)
 
-	// Convert input to internal model at boundary
-	realm, version, err := apischeme.NormalizeRealm(*doc)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	// Build minimal internal realm for GetRealm lookup
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: realm.Metadata.Name,
+		},
 	}
 
-	// Get existing realm (returns external model)
-	rDoc, err := r.GetRealm(doc)
+	// Get existing realm (returns internal model)
+	existingRealm, err := r.GetRealm(lookupRealm)
 	if err != nil && !errors.Is(err, errdefs.ErrRealmNotFound) {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
+		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
 	}
 
 	// Realm found, check if namespace exists
-	if rDoc != nil {
-		existingRealm, _, normalizeErr := apischeme.NormalizeRealm(*rDoc)
-		if normalizeErr != nil {
-			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, normalizeErr)
-		}
-
+	if err == nil {
 		ensuredRealm, ensureErr := r.ensureRealmContainerdNamespace(existingRealm)
 		if ensureErr != nil {
-			return nil, ensureErr
+			return intmodel.Realm{}, ensureErr
 		}
 
 		ensuredRealm, ensureErr = r.ensureRealmCgroup(ensuredRealm)
 		if ensureErr != nil {
-			return nil, ensureErr
+			return intmodel.Realm{}, ensureErr
 		}
 
-		// Convert to external model for return
-		ensuredRealmDoc, buildErr := apischeme.BuildRealmExternalFromInternal(ensuredRealm, version)
-		if buildErr != nil {
-			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, buildErr)
-		}
-
-		return &ensuredRealmDoc, nil
+		return ensuredRealm, nil
 	}
 
 	// Realm not found, create new realm
 	realm.Status.State = intmodel.RealmStateCreating
 	resultRealm, err := r.provisionNewRealm(realm)
 	if err != nil {
-		return nil, err
+		return intmodel.Realm{}, err
 	}
 
-	// Convert result back to external model at boundary
-	resultDoc, err := apischeme.BuildRealmExternalFromInternal(resultRealm, version)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-
-	return &resultDoc, nil
+	return resultRealm, nil
 }
 
-func (r *Exec) CreateStack(doc *v1beta1.StackDoc) (*v1beta1.StackDoc, error) {
+func (r *Exec) CreateStack(stack intmodel.Stack) (intmodel.Stack, error) {
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
 
-	// Convert input to internal model at boundary
-	stack, version, err := apischeme.NormalizeStack(*doc)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	// Build minimal internal stack for GetStack lookup
+	lookupStack := intmodel.Stack{
+		Metadata: intmodel.StackMetadata{
+			Name: stack.Metadata.Name,
+		},
+		Spec: intmodel.StackSpec{
+			RealmName: stack.Spec.RealmName,
+			SpaceName: stack.Spec.SpaceName,
+		},
 	}
 
-	// Get existing stack (returns external model)
-	sDoc, err := r.GetStack(doc)
+	// Get existing stack (returns internal model)
+	existingStack, err := r.GetStack(lookupStack)
 	if err != nil && !errors.Is(err, errdefs.ErrStackNotFound) {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrGetStack, err)
+		return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrGetStack, err)
 	}
 
 	// Stack found, ensure cgroup exists
-	if sDoc != nil {
-		existingStack, _, normalizeErr := apischeme.NormalizeStack(*sDoc)
-		if normalizeErr != nil {
-			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, normalizeErr)
-		}
-
+	if err == nil {
 		ensuredStack, ensureErr := r.ensureStackCgroup(existingStack)
 		if ensureErr != nil {
-			return nil, ensureErr
+			return intmodel.Stack{}, ensureErr
 		}
 
-		// Convert to external model for return
-		ensuredStackDoc, buildErr := apischeme.BuildStackExternalFromInternal(ensuredStack, version)
-		if buildErr != nil {
-			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, buildErr)
-		}
-
-		return &ensuredStackDoc, nil
+		return ensuredStack, nil
 	}
 
 	// Stack not found, create new stack
 	resultStack, err := r.provisionNewStack(stack)
 	if err != nil {
-		return nil, err
+		return intmodel.Stack{}, err
 	}
 
-	// Convert result back to external model at boundary
-	resultDoc, err := apischeme.BuildStackExternalFromInternal(resultStack, version)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-
-	return &resultDoc, nil
+	return resultStack, nil
 }
 
-func (r *Exec) CreateCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error) {
+func (r *Exec) CreateCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
 
-	// Convert input to internal model at boundary
-	cell, version, err := apischeme.NormalizeCell(*doc)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	// Build minimal internal cell for GetCell lookup
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: cell.Metadata.Name,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: cell.Spec.RealmName,
+			SpaceName: cell.Spec.SpaceName,
+			StackName: cell.Spec.StackName,
+		},
 	}
 
-	// Get existing cell (returns external model)
-	cDoc, err := r.GetCell(doc)
+	// Get existing cell (returns internal model)
+	existingCell, err := r.GetCell(lookupCell)
 	if err != nil && !errors.Is(err, errdefs.ErrCellNotFound) {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
+		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 	}
 
 	// Cell found, ensure cgroup exists
-	if cDoc != nil {
-		existingCell, _, normalizeErr := apischeme.NormalizeCell(*cDoc)
-		if normalizeErr != nil {
-			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, normalizeErr)
-		}
-
+	if !errors.Is(err, errdefs.ErrCellNotFound) {
 		ensuredCell, ensureErr := r.ensureCellCgroup(existingCell)
 		if ensureErr != nil {
-			return nil, ensureErr
+			return intmodel.Cell{}, ensureErr
 		}
 
 		// Merge containers from the new cell into the existing cell
@@ -222,116 +193,78 @@ func (r *Exec) CreateCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error) {
 
 		_, ensureErr = r.ensureCellContainers(ensuredCell)
 		if ensureErr != nil {
-			return nil, ensureErr
+			return intmodel.Cell{}, ensureErr
 		}
 
 		// Update metadata to persist the merged containers
 		if err = r.UpdateCellMetadata(ensuredCell); err != nil {
-			return nil, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
+			return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
 		}
 
-		// Convert to external model for return
-		ensuredCellDoc, buildErr := apischeme.BuildCellExternalFromInternal(ensuredCell, version)
-		if buildErr != nil {
-			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, buildErr)
-		}
-
-		// Return external model
-		return &ensuredCellDoc, nil
+		return ensuredCell, nil
 	}
 
 	// Cell not found, create new cell
 	resultCell, err := r.provisionNewCell(cell)
 	if err != nil {
-		return nil, err
+		return intmodel.Cell{}, err
 	}
 
-	// Convert result back to external model at boundary
-	resultDoc, err := apischeme.BuildCellExternalFromInternal(resultCell, version)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-
-	return &resultDoc, nil
+	return resultCell, nil
 }
 
-func (r *Exec) CreateSpace(doc *v1beta1.SpaceDoc) (*v1beta1.SpaceDoc, error) {
+func (r *Exec) CreateSpace(space intmodel.Space) (intmodel.Space, error) {
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
 
-	// Convert input to internal model at boundary
-	space, version, err := apischeme.NormalizeSpace(*doc)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	// Build minimal internal space for GetSpace lookup
+	lookupSpace := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{
+			Name: space.Metadata.Name,
+		},
+		Spec: intmodel.SpaceSpec{
+			RealmName: space.Spec.RealmName,
+		},
 	}
 
-	// Get existing space (returns external model)
-	sDoc, err := r.GetSpace(doc)
+	// Get existing space (returns internal model)
+	existingSpace, err := r.GetSpace(lookupSpace)
 	if err != nil && !errors.Is(err, errdefs.ErrSpaceNotFound) {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
+		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
 	}
 
 	realmName := space.Spec.RealmName
-	if sDoc != nil {
-		existingSpace, _, normalizeErr := apischeme.NormalizeSpace(*sDoc)
-		if normalizeErr != nil {
-			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, normalizeErr)
-		}
+	if err == nil {
 		if existingSpace.Spec.RealmName != "" {
 			realmName = existingSpace.Spec.RealmName
 		}
 	}
 	if realmName == "" {
-		return nil, errdefs.ErrRealmNameRequired
-	}
-	realmDoc, realmErr := r.GetRealm(&v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
-			Name: realmName,
-		},
-	})
-	if realmErr != nil {
-		return nil, realmErr
+		return intmodel.Space{}, errdefs.ErrRealmNameRequired
 	}
 
 	// Space found, ensure CNI config exists
-	if sDoc != nil {
-		existingSpace, _, normalizeErr := apischeme.NormalizeSpace(*sDoc)
-		if normalizeErr != nil {
-			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, normalizeErr)
-		}
-
+	if err == nil {
 		ensuredSpace, ensureErr := r.ensureSpaceCNIConfig(existingSpace)
 		if ensureErr != nil {
-			return nil, ensureErr
+			return intmodel.Space{}, ensureErr
 		}
 
-		ensuredSpace, ensureErr = r.ensureSpaceCgroup(ensuredSpace, realmDoc)
+		ensuredSpace, ensureErr = r.ensureSpaceCgroup(ensuredSpace)
 		if ensureErr != nil {
-			return nil, ensureErr
+			return intmodel.Space{}, ensureErr
 		}
 
-		// Convert to external model for return
-		ensuredSpaceDoc, buildErr := apischeme.BuildSpaceExternalFromInternal(ensuredSpace, version)
-		if buildErr != nil {
-			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, buildErr)
-		}
-
-		return &ensuredSpaceDoc, nil
+		return ensuredSpace, nil
 	}
 
 	// Space not found, create new space
 	space.Status.State = intmodel.SpaceStateCreating
 	resultSpace, err := r.provisionNewSpace(space)
 	if err != nil {
-		return nil, err
+		return intmodel.Space{}, err
 	}
 
-	// Convert result back to external model at boundary
-	resultDoc, err := apischeme.BuildSpaceExternalFromInternal(resultSpace, version)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-
-	return &resultDoc, nil
+	return resultSpace, nil
 }

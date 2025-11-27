@@ -23,45 +23,49 @@ import (
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/ctr"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 type Runner interface {
 	BootstrapCNI(cfgDir, cacheDir, binDir string) (cni.BootstrapReport, error)
 
-	GetRealm(doc *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error)
-	CreateRealm(spec *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error)
+	GetRealm(realm intmodel.Realm) (intmodel.Realm, error)
+	ListRealms() ([]intmodel.Realm, error)
+	CreateRealm(realm intmodel.Realm) (intmodel.Realm, error)
 	ExistsRealmContainerdNamespace(namespace string) (bool, error)
-	DeleteRealm(doc *v1beta1.RealmDoc) (DeleteRealmOutcome, error)
+	DeleteRealm(realm intmodel.Realm) (DeleteRealmOutcome, error)
 
-	GetSpace(doc *v1beta1.SpaceDoc) (*v1beta1.SpaceDoc, error)
-	CreateSpace(doc *v1beta1.SpaceDoc) (*v1beta1.SpaceDoc, error)
-	ExistsSpaceCNIConfig(doc *v1beta1.SpaceDoc) (bool, error)
-	DeleteSpace(doc *v1beta1.SpaceDoc) error
+	GetSpace(space intmodel.Space) (intmodel.Space, error)
+	ListSpaces(realmName string) ([]intmodel.Space, error)
+	CreateSpace(space intmodel.Space) (intmodel.Space, error)
+	ExistsSpaceCNIConfig(space intmodel.Space) (bool, error)
+	DeleteSpace(space intmodel.Space) error
 
-	GetCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error)
-	CreateCell(doc *v1beta1.CellDoc) (*v1beta1.CellDoc, error)
-	StartCell(doc *v1beta1.CellDoc) error
-	StopCell(doc *v1beta1.CellDoc) error
-	StopContainer(doc *v1beta1.CellDoc, containerID string) error
-	KillCell(doc *v1beta1.CellDoc) error
-	KillContainer(doc *v1beta1.CellDoc, containerID string) error
-	DeleteContainer(doc *v1beta1.CellDoc, containerID string) error
+	GetCell(cell intmodel.Cell) (intmodel.Cell, error)
+	ListCells(realmName, spaceName, stackName string) ([]intmodel.Cell, error)
+	ListContainers(realmName, spaceName, stackName, cellName string) ([]intmodel.ContainerSpec, error)
+	CreateCell(cell intmodel.Cell) (intmodel.Cell, error)
+	StartCell(cell intmodel.Cell) error
+	StopCell(cell intmodel.Cell) error
+	StopContainer(cell intmodel.Cell, containerID string) error
+	KillCell(cell intmodel.Cell) error
+	KillContainer(cell intmodel.Cell, containerID string) error
+	DeleteContainer(cell intmodel.Cell, containerID string) error
 	UpdateCellMetadata(cell intmodel.Cell) error
-	ExistsCellRootContainer(doc *v1beta1.CellDoc) (bool, error)
-	DeleteCell(doc *v1beta1.CellDoc) error
+	ExistsCellRootContainer(cell intmodel.Cell) (bool, error)
+	DeleteCell(cell intmodel.Cell) error
 
-	GetStack(doc *v1beta1.StackDoc) (*v1beta1.StackDoc, error)
-	CreateStack(doc *v1beta1.StackDoc) (*v1beta1.StackDoc, error)
-	DeleteStack(doc *v1beta1.StackDoc) error
+	GetStack(stack intmodel.Stack) (intmodel.Stack, error)
+	ListStacks(realmName, spaceName string) ([]intmodel.Stack, error)
+	CreateStack(stack intmodel.Stack) (intmodel.Stack, error)
+	DeleteStack(stack intmodel.Stack) error
 
 	ExistsCgroup(doc any) (bool, error)
 
-	PurgeRealm(doc *v1beta1.RealmDoc) error
-	PurgeSpace(doc *v1beta1.SpaceDoc) error
-	PurgeStack(doc *v1beta1.StackDoc) error
-	PurgeCell(doc *v1beta1.CellDoc) error
-	PurgeContainer(containerID, namespace string) error
+	PurgeRealm(realm intmodel.Realm) error
+	PurgeSpace(space intmodel.Space) error
+	PurgeStack(stack intmodel.Stack) error
+	PurgeCell(cell intmodel.Cell) error
+	PurgeContainer(realm intmodel.Realm, containerID string) error
 }
 
 // DeleteRealmOutcome reports which realm resources were deleted successfully.

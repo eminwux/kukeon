@@ -30,7 +30,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -46,7 +46,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 		name          string
 		args          []string
 		setup         func(t *testing.T, cmd *cobra.Command)
-		controllerFn  func(doc *v1beta1.CellDoc) (controller.StartCellResult, error)
+		controllerFn  func(cell intmodel.Cell) (controller.StartCellResult, error)
 		wantErr       string
 		wantCallStart bool
 		wantOpts      *struct {
@@ -65,9 +65,9 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			controllerFn: func(doc *v1beta1.CellDoc) (controller.StartCellResult, error) {
+			controllerFn: func(cell intmodel.Cell) (controller.StartCellResult, error) {
 				return controller.StartCellResult{
-					CellDoc: doc,
+					Cell:    cell,
 					Started: true,
 				}, nil
 			},
@@ -93,9 +93,9 @@ func TestNewCellCmdRunE(t *testing.T) {
 				viper.Set(config.KUKE_START_CELL_SPACE.ViperKey, "space-b")
 				viper.Set(config.KUKE_START_CELL_STACK.ViperKey, "stack-b")
 			},
-			controllerFn: func(doc *v1beta1.CellDoc) (controller.StartCellResult, error) {
+			controllerFn: func(cell intmodel.Cell) (controller.StartCellResult, error) {
 				return controller.StartCellResult{
-					CellDoc: doc,
+					Cell:    cell,
 					Started: true,
 				}, nil
 			},
@@ -121,9 +121,9 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "  space-a  ")
 				setFlag(t, cmd, "stack", "  stack-a  ")
 			},
-			controllerFn: func(doc *v1beta1.CellDoc) (controller.StartCellResult, error) {
+			controllerFn: func(cell intmodel.Cell) (controller.StartCellResult, error) {
 				return controller.StartCellResult{
-					CellDoc: doc,
+					Cell:    cell,
 					Started: true,
 				}, nil
 			},
@@ -224,7 +224,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			controllerFn: func(_ *v1beta1.CellDoc) (controller.StartCellResult, error) {
+			controllerFn: func(_ intmodel.Cell) (controller.StartCellResult, error) {
 				return controller.StartCellResult{}, errdefs.ErrCellNotFound
 			},
 			wantErr:       "cell not found",
@@ -248,7 +248,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 			t.Cleanup(viper.Reset)
 
 			var startCalled bool
-			var startDoc *v1beta1.CellDoc
+			var startCell intmodel.Cell
 
 			cmd := cell.NewCellCmd()
 			cmd.SetOut(&bytes.Buffer{})
@@ -265,10 +265,10 @@ func TestNewCellCmdRunE(t *testing.T) {
 				// If we need to mock the controller, inject it via context
 				if tt.controllerFn != nil {
 					fakeCtrl := &fakeControllerExec{
-						startCellFn: func(doc *v1beta1.CellDoc) (controller.StartCellResult, error) {
+						startCellFn: func(cell intmodel.Cell) (controller.StartCellResult, error) {
 							startCalled = true
-							startDoc = doc
-							return tt.controllerFn(doc)
+							startCell = cell
+							return tt.controllerFn(cell)
 						},
 					}
 					// Inject mock controller into context
@@ -302,20 +302,17 @@ func TestNewCellCmdRunE(t *testing.T) {
 			}
 
 			if tt.wantOpts != nil {
-				if startDoc == nil {
-					t.Fatal("StartCell doc nil")
+				if startCell.Metadata.Name != tt.wantOpts.name {
+					t.Errorf("StartCell metadata name=%q want=%q", startCell.Metadata.Name, tt.wantOpts.name)
 				}
-				if startDoc.Metadata.Name != tt.wantOpts.name {
-					t.Errorf("StartCell metadata name=%q want=%q", startDoc.Metadata.Name, tt.wantOpts.name)
+				if startCell.Spec.RealmName != tt.wantOpts.realm {
+					t.Errorf("StartCell realm=%q want=%q", startCell.Spec.RealmName, tt.wantOpts.realm)
 				}
-				if startDoc.Spec.RealmID != tt.wantOpts.realm {
-					t.Errorf("StartCell realm=%q want=%q", startDoc.Spec.RealmID, tt.wantOpts.realm)
+				if startCell.Spec.SpaceName != tt.wantOpts.space {
+					t.Errorf("StartCell space=%q want=%q", startCell.Spec.SpaceName, tt.wantOpts.space)
 				}
-				if startDoc.Spec.SpaceID != tt.wantOpts.space {
-					t.Errorf("StartCell space=%q want=%q", startDoc.Spec.SpaceID, tt.wantOpts.space)
-				}
-				if startDoc.Spec.StackID != tt.wantOpts.stack {
-					t.Errorf("StartCell stack=%q want=%q", startDoc.Spec.StackID, tt.wantOpts.stack)
+				if startCell.Spec.StackName != tt.wantOpts.stack {
+					t.Errorf("StartCell stack=%q want=%q", startCell.Spec.StackName, tt.wantOpts.stack)
 				}
 			}
 
@@ -332,14 +329,14 @@ func TestNewCellCmdRunE(t *testing.T) {
 }
 
 type fakeControllerExec struct {
-	startCellFn func(doc *v1beta1.CellDoc) (controller.StartCellResult, error)
+	startCellFn func(cell intmodel.Cell) (controller.StartCellResult, error)
 }
 
-func (f *fakeControllerExec) StartCell(doc *v1beta1.CellDoc) (controller.StartCellResult, error) {
+func (f *fakeControllerExec) StartCell(cell intmodel.Cell) (controller.StartCellResult, error) {
 	if f.startCellFn == nil {
 		return controller.StartCellResult{}, errors.New("unexpected StartCell call")
 	}
-	return f.startCellFn(doc)
+	return f.startCellFn(cell)
 }
 
 func setFlag(t *testing.T, cmd *cobra.Command, name, value string) {

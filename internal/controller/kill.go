@@ -21,132 +21,132 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // KillCellResult reports the outcome of killing a cell.
 type KillCellResult struct {
-	CellDoc *v1beta1.CellDoc
-	Killed  bool
+	Cell   intmodel.Cell
+	Killed bool
 }
 
 // KillContainerResult reports the outcome of killing a container.
 type KillContainerResult struct {
-	ContainerDoc *v1beta1.ContainerDoc
-	Killed       bool
+	Container intmodel.Container
+	Killed    bool
 }
 
 // KillCell immediately force-kills all containers in a cell and updates the cell metadata state.
-func (b *Exec) KillCell(doc *v1beta1.CellDoc) (KillCellResult, error) {
+func (b *Exec) KillCell(cell intmodel.Cell) (KillCellResult, error) {
 	var res KillCellResult
-	if doc == nil {
+
+	name := strings.TrimSpace(cell.Metadata.Name)
+	if name == "" {
 		return res, errdefs.ErrCellNameRequired
 	}
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
+	if realmName == "" {
+		return res, errdefs.ErrRealmNameRequired
+	}
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
+	if spaceName == "" {
+		return res, errdefs.ErrSpaceNameRequired
+	}
+	stackName := strings.TrimSpace(cell.Spec.StackName)
+	if stackName == "" {
+		return res, errdefs.ErrStackNameRequired
+	}
 
-	name := strings.TrimSpace(doc.Metadata.Name)
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
-	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
-	stackName := strings.TrimSpace(doc.Spec.StackID)
-
-	_, _, _, _, cellDoc, err := b.validateAndGetCell(name, realmName, spaceName, stackName)
+	// Build lookup cell for GetCell
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: name,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
+		},
+	}
+	getResult, err := b.GetCell(lookupCell)
 	if err != nil {
 		return res, err
 	}
-	res.CellDoc = cellDoc
+	if !getResult.MetadataExists {
+		return res, fmt.Errorf(
+			"cell %q not found in realm %q, space %q, stack %q",
+			name,
+			realmName,
+			spaceName,
+			stackName,
+		)
+	}
+	internalCell := getResult.Cell
 
 	// Kill all containers in the cell
-	if err = b.runner.KillCell(cellDoc); err != nil {
+	if err = b.runner.KillCell(internalCell); err != nil {
 		return res, fmt.Errorf("failed to kill cell containers: %w", err)
 	}
 
-	// Convert to internal model for UpdateCellMetadata
-	cell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
-	if err != nil {
-		return res, fmt.Errorf("failed to convert cell to internal model: %w", err)
-	}
-	cell.Status.State = intmodel.CellStatePending
+	// Update cell state to Pending (killed)
+	internalCell.Status.State = intmodel.CellStatePending
 
 	// Update cell metadata state to Pending (killed)
-	if err = b.runner.UpdateCellMetadata(cell); err != nil {
+	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {
 		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
-	// Update cellDoc for response
-	cellDoc.Status.State = v1beta1.CellStatePending
-
+	res.Cell = internalCell
 	res.Killed = true
 	return res, nil
 }
 
 // KillContainer immediately force-kills a specific container in a cell and updates the cell metadata.
-func (b *Exec) KillContainer(doc *v1beta1.ContainerDoc) (KillContainerResult, error) {
+func (b *Exec) KillContainer(container intmodel.Container) (KillContainerResult, error) {
 	var res KillContainerResult
-	if doc == nil {
-		return res, errdefs.ErrContainerNameRequired
-	}
 
-	if doc.Metadata.Labels == nil {
-		doc.Metadata.Labels = make(map[string]string)
-	}
-	if doc.APIVersion == "" {
-		doc.APIVersion = v1beta1.APIVersionV1Beta1
-	}
-	if doc.Kind == "" {
-		doc.Kind = v1beta1.KindContainer
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(container.Metadata.Name)
 	if name == "" {
-		name = strings.TrimSpace(doc.Spec.ID)
+		name = strings.TrimSpace(container.Spec.ID)
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return res, errdefs.ErrContainerNameRequired
 	}
-	doc.Metadata.Name = name
-	doc.Spec.ID = name
 
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(container.Spec.RealmName)
 	if realmName == "" {
 		return res, errdefs.ErrRealmNameRequired
 	}
-	doc.Spec.RealmID = realmName
 
-	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	spaceName := strings.TrimSpace(container.Spec.SpaceName)
 	if spaceName == "" {
 		return res, errdefs.ErrSpaceNameRequired
 	}
-	doc.Spec.SpaceID = spaceName
 
-	stackName := strings.TrimSpace(doc.Spec.StackID)
+	stackName := strings.TrimSpace(container.Spec.StackName)
 	if stackName == "" {
 		return res, errdefs.ErrStackNameRequired
 	}
-	doc.Spec.StackID = stackName
 
-	cellName := strings.TrimSpace(doc.Spec.CellID)
+	cellName := strings.TrimSpace(container.Spec.CellName)
 	if cellName == "" {
 		return res, errdefs.ErrCellNameRequired
 	}
-	doc.Spec.CellID = cellName
 
-	res.ContainerDoc = doc
-
-	// Get cell document
-	cellLookup := &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
+	// Build lookup cell for GetCell
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
 			Name: cellName,
 		},
-		Spec: v1beta1.CellSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-			StackID: stackName,
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
 		},
 	}
-	getResult, err := b.GetCell(cellLookup)
+	getResult, err := b.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return res, fmt.Errorf(
@@ -159,47 +159,57 @@ func (b *Exec) KillContainer(doc *v1beta1.ContainerDoc) (KillContainerResult, er
 		}
 		return res, err
 	}
-	cellDoc := getResult.CellDoc
-	if cellDoc == nil {
+	if !getResult.MetadataExists {
 		return res, fmt.Errorf("cell %q not found", cellName)
 	}
+	internalCell := getResult.Cell
 
 	// Find container in cell spec by name (ID now stores just the container name)
-	var foundContainer *v1beta1.ContainerSpec
-	for i := range cellDoc.Spec.Containers {
-		if cellDoc.Spec.Containers[i].ID == name {
-			foundContainer = &cellDoc.Spec.Containers[i]
-			break
+	var foundContainerSpec *intmodel.ContainerSpec
+
+	// Check root container first
+	if internalCell.Spec.RootContainer != nil && internalCell.Spec.RootContainer.ID == name {
+		foundContainerSpec = internalCell.Spec.RootContainer
+	} else {
+		// Check regular containers
+		for i := range internalCell.Spec.Containers {
+			if internalCell.Spec.Containers[i].ID == name {
+				foundContainerSpec = &internalCell.Spec.Containers[i]
+				break
+			}
 		}
 	}
 
-	if foundContainer == nil {
+	if foundContainerSpec == nil {
 		return res, fmt.Errorf("container %q not found in cell %q", name, cellName)
 	}
 
-	// Update the doc spec to match the stored container details.
-	doc.Spec = *foundContainer
-	doc.Spec.ID = name
-	doc.Spec.RealmID = realmName
-	doc.Spec.SpaceID = spaceName
-	doc.Spec.StackID = stackName
-	doc.Spec.CellID = cellName
-
 	// Kill the specific container (pass container name, runner will build full ID)
-	if err = b.runner.KillContainer(cellDoc, name); err != nil {
+	if err = b.runner.KillContainer(internalCell, name); err != nil {
 		return res, fmt.Errorf("failed to kill container %s: %w", name, err)
-	}
-
-	// Convert to internal model for UpdateCellMetadata
-	cell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
-	if err != nil {
-		return res, fmt.Errorf("failed to convert cell to internal model: %w", err)
 	}
 
 	// Update cell metadata (state remains Ready if other containers are running)
 	// The state management can be enhanced later to track individual container states
-	if err = b.runner.UpdateCellMetadata(cell); err != nil {
+	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {
 		return res, fmt.Errorf("failed to update cell metadata: %w", err)
+	}
+
+	// Build result container from found container spec
+	labels := container.Metadata.Labels
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+
+	res.Container = intmodel.Container{
+		Metadata: intmodel.ContainerMetadata{
+			Name:   name,
+			Labels: labels,
+		},
+		Spec: *foundContainerSpec,
+		Status: intmodel.ContainerStatus{
+			State: intmodel.ContainerStatePending,
+		},
 	}
 
 	res.Killed = true

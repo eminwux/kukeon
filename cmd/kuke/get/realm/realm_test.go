@@ -31,11 +31,13 @@ import (
 	realm "github.com/eminwux/kukeon/cmd/kuke/get/realm"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
-	"github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -347,14 +349,16 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			name: "get realm success",
 			args: []string{"alpha"},
 			controller: &fakeRealmController{
-				getRealmFn: func(doc *v1beta1.RealmDoc) (controller.GetRealmResult, error) {
-					if doc.Metadata.Name != "alpha" {
+				getRealmFn: func(realm intmodel.Realm) (controller.GetRealmResult, error) {
+					if realm.Metadata.Name != "alpha" {
 						return controller.GetRealmResult{}, errors.New("unexpected args")
 					}
+					// Convert docAlpha to internal for result
+					realmInternal, _, _ := apischeme.NormalizeRealm(*docAlpha)
 					return controller.GetRealmResult{
-						RealmDoc:       docAlpha,
-						MetadataExists: true,
-						CgroupExists:   true,
+						Realm:                     realmInternal,
+						MetadataExists:            true,
+						CgroupExists:              true,
 						ContainerdNamespaceExists: true,
 					}, nil
 				},
@@ -365,8 +369,14 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			name:       "list realms success",
 			outputFlag: "yaml",
 			controller: &fakeRealmController{
-				listRealmsFn: func() ([]*v1beta1.RealmDoc, error) {
-					return docList, nil
+				listRealmsFn: func() ([]intmodel.Realm, error) {
+					// Convert docList to internal types
+					internalRealms := make([]intmodel.Realm, 0, len(docList))
+					for _, doc := range docList {
+						realmInternal, _, _ := apischeme.NormalizeRealm(*doc)
+						internalRealms = append(internalRealms, realmInternal)
+					}
+					return internalRealms, nil
 				},
 			},
 			wantOutput: []string{"name: alpha"},
@@ -375,7 +385,7 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			name: "realm not found error",
 			args: []string{"ghost"},
 			controller: &fakeRealmController{
-				getRealmFn: func(_ *v1beta1.RealmDoc) (controller.GetRealmResult, error) {
+				getRealmFn: func(_ intmodel.Realm) (controller.GetRealmResult, error) {
 					return controller.GetRealmResult{}, errdefs.ErrRealmNotFound
 				},
 			},
@@ -443,18 +453,18 @@ func TestNewRealmCmdRunE(t *testing.T) {
 }
 
 type fakeRealmController struct {
-	getRealmFn   func(doc *v1beta1.RealmDoc) (controller.GetRealmResult, error)
-	listRealmsFn func() ([]*v1beta1.RealmDoc, error)
+	getRealmFn   func(realm intmodel.Realm) (controller.GetRealmResult, error)
+	listRealmsFn func() ([]intmodel.Realm, error)
 }
 
-func (f *fakeRealmController) GetRealm(doc *v1beta1.RealmDoc) (controller.GetRealmResult, error) {
+func (f *fakeRealmController) GetRealm(realm intmodel.Realm) (controller.GetRealmResult, error) {
 	if f.getRealmFn == nil {
 		return controller.GetRealmResult{}, errors.New("unexpected GetRealm call")
 	}
-	return f.getRealmFn(doc)
+	return f.getRealmFn(realm)
 }
 
-func (f *fakeRealmController) ListRealms() ([]*v1beta1.RealmDoc, error) {
+func (f *fakeRealmController) ListRealms() ([]intmodel.Realm, error) {
 	if f.listRealmsFn == nil {
 		return nil, errors.New("unexpected ListRealms call")
 	}

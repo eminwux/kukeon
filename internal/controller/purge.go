@@ -22,12 +22,12 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
 // PurgeRealmResult reports what was purged during realm purging.
 type PurgeRealmResult struct {
-	RealmDoc       *v1beta1.RealmDoc
+	Realm          intmodel.Realm
 	RealmDeleted   bool     // Whether realm deletion succeeded
 	PurgeSucceeded bool     // Whether comprehensive purge succeeded
 	Force          bool     // Force flag that was used
@@ -38,7 +38,7 @@ type PurgeRealmResult struct {
 
 // PurgeSpaceResult reports what was purged during space purging.
 type PurgeSpaceResult struct {
-	SpaceDoc *v1beta1.SpaceDoc
+	Space intmodel.Space
 
 	MetadataDeleted   bool
 	CgroupDeleted     bool
@@ -53,14 +53,14 @@ type PurgeSpaceResult struct {
 
 // PurgeStackResult reports what was purged during stack purging.
 type PurgeStackResult struct {
-	StackDoc *v1beta1.StackDoc
-	Deleted  []string // Resources that were deleted (standard cleanup)
-	Purged   []string // Additional resources purged (CNI, orphaned containers, etc.)
+	Stack   intmodel.Stack
+	Deleted []string // Resources that were deleted (standard cleanup)
+	Purged  []string // Additional resources purged (CNI, orphaned containers, etc.)
 }
 
 // PurgeCellResult reports what was purged during cell purging.
 type PurgeCellResult struct {
-	CellDoc           *v1beta1.CellDoc
+	Cell              intmodel.Cell
 	ContainersDeleted bool
 	CgroupDeleted     bool
 	MetadataDeleted   bool
@@ -73,7 +73,7 @@ type PurgeCellResult struct {
 
 // PurgeContainerResult reports what was purged during container purging.
 type PurgeContainerResult struct {
-	ContainerDoc       *v1beta1.ContainerDoc
+	Container          intmodel.Container
 	CellMetadataExists bool
 	ContainerExists    bool
 	Deleted            []string // Resources that were deleted (standard cleanup)
@@ -82,61 +82,59 @@ type PurgeContainerResult struct {
 
 // PurgeRealm purges a realm with comprehensive cleanup. If cascade is true, purges all spaces first.
 // If force is true, skips validation of child resources.
-func (b *Exec) PurgeRealm(doc *v1beta1.RealmDoc, force, cascade bool) (PurgeRealmResult, error) {
+func (b *Exec) PurgeRealm(realm intmodel.Realm, force, cascade bool) (PurgeRealmResult, error) {
 	var result PurgeRealmResult
 
-	if doc == nil {
-		return result, errdefs.ErrRealmNameRequired
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(realm.Metadata.Name)
 	if name == "" {
 		return result, errdefs.ErrRealmNameRequired
 	}
 
-	// Get realm document
-	getResult, err := b.GetRealm(doc)
+	// Build lookup realm for GetRealm
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: name,
+		},
+	}
+	getResult, err := b.GetRealm(lookupRealm)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrRealmNotFound) {
 			return result, fmt.Errorf("realm %q not found", name)
 		}
 		return result, err
 	}
+	if !getResult.MetadataExists {
+		return result, fmt.Errorf("realm %q not found", name)
+	}
 
-	// Initialize result with realm document and flags
+	internalRealm := getResult.Realm
+
+	// Initialize result with realm and flags
 	result = PurgeRealmResult{
-		RealmDoc: getResult.RealmDoc,
-		Force:    force,
-		Cascade:  cascade,
-		Deleted:  []string{},
-		Purged:   []string{},
+		Realm:   internalRealm,
+		Force:   force,
+		Cascade: cascade,
+		Deleted: []string{},
+		Purged:  []string{},
 	}
 
 	// If cascade, purge all spaces first
 	if cascade {
-		var spaces []*v1beta1.SpaceDoc
+		var spaces []intmodel.Space
 		spaces, err = b.ListSpaces(name)
 		if err != nil {
 			return result, fmt.Errorf("failed to list spaces: %w", err)
 		}
-		for _, space := range spaces {
-			spaceDoc := &v1beta1.SpaceDoc{
-				Metadata: v1beta1.SpaceMetadata{
-					Name: space.Metadata.Name,
-				},
-				Spec: v1beta1.SpaceSpec{
-					RealmID: name,
-				},
-			}
-			_, err = b.PurgeSpace(spaceDoc, force, cascade)
+		for _, spaceInternal := range spaces {
+			_, err = b.PurgeSpace(spaceInternal, force, cascade)
 			if err != nil {
-				return result, fmt.Errorf("failed to purge space %q: %w", space.Metadata.Name, err)
+				return result, fmt.Errorf("failed to purge space %q: %w", spaceInternal.Metadata.Name, err)
 			}
-			result.Deleted = append(result.Deleted, fmt.Sprintf("space:%s", space.Metadata.Name))
+			result.Deleted = append(result.Deleted, fmt.Sprintf("space:%s", spaceInternal.Metadata.Name))
 		}
 	} else if !force {
 		// Validate no spaces exist
-		var spaces []*v1beta1.SpaceDoc
+		var spaces []intmodel.Space
 		spaces, err = b.ListSpaces(name)
 		if err != nil {
 			return result, fmt.Errorf("failed to list spaces: %w", err)
@@ -147,35 +145,20 @@ func (b *Exec) PurgeRealm(doc *v1beta1.RealmDoc, force, cascade bool) (PurgeReal
 	}
 
 	// Perform standard delete first
-	deleteDoc := &v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
-			Name: name,
-		},
-		Spec: v1beta1.RealmSpec{
-			Namespace: name,
-		},
-	}
-	deleteResult, err := b.DeleteRealm(deleteDoc, force, cascade)
+	deleteResult, err := b.DeleteRealm(internalRealm, force, cascade)
 	if err != nil {
 		// Log but continue with purge
 		result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
 		result.RealmDeleted = false
 	} else {
-		result.Deleted = deleteResult.Deleted
+		result.Deleted = append(result.Deleted, deleteResult.Deleted...)
 		result.RealmDeleted = true
-		// Update RealmDoc from delete result if available
-		if deleteResult.RealmDoc != nil {
-			result.RealmDoc = deleteResult.RealmDoc
-		}
+		// Update result realm with deleted realm
+		result.Realm = deleteResult.Realm
 	}
 
 	// Perform comprehensive purge
-	purgeDoc := &v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
-			Name: name,
-		},
-	}
-	if err = b.runner.PurgeRealm(purgeDoc); err != nil {
+	if err = b.runner.PurgeRealm(internalRealm); err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
 		result.PurgeSucceeded = false
 	} else {
@@ -188,70 +171,67 @@ func (b *Exec) PurgeRealm(doc *v1beta1.RealmDoc, force, cascade bool) (PurgeReal
 
 // PurgeSpace purges a space with comprehensive cleanup. If cascade is true, purges all stacks first.
 // If force is true, skips validation of child resources.
-func (b *Exec) PurgeSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (PurgeSpaceResult, error) {
+func (b *Exec) PurgeSpace(space intmodel.Space, force, cascade bool) (PurgeSpaceResult, error) {
 	var result PurgeSpaceResult
 
-	if doc == nil {
-		return result, errdefs.ErrSpaceNameRequired
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(space.Metadata.Name)
 	if name == "" {
 		return result, errdefs.ErrSpaceNameRequired
 	}
-	doc.Metadata.Name = name
 
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(space.Spec.RealmName)
 	if realmName == "" {
 		return result, errdefs.ErrRealmNameRequired
 	}
-	doc.Spec.RealmID = realmName
 
-	getResult, err := b.GetSpace(doc)
+	// Build lookup space for GetSpace
+	lookupSpace := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{
+			Name: name,
+		},
+		Spec: intmodel.SpaceSpec{
+			RealmName: realmName,
+		},
+	}
+	getResult, err := b.GetSpace(lookupSpace)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrSpaceNotFound) {
 			return result, fmt.Errorf("space %q not found in realm %q", name, realmName)
 		}
 		return result, err
 	}
-	if !getResult.MetadataExists || getResult.SpaceDoc == nil {
+	if !getResult.MetadataExists {
 		return result, fmt.Errorf("space %q not found in realm %q", name, realmName)
 	}
 
+	internalSpace := getResult.Space
+
+	// Initialize result with space and flags
 	result = PurgeSpaceResult{
-		SpaceDoc: getResult.SpaceDoc,
-		Force:    force,
-		Cascade:  cascade,
-		Deleted:  []string{},
-		Purged:   []string{},
+		Space:   internalSpace,
+		Force:   force,
+		Cascade: cascade,
+		Deleted: []string{},
+		Purged:  []string{},
 	}
 
 	// If cascade, purge all stacks first (recursively cascades to cells)
 	if cascade {
-		var stacks []*v1beta1.StackDoc
+		var stacks []intmodel.Stack
 		stacks, err = b.ListStacks(realmName, name)
 		if err != nil {
 			return result, fmt.Errorf("failed to list stacks: %w", err)
 		}
-		for _, stack := range stacks {
-			stackDoc := &v1beta1.StackDoc{
-				Metadata: v1beta1.StackMetadata{
-					Name: stack.Metadata.Name,
-				},
-				Spec: v1beta1.StackSpec{
-					RealmID: realmName,
-					SpaceID: name,
-				},
-			}
-			_, err = b.PurgeStack(stackDoc, force, cascade)
+		for _, stackInternal := range stacks {
+			_, err = b.PurgeStack(stackInternal, force, cascade)
 			if err != nil {
-				return result, fmt.Errorf("failed to purge stack %q: %w", stack.Metadata.Name, err)
+				return result, fmt.Errorf("failed to purge stack %q: %w", stackInternal.Metadata.Name, err)
 			}
-			result.Deleted = append(result.Deleted, fmt.Sprintf("stack:%s", stack.Metadata.Name))
+			result.Deleted = append(result.Deleted, fmt.Sprintf("stack:%s", stackInternal.Metadata.Name))
 		}
 	} else if !force {
 		// Validate no stacks exist
-		var stacks []*v1beta1.StackDoc
+		var stacks []intmodel.Stack
 		stacks, err = b.ListStacks(realmName, name)
 		if err != nil {
 			return result, fmt.Errorf("failed to list stacks: %w", err)
@@ -262,7 +242,7 @@ func (b *Exec) PurgeSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (PurgeSpac
 	}
 
 	// Perform standard delete first
-	deleteResult, err := b.DeleteSpace(doc, force, cascade)
+	deleteResult, err := b.DeleteSpace(internalSpace, force, cascade)
 	if err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
 	} else {
@@ -270,21 +250,12 @@ func (b *Exec) PurgeSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (PurgeSpac
 		result.MetadataDeleted = deleteResult.MetadataDeleted
 		result.CgroupDeleted = deleteResult.CgroupDeleted
 		result.CNINetworkDeleted = deleteResult.CNINetworkDeleted
-		if deleteResult.SpaceDoc != nil {
-			result.SpaceDoc = deleteResult.SpaceDoc
-		}
+		// Update result space with deleted space
+		result.Space = deleteResult.Space
 	}
 
 	// Perform comprehensive purge
-	purgeDoc := &v1beta1.SpaceDoc{
-		Metadata: v1beta1.SpaceMetadata{
-			Name: name,
-		},
-		Spec: v1beta1.SpaceSpec{
-			RealmID: realmName,
-		},
-	}
-	if err = b.runner.PurgeSpace(purgeDoc); err != nil {
+	if err = b.runner.PurgeSpace(internalSpace); err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
 		result.PurgeSucceeded = false
 	} else {
@@ -297,33 +268,35 @@ func (b *Exec) PurgeSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (PurgeSpac
 
 // PurgeStack purges a stack with comprehensive cleanup. If cascade is true, purges all cells first.
 // If force is true, skips validation of child resources.
-func (b *Exec) PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (PurgeStackResult, error) {
+func (b *Exec) PurgeStack(stack intmodel.Stack, force, cascade bool) (PurgeStackResult, error) {
 	var result PurgeStackResult
 
-	if doc == nil {
-		return result, errdefs.ErrStackNameRequired
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(stack.Metadata.Name)
 	if name == "" {
 		return result, errdefs.ErrStackNameRequired
 	}
-	doc.Metadata.Name = name
 
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(stack.Spec.RealmName)
 	if realmName == "" {
 		return result, errdefs.ErrRealmNameRequired
 	}
-	doc.Spec.RealmID = realmName
 
-	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	spaceName := strings.TrimSpace(stack.Spec.SpaceName)
 	if spaceName == "" {
 		return result, errdefs.ErrSpaceNameRequired
 	}
-	doc.Spec.SpaceID = spaceName
 
-	// Get stack document
-	getResult, err := b.GetStack(doc)
+	// Build lookup stack for GetStack
+	lookupStack := intmodel.Stack{
+		Metadata: intmodel.StackMetadata{
+			Name: name,
+		},
+		Spec: intmodel.StackSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+		},
+	}
+	getResult, err := b.GetStack(lookupStack)
 	if err != nil {
 		return result, err
 	}
@@ -331,34 +304,32 @@ func (b *Exec) PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (PurgeStac
 		return result, fmt.Errorf("stack %q not found in realm %q, space %q", name, realmName, spaceName)
 	}
 
-	stackDoc := getResult.StackDoc
-	if stackDoc == nil {
-		stackDoc = doc
-	}
+	internalStack := getResult.Stack
 
+	// Initialize result with stack and flags
 	result = PurgeStackResult{
-		StackDoc: stackDoc,
-		Deleted:  []string{},
-		Purged:   []string{},
+		Stack:   internalStack,
+		Deleted: []string{},
+		Purged:  []string{},
 	}
 
 	// If cascade, purge all cells first
 	if cascade {
-		var cells []*v1beta1.CellDoc
+		var cells []intmodel.Cell
 		cells, err = b.ListCells(realmName, spaceName, name)
 		if err != nil {
 			return result, fmt.Errorf("failed to list cells: %w", err)
 		}
-		for _, cell := range cells {
-			_, err = b.PurgeCell(cell, force, false)
+		for _, cellInternal := range cells {
+			_, err = b.PurgeCell(cellInternal, force, false)
 			if err != nil {
-				return result, fmt.Errorf("failed to purge cell %q: %w", cell.Metadata.Name, err)
+				return result, fmt.Errorf("failed to purge cell %q: %w", cellInternal.Metadata.Name, err)
 			}
-			result.Deleted = append(result.Deleted, fmt.Sprintf("cell:%s", cell.Metadata.Name))
+			result.Deleted = append(result.Deleted, fmt.Sprintf("cell:%s", cellInternal.Metadata.Name))
 		}
 	} else if !force {
 		// Validate no cells exist
-		var cells []*v1beta1.CellDoc
+		var cells []intmodel.Cell
 		cells, err = b.ListCells(realmName, spaceName, name)
 		if err != nil {
 			return result, fmt.Errorf("failed to list cells: %w", err)
@@ -369,27 +340,17 @@ func (b *Exec) PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (PurgeStac
 	}
 
 	// Perform standard delete first
-	deleteResult, err := b.DeleteStack(doc, force, cascade)
+	deleteResult, err := b.DeleteStack(internalStack, force, cascade)
 	if err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
 	} else {
-		result.Deleted = deleteResult.Deleted
-		if deleteResult.StackDoc != nil {
-			result.StackDoc = deleteResult.StackDoc
-		}
+		result.Deleted = append(result.Deleted, deleteResult.Deleted...)
+		// Update result stack with deleted stack
+		result.Stack = deleteResult.Stack
 	}
 
 	// Perform comprehensive purge
-	purgeDoc := &v1beta1.StackDoc{
-		Metadata: v1beta1.StackMetadata{
-			Name: name,
-		},
-		Spec: v1beta1.StackSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-		},
-	}
-	if err = b.runner.PurgeStack(purgeDoc); err != nil {
+	if err = b.runner.PurgeStack(internalStack); err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
 	} else {
 		result.Purged = append(result.Purged, "cni-resources", "orphaned-containers", "all-metadata")
@@ -400,39 +361,41 @@ func (b *Exec) PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (PurgeStac
 
 // PurgeCell purges a cell with comprehensive cleanup. Always purges all containers first.
 // If force is true, skips validation (currently unused but recorded for auditing).
-func (b *Exec) PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (PurgeCellResult, error) {
+func (b *Exec) PurgeCell(cell intmodel.Cell, force, cascade bool) (PurgeCellResult, error) {
 	var result PurgeCellResult
 
-	if doc == nil {
-		return result, errdefs.ErrCellNameRequired
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(cell.Metadata.Name)
 	if name == "" {
 		return result, errdefs.ErrCellNameRequired
 	}
-	doc.Metadata.Name = name
 
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
 	if realmName == "" {
 		return result, errdefs.ErrRealmNameRequired
 	}
-	doc.Spec.RealmID = realmName
 
-	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
 	if spaceName == "" {
 		return result, errdefs.ErrSpaceNameRequired
 	}
-	doc.Spec.SpaceID = spaceName
 
-	stackName := strings.TrimSpace(doc.Spec.StackID)
+	stackName := strings.TrimSpace(cell.Spec.StackName)
 	if stackName == "" {
 		return result, errdefs.ErrStackNameRequired
 	}
-	doc.Spec.StackID = stackName
 
-	// Ensure cell exists and capture latest state.
-	getResult, err := b.GetCell(doc)
+	// Build lookup cell for GetCell
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: name,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
+		},
+	}
+	getResult, err := b.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return result, fmt.Errorf(
@@ -446,8 +409,11 @@ func (b *Exec) PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (PurgeCellRe
 		return result, err
 	}
 
+	internalCell := getResult.Cell
+
+	// Initialize result with cell and flags
 	result = PurgeCellResult{
-		CellDoc: getResult.CellDoc,
+		Cell:    internalCell,
 		Force:   force,
 		Cascade: cascade,
 		Deleted: []string{},
@@ -455,7 +421,7 @@ func (b *Exec) PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (PurgeCellRe
 	}
 
 	// Perform standard delete first
-	deleteResult, err := b.DeleteCell(doc)
+	deleteResult, err := b.DeleteCell(internalCell)
 	if err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
 	} else {
@@ -472,13 +438,12 @@ func (b *Exec) PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (PurgeCellRe
 		if deleteResult.MetadataDeleted {
 			result.Deleted = append(result.Deleted, "metadata")
 		}
-		if deleteResult.CellDoc != nil {
-			result.CellDoc = deleteResult.CellDoc
-		}
+		// Update result cell with deleted cell
+		result.Cell = deleteResult.Cell
 	}
 
 	// Perform comprehensive purge
-	if err = b.runner.PurgeCell(doc); err != nil {
+	if err = b.runner.PurgeCell(internalCell); err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
 		result.PurgeSucceeded = false
 	} else {
@@ -490,32 +455,57 @@ func (b *Exec) PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (PurgeCellRe
 }
 
 // PurgeContainer purges a single container with comprehensive cleanup. Cascade flag is not applicable.
-func (b *Exec) PurgeContainer(doc *v1beta1.ContainerDoc) (PurgeContainerResult, error) {
+func (b *Exec) PurgeContainer(container intmodel.Container) (PurgeContainerResult, error) {
 	var result PurgeContainerResult
 
-	sanitizedDoc, name, realmName, spaceName, stackName, cellName, err := normalizeContainerDoc(doc)
-	if err != nil {
-		return result, err
+	name := strings.TrimSpace(container.Metadata.Name)
+	if name == "" {
+		name = strings.TrimSpace(container.Spec.ID)
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return result, errdefs.ErrContainerNameRequired
 	}
 
+	realmName := strings.TrimSpace(container.Spec.RealmName)
+	if realmName == "" {
+		return result, errdefs.ErrRealmNameRequired
+	}
+
+	spaceName := strings.TrimSpace(container.Spec.SpaceName)
+	if spaceName == "" {
+		return result, errdefs.ErrSpaceNameRequired
+	}
+
+	stackName := strings.TrimSpace(container.Spec.StackName)
+	if stackName == "" {
+		return result, errdefs.ErrStackNameRequired
+	}
+
+	cellName := strings.TrimSpace(container.Spec.CellName)
+	if cellName == "" {
+		return result, errdefs.ErrCellNameRequired
+	}
+
+	// Initialize result
 	result = PurgeContainerResult{
-		ContainerDoc: sanitizedDoc,
-		Deleted:      []string{},
-		Purged:       []string{},
+		Container: container,
+		Deleted:   []string{},
+		Purged:    []string{},
 	}
 
 	// Get cell to find container metadata
-	cellDoc := &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
 			Name: cellName,
 		},
-		Spec: v1beta1.CellSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-			StackID: stackName,
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
 		},
 	}
-	getResult, err := b.GetCell(cellDoc)
+	getResult, err := b.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return result, fmt.Errorf(
@@ -530,116 +520,67 @@ func (b *Exec) PurgeContainer(doc *v1beta1.ContainerDoc) (PurgeContainerResult, 
 	}
 	result.CellMetadataExists = getResult.MetadataExists
 
-	cellDoc = getResult.CellDoc
-	if cellDoc == nil {
+	if !getResult.MetadataExists {
 		return result, fmt.Errorf("cell %q not found", cellName)
 	}
 
+	internalCell := getResult.Cell
+
 	// Check if container exists in cell metadata by name (ID now stores just the container name)
-	var foundContainer *v1beta1.ContainerSpec
-	for i := range cellDoc.Spec.Containers {
-		if cellDoc.Spec.Containers[i].ID == name {
-			foundContainer = &cellDoc.Spec.Containers[i]
-			break
+	var foundContainerSpec *intmodel.ContainerSpec
+
+	// Check root container first
+	if internalCell.Spec.RootContainer != nil && internalCell.Spec.RootContainer.ID == name {
+		foundContainerSpec = internalCell.Spec.RootContainer
+		result.ContainerExists = true
+	} else {
+		// Check regular containers
+		for i := range internalCell.Spec.Containers {
+			if internalCell.Spec.Containers[i].ID == name {
+				foundContainerSpec = &internalCell.Spec.Containers[i]
+				result.ContainerExists = true
+				break
+			}
 		}
 	}
 
 	// Perform standard delete if container is in metadata
-	if foundContainer != nil {
-		result.ContainerExists = true
+	if foundContainerSpec != nil {
 		var deleteResult DeleteContainerResult
-		deleteResult, err = b.DeleteContainer(result.ContainerDoc)
+		deleteResult, err = b.DeleteContainer(container)
 		if err != nil {
 			result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
 		} else {
 			result.Deleted = append(result.Deleted, deleteResult.Deleted...)
-			if deleteResult.ContainerDoc != nil {
-				result.ContainerDoc = deleteResult.ContainerDoc
-			}
 			result.CellMetadataExists = deleteResult.CellMetadataExists
 			result.ContainerExists = deleteResult.ContainerExists
+			// Update result container with deleted container
+			result.Container = deleteResult.Container
 		}
-	} else {
-		result.ContainerExists = false
 	}
 
-	// Get realm to determine namespace for runtime cleanup
-	realmDocInput := &v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
+	// Get realm to pass to runner.PurgeContainer
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
 			Name: realmName,
 		},
 	}
-	realmGetResult, err := b.GetRealm(realmDocInput)
+	realmGetResult, err := b.GetRealm(lookupRealm)
 	if err != nil {
 		return result, fmt.Errorf("failed to get realm: %w", err)
 	}
-	realmDoc := realmGetResult.RealmDoc
-	if realmDoc == nil {
+	if !realmGetResult.MetadataExists {
 		return result, fmt.Errorf("realm %q not found", realmName)
 	}
 
+	// Use internal realm directly for runner.PurgeContainer
+	internalRealm := realmGetResult.Realm
 	// Use container name directly for containerd operations
-	if err = b.runner.PurgeContainer(name, realmDoc.Spec.Namespace); err != nil {
+	if err = b.runner.PurgeContainer(internalRealm, name); err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
 	} else {
 		result.Purged = append(result.Purged, "cni-resources", "ipam-allocation", "cache-entries")
 	}
 
 	return result, nil
-}
-
-func normalizeContainerDoc(
-	doc *v1beta1.ContainerDoc,
-) (*v1beta1.ContainerDoc, string, string, string, string, string, error) {
-	if doc == nil {
-		return nil, "", "", "", "", "", errdefs.ErrContainerNameRequired
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
-	if name == "" {
-		return nil, "", "", "", "", "", errdefs.ErrContainerNameRequired
-	}
-
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
-	if realmName == "" {
-		return nil, "", "", "", "", "", errdefs.ErrRealmNameRequired
-	}
-
-	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
-	if spaceName == "" {
-		return nil, "", "", "", "", "", errdefs.ErrSpaceNameRequired
-	}
-
-	stackName := strings.TrimSpace(doc.Spec.StackID)
-	if stackName == "" {
-		return nil, "", "", "", "", "", errdefs.ErrStackNameRequired
-	}
-
-	cellName := strings.TrimSpace(doc.Spec.CellID)
-	if cellName == "" {
-		return nil, "", "", "", "", "", errdefs.ErrCellNameRequired
-	}
-
-	labels := make(map[string]string, len(doc.Metadata.Labels))
-	for k, v := range doc.Metadata.Labels {
-		labels[k] = v
-	}
-
-	sanitized := &v1beta1.ContainerDoc{
-		APIVersion: v1beta1.APIVersionV1Beta1,
-		Kind:       v1beta1.KindContainer,
-		Metadata: v1beta1.ContainerMetadata{
-			Name:   name,
-			Labels: labels,
-		},
-		Spec: v1beta1.ContainerSpec{
-			ID:      name,
-			RealmID: realmName,
-			SpaceID: spaceName,
-			StackID: stackName,
-			CellID:  cellName,
-		},
-	}
-
-	return sanitized, name, realmName, spaceName, stackName, cellName, nil
 }

@@ -32,7 +32,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -498,15 +498,15 @@ func TestDeleteStackWithMocks(t *testing.T) {
 			forceFlag:   false,
 			cascadeFlag: false,
 			controller: &fakeStackController{
-				deleteStackFn: func(doc *v1beta1.StackDoc, force, cascade bool) (controller.DeleteStackResult, error) {
-					if doc.Metadata.Name != "test-stack" {
-						t.Fatalf("expected name %q, got %q", "test-stack", doc.Metadata.Name)
+				deleteStackFn: func(stack intmodel.Stack, force, cascade bool) (controller.DeleteStackResult, error) {
+					if stack.Metadata.Name != "test-stack" {
+						t.Fatalf("expected name %q, got %q", "test-stack", stack.Metadata.Name)
 					}
-					if doc.Spec.RealmID != "test-realm" {
-						t.Fatalf("expected realm %q, got %q", "test-realm", doc.Spec.RealmID)
+					if stack.Spec.RealmName != "test-realm" {
+						t.Fatalf("expected realm %q, got %q", "test-realm", stack.Spec.RealmName)
 					}
-					if doc.Spec.SpaceID != "test-space" {
-						t.Fatalf("expected space %q, got %q", "test-space", doc.Spec.SpaceID)
+					if stack.Spec.SpaceName != "test-space" {
+						t.Fatalf("expected space %q, got %q", "test-space", stack.Spec.SpaceName)
 					}
 					if force {
 						t.Fatalf("expected force to be false, got true")
@@ -518,7 +518,7 @@ func TestDeleteStackWithMocks(t *testing.T) {
 						StackName:       "test-stack",
 						RealmName:       "test-realm",
 						SpaceName:       "test-space",
-						StackDoc:        doc,
+						Stack:           stack,
 						MetadataDeleted: true,
 						CgroupDeleted:   true,
 						Deleted:         []string{"metadata", "cgroup"},
@@ -535,21 +535,21 @@ func TestDeleteStackWithMocks(t *testing.T) {
 			forceFlag:   false,
 			cascadeFlag: false,
 			controller: &fakeStackController{
-				deleteStackFn: func(doc *v1beta1.StackDoc, _ bool, _ bool) (controller.DeleteStackResult, error) {
-					if doc.Metadata.Name != "test-stack" {
-						t.Fatalf("expected trimmed name %q, got %q", "test-stack", doc.Metadata.Name)
+				deleteStackFn: func(stack intmodel.Stack, _ bool, _ bool) (controller.DeleteStackResult, error) {
+					if stack.Metadata.Name != "test-stack" {
+						t.Fatalf("expected trimmed name %q, got %q", "test-stack", stack.Metadata.Name)
 					}
-					if doc.Spec.RealmID != "test-realm" {
-						t.Fatalf("expected trimmed realm %q, got %q", "test-realm", doc.Spec.RealmID)
+					if stack.Spec.RealmName != "test-realm" {
+						t.Fatalf("expected trimmed realm %q, got %q", "test-realm", stack.Spec.RealmName)
 					}
-					if doc.Spec.SpaceID != "test-space" {
-						t.Fatalf("expected trimmed space %q, got %q", "test-space", doc.Spec.SpaceID)
+					if stack.Spec.SpaceName != "test-space" {
+						t.Fatalf("expected trimmed space %q, got %q", "test-space", stack.Spec.SpaceName)
 					}
 					return controller.DeleteStackResult{
 						StackName:       "test-stack",
 						RealmName:       "test-realm",
 						SpaceName:       "test-space",
-						StackDoc:        doc,
+						Stack:           stack,
 						MetadataDeleted: true,
 						CgroupDeleted:   true,
 						Deleted:         []string{"metadata", "cgroup"},
@@ -566,7 +566,7 @@ func TestDeleteStackWithMocks(t *testing.T) {
 			forceFlag:   true,
 			cascadeFlag: false,
 			controller: &fakeStackController{
-				deleteStackFn: func(doc *v1beta1.StackDoc, force bool, cascade bool) (controller.DeleteStackResult, error) {
+				deleteStackFn: func(stack intmodel.Stack, force bool, cascade bool) (controller.DeleteStackResult, error) {
 					if !force {
 						t.Fatalf("expected force to be true, got false")
 					}
@@ -577,7 +577,7 @@ func TestDeleteStackWithMocks(t *testing.T) {
 						StackName:       "test-stack",
 						RealmName:       "test-realm",
 						SpaceName:       "test-space",
-						StackDoc:        doc,
+						Stack:           stack,
 						MetadataDeleted: true,
 						CgroupDeleted:   true,
 						Deleted:         []string{"metadata", "cgroup"},
@@ -594,7 +594,7 @@ func TestDeleteStackWithMocks(t *testing.T) {
 			forceFlag:   false,
 			cascadeFlag: true,
 			controller: &fakeStackController{
-				deleteStackFn: func(doc *v1beta1.StackDoc, force bool, cascade bool) (controller.DeleteStackResult, error) {
+				deleteStackFn: func(stack intmodel.Stack, force bool, cascade bool) (controller.DeleteStackResult, error) {
 					if force {
 						t.Fatalf("expected force to be false, got true")
 					}
@@ -605,7 +605,7 @@ func TestDeleteStackWithMocks(t *testing.T) {
 						StackName:       "test-stack",
 						RealmName:       "test-realm",
 						SpaceName:       "test-space",
-						StackDoc:        doc,
+						Stack:           stack,
 						MetadataDeleted: true,
 						CgroupDeleted:   true,
 						Deleted:         []string{"cell:cell1", "cell:cell2", "metadata", "cgroup"},
@@ -622,7 +622,7 @@ func TestDeleteStackWithMocks(t *testing.T) {
 			forceFlag:   true,
 			cascadeFlag: true,
 			controller: &fakeStackController{
-				deleteStackFn: func(doc *v1beta1.StackDoc, force bool, cascade bool) (controller.DeleteStackResult, error) {
+				deleteStackFn: func(stack intmodel.Stack, force bool, cascade bool) (controller.DeleteStackResult, error) {
 					if !force {
 						t.Fatalf("expected force to be true, got false")
 					}
@@ -633,7 +633,7 @@ func TestDeleteStackWithMocks(t *testing.T) {
 						StackName:       "test-stack",
 						RealmName:       "test-realm",
 						SpaceName:       "test-space",
-						StackDoc:        doc,
+						Stack:           stack,
 						MetadataDeleted: true,
 						CgroupDeleted:   true,
 						Deleted:         []string{"cell:cell1", "metadata", "cgroup"},
@@ -648,7 +648,7 @@ func TestDeleteStackWithMocks(t *testing.T) {
 			realmFlag: "test-realm",
 			spaceFlag: "test-space",
 			controller: &fakeStackController{
-				deleteStackFn: func(_ *v1beta1.StackDoc, _ bool, _ bool) (controller.DeleteStackResult, error) {
+				deleteStackFn: func(_ intmodel.Stack, _ bool, _ bool) (controller.DeleteStackResult, error) {
 					return controller.DeleteStackResult{}, errdefs.ErrDeleteStack
 				},
 			},
@@ -661,7 +661,7 @@ func TestDeleteStackWithMocks(t *testing.T) {
 			realmFlag: "test-realm",
 			spaceFlag: "test-space",
 			controller: &fakeStackController{
-				deleteStackFn: func(_ *v1beta1.StackDoc, _ bool, _ bool) (controller.DeleteStackResult, error) {
+				deleteStackFn: func(_ intmodel.Stack, _ bool, _ bool) (controller.DeleteStackResult, error) {
 					return controller.DeleteStackResult{}, errdefs.ErrStackNotFound
 				},
 			},
@@ -795,17 +795,17 @@ func testLogger() *slog.Logger {
 }
 
 type fakeStackController struct {
-	deleteStackFn func(doc *v1beta1.StackDoc, force, cascade bool) (controller.DeleteStackResult, error)
+	deleteStackFn func(stack intmodel.Stack, force, cascade bool) (controller.DeleteStackResult, error)
 }
 
 func (f *fakeStackController) DeleteStack(
-	doc *v1beta1.StackDoc,
+	stack intmodel.Stack,
 	force, cascade bool,
 ) (controller.DeleteStackResult, error) {
 	if f.deleteStackFn == nil {
 		panic("DeleteStack was called unexpectedly")
 	}
-	return f.deleteStackFn(doc, force, cascade)
+	return f.deleteStackFn(stack, force, cascade)
 }
 
 func setupTempDir() error {

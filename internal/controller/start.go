@@ -21,165 +21,94 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // StartCellResult reports the outcome of starting a cell.
 type StartCellResult struct {
-	CellDoc *v1beta1.CellDoc
+	Cell    intmodel.Cell
 	Started bool
 }
 
 // StartContainerResult reports the outcome of starting a container.
 type StartContainerResult struct {
-	ContainerDoc *v1beta1.ContainerDoc
-	Started      bool
-}
-
-// validateAndGetCell validates and trims cell parameters, then retrieves the cell document.
-// Returns the validated parameters and the cell document, or an error if validation or retrieval fails.
-func (b *Exec) validateAndGetCell(
-	name, realmName, spaceName, stackName string,
-) (string, string, string, string, *v1beta1.CellDoc, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "", "", "", "", nil, errdefs.ErrCellNameRequired
-	}
-	realmName = strings.TrimSpace(realmName)
-	if realmName == "" {
-		return "", "", "", "", nil, errdefs.ErrRealmNameRequired
-	}
-	spaceName = strings.TrimSpace(spaceName)
-	if spaceName == "" {
-		return "", "", "", "", nil, errdefs.ErrSpaceNameRequired
-	}
-	stackName = strings.TrimSpace(stackName)
-	if stackName == "" {
-		return "", "", "", "", nil, errdefs.ErrStackNameRequired
-	}
-
-	// Get cell document
-	doc := &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
-			Name: name,
-		},
-		Spec: v1beta1.CellSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-			StackID: stackName,
-		},
-	}
-	result, err := b.GetCell(doc)
-	if err != nil {
-		if errors.Is(err, errdefs.ErrCellNotFound) {
-			return "", "", "", "", nil, fmt.Errorf(
-				"cell %q not found in realm %q, space %q, stack %q",
-				name,
-				realmName,
-				spaceName,
-				stackName,
-			)
-		}
-		return "", "", "", "", nil, err
-	}
-	cellDoc := result.CellDoc
-	if cellDoc == nil {
-		return "", "", "", "", nil, fmt.Errorf("cell %q not found", name)
-	}
-
-	return name, realmName, spaceName, stackName, cellDoc, nil
+	Container intmodel.Container
+	Started   bool
 }
 
 // StartCell starts all containers in a cell and updates the cell metadata state.
-func (b *Exec) StartCell(doc *v1beta1.CellDoc) (StartCellResult, error) {
+func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 	var res StartCellResult
-	if doc == nil {
-		return res, errdefs.ErrCellNameRequired
-	}
 
-	name := strings.TrimSpace(doc.Metadata.Name)
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
-	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
-	stackName := strings.TrimSpace(doc.Spec.StackID)
-
-	_, _, _, _, cellDoc, err := b.validateAndGetCell(name, realmName, spaceName, stackName)
+	internalCell, err := b.validateAndGetCell(cell)
 	if err != nil {
 		return res, err
 	}
 
-	res.CellDoc = cellDoc
-
 	// Start all containers in the cell
-	if err = b.runner.StartCell(cellDoc); err != nil {
+	if err = b.runner.StartCell(internalCell); err != nil {
 		return res, fmt.Errorf("failed to start cell containers: %w", err)
 	}
 
-	// Convert to internal model for UpdateCellMetadata
-	cell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
-	if err != nil {
-		return res, fmt.Errorf("failed to convert cell to internal model: %w", err)
-	}
-	cell.Status.State = intmodel.CellStateReady
+	// Update cell state to Ready
+	internalCell.Status.State = intmodel.CellStateReady
 
 	// Update cell metadata state to Ready
-	if err = b.runner.UpdateCellMetadata(cell); err != nil {
+	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {
 		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
-	// Update cellDoc for response
-	cellDoc.Status.State = v1beta1.CellStateReady
-
+	res.Cell = internalCell
 	res.Started = true
 	return res, nil
 }
 
 // StartContainer starts a specific container in a cell and updates the cell metadata.
-func (b *Exec) StartContainer(doc *v1beta1.ContainerDoc) (StartContainerResult, error) {
+func (b *Exec) StartContainer(container intmodel.Container) (StartContainerResult, error) {
 	var res StartContainerResult
-	if doc == nil {
-		return res, errdefs.ErrContainerNameRequired
-	}
 
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(container.Metadata.Name)
+	if name == "" {
+		name = strings.TrimSpace(container.Spec.ID)
+	}
+	name = strings.TrimSpace(name)
 	if name == "" {
 		return res, errdefs.ErrContainerNameRequired
 	}
 
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(container.Spec.RealmName)
 	if realmName == "" {
 		return res, errdefs.ErrRealmNameRequired
 	}
 
-	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	spaceName := strings.TrimSpace(container.Spec.SpaceName)
 	if spaceName == "" {
 		return res, errdefs.ErrSpaceNameRequired
 	}
 
-	stackName := strings.TrimSpace(doc.Spec.StackID)
+	stackName := strings.TrimSpace(container.Spec.StackName)
 	if stackName == "" {
 		return res, errdefs.ErrStackNameRequired
 	}
 
-	cellName := strings.TrimSpace(doc.Spec.CellID)
+	cellName := strings.TrimSpace(container.Spec.CellName)
 	if cellName == "" {
 		return res, errdefs.ErrCellNameRequired
 	}
 
-	// Get cell document
-	cellLookup := &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
+	// Build lookup cell for GetCell
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
 			Name: cellName,
 		},
-		Spec: v1beta1.CellSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-			StackID: stackName,
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
 		},
 	}
-	getResult, err := b.GetCell(cellLookup)
+	getResult, err := b.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return res, fmt.Errorf(
@@ -192,75 +121,74 @@ func (b *Exec) StartContainer(doc *v1beta1.ContainerDoc) (StartContainerResult, 
 		}
 		return res, err
 	}
-	cellDoc := getResult.CellDoc
-	if cellDoc == nil {
+	if !getResult.MetadataExists {
 		return res, fmt.Errorf("cell %q not found", cellName)
 	}
 
+	internalCell := getResult.Cell
+
 	// Find container in cell spec by name (ID now stores just the container name)
-	var foundContainer *v1beta1.ContainerSpec
-	for i := range cellDoc.Spec.Containers {
-		if cellDoc.Spec.Containers[i].ID == name {
-			foundContainer = &cellDoc.Spec.Containers[i]
-			break
+	var foundContainerSpec *intmodel.ContainerSpec
+
+	// Check root container first
+	if internalCell.Spec.RootContainer != nil && internalCell.Spec.RootContainer.ID == name {
+		foundContainerSpec = internalCell.Spec.RootContainer
+	} else {
+		// Check regular containers
+		for i := range internalCell.Spec.Containers {
+			if internalCell.Spec.Containers[i].ID == name {
+				foundContainerSpec = &internalCell.Spec.Containers[i]
+				break
+			}
 		}
 	}
 
-	if foundContainer == nil {
+	if foundContainerSpec == nil {
 		return res, fmt.Errorf("container %q not found in cell %q", name, cellName)
 	}
 
-	// Start the cell (which will start all containers including this one)
-	// The StartCell method handles starting individual containers if they exist
-	cellDocToStart := &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
+	// Start the cell with only this container
+	// Construct a cell with just this container for starting
+	cellToStart := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
 			Name: cellName,
 		},
-		Spec: v1beta1.CellSpec{
-			ID:      cellName,
-			RealmID: realmName,
-			SpaceID: spaceName,
-			StackID: stackName,
-			Containers: []v1beta1.ContainerSpec{
-				*foundContainer,
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
+			Containers: []intmodel.ContainerSpec{
+				*foundContainerSpec,
 			},
 		},
 	}
-	if err = b.runner.StartCell(cellDocToStart); err != nil {
+
+	if err = b.runner.StartCell(cellToStart); err != nil {
 		return res, fmt.Errorf("failed to start container %s: %w", name, err)
 	}
 
-	// Convert to internal model for UpdateCellMetadata
-	cell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
-	if err != nil {
-		return res, fmt.Errorf("failed to convert cell to internal model: %w", err)
-	}
-	cell.Status.State = intmodel.CellStateReady
+	// Update cell state to Ready
+	internalCell.Status.State = intmodel.CellStateReady
 
 	// Update cell metadata state to Ready
-	if err = b.runner.UpdateCellMetadata(cell); err != nil {
+	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {
 		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
-	// Update cellDoc for response
-	cellDoc.Status.State = v1beta1.CellStateReady
+	// Construct result container
+	labels := container.Metadata.Labels
+	if labels == nil {
+		labels = make(map[string]string)
+	}
 
-	containerSpec := *foundContainer
-	containerSpec.RealmID = realmName
-	containerSpec.SpaceID = spaceName
-	containerSpec.StackID = stackName
-	containerSpec.CellID = cellName
-
-	res.ContainerDoc = &v1beta1.ContainerDoc{
-		APIVersion: v1beta1.APIVersionV1Beta1,
-		Kind:       v1beta1.KindContainer,
-		Metadata: v1beta1.ContainerMetadata{
-			Name:   containerSpec.ID,
-			Labels: map[string]string{},
+	res.Container = intmodel.Container{
+		Metadata: intmodel.ContainerMetadata{
+			Name:   name,
+			Labels: labels,
 		},
-		Spec: containerSpec,
-		Status: v1beta1.ContainerStatus{
-			State: v1beta1.ContainerStateReady,
+		Spec: *foundContainerSpec,
+		Status: intmodel.ContainerStatus{
+			State: intmodel.ContainerStateReady,
 		},
 	}
 	res.Started = true

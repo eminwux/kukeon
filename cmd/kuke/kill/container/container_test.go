@@ -30,7 +30,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -64,10 +64,10 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "cell", "cell-a")
 			},
 			controller: &fakeContainerController{
-				killContainerFn: func(doc *v1beta1.ContainerDoc) (controller.KillContainerResult, error) {
+				killContainerFn: func(container intmodel.Container) (controller.KillContainerResult, error) {
 					return controller.KillContainerResult{
-						ContainerDoc: doc,
-						Killed:       true,
+						Container: container,
+						Killed:    true,
 					}, nil
 				},
 			},
@@ -96,10 +96,10 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				viper.Set(config.KUKE_KILL_CONTAINER_CELL.ViperKey, "cell-b")
 			},
 			controller: &fakeContainerController{
-				killContainerFn: func(doc *v1beta1.ContainerDoc) (controller.KillContainerResult, error) {
+				killContainerFn: func(container intmodel.Container) (controller.KillContainerResult, error) {
 					return controller.KillContainerResult{
-						ContainerDoc: doc,
-						Killed:       true,
+						Container: container,
+						Killed:    true,
 					}, nil
 				},
 			},
@@ -128,10 +128,10 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "cell", "  cell-c  ")
 			},
 			controller: &fakeContainerController{
-				killContainerFn: func(doc *v1beta1.ContainerDoc) (controller.KillContainerResult, error) {
+				killContainerFn: func(container intmodel.Container) (controller.KillContainerResult, error) {
 					return controller.KillContainerResult{
-						ContainerDoc: doc,
-						Killed:       true,
+						Container: container,
+						Killed:    true,
 					}, nil
 				},
 			},
@@ -213,7 +213,7 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "cell", "cell-a")
 			},
 			controller: &fakeContainerController{
-				killContainerFn: func(_ *v1beta1.ContainerDoc) (controller.KillContainerResult, error) {
+				killContainerFn: func(_ intmodel.Container) (controller.KillContainerResult, error) {
 					return controller.KillContainerResult{}, errors.New("kill failed")
 				},
 			},
@@ -281,22 +281,34 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			}
 
 			if tt.wantDocFields != nil {
-				gotDoc := tt.controller.capturedDoc
-				if gotDoc == nil {
-					t.Fatal("expected captured doc, got nil")
+				gotContainer := tt.controller.capturedContainer
+				if gotContainer.Metadata.Name == "" && gotContainer.Spec.ID == "" {
+					t.Fatal("expected captured container, got empty")
 				}
 
-				gotName := strings.TrimSpace(gotDoc.Metadata.Name)
+				gotName := strings.TrimSpace(gotContainer.Metadata.Name)
 				if gotName == "" {
-					gotName = strings.TrimSpace(gotDoc.Spec.ID)
+					gotName = strings.TrimSpace(gotContainer.Spec.ID)
 				}
 
 				if gotName != tt.wantDocFields.name ||
-					strings.TrimSpace(gotDoc.Spec.RealmID) != tt.wantDocFields.realm ||
-					strings.TrimSpace(gotDoc.Spec.SpaceID) != tt.wantDocFields.space ||
-					strings.TrimSpace(gotDoc.Spec.StackID) != tt.wantDocFields.stack ||
-					strings.TrimSpace(gotDoc.Spec.CellID) != tt.wantDocFields.cell {
-					t.Errorf("KillContainer called with doc %+v, want %+v", gotDoc.Spec, tt.wantDocFields)
+					strings.TrimSpace(gotContainer.Spec.RealmName) != tt.wantDocFields.realm ||
+					strings.TrimSpace(gotContainer.Spec.SpaceName) != tt.wantDocFields.space ||
+					strings.TrimSpace(gotContainer.Spec.StackName) != tt.wantDocFields.stack ||
+					strings.TrimSpace(gotContainer.Spec.CellName) != tt.wantDocFields.cell {
+					t.Errorf(
+						"KillContainer called with name=%q realm=%q space=%q stack=%q cell=%q, want name=%q realm=%q space=%q stack=%q cell=%q",
+						gotName,
+						gotContainer.Spec.RealmName,
+						gotContainer.Spec.SpaceName,
+						gotContainer.Spec.StackName,
+						gotContainer.Spec.CellName,
+						tt.wantDocFields.name,
+						tt.wantDocFields.realm,
+						tt.wantDocFields.space,
+						tt.wantDocFields.stack,
+						tt.wantDocFields.cell,
+					)
 				}
 			}
 		})
@@ -332,20 +344,20 @@ func TestNewContainerCmd_AutocompleteRegistration(t *testing.T) {
 }
 
 type fakeContainerController struct {
-	killContainerFn func(doc *v1beta1.ContainerDoc) (controller.KillContainerResult, error)
-	capturedDoc     *v1beta1.ContainerDoc
+	killContainerFn   func(container intmodel.Container) (controller.KillContainerResult, error)
+	capturedContainer intmodel.Container
 }
 
 func (f *fakeContainerController) KillContainer(
-	doc *v1beta1.ContainerDoc,
+	container intmodel.Container,
 ) (controller.KillContainerResult, error) {
 	if f.killContainerFn == nil {
 		return controller.KillContainerResult{}, errors.New("unexpected KillContainer call")
 	}
 
-	f.capturedDoc = doc
+	f.capturedContainer = container
 
-	return f.killContainerFn(doc)
+	return f.killContainerFn(container)
 }
 
 func setFlag(t *testing.T, cmd *cobra.Command, name, value string) {

@@ -22,42 +22,42 @@ import (
 
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller/runner"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
 type Controller interface {
 	Bootstrap() (BootstrapReport, error)
-	CreateRealm(doc *v1beta1.RealmDoc) (CreateRealmResult, error)
-	CreateSpace(doc *v1beta1.SpaceDoc) (CreateSpaceResult, error)
-	CreateStack(doc *v1beta1.StackDoc) (CreateStackResult, error)
-	CreateCell(doc *v1beta1.CellDoc) (CreateCellResult, error)
-	CreateContainer(doc *v1beta1.ContainerDoc) (CreateContainerResult, error)
-	DeleteRealm(doc *v1beta1.RealmDoc, force, cascade bool) (DeleteRealmResult, error)
-	DeleteSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (DeleteSpaceResult, error)
-	DeleteStack(doc *v1beta1.StackDoc, force, cascade bool) (DeleteStackResult, error)
-	DeleteCell(doc *v1beta1.CellDoc) (DeleteCellResult, error)
-	DeleteContainer(doc *v1beta1.ContainerDoc) (DeleteContainerResult, error)
-	GetRealm(doc *v1beta1.RealmDoc) (GetRealmResult, error)
-	ListRealms() ([]*v1beta1.RealmDoc, error)
-	GetSpace(doc *v1beta1.SpaceDoc) (GetSpaceResult, error)
-	ListSpaces(realmName string) ([]*v1beta1.SpaceDoc, error)
-	GetStack(doc *v1beta1.StackDoc) (GetStackResult, error)
-	ListStacks(realmName, spaceName string) ([]*v1beta1.StackDoc, error)
-	GetCell(doc *v1beta1.CellDoc) (GetCellResult, error)
-	ListCells(realmName, spaceName, stackName string) ([]*v1beta1.CellDoc, error)
-	GetContainer(doc *v1beta1.ContainerDoc) (GetContainerResult, error)
-	ListContainers(realmName, spaceName, stackName, cellName string) ([]*v1beta1.ContainerSpec, error)
-	StartCell(doc *v1beta1.CellDoc) (StartCellResult, error)
-	StartContainer(doc *v1beta1.ContainerDoc) (StartContainerResult, error)
-	StopCell(doc *v1beta1.CellDoc) (StopCellResult, error)
-	StopContainer(doc *v1beta1.ContainerDoc) (StopContainerResult, error)
-	KillCell(doc *v1beta1.CellDoc) (KillCellResult, error)
-	KillContainer(doc *v1beta1.ContainerDoc) (KillContainerResult, error)
-	PurgeRealm(doc *v1beta1.RealmDoc, force, cascade bool) (PurgeRealmResult, error)
-	PurgeSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (PurgeSpaceResult, error)
-	PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (PurgeStackResult, error)
-	PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (PurgeCellResult, error)
-	PurgeContainer(doc *v1beta1.ContainerDoc) (PurgeContainerResult, error)
+	CreateRealm(realm intmodel.Realm) (CreateRealmResult, error)
+	CreateSpace(space intmodel.Space) (CreateSpaceResult, error)
+	CreateStack(stack intmodel.Stack) (CreateStackResult, error)
+	CreateCell(cell intmodel.Cell) (CreateCellResult, error)
+	CreateContainer(container intmodel.Container) (CreateContainerResult, error)
+	DeleteRealm(realm intmodel.Realm, force, cascade bool) (DeleteRealmResult, error)
+	DeleteSpace(space intmodel.Space, force, cascade bool) (DeleteSpaceResult, error)
+	DeleteStack(stack intmodel.Stack, force, cascade bool) (DeleteStackResult, error)
+	DeleteCell(cell intmodel.Cell) (DeleteCellResult, error)
+	DeleteContainer(container intmodel.Container) (DeleteContainerResult, error)
+	GetRealm(realm intmodel.Realm) (GetRealmResult, error)
+	ListRealms() ([]intmodel.Realm, error)
+	GetSpace(space intmodel.Space) (GetSpaceResult, error)
+	ListSpaces(realmName string) ([]intmodel.Space, error)
+	GetStack(stack intmodel.Stack) (GetStackResult, error)
+	ListStacks(realmName, spaceName string) ([]intmodel.Stack, error)
+	GetCell(cell intmodel.Cell) (GetCellResult, error)
+	ListCells(realmName, spaceName, stackName string) ([]intmodel.Cell, error)
+	GetContainer(container intmodel.Container) (GetContainerResult, error)
+	ListContainers(realmName, spaceName, stackName, cellName string) ([]intmodel.ContainerSpec, error)
+	StartCell(cell intmodel.Cell) (StartCellResult, error)
+	StartContainer(container intmodel.Container) (StartContainerResult, error)
+	StopCell(cell intmodel.Cell) (StopCellResult, error)
+	StopContainer(container intmodel.Container) (StopContainerResult, error)
+	KillCell(cell intmodel.Cell) (KillCellResult, error)
+	KillContainer(container intmodel.Container) (KillContainerResult, error)
+	PurgeRealm(realm intmodel.Realm, force, cascade bool) (PurgeRealmResult, error)
+	PurgeSpace(space intmodel.Space, force, cascade bool) (PurgeSpaceResult, error)
+	PurgeStack(stack intmodel.Stack, force, cascade bool) (PurgeStackResult, error)
+	PurgeCell(cell intmodel.Cell, force, cascade bool) (PurgeCellResult, error)
+	PurgeContainer(container intmodel.Container) (PurgeContainerResult, error)
 }
 
 type Exec struct {
@@ -136,5 +136,3 @@ func (b *Exec) Bootstrap() (BootstrapReport, error) {
 
 	return report, nil
 }
-
-// moved to bootstrap.go

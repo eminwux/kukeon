@@ -22,8 +22,10 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/kill/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -32,7 +34,7 @@ import (
 type KillCellResult = controller.KillCellResult
 
 type cellController interface {
-	KillCell(doc *v1beta1.CellDoc) (KillCellResult, error)
+	KillCell(cell intmodel.Cell) (KillCellResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -87,21 +89,25 @@ func NewCellCmd() *cobra.Command {
 				},
 			}
 
-			result, err := ctrl.KillCell(cellDoc)
+			// Convert at boundary before calling controller
+			cellInternal, _, err := apischeme.NormalizeCell(*cellDoc)
+			if err != nil {
+				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+			}
+
+			result, err := ctrl.KillCell(cellInternal)
 			if err != nil {
 				return err
 			}
 
-			targetDoc := result.CellDoc
-			stackName := stack
-			cellName := name
-			if targetDoc != nil {
-				if metaName := strings.TrimSpace(targetDoc.Metadata.Name); metaName != "" {
-					cellName = metaName
-				}
-				if specStack := strings.TrimSpace(targetDoc.Spec.StackID); specStack != "" {
-					stackName = specStack
-				}
+			// Use cell from result for output
+			cellName := result.Cell.Metadata.Name
+			stackName := result.Cell.Spec.StackName
+			if cellName == "" {
+				cellName = name
+			}
+			if stackName == "" {
+				stackName = stack
 			}
 
 			cmd.Printf("Killed cell %q from stack %q\n", cellName, stackName)

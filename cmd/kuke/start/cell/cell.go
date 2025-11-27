@@ -22,8 +22,10 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/start/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -33,7 +35,7 @@ import (
 type StartCellResult = controller.StartCellResult
 
 type cellController interface {
-	StartCell(doc *v1beta1.CellDoc) (controller.StartCellResult, error)
+	StartCell(cell intmodel.Cell) (controller.StartCellResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -57,7 +59,7 @@ func NewCellCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				ctrl = realCtrl
+				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
 			name := strings.TrimSpace(args[0])
@@ -77,20 +79,25 @@ func NewCellCmd() *cobra.Command {
 
 			cellDoc := buildCellDoc(name, realm, space, stack)
 
-			result, err := ctrl.StartCell(cellDoc)
+			// Convert at boundary before calling controller
+			cellInternal, _, err := apischeme.NormalizeCell(*cellDoc)
+			if err != nil {
+				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+			}
+
+			result, err := ctrl.StartCell(cellInternal)
 			if err != nil {
 				return err
 			}
 
-			cellName := strings.TrimSpace(name)
-			stackName := strings.TrimSpace(stack)
-			if result.CellDoc != nil {
-				if trimmed := strings.TrimSpace(result.CellDoc.Metadata.Name); trimmed != "" {
-					cellName = trimmed
-				}
-				if trimmed := strings.TrimSpace(result.CellDoc.Spec.StackID); trimmed != "" {
-					stackName = trimmed
-				}
+			// Use cell from result for output
+			cellName := result.Cell.Metadata.Name
+			if cellName == "" {
+				cellName = name
+			}
+			stackName := result.Cell.Spec.StackName
+			if stackName == "" {
+				stackName = stack
 			}
 
 			cmd.Printf("Started cell %q from stack %q\n", cellName, stackName)
@@ -116,6 +123,14 @@ func NewCellCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
 
 	return cmd
+}
+
+type controllerWrapper struct {
+	ctrl *controller.Exec
+}
+
+func (w *controllerWrapper) StartCell(cell intmodel.Cell) (controller.StartCellResult, error) {
+	return w.ctrl.StartCell(cell)
 }
 
 func buildCellDoc(name, realm, space, stack string) *v1beta1.CellDoc {

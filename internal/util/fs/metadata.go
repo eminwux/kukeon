@@ -17,9 +17,15 @@
 package fs
 
 import (
+	"encoding/json"
+	"fmt"
 	"path/filepath"
 
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/consts"
+	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // RealmMetadataDir returns the metadata directory for the given realm.
@@ -72,4 +78,129 @@ func CellMetadataPath(baseRunPath, realmName, spaceName, stackName, cellName str
 		CellMetadataDir(baseRunPath, realmName, spaceName, stackName, cellName),
 		consts.KukeonMetadataFile,
 	)
+}
+
+type metadataHeader struct {
+	APIVersion string `json:"apiVersion"`
+	Kind       string `json:"kind"`
+}
+
+// DetectMetadataVersion detects the API version from raw metadata bytes by parsing the apiVersion field.
+// It returns the normalized version using apischeme.DefaultVersion.
+func DetectMetadataVersion(raw []byte) (v1beta1.Version, error) {
+	var header metadataHeader
+	if err := json.Unmarshal(raw, &header); err != nil {
+		return "", fmt.Errorf("metadata header: %w", err)
+	}
+	return apischeme.DefaultVersion(v1beta1.Version(header.APIVersion)), nil
+}
+
+// ConvertCellListToExternal converts a slice of internal cells to a slice of external cell docs.
+func ConvertCellListToExternal(internalCells []intmodel.Cell) ([]*v1beta1.CellDoc, error) {
+	externalCells := make([]*v1beta1.CellDoc, 0, len(internalCells))
+	for _, cell := range internalCells {
+		cellDoc, convertErr := apischeme.BuildCellExternalFromInternal(cell, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		externalCells = append(externalCells, &cellDoc)
+	}
+	return externalCells, nil
+}
+
+// ConvertStackListToExternal converts a slice of internal stacks to a slice of external stack docs.
+func ConvertStackListToExternal(internalStacks []intmodel.Stack) ([]*v1beta1.StackDoc, error) {
+	externalStacks := make([]*v1beta1.StackDoc, 0, len(internalStacks))
+	for _, stack := range internalStacks {
+		stackDoc, convertErr := apischeme.BuildStackExternalFromInternal(stack, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		externalStacks = append(externalStacks, &stackDoc)
+	}
+	return externalStacks, nil
+}
+
+// ConvertSpaceListToExternal converts a slice of internal spaces to a slice of external space docs.
+func ConvertSpaceListToExternal(internalSpaces []intmodel.Space) ([]*v1beta1.SpaceDoc, error) {
+	externalSpaces := make([]*v1beta1.SpaceDoc, 0, len(internalSpaces))
+	for _, space := range internalSpaces {
+		spaceDoc, convertErr := apischeme.BuildSpaceExternalFromInternal(space, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		externalSpaces = append(externalSpaces, &spaceDoc)
+	}
+	return externalSpaces, nil
+}
+
+// ConvertRealmListToExternal converts a slice of internal realms to a slice of external realm docs.
+func ConvertRealmListToExternal(internalRealms []intmodel.Realm) ([]*v1beta1.RealmDoc, error) {
+	externalRealms := make([]*v1beta1.RealmDoc, 0, len(internalRealms))
+	for _, realm := range internalRealms {
+		realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(realm, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		externalRealms = append(externalRealms, &realmDoc)
+	}
+	return externalRealms, nil
+}
+
+// ConvertContainerSpecListToExternal converts a slice of internal container specs to a slice of external specs.
+func ConvertContainerSpecListToExternal(internalSpecs []intmodel.ContainerSpec) ([]*v1beta1.ContainerSpec, error) {
+	externalSpecs := make([]*v1beta1.ContainerSpec, 0, len(internalSpecs))
+	for _, spec := range internalSpecs {
+		containerSpec := apischeme.BuildContainerSpecExternalFromInternal(spec)
+		externalSpecs = append(externalSpecs, &containerSpec)
+	}
+	return externalSpecs, nil
+}
+
+// ConvertCellToExternal converts an internal cell to an external cell doc.
+func ConvertCellToExternal(internalCell intmodel.Cell) (*v1beta1.CellDoc, error) {
+	cellDoc, convertErr := apischeme.BuildCellExternalFromInternal(internalCell, apischeme.VersionV1Beta1)
+	if convertErr != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+	return &cellDoc, nil
+}
+
+// ConvertStackToExternal converts an internal stack to an external stack doc.
+func ConvertStackToExternal(internalStack intmodel.Stack) (*v1beta1.StackDoc, error) {
+	stackDoc, convertErr := apischeme.BuildStackExternalFromInternal(internalStack, apischeme.VersionV1Beta1)
+	if convertErr != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+	return &stackDoc, nil
+}
+
+// ConvertSpaceToExternal converts an internal space to an external space doc.
+func ConvertSpaceToExternal(internalSpace intmodel.Space) (*v1beta1.SpaceDoc, error) {
+	spaceDoc, convertErr := apischeme.BuildSpaceExternalFromInternal(internalSpace, apischeme.VersionV1Beta1)
+	if convertErr != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+	return &spaceDoc, nil
+}
+
+// ConvertRealmToExternal converts an internal realm to an external realm doc.
+func ConvertRealmToExternal(internalRealm intmodel.Realm) (*v1beta1.RealmDoc, error) {
+	realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
+	if convertErr != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+	return &realmDoc, nil
+}
+
+// ConvertContainerToExternal converts an internal container to an external container doc.
+func ConvertContainerToExternal(internalContainer intmodel.Container) (*v1beta1.ContainerDoc, error) {
+	containerDoc, convertErr := apischeme.BuildContainerExternalFromInternal(
+		internalContainer,
+		apischeme.VersionV1Beta1,
+	)
+	if convertErr != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+	return &containerDoc, nil
 }

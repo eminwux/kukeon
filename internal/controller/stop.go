@@ -21,164 +21,94 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // StopCellResult reports the outcome of stopping a cell.
 type StopCellResult struct {
-	CellDoc *v1beta1.CellDoc
+	Cell    intmodel.Cell
 	Stopped bool
 }
 
 // StopContainerResult reports the outcome of stopping a container.
 type StopContainerResult struct {
-	ContainerDoc *v1beta1.ContainerDoc
-	Stopped      bool
+	Container intmodel.Container
+	Stopped   bool
 }
 
 // StopCell stops all containers in a cell and updates the cell metadata state.
-func (b *Exec) StopCell(doc *v1beta1.CellDoc) (StopCellResult, error) {
+func (b *Exec) StopCell(cell intmodel.Cell) (StopCellResult, error) {
 	var result StopCellResult
-	if doc == nil {
-		return result, errdefs.ErrCellNameRequired
-	}
 
-	if doc.Metadata.Labels == nil {
-		doc.Metadata.Labels = make(map[string]string)
-	}
-	if doc.APIVersion == "" {
-		doc.APIVersion = v1beta1.APIVersionV1Beta1
-	}
-	if doc.Kind == "" {
-		doc.Kind = v1beta1.KindCell
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
-	if name == "" {
-		name = strings.TrimSpace(doc.Spec.ID)
-	}
-	if name == "" {
-		return result, errdefs.ErrCellNameRequired
-	}
-	doc.Metadata.Name = name
-	doc.Spec.ID = name
-
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
-	if realmName == "" {
-		return result, errdefs.ErrRealmNameRequired
-	}
-	doc.Spec.RealmID = realmName
-
-	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
-	if spaceName == "" {
-		return result, errdefs.ErrSpaceNameRequired
-	}
-	doc.Spec.SpaceID = spaceName
-
-	stackName := strings.TrimSpace(doc.Spec.StackID)
-	if stackName == "" {
-		return result, errdefs.ErrStackNameRequired
-	}
-	doc.Spec.StackID = stackName
-
-	_, _, _, _, cellDoc, err := b.validateAndGetCell(name, realmName, spaceName, stackName)
+	internalCell, err := b.validateAndGetCell(cell)
 	if err != nil {
 		return result, err
 	}
-	result.CellDoc = cellDoc
 
 	// Stop all containers in the cell
-	if err = b.runner.StopCell(cellDoc); err != nil {
+	if err = b.runner.StopCell(internalCell); err != nil {
 		return result, fmt.Errorf("failed to stop cell containers: %w", err)
 	}
 
-	// Convert to internal model for UpdateCellMetadata
-	cell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
-	if err != nil {
-		return result, fmt.Errorf("failed to convert cell to internal model: %w", err)
-	}
-	cell.Status.State = intmodel.CellStatePending
+	// Update cell state to Pending
+	internalCell.Status.State = intmodel.CellStatePending
 
 	// Update cell metadata state to Pending (stopped)
-	if err = b.runner.UpdateCellMetadata(cell); err != nil {
+	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {
 		return result, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
-	// Update cellDoc for response
-	cellDoc.Status.State = v1beta1.CellStatePending
-
+	result.Cell = internalCell
 	result.Stopped = true
 	return result, nil
 }
 
 // StopContainer stops a specific container in a cell and updates the cell metadata.
-func (b *Exec) StopContainer(doc *v1beta1.ContainerDoc) (StopContainerResult, error) {
+func (b *Exec) StopContainer(container intmodel.Container) (StopContainerResult, error) {
 	var res StopContainerResult
-	if doc == nil {
-		return res, errdefs.ErrContainerNameRequired
-	}
 
-	if doc.Metadata.Labels == nil {
-		doc.Metadata.Labels = make(map[string]string)
-	}
-	if doc.APIVersion == "" {
-		doc.APIVersion = v1beta1.APIVersionV1Beta1
-	}
-	if doc.Kind == "" {
-		doc.Kind = v1beta1.KindContainer
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(container.Metadata.Name)
 	if name == "" {
-		name = strings.TrimSpace(doc.Spec.ID)
+		name = strings.TrimSpace(container.Spec.ID)
 	}
+	name = strings.TrimSpace(name)
 	if name == "" {
 		return res, errdefs.ErrContainerNameRequired
 	}
-	doc.Metadata.Name = name
-	doc.Spec.ID = name
 
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(container.Spec.RealmName)
 	if realmName == "" {
 		return res, errdefs.ErrRealmNameRequired
 	}
-	doc.Spec.RealmID = realmName
 
-	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	spaceName := strings.TrimSpace(container.Spec.SpaceName)
 	if spaceName == "" {
 		return res, errdefs.ErrSpaceNameRequired
 	}
-	doc.Spec.SpaceID = spaceName
 
-	stackName := strings.TrimSpace(doc.Spec.StackID)
+	stackName := strings.TrimSpace(container.Spec.StackName)
 	if stackName == "" {
 		return res, errdefs.ErrStackNameRequired
 	}
-	doc.Spec.StackID = stackName
 
-	cellName := strings.TrimSpace(doc.Spec.CellID)
+	cellName := strings.TrimSpace(container.Spec.CellName)
 	if cellName == "" {
 		return res, errdefs.ErrCellNameRequired
 	}
-	doc.Spec.CellID = cellName
 
-	res.ContainerDoc = doc
-
-	// Get cell document
-	cellDocReq := &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
+	// Build lookup cell for GetCell
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
 			Name: cellName,
 		},
-		Spec: v1beta1.CellSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-			StackID: stackName,
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
 		},
 	}
-	getResult, err := b.GetCell(cellDocReq)
+	getResult, err := b.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return res, fmt.Errorf(
@@ -191,26 +121,59 @@ func (b *Exec) StopContainer(doc *v1beta1.ContainerDoc) (StopContainerResult, er
 		}
 		return res, err
 	}
-	cellDoc := getResult.CellDoc
-	if cellDoc == nil {
+	if !getResult.MetadataExists {
 		return res, fmt.Errorf("cell %q not found", cellName)
 	}
 
-	// Stop the specific container (pass container name, runner will build full ID)
-	if err = b.runner.StopContainer(cellDoc, name); err != nil {
-		return res, fmt.Errorf("failed to stop container %s: %w", name, err)
+	internalCell := getResult.Cell
+
+	// Find container in cell spec to construct result container
+	var foundContainerSpec *intmodel.ContainerSpec
+
+	// Check root container first
+	if internalCell.Spec.RootContainer != nil && internalCell.Spec.RootContainer.ID == name {
+		foundContainerSpec = internalCell.Spec.RootContainer
+	} else {
+		// Check regular containers
+		for i := range internalCell.Spec.Containers {
+			if internalCell.Spec.Containers[i].ID == name {
+				foundContainerSpec = &internalCell.Spec.Containers[i]
+				break
+			}
+		}
 	}
 
-	// Convert to internal model for UpdateCellMetadata
-	cell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
-	if err != nil {
-		return res, fmt.Errorf("failed to convert cell to internal model: %w", err)
+	// Stop the specific container (pass container name, runner will build full ID)
+	if err = b.runner.StopContainer(internalCell, name); err != nil {
+		return res, fmt.Errorf("failed to stop container %s: %w", name, err)
 	}
 
 	// Update cell metadata (state remains Ready if other containers are running)
 	// The state management can be enhanced later to track individual container states
-	if err = b.runner.UpdateCellMetadata(cell); err != nil {
+	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {
 		return res, fmt.Errorf("failed to update cell metadata: %w", err)
+	}
+
+	// Construct result container
+	if foundContainerSpec != nil {
+		labels := container.Metadata.Labels
+		if labels == nil {
+			labels = make(map[string]string)
+		}
+
+		res.Container = intmodel.Container{
+			Metadata: intmodel.ContainerMetadata{
+				Name:   name,
+				Labels: labels,
+			},
+			Spec: *foundContainerSpec,
+			Status: intmodel.ContainerStatus{
+				State: intmodel.ContainerStatePending,
+			},
+		}
+	} else {
+		// If container not found in spec, use the input container
+		res.Container = container
 	}
 
 	res.Stopped = true

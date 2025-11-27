@@ -22,8 +22,10 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
@@ -31,7 +33,7 @@ import (
 )
 
 type spaceController interface {
-	CreateSpace(doc *v1beta1.SpaceDoc) (controller.CreateSpaceResult, error)
+	CreateSpace(space intmodel.Space) (controller.CreateSpaceResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -41,8 +43,8 @@ type controllerWrapper struct {
 	ctrl *controller.Exec
 }
 
-func (w *controllerWrapper) CreateSpace(doc *v1beta1.SpaceDoc) (controller.CreateSpaceResult, error) {
-	return w.ctrl.CreateSpace(doc)
+func (w *controllerWrapper) CreateSpace(space intmodel.Space) (controller.CreateSpaceResult, error) {
+	return w.ctrl.CreateSpace(space)
 }
 
 func NewSpaceCmd() *cobra.Command {
@@ -82,6 +84,7 @@ func NewSpaceCmd() *cobra.Command {
 				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
+			// Build v1beta1.SpaceDoc from command arguments
 			doc := &v1beta1.SpaceDoc{
 				Metadata: v1beta1.SpaceMetadata{
 					Name: name,
@@ -91,12 +94,19 @@ func NewSpaceCmd() *cobra.Command {
 				},
 			}
 
-			result, err := ctrl.CreateSpace(doc)
+			// Convert at boundary before calling controller
+			space, version, err := apischeme.NormalizeSpace(*doc)
+			if err != nil {
+				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+			}
+
+			// Call controller with internal type
+			result, err := ctrl.CreateSpace(space)
 			if err != nil {
 				return err
 			}
 
-			printSpaceResult(cmd, result)
+			printSpaceResult(cmd, result, version)
 			return nil
 		},
 	}
@@ -110,29 +120,34 @@ func NewSpaceCmd() *cobra.Command {
 	return cmd
 }
 
-func printSpaceResult(cmd *cobra.Command, result controller.CreateSpaceResult) {
-	if result.SpaceDoc == nil {
-		cmd.Printf("Space (metadata missing)\n")
-		shared.PrintCreationOutcome(cmd, "metadata", result.MetadataExistsPost, result.Created)
-		shared.PrintCreationOutcome(cmd, "network", result.CNINetworkExistsPost, result.CNINetworkCreated)
-		shared.PrintCreationOutcome(cmd, "cgroup", result.CgroupExistsPost, result.CgroupCreated)
-		return
-	}
-
-	name := result.SpaceDoc.Metadata.Name
-	realm := result.SpaceDoc.Spec.RealmID
-	networkName, err := naming.BuildSpaceNetworkName(realm, name)
+func printSpaceResult(cmd *cobra.Command, result controller.CreateSpaceResult, version v1beta1.Version) {
+	// Convert result back to external for output
+	resultDoc, err := apischeme.BuildSpaceExternalFromInternal(result.Space, version)
 	if err != nil {
-		networkName = "<unknown>"
+		// Fallback to internal type if conversion fails
+		name := result.Space.Metadata.Name
+		realm := result.Space.Spec.RealmName
+		networkName, buildErr := naming.BuildSpaceNetworkName(realm, name)
+		if buildErr != nil {
+			networkName = "<unknown>"
+		}
+		cmd.Printf("Space %q (realm %q, network %q)\n", name, realm, networkName)
+		cmd.Printf("Warning: failed to convert result for output: %v\n", err)
+	} else {
+		name := resultDoc.Metadata.Name
+		realm := resultDoc.Spec.RealmID
+		networkName, err := naming.BuildSpaceNetworkName(realm, name)
+		if err != nil {
+			networkName = "<unknown>"
+		}
+		cmd.Printf("Space %q (realm %q, network %q)\n", name, realm, networkName)
 	}
-
-	cmd.Printf("Space %q (realm %q, network %q)\n", name, realm, networkName)
 	shared.PrintCreationOutcome(cmd, "metadata", result.MetadataExistsPost, result.Created)
 	shared.PrintCreationOutcome(cmd, "network", result.CNINetworkExistsPost, result.CNINetworkCreated)
 	shared.PrintCreationOutcome(cmd, "cgroup", result.CgroupExistsPost, result.CgroupCreated)
 }
 
 // PrintSpaceResult is exported for testing purposes.
-func PrintSpaceResult(cmd *cobra.Command, result controller.CreateSpaceResult) {
-	printSpaceResult(cmd, result)
+func PrintSpaceResult(cmd *cobra.Command, result controller.CreateSpaceResult, version v1beta1.Version) {
+	printSpaceResult(cmd, result, version)
 }

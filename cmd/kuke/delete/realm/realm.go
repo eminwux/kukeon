@@ -21,7 +21,9 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 )
@@ -29,7 +31,7 @@ import (
 // RealmController defines the interface for realm deletion operations.
 // It is exported for use in tests.
 type RealmController interface {
-	DeleteRealm(doc *v1beta1.RealmDoc, force, cascade bool) (controller.DeleteRealmResult, error)
+	DeleteRealm(realm intmodel.Realm, force, cascade bool) (controller.DeleteRealmResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -70,14 +72,20 @@ func NewRealmCmd() *cobra.Command {
 				},
 			}
 
-			result, err := ctrl.DeleteRealm(realmDoc, force, cascade)
+			// Convert at boundary before calling controller
+			realmInternal, _, err := apischeme.NormalizeRealm(*realmDoc)
+			if err != nil {
+				return err
+			}
+
+			result, err := ctrl.DeleteRealm(realmInternal, force, cascade)
 			if err != nil {
 				return err
 			}
 
 			realmName := name
-			if result.RealmDoc != nil && result.RealmDoc.Metadata.Name != "" {
-				realmName = result.RealmDoc.Metadata.Name
+			if result.Realm.Metadata.Name != "" {
+				realmName = result.Realm.Metadata.Name
 			}
 			cmd.Printf("Deleted realm %q\n", realmName)
 			return nil
@@ -95,8 +103,8 @@ type controllerWrapper struct {
 }
 
 func (w *controllerWrapper) DeleteRealm(
-	doc *v1beta1.RealmDoc,
+	realm intmodel.Realm,
 	force, cascade bool,
 ) (controller.DeleteRealmResult, error) {
-	return w.ctrl.DeleteRealm(doc, force, cascade)
+	return w.ctrl.DeleteRealm(realm, force, cascade)
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -39,14 +40,14 @@ func TestNewCellCmdRunE(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	tests := []struct {
-		name       string
-		args       []string
-		setup      func(t *testing.T, cmd *cobra.Command)
-		controller *fakeCellController
-		wantErr    string
-		wantOutput []string
-		wantReqDoc *v1beta1.CellDoc
-		skipLogger bool
+		name        string
+		args        []string
+		setup       func(t *testing.T, cmd *cobra.Command)
+		controller  *fakeCellController
+		wantErr     string
+		wantOutput  []string
+		wantReqCell intmodel.Cell
+		skipLogger  bool
 	}{
 		{
 			name: "success with flags",
@@ -57,15 +58,15 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "stack", "stack-a")
 			},
 			controller: &fakeCellController{
-				killCellFn: func(doc *v1beta1.CellDoc) (controller.KillCellResult, error) {
+				killCellFn: func(cell intmodel.Cell) (controller.KillCellResult, error) {
 					return controller.KillCellResult{
-						CellDoc: doc,
-						Killed:  true,
+						Cell:   cell,
+						Killed: true,
 					}, nil
 				},
 			},
-			wantReqDoc: newCellDoc("test-cell", "realm-a", "space-a", "stack-a"),
-			wantOutput: []string{`Killed cell "test-cell" from stack "stack-a"`},
+			wantReqCell: newCellInternal("test-cell", "realm-a", "space-a", "stack-a"),
+			wantOutput:  []string{`Killed cell "test-cell" from stack "stack-a"`},
 		},
 		{
 			name: "success with viper config",
@@ -76,15 +77,15 @@ func TestNewCellCmdRunE(t *testing.T) {
 				viper.Set(config.KUKE_KILL_CELL_STACK.ViperKey, "stack-b")
 			},
 			controller: &fakeCellController{
-				killCellFn: func(doc *v1beta1.CellDoc) (controller.KillCellResult, error) {
+				killCellFn: func(cell intmodel.Cell) (controller.KillCellResult, error) {
 					return controller.KillCellResult{
-						CellDoc: doc,
-						Killed:  true,
+						Cell:   cell,
+						Killed: true,
 					}, nil
 				},
 			},
-			wantReqDoc: newCellDoc("cell-b", "realm-b", "space-b", "stack-b"),
-			wantOutput: []string{`Killed cell "cell-b" from stack "stack-b"`},
+			wantReqCell: newCellInternal("cell-b", "realm-b", "space-b", "stack-b"),
+			wantOutput:  []string{`Killed cell "cell-b" from stack "stack-b"`},
 		},
 		{
 			name: "trims whitespace",
@@ -95,15 +96,15 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "stack", "  stack-c  ")
 			},
 			controller: &fakeCellController{
-				killCellFn: func(doc *v1beta1.CellDoc) (controller.KillCellResult, error) {
+				killCellFn: func(cell intmodel.Cell) (controller.KillCellResult, error) {
 					return controller.KillCellResult{
-						CellDoc: doc,
-						Killed:  true,
+						Cell:   cell,
+						Killed: true,
 					}, nil
 				},
 			},
-			wantReqDoc: newCellDoc("trimmed", "realm-c", "space-c", "stack-c"),
-			wantOutput: []string{`Killed cell "trimmed" from stack "stack-c"`},
+			wantReqCell: newCellInternal("trimmed", "realm-c", "space-c", "stack-c"),
+			wantOutput:  []string{`Killed cell "trimmed" from stack "stack-c"`},
 		},
 		{
 			name: "missing realm",
@@ -153,12 +154,12 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "stack", "stack-a")
 			},
 			controller: &fakeCellController{
-				killCellFn: func(_ *v1beta1.CellDoc) (controller.KillCellResult, error) {
+				killCellFn: func(_ intmodel.Cell) (controller.KillCellResult, error) {
 					return controller.KillCellResult{}, errors.New("kill failed")
 				},
 			},
-			wantErr:    "kill failed",
-			wantReqDoc: newCellDoc("test-cell", "realm-a", "space-a", "stack-a"),
+			wantErr:     "kill failed",
+			wantReqCell: newCellInternal("test-cell", "realm-a", "space-a", "stack-a"),
 		},
 	}
 
@@ -208,16 +209,26 @@ func TestNewCellCmdRunE(t *testing.T) {
 				}
 			}
 
-			if tt.wantReqDoc != nil {
-				got := tt.controller.capturedDoc
-				if got == nil {
-					t.Fatalf("expected KillCell to be called, but captured doc is nil")
+			if tt.wantReqCell.Metadata.Name != "" {
+				got := tt.controller.capturedCell
+				if got.Metadata.Name == "" {
+					t.Fatalf("expected KillCell to be called, but captured cell is empty")
 				}
-				if got.Metadata.Name != tt.wantReqDoc.Metadata.Name ||
-					got.Spec.RealmID != tt.wantReqDoc.Spec.RealmID ||
-					got.Spec.SpaceID != tt.wantReqDoc.Spec.SpaceID ||
-					got.Spec.StackID != tt.wantReqDoc.Spec.StackID {
-					t.Errorf("KillCell called with %+v, want %+v", got, tt.wantReqDoc)
+				if got.Metadata.Name != tt.wantReqCell.Metadata.Name ||
+					got.Spec.RealmName != tt.wantReqCell.Spec.RealmName ||
+					got.Spec.SpaceName != tt.wantReqCell.Spec.SpaceName ||
+					got.Spec.StackName != tt.wantReqCell.Spec.StackName {
+					t.Errorf(
+						"KillCell called with name=%q realm=%q space=%q stack=%q, want name=%q realm=%q space=%q stack=%q",
+						got.Metadata.Name,
+						got.Spec.RealmName,
+						got.Spec.SpaceName,
+						got.Spec.StackName,
+						tt.wantReqCell.Metadata.Name,
+						tt.wantReqCell.Spec.RealmName,
+						tt.wantReqCell.Spec.SpaceName,
+						tt.wantReqCell.Spec.StackName,
+					)
 				}
 			}
 		})
@@ -252,17 +263,17 @@ func TestNewCellCmd_AutocompleteRegistration(t *testing.T) {
 }
 
 type fakeCellController struct {
-	killCellFn  func(doc *v1beta1.CellDoc) (controller.KillCellResult, error)
-	capturedDoc *v1beta1.CellDoc
+	killCellFn   func(cell intmodel.Cell) (controller.KillCellResult, error)
+	capturedCell intmodel.Cell
 }
 
-func (f *fakeCellController) KillCell(doc *v1beta1.CellDoc) (controller.KillCellResult, error) {
+func (f *fakeCellController) KillCell(cell intmodel.Cell) (controller.KillCellResult, error) {
 	if f.killCellFn == nil {
 		return controller.KillCellResult{}, errors.New("unexpected KillCell call")
 	}
 
-	f.capturedDoc = doc
-	return f.killCellFn(doc)
+	f.capturedCell = cell
+	return f.killCellFn(cell)
 }
 
 func newCellDoc(name, realm, space, stack string) *v1beta1.CellDoc {
@@ -274,6 +285,19 @@ func newCellDoc(name, realm, space, stack string) *v1beta1.CellDoc {
 			RealmID: realm,
 			SpaceID: space,
 			StackID: stack,
+		},
+	}
+}
+
+func newCellInternal(name, realm, space, stack string) intmodel.Cell {
+	return intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: name,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: realm,
+			SpaceName: space,
+			StackName: stack,
 		},
 	}
 }

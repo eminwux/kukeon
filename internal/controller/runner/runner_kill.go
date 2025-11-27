@@ -24,38 +24,62 @@ import (
 
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/naming"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // KillCell immediately force-kills all containers in a cell (workload containers first, then root container).
 // It detaches the root container from the CNI network before killing it.
-func (r *Exec) KillCell(doc *v1beta1.CellDoc) error {
-	if doc == nil {
-		return errdefs.ErrCellNotFound
-	}
-
-	cellName := strings.TrimSpace(doc.Metadata.Name)
+func (r *Exec) KillCell(cell intmodel.Cell) error {
+	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
-		return errdefs.ErrCellNotFound
+		return errdefs.ErrCellNameRequired
+	}
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
+	}
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
+	if spaceName == "" {
+		return errdefs.ErrSpaceNameRequired
+	}
+	stackName := strings.TrimSpace(cell.Spec.StackName)
+	if stackName == "" {
+		return errdefs.ErrStackNameRequired
 	}
 
-	cellID := doc.Spec.ID
+	// Get the cell document to access all containers
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: cellName,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
+		},
+	}
+	internalCell, err := r.GetCell(lookupCell)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
+	}
+
+	cellID := strings.TrimSpace(internalCell.Spec.ID)
 	if cellID == "" {
 		return errdefs.ErrCellIDRequired
 	}
 
-	realmID := doc.Spec.RealmID
+	realmID := strings.TrimSpace(internalCell.Spec.RealmName)
 	if realmID == "" {
 		return errdefs.ErrRealmNameRequired
 	}
 
-	spaceID := doc.Spec.SpaceID
+	spaceID := strings.TrimSpace(internalCell.Spec.SpaceName)
 	if spaceID == "" {
 		return errdefs.ErrSpaceNameRequired
 	}
 
-	stackID := doc.Spec.StackID
+	stackID := strings.TrimSpace(internalCell.Spec.StackName)
 	if stackID == "" {
 		return errdefs.ErrStackNameRequired
 	}
@@ -75,33 +99,38 @@ func (r *Exec) KillCell(doc *v1beta1.CellDoc) error {
 	}
 	r.ctrClient = ctr.NewClient(context.Background(), r.logger, r.opts.ContainerdSocket)
 
-	err := r.ctrClient.Connect()
+	err = r.ctrClient.Connect()
 	if err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 	defer r.ctrClient.Close()
 
 	// Get realm to access namespace
-	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
 			Name: realmID,
 		},
-	})
+	}
+	internalRealm, err := r.GetRealm(lookupRealm)
 	if err != nil {
 		return fmt.Errorf("failed to get realm: %w", err)
 	}
 
 	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
 
 	// Kill all workload containers first
-	for _, containerSpec := range doc.Spec.Containers {
+	for _, containerSpec := range internalCell.Spec.Containers {
+		containerCellName := strings.TrimSpace(containerSpec.CellName)
+		if containerCellName == "" {
+			containerCellName = cellID
+		}
 		// Build container ID using hierarchical format
 		var containerID string
 		containerID, err = naming.BuildContainerName(
-			containerSpec.SpaceID,
-			containerSpec.StackID,
-			containerSpec.CellID,
+			containerSpec.SpaceName,
+			containerSpec.StackName,
+			containerCellName,
 			containerSpec.ID,
 		)
 		if err != nil {
@@ -109,7 +138,7 @@ func (r *Exec) KillCell(doc *v1beta1.CellDoc) error {
 		}
 
 		// Use container name with UUID for containerd operations
-		err = r.killContainerTask(ctrCtx, containerID, realmDoc.Spec.Namespace)
+		err = r.killContainerTask(ctrCtx, containerID, internalRealm.Spec.Namespace)
 		if err != nil {
 			// Log warning but continue with other containers
 			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
@@ -147,11 +176,11 @@ func (r *Exec) KillCell(doc *v1beta1.CellDoc) error {
 		cellName,
 		spaceID,
 		realmID,
-		realmDoc.Spec.Namespace,
+		internalRealm.Spec.Namespace,
 	)
 
 	// Kill root container
-	err = r.killContainerTask(ctrCtx, rootContainerID, realmDoc.Spec.Namespace)
+	err = r.killContainerTask(ctrCtx, rootContainerID, internalRealm.Spec.Namespace)
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
 		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
@@ -175,33 +204,29 @@ func (r *Exec) KillCell(doc *v1beta1.CellDoc) error {
 }
 
 // KillContainer immediately force-kills a specific container in a cell.
-func (r *Exec) KillContainer(doc *v1beta1.CellDoc, containerID string) error {
-	if doc == nil {
-		return errdefs.ErrCellNotFound
-	}
-
+func (r *Exec) KillContainer(cell intmodel.Cell, containerID string) error {
 	containerID = strings.TrimSpace(containerID)
 	if containerID == "" {
 		return errors.New("container ID is required")
 	}
 
-	cellName := strings.TrimSpace(doc.Metadata.Name)
+	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
 		return errdefs.ErrCellNotFound
 	}
 
-	cellID := doc.Spec.ID
+	cellID := cell.Spec.ID
 	if cellID == "" {
 		return errdefs.ErrCellIDRequired
 	}
 
-	realmID := doc.Spec.RealmID
-	if realmID == "" {
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
+	if realmName == "" {
 		return errdefs.ErrRealmNameRequired
 	}
 
-	spaceID := doc.Spec.SpaceID
-	if spaceID == "" {
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
+	if spaceName == "" {
 		return errdefs.ErrSpaceNameRequired
 	}
 
@@ -222,23 +247,24 @@ func (r *Exec) KillContainer(doc *v1beta1.CellDoc, containerID string) error {
 	defer r.ctrClient.Close()
 
 	// Get realm to access namespace
-	realmDoc, err := r.GetRealm(&v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
-			Name: realmID,
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: realmName,
 		},
-	})
+	}
+	internalRealm, err := r.GetRealm(lookupRealm)
 	if err != nil {
 		return fmt.Errorf("failed to get realm: %w", err)
 	}
 
 	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
 
 	// Use container name directly for containerd operations
-	err = r.killContainerTask(ctrCtx, containerID, realmDoc.Spec.Namespace)
+	err = r.killContainerTask(ctrCtx, containerID, internalRealm.Spec.Namespace)
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
+		fields = append(fields, "space", spaceName, "realm", realmName, "err", fmt.Sprintf("%v", err))
 		r.logger.ErrorContext(
 			r.ctx,
 			"failed to kill container",
@@ -248,7 +274,7 @@ func (r *Exec) KillContainer(doc *v1beta1.CellDoc, containerID string) error {
 	}
 
 	fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-	fields = append(fields, "space", spaceID, "realm", realmID)
+	fields = append(fields, "space", spaceName, "realm", realmName)
 	r.logger.InfoContext(
 		r.ctx,
 		"killed container",

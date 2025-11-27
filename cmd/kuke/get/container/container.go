@@ -23,8 +23,11 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/fs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -34,8 +37,8 @@ import (
 type GetContainerResult = controller.GetContainerResult
 
 type ContainerController interface {
-	GetContainer(doc *v1beta1.ContainerDoc) (GetContainerResult, error)
-	ListContainers(realmName, spaceName, stackName, cellName string) ([]*v1beta1.ContainerSpec, error)
+	GetContainer(container intmodel.Container) (GetContainerResult, error)
+	ListContainers(realmName, spaceName, stackName, cellName string) ([]intmodel.ContainerSpec, error)
 }
 
 type containerController = ContainerController // internal alias for backward compatibility
@@ -195,25 +198,45 @@ func runContainerCmdWithDeps(
 			},
 		}
 
-		result, err := ctrl.GetContainer(containerDoc)
+		// Convert at boundary before calling controller
+		var containerInternal intmodel.Container
+		containerInternal, _, err = apischeme.NormalizeContainer(*containerDoc)
+		if err != nil {
+			return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+		}
+
+		var result controller.GetContainerResult
+		result, err = ctrl.GetContainer(containerInternal)
 		if err != nil {
 			return err
 		}
 
-		if result.ContainerDoc == nil {
+		if !result.ContainerExists {
 			return fmt.Errorf("container %q not found", name)
 		}
 
-		return printContainer(cmd, result.ContainerDoc, outputFormat, printYAML, printJSON)
+		// Convert result back to external for printing
+		containerDoc, err = fs.ConvertContainerToExternal(result.Container)
+		if err != nil {
+			return err
+		}
+
+		return printContainer(cmd, containerDoc, outputFormat, printYAML, printJSON)
 	}
 
 	// List containers (optionally filtered by realm, space, stack, and/or cell)
-	containers, err := ctrl.ListContainers(realm, space, stack, cell)
+	internalContainers, err := ctrl.ListContainers(realm, space, stack, cell)
 	if err != nil {
 		return err
 	}
 
-	return printContainers(cmd, containers, outputFormat, printYAML, printJSON, printTable)
+	// Convert internal containers to external for printing
+	externalContainers, err := fs.ConvertContainerSpecListToExternal(internalContainers)
+	if err != nil {
+		return err
+	}
+
+	return printContainers(cmd, externalContainers, outputFormat, printYAML, printJSON, printTable)
 }
 
 func printContainer(
@@ -303,13 +326,13 @@ type controllerWrapper struct {
 }
 
 func (w *controllerWrapper) GetContainer(
-	doc *v1beta1.ContainerDoc,
+	container intmodel.Container,
 ) (GetContainerResult, error) {
-	return w.ctrl.GetContainer(doc)
+	return w.ctrl.GetContainer(container)
 }
 
 func (w *controllerWrapper) ListContainers(
 	realmName, spaceName, stackName, cellName string,
-) ([]*v1beta1.ContainerSpec, error) {
+) ([]intmodel.ContainerSpec, error) {
 	return w.ctrl.ListContainers(realmName, spaceName, stackName, cellName)
 }

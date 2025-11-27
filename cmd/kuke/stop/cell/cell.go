@@ -22,8 +22,10 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/stop/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -32,7 +34,7 @@ import (
 type StopCellResult = controller.StopCellResult
 
 type cellController interface {
-	StopCell(doc *v1beta1.CellDoc) (StopCellResult, error)
+	StopCell(cell intmodel.Cell) (StopCellResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -89,28 +91,25 @@ func NewCellCmd() *cobra.Command {
 				},
 			}
 
-			result, err := ctrl.StopCell(cellDoc)
+			// Convert at boundary before calling controller
+			cellInternal, _, err := apischeme.NormalizeCell(*cellDoc)
+			if err != nil {
+				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+			}
+
+			result, err := ctrl.StopCell(cellInternal)
 			if err != nil {
 				return err
 			}
 
-			targetDoc := result.CellDoc
-			if targetDoc == nil {
-				targetDoc = cellDoc
+			// Use cell from result for output
+			outputCell := result.Cell.Metadata.Name
+			if outputCell == "" {
+				outputCell = name
 			}
-
-			outputCell := strings.TrimSpace(name)
-			outputStack := strings.TrimSpace(stack)
-			if targetDoc != nil {
-				if metaName := strings.TrimSpace(targetDoc.Metadata.Name); metaName != "" {
-					outputCell = metaName
-				} else if specID := strings.TrimSpace(targetDoc.Spec.ID); specID != "" {
-					outputCell = specID
-				}
-
-				if specStack := strings.TrimSpace(targetDoc.Spec.StackID); specStack != "" {
-					outputStack = specStack
-				}
+			outputStack := result.Cell.Spec.StackName
+			if outputStack == "" {
+				outputStack = stack
 			}
 
 			cmd.Printf("Stopped cell %q from stack %q\n", outputCell, outputStack)
@@ -142,9 +141,6 @@ type controllerWrapper struct {
 	ctrl *controller.Exec
 }
 
-func (w *controllerWrapper) StopCell(doc *v1beta1.CellDoc) (StopCellResult, error) {
-	if doc == nil {
-		return StopCellResult{}, fmt.Errorf("%w", errdefs.ErrCellNameRequired)
-	}
-	return w.ctrl.StopCell(doc)
+func (w *controllerWrapper) StopCell(cell intmodel.Cell) (StopCellResult, error) {
+	return w.ctrl.StopCell(cell)
 }

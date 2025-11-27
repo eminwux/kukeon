@@ -22,15 +22,17 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type containerController interface {
-	DeleteContainer(doc *v1beta1.ContainerDoc) (controller.DeleteContainerResult, error)
+	DeleteContainer(container intmodel.Container) (controller.DeleteContainerResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -54,7 +56,7 @@ func NewContainerCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				ctrl = realCtrl
+				ctrl = &controllerWrapper{ctrl: realCtrl}
 			}
 
 			name := strings.TrimSpace(args[0])
@@ -88,7 +90,13 @@ func NewContainerCmd() *cobra.Command {
 				},
 			}
 
-			_, err := ctrl.DeleteContainer(containerDoc)
+			// Convert at boundary before calling controller
+			containerInternal, _, err := apischeme.NormalizeContainer(*containerDoc)
+			if err != nil {
+				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+			}
+
+			_, err = ctrl.DeleteContainer(containerInternal)
 			if err != nil {
 				return err
 			}
@@ -118,4 +126,14 @@ func NewContainerCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("cell", config.CompleteCellNames)
 
 	return cmd
+}
+
+type controllerWrapper struct {
+	ctrl *controller.Exec
+}
+
+func (w *controllerWrapper) DeleteContainer(
+	container intmodel.Container,
+) (controller.DeleteContainerResult, error) {
+	return w.ctrl.DeleteContainer(container)
 }

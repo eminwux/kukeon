@@ -21,7 +21,7 @@ import (
 
 	"github.com/containerd/containerd/v2/pkg/oci"
 	internalctr "github.com/eminwux/kukeon/internal/ctr"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
 const (
@@ -43,13 +43,13 @@ func DefaultRootContainerSpec(
 	spaceID,
 	stackID,
 	cniConfigPath string,
-) *v1beta1.ContainerSpec {
-	return &v1beta1.ContainerSpec{
+) intmodel.ContainerSpec {
+	return intmodel.ContainerSpec{
 		ID:            containerID,
-		CellID:        cellID,
-		RealmID:       realmID,
-		SpaceID:       spaceID,
-		StackID:       stackID,
+		CellName:      cellID,
+		RealmName:     realmID,
+		SpaceName:     spaceID,
+		StackName:     stackID,
 		Root:          true,
 		Image:         DefaultRootContainerImage,
 		Command:       defaultRootContainerCmd,
@@ -58,16 +58,12 @@ func DefaultRootContainerSpec(
 	}
 }
 
-// BuildRootContainerSpec converts the API-level root container spec into an
+// BuildRootContainerSpec converts the internal root container spec into an
 // internal ctr.ContainerSpec with the expected defaults applied.
 func BuildRootContainerSpec(
-	rootSpec *v1beta1.ContainerSpec,
+	rootSpec intmodel.ContainerSpec,
 	labels map[string]string,
 ) internalctr.ContainerSpec {
-	if rootSpec == nil {
-		return internalctr.ContainerSpec{}
-	}
-
 	image := rootSpec.Image
 	if image == "" {
 		image = DefaultRootContainerImage
@@ -105,11 +101,7 @@ func BuildRootContainerSpec(
 	}
 }
 
-func buildRootProcessArgs(rootSpec *v1beta1.ContainerSpec) []string {
-	if rootSpec == nil {
-		return []string{defaultRootContainerCmd, defaultRootContainerArg}
-	}
-
+func buildRootProcessArgs(rootSpec intmodel.ContainerSpec) []string {
 	switch {
 	case rootSpec.Command != "":
 		args := []string{rootSpec.Command}

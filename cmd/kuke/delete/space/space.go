@@ -22,8 +22,10 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -32,7 +34,7 @@ import (
 // SpaceController defines the interface for space deletion operations.
 // It is exported for use in tests.
 type SpaceController interface {
-	DeleteSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (controller.DeleteSpaceResult, error)
+	DeleteSpace(space intmodel.Space, force, cascade bool) (controller.DeleteSpaceResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -78,18 +80,24 @@ func NewSpaceCmd() *cobra.Command {
 				},
 			}
 
-			result, err := ctrl.DeleteSpace(spaceDoc, force, cascade)
+			// Convert at boundary before calling controller
+			spaceInternal, _, err := apischeme.NormalizeSpace(*spaceDoc)
+			if err != nil {
+				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+			}
+
+			result, err := ctrl.DeleteSpace(spaceInternal, force, cascade)
 			if err != nil {
 				return err
 			}
 
 			spaceName := result.SpaceName
-			if spaceName == "" && result.SpaceDoc != nil {
-				spaceName = result.SpaceDoc.Metadata.Name
+			if spaceName == "" && result.Space.Metadata.Name != "" {
+				spaceName = result.Space.Metadata.Name
 			}
 			realmName := result.RealmName
-			if realmName == "" && result.SpaceDoc != nil {
-				realmName = result.SpaceDoc.Spec.RealmID
+			if realmName == "" && result.Space.Spec.RealmName != "" {
+				realmName = result.Space.Spec.RealmName
 			}
 
 			cmd.Printf("Deleted space %q from realm %q\n", spaceName, realmName)
@@ -114,8 +122,8 @@ type controllerWrapper struct {
 }
 
 func (w *controllerWrapper) DeleteSpace(
-	doc *v1beta1.SpaceDoc,
+	space intmodel.Space,
 	force, cascade bool,
 ) (controller.DeleteSpaceResult, error) {
-	return w.ctrl.DeleteSpace(doc, force, cascade)
+	return w.ctrl.DeleteSpace(space, force, cascade)
 }
