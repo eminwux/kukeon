@@ -52,6 +52,48 @@ func controllerFromCmd(cmd *cobra.Command) (*controller.Exec, error) {
 	return controller.NewControllerExec(cmd.Context(), logger, opts), nil
 }
 
+// getFlagValueWithDefault gets a flag value, falling back to Viper (which includes defaults) and then to a provided default.
+// The ViperKey is determined from the command hierarchy (e.g., "kuke/create/space/realm").
+func getFlagValueWithDefault(cmd *cobra.Command, flagName string, fallbackDefault string) string {
+	// First, try to get the flag value directly
+	flagValue, _ := cmd.Flags().GetString(flagName)
+	if flagValue != "" {
+		return strings.TrimSpace(flagValue)
+	}
+
+	// If flag is not set, try to determine the ViperKey from command hierarchy
+	// Pattern: kuke/{operation}/{resource}/{flagName}
+	// Command hierarchy: kuke (root) -> create/get/delete/etc (operation) -> space/stack/etc (resource)
+	var operation string
+	resource := cmd.Name()
+
+	// Get the parent command (operation: create, get, delete, purge, start, stop, kill)
+	if parent := cmd.Parent(); parent != nil {
+		operation = parent.Name()
+		// If parent is "kuke" (root), we need to go up one more level
+		// This should only happen in edge cases, but handle it gracefully
+		if operation == "kuke" {
+			if grandParent := parent.Parent(); grandParent != nil {
+				operation = grandParent.Name()
+			} else {
+				operation = "" // Can't determine operation
+			}
+		}
+	}
+
+	// Build ViperKey if we have both operation and resource
+	if operation != "" && resource != "" {
+		viperKey := "kuke/" + operation + "/" + resource + "/" + flagName
+		viperValue := viper.GetString(viperKey)
+		if viperValue != "" {
+			return strings.TrimSpace(viperValue)
+		}
+	}
+
+	// Finally, use the fallback default
+	return strings.TrimSpace(fallbackDefault)
+}
+
 // CompleteRealmNames provides shell completion for realm names by listing existing realms.
 // This function can be used as a ValidArgsFunction or for flag completion in commands that accept realm names.
 func CompleteRealmNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -152,11 +194,8 @@ func CompleteSpaceNames(cmd *cobra.Command, args []string, toComplete string) ([
 		return []string{}, cobra.ShellCompDirectiveNoFileComp
 	}
 
-	// Read realm flag if available
-	realmName, _ := cmd.Flags().GetString("realm")
-
-	// Trim whitespace
-	realmName = strings.TrimSpace(realmName)
+	// Read realm flag with default fallback
+	realmName := getFlagValueWithDefault(cmd, "realm", "default")
 
 	// When used as ValidArgsFunction for positional args, require --realm flag to be set
 	// Check if we're being called as ValidArgsFunction (not for flag completion)
@@ -228,13 +267,9 @@ func CompleteStackNames(cmd *cobra.Command, args []string, toComplete string) ([
 		return []string{}, cobra.ShellCompDirectiveNoFileComp
 	}
 
-	// Read realm and space flags if available
-	realmName, _ := cmd.Flags().GetString("realm")
-	spaceName, _ := cmd.Flags().GetString("space")
-
-	// Trim whitespace
-	realmName = strings.TrimSpace(realmName)
-	spaceName = strings.TrimSpace(spaceName)
+	// Read realm and space flags with default fallback
+	realmName := getFlagValueWithDefault(cmd, "realm", "default")
+	spaceName := getFlagValueWithDefault(cmd, "space", "default")
 
 	// When used as ValidArgsFunction for positional args, require --realm and --space flags to be set
 	// Check if we're being called as ValidArgsFunction (not for flag completion)
@@ -306,15 +341,10 @@ func CompleteCellNames(cmd *cobra.Command, args []string, toComplete string) ([]
 		return []string{}, cobra.ShellCompDirectiveNoFileComp
 	}
 
-	// Read realm, space, and stack flags if available
-	realmName, _ := cmd.Flags().GetString("realm")
-	spaceName, _ := cmd.Flags().GetString("space")
-	stackName, _ := cmd.Flags().GetString("stack")
-
-	// Trim whitespace
-	realmName = strings.TrimSpace(realmName)
-	spaceName = strings.TrimSpace(spaceName)
-	stackName = strings.TrimSpace(stackName)
+	// Read realm, space, and stack flags with default fallback
+	realmName := getFlagValueWithDefault(cmd, "realm", "default")
+	spaceName := getFlagValueWithDefault(cmd, "space", "default")
+	stackName := getFlagValueWithDefault(cmd, "stack", "default")
 
 	// When used as ValidArgsFunction for positional args, require --realm, --space, and --stack flags to be set
 	// Check if we're being called as ValidArgsFunction (not for flag completion)
@@ -386,17 +416,11 @@ func CompleteContainerNames(cmd *cobra.Command, args []string, toComplete string
 		return []string{}, cobra.ShellCompDirectiveNoFileComp
 	}
 
-	// Read required flags
-	realmName, _ := cmd.Flags().GetString("realm")
-	spaceName, _ := cmd.Flags().GetString("space")
-	stackName, _ := cmd.Flags().GetString("stack")
-	cellName, _ := cmd.Flags().GetString("cell")
-
-	// Trim whitespace
-	realmName = strings.TrimSpace(realmName)
-	spaceName = strings.TrimSpace(spaceName)
-	stackName = strings.TrimSpace(stackName)
-	cellName = strings.TrimSpace(cellName)
+	// Read required flags with default fallback (cell has no default)
+	realmName := getFlagValueWithDefault(cmd, "realm", "default")
+	spaceName := getFlagValueWithDefault(cmd, "space", "default")
+	stackName := getFlagValueWithDefault(cmd, "stack", "default")
+	cellName := getFlagValueWithDefault(cmd, "cell", "")
 
 	// When used as ValidArgsFunction for positional args, require all flags to be set
 	// Check if we're being called as ValidArgsFunction (not for flag completion)
