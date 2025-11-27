@@ -27,6 +27,7 @@ import (
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/fs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -234,10 +235,9 @@ func runContainerCmdWithDeps(
 	}
 
 	// Convert internal containers to external for printing
-	externalContainers := make([]*v1beta1.ContainerSpec, 0, len(internalContainers))
-	for _, container := range internalContainers {
-		containerSpec := apischeme.BuildContainerSpecExternalFromInternal(container)
-		externalContainers = append(externalContainers, &containerSpec)
+	externalContainers, err := fs.ConvertContainerSpecListToExternal(internalContainers)
+	if err != nil {
+		return err
 	}
 
 	return printContainers(cmd, externalContainers, outputFormat, printYAML, printJSON, printTable)

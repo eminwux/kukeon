@@ -23,6 +23,8 @@ import (
 
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/consts"
+	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -91,4 +93,66 @@ func DetectMetadataVersion(raw []byte) (v1beta1.Version, error) {
 		return "", fmt.Errorf("metadata header: %w", err)
 	}
 	return apischeme.DefaultVersion(v1beta1.Version(header.APIVersion)), nil
+}
+
+// ConvertCellListToExternal converts a slice of internal cells to a slice of external cell docs.
+func ConvertCellListToExternal(internalCells []intmodel.Cell) ([]*v1beta1.CellDoc, error) {
+	externalCells := make([]*v1beta1.CellDoc, 0, len(internalCells))
+	for _, cell := range internalCells {
+		cellDoc, convertErr := apischeme.BuildCellExternalFromInternal(cell, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		externalCells = append(externalCells, &cellDoc)
+	}
+	return externalCells, nil
+}
+
+// ConvertStackListToExternal converts a slice of internal stacks to a slice of external stack docs.
+func ConvertStackListToExternal(internalStacks []intmodel.Stack) ([]*v1beta1.StackDoc, error) {
+	externalStacks := make([]*v1beta1.StackDoc, 0, len(internalStacks))
+	for _, stack := range internalStacks {
+		stackDoc, convertErr := apischeme.BuildStackExternalFromInternal(stack, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		externalStacks = append(externalStacks, &stackDoc)
+	}
+	return externalStacks, nil
+}
+
+// ConvertSpaceListToExternal converts a slice of internal spaces to a slice of external space docs.
+func ConvertSpaceListToExternal(internalSpaces []intmodel.Space) ([]*v1beta1.SpaceDoc, error) {
+	externalSpaces := make([]*v1beta1.SpaceDoc, 0, len(internalSpaces))
+	for _, space := range internalSpaces {
+		spaceDoc, convertErr := apischeme.BuildSpaceExternalFromInternal(space, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		externalSpaces = append(externalSpaces, &spaceDoc)
+	}
+	return externalSpaces, nil
+}
+
+// ConvertRealmListToExternal converts a slice of internal realms to a slice of external realm docs.
+func ConvertRealmListToExternal(internalRealms []intmodel.Realm) ([]*v1beta1.RealmDoc, error) {
+	externalRealms := make([]*v1beta1.RealmDoc, 0, len(internalRealms))
+	for _, realm := range internalRealms {
+		realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(realm, apischeme.VersionV1Beta1)
+		if convertErr != nil {
+			return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+		}
+		externalRealms = append(externalRealms, &realmDoc)
+	}
+	return externalRealms, nil
+}
+
+// ConvertContainerSpecListToExternal converts a slice of internal container specs to a slice of external specs.
+func ConvertContainerSpecListToExternal(internalSpecs []intmodel.ContainerSpec) ([]*v1beta1.ContainerSpec, error) {
+	externalSpecs := make([]*v1beta1.ContainerSpec, 0, len(internalSpecs))
+	for _, spec := range internalSpecs {
+		containerSpec := apischeme.BuildContainerSpecExternalFromInternal(spec)
+		externalSpecs = append(externalSpecs, &containerSpec)
+	}
+	return externalSpecs, nil
 }

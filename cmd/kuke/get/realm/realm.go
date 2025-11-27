@@ -27,6 +27,7 @@ import (
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/fs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -119,13 +120,9 @@ func NewRealmCmd() *cobra.Command {
 			}
 
 			// Convert internal realms to external for printing
-			externalRealms := make([]*v1beta1.RealmDoc, 0, len(internalRealms))
-			for _, realm := range internalRealms {
-				realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(realm, apischeme.VersionV1Beta1)
-				if convertErr != nil {
-					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-				}
-				externalRealms = append(externalRealms, &realmDoc)
+			externalRealms, err := fs.ConvertRealmListToExternal(internalRealms)
+			if err != nil {
+				return err
 			}
 
 			return printRealms(cmd, externalRealms, outputFormat)

@@ -27,6 +27,7 @@ import (
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/fs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -161,13 +162,9 @@ func NewCellCmd() *cobra.Command {
 			}
 
 			// Convert internal cells to external for printing
-			externalCells := make([]*v1beta1.CellDoc, 0, len(internalCells))
-			for _, cell := range internalCells {
-				cellDoc, convertErr := apischeme.BuildCellExternalFromInternal(cell, apischeme.VersionV1Beta1)
-				if convertErr != nil {
-					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-				}
-				externalCells = append(externalCells, &cellDoc)
+			externalCells, err := fs.ConvertCellListToExternal(internalCells)
+			if err != nil {
+				return err
 			}
 
 			return printCells(cmd, externalCells, outputFormat)

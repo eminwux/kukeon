@@ -27,6 +27,7 @@ import (
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/fs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -129,13 +130,9 @@ func NewSpaceCmd() *cobra.Command {
 			}
 
 			// Convert internal spaces to external for printing
-			externalSpaces := make([]*v1beta1.SpaceDoc, 0, len(internalSpaces))
-			for _, space := range internalSpaces {
-				spaceDoc, convertErr := apischeme.BuildSpaceExternalFromInternal(space, apischeme.VersionV1Beta1)
-				if convertErr != nil {
-					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-				}
-				externalSpaces = append(externalSpaces, &spaceDoc)
+			externalSpaces, err := fs.ConvertSpaceListToExternal(internalSpaces)
+			if err != nil {
+				return err
 			}
 
 			return printSpaces(cmd, externalSpaces, outputFormat)

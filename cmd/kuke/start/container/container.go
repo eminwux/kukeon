@@ -31,12 +31,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-// StartContainerResult exposes the started container doc plus controller booleans.
-type StartContainerResult struct {
-	Container intmodel.Container
-	Started   bool
-}
-
 type containerController interface {
 	StartContainer(container intmodel.Container) (controller.StartContainerResult, error)
 }

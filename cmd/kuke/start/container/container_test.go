@@ -28,6 +28,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	container "github.com/eminwux/kukeon/cmd/kuke/start/container"
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/spf13/cobra"
@@ -45,7 +46,7 @@ func TestNewContainerCmdRunE(t *testing.T) {
 		name          string
 		args          []string
 		setup         func(t *testing.T, cmd *cobra.Command)
-		controllerFn  func(container intmodel.Container) (container.StartContainerResult, error)
+		controllerFn  func(container intmodel.Container) (controller.StartContainerResult, error)
 		wantErr       string
 		wantCallStart bool
 		wantDocFields *struct {
@@ -66,8 +67,8 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "stack", "stack-a")
 				setFlag(t, cmd, "cell", "cell-a")
 			},
-			controllerFn: func(ctr intmodel.Container) (container.StartContainerResult, error) {
-				return container.StartContainerResult{
+			controllerFn: func(ctr intmodel.Container) (controller.StartContainerResult, error) {
+				return controller.StartContainerResult{
 					Container: ctr,
 					Started:   true,
 				}, nil
@@ -97,8 +98,8 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				viper.Set(config.KUKE_START_CONTAINER_STACK.ViperKey, "stack-b")
 				viper.Set(config.KUKE_START_CONTAINER_CELL.ViperKey, "cell-b")
 			},
-			controllerFn: func(ctr intmodel.Container) (container.StartContainerResult, error) {
-				return container.StartContainerResult{
+			controllerFn: func(ctr intmodel.Container) (controller.StartContainerResult, error) {
+				return controller.StartContainerResult{
 					Container: ctr,
 					Started:   true,
 				}, nil
@@ -128,8 +129,8 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "stack", "  stack-a  ")
 				setFlag(t, cmd, "cell", "  cell-a  ")
 			},
-			controllerFn: func(ctr intmodel.Container) (container.StartContainerResult, error) {
-				return container.StartContainerResult{
+			controllerFn: func(ctr intmodel.Container) (controller.StartContainerResult, error) {
+				return controller.StartContainerResult{
 					Container: ctr,
 					Started:   true,
 				}, nil
@@ -264,8 +265,8 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "stack", "stack-a")
 				setFlag(t, cmd, "cell", "cell-a")
 			},
-			controllerFn: func(_ intmodel.Container) (container.StartContainerResult, error) {
-				return container.StartContainerResult{}, errdefs.ErrCellNotFound
+			controllerFn: func(_ intmodel.Container) (controller.StartContainerResult, error) {
+				return controller.StartContainerResult{}, errdefs.ErrCellNotFound
 			},
 			wantErr:       "cell not found",
 			wantCallStart: true,
@@ -307,7 +308,7 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				// If we need to mock the controller, inject it via context
 				if tt.controllerFn != nil {
 					fakeCtrl := &fakeControllerExec{
-						startContainerFn: func(ctr intmodel.Container) (container.StartContainerResult, error) {
+						startContainerFn: func(ctr intmodel.Container) (controller.StartContainerResult, error) {
 							startCalled = true
 							receivedContainer = ctr
 							return tt.controllerFn(ctr)
@@ -379,12 +380,12 @@ func TestNewContainerCmdRunE(t *testing.T) {
 }
 
 type fakeControllerExec struct {
-	startContainerFn func(container intmodel.Container) (container.StartContainerResult, error)
+	startContainerFn func(container intmodel.Container) (controller.StartContainerResult, error)
 }
 
-func (f *fakeControllerExec) StartContainer(ctr intmodel.Container) (container.StartContainerResult, error) {
+func (f *fakeControllerExec) StartContainer(ctr intmodel.Container) (controller.StartContainerResult, error) {
 	if f.startContainerFn == nil {
-		return container.StartContainerResult{}, errors.New("unexpected StartContainer call")
+		return controller.StartContainerResult{}, errors.New("unexpected StartContainer call")
 	}
 	return f.startContainerFn(ctr)
 }
