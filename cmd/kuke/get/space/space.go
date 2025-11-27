@@ -73,6 +73,9 @@ func NewSpaceCmd() *cobra.Command {
 				realm, _ = cmd.Flags().GetString("realm")
 				realm = strings.TrimSpace(realm)
 			}
+			if realm == "" {
+				realm = config.KUKE_GET_SPACE_REALM.ValueOrDefault()
+			}
 
 			var name string
 			if len(args) > 0 {

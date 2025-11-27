@@ -63,9 +63,8 @@ func NewSpaceCmd() *cobra.Command {
 
 			name := strings.TrimSpace(args[0])
 			realm := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_SPACE_REALM.ViperKey))
-
 			if realm == "" {
-				return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
+				realm = config.KUKE_DELETE_SPACE_REALM.ValueOrDefault()
 			}
 
 			force := shared.ParseForceFlag(cmd)

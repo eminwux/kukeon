@@ -19,6 +19,7 @@ package stack_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -58,50 +59,122 @@ func TestNewStackCmd(t *testing.T) {
 		wantOutputSubs []string
 	}{
 		{
-			name:    "missing realm flag",
+			name:    "uses default realm when realm flag not set",
 			cliArgs: []string{"stack-name", "--space", "space-a"},
 			setupContext: func(cmd *cobra.Command) error {
 				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+				fakeCtrl := &fakeStackController{
+					deleteStackFn: func(stack intmodel.Stack, _ bool, _ bool) (controller.DeleteStackResult, error) {
+						if stack.Metadata.Name != "stack-name" || stack.Spec.RealmName != "default" ||
+							stack.Spec.SpaceName != "space-a" {
+							return controller.DeleteStackResult{}, fmt.Errorf(
+								"unexpected stack: name=%q realm=%q space=%q",
+								stack.Metadata.Name,
+								stack.Spec.RealmName,
+								stack.Spec.SpaceName,
+							)
+						}
+						return controller.DeleteStackResult{
+							StackName: "stack-name",
+							SpaceName: "space-a",
+						}, nil
+					},
+				}
+				ctx = context.WithValue(ctx, stack.MockControllerKey{}, fakeCtrl)
 				cmd.SetContext(ctx)
 				return nil
 			},
-			wantErrSub: "realm name is required",
+			wantOutputSubs: []string{"Deleted stack \"stack-name\" from space \"space-a\""},
 		},
 		{
-			name:    "missing space flag",
+			name:    "uses default space when space flag not set",
 			cliArgs: []string{"stack-name", "--realm", "realm-a"},
 			setupContext: func(cmd *cobra.Command) error {
 				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+				fakeCtrl := &fakeStackController{
+					deleteStackFn: func(stack intmodel.Stack, _ bool, _ bool) (controller.DeleteStackResult, error) {
+						if stack.Metadata.Name != "stack-name" || stack.Spec.RealmName != "realm-a" ||
+							stack.Spec.SpaceName != "default" {
+							return controller.DeleteStackResult{}, fmt.Errorf(
+								"unexpected stack: name=%q realm=%q space=%q",
+								stack.Metadata.Name,
+								stack.Spec.RealmName,
+								stack.Spec.SpaceName,
+							)
+						}
+						return controller.DeleteStackResult{
+							StackName: "stack-name",
+							SpaceName: "default",
+						}, nil
+					},
+				}
+				ctx = context.WithValue(ctx, stack.MockControllerKey{}, fakeCtrl)
 				cmd.SetContext(ctx)
 				return nil
 			},
-			wantErrSub: "space name is required",
+			wantOutputSubs: []string{"Deleted stack \"stack-name\" from space \"default\""},
 		},
 		{
-			name:       "missing realm from viper",
+			name:       "uses default realm when realm not in viper",
 			cliArgs:    []string{"stack-name"},
 			viperSpace: "space-a",
 			setupContext: func(cmd *cobra.Command) error {
 				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+				fakeCtrl := &fakeStackController{
+					deleteStackFn: func(stack intmodel.Stack, _ bool, _ bool) (controller.DeleteStackResult, error) {
+						if stack.Metadata.Name != "stack-name" || stack.Spec.RealmName != "default" ||
+							stack.Spec.SpaceName != "space-a" {
+							return controller.DeleteStackResult{}, fmt.Errorf(
+								"unexpected stack: name=%q realm=%q space=%q",
+								stack.Metadata.Name,
+								stack.Spec.RealmName,
+								stack.Spec.SpaceName,
+							)
+						}
+						return controller.DeleteStackResult{
+							StackName: "stack-name",
+							SpaceName: "space-a",
+						}, nil
+					},
+				}
+				ctx = context.WithValue(ctx, stack.MockControllerKey{}, fakeCtrl)
 				cmd.SetContext(ctx)
 				return nil
 			},
-			wantErrSub: "realm name is required",
+			wantOutputSubs: []string{"Deleted stack \"stack-name\" from space \"space-a\""},
 		},
 		{
-			name:       "missing space from viper",
+			name:       "uses default space when space not in viper",
 			cliArgs:    []string{"stack-name"},
 			viperRealm: "realm-a",
 			setupContext: func(cmd *cobra.Command) error {
 				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+				fakeCtrl := &fakeStackController{
+					deleteStackFn: func(stack intmodel.Stack, _ bool, _ bool) (controller.DeleteStackResult, error) {
+						if stack.Metadata.Name != "stack-name" || stack.Spec.RealmName != "realm-a" ||
+							stack.Spec.SpaceName != "default" {
+							return controller.DeleteStackResult{}, fmt.Errorf(
+								"unexpected stack: name=%q realm=%q space=%q",
+								stack.Metadata.Name,
+								stack.Spec.RealmName,
+								stack.Spec.SpaceName,
+							)
+						}
+						return controller.DeleteStackResult{
+							StackName: "stack-name",
+							SpaceName: "default",
+						}, nil
+					},
+				}
+				ctx = context.WithValue(ctx, stack.MockControllerKey{}, fakeCtrl)
 				cmd.SetContext(ctx)
 				return nil
 			},
-			wantErrSub: "space name is required",
+			wantOutputSubs: []string{"Deleted stack \"stack-name\" from space \"default\""},
 		},
 		{
 			name:    "controller creation error propagation",

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -148,34 +149,82 @@ func TestNewCellCmdRunE(t *testing.T) {
 			wantOutput: []string{`Deleted cell "test-cell" from stack "stack-a"`},
 		},
 		{
-			name: "error: missing realm",
+			name: "uses default realm when realm flag not set",
 			args: []string{"test-cell"},
 			setup: func(t *testing.T, cmd *cobra.Command) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			wantErr:        "realm name is required",
-			wantCallDelete: false,
+			controllerFn: func(cell intmodel.Cell) (controller.DeleteCellResult, error) {
+				if cell.Metadata.Name != "test-cell" || cell.Spec.RealmName != "default" ||
+					cell.Spec.SpaceName != "space-a" || cell.Spec.StackName != "stack-a" {
+					return controller.DeleteCellResult{}, fmt.Errorf(
+						"unexpected cell: name=%q realm=%q space=%q stack=%q",
+						cell.Metadata.Name,
+						cell.Spec.RealmName,
+						cell.Spec.SpaceName,
+						cell.Spec.StackName,
+					)
+				}
+				return controller.DeleteCellResult{
+					Cell:            cell,
+					MetadataDeleted: true,
+					CgroupDeleted:   true,
+				}, nil
+			},
+			wantCallDelete: true,
 		},
 		{
-			name: "error: missing space",
+			name: "uses default space when space flag not set",
 			args: []string{"test-cell"},
 			setup: func(t *testing.T, cmd *cobra.Command) {
 				setFlag(t, cmd, "realm", "realm-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			wantErr:        "space name is required",
-			wantCallDelete: false,
+			controllerFn: func(cell intmodel.Cell) (controller.DeleteCellResult, error) {
+				if cell.Metadata.Name != "test-cell" || cell.Spec.RealmName != "realm-a" ||
+					cell.Spec.SpaceName != "default" || cell.Spec.StackName != "stack-a" {
+					return controller.DeleteCellResult{}, fmt.Errorf(
+						"unexpected cell: name=%q realm=%q space=%q stack=%q",
+						cell.Metadata.Name,
+						cell.Spec.RealmName,
+						cell.Spec.SpaceName,
+						cell.Spec.StackName,
+					)
+				}
+				return controller.DeleteCellResult{
+					Cell:            cell,
+					MetadataDeleted: true,
+					CgroupDeleted:   true,
+				}, nil
+			},
+			wantCallDelete: true,
 		},
 		{
-			name: "error: missing stack",
+			name: "uses default stack when stack flag not set",
 			args: []string{"test-cell"},
 			setup: func(t *testing.T, cmd *cobra.Command) {
 				setFlag(t, cmd, "realm", "realm-a")
 				setFlag(t, cmd, "space", "space-a")
 			},
-			wantErr:        "stack name is required",
-			wantCallDelete: false,
+			controllerFn: func(cell intmodel.Cell) (controller.DeleteCellResult, error) {
+				if cell.Metadata.Name != "test-cell" || cell.Spec.RealmName != "realm-a" ||
+					cell.Spec.SpaceName != "space-a" || cell.Spec.StackName != "default" {
+					return controller.DeleteCellResult{}, fmt.Errorf(
+						"unexpected cell: name=%q realm=%q space=%q stack=%q",
+						cell.Metadata.Name,
+						cell.Spec.RealmName,
+						cell.Spec.SpaceName,
+						cell.Spec.StackName,
+					)
+				}
+				return controller.DeleteCellResult{
+					Cell:            cell,
+					MetadataDeleted: true,
+					CgroupDeleted:   true,
+				}, nil
+			},
+			wantCallDelete: true,
 		},
 		{
 			name: "error: empty realm after trimming whitespace",

@@ -79,17 +79,17 @@ func runCreateCell(cmd *cobra.Command, args []string) error {
 
 	realm := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_REALM.ViperKey))
 	if realm == "" {
-		return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
+		realm = config.KUKE_CREATE_CELL_REALM.ValueOrDefault()
 	}
 
 	space := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_SPACE.ViperKey))
 	if space == "" {
-		return fmt.Errorf("%w (--space)", errdefs.ErrSpaceNameRequired)
+		space = config.KUKE_CREATE_CELL_SPACE.ValueOrDefault()
 	}
 
 	stack := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_STACK.ViperKey))
 	if stack == "" {
-		return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
+		stack = config.KUKE_CREATE_CELL_STACK.ValueOrDefault()
 	}
 
 	// Build v1beta1.CellDoc from command arguments

@@ -72,32 +72,52 @@ func TestNewStackCmd(t *testing.T) {
 		wantErrSub string
 	}{
 		{
-			name:    "requires realm when name provided",
+			name:    "uses default realm when name provided and realm not set",
 			cliArgs: []string{"demo", "--space", "space-a"},
 			controller: &fakeStackController{
-				getStack: func(_ intmodel.Stack) (controller.GetStackResult, error) {
-					t.Fatalf("GetStack should not be called when realm is missing")
-					return controller.GetStackResult{}, errors.New("unreachable")
+				getStack: func(stack intmodel.Stack) (controller.GetStackResult, error) {
+					if stack.Metadata.Name != "demo" || stack.Spec.RealmName != "default" ||
+						stack.Spec.SpaceName != "space-a" {
+						t.Fatalf(
+							"unexpected GetStack inputs: name=%q realm=%q space=%q",
+							stack.Metadata.Name,
+							stack.Spec.RealmName,
+							stack.Spec.SpaceName,
+						)
+					}
+					return controller.GetStackResult{
+						Stack:          stack,
+						MetadataExists: true,
+					}, nil
 				},
 				listStacks: func(_, _ string) ([]intmodel.Stack, error) {
 					return nil, errors.New("unexpected list call")
 				},
 			},
-			wantErrSub: "realm name is required",
 		},
 		{
-			name:    "requires space when name provided",
+			name:    "uses default space when name provided and space not set",
 			cliArgs: []string{"demo", "--realm", "realm-a"},
 			controller: &fakeStackController{
-				getStack: func(_ intmodel.Stack) (controller.GetStackResult, error) {
-					t.Fatalf("GetStack should not be called when space is missing")
-					return controller.GetStackResult{}, errors.New("unreachable")
+				getStack: func(stack intmodel.Stack) (controller.GetStackResult, error) {
+					if stack.Metadata.Name != "demo" || stack.Spec.RealmName != "realm-a" ||
+						stack.Spec.SpaceName != "default" {
+						t.Fatalf(
+							"unexpected GetStack inputs: name=%q realm=%q space=%q",
+							stack.Metadata.Name,
+							stack.Spec.RealmName,
+							stack.Spec.SpaceName,
+						)
+					}
+					return controller.GetStackResult{
+						Stack:          stack,
+						MetadataExists: true,
+					}, nil
 				},
 				listStacks: func(_, _ string) ([]intmodel.Stack, error) {
 					return nil, errors.New("unexpected list call")
 				},
 			},
-			wantErrSub: "space name is required",
 		},
 		{
 			name:    "gets single stack with provided flags",
@@ -291,26 +311,44 @@ func TestNewStackCmdRunE(t *testing.T) {
 			wantOutput: []string{"name: alpha"},
 		},
 		{
-			name:      "missing realm for single stack",
+			name:      "uses default realm when realm flag not set",
 			args:      []string{"alpha"},
 			spaceFlag: "space-a",
 			controller: &fakeStackController{
-				getStack: func(_ intmodel.Stack) (controller.GetStackResult, error) {
-					return controller.GetStackResult{}, errors.New("unexpected call")
+				getStack: func(stack intmodel.Stack) (controller.GetStackResult, error) {
+					if stack.Metadata.Name != "alpha" || stack.Spec.RealmName != "default" ||
+						stack.Spec.SpaceName != "space-a" {
+						return controller.GetStackResult{}, errors.New("unexpected args")
+					}
+					// Convert docAlpha to internal for result
+					stackInternal, _, _ := apischeme.NormalizeStack(*docAlpha)
+					return controller.GetStackResult{
+						Stack:          stackInternal,
+						MetadataExists: true,
+					}, nil
 				},
 			},
-			wantErr: "realm name is required",
+			wantOutput: []string{"name: alpha"},
 		},
 		{
-			name:      "missing space for single stack",
+			name:      "uses default space when space flag not set",
 			args:      []string{"alpha"},
 			realmFlag: "realm-a",
 			controller: &fakeStackController{
-				getStack: func(_ intmodel.Stack) (controller.GetStackResult, error) {
-					return controller.GetStackResult{}, errors.New("unexpected call")
+				getStack: func(stack intmodel.Stack) (controller.GetStackResult, error) {
+					if stack.Metadata.Name != "alpha" || stack.Spec.RealmName != "realm-a" ||
+						stack.Spec.SpaceName != "default" {
+						return controller.GetStackResult{}, errors.New("unexpected args")
+					}
+					// Convert docAlpha to internal for result
+					stackInternal, _, _ := apischeme.NormalizeStack(*docAlpha)
+					return controller.GetStackResult{
+						Stack:          stackInternal,
+						MetadataExists: true,
+					}, nil
 				},
 			},
-			wantErr: "space name is required",
+			wantOutput: []string{"name: alpha"},
 		},
 		{
 			name:      "stack not found error",

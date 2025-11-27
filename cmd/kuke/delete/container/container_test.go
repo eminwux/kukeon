@@ -117,34 +117,88 @@ func TestNewContainerCmdRunE(t *testing.T) {
 		wantOutput  []string
 	}{
 		{
-			name: "missing realm error",
+			name: "uses default realm when realm flag not set",
 			args: []string{"my-container"},
 			flags: map[string]string{
 				"space": "my-space",
 				"stack": "my-stack",
 				"cell":  "my-cell",
 			},
-			wantErr: "realm name is required",
+			controller: &fakeDeleteController{
+				deleteContainerFn: func(container intmodel.Container) (controller.DeleteContainerResult, error) {
+					if container.Metadata.Name != "my-container" || container.Spec.RealmName != "default" ||
+						container.Spec.SpaceName != "my-space" ||
+						container.Spec.StackName != "my-stack" ||
+						container.Spec.CellName != "my-cell" {
+						return controller.DeleteContainerResult{}, errors.New("unexpected args")
+					}
+					return controller.DeleteContainerResult{
+						Container:          container,
+						CellMetadataExists: true,
+						ContainerExists:    true,
+						Deleted:            []string{"container", "task"},
+					}, nil
+				},
+			},
+			wantOutput: []string{
+				"Deleted container \"my-container\" from cell \"my-cell\"",
+			},
 		},
 		{
-			name: "missing space error",
+			name: "uses default space when space flag not set",
 			args: []string{"my-container"},
 			flags: map[string]string{
 				"realm": "my-realm",
 				"stack": "my-stack",
 				"cell":  "my-cell",
 			},
-			wantErr: "space name is required",
+			controller: &fakeDeleteController{
+				deleteContainerFn: func(container intmodel.Container) (controller.DeleteContainerResult, error) {
+					if container.Metadata.Name != "my-container" || container.Spec.RealmName != "my-realm" ||
+						container.Spec.SpaceName != "default" ||
+						container.Spec.StackName != "my-stack" ||
+						container.Spec.CellName != "my-cell" {
+						return controller.DeleteContainerResult{}, errors.New("unexpected args")
+					}
+					return controller.DeleteContainerResult{
+						Container:          container,
+						CellMetadataExists: true,
+						ContainerExists:    true,
+						Deleted:            []string{"container", "task"},
+					}, nil
+				},
+			},
+			wantOutput: []string{
+				"Deleted container \"my-container\" from cell \"my-cell\"",
+			},
 		},
 		{
-			name: "missing stack error",
+			name: "uses default stack when stack flag not set",
 			args: []string{"my-container"},
 			flags: map[string]string{
 				"realm": "my-realm",
 				"space": "my-space",
 				"cell":  "my-cell",
 			},
-			wantErr: "stack name is required",
+			controller: &fakeDeleteController{
+				deleteContainerFn: func(container intmodel.Container) (controller.DeleteContainerResult, error) {
+					if container.Metadata.Name != "my-container" || container.Spec.RealmName != "my-realm" ||
+						container.Spec.SpaceName != "my-space" ||
+						container.Spec.StackName != "default" ||
+						container.Spec.CellName != "my-cell" {
+						return controller.DeleteContainerResult{}, errors.New("unexpected args")
+					}
+					return controller.DeleteContainerResult{
+						Container:          container,
+						CellMetadataExists: true,
+						ContainerExists:    true,
+						Deleted:            []string{"container", "task"},
+					}, nil
+				},
+			},
+			wantOutput: []string{
+				"Deleted container \"my-container\" from cell \"my-cell\"",
+			},
 		},
 		{
 			name: "missing cell error",

@@ -59,30 +59,94 @@ func TestNewStackCmd(t *testing.T) {
 		verifyCreateStack func(t *testing.T, stack intmodel.Stack)
 	}{
 		{
-			name:       "missing realm flag",
-			cliArgs:    []string{"stack-name", "--space", "space-a"},
-			controller: &fakeStackController{},
-			wantErrSub: "realm name is required",
+			name:    "uses default realm when realm flag not set",
+			cliArgs: []string{"stack-name", "--space", "space-a"},
+			controller: &fakeStackController{
+				createStack: func(stack intmodel.Stack) (controller.CreateStackResult, error) {
+					if stack.Metadata.Name != "stack-name" || stack.Spec.RealmName != "default" ||
+						stack.Spec.SpaceName != "space-a" {
+						t.Fatalf("unexpected stack: name=%q realm=%q space=%q",
+							stack.Metadata.Name, stack.Spec.RealmName, stack.Spec.SpaceName)
+					}
+					return controller.CreateStackResult{
+						Stack: stack,
+					}, nil
+				},
+			},
+			verifyCreateStack: func(t *testing.T, stack intmodel.Stack) {
+				if stack.Spec.RealmName != "default" {
+					t.Fatalf("expected default realm, got %q", stack.Spec.RealmName)
+				}
+			},
+			wantOutputSubs: []string{"Stack \"stack-name\" (realm \"default\", space \"space-a\")"},
 		},
 		{
-			name:       "missing space flag",
-			cliArgs:    []string{"stack-name", "--realm", "realm-a"},
-			controller: &fakeStackController{},
-			wantErrSub: "space name is required",
+			name:    "uses default space when space flag not set",
+			cliArgs: []string{"stack-name", "--realm", "realm-a"},
+			controller: &fakeStackController{
+				createStack: func(stack intmodel.Stack) (controller.CreateStackResult, error) {
+					if stack.Metadata.Name != "stack-name" || stack.Spec.RealmName != "realm-a" ||
+						stack.Spec.SpaceName != "default" {
+						t.Fatalf("unexpected stack: name=%q realm=%q space=%q",
+							stack.Metadata.Name, stack.Spec.RealmName, stack.Spec.SpaceName)
+					}
+					return controller.CreateStackResult{
+						Stack: stack,
+					}, nil
+				},
+			},
+			verifyCreateStack: func(t *testing.T, stack intmodel.Stack) {
+				if stack.Spec.SpaceName != "default" {
+					t.Fatalf("expected default space, got %q", stack.Spec.SpaceName)
+				}
+			},
+			wantOutputSubs: []string{"Stack \"stack-name\" (realm \"realm-a\", space \"default\")"},
 		},
 		{
-			name:       "missing realm from viper",
+			name:       "uses default realm when realm not in viper",
 			cliArgs:    []string{"stack-name"},
 			viperSpace: "space-a",
-			controller: &fakeStackController{},
-			wantErrSub: "realm name is required",
+			controller: &fakeStackController{
+				createStack: func(stack intmodel.Stack) (controller.CreateStackResult, error) {
+					if stack.Metadata.Name != "stack-name" || stack.Spec.RealmName != "default" ||
+						stack.Spec.SpaceName != "space-a" {
+						t.Fatalf("unexpected stack: name=%q realm=%q space=%q",
+							stack.Metadata.Name, stack.Spec.RealmName, stack.Spec.SpaceName)
+					}
+					return controller.CreateStackResult{
+						Stack: stack,
+					}, nil
+				},
+			},
+			verifyCreateStack: func(t *testing.T, stack intmodel.Stack) {
+				if stack.Spec.RealmName != "default" {
+					t.Fatalf("expected default realm, got %q", stack.Spec.RealmName)
+				}
+			},
+			wantOutputSubs: []string{"Stack \"stack-name\" (realm \"default\", space \"space-a\")"},
 		},
 		{
-			name:       "missing space from viper",
+			name:       "uses default space when space not in viper",
 			cliArgs:    []string{"stack-name"},
 			viperRealm: "realm-a",
-			controller: &fakeStackController{},
-			wantErrSub: "space name is required",
+			controller: &fakeStackController{
+				createStack: func(stack intmodel.Stack) (controller.CreateStackResult, error) {
+					if stack.Metadata.Name != "stack-name" || stack.Spec.RealmName != "realm-a" ||
+						stack.Spec.SpaceName != "default" {
+						t.Fatalf("unexpected stack: name=%q realm=%q space=%q",
+							stack.Metadata.Name, stack.Spec.RealmName, stack.Spec.SpaceName)
+					}
+					return controller.CreateStackResult{
+						Stack: stack,
+					}, nil
+				},
+			},
+			verifyCreateStack: func(t *testing.T, stack intmodel.Stack) {
+				if stack.Spec.SpaceName != "default" {
+					t.Fatalf("expected default space, got %q", stack.Spec.SpaceName)
+				}
+			},
+			wantOutputSubs: []string{"Stack \"stack-name\" (realm \"realm-a\", space \"default\")"},
 		},
 		{
 			name:    "name from args with trimming",
@@ -568,22 +632,56 @@ func TestNewStackCmdRunE(t *testing.T) {
 			},
 		},
 		{
-			name: "error: missing realm",
+			name: "uses default realm when realm flag not set",
 			args: []string{"test-stack"},
 			setup: func(t *testing.T, cmd *cobra.Command) {
 				setFlag(t, cmd, "space", "space-a")
 			},
-			wantErr:        "realm name is required",
-			wantCallCreate: false,
+			controllerFn: func(stack intmodel.Stack) (controller.CreateStackResult, error) {
+				return controller.CreateStackResult{
+					Stack:              stack,
+					Created:            true,
+					MetadataExistsPost: true,
+					CgroupCreated:      true,
+					CgroupExistsPost:   true,
+				}, nil
+			},
+			wantCallCreate: true,
+			wantStack: intmodel.Stack{
+				Metadata: intmodel.StackMetadata{
+					Name: "test-stack",
+				},
+				Spec: intmodel.StackSpec{
+					RealmName: "default",
+					SpaceName: "space-a",
+				},
+			},
 		},
 		{
-			name: "error: missing space",
+			name: "uses default space when space flag not set",
 			args: []string{"test-stack"},
 			setup: func(t *testing.T, cmd *cobra.Command) {
 				setFlag(t, cmd, "realm", "realm-a")
 			},
-			wantErr:        "space name is required",
-			wantCallCreate: false,
+			controllerFn: func(stack intmodel.Stack) (controller.CreateStackResult, error) {
+				return controller.CreateStackResult{
+					Stack:              stack,
+					Created:            true,
+					MetadataExistsPost: true,
+					CgroupCreated:      true,
+					CgroupExistsPost:   true,
+				}, nil
+			},
+			wantCallCreate: true,
+			wantStack: intmodel.Stack{
+				Metadata: intmodel.StackMetadata{
+					Name: "test-stack",
+				},
+				Spec: intmodel.StackSpec{
+					RealmName: "realm-a",
+					SpaceName: "default",
+				},
+			},
 		},
 		{
 			name: "error: logger not in context",

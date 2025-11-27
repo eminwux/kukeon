@@ -61,19 +61,21 @@ func NewContainerCmd() *cobra.Command {
 
 			name := strings.TrimSpace(args[0])
 			realm := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CONTAINER_REALM.ViperKey))
-			space := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CONTAINER_SPACE.ViperKey))
-			stack := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CONTAINER_STACK.ViperKey))
-			cell := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CONTAINER_CELL.ViperKey))
-
 			if realm == "" {
-				return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
+				realm = config.KUKE_DELETE_CONTAINER_REALM.ValueOrDefault()
 			}
+
+			space := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CONTAINER_SPACE.ViperKey))
 			if space == "" {
-				return fmt.Errorf("%w (--space)", errdefs.ErrSpaceNameRequired)
+				space = config.KUKE_DELETE_CONTAINER_SPACE.ValueOrDefault()
 			}
+
+			stack := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CONTAINER_STACK.ViperKey))
 			if stack == "" {
-				return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
+				stack = config.KUKE_DELETE_CONTAINER_STACK.ValueOrDefault()
 			}
+
+			cell := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CONTAINER_CELL.ViperKey))
 			if cell == "" {
 				return fmt.Errorf("%w (--cell)", errdefs.ErrCellNameRequired)
 			}

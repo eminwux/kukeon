@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -119,34 +120,106 @@ func TestNewContainerCmdRunE(t *testing.T) {
 		wantOutput  []string
 	}{
 		{
-			name: "missing realm error",
+			name: "uses default realm when realm flag not set",
 			args: []string{"my-container"},
 			flags: map[string]string{
 				"space": "my-space",
 				"stack": "my-stack",
 				"cell":  "my-cell",
 			},
-			wantErr: "realm name is required",
+			setupCtx: func(cmd *cobra.Command) {
+				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+				fakeCtrl := &fakeContainerController{
+					createContainerFn: func(container intmodel.Container) (controller.CreateContainerResult, error) {
+						if container.Spec.RealmName != "default" {
+							return controller.CreateContainerResult{}, fmt.Errorf(
+								"unexpected realm: %q",
+								container.Spec.RealmName,
+							)
+						}
+						return controller.CreateContainerResult{
+							Container:           container,
+							ContainerCreated:    true,
+							ContainerExistsPost: true,
+							Started:             true,
+						}, nil
+					},
+				}
+				ctx = context.WithValue(ctx, container.MockControllerKey{}, fakeCtrl)
+				cmd.SetContext(ctx)
+			},
+			wantOutput: []string{
+				"Container \"my-container\" (ID: \"my-container\")",
+			},
 		},
 		{
-			name: "missing space error",
+			name: "uses default space when space flag not set",
 			args: []string{"my-container"},
 			flags: map[string]string{
 				"realm": "my-realm",
 				"stack": "my-stack",
 				"cell":  "my-cell",
 			},
-			wantErr: "space name is required",
+			setupCtx: func(cmd *cobra.Command) {
+				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+				fakeCtrl := &fakeContainerController{
+					createContainerFn: func(container intmodel.Container) (controller.CreateContainerResult, error) {
+						if container.Spec.SpaceName != "default" {
+							return controller.CreateContainerResult{}, fmt.Errorf(
+								"unexpected space: %q",
+								container.Spec.SpaceName,
+							)
+						}
+						return controller.CreateContainerResult{
+							Container:           container,
+							ContainerCreated:    true,
+							ContainerExistsPost: true,
+							Started:             true,
+						}, nil
+					},
+				}
+				ctx = context.WithValue(ctx, container.MockControllerKey{}, fakeCtrl)
+				cmd.SetContext(ctx)
+			},
+			wantOutput: []string{
+				"Container \"my-container\" (ID: \"my-container\")",
+			},
 		},
 		{
-			name: "missing stack error",
+			name: "uses default stack when stack flag not set",
 			args: []string{"my-container"},
 			flags: map[string]string{
 				"realm": "my-realm",
 				"space": "my-space",
 				"cell":  "my-cell",
 			},
-			wantErr: "stack name is required",
+			setupCtx: func(cmd *cobra.Command) {
+				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+				fakeCtrl := &fakeContainerController{
+					createContainerFn: func(container intmodel.Container) (controller.CreateContainerResult, error) {
+						if container.Spec.StackName != "default" {
+							return controller.CreateContainerResult{}, fmt.Errorf(
+								"unexpected stack: %q",
+								container.Spec.StackName,
+							)
+						}
+						return controller.CreateContainerResult{
+							Container:           container,
+							ContainerCreated:    true,
+							ContainerExistsPost: true,
+							Started:             true,
+						}, nil
+					},
+				}
+				ctx = context.WithValue(ctx, container.MockControllerKey{}, fakeCtrl)
+				cmd.SetContext(ctx)
+			},
+			wantOutput: []string{
+				"Container \"my-container\" (ID: \"my-container\")",
+			},
 		},
 		{
 			name: "missing cell error",

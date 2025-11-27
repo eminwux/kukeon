@@ -181,27 +181,27 @@ func TestCompleteSpaceNames(t *testing.T) {
 		noLogger   bool
 	}{
 		{
-			name: "success with multiple spaces",
+			name: "success with multiple spaces using default realm",
 			setup: func(t *testing.T, runPath string) {
-				createRealmMetadata(t, runPath, "realm1", "realm1-ns")
-				createSpaceMetadata(t, runPath, "realm1", "alpha")
-				createSpaceMetadata(t, runPath, "realm1", "bravo")
-				createSpaceMetadata(t, runPath, "realm1", "charlie")
+				createRealmMetadata(t, runPath, "default", "default-ns")
+				createSpaceMetadata(t, runPath, "default", "alpha")
+				createSpaceMetadata(t, runPath, "default", "bravo")
+				createSpaceMetadata(t, runPath, "default", "charlie")
 			},
 			toComplete: "",
 			wantNames:  []string{"alpha", "bravo", "charlie"},
 		},
 		{
-			name: "success with spaces across multiple realms",
+			name: "success with spaces across multiple realms (default realm only)",
 			setup: func(t *testing.T, runPath string) {
-				createRealmMetadata(t, runPath, "realm1", "realm1-ns")
+				createRealmMetadata(t, runPath, "default", "default-ns")
 				createRealmMetadata(t, runPath, "realm2", "realm2-ns")
-				createSpaceMetadata(t, runPath, "realm1", "alpha")
-				createSpaceMetadata(t, runPath, "realm1", "bravo")
+				createSpaceMetadata(t, runPath, "default", "alpha")
+				createSpaceMetadata(t, runPath, "default", "bravo")
 				createSpaceMetadata(t, runPath, "realm2", "charlie")
 			},
 			toComplete: "",
-			wantNames:  []string{"alpha", "bravo", "charlie"},
+			wantNames:  []string{"alpha", "bravo"},
 		},
 		{
 			name: "success with realm filter",
@@ -234,12 +234,12 @@ func TestCompleteSpaceNames(t *testing.T) {
 			wantNames:  []string{"alpha"},
 		},
 		{
-			name: "success with prefix filter",
+			name: "success with prefix filter using default realm",
 			setup: func(t *testing.T, runPath string) {
-				createRealmMetadata(t, runPath, "realm1", "realm1-ns")
-				createSpaceMetadata(t, runPath, "realm1", "alpha")
-				createSpaceMetadata(t, runPath, "realm1", "bravo")
-				createSpaceMetadata(t, runPath, "realm1", "charlie")
+				createRealmMetadata(t, runPath, "default", "default-ns")
+				createSpaceMetadata(t, runPath, "default", "alpha")
+				createSpaceMetadata(t, runPath, "default", "bravo")
+				createSpaceMetadata(t, runPath, "default", "charlie")
 			},
 			toComplete: "a",
 			wantNames:  []string{"alpha"},
@@ -350,39 +350,39 @@ func TestCompleteStackNames(t *testing.T) {
 		noLogger   bool
 	}{
 		{
-			name: "success with multiple stacks",
+			name: "success with multiple stacks using default realm and space",
 			setup: func(t *testing.T, runPath string) {
-				createRealmMetadata(t, runPath, "realm1", "realm1-ns")
-				createSpaceMetadata(t, runPath, "realm1", "space1")
-				createStackMetadata(t, runPath, "realm1", "space1", "alpha")
-				createStackMetadata(t, runPath, "realm1", "space1", "bravo")
-				createStackMetadata(t, runPath, "realm1", "space1", "charlie")
+				createRealmMetadata(t, runPath, "default", "default-ns")
+				createSpaceMetadata(t, runPath, "default", "default")
+				createStackMetadata(t, runPath, "default", "default", "alpha")
+				createStackMetadata(t, runPath, "default", "default", "bravo")
+				createStackMetadata(t, runPath, "default", "default", "charlie")
 			},
 			toComplete: "",
 			wantNames:  []string{"alpha", "bravo", "charlie"},
 		},
 		{
-			name: "success with stacks across multiple realms/spaces",
+			name: "success with stacks across multiple realms/spaces (default realm/space only)",
 			setup: func(t *testing.T, runPath string) {
-				createRealmMetadata(t, runPath, "realm1", "realm1-ns")
+				createRealmMetadata(t, runPath, "default", "default-ns")
 				createRealmMetadata(t, runPath, "realm2", "realm2-ns")
-				createSpaceMetadata(t, runPath, "realm1", "space1")
+				createSpaceMetadata(t, runPath, "default", "default")
 				createSpaceMetadata(t, runPath, "realm2", "space2")
-				createStackMetadata(t, runPath, "realm1", "space1", "alpha")
-				createStackMetadata(t, runPath, "realm1", "space1", "bravo")
+				createStackMetadata(t, runPath, "default", "default", "alpha")
+				createStackMetadata(t, runPath, "default", "default", "bravo")
 				createStackMetadata(t, runPath, "realm2", "space2", "charlie")
 			},
 			toComplete: "",
-			wantNames:  []string{"alpha", "bravo", "charlie"},
+			wantNames:  []string{"alpha", "bravo"},
 		},
 		{
-			name: "success with prefix filter",
+			name: "success with prefix filter using default realm and space",
 			setup: func(t *testing.T, runPath string) {
-				createRealmMetadata(t, runPath, "realm1", "realm1-ns")
-				createSpaceMetadata(t, runPath, "realm1", "space1")
-				createStackMetadata(t, runPath, "realm1", "space1", "alpha")
-				createStackMetadata(t, runPath, "realm1", "space1", "bravo")
-				createStackMetadata(t, runPath, "realm1", "space1", "charlie")
+				createRealmMetadata(t, runPath, "default", "default-ns")
+				createSpaceMetadata(t, runPath, "default", "default")
+				createStackMetadata(t, runPath, "default", "default", "alpha")
+				createStackMetadata(t, runPath, "default", "default", "bravo")
+				createStackMetadata(t, runPath, "default", "default", "charlie")
 			},
 			toComplete: "a",
 			wantNames:  []string{"alpha"},
@@ -565,27 +565,27 @@ func TestCompleteCellNames(t *testing.T) {
 		noLogger   bool
 	}{
 		{
-			name: "success with multiple cells",
+			name: "success with multiple cells using default realm, space, and stack",
 			setup: func(t *testing.T, runPath string) {
-				createRealmMetadata(t, runPath, "realm1", "realm1-ns")
-				createSpaceMetadata(t, runPath, "realm1", "space1")
-				createStackMetadata(t, runPath, "realm1", "space1", "stack1")
-				createCellMetadata(t, runPath, "realm1", "space1", "stack1", "alpha")
-				createCellMetadata(t, runPath, "realm1", "space1", "stack1", "bravo")
-				createCellMetadata(t, runPath, "realm1", "space1", "stack1", "charlie")
+				createRealmMetadata(t, runPath, "default", "default-ns")
+				createSpaceMetadata(t, runPath, "default", "default")
+				createStackMetadata(t, runPath, "default", "default", "default")
+				createCellMetadata(t, runPath, "default", "default", "default", "alpha")
+				createCellMetadata(t, runPath, "default", "default", "default", "bravo")
+				createCellMetadata(t, runPath, "default", "default", "default", "charlie")
 			},
 			toComplete: "",
 			wantNames:  []string{"alpha", "bravo", "charlie"},
 		},
 		{
-			name: "success with prefix filter",
+			name: "success with prefix filter using default realm, space, and stack",
 			setup: func(t *testing.T, runPath string) {
-				createRealmMetadata(t, runPath, "realm1", "realm1-ns")
-				createSpaceMetadata(t, runPath, "realm1", "space1")
-				createStackMetadata(t, runPath, "realm1", "space1", "stack1")
-				createCellMetadata(t, runPath, "realm1", "space1", "stack1", "alpha")
-				createCellMetadata(t, runPath, "realm1", "space1", "stack1", "bravo")
-				createCellMetadata(t, runPath, "realm1", "space1", "stack1", "charlie")
+				createRealmMetadata(t, runPath, "default", "default-ns")
+				createSpaceMetadata(t, runPath, "default", "default")
+				createStackMetadata(t, runPath, "default", "default", "default")
+				createCellMetadata(t, runPath, "default", "default", "default", "alpha")
+				createCellMetadata(t, runPath, "default", "default", "default", "bravo")
+				createCellMetadata(t, runPath, "default", "default", "default", "charlie")
 			},
 			toComplete: "a",
 			wantNames:  []string{"alpha"},

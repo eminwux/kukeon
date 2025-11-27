@@ -238,11 +238,11 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			wantOutput: []string{"name: alpha"},
 		},
 		{
-			name:       "list spaces success",
+			name:       "list spaces success using default realm",
 			outputFlag: "yaml",
 			controller: &fakeSpaceController{
 				listSpacesFn: func(realm string) ([]intmodel.Space, error) {
-					if realm != "" {
+					if realm != "default" {
 						return nil, errors.New("unexpected realm filter")
 					}
 					// Convert docList to internal types
@@ -257,9 +257,28 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			wantOutput: []string{"name: alpha"},
 		},
 		{
-			name:    "missing realm for single space",
-			args:    []string{"alpha"},
-			wantErr: "realm name is required",
+			name: "uses default realm when realm flag not set",
+			args: []string{"alpha"},
+			controller: &fakeSpaceController{
+				getSpaceFn: func(space intmodel.Space) (controller.GetSpaceResult, error) {
+					if space.Metadata.Name != "alpha" || space.Spec.RealmName != "default" {
+						return controller.GetSpaceResult{}, errors.New("unexpected args")
+					}
+					// Create doc with default realm for result
+					docDefault := &v1beta1.SpaceDoc{
+						Metadata: v1beta1.SpaceMetadata{Name: "alpha"},
+						Spec:     v1beta1.SpaceSpec{RealmID: "default"},
+					}
+					spaceInternal, _, _ := apischeme.NormalizeSpace(*docDefault)
+					return controller.GetSpaceResult{
+						Space:            spaceInternal,
+						MetadataExists:   true,
+						CgroupExists:     true,
+						CNINetworkExists: true,
+					}, nil
+				},
+			},
+			wantOutput: []string{"name: alpha"},
 		},
 		{
 			name:      "space not found error",

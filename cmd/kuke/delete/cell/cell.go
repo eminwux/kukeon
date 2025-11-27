@@ -61,17 +61,18 @@ func NewCellCmd() *cobra.Command {
 
 			name := strings.TrimSpace(args[0])
 			realm := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CELL_REALM.ViperKey))
-			space := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CELL_SPACE.ViperKey))
-			stack := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CELL_STACK.ViperKey))
-
 			if realm == "" {
-				return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
+				realm = config.KUKE_DELETE_CELL_REALM.ValueOrDefault()
 			}
+
+			space := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CELL_SPACE.ViperKey))
 			if space == "" {
-				return fmt.Errorf("%w (--space)", errdefs.ErrSpaceNameRequired)
+				space = config.KUKE_DELETE_CELL_SPACE.ValueOrDefault()
 			}
+
+			stack := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CELL_STACK.ViperKey))
 			if stack == "" {
-				return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
+				stack = config.KUKE_DELETE_CELL_STACK.ValueOrDefault()
 			}
 
 			doc := &v1beta1.CellDoc{

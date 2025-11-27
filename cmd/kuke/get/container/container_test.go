@@ -460,11 +460,11 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			wantPrinted: containerAlphaDoc,
 		},
 		{
-			name:       "list containers success",
+			name:       "list containers success using default filters",
 			outputFlag: "yaml",
 			controller: &fakeContainerController{
 				listContainersFn: func(realm string, space, stack, cell string) ([]intmodel.ContainerSpec, error) {
-					if realm != "" || space != "" || stack != "" || cell != "" {
+					if realm != "default" || space != "default" || stack != "default" || cell != "" {
 						return nil, errors.New("unexpected filters")
 					}
 					// Convert containerList to internal types
@@ -500,22 +500,192 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			wantPrinted: containerList,
 		},
 		{
-			name:    "missing realm for single container",
-			args:    []string{"alpha"},
-			wantErr: "realm name is required",
+			name:      "uses default realm when realm flag not set",
+			args:      []string{"alpha"},
+			spaceFlag: "mars",
+			stackFlag: "venus",
+			cellFlag:  "jupiter",
+			controller: &fakeContainerController{
+				getContainerFn: func(ctr intmodel.Container) (container.GetContainerResult, error) {
+					if ctr.Metadata.Name != "alpha" || ctr.Spec.RealmName != "default" ||
+						ctr.Spec.SpaceName != "mars" ||
+						ctr.Spec.StackName != "venus" ||
+						ctr.Spec.CellName != "jupiter" {
+						return container.GetContainerResult{}, errors.New("unexpected args")
+					}
+					// Create doc with default realm for result
+					containerDefaultSpec := &v1beta1.ContainerSpec{
+						ID:      "alpha",
+						RealmID: "default",
+						SpaceID: "mars",
+						StackID: "venus",
+						CellID:  "jupiter",
+						Image:   "nginx:latest",
+					}
+					containerDefaultDoc := &v1beta1.ContainerDoc{
+						APIVersion: v1beta1.APIVersionV1Beta1,
+						Kind:       v1beta1.KindContainer,
+						Metadata: v1beta1.ContainerMetadata{
+							Name:   "alpha",
+							Labels: make(map[string]string),
+						},
+						Spec: *containerDefaultSpec,
+						Status: v1beta1.ContainerStatus{
+							State: v1beta1.ContainerStateReady,
+						},
+					}
+					containerInternal, _, _ := apischeme.NormalizeContainer(*containerDefaultDoc)
+					return container.GetContainerResult{
+						Container:          containerInternal,
+						CellMetadataExists: true,
+						ContainerExists:    true,
+					}, nil
+				},
+			},
+			wantPrinted: &v1beta1.ContainerDoc{
+				APIVersion: v1beta1.APIVersionV1Beta1,
+				Kind:       v1beta1.KindContainer,
+				Metadata: v1beta1.ContainerMetadata{
+					Name:   "alpha",
+					Labels: make(map[string]string),
+				},
+				Spec: v1beta1.ContainerSpec{
+					ID:      "alpha",
+					RealmID: "default",
+					SpaceID: "mars",
+					StackID: "venus",
+					CellID:  "jupiter",
+					Image:   "nginx:latest",
+				},
+				Status: v1beta1.ContainerStatus{
+					State: v1beta1.ContainerStateReady,
+				},
+			},
 		},
 		{
-			name:      "missing space for single container",
+			name:      "uses default space when space flag not set",
 			args:      []string{"alpha"},
 			realmFlag: "earth",
-			wantErr:   "space name is required",
+			stackFlag: "venus",
+			cellFlag:  "jupiter",
+			controller: &fakeContainerController{
+				getContainerFn: func(ctr intmodel.Container) (container.GetContainerResult, error) {
+					if ctr.Metadata.Name != "alpha" || ctr.Spec.RealmName != "earth" ||
+						ctr.Spec.SpaceName != "default" ||
+						ctr.Spec.StackName != "venus" ||
+						ctr.Spec.CellName != "jupiter" {
+						return container.GetContainerResult{}, errors.New("unexpected args")
+					}
+					// Create doc with default space for result
+					containerDefaultSpec := &v1beta1.ContainerSpec{
+						ID:      "alpha",
+						RealmID: "earth",
+						SpaceID: "default",
+						StackID: "venus",
+						CellID:  "jupiter",
+						Image:   "nginx:latest",
+					}
+					containerDefaultDoc := &v1beta1.ContainerDoc{
+						APIVersion: v1beta1.APIVersionV1Beta1,
+						Kind:       v1beta1.KindContainer,
+						Metadata: v1beta1.ContainerMetadata{
+							Name:   "alpha",
+							Labels: make(map[string]string),
+						},
+						Spec: *containerDefaultSpec,
+						Status: v1beta1.ContainerStatus{
+							State: v1beta1.ContainerStateReady,
+						},
+					}
+					containerInternal, _, _ := apischeme.NormalizeContainer(*containerDefaultDoc)
+					return container.GetContainerResult{
+						Container:          containerInternal,
+						CellMetadataExists: true,
+						ContainerExists:    true,
+					}, nil
+				},
+			},
+			wantPrinted: &v1beta1.ContainerDoc{
+				APIVersion: v1beta1.APIVersionV1Beta1,
+				Kind:       v1beta1.KindContainer,
+				Metadata: v1beta1.ContainerMetadata{
+					Name:   "alpha",
+					Labels: make(map[string]string),
+				},
+				Spec: v1beta1.ContainerSpec{
+					ID:      "alpha",
+					RealmID: "earth",
+					SpaceID: "default",
+					StackID: "venus",
+					CellID:  "jupiter",
+					Image:   "nginx:latest",
+				},
+				Status: v1beta1.ContainerStatus{
+					State: v1beta1.ContainerStateReady,
+				},
+			},
 		},
 		{
-			name:      "missing stack for single container",
+			name:      "uses default stack when stack flag not set",
 			args:      []string{"alpha"},
 			realmFlag: "earth",
 			spaceFlag: "mars",
-			wantErr:   "stack name is required",
+			cellFlag:  "jupiter",
+			controller: &fakeContainerController{
+				getContainerFn: func(ctr intmodel.Container) (container.GetContainerResult, error) {
+					if ctr.Metadata.Name != "alpha" || ctr.Spec.RealmName != "earth" || ctr.Spec.SpaceName != "mars" ||
+						ctr.Spec.StackName != "default" ||
+						ctr.Spec.CellName != "jupiter" {
+						return container.GetContainerResult{}, errors.New("unexpected args")
+					}
+					// Create doc with default stack for result
+					containerDefaultSpec := &v1beta1.ContainerSpec{
+						ID:      "alpha",
+						RealmID: "earth",
+						SpaceID: "mars",
+						StackID: "default",
+						CellID:  "jupiter",
+						Image:   "nginx:latest",
+					}
+					containerDefaultDoc := &v1beta1.ContainerDoc{
+						APIVersion: v1beta1.APIVersionV1Beta1,
+						Kind:       v1beta1.KindContainer,
+						Metadata: v1beta1.ContainerMetadata{
+							Name:   "alpha",
+							Labels: make(map[string]string),
+						},
+						Spec: *containerDefaultSpec,
+						Status: v1beta1.ContainerStatus{
+							State: v1beta1.ContainerStateReady,
+						},
+					}
+					containerInternal, _, _ := apischeme.NormalizeContainer(*containerDefaultDoc)
+					return container.GetContainerResult{
+						Container:          containerInternal,
+						CellMetadataExists: true,
+						ContainerExists:    true,
+					}, nil
+				},
+			},
+			wantPrinted: &v1beta1.ContainerDoc{
+				APIVersion: v1beta1.APIVersionV1Beta1,
+				Kind:       v1beta1.KindContainer,
+				Metadata: v1beta1.ContainerMetadata{
+					Name:   "alpha",
+					Labels: make(map[string]string),
+				},
+				Spec: v1beta1.ContainerSpec{
+					ID:      "alpha",
+					RealmID: "earth",
+					SpaceID: "mars",
+					StackID: "default",
+					CellID:  "jupiter",
+					Image:   "nginx:latest",
+				},
+				Status: v1beta1.ContainerStatus{
+					State: v1beta1.ContainerStateReady,
+				},
+			},
 		},
 		{
 			name:      "missing cell for single container",
