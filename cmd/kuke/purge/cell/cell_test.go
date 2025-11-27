@@ -30,7 +30,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -182,8 +182,8 @@ func TestNewCellCmdRunE(t *testing.T) {
 				"stack": "my-stack",
 			},
 			controller: &fakePurgeController{
-				purgeCellFn: func(doc *v1beta1.CellDoc, _ bool, _ bool) (controller.PurgeCellResult, error) {
-					if doc.Metadata.Name == "" {
+				purgeCellFn: func(cell intmodel.Cell, _ bool, _ bool) (controller.PurgeCellResult, error) {
+					if cell.Metadata.Name == "" {
 						return controller.PurgeCellResult{}, errdefs.ErrCellNameRequired
 					}
 					return controller.PurgeCellResult{}, errors.New("unexpected call")
@@ -214,11 +214,11 @@ func TestNewCellCmdRunE(t *testing.T) {
 				"stack": "my-stack",
 			},
 			controller: &fakePurgeController{
-				purgeCellFn: func(doc *v1beta1.CellDoc, _ bool, _ bool) (controller.PurgeCellResult, error) {
-					if doc.Metadata.Name != "my-cell" ||
-						doc.Spec.RealmID != "my-realm" ||
-						doc.Spec.SpaceID != "my-space" ||
-						doc.Spec.StackID != "my-stack" {
+				purgeCellFn: func(cell intmodel.Cell, _ bool, _ bool) (controller.PurgeCellResult, error) {
+					if cell.Metadata.Name != "my-cell" ||
+						cell.Spec.RealmName != "my-realm" ||
+						cell.Spec.SpaceName != "my-space" ||
+						cell.Spec.StackName != "my-stack" {
 						return controller.PurgeCellResult{}, errors.New("unexpected args")
 					}
 					return controller.PurgeCellResult{}, errors.New("cell not found")
@@ -235,22 +235,22 @@ func TestNewCellCmdRunE(t *testing.T) {
 				"stack": "my-stack",
 			},
 			controller: &fakePurgeController{
-				purgeCellFn: func(doc *v1beta1.CellDoc, _ bool, _ bool) (controller.PurgeCellResult, error) {
-					if doc.Metadata.Name != "my-cell" ||
-						doc.Spec.RealmID != "my-realm" ||
-						doc.Spec.SpaceID != "my-space" ||
-						doc.Spec.StackID != "my-stack" {
+				purgeCellFn: func(cell intmodel.Cell, _ bool, _ bool) (controller.PurgeCellResult, error) {
+					if cell.Metadata.Name != "my-cell" ||
+						cell.Spec.RealmName != "my-realm" ||
+						cell.Spec.SpaceName != "my-space" ||
+						cell.Spec.StackName != "my-stack" {
 						return controller.PurgeCellResult{}, errors.New("unexpected args")
 					}
 					return controller.PurgeCellResult{
-						CellDoc: &v1beta1.CellDoc{
-							Metadata: v1beta1.CellMetadata{
+						Cell: intmodel.Cell{
+							Metadata: intmodel.CellMetadata{
 								Name: "my-cell",
 							},
-							Spec: v1beta1.CellSpec{
-								RealmID: "my-realm",
-								SpaceID: "my-space",
-								StackID: "my-stack",
+							Spec: intmodel.CellSpec{
+								RealmName: "my-realm",
+								SpaceName: "my-space",
+								StackName: "my-stack",
 							},
 						},
 						Purged: []string{"cni-resources", "orphaned-containers"},
@@ -271,14 +271,14 @@ func TestNewCellCmdRunE(t *testing.T) {
 				"stack": "my-stack",
 			},
 			controller: &fakePurgeController{
-				purgeCellFn: func(_ *v1beta1.CellDoc, _ bool, _ bool) (controller.PurgeCellResult, error) {
+				purgeCellFn: func(_ intmodel.Cell, _ bool, _ bool) (controller.PurgeCellResult, error) {
 					return controller.PurgeCellResult{
-						CellDoc: &v1beta1.CellDoc{
-							Metadata: v1beta1.CellMetadata{
+						Cell: intmodel.Cell{
+							Metadata: intmodel.CellMetadata{
 								Name: "my-cell",
 							},
-							Spec: v1beta1.CellSpec{
-								StackID: "my-stack",
+							Spec: intmodel.CellSpec{
+								StackName: "my-stack",
 							},
 						},
 						Purged: []string{},
@@ -298,20 +298,20 @@ func TestNewCellCmdRunE(t *testing.T) {
 				"stack": "  my-stack  ",
 			},
 			controller: &fakePurgeController{
-				purgeCellFn: func(doc *v1beta1.CellDoc, _, _ bool) (controller.PurgeCellResult, error) {
-					if doc.Metadata.Name != "my-cell" ||
-						doc.Spec.RealmID != "my-realm" ||
-						doc.Spec.SpaceID != "my-space" ||
-						doc.Spec.StackID != "my-stack" {
+				purgeCellFn: func(cell intmodel.Cell, _, _ bool) (controller.PurgeCellResult, error) {
+					if cell.Metadata.Name != "my-cell" ||
+						cell.Spec.RealmName != "my-realm" ||
+						cell.Spec.SpaceName != "my-space" ||
+						cell.Spec.StackName != "my-stack" {
 						return controller.PurgeCellResult{}, errors.New("unexpected trimmed args")
 					}
 					return controller.PurgeCellResult{
-						CellDoc: &v1beta1.CellDoc{
-							Metadata: v1beta1.CellMetadata{
+						Cell: intmodel.Cell{
+							Metadata: intmodel.CellMetadata{
 								Name: "my-cell",
 							},
-							Spec: v1beta1.CellSpec{
-								StackID: "my-stack",
+							Spec: intmodel.CellSpec{
+								StackName: "my-stack",
 							},
 						},
 						Purged: []string{"cni-resources"},
@@ -331,20 +331,20 @@ func TestNewCellCmdRunE(t *testing.T) {
 				config.KUKE_PURGE_CELL_STACK.ViperKey: "viper-stack",
 			},
 			controller: &fakePurgeController{
-				purgeCellFn: func(doc *v1beta1.CellDoc, _, _ bool) (controller.PurgeCellResult, error) {
-					if doc.Metadata.Name != "my-cell" ||
-						doc.Spec.RealmID != "viper-realm" ||
-						doc.Spec.SpaceID != "viper-space" ||
-						doc.Spec.StackID != "viper-stack" {
+				purgeCellFn: func(cell intmodel.Cell, _, _ bool) (controller.PurgeCellResult, error) {
+					if cell.Metadata.Name != "my-cell" ||
+						cell.Spec.RealmName != "viper-realm" ||
+						cell.Spec.SpaceName != "viper-space" ||
+						cell.Spec.StackName != "viper-stack" {
 						return controller.PurgeCellResult{}, errors.New("unexpected args from viper")
 					}
 					return controller.PurgeCellResult{
-						CellDoc: &v1beta1.CellDoc{
-							Metadata: v1beta1.CellMetadata{
+						Cell: intmodel.Cell{
+							Metadata: intmodel.CellMetadata{
 								Name: "my-cell",
 							},
-							Spec: v1beta1.CellSpec{
-								StackID: "viper-stack",
+							Spec: intmodel.CellSpec{
+								StackName: "viper-stack",
 							},
 						},
 						Purged: []string{},
@@ -365,13 +365,13 @@ func TestNewCellCmdRunE(t *testing.T) {
 			},
 			forceFlag: true,
 			controller: &fakePurgeController{
-				purgeCellFn: func(doc *v1beta1.CellDoc, force, _ bool) (controller.PurgeCellResult, error) {
+				purgeCellFn: func(cell intmodel.Cell, force, _ bool) (controller.PurgeCellResult, error) {
 					if !force {
 						return controller.PurgeCellResult{}, errors.New("force flag not passed")
 					}
 					return controller.PurgeCellResult{
-						CellDoc: doc,
-						Purged:  []string{},
+						Cell:   cell,
+						Purged: []string{},
 					}, nil
 				},
 			},
@@ -389,13 +389,13 @@ func TestNewCellCmdRunE(t *testing.T) {
 			},
 			cascadeFlag: true,
 			controller: &fakePurgeController{
-				purgeCellFn: func(doc *v1beta1.CellDoc, _, cascade bool) (controller.PurgeCellResult, error) {
+				purgeCellFn: func(cell intmodel.Cell, _, cascade bool) (controller.PurgeCellResult, error) {
 					if !cascade {
 						return controller.PurgeCellResult{}, errors.New("cascade flag not passed")
 					}
 					return controller.PurgeCellResult{
-						CellDoc: doc,
-						Purged:  []string{},
+						Cell:   cell,
+						Purged: []string{},
 					}, nil
 				},
 			},
@@ -414,13 +414,13 @@ func TestNewCellCmdRunE(t *testing.T) {
 			forceFlag:   true,
 			cascadeFlag: true,
 			controller: &fakePurgeController{
-				purgeCellFn: func(doc *v1beta1.CellDoc, force, cascade bool) (controller.PurgeCellResult, error) {
+				purgeCellFn: func(cell intmodel.Cell, force, cascade bool) (controller.PurgeCellResult, error) {
 					if !force || !cascade {
 						return controller.PurgeCellResult{}, errors.New("flags not passed correctly")
 					}
 					return controller.PurgeCellResult{
-						CellDoc: doc,
-						Purged:  []string{"cni-resources"},
+						Cell:   cell,
+						Purged: []string{"cni-resources"},
 					}, nil
 				},
 			},
@@ -521,17 +521,17 @@ func TestNewCellCmdRunE(t *testing.T) {
 
 // fakePurgeController provides a mock implementation for testing PurgeCell.
 type fakePurgeController struct {
-	purgeCellFn func(doc *v1beta1.CellDoc, force, cascade bool) (controller.PurgeCellResult, error)
+	purgeCellFn func(cell intmodel.Cell, force, cascade bool) (controller.PurgeCellResult, error)
 }
 
 func (f *fakePurgeController) PurgeCell(
-	doc *v1beta1.CellDoc,
+	cell intmodel.Cell,
 	force, cascade bool,
 ) (controller.PurgeCellResult, error) {
 	if f.purgeCellFn == nil {
 		return controller.PurgeCellResult{}, errors.New("unexpected PurgeCell call")
 	}
-	return f.purgeCellFn(doc, force, cascade)
+	return f.purgeCellFn(cell, force, cascade)
 }
 
 func TestNewCellCmd_AutocompleteRegistration(t *testing.T) {

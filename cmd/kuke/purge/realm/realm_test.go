@@ -30,7 +30,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -92,9 +92,9 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			name: "empty realm name after trimming",
 			args: []string{"   "},
 			controller: &fakePurgeRealmController{
-				purgeRealmFn: func(doc *v1beta1.RealmDoc, _ bool, _ bool) (controller.PurgeRealmResult, error) {
+				purgeRealmFn: func(realm intmodel.Realm, _ bool, _ bool) (controller.PurgeRealmResult, error) {
 					// Should not reach here due to validation, but if it does, expect empty name
-					if doc == nil || doc.Metadata.Name == "" {
+					if realm.Metadata.Name == "" {
 						return controller.PurgeRealmResult{}, errdefs.ErrRealmNameRequired
 					}
 					return controller.PurgeRealmResult{}, errors.New("unexpected call")
@@ -115,8 +115,8 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			name: "controller PurgeRealm returns error",
 			args: []string{"my-realm"},
 			controller: &fakePurgeRealmController{
-				purgeRealmFn: func(doc *v1beta1.RealmDoc, _ bool, _ bool) (controller.PurgeRealmResult, error) {
-					if doc == nil || doc.Metadata.Name != "my-realm" {
+				purgeRealmFn: func(realm intmodel.Realm, _ bool, _ bool) (controller.PurgeRealmResult, error) {
+					if realm.Metadata.Name != "my-realm" {
 						return controller.PurgeRealmResult{}, errors.New("unexpected args")
 					}
 					return controller.PurgeRealmResult{}, errors.New("realm not found")
@@ -128,7 +128,7 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			name: "controller PurgeRealm returns realm not found error",
 			args: []string{"nonexistent-realm"},
 			controller: &fakePurgeRealmController{
-				purgeRealmFn: func(_ *v1beta1.RealmDoc, _ bool, _ bool) (controller.PurgeRealmResult, error) {
+				purgeRealmFn: func(_ intmodel.Realm, _ bool, _ bool) (controller.PurgeRealmResult, error) {
 					return controller.PurgeRealmResult{}, errors.New("realm nonexistent-realm not found")
 				},
 			},
@@ -138,13 +138,13 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			name: "successful purge with no additional resources",
 			args: []string{"my-realm"},
 			controller: &fakePurgeRealmController{
-				purgeRealmFn: func(doc *v1beta1.RealmDoc, force, cascade bool) (controller.PurgeRealmResult, error) {
-					if doc == nil || doc.Metadata.Name != "my-realm" || force != false || cascade != false {
+				purgeRealmFn: func(realm intmodel.Realm, force, cascade bool) (controller.PurgeRealmResult, error) {
+					if realm.Metadata.Name != "my-realm" || force != false || cascade != false {
 						return controller.PurgeRealmResult{}, errors.New("unexpected args")
 					}
 					return controller.PurgeRealmResult{
-						RealmDoc: &v1beta1.RealmDoc{
-							Metadata: v1beta1.RealmMetadata{
+						Realm: intmodel.Realm{
+							Metadata: intmodel.RealmMetadata{
 								Name: "my-realm",
 							},
 						},
@@ -165,13 +165,13 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			name: "successful purge with additional purged resources",
 			args: []string{"my-realm"},
 			controller: &fakePurgeRealmController{
-				purgeRealmFn: func(doc *v1beta1.RealmDoc, _ bool, _ bool) (controller.PurgeRealmResult, error) {
-					if doc == nil || doc.Metadata.Name != "my-realm" {
+				purgeRealmFn: func(realm intmodel.Realm, _ bool, _ bool) (controller.PurgeRealmResult, error) {
+					if realm.Metadata.Name != "my-realm" {
 						return controller.PurgeRealmResult{}, errors.New("unexpected args")
 					}
 					return controller.PurgeRealmResult{
-						RealmDoc: &v1beta1.RealmDoc{
-							Metadata: v1beta1.RealmMetadata{
+						Realm: intmodel.Realm{
+							Metadata: intmodel.RealmMetadata{
 								Name: "my-realm",
 							},
 						},
@@ -196,13 +196,13 @@ func TestNewRealmCmdRunE(t *testing.T) {
 				"force": "true",
 			},
 			controller: &fakePurgeRealmController{
-				purgeRealmFn: func(doc *v1beta1.RealmDoc, force, cascade bool) (controller.PurgeRealmResult, error) {
-					if doc == nil || doc.Metadata.Name != "my-realm" || force != true || cascade != false {
+				purgeRealmFn: func(realm intmodel.Realm, force, cascade bool) (controller.PurgeRealmResult, error) {
+					if realm.Metadata.Name != "my-realm" || force != true || cascade != false {
 						return controller.PurgeRealmResult{}, errors.New("unexpected args")
 					}
 					return controller.PurgeRealmResult{
-						RealmDoc: &v1beta1.RealmDoc{
-							Metadata: v1beta1.RealmMetadata{
+						Realm: intmodel.Realm{
+							Metadata: intmodel.RealmMetadata{
 								Name: "my-realm",
 							},
 						},
@@ -226,13 +226,13 @@ func TestNewRealmCmdRunE(t *testing.T) {
 				"cascade": "true",
 			},
 			controller: &fakePurgeRealmController{
-				purgeRealmFn: func(doc *v1beta1.RealmDoc, force, cascade bool) (controller.PurgeRealmResult, error) {
-					if doc == nil || doc.Metadata.Name != "my-realm" || force != false || cascade != true {
+				purgeRealmFn: func(realm intmodel.Realm, force, cascade bool) (controller.PurgeRealmResult, error) {
+					if realm.Metadata.Name != "my-realm" || force != false || cascade != true {
 						return controller.PurgeRealmResult{}, errors.New("unexpected args")
 					}
 					return controller.PurgeRealmResult{
-						RealmDoc: &v1beta1.RealmDoc{
-							Metadata: v1beta1.RealmMetadata{
+						Realm: intmodel.Realm{
+							Metadata: intmodel.RealmMetadata{
 								Name: "my-realm",
 							},
 						},
@@ -257,13 +257,13 @@ func TestNewRealmCmdRunE(t *testing.T) {
 				"cascade": "true",
 			},
 			controller: &fakePurgeRealmController{
-				purgeRealmFn: func(doc *v1beta1.RealmDoc, force, cascade bool) (controller.PurgeRealmResult, error) {
-					if doc == nil || doc.Metadata.Name != "my-realm" || force != true || cascade != true {
+				purgeRealmFn: func(realm intmodel.Realm, force, cascade bool) (controller.PurgeRealmResult, error) {
+					if realm.Metadata.Name != "my-realm" || force != true || cascade != true {
 						return controller.PurgeRealmResult{}, errors.New("unexpected args")
 					}
 					return controller.PurgeRealmResult{
-						RealmDoc: &v1beta1.RealmDoc{
-							Metadata: v1beta1.RealmMetadata{
+						Realm: intmodel.Realm{
+							Metadata: intmodel.RealmMetadata{
 								Name: "my-realm",
 							},
 						},
@@ -285,14 +285,14 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			name: "successful purge with trimmed whitespace from realm name",
 			args: []string{"  my-realm  "},
 			controller: &fakePurgeRealmController{
-				purgeRealmFn: func(doc *v1beta1.RealmDoc, _ bool, _ bool) (controller.PurgeRealmResult, error) {
+				purgeRealmFn: func(realm intmodel.Realm, _ bool, _ bool) (controller.PurgeRealmResult, error) {
 					// Verify that trimming happened
-					if doc == nil || doc.Metadata.Name != "my-realm" {
+					if realm.Metadata.Name != "my-realm" {
 						return controller.PurgeRealmResult{}, errors.New("unexpected trimmed args")
 					}
 					return controller.PurgeRealmResult{
-						RealmDoc: &v1beta1.RealmDoc{
-							Metadata: v1beta1.RealmMetadata{
+						Realm: intmodel.Realm{
+							Metadata: intmodel.RealmMetadata{
 								Name: "my-realm",
 							},
 						},
@@ -393,15 +393,15 @@ func TestNewRealmCmd_AutocompleteRegistration(t *testing.T) {
 
 // fakePurgeRealmController provides a mock implementation for testing PurgeRealm.
 type fakePurgeRealmController struct {
-	purgeRealmFn func(doc *v1beta1.RealmDoc, force, cascade bool) (controller.PurgeRealmResult, error)
+	purgeRealmFn func(realm intmodel.Realm, force, cascade bool) (controller.PurgeRealmResult, error)
 }
 
 func (f *fakePurgeRealmController) PurgeRealm(
-	doc *v1beta1.RealmDoc,
+	realm intmodel.Realm,
 	force, cascade bool,
 ) (controller.PurgeRealmResult, error) {
 	if f.purgeRealmFn == nil {
 		return controller.PurgeRealmResult{}, errors.New("unexpected PurgeRealm call")
 	}
-	return f.purgeRealmFn(doc, force, cascade)
+	return f.purgeRealmFn(realm, force, cascade)
 }

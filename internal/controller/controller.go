@@ -54,11 +54,11 @@ type Controller interface {
 	StopContainer(doc *v1beta1.ContainerDoc) (StopContainerResult, error)
 	KillCell(cell intmodel.Cell) (KillCellResult, error)
 	KillContainer(container intmodel.Container) (KillContainerResult, error)
-	PurgeRealm(doc *v1beta1.RealmDoc, force, cascade bool) (PurgeRealmResult, error)
-	PurgeSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (PurgeSpaceResult, error)
-	PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (PurgeStackResult, error)
-	PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (PurgeCellResult, error)
-	PurgeContainer(doc *v1beta1.ContainerDoc) (PurgeContainerResult, error)
+	PurgeRealm(realm intmodel.Realm, force, cascade bool) (PurgeRealmResult, error)
+	PurgeSpace(space intmodel.Space, force, cascade bool) (PurgeSpaceResult, error)
+	PurgeStack(stack intmodel.Stack, force, cascade bool) (PurgeStackResult, error)
+	PurgeCell(cell intmodel.Cell, force, cascade bool) (PurgeCellResult, error)
+	PurgeContainer(container intmodel.Container) (PurgeContainerResult, error)
 }
 
 type Exec struct {

@@ -22,15 +22,17 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/purge/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type spaceController interface {
-	PurgeSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (controller.PurgeSpaceResult, error)
+	PurgeSpace(space intmodel.Space, force, cascade bool) (controller.PurgeSpaceResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -76,20 +78,25 @@ func NewSpaceCmd() *cobra.Command {
 				},
 			}
 
-			result, err := ctrl.PurgeSpace(doc, force, cascade)
+			// Convert at boundary before calling controller
+			spaceInternal, _, err := apischeme.NormalizeSpace(*doc)
+			if err != nil {
+				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+			}
+
+			result, err := ctrl.PurgeSpace(spaceInternal, force, cascade)
 			if err != nil {
 				return err
 			}
 
-			spaceName := name
-			realmName := realm
-			if result.SpaceDoc != nil {
-				if trimmed := strings.TrimSpace(result.SpaceDoc.Metadata.Name); trimmed != "" {
-					spaceName = trimmed
-				}
-				if trimmed := strings.TrimSpace(result.SpaceDoc.Spec.RealmID); trimmed != "" {
-					realmName = trimmed
-				}
+			// Use space from result for output
+			spaceName := result.Space.Metadata.Name
+			realmName := result.Space.Spec.RealmName
+			if spaceName == "" {
+				spaceName = name
+			}
+			if realmName == "" {
+				realmName = realm
 			}
 
 			cmd.Printf("Purged space %q from realm %q\n", spaceName, realmName)
@@ -123,8 +130,8 @@ type controllerWrapper struct {
 }
 
 func (w *controllerWrapper) PurgeSpace(
-	doc *v1beta1.SpaceDoc,
+	space intmodel.Space,
 	force, cascade bool,
 ) (controller.PurgeSpaceResult, error) {
-	return w.ctrl.PurgeSpace(doc, force, cascade)
+	return w.ctrl.PurgeSpace(space, force, cascade)
 }

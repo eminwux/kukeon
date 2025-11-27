@@ -29,7 +29,7 @@ import (
 
 // PurgeRealmResult reports what was purged during realm purging.
 type PurgeRealmResult struct {
-	RealmDoc       *v1beta1.RealmDoc
+	Realm          intmodel.Realm
 	RealmDeleted   bool     // Whether realm deletion succeeded
 	PurgeSucceeded bool     // Whether comprehensive purge succeeded
 	Force          bool     // Force flag that was used
@@ -40,7 +40,7 @@ type PurgeRealmResult struct {
 
 // PurgeSpaceResult reports what was purged during space purging.
 type PurgeSpaceResult struct {
-	SpaceDoc *v1beta1.SpaceDoc
+	Space intmodel.Space
 
 	MetadataDeleted   bool
 	CgroupDeleted     bool
@@ -55,14 +55,14 @@ type PurgeSpaceResult struct {
 
 // PurgeStackResult reports what was purged during stack purging.
 type PurgeStackResult struct {
-	StackDoc *v1beta1.StackDoc
-	Deleted  []string // Resources that were deleted (standard cleanup)
-	Purged   []string // Additional resources purged (CNI, orphaned containers, etc.)
+	Stack   intmodel.Stack
+	Deleted []string // Resources that were deleted (standard cleanup)
+	Purged  []string // Additional resources purged (CNI, orphaned containers, etc.)
 }
 
 // PurgeCellResult reports what was purged during cell purging.
 type PurgeCellResult struct {
-	CellDoc           *v1beta1.CellDoc
+	Cell              intmodel.Cell
 	ContainersDeleted bool
 	CgroupDeleted     bool
 	MetadataDeleted   bool
@@ -75,7 +75,7 @@ type PurgeCellResult struct {
 
 // PurgeContainerResult reports what was purged during container purging.
 type PurgeContainerResult struct {
-	ContainerDoc       *v1beta1.ContainerDoc
+	Container          intmodel.Container
 	CellMetadataExists bool
 	ContainerExists    bool
 	Deleted            []string // Resources that were deleted (standard cleanup)
@@ -84,25 +84,20 @@ type PurgeContainerResult struct {
 
 // PurgeRealm purges a realm with comprehensive cleanup. If cascade is true, purges all spaces first.
 // If force is true, skips validation of child resources.
-func (b *Exec) PurgeRealm(doc *v1beta1.RealmDoc, force, cascade bool) (PurgeRealmResult, error) {
+func (b *Exec) PurgeRealm(realm intmodel.Realm, force, cascade bool) (PurgeRealmResult, error) {
 	var result PurgeRealmResult
 
-	if doc == nil {
-		return result, errdefs.ErrRealmNameRequired
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(realm.Metadata.Name)
 	if name == "" {
 		return result, errdefs.ErrRealmNameRequired
 	}
 
-	// Convert external doc to internal at boundary for GetRealm
+	// Build lookup realm for GetRealm
 	lookupRealm := intmodel.Realm{
 		Metadata: intmodel.RealmMetadata{
 			Name: name,
 		},
 	}
-	// Note: namespace field in doc.Spec.Namespace is used later, but GetRealm doesn't need it
 	getResult, err := b.GetRealm(lookupRealm)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrRealmNotFound) {
@@ -114,25 +109,15 @@ func (b *Exec) PurgeRealm(doc *v1beta1.RealmDoc, force, cascade bool) (PurgeReal
 		return result, fmt.Errorf("realm %q not found", name)
 	}
 
-	// Convert GetRealm result back to external for result struct (temporary until PurgeRealm is refactored)
-	realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(getResult.Realm, apischeme.VersionV1Beta1)
-	if convertErr != nil {
-		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-	}
-
-	// Initialize result with realm document and flags
-	result = PurgeRealmResult{
-		RealmDoc: &realmDoc,
-		Force:    force,
-		Cascade:  cascade,
-		Deleted:  []string{},
-		Purged:   []string{},
-	}
-
 	internalRealm := getResult.Realm
-	realmVersion := apischeme.VersionV1Beta1 // Default version
-	if convertErr != nil {
-		return result, fmt.Errorf("failed to convert realm %q: %w", name, convertErr)
+
+	// Initialize result with realm and flags
+	result = PurgeRealmResult{
+		Realm:   internalRealm,
+		Force:   force,
+		Cascade: cascade,
+		Deleted: []string{},
+		Purged:  []string{},
 	}
 
 	// If cascade, purge all spaces first
@@ -143,15 +128,12 @@ func (b *Exec) PurgeRealm(doc *v1beta1.RealmDoc, force, cascade bool) (PurgeReal
 			return result, fmt.Errorf("failed to list spaces: %w", err)
 		}
 		for _, space := range spaces {
-			spaceDoc := &v1beta1.SpaceDoc{
-				Metadata: v1beta1.SpaceMetadata{
-					Name: space.Metadata.Name,
-				},
-				Spec: v1beta1.SpaceSpec{
-					RealmID: name,
-				},
+			// Convert at boundary for PurgeSpace (space is external, convert to internal)
+			spaceInternal, convertErr := apischeme.ConvertSpaceDocToInternal(*space)
+			if convertErr != nil {
+				return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
 			}
-			_, err = b.PurgeSpace(spaceDoc, force, cascade)
+			_, err = b.PurgeSpace(spaceInternal, force, cascade)
 			if err != nil {
 				return result, fmt.Errorf("failed to purge space %q: %w", space.Metadata.Name, err)
 			}
@@ -178,12 +160,8 @@ func (b *Exec) PurgeRealm(doc *v1beta1.RealmDoc, force, cascade bool) (PurgeReal
 	} else {
 		result.Deleted = append(result.Deleted, deleteResult.Deleted...)
 		result.RealmDeleted = true
-		realmDocExternal, buildErr := apischeme.BuildRealmExternalFromInternal(deleteResult.Realm, realmVersion)
-		if buildErr != nil {
-			result.Purged = append(result.Purged, fmt.Sprintf("delete-conversion-error:%v", buildErr))
-		} else {
-			result.RealmDoc = &realmDocExternal
-		}
+		// Update result realm with deleted realm
+		result.Realm = deleteResult.Realm
 	}
 
 	// Perform comprehensive purge
@@ -200,26 +178,20 @@ func (b *Exec) PurgeRealm(doc *v1beta1.RealmDoc, force, cascade bool) (PurgeReal
 
 // PurgeSpace purges a space with comprehensive cleanup. If cascade is true, purges all stacks first.
 // If force is true, skips validation of child resources.
-func (b *Exec) PurgeSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (PurgeSpaceResult, error) {
+func (b *Exec) PurgeSpace(space intmodel.Space, force, cascade bool) (PurgeSpaceResult, error) {
 	var result PurgeSpaceResult
 
-	if doc == nil {
-		return result, errdefs.ErrSpaceNameRequired
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(space.Metadata.Name)
 	if name == "" {
 		return result, errdefs.ErrSpaceNameRequired
 	}
-	doc.Metadata.Name = name
 
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(space.Spec.RealmName)
 	if realmName == "" {
 		return result, errdefs.ErrRealmNameRequired
 	}
-	doc.Spec.RealmID = realmName
 
-	// Convert external doc to internal at boundary for GetSpace
+	// Build lookup space for GetSpace
 	lookupSpace := intmodel.Space{
 		Metadata: intmodel.SpaceMetadata{
 			Name: name,
@@ -239,22 +211,16 @@ func (b *Exec) PurgeSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (PurgeSpac
 		return result, fmt.Errorf("space %q not found in realm %q", name, realmName)
 	}
 
-	// Convert GetSpace result back to external for result struct (temporary until PurgeSpace is refactored)
-	spaceDoc, convertErr := apischeme.BuildSpaceExternalFromInternal(getResult.Space, apischeme.VersionV1Beta1)
-	if convertErr != nil {
-		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-	}
-
-	result = PurgeSpaceResult{
-		SpaceDoc: &spaceDoc,
-		Force:    force,
-		Cascade:  cascade,
-		Deleted:  []string{},
-		Purged:   []string{},
-	}
-
 	internalSpace := getResult.Space
-	spaceVersion := apischeme.VersionV1Beta1 // Default version
+
+	// Initialize result with space and flags
+	result = PurgeSpaceResult{
+		Space:   internalSpace,
+		Force:   force,
+		Cascade: cascade,
+		Deleted: []string{},
+		Purged:  []string{},
+	}
 
 	// If cascade, purge all stacks first (recursively cascades to cells)
 	if cascade {
@@ -264,16 +230,12 @@ func (b *Exec) PurgeSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (PurgeSpac
 			return result, fmt.Errorf("failed to list stacks: %w", err)
 		}
 		for _, stack := range stacks {
-			stackDoc := &v1beta1.StackDoc{
-				Metadata: v1beta1.StackMetadata{
-					Name: stack.Metadata.Name,
-				},
-				Spec: v1beta1.StackSpec{
-					RealmID: realmName,
-					SpaceID: name,
-				},
+			// Convert at boundary for PurgeStack (stack is external, convert to internal)
+			stackInternal, convertErr := apischeme.ConvertStackDocToInternal(*stack)
+			if convertErr != nil {
+				return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
 			}
-			_, err = b.PurgeStack(stackDoc, force, cascade)
+			_, err = b.PurgeStack(stackInternal, force, cascade)
 			if err != nil {
 				return result, fmt.Errorf("failed to purge stack %q: %w", stack.Metadata.Name, err)
 			}
@@ -300,12 +262,8 @@ func (b *Exec) PurgeSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (PurgeSpac
 		result.MetadataDeleted = deleteResult.MetadataDeleted
 		result.CgroupDeleted = deleteResult.CgroupDeleted
 		result.CNINetworkDeleted = deleteResult.CNINetworkDeleted
-		spaceDocExternal, buildErr := apischeme.BuildSpaceExternalFromInternal(deleteResult.Space, spaceVersion)
-		if buildErr != nil {
-			result.Purged = append(result.Purged, fmt.Sprintf("delete-conversion-error:%v", buildErr))
-		} else {
-			result.SpaceDoc = &spaceDocExternal
-		}
+		// Update result space with deleted space
+		result.Space = deleteResult.Space
 	}
 
 	// Perform comprehensive purge
@@ -322,32 +280,25 @@ func (b *Exec) PurgeSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (PurgeSpac
 
 // PurgeStack purges a stack with comprehensive cleanup. If cascade is true, purges all cells first.
 // If force is true, skips validation of child resources.
-func (b *Exec) PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (PurgeStackResult, error) {
+func (b *Exec) PurgeStack(stack intmodel.Stack, force, cascade bool) (PurgeStackResult, error) {
 	var result PurgeStackResult
 
-	if doc == nil {
-		return result, errdefs.ErrStackNameRequired
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(stack.Metadata.Name)
 	if name == "" {
 		return result, errdefs.ErrStackNameRequired
 	}
-	doc.Metadata.Name = name
 
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(stack.Spec.RealmName)
 	if realmName == "" {
 		return result, errdefs.ErrRealmNameRequired
 	}
-	doc.Spec.RealmID = realmName
 
-	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	spaceName := strings.TrimSpace(stack.Spec.SpaceName)
 	if spaceName == "" {
 		return result, errdefs.ErrSpaceNameRequired
 	}
-	doc.Spec.SpaceID = spaceName
 
-	// Convert external doc to internal at boundary for GetStack
+	// Build lookup stack for GetStack
 	lookupStack := intmodel.Stack{
 		Metadata: intmodel.StackMetadata{
 			Name: name,
@@ -365,20 +316,14 @@ func (b *Exec) PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (PurgeStac
 		return result, fmt.Errorf("stack %q not found in realm %q, space %q", name, realmName, spaceName)
 	}
 
-	// Convert GetStack result back to external for result struct (temporary until PurgeStack is refactored)
-	stackDoc, convertErr := apischeme.BuildStackExternalFromInternal(getResult.Stack, apischeme.VersionV1Beta1)
-	if convertErr != nil {
-		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-	}
-
-	result = PurgeStackResult{
-		StackDoc: &stackDoc,
-		Deleted:  []string{},
-		Purged:   []string{},
-	}
-
 	internalStack := getResult.Stack
-	stackVersion := apischeme.VersionV1Beta1 // Default version
+
+	// Initialize result with stack and flags
+	result = PurgeStackResult{
+		Stack:   internalStack,
+		Deleted: []string{},
+		Purged:  []string{},
+	}
 
 	// If cascade, purge all cells first
 	if cascade {
@@ -388,7 +333,12 @@ func (b *Exec) PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (PurgeStac
 			return result, fmt.Errorf("failed to list cells: %w", err)
 		}
 		for _, cell := range cells {
-			_, err = b.PurgeCell(cell, force, false)
+			// Convert at boundary for PurgeCell (cell is external, convert to internal)
+			cellInternal, convertErr := apischeme.ConvertCellDocToInternal(*cell)
+			if convertErr != nil {
+				return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+			}
+			_, err = b.PurgeCell(cellInternal, force, false)
 			if err != nil {
 				return result, fmt.Errorf("failed to purge cell %q: %w", cell.Metadata.Name, err)
 			}
@@ -412,12 +362,8 @@ func (b *Exec) PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (PurgeStac
 		result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
 	} else {
 		result.Deleted = append(result.Deleted, deleteResult.Deleted...)
-		stackDocExternal, buildErr := apischeme.BuildStackExternalFromInternal(deleteResult.Stack, stackVersion)
-		if buildErr != nil {
-			result.Purged = append(result.Purged, fmt.Sprintf("delete-conversion-error:%v", buildErr))
-		} else {
-			result.StackDoc = &stackDocExternal
-		}
+		// Update result stack with deleted stack
+		result.Stack = deleteResult.Stack
 	}
 
 	// Perform comprehensive purge
@@ -432,38 +378,30 @@ func (b *Exec) PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (PurgeStac
 
 // PurgeCell purges a cell with comprehensive cleanup. Always purges all containers first.
 // If force is true, skips validation (currently unused but recorded for auditing).
-func (b *Exec) PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (PurgeCellResult, error) {
+func (b *Exec) PurgeCell(cell intmodel.Cell, force, cascade bool) (PurgeCellResult, error) {
 	var result PurgeCellResult
 
-	if doc == nil {
-		return result, errdefs.ErrCellNameRequired
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(cell.Metadata.Name)
 	if name == "" {
 		return result, errdefs.ErrCellNameRequired
 	}
-	doc.Metadata.Name = name
 
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
 	if realmName == "" {
 		return result, errdefs.ErrRealmNameRequired
 	}
-	doc.Spec.RealmID = realmName
 
-	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
 	if spaceName == "" {
 		return result, errdefs.ErrSpaceNameRequired
 	}
-	doc.Spec.SpaceID = spaceName
 
-	stackName := strings.TrimSpace(doc.Spec.StackID)
+	stackName := strings.TrimSpace(cell.Spec.StackName)
 	if stackName == "" {
 		return result, errdefs.ErrStackNameRequired
 	}
-	doc.Spec.StackID = stackName
 
-	// Convert external doc to internal at boundary for GetCell
+	// Build lookup cell for GetCell
 	lookupCell := intmodel.Cell{
 		Metadata: intmodel.CellMetadata{
 			Name: name,
@@ -488,22 +426,16 @@ func (b *Exec) PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (PurgeCellRe
 		return result, err
 	}
 
-	// Convert GetCell result back to external for result struct (temporary until PurgeCell is refactored)
-	cellDoc, convertErr := apischeme.BuildCellExternalFromInternal(getResult.Cell, apischeme.VersionV1Beta1)
-	if convertErr != nil {
-		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-	}
+	internalCell := getResult.Cell
 
+	// Initialize result with cell and flags
 	result = PurgeCellResult{
-		CellDoc: &cellDoc,
+		Cell:    internalCell,
 		Force:   force,
 		Cascade: cascade,
 		Deleted: []string{},
 		Purged:  []string{},
 	}
-
-	internalCell := getResult.Cell
-	cellVersion := apischeme.VersionV1Beta1 // Default version
 
 	// Perform standard delete first
 	deleteResult, err := b.DeleteCell(internalCell)
@@ -523,12 +455,8 @@ func (b *Exec) PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (PurgeCellRe
 		if deleteResult.MetadataDeleted {
 			result.Deleted = append(result.Deleted, "metadata")
 		}
-		cellDocExternal, buildErr := apischeme.BuildCellExternalFromInternal(deleteResult.Cell, cellVersion)
-		if buildErr != nil {
-			result.Purged = append(result.Purged, fmt.Sprintf("delete-conversion-error:%v", buildErr))
-		} else {
-			result.CellDoc = &cellDocExternal
-		}
+		// Update result cell with deleted cell
+		result.Cell = deleteResult.Cell
 	}
 
 	// Perform comprehensive purge
@@ -544,23 +472,43 @@ func (b *Exec) PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (PurgeCellRe
 }
 
 // PurgeContainer purges a single container with comprehensive cleanup. Cascade flag is not applicable.
-func (b *Exec) PurgeContainer(doc *v1beta1.ContainerDoc) (PurgeContainerResult, error) {
+func (b *Exec) PurgeContainer(container intmodel.Container) (PurgeContainerResult, error) {
 	var result PurgeContainerResult
 
-	sanitizedDoc, name, realmName, spaceName, stackName, cellName, err := normalizeContainerDoc(doc)
-	if err != nil {
-		return result, err
+	name := strings.TrimSpace(container.Metadata.Name)
+	if name == "" {
+		name = strings.TrimSpace(container.Spec.ID)
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return result, errdefs.ErrContainerNameRequired
 	}
 
+	realmName := strings.TrimSpace(container.Spec.RealmName)
+	if realmName == "" {
+		return result, errdefs.ErrRealmNameRequired
+	}
+
+	spaceName := strings.TrimSpace(container.Spec.SpaceName)
+	if spaceName == "" {
+		return result, errdefs.ErrSpaceNameRequired
+	}
+
+	stackName := strings.TrimSpace(container.Spec.StackName)
+	if stackName == "" {
+		return result, errdefs.ErrStackNameRequired
+	}
+
+	cellName := strings.TrimSpace(container.Spec.CellName)
+	if cellName == "" {
+		return result, errdefs.ErrCellNameRequired
+	}
+
+	// Initialize result
 	result = PurgeContainerResult{
-		ContainerDoc: sanitizedDoc,
-		Deleted:      []string{},
-		Purged:       []string{},
-	}
-
-	containerInternal, containerVersion, convertErr := apischeme.NormalizeContainer(*sanitizedDoc)
-	if convertErr != nil {
-		return result, fmt.Errorf("failed to convert container %q: %w", name, convertErr)
+		Container: container,
+		Deleted:   []string{},
+		Purged:    []string{},
 	}
 
 	// Get cell to find container metadata
@@ -593,41 +541,39 @@ func (b *Exec) PurgeContainer(doc *v1beta1.ContainerDoc) (PurgeContainerResult, 
 		return result, fmt.Errorf("cell %q not found", cellName)
 	}
 
-	// Convert GetCell result back to external for container spec access (temporary until PurgeContainer is refactored)
-	cellDoc, convertErr := apischeme.BuildCellExternalFromInternal(getResult.Cell, apischeme.VersionV1Beta1)
-	if convertErr != nil {
-		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-	}
+	internalCell := getResult.Cell
 
 	// Check if container exists in cell metadata by name (ID now stores just the container name)
-	var foundContainer *v1beta1.ContainerSpec
-	for i := range cellDoc.Spec.Containers {
-		if cellDoc.Spec.Containers[i].ID == name {
-			foundContainer = &cellDoc.Spec.Containers[i]
-			break
+	var foundContainerSpec *intmodel.ContainerSpec
+
+	// Check root container first
+	if internalCell.Spec.RootContainer != nil && internalCell.Spec.RootContainer.ID == name {
+		foundContainerSpec = internalCell.Spec.RootContainer
+		result.ContainerExists = true
+	} else {
+		// Check regular containers
+		for i := range internalCell.Spec.Containers {
+			if internalCell.Spec.Containers[i].ID == name {
+				foundContainerSpec = &internalCell.Spec.Containers[i]
+				result.ContainerExists = true
+				break
+			}
 		}
 	}
 
 	// Perform standard delete if container is in metadata
-	if foundContainer != nil {
-		result.ContainerExists = true
+	if foundContainerSpec != nil {
 		var deleteResult DeleteContainerResult
-		deleteResult, err = b.DeleteContainer(containerInternal)
+		deleteResult, err = b.DeleteContainer(container)
 		if err != nil {
 			result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
 		} else {
 			result.Deleted = append(result.Deleted, deleteResult.Deleted...)
-			containerDocExternal, buildErr := apischeme.BuildContainerExternalFromInternal(deleteResult.Container, containerVersion)
-			if buildErr != nil {
-				result.Purged = append(result.Purged, fmt.Sprintf("delete-conversion-error:%v", buildErr))
-			} else {
-				result.ContainerDoc = &containerDocExternal
-			}
 			result.CellMetadataExists = deleteResult.CellMetadataExists
 			result.ContainerExists = deleteResult.ContainerExists
+			// Update result container with deleted container
+			result.Container = deleteResult.Container
 		}
-	} else {
-		result.ContainerExists = false
 	}
 
 	// Get realm to pass to runner.PurgeContainer
@@ -654,60 +600,4 @@ func (b *Exec) PurgeContainer(doc *v1beta1.ContainerDoc) (PurgeContainerResult, 
 	}
 
 	return result, nil
-}
-
-func normalizeContainerDoc(
-	doc *v1beta1.ContainerDoc,
-) (*v1beta1.ContainerDoc, string, string, string, string, string, error) {
-	if doc == nil {
-		return nil, "", "", "", "", "", errdefs.ErrContainerNameRequired
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
-	if name == "" {
-		return nil, "", "", "", "", "", errdefs.ErrContainerNameRequired
-	}
-
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
-	if realmName == "" {
-		return nil, "", "", "", "", "", errdefs.ErrRealmNameRequired
-	}
-
-	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
-	if spaceName == "" {
-		return nil, "", "", "", "", "", errdefs.ErrSpaceNameRequired
-	}
-
-	stackName := strings.TrimSpace(doc.Spec.StackID)
-	if stackName == "" {
-		return nil, "", "", "", "", "", errdefs.ErrStackNameRequired
-	}
-
-	cellName := strings.TrimSpace(doc.Spec.CellID)
-	if cellName == "" {
-		return nil, "", "", "", "", "", errdefs.ErrCellNameRequired
-	}
-
-	labels := make(map[string]string, len(doc.Metadata.Labels))
-	for k, v := range doc.Metadata.Labels {
-		labels[k] = v
-	}
-
-	sanitized := &v1beta1.ContainerDoc{
-		APIVersion: v1beta1.APIVersionV1Beta1,
-		Kind:       v1beta1.KindContainer,
-		Metadata: v1beta1.ContainerMetadata{
-			Name:   name,
-			Labels: labels,
-		},
-		Spec: v1beta1.ContainerSpec{
-			ID:      name,
-			RealmID: realmName,
-			SpaceID: spaceName,
-			StackID: stackName,
-			CellID:  cellName,
-		},
-	}
-
-	return sanitized, name, realmName, spaceName, stackName, cellName, nil
 }

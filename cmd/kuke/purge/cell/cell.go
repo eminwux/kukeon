@@ -22,15 +22,17 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/purge/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type cellController interface {
-	PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (controller.PurgeCellResult, error)
+	PurgeCell(cell intmodel.Cell, force, cascade bool) (controller.PurgeCellResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -86,18 +88,25 @@ func NewCellCmd() *cobra.Command {
 				},
 			}
 
-			result, err := ctrl.PurgeCell(doc, force, cascade)
+			// Convert at boundary before calling controller
+			cellInternal, _, err := apischeme.NormalizeCell(*doc)
+			if err != nil {
+				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+			}
+
+			result, err := ctrl.PurgeCell(cellInternal, force, cascade)
 			if err != nil {
 				return err
 			}
 
-			cellName := name
-			stackName := stack
-			if result.CellDoc != nil {
-				cellName = result.CellDoc.Metadata.Name
-				if result.CellDoc.Spec.StackID != "" {
-					stackName = result.CellDoc.Spec.StackID
-				}
+			// Use cell from result for output
+			cellName := result.Cell.Metadata.Name
+			stackName := result.Cell.Spec.StackName
+			if cellName == "" {
+				cellName = name
+			}
+			if stackName == "" {
+				stackName = stack
 			}
 
 			cmd.Printf("Purged cell %q from stack %q\n", cellName, stackName)
@@ -132,6 +141,6 @@ type controllerWrapper struct {
 	ctrl *controller.Exec
 }
 
-func (w *controllerWrapper) PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (controller.PurgeCellResult, error) {
-	return w.ctrl.PurgeCell(doc, force, cascade)
+func (w *controllerWrapper) PurgeCell(cell intmodel.Cell, force, cascade bool) (controller.PurgeCellResult, error) {
+	return w.ctrl.PurgeCell(cell, force, cascade)
 }

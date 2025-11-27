@@ -296,9 +296,19 @@ func TestNewContainerCmdRunE(t *testing.T) {
 					strings.TrimSpace(gotContainer.Spec.SpaceName) != tt.wantDocFields.space ||
 					strings.TrimSpace(gotContainer.Spec.StackName) != tt.wantDocFields.stack ||
 					strings.TrimSpace(gotContainer.Spec.CellName) != tt.wantDocFields.cell {
-					t.Errorf("KillContainer called with name=%q realm=%q space=%q stack=%q cell=%q, want name=%q realm=%q space=%q stack=%q cell=%q",
-						gotName, gotContainer.Spec.RealmName, gotContainer.Spec.SpaceName, gotContainer.Spec.StackName, gotContainer.Spec.CellName,
-						tt.wantDocFields.name, tt.wantDocFields.realm, tt.wantDocFields.space, tt.wantDocFields.stack, tt.wantDocFields.cell)
+					t.Errorf(
+						"KillContainer called with name=%q realm=%q space=%q stack=%q cell=%q, want name=%q realm=%q space=%q stack=%q cell=%q",
+						gotName,
+						gotContainer.Spec.RealmName,
+						gotContainer.Spec.SpaceName,
+						gotContainer.Spec.StackName,
+						gotContainer.Spec.CellName,
+						tt.wantDocFields.name,
+						tt.wantDocFields.realm,
+						tt.wantDocFields.space,
+						tt.wantDocFields.stack,
+						tt.wantDocFields.cell,
+					)
 				}
 			}
 		})

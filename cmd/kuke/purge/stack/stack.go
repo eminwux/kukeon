@@ -23,15 +23,17 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/purge/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type stackController interface {
-	PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (controller.PurgeStackResult, error)
+	PurgeStack(stack intmodel.Stack, force, cascade bool) (controller.PurgeStackResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -82,20 +84,25 @@ func NewStackCmd() *cobra.Command {
 				},
 			}
 
-			result, err := ctrl.PurgeStack(doc, force, cascade)
+			// Convert at boundary before calling controller
+			stackInternal, _, err := apischeme.NormalizeStack(*doc)
+			if err != nil {
+				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+			}
+
+			result, err := ctrl.PurgeStack(stackInternal, force, cascade)
 			if err != nil {
 				return err
 			}
 
-			stackName := name
-			spaceName := space
-			if result.StackDoc != nil {
-				if trimmed := strings.TrimSpace(result.StackDoc.Metadata.Name); trimmed != "" {
-					stackName = trimmed
-				}
-				if trimmed := strings.TrimSpace(result.StackDoc.Spec.SpaceID); trimmed != "" {
-					spaceName = trimmed
-				}
+			// Use stack from result for output
+			stackName := result.Stack.Metadata.Name
+			spaceName := result.Stack.Spec.SpaceName
+			if stackName == "" {
+				stackName = name
+			}
+			if spaceName == "" {
+				spaceName = space
 			}
 
 			cmd.Printf("Purged stack %q from space %q\n", stackName, spaceName)
@@ -125,16 +132,13 @@ type controllerWrapper struct {
 }
 
 func (w *controllerWrapper) PurgeStack(
-	doc *v1beta1.StackDoc,
+	stack intmodel.Stack,
 	force, cascade bool,
 ) (controller.PurgeStackResult, error) {
 	var zero controller.PurgeStackResult
 	if w == nil || w.ctrl == nil {
 		return zero, errors.New("controller not initialized")
 	}
-	if doc == nil {
-		return zero, errdefs.ErrStackNameRequired
-	}
 
-	return w.ctrl.PurgeStack(doc, force, cascade)
+	return w.ctrl.PurgeStack(stack, force, cascade)
 }
