@@ -48,10 +48,10 @@ type Controller interface {
 	ListCells(realmName, spaceName, stackName string) ([]*v1beta1.CellDoc, error)
 	GetContainer(container intmodel.Container) (GetContainerResult, error)
 	ListContainers(realmName, spaceName, stackName, cellName string) ([]*v1beta1.ContainerSpec, error)
-	StartCell(doc *v1beta1.CellDoc) (StartCellResult, error)
-	StartContainer(doc *v1beta1.ContainerDoc) (StartContainerResult, error)
-	StopCell(doc *v1beta1.CellDoc) (StopCellResult, error)
-	StopContainer(doc *v1beta1.ContainerDoc) (StopContainerResult, error)
+	StartCell(cell intmodel.Cell) (StartCellResult, error)
+	StartContainer(container intmodel.Container) (StartContainerResult, error)
+	StopCell(cell intmodel.Cell) (StopCellResult, error)
+	StopContainer(container intmodel.Container) (StopContainerResult, error)
 	KillCell(cell intmodel.Cell) (KillCellResult, error)
 	KillContainer(container intmodel.Container) (KillContainerResult, error)
 	PurgeRealm(realm intmodel.Realm, force, cascade bool) (PurgeRealmResult, error)
@@ -137,5 +137,3 @@ func (b *Exec) Bootstrap() (BootstrapReport, error) {
 
 	return report, nil
 }
-
-// moved to bootstrap.go

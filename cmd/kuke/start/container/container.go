@@ -22,8 +22,10 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/start/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -31,12 +33,12 @@ import (
 
 // StartContainerResult exposes the started container doc plus controller booleans.
 type StartContainerResult struct {
-	ContainerDoc *v1beta1.ContainerDoc
-	Started      bool
+	Container intmodel.Container
+	Started   bool
 }
 
 type containerController interface {
-	StartContainer(doc *v1beta1.ContainerDoc) (StartContainerResult, error)
+	StartContainer(container intmodel.Container) (controller.StartContainerResult, error)
 }
 
 // MockControllerKey is used to inject mock controllers in tests via context.
@@ -84,20 +86,34 @@ func NewContainerCmd() *cobra.Command {
 
 			containerDoc := newContainerDoc(name, realm, space, stack, cell)
 
-			result, err := ctrl.StartContainer(containerDoc)
+			// Convert at boundary before calling controller
+			containerInternal, _, err := apischeme.NormalizeContainer(*containerDoc)
+			if err != nil {
+				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+			}
+
+			result, err := ctrl.StartContainer(containerInternal)
 			if err != nil {
 				return err
 			}
 
-			doc := result.ContainerDoc
-			if doc == nil {
-				doc = containerDoc
+			// Use container from result for output
+			containerName := result.Container.Metadata.Name
+			if containerName == "" {
+				containerName = result.Container.Spec.ID
+			}
+			if containerName == "" {
+				containerName = name
+			}
+			cellName := result.Container.Spec.CellName
+			if cellName == "" {
+				cellName = cell
 			}
 
 			cmd.Printf(
 				"Started container %q from cell %q\n",
-				strings.TrimSpace(doc.Metadata.Name),
-				strings.TrimSpace(doc.Spec.CellID),
+				containerName,
+				cellName,
 			)
 			return nil
 		},
@@ -147,31 +163,6 @@ type controllerWrapper struct {
 	ctrl *controller.Exec
 }
 
-func (w *controllerWrapper) StartContainer(doc *v1beta1.ContainerDoc) (StartContainerResult, error) {
-	if doc == nil {
-		return StartContainerResult{}, errdefs.ErrContainerNameRequired
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
-	realm := strings.TrimSpace(doc.Spec.RealmID)
-	space := strings.TrimSpace(doc.Spec.SpaceID)
-	stack := strings.TrimSpace(doc.Spec.StackID)
-	cell := strings.TrimSpace(doc.Spec.CellID)
-
-	sanitizedDoc := newContainerDoc(name, realm, space, stack, cell)
-
-	res, err := w.ctrl.StartContainer(sanitizedDoc)
-	if err != nil {
-		return StartContainerResult{}, err
-	}
-
-	resultDoc := sanitizedDoc
-	if res.ContainerDoc != nil {
-		resultDoc = res.ContainerDoc
-	}
-
-	return StartContainerResult{
-		ContainerDoc: resultDoc,
-		Started:      res.Started,
-	}, nil
+func (w *controllerWrapper) StartContainer(container intmodel.Container) (controller.StartContainerResult, error) {
+	return w.ctrl.StartContainer(container)
 }

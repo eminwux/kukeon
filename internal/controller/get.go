@@ -694,3 +694,58 @@ func (b *Exec) listStackDirs(realmName, spaceName, stackName string) ([]string, 
 	}
 	return dirs, nil
 }
+
+// validateAndGetCell validates cell input parameters and retrieves the cell.
+// It performs validation of name, realmName, spaceName, and stackName,
+// builds a lookup cell, calls GetCell, and handles errors appropriately.
+func (b *Exec) validateAndGetCell(cell intmodel.Cell) (intmodel.Cell, error) {
+	name := strings.TrimSpace(cell.Metadata.Name)
+	if name == "" {
+		return intmodel.Cell{}, errdefs.ErrCellNameRequired
+	}
+
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
+	if realmName == "" {
+		return intmodel.Cell{}, errdefs.ErrRealmNameRequired
+	}
+
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
+	if spaceName == "" {
+		return intmodel.Cell{}, errdefs.ErrSpaceNameRequired
+	}
+
+	stackName := strings.TrimSpace(cell.Spec.StackName)
+	if stackName == "" {
+		return intmodel.Cell{}, errdefs.ErrStackNameRequired
+	}
+
+	// Build lookup cell for GetCell
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: name,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
+		},
+	}
+	getResult, err := b.GetCell(lookupCell)
+	if err != nil {
+		if errors.Is(err, errdefs.ErrCellNotFound) {
+			return intmodel.Cell{}, fmt.Errorf(
+				"cell %q not found in realm %q, space %q, stack %q",
+				name,
+				realmName,
+				spaceName,
+				stackName,
+			)
+		}
+		return intmodel.Cell{}, err
+	}
+	if !getResult.MetadataExists {
+		return intmodel.Cell{}, fmt.Errorf("cell %q not found", name)
+	}
+
+	return getResult.Cell, nil
+}

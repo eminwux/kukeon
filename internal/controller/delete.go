@@ -346,62 +346,16 @@ func (b *Exec) DeleteStack(stack intmodel.Stack, force, cascade bool) (DeleteSta
 func (b *Exec) DeleteCell(cell intmodel.Cell) (DeleteCellResult, error) {
 	var res DeleteCellResult
 
-	name := strings.TrimSpace(cell.Metadata.Name)
-	if name == "" {
-		return res, errdefs.ErrCellNameRequired
-	}
-
-	realmName := strings.TrimSpace(cell.Spec.RealmName)
-	if realmName == "" {
-		return res, errdefs.ErrRealmNameRequired
-	}
-
-	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
-	if spaceName == "" {
-		return res, errdefs.ErrSpaceNameRequired
-	}
-
-	stackName := strings.TrimSpace(cell.Spec.StackName)
-	if stackName == "" {
-		return res, errdefs.ErrStackNameRequired
-	}
-
-	// Build minimal lookup doc for GetCell (still uses external types)
-	// Build lookup cell for GetCell
-	lookupCell := intmodel.Cell{
-		Metadata: intmodel.CellMetadata{
-			Name: name,
-		},
-		Spec: intmodel.CellSpec{
-			RealmName: realmName,
-			SpaceName: spaceName,
-			StackName: stackName,
-		},
-	}
-
-	getResult, err := b.GetCell(lookupCell)
+	internalCell, err := b.validateAndGetCell(cell)
 	if err != nil {
-		if errors.Is(err, errdefs.ErrCellNotFound) {
-			return res, fmt.Errorf(
-				"cell %q not found in realm %q, space %q, stack %q",
-				name,
-				realmName,
-				spaceName,
-				stackName,
-			)
-		}
 		return res, err
-	}
-	if !getResult.MetadataExists {
-		return res, fmt.Errorf("cell %q not found", name)
 	}
 
 	res = DeleteCellResult{
-		Cell: getResult.Cell,
+		Cell: internalCell,
 	}
 
 	// Always delete all containers in cell first
-	internalCell := getResult.Cell
 	if len(internalCell.Spec.Containers) > 0 {
 		res.ContainersDeleted = true
 	}
