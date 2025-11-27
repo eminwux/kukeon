@@ -22,15 +22,17 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type StackController interface {
-	GetStack(doc *v1beta1.StackDoc) (controller.GetStackResult, error)
+	GetStack(stack intmodel.Stack) (controller.GetStackResult, error)
 	ListStacks(realmName, spaceName string) ([]*v1beta1.StackDoc, error)
 }
 
@@ -102,7 +104,15 @@ func NewStackCmd() *cobra.Command {
 					},
 				}
 
-				result, err := ctrl.GetStack(doc)
+				// Convert at boundary before calling controller
+				var stackInternal intmodel.Stack
+				stackInternal, _, err = apischeme.NormalizeStack(*doc)
+				if err != nil {
+					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				}
+
+				var result controller.GetStackResult
+				result, err = ctrl.GetStack(stackInternal)
 				if err != nil {
 					return err
 				}
@@ -110,7 +120,14 @@ func NewStackCmd() *cobra.Command {
 					return fmt.Errorf("stack %q not found in realm %q, space %q", name, realm, space)
 				}
 
-				return printStack(cmd, result.StackDoc, outputFormat)
+				// Convert result back to external for printing
+				var stackDoc v1beta1.StackDoc
+				stackDoc, err = apischeme.BuildStackExternalFromInternal(result.Stack, apischeme.VersionV1Beta1)
+				if err != nil {
+					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				}
+
+				return printStack(cmd, &stackDoc, outputFormat)
 			}
 
 			// List stacks (optionally filtered by realm and/or space)
@@ -202,8 +219,8 @@ type controllerWrapper struct {
 	ctrl *controller.Exec
 }
 
-func (w *controllerWrapper) GetStack(doc *v1beta1.StackDoc) (controller.GetStackResult, error) {
-	return w.ctrl.GetStack(doc)
+func (w *controllerWrapper) GetStack(stack intmodel.Stack) (controller.GetStackResult, error) {
+	return w.ctrl.GetStack(stack)
 }
 
 func (w *controllerWrapper) ListStacks(realmName, spaceName string) ([]*v1beta1.StackDoc, error) {

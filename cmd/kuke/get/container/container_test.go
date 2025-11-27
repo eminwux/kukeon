@@ -29,7 +29,9 @@ import (
 	container "github.com/eminwux/kukeon/cmd/kuke/get/container"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -440,14 +442,16 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			stackFlag: "venus",
 			cellFlag:  "jupiter",
 			controller: &fakeContainerController{
-				getContainerFn: func(doc *v1beta1.ContainerDoc) (container.GetContainerResult, error) {
-					if doc.Metadata.Name != "alpha" || doc.Spec.RealmID != "earth" || doc.Spec.SpaceID != "mars" ||
-						doc.Spec.StackID != "venus" ||
-						doc.Spec.CellID != "jupiter" {
+				getContainerFn: func(ctr intmodel.Container) (container.GetContainerResult, error) {
+					if ctr.Metadata.Name != "alpha" || ctr.Spec.RealmName != "earth" || ctr.Spec.SpaceName != "mars" ||
+						ctr.Spec.StackName != "venus" ||
+						ctr.Spec.CellName != "jupiter" {
 						return container.GetContainerResult{}, errors.New("unexpected args")
 					}
+					// Convert containerAlphaDoc to internal for result
+					containerInternal, _, _ := apischeme.NormalizeContainer(*containerAlphaDoc)
 					return container.GetContainerResult{
-						ContainerDoc:       containerAlphaDoc,
+						Container:          containerInternal,
 						CellMetadataExists: true,
 						ContainerExists:    true,
 					}, nil
@@ -519,7 +523,7 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			stackFlag: "venus",
 			cellFlag:  "jupiter",
 			controller: &fakeContainerController{
-				getContainerFn: func(_ *v1beta1.ContainerDoc) (container.GetContainerResult, error) {
+				getContainerFn: func(_ intmodel.Container) (container.GetContainerResult, error) {
 					return container.GetContainerResult{}, errdefs.ErrContainerNameRequired
 				},
 			},
@@ -533,7 +537,7 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			stackFlag: "venus",
 			cellFlag:  "jupiter",
 			controller: &fakeContainerController{
-				getContainerFn: func(_ *v1beta1.ContainerDoc) (container.GetContainerResult, error) {
+				getContainerFn: func(_ intmodel.Container) (container.GetContainerResult, error) {
 					return container.GetContainerResult{}, errors.New("controller error")
 				},
 			},
@@ -555,8 +559,8 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			stackFlag: "venus",
 			cellFlag:  "jupiter",
 			controller: &fakeContainerController{
-				getContainerFn: func(doc *v1beta1.ContainerDoc) (container.GetContainerResult, error) {
-					if doc.Metadata.Name != "beta" {
+				getContainerFn: func(ctr intmodel.Container) (container.GetContainerResult, error) {
+					if ctr.Metadata.Name != "beta" {
 						return container.GetContainerResult{}, errors.New("unexpected name")
 					}
 					betaDoc := &v1beta1.ContainerDoc{
@@ -571,8 +575,10 @@ func TestNewContainerCmdRunE(t *testing.T) {
 							State: v1beta1.ContainerStateReady,
 						},
 					}
+					// Convert betaDoc to internal for result
+					containerInternal, _, _ := apischeme.NormalizeContainer(*betaDoc)
 					return container.GetContainerResult{
-						ContainerDoc:       betaDoc,
+						Container:          containerInternal,
 						CellMetadataExists: true,
 						ContainerExists:    true,
 					}, nil
@@ -691,17 +697,17 @@ func TestNewContainerCmdRunE(t *testing.T) {
 }
 
 type fakeContainerController struct {
-	getContainerFn   func(doc *v1beta1.ContainerDoc) (container.GetContainerResult, error)
+	getContainerFn   func(ctr intmodel.Container) (container.GetContainerResult, error)
 	listContainersFn func(realm, space, stack, cell string) ([]*v1beta1.ContainerSpec, error)
 }
 
 func (f *fakeContainerController) GetContainer(
-	doc *v1beta1.ContainerDoc,
+	ctr intmodel.Container,
 ) (container.GetContainerResult, error) {
 	if f.getContainerFn == nil {
 		return container.GetContainerResult{}, errors.New("unexpected GetContainer call")
 	}
-	return f.getContainerFn(doc)
+	return f.getContainerFn(ctr)
 }
 
 func (f *fakeContainerController) ListContainers(

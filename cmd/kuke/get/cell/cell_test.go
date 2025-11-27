@@ -31,8 +31,10 @@ import (
 	cell "github.com/eminwux/kukeon/cmd/kuke/get/cell"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -260,12 +262,14 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "stack", "stack-a")
 			},
 			controller: &fakeCellController{
-				getCellFn: func(doc *v1beta1.CellDoc) (controller.GetCellResult, error) {
-					if doc.Metadata.Name != "alpha" || doc.Spec.RealmID != "realm-a" || doc.Spec.SpaceID != "space-a" || doc.Spec.StackID != "stack-a" {
+				getCellFn: func(cell intmodel.Cell) (controller.GetCellResult, error) {
+					if cell.Metadata.Name != "alpha" || cell.Spec.RealmName != "realm-a" || cell.Spec.SpaceName != "space-a" || cell.Spec.StackName != "stack-a" {
 						return controller.GetCellResult{}, errors.New("unexpected get args")
 					}
+					// Convert singleDoc to internal for result
+					cellInternal, _, _ := apischeme.NormalizeCell(*singleDoc)
 					return controller.GetCellResult{
-						CellDoc:              singleDoc,
+						Cell:                 cellInternal,
 						MetadataExists:       true,
 						CgroupExists:         true,
 						RootContainerExists:  true,
@@ -283,12 +287,14 @@ func TestNewCellCmdRunE(t *testing.T) {
 				viper.Set(config.KUKE_GET_CELL_STACK.ViperKey, "stack-a")
 			},
 			controller: &fakeCellController{
-				getCellFn: func(doc *v1beta1.CellDoc) (controller.GetCellResult, error) {
-					if doc.Metadata.Name != "alpha" || doc.Spec.RealmID != "realm-a" || doc.Spec.SpaceID != "space-a" || doc.Spec.StackID != "stack-a" {
+				getCellFn: func(cell intmodel.Cell) (controller.GetCellResult, error) {
+					if cell.Metadata.Name != "alpha" || cell.Spec.RealmName != "realm-a" || cell.Spec.SpaceName != "space-a" || cell.Spec.StackName != "stack-a" {
 						return controller.GetCellResult{}, errors.New("unexpected get args")
 					}
+					// Convert singleDoc to internal for result
+					cellInternal, _, _ := apischeme.NormalizeCell(*singleDoc)
 					return controller.GetCellResult{
-						CellDoc:              singleDoc,
+						Cell:                 cellInternal,
 						MetadataExists:       true,
 						CgroupExists:         true,
 						RootContainerExists:  true,
@@ -328,7 +334,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "stack", "stack-a")
 			},
 			controller: &fakeCellController{
-				getCellFn: func(_ *v1beta1.CellDoc) (controller.GetCellResult, error) {
+				getCellFn: func(_ intmodel.Cell) (controller.GetCellResult, error) {
 					return controller.GetCellResult{}, errdefs.ErrCellNotFound
 				},
 			},
@@ -443,15 +449,15 @@ func captureStdout(fn func() error) (string, error) {
 }
 
 type fakeCellController struct {
-	getCellFn   func(doc *v1beta1.CellDoc) (controller.GetCellResult, error)
+	getCellFn   func(cell intmodel.Cell) (controller.GetCellResult, error)
 	listCellsFn func(realm, space, stack string) ([]*v1beta1.CellDoc, error)
 }
 
-func (f *fakeCellController) GetCell(doc *v1beta1.CellDoc) (controller.GetCellResult, error) {
+func (f *fakeCellController) GetCell(cell intmodel.Cell) (controller.GetCellResult, error) {
 	if f.getCellFn == nil {
 		return controller.GetCellResult{}, errors.New("unexpected GetCell call")
 	}
-	return f.getCellFn(doc)
+	return f.getCellFn(cell)
 }
 
 func (f *fakeCellController) ListCells(realm, space, stack string) ([]*v1beta1.CellDoc, error) {

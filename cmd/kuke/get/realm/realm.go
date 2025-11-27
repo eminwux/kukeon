@@ -23,15 +23,17 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type RealmController interface {
-	GetRealm(doc *v1beta1.RealmDoc) (controller.GetRealmResult, error)
+	GetRealm(realm intmodel.Realm) (controller.GetRealmResult, error)
 	ListRealms() ([]*v1beta1.RealmDoc, error)
 }
 
@@ -79,8 +81,16 @@ func NewRealmCmd() *cobra.Command {
 						Name: name,
 					},
 				}
+
+				// Convert at boundary before calling controller
+				var realmInternal intmodel.Realm
+				realmInternal, _, err = apischeme.NormalizeRealm(*doc)
+				if err != nil {
+					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				}
+
 				var result controller.GetRealmResult
-				result, err = ctrl.GetRealm(doc)
+				result, err = ctrl.GetRealm(realmInternal)
 				if err != nil {
 					if errors.Is(err, errdefs.ErrRealmNotFound) {
 						return fmt.Errorf("realm %q not found", name)
@@ -88,11 +98,18 @@ func NewRealmCmd() *cobra.Command {
 					return err
 				}
 
-				if result.RealmDoc == nil {
+				if !result.MetadataExists {
 					return fmt.Errorf("realm %q not found", name)
 				}
 
-				return printRealm(cmd, result.RealmDoc, outputFormat)
+				// Convert result back to external for printing
+				var realmDoc v1beta1.RealmDoc
+				realmDoc, err = apischeme.BuildRealmExternalFromInternal(result.Realm, apischeme.VersionV1Beta1)
+				if err != nil {
+					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				}
+
+				return printRealm(cmd, &realmDoc, outputFormat)
 			}
 
 			// List all realms
@@ -177,8 +194,8 @@ type controllerWrapper struct {
 	ctrl *controller.Exec
 }
 
-func (w *controllerWrapper) GetRealm(doc *v1beta1.RealmDoc) (controller.GetRealmResult, error) {
-	return w.ctrl.GetRealm(doc)
+func (w *controllerWrapper) GetRealm(realm intmodel.Realm) (controller.GetRealmResult, error) {
+	return w.ctrl.GetRealm(realm)
 }
 
 func (w *controllerWrapper) ListRealms() ([]*v1beta1.RealmDoc, error) {

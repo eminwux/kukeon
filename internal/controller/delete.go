@@ -88,42 +88,25 @@ func (b *Exec) DeleteRealm(realm intmodel.Realm, force, cascade bool) (DeleteRea
 		return res, errdefs.ErrRealmNameRequired
 	}
 
-	namespace := strings.TrimSpace(realm.Spec.Namespace)
-	if namespace == "" {
-		namespace = name
-	}
-
-	// Build minimal lookup realm for GetRealm (still uses external types)
-	lookupDoc := &v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
+	// Ensure realm exists and capture its latest state
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
 			Name: name,
 		},
-		Spec: v1beta1.RealmSpec{
-			Namespace: namespace,
-		},
 	}
-
-	// Ensure realm exists and capture its latest state
-	// Note: GetRealm still uses external types, but we'll convert the result
-	getResult, err := b.GetRealm(lookupDoc)
+	getResult, err := b.GetRealm(lookupRealm)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrRealmNotFound) {
 			return res, fmt.Errorf("realm %q not found", name)
 		}
 		return res, err
 	}
-	if !getResult.MetadataExists || getResult.RealmDoc == nil {
+	if !getResult.MetadataExists {
 		return res, fmt.Errorf("realm %q not found", name)
 	}
 
-	// Convert GetRealm result to internal for rest of method
-	internalRealm, _, convertErr := apischeme.NormalizeRealm(*getResult.RealmDoc)
-	if convertErr != nil {
-		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-	}
-
 	res = DeleteRealmResult{
-		Realm:   internalRealm,
+		Realm:   getResult.Realm,
 		Deleted: []string{},
 	}
 
@@ -136,8 +119,7 @@ func (b *Exec) DeleteRealm(realm intmodel.Realm, force, cascade bool) (DeleteRea
 		}
 		for _, spaceDoc := range spaces {
 			// Convert external space to internal at boundary
-			var spaceInternal intmodel.Space
-			spaceInternal, _, convertErr = apischeme.NormalizeSpace(*spaceDoc)
+			spaceInternal, _, convertErr := apischeme.NormalizeSpace(*spaceDoc)
 			if convertErr != nil {
 				return res, fmt.Errorf("failed to convert space %q: %w", spaceDoc.Metadata.Name, convertErr)
 			}
@@ -159,7 +141,7 @@ func (b *Exec) DeleteRealm(realm intmodel.Realm, force, cascade bool) (DeleteRea
 	}
 
 	// Delete realm via runner and capture detailed outcome
-	outcome, err := b.runner.DeleteRealm(internalRealm)
+	outcome, err := b.runner.DeleteRealm(getResult.Realm)
 	if err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrDeleteRealm, err)
 	}
@@ -196,37 +178,31 @@ func (b *Exec) DeleteSpace(space intmodel.Space, force, cascade bool) (DeleteSpa
 		return res, errdefs.ErrRealmNameRequired
 	}
 
-	// Build minimal lookup doc for GetSpace (still uses external types)
-	lookupDoc := &v1beta1.SpaceDoc{
-		Metadata: v1beta1.SpaceMetadata{
+	// Build lookup space for GetSpace
+	lookupSpace := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{
 			Name: name,
 		},
-		Spec: v1beta1.SpaceSpec{
-			RealmID: realmName,
+		Spec: intmodel.SpaceSpec{
+			RealmName: realmName,
 		},
 	}
 
-	getResult, err := b.GetSpace(lookupDoc)
+	getResult, err := b.GetSpace(lookupSpace)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrSpaceNotFound) {
 			return res, fmt.Errorf("space %q not found in realm %q", name, realmName)
 		}
 		return res, err
 	}
-	if !getResult.MetadataExists || getResult.SpaceDoc == nil {
+	if !getResult.MetadataExists {
 		return res, fmt.Errorf("space %q not found in realm %q", name, realmName)
-	}
-
-	// Convert GetSpace result to internal for rest of method
-	internalSpace, _, convertErr := apischeme.NormalizeSpace(*getResult.SpaceDoc)
-	if convertErr != nil {
-		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
 	}
 
 	res = DeleteSpaceResult{
 		SpaceName: name,
 		RealmName: realmName,
-		Space:     internalSpace,
+		Space:     getResult.Space,
 		Deleted:   []string{},
 	}
 
@@ -242,8 +218,7 @@ func (b *Exec) DeleteSpace(space intmodel.Space, force, cascade bool) (DeleteSpa
 				continue
 			}
 			// Convert external stack to internal at boundary
-			var stackInternal intmodel.Stack
-			stackInternal, _, convertErr = apischeme.NormalizeStack(*stackDoc)
+			stackInternal, _, convertErr := apischeme.NormalizeStack(*stackDoc)
 			if convertErr != nil {
 				return res, fmt.Errorf("failed to convert stack %q: %w", stackDoc.Metadata.Name, convertErr)
 			}
@@ -265,7 +240,7 @@ func (b *Exec) DeleteSpace(space intmodel.Space, force, cascade bool) (DeleteSpa
 	}
 
 	// Delete space
-	if err = b.runner.DeleteSpace(internalSpace); err != nil {
+	if err = b.runner.DeleteSpace(getResult.Space); err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrDeleteSpace, err)
 	}
 
@@ -296,39 +271,33 @@ func (b *Exec) DeleteStack(stack intmodel.Stack, force, cascade bool) (DeleteSta
 		return res, errdefs.ErrSpaceNameRequired
 	}
 
-	// Build minimal lookup doc for GetStack (still uses external types)
-	lookupDoc := &v1beta1.StackDoc{
-		Metadata: v1beta1.StackMetadata{
+	// Build lookup stack for GetStack
+	lookupStack := intmodel.Stack{
+		Metadata: intmodel.StackMetadata{
 			Name: name,
 		},
-		Spec: v1beta1.StackSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
+		Spec: intmodel.StackSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
 		},
 	}
 
-	getResult, err := b.GetStack(lookupDoc)
+	getResult, err := b.GetStack(lookupStack)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrStackNotFound) {
 			return res, fmt.Errorf("stack %q not found in realm %q, space %q", name, realmName, spaceName)
 		}
 		return res, err
 	}
-	if !getResult.MetadataExists || getResult.StackDoc == nil {
+	if !getResult.MetadataExists {
 		return res, fmt.Errorf("stack %q not found in realm %q, space %q", name, realmName, spaceName)
-	}
-
-	// Convert GetStack result to internal for rest of method
-	internalStack, _, convertErr := apischeme.NormalizeStack(*getResult.StackDoc)
-	if convertErr != nil {
-		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
 	}
 
 	res = DeleteStackResult{
 		StackName: name,
 		RealmName: realmName,
 		SpaceName: spaceName,
-		Stack:     internalStack,
+		Stack:     getResult.Stack,
 		Deleted:   []string{},
 	}
 
@@ -341,8 +310,7 @@ func (b *Exec) DeleteStack(stack intmodel.Stack, force, cascade bool) (DeleteSta
 		}
 		for _, cellDoc := range cells {
 			// Convert external cell to internal at boundary
-			var cellInternal intmodel.Cell
-			cellInternal, _, convertErr = apischeme.NormalizeCell(*cellDoc)
+			cellInternal, _, convertErr := apischeme.NormalizeCell(*cellDoc)
 			if convertErr != nil {
 				return res, fmt.Errorf("failed to convert cell %q: %w", cellDoc.Metadata.Name, convertErr)
 			}
@@ -364,7 +332,7 @@ func (b *Exec) DeleteStack(stack intmodel.Stack, force, cascade bool) (DeleteSta
 	}
 
 	// Delete stack
-	if err = b.runner.DeleteStack(internalStack); err != nil {
+	if err = b.runner.DeleteStack(getResult.Stack); err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrDeleteStack, err)
 	}
 
@@ -399,18 +367,19 @@ func (b *Exec) DeleteCell(cell intmodel.Cell) (DeleteCellResult, error) {
 	}
 
 	// Build minimal lookup doc for GetCell (still uses external types)
-	lookupDoc := &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
+	// Build lookup cell for GetCell
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
 			Name: name,
 		},
-		Spec: v1beta1.CellSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-			StackID: stackName,
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
 		},
 	}
 
-	getResult, err := b.GetCell(lookupDoc)
+	getResult, err := b.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return res, fmt.Errorf(
@@ -423,22 +392,16 @@ func (b *Exec) DeleteCell(cell intmodel.Cell) (DeleteCellResult, error) {
 		}
 		return res, err
 	}
-	cellDoc := getResult.CellDoc
-	if cellDoc == nil {
+	if !getResult.MetadataExists {
 		return res, fmt.Errorf("cell %q not found", name)
 	}
 
-	// Convert GetCell result to internal for rest of method
-	internalCell, _, convertErr := apischeme.NormalizeCell(*cellDoc)
-	if convertErr != nil {
-		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-	}
-
 	res = DeleteCellResult{
-		Cell: internalCell,
+		Cell: getResult.Cell,
 	}
 
 	// Always delete all containers in cell first
+	internalCell := getResult.Cell
 	if len(internalCell.Spec.Containers) > 0 {
 		res.ContainersDeleted = true
 	}
@@ -480,17 +443,18 @@ func (b *Exec) DeleteContainer(container intmodel.Container) (DeleteContainerRes
 	res.Deleted = []string{}
 
 	// Build minimal lookup doc for GetCell (still uses external types)
-	cellDoc := &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
+	// Build lookup cell for GetCell
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
 			Name: cellName,
 		},
-		Spec: v1beta1.CellSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-			StackID: stackName,
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
 		},
 	}
-	getResult, err := b.GetCell(cellDoc)
+	getResult, err := b.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			res.CellMetadataExists = false
@@ -505,16 +469,11 @@ func (b *Exec) DeleteContainer(container intmodel.Container) (DeleteContainerRes
 		return res, err
 	}
 	res.CellMetadataExists = getResult.MetadataExists
-	cellDoc = getResult.CellDoc
-	if cellDoc == nil {
+	if !getResult.MetadataExists {
 		return res, fmt.Errorf("cell %q not found", cellName)
 	}
 
-	// Convert GetCell result to internal for rest of method
-	internalCell, _, convertErr := apischeme.NormalizeCell(*cellDoc)
-	if convertErr != nil {
-		return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-	}
+	internalCell := getResult.Cell
 
 	// Find container in cell by name
 	var foundContainer *intmodel.ContainerSpec

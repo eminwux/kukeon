@@ -23,8 +23,10 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -34,7 +36,7 @@ import (
 type GetContainerResult = controller.GetContainerResult
 
 type ContainerController interface {
-	GetContainer(doc *v1beta1.ContainerDoc) (GetContainerResult, error)
+	GetContainer(container intmodel.Container) (GetContainerResult, error)
 	ListContainers(realmName, spaceName, stackName, cellName string) ([]*v1beta1.ContainerSpec, error)
 }
 
@@ -195,16 +197,34 @@ func runContainerCmdWithDeps(
 			},
 		}
 
-		result, err := ctrl.GetContainer(containerDoc)
+		// Convert at boundary before calling controller
+		var containerInternal intmodel.Container
+		containerInternal, _, err = apischeme.NormalizeContainer(*containerDoc)
+		if err != nil {
+			return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+		}
+
+		var result controller.GetContainerResult
+		result, err = ctrl.GetContainer(containerInternal)
 		if err != nil {
 			return err
 		}
 
-		if result.ContainerDoc == nil {
+		if !result.ContainerExists {
 			return fmt.Errorf("container %q not found", name)
 		}
 
-		return printContainer(cmd, result.ContainerDoc, outputFormat, printYAML, printJSON)
+		// Convert result back to external for printing
+		var containerDocResult v1beta1.ContainerDoc
+		containerDocResult, err = apischeme.BuildContainerExternalFromInternal(
+			result.Container,
+			apischeme.VersionV1Beta1,
+		)
+		if err != nil {
+			return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+		}
+
+		return printContainer(cmd, &containerDocResult, outputFormat, printYAML, printJSON)
 	}
 
 	// List containers (optionally filtered by realm, space, stack, and/or cell)
@@ -303,9 +323,9 @@ type controllerWrapper struct {
 }
 
 func (w *controllerWrapper) GetContainer(
-	doc *v1beta1.ContainerDoc,
+	container intmodel.Container,
 ) (GetContainerResult, error) {
-	return w.ctrl.GetContainer(doc)
+	return w.ctrl.GetContainer(container)
 }
 
 func (w *controllerWrapper) ListContainers(

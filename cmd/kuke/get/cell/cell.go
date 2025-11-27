@@ -23,15 +23,17 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type CellController interface {
-	GetCell(doc *v1beta1.CellDoc) (controller.GetCellResult, error)
+	GetCell(cell intmodel.Cell) (controller.GetCellResult, error)
 	ListCells(realm, space, stack string) ([]*v1beta1.CellDoc, error)
 }
 
@@ -112,7 +114,14 @@ func NewCellCmd() *cobra.Command {
 						StackID: stack,
 					},
 				}
-				result, getErr := ctrl.GetCell(doc)
+
+				// Convert at boundary before calling controller
+				cellInternal, _, err := apischeme.NormalizeCell(*doc)
+				if err != nil {
+					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				}
+
+				result, getErr := ctrl.GetCell(cellInternal)
 				if getErr != nil {
 					if errors.Is(getErr, errdefs.ErrCellNotFound) {
 						return fmt.Errorf(
@@ -126,7 +135,23 @@ func NewCellCmd() *cobra.Command {
 					return getErr
 				}
 
-				return printCell(cmd, result.CellDoc, outputFormat)
+				if !result.MetadataExists {
+					return fmt.Errorf(
+						"cell %q not found in realm %q, space %q, stack %q",
+						name,
+						realm,
+						space,
+						stack,
+					)
+				}
+
+				// Convert result back to external for printing
+				cellDoc, err := apischeme.BuildCellExternalFromInternal(result.Cell, apischeme.VersionV1Beta1)
+				if err != nil {
+					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				}
+
+				return printCell(cmd, &cellDoc, outputFormat)
 			}
 
 			// List cells (optionally filtered by realm, space, and/or stack)
@@ -223,8 +248,8 @@ type controllerWrapper struct {
 	ctrl *controller.Exec
 }
 
-func (w *controllerWrapper) GetCell(doc *v1beta1.CellDoc) (controller.GetCellResult, error) {
-	return w.ctrl.GetCell(doc)
+func (w *controllerWrapper) GetCell(cell intmodel.Cell) (controller.GetCellResult, error) {
+	return w.ctrl.GetCell(cell)
 }
 
 func (w *controllerWrapper) ListCells(realm, space, stack string) ([]*v1beta1.CellDoc, error) {

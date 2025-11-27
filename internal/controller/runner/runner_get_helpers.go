@@ -23,6 +23,7 @@ import (
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/metadata"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/fs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -31,7 +32,7 @@ func (r *Exec) readRealmInternal(filePath string) (intmodel.Realm, error) {
 	if err != nil {
 		return intmodel.Realm{}, err
 	}
-	version, err := detectMetadataVersion(raw)
+	version, err := fs.DetectMetadataVersion(raw)
 	if err != nil {
 		return intmodel.Realm{}, wrapConversionErr(err)
 	}
@@ -56,7 +57,7 @@ func (r *Exec) readSpaceInternal(filePath string) (intmodel.Space, error) {
 	if err != nil {
 		return intmodel.Space{}, err
 	}
-	version, err := detectMetadataVersion(raw)
+	version, err := fs.DetectMetadataVersion(raw)
 	if err != nil {
 		return intmodel.Space{}, wrapConversionErr(err)
 	}
@@ -81,7 +82,7 @@ func (r *Exec) readStackInternal(filePath string) (intmodel.Stack, error) {
 	if err != nil {
 		return intmodel.Stack{}, err
 	}
-	version, err := detectMetadataVersion(raw)
+	version, err := fs.DetectMetadataVersion(raw)
 	if err != nil {
 		return intmodel.Stack{}, wrapConversionErr(err)
 	}
@@ -106,7 +107,7 @@ func (r *Exec) readCellInternal(filePath string) (intmodel.Cell, error) {
 	if err != nil {
 		return intmodel.Cell{}, err
 	}
-	version, err := detectMetadataVersion(raw)
+	version, err := fs.DetectMetadataVersion(raw)
 	if err != nil {
 		return intmodel.Cell{}, wrapConversionErr(err)
 	}

@@ -17,9 +17,13 @@
 package fs
 
 import (
+	"encoding/json"
+	"fmt"
 	"path/filepath"
 
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/consts"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // RealmMetadataDir returns the metadata directory for the given realm.
@@ -72,4 +76,19 @@ func CellMetadataPath(baseRunPath, realmName, spaceName, stackName, cellName str
 		CellMetadataDir(baseRunPath, realmName, spaceName, stackName, cellName),
 		consts.KukeonMetadataFile,
 	)
+}
+
+type metadataHeader struct {
+	APIVersion string `json:"apiVersion"`
+	Kind       string `json:"kind"`
+}
+
+// DetectMetadataVersion detects the API version from raw metadata bytes by parsing the apiVersion field.
+// It returns the normalized version using apischeme.DefaultVersion.
+func DetectMetadataVersion(raw []byte) (v1beta1.Version, error) {
+	var header metadataHeader
+	if err := json.Unmarshal(raw, &header); err != nil {
+		return "", fmt.Errorf("metadata header: %w", err)
+	}
+	return apischeme.DefaultVersion(v1beta1.Version(header.APIVersion)), nil
 }

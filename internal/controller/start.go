@@ -61,18 +61,18 @@ func (b *Exec) validateAndGetCell(
 		return "", "", "", "", nil, errdefs.ErrStackNameRequired
 	}
 
-	// Get cell document
-	doc := &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
+	// Build lookup cell for GetCell (using internal types)
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
 			Name: name,
 		},
-		Spec: v1beta1.CellSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-			StackID: stackName,
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
 		},
 	}
-	result, err := b.GetCell(doc)
+	result, err := b.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return "", "", "", "", nil, fmt.Errorf(
@@ -85,10 +85,15 @@ func (b *Exec) validateAndGetCell(
 		}
 		return "", "", "", "", nil, err
 	}
-	cellDoc := result.CellDoc
-	if cellDoc == nil {
+	if !result.MetadataExists {
 		return "", "", "", "", nil, fmt.Errorf("cell %q not found", name)
 	}
+	// Convert internal cell back to external for return value
+	cellDocExternal, err := apischeme.BuildCellExternalFromInternal(result.Cell, apischeme.VersionV1Beta1)
+	if err != nil {
+		return "", "", "", "", nil, fmt.Errorf("failed to convert cell to external model: %w", err)
+	}
+	cellDoc := &cellDocExternal
 
 	return name, realmName, spaceName, stackName, cellDoc, nil
 }
@@ -125,9 +130,6 @@ func (b *Exec) StartCell(doc *v1beta1.CellDoc) (StartCellResult, error) {
 
 	// Use the same internal cell for UpdateCellMetadata
 	cell := internalCell
-	if err != nil {
-		return res, fmt.Errorf("failed to convert cell to internal model: %w", err)
-	}
 	cell.Status.State = intmodel.CellStateReady
 
 	// Update cell metadata state to Ready
@@ -174,18 +176,18 @@ func (b *Exec) StartContainer(doc *v1beta1.ContainerDoc) (StartContainerResult, 
 		return res, errdefs.ErrCellNameRequired
 	}
 
-	// Get cell document
-	cellLookup := &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
+	// Build lookup cell for GetCell (using internal types)
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
 			Name: cellName,
 		},
-		Spec: v1beta1.CellSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-			StackID: stackName,
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
 		},
 	}
-	getResult, err := b.GetCell(cellLookup)
+	getResult, err := b.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return res, fmt.Errorf(
@@ -198,10 +200,15 @@ func (b *Exec) StartContainer(doc *v1beta1.ContainerDoc) (StartContainerResult, 
 		}
 		return res, err
 	}
-	cellDoc := getResult.CellDoc
-	if cellDoc == nil {
+	if !getResult.MetadataExists {
 		return res, fmt.Errorf("cell %q not found", cellName)
 	}
+	// Convert internal cell back to external
+	cellDocExternal, err := apischeme.BuildCellExternalFromInternal(getResult.Cell, apischeme.VersionV1Beta1)
+	if err != nil {
+		return res, fmt.Errorf("failed to convert cell to external model: %w", err)
+	}
+	cellDoc := &cellDocExternal
 
 	// Find container in cell spec by name (ID now stores just the container name)
 	var foundContainer *v1beta1.ContainerSpec

@@ -141,18 +141,18 @@ func (b *Exec) KillContainer(doc *v1beta1.ContainerDoc) (KillContainerResult, er
 
 	res.ContainerDoc = doc
 
-	// Get cell document
-	cellLookup := &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
+	// Build lookup cell for GetCell (using internal types)
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
 			Name: cellName,
 		},
-		Spec: v1beta1.CellSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-			StackID: stackName,
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
 		},
 	}
-	getResult, err := b.GetCell(cellLookup)
+	getResult, err := b.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return res, fmt.Errorf(
@@ -165,10 +165,15 @@ func (b *Exec) KillContainer(doc *v1beta1.ContainerDoc) (KillContainerResult, er
 		}
 		return res, err
 	}
-	cellDoc := getResult.CellDoc
-	if cellDoc == nil {
+	if !getResult.MetadataExists {
 		return res, fmt.Errorf("cell %q not found", cellName)
 	}
+	// Convert internal cell back to external
+	cellDocExternal, err := apischeme.BuildCellExternalFromInternal(getResult.Cell, apischeme.VersionV1Beta1)
+	if err != nil {
+		return res, fmt.Errorf("failed to convert cell to external model: %w", err)
+	}
+	cellDoc := &cellDocExternal
 
 	// Find container in cell spec by name (ID now stores just the container name)
 	var foundContainer *v1beta1.ContainerSpec

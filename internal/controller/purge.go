@@ -23,6 +23,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -95,25 +96,41 @@ func (b *Exec) PurgeRealm(doc *v1beta1.RealmDoc, force, cascade bool) (PurgeReal
 		return result, errdefs.ErrRealmNameRequired
 	}
 
-	// Get realm document
-	getResult, err := b.GetRealm(doc)
+	// Convert external doc to internal at boundary for GetRealm
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: name,
+		},
+	}
+	// Note: namespace field in doc.Spec.Namespace is used later, but GetRealm doesn't need it
+	getResult, err := b.GetRealm(lookupRealm)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrRealmNotFound) {
 			return result, fmt.Errorf("realm %q not found", name)
 		}
 		return result, err
 	}
+	if !getResult.MetadataExists {
+		return result, fmt.Errorf("realm %q not found", name)
+	}
+
+	// Convert GetRealm result back to external for result struct (temporary until PurgeRealm is refactored)
+	realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(getResult.Realm, apischeme.VersionV1Beta1)
+	if convertErr != nil {
+		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
 
 	// Initialize result with realm document and flags
 	result = PurgeRealmResult{
-		RealmDoc: getResult.RealmDoc,
+		RealmDoc: &realmDoc,
 		Force:    force,
 		Cascade:  cascade,
 		Deleted:  []string{},
 		Purged:   []string{},
 	}
 
-	internalRealm, realmVersion, convertErr := apischeme.NormalizeRealm(*getResult.RealmDoc)
+	internalRealm := getResult.Realm
+	realmVersion := apischeme.VersionV1Beta1 // Default version
 	if convertErr != nil {
 		return result, fmt.Errorf("failed to convert realm %q: %w", name, convertErr)
 	}
@@ -202,29 +219,42 @@ func (b *Exec) PurgeSpace(doc *v1beta1.SpaceDoc, force, cascade bool) (PurgeSpac
 	}
 	doc.Spec.RealmID = realmName
 
-	getResult, err := b.GetSpace(doc)
+	// Convert external doc to internal at boundary for GetSpace
+	lookupSpace := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{
+			Name: name,
+		},
+		Spec: intmodel.SpaceSpec{
+			RealmName: realmName,
+		},
+	}
+	getResult, err := b.GetSpace(lookupSpace)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrSpaceNotFound) {
 			return result, fmt.Errorf("space %q not found in realm %q", name, realmName)
 		}
 		return result, err
 	}
-	if !getResult.MetadataExists || getResult.SpaceDoc == nil {
+	if !getResult.MetadataExists {
 		return result, fmt.Errorf("space %q not found in realm %q", name, realmName)
 	}
 
+	// Convert GetSpace result back to external for result struct (temporary until PurgeSpace is refactored)
+	spaceDoc, convertErr := apischeme.BuildSpaceExternalFromInternal(getResult.Space, apischeme.VersionV1Beta1)
+	if convertErr != nil {
+		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+
 	result = PurgeSpaceResult{
-		SpaceDoc: getResult.SpaceDoc,
+		SpaceDoc: &spaceDoc,
 		Force:    force,
 		Cascade:  cascade,
 		Deleted:  []string{},
 		Purged:   []string{},
 	}
 
-	internalSpace, spaceVersion, convertErr := apischeme.NormalizeSpace(*getResult.SpaceDoc)
-	if convertErr != nil {
-		return result, fmt.Errorf("failed to convert space %q: %w", name, convertErr)
-	}
+	internalSpace := getResult.Space
+	spaceVersion := apischeme.VersionV1Beta1 // Default version
 
 	// If cascade, purge all stacks first (recursively cascades to cells)
 	if cascade {
@@ -317,8 +347,17 @@ func (b *Exec) PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (PurgeStac
 	}
 	doc.Spec.SpaceID = spaceName
 
-	// Get stack document
-	getResult, err := b.GetStack(doc)
+	// Convert external doc to internal at boundary for GetStack
+	lookupStack := intmodel.Stack{
+		Metadata: intmodel.StackMetadata{
+			Name: name,
+		},
+		Spec: intmodel.StackSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+		},
+	}
+	getResult, err := b.GetStack(lookupStack)
 	if err != nil {
 		return result, err
 	}
@@ -326,21 +365,20 @@ func (b *Exec) PurgeStack(doc *v1beta1.StackDoc, force, cascade bool) (PurgeStac
 		return result, fmt.Errorf("stack %q not found in realm %q, space %q", name, realmName, spaceName)
 	}
 
-	stackDoc := getResult.StackDoc
-	if stackDoc == nil {
-		stackDoc = doc
+	// Convert GetStack result back to external for result struct (temporary until PurgeStack is refactored)
+	stackDoc, convertErr := apischeme.BuildStackExternalFromInternal(getResult.Stack, apischeme.VersionV1Beta1)
+	if convertErr != nil {
+		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
 	}
 
 	result = PurgeStackResult{
-		StackDoc: stackDoc,
+		StackDoc: &stackDoc,
 		Deleted:  []string{},
 		Purged:   []string{},
 	}
 
-	internalStack, stackVersion, convertErr := apischeme.NormalizeStack(*stackDoc)
-	if convertErr != nil {
-		return result, fmt.Errorf("failed to convert stack %q: %w", name, convertErr)
-	}
+	internalStack := getResult.Stack
+	stackVersion := apischeme.VersionV1Beta1 // Default version
 
 	// If cascade, purge all cells first
 	if cascade {
@@ -425,8 +463,18 @@ func (b *Exec) PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (PurgeCellRe
 	}
 	doc.Spec.StackID = stackName
 
-	// Ensure cell exists and capture latest state.
-	getResult, err := b.GetCell(doc)
+	// Convert external doc to internal at boundary for GetCell
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: name,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
+		},
+	}
+	getResult, err := b.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return result, fmt.Errorf(
@@ -440,18 +488,22 @@ func (b *Exec) PurgeCell(doc *v1beta1.CellDoc, force, cascade bool) (PurgeCellRe
 		return result, err
 	}
 
+	// Convert GetCell result back to external for result struct (temporary until PurgeCell is refactored)
+	cellDoc, convertErr := apischeme.BuildCellExternalFromInternal(getResult.Cell, apischeme.VersionV1Beta1)
+	if convertErr != nil {
+		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+	}
+
 	result = PurgeCellResult{
-		CellDoc: getResult.CellDoc,
+		CellDoc: &cellDoc,
 		Force:   force,
 		Cascade: cascade,
 		Deleted: []string{},
 		Purged:  []string{},
 	}
 
-	internalCell, cellVersion, convertErr := apischeme.NormalizeCell(*getResult.CellDoc)
-	if convertErr != nil {
-		return result, fmt.Errorf("failed to convert cell %q: %w", name, convertErr)
-	}
+	internalCell := getResult.Cell
+	cellVersion := apischeme.VersionV1Beta1 // Default version
 
 	// Perform standard delete first
 	deleteResult, err := b.DeleteCell(internalCell)
@@ -512,17 +564,17 @@ func (b *Exec) PurgeContainer(doc *v1beta1.ContainerDoc) (PurgeContainerResult, 
 	}
 
 	// Get cell to find container metadata
-	cellDoc := &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
 			Name: cellName,
 		},
-		Spec: v1beta1.CellSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-			StackID: stackName,
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
 		},
 	}
-	getResult, err := b.GetCell(cellDoc)
+	getResult, err := b.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return result, fmt.Errorf(
@@ -537,9 +589,14 @@ func (b *Exec) PurgeContainer(doc *v1beta1.ContainerDoc) (PurgeContainerResult, 
 	}
 	result.CellMetadataExists = getResult.MetadataExists
 
-	cellDoc = getResult.CellDoc
-	if cellDoc == nil {
+	if !getResult.MetadataExists {
 		return result, fmt.Errorf("cell %q not found", cellName)
+	}
+
+	// Convert GetCell result back to external for container spec access (temporary until PurgeContainer is refactored)
+	cellDoc, convertErr := apischeme.BuildCellExternalFromInternal(getResult.Cell, apischeme.VersionV1Beta1)
+	if convertErr != nil {
+		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
 	}
 
 	// Check if container exists in cell metadata by name (ID now stores just the container name)
@@ -574,30 +631,26 @@ func (b *Exec) PurgeContainer(doc *v1beta1.ContainerDoc) (PurgeContainerResult, 
 	}
 
 	// Get realm to pass to runner.PurgeContainer
-	realmDocInput := &v1beta1.RealmDoc{
-		Metadata: v1beta1.RealmMetadata{
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
 			Name: realmName,
 		},
 	}
-	realmGetResult, err := b.GetRealm(realmDocInput)
+	realmGetResult, err := b.GetRealm(lookupRealm)
 	if err != nil {
 		return result, fmt.Errorf("failed to get realm: %w", err)
 	}
-	if realmGetResult.RealmDoc == nil {
+	if !realmGetResult.MetadataExists {
 		return result, fmt.Errorf("realm %q not found", realmName)
 	}
 
-	// Convert external realm to internal for runner.PurgeContainer
-	internalRealm, _, convertErr := apischeme.NormalizeRealm(*realmGetResult.RealmDoc)
-	if convertErr != nil {
-		result.Purged = append(result.Purged, fmt.Sprintf("purge-conversion-error:%v", convertErr))
+	// Use internal realm directly for runner.PurgeContainer
+	internalRealm := realmGetResult.Realm
+	// Use container name directly for containerd operations
+	if err = b.runner.PurgeContainer(internalRealm, name); err != nil {
+		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
 	} else {
-		// Use container name directly for containerd operations
-		if err = b.runner.PurgeContainer(internalRealm, name); err != nil {
-			result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
-		} else {
-			result.Purged = append(result.Purged, "cni-resources", "ipam-allocation", "cache-entries")
-		}
+		result.Purged = append(result.Purged, "cni-resources", "ipam-allocation", "cache-entries")
 	}
 
 	return result, nil

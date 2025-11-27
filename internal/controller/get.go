@@ -36,7 +36,7 @@ import (
 
 // GetRealmResult reports the current state of a realm.
 type GetRealmResult struct {
-	RealmDoc                  *v1beta1.RealmDoc
+	Realm                     intmodel.Realm
 	MetadataExists            bool
 	CgroupExists              bool
 	ContainerdNamespaceExists bool
@@ -44,7 +44,7 @@ type GetRealmResult struct {
 
 // GetSpaceResult reports the current state of a space.
 type GetSpaceResult struct {
-	SpaceDoc         *v1beta1.SpaceDoc
+	Space            intmodel.Space
 	MetadataExists   bool
 	CgroupExists     bool
 	CNINetworkExists bool
@@ -52,45 +52,41 @@ type GetSpaceResult struct {
 
 // GetStackResult reports the current state of a stack.
 type GetStackResult struct {
-	StackDoc       *v1beta1.StackDoc
+	Stack          intmodel.Stack
 	MetadataExists bool
 	CgroupExists   bool
 }
 
 // GetContainerResult reports the current state of a container.
 type GetContainerResult struct {
-	ContainerDoc       *v1beta1.ContainerDoc
+	Container          intmodel.Container
 	CellMetadataExists bool
 	ContainerExists    bool
 }
 
 // GetCellResult reports the current state of a cell.
 type GetCellResult struct {
-	CellDoc             *v1beta1.CellDoc
+	Cell                intmodel.Cell
 	MetadataExists      bool
 	CgroupExists        bool
 	RootContainerExists bool
 }
 
 // GetRealm retrieves a single realm and reports its current state.
-func (b *Exec) GetRealm(doc *v1beta1.RealmDoc) (GetRealmResult, error) {
+func (b *Exec) GetRealm(realm intmodel.Realm) (GetRealmResult, error) {
 	var res GetRealmResult
 
-	if doc == nil {
-		return res, errdefs.ErrRealmNameRequired
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(realm.Metadata.Name)
 	if name == "" {
 		return res, errdefs.ErrRealmNameRequired
 	}
 
-	namespace := strings.TrimSpace(doc.Spec.Namespace)
+	namespace := strings.TrimSpace(realm.Spec.Namespace)
 	if namespace == "" {
 		namespace = name
 	}
 
-	// Convert external doc to internal model at boundary
+	// Build lookup realm for runner
 	lookupRealm := intmodel.Realm{
 		Metadata: intmodel.RealmMetadata{
 			Name: name,
@@ -108,17 +104,11 @@ func (b *Exec) GetRealm(doc *v1beta1.RealmDoc) (GetRealmResult, error) {
 	} else {
 		res.MetadataExists = true
 
-		// Convert internal realm back to external for ExistsCgroup and result
-		realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
-		if convertErr != nil {
-			return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-		}
-
 		res.CgroupExists, err = b.runner.ExistsCgroup(internalRealm)
 		if err != nil {
 			return res, fmt.Errorf("failed to check if realm cgroup exists: %w", err)
 		}
-		res.RealmDoc = &realmDoc
+		res.Realm = internalRealm
 	}
 
 	res.ContainerdNamespaceExists, err = b.runner.ExistsRealmContainerdNamespace(namespace)
@@ -136,23 +126,19 @@ func (b *Exec) ListRealms() ([]*v1beta1.RealmDoc, error) {
 }
 
 // GetSpace retrieves a single space and reports its current state.
-func (b *Exec) GetSpace(doc *v1beta1.SpaceDoc) (GetSpaceResult, error) {
+func (b *Exec) GetSpace(space intmodel.Space) (GetSpaceResult, error) {
 	var res GetSpaceResult
 
-	if doc == nil {
-		return res, errdefs.ErrSpaceNameRequired
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(space.Metadata.Name)
 	if name == "" {
 		return res, errdefs.ErrSpaceNameRequired
 	}
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(space.Spec.RealmName)
 	if realmName == "" {
 		return res, errdefs.ErrRealmNameRequired
 	}
 
-	// Convert external doc to internal model at boundary
+	// Build lookup space for runner
 	lookupSpace := intmodel.Space{
 		Metadata: intmodel.SpaceMetadata{
 			Name: name,
@@ -173,17 +159,11 @@ func (b *Exec) GetSpace(doc *v1beta1.SpaceDoc) (GetSpaceResult, error) {
 	} else {
 		res.MetadataExists = true
 
-		// Convert internal space back to external for ExistsCgroup and result
-		spaceDoc, convertErr := apischeme.BuildSpaceExternalFromInternal(internalSpace, apischeme.VersionV1Beta1)
-		if convertErr != nil {
-			return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-		}
-
 		res.CgroupExists, err = b.runner.ExistsCgroup(internalSpace)
 		if err != nil {
 			return res, fmt.Errorf("failed to check if space cgroup exists: %w", err)
 		}
-		res.SpaceDoc = &spaceDoc
+		res.Space = internalSpace
 	}
 
 	res.CNINetworkExists, err = b.runner.ExistsSpaceCNIConfig(lookupSpace)
@@ -225,27 +205,23 @@ func (b *Exec) ListSpaces(realmName string) ([]*v1beta1.SpaceDoc, error) {
 }
 
 // GetStack retrieves a single stack and reports its current state.
-func (b *Exec) GetStack(doc *v1beta1.StackDoc) (GetStackResult, error) {
+func (b *Exec) GetStack(stack intmodel.Stack) (GetStackResult, error) {
 	var res GetStackResult
 
-	if doc == nil {
-		return res, errdefs.ErrStackNameRequired
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(stack.Metadata.Name)
 	if name == "" {
 		return res, errdefs.ErrStackNameRequired
 	}
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(stack.Spec.RealmName)
 	if realmName == "" {
 		return res, errdefs.ErrRealmNameRequired
 	}
-	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	spaceName := strings.TrimSpace(stack.Spec.SpaceName)
 	if spaceName == "" {
 		return res, errdefs.ErrSpaceNameRequired
 	}
 
-	// Build minimal internal stack for GetStack lookup
+	// Build lookup stack for runner
 	lookupStack := intmodel.Stack{
 		Metadata: intmodel.StackMetadata{
 			Name: name,
@@ -265,16 +241,11 @@ func (b *Exec) GetStack(doc *v1beta1.StackDoc) (GetStackResult, error) {
 		}
 	} else {
 		res.MetadataExists = true
-		// Convert internal stack back to external for ExistsCgroup
-		stackDoc, convErr := apischeme.BuildStackExternalFromInternal(internalStack, apischeme.VersionV1Beta1)
-		if convErr != nil {
-			return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convErr)
-		}
 		res.CgroupExists, err = b.runner.ExistsCgroup(internalStack)
 		if err != nil {
 			return res, fmt.Errorf("failed to check if stack cgroup exists: %w", err)
 		}
-		res.StackDoc = &stackDoc
+		res.Stack = internalStack
 	}
 
 	return res, nil
@@ -313,31 +284,27 @@ func (b *Exec) ListStacks(realmName, spaceName string) ([]*v1beta1.StackDoc, err
 }
 
 // GetCell retrieves a single cell and reports its current state.
-func (b *Exec) GetCell(doc *v1beta1.CellDoc) (GetCellResult, error) {
+func (b *Exec) GetCell(cell intmodel.Cell) (GetCellResult, error) {
 	var res GetCellResult
 
-	if doc == nil {
-		return res, errdefs.ErrCellNameRequired
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(cell.Metadata.Name)
 	if name == "" {
 		return res, errdefs.ErrCellNameRequired
 	}
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
 	if realmName == "" {
 		return res, errdefs.ErrRealmNameRequired
 	}
-	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
 	if spaceName == "" {
 		return res, errdefs.ErrSpaceNameRequired
 	}
-	stackName := strings.TrimSpace(doc.Spec.StackID)
+	stackName := strings.TrimSpace(cell.Spec.StackName)
 	if stackName == "" {
 		return res, errdefs.ErrStackNameRequired
 	}
 
-	// Convert external doc to internal model for runner.GetCell
+	// Build lookup cell for runner
 	lookupCell := intmodel.Cell{
 		Metadata: intmodel.CellMetadata{
 			Name: name,
@@ -358,23 +325,18 @@ func (b *Exec) GetCell(doc *v1beta1.CellDoc) (GetCellResult, error) {
 		}
 	} else {
 		res.MetadataExists = true
-		// Convert internal cell back to external for verification and ExistsCgroup
-		cellDoc, convErr := apischeme.BuildCellExternalFromInternal(internalCell, apischeme.VersionV1Beta1)
-		if convErr != nil {
-			return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convErr)
-		}
 		// Verify realm, space, and stack match
-		if cellDoc.Spec.RealmID != realmName {
+		if internalCell.Spec.RealmName != realmName {
 			return res, fmt.Errorf("cell %q not found in realm %q (found in realm %q) at run-path %q",
-				name, realmName, cellDoc.Spec.RealmID, b.opts.RunPath)
+				name, realmName, internalCell.Spec.RealmName, b.opts.RunPath)
 		}
-		if cellDoc.Spec.SpaceID != spaceName {
+		if internalCell.Spec.SpaceName != spaceName {
 			return res, fmt.Errorf("cell %q not found in space %q (found in space %q) at run-path %q",
-				name, spaceName, cellDoc.Spec.SpaceID, b.opts.RunPath)
+				name, spaceName, internalCell.Spec.SpaceName, b.opts.RunPath)
 		}
-		if cellDoc.Spec.StackID != stackName {
+		if internalCell.Spec.StackName != stackName {
 			return res, fmt.Errorf("cell %q not found in stack %q (found in stack %q) at run-path %q",
-				name, stackName, cellDoc.Spec.StackID, b.opts.RunPath)
+				name, stackName, internalCell.Spec.StackName, b.opts.RunPath)
 		}
 		res.CgroupExists, err = b.runner.ExistsCgroup(internalCell)
 		if err != nil {
@@ -384,7 +346,7 @@ func (b *Exec) GetCell(doc *v1beta1.CellDoc) (GetCellResult, error) {
 		if err != nil {
 			return res, fmt.Errorf("failed to check root container: %w", err)
 		}
-		res.CellDoc = &cellDoc
+		res.Cell = internalCell
 	}
 
 	return res, nil
@@ -424,45 +386,42 @@ func (b *Exec) ListCells(realmName, spaceName, stackName string) ([]*v1beta1.Cel
 }
 
 // GetContainer retrieves a single container and reports its current state.
-func (b *Exec) GetContainer(doc *v1beta1.ContainerDoc) (GetContainerResult, error) {
+func (b *Exec) GetContainer(container intmodel.Container) (GetContainerResult, error) {
 	var res GetContainerResult
 
-	if doc == nil {
-		return res, errdefs.ErrContainerNameRequired
-	}
-
-	name := strings.TrimSpace(doc.Metadata.Name)
+	name := strings.TrimSpace(container.Metadata.Name)
 	if name == "" {
 		return res, errdefs.ErrContainerNameRequired
 	}
-	realmName := strings.TrimSpace(doc.Spec.RealmID)
+	realmName := strings.TrimSpace(container.Spec.RealmName)
 	if realmName == "" {
 		return res, errdefs.ErrRealmNameRequired
 	}
-	spaceName := strings.TrimSpace(doc.Spec.SpaceID)
+	spaceName := strings.TrimSpace(container.Spec.SpaceName)
 	if spaceName == "" {
 		return res, errdefs.ErrSpaceNameRequired
 	}
-	stackName := strings.TrimSpace(doc.Spec.StackID)
+	stackName := strings.TrimSpace(container.Spec.StackName)
 	if stackName == "" {
 		return res, errdefs.ErrStackNameRequired
 	}
-	cellName := strings.TrimSpace(doc.Spec.CellID)
+	cellName := strings.TrimSpace(container.Spec.CellName)
 	if cellName == "" {
 		return res, errdefs.ErrCellNameRequired
 	}
 
-	cellDoc := &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
+	// Build lookup cell for GetCell
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
 			Name: cellName,
 		},
-		Spec: v1beta1.CellSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-			StackID: stackName,
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
 		},
 	}
-	cellResult, err := b.GetCell(cellDoc)
+	cellResult, err := b.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			res.CellMetadataExists = false
@@ -471,37 +430,42 @@ func (b *Exec) GetContainer(doc *v1beta1.ContainerDoc) (GetContainerResult, erro
 		}
 	} else {
 		res.CellMetadataExists = true
-		if cellResult.CellDoc == nil {
+		if !cellResult.MetadataExists {
 			return res, fmt.Errorf("cell %q not found", cellName)
 		}
 
 		// Find container in cell spec by name (ID now stores just the container name)
-		var containerSpec *v1beta1.ContainerSpec
-		for i := range cellResult.CellDoc.Spec.Containers {
-			if cellResult.CellDoc.Spec.Containers[i].ID == name {
-				containerSpec = &cellResult.CellDoc.Spec.Containers[i]
-				break
+		var foundContainerSpec *intmodel.ContainerSpec
+
+		// Check root container first
+		if cellResult.Cell.Spec.RootContainer != nil && cellResult.Cell.Spec.RootContainer.ID == name {
+			foundContainerSpec = cellResult.Cell.Spec.RootContainer
+		} else {
+			// Check regular containers
+			for i := range cellResult.Cell.Spec.Containers {
+				if cellResult.Cell.Spec.Containers[i].ID == name {
+					foundContainerSpec = &cellResult.Cell.Spec.Containers[i]
+					break
+				}
 			}
 		}
 
-		if containerSpec != nil {
+		if foundContainerSpec != nil {
 			res.ContainerExists = true
-			// Construct ContainerDoc from the found container spec
-			labels := doc.Metadata.Labels
+			// Construct Container from the found container spec
+			labels := container.Metadata.Labels
 			if labels == nil {
 				labels = make(map[string]string)
 			}
 
-			res.ContainerDoc = &v1beta1.ContainerDoc{
-				APIVersion: v1beta1.APIVersionV1Beta1,
-				Kind:       v1beta1.KindContainer,
-				Metadata: v1beta1.ContainerMetadata{
+			res.Container = intmodel.Container{
+				Metadata: intmodel.ContainerMetadata{
 					Name:   name,
 					Labels: labels,
 				},
-				Spec: *containerSpec,
-				Status: v1beta1.ContainerStatus{
-					State: v1beta1.ContainerStateReady,
+				Spec: *foundContainerSpec,
+				Status: intmodel.ContainerStatus{
+					State: intmodel.ContainerStateReady,
 				},
 			}
 		} else {
@@ -535,25 +499,29 @@ func (b *Exec) ListContainers(realmName, spaceName, stackName, cellName string) 
 			}
 			// For other errors, fall back to GetCell (which may call containerd)
 			// This preserves existing behavior for non-autocomplete use cases
-			doc := &v1beta1.CellDoc{
-				Metadata: v1beta1.CellMetadata{
+			lookupCell := intmodel.Cell{
+				Metadata: intmodel.CellMetadata{
 					Name: cellName,
 				},
-				Spec: v1beta1.CellSpec{
-					RealmID: realmName,
-					SpaceID: spaceName,
-					StackID: stackName,
+				Spec: intmodel.CellSpec{
+					RealmName: realmName,
+					SpaceName: spaceName,
+					StackName: stackName,
 				},
 			}
-			result, getErr := b.GetCell(doc)
+			result, getErr := b.GetCell(lookupCell)
 			if getErr != nil {
 				return nil, getErr
 			}
-			cellDoc := result.CellDoc
-			if cellDoc == nil {
+			if !result.MetadataExists {
 				return nil, fmt.Errorf("cell %q not found", cellName)
 			}
-			cells = []*v1beta1.CellDoc{cellDoc}
+			// Convert back to external for cells list (temporary until ListContainers is refactored)
+			cellDoc, convertErr := apischeme.BuildCellExternalFromInternal(result.Cell, apischeme.VersionV1Beta1)
+			if convertErr != nil {
+				return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+			}
+			cells = []*v1beta1.CellDoc{&cellDoc}
 		} else {
 			// Successfully read from metadata file - use it directly without containerd
 			cells = []*v1beta1.CellDoc{&cell}

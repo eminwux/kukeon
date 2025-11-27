@@ -103,9 +103,6 @@ func (b *Exec) StopCell(doc *v1beta1.CellDoc) (StopCellResult, error) {
 
 	// Use the same internal cell for UpdateCellMetadata
 	cell := internalCell
-	if err != nil {
-		return result, fmt.Errorf("failed to convert cell to internal model: %w", err)
-	}
 	cell.Status.State = intmodel.CellStatePending
 
 	// Update cell metadata state to Pending (stopped)
@@ -173,18 +170,18 @@ func (b *Exec) StopContainer(doc *v1beta1.ContainerDoc) (StopContainerResult, er
 
 	res.ContainerDoc = doc
 
-	// Get cell document
-	cellDocReq := &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
+	// Build lookup cell for GetCell (using internal types)
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
 			Name: cellName,
 		},
-		Spec: v1beta1.CellSpec{
-			RealmID: realmName,
-			SpaceID: spaceName,
-			StackID: stackName,
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: stackName,
 		},
 	}
-	getResult, err := b.GetCell(cellDocReq)
+	getResult, err := b.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return res, fmt.Errorf(
@@ -197,10 +194,15 @@ func (b *Exec) StopContainer(doc *v1beta1.ContainerDoc) (StopContainerResult, er
 		}
 		return res, err
 	}
-	cellDoc := getResult.CellDoc
-	if cellDoc == nil {
+	if !getResult.MetadataExists {
 		return res, fmt.Errorf("cell %q not found", cellName)
 	}
+	// Convert internal cell back to external
+	cellDocExternal, err := apischeme.BuildCellExternalFromInternal(getResult.Cell, apischeme.VersionV1Beta1)
+	if err != nil {
+		return res, fmt.Errorf("failed to convert cell to external model: %w", err)
+	}
+	cellDoc := &cellDocExternal
 
 	// Convert external cell to internal for runner.StopContainer
 	internalCell, err := apischeme.ConvertCellDocToInternal(*cellDoc)
@@ -215,9 +217,6 @@ func (b *Exec) StopContainer(doc *v1beta1.ContainerDoc) (StopContainerResult, er
 
 	// Use the same internal cell for UpdateCellMetadata
 	cell := internalCell
-	if err != nil {
-		return res, fmt.Errorf("failed to convert cell to internal model: %w", err)
-	}
 
 	// Update cell metadata (state remains Ready if other containers are running)
 	// The state management can be enhanced later to track individual container states
