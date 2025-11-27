@@ -29,16 +29,20 @@ type Runner interface {
 	BootstrapCNI(cfgDir, cacheDir, binDir string) (cni.BootstrapReport, error)
 
 	GetRealm(realm intmodel.Realm) (intmodel.Realm, error)
+	ListRealms() ([]intmodel.Realm, error)
 	CreateRealm(realm intmodel.Realm) (intmodel.Realm, error)
 	ExistsRealmContainerdNamespace(namespace string) (bool, error)
 	DeleteRealm(realm intmodel.Realm) (DeleteRealmOutcome, error)
 
 	GetSpace(space intmodel.Space) (intmodel.Space, error)
+	ListSpaces(realmName string) ([]intmodel.Space, error)
 	CreateSpace(space intmodel.Space) (intmodel.Space, error)
 	ExistsSpaceCNIConfig(space intmodel.Space) (bool, error)
 	DeleteSpace(space intmodel.Space) error
 
 	GetCell(cell intmodel.Cell) (intmodel.Cell, error)
+	ListCells(realmName, spaceName, stackName string) ([]intmodel.Cell, error)
+	ListContainers(realmName, spaceName, stackName, cellName string) ([]intmodel.ContainerSpec, error)
 	CreateCell(cell intmodel.Cell) (intmodel.Cell, error)
 	StartCell(cell intmodel.Cell) error
 	StopCell(cell intmodel.Cell) error
@@ -51,6 +55,7 @@ type Runner interface {
 	DeleteCell(cell intmodel.Cell) error
 
 	GetStack(stack intmodel.Stack) (intmodel.Stack, error)
+	ListStacks(realmName, spaceName string) ([]intmodel.Stack, error)
 	CreateStack(stack intmodel.Stack) (intmodel.Stack, error)
 	DeleteStack(stack intmodel.Stack) error
 

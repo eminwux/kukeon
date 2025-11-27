@@ -34,7 +34,7 @@ import (
 
 type SpaceController interface {
 	GetSpace(space intmodel.Space) (controller.GetSpaceResult, error)
-	ListSpaces(realm string) ([]*v1beta1.SpaceDoc, error)
+	ListSpaces(realm string) ([]intmodel.Space, error)
 }
 
 type spaceController = SpaceController // internal alias for backward compatibility
@@ -123,12 +123,22 @@ func NewSpaceCmd() *cobra.Command {
 			}
 
 			// List spaces (optionally filtered by realm)
-			spaces, listErr := ctrl.ListSpaces(realm)
+			internalSpaces, listErr := ctrl.ListSpaces(realm)
 			if listErr != nil {
 				return listErr
 			}
 
-			return printSpaces(cmd, spaces, outputFormat)
+			// Convert internal spaces to external for printing
+			externalSpaces := make([]*v1beta1.SpaceDoc, 0, len(internalSpaces))
+			for _, space := range internalSpaces {
+				spaceDoc, convertErr := apischeme.BuildSpaceExternalFromInternal(space, apischeme.VersionV1Beta1)
+				if convertErr != nil {
+					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+				}
+				externalSpaces = append(externalSpaces, &spaceDoc)
+			}
+
+			return printSpaces(cmd, externalSpaces, outputFormat)
 		},
 	}
 
@@ -214,6 +224,6 @@ func (w *controllerWrapper) GetSpace(space intmodel.Space) (controller.GetSpaceR
 	return w.ctrl.GetSpace(space)
 }
 
-func (w *controllerWrapper) ListSpaces(realm string) ([]*v1beta1.SpaceDoc, error) {
+func (w *controllerWrapper) ListSpaces(realm string) ([]intmodel.Space, error) {
 	return w.ctrl.ListSpaces(realm)
 }

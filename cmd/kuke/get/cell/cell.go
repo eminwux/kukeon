@@ -34,7 +34,7 @@ import (
 
 type CellController interface {
 	GetCell(cell intmodel.Cell) (controller.GetCellResult, error)
-	ListCells(realm, space, stack string) ([]*v1beta1.CellDoc, error)
+	ListCells(realm, space, stack string) ([]intmodel.Cell, error)
 }
 
 type cellController = CellController // internal alias for backward compatibility
@@ -155,12 +155,22 @@ func NewCellCmd() *cobra.Command {
 			}
 
 			// List cells (optionally filtered by realm, space, and/or stack)
-			cells, listErr := ctrl.ListCells(realm, space, stack)
+			internalCells, listErr := ctrl.ListCells(realm, space, stack)
 			if listErr != nil {
 				return listErr
 			}
 
-			return printCells(cmd, cells, outputFormat)
+			// Convert internal cells to external for printing
+			externalCells := make([]*v1beta1.CellDoc, 0, len(internalCells))
+			for _, cell := range internalCells {
+				cellDoc, convertErr := apischeme.BuildCellExternalFromInternal(cell, apischeme.VersionV1Beta1)
+				if convertErr != nil {
+					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+				}
+				externalCells = append(externalCells, &cellDoc)
+			}
+
+			return printCells(cmd, externalCells, outputFormat)
 		},
 	}
 
@@ -252,6 +262,6 @@ func (w *controllerWrapper) GetCell(cell intmodel.Cell) (controller.GetCellResul
 	return w.ctrl.GetCell(cell)
 }
 
-func (w *controllerWrapper) ListCells(realm, space, stack string) ([]*v1beta1.CellDoc, error) {
+func (w *controllerWrapper) ListCells(realm, space, stack string) ([]intmodel.Cell, error) {
 	return w.ctrl.ListCells(realm, space, stack)
 }

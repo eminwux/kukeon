@@ -369,8 +369,14 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			name:       "list realms success",
 			outputFlag: "yaml",
 			controller: &fakeRealmController{
-				listRealmsFn: func() ([]*v1beta1.RealmDoc, error) {
-					return docList, nil
+				listRealmsFn: func() ([]intmodel.Realm, error) {
+					// Convert docList to internal types
+					internalRealms := make([]intmodel.Realm, 0, len(docList))
+					for _, doc := range docList {
+						realmInternal, _, _ := apischeme.NormalizeRealm(*doc)
+						internalRealms = append(internalRealms, realmInternal)
+					}
+					return internalRealms, nil
 				},
 			},
 			wantOutput: []string{"name: alpha"},
@@ -448,7 +454,7 @@ func TestNewRealmCmdRunE(t *testing.T) {
 
 type fakeRealmController struct {
 	getRealmFn   func(realm intmodel.Realm) (controller.GetRealmResult, error)
-	listRealmsFn func() ([]*v1beta1.RealmDoc, error)
+	listRealmsFn func() ([]intmodel.Realm, error)
 }
 
 func (f *fakeRealmController) GetRealm(realm intmodel.Realm) (controller.GetRealmResult, error) {
@@ -458,7 +464,7 @@ func (f *fakeRealmController) GetRealm(realm intmodel.Realm) (controller.GetReal
 	return f.getRealmFn(realm)
 }
 
-func (f *fakeRealmController) ListRealms() ([]*v1beta1.RealmDoc, error) {
+func (f *fakeRealmController) ListRealms() ([]intmodel.Realm, error) {
 	if f.listRealmsFn == nil {
 		return nil, errors.New("unexpected ListRealms call")
 	}

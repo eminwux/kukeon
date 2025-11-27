@@ -357,9 +357,9 @@ func convertContainerSpecToInternal(in ext.ContainerSpec) intmodel.ContainerSpec
 	}
 }
 
-// buildContainerSpecExternalFromInternal converts an internal ContainerSpec to the external ContainerSpec type.
+// BuildContainerSpecExternalFromInternal converts an internal ContainerSpec to the external ContainerSpec type.
 // This is used for nested ContainerSpecs in CellSpec.
-func buildContainerSpecExternalFromInternal(in intmodel.ContainerSpec) ext.ContainerSpec {
+func BuildContainerSpecExternalFromInternal(in intmodel.ContainerSpec) ext.ContainerSpec {
 	return ext.ContainerSpec{
 		ID:              in.ID,
 		RealmID:         in.RealmName,
@@ -445,14 +445,14 @@ func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ex
 
 		// Convert nested RootContainer if present
 		if in.Spec.RootContainer != nil {
-			rootContainer := buildContainerSpecExternalFromInternal(*in.Spec.RootContainer)
+			rootContainer := BuildContainerSpecExternalFromInternal(*in.Spec.RootContainer)
 			cell.Spec.RootContainer = &rootContainer
 		}
 
 		// Convert nested Containers slice
 		cell.Spec.Containers = make([]ext.ContainerSpec, len(in.Spec.Containers))
 		for i, intContainer := range in.Spec.Containers {
-			cell.Spec.Containers[i] = buildContainerSpecExternalFromInternal(intContainer)
+			cell.Spec.Containers[i] = BuildContainerSpecExternalFromInternal(intContainer)
 		}
 
 		return cell, nil

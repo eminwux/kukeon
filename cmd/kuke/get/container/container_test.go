@@ -463,11 +463,16 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			name:       "list containers success",
 			outputFlag: "yaml",
 			controller: &fakeContainerController{
-				listContainersFn: func(realm string, space, stack, cell string) ([]*v1beta1.ContainerSpec, error) {
+				listContainersFn: func(realm string, space, stack, cell string) ([]intmodel.ContainerSpec, error) {
 					if realm != "" || space != "" || stack != "" || cell != "" {
 						return nil, errors.New("unexpected filters")
 					}
-					return containerList, nil
+					// Convert containerList to internal types
+					internalContainers := make([]intmodel.ContainerSpec, 0, len(containerList))
+					for _, extSpec := range containerList {
+						internalContainers = append(internalContainers, convertContainerSpecToInternalTest(*extSpec))
+					}
+					return internalContainers, nil
 				},
 			},
 			wantPrinted: containerList,
@@ -480,11 +485,16 @@ func TestNewContainerCmdRunE(t *testing.T) {
 			cellFlag:   "jupiter",
 			outputFlag: "json",
 			controller: &fakeContainerController{
-				listContainersFn: func(realm string, space, stack, cell string) ([]*v1beta1.ContainerSpec, error) {
+				listContainersFn: func(realm string, space, stack, cell string) ([]intmodel.ContainerSpec, error) {
 					if realm != "earth" || space != "mars" || stack != "venus" || cell != "jupiter" {
 						return nil, errors.New("unexpected filters")
 					}
-					return containerList, nil
+					// Convert containerList to internal types
+					internalContainers := make([]intmodel.ContainerSpec, 0, len(containerList))
+					for _, extSpec := range containerList {
+						internalContainers = append(internalContainers, convertContainerSpecToInternalTest(*extSpec))
+					}
+					return internalContainers, nil
 				},
 			},
 			wantPrinted: containerList,
@@ -546,7 +556,7 @@ func TestNewContainerCmdRunE(t *testing.T) {
 		{
 			name: "controller error for list containers",
 			controller: &fakeContainerController{
-				listContainersFn: func(_ string, _ string, _ string, _ string) ([]*v1beta1.ContainerSpec, error) {
+				listContainersFn: func(_ string, _ string, _ string, _ string) ([]intmodel.ContainerSpec, error) {
 					return nil, errors.New("list error")
 				},
 			},
@@ -698,7 +708,7 @@ func TestNewContainerCmdRunE(t *testing.T) {
 
 type fakeContainerController struct {
 	getContainerFn   func(ctr intmodel.Container) (container.GetContainerResult, error)
-	listContainersFn func(realm, space, stack, cell string) ([]*v1beta1.ContainerSpec, error)
+	listContainersFn func(realm, space, stack, cell string) ([]intmodel.ContainerSpec, error)
 }
 
 func (f *fakeContainerController) GetContainer(
@@ -712,7 +722,7 @@ func (f *fakeContainerController) GetContainer(
 
 func (f *fakeContainerController) ListContainers(
 	realmName, spaceName, stackName, cellName string,
-) ([]*v1beta1.ContainerSpec, error) {
+) ([]intmodel.ContainerSpec, error) {
 	if f.listContainersFn == nil {
 		return nil, errors.New("unexpected ListContainers call")
 	}
@@ -772,4 +782,27 @@ func TestNewContainerCmd_AutocompleteRegistration(t *testing.T) {
 	// We can't directly access the registered functions, but the fact that
 	// ValidArgsFunction is set and flags exist confirms the structure is correct.
 	// The short flag "o" is an alias for "output" and uses the same completion function.
+}
+
+// convertContainerSpecToInternalTest converts an external ContainerSpec to internal ContainerSpec for testing.
+func convertContainerSpecToInternalTest(in v1beta1.ContainerSpec) intmodel.ContainerSpec {
+	return intmodel.ContainerSpec{
+		ID:              in.ID,
+		RealmName:       in.RealmID,
+		SpaceName:       in.SpaceID,
+		StackName:       in.StackID,
+		CellName:        in.CellID,
+		Root:            in.Root,
+		Image:           in.Image,
+		Command:         in.Command,
+		Args:            in.Args,
+		Env:             in.Env,
+		Ports:           in.Ports,
+		Volumes:         in.Volumes,
+		Networks:        in.Networks,
+		NetworksAliases: in.NetworksAliases,
+		Privileged:      in.Privileged,
+		CNIConfigPath:   in.CNIConfigPath,
+		RestartPolicy:   in.RestartPolicy,
+	}
 }

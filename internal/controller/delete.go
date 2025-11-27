@@ -21,10 +21,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // DeleteRealmResult reports what was deleted during realm deletion.
@@ -111,23 +109,18 @@ func (b *Exec) DeleteRealm(realm intmodel.Realm, force, cascade bool) (DeleteRea
 	}
 
 	// If cascade, delete all spaces first
-	var spaces []*v1beta1.SpaceDoc
+	var spaces []intmodel.Space
 	if cascade {
 		spaces, err = b.ListSpaces(name)
 		if err != nil {
 			return res, fmt.Errorf("failed to list spaces: %w", err)
 		}
-		for _, spaceDoc := range spaces {
-			// Convert external space to internal at boundary
-			spaceInternal, _, convertErr := apischeme.NormalizeSpace(*spaceDoc)
-			if convertErr != nil {
-				return res, fmt.Errorf("failed to convert space %q: %w", spaceDoc.Metadata.Name, convertErr)
-			}
+		for _, spaceInternal := range spaces {
 			_, err = b.DeleteSpace(spaceInternal, force, cascade)
 			if err != nil {
-				return res, fmt.Errorf("failed to delete space %q: %w", spaceDoc.Metadata.Name, err)
+				return res, fmt.Errorf("failed to delete space %q: %w", spaceInternal.Metadata.Name, err)
 			}
-			res.Deleted = append(res.Deleted, fmt.Sprintf("space:%s", spaceDoc.Metadata.Name))
+			res.Deleted = append(res.Deleted, fmt.Sprintf("space:%s", spaceInternal.Metadata.Name))
 		}
 	} else if !force {
 		// Validate no spaces exist
@@ -207,26 +200,18 @@ func (b *Exec) DeleteSpace(space intmodel.Space, force, cascade bool) (DeleteSpa
 	}
 
 	// If cascade, delete all stacks first (recursively cascades to cells)
-	var stacks []*v1beta1.StackDoc
+	var stacks []intmodel.Stack
 	if cascade {
 		stacks, err = b.ListStacks(realmName, name)
 		if err != nil {
 			return res, fmt.Errorf("failed to list stacks: %w", err)
 		}
-		for _, stackDoc := range stacks {
-			if stackDoc == nil {
-				continue
-			}
-			// Convert external stack to internal at boundary
-			stackInternal, _, convertErr := apischeme.NormalizeStack(*stackDoc)
-			if convertErr != nil {
-				return res, fmt.Errorf("failed to convert stack %q: %w", stackDoc.Metadata.Name, convertErr)
-			}
+		for _, stackInternal := range stacks {
 			_, err = b.DeleteStack(stackInternal, force, cascade)
 			if err != nil {
-				return res, fmt.Errorf("failed to delete stack %q: %w", stackDoc.Metadata.Name, err)
+				return res, fmt.Errorf("failed to delete stack %q: %w", stackInternal.Metadata.Name, err)
 			}
-			res.Deleted = append(res.Deleted, fmt.Sprintf("stack:%s", stackDoc.Metadata.Name))
+			res.Deleted = append(res.Deleted, fmt.Sprintf("stack:%s", stackInternal.Metadata.Name))
 		}
 	} else if !force {
 		// Validate no stacks exist
@@ -302,23 +287,18 @@ func (b *Exec) DeleteStack(stack intmodel.Stack, force, cascade bool) (DeleteSta
 	}
 
 	// If cascade, delete all cells first
-	var cells []*v1beta1.CellDoc
+	var cells []intmodel.Cell
 	if cascade {
 		cells, err = b.ListCells(realmName, spaceName, name)
 		if err != nil {
 			return res, fmt.Errorf("failed to list cells: %w", err)
 		}
-		for _, cellDoc := range cells {
-			// Convert external cell to internal at boundary
-			cellInternal, _, convertErr := apischeme.NormalizeCell(*cellDoc)
-			if convertErr != nil {
-				return res, fmt.Errorf("failed to convert cell %q: %w", cellDoc.Metadata.Name, convertErr)
-			}
+		for _, cellInternal := range cells {
 			_, err = b.DeleteCell(cellInternal)
 			if err != nil {
-				return res, fmt.Errorf("failed to delete cell %q: %w", cellDoc.Metadata.Name, err)
+				return res, fmt.Errorf("failed to delete cell %q: %w", cellInternal.Metadata.Name, err)
 			}
-			res.Deleted = append(res.Deleted, fmt.Sprintf("cell:%s", cellDoc.Metadata.Name))
+			res.Deleted = append(res.Deleted, fmt.Sprintf("cell:%s", cellInternal.Metadata.Name))
 		}
 	} else if !force {
 		// Validate no cells exist

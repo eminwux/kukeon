@@ -37,7 +37,7 @@ type GetContainerResult = controller.GetContainerResult
 
 type ContainerController interface {
 	GetContainer(container intmodel.Container) (GetContainerResult, error)
-	ListContainers(realmName, spaceName, stackName, cellName string) ([]*v1beta1.ContainerSpec, error)
+	ListContainers(realmName, spaceName, stackName, cellName string) ([]intmodel.ContainerSpec, error)
 }
 
 type containerController = ContainerController // internal alias for backward compatibility
@@ -228,12 +228,19 @@ func runContainerCmdWithDeps(
 	}
 
 	// List containers (optionally filtered by realm, space, stack, and/or cell)
-	containers, err := ctrl.ListContainers(realm, space, stack, cell)
+	internalContainers, err := ctrl.ListContainers(realm, space, stack, cell)
 	if err != nil {
 		return err
 	}
 
-	return printContainers(cmd, containers, outputFormat, printYAML, printJSON, printTable)
+	// Convert internal containers to external for printing
+	externalContainers := make([]*v1beta1.ContainerSpec, 0, len(internalContainers))
+	for _, container := range internalContainers {
+		containerSpec := apischeme.BuildContainerSpecExternalFromInternal(container)
+		externalContainers = append(externalContainers, &containerSpec)
+	}
+
+	return printContainers(cmd, externalContainers, outputFormat, printYAML, printJSON, printTable)
 }
 
 func printContainer(
@@ -330,6 +337,6 @@ func (w *controllerWrapper) GetContainer(
 
 func (w *controllerWrapper) ListContainers(
 	realmName, spaceName, stackName, cellName string,
-) ([]*v1beta1.ContainerSpec, error) {
+) ([]intmodel.ContainerSpec, error) {
 	return w.ctrl.ListContainers(realmName, spaceName, stackName, cellName)
 }

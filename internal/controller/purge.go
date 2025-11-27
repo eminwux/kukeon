@@ -21,10 +21,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // PurgeRealmResult reports what was purged during realm purging.
@@ -122,26 +120,21 @@ func (b *Exec) PurgeRealm(realm intmodel.Realm, force, cascade bool) (PurgeRealm
 
 	// If cascade, purge all spaces first
 	if cascade {
-		var spaces []*v1beta1.SpaceDoc
+		var spaces []intmodel.Space
 		spaces, err = b.ListSpaces(name)
 		if err != nil {
 			return result, fmt.Errorf("failed to list spaces: %w", err)
 		}
-		for _, space := range spaces {
-			// Convert at boundary for PurgeSpace (space is external, convert to internal)
-			spaceInternal, convertErr := apischeme.ConvertSpaceDocToInternal(*space)
-			if convertErr != nil {
-				return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-			}
+		for _, spaceInternal := range spaces {
 			_, err = b.PurgeSpace(spaceInternal, force, cascade)
 			if err != nil {
-				return result, fmt.Errorf("failed to purge space %q: %w", space.Metadata.Name, err)
+				return result, fmt.Errorf("failed to purge space %q: %w", spaceInternal.Metadata.Name, err)
 			}
-			result.Deleted = append(result.Deleted, fmt.Sprintf("space:%s", space.Metadata.Name))
+			result.Deleted = append(result.Deleted, fmt.Sprintf("space:%s", spaceInternal.Metadata.Name))
 		}
 	} else if !force {
 		// Validate no spaces exist
-		var spaces []*v1beta1.SpaceDoc
+		var spaces []intmodel.Space
 		spaces, err = b.ListSpaces(name)
 		if err != nil {
 			return result, fmt.Errorf("failed to list spaces: %w", err)
@@ -224,26 +217,21 @@ func (b *Exec) PurgeSpace(space intmodel.Space, force, cascade bool) (PurgeSpace
 
 	// If cascade, purge all stacks first (recursively cascades to cells)
 	if cascade {
-		var stacks []*v1beta1.StackDoc
+		var stacks []intmodel.Stack
 		stacks, err = b.ListStacks(realmName, name)
 		if err != nil {
 			return result, fmt.Errorf("failed to list stacks: %w", err)
 		}
-		for _, stack := range stacks {
-			// Convert at boundary for PurgeStack (stack is external, convert to internal)
-			stackInternal, convertErr := apischeme.ConvertStackDocToInternal(*stack)
-			if convertErr != nil {
-				return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-			}
+		for _, stackInternal := range stacks {
 			_, err = b.PurgeStack(stackInternal, force, cascade)
 			if err != nil {
-				return result, fmt.Errorf("failed to purge stack %q: %w", stack.Metadata.Name, err)
+				return result, fmt.Errorf("failed to purge stack %q: %w", stackInternal.Metadata.Name, err)
 			}
-			result.Deleted = append(result.Deleted, fmt.Sprintf("stack:%s", stack.Metadata.Name))
+			result.Deleted = append(result.Deleted, fmt.Sprintf("stack:%s", stackInternal.Metadata.Name))
 		}
 	} else if !force {
 		// Validate no stacks exist
-		var stacks []*v1beta1.StackDoc
+		var stacks []intmodel.Stack
 		stacks, err = b.ListStacks(realmName, name)
 		if err != nil {
 			return result, fmt.Errorf("failed to list stacks: %w", err)
@@ -327,26 +315,21 @@ func (b *Exec) PurgeStack(stack intmodel.Stack, force, cascade bool) (PurgeStack
 
 	// If cascade, purge all cells first
 	if cascade {
-		var cells []*v1beta1.CellDoc
+		var cells []intmodel.Cell
 		cells, err = b.ListCells(realmName, spaceName, name)
 		if err != nil {
 			return result, fmt.Errorf("failed to list cells: %w", err)
 		}
-		for _, cell := range cells {
-			// Convert at boundary for PurgeCell (cell is external, convert to internal)
-			cellInternal, convertErr := apischeme.ConvertCellDocToInternal(*cell)
-			if convertErr != nil {
-				return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-			}
+		for _, cellInternal := range cells {
 			_, err = b.PurgeCell(cellInternal, force, false)
 			if err != nil {
-				return result, fmt.Errorf("failed to purge cell %q: %w", cell.Metadata.Name, err)
+				return result, fmt.Errorf("failed to purge cell %q: %w", cellInternal.Metadata.Name, err)
 			}
-			result.Deleted = append(result.Deleted, fmt.Sprintf("cell:%s", cell.Metadata.Name))
+			result.Deleted = append(result.Deleted, fmt.Sprintf("cell:%s", cellInternal.Metadata.Name))
 		}
 	} else if !force {
 		// Validate no cells exist
-		var cells []*v1beta1.CellDoc
+		var cells []intmodel.Cell
 		cells, err = b.ListCells(realmName, spaceName, name)
 		if err != nil {
 			return result, fmt.Errorf("failed to list cells: %w", err)

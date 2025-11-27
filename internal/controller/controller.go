@@ -23,7 +23,6 @@ import (
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller/runner"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 type Controller interface {
@@ -39,15 +38,15 @@ type Controller interface {
 	DeleteCell(cell intmodel.Cell) (DeleteCellResult, error)
 	DeleteContainer(container intmodel.Container) (DeleteContainerResult, error)
 	GetRealm(realm intmodel.Realm) (GetRealmResult, error)
-	ListRealms() ([]*v1beta1.RealmDoc, error)
+	ListRealms() ([]intmodel.Realm, error)
 	GetSpace(space intmodel.Space) (GetSpaceResult, error)
-	ListSpaces(realmName string) ([]*v1beta1.SpaceDoc, error)
+	ListSpaces(realmName string) ([]intmodel.Space, error)
 	GetStack(stack intmodel.Stack) (GetStackResult, error)
-	ListStacks(realmName, spaceName string) ([]*v1beta1.StackDoc, error)
+	ListStacks(realmName, spaceName string) ([]intmodel.Stack, error)
 	GetCell(cell intmodel.Cell) (GetCellResult, error)
-	ListCells(realmName, spaceName, stackName string) ([]*v1beta1.CellDoc, error)
+	ListCells(realmName, spaceName, stackName string) ([]intmodel.Cell, error)
 	GetContainer(container intmodel.Container) (GetContainerResult, error)
-	ListContainers(realmName, spaceName, stackName, cellName string) ([]*v1beta1.ContainerSpec, error)
+	ListContainers(realmName, spaceName, stackName, cellName string) ([]intmodel.ContainerSpec, error)
 	StartCell(cell intmodel.Cell) (StartCellResult, error)
 	StartContainer(container intmodel.Container) (StartContainerResult, error)
 	StopCell(cell intmodel.Cell) (StopCellResult, error)

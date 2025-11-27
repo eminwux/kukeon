@@ -79,7 +79,7 @@ func TestNewStackCmd(t *testing.T) {
 					t.Fatalf("GetStack should not be called when realm is missing")
 					return controller.GetStackResult{}, errors.New("unreachable")
 				},
-				listStacks: func(_, _ string) ([]*v1beta1.StackDoc, error) {
+				listStacks: func(_, _ string) ([]intmodel.Stack, error) {
 					return nil, errors.New("unexpected list call")
 				},
 			},
@@ -93,7 +93,7 @@ func TestNewStackCmd(t *testing.T) {
 					t.Fatalf("GetStack should not be called when space is missing")
 					return controller.GetStackResult{}, errors.New("unreachable")
 				},
-				listStacks: func(_, _ string) ([]*v1beta1.StackDoc, error) {
+				listStacks: func(_, _ string) ([]intmodel.Stack, error) {
 					return nil, errors.New("unexpected list call")
 				},
 			},
@@ -104,15 +104,21 @@ func TestNewStackCmd(t *testing.T) {
 			cliArgs: []string{"demo", "--realm", " realm-a ", "--space", "\tspace-a"},
 			controller: &fakeStackController{
 				getStack: func(stack intmodel.Stack) (controller.GetStackResult, error) {
-					if stack.Metadata.Name != "demo" || stack.Spec.RealmName != "realm-a" || stack.Spec.SpaceName != "space-a" {
-						t.Fatalf("unexpected GetStack inputs: name=%q realm=%q space=%q", stack.Metadata.Name, stack.Spec.RealmName, stack.Spec.SpaceName)
+					if stack.Metadata.Name != "demo" || stack.Spec.RealmName != "realm-a" ||
+						stack.Spec.SpaceName != "space-a" {
+						t.Fatalf(
+							"unexpected GetStack inputs: name=%q realm=%q space=%q",
+							stack.Metadata.Name,
+							stack.Spec.RealmName,
+							stack.Spec.SpaceName,
+						)
 					}
 					return controller.GetStackResult{
 						Stack:          stack,
 						MetadataExists: true,
 					}, nil
 				},
-				listStacks: func(_, _ string) ([]*v1beta1.StackDoc, error) {
+				listStacks: func(_, _ string) ([]intmodel.Stack, error) {
 					return nil, errors.New("unexpected list call")
 				},
 			},
@@ -125,13 +131,16 @@ func TestNewStackCmd(t *testing.T) {
 				getStack: func(_ intmodel.Stack) (controller.GetStackResult, error) {
 					return controller.GetStackResult{}, errors.New("unexpected get call")
 				},
-				listStacks: func(realm, space string) ([]*v1beta1.StackDoc, error) {
+				listStacks: func(realm, space string) ([]intmodel.Stack, error) {
 					if realm != "realm-x" || space != "space-x" {
 						t.Fatalf("unexpected ListStacks inputs: %q %q", realm, space)
 					}
-					return []*v1beta1.StackDoc{
-						{Metadata: v1beta1.StackMetadata{Name: "a"}},
-					}, nil
+					// Convert external doc to internal
+					doc := &v1beta1.StackDoc{
+						Metadata: v1beta1.StackMetadata{Name: "a"},
+					}
+					stackInternal, _, _ := apischeme.NormalizeStack(*doc)
+					return []intmodel.Stack{stackInternal}, nil
 				},
 			},
 		},
@@ -141,7 +150,7 @@ func TestNewStackCmd(t *testing.T) {
 				getStack: func(_ intmodel.Stack) (controller.GetStackResult, error) {
 					return controller.GetStackResult{}, errors.New("unexpected get call")
 				},
-				listStacks: func(_, _ string) ([]*v1beta1.StackDoc, error) {
+				listStacks: func(_, _ string) ([]intmodel.Stack, error) {
 					return nil, errors.New("boom")
 				},
 			},
@@ -205,7 +214,7 @@ func TestPrintStacks(t *testing.T) {
 
 type fakeStackController struct {
 	getStack   func(stack intmodel.Stack) (controller.GetStackResult, error)
-	listStacks func(realmName, spaceName string) ([]*v1beta1.StackDoc, error)
+	listStacks func(realmName, spaceName string) ([]intmodel.Stack, error)
 }
 
 func (f *fakeStackController) GetStack(stack intmodel.Stack) (controller.GetStackResult, error) {
@@ -215,7 +224,7 @@ func (f *fakeStackController) GetStack(stack intmodel.Stack) (controller.GetStac
 	return f.getStack(stack)
 }
 
-func (f *fakeStackController) ListStacks(realmName, spaceName string) ([]*v1beta1.StackDoc, error) {
+func (f *fakeStackController) ListStacks(realmName, spaceName string) ([]intmodel.Stack, error) {
 	if f.listStacks == nil {
 		panic("ListStacks was called unexpectedly")
 	}
@@ -246,7 +255,8 @@ func TestNewStackCmdRunE(t *testing.T) {
 			spaceFlag: "space-a",
 			controller: &fakeStackController{
 				getStack: func(stack intmodel.Stack) (controller.GetStackResult, error) {
-					if stack.Metadata.Name != "alpha" || stack.Spec.RealmName != "realm-a" || stack.Spec.SpaceName != "space-a" {
+					if stack.Metadata.Name != "alpha" || stack.Spec.RealmName != "realm-a" ||
+						stack.Spec.SpaceName != "space-a" {
 						return controller.GetStackResult{}, errors.New("unexpected args")
 					}
 					// Convert docAlpha to internal for result
@@ -265,11 +275,17 @@ func TestNewStackCmdRunE(t *testing.T) {
 			spaceFlag:  "space-a",
 			outputFlag: "yaml",
 			controller: &fakeStackController{
-				listStacks: func(realm, space string) ([]*v1beta1.StackDoc, error) {
+				listStacks: func(realm, space string) ([]intmodel.Stack, error) {
 					if realm != "realm-a" || space != "space-a" {
 						return nil, errors.New("unexpected args")
 					}
-					return docList, nil
+					// Convert docList to internal types
+					internalStacks := make([]intmodel.Stack, 0, len(docList))
+					for _, doc := range docList {
+						stackInternal, _, _ := apischeme.NormalizeStack(*doc)
+						internalStacks = append(internalStacks, stackInternal)
+					}
+					return internalStacks, nil
 				},
 			},
 			wantOutput: []string{"name: alpha"},

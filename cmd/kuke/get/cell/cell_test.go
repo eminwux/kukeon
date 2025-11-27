@@ -237,7 +237,6 @@ func TestPrintCells(t *testing.T) {
 }
 
 func TestNewCellCmdRunE(t *testing.T) {
-
 	singleDoc := sampleCellDoc("alpha", "realm-a", "space-a", "stack-a", v1beta1.CellStateReady, "/cg/alpha")
 	listDocs := []*v1beta1.CellDoc{
 		singleDoc,
@@ -263,7 +262,9 @@ func TestNewCellCmdRunE(t *testing.T) {
 			},
 			controller: &fakeCellController{
 				getCellFn: func(cell intmodel.Cell) (controller.GetCellResult, error) {
-					if cell.Metadata.Name != "alpha" || cell.Spec.RealmName != "realm-a" || cell.Spec.SpaceName != "space-a" || cell.Spec.StackName != "stack-a" {
+					if cell.Metadata.Name != "alpha" || cell.Spec.RealmName != "realm-a" ||
+						cell.Spec.SpaceName != "space-a" ||
+						cell.Spec.StackName != "stack-a" {
 						return controller.GetCellResult{}, errors.New("unexpected get args")
 					}
 					// Convert singleDoc to internal for result
@@ -288,7 +289,9 @@ func TestNewCellCmdRunE(t *testing.T) {
 			},
 			controller: &fakeCellController{
 				getCellFn: func(cell intmodel.Cell) (controller.GetCellResult, error) {
-					if cell.Metadata.Name != "alpha" || cell.Spec.RealmName != "realm-a" || cell.Spec.SpaceName != "space-a" || cell.Spec.StackName != "stack-a" {
+					if cell.Metadata.Name != "alpha" || cell.Spec.RealmName != "realm-a" ||
+						cell.Spec.SpaceName != "space-a" ||
+						cell.Spec.StackName != "stack-a" {
 						return controller.GetCellResult{}, errors.New("unexpected get args")
 					}
 					// Convert singleDoc to internal for result
@@ -347,11 +350,17 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-a")
 			},
 			controller: &fakeCellController{
-				listCellsFn: func(realm, space, stack string) ([]*v1beta1.CellDoc, error) {
+				listCellsFn: func(realm, space, stack string) ([]intmodel.Cell, error) {
 					if realm != "realm-a" || space != "space-a" || stack != "" {
 						return nil, errors.New("unexpected list args")
 					}
-					return listDocs, nil
+					// Convert listDocs to internal types
+					internalCells := make([]intmodel.Cell, 0, len(listDocs))
+					for _, doc := range listDocs {
+						cellInternal, _, _ := apischeme.NormalizeCell(*doc)
+						internalCells = append(internalCells, cellInternal)
+					}
+					return internalCells, nil
 				},
 			},
 			expectMatch: "alpha",
@@ -359,11 +368,17 @@ func TestNewCellCmdRunE(t *testing.T) {
 		{
 			name: "list cells default filters",
 			controller: &fakeCellController{
-				listCellsFn: func(realm, space, stack string) ([]*v1beta1.CellDoc, error) {
+				listCellsFn: func(realm, space, stack string) ([]intmodel.Cell, error) {
 					if realm != "" || space != "" || stack != "" {
 						return nil, errors.New("expected empty filters")
 					}
-					return listDocs, nil
+					// Convert listDocs to internal types
+					internalCells := make([]intmodel.Cell, 0, len(listDocs))
+					for _, doc := range listDocs {
+						cellInternal, _, _ := apischeme.NormalizeCell(*doc)
+						internalCells = append(internalCells, cellInternal)
+					}
+					return internalCells, nil
 				},
 			},
 			expectMatch: "alpha",
@@ -450,7 +465,7 @@ func captureStdout(fn func() error) (string, error) {
 
 type fakeCellController struct {
 	getCellFn   func(cell intmodel.Cell) (controller.GetCellResult, error)
-	listCellsFn func(realm, space, stack string) ([]*v1beta1.CellDoc, error)
+	listCellsFn func(realm, space, stack string) ([]intmodel.Cell, error)
 }
 
 func (f *fakeCellController) GetCell(cell intmodel.Cell) (controller.GetCellResult, error) {
@@ -460,7 +475,7 @@ func (f *fakeCellController) GetCell(cell intmodel.Cell) (controller.GetCellResu
 	return f.getCellFn(cell)
 }
 
-func (f *fakeCellController) ListCells(realm, space, stack string) ([]*v1beta1.CellDoc, error) {
+func (f *fakeCellController) ListCells(realm, space, stack string) ([]intmodel.Cell, error) {
 	if f.listCellsFn == nil {
 		return nil, errors.New("unexpected ListCells call")
 	}

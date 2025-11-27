@@ -33,7 +33,7 @@ import (
 
 type StackController interface {
 	GetStack(stack intmodel.Stack) (controller.GetStackResult, error)
-	ListStacks(realmName, spaceName string) ([]*v1beta1.StackDoc, error)
+	ListStacks(realmName, spaceName string) ([]intmodel.Stack, error)
 }
 
 type stackController = StackController // internal alias for backward compatibility
@@ -131,12 +131,22 @@ func NewStackCmd() *cobra.Command {
 			}
 
 			// List stacks (optionally filtered by realm and/or space)
-			stacks, err := ctrl.ListStacks(realm, space)
+			internalStacks, err := ctrl.ListStacks(realm, space)
 			if err != nil {
 				return err
 			}
 
-			return printStacks(cmd, stacks, outputFormat)
+			// Convert internal stacks to external for printing
+			externalStacks := make([]*v1beta1.StackDoc, 0, len(internalStacks))
+			for _, stack := range internalStacks {
+				stackDoc, convertErr := apischeme.BuildStackExternalFromInternal(stack, apischeme.VersionV1Beta1)
+				if convertErr != nil {
+					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+				}
+				externalStacks = append(externalStacks, &stackDoc)
+			}
+
+			return printStacks(cmd, externalStacks, outputFormat)
 		},
 	}
 
@@ -223,6 +233,6 @@ func (w *controllerWrapper) GetStack(stack intmodel.Stack) (controller.GetStackR
 	return w.ctrl.GetStack(stack)
 }
 
-func (w *controllerWrapper) ListStacks(realmName, spaceName string) ([]*v1beta1.StackDoc, error) {
+func (w *controllerWrapper) ListStacks(realmName, spaceName string) ([]intmodel.Stack, error) {
 	return w.ctrl.ListStacks(realmName, spaceName)
 }

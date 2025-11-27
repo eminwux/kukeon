@@ -34,7 +34,7 @@ import (
 
 type RealmController interface {
 	GetRealm(realm intmodel.Realm) (controller.GetRealmResult, error)
-	ListRealms() ([]*v1beta1.RealmDoc, error)
+	ListRealms() ([]intmodel.Realm, error)
 }
 
 type realmController = RealmController // internal alias for backward compatibility
@@ -113,12 +113,22 @@ func NewRealmCmd() *cobra.Command {
 			}
 
 			// List all realms
-			realms, err := ctrl.ListRealms()
+			internalRealms, err := ctrl.ListRealms()
 			if err != nil {
 				return err
 			}
 
-			return printRealms(cmd, realms, outputFormat)
+			// Convert internal realms to external for printing
+			externalRealms := make([]*v1beta1.RealmDoc, 0, len(internalRealms))
+			for _, realm := range internalRealms {
+				realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(realm, apischeme.VersionV1Beta1)
+				if convertErr != nil {
+					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
+				}
+				externalRealms = append(externalRealms, &realmDoc)
+			}
+
+			return printRealms(cmd, externalRealms, outputFormat)
 		},
 	}
 
@@ -198,6 +208,6 @@ func (w *controllerWrapper) GetRealm(realm intmodel.Realm) (controller.GetRealmR
 	return w.ctrl.GetRealm(realm)
 }
 
-func (w *controllerWrapper) ListRealms() ([]*v1beta1.RealmDoc, error) {
+func (w *controllerWrapper) ListRealms() ([]intmodel.Realm, error) {
 	return w.ctrl.ListRealms()
 }

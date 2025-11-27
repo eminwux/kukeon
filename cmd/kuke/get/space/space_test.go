@@ -201,7 +201,6 @@ func captureStdout(fn func() error) (string, error) {
 }
 
 func TestNewSpaceCmdRunE(t *testing.T) {
-
 	docAlpha := &v1beta1.SpaceDoc{
 		Metadata: v1beta1.SpaceMetadata{Name: "alpha"},
 		Spec:     v1beta1.SpaceSpec{RealmID: "earth"},
@@ -242,11 +241,17 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			name:       "list spaces success",
 			outputFlag: "yaml",
 			controller: &fakeSpaceController{
-				listSpacesFn: func(realm string) ([]*v1beta1.SpaceDoc, error) {
+				listSpacesFn: func(realm string) ([]intmodel.Space, error) {
 					if realm != "" {
 						return nil, errors.New("unexpected realm filter")
 					}
-					return docList, nil
+					// Convert docList to internal types
+					internalSpaces := make([]intmodel.Space, 0, len(docList))
+					for _, doc := range docList {
+						spaceInternal, _, _ := apischeme.NormalizeSpace(*doc)
+						internalSpaces = append(internalSpaces, spaceInternal)
+					}
+					return internalSpaces, nil
 				},
 			},
 			wantOutput: []string{"name: alpha"},
@@ -335,7 +340,7 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 
 type fakeSpaceController struct {
 	getSpaceFn   func(space intmodel.Space) (controller.GetSpaceResult, error)
-	listSpacesFn func(realm string) ([]*v1beta1.SpaceDoc, error)
+	listSpacesFn func(realm string) ([]intmodel.Space, error)
 }
 
 func (f *fakeSpaceController) GetSpace(space intmodel.Space) (controller.GetSpaceResult, error) {
@@ -345,7 +350,7 @@ func (f *fakeSpaceController) GetSpace(space intmodel.Space) (controller.GetSpac
 	return f.getSpaceFn(space)
 }
 
-func (f *fakeSpaceController) ListSpaces(realm string) ([]*v1beta1.SpaceDoc, error) {
+func (f *fakeSpaceController) ListSpaces(realm string) ([]intmodel.Space, error) {
 	if f.listSpacesFn == nil {
 		return nil, errors.New("unexpected ListSpaces call")
 	}
