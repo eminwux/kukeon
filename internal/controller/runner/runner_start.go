@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -65,20 +64,15 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 		return fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 	}
 
-	// Convert internal cell back to external for accessing container specs
-	cellDoc, convertErr := apischeme.BuildCellExternalFromInternal(internalCell, apischeme.VersionV1Beta1)
-	if convertErr != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-	}
-
-	cellID := cellDoc.Spec.ID
+	cellSpec := internalCell.Spec
+	cellID := cellSpec.ID
 	if cellID == "" {
 		return errdefs.ErrCellIDRequired
 	}
 
-	realmID := cellDoc.Spec.RealmID
-	spaceID := cellDoc.Spec.SpaceID
-	stackID := cellDoc.Spec.StackID
+	realmID := cellSpec.RealmName
+	spaceID := cellSpec.SpaceName
+	stackID := cellSpec.StackName
 
 	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmID, spaceID)
 	if cniErr != nil {
@@ -291,12 +285,12 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 	)
 
 	// Start all containers defined in the CellDoc
-	for _, containerSpec := range cellDoc.Spec.Containers {
+	for _, containerSpec := range cellSpec.Containers {
 		// Build container ID using hierarchical format
 		containerID, err = naming.BuildContainerName(
-			containerSpec.SpaceID,
-			containerSpec.StackID,
-			containerSpec.CellID,
+			containerSpec.SpaceName,
+			containerSpec.StackName,
+			containerSpec.CellName,
 			containerSpec.ID,
 		)
 		if err != nil {

@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -65,20 +64,25 @@ func (r *Exec) KillCell(cell intmodel.Cell) error {
 		return fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 	}
 
-	// Convert internal cell back to external for accessing container specs
-	cellDoc, convertErr := apischeme.BuildCellExternalFromInternal(internalCell, apischeme.VersionV1Beta1)
-	if convertErr != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-	}
-
-	cellID := cellDoc.Spec.ID
+	cellID := strings.TrimSpace(internalCell.Spec.ID)
 	if cellID == "" {
 		return errdefs.ErrCellIDRequired
 	}
 
-	realmID := cellDoc.Spec.RealmID
-	spaceID := cellDoc.Spec.SpaceID
-	stackID := cellDoc.Spec.StackID
+	realmID := strings.TrimSpace(internalCell.Spec.RealmName)
+	if realmID == "" {
+		return errdefs.ErrRealmNameRequired
+	}
+
+	spaceID := strings.TrimSpace(internalCell.Spec.SpaceName)
+	if spaceID == "" {
+		return errdefs.ErrSpaceNameRequired
+	}
+
+	stackID := strings.TrimSpace(internalCell.Spec.StackName)
+	if stackID == "" {
+		return errdefs.ErrStackNameRequired
+	}
 
 	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmID, spaceID)
 	if cniErr != nil {
@@ -116,13 +120,17 @@ func (r *Exec) KillCell(cell intmodel.Cell) error {
 	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
 
 	// Kill all workload containers first
-	for _, containerSpec := range cellDoc.Spec.Containers {
+	for _, containerSpec := range internalCell.Spec.Containers {
+		containerCellName := strings.TrimSpace(containerSpec.CellName)
+		if containerCellName == "" {
+			containerCellName = cellID
+		}
 		// Build container ID using hierarchical format
 		var containerID string
 		containerID, err = naming.BuildContainerName(
-			containerSpec.SpaceID,
-			containerSpec.StackID,
-			containerSpec.CellID,
+			containerSpec.SpaceName,
+			containerSpec.StackName,
+			containerCellName,
 			containerSpec.ID,
 		)
 		if err != nil {

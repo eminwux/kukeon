@@ -21,29 +21,24 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	"github.com/eminwux/kukeon/internal/metadata"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 func (r *Exec) GetRealm(realm intmodel.Realm) (intmodel.Realm, error) {
 	// Get realm metadata
 	metadataFilePath := fs.RealmMetadataPath(r.opts.RunPath, realm.Metadata.Name)
-	realmDoc, err := metadata.ReadMetadata[v1beta1.RealmDoc](r.ctx, r.logger, metadataFilePath)
+	internalRealm, err := r.readRealmInternal(metadataFilePath)
 	if err != nil {
-		if errors.Is(err, errdefs.ErrMissingMetadataFile) {
+		switch {
+		case errors.Is(err, errdefs.ErrMissingMetadataFile):
 			return intmodel.Realm{}, errdefs.ErrRealmNotFound
+		case errors.Is(err, errdefs.ErrConversionFailed):
+			return intmodel.Realm{}, err
+		default:
+			return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
 		}
-		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
-	}
-
-	// Convert external doc from metadata to internal model
-	internalRealm, err := apischeme.ConvertRealmDocToInternal(realmDoc)
-	if err != nil {
-		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
 	return internalRealm, nil
@@ -60,18 +55,16 @@ func (r *Exec) GetSpace(space intmodel.Space) (intmodel.Space, error) {
 	}
 	// Get space metadata
 	metadataFilePath := fs.SpaceMetadataPath(r.opts.RunPath, realmName, spaceName)
-	spaceDoc, err := metadata.ReadMetadata[v1beta1.SpaceDoc](r.ctx, r.logger, metadataFilePath)
+	internalSpace, err := r.readSpaceInternal(metadataFilePath)
 	if err != nil {
-		if errors.Is(err, errdefs.ErrMissingMetadataFile) {
+		switch {
+		case errors.Is(err, errdefs.ErrMissingMetadataFile):
 			return intmodel.Space{}, errdefs.ErrSpaceNotFound
+		case errors.Is(err, errdefs.ErrConversionFailed):
+			return intmodel.Space{}, err
+		default:
+			return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
 		}
-		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
-	}
-
-	// Convert external doc from metadata to internal model
-	internalSpace, err := apischeme.ConvertSpaceDocToInternal(spaceDoc)
-	if err != nil {
-		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
 	return internalSpace, nil
@@ -92,18 +85,16 @@ func (r *Exec) GetStack(stack intmodel.Stack) (intmodel.Stack, error) {
 	}
 	// Get stack metadata
 	metadataFilePath := fs.StackMetadataPath(r.opts.RunPath, realmName, spaceName, stackName)
-	stackDoc, err := metadata.ReadMetadata[v1beta1.StackDoc](r.ctx, r.logger, metadataFilePath)
+	internalStack, err := r.readStackInternal(metadataFilePath)
 	if err != nil {
-		if errors.Is(err, errdefs.ErrMissingMetadataFile) {
+		switch {
+		case errors.Is(err, errdefs.ErrMissingMetadataFile):
 			return intmodel.Stack{}, errdefs.ErrStackNotFound
+		case errors.Is(err, errdefs.ErrConversionFailed):
+			return intmodel.Stack{}, err
+		default:
+			return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrGetStack, err)
 		}
-		return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrGetStack, err)
-	}
-
-	// Convert external doc from metadata to internal model
-	internalStack, err := apischeme.ConvertStackDocToInternal(stackDoc)
-	if err != nil {
-		return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
 	return internalStack, nil
@@ -128,18 +119,16 @@ func (r *Exec) GetCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	}
 	// Get cell metadata
 	metadataFilePath := fs.CellMetadataPath(r.opts.RunPath, realmName, spaceName, stackName, cellName)
-	cellDoc, err := metadata.ReadMetadata[v1beta1.CellDoc](r.ctx, r.logger, metadataFilePath)
+	internalCell, err := r.readCellInternal(metadataFilePath)
 	if err != nil {
-		if errors.Is(err, errdefs.ErrMissingMetadataFile) {
+		switch {
+		case errors.Is(err, errdefs.ErrMissingMetadataFile):
 			return intmodel.Cell{}, errdefs.ErrCellNotFound
+		case errors.Is(err, errdefs.ErrConversionFailed):
+			return intmodel.Cell{}, err
+		default:
+			return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 		}
-		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
-	}
-
-	// Convert external doc from metadata to internal model
-	internalCell, err := apischeme.ConvertCellDocToInternal(cellDoc)
-	if err != nil {
-		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
 	return internalCell, nil

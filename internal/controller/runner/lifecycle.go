@@ -30,14 +30,6 @@ import (
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
-func appendCellLogFields(fields []any, cellID, cellName string) []any {
-	fields = append(fields, "cell", cellID)
-	if cellName != "" && cellName != cellID {
-		fields = append(fields, "cellName", cellName)
-	}
-	return fields
-}
-
 // detachRootContainerFromCNI detaches the root container from the CNI network.
 // It handles the case where the container might not exist or might already be detached.
 // This function logs warnings for non-critical failures but continues execution.

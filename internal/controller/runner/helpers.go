@@ -18,18 +18,21 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/naming"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // purgeCNIForContainer removes all CNI-related resources for a specific container.
@@ -324,4 +327,49 @@ func (r *Exec) getSpaceNetworkName(space intmodel.Space) (string, error) {
 		}
 	}
 	return naming.BuildSpaceNetworkName(realmName, space.Metadata.Name)
+}
+
+func appendCellLogFields(fields []any, cellID, cellName string) []any {
+	fields = append(fields, "cell", cellID)
+	if cellName != "" && cellName != cellID {
+		fields = append(fields, "cellName", cellName)
+	}
+	return fields
+}
+
+func buildRootContainerLabels(cell intmodel.Cell) map[string]string {
+	labels := make(map[string]string)
+	if cell.Metadata.Labels != nil {
+		for k, v := range cell.Metadata.Labels {
+			labels[k] = v
+		}
+	}
+	labels["kukeon.io/cell"] = cell.Spec.ID
+	if cell.Metadata.Name != "" {
+		labels["kukeon.io/cell-name"] = cell.Metadata.Name
+	}
+	labels["kukeon.io/space"] = cell.Spec.SpaceName
+	labels["kukeon.io/realm"] = cell.Spec.RealmName
+	labels["kukeon.io/stack"] = cell.Spec.StackName
+	return labels
+}
+
+type metadataHeader struct {
+	APIVersion string `json:"apiVersion"`
+	Kind       string `json:"kind"`
+}
+
+func detectMetadataVersion(raw []byte) (v1beta1.Version, error) {
+	var header metadataHeader
+	if err := json.Unmarshal(raw, &header); err != nil {
+		return "", fmt.Errorf("metadata header: %w", err)
+	}
+	return apischeme.DefaultVersion(v1beta1.Version(header.APIVersion)), nil
+}
+
+func wrapConversionErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 }

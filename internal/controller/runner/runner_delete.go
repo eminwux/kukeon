@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/ctr"
@@ -85,14 +84,9 @@ func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get realm: %w", err)
 	}
-	// Convert internal realm back to external for accessing namespace
-	realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
-	if convertErr != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-	}
 
 	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
 
 	// Build hierarchical container ID for containerd operations
 
@@ -198,12 +192,6 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 		return fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 	}
 
-	// Convert internal cell back to external for use in rest of function
-	cellDoc, convertErr := apischeme.BuildCellExternalFromInternal(internalCell, apischeme.VersionV1Beta1)
-	if convertErr != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-	}
-
 	// Initialize ctr client if needed
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
@@ -216,31 +204,46 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 	// Get realm to access namespace
 	lookupRealm := intmodel.Realm{
 		Metadata: intmodel.RealmMetadata{
-			Name: cellDoc.Spec.RealmID,
+			Name: internalCell.Spec.RealmName,
 		},
 	}
 	internalRealm, err := r.GetRealm(lookupRealm)
 	if err != nil {
 		return fmt.Errorf("failed to get realm: %w", err)
 	}
-	// Convert internal realm back to external for accessing namespace
-	realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
-	if convertErr != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-	}
 
 	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(realmDoc.Spec.Namespace)
+	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
+
+	cellSpaceName := internalCell.Spec.SpaceName
+	cellStackName := internalCell.Spec.StackName
+	cellID := internalCell.Spec.ID
+	if strings.TrimSpace(cellID) == "" {
+		cellID = internalCell.Metadata.Name
+	}
 
 	// Delete all containers in the cell (workload + root)
 	ctrCtx := context.Background()
-	for _, containerSpec := range cellDoc.Spec.Containers {
+	for _, containerSpec := range internalCell.Spec.Containers {
+		containerSpaceName := containerSpec.SpaceName
+		if strings.TrimSpace(containerSpaceName) == "" {
+			containerSpaceName = cellSpaceName
+		}
+		containerStackName := containerSpec.StackName
+		if strings.TrimSpace(containerStackName) == "" {
+			containerStackName = cellStackName
+		}
+		containerCellName := containerSpec.CellName
+		if strings.TrimSpace(containerCellName) == "" {
+			containerCellName = cellID
+		}
+
 		// Build container ID using hierarchical format
 		var containerID string
 		containerID, err = naming.BuildContainerName(
-			containerSpec.SpaceID,
-			containerSpec.StackID,
-			containerSpec.CellID,
+			containerSpaceName,
+			containerStackName,
+			containerCellName,
 			containerSpec.ID,
 		)
 		if err != nil {
@@ -279,7 +282,7 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 	}
 
 	// Delete root container
-	rootContainerID, err := naming.BuildRootContainerName(cellDoc.Spec.SpaceID, cellDoc.Spec.StackID, cellDoc.Spec.ID)
+	rootContainerID, err := naming.BuildRootContainerName(cellSpaceName, cellStackName, cellID)
 	if err != nil {
 		return fmt.Errorf("failed to build root container name: %w", err)
 	}
@@ -296,7 +299,7 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 				netnsPath := fmt.Sprintf("/proc/%d/ns/net", pid)
 
 				// Get CNI config path
-				cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(cellDoc.Spec.RealmID, cellDoc.Spec.SpaceID)
+				cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(internalCell.Spec.RealmName, cellSpaceName)
 				if cniErr == nil {
 					// Create CNI manager and remove container from network
 					cniMgr, mgrErr := cni.NewManager(
@@ -414,10 +417,10 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 	// Delete cell metadata
 	metadataFilePath := fs.CellMetadataPath(
 		r.opts.RunPath,
-		cellDoc.Spec.RealmID,
-		cellDoc.Spec.SpaceID,
-		cellDoc.Spec.StackID,
-		cellDoc.Metadata.Name,
+		internalCell.Spec.RealmName,
+		cellSpaceName,
+		cellStackName,
+		internalCell.Metadata.Name,
 	)
 	if err = metadata.DeleteMetadata(r.ctx, r.logger, metadataFilePath); err != nil {
 		return fmt.Errorf("%w: failed to delete cell metadata: %w", errdefs.ErrDeleteCell, err)
@@ -458,12 +461,6 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 		}
 		return fmt.Errorf("%w: %w", errdefs.ErrGetStack, err)
 	}
-	// Convert internal stack back to external for use in rest of function
-	stackDoc, convertStackErr := apischeme.BuildStackExternalFromInternal(internalStack, apischeme.VersionV1Beta1)
-	if convertStackErr != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertStackErr)
-	}
-
 	// Initialize ctr client if needed
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
@@ -485,9 +482,9 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 	// Delete stack metadata
 	metadataFilePath := fs.StackMetadataPath(
 		r.opts.RunPath,
-		stackDoc.Spec.RealmID,
-		stackDoc.Spec.SpaceID,
-		stackDoc.Metadata.Name,
+		internalStack.Spec.RealmName,
+		internalStack.Spec.SpaceName,
+		internalStack.Metadata.Name,
 	)
 	if err = metadata.DeleteMetadata(r.ctx, r.logger, metadataFilePath); err != nil {
 		return fmt.Errorf("%w: failed to delete stack metadata: %w", errdefs.ErrDeleteStack, err)
@@ -523,12 +520,6 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 		}
 		return fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
 	}
-	// Convert internal space back to external for use in rest of function
-	spaceDoc, convertSpaceErr := apischeme.BuildSpaceExternalFromInternal(internalSpace, apischeme.VersionV1Beta1)
-	if convertSpaceErr != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertSpaceErr)
-	}
-
 	// Initialize ctr client if needed
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
@@ -541,19 +532,19 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 	// Get realm to build cgroup spec
 	// Delete CNI network config
 	var networkName string
-	realmID := spaceDoc.Spec.RealmID
-	if realmID == "" && spaceDoc.Metadata.Labels != nil {
-		if realmLabel, ok := spaceDoc.Metadata.Labels[consts.KukeonRealmLabelKey]; ok &&
+	realmName = internalSpace.Spec.RealmName
+	if realmName == "" && internalSpace.Metadata.Labels != nil {
+		if realmLabel, ok := internalSpace.Metadata.Labels[consts.KukeonRealmLabelKey]; ok &&
 			strings.TrimSpace(realmLabel) != "" {
-			realmID = strings.TrimSpace(realmLabel)
+			realmName = strings.TrimSpace(realmLabel)
 		}
 	}
-	networkName, err = naming.BuildSpaceNetworkName(realmID, spaceDoc.Metadata.Name)
+	networkName, err = naming.BuildSpaceNetworkName(realmName, internalSpace.Metadata.Name)
 	if err != nil {
 		r.logger.WarnContext(r.ctx, "failed to build network name, skipping CNI config deletion", "error", err)
 	} else {
 		var confPath string
-		confPath, err = r.resolveSpaceCNIConfigPath(spaceDoc.Spec.RealmID, spaceDoc.Metadata.Name)
+		confPath, err = r.resolveSpaceCNIConfigPath(realmName, internalSpace.Metadata.Name)
 		if err == nil {
 			var mgr *cni.Manager
 			mgr, err = cni.NewManager(
@@ -582,8 +573,8 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 	// Delete space metadata
 	metadataFilePath := fs.SpaceMetadataPath(
 		r.opts.RunPath,
-		spaceDoc.Spec.RealmID,
-		spaceDoc.Metadata.Name,
+		internalSpace.Spec.RealmName,
+		internalSpace.Metadata.Name,
 	)
 	if err = metadata.DeleteMetadata(r.ctx, r.logger, metadataFilePath); err != nil {
 		return fmt.Errorf("%w: failed to delete space metadata: %w", errdefs.ErrDeleteSpace, err)
@@ -614,12 +605,6 @@ func (r *Exec) DeleteRealm(realm intmodel.Realm) (DeleteRealmOutcome, error) {
 		}
 		return outcome, fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
 	}
-	// Convert internal realm back to external for DefaultRealmSpec and accessing namespace
-	realmDoc, convertErr := apischeme.BuildRealmExternalFromInternal(internalRealm, apischeme.VersionV1Beta1)
-	if convertErr != nil {
-		return outcome, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-	}
-
 	// Initialize ctr client if needed
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
@@ -641,12 +626,12 @@ func (r *Exec) DeleteRealm(realm intmodel.Realm) (DeleteRealmOutcome, error) {
 	}
 
 	// Delete containerd namespace
-	if err = r.ctrClient.DeleteNamespace(realmDoc.Spec.Namespace); err != nil {
+	if err = r.ctrClient.DeleteNamespace(internalRealm.Spec.Namespace); err != nil {
 		r.logger.WarnContext(
 			r.ctx,
 			"failed to delete containerd namespace",
 			"namespace",
-			realmDoc.Spec.Namespace,
+			internalRealm.Spec.Namespace,
 			"error",
 			err,
 		)
@@ -656,7 +641,7 @@ func (r *Exec) DeleteRealm(realm intmodel.Realm) (DeleteRealmOutcome, error) {
 	}
 
 	// Delete realm metadata
-	metadataFilePath := fs.RealmMetadataPath(r.opts.RunPath, realmDoc.Metadata.Name)
+	metadataFilePath := fs.RealmMetadataPath(r.opts.RunPath, internalRealm.Metadata.Name)
 	if err = metadata.DeleteMetadata(r.ctx, r.logger, metadataFilePath); err != nil {
 		return outcome, fmt.Errorf("%w: failed to delete realm metadata: %w", errdefs.ErrDeleteRealm, err)
 	}

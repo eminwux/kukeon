@@ -114,7 +114,7 @@ func (b *Exec) GetRealm(doc *v1beta1.RealmDoc) (GetRealmResult, error) {
 			return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
 		}
 
-		res.CgroupExists, err = b.runner.ExistsCgroup(&realmDoc)
+		res.CgroupExists, err = b.runner.ExistsCgroup(internalRealm)
 		if err != nil {
 			return res, fmt.Errorf("failed to check if realm cgroup exists: %w", err)
 		}
@@ -179,7 +179,7 @@ func (b *Exec) GetSpace(doc *v1beta1.SpaceDoc) (GetSpaceResult, error) {
 			return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
 		}
 
-		res.CgroupExists, err = b.runner.ExistsCgroup(&spaceDoc)
+		res.CgroupExists, err = b.runner.ExistsCgroup(internalSpace)
 		if err != nil {
 			return res, fmt.Errorf("failed to check if space cgroup exists: %w", err)
 		}
@@ -270,7 +270,7 @@ func (b *Exec) GetStack(doc *v1beta1.StackDoc) (GetStackResult, error) {
 		if convErr != nil {
 			return res, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convErr)
 		}
-		res.CgroupExists, err = b.runner.ExistsCgroup(&stackDoc)
+		res.CgroupExists, err = b.runner.ExistsCgroup(internalStack)
 		if err != nil {
 			return res, fmt.Errorf("failed to check if stack cgroup exists: %w", err)
 		}
@@ -376,7 +376,7 @@ func (b *Exec) GetCell(doc *v1beta1.CellDoc) (GetCellResult, error) {
 			return res, fmt.Errorf("cell %q not found in stack %q (found in stack %q) at run-path %q",
 				name, stackName, cellDoc.Spec.StackID, b.opts.RunPath)
 		}
-		res.CgroupExists, err = b.runner.ExistsCgroup(&cellDoc)
+		res.CgroupExists, err = b.runner.ExistsCgroup(internalCell)
 		if err != nil {
 			return res, fmt.Errorf("failed to check if cell cgroup exists: %w", err)
 		}

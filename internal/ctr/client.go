@@ -26,7 +26,7 @@ import (
 	apitypes "github.com/containerd/containerd/api/types"
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
 type client struct {
@@ -73,7 +73,7 @@ type Client interface {
 	DeleteCgroup(group, mountpoint string) error
 	CreateContainerFromSpec(
 		ctx context.Context,
-		containerSpec *v1beta1.ContainerSpec,
+		containerSpec intmodel.ContainerSpec,
 	) (containerd.Container, error)
 }
 

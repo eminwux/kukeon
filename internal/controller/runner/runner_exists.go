@@ -22,7 +22,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -30,7 +29,6 @@ import (
 	"github.com/eminwux/kukeon/internal/util/cgroups"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 func (r *Exec) ExistsRealmContainerdNamespace(namespace string) (bool, error) {
@@ -150,52 +148,32 @@ func (r *Exec) ExistsCgroup(doc any) (bool, error) {
 
 	// Build cgroup spec based on doc type
 	switch d := doc.(type) {
-	case *v1beta1.RealmDoc:
-		if d == nil {
+	case intmodel.Realm:
+		if d.Metadata.Name == "" {
 			return false, errdefs.ErrRealmNotFound
 		}
-		// Convert external realm to internal for DefaultRealmSpec
-		internalRealm, convertErr := apischeme.ConvertRealmDocToInternal(*d)
-		if convertErr != nil {
-			return false, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertErr)
-		}
-		spec = cgroups.DefaultRealmSpec(internalRealm)
+		spec = cgroups.DefaultRealmSpec(d)
 
-	case *v1beta1.SpaceDoc:
-		if d == nil {
+	case intmodel.Space:
+		if d.Metadata.Name == "" {
 			return false, errdefs.ErrSpaceNotFound
 		}
-		if d.Spec.RealmID == "" {
+		if d.Spec.RealmName == "" {
 			return false, errdefs.ErrRealmNameRequired
 		}
-		// Convert external space doc to internal for DefaultSpaceSpec
-		internalSpace, convertSpaceErr := apischeme.ConvertSpaceDocToInternal(*d)
-		if convertSpaceErr != nil {
-			return false, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertSpaceErr)
-		}
-		spec = cgroups.DefaultSpaceSpec(internalSpace)
+		spec = cgroups.DefaultSpaceSpec(d)
 
-	case *v1beta1.StackDoc:
-		if d == nil {
+	case intmodel.Stack:
+		if d.Metadata.Name == "" {
 			return false, errdefs.ErrStackNotFound
 		}
-		// Convert external stack doc to internal for DefaultStackSpec
-		internalStack, convertStackErr := apischeme.ConvertStackDocToInternal(*d)
-		if convertStackErr != nil {
-			return false, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertStackErr)
-		}
-		spec = cgroups.DefaultStackSpec(internalStack)
+		spec = cgroups.DefaultStackSpec(d)
 
-	case *v1beta1.CellDoc:
-		if d == nil {
+	case intmodel.Cell:
+		if d.Metadata.Name == "" {
 			return false, errdefs.ErrCellNotFound
 		}
-		// Convert external cell doc to internal for DefaultCellSpec
-		internalCell, convertCellErr := apischeme.ConvertCellDocToInternal(*d)
-		if convertCellErr != nil {
-			return false, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, convertCellErr)
-		}
-		spec = cgroups.DefaultCellSpec(internalCell)
+		spec = cgroups.DefaultCellSpec(d)
 
 	default:
 		return false, fmt.Errorf("unsupported doc type: %T", doc)
