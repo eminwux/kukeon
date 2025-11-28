@@ -68,7 +68,7 @@ func NewSpaceCmd() *cobra.Command {
 
 			realm := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_SPACE_REALM.ViperKey))
 			if realm == "" {
-				return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
+				realm = config.KUKE_CREATE_SPACE_REALM.ValueOrDefault()
 			}
 
 			// Check for mock controller in context (for testing)

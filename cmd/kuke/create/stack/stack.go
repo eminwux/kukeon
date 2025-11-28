@@ -115,12 +115,12 @@ func runCreateStackWithDeps(
 
 	realm := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_STACK_REALM.ViperKey))
 	if realm == "" {
-		return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
+		realm = config.KUKE_CREATE_STACK_REALM.ValueOrDefault()
 	}
 
 	space := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_STACK_SPACE.ViperKey))
 	if space == "" {
-		return fmt.Errorf("%w (--space)", errdefs.ErrSpaceNameRequired)
+		space = config.KUKE_CREATE_STACK_SPACE.ValueOrDefault()
 	}
 
 	ctrl, err := getCtrl(cmd)

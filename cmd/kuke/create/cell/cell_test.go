@@ -393,34 +393,94 @@ func TestNewCellCmdRunE(t *testing.T) {
 			wantCallCreate: false,
 		},
 		{
-			name: "error: missing realm",
+			name: "uses default realm when realm flag not set",
 			args: []string{"test-cell"},
 			setup: func(t *testing.T, cmd *cobra.Command) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			wantErr:        "realm name is required",
-			wantCallCreate: false,
+			controllerFn: func(cell intmodel.Cell) (controller.CreateCellResult, error) {
+				return controller.CreateCellResult{
+					Cell:                    cell,
+					Created:                 true,
+					MetadataExistsPost:      true,
+					CgroupCreated:           true,
+					CgroupExistsPost:        true,
+					RootContainerCreated:    true,
+					RootContainerExistsPost: true,
+				}, nil
+			},
+			wantCallCreate: true,
+			wantCell: intmodel.Cell{
+				Metadata: intmodel.CellMetadata{
+					Name: "test-cell",
+				},
+				Spec: intmodel.CellSpec{
+					RealmName: "default",
+					SpaceName: "space-a",
+					StackName: "stack-a",
+				},
+			},
 		},
 		{
-			name: "error: missing space",
+			name: "uses default space when space flag not set",
 			args: []string{"test-cell"},
 			setup: func(t *testing.T, cmd *cobra.Command) {
 				setFlag(t, cmd, "realm", "realm-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			wantErr:        "space name is required",
-			wantCallCreate: false,
+			controllerFn: func(cell intmodel.Cell) (controller.CreateCellResult, error) {
+				return controller.CreateCellResult{
+					Cell:                    cell,
+					Created:                 true,
+					MetadataExistsPost:      true,
+					CgroupCreated:           true,
+					CgroupExistsPost:        true,
+					RootContainerCreated:    true,
+					RootContainerExistsPost: true,
+				}, nil
+			},
+			wantCallCreate: true,
+			wantCell: intmodel.Cell{
+				Metadata: intmodel.CellMetadata{
+					Name: "test-cell",
+				},
+				Spec: intmodel.CellSpec{
+					RealmName: "realm-a",
+					SpaceName: "default",
+					StackName: "stack-a",
+				},
+			},
 		},
 		{
-			name: "error: missing stack",
+			name: "uses default stack when stack flag not set",
 			args: []string{"test-cell"},
 			setup: func(t *testing.T, cmd *cobra.Command) {
 				setFlag(t, cmd, "realm", "realm-a")
 				setFlag(t, cmd, "space", "space-a")
 			},
-			wantErr:        "stack name is required",
-			wantCallCreate: false,
+			controllerFn: func(cell intmodel.Cell) (controller.CreateCellResult, error) {
+				return controller.CreateCellResult{
+					Cell:                    cell,
+					Created:                 true,
+					MetadataExistsPost:      true,
+					CgroupCreated:           true,
+					CgroupExistsPost:        true,
+					RootContainerCreated:    true,
+					RootContainerExistsPost: true,
+				}, nil
+			},
+			wantCallCreate: true,
+			wantCell: intmodel.Cell{
+				Metadata: intmodel.CellMetadata{
+					Name: "test-cell",
+				},
+				Spec: intmodel.CellSpec{
+					RealmName: "realm-a",
+					SpaceName: "space-a",
+					StackName: "default",
+				},
+			},
 		},
 		{
 			name: "error: logger not in context",

@@ -219,9 +219,27 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			},
 		},
 		{
-			name:    "error missing realm",
-			args:    []string{"my-space"},
-			wantErr: "realm name is required",
+			name: "uses default realm when realm flag not set",
+			args: []string{"my-space"},
+			controller: &fakeSpaceController{
+				createSpaceFn: func(space intmodel.Space) (controller.CreateSpaceResult, error) {
+					if space.Metadata.Name != "my-space" || space.Spec.RealmName != "default" {
+						t.Fatalf("unexpected space: name=%q realm=%q", space.Metadata.Name, space.Spec.RealmName)
+					}
+					return controller.CreateSpaceResult{
+						Space:                space,
+						Created:              true,
+						CNINetworkCreated:    true,
+						CgroupCreated:        true,
+						MetadataExistsPost:   true,
+						CNINetworkExistsPost: true,
+						CgroupExistsPost:     true,
+					}, nil
+				},
+			},
+			wantOutput: []string{
+				`Space "my-space" (realm "default", network "default-my-space")`,
+			},
 		},
 		{
 			name:      "error missing name",

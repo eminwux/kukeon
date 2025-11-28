@@ -72,11 +72,17 @@ func NewStackCmd() *cobra.Command {
 				realm, _ = cmd.Flags().GetString("realm")
 				realm = strings.TrimSpace(realm)
 			}
+			if realm == "" {
+				realm = config.KUKE_GET_STACK_REALM.ValueOrDefault()
+			}
 
 			space := strings.TrimSpace(viper.GetString(config.KUKE_GET_STACK_SPACE.ViperKey))
 			if space == "" {
 				space, _ = cmd.Flags().GetString("space")
 				space = strings.TrimSpace(space)
+			}
+			if space == "" {
+				space = config.KUKE_GET_STACK_SPACE.ValueOrDefault()
 			}
 
 			var name string

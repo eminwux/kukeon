@@ -140,17 +140,26 @@ func runContainerCmdWithDeps(
 		realm, _ = cmd.Flags().GetString("realm")
 		realm = strings.TrimSpace(realm)
 	}
+	if realm == "" {
+		realm = config.KUKE_GET_CONTAINER_REALM.ValueOrDefault()
+	}
 
 	space := strings.TrimSpace(viper.GetString(config.KUKE_GET_CONTAINER_SPACE.ViperKey))
 	if space == "" {
 		space, _ = cmd.Flags().GetString("space")
 		space = strings.TrimSpace(space)
 	}
+	if space == "" {
+		space = config.KUKE_GET_CONTAINER_SPACE.ValueOrDefault()
+	}
 
 	stack := strings.TrimSpace(viper.GetString(config.KUKE_GET_CONTAINER_STACK.ViperKey))
 	if stack == "" {
 		stack, _ = cmd.Flags().GetString("stack")
 		stack = strings.TrimSpace(stack)
+	}
+	if stack == "" {
+		stack = config.KUKE_GET_CONTAINER_STACK.ValueOrDefault()
 	}
 
 	cell := strings.TrimSpace(viper.GetString(config.KUKE_GET_CONTAINER_CELL.ViperKey))

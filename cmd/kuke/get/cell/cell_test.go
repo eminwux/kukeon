@@ -307,26 +307,106 @@ func TestNewCellCmdRunE(t *testing.T) {
 			expectMatch: "name: alpha",
 		},
 		{
-			name:    "missing realm when fetching single cell",
-			args:    []string{"alpha"},
-			wantErr: "realm name is required",
+			name: "uses default realm when realm flag not set",
+			args: []string{"alpha"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				setFlag(t, cmd, "space", "space-a")
+				setFlag(t, cmd, "stack", "stack-a")
+			},
+			controller: &fakeCellController{
+				getCellFn: func(cell intmodel.Cell) (controller.GetCellResult, error) {
+					if cell.Metadata.Name != "alpha" || cell.Spec.RealmName != "default" ||
+						cell.Spec.SpaceName != "space-a" ||
+						cell.Spec.StackName != "stack-a" {
+						return controller.GetCellResult{}, errors.New("unexpected get args")
+					}
+					// Create doc with default realm for result
+					docDefault := sampleCellDoc(
+						"alpha",
+						"default",
+						"space-a",
+						"stack-a",
+						v1beta1.CellStateReady,
+						"/cg/alpha",
+					)
+					cellInternal, _, _ := apischeme.NormalizeCell(*docDefault)
+					return controller.GetCellResult{
+						Cell:                cellInternal,
+						MetadataExists:      true,
+						CgroupExists:        true,
+						RootContainerExists: true,
+					}, nil
+				},
+			},
+			expectMatch: "name: alpha",
 		},
 		{
-			name: "missing space when fetching single cell",
+			name: "uses default space when space flag not set",
 			args: []string{"alpha"},
 			setup: func(t *testing.T, cmd *cobra.Command) {
 				setFlag(t, cmd, "realm", "realm-a")
+				setFlag(t, cmd, "stack", "stack-a")
 			},
-			wantErr: "space name is required",
+			controller: &fakeCellController{
+				getCellFn: func(cell intmodel.Cell) (controller.GetCellResult, error) {
+					if cell.Metadata.Name != "alpha" || cell.Spec.RealmName != "realm-a" ||
+						cell.Spec.SpaceName != "default" ||
+						cell.Spec.StackName != "stack-a" {
+						return controller.GetCellResult{}, errors.New("unexpected get args")
+					}
+					// Create doc with default space for result
+					docDefault := sampleCellDoc(
+						"alpha",
+						"realm-a",
+						"default",
+						"stack-a",
+						v1beta1.CellStateReady,
+						"/cg/alpha",
+					)
+					cellInternal, _, _ := apischeme.NormalizeCell(*docDefault)
+					return controller.GetCellResult{
+						Cell:                cellInternal,
+						MetadataExists:      true,
+						CgroupExists:        true,
+						RootContainerExists: true,
+					}, nil
+				},
+			},
+			expectMatch: "name: alpha",
 		},
 		{
-			name: "missing stack when fetching single cell",
+			name: "uses default stack when stack flag not set",
 			args: []string{"alpha"},
 			setup: func(t *testing.T, cmd *cobra.Command) {
 				setFlag(t, cmd, "realm", "realm-a")
 				setFlag(t, cmd, "space", "space-a")
 			},
-			wantErr: "stack name is required",
+			controller: &fakeCellController{
+				getCellFn: func(cell intmodel.Cell) (controller.GetCellResult, error) {
+					if cell.Metadata.Name != "alpha" || cell.Spec.RealmName != "realm-a" ||
+						cell.Spec.SpaceName != "space-a" ||
+						cell.Spec.StackName != "default" {
+						return controller.GetCellResult{}, errors.New("unexpected get args")
+					}
+					// Create doc with default stack for result
+					docDefault := sampleCellDoc(
+						"alpha",
+						"realm-a",
+						"space-a",
+						"default",
+						v1beta1.CellStateReady,
+						"/cg/alpha",
+					)
+					cellInternal, _, _ := apischeme.NormalizeCell(*docDefault)
+					return controller.GetCellResult{
+						Cell:                cellInternal,
+						MetadataExists:      true,
+						CgroupExists:        true,
+						RootContainerExists: true,
+					}, nil
+				},
+			},
+			expectMatch: "name: alpha",
 		},
 		{
 			name: "cell not found surfaces friendly error",
@@ -351,7 +431,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 			},
 			controller: &fakeCellController{
 				listCellsFn: func(realm, space, stack string) ([]intmodel.Cell, error) {
-					if realm != "realm-a" || space != "space-a" || stack != "" {
+					if realm != "realm-a" || space != "space-a" || stack != "default" {
 						return nil, errors.New("unexpected list args")
 					}
 					// Convert listDocs to internal types
@@ -366,11 +446,11 @@ func TestNewCellCmdRunE(t *testing.T) {
 			expectMatch: "alpha",
 		},
 		{
-			name: "list cells default filters",
+			name: "list cells using default filters",
 			controller: &fakeCellController{
 				listCellsFn: func(realm, space, stack string) ([]intmodel.Cell, error) {
-					if realm != "" || space != "" || stack != "" {
-						return nil, errors.New("expected empty filters")
+					if realm != "default" || space != "default" || stack != "default" {
+						return nil, errors.New("expected default filters")
 					}
 					// Convert listDocs to internal types
 					internalCells := make([]intmodel.Cell, 0, len(listDocs))

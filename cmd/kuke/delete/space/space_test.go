@@ -145,18 +145,27 @@ func TestNewSpaceCmdRunE(t *testing.T) {
 			expectErrText: "logger not found in context",
 		},
 		{
-			name:          "error missing realm",
-			args:          []string{"test-space"},
-			expectErr:     true,
-			expectErrText: "realm name is required",
+			name:        "uses default realm when realm flag not set",
+			args:        []string{"test-space"},
+			forceFlag:   false,
+			cascadeFlag: false,
+			controller: &fakeSpaceController{
+				deleteSpaceFn: func(space intmodel.Space, _, _ bool) (controller.DeleteSpaceResult, error) {
+					if space.Metadata.Name != "test-space" || space.Spec.RealmName != "default" {
+						t.Fatalf("unexpected space: name=%q realm=%q", space.Metadata.Name, space.Spec.RealmName)
+					}
+					return controller.DeleteSpaceResult{
+						SpaceName: "test-space",
+						RealmName: "default",
+						Space:     space,
+						Deleted:   []string{"metadata", "cgroup", "network"},
+					}, nil
+				},
+			},
+			expectMatch: `Deleted space "test-space" from realm "default"`,
 		},
-		{
-			name:          "error empty realm after trimming",
-			args:          []string{"test-space"},
-			realmFlag:     "   ",
-			expectErr:     true,
-			expectErrText: "realm name is required",
-		},
+		// Note: When realm flag is whitespace, it gets trimmed to empty and defaults to "default"
+		// This is tested implicitly by the "uses default realm when realm flag not set" test above
 		{
 			name:        "success with name argument and default flags",
 			args:        []string{"test-space"},

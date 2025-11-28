@@ -60,17 +60,17 @@ func NewContainerCmd() *cobra.Command {
 
 			realm := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_REALM.ViperKey))
 			if realm == "" {
-				return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
+				realm = config.KUKE_CREATE_CONTAINER_REALM.ValueOrDefault()
 			}
 
 			space := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_SPACE.ViperKey))
 			if space == "" {
-				return fmt.Errorf("%w (--space)", errdefs.ErrSpaceNameRequired)
+				space = config.KUKE_CREATE_CONTAINER_SPACE.ValueOrDefault()
 			}
 
 			stack := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_STACK.ViperKey))
 			if stack == "" {
-				return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
+				stack = config.KUKE_CREATE_CONTAINER_STACK.ValueOrDefault()
 			}
 
 			cell := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_CELL.ViperKey))
