@@ -25,17 +25,6 @@ import (
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
-// PurgeRealmResult reports what was purged during realm purging.
-type PurgeRealmResult struct {
-	Realm          intmodel.Realm
-	RealmDeleted   bool     // Whether realm deletion succeeded
-	PurgeSucceeded bool     // Whether comprehensive purge succeeded
-	Force          bool     // Force flag that was used
-	Cascade        bool     // Cascade flag that was used
-	Deleted        []string // Resources that were deleted (standard cleanup)
-	Purged         []string // Additional resources purged (CNI, orphaned containers, etc.)
-}
-
 // PurgeSpaceResult reports what was purged during space purging.
 type PurgeSpaceResult struct {
 	Space intmodel.Space
@@ -49,124 +38,6 @@ type PurgeSpaceResult struct {
 
 	Deleted []string // Resources that were deleted (standard cleanup)
 	Purged  []string // Additional resources purged (CNI, orphaned containers, etc.)
-}
-
-// PurgeStackResult reports what was purged during stack purging.
-type PurgeStackResult struct {
-	Stack   intmodel.Stack
-	Deleted []string // Resources that were deleted (standard cleanup)
-	Purged  []string // Additional resources purged (CNI, orphaned containers, etc.)
-}
-
-// PurgeCellResult reports what was purged during cell purging.
-type PurgeCellResult struct {
-	Cell              intmodel.Cell
-	ContainersDeleted bool
-	CgroupDeleted     bool
-	MetadataDeleted   bool
-	PurgeSucceeded    bool
-	Force             bool
-	Cascade           bool
-	Deleted           []string // Resources that were deleted (standard cleanup)
-	Purged            []string // Additional resources purged (CNI, orphaned containers, etc.)
-}
-
-// PurgeContainerResult reports what was purged during container purging.
-type PurgeContainerResult struct {
-	Container          intmodel.Container
-	CellMetadataExists bool
-	ContainerExists    bool
-	Deleted            []string // Resources that were deleted (standard cleanup)
-	Purged             []string // Additional resources purged (CNI, orphaned containers, etc.)
-}
-
-// PurgeRealm purges a realm with comprehensive cleanup. If cascade is true, purges all spaces first.
-// If force is true, skips validation of child resources.
-func (b *Exec) PurgeRealm(realm intmodel.Realm, force, cascade bool) (PurgeRealmResult, error) {
-	var result PurgeRealmResult
-
-	name := strings.TrimSpace(realm.Metadata.Name)
-	if name == "" {
-		return result, errdefs.ErrRealmNameRequired
-	}
-
-	// Build lookup realm for GetRealm
-	lookupRealm := intmodel.Realm{
-		Metadata: intmodel.RealmMetadata{
-			Name: name,
-		},
-	}
-	getResult, err := b.GetRealm(lookupRealm)
-	if err != nil {
-		if errors.Is(err, errdefs.ErrRealmNotFound) {
-			return result, fmt.Errorf("realm %q not found", name)
-		}
-		return result, err
-	}
-	if !getResult.MetadataExists {
-		return result, fmt.Errorf("realm %q not found", name)
-	}
-
-	internalRealm := getResult.Realm
-
-	// Initialize result with realm and flags
-	result = PurgeRealmResult{
-		Realm:   internalRealm,
-		Force:   force,
-		Cascade: cascade,
-		Deleted: []string{},
-		Purged:  []string{},
-	}
-
-	// If cascade, purge all spaces first
-	if cascade {
-		var spaces []intmodel.Space
-		spaces, err = b.ListSpaces(name)
-		if err != nil {
-			return result, fmt.Errorf("failed to list spaces: %w", err)
-		}
-		for _, spaceInternal := range spaces {
-			_, err = b.PurgeSpace(spaceInternal, force, cascade)
-			if err != nil {
-				return result, fmt.Errorf("failed to purge space %q: %w", spaceInternal.Metadata.Name, err)
-			}
-			result.Deleted = append(result.Deleted, fmt.Sprintf("space:%s", spaceInternal.Metadata.Name))
-		}
-	} else if !force {
-		// Validate no spaces exist
-		var spaces []intmodel.Space
-		spaces, err = b.ListSpaces(name)
-		if err != nil {
-			return result, fmt.Errorf("failed to list spaces: %w", err)
-		}
-		if len(spaces) > 0 {
-			return result, fmt.Errorf("%w: realm %q has %d space(s). Use --cascade to purge them or --force to skip validation", errdefs.ErrResourceHasDependencies, name, len(spaces))
-		}
-	}
-
-	// Perform standard delete first
-	deleteResult, err := b.DeleteRealm(internalRealm, force, cascade)
-	if err != nil {
-		// Log but continue with purge
-		result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
-		result.RealmDeleted = false
-	} else {
-		result.Deleted = append(result.Deleted, deleteResult.Deleted...)
-		result.RealmDeleted = true
-		// Update result realm with deleted realm
-		result.Realm = deleteResult.Realm
-	}
-
-	// Perform comprehensive purge
-	if err = b.runner.PurgeRealm(internalRealm); err != nil {
-		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
-		result.PurgeSucceeded = false
-	} else {
-		result.Purged = append(result.Purged, "orphaned-containers", "cni-resources", "all-metadata")
-		result.PurgeSucceeded = true
-	}
-
-	return result, nil
 }
 
 // PurgeSpace purges a space with comprehensive cleanup. If cascade is true, purges all stacks first.
@@ -266,6 +137,13 @@ func (b *Exec) PurgeSpace(space intmodel.Space, force, cascade bool) (PurgeSpace
 	return result, nil
 }
 
+// PurgeStackResult reports what was purged during stack purging.
+type PurgeStackResult struct {
+	Stack   intmodel.Stack
+	Deleted []string // Resources that were deleted (standard cleanup)
+	Purged  []string // Additional resources purged (CNI, orphaned containers, etc.)
+}
+
 // PurgeStack purges a stack with comprehensive cleanup. If cascade is true, purges all cells first.
 // If force is true, skips validation of child resources.
 func (b *Exec) PurgeStack(stack intmodel.Stack, force, cascade bool) (PurgeStackResult, error) {
@@ -357,6 +235,19 @@ func (b *Exec) PurgeStack(stack intmodel.Stack, force, cascade bool) (PurgeStack
 	}
 
 	return result, nil
+}
+
+// PurgeCellResult reports what was purged during cell purging.
+type PurgeCellResult struct {
+	Cell              intmodel.Cell
+	ContainersDeleted bool
+	CgroupDeleted     bool
+	MetadataDeleted   bool
+	PurgeSucceeded    bool
+	Force             bool
+	Cascade           bool
+	Deleted           []string // Resources that were deleted (standard cleanup)
+	Purged            []string // Additional resources purged (CNI, orphaned containers, etc.)
 }
 
 // PurgeCell purges a cell with comprehensive cleanup. Always purges all containers first.
@@ -452,6 +343,15 @@ func (b *Exec) PurgeCell(cell intmodel.Cell, force, cascade bool) (PurgeCellResu
 	}
 
 	return result, nil
+}
+
+// PurgeContainerResult reports what was purged during container purging.
+type PurgeContainerResult struct {
+	Container          intmodel.Container
+	CellMetadataExists bool
+	ContainerExists    bool
+	Deleted            []string // Resources that were deleted (standard cleanup)
+	Purged             []string // Additional resources purged (CNI, orphaned containers, etc.)
 }
 
 // PurgeContainer purges a single container with comprehensive cleanup. Cascade flag is not applicable.

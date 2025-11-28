@@ -1,0 +1,97 @@
+// Copyright 2025 Emiliano Spinella (eminwux)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// SPDX-License-Identifier: Apache-2.0
+
+package runner
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/eminwux/kukeon/internal/ctr"
+	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/metadata"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/cgroups"
+	"github.com/eminwux/kukeon/internal/util/fs"
+)
+
+func (r *Exec) DeleteRealm(realm intmodel.Realm) (DeleteRealmOutcome, error) {
+	var outcome DeleteRealmOutcome
+
+	realmName := strings.TrimSpace(realm.Metadata.Name)
+	if realmName == "" {
+		return outcome, errdefs.ErrRealmNameRequired
+	}
+
+	// Get the realm document
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: realmName,
+		},
+	}
+	internalRealm, err := r.GetRealm(lookupRealm)
+	if err != nil {
+		if errors.Is(err, errdefs.ErrRealmNotFound) {
+			// Idempotent: realm doesn't exist, consider it deleted
+			return outcome, nil
+		}
+		return outcome, fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
+	}
+	// Initialize ctr client if needed
+	if r.ctrClient == nil {
+		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
+	}
+	if err = r.ctrClient.Connect(); err != nil {
+		return outcome, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	defer r.ctrClient.Close()
+
+	// Delete realm cgroup
+	spec := cgroups.DefaultRealmSpec(internalRealm)
+	mountpoint := r.ctrClient.GetCgroupMountpoint()
+	err = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
+	if err != nil {
+		r.logger.WarnContext(r.ctx, "failed to delete realm cgroup", "cgroup", spec.Group, "error", err)
+		// Continue with namespace and metadata deletion
+	} else {
+		outcome.CgroupDeleted = true
+	}
+
+	// Delete containerd namespace
+	if err = r.ctrClient.DeleteNamespace(internalRealm.Spec.Namespace); err != nil {
+		r.logger.WarnContext(
+			r.ctx,
+			"failed to delete containerd namespace",
+			"namespace",
+			internalRealm.Spec.Namespace,
+			"error",
+			err,
+		)
+		// Continue with metadata deletion
+	} else {
+		outcome.ContainerdNamespaceDeleted = true
+	}
+
+	// Delete realm metadata
+	metadataFilePath := fs.RealmMetadataPath(r.opts.RunPath, internalRealm.Metadata.Name)
+	if err = metadata.DeleteMetadata(r.ctx, r.logger, metadataFilePath); err != nil {
+		return outcome, fmt.Errorf("%w: failed to delete realm metadata: %w", errdefs.ErrDeleteRealm, err)
+	}
+	outcome.MetadataDeleted = true
+
+	return outcome, nil
+}

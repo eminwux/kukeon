@@ -75,6 +75,8 @@ type Client interface {
 		ctx context.Context,
 		containerSpec intmodel.ContainerSpec,
 	) (containerd.Container, error)
+	// CleanupNamespaceResources removes all images and snapshots from a namespace
+	CleanupNamespaceResources(ctx context.Context, namespace, snapshotter string) error
 }
 
 // NamespacePaths describes the namespace file paths a container should join.

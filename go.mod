@@ -9,6 +9,7 @@ require (
 	github.com/containerd/errdefs v1.0.0
 	github.com/containerd/typeurl/v2 v2.2.3
 	github.com/containernetworking/cni v1.3.0
+	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/runtime-spec v1.2.1
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/viper v1.21.0
@@ -48,7 +49,6 @@ require (
 	github.com/moby/sys/signal v0.7.1 // indirect
 	github.com/moby/sys/user v0.4.0 // indirect
 	github.com/moby/sys/userns v0.1.0 // indirect
-	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/opencontainers/selinux v1.13.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect

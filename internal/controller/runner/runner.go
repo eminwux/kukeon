@@ -31,6 +31,7 @@ type Runner interface {
 	GetRealm(realm intmodel.Realm) (intmodel.Realm, error)
 	ListRealms() ([]intmodel.Realm, error)
 	CreateRealm(realm intmodel.Realm) (intmodel.Realm, error)
+	EnsureRealm(realm intmodel.Realm) (intmodel.Realm, error)
 	ExistsRealmContainerdNamespace(namespace string) (bool, error)
 	DeleteRealm(realm intmodel.Realm) (DeleteRealmOutcome, error)
 

@@ -25,47 +25,6 @@ import (
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
-func (r *Exec) CreateRealm(realm intmodel.Realm) (intmodel.Realm, error) {
-	r.logger.Debug("run-path", "run-path", r.opts.RunPath)
-
-	// Build minimal internal realm for GetRealm lookup
-	lookupRealm := intmodel.Realm{
-		Metadata: intmodel.RealmMetadata{
-			Name: realm.Metadata.Name,
-		},
-	}
-
-	// Get existing realm (returns internal model)
-	existingRealm, err := r.GetRealm(lookupRealm)
-	if err != nil && !errors.Is(err, errdefs.ErrRealmNotFound) {
-		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
-	}
-
-	// Realm found, check if namespace exists
-	if err == nil {
-		ensuredRealm, ensureErr := r.ensureRealmContainerdNamespace(existingRealm)
-		if ensureErr != nil {
-			return intmodel.Realm{}, ensureErr
-		}
-
-		ensuredRealm, ensureErr = r.ensureRealmCgroup(ensuredRealm)
-		if ensureErr != nil {
-			return intmodel.Realm{}, ensureErr
-		}
-
-		return ensuredRealm, nil
-	}
-
-	// Realm not found, create new realm
-	realm.Status.State = intmodel.RealmStateCreating
-	resultRealm, err := r.provisionNewRealm(realm)
-	if err != nil {
-		return intmodel.Realm{}, err
-	}
-
-	return resultRealm, nil
-}
-
 func (r *Exec) CreateStack(stack intmodel.Stack) (intmodel.Stack, error) {
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)

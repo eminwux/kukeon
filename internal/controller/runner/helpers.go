@@ -61,7 +61,7 @@ func (r *Exec) purgeCNIForContainer(ctx context.Context, containerID, netnsPath,
 
 	// Remove IPAM allocation files
 	if networkName != "" {
-		ipamDir := filepath.Join("/var/lib/cni/networks", networkName)
+		ipamDir := filepath.Join(cni.CNINetworksDir, networkName)
 		ipamFile := filepath.Join(ipamDir, containerID)
 		if err := os.Remove(ipamFile); err == nil {
 			purged = append(purged, "ipam-allocation")
@@ -120,7 +120,7 @@ func (r *Exec) purgeCNIForNetwork(ctx context.Context, networkName string) error
 	var purged []string
 
 	// Remove entire network directory from /var/lib/cni/networks/
-	networkDir := filepath.Join("/var/lib/cni/networks", networkName)
+	networkDir := filepath.Join(cni.CNINetworksDir, networkName)
 	if err := os.RemoveAll(networkDir); err == nil {
 		purged = append(purged, "network-directory")
 		r.logger.DebugContext(ctx, "removed CNI network directory", "network", networkName, "dir", networkDir)

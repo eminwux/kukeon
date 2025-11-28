@@ -46,6 +46,10 @@ const (
 	defaultSubnetCIDR  = "10.88.0.0/16"
 )
 
+// CNINetworksDir is the standard directory where CNI stores network state and IPAM allocations.
+// This is the default location used by CNI plugins for host-local IPAM.
+const CNINetworksDir = "/var/lib/cni/networks"
+
 type ConflistModel struct {
 	CNIVersion string        `json:"cniVersion"`
 	Name       string        `json:"name"`
