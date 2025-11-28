@@ -25,66 +25,13 @@ import (
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
-func (r *Exec) CreateStack(stack intmodel.Stack) (intmodel.Stack, error) {
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-
-	// Build minimal internal stack for GetStack lookup
-	lookupStack := intmodel.Stack{
-		Metadata: intmodel.StackMetadata{
-			Name: stack.Metadata.Name,
-		},
-		Spec: intmodel.StackSpec{
-			RealmName: stack.Spec.RealmName,
-			SpaceName: stack.Spec.SpaceName,
-		},
-	}
-
-	// Get existing stack (returns internal model)
-	existingStack, err := r.GetStack(lookupStack)
-	if err != nil && !errors.Is(err, errdefs.ErrStackNotFound) {
-		return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrGetStack, err)
-	}
-
-	// Stack found, ensure cgroup exists
-	if err == nil {
-		ensuredStack, ensureErr := r.ensureStackCgroup(existingStack)
-		if ensureErr != nil {
-			return intmodel.Stack{}, ensureErr
-		}
-
-		return ensuredStack, nil
-	}
-
-	// Stack not found, create new stack
-	resultStack, err := r.provisionNewStack(stack)
-	if err != nil {
-		return intmodel.Stack{}, err
-	}
-
-	return resultStack, nil
-}
-
 func (r *Exec) CreateCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
 
-	// Build minimal internal cell for GetCell lookup
-	lookupCell := intmodel.Cell{
-		Metadata: intmodel.CellMetadata{
-			Name: cell.Metadata.Name,
-		},
-		Spec: intmodel.CellSpec{
-			RealmName: cell.Spec.RealmName,
-			SpaceName: cell.Spec.SpaceName,
-			StackName: cell.Spec.StackName,
-		},
-	}
-
 	// Get existing cell (returns internal model)
-	existingCell, err := r.GetCell(lookupCell)
+	existingCell, err := r.GetCell(cell)
 	if err != nil && !errors.Is(err, errdefs.ErrCellNotFound) {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 	}

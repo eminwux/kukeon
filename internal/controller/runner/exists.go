@@ -69,17 +69,7 @@ func (r *Exec) ExistsCellRootContainer(cell intmodel.Cell) (bool, error) {
 	}
 
 	// Get the cell document to access cell ID
-	lookupCell := intmodel.Cell{
-		Metadata: intmodel.CellMetadata{
-			Name: cellName,
-		},
-		Spec: intmodel.CellSpec{
-			RealmName: realmName,
-			SpaceName: spaceName,
-			StackName: stackName,
-		},
-	}
-	internalCell, err := r.GetCell(lookupCell)
+	internalCell, err := r.GetCell(cell)
 	if err != nil {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 	}

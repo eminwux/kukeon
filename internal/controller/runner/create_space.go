@@ -30,18 +30,8 @@ func (r *Exec) CreateSpace(space intmodel.Space) (intmodel.Space, error) {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
 
-	// Build minimal internal space for GetSpace lookup
-	lookupSpace := intmodel.Space{
-		Metadata: intmodel.SpaceMetadata{
-			Name: space.Metadata.Name,
-		},
-		Spec: intmodel.SpaceSpec{
-			RealmName: space.Spec.RealmName,
-		},
-	}
-
 	// Get existing space (returns internal model)
-	existingSpace, err := r.GetSpace(lookupSpace)
+	existingSpace, err := r.GetSpace(space)
 	if err != nil && !errors.Is(err, errdefs.ErrSpaceNotFound) {
 		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
 	}

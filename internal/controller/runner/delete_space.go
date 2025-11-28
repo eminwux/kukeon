@@ -43,15 +43,7 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 	}
 
 	// Get the space document
-	lookupSpace := intmodel.Space{
-		Metadata: intmodel.SpaceMetadata{
-			Name: spaceName,
-		},
-		Spec: intmodel.SpaceSpec{
-			RealmName: realmName,
-		},
-	}
-	internalSpace, err := r.GetSpace(lookupSpace)
+	internalSpace, err := r.GetSpace(space)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrSpaceNotFound) {
 			// Idempotent: space doesn't exist, consider it deleted

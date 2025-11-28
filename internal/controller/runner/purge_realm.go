@@ -40,12 +40,7 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) error {
 
 	// Get realm via internal model to ensure metadata accuracy (if available)
 	// Note: DeleteRealm is handled at the controller level, this function focuses on comprehensive cleanup
-	lookupRealm := intmodel.Realm{
-		Metadata: intmodel.RealmMetadata{
-			Name: realmName,
-		},
-	}
-	internalRealm, err := r.GetRealm(lookupRealm)
+	internalRealm, err := r.GetRealm(realm)
 	if err != nil && !errors.Is(err, errdefs.ErrRealmNotFound) {
 		return fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
 	}

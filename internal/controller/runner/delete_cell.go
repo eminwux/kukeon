@@ -51,17 +51,7 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 	}
 
 	// Get the cell document to access all containers
-	lookupCell := intmodel.Cell{
-		Metadata: intmodel.CellMetadata{
-			Name: cellName,
-		},
-		Spec: intmodel.CellSpec{
-			RealmName: realmName,
-			SpaceName: spaceName,
-			StackName: stackName,
-		},
-	}
-	internalCell, err := r.GetCell(lookupCell)
+	internalCell, err := r.GetCell(cell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			// Idempotent: cell doesn't exist, consider it deleted

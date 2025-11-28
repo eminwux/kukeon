@@ -44,16 +44,7 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 	}
 
 	// Get the stack document
-	lookupStack := intmodel.Stack{
-		Metadata: intmodel.StackMetadata{
-			Name: stackName,
-		},
-		Spec: intmodel.StackSpec{
-			RealmName: realmName,
-			SpaceName: spaceName,
-		},
-	}
-	internalStack, err := r.GetStack(lookupStack)
+	internalStack, err := r.GetStack(stack)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrStackNotFound) {
 			// Idempotent: stack doesn't exist, consider it deleted
