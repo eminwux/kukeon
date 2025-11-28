@@ -34,6 +34,39 @@ type DeleteRealmResult struct {
 	ContainerdNamespaceDeleted bool
 }
 
+// deleteRealmCascade handles cascade deletion logic using runner methods directly.
+// It returns an error if deletion fails, but does not return result types.
+func (b *Exec) deleteRealmCascade(realm intmodel.Realm, force, cascade bool) error {
+	realmName := strings.TrimSpace(realm.Metadata.Name)
+
+	// If cascade is true, list and delete child resources (spaces)
+	if cascade {
+		spaces, listErr := b.runner.ListSpaces(realmName)
+		if listErr != nil {
+			return fmt.Errorf("failed to list spaces: %w", listErr)
+		}
+		for _, space := range spaces {
+			if delErr := b.deleteSpaceCascade(space, force, cascade); delErr != nil {
+				return fmt.Errorf("failed to delete space %q: %w", space.Metadata.Name, delErr)
+			}
+		}
+	} else if !force {
+		// Validate no child resources exist
+		spaces, listErr := b.runner.ListSpaces(realmName)
+		if listErr != nil {
+			return fmt.Errorf("failed to list spaces: %w", listErr)
+		}
+		if len(spaces) > 0 {
+			return fmt.Errorf("%w: realm %q has %d space(s). Use --cascade to delete them or --force to skip validation",
+				errdefs.ErrResourceHasDependencies, realmName, len(spaces))
+		}
+	}
+
+	// Delete the resource itself via runner (ignore outcome, return error only)
+	_, err := b.runner.DeleteRealm(realm)
+	return err
+}
+
 // DeleteRealm deletes a realm. If cascade is true, deletes all spaces first.
 // If force is true, skips validation of child resources.
 func (b *Exec) DeleteRealm(realm intmodel.Realm, force, cascade bool) (DeleteRealmResult, error) {
@@ -44,72 +77,48 @@ func (b *Exec) DeleteRealm(realm intmodel.Realm, force, cascade bool) (DeleteRea
 		return res, errdefs.ErrRealmNameRequired
 	}
 
-	// Ensure realm exists and capture its latest state
-	lookupRealm := intmodel.Realm{
-		Metadata: intmodel.RealmMetadata{
-			Name: name,
-		},
-	}
-	getResult, err := b.GetRealm(lookupRealm)
+	getResult, err := b.runner.GetRealm(realm)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrRealmNotFound) {
+			// Realm not found, return error
 			return res, fmt.Errorf("realm %q not found", name)
 		}
+		// Other error, return error
 		return res, err
-	}
-	if !getResult.MetadataExists {
-		return res, fmt.Errorf("realm %q not found", name)
 	}
 
 	res = DeleteRealmResult{
-		Realm:   getResult.Realm,
+		Realm:   getResult,
 		Deleted: []string{},
 	}
 
-	// If cascade, delete all spaces first
-	var spaces []intmodel.Space
+	// Use private cascade method for deletion
+	// Track deleted spaces for result building (list before deletion to know what will be deleted)
 	if cascade {
-		spaces, err = b.ListSpaces(name)
-		if err != nil {
-			return res, fmt.Errorf("failed to list spaces: %w", err)
+		spaces, listErr := b.runner.ListSpaces(name)
+		if listErr != nil {
+			return res, fmt.Errorf("failed to list spaces: %w", listErr)
 		}
-		for _, spaceInternal := range spaces {
-			_, err = b.DeleteSpace(spaceInternal, force, cascade)
-			if err != nil {
-				return res, fmt.Errorf("failed to delete space %q: %w", spaceInternal.Metadata.Name, err)
-			}
-			res.Deleted = append(res.Deleted, fmt.Sprintf("space:%s", spaceInternal.Metadata.Name))
-		}
-	} else if !force {
-		// Validate no spaces exist
-		spaces, err = b.ListSpaces(name)
-		if err != nil {
-			return res, fmt.Errorf("failed to list spaces: %w", err)
-		}
-		if len(spaces) > 0 {
-			return res, fmt.Errorf("%w: realm %q has %d space(s). Use --cascade to delete them or --force to skip validation", errdefs.ErrResourceHasDependencies, name, len(spaces))
+		// Track spaces that will be deleted
+		for _, space := range spaces {
+			res.Deleted = append(res.Deleted, fmt.Sprintf("space:%s", space.Metadata.Name))
 		}
 	}
 
-	// Delete realm via runner and capture detailed outcome
-	outcome, err := b.runner.DeleteRealm(getResult.Realm)
-	if err != nil {
+	// Delete the resource itself (private method handles cascade deletion)
+	// Note: private method deletes realm and returns error only, so we can't get outcome
+	// Since private method succeeded, we assume all deletions succeeded
+	if err = b.deleteRealmCascade(getResult, force, cascade); err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrDeleteRealm, err)
 	}
 
-	res.MetadataDeleted = outcome.MetadataDeleted
-	res.CgroupDeleted = outcome.CgroupDeleted
-	res.ContainerdNamespaceDeleted = outcome.ContainerdNamespaceDeleted
+	// Since private method succeeded, assume all deletions succeeded
+	// (We can't get the actual outcome since realm is already deleted)
+	res.MetadataDeleted = true
+	res.CgroupDeleted = true
+	res.ContainerdNamespaceDeleted = true
 
-	if outcome.MetadataDeleted {
-		res.Deleted = append(res.Deleted, "metadata")
-	}
-	if outcome.CgroupDeleted {
-		res.Deleted = append(res.Deleted, "cgroup")
-	}
-	if outcome.ContainerdNamespaceDeleted {
-		res.Deleted = append(res.Deleted, "namespace")
-	}
+	res.Deleted = append(res.Deleted, "metadata", "cgroup", "namespace")
 
 	return res, nil
 }

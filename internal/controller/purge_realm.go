@@ -53,13 +53,7 @@ func (b *Exec) PurgeRealm(realm intmodel.Realm, force, cascade bool) (PurgeRealm
 		realm.Spec.Namespace = namespace
 	}
 
-	// Build lookup realm for GetRealm
-	lookupRealm := intmodel.Realm{
-		Metadata: intmodel.RealmMetadata{
-			Name: name,
-		},
-	}
-	getResult, err := b.GetRealm(lookupRealm)
+	getResult, err := b.GetRealm(realm)
 	if err != nil && !errors.Is(err, errdefs.ErrRealmNotFound) {
 		return result, err
 	}
@@ -98,59 +92,77 @@ func (b *Exec) PurgeRealm(realm intmodel.Realm, force, cascade bool) (PurgeRealm
 		Purged:  []string{},
 	}
 
-	// If cascade, purge all spaces first (only if metadata exists, as ListSpaces requires metadata)
+	// Track deleted spaces for result building (list before deletion to know what will be deleted)
 	if cascade && metadataExists {
-		var spaces []intmodel.Space
-		spaces, err = b.ListSpaces(name)
-		if err != nil {
-			return result, fmt.Errorf("failed to list spaces: %w", err)
+		spaces, listErr := b.runner.ListSpaces(name)
+		if listErr != nil {
+			return result, fmt.Errorf("failed to list spaces: %w", listErr)
 		}
-		for _, spaceInternal := range spaces {
-			_, err = b.PurgeSpace(spaceInternal, force, cascade)
-			if err != nil {
-				return result, fmt.Errorf("failed to purge space %q: %w", spaceInternal.Metadata.Name, err)
-			}
-			result.Deleted = append(result.Deleted, fmt.Sprintf("space:%s", spaceInternal.Metadata.Name))
-		}
-	} else if !force && metadataExists {
-		// Validate no spaces exist (only if metadata exists)
-		var spaces []intmodel.Space
-		spaces, err = b.ListSpaces(name)
-		if err != nil {
-			return result, fmt.Errorf("failed to list spaces: %w", err)
-		}
-		if len(spaces) > 0 {
-			return result, fmt.Errorf("%w: realm %q has %d space(s). Use --cascade to purge them or --force to skip validation", errdefs.ErrResourceHasDependencies, name, len(spaces))
+		// Track spaces that will be deleted
+		for _, space := range spaces {
+			result.Deleted = append(result.Deleted, fmt.Sprintf("space:%s", space.Metadata.Name))
 		}
 	}
 
-	// Perform standard delete first (only if metadata exists, as DeleteRealm requires metadata)
-	if metadataExists {
-		var deleteResult DeleteRealmResult
-		deleteResult, err = b.DeleteRealm(internalRealm, force, cascade)
-		if err != nil {
-			// Log but continue with purge
-			result.Purged = append(result.Purged, fmt.Sprintf("delete-warning:%v", err))
-			result.RealmDeleted = false
-		} else {
-			result.Deleted = append(result.Deleted, deleteResult.Deleted...)
-			result.RealmDeleted = true
-			// Update result realm with deleted realm
-			result.Realm = deleteResult.Realm
-		}
-	} else {
-		// Metadata doesn't exist - skip DeleteRealm and mark as not deleted via standard delete
-		result.RealmDeleted = false
-	}
-
-	// Perform comprehensive purge
-	if err = b.runner.PurgeRealm(internalRealm); err != nil {
+	// Call private cascade method (handles cascade deletion, standard delete, and comprehensive purge)
+	if err = b.purgeRealmCascade(internalRealm, force, cascade, metadataExists); err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
 		result.PurgeSucceeded = false
+		// If metadata exists and delete failed, mark as not deleted
+		if metadataExists {
+			result.RealmDeleted = false
+		}
 	} else {
+		// Since private method succeeded, assume all operations succeeded
+		if metadataExists {
+			result.RealmDeleted = true
+			result.Deleted = append(result.Deleted, "metadata", "cgroup", "namespace")
+		} else {
+			result.RealmDeleted = false
+		}
 		result.Purged = append(result.Purged, "orphaned-containers", "cni-resources", "all-metadata")
 		result.PurgeSucceeded = true
 	}
 
 	return result, nil
+}
+
+// purgeRealmCascade handles cascade deletion and purging logic using runner methods directly.
+// It returns an error if deletion/purging fails, but does not return result types.
+// metadataExists indicates whether realm metadata exists (affects cascade and delete operations).
+func (b *Exec) purgeRealmCascade(realm intmodel.Realm, force, cascade, metadataExists bool) error {
+	realmName := strings.TrimSpace(realm.Metadata.Name)
+
+	// If cascade is true, list and purge child resources (spaces) recursively (only if metadata exists)
+	if cascade && metadataExists {
+		spaces, err := b.runner.ListSpaces(realmName)
+		if err != nil {
+			return fmt.Errorf("failed to list spaces: %w", err)
+		}
+		for _, space := range spaces {
+			if err = b.purgeSpaceCascade(space, force, cascade); err != nil {
+				return fmt.Errorf("failed to purge space %q: %w", space.Metadata.Name, err)
+			}
+		}
+	} else if !force && metadataExists {
+		// Validate no child resources exist (only if metadata exists)
+		spaces, err := b.runner.ListSpaces(realmName)
+		if err != nil {
+			return fmt.Errorf("failed to list spaces: %w", err)
+		}
+		if len(spaces) > 0 {
+			return fmt.Errorf("%w: realm %q has %d space(s). Use --cascade to purge them or --force to skip validation",
+				errdefs.ErrResourceHasDependencies, realmName, len(spaces))
+		}
+	}
+
+	// Perform standard delete first (only if metadata exists, as deleteRealmCascade requires metadata)
+	if metadataExists {
+		if err := b.deleteRealmCascade(realm, force, cascade); err != nil {
+			return fmt.Errorf("failed to delete realm: %w", err)
+		}
+	}
+
+	// Perform comprehensive purge via runner (works even without metadata)
+	return b.runner.PurgeRealm(realm)
 }

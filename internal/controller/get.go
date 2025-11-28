@@ -33,36 +33,6 @@ type GetRealmResult struct {
 	ContainerdNamespaceExists bool
 }
 
-// GetSpaceResult reports the current state of a space.
-type GetSpaceResult struct {
-	Space            intmodel.Space
-	MetadataExists   bool
-	CgroupExists     bool
-	CNINetworkExists bool
-}
-
-// GetStackResult reports the current state of a stack.
-type GetStackResult struct {
-	Stack          intmodel.Stack
-	MetadataExists bool
-	CgroupExists   bool
-}
-
-// GetContainerResult reports the current state of a container.
-type GetContainerResult struct {
-	Container          intmodel.Container
-	CellMetadataExists bool
-	ContainerExists    bool
-}
-
-// GetCellResult reports the current state of a cell.
-type GetCellResult struct {
-	Cell                intmodel.Cell
-	MetadataExists      bool
-	CgroupExists        bool
-	RootContainerExists bool
-}
-
 // GetRealm retrieves a single realm and reports its current state.
 func (b *Exec) GetRealm(realm intmodel.Realm) (GetRealmResult, error) {
 	var res GetRealmResult
@@ -113,6 +83,14 @@ func (b *Exec) GetRealm(realm intmodel.Realm) (GetRealmResult, error) {
 // ListRealms lists all realms.
 func (b *Exec) ListRealms() ([]intmodel.Realm, error) {
 	return b.runner.ListRealms()
+}
+
+// GetSpaceResult reports the current state of a space.
+type GetSpaceResult struct {
+	Space            intmodel.Space
+	MetadataExists   bool
+	CgroupExists     bool
+	CNINetworkExists bool
 }
 
 // GetSpace retrieves a single space and reports its current state.
@@ -169,6 +147,13 @@ func (b *Exec) ListSpaces(realmName string) ([]intmodel.Space, error) {
 	return b.runner.ListSpaces(realmName)
 }
 
+// GetStackResult reports the current state of a stack.
+type GetStackResult struct {
+	Stack          intmodel.Stack
+	MetadataExists bool
+	CgroupExists   bool
+}
+
 // GetStack retrieves a single stack and reports its current state.
 func (b *Exec) GetStack(stack intmodel.Stack) (GetStackResult, error) {
 	var res GetStackResult
@@ -219,6 +204,14 @@ func (b *Exec) GetStack(stack intmodel.Stack) (GetStackResult, error) {
 // ListStacks lists all stacks, optionally filtered by realm and/or space.
 func (b *Exec) ListStacks(realmName, spaceName string) ([]intmodel.Stack, error) {
 	return b.runner.ListStacks(realmName, spaceName)
+}
+
+// GetCellResult reports the current state of a cell.
+type GetCellResult struct {
+	Cell                intmodel.Cell
+	MetadataExists      bool
+	CgroupExists        bool
+	RootContainerExists bool
 }
 
 // GetCell retrieves a single cell and reports its current state.
@@ -293,6 +286,13 @@ func (b *Exec) GetCell(cell intmodel.Cell) (GetCellResult, error) {
 // ListCells lists all cells, optionally filtered by realm, space, and/or stack.
 func (b *Exec) ListCells(realmName, spaceName, stackName string) ([]intmodel.Cell, error) {
 	return b.runner.ListCells(realmName, spaceName, stackName)
+}
+
+// GetContainerResult reports the current state of a container.
+type GetContainerResult struct {
+	Container          intmodel.Container
+	CellMetadataExists bool
+	ContainerExists    bool
 }
 
 // GetContainer retrieves a single container and reports its current state.
