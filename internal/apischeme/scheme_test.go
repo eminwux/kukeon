@@ -163,12 +163,12 @@ func TestCellRoundTripV1Beta1(t *testing.T) {
 			Labels: map[string]string{"g": "h"},
 		},
 		Spec: ext.CellSpec{
-			ID:            "cell-id-0",
-			RealmID:       "realm0",
-			SpaceID:       "space0",
-			StackID:       "stack0",
-			Containers:    []ext.ContainerSpec{},
-			RootContainer: nil,
+			ID:              "cell-id-0",
+			RealmID:         "realm0",
+			SpaceID:         "space0",
+			StackID:         "stack0",
+			RootContainerID: "",
+			Containers:      []ext.ContainerSpec{},
 		},
 		Status: ext.CellStatus{
 			State:      ext.CellStatePending,

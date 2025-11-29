@@ -832,6 +832,72 @@ func validateContainerSpec(spec ContainerSpec) error {
 	return nil
 }
 
+// BuildContainerSpec converts an internal ContainerSpec to ctr.ContainerSpec
+// with the expected defaults applied.
+// Uses ContainerdID if available, otherwise falls back to ID.
+func BuildContainerSpec(
+	containerSpec intmodel.ContainerSpec,
+) ContainerSpec {
+	// Use ContainerdID if available, otherwise fall back to ID
+	containerdID := containerSpec.ContainerdID
+	if containerdID == "" {
+		containerdID = containerSpec.ID
+	}
+
+	cellID := containerSpec.CellName
+	spaceID := containerSpec.SpaceName
+	realmID := containerSpec.RealmName
+	stackID := containerSpec.StackName
+
+	// Build labels
+	labels := make(map[string]string)
+	// Add kukeon-specific labels
+	labels["kukeon.io/container-type"] = "container"
+	labels["kukeon.io/cell"] = cellID
+	labels["kukeon.io/space"] = spaceID
+	labels["kukeon.io/realm"] = realmID
+	labels["kukeon.io/stack"] = stackID
+
+	// Build OCI spec options
+	specOpts := []oci.SpecOpts{
+		oci.WithDefaultPathEnv,
+	}
+
+	// Set hostname to containerd ID if not empty
+	if containerdID != "" {
+		specOpts = append(specOpts, oci.WithHostname(containerdID))
+	}
+
+	// Set command and args
+	if containerSpec.Command != "" {
+		args := []string{containerSpec.Command}
+		if len(containerSpec.Args) > 0 {
+			args = append(args, containerSpec.Args...)
+		}
+		specOpts = append(specOpts, oci.WithProcessArgs(args...))
+	} else if len(containerSpec.Args) > 0 {
+		specOpts = append(specOpts, oci.WithProcessArgs(containerSpec.Args...))
+	}
+
+	// Set environment variables
+	if len(containerSpec.Env) > 0 {
+		specOpts = append(specOpts, oci.WithEnv(containerSpec.Env))
+	}
+
+	// Set privileged mode if specified
+	if containerSpec.Privileged {
+		specOpts = append(specOpts, oci.WithPrivileged)
+	}
+
+	return ContainerSpec{
+		ID:            containerdID,
+		Image:         containerSpec.Image,
+		Labels:        labels,
+		SpecOpts:      specOpts,
+		CNIConfigPath: containerSpec.CNIConfigPath,
+	}
+}
+
 // CreateContainerFromSpec converts an internal ContainerSpec to ctr.ContainerSpec and creates the container.
 func (c *client) CreateContainerFromSpec(
 	ctx context.Context,
@@ -862,58 +928,9 @@ func (c *client) CreateContainerFromSpec(
 	}
 
 	cellID := containerSpec.CellName
-	spaceID := containerSpec.SpaceName
-	realmID := containerSpec.RealmName
-	stackID := containerSpec.StackName
 
-	// Build labels
-	labels := make(map[string]string)
-	// Add kukeon-specific labels
-	labels["kukeon.io/container-type"] = "container"
-	labels["kukeon.io/cell"] = cellID
-	labels["kukeon.io/space"] = spaceID
-	labels["kukeon.io/realm"] = realmID
-	labels["kukeon.io/stack"] = stackID
-
-	// Build OCI spec options
-	specOpts := []oci.SpecOpts{
-		oci.WithDefaultPathEnv,
-	}
-
-	// Set hostname to container ID if not empty
-	if containerSpec.ID != "" {
-		specOpts = append(specOpts, oci.WithHostname(containerSpec.ID))
-	}
-
-	// Set command and args
-	if containerSpec.Command != "" {
-		args := []string{containerSpec.Command}
-		if len(containerSpec.Args) > 0 {
-			args = append(args, containerSpec.Args...)
-		}
-		specOpts = append(specOpts, oci.WithProcessArgs(args...))
-	} else if len(containerSpec.Args) > 0 {
-		specOpts = append(specOpts, oci.WithProcessArgs(containerSpec.Args...))
-	}
-
-	// Set environment variables
-	if len(containerSpec.Env) > 0 {
-		specOpts = append(specOpts, oci.WithEnv(containerSpec.Env))
-	}
-
-	// Set privileged mode if specified
-	if containerSpec.Privileged {
-		specOpts = append(specOpts, oci.WithPrivileged)
-	}
-
-	// Convert to ctr.ContainerSpec
-	ctrSpec := ContainerSpec{
-		ID:            containerSpec.ID,
-		Image:         containerSpec.Image,
-		Labels:        labels,
-		SpecOpts:      specOpts,
-		CNIConfigPath: containerSpec.CNIConfigPath,
-	}
+	// Convert to ctr.ContainerSpec using BuildContainerSpec
+	ctrSpec := BuildContainerSpec(containerSpec)
 
 	// Create the container
 	container, err := c.CreateContainer(ctx, ctrSpec)
@@ -935,13 +952,13 @@ func (c *client) CreateContainerFromSpec(
 		ctx,
 		"created container from spec",
 		"id",
-		containerSpec.ID,
+		ctrSpec.ID,
 		"cell",
 		cellID,
 		"space",
-		spaceID,
+		containerSpec.SpaceName,
 		"realm",
-		realmID,
+		containerSpec.RealmName,
 	)
 	return container, nil
 }

@@ -31,6 +31,7 @@ type ContainerMetadata struct {
 
 type ContainerSpec struct {
 	ID              string
+	ContainerdID    string
 	RealmName       string
 	SpaceName       string
 	StackName       string

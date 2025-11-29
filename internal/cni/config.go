@@ -32,7 +32,7 @@ type NetworkConfig struct {
 func NewCNINetworkConfig(name string) NetworkConfig {
 	return NetworkConfig{
 		Name:       name,
-		BridgeName: defaultBridgeName,
+		BridgeName: name,
 		SubnetCIDR: defaultSubnetCIDR,
 	}
 }

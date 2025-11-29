@@ -37,10 +37,10 @@ func BuildSpaceNetworkName(realmName, spaceName string) (string, error) {
 	return fmt.Sprintf("%s-%s", realmName, spaceName), nil
 }
 
-// BuildRootContainerName constructs a root container name using hierarchical format.
+// BuildRootContainerdID constructs a root container containerd ID using hierarchical format.
 // Format: {spaceName}__{stackName}__{cellName}__root
 // Validates that all parameters are non-empty.
-func BuildRootContainerName(spaceName, stackName, cellName string) (string, error) {
+func BuildRootContainerdID(spaceName, stackName, cellName string) (string, error) {
 	spaceName = strings.TrimSpace(spaceName)
 	stackName = strings.TrimSpace(stackName)
 	cellName = strings.TrimSpace(cellName)
@@ -58,10 +58,10 @@ func BuildRootContainerName(spaceName, stackName, cellName string) (string, erro
 	return fmt.Sprintf("%s_%s_%s_root", spaceName, stackName, cellName), nil
 }
 
-// BuildContainerName constructs a container name using hierarchical format.
+// BuildContainerdID constructs a container containerd ID using hierarchical format.
 // Format: {spaceName}__{stackName}__{cellName}__{containerName}
 // Validates that all parameters are non-empty.
-func BuildContainerName(spaceName, stackName, cellName, containerName string) (string, error) {
+func BuildContainerdID(spaceName, stackName, cellName, containerName string) (string, error) {
 	spaceName = strings.TrimSpace(spaceName)
 	stackName = strings.TrimSpace(stackName)
 	cellName = strings.TrimSpace(cellName)

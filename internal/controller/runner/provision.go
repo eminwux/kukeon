@@ -866,7 +866,7 @@ func (r *Exec) provisionNewCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	cell.Status.CgroupPath = cgroupPath
 
 	// Create pause container and all containers for the cell
-	_, err = r.createCellContainers(cell)
+	_, err = r.createCellContainers(&cell)
 	if err != nil {
 		return intmodel.Cell{}, err
 	}
@@ -991,9 +991,11 @@ func (r *Exec) ensureCellCgroup(cell intmodel.Cell) (intmodel.Cell, error) {
 	return cell, nil
 }
 
-// createCellContainers creates the root container and all containers defined in the Cell.
-// The root container is created first, then all containers in cell.Spec.Containers are created.
-func (r *Exec) createCellContainers(cell intmodel.Cell) (containerd.Container, error) {
+// createCellContainers creates all containers defined in the Cell, including the root container.
+// The root container is treated uniformly with other containers in the loop, but uses a different
+// creation method (BuildRootContainerSpec + CreateContainer vs CreateContainerFromSpec).
+// Modifies the cell in place: ensures root container is in Containers array and sets RootContainerID.
+func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, error) {
 	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
 		return nil, errdefs.ErrCellNameRequired
@@ -1060,53 +1062,58 @@ func (r *Exec) createCellContainers(cell intmodel.Cell) (containerd.Container, e
 	// Set namespace to realm namespace
 	r.ctrClient.SetNamespace(namespace)
 
-	// Generate container ID with cell identifier for uniqueness
-	containerID, err := naming.BuildRootContainerName(spaceName, stackName, cellID)
+	// Prepare root container: ensure it's in Containers array and RootContainerID is set
+	rootContainerdID, err := naming.BuildRootContainerdID(spaceName, stackName, cellID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build root container name: %w", err)
+		return nil, fmt.Errorf("failed to build root container containerd ID: %w", err)
 	}
 
-	rootContainerSpec, err := r.ensureCellRootContainerSpec(cell)
+	rootContainerSpec, err := r.ensureCellRootContainerSpec(*cell)
 	if err != nil {
 		return nil, err
 	}
 
-	rootLabels := buildRootContainerLabels(cell)
-	containerSpec := ctrutil.BuildRootContainerSpec(rootContainerSpec, rootLabels)
-
-	container, err := r.ctrClient.CreateContainer(ctrCtx, containerSpec)
-	if err != nil {
-		logFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-		logFields = append(
-			logFields,
-			"space",
-			spaceName,
-			"realm",
-			realmName,
-			"cniConfig",
-			cniConfigPath,
-			"err",
-			fmt.Sprintf("%v", err),
-		)
-		r.logger.ErrorContext(
-			r.ctx,
-			"failed to create root container",
-			logFields...,
-		)
-		return nil, fmt.Errorf("%w: %w", errdefs.ErrCreateRootContainer, err)
+	// Ensure root container base name is set (use "root" if empty)
+	if rootContainerSpec.ID == "" {
+		rootContainerSpec.ID = "root"
 	}
 
-	infoFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-	infoFields = append(infoFields, "space", spaceName, "realm", realmName, "cniConfig", cniConfigPath)
-	r.logger.InfoContext(
-		r.ctx,
-		"created root container",
-		infoFields...,
-	)
+	// Set containerd ID (hierarchical format)
+	rootContainerSpec.ContainerdID = rootContainerdID
 
-	// Create all containers defined in the cell
+	// Determine root container ID for RootContainerID field (use base name from ID field)
+	rootContainerBaseID := rootContainerSpec.ID
+
+	// Ensure root container is in Containers array
+	rootContainerInArray := false
+	for i, container := range cell.Spec.Containers {
+		if container.ID == rootContainerBaseID {
+			// Update existing entry to ensure it has Root flag and correct fields
+			cell.Spec.Containers[i] = rootContainerSpec
+			rootContainerInArray = true
+			break
+		}
+	}
+
+	// Add root container to Containers array if not present
+	if !rootContainerInArray {
+		cell.Spec.Containers = append(cell.Spec.Containers, rootContainerSpec)
+	}
+
+	// Set RootContainerID if not already set (use base name, not hierarchical ID)
+	if cell.Spec.RootContainerID == "" {
+		cell.Spec.RootContainerID = rootContainerBaseID
+	}
+
+	// Track root container for return value
+	var rootContainer containerd.Container
+
+	// Create all containers defined in the cell (including root container)
 	for i := range cell.Spec.Containers {
 		containerSpec := cell.Spec.Containers[i]
+
+		// Determine if this is the root container
+		isRoot := cell.Spec.RootContainerID != "" && containerSpec.ID == cell.Spec.RootContainerID
 
 		// Ensure container spec has required names
 		if containerSpec.CellName == "" {
@@ -1126,55 +1133,111 @@ func (r *Exec) createCellContainers(cell intmodel.Cell) (containerd.Container, e
 		}
 		cell.Spec.Containers[i] = containerSpec
 
-		// Build container ID using hierarchical format for containerd operations
-		// Don't modify containerSpec.ID in the document - keep it as the base name
-		containerID, err = naming.BuildContainerName(
-			containerSpec.SpaceName,
-			containerSpec.StackName,
-			containerSpec.CellName,
-			containerSpec.ID,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build container name: %w", err)
-		}
+		var createdContainer containerd.Container
+		var createErr error
 
-		// Update container spec with hierarchical ID
-		containerSpec.ID = containerID
+		if isRoot {
+			// Root container: use BuildRootContainerSpec + CreateContainer
+			// Use ContainerdID if available, otherwise build it
+			containerdID := containerSpec.ContainerdID
+			if containerdID == "" {
+				var buildErr error
+				containerdID, buildErr = naming.BuildRootContainerdID(spaceName, stackName, cellID)
+				if buildErr != nil {
+					return nil, fmt.Errorf("failed to build root container containerd ID: %w", buildErr)
+				}
+				containerSpec.ContainerdID = containerdID
+				cell.Spec.Containers[i] = containerSpec
+			}
 
-		// Use container name with hierarchical format for containerd operations
-		_, err = r.ctrClient.CreateContainerFromSpec(
-			ctrCtx,
-			containerSpec,
-		)
-		if err != nil {
-			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-			fields = append(
-				fields,
-				"space",
-				spaceName,
-				"realm",
-				realmName,
-				"cniConfig",
-				containerSpec.CNIConfigPath,
-				"err",
-				fmt.Sprintf("%v", err),
-			)
-			r.logger.ErrorContext(
+			rootLabels := buildRootContainerLabels(*cell)
+			ctrContainerSpec := ctrutil.BuildRootContainerSpec(containerSpec, rootLabels)
+
+			createdContainer, createErr = r.ctrClient.CreateContainer(ctrCtx, ctrContainerSpec)
+			if createErr != nil {
+				logFields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
+				logFields = append(
+					logFields,
+					"space",
+					spaceName,
+					"realm",
+					realmName,
+					"cniConfig",
+					cniConfigPath,
+					"err",
+					fmt.Sprintf("%v", createErr),
+				)
+				r.logger.ErrorContext(
+					r.ctx,
+					"failed to create root container",
+					logFields...,
+				)
+				return nil, fmt.Errorf("%w: %w", errdefs.ErrCreateRootContainer, createErr)
+			}
+
+			rootContainer = createdContainer
+
+			infoFields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
+			infoFields = append(infoFields, "space", spaceName, "realm", realmName, "cniConfig", cniConfigPath)
+			r.logger.InfoContext(
 				r.ctx,
-				"failed to create container from cell",
-				fields...,
+				"created root container",
+				infoFields...,
 			)
-			return nil, fmt.Errorf("failed to create container %s: %w", containerID, err)
+		} else {
+			// Regular container: use CreateContainerFromSpec
+			// Build containerd ID using hierarchical format for containerd operations
+			// Store it in ContainerdID field, keep base name in ID field
+			containerdID := containerSpec.ContainerdID
+			if containerdID == "" {
+				var buildErr error
+				containerdID, buildErr = naming.BuildContainerdID(
+					containerSpec.SpaceName,
+					containerSpec.StackName,
+					containerSpec.CellName,
+					containerSpec.ID,
+				)
+				if buildErr != nil {
+					return nil, fmt.Errorf("failed to build container containerd ID: %w", buildErr)
+				}
+				containerSpec.ContainerdID = containerdID
+				cell.Spec.Containers[i] = containerSpec
+			}
+
+			_, createErr = r.ctrClient.CreateContainerFromSpec(
+				ctrCtx,
+				containerSpec,
+			)
+			if createErr != nil {
+				fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
+				fields = append(
+					fields,
+					"space",
+					spaceName,
+					"realm",
+					realmName,
+					"cniConfig",
+					containerSpec.CNIConfigPath,
+					"err",
+					fmt.Sprintf("%v", createErr),
+				)
+				r.logger.ErrorContext(
+					r.ctx,
+					"failed to create container from cell",
+					fields...,
+				)
+				return nil, fmt.Errorf("failed to create container %s: %w", containerdID, createErr)
+			}
 		}
 	}
 
-	return container, nil
+	return rootContainer, nil
 }
 
 // ensureCellContainers ensures the root container and all containers defined in the CellDoc exist.
 // The root container is ensured first, then all containers in doc.Spec.Containers are ensured.
 // If any container doesn't exist, it is created. Returns the root container or an error.
-func (r *Exec) ensureCellContainers(cell intmodel.Cell) (containerd.Container, error) {
+func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, error) {
 	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
 		return nil, errdefs.ErrCellNotFound
@@ -1236,10 +1299,10 @@ func (r *Exec) ensureCellContainers(cell intmodel.Cell) (containerd.Container, e
 	// Set namespace to realm namespace
 	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
 
-	// Generate container ID with cell identifier for uniqueness
-	containerID, err := naming.BuildRootContainerName(spaceName, stackName, cellID)
+	// Generate containerd ID with cell identifier for uniqueness
+	containerID, err := naming.BuildRootContainerdID(spaceName, stackName, cellID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build root container name: %w", err)
+		return nil, fmt.Errorf("failed to build root container containerd ID: %w", err)
 	}
 
 	// Declare container variable to be used in both branches
@@ -1290,12 +1353,37 @@ func (r *Exec) ensureCellContainers(cell intmodel.Cell) (containerd.Container, e
 			createFields...,
 		)
 
-		rootContainerSpec, err := r.ensureCellRootContainerSpec(cell)
+		var rootContainerSpec intmodel.ContainerSpec
+		rootContainerSpec, err = r.ensureCellRootContainerSpec(*cell)
 		if err != nil {
 			return nil, err
 		}
 
-		rootLabels := buildRootContainerLabels(cell)
+		// Determine root container ID for RootContainerID field (use base name from ID field)
+		rootContainerBaseID := rootContainerSpec.ID
+
+		// Check if root container is already in Containers array
+		rootContainerInArray := false
+		for i, container := range cell.Spec.Containers {
+			if container.ID == rootContainerBaseID {
+				// Update existing entry to ensure it has Root flag and correct fields
+				cell.Spec.Containers[i] = rootContainerSpec
+				rootContainerInArray = true
+				break
+			}
+		}
+
+		// Add root container to Containers array if not present
+		if !rootContainerInArray {
+			cell.Spec.Containers = append(cell.Spec.Containers, rootContainerSpec)
+		}
+
+		// Set RootContainerID if not already set (use base name, not hierarchical ID)
+		if cell.Spec.RootContainerID == "" {
+			cell.Spec.RootContainerID = rootContainerBaseID
+		}
+
+		rootLabels := buildRootContainerLabels(*cell)
 		containerSpec := ctrutil.BuildRootContainerSpec(rootContainerSpec, rootLabels)
 
 		var createErr error
@@ -1393,16 +1481,22 @@ func (r *Exec) ensureCellContainers(cell intmodel.Cell) (containerd.Container, e
 			containerSpec.StackName = stackName
 		}
 
-		// Build container ID using hierarchical format for containerd operations
-		// Don't modify containerSpec.ID in the document - keep it as the base name
-		containerID, err = naming.BuildContainerName(
-			containerSpec.SpaceName,
-			containerSpec.StackName,
-			containerSpec.CellName,
-			containerSpec.ID,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build container name: %w", err)
+		// Build containerd ID using hierarchical format for containerd operations
+		// Store it in ContainerdID field, keep base name in ID field
+		containerdID := containerSpec.ContainerdID
+		if containerdID == "" {
+			var buildErr error
+			containerdID, buildErr = naming.BuildContainerdID(
+				containerSpec.SpaceName,
+				containerSpec.StackName,
+				containerSpec.CellName,
+				containerSpec.ID,
+			)
+			if buildErr != nil {
+				return nil, fmt.Errorf("failed to build container containerd ID: %w", buildErr)
+			}
+			containerSpec.ContainerdID = containerdID
+			cell.Spec.Containers[i] = containerSpec
 		}
 
 		// Log the hierarchical container ID we built
@@ -1417,17 +1511,17 @@ func (r *Exec) ensureCellContainers(cell intmodel.Cell) (containerd.Container, e
 			stackName,
 			"containerName",
 			containerSpec.ID,
-			"hierarchicalID",
-			containerID,
+			"containerdID",
+			containerdID,
 		)
 		r.logger.DebugContext(
 			r.ctx,
-			"built hierarchical container ID",
+			"built hierarchical container containerd ID",
 			idFields...,
 		)
 
-		// Use container name with hierarchical format for containerd operations
-		exists, err = r.ctrClient.ExistsContainer(ctrCtx, containerID)
+		// Use containerd ID for containerd operations
+		exists, err = r.ctrClient.ExistsContainer(ctrCtx, containerdID)
 		if err != nil {
 			// Check if the error indicates the container doesn't exist
 			// In that case, treat it as "doesn't exist" (false) rather than a fatal error
@@ -1436,7 +1530,7 @@ func (r *Exec) ensureCellContainers(cell intmodel.Cell) (containerd.Container, e
 				exists = false
 			} else {
 				// Some other error occurred
-				fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+				fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 				fields = append(
 					fields,
 					"space",
@@ -1453,12 +1547,12 @@ func (r *Exec) ensureCellContainers(cell intmodel.Cell) (containerd.Container, e
 					"failed to check if container exists",
 					fields...,
 				)
-				return nil, fmt.Errorf("failed to check if container %s exists: %w", containerID, err)
+				return nil, fmt.Errorf("failed to check if container %s exists: %w", containerdID, err)
 			}
 		}
 
 		// Log the existence check result
-		existsFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		existsFields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 		existsFields = append(
 			existsFields,
 			"space",
@@ -1477,7 +1571,7 @@ func (r *Exec) ensureCellContainers(cell intmodel.Cell) (containerd.Container, e
 		)
 
 		if !exists {
-			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+			fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 			fields = append(fields, "space", spaceName, "realm", realmName, "cniConfig", containerSpec.CNIConfigPath)
 			r.logger.InfoContext(
 				r.ctx,
@@ -1490,11 +1584,8 @@ func (r *Exec) ensureCellContainers(cell intmodel.Cell) (containerd.Container, e
 			}
 
 			// Container doesn't exist, create it
-			// Update container spec with hierarchical ID
-			containerSpec.ID = containerID
-
 			// Log container spec details before creation
-			createSpecFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+			createSpecFields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 			createSpecFields = append(
 				createSpecFields,
 				"space",
@@ -1526,7 +1617,7 @@ func (r *Exec) ensureCellContainers(cell intmodel.Cell) (containerd.Container, e
 				// was created between the existence check and creation attempt
 				errMsg := containerCreateErr.Error()
 				if strings.Contains(errMsg, "container already exists") {
-					debugFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+					debugFields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 					debugFields = append(debugFields, "space", spaceName, "realm", realmName)
 					r.logger.DebugContext(
 						r.ctx,
@@ -1535,7 +1626,7 @@ func (r *Exec) ensureCellContainers(cell intmodel.Cell) (containerd.Container, e
 					)
 					continue
 				}
-				errorFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+				errorFields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 				errorFields = append(
 					errorFields,
 					"space",
@@ -1552,10 +1643,10 @@ func (r *Exec) ensureCellContainers(cell intmodel.Cell) (containerd.Container, e
 					"failed to create container from cell",
 					errorFields...,
 				)
-				return nil, fmt.Errorf("failed to create container %s: %w", containerID, containerCreateErr)
+				return nil, fmt.Errorf("failed to create container %s: %w", containerdID, containerCreateErr)
 			}
 			if createdContainer != nil {
-				successFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+				successFields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 				successFields = append(
 					successFields,
 					"space",
@@ -1616,20 +1707,35 @@ func (r *Exec) ensureCellRootContainerSpec(cell intmodel.Cell) (intmodel.Contain
 		return intmodel.ContainerSpec{}, fmt.Errorf("failed to resolve space CNI config: %w", err)
 	}
 
-	// Generate container ID
-	containerID, err := naming.BuildRootContainerName(spaceName, stackName, cellID)
+	// Generate containerd ID
+	containerdID, err := naming.BuildRootContainerdID(spaceName, stackName, cellID)
 	if err != nil {
-		return intmodel.ContainerSpec{}, fmt.Errorf("failed to build root container name: %w", err)
+		return intmodel.ContainerSpec{}, fmt.Errorf("failed to build root container containerd ID: %w", err)
 	}
 
-	// Work with internal model's RootContainer if it exists
+	// Find root container in Containers array if RootContainerID is set
 	var rootSpec intmodel.ContainerSpec
-	if cell.Spec.RootContainer != nil {
-		rootSpec = *cell.Spec.RootContainer
+	if cell.Spec.RootContainerID != "" {
+		// Look for root container in Containers array
+		found := false
+		for _, container := range cell.Spec.Containers {
+			if container.ID == cell.Spec.RootContainerID {
+				rootSpec = container
+				found = true
+				break
+			}
+		}
+		if !found {
+			return intmodel.ContainerSpec{}, fmt.Errorf(
+				"rootContainerId %q not found in containers array",
+				cell.Spec.RootContainerID,
+			)
+		}
 	} else {
 		// Create default root container spec
+		// Pass containerdID to set ContainerdID field, ID will be set to "root"
 		rootSpec = ctrutil.DefaultRootContainerSpec(
-			containerID,
+			containerdID,
 			cellID,
 			realmName,
 			spaceName,
@@ -1641,7 +1747,11 @@ func (r *Exec) ensureCellRootContainerSpec(cell intmodel.Cell) (intmodel.Contain
 	// Ensure required fields are set
 	rootSpec.Root = true
 	if rootSpec.ID == "" {
-		rootSpec.ID = containerID
+		rootSpec.ID = "root"
+	}
+	// Set containerd ID (hierarchical format) if not already set
+	if rootSpec.ContainerdID == "" {
+		rootSpec.ContainerdID = containerdID
 	}
 	if rootSpec.CellName == "" {
 		rootSpec.CellName = cellID

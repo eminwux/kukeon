@@ -129,17 +129,10 @@ func (b *Exec) StopContainer(container intmodel.Container) (StopContainerResult,
 
 	// Find container in cell spec to construct result container
 	var foundContainerSpec *intmodel.ContainerSpec
-
-	// Check root container first
-	if internalCell.Spec.RootContainer != nil && internalCell.Spec.RootContainer.ID == name {
-		foundContainerSpec = internalCell.Spec.RootContainer
-	} else {
-		// Check regular containers
-		for i := range internalCell.Spec.Containers {
-			if internalCell.Spec.Containers[i].ID == name {
-				foundContainerSpec = &internalCell.Spec.Containers[i]
-				break
-			}
+	for i := range internalCell.Spec.Containers {
+		if internalCell.Spec.Containers[i].ID == name {
+			foundContainerSpec = &internalCell.Spec.Containers[i]
+			break
 		}
 	}
 

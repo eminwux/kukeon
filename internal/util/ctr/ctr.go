@@ -36,8 +36,10 @@ const (
 
 // DefaultRootContainerSpec returns a minimal ContainerSpec suitable for keeping
 // the root container alive while other workload containers are managed.
+// containerdID is the hierarchical ID used for containerd operations.
+// The ID field will be set to "root" (base name).
 func DefaultRootContainerSpec(
-	containerID,
+	containerdID,
 	cellID,
 	realmID,
 	spaceID,
@@ -45,7 +47,8 @@ func DefaultRootContainerSpec(
 	cniConfigPath string,
 ) intmodel.ContainerSpec {
 	return intmodel.ContainerSpec{
-		ID:            containerID,
+		ID:            "root",
+		ContainerdID:  containerdID,
 		CellName:      cellID,
 		RealmName:     realmID,
 		SpaceName:     spaceID,
@@ -60,10 +63,17 @@ func DefaultRootContainerSpec(
 
 // BuildRootContainerSpec converts the internal root container spec into an
 // internal ctr.ContainerSpec with the expected defaults applied.
+// Uses ContainerdID if available, otherwise falls back to ID.
 func BuildRootContainerSpec(
 	rootSpec intmodel.ContainerSpec,
 	labels map[string]string,
 ) internalctr.ContainerSpec {
+	// Use ContainerdID if available, otherwise fall back to ID
+	containerdID := rootSpec.ContainerdID
+	if containerdID == "" {
+		containerdID = rootSpec.ID
+	}
+
 	image := rootSpec.Image
 	if image == "" {
 		image = DefaultRootContainerImage
@@ -73,8 +83,8 @@ func BuildRootContainerSpec(
 		oci.WithDefaultPathEnv,
 	}
 
-	if rootSpec.ID != "" {
-		specOpts = append(specOpts, oci.WithHostname(rootSpec.ID))
+	if containerdID != "" {
+		specOpts = append(specOpts, oci.WithHostname(containerdID))
 	}
 
 	if processArgs := buildRootProcessArgs(rootSpec); len(processArgs) > 0 {
@@ -93,7 +103,7 @@ func BuildRootContainerSpec(
 	rootLabels[rootContainerLabelKey] = rootContainerLabelValue
 
 	return internalctr.ContainerSpec{
-		ID:            rootSpec.ID,
+		ID:            containerdID,
 		Image:         image,
 		Labels:        rootLabels,
 		SpecOpts:      specOpts,

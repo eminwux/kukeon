@@ -539,15 +539,14 @@ func (r *Exec) ExtractContainersFromCells(cells []intmodel.Cell) []intmodel.Cont
 	var containers []intmodel.ContainerSpec
 
 	for _, cell := range cells {
-		// Extract root container if present
-		if cell.Spec.RootContainer != nil {
-			container := *cell.Spec.RootContainer
-			container.Root = true
+		// Extract all containers, marking root container if present
+		for _, container := range cell.Spec.Containers {
+			// Check if this is the root container
+			if cell.Spec.RootContainerID != "" && container.ID == cell.Spec.RootContainerID {
+				container.Root = true
+			}
 			containers = append(containers, container)
 		}
-
-		// Extract regular containers
-		containers = append(containers, cell.Spec.Containers...)
 	}
 
 	return containers

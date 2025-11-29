@@ -30,19 +30,18 @@ type CellMetadata struct {
 }
 
 type CellSpec struct {
-	ID            string          `json:"id"                      yaml:"id"`
-	RealmID       string          `json:"realmId"                 yaml:"realmId"`
-	SpaceID       string          `json:"spaceId"                 yaml:"spaceId"`
-	StackID       string          `json:"stackId"                 yaml:"stackId"`
-	RootContainer *ContainerSpec  `json:"rootContainer,omitempty" yaml:"rootContainer,omitempty"`
-	Containers    []ContainerSpec `json:"containers"              yaml:"containers"`
+	ID              string          `json:"id"                        yaml:"id"`
+	RealmID         string          `json:"realmId"                   yaml:"realmId"`
+	SpaceID         string          `json:"spaceId"                   yaml:"spaceId"`
+	StackID         string          `json:"stackId"                   yaml:"stackId"`
+	RootContainerID string          `json:"rootContainerId,omitempty" yaml:"rootContainerId,omitempty"`
+	Containers      []ContainerSpec `json:"containers"                yaml:"containers"`
 }
 
 type CellStatus struct {
-	State         CellState         `json:"state"                   yaml:"state"`
-	CgroupPath    string            `json:"cgroupPath"              yaml:"cgroupPath"`
-	RootContainer *ContainerSpec    `json:"rootContainer,omitempty" yaml:"rootContainer,omitempty"`
-	Containers    []ContainerStatus `json:"containers"              yaml:"containers"`
+	State      CellState         `json:"state"      yaml:"state"`
+	CgroupPath string            `json:"cgroupPath" yaml:"cgroupPath"`
+	Containers []ContainerStatus `json:"containers" yaml:"containers"`
 }
 
 type CellState int
@@ -79,12 +78,12 @@ func NewCellDoc(from *CellDoc) *CellDoc {
 				Labels: map[string]string{},
 			},
 			Spec: CellSpec{
-				ID:            "",
-				RealmID:       "",
-				SpaceID:       "",
-				StackID:       "",
-				RootContainer: nil,
-				Containers:    []ContainerSpec{},
+				ID:              "",
+				RealmID:         "",
+				SpaceID:         "",
+				StackID:         "",
+				RootContainerID: "",
+				Containers:      []ContainerSpec{},
 			},
 			Status: CellStatus{
 				State:      CellStateUnknown,
@@ -103,17 +102,6 @@ func NewCellDoc(from *CellDoc) *CellDoc {
 			labels[k] = v
 		}
 		out.Metadata.Labels = labels
-	}
-
-	if out.Spec.RootContainer != nil {
-		rootContainer := *out.Spec.RootContainer
-		rootContainer.Args = cloneSlice(rootContainer.Args)
-		rootContainer.Env = cloneSlice(rootContainer.Env)
-		rootContainer.Ports = cloneSlice(rootContainer.Ports)
-		rootContainer.Volumes = cloneSlice(rootContainer.Volumes)
-		rootContainer.Networks = cloneSlice(rootContainer.Networks)
-		rootContainer.NetworksAliases = cloneSlice(rootContainer.NetworksAliases)
-		out.Spec.RootContainer = &rootContainer
 	}
 
 	if out.Spec.Containers == nil {

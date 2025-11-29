@@ -28,12 +28,12 @@ type CellMetadata struct {
 }
 
 type CellSpec struct {
-	ID            string
-	RealmName     string
-	SpaceName     string
-	StackName     string
-	RootContainer *ContainerSpec
-	Containers    []ContainerSpec
+	ID              string
+	RealmName       string
+	SpaceName       string
+	StackName       string
+	RootContainerID string
+	Containers      []ContainerSpec
 }
 
 type CellStatus struct {

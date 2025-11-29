@@ -126,9 +126,9 @@ func (r *Exec) PurgeCell(cell intmodel.Cell) error {
 
 			// Add root container
 			var rootContainerID string
-			rootContainerID, err = naming.BuildRootContainerName(cellSpaceName, cellStackName, cellID)
+			rootContainerID, err = naming.BuildRootContainerdID(cellSpaceName, cellStackName, cellID)
 			if err != nil {
-				r.logger.WarnContext(r.ctx, "failed to build root container name", "error", err)
+				r.logger.WarnContext(r.ctx, "failed to build root container containerd ID", "error", err)
 			} else {
 				containerIDs = append(containerIDs, rootContainerID)
 			}
@@ -154,10 +154,10 @@ func (r *Exec) PurgeCell(cell intmodel.Cell) error {
 					continue
 				}
 
-				var containerID string
-				containerID, err = naming.BuildContainerName(containerSpaceName, containerStackName, containerCellName, containerName)
-				if err != nil {
-					r.logger.WarnContext(r.ctx, "failed to build container name", "container", containerName, "error", err)
+				// Use ContainerdID from spec
+				containerID := containerSpec.ContainerdID
+				if containerID == "" {
+					r.logger.WarnContext(r.ctx, "container has empty ContainerdID, skipping", "container", containerName)
 					continue
 				}
 				containerIDs = append(containerIDs, containerID)

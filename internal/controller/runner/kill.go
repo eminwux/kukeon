@@ -125,16 +125,10 @@ func (r *Exec) KillCell(cell intmodel.Cell) error {
 		if containerCellName == "" {
 			containerCellName = cellID
 		}
-		// Build container ID using hierarchical format
-		var containerID string
-		containerID, err = naming.BuildContainerName(
-			containerSpec.SpaceName,
-			containerSpec.StackName,
-			containerCellName,
-			containerSpec.ID,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to build container name: %w", err)
+		// Use ContainerdID from spec
+		containerID := containerSpec.ContainerdID
+		if containerID == "" {
+			return fmt.Errorf("container %q has empty ContainerdID", containerSpec.ID)
 		}
 
 		// Use container name with UUID for containerd operations
@@ -162,9 +156,9 @@ func (r *Exec) KillCell(cell intmodel.Cell) error {
 	}
 
 	// Kill root container last and detach from CNI
-	rootContainerID, err := naming.BuildRootContainerName(spaceID, stackID, cellID)
+	rootContainerID, err := naming.BuildRootContainerdID(spaceID, stackID, cellID)
 	if err != nil {
-		return fmt.Errorf("failed to build root container name: %w", err)
+		return fmt.Errorf("failed to build root container containerd ID: %w", err)
 	}
 
 	// Detach root container from CNI network
@@ -260,11 +254,40 @@ func (r *Exec) KillContainer(cell intmodel.Cell, containerID string) error {
 	// Set namespace to realm namespace
 	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
 
-	// Use container name directly for containerd operations
-	err = r.killContainerTask(ctrCtx, containerID, internalRealm.Spec.Namespace)
+	// Find container in cell spec by ID (base name)
+	var foundContainerSpec *intmodel.ContainerSpec
+	for i := range cell.Spec.Containers {
+		if cell.Spec.Containers[i].ID == containerID {
+			foundContainerSpec = &cell.Spec.Containers[i]
+			break
+		}
+	}
+
+	if foundContainerSpec == nil {
+		return fmt.Errorf("container %q not found in cell %q", containerID, cellName)
+	}
+
+	// Use ContainerdID from spec
+	containerdID := foundContainerSpec.ContainerdID
+	if containerdID == "" {
+		return fmt.Errorf("container %q has empty ContainerdID", containerID)
+	}
+
+	// Use containerd ID for containerd operations
+	err = r.killContainerTask(ctrCtx, containerdID, internalRealm.Spec.Namespace)
 	if err != nil {
-		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-		fields = append(fields, "space", spaceName, "realm", realmName, "err", fmt.Sprintf("%v", err))
+		fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
+		fields = append(
+			fields,
+			"space",
+			spaceName,
+			"realm",
+			realmName,
+			"containerName",
+			containerID,
+			"err",
+			fmt.Sprintf("%v", err),
+		)
 		r.logger.ErrorContext(
 			r.ctx,
 			"failed to kill container",
@@ -273,8 +296,8 @@ func (r *Exec) KillContainer(cell intmodel.Cell, containerID string) error {
 		return fmt.Errorf("failed to kill container %s: %w", containerID, err)
 	}
 
-	fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-	fields = append(fields, "space", spaceName, "realm", realmName)
+	fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
+	fields = append(fields, "space", spaceName, "realm", realmName, "containerName", containerID)
 	r.logger.InfoContext(
 		r.ctx,
 		"killed container",

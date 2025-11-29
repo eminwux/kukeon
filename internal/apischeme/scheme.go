@@ -338,6 +338,7 @@ func NormalizeContainer(req ext.ContainerDoc) (intmodel.Container, ext.Version, 
 func convertContainerSpecToInternal(in ext.ContainerSpec) intmodel.ContainerSpec {
 	return intmodel.ContainerSpec{
 		ID:              in.ID,
+		ContainerdID:    in.ContainerdID,
 		RealmName:       in.RealmID,
 		SpaceName:       in.SpaceID,
 		StackName:       in.StackID,
@@ -362,6 +363,7 @@ func convertContainerSpecToInternal(in ext.ContainerSpec) intmodel.ContainerSpec
 func BuildContainerSpecExternalFromInternal(in intmodel.ContainerSpec) ext.ContainerSpec {
 	return ext.ContainerSpec{
 		ID:              in.ID,
+		ContainerdID:    in.ContainerdID,
 		RealmID:         in.RealmName,
 		SpaceID:         in.SpaceName,
 		StackID:         in.StackName,
@@ -391,10 +393,11 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 				Labels: in.Metadata.Labels,
 			},
 			Spec: intmodel.CellSpec{
-				ID:        in.Spec.ID,
-				RealmName: in.Spec.RealmID,
-				SpaceName: in.Spec.SpaceID,
-				StackName: in.Spec.StackID,
+				ID:              in.Spec.ID,
+				RealmName:       in.Spec.RealmID,
+				SpaceName:       in.Spec.SpaceID,
+				StackName:       in.Spec.StackID,
+				RootContainerID: in.Spec.RootContainerID,
 			},
 			Status: intmodel.CellStatus{
 				State:      intmodel.CellState(in.Status.State),
@@ -402,16 +405,27 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 			},
 		}
 
-		// Convert nested RootContainer if present
-		if in.Spec.RootContainer != nil {
-			rootContainer := convertContainerSpecToInternal(*in.Spec.RootContainer)
-			cell.Spec.RootContainer = &rootContainer
-		}
-
 		// Convert nested Containers slice
 		cell.Spec.Containers = make([]intmodel.ContainerSpec, len(in.Spec.Containers))
 		for i, extContainer := range in.Spec.Containers {
 			cell.Spec.Containers[i] = convertContainerSpecToInternal(extContainer)
+		}
+
+		// Validate that if RootContainerID is set, the container exists in Containers array
+		if cell.Spec.RootContainerID != "" {
+			found := false
+			for _, container := range cell.Spec.Containers {
+				if container.ID == cell.Spec.RootContainerID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return intmodel.Cell{}, fmt.Errorf(
+					"rootContainerId %q not found in containers array",
+					cell.Spec.RootContainerID,
+				)
+			}
 		}
 
 		return cell, nil
@@ -432,10 +446,11 @@ func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ex
 				Labels: in.Metadata.Labels,
 			},
 			Spec: ext.CellSpec{
-				ID:      in.Spec.ID,
-				RealmID: in.Spec.RealmName,
-				SpaceID: in.Spec.SpaceName,
-				StackID: in.Spec.StackName,
+				ID:              in.Spec.ID,
+				RealmID:         in.Spec.RealmName,
+				SpaceID:         in.Spec.SpaceName,
+				StackID:         in.Spec.StackName,
+				RootContainerID: in.Spec.RootContainerID,
 			},
 			Status: ext.CellStatus{
 				State:      ext.CellState(in.Status.State),
@@ -443,16 +458,27 @@ func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ex
 			},
 		}
 
-		// Convert nested RootContainer if present
-		if in.Spec.RootContainer != nil {
-			rootContainer := BuildContainerSpecExternalFromInternal(*in.Spec.RootContainer)
-			cell.Spec.RootContainer = &rootContainer
-		}
-
 		// Convert nested Containers slice
 		cell.Spec.Containers = make([]ext.ContainerSpec, len(in.Spec.Containers))
 		for i, intContainer := range in.Spec.Containers {
 			cell.Spec.Containers[i] = BuildContainerSpecExternalFromInternal(intContainer)
+		}
+
+		// Validate that if RootContainerID is set, the container exists in Containers array
+		if cell.Spec.RootContainerID != "" {
+			found := false
+			for _, container := range cell.Spec.Containers {
+				if container.ID == cell.Spec.RootContainerID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return ext.CellDoc{}, fmt.Errorf(
+					"rootContainerId %q not found in containers array",
+					cell.Spec.RootContainerID,
+				)
+			}
 		}
 
 		return cell, nil

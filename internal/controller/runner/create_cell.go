@@ -118,7 +118,7 @@ func (r *Exec) EnsureCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		"containerCount", len(ensuredCell.Spec.Containers),
 	)
 
-	_, ensureErr = r.ensureCellContainers(ensuredCell)
+	_, ensureErr = r.ensureCellContainers(&ensuredCell)
 	if ensureErr != nil {
 		return intmodel.Cell{}, ensureErr
 	}
