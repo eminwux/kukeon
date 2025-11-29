@@ -140,16 +140,10 @@ func (r *Exec) StopCell(cell intmodel.Cell) error {
 			containerCellName = cellID
 		}
 
-		// Build container ID using hierarchical format
-		var containerID string
-		containerID, err = naming.BuildContainerName(
-			containerSpaceName,
-			containerStackName,
-			containerCellName,
-			containerSpec.ID,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to build container name: %w", err)
+		// Use ContainerdID from spec
+		containerID := containerSpec.ContainerdID
+		if containerID == "" {
+			return fmt.Errorf("container %q has empty ContainerdID", containerSpec.ID)
 		}
 
 		// Use container name with UUID for containerd operations
@@ -181,9 +175,9 @@ func (r *Exec) StopCell(cell intmodel.Cell) error {
 	}
 
 	// Stop root container last (after all workload containers are stopped)
-	rootContainerID, err := naming.BuildRootContainerName(spaceName, stackName, cellID)
+	rootContainerID, err := naming.BuildRootContainerdID(spaceName, stackName, cellID)
 	if err != nil {
-		return fmt.Errorf("failed to build root container name: %w", err)
+		return fmt.Errorf("failed to build root container containerd ID: %w", err)
 	}
 
 	// Get root container's PID before stopping (needed for CNI detach)
@@ -330,15 +324,44 @@ func (r *Exec) StopContainer(cell intmodel.Cell, containerID string) error {
 	// Set namespace to realm namespace
 	r.ctrClient.SetNamespace(namespace)
 
-	// Use container name directly for containerd operations
+	// Find container in cell spec by ID (base name)
+	var foundContainerSpec *intmodel.ContainerSpec
+	for i := range cell.Spec.Containers {
+		if cell.Spec.Containers[i].ID == containerID {
+			foundContainerSpec = &cell.Spec.Containers[i]
+			break
+		}
+	}
+
+	if foundContainerSpec == nil {
+		return fmt.Errorf("container %q not found in cell %q", containerID, cellName)
+	}
+
+	// Use ContainerdID from spec
+	containerdID := foundContainerSpec.ContainerdID
+	if containerdID == "" {
+		return fmt.Errorf("container %q has empty ContainerdID", containerID)
+	}
+
+	// Use containerd ID for containerd operations
 	timeout := 5 * time.Second
-	_, err = r.ctrClient.StopContainer(ctrCtx, containerID, ctr.StopContainerOptions{
+	_, err = r.ctrClient.StopContainer(ctrCtx, containerdID, ctr.StopContainerOptions{
 		Force:   true,
 		Timeout: &timeout,
 	})
 	if err != nil {
-		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-		fields = append(fields, "space", spaceName, "realm", realmName, "err", fmt.Sprintf("%v", err))
+		fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
+		fields = append(
+			fields,
+			"space",
+			spaceName,
+			"realm",
+			realmName,
+			"containerName",
+			containerID,
+			"err",
+			fmt.Sprintf("%v", err),
+		)
 		r.logger.ErrorContext(
 			r.ctx,
 			"failed to stop container",
@@ -347,8 +370,8 @@ func (r *Exec) StopContainer(cell intmodel.Cell, containerID string) error {
 		return fmt.Errorf("failed to stop container %s: %w", containerID, err)
 	}
 
-	fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-	fields = append(fields, "space", spaceName, "realm", realmName)
+	fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
+	fields = append(fields, "space", spaceName, "realm", realmName, "containerName", containerID)
 	r.logger.InfoContext(
 		r.ctx,
 		"stopped container",

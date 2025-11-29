@@ -92,7 +92,7 @@ func (r *Exec) EnsureContainer(cell intmodel.Cell, container intmodel.ContainerS
 	)
 
 	// Ensure containers exist
-	_, ensureErr := r.ensureCellContainers(cell)
+	_, ensureErr := r.ensureCellContainers(&cell)
 	if ensureErr != nil {
 		return intmodel.Cell{}, ensureErr
 	}

@@ -108,10 +108,10 @@ func (r *Exec) ExistsCellRootContainer(cell intmodel.Cell) (bool, error) {
 	// Set namespace to realm namespace
 	r.ctrClient.SetNamespace(namespace)
 
-	// Generate container ID with cell identifier for uniqueness
-	containerID, err := naming.BuildRootContainerName(spaceName, stackName, cellID)
+	// Generate containerd ID with cell identifier for uniqueness
+	containerID, err := naming.BuildRootContainerdID(spaceName, stackName, cellID)
 	if err != nil {
-		return false, fmt.Errorf("failed to build root container name: %w", err)
+		return false, fmt.Errorf("failed to build root container containerd ID: %w", err)
 	}
 
 	// Check if container exists

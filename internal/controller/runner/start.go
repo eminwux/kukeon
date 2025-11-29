@@ -118,10 +118,10 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 	// Set namespace to realm namespace
 	r.ctrClient.SetNamespace(namespace)
 
-	// Generate container ID with cell identifier for uniqueness
-	containerID, err := naming.BuildRootContainerName(spaceID, stackID, cellID)
+	// Generate containerd ID with cell identifier for uniqueness
+	containerID, err := naming.BuildRootContainerdID(spaceID, stackID, cellID)
 	if err != nil {
-		return fmt.Errorf("failed to build root container name: %w", err)
+		return fmt.Errorf("failed to build root container containerd ID: %w", err)
 	}
 
 	// Start root container
@@ -287,19 +287,14 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 
 	// Start all containers defined in the CellDoc
 	for _, containerSpec := range cellSpec.Containers {
-		// Build container ID using hierarchical format
-		containerID, err = naming.BuildContainerName(
-			containerSpec.SpaceName,
-			containerSpec.StackName,
-			containerSpec.CellName,
-			containerSpec.ID,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to build container name: %w", err)
+		// Use ContainerdID from spec
+		ctrContainerID := containerSpec.ContainerdID
+		if ctrContainerID == "" {
+			return fmt.Errorf("container %q has empty ContainerdID", containerSpec.ID)
 		}
 
 		// Log which container we're attempting to start
-		startFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		startFields := appendCellLogFields([]any{"id", ctrContainerID}, cellID, cellName)
 		startFields = append(startFields, "space", spaceID, "realm", realmID, "containerName", containerSpec.ID)
 		r.logger.DebugContext(
 			r.ctx,
@@ -309,23 +304,23 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 
 		// Use container name with UUID for containerd operations
 		specWithNamespaces := ctr.JoinContainerNamespaces(
-			ctr.ContainerSpec{ID: containerID},
+			ctr.ContainerSpec{ID: ctrContainerID},
 			namespacePaths,
 		)
 
 		_, err = r.ctrClient.StartContainer(ctrCtx, specWithNamespaces, ctr.TaskSpec{})
 		if err != nil {
-			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+			fields := appendCellLogFields([]any{"id", ctrContainerID}, cellID, cellName)
 			fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
 			r.logger.ErrorContext(
 				r.ctx,
 				"failed to start container from CellDoc",
 				fields...,
 			)
-			return fmt.Errorf("failed to start container %s: %w", containerID, err)
+			return fmt.Errorf("failed to start container %s: %w", ctrContainerID, err)
 		}
 
-		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		fields := appendCellLogFields([]any{"id", ctrContainerID}, cellID, cellName)
 		fields = append(fields, "space", spaceID, "realm", realmID)
 		r.logger.InfoContext(
 			r.ctx,
@@ -399,11 +394,40 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
 	// Set namespace to realm namespace
 	r.ctrClient.SetNamespace(namespace)
 
-	// Use container name directly for containerd operations
-	_, err = r.ctrClient.StartContainer(ctrCtx, ctr.ContainerSpec{ID: containerID}, ctr.TaskSpec{})
+	// Find container in cell spec by ID (base name)
+	var foundContainerSpec *intmodel.ContainerSpec
+	for i := range cell.Spec.Containers {
+		if cell.Spec.Containers[i].ID == containerID {
+			foundContainerSpec = &cell.Spec.Containers[i]
+			break
+		}
+	}
+
+	if foundContainerSpec == nil {
+		return fmt.Errorf("container %q not found in cell %q", containerID, cellName)
+	}
+
+	// Use ContainerdID from spec
+	containerdID := foundContainerSpec.ContainerdID
+	if containerdID == "" {
+		return fmt.Errorf("container %q has empty ContainerdID", containerID)
+	}
+
+	// Use containerd ID for containerd operations
+	_, err = r.ctrClient.StartContainer(ctrCtx, ctr.ContainerSpec{ID: containerdID}, ctr.TaskSpec{})
 	if err != nil {
-		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-		fields = append(fields, "space", spaceName, "realm", realmName, "err", fmt.Sprintf("%v", err))
+		fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
+		fields = append(
+			fields,
+			"space",
+			spaceName,
+			"realm",
+			realmName,
+			"containerName",
+			containerID,
+			"err",
+			fmt.Sprintf("%v", err),
+		)
 		r.logger.ErrorContext(
 			r.ctx,
 			"failed to start container",
@@ -412,8 +436,8 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
 		return fmt.Errorf("failed to start container %s: %w", containerID, err)
 	}
 
-	fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-	fields = append(fields, "space", spaceName, "realm", realmName)
+	fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
+	fields = append(fields, "space", spaceName, "realm", realmName, "containerName", containerID)
 	r.logger.InfoContext(
 		r.ctx,
 		"started container",

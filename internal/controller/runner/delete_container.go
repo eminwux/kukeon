@@ -25,7 +25,6 @@ import (
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 // DeleteContainer stops and deletes a specific container in a cell from containerd.
@@ -83,42 +82,49 @@ func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 	// Set namespace to realm namespace
 	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
 
-	// Build hierarchical container ID for containerd operations
+	// Find container in cell spec by ID (base name)
+	var foundContainerSpec *intmodel.ContainerSpec
+	for i := range cell.Spec.Containers {
+		if cell.Spec.Containers[i].ID == containerID {
+			foundContainerSpec = &cell.Spec.Containers[i]
+			break
+		}
+	}
 
-	hierarchicalContainerID, err := naming.BuildContainerName(
-		spaceName,
-		stackName,
-		cellID,
-		containerID,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to build container name: %w", err)
+	if foundContainerSpec == nil {
+		return fmt.Errorf("container %q not found in cell %q", containerID, cellName)
+	}
+
+	// Use ContainerdID from spec
+	containerdID := foundContainerSpec.ContainerdID
+	if containerdID == "" {
+		return fmt.Errorf("container %q has empty ContainerdID", containerID)
 	}
 
 	// Create a background context for containerd operations
 	ctrCtx := context.Background()
 
-	// Stop the container using hierarchical ID
-	_, err = r.ctrClient.StopContainer(ctrCtx, hierarchicalContainerID, ctr.StopContainerOptions{})
+	// Stop the container using containerd ID
+	_, err = r.ctrClient.StopContainer(ctrCtx, containerdID, ctr.StopContainerOptions{})
 	if err != nil {
 		r.logger.WarnContext(
 			r.ctx,
 			"failed to stop container, continuing with deletion",
 			"container",
 			containerID,
-			"hierarchicalID",
-			hierarchicalContainerID,
+			"containerdID",
+			containerdID,
 			"error",
 			err,
 		)
 	}
 
-	// Delete the container from containerd using hierarchical ID
-	err = r.ctrClient.DeleteContainer(ctrCtx, hierarchicalContainerID, ctr.ContainerDeleteOptions{
+	// Delete the container from containerd using containerd ID
+	err = r.ctrClient.DeleteContainer(ctrCtx, containerdID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 	if err != nil {
-		fields := appendCellLogFields([]any{"id", hierarchicalContainerID}, cellID, cellName)
+		fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 		fields = append(
 			fields,
 			"space",
@@ -138,7 +144,7 @@ func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 		return fmt.Errorf("failed to delete container %s: %w", containerID, err)
 	}
 
-	fields := appendCellLogFields([]any{"id", hierarchicalContainerID}, cellID, cellName)
+	fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 	fields = append(fields, "space", spaceName, "realm", realmName, "containerName", containerID)
 	r.logger.InfoContext(
 		r.ctx,

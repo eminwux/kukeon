@@ -108,19 +108,11 @@ func (b *Exec) PurgeContainer(container intmodel.Container) (PurgeContainerResul
 
 	// Check if container exists in cell metadata by name (ID now stores just the container name)
 	var foundContainerSpec *intmodel.ContainerSpec
-
-	// Check root container first
-	if internalCell.Spec.RootContainer != nil && internalCell.Spec.RootContainer.ID == name {
-		foundContainerSpec = internalCell.Spec.RootContainer
-		result.ContainerExists = true
-	} else {
-		// Check regular containers
-		for i := range internalCell.Spec.Containers {
-			if internalCell.Spec.Containers[i].ID == name {
-				foundContainerSpec = &internalCell.Spec.Containers[i]
-				result.ContainerExists = true
-				break
-			}
+	for i := range internalCell.Spec.Containers {
+		if internalCell.Spec.Containers[i].ID == name {
+			foundContainerSpec = &internalCell.Spec.Containers[i]
+			result.ContainerExists = true
+			break
 		}
 	}
 
@@ -172,17 +164,10 @@ func (b *Exec) PurgeContainer(container intmodel.Container) (PurgeContainerResul
 func (b *Exec) purgeContainerInternal(cell intmodel.Cell, containerName string, realm intmodel.Realm) error {
 	// Check if container exists in cell metadata
 	var foundContainerSpec *intmodel.ContainerSpec
-
-	// Check root container first
-	if cell.Spec.RootContainer != nil && cell.Spec.RootContainer.ID == containerName {
-		foundContainerSpec = cell.Spec.RootContainer
-	} else {
-		// Check regular containers
-		for i := range cell.Spec.Containers {
-			if cell.Spec.Containers[i].ID == containerName {
-				foundContainerSpec = &cell.Spec.Containers[i]
-				break
-			}
+	for i := range cell.Spec.Containers {
+		if cell.Spec.Containers[i].ID == containerName {
+			foundContainerSpec = &cell.Spec.Containers[i]
+			break
 		}
 	}
 
@@ -191,8 +176,16 @@ func (b *Exec) purgeContainerInternal(cell intmodel.Cell, containerName string, 
 		if err := b.deleteContainerInternal(cell, containerName); err != nil {
 			return fmt.Errorf("failed to delete container: %w", err)
 		}
+
+		// Use ContainerdID from spec for purge
+		containerdID := foundContainerSpec.ContainerdID
+		if containerdID != "" {
+			// Perform comprehensive purge via runner using ContainerdID
+			return b.runner.PurgeContainer(realm, containerdID)
+		}
 	}
 
-	// Perform comprehensive purge via runner
+	// If container not found in metadata or ContainerdID is empty, still try to purge by name
+	// (for orphaned containers that might exist in containerd but not in metadata)
 	return b.runner.PurgeContainer(realm, containerName)
 }

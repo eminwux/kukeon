@@ -106,22 +106,14 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 			containerCellName = cellID
 		}
 
-		// Build container ID using hierarchical format
-		var containerID string
-		containerID, err = naming.BuildContainerName(
-			containerSpaceName,
-			containerStackName,
-			containerCellName,
-			containerSpec.ID,
-		)
-		if err != nil {
+		// Use ContainerdID from spec
+		containerID := containerSpec.ContainerdID
+		if containerID == "" {
 			r.logger.WarnContext(
 				r.ctx,
-				"failed to build container name, skipping",
+				"container has empty ContainerdID, skipping",
 				"container",
 				containerSpec.ID,
-				"error",
-				err,
 			)
 			continue
 		}
@@ -150,9 +142,9 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 	}
 
 	// Delete root container
-	rootContainerID, err := naming.BuildRootContainerName(cellSpaceName, cellStackName, cellID)
+	rootContainerID, err := naming.BuildRootContainerdID(cellSpaceName, cellStackName, cellID)
 	if err != nil {
-		return fmt.Errorf("failed to build root container name: %w", err)
+		return fmt.Errorf("failed to build root container containerd ID: %w", err)
 	}
 
 	// Clean up CNI network configuration before stopping/deleting the root container
@@ -253,7 +245,7 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 		)
 	}
 
-	_, err = r.ctrClient.StopContainer(ctrCtx, rootContainerID, ctr.StopContainerOptions{})
+	_, err = r.ctrClient.StopContainer(ctrCtx, rootContainerID, ctr.StopContainerOptions{Force: true})
 	if err != nil {
 		r.logger.WarnContext(
 			r.ctx,

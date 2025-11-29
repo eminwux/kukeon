@@ -346,17 +346,10 @@ func (b *Exec) GetContainer(container intmodel.Container) (GetContainerResult, e
 
 		// Find container in cell spec by name (ID now stores just the container name)
 		var foundContainerSpec *intmodel.ContainerSpec
-
-		// Check root container first
-		if cellResult.Cell.Spec.RootContainer != nil && cellResult.Cell.Spec.RootContainer.ID == name {
-			foundContainerSpec = cellResult.Cell.Spec.RootContainer
-		} else {
-			// Check regular containers
-			for i := range cellResult.Cell.Spec.Containers {
-				if cellResult.Cell.Spec.Containers[i].ID == name {
-					foundContainerSpec = &cellResult.Cell.Spec.Containers[i]
-					break
-				}
+		for i := range cellResult.Cell.Spec.Containers {
+			if cellResult.Cell.Spec.Containers[i].ID == name {
+				foundContainerSpec = &cellResult.Cell.Spec.Containers[i]
+				break
 			}
 		}
 

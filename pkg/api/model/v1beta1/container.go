@@ -33,6 +33,7 @@ type ContainerMetadata struct {
 
 type ContainerSpec struct {
 	ID              string   `json:"id"                      yaml:"id"`
+	ContainerdID    string   `json:"containerdId,omitempty"  yaml:"containerdId,omitempty"`
 	RealmID         string   `json:"realmId"                 yaml:"realmId"`
 	SpaceID         string   `json:"spaceId"                 yaml:"spaceId"`
 	StackID         string   `json:"stackId"                 yaml:"stackId"`
@@ -96,6 +97,7 @@ func NewContainerDoc(from *ContainerDoc) *ContainerDoc {
 			},
 			Spec: ContainerSpec{
 				ID:              "",
+				ContainerdID:    "",
 				RealmID:         "",
 				SpaceID:         "",
 				StackID:         "",
