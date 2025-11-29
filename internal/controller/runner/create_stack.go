@@ -36,9 +36,9 @@ func (r *Exec) CreateStack(stack intmodel.Stack) (intmodel.Stack, error) {
 		return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrGetStack, err)
 	}
 
-	// Stack found, ensure cgroup exists
+	// Stack found, ensure resources exist
 	if err == nil {
-		ensuredStack, ensureErr := r.ensureStackCgroup(existingStack)
+		ensuredStack, ensureErr := r.EnsureStack(existingStack)
 		if ensureErr != nil {
 			return intmodel.Stack{}, ensureErr
 		}
@@ -53,4 +53,16 @@ func (r *Exec) CreateStack(stack intmodel.Stack) (intmodel.Stack, error) {
 	}
 
 	return resultStack, nil
+}
+
+// EnsureStack ensures that all required resources for a stack exist.
+// It ensures the cgroup exists.
+func (r *Exec) EnsureStack(stack intmodel.Stack) (intmodel.Stack, error) {
+	// Ensure cgroup exists
+	ensuredStack, ensureErr := r.ensureStackCgroup(stack)
+	if ensureErr != nil {
+		return intmodel.Stack{}, ensureErr
+	}
+
+	return ensuredStack, nil
 }

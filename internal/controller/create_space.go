@@ -41,10 +41,12 @@ type CreateSpaceResult struct {
 	Created              bool
 }
 
-// CreateSpace creates a new space.
+// CreateSpace creates a new space or ensures an existing space's resources exist.
 // It returns a CreateSpaceResult and an error.
-// The CreateSpaceResult contains the space, the metadata exists pre, the metadata exists post, the cgroup exists pre, the cgroup exists post, the cgroup created, the cni network exists pre, the cni network exists post, the cni network created, and the created.
-// The error is returned if the space name is required, the realm name is required, the space cgroup does not exist, the cni network does not exist, or the space creation fails.
+// The CreateSpaceResult reports the state of space resources before and after the operation,
+// indicating what was created vs what already existed.
+// The error is returned if the space name is required, the realm name is required,
+// the space cgroup does not exist, the cni network does not exist, or the space creation fails.
 func (b *Exec) CreateSpace(space intmodel.Space) (CreateSpaceResult, error) {
 	var res CreateSpaceResult
 
@@ -78,14 +80,28 @@ func (b *Exec) CreateSpace(space intmodel.Space) (CreateSpaceResult, error) {
 		},
 	}
 
+	// Check if space already exists
 	internalSpacePre, err := b.runner.GetSpace(lookupSpace)
+	var resultSpace intmodel.Space
+	var wasCreated bool
+
 	if err != nil {
+		// Space not found, create new space
 		if errors.Is(err, errdefs.ErrSpaceNotFound) {
 			res.MetadataExistsPre = false
 		} else {
 			return res, fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
 		}
+
+		// Create new space
+		resultSpace, err = b.runner.CreateSpace(space)
+		if err != nil {
+			return res, fmt.Errorf("%w: %w", errdefs.ErrCreateSpace, err)
+		}
+
+		wasCreated = true
 	} else {
+		// Space found, check pre-state for result reporting (EnsureSpace will also check internally)
 		res.MetadataExistsPre = true
 		res.CgroupExistsPre, err = b.runner.ExistsCgroup(internalSpacePre)
 		if err != nil {
@@ -95,40 +111,32 @@ func (b *Exec) CreateSpace(space intmodel.Space) (CreateSpaceResult, error) {
 		if err != nil {
 			return res, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 		}
-	}
 
-	// Call runner with internal type
-	resultSpace, err := b.runner.CreateSpace(space)
-	if err != nil {
-		return res, fmt.Errorf("%w: %w", errdefs.ErrCreateSpace, err)
-	}
-
-	// Build minimal internal space for GetSpace lookup (after creation)
-	internalSpacePost, err := b.runner.GetSpace(lookupSpace)
-	if err != nil {
-		if errors.Is(err, errdefs.ErrSpaceNotFound) {
-			res.MetadataExistsPost = false
-		} else {
-			return res, fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
-		}
-	} else {
-		res.MetadataExistsPost = true
-		res.CgroupExistsPost, err = b.runner.ExistsCgroup(internalSpacePost)
+		// Ensure resources exist (EnsureSpace checks/ensures internally)
+		resultSpace, err = b.runner.EnsureSpace(internalSpacePre)
 		if err != nil {
-			return res, fmt.Errorf("failed to check if space cgroup exists: %w", err)
+			return res, fmt.Errorf("%w: %w", errdefs.ErrCreateSpace, err)
 		}
-		// Use the result from CreateSpace instead of GetSpace to ensure consistency
-		res.Space = resultSpace
+
+		wasCreated = false
 	}
 
-	res.CNINetworkExistsPost, err = b.runner.ExistsSpaceCNIConfig(lookupSpace)
-	if err != nil {
-		return res, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
+	// Set result fields
+	res.Space = resultSpace
+	res.MetadataExistsPost = true
+	// After CreateSpace/EnsureSpace, both CNI network and cgroup are guaranteed to exist
+	res.CNINetworkExistsPost = true
+	res.CgroupExistsPost = true
+	res.Created = wasCreated
+	if wasCreated {
+		// New space: all resources were created
+		res.CNINetworkCreated = true
+		res.CgroupCreated = true
+	} else {
+		// Existing space: resources were created only if they didn't exist before
+		res.CNINetworkCreated = !res.CNINetworkExistsPre
+		res.CgroupCreated = !res.CgroupExistsPre
 	}
-
-	res.Created = !res.MetadataExistsPre && res.MetadataExistsPost
-	res.CNINetworkCreated = !res.CNINetworkExistsPre && res.CNINetworkExistsPost
-	res.CgroupCreated = !res.CgroupExistsPre && res.CgroupExistsPost
 
 	return res, nil
 }

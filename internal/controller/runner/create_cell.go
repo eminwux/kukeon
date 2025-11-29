@@ -36,13 +36,8 @@ func (r *Exec) CreateCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 	}
 
-	// Cell found, ensure cgroup exists
+	// Cell found, merge containers and ensure resources exist
 	if !errors.Is(err, errdefs.ErrCellNotFound) {
-		ensuredCell, ensureErr := r.ensureCellCgroup(existingCell)
-		if ensureErr != nil {
-			return intmodel.Cell{}, ensureErr
-		}
-
 		// Merge containers from the new cell into the existing cell
 		// This ensures containers specified in the new cell are created even if
 		// they weren't in the stored cell document
@@ -51,19 +46,19 @@ func (r *Exec) CreateCell(cell intmodel.Cell) (intmodel.Cell, error) {
 			r.logger.DebugContext(
 				r.ctx,
 				"merging containers into existing cell",
-				"cell", ensuredCell.Metadata.Name,
-				"existingContainerCount", len(ensuredCell.Spec.Containers),
+				"cell", existingCell.Metadata.Name,
+				"existingContainerCount", len(existingCell.Spec.Containers),
 				"newContainerCount", len(cell.Spec.Containers),
 			)
 
 			// Create a map of existing container IDs to avoid duplicates
 			existingContainerIDs := make(map[string]bool)
-			for _, container := range ensuredCell.Spec.Containers {
+			for _, container := range existingCell.Spec.Containers {
 				existingContainerIDs[container.ID] = true
 				r.logger.DebugContext(
 					r.ctx,
 					"existing container in cell",
-					"cell", ensuredCell.Metadata.Name,
+					"cell", existingCell.Metadata.Name,
 					"containerID", container.ID,
 				)
 			}
@@ -72,39 +67,26 @@ func (r *Exec) CreateCell(cell intmodel.Cell) (intmodel.Cell, error) {
 				r.logger.DebugContext(
 					r.ctx,
 					"checking if container should be merged",
-					"cell", ensuredCell.Metadata.Name,
+					"cell", existingCell.Metadata.Name,
 					"containerID", container.ID,
 					"alreadyExists", existingContainerIDs[container.ID],
 				)
 				if !existingContainerIDs[container.ID] {
-					ensuredCell.Spec.Containers = append(ensuredCell.Spec.Containers, container)
+					existingCell.Spec.Containers = append(existingCell.Spec.Containers, container)
 					r.logger.DebugContext(
 						r.ctx,
 						"merged new container into cell",
-						"cell", ensuredCell.Metadata.Name,
+						"cell", existingCell.Metadata.Name,
 						"containerID", container.ID,
-						"totalContainers", len(ensuredCell.Spec.Containers),
+						"totalContainers", len(existingCell.Spec.Containers),
 					)
 				}
 			}
 		}
 
-		// Log final container count before ensuring containers
-		r.logger.DebugContext(
-			r.ctx,
-			"calling ensureCellContainers",
-			"cell", ensuredCell.Metadata.Name,
-			"containerCount", len(ensuredCell.Spec.Containers),
-		)
-
-		_, ensureErr = r.ensureCellContainers(ensuredCell)
+		ensuredCell, ensureErr := r.EnsureCell(existingCell)
 		if ensureErr != nil {
 			return intmodel.Cell{}, ensureErr
-		}
-
-		// Update metadata to persist the merged containers
-		if err = r.UpdateCellMetadata(ensuredCell); err != nil {
-			return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
 		}
 
 		return ensuredCell, nil
@@ -117,4 +99,34 @@ func (r *Exec) CreateCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	}
 
 	return resultCell, nil
+}
+
+// EnsureCell ensures that all required resources for a cell exist.
+// It ensures the cgroup exists, ensures cell containers exist, and updates metadata.
+func (r *Exec) EnsureCell(cell intmodel.Cell) (intmodel.Cell, error) {
+	// Ensure cgroup exists
+	ensuredCell, ensureErr := r.ensureCellCgroup(cell)
+	if ensureErr != nil {
+		return intmodel.Cell{}, ensureErr
+	}
+
+	// Log final container count before ensuring containers
+	r.logger.DebugContext(
+		r.ctx,
+		"calling ensureCellContainers",
+		"cell", ensuredCell.Metadata.Name,
+		"containerCount", len(ensuredCell.Spec.Containers),
+	)
+
+	_, ensureErr = r.ensureCellContainers(ensuredCell)
+	if ensureErr != nil {
+		return intmodel.Cell{}, ensureErr
+	}
+
+	// Update metadata to persist the containers
+	if err := r.UpdateCellMetadata(ensuredCell); err != nil {
+		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
+	}
+
+	return ensuredCell, nil
 }

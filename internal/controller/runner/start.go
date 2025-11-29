@@ -18,6 +18,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -332,6 +333,92 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 			fields...,
 		)
 	}
+
+	return nil
+}
+
+// StartContainer starts a specific container in a cell.
+func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
+	containerID = strings.TrimSpace(containerID)
+	if containerID == "" {
+		return errors.New("container ID is required")
+	}
+
+	cellName := strings.TrimSpace(cell.Metadata.Name)
+	if cellName == "" {
+		return errdefs.ErrCellNotFound
+	}
+
+	cellID := cell.Spec.ID
+	if cellID == "" {
+		return errdefs.ErrCellIDRequired
+	}
+
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
+	if realmName == "" {
+		return errdefs.ErrRealmNameRequired
+	}
+
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
+	if spaceName == "" {
+		return errdefs.ErrSpaceNameRequired
+	}
+
+	// Create a background context for containerd operations
+	ctrCtx := context.Background()
+
+	// Always create a fresh client with background context to avoid cancellation issues
+	if r.ctrClient != nil {
+		_ = r.ctrClient.Close() // Ignore errors when closing old client
+		r.ctrClient = nil
+	}
+	r.ctrClient = ctr.NewClient(context.Background(), r.logger, r.opts.ContainerdSocket)
+
+	err := r.ctrClient.Connect()
+	if err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	defer r.ctrClient.Close()
+
+	// Get realm to access namespace
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: realmName,
+		},
+	}
+	internalRealm, err := r.GetRealm(lookupRealm)
+	if err != nil {
+		return fmt.Errorf("failed to get realm: %w", err)
+	}
+
+	namespace := internalRealm.Spec.Namespace
+	if namespace == "" {
+		return fmt.Errorf("realm %q has no namespace", realmName)
+	}
+
+	// Set namespace to realm namespace
+	r.ctrClient.SetNamespace(namespace)
+
+	// Use container name directly for containerd operations
+	_, err = r.ctrClient.StartContainer(ctrCtx, ctr.ContainerSpec{ID: containerID}, ctr.TaskSpec{})
+	if err != nil {
+		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		fields = append(fields, "space", spaceName, "realm", realmName, "err", fmt.Sprintf("%v", err))
+		r.logger.ErrorContext(
+			r.ctx,
+			"failed to start container",
+			fields...,
+		)
+		return fmt.Errorf("failed to start container %s: %w", containerID, err)
+	}
+
+	fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+	fields = append(fields, "space", spaceName, "realm", realmName)
+	r.logger.InfoContext(
+		r.ctx,
+		"started container",
+		fields...,
+	)
 
 	return nil
 }

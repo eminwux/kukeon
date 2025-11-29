@@ -38,6 +38,7 @@ type Runner interface {
 	GetSpace(space intmodel.Space) (intmodel.Space, error)
 	ListSpaces(realmName string) ([]intmodel.Space, error)
 	CreateSpace(space intmodel.Space) (intmodel.Space, error)
+	EnsureSpace(space intmodel.Space) (intmodel.Space, error)
 	ExistsSpaceCNIConfig(space intmodel.Space) (bool, error)
 	DeleteSpace(space intmodel.Space) error
 
@@ -45,12 +46,16 @@ type Runner interface {
 	ListCells(realmName, spaceName, stackName string) ([]intmodel.Cell, error)
 	ListContainers(realmName, spaceName, stackName, cellName string) ([]intmodel.ContainerSpec, error)
 	CreateCell(cell intmodel.Cell) (intmodel.Cell, error)
+	EnsureCell(cell intmodel.Cell) (intmodel.Cell, error)
 	StartCell(cell intmodel.Cell) error
 	StopCell(cell intmodel.Cell) error
+	StartContainer(cell intmodel.Cell, containerID string) error
 	StopContainer(cell intmodel.Cell, containerID string) error
 	KillCell(cell intmodel.Cell) error
 	KillContainer(cell intmodel.Cell, containerID string) error
 	DeleteContainer(cell intmodel.Cell, containerID string) error
+	CreateContainer(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)
+	EnsureContainer(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)
 	UpdateCellMetadata(cell intmodel.Cell) error
 	ExistsCellRootContainer(cell intmodel.Cell) (bool, error)
 	DeleteCell(cell intmodel.Cell) error
@@ -58,6 +63,7 @@ type Runner interface {
 	GetStack(stack intmodel.Stack) (intmodel.Stack, error)
 	ListStacks(realmName, spaceName string) ([]intmodel.Stack, error)
 	CreateStack(stack intmodel.Stack) (intmodel.Stack, error)
+	EnsureStack(stack intmodel.Stack) (intmodel.Stack, error)
 	DeleteStack(stack intmodel.Stack) error
 
 	ExistsCgroup(doc any) (bool, error)

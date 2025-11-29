@@ -46,14 +46,9 @@ func (r *Exec) CreateSpace(space intmodel.Space) (intmodel.Space, error) {
 		return intmodel.Space{}, errdefs.ErrRealmNameRequired
 	}
 
-	// Space found, ensure CNI config exists
+	// Space found, ensure resources exist
 	if err == nil {
-		ensuredSpace, ensureErr := r.ensureSpaceCNIConfig(existingSpace)
-		if ensureErr != nil {
-			return intmodel.Space{}, ensureErr
-		}
-
-		ensuredSpace, ensureErr = r.ensureSpaceCgroup(ensuredSpace)
+		ensuredSpace, ensureErr := r.EnsureSpace(existingSpace)
 		if ensureErr != nil {
 			return intmodel.Space{}, ensureErr
 		}
@@ -69,4 +64,22 @@ func (r *Exec) CreateSpace(space intmodel.Space) (intmodel.Space, error) {
 	}
 
 	return resultSpace, nil
+}
+
+// EnsureSpace ensures that all required resources for a space exist.
+// It ensures the CNI config and cgroup exist.
+func (r *Exec) EnsureSpace(space intmodel.Space) (intmodel.Space, error) {
+	// Ensure CNI config exists
+	ensuredSpace, ensureErr := r.ensureSpaceCNIConfig(space)
+	if ensureErr != nil {
+		return intmodel.Space{}, ensureErr
+	}
+
+	// Ensure cgroup exists
+	ensuredSpace, ensureErr = r.ensureSpaceCgroup(ensuredSpace)
+	if ensureErr != nil {
+		return intmodel.Space{}, ensureErr
+	}
+
+	return ensuredSpace, nil
 }
