@@ -40,7 +40,7 @@ type fakeRunner struct {
 	CreateRealmFn                    func(realm intmodel.Realm) (intmodel.Realm, error)
 	EnsureRealmFn                    func(realm intmodel.Realm) (intmodel.Realm, error)
 	ExistsRealmContainerdNamespaceFn func(namespace string) (bool, error)
-	DeleteRealmFn                    func(realm intmodel.Realm) (runner.DeleteRealmOutcome, error)
+	DeleteRealmFn                    func(realm intmodel.Realm) error
 
 	// Space methods
 	GetSpaceFn             func(space intmodel.Space) (intmodel.Space, error)
@@ -129,11 +129,11 @@ func (f *fakeRunner) ExistsRealmContainerdNamespace(namespace string) (bool, err
 	return false, errors.New("unexpected call to ExistsRealmContainerdNamespace")
 }
 
-func (f *fakeRunner) DeleteRealm(realm intmodel.Realm) (runner.DeleteRealmOutcome, error) {
+func (f *fakeRunner) DeleteRealm(realm intmodel.Realm) error {
 	if f.DeleteRealmFn != nil {
 		return f.DeleteRealmFn(realm)
 	}
-	return runner.DeleteRealmOutcome{}, errors.New("unexpected call to DeleteRealm")
+	return errors.New("unexpected call to DeleteRealm")
 }
 
 // Space methods

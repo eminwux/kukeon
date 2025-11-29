@@ -29,63 +29,46 @@ import (
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
-func (r *Exec) DeleteRealm(realm intmodel.Realm) (DeleteRealmOutcome, error) {
-	var outcome DeleteRealmOutcome
-
+func (r *Exec) DeleteRealm(realm intmodel.Realm) error {
 	realmName := strings.TrimSpace(realm.Metadata.Name)
 	if realmName == "" {
-		return outcome, errdefs.ErrRealmNameRequired
+		return errdefs.ErrRealmNameRequired
 	}
 
 	internalRealm, err := r.GetRealm(realm)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrRealmNotFound) {
 			// Idempotent: realm doesn't exist, consider it deleted
-			return outcome, nil
+			return nil
 		}
-		return outcome, fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
+		return fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
 	}
 	// Initialize ctr client if needed
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
 	if err = r.ctrClient.Connect(); err != nil {
-		return outcome, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 	defer r.ctrClient.Close()
 
 	// Delete realm cgroup
 	spec := cgroups.DefaultRealmSpec(internalRealm)
 	mountpoint := r.ctrClient.GetCgroupMountpoint()
-	err = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
-	if err != nil {
-		r.logger.WarnContext(r.ctx, "failed to delete realm cgroup", "cgroup", spec.Group, "error", err)
-		// Continue with namespace and metadata deletion
-	} else {
-		outcome.CgroupDeleted = true
+	if err = r.ctrClient.DeleteCgroup(spec.Group, mountpoint); err != nil {
+		return fmt.Errorf("%w: failed to delete realm cgroup: %w", errdefs.ErrDeleteRealm, err)
 	}
 
 	// Delete containerd namespace
 	if err = r.ctrClient.DeleteNamespace(internalRealm.Spec.Namespace); err != nil {
-		r.logger.WarnContext(
-			r.ctx,
-			"failed to delete containerd namespace",
-			"namespace",
-			internalRealm.Spec.Namespace,
-			"error",
-			err,
-		)
-		// Continue with metadata deletion
-	} else {
-		outcome.ContainerdNamespaceDeleted = true
+		return fmt.Errorf("%w: failed to delete containerd namespace: %w", errdefs.ErrDeleteRealm, err)
 	}
 
 	// Delete realm metadata
 	metadataFilePath := fs.RealmMetadataPath(r.opts.RunPath, internalRealm.Metadata.Name)
 	if err = metadata.DeleteMetadata(r.ctx, r.logger, metadataFilePath); err != nil {
-		return outcome, fmt.Errorf("%w: failed to delete realm metadata: %w", errdefs.ErrDeleteRealm, err)
+		return fmt.Errorf("%w: failed to delete realm metadata: %w", errdefs.ErrDeleteRealm, err)
 	}
-	outcome.MetadataDeleted = true
 
-	return outcome, nil
+	return nil
 }

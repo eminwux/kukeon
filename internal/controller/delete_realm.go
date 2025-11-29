@@ -62,8 +62,8 @@ func (b *Exec) deleteRealmCascade(realm intmodel.Realm, force, cascade bool) err
 		}
 	}
 
-	// Delete the resource itself via runner (ignore outcome, return error only)
-	_, err := b.runner.DeleteRealm(realm)
+	// Delete the resource itself via runner
+	err := b.runner.DeleteRealm(realm)
 	return err
 }
 
@@ -106,14 +106,11 @@ func (b *Exec) DeleteRealm(realm intmodel.Realm, force, cascade bool) (DeleteRea
 	}
 
 	// Delete the resource itself (private method handles cascade deletion)
-	// Note: private method deletes realm and returns error only, so we can't get outcome
-	// Since private method succeeded, we assume all deletions succeeded
 	if err = b.deleteRealmCascade(getResult, force, cascade); err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrDeleteRealm, err)
 	}
 
-	// Since private method succeeded, assume all deletions succeeded
-	// (We can't get the actual outcome since realm is already deleted)
+	// Since private method succeeded, all deletions succeeded (all-or-nothing behavior)
 	res.MetadataDeleted = true
 	res.CgroupDeleted = true
 	res.ContainerdNamespaceDeleted = true
