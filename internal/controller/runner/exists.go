@@ -69,17 +69,7 @@ func (r *Exec) ExistsCellRootContainer(cell intmodel.Cell) (bool, error) {
 	}
 
 	// Get the cell document to access cell ID
-	lookupCell := intmodel.Cell{
-		Metadata: intmodel.CellMetadata{
-			Name: cellName,
-		},
-		Spec: intmodel.CellSpec{
-			RealmName: realmName,
-			SpaceName: spaceName,
-			StackName: stackName,
-		},
-	}
-	internalCell, err := r.GetCell(lookupCell)
+	internalCell, err := r.GetCell(cell)
 	if err != nil {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 	}
@@ -198,6 +188,10 @@ func (r *Exec) ExistsCgroup(doc any) (bool, error) {
 	return true, nil
 }
 
+// ExistsSpaceCNIConfig checks if the CNI config for a space exists.
+// It returns a bool and an error.
+// The bool is true if the CNI config exists, false otherwise.
+// The error is returned if the space name is required, the realm name is required, the CNI config does not exist, or the CNI config creation fails.
 func (r *Exec) ExistsSpaceCNIConfig(space intmodel.Space) (bool, error) {
 	spaceName := strings.TrimSpace(space.Metadata.Name)
 	if spaceName == "" {

@@ -141,9 +141,19 @@ func (b *Exec) bootstrapRealm(report BootstrapReport) (BootstrapReport, error) {
 		return report, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
-	_, err = b.runner.CreateRealm(realm)
-	if err != nil && !errors.Is(err, errdefs.ErrNamespaceAlreadyExists) {
-		return report, fmt.Errorf("%w: %w", errdefs.ErrCreateRealm, err)
+	// Use EnsureRealm for existing realms, CreateRealm for new realms
+	if report.RealmMetadataExistsPre {
+		// Realm exists, ensure all resources are present
+		_, err = b.runner.EnsureRealm(internalRealmPre)
+		if err != nil {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrCreateRealm, err)
+		}
+	} else {
+		// Realm doesn't exist, create it (which will also ensure resources)
+		_, err = b.runner.CreateRealm(realm)
+		if err != nil && !errors.Is(err, errdefs.ErrNamespaceAlreadyExists) {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrCreateRealm, err)
+		}
 	}
 
 	// Post-state
@@ -238,10 +248,19 @@ func (b *Exec) bootstrapSpace(report BootstrapReport) (BootstrapReport, error) {
 	}
 	report.SpaceCNINetworkName = spaceNet
 
-	// Create or reconcile space
-	_, err = b.runner.CreateSpace(space)
-	if err != nil {
-		return report, fmt.Errorf("%w: %w", errdefs.ErrCreateSpace, err)
+	// Use EnsureSpace for existing spaces, CreateSpace for new spaces
+	if report.SpaceMetadataExistsPre {
+		// Space exists, ensure all resources are present
+		_, err = b.runner.EnsureSpace(internalSpacePre)
+		if err != nil {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrCreateSpace, err)
+		}
+	} else {
+		// Space doesn't exist, create it (which will also ensure resources)
+		_, err = b.runner.CreateSpace(space)
+		if err != nil {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrCreateSpace, err)
+		}
 	}
 
 	// Post-state checks
@@ -329,10 +348,19 @@ func (b *Exec) bootstrapStack(report BootstrapReport) (BootstrapReport, error) {
 		return report, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
-	// Create or reconcile stack
-	_, err = b.runner.CreateStack(stack)
-	if err != nil {
-		return report, fmt.Errorf("%w: %w", errdefs.ErrCreateStack, err)
+	// Use EnsureStack for existing stacks, CreateStack for new stacks
+	if report.StackMetadataExistsPre {
+		// Stack exists, ensure all resources are present
+		_, err = b.runner.EnsureStack(internalStackPre)
+		if err != nil {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrCreateStack, err)
+		}
+	} else {
+		// Stack doesn't exist, create it (which will also ensure resources)
+		_, err = b.runner.CreateStack(stack)
+		if err != nil {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrCreateStack, err)
+		}
 	}
 
 	// Build minimal internal stack for GetStack lookup (post) using internal fields
@@ -449,14 +477,24 @@ func (b *Exec) bootstrapCell(report BootstrapReport) (BootstrapReport, error) {
 		report.CellStartedPre = false
 	}
 
-	// Create or reconcile cell
-	_, err = b.runner.CreateCell(cell)
-	if err != nil {
-		return report, fmt.Errorf("%w: %w", errdefs.ErrCreateCell, err)
+	// Use EnsureCell for existing cells, CreateCell for new cells
+	var ensuredCell intmodel.Cell
+	if report.CellMetadataExistsPre {
+		// Cell exists, ensure all resources are present
+		ensuredCell, err = b.runner.EnsureCell(internalCellPre)
+		if err != nil {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrCreateCell, err)
+		}
+	} else {
+		// Cell doesn't exist, create it (which will also ensure resources)
+		ensuredCell, err = b.runner.CreateCell(cell)
+		if err != nil {
+			return report, fmt.Errorf("%w: %w", errdefs.ErrCreateCell, err)
+		}
 	}
 
-	// Start cell containers using the already-converted internal cell
-	err = b.runner.StartCell(cell)
+	// Start cell containers using the ensured/created cell
+	err = b.runner.StartCell(ensuredCell)
 	if err != nil {
 		return report, fmt.Errorf("failed to start cell containers: %w", err)
 	}

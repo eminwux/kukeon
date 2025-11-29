@@ -49,19 +49,25 @@ type ensureCgroupParams struct {
 }
 
 func (r *Exec) provisionNewRealm(realm intmodel.Realm) (intmodel.Realm, error) {
-	// Update realm metadata
+	// Update realm metadata with Creating state
 	if err := r.UpdateRealmMetadata(realm); err != nil {
 		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateRealmMetadata, err)
 	}
 
 	// Create realm namespace
 	if err := r.createRealmContainerdNamespace(realm); err != nil {
+		// Set state to Failed and update metadata before returning error
+		realm.Status.State = intmodel.RealmStateFailed
+		_ = r.UpdateRealmMetadata(realm) // Best effort to save failed state
 		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrCreateRealmNamespace, err)
 	}
 
 	// Create realm cgroup
 	cgroupPath, err := r.createRealmCgroup(realm)
 	if err != nil {
+		// Set state to Failed and update metadata before returning error
+		realm.Status.State = intmodel.RealmStateFailed
+		_ = r.UpdateRealmMetadata(realm) // Best effort to save failed state
 		return intmodel.Realm{}, err
 	}
 

@@ -309,6 +309,41 @@ func TestNewRealmCmdRunE(t *testing.T) {
 				"Purged realm \"my-realm\"",
 			},
 		},
+		{
+			name: "successful purge without metadata (realm not in metadata)",
+			args: []string{"orphaned-realm"},
+			controller: &fakePurgeRealmController{
+				purgeRealmFn: func(realm intmodel.Realm, _ bool, _ bool) (controller.PurgeRealmResult, error) {
+					// Verify realm name is correct
+					// Note: namespace defaulting happens in the real controller's PurgeRealm method,
+					// so we don't check it here. The important thing is that purge succeeds without metadata.
+					if realm.Metadata.Name != "orphaned-realm" {
+						return controller.PurgeRealmResult{}, errors.New("unexpected realm name")
+					}
+					// When metadata doesn't exist, RealmDeleted should be false
+					return controller.PurgeRealmResult{
+						Realm: intmodel.Realm{
+							Metadata: intmodel.RealmMetadata{
+								Name: "orphaned-realm",
+							},
+							Spec: intmodel.RealmSpec{
+								Namespace: "orphaned-realm", // Controller will default this
+							},
+						},
+						RealmDeleted:   false, // Not deleted via standard delete (no metadata)
+						PurgeSucceeded: true,  // But purge succeeded
+						Force:          false,
+						Cascade:        false,
+						Deleted:        []string{},
+						Purged:         []string{"orphaned-containers", "cni-resources", "all-metadata"},
+					}, nil
+				},
+			},
+			wantOutput: []string{
+				"Purged realm \"orphaned-realm\"",
+				"Additional resources purged: [orphaned-containers cni-resources all-metadata]",
+			},
+		},
 	}
 
 	for _, tt := range tests {
