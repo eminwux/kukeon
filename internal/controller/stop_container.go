@@ -33,6 +33,7 @@ type StopContainerResult struct {
 
 // StopContainer stops a specific container in a cell and updates the cell metadata.
 func (b *Exec) StopContainer(container intmodel.Container) (StopContainerResult, error) {
+	defer b.runner.Close()
 	var res StopContainerResult
 
 	name := strings.TrimSpace(container.Metadata.Name)

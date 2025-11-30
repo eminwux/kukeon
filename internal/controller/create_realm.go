@@ -48,6 +48,7 @@ type CreateRealmResult struct {
 // The error is returned if the realm name is required, the namespace is required,
 // the realm cgroup does not exist, the containerd namespace does not exist, or the realm creation fails.
 func (b *Exec) CreateRealm(realm intmodel.Realm) (CreateRealmResult, error) {
+	defer b.runner.Close()
 	var res CreateRealmResult
 
 	name := strings.TrimSpace(realm.Metadata.Name)

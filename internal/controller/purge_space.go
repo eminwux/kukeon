@@ -43,6 +43,7 @@ type PurgeSpaceResult struct {
 // PurgeSpace purges a space with comprehensive cleanup. If cascade is true, purges all stacks first.
 // If force is true, skips validation of child resources.
 func (b *Exec) PurgeSpace(space intmodel.Space, force, cascade bool) (PurgeSpaceResult, error) {
+	defer b.runner.Close()
 	var result PurgeSpaceResult
 
 	name := strings.TrimSpace(space.Metadata.Name)

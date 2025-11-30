@@ -35,6 +35,7 @@ type PurgeStackResult struct {
 // PurgeStack purges a stack with comprehensive cleanup. If cascade is true, purges all cells first.
 // If force is true, skips validation of child resources.
 func (b *Exec) PurgeStack(stack intmodel.Stack, force, cascade bool) (PurgeStackResult, error) {
+	defer b.runner.Close()
 	var result PurgeStackResult
 
 	name := strings.TrimSpace(stack.Metadata.Name)

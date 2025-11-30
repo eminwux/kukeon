@@ -31,15 +31,9 @@ type DeleteCellResult struct {
 	MetadataDeleted   bool
 }
 
-// deleteCellInternal handles the core cell deletion logic using runner methods directly.
-// It deletes the cell via the runner, which handles container deletion, cgroup cleanup, and metadata deletion.
-// It returns an error if deletion fails, but does not return result types.
-func (b *Exec) deleteCellInternal(cell intmodel.Cell) error {
-	return b.runner.DeleteCell(cell)
-}
-
 // DeleteCell deletes a cell. Always deletes all containers first.
 func (b *Exec) DeleteCell(cell intmodel.Cell) (DeleteCellResult, error) {
+	defer b.runner.Close()
 	var res DeleteCellResult
 
 	internalCell, err := b.validateAndGetCell(cell)
@@ -64,4 +58,11 @@ func (b *Exec) DeleteCell(cell intmodel.Cell) (DeleteCellResult, error) {
 	res.CgroupDeleted = true
 	res.MetadataDeleted = true
 	return res, nil
+}
+
+// deleteCellInternal handles the core cell deletion logic using runner methods directly.
+// It deletes the cell via the runner, which handles container deletion, cgroup cleanup, and metadata deletion.
+// It returns an error if deletion fails, but does not return result types.
+func (b *Exec) deleteCellInternal(cell intmodel.Cell) error {
+	return b.runner.DeleteCell(cell)
 }

@@ -48,6 +48,7 @@ type CreateSpaceResult struct {
 // The error is returned if the space name is required, the realm name is required,
 // the space cgroup does not exist, the cni network does not exist, or the space creation fails.
 func (b *Exec) CreateSpace(space intmodel.Space) (CreateSpaceResult, error) {
+	defer b.runner.Close()
 	var res CreateSpaceResult
 
 	name := strings.TrimSpace(space.Metadata.Name)

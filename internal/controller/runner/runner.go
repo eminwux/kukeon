@@ -73,6 +73,8 @@ type Runner interface {
 	PurgeStack(stack intmodel.Stack) error
 	PurgeCell(cell intmodel.Cell) error
 	PurgeContainer(realm intmodel.Realm, containerID string) error
+
+	Close() error
 }
 
 type Exec struct {
@@ -103,4 +105,20 @@ func NewRunner(ctx context.Context, logger *slog.Logger, opts Options) Runner {
 func (r *Exec) BootstrapCNI(cfgDir, cacheDir, binDir string) (cni.BootstrapReport, error) {
 	// Delegate to cni package bootstrap; empty params will default.
 	return cni.BootstrapCNI(cfgDir, cacheDir, binDir)
+}
+
+func (r *Exec) Close() error {
+	if r.ctrClient == nil {
+		return nil
+	}
+	return r.ctrClient.Close()
+}
+
+// ensureClientConnected ensures the containerd client is initialized and connected.
+// It creates a new client if needed, and reconnects if the connection was closed.
+func (r *Exec) ensureClientConnected() error {
+	if r.ctrClient == nil {
+		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
+	}
+	return r.ctrClient.Connect()
 }

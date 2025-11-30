@@ -41,6 +41,7 @@ type DeleteSpaceResult struct {
 // DeleteSpace deletes a space. If cascade is true, deletes all stacks first.
 // If force is true, skips validation of child resources.
 func (b *Exec) DeleteSpace(space intmodel.Space, force, cascade bool) (DeleteSpaceResult, error) {
+	defer b.runner.Close()
 	var res DeleteSpaceResult
 
 	name := strings.TrimSpace(space.Metadata.Name)

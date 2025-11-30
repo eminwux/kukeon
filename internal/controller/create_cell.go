@@ -61,6 +61,7 @@ type ContainerCreationOutcome struct {
 // the space name is required, the stack name is required, the cell cgroup does not exist,
 // the root container does not exist, or the cell creation fails.
 func (b *Exec) CreateCell(cell intmodel.Cell) (CreateCellResult, error) {
+	defer b.runner.Close()
 	var res CreateCellResult
 
 	name := strings.TrimSpace(cell.Metadata.Name)

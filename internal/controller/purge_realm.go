@@ -39,6 +39,7 @@ type PurgeRealmResult struct {
 // PurgeRealm purges a realm with comprehensive cleanup. If cascade is true, purges all spaces first.
 // If force is true, skips validation of child resources.
 func (b *Exec) PurgeRealm(realm intmodel.Realm, force, cascade bool) (PurgeRealmResult, error) {
+	defer b.runner.Close()
 	var result PurgeRealmResult
 
 	name := strings.TrimSpace(realm.Metadata.Name)

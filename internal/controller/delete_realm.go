@@ -34,42 +34,10 @@ type DeleteRealmResult struct {
 	ContainerdNamespaceDeleted bool
 }
 
-// deleteRealmCascade handles cascade deletion logic using runner methods directly.
-// It returns an error if deletion fails, but does not return result types.
-func (b *Exec) deleteRealmCascade(realm intmodel.Realm, force, cascade bool) error {
-	realmName := strings.TrimSpace(realm.Metadata.Name)
-
-	// If cascade is true, list and delete child resources (spaces)
-	if cascade {
-		spaces, listErr := b.runner.ListSpaces(realmName)
-		if listErr != nil {
-			return fmt.Errorf("failed to list spaces: %w", listErr)
-		}
-		for _, space := range spaces {
-			if delErr := b.deleteSpaceCascade(space, force, cascade); delErr != nil {
-				return fmt.Errorf("failed to delete space %q: %w", space.Metadata.Name, delErr)
-			}
-		}
-	} else if !force {
-		// Validate no child resources exist
-		spaces, listErr := b.runner.ListSpaces(realmName)
-		if listErr != nil {
-			return fmt.Errorf("failed to list spaces: %w", listErr)
-		}
-		if len(spaces) > 0 {
-			return fmt.Errorf("%w: realm %q has %d space(s). Use --cascade to delete them or --force to skip validation",
-				errdefs.ErrResourceHasDependencies, realmName, len(spaces))
-		}
-	}
-
-	// Delete the resource itself via runner
-	err := b.runner.DeleteRealm(realm)
-	return err
-}
-
 // DeleteRealm deletes a realm. If cascade is true, deletes all spaces first.
 // If force is true, skips validation of child resources.
 func (b *Exec) DeleteRealm(realm intmodel.Realm, force, cascade bool) (DeleteRealmResult, error) {
+	defer b.runner.Close()
 	var res DeleteRealmResult
 
 	name := strings.TrimSpace(realm.Metadata.Name)
@@ -118,4 +86,37 @@ func (b *Exec) DeleteRealm(realm intmodel.Realm, force, cascade bool) (DeleteRea
 	res.Deleted = append(res.Deleted, "metadata", "cgroup", "namespace")
 
 	return res, nil
+}
+
+// deleteRealmCascade handles cascade deletion logic using runner methods directly.
+// It returns an error if deletion fails, but does not return result types.
+func (b *Exec) deleteRealmCascade(realm intmodel.Realm, force, cascade bool) error {
+	realmName := strings.TrimSpace(realm.Metadata.Name)
+
+	// If cascade is true, list and delete child resources (spaces)
+	if cascade {
+		spaces, listErr := b.runner.ListSpaces(realmName)
+		if listErr != nil {
+			return fmt.Errorf("failed to list spaces: %w", listErr)
+		}
+		for _, space := range spaces {
+			if delErr := b.deleteSpaceCascade(space, force, cascade); delErr != nil {
+				return fmt.Errorf("failed to delete space %q: %w", space.Metadata.Name, delErr)
+			}
+		}
+	} else if !force {
+		// Validate no child resources exist
+		spaces, listErr := b.runner.ListSpaces(realmName)
+		if listErr != nil {
+			return fmt.Errorf("failed to list spaces: %w", listErr)
+		}
+		if len(spaces) > 0 {
+			return fmt.Errorf("%w: realm %q has %d space(s). Use --cascade to delete them or --force to skip validation",
+				errdefs.ErrResourceHasDependencies, realmName, len(spaces))
+		}
+	}
+
+	// Delete the resource itself via runner
+	err := b.runner.DeleteRealm(realm)
+	return err
 }

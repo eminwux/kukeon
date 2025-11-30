@@ -24,7 +24,6 @@ import (
 
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/consts"
-	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -52,14 +51,9 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 		}
 		return fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
 	}
-	// Initialize ctr client if needed
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	if err = r.ctrClient.Connect(); err != nil {
+	if err = r.ensureClientConnected(); err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	// Get realm to build cgroup spec and for namespace access
 	realmName = internalSpace.Spec.RealmName

@@ -182,14 +182,9 @@ func (r *Exec) purgeCNIForNetwork(networkName string) error {
 // findOrphanedContainers lists all containers in containerd namespace matching a pattern,
 // and returns container IDs that are not tracked in metadata.
 func (r *Exec) findOrphanedContainers(namespace, pattern string) ([]string, error) {
-	if r.ctrClient == nil {
-		r.logger.DebugContext(r.ctx, "initializing containerd client for finding orphaned containers")
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	if err := r.ctrClient.Connect(); err != nil {
+	if err := r.ensureClientConnected(); err != nil {
 		return nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	// Set namespace
 	oldNamespace := r.ctrClient.Namespace()
@@ -252,10 +247,7 @@ func (r *Exec) findCNIConfigPath(networkName string) (string, error) {
 
 // getContainerNetnsPath attempts to get the network namespace path for a container.
 func (r *Exec) getContainerNetnsPath(containerID string) (string, error) {
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	if err := r.ctrClient.Connect(); err != nil {
+	if err := r.ensureClientConnected(); err != nil {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 

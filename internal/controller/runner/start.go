@@ -83,19 +83,9 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 	// This ensures operations complete even if the parent context is canceled
 	// The logger is passed separately, so we don't need to preserve context values
 
-	// Always create a fresh client with background context to avoid cancellation issues
-	// Close any existing client first to ensure clean state
-	if r.ctrClient != nil {
-		_ = r.ctrClient.Close() // Ignore errors when closing old client
-		r.ctrClient = nil
-	}
-	r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-
-	err = r.ctrClient.Connect()
-	if err != nil {
+	if err = r.ensureClientConnected(); err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	// Get realm to access namespace
 	lookupRealm := intmodel.Realm{
@@ -362,18 +352,9 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
 		return errdefs.ErrSpaceNameRequired
 	}
 
-	// Always create a fresh client with background context to avoid cancellation issues
-	if r.ctrClient != nil {
-		_ = r.ctrClient.Close() // Ignore errors when closing old client
-		r.ctrClient = nil
-	}
-	r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-
-	err := r.ctrClient.Connect()
-	if err != nil {
+	if err := r.ensureClientConnected(); err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	// Get realm to access namespace
 	lookupRealm := intmodel.Realm{

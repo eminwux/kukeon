@@ -23,7 +23,6 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/cni"
-	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/cgroups"
@@ -51,12 +50,9 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) error {
 		realmForOps = realm
 	}
 
-	// Initialize ctr client for comprehensive cleanup
-	r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	if err = r.ctrClient.Connect(); err != nil {
+	if err = r.ensureClientConnected(); err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	// List ALL containers in namespace (even orphaned ones)
 	r.logger.DebugContext(r.ctx, "starting to find orphaned containers", "namespace", realmForOps.Spec.Namespace)

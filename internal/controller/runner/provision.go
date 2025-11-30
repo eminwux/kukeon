@@ -85,15 +85,9 @@ func (r *Exec) provisionNewRealm(realm intmodel.Realm) (intmodel.Realm, error) {
 
 func (r *Exec) createRealmContainerdNamespace(realm intmodel.Realm) error {
 	// Create realm containerd namespace
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-
-	err := r.ctrClient.Connect()
-	if err != nil {
+	if err := r.ensureClientConnected(); err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	exists, err := r.ctrClient.ExistsNamespace(realm.Spec.Namespace)
 	if err != nil {
@@ -119,13 +113,9 @@ func (r *Exec) createRealmContainerdNamespace(realm intmodel.Realm) error {
 
 func (r *Exec) ensureRealmContainerdNamespace(realm intmodel.Realm) (intmodel.Realm, error) {
 	// Ensure containerd namespace exists for the realm
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	if err := r.ctrClient.Connect(); err != nil {
+	if err := r.ensureClientConnected(); err != nil {
 		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	exists, err := r.ctrClient.ExistsNamespace(realm.Spec.Namespace)
 	if err != nil {
@@ -338,14 +328,9 @@ func (r *Exec) buildCgroupPath(spec ctr.CgroupSpec) (ctr.CgroupSpec, string, err
 // createCgroupInternal handles client initialization, connection, and cgroup creation.
 // It assumes the spec already has Group and Mountpoint set correctly.
 func (r *Exec) createCgroupInternal(spec ctr.CgroupSpec) (string, error) {
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-
-	if err := r.ctrClient.Connect(); err != nil {
+	if err := r.ensureClientConnected(); err != nil {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	if _, err := r.ctrClient.NewCgroup(spec); err != nil {
 		return "", err
@@ -535,13 +520,9 @@ func (r *Exec) ensureSpaceCgroup(space intmodel.Space) (intmodel.Space, error) {
 		return intmodel.Space{}, errdefs.ErrRealmNameRequired
 	}
 
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	if err := r.ctrClient.Connect(); err != nil {
+	if err := r.ensureClientConnected(); err != nil {
 		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	spec := cgroups.DefaultSpaceSpec(space)
 
@@ -604,13 +585,9 @@ func (r *Exec) createSpaceCgroup(space intmodel.Space) (string, error) {
 	spec := cgroups.DefaultSpaceSpec(space)
 
 	// Ensure client is initialized and connected
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	if err := r.ctrClient.Connect(); err != nil {
+	if err = r.ensureClientConnected(); err != nil {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	// Build the cgroup path
 	spec, _, err = r.buildCgroupPath(spec)
@@ -641,13 +618,9 @@ func (r *Exec) createRealmCgroup(realm intmodel.Realm) (string, error) {
 	spec := cgroups.DefaultRealmSpec(realm)
 
 	// Ensure client is initialized and connected
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	if err := r.ctrClient.Connect(); err != nil {
+	if err := r.ensureClientConnected(); err != nil {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	// Build the cgroup path
 	var err error
@@ -674,13 +647,9 @@ func (r *Exec) createRealmCgroup(realm intmodel.Realm) (string, error) {
 }
 
 func (r *Exec) ensureRealmCgroup(realm intmodel.Realm) (intmodel.Realm, error) {
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	if err := r.ctrClient.Connect(); err != nil {
+	if err := r.ensureClientConnected(); err != nil {
 		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	spec := cgroups.DefaultRealmSpec(realm)
 
@@ -774,16 +743,12 @@ func (r *Exec) createStackCgroup(stack intmodel.Stack) (string, error) {
 	spec := cgroups.DefaultStackSpec(stack)
 
 	// Ensure client is initialized and connected
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	var err error
-	if err = r.ctrClient.Connect(); err != nil {
+	if err := r.ensureClientConnected(); err != nil {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	// Build the cgroup path
+	var err error
 	spec, _, err = r.buildCgroupPath(spec)
 	if err != nil {
 		return "", err
@@ -821,13 +786,9 @@ func (r *Exec) ensureStackCgroup(stack intmodel.Stack) (intmodel.Stack, error) {
 		return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	if err = r.ctrClient.Connect(); err != nil {
+	if err = r.ensureClientConnected(); err != nil {
 		return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	spec := cgroups.DefaultStackSpec(stack)
 
@@ -911,16 +872,12 @@ func (r *Exec) createCellCgroup(cell intmodel.Cell) (string, error) {
 	spec := cgroups.DefaultCellSpec(cell)
 
 	// Ensure client is initialized and connected
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	var err error
-	if err = r.ctrClient.Connect(); err != nil {
+	if err := r.ensureClientConnected(); err != nil {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	// Build the cgroup path
+	var err error
 	spec, _, err = r.buildCgroupPath(spec)
 	if err != nil {
 		return "", err
@@ -962,13 +919,9 @@ func (r *Exec) ensureCellCgroup(cell intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	if err = r.ctrClient.Connect(); err != nil {
+	if err = r.ensureClientConnected(); err != nil {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	spec := cgroups.DefaultCellSpec(cell)
 
@@ -1040,16 +993,9 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		return nil, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
 
-	// Initialize ctr client if needed
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-
-	err := r.ctrClient.Connect()
-	if err != nil {
+	if err := r.ensureClientConnected(); err != nil {
 		return nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	// Get realm to access namespace
 	lookupRealm := intmodel.Realm{
@@ -1281,16 +1227,9 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		return nil, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
 
-	// Initialize ctr client if needed
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-
-	err := r.ctrClient.Connect()
-	if err != nil {
+	if err := r.ensureClientConnected(); err != nil {
 		return nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	// Get realm to access namespace
 	lookupRealm := intmodel.Realm{

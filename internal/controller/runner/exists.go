@@ -40,13 +40,9 @@ func (r *Exec) ExistsRealmContainerdNamespace(namespace string) (bool, error) {
 		return false, nil
 	}
 
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	if err := r.ctrClient.Connect(); err != nil {
+	if err := r.ensureClientConnected(); err != nil {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 	return r.ctrClient.ExistsNamespace(namespace)
 }
 
@@ -79,14 +75,9 @@ func (r *Exec) ExistsCellRootContainer(cell intmodel.Cell) (bool, error) {
 		return false, errdefs.ErrCellIDRequired
 	}
 
-	// Initialize ctr client if needed
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	if err = r.ctrClient.Connect(); err != nil {
+	if err = r.ensureClientConnected(); err != nil {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	// Get realm to access namespace
 	lookupRealm := intmodel.Realm{
@@ -124,14 +115,9 @@ func (r *Exec) ExistsCellRootContainer(cell intmodel.Cell) (bool, error) {
 }
 
 func (r *Exec) ExistsCgroup(doc any) (bool, error) {
-	// Initialize ctr client if needed
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	if err := r.ctrClient.Connect(); err != nil {
+	if err := r.ensureClientConnected(); err != nil {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	var spec ctr.CgroupSpec
 	var err error
