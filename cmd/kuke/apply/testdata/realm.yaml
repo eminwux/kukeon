@@ -1,0 +1,6 @@
+apiVersion: v1beta1
+kind: Realm
+metadata:
+  name: test-realm
+spec:
+  namespace: test-ns

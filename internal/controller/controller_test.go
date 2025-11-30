@@ -93,6 +93,14 @@ type fakeRunner struct {
 
 	// Close
 	CloseFn func() error
+
+	// Apply methods
+	UpdateRealmFn     func(realm intmodel.Realm) (intmodel.Realm, error)
+	UpdateSpaceFn     func(space intmodel.Space) (intmodel.Space, error)
+	UpdateStackFn     func(stack intmodel.Stack) (intmodel.Stack, error)
+	UpdateCellFn      func(cell intmodel.Cell) (intmodel.Cell, error)
+	RecreateCellFn    func(cell intmodel.Cell) (intmodel.Cell, error)
+	UpdateContainerFn func(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)
 }
 
 // Realm methods
@@ -407,6 +415,50 @@ func (f *fakeRunner) Close() error {
 		return f.CloseFn()
 	}
 	return nil
+}
+
+// Apply
+
+func (f *fakeRunner) UpdateRealm(realm intmodel.Realm) (intmodel.Realm, error) {
+	if f.UpdateRealmFn != nil {
+		return f.UpdateRealmFn(realm)
+	}
+	return intmodel.Realm{}, errors.New("unexpected call to UpdateRealm")
+}
+
+func (f *fakeRunner) UpdateSpace(space intmodel.Space) (intmodel.Space, error) {
+	if f.UpdateSpaceFn != nil {
+		return f.UpdateSpaceFn(space)
+	}
+	return intmodel.Space{}, errors.New("unexpected call to UpdateSpace")
+}
+
+func (f *fakeRunner) UpdateStack(stack intmodel.Stack) (intmodel.Stack, error) {
+	if f.UpdateStackFn != nil {
+		return f.UpdateStackFn(stack)
+	}
+	return intmodel.Stack{}, errors.New("unexpected call to UpdateStack")
+}
+
+func (f *fakeRunner) UpdateCell(cell intmodel.Cell) (intmodel.Cell, error) {
+	if f.UpdateCellFn != nil {
+		return f.UpdateCellFn(cell)
+	}
+	return intmodel.Cell{}, errors.New("unexpected call to UpdateCell")
+}
+
+func (f *fakeRunner) RecreateCell(cell intmodel.Cell) (intmodel.Cell, error) {
+	if f.RecreateCellFn != nil {
+		return f.RecreateCellFn(cell)
+	}
+	return intmodel.Cell{}, errors.New("unexpected call to RecreateCell")
+}
+
+func (f *fakeRunner) UpdateContainer(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error) {
+	if f.UpdateContainerFn != nil {
+		return f.UpdateContainerFn(cell, container)
+	}
+	return intmodel.Cell{}, errors.New("unexpected call to UpdateContainer")
 }
 
 // Test helper functions

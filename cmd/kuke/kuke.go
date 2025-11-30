@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	applycmd "github.com/eminwux/kukeon/cmd/kuke/apply"
 	autocompletecmd "github.com/eminwux/kukeon/cmd/kuke/autocomplete"
 	createcmd "github.com/eminwux/kukeon/cmd/kuke/create"
 	deletecmd "github.com/eminwux/kukeon/cmd/kuke/delete"
@@ -115,6 +116,7 @@ func NewKukeCmd() (*cobra.Command, error) {
 
 func SetupKukeCmd(rootCmd *cobra.Command) error {
 	rootCmd.AddCommand(initcmd.NewInitCmd())
+	rootCmd.AddCommand(applycmd.NewApplyCmd())
 	rootCmd.AddCommand(createcmd.NewCreateCmd())
 	rootCmd.AddCommand(getcmd.NewGetCmd())
 	rootCmd.AddCommand(deletecmd.NewDeleteCmd())

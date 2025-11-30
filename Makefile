@@ -53,7 +53,7 @@ kill:
 	(killall kukeond || true )
 
 test:
-	go test ./...
+	go test $(shell go list ./... | grep -v /e2e)
 
 e2e: test-e2e
 .PHONY: test-e2e
