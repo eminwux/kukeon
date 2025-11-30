@@ -156,5 +156,31 @@ func (b *Exec) validateAndGetCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, err
 	}
 
+	// Verify realm, space, and stack match
+	if internalCell.Spec.RealmName != realmName {
+		return intmodel.Cell{}, fmt.Errorf("cell %q not found in realm %q (found in realm %q) at run-path %q",
+			name, realmName, internalCell.Spec.RealmName, b.opts.RunPath)
+	}
+	if internalCell.Spec.SpaceName != spaceName {
+		return intmodel.Cell{}, fmt.Errorf("cell %q not found in space %q (found in space %q) at run-path %q",
+			name, spaceName, internalCell.Spec.SpaceName, b.opts.RunPath)
+	}
+	if internalCell.Spec.StackName != stackName {
+		return intmodel.Cell{}, fmt.Errorf("cell %q not found in stack %q (found in stack %q) at run-path %q",
+			name, stackName, internalCell.Spec.StackName, b.opts.RunPath)
+	}
+
+	// Check if cell cgroup exists
+	_, err = b.runner.ExistsCgroup(internalCell)
+	if err != nil {
+		return intmodel.Cell{}, fmt.Errorf("failed to check if cell cgroup exists: %w", err)
+	}
+
+	// Check if root container exists
+	_, err = b.runner.ExistsCellRootContainer(internalCell)
+	if err != nil {
+		return intmodel.Cell{}, fmt.Errorf("failed to check root container: %w", err)
+	}
+
 	return internalCell, nil
 }
