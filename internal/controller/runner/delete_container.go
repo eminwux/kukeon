@@ -101,8 +101,27 @@ func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 		return fmt.Errorf("container %q has empty ContainerdID", containerID)
 	}
 
+	// Get space for network name
+	lookupSpace := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{
+			Name: spaceName,
+		},
+		Spec: intmodel.SpaceSpec{
+			RealmName: realmName,
+		},
+	}
+	space, spaceErr := r.GetSpace(lookupSpace)
+	var networkName string
+	if spaceErr == nil {
+		networkName, _ = r.getSpaceNetworkName(space)
+	}
+
 	// Create a background context for containerd operations
 	ctrCtx := context.Background()
+
+	// Comprehensive CNI cleanup before stopping/deleting
+	netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerdID)
+	_ = r.purgeCNIForContainer(ctrCtx, containerdID, netnsPath, networkName)
 
 	// Stop the container using containerd ID
 	_, err = r.ctrClient.StopContainer(ctrCtx, containerdID, ctr.StopContainerOptions{})

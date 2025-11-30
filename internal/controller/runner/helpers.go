@@ -357,3 +357,43 @@ func wrapConversionErr(err error) error {
 	}
 	return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 }
+
+// ContainerIDMinimumParts is the minimum number of parts needed in a container ID
+// to extract the network name. Container ID format: realm-space-cell-container
+// We need at least realm and space to form the network name: realm-space.
+const ContainerIDMinimumParts = 2
+
+// processOrphanedContainers processes a list of orphaned containers by stopping,
+// deleting them, and purging their CNI resources.
+func (r *Exec) processOrphanedContainers(ctx context.Context, containers []string) {
+	if len(containers) == 0 {
+		return
+	}
+
+	r.logger.InfoContext(ctx, "processing orphaned containers for deletion", "count", len(containers))
+	ctrCtx := context.Background()
+	for i, containerID := range containers {
+		r.logger.DebugContext(ctx, "processing container", "index", i+1, "total", len(containers), "id", containerID)
+		// Try to delete container
+		r.logger.DebugContext(ctx, "stopping container", "id", containerID)
+		_, _ = r.ctrClient.StopContainer(ctrCtx, containerID, ctr.StopContainerOptions{})
+		r.logger.DebugContext(ctx, "deleting container", "id", containerID)
+		_ = r.ctrClient.DeleteContainer(ctrCtx, containerID, ctr.ContainerDeleteOptions{
+			SnapshotCleanup: true,
+		})
+
+		// Get netns and purge CNI
+		r.logger.DebugContext(ctx, "getting container netns path", "id", containerID)
+		netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
+		// Try to determine network name from container ID pattern
+		// Container ID format: realm-space-cell-container
+		parts := strings.Split(containerID, "-")
+		if len(parts) >= ContainerIDMinimumParts {
+			networkName := fmt.Sprintf("%s-%s", parts[0], parts[1])
+			r.logger.DebugContext(ctx, "purging CNI resources for container", "id", containerID, "network", networkName)
+			_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
+		}
+		r.logger.DebugContext(ctx, "completed processing container", "id", containerID)
+	}
+	r.logger.InfoContext(ctx, "completed processing all orphaned containers", "count", len(containers))
+}

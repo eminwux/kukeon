@@ -711,14 +711,29 @@ func (r *Exec) ensureRealmCgroup(realm intmodel.Realm) (intmodel.Realm, error) {
 	}
 
 	// Update internal model's CgroupPath from external model after ensureCgroupInternal
+	// This ensures realm.Status.CgroupPath matches what was set/backfilled in ensureCgroupInternal
 	realm.Status.CgroupPath = realmDoc.Status.CgroupPath
 
 	// Always update metadata after ensureCgroupInternal to ensure CgroupPath is saved
-	// (closure may not have been called if cgroup already existed with path)
+	// This is critical because:
+	// 1. If cgroup was created, closure already saved it, but we ensure it's saved with current realm
+	// 2. If cgroup existed and path was backfilled, closure saved it, but we ensure consistency
+	// 3. If cgroup existed with path already set, we ensure metadata matches
 	if realmDoc.Status.CgroupPath != "" {
 		if err := r.UpdateRealmMetadata(realm); err != nil {
 			return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateRealmMetadata, err)
 		}
+	} else {
+		// If cgroup path is still empty after ensureCgroupInternal, log warning
+		// This should not happen - ensureCgroupInternal should have created cgroup or backfilled path
+		r.logger.WarnContext(
+			r.ctx,
+			"realm cgroup path is empty after ensureCgroupInternal",
+			"realm",
+			realm.Metadata.Name,
+			"spec_group",
+			spec.Group,
+		)
 	}
 
 	return realm, nil

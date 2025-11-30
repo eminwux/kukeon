@@ -27,10 +27,12 @@ import (
 	apitypes "github.com/containerd/containerd/api/types"
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/core/containers"
+	"github.com/containerd/containerd/v2/core/leases"
 	"github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/errdefs"
+	"github.com/containerd/platforms"
 	"github.com/containerd/typeurl/v2"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
@@ -407,7 +409,38 @@ func (c *client) CreateContainer(ctx context.Context, spec ContainerSpec) (conta
 	image, err := c.cClient.GetImage(nsCtx, spec.Image)
 	if err != nil {
 		c.logger.DebugContext(ctx, "image not found locally, pulling", "image", spec.Image)
-		image, err = c.cClient.Pull(nsCtx, spec.Image)
+		// Create a lease for the pull operation to avoid lease management issues
+		// The lease will be automatically cleaned up when the context is done
+		leaseManager := c.cClient.LeasesService()
+		lease, leaseErr := leaseManager.Create(
+			nsCtx,
+			leases.WithID(fmt.Sprintf("pull-%s-%d", spec.Image, time.Now().UnixNano())),
+		)
+		if leaseErr != nil {
+			c.logger.WarnContext(
+				ctx,
+				"failed to create lease for image pull, continuing without lease",
+				"image",
+				spec.Image,
+				"err",
+				formatError(leaseErr),
+			)
+			// Continue without lease - some containerd setups may not require it
+		} else {
+			// Use lease context for pull
+			leaseCtx := leases.WithLease(nsCtx, lease.ID)
+			defer func() {
+				// Clean up lease after pull
+				if deleteErr := leaseManager.Delete(nsCtx, lease); deleteErr != nil {
+					c.logger.WarnContext(ctx, "failed to delete lease after image pull", "lease", lease.ID, "err", formatError(deleteErr))
+				}
+			}()
+			nsCtx = leaseCtx
+		}
+		// Use default platform for pull
+		// The image will be unpacked separately after pull
+		platform := platforms.DefaultSpec()
+		image, err = c.cClient.Pull(nsCtx, spec.Image, containerd.WithPlatform(platforms.Format(platform)))
 		if err != nil {
 			c.logger.ErrorContext(ctx, "failed to pull image", "image", spec.Image, "err", formatError(err))
 			return nil, fmt.Errorf("failed to pull image %s: %w", spec.Image, err)
@@ -775,6 +808,18 @@ func (c *client) StopContainer(
 			return nil, fmt.Errorf("task %s is still running after stop attempt", id)
 		}
 	}
+
+	// Delete the stopped task - stopped tasks are cleaned up, and StartContainer
+	// will create a new task when starting again
+	c.logger.DebugContext(ctx, "deleting stopped task", "id", id)
+	_, err = task.Delete(nsCtx, containerd.WithProcessKill)
+	if err != nil {
+		c.logger.WarnContext(ctx, "failed to delete stopped task", "id", id, "err", formatError(err))
+		// Continue anyway - task is stopped even if deletion failed
+	} else {
+		c.logger.DebugContext(ctx, "deleted stopped task", "id", id)
+	}
+	c.dropTask(id)
 
 	return &exitStatus, nil
 }

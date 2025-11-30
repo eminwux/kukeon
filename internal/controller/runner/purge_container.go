@@ -74,7 +74,7 @@ func (r *Exec) PurgeContainer(realm intmodel.Realm, containerID string) error {
 	// Try to determine network name from container ID
 	parts := strings.Split(containerID, "-")
 	networkName := ""
-	if len(parts) >= 2 {
+	if len(parts) >= ContainerIDMinimumParts {
 		networkName = fmt.Sprintf("%s-%s", parts[0], parts[1])
 	}
 

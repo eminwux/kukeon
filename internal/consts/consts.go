@@ -19,6 +19,8 @@ package consts
 const (
 	KukeonCgroupRoot = "/kukeon"
 
+	CgroupFilesystemPath = "/sys/fs/cgroup"
+
 	KukeonMetadataFile = "metadata.json"
 
 	KukeonRealmName      = "default"

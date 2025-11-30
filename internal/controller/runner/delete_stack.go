@@ -17,8 +17,10 @@
 package runner
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/ctr"
@@ -61,16 +63,65 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 	}
 	defer r.ctrClient.Close()
 
+	// Get realm and space for namespace and network access
+	lookupRealm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: internalStack.Spec.RealmName,
+		},
+	}
+	internalRealm, realmErr := r.GetRealm(lookupRealm)
+	if realmErr == nil {
+		// Set namespace for container operations
+		r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
+
+		// Get space for network name
+		lookupSpace := intmodel.Space{
+			Metadata: intmodel.SpaceMetadata{
+				Name: internalStack.Spec.SpaceName,
+			},
+			Spec: intmodel.SpaceSpec{
+				RealmName: internalStack.Spec.RealmName,
+			},
+		}
+		internalSpace, spaceErr := r.GetSpace(lookupSpace)
+		if spaceErr == nil {
+			networkName, _ := r.getSpaceNetworkName(internalSpace)
+
+			// Find containers by pattern and purge CNI for each
+			pattern := fmt.Sprintf(
+				"%s-%s-%s",
+				internalStack.Spec.RealmName,
+				internalStack.Spec.SpaceName,
+				internalStack.Metadata.Name,
+			)
+			containers, findErr := r.findContainersByPattern(r.ctx, internalRealm.Spec.Namespace, pattern)
+			if findErr == nil {
+				ctrCtx := context.Background()
+				for _, containerID := range containers {
+					netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
+					_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
+				}
+			}
+		}
+	}
+
 	// Delete stack cgroup
-	spec := cgroups.DefaultStackSpec(internalStack)
+	// Use the stored CgroupPath from stack status (includes full hierarchy path)
+	// instead of rebuilding from DefaultStackSpec which only has the relative path
 	mountpoint := r.ctrClient.GetCgroupMountpoint()
-	err = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
+	cgroupGroup := internalStack.Status.CgroupPath
+	if cgroupGroup == "" {
+		// Fallback to DefaultStackSpec if CgroupPath is not set (for backwards compatibility)
+		spec := cgroups.DefaultStackSpec(internalStack)
+		cgroupGroup = spec.Group
+	}
+	err = r.ctrClient.DeleteCgroup(cgroupGroup, mountpoint)
 	if err != nil {
-		r.logger.WarnContext(r.ctx, "failed to delete stack cgroup", "cgroup", spec.Group, "error", err)
+		r.logger.WarnContext(r.ctx, "failed to delete stack cgroup", "cgroup", cgroupGroup, "error", err)
 		// Continue with metadata deletion
 	}
 
-	// Delete stack metadata
+	// Delete stack metadata file
 	metadataFilePath := fs.StackMetadataPath(
 		r.opts.RunPath,
 		internalStack.Spec.RealmName,
@@ -80,6 +131,15 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 	if err = metadata.DeleteMetadata(r.ctx, r.logger, metadataFilePath); err != nil {
 		return fmt.Errorf("%w: failed to delete stack metadata: %w", errdefs.ErrDeleteStack, err)
 	}
+
+	// Remove metadata directory completely
+	metadataRunPath := fs.StackMetadataDir(
+		r.opts.RunPath,
+		internalStack.Spec.RealmName,
+		internalStack.Spec.SpaceName,
+		internalStack.Metadata.Name,
+	)
+	_ = os.RemoveAll(metadataRunPath)
 
 	return nil
 }

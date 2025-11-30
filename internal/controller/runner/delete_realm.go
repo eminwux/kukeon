@@ -17,10 +17,13 @@
 package runner
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
@@ -53,10 +56,66 @@ func (r *Exec) DeleteRealm(realm intmodel.Realm) error {
 	defer r.ctrClient.Close()
 
 	// Delete realm cgroup
-	spec := cgroups.DefaultRealmSpec(internalRealm)
+	// Use the stored CgroupPath from realm status (includes full hierarchy path)
+	// instead of rebuilding from DefaultRealmSpec which only has the relative path
 	mountpoint := r.ctrClient.GetCgroupMountpoint()
-	if err = r.ctrClient.DeleteCgroup(spec.Group, mountpoint); err != nil {
+	cgroupGroup := internalRealm.Status.CgroupPath
+	if cgroupGroup == "" {
+		// Fallback to DefaultRealmSpec if CgroupPath is not set (for backwards compatibility)
+		spec := cgroups.DefaultRealmSpec(internalRealm)
+		cgroupGroup = spec.Group
+	}
+	if err = r.ctrClient.DeleteCgroup(cgroupGroup, mountpoint); err != nil {
 		return fmt.Errorf("%w: failed to delete realm cgroup: %w", errdefs.ErrDeleteRealm, err)
+	}
+
+	// Clean up all namespace resources (images, snapshots, blobs) before deleting namespace
+	// Namespace must be empty before deletion
+	ctrCtx := context.Background()
+	if err = r.ctrClient.CleanupNamespaceResources(ctrCtx, internalRealm.Spec.Namespace, "overlayfs"); err != nil {
+		r.logger.WarnContext(
+			r.ctx,
+			"failed to cleanup namespace resources",
+			"namespace",
+			internalRealm.Spec.Namespace,
+			"error",
+			err,
+		)
+		// Continue with namespace deletion attempt anyway
+	}
+
+	// Find and clean up orphaned containers before deleting namespace
+	r.logger.DebugContext(r.ctx, "starting to find orphaned containers", "namespace", internalRealm.Spec.Namespace)
+	containers, err := r.findOrphanedContainers(ctrCtx, internalRealm.Spec.Namespace, "")
+	if err != nil {
+		r.logger.WarnContext(r.ctx, "failed to find orphaned containers", "error", err)
+	} else {
+		r.logger.DebugContext(r.ctx, "found orphaned containers", "count", len(containers))
+		r.processOrphanedContainers(ctrCtx, containers)
+	}
+
+	// Purge all CNI networks for this realm
+	// Network names follow the pattern: {realmName}-{spaceName}
+	// Scan /var/lib/cni/networks/ for all networks starting with realm name
+	cniNetworksDir := cni.CNINetworksDir
+	entries, err := os.ReadDir(cniNetworksDir)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			r.logger.WarnContext(r.ctx, "failed to read CNI networks directory", "dir", cniNetworksDir, "error", err)
+		}
+	} else {
+		realmPrefix := internalRealm.Metadata.Name + "-"
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			networkName := entry.Name()
+			// Check if network name starts with realm name prefix
+			if strings.HasPrefix(networkName, realmPrefix) {
+				r.logger.DebugContext(r.ctx, "purging CNI network for realm", "realm", internalRealm.Metadata.Name, "network", networkName)
+				_ = r.purgeCNIForNetwork(r.ctx, networkName)
+			}
+		}
 	}
 
 	// Delete containerd namespace
@@ -64,7 +123,7 @@ func (r *Exec) DeleteRealm(realm intmodel.Realm) error {
 		return fmt.Errorf("%w: failed to delete containerd namespace: %w", errdefs.ErrDeleteRealm, err)
 	}
 
-	// Delete realm metadata
+	// Delete realm metadata file
 	metadataFilePath := fs.RealmMetadataPath(r.opts.RunPath, internalRealm.Metadata.Name)
 	if err = metadata.DeleteMetadata(r.ctx, r.logger, metadataFilePath); err != nil {
 		return fmt.Errorf("%w: failed to delete realm metadata: %w", errdefs.ErrDeleteRealm, err)
