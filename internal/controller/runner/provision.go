@@ -17,7 +17,6 @@
 package runner
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -1041,15 +1040,9 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		return nil, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
 
-	// Create a background context for containerd operations
-	// This ensures operations complete even if the parent context is canceled
-	// The logger is passed separately, so we don't need to preserve context values
-	ctrCtx := context.Background()
-
 	// Initialize ctr client if needed
-	// Use background context for client creation to avoid cancellation issues
 	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(context.Background(), r.logger, r.opts.ContainerdSocket)
+		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
 
 	err := r.ctrClient.Connect()
@@ -1168,7 +1161,7 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 			rootLabels := buildRootContainerLabels(*cell)
 			ctrContainerSpec := ctrutil.BuildRootContainerSpec(containerSpec, rootLabels)
 
-			createdContainer, createErr = r.ctrClient.CreateContainer(ctrCtx, ctrContainerSpec)
+			createdContainer, createErr = r.ctrClient.CreateContainer(r.ctx, ctrContainerSpec)
 			if createErr != nil {
 				logFields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 				logFields = append(
@@ -1220,7 +1213,7 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 			}
 
 			_, createErr = r.ctrClient.CreateContainerFromSpec(
-				ctrCtx,
+				r.ctx,
 				containerSpec,
 			)
 			if createErr != nil {
@@ -1283,15 +1276,9 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		return nil, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
 
-	// Create a background context for containerd operations
-	// This ensures operations complete even if the parent context is canceled
-	// The logger is passed separately, so we don't need to preserve context values
-	ctrCtx := context.Background()
-
 	// Initialize ctr client if needed
-	// Use background context for client creation to avoid cancellation issues
 	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(context.Background(), r.logger, r.opts.ContainerdSocket)
+		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
 
 	err := r.ctrClient.Connect()
@@ -1324,7 +1311,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 	var container containerd.Container
 
 	// Check if container exists
-	exists, err := r.ctrClient.ExistsContainer(ctrCtx, containerID)
+	exists, err := r.ctrClient.ExistsContainer(r.ctx, containerID)
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 		fields = append(fields, "space", spaceName, "realm", realmName, "err", fmt.Sprintf("%v", err))
@@ -1339,7 +1326,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 	if exists {
 		// Container exists, load it but continue to process other containers
 		var loadErr error
-		container, loadErr = r.ctrClient.GetContainer(ctrCtx, containerID)
+		container, loadErr = r.ctrClient.GetContainer(r.ctx, containerID)
 		if loadErr != nil {
 			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 			fields = append(fields, "space", spaceName, "realm", realmName, "err", fmt.Sprintf("%v", loadErr))
@@ -1402,7 +1389,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		containerSpec := ctrutil.BuildRootContainerSpec(rootContainerSpec, rootLabels)
 
 		var createErr error
-		container, createErr = r.ctrClient.CreateContainer(ctrCtx, containerSpec)
+		container, createErr = r.ctrClient.CreateContainer(r.ctx, containerSpec)
 		if createErr != nil {
 			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 			fields = append(
@@ -1536,7 +1523,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		)
 
 		// Use containerd ID for containerd operations
-		exists, err = r.ctrClient.ExistsContainer(ctrCtx, containerdID)
+		exists, err = r.ctrClient.ExistsContainer(r.ctx, containerdID)
 		if err != nil {
 			// Check if the error indicates the container doesn't exist
 			// In that case, treat it as "doesn't exist" (false) rather than a fatal error
@@ -1623,7 +1610,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 			)
 
 			createdContainer, containerCreateErr := r.ctrClient.CreateContainerFromSpec(
-				ctrCtx,
+				r.ctx,
 				containerSpec,
 			)
 			if containerCreateErr != nil {

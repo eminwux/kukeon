@@ -17,7 +17,6 @@
 package runner
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -89,15 +88,12 @@ func (r *Exec) KillCell(cell intmodel.Cell) error {
 		return fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
 
-	// Create a background context for containerd operations
-	ctrCtx := context.Background()
-
-	// Always create a fresh client with background context to avoid cancellation issues
+	// Always create a fresh client
 	if r.ctrClient != nil {
 		_ = r.ctrClient.Close() // Ignore errors when closing old client
 		r.ctrClient = nil
 	}
-	r.ctrClient = ctr.NewClient(context.Background(), r.logger, r.opts.ContainerdSocket)
+	r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 
 	err = r.ctrClient.Connect()
 	if err != nil {
@@ -132,7 +128,7 @@ func (r *Exec) KillCell(cell intmodel.Cell) error {
 		}
 
 		// Use container name with UUID for containerd operations
-		err = r.killContainerTask(ctrCtx, containerID, internalRealm.Spec.Namespace)
+		err = r.killContainerTask(containerID, internalRealm.Spec.Namespace)
 		if err != nil {
 			// Log warning but continue with other containers
 			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
@@ -163,7 +159,7 @@ func (r *Exec) KillCell(cell intmodel.Cell) error {
 
 	// Detach root container from CNI network
 	r.detachRootContainerFromCNI(
-		ctrCtx,
+		r.ctx,
 		rootContainerID,
 		cniConfigPath,
 		cellID,
@@ -174,7 +170,7 @@ func (r *Exec) KillCell(cell intmodel.Cell) error {
 	)
 
 	// Kill root container
-	err = r.killContainerTask(ctrCtx, rootContainerID, internalRealm.Spec.Namespace)
+	err = r.killContainerTask(rootContainerID, internalRealm.Spec.Namespace)
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
 		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
@@ -224,15 +220,12 @@ func (r *Exec) KillContainer(cell intmodel.Cell, containerID string) error {
 		return errdefs.ErrSpaceNameRequired
 	}
 
-	// Create a background context for containerd operations
-	ctrCtx := context.Background()
-
-	// Always create a fresh client with background context to avoid cancellation issues
+	// Always create a fresh client
 	if r.ctrClient != nil {
 		_ = r.ctrClient.Close() // Ignore errors when closing old client
 		r.ctrClient = nil
 	}
-	r.ctrClient = ctr.NewClient(context.Background(), r.logger, r.opts.ContainerdSocket)
+	r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 
 	err := r.ctrClient.Connect()
 	if err != nil {
@@ -274,7 +267,7 @@ func (r *Exec) KillContainer(cell intmodel.Cell, containerID string) error {
 	}
 
 	// Use containerd ID for containerd operations
-	err = r.killContainerTask(ctrCtx, containerdID, internalRealm.Spec.Namespace)
+	err = r.killContainerTask(containerdID, internalRealm.Spec.Namespace)
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 		fields = append(

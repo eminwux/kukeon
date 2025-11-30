@@ -17,7 +17,6 @@
 package runner
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -83,7 +82,6 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 	// Create a background context for containerd operations
 	// This ensures operations complete even if the parent context is canceled
 	// The logger is passed separately, so we don't need to preserve context values
-	ctrCtx := context.Background()
 
 	// Always create a fresh client with background context to avoid cancellation issues
 	// Close any existing client first to ensure clean state
@@ -91,7 +89,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 		_ = r.ctrClient.Close() // Ignore errors when closing old client
 		r.ctrClient = nil
 	}
-	r.ctrClient = ctr.NewClient(context.Background(), r.logger, r.opts.ContainerdSocket)
+	r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 
 	err = r.ctrClient.Connect()
 	if err != nil {
@@ -125,7 +123,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 	}
 
 	// Start root container
-	rootTask, err := r.ctrClient.StartContainer(ctrCtx, ctr.ContainerSpec{ID: containerID}, ctr.TaskSpec{})
+	rootTask, err := r.ctrClient.StartContainer(r.ctx, ctr.ContainerSpec{ID: containerID}, ctr.TaskSpec{})
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
@@ -216,7 +214,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 	}
 
 	netnsPath := namespacePaths.Net
-	if addErr := cniMgr.AddContainerToNetwork(ctrCtx, containerID, netnsPath); addErr != nil {
+	if addErr := cniMgr.AddContainerToNetwork(r.ctx, containerID, netnsPath); addErr != nil {
 		// Check if the error indicates the container is already attached to the network
 		// This can happen when the task was already running from a previous start
 		errMsg := addErr.Error()
@@ -308,7 +306,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 			namespacePaths,
 		)
 
-		_, err = r.ctrClient.StartContainer(ctrCtx, specWithNamespaces, ctr.TaskSpec{})
+		_, err = r.ctrClient.StartContainer(r.ctx, specWithNamespaces, ctr.TaskSpec{})
 		if err != nil {
 			fields := appendCellLogFields([]any{"id", ctrContainerID}, cellID, cellName)
 			fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
@@ -359,15 +357,12 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
 		return errdefs.ErrSpaceNameRequired
 	}
 
-	// Create a background context for containerd operations
-	ctrCtx := context.Background()
-
 	// Always create a fresh client with background context to avoid cancellation issues
 	if r.ctrClient != nil {
 		_ = r.ctrClient.Close() // Ignore errors when closing old client
 		r.ctrClient = nil
 	}
-	r.ctrClient = ctr.NewClient(context.Background(), r.logger, r.opts.ContainerdSocket)
+	r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 
 	err := r.ctrClient.Connect()
 	if err != nil {
@@ -414,7 +409,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
 	}
 
 	// Use containerd ID for containerd operations
-	_, err = r.ctrClient.StartContainer(ctrCtx, ctr.ContainerSpec{ID: containerdID}, ctr.TaskSpec{})
+	_, err = r.ctrClient.StartContainer(r.ctx, ctr.ContainerSpec{ID: containerdID}, ctr.TaskSpec{})
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 		fields = append(
