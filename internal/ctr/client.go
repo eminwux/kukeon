@@ -30,20 +30,22 @@ import (
 )
 
 type client struct {
-	ctx                  context.Context
-	logger               *slog.Logger
-	socket               string
-	cClient              *containerd.Client
-	namespace            string
-	namespaceMu          sync.RWMutex
-	cgroups              map[string]*cgroup2.Manager
-	containersMu         sync.RWMutex
-	containers           map[string]containerd.Container
-	tasksMu              sync.RWMutex
-	tasks                map[string]containerd.Task
-	cgroupMountpointOnce sync.Once
-	cgroupMountpoint     string
-	cgroupMountpointErr  error
+	ctx                   context.Context
+	logger                *slog.Logger
+	socket                string
+	cClient               *containerd.Client
+	namespace             string
+	namespaceMu           sync.RWMutex
+	registryCredentials   []RegistryCredentials
+	registryCredentialsMu sync.RWMutex
+	cgroups               map[string]*cgroup2.Manager
+	containersMu          sync.RWMutex
+	containers            map[string]containerd.Container
+	tasksMu               sync.RWMutex
+	tasks                 map[string]containerd.Task
+	cgroupMountpointOnce  sync.Once
+	cgroupMountpoint      string
+	cgroupMountpointErr   error
 }
 
 type Client interface {
@@ -58,6 +60,8 @@ type Client interface {
 	GetCurrentCgroupPath() (string, error)
 	CgroupPath(group, mountpoint string) (string, error)
 	SetNamespace(namespace string)
+	SetNamespaceWithCredentials(namespace string, creds []RegistryCredentials)
+	GetRegistryCredentials() []RegistryCredentials
 	Namespace() string
 	CreateContainer(ctx context.Context, spec ContainerSpec) (containerd.Container, error)
 	GetContainer(ctx context.Context, id string) (containerd.Container, error)
