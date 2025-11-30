@@ -35,6 +35,7 @@ type DeleteContainerResult struct {
 
 // DeleteContainer deletes a single container. Cascade flag is not applicable.
 func (b *Exec) DeleteContainer(container intmodel.Container) (DeleteContainerResult, error) {
+	defer b.runner.Close()
 	var res DeleteContainerResult
 
 	name := strings.TrimSpace(container.Metadata.Name)

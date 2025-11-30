@@ -34,6 +34,7 @@ type GetStackResult struct {
 
 // GetStack retrieves a single stack and reports its current state.
 func (b *Exec) GetStack(stack intmodel.Stack) (GetStackResult, error) {
+	defer b.runner.Close()
 	var res GetStackResult
 
 	name := strings.TrimSpace(stack.Metadata.Name)
@@ -81,5 +82,6 @@ func (b *Exec) GetStack(stack intmodel.Stack) (GetStackResult, error) {
 
 // ListStacks lists all stacks, optionally filtered by realm and/or space.
 func (b *Exec) ListStacks(realmName, spaceName string) ([]intmodel.Stack, error) {
+	defer b.runner.Close()
 	return b.runner.ListStacks(realmName, spaceName)
 }

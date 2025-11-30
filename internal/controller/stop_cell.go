@@ -30,6 +30,7 @@ type StopCellResult struct {
 
 // StopCell stops all containers in a cell and updates the cell metadata state.
 func (b *Exec) StopCell(cell intmodel.Cell) (StopCellResult, error) {
+	defer b.runner.Close()
 	var result StopCellResult
 
 	internalCell, err := b.validateAndGetCell(cell)

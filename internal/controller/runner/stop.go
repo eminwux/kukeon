@@ -89,18 +89,9 @@ func (r *Exec) StopCell(cell intmodel.Cell) error {
 		return fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
 
-	// Always create a fresh client
-	if r.ctrClient != nil {
-		_ = r.ctrClient.Close() // Ignore errors when closing old client
-		r.ctrClient = nil
-	}
-	r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-
-	err = r.ctrClient.Connect()
-	if err != nil {
+	if err = r.ensureClientConnected(); err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	// Get realm to access namespace
 	lookupRealm := intmodel.Realm{
@@ -285,18 +276,9 @@ func (r *Exec) StopContainer(cell intmodel.Cell, containerID string) error {
 		return errdefs.ErrSpaceNameRequired
 	}
 
-	// Always create a fresh client
-	if r.ctrClient != nil {
-		_ = r.ctrClient.Close() // Ignore errors when closing old client
-		r.ctrClient = nil
-	}
-	r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-
-	err := r.ctrClient.Connect()
-	if err != nil {
+	if err := r.ensureClientConnected(); err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	// Get realm to access namespace
 	lookupRealm := intmodel.Realm{

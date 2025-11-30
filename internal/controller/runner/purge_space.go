@@ -22,7 +22,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/cgroups"
@@ -81,11 +80,7 @@ func (r *Exec) PurgeSpace(space intmodel.Space) error {
 	}
 
 	// Find all containers in space
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	if err = r.ctrClient.Connect(); err == nil {
-		defer r.ctrClient.Close()
+	if err = r.ensureClientConnected(); err == nil {
 		r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
 
 		pattern := fmt.Sprintf("%s-%s", spaceForOps.Spec.RealmName, spaceForOps.Metadata.Name)

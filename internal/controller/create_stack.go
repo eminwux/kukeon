@@ -45,6 +45,7 @@ type CreateStackResult struct {
 // The error is returned if the stack name is required, the realm name is required,
 // the space name is required, the stack cgroup does not exist, or the stack creation fails.
 func (b *Exec) CreateStack(stack intmodel.Stack) (CreateStackResult, error) {
+	defer b.runner.Close()
 	var res CreateStackResult
 
 	name := strings.TrimSpace(stack.Metadata.Name)

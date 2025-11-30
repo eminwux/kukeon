@@ -20,14 +20,13 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
 func (r *Exec) CreateCell(cell intmodel.Cell) (intmodel.Cell, error) {
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
+	if err := r.ensureClientConnected(); err != nil {
+		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
 	// Get existing cell (returns internal model)

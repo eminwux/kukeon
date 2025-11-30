@@ -35,6 +35,7 @@ type GetCellResult struct {
 
 // GetCell retrieves a single cell and reports its current state.
 func (b *Exec) GetCell(cell intmodel.Cell) (GetCellResult, error) {
+	defer b.runner.Close()
 	var res GetCellResult
 
 	name := strings.TrimSpace(cell.Metadata.Name)
@@ -104,6 +105,7 @@ func (b *Exec) GetCell(cell intmodel.Cell) (GetCellResult, error) {
 
 // ListCells lists all cells, optionally filtered by realm, space, and/or stack.
 func (b *Exec) ListCells(realmName, spaceName, stackName string) ([]intmodel.Cell, error) {
+	defer b.runner.Close()
 	return b.runner.ListCells(realmName, spaceName, stackName)
 }
 

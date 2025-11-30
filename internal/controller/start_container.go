@@ -33,6 +33,7 @@ type StartContainerResult struct {
 
 // StartContainer starts a specific container in a cell and updates the cell metadata.
 func (b *Exec) StartContainer(container intmodel.Container) (StartContainerResult, error) {
+	defer b.runner.Close()
 	var res StartContainerResult
 
 	name := strings.TrimSpace(container.Metadata.Name)

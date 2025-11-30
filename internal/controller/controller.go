@@ -98,6 +98,7 @@ func NewControllerExecForTesting(ctx context.Context, logger *slog.Logger, opts 
 }
 
 func (b *Exec) Bootstrap() (BootstrapReport, error) {
+	defer b.runner.Close()
 	b.logger.DebugContext(b.ctx, "bootstrapping kukeon", "options", b.opts)
 
 	var err error

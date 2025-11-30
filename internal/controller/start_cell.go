@@ -30,6 +30,7 @@ type StartCellResult struct {
 
 // StartCell starts all containers in a cell and updates the cell metadata state.
 func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
+	defer b.runner.Close()
 	var res StartCellResult
 
 	internalCell, err := b.validateAndGetCell(cell)

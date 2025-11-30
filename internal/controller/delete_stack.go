@@ -41,6 +41,7 @@ type DeleteStackResult struct {
 // DeleteStack deletes a stack. If cascade is true, deletes all cells first.
 // If force is true, skips validation of child resources.
 func (b *Exec) DeleteStack(stack intmodel.Stack, force, cascade bool) (DeleteStackResult, error) {
+	defer b.runner.Close()
 	var res DeleteStackResult
 
 	name := strings.TrimSpace(stack.Metadata.Name)

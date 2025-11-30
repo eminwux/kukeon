@@ -90,6 +90,9 @@ type fakeRunner struct {
 
 	// Bootstrap
 	BootstrapCNIFn func(cfgDir, cacheDir, binDir string) (cni.BootstrapReport, error)
+
+	// Close
+	CloseFn func() error
 }
 
 // Realm methods
@@ -395,6 +398,15 @@ func (f *fakeRunner) BootstrapCNI(cfgDir, cacheDir, binDir string) (cni.Bootstra
 		return f.BootstrapCNIFn(cfgDir, cacheDir, binDir)
 	}
 	return cni.BootstrapReport{}, errors.New("unexpected call to BootstrapCNI")
+}
+
+// Close
+
+func (f *fakeRunner) Close() error {
+	if f.CloseFn != nil {
+		return f.CloseFn()
+	}
+	return nil
 }
 
 // Test helper functions

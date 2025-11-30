@@ -35,6 +35,7 @@ type GetRealmResult struct {
 
 // GetRealm retrieves a single realm and reports its current state.
 func (b *Exec) GetRealm(realm intmodel.Realm) (GetRealmResult, error) {
+	defer b.runner.Close()
 	var res GetRealmResult
 
 	name := strings.TrimSpace(realm.Metadata.Name)
@@ -82,5 +83,6 @@ func (b *Exec) GetRealm(realm intmodel.Realm) (GetRealmResult, error) {
 
 // ListRealms lists all realms.
 func (b *Exec) ListRealms() ([]intmodel.Realm, error) {
+	defer b.runner.Close()
 	return b.runner.ListRealms()
 }

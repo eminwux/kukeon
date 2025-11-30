@@ -41,6 +41,7 @@ type PurgeCellResult struct {
 // PurgeCell purges a cell with comprehensive cleanup. Always purges all containers first.
 // If force is true, skips validation (currently unused but recorded for auditing).
 func (b *Exec) PurgeCell(cell intmodel.Cell, force, cascade bool) (PurgeCellResult, error) {
+	defer b.runner.Close()
 	var result PurgeCellResult
 
 	name := strings.TrimSpace(cell.Metadata.Name)

@@ -35,6 +35,7 @@ type GetSpaceResult struct {
 
 // GetSpace retrieves a single space and reports its current state.
 func (b *Exec) GetSpace(space intmodel.Space) (GetSpaceResult, error) {
+	defer b.runner.Close()
 	var res GetSpaceResult
 
 	name := strings.TrimSpace(space.Metadata.Name)
@@ -84,5 +85,6 @@ func (b *Exec) GetSpace(space intmodel.Space) (GetSpaceResult, error) {
 
 // ListSpaces lists all spaces, optionally filtered by realm.
 func (b *Exec) ListSpaces(realmName string) ([]intmodel.Space, error) {
+	defer b.runner.Close()
 	return b.runner.ListSpaces(realmName)
 }

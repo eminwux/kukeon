@@ -34,6 +34,7 @@ type GetContainerResult struct {
 
 // GetContainer retrieves a single container and reports its current state.
 func (b *Exec) GetContainer(container intmodel.Container) (GetContainerResult, error) {
+	defer b.runner.Close()
 	var res GetContainerResult
 
 	name := strings.TrimSpace(container.Metadata.Name)
@@ -118,5 +119,6 @@ func (b *Exec) GetContainer(container intmodel.Container) (GetContainerResult, e
 
 // ListContainers lists all containers, optionally filtered by realm, space, stack, and/or cell.
 func (b *Exec) ListContainers(realmName, spaceName, stackName, cellName string) ([]intmodel.ContainerSpec, error) {
+	defer b.runner.Close()
 	return b.runner.ListContainers(realmName, spaceName, stackName, cellName)
 }

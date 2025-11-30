@@ -38,6 +38,7 @@ type CreateContainerResult struct {
 }
 
 func (b *Exec) CreateContainer(container intmodel.Container) (CreateContainerResult, error) {
+	defer b.runner.Close()
 	var res CreateContainerResult
 
 	containerName := strings.TrimSpace(container.Metadata.Name)

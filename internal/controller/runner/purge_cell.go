@@ -22,7 +22,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/cgroups"
@@ -68,14 +67,9 @@ func (r *Exec) PurgeCell(cell intmodel.Cell) error {
 		cellForOps = cell
 	}
 
-	// Initialize ctr client if needed
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	if err = r.ctrClient.Connect(); err != nil {
+	if err = r.ensureClientConnected(); err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	// Get realm to access namespace
 	lookupRealm := intmodel.Realm{

@@ -48,14 +48,9 @@ func (r *Exec) PurgeContainer(realm intmodel.Realm, containerID string) error {
 		return fmt.Errorf("realm %q has no namespace", realmName)
 	}
 
-	// Initialize ctr client
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
-	if err = r.ctrClient.Connect(); err != nil {
+	if err = r.ensureClientConnected(); err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	defer r.ctrClient.Close()
 
 	r.ctrClient.SetNamespace(namespace)
 

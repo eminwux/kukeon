@@ -36,6 +36,7 @@ type PurgeContainerResult struct {
 
 // PurgeContainer purges a single container with comprehensive cleanup. Cascade flag is not applicable.
 func (b *Exec) PurgeContainer(container intmodel.Container) (PurgeContainerResult, error) {
+	defer b.runner.Close()
 	var result PurgeContainerResult
 
 	name := strings.TrimSpace(container.Metadata.Name)
