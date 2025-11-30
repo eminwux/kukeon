@@ -85,23 +85,21 @@ func (b *Exec) PurgeContainer(container intmodel.Container) (PurgeContainerResul
 			StackName: stackName,
 		},
 	}
-	getResult, err := b.GetCell(lookupCell)
+	internalCell, err := b.runner.GetCell(lookupCell)
 	if err != nil {
+		if errors.Is(err, errdefs.ErrCellNotFound) {
+			result.CellMetadataExists = false
+			return result, fmt.Errorf(
+				"cell %q not found in realm %q, space %q, stack %q",
+				cellName,
+				realmName,
+				spaceName,
+				stackName,
+			)
+		}
 		return result, err
 	}
-	result.CellMetadataExists = getResult.MetadataExists
-
-	if !getResult.MetadataExists {
-		return result, fmt.Errorf(
-			"cell %q not found in realm %q, space %q, stack %q",
-			cellName,
-			realmName,
-			spaceName,
-			stackName,
-		)
-	}
-
-	internalCell := getResult.Cell
+	result.CellMetadataExists = true
 
 	// Check if container exists in cell metadata by name (ID now stores just the container name)
 	var foundContainerSpec *intmodel.ContainerSpec

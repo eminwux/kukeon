@@ -17,6 +17,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -67,22 +68,21 @@ func (b *Exec) GetContainer(container intmodel.Container) (GetContainerResult, e
 			StackName: stackName,
 		},
 	}
-	cellResult, err := b.GetCell(lookupCell)
+	internalCell, err := b.runner.GetCell(lookupCell)
 	if err != nil {
+		if errors.Is(err, errdefs.ErrCellNotFound) {
+			res.CellMetadataExists = false
+			return res, fmt.Errorf("failed to get cell %q: cell not found", cellName)
+		}
 		return res, fmt.Errorf("failed to get cell %q: %w", cellName, err)
-	}
-	// Check MetadataExists regardless of error (GetCell returns nil error when cell not found)
-	if !cellResult.MetadataExists {
-		res.CellMetadataExists = false
-		return res, fmt.Errorf("failed to get cell %q: cell not found", cellName)
 	}
 	res.CellMetadataExists = true
 
 	// Find container in cell spec by name (ID now stores just the container name)
 	var foundContainerSpec *intmodel.ContainerSpec
-	for i := range cellResult.Cell.Spec.Containers {
-		if cellResult.Cell.Spec.Containers[i].ID == name {
-			foundContainerSpec = &cellResult.Cell.Spec.Containers[i]
+	for i := range internalCell.Spec.Containers {
+		if internalCell.Spec.Containers[i].ID == name {
+			foundContainerSpec = &internalCell.Spec.Containers[i]
 			break
 		}
 	}

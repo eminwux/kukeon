@@ -131,7 +131,7 @@ func (b *Exec) validateAndGetCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, errdefs.ErrStackNameRequired
 	}
 
-	// Build lookup cell for GetCell
+	// Build lookup cell for runner
 	lookupCell := intmodel.Cell{
 		Metadata: intmodel.CellMetadata{
 			Name: name,
@@ -142,7 +142,7 @@ func (b *Exec) validateAndGetCell(cell intmodel.Cell) (intmodel.Cell, error) {
 			StackName: stackName,
 		},
 	}
-	getResult, err := b.GetCell(lookupCell)
+	internalCell, err := b.runner.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return intmodel.Cell{}, fmt.Errorf(
@@ -155,9 +155,6 @@ func (b *Exec) validateAndGetCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		}
 		return intmodel.Cell{}, err
 	}
-	if !getResult.MetadataExists {
-		return intmodel.Cell{}, fmt.Errorf("cell %q not found", name)
-	}
 
-	return getResult.Cell, nil
+	return internalCell, nil
 }

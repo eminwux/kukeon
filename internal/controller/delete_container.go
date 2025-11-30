@@ -60,8 +60,7 @@ func (b *Exec) DeleteContainer(container intmodel.Container) (DeleteContainerRes
 
 	res.Deleted = []string{}
 
-	// Build minimal lookup doc for GetCell (still uses external types)
-	// Build lookup cell for GetCell
+	// Build lookup cell for runner
 	lookupCell := intmodel.Cell{
 		Metadata: intmodel.CellMetadata{
 			Name: cellName,
@@ -72,7 +71,7 @@ func (b *Exec) DeleteContainer(container intmodel.Container) (DeleteContainerRes
 			StackName: stackName,
 		},
 	}
-	getResult, err := b.GetCell(lookupCell)
+	internalCell, err := b.runner.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			res.CellMetadataExists = false
@@ -86,12 +85,7 @@ func (b *Exec) DeleteContainer(container intmodel.Container) (DeleteContainerRes
 		}
 		return res, err
 	}
-	res.CellMetadataExists = getResult.MetadataExists
-	if !getResult.MetadataExists {
-		return res, fmt.Errorf("cell %q not found", cellName)
-	}
-
-	internalCell := getResult.Cell
+	res.CellMetadataExists = true
 
 	// Find container in cell by name
 	var foundContainer *intmodel.ContainerSpec

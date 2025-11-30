@@ -17,6 +17,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -51,15 +52,13 @@ func (b *Exec) PurgeStack(stack intmodel.Stack, force, cascade bool) (PurgeStack
 		return result, errdefs.ErrSpaceNameRequired
 	}
 
-	getResult, err := b.GetStack(stack)
+	internalStack, err := b.runner.GetStack(stack)
 	if err != nil {
+		if errors.Is(err, errdefs.ErrStackNotFound) {
+			return result, fmt.Errorf("stack %q not found in realm %q, space %q", name, realmName, spaceName)
+		}
 		return result, err
 	}
-	if !getResult.MetadataExists {
-		return result, fmt.Errorf("stack %q not found in realm %q, space %q", name, realmName, spaceName)
-	}
-
-	internalStack := getResult.Stack
 
 	// Initialize result with stack and flags
 	result = PurgeStackResult{

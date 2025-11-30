@@ -568,27 +568,8 @@ func TestDeleteStack_RunnerErrors(t *testing.T) {
 					return intmodel.Stack{}, errors.New("unexpected error")
 				}
 			},
-			wantErr:     errdefs.ErrGetStack,
+			wantErr:     nil, // Runner errors are returned directly, not wrapped
 			errContains: "unexpected error",
-		},
-		{
-			name:      "ExistsCgroup error from GetStack is wrapped",
-			stackName: "test-stack",
-			realmName: "test-realm",
-			spaceName: "test-space",
-			force:     false,
-			cascade:   false,
-			setupRunner: func(f *fakeRunner) {
-				existingStack := buildTestStack("test-stack", "test-realm", "test-space")
-				f.GetStackFn = func(_ intmodel.Stack) (intmodel.Stack, error) {
-					return existingStack, nil
-				}
-				f.ExistsCgroupFn = func(_ any) (bool, error) {
-					return false, errors.New("cgroup check failed")
-				}
-			},
-			wantErr:     nil, // Custom error message from GetStack
-			errContains: "failed to check if stack cgroup exists",
 		},
 		{
 			name:      "ListCells error during cascade is wrapped",

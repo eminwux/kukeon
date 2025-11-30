@@ -63,7 +63,7 @@ func (b *Exec) PurgeCell(cell intmodel.Cell, force, cascade bool) (PurgeCellResu
 		return result, errdefs.ErrStackNameRequired
 	}
 
-	getResult, err := b.GetCell(cell)
+	internalCell, err := b.runner.GetCell(cell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return result, fmt.Errorf(
@@ -76,18 +76,6 @@ func (b *Exec) PurgeCell(cell intmodel.Cell, force, cascade bool) (PurgeCellResu
 		}
 		return result, err
 	}
-
-	if !getResult.MetadataExists {
-		return result, fmt.Errorf(
-			"cell %q not found in realm %q, space %q, stack %q",
-			name,
-			realmName,
-			spaceName,
-			stackName,
-		)
-	}
-
-	internalCell := getResult.Cell
 
 	// Initialize result with cell and flags
 	result = PurgeCellResult{

@@ -64,7 +64,7 @@ func (b *Exec) StopContainer(container intmodel.Container) (StopContainerResult,
 		return res, errdefs.ErrCellNameRequired
 	}
 
-	// Build lookup cell for GetCell
+	// Build lookup cell for runner
 	lookupCell := intmodel.Cell{
 		Metadata: intmodel.CellMetadata{
 			Name: cellName,
@@ -75,7 +75,7 @@ func (b *Exec) StopContainer(container intmodel.Container) (StopContainerResult,
 			StackName: stackName,
 		},
 	}
-	getResult, err := b.GetCell(lookupCell)
+	internalCell, err := b.runner.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return res, fmt.Errorf(
@@ -88,11 +88,6 @@ func (b *Exec) StopContainer(container intmodel.Container) (StopContainerResult,
 		}
 		return res, err
 	}
-	if !getResult.MetadataExists {
-		return res, fmt.Errorf("cell %q not found", cellName)
-	}
-
-	internalCell := getResult.Cell
 
 	// Find container in cell spec to construct result container
 	var foundContainerSpec *intmodel.ContainerSpec

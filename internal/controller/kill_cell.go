@@ -17,6 +17,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -51,7 +52,7 @@ func (b *Exec) KillCell(cell intmodel.Cell) (KillCellResult, error) {
 		return res, errdefs.ErrStackNameRequired
 	}
 
-	// Build lookup cell for GetCell
+	// Build lookup cell for runner
 	lookupCell := intmodel.Cell{
 		Metadata: intmodel.CellMetadata{
 			Name: name,
@@ -62,20 +63,19 @@ func (b *Exec) KillCell(cell intmodel.Cell) (KillCellResult, error) {
 			StackName: stackName,
 		},
 	}
-	getResult, err := b.GetCell(lookupCell)
+	internalCell, err := b.runner.GetCell(lookupCell)
 	if err != nil {
+		if errors.Is(err, errdefs.ErrCellNotFound) {
+			return res, fmt.Errorf(
+				"cell %q not found in realm %q, space %q, stack %q",
+				name,
+				realmName,
+				spaceName,
+				stackName,
+			)
+		}
 		return res, err
 	}
-	if !getResult.MetadataExists {
-		return res, fmt.Errorf(
-			"cell %q not found in realm %q, space %q, stack %q",
-			name,
-			realmName,
-			spaceName,
-			stackName,
-		)
-	}
-	internalCell := getResult.Cell
 
 	// Kill all containers in the cell
 	if err = b.runner.KillCell(internalCell); err != nil {

@@ -555,3 +555,159 @@ func TestPurgeContainer_ValidationErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestPurgeContainer_RunnerErrors(t *testing.T) {
+	tests := []struct {
+		name          string
+		containerName string
+		realmName     string
+		spaceName     string
+		stackName     string
+		cellName      string
+		setupRunner   func(*fakeRunner)
+		wantErr       bool
+		errContains   string
+		wantResult    func(t *testing.T, result controller.PurgeContainerResult)
+	}{
+		{
+			name:          "deleteContainerInternal error is wrapped",
+			containerName: "test-container",
+			realmName:     "test-realm",
+			spaceName:     "test-space",
+			stackName:     "test-stack",
+			cellName:      "test-cell",
+			setupRunner: func(f *fakeRunner) {
+				existingCell := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
+				existingCell.Spec.Containers = []intmodel.ContainerSpec{
+					{ID: "test-container", Image: "alpine:latest", ContainerdID: "containerd-id-123"},
+				}
+				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return existingCell, nil
+				}
+				f.ExistsCgroupFn = func(_ any) (bool, error) {
+					return true, nil
+				}
+				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+					return true, nil
+				}
+				existingRealm := buildTestRealm("test-realm", "test-namespace")
+				f.GetRealmFn = func(_ intmodel.Realm) (intmodel.Realm, error) {
+					return existingRealm, nil
+				}
+				f.DeleteContainerFn = func(_ intmodel.Cell, _ string) error {
+					return errors.New("deletion failed")
+				}
+			},
+			wantErr:     false,
+			errContains: "",
+			wantResult: func(t *testing.T, result controller.PurgeContainerResult) {
+				hasError := false
+				for _, p := range result.Purged {
+					if len(p) > 12 && p[:12] == "purge-error:" {
+						hasError = true
+						break
+					}
+				}
+				if !hasError {
+					t.Error("expected Purged to contain 'purge-error:' entry")
+				}
+			},
+		},
+		{
+			name:          "PurgeContainer runner error is appended to Purged",
+			containerName: "test-container",
+			realmName:     "test-realm",
+			spaceName:     "test-space",
+			stackName:     "test-stack",
+			cellName:      "test-cell",
+			setupRunner: func(f *fakeRunner) {
+				existingCell := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
+				existingCell.Spec.Containers = []intmodel.ContainerSpec{
+					{ID: "test-container", Image: "alpine:latest", ContainerdID: "containerd-id-123"},
+				}
+				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return existingCell, nil
+				}
+				f.ExistsCgroupFn = func(_ any) (bool, error) {
+					return true, nil
+				}
+				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+					return true, nil
+				}
+				existingRealm := buildTestRealm("test-realm", "test-namespace")
+				f.GetRealmFn = func(_ intmodel.Realm) (intmodel.Realm, error) {
+					return existingRealm, nil
+				}
+				f.DeleteContainerFn = func(_ intmodel.Cell, _ string) error {
+					return nil
+				}
+				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
+					return nil
+				}
+				f.PurgeContainerFn = func(_ intmodel.Realm, _ string) error {
+					return errors.New("purge failed")
+				}
+			},
+			wantErr: false,
+			wantResult: func(t *testing.T, result controller.PurgeContainerResult) {
+				hasError := false
+				for _, p := range result.Purged {
+					if len(p) > 12 && p[:12] == "purge-error:" {
+						hasError = true
+						break
+					}
+				}
+				if !hasError {
+					t.Error("expected Purged to contain 'purge-error:' entry")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRunner := &fakeRunner{}
+			if tt.setupRunner != nil {
+				tt.setupRunner(mockRunner)
+			}
+
+			ctrl := setupTestController(t, mockRunner)
+			container := buildTestContainer(
+				tt.containerName,
+				tt.realmName,
+				tt.spaceName,
+				tt.stackName,
+				tt.cellName,
+				"alpine:latest",
+			)
+
+			result, err := ctrl.PurgeContainer(container)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error but got none")
+					return
+				}
+				if tt.errContains != "" {
+					errStr := err.Error()
+					found := false
+					for i := 0; i <= len(errStr)-len(tt.errContains); i++ {
+						if i+len(tt.errContains) <= len(errStr) && errStr[i:i+len(tt.errContains)] == tt.errContains {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Errorf("expected error message to contain %q, got %q", tt.errContains, err.Error())
+					}
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.wantResult != nil {
+				tt.wantResult(t, result)
+			}
+		})
+	}
+}

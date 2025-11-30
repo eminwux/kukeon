@@ -366,7 +366,7 @@ func TestDeleteCell_RunnerErrors(t *testing.T) {
 		errContains string
 	}{
 		{
-			name:      "GetCell error (non-NotFound) is wrapped",
+			name:      "GetCell error (non-NotFound) is returned as-is",
 			cellName:  "test-cell",
 			realmName: "test-realm",
 			spaceName: "test-space",
@@ -376,47 +376,8 @@ func TestDeleteCell_RunnerErrors(t *testing.T) {
 					return intmodel.Cell{}, errors.New("unexpected error")
 				}
 			},
-			wantErr:     errdefs.ErrGetCell,
+			wantErr:     nil, // Runner errors are returned directly, not wrapped
 			errContains: "unexpected error",
-		},
-		{
-			name:      "ExistsCgroup error from GetCell is wrapped",
-			cellName:  "test-cell",
-			realmName: "test-realm",
-			spaceName: "test-space",
-			stackName: "test-stack",
-			setupRunner: func(f *fakeRunner) {
-				existingCell := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
-				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
-					return existingCell, nil
-				}
-				f.ExistsCgroupFn = func(_ any) (bool, error) {
-					return false, errors.New("cgroup check failed")
-				}
-			},
-			wantErr:     nil, // Custom error message from GetCell
-			errContains: "failed to check if cell cgroup exists",
-		},
-		{
-			name:      "ExistsCellRootContainer error from GetCell is wrapped",
-			cellName:  "test-cell",
-			realmName: "test-realm",
-			spaceName: "test-space",
-			stackName: "test-stack",
-			setupRunner: func(f *fakeRunner) {
-				existingCell := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
-				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
-					return existingCell, nil
-				}
-				f.ExistsCgroupFn = func(_ any) (bool, error) {
-					return true, nil
-				}
-				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
-					return false, errors.New("root container check failed")
-				}
-			},
-			wantErr:     nil, // Custom error message from GetCell
-			errContains: "failed to check root container",
 		},
 		{
 			name:      "DeleteCell runner error is wrapped with ErrDeleteCell",

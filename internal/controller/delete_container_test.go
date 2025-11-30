@@ -469,47 +469,6 @@ func TestDeleteContainer_RunnerErrors(t *testing.T) {
 			errContains: "unexpected error",
 		},
 		{
-			name:          "ExistsCgroup error from GetCell is wrapped",
-			containerName: "test-container",
-			realmName:     "test-realm",
-			spaceName:     "test-space",
-			stackName:     "test-stack",
-			cellName:      "test-cell",
-			setupRunner: func(f *fakeRunner) {
-				existingCell := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
-				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
-					return existingCell, nil
-				}
-				f.ExistsCgroupFn = func(_ any) (bool, error) {
-					return false, errors.New("cgroup check failed")
-				}
-			},
-			wantErr:     true,
-			errContains: "failed to check if cell cgroup exists",
-		},
-		{
-			name:          "ExistsCellRootContainer error from GetCell is wrapped",
-			containerName: "test-container",
-			realmName:     "test-realm",
-			spaceName:     "test-space",
-			stackName:     "test-stack",
-			cellName:      "test-cell",
-			setupRunner: func(f *fakeRunner) {
-				existingCell := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
-				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
-					return existingCell, nil
-				}
-				f.ExistsCgroupFn = func(_ any) (bool, error) {
-					return true, nil
-				}
-				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
-					return false, errors.New("root container check failed")
-				}
-			},
-			wantErr:     true,
-			errContains: "failed to check root container",
-		},
-		{
 			name:          "DeleteContainer runner error is wrapped",
 			containerName: "test-container",
 			realmName:     "test-realm",

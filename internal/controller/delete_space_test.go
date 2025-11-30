@@ -559,51 +559,9 @@ func TestDeleteSpace_RunnerErrors(t *testing.T) {
 				f.GetSpaceFn = func(_ intmodel.Space) (intmodel.Space, error) {
 					return intmodel.Space{}, errors.New("unexpected error")
 				}
-				f.ExistsSpaceCNIConfigFn = func(_ intmodel.Space) (bool, error) {
-					return false, nil
-				}
 			},
-			wantErr:     errdefs.ErrGetSpace,
+			wantErr:     nil, // Runner errors are returned directly, not wrapped
 			errContains: "unexpected error",
-		},
-		{
-			name:      "ExistsCgroup error from GetSpace is wrapped",
-			spaceName: "test-space",
-			realmName: "test-realm",
-			force:     false,
-			cascade:   false,
-			setupRunner: func(f *fakeRunner) {
-				existingSpace := buildTestSpace("test-space", "test-realm")
-				f.GetSpaceFn = func(_ intmodel.Space) (intmodel.Space, error) {
-					return existingSpace, nil
-				}
-				f.ExistsCgroupFn = func(_ any) (bool, error) {
-					return false, errors.New("cgroup check failed")
-				}
-			},
-			wantErr:     nil, // Custom error message from GetSpace
-			errContains: "failed to check if space cgroup exists",
-		},
-		{
-			name:      "ExistsSpaceCNIConfig error from GetSpace is wrapped",
-			spaceName: "test-space",
-			realmName: "test-realm",
-			force:     false,
-			cascade:   false,
-			setupRunner: func(f *fakeRunner) {
-				existingSpace := buildTestSpace("test-space", "test-realm")
-				f.GetSpaceFn = func(_ intmodel.Space) (intmodel.Space, error) {
-					return existingSpace, nil
-				}
-				f.ExistsCgroupFn = func(_ any) (bool, error) {
-					return true, nil
-				}
-				f.ExistsSpaceCNIConfigFn = func(_ intmodel.Space) (bool, error) {
-					return false, errors.New("network check failed")
-				}
-			},
-			wantErr:     errdefs.ErrCheckNetworkExists,
-			errContains: "network check failed",
 		},
 		{
 			name:      "ListStacks error during cascade is wrapped",
