@@ -20,9 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
@@ -90,6 +90,21 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 		cellID = internalCell.Metadata.Name
 	}
 
+	// Get space for network name
+	lookupSpace := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{
+			Name: cellSpaceName,
+		},
+		Spec: intmodel.SpaceSpec{
+			RealmName: internalCell.Spec.RealmName,
+		},
+	}
+	space, spaceErr := r.GetSpace(lookupSpace)
+	var networkName string
+	if spaceErr == nil {
+		networkName, _ = r.getSpaceNetworkName(space)
+	}
+
 	// Delete all containers in the cell (workload + root)
 	ctrCtx := context.Background()
 	for _, containerSpec := range internalCell.Spec.Containers {
@@ -117,6 +132,10 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 			)
 			continue
 		}
+
+		// Get netns path and purge CNI before stopping/deleting
+		netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
+		_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
 
 		// Use container name with UUID for containerd operations
 		// Stop and delete the container
@@ -147,103 +166,9 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 		return fmt.Errorf("failed to build root container containerd ID: %w", err)
 	}
 
-	// Clean up CNI network configuration before stopping/deleting the root container
-	// Try to get the task to retrieve the netns path
-	container, loadErr := r.ctrClient.GetContainer(ctrCtx, rootContainerID)
-	if loadErr == nil {
-		// Try to get the task to get PID and netns path
-		task, taskErr := container.Task(ctrCtx, nil)
-		if taskErr == nil {
-			pid := task.Pid()
-			if pid > 0 {
-				netnsPath := fmt.Sprintf("/proc/%d/ns/net", pid)
-
-				// Get CNI config path
-				cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(internalCell.Spec.RealmName, cellSpaceName)
-				if cniErr == nil {
-					// Create CNI manager and remove container from network
-					cniMgr, mgrErr := cni.NewManager(
-						r.cniConf.CniBinDir,
-						r.cniConf.CniConfigDir,
-						r.cniConf.CniCacheDir,
-					)
-					if mgrErr == nil {
-						if configLoadErr := cniMgr.LoadNetworkConfigList(cniConfigPath); configLoadErr == nil {
-							delErr := cniMgr.DelContainerFromNetwork(ctrCtx, rootContainerID, netnsPath)
-							if delErr != nil {
-								r.logger.WarnContext(
-									r.ctx,
-									"failed to remove root container from CNI network, continuing with deletion",
-									"container",
-									rootContainerID,
-									"netns",
-									netnsPath,
-									"error",
-									delErr,
-								)
-							} else {
-								r.logger.InfoContext(
-									r.ctx,
-									"removed root container from CNI network",
-									"container",
-									rootContainerID,
-									"netns",
-									netnsPath,
-								)
-							}
-						} else {
-							r.logger.WarnContext(
-								r.ctx,
-								"failed to load CNI config for cleanup",
-								"container",
-								rootContainerID,
-								"config",
-								cniConfigPath,
-								"error",
-								configLoadErr,
-							)
-						}
-					} else {
-						r.logger.WarnContext(
-							r.ctx,
-							"failed to create CNI manager for cleanup",
-							"container",
-							rootContainerID,
-							"error",
-							mgrErr,
-						)
-					}
-				} else {
-					r.logger.WarnContext(
-						r.ctx,
-						"failed to resolve CNI config path for cleanup",
-						"container",
-						rootContainerID,
-						"error",
-						cniErr,
-					)
-				}
-			}
-		} else {
-			r.logger.DebugContext(
-				r.ctx,
-				"root container task not found, skipping CNI cleanup",
-				"container",
-				rootContainerID,
-				"error",
-				taskErr,
-			)
-		}
-	} else {
-		r.logger.DebugContext(
-			r.ctx,
-			"root container not found, skipping CNI cleanup",
-			"container",
-			rootContainerID,
-			"error",
-			loadErr,
-		)
-	}
+	// Comprehensive CNI cleanup for root container before stopping/deleting
+	netnsPath, _ := r.getContainerNetnsPath(ctrCtx, rootContainerID)
+	_ = r.purgeCNIForContainer(ctrCtx, rootContainerID, netnsPath, networkName)
 
 	_, err = r.ctrClient.StopContainer(ctrCtx, rootContainerID, ctr.StopContainerOptions{Force: true})
 	if err != nil {
@@ -266,15 +191,22 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 	}
 
 	// Delete cell cgroup
-	spec := cgroups.DefaultCellSpec(internalCell)
+	// Use the stored CgroupPath from cell status (includes full hierarchy path)
+	// instead of rebuilding from DefaultCellSpec which only has the relative path
 	mountpoint := r.ctrClient.GetCgroupMountpoint()
-	err = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
+	cgroupGroup := internalCell.Status.CgroupPath
+	if cgroupGroup == "" {
+		// Fallback to DefaultCellSpec if CgroupPath is not set (for backwards compatibility)
+		spec := cgroups.DefaultCellSpec(internalCell)
+		cgroupGroup = spec.Group
+	}
+	err = r.ctrClient.DeleteCgroup(cgroupGroup, mountpoint)
 	if err != nil {
-		r.logger.WarnContext(r.ctx, "failed to delete cell cgroup", "cgroup", spec.Group, "error", err)
+		r.logger.WarnContext(r.ctx, "failed to delete cell cgroup", "cgroup", cgroupGroup, "error", err)
 		// Continue with metadata deletion
 	}
 
-	// Delete cell metadata
+	// Delete cell metadata file
 	metadataFilePath := fs.CellMetadataPath(
 		r.opts.RunPath,
 		internalCell.Spec.RealmName,
@@ -285,6 +217,16 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 	if err = metadata.DeleteMetadata(r.ctx, r.logger, metadataFilePath); err != nil {
 		return fmt.Errorf("%w: failed to delete cell metadata: %w", errdefs.ErrDeleteCell, err)
 	}
+
+	// Remove metadata directory completely
+	metadataRunPath := fs.CellMetadataDir(
+		r.opts.RunPath,
+		internalCell.Spec.RealmName,
+		cellSpaceName,
+		cellStackName,
+		internalCell.Metadata.Name,
+	)
+	_ = os.RemoveAll(metadataRunPath)
 
 	return nil
 }

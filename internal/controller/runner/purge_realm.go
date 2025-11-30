@@ -66,34 +66,8 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) error {
 		r.logger.WarnContext(r.ctx, "failed to find orphaned containers", "error", err)
 	} else {
 		r.logger.DebugContext(r.ctx, "found orphaned containers", "count", len(containers))
-		if len(containers) > 0 {
-			r.logger.InfoContext(r.ctx, "processing orphaned containers for deletion", "count", len(containers))
-			ctrCtx := context.Background()
-			for i, containerID := range containers {
-				r.logger.DebugContext(r.ctx, "processing container", "index", i+1, "total", len(containers), "id", containerID)
-				// Try to delete container
-				r.logger.DebugContext(r.ctx, "stopping container", "id", containerID)
-				_, _ = r.ctrClient.StopContainer(ctrCtx, containerID, ctr.StopContainerOptions{})
-				r.logger.DebugContext(r.ctx, "deleting container", "id", containerID)
-				_ = r.ctrClient.DeleteContainer(ctrCtx, containerID, ctr.ContainerDeleteOptions{
-					SnapshotCleanup: true,
-				})
-
-				// Get netns and purge CNI
-				r.logger.DebugContext(r.ctx, "getting container netns path", "id", containerID)
-				netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
-				// Try to determine network name from container ID pattern
-				// Container ID format: realm-space-cell-container
-				parts := strings.Split(containerID, "-")
-				if len(parts) >= 2 {
-					networkName := fmt.Sprintf("%s-%s", parts[0], parts[1])
-					r.logger.DebugContext(r.ctx, "purging CNI resources for container", "id", containerID, "network", networkName)
-					_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
-				}
-				r.logger.DebugContext(r.ctx, "completed processing container", "id", containerID)
-			}
-			r.logger.InfoContext(r.ctx, "completed processing all orphaned containers", "count", len(containers))
-		}
+		ctrCtx := context.Background()
+		r.processOrphanedContainers(ctrCtx, containers)
 	}
 
 	// Purge all CNI networks for this realm
@@ -153,9 +127,19 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) error {
 	_ = os.RemoveAll(metadataRunPath)
 
 	// Force remove realm cgroup
-	spec := cgroups.DefaultRealmSpec(realmForOps)
+	// Try to use stored CgroupPath first, fallback to DefaultRealmSpec if not available
 	mountpoint := r.ctrClient.GetCgroupMountpoint()
-	_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
+	cgroupGroup := realmForOps.Status.CgroupPath
+	if cgroupGroup == "" {
+		// Fallback to DefaultRealmSpec if CgroupPath is not set
+		spec := cgroups.DefaultRealmSpec(realmForOps)
+		cgroupGroup = spec.Group
+	}
+	// DeleteCgroup is now idempotent - it will return nil if cgroup doesn't exist
+	if err = r.ctrClient.DeleteCgroup(cgroupGroup, mountpoint); err != nil {
+		r.logger.WarnContext(r.ctx, "failed to delete realm cgroup during purge", "cgroup", cgroupGroup, "error", err)
+		// Continue with cleanup even if cgroup deletion fails
+	}
 
 	return nil
 }

@@ -27,6 +27,7 @@ import (
 
 	cgroup2 "github.com/containerd/cgroups/v2/cgroup2"
 	cgroupstats "github.com/containerd/cgroups/v2/cgroup2/stats"
+	"github.com/eminwux/kukeon/internal/consts"
 )
 
 // TODO(eminwux): add cgroup integration tests once CI exposes a writable cgroup v2 hierarchy.
@@ -218,7 +219,23 @@ func (c *client) AddProcessToCgroup(group, mountpoint string, pid int) error {
 }
 
 // DeleteCgroup removes the cgroup. It will fail if processes are still attached.
+// If the cgroup doesn't exist, it returns nil (idempotent operation).
 func (c *client) DeleteCgroup(group, mountpoint string) error {
+	if err := validateGroupPath(group); err != nil {
+		return err
+	}
+
+	// Check if cgroup exists before trying to delete it (idempotent operation)
+	mp := c.effectiveMountpoint(mountpoint)
+	cgroupPath := filepath.Join(mp, strings.TrimPrefix(group, "/"))
+	if _, err := os.Stat(cgroupPath); err != nil {
+		if os.IsNotExist(err) {
+			// Cgroup doesn't exist, treat as success (already deleted)
+			return nil
+		}
+		return err
+	}
+
 	manager, err := c.managerFor(group, mountpoint)
 	if err != nil {
 		return err
@@ -419,7 +436,7 @@ func parseMountinfo(ctx context.Context, logger *slog.Logger) (string, error) {
 }
 
 func discoverCgroupMountpoint(ctx context.Context, logger *slog.Logger) (string, error) {
-	const fallbackMountpoint = "/sys/fs/cgroup"
+	const fallbackMountpoint = consts.CgroupFilesystemPath
 
 	if logger != nil {
 		logger.DebugContext(ctx, "discovering cgroup mountpoint from /proc/self/cgroup")
@@ -532,12 +549,12 @@ func (c *client) effectiveMountpoint(mountpoint string) string {
 					ctx,
 					"cgroup mountpoint discovery returned empty, using fallback",
 					"fallback",
-					"/sys/fs/cgroup",
+					consts.CgroupFilesystemPath,
 					"error",
 					c.cgroupMountpointErr,
 				)
 			}
-			c.cgroupMountpoint = "/sys/fs/cgroup"
+			c.cgroupMountpoint = consts.CgroupFilesystemPath
 		}
 		// Log the discovered mountpoint for debugging
 		if logger != nil {
@@ -562,7 +579,7 @@ func (c *client) effectiveMountpoint(mountpoint string) string {
 	})
 	// Final safety check: ensure we never return an empty mountpoint
 	if c.cgroupMountpoint == "" {
-		return "/sys/fs/cgroup"
+		return consts.CgroupFilesystemPath
 	}
 	return c.cgroupMountpoint
 }
