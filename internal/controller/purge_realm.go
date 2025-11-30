@@ -112,17 +112,18 @@ func (b *Exec) PurgeRealm(realm intmodel.Realm, force, cascade bool) (PurgeRealm
 		if metadataExists {
 			result.RealmDeleted = false
 		}
-	} else {
-		// Since private method succeeded, assume all operations succeeded
-		if metadataExists {
-			result.RealmDeleted = true
-			result.Deleted = append(result.Deleted, "metadata", "cgroup", "namespace")
-		} else {
-			result.RealmDeleted = false
-		}
-		result.Purged = append(result.Purged, "orphaned-containers", "cni-resources", "all-metadata")
-		result.PurgeSucceeded = true
+		return result, err
 	}
+
+	// Since private method succeeded, assume all operations succeeded
+	if metadataExists {
+		result.RealmDeleted = true
+		result.Deleted = append(result.Deleted, "metadata", "cgroup", "namespace")
+	} else {
+		result.RealmDeleted = false
+	}
+	result.Purged = append(result.Purged, "orphaned-containers", "cni-resources", "all-metadata")
+	result.PurgeSucceeded = true
 
 	return result, nil
 }
