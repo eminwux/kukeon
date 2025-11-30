@@ -25,48 +25,15 @@ import (
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
-// StartCellResult reports the outcome of starting a cell.
-type StartCellResult struct {
-	Cell    intmodel.Cell
-	Started bool
-}
-
-// StartContainerResult reports the outcome of starting a container.
-type StartContainerResult struct {
+// KillContainerResult reports the outcome of killing a container.
+type KillContainerResult struct {
 	Container intmodel.Container
-	Started   bool
+	Killed    bool
 }
 
-// StartCell starts all containers in a cell and updates the cell metadata state.
-func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
-	var res StartCellResult
-
-	internalCell, err := b.validateAndGetCell(cell)
-	if err != nil {
-		return res, err
-	}
-
-	// Start all containers in the cell
-	if err = b.runner.StartCell(internalCell); err != nil {
-		return res, fmt.Errorf("failed to start cell containers: %w", err)
-	}
-
-	// Update cell state to Ready
-	internalCell.Status.State = intmodel.CellStateReady
-
-	// Update cell metadata state to Ready
-	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {
-		return res, fmt.Errorf("failed to update cell metadata: %w", err)
-	}
-
-	res.Cell = internalCell
-	res.Started = true
-	return res, nil
-}
-
-// StartContainer starts a specific container in a cell and updates the cell metadata.
-func (b *Exec) StartContainer(container intmodel.Container) (StartContainerResult, error) {
-	var res StartContainerResult
+// KillContainer immediately force-kills a specific container in a cell and updates the cell metadata.
+func (b *Exec) KillContainer(container intmodel.Container) (KillContainerResult, error) {
+	var res KillContainerResult
 
 	name := strings.TrimSpace(container.Metadata.Name)
 	if name == "" {
@@ -124,7 +91,6 @@ func (b *Exec) StartContainer(container intmodel.Container) (StartContainerResul
 	if !getResult.MetadataExists {
 		return res, fmt.Errorf("cell %q not found", cellName)
 	}
-
 	internalCell := getResult.Cell
 
 	// Find container in cell spec by name (ID now stores just the container name)
@@ -140,35 +106,18 @@ func (b *Exec) StartContainer(container intmodel.Container) (StartContainerResul
 		return res, fmt.Errorf("container %q not found in cell %q", name, cellName)
 	}
 
-	// Start the cell with only this container
-	// Construct a cell with just this container for starting
-	cellToStart := intmodel.Cell{
-		Metadata: intmodel.CellMetadata{
-			Name: cellName,
-		},
-		Spec: intmodel.CellSpec{
-			RealmName: realmName,
-			SpaceName: spaceName,
-			StackName: stackName,
-			Containers: []intmodel.ContainerSpec{
-				*foundContainerSpec,
-			},
-		},
+	// Kill the specific container (pass container name, runner will build full ID)
+	if err = b.runner.KillContainer(internalCell, name); err != nil {
+		return res, fmt.Errorf("failed to kill container %s: %w", name, err)
 	}
 
-	if err = b.runner.StartCell(cellToStart); err != nil {
-		return res, fmt.Errorf("failed to start container %s: %w", name, err)
-	}
-
-	// Update cell state to Ready
-	internalCell.Status.State = intmodel.CellStateReady
-
-	// Update cell metadata state to Ready
+	// Update cell metadata (state remains Ready if other containers are running)
+	// The state management can be enhanced later to track individual container states
 	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {
 		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
-	// Construct result container
+	// Build result container from found container spec
 	labels := container.Metadata.Labels
 	if labels == nil {
 		labels = make(map[string]string)
@@ -181,10 +130,10 @@ func (b *Exec) StartContainer(container intmodel.Container) (StartContainerResul
 		},
 		Spec: *foundContainerSpec,
 		Status: intmodel.ContainerStatus{
-			State: intmodel.ContainerStateReady,
+			State: intmodel.ContainerStatePending,
 		},
 	}
-	res.Started = true
 
+	res.Killed = true
 	return res, nil
 }
