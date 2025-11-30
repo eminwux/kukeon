@@ -17,7 +17,6 @@
 package runner
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -86,13 +85,12 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 
 		// Find containers by pattern and purge CNI for each
 		pattern := fmt.Sprintf("%s-%s", realmName, internalSpace.Metadata.Name)
-		containers, findErr := r.findContainersByPattern(r.ctx, internalRealm.Spec.Namespace, pattern)
+		containers, findErr := r.findContainersByPattern(internalRealm.Spec.Namespace, pattern)
 		if findErr == nil {
-			ctrCtx := context.Background()
 			networkName, _ := r.getSpaceNetworkName(internalSpace)
 			for _, containerID := range containers {
-				netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
-				_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
+				netnsPath, _ := r.getContainerNetnsPath(containerID)
+				_ = r.purgeCNIForContainer(containerID, netnsPath, networkName)
 			}
 		}
 	}
@@ -120,7 +118,7 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 			}
 		}
 		// Perform comprehensive CNI network cleanup (IPAM, cache entries, network directory)
-		_ = r.purgeCNIForNetwork(r.ctx, networkName)
+		_ = r.purgeCNIForNetwork(networkName)
 	}
 
 	// Delete space cgroup

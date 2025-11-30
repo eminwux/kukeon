@@ -17,7 +17,6 @@
 package runner
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -90,15 +89,12 @@ func (r *Exec) StopCell(cell intmodel.Cell) error {
 		return fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
 
-	// Create a background context for containerd operations
-	ctrCtx := context.Background()
-
-	// Always create a fresh client with background context to avoid cancellation issues
+	// Always create a fresh client
 	if r.ctrClient != nil {
 		_ = r.ctrClient.Close() // Ignore errors when closing old client
 		r.ctrClient = nil
 	}
-	r.ctrClient = ctr.NewClient(context.Background(), r.logger, r.opts.ContainerdSocket)
+	r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 
 	err = r.ctrClient.Connect()
 	if err != nil {
@@ -148,7 +144,7 @@ func (r *Exec) StopCell(cell intmodel.Cell) error {
 
 		// Use container name with UUID for containerd operations
 		timeout := 5 * time.Second
-		_, err = r.ctrClient.StopContainer(ctrCtx, containerID, ctr.StopContainerOptions{
+		_, err = r.ctrClient.StopContainer(r.ctx, containerID, ctr.StopContainerOptions{
 			Force:   true,
 			Timeout: &timeout,
 		})
@@ -182,9 +178,9 @@ func (r *Exec) StopCell(cell intmodel.Cell) error {
 
 	// Get root container's PID before stopping (needed for CNI detach)
 	var rootPID uint32
-	rootContainer, err := r.ctrClient.GetContainer(ctrCtx, rootContainerID)
+	rootContainer, err := r.ctrClient.GetContainer(r.ctx, rootContainerID)
 	if err == nil {
-		nsCtx := namespaces.WithNamespace(ctrCtx, namespace)
+		nsCtx := namespaces.WithNamespace(r.ctx, namespace)
 		rootTask, taskErr := rootContainer.Task(nsCtx, nil)
 		if taskErr == nil {
 			rootPID = rootTask.Pid()
@@ -193,7 +189,7 @@ func (r *Exec) StopCell(cell intmodel.Cell) error {
 
 	// Stop root container
 	timeout := 5 * time.Second
-	_, err = r.ctrClient.StopContainer(ctrCtx, rootContainerID, ctr.StopContainerOptions{
+	_, err = r.ctrClient.StopContainer(r.ctx, rootContainerID, ctr.StopContainerOptions{
 		Force:   true,
 		Timeout: &timeout,
 	})
@@ -227,7 +223,7 @@ func (r *Exec) StopCell(cell intmodel.Cell) error {
 		)
 		if mgrErr == nil {
 			if loadErr := cniMgr.LoadNetworkConfigList(cniConfigPath); loadErr == nil {
-				if delErr := cniMgr.DelContainerFromNetwork(ctrCtx, rootContainerID, netnsPath); delErr != nil {
+				if delErr := cniMgr.DelContainerFromNetwork(r.ctx, rootContainerID, netnsPath); delErr != nil {
 					// Log warning but continue - network might already be detached
 					fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
 					fields = append(
@@ -289,15 +285,12 @@ func (r *Exec) StopContainer(cell intmodel.Cell, containerID string) error {
 		return errdefs.ErrSpaceNameRequired
 	}
 
-	// Create a background context for containerd operations
-	ctrCtx := context.Background()
-
-	// Always create a fresh client with background context to avoid cancellation issues
+	// Always create a fresh client
 	if r.ctrClient != nil {
 		_ = r.ctrClient.Close() // Ignore errors when closing old client
 		r.ctrClient = nil
 	}
-	r.ctrClient = ctr.NewClient(context.Background(), r.logger, r.opts.ContainerdSocket)
+	r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 
 	err := r.ctrClient.Connect()
 	if err != nil {
@@ -345,7 +338,7 @@ func (r *Exec) StopContainer(cell intmodel.Cell, containerID string) error {
 
 	// Use containerd ID for containerd operations
 	timeout := 5 * time.Second
-	_, err = r.ctrClient.StopContainer(ctrCtx, containerdID, ctr.StopContainerOptions{
+	_, err = r.ctrClient.StopContainer(r.ctx, containerdID, ctr.StopContainerOptions{
 		Force:   true,
 		Timeout: &timeout,
 	})

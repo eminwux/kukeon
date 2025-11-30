@@ -17,7 +17,6 @@
 package runner
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -166,15 +165,14 @@ func (r *Exec) PurgeCell(cell intmodel.Cell) error {
 			r.logger.DebugContext(r.ctx, "built container IDs from cell", "count", len(containerIDs))
 			if len(containerIDs) > 0 {
 				r.logger.InfoContext(r.ctx, "purging CNI resources for cell containers", "count", len(containerIDs))
-				ctrCtx := context.Background()
 				for i, containerID := range containerIDs {
 					r.logger.DebugContext(r.ctx, "processing container for CNI purge", "index", i+1, "total", len(containerIDs), "id", containerID)
 					// Try to get netns path
 					r.logger.DebugContext(r.ctx, "getting container netns path", "id", containerID)
-					netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
+					netnsPath, _ := r.getContainerNetnsPath(containerID)
 					// Purge CNI resources
 					r.logger.DebugContext(r.ctx, "purging CNI resources for container", "id", containerID, "network", networkName)
-					_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
+					_ = r.purgeCNIForContainer(containerID, netnsPath, networkName)
 				}
 				r.logger.InfoContext(r.ctx, "completed purging CNI resources for cell containers", "count", len(containerIDs))
 			}

@@ -94,15 +94,15 @@ func (r *Exec) detachRootContainerFromCNI(
 
 // killContainerTask directly kills a container task by sending SIGKILL immediately.
 // This is a helper method used by KillCell and KillContainer.
-func (r *Exec) killContainerTask(ctrCtx context.Context, containerID, realmNamespace string) error {
+func (r *Exec) killContainerTask(containerID, realmNamespace string) error {
 	// Get the container
-	container, err := r.ctrClient.GetContainer(ctrCtx, containerID)
+	container, err := r.ctrClient.GetContainer(r.ctx, containerID)
 	if err != nil {
 		return fmt.Errorf("failed to get container %s: %w", containerID, err)
 	}
 
 	// Create namespace context
-	nsCtx := namespaces.WithNamespace(ctrCtx, realmNamespace)
+	nsCtx := namespaces.WithNamespace(r.ctx, realmNamespace)
 
 	// Get the task
 	task, err := container.Task(nsCtx, nil)

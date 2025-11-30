@@ -17,7 +17,6 @@
 package runner
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -77,7 +76,7 @@ func (r *Exec) PurgeSpace(space intmodel.Space) error {
 		networkName, err = r.getSpaceNetworkName(internalSpace)
 		if err == nil {
 			// Purge entire network
-			_ = r.purgeCNIForNetwork(r.ctx, networkName)
+			_ = r.purgeCNIForNetwork(networkName)
 		}
 	}
 
@@ -91,12 +90,11 @@ func (r *Exec) PurgeSpace(space intmodel.Space) error {
 
 		pattern := fmt.Sprintf("%s-%s", spaceForOps.Spec.RealmName, spaceForOps.Metadata.Name)
 		var containers []string
-		containers, err = r.findContainersByPattern(r.ctx, internalRealm.Spec.Namespace, pattern)
+		containers, err = r.findContainersByPattern(internalRealm.Spec.Namespace, pattern)
 		if err == nil {
-			ctrCtx := context.Background()
 			for _, containerID := range containers {
-				netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
-				_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
+				netnsPath, _ := r.getContainerNetnsPath(containerID)
+				_ = r.purgeCNIForContainer(containerID, netnsPath, networkName)
 			}
 		}
 	}

@@ -32,9 +32,7 @@ func (c *client) CreateNamespace(namespace string) error {
 	c.logger.DebugContext(c.ctx, "creating namespace", "namespace", namespace)
 	namespaces := c.cClient.NamespaceService()
 
-	// Use background context to avoid cancellation issues
-	ctx := context.Background()
-	err := namespaces.Create(ctx, namespace, nil)
+	err := namespaces.Create(c.ctx, namespace, nil)
 	if err != nil {
 		c.logger.ErrorContext(
 			c.ctx,
@@ -66,11 +64,8 @@ func (c *client) DeleteNamespace(namespace string) error {
 	c.logger.DebugContext(c.ctx, "deleting namespace", "namespace", namespace)
 	namespaces := c.cClient.NamespaceService()
 
-	// Use background context to avoid cancellation issues
-	ctx := context.Background()
-
 	// Check if namespace exists first
-	nsList, err := namespaces.List(ctx)
+	nsList, err := namespaces.List(c.ctx)
 	if err != nil {
 		c.logger.ErrorContext(c.ctx, "failed to list containerd namespaces", "err", fmt.Sprintf("%v", err))
 		return fmt.Errorf("failed to list namespaces: %w", err)
@@ -84,7 +79,7 @@ func (c *client) DeleteNamespace(namespace string) error {
 	// Delete the namespace
 	// Note: The namespace must be empty (no containers, images, etc.) to be deleted
 	c.logger.InfoContext(c.ctx, "deleting containerd namespace", "namespace", namespace)
-	if err = namespaces.Delete(ctx, namespace); err != nil {
+	if err = namespaces.Delete(c.ctx, namespace); err != nil {
 		c.logger.ErrorContext(
 			c.ctx,
 			"failed to delete containerd namespace",
@@ -106,9 +101,8 @@ func (c *client) ListNamespaces() ([]string, error) {
 	namespaces := c.cClient.NamespaceService()
 	// containerd requires a namespace for most API calls.
 	// But listing namespaces does not require entering one.
-	ctx := context.Background()
 
-	nsList, err := namespaces.List(ctx)
+	nsList, err := namespaces.List(c.ctx)
 	if err != nil {
 		c.logger.Error("failed to list containerd namespaces: %v", "err", fmt.Sprintf("%v", err))
 		return nil, err
@@ -129,9 +123,7 @@ func (c *client) GetNamespace(namespace string) (string, error) {
 	c.logger.DebugContext(c.ctx, "getting namespace", "namespace", namespace)
 	namespaces := c.cClient.NamespaceService()
 
-	// Use background context to avoid cancellation issues
-	ctx := context.Background()
-	nsList, err := namespaces.List(ctx)
+	nsList, err := namespaces.List(c.ctx)
 	if err != nil {
 		c.logger.Error("failed to list containerd namespaces: %v", "err", fmt.Sprintf("%v", err))
 		return "", err
