@@ -25,43 +25,10 @@ import (
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
-// StopCellResult reports the outcome of stopping a cell.
-type StopCellResult struct {
-	Cell    intmodel.Cell
-	Stopped bool
-}
-
 // StopContainerResult reports the outcome of stopping a container.
 type StopContainerResult struct {
 	Container intmodel.Container
 	Stopped   bool
-}
-
-// StopCell stops all containers in a cell and updates the cell metadata state.
-func (b *Exec) StopCell(cell intmodel.Cell) (StopCellResult, error) {
-	var result StopCellResult
-
-	internalCell, err := b.validateAndGetCell(cell)
-	if err != nil {
-		return result, err
-	}
-
-	// Stop all containers in the cell
-	if err = b.runner.StopCell(internalCell); err != nil {
-		return result, fmt.Errorf("failed to stop cell containers: %w", err)
-	}
-
-	// Update cell state to Pending
-	internalCell.Status.State = intmodel.CellStatePending
-
-	// Update cell metadata state to Pending (stopped)
-	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {
-		return result, fmt.Errorf("failed to update cell metadata: %w", err)
-	}
-
-	result.Cell = internalCell
-	result.Stopped = true
-	return result, nil
 }
 
 // StopContainer stops a specific container in a cell and updates the cell metadata.
@@ -97,7 +64,7 @@ func (b *Exec) StopContainer(container intmodel.Container) (StopContainerResult,
 		return res, errdefs.ErrCellNameRequired
 	}
 
-	// Build lookup cell for GetCell
+	// Build lookup cell for runner
 	lookupCell := intmodel.Cell{
 		Metadata: intmodel.CellMetadata{
 			Name: cellName,
@@ -108,7 +75,7 @@ func (b *Exec) StopContainer(container intmodel.Container) (StopContainerResult,
 			StackName: stackName,
 		},
 	}
-	getResult, err := b.GetCell(lookupCell)
+	internalCell, err := b.runner.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return res, fmt.Errorf(
@@ -121,11 +88,6 @@ func (b *Exec) StopContainer(container intmodel.Container) (StopContainerResult,
 		}
 		return res, err
 	}
-	if !getResult.MetadataExists {
-		return res, fmt.Errorf("cell %q not found", cellName)
-	}
-
-	internalCell := getResult.Cell
 
 	// Find container in cell spec to construct result container
 	var foundContainerSpec *intmodel.ContainerSpec

@@ -55,18 +55,13 @@ func (b *Exec) PurgeSpace(space intmodel.Space, force, cascade bool) (PurgeSpace
 		return result, errdefs.ErrRealmNameRequired
 	}
 
-	getResult, err := b.GetSpace(space)
+	internalSpace, err := b.runner.GetSpace(space)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrSpaceNotFound) {
 			return result, fmt.Errorf("space %q not found in realm %q", name, realmName)
 		}
 		return result, err
 	}
-	if !getResult.MetadataExists {
-		return result, fmt.Errorf("space %q not found in realm %q", name, realmName)
-	}
-
-	internalSpace := getResult.Space
 
 	// Initialize result with space and flags
 	result = PurgeSpaceResult{

@@ -58,22 +58,19 @@ func (b *Exec) DeleteStack(stack intmodel.Stack, force, cascade bool) (DeleteSta
 		return res, errdefs.ErrSpaceNameRequired
 	}
 
-	getResult, err := b.GetStack(stack)
+	internalStack, err := b.runner.GetStack(stack)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrStackNotFound) {
 			return res, fmt.Errorf("stack %q not found in realm %q, space %q", name, realmName, spaceName)
 		}
 		return res, err
 	}
-	if !getResult.MetadataExists {
-		return res, fmt.Errorf("stack %q not found in realm %q, space %q", name, realmName, spaceName)
-	}
 
 	res = DeleteStackResult{
 		StackName: name,
 		RealmName: realmName,
 		SpaceName: spaceName,
-		Stack:     getResult.Stack,
+		Stack:     internalStack,
 		Deleted:   []string{},
 	}
 
@@ -91,7 +88,7 @@ func (b *Exec) DeleteStack(stack intmodel.Stack, force, cascade bool) (DeleteSta
 	}
 
 	// Delete the resource itself (private method handles cascade deletion)
-	if err = b.deleteStackCascade(getResult.Stack, force, cascade); err != nil {
+	if err = b.deleteStackCascade(internalStack, force, cascade); err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrDeleteStack, err)
 	}
 

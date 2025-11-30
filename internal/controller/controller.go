@@ -86,6 +86,17 @@ func NewControllerExec(ctx context.Context, logger *slog.Logger, opts Options) *
 	}
 }
 
+// NewControllerExecForTesting creates a controller with a custom runner for testing.
+// This function is exported for testing purposes only.
+func NewControllerExecForTesting(ctx context.Context, logger *slog.Logger, opts Options, r runner.Runner) *Exec {
+	return &Exec{
+		ctx:    ctx,
+		logger: logger,
+		opts:   opts,
+		runner: r,
+	}
+}
+
 func (b *Exec) Bootstrap() (BootstrapReport, error) {
 	b.logger.DebugContext(b.ctx, "bootstrapping kukeon", "options", b.opts)
 

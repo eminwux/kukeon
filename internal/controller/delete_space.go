@@ -53,21 +53,18 @@ func (b *Exec) DeleteSpace(space intmodel.Space, force, cascade bool) (DeleteSpa
 		return res, errdefs.ErrRealmNameRequired
 	}
 
-	getResult, err := b.GetSpace(space)
+	internalSpace, err := b.runner.GetSpace(space)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrSpaceNotFound) {
 			return res, fmt.Errorf("space %q not found in realm %q", name, realmName)
 		}
 		return res, err
 	}
-	if !getResult.MetadataExists {
-		return res, fmt.Errorf("space %q not found in realm %q", name, realmName)
-	}
 
 	res = DeleteSpaceResult{
 		SpaceName: name,
 		RealmName: realmName,
-		Space:     getResult.Space,
+		Space:     internalSpace,
 		Deleted:   []string{},
 	}
 
@@ -85,7 +82,7 @@ func (b *Exec) DeleteSpace(space intmodel.Space, force, cascade bool) (DeleteSpa
 	}
 
 	// Delete the resource itself (private method handles cascade deletion)
-	if err = b.deleteSpaceCascade(getResult.Space, force, cascade); err != nil {
+	if err = b.deleteSpaceCascade(internalSpace, force, cascade); err != nil {
 		return res, fmt.Errorf("%w: %w", errdefs.ErrDeleteSpace, err)
 	}
 

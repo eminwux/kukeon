@@ -53,33 +53,34 @@ func (b *Exec) PurgeRealm(realm intmodel.Realm, force, cascade bool) (PurgeRealm
 		realm.Spec.Namespace = namespace
 	}
 
-	getResult, err := b.GetRealm(realm)
-	if err != nil && !errors.Is(err, errdefs.ErrRealmNotFound) {
-		return result, err
-	}
-
 	// Determine which realm to use: from metadata if available, otherwise use provided realm
 	var internalRealm intmodel.Realm
-	metadataExists := err == nil && getResult.MetadataExists
-	if metadataExists {
-		internalRealm = getResult.Realm
+	var metadataExists bool
+	internalRealm, err := b.runner.GetRealm(realm)
+	if err != nil {
+		if errors.Is(err, errdefs.ErrRealmNotFound) {
+			// Metadata doesn't exist - construct realm from input with default namespace
+			metadataExists = false
+			internalRealm = intmodel.Realm{
+				Metadata: intmodel.RealmMetadata{
+					Name:   name,
+					Labels: realm.Metadata.Labels,
+				},
+				Spec: intmodel.RealmSpec{
+					Namespace: namespace,
+				},
+				Status: intmodel.RealmStatus{
+					State: intmodel.RealmStateUnknown,
+				},
+			}
+		} else {
+			return result, err
+		}
+	} else {
+		metadataExists = true
 		// Ensure namespace is set (use from metadata if available, otherwise use default)
 		if internalRealm.Spec.Namespace == "" {
 			internalRealm.Spec.Namespace = namespace
-		}
-	} else {
-		// Metadata doesn't exist - construct realm from input with default namespace
-		internalRealm = intmodel.Realm{
-			Metadata: intmodel.RealmMetadata{
-				Name:   name,
-				Labels: realm.Metadata.Labels,
-			},
-			Spec: intmodel.RealmSpec{
-				Namespace: namespace,
-			},
-			Status: intmodel.RealmStatus{
-				State: intmodel.RealmStateUnknown,
-			},
 		}
 	}
 
@@ -112,17 +113,18 @@ func (b *Exec) PurgeRealm(realm intmodel.Realm, force, cascade bool) (PurgeRealm
 		if metadataExists {
 			result.RealmDeleted = false
 		}
-	} else {
-		// Since private method succeeded, assume all operations succeeded
-		if metadataExists {
-			result.RealmDeleted = true
-			result.Deleted = append(result.Deleted, "metadata", "cgroup", "namespace")
-		} else {
-			result.RealmDeleted = false
-		}
-		result.Purged = append(result.Purged, "orphaned-containers", "cni-resources", "all-metadata")
-		result.PurgeSucceeded = true
+		return result, err
 	}
+
+	// Since private method succeeded, assume all operations succeeded
+	if metadataExists {
+		result.RealmDeleted = true
+		result.Deleted = append(result.Deleted, "metadata", "cgroup", "namespace")
+	} else {
+		result.RealmDeleted = false
+	}
+	result.Purged = append(result.Purged, "orphaned-containers", "cni-resources", "all-metadata")
+	result.PurgeSucceeded = true
 
 	return result, nil
 }

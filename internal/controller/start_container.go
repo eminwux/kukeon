@@ -25,43 +25,10 @@ import (
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
-// StartCellResult reports the outcome of starting a cell.
-type StartCellResult struct {
-	Cell    intmodel.Cell
-	Started bool
-}
-
 // StartContainerResult reports the outcome of starting a container.
 type StartContainerResult struct {
 	Container intmodel.Container
 	Started   bool
-}
-
-// StartCell starts all containers in a cell and updates the cell metadata state.
-func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
-	var res StartCellResult
-
-	internalCell, err := b.validateAndGetCell(cell)
-	if err != nil {
-		return res, err
-	}
-
-	// Start all containers in the cell
-	if err = b.runner.StartCell(internalCell); err != nil {
-		return res, fmt.Errorf("failed to start cell containers: %w", err)
-	}
-
-	// Update cell state to Ready
-	internalCell.Status.State = intmodel.CellStateReady
-
-	// Update cell metadata state to Ready
-	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {
-		return res, fmt.Errorf("failed to update cell metadata: %w", err)
-	}
-
-	res.Cell = internalCell
-	res.Started = true
-	return res, nil
 }
 
 // StartContainer starts a specific container in a cell and updates the cell metadata.
@@ -97,7 +64,7 @@ func (b *Exec) StartContainer(container intmodel.Container) (StartContainerResul
 		return res, errdefs.ErrCellNameRequired
 	}
 
-	// Build lookup cell for GetCell
+	// Build lookup cell for runner
 	lookupCell := intmodel.Cell{
 		Metadata: intmodel.CellMetadata{
 			Name: cellName,
@@ -108,7 +75,7 @@ func (b *Exec) StartContainer(container intmodel.Container) (StartContainerResul
 			StackName: stackName,
 		},
 	}
-	getResult, err := b.GetCell(lookupCell)
+	internalCell, err := b.runner.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return res, fmt.Errorf(
@@ -121,11 +88,6 @@ func (b *Exec) StartContainer(container intmodel.Container) (StartContainerResul
 		}
 		return res, err
 	}
-	if !getResult.MetadataExists {
-		return res, fmt.Errorf("cell %q not found", cellName)
-	}
-
-	internalCell := getResult.Cell
 
 	// Find container in cell spec by name (ID now stores just the container name)
 	var foundContainerSpec *intmodel.ContainerSpec

@@ -33,7 +33,7 @@ type Runner interface {
 	CreateRealm(realm intmodel.Realm) (intmodel.Realm, error)
 	EnsureRealm(realm intmodel.Realm) (intmodel.Realm, error)
 	ExistsRealmContainerdNamespace(namespace string) (bool, error)
-	DeleteRealm(realm intmodel.Realm) (DeleteRealmOutcome, error)
+	DeleteRealm(realm intmodel.Realm) error
 
 	GetSpace(space intmodel.Space) (intmodel.Space, error)
 	ListSpaces(realmName string) ([]intmodel.Space, error)
@@ -73,13 +73,6 @@ type Runner interface {
 	PurgeStack(stack intmodel.Stack) error
 	PurgeCell(cell intmodel.Cell) error
 	PurgeContainer(realm intmodel.Realm, containerID string) error
-}
-
-// DeleteRealmOutcome reports which realm resources were deleted successfully.
-type DeleteRealmOutcome struct {
-	MetadataDeleted            bool
-	CgroupDeleted              bool
-	ContainerdNamespaceDeleted bool
 }
 
 type Exec struct {

@@ -85,9 +85,10 @@ func (b *Exec) PurgeContainer(container intmodel.Container) (PurgeContainerResul
 			StackName: stackName,
 		},
 	}
-	getResult, err := b.GetCell(lookupCell)
+	internalCell, err := b.runner.GetCell(lookupCell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
+			result.CellMetadataExists = false
 			return result, fmt.Errorf(
 				"cell %q not found in realm %q, space %q, stack %q",
 				cellName,
@@ -98,13 +99,7 @@ func (b *Exec) PurgeContainer(container intmodel.Container) (PurgeContainerResul
 		}
 		return result, err
 	}
-	result.CellMetadataExists = getResult.MetadataExists
-
-	if !getResult.MetadataExists {
-		return result, fmt.Errorf("cell %q not found", cellName)
-	}
-
-	internalCell := getResult.Cell
+	result.CellMetadataExists = true
 
 	// Check if container exists in cell metadata by name (ID now stores just the container name)
 	var foundContainerSpec *intmodel.ContainerSpec
@@ -138,16 +133,13 @@ func (b *Exec) PurgeContainer(container intmodel.Container) (PurgeContainerResul
 			Name: realmName,
 		},
 	}
-	realmGetResult, err := b.GetRealm(lookupRealm)
+	internalRealm, err := b.runner.GetRealm(lookupRealm)
 	if err != nil {
+		if errors.Is(err, errdefs.ErrRealmNotFound) {
+			return result, fmt.Errorf("realm %q not found", realmName)
+		}
 		return result, fmt.Errorf("failed to get realm: %w", err)
 	}
-	if !realmGetResult.MetadataExists {
-		return result, fmt.Errorf("realm %q not found", realmName)
-	}
-
-	// Use internal realm directly for purgeContainerInternal
-	internalRealm := realmGetResult.Realm
 
 	// Call private method for deletion and purging
 	if err = b.purgeContainerInternal(internalCell, name, internalRealm); err != nil {

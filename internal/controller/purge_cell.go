@@ -63,7 +63,7 @@ func (b *Exec) PurgeCell(cell intmodel.Cell, force, cascade bool) (PurgeCellResu
 		return result, errdefs.ErrStackNameRequired
 	}
 
-	getResult, err := b.GetCell(cell)
+	internalCell, err := b.runner.GetCell(cell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
 			return result, fmt.Errorf(
@@ -76,8 +76,6 @@ func (b *Exec) PurgeCell(cell intmodel.Cell, force, cascade bool) (PurgeCellResu
 		}
 		return result, err
 	}
-
-	internalCell := getResult.Cell
 
 	// Initialize result with cell and flags
 	result = PurgeCellResult{
