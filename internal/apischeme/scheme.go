@@ -40,13 +40,22 @@ func DefaultVersion(version ext.Version) ext.Version {
 func ConvertRealmDocToInternal(in ext.RealmDoc) (intmodel.Realm, error) {
 	switch in.APIVersion {
 	case VersionV1Beta1, "": // default/empty treated as v1beta1
+		registryCreds := make([]intmodel.RegistryCredentials, len(in.Spec.RegistryCredentials))
+		for i, cred := range in.Spec.RegistryCredentials {
+			registryCreds[i] = intmodel.RegistryCredentials{
+				Username:      cred.Username,
+				Password:      cred.Password,
+				ServerAddress: cred.ServerAddress,
+			}
+		}
 		return intmodel.Realm{
 			Metadata: intmodel.RealmMetadata{
 				Name:   in.Metadata.Name,
 				Labels: in.Metadata.Labels,
 			},
 			Spec: intmodel.RealmSpec{
-				Namespace: in.Spec.Namespace,
+				Namespace:           in.Spec.Namespace,
+				RegistryCredentials: registryCreds,
 			},
 			Status: intmodel.RealmStatus{
 				State:      intmodel.RealmState(in.Status.State),
@@ -62,6 +71,14 @@ func ConvertRealmDocToInternal(in ext.RealmDoc) (intmodel.Realm, error) {
 func BuildRealmExternalFromInternal(in intmodel.Realm, apiVersion ext.Version) (ext.RealmDoc, error) {
 	switch apiVersion {
 	case VersionV1Beta1, "": // default to v1beta1
+		registryCreds := make([]ext.RegistryCredentials, len(in.Spec.RegistryCredentials))
+		for i, cred := range in.Spec.RegistryCredentials {
+			registryCreds[i] = ext.RegistryCredentials{
+				Username:      cred.Username,
+				Password:      cred.Password,
+				ServerAddress: cred.ServerAddress,
+			}
+		}
 		return ext.RealmDoc{
 			APIVersion: VersionV1Beta1,
 			Kind:       ext.KindRealm,
@@ -70,7 +87,8 @@ func BuildRealmExternalFromInternal(in intmodel.Realm, apiVersion ext.Version) (
 				Labels: in.Metadata.Labels,
 			},
 			Spec: ext.RealmSpec{
-				Namespace: in.Spec.Namespace,
+				Namespace:           in.Spec.Namespace,
+				RegistryCredentials: registryCreds,
 			},
 			Status: ext.RealmStatus{
 				State:      ext.RealmState(in.Status.State),

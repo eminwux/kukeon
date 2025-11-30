@@ -115,8 +115,13 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 		return fmt.Errorf("realm %q has no namespace", realmID)
 	}
 
-	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(namespace)
+	// Set namespace to realm namespace with credentials if available
+	if internalRealm.Spec.RegistryCredentials != nil {
+		creds := ctr.ConvertRealmCredentials(internalRealm.Spec.RegistryCredentials)
+		r.ctrClient.SetNamespaceWithCredentials(namespace, creds)
+	} else {
+		r.ctrClient.SetNamespace(namespace)
+	}
 
 	// Generate containerd ID with cell identifier for uniqueness
 	containerID, err := naming.BuildRootContainerdID(spaceID, stackID, cellID)
@@ -391,8 +396,13 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
 		return fmt.Errorf("realm %q has no namespace", realmName)
 	}
 
-	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(namespace)
+	// Set namespace to realm namespace with credentials if available
+	if len(internalRealm.Spec.RegistryCredentials) > 0 {
+		creds := ctr.ConvertRealmCredentials(internalRealm.Spec.RegistryCredentials)
+		r.ctrClient.SetNamespaceWithCredentials(namespace, creds)
+	} else {
+		r.ctrClient.SetNamespace(namespace)
+	}
 
 	// Find container in cell spec by ID (base name)
 	var foundContainerSpec *intmodel.ContainerSpec

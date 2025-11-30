@@ -28,6 +28,8 @@ import (
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/core/containers"
 	"github.com/containerd/containerd/v2/core/leases"
+	"github.com/containerd/containerd/v2/core/remotes"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
 	"github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/containerd/v2/pkg/oci"
@@ -41,6 +43,18 @@ import (
 const (
 	cniConfigAnnotation = "io.kukeon.cni.config"
 )
+
+// RegistryCredentials contains authentication information for a container registry.
+// This type matches the modelhub RegistryCredentials structure for use in the ctr package.
+type RegistryCredentials struct {
+	// Username is the registry username.
+	Username string
+	// Password is the registry password or token.
+	Password string
+	// ServerAddress is the registry server address (e.g., "docker.io", "registry.example.com").
+	// If empty, credentials apply to the registry extracted from the image reference.
+	ServerAddress string
+}
 
 var (
 	errEmptyContainerID  = errors.New("ctr: container id is required")
@@ -81,6 +95,54 @@ func formatError(err error) string {
 	}
 	result += resultSb61.String()
 
+	return result
+}
+
+// buildResolver creates a remotes.Resolver with optional credentials.
+// If creds is empty, returns a default resolver without authentication (supports anonymous pulls).
+// If creds are provided, returns a resolver with Docker authorizer configured to match credentials by host.
+func buildResolver(creds []RegistryCredentials) remotes.Resolver {
+	if len(creds) == 0 {
+		// Return default resolver without authentication (anonymous pulls)
+		return docker.NewResolver(docker.ResolverOptions{})
+	}
+
+	// Create resolver with credentials that match by host
+	return docker.NewResolver(docker.ResolverOptions{
+		Authorizer: docker.NewDockerAuthorizer(
+			docker.WithAuthCreds(func(host string) (string, string, error) {
+				// First, try to find exact match by ServerAddress
+				for _, cred := range creds {
+					if cred.ServerAddress != "" && host == cred.ServerAddress {
+						return cred.Username, cred.Password, nil
+					}
+				}
+				// If no exact match, try credentials with empty ServerAddress (default/fallback)
+				for _, cred := range creds {
+					if cred.ServerAddress == "" {
+						return cred.Username, cred.Password, nil
+					}
+				}
+				// No matching credentials found for this host
+				return "", "", nil
+			}),
+		),
+	})
+}
+
+// ConvertRealmCredentials converts modelhub RegistryCredentials slice to ctr RegistryCredentials slice.
+func ConvertRealmCredentials(creds []intmodel.RegistryCredentials) []RegistryCredentials {
+	if len(creds) == 0 {
+		return nil
+	}
+	result := make([]RegistryCredentials, len(creds))
+	for i, cred := range creds {
+		result[i] = RegistryCredentials{
+			Username:      cred.Username,
+			Password:      cred.Password,
+			ServerAddress: cred.ServerAddress,
+		}
+	}
 	return result
 }
 
@@ -247,11 +309,37 @@ func (c *client) namespaceCtx(ctx context.Context) context.Context {
 }
 
 // SetNamespace sets the namespace for subsequent operations.
+// This clears any previously set registry credentials.
 func (c *client) SetNamespace(namespace string) {
 	c.namespaceMu.Lock()
 	defer c.namespaceMu.Unlock()
 	c.namespace = namespace
 	c.logger.DebugContext(c.ctx, "set namespace", "namespace", namespace)
+
+	// Clear credentials when namespace is set without credentials
+	c.registryCredentialsMu.Lock()
+	defer c.registryCredentialsMu.Unlock()
+	c.registryCredentials = nil
+}
+
+// SetNamespaceWithCredentials sets the namespace and associated registry credentials.
+// This should be called when switching to a realm's namespace.
+func (c *client) SetNamespaceWithCredentials(namespace string, creds []RegistryCredentials) {
+	c.namespaceMu.Lock()
+	defer c.namespaceMu.Unlock()
+	c.namespace = namespace
+	c.logger.DebugContext(c.ctx, "set namespace with credentials", "namespace", namespace, "creds_count", len(creds))
+
+	c.registryCredentialsMu.Lock()
+	defer c.registryCredentialsMu.Unlock()
+	c.registryCredentials = creds
+}
+
+// GetRegistryCredentials returns the current registry credentials for the namespace.
+func (c *client) GetRegistryCredentials() []RegistryCredentials {
+	c.registryCredentialsMu.RLock()
+	defer c.registryCredentialsMu.RUnlock()
+	return c.registryCredentials
 }
 
 // Namespace returns the current namespace.
@@ -440,7 +528,23 @@ func (c *client) CreateContainer(ctx context.Context, spec ContainerSpec) (conta
 		// Use default platform for pull
 		// The image will be unpacked separately after pull
 		platform := platforms.DefaultSpec()
-		image, err = c.cClient.Pull(nsCtx, spec.Image, containerd.WithPlatform(platforms.Format(platform)))
+
+		// Build pull options with resolver if credentials are available
+		pullOpts := []containerd.RemoteOpt{
+			containerd.WithPlatform(platforms.Format(platform)),
+		}
+
+		// Get credentials from client (set when namespace was configured)
+		creds := c.GetRegistryCredentials()
+		if len(creds) > 0 {
+			resolver := buildResolver(creds)
+			pullOpts = append(pullOpts, containerd.WithResolver(resolver))
+			c.logger.DebugContext(ctx, "pulling image with credentials", "image", spec.Image, "creds_count", len(creds))
+		} else {
+			c.logger.DebugContext(ctx, "pulling image anonymously", "image", spec.Image)
+		}
+
+		image, err = c.cClient.Pull(nsCtx, spec.Image, pullOpts...)
 		if err != nil {
 			c.logger.ErrorContext(ctx, "failed to pull image", "image", spec.Image, "err", formatError(err))
 			return nil, fmt.Errorf("failed to pull image %s: %w", spec.Image, err)
