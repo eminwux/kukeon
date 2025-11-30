@@ -77,6 +77,16 @@ func (b *Exec) PurgeCell(cell intmodel.Cell, force, cascade bool) (PurgeCellResu
 		return result, err
 	}
 
+	if !getResult.MetadataExists {
+		return result, fmt.Errorf(
+			"cell %q not found in realm %q, space %q, stack %q",
+			name,
+			realmName,
+			spaceName,
+			stackName,
+		)
+	}
+
 	internalCell := getResult.Cell
 
 	// Initialize result with cell and flags
