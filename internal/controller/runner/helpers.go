@@ -33,7 +33,7 @@ import (
 )
 
 // purgeCNIForContainer removes all CNI-related resources for a specific container.
-func (r *Exec) purgeCNIForContainer(ctx context.Context, containerID, netnsPath, networkName string) error {
+func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) error {
 	var purged []string
 
 	// Try to call CNI DEL if netns is available
@@ -48,11 +48,11 @@ func (r *Exec) purgeCNIForContainer(ctx context.Context, containerID, netnsPath,
 			)
 			if err == nil {
 				if err = cniMgr.LoadNetworkConfigList(cniConfigPath); err == nil {
-					if err = cniMgr.DelContainerFromNetwork(ctx, containerID, netnsPath); err == nil {
+					if err = cniMgr.DelContainerFromNetwork(r.ctx, containerID, netnsPath); err == nil {
 						purged = append(purged, "cni-del")
-						r.logger.DebugContext(ctx, "called CNI DEL for container", "container", containerID)
+						r.logger.DebugContext(r.ctx, "called CNI DEL for container", "container", containerID)
 					} else {
-						r.logger.WarnContext(ctx, "failed to call CNI DEL", "container", containerID, "error", err)
+						r.logger.WarnContext(r.ctx, "failed to call CNI DEL", "container", containerID, "error", err)
 					}
 				}
 			}
@@ -65,9 +65,9 @@ func (r *Exec) purgeCNIForContainer(ctx context.Context, containerID, netnsPath,
 		ipamFile := filepath.Join(ipamDir, containerID)
 		if err := os.Remove(ipamFile); err == nil {
 			purged = append(purged, "ipam-allocation")
-			r.logger.DebugContext(ctx, "removed IPAM allocation", "container", containerID, "file", ipamFile)
+			r.logger.DebugContext(r.ctx, "removed IPAM allocation", "container", containerID, "file", ipamFile)
 		} else if !errors.Is(err, os.ErrNotExist) {
-			r.logger.WarnContext(ctx, "failed to remove IPAM allocation", "container", containerID, "error", err)
+			r.logger.WarnContext(r.ctx, "failed to remove IPAM allocation", "container", containerID, "error", err)
 		}
 	}
 
@@ -95,9 +95,9 @@ func (r *Exec) purgeCNIForContainer(ctx context.Context, containerID, netnsPath,
 				for _, match := range matches {
 					if err = os.Remove(match); err == nil {
 						purged = append(purged, fmt.Sprintf("cache-entry:%s", filepath.Base(match)))
-						r.logger.DebugContext(ctx, "removed CNI cache entry", "container", containerID, "file", match)
+						r.logger.DebugContext(r.ctx, "removed CNI cache entry", "container", containerID, "file", match)
 					} else if !errors.Is(err, os.ErrNotExist) {
-						r.logger.WarnContext(ctx, "failed to remove CNI cache entry", "container", containerID, "file", match, "error", err)
+						r.logger.WarnContext(r.ctx, "failed to remove CNI cache entry", "container", containerID, "file", match, "error", err)
 					}
 				}
 			}
@@ -105,14 +105,14 @@ func (r *Exec) purgeCNIForContainer(ctx context.Context, containerID, netnsPath,
 	}
 
 	if len(purged) > 0 {
-		r.logger.InfoContext(ctx, "purged CNI resources for container", "container", containerID, "purged", purged)
+		r.logger.InfoContext(r.ctx, "purged CNI resources for container", "container", containerID, "purged", purged)
 	}
 
 	return nil
 }
 
 // purgeCNIForNetwork removes all CNI-related resources for an entire network.
-func (r *Exec) purgeCNIForNetwork(ctx context.Context, networkName string) error {
+func (r *Exec) purgeCNIForNetwork(networkName string) error {
 	if networkName == "" {
 		return nil
 	}
@@ -123,9 +123,9 @@ func (r *Exec) purgeCNIForNetwork(ctx context.Context, networkName string) error
 	networkDir := filepath.Join(cni.CNINetworksDir, networkName)
 	if err := os.RemoveAll(networkDir); err == nil {
 		purged = append(purged, "network-directory")
-		r.logger.DebugContext(ctx, "removed CNI network directory", "network", networkName, "dir", networkDir)
+		r.logger.DebugContext(r.ctx, "removed CNI network directory", "network", networkName, "dir", networkDir)
 	} else if !errors.Is(err, os.ErrNotExist) {
-		r.logger.WarnContext(ctx, "failed to remove CNI network directory", "network", networkName, "error", err)
+		r.logger.WarnContext(r.ctx, "failed to remove CNI network directory", "network", networkName, "error", err)
 	}
 
 	// Remove all related cache entries (files containing network name)
@@ -144,7 +144,7 @@ func (r *Exec) purgeCNIForNetwork(ctx context.Context, networkName string) error
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			r.logger.WarnContext(ctx, "failed to read cache directory", "dir", cacheDir, "error", err)
+			r.logger.WarnContext(r.ctx, "failed to read cache directory", "dir", cacheDir, "error", err)
 			continue
 		}
 
@@ -158,7 +158,7 @@ func (r *Exec) purgeCNIForNetwork(ctx context.Context, networkName string) error
 				if err = os.Remove(filePath); err == nil {
 					purged = append(purged, fmt.Sprintf("cache-entry:%s", entry.Name()))
 					r.logger.DebugContext(
-						ctx,
+						r.ctx,
 						"removed CNI cache entry for network",
 						"network",
 						networkName,
@@ -166,14 +166,14 @@ func (r *Exec) purgeCNIForNetwork(ctx context.Context, networkName string) error
 						filePath,
 					)
 				} else if !errors.Is(err, os.ErrNotExist) {
-					r.logger.WarnContext(ctx, "failed to remove CNI cache entry", "network", networkName, "file", filePath, "error", err)
+					r.logger.WarnContext(r.ctx, "failed to remove CNI cache entry", "network", networkName, "file", filePath, "error", err)
 				}
 			}
 		}
 	}
 
 	if len(purged) > 0 {
-		r.logger.InfoContext(ctx, "purged CNI resources for network", "network", networkName, "purged", purged)
+		r.logger.InfoContext(r.ctx, "purged CNI resources for network", "network", networkName, "purged", purged)
 	}
 
 	return nil
@@ -181,9 +181,9 @@ func (r *Exec) purgeCNIForNetwork(ctx context.Context, networkName string) error
 
 // findOrphanedContainers lists all containers in containerd namespace matching a pattern,
 // and returns container IDs that are not tracked in metadata.
-func (r *Exec) findOrphanedContainers(ctx context.Context, namespace, pattern string) ([]string, error) {
+func (r *Exec) findOrphanedContainers(namespace, pattern string) ([]string, error) {
 	if r.ctrClient == nil {
-		r.logger.DebugContext(ctx, "initializing containerd client for finding orphaned containers")
+		r.logger.DebugContext(r.ctx, "initializing containerd client for finding orphaned containers")
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
 	if err := r.ctrClient.Connect(); err != nil {
@@ -194,7 +194,7 @@ func (r *Exec) findOrphanedContainers(ctx context.Context, namespace, pattern st
 	// Set namespace
 	oldNamespace := r.ctrClient.Namespace()
 	r.logger.DebugContext(
-		ctx,
+		r.ctx,
 		"setting namespace for container listing",
 		"namespace",
 		namespace,
@@ -205,13 +205,13 @@ func (r *Exec) findOrphanedContainers(ctx context.Context, namespace, pattern st
 	defer r.ctrClient.SetNamespace(oldNamespace)
 
 	// List all containers
-	r.logger.DebugContext(ctx, "listing containers from containerd", "namespace", namespace, "pattern", pattern)
-	containers, err := r.ctrClient.ListContainers(ctx)
+	r.logger.DebugContext(r.ctx, "listing containers from containerd", "namespace", namespace, "pattern", pattern)
+	containers, err := r.ctrClient.ListContainers(r.ctx)
 	if err != nil {
-		r.logger.ErrorContext(ctx, "failed to list containers", "error", err)
+		r.logger.ErrorContext(r.ctx, "failed to list containers", "error", err)
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
-	r.logger.DebugContext(ctx, "listed containers from containerd", "count", len(containers))
+	r.logger.DebugContext(r.ctx, "listed containers from containerd", "count", len(containers))
 
 	var orphaned []string
 	for _, container := range containers {
@@ -223,7 +223,7 @@ func (r *Exec) findOrphanedContainers(ctx context.Context, namespace, pattern st
 		orphaned = append(orphaned, containerID)
 	}
 	r.logger.DebugContext(
-		ctx,
+		r.ctx,
 		"filtered orphaned containers",
 		"total_listed",
 		len(containers),
@@ -251,7 +251,7 @@ func (r *Exec) findCNIConfigPath(networkName string) (string, error) {
 }
 
 // getContainerNetnsPath attempts to get the network namespace path for a container.
-func (r *Exec) getContainerNetnsPath(ctx context.Context, containerID string) (string, error) {
+func (r *Exec) getContainerNetnsPath(containerID string) (string, error) {
 	if r.ctrClient == nil {
 		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
 	}
@@ -259,12 +259,12 @@ func (r *Exec) getContainerNetnsPath(ctx context.Context, containerID string) (s
 		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
-	container, err := r.ctrClient.GetContainer(ctx, containerID)
+	container, err := r.ctrClient.GetContainer(r.ctx, containerID)
 	if err != nil {
 		return "", err
 	}
 
-	task, err := container.Task(ctx, nil)
+	task, err := container.Task(r.ctx, nil)
 	if err != nil {
 		return "", err
 	}
@@ -279,11 +279,11 @@ func (r *Exec) getContainerNetnsPath(ctx context.Context, containerID string) (s
 
 // findContainersByPattern finds all containers matching a naming pattern.
 // Pattern format: realm-space-stack-cell or realm-space-stack-cell-container.
-func (r *Exec) findContainersByPattern(ctx context.Context, namespace, pattern string) ([]string, error) {
-	r.logger.DebugContext(ctx, "finding containers by pattern", "namespace", namespace, "pattern", pattern)
-	containers, err := r.findOrphanedContainers(ctx, namespace, pattern)
+func (r *Exec) findContainersByPattern(namespace, pattern string) ([]string, error) {
+	r.logger.DebugContext(r.ctx, "finding containers by pattern", "namespace", namespace, "pattern", pattern)
+	containers, err := r.findOrphanedContainers(namespace, pattern)
 	if err != nil {
-		r.logger.ErrorContext(ctx, "failed to find orphaned containers for pattern", "pattern", pattern, "error", err)
+		r.logger.ErrorContext(r.ctx, "failed to find orphaned containers for pattern", "pattern", pattern, "error", err)
 		return nil, err
 	}
 
@@ -301,7 +301,7 @@ func (r *Exec) findContainersByPattern(ctx context.Context, namespace, pattern s
 		}
 	}
 	r.logger.DebugContext(
-		ctx,
+		r.ctx,
 		"filtered containers by pattern",
 		"total_found",
 		len(containers),
@@ -371,27 +371,26 @@ func (r *Exec) processOrphanedContainers(ctx context.Context, containers []strin
 	}
 
 	r.logger.InfoContext(ctx, "processing orphaned containers for deletion", "count", len(containers))
-	ctrCtx := context.Background()
 	for i, containerID := range containers {
 		r.logger.DebugContext(ctx, "processing container", "index", i+1, "total", len(containers), "id", containerID)
 		// Try to delete container
 		r.logger.DebugContext(ctx, "stopping container", "id", containerID)
-		_, _ = r.ctrClient.StopContainer(ctrCtx, containerID, ctr.StopContainerOptions{})
+		_, _ = r.ctrClient.StopContainer(ctx, containerID, ctr.StopContainerOptions{})
 		r.logger.DebugContext(ctx, "deleting container", "id", containerID)
-		_ = r.ctrClient.DeleteContainer(ctrCtx, containerID, ctr.ContainerDeleteOptions{
+		_ = r.ctrClient.DeleteContainer(ctx, containerID, ctr.ContainerDeleteOptions{
 			SnapshotCleanup: true,
 		})
 
 		// Get netns and purge CNI
 		r.logger.DebugContext(ctx, "getting container netns path", "id", containerID)
-		netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
+		netnsPath, _ := r.getContainerNetnsPath(containerID)
 		// Try to determine network name from container ID pattern
 		// Container ID format: realm-space-cell-container
 		parts := strings.Split(containerID, "-")
 		if len(parts) >= ContainerIDMinimumParts {
 			networkName := fmt.Sprintf("%s-%s", parts[0], parts[1])
 			r.logger.DebugContext(ctx, "purging CNI resources for container", "id", containerID, "network", networkName)
-			_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
+			_ = r.purgeCNIForContainer(containerID, netnsPath, networkName)
 		}
 		r.logger.DebugContext(ctx, "completed processing container", "id", containerID)
 	}

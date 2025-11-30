@@ -17,7 +17,6 @@
 package runner
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -116,15 +115,12 @@ func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 		networkName, _ = r.getSpaceNetworkName(space)
 	}
 
-	// Create a background context for containerd operations
-	ctrCtx := context.Background()
-
 	// Comprehensive CNI cleanup before stopping/deleting
-	netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerdID)
-	_ = r.purgeCNIForContainer(ctrCtx, containerdID, netnsPath, networkName)
+	netnsPath, _ := r.getContainerNetnsPath(containerdID)
+	_ = r.purgeCNIForContainer(containerdID, netnsPath, networkName)
 
 	// Stop the container using containerd ID
-	_, err = r.ctrClient.StopContainer(ctrCtx, containerdID, ctr.StopContainerOptions{})
+	_, err = r.ctrClient.StopContainer(r.ctx, containerdID, ctr.StopContainerOptions{})
 	if err != nil {
 		r.logger.WarnContext(
 			r.ctx,
@@ -139,7 +135,7 @@ func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 	}
 
 	// Delete the container from containerd using containerd ID
-	err = r.ctrClient.DeleteContainer(ctrCtx, containerdID, ctr.ContainerDeleteOptions{
+	err = r.ctrClient.DeleteContainer(r.ctx, containerdID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 	if err != nil {

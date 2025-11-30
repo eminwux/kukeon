@@ -17,7 +17,6 @@
 package runner
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -106,7 +105,6 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 	}
 
 	// Delete all containers in the cell (workload + root)
-	ctrCtx := context.Background()
 	for _, containerSpec := range internalCell.Spec.Containers {
 		containerSpaceName := containerSpec.SpaceName
 		if strings.TrimSpace(containerSpaceName) == "" {
@@ -134,12 +132,12 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 		}
 
 		// Get netns path and purge CNI before stopping/deleting
-		netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
-		_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
+		netnsPath, _ := r.getContainerNetnsPath(containerID)
+		_ = r.purgeCNIForContainer(containerID, netnsPath, networkName)
 
 		// Use container name with UUID for containerd operations
 		// Stop and delete the container
-		_, err = r.ctrClient.StopContainer(ctrCtx, containerID, ctr.StopContainerOptions{})
+		_, err = r.ctrClient.StopContainer(r.ctx, containerID, ctr.StopContainerOptions{})
 		if err != nil {
 			r.logger.WarnContext(
 				r.ctx,
@@ -151,7 +149,7 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 			)
 		}
 
-		err = r.ctrClient.DeleteContainer(ctrCtx, containerID, ctr.ContainerDeleteOptions{
+		err = r.ctrClient.DeleteContainer(r.ctx, containerID, ctr.ContainerDeleteOptions{
 			SnapshotCleanup: true,
 		})
 		if err != nil {
@@ -167,10 +165,10 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 	}
 
 	// Comprehensive CNI cleanup for root container before stopping/deleting
-	netnsPath, _ := r.getContainerNetnsPath(ctrCtx, rootContainerID)
-	_ = r.purgeCNIForContainer(ctrCtx, rootContainerID, netnsPath, networkName)
+	netnsPath, _ := r.getContainerNetnsPath(rootContainerID)
+	_ = r.purgeCNIForContainer(rootContainerID, netnsPath, networkName)
 
-	_, err = r.ctrClient.StopContainer(ctrCtx, rootContainerID, ctr.StopContainerOptions{Force: true})
+	_, err = r.ctrClient.StopContainer(r.ctx, rootContainerID, ctr.StopContainerOptions{Force: true})
 	if err != nil {
 		r.logger.WarnContext(
 			r.ctx,
@@ -182,7 +180,7 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 		)
 	}
 
-	err = r.ctrClient.DeleteContainer(ctrCtx, rootContainerID, ctr.ContainerDeleteOptions{
+	err = r.ctrClient.DeleteContainer(r.ctx, rootContainerID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 	if err != nil {

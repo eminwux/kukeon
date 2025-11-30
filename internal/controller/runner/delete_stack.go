@@ -17,7 +17,6 @@
 package runner
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -94,12 +93,11 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 				internalStack.Spec.SpaceName,
 				internalStack.Metadata.Name,
 			)
-			containers, findErr := r.findContainersByPattern(r.ctx, internalRealm.Spec.Namespace, pattern)
+			containers, findErr := r.findContainersByPattern(internalRealm.Spec.Namespace, pattern)
 			if findErr == nil {
-				ctrCtx := context.Background()
 				for _, containerID := range containers {
-					netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
-					_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
+					netnsPath, _ := r.getContainerNetnsPath(containerID)
+					_ = r.purgeCNIForContainer(containerID, netnsPath, networkName)
 				}
 			}
 		}

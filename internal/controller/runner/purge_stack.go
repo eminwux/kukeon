@@ -17,7 +17,6 @@
 package runner
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -102,12 +101,11 @@ func (r *Exec) PurgeStack(stack intmodel.Stack) error {
 			stackForOps.Metadata.Name,
 		)
 		var containers []string
-		containers, err = r.findContainersByPattern(r.ctx, realmNamespace, pattern)
+		containers, err = r.findContainersByPattern(realmNamespace, pattern)
 		if err == nil {
-			ctrCtx := context.Background()
 			for _, containerID := range containers {
-				netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
-				_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
+				netnsPath, _ := r.getContainerNetnsPath(containerID)
+				_ = r.purgeCNIForContainer(containerID, netnsPath, networkName)
 			}
 		}
 	}

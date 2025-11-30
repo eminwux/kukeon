@@ -17,7 +17,6 @@
 package runner
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -60,16 +59,14 @@ func (r *Exec) PurgeContainer(realm intmodel.Realm, containerID string) error {
 
 	r.ctrClient.SetNamespace(namespace)
 
-	ctrCtx := context.Background()
-
 	// Try to stop and delete container
-	_, _ = r.ctrClient.StopContainer(ctrCtx, containerID, ctr.StopContainerOptions{})
-	_ = r.ctrClient.DeleteContainer(ctrCtx, containerID, ctr.ContainerDeleteOptions{
+	_, _ = r.ctrClient.StopContainer(r.ctx, containerID, ctr.StopContainerOptions{})
+	_ = r.ctrClient.DeleteContainer(r.ctx, containerID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 
 	// Get netns path if container is running
-	netnsPath, _ := r.getContainerNetnsPath(ctrCtx, containerID)
+	netnsPath, _ := r.getContainerNetnsPath(containerID)
 
 	// Try to determine network name from container ID
 	parts := strings.Split(containerID, "-")
@@ -79,7 +76,7 @@ func (r *Exec) PurgeContainer(realm intmodel.Realm, containerID string) error {
 	}
 
 	// Purge CNI resources
-	_ = r.purgeCNIForContainer(ctrCtx, containerID, netnsPath, networkName)
+	_ = r.purgeCNIForContainer(containerID, netnsPath, networkName)
 
 	return nil
 }

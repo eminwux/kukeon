@@ -17,7 +17,6 @@
 package runner
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -71,8 +70,7 @@ func (r *Exec) DeleteRealm(realm intmodel.Realm) error {
 
 	// Clean up all namespace resources (images, snapshots, blobs) before deleting namespace
 	// Namespace must be empty before deletion
-	ctrCtx := context.Background()
-	if err = r.ctrClient.CleanupNamespaceResources(ctrCtx, internalRealm.Spec.Namespace, "overlayfs"); err != nil {
+	if err = r.ctrClient.CleanupNamespaceResources(r.ctx, internalRealm.Spec.Namespace, "overlayfs"); err != nil {
 		r.logger.WarnContext(
 			r.ctx,
 			"failed to cleanup namespace resources",
@@ -86,12 +84,12 @@ func (r *Exec) DeleteRealm(realm intmodel.Realm) error {
 
 	// Find and clean up orphaned containers before deleting namespace
 	r.logger.DebugContext(r.ctx, "starting to find orphaned containers", "namespace", internalRealm.Spec.Namespace)
-	containers, err := r.findOrphanedContainers(ctrCtx, internalRealm.Spec.Namespace, "")
+	containers, err := r.findOrphanedContainers(internalRealm.Spec.Namespace, "")
 	if err != nil {
 		r.logger.WarnContext(r.ctx, "failed to find orphaned containers", "error", err)
 	} else {
 		r.logger.DebugContext(r.ctx, "found orphaned containers", "count", len(containers))
-		r.processOrphanedContainers(ctrCtx, containers)
+		r.processOrphanedContainers(r.ctx, containers)
 	}
 
 	// Purge all CNI networks for this realm
@@ -113,7 +111,7 @@ func (r *Exec) DeleteRealm(realm intmodel.Realm) error {
 			// Check if network name starts with realm name prefix
 			if strings.HasPrefix(networkName, realmPrefix) {
 				r.logger.DebugContext(r.ctx, "purging CNI network for realm", "realm", internalRealm.Metadata.Name, "network", networkName)
-				_ = r.purgeCNIForNetwork(r.ctx, networkName)
+				_ = r.purgeCNIForNetwork(networkName)
 			}
 		}
 	}
