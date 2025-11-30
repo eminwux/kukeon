@@ -30,7 +30,19 @@ type RealmMetadata struct {
 }
 
 type RealmSpec struct {
-	Namespace string `json:"namespace" yaml:"namespace"`
+	Namespace           string                `json:"namespace"                     yaml:"namespace"`
+	RegistryCredentials []RegistryCredentials `json:"registryCredentials,omitempty" yaml:"registryCredentials,omitempty"`
+}
+
+// RegistryCredentials contains authentication information for a container registry.
+type RegistryCredentials struct {
+	// Username is the registry username.
+	Username string `json:"username"                yaml:"username"`
+	// Password is the registry password or token.
+	Password string `json:"password"                yaml:"password"`
+	// ServerAddress is the registry server address (e.g., "docker.io", "registry.example.com").
+	// If empty, credentials apply to the registry extracted from the image reference.
+	ServerAddress string `json:"serverAddress,omitempty" yaml:"serverAddress,omitempty"`
 }
 
 type RealmStatus struct {
