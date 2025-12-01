@@ -81,7 +81,7 @@ func (r *Exec) RecreateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 		}
 
 		// Stop container
-		_, err = r.ctrClient.StopContainer(r.ctx, containerID, ctr.StopContainerOptions{})
+		_, err = r.ctrClient.StopContainer(containerID, ctr.StopContainerOptions{})
 		if err != nil {
 			r.logger.WarnContext(
 				r.ctx,
@@ -92,7 +92,7 @@ func (r *Exec) RecreateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 		}
 
 		// Delete container
-		err = r.ctrClient.DeleteContainer(r.ctx, containerID, ctr.ContainerDeleteOptions{
+		err = r.ctrClient.DeleteContainer(containerID, ctr.ContainerDeleteOptions{
 			SnapshotCleanup: true,
 		})
 		if err != nil {
@@ -111,7 +111,7 @@ func (r *Exec) RecreateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, fmt.Errorf("failed to build root container containerd ID: %w", err)
 	}
 
-	_, err = r.ctrClient.StopContainer(r.ctx, rootContainerID, ctr.StopContainerOptions{Force: true})
+	_, err = r.ctrClient.StopContainer(rootContainerID, ctr.StopContainerOptions{Force: true})
 	if err != nil {
 		r.logger.WarnContext(
 			r.ctx,
@@ -121,7 +121,7 @@ func (r *Exec) RecreateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 		)
 	}
 
-	err = r.ctrClient.DeleteContainer(r.ctx, rootContainerID, ctr.ContainerDeleteOptions{
+	err = r.ctrClient.DeleteContainer(rootContainerID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 	if err != nil {

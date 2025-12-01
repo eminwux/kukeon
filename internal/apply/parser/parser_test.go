@@ -346,3 +346,199 @@ metadata:
 		t.Fatalf("expected 1 document, got %d", len(docs))
 	}
 }
+
+func TestParseDocuments_SeparatorInString(t *testing.T) {
+	// Test that --- in a string value should not split documents
+	yaml := `apiVersion: v1beta1
+kind: Realm
+metadata:
+  name: test-realm
+  description: "This contains --- three dashes"
+spec:
+  namespace: test-ns
+---
+apiVersion: v1beta1
+kind: Space
+metadata:
+  name: test-space
+spec:
+  realmId: test-realm
+`
+	docs, err := parser.ParseDocuments(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseDocuments failed: %v", err)
+	}
+	if len(docs) != 2 {
+		t.Fatalf("expected 2 documents, got %d", len(docs))
+	}
+	// Verify the first document contains the --- in the string
+	if !strings.Contains(string(docs[0]), "This contains --- three dashes") {
+		t.Errorf("expected first document to contain '---' in string, got: %s", string(docs[0]))
+	}
+}
+
+func TestParseDocuments_SeparatorInComment(t *testing.T) {
+	// Test that --- in a comment should not split documents
+	yaml := `apiVersion: v1beta1
+kind: Realm
+metadata:
+  name: test-realm
+  # This is a comment with --- three dashes
+spec:
+  namespace: test-ns
+---
+apiVersion: v1beta1
+kind: Space
+metadata:
+  name: test-space
+spec:
+  realmId: test-realm
+`
+	docs, err := parser.ParseDocuments(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseDocuments failed: %v", err)
+	}
+	if len(docs) != 2 {
+		t.Fatalf("expected 2 documents, got %d", len(docs))
+	}
+	// Verify the first document contains the comment
+	if !strings.Contains(string(docs[0]), "# This is a comment with --- three dashes") {
+		t.Errorf("expected first document to contain comment with '---', got: %s", string(docs[0]))
+	}
+}
+
+func TestParseDocuments_SeparatorInMultilineString(t *testing.T) {
+	// Test that --- in a multiline string should not split documents
+	yaml := `apiVersion: v1beta1
+kind: Realm
+metadata:
+  name: test-realm
+spec:
+  namespace: test-ns
+  description: |
+    This is a multiline string
+    that contains --- three dashes
+    in the middle of the content
+---
+apiVersion: v1beta1
+kind: Space
+metadata:
+  name: test-space
+spec:
+  realmId: test-realm
+`
+	docs, err := parser.ParseDocuments(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseDocuments failed: %v", err)
+	}
+	if len(docs) != 2 {
+		t.Fatalf("expected 2 documents, got %d", len(docs))
+	}
+	// Verify the first document contains the multiline string with ---
+	if !strings.Contains(string(docs[0]), "that contains --- three dashes") {
+		t.Errorf("expected first document to contain multiline string with '---', got: %s", string(docs[0]))
+	}
+}
+
+func TestParseDocuments_LeadingWhitespace(t *testing.T) {
+	// Test that --- with leading whitespace should still split documents
+	yaml := `apiVersion: v1beta1
+kind: Realm
+metadata:
+  name: realm1
+    ---
+apiVersion: v1beta1
+kind: Space
+metadata:
+  name: space1
+spec:
+  realmId: realm1
+`
+	docs, err := parser.ParseDocuments(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseDocuments failed: %v", err)
+	}
+	if len(docs) != 2 {
+		t.Fatalf("expected 2 documents, got %d", len(docs))
+	}
+}
+
+func TestParseDocuments_FirstDocumentNoSeparator(t *testing.T) {
+	// Test that first document without --- should work
+	yaml := `apiVersion: v1beta1
+kind: Realm
+metadata:
+  name: realm1
+spec:
+  namespace: test-ns
+---
+apiVersion: v1beta1
+kind: Space
+metadata:
+  name: space1
+spec:
+  realmId: realm1
+`
+	docs, err := parser.ParseDocuments(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseDocuments failed: %v", err)
+	}
+	if len(docs) != 2 {
+		t.Fatalf("expected 2 documents, got %d", len(docs))
+	}
+}
+
+func TestParseDocuments_ComplexContent(t *testing.T) {
+	// Test complex YAML with --- in various places
+	yaml := `apiVersion: v1beta1
+kind: Realm
+metadata:
+  name: test-realm
+  labels:
+    key1: "value with --- dashes"
+    key2: |
+      Multiline
+      with --- dashes
+  # Comment with --- dashes
+spec:
+  namespace: test-ns
+  description: "String with --- dashes"
+---
+apiVersion: v1beta1
+kind: Space
+metadata:
+  name: test-space
+  # Another comment --- here
+spec:
+  realmId: test-realm
+  config: |
+    Some config
+    with --- dashes
+    in it
+---
+apiVersion: v1beta1
+kind: Stack
+metadata:
+  name: test-stack
+spec:
+  realmId: test-realm
+  spaceId: test-space
+`
+	docs, err := parser.ParseDocuments(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseDocuments failed: %v", err)
+	}
+	if len(docs) != 3 {
+		t.Fatalf("expected 3 documents, got %d", len(docs))
+	}
+	// Verify each document contains the expected content
+	if !strings.Contains(string(docs[0]), "value with --- dashes") {
+		t.Errorf("expected first document to contain '---' in label value")
+	}
+	if !strings.Contains(string(docs[1]), "with --- dashes") {
+		t.Errorf("expected second document to contain '---' in multiline config")
+	}
+	if !strings.Contains(string(docs[2]), "kind: Stack") {
+		t.Errorf("expected third document to be a Stack")
+	}
+}

@@ -17,9 +17,9 @@
 package controller
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/apply/parser"
@@ -48,6 +48,51 @@ type ResourceResult struct {
 	Details map[string]string
 }
 
+// resourceResultJSON is a helper type for JSON/YAML serialization.
+type resourceResultJSON struct {
+	Index   int               `json:"index"             yaml:"index"`
+	Kind    string            `json:"kind"              yaml:"kind"`
+	Name    string            `json:"name"              yaml:"name"`
+	Action  string            `json:"action"            yaml:"action"`
+	Error   *string           `json:"error,omitempty"   yaml:"error,omitempty"`
+	Changes []string          `json:"changes,omitempty" yaml:"changes,omitempty"`
+	Details map[string]string `json:"details,omitempty" yaml:"details,omitempty"`
+}
+
+// MarshalJSON implements json.Marshaler for ResourceResult.
+func (r ResourceResult) MarshalJSON() ([]byte, error) {
+	result := resourceResultJSON{
+		Index:   r.Index,
+		Kind:    r.Kind,
+		Name:    r.Name,
+		Action:  r.Action,
+		Changes: r.Changes,
+		Details: r.Details,
+	}
+	if r.Error != nil {
+		errMsg := r.Error.Error()
+		result.Error = &errMsg
+	}
+	return json.Marshal(result)
+}
+
+// MarshalYAML implements yaml.Marshaler for ResourceResult.
+func (r ResourceResult) MarshalYAML() (interface{}, error) {
+	result := resourceResultJSON{
+		Index:   r.Index,
+		Kind:    r.Kind,
+		Name:    r.Name,
+		Action:  r.Action,
+		Changes: r.Changes,
+		Details: r.Details,
+	}
+	if r.Error != nil {
+		errMsg := r.Error.Error()
+		result.Error = &errMsg
+	}
+	return result, nil
+}
+
 // ApplyDocuments applies a set of resource documents in dependency order.
 // Documents are sorted: Realm → Space → Stack → Cell → Container.
 // Returns a summary of actions taken for each resource.
@@ -59,7 +104,7 @@ func (b *Exec) ApplyDocuments(docs []parser.Document) (ApplyResult, error) {
 	}
 
 	// Sort documents by dependency order
-	sortedDocs := sortDocumentsByDependency(docs)
+	sortedDocs := SortDocumentsByKind(docs, false)
 
 	// Apply each document in order
 	for _, doc := range sortedDocs {
@@ -179,33 +224,4 @@ func (b *Exec) ApplyDocuments(docs []parser.Document) (ApplyResult, error) {
 	}
 
 	return result, nil
-}
-
-// sortDocumentsByDependency sorts documents by dependency order:
-// Realm → Space → Stack → Cell → Container.
-func sortDocumentsByDependency(docs []parser.Document) []parser.Document {
-	// Create a copy to avoid modifying the original
-	sorted := make([]parser.Document, len(docs))
-	copy(sorted, docs)
-
-	// Define dependency order
-	kindOrder := map[v1beta1.Kind]int{
-		v1beta1.KindRealm:     1,
-		v1beta1.KindSpace:     2,
-		v1beta1.KindStack:     3,
-		v1beta1.KindCell:      4,
-		v1beta1.KindContainer: 5,
-	}
-
-	// Sort by kind order, then by original index
-	sort.Slice(sorted, func(i, j int) bool {
-		orderI := kindOrder[sorted[i].Kind]
-		orderJ := kindOrder[sorted[j].Kind]
-		if orderI != orderJ {
-			return orderI < orderJ
-		}
-		return sorted[i].Index < sorted[j].Index
-	})
-
-	return sorted
 }

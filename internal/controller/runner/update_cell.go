@@ -166,12 +166,12 @@ func containerSpecChanged(desired, actual *intmodel.ContainerSpec) bool {
 
 func stringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
-		return true // Different length means changed
+		return false // Different length means not equal
 	}
 	for i := range a {
 		if a[i] != b[i] {
-			return true // Different content means changed
+			return false // Different content means not equal
 		}
 	}
-	return false // Same content means unchanged
+	return true // Same content means equal
 }

@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
@@ -57,15 +58,24 @@ func (e *ValidationError) Error() string {
 }
 
 // ParseDocuments reads YAML from the given reader and splits it into multiple documents.
-// Documents are separated by `---`.
+// Documents are separated by `---` at the start of a line (optionally preceded by whitespace),
+// following the YAML specification. The separator must appear on its own line.
 func ParseDocuments(r io.Reader) ([][]byte, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read input: %w", err)
 	}
 
+	// Regex pattern to match document separator: --- at start of line (with optional whitespace)
+	// Pattern: (?m)^\s*---\s*$
+	// - (?m) enables multiline mode (^ and $ match line boundaries)
+	// - ^\s* matches start of line with optional leading whitespace
+	// - --- matches literal three dashes
+	// - \s*$ matches optional trailing whitespace and end of line
+	separatorPattern := regexp.MustCompile(`(?m)^\s*---\s*$`)
+
 	// Split on document separator
-	docs := strings.Split(string(data), "---")
+	docs := separatorPattern.Split(string(data), -1)
 	result := make([][]byte, 0, len(docs))
 
 	for _, doc := range docs {

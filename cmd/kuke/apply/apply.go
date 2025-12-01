@@ -17,19 +17,14 @@
 package apply
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
-	"strings"
 
-	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
+	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/apply/parser"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 )
 
 type applyController interface {
@@ -62,54 +57,26 @@ func NewApplyCmd() *cobra.Command {
 			}
 
 			// Read input
-			var reader io.Reader
-			if file == "-" {
-				reader = os.Stdin
-			} else {
-				f, openErr := os.Open(file)
-				if openErr != nil {
-					return fmt.Errorf("failed to open file %q: %w", file, openErr)
-				}
-				defer f.Close()
-				reader = f
-			}
-
-			// Parse YAML documents
-			rawDocs, err := parser.ParseDocuments(reader)
+			reader, cleanup, err := kukshared.ReadFileOrStdin(file)
 			if err != nil {
-				return fmt.Errorf("failed to parse YAML: %w", err)
+				return err
 			}
-
-			// Parse and validate each document
-			docs := make([]parser.Document, 0, len(rawDocs))
-			var validationErrors []*parser.ValidationError
-
-			for i, rawDoc := range rawDocs {
-				doc, parseErr := parser.ParseDocument(i, rawDoc)
-				if parseErr != nil {
-					validationErrors = append(validationErrors, &parser.ValidationError{
-						Index: i,
-						Err:   parseErr,
-					})
-					continue
+			defer func() {
+				if cleanupErr := cleanup(); cleanupErr != nil {
+					// Log cleanup error but don't fail the operation
+					_ = cleanupErr
 				}
+			}()
 
-				validationErr := parser.ValidateDocument(doc)
-				if validationErr != nil {
-					validationErrors = append(validationErrors, validationErr)
-					continue
-				}
-
-				docs = append(docs, *doc)
+			// Parse and validate documents
+			docs, validationErrors, err := kukshared.ParseAndValidateDocuments(reader)
+			if err != nil {
+				return err
 			}
 
 			// Report validation errors
 			if len(validationErrors) > 0 {
-				var errMsgs []string
-				for _, validationErr := range validationErrors {
-					errMsgs = append(errMsgs, validationErr.Error())
-				}
-				return fmt.Errorf("validation errors:\n  %s", strings.Join(errMsgs, "\n  "))
+				return kukshared.FormatValidationErrors(validationErrors)
 			}
 
 			if len(docs) == 0 {
@@ -121,7 +88,7 @@ func NewApplyCmd() *cobra.Command {
 			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(applyController); ok {
 				ctrl = mockCtrl
 			} else {
-				realCtrl, ctrlErr := shared.ControllerFromCmd(cmd)
+				realCtrl, ctrlErr := kukshared.ControllerFromCmd(cmd)
 				if ctrlErr != nil {
 					return ctrlErr
 				}
@@ -180,32 +147,11 @@ func printApplyResult(cmd *cobra.Command, result controller.ApplyResult) error {
 }
 
 func printApplyResultJSON(cmd *cobra.Command, result controller.ApplyResult, format string) error {
-	// Simple JSON output (can be enhanced later)
 	output := struct {
 		Resources []controller.ResourceResult `json:"resources"`
 	}{
 		Resources: result.Resources,
 	}
 
-	var outputStr string
-	var err error
-
-	if format == "json" {
-		var b []byte
-		b, err = json.MarshalIndent(output, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal JSON: %w", err)
-		}
-		outputStr = string(b)
-	} else {
-		var b []byte
-		b, err = yaml.Marshal(output)
-		if err != nil {
-			return fmt.Errorf("failed to marshal YAML: %w", err)
-		}
-		outputStr = string(b)
-	}
-
-	cmd.Print(outputStr)
-	return nil
+	return kukshared.PrintJSONOrYAML(cmd, output, format)
 }
