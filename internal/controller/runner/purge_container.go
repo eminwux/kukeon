@@ -55,8 +55,8 @@ func (r *Exec) PurgeContainer(realm intmodel.Realm, containerID string) error {
 	r.ctrClient.SetNamespace(namespace)
 
 	// Try to stop and delete container
-	_, _ = r.ctrClient.StopContainer(r.ctx, containerID, ctr.StopContainerOptions{})
-	_ = r.ctrClient.DeleteContainer(r.ctx, containerID, ctr.ContainerDeleteOptions{
+	_, _ = r.ctrClient.StopContainer(containerID, ctr.StopContainerOptions{})
+	_ = r.ctrClient.DeleteContainer(containerID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 

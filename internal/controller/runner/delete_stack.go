@@ -22,10 +22,10 @@ import (
 	"os"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/eminwux/kukeon/internal/util/cgroups"
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
@@ -104,7 +104,7 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 	cgroupGroup := internalStack.Status.CgroupPath
 	if cgroupGroup == "" {
 		// Fallback to DefaultStackSpec if CgroupPath is not set (for backwards compatibility)
-		spec := cgroups.DefaultStackSpec(internalStack)
+		spec := ctr.DefaultStackSpec(internalStack)
 		cgroupGroup = spec.Group
 	}
 	err = r.ctrClient.DeleteCgroup(cgroupGroup, mountpoint)

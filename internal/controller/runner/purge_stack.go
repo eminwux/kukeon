@@ -22,9 +22,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/eminwux/kukeon/internal/util/cgroups"
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
@@ -106,7 +106,7 @@ func (r *Exec) PurgeStack(stack intmodel.Stack) error {
 	}
 
 	// Force remove stack cgroup
-	spec := cgroups.DefaultStackSpec(stackForOps)
+	spec := ctr.DefaultStackSpec(stackForOps)
 	if r.ctrClient != nil {
 		mountpoint := r.ctrClient.GetCgroupMountpoint()
 		_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)

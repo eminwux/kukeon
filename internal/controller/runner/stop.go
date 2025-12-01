@@ -135,7 +135,7 @@ func (r *Exec) StopCell(cell intmodel.Cell) error {
 
 		// Use container name with UUID for containerd operations
 		timeout := 5 * time.Second
-		_, err = r.ctrClient.StopContainer(r.ctx, containerID, ctr.StopContainerOptions{
+		_, err = r.ctrClient.StopContainer(containerID, ctr.StopContainerOptions{
 			Force:   true,
 			Timeout: &timeout,
 		})
@@ -169,7 +169,7 @@ func (r *Exec) StopCell(cell intmodel.Cell) error {
 
 	// Get root container's PID before stopping (needed for CNI detach)
 	var rootPID uint32
-	rootContainer, err := r.ctrClient.GetContainer(r.ctx, rootContainerID)
+	rootContainer, err := r.ctrClient.GetContainer(rootContainerID)
 	if err == nil {
 		nsCtx := namespaces.WithNamespace(r.ctx, namespace)
 		rootTask, taskErr := rootContainer.Task(nsCtx, nil)
@@ -180,7 +180,7 @@ func (r *Exec) StopCell(cell intmodel.Cell) error {
 
 	// Stop root container
 	timeout := 5 * time.Second
-	_, err = r.ctrClient.StopContainer(r.ctx, rootContainerID, ctr.StopContainerOptions{
+	_, err = r.ctrClient.StopContainer(rootContainerID, ctr.StopContainerOptions{
 		Force:   true,
 		Timeout: &timeout,
 	})
@@ -320,7 +320,7 @@ func (r *Exec) StopContainer(cell intmodel.Cell, containerID string) error {
 
 	// Use containerd ID for containerd operations
 	timeout := 5 * time.Second
-	_, err = r.ctrClient.StopContainer(r.ctx, containerdID, ctr.StopContainerOptions{
+	_, err = r.ctrClient.StopContainer(containerdID, ctr.StopContainerOptions{
 		Force:   true,
 		Timeout: &timeout,
 	})

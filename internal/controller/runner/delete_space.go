@@ -24,10 +24,10 @@ import (
 
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/consts"
+	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/eminwux/kukeon/internal/util/cgroups"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
 )
@@ -122,7 +122,7 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 	cgroupGroup := internalSpace.Status.CgroupPath
 	if cgroupGroup == "" {
 		// Fallback to DefaultSpaceSpec if CgroupPath is not set (for backwards compatibility)
-		spec := cgroups.DefaultSpaceSpec(internalSpace)
+		spec := ctr.DefaultSpaceSpec(internalSpace)
 		cgroupGroup = spec.Group
 	}
 	err = r.ctrClient.DeleteCgroup(cgroupGroup, mountpoint)

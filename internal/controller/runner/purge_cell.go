@@ -22,9 +22,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/eminwux/kukeon/internal/util/cgroups"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
 )
@@ -174,7 +174,7 @@ func (r *Exec) PurgeCell(cell intmodel.Cell) error {
 	}
 
 	// Force remove cell cgroup if it still exists
-	spec := cgroups.DefaultCellSpec(cellForOps)
+	spec := ctr.DefaultCellSpec(cellForOps)
 	mountpoint := r.ctrClient.GetCgroupMountpoint()
 	_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)
 

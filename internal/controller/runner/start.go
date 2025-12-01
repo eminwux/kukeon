@@ -118,7 +118,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 	}
 
 	// Start root container
-	rootTask, err := r.ctrClient.StartContainer(r.ctx, ctr.ContainerSpec{ID: containerID}, ctr.TaskSpec{})
+	rootTask, err := r.ctrClient.StartContainer(ctr.ContainerSpec{ID: containerID}, ctr.TaskSpec{})
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
@@ -301,7 +301,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 			namespacePaths,
 		)
 
-		_, err = r.ctrClient.StartContainer(r.ctx, specWithNamespaces, ctr.TaskSpec{})
+		_, err = r.ctrClient.StartContainer(specWithNamespaces, ctr.TaskSpec{})
 		if err != nil {
 			fields := appendCellLogFields([]any{"id", ctrContainerID}, cellID, cellName)
 			fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
@@ -400,7 +400,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
 	}
 
 	// Use containerd ID for containerd operations
-	_, err = r.ctrClient.StartContainer(r.ctx, ctr.ContainerSpec{ID: containerdID}, ctr.TaskSpec{})
+	_, err = r.ctrClient.StartContainer(ctr.ContainerSpec{ID: containerdID}, ctr.TaskSpec{})
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 		fields = append(

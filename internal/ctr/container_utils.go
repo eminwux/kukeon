@@ -14,13 +14,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package ctrutil
+package ctr
 
 import (
 	"strings"
 
 	"github.com/containerd/containerd/v2/pkg/oci"
-	internalctr "github.com/eminwux/kukeon/internal/ctr"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
@@ -67,7 +66,7 @@ func DefaultRootContainerSpec(
 func BuildRootContainerSpec(
 	rootSpec intmodel.ContainerSpec,
 	labels map[string]string,
-) internalctr.ContainerSpec {
+) ContainerSpec {
 	// Use ContainerdID if available, otherwise fall back to ID
 	containerdID := rootSpec.ContainerdID
 	if containerdID == "" {
@@ -102,7 +101,7 @@ func BuildRootContainerSpec(
 	rootLabels := copyLabels(labels)
 	rootLabels[rootContainerLabelKey] = rootContainerLabelValue
 
-	return internalctr.ContainerSpec{
+	return ContainerSpec{
 		ID:            containerdID,
 		Image:         image,
 		Labels:        rootLabels,

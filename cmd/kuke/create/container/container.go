@@ -24,9 +24,9 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/controller"
+	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	ctrutil "github.com/eminwux/kukeon/internal/util/ctr"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -83,7 +83,7 @@ func NewContainerCmd() *cobra.Command {
 				image = "docker.io/library/debian:latest"
 			} else {
 				// Normalize image reference to fully qualified format
-				image = ctrutil.NormalizeImageReference(image)
+				image = ctr.NormalizeImageReference(image)
 			}
 
 			command, err := cmd.Flags().GetString("command")

@@ -26,7 +26,6 @@ import (
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/eminwux/kukeon/internal/util/cgroups"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
 )
@@ -106,7 +105,7 @@ func (r *Exec) ExistsCellRootContainer(cell intmodel.Cell) (bool, error) {
 	}
 
 	// Check if container exists
-	exists, err := r.ctrClient.ExistsContainer(r.ctx, containerID)
+	exists, err := r.ctrClient.ExistsContainer(containerID)
 	if err != nil {
 		return false, fmt.Errorf("failed to check if root container exists: %w", err)
 	}
@@ -128,7 +127,7 @@ func (r *Exec) ExistsCgroup(doc any) (bool, error) {
 		if d.Metadata.Name == "" {
 			return false, errdefs.ErrRealmNotFound
 		}
-		spec = cgroups.DefaultRealmSpec(d)
+		spec = ctr.DefaultRealmSpec(d)
 
 	case intmodel.Space:
 		if d.Metadata.Name == "" {
@@ -137,19 +136,19 @@ func (r *Exec) ExistsCgroup(doc any) (bool, error) {
 		if d.Spec.RealmName == "" {
 			return false, errdefs.ErrRealmNameRequired
 		}
-		spec = cgroups.DefaultSpaceSpec(d)
+		spec = ctr.DefaultSpaceSpec(d)
 
 	case intmodel.Stack:
 		if d.Metadata.Name == "" {
 			return false, errdefs.ErrStackNotFound
 		}
-		spec = cgroups.DefaultStackSpec(d)
+		spec = ctr.DefaultStackSpec(d)
 
 	case intmodel.Cell:
 		if d.Metadata.Name == "" {
 			return false, errdefs.ErrCellNotFound
 		}
-		spec = cgroups.DefaultCellSpec(d)
+		spec = ctr.DefaultCellSpec(d)
 
 	default:
 		return false, fmt.Errorf("unsupported doc type: %T", doc)

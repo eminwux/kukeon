@@ -201,7 +201,7 @@ func (r *Exec) findOrphanedContainers(namespace, pattern string) ([]string, erro
 
 	// List all containers
 	r.logger.DebugContext(r.ctx, "listing containers from containerd", "namespace", namespace, "pattern", pattern)
-	containers, err := r.ctrClient.ListContainers(r.ctx)
+	containers, err := r.ctrClient.ListContainers()
 	if err != nil {
 		r.logger.ErrorContext(r.ctx, "failed to list containers", "error", err)
 		return nil, fmt.Errorf("failed to list containers: %w", err)
@@ -251,7 +251,7 @@ func (r *Exec) getContainerNetnsPath(containerID string) (string, error) {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
-	container, err := r.ctrClient.GetContainer(r.ctx, containerID)
+	container, err := r.ctrClient.GetContainer(containerID)
 	if err != nil {
 		return "", err
 	}
@@ -367,9 +367,9 @@ func (r *Exec) processOrphanedContainers(ctx context.Context, containers []strin
 		r.logger.DebugContext(ctx, "processing container", "index", i+1, "total", len(containers), "id", containerID)
 		// Try to delete container
 		r.logger.DebugContext(ctx, "stopping container", "id", containerID)
-		_, _ = r.ctrClient.StopContainer(ctx, containerID, ctr.StopContainerOptions{})
+		_, _ = r.ctrClient.StopContainer(containerID, ctr.StopContainerOptions{})
 		r.logger.DebugContext(ctx, "deleting container", "id", containerID)
-		_ = r.ctrClient.DeleteContainer(ctx, containerID, ctr.ContainerDeleteOptions{
+		_ = r.ctrClient.DeleteContainer(containerID, ctr.ContainerDeleteOptions{
 			SnapshotCleanup: true,
 		})
 

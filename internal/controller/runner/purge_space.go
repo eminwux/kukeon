@@ -22,9 +22,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/eminwux/kukeon/internal/util/cgroups"
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
@@ -95,7 +95,7 @@ func (r *Exec) PurgeSpace(space intmodel.Space) error {
 	}
 
 	// Force remove space cgroup
-	spec := cgroups.DefaultSpaceSpec(spaceForOps)
+	spec := ctr.DefaultSpaceSpec(spaceForOps)
 	if r.ctrClient != nil {
 		mountpoint := r.ctrClient.GetCgroupMountpoint()
 		_ = r.ctrClient.DeleteCgroup(spec.Group, mountpoint)

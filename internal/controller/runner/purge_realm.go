@@ -23,9 +23,9 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/cni"
+	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/eminwux/kukeon/internal/util/cgroups"
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
@@ -90,7 +90,7 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) error {
 
 	// Clean up all namespace resources (images, snapshots) before deleting namespace
 	// Namespace must be empty before deletion
-	if err = r.ctrClient.CleanupNamespaceResources(r.ctx, realmForOps.Spec.Namespace, "overlayfs"); err != nil {
+	if err = r.ctrClient.CleanupNamespaceResources(realmForOps.Spec.Namespace, "overlayfs"); err != nil {
 		r.logger.WarnContext(
 			r.ctx,
 			"failed to cleanup namespace resources",
@@ -125,7 +125,7 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) error {
 	cgroupGroup := realmForOps.Status.CgroupPath
 	if cgroupGroup == "" {
 		// Fallback to DefaultRealmSpec if CgroupPath is not set
-		spec := cgroups.DefaultRealmSpec(realmForOps)
+		spec := ctr.DefaultRealmSpec(realmForOps)
 		cgroupGroup = spec.Group
 	}
 	// DeleteCgroup is now idempotent - it will return nil if cgroup doesn't exist

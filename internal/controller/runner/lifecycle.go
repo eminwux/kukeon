@@ -38,7 +38,7 @@ func (r *Exec) detachRootContainerFromCNI(
 	rootContainerID, cniConfigPath, cellID, cellName, spaceID, realmID, realmNamespace string,
 ) {
 	// Get root container to check if it exists and get its task
-	rootContainer, err := r.ctrClient.GetContainer(ctrCtx, rootContainerID)
+	rootContainer, err := r.ctrClient.GetContainer(rootContainerID)
 	if err == nil {
 		// Container exists, try to get its task to detach from CNI
 		nsCtx := namespaces.WithNamespace(ctrCtx, realmNamespace)
@@ -96,7 +96,7 @@ func (r *Exec) detachRootContainerFromCNI(
 // This is a helper method used by KillCell and KillContainer.
 func (r *Exec) killContainerTask(containerID, realmNamespace string) error {
 	// Get the container
-	container, err := r.ctrClient.GetContainer(r.ctx, containerID)
+	container, err := r.ctrClient.GetContainer(containerID)
 	if err != nil {
 		return fmt.Errorf("failed to get container %s: %w", containerID, err)
 	}

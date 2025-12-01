@@ -30,8 +30,6 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/eminwux/kukeon/internal/util/cgroups"
-	ctrutil "github.com/eminwux/kukeon/internal/util/ctr"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
 )
@@ -524,7 +522,7 @@ func (r *Exec) ensureSpaceCgroup(space intmodel.Space) (intmodel.Space, error) {
 		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
-	spec := cgroups.DefaultSpaceSpec(space)
+	spec := ctr.DefaultSpaceSpec(space)
 
 	// Convert to external model for ensureCgroupInternal (requires external model for CgroupPath updates)
 	spaceDoc, err := apischeme.BuildSpaceExternalFromInternal(space, apischeme.VersionV1Beta1)
@@ -582,7 +580,7 @@ func (r *Exec) createSpaceCgroup(space intmodel.Space) (string, error) {
 		return "", err
 	}
 
-	spec := cgroups.DefaultSpaceSpec(space)
+	spec := ctr.DefaultSpaceSpec(space)
 
 	// Ensure client is initialized and connected
 	if err = r.ensureClientConnected(); err != nil {
@@ -615,7 +613,7 @@ func (r *Exec) createSpaceCgroup(space intmodel.Space) (string, error) {
 }
 
 func (r *Exec) createRealmCgroup(realm intmodel.Realm) (string, error) {
-	spec := cgroups.DefaultRealmSpec(realm)
+	spec := ctr.DefaultRealmSpec(realm)
 
 	// Ensure client is initialized and connected
 	if err := r.ensureClientConnected(); err != nil {
@@ -651,7 +649,7 @@ func (r *Exec) ensureRealmCgroup(realm intmodel.Realm) (intmodel.Realm, error) {
 		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
-	spec := cgroups.DefaultRealmSpec(realm)
+	spec := ctr.DefaultRealmSpec(realm)
 
 	// Convert to external model for ensureCgroupInternal (requires external model for CgroupPath updates)
 	realmDoc, err := apischeme.BuildRealmExternalFromInternal(realm, apischeme.VersionV1Beta1)
@@ -740,7 +738,7 @@ func (r *Exec) createStackCgroup(stack intmodel.Stack) (string, error) {
 		return "", errdefs.ErrSpaceNameRequired
 	}
 
-	spec := cgroups.DefaultStackSpec(stack)
+	spec := ctr.DefaultStackSpec(stack)
 
 	// Ensure client is initialized and connected
 	if err := r.ensureClientConnected(); err != nil {
@@ -790,7 +788,7 @@ func (r *Exec) ensureStackCgroup(stack intmodel.Stack) (intmodel.Stack, error) {
 		return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
-	spec := cgroups.DefaultStackSpec(stack)
+	spec := ctr.DefaultStackSpec(stack)
 
 	// Capture stack for closure
 	stackForUpdate := stack
@@ -869,7 +867,7 @@ func (r *Exec) createCellCgroup(cell intmodel.Cell) (string, error) {
 		return "", errdefs.ErrStackNameRequired
 	}
 
-	spec := cgroups.DefaultCellSpec(cell)
+	spec := ctr.DefaultCellSpec(cell)
 
 	// Ensure client is initialized and connected
 	if err := r.ensureClientConnected(); err != nil {
@@ -923,7 +921,7 @@ func (r *Exec) ensureCellCgroup(cell intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
-	spec := cgroups.DefaultCellSpec(cell)
+	spec := ctr.DefaultCellSpec(cell)
 
 	// Capture cell for closure
 	cellForUpdate := cell
@@ -1110,9 +1108,9 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 			}
 
 			rootLabels := buildRootContainerLabels(*cell)
-			ctrContainerSpec := ctrutil.BuildRootContainerSpec(containerSpec, rootLabels)
+			ctrContainerSpec := ctr.BuildRootContainerSpec(containerSpec, rootLabels)
 
-			createdContainer, createErr = r.ctrClient.CreateContainer(r.ctx, ctrContainerSpec)
+			createdContainer, createErr = r.ctrClient.CreateContainer(ctrContainerSpec)
 			if createErr != nil {
 				logFields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 				logFields = append(
@@ -1164,7 +1162,6 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 			}
 
 			_, createErr = r.ctrClient.CreateContainerFromSpec(
-				r.ctx,
 				containerSpec,
 			)
 			if createErr != nil {
@@ -1260,7 +1257,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 	var container containerd.Container
 
 	// Check if container exists
-	exists, err := r.ctrClient.ExistsContainer(r.ctx, containerID)
+	exists, err := r.ctrClient.ExistsContainer(containerID)
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 		fields = append(fields, "space", spaceName, "realm", realmName, "err", fmt.Sprintf("%v", err))
@@ -1275,7 +1272,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 	if exists {
 		// Container exists, load it but continue to process other containers
 		var loadErr error
-		container, loadErr = r.ctrClient.GetContainer(r.ctx, containerID)
+		container, loadErr = r.ctrClient.GetContainer(containerID)
 		if loadErr != nil {
 			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 			fields = append(fields, "space", spaceName, "realm", realmName, "err", fmt.Sprintf("%v", loadErr))
@@ -1335,10 +1332,10 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		}
 
 		rootLabels := buildRootContainerLabels(*cell)
-		containerSpec := ctrutil.BuildRootContainerSpec(rootContainerSpec, rootLabels)
+		containerSpec := ctr.BuildRootContainerSpec(rootContainerSpec, rootLabels)
 
 		var createErr error
-		container, createErr = r.ctrClient.CreateContainer(r.ctx, containerSpec)
+		container, createErr = r.ctrClient.CreateContainer(containerSpec)
 		if createErr != nil {
 			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 			fields = append(
@@ -1472,7 +1469,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		)
 
 		// Use containerd ID for containerd operations
-		exists, err = r.ctrClient.ExistsContainer(r.ctx, containerdID)
+		exists, err = r.ctrClient.ExistsContainer(containerdID)
 		if err != nil {
 			// Check if the error indicates the container doesn't exist
 			// In that case, treat it as "doesn't exist" (false) rather than a fatal error
@@ -1559,7 +1556,6 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 			)
 
 			createdContainer, containerCreateErr := r.ctrClient.CreateContainerFromSpec(
-				r.ctx,
 				containerSpec,
 			)
 			if containerCreateErr != nil {
@@ -1685,7 +1681,7 @@ func (r *Exec) ensureCellRootContainerSpec(cell intmodel.Cell) (intmodel.Contain
 	} else {
 		// Create default root container spec
 		// Pass containerdID to set ContainerdID field, ID will be set to "root"
-		rootSpec = ctrutil.DefaultRootContainerSpec(
+		rootSpec = ctr.DefaultRootContainerSpec(
 			containerdID,
 			cellID,
 			realmName,

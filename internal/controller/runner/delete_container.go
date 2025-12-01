@@ -115,7 +115,7 @@ func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 	_ = r.purgeCNIForContainer(containerdID, netnsPath, networkName)
 
 	// Stop the container using containerd ID
-	_, err = r.ctrClient.StopContainer(r.ctx, containerdID, ctr.StopContainerOptions{})
+	_, err = r.ctrClient.StopContainer(containerdID, ctr.StopContainerOptions{})
 	if err != nil {
 		r.logger.WarnContext(
 			r.ctx,
@@ -130,7 +130,7 @@ func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 	}
 
 	// Delete the container from containerd using containerd ID
-	err = r.ctrClient.DeleteContainer(r.ctx, containerdID, ctr.ContainerDeleteOptions{
+	err = r.ctrClient.DeleteContainer(containerdID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 	if err != nil {
