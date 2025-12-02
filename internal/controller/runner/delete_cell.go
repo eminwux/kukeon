@@ -26,7 +26,6 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/eminwux/kukeon/internal/util/cgroups"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
 )
@@ -132,7 +131,7 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 
 		// Use container name with UUID for containerd operations
 		// Stop and delete the container
-		_, err = r.ctrClient.StopContainer(r.ctx, containerID, ctr.StopContainerOptions{})
+		_, err = r.ctrClient.StopContainer(containerID, ctr.StopContainerOptions{})
 		if err != nil {
 			r.logger.WarnContext(
 				r.ctx,
@@ -144,7 +143,7 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 			)
 		}
 
-		err = r.ctrClient.DeleteContainer(r.ctx, containerID, ctr.ContainerDeleteOptions{
+		err = r.ctrClient.DeleteContainer(containerID, ctr.ContainerDeleteOptions{
 			SnapshotCleanup: true,
 		})
 		if err != nil {
@@ -163,7 +162,7 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 	netnsPath, _ := r.getContainerNetnsPath(rootContainerID)
 	_ = r.purgeCNIForContainer(rootContainerID, netnsPath, networkName)
 
-	_, err = r.ctrClient.StopContainer(r.ctx, rootContainerID, ctr.StopContainerOptions{Force: true})
+	_, err = r.ctrClient.StopContainer(rootContainerID, ctr.StopContainerOptions{Force: true})
 	if err != nil {
 		r.logger.WarnContext(
 			r.ctx,
@@ -175,7 +174,7 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 		)
 	}
 
-	err = r.ctrClient.DeleteContainer(r.ctx, rootContainerID, ctr.ContainerDeleteOptions{
+	err = r.ctrClient.DeleteContainer(rootContainerID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 	if err != nil {
@@ -190,7 +189,7 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 	cgroupGroup := internalCell.Status.CgroupPath
 	if cgroupGroup == "" {
 		// Fallback to DefaultCellSpec if CgroupPath is not set (for backwards compatibility)
-		spec := cgroups.DefaultCellSpec(internalCell)
+		spec := ctr.DefaultCellSpec(internalCell)
 		cgroupGroup = spec.Group
 	}
 	err = r.ctrClient.DeleteCgroup(cgroupGroup, mountpoint)

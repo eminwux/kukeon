@@ -23,10 +23,10 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/cni"
+	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/eminwux/kukeon/internal/util/cgroups"
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
@@ -55,7 +55,7 @@ func (r *Exec) DeleteRealm(realm intmodel.Realm) error {
 	cgroupGroup := internalRealm.Status.CgroupPath
 	if cgroupGroup == "" {
 		// Fallback to DefaultRealmSpec if CgroupPath is not set (for backwards compatibility)
-		spec := cgroups.DefaultRealmSpec(internalRealm)
+		spec := ctr.DefaultRealmSpec(internalRealm)
 		cgroupGroup = spec.Group
 	}
 	if err = r.ctrClient.DeleteCgroup(cgroupGroup, mountpoint); err != nil {
@@ -64,7 +64,7 @@ func (r *Exec) DeleteRealm(realm intmodel.Realm) error {
 
 	// Clean up all namespace resources (images, snapshots, blobs) before deleting namespace
 	// Namespace must be empty before deletion
-	if err = r.ctrClient.CleanupNamespaceResources(r.ctx, internalRealm.Spec.Namespace, "overlayfs"); err != nil {
+	if err = r.ctrClient.CleanupNamespaceResources(internalRealm.Spec.Namespace, "overlayfs"); err != nil {
 		r.logger.WarnContext(
 			r.ctx,
 			"failed to cleanup namespace resources",

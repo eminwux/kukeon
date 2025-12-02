@@ -14,21 +14,20 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package cgroups
+package ctr
 
 import (
 	"fmt"
 
 	"github.com/eminwux/kukeon/internal/consts"
-	"github.com/eminwux/kukeon/internal/ctr"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
-func DefaultRealmSpec(realm intmodel.Realm) ctr.CgroupSpec {
+func DefaultRealmSpec(realm intmodel.Realm) CgroupSpec {
 	group := fmt.Sprintf("%s/%s", consts.KukeonCgroupRoot, realm.Metadata.Name)
-	return ctr.CgroupSpec{
+	return CgroupSpec{
 		Group: group,
-		Resources: ctr.CgroupResources{
+		Resources: CgroupResources{
 			CPU:    nil,
 			Memory: nil,
 			IO:     nil,
@@ -36,11 +35,11 @@ func DefaultRealmSpec(realm intmodel.Realm) ctr.CgroupSpec {
 	}
 }
 
-func DefaultSpaceSpec(space intmodel.Space) ctr.CgroupSpec {
+func DefaultSpaceSpec(space intmodel.Space) CgroupSpec {
 	group := fmt.Sprintf("%s/%s/%s", consts.KukeonCgroupRoot, space.Spec.RealmName, space.Metadata.Name)
-	return ctr.CgroupSpec{
+	return CgroupSpec{
 		Group: group,
-		Resources: ctr.CgroupResources{
+		Resources: CgroupResources{
 			CPU:    nil,
 			Memory: nil,
 			IO:     nil,
@@ -48,7 +47,7 @@ func DefaultSpaceSpec(space intmodel.Space) ctr.CgroupSpec {
 	}
 }
 
-func DefaultStackSpec(stack intmodel.Stack) ctr.CgroupSpec {
+func DefaultStackSpec(stack intmodel.Stack) CgroupSpec {
 	group := fmt.Sprintf(
 		"%s/%s/%s/%s",
 		consts.KukeonCgroupRoot,
@@ -56,9 +55,9 @@ func DefaultStackSpec(stack intmodel.Stack) ctr.CgroupSpec {
 		stack.Spec.SpaceName,
 		stack.Metadata.Name,
 	)
-	return ctr.CgroupSpec{
+	return CgroupSpec{
 		Group: group,
-		Resources: ctr.CgroupResources{
+		Resources: CgroupResources{
 			CPU:    nil,
 			Memory: nil,
 			IO:     nil,
@@ -66,7 +65,7 @@ func DefaultStackSpec(stack intmodel.Stack) ctr.CgroupSpec {
 	}
 }
 
-func DefaultCellSpec(cell intmodel.Cell) ctr.CgroupSpec {
+func DefaultCellSpec(cell intmodel.Cell) CgroupSpec {
 	group := fmt.Sprintf(
 		"%s/%s/%s/%s/%s",
 		consts.KukeonCgroupRoot,
@@ -75,9 +74,9 @@ func DefaultCellSpec(cell intmodel.Cell) ctr.CgroupSpec {
 		cell.Spec.StackName,
 		cell.Metadata.Name,
 	)
-	return ctr.CgroupSpec{
+	return CgroupSpec{
 		Group: group,
-		Resources: ctr.CgroupResources{
+		Resources: CgroupResources{
 			CPU:    nil,
 			Memory: nil,
 			IO:     nil,

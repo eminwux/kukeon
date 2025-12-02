@@ -51,44 +51,36 @@ type client struct {
 type Client interface {
 	Connect() error
 	Close() error
+
+	Namespace() string
 	CreateNamespace(namespace string) error
 	DeleteNamespace(namespace string) error
 	ListNamespaces() ([]string, error)
 	GetNamespace(namespace string) (string, error)
 	ExistsNamespace(namespace string) (bool, error)
+	SetNamespace(namespace string)
+	SetNamespaceWithCredentials(namespace string, creds []RegistryCredentials)
+	CleanupNamespaceResources(namespace, snapshotter string) error
+	GetRegistryCredentials() []RegistryCredentials
+
 	GetCgroupMountpoint() string
 	GetCurrentCgroupPath() (string, error)
 	CgroupPath(group, mountpoint string) (string, error)
-	SetNamespace(namespace string)
-	SetNamespaceWithCredentials(namespace string, creds []RegistryCredentials)
-	GetRegistryCredentials() []RegistryCredentials
-	Namespace() string
-	CreateContainer(ctx context.Context, spec ContainerSpec) (containerd.Container, error)
-	GetContainer(ctx context.Context, id string) (containerd.Container, error)
-	ListContainers(ctx context.Context, filters ...string) ([]containerd.Container, error)
-	ExistsContainer(ctx context.Context, id string) (bool, error)
-	DeleteContainer(ctx context.Context, id string, opts ContainerDeleteOptions) error
-	StartContainer(ctx context.Context, spec ContainerSpec, taskSpec TaskSpec) (containerd.Task, error)
-	StopContainer(ctx context.Context, id string, opts StopContainerOptions) (*containerd.ExitStatus, error)
-	TaskStatus(ctx context.Context, id string) (containerd.Status, error)
-	TaskMetrics(ctx context.Context, id string) (*apitypes.Metric, error)
 	NewCgroup(spec CgroupSpec) (*cgroup2.Manager, error)
 	LoadCgroup(group string, mountpoint string) (*cgroup2.Manager, error)
 	DeleteCgroup(group, mountpoint string) error
-	CreateContainerFromSpec(
-		ctx context.Context,
-		containerSpec intmodel.ContainerSpec,
-	) (containerd.Container, error)
-	// CleanupNamespaceResources removes all images and snapshots from a namespace
-	CleanupNamespaceResources(ctx context.Context, namespace, snapshotter string) error
-}
+	CreateContainerFromSpec(intmodel.ContainerSpec) (containerd.Container, error)
 
-// NamespacePaths describes the namespace file paths a container should join.
-type NamespacePaths struct {
-	Net string
-	IPC string
-	UTS string
-	PID string
+	CreateContainer(spec ContainerSpec) (containerd.Container, error)
+	GetContainer(id string) (containerd.Container, error)
+	ListContainers(filters ...string) ([]containerd.Container, error)
+	ExistsContainer(id string) (bool, error)
+	DeleteContainer(id string, opts ContainerDeleteOptions) error
+	StartContainer(spec ContainerSpec, taskSpec TaskSpec) (containerd.Task, error)
+	StopContainer(id string, opts StopContainerOptions) (*containerd.ExitStatus, error)
+
+	TaskStatus(id string) (containerd.Status, error)
+	TaskMetrics(id string) (*apitypes.Metric, error)
 }
 
 func NewClient(ctx context.Context, logger *slog.Logger, socket string) Client {
