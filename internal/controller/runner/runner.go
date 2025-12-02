@@ -80,6 +80,11 @@ type Runner interface {
 	PurgeCell(cell intmodel.Cell) error
 	PurgeContainer(realm intmodel.Realm, containerID string) error
 
+	RefreshRealm(realm intmodel.Realm) (intmodel.Realm, bool, error)
+	RefreshSpace(space intmodel.Space) (intmodel.Space, bool, error)
+	RefreshStack(stack intmodel.Stack) (intmodel.Stack, bool, error)
+	RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error)
+
 	Close() error
 }
 

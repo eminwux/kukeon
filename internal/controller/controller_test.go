@@ -101,6 +101,12 @@ type fakeRunner struct {
 	UpdateCellFn      func(cell intmodel.Cell) (intmodel.Cell, error)
 	RecreateCellFn    func(cell intmodel.Cell) (intmodel.Cell, error)
 	UpdateContainerFn func(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)
+
+	// Refresh methods
+	RefreshRealmFn func(realm intmodel.Realm) (intmodel.Realm, bool, error)
+	RefreshSpaceFn func(space intmodel.Space) (intmodel.Space, bool, error)
+	RefreshStackFn func(stack intmodel.Stack) (intmodel.Stack, bool, error)
+	RefreshCellFn  func(cell intmodel.Cell) (intmodel.Cell, int, error)
 }
 
 // Realm methods
@@ -459,6 +465,36 @@ func (f *fakeRunner) UpdateContainer(cell intmodel.Cell, container intmodel.Cont
 		return f.UpdateContainerFn(cell, container)
 	}
 	return intmodel.Cell{}, errors.New("unexpected call to UpdateContainer")
+}
+
+// Refresh methods
+
+func (f *fakeRunner) RefreshRealm(realm intmodel.Realm) (intmodel.Realm, bool, error) {
+	if f.RefreshRealmFn != nil {
+		return f.RefreshRealmFn(realm)
+	}
+	return intmodel.Realm{}, false, errors.New("unexpected call to RefreshRealm")
+}
+
+func (f *fakeRunner) RefreshSpace(space intmodel.Space) (intmodel.Space, bool, error) {
+	if f.RefreshSpaceFn != nil {
+		return f.RefreshSpaceFn(space)
+	}
+	return intmodel.Space{}, false, errors.New("unexpected call to RefreshSpace")
+}
+
+func (f *fakeRunner) RefreshStack(stack intmodel.Stack) (intmodel.Stack, bool, error) {
+	if f.RefreshStackFn != nil {
+		return f.RefreshStackFn(stack)
+	}
+	return intmodel.Stack{}, false, errors.New("unexpected call to RefreshStack")
+}
+
+func (f *fakeRunner) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error) {
+	if f.RefreshCellFn != nil {
+		return f.RefreshCellFn(cell)
+	}
+	return intmodel.Cell{}, 0, errors.New("unexpected call to RefreshCell")
 }
 
 // Test helper functions
