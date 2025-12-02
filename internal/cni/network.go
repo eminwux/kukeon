@@ -17,7 +17,6 @@
 package cni
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,86 +27,7 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
-// defaults moved to config.go
-
-// models and defaults moved to config.go
-
-type Manager struct {
-	cniConf libcni.CNI
-	netConf *libcni.NetworkConfigList
-	conf    Conf
-}
-
-type Conf struct {
-	CniConfigDir string
-	CniBinDir    string
-	CniCacheDir  string
-}
-
-func NewManager(cniBinDir, cniConfigDir, cniCacheDir string) (*Manager, error) {
-	// cniBinDir: where plugins live, e.g. /opt/cni/bin
-	// cacheDir: something like /var/lib/kukeon/cni-cache
-
-	// Apply defaults BEFORE creating the CNI config to ensure non-empty paths
-	if cniConfigDir == "" {
-		cniConfigDir = defaultCniConfDir
-	}
-
-	if cniBinDir == "" {
-		cniBinDir = defaultCniBinDir
-	}
-
-	if cniCacheDir == "" {
-		cniCacheDir = defaultCniCacheDir
-	}
-
-	cniConf := libcni.NewCNIConfigWithCacheDir(
-		[]string{cniBinDir},
-		cniCacheDir,
-		nil,
-	)
-
-	var netConf *libcni.NetworkConfigList
-
-	return &Manager{
-		cniConf: cniConf,
-		netConf: netConf,
-		conf: Conf{
-			CniConfigDir: cniConfigDir,
-			CniBinDir:    cniBinDir,
-			CniCacheDir:  cniCacheDir,
-		},
-	}, nil
-}
-
-func (m *Manager) AddContainerToNetwork(ctx context.Context, containerID, netnsPath string) error {
-	if m.netConf == nil {
-		return errdefs.ErrNetworkConfigNotLoaded
-	}
-
-	rt := &libcni.RuntimeConf{
-		ContainerID: containerID,
-		NetNS:       netnsPath, // e.g. /proc/<pid>/ns/net
-		IfName:      "eth0",
-	}
-
-	_, err := m.cniConf.AddNetworkList(ctx, m.netConf, rt)
-	return err
-}
-
-func (m *Manager) DelContainerFromNetwork(ctx context.Context, containerID, netnsPath string) error {
-	if m.netConf == nil {
-		return errdefs.ErrNetworkConfigNotLoaded
-	}
-
-	rt := &libcni.RuntimeConf{
-		ContainerID: containerID,
-		NetNS:       netnsPath,
-		IfName:      "eth0",
-	}
-	return m.cniConf.DelNetworkList(ctx, m.netConf, rt)
-}
-
+// LoadNetworkConfigList loads a CNI network config list from the given path.
 func (m *Manager) LoadNetworkConfigList(configPath string) error {
 	if configPath == "" {
 		return errors.New("network config path is required")
@@ -122,6 +42,7 @@ func (m *Manager) LoadNetworkConfigList(configPath string) error {
 	return nil
 }
 
+// ExistsNetworkConfig checks if a network config exists and matches the expected network name.
 func (m *Manager) ExistsNetworkConfig(networkName, configPath string) (bool, string, error) {
 	if configPath == "" {
 		configPath = filepath.Join(m.conf.CniConfigDir, networkName+".conflist")

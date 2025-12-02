@@ -18,16 +18,6 @@ package cni
 
 import "encoding/json"
 
-// NetworkConfig represents the desired parameters for creating a CNI network.
-type NetworkConfig struct {
-	// Name is the CNI network name and the filename (without extension).
-	Name string
-	// BridgeName is the bridge device name. Defaults to "cni0" when empty.
-	BridgeName string
-	// SubnetCIDR is the IPAM subnet CIDR. Defaults to "10.88.0.0/16" when empty.
-	SubnetCIDR string
-}
-
 // NewCNINetworkConfig builds a NetworkConfig with sensible defaults.
 func NewCNINetworkConfig(name string) NetworkConfig {
 	return NetworkConfig{
@@ -35,47 +25,6 @@ func NewCNINetworkConfig(name string) NetworkConfig {
 		BridgeName: name,
 		SubnetCIDR: defaultSubnetCIDR,
 	}
-}
-
-const (
-	defaultCniConfDir  = "/opt/cni/net.d"
-	defaultCniBinDir   = "/opt/cni/bin"
-	defaultCniCacheDir = "/opt/cni/cache"
-	defaultCNIVersion  = "0.4.0"
-	defaultBridgeName  = "cni0"
-	defaultSubnetCIDR  = "10.88.0.0/16"
-)
-
-// CNINetworksDir is the standard directory where CNI stores network state and IPAM allocations.
-// This is the default location used by CNI plugins for host-local IPAM.
-const CNINetworksDir = "/var/lib/cni/networks"
-
-type ConflistModel struct {
-	CNIVersion string        `json:"cniVersion"`
-	Name       string        `json:"name"`
-	Plugins    []interface{} `json:"plugins"`
-}
-
-type BridgePluginModel struct {
-	Type      string           `json:"type"`
-	Bridge    string           `json:"bridge"`
-	IsGateway bool             `json:"isGateway"`
-	IPMasq    bool             `json:"ipMasq"`
-	IPAM      BridgeIPAMConfig `json:"ipam"`
-}
-
-type BridgeIPAMConfig struct {
-	Type   string                `json:"type"`
-	Ranges [][]map[string]string `json:"ranges"`
-	Routes []RouteModel          `json:"routes"`
-}
-
-type RouteModel struct {
-	Dst string `json:"dst"`
-}
-
-type LoopbackPluginModel struct {
-	Type string `json:"type"`
 }
 
 // BuildDefaultConflist generates a default conflist JSON using provided parameters.
