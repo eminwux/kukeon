@@ -18,22 +18,6 @@ package cni
 
 import "os"
 
-// BootstrapReport captures CNI environment checks and actions.
-type BootstrapReport struct {
-	CniConfigDir        string
-	CniCacheDir         string
-	CniBinDir           string
-	ConfigDirExistsPre  bool
-	CacheDirExistsPre   bool
-	BinDirExistsPre     bool
-	ConfigDirCreated    bool
-	CacheDirCreated     bool
-	BinDirCreated       bool
-	ConfigDirExistsPost bool
-	CacheDirExistsPost  bool
-	BinDirExistsPost    bool
-}
-
 // BootstrapCNI ensures required directories exist and the bin directory is present.
 // If any directory is empty, the defaults from config.go are used.
 func BootstrapCNI(cfgDir, cacheDir, binDir string) (BootstrapReport, error) {
