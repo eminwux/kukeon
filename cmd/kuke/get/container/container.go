@@ -239,13 +239,67 @@ func runContainerCmdWithDeps(
 		return err
 	}
 
-	// Convert internal containers to external for printing
-	externalContainers, err := fs.ConvertContainerSpecListToExternal(internalContainers)
-	if err != nil {
-		return err
+	// Query state for each container by calling GetContainer
+	// This ensures we get the actual state from containerd
+	// We'll store containers with their state in a map for lookup during printing
+	containerStates := make(map[string]string) // key: container ID, value: state string
+	containersWithState := make([]*v1beta1.ContainerSpec, 0, len(internalContainers))
+
+	for _, containerSpec := range internalContainers {
+		// Build a Container from the spec to query state
+		// Ensure all required fields are set (they should already be in the spec from ListContainers)
+		containerInternal := intmodel.Container{
+			Metadata: intmodel.ContainerMetadata{
+				Name: containerSpec.ID,
+			},
+			Spec: containerSpec,
+		}
+
+		// Ensure required fields are set from command flags if not in spec
+		if containerInternal.Spec.RealmName == "" {
+			containerInternal.Spec.RealmName = realm
+		}
+		if containerInternal.Spec.SpaceName == "" {
+			containerInternal.Spec.SpaceName = space
+		}
+		if containerInternal.Spec.StackName == "" {
+			containerInternal.Spec.StackName = stack
+		}
+		if containerInternal.Spec.CellName == "" {
+			containerInternal.Spec.CellName = cell
+		}
+
+		// Get full container with state
+		var result controller.GetContainerResult
+		result, err = ctrl.GetContainer(containerInternal)
+		if err != nil {
+			// If we can't get state, use Unknown and continue
+			// Log the error for debugging (this should be visible in verbose mode)
+			cmd.PrintErrln("Warning: failed to get container state for", containerSpec.ID, ":", err)
+			containerStates[containerSpec.ID] = "Unknown"
+		} else {
+			// Convert state to string for display
+			// Convert internal state to external state first
+			externalState := convertInternalStateToExternal(result.Container.Status.State)
+			stateStr := containerStateToString(externalState)
+			containerStates[containerSpec.ID] = stateStr
+		}
+
+		// Convert spec to external (state will be added during printing)
+		// Use the conversion function from apischeme
+		externalSpec := apischeme.BuildContainerSpecExternalFromInternal(containerSpec)
+		containersWithState = append(containersWithState, &externalSpec)
 	}
 
-	return printContainers(cmd, externalContainers, outputFormat, printYAML, printJSON, printTable)
+	return printContainersWithState(
+		cmd,
+		containersWithState,
+		containerStates,
+		outputFormat,
+		printYAML,
+		printJSON,
+		printTable,
+	)
 }
 
 func printContainer(
@@ -276,6 +330,18 @@ func printContainers(
 	printJSON printObjectFunc,
 	printTable tablePrinterFunc,
 ) error {
+	return printContainersWithState(cmd, containers, nil, format, printYAML, printJSON, printTable)
+}
+
+func printContainersWithState(
+	cmd *cobra.Command,
+	containers []*v1beta1.ContainerSpec,
+	containerStates map[string]string,
+	format shared.OutputFormat,
+	printYAML printObjectFunc,
+	printJSON printObjectFunc,
+	printTable tablePrinterFunc,
+) error {
 	switch format {
 	case shared.OutputFormatYAML:
 		return printYAML(containers)
@@ -293,9 +359,13 @@ func printContainers(
 		for _, c := range containers {
 			containerName := containerDisplayName(c)
 
+			// Get state from map if available, otherwise use Unknown
 			state := "Unknown"
-			// ContainerSpec doesn't have a State field, so we'll use "-"
-			// The actual state would need to be retrieved from containerd
+			if containerStates != nil {
+				if s, ok := containerStates[c.ID]; ok {
+					state = s
+				}
+			}
 
 			rows = append(rows, []string{
 				containerName,
@@ -313,6 +383,48 @@ func printContainers(
 		return nil
 	default:
 		return printYAML(containers)
+	}
+}
+
+func convertInternalStateToExternal(state intmodel.ContainerState) v1beta1.ContainerState {
+	switch state {
+	case intmodel.ContainerStatePending:
+		return v1beta1.ContainerStatePending
+	case intmodel.ContainerStateReady:
+		return v1beta1.ContainerStateReady
+	case intmodel.ContainerStateStopped:
+		return v1beta1.ContainerStateStopped
+	case intmodel.ContainerStatePaused:
+		return v1beta1.ContainerStatePaused
+	case intmodel.ContainerStatePausing:
+		return v1beta1.ContainerStatePausing
+	case intmodel.ContainerStateFailed:
+		return v1beta1.ContainerStateFailed
+	case intmodel.ContainerStateUnknown:
+		return v1beta1.ContainerStateUnknown
+	default:
+		return v1beta1.ContainerStateUnknown
+	}
+}
+
+func containerStateToString(state v1beta1.ContainerState) string {
+	switch state {
+	case v1beta1.ContainerStatePending:
+		return "Pending"
+	case v1beta1.ContainerStateReady:
+		return "Ready"
+	case v1beta1.ContainerStateStopped:
+		return "Stopped"
+	case v1beta1.ContainerStatePaused:
+		return "Paused"
+	case v1beta1.ContainerStatePausing:
+		return "Pausing"
+	case v1beta1.ContainerStateFailed:
+		return "Failed"
+	case v1beta1.ContainerStateUnknown:
+		return "Unknown"
+	default:
+		return "Unknown"
 	}
 }
 

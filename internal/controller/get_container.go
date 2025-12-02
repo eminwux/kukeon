@@ -96,6 +96,30 @@ func (b *Exec) GetContainer(container intmodel.Container) (GetContainerResult, e
 			labels = make(map[string]string)
 		}
 
+		// Query actual container state from containerd
+		var actualState intmodel.ContainerState
+		actualState, err = b.runner.GetContainerState(internalCell, name)
+		if err != nil {
+			// Log error at info level so it's visible
+			b.logger.InfoContext(b.ctx, "failed to get container state from containerd",
+				"container", name,
+				"cell", cellName,
+				"error", err)
+			actualState = intmodel.ContainerStateUnknown
+		}
+
+		// Log state for debugging (use info level so it's visible)
+		b.logger.InfoContext(b.ctx, "container state from containerd",
+			"container", name,
+			"cell", cellName,
+			"state", actualState)
+
+		// Note: Container state is not currently persisted in ContainerSpec.
+		// The state is queried from containerd each time GetContainer is called.
+		// If state persistence is needed in the future, ContainerSpec would need
+		// to be extended to include a Status field, or container states would need
+		// to be stored separately in cell metadata.
+
 		res.Container = intmodel.Container{
 			Metadata: intmodel.ContainerMetadata{
 				Name:   name,
@@ -103,7 +127,7 @@ func (b *Exec) GetContainer(container intmodel.Container) (GetContainerResult, e
 			},
 			Spec: *foundContainerSpec,
 			Status: intmodel.ContainerStatus{
-				State: intmodel.ContainerStateReady,
+				State: actualState,
 			},
 		}
 	} else {

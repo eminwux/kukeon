@@ -131,6 +131,17 @@ func (b *Exec) StartContainer(container intmodel.Container) (StartContainerResul
 		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
+	// Query actual container state from containerd
+	actualState, err := b.runner.GetContainerState(internalCell, name)
+	if err != nil {
+		// Log error but continue with Ready state (container was just started)
+		b.logger.DebugContext(b.ctx, "failed to get container state from containerd after start",
+			"container", name,
+			"cell", cellName,
+			"error", err)
+		actualState = intmodel.ContainerStateReady // Default to Ready since we just started it
+	}
+
 	// Construct result container
 	labels := container.Metadata.Labels
 	if labels == nil {
@@ -144,7 +155,7 @@ func (b *Exec) StartContainer(container intmodel.Container) (StartContainerResul
 		},
 		Spec: *foundContainerSpec,
 		Status: intmodel.ContainerStatus{
-			State: intmodel.ContainerStateReady,
+			State: actualState,
 		},
 	}
 	res.Started = true

@@ -70,13 +70,14 @@ type fakeRunner struct {
 	UpdateCellMetadataFn      func(cell intmodel.Cell) error
 
 	// Container methods
-	ListContainersFn  func(realmName, spaceName, stackName, cellName string) ([]intmodel.ContainerSpec, error)
-	CreateContainerFn func(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)
-	EnsureContainerFn func(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)
-	StartContainerFn  func(cell intmodel.Cell, containerID string) error
-	StopContainerFn   func(cell intmodel.Cell, containerID string) error
-	KillContainerFn   func(cell intmodel.Cell, containerID string) error
-	DeleteContainerFn func(cell intmodel.Cell, containerID string) error
+	ListContainersFn    func(realmName, spaceName, stackName, cellName string) ([]intmodel.ContainerSpec, error)
+	CreateContainerFn   func(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)
+	EnsureContainerFn   func(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)
+	StartContainerFn    func(cell intmodel.Cell, containerID string) error
+	StopContainerFn     func(cell intmodel.Cell, containerID string) error
+	KillContainerFn     func(cell intmodel.Cell, containerID string) error
+	DeleteContainerFn   func(cell intmodel.Cell, containerID string) error
+	GetContainerStateFn func(cell intmodel.Cell, containerID string) (intmodel.ContainerState, error)
 
 	// Utility methods
 	ExistsCgroupFn func(doc any) (bool, error)
@@ -357,6 +358,13 @@ func (f *fakeRunner) DeleteContainer(cell intmodel.Cell, containerID string) err
 		return f.DeleteContainerFn(cell, containerID)
 	}
 	return errors.New("unexpected call to DeleteContainer")
+}
+
+func (f *fakeRunner) GetContainerState(cell intmodel.Cell, containerID string) (intmodel.ContainerState, error) {
+	if f.GetContainerStateFn != nil {
+		return f.GetContainerStateFn(cell, containerID)
+	}
+	return intmodel.ContainerStateUnknown, errors.New("unexpected call to GetContainerState")
 }
 
 // Utility methods

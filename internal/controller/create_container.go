@@ -196,6 +196,18 @@ func (b *Exec) CreateContainer(container intmodel.Container) (CreateContainerRes
 			labels = make(map[string]string)
 		}
 
+		// Query actual container state from containerd
+		var actualState intmodel.ContainerState
+		actualState, err = b.runner.GetContainerState(internalCellPost, containerName)
+		if err != nil {
+			// Log error but continue with Ready state (container was just started)
+			b.logger.DebugContext(b.ctx, "failed to get container state from containerd after creation",
+				"container", containerName,
+				"cell", cellName,
+				"error", err)
+			actualState = intmodel.ContainerStateReady // Default to Ready since we just started it
+		}
+
 		res.Container = intmodel.Container{
 			Metadata: intmodel.ContainerMetadata{
 				Name:   containerName,
@@ -203,7 +215,7 @@ func (b *Exec) CreateContainer(container intmodel.Container) (CreateContainerRes
 			},
 			Spec: *containerSpec,
 			Status: intmodel.ContainerStatus{
-				State: intmodel.ContainerStateReady,
+				State: actualState,
 			},
 		}
 	}

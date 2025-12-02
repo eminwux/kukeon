@@ -85,6 +85,8 @@ type Runner interface {
 	RefreshStack(stack intmodel.Stack) (intmodel.Stack, bool, error)
 	RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error)
 
+	GetContainerState(cell intmodel.Cell, containerID string) (intmodel.ContainerState, error)
+
 	Close() error
 }
 
