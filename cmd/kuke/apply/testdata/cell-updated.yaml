@@ -1,0 +1,24 @@
+apiVersion: v1beta1
+kind: Cell
+metadata:
+  name: test-cell
+spec:
+  id: test-cell
+  realmId: test-realm
+  spaceId: test-space
+  stackId: test-stack
+  containers:
+    - id: root
+      root: true
+      image: docker.io/library/busybox:latest
+      command: sleep
+      args:
+        - "7200"
+    - id: worker
+      image: docker.io/library/busybox:latest
+      command: sleep
+      args:
+        - "3600"
+      env:
+        - WORKER_MODE=active
+        - WORKER_THREADS=4

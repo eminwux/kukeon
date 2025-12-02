@@ -1,0 +1,22 @@
+apiVersion: v1beta1
+kind: Realm
+metadata:
+  name: multi-realm
+spec:
+  namespace: multi-ns
+---
+apiVersion: v1beta1
+kind: Space
+metadata:
+  name: multi-space
+spec:
+  realmId: multi-realm
+---
+apiVersion: v1beta1
+kind: Stack
+metadata:
+  name: multi-stack
+spec:
+  id: multi-stack
+  realmId: multi-realm
+  spaceId: multi-space

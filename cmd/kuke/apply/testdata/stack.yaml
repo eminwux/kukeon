@@ -1,0 +1,8 @@
+apiVersion: v1beta1
+kind: Stack
+metadata:
+  name: test-stack
+spec:
+  id: test-stack
+  realmId: test-realm
+  spaceId: test-space

@@ -20,20 +20,20 @@ import (
 	"log/slog"
 
 	"github.com/eminwux/kukeon/cmd/config"
-	createshared "github.com/eminwux/kukeon/cmd/kuke/create/shared"
+	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-// ControllerFromCmd reuses the controller helper from create/shared.
+// ControllerFromCmd uses the centralized controller helper from kuke/shared.
 func ControllerFromCmd(cmd *cobra.Command) (*controller.Exec, error) {
-	return createshared.ControllerFromCmd(cmd)
+	return kukshared.ControllerFromCmd(cmd)
 }
 
-// LoggerFromCmd reuses the logger helper from create/shared.
+// LoggerFromCmd uses the centralized logger helper from kuke/shared.
 func LoggerFromCmd(cmd *cobra.Command) (*slog.Logger, error) {
-	return createshared.LoggerFromCmd(cmd)
+	return kukshared.LoggerFromCmd(cmd)
 }
 
 // ParseCascadeFlag reads the persistent --cascade flag from the command.

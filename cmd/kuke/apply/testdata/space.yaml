@@ -1,0 +1,6 @@
+apiVersion: v1beta1
+kind: Space
+metadata:
+  name: test-space
+spec:
+  realmId: test-realm
