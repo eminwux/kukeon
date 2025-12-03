@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/containerd/containerd/v2/pkg/namespaces"
@@ -95,7 +96,7 @@ func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) 
 				// Read file to check if it contains our container ID
 				content, readErr := os.ReadFile(filePath)
 				if readErr == nil {
-					if strings.Contains(string(content), containerID) {
+					if containsExactContainerID(string(content), containerID) {
 						if removeErr := os.Remove(filePath); removeErr == nil {
 							purged = append(purged, fmt.Sprintf("ipam-file:%s", fileName))
 							r.logger.DebugContext(
@@ -153,6 +154,39 @@ func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) 
 	}
 
 	return nil
+}
+
+// containsExactContainerID checks if the content contains the exact container ID,
+// preventing false matches when container IDs share common prefixes.
+// It first checks for an exact match (after trimming whitespace), then falls back
+// to token-boundary matching for cases where the container ID appears in structured content.
+func containsExactContainerID(content, containerID string) bool {
+	if containerID == "" {
+		return false
+	}
+
+	// First, check for exact match after trimming whitespace (most common case for CNI host-local IPAM)
+	trimmed := strings.TrimSpace(content)
+	if trimmed == containerID {
+		return true
+	}
+
+	// If not exact match, use regexp to match container ID as a complete token
+	// This handles cases where container ID appears in structured content (JSON, etc.)
+	// We match container ID surrounded by whitespace, quotes, commas, or start/end of string
+	// QuoteMeta escapes special regexp characters in containerID
+	escapedID := regexp.QuoteMeta(containerID)
+	// Pattern: start of string or non-word character (whitespace, quote, comma, etc.), then exact container ID, then end of string or non-word character
+	// Note: We use [^\w] instead of \W to avoid issues with Unicode word boundaries
+	pattern := `(^|[^\w])` + escapedID + `([^\w]|$)`
+	matched, err := regexp.MatchString(pattern, content)
+	if err != nil {
+		// If regexp fails, fall back to exact substring match as last resort
+		// (though this should never happen with valid container IDs)
+		return strings.Contains(content, containerID)
+	}
+
+	return matched
 }
 
 // purgeCNIForNetwork removes all CNI-related resources for an entire network.
