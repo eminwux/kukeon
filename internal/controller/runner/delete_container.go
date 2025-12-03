@@ -134,6 +134,25 @@ func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 		SnapshotCleanup: true,
 	})
 	if err != nil {
+		// Check if container doesn't exist - this is idempotent (already deleted)
+		if errors.Is(err, ctr.ErrContainerNotFound) {
+			// Container already deleted, treat as success
+			fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
+			fields = append(fields, "space", spaceName, "realm", realmName, "containerName", containerID)
+			r.logger.DebugContext(
+				r.ctx,
+				"container already deleted",
+				fields...,
+			)
+			// Still run cleanup in case there are orphaned CNI resources
+			netnsPath = ""
+			if networkName != "" {
+				_ = r.purgeCNIForContainer(containerdID, netnsPath, networkName)
+			}
+			return nil
+		}
+
+		// Other errors are actual failures
 		fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 		fields = append(
 			fields,
@@ -161,6 +180,14 @@ func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 		"deleted container",
 		fields...,
 	)
+
+	// Always run comprehensive CNI cleanup after container deletion as a safety net
+	// Note: Workload containers share the root container's network namespace, so they don't
+	// need individual CNI cleanup, but we run this anyway to catch any edge cases
+	netnsPath = ""
+	if networkName != "" {
+		_ = r.purgeCNIForContainer(containerdID, netnsPath, networkName)
+	}
 
 	return nil
 }

@@ -49,6 +49,7 @@ type CellState int
 const (
 	CellStatePending CellState = iota
 	CellStateReady
+	CellStateStopped
 	CellStateFailed
 	CellStateUnknown
 )
@@ -59,6 +60,8 @@ func (c *CellState) String() string {
 		return StatePendingStr
 	case CellStateReady:
 		return StateReadyStr
+	case CellStateStopped:
+		return StateStoppedStr
 	case CellStateFailed:
 		return StateFailedStr
 	case CellStateUnknown:

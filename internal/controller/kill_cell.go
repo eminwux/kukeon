@@ -83,10 +83,10 @@ func (b *Exec) KillCell(cell intmodel.Cell) (KillCellResult, error) {
 		return res, fmt.Errorf("failed to kill cell containers: %w", err)
 	}
 
-	// Update cell state to Pending (killed)
-	internalCell.Status.State = intmodel.CellStatePending
+	// Update cell state to Stopped
+	internalCell.Status.State = intmodel.CellStateStopped
 
-	// Update cell metadata state to Pending (killed)
+	// Update cell metadata state to Stopped
 	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {
 		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}

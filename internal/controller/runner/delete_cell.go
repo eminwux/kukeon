@@ -133,22 +133,38 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 		// Stop and delete the container
 		_, err = r.ctrClient.StopContainer(containerID, ctr.StopContainerOptions{})
 		if err != nil {
-			r.logger.WarnContext(
-				r.ctx,
-				"failed to stop container, continuing with deletion",
-				"container",
-				containerID,
-				"error",
-				err,
-			)
+			// Check if container/task doesn't exist - this is idempotent (already stopped/deleted)
+			if errors.Is(err, ctr.ErrContainerNotFound) || errors.Is(err, ctr.ErrTaskNotFound) {
+				r.logger.DebugContext(
+					r.ctx,
+					"container or task already stopped/deleted, continuing",
+					"container",
+					containerID,
+				)
+			} else {
+				r.logger.WarnContext(
+					r.ctx,
+					"failed to stop container, continuing with deletion",
+					"container",
+					containerID,
+					"error",
+					err,
+				)
+			}
 		}
 
 		err = r.ctrClient.DeleteContainer(containerID, ctr.ContainerDeleteOptions{
 			SnapshotCleanup: true,
 		})
 		if err != nil {
-			r.logger.WarnContext(r.ctx, "failed to delete container", "container", containerID, "error", err)
-			// Continue with other containers
+			// Check if container doesn't exist - this is idempotent (already deleted)
+			if errors.Is(err, ctr.ErrContainerNotFound) {
+				r.logger.DebugContext(r.ctx, "container already deleted", "container", containerID)
+				// Continue with other containers
+			} else {
+				r.logger.WarnContext(r.ctx, "failed to delete container", "container", containerID, "error", err)
+				// Continue with other containers
+			}
 		}
 	}
 
@@ -164,22 +180,46 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 
 	_, err = r.ctrClient.StopContainer(rootContainerID, ctr.StopContainerOptions{Force: true})
 	if err != nil {
-		r.logger.WarnContext(
-			r.ctx,
-			"failed to stop root container, continuing with deletion",
-			"container",
-			rootContainerID,
-			"error",
-			err,
-		)
+		// Check if container/task doesn't exist - this is idempotent (already stopped/deleted)
+		if errors.Is(err, ctr.ErrContainerNotFound) || errors.Is(err, ctr.ErrTaskNotFound) {
+			r.logger.DebugContext(
+				r.ctx,
+				"root container or task already stopped/deleted, continuing",
+				"container",
+				rootContainerID,
+			)
+		} else {
+			r.logger.WarnContext(
+				r.ctx,
+				"failed to stop root container, continuing with deletion",
+				"container",
+				rootContainerID,
+				"error",
+				err,
+			)
+		}
 	}
 
 	err = r.ctrClient.DeleteContainer(rootContainerID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 	if err != nil {
-		r.logger.WarnContext(r.ctx, "failed to delete root container", "container", rootContainerID, "error", err)
-		// Continue with cgroup and metadata deletion
+		// Check if container doesn't exist - this is idempotent (already deleted)
+		if errors.Is(err, ctr.ErrContainerNotFound) {
+			r.logger.DebugContext(r.ctx, "root container already deleted", "container", rootContainerID)
+			// Continue with cgroup and metadata deletion
+		} else {
+			r.logger.WarnContext(r.ctx, "failed to delete root container", "container", rootContainerID, "error", err)
+			// Continue with cgroup and metadata deletion
+		}
+	}
+
+	// Always run comprehensive CNI cleanup after root container deletion as a safety net
+	// This ensures IPAM allocations are cleaned up even if earlier cleanup succeeded or failed
+	// Clear netns path since container is now deleted
+	netnsPath = ""
+	if networkName != "" {
+		_ = r.purgeCNIForContainer(rootContainerID, netnsPath, networkName)
 	}
 
 	// Delete cell cgroup

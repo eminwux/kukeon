@@ -95,6 +95,25 @@ func (c *client) applySpecOpts(container containerd.Container, opts []oci.SpecOp
 		return fmt.Errorf("failed to load container spec: %w", err)
 	}
 
+	// Clear any existing namespace paths that might be stale
+	// Namespace paths should be set dynamically when starting containers, not stored in the spec
+	if ociSpec.Linux != nil && len(ociSpec.Linux.Namespaces) > 0 {
+		for i := range ociSpec.Linux.Namespaces {
+			// Clear paths for namespaces that are typically set dynamically (Net, IPC, UTS)
+			// Keep PID namespace and other namespace types as-is since they're usually not set via paths
+			switch ociSpec.Linux.Namespaces[i].Type {
+			case runtimespec.NetworkNamespace, runtimespec.IPCNamespace, runtimespec.UTSNamespace:
+				ociSpec.Linux.Namespaces[i].Path = ""
+			case runtimespec.PIDNamespace,
+				runtimespec.MountNamespace,
+				runtimespec.UserNamespace,
+				runtimespec.CgroupNamespace,
+				runtimespec.TimeNamespace:
+				// Other namespace types (PID, Mount, User, Cgroup, Time) are left unchanged
+			}
+		}
+	}
+
 	for _, opt := range opts {
 		if err = opt(nsCtx, c.cClient, nil, ociSpec); err != nil {
 			return fmt.Errorf("failed to apply spec option: %w", err)

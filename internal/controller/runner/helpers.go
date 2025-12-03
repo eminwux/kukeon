@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/ctr"
@@ -33,11 +34,13 @@ import (
 )
 
 // purgeCNIForContainer removes all CNI-related resources for a specific container.
+// It always attempts cleanup even if the container is already deleted or network namespace is invalid.
 func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) error {
 	var purged []string
 
-	// Try to call CNI DEL if netns is available
-	if netnsPath != "" {
+	// Always try to call CNI DEL if network name is available
+	// Some CNI plugins may handle empty/invalid netns gracefully
+	if networkName != "" {
 		cniConfigPath, err := r.findCNIConfigPath(networkName)
 		if err == nil {
 			var cniMgr *cni.Manager
@@ -48,11 +51,17 @@ func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) 
 			)
 			if err == nil {
 				if err = cniMgr.LoadNetworkConfigList(cniConfigPath); err == nil {
-					if err = cniMgr.DelContainerFromNetwork(r.ctx, containerID, netnsPath); err == nil {
-						purged = append(purged, "cni-del")
-						r.logger.DebugContext(r.ctx, "called CNI DEL for container", "container", containerID)
+					// Attempt CNI DEL even if netnsPath is empty (best-effort cleanup)
+					// Some CNI plugins may handle this gracefully
+					if netnsPath != "" {
+						if err = cniMgr.DelContainerFromNetwork(r.ctx, containerID, netnsPath); err == nil {
+							purged = append(purged, "cni-del")
+							r.logger.DebugContext(r.ctx, "called CNI DEL for container", "container", containerID)
+						} else {
+							r.logger.DebugContext(r.ctx, "CNI DEL failed (netns may be invalid)", "container", containerID, "error", err)
+						}
 					} else {
-						r.logger.WarnContext(r.ctx, "failed to call CNI DEL", "container", containerID, "error", err)
+						r.logger.DebugContext(r.ctx, "skipping CNI DEL (no netns path available)", "container", containerID)
 					}
 				}
 			}
@@ -62,12 +71,47 @@ func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) 
 	// Remove IPAM allocation files
 	if networkName != "" {
 		ipamDir := filepath.Join(cni.CNINetworksDir, networkName)
+
+		// Try removing file named by container ID
 		ipamFile := filepath.Join(ipamDir, containerID)
 		if err := os.Remove(ipamFile); err == nil {
 			purged = append(purged, "ipam-allocation")
 			r.logger.DebugContext(r.ctx, "removed IPAM allocation", "container", containerID, "file", ipamFile)
 		} else if !errors.Is(err, os.ErrNotExist) {
-			r.logger.WarnContext(r.ctx, "failed to remove IPAM allocation", "container", containerID, "error", err)
+			r.logger.DebugContext(r.ctx, "failed to remove IPAM allocation file", "container", containerID, "file", ipamFile, "error", err)
+		}
+
+		// Also scan network directory for files that might contain this container ID
+		// CNI may store IPAM allocations in files named by IP address that contain container IDs
+		entries, err := os.ReadDir(ipamDir)
+		if err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				fileName := entry.Name()
+				filePath := filepath.Join(ipamDir, fileName)
+
+				// Read file to check if it contains our container ID
+				content, readErr := os.ReadFile(filePath)
+				if readErr == nil {
+					if strings.Contains(string(content), containerID) {
+						if removeErr := os.Remove(filePath); removeErr == nil {
+							purged = append(purged, fmt.Sprintf("ipam-file:%s", fileName))
+							r.logger.DebugContext(
+								r.ctx,
+								"removed IPAM allocation file (found container ID in file)",
+								"container",
+								containerID,
+								"file",
+								filePath,
+							)
+						} else if !errors.Is(removeErr, os.ErrNotExist) {
+							r.logger.DebugContext(r.ctx, "failed to remove IPAM allocation file", "container", containerID, "file", filePath, "error", removeErr)
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -318,6 +362,66 @@ func (r *Exec) getSpaceNetworkName(space intmodel.Space) (string, error) {
 	return naming.BuildSpaceNetworkName(realmName, space.Metadata.Name)
 }
 
+// detachRootContainerFromNetwork detaches a root container from the CNI network.
+// It gets the container's PID and network namespace path, then calls CNI DEL to detach it.
+// This should be called before killing or stopping the container to ensure the namespace is still valid.
+func (r *Exec) detachRootContainerFromNetwork(
+	rootContainerID, cniConfigPath, namespace, cellID, cellName, spaceID, realmID string,
+) {
+	var netnsPath string
+	rootContainer, err := r.ctrClient.GetContainer(rootContainerID)
+	if err == nil {
+		nsCtx := namespaces.WithNamespace(r.ctx, namespace)
+		rootTask, taskErr := rootContainer.Task(nsCtx, nil)
+		if taskErr == nil {
+			rootPID := rootTask.Pid()
+			if rootPID > 0 {
+				netnsPath = fmt.Sprintf("/proc/%d/ns/net", rootPID)
+
+				// Detach root container from CNI network BEFORE killing/stopping
+				// This ensures the namespace is still valid
+				cniMgr, mgrErr := cni.NewManager(
+					r.cniConf.CniBinDir,
+					r.cniConf.CniConfigDir,
+					r.cniConf.CniCacheDir,
+				)
+				if mgrErr == nil {
+					if loadErr := cniMgr.LoadNetworkConfigList(cniConfigPath); loadErr == nil {
+						if delErr := cniMgr.DelContainerFromNetwork(r.ctx, rootContainerID, netnsPath); delErr != nil {
+							// Log warning but continue - will try comprehensive cleanup after deletion
+							fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
+							fields = append(
+								fields,
+								"space",
+								spaceID,
+								"realm",
+								realmID,
+								"netns",
+								netnsPath,
+								"err",
+								fmt.Sprintf("%v", delErr),
+							)
+							r.logger.WarnContext(
+								r.ctx,
+								"failed to detach root container from network, will try comprehensive cleanup after deletion",
+								fields...,
+							)
+						} else {
+							fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
+							fields = append(fields, "space", spaceID, "realm", realmID, "netns", netnsPath)
+							r.logger.InfoContext(
+								r.ctx,
+								"detached root container from network",
+								fields...,
+							)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
 func appendCellLogFields(fields []any, cellID, cellName string) []any {
 	fields = append(fields, "cell", cellID)
 	if cellName != "" && cellName != cellID {
@@ -350,10 +454,53 @@ func wrapConversionErr(err error) error {
 	return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 }
 
+// isValidationError checks if an error is a validation error that should cause
+// operations to fail fast rather than being logged and ignored.
+func isValidationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, errdefs.ErrCellNameRequired) ||
+		errors.Is(err, errdefs.ErrCellIDRequired) ||
+		errors.Is(err, errdefs.ErrRealmNameRequired) ||
+		errors.Is(err, errdefs.ErrSpaceNameRequired) ||
+		errors.Is(err, errdefs.ErrStackNameRequired) ||
+		errors.Is(err, errdefs.ErrContainerNameRequired)
+}
+
 // ContainerIDMinimumParts is the minimum number of parts needed in a container ID
 // to extract the network name. Container ID format: realm-space-cell-container
 // We need at least realm and space to form the network name: realm-space.
 const ContainerIDMinimumParts = 2
+
+// getRootContainerContainerdID extracts the containerd ID of the root container from a cell spec.
+// It finds the container in cell.Spec.Containers where container.ID == cell.Spec.RootContainerID
+// and returns its ContainerdID field.
+func (r *Exec) getRootContainerContainerdID(cell intmodel.Cell) (string, error) {
+	cellName := cell.Metadata.Name
+	if cell.Spec.RootContainerID == "" {
+		return "", fmt.Errorf("cell %q has no RootContainerID set", cellName)
+	}
+
+	var rootContainerSpec *intmodel.ContainerSpec
+	for i := range cell.Spec.Containers {
+		if cell.Spec.Containers[i].ID == cell.Spec.RootContainerID {
+			rootContainerSpec = &cell.Spec.Containers[i]
+			break
+		}
+	}
+
+	if rootContainerSpec == nil {
+		return "", fmt.Errorf("root container %q not found in cell %q containers", cell.Spec.RootContainerID, cellName)
+	}
+
+	rootContainerID := rootContainerSpec.ContainerdID
+	if rootContainerID == "" {
+		return "", fmt.Errorf("root container %q has empty ContainerdID", cell.Spec.RootContainerID)
+	}
+
+	return rootContainerID, nil
+}
 
 // processOrphanedContainers processes a list of orphaned containers by stopping,
 // deleting them, and purging their CNI resources.

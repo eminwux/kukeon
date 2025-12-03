@@ -65,8 +65,8 @@ func TestStopCell_SuccessfulStop(t *testing.T) {
 					return nil
 				}
 				f.UpdateCellMetadataFn = func(cell intmodel.Cell) error {
-					if cell.Status.State != intmodel.CellStatePending {
-						return errors.New("expected cell state to be Pending after stop")
+					if cell.Status.State != intmodel.CellStateStopped {
+						return errors.New("expected cell state to be Stopped after stop")
 					}
 					return nil
 				}
@@ -78,8 +78,8 @@ func TestStopCell_SuccessfulStop(t *testing.T) {
 				if result.Cell.Metadata.Name != "test-cell" {
 					t.Errorf("expected cell name to be 'test-cell', got %q", result.Cell.Metadata.Name)
 				}
-				if result.Cell.Status.State != intmodel.CellStatePending {
-					t.Errorf("expected cell state to be Pending, got %v", result.Cell.Status.State)
+				if result.Cell.Status.State != intmodel.CellStateStopped {
+					t.Errorf("expected cell state to be Stopped, got %v", result.Cell.Status.State)
 				}
 			},
 			wantErr: false,
@@ -108,8 +108,8 @@ func TestStopCell_SuccessfulStop(t *testing.T) {
 					return nil
 				}
 				f.UpdateCellMetadataFn = func(cell intmodel.Cell) error {
-					if cell.Status.State != intmodel.CellStatePending {
-						return errors.New("expected cell state to be Pending after stop")
+					if cell.Status.State != intmodel.CellStateStopped {
+						return errors.New("expected cell state to be Stopped after stop")
 					}
 					return nil
 				}
@@ -118,8 +118,8 @@ func TestStopCell_SuccessfulStop(t *testing.T) {
 				if !result.Stopped {
 					t.Error("expected Stopped to be true")
 				}
-				if result.Cell.Status.State != intmodel.CellStatePending {
-					t.Errorf("expected cell state to be Pending, got %v", result.Cell.Status.State)
+				if result.Cell.Status.State != intmodel.CellStateStopped {
+					t.Errorf("expected cell state to be Stopped, got %v", result.Cell.Status.State)
 				}
 			},
 			wantErr: false,

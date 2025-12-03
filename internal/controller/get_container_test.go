@@ -557,6 +557,9 @@ func TestGetContainer_ResultContainerConstruction(t *testing.T) {
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
 				}
+				f.GetContainerStateFn = func(_ intmodel.Cell, _ string) (intmodel.ContainerState, error) {
+					return intmodel.ContainerStateReady, nil
+				}
 				f.ExistsCgroupFn = func(_ any) (bool, error) {
 					return true, nil
 				}

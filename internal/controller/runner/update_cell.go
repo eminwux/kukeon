@@ -64,6 +64,13 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 		if _, exists := desiredContainers[id]; !exists {
 			// Container should be removed
 			if stopErr := r.StopContainer(existing, id); stopErr != nil {
+				if isValidationError(stopErr) {
+					return intmodel.Cell{}, fmt.Errorf(
+						"validation error stopping container %q for removal: %w",
+						id,
+						stopErr,
+					)
+				}
 				r.logger.WarnContext(
 					r.ctx,
 					"failed to stop container for removal, continuing",
@@ -73,6 +80,13 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 				)
 			}
 			if deleteErr := r.DeleteContainer(existing, id); deleteErr != nil {
+				if isValidationError(deleteErr) {
+					return intmodel.Cell{}, fmt.Errorf(
+						"validation error deleting container %q for removal: %w",
+						id,
+						deleteErr,
+					)
+				}
 				r.logger.WarnContext(
 					r.ctx,
 					"failed to delete container for removal, continuing",
@@ -95,6 +109,13 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 			if containerSpecChanged(&desiredContainer, actualContainer) {
 				// Stop and delete old container
 				if stopErr := r.StopContainer(existing, desiredContainer.ID); stopErr != nil {
+					if isValidationError(stopErr) {
+						return intmodel.Cell{}, fmt.Errorf(
+							"validation error stopping container %q for update: %w",
+							desiredContainer.ID,
+							stopErr,
+						)
+					}
 					r.logger.WarnContext(
 						r.ctx,
 						"failed to stop container for update, continuing",
@@ -104,6 +125,13 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 					)
 				}
 				if deleteErr := r.DeleteContainer(existing, desiredContainer.ID); deleteErr != nil {
+					if isValidationError(deleteErr) {
+						return intmodel.Cell{}, fmt.Errorf(
+							"validation error deleting container %q for update: %w",
+							desiredContainer.ID,
+							deleteErr,
+						)
+					}
 					r.logger.WarnContext(
 						r.ctx,
 						"failed to delete container for update, continuing",

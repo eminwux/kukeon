@@ -384,6 +384,8 @@ func (c *client) ExistsContainer(id string) (bool, error) {
 }
 
 // DeleteContainer deletes a container.
+// It is idempotent - if the container doesn't exist, it returns nil (treating it as already deleted).
+// It automatically deletes any associated task before deleting the container.
 func (c *client) DeleteContainer(id string, opts ContainerDeleteOptions) error {
 	if id == "" {
 		return ErrEmptyContainerID
@@ -392,6 +394,11 @@ func (c *client) DeleteContainer(id string, opts ContainerDeleteOptions) error {
 	c.logger.DebugContext(c.ctx, "starting to delete container", "id", id, "snapshot_cleanup", opts.SnapshotCleanup)
 	container, err := c.loadContainer(id)
 	if err != nil {
+		// Container doesn't exist - treat as idempotent (already deleted)
+		if errors.Is(err, ErrContainerNotFound) {
+			c.logger.DebugContext(c.ctx, "container not found", "id", id)
+			return nil
+		}
 		c.logger.DebugContext(c.ctx, "failed to load container for deletion", "id", id, "error", err)
 		return err
 	}
@@ -407,6 +414,7 @@ func (c *client) DeleteContainer(id string, opts ContainerDeleteOptions) error {
 		_, err = task.Delete(nsCtx, containerd.WithProcessKill)
 		if err != nil {
 			c.logger.WarnContext(c.ctx, "failed to delete task", "id", id, "err", formatError(err))
+			// Continue with container deletion even if task deletion failed
 		} else {
 			c.logger.DebugContext(c.ctx, "deleted task", "id", id)
 		}
@@ -424,6 +432,12 @@ func (c *client) DeleteContainer(id string, opts ContainerDeleteOptions) error {
 
 	err = container.Delete(nsCtx, deleteOpts...)
 	if err != nil {
+		// Check if container was already deleted (race condition)
+		if errdefs.IsNotFound(err) {
+			c.logger.DebugContext(c.ctx, "container not found", "id", id)
+			c.dropContainer(id)
+			return nil
+		}
 		c.logger.ErrorContext(c.ctx, "failed to delete container", "id", id, "err", formatError(err))
 		return fmt.Errorf("failed to delete container: %w", err)
 	}
