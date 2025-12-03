@@ -21,6 +21,7 @@ import (
 
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/errdefs"
+	internalerrdefs "github.com/eminwux/kukeon/internal/errdefs"
 )
 
 // storeContainer stores a container in the cache.
@@ -48,7 +49,7 @@ func (c *client) loadContainer(id string) (containerd.Container, error) {
 		// Only wrap "not found" errors with ErrContainerNotFound
 		// Other errors (connection failures, permission errors, etc.) should be returned as-is
 		if errdefs.IsNotFound(err) {
-			return nil, fmt.Errorf("%w: %w", ErrContainerNotFound, err)
+			return nil, fmt.Errorf("%w: %w", internalerrdefs.ErrContainerNotFound, err)
 		}
 		return nil, err
 	}
@@ -92,7 +93,7 @@ func (c *client) loadTask(id string) (containerd.Task, error) {
 	nsCtx := c.namespaceCtx()
 	task, err := container.Task(nsCtx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrTaskNotFound, err)
+		return nil, fmt.Errorf("%w: %w", internalerrdefs.ErrTaskNotFound, err)
 	}
 	c.storeTask(id, task)
 	return task, nil

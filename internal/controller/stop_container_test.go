@@ -61,6 +61,9 @@ func TestStopContainer_SuccessfulStop(t *testing.T) {
 					}
 					return nil
 				}
+				f.GetContainerStateFn = func(_ intmodel.Cell, _ string) (intmodel.ContainerState, error) {
+					return intmodel.ContainerStatePending, nil
+				}
 				f.UpdateCellMetadataFn = func(cell intmodel.Cell) error {
 					// Container should still be in cell (stop doesn't remove it)
 					if len(cell.Spec.Containers) != 2 {
@@ -571,6 +574,9 @@ func TestStopContainer_ContainerLookupByID(t *testing.T) {
 					}
 					return nil
 				}
+				f.GetContainerStateFn = func(_ intmodel.Cell, _ string) (intmodel.ContainerState, error) {
+					return intmodel.ContainerStatePending, nil
+				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
 					return nil
 				}
@@ -609,6 +615,9 @@ func TestStopContainer_ContainerLookupByID(t *testing.T) {
 						return errors.New("unexpected container ID")
 					}
 					return nil
+				}
+				f.GetContainerStateFn = func(_ intmodel.Cell, _ string) (intmodel.ContainerState, error) {
+					return intmodel.ContainerStatePending, nil
 				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
 					return nil
@@ -707,6 +716,9 @@ func TestStopContainer_NameTrimming(t *testing.T) {
 						return errors.New("unexpected container ID")
 					}
 					return nil
+				}
+				f.GetContainerStateFn = func(_ intmodel.Cell, _ string) (intmodel.ContainerState, error) {
+					return intmodel.ContainerStatePending, nil
 				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
 					return nil

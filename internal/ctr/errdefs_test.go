@@ -20,7 +20,7 @@ import (
 	"errors"
 	"testing"
 
-	ctr "github.com/eminwux/kukeon/internal/ctr"
+	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
 func TestErrdefs(t *testing.T) {
@@ -31,78 +31,78 @@ func TestErrdefs(t *testing.T) {
 	}{
 		{
 			name:        "ErrEmptyGroupPath",
-			err:         ctr.ErrEmptyGroupPath,
-			wantMessage: "ctr: cgroup group path is required",
+			err:         errdefs.ErrEmptyGroupPath,
+			wantMessage: "cgroup group path is required",
 		},
 		{
 			name:        "ErrInvalidPID",
-			err:         ctr.ErrInvalidPID,
-			wantMessage: "ctr: pid must be greater than zero",
+			err:         errdefs.ErrInvalidPID,
+			wantMessage: "pid must be greater than zero",
 		},
 		{
 			name:        "ErrInvalidCPUWeight",
-			err:         ctr.ErrInvalidCPUWeight,
-			wantMessage: "ctr: cpu weight must be within [1, 10000]",
+			err:         errdefs.ErrInvalidCPUWeight,
+			wantMessage: "cpu weight must be within [1, 10000]",
 		},
 		{
 			name:        "ErrInvalidIOWeight",
-			err:         ctr.ErrInvalidIOWeight,
-			wantMessage: "ctr: io weight must be within [1, 1000]",
+			err:         errdefs.ErrInvalidIOWeight,
+			wantMessage: "io weight must be within [1, 1000]",
 		},
 		{
 			name:        "ErrInvalidThrottle",
-			err:         ctr.ErrInvalidThrottle,
-			wantMessage: "ctr: io throttle entries require type, major, minor and rate",
+			err:         errdefs.ErrInvalidThrottle,
+			wantMessage: "io throttle entries require type, major, minor and rate",
 		},
 		{
 			name:        "ErrEmptyContainerID",
-			err:         ctr.ErrEmptyContainerID,
-			wantMessage: "ctr: container id is required",
+			err:         errdefs.ErrEmptyContainerID,
+			wantMessage: "container id is required",
 		},
 		{
 			name:        "ErrEmptyCellID",
-			err:         ctr.ErrEmptyCellID,
-			wantMessage: "ctr: cell id is required",
+			err:         errdefs.ErrEmptyCellID,
+			wantMessage: "cell id is required",
 		},
 		{
 			name:        "ErrEmptySpaceID",
-			err:         ctr.ErrEmptySpaceID,
-			wantMessage: "ctr: space id is required",
+			err:         errdefs.ErrEmptySpaceID,
+			wantMessage: "space id is required",
 		},
 		{
 			name:        "ErrEmptyRealmID",
-			err:         ctr.ErrEmptyRealmID,
-			wantMessage: "ctr: realm id is required",
+			err:         errdefs.ErrEmptyRealmID,
+			wantMessage: "realm id is required",
 		},
 		{
 			name:        "ErrEmptyStackID",
-			err:         ctr.ErrEmptyStackID,
-			wantMessage: "ctr: stack id is required",
+			err:         errdefs.ErrEmptyStackID,
+			wantMessage: "stack id is required",
 		},
 		{
 			name:        "ErrContainerExists",
-			err:         ctr.ErrContainerExists,
-			wantMessage: "ctr: container already exists",
+			err:         errdefs.ErrContainerExists,
+			wantMessage: "container already exists",
 		},
 		{
 			name:        "ErrContainerNotFound",
-			err:         ctr.ErrContainerNotFound,
-			wantMessage: "ctr: container not found",
+			err:         errdefs.ErrContainerNotFound,
+			wantMessage: "container not found",
 		},
 		{
 			name:        "ErrTaskNotFound",
-			err:         ctr.ErrTaskNotFound,
-			wantMessage: "ctr: task not found",
+			err:         errdefs.ErrTaskNotFound,
+			wantMessage: "task not found",
 		},
 		{
 			name:        "ErrTaskNotRunning",
-			err:         ctr.ErrTaskNotRunning,
-			wantMessage: "ctr: task is not running",
+			err:         errdefs.ErrTaskNotRunning,
+			wantMessage: "task is not running",
 		},
 		{
 			name:        "ErrInvalidImage",
-			err:         ctr.ErrInvalidImage,
-			wantMessage: "ctr: image reference is required",
+			err:         errdefs.ErrInvalidImage,
+			wantMessage: "invalid image reference",
 		},
 	}
 
@@ -131,10 +131,10 @@ func TestErrdefsAreDistinct(t *testing.T) {
 		err1 error
 		err2 error
 	}{
-		{"ErrEmptyGroupPath vs ErrInvalidPID", ctr.ErrEmptyGroupPath, ctr.ErrInvalidPID},
-		{"ErrEmptyContainerID vs ErrContainerNotFound", ctr.ErrEmptyContainerID, ctr.ErrContainerNotFound},
-		{"ErrTaskNotFound vs ErrTaskNotRunning", ctr.ErrTaskNotFound, ctr.ErrTaskNotRunning},
-		{"ErrEmptyRealmID vs ErrEmptySpaceID", ctr.ErrEmptyRealmID, ctr.ErrEmptySpaceID},
+		{"ErrEmptyGroupPath vs ErrInvalidPID", errdefs.ErrEmptyGroupPath, errdefs.ErrInvalidPID},
+		{"ErrEmptyContainerID vs ErrContainerNotFound", errdefs.ErrEmptyContainerID, errdefs.ErrContainerNotFound},
+		{"ErrTaskNotFound vs ErrTaskNotRunning", errdefs.ErrTaskNotFound, errdefs.ErrTaskNotRunning},
+		{"ErrEmptyRealmID vs ErrEmptySpaceID", errdefs.ErrEmptyRealmID, errdefs.ErrEmptySpaceID},
 	}
 
 	for _, tt := range errorPairs {

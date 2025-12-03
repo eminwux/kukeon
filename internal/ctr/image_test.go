@@ -19,7 +19,7 @@ package ctr_test
 import (
 	"testing"
 
-	ctr "github.com/eminwux/kukeon/internal/ctr"
+	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
 // Note: The functions in image.go are unexported (internal implementation).
@@ -36,10 +36,10 @@ import (
 
 func TestImageErrorHandling(t *testing.T) {
 	// Verify that image-related errors are properly defined
-	if ctr.ErrInvalidImage == nil {
+	if errdefs.ErrInvalidImage == nil {
 		t.Error("ErrInvalidImage should not be nil")
 	}
-	if ctr.ErrInvalidImage.Error() == "" {
+	if errdefs.ErrInvalidImage.Error() == "" {
 		t.Error("ErrInvalidImage should have a non-empty error message")
 	}
 }

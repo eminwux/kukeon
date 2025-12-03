@@ -75,4 +75,24 @@ var (
 	ErrDeleteCell              = errors.New("failed to delete cell")
 	ErrDeleteContainer         = errors.New("failed to delete container")
 	ErrResourceHasDependencies = errors.New("resource has child resources")
+
+	// Cgroup-related errors.
+
+	ErrEmptyGroupPath   = errors.New("cgroup group path is required")
+	ErrInvalidPID       = errors.New("pid must be greater than zero")
+	ErrInvalidCPUWeight = errors.New("cpu weight must be within [1, 10000]")
+	ErrInvalidIOWeight  = errors.New("io weight must be within [1, 1000]")
+	ErrInvalidThrottle  = errors.New("io throttle entries require type, major, minor and rate")
+
+	// Container-related errors.
+
+	ErrEmptyContainerID  = errors.New("container id is required")
+	ErrEmptyCellID       = errors.New("cell id is required")
+	ErrEmptySpaceID      = errors.New("space id is required")
+	ErrEmptyRealmID      = errors.New("realm id is required")
+	ErrEmptyStackID      = errors.New("stack id is required")
+	ErrContainerExists   = errors.New("container already exists")
+	ErrContainerNotFound = errors.New("container not found")
+	ErrTaskNotFound      = errors.New("task not found")
+	ErrTaskNotRunning    = errors.New("task is not running")
 )

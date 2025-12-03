@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	ctr "github.com/eminwux/kukeon/internal/ctr"
+	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
 func setupTestClientForTask(t *testing.T) ctr.Client {
@@ -43,7 +44,7 @@ func TestTaskStatusValidation(t *testing.T) {
 	if err == nil {
 		t.Error("TaskStatus with empty ID should return error")
 	}
-	if err != nil && !errors.Is(err, ctr.ErrEmptyContainerID) {
+	if err != nil && !errors.Is(err, errdefs.ErrEmptyContainerID) {
 		// Error might be wrapped, check if it contains the expected error
 		if err.Error() == "" {
 			t.Errorf("TaskStatus error should not be empty, got: %v", err)
@@ -61,7 +62,7 @@ func TestTaskMetricsValidation(t *testing.T) {
 	if err == nil {
 		t.Error("TaskMetrics with empty ID should return error")
 	}
-	if err != nil && !errors.Is(err, ctr.ErrEmptyContainerID) {
+	if err != nil && !errors.Is(err, errdefs.ErrEmptyContainerID) {
 		// Error might be wrapped, check if it contains the expected error
 		if err.Error() == "" {
 			t.Errorf("TaskMetrics error should not be empty, got: %v", err)
@@ -80,7 +81,7 @@ func TestTaskStatusErrorHandling(t *testing.T) {
 		{
 			name:    "empty container ID",
 			id:      "",
-			wantErr: ctr.ErrEmptyContainerID,
+			wantErr: errdefs.ErrEmptyContainerID,
 		},
 		// Note: "valid container ID" case is skipped as it requires containerd connection
 		// Validation tests focus on invalid inputs.
@@ -112,7 +113,7 @@ func TestTaskMetricsErrorHandling(t *testing.T) {
 		{
 			name:    "empty container ID",
 			id:      "",
-			wantErr: ctr.ErrEmptyContainerID,
+			wantErr: errdefs.ErrEmptyContainerID,
 		},
 		// Note: "valid container ID" case is skipped as it requires containerd connection
 		// Validation tests focus on invalid inputs.

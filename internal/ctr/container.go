@@ -27,6 +27,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/errdefs"
+	internalerrdefs "github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
@@ -36,7 +37,7 @@ func (c *client) StartContainer(
 	taskSpec TaskSpec,
 ) (containerd.Task, error) {
 	if containerSpec.ID == "" {
-		return nil, ErrEmptyContainerID
+		return nil, internalerrdefs.ErrEmptyContainerID
 	}
 
 	container, err := c.loadContainer(containerSpec.ID)
@@ -122,7 +123,7 @@ func (c *client) StopContainer(
 	opts StopContainerOptions,
 ) (*containerd.ExitStatus, error) {
 	if id == "" {
-		return nil, ErrEmptyContainerID
+		return nil, internalerrdefs.ErrEmptyContainerID
 	}
 
 	c.logger.DebugContext(c.ctx, "starting to stop container", "id", id)
@@ -144,7 +145,7 @@ func (c *client) StopContainer(
 
 	if status.Status != containerd.Running {
 		c.logger.WarnContext(c.ctx, "task is not running", "id", id, "status", status.Status)
-		return nil, ErrTaskNotRunning
+		return nil, internalerrdefs.ErrTaskNotRunning
 	}
 
 	// Determine signal
@@ -277,7 +278,7 @@ func (c *client) CreateContainer(spec ContainerSpec) (containerd.Container, erro
 	_, err := c.cClient.LoadContainer(nsCtx, spec.ID)
 	if err == nil {
 		c.logger.WarnContext(c.ctx, "container already exists", "id", spec.ID)
-		return nil, ErrContainerExists
+		return nil, internalerrdefs.ErrContainerExists
 	}
 
 	// Pull the image if needed
@@ -340,7 +341,7 @@ func (c *client) CreateContainer(spec ContainerSpec) (containerd.Container, erro
 // GetContainer retrieves a container by ID.
 func (c *client) GetContainer(id string) (containerd.Container, error) {
 	if id == "" {
-		return nil, ErrEmptyContainerID
+		return nil, internalerrdefs.ErrEmptyContainerID
 	}
 	return c.loadContainer(id)
 }
@@ -367,7 +368,7 @@ func (c *client) ListContainers(filters ...string) ([]containerd.Container, erro
 // ExistsContainer checks if a container exists.
 func (c *client) ExistsContainer(id string) (bool, error) {
 	if id == "" {
-		return false, ErrEmptyContainerID
+		return false, internalerrdefs.ErrEmptyContainerID
 	}
 
 	nsCtx := c.namespaceCtx()
@@ -376,7 +377,7 @@ func (c *client) ExistsContainer(id string) (bool, error) {
 		// Only wrap "not found" errors with ErrContainerNotFound so callers can use errors.Is to check
 		// Other errors (connection failures, permission errors, etc.) should be returned as-is
 		if errdefs.IsNotFound(err) {
-			return false, fmt.Errorf("%w: %w", ErrContainerNotFound, err)
+			return false, fmt.Errorf("%w: %w", internalerrdefs.ErrContainerNotFound, err)
 		}
 		return false, err
 	}
@@ -384,14 +385,21 @@ func (c *client) ExistsContainer(id string) (bool, error) {
 }
 
 // DeleteContainer deletes a container.
+// It is idempotent - if the container doesn't exist, it returns nil (treating it as already deleted).
+// It automatically deletes any associated task before deleting the container.
 func (c *client) DeleteContainer(id string, opts ContainerDeleteOptions) error {
 	if id == "" {
-		return ErrEmptyContainerID
+		return internalerrdefs.ErrEmptyContainerID
 	}
 
 	c.logger.DebugContext(c.ctx, "starting to delete container", "id", id, "snapshot_cleanup", opts.SnapshotCleanup)
 	container, err := c.loadContainer(id)
 	if err != nil {
+		// Container doesn't exist - treat as idempotent (already deleted)
+		if errors.Is(err, internalerrdefs.ErrContainerNotFound) {
+			c.logger.DebugContext(c.ctx, "container not found", "id", id)
+			return nil
+		}
 		c.logger.DebugContext(c.ctx, "failed to load container for deletion", "id", id, "error", err)
 		return err
 	}
@@ -407,6 +415,7 @@ func (c *client) DeleteContainer(id string, opts ContainerDeleteOptions) error {
 		_, err = task.Delete(nsCtx, containerd.WithProcessKill)
 		if err != nil {
 			c.logger.WarnContext(c.ctx, "failed to delete task", "id", id, "err", formatError(err))
+			// Continue with container deletion even if task deletion failed
 		} else {
 			c.logger.DebugContext(c.ctx, "deleted task", "id", id)
 		}
@@ -424,6 +433,12 @@ func (c *client) DeleteContainer(id string, opts ContainerDeleteOptions) error {
 
 	err = container.Delete(nsCtx, deleteOpts...)
 	if err != nil {
+		// Check if container was already deleted (race condition)
+		if errdefs.IsNotFound(err) {
+			c.logger.DebugContext(c.ctx, "container not found", "id", id)
+			c.dropContainer(id)
+			return nil
+		}
 		c.logger.ErrorContext(c.ctx, "failed to delete container", "id", id, "err", formatError(err))
 		return fmt.Errorf("failed to delete container: %w", err)
 	}
@@ -438,27 +453,27 @@ func (c *client) CreateContainerFromSpec(
 	containerSpec intmodel.ContainerSpec,
 ) (containerd.Container, error) {
 	if containerSpec.ID == "" {
-		return nil, ErrEmptyContainerID
+		return nil, internalerrdefs.ErrEmptyContainerID
 	}
 
 	if containerSpec.Image == "" {
-		return nil, ErrInvalidImage
+		return nil, internalerrdefs.ErrInvalidImage
 	}
 
 	if containerSpec.CellName == "" {
-		return nil, ErrEmptyCellID
+		return nil, internalerrdefs.ErrEmptyCellID
 	}
 
 	if containerSpec.SpaceName == "" {
-		return nil, ErrEmptySpaceID
+		return nil, internalerrdefs.ErrEmptySpaceID
 	}
 
 	if containerSpec.RealmName == "" {
-		return nil, ErrEmptyRealmID
+		return nil, internalerrdefs.ErrEmptyRealmID
 	}
 
 	if containerSpec.StackName == "" {
-		return nil, ErrEmptyStackID
+		return nil, internalerrdefs.ErrEmptyStackID
 	}
 
 	cellID := containerSpec.CellName
@@ -500,10 +515,10 @@ func (c *client) CreateContainerFromSpec(
 // validateContainerSpec validates a container spec.
 func validateContainerSpec(spec ContainerSpec) error {
 	if spec.ID == "" {
-		return ErrEmptyContainerID
+		return internalerrdefs.ErrEmptyContainerID
 	}
 	if spec.Image == "" {
-		return ErrInvalidImage
+		return internalerrdefs.ErrInvalidImage
 	}
 	return nil
 }

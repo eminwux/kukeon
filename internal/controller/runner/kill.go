@@ -21,9 +21,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 // KillCell immediately force-kills all containers in a cell (workload containers first, then root container).
@@ -107,6 +107,11 @@ func (r *Exec) KillCell(cell intmodel.Cell) error {
 
 	// Kill all workload containers first
 	for _, containerSpec := range internalCell.Spec.Containers {
+		// Skip root container - it's handled separately afterwards
+		if containerSpec.Root {
+			continue
+		}
+
 		containerCellName := strings.TrimSpace(containerSpec.CellName)
 		if containerCellName == "" {
 			containerCellName = cellID
@@ -139,24 +144,61 @@ func (r *Exec) KillCell(cell intmodel.Cell) error {
 			"killed container",
 			fields...,
 		)
+
+		// Delete container after killing
+		err = r.ctrClient.DeleteContainer(containerID, ctr.ContainerDeleteOptions{
+			SnapshotCleanup: true,
+		})
+		if err != nil {
+			// Log warning but don't fail - container might already be deleted
+			fields = appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+			fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
+			r.logger.WarnContext(
+				r.ctx,
+				"failed to delete container, continuing",
+				fields...,
+			)
+		} else {
+			fields = appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+			fields = append(fields, "space", spaceID, "realm", realmID)
+			r.logger.InfoContext(
+				r.ctx,
+				"deleted container",
+				fields...,
+			)
+		}
 	}
 
 	// Kill root container last and detach from CNI
-	rootContainerID, err := naming.BuildRootContainerdID(spaceID, stackID, cellID)
+	rootContainerID, err := r.getRootContainerContainerdID(internalCell)
 	if err != nil {
-		return fmt.Errorf("failed to build root container containerd ID: %w", err)
+		return err
 	}
 
-	// Detach root container from CNI network
-	r.detachRootContainerFromCNI(
-		r.ctx,
+	// Get space to resolve network name for fallback cleanup
+	var networkName string
+	lookupSpace := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{
+			Name: spaceID,
+		},
+		Spec: intmodel.SpaceSpec{
+			RealmName: realmID,
+		},
+	}
+	internalSpace, spaceErr := r.GetSpace(lookupSpace)
+	if spaceErr == nil {
+		networkName, _ = r.getSpaceNetworkName(internalSpace)
+	}
+
+	// Detach root container from CNI network before killing (needed for CNI detach)
+	r.detachRootContainerFromNetwork(
 		rootContainerID,
 		cniConfigPath,
+		internalRealm.Spec.Namespace,
 		cellID,
 		cellName,
 		spaceID,
 		realmID,
-		internalRealm.Spec.Namespace,
 	)
 
 	// Kill root container
@@ -180,6 +222,71 @@ func (r *Exec) KillCell(cell intmodel.Cell) error {
 		)
 	}
 
+	// Delete root container after killing
+	err = r.ctrClient.DeleteContainer(rootContainerID, ctr.ContainerDeleteOptions{
+		SnapshotCleanup: true,
+	})
+	if err != nil {
+		// Log warning but don't fail - container might already be deleted
+		fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
+		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
+		r.logger.WarnContext(
+			r.ctx,
+			"failed to delete root container, continuing",
+			fields...,
+		)
+	} else {
+		fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
+		fields = append(fields, "space", spaceID, "realm", realmID)
+		r.logger.InfoContext(
+			r.ctx,
+			"deleted root container",
+			fields...,
+		)
+	}
+
+	// Always run comprehensive CNI cleanup after container deletion as a safety net
+	// This ensures IPAM allocations are cleaned up even if CNI DEL succeeded or failed
+	// Clear netns path since container is now deleted
+	var netnsPath string
+	if networkName != "" {
+		if purgeErr := r.purgeCNIForContainer(rootContainerID, netnsPath, networkName); purgeErr != nil {
+			fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
+			fields = append(
+				fields,
+				"space",
+				spaceID,
+				"realm",
+				realmID,
+				"network",
+				networkName,
+				"err",
+				fmt.Sprintf("%v", purgeErr),
+			)
+			r.logger.WarnContext(
+				r.ctx,
+				"final CNI cleanup had errors, but continuing",
+				fields...,
+			)
+		} else {
+			fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
+			fields = append(fields, "space", spaceID, "realm", realmID, "network", networkName)
+			r.logger.DebugContext(
+				r.ctx,
+				"completed final CNI cleanup after container deletion",
+				fields...,
+			)
+		}
+	} else {
+		fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
+		fields = append(fields, "space", spaceID, "realm", realmID)
+		r.logger.WarnContext(
+			r.ctx,
+			"cannot perform final CNI cleanup: network name not resolved",
+			fields...,
+		)
+	}
+
 	return nil
 }
 
@@ -192,7 +299,7 @@ func (r *Exec) KillContainer(cell intmodel.Cell, containerID string) error {
 
 	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
-		return errdefs.ErrCellNotFound
+		return errdefs.ErrCellNameRequired
 	}
 
 	cellID := cell.Spec.ID
@@ -241,6 +348,14 @@ func (r *Exec) KillContainer(cell intmodel.Cell, containerID string) error {
 		return fmt.Errorf("container %q not found in cell %q", containerID, cellName)
 	}
 
+	// Root container cannot be killed directly - it must be killed by killing the cell
+	if foundContainerSpec.Root {
+		return fmt.Errorf(
+			"root container cannot be killed directly, kill the cell instead using 'kuke kill cell %s'",
+			cellName,
+		)
+	}
+
 	// Use ContainerdID from spec
 	containerdID := foundContainerSpec.ContainerdID
 	if containerdID == "" {
@@ -277,6 +392,39 @@ func (r *Exec) KillContainer(cell intmodel.Cell, containerID string) error {
 		"killed container",
 		fields...,
 	)
+
+	// Delete container after killing
+	err = r.ctrClient.DeleteContainer(containerdID, ctr.ContainerDeleteOptions{
+		SnapshotCleanup: true,
+	})
+	if err != nil {
+		// Log warning but don't fail - container might already be deleted
+		fields = appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
+		fields = append(
+			fields,
+			"space",
+			spaceName,
+			"realm",
+			realmName,
+			"containerName",
+			containerID,
+			"err",
+			fmt.Sprintf("%v", err),
+		)
+		r.logger.WarnContext(
+			r.ctx,
+			"failed to delete container, continuing",
+			fields...,
+		)
+	} else {
+		fields = appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
+		fields = append(fields, "space", spaceName, "realm", realmName, "containerName", containerID)
+		r.logger.InfoContext(
+			r.ctx,
+			"deleted container",
+			fields...,
+		)
+	}
 
 	return nil
 }

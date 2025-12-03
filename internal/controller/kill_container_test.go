@@ -61,6 +61,9 @@ func TestKillContainer_SuccessfulKill(t *testing.T) {
 					}
 					return nil
 				}
+				f.GetContainerStateFn = func(_ intmodel.Cell, _ string) (intmodel.ContainerState, error) {
+					return intmodel.ContainerStatePending, nil
+				}
 				f.UpdateCellMetadataFn = func(cell intmodel.Cell) error {
 					// Container should still be in cell (kill doesn't remove it)
 					if len(cell.Spec.Containers) != 2 {

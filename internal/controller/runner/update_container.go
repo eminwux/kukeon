@@ -53,6 +53,13 @@ func (r *Exec) UpdateContainer(cell intmodel.Cell, desiredContainer intmodel.Con
 	if containerSpecChanged(&desiredContainer, actualContainer) {
 		// Breaking change: stop, delete, and recreate
 		if stopErr := r.StopContainer(existing, desiredContainer.ID); stopErr != nil {
+			if isValidationError(stopErr) {
+				return intmodel.Cell{}, fmt.Errorf(
+					"validation error stopping container %q: %w",
+					desiredContainer.ID,
+					stopErr,
+				)
+			}
 			r.logger.WarnContext(
 				r.ctx,
 				"failed to stop container for update, continuing",
@@ -63,6 +70,13 @@ func (r *Exec) UpdateContainer(cell intmodel.Cell, desiredContainer intmodel.Con
 		}
 
 		if deleteErr := r.DeleteContainer(existing, desiredContainer.ID); deleteErr != nil {
+			if isValidationError(deleteErr) {
+				return intmodel.Cell{}, fmt.Errorf(
+					"validation error deleting container %q: %w",
+					desiredContainer.ID,
+					deleteErr,
+				)
+			}
 			r.logger.WarnContext(
 				r.ctx,
 				"failed to delete container for update, continuing",

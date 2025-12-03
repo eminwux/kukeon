@@ -707,7 +707,7 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 		)
 	}
 
-	// Step 11: Verify cell state updated to Pending
+	// Step 11: Verify cell state updated to Stopped
 	args = append(
 		buildKukeRunPathArgs(runPath),
 		"get",
@@ -729,10 +729,10 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 		t.Fatalf("failed to parse cell JSON after stop: %v", err)
 	}
 
-	// Verify cell state is Pending (0)
-	// Note: CellStatePending = 0 (iota)
-	if cell.Status.State != 0 {
-		t.Fatalf("cell state after stop: %d, expected Pending (0)", cell.Status.State)
+	// Verify cell state is Stopped (2)
+	// Note: CellStateStopped = 2 (after CellStateReady = 1)
+	if cell.Status.State != 2 {
+		t.Fatalf("cell state after stop: %d, expected Stopped (2)", cell.Status.State)
 	}
 
 	// Cleanup runs automatically via t.Cleanup()
@@ -890,7 +890,7 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 		)
 	}
 
-	// Step 11: Verify cell state updated to Pending
+	// Step 11: Verify cell state updated to Stopped
 	args = append(
 		buildKukeRunPathArgs(runPath),
 		"get",
@@ -912,10 +912,10 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 		t.Fatalf("failed to parse cell JSON after kill: %v", err)
 	}
 
-	// Verify cell state is Pending (0)
-	// Note: CellStatePending = 0 (iota)
-	if cell.Status.State != 0 {
-		t.Fatalf("cell state after kill: %d, expected Pending (0)", cell.Status.State)
+	// Verify cell state is Stopped (2)
+	// Note: CellStateStopped = 2 (after CellStateReady = 1)
+	if cell.Status.State != 2 {
+		t.Fatalf("cell state after kill: %d, expected Stopped (2)", cell.Status.State)
 	}
 
 	// Cleanup runs automatically via t.Cleanup()

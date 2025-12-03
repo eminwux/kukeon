@@ -62,8 +62,24 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 	// Handle orphan containers (in actual but not in desired)
 	for id := range actualContainers {
 		if _, exists := desiredContainers[id]; !exists {
+			// Root container cannot be removed from the cell
+			if actualContainers[id].Root {
+				return intmodel.Cell{}, fmt.Errorf(
+					"root container %q cannot be removed from cell %q, delete the cell instead using 'kuke delete cell %s'",
+					id,
+					existing.Metadata.Name,
+					existing.Metadata.Name,
+				)
+			}
 			// Container should be removed
 			if stopErr := r.StopContainer(existing, id); stopErr != nil {
+				if isValidationError(stopErr) {
+					return intmodel.Cell{}, fmt.Errorf(
+						"validation error stopping container %q for removal: %w",
+						id,
+						stopErr,
+					)
+				}
 				r.logger.WarnContext(
 					r.ctx,
 					"failed to stop container for removal, continuing",
@@ -73,6 +89,13 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 				)
 			}
 			if deleteErr := r.DeleteContainer(existing, id); deleteErr != nil {
+				if isValidationError(deleteErr) {
+					return intmodel.Cell{}, fmt.Errorf(
+						"validation error deleting container %q for removal: %w",
+						id,
+						deleteErr,
+					)
+				}
 				r.logger.WarnContext(
 					r.ctx,
 					"failed to delete container for removal, continuing",
@@ -93,8 +116,23 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 			desiredContainer.ContainerdID = actualContainer.ContainerdID
 			// Check if container spec changed (image, command, args) - if so, recreate
 			if containerSpecChanged(&desiredContainer, actualContainer) {
+				// Root container cannot be deleted for updates
+				if actualContainer.Root {
+					return intmodel.Cell{}, fmt.Errorf(
+						"root container %q cannot be deleted for update in cell %q, recreate the cell instead",
+						desiredContainer.ID,
+						existing.Metadata.Name,
+					)
+				}
 				// Stop and delete old container
 				if stopErr := r.StopContainer(existing, desiredContainer.ID); stopErr != nil {
+					if isValidationError(stopErr) {
+						return intmodel.Cell{}, fmt.Errorf(
+							"validation error stopping container %q for update: %w",
+							desiredContainer.ID,
+							stopErr,
+						)
+					}
 					r.logger.WarnContext(
 						r.ctx,
 						"failed to stop container for update, continuing",
@@ -104,6 +142,13 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 					)
 				}
 				if deleteErr := r.DeleteContainer(existing, desiredContainer.ID); deleteErr != nil {
+					if isValidationError(deleteErr) {
+						return intmodel.Cell{}, fmt.Errorf(
+							"validation error deleting container %q for update: %w",
+							desiredContainer.ID,
+							deleteErr,
+						)
+					}
 					r.logger.WarnContext(
 						r.ctx,
 						"failed to delete container for update, continuing",

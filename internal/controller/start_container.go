@@ -103,23 +103,9 @@ func (b *Exec) StartContainer(container intmodel.Container) (StartContainerResul
 		return res, fmt.Errorf("container %q not found in cell %q", name, cellName)
 	}
 
-	// Start the cell with only this container
-	// Construct a cell with just this container for starting
-	cellToStart := intmodel.Cell{
-		Metadata: intmodel.CellMetadata{
-			Name: cellName,
-		},
-		Spec: intmodel.CellSpec{
-			RealmName: realmName,
-			SpaceName: spaceName,
-			StackName: stackName,
-			Containers: []intmodel.ContainerSpec{
-				*foundContainerSpec,
-			},
-		},
-	}
-
-	if err = b.runner.StartCell(cellToStart); err != nil {
+	// Start the container using runner.StartContainer which checks if root container is running
+	// If root container is not running, runner.StartContainer will return an error telling user to start the cell first
+	if err = b.runner.StartContainer(internalCell, name); err != nil {
 		return res, fmt.Errorf("failed to start container %s: %w", name, err)
 	}
 

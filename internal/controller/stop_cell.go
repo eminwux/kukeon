@@ -43,10 +43,10 @@ func (b *Exec) StopCell(cell intmodel.Cell) (StopCellResult, error) {
 		return result, fmt.Errorf("failed to stop cell containers: %w", err)
 	}
 
-	// Update cell state to Pending
-	internalCell.Status.State = intmodel.CellStatePending
+	// Update cell state to Stopped
+	internalCell.Status.State = intmodel.CellStateStopped
 
-	// Update cell metadata state to Pending (stopped)
+	// Update cell metadata state to Stopped
 	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {
 		return result, fmt.Errorf("failed to update cell metadata: %w", err)
 	}

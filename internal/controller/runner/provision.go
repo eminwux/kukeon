@@ -1473,7 +1473,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		if err != nil {
 			// Check if the error indicates the container doesn't exist
 			// In that case, treat it as "doesn't exist" (false) rather than a fatal error
-			if errors.Is(err, ctr.ErrContainerNotFound) {
+			if errors.Is(err, errdefs.ErrContainerNotFound) {
 				// Container doesn't exist, which is fine - we'll create it
 				exists = false
 			} else {

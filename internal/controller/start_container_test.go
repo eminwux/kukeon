@@ -55,12 +55,9 @@ func TestStartContainer_SuccessfulStart(t *testing.T) {
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
 				}
-				f.StartCellFn = func(cell intmodel.Cell) error {
-					// Verify cell contains only the container to start
-					if len(cell.Spec.Containers) != 1 {
-						return errors.New("expected cell to contain only one container")
-					}
-					if cell.Spec.Containers[0].ID != "test-container" {
+				f.StartContainerFn = func(_ intmodel.Cell, containerID string) error {
+					// Verify container ID matches
+					if containerID != "test-container" {
 						return errors.New("unexpected container ID")
 					}
 					return nil
@@ -104,7 +101,7 @@ func TestStartContainer_SuccessfulStart(t *testing.T) {
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
+				f.StartContainerFn = func(_ intmodel.Cell, _ string) error {
 					return nil
 				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
@@ -504,7 +501,7 @@ func TestStartContainer_RunnerErrors(t *testing.T) {
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
+				f.StartContainerFn = func(_ intmodel.Cell, _ string) error {
 					return errors.New("start failed")
 				}
 			},
@@ -526,7 +523,7 @@ func TestStartContainer_RunnerErrors(t *testing.T) {
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
+				f.StartContainerFn = func(_ intmodel.Cell, _ string) error {
 					return nil
 				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
@@ -616,9 +613,9 @@ func TestStartContainer_ContainerLookupByID(t *testing.T) {
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
 				}
-				f.StartCellFn = func(cell intmodel.Cell) error {
-					if len(cell.Spec.Containers) != 1 || cell.Spec.Containers[0].ID != "target-container" {
-						return errors.New("unexpected container in cell")
+				f.StartContainerFn = func(_ intmodel.Cell, containerID string) error {
+					if containerID != "target-container" {
+						return errors.New("unexpected container ID")
 					}
 					return nil
 				}
@@ -652,9 +649,9 @@ func TestStartContainer_ContainerLookupByID(t *testing.T) {
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
 				}
-				f.StartCellFn = func(cell intmodel.Cell) error {
-					if len(cell.Spec.Containers) != 1 || cell.Spec.Containers[0].ID != "target-container-id" {
-						return errors.New("unexpected container in cell")
+				f.StartContainerFn = func(_ intmodel.Cell, containerID string) error {
+					if containerID != "target-container-id" {
+						return errors.New("unexpected container ID")
 					}
 					return nil
 				}
@@ -747,9 +744,9 @@ func TestStartContainer_NameTrimming(t *testing.T) {
 					}
 					return existingCell, nil
 				}
-				f.StartCellFn = func(cell intmodel.Cell) error {
-					if len(cell.Spec.Containers) != 1 || cell.Spec.Containers[0].ID != "test-container" {
-						return errors.New("unexpected container in cell")
+				f.StartContainerFn = func(_ intmodel.Cell, containerID string) error {
+					if containerID != "test-container" {
+						return errors.New("unexpected container ID")
 					}
 					return nil
 				}

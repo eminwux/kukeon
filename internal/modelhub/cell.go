@@ -46,6 +46,7 @@ type CellState int
 const (
 	CellStatePending CellState = iota
 	CellStateReady
+	CellStateStopped
 	CellStateFailed
 	CellStateUnknown
 )

@@ -27,6 +27,7 @@ import (
 	cgroup2 "github.com/containerd/cgroups/v2/cgroup2"
 	cgroupstats "github.com/containerd/cgroups/v2/cgroup2/stats"
 	"github.com/eminwux/kukeon/internal/consts"
+	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
 // TODO(eminwux): add cgroup integration tests once CI exposes a writable cgroup v2 hierarchy.
@@ -141,7 +142,7 @@ func (c *client) UpdateCgroup(group, mountpoint string, resources CgroupResource
 // AddProcessToCgroup adds the pid into cgroup.procs.
 func (c *client) AddProcessToCgroup(group, mountpoint string, pid int) error {
 	if pid <= 0 {
-		return ErrInvalidPID
+		return errdefs.ErrInvalidPID
 	}
 	manager, err := c.managerFor(group, mountpoint)
 	if err != nil {
@@ -278,7 +279,7 @@ func (c *client) managerFor(group, mountpoint string) (*cgroup2.Manager, error) 
 
 func validateGroupPath(group string) error {
 	if group == "" {
-		return ErrEmptyGroupPath
+		return errdefs.ErrEmptyGroupPath
 	}
 	return cgroup2.VerifyGroupPath(group)
 }

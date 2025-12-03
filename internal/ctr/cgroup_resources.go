@@ -18,6 +18,7 @@ package ctr
 
 import (
 	cgroup2 "github.com/containerd/cgroups/v2/cgroup2"
+	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
 // toResources converts CgroupResources to cgroup2.Resources.
@@ -63,7 +64,7 @@ func (c *CPUResources) isZero() bool {
 func (c *CPUResources) toResource() (*cgroup2.CPU, error) {
 	if c.Weight != nil {
 		if *c.Weight < 1 || *c.Weight > 10000 {
-			return nil, ErrInvalidCPUWeight
+			return nil, errdefs.ErrInvalidCPUWeight
 		}
 	}
 	cpu := &cgroup2.CPU{
@@ -111,12 +112,12 @@ func (io *IOResources) isZero() bool {
 // toResource converts IOResources to cgroup2.IO.
 func (io *IOResources) toResource() (*cgroup2.IO, error) {
 	if io.Weight != 0 && (io.Weight < 1 || io.Weight > 1000) {
-		return nil, ErrInvalidIOWeight
+		return nil, errdefs.ErrInvalidIOWeight
 	}
 	maxEntries := make([]cgroup2.Entry, 0, len(io.Throttle))
 	for _, entry := range io.Throttle {
 		if entry.Type == "" || entry.Rate == 0 || entry.Major < 0 || entry.Minor < 0 {
-			return nil, ErrInvalidThrottle
+			return nil, errdefs.ErrInvalidThrottle
 		}
 		maxEntries = append(maxEntries, cgroup2.Entry{
 			Type:  cgroup2.IOType(entry.Type),
