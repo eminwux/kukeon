@@ -28,10 +28,14 @@ import (
 )
 
 func existsFilePath(filepath string) bool {
-	if _, err := os.Stat(filepath); err == nil {
+	_, err := os.Stat(filepath)
+	if err == nil {
 		return true
 	}
-	return false
+	// Only return false if the error is specifically "file does not exist"
+	// For other errors (like permission denied), return true so we attempt
+	// to read the file anyway and let the read operation provide the actual error
+	return !os.IsNotExist(err)
 }
 
 func WriteMetadata(ctx context.Context, logger *slog.Logger, metadata any, file string) error {

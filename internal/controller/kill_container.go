@@ -114,6 +114,17 @@ func (b *Exec) KillContainer(container intmodel.Container) (KillContainerResult,
 		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
+	// Query actual container state from containerd
+	actualState, err := b.runner.GetContainerState(internalCell, name)
+	if err != nil {
+		// Log error but continue with Pending state (container was just killed)
+		b.logger.DebugContext(b.ctx, "failed to get container state from containerd after kill",
+			"container", name,
+			"cell", cellName,
+			"error", err)
+		actualState = intmodel.ContainerStateStopped // Default to Stopped since we just killed it
+	}
+
 	// Build result container from found container spec
 	labels := container.Metadata.Labels
 	if labels == nil {
@@ -127,7 +138,7 @@ func (b *Exec) KillContainer(container intmodel.Container) (KillContainerResult,
 		},
 		Spec: *foundContainerSpec,
 		Status: intmodel.ContainerStatus{
-			State: intmodel.ContainerStatePending,
+			State: actualState,
 		},
 	}
 

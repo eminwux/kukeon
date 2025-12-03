@@ -70,13 +70,14 @@ type fakeRunner struct {
 	UpdateCellMetadataFn      func(cell intmodel.Cell) error
 
 	// Container methods
-	ListContainersFn  func(realmName, spaceName, stackName, cellName string) ([]intmodel.ContainerSpec, error)
-	CreateContainerFn func(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)
-	EnsureContainerFn func(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)
-	StartContainerFn  func(cell intmodel.Cell, containerID string) error
-	StopContainerFn   func(cell intmodel.Cell, containerID string) error
-	KillContainerFn   func(cell intmodel.Cell, containerID string) error
-	DeleteContainerFn func(cell intmodel.Cell, containerID string) error
+	ListContainersFn    func(realmName, spaceName, stackName, cellName string) ([]intmodel.ContainerSpec, error)
+	CreateContainerFn   func(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)
+	EnsureContainerFn   func(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)
+	StartContainerFn    func(cell intmodel.Cell, containerID string) error
+	StopContainerFn     func(cell intmodel.Cell, containerID string) error
+	KillContainerFn     func(cell intmodel.Cell, containerID string) error
+	DeleteContainerFn   func(cell intmodel.Cell, containerID string) error
+	GetContainerStateFn func(cell intmodel.Cell, containerID string) (intmodel.ContainerState, error)
 
 	// Utility methods
 	ExistsCgroupFn func(doc any) (bool, error)
@@ -101,6 +102,12 @@ type fakeRunner struct {
 	UpdateCellFn      func(cell intmodel.Cell) (intmodel.Cell, error)
 	RecreateCellFn    func(cell intmodel.Cell) (intmodel.Cell, error)
 	UpdateContainerFn func(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)
+
+	// Refresh methods
+	RefreshRealmFn func(realm intmodel.Realm) (intmodel.Realm, bool, error)
+	RefreshSpaceFn func(space intmodel.Space) (intmodel.Space, bool, error)
+	RefreshStackFn func(stack intmodel.Stack) (intmodel.Stack, bool, error)
+	RefreshCellFn  func(cell intmodel.Cell) (intmodel.Cell, int, error)
 }
 
 // Realm methods
@@ -353,6 +360,13 @@ func (f *fakeRunner) DeleteContainer(cell intmodel.Cell, containerID string) err
 	return errors.New("unexpected call to DeleteContainer")
 }
 
+func (f *fakeRunner) GetContainerState(cell intmodel.Cell, containerID string) (intmodel.ContainerState, error) {
+	if f.GetContainerStateFn != nil {
+		return f.GetContainerStateFn(cell, containerID)
+	}
+	return intmodel.ContainerStateUnknown, errors.New("unexpected call to GetContainerState")
+}
+
 // Utility methods
 
 func (f *fakeRunner) ExistsCgroup(doc any) (bool, error) {
@@ -459,6 +473,36 @@ func (f *fakeRunner) UpdateContainer(cell intmodel.Cell, container intmodel.Cont
 		return f.UpdateContainerFn(cell, container)
 	}
 	return intmodel.Cell{}, errors.New("unexpected call to UpdateContainer")
+}
+
+// Refresh methods
+
+func (f *fakeRunner) RefreshRealm(realm intmodel.Realm) (intmodel.Realm, bool, error) {
+	if f.RefreshRealmFn != nil {
+		return f.RefreshRealmFn(realm)
+	}
+	return intmodel.Realm{}, false, errors.New("unexpected call to RefreshRealm")
+}
+
+func (f *fakeRunner) RefreshSpace(space intmodel.Space) (intmodel.Space, bool, error) {
+	if f.RefreshSpaceFn != nil {
+		return f.RefreshSpaceFn(space)
+	}
+	return intmodel.Space{}, false, errors.New("unexpected call to RefreshSpace")
+}
+
+func (f *fakeRunner) RefreshStack(stack intmodel.Stack) (intmodel.Stack, bool, error) {
+	if f.RefreshStackFn != nil {
+		return f.RefreshStackFn(stack)
+	}
+	return intmodel.Stack{}, false, errors.New("unexpected call to RefreshStack")
+}
+
+func (f *fakeRunner) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error) {
+	if f.RefreshCellFn != nil {
+		return f.RefreshCellFn(cell)
+	}
+	return intmodel.Cell{}, 0, errors.New("unexpected call to RefreshCell")
 }
 
 // Test helper functions

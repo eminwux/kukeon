@@ -39,6 +39,9 @@ const (
 const (
 	StatePendingStr  = "Pending"
 	StateReadyStr    = "Ready"
+	StateStoppedStr  = "Stopped"
+	StatePausedStr   = "Paused"
+	StatePausingStr  = "Pausing"
 	StateFailedStr   = "Failed"
 	StateUnknownStr  = "Unknown"
 	StateCreatingStr = "Creating"

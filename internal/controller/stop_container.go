@@ -110,6 +110,23 @@ func (b *Exec) StopContainer(container intmodel.Container) (StopContainerResult,
 		return res, fmt.Errorf("failed to update cell metadata: %w", err)
 	}
 
+	// Query actual container state from containerd
+	var actualState intmodel.ContainerState
+	if foundContainerSpec != nil {
+		var state intmodel.ContainerState
+		state, err = b.runner.GetContainerState(internalCell, name)
+		if err != nil {
+			// Log error but continue with Pending state (container was just stopped)
+			b.logger.DebugContext(b.ctx, "failed to get container state from containerd after stop",
+				"container", name,
+				"cell", cellName,
+				"error", err)
+			actualState = intmodel.ContainerStateStopped // Default to Stopped since we just stopped it
+		} else {
+			actualState = state
+		}
+	}
+
 	// Construct result container
 	if foundContainerSpec != nil {
 		labels := container.Metadata.Labels
@@ -124,7 +141,7 @@ func (b *Exec) StopContainer(container intmodel.Container) (StopContainerResult,
 			},
 			Spec: *foundContainerSpec,
 			Status: intmodel.ContainerStatus{
-				State: intmodel.ContainerStatePending,
+				State: actualState,
 			},
 		}
 	} else {

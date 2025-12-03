@@ -58,6 +58,7 @@ type Controller interface {
 	PurgeStack(stack intmodel.Stack, force, cascade bool) (PurgeStackResult, error)
 	PurgeCell(cell intmodel.Cell, force, cascade bool) (PurgeCellResult, error)
 	PurgeContainer(container intmodel.Container) (PurgeContainerResult, error)
+	RefreshAll() (RefreshResult, error)
 }
 
 type Exec struct {

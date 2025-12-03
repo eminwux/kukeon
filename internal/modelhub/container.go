@@ -65,6 +65,9 @@ type ContainerState int
 const (
 	ContainerStatePending ContainerState = iota
 	ContainerStateReady
+	ContainerStateStopped
+	ContainerStatePaused
+	ContainerStatePausing
 	ContainerStateFailed
 	ContainerStateUnknown
 )

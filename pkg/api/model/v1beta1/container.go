@@ -67,6 +67,9 @@ type ContainerState int
 const (
 	ContainerStatePending ContainerState = iota
 	ContainerStateReady
+	ContainerStateStopped
+	ContainerStatePaused
+	ContainerStatePausing
 	ContainerStateFailed
 	ContainerStateUnknown
 )
@@ -77,6 +80,12 @@ func (c *ContainerState) String() string {
 		return StatePendingStr
 	case ContainerStateReady:
 		return StateReadyStr
+	case ContainerStateStopped:
+		return StateStoppedStr
+	case ContainerStatePaused:
+		return StatePausedStr
+	case ContainerStatePausing:
+		return StatePausingStr
 	case ContainerStateFailed:
 		return StateFailedStr
 	case ContainerStateUnknown:
@@ -116,7 +125,7 @@ func NewContainerDoc(from *ContainerDoc) *ContainerDoc {
 				RestartPolicy:   "",
 			},
 			Status: ContainerStatus{
-				State:        ContainerStateUnknown,
+				State:        ContainerStatePending,
 				RestartCount: 0,
 				RestartTime:  time.Time{},
 				StartTime:    time.Time{},
