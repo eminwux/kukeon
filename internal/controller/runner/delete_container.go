@@ -89,6 +89,14 @@ func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 		return fmt.Errorf("container %q not found in cell %q", containerID, cellName)
 	}
 
+	// Root container cannot be deleted directly - it must be deleted by deleting the cell
+	if foundContainerSpec.Root {
+		return fmt.Errorf(
+			"root container cannot be deleted directly, delete the cell instead using 'kuke delete cell %s'",
+			cellName,
+		)
+	}
+
 	// Use ContainerdID from spec
 	containerdID := foundContainerSpec.ContainerdID
 	if containerdID == "" {

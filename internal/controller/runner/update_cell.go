@@ -62,6 +62,15 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 	// Handle orphan containers (in actual but not in desired)
 	for id := range actualContainers {
 		if _, exists := desiredContainers[id]; !exists {
+			// Root container cannot be removed from the cell
+			if actualContainers[id].Root {
+				return intmodel.Cell{}, fmt.Errorf(
+					"root container %q cannot be removed from cell %q, delete the cell instead using 'kuke delete cell %s'",
+					id,
+					existing.Metadata.Name,
+					existing.Metadata.Name,
+				)
+			}
 			// Container should be removed
 			if stopErr := r.StopContainer(existing, id); stopErr != nil {
 				if isValidationError(stopErr) {
@@ -107,6 +116,14 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 			desiredContainer.ContainerdID = actualContainer.ContainerdID
 			// Check if container spec changed (image, command, args) - if so, recreate
 			if containerSpecChanged(&desiredContainer, actualContainer) {
+				// Root container cannot be deleted for updates
+				if actualContainer.Root {
+					return intmodel.Cell{}, fmt.Errorf(
+						"root container %q cannot be deleted for update in cell %q, recreate the cell instead",
+						desiredContainer.ID,
+						existing.Metadata.Name,
+					)
+				}
 				// Stop and delete old container
 				if stopErr := r.StopContainer(existing, desiredContainer.ID); stopErr != nil {
 					if isValidationError(stopErr) {
