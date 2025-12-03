@@ -561,6 +561,14 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
 		return fmt.Errorf("container %q not found in cell %q", containerID, cellName)
 	}
 
+	// Root container cannot be started directly - it must be started by starting the cell
+	if foundContainerSpec.Root {
+		return fmt.Errorf(
+			"root container cannot be started directly, start the cell instead using 'kuke start cell %s'",
+			cellName,
+		)
+	}
+
 	// Use ContainerdID from spec
 	containerdID := foundContainerSpec.ContainerdID
 	if containerdID == "" {
