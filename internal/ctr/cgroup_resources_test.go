@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	ctr "github.com/eminwux/kukeon/internal/ctr"
+	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
 // Note: The functions in cgroup_resources.go are unexported (internal implementation).
@@ -123,24 +124,24 @@ func TestCgroupResourcesTypes(t *testing.T) {
 // These errors are returned by unexported validation functions.
 func TestCgroupResourceErrorTypes(t *testing.T) {
 	// Verify that error types are exported and can be checked
-	if ctr.ErrInvalidCPUWeight == nil {
+	if errdefs.ErrInvalidCPUWeight == nil {
 		t.Error("ErrInvalidCPUWeight should not be nil")
 	}
-	if ctr.ErrInvalidIOWeight == nil {
+	if errdefs.ErrInvalidIOWeight == nil {
 		t.Error("ErrInvalidIOWeight should not be nil")
 	}
-	if ctr.ErrInvalidThrottle == nil {
+	if errdefs.ErrInvalidThrottle == nil {
 		t.Error("ErrInvalidThrottle should not be nil")
 	}
 
 	// Verify error messages
-	if ctr.ErrInvalidCPUWeight.Error() == "" {
+	if errdefs.ErrInvalidCPUWeight.Error() == "" {
 		t.Error("ErrInvalidCPUWeight should have a non-empty error message")
 	}
-	if ctr.ErrInvalidIOWeight.Error() == "" {
+	if errdefs.ErrInvalidIOWeight.Error() == "" {
 		t.Error("ErrInvalidIOWeight should have a non-empty error message")
 	}
-	if ctr.ErrInvalidThrottle.Error() == "" {
+	if errdefs.ErrInvalidThrottle.Error() == "" {
 		t.Error("ErrInvalidThrottle should have a non-empty error message")
 	}
 }

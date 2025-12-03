@@ -23,9 +23,10 @@ import (
 
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
+	"github.com/containerd/errdefs"
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/ctr"
-	"github.com/eminwux/kukeon/internal/errdefs"
+	internalerrdefs "github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/naming"
 )
@@ -35,19 +36,19 @@ import (
 func (r *Exec) StartCell(cell intmodel.Cell) error {
 	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
-		return errdefs.ErrCellNameRequired
+		return internalerrdefs.ErrCellNameRequired
 	}
 	realmName := strings.TrimSpace(cell.Spec.RealmName)
 	if realmName == "" {
-		return errdefs.ErrRealmNameRequired
+		return internalerrdefs.ErrRealmNameRequired
 	}
 	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
 	if spaceName == "" {
-		return errdefs.ErrSpaceNameRequired
+		return internalerrdefs.ErrSpaceNameRequired
 	}
 	stackName := strings.TrimSpace(cell.Spec.StackName)
 	if stackName == "" {
-		return errdefs.ErrStackNameRequired
+		return internalerrdefs.ErrStackNameRequired
 	}
 
 	// Get the cell document to access all containers
@@ -63,13 +64,13 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 	}
 	internalCell, err := r.GetCell(lookupCell)
 	if err != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
+		return fmt.Errorf("%w: %w", internalerrdefs.ErrGetCell, err)
 	}
 
 	cellSpec := internalCell.Spec
 	cellID := cellSpec.ID
 	if cellID == "" {
-		return errdefs.ErrCellIDRequired
+		return internalerrdefs.ErrCellIDRequired
 	}
 
 	realmID := cellSpec.RealmName
@@ -86,7 +87,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 	// The logger is passed separately, so we don't need to preserve context values
 
 	if err = r.ensureClientConnected(); err != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+		return fmt.Errorf("%w: %w", internalerrdefs.ErrConnectContainerd, err)
 	}
 
 	// Get realm to access namespace
@@ -123,7 +124,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 	container, err := r.ctrClient.GetContainer(containerID)
 	if err != nil {
 		// Container doesn't exist, will create fresh
-		if errors.Is(err, ctr.ErrContainerNotFound) {
+		if errors.Is(err, internalerrdefs.ErrContainerNotFound) {
 			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 			fields = append(fields, "space", spaceID, "realm", realmID)
 			r.logger.DebugContext(
@@ -165,7 +166,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 		})
 		if err != nil {
 			// Check if container doesn't exist (might have been deleted between check and delete)
-			if errors.Is(err, ctr.ErrContainerNotFound) {
+			if errors.Is(err, internalerrdefs.ErrContainerNotFound) {
 				fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 				fields = append(fields, "space", spaceID, "realm", realmID)
 				r.logger.DebugContext(
@@ -289,7 +290,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 		r.cniConf.CniCacheDir,
 	)
 	if mgrErr != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrInitCniManager, mgrErr)
+		return fmt.Errorf("%w: %w", internalerrdefs.ErrInitCniManager, mgrErr)
 	}
 
 	if loadErr := cniMgr.LoadNetworkConfigList(cniConfigPath); loadErr != nil {
@@ -501,26 +502,26 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
 
 	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
-		return errdefs.ErrCellNameRequired
+		return internalerrdefs.ErrCellNameRequired
 	}
 
 	cellID := cell.Spec.ID
 	if cellID == "" {
-		return errdefs.ErrCellIDRequired
+		return internalerrdefs.ErrCellIDRequired
 	}
 
 	realmName := strings.TrimSpace(cell.Spec.RealmName)
 	if realmName == "" {
-		return errdefs.ErrRealmNameRequired
+		return internalerrdefs.ErrRealmNameRequired
 	}
 
 	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
 	if spaceName == "" {
-		return errdefs.ErrSpaceNameRequired
+		return internalerrdefs.ErrSpaceNameRequired
 	}
 
 	if err := r.ensureClientConnected(); err != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+		return fmt.Errorf("%w: %w", internalerrdefs.ErrConnectContainerd, err)
 	}
 
 	// Get realm to access namespace
@@ -575,7 +576,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
 	// Get root container's namespace paths
 	rootContainer, err := r.ctrClient.GetContainer(rootContainerID)
 	if err != nil {
-		if errors.Is(err, ctr.ErrContainerNotFound) {
+		if errors.Is(err, internalerrdefs.ErrContainerNotFound) {
 			return fmt.Errorf(
 				"root container %q does not exist, start the cell first using 'kuke start cell %s': %w",
 				rootContainerID,
@@ -590,7 +591,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
 	rootTask, err := rootContainer.Task(nsCtx, nil)
 	if err != nil {
 		// Check if task doesn't exist
-		if errors.Is(err, ctr.ErrTaskNotFound) {
+		if errdefs.IsNotFound(err) {
 			return fmt.Errorf(
 				"root container %q exists but has no task, start the cell first using 'kuke start cell %s': %w",
 				rootContainerID,

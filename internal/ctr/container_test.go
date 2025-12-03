@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	ctr "github.com/eminwux/kukeon/internal/ctr"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
@@ -44,7 +45,7 @@ func TestContainerValidation(t *testing.T) {
 	if err == nil {
 		t.Error("GetContainer with empty ID should return error")
 	}
-	if !errors.Is(err, ctr.ErrEmptyContainerID) {
+	if !errors.Is(err, errdefs.ErrEmptyContainerID) {
 		t.Errorf("GetContainer with empty ID error = %v, want ErrEmptyContainerID", err)
 	}
 
@@ -53,7 +54,7 @@ func TestContainerValidation(t *testing.T) {
 	if err2 == nil {
 		t.Error("ExistsContainer with empty ID should return error")
 	}
-	if !errors.Is(err2, ctr.ErrEmptyContainerID) {
+	if !errors.Is(err2, errdefs.ErrEmptyContainerID) {
 		t.Errorf("ExistsContainer with empty ID error = %v, want ErrEmptyContainerID", err2)
 	}
 
@@ -62,7 +63,7 @@ func TestContainerValidation(t *testing.T) {
 	if err3 == nil {
 		t.Error("DeleteContainer with empty ID should return error")
 	}
-	if !errors.Is(err3, ctr.ErrEmptyContainerID) {
+	if !errors.Is(err3, errdefs.ErrEmptyContainerID) {
 		t.Errorf("DeleteContainer with empty ID error = %v, want ErrEmptyContainerID", err3)
 	}
 }
@@ -81,7 +82,7 @@ func TestCreateContainerValidation(t *testing.T) {
 				ID:    "",
 				Image: "docker.io/library/busybox:latest",
 			},
-			wantErr: ctr.ErrEmptyContainerID,
+			wantErr: errdefs.ErrEmptyContainerID,
 		},
 		{
 			name: "empty image reference",
@@ -89,7 +90,7 @@ func TestCreateContainerValidation(t *testing.T) {
 				ID:    "test-container",
 				Image: "",
 			},
-			wantErr: ctr.ErrInvalidImage,
+			wantErr: errdefs.ErrInvalidImage,
 		},
 		// Note: "valid spec" case is skipped as it requires containerd connection
 		// which would cause nil pointer panic. Validation tests focus on invalid inputs.
@@ -126,7 +127,7 @@ func TestStartContainerValidation(t *testing.T) {
 				Image: "docker.io/library/busybox:latest",
 			},
 			taskSpec: ctr.TaskSpec{},
-			wantErr:  ctr.ErrEmptyContainerID,
+			wantErr:  errdefs.ErrEmptyContainerID,
 		},
 		// Note: "valid container spec" case is skipped as it requires containerd connection
 		// Validation tests focus on invalid inputs.
@@ -146,7 +147,7 @@ func TestStartContainerValidation(t *testing.T) {
 						// Error might be wrapped, check if it contains the expected error
 						if !errors.Is(err, tt.wantErr) {
 							// Check if it's a different but expected validation error
-							if !errors.Is(err, ctr.ErrEmptyContainerID) {
+							if !errors.Is(err, errdefs.ErrEmptyContainerID) {
 								t.Logf("StartContainer() error = %v (may be expected if container not found)", err)
 							}
 						}
@@ -171,7 +172,7 @@ func TestStopContainerValidation(t *testing.T) {
 			name:    "empty container ID",
 			id:      "",
 			opts:    ctr.StopContainerOptions{},
-			wantErr: ctr.ErrEmptyContainerID,
+			wantErr: errdefs.ErrEmptyContainerID,
 		},
 		// Note: "valid container ID" cases are skipped as they require containerd connection
 		// Validation tests focus on invalid inputs.
@@ -186,7 +187,7 @@ func TestStopContainerValidation(t *testing.T) {
 					t.Errorf("StopContainer() error = nil, want error %v", tt.wantErr)
 				} else if !errors.Is(err, tt.wantErr) {
 					// Error might be wrapped
-					if !errors.Is(err, ctr.ErrEmptyContainerID) {
+					if !errors.Is(err, errdefs.ErrEmptyContainerID) {
 						t.Logf("StopContainer() error = %v (may be expected if container/task not found)", err)
 					}
 				}
@@ -209,7 +210,7 @@ func TestCreateContainerFromSpecValidation(t *testing.T) {
 				ID:    "",
 				Image: "docker.io/library/busybox:latest",
 			},
-			wantErr: ctr.ErrEmptyContainerID,
+			wantErr: errdefs.ErrEmptyContainerID,
 		},
 		{
 			name: "empty image",
@@ -217,7 +218,7 @@ func TestCreateContainerFromSpecValidation(t *testing.T) {
 				ID:    "test-container",
 				Image: "",
 			},
-			wantErr: ctr.ErrInvalidImage,
+			wantErr: errdefs.ErrInvalidImage,
 		},
 		{
 			name: "empty cell name",
@@ -229,7 +230,7 @@ func TestCreateContainerFromSpecValidation(t *testing.T) {
 				RealmName: "realm1",
 				StackName: "stack1",
 			},
-			wantErr: ctr.ErrEmptyCellID,
+			wantErr: errdefs.ErrEmptyCellID,
 		},
 		{
 			name: "empty space name",
@@ -241,7 +242,7 @@ func TestCreateContainerFromSpecValidation(t *testing.T) {
 				RealmName: "realm1",
 				StackName: "stack1",
 			},
-			wantErr: ctr.ErrEmptySpaceID,
+			wantErr: errdefs.ErrEmptySpaceID,
 		},
 		{
 			name: "empty realm name",
@@ -253,7 +254,7 @@ func TestCreateContainerFromSpecValidation(t *testing.T) {
 				RealmName: "",
 				StackName: "stack1",
 			},
-			wantErr: ctr.ErrEmptyRealmID,
+			wantErr: errdefs.ErrEmptyRealmID,
 		},
 		{
 			name: "empty stack name",
@@ -265,7 +266,7 @@ func TestCreateContainerFromSpecValidation(t *testing.T) {
 				RealmName: "realm1",
 				StackName: "",
 			},
-			wantErr: ctr.ErrEmptyStackID,
+			wantErr: errdefs.ErrEmptyStackID,
 		},
 		// Note: "valid spec" case is skipped as it requires containerd connection
 		// Validation tests focus on invalid inputs.

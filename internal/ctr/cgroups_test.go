@@ -26,6 +26,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/consts"
 	ctr "github.com/eminwux/kukeon/internal/ctr"
+	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
 // Note: The cgroups.go file contains exported methods on Client interface:
@@ -52,10 +53,10 @@ func setupTestClientForCgroups(t *testing.T) ctr.Client {
 
 func TestCgroupErrorHandling(t *testing.T) {
 	// Verify that cgroup-related errors are properly defined
-	if ctr.ErrEmptyGroupPath == nil {
+	if errdefs.ErrEmptyGroupPath == nil {
 		t.Error("ErrEmptyGroupPath should not be nil")
 	}
-	if ctr.ErrEmptyGroupPath.Error() == "" {
+	if errdefs.ErrEmptyGroupPath.Error() == "" {
 		t.Error("ErrEmptyGroupPath should have a non-empty error message")
 	}
 }
@@ -91,9 +92,9 @@ func TestNewCgroupValidation(t *testing.T) {
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Errorf("NewCgroup() error = nil, want error containing %q", tt.wantErr)
-				} else if err.Error() == "" || err.Error() != ctr.ErrEmptyGroupPath.Error() {
+				} else if err.Error() == "" || err.Error() != errdefs.ErrEmptyGroupPath.Error() {
 					// Check if error message contains expected text
-					if !errors.Is(err, ctr.ErrEmptyGroupPath) {
+					if !errors.Is(err, errdefs.ErrEmptyGroupPath) {
 						t.Errorf("NewCgroup() error = %v, want ErrEmptyGroupPath", err)
 					}
 				}
@@ -139,7 +140,7 @@ func TestLoadCgroupValidation(t *testing.T) {
 				}
 			} else {
 				// Error might occur due to missing cgroup, but validation should pass
-				if err != nil && errors.Is(err, ctr.ErrEmptyGroupPath) {
+				if err != nil && errors.Is(err, errdefs.ErrEmptyGroupPath) {
 					t.Errorf("LoadCgroup() unexpected validation error: %v", err)
 				}
 			}
@@ -180,7 +181,7 @@ func TestDeleteCgroupValidation(t *testing.T) {
 				}
 			} else {
 				// DeleteCgroup is idempotent, so no error expected even if cgroup doesn't exist
-				if err != nil && errors.Is(err, ctr.ErrEmptyGroupPath) {
+				if err != nil && errors.Is(err, errdefs.ErrEmptyGroupPath) {
 					t.Errorf("DeleteCgroup() unexpected validation error: %v", err)
 				}
 			}
@@ -261,7 +262,7 @@ func TestCgroupPath(t *testing.T) {
 					t.Errorf("CgroupPath() error = nil, want error")
 				}
 				// Error could be ErrEmptyGroupPath or validation error from cgroup2.VerifyGroupPath
-				if tt.group == "" && !errors.Is(err, ctr.ErrEmptyGroupPath) {
+				if tt.group == "" && !errors.Is(err, errdefs.ErrEmptyGroupPath) {
 					t.Errorf("CgroupPath() error = %v, want ErrEmptyGroupPath", err)
 				}
 				return

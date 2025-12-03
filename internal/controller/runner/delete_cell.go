@@ -134,7 +134,7 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 		_, err = r.ctrClient.StopContainer(containerID, ctr.StopContainerOptions{})
 		if err != nil {
 			// Check if container/task doesn't exist - this is idempotent (already stopped/deleted)
-			if errors.Is(err, ctr.ErrContainerNotFound) || errors.Is(err, ctr.ErrTaskNotFound) {
+			if errors.Is(err, errdefs.ErrContainerNotFound) || errors.Is(err, errdefs.ErrTaskNotFound) {
 				r.logger.DebugContext(
 					r.ctx,
 					"container or task already stopped/deleted, continuing",
@@ -158,7 +158,7 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 		})
 		if err != nil {
 			// Check if container doesn't exist - this is idempotent (already deleted)
-			if errors.Is(err, ctr.ErrContainerNotFound) {
+			if errors.Is(err, errdefs.ErrContainerNotFound) {
 				r.logger.DebugContext(r.ctx, "container already deleted", "container", containerID)
 				// Continue with other containers
 			} else {
@@ -181,7 +181,7 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 	_, err = r.ctrClient.StopContainer(rootContainerID, ctr.StopContainerOptions{Force: true})
 	if err != nil {
 		// Check if container/task doesn't exist - this is idempotent (already stopped/deleted)
-		if errors.Is(err, ctr.ErrContainerNotFound) || errors.Is(err, ctr.ErrTaskNotFound) {
+		if errors.Is(err, errdefs.ErrContainerNotFound) || errors.Is(err, errdefs.ErrTaskNotFound) {
 			r.logger.DebugContext(
 				r.ctx,
 				"root container or task already stopped/deleted, continuing",
@@ -205,7 +205,7 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 	})
 	if err != nil {
 		// Check if container doesn't exist - this is idempotent (already deleted)
-		if errors.Is(err, ctr.ErrContainerNotFound) {
+		if errors.Is(err, errdefs.ErrContainerNotFound) {
 			r.logger.DebugContext(r.ctx, "root container already deleted", "container", rootContainerID)
 			// Continue with cgroup and metadata deletion
 		} else {

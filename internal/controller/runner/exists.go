@@ -108,7 +108,7 @@ func (r *Exec) ExistsCellRootContainer(cell intmodel.Cell) (bool, error) {
 	exists, err := r.ctrClient.ExistsContainer(containerID)
 	if err != nil {
 		// Check if container doesn't exist - this is not an error, just "doesn't exist"
-		if errors.Is(err, ctr.ErrContainerNotFound) {
+		if errors.Is(err, errdefs.ErrContainerNotFound) {
 			// Container doesn't exist, return false (not an error)
 			return false, nil
 		}

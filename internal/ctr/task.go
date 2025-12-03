@@ -21,12 +21,13 @@ import (
 
 	apitypes "github.com/containerd/containerd/api/types"
 	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
 // TaskStatus returns the current status of a task.
 func (c *client) TaskStatus(id string) (containerd.Status, error) {
 	if id == "" {
-		return containerd.Status{}, ErrEmptyContainerID
+		return containerd.Status{}, errdefs.ErrEmptyContainerID
 	}
 
 	task, err := c.loadTask(id)
@@ -47,7 +48,7 @@ func (c *client) TaskStatus(id string) (containerd.Status, error) {
 // TaskMetrics returns the metrics for a task.
 func (c *client) TaskMetrics(id string) (*apitypes.Metric, error) {
 	if id == "" {
-		return nil, ErrEmptyContainerID
+		return nil, errdefs.ErrEmptyContainerID
 	}
 
 	task, err := c.loadTask(id)

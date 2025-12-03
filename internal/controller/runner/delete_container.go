@@ -135,7 +135,7 @@ func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 	})
 	if err != nil {
 		// Check if container doesn't exist - this is idempotent (already deleted)
-		if errors.Is(err, ctr.ErrContainerNotFound) {
+		if errors.Is(err, errdefs.ErrContainerNotFound) {
 			// Container already deleted, treat as success
 			fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 			fields = append(fields, "space", spaceName, "realm", realmName, "containerName", containerID)
