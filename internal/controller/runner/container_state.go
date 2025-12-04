@@ -108,7 +108,7 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 			"container", containerID,
 			"cell", cellName,
 			"containersInCell", len(cell.Spec.Containers))
-		return intmodel.ContainerStateUnknown, fmt.Errorf("container %q not found in cell %q", containerID, cellName)
+		return intmodel.ContainerStateUnknown, nil
 	}
 
 	// Get cell ID (use Spec.ID if available, otherwise fall back to Metadata.Name)
@@ -164,7 +164,7 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 			"containerdID", containerdID,
 			"error", err)
 		// If we can't check existence, return Unknown
-		return intmodel.ContainerStateUnknown, nil
+		return intmodel.ContainerStateStopped, nil
 	}
 
 	if !containerExists {
