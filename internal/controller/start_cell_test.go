@@ -156,6 +156,141 @@ func TestStartCell_SuccessfulStart(t *testing.T) {
 	}
 }
 
+func TestStartCell_ReadyStateValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		cellName    string
+		realmName   string
+		spaceName   string
+		stackName   string
+		setupRunner func(*fakeRunner)
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:      "cell in Ready state returns error",
+			cellName:  "ready-cell",
+			realmName: "test-realm",
+			spaceName: "test-space",
+			stackName: "test-stack",
+			setupRunner: func(f *fakeRunner) {
+				existingCell := buildTestCell("ready-cell", "test-realm", "test-space", "test-stack")
+				existingCell.Status.State = intmodel.CellStateReady
+				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return existingCell, nil
+				}
+				f.ExistsCgroupFn = func(_ any) (bool, error) {
+					return true, nil
+				}
+				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+					return true, nil
+				}
+			},
+			wantErr:     true,
+			errContains: "cell \"ready-cell\" is already in Ready state and must first be stopped",
+		},
+		{
+			name:      "cell in Stopped state can be started",
+			cellName:  "stopped-cell",
+			realmName: "test-realm",
+			spaceName: "test-space",
+			stackName: "test-stack",
+			setupRunner: func(f *fakeRunner) {
+				existingCell := buildTestCell("stopped-cell", "test-realm", "test-space", "test-stack")
+				existingCell.Status.State = intmodel.CellStateStopped
+				existingCell.Spec.Containers = []intmodel.ContainerSpec{
+					{ID: "container1", Image: "alpine:latest"},
+				}
+				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return existingCell, nil
+				}
+				f.ExistsCgroupFn = func(_ any) (bool, error) {
+					return true, nil
+				}
+				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+					return true, nil
+				}
+				f.StartCellFn = func(_ intmodel.Cell) error {
+					return nil
+				}
+				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
+					return nil
+				}
+			},
+			wantErr: false,
+		},
+		{
+			name:      "cell in Pending state can be started",
+			cellName:  "pending-cell",
+			realmName: "test-realm",
+			spaceName: "test-space",
+			stackName: "test-stack",
+			setupRunner: func(f *fakeRunner) {
+				existingCell := buildTestCell("pending-cell", "test-realm", "test-space", "test-stack")
+				existingCell.Status.State = intmodel.CellStatePending
+				existingCell.Spec.Containers = []intmodel.ContainerSpec{
+					{ID: "container1", Image: "alpine:latest"},
+				}
+				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return existingCell, nil
+				}
+				f.ExistsCgroupFn = func(_ any) (bool, error) {
+					return true, nil
+				}
+				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+					return true, nil
+				}
+				f.StartCellFn = func(_ intmodel.Cell) error {
+					return nil
+				}
+				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
+					return nil
+				}
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRunner := &fakeRunner{}
+			if tt.setupRunner != nil {
+				tt.setupRunner(mockRunner)
+			}
+
+			ctrl := setupTestController(t, mockRunner)
+			cell := buildTestCell(tt.cellName, tt.realmName, tt.spaceName, tt.stackName)
+
+			_, err := ctrl.StartCell(cell)
+
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+
+			if err == nil {
+				t.Fatal("expected error but got none")
+			}
+
+			if tt.errContains != "" {
+				errStr := err.Error()
+				found := false
+				for i := 0; i <= len(errStr)-len(tt.errContains); i++ {
+					if i+len(tt.errContains) <= len(errStr) && errStr[i:i+len(tt.errContains)] == tt.errContains {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected error message to contain %q, got %q", tt.errContains, err.Error())
+				}
+			}
+		})
+	}
+}
+
 func TestStartCell_ValidationErrors(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -396,6 +531,7 @@ func TestStartCell_RunnerErrors(t *testing.T) {
 			stackName: "test-stack",
 			setupRunner: func(f *fakeRunner) {
 				existingCell := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
+				existingCell.Status.State = intmodel.CellStateStopped
 				// Mock GetCell (called by validateAndGetCell via controller.GetCell)
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
@@ -421,6 +557,7 @@ func TestStartCell_RunnerErrors(t *testing.T) {
 			stackName: "test-stack",
 			setupRunner: func(f *fakeRunner) {
 				existingCell := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
+				existingCell.Status.State = intmodel.CellStateStopped
 				// Mock GetCell (called by validateAndGetCell via controller.GetCell)
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
@@ -502,6 +639,7 @@ func TestStartCell_NameTrimming(t *testing.T) {
 			stackName: "  test-stack  ",
 			setupRunner: func(f *fakeRunner) {
 				existingCell := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
+				existingCell.Status.State = intmodel.CellStateStopped
 				// Mock GetCell (called by validateAndGetCell via controller.GetCell)
 				f.GetCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
 					// Verify trimmed names are used
