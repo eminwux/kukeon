@@ -105,12 +105,10 @@ func (b *Exec) StartContainer(container intmodel.Container) (StartContainerResul
 
 	// Start the container using runner.StartContainer which checks if root container is running
 	// If root container is not running, runner.StartContainer will return an error telling user to start the cell first
-	if err = b.runner.StartContainer(internalCell, name); err != nil {
+	internalCell, err = b.runner.StartContainer(internalCell, name)
+	if err != nil {
 		return res, fmt.Errorf("failed to start container %s: %w", name, err)
 	}
-
-	// Update cell state to Ready
-	internalCell.Status.State = intmodel.CellStateReady
 
 	// Update cell metadata state to Ready
 	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {

@@ -31,22 +31,22 @@ import (
 // It detaches the root container from the CNI network before stopping it, ensuring the network namespace
 // is still valid. If detachment fails or the container is already stopped, fallback cleanup removes
 // IPAM allocations directly.
-func (r *Exec) StopCell(cell intmodel.Cell) error {
+func (r *Exec) StopCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
-		return errdefs.ErrCellNameRequired
+		return intmodel.Cell{}, errdefs.ErrCellNameRequired
 	}
 	realmName := strings.TrimSpace(cell.Spec.RealmName)
 	if realmName == "" {
-		return errdefs.ErrRealmNameRequired
+		return intmodel.Cell{}, errdefs.ErrRealmNameRequired
 	}
 	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
 	if spaceName == "" {
-		return errdefs.ErrSpaceNameRequired
+		return intmodel.Cell{}, errdefs.ErrSpaceNameRequired
 	}
 	stackName := strings.TrimSpace(cell.Spec.StackName)
 	if stackName == "" {
-		return errdefs.ErrStackNameRequired
+		return intmodel.Cell{}, errdefs.ErrStackNameRequired
 	}
 
 	// Get the cell document to access all containers
@@ -62,7 +62,7 @@ func (r *Exec) StopCell(cell intmodel.Cell) error {
 	}
 	internalCell, err := r.GetCell(lookupCell)
 	if err != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
+		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 	}
 
 	cellID := strings.TrimSpace(internalCell.Spec.ID)
@@ -70,7 +70,7 @@ func (r *Exec) StopCell(cell intmodel.Cell) error {
 		cellID = strings.TrimSpace(internalCell.Metadata.Name)
 	}
 	if cellID == "" {
-		return errdefs.ErrCellIDRequired
+		return intmodel.Cell{}, errdefs.ErrCellIDRequired
 	}
 
 	if specRealm := strings.TrimSpace(internalCell.Spec.RealmName); specRealm != "" {
@@ -85,11 +85,11 @@ func (r *Exec) StopCell(cell intmodel.Cell) error {
 
 	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmName, spaceName)
 	if cniErr != nil {
-		return fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
+		return intmodel.Cell{}, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
 
 	if err = r.ensureClientConnected(); err != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
 	// Get realm to access namespace
@@ -100,12 +100,12 @@ func (r *Exec) StopCell(cell intmodel.Cell) error {
 	}
 	internalRealm, err := r.GetRealm(lookupRealm)
 	if err != nil {
-		return fmt.Errorf("failed to get realm: %w", err)
+		return intmodel.Cell{}, fmt.Errorf("failed to get realm: %w", err)
 	}
 
 	namespace := internalRealm.Spec.Namespace
 	if namespace == "" {
-		return fmt.Errorf("realm %q has no namespace", realmName)
+		return intmodel.Cell{}, fmt.Errorf("realm %q has no namespace", realmName)
 	}
 
 	// Set namespace to realm namespace
@@ -134,7 +134,7 @@ func (r *Exec) StopCell(cell intmodel.Cell) error {
 		// Use ContainerdID from spec
 		containerID := containerSpec.ContainerdID
 		if containerID == "" {
-			return fmt.Errorf("container %q has empty ContainerdID", containerSpec.ID)
+			return intmodel.Cell{}, fmt.Errorf("container %q has empty ContainerdID", containerSpec.ID)
 		}
 
 		// Use container name with UUID for containerd operations
@@ -191,7 +191,7 @@ func (r *Exec) StopCell(cell intmodel.Cell) error {
 	// Stop root container last (after all workload containers are stopped)
 	rootContainerID, err := r.getRootContainerContainerdID(internalCell)
 	if err != nil {
-		return err
+		return intmodel.Cell{}, err
 	}
 
 	// Get space to resolve network name for fallback cleanup
@@ -310,7 +310,10 @@ func (r *Exec) StopCell(cell intmodel.Cell) error {
 		)
 	}
 
-	return nil
+	// Update cell state in internal model
+	internalCell.Status.State = intmodel.CellStateStopped
+
+	return internalCell, nil
 }
 
 // StopContainer stops a specific container in a cell.

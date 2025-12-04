@@ -327,17 +327,11 @@ func ReconcileCell(r runner.Runner, desired intmodel.Cell) (ReconcileResult, err
 			}
 			// Start the newly created cell (containers are created but not started)
 			// This matches the behavior of controller.CreateCell which also starts cells
-			if startErr := r.StartCell(created); startErr != nil {
+			started, startErr := r.StartCell(created)
+			if startErr != nil {
 				return result, fmt.Errorf("failed to start cell after creation: %w", startErr)
 			}
-			// Re-fetch the cell to get the latest state after starting
-			started, getErr := r.GetCell(created)
-			if getErr != nil {
-				return result, fmt.Errorf("failed to get cell after starting: %w", getErr)
-			}
-			// Update cell state to Ready and persist metadata
-			// This matches the behavior of controller.StartCell
-			started.Status.State = intmodel.CellStateReady
+			// Update cell metadata (status already set by runner)
 			if updateErr := r.UpdateCellMetadata(started); updateErr != nil {
 				return result, fmt.Errorf("failed to update cell metadata after start: %w", updateErr)
 			}

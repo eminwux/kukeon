@@ -156,7 +156,8 @@ func (b *Exec) CreateContainer(container intmodel.Container) (CreateContainerRes
 	)
 
 	// Start only the specific container
-	if err = b.runner.StartContainer(resultCell, containerName); err != nil {
+	_, err = b.runner.StartContainer(resultCell, containerName)
+	if err != nil {
 		return res, fmt.Errorf("failed to start container %s: %w", containerName, err)
 	}
 

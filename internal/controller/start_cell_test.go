@@ -61,8 +61,9 @@ func TestStartCell_SuccessfulStart(t *testing.T) {
 				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
 					return true, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(cell intmodel.Cell) error {
 					if cell.Status.State != intmodel.CellStateReady {
@@ -104,8 +105,9 @@ func TestStartCell_SuccessfulStart(t *testing.T) {
 				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
 					return true, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(cell intmodel.Cell) error {
 					if cell.Status.State != intmodel.CellStateReady {
@@ -210,8 +212,9 @@ func TestStartCell_ReadyStateValidation(t *testing.T) {
 				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
 					return true, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
 					return nil
@@ -240,8 +243,9 @@ func TestStartCell_ReadyStateValidation(t *testing.T) {
 				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
 					return true, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
 					return nil
@@ -542,8 +546,8 @@ func TestStartCell_RunnerErrors(t *testing.T) {
 				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
 					return true, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return errors.New("start failed")
+				f.StartCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return intmodel.Cell{}, errors.New("start failed")
 				}
 			},
 			wantErr:     true,
@@ -568,8 +572,9 @@ func TestStartCell_RunnerErrors(t *testing.T) {
 				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
 					return true, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
 					return errors.New("metadata update failed")
@@ -654,8 +659,9 @@ func TestStartCell_NameTrimming(t *testing.T) {
 				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
 					return true, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
 					return nil

@@ -47,12 +47,10 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 	}
 
 	// Start all containers in the cell
-	if err = b.runner.StartCell(internalCell); err != nil {
+	internalCell, err = b.runner.StartCell(internalCell)
+	if err != nil {
 		return res, fmt.Errorf("failed to start cell containers: %w", err)
 	}
-
-	// Update cell state to Ready
-	internalCell.Status.State = intmodel.CellStateReady
 
 	// Update cell metadata state to Ready
 	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {

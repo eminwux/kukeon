@@ -494,7 +494,7 @@ func (b *Exec) bootstrapCell(report BootstrapReport) (BootstrapReport, error) {
 	}
 
 	// Start cell containers using the ensured/created cell
-	err = b.runner.StartCell(ensuredCell)
+	_, err = b.runner.StartCell(ensuredCell)
 	if err != nil {
 		return report, fmt.Errorf("failed to start cell containers: %w", err)
 	}
