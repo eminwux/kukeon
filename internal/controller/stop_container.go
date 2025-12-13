@@ -141,6 +141,8 @@ func (b *Exec) StopContainer(container intmodel.Container) (StopContainerResult,
 			},
 			Spec: *foundContainerSpec,
 			Status: intmodel.ContainerStatus{
+				Name:  name,
+				ID:    name,
 				State: actualState,
 			},
 		}

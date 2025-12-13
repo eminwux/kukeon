@@ -282,6 +282,8 @@ func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, err
 				RestartPolicy:   in.Spec.RestartPolicy,
 			},
 			Status: intmodel.ContainerStatus{
+				Name:         in.Status.Name,
+				ID:           in.Status.ID,
 				State:        intmodel.ContainerState(in.Status.State),
 				RestartCount: in.Status.RestartCount,
 				RestartTime:  in.Status.RestartTime,
@@ -327,6 +329,8 @@ func BuildContainerExternalFromInternal(in intmodel.Container, apiVersion ext.Ve
 				RestartPolicy:   in.Spec.RestartPolicy,
 			},
 			Status: ext.ContainerStatus{
+				Name:         in.Status.Name,
+				ID:           in.Status.ID,
 				State:        ext.ContainerState(in.Status.State),
 				RestartCount: in.Status.RestartCount,
 				RestartTime:  in.Status.RestartTime,
@@ -401,6 +405,50 @@ func BuildContainerSpecExternalFromInternal(in intmodel.ContainerSpec) ext.Conta
 	}
 }
 
+// convertContainerStatusesToInternal converts a slice of external ContainerStatus to internal ContainerStatus.
+func convertContainerStatusesToInternal(in []ext.ContainerStatus) []intmodel.ContainerStatus {
+	if in == nil {
+		return []intmodel.ContainerStatus{}
+	}
+	result := make([]intmodel.ContainerStatus, len(in))
+	for i, status := range in {
+		result[i] = intmodel.ContainerStatus{
+			Name:         status.Name,
+			ID:           status.ID,
+			State:        intmodel.ContainerState(status.State),
+			RestartCount: status.RestartCount,
+			RestartTime:  status.RestartTime,
+			StartTime:    status.StartTime,
+			FinishTime:   status.FinishTime,
+			ExitCode:     status.ExitCode,
+			ExitSignal:   status.ExitSignal,
+		}
+	}
+	return result
+}
+
+// buildContainerStatusesExternalFromInternal converts a slice of internal ContainerStatus to external ContainerStatus.
+func buildContainerStatusesExternalFromInternal(in []intmodel.ContainerStatus) []ext.ContainerStatus {
+	if in == nil {
+		return []ext.ContainerStatus{}
+	}
+	result := make([]ext.ContainerStatus, len(in))
+	for i, status := range in {
+		result[i] = ext.ContainerStatus{
+			Name:         status.Name,
+			ID:           status.ID,
+			State:        ext.ContainerState(status.State),
+			RestartCount: status.RestartCount,
+			RestartTime:  status.RestartTime,
+			StartTime:    status.StartTime,
+			FinishTime:   status.FinishTime,
+			ExitCode:     status.ExitCode,
+			ExitSignal:   status.ExitSignal,
+		}
+	}
+	return result
+}
+
 // ConvertCellDocToInternal converts an external CellDoc to the internal hub type.
 func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 	switch in.APIVersion {
@@ -420,6 +468,7 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 			Status: intmodel.CellStatus{
 				State:      intmodel.CellState(in.Status.State),
 				CgroupPath: in.Status.CgroupPath,
+				Containers: convertContainerStatusesToInternal(in.Status.Containers),
 			},
 		}
 
@@ -473,6 +522,7 @@ func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ex
 			Status: ext.CellStatus{
 				State:      ext.CellState(in.Status.State),
 				CgroupPath: in.Status.CgroupPath,
+				Containers: buildContainerStatusesExternalFromInternal(in.Status.Containers),
 			},
 		}
 

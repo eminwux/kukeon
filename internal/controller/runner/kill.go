@@ -290,6 +290,14 @@ func (r *Exec) KillCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	// Update cell state in internal model
 	internalCell.Status.State = intmodel.CellStateStopped
 
+	// Populate container statuses after killing cell and persist them
+	if err = r.PopulateAndPersistCellContainerStatuses(&internalCell); err != nil {
+		r.logger.WarnContext(r.ctx, "failed to populate container statuses",
+			"cell", cellName,
+			"error", err)
+		// Continue anyway - status population is best-effort
+	}
+
 	return internalCell, nil
 }
 

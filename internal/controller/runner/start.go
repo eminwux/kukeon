@@ -493,6 +493,14 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	// Update cell state in internal model
 	internalCell.Status.State = intmodel.CellStateReady
 
+	// Populate container statuses after starting cell and persist them
+	if err = r.PopulateAndPersistCellContainerStatuses(&internalCell); err != nil {
+		r.logger.WarnContext(r.ctx, "failed to populate container statuses",
+			"cell", cellName,
+			"error", err)
+		// Continue anyway - status population is best-effort
+	}
+
 	return internalCell, nil
 }
 
@@ -735,6 +743,14 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (intmodel.
 
 	// Update cell state in internal model
 	updatedCell.Status.State = intmodel.CellStateReady
+
+	// Populate container statuses after starting cell and persist them
+	if err = r.PopulateAndPersistCellContainerStatuses(&updatedCell); err != nil {
+		r.logger.WarnContext(r.ctx, "failed to populate container statuses",
+			"cell", cellName,
+			"error", err)
+		// Continue anyway - status population is best-effort
+	}
 
 	return updatedCell, nil
 }

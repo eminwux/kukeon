@@ -139,6 +139,8 @@ func (b *Exec) StartContainer(container intmodel.Container) (StartContainerResul
 		},
 		Spec: *foundContainerSpec,
 		Status: intmodel.ContainerStatus{
+			Name:  name,
+			ID:    name,
 			State: actualState,
 		},
 	}

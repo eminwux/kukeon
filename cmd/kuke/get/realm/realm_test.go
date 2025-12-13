@@ -140,6 +140,7 @@ func TestNewRealmCmd(t *testing.T) {
 	tests := []struct {
 		name          string
 		args          []string
+		controller    realm.RealmController
 		setup         func(t *testing.T, runPath string)
 		expectErr     bool
 		expectErrText string
@@ -149,6 +150,22 @@ func TestNewRealmCmd(t *testing.T) {
 		{
 			name: "get realm by arg",
 			args: []string{"alpha"},
+			controller: &fakeRealmController{
+				getRealmFn: func(realm intmodel.Realm) (controller.GetRealmResult, error) {
+					if realm.Metadata.Name != "alpha" {
+						return controller.GetRealmResult{}, errors.New("unexpected realm name")
+					}
+					realmInternal, _, _ := apischeme.NormalizeRealm(
+						*sampleRealmDoc("alpha", "alpha-ns", v1beta1.RealmStateReady, "/cgroup/alpha"),
+					)
+					return controller.GetRealmResult{
+						Realm:                     realmInternal,
+						MetadataExists:            true,
+						CgroupExists:              true,
+						ContainerdNamespaceExists: true,
+					}, nil
+				},
+			},
 			setup: func(t *testing.T, runPath string) {
 				writeRealmMetadata(
 					t,
@@ -161,6 +178,22 @@ func TestNewRealmCmd(t *testing.T) {
 		},
 		{
 			name: "get realm from config fallback",
+			controller: &fakeRealmController{
+				getRealmFn: func(realm intmodel.Realm) (controller.GetRealmResult, error) {
+					if realm.Metadata.Name != "bravo" {
+						return controller.GetRealmResult{}, errors.New("unexpected realm name")
+					}
+					realmInternal, _, _ := apischeme.NormalizeRealm(
+						*sampleRealmDoc("bravo", "bravo-ns", v1beta1.RealmStateReady, "/cgroup/bravo"),
+					)
+					return controller.GetRealmResult{
+						Realm:                     realmInternal,
+						MetadataExists:            true,
+						CgroupExists:              true,
+						ContainerdNamespaceExists: true,
+					}, nil
+				},
+			},
 			setup: func(t *testing.T, runPath string) {
 				writeRealmMetadata(
 					t,
@@ -174,6 +207,19 @@ func TestNewRealmCmd(t *testing.T) {
 		},
 		{
 			name: "list realms table",
+			controller: &fakeRealmController{
+				listRealmsFn: func() ([]intmodel.Realm, error) {
+					internalRealms := make([]intmodel.Realm, 0, 2)
+					realmAlpha, _, _ := apischeme.NormalizeRealm(
+						*sampleRealmDoc("alpha", "alpha-ns", v1beta1.RealmStateReady, "/cgroup/alpha"),
+					)
+					realmBravo, _, _ := apischeme.NormalizeRealm(
+						*sampleRealmDoc("bravo", "bravo-ns", v1beta1.RealmStatePending, "/cgroup/bravo"),
+					)
+					internalRealms = append(internalRealms, realmAlpha, realmBravo)
+					return internalRealms, nil
+				},
+			},
 			setup: func(t *testing.T, runPath string) {
 				writeRealmMetadata(t, runPath,
 					sampleRealmDoc("alpha", "alpha-ns", v1beta1.RealmStateReady, "/cgroup/alpha"),
@@ -185,6 +231,16 @@ func TestNewRealmCmd(t *testing.T) {
 		{
 			name: "list realms json",
 			args: []string{"--output", "json"},
+			controller: &fakeRealmController{
+				listRealmsFn: func() ([]intmodel.Realm, error) {
+					internalRealms := make([]intmodel.Realm, 0, 1)
+					realmAlpha, _, _ := apischeme.NormalizeRealm(
+						*sampleRealmDoc("alpha", "alpha-ns", v1beta1.RealmStateReady, "/cgroup/alpha"),
+					)
+					internalRealms = append(internalRealms, realmAlpha)
+					return internalRealms, nil
+				},
+			},
 			setup: func(t *testing.T, runPath string) {
 				writeRealmMetadata(t, runPath,
 					sampleRealmDoc("alpha", "alpha-ns", v1beta1.RealmStateReady, "/cgroup/alpha"),
@@ -194,12 +250,22 @@ func TestNewRealmCmd(t *testing.T) {
 			useStdout:   true,
 		},
 		{
-			name:        "list realms empty",
+			name: "list realms empty",
+			controller: &fakeRealmController{
+				listRealmsFn: func() ([]intmodel.Realm, error) {
+					return []intmodel.Realm{}, nil
+				},
+			},
 			expectMatch: "No realms found.",
 		},
 		{
 			name: "realm not found",
 			args: []string{"ghost"},
+			controller: &fakeRealmController{
+				getRealmFn: func(_ intmodel.Realm) (controller.GetRealmResult, error) {
+					return controller.GetRealmResult{}, errdefs.ErrRealmNotFound
+				},
+			},
 			setup: func(t *testing.T, runPath string) {
 				writeRealmMetadata(
 					t,
@@ -216,6 +282,13 @@ func TestNewRealmCmd(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			runPath := t.TempDir()
 			cmd, buf := newRealmTestCommand(t, runPath)
+
+			// Inject mock controller via context if provided
+			if tt.controller != nil {
+				ctx := cmd.Context()
+				ctx = context.WithValue(ctx, realm.MockControllerKey{}, tt.controller)
+				cmd.SetContext(ctx)
+			}
 
 			if tt.setup != nil {
 				tt.setup(t, runPath)

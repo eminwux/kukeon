@@ -18,6 +18,7 @@ package ctr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -95,22 +96,54 @@ func NewClient(ctx context.Context, logger *slog.Logger, socket string) Client {
 	}
 }
 
+// verifyConnection checks if the containerd client connection is still valid
+// by performing a lightweight operation (listing namespaces).
+func (c *client) verifyConnection() error {
+	if c.cClient == nil {
+		return errors.New("client is nil")
+	}
+	// Use a simple operation to verify connection - list namespaces
+	// This is lightweight and will fail if connection is broken
+	namespaces := c.cClient.NamespaceService()
+	_, err := namespaces.List(c.ctx)
+	return err
+}
+
 func (c *client) Connect() error {
-	// If already connected, check if connection is still valid
-	// Only create a new connection if needed to avoid closing active connections
+	// If already connected, verify the connection is still valid
 	if c.cClient != nil {
-		// Try to use the existing connection - if it's closed, we'll get an error
-		// and can then create a new one. For now, just reuse it.
-		c.logger.DebugContext(c.ctx, "containerd client already connected, reusing connection", "socket", c.socket)
-		return nil
+		if err := c.verifyConnection(); err == nil {
+			// Connection is valid, reuse it
+			c.logger.DebugContext(c.ctx, "containerd client already connected, reusing connection", "socket", c.socket)
+			return nil
+		}
+		// Connection is invalid, close it and create a new one
+		verifyErr := c.verifyConnection()
+		c.logger.DebugContext(
+			c.ctx,
+			"containerd connection invalid, reconnecting",
+			"socket",
+			c.socket,
+			"error",
+			verifyErr,
+		)
+		_ = c.Close() // Close the invalid connection
 	}
 
+	// Create new connection
 	var err error
 	c.cClient, err = containerd.New(c.socket)
 	if err != nil {
 		c.logger.Error("failed to connect to containerd: %v", "err", fmt.Sprintf("%v", err))
 		return err
 	}
+
+	// Verify the new connection works
+	if err = c.verifyConnection(); err != nil {
+		_ = c.Close()
+		return fmt.Errorf("failed to verify new connection: %w", err)
+	}
+
 	c.logger.InfoContext(c.ctx, "connected to containerd", "socket", c.socket)
 	return nil
 }

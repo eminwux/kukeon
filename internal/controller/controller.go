@@ -59,6 +59,7 @@ type Controller interface {
 	PurgeCell(cell intmodel.Cell, force, cascade bool) (PurgeCellResult, error)
 	PurgeContainer(container intmodel.Container) (PurgeContainerResult, error)
 	RefreshAll() (RefreshResult, error)
+	Close() error
 }
 
 type Exec struct {
@@ -148,4 +149,9 @@ func (b *Exec) Bootstrap() (BootstrapReport, error) {
 	}
 
 	return report, nil
+}
+
+// Close closes the controller and releases all resources, including the containerd connection.
+func (b *Exec) Close() error {
+	return b.runner.Close()
 }

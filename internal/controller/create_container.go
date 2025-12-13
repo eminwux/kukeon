@@ -216,6 +216,8 @@ func (b *Exec) CreateContainer(container intmodel.Container) (CreateContainerRes
 			},
 			Spec: *containerSpec,
 			Status: intmodel.ContainerStatus{
+				Name:  containerName,
+				ID:    containerName,
 				State: actualState,
 			},
 		}

@@ -39,6 +39,7 @@ type GetContainerResult = controller.GetContainerResult
 type ContainerController interface {
 	GetContainer(container intmodel.Container) (GetContainerResult, error)
 	ListContainers(realmName, spaceName, stackName, cellName string) ([]intmodel.ContainerSpec, error)
+	Close() error
 }
 
 type containerController = ContainerController // internal alias for backward compatibility
@@ -120,6 +121,7 @@ func runContainerCmdWithDeps(
 	printTable tablePrinterFunc,
 ) error {
 	var ctrl containerController
+
 	if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(ContainerController); ok {
 		ctrl = mockCtrl
 	} else {
@@ -129,6 +131,14 @@ func runContainerCmdWithDeps(
 		}
 		ctrl = &controllerWrapper{ctrl: realCtrl}
 	}
+
+	// Close connection when command completes
+	defer func() {
+		if closeErr := ctrl.Close(); closeErr != nil {
+			// Log but don't fail the command
+			cmd.PrintErrln("Warning: failed to close controller:", closeErr)
+		}
+	}()
 
 	outputFormat, err := shared.ParseOutputFormat(cmd)
 	if err != nil {
@@ -456,4 +466,8 @@ func (w *controllerWrapper) ListContainers(
 	realmName, spaceName, stackName, cellName string,
 ) ([]intmodel.ContainerSpec, error) {
 	return w.ctrl.ListContainers(realmName, spaceName, stackName, cellName)
+}
+
+func (w *controllerWrapper) Close() error {
+	return w.ctrl.Close()
 }
