@@ -54,8 +54,9 @@ func TestKillCell_SuccessfulKill(t *testing.T) {
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
 				}
-				f.KillCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.KillCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateStopped
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(cell intmodel.Cell) error {
 					if cell.Status.State != intmodel.CellStateStopped {
@@ -90,8 +91,9 @@ func TestKillCell_SuccessfulKill(t *testing.T) {
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
 				}
-				f.KillCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.KillCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateStopped
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(cell intmodel.Cell) error {
 					if cell.Status.State != intmodel.CellStateStopped {
@@ -345,8 +347,8 @@ func TestKillCell_RunnerErrors(t *testing.T) {
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
 				}
-				f.KillCellFn = func(_ intmodel.Cell) error {
-					return errors.New("kill failed")
+				f.KillCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return intmodel.Cell{}, errors.New("kill failed")
 				}
 			},
 			wantErr:     true,
@@ -363,8 +365,9 @@ func TestKillCell_RunnerErrors(t *testing.T) {
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
 				}
-				f.KillCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.KillCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateStopped
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
 					return errors.New("metadata update failed")
@@ -441,8 +444,9 @@ func TestKillCell_NameTrimming(t *testing.T) {
 					}
 					return existingCell, nil
 				}
-				f.KillCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.KillCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateStopped
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
 					return nil

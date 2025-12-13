@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/eminwux/kukeon/internal/cni"
@@ -568,4 +569,55 @@ func (r *Exec) processOrphanedContainers(ctx context.Context, containers []strin
 		r.logger.DebugContext(ctx, "completed processing container", "id", containerID)
 	}
 	r.logger.InfoContext(ctx, "completed processing all orphaned containers", "count", len(containers))
+}
+
+// populateCellContainerStatuses queries containerd for the status of all containers
+// in a cell and populates cell.Status.Containers array.
+func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
+	if len(cell.Spec.Containers) == 0 {
+		cell.Status.Containers = []intmodel.ContainerStatus{}
+		return nil
+	}
+
+	statuses := make([]intmodel.ContainerStatus, 0, len(cell.Spec.Containers))
+
+	for _, containerSpec := range cell.Spec.Containers {
+		// Get container state from containerd
+		state, err := r.GetContainerState(*cell, containerSpec.ID)
+		if err != nil {
+			// Log error but continue with other containers
+			r.logger.DebugContext(r.ctx, "failed to get container state",
+				"container", containerSpec.ID,
+				"error", err)
+			state = intmodel.ContainerStateUnknown
+		}
+
+		// TODO: Get additional status fields (RestartCount, StartTime, etc.) from containerd
+		// For now, populate with basic state
+		status := intmodel.ContainerStatus{
+			Name:         containerSpec.ID,
+			ID:           containerSpec.ID,
+			State:        state,
+			RestartCount: 0,           // TODO: retrieve from containerd
+			RestartTime:  time.Time{}, // TODO: retrieve from containerd
+			StartTime:    time.Time{}, // TODO: retrieve from containerd
+			FinishTime:   time.Time{}, // TODO: retrieve from containerd
+			ExitCode:     0,           // TODO: retrieve from containerd
+			ExitSignal:   "",          // TODO: retrieve from containerd
+		}
+		statuses = append(statuses, status)
+	}
+
+	cell.Status.Containers = statuses
+	return nil
+}
+
+// PopulateAndPersistCellContainerStatuses populates container statuses from containerd
+// and persists them by updating cell metadata. This should be used when the cell status
+// changes need to be persisted to disk.
+func (r *Exec) PopulateAndPersistCellContainerStatuses(cell *intmodel.Cell) error {
+	if err := r.populateCellContainerStatuses(cell); err != nil {
+		return err
+	}
+	return r.UpdateCellMetadata(*cell)
 }

@@ -28,22 +28,22 @@ import (
 
 // KillCell immediately force-kills all containers in a cell (workload containers first, then root container).
 // It detaches the root container from the CNI network before killing it.
-func (r *Exec) KillCell(cell intmodel.Cell) error {
+func (r *Exec) KillCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
-		return errdefs.ErrCellNameRequired
+		return intmodel.Cell{}, errdefs.ErrCellNameRequired
 	}
 	realmName := strings.TrimSpace(cell.Spec.RealmName)
 	if realmName == "" {
-		return errdefs.ErrRealmNameRequired
+		return intmodel.Cell{}, errdefs.ErrRealmNameRequired
 	}
 	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
 	if spaceName == "" {
-		return errdefs.ErrSpaceNameRequired
+		return intmodel.Cell{}, errdefs.ErrSpaceNameRequired
 	}
 	stackName := strings.TrimSpace(cell.Spec.StackName)
 	if stackName == "" {
-		return errdefs.ErrStackNameRequired
+		return intmodel.Cell{}, errdefs.ErrStackNameRequired
 	}
 
 	// Get the cell document to access all containers
@@ -59,36 +59,36 @@ func (r *Exec) KillCell(cell intmodel.Cell) error {
 	}
 	internalCell, err := r.GetCell(lookupCell)
 	if err != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
+		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 	}
 
 	cellID := strings.TrimSpace(internalCell.Spec.ID)
 	if cellID == "" {
-		return errdefs.ErrCellIDRequired
+		return intmodel.Cell{}, errdefs.ErrCellIDRequired
 	}
 
 	realmID := strings.TrimSpace(internalCell.Spec.RealmName)
 	if realmID == "" {
-		return errdefs.ErrRealmNameRequired
+		return intmodel.Cell{}, errdefs.ErrRealmNameRequired
 	}
 
 	spaceID := strings.TrimSpace(internalCell.Spec.SpaceName)
 	if spaceID == "" {
-		return errdefs.ErrSpaceNameRequired
+		return intmodel.Cell{}, errdefs.ErrSpaceNameRequired
 	}
 
 	stackID := strings.TrimSpace(internalCell.Spec.StackName)
 	if stackID == "" {
-		return errdefs.ErrStackNameRequired
+		return intmodel.Cell{}, errdefs.ErrStackNameRequired
 	}
 
 	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmID, spaceID)
 	if cniErr != nil {
-		return fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
+		return intmodel.Cell{}, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
 
 	if err = r.ensureClientConnected(); err != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
 	// Get realm to access namespace
@@ -99,7 +99,7 @@ func (r *Exec) KillCell(cell intmodel.Cell) error {
 	}
 	internalRealm, err := r.GetRealm(lookupRealm)
 	if err != nil {
-		return fmt.Errorf("failed to get realm: %w", err)
+		return intmodel.Cell{}, fmt.Errorf("failed to get realm: %w", err)
 	}
 
 	// Set namespace to realm namespace
@@ -119,7 +119,7 @@ func (r *Exec) KillCell(cell intmodel.Cell) error {
 		// Use ContainerdID from spec
 		containerID := containerSpec.ContainerdID
 		if containerID == "" {
-			return fmt.Errorf("container %q has empty ContainerdID", containerSpec.ID)
+			return intmodel.Cell{}, fmt.Errorf("container %q has empty ContainerdID", containerSpec.ID)
 		}
 
 		// Use container name with UUID for containerd operations
@@ -172,7 +172,7 @@ func (r *Exec) KillCell(cell intmodel.Cell) error {
 	// Kill root container last and detach from CNI
 	rootContainerID, err := r.getRootContainerContainerdID(internalCell)
 	if err != nil {
-		return err
+		return intmodel.Cell{}, err
 	}
 
 	// Get space to resolve network name for fallback cleanup
@@ -287,7 +287,18 @@ func (r *Exec) KillCell(cell intmodel.Cell) error {
 		)
 	}
 
-	return nil
+	// Update cell state in internal model
+	internalCell.Status.State = intmodel.CellStateStopped
+
+	// Populate container statuses after killing cell and persist them
+	if err = r.PopulateAndPersistCellContainerStatuses(&internalCell); err != nil {
+		r.logger.WarnContext(r.ctx, "failed to populate container statuses",
+			"cell", cellName,
+			"error", err)
+		// Continue anyway - status population is best-effort
+	}
+
+	return internalCell, nil
 }
 
 // KillContainer immediately force-kills a specific container in a cell.

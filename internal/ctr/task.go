@@ -22,6 +22,7 @@ import (
 	apitypes "github.com/containerd/containerd/api/types"
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
 // TaskStatus returns the current status of a task.
@@ -64,4 +65,24 @@ func (c *client) TaskMetrics(id string) (*apitypes.Metric, error) {
 	}
 
 	return metrics, nil
+}
+
+// ConvertContainerdStatusToContainerState converts a containerd task status to internal ContainerState.
+func ConvertContainerdStatusToContainerState(status containerd.Status) intmodel.ContainerState {
+	switch status.Status {
+	case containerd.Running:
+		return intmodel.ContainerStateReady
+	case containerd.Stopped:
+		return intmodel.ContainerStateStopped
+	case containerd.Created:
+		return intmodel.ContainerStatePending
+	case containerd.Unknown:
+		return intmodel.ContainerStateUnknown
+	case containerd.Paused:
+		return intmodel.ContainerStatePaused
+	case containerd.Pausing:
+		return intmodel.ContainerStatePausing
+	default:
+		return intmodel.ContainerStateUnknown
+	}
 }

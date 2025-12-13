@@ -51,6 +51,8 @@ type ContainerSpec struct {
 }
 
 type ContainerStatus struct {
+	Name         string // Container name/ID
+	ID           string // Container ID (same as Name)
 	State        ContainerState
 	RestartCount int
 	RestartTime  time.Time

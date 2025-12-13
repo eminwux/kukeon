@@ -39,6 +39,7 @@ type CellSpec struct {
 type CellStatus struct {
 	State      CellState
 	CgroupPath string
+	Containers []ContainerStatus
 }
 
 type CellState int

@@ -138,6 +138,8 @@ func (b *Exec) KillContainer(container intmodel.Container) (KillContainerResult,
 		},
 		Spec: *foundContainerSpec,
 		Status: intmodel.ContainerStatus{
+			Name:  name,
+			ID:    name,
 			State: actualState,
 		},
 	}

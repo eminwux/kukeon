@@ -899,6 +899,11 @@ func (f *fakeContainerController) ListContainers(
 	return f.listContainersFn(realmName, spaceName, stackName, cellName)
 }
 
+func (f *fakeContainerController) Close() error {
+	// Mock controllers don't need cleanup
+	return nil
+}
+
 func TestNewContainerCmd_AutocompleteRegistration(t *testing.T) {
 	cmd := container.NewContainerCmd()
 

@@ -85,11 +85,12 @@ func TestCreateContainer_NewContainerCreation(t *testing.T) {
 				f.CreateContainerFn = func(_ intmodel.Cell, _ intmodel.ContainerSpec) (intmodel.Cell, error) {
 					return resultCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, containerID string) error {
+				f.StartContainerFn = func(cell intmodel.Cell, containerID string) (intmodel.Cell, error) {
 					if containerID != "test-container" {
-						return errors.New("unexpected container ID")
+						return intmodel.Cell{}, errors.New("unexpected container ID")
 					}
-					return nil
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateContainerResult) {
@@ -200,8 +201,9 @@ func TestCreateContainer_ExistingContainerReconciliation(t *testing.T) {
 				f.CreateContainerFn = func(_ intmodel.Cell, _ intmodel.ContainerSpec) (intmodel.Cell, error) {
 					return resultCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, _ string) error {
-					return nil
+				f.StartContainerFn = func(cell intmodel.Cell, _ string) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateContainerResult) {
@@ -304,11 +306,12 @@ func TestCreateContainer_ContainerNameSource(t *testing.T) {
 					}
 					return resultCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, containerID string) error {
+				f.StartContainerFn = func(cell intmodel.Cell, containerID string) (intmodel.Cell, error) {
 					if containerID != "test-container" {
-						return errors.New("unexpected container ID")
+						return intmodel.Cell{}, errors.New("unexpected container ID")
 					}
-					return nil
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateContainerResult) {
@@ -357,11 +360,12 @@ func TestCreateContainer_ContainerNameSource(t *testing.T) {
 					}
 					return resultCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, containerID string) error {
+				f.StartContainerFn = func(cell intmodel.Cell, containerID string) (intmodel.Cell, error) {
 					if containerID != "test-container-id" {
-						return errors.New("unexpected container ID")
+						return intmodel.Cell{}, errors.New("unexpected container ID")
 					}
-					return nil
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateContainerResult) {
@@ -476,8 +480,9 @@ func TestCreateContainer_DefaultSpecID(t *testing.T) {
 					}
 					return resultCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, _ string) error {
-					return nil
+				f.StartContainerFn = func(cell intmodel.Cell, _ string) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateContainerResult) {
@@ -528,11 +533,12 @@ func TestCreateContainer_DefaultSpecID(t *testing.T) {
 					}
 					return resultCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, containerID string) error {
+				f.StartContainerFn = func(cell intmodel.Cell, containerID string) (intmodel.Cell, error) {
 					if containerID != "test-container" {
-						return errors.New("unexpected container ID for StartContainer")
+						return intmodel.Cell{}, errors.New("unexpected container ID for StartContainer")
 					}
-					return nil
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateContainerResult) {
@@ -836,8 +842,9 @@ func TestCreateContainer_DefaultLabels(t *testing.T) {
 				f.CreateContainerFn = func(_ intmodel.Cell, _ intmodel.ContainerSpec) (intmodel.Cell, error) {
 					return resultCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, _ string) error {
-					return nil
+				f.StartContainerFn = func(cell intmodel.Cell, _ string) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateContainerResult) {
@@ -884,8 +891,9 @@ func TestCreateContainer_DefaultLabels(t *testing.T) {
 				f.CreateContainerFn = func(_ intmodel.Cell, _ intmodel.ContainerSpec) (intmodel.Cell, error) {
 					return resultCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, _ string) error {
-					return nil
+				f.StartContainerFn = func(cell intmodel.Cell, _ string) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateContainerResult) {
@@ -1054,8 +1062,8 @@ func TestCreateContainer_RunnerErrors(t *testing.T) {
 				f.CreateContainerFn = func(_ intmodel.Cell, _ intmodel.ContainerSpec) (intmodel.Cell, error) {
 					return resultCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, _ string) error {
-					return errors.New("start failed")
+				f.StartContainerFn = func(_ intmodel.Cell, _ string) (intmodel.Cell, error) {
+					return intmodel.Cell{}, errors.New("start failed")
 				}
 			},
 			wantErr:     nil, // Custom error message, not a standard error
@@ -1090,8 +1098,9 @@ func TestCreateContainer_RunnerErrors(t *testing.T) {
 				f.CreateContainerFn = func(_ intmodel.Cell, _ intmodel.ContainerSpec) (intmodel.Cell, error) {
 					return resultCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, _ string) error {
-					return nil
+				f.StartContainerFn = func(cell intmodel.Cell, _ string) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantErr:     errdefs.ErrGetCell,
@@ -1204,11 +1213,12 @@ func TestCreateContainer_NameTrimming(t *testing.T) {
 					}
 					return resultCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, containerID string) error {
+				f.StartContainerFn = func(cell intmodel.Cell, containerID string) (intmodel.Cell, error) {
 					if containerID != "test-container" {
-						return errors.New("container ID not trimmed")
+						return intmodel.Cell{}, errors.New("container ID not trimmed")
 					}
-					return nil
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateContainerResult) {
@@ -1354,8 +1364,9 @@ func TestCreateContainer_ContainerObjectConstruction(t *testing.T) {
 				f.CreateContainerFn = func(_ intmodel.Cell, _ intmodel.ContainerSpec) (intmodel.Cell, error) {
 					return resultCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, _ string) error {
-					return nil
+				f.StartContainerFn = func(cell intmodel.Cell, _ string) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateContainerResult) {
@@ -1437,11 +1448,12 @@ func TestCreateContainer_ContainerObjectConstruction(t *testing.T) {
 				f.CreateContainerFn = func(_ intmodel.Cell, _ intmodel.ContainerSpec) (intmodel.Cell, error) {
 					return resultCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, containerID string) error {
+				f.StartContainerFn = func(cell intmodel.Cell, containerID string) (intmodel.Cell, error) {
 					if containerID != "target-container" {
-						return errors.New("unexpected container ID")
+						return intmodel.Cell{}, errors.New("unexpected container ID")
 					}
-					return nil
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateContainerResult) {

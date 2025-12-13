@@ -134,6 +134,14 @@ func (r *Exec) GetCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		}
 	}
 
+	// Populate container statuses when retrieving cell
+	if err = r.populateCellContainerStatuses(&internalCell); err != nil {
+		r.logger.DebugContext(r.ctx, "failed to populate container statuses",
+			"cell", cellName,
+			"error", err)
+		// Continue anyway - status population is best-effort
+	}
+
 	return internalCell, nil
 }
 

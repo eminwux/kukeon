@@ -49,11 +49,11 @@ type Runner interface {
 	ListContainers(realmName, spaceName, stackName, cellName string) ([]intmodel.ContainerSpec, error)
 	CreateCell(cell intmodel.Cell) (intmodel.Cell, error)
 	EnsureCell(cell intmodel.Cell) (intmodel.Cell, error)
-	StartCell(cell intmodel.Cell) error
-	StopCell(cell intmodel.Cell) error
-	StartContainer(cell intmodel.Cell, containerID string) error
+	StartCell(cell intmodel.Cell) (intmodel.Cell, error)
+	StopCell(cell intmodel.Cell) (intmodel.Cell, error)
+	StartContainer(cell intmodel.Cell, containerID string) (intmodel.Cell, error)
 	StopContainer(cell intmodel.Cell, containerID string) error
-	KillCell(cell intmodel.Cell) error
+	KillCell(cell intmodel.Cell) (intmodel.Cell, error)
 	KillContainer(cell intmodel.Cell, containerID string) error
 	DeleteContainer(cell intmodel.Cell, containerID string) error
 	CreateContainer(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)

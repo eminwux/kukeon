@@ -121,7 +121,7 @@ func (b *Exec) StopContainer(container intmodel.Container) (StopContainerResult,
 				"container", name,
 				"cell", cellName,
 				"error", err)
-			actualState = intmodel.ContainerStateStopped // Default to Stopped since we just stopped it
+			actualState = intmodel.ContainerStateUnknown // Default to Unknown since we don't know the state
 		} else {
 			actualState = state
 		}
@@ -141,6 +141,8 @@ func (b *Exec) StopContainer(container intmodel.Container) (StopContainerResult,
 			},
 			Spec: *foundContainerSpec,
 			Status: intmodel.ContainerStatus{
+				Name:  name,
+				ID:    name,
 				State: actualState,
 			},
 		}

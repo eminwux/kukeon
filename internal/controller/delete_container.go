@@ -111,6 +111,8 @@ func (b *Exec) DeleteContainer(container intmodel.Container) (DeleteContainerRes
 		},
 		Spec: *foundContainer,
 		Status: intmodel.ContainerStatus{
+			Name:  name,
+			ID:    name,
 			State: intmodel.ContainerStateReady,
 		},
 	}

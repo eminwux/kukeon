@@ -42,6 +42,14 @@ func (r *Exec) CreateContainer(cell intmodel.Cell, container intmodel.ContainerS
 		return intmodel.Cell{}, ensureErr
 	}
 
+	// Populate container statuses after creating container and persist them
+	if err = r.PopulateAndPersistCellContainerStatuses(&ensuredCell); err != nil {
+		r.logger.WarnContext(r.ctx, "failed to populate and persist container statuses",
+			"cell", ensuredCell.Metadata.Name,
+			"error", err)
+		// Continue anyway - status population is best-effort
+	}
+
 	return ensuredCell, nil
 }
 

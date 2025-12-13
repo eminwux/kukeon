@@ -62,9 +62,9 @@ type fakeRunner struct {
 	ListCellsFn               func(realmName, spaceName, stackName string) ([]intmodel.Cell, error)
 	CreateCellFn              func(cell intmodel.Cell) (intmodel.Cell, error)
 	EnsureCellFn              func(cell intmodel.Cell) (intmodel.Cell, error)
-	StartCellFn               func(cell intmodel.Cell) error
-	StopCellFn                func(cell intmodel.Cell) error
-	KillCellFn                func(cell intmodel.Cell) error
+	StartCellFn               func(cell intmodel.Cell) (intmodel.Cell, error)
+	StopCellFn                func(cell intmodel.Cell) (intmodel.Cell, error)
+	KillCellFn                func(cell intmodel.Cell) (intmodel.Cell, error)
 	DeleteCellFn              func(cell intmodel.Cell) error
 	ExistsCellRootContainerFn func(cell intmodel.Cell) (bool, error)
 	UpdateCellMetadataFn      func(cell intmodel.Cell) error
@@ -73,7 +73,7 @@ type fakeRunner struct {
 	ListContainersFn    func(realmName, spaceName, stackName, cellName string) ([]intmodel.ContainerSpec, error)
 	CreateContainerFn   func(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)
 	EnsureContainerFn   func(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)
-	StartContainerFn    func(cell intmodel.Cell, containerID string) error
+	StartContainerFn    func(cell intmodel.Cell, containerID string) (intmodel.Cell, error)
 	StopContainerFn     func(cell intmodel.Cell, containerID string) error
 	KillContainerFn     func(cell intmodel.Cell, containerID string) error
 	DeleteContainerFn   func(cell intmodel.Cell, containerID string) error
@@ -265,25 +265,25 @@ func (f *fakeRunner) EnsureCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	return intmodel.Cell{}, errors.New("unexpected call to EnsureCell")
 }
 
-func (f *fakeRunner) StartCell(cell intmodel.Cell) error {
+func (f *fakeRunner) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	if f.StartCellFn != nil {
 		return f.StartCellFn(cell)
 	}
-	return errors.New("unexpected call to StartCell")
+	return intmodel.Cell{}, errors.New("unexpected call to StartCell")
 }
 
-func (f *fakeRunner) StopCell(cell intmodel.Cell) error {
+func (f *fakeRunner) StopCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	if f.StopCellFn != nil {
 		return f.StopCellFn(cell)
 	}
-	return errors.New("unexpected call to StopCell")
+	return intmodel.Cell{}, errors.New("unexpected call to StopCell")
 }
 
-func (f *fakeRunner) KillCell(cell intmodel.Cell) error {
+func (f *fakeRunner) KillCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	if f.KillCellFn != nil {
 		return f.KillCellFn(cell)
 	}
-	return errors.New("unexpected call to KillCell")
+	return intmodel.Cell{}, errors.New("unexpected call to KillCell")
 }
 
 func (f *fakeRunner) DeleteCell(cell intmodel.Cell) error {
@@ -332,11 +332,11 @@ func (f *fakeRunner) EnsureContainer(cell intmodel.Cell, container intmodel.Cont
 	return intmodel.Cell{}, errors.New("unexpected call to EnsureContainer")
 }
 
-func (f *fakeRunner) StartContainer(cell intmodel.Cell, containerID string) error {
+func (f *fakeRunner) StartContainer(cell intmodel.Cell, containerID string) (intmodel.Cell, error) {
 	if f.StartContainerFn != nil {
 		return f.StartContainerFn(cell, containerID)
 	}
-	return errors.New("unexpected call to StartContainer")
+	return intmodel.Cell{}, errors.New("unexpected call to StartContainer")
 }
 
 func (f *fakeRunner) StopContainer(cell intmodel.Cell, containerID string) error {

@@ -39,12 +39,10 @@ func (b *Exec) StopCell(cell intmodel.Cell) (StopCellResult, error) {
 	}
 
 	// Stop all containers in the cell
-	if err = b.runner.StopCell(internalCell); err != nil {
+	internalCell, err = b.runner.StopCell(internalCell)
+	if err != nil {
 		return result, fmt.Errorf("failed to stop cell containers: %w", err)
 	}
-
-	// Update cell state to Stopped
-	internalCell.Status.State = intmodel.CellStateStopped
 
 	// Update cell metadata state to Stopped
 	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {

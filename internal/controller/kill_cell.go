@@ -79,12 +79,10 @@ func (b *Exec) KillCell(cell intmodel.Cell) (KillCellResult, error) {
 	}
 
 	// Kill all containers in the cell
-	if err = b.runner.KillCell(internalCell); err != nil {
+	internalCell, err = b.runner.KillCell(internalCell)
+	if err != nil {
 		return res, fmt.Errorf("failed to kill cell containers: %w", err)
 	}
-
-	// Update cell state to Stopped
-	internalCell.Status.State = intmodel.CellStateStopped
 
 	// Update cell metadata state to Stopped
 	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {

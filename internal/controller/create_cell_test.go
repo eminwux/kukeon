@@ -52,8 +52,9 @@ func TestCreateCell_NewCellCreation(t *testing.T) {
 				f.CreateCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return buildTestCell("test-cell", "test-realm", "test-space", "test-stack"), nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateCellResult) {
@@ -153,8 +154,9 @@ func TestCreateCell_ExistingCellReconciliation(t *testing.T) {
 				f.EnsureCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
 					return cell, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateCellResult) {
@@ -205,8 +207,9 @@ func TestCreateCell_ExistingCellReconciliation(t *testing.T) {
 				f.EnsureCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
 					return cell, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateCellResult) {
@@ -302,8 +305,9 @@ func TestCreateCell_ContainerOutcomes(t *testing.T) {
 				f.CreateCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return createdCell, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateCellResult) {
@@ -359,8 +363,9 @@ func TestCreateCell_ContainerOutcomes(t *testing.T) {
 				f.EnsureCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
 					return cell, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateCellResult) {
@@ -423,8 +428,9 @@ func TestCreateCell_ContainerOutcomes(t *testing.T) {
 				f.EnsureCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return updatedCell, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateCellResult) {
@@ -497,8 +503,9 @@ func TestCreateCell_ContainerOutcomes(t *testing.T) {
 				f.CreateCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return createdCell, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateCellResult) {
@@ -675,8 +682,9 @@ func TestCreateCell_DefaultLabels(t *testing.T) {
 					}
 					return cell, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateCellResult) {
@@ -748,8 +756,9 @@ func TestCreateCell_DefaultLabels(t *testing.T) {
 					}
 					return cell, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateCellResult) {
@@ -821,8 +830,9 @@ func TestCreateCell_DefaultLabels(t *testing.T) {
 					}
 					return cell, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateCellResult) {
@@ -909,8 +919,9 @@ func TestCreateCell_DefaultSpecID(t *testing.T) {
 					}
 					return cell, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateCellResult) {
@@ -943,8 +954,9 @@ func TestCreateCell_DefaultSpecID(t *testing.T) {
 					}
 					return cell, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateCellResult) {
@@ -1021,8 +1033,9 @@ func TestCreateCell_ContainerOwnership(t *testing.T) {
 					}
 					return cell, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateCellResult) {
@@ -1063,8 +1076,9 @@ func TestCreateCell_ContainerOwnership(t *testing.T) {
 				f.CreateCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
 					return cell, nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateCellResult) {
@@ -1214,8 +1228,8 @@ func TestCreateCell_RunnerErrors(t *testing.T) {
 				f.CreateCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return buildTestCell("test-cell", "test-realm", "test-space", "test-stack"), nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return errors.New("start failed")
+				f.StartCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return intmodel.Cell{}, errors.New("start failed")
 				}
 			},
 			wantErr:     nil, // Custom error message, not a standard error
@@ -1288,8 +1302,9 @@ func TestCreateCell_NameTrimming(t *testing.T) {
 					// Return cell with trimmed values as the result
 					return buildTestCell("test-cell", "test-realm", "test-space", "test-stack"), nil
 				}
-				f.StartCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateCellResult) {

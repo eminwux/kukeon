@@ -38,13 +38,19 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 		return res, err
 	}
 
-	// Start all containers in the cell
-	if err = b.runner.StartCell(internalCell); err != nil {
-		return res, fmt.Errorf("failed to start cell containers: %w", err)
+	// Check if cell is already in Ready state
+	if internalCell.Status.State == intmodel.CellStateReady {
+		return res, fmt.Errorf(
+			"cell %q is already in Ready state and must first be stopped",
+			internalCell.Metadata.Name,
+		)
 	}
 
-	// Update cell state to Ready
-	internalCell.Status.State = intmodel.CellStateReady
+	// Start all containers in the cell
+	internalCell, err = b.runner.StartCell(internalCell)
+	if err != nil {
+		return res, fmt.Errorf("failed to start cell containers: %w", err)
+	}
 
 	// Update cell metadata state to Ready
 	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {
