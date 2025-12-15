@@ -149,22 +149,13 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 		"namespace", namespace)
 
 	// Check if container exists in containerd
-	// Note: ensureClientConnected() should have initialized the client, but check anyway
-	if r.ctrClient == nil {
-		r.logger.InfoContext(r.ctx, "containerd client not available after connection attempt",
-			"container", containerID,
-			"containerdID", containerdID)
-		return intmodel.ContainerStateUnknown, errors.New("containerd client not available")
-	}
-
-	containerExists, err := r.ctrClient.ExistsContainer(containerdID)
+	containerExists, err := r.ExistsContainer(containerdID)
 	if err != nil {
 		r.logger.InfoContext(r.ctx, "failed to check container existence",
 			"container", containerID,
 			"containerdID", containerdID,
 			"error", err)
-		// If we can't check existence, return Unknown
-		return intmodel.ContainerStateStopped, nil
+		return intmodel.ContainerStateUnknown, nil
 	}
 
 	if !containerExists {
@@ -173,7 +164,7 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 			"container", containerID,
 			"containerdID", containerdID,
 			"namespace", namespace)
-		return intmodel.ContainerStateUnknown, nil
+		return intmodel.ContainerStateStopped, nil
 	}
 
 	// Get container state using TaskStatus from ctr package

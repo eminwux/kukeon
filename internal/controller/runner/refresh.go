@@ -285,7 +285,7 @@ func (r *Exec) refreshContainerStatus(cell intmodel.Cell, containerSpec *intmode
 	// Check if container exists in containerd
 	containerExists := false
 	if r.ctrClient != nil {
-		containerExists, err = r.ctrClient.ExistsContainer(containerdID)
+		containerExists, err = r.ExistsContainer(containerdID)
 		if err != nil {
 			r.logger.DebugContext(r.ctx, "failed to check container existence",
 				"container", containerSpec.ID,

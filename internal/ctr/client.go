@@ -112,20 +112,20 @@ func (c *client) verifyConnection() error {
 func (c *client) Connect() error {
 	// If already connected, verify the connection is still valid
 	if c.cClient != nil {
-		if err := c.verifyConnection(); err == nil {
+		err := c.verifyConnection()
+		if err == nil {
 			// Connection is valid, reuse it
 			c.logger.DebugContext(c.ctx, "containerd client already connected, reusing connection", "socket", c.socket)
 			return nil
 		}
 		// Connection is invalid, close it and create a new one
-		verifyErr := c.verifyConnection()
 		c.logger.DebugContext(
 			c.ctx,
 			"containerd connection invalid, reconnecting",
 			"socket",
 			c.socket,
 			"error",
-			verifyErr,
+			err,
 		)
 		_ = c.Close() // Close the invalid connection
 	}

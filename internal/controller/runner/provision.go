@@ -1257,7 +1257,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 	var container containerd.Container
 
 	// Check if container exists
-	exists, err := r.ctrClient.ExistsContainer(containerID)
+	exists, err := r.ExistsContainer(containerID)
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 		fields = append(fields, "space", spaceName, "realm", realmName, "err", fmt.Sprintf("%v", err))
@@ -1469,34 +1469,27 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		)
 
 		// Use containerd ID for containerd operations
-		exists, err = r.ctrClient.ExistsContainer(containerdID)
+		exists, err = r.ExistsContainer(containerdID)
 		if err != nil {
-			// Check if the error indicates the container doesn't exist
-			// In that case, treat it as "doesn't exist" (false) rather than a fatal error
-			if errors.Is(err, errdefs.ErrContainerNotFound) {
-				// Container doesn't exist, which is fine - we'll create it
-				exists = false
-			} else {
-				// Some other error occurred
-				fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
-				fields = append(
-					fields,
-					"space",
-					spaceName,
-					"realm",
-					realmName,
-					"containerName",
-					containerSpec.ID,
-					"err",
-					fmt.Sprintf("%v", err),
-				)
-				r.logger.ErrorContext(
-					r.ctx,
-					"failed to check if container exists",
-					fields...,
-				)
-				return nil, fmt.Errorf("failed to check if container %s exists: %w", containerdID, err)
-			}
+			// Some other error occurred (connection failure, permission error, etc.)
+			fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
+			fields = append(
+				fields,
+				"space",
+				spaceName,
+				"realm",
+				realmName,
+				"containerName",
+				containerSpec.ID,
+				"err",
+				fmt.Sprintf("%v", err),
+			)
+			r.logger.ErrorContext(
+				r.ctx,
+				"failed to check if hierarchical container exists",
+				fields...,
+			)
+			return nil, fmt.Errorf("failed to check if hierarchical container exists: %w", err)
 		}
 
 		// Log the existence check result
