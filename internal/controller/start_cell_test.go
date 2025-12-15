@@ -170,7 +170,7 @@ func TestStartCell_ReadyStateValidation(t *testing.T) {
 		errContains string
 	}{
 		{
-			name:      "cell in Ready state returns error",
+			name:      "cell in Ready state with empty Status.Containers returns error (fallback to metadata)",
 			cellName:  "ready-cell",
 			realmName: "test-realm",
 			spaceName: "test-space",
@@ -178,6 +178,7 @@ func TestStartCell_ReadyStateValidation(t *testing.T) {
 			setupRunner: func(f *fakeRunner) {
 				existingCell := buildTestCell("ready-cell", "test-realm", "test-space", "test-stack")
 				existingCell.Status.State = intmodel.CellStateReady
+				existingCell.Status.Containers = []intmodel.ContainerStatus{} // Empty - fallback to metadata check
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
 				}
@@ -190,6 +191,96 @@ func TestStartCell_ReadyStateValidation(t *testing.T) {
 			},
 			wantErr:     true,
 			errContains: "cell \"ready-cell\" is already in Ready state and must first be stopped",
+		},
+		{
+			name:      "cell in Ready state with running containers returns error",
+			cellName:  "ready-cell-running",
+			realmName: "test-realm",
+			spaceName: "test-space",
+			stackName: "test-stack",
+			setupRunner: func(f *fakeRunner) {
+				existingCell := buildTestCell("ready-cell-running", "test-realm", "test-space", "test-stack")
+				existingCell.Status.State = intmodel.CellStateReady
+				existingCell.Status.Containers = []intmodel.ContainerStatus{
+					{ID: "container1", State: intmodel.ContainerStateReady}, // Actually running
+					{ID: "container2", State: intmodel.ContainerStateStopped},
+				}
+				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return existingCell, nil
+				}
+				f.ExistsCgroupFn = func(_ any) (bool, error) {
+					return true, nil
+				}
+				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+					return true, nil
+				}
+			},
+			wantErr:     true,
+			errContains: "cell \"ready-cell-running\" has running containers and must first be stopped",
+		},
+		{
+			name:      "cell in Ready state but all containers stopped allows start",
+			cellName:  "ready-cell-stopped",
+			realmName: "test-realm",
+			spaceName: "test-space",
+			stackName: "test-stack",
+			setupRunner: func(f *fakeRunner) {
+				existingCell := buildTestCell("ready-cell-stopped", "test-realm", "test-space", "test-stack")
+				existingCell.Status.State = intmodel.CellStateReady // Stale metadata
+				existingCell.Status.Containers = []intmodel.ContainerStatus{
+					{ID: "container1", State: intmodel.ContainerStateStopped}, // Actually stopped
+					{ID: "container2", State: intmodel.ContainerStateStopped},
+				}
+				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return existingCell, nil
+				}
+				f.ExistsCgroupFn = func(_ any) (bool, error) {
+					return true, nil
+				}
+				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+					return true, nil
+				}
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
+				}
+				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
+					return nil
+				}
+			},
+			wantErr: false,
+		},
+		{
+			name:      "cell in Ready state with ContainerStateUnknown allows start",
+			cellName:  "ready-cell-unknown",
+			realmName: "test-realm",
+			spaceName: "test-space",
+			stackName: "test-stack",
+			setupRunner: func(f *fakeRunner) {
+				existingCell := buildTestCell("ready-cell-unknown", "test-realm", "test-space", "test-stack")
+				existingCell.Status.State = intmodel.CellStateReady
+				existingCell.Status.Containers = []intmodel.ContainerStatus{
+					{ID: "container1", State: intmodel.ContainerStateUnknown}, // Unknown treated as not running
+					{ID: "container2", State: intmodel.ContainerStateStopped},
+				}
+				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return existingCell, nil
+				}
+				f.ExistsCgroupFn = func(_ any) (bool, error) {
+					return true, nil
+				}
+				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+					return true, nil
+				}
+				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
+				}
+				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
+					return nil
+				}
+			},
+			wantErr: false,
 		},
 		{
 			name:      "cell in Stopped state can be started",
