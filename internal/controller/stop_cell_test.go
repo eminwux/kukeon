@@ -61,8 +61,9 @@ func TestStopCell_SuccessfulStop(t *testing.T) {
 				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
 					return true, nil
 				}
-				f.StopCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StopCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateStopped
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(cell intmodel.Cell) error {
 					if cell.Status.State != intmodel.CellStateStopped {
@@ -104,8 +105,9 @@ func TestStopCell_SuccessfulStop(t *testing.T) {
 				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
 					return true, nil
 				}
-				f.StopCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StopCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateStopped
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(cell intmodel.Cell) error {
 					if cell.Status.State != intmodel.CellStateStopped {
@@ -406,8 +408,8 @@ func TestStopCell_RunnerErrors(t *testing.T) {
 				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
 					return true, nil
 				}
-				f.StopCellFn = func(_ intmodel.Cell) error {
-					return errors.New("stop failed")
+				f.StopCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return intmodel.Cell{}, errors.New("stop failed")
 				}
 			},
 			wantErr:     true,
@@ -431,8 +433,9 @@ func TestStopCell_RunnerErrors(t *testing.T) {
 				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
 					return true, nil
 				}
-				f.StopCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StopCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateStopped
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
 					return errors.New("metadata update failed")
@@ -516,8 +519,9 @@ func TestStopCell_NameTrimming(t *testing.T) {
 				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
 					return true, nil
 				}
-				f.StopCellFn = func(_ intmodel.Cell) error {
-					return nil
+				f.StopCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateStopped
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
 					return nil

@@ -55,12 +55,13 @@ func TestStartContainer_SuccessfulStart(t *testing.T) {
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, containerID string) error {
+				f.StartContainerFn = func(cell intmodel.Cell, containerID string) (intmodel.Cell, error) {
 					// Verify container ID matches
 					if containerID != "test-container" {
-						return errors.New("unexpected container ID")
+						return intmodel.Cell{}, errors.New("unexpected container ID")
 					}
-					return nil
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(cell intmodel.Cell) error {
 					// Container should still be in cell (start doesn't remove it)
@@ -101,8 +102,9 @@ func TestStartContainer_SuccessfulStart(t *testing.T) {
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, _ string) error {
-					return nil
+				f.StartContainerFn = func(cell intmodel.Cell, _ string) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
 					return nil
@@ -501,8 +503,8 @@ func TestStartContainer_RunnerErrors(t *testing.T) {
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, _ string) error {
-					return errors.New("start failed")
+				f.StartContainerFn = func(_ intmodel.Cell, _ string) (intmodel.Cell, error) {
+					return intmodel.Cell{}, errors.New("start failed")
 				}
 			},
 			wantErr:     true,
@@ -523,8 +525,9 @@ func TestStartContainer_RunnerErrors(t *testing.T) {
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, _ string) error {
-					return nil
+				f.StartContainerFn = func(cell intmodel.Cell, _ string) (intmodel.Cell, error) {
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
 					return errors.New("metadata update failed")
@@ -613,11 +616,12 @@ func TestStartContainer_ContainerLookupByID(t *testing.T) {
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, containerID string) error {
+				f.StartContainerFn = func(cell intmodel.Cell, containerID string) (intmodel.Cell, error) {
 					if containerID != "target-container" {
-						return errors.New("unexpected container ID")
+						return intmodel.Cell{}, errors.New("unexpected container ID")
 					}
-					return nil
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
 					return nil
@@ -649,11 +653,12 @@ func TestStartContainer_ContainerLookupByID(t *testing.T) {
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
 					return existingCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, containerID string) error {
+				f.StartContainerFn = func(cell intmodel.Cell, containerID string) (intmodel.Cell, error) {
 					if containerID != "target-container-id" {
-						return errors.New("unexpected container ID")
+						return intmodel.Cell{}, errors.New("unexpected container ID")
 					}
-					return nil
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
 					return nil
@@ -744,11 +749,12 @@ func TestStartContainer_NameTrimming(t *testing.T) {
 					}
 					return existingCell, nil
 				}
-				f.StartContainerFn = func(_ intmodel.Cell, containerID string) error {
+				f.StartContainerFn = func(cell intmodel.Cell, containerID string) (intmodel.Cell, error) {
 					if containerID != "test-container" {
-						return errors.New("unexpected container ID")
+						return intmodel.Cell{}, errors.New("unexpected container ID")
 					}
-					return nil
+					cell.Status.State = intmodel.CellStateReady
+					return cell, nil
 				}
 				f.UpdateCellMetadataFn = func(_ intmodel.Cell) error {
 					return nil

@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"strings"
 
-	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/naming"
@@ -108,7 +108,7 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 			"container", containerID,
 			"cell", cellName,
 			"containersInCell", len(cell.Spec.Containers))
-		return intmodel.ContainerStateUnknown, fmt.Errorf("container %q not found in cell %q", containerID, cellName)
+		return intmodel.ContainerStateUnknown, nil
 	}
 
 	// Get cell ID (use Spec.ID if available, otherwise fall back to Metadata.Name)
@@ -149,21 +149,12 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 		"namespace", namespace)
 
 	// Check if container exists in containerd
-	// Note: ensureClientConnected() should have initialized the client, but check anyway
-	if r.ctrClient == nil {
-		r.logger.InfoContext(r.ctx, "containerd client not available after connection attempt",
-			"container", containerID,
-			"containerdID", containerdID)
-		return intmodel.ContainerStateUnknown, errors.New("containerd client not available")
-	}
-
-	containerExists, err := r.ctrClient.ExistsContainer(containerdID)
+	containerExists, err := r.ExistsContainer(containerdID)
 	if err != nil {
 		r.logger.InfoContext(r.ctx, "failed to check container existence",
 			"container", containerID,
 			"containerdID", containerdID,
 			"error", err)
-		// If we can't check existence, return Unknown
 		return intmodel.ContainerStateUnknown, nil
 	}
 
@@ -173,52 +164,28 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 			"container", containerID,
 			"containerdID", containerdID,
 			"namespace", namespace)
-		return intmodel.ContainerStateUnknown, nil
-	}
-
-	// Get task status if container exists
-	taskStatus, err := r.ctrClient.TaskStatus(containerdID)
-	if err != nil {
-		// Task might not exist even if container does (container was stopped/deleted)
-		r.logger.DebugContext(r.ctx, "failed to get task status (container exists but task may not)",
-			"container", containerID,
-			"containerdID", containerdID,
-			"error", err)
-		// Container exists but no task - container is stopped, return Stopped
 		return intmodel.ContainerStateStopped, nil
 	}
 
-	// Convert containerd status to internal container state
-	state := convertContainerdStatusToContainerState(taskStatus, true)
-	r.logger.InfoContext(r.ctx, "container state determined",
+	// Get container state using TaskStatus from ctr package
+	taskStatus, taskStatusErr := r.ctrClient.TaskStatus(containerdID)
+	if taskStatusErr == nil {
+		// TaskStatus succeeded - convert and return
+		state := ctr.ConvertContainerdStatusToContainerState(taskStatus)
+		r.logger.InfoContext(r.ctx, "container state determined via TaskStatus",
+			"container", containerID,
+			"containerdID", containerdID,
+			"namespace", namespace,
+			"taskStatus", taskStatus.Status,
+			"internalState", state)
+		return state, nil
+	}
+
+	// TaskStatus failed - return Unknown since we can't determine the state
+	r.logger.InfoContext(r.ctx, "failed to get container state via TaskStatus",
 		"container", containerID,
 		"containerdID", containerdID,
 		"namespace", namespace,
-		"taskStatus", taskStatus.Status,
-		"internalState", state)
-	return state, nil
-}
-
-// convertContainerdStatusToContainerState converts a containerd task status to internal ContainerState.
-func convertContainerdStatusToContainerState(status containerd.Status, hasTask bool) intmodel.ContainerState {
-	if !hasTask {
-		return intmodel.ContainerStateUnknown
-	}
-
-	switch status.Status {
-	case containerd.Running:
-		return intmodel.ContainerStateReady
-	case containerd.Stopped:
-		return intmodel.ContainerStateStopped
-	case containerd.Created:
-		return intmodel.ContainerStatePending
-	case containerd.Unknown:
-		return intmodel.ContainerStateUnknown
-	case containerd.Paused:
-		return intmodel.ContainerStatePaused
-	case containerd.Pausing:
-		return intmodel.ContainerStatePausing
-	default:
-		return intmodel.ContainerStateUnknown
-	}
+		"error", taskStatusErr)
+	return intmodel.ContainerStateUnknown, nil
 }

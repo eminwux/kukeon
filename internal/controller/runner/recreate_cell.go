@@ -37,7 +37,8 @@ func (r *Exec) RecreateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 	}
 
 	// Stop all containers in the cell
-	if stopErr := r.StopCell(existing); stopErr != nil {
+	_, stopErr := r.StopCell(existing)
+	if stopErr != nil {
 		r.logger.WarnContext(
 			r.ctx,
 			"failed to stop cell containers, continuing with deletion",

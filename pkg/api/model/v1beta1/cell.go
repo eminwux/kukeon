@@ -91,6 +91,7 @@ func NewCellDoc(from *CellDoc) *CellDoc {
 			Status: CellStatus{
 				State:      CellStateUnknown,
 				CgroupPath: "",
+				Containers: []ContainerStatus{},
 			},
 		}
 	}

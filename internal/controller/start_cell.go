@@ -38,13 +38,39 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 		return res, err
 	}
 
-	// Start all containers in the cell
-	if err = b.runner.StartCell(internalCell); err != nil {
-		return res, fmt.Errorf("failed to start cell containers: %w", err)
+	// Check if containers are actually running by examining Status.Containers
+	// which is freshly populated from containerd by validateAndGetCell -> GetCell -> populateCellContainerStatuses
+	// This prevents blocking starts when containers have crashed externally but metadata still shows Ready state
+	if len(internalCell.Status.Containers) > 0 {
+		// Check if any container is actually running
+		hasRunningContainer := false
+		for _, containerStatus := range internalCell.Status.Containers {
+			if containerStatus.State == intmodel.ContainerStateReady {
+				hasRunningContainer = true
+				break
+			}
+		}
+		if hasRunningContainer {
+			return res, fmt.Errorf(
+				"cell %q has running containers and must first be stopped",
+				internalCell.Metadata.Name,
+			)
+		}
+		// Containers are stopped (or unknown), allow start even if metadata says Ready
+	} else if internalCell.Status.State == intmodel.CellStateReady {
+		// No container statuses available, fall back to metadata state check
+		// This preserves existing behavior for cells without containers or when status population fails
+		return res, fmt.Errorf(
+			"cell %q is already in Ready state and must first be stopped",
+			internalCell.Metadata.Name,
+		)
 	}
 
-	// Update cell state to Ready
-	internalCell.Status.State = intmodel.CellStateReady
+	// Start all containers in the cell
+	internalCell, err = b.runner.StartCell(internalCell)
+	if err != nil {
+		return res, fmt.Errorf("failed to start cell containers: %w", err)
+	}
 
 	// Update cell metadata state to Ready
 	if err = b.runner.UpdateCellMetadata(internalCell); err != nil {

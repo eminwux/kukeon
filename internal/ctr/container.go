@@ -374,11 +374,11 @@ func (c *client) ExistsContainer(id string) (bool, error) {
 	nsCtx := c.namespaceCtx()
 	_, err := c.cClient.LoadContainer(nsCtx, id)
 	if err != nil {
-		// Only wrap "not found" errors with ErrContainerNotFound so callers can use errors.Is to check
-		// Other errors (connection failures, permission errors, etc.) should be returned as-is
+		// "Not found" is not an error for Exists - it's a valid result (container doesn't exist)
 		if errdefs.IsNotFound(err) {
-			return false, fmt.Errorf("%w: %w", internalerrdefs.ErrContainerNotFound, err)
+			return false, nil
 		}
+		// Only real errors (connection failures, permission errors, etc.) should be returned
 		return false, err
 	}
 	return true, nil

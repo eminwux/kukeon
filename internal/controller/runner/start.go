@@ -33,22 +33,22 @@ import (
 
 // StartCell starts the root container and all containers defined in the CellDoc.
 // The root container is started first, then all containers in doc.Spec.Containers are started.
-func (r *Exec) StartCell(cell intmodel.Cell) error {
+func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
-		return internalerrdefs.ErrCellNameRequired
+		return intmodel.Cell{}, internalerrdefs.ErrCellNameRequired
 	}
 	realmName := strings.TrimSpace(cell.Spec.RealmName)
 	if realmName == "" {
-		return internalerrdefs.ErrRealmNameRequired
+		return intmodel.Cell{}, internalerrdefs.ErrRealmNameRequired
 	}
 	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
 	if spaceName == "" {
-		return internalerrdefs.ErrSpaceNameRequired
+		return intmodel.Cell{}, internalerrdefs.ErrSpaceNameRequired
 	}
 	stackName := strings.TrimSpace(cell.Spec.StackName)
 	if stackName == "" {
-		return internalerrdefs.ErrStackNameRequired
+		return intmodel.Cell{}, internalerrdefs.ErrStackNameRequired
 	}
 
 	// Get the cell document to access all containers
@@ -64,13 +64,13 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 	}
 	internalCell, err := r.GetCell(lookupCell)
 	if err != nil {
-		return fmt.Errorf("%w: %w", internalerrdefs.ErrGetCell, err)
+		return intmodel.Cell{}, fmt.Errorf("%w: %w", internalerrdefs.ErrGetCell, err)
 	}
 
 	cellSpec := internalCell.Spec
 	cellID := cellSpec.ID
 	if cellID == "" {
-		return internalerrdefs.ErrCellIDRequired
+		return intmodel.Cell{}, internalerrdefs.ErrCellIDRequired
 	}
 
 	realmID := cellSpec.RealmName
@@ -79,7 +79,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 
 	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmID, spaceID)
 	if cniErr != nil {
-		return fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
+		return intmodel.Cell{}, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
 
 	// Create a background context for containerd operations
@@ -87,7 +87,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 	// The logger is passed separately, so we don't need to preserve context values
 
 	if err = r.ensureClientConnected(); err != nil {
-		return fmt.Errorf("%w: %w", internalerrdefs.ErrConnectContainerd, err)
+		return intmodel.Cell{}, fmt.Errorf("%w: %w", internalerrdefs.ErrConnectContainerd, err)
 	}
 
 	// Get realm to access namespace
@@ -98,12 +98,12 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 	}
 	internalRealm, err := r.GetRealm(lookupRealm)
 	if err != nil {
-		return fmt.Errorf("failed to get realm: %w", err)
+		return intmodel.Cell{}, fmt.Errorf("failed to get realm: %w", err)
 	}
 
 	namespace := internalRealm.Spec.Namespace
 	if namespace == "" {
-		return fmt.Errorf("realm %q has no namespace", realmID)
+		return intmodel.Cell{}, fmt.Errorf("realm %q has no namespace", realmID)
 	}
 
 	// Set namespace to realm namespace with credentials if available
@@ -117,7 +117,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 	// Generate containerd ID with cell identifier for uniqueness
 	containerID, err := naming.BuildRootContainerdID(spaceID, stackID, cellID)
 	if err != nil {
-		return fmt.Errorf("failed to build root container containerd ID: %w", err)
+		return intmodel.Cell{}, fmt.Errorf("failed to build root container containerd ID: %w", err)
 	}
 
 	// Check if container exists and clean it up
@@ -197,7 +197,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 	// Recreate root container fresh
 	rootContainerSpec, err := r.ensureCellRootContainerSpec(internalCell)
 	if err != nil {
-		return fmt.Errorf("failed to get root container spec: %w", err)
+		return intmodel.Cell{}, fmt.Errorf("failed to get root container spec: %w", err)
 	}
 
 	rootLabels := buildRootContainerLabels(internalCell)
@@ -212,7 +212,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 			"failed to create root container",
 			fields...,
 		)
-		return fmt.Errorf("failed to create root container %s: %w", containerID, err)
+		return intmodel.Cell{}, fmt.Errorf("failed to create root container %s: %w", containerID, err)
 	}
 
 	fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
@@ -233,12 +233,12 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 			"failed to start root container",
 			fields...,
 		)
-		return fmt.Errorf("failed to start root container %s: %w", containerID, err)
+		return intmodel.Cell{}, fmt.Errorf("failed to start root container %s: %w", containerID, err)
 	}
 
 	rootPID := rootTask.Pid()
 	if rootPID == 0 {
-		return fmt.Errorf("root container %s has invalid pid (0)", containerID)
+		return intmodel.Cell{}, fmt.Errorf("root container %s has invalid pid (0)", containerID)
 	}
 
 	namespacePaths := ctr.NamespacePaths{
@@ -290,7 +290,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 		r.cniConf.CniCacheDir,
 	)
 	if mgrErr != nil {
-		return fmt.Errorf("%w: %w", internalerrdefs.ErrInitCniManager, mgrErr)
+		return intmodel.Cell{}, fmt.Errorf("%w: %w", internalerrdefs.ErrInitCniManager, mgrErr)
 	}
 
 	if loadErr := cniMgr.LoadNetworkConfigList(cniConfigPath); loadErr != nil {
@@ -311,7 +311,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 			"failed to load CNI config",
 			fields...,
 		)
-		return fmt.Errorf("failed to load CNI config %s: %w", cniConfigPath, loadErr)
+		return intmodel.Cell{}, fmt.Errorf("failed to load CNI config %s: %w", cniConfigPath, loadErr)
 	}
 
 	netnsPath := namespacePaths.Net
@@ -372,7 +372,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 				"failed to attach root container to network",
 				fields...,
 			)
-			return fmt.Errorf("failed to attach root container %s to network: %w", containerID, addErr)
+			return intmodel.Cell{}, fmt.Errorf("failed to attach root container %s to network: %w", containerID, addErr)
 		}
 	}
 
@@ -394,7 +394,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 		// Use ContainerdID from spec
 		ctrContainerID := containerSpec.ContainerdID
 		if ctrContainerID == "" {
-			return fmt.Errorf("container %q has empty ContainerdID", containerSpec.ID)
+			return intmodel.Cell{}, fmt.Errorf("container %q has empty ContainerdID", containerSpec.ID)
 		}
 
 		// Log which container we're attempting to start
@@ -452,7 +452,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 				"failed to create container",
 				fields...,
 			)
-			return fmt.Errorf("failed to create container %s: %w", ctrContainerID, err)
+			return intmodel.Cell{}, fmt.Errorf("failed to create container %s: %w", ctrContainerID, err)
 		}
 
 		fields = appendCellLogFields([]any{"id", ctrContainerID}, cellID, cellName)
@@ -478,7 +478,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 				"failed to start container from CellDoc",
 				fields...,
 			)
-			return fmt.Errorf("failed to start container %s: %w", ctrContainerID, err)
+			return intmodel.Cell{}, fmt.Errorf("failed to start container %s: %w", ctrContainerID, err)
 		}
 
 		fields = appendCellLogFields([]any{"id", ctrContainerID}, cellID, cellName)
@@ -490,38 +490,49 @@ func (r *Exec) StartCell(cell intmodel.Cell) error {
 		)
 	}
 
-	return nil
+	// Update cell state in internal model
+	internalCell.Status.State = intmodel.CellStateReady
+
+	// Populate container statuses after starting cell and persist them
+	if err = r.PopulateAndPersistCellContainerStatuses(&internalCell); err != nil {
+		r.logger.WarnContext(r.ctx, "failed to populate container statuses",
+			"cell", cellName,
+			"error", err)
+		// Continue anyway - status population is best-effort
+	}
+
+	return internalCell, nil
 }
 
 // StartContainer starts a specific container in a cell.
-func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
+func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (intmodel.Cell, error) {
 	containerID = strings.TrimSpace(containerID)
 	if containerID == "" {
-		return errors.New("container ID is required")
+		return intmodel.Cell{}, errors.New("container ID is required")
 	}
 
 	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
-		return internalerrdefs.ErrCellNameRequired
+		return intmodel.Cell{}, internalerrdefs.ErrCellNameRequired
 	}
 
 	cellID := cell.Spec.ID
 	if cellID == "" {
-		return internalerrdefs.ErrCellIDRequired
+		return intmodel.Cell{}, internalerrdefs.ErrCellIDRequired
 	}
 
 	realmName := strings.TrimSpace(cell.Spec.RealmName)
 	if realmName == "" {
-		return internalerrdefs.ErrRealmNameRequired
+		return intmodel.Cell{}, internalerrdefs.ErrRealmNameRequired
 	}
 
 	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
 	if spaceName == "" {
-		return internalerrdefs.ErrSpaceNameRequired
+		return intmodel.Cell{}, internalerrdefs.ErrSpaceNameRequired
 	}
 
 	if err := r.ensureClientConnected(); err != nil {
-		return fmt.Errorf("%w: %w", internalerrdefs.ErrConnectContainerd, err)
+		return intmodel.Cell{}, fmt.Errorf("%w: %w", internalerrdefs.ErrConnectContainerd, err)
 	}
 
 	// Get realm to access namespace
@@ -532,12 +543,12 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
 	}
 	internalRealm, err := r.GetRealm(lookupRealm)
 	if err != nil {
-		return fmt.Errorf("failed to get realm: %w", err)
+		return intmodel.Cell{}, fmt.Errorf("failed to get realm: %w", err)
 	}
 
 	namespace := internalRealm.Spec.Namespace
 	if namespace == "" {
-		return fmt.Errorf("realm %q has no namespace", realmName)
+		return intmodel.Cell{}, fmt.Errorf("realm %q has no namespace", realmName)
 	}
 
 	// Set namespace to realm namespace with credentials if available
@@ -558,12 +569,12 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
 	}
 
 	if foundContainerSpec == nil {
-		return fmt.Errorf("container %q not found in cell %q", containerID, cellName)
+		return intmodel.Cell{}, fmt.Errorf("container %q not found in cell %q", containerID, cellName)
 	}
 
 	// Root container cannot be started directly - it must be started by starting the cell
 	if foundContainerSpec.Root {
-		return fmt.Errorf(
+		return intmodel.Cell{}, fmt.Errorf(
 			"root container cannot be started directly, start the cell instead using 'kuke start cell %s'",
 			cellName,
 		)
@@ -572,27 +583,27 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
 	// Use ContainerdID from spec
 	containerdID := foundContainerSpec.ContainerdID
 	if containerdID == "" {
-		return fmt.Errorf("container %q has empty ContainerdID", containerID)
+		return intmodel.Cell{}, fmt.Errorf("container %q has empty ContainerdID", containerID)
 	}
 
 	// Get root container to get namespace paths
 	rootContainerID, err := r.getRootContainerContainerdID(cell)
 	if err != nil {
-		return err
+		return intmodel.Cell{}, err
 	}
 
 	// Get root container's namespace paths
 	rootContainer, err := r.ctrClient.GetContainer(rootContainerID)
 	if err != nil {
 		if errors.Is(err, internalerrdefs.ErrContainerNotFound) {
-			return fmt.Errorf(
+			return intmodel.Cell{}, fmt.Errorf(
 				"root container %q does not exist, start the cell first using 'kuke start cell %s': %w",
 				rootContainerID,
 				cellName,
 				err,
 			)
 		}
-		return fmt.Errorf("failed to get root container: %w", err)
+		return intmodel.Cell{}, fmt.Errorf("failed to get root container: %w", err)
 	}
 
 	nsCtx := namespaces.WithNamespace(r.ctx, namespace)
@@ -600,19 +611,19 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
 	if err != nil {
 		// Check if task doesn't exist
 		if errdefs.IsNotFound(err) {
-			return fmt.Errorf(
+			return intmodel.Cell{}, fmt.Errorf(
 				"root container %q exists but has no task, start the cell first using 'kuke start cell %s': %w",
 				rootContainerID,
 				cellName,
 				err,
 			)
 		}
-		return fmt.Errorf("root container task not found, ensure root container is started: %w", err)
+		return intmodel.Cell{}, fmt.Errorf("root container task not found, ensure root container is started: %w", err)
 	}
 
 	rootPID := rootTask.Pid()
 	if rootPID == 0 {
-		return errors.New("root container has invalid pid (0)")
+		return intmodel.Cell{}, errors.New("root container has invalid pid (0)")
 	}
 
 	namespacePaths := ctr.NamespacePaths{
@@ -667,7 +678,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
 			"failed to create container",
 			fields...,
 		)
-		return fmt.Errorf("failed to create container %s: %w", containerID, err)
+		return intmodel.Cell{}, fmt.Errorf("failed to create container %s: %w", containerID, err)
 	}
 
 	fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
@@ -703,7 +714,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
 			"failed to start container",
 			fields...,
 		)
-		return fmt.Errorf("failed to start container %s: %w", containerID, err)
+		return intmodel.Cell{}, fmt.Errorf("failed to start container %s: %w", containerID, err)
 	}
 
 	fields = appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
@@ -714,5 +725,32 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) error {
 		fields...,
 	)
 
-	return nil
+	// Get the cell again to ensure we have the latest state
+	lookupCell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: cellName,
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: realmName,
+			SpaceName: spaceName,
+			StackName: cell.Spec.StackName,
+		},
+	}
+	updatedCell, err := r.GetCell(lookupCell)
+	if err != nil {
+		return intmodel.Cell{}, fmt.Errorf("failed to retrieve cell after starting container: %w", err)
+	}
+
+	// Update cell state in internal model
+	updatedCell.Status.State = intmodel.CellStateReady
+
+	// Populate container statuses after starting cell and persist them
+	if err = r.PopulateAndPersistCellContainerStatuses(&updatedCell); err != nil {
+		r.logger.WarnContext(r.ctx, "failed to populate container statuses",
+			"cell", cellName,
+			"error", err)
+		// Continue anyway - status population is best-effort
+	}
+
+	return updatedCell, nil
 }

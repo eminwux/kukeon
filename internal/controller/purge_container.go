@@ -123,6 +123,8 @@ func (b *Exec) PurgeContainer(container intmodel.Container) (PurgeContainerResul
 			},
 			Spec: *foundContainerSpec,
 			Status: intmodel.ContainerStatus{
+				Name:  name,
+				ID:    name,
 				State: intmodel.ContainerStateReady,
 			},
 		}

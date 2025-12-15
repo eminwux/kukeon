@@ -45,6 +45,15 @@ func (r *Exec) ExistsRealmContainerdNamespace(namespace string) (bool, error) {
 	return r.ctrClient.ExistsNamespace(namespace)
 }
 
+// ExistsContainer checks if a container exists in containerd by its containerd ID.
+// It ensures the client is connected before making the call.
+func (r *Exec) ExistsContainer(containerdID string) (bool, error) {
+	if err := r.ensureClientConnected(); err != nil {
+		return false, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	return r.ctrClient.ExistsContainer(containerdID)
+}
+
 func (r *Exec) ExistsCellRootContainer(cell intmodel.Cell) (bool, error) {
 	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
@@ -107,11 +116,6 @@ func (r *Exec) ExistsCellRootContainer(cell intmodel.Cell) (bool, error) {
 	// Check if container exists
 	exists, err := r.ctrClient.ExistsContainer(containerID)
 	if err != nil {
-		// Check if container doesn't exist - this is not an error, just "doesn't exist"
-		if errors.Is(err, errdefs.ErrContainerNotFound) {
-			// Container doesn't exist, return false (not an error)
-			return false, nil
-		}
 		// Other errors are actual failures
 		return false, fmt.Errorf("failed to check if root container exists: %w", err)
 	}

@@ -169,7 +169,8 @@ func (b *Exec) CreateCell(cell intmodel.Cell) (CreateCellResult, error) {
 	}
 
 	// Start cell containers (both new and existing cells need to be started)
-	if err = b.runner.StartCell(resultCell); err != nil {
+	resultCell, err = b.runner.StartCell(resultCell)
+	if err != nil {
 		return res, fmt.Errorf("failed to start cell containers: %w", err)
 	}
 

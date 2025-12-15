@@ -88,6 +88,18 @@ func (r *Exec) CreateCell(cell intmodel.Cell) (intmodel.Cell, error) {
 			return intmodel.Cell{}, ensureErr
 		}
 
+		// Populate container statuses after ensuring cell and persist them
+		if err = r.PopulateAndPersistCellContainerStatuses(&ensuredCell); err != nil {
+			r.logger.WarnContext(r.ctx, "failed to populate container statuses",
+				"cell", ensuredCell.Metadata.Name,
+				"error", err)
+			// If UpdateCellMetadata failed, return error; otherwise continue (populate is best-effort)
+			if errors.Is(err, errdefs.ErrWriteMetadata) || errors.Is(err, errdefs.ErrConversionFailed) {
+				return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
+			}
+			// Continue anyway - status population is best-effort
+		}
+
 		return ensuredCell, nil
 	}
 
@@ -95,6 +107,18 @@ func (r *Exec) CreateCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	resultCell, err := r.provisionNewCell(cell)
 	if err != nil {
 		return intmodel.Cell{}, err
+	}
+
+	// Populate container statuses after creating cell and persist them
+	if err = r.PopulateAndPersistCellContainerStatuses(&resultCell); err != nil {
+		r.logger.WarnContext(r.ctx, "failed to populate container statuses",
+			"cell", resultCell.Metadata.Name,
+			"error", err)
+		// If UpdateCellMetadata failed, return error; otherwise continue (populate is best-effort)
+		if errors.Is(err, errdefs.ErrWriteMetadata) || errors.Is(err, errdefs.ErrConversionFailed) {
+			return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
+		}
+		// Continue anyway - status population is best-effort
 	}
 
 	return resultCell, nil

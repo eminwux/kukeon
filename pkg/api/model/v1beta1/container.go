@@ -53,6 +53,8 @@ type ContainerSpec struct {
 }
 
 type ContainerStatus struct {
+	Name         string         `json:"name"         yaml:"name"`
+	ID           string         `json:"id"           yaml:"id"`
 	State        ContainerState `json:"state"        yaml:"state"`
 	RestartCount int            `json:"restartCount" yaml:"restartCount"`
 	RestartTime  time.Time      `json:"restartTime"  yaml:"restartTime"`
@@ -125,6 +127,8 @@ func NewContainerDoc(from *ContainerDoc) *ContainerDoc {
 				RestartPolicy:   "",
 			},
 			Status: ContainerStatus{
+				Name:         "",
+				ID:           "",
 				State:        ContainerStatePending,
 				RestartCount: 0,
 				RestartTime:  time.Time{},
