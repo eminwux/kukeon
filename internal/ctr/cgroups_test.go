@@ -91,12 +91,9 @@ func TestNewCgroupValidation(t *testing.T) {
 
 			if tt.wantErr != "" {
 				if err == nil {
-					t.Errorf("NewCgroup() error = nil, want error containing %q", tt.wantErr)
-				} else if err.Error() == "" || err.Error() != errdefs.ErrEmptyGroupPath.Error() {
-					// Check if error message contains expected text
-					if !errors.Is(err, errdefs.ErrEmptyGroupPath) {
-						t.Errorf("NewCgroup() error = %v, want ErrEmptyGroupPath", err)
-					}
+					t.Errorf("NewCgroup() error = nil, want ErrEmptyGroupPath")
+				} else if !errors.Is(err, errdefs.ErrEmptyGroupPath) {
+					t.Errorf("NewCgroup() error = %v, want ErrEmptyGroupPath", err)
 				}
 			} else {
 				// For valid paths, error might occur due to missing cgroup filesystem

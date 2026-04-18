@@ -20,6 +20,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 
 	ctr "github.com/eminwux/kukeon/internal/ctr"
@@ -98,11 +99,8 @@ func TestDeleteNamespaceValidation(t *testing.T) {
 					t.Errorf("DeleteNamespace() error = nil, want error containing %q", tt.wantErrMsg)
 				} else if err.Error() == "" {
 					t.Errorf("DeleteNamespace() error message is empty, want error containing %q", tt.wantErrMsg)
-				} else if tt.namespace == "" {
-					// Check that error message contains expected text
-					if err.Error() != tt.wantErrMsg && err.Error() != "namespace name is required" {
-						t.Logf("DeleteNamespace() error = %v (may be expected)", err)
-					}
+				} else if !strings.Contains(err.Error(), tt.wantErrMsg) {
+					t.Errorf("DeleteNamespace() error = %v, want message containing %q", err, tt.wantErrMsg)
 				}
 			} else {
 				// Validation passes, but actual deletion may fail without containerd connection
