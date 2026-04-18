@@ -57,9 +57,9 @@ test:
 
 e2e: test-e2e
 .PHONY: test-e2e
-test-e2e:
+test-e2e: kuke
 	@echo "Running e2e tests using binaries in project root"
-	HOME=$(HOME) E2E_BIN_DIR=$(CURDIR) go test -v ./e2e -v
+	HOME=$(HOME) PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$(PATH) E2E_BIN_DIR=$(CURDIR) go test -v ./e2e
 
 tag:
 	git tag -s v$(KUKEON_VERSION) -m "Release version $(KUKEON_VERSION)"

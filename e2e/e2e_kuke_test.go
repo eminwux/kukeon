@@ -19,6 +19,8 @@ package e2e_test
 import (
 	"strings"
 	"testing"
+
+	"github.com/eminwux/kukeon/internal/consts"
 )
 
 // TestKuke_Help tests kuke help command.
@@ -180,14 +182,31 @@ func TestKuke_Init_VerifyState(t *testing.T) {
 	runPath := getRandomRunPath(t)
 	mkdirRunPath(t, runPath)
 
-	// Step 0: Delete cascade the realm "default" if it exists (cleanup from previous runs)
-	cleanupRealm(t, runPath, "default")
+	// Step 0: Purge default resources created by init in reverse dependency order
+	// (cleanup from previous runs that may have left orphaned containerd containers)
+	_, _, _ = runBinary(t, nil, kuke, append(
+		buildKukeRunPathArgs(runPath),
+		"purge", "cell", consts.KukeonCellName,
+		"--realm", "default", "--space", "default", "--stack", "default",
+	)...)
+	_, _, _ = runBinary(t, nil, kuke, append(
+		buildKukeRunPathArgs(runPath),
+		"purge", "stack", "default",
+		"--realm", "default", "--space", "default",
+	)...)
+	_, _, _ = runBinary(t, nil, kuke, append(
+		buildKukeRunPathArgs(runPath),
+		"purge", "space", "default",
+		"--realm", "default",
+	)...)
+	_, _, _ = runBinary(t, nil, kuke, append(
+		buildKukeRunPathArgs(runPath),
+		"purge", "realm", "default",
+	)...)
 
-	// Cleanup: Clean up default resources created by init
+	// Cleanup: Clean up default resources created by init in reverse dependency order
 	t.Cleanup(func() {
-		// Try to clean up in reverse dependency order
-		// Note: Use default names from consts
-		// Note: Do not cleanup cell "kukeon" or containers inside it per test requirements
+		cleanupCell(t, runPath, "default", "default", "default", consts.KukeonCellName)
 		cleanupStack(t, runPath, "default", "default", "default")
 		cleanupSpace(t, runPath, "default", "default")
 		cleanupRealm(t, runPath, "default")

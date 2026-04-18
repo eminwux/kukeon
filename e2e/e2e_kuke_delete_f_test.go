@@ -34,6 +34,10 @@ func TestKukeDeleteF_Realm(t *testing.T) {
 
 	realmName := generateUniqueRealmName(t)
 
+	t.Cleanup(func() {
+		cleanupRealm(t, runPath, realmName)
+	})
+
 	// First, create a realm using apply
 	tmpDir := t.TempDir()
 	applyYamlFile := filepath.Join(tmpDir, "realm-apply.yaml")
@@ -101,6 +105,11 @@ func TestKukeDeleteF_MultiResource(t *testing.T) {
 
 	realmName := generateUniqueRealmName(t)
 	spaceName := "delete-space-" + strings.TrimPrefix(realmName, "e-r-")
+
+	t.Cleanup(func() {
+		cleanupSpace(t, runPath, realmName, spaceName)
+		cleanupRealm(t, runPath, realmName)
+	})
 
 	// First, create resources using apply
 	tmpDir := t.TempDir()
@@ -184,6 +193,11 @@ func TestKukeDeleteF_Cascade(t *testing.T) {
 
 	realmName := generateUniqueRealmName(t)
 	spaceName := "delete-cascade-space-" + strings.TrimPrefix(realmName, "e-r-")
+
+	t.Cleanup(func() {
+		cleanupSpace(t, runPath, realmName, spaceName)
+		cleanupRealm(t, runPath, realmName)
+	})
 
 	// First, create resources using apply
 	tmpDir := t.TempDir()

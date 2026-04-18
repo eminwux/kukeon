@@ -308,7 +308,7 @@ func TestNewContainerCmdRunE(t *testing.T) {
 				"space": "my-space",
 				"stack": "my-stack",
 				"cell":  "my-cell",
-				"image": "docker.io/library/alpine:latest",
+				"image": "registry.eminwux.com/alpine:latest",
 			},
 			setupCtx: func(cmd *cobra.Command) {
 				logger := slog.New(slog.NewTextHandler(io.Discard, nil))

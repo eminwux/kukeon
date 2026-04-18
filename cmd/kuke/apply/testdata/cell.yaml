@@ -10,19 +10,19 @@ spec:
   containers:
     - id: root
       root: true
-      image: docker.io/library/busybox:latest
+      image: registry.eminwux.com/busybox:latest
       command: sleep
       args:
         - "3600"
     - id: worker
-      image: docker.io/library/busybox:latest
+      image: registry.eminwux.com/busybox:latest
       command: sleep
       args:
         - "3600"
       env:
         - WORKER_MODE=active
     - id: cache
-      image: docker.io/library/busybox:latest
+      image: registry.eminwux.com/busybox:latest
       command: sleep
       args:
         - "3600"

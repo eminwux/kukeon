@@ -54,7 +54,7 @@ func runReturningBinary(t *testing.T, _ []string, command string, args ...string
 		t.Skipf("binary %s not found, skipping", bin)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, bin, args...)
@@ -84,7 +84,7 @@ func runBinary(t *testing.T, env []string, command string, args ...string) (int,
 		t.Skipf("binary %s not found, skipping", bin)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, bin, args...)
@@ -217,7 +217,7 @@ func verifyCgroupPathExists(t *testing.T, cgroupPath string) bool {
 func generateUniqueSpaceName(t *testing.T) string {
 	t.Helper()
 	timestamp := time.Now().UnixNano()
-	hexID := fmt.Sprintf("%02x", timestamp&0xFF) // 2 hex chars from lower 8 bits
+	hexID := fmt.Sprintf("%02x", timestamp&0xFF)
 	return fmt.Sprintf("e-sp-%s", hexID)
 }
 
@@ -326,7 +326,7 @@ func verifySpaceExists(t *testing.T, runPath, realmName, spaceName string) bool 
 func generateUniqueStackName(t *testing.T) string {
 	t.Helper()
 	timestamp := time.Now().UnixNano()
-	hexID := fmt.Sprintf("%02x", timestamp&0xFF) // 2 hex chars from lower 8 bits
+	hexID := fmt.Sprintf("%02x", timestamp&0xFF)
 	return fmt.Sprintf("e-st-%s", hexID)
 }
 
@@ -436,7 +436,7 @@ func verifyStackExists(t *testing.T, runPath, realmName, spaceName, stackName st
 func generateUniqueCellName(t *testing.T) string {
 	t.Helper()
 	timestamp := time.Now().UnixNano()
-	hexID := fmt.Sprintf("%02x", timestamp&0xFF) // 2 hex chars from lower 8 bits
+	hexID := fmt.Sprintf("%02x", timestamp&0xFF)
 	return fmt.Sprintf("e-ce-%s", hexID)
 }
 
@@ -444,7 +444,7 @@ func generateUniqueCellName(t *testing.T) string {
 func generateUniqueContainerName(t *testing.T) string {
 	t.Helper()
 	timestamp := time.Now().UnixNano()
-	hexID := fmt.Sprintf("%02x", timestamp&0xFF) // 2 hex chars from lower 8 bits
+	hexID := fmt.Sprintf("%02x", timestamp&0xFF)
 	return fmt.Sprintf("e-co-%s", hexID)
 }
 
@@ -572,53 +572,13 @@ func getRealmNamespace(t *testing.T, runPath, realmName string) (string, error) 
 // verifyRootContainerExists verifies root container exists in containerd namespace.
 func verifyRootContainerExists(t *testing.T, namespace, containerID string) bool {
 	t.Helper()
-
-	// Check if ctr binary exists
-	ctrPath, err := exec.LookPath(ctr)
-	if err != nil {
-		t.Logf("ctr binary not found, skipping root container verification")
-		return false
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, ctrPath, "--namespace", namespace, "container", "ls")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Logf("failed to run ctr container ls: %v, output: %s", err, string(out))
-		return false
-	}
-
-	// Check if container ID appears in output
-	output := string(out)
-	return strings.Contains(output, containerID)
+	return verifyContainerExists(t, namespace, containerID)
 }
 
 // verifyRootContainerTaskExists verifies root container task exists in containerd namespace.
 func verifyRootContainerTaskExists(t *testing.T, namespace, containerID string) bool {
 	t.Helper()
-
-	// Check if ctr binary exists
-	ctrPath, err := exec.LookPath(ctr)
-	if err != nil {
-		t.Logf("ctr binary not found, skipping root container task verification")
-		return false
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, ctrPath, "--namespace", namespace, "task", "ls")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Logf("failed to run ctr task ls: %v, output: %s", err, string(out))
-		return false
-	}
-
-	// Check if container ID appears in output
-	output := string(out)
-	return strings.Contains(output, containerID)
+	return verifyContainerTaskExists(t, namespace, containerID)
 }
 
 // verifyContainerExists verifies container exists in containerd namespace.

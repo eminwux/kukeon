@@ -80,7 +80,7 @@ func TestCreateContainerValidation(t *testing.T) {
 			name: "empty container ID",
 			spec: ctr.ContainerSpec{
 				ID:    "",
-				Image: "docker.io/library/busybox:latest",
+				Image: "registry.eminwux.com/busybox:latest",
 			},
 			wantErr: errdefs.ErrEmptyContainerID,
 		},
@@ -124,7 +124,7 @@ func TestStartContainerValidation(t *testing.T) {
 			name: "empty container ID",
 			containerSpec: ctr.ContainerSpec{
 				ID:    "",
-				Image: "docker.io/library/busybox:latest",
+				Image: "registry.eminwux.com/busybox:latest",
 			},
 			taskSpec: ctr.TaskSpec{},
 			wantErr:  errdefs.ErrEmptyContainerID,
@@ -194,7 +194,7 @@ func TestCreateContainerFromSpecValidation(t *testing.T) {
 			name: "empty container ID",
 			spec: intmodel.ContainerSpec{
 				ID:    "",
-				Image: "docker.io/library/busybox:latest",
+				Image: "registry.eminwux.com/busybox:latest",
 			},
 			wantErr: errdefs.ErrEmptyContainerID,
 		},
@@ -210,7 +210,7 @@ func TestCreateContainerFromSpecValidation(t *testing.T) {
 			name: "empty cell name",
 			spec: intmodel.ContainerSpec{
 				ID:        "test-container",
-				Image:     "docker.io/library/busybox:latest",
+				Image:     "registry.eminwux.com/busybox:latest",
 				CellName:  "",
 				SpaceName: "space1",
 				RealmName: "realm1",
@@ -222,7 +222,7 @@ func TestCreateContainerFromSpecValidation(t *testing.T) {
 			name: "empty space name",
 			spec: intmodel.ContainerSpec{
 				ID:        "test-container",
-				Image:     "docker.io/library/busybox:latest",
+				Image:     "registry.eminwux.com/busybox:latest",
 				CellName:  "cell1",
 				SpaceName: "",
 				RealmName: "realm1",
@@ -234,7 +234,7 @@ func TestCreateContainerFromSpecValidation(t *testing.T) {
 			name: "empty realm name",
 			spec: intmodel.ContainerSpec{
 				ID:        "test-container",
-				Image:     "docker.io/library/busybox:latest",
+				Image:     "registry.eminwux.com/busybox:latest",
 				CellName:  "cell1",
 				SpaceName: "space1",
 				RealmName: "",
@@ -246,7 +246,7 @@ func TestCreateContainerFromSpecValidation(t *testing.T) {
 			name: "empty stack name",
 			spec: intmodel.ContainerSpec{
 				ID:        "test-container",
-				Image:     "docker.io/library/busybox:latest",
+				Image:     "registry.eminwux.com/busybox:latest",
 				CellName:  "cell1",
 				SpaceName: "space1",
 				RealmName: "realm1",
