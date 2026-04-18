@@ -26,6 +26,7 @@ import (
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/cni"
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
@@ -295,6 +296,32 @@ func (r *Exec) createSpaceCNIConfig(space intmodel.Space) (string, error) {
 		confPath,
 	)
 	return confPath, nil
+}
+
+// EnsureKukeonRootCgroup ensures the kukeon root cgroup (/kukeon) exists at the
+// cgroup hierarchy root. This is the base under which all realms are created.
+// It bypasses buildCgroupPath (which would otherwise nest /kukeon under itself)
+// and creates the cgroup directly at the discovered mountpoint.
+// Returns (existsPre, created, err).
+func (r *Exec) EnsureKukeonRootCgroup() (bool, bool, error) {
+	if err := r.ensureClientConnected(); err != nil {
+		return false, false, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+
+	mountpoint := r.ctrClient.GetCgroupMountpoint()
+	group := consts.KukeonCgroupRoot
+
+	if _, err := r.ctrClient.LoadCgroup(group, mountpoint); err == nil {
+		r.logger.DebugContext(r.ctx, "kukeon root cgroup already exists", "group", group, "mountpoint", mountpoint)
+		return true, false, nil
+	}
+
+	spec := ctr.CgroupSpec{Group: group, Mountpoint: mountpoint}
+	if _, err := r.ctrClient.NewCgroup(spec); err != nil {
+		return false, false, fmt.Errorf("%w: %w", errdefs.ErrCreateRealmCgroup, err)
+	}
+	r.logger.InfoContext(r.ctx, "created kukeon root cgroup", "group", group, "mountpoint", mountpoint)
+	return false, true, nil
 }
 
 // buildCgroupPath discovers the cgroup mountpoint and current process cgroup path,

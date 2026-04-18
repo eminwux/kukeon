@@ -31,6 +31,10 @@ import (
 type BootstrapReport struct {
 	RunPath string
 
+	KukeonCgroupExistsPre  bool
+	KukeonCgroupExistsPost bool
+	KukeonCgroupCreated    bool
+
 	RealmName                          string
 	RealmContainerdNamespace           string
 	RealmMetadataExistsPre             bool
@@ -90,6 +94,17 @@ type BootstrapReport struct {
 	CellStartedPre              bool
 	CellStartedPost             bool
 	CellStarted                 bool
+}
+
+func (b *Exec) bootstrapKukeonCgroup(report BootstrapReport) (BootstrapReport, error) {
+	existsPre, created, err := b.runner.EnsureKukeonRootCgroup()
+	if err != nil {
+		return report, err
+	}
+	report.KukeonCgroupExistsPre = existsPre
+	report.KukeonCgroupExistsPost = true
+	report.KukeonCgroupCreated = created
+	return report, nil
 }
 
 func (b *Exec) bootstrapRealm(report BootstrapReport) (BootstrapReport, error) {

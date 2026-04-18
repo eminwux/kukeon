@@ -116,6 +116,12 @@ func (b *Exec) Bootstrap() (BootstrapReport, error) {
 		return report, err
 	}
 
+	// Ensure the kukeon root cgroup exists; all realms nest under it.
+	report, err = b.bootstrapKukeonCgroup(report)
+	if err != nil {
+		return report, err
+	}
+
 	// Bootstrap realm
 	report, err = b.bootstrapRealm(report)
 	if err != nil {

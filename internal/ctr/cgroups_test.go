@@ -323,28 +323,11 @@ func TestGetCgroupMountpoint(t *testing.T) {
 func TestGetCurrentCgroupPath(t *testing.T) {
 	client := setupTestClientForCgroups(t)
 
-	// Test GetCurrentCgroupPath
-	// This reads from /proc/self/cgroup which exists on Linux systems
-	// If it doesn't exist or fails, we'll handle that gracefully
 	path, err := client.GetCurrentCgroupPath()
-	// On systems without /proc/self/cgroup, we expect an error
-	// On systems with cgroup2, we expect a valid path
 	if err != nil {
-		// Error is acceptable if /proc/self/cgroup doesn't exist or doesn't contain cgroup2
-		t.Logf("GetCurrentCgroupPath() returned error (may be expected): %v", err)
-		if path != "" {
-			t.Errorf("GetCurrentCgroupPath() error = %v but path = %q (should be empty on error)", err, path)
-		}
-		return
+		t.Fatalf("GetCurrentCgroupPath() unexpected error: %v", err)
 	}
-
-	// If no error, path should be non-empty
-	if path == "" {
-		t.Error("GetCurrentCgroupPath() = empty string, want non-empty path on success")
-	}
-
-	// Path should start with / (cgroup paths are absolute)
-	if path != "" && path[0] != '/' {
-		t.Errorf("GetCurrentCgroupPath() = %q, want absolute path starting with /", path)
+	if path != consts.KukeonCgroupRoot {
+		t.Errorf("GetCurrentCgroupPath() = %q, want %q", path, consts.KukeonCgroupRoot)
 	}
 }

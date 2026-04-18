@@ -27,6 +27,7 @@ import (
 
 type Runner interface {
 	BootstrapCNI(cfgDir, cacheDir, binDir string) (cni.BootstrapReport, error)
+	EnsureKukeonRootCgroup() (existsPre bool, created bool, err error)
 
 	GetRealm(realm intmodel.Realm) (intmodel.Realm, error)
 	ListRealms() ([]intmodel.Realm, error)

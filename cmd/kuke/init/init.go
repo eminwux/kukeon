@@ -102,6 +102,7 @@ func printBootstrapReport(cmd *cobra.Command, report controller.BootstrapReport)
 	printHeader(cmd, report)
 	printOverview(cmd, report)
 	cmd.Println("Actions:")
+	printKukeonCgroupAction(cmd, report)
 	printRealmActions(cmd, report)
 	printSpaceActions(cmd, report)
 	printStackActions(cmd, report)
@@ -109,8 +110,19 @@ func printBootstrapReport(cmd *cobra.Command, report controller.BootstrapReport)
 	printCNIActions(cmd, report)
 }
 
+func printKukeonCgroupAction(cmd *cobra.Command, report controller.BootstrapReport) {
+	printCgroupAction(
+		cmd,
+		"kukeon root",
+		report.KukeonCgroupExistsPre,
+		report.KukeonCgroupExistsPost,
+		report.KukeonCgroupCreated,
+	)
+}
+
 func printHeader(cmd *cobra.Command, report controller.BootstrapReport) {
-	anyCreated := report.RealmCreated ||
+	anyCreated := report.KukeonCgroupCreated ||
+		report.RealmCreated ||
 		report.RealmContainerdNamespaceCreated ||
 		report.SpaceCreated ||
 		report.SpaceCNINetworkCreated ||

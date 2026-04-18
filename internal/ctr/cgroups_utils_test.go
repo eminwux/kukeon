@@ -36,7 +36,7 @@ func TestDefaultRealmSpec(t *testing.T) {
 					Name: "test-realm",
 				},
 			},
-			wantGroup: "/kukeon/test-realm",
+			wantGroup: "/test-realm",
 		},
 		{
 			name: "realm with special characters",
@@ -45,7 +45,7 @@ func TestDefaultRealmSpec(t *testing.T) {
 					Name: "realm-123",
 				},
 			},
-			wantGroup: "/kukeon/realm-123",
+			wantGroup: "/realm-123",
 		},
 		{
 			name: "empty realm name",
@@ -54,7 +54,7 @@ func TestDefaultRealmSpec(t *testing.T) {
 					Name: "",
 				},
 			},
-			wantGroup: "/kukeon/",
+			wantGroup: "/",
 		},
 	}
 
@@ -100,7 +100,7 @@ func TestDefaultSpaceSpec(t *testing.T) {
 					RealmName: "test-realm",
 				},
 			},
-			wantGroup: "/kukeon/test-realm/test-space",
+			wantGroup: "/test-realm/test-space",
 		},
 		{
 			name: "space with multiple components",
@@ -112,7 +112,7 @@ func TestDefaultSpaceSpec(t *testing.T) {
 					RealmName: "realm-456",
 				},
 			},
-			wantGroup: "/kukeon/realm-456/space-123",
+			wantGroup: "/realm-456/space-123",
 		},
 		{
 			name: "space with empty names",
@@ -124,7 +124,7 @@ func TestDefaultSpaceSpec(t *testing.T) {
 					RealmName: "",
 				},
 			},
-			wantGroup: "/kukeon//",
+			wantGroup: "//",
 		},
 	}
 
@@ -171,7 +171,7 @@ func TestDefaultStackSpec(t *testing.T) {
 					SpaceName: "test-space",
 				},
 			},
-			wantGroup: "/kukeon/test-realm/test-space/test-stack",
+			wantGroup: "/test-realm/test-space/test-stack",
 		},
 		{
 			name: "stack with all components",
@@ -184,7 +184,7 @@ func TestDefaultStackSpec(t *testing.T) {
 					SpaceName: "space-789",
 				},
 			},
-			wantGroup: "/kukeon/realm-456/space-789/stack-123",
+			wantGroup: "/realm-456/space-789/stack-123",
 		},
 		{
 			name: "stack with empty names",
@@ -197,7 +197,7 @@ func TestDefaultStackSpec(t *testing.T) {
 					SpaceName: "",
 				},
 			},
-			wantGroup: "/kukeon///",
+			wantGroup: "///",
 		},
 	}
 
@@ -245,7 +245,7 @@ func TestDefaultCellSpec(t *testing.T) {
 					StackName: "test-stack",
 				},
 			},
-			wantGroup: "/kukeon/test-realm/test-space/test-stack/test-cell",
+			wantGroup: "/test-realm/test-space/test-stack/test-cell",
 		},
 		{
 			name: "cell with all components",
@@ -259,7 +259,7 @@ func TestDefaultCellSpec(t *testing.T) {
 					StackName: "stack-abc",
 				},
 			},
-			wantGroup: "/kukeon/realm-456/space-789/stack-abc/cell-123",
+			wantGroup: "/realm-456/space-789/stack-abc/cell-123",
 		},
 		{
 			name: "cell with empty names",
@@ -273,7 +273,7 @@ func TestDefaultCellSpec(t *testing.T) {
 					StackName: "",
 				},
 			},
-			wantGroup: "/kukeon////", // 4 levels: realm/space/stack/cell
+			wantGroup: "////", // 4 levels: realm/space/stack/cell
 		},
 	}
 
