@@ -68,6 +68,49 @@ func (m *Manager) ExistsNetworkConfig(networkName, configPath string) (bool, str
 	return true, configPath, nil
 }
 
+// ReadBridgeName parses the conflist at configPath and returns the `bridge` field of
+// the first plugin whose `type` is "bridge". Returns errdefs.ErrNetworkNotFound if the
+// file is missing, errdefs.ErrBridgePluginMissing if no bridge plugin is present, and
+// a wrapped JSON error for malformed content. The returned string may be empty when
+// the bridge plugin has no `bridge` field, which callers should treat as a mismatch.
+func (m *Manager) ReadBridgeName(configPath string) (string, error) {
+	if configPath == "" {
+		return "", errors.New("network config path is required")
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", errdefs.ErrNetworkNotFound
+		}
+		return "", err
+	}
+
+	var raw map[string]interface{}
+	if uErr := json.Unmarshal(data, &raw); uErr != nil {
+		return "", fmt.Errorf("parse conflist: %w", uErr)
+	}
+
+	plugins, ok := raw["plugins"].([]interface{})
+	if !ok {
+		return "", errdefs.ErrBridgePluginMissing
+	}
+
+	for _, p := range plugins {
+		plugin, pOK := p.(map[string]interface{})
+		if !pOK {
+			continue
+		}
+		if t, tOK := plugin["type"].(string); !tOK || t != "bridge" {
+			continue
+		}
+		bridge, _ := plugin["bridge"].(string)
+		return bridge, nil
+	}
+
+	return "", errdefs.ErrBridgePluginMissing
+}
+
 // CreateNetworkWithConfig creates a CNI network conflist file using the provided NetworkConfig.
 func (m *Manager) CreateNetworkWithConfig(cfg NetworkConfig) (string, error) {
 	bridge := cfg.BridgeName

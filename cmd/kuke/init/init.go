@@ -95,6 +95,19 @@ func setFlags(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("failed to bind flag: %w", err)
 	}
+
+	cmd.Flags().Bool(
+		"force-regenerate-cni", false,
+		"Rewrite space CNI conflists even when they already exist; use to "+
+			"recover from stale on-disk state after a generator fix",
+	)
+	err = viper.BindPFlag(
+		config.KUKE_INIT_FORCE_REGENERATE_CNI.ViperKey,
+		cmd.Flags().Lookup("force-regenerate-cni"),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to bind flag: %w", err)
+	}
 	return nil
 }
 
@@ -138,10 +151,11 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	image := resolveKukeondImage()
 
 	opts := controller.Options{
-		RunPath:          viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey),
-		ContainerdSocket: viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
-		KukeondImage:     image,
-		KukeondSocket:    socketPath,
+		RunPath:            viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey),
+		ContainerdSocket:   viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
+		KukeondImage:       image,
+		KukeondSocket:      socketPath,
+		ForceRegenerateCNI: viper.GetBool(config.KUKE_INIT_FORCE_REGENERATE_CNI.ViperKey),
 	}
 
 	logger.DebugContext(cmd.Context(), "running init", "opts", opts)
