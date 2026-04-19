@@ -45,13 +45,6 @@ func (m *Manager) DelContainerFromNetwork(ctx context.Context, containerID, netn
 	return translateCNIError(err, m.netConf.Name, bridgeNameFromNetConf(m.netConf))
 }
 
-// BridgeName returns the bridge device name from the currently loaded
-// CNI conflist, or "" if no conflist is loaded or the conflist has no
-// bridge plugin.
-func (m *Manager) BridgeName() string {
-	return bridgeNameFromNetConf(m.netConf)
-}
-
 // buildRuntimeConf builds a RuntimeConf for container network operations.
 func buildRuntimeConf(containerID, netnsPath string) *libcni.RuntimeConf {
 	return &libcni.RuntimeConf{

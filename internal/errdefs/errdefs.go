@@ -100,5 +100,4 @@ var (
 
 	ErrBridgeNameTooLong = errors.New("bridge name exceeds Linux IFNAMSIZ limit")
 	ErrCNIPluginNotFound = errors.New("cni plugin not found")
-	ErrCNIBridgeCreate   = errors.New("failed to create bridge")
 )
