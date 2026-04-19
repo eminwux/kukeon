@@ -43,6 +43,7 @@ var (
 	ErrConversionFailed        = errors.New("conversion failed")
 	ErrDefaultingFailed        = errors.New("defaulting failed")
 	ErrCheckNetworkExists      = errors.New("failed to check if network exists")
+	ErrBridgePluginMissing     = errors.New("bridge plugin missing from conflist")
 	ErrGetSpace                = errors.New("failed to get space")
 	ErrSpaceNotFound           = errors.New("space not found")
 	ErrSpaceDocRequired        = errors.New("space document is required")

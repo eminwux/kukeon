@@ -105,6 +105,10 @@ type Options struct {
 	ContainerdSocket string
 	RunPath          string
 	CniConf          cni.Conf
+	// ForceRegenerateCNI forces ensureSpaceCNIConfig to rewrite an existing conflist
+	// even when one is present and its bridge name matches SafeBridgeName. Set by
+	// `kuke init --force-regenerate-cni` as an operator escape hatch.
+	ForceRegenerateCNI bool
 }
 
 func NewRunner(ctx context.Context, logger *slog.Logger, opts Options) Runner {

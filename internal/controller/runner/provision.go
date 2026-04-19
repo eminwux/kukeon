@@ -192,12 +192,31 @@ func (r *Exec) ensureSpaceCNIConfig(space intmodel.Space) (intmodel.Space, error
 		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
 
-	// Ensure a network exists for this space
+	// Ensure a network exists for this space. Self-heal stale conflists on
+	// disk: if the file exists but its bridge name disagrees with
+	// SafeBridgeName(networkName), the conflist was written before the
+	// IFNAMSIZ fix (commit 6a46bc4) and will fail netlink with ERANGE when
+	// the CNI plugin tries to create the bridge. Regenerate in place so
+	// fixes to the name generator propagate to hosts with pre-existing
+	// state on re-run.
 	exists, _, err := mgr.ExistsNetworkConfig(networkName, confPath)
 	if err != nil && !errors.Is(err, errdefs.ErrNetworkNotFound) {
 		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, err)
 	}
-	if !exists {
+	regenerate, regenReason, regenErr := r.shouldRegenerateSpaceCNI(mgr, space, networkName, confPath, exists)
+	if regenErr != nil {
+		return intmodel.Space{}, regenErr
+	}
+	if regenerate {
+		if regenReason != "" {
+			r.logger.InfoContext(
+				r.ctx,
+				"regenerating space network conflist",
+				"space", space.Metadata.Name,
+				"network", networkName,
+				"reason", regenReason,
+			)
+		}
 		if writeErr := fs.WriteSpaceNetworkConfig(confPath, networkName); writeErr != nil {
 			return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrCreateNetwork, writeErr)
 		}
@@ -248,6 +267,43 @@ func (r *Exec) ensureSpaceCNIConfig(space intmodel.Space) (intmodel.Space, error
 		confPath,
 	)
 	return space, nil
+}
+
+// shouldRegenerateSpaceCNI decides whether ensureSpaceCNIConfig needs to
+// rewrite the on-disk conflist. Returns (regenerate, humanReason, fatalErr).
+// The reason is empty when the decision is the trivial "file missing" case so
+// callers can suppress logging on first-time provision.
+func (r *Exec) shouldRegenerateSpaceCNI(
+	mgr *cni.Manager,
+	space intmodel.Space,
+	networkName, confPath string,
+	exists bool,
+) (bool, string, error) {
+	if !exists {
+		return true, "", nil
+	}
+	if r.opts.ForceRegenerateCNI {
+		return true, "force-regenerate-cni flag set", nil
+	}
+	onDiskBridge, readErr := mgr.ReadBridgeName(confPath)
+	switch {
+	case readErr == nil:
+		expected := cni.SafeBridgeName(networkName)
+		if onDiskBridge != expected {
+			return true, fmt.Sprintf(
+				"bridge name %q does not match expected %q (stale pre-SafeBridgeName conflist)",
+				onDiskBridge, expected,
+			), nil
+		}
+		return false, "", nil
+	case errors.Is(readErr, errdefs.ErrBridgePluginMissing):
+		return true, "bridge plugin missing from conflist", nil
+	case errors.Is(readErr, errdefs.ErrNetworkNotFound):
+		// Race: ExistsNetworkConfig saw the file; it's gone now. Regenerate.
+		return true, "conflist disappeared after existence check", nil
+	default:
+		return false, "", fmt.Errorf("%w: %w", errdefs.ErrCheckNetworkExists, readErr)
+	}
 }
 
 func (r *Exec) createSpaceCNIConfig(space intmodel.Space) (string, error) {
