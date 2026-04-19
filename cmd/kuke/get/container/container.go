@@ -106,19 +106,10 @@ func runContainerCmdWithDeps(
 		return err
 	}
 
-	realm := strings.TrimSpace(viper.GetString(config.KUKE_GET_CONTAINER_REALM.ViperKey))
-	if realm == "" {
-		realm = strings.TrimSpace(config.KUKE_GET_CONTAINER_REALM.ValueOrDefault())
-	}
-	space := strings.TrimSpace(viper.GetString(config.KUKE_GET_CONTAINER_SPACE.ViperKey))
-	if space == "" {
-		space = strings.TrimSpace(config.KUKE_GET_CONTAINER_SPACE.ValueOrDefault())
-	}
-	stack := strings.TrimSpace(viper.GetString(config.KUKE_GET_CONTAINER_STACK.ViperKey))
-	if stack == "" {
-		stack = strings.TrimSpace(config.KUKE_GET_CONTAINER_STACK.ValueOrDefault())
-	}
-	cell := strings.TrimSpace(viper.GetString(config.KUKE_GET_CONTAINER_CELL.ViperKey))
+	realm := shared.ExplicitFlag(cmd, "realm", config.KUKE_GET_CONTAINER_REALM.ViperKey)
+	space := shared.ExplicitFlag(cmd, "space", config.KUKE_GET_CONTAINER_SPACE.ViperKey)
+	stack := shared.ExplicitFlag(cmd, "stack", config.KUKE_GET_CONTAINER_STACK.ViperKey)
+	cell := shared.ExplicitFlag(cmd, "cell", config.KUKE_GET_CONTAINER_CELL.ViperKey)
 
 	var name string
 	if len(args) > 0 {
@@ -128,6 +119,15 @@ func runContainerCmdWithDeps(
 	}
 
 	if name != "" {
+		if realm == "" {
+			realm = strings.TrimSpace(config.KUKE_GET_CONTAINER_REALM.ValueOrDefault())
+		}
+		if space == "" {
+			space = strings.TrimSpace(config.KUKE_GET_CONTAINER_SPACE.ValueOrDefault())
+		}
+		if stack == "" {
+			stack = strings.TrimSpace(config.KUKE_GET_CONTAINER_STACK.ValueOrDefault())
+		}
 		if realm == "" {
 			return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
 		}

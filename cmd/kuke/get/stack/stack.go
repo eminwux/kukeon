@@ -54,14 +54,8 @@ func NewStackCmd() *cobra.Command {
 				return err
 			}
 
-			realm := strings.TrimSpace(viper.GetString(config.KUKE_GET_STACK_REALM.ViperKey))
-			if realm == "" {
-				realm = strings.TrimSpace(config.KUKE_GET_STACK_REALM.ValueOrDefault())
-			}
-			space := strings.TrimSpace(viper.GetString(config.KUKE_GET_STACK_SPACE.ViperKey))
-			if space == "" {
-				space = strings.TrimSpace(config.KUKE_GET_STACK_SPACE.ValueOrDefault())
-			}
+			realm := shared.ExplicitFlag(cmd, "realm", config.KUKE_GET_STACK_REALM.ViperKey)
+			space := shared.ExplicitFlag(cmd, "space", config.KUKE_GET_STACK_SPACE.ViperKey)
 
 			var name string
 			if len(args) > 0 {
@@ -71,6 +65,12 @@ func NewStackCmd() *cobra.Command {
 			}
 
 			if name != "" {
+				if realm == "" {
+					realm = strings.TrimSpace(config.KUKE_GET_STACK_REALM.ValueOrDefault())
+				}
+				if space == "" {
+					space = strings.TrimSpace(config.KUKE_GET_STACK_SPACE.ValueOrDefault())
+				}
 				if realm == "" {
 					return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
 				}

@@ -54,10 +54,7 @@ func NewSpaceCmd() *cobra.Command {
 				return err
 			}
 
-			realm := strings.TrimSpace(viper.GetString(config.KUKE_GET_SPACE_REALM.ViperKey))
-			if realm == "" {
-				realm = strings.TrimSpace(config.KUKE_GET_SPACE_REALM.ValueOrDefault())
-			}
+			realm := shared.ExplicitFlag(cmd, "realm", config.KUKE_GET_SPACE_REALM.ViperKey)
 
 			var name string
 			if len(args) > 0 {
@@ -67,6 +64,9 @@ func NewSpaceCmd() *cobra.Command {
 			}
 
 			if name != "" {
+				if realm == "" {
+					realm = strings.TrimSpace(config.KUKE_GET_SPACE_REALM.ValueOrDefault())
+				}
 				if realm == "" {
 					return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
 				}

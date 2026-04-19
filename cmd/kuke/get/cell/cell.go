@@ -54,18 +54,9 @@ func NewCellCmd() *cobra.Command {
 				return err
 			}
 
-			realm := strings.TrimSpace(viper.GetString(config.KUKE_GET_CELL_REALM.ViperKey))
-			if realm == "" {
-				realm = strings.TrimSpace(config.KUKE_GET_CELL_REALM.ValueOrDefault())
-			}
-			space := strings.TrimSpace(viper.GetString(config.KUKE_GET_CELL_SPACE.ViperKey))
-			if space == "" {
-				space = strings.TrimSpace(config.KUKE_GET_CELL_SPACE.ValueOrDefault())
-			}
-			stack := strings.TrimSpace(viper.GetString(config.KUKE_GET_CELL_STACK.ViperKey))
-			if stack == "" {
-				stack = strings.TrimSpace(config.KUKE_GET_CELL_STACK.ValueOrDefault())
-			}
+			realm := shared.ExplicitFlag(cmd, "realm", config.KUKE_GET_CELL_REALM.ViperKey)
+			space := shared.ExplicitFlag(cmd, "space", config.KUKE_GET_CELL_SPACE.ViperKey)
+			stack := shared.ExplicitFlag(cmd, "stack", config.KUKE_GET_CELL_STACK.ViperKey)
 
 			var name string
 			if len(args) > 0 {
@@ -75,6 +66,15 @@ func NewCellCmd() *cobra.Command {
 			}
 
 			if name != "" {
+				if realm == "" {
+					realm = strings.TrimSpace(config.KUKE_GET_CELL_REALM.ValueOrDefault())
+				}
+				if space == "" {
+					space = strings.TrimSpace(config.KUKE_GET_CELL_SPACE.ValueOrDefault())
+				}
+				if stack == "" {
+					stack = strings.TrimSpace(config.KUKE_GET_CELL_STACK.ValueOrDefault())
+				}
 				if realm == "" {
 					return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
 				}

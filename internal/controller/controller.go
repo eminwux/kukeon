@@ -175,7 +175,15 @@ func (b *Exec) Bootstrap() (BootstrapReport, error) {
 	// System cell: kukeond. Provisioned only when an image is configured (lets
 	// callers opt out in tests / non-daemon setups).
 	if b.opts.KukeondImage != "" {
-		cellDoc := kukeondCellDoc(b.opts.KukeondImage, b.opts.KukeondSocket)
+		if err = ensureSocketDir(b.opts.KukeondSocket); err != nil {
+			return report, err
+		}
+		cellDoc := kukeondCellDoc(
+			b.opts.KukeondImage,
+			b.opts.KukeondSocket,
+			b.opts.RunPath,
+			b.opts.ContainerdSocket,
+		)
 		if err = b.bootstrapCell(&report.SystemCell, cellDoc); err != nil {
 			return report, err
 		}

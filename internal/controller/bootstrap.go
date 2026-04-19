@@ -19,6 +19,7 @@ package controller
 import (
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/consts"
@@ -408,7 +409,33 @@ func (b *Exec) bootstrapStack(section *StackSection, realmName, spaceName, stack
 }
 
 // kukeondCellDoc builds the CellDoc describing the kukeond system cell.
-func kukeondCellDoc(image, socketPath string) *v1beta1.CellDoc {
+// The host runPath is bind-mounted into the container at the same path and
+// passed via --run-path so that kukeond reads/writes the same metadata store
+// that kuke uses in --no-daemon mode. The host containerd socket directory is
+// also bind-mounted and --containerd-socket is forwarded so kukeond can reach
+// the same containerd daemon as kuke does on the host.
+func kukeondCellDoc(image, socketPath, runPath, containerdSocket string) *v1beta1.CellDoc {
+	args := []string{"serve", "--socket", socketPath}
+	if runPath != "" {
+		args = append(args, "--run-path", runPath)
+	}
+	if containerdSocket != "" {
+		args = append(args, "--containerd-socket", containerdSocket)
+	}
+
+	volumes := []string{
+		fmt.Sprintf("%s:%s", socketDir(socketPath), socketDir(socketPath)),
+	}
+	if runPath != "" && runPath != socketDir(socketPath) {
+		volumes = append(volumes, fmt.Sprintf("%s:%s", runPath, runPath))
+	}
+	if containerdSocket != "" {
+		ctrdDir := socketDir(containerdSocket)
+		if ctrdDir != socketDir(socketPath) && ctrdDir != runPath {
+			volumes = append(volumes, fmt.Sprintf("%s:%s", ctrdDir, ctrdDir))
+		}
+	}
+
 	return &v1beta1.CellDoc{
 		Metadata: v1beta1.CellMetadata{
 			Name: consts.KukeSystemCellName,
@@ -426,22 +453,30 @@ func kukeondCellDoc(image, socketPath string) *v1beta1.CellDoc {
 			StackID: consts.KukeSystemStackName,
 			Containers: []v1beta1.ContainerSpec{
 				{
-					ID:      consts.KukeSystemContainerName,
-					RealmID: consts.KukeSystemRealmName,
-					SpaceID: consts.KukeSystemSpaceName,
-					StackID: consts.KukeSystemStackName,
-					CellID:  consts.KukeSystemCellName,
-					Image:   image,
-					Command: "/bin/kukeond",
-					Args:    []string{"serve", "--socket", socketPath},
-					Volumes: []string{
-						fmt.Sprintf("%s:%s", socketDir(socketPath), socketDir(socketPath)),
-					},
+					ID:         consts.KukeSystemContainerName,
+					RealmID:    consts.KukeSystemRealmName,
+					SpaceID:    consts.KukeSystemSpaceName,
+					StackID:    consts.KukeSystemStackName,
+					CellID:     consts.KukeSystemCellName,
+					Image:      image,
+					Command:    "/bin/kukeond",
+					Args:       args,
+					Volumes:    volumes,
 					Privileged: true,
 				},
 			},
 		},
 	}
+}
+
+// ensureSocketDir creates the parent directory of the kukeond unix socket so
+// that the bind-mount into the kukeond container has a source to mount.
+func ensureSocketDir(socketPath string) error {
+	dir := socketDir(socketPath)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("create kukeond socket dir %q: %w", dir, err)
+	}
+	return nil
 }
 
 // socketDir returns the parent directory of the kukeond unix socket path.

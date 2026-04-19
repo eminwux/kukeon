@@ -26,8 +26,19 @@ import (
 	createshared "github.com/eminwux/kukeon/cmd/kuke/create/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 )
+
+// ExplicitFlag returns the flag's value only when the user explicitly provided it.
+// This avoids viper.SetDefault side-effects leaking hardcoded defaults (e.g. "default")
+// into list-operation filters, where an unset flag must mean "no filter".
+func ExplicitFlag(cmd *cobra.Command, flagName, viperKey string) string {
+	if cmd != nil && cmd.Flags().Changed(flagName) {
+		return strings.TrimSpace(viper.GetString(viperKey))
+	}
+	return ""
+}
 
 // OutputFormat represents the output format type.
 type OutputFormat string
