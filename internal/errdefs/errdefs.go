@@ -96,4 +96,9 @@ var (
 	ErrContainerNotFound = errors.New("container not found")
 	ErrTaskNotFound      = errors.New("task not found")
 	ErrTaskNotRunning    = errors.New("task is not running")
+
+	// CNI-related errors.
+
+	ErrBridgeNameTooLong = errors.New("bridge name exceeds Linux IFNAMSIZ limit")
+	ErrCNIPluginNotFound = errors.New("cni plugin not found")
 )
