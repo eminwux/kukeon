@@ -21,8 +21,10 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/client/local"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -87,4 +89,29 @@ func GetControllerWithMockWrapper[T any](cmd *cobra.Command, mockKey any, wrappe
 	}
 
 	return wrapper(realCtrl), nil
+}
+
+// ClientFromCmd returns a kukeonv1.Client selected by flags/env:
+//   - --no-daemon (or KUKEON_NO_DAEMON=true): in-process Client backed by a
+//     fresh controller.Exec. Requires privileges.
+//   - default: JSON-RPC Client dialing KUKEON_HOST (unix:///... today).
+//
+// The caller owns the returned Client and must Close it.
+func ClientFromCmd(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if viper.GetBool(config.KUKEON_ROOT_NO_DAEMON.ViperKey) {
+		logger, err := LoggerFromCmd(cmd)
+		if err != nil {
+			return nil, err
+		}
+		return local.New(cmd.Context(), logger, controller.Options{
+			RunPath:          viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey),
+			ContainerdSocket: viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
+		}), nil
+	}
+
+	host := viper.GetString(config.KUKEON_ROOT_HOST.ViperKey)
+	if host == "" {
+		host = config.KUKEON_ROOT_HOST.Default
+	}
+	return kukeonv1.Dial(cmd.Context(), host)
 }

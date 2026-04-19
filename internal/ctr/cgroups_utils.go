@@ -19,12 +19,14 @@ package ctr
 import (
 	"fmt"
 
-	"github.com/eminwux/kukeon/internal/consts"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
+// The /kukeon base is supplied by GetCurrentCgroupPath and joined in
+// buildCgroupPath, so Default*Spec returns only the sub-path under it.
+
 func DefaultRealmSpec(realm intmodel.Realm) CgroupSpec {
-	group := fmt.Sprintf("%s/%s", consts.KukeonCgroupRoot, realm.Metadata.Name)
+	group := "/" + realm.Metadata.Name
 	return CgroupSpec{
 		Group: group,
 		Resources: CgroupResources{
@@ -36,7 +38,7 @@ func DefaultRealmSpec(realm intmodel.Realm) CgroupSpec {
 }
 
 func DefaultSpaceSpec(space intmodel.Space) CgroupSpec {
-	group := fmt.Sprintf("%s/%s/%s", consts.KukeonCgroupRoot, space.Spec.RealmName, space.Metadata.Name)
+	group := fmt.Sprintf("/%s/%s", space.Spec.RealmName, space.Metadata.Name)
 	return CgroupSpec{
 		Group: group,
 		Resources: CgroupResources{
@@ -49,8 +51,7 @@ func DefaultSpaceSpec(space intmodel.Space) CgroupSpec {
 
 func DefaultStackSpec(stack intmodel.Stack) CgroupSpec {
 	group := fmt.Sprintf(
-		"%s/%s/%s/%s",
-		consts.KukeonCgroupRoot,
+		"/%s/%s/%s",
 		stack.Spec.RealmName,
 		stack.Spec.SpaceName,
 		stack.Metadata.Name,
@@ -67,8 +68,7 @@ func DefaultStackSpec(stack intmodel.Stack) CgroupSpec {
 
 func DefaultCellSpec(cell intmodel.Cell) CgroupSpec {
 	group := fmt.Sprintf(
-		"%s/%s/%s/%s/%s",
-		consts.KukeonCgroupRoot,
+		"/%s/%s/%s/%s",
 		cell.Spec.RealmName,
 		cell.Spec.SpaceName,
 		cell.Spec.StackName,

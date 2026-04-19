@@ -23,19 +23,24 @@ const (
 
 	KukeonMetadataFile = "metadata.json"
 
-	KukeonRealmName      = "default"
-	KukeonRealmNamespace = "kukeon.io"
-	KukeonRealmLabelKey  = "realm.kukeon.io"
-
-	KukeonSpaceName     = "default"
-	KukeonSpaceLabelKey = "space.kukeon.io"
-
-	KukeonStackName     = "default"
-	KukeonStackLabelKey = "stack.kukeon.io"
-
-	KukeonCellName     = "kukeon"
-	KukeonCellLabelKey = "cell.kukeon.io"
-
-	KukeonContainerName     = "kukeond"
+	// Label keys shared across the user default hierarchy and the system hierarchy.
+	KukeonRealmLabelKey     = "realm.kukeon.io"
+	KukeonSpaceLabelKey     = "space.kukeon.io"
+	KukeonStackLabelKey     = "stack.kukeon.io"
+	KukeonCellLabelKey      = "cell.kukeon.io"
 	KukeonContainerLabelKey = "container.kukeon.io"
+
+	// Default user hierarchy created by `kuke init` for user workloads.
+	KukeonDefaultRealmName      = "default"
+	KukeonDefaultRealmNamespace = "kukeon.io"
+	KukeonDefaultSpaceName      = "default"
+	KukeonDefaultStackName      = "default"
+
+	// System hierarchy created by `kuke init` for the kukeond daemon.
+	KukeSystemRealmName      = "kuke-system"
+	KukeSystemRealmNamespace = "kuke-system.kukeon.io"
+	KukeSystemSpaceName      = "kukeon"
+	KukeSystemStackName      = "kukeon"
+	KukeSystemCellName       = "kukeond"
+	KukeSystemContainerName  = "kukeond"
 )

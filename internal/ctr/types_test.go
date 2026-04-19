@@ -49,7 +49,7 @@ func TestContainerSpec(t *testing.T) {
 
 	spec := ctr.ContainerSpec{
 		ID:            "test-container",
-		Image:         "docker.io/library/busybox:latest",
+		Image:         "registry.eminwux.com/busybox:latest",
 		SnapshotKey:   "snapshot-key",
 		Snapshotter:   "overlayfs",
 		Runtime:       runtime,
@@ -60,8 +60,8 @@ func TestContainerSpec(t *testing.T) {
 	if spec.ID != "test-container" {
 		t.Errorf("ID = %q, want %q", spec.ID, "test-container")
 	}
-	if spec.Image != "docker.io/library/busybox:latest" {
-		t.Errorf("Image = %q, want %q", spec.Image, "docker.io/library/busybox:latest")
+	if spec.Image != "registry.eminwux.com/busybox:latest" {
+		t.Errorf("Image = %q, want %q", spec.Image, "registry.eminwux.com/busybox:latest")
 	}
 	if spec.Runtime == nil || spec.Runtime.Name != "io.containerd.runc.v2" {
 		t.Errorf("Runtime.Name = %q, want %q", spec.Runtime.Name, "io.containerd.runc.v2")

@@ -99,8 +99,6 @@ func (r ResourceDeleteResult) MarshalYAML() (interface{}, error) {
 // Documents are sorted: Container → Cell → Stack → Space → Realm.
 // Returns a summary of actions taken for each resource.
 func (b *Exec) DeleteDocuments(docs []parser.Document, cascade, force bool) (DeleteResult, error) {
-	defer b.runner.Close()
-
 	result := DeleteResult{
 		Resources: make([]ResourceDeleteResult, 0, len(docs)),
 	}

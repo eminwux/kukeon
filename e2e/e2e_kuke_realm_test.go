@@ -34,7 +34,7 @@ import (
 func generateUniqueRealmName(t *testing.T) string {
 	t.Helper()
 	timestamp := time.Now().UnixNano()
-	hexID := fmt.Sprintf("%02x", timestamp&0xFF) // 2 hex chars from lower 8 bits
+	hexID := fmt.Sprintf("%02x", timestamp&0xFF)
 	return fmt.Sprintf("e-r-%s", hexID)
 }
 

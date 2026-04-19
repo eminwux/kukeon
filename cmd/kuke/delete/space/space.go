@@ -17,27 +17,18 @@
 package space
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
-	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/controller"
-	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-// SpaceController defines the interface for space deletion operations.
-// It is exported for use in tests.
-type SpaceController interface {
-	DeleteSpace(space intmodel.Space, force, cascade bool) (controller.DeleteSpaceResult, error)
-}
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
 func NewSpaceCmd() *cobra.Command {
@@ -49,43 +40,27 @@ func NewSpaceCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Check for mock controller in context (for testing)
-			var ctrl SpaceController
-			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(SpaceController); ok {
-				ctrl = mockCtrl
-			} else {
-				realCtrl, err := shared.ControllerFromCmd(cmd)
-				if err != nil {
-					return err
-				}
-				ctrl = &controllerWrapper{ctrl: realCtrl}
-			}
-
 			name := strings.TrimSpace(args[0])
 			realm := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_SPACE_REALM.ViperKey))
 			if realm == "" {
-				realm = config.KUKE_DELETE_SPACE_REALM.ValueOrDefault()
+				realm = strings.TrimSpace(config.KUKE_DELETE_SPACE_REALM.ValueOrDefault())
 			}
 
 			force := shared.ParseForceFlag(cmd)
 			cascade := shared.ParseCascadeFlag(cmd)
 
-			spaceDoc := &v1beta1.SpaceDoc{
-				Metadata: v1beta1.SpaceMetadata{
-					Name: name,
-				},
-				Spec: v1beta1.SpaceSpec{
-					RealmID: realm,
-				},
+			doc := v1beta1.SpaceDoc{
+				Metadata: v1beta1.SpaceMetadata{Name: name},
+				Spec:     v1beta1.SpaceSpec{RealmID: realm},
 			}
 
-			// Convert at boundary before calling controller
-			spaceInternal, _, err := apischeme.NormalizeSpace(*spaceDoc)
+			client, err := resolveClient(cmd)
 			if err != nil {
-				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				return err
 			}
+			defer func() { _ = client.Close() }()
 
-			result, err := ctrl.DeleteSpace(spaceInternal, force, cascade)
+			result, err := client.DeleteSpace(cmd.Context(), doc, force, cascade)
 			if err != nil {
 				return err
 			}
@@ -94,9 +69,15 @@ func NewSpaceCmd() *cobra.Command {
 			if spaceName == "" && result.Space.Metadata.Name != "" {
 				spaceName = result.Space.Metadata.Name
 			}
+			if spaceName == "" {
+				spaceName = name
+			}
 			realmName := result.RealmName
-			if realmName == "" && result.Space.Spec.RealmName != "" {
-				realmName = result.Space.Spec.RealmName
+			if realmName == "" && result.Space.Spec.RealmID != "" {
+				realmName = result.Space.Spec.RealmID
+			}
+			if realmName == "" {
+				realmName = realm
 			}
 
 			cmd.Printf("Deleted space %q from realm %q\n", spaceName, realmName)
@@ -107,22 +88,15 @@ func NewSpaceCmd() *cobra.Command {
 	cmd.Flags().String("realm", "", "Realm that owns the space")
 	_ = viper.BindPFlag(config.KUKE_DELETE_SPACE_REALM.ViperKey, cmd.Flags().Lookup("realm"))
 
-	// Register autocomplete function for --realm flag
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
-
-	// Register autocomplete function for positional argument (space name)
 	cmd.ValidArgsFunction = config.CompleteSpaceNames
 
 	return cmd
 }
 
-type controllerWrapper struct {
-	ctrl *controller.Exec
-}
-
-func (w *controllerWrapper) DeleteSpace(
-	space intmodel.Space,
-	force, cascade bool,
-) (controller.DeleteSpaceResult, error) {
-	return w.ctrl.DeleteSpace(space, force, cascade)
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
+	}
+	return kukeshared.ClientFromCmd(cmd)
 }

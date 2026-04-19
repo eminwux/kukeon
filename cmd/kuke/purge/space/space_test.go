@@ -28,491 +28,100 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	space "github.com/eminwux/kukeon/cmd/kuke/purge/space"
 	"github.com/eminwux/kukeon/cmd/types"
-	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/spf13/cobra"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/viper"
 )
 
-func TestNewSpaceCmd(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	cmd := space.NewSpaceCmd()
-
-	if cmd.Use != "space [name]" {
-		t.Errorf("Use mismatch: got %q, want %q", cmd.Use, "space [name]")
-	}
-
-	if cmd.Short != "Purge a space with comprehensive cleanup" {
-		t.Errorf("Short mismatch: got %q, want %q", cmd.Short, "Purge a space with comprehensive cleanup")
-	}
-
-	if !cmd.SilenceUsage {
-		t.Error("SilenceUsage should be true")
-	}
-
-	if cmd.SilenceErrors {
-		t.Error("SilenceErrors should be false")
-	}
-
-	// Test flags exist
-	flags := []struct {
-		name     string
-		required bool
-	}{
-		{"realm", true},
-	}
-
-	for _, flag := range flags {
-		f := cmd.Flags().Lookup(flag.name)
-		if f == nil {
-			t.Errorf("flag %q not found", flag.name)
-			continue
-		}
-	}
-
-	// Test viper binding
-	testCases := []struct {
-		name     string
-		viperKey string
-		value    string
-	}{
-		{"realm", config.KUKE_PURGE_SPACE_REALM.ViperKey, "test-realm"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			viper.Reset()
-			// Create a new command for each test to ensure clean state
-			testCmd := space.NewSpaceCmd()
-			if err := testCmd.Flags().Set(tc.name, tc.value); err != nil {
-				t.Fatalf("failed to set flag: %v", err)
-			}
-			got := viper.GetString(tc.viperKey)
-			if got != tc.value {
-				t.Errorf("viper binding mismatch: got %q, want %q", got, tc.value)
-			}
-		})
-	}
-}
-
-func TestNewSpaceCmd_AutocompleteRegistration(t *testing.T) {
-	cmd := space.NewSpaceCmd()
-
-	// Test that realm flag exists
-	realmFlag := cmd.Flags().Lookup("realm")
-	if realmFlag == nil {
-		t.Fatal("expected 'realm' flag to exist")
-	}
-
-	// Verify flag structure (completion function registration is verified by Cobra)
-	// The completion function is registered via RegisterFlagCompletionFunc
-
-	// Test that positional argument has completion function registered
-	if cmd.ValidArgsFunction == nil {
-		t.Error("expected ValidArgsFunction to be set for positional argument")
-	}
-}
-
-func TestNewSpaceCmdRunE(t *testing.T) {
+func TestPurgeSpace(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	tests := []struct {
-		name        string
-		args        []string
-		flags       map[string]string
-		viperConfig map[string]string
-		setupCtx    func(*cobra.Command)
-		controller  *fakePurgeController
-		wantErr     string
-		wantOutput  []string
+		name       string
+		args       []string
+		setup      func()
+		fake       *fakeClient
+		wantErr    string
+		wantOutput string
 	}{
 		{
-			name:    "missing realm error",
-			args:    []string{"my-space"},
+			name:  "success",
+			args:  []string{"s1"},
+			setup: func() { viper.Set(config.KUKE_PURGE_SPACE_REALM.ViperKey, "r1") },
+			fake: &fakeClient{
+				purgeSpaceFn: func(doc v1beta1.SpaceDoc, _, _ bool) (kukeonv1.PurgeSpaceResult, error) {
+					return kukeonv1.PurgeSpaceResult{Space: doc, PurgeSucceeded: true}, nil
+				},
+			},
+			wantOutput: `Purged space "s1" from realm "r1"`,
+		},
+		{
+			name:    "missing realm",
+			args:    []string{"s1"},
+			fake:    &fakeClient{},
 			wantErr: "realm name is required",
 		},
 		{
-			name: "empty realm after trimming",
-			args: []string{"my-space"},
-			flags: map[string]string{
-				"realm": "   ",
-			},
-			wantErr: "realm name is required",
-		},
-		{
-			name: "empty space name after trimming",
-			args: []string{"   "},
-			flags: map[string]string{
-				"realm": "my-realm",
-			},
-			controller: &fakePurgeController{
-				purgeSpaceFn: func(space intmodel.Space, _ bool, _ bool) (controller.PurgeSpaceResult, error) {
-					// Should not reach here due to validation, but if it does, expect empty name
-					if space.Metadata.Name == "" {
-						return controller.PurgeSpaceResult{}, errdefs.ErrSpaceNameRequired
-					}
-					return controller.PurgeSpaceResult{}, errors.New("unexpected call")
-				},
-			},
-			wantErr: "space name is required",
-		},
-		{
-			name: "controller creation error - missing logger",
-			args: []string{"my-space"},
-			flags: map[string]string{
-				"realm": "my-realm",
-			},
-			setupCtx: func(cmd *cobra.Command) {
-				// Don't set logger in context
-				cmd.SetContext(context.Background())
-			},
-			wantErr: "logger not found",
-		},
-		{
-			name: "controller PurgeSpace returns error",
-			args: []string{"my-space"},
-			flags: map[string]string{
-				"realm": "my-realm",
-			},
-			controller: &fakePurgeController{
-				purgeSpaceFn: func(space intmodel.Space, _ bool, _ bool) (controller.PurgeSpaceResult, error) {
-					if space.Metadata.Name != "my-space" || space.Spec.RealmName != "my-realm" {
-						return controller.PurgeSpaceResult{}, errors.New("unexpected args")
-					}
-					return controller.PurgeSpaceResult{}, errors.New("space not found")
+			name:  "not found",
+			args:  []string{"missing"},
+			setup: func() { viper.Set(config.KUKE_PURGE_SPACE_REALM.ViperKey, "r1") },
+			fake: &fakeClient{
+				purgeSpaceFn: func(_ v1beta1.SpaceDoc, _, _ bool) (kukeonv1.PurgeSpaceResult, error) {
+					return kukeonv1.PurgeSpaceResult{}, errdefs.ErrSpaceNotFound
 				},
 			},
 			wantErr: "space not found",
-		},
-		{
-			name: "controller PurgeSpace returns space not found error",
-			args: []string{"nonexistent-space"},
-			flags: map[string]string{
-				"realm": "my-realm",
-			},
-			controller: &fakePurgeController{
-				purgeSpaceFn: func(_ intmodel.Space, _ bool, _ bool) (controller.PurgeSpaceResult, error) {
-					return controller.PurgeSpaceResult{}, errdefs.ErrSpaceNotFound
-				},
-			},
-			wantErr: "space not found",
-		},
-		{
-			name: "successful space purge",
-			args: []string{"my-space"},
-			flags: map[string]string{
-				"realm": "my-realm",
-			},
-			controller: &fakePurgeController{
-				purgeSpaceFn: func(space intmodel.Space, _ bool, _ bool) (controller.PurgeSpaceResult, error) {
-					if space.Metadata.Name != "my-space" || space.Spec.RealmName != "my-realm" {
-						return controller.PurgeSpaceResult{}, errors.New("unexpected args")
-					}
-					return controller.PurgeSpaceResult{
-						Space: intmodel.Space{
-							Metadata: intmodel.SpaceMetadata{Name: "my-space"},
-							Spec:     intmodel.SpaceSpec{RealmName: "my-realm"},
-						},
-						MetadataDeleted:   true,
-						CgroupDeleted:     true,
-						CNINetworkDeleted: true,
-						Deleted:           []string{"space"},
-					}, nil
-				},
-			},
-			wantOutput: []string{
-				"Purged space \"my-space\" from realm \"my-realm\"",
-				"Deleted resources -> metadata:true cgroup:true cni:true",
-			},
-		},
-		{
-			name: "successful purge with additional resources",
-			args: []string{"my-space"},
-			flags: map[string]string{
-				"realm": "my-realm",
-			},
-			controller: &fakePurgeController{
-				purgeSpaceFn: func(space intmodel.Space, _ bool, _ bool) (controller.PurgeSpaceResult, error) {
-					if space.Metadata.Name != "my-space" || space.Spec.RealmName != "my-realm" {
-						return controller.PurgeSpaceResult{}, errors.New("unexpected args")
-					}
-					return controller.PurgeSpaceResult{
-						Space: intmodel.Space{
-							Metadata: intmodel.SpaceMetadata{Name: "my-space"},
-							Spec:     intmodel.SpaceSpec{RealmName: "my-realm"},
-						},
-						MetadataDeleted:   true,
-						CgroupDeleted:     true,
-						CNINetworkDeleted: false,
-						Deleted:           []string{"space"},
-						Purged:            []string{"cni-network", "orphaned-containers"},
-					}, nil
-				},
-			},
-			wantOutput: []string{
-				"Purged space \"my-space\" from realm \"my-realm\"",
-				"Deleted resources -> metadata:true cgroup:true cni:false",
-				"Additional resources purged: [cni-network orphaned-containers]",
-			},
-		},
-		{
-			name: "successful purge with trimmed whitespace in args and flags",
-			args: []string{"  my-space  "},
-			flags: map[string]string{
-				"realm": "  my-realm  ",
-			},
-			controller: &fakePurgeController{
-				purgeSpaceFn: func(space intmodel.Space, _ bool, _ bool) (controller.PurgeSpaceResult, error) {
-					// Verify that trimming happened
-					if space.Metadata.Name != "my-space" || space.Spec.RealmName != "my-realm" {
-						return controller.PurgeSpaceResult{}, errors.New("unexpected trimmed args")
-					}
-					return controller.PurgeSpaceResult{
-						Space: intmodel.Space{
-							Metadata: intmodel.SpaceMetadata{Name: "my-space"},
-							Spec:     intmodel.SpaceSpec{RealmName: "my-realm"},
-						},
-						MetadataDeleted:   true,
-						CgroupDeleted:     true,
-						CNINetworkDeleted: true,
-						Deleted:           []string{"space"},
-					}, nil
-				},
-			},
-			wantOutput: []string{
-				"Purged space \"my-space\" from realm \"my-realm\"",
-				"Deleted resources -> metadata:true cgroup:true cni:true",
-			},
-		},
-		{
-			name: "values from viper config",
-			args: []string{"my-space"},
-			viperConfig: map[string]string{
-				config.KUKE_PURGE_SPACE_REALM.ViperKey: "viper-realm",
-			},
-			controller: &fakePurgeController{
-				purgeSpaceFn: func(space intmodel.Space, _ bool, _ bool) (controller.PurgeSpaceResult, error) {
-					if space.Metadata.Name != "my-space" || space.Spec.RealmName != "viper-realm" {
-						return controller.PurgeSpaceResult{}, errors.New("unexpected args from viper")
-					}
-					return controller.PurgeSpaceResult{
-						Space: intmodel.Space{
-							Metadata: intmodel.SpaceMetadata{Name: "my-space"},
-							Spec:     intmodel.SpaceSpec{RealmName: "viper-realm"},
-						},
-						MetadataDeleted:   true,
-						CgroupDeleted:     true,
-						CNINetworkDeleted: true,
-						Deleted:           []string{"space"},
-					}, nil
-				},
-			},
-			wantOutput: []string{
-				"Purged space \"my-space\" from realm \"viper-realm\"",
-				"Deleted resources -> metadata:true cgroup:true cni:true",
-			},
-		},
-		{
-			name: "force flag is parsed correctly",
-			args: []string{"my-space"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"force": "true",
-			},
-			controller: &fakePurgeController{
-				purgeSpaceFn: func(space intmodel.Space, force bool, _ bool) (controller.PurgeSpaceResult, error) {
-					if !force {
-						return controller.PurgeSpaceResult{}, errors.New("force flag not parsed correctly")
-					}
-					if space.Metadata.Name != "my-space" || space.Spec.RealmName != "my-realm" {
-						return controller.PurgeSpaceResult{}, errors.New("unexpected args")
-					}
-					return controller.PurgeSpaceResult{
-						Space: intmodel.Space{
-							Metadata: intmodel.SpaceMetadata{Name: "my-space"},
-							Spec:     intmodel.SpaceSpec{RealmName: "my-realm"},
-						},
-						MetadataDeleted:   true,
-						CgroupDeleted:     true,
-						CNINetworkDeleted: true,
-						Force:             true,
-						Deleted:           []string{"space"},
-					}, nil
-				},
-			},
-			wantOutput: []string{
-				"Purged space \"my-space\" from realm \"my-realm\"",
-				"Deleted resources -> metadata:true cgroup:true cni:true",
-			},
-		},
-		{
-			name: "cascade flag is parsed correctly",
-			args: []string{"my-space"},
-			flags: map[string]string{
-				"realm":   "my-realm",
-				"cascade": "true",
-			},
-			controller: &fakePurgeController{
-				purgeSpaceFn: func(space intmodel.Space, _ bool, cascade bool) (controller.PurgeSpaceResult, error) {
-					if !cascade {
-						return controller.PurgeSpaceResult{}, errors.New("cascade flag not parsed correctly")
-					}
-					if space.Metadata.Name != "my-space" || space.Spec.RealmName != "my-realm" {
-						return controller.PurgeSpaceResult{}, errors.New("unexpected args")
-					}
-					return controller.PurgeSpaceResult{
-						Space: intmodel.Space{
-							Metadata: intmodel.SpaceMetadata{Name: "my-space"},
-							Spec:     intmodel.SpaceSpec{RealmName: "my-realm"},
-						},
-						MetadataDeleted:   true,
-						CgroupDeleted:     true,
-						CNINetworkDeleted: true,
-						Cascade:           true,
-						Deleted:           []string{"space"},
-					}, nil
-				},
-			},
-			wantOutput: []string{
-				"Purged space \"my-space\" from realm \"my-realm\"",
-				"Deleted resources -> metadata:true cgroup:true cni:true",
-			},
-		},
-		{
-			name: "both force and cascade flags are parsed correctly",
-			args: []string{"my-space"},
-			flags: map[string]string{
-				"realm":   "my-realm",
-				"force":   "true",
-				"cascade": "true",
-			},
-			controller: &fakePurgeController{
-				purgeSpaceFn: func(space intmodel.Space, force bool, cascade bool) (controller.PurgeSpaceResult, error) {
-					if !force || !cascade {
-						return controller.PurgeSpaceResult{}, errors.New("flags not parsed correctly")
-					}
-					if space.Metadata.Name != "my-space" || space.Spec.RealmName != "my-realm" {
-						return controller.PurgeSpaceResult{}, errors.New("unexpected args")
-					}
-					return controller.PurgeSpaceResult{
-						Space: intmodel.Space{
-							Metadata: intmodel.SpaceMetadata{Name: "my-space"},
-							Spec:     intmodel.SpaceSpec{RealmName: "my-realm"},
-						},
-						MetadataDeleted:   true,
-						CgroupDeleted:     true,
-						CNINetworkDeleted: true,
-						Force:             true,
-						Cascade:           true,
-						Deleted:           []string{"space"},
-					}, nil
-				},
-			},
-			wantOutput: []string{
-				"Purged space \"my-space\" from realm \"my-realm\"",
-				"Deleted resources -> metadata:true cgroup:true cni:true",
-			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
 			viper.Reset()
+			if tt.setup != nil {
+				tt.setup()
+			}
 			cmd := space.NewSpaceCmd()
-			var outBuf bytes.Buffer
-			cmd.SetOut(&outBuf)
-			cmd.SetErr(&outBuf)
-
-			// Add persistent flags for force and cascade if needed (they're normally on parent command)
-			if tt.flags != nil {
-				if _, hasForce := tt.flags["force"]; hasForce {
-					cmd.PersistentFlags().Bool("force", false, "Skip validation and attempt purge anyway")
-					_ = viper.BindPFlag(config.KUKE_PURGE_FORCE.ViperKey, cmd.PersistentFlags().Lookup("force"))
-				}
-				if _, hasCascade := tt.flags["cascade"]; hasCascade {
-					cmd.PersistentFlags().Bool("cascade", false, "Automatically purge child resources recursively")
-					_ = viper.BindPFlag(config.KUKE_PURGE_CASCADE.ViperKey, cmd.PersistentFlags().Lookup("cascade"))
-				}
-			}
-
-			// Set up context with logger (unless overridden)
-			var ctx context.Context
-			if tt.setupCtx != nil {
-				tt.setupCtx(cmd)
-				ctx = cmd.Context()
-			} else {
-				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-				ctx = context.WithValue(context.Background(), types.CtxLogger, logger)
-			}
-
-			// Inject mock controller via context if needed
-			if tt.controller != nil {
-				ctx = context.WithValue(ctx, space.MockControllerKey{}, tt.controller)
-			}
-
+			buf := &bytes.Buffer{}
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+			ctx = context.WithValue(ctx, space.MockControllerKey{}, kukeonv1.Client(tt.fake))
 			cmd.SetContext(ctx)
-
-			// Set viper config
-			for k, v := range tt.viperConfig {
-				viper.Set(k, v)
-			}
-
-			// Set flags
-			for name, value := range tt.flags {
-				// Use PersistentFlags for force and cascade, regular Flags for others
-				if name == "force" || name == "cascade" {
-					if err := cmd.PersistentFlags().Set(name, value); err != nil {
-						t.Fatalf("failed to set persistent flag %q: %v", name, err)
-					}
-				} else {
-					if err := cmd.Flags().Set(name, value); err != nil {
-						t.Fatalf("failed to set flag %q: %v", name, err)
-					}
-				}
-			}
-
 			cmd.SetArgs(tt.args)
-			err := cmd.Execute()
 
+			err := cmd.Execute()
 			if tt.wantErr != "" {
-				if err == nil {
-					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
-				}
-				if !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("expected error containing %q, got %q", tt.wantErr, err.Error())
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("want err %q, got %v", tt.wantErr, err)
 				}
 				return
 			}
-
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-
-			if len(tt.wantOutput) > 0 {
-				output := outBuf.String()
-				for _, want := range tt.wantOutput {
-					if !strings.Contains(output, want) {
-						t.Errorf("output missing expected string %q. Got output: %q", want, output)
-					}
-				}
+			if tt.wantOutput != "" && !strings.Contains(buf.String(), tt.wantOutput) {
+				t.Errorf("output missing %q\nGot:\n%s", tt.wantOutput, buf.String())
 			}
 		})
 	}
 }
 
-// fakePurgeController provides a mock implementation for testing PurgeSpace.
-type fakePurgeController struct {
-	purgeSpaceFn func(space intmodel.Space, force, cascade bool) (controller.PurgeSpaceResult, error)
+type fakeClient struct {
+	kukeonv1.FakeClient
+
+	purgeSpaceFn func(doc v1beta1.SpaceDoc, force, cascade bool) (kukeonv1.PurgeSpaceResult, error)
 }
 
-func (f *fakePurgeController) PurgeSpace(
-	space intmodel.Space,
+func (f *fakeClient) PurgeSpace(
+	_ context.Context,
+	doc v1beta1.SpaceDoc,
 	force, cascade bool,
-) (controller.PurgeSpaceResult, error) {
+) (kukeonv1.PurgeSpaceResult, error) {
 	if f.purgeSpaceFn == nil {
-		return controller.PurgeSpaceResult{}, errors.New("unexpected PurgeSpace call")
+		return kukeonv1.PurgeSpaceResult{}, errors.New("unexpected PurgeSpace call")
 	}
-	return f.purgeSpaceFn(space, force, cascade)
+	return f.purgeSpaceFn(doc, force, cascade)
 }

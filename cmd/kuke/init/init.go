@@ -17,15 +17,25 @@
 package init
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"net"
+	"strings"
+	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+)
+
+const (
+	kukeondReadyTimeout = 30 * time.Second
+	kukeondReadyTick    = 200 * time.Millisecond
 )
 
 func NewInitCmd() *cobra.Command {
@@ -67,11 +77,51 @@ func setFlags(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("failed to bind flag: %w", err)
 	}
+
+	cmd.Flags().String(
+		"kukeond-image", "",
+		"Container image for kukeond (default: ghcr.io/eminwux/kukeon:<kuke version>)",
+	)
+	err = viper.BindPFlag(config.KUKE_INIT_KUKEOND_IMAGE.ViperKey, cmd.Flags().Lookup("kukeond-image"))
+	if err != nil {
+		return fmt.Errorf("failed to bind flag: %w", err)
+	}
+
+	cmd.Flags().Bool(
+		"no-wait", false,
+		"Do not wait for kukeond to become ready after bootstrap",
+	)
+	err = viper.BindPFlag(config.KUKE_INIT_NO_WAIT.ViperKey, cmd.Flags().Lookup("no-wait"))
+	if err != nil {
+		return fmt.Errorf("failed to bind flag: %w", err)
+	}
 	return nil
 }
 
 func setPersistentFlags(_ *cobra.Command) error {
 	return nil
+}
+
+// resolveKukeondImage returns the kukeond container image to provision.
+// If the user passed --kukeond-image, that wins. Otherwise compose
+// config.KukeondImageRepo (e.g. ghcr.io/eminwux/kukeon, injected via ldflags
+// by the release pipeline) with a tag matching config.Version. Dev builds
+// whose version isn't a release tag fall back to :latest.
+func resolveKukeondImage() string {
+	if override := viper.GetString(config.KUKE_INIT_KUKEOND_IMAGE.ViperKey); override != "" {
+		return override
+	}
+
+	repo := strings.TrimSpace(config.KukeondImageRepo)
+	if repo == "" {
+		repo = "ghcr.io/eminwux/kukeon"
+	}
+
+	tag := strings.TrimSpace(config.Version)
+	if tag == "" || !strings.HasPrefix(tag, "v") {
+		tag = "latest"
+	}
+	return fmt.Sprintf("%s:%s", repo, tag)
 }
 
 func runInit(cmd *cobra.Command, _ []string) error {
@@ -80,9 +130,18 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return errdefs.ErrLoggerNotFound
 	}
 
+	socketPath := viper.GetString(config.KUKEOND_SOCKET.ViperKey)
+	if socketPath == "" {
+		socketPath = config.KUKEOND_SOCKET.Default
+	}
+
+	image := resolveKukeondImage()
+
 	opts := controller.Options{
 		RunPath:          viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey),
 		ContainerdSocket: viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
+		KukeondImage:     image,
+		KukeondSocket:    socketPath,
 	}
 
 	logger.DebugContext(cmd.Context(), "running init", "opts", opts)
@@ -93,8 +152,63 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// Cobra prints to stdout
 	printBootstrapReport(cmd, report)
+
+	if viper.GetBool(config.KUKE_INIT_NO_WAIT.ViperKey) {
+		return nil
+	}
+
+	if err = waitForKukeondReady(cmd.Context(), socketPath, kukeondReadyTimeout); err != nil {
+		return fmt.Errorf("kukeond did not become ready: %w", err)
+	}
+	cmd.Println(fmt.Sprintf("kukeond is ready (unix://%s)", socketPath))
+	return nil
+}
+
+// waitForKukeondReady polls the kukeond socket with Ping until it responds or
+// the timeout expires. The socket file may appear before the RPC handler is
+// actually serving, so we dial AND ping.
+func waitForKukeondReady(ctx context.Context, socketPath string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				return fmt.Errorf("timed out after %s: %w", timeout, lastErr)
+			}
+			return fmt.Errorf("timed out after %s", timeout)
+		}
+
+		attemptCtx, cancel := context.WithTimeout(ctx, kukeondReadyTick)
+		err := pingKukeond(attemptCtx, socketPath)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(kukeondReadyTick):
+		}
+	}
+}
+
+func pingKukeond(ctx context.Context, socketPath string) error {
+	d := net.Dialer{Timeout: kukeondReadyTick}
+	conn, err := d.DialContext(ctx, "unix", socketPath)
+	if err != nil {
+		return fmt.Errorf("dial: %w", err)
+	}
+	_ = conn.Close()
+
+	client := kukeonv1.NewUnixClient(socketPath, kukeonv1.WithDialTimeout(kukeondReadyTick))
+	defer func() { _ = client.Close() }()
+
+	if err = client.Ping(ctx); err != nil {
+		return fmt.Errorf("ping: %w", err)
+	}
 	return nil
 }
 
@@ -102,22 +216,40 @@ func printBootstrapReport(cmd *cobra.Command, report controller.BootstrapReport)
 	printHeader(cmd, report)
 	printOverview(cmd, report)
 	cmd.Println("Actions:")
-	printRealmActions(cmd, report)
-	printSpaceActions(cmd, report)
-	printStackActions(cmd, report)
-	printCellActions(cmd, report)
+	printKukeonCgroupAction(cmd, report)
 	printCNIActions(cmd, report)
+
+	cmd.Println("  Default hierarchy:")
+	printRealmActions(cmd, report.DefaultRealm)
+	printSpaceActions(cmd, report.DefaultSpace)
+	printStackActions(cmd, report.DefaultStack)
+
+	cmd.Println("  System hierarchy:")
+	printRealmActions(cmd, report.SystemRealm)
+	printSpaceActions(cmd, report.SystemSpace)
+	printStackActions(cmd, report.SystemStack)
+	printCellActions(cmd, report.SystemCell, report.KukeondImage)
+}
+
+func printKukeonCgroupAction(cmd *cobra.Command, report controller.BootstrapReport) {
+	printCgroupAction(
+		cmd,
+		"kukeon root",
+		report.KukeonCgroupExistsPre,
+		report.KukeonCgroupExistsPost,
+		report.KukeonCgroupCreated,
+	)
 }
 
 func printHeader(cmd *cobra.Command, report controller.BootstrapReport) {
-	anyCreated := report.RealmCreated ||
-		report.RealmContainerdNamespaceCreated ||
-		report.SpaceCreated ||
-		report.SpaceCNINetworkCreated ||
-		report.StackCreated ||
-		report.CellCreated ||
-		report.CellRootContainerCreated ||
-		report.CellStarted ||
+	anyCreated := report.KukeonCgroupCreated ||
+		sectionRealmChanged(report.DefaultRealm) ||
+		sectionSpaceChanged(report.DefaultSpace) ||
+		sectionStackChanged(report.DefaultStack) ||
+		sectionRealmChanged(report.SystemRealm) ||
+		sectionSpaceChanged(report.SystemSpace) ||
+		sectionStackChanged(report.SystemStack) ||
+		sectionCellChanged(report.SystemCell) ||
 		report.CniConfigDirCreated ||
 		report.CniCacheDirCreated ||
 		report.CniBinDirCreated
@@ -128,102 +260,130 @@ func printHeader(cmd *cobra.Command, report controller.BootstrapReport) {
 	cmd.Println("Kukeon runtime already initialized")
 }
 
+func sectionRealmChanged(s controller.RealmSection) bool {
+	return s.RealmCreated || s.RealmContainerdNamespaceCreated || s.RealmCgroupCreated
+}
+
+func sectionSpaceChanged(s controller.SpaceSection) bool {
+	return s.SpaceCreated || s.SpaceCNINetworkCreated || s.SpaceCgroupCreated
+}
+
+func sectionStackChanged(s controller.StackSection) bool {
+	return s.StackCreated || s.StackCgroupCreated
+}
+
+func sectionCellChanged(s controller.CellSection) bool {
+	return s.CellCreated || s.CellCgroupCreated || s.CellRootContainerCreated || s.CellStarted
+}
+
 func printOverview(cmd *cobra.Command, report controller.BootstrapReport) {
 	cmd.Println(fmt.Sprintf(
 		"Realm: %s (namespace: %s)",
-		report.RealmName,
-		report.RealmContainerdNamespace,
+		report.DefaultRealm.RealmName,
+		report.DefaultRealm.RealmContainerdNamespace,
+	))
+	cmd.Println(fmt.Sprintf(
+		"System realm: %s (namespace: %s)",
+		report.SystemRealm.RealmName,
+		report.SystemRealm.RealmContainerdNamespace,
 	))
 	cmd.Println(fmt.Sprintf("Run path: %s", report.RunPath))
+	if report.KukeondImage != "" {
+		cmd.Println(fmt.Sprintf("Kukeond image: %s", report.KukeondImage))
+	}
 }
 
-func printRealmActions(cmd *cobra.Command, report controller.BootstrapReport) {
-	if report.RealmCreated {
-		cmd.Println("  - realm: created")
+func printRealmActions(cmd *cobra.Command, section controller.RealmSection) {
+	if section.RealmCreated {
+		cmd.Println(fmt.Sprintf("    - realm %q: created", section.RealmName))
 	} else {
-		cmd.Println("  - realm: already existed")
+		cmd.Println(fmt.Sprintf("    - realm %q: already existed", section.RealmName))
 	}
-	if report.RealmContainerdNamespaceCreated {
-		cmd.Println("  - containerd namespace: created")
+	if section.RealmContainerdNamespaceCreated {
+		cmd.Println(fmt.Sprintf("    - containerd namespace %q: created", section.RealmContainerdNamespace))
 	} else {
-		cmd.Println("  - containerd namespace: already existed")
+		cmd.Println(fmt.Sprintf("    - containerd namespace %q: already existed", section.RealmContainerdNamespace))
 	}
 	printCgroupAction(
 		cmd,
 		"realm",
-		report.RealmCgroupExistsPre,
-		report.RealmCgroupExistsPost,
-		report.RealmCgroupCreated,
+		section.RealmCgroupExistsPre,
+		section.RealmCgroupExistsPost,
+		section.RealmCgroupCreated,
 	)
 }
 
-func printSpaceActions(cmd *cobra.Command, report controller.BootstrapReport) {
-	if report.SpaceCreated {
-		cmd.Println("  - space: created")
+func printSpaceActions(cmd *cobra.Command, section controller.SpaceSection) {
+	if section.SpaceCreated {
+		cmd.Println(fmt.Sprintf("    - space %q: created", section.SpaceName))
 	} else {
-		cmd.Println("  - space: already existed")
+		cmd.Println(fmt.Sprintf("    - space %q: already existed", section.SpaceName))
 	}
-	if report.SpaceCNINetworkCreated {
+	if section.SpaceCNINetworkCreated {
 		cmd.Println(fmt.Sprintf(
-			"  - network %q: created",
-			report.SpaceCNINetworkName,
+			"    - network %q: created",
+			section.SpaceCNINetworkName,
 		))
 	} else {
 		cmd.Println(fmt.Sprintf(
-			"  - network %q: already existed",
-			report.SpaceCNINetworkName,
+			"    - network %q: already existed",
+			section.SpaceCNINetworkName,
 		))
 	}
 	printCgroupAction(
 		cmd,
 		"space",
-		report.SpaceCgroupExistsPre,
-		report.SpaceCgroupExistsPost,
-		report.SpaceCgroupCreated,
+		section.SpaceCgroupExistsPre,
+		section.SpaceCgroupExistsPost,
+		section.SpaceCgroupCreated,
 	)
 }
 
-func printStackActions(cmd *cobra.Command, report controller.BootstrapReport) {
-	if report.StackCreated {
-		cmd.Println("  - stack: created")
+func printStackActions(cmd *cobra.Command, section controller.StackSection) {
+	if section.StackCreated {
+		cmd.Println(fmt.Sprintf("    - stack %q: created", section.StackName))
 	} else {
-		cmd.Println("  - stack: already existed")
+		cmd.Println(fmt.Sprintf("    - stack %q: already existed", section.StackName))
 	}
 	printCgroupAction(
 		cmd,
 		"stack",
-		report.StackCgroupExistsPre,
-		report.StackCgroupExistsPost,
-		report.StackCgroupCreated,
+		section.StackCgroupExistsPre,
+		section.StackCgroupExistsPost,
+		section.StackCgroupCreated,
 	)
 }
 
-func printCellActions(cmd *cobra.Command, report controller.BootstrapReport) {
-	if report.CellCreated {
-		cmd.Println("  - cell: created")
+func printCellActions(cmd *cobra.Command, section controller.CellSection, image string) {
+	if section.CellName == "" {
+		cmd.Println("    - cell: not provisioned")
+		return
+	}
+	if section.CellCreated {
+		cmd.Println(fmt.Sprintf("    - cell %q: created (image %s)", section.CellName, image))
 	} else {
-		cmd.Println("  - cell: already existed")
+		cmd.Println(fmt.Sprintf("    - cell %q: already existed", section.CellName))
 	}
 	printCgroupAction(
 		cmd,
 		"cell",
-		report.CellCgroupExistsPre,
-		report.CellCgroupExistsPost,
-		report.CellCgroupCreated,
+		section.CellCgroupExistsPre,
+		section.CellCgroupExistsPost,
+		section.CellCgroupCreated,
 	)
 	printCgroupAction(
 		cmd,
 		"cell root container",
-		report.CellRootContainerExistsPre,
-		report.CellRootContainerExistsPost,
-		report.CellRootContainerCreated,
+		section.CellRootContainerExistsPre,
+		section.CellRootContainerExistsPost,
+		section.CellRootContainerCreated,
 	)
 	printCgroupAction(
 		cmd,
 		"cell containers",
-		report.CellStartedPre,
-		report.CellStartedPost,
-		report.CellStarted,
+		section.CellStartedPre,
+		section.CellStartedPost,
+		section.CellStarted,
 	)
 }
 
@@ -254,14 +414,14 @@ func printDirAction(cmd *cobra.Command, label string, path string, created bool,
 func printCgroupAction(cmd *cobra.Command, label string, existedPre bool, existsPost bool, created bool) {
 	switch {
 	case created:
-		cmd.Println(fmt.Sprintf("  - %s cgroup: created", label))
+		cmd.Println(fmt.Sprintf("    - %s cgroup: created", label))
 	case existsPost:
-		cmd.Println(fmt.Sprintf("  - %s cgroup: already existed", label))
+		cmd.Println(fmt.Sprintf("    - %s cgroup: already existed", label))
 	default:
 		if existedPre {
-			cmd.Println(fmt.Sprintf("  - %s cgroup: missing (was previously present)", label))
+			cmd.Println(fmt.Sprintf("    - %s cgroup: missing (was previously present)", label))
 		} else {
-			cmd.Println(fmt.Sprintf("  - %s cgroup: missing", label))
+			cmd.Println(fmt.Sprintf("    - %s cgroup: missing", label))
 		}
 	}
 }

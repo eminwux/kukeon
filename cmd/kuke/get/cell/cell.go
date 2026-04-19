@@ -23,24 +23,15 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
-	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/controller"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/eminwux/kukeon/internal/util/fs"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-type CellController interface {
-	GetCell(cell intmodel.Cell) (controller.GetCellResult, error)
-	ListCells(realm, space, stack string) ([]intmodel.Cell, error)
-}
-
-type cellController = CellController // internal alias for backward compatibility
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
 func NewCellCmd() *cobra.Command {
@@ -52,47 +43,28 @@ func NewCellCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var ctrl cellController
-			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(CellController); ok {
-				ctrl = mockCtrl
-			} else {
-				realCtrl, err := shared.ControllerFromCmd(cmd)
-				if err != nil {
-					return err
-				}
-				ctrl = &controllerWrapper{ctrl: realCtrl}
+			client, err := resolveClient(cmd)
+			if err != nil {
+				return err
 			}
+			defer func() { _ = client.Close() }()
 
-			outputFormat, formatErr := shared.ParseOutputFormat(cmd)
-			if formatErr != nil {
-				return formatErr
+			outputFormat, err := shared.ParseOutputFormat(cmd)
+			if err != nil {
+				return err
 			}
 
 			realm := strings.TrimSpace(viper.GetString(config.KUKE_GET_CELL_REALM.ViperKey))
 			if realm == "" {
-				realm, _ = cmd.Flags().GetString("realm")
-				realm = strings.TrimSpace(realm)
+				realm = strings.TrimSpace(config.KUKE_GET_CELL_REALM.ValueOrDefault())
 			}
-			if realm == "" {
-				realm = config.KUKE_GET_CELL_REALM.ValueOrDefault()
-			}
-
 			space := strings.TrimSpace(viper.GetString(config.KUKE_GET_CELL_SPACE.ViperKey))
 			if space == "" {
-				space, _ = cmd.Flags().GetString("space")
-				space = strings.TrimSpace(space)
+				space = strings.TrimSpace(config.KUKE_GET_CELL_SPACE.ValueOrDefault())
 			}
-			if space == "" {
-				space = config.KUKE_GET_CELL_SPACE.ValueOrDefault()
-			}
-
 			stack := strings.TrimSpace(viper.GetString(config.KUKE_GET_CELL_STACK.ViperKey))
 			if stack == "" {
-				stack, _ = cmd.Flags().GetString("stack")
-				stack = strings.TrimSpace(stack)
-			}
-			if stack == "" {
-				stack = config.KUKE_GET_CELL_STACK.ValueOrDefault()
+				stack = strings.TrimSpace(config.KUKE_GET_CELL_STACK.ValueOrDefault())
 			}
 
 			var name string
@@ -103,7 +75,6 @@ func NewCellCmd() *cobra.Command {
 			}
 
 			if name != "" {
-				// Get single cell (requires realm, space, and stack)
 				if realm == "" {
 					return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
 				}
@@ -113,91 +84,47 @@ func NewCellCmd() *cobra.Command {
 				if stack == "" {
 					return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
 				}
-
-				doc := &v1beta1.CellDoc{
-					Metadata: v1beta1.CellMetadata{
-						Name: name,
-					},
+				doc := v1beta1.CellDoc{
+					Metadata: v1beta1.CellMetadata{Name: name},
 					Spec: v1beta1.CellSpec{
 						RealmID: realm,
 						SpaceID: space,
 						StackID: stack,
 					},
 				}
-
-				// Convert at boundary before calling controller
-				cellInternal, _, err := apischeme.NormalizeCell(*doc)
+				result, err := client.GetCell(cmd.Context(), doc)
 				if err != nil {
-					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-				}
-
-				result, getErr := ctrl.GetCell(cellInternal)
-				if getErr != nil {
-					if errors.Is(getErr, errdefs.ErrCellNotFound) {
-						return fmt.Errorf(
-							"cell %q not found in realm %q, space %q, stack %q",
-							name,
-							realm,
-							space,
-							stack,
-						)
+					if errors.Is(err, errdefs.ErrCellNotFound) {
+						return fmt.Errorf("cell %q not found in stack %q/%q/%q", name, realm, space, stack)
 					}
-					return getErr
-				}
-
-				if !result.MetadataExists {
-					return fmt.Errorf(
-						"cell %q not found in realm %q, space %q, stack %q",
-						name,
-						realm,
-						space,
-						stack,
-					)
-				}
-
-				// Convert result back to external for printing
-				cellDoc, err := fs.ConvertCellToExternal(result.Cell)
-				if err != nil {
 					return err
 				}
-
-				return printCell(cmd, cellDoc, outputFormat)
+				if !result.MetadataExists {
+					return fmt.Errorf("cell %q not found in stack %q/%q/%q", name, realm, space, stack)
+				}
+				return printCell(&result.Cell, outputFormat)
 			}
 
-			// List cells (optionally filtered by realm, space, and/or stack)
-			internalCells, listErr := ctrl.ListCells(realm, space, stack)
-			if listErr != nil {
-				return listErr
-			}
-
-			// Convert internal cells to external for printing
-			externalCells, err := fs.ConvertCellListToExternal(internalCells)
+			cells, err := client.ListCells(cmd.Context(), realm, space, stack)
 			if err != nil {
 				return err
 			}
-
-			return printCells(cmd, externalCells, outputFormat)
+			return printCells(cmd, cells, outputFormat)
 		},
 	}
 
 	cmd.Flags().String("realm", "", "Filter cells by realm name")
 	_ = viper.BindPFlag(config.KUKE_GET_CELL_REALM.ViperKey, cmd.Flags().Lookup("realm"))
-
 	cmd.Flags().String("space", "", "Filter cells by space name")
 	_ = viper.BindPFlag(config.KUKE_GET_CELL_SPACE.ViperKey, cmd.Flags().Lookup("space"))
-
 	cmd.Flags().String("stack", "", "Filter cells by stack name")
 	_ = viper.BindPFlag(config.KUKE_GET_CELL_STACK.ViperKey, cmd.Flags().Lookup("stack"))
-
 	cmd.Flags().
 		StringP("output", "o", "", "Output format (yaml, json, table). Default: table for list, yaml for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
 
-	// Register autocomplete for positional argument
 	cmd.ValidArgsFunction = config.CompleteCellNames
-
-	// Register autocomplete functions for flags
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
 	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
@@ -207,21 +134,23 @@ func NewCellCmd() *cobra.Command {
 	return cmd
 }
 
-func printCell(_ *cobra.Command, cell interface{}, format shared.OutputFormat) error {
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
+	}
+	return kukeshared.ClientFromCmd(cmd)
+}
+
+func printCell(cell *v1beta1.CellDoc, format shared.OutputFormat) error {
 	switch format {
-	case shared.OutputFormatYAML:
-		return shared.PrintYAML(cell)
 	case shared.OutputFormatJSON:
 		return shared.PrintJSON(cell)
-	case shared.OutputFormatTable:
-		// For single resource, show full YAML by default
-		return shared.PrintYAML(cell)
 	default:
 		return shared.PrintYAML(cell)
 	}
 }
 
-func printCells(cmd *cobra.Command, cells []*v1beta1.CellDoc, format shared.OutputFormat) error {
+func printCells(cmd *cobra.Command, cells []v1beta1.CellDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
 		return shared.PrintYAML(cells)
@@ -232,42 +161,23 @@ func printCells(cmd *cobra.Command, cells []*v1beta1.CellDoc, format shared.Outp
 			cmd.Println("No cells found.")
 			return nil
 		}
-
 		headers := []string{"NAME", "REALM", "SPACE", "STACK", "STATE", "CGROUP"}
 		rows := make([][]string, 0, len(cells))
-
-		for _, c := range cells {
+		for i := range cells {
+			c := &cells[i]
 			state := (&c.Status.State).String()
 			cgroup := c.Status.CgroupPath
 			if cgroup == "" {
 				cgroup = "-"
 			}
-
-			rows = append(rows, []string{
-				c.Metadata.Name,
-				c.Spec.RealmID,
-				c.Spec.SpaceID,
-				c.Spec.StackID,
-				state,
-				cgroup,
-			})
+			rows = append(
+				rows,
+				[]string{c.Metadata.Name, c.Spec.RealmID, c.Spec.SpaceID, c.Spec.StackID, state, cgroup},
+			)
 		}
-
 		shared.PrintTable(cmd, headers, rows)
 		return nil
 	default:
 		return shared.PrintYAML(cells)
 	}
-}
-
-type controllerWrapper struct {
-	ctrl *controller.Exec
-}
-
-func (w *controllerWrapper) GetCell(cell intmodel.Cell) (controller.GetCellResult, error) {
-	return w.ctrl.GetCell(cell)
-}
-
-func (w *controllerWrapper) ListCells(realm, space, stack string) ([]intmodel.Cell, error) {
-	return w.ctrl.ListCells(realm, space, stack)
 }

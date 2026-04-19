@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 
 	"github.com/eminwux/kukeon/cmd/kuke"
+	"github.com/eminwux/kukeon/cmd/kukeond"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/logging"
 	"github.com/spf13/cobra"
@@ -40,7 +41,8 @@ func getFactories(ctx context.Context) factoryMap {
 		return mockFactories
 	}
 	return factoryMap{
-		"kuke": kuke.NewKukeCmd,
+		"kuke":    kuke.NewKukeCmd,
+		"kukeond": kukeond.NewKukeondCmd,
 	}
 }
 

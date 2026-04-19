@@ -17,7 +17,6 @@
 package ctr
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"os"
@@ -92,30 +91,10 @@ func (c *client) GetCgroupMountpoint() string {
 	return c.effectiveMountpoint("")
 }
 
-// GetCurrentCgroupPath returns the current process's cgroup path from /proc/self/cgroup.
+// GetCurrentCgroupPath returns the kukeon root cgroup path, which is the base
+// under which all realms (and the full kukeon hierarchy) live.
 func (c *client) GetCurrentCgroupPath() (string, error) {
-	file, err := os.Open("/proc/self/cgroup")
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		// Format: hierarchy:controllers:path
-		// For cgroup2 (unified hierarchy): 0::<path> where controllers is empty
-		parts := strings.Split(line, ":")
-		if len(parts) == 3 && parts[0] == "0" && parts[1] == "" {
-			return parts[2], nil
-		}
-	}
-
-	if scanErr := scanner.Err(); scanErr != nil {
-		return "", scanErr
-	}
-
-	return "", errors.New("cgroup2 entry not found in /proc/self/cgroup")
+	return consts.KukeonCgroupRoot, nil
 }
 
 // CgroupPath returns the absolute path under the unified hierarchy for this cgroup.

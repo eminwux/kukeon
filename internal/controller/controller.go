@@ -69,11 +69,16 @@ type Exec struct {
 	runner runner.Runner
 }
 
-// BootstrapReport moved to bootstrap.go
-
 type Options struct {
 	RunPath          string
 	ContainerdSocket string
+	// KukeondImage is the container image for the kukeond system cell. If empty,
+	// bootstrap will skip provisioning the system cell (but still provision the
+	// system realm/space/stack).
+	KukeondImage string
+	// KukeondSocket is the unix socket path kukeond serves on. Used by bootstrap
+	// to build the bind-mount for the system cell.
+	KukeondSocket string
 }
 
 func NewControllerExec(ctx context.Context, logger *slog.Logger, opts Options) *Exec {
@@ -100,52 +105,80 @@ func NewControllerExecForTesting(ctx context.Context, logger *slog.Logger, opts 
 }
 
 func (b *Exec) Bootstrap() (BootstrapReport, error) {
-	defer b.runner.Close()
 	b.logger.DebugContext(b.ctx, "bootstrapping kukeon", "options", b.opts)
 
-	var err error
 	report := BootstrapReport{
-		RealmName:                consts.KukeonRealmName,
-		RealmContainerdNamespace: consts.KukeonRealmNamespace,
-		RunPath:                  b.opts.RunPath,
+		RunPath:      b.opts.RunPath,
+		KukeondImage: b.opts.KukeondImage,
 	}
 
-	// Bootstrap CNI environment (use defaults by passing empty values)
-	report, err = b.bootstrapCNI(report)
+	// CNI.
+	report, err := b.bootstrapCNI(report)
 	if err != nil {
 		return report, err
 	}
 
-	// Bootstrap realm
-	report, err = b.bootstrapRealm(report)
+	// Kukeon root cgroup.
+	report, err = b.bootstrapKukeonCgroup(report)
 	if err != nil {
 		return report, err
 	}
 
-	report.RealmCreated = !report.RealmMetadataExistsPre && report.RealmMetadataExistsPost
-	report.RealmContainerdNamespaceCreated = !report.RealmContainerdNamespaceExistsPre &&
-		report.RealmContainerdNamespaceExistsPost
-
-	// Bootstrap default space and its CNI network
-	report, err = b.bootstrapSpace(report)
-	if err != nil {
+	// Default user hierarchy: default realm / default space / default stack (no cell).
+	if err = b.bootstrapRealm(
+		&report.DefaultRealm,
+		consts.KukeonDefaultRealmName,
+		consts.KukeonDefaultRealmNamespace,
+	); err != nil {
+		return report, err
+	}
+	if err = b.bootstrapSpace(
+		&report.DefaultSpace,
+		consts.KukeonDefaultRealmName,
+		consts.KukeonDefaultSpaceName,
+	); err != nil {
+		return report, err
+	}
+	if err = b.bootstrapStack(
+		&report.DefaultStack,
+		consts.KukeonDefaultRealmName,
+		consts.KukeonDefaultSpaceName,
+		consts.KukeonDefaultStackName,
+	); err != nil {
 		return report, err
 	}
 
-	// Space outcomes
-	report.SpaceCreated = !report.SpaceMetadataExistsPre && report.SpaceMetadataExistsPost
-	report.SpaceCNINetworkCreated = !report.SpaceCNINetworkExistsPre && report.SpaceCNINetworkExistsPost
-
-	// Bootstrap default stack
-	report, err = b.bootstrapStack(report)
-	if err != nil {
+	// System hierarchy: kuke-system realm / kukeon space / kukeon stack / kukeond cell.
+	if err = b.bootstrapRealm(
+		&report.SystemRealm,
+		consts.KukeSystemRealmName,
+		consts.KukeSystemRealmNamespace,
+	); err != nil {
+		return report, err
+	}
+	if err = b.bootstrapSpace(
+		&report.SystemSpace,
+		consts.KukeSystemRealmName,
+		consts.KukeSystemSpaceName,
+	); err != nil {
+		return report, err
+	}
+	if err = b.bootstrapStack(
+		&report.SystemStack,
+		consts.KukeSystemRealmName,
+		consts.KukeSystemSpaceName,
+		consts.KukeSystemStackName,
+	); err != nil {
 		return report, err
 	}
 
-	// Bootstrap default cell
-	report, err = b.bootstrapCell(report)
-	if err != nil {
-		return report, err
+	// System cell: kukeond. Provisioned only when an image is configured (lets
+	// callers opt out in tests / non-daemon setups).
+	if b.opts.KukeondImage != "" {
+		cellDoc := kukeondCellDoc(b.opts.KukeondImage, b.opts.KukeondSocket)
+		if err = b.bootstrapCell(&report.SystemCell, cellDoc); err != nil {
+			return report, err
+		}
 	}
 
 	return report, nil

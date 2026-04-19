@@ -23,24 +23,15 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
-	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/controller"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/eminwux/kukeon/internal/util/fs"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-type SpaceController interface {
-	GetSpace(space intmodel.Space) (controller.GetSpaceResult, error)
-	ListSpaces(realm string) ([]intmodel.Space, error)
-}
-
-type spaceController = SpaceController // internal alias for backward compatibility
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
 func NewSpaceCmd() *cobra.Command {
@@ -52,29 +43,20 @@ func NewSpaceCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var ctrl spaceController
-			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(SpaceController); ok {
-				ctrl = mockCtrl
-			} else {
-				realCtrl, err := shared.ControllerFromCmd(cmd)
-				if err != nil {
-					return err
-				}
-				ctrl = &controllerWrapper{ctrl: realCtrl}
+			client, err := resolveClient(cmd)
+			if err != nil {
+				return err
 			}
+			defer func() { _ = client.Close() }()
 
-			outputFormat, parseErr := shared.ParseOutputFormat(cmd)
-			if parseErr != nil {
-				return parseErr
+			outputFormat, err := shared.ParseOutputFormat(cmd)
+			if err != nil {
+				return err
 			}
 
 			realm := strings.TrimSpace(viper.GetString(config.KUKE_GET_SPACE_REALM.ViperKey))
 			if realm == "" {
-				realm, _ = cmd.Flags().GetString("realm")
-				realm = strings.TrimSpace(realm)
-			}
-			if realm == "" {
-				realm = config.KUKE_GET_SPACE_REALM.ValueOrDefault()
+				realm = strings.TrimSpace(config.KUKE_GET_SPACE_REALM.ValueOrDefault())
 			}
 
 			var name string
@@ -85,60 +67,31 @@ func NewSpaceCmd() *cobra.Command {
 			}
 
 			if name != "" {
-				// Get single space (requires realm)
 				if realm == "" {
 					return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
 				}
-
-				doc := &v1beta1.SpaceDoc{
-					Metadata: v1beta1.SpaceMetadata{
-						Name: name,
-					},
-					Spec: v1beta1.SpaceSpec{
-						RealmID: realm,
-					},
+				doc := v1beta1.SpaceDoc{
+					Metadata: v1beta1.SpaceMetadata{Name: name},
+					Spec:     v1beta1.SpaceSpec{RealmID: realm},
 				}
-
-				// Convert at boundary before calling controller
-				spaceInternal, _, err := apischeme.NormalizeSpace(*doc)
+				result, err := client.GetSpace(cmd.Context(), doc)
 				if err != nil {
-					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-				}
-
-				result, getErr := ctrl.GetSpace(spaceInternal)
-				if getErr != nil {
-					if errors.Is(getErr, errdefs.ErrSpaceNotFound) {
+					if errors.Is(err, errdefs.ErrSpaceNotFound) {
 						return fmt.Errorf("space %q not found in realm %q", name, realm)
 					}
-					return getErr
+					return err
 				}
-
 				if !result.MetadataExists {
 					return fmt.Errorf("space %q not found in realm %q", name, realm)
 				}
-
-				// Convert result back to external for printing
-				spaceDoc, err := fs.ConvertSpaceToExternal(result.Space)
-				if err != nil {
-					return err
-				}
-
-				return printSpace(spaceDoc, outputFormat)
+				return printSpace(&result.Space, outputFormat)
 			}
 
-			// List spaces (optionally filtered by realm)
-			internalSpaces, listErr := ctrl.ListSpaces(realm)
-			if listErr != nil {
-				return listErr
-			}
-
-			// Convert internal spaces to external for printing
-			externalSpaces, err := fs.ConvertSpaceListToExternal(internalSpaces)
+			spaces, err := client.ListSpaces(cmd.Context(), realm)
 			if err != nil {
 				return err
 			}
-
-			return printSpaces(cmd, externalSpaces, outputFormat)
+			return printSpaces(cmd, spaces, outputFormat)
 		},
 	}
 
@@ -150,36 +103,31 @@ func NewSpaceCmd() *cobra.Command {
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
 
-	// Register autocomplete for positional argument
 	cmd.ValidArgsFunction = config.CompleteSpaceNames
-
-	// Register autocomplete function for --realm flag
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
-
-	// Register autocomplete function for --output flag
 	_ = cmd.RegisterFlagCompletionFunc("output", config.CompleteOutputFormat)
-
-	// Register autocomplete function for -o flag
 	_ = cmd.RegisterFlagCompletionFunc("o", config.CompleteOutputFormat)
 
 	return cmd
 }
 
-func printSpace(space interface{}, format shared.OutputFormat) error {
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
+	}
+	return kukeshared.ClientFromCmd(cmd)
+}
+
+func printSpace(space *v1beta1.SpaceDoc, format shared.OutputFormat) error {
 	switch format {
-	case shared.OutputFormatYAML:
-		return shared.PrintYAML(space)
 	case shared.OutputFormatJSON:
 		return shared.PrintJSON(space)
-	case shared.OutputFormatTable:
-		// For single resource, show full YAML by default
-		return shared.PrintYAML(space)
 	default:
 		return shared.PrintYAML(space)
 	}
 }
 
-func printSpaces(cmd *cobra.Command, spaces []*v1beta1.SpaceDoc, format shared.OutputFormat) error {
+func printSpaces(cmd *cobra.Command, spaces []v1beta1.SpaceDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
 		return shared.PrintYAML(spaces)
@@ -190,40 +138,20 @@ func printSpaces(cmd *cobra.Command, spaces []*v1beta1.SpaceDoc, format shared.O
 			cmd.Println("No spaces found.")
 			return nil
 		}
-
 		headers := []string{"NAME", "REALM", "STATE", "CGROUP"}
 		rows := make([][]string, 0, len(spaces))
-
-		for _, s := range spaces {
+		for i := range spaces {
+			s := &spaces[i]
 			state := (&s.Status.State).String()
 			cgroup := s.Status.CgroupPath
 			if cgroup == "" {
 				cgroup = "-"
 			}
-
-			rows = append(rows, []string{
-				s.Metadata.Name,
-				s.Spec.RealmID,
-				state,
-				cgroup,
-			})
+			rows = append(rows, []string{s.Metadata.Name, s.Spec.RealmID, state, cgroup})
 		}
-
 		shared.PrintTable(cmd, headers, rows)
 		return nil
 	default:
 		return shared.PrintYAML(spaces)
 	}
-}
-
-type controllerWrapper struct {
-	ctrl *controller.Exec
-}
-
-func (w *controllerWrapper) GetSpace(space intmodel.Space) (controller.GetSpaceResult, error) {
-	return w.ctrl.GetSpace(space)
-}
-
-func (w *controllerWrapper) ListSpaces(realm string) ([]intmodel.Space, error) {
-	return w.ctrl.ListSpaces(realm)
 }

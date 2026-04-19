@@ -19,29 +19,13 @@ package refresh
 import (
 	"strings"
 
-	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
-	"github.com/eminwux/kukeon/internal/controller"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/spf13/cobra"
 )
 
-// RefreshResult is an alias for controller.RefreshResult.
-type RefreshResult = controller.RefreshResult
-
-// RefreshController defines the interface for refresh operations.
-type RefreshController interface {
-	RefreshAll() (RefreshResult, error)
-}
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
-
-type controllerWrapper struct {
-	ctrl *controller.Exec
-}
-
-func (w *controllerWrapper) RefreshAll() (RefreshResult, error) {
-	return w.ctrl.RefreshAll()
-}
 
 func NewRefreshCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -56,23 +40,17 @@ func NewRefreshCmd() *cobra.Command {
 }
 
 func runRefreshCmd(cmd *cobra.Command, _ []string) error {
-	var ctrl RefreshController
-	if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(RefreshController); ok {
-		ctrl = mockCtrl
-	} else {
-		realCtrl, err := shared.ControllerFromCmd(cmd)
-		if err != nil {
-			return err
-		}
-		ctrl = &controllerWrapper{ctrl: realCtrl}
+	client, err := resolveClient(cmd)
+	if err != nil {
+		return err
 	}
+	defer func() { _ = client.Close() }()
 
-	result, err := ctrl.RefreshAll()
+	result, err := client.RefreshAll(cmd.Context())
 	if err != nil {
 		return err
 	}
 
-	// Print summary
 	cmd.Printf("Refreshed metadata status:\n")
 	printEntityList(cmd, "  Realms", result.RealmsFound)
 	printEntityList(cmd, "  Spaces", result.SpacesFound)
@@ -120,8 +98,13 @@ func runRefreshCmd(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// printEntityList prints a list of entities with count and names.
-// Format: "Label: count (name1, name2, ...)" or "Label: count" if empty.
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
+	}
+	return kukeshared.ClientFromCmd(cmd)
+}
+
 func printEntityList(cmd *cobra.Command, label string, entities []string) {
 	count := len(entities)
 	if count == 0 {
@@ -131,10 +114,8 @@ func printEntityList(cmd *cobra.Command, label string, entities []string) {
 
 	const maxEntitiesToShow = 5
 	if count <= maxEntitiesToShow {
-		// For small lists, show all names
 		cmd.Printf("%s: %d (%s)\n", label, count, strings.Join(entities, ", "))
 	} else {
-		// For large lists, show first few and count
 		cmd.Printf("%s: %d (%s, ...)\n", label, count, strings.Join(entities[:maxEntitiesToShow], ", "))
 	}
 }

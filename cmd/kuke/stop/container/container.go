@@ -21,21 +21,15 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
-	"github.com/eminwux/kukeon/cmd/kuke/stop/shared"
-	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/controller"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-type containerController interface {
-	StopContainer(container intmodel.Container) (controller.StopContainerResult, error)
-}
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
 func NewContainerCmd() *cobra.Command {
@@ -66,32 +60,30 @@ func NewContainerCmd() *cobra.Command {
 				return fmt.Errorf("%w (--cell)", errdefs.ErrCellNameRequired)
 			}
 
-			// Check for mock controller in context (for testing)
-			var ctrl containerController
-			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(containerController); ok {
-				ctrl = mockCtrl
-			} else {
-				realCtrl, err := shared.ControllerFromCmd(cmd)
-				if err != nil {
-					return err
-				}
-				ctrl = &controllerWrapper{ctrl: realCtrl}
+			doc := v1beta1.ContainerDoc{
+				APIVersion: v1beta1.APIVersionV1Beta1,
+				Kind:       v1beta1.KindContainer,
+				Metadata:   v1beta1.ContainerMetadata{Name: name, Labels: map[string]string{}},
+				Spec: v1beta1.ContainerSpec{
+					ID:      name,
+					RealmID: realm,
+					SpaceID: space,
+					StackID: stack,
+					CellID:  cell,
+				},
 			}
 
-			containerDoc := newContainerDoc(name, realm, space, stack, cell)
-
-			// Convert at boundary before calling controller
-			containerInternal, _, err := apischeme.NormalizeContainer(*containerDoc)
+			client, err := resolveClient(cmd)
 			if err != nil {
-				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				return err
 			}
+			defer func() { _ = client.Close() }()
 
-			result, err := ctrl.StopContainer(containerInternal)
+			result, err := client.StopContainer(cmd.Context(), doc)
 			if err != nil {
 				return err
 			}
 
-			// Use container from result for output
 			containerName := result.Container.Metadata.Name
 			if containerName == "" {
 				containerName = result.Container.Spec.ID
@@ -99,33 +91,24 @@ func NewContainerCmd() *cobra.Command {
 			if containerName == "" {
 				containerName = name
 			}
-			cellName := result.Container.Spec.CellName
+			cellName := result.Container.Spec.CellID
 			if cellName == "" {
 				cellName = cell
 			}
-
-			if result.Stopped {
-				cmd.Printf("Stopped container %q from cell %q\n", containerName, cellName)
-			} else {
-				cmd.Printf("Container %q was already stopped in cell %q\n", containerName, cellName)
-			}
+			cmd.Printf("Stopped container %q from cell %q\n", containerName, cellName)
 			return nil
 		},
 	}
 
 	cmd.Flags().String("realm", "", "Realm that owns the container")
 	_ = viper.BindPFlag(config.KUKE_STOP_CONTAINER_REALM.ViperKey, cmd.Flags().Lookup("realm"))
-
 	cmd.Flags().String("space", "", "Space that owns the container")
 	_ = viper.BindPFlag(config.KUKE_STOP_CONTAINER_SPACE.ViperKey, cmd.Flags().Lookup("space"))
-
 	cmd.Flags().String("stack", "", "Stack that owns the container")
 	_ = viper.BindPFlag(config.KUKE_STOP_CONTAINER_STACK.ViperKey, cmd.Flags().Lookup("stack"))
-
 	cmd.Flags().String("cell", "", "Cell that owns the container")
 	_ = viper.BindPFlag(config.KUKE_STOP_CONTAINER_CELL.ViperKey, cmd.Flags().Lookup("cell"))
 
-	// Register autocomplete functions for flags and positional argument
 	cmd.ValidArgsFunction = config.CompleteContainerNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
@@ -135,28 +118,9 @@ func NewContainerCmd() *cobra.Command {
 	return cmd
 }
 
-type controllerWrapper struct {
-	ctrl *controller.Exec
-}
-
-func (w *controllerWrapper) StopContainer(container intmodel.Container) (controller.StopContainerResult, error) {
-	return w.ctrl.StopContainer(container)
-}
-
-func newContainerDoc(name, realm, space, stack, cell string) *v1beta1.ContainerDoc {
-	return &v1beta1.ContainerDoc{
-		APIVersion: v1beta1.APIVersionV1Beta1,
-		Kind:       v1beta1.KindContainer,
-		Metadata: v1beta1.ContainerMetadata{
-			Name:   strings.TrimSpace(name),
-			Labels: make(map[string]string),
-		},
-		Spec: v1beta1.ContainerSpec{
-			ID:      strings.TrimSpace(name),
-			RealmID: strings.TrimSpace(realm),
-			SpaceID: strings.TrimSpace(space),
-			StackID: strings.TrimSpace(stack),
-			CellID:  strings.TrimSpace(cell),
-		},
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
 	}
+	return kukeshared.ClientFromCmd(cmd)
 }

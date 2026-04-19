@@ -90,7 +90,8 @@ type fakeRunner struct {
 	PurgeContainerFn func(realm intmodel.Realm, containerID string) error
 
 	// Bootstrap
-	BootstrapCNIFn func(cfgDir, cacheDir, binDir string) (cni.BootstrapReport, error)
+	BootstrapCNIFn           func(cfgDir, cacheDir, binDir string) (cni.BootstrapReport, error)
+	EnsureKukeonRootCgroupFn func() (bool, bool, error)
 
 	// Close
 	CloseFn func() error
@@ -420,6 +421,13 @@ func (f *fakeRunner) BootstrapCNI(cfgDir, cacheDir, binDir string) (cni.Bootstra
 		return f.BootstrapCNIFn(cfgDir, cacheDir, binDir)
 	}
 	return cni.BootstrapReport{}, errors.New("unexpected call to BootstrapCNI")
+}
+
+func (f *fakeRunner) EnsureKukeonRootCgroup() (bool, bool, error) {
+	if f.EnsureKukeonRootCgroupFn != nil {
+		return f.EnsureKukeonRootCgroupFn()
+	}
+	return false, false, errors.New("unexpected call to EnsureKukeonRootCgroup")
 }
 
 // Close

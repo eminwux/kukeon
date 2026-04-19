@@ -22,20 +22,15 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/purge/shared"
-	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/controller"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-type spaceController interface {
-	PurgeSpace(space intmodel.Space, force, cascade bool) (controller.PurgeSpaceResult, error)
-}
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
 func NewSpaceCmd() *cobra.Command {
@@ -47,21 +42,8 @@ func NewSpaceCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Check for mock controller in context (for testing)
-			var ctrl spaceController
-			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(spaceController); ok {
-				ctrl = mockCtrl
-			} else {
-				realCtrl, err := shared.ControllerFromCmd(cmd)
-				if err != nil {
-					return err
-				}
-				ctrl = &controllerWrapper{ctrl: realCtrl}
-			}
-
 			name := strings.TrimSpace(args[0])
 			realm := strings.TrimSpace(viper.GetString(config.KUKE_PURGE_SPACE_REALM.ViperKey))
-
 			if realm == "" {
 				return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
 			}
@@ -69,32 +51,27 @@ func NewSpaceCmd() *cobra.Command {
 			force := shared.ParseForceFlag(cmd)
 			cascade := shared.ParseCascadeFlag(cmd)
 
-			doc := &v1beta1.SpaceDoc{
-				Metadata: v1beta1.SpaceMetadata{
-					Name: name,
-				},
-				Spec: v1beta1.SpaceSpec{
-					RealmID: realm,
-				},
+			doc := v1beta1.SpaceDoc{
+				Metadata: v1beta1.SpaceMetadata{Name: name},
+				Spec:     v1beta1.SpaceSpec{RealmID: realm},
 			}
 
-			// Convert at boundary before calling controller
-			spaceInternal, _, err := apischeme.NormalizeSpace(*doc)
+			client, err := resolveClient(cmd)
 			if err != nil {
-				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				return err
 			}
+			defer func() { _ = client.Close() }()
 
-			result, err := ctrl.PurgeSpace(spaceInternal, force, cascade)
+			result, err := client.PurgeSpace(cmd.Context(), doc, force, cascade)
 			if err != nil {
 				return err
 			}
 
-			// Use space from result for output
 			spaceName := result.Space.Metadata.Name
-			realmName := result.Space.Spec.RealmName
 			if spaceName == "" {
 				spaceName = name
 			}
+			realmName := result.Space.Spec.RealmID
 			if realmName == "" {
 				realmName = realm
 			}
@@ -116,22 +93,15 @@ func NewSpaceCmd() *cobra.Command {
 	cmd.Flags().String("realm", "", "Realm that owns the space")
 	_ = viper.BindPFlag(config.KUKE_PURGE_SPACE_REALM.ViperKey, cmd.Flags().Lookup("realm"))
 
-	// Register autocomplete function for --realm flag
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
-
-	// Register autocomplete function for positional argument (space name)
 	cmd.ValidArgsFunction = config.CompleteSpaceNames
 
 	return cmd
 }
 
-type controllerWrapper struct {
-	ctrl *controller.Exec
-}
-
-func (w *controllerWrapper) PurgeSpace(
-	space intmodel.Space,
-	force, cascade bool,
-) (controller.PurgeSpaceResult, error) {
-	return w.ctrl.PurgeSpace(space, force, cascade)
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
+	}
+	return kukeshared.ClientFromCmd(cmd)
 }

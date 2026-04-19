@@ -299,8 +299,13 @@ func (c *client) CreateContainer(spec ContainerSpec) (containerd.Container, erro
 		snapshotKey = spec.ID
 	}
 
-	// Build OCI spec options, injecting annotations when needed
-	specOpts := make([]oci.SpecOpts, 0, len(spec.SpecOpts)+1)
+	// Build OCI spec options, injecting annotations when needed.
+	// Prepend WithImageConfig so the image's Entrypoint/Cmd, env, cwd, and user
+	// populate the spec when the caller did not provide an explicit command/args.
+	// Caller-supplied SpecOpts (e.g. WithProcessArgs, WithEnv) run after and override.
+	//nolint:mnd // Magic number of 2 for the two options we prepend (WithImageConfig and optionally WithAnnotations)
+	specOpts := make([]oci.SpecOpts, 0, len(spec.SpecOpts)+2)
+	specOpts = append(specOpts, oci.WithImageConfig(image))
 	specOpts = append(specOpts, spec.SpecOpts...)
 	if spec.CNIConfigPath != "" {
 		specOpts = append(specOpts, oci.WithAnnotations(map[string]string{

@@ -20,6 +20,7 @@ package controller_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/consts"
@@ -657,21 +658,8 @@ func TestCreateRealm_RunnerErrors(t *testing.T) {
 			}
 
 			if tt.errContains != "" {
-				if err.Error() == "" || err.Error() == tt.errContains {
-					// Error message should contain the specified text
-					found := false
-					errStr := err.Error()
-					if len(errStr) >= len(tt.errContains) {
-						for i := 0; i <= len(errStr)-len(tt.errContains); i++ {
-							if errStr[i:i+len(tt.errContains)] == tt.errContains {
-								found = true
-								break
-							}
-						}
-					}
-					if !found && err.Error() != tt.errContains {
-						t.Errorf("expected error message to contain %q, got %q", tt.errContains, err.Error())
-					}
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("expected error message to contain %q, got %q", tt.errContains, err.Error())
 				}
 			}
 		})

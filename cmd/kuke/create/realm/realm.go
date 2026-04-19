@@ -17,24 +17,16 @@
 package realm
 
 import (
-	"fmt"
-
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
-	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/controller"
-	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-type realmController interface {
-	CreateRealm(realm intmodel.Realm) (controller.CreateRealmResult, error)
-}
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
 func NewRealmCmd() *cobra.Command {
@@ -61,42 +53,23 @@ func NewRealmCmd() *cobra.Command {
 				return err
 			}
 
-			// Build v1beta1.RealmDoc from command arguments
-			doc := &v1beta1.RealmDoc{
-				Metadata: v1beta1.RealmMetadata{
-					Name: name,
-				},
-				Spec: v1beta1.RealmSpec{
-					Namespace: namespace,
-				},
+			doc := v1beta1.RealmDoc{
+				Metadata: v1beta1.RealmMetadata{Name: name},
+				Spec:     v1beta1.RealmSpec{Namespace: namespace},
 			}
 
-			// Convert at boundary before calling controller
-			realm, version, err := apischeme.NormalizeRealm(*doc)
+			client, err := resolveClient(cmd)
 			if err != nil {
-				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				return err
 			}
+			defer func() { _ = client.Close() }()
 
-			// Check for mock controller in context (for testing)
-			var ctrl realmController
-			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(realmController); ok {
-				ctrl = mockCtrl
-			} else {
-				var realCtrl *controller.Exec
-				realCtrl, err = shared.ControllerFromCmd(cmd)
-				if err != nil {
-					return err
-				}
-				ctrl = realCtrl
-			}
-
-			// Call controller with internal type
-			result, err := ctrl.CreateRealm(realm)
+			result, err := client.CreateRealm(cmd.Context(), doc)
 			if err != nil {
 				return err
 			}
 
-			printRealmResult(cmd, result, version)
+			printRealmResult(cmd, result)
 			return nil
 		},
 	}
@@ -106,16 +79,15 @@ func NewRealmCmd() *cobra.Command {
 	return cmd
 }
 
-func printRealmResult(cmd *cobra.Command, result controller.CreateRealmResult, version v1beta1.Version) {
-	// Convert result back to external for output
-	resultDoc, err := apischeme.BuildRealmExternalFromInternal(result.Realm, version)
-	if err != nil {
-		// Fallback to internal type if conversion fails
-		cmd.Printf("Realm %q (namespace %q)\n", result.Realm.Metadata.Name, result.Realm.Spec.Namespace)
-		cmd.Printf("Warning: failed to convert result for output: %v\n", err)
-	} else {
-		cmd.Printf("Realm %q (namespace %q)\n", resultDoc.Metadata.Name, resultDoc.Spec.Namespace)
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
 	}
+	return kukeshared.ClientFromCmd(cmd)
+}
+
+func printRealmResult(cmd *cobra.Command, result kukeonv1.CreateRealmResult) {
+	cmd.Printf("Realm %q (namespace %q)\n", result.Realm.Metadata.Name, result.Realm.Spec.Namespace)
 	shared.PrintCreationOutcome(cmd, "metadata", result.MetadataExistsPost, result.Created)
 	shared.PrintCreationOutcome(
 		cmd,
@@ -127,6 +99,6 @@ func printRealmResult(cmd *cobra.Command, result controller.CreateRealmResult, v
 }
 
 // PrintRealmResult is exported for testing purposes.
-func PrintRealmResult(cmd *cobra.Command, result controller.CreateRealmResult, version v1beta1.Version) {
-	printRealmResult(cmd, result, version)
+func PrintRealmResult(cmd *cobra.Command, result kukeonv1.CreateRealmResult) {
+	printRealmResult(cmd, result)
 }

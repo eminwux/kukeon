@@ -44,11 +44,8 @@ func TestTaskStatusValidation(t *testing.T) {
 	if err == nil {
 		t.Error("TaskStatus with empty ID should return error")
 	}
-	if err != nil && !errors.Is(err, errdefs.ErrEmptyContainerID) {
-		// Error might be wrapped, check if it contains the expected error
-		if err.Error() == "" {
-			t.Errorf("TaskStatus error should not be empty, got: %v", err)
-		}
+	if !errors.Is(err, errdefs.ErrEmptyContainerID) {
+		t.Errorf("TaskStatus() error = %v, want ErrEmptyContainerID", err)
 	}
 }
 
@@ -62,11 +59,8 @@ func TestTaskMetricsValidation(t *testing.T) {
 	if err == nil {
 		t.Error("TaskMetrics with empty ID should return error")
 	}
-	if err != nil && !errors.Is(err, errdefs.ErrEmptyContainerID) {
-		// Error might be wrapped, check if it contains the expected error
-		if err.Error() == "" {
-			t.Errorf("TaskMetrics error should not be empty, got: %v", err)
-		}
+	if !errors.Is(err, errdefs.ErrEmptyContainerID) {
+		t.Errorf("TaskMetrics() error = %v, want ErrEmptyContainerID", err)
 	}
 }
 

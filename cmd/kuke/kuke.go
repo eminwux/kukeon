@@ -159,6 +159,22 @@ func SetPersistentLoggingFlags(rootCmd *cobra.Command) error {
 		return err
 	}
 
+	rootCmd.PersistentFlags().String(
+		"host", config.KUKEON_ROOT_HOST.Default,
+		"kukeond endpoint (unix:///path or ssh://user@host)",
+	)
+	if err := viper.BindPFlag(config.KUKEON_ROOT_HOST.ViperKey, rootCmd.PersistentFlags().Lookup("host")); err != nil {
+		return err
+	}
+
+	rootCmd.PersistentFlags().Bool(
+		"no-daemon", false,
+		"bypass kukeond and run operations in-process (requires privileges)",
+	)
+	if err := viper.BindPFlag(config.KUKEON_ROOT_NO_DAEMON.ViperKey, rootCmd.PersistentFlags().Lookup("no-daemon")); err != nil {
+		return err
+	}
+
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose logging")
 	if err := viper.BindPFlag(config.KUKEON_ROOT_VERBOSE.ViperKey, rootCmd.PersistentFlags().Lookup("verbose")); err != nil {
 		return err

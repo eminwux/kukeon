@@ -14,6 +14,88 @@ It provides structure, networking, isolation, and lifecycle management for conta
 At its core is `kukeond`, a small daemon that manages containerd, CNI networks, namespaces, and cgroups, and exposes a simple API.
 The `kuke` CLI and the future Web UI act as thin clients.
 
+## Quick Start
+
+Get kukeon running on a single Linux host in minutes.
+
+### Prerequisites
+
+- Linux with cgroups v2
+- [containerd](https://containerd.io/) running at `/run/containerd/containerd.sock`
+- [CNI plugins](https://github.com/containernetworking/plugins) available on the host
+
+### Install
+
+```bash
+# Set your platform (defaults shown)
+export OS=linux        # Options: linux
+export ARCH=amd64      # Options: amd64, arm64
+
+# Install kuke (the CLI also dispatches as kukeond based on argv[0])
+curl -L -o kuke https://github.com/eminwux/kukeon/releases/download/v0.1.0/kuke-${OS}-${ARCH} && \
+chmod +x kuke && \
+sudo install -m 0755 kuke /usr/local/bin/kuke && \
+sudo ln -f /usr/local/bin/kuke /usr/local/bin/kukeond
+```
+
+### Initialize the runtime
+
+`kuke init` provisions the default hierarchy (realm `main`, space `default`, stack `default`), sets up CNI dirs, pulls the `kukeond` image, and starts the daemon. It touches `/opt/kukeon`, cgroups, and containerd, so it needs root:
+
+```bash
+$ sudo kuke init
+Initialized Kukeon runtime
+Realm: main (namespace: kukeon-main)
+System realm: kukeon-system (namespace: kukeon-system)
+Run path: /opt/kukeon
+Kukeond image: ghcr.io/eminwux/kukeon:v0.1.0
+Actions:
+    - kukeon root cgroup: created
+  - CNI config dir "/etc/cni/net.d": created
+  - CNI bin dir "/opt/cni/bin": already existed
+  Default hierarchy:
+    - realm "main": created
+    - containerd namespace "kukeon-main": created
+    - space "default": created
+    - network "default": created
+    - stack "default": created
+  System hierarchy:
+    - realm "kukeon-system": created
+    - cell "kukeond": created (image ghcr.io/eminwux/kukeon:v0.1.0)
+kukeond is ready (unix:///opt/kukeon/run/kukeond.sock)
+```
+
+### Verify with `kuke get`
+
+List the realms, spaces, and stacks that `kuke init` just created:
+
+```bash
+$ sudo kuke get realms
+NAME           NAMESPACE       STATE    CGROUP
+main           kukeon-main     Running  /kukeon/main
+kukeon-system  kukeon-system   Running  /kukeon/kukeon-system
+
+$ sudo kuke get spaces --realm main
+NAME     REALM  STATE    CGROUP
+default  main   Running  /kukeon/main/default
+
+$ sudo kuke get stacks --realm main --space default
+NAME     REALM  SPACE    STATE    CGROUP
+default  main   default  Running  /kukeon/main/default/default
+```
+
+Add `-o yaml` or `-o json` for full resource details.
+
+### Autocomplete
+
+```bash
+cat >> ~/.bashrc <<EOF
+source <(kuke autocomplete bash)
+EOF
+```
+
+`kuke autocomplete zsh` and `kuke autocomplete fish` are also supported.
+
 ## Philosophy
 
 «καὶ ὁ κυκεὼν διίσταται μὴ κινούμενος»
@@ -124,13 +206,6 @@ Contributions, issues, and feedback are welcome.
 - Solidify CNI integration and defaults
 - Add a minimal Web UI (read-only at first)
 - Expand documentation and examples
-
-## Getting Started (placeholder)
-
-Documentation is in progress. For now:
-
-- Review `Makefile` targets for local build and test flows
-- Explore the code under `cmd/` and `internal/` to see the structure
 
 ## Contribute
 

@@ -37,7 +37,6 @@ type DeleteRealmResult struct {
 // DeleteRealm deletes a realm. If cascade is true, deletes all spaces first.
 // If force is true, skips validation of child resources.
 func (b *Exec) DeleteRealm(realm intmodel.Realm, force, cascade bool) (DeleteRealmResult, error) {
-	defer b.runner.Close()
 	var res DeleteRealmResult
 
 	name := strings.TrimSpace(realm.Metadata.Name)

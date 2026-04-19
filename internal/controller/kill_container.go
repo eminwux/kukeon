@@ -33,7 +33,6 @@ type KillContainerResult struct {
 
 // KillContainer immediately force-kills a specific container in a cell and updates the cell metadata.
 func (b *Exec) KillContainer(container intmodel.Container) (KillContainerResult, error) {
-	defer b.runner.Close()
 	var res KillContainerResult
 
 	name := strings.TrimSpace(container.Metadata.Name)

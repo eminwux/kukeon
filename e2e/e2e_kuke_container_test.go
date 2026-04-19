@@ -24,13 +24,13 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
-// cleanupContainer deletes a container.
+// cleanupContainer purges a container, handling running, stopped, or non-existent states.
 func cleanupContainer(t *testing.T, runPath, realmName, spaceName, stackName, cellName, containerName string) {
 	t.Helper()
 
 	args := append(
 		buildKukeRunPathArgs(runPath),
-		"delete",
+		"purge",
 		"container",
 		containerName,
 		"--realm",
@@ -138,7 +138,7 @@ func TestKuke_CreateContainer_VerifyState(t *testing.T) {
 		"--cell",
 		cellName,
 		"--image",
-		"docker.io/library/debian:latest",
+		"registry.eminwux.com/debian:latest",
 		"--command",
 		"sleep",
 		"--args",
@@ -251,7 +251,7 @@ func TestKuke_DeleteContainer_VerifyState(t *testing.T) {
 		"--cell",
 		cellName,
 		"--image",
-		"docker.io/library/debian:latest",
+		"registry.eminwux.com/debian:latest",
 		"--command",
 		"sleep",
 		"--args",
@@ -400,7 +400,7 @@ func TestKuke_StartContainer_VerifyState(t *testing.T) {
 		"--cell",
 		cellName,
 		"--image",
-		"docker.io/library/debian:latest",
+		"registry.eminwux.com/debian:latest",
 		"--command",
 		"sleep",
 		"--args",
@@ -566,7 +566,7 @@ func TestKuke_StopContainer_VerifyState(t *testing.T) {
 		"--cell",
 		cellName,
 		"--image",
-		"docker.io/library/debian:latest",
+		"registry.eminwux.com/debian:latest",
 		"--command",
 		"sleep",
 		"--args",
@@ -706,7 +706,7 @@ func TestKuke_KillContainer_VerifyState(t *testing.T) {
 		"--cell",
 		cellName,
 		"--image",
-		"docker.io/library/debian:latest",
+		"registry.eminwux.com/debian:latest",
 		"--command",
 		"sleep",
 		"--args",
@@ -847,7 +847,7 @@ func TestKuke_PurgeContainer_VerifyState(t *testing.T) {
 		"--cell",
 		cellName,
 		"--image",
-		"docker.io/library/debian:latest",
+		"registry.eminwux.com/debian:latest",
 		"--command",
 		"sleep",
 		"--args",

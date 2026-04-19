@@ -17,31 +17,19 @@
 package stack
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
-	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/controller"
-	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-type stackController interface {
-	CreateStack(stack intmodel.Stack) (controller.CreateStackResult, error)
-}
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
-
-type (
-	controllerGetter func(*cobra.Command) (stackController, error)
-	printOutcomeFunc func(*cobra.Command, string, bool, bool)
-)
 
 func NewStackCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -60,7 +48,6 @@ func NewStackCmd() *cobra.Command {
 	cmd.Flags().String("space", "", "Space that owns the stack")
 	_ = viper.BindPFlag(config.KUKE_CREATE_STACK_SPACE.ViperKey, cmd.Flags().Lookup("space"))
 
-	// Register autocomplete functions for flags
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
 
@@ -68,41 +55,6 @@ func NewStackCmd() *cobra.Command {
 }
 
 func runCreateStack(cmd *cobra.Command, args []string) error {
-	return runCreateStackWithDeps(
-		cmd,
-		args,
-		getController,
-		shared.PrintCreationOutcome,
-	)
-}
-
-func getController(cmd *cobra.Command) (stackController, error) {
-	// Check for mock controller in context (for testing)
-	if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(stackController); ok {
-		return mockCtrl, nil
-	}
-
-	ctrl, err := shared.ControllerFromCmd(cmd)
-	if err != nil {
-		return nil, err
-	}
-	return &controllerWrapper{ctrl: ctrl}, nil
-}
-
-type controllerWrapper struct {
-	ctrl *controller.Exec
-}
-
-func (w *controllerWrapper) CreateStack(stack intmodel.Stack) (controller.CreateStackResult, error) {
-	return w.ctrl.CreateStack(stack)
-}
-
-func runCreateStackWithDeps(
-	cmd *cobra.Command,
-	args []string,
-	getCtrl controllerGetter,
-	printOutcome printOutcomeFunc,
-) error {
 	name, err := shared.RequireNameArgOrDefault(
 		cmd,
 		args,
@@ -115,24 +67,16 @@ func runCreateStackWithDeps(
 
 	realm := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_STACK_REALM.ViperKey))
 	if realm == "" {
-		realm = config.KUKE_CREATE_STACK_REALM.ValueOrDefault()
+		realm = strings.TrimSpace(config.KUKE_CREATE_STACK_REALM.ValueOrDefault())
 	}
 
 	space := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_STACK_SPACE.ViperKey))
 	if space == "" {
-		space = config.KUKE_CREATE_STACK_SPACE.ValueOrDefault()
+		space = strings.TrimSpace(config.KUKE_CREATE_STACK_SPACE.ValueOrDefault())
 	}
 
-	ctrl, err := getCtrl(cmd)
-	if err != nil {
-		return err
-	}
-
-	// Build v1beta1.StackDoc from command arguments
-	doc := &v1beta1.StackDoc{
-		Metadata: v1beta1.StackMetadata{
-			Name: name,
-		},
+	doc := v1beta1.StackDoc{
+		Metadata: v1beta1.StackMetadata{Name: name},
 		Spec: v1beta1.StackSpec{
 			ID:      name,
 			RealmID: realm,
@@ -140,52 +84,40 @@ func runCreateStackWithDeps(
 		},
 	}
 
-	// Convert at boundary before calling controller
-	stack, version, err := apischeme.NormalizeStack(*doc)
+	client, err := resolveClient(cmd)
 	if err != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+		return err
 	}
+	defer func() { _ = client.Close() }()
 
-	// Call controller with internal type
-	result, err := ctrl.CreateStack(stack)
+	result, err := client.CreateStack(cmd.Context(), doc)
 	if err != nil {
 		return err
 	}
 
-	printStackResult(cmd, result, printOutcome, version)
+	printStackResult(cmd, result)
 	return nil
 }
 
-func printStackResult(
-	cmd *cobra.Command,
-	result controller.CreateStackResult,
-	printOutcome printOutcomeFunc,
-	version v1beta1.Version,
-) {
-	// Convert result back to external for output
-	resultDoc, err := apischeme.BuildStackExternalFromInternal(result.Stack, version)
-	if err != nil {
-		// Fallback to internal type if conversion fails
-		cmd.Printf(
-			"Stack %q (realm %q, space %q)\n",
-			result.Stack.Metadata.Name,
-			result.Stack.Spec.RealmName,
-			result.Stack.Spec.SpaceName,
-		)
-		cmd.Printf("Warning: failed to convert result for output: %v\n", err)
-	} else {
-		cmd.Printf("Stack %q (realm %q, space %q)\n", resultDoc.Metadata.Name, resultDoc.Spec.RealmID, resultDoc.Spec.SpaceID)
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
 	}
-	printOutcome(cmd, "metadata", result.MetadataExistsPost, result.Created)
-	printOutcome(cmd, "cgroup", result.CgroupExistsPost, result.CgroupCreated)
+	return kukeshared.ClientFromCmd(cmd)
+}
+
+func printStackResult(cmd *cobra.Command, result kukeonv1.CreateStackResult) {
+	cmd.Printf(
+		"Stack %q (realm %q, space %q)\n",
+		result.Stack.Metadata.Name,
+		result.Stack.Spec.RealmID,
+		result.Stack.Spec.SpaceID,
+	)
+	shared.PrintCreationOutcome(cmd, "metadata", result.MetadataExistsPost, result.Created)
+	shared.PrintCreationOutcome(cmd, "cgroup", result.CgroupExistsPost, result.CgroupCreated)
 }
 
 // PrintStackResult is exported for testing purposes.
-func PrintStackResult(
-	cmd *cobra.Command,
-	result controller.CreateStackResult,
-	printOutcome printOutcomeFunc,
-	version v1beta1.Version,
-) {
-	printStackResult(cmd, result, printOutcome, version)
+func PrintStackResult(cmd *cobra.Command, result kukeonv1.CreateStackResult) {
+	printStackResult(cmd, result)
 }

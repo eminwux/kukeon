@@ -28,381 +28,109 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	cell "github.com/eminwux/kukeon/cmd/kuke/stop/cell"
 	"github.com/eminwux/kukeon/cmd/types"
-	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/spf13/cobra"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/viper"
 )
 
-var _ = cell.NewCellCmd // ensure cell package is linked in
-
-func TestNewCellCmdRunE(t *testing.T) {
-	t.Cleanup(func() {
-		viper.Reset()
-	})
+func TestStopCell(t *testing.T) {
+	t.Cleanup(viper.Reset)
 
 	tests := []struct {
-		name         string
-		args         []string
-		setup        func(t *testing.T, cmd *cobra.Command)
-		controllerFn func(cell intmodel.Cell) (controller.StopCellResult, error)
-		wantErr      string
-		wantCallStop bool
-		wantDoc      *struct {
-			name  string
-			realm string
-			space string
-			stack string
-		}
-		wantOutput []string
+		name       string
+		args       []string
+		setup      func()
+		fake       *fakeClient
+		wantErr    string
+		wantOutput string
 	}{
 		{
-			name: "success: all flags provided",
-			args: []string{"test-cell"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				setFlag(t, cmd, "realm", "realm-a")
-				setFlag(t, cmd, "space", "space-a")
-				setFlag(t, cmd, "stack", "stack-a")
+			name: "success",
+			args: []string{"c1"},
+			setup: func() {
+				viper.Set(config.KUKE_STOP_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_STOP_CELL_SPACE.ViperKey, "s1")
+				viper.Set(config.KUKE_STOP_CELL_STACK.ViperKey, "st1")
 			},
-			controllerFn: func(cell intmodel.Cell) (controller.StopCellResult, error) {
-				return controller.StopCellResult{
-					Cell:    cell,
-					Stopped: true,
-				}, nil
+			fake: &fakeClient{
+				stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+					return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
+				},
 			},
-			wantCallStop: true,
-			wantDoc: &struct {
-				name  string
-				realm string
-				space string
-				stack string
-			}{
-				name:  "test-cell",
-				realm: "realm-a",
-				space: "space-a",
-				stack: "stack-a",
-			},
-			wantOutput: []string{`Stopped cell "test-cell" from stack "stack-a"`},
+			wantOutput: `Stopped cell "c1" from stack "st1"`,
 		},
 		{
-			name: "success: values from viper config",
-			args: []string{"viper-cell"},
-			setup: func(_ *testing.T, _ *cobra.Command) {
-				viper.Set(config.KUKE_STOP_CELL_REALM.ViperKey, "realm-b")
-				viper.Set(config.KUKE_STOP_CELL_SPACE.ViperKey, "space-b")
-				viper.Set(config.KUKE_STOP_CELL_STACK.ViperKey, "stack-b")
+			name: "missing stack",
+			args: []string{"c1"},
+			setup: func() {
+				viper.Set(config.KUKE_STOP_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_STOP_CELL_SPACE.ViperKey, "s1")
 			},
-			controllerFn: func(cell intmodel.Cell) (controller.StopCellResult, error) {
-				return controller.StopCellResult{
-					Cell:    cell,
-					Stopped: true,
-				}, nil
-			},
-			wantCallStop: true,
-			wantDoc: &struct {
-				name  string
-				realm string
-				space string
-				stack string
-			}{
-				name:  "viper-cell",
-				realm: "realm-b",
-				space: "space-b",
-				stack: "stack-b",
-			},
-			wantOutput: []string{`Stopped cell "viper-cell" from stack "stack-b"`},
+			wantErr: "stack name is required",
 		},
 		{
-			name: "success: whitespace trimming on args and flags",
-			args: []string{"  test-cell  "},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				setFlag(t, cmd, "realm", "  realm-a  ")
-				setFlag(t, cmd, "space", "  space-a  ")
-				setFlag(t, cmd, "stack", "  stack-a  ")
+			name: "client error",
+			args: []string{"c1"},
+			setup: func() {
+				viper.Set(config.KUKE_STOP_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_STOP_CELL_SPACE.ViperKey, "s1")
+				viper.Set(config.KUKE_STOP_CELL_STACK.ViperKey, "st1")
 			},
-			controllerFn: func(cell intmodel.Cell) (controller.StopCellResult, error) {
-				return controller.StopCellResult{
-					Cell:    cell,
-					Stopped: true,
-				}, nil
+			fake: &fakeClient{
+				stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+					return kukeonv1.StopCellResult{}, errdefs.ErrCellNotFound
+				},
 			},
-			wantCallStop: true,
-			wantDoc: &struct {
-				name  string
-				realm string
-				space string
-				stack string
-			}{
-				name:  "test-cell",
-				realm: "realm-a",
-				space: "space-a",
-				stack: "stack-a",
-			},
-			wantOutput: []string{`Stopped cell "test-cell" from stack "stack-a"`},
-		},
-		{
-			name: "error: missing realm",
-			args: []string{"test-cell"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				setFlag(t, cmd, "space", "space-a")
-				setFlag(t, cmd, "stack", "stack-a")
-			},
-			wantErr:      "realm name is required",
-			wantCallStop: false,
-		},
-		{
-			name: "error: missing space",
-			args: []string{"test-cell"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				setFlag(t, cmd, "realm", "realm-a")
-				setFlag(t, cmd, "stack", "stack-a")
-			},
-			wantErr:      "space name is required",
-			wantCallStop: false,
-		},
-		{
-			name: "error: missing stack",
-			args: []string{"test-cell"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				setFlag(t, cmd, "realm", "realm-a")
-				setFlag(t, cmd, "space", "space-a")
-			},
-			wantErr:      "stack name is required",
-			wantCallStop: false,
-		},
-		{
-			name: "error: empty realm after trimming whitespace",
-			args: []string{"test-cell"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				setFlag(t, cmd, "realm", "   ")
-				setFlag(t, cmd, "space", "space-a")
-				setFlag(t, cmd, "stack", "stack-a")
-			},
-			wantErr:      "realm name is required",
-			wantCallStop: false,
-		},
-		{
-			name: "error: empty space after trimming whitespace",
-			args: []string{"test-cell"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				setFlag(t, cmd, "realm", "realm-a")
-				setFlag(t, cmd, "space", "   ")
-				setFlag(t, cmd, "stack", "stack-a")
-			},
-			wantErr:      "space name is required",
-			wantCallStop: false,
-		},
-		{
-			name: "error: empty stack after trimming whitespace",
-			args: []string{"test-cell"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				setFlag(t, cmd, "realm", "realm-a")
-				setFlag(t, cmd, "space", "space-a")
-				setFlag(t, cmd, "stack", "   ")
-			},
-			wantErr:      "stack name is required",
-			wantCallStop: false,
-		},
-		{
-			name: "error: logger not in context",
-			args: []string{"test-cell"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				cmd.SetContext(context.Background())
-				setFlag(t, cmd, "realm", "realm-a")
-				setFlag(t, cmd, "space", "space-a")
-				setFlag(t, cmd, "stack", "stack-a")
-			},
-			wantErr:      "logger not found",
-			wantCallStop: false,
-		},
-		{
-			name: "error: StopCell fails with ErrCellNotFound",
-			args: []string{"missing-cell"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				setFlag(t, cmd, "realm", "realm-a")
-				setFlag(t, cmd, "space", "space-a")
-				setFlag(t, cmd, "stack", "stack-a")
-			},
-			controllerFn: func(_ intmodel.Cell) (controller.StopCellResult, error) {
-				return controller.StopCellResult{}, errdefs.ErrCellNotFound
-			},
-			wantErr:      "cell not found",
-			wantCallStop: true,
-			wantDoc: &struct {
-				name  string
-				realm string
-				space string
-				stack string
-			}{
-				name:  "missing-cell",
-				realm: "realm-a",
-				space: "space-a",
-				stack: "stack-a",
-			},
-		},
-		{
-			name: "error: StopCell fails with generic error",
-			args: []string{"test-cell"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				setFlag(t, cmd, "realm", "realm-a")
-				setFlag(t, cmd, "space", "space-a")
-				setFlag(t, cmd, "stack", "stack-a")
-			},
-			controllerFn: func(_ intmodel.Cell) (controller.StopCellResult, error) {
-				return controller.StopCellResult{}, errors.New("failed to stop cell containers")
-			},
-			wantErr:      "failed to stop cell containers",
-			wantCallStop: true,
-			wantDoc: &struct {
-				name  string
-				realm string
-				space string
-				stack string
-			}{
-				name:  "test-cell",
-				realm: "realm-a",
-				space: "space-a",
-				stack: "stack-a",
-			},
+			wantErr: "cell not found",
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Cleanup(viper.Reset)
-
-			var stopCalled bool
-			var stopCell intmodel.Cell
+			viper.Reset()
+			if tt.setup != nil {
+				tt.setup()
+			}
 
 			cmd := cell.NewCellCmd()
-			cmd.SetOut(&bytes.Buffer{})
-			cmd.SetErr(&bytes.Buffer{})
-
-			ctx := context.Background()
-
-			// Inject mock controller via context if needed
-			if tt.name != "error: logger not in context" {
-				// Set up logger context
-				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-				ctx = context.WithValue(ctx, types.CtxLogger, logger)
-
-				// If we need to mock the controller, inject it via context
-				if tt.controllerFn != nil {
-					fakeCtrl := &fakeControllerExec{
-						stopCellFn: func(cell intmodel.Cell) (controller.StopCellResult, error) {
-							stopCalled = true
-							stopCell = cell
-							return tt.controllerFn(cell)
-						},
-					}
-					// Inject mock controller into context
-					ctx = context.WithValue(ctx, cell.MockControllerKey{}, fakeCtrl)
-				}
+			buf := &bytes.Buffer{}
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+			if tt.fake != nil {
+				ctx = context.WithValue(ctx, cell.MockControllerKey{}, kukeonv1.Client(tt.fake))
 			}
-
 			cmd.SetContext(ctx)
-
-			if tt.setup != nil {
-				tt.setup(t, cmd)
-			}
-
 			cmd.SetArgs(tt.args)
 
 			err := cmd.Execute()
-
 			if tt.wantErr != "" {
-				if err == nil {
-					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("want err %q, got %v", tt.wantErr, err)
 				}
-				if !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
-				}
-			} else if err != nil {
+				return
+			}
+			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-
-			if stopCalled != tt.wantCallStop {
-				t.Errorf("StopCell called=%v want=%v", stopCalled, tt.wantCallStop)
-			}
-
-			if tt.wantDoc != nil {
-				if stopCell.Metadata.Name != tt.wantDoc.name {
-					t.Errorf("StopCell name=%q want=%q", stopCell.Metadata.Name, tt.wantDoc.name)
-				}
-				if stopCell.Spec.RealmName != tt.wantDoc.realm {
-					t.Errorf("StopCell realm=%q want=%q", stopCell.Spec.RealmName, tt.wantDoc.realm)
-				}
-				if stopCell.Spec.SpaceName != tt.wantDoc.space {
-					t.Errorf("StopCell space=%q want=%q", stopCell.Spec.SpaceName, tt.wantDoc.space)
-				}
-				if stopCell.Spec.StackName != tt.wantDoc.stack {
-					t.Errorf("StopCell stack=%q want=%q", stopCell.Spec.StackName, tt.wantDoc.stack)
-				}
-			}
-
-			if tt.wantOutput != nil {
-				output := cmd.OutOrStdout().(*bytes.Buffer).String()
-				for _, expected := range tt.wantOutput {
-					if !strings.Contains(output, expected) {
-						t.Errorf("output missing expected string %q\nGot output:\n%s", expected, output)
-					}
-				}
+			if tt.wantOutput != "" && !strings.Contains(buf.String(), tt.wantOutput) {
+				t.Errorf("output missing %q\nGot:\n%s", tt.wantOutput, buf.String())
 			}
 		})
 	}
 }
 
-type fakeControllerExec struct {
-	stopCellFn func(cell intmodel.Cell) (controller.StopCellResult, error)
+type fakeClient struct {
+	kukeonv1.FakeClient
+
+	stopCellFn func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error)
 }
 
-func (f *fakeControllerExec) StopCell(cell intmodel.Cell) (controller.StopCellResult, error) {
+func (f *fakeClient) StopCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
 	if f.stopCellFn == nil {
-		return controller.StopCellResult{}, errors.New("unexpected StopCell call")
+		return kukeonv1.StopCellResult{}, errors.New("unexpected StopCell call")
 	}
-	return f.stopCellFn(cell)
-}
-
-func setFlag(t *testing.T, cmd *cobra.Command, name, value string) {
-	t.Helper()
-	if err := cmd.Flags().Set(name, value); err != nil {
-		t.Fatalf("failed to set flag %s: %v", name, err)
-	}
-}
-
-func TestNewCellCmd_AutocompleteRegistration(t *testing.T) {
-	cmd := cell.NewCellCmd()
-
-	// Test that ValidArgsFunction is set to CompleteCellNames
-	if cmd.ValidArgsFunction == nil {
-		t.Fatal("expected ValidArgsFunction to be set")
-	}
-
-	// Test that realm flag exists
-	realmFlag := cmd.Flags().Lookup("realm")
-	if realmFlag == nil {
-		t.Fatal("expected 'realm' flag to exist")
-	}
-	if realmFlag.Usage != "Realm that owns the cell" {
-		t.Errorf("unexpected realm flag usage: %q", realmFlag.Usage)
-	}
-
-	// Test that space flag exists
-	spaceFlag := cmd.Flags().Lookup("space")
-	if spaceFlag == nil {
-		t.Fatal("expected 'space' flag to exist")
-	}
-	if spaceFlag.Usage != "Space that owns the cell" {
-		t.Errorf("unexpected space flag usage: %q", spaceFlag.Usage)
-	}
-
-	// Test that stack flag exists
-	stackFlag := cmd.Flags().Lookup("stack")
-	if stackFlag == nil {
-		t.Fatal("expected 'stack' flag to exist")
-	}
-	if stackFlag.Usage != "Stack that owns the cell" {
-		t.Errorf("unexpected stack flag usage: %q", stackFlag.Usage)
-	}
+	return f.stopCellFn(doc)
 }

@@ -17,26 +17,20 @@
 package stack
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/purge/shared"
-	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/controller"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-type stackController interface {
-	PurgeStack(stack intmodel.Stack, force, cascade bool) (controller.PurgeStackResult, error)
-}
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
 func NewStackCmd() *cobra.Command {
@@ -48,18 +42,6 @@ func NewStackCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Check for mock controller in context (for testing)
-			var ctrl stackController
-			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(stackController); ok {
-				ctrl = mockCtrl
-			} else {
-				realCtrl, err := shared.ControllerFromCmd(cmd)
-				if err != nil {
-					return err
-				}
-				ctrl = &controllerWrapper{ctrl: realCtrl}
-			}
-
 			name := strings.TrimSpace(args[0])
 			realm := strings.TrimSpace(viper.GetString(config.KUKE_PURGE_STACK_REALM.ViperKey))
 			space := strings.TrimSpace(viper.GetString(config.KUKE_PURGE_STACK_SPACE.ViperKey))
@@ -74,33 +56,30 @@ func NewStackCmd() *cobra.Command {
 			force := shared.ParseForceFlag(cmd)
 			cascade := shared.ParseCascadeFlag(cmd)
 
-			doc := &v1beta1.StackDoc{
-				Metadata: v1beta1.StackMetadata{
-					Name: name,
-				},
+			doc := v1beta1.StackDoc{
+				Metadata: v1beta1.StackMetadata{Name: name},
 				Spec: v1beta1.StackSpec{
 					RealmID: realm,
 					SpaceID: space,
 				},
 			}
 
-			// Convert at boundary before calling controller
-			stackInternal, _, err := apischeme.NormalizeStack(*doc)
+			client, err := resolveClient(cmd)
 			if err != nil {
-				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				return err
 			}
+			defer func() { _ = client.Close() }()
 
-			result, err := ctrl.PurgeStack(stackInternal, force, cascade)
+			result, err := client.PurgeStack(cmd.Context(), doc, force, cascade)
 			if err != nil {
 				return err
 			}
 
-			// Use stack from result for output
 			stackName := result.Stack.Metadata.Name
-			spaceName := result.Stack.Spec.SpaceName
 			if stackName == "" {
 				stackName = name
 			}
+			spaceName := result.Stack.Spec.SpaceID
 			if spaceName == "" {
 				spaceName = space
 			}
@@ -115,11 +94,9 @@ func NewStackCmd() *cobra.Command {
 
 	cmd.Flags().String("realm", "", "Realm that owns the stack")
 	_ = viper.BindPFlag(config.KUKE_PURGE_STACK_REALM.ViperKey, cmd.Flags().Lookup("realm"))
-
 	cmd.Flags().String("space", "", "Space that owns the stack")
 	_ = viper.BindPFlag(config.KUKE_PURGE_STACK_SPACE.ViperKey, cmd.Flags().Lookup("space"))
 
-	// Register autocomplete functions
 	cmd.ValidArgsFunction = config.CompleteStackNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
@@ -127,18 +104,9 @@ func NewStackCmd() *cobra.Command {
 	return cmd
 }
 
-type controllerWrapper struct {
-	ctrl *controller.Exec
-}
-
-func (w *controllerWrapper) PurgeStack(
-	stack intmodel.Stack,
-	force, cascade bool,
-) (controller.PurgeStackResult, error) {
-	var zero controller.PurgeStackResult
-	if w == nil || w.ctrl == nil {
-		return zero, errors.New("controller not initialized")
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
 	}
-
-	return w.ctrl.PurgeStack(stack, force, cascade)
+	return kukeshared.ClientFromCmd(cmd)
 }

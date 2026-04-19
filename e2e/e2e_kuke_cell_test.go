@@ -364,6 +364,15 @@ func TestKuke_DeleteCell_VerifyState(t *testing.T) {
 		)
 	}
 
+	// Step 9b: Verify root container task does NOT exist
+	if verifyRootContainerTaskExists(t, realmNamespace, rootContainerID) {
+		t.Fatalf(
+			"root container task %q still exists in containerd namespace %q after cell deletion",
+			rootContainerID,
+			realmNamespace,
+		)
+	}
+
 	// Step 10: Verify cell does NOT appear in list
 	if verifyCellInList(t, runPath, realmName, spaceName, stackName, cellName) {
 		t.Fatalf("cell %q still appears in cell list after deletion", cellName)
@@ -468,7 +477,7 @@ func TestKuke_StartCell_VerifyState(t *testing.T) {
 	// Step 6: Build root container ID: {spaceName}_{stackName}_{cellID}_root
 	rootContainerID := fmt.Sprintf("%s_%s_%s_root", spaceName, stackName, cellID)
 
-	// Step 7: Verify cell is in Pending state initially (baseline)
+	// Step 7: Get cell state after creation
 	args = append(
 		buildKukeRunPathArgs(runPath),
 		"get",
@@ -490,30 +499,22 @@ func TestKuke_StartCell_VerifyState(t *testing.T) {
 		t.Fatalf("failed to parse cell JSON: %v", err)
 	}
 
-	// Verify cell state is Pending (0) after creation
-	// Note: CellStatePending = 0 (iota)
-	if cell.Status.State != 0 {
-		t.Logf(
-			"cell state after creation: %d, expected Pending (0) - containers may auto-start on creation",
-			cell.Status.State,
+	// Step 8: Start the cell only if not already running (containers may auto-start on creation)
+	if cell.Status.State == 0 {
+		args = append(
+			buildKukeRunPathArgs(runPath),
+			"start",
+			"cell",
+			cellName,
+			"--realm",
+			realmName,
+			"--space",
+			spaceName,
+			"--stack",
+			stackName,
 		)
-		// Don't fail if state is not Pending - containers may auto-start on creation
+		runReturningBinary(t, nil, kuke, args...)
 	}
-
-	// Step 8: Start the cell
-	args = append(
-		buildKukeRunPathArgs(runPath),
-		"start",
-		"cell",
-		cellName,
-		"--realm",
-		realmName,
-		"--space",
-		spaceName,
-		"--stack",
-		stackName,
-	)
-	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 9: Verify root container task exists (all containers in cell are running)
 	if !verifyRootContainerTaskExists(t, realmNamespace, rootContainerID) {
@@ -596,7 +597,7 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 	)
 	runReturningBinary(t, nil, kuke, args...)
 
-	// Step 4: Create cell
+	// Step 4: Create cell (containers auto-start on creation, so cell is Ready)
 	args = append(
 		buildKukeRunPathArgs(runPath),
 		"create",
@@ -611,22 +612,7 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 	)
 	runReturningBinary(t, nil, kuke, args...)
 
-	// Step 5: Start cell (cell should be in Ready state after starting)
-	args = append(
-		buildKukeRunPathArgs(runPath),
-		"start",
-		"cell",
-		cellName,
-		"--realm",
-		realmName,
-		"--space",
-		spaceName,
-		"--stack",
-		stackName,
-	)
-	runReturningBinary(t, nil, kuke, args...)
-
-	// Step 6: Get realm namespace and cell ID for container verification
+	// Step 5: Get realm namespace and cell ID for container verification
 	realmNamespace, err := getRealmNamespace(t, runPath, realmName)
 	if err != nil {
 		t.Fatalf("failed to get realm namespace: %v", err)
@@ -643,10 +629,10 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 		t.Fatal("cell ID is empty")
 	}
 
-	// Step 7: Build root container ID: {spaceName}_{stackName}_{cellID}_root
+	// Step 6: Build root container ID: {spaceName}_{stackName}_{cellID}_root
 	rootContainerID := fmt.Sprintf("%s_%s_%s_root", spaceName, stackName, cellID)
 
-	// Step 8: Verify cell is in Ready state and containers are running (baseline)
+	// Step 7: Verify cell is in Ready state and containers are running (baseline)
 	args = append(
 		buildKukeRunPathArgs(runPath),
 		"get",
@@ -668,22 +654,21 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 		t.Fatalf("failed to parse cell JSON: %v", err)
 	}
 
-	// Verify cell state is Ready (1)
-	// Note: CellStateReady = 1 (iota)
+	// Verify cell state is Ready (1) after creation (containers auto-start)
 	if cell.Status.State != 1 {
-		t.Fatalf("cell state after start: %d, expected Ready (1)", cell.Status.State)
+		t.Fatalf("cell state after creation: %d, expected Ready (1)", cell.Status.State)
 	}
 
 	// Verify root container task exists (all containers in cell are running)
 	if !verifyRootContainerTaskExists(t, realmNamespace, rootContainerID) {
 		t.Fatalf(
-			"root container task %q not found in containerd namespace %q after starting cell",
+			"root container task %q not found in containerd namespace %q after cell creation",
 			rootContainerID,
 			realmNamespace,
 		)
 	}
 
-	// Step 9: Stop the cell
+	// Step 8: Stop the cell
 	args = append(
 		buildKukeRunPathArgs(runPath),
 		"stop",
@@ -698,7 +683,7 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 	)
 	runReturningBinary(t, nil, kuke, args...)
 
-	// Step 10: Verify root container task does NOT exist (all containers in cell are stopped)
+	// Step 9: Verify root container task does NOT exist (all containers in cell are stopped)
 	if verifyRootContainerTaskExists(t, realmNamespace, rootContainerID) {
 		t.Fatalf(
 			"root container task %q still exists in containerd namespace %q after stopping cell",
@@ -707,7 +692,7 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 		)
 	}
 
-	// Step 11: Verify cell state updated to Stopped
+	// Step 10: Verify cell state updated to Stopped
 	args = append(
 		buildKukeRunPathArgs(runPath),
 		"get",
@@ -779,7 +764,7 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 	)
 	runReturningBinary(t, nil, kuke, args...)
 
-	// Step 4: Create cell
+	// Step 4: Create cell (containers auto-start on creation, so cell is Ready)
 	args = append(
 		buildKukeRunPathArgs(runPath),
 		"create",
@@ -794,22 +779,7 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 	)
 	runReturningBinary(t, nil, kuke, args...)
 
-	// Step 5: Start cell (cell should be in Ready state after starting)
-	args = append(
-		buildKukeRunPathArgs(runPath),
-		"start",
-		"cell",
-		cellName,
-		"--realm",
-		realmName,
-		"--space",
-		spaceName,
-		"--stack",
-		stackName,
-	)
-	runReturningBinary(t, nil, kuke, args...)
-
-	// Step 6: Get realm namespace and cell ID for container verification
+	// Step 5: Get realm namespace and cell ID for container verification
 	realmNamespace, err := getRealmNamespace(t, runPath, realmName)
 	if err != nil {
 		t.Fatalf("failed to get realm namespace: %v", err)
@@ -826,10 +796,10 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 		t.Fatal("cell ID is empty")
 	}
 
-	// Step 7: Build root container ID: {spaceName}_{stackName}_{cellID}_root
+	// Step 6: Build root container ID: {spaceName}_{stackName}_{cellID}_root
 	rootContainerID := fmt.Sprintf("%s_%s_%s_root", spaceName, stackName, cellID)
 
-	// Step 8: Verify cell is in Ready state and containers are running (baseline)
+	// Step 7: Verify cell is in Ready state and containers are running (baseline)
 	args = append(
 		buildKukeRunPathArgs(runPath),
 		"get",
@@ -851,22 +821,21 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 		t.Fatalf("failed to parse cell JSON: %v", err)
 	}
 
-	// Verify cell state is Ready (1)
-	// Note: CellStateReady = 1 (iota)
+	// Verify cell state is Ready (1) after creation (containers auto-start)
 	if cell.Status.State != 1 {
-		t.Fatalf("cell state after start: %d, expected Ready (1)", cell.Status.State)
+		t.Fatalf("cell state after creation: %d, expected Ready (1)", cell.Status.State)
 	}
 
 	// Verify root container task exists (all containers in cell are running)
 	if !verifyRootContainerTaskExists(t, realmNamespace, rootContainerID) {
 		t.Fatalf(
-			"root container task %q not found in containerd namespace %q after starting cell",
+			"root container task %q not found in containerd namespace %q after cell creation",
 			rootContainerID,
 			realmNamespace,
 		)
 	}
 
-	// Step 9: Kill the cell
+	// Step 8: Kill the cell
 	args = append(
 		buildKukeRunPathArgs(runPath),
 		"kill",
@@ -881,7 +850,7 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 	)
 	runReturningBinary(t, nil, kuke, args...)
 
-	// Step 10: Verify root container task is STOPPED (kill only sends signal, doesn't delete task)
+	// Step 9: Verify root container task is STOPPED (kill only sends signal, doesn't delete task)
 	if !verifyRootContainerTaskIsStopped(t, realmNamespace, rootContainerID) {
 		t.Fatalf(
 			"root container task %q is still running in containerd namespace %q after killing cell",
@@ -890,7 +859,7 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 		)
 	}
 
-	// Step 11: Verify cell state updated to Stopped
+	// Step 10: Verify cell state updated to Stopped
 	args = append(
 		buildKukeRunPathArgs(runPath),
 		"get",
@@ -1072,6 +1041,15 @@ func TestKuke_PurgeCell_VerifyState(t *testing.T) {
 	if verifyRootContainerExists(t, realmNamespace, rootContainerID) {
 		t.Fatalf(
 			"root container %q still exists in containerd namespace %q after cell purge",
+			rootContainerID,
+			realmNamespace,
+		)
+	}
+
+	// Step 9b: Verify root container task does NOT exist
+	if verifyRootContainerTaskExists(t, realmNamespace, rootContainerID) {
+		t.Fatalf(
+			"root container task %q still exists in containerd namespace %q after cell purge",
 			rootContainerID,
 			realmNamespace,
 		)

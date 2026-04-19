@@ -23,24 +23,15 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
-	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/controller"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/eminwux/kukeon/internal/util/fs"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-type RealmController interface {
-	GetRealm(realm intmodel.Realm) (controller.GetRealmResult, error)
-	ListRealms() ([]intmodel.Realm, error)
-}
-
-type realmController = RealmController // internal alias for backward compatibility
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
 func NewRealmCmd() *cobra.Command {
@@ -52,16 +43,11 @@ func NewRealmCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var ctrl realmController
-			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(RealmController); ok {
-				ctrl = mockCtrl
-			} else {
-				realCtrl, err := shared.ControllerFromCmd(cmd)
-				if err != nil {
-					return err
-				}
-				ctrl = &controllerWrapper{ctrl: realCtrl}
+			client, err := resolveClient(cmd)
+			if err != nil {
+				return err
 			}
+			defer func() { _ = client.Close() }()
 
 			outputFormat, err := shared.ParseOutputFormat(cmd)
 			if err != nil {
@@ -76,56 +62,27 @@ func NewRealmCmd() *cobra.Command {
 			}
 
 			if name != "" {
-				// Get single realm
-				doc := &v1beta1.RealmDoc{
-					Metadata: v1beta1.RealmMetadata{
-						Name: name,
-					},
+				doc := v1beta1.RealmDoc{
+					Metadata: v1beta1.RealmMetadata{Name: name},
 				}
-
-				// Convert at boundary before calling controller
-				var realmInternal intmodel.Realm
-				realmInternal, _, err = apischeme.NormalizeRealm(*doc)
-				if err != nil {
-					return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-				}
-
-				var result controller.GetRealmResult
-				result, err = ctrl.GetRealm(realmInternal)
+				result, err := client.GetRealm(cmd.Context(), doc)
 				if err != nil {
 					if errors.Is(err, errdefs.ErrRealmNotFound) {
 						return fmt.Errorf("realm %q not found", name)
 					}
 					return err
 				}
-
 				if !result.MetadataExists {
 					return fmt.Errorf("realm %q not found", name)
 				}
-
-				// Convert result back to external for printing
-				var realmDoc *v1beta1.RealmDoc
-				realmDoc, err = fs.ConvertRealmToExternal(result.Realm)
-				if err != nil {
-					return err
-				}
-
-				return printRealm(cmd, realmDoc, outputFormat)
+				return printRealm(&result.Realm, outputFormat)
 			}
 
-			// List all realms
-			internalRealms, err := ctrl.ListRealms()
+			realms, err := client.ListRealms(cmd.Context())
 			if err != nil {
 				return err
 			}
-
-			// Convert internal realms to external for printing
-			externalRealms, err := fs.ConvertRealmListToExternal(internalRealms)
-			if err != nil {
-				return err
-			}
-
-			return printRealms(cmd, externalRealms, outputFormat)
+			return printRealms(cmd, realms, outputFormat)
 		},
 	}
 
@@ -134,33 +91,30 @@ func NewRealmCmd() *cobra.Command {
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
 
-	// Register autocomplete for positional argument
 	cmd.ValidArgsFunction = config.CompleteRealmNames
-
-	// Register autocomplete function for --output flag
 	_ = cmd.RegisterFlagCompletionFunc("output", config.CompleteOutputFormat)
-
-	// Register autocomplete function for -o flag
 	_ = cmd.RegisterFlagCompletionFunc("o", config.CompleteOutputFormat)
 
 	return cmd
 }
 
-func printRealm(_ *cobra.Command, realm interface{}, format shared.OutputFormat) error {
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
+	}
+	return kukeshared.ClientFromCmd(cmd)
+}
+
+func printRealm(realm *v1beta1.RealmDoc, format shared.OutputFormat) error {
 	switch format {
-	case shared.OutputFormatYAML:
-		return shared.PrintYAML(realm)
 	case shared.OutputFormatJSON:
 		return shared.PrintJSON(realm)
-	case shared.OutputFormatTable:
-		// For single resource, show full YAML by default
-		return shared.PrintYAML(realm)
 	default:
 		return shared.PrintYAML(realm)
 	}
 }
 
-func printRealms(cmd *cobra.Command, realms []*v1beta1.RealmDoc, format shared.OutputFormat) error {
+func printRealms(cmd *cobra.Command, realms []v1beta1.RealmDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
 		return shared.PrintYAML(realms)
@@ -171,40 +125,20 @@ func printRealms(cmd *cobra.Command, realms []*v1beta1.RealmDoc, format shared.O
 			cmd.Println("No realms found.")
 			return nil
 		}
-
 		headers := []string{"NAME", "NAMESPACE", "STATE", "CGROUP"}
 		rows := make([][]string, 0, len(realms))
-
-		for _, r := range realms {
+		for i := range realms {
+			r := &realms[i]
 			state := (&r.Status.State).String()
 			cgroup := r.Status.CgroupPath
 			if cgroup == "" {
 				cgroup = "-"
 			}
-
-			rows = append(rows, []string{
-				r.Metadata.Name,
-				r.Spec.Namespace,
-				state,
-				cgroup,
-			})
+			rows = append(rows, []string{r.Metadata.Name, r.Spec.Namespace, state, cgroup})
 		}
-
 		shared.PrintTable(cmd, headers, rows)
 		return nil
 	default:
 		return shared.PrintYAML(realms)
 	}
-}
-
-type controllerWrapper struct {
-	ctrl *controller.Exec
-}
-
-func (w *controllerWrapper) GetRealm(realm intmodel.Realm) (controller.GetRealmResult, error) {
-	return w.ctrl.GetRealm(realm)
-}
-
-func (w *controllerWrapper) ListRealms() ([]intmodel.Realm, error) {
-	return w.ctrl.ListRealms()
 }

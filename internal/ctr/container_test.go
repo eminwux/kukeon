@@ -80,7 +80,7 @@ func TestCreateContainerValidation(t *testing.T) {
 			name: "empty container ID",
 			spec: ctr.ContainerSpec{
 				ID:    "",
-				Image: "docker.io/library/busybox:latest",
+				Image: "registry.eminwux.com/busybox:latest",
 			},
 			wantErr: errdefs.ErrEmptyContainerID,
 		},
@@ -124,7 +124,7 @@ func TestStartContainerValidation(t *testing.T) {
 			name: "empty container ID",
 			containerSpec: ctr.ContainerSpec{
 				ID:    "",
-				Image: "docker.io/library/busybox:latest",
+				Image: "registry.eminwux.com/busybox:latest",
 			},
 			taskSpec: ctr.TaskSpec{},
 			wantErr:  errdefs.ErrEmptyContainerID,
@@ -141,18 +141,7 @@ func TestStartContainerValidation(t *testing.T) {
 				if err == nil {
 					t.Errorf("StartContainer() error = nil, want error %v", tt.wantErr)
 				} else if !errors.Is(err, tt.wantErr) {
-					// Check if error is wrapped
-					var wrappedErr error
-					if err.Error() != "" {
-						// Error might be wrapped, check if it contains the expected error
-						if !errors.Is(err, tt.wantErr) {
-							// Check if it's a different but expected validation error
-							if !errors.Is(err, errdefs.ErrEmptyContainerID) {
-								t.Logf("StartContainer() error = %v (may be expected if container not found)", err)
-							}
-						}
-					}
-					_ = wrappedErr
+					t.Errorf("StartContainer() error = %v, want %v", err, tt.wantErr)
 				}
 			}
 		})
@@ -186,10 +175,7 @@ func TestStopContainerValidation(t *testing.T) {
 				if err == nil {
 					t.Errorf("StopContainer() error = nil, want error %v", tt.wantErr)
 				} else if !errors.Is(err, tt.wantErr) {
-					// Error might be wrapped
-					if !errors.Is(err, errdefs.ErrEmptyContainerID) {
-						t.Logf("StopContainer() error = %v (may be expected if container/task not found)", err)
-					}
+					t.Errorf("StopContainer() error = %v, want %v", err, tt.wantErr)
 				}
 			}
 		})
@@ -208,7 +194,7 @@ func TestCreateContainerFromSpecValidation(t *testing.T) {
 			name: "empty container ID",
 			spec: intmodel.ContainerSpec{
 				ID:    "",
-				Image: "docker.io/library/busybox:latest",
+				Image: "registry.eminwux.com/busybox:latest",
 			},
 			wantErr: errdefs.ErrEmptyContainerID,
 		},
@@ -224,7 +210,7 @@ func TestCreateContainerFromSpecValidation(t *testing.T) {
 			name: "empty cell name",
 			spec: intmodel.ContainerSpec{
 				ID:        "test-container",
-				Image:     "docker.io/library/busybox:latest",
+				Image:     "registry.eminwux.com/busybox:latest",
 				CellName:  "",
 				SpaceName: "space1",
 				RealmName: "realm1",
@@ -236,7 +222,7 @@ func TestCreateContainerFromSpecValidation(t *testing.T) {
 			name: "empty space name",
 			spec: intmodel.ContainerSpec{
 				ID:        "test-container",
-				Image:     "docker.io/library/busybox:latest",
+				Image:     "registry.eminwux.com/busybox:latest",
 				CellName:  "cell1",
 				SpaceName: "",
 				RealmName: "realm1",
@@ -248,7 +234,7 @@ func TestCreateContainerFromSpecValidation(t *testing.T) {
 			name: "empty realm name",
 			spec: intmodel.ContainerSpec{
 				ID:        "test-container",
-				Image:     "docker.io/library/busybox:latest",
+				Image:     "registry.eminwux.com/busybox:latest",
 				CellName:  "cell1",
 				SpaceName: "space1",
 				RealmName: "",
@@ -260,7 +246,7 @@ func TestCreateContainerFromSpecValidation(t *testing.T) {
 			name: "empty stack name",
 			spec: intmodel.ContainerSpec{
 				ID:        "test-container",
-				Image:     "docker.io/library/busybox:latest",
+				Image:     "registry.eminwux.com/busybox:latest",
 				CellName:  "cell1",
 				SpaceName: "space1",
 				RealmName: "realm1",
