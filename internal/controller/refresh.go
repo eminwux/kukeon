@@ -39,7 +39,6 @@ type RefreshResult struct {
 
 // RefreshAll refreshes all metadata entities by introspecting containerd and CNI.
 func (b *Exec) RefreshAll() (RefreshResult, error) {
-	defer b.runner.Close()
 	result := RefreshResult{
 		RealmsFound:       []string{},
 		SpacesFound:       []string{},

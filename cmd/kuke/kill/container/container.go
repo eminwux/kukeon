@@ -21,29 +21,22 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
-	"github.com/eminwux/kukeon/cmd/kuke/kill/shared"
-	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/controller"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-type containerController interface {
-	KillContainer(container intmodel.Container) (controller.KillContainerResult, error)
-}
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
-// NewContainerCmd builds the `kuke kill container` subcommand.
 func NewContainerCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "container [name]",
 		Aliases:       []string{"co"},
-		Short:         "Kill a container",
+		Short:         "Immediately force-kill a container",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -67,24 +60,10 @@ func NewContainerCmd() *cobra.Command {
 				return fmt.Errorf("%w (--cell)", errdefs.ErrCellNameRequired)
 			}
 
-			var ctrl containerController
-			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(containerController); ok {
-				ctrl = mockCtrl
-			} else {
-				realCtrl, err := shared.ControllerFromCmd(cmd)
-				if err != nil {
-					return err
-				}
-				ctrl = realCtrl
-			}
-
-			containerDoc := &v1beta1.ContainerDoc{
+			doc := v1beta1.ContainerDoc{
 				APIVersion: v1beta1.APIVersionV1Beta1,
 				Kind:       v1beta1.KindContainer,
-				Metadata: v1beta1.ContainerMetadata{
-					Name:   name,
-					Labels: make(map[string]string),
-				},
+				Metadata:   v1beta1.ContainerMetadata{Name: name, Labels: map[string]string{}},
 				Spec: v1beta1.ContainerSpec{
 					ID:      name,
 					RealmID: realm,
@@ -94,27 +73,28 @@ func NewContainerCmd() *cobra.Command {
 				},
 			}
 
-			// Convert at boundary before calling controller
-			containerInternal, _, err := apischeme.NormalizeContainer(*containerDoc)
+			client, err := resolveClient(cmd)
 			if err != nil {
-				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				return err
 			}
+			defer func() { _ = client.Close() }()
 
-			result, err := ctrl.KillContainer(containerInternal)
+			result, err := client.KillContainer(cmd.Context(), doc)
 			if err != nil {
 				return err
 			}
 
-			// Use container from result for output
 			containerName := result.Container.Metadata.Name
-			cellName := result.Container.Spec.CellName
+			if containerName == "" {
+				containerName = result.Container.Spec.ID
+			}
 			if containerName == "" {
 				containerName = name
 			}
+			cellName := result.Container.Spec.CellID
 			if cellName == "" {
 				cellName = cell
 			}
-
 			cmd.Printf("Killed container %q from cell %q\n", containerName, cellName)
 			return nil
 		},
@@ -122,13 +102,10 @@ func NewContainerCmd() *cobra.Command {
 
 	cmd.Flags().String("realm", "", "Realm that owns the container")
 	_ = viper.BindPFlag(config.KUKE_KILL_CONTAINER_REALM.ViperKey, cmd.Flags().Lookup("realm"))
-
 	cmd.Flags().String("space", "", "Space that owns the container")
 	_ = viper.BindPFlag(config.KUKE_KILL_CONTAINER_SPACE.ViperKey, cmd.Flags().Lookup("space"))
-
 	cmd.Flags().String("stack", "", "Stack that owns the container")
 	_ = viper.BindPFlag(config.KUKE_KILL_CONTAINER_STACK.ViperKey, cmd.Flags().Lookup("stack"))
-
 	cmd.Flags().String("cell", "", "Cell that owns the container")
 	_ = viper.BindPFlag(config.KUKE_KILL_CONTAINER_CELL.ViperKey, cmd.Flags().Lookup("cell"))
 
@@ -139,4 +116,11 @@ func NewContainerCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("cell", config.CompleteCellNames)
 
 	return cmd
+}
+
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
+	}
+	return kukeshared.ClientFromCmd(cmd)
 }

@@ -97,8 +97,6 @@ func (r ResourceResult) MarshalYAML() (interface{}, error) {
 // Documents are sorted: Realm → Space → Stack → Cell → Container.
 // Returns a summary of actions taken for each resource.
 func (b *Exec) ApplyDocuments(docs []parser.Document) (ApplyResult, error) {
-	defer b.runner.Close()
-
 	result := ApplyResult{
 		Resources: make([]ResourceResult, 0, len(docs)),
 	}

@@ -19,19 +19,15 @@ package apply
 import (
 	"errors"
 	"fmt"
+	"io"
 
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
-	"github.com/eminwux/kukeon/internal/apply/parser"
-	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/spf13/cobra"
 )
 
-type applyController interface {
-	ApplyDocuments(docs []parser.Document) (controller.ApplyResult, error)
-}
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
 func NewApplyCmd() *cobra.Command {
@@ -56,52 +52,28 @@ func NewApplyCmd() *cobra.Command {
 				return err
 			}
 
-			// Read input
 			reader, cleanup, err := kukshared.ReadFileOrStdin(file)
 			if err != nil {
 				return err
 			}
-			defer func() {
-				if cleanupErr := cleanup(); cleanupErr != nil {
-					// Log cleanup error but don't fail the operation
-					_ = cleanupErr
-				}
-			}()
+			defer func() { _ = cleanup() }()
 
-			// Parse and validate documents
-			docs, validationErrors, err := kukshared.ParseAndValidateDocuments(reader)
+			rawYAML, err := io.ReadAll(reader)
+			if err != nil {
+				return fmt.Errorf("failed to read input: %w", err)
+			}
+
+			client, err := resolveClient(cmd)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = client.Close() }()
+
+			result, err := client.ApplyDocuments(cmd.Context(), rawYAML)
 			if err != nil {
 				return err
 			}
 
-			// Report validation errors
-			if len(validationErrors) > 0 {
-				return kukshared.FormatValidationErrors(validationErrors)
-			}
-
-			if len(docs) == 0 {
-				return errors.New("no valid documents found in input")
-			}
-
-			// Get controller
-			var ctrl applyController
-			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(applyController); ok {
-				ctrl = mockCtrl
-			} else {
-				realCtrl, ctrlErr := kukshared.ControllerFromCmd(cmd)
-				if ctrlErr != nil {
-					return ctrlErr
-				}
-				ctrl = realCtrl
-			}
-
-			// Apply documents
-			result, err := ctrl.ApplyDocuments(docs)
-			if err != nil {
-				return fmt.Errorf("failed to apply documents: %w", err)
-			}
-
-			// Print results
 			if output == "json" || output == "yaml" {
 				return printApplyResultJSON(cmd, result, output)
 			}
@@ -111,13 +83,19 @@ func NewApplyCmd() *cobra.Command {
 
 	cmd.Flags().StringP("file", "f", "", "File to read YAML from (use - for stdin)")
 	_ = cmd.MarkFlagRequired("file")
-
 	cmd.Flags().StringP("output", "o", "", "Output format: json, yaml (default: human-readable)")
 
 	return cmd
 }
 
-func printApplyResult(cmd *cobra.Command, result controller.ApplyResult) error {
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
+	}
+	return kukshared.ClientFromCmd(cmd)
+}
+
+func printApplyResult(cmd *cobra.Command, result kukeonv1.ApplyDocumentsResult) error {
 	hasFailures := false
 	for _, resource := range result.Resources {
 		switch resource.Action {
@@ -133,8 +111,8 @@ func printApplyResult(cmd *cobra.Command, result controller.ApplyResult) error {
 		case "failed":
 			hasFailures = true
 			cmd.Printf("%s %q: failed\n", resource.Kind, resource.Name)
-			if resource.Error != nil {
-				cmd.Printf("  Error: %v\n", resource.Error)
+			if resource.Error != "" {
+				cmd.Printf("  Error: %s\n", resource.Error)
 			}
 		}
 	}
@@ -146,12 +124,11 @@ func printApplyResult(cmd *cobra.Command, result controller.ApplyResult) error {
 	return nil
 }
 
-func printApplyResultJSON(cmd *cobra.Command, result controller.ApplyResult, format string) error {
+func printApplyResultJSON(cmd *cobra.Command, result kukeonv1.ApplyDocumentsResult, format string) error {
 	output := struct {
-		Resources []controller.ResourceResult `json:"resources"`
+		Resources []kukeonv1.ApplyResourceResult `json:"resources" yaml:"resources"`
 	}{
 		Resources: result.Resources,
 	}
-
 	return kukshared.PrintJSONOrYAML(cmd, output, format)
 }

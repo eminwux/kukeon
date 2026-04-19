@@ -28,33 +28,34 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	cell "github.com/eminwux/kukeon/cmd/kuke/create/cell"
 	"github.com/eminwux/kukeon/cmd/types"
-	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
+func newCellDoc(name, realm, space, stack string) v1beta1.CellDoc {
+	return v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: name},
+		Spec: v1beta1.CellSpec{
+			RealmID: realm,
+			SpaceID: space,
+			StackID: stack,
+		},
+	}
+}
+
 func TestPrintCellResult(t *testing.T) {
 	tests := []struct {
 		name           string
-		result         controller.CreateCellResult
+		result         kukeonv1.CreateCellResult
 		expectedOutput []string
 	}{
 		{
 			name: "all resources created",
-			result: controller.CreateCellResult{
-				Cell: intmodel.Cell{
-					Metadata: intmodel.CellMetadata{
-						Name: "test-cell",
-					},
-					Spec: intmodel.CellSpec{
-						RealmName: "realm-a",
-						SpaceName: "space-a",
-						StackName: "stack-a",
-					},
-				},
+			result: kukeonv1.CreateCellResult{
+				Cell:                    newCellDoc("test-cell", "realm-a", "space-a", "stack-a"),
 				Created:                 true,
 				MetadataExistsPost:      true,
 				CgroupCreated:           true,
@@ -74,17 +75,8 @@ func TestPrintCellResult(t *testing.T) {
 		},
 		{
 			name: "all resources already existed",
-			result: controller.CreateCellResult{
-				Cell: intmodel.Cell{
-					Metadata: intmodel.CellMetadata{
-						Name: "existing-cell",
-					},
-					Spec: intmodel.CellSpec{
-						RealmName: "realm-b",
-						SpaceName: "space-b",
-						StackName: "stack-b",
-					},
-				},
+			result: kukeonv1.CreateCellResult{
+				Cell:                    newCellDoc("existing-cell", "realm-b", "space-b", "stack-b"),
 				Created:                 false,
 				MetadataExistsPost:      true,
 				CgroupExistsPost:        true,
@@ -102,17 +94,8 @@ func TestPrintCellResult(t *testing.T) {
 		},
 		{
 			name: "mixed states",
-			result: controller.CreateCellResult{
-				Cell: intmodel.Cell{
-					Metadata: intmodel.CellMetadata{
-						Name: "mixed-cell",
-					},
-					Spec: intmodel.CellSpec{
-						RealmName: "realm-c",
-						SpaceName: "space-c",
-						StackName: "stack-c",
-					},
-				},
+			result: kukeonv1.CreateCellResult{
+				Cell:                    newCellDoc("mixed-cell", "realm-c", "space-c", "stack-c"),
 				Created:                 false,
 				MetadataExistsPost:      true,
 				CgroupCreated:           true,
@@ -131,17 +114,8 @@ func TestPrintCellResult(t *testing.T) {
 		},
 		{
 			name: "missing resources",
-			result: controller.CreateCellResult{
-				Cell: intmodel.Cell{
-					Metadata: intmodel.CellMetadata{
-						Name: "missing-cell",
-					},
-					Spec: intmodel.CellSpec{
-						RealmName: "realm-d",
-						SpaceName: "space-d",
-						StackName: "stack-d",
-					},
-				},
+			result: kukeonv1.CreateCellResult{
+				Cell:                    newCellDoc("missing-cell", "realm-d", "space-d", "stack-d"),
 				Created:                 false,
 				MetadataExistsPost:      false,
 				CgroupExistsPost:        false,
@@ -159,17 +133,8 @@ func TestPrintCellResult(t *testing.T) {
 		},
 		{
 			name: "single container created",
-			result: controller.CreateCellResult{
-				Cell: intmodel.Cell{
-					Metadata: intmodel.CellMetadata{
-						Name: "single-container-cell",
-					},
-					Spec: intmodel.CellSpec{
-						RealmName: "realm-e",
-						SpaceName: "space-e",
-						StackName: "stack-e",
-					},
-				},
+			result: kukeonv1.CreateCellResult{
+				Cell:                    newCellDoc("single-container-cell", "realm-e", "space-e", "stack-e"),
 				Created:                 true,
 				MetadataExistsPost:      true,
 				CgroupCreated:           true,
@@ -177,12 +142,8 @@ func TestPrintCellResult(t *testing.T) {
 				RootContainerCreated:    true,
 				RootContainerExistsPost: true,
 				Started:                 true,
-				Containers: []controller.ContainerCreationOutcome{
-					{
-						Name:       "app",
-						ExistsPost: true,
-						Created:    true,
-					},
+				Containers: []kukeonv1.ContainerCreationOutcome{
+					{Name: "app", ExistsPost: true, Created: true},
 				},
 			},
 			expectedOutput: []string{
@@ -196,17 +157,8 @@ func TestPrintCellResult(t *testing.T) {
 		},
 		{
 			name: "multiple containers with mixed states",
-			result: controller.CreateCellResult{
-				Cell: intmodel.Cell{
-					Metadata: intmodel.CellMetadata{
-						Name: "multi-container-cell",
-					},
-					Spec: intmodel.CellSpec{
-						RealmName: "realm-f",
-						SpaceName: "space-f",
-						StackName: "stack-f",
-					},
-				},
+			result: kukeonv1.CreateCellResult{
+				Cell:                    newCellDoc("multi-container-cell", "realm-f", "space-f", "stack-f"),
 				Created:                 true,
 				MetadataExistsPost:      true,
 				CgroupCreated:           true,
@@ -214,22 +166,10 @@ func TestPrintCellResult(t *testing.T) {
 				RootContainerCreated:    true,
 				RootContainerExistsPost: true,
 				Started:                 false,
-				Containers: []controller.ContainerCreationOutcome{
-					{
-						Name:       "app",
-						ExistsPost: true,
-						Created:    true,
-					},
-					{
-						Name:       "worker",
-						ExistsPost: true,
-						Created:    false,
-					},
-					{
-						Name:       "cache",
-						ExistsPost: false,
-						Created:    false,
-					},
+				Containers: []kukeonv1.ContainerCreationOutcome{
+					{Name: "app", ExistsPost: true, Created: true},
+					{Name: "worker", ExistsPost: true, Created: false},
+					{Name: "cache", ExistsPost: false, Created: false},
 				},
 			},
 			expectedOutput: []string{
@@ -248,7 +188,7 @@ func TestPrintCellResult(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd, buf := newTestCommand()
-			cell.PrintCellResult(cmd, tt.result, v1beta1.APIVersionV1Beta1)
+			cell.PrintCellResult(cmd, tt.result)
 			output := buf.String()
 
 			for _, expected := range tt.expectedOutput {
@@ -257,7 +197,6 @@ func TestPrintCellResult(t *testing.T) {
 				}
 			}
 
-			// Verify cell header is printed exactly once
 			headerCount := strings.Count(output, `Cell "`)
 			if headerCount != 1 {
 				t.Errorf("expected exactly one cell header, got %d", headerCount)
@@ -267,18 +206,16 @@ func TestPrintCellResult(t *testing.T) {
 }
 
 func TestNewCellCmdRunE(t *testing.T) {
-	t.Cleanup(func() {
-		viper.Reset()
-	})
+	t.Cleanup(viper.Reset)
 
 	tests := []struct {
 		name           string
 		args           []string
 		setup          func(t *testing.T, cmd *cobra.Command)
-		controllerFn   func(cell intmodel.Cell) (controller.CreateCellResult, error)
+		clientFn       func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error)
 		wantErr        string
 		wantCallCreate bool
-		wantCell       intmodel.Cell
+		wantDoc        v1beta1.CellDoc
 		wantOutput     []string
 	}{
 		{
@@ -289,9 +226,9 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			controllerFn: func(cell intmodel.Cell) (controller.CreateCellResult, error) {
-				return controller.CreateCellResult{
-					Cell:                    cell,
+			clientFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+				return kukeonv1.CreateCellResult{
+					Cell:                    doc,
 					Created:                 true,
 					MetadataExistsPost:      true,
 					CgroupCreated:           true,
@@ -302,16 +239,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 				}, nil
 			},
 			wantCallCreate: true,
-			wantCell: intmodel.Cell{
-				Metadata: intmodel.CellMetadata{
-					Name: "test-cell",
-				},
-				Spec: intmodel.CellSpec{
-					RealmName: "realm-a",
-					SpaceName: "space-a",
-					StackName: "stack-a",
-				},
-			},
+			wantDoc:        newCellDoc("test-cell", "realm-a", "space-a", "stack-a"),
 			wantOutput: []string{
 				`Cell "test-cell" (realm "realm-a", space "space-a", stack "stack-a")`,
 			},
@@ -324,9 +252,9 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-b")
 				setFlag(t, cmd, "stack", "stack-b")
 			},
-			controllerFn: func(cell intmodel.Cell) (controller.CreateCellResult, error) {
-				return controller.CreateCellResult{
-					Cell:                    cell,
+			clientFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+				return kukeonv1.CreateCellResult{
+					Cell:                    doc,
 					Created:                 true,
 					MetadataExistsPost:      true,
 					CgroupCreated:           true,
@@ -337,16 +265,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 				}, nil
 			},
 			wantCallCreate: true,
-			wantCell: intmodel.Cell{
-				Metadata: intmodel.CellMetadata{
-					Name: "viper-cell",
-				},
-				Spec: intmodel.CellSpec{
-					RealmName: "realm-b",
-					SpaceName: "space-b",
-					StackName: "stack-b",
-				},
-			},
+			wantDoc:        newCellDoc("viper-cell", "realm-b", "space-b", "stack-b"),
 			wantOutput: []string{
 				`Cell "viper-cell" (realm "realm-b", space "space-b", stack "stack-b")`,
 			},
@@ -359,9 +278,9 @@ func TestNewCellCmdRunE(t *testing.T) {
 				viper.Set(config.KUKE_CREATE_CELL_SPACE.ViperKey, "space-c")
 				viper.Set(config.KUKE_CREATE_CELL_STACK.ViperKey, "stack-c")
 			},
-			controllerFn: func(cell intmodel.Cell) (controller.CreateCellResult, error) {
-				return controller.CreateCellResult{
-					Cell:                    cell,
+			clientFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+				return kukeonv1.CreateCellResult{
+					Cell:                    doc,
 					Created:                 false,
 					MetadataExistsPost:      true,
 					CgroupExistsPost:        true,
@@ -370,25 +289,14 @@ func TestNewCellCmdRunE(t *testing.T) {
 				}, nil
 			},
 			wantCallCreate: true,
-			wantCell: intmodel.Cell{
-				Metadata: intmodel.CellMetadata{
-					Name: "all-viper-cell",
-				},
-				Spec: intmodel.CellSpec{
-					RealmName: "realm-c",
-					SpaceName: "space-c",
-					StackName: "stack-c",
-				},
-			},
+			wantDoc:        newCellDoc("all-viper-cell", "realm-c", "space-c", "stack-c"),
 			wantOutput: []string{
 				`Cell "all-viper-cell" (realm "realm-c", space "space-c", stack "stack-c")`,
 			},
 		},
 		{
-			name: "error: missing name",
-			setup: func(_ *testing.T, _ *cobra.Command) {
-				// Don't set name in args or viper
-			},
+			name:           "error: missing name",
+			setup:          func(_ *testing.T, _ *cobra.Command) {},
 			wantErr:        "cell name is required",
 			wantCallCreate: false,
 		},
@@ -399,9 +307,9 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			controllerFn: func(cell intmodel.Cell) (controller.CreateCellResult, error) {
-				return controller.CreateCellResult{
-					Cell:                    cell,
+			clientFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+				return kukeonv1.CreateCellResult{
+					Cell:                    doc,
 					Created:                 true,
 					MetadataExistsPost:      true,
 					CgroupCreated:           true,
@@ -411,16 +319,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 				}, nil
 			},
 			wantCallCreate: true,
-			wantCell: intmodel.Cell{
-				Metadata: intmodel.CellMetadata{
-					Name: "test-cell",
-				},
-				Spec: intmodel.CellSpec{
-					RealmName: "default",
-					SpaceName: "space-a",
-					StackName: "stack-a",
-				},
-			},
+			wantDoc:        newCellDoc("test-cell", "default", "space-a", "stack-a"),
 		},
 		{
 			name: "uses default space when space flag not set",
@@ -429,9 +328,9 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "realm", "realm-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			controllerFn: func(cell intmodel.Cell) (controller.CreateCellResult, error) {
-				return controller.CreateCellResult{
-					Cell:                    cell,
+			clientFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+				return kukeonv1.CreateCellResult{
+					Cell:                    doc,
 					Created:                 true,
 					MetadataExistsPost:      true,
 					CgroupCreated:           true,
@@ -441,16 +340,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 				}, nil
 			},
 			wantCallCreate: true,
-			wantCell: intmodel.Cell{
-				Metadata: intmodel.CellMetadata{
-					Name: "test-cell",
-				},
-				Spec: intmodel.CellSpec{
-					RealmName: "realm-a",
-					SpaceName: "default",
-					StackName: "stack-a",
-				},
-			},
+			wantDoc:        newCellDoc("test-cell", "realm-a", "default", "stack-a"),
 		},
 		{
 			name: "uses default stack when stack flag not set",
@@ -459,9 +349,9 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "realm", "realm-a")
 				setFlag(t, cmd, "space", "space-a")
 			},
-			controllerFn: func(cell intmodel.Cell) (controller.CreateCellResult, error) {
-				return controller.CreateCellResult{
-					Cell:                    cell,
+			clientFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+				return kukeonv1.CreateCellResult{
+					Cell:                    doc,
 					Created:                 true,
 					MetadataExistsPost:      true,
 					CgroupCreated:           true,
@@ -471,32 +361,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 				}, nil
 			},
 			wantCallCreate: true,
-			wantCell: intmodel.Cell{
-				Metadata: intmodel.CellMetadata{
-					Name: "test-cell",
-				},
-				Spec: intmodel.CellSpec{
-					RealmName: "realm-a",
-					SpaceName: "space-a",
-					StackName: "default",
-				},
-			},
-		},
-		{
-			name: "error: logger not in context",
-			args: []string{"test-cell"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				cmd.SetContext(context.Background())
-				setFlag(t, cmd, "realm", "realm-a")
-				setFlag(t, cmd, "space", "space-a")
-				setFlag(t, cmd, "stack", "stack-a")
-			},
-			controllerFn: func(_ intmodel.Cell) (controller.CreateCellResult, error) {
-				// This shouldn't be called, but if it is, return an error
-				return controller.CreateCellResult{}, errors.New("unexpected call")
-			},
-			wantErr:        "logger not found",
-			wantCallCreate: false,
+			wantDoc:        newCellDoc("test-cell", "realm-a", "space-a", "default"),
 		},
 		{
 			name: "error: CreateCell fails",
@@ -506,21 +371,12 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			controllerFn: func(_ intmodel.Cell) (controller.CreateCellResult, error) {
-				return controller.CreateCellResult{}, errdefs.ErrCreateCell
+			clientFn: func(_ v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+				return kukeonv1.CreateCellResult{}, errdefs.ErrCreateCell
 			},
 			wantErr:        "failed to create cell",
 			wantCallCreate: true,
-			wantCell: intmodel.Cell{
-				Metadata: intmodel.CellMetadata{
-					Name: "test-cell",
-				},
-				Spec: intmodel.CellSpec{
-					RealmName: "realm-a",
-					SpaceName: "space-a",
-					StackName: "stack-a",
-				},
-			},
+			wantDoc:        newCellDoc("test-cell", "realm-a", "space-a", "stack-a"),
 		},
 		{
 			name: "error: realm with whitespace trimmed",
@@ -530,8 +386,15 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			wantErr:        "realm name is required",
-			wantCallCreate: false,
+			clientFn: func(_ v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+				return kukeonv1.CreateCellResult{}, errors.New("unexpected call")
+			},
+			// With blank realm, local path short-circuits in the controller;
+			// but through the mock client we also see the empty RealmID get through
+			// since normalization runs server-side. Assert call path + empty realm.
+			wantCallCreate: true,
+			wantDoc:        newCellDoc("test-cell", "", "space-a", "stack-a"),
+			wantErr:        "unexpected call",
 		},
 		{
 			name: "success: realm with whitespace trimmed",
@@ -541,9 +404,9 @@ func TestNewCellCmdRunE(t *testing.T) {
 				setFlag(t, cmd, "space", "  space-a  ")
 				setFlag(t, cmd, "stack", "  stack-a  ")
 			},
-			controllerFn: func(cell intmodel.Cell) (controller.CreateCellResult, error) {
-				return controller.CreateCellResult{
-					Cell:                    cell,
+			clientFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+				return kukeonv1.CreateCellResult{
+					Cell:                    doc,
 					Created:                 true,
 					MetadataExistsPost:      true,
 					CgroupCreated:           true,
@@ -554,16 +417,7 @@ func TestNewCellCmdRunE(t *testing.T) {
 				}, nil
 			},
 			wantCallCreate: true,
-			wantCell: intmodel.Cell{
-				Metadata: intmodel.CellMetadata{
-					Name: "test-cell",
-				},
-				Spec: intmodel.CellSpec{
-					RealmName: "realm-a",
-					SpaceName: "space-a",
-					StackName: "stack-a",
-				},
-			},
+			wantDoc:        newCellDoc("test-cell", "realm-a", "space-a", "stack-a"),
 		},
 	}
 
@@ -572,32 +426,24 @@ func TestNewCellCmdRunE(t *testing.T) {
 			t.Cleanup(viper.Reset)
 
 			var createCalled bool
-			var createCell intmodel.Cell
+			var createDoc v1beta1.CellDoc
 
 			cmd := cell.NewCellCmd()
 			cmd.SetOut(&bytes.Buffer{})
 			cmd.SetErr(&bytes.Buffer{})
 
-			ctx := context.Background()
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 
-			// Inject mock controller via context if needed
-			if tt.name != "error: logger not in context" {
-				// Set up logger context
-				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-				ctx = context.WithValue(ctx, types.CtxLogger, logger)
-
-				// If we need to mock the controller, inject it via context
-				if tt.controllerFn != nil {
-					fakeCtrl := &fakeControllerExec{
-						createCellFn: func(cell intmodel.Cell) (controller.CreateCellResult, error) {
-							createCalled = true
-							createCell = cell
-							return tt.controllerFn(cell)
-						},
-					}
-					// Inject mock controller into context using the exported key
-					ctx = context.WithValue(ctx, cell.MockControllerKey{}, fakeCtrl)
+			if tt.clientFn != nil {
+				fake := &fakeClient{
+					createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+						createCalled = true
+						createDoc = doc
+						return tt.clientFn(doc)
+					},
 				}
+				ctx = context.WithValue(ctx, cell.MockControllerKey{}, kukeonv1.Client(fake))
 			}
 
 			cmd.SetContext(ctx)
@@ -625,21 +471,18 @@ func TestNewCellCmdRunE(t *testing.T) {
 				t.Errorf("CreateCell called=%v want=%v", createCalled, tt.wantCallCreate)
 			}
 
-			if tt.wantCell.Metadata.Name != "" {
-				if !createCalled {
-					t.Fatal("CreateCell not called, but wantCell specified")
+			if tt.wantCallCreate {
+				if createDoc.Metadata.Name != tt.wantDoc.Metadata.Name {
+					t.Errorf("CreateCell Name=%q want=%q", createDoc.Metadata.Name, tt.wantDoc.Metadata.Name)
 				}
-				if createCell.Metadata.Name != tt.wantCell.Metadata.Name {
-					t.Errorf("CreateCell Name=%q want=%q", createCell.Metadata.Name, tt.wantCell.Metadata.Name)
+				if createDoc.Spec.RealmID != tt.wantDoc.Spec.RealmID {
+					t.Errorf("CreateCell RealmID=%q want=%q", createDoc.Spec.RealmID, tt.wantDoc.Spec.RealmID)
 				}
-				if createCell.Spec.RealmName != tt.wantCell.Spec.RealmName {
-					t.Errorf("CreateCell RealmName=%q want=%q", createCell.Spec.RealmName, tt.wantCell.Spec.RealmName)
+				if createDoc.Spec.SpaceID != tt.wantDoc.Spec.SpaceID {
+					t.Errorf("CreateCell SpaceID=%q want=%q", createDoc.Spec.SpaceID, tt.wantDoc.Spec.SpaceID)
 				}
-				if createCell.Spec.SpaceName != tt.wantCell.Spec.SpaceName {
-					t.Errorf("CreateCell SpaceName=%q want=%q", createCell.Spec.SpaceName, tt.wantCell.Spec.SpaceName)
-				}
-				if createCell.Spec.StackName != tt.wantCell.Spec.StackName {
-					t.Errorf("CreateCell StackName=%q want=%q", createCell.Spec.StackName, tt.wantCell.Spec.StackName)
+				if createDoc.Spec.StackID != tt.wantDoc.Spec.StackID {
+					t.Errorf("CreateCell StackID=%q want=%q", createDoc.Spec.StackID, tt.wantDoc.Spec.StackID)
 				}
 			}
 
@@ -655,15 +498,17 @@ func TestNewCellCmdRunE(t *testing.T) {
 	}
 }
 
-type fakeControllerExec struct {
-	createCellFn func(cell intmodel.Cell) (controller.CreateCellResult, error)
+type fakeClient struct {
+	kukeonv1.FakeClient
+
+	createCellFn func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error)
 }
 
-func (f *fakeControllerExec) CreateCell(cell intmodel.Cell) (controller.CreateCellResult, error) {
+func (f *fakeClient) CreateCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 	if f.createCellFn == nil {
-		return controller.CreateCellResult{}, errors.New("unexpected CreateCell call")
+		return kukeonv1.CreateCellResult{}, errors.New("unexpected CreateCell call")
 	}
-	return f.createCellFn(cell)
+	return f.createCellFn(doc)
 }
 
 func newTestCommand() (*cobra.Command, *bytes.Buffer) {
@@ -682,10 +527,8 @@ func setFlag(t *testing.T, cmd *cobra.Command, name, value string) {
 }
 
 func TestNewCellCmd_AutocompleteRegistration(t *testing.T) {
-	// Test that autocomplete functions are properly registered for flags
 	cmd := cell.NewCellCmd()
 
-	// Test that realm flag exists
 	realmFlag := cmd.Flags().Lookup("realm")
 	if realmFlag == nil {
 		t.Fatal("expected 'realm' flag to exist")
@@ -694,7 +537,6 @@ func TestNewCellCmd_AutocompleteRegistration(t *testing.T) {
 		t.Errorf("unexpected realm flag usage: %q", realmFlag.Usage)
 	}
 
-	// Test that space flag exists
 	spaceFlag := cmd.Flags().Lookup("space")
 	if spaceFlag == nil {
 		t.Fatal("expected 'space' flag to exist")
@@ -703,7 +545,6 @@ func TestNewCellCmd_AutocompleteRegistration(t *testing.T) {
 		t.Errorf("unexpected space flag usage: %q", spaceFlag.Usage)
 	}
 
-	// Test that stack flag exists
 	stackFlag := cmd.Flags().Lookup("stack")
 	if stackFlag == nil {
 		t.Fatal("expected 'stack' flag to exist")

@@ -22,20 +22,15 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/purge/shared"
-	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/controller"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-type cellController interface {
-	PurgeCell(cell intmodel.Cell, force, cascade bool) (controller.PurgeCellResult, error)
-}
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
 func NewCellCmd() *cobra.Command {
@@ -47,18 +42,6 @@ func NewCellCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Check for mock controller in context (for testing)
-			var ctrl cellController
-			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(cellController); ok {
-				ctrl = mockCtrl
-			} else {
-				realCtrl, err := shared.ControllerFromCmd(cmd)
-				if err != nil {
-					return err
-				}
-				ctrl = &controllerWrapper{ctrl: realCtrl}
-			}
-
 			name := strings.TrimSpace(args[0])
 			realm := strings.TrimSpace(viper.GetString(config.KUKE_PURGE_CELL_REALM.ViperKey))
 			space := strings.TrimSpace(viper.GetString(config.KUKE_PURGE_CELL_SPACE.ViperKey))
@@ -75,12 +58,10 @@ func NewCellCmd() *cobra.Command {
 			}
 
 			force := shared.ParseForceFlag(cmd)
-			cascade := shared.ParseCascadeFlag(cmd) // Ignored for cells, but parsed for consistency
+			cascade := shared.ParseCascadeFlag(cmd)
 
-			doc := &v1beta1.CellDoc{
-				Metadata: v1beta1.CellMetadata{
-					Name: name,
-				},
+			doc := v1beta1.CellDoc{
+				Metadata: v1beta1.CellMetadata{Name: name},
 				Spec: v1beta1.CellSpec{
 					RealmID: realm,
 					SpaceID: space,
@@ -88,23 +69,22 @@ func NewCellCmd() *cobra.Command {
 				},
 			}
 
-			// Convert at boundary before calling controller
-			cellInternal, _, err := apischeme.NormalizeCell(*doc)
+			client, err := resolveClient(cmd)
 			if err != nil {
-				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				return err
 			}
+			defer func() { _ = client.Close() }()
 
-			result, err := ctrl.PurgeCell(cellInternal, force, cascade)
+			result, err := client.PurgeCell(cmd.Context(), doc, force, cascade)
 			if err != nil {
 				return err
 			}
 
-			// Use cell from result for output
 			cellName := result.Cell.Metadata.Name
-			stackName := result.Cell.Spec.StackName
 			if cellName == "" {
 				cellName = name
 			}
+			stackName := result.Cell.Spec.StackID
 			if stackName == "" {
 				stackName = stack
 			}
@@ -119,17 +99,12 @@ func NewCellCmd() *cobra.Command {
 
 	cmd.Flags().String("realm", "", "Realm that owns the cell")
 	_ = viper.BindPFlag(config.KUKE_PURGE_CELL_REALM.ViperKey, cmd.Flags().Lookup("realm"))
-
 	cmd.Flags().String("space", "", "Space that owns the cell")
 	_ = viper.BindPFlag(config.KUKE_PURGE_CELL_SPACE.ViperKey, cmd.Flags().Lookup("space"))
-
 	cmd.Flags().String("stack", "", "Stack that owns the cell")
 	_ = viper.BindPFlag(config.KUKE_PURGE_CELL_STACK.ViperKey, cmd.Flags().Lookup("stack"))
 
-	// Register autocomplete for positional argument
 	cmd.ValidArgsFunction = config.CompleteCellNames
-
-	// Register autocomplete functions for flags
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
 	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
@@ -137,10 +112,9 @@ func NewCellCmd() *cobra.Command {
 	return cmd
 }
 
-type controllerWrapper struct {
-	ctrl *controller.Exec
-}
-
-func (w *controllerWrapper) PurgeCell(cell intmodel.Cell, force, cascade bool) (controller.PurgeCellResult, error) {
-	return w.ctrl.PurgeCell(cell, force, cascade)
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
+	}
+	return kukeshared.ClientFromCmd(cmd)
 }

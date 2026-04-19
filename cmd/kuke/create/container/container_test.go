@@ -20,88 +20,76 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"strings"
 	"testing"
 
-	"github.com/eminwux/kukeon/cmd/config"
 	container "github.com/eminwux/kukeon/cmd/kuke/create/container"
 	"github.com/eminwux/kukeon/cmd/types"
-	"github.com/eminwux/kukeon/internal/controller"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-func TestNewContainerCmd(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	cmd := container.NewContainerCmd()
-
-	if cmd.Use != "container [name]" {
-		t.Errorf("Use mismatch: got %q, want %q", cmd.Use, "container [name]")
+func newContainerDoc(name, realm, space, stack, cell, image string) v1beta1.ContainerDoc {
+	return v1beta1.ContainerDoc{
+		Metadata: v1beta1.ContainerMetadata{Name: name},
+		Spec: v1beta1.ContainerSpec{
+			ID:      name,
+			RealmID: realm,
+			SpaceID: space,
+			StackID: stack,
+			CellID:  cell,
+			Image:   image,
+		},
 	}
+}
 
-	if cmd.Short != "Create a new container inside a cell" {
-		t.Errorf("Short mismatch: got %q, want %q", cmd.Short, "Create a new container inside a cell")
-	}
-
-	if !cmd.SilenceUsage {
-		t.Error("SilenceUsage should be true")
-	}
-
-	if cmd.SilenceErrors {
-		t.Error("SilenceErrors should be false")
-	}
-
-	// Test flags exist
-	flags := []struct {
-		name     string
-		required bool
+func TestPrintContainerResult(t *testing.T) {
+	tests := []struct {
+		name           string
+		result         kukeonv1.CreateContainerResult
+		expectedOutput []string
 	}{
-		{"realm", true},
-		{"space", true},
-		{"stack", true},
-		{"cell", true},
-		{"image", false},
-		{"command", false},
-		{"args", false},
+		{
+			name: "container created and started",
+			result: kukeonv1.CreateContainerResult{
+				Container:           newContainerDoc("c1", "r1", "s1", "st1", "cell1", "img"),
+				ContainerCreated:    true,
+				ContainerExistsPost: true,
+				Started:             true,
+			},
+			expectedOutput: []string{
+				`Container "c1" (ID: "c1") in cell "cell1" (realm "r1", space "s1", stack "st1")`,
+				"  - container: created",
+				"  - container: started",
+			},
+		},
+		{
+			name: "container existed not started",
+			result: kukeonv1.CreateContainerResult{
+				Container:           newContainerDoc("c2", "r2", "s2", "st2", "cell2", "img"),
+				ContainerExistsPost: true,
+			},
+			expectedOutput: []string{
+				`Container "c2"`,
+				"  - container: already existed",
+				"  - container: not started",
+			},
+		},
 	}
-
-	for _, flag := range flags {
-		f := cmd.Flags().Lookup(flag.name)
-		if f == nil {
-			t.Errorf("flag %q not found", flag.name)
-			continue
-		}
-	}
-
-	// Test viper binding
-	testCases := []struct {
-		name     string
-		viperKey string
-		value    string
-	}{
-		{"realm", config.KUKE_CREATE_CONTAINER_REALM.ViperKey, "test-realm"},
-		{"space", config.KUKE_CREATE_CONTAINER_SPACE.ViperKey, "test-space"},
-		{"stack", config.KUKE_CREATE_CONTAINER_STACK.ViperKey, "test-stack"},
-		{"cell", config.KUKE_CREATE_CONTAINER_CELL.ViperKey, "test-cell"},
-		{"image", config.KUKE_CREATE_CONTAINER_IMAGE.ViperKey, "test-image"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Create a new command for each test to ensure clean state
-			testCmd := container.NewContainerCmd()
-			if err := testCmd.Flags().Set(tc.name, tc.value); err != nil {
-				t.Fatalf("failed to set flag: %v", err)
-			}
-			got := viper.GetString(tc.viperKey)
-			if got != tc.value {
-				t.Errorf("viper binding mismatch: got %q, want %q", got, tc.value)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, buf := newTestCommand()
+			container.PrintContainerResult(cmd, tt.result)
+			out := buf.String()
+			for _, want := range tt.expectedOutput {
+				if !strings.Contains(out, want) {
+					t.Errorf("output missing %q\nGot:\n%s", want, out)
+				}
 			}
 		})
 	}
@@ -111,319 +99,92 @@ func TestNewContainerCmdRunE(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	tests := []struct {
-		name        string
-		args        []string
-		flags       map[string]string
-		viperConfig map[string]string
-		setupCtx    func(*cobra.Command)
-		wantErr     string
-		wantOutput  []string
+		name           string
+		args           []string
+		setup          func(t *testing.T, cmd *cobra.Command)
+		clientFn       func(doc v1beta1.ContainerDoc) (kukeonv1.CreateContainerResult, error)
+		wantErr        string
+		wantCallCreate bool
+		wantName       string
+		wantCell       string
+		wantImage      string
 	}{
 		{
-			name: "uses default realm when realm flag not set",
-			args: []string{"my-container"},
-			flags: map[string]string{
-				"space": "my-space",
-				"stack": "my-stack",
-				"cell":  "my-cell",
+			name: "success with required flags",
+			args: []string{"c1"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				setFlag(t, cmd, "cell", "cell1")
+				setFlag(t, cmd, "realm", "r1")
+				setFlag(t, cmd, "space", "s1")
+				setFlag(t, cmd, "stack", "st1")
+				setFlag(t, cmd, "image", "my/image:tag")
 			},
-			setupCtx: func(cmd *cobra.Command) {
-				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-				fakeCtrl := &fakeContainerController{
-					createContainerFn: func(container intmodel.Container) (controller.CreateContainerResult, error) {
-						if container.Spec.RealmName != "default" {
-							return controller.CreateContainerResult{}, fmt.Errorf(
-								"unexpected realm: %q",
-								container.Spec.RealmName,
-							)
-						}
-						return controller.CreateContainerResult{
-							Container:           container,
-							ContainerCreated:    true,
-							ContainerExistsPost: true,
-							Started:             true,
-						}, nil
-					},
-				}
-				ctx = context.WithValue(ctx, container.MockControllerKey{}, fakeCtrl)
-				cmd.SetContext(ctx)
+			clientFn: func(doc v1beta1.ContainerDoc) (kukeonv1.CreateContainerResult, error) {
+				return kukeonv1.CreateContainerResult{
+					Container:           doc,
+					ContainerCreated:    true,
+					ContainerExistsPost: true,
+				}, nil
 			},
-			wantOutput: []string{
-				"Container \"my-container\" (ID: \"my-container\")",
-			},
+			wantCallCreate: true,
+			wantName:       "c1",
+			wantCell:       "cell1",
+			wantImage:      "docker.io/my/image:tag",
 		},
 		{
-			name: "uses default space when space flag not set",
-			args: []string{"my-container"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"stack": "my-stack",
-				"cell":  "my-cell",
-			},
-			setupCtx: func(cmd *cobra.Command) {
-				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-				fakeCtrl := &fakeContainerController{
-					createContainerFn: func(container intmodel.Container) (controller.CreateContainerResult, error) {
-						if container.Spec.SpaceName != "default" {
-							return controller.CreateContainerResult{}, fmt.Errorf(
-								"unexpected space: %q",
-								container.Spec.SpaceName,
-							)
-						}
-						return controller.CreateContainerResult{
-							Container:           container,
-							ContainerCreated:    true,
-							ContainerExistsPost: true,
-							Started:             true,
-						}, nil
-					},
-				}
-				ctx = context.WithValue(ctx, container.MockControllerKey{}, fakeCtrl)
-				cmd.SetContext(ctx)
-			},
-			wantOutput: []string{
-				"Container \"my-container\" (ID: \"my-container\")",
-			},
-		},
-		{
-			name: "uses default stack when stack flag not set",
-			args: []string{"my-container"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "my-space",
-				"cell":  "my-cell",
-			},
-			setupCtx: func(cmd *cobra.Command) {
-				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-				fakeCtrl := &fakeContainerController{
-					createContainerFn: func(container intmodel.Container) (controller.CreateContainerResult, error) {
-						if container.Spec.StackName != "default" {
-							return controller.CreateContainerResult{}, fmt.Errorf(
-								"unexpected stack: %q",
-								container.Spec.StackName,
-							)
-						}
-						return controller.CreateContainerResult{
-							Container:           container,
-							ContainerCreated:    true,
-							ContainerExistsPost: true,
-							Started:             true,
-						}, nil
-					},
-				}
-				ctx = context.WithValue(ctx, container.MockControllerKey{}, fakeCtrl)
-				cmd.SetContext(ctx)
-			},
-			wantOutput: []string{
-				"Container \"my-container\" (ID: \"my-container\")",
-			},
-		},
-		{
-			name: "missing cell error",
-			args: []string{"my-container"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "my-space",
-				"stack": "my-stack",
-			},
-			wantErr: "cell name is required",
-		},
-		{
-			name: "missing name error",
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "my-space",
-				"stack": "my-stack",
-				"cell":  "my-cell",
-			},
+			name:    "error missing name",
 			wantErr: "container name is required",
 		},
 		{
-			name: "empty realm after trimming",
-			args: []string{"my-container"},
-			flags: map[string]string{
-				"realm": "   ",
-				"space": "my-space",
-				"stack": "my-stack",
-				"cell":  "my-cell",
-			},
-			wantErr: "realm name is required",
-		},
-		{
-			name: "empty space after trimming",
-			args: []string{"my-container"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "   ",
-				"stack": "my-stack",
-				"cell":  "my-cell",
-			},
-			wantErr: "space name is required",
-		},
-		{
-			name: "empty stack after trimming",
-			args: []string{"my-container"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "my-space",
-				"stack": "   ",
-				"cell":  "my-cell",
-			},
-			wantErr: "stack name is required",
-		},
-		{
-			name: "empty cell after trimming",
-			args: []string{"my-container"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "my-space",
-				"stack": "my-stack",
-				"cell":  "   ",
-			},
+			name:    "error missing cell",
+			args:    []string{"c1"},
 			wantErr: "cell name is required",
 		},
 		{
-			name: "controller creation error - missing logger",
-			args: []string{"my-container"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "my-space",
-				"stack": "my-stack",
-				"cell":  "my-cell",
+			name: "error client returns",
+			args: []string{"c1"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				setFlag(t, cmd, "cell", "cell1")
 			},
-			setupCtx: func(cmd *cobra.Command) {
-				// Don't set logger in context
-				cmd.SetContext(context.Background())
+			clientFn: func(_ v1beta1.ContainerDoc) (kukeonv1.CreateContainerResult, error) {
+				return kukeonv1.CreateContainerResult{}, errdefs.ErrCreateCell
 			},
-			wantErr: "logger not found",
-		},
-		{
-			name: "success: container created and started",
-			args: []string{"my-container"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "my-space",
-				"stack": "my-stack",
-				"cell":  "my-cell",
-				"image": "registry.eminwux.com/alpine:latest",
-			},
-			setupCtx: func(cmd *cobra.Command) {
-				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-				fakeCtrl := &fakeContainerController{
-					createContainerFn: func(container intmodel.Container) (controller.CreateContainerResult, error) {
-						return controller.CreateContainerResult{
-							Container:           container,
-							ContainerCreated:    true,
-							ContainerExistsPost: true,
-							Started:             true,
-						}, nil
-					},
-				}
-				ctx = context.WithValue(ctx, container.MockControllerKey{}, fakeCtrl)
-				cmd.SetContext(ctx)
-			},
-			wantOutput: []string{
-				"Container \"my-container\" (ID: \"my-container\")",
-				"container: created",
-				"container: started",
-			},
-		},
-		{
-			name: "success: container already existed",
-			args: []string{"existing-container"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "my-space",
-				"stack": "my-stack",
-				"cell":  "my-cell",
-			},
-			setupCtx: func(cmd *cobra.Command) {
-				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-				fakeCtrl := &fakeContainerController{
-					createContainerFn: func(container intmodel.Container) (controller.CreateContainerResult, error) {
-						return controller.CreateContainerResult{
-							Container:           container,
-							ContainerCreated:    false,
-							ContainerExistsPost: true,
-							Started:             false,
-						}, nil
-					},
-				}
-				ctx = context.WithValue(ctx, container.MockControllerKey{}, fakeCtrl)
-				cmd.SetContext(ctx)
-			},
-			wantOutput: []string{
-				"Container \"existing-container\"",
-				"container: already existed",
-				"container: not started",
-			},
-		},
-		{
-			name: "error: CreateContainer fails",
-			args: []string{"my-container"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "my-space",
-				"stack": "my-stack",
-				"cell":  "my-cell",
-			},
-			setupCtx: func(cmd *cobra.Command) {
-				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-				fakeCtrl := &fakeContainerController{
-					createContainerFn: func(_ intmodel.Container) (controller.CreateContainerResult, error) {
-						return controller.CreateContainerResult{}, errors.New("failed to create container")
-					},
-				}
-				ctx = context.WithValue(ctx, container.MockControllerKey{}, fakeCtrl)
-				cmd.SetContext(ctx)
-			},
-			wantErr: "failed to create container",
+			wantErr:        "failed to create cell",
+			wantCallCreate: true,
+			wantName:       "c1",
+			wantCell:       "cell1",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			viper.Reset()
+			t.Cleanup(viper.Reset)
+
+			var createCalled bool
+			var createDoc v1beta1.ContainerDoc
+
 			cmd := container.NewContainerCmd()
-			var outBuf bytes.Buffer
-			cmd.SetOut(&outBuf)
-			cmd.SetErr(&outBuf)
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SetErr(&bytes.Buffer{})
 
-			// Set up context with logger (unless overridden)
-			if tt.setupCtx != nil {
-				tt.setupCtx(cmd)
-			} else {
-				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-				cmd.SetContext(ctx)
-			}
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 
-			// Set viper config
-			for k, v := range tt.viperConfig {
-				viper.Set(k, v)
-			}
-
-			// Set flags
-			for name, value := range tt.flags {
-				if name == "args" {
-					// Handle string array flag
-					args := strings.Split(value, ",")
-					for _, arg := range args {
-						if err := cmd.Flags().Set("args", arg); err != nil {
-							t.Fatalf("failed to set args flag: %v", err)
-						}
-					}
-				} else {
-					if err := cmd.Flags().Set(name, value); err != nil {
-						t.Fatalf("failed to set flag %q: %v", name, err)
-					}
+			if tt.clientFn != nil {
+				fake := &fakeClient{
+					createContainerFn: func(doc v1beta1.ContainerDoc) (kukeonv1.CreateContainerResult, error) {
+						createCalled = true
+						createDoc = doc
+						return tt.clientFn(doc)
+					},
 				}
+				ctx = context.WithValue(ctx, container.MockControllerKey{}, kukeonv1.Client(fake))
+			}
+
+			cmd.SetContext(ctx)
+
+			if tt.setup != nil {
+				tt.setup(t, cmd)
 			}
 
 			cmd.SetArgs(tt.args)
@@ -434,176 +195,60 @@ func TestNewContainerCmdRunE(t *testing.T) {
 					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
 				}
 				if !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("expected error containing %q, got %q", tt.wantErr, err.Error())
+					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
 				}
-				return
-			}
-
-			if err != nil {
+			} else if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if len(tt.wantOutput) > 0 {
-				output := outBuf.String()
-				for _, want := range tt.wantOutput {
-					if !strings.Contains(output, want) {
-						t.Errorf("output missing expected string %q. Got output: %q", want, output)
-					}
+			if createCalled != tt.wantCallCreate {
+				t.Errorf("CreateContainer called=%v want=%v", createCalled, tt.wantCallCreate)
+			}
+
+			if tt.wantCallCreate {
+				if createDoc.Metadata.Name != tt.wantName {
+					t.Errorf("Name=%q want=%q", createDoc.Metadata.Name, tt.wantName)
+				}
+				if createDoc.Spec.CellID != tt.wantCell {
+					t.Errorf("CellID=%q want=%q", createDoc.Spec.CellID, tt.wantCell)
+				}
+				if tt.wantImage != "" && createDoc.Spec.Image != tt.wantImage {
+					t.Errorf("Image=%q want=%q", createDoc.Spec.Image, tt.wantImage)
 				}
 			}
 		})
 	}
 }
 
-func TestPrintContainerResult(t *testing.T) {
-	tests := []struct {
-		name          string
-		result        controller.CreateContainerResult
-		wantOutput    []string
-		notWantOutput []string
-	}{
-		{
-			name: "container created and started",
-			result: controller.CreateContainerResult{
-				Container: intmodel.Container{
-					Metadata: intmodel.ContainerMetadata{
-						Name: "my-container",
-					},
-					Spec: intmodel.ContainerSpec{
-						ID:        "my-container",
-						RealmName: "my-realm",
-						SpaceName: "my-space",
-						StackName: "my-stack",
-						CellName:  "my-cell",
-					},
-				},
-				ContainerCreated:    true,
-				ContainerExistsPost: true,
-				Started:             true,
-			},
-			wantOutput: []string{
-				"Container \"my-container\" (ID: \"my-container\")",
-				"in cell \"my-cell\"",
-				"realm \"my-realm\"",
-				"space \"my-space\"",
-				"stack \"my-stack\"",
-				"container: created",
-				"container: started",
-			},
-		},
-		{
-			name: "container already existed and not started",
-			result: controller.CreateContainerResult{
-				Container: intmodel.Container{
-					Metadata: intmodel.ContainerMetadata{
-						Name: "existing-container",
-					},
-					Spec: intmodel.ContainerSpec{
-						ID:        "existing-container",
-						RealmName: "my-realm",
-						SpaceName: "my-space",
-						StackName: "my-stack",
-						CellName:  "my-cell",
-					},
-				},
-				ContainerCreated:    false,
-				ContainerExistsPost: true,
-				Started:             false,
-			},
-			wantOutput: []string{
-				"Container \"existing-container\"",
-				"container: already existed",
-				"container: not started",
-			},
-			notWantOutput: []string{
-				"container: created",
-				"container: started",
-			},
-		},
-		{
-			name: "container missing",
-			result: controller.CreateContainerResult{
-				Container:           intmodel.Container{},
-				ContainerCreated:    false,
-				ContainerExistsPost: false,
-				Started:             false,
-			},
-			wantOutput: []string{
-				"Container",
-				"container: not started",
-			},
-			notWantOutput: []string{
-				"container: created",
-				"container: already existed",
-				"container: started",
-			},
-		},
-		{
-			name: "container created but not started",
-			result: controller.CreateContainerResult{
-				Container: intmodel.Container{
-					Metadata: intmodel.ContainerMetadata{
-						Name: "stopped-container",
-					},
-					Spec: intmodel.ContainerSpec{
-						ID:        "stopped-container",
-						RealmName: "my-realm",
-						SpaceName: "my-space",
-						StackName: "my-stack",
-						CellName:  "my-cell",
-					},
-				},
-				ContainerCreated:    true,
-				ContainerExistsPost: true,
-				Started:             false,
-			},
-			wantOutput: []string{
-				"container: created",
-				"container: not started",
-			},
-			notWantOutput: []string{
-				"container: started",
-			},
-		},
+func TestNewContainerCmd_Structure(t *testing.T) {
+	cmd := container.NewContainerCmd()
+	if cmd.Use != "container [name]" {
+		t.Errorf("Use=%q want container [name]", cmd.Use)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cmd, buf := newOutputCommand()
-			container.PrintContainerResult(cmd, tt.result, v1beta1.APIVersionV1Beta1)
-			output := buf.String()
-
-			for _, want := range tt.wantOutput {
-				if !strings.Contains(output, want) {
-					t.Errorf("output missing expected string %q. Got output: %q", want, output)
-				}
-			}
-
-			for _, notWant := range tt.notWantOutput {
-				if strings.Contains(output, notWant) {
-					t.Errorf("output contains unexpected string %q. Got output: %q", notWant, output)
-				}
-			}
-		})
+	for _, f := range []string{"realm", "space", "stack", "cell", "image", "env", "port"} {
+		if cmd.Flags().Lookup(f) == nil {
+			t.Errorf("expected %q flag", f)
+		}
 	}
 }
 
-// Test helpers
+type fakeClient struct {
+	kukeonv1.FakeClient
 
-type fakeContainerController struct {
-	createContainerFn func(container intmodel.Container) (controller.CreateContainerResult, error)
+	createContainerFn func(doc v1beta1.ContainerDoc) (kukeonv1.CreateContainerResult, error)
 }
 
-func (f *fakeContainerController) CreateContainer(
-	container intmodel.Container,
-) (controller.CreateContainerResult, error) {
+func (f *fakeClient) CreateContainer(
+	_ context.Context,
+	doc v1beta1.ContainerDoc,
+) (kukeonv1.CreateContainerResult, error) {
 	if f.createContainerFn == nil {
-		return controller.CreateContainerResult{}, errors.New("unexpected CreateContainer call")
+		return kukeonv1.CreateContainerResult{}, errors.New("unexpected CreateContainer call")
 	}
-	return f.createContainerFn(container)
+	return f.createContainerFn(doc)
 }
 
-func newOutputCommand() (*cobra.Command, *bytes.Buffer) {
+func newTestCommand() (*cobra.Command, *bytes.Buffer) {
 	cmd := &cobra.Command{Use: "test"}
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
@@ -611,49 +256,9 @@ func newOutputCommand() (*cobra.Command, *bytes.Buffer) {
 	return cmd, buf
 }
 
-func TestNewContainerCmd_AutocompleteRegistration(t *testing.T) {
-	cmd := container.NewContainerCmd()
-
-	// Test that flags exist and have completion functions registered
-	flags := []struct {
-		name string
-	}{
-		{"realm"},
-		{"space"},
-		{"stack"},
-		{"cell"},
-	}
-
-	for _, flag := range flags {
-		flagObj := cmd.Flags().Lookup(flag.name)
-		if flagObj == nil {
-			t.Errorf("expected %q flag to exist", flag.name)
-			continue
-		}
-
-		// Verify flag structure (completion function registration is verified by Cobra)
-		switch flag.name {
-		case "realm":
-			if flagObj.Usage != "Realm that owns the container" {
-				t.Errorf("unexpected realm flag usage: %q", flagObj.Usage)
-			}
-		case "space":
-			if flagObj.Usage != "Space that owns the container" {
-				t.Errorf("unexpected space flag usage: %q", flagObj.Usage)
-			}
-		case "stack":
-			if flagObj.Usage != "Stack that owns the container" {
-				t.Errorf("unexpected stack flag usage: %q", flagObj.Usage)
-			}
-		case "cell":
-			if flagObj.Usage != "Cell that owns the container" {
-				t.Errorf("unexpected cell flag usage: %q", flagObj.Usage)
-			}
-		}
-	}
-
-	// Test that ValidArgsFunction is set for positional argument
-	if cmd.ValidArgsFunction == nil {
-		t.Error("expected ValidArgsFunction to be set for positional argument")
+func setFlag(t *testing.T, cmd *cobra.Command, name, value string) {
+	t.Helper()
+	if err := cmd.Flags().Set(name, value); err != nil {
+		t.Fatalf("failed to set flag %s: %v", name, err)
 	}
 }

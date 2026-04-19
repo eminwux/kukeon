@@ -17,24 +17,17 @@
 package realm
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/purge/shared"
-	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/controller"
-	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 )
 
-type realmController interface {
-	PurgeRealm(realm intmodel.Realm, force, cascade bool) (controller.PurgeRealmResult, error)
-}
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
 func NewRealmCmd() *cobra.Command {
@@ -46,41 +39,25 @@ func NewRealmCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Check for mock controller in context (for testing)
-			var ctrl realmController
-			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(realmController); ok {
-				ctrl = mockCtrl
-			} else {
-				realCtrl, err := shared.ControllerFromCmd(cmd)
-				if err != nil {
-					return err
-				}
-				ctrl = &controllerWrapper{ctrl: realCtrl}
-			}
-
 			name := strings.TrimSpace(args[0])
-
 			force := shared.ParseForceFlag(cmd)
 			cascade := shared.ParseCascadeFlag(cmd)
 
-			doc := &v1beta1.RealmDoc{
-				Metadata: v1beta1.RealmMetadata{
-					Name: name,
-				},
+			doc := v1beta1.RealmDoc{
+				Metadata: v1beta1.RealmMetadata{Name: name},
 			}
 
-			// Convert at boundary before calling controller
-			realmInternal, _, err := apischeme.NormalizeRealm(*doc)
+			client, err := resolveClient(cmd)
 			if err != nil {
-				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				return err
 			}
+			defer func() { _ = client.Close() }()
 
-			result, err := ctrl.PurgeRealm(realmInternal, force, cascade)
+			result, err := client.PurgeRealm(cmd.Context(), doc, force, cascade)
 			if err != nil {
 				return err
 			}
 
-			// Use realm from result for output
 			realmName := result.Realm.Metadata.Name
 			if realmName == "" {
 				realmName = name
@@ -94,19 +71,14 @@ func NewRealmCmd() *cobra.Command {
 		},
 	}
 
-	// Register autocomplete for positional argument
 	cmd.ValidArgsFunction = config.CompleteRealmNames
 
 	return cmd
 }
 
-type controllerWrapper struct {
-	ctrl *controller.Exec
-}
-
-func (w *controllerWrapper) PurgeRealm(
-	realm intmodel.Realm,
-	force, cascade bool,
-) (controller.PurgeRealmResult, error) {
-	return w.ctrl.PurgeRealm(realm, force, cascade)
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
+	}
+	return kukeshared.ClientFromCmd(cmd)
 }

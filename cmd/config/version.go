@@ -16,5 +16,15 @@
 
 package config
 
+// Version is the kuke/kukeond build version.
+//
 //nolint:gochecknoglobals // needs to be global for ldflags injection
 var Version = "0.1.0"
+
+// KukeondImageRepo is the OCI image reference (without tag) that `kuke init`
+// will provision for the kukeond system cell when the user does not pass
+// --kukeond-image. The release pipeline injects the ghcr.io path that the
+// matching kukeond image is published to.
+//
+//nolint:gochecknoglobals // needs to be global for ldflags injection
+var KukeondImageRepo = "ghcr.io/eminwux/kukeon"

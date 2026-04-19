@@ -182,12 +182,29 @@ func TestKuke_Init_VerifyState(t *testing.T) {
 	runPath := getRandomRunPath(t)
 	mkdirRunPath(t, runPath)
 
-	// Step 0: Purge default resources created by init in reverse dependency order
+	// Step 0: Purge resources created by init in reverse dependency order
 	// (cleanup from previous runs that may have left orphaned containerd containers)
 	_, _, _ = runBinary(t, nil, kuke, append(
 		buildKukeRunPathArgs(runPath),
-		"purge", "cell", consts.KukeonCellName,
-		"--realm", "default", "--space", "default", "--stack", "default",
+		"purge", "cell", consts.KukeSystemCellName,
+		"--realm", consts.KukeSystemRealmName,
+		"--space", consts.KukeSystemSpaceName,
+		"--stack", consts.KukeSystemStackName,
+	)...)
+	_, _, _ = runBinary(t, nil, kuke, append(
+		buildKukeRunPathArgs(runPath),
+		"purge", "stack", consts.KukeSystemStackName,
+		"--realm", consts.KukeSystemRealmName,
+		"--space", consts.KukeSystemSpaceName,
+	)...)
+	_, _, _ = runBinary(t, nil, kuke, append(
+		buildKukeRunPathArgs(runPath),
+		"purge", "space", consts.KukeSystemSpaceName,
+		"--realm", consts.KukeSystemRealmName,
+	)...)
+	_, _, _ = runBinary(t, nil, kuke, append(
+		buildKukeRunPathArgs(runPath),
+		"purge", "realm", consts.KukeSystemRealmName,
 	)...)
 	_, _, _ = runBinary(t, nil, kuke, append(
 		buildKukeRunPathArgs(runPath),
@@ -204,9 +221,23 @@ func TestKuke_Init_VerifyState(t *testing.T) {
 		"purge", "realm", "default",
 	)...)
 
-	// Cleanup: Clean up default resources created by init in reverse dependency order
+	// Cleanup: Clean up resources created by init in reverse dependency order
 	t.Cleanup(func() {
-		cleanupCell(t, runPath, "default", "default", "default", consts.KukeonCellName)
+		cleanupCell(
+			t, runPath,
+			consts.KukeSystemRealmName,
+			consts.KukeSystemSpaceName,
+			consts.KukeSystemStackName,
+			consts.KukeSystemCellName,
+		)
+		cleanupStack(
+			t, runPath,
+			consts.KukeSystemRealmName,
+			consts.KukeSystemSpaceName,
+			consts.KukeSystemStackName,
+		)
+		cleanupSpace(t, runPath, consts.KukeSystemRealmName, consts.KukeSystemSpaceName)
+		cleanupRealm(t, runPath, consts.KukeSystemRealmName)
 		cleanupStack(t, runPath, "default", "default", "default")
 		cleanupSpace(t, runPath, "default", "default")
 		cleanupRealm(t, runPath, "default")

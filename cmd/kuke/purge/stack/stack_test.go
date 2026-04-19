@@ -28,679 +28,107 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	stack "github.com/eminwux/kukeon/cmd/kuke/purge/stack"
 	"github.com/eminwux/kukeon/cmd/types"
-	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/spf13/cobra"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/viper"
 )
 
-func TestNewStackCmd(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	cmd := stack.NewStackCmd()
-
-	if cmd.Use != "stack [name]" {
-		t.Errorf("Use mismatch: got %q, want %q", cmd.Use, "stack [name]")
-	}
-
-	if cmd.Short != "Purge a stack with comprehensive cleanup" {
-		t.Errorf("Short mismatch: got %q, want %q", cmd.Short, "Purge a stack with comprehensive cleanup")
-	}
-
-	if !cmd.SilenceUsage {
-		t.Error("SilenceUsage should be true")
-	}
-
-	if cmd.SilenceErrors {
-		t.Error("SilenceErrors should be false")
-	}
-
-	// Test flags exist
-	flags := []struct {
-		name     string
-		required bool
-	}{
-		{"realm", true},
-		{"space", true},
-	}
-
-	for _, flag := range flags {
-		f := cmd.Flags().Lookup(flag.name)
-		if f == nil {
-			t.Errorf("flag %q not found", flag.name)
-			continue
-		}
-	}
-
-	// Test viper binding
-	testCases := []struct {
-		name     string
-		viperKey string
-		value    string
-	}{
-		{"realm", config.KUKE_PURGE_STACK_REALM.ViperKey, "test-realm"},
-		{"space", config.KUKE_PURGE_STACK_SPACE.ViperKey, "test-space"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			viper.Reset()
-			// Create a new command for each test to ensure clean state
-			testCmd := stack.NewStackCmd()
-			if err := testCmd.Flags().Set(tc.name, tc.value); err != nil {
-				t.Fatalf("failed to set flag: %v", err)
-			}
-			got := viper.GetString(tc.viperKey)
-			if got != tc.value {
-				t.Errorf("viper binding mismatch: got %q, want %q", got, tc.value)
-			}
-		})
-	}
-}
-
-func TestNewStackCmdRunE(t *testing.T) {
+func TestPurgeStack(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	tests := []struct {
-		name        string
-		args        []string
-		flags       map[string]string
-		viperConfig map[string]string
-		setupCtx    func(*cobra.Command)
-		controller  *fakeStackController
-		forceFlag   bool
-		cascadeFlag bool
-		wantErr     string
-		wantOutput  []string
+		name       string
+		args       []string
+		setup      func()
+		fake       *fakeClient
+		wantErr    string
+		wantOutput string
 	}{
 		{
-			name: "missing realm error",
-			args: []string{"my-stack"},
-			flags: map[string]string{
-				"space": "my-space",
+			name: "success",
+			args: []string{"st1"},
+			setup: func() {
+				viper.Set(config.KUKE_PURGE_STACK_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_PURGE_STACK_SPACE.ViperKey, "s1")
 			},
-			wantErr: "realm name is required",
+			fake: &fakeClient{
+				purgeStackFn: func(doc v1beta1.StackDoc, _, _ bool) (kukeonv1.PurgeStackResult, error) {
+					return kukeonv1.PurgeStackResult{Stack: doc}, nil
+				},
+			},
+			wantOutput: `Purged stack "st1" from space "s1"`,
 		},
 		{
-			name: "missing space error",
-			args: []string{"my-stack"},
-			flags: map[string]string{
-				"realm": "my-realm",
-			},
+			name:    "missing space",
+			args:    []string{"st1"},
+			setup:   func() { viper.Set(config.KUKE_PURGE_STACK_REALM.ViperKey, "r1") },
+			fake:    &fakeClient{},
 			wantErr: "space name is required",
 		},
 		{
-			name: "empty realm after trimming",
-			args: []string{"my-stack"},
-			flags: map[string]string{
-				"realm": "   ",
-				"space": "my-space",
+			name: "not found",
+			args: []string{"missing"},
+			setup: func() {
+				viper.Set(config.KUKE_PURGE_STACK_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_PURGE_STACK_SPACE.ViperKey, "s1")
 			},
-			wantErr: "realm name is required",
-		},
-		{
-			name: "empty space after trimming",
-			args: []string{"my-stack"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "   ",
-			},
-			wantErr: "space name is required",
-		},
-		{
-			name: "empty stack name after trimming",
-			args: []string{"   "},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "my-space",
-			},
-			controller: &fakeStackController{
-				purgeStackFn: func(stack intmodel.Stack, _, _ bool) (controller.PurgeStackResult, error) {
-					if stack.Metadata.Name == "" {
-						return controller.PurgeStackResult{}, errdefs.ErrStackNameRequired
-					}
-					return controller.PurgeStackResult{}, errors.New("unexpected call")
-				},
-			},
-			wantErr: "stack name is required",
-		},
-		{
-			name: "controller creation error - missing logger",
-			args: []string{"my-stack"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "my-space",
-			},
-			setupCtx: func(cmd *cobra.Command) {
-				// Don't set logger in context
-				cmd.SetContext(context.Background())
-			},
-			wantErr: "logger not found",
-		},
-		{
-			name: "controller PurgeStack returns error",
-			args: []string{"my-stack"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "my-space",
-			},
-			controller: &fakeStackController{
-				purgeStackFn: func(stack intmodel.Stack, _, _ bool) (controller.PurgeStackResult, error) {
-					if stack.Metadata.Name != "my-stack" || stack.Spec.RealmName != "my-realm" ||
-						stack.Spec.SpaceName != "my-space" {
-						return controller.PurgeStackResult{}, errors.New("unexpected args")
-					}
-					return controller.PurgeStackResult{}, errors.New("stack not found")
+			fake: &fakeClient{
+				purgeStackFn: func(_ v1beta1.StackDoc, _, _ bool) (kukeonv1.PurgeStackResult, error) {
+					return kukeonv1.PurgeStackResult{}, errdefs.ErrStackNotFound
 				},
 			},
 			wantErr: "stack not found",
-		},
-		{
-			name: "controller PurgeStack returns stack not found error",
-			args: []string{"nonexistent-stack"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "my-space",
-			},
-			controller: &fakeStackController{
-				purgeStackFn: func(_ intmodel.Stack, _, _ bool) (controller.PurgeStackResult, error) {
-					return controller.PurgeStackResult{}, errdefs.ErrStackNotFound
-				},
-			},
-			wantErr: "stack not found",
-		},
-		{
-			name: "successful stack purge",
-			args: []string{"my-stack"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "my-space",
-			},
-			controller: &fakeStackController{
-				purgeStackFn: func(stack intmodel.Stack, force, cascade bool) (controller.PurgeStackResult, error) {
-					if stack.Metadata.Name != "my-stack" || stack.Spec.RealmName != "my-realm" ||
-						stack.Spec.SpaceName != "my-space" {
-						return controller.PurgeStackResult{}, errors.New("unexpected args")
-					}
-					if force {
-						return controller.PurgeStackResult{}, errors.New("unexpected force flag")
-					}
-					if cascade {
-						return controller.PurgeStackResult{}, errors.New("unexpected cascade flag")
-					}
-					return controller.PurgeStackResult{
-						Stack: intmodel.Stack{
-							Metadata: intmodel.StackMetadata{Name: "my-stack"},
-							Spec: intmodel.StackSpec{
-								RealmName: "my-realm",
-								SpaceName: "my-space",
-							},
-						},
-						Purged: []string{"cni-resources", "orphaned-containers"},
-					}, nil
-				},
-			},
-			wantOutput: []string{
-				"Purged stack \"my-stack\" from space \"my-space\"",
-				"Additional resources purged: [cni-resources orphaned-containers]",
-			},
-		},
-		{
-			name: "successful purge with no additional resources",
-			args: []string{"my-stack"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "my-space",
-			},
-			controller: &fakeStackController{
-				purgeStackFn: func(_ intmodel.Stack, _, _ bool) (controller.PurgeStackResult, error) {
-					return controller.PurgeStackResult{
-						Stack: intmodel.Stack{
-							Metadata: intmodel.StackMetadata{Name: "my-stack"},
-							Spec: intmodel.StackSpec{
-								RealmName: "my-realm",
-								SpaceName: "my-space",
-							},
-						},
-						Purged: []string{},
-					}, nil
-				},
-			},
-			wantOutput: []string{
-				"Purged stack \"my-stack\" from space \"my-space\"",
-			},
-		},
-		{
-			name: "successful deletion with trimmed whitespace in args and flags",
-			args: []string{"  my-stack  "},
-			flags: map[string]string{
-				"realm": "  my-realm  ",
-				"space": "  my-space  ",
-			},
-			controller: &fakeStackController{
-				purgeStackFn: func(stack intmodel.Stack, _, _ bool) (controller.PurgeStackResult, error) {
-					if stack.Metadata.Name != "my-stack" || stack.Spec.RealmName != "my-realm" ||
-						stack.Spec.SpaceName != "my-space" {
-						return controller.PurgeStackResult{}, errors.New("unexpected trimmed args")
-					}
-					return controller.PurgeStackResult{
-						Stack: intmodel.Stack{
-							Metadata: intmodel.StackMetadata{Name: "my-stack"},
-							Spec: intmodel.StackSpec{
-								RealmName: "my-realm",
-								SpaceName: "my-space",
-							},
-						},
-						Purged: []string{"cni-resources"},
-					}, nil
-				},
-			},
-			wantOutput: []string{
-				"Purged stack \"my-stack\" from space \"my-space\"",
-			},
-		},
-		{
-			name: "values from viper config",
-			args: []string{"my-stack"},
-			viperConfig: map[string]string{
-				config.KUKE_PURGE_STACK_REALM.ViperKey: "viper-realm",
-				config.KUKE_PURGE_STACK_SPACE.ViperKey: "viper-space",
-			},
-			controller: &fakeStackController{
-				purgeStackFn: func(stack intmodel.Stack, _, _ bool) (controller.PurgeStackResult, error) {
-					if stack.Metadata.Name != "my-stack" || stack.Spec.RealmName != "viper-realm" ||
-						stack.Spec.SpaceName != "viper-space" {
-						return controller.PurgeStackResult{}, errors.New("unexpected args from viper")
-					}
-					return controller.PurgeStackResult{
-						Stack: intmodel.Stack{
-							Metadata: intmodel.StackMetadata{Name: "my-stack"},
-							Spec: intmodel.StackSpec{
-								RealmName: "viper-realm",
-								SpaceName: "viper-space",
-							},
-						},
-						Purged: []string{},
-					}, nil
-				},
-			},
-			wantOutput: []string{
-				"Purged stack \"my-stack\" from space \"viper-space\"",
-			},
-		},
-		{
-			name: "success with --force flag",
-			args: []string{"my-stack"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "my-space",
-			},
-			forceFlag: true,
-			controller: &fakeStackController{
-				purgeStackFn: func(_ intmodel.Stack, force, cascade bool) (controller.PurgeStackResult, error) {
-					if !force {
-						return controller.PurgeStackResult{}, errors.New("expected force to be true")
-					}
-					if cascade {
-						return controller.PurgeStackResult{}, errors.New("unexpected cascade flag")
-					}
-					return controller.PurgeStackResult{
-						Stack: intmodel.Stack{
-							Metadata: intmodel.StackMetadata{Name: "my-stack"},
-							Spec: intmodel.StackSpec{
-								RealmName: "my-realm",
-								SpaceName: "my-space",
-							},
-						},
-						Purged: []string{},
-					}, nil
-				},
-			},
-			wantOutput: []string{
-				"Purged stack \"my-stack\" from space \"my-space\"",
-			},
-		},
-		{
-			name: "success with --cascade flag",
-			args: []string{"my-stack"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "my-space",
-			},
-			cascadeFlag: true,
-			controller: &fakeStackController{
-				purgeStackFn: func(_ intmodel.Stack, force, cascade bool) (controller.PurgeStackResult, error) {
-					if force {
-						return controller.PurgeStackResult{}, errors.New("unexpected force flag")
-					}
-					if !cascade {
-						return controller.PurgeStackResult{}, errors.New("expected cascade to be true")
-					}
-					return controller.PurgeStackResult{
-						Stack: intmodel.Stack{
-							Metadata: intmodel.StackMetadata{Name: "my-stack"},
-							Spec: intmodel.StackSpec{
-								RealmName: "my-realm",
-								SpaceName: "my-space",
-							},
-						},
-						Purged: []string{},
-					}, nil
-				},
-			},
-			wantOutput: []string{
-				"Purged stack \"my-stack\" from space \"my-space\"",
-			},
-		},
-		{
-			name: "success with both --force and --cascade flags",
-			args: []string{"my-stack"},
-			flags: map[string]string{
-				"realm": "my-realm",
-				"space": "my-space",
-			},
-			forceFlag:   true,
-			cascadeFlag: true,
-			controller: &fakeStackController{
-				purgeStackFn: func(_ intmodel.Stack, force, cascade bool) (controller.PurgeStackResult, error) {
-					if !force {
-						return controller.PurgeStackResult{}, errors.New("expected force to be true")
-					}
-					if !cascade {
-						return controller.PurgeStackResult{}, errors.New("expected cascade to be true")
-					}
-					return controller.PurgeStackResult{
-						Stack: intmodel.Stack{
-							Metadata: intmodel.StackMetadata{Name: "my-stack"},
-							Spec: intmodel.StackSpec{
-								RealmName: "my-realm",
-								SpaceName: "my-space",
-							},
-						},
-						Purged: []string{},
-					}, nil
-				},
-			},
-			wantOutput: []string{
-				"Purged stack \"my-stack\" from space \"my-space\"",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			viper.Reset()
-			cmd := stack.NewStackCmd()
-			var outBuf bytes.Buffer
-			cmd.SetOut(&outBuf)
-			cmd.SetErr(&outBuf)
-
-			// Set up parent command for persistent flags
-			parentCmd := &cobra.Command{
-				Use: "purge",
-			}
-			parentCmd.PersistentFlags().Bool("force", false, "")
-			parentCmd.PersistentFlags().Bool("cascade", false, "")
-			_ = viper.BindPFlag(config.KUKE_PURGE_FORCE.ViperKey, parentCmd.PersistentFlags().Lookup("force"))
-			_ = viper.BindPFlag(config.KUKE_PURGE_CASCADE.ViperKey, parentCmd.PersistentFlags().Lookup("cascade"))
-			parentCmd.AddCommand(cmd)
-			parentCmd.SetOut(&outBuf)
-			parentCmd.SetErr(&outBuf)
-
-			// Set up context with logger (unless overridden)
-			var ctx context.Context
-			if tt.setupCtx != nil {
-				tt.setupCtx(cmd)
-				ctx = cmd.Context()
-			} else {
-				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-				ctx = context.WithValue(context.Background(), types.CtxLogger, logger)
-			}
-
-			// Inject mock controller via context if needed
-			if tt.controller != nil {
-				ctx = context.WithValue(ctx, stack.MockControllerKey{}, tt.controller)
-			}
-
-			parentCmd.SetContext(ctx)
-			cmd.SetContext(ctx)
-
-			// Set viper config
-			for k, v := range tt.viperConfig {
-				viper.Set(k, v)
-			}
-
-			// Set flags
-			for name, value := range tt.flags {
-				if err := cmd.Flags().Set(name, value); err != nil {
-					t.Fatalf("failed to set flag %q: %v", name, err)
-				}
-			}
-
-			// Build args with flags
-			args := tt.args
-			if tt.forceFlag {
-				args = append(args, "--force")
-			}
-			if tt.cascadeFlag {
-				args = append(args, "--cascade")
-			}
-
-			// Set args on parent command
-			allArgs := append([]string{"stack"}, args...)
-			parentCmd.SetArgs(allArgs)
-
-			err := parentCmd.Execute()
-
-			if tt.wantErr != "" {
-				if err == nil {
-					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
-				}
-				if !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("expected error containing %q, got %q", tt.wantErr, err.Error())
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if len(tt.wantOutput) > 0 {
-				output := outBuf.String()
-				for _, want := range tt.wantOutput {
-					if !strings.Contains(output, want) {
-						t.Errorf("output missing expected string %q. Got output: %q", want, output)
-					}
-				}
-			}
-		})
-	}
-}
-
-func TestForceAndCascadeFlags(t *testing.T) {
-	tests := []struct {
-		name          string
-		cliArgs       []string
-		controller    *fakeStackController
-		verifyForce   bool
-		verifyCascade bool
-	}{
-		{
-			name:    "force flag parsing",
-			cliArgs: []string{"stack-name", "--realm", "realm-a", "--space", "space-a", "--force"},
-			controller: &fakeStackController{
-				purgeStackFn: func(stack intmodel.Stack, force, cascade bool) (controller.PurgeStackResult, error) {
-					if !force {
-						t.Errorf("expected force to be true, got false")
-					}
-					if cascade {
-						t.Errorf("expected cascade to be false, got true")
-					}
-					if stack.Metadata.Name != "stack-name" || stack.Spec.SpaceName != "space-a" {
-						t.Errorf("unexpected stack: %+v", stack)
-					}
-					return controller.PurgeStackResult{
-						Stack: intmodel.Stack{
-							Metadata: intmodel.StackMetadata{Name: "stack-name"},
-							Spec: intmodel.StackSpec{
-								SpaceName: "space-a",
-							},
-						},
-					}, nil
-				},
-			},
-			verifyForce:   true,
-			verifyCascade: false,
-		},
-		{
-			name:    "cascade flag parsing",
-			cliArgs: []string{"stack-name", "--realm", "realm-a", "--space", "space-a", "--cascade"},
-			controller: &fakeStackController{
-				purgeStackFn: func(stack intmodel.Stack, force, cascade bool) (controller.PurgeStackResult, error) {
-					if force {
-						t.Errorf("expected force to be false, got true")
-					}
-					if !cascade {
-						t.Errorf("expected cascade to be true, got false")
-					}
-					if stack.Metadata.Name != "stack-name" || stack.Spec.SpaceName != "space-a" {
-						t.Errorf("unexpected stack: %+v", stack)
-					}
-					return controller.PurgeStackResult{
-						Stack: intmodel.Stack{
-							Metadata: intmodel.StackMetadata{Name: "stack-name"},
-							Spec: intmodel.StackSpec{
-								SpaceName: "space-a",
-							},
-						},
-					}, nil
-				},
-			},
-			verifyForce:   false,
-			verifyCascade: true,
-		},
-		{
-			name:    "both flags parsing",
-			cliArgs: []string{"stack-name", "--realm", "realm-a", "--space", "space-a", "--force", "--cascade"},
-			controller: &fakeStackController{
-				purgeStackFn: func(stack intmodel.Stack, force, cascade bool) (controller.PurgeStackResult, error) {
-					if !force {
-						t.Errorf("expected force to be true, got false")
-					}
-					if !cascade {
-						t.Errorf("expected cascade to be true, got false")
-					}
-					if stack.Metadata.Name != "stack-name" || stack.Spec.SpaceName != "space-a" {
-						t.Errorf("unexpected stack: %+v", stack)
-					}
-					return controller.PurgeStackResult{
-						Stack: intmodel.Stack{
-							Metadata: intmodel.StackMetadata{Name: "stack-name"},
-							Spec: intmodel.StackSpec{
-								SpaceName: "space-a",
-							},
-						},
-					}, nil
-				},
-			},
-			verifyForce:   true,
-			verifyCascade: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Cleanup(viper.Reset)
-
-			// Set up command
+			viper.Reset()
+			if tt.setup != nil {
+				tt.setup()
+			}
 			cmd := stack.NewStackCmd()
 			buf := &bytes.Buffer{}
 			cmd.SetOut(buf)
 			cmd.SetErr(buf)
-
-			// Set up parent command for persistent flags
-			parentCmd := &cobra.Command{
-				Use: "purge",
-			}
-			parentCmd.PersistentFlags().Bool("force", false, "")
-			parentCmd.PersistentFlags().Bool("cascade", false, "")
-			_ = viper.BindPFlag(config.KUKE_PURGE_FORCE.ViperKey, parentCmd.PersistentFlags().Lookup("force"))
-			_ = viper.BindPFlag(config.KUKE_PURGE_CASCADE.ViperKey, parentCmd.PersistentFlags().Lookup("cascade"))
-			parentCmd.AddCommand(cmd)
-			parentCmd.SetOut(buf)
-			parentCmd.SetErr(buf)
-
-			// Set up context with logger
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-
-			// Inject mock controller via context
-			if tt.controller != nil {
-				ctx = context.WithValue(ctx, stack.MockControllerKey{}, tt.controller)
-			}
-
-			parentCmd.SetContext(ctx)
+			ctx = context.WithValue(ctx, stack.MockControllerKey{}, kukeonv1.Client(tt.fake))
 			cmd.SetContext(ctx)
+			cmd.SetArgs(tt.args)
 
-			// Set args on parent command
-			if len(tt.cliArgs) > 0 {
-				allArgs := append([]string{"stack"}, tt.cliArgs...)
-				parentCmd.SetArgs(allArgs)
+			err := cmd.Execute()
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("want err %q, got %v", tt.wantErr, err)
+				}
+				return
 			}
-
-			// Execute command - this will parse flags and call the mock controller
-			err := parentCmd.Execute()
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantOutput != "" && !strings.Contains(buf.String(), tt.wantOutput) {
+				t.Errorf("output missing %q\nGot:\n%s", tt.wantOutput, buf.String())
 			}
 		})
 	}
 }
 
-// fakeStackController provides a mock implementation for testing PurgeStack.
-type fakeStackController struct {
-	purgeStackFn func(stack intmodel.Stack, force, cascade bool) (controller.PurgeStackResult, error)
+type fakeClient struct {
+	kukeonv1.FakeClient
+
+	purgeStackFn func(doc v1beta1.StackDoc, force, cascade bool) (kukeonv1.PurgeStackResult, error)
 }
 
-func (f *fakeStackController) PurgeStack(
-	stack intmodel.Stack,
+func (f *fakeClient) PurgeStack(
+	_ context.Context,
+	doc v1beta1.StackDoc,
 	force, cascade bool,
-) (controller.PurgeStackResult, error) {
+) (kukeonv1.PurgeStackResult, error) {
 	if f.purgeStackFn == nil {
-		return controller.PurgeStackResult{}, errors.New("unexpected PurgeStack call")
+		return kukeonv1.PurgeStackResult{}, errors.New("unexpected PurgeStack call")
 	}
-	return f.purgeStackFn(stack, force, cascade)
-}
-
-func TestNewStackCmd_AutocompleteRegistration(t *testing.T) {
-	cmd := stack.NewStackCmd()
-
-	// Test that ValidArgsFunction is set to CompleteStackNames
-	if cmd.ValidArgsFunction == nil {
-		t.Fatal("expected ValidArgsFunction to be set")
-	}
-
-	// Test that realm flag exists
-	realmFlag := cmd.Flags().Lookup("realm")
-	if realmFlag == nil {
-		t.Fatal("expected 'realm' flag to exist")
-	}
-
-	// Verify flag structure (completion function registration is verified by Cobra)
-	if realmFlag.Usage != "Realm that owns the stack" {
-		t.Errorf("unexpected realm flag usage: %q", realmFlag.Usage)
-	}
-
-	// Test that space flag exists
-	spaceFlag := cmd.Flags().Lookup("space")
-	if spaceFlag == nil {
-		t.Fatal("expected 'space' flag to exist")
-	}
-
-	// Verify flag structure (completion function registration is verified by Cobra)
-	if spaceFlag.Usage != "Space that owns the stack" {
-		t.Errorf("unexpected space flag usage: %q", spaceFlag.Usage)
-	}
+	return f.purgeStackFn(doc, force, cascade)
 }

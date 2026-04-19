@@ -22,20 +22,14 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
-	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/controller"
-	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-type cellController interface {
-	CreateCell(cell intmodel.Cell) (controller.CreateCellResult, error)
-}
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
 func NewCellCmd() *cobra.Command {
@@ -79,84 +73,58 @@ func runCreateCell(cmd *cobra.Command, args []string) error {
 
 	realm := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_REALM.ViperKey))
 	if realm == "" {
-		realm = config.KUKE_CREATE_CELL_REALM.ValueOrDefault()
+		realm = strings.TrimSpace(config.KUKE_CREATE_CELL_REALM.ValueOrDefault())
 	}
 
 	space := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_SPACE.ViperKey))
 	if space == "" {
-		space = config.KUKE_CREATE_CELL_SPACE.ValueOrDefault()
+		space = strings.TrimSpace(config.KUKE_CREATE_CELL_SPACE.ValueOrDefault())
 	}
 
 	stack := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_STACK.ViperKey))
 	if stack == "" {
-		stack = config.KUKE_CREATE_CELL_STACK.ValueOrDefault()
+		stack = strings.TrimSpace(config.KUKE_CREATE_CELL_STACK.ValueOrDefault())
 	}
 
-	// Build v1beta1.CellDoc from command arguments
-	doc := &v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{
-			Name: name,
-		},
+	doc := v1beta1.NewCellDoc(&v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: name},
 		Spec: v1beta1.CellSpec{
 			RealmID: realm,
 			SpaceID: space,
 			StackID: stack,
 		},
-	}
+	})
 
-	// Ensure all nested structs are initialized
-	doc = v1beta1.NewCellDoc(doc)
-
-	// Convert at boundary before calling controller
-	cell, version, err := apischeme.NormalizeCell(*doc)
+	client, err := resolveClient(cmd)
 	if err != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+		return err
 	}
+	defer func() { _ = client.Close() }()
 
-	// Check for mock controller in context (for testing)
-	var ctrl cellController
-	if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(cellController); ok {
-		ctrl = mockCtrl
-	} else {
-		realCtrl, ctrlErr := shared.ControllerFromCmd(cmd)
-		if ctrlErr != nil {
-			return ctrlErr
-		}
-		ctrl = realCtrl
-	}
-
-	// Call controller with internal type
-	result, err := ctrl.CreateCell(cell)
+	result, err := client.CreateCell(cmd.Context(), *doc)
 	if err != nil {
 		return err
 	}
 
-	printCellResult(cmd, result, version)
+	printCellResult(cmd, result)
 	return nil
 }
 
-func printCellResult(cmd *cobra.Command, result controller.CreateCellResult, version v1beta1.Version) {
-	// Convert result back to external for output
-	resultDoc, err := apischeme.BuildCellExternalFromInternal(result.Cell, version)
-	if err != nil {
-		// Fallback to internal type if conversion fails
-		cmd.Printf(
-			"Cell %q (realm %q, space %q, stack %q)\n",
-			result.Cell.Metadata.Name,
-			result.Cell.Spec.RealmName,
-			result.Cell.Spec.SpaceName,
-			result.Cell.Spec.StackName,
-		)
-		cmd.Printf("Warning: failed to convert result for output: %v\n", err)
-	} else {
-		cmd.Printf(
-			"Cell %q (realm %q, space %q, stack %q)\n",
-			resultDoc.Metadata.Name,
-			resultDoc.Spec.RealmID,
-			resultDoc.Spec.SpaceID,
-			resultDoc.Spec.StackID,
-		)
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
 	}
+	return kukeshared.ClientFromCmd(cmd)
+}
+
+func printCellResult(cmd *cobra.Command, result kukeonv1.CreateCellResult) {
+	cmd.Printf(
+		"Cell %q (realm %q, space %q, stack %q)\n",
+		result.Cell.Metadata.Name,
+		result.Cell.Spec.RealmID,
+		result.Cell.Spec.SpaceID,
+		result.Cell.Spec.StackID,
+	)
 	shared.PrintCreationOutcome(cmd, "metadata", result.MetadataExistsPost, result.Created)
 	shared.PrintCreationOutcome(cmd, "cgroup", result.CgroupExistsPost, result.CgroupCreated)
 	shared.PrintCreationOutcome(cmd, "root container", result.RootContainerExistsPost, result.RootContainerCreated)
@@ -178,6 +146,6 @@ func printCellResult(cmd *cobra.Command, result controller.CreateCellResult, ver
 }
 
 // PrintCellResult is exported for testing purposes.
-func PrintCellResult(cmd *cobra.Command, result controller.CreateCellResult, version v1beta1.Version) {
-	printCellResult(cmd, result, version)
+func PrintCellResult(cmd *cobra.Command, result kukeonv1.CreateCellResult) {
+	printCellResult(cmd, result)
 }

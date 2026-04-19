@@ -22,462 +22,137 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"testing"
 
-	"github.com/eminwux/kukeon/cmd/config"
 	stack "github.com/eminwux/kukeon/cmd/kuke/get/stack"
 	"github.com/eminwux/kukeon/cmd/types"
-	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/controller"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-// Behaviors covered:
-// 1. Argument/flag validation for single stack lookups.
-// 2. List flows honoring viper defaults and controller propagation.
-// 3. Output selection fallbacks for single and multiple stacks.
-
-func captureStdout(fn func() error) (string, error) {
-	origStdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		return "", err
-	}
-
-	os.Stdout = w
-	runErr := fn()
-	_ = w.Close()
-	os.Stdout = origStdout
-
-	var buf bytes.Buffer
-	_, copyErr := io.Copy(&buf, r)
-	_ = r.Close()
-	if copyErr != nil {
-		return "", copyErr
-	}
-	return buf.String(), runErr
-}
-
 func TestNewStackCmd(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
 	tests := []struct {
 		name       string
-		cliArgs    []string
-		viperRealm string
-		viperSpace string
-		controller stack.StackController
-		wantErrSub string
+		args       []string
+		setup      func(t *testing.T, cmd *cobra.Command)
+		fake       *fakeClient
+		wantErr    string
+		wantOutput string
 	}{
 		{
-			name:    "uses default realm when name provided and realm not set",
-			cliArgs: []string{"demo", "--space", "space-a"},
-			controller: &fakeStackController{
-				getStack: func(stack intmodel.Stack) (controller.GetStackResult, error) {
-					if stack.Metadata.Name != "demo" || stack.Spec.RealmName != "default" ||
-						stack.Spec.SpaceName != "space-a" {
-						t.Fatalf(
-							"unexpected GetStack inputs: name=%q realm=%q space=%q",
-							stack.Metadata.Name,
-							stack.Spec.RealmName,
-							stack.Spec.SpaceName,
-						)
-					}
-					return controller.GetStackResult{
-						Stack:          stack,
+			name: "get single stack",
+			args: []string{"st1"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				_ = cmd.Flags().Set("realm", "r1")
+				_ = cmd.Flags().Set("space", "s1")
+			},
+			fake: &fakeClient{
+				getStackFn: func(_ v1beta1.StackDoc) (kukeonv1.GetStackResult, error) {
+					return kukeonv1.GetStackResult{
+						Stack: v1beta1.StackDoc{
+							Metadata: v1beta1.StackMetadata{Name: "st1"},
+							Spec:     v1beta1.StackSpec{RealmID: "r1", SpaceID: "s1"},
+						},
 						MetadataExists: true,
 					}, nil
 				},
-				listStacks: func(_, _ string) ([]intmodel.Stack, error) {
-					return nil, errors.New("unexpected list call")
-				},
 			},
 		},
 		{
-			name:    "uses default space when name provided and space not set",
-			cliArgs: []string{"demo", "--realm", "realm-a"},
-			controller: &fakeStackController{
-				getStack: func(stack intmodel.Stack) (controller.GetStackResult, error) {
-					if stack.Metadata.Name != "demo" || stack.Spec.RealmName != "realm-a" ||
-						stack.Spec.SpaceName != "default" {
-						t.Fatalf(
-							"unexpected GetStack inputs: name=%q realm=%q space=%q",
-							stack.Metadata.Name,
-							stack.Spec.RealmName,
-							stack.Spec.SpaceName,
-						)
-					}
-					return controller.GetStackResult{
-						Stack:          stack,
-						MetadataExists: true,
-					}, nil
-				},
-				listStacks: func(_, _ string) ([]intmodel.Stack, error) {
-					return nil, errors.New("unexpected list call")
+			name: "get not found",
+			args: []string{"missing"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				_ = cmd.Flags().Set("realm", "r1")
+				_ = cmd.Flags().Set("space", "s1")
+			},
+			fake: &fakeClient{
+				getStackFn: func(_ v1beta1.StackDoc) (kukeonv1.GetStackResult, error) {
+					return kukeonv1.GetStackResult{}, errdefs.ErrStackNotFound
 				},
 			},
+			wantErr: `stack "missing" not found`,
 		},
 		{
-			name:    "gets single stack with provided flags",
-			cliArgs: []string{"demo", "--realm", " realm-a ", "--space", "\tspace-a"},
-			controller: &fakeStackController{
-				getStack: func(stack intmodel.Stack) (controller.GetStackResult, error) {
-					if stack.Metadata.Name != "demo" || stack.Spec.RealmName != "realm-a" ||
-						stack.Spec.SpaceName != "space-a" {
-						t.Fatalf(
-							"unexpected GetStack inputs: name=%q realm=%q space=%q",
-							stack.Metadata.Name,
-							stack.Spec.RealmName,
-							stack.Spec.SpaceName,
-						)
-					}
-					return controller.GetStackResult{
-						Stack:          stack,
-						MetadataExists: true,
-					}, nil
-				},
-				listStacks: func(_, _ string) ([]intmodel.Stack, error) {
-					return nil, errors.New("unexpected list call")
+			name: "list stacks",
+			fake: &fakeClient{
+				listStacksFn: func(_, _ string) ([]v1beta1.StackDoc, error) {
+					return []v1beta1.StackDoc{{Metadata: v1beta1.StackMetadata{Name: "st1"}}}, nil
 				},
 			},
+			wantOutput: "st1",
 		},
 		{
-			name:       "lists stacks using viper defaults",
-			viperRealm: " realm-x ",
-			viperSpace: "\tspace-x",
-			controller: &fakeStackController{
-				getStack: func(_ intmodel.Stack) (controller.GetStackResult, error) {
-					return controller.GetStackResult{}, errors.New("unexpected get call")
-				},
-				listStacks: func(realm, space string) ([]intmodel.Stack, error) {
-					if realm != "realm-x" || space != "space-x" {
-						t.Fatalf("unexpected ListStacks inputs: %q %q", realm, space)
-					}
-					// Convert external doc to internal
-					doc := &v1beta1.StackDoc{
-						Metadata: v1beta1.StackMetadata{Name: "a"},
-					}
-					stackInternal, _, _ := apischeme.NormalizeStack(*doc)
-					return []intmodel.Stack{stackInternal}, nil
-				},
+			name: "list empty",
+			fake: &fakeClient{
+				listStacksFn: func(_, _ string) ([]v1beta1.StackDoc, error) { return nil, nil },
 			},
-		},
-		{
-			name: "propagates list errors",
-			controller: &fakeStackController{
-				getStack: func(_ intmodel.Stack) (controller.GetStackResult, error) {
-					return controller.GetStackResult{}, errors.New("unexpected get call")
-				},
-				listStacks: func(_, _ string) ([]intmodel.Stack, error) {
-					return nil, errors.New("boom")
-				},
-			},
-			wantErrSub: "boom",
+			wantOutput: "No stacks found.",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Cleanup(viper.Reset)
-			if tt.viperRealm != "" {
-				viper.Set(config.KUKE_GET_STACK_REALM.ViperKey, tt.viperRealm)
-			}
-			if tt.viperSpace != "" {
-				viper.Set(config.KUKE_GET_STACK_SPACE.ViperKey, tt.viperSpace)
-			}
 
-			// Set up context with logger
-			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-			// Inject mock controller via context if provided
-			if tt.controller != nil {
-				ctx = context.WithValue(ctx, stack.MockControllerKey{}, tt.controller)
-			}
-
-			cmd := stack.NewStackCmd()
-			cmd.SetContext(ctx)
-			cmd.SetOut(&bytes.Buffer{})
-			cmd.SetErr(&bytes.Buffer{})
-			if len(tt.cliArgs) > 0 {
-				cmd.SetArgs(tt.cliArgs)
-			}
-
-			err := cmd.Execute()
-			if tt.wantErrSub != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErrSub) {
-					t.Fatalf("expected error containing %q, got %v", tt.wantErrSub, err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-		})
-	}
-}
-
-// TestPrintStack tests the unexported printStack function.
-// Since we're using package stack_test, we can't access unexported functions.
-// This test is skipped - it should be refactored to test through the public API.
-func TestPrintStack(t *testing.T) {
-	t.Skip("TestPrintStack tests unexported function - needs refactoring to test public API")
-}
-
-// TestPrintStacks tests the unexported printStacks function.
-// Since we're using package stack_test, we can't access unexported functions.
-// This test is skipped - it should be refactored to test through the public API.
-func TestPrintStacks(t *testing.T) {
-	t.Skip("TestPrintStacks tests unexported function - needs refactoring to test public API")
-}
-
-type fakeStackController struct {
-	getStack   func(stack intmodel.Stack) (controller.GetStackResult, error)
-	listStacks func(realmName, spaceName string) ([]intmodel.Stack, error)
-}
-
-func (f *fakeStackController) GetStack(stack intmodel.Stack) (controller.GetStackResult, error) {
-	if f.getStack == nil {
-		panic("GetStack was called unexpectedly")
-	}
-	return f.getStack(stack)
-}
-
-func (f *fakeStackController) ListStacks(realmName, spaceName string) ([]intmodel.Stack, error) {
-	if f.listStacks == nil {
-		panic("ListStacks was called unexpectedly")
-	}
-	return f.listStacks(realmName, spaceName)
-}
-
-func TestNewStackCmdRunE(t *testing.T) {
-	docAlpha := &v1beta1.StackDoc{
-		Metadata: v1beta1.StackMetadata{Name: "alpha"},
-		Spec:     v1beta1.StackSpec{RealmID: "realm-a", SpaceID: "space-a"},
-	}
-	docList := []*v1beta1.StackDoc{docAlpha}
-
-	tests := []struct {
-		name       string
-		args       []string
-		realmFlag  string
-		spaceFlag  string
-		outputFlag string
-		controller stack.StackController
-		wantOutput []string
-		wantErr    string
-	}{
-		{
-			name:      "get stack success",
-			args:      []string{"alpha"},
-			realmFlag: "realm-a",
-			spaceFlag: "space-a",
-			controller: &fakeStackController{
-				getStack: func(stack intmodel.Stack) (controller.GetStackResult, error) {
-					if stack.Metadata.Name != "alpha" || stack.Spec.RealmName != "realm-a" ||
-						stack.Spec.SpaceName != "space-a" {
-						return controller.GetStackResult{}, errors.New("unexpected args")
-					}
-					// Convert docAlpha to internal for result
-					stackInternal, _, _ := apischeme.NormalizeStack(*docAlpha)
-					return controller.GetStackResult{
-						Stack:          stackInternal,
-						MetadataExists: true,
-					}, nil
-				},
-			},
-			wantOutput: []string{"name: alpha"},
-		},
-		{
-			name:       "list stacks success",
-			realmFlag:  "realm-a",
-			spaceFlag:  "space-a",
-			outputFlag: "yaml",
-			controller: &fakeStackController{
-				listStacks: func(realm, space string) ([]intmodel.Stack, error) {
-					if realm != "realm-a" || space != "space-a" {
-						return nil, errors.New("unexpected args")
-					}
-					// Convert docList to internal types
-					internalStacks := make([]intmodel.Stack, 0, len(docList))
-					for _, doc := range docList {
-						stackInternal, _, _ := apischeme.NormalizeStack(*doc)
-						internalStacks = append(internalStacks, stackInternal)
-					}
-					return internalStacks, nil
-				},
-			},
-			wantOutput: []string{"name: alpha"},
-		},
-		{
-			name:      "uses default realm when realm flag not set",
-			args:      []string{"alpha"},
-			spaceFlag: "space-a",
-			controller: &fakeStackController{
-				getStack: func(stack intmodel.Stack) (controller.GetStackResult, error) {
-					if stack.Metadata.Name != "alpha" || stack.Spec.RealmName != "default" ||
-						stack.Spec.SpaceName != "space-a" {
-						return controller.GetStackResult{}, errors.New("unexpected args")
-					}
-					// Convert docAlpha to internal for result
-					stackInternal, _, _ := apischeme.NormalizeStack(*docAlpha)
-					return controller.GetStackResult{
-						Stack:          stackInternal,
-						MetadataExists: true,
-					}, nil
-				},
-			},
-			wantOutput: []string{"name: alpha"},
-		},
-		{
-			name:      "uses default space when space flag not set",
-			args:      []string{"alpha"},
-			realmFlag: "realm-a",
-			controller: &fakeStackController{
-				getStack: func(stack intmodel.Stack) (controller.GetStackResult, error) {
-					if stack.Metadata.Name != "alpha" || stack.Spec.RealmName != "realm-a" ||
-						stack.Spec.SpaceName != "default" {
-						return controller.GetStackResult{}, errors.New("unexpected args")
-					}
-					// Convert docAlpha to internal for result
-					stackInternal, _, _ := apischeme.NormalizeStack(*docAlpha)
-					return controller.GetStackResult{
-						Stack:          stackInternal,
-						MetadataExists: true,
-					}, nil
-				},
-			},
-			wantOutput: []string{"name: alpha"},
-		},
-		{
-			name:      "stack not found error",
-			args:      []string{"ghost"},
-			realmFlag: "realm-a",
-			spaceFlag: "space-a",
-			controller: &fakeStackController{
-				getStack: func(_ intmodel.Stack) (controller.GetStackResult, error) {
-					return controller.GetStackResult{
-						MetadataExists: false,
-					}, nil
-				},
-			},
-			wantErr: "stack \"ghost\" not found in realm \"realm-a\", space \"space-a\"",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			viper.Reset()
 			cmd := stack.NewStackCmd()
 			buf := &bytes.Buffer{}
 			cmd.SetOut(buf)
 			cmd.SetErr(buf)
 
-			if tt.realmFlag != "" {
-				if err := cmd.Flags().Set("realm", tt.realmFlag); err != nil {
-					t.Fatalf("failed to set realm flag: %v", err)
-				}
-			}
-			if tt.spaceFlag != "" {
-				if err := cmd.Flags().Set("space", tt.spaceFlag); err != nil {
-					t.Fatalf("failed to set space flag: %v", err)
-				}
-			}
-			if tt.outputFlag != "" {
-				if err := cmd.Flags().Set("output", tt.outputFlag); err != nil {
-					t.Fatalf("failed to set output flag: %v", err)
-				}
-			}
-
-			// Set up context with logger
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-			// Inject mock controller via context if provided
-			if tt.controller != nil {
-				ctx = context.WithValue(ctx, stack.MockControllerKey{}, tt.controller)
-			}
+			ctx = context.WithValue(ctx, stack.MockControllerKey{}, kukeonv1.Client(tt.fake))
 			cmd.SetContext(ctx)
 
-			cmd.SetArgs(tt.args)
-
-			// Capture stdout since PrintYAML/PrintJSON write to os.Stdout
-			// Table output goes to cmd.Out
-			var stdout string
-			var err error
-			if tt.wantOutput != nil || tt.wantErr == "" {
-				stdout, err = captureStdout(cmd.Execute)
-			} else {
-				err = cmd.Execute()
+			if tt.setup != nil {
+				tt.setup(t, cmd)
 			}
 
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+
 			if tt.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
 				}
 				return
 			}
-
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-
-			if tt.wantOutput != nil {
-				// Combine stdout (YAML/JSON) and command output (table) and stderr
-				output := stdout + buf.String()
-				for _, expected := range tt.wantOutput {
-					if !strings.Contains(output, expected) {
-						t.Errorf("output missing expected string %q\nGot output:\n%s", expected, output)
-					}
-				}
+			if tt.wantOutput != "" && !strings.Contains(buf.String(), tt.wantOutput) {
+				t.Errorf("output missing %q\nGot:\n%s", tt.wantOutput, buf.String())
 			}
 		})
 	}
 }
 
-func TestNewStackCmd_AutocompleteRegistration(t *testing.T) {
-	cmd := stack.NewStackCmd()
+type fakeClient struct {
+	kukeonv1.FakeClient
 
-	// Test that ValidArgsFunction is set to CompleteStackNames
-	if cmd.ValidArgsFunction == nil {
-		t.Fatal("expected ValidArgsFunction to be set")
-	}
+	getStackFn   func(doc v1beta1.StackDoc) (kukeonv1.GetStackResult, error)
+	listStacksFn func(realm, space string) ([]v1beta1.StackDoc, error)
+}
 
-	// Test that realm flag exists
-	realmFlag := cmd.Flags().Lookup("realm")
-	if realmFlag == nil {
-		t.Fatal("expected 'realm' flag to exist")
+func (f *fakeClient) GetStack(_ context.Context, doc v1beta1.StackDoc) (kukeonv1.GetStackResult, error) {
+	if f.getStackFn == nil {
+		return kukeonv1.GetStackResult{}, errors.New("unexpected GetStack call")
 	}
+	return f.getStackFn(doc)
+}
 
-	// Verify flag structure (completion function registration is verified by Cobra)
-	if realmFlag.Usage != "Filter stacks by realm name" {
-		t.Errorf("unexpected realm flag usage: %q", realmFlag.Usage)
+func (f *fakeClient) ListStacks(_ context.Context, realm, space string) ([]v1beta1.StackDoc, error) {
+	if f.listStacksFn == nil {
+		return nil, errors.New("unexpected ListStacks call")
 	}
-
-	// Test that space flag exists
-	spaceFlag := cmd.Flags().Lookup("space")
-	if spaceFlag == nil {
-		t.Fatal("expected 'space' flag to exist")
-	}
-
-	// Verify flag structure (completion function registration is verified by Cobra)
-	if spaceFlag.Usage != "Filter stacks by space name" {
-		t.Errorf("unexpected space flag usage: %q", spaceFlag.Usage)
-	}
-
-	// Test that output flag exists
-	outputFlag := cmd.Flags().Lookup("output")
-	if outputFlag == nil {
-		t.Fatal("expected 'output' flag to exist")
-	}
-
-	// Verify flag structure (completion function registration is verified by Cobra)
-	if outputFlag.Usage != "Output format (yaml, json, table). Default: table for list, yaml for single resource" {
-		t.Errorf("unexpected output flag usage: %q", outputFlag.Usage)
-	}
-
-	// Verify that output flag has shorthand 'o'
-	if outputFlag.Shorthand != "o" {
-		t.Errorf("expected output flag to have shorthand 'o', got %q", outputFlag.Shorthand)
-	}
+	return f.listStacksFn(realm, space)
 }

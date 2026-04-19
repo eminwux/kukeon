@@ -22,21 +22,16 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/create/shared"
-	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/controller"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-type containerController interface {
-	CreateContainer(container intmodel.Container) (controller.CreateContainerResult, error)
-}
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
 func NewContainerCmd() *cobra.Command {
@@ -47,152 +42,7 @@ func NewContainerCmd() *cobra.Command {
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			name, err := shared.RequireNameArgOrDefault(
-				cmd,
-				args,
-				"container",
-				viper.GetString(config.KUKE_CREATE_CONTAINER_NAME.ViperKey),
-			)
-			if err != nil {
-				return err
-			}
-
-			realm := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_REALM.ViperKey))
-			if realm == "" {
-				realm = config.KUKE_CREATE_CONTAINER_REALM.ValueOrDefault()
-			}
-
-			space := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_SPACE.ViperKey))
-			if space == "" {
-				space = config.KUKE_CREATE_CONTAINER_SPACE.ValueOrDefault()
-			}
-
-			stack := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_STACK.ViperKey))
-			if stack == "" {
-				stack = config.KUKE_CREATE_CONTAINER_STACK.ValueOrDefault()
-			}
-
-			cell := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_CELL.ViperKey))
-			if cell == "" {
-				return fmt.Errorf("%w (--cell)", errdefs.ErrCellNameRequired)
-			}
-
-			image := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_IMAGE.ViperKey))
-			if image == "" {
-				image = "docker.io/library/debian:latest"
-			} else {
-				// Normalize image reference to fully qualified format
-				image = ctr.NormalizeImageReference(image)
-			}
-
-			command, err := cmd.Flags().GetString("command")
-			if err != nil {
-				return err
-			}
-
-			argsList, err := cmd.Flags().GetStringArray("args")
-			if err != nil {
-				return err
-			}
-
-			envList, err := cmd.Flags().GetStringArray("env")
-			if err != nil {
-				return err
-			}
-
-			portsList, err := cmd.Flags().GetStringArray("port")
-			if err != nil {
-				return err
-			}
-
-			volumesList, err := cmd.Flags().GetStringArray("volume")
-			if err != nil {
-				return err
-			}
-
-			networksList, err := cmd.Flags().GetStringArray("network")
-			if err != nil {
-				return err
-			}
-
-			networkAliasesList, err := cmd.Flags().GetStringArray("network-alias")
-			if err != nil {
-				return err
-			}
-
-			labelsList, err := cmd.Flags().GetStringArray("label")
-			if err != nil {
-				return err
-			}
-
-			labels, err := parseLabels(labelsList)
-			if err != nil {
-				return err
-			}
-
-			privileged := viper.GetBool(config.KUKE_CREATE_CONTAINER_PRIVILEGED.ViperKey)
-			root := viper.GetBool(config.KUKE_CREATE_CONTAINER_ROOT.ViperKey)
-			cniConfigPath := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_CNI_CONFIG_PATH.ViperKey))
-			restartPolicy := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_RESTART_POLICY.ViperKey))
-
-			containerDoc := &v1beta1.ContainerDoc{
-				Metadata: v1beta1.ContainerMetadata{
-					Name:   name,
-					Labels: labels,
-				},
-				Spec: v1beta1.ContainerSpec{
-					ID:              name,
-					RealmID:         realm,
-					SpaceID:         space,
-					StackID:         stack,
-					CellID:          cell,
-					Root:            root,
-					Image:           image,
-					Command:         command,
-					Args:            argsList,
-					Env:             envList,
-					Ports:           portsList,
-					Volumes:         volumesList,
-					Networks:        networksList,
-					NetworksAliases: networkAliasesList,
-					Privileged:      privileged,
-					CNIConfigPath:   cniConfigPath,
-					RestartPolicy:   restartPolicy,
-				},
-			}
-
-			// Ensure all nested structs are initialized
-			containerDoc = v1beta1.NewContainerDoc(containerDoc)
-
-			// Convert at boundary before calling controller
-			containerInternal, version, err := apischeme.NormalizeContainer(*containerDoc)
-			if err != nil {
-				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-			}
-
-			// Check for mock controller in context (for testing)
-			var ctrl containerController
-			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(containerController); ok {
-				ctrl = mockCtrl
-			} else {
-				var realCtrl *controller.Exec
-				realCtrl, err = shared.ControllerFromCmd(cmd)
-				if err != nil {
-					return err
-				}
-				ctrl = realCtrl
-			}
-
-			// Call controller with internal type
-			createResult, err := ctrl.CreateContainer(containerInternal)
-			if err != nil {
-				return err
-			}
-
-			printContainerResult(cmd, createResult, version)
-			return nil
-		},
+		RunE:          runCreateContainer,
 	}
 
 	cmd.Flags().String("realm", "", "Realm that owns the container")
@@ -243,7 +93,6 @@ func NewContainerCmd() *cobra.Command {
 	cmd.Flags().StringArray("label", []string{}, "Metadata label in KEY=VALUE form (repeatable)")
 	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_LABELS.ViperKey, cmd.Flags().Lookup("label"))
 
-	// Register autocomplete functions for flags and positional argument
 	cmd.ValidArgsFunction = config.CompleteContainerNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
@@ -253,32 +102,144 @@ func NewContainerCmd() *cobra.Command {
 	return cmd
 }
 
-func printContainerResult(cmd *cobra.Command, result controller.CreateContainerResult, version v1beta1.Version) {
-	// Convert result back to external for output
-	resultDoc, err := apischeme.BuildContainerExternalFromInternal(result.Container, version)
+func runCreateContainer(cmd *cobra.Command, args []string) error {
+	name, err := shared.RequireNameArgOrDefault(
+		cmd,
+		args,
+		"container",
+		viper.GetString(config.KUKE_CREATE_CONTAINER_NAME.ViperKey),
+	)
 	if err != nil {
-		// Fallback to internal type if conversion fails
-		cmd.Printf(
-			"Container %q (ID: %q) in cell %q (realm %q, space %q, stack %q)\n",
-			result.Container.Metadata.Name,
-			result.Container.Spec.ID,
-			result.Container.Spec.CellName,
-			result.Container.Spec.RealmName,
-			result.Container.Spec.SpaceName,
-			result.Container.Spec.StackName,
-		)
-		cmd.Printf("Warning: failed to convert result for output: %v\n", err)
-	} else {
-		cmd.Printf(
-			"Container %q (ID: %q) in cell %q (realm %q, space %q, stack %q)\n",
-			resultDoc.Metadata.Name,
-			resultDoc.Spec.ID,
-			resultDoc.Spec.CellID,
-			resultDoc.Spec.RealmID,
-			resultDoc.Spec.SpaceID,
-			resultDoc.Spec.StackID,
-		)
+		return err
 	}
+
+	realm := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_REALM.ViperKey))
+	if realm == "" {
+		realm = strings.TrimSpace(config.KUKE_CREATE_CONTAINER_REALM.ValueOrDefault())
+	}
+
+	space := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_SPACE.ViperKey))
+	if space == "" {
+		space = strings.TrimSpace(config.KUKE_CREATE_CONTAINER_SPACE.ValueOrDefault())
+	}
+
+	stack := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_STACK.ViperKey))
+	if stack == "" {
+		stack = strings.TrimSpace(config.KUKE_CREATE_CONTAINER_STACK.ValueOrDefault())
+	}
+
+	cell := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_CELL.ViperKey))
+	if cell == "" {
+		return fmt.Errorf("%w (--cell)", errdefs.ErrCellNameRequired)
+	}
+
+	image := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_IMAGE.ViperKey))
+	if image == "" {
+		image = "docker.io/library/debian:latest"
+	} else {
+		image = ctr.NormalizeImageReference(image)
+	}
+
+	command, err := cmd.Flags().GetString("command")
+	if err != nil {
+		return err
+	}
+	argsList, err := cmd.Flags().GetStringArray("args")
+	if err != nil {
+		return err
+	}
+	envList, err := cmd.Flags().GetStringArray("env")
+	if err != nil {
+		return err
+	}
+	portsList, err := cmd.Flags().GetStringArray("port")
+	if err != nil {
+		return err
+	}
+	volumesList, err := cmd.Flags().GetStringArray("volume")
+	if err != nil {
+		return err
+	}
+	networksList, err := cmd.Flags().GetStringArray("network")
+	if err != nil {
+		return err
+	}
+	networkAliasesList, err := cmd.Flags().GetStringArray("network-alias")
+	if err != nil {
+		return err
+	}
+	labelsList, err := cmd.Flags().GetStringArray("label")
+	if err != nil {
+		return err
+	}
+	labels, err := parseLabels(labelsList)
+	if err != nil {
+		return err
+	}
+
+	privileged := viper.GetBool(config.KUKE_CREATE_CONTAINER_PRIVILEGED.ViperKey)
+	root := viper.GetBool(config.KUKE_CREATE_CONTAINER_ROOT.ViperKey)
+	cniConfigPath := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_CNI_CONFIG_PATH.ViperKey))
+	restartPolicy := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_RESTART_POLICY.ViperKey))
+
+	doc := v1beta1.NewContainerDoc(&v1beta1.ContainerDoc{
+		Metadata: v1beta1.ContainerMetadata{
+			Name:   name,
+			Labels: labels,
+		},
+		Spec: v1beta1.ContainerSpec{
+			ID:              name,
+			RealmID:         realm,
+			SpaceID:         space,
+			StackID:         stack,
+			CellID:          cell,
+			Root:            root,
+			Image:           image,
+			Command:         command,
+			Args:            argsList,
+			Env:             envList,
+			Ports:           portsList,
+			Volumes:         volumesList,
+			Networks:        networksList,
+			NetworksAliases: networkAliasesList,
+			Privileged:      privileged,
+			CNIConfigPath:   cniConfigPath,
+			RestartPolicy:   restartPolicy,
+		},
+	})
+
+	client, err := resolveClient(cmd)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = client.Close() }()
+
+	result, err := client.CreateContainer(cmd.Context(), *doc)
+	if err != nil {
+		return err
+	}
+
+	printContainerResult(cmd, result)
+	return nil
+}
+
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
+	}
+	return kukeshared.ClientFromCmd(cmd)
+}
+
+func printContainerResult(cmd *cobra.Command, result kukeonv1.CreateContainerResult) {
+	cmd.Printf(
+		"Container %q (ID: %q) in cell %q (realm %q, space %q, stack %q)\n",
+		result.Container.Metadata.Name,
+		result.Container.Spec.ID,
+		result.Container.Spec.CellID,
+		result.Container.Spec.RealmID,
+		result.Container.Spec.SpaceID,
+		result.Container.Spec.StackID,
+	)
 	shared.PrintCreationOutcome(cmd, "container", result.ContainerExistsPost, result.ContainerCreated)
 	if result.Started {
 		cmd.Println("  - container: started")
@@ -288,8 +249,8 @@ func printContainerResult(cmd *cobra.Command, result controller.CreateContainerR
 }
 
 // PrintContainerResult is exported for testing purposes.
-func PrintContainerResult(cmd *cobra.Command, result controller.CreateContainerResult, version v1beta1.Version) {
-	printContainerResult(cmd, result, version)
+func PrintContainerResult(cmd *cobra.Command, result kukeonv1.CreateContainerResult) {
+	printContainerResult(cmd, result)
 }
 
 func parseLabels(entries []string) (map[string]string, error) {

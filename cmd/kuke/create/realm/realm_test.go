@@ -22,595 +22,143 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	realm "github.com/eminwux/kukeon/cmd/kuke/create/realm"
 	"github.com/eminwux/kukeon/cmd/types"
-	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
+func newRealmDoc(name, namespace string) v1beta1.RealmDoc {
+	return v1beta1.RealmDoc{
+		Metadata: v1beta1.RealmMetadata{Name: name},
+		Spec:     v1beta1.RealmSpec{Namespace: namespace},
+	}
+}
+
 func TestPrintRealmResult(t *testing.T) {
 	tests := []struct {
-		name        string
-		result      controller.CreateRealmResult
-		expectMatch []string
+		name           string
+		result         kukeonv1.CreateRealmResult
+		expectedOutput []string
 	}{
 		{
-			name: "all resources created",
-			result: controller.CreateRealmResult{
-				Realm: intmodel.Realm{
-					Metadata: intmodel.RealmMetadata{
-						Name: "test-realm",
-					},
-					Spec: intmodel.RealmSpec{
-						Namespace: "test-ns",
-					},
-				},
-				MetadataExistsPost:            true,
+			name: "all created",
+			result: kukeonv1.CreateRealmResult{
+				Realm:                         newRealmDoc("r1", "ns1"),
 				Created:                       true,
-				ContainerdNamespaceExistsPost: true,
+				MetadataExistsPost:            true,
 				ContainerdNamespaceCreated:    true,
-				CgroupExistsPost:              true,
+				ContainerdNamespaceExistsPost: true,
 				CgroupCreated:                 true,
+				CgroupExistsPost:              true,
 			},
-			expectMatch: []string{
-				`Realm "test-realm" (namespace "test-ns")`,
+			expectedOutput: []string{
+				`Realm "r1" (namespace "ns1")`,
 				"  - metadata: created",
 				"  - containerd namespace: created",
 				"  - cgroup: created",
 			},
 		},
 		{
-			name: "all resources already existed",
-			result: controller.CreateRealmResult{
-				Realm: intmodel.Realm{
-					Metadata: intmodel.RealmMetadata{
-						Name: "existing-realm",
-					},
-					Spec: intmodel.RealmSpec{
-						Namespace: "existing-ns",
-					},
-				},
+			name: "all existed",
+			result: kukeonv1.CreateRealmResult{
+				Realm:                         newRealmDoc("r2", "ns2"),
 				MetadataExistsPost:            true,
-				Created:                       false,
 				ContainerdNamespaceExistsPost: true,
-				ContainerdNamespaceCreated:    false,
 				CgroupExistsPost:              true,
-				CgroupCreated:                 false,
 			},
-			expectMatch: []string{
-				`Realm "existing-realm" (namespace "existing-ns")`,
+			expectedOutput: []string{
+				`Realm "r2" (namespace "ns2")`,
 				"  - metadata: already existed",
 				"  - containerd namespace: already existed",
 				"  - cgroup: already existed",
-			},
-		},
-		{
-			name: "metadata created, others existed",
-			result: controller.CreateRealmResult{
-				Realm: intmodel.Realm{
-					Metadata: intmodel.RealmMetadata{
-						Name: "mixed-realm",
-					},
-					Spec: intmodel.RealmSpec{
-						Namespace: "mixed-ns",
-					},
-				},
-				MetadataExistsPost:            true,
-				Created:                       true,
-				ContainerdNamespaceExistsPost: true,
-				ContainerdNamespaceCreated:    false,
-				CgroupExistsPost:              true,
-				CgroupCreated:                 false,
-			},
-			expectMatch: []string{
-				`Realm "mixed-realm" (namespace "mixed-ns")`,
-				"  - metadata: created",
-				"  - containerd namespace: already existed",
-				"  - cgroup: already existed",
-			},
-		},
-		{
-			name: "namespace created, others existed",
-			result: controller.CreateRealmResult{
-				Realm: intmodel.Realm{
-					Metadata: intmodel.RealmMetadata{
-						Name: "ns-created",
-					},
-					Spec: intmodel.RealmSpec{
-						Namespace: "ns-created-ns",
-					},
-				},
-				MetadataExistsPost:            true,
-				Created:                       false,
-				ContainerdNamespaceExistsPost: true,
-				ContainerdNamespaceCreated:    true,
-				CgroupExistsPost:              true,
-				CgroupCreated:                 false,
-			},
-			expectMatch: []string{
-				`Realm "ns-created" (namespace "ns-created-ns")`,
-				"  - metadata: already existed",
-				"  - containerd namespace: created",
-				"  - cgroup: already existed",
-			},
-		},
-		{
-			name: "cgroup created, others existed",
-			result: controller.CreateRealmResult{
-				Realm: intmodel.Realm{
-					Metadata: intmodel.RealmMetadata{
-						Name: "cgroup-created",
-					},
-					Spec: intmodel.RealmSpec{
-						Namespace: "cgroup-created-ns",
-					},
-				},
-				MetadataExistsPost:            true,
-				Created:                       false,
-				ContainerdNamespaceExistsPost: true,
-				ContainerdNamespaceCreated:    false,
-				CgroupExistsPost:              true,
-				CgroupCreated:                 true,
-			},
-			expectMatch: []string{
-				`Realm "cgroup-created" (namespace "cgroup-created-ns")`,
-				"  - metadata: already existed",
-				"  - containerd namespace: already existed",
-				"  - cgroup: created",
-			},
-		},
-		{
-			name: "metadata missing",
-			result: controller.CreateRealmResult{
-				Realm: intmodel.Realm{
-					Metadata: intmodel.RealmMetadata{
-						Name: "missing-metadata",
-					},
-					Spec: intmodel.RealmSpec{
-						Namespace: "missing-ns",
-					},
-				},
-				MetadataExistsPost:            false,
-				Created:                       false,
-				ContainerdNamespaceExistsPost: true,
-				ContainerdNamespaceCreated:    false,
-				CgroupExistsPost:              true,
-				CgroupCreated:                 false,
-			},
-			expectMatch: []string{
-				`Realm "missing-metadata" (namespace "missing-ns")`,
-				"  - metadata: missing",
-				"  - containerd namespace: already existed",
-				"  - cgroup: already existed",
-			},
-		},
-		{
-			name: "namespace missing",
-			result: controller.CreateRealmResult{
-				Realm: intmodel.Realm{
-					Metadata: intmodel.RealmMetadata{
-						Name: "missing-ns",
-					},
-					Spec: intmodel.RealmSpec{
-						Namespace: "missing-ns-name",
-					},
-				},
-				MetadataExistsPost:            true,
-				Created:                       false,
-				ContainerdNamespaceExistsPost: false,
-				ContainerdNamespaceCreated:    false,
-				CgroupExistsPost:              true,
-				CgroupCreated:                 false,
-			},
-			expectMatch: []string{
-				`Realm "missing-ns" (namespace "missing-ns-name")`,
-				"  - metadata: already existed",
-				"  - containerd namespace: missing",
-				"  - cgroup: already existed",
-			},
-		},
-		{
-			name: "cgroup missing",
-			result: controller.CreateRealmResult{
-				Realm: intmodel.Realm{
-					Metadata: intmodel.RealmMetadata{
-						Name: "missing-cgroup",
-					},
-					Spec: intmodel.RealmSpec{
-						Namespace: "missing-cgroup-ns",
-					},
-				},
-				MetadataExistsPost:            true,
-				Created:                       false,
-				ContainerdNamespaceExistsPost: true,
-				ContainerdNamespaceCreated:    false,
-				CgroupExistsPost:              false,
-				CgroupCreated:                 false,
-			},
-			expectMatch: []string{
-				`Realm "missing-cgroup" (namespace "missing-cgroup-ns")`,
-				"  - metadata: already existed",
-				"  - containerd namespace: already existed",
-				"  - cgroup: missing",
-			},
-		},
-		{
-			name: "all missing",
-			result: controller.CreateRealmResult{
-				Realm: intmodel.Realm{
-					Metadata: intmodel.RealmMetadata{
-						Name: "all-missing",
-					},
-					Spec: intmodel.RealmSpec{
-						Namespace: "all-missing-ns",
-					},
-				},
-				MetadataExistsPost:            false,
-				Created:                       false,
-				ContainerdNamespaceExistsPost: false,
-				ContainerdNamespaceCreated:    false,
-				CgroupExistsPost:              false,
-				CgroupCreated:                 false,
-			},
-			expectMatch: []string{
-				`Realm "all-missing" (namespace "all-missing-ns")`,
-				"  - metadata: missing",
-				"  - containerd namespace: missing",
-				"  - cgroup: missing",
 			},
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := &cobra.Command{Use: "realm"}
-			buf := &bytes.Buffer{}
-			cmd.SetOut(buf)
-			cmd.SetErr(buf)
-
-			realm.PrintRealmResult(cmd, tt.result, v1beta1.APIVersionV1Beta1)
-
-			output := buf.String()
-			for _, match := range tt.expectMatch {
-				if !strings.Contains(output, match) {
-					t.Errorf("output %q missing expected match %q", output, match)
+			cmd, buf := newTestCommand()
+			realm.PrintRealmResult(cmd, tt.result)
+			out := buf.String()
+			for _, want := range tt.expectedOutput {
+				if !strings.Contains(out, want) {
+					t.Errorf("output missing %q\nGot:\n%s", want, out)
 				}
 			}
 		})
-	}
-}
-
-func TestNewRealmCmd(t *testing.T) {
-	tests := []struct {
-		name               string
-		args               []string
-		setup              func(t *testing.T, runPath string)
-		expectErr          bool
-		expectErrText      string
-		expectMatch        string
-		useStdout          bool
-		skipIfNoContainerd bool
-	}{
-		{
-			name: "error missing name no arg no config",
-			setup: func(_ *testing.T, _ string) {
-				// No config set
-			},
-			expectErr:     true,
-			expectErrText: "realm name is required",
-		},
-		{
-			name: "error missing logger in context",
-			args: []string{"test-realm"},
-			setup: func(_ *testing.T, _ string) {
-				// Context without logger will be set in test
-			},
-			expectErr:     true,
-			expectErrText: "logger not found in context",
-		},
-		{
-			name: "error with empty name after trim",
-			args: []string{"   "},
-			setup: func(_ *testing.T, _ string) {
-				// Empty name after trim should fail
-			},
-			expectErr:     true,
-			expectErrText: "realm name is required",
-		},
-		{
-			name: "success with name argument",
-			args: []string{"test-realm"},
-			setup: func(_ *testing.T, _ string) {
-				// Mock controller will be injected via context
-			},
-			expectMatch: `Realm "test-realm"`,
-		},
-		{
-			name: "success with name from config",
-			setup: func(_ *testing.T, _ string) {
-				viper.Set(config.KUKE_CREATE_REALM_NAME.ViperKey, "config-realm")
-			},
-			expectMatch: `Realm "config-realm"`,
-		},
-		{
-			name: "success with namespace flag",
-			args: []string{"test-realm", "--namespace", "custom-ns"},
-			setup: func(_ *testing.T, _ string) {
-				// Mock controller will be injected via context
-			},
-			expectMatch: `namespace "custom-ns"`,
-		},
-		{
-			name: "success with empty namespace defaults to name",
-			args: []string{"default-ns-realm"},
-			setup: func(_ *testing.T, _ string) {
-				// Mock controller will be injected via context
-			},
-			expectMatch: `Realm "default-ns-realm" (namespace "default-ns-realm")`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			runPath := t.TempDir()
-			cmd, buf := newRealmTestCommand(t, runPath, tt.name == "error missing logger in context")
-
-			if tt.setup != nil {
-				tt.setup(t, runPath)
-			}
-
-			// Inject mock controller via context for success cases
-			if !tt.expectErr && tt.expectMatch != "" {
-				ctx := cmd.Context()
-				mockCtrl := &fakeRealmController{
-					createRealmFn: func(realm intmodel.Realm) (controller.CreateRealmResult, error) {
-						namespace := realm.Spec.Namespace
-						if namespace == "" {
-							namespace = realm.Metadata.Name
-						}
-						realm.Spec.Namespace = namespace
-						return controller.CreateRealmResult{
-							Realm:                         realm,
-							Created:                       true,
-							ContainerdNamespaceCreated:    true,
-							CgroupCreated:                 true,
-							MetadataExistsPost:            true,
-							ContainerdNamespaceExistsPost: true,
-							CgroupExistsPost:              true,
-						}, nil
-					},
-				}
-				ctx = context.WithValue(ctx, realm.MockControllerKey{}, mockCtrl)
-				cmd.SetContext(ctx)
-			}
-
-			cmd.SetArgs(tt.args)
-
-			var (
-				out string
-				err error
-			)
-			if tt.useStdout {
-				out, err = captureStdout(cmd.Execute)
-			} else {
-				err = cmd.Execute()
-				out = buf.String()
-			}
-
-			if tt.expectErr {
-				if err == nil {
-					t.Fatalf("expected error, got nil")
-				}
-				if tt.expectErrText != "" && !strings.Contains(err.Error(), tt.expectErrText) {
-					t.Fatalf("expected error containing %q, got %v", tt.expectErrText, err)
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if tt.expectMatch != "" && !strings.Contains(out, tt.expectMatch) {
-				t.Fatalf("output %q missing expected match %q", out, tt.expectMatch)
-			}
-		})
-	}
-}
-
-func TestNewRealmCmd_CommandStructure(t *testing.T) {
-	// Test that the command is created with correct structure
-	cmd := realm.NewRealmCmd()
-
-	if cmd.Use != "realm [name]" {
-		t.Errorf("expected Use to be 'realm [name]', got %q", cmd.Use)
-	}
-
-	if cmd.Short != "Create or reconcile a realm" {
-		t.Errorf("expected Short to be 'Create or reconcile a realm', got %q", cmd.Short)
-	}
-
-	if !cmd.SilenceUsage {
-		t.Error("expected SilenceUsage to be true")
-	}
-
-	if cmd.SilenceErrors {
-		t.Error("expected SilenceErrors to be false")
-	}
-
-	// Test that namespace flag exists
-	namespaceFlag := cmd.Flags().Lookup("namespace")
-	if namespaceFlag == nil {
-		t.Fatal("expected 'namespace' flag to exist")
-	}
-
-	if namespaceFlag.Usage != "Containerd namespace for the realm (defaults to the realm name)" {
-		t.Errorf("unexpected namespace flag usage: %q", namespaceFlag.Usage)
 	}
 }
 
 func TestNewRealmCmdRunE(t *testing.T) {
-	t.Cleanup(func() {
-		viper.Reset()
-	})
+	t.Cleanup(viper.Reset)
 
 	tests := []struct {
 		name           string
 		args           []string
 		setup          func(t *testing.T, cmd *cobra.Command)
-		controllerFn   func(realm intmodel.Realm) (controller.CreateRealmResult, error)
+		clientFn       func(doc v1beta1.RealmDoc) (kukeonv1.CreateRealmResult, error)
 		wantErr        string
 		wantCallCreate bool
-		wantRealm      intmodel.Realm
+		wantDoc        v1beta1.RealmDoc
 		wantOutput     []string
 	}{
 		{
-			name: "success: name from args",
-			args: []string{"test-realm"},
-			setup: func(_ *testing.T, _ *cobra.Command) {
-				// No setup needed
-			},
-			controllerFn: func(realm intmodel.Realm) (controller.CreateRealmResult, error) {
-				namespace := realm.Spec.Namespace
-				if namespace == "" {
-					namespace = realm.Metadata.Name
-				}
-				realm.Spec.Namespace = namespace
-				return controller.CreateRealmResult{
-					Realm:                         realm,
-					Created:                       true,
-					MetadataExistsPost:            true,
-					ContainerdNamespaceCreated:    true,
-					ContainerdNamespaceExistsPost: true,
-					CgroupCreated:                 true,
-					CgroupExistsPost:              true,
-				}, nil
+			name: "success with name arg",
+			args: []string{"r1"},
+			clientFn: func(doc v1beta1.RealmDoc) (kukeonv1.CreateRealmResult, error) {
+				return kukeonv1.CreateRealmResult{Realm: doc, Created: true, MetadataExistsPost: true}, nil
 			},
 			wantCallCreate: true,
-			wantRealm: intmodel.Realm{
-				Metadata: intmodel.RealmMetadata{
-					Name: "test-realm",
-				},
-				Spec: intmodel.RealmSpec{
-					Namespace: "",
-				},
-			},
-			wantOutput: []string{
-				`Realm "test-realm"`,
-			},
+			wantDoc:        newRealmDoc("r1", ""),
+			wantOutput:     []string{`Realm "r1"`},
 		},
 		{
-			name: "success: name from viper",
+			name: "success with namespace flag",
+			args: []string{"r1", "--namespace", "custom-ns"},
+			clientFn: func(doc v1beta1.RealmDoc) (kukeonv1.CreateRealmResult, error) {
+				return kukeonv1.CreateRealmResult{Realm: doc, Created: true, MetadataExistsPost: true}, nil
+			},
+			wantCallCreate: true,
+			wantDoc:        newRealmDoc("r1", "custom-ns"),
+			wantOutput:     []string{`namespace "custom-ns"`},
+		},
+		{
+			name: "success with name from viper",
 			setup: func(_ *testing.T, _ *cobra.Command) {
 				viper.Set(config.KUKE_CREATE_REALM_NAME.ViperKey, "viper-realm")
 			},
-			controllerFn: func(realm intmodel.Realm) (controller.CreateRealmResult, error) {
-				namespace := realm.Spec.Namespace
-				if namespace == "" {
-					namespace = realm.Metadata.Name
-				}
-				realm.Spec.Namespace = namespace
-				return controller.CreateRealmResult{
-					Realm:                         realm,
-					Created:                       true,
-					MetadataExistsPost:            true,
-					ContainerdNamespaceCreated:    true,
-					ContainerdNamespaceExistsPost: true,
-					CgroupCreated:                 true,
-					CgroupExistsPost:              true,
-				}, nil
+			clientFn: func(doc v1beta1.RealmDoc) (kukeonv1.CreateRealmResult, error) {
+				return kukeonv1.CreateRealmResult{Realm: doc, Created: true, MetadataExistsPost: true}, nil
 			},
 			wantCallCreate: true,
-			wantRealm: intmodel.Realm{
-				Metadata: intmodel.RealmMetadata{
-					Name: "viper-realm",
-				},
-				Spec: intmodel.RealmSpec{
-					Namespace: "",
-				},
-			},
-			wantOutput: []string{
-				`Realm "viper-realm"`,
-			},
+			wantDoc:        newRealmDoc("viper-realm", ""),
+			wantOutput:     []string{`Realm "viper-realm"`},
 		},
 		{
-			name: "success: with namespace flag",
-			args: []string{"test-realm"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				setFlag(t, cmd, "namespace", "custom-ns")
-			},
-			controllerFn: func(realm intmodel.Realm) (controller.CreateRealmResult, error) {
-				return controller.CreateRealmResult{
-					Realm:                         realm,
-					Created:                       true,
-					MetadataExistsPost:            true,
-					ContainerdNamespaceCreated:    true,
-					ContainerdNamespaceExistsPost: true,
-					CgroupCreated:                 true,
-					CgroupExistsPost:              true,
-				}, nil
-			},
-			wantCallCreate: true,
-			wantRealm: intmodel.Realm{
-				Metadata: intmodel.RealmMetadata{
-					Name: "test-realm",
-				},
-				Spec: intmodel.RealmSpec{
-					Namespace: "custom-ns",
-				},
-			},
-			wantOutput: []string{
-				`namespace "custom-ns"`,
-			},
+			name:    "error missing name",
+			wantErr: "realm name is required",
 		},
 		{
-			name: "error: missing name",
-			setup: func(_ *testing.T, _ *cobra.Command) {
-				// Don't set name in args or viper
-			},
-			wantErr:        "realm name is required",
-			wantCallCreate: false,
+			name:    "error empty name after trim",
+			args:    []string{"   "},
+			wantErr: "realm name is required",
 		},
 		{
-			name: "error: logger not in context",
-			args: []string{"test-realm"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				cmd.SetContext(context.Background())
-			},
-			controllerFn: func(_ intmodel.Realm) (controller.CreateRealmResult, error) {
-				return controller.CreateRealmResult{}, errors.New("unexpected call")
-			},
-			wantErr:        "logger not found",
-			wantCallCreate: false,
-		},
-		{
-			name: "error: CreateRealm fails",
-			args: []string{"test-realm"},
-			setup: func(_ *testing.T, _ *cobra.Command) {
-				// No setup needed
-			},
-			controllerFn: func(_ intmodel.Realm) (controller.CreateRealmResult, error) {
-				return controller.CreateRealmResult{}, errdefs.ErrCreateRealm
+			name: "error client returns",
+			args: []string{"r1"},
+			clientFn: func(_ v1beta1.RealmDoc) (kukeonv1.CreateRealmResult, error) {
+				return kukeonv1.CreateRealmResult{}, errdefs.ErrCreateRealm
 			},
 			wantErr:        "failed to create realm",
 			wantCallCreate: true,
-			wantRealm: intmodel.Realm{
-				Metadata: intmodel.RealmMetadata{
-					Name: "test-realm",
-				},
-				Spec: intmodel.RealmSpec{
-					Namespace: "",
-				},
-			},
+			wantDoc:        newRealmDoc("r1", ""),
 		},
 	}
 
@@ -619,32 +167,24 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			t.Cleanup(viper.Reset)
 
 			var createCalled bool
-			var createRealm intmodel.Realm
+			var createDoc v1beta1.RealmDoc
 
 			cmd := realm.NewRealmCmd()
 			cmd.SetOut(&bytes.Buffer{})
 			cmd.SetErr(&bytes.Buffer{})
 
-			ctx := context.Background()
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 
-			// Inject mock controller via context if needed
-			if tt.name != "error: logger not in context" {
-				// Set up logger context
-				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-				ctx = context.WithValue(ctx, types.CtxLogger, logger)
-
-				// If we need to mock the controller, inject it via context
-				if tt.controllerFn != nil {
-					fakeCtrl := &fakeRealmController{
-						createRealmFn: func(realm intmodel.Realm) (controller.CreateRealmResult, error) {
-							createCalled = true
-							createRealm = realm
-							return tt.controllerFn(realm)
-						},
-					}
-					// Inject mock controller into context using the exported key
-					ctx = context.WithValue(ctx, realm.MockControllerKey{}, fakeCtrl)
+			if tt.clientFn != nil {
+				fake := &fakeClient{
+					createRealmFn: func(doc v1beta1.RealmDoc) (kukeonv1.CreateRealmResult, error) {
+						createCalled = true
+						createDoc = doc
+						return tt.clientFn(doc)
+					},
 				}
+				ctx = context.WithValue(ctx, realm.MockControllerKey{}, kukeonv1.Client(fake))
 			}
 
 			cmd.SetContext(ctx)
@@ -654,7 +194,6 @@ func TestNewRealmCmdRunE(t *testing.T) {
 			}
 
 			cmd.SetArgs(tt.args)
-
 			err := cmd.Execute()
 
 			if tt.wantErr != "" {
@@ -672,27 +211,20 @@ func TestNewRealmCmdRunE(t *testing.T) {
 				t.Errorf("CreateRealm called=%v want=%v", createCalled, tt.wantCallCreate)
 			}
 
-			if tt.wantRealm.Metadata.Name != "" {
-				if !createCalled {
-					t.Fatalf("CreateRealm not called, but wantRealm specified")
+			if tt.wantCallCreate {
+				if createDoc.Metadata.Name != tt.wantDoc.Metadata.Name {
+					t.Errorf("CreateRealm Name=%q want=%q", createDoc.Metadata.Name, tt.wantDoc.Metadata.Name)
 				}
-				if createRealm.Metadata.Name != tt.wantRealm.Metadata.Name {
-					t.Errorf("CreateRealm Name=%q want=%q", createRealm.Metadata.Name, tt.wantRealm.Metadata.Name)
-				}
-				if createRealm.Spec.Namespace != tt.wantRealm.Spec.Namespace {
-					t.Errorf(
-						"CreateRealm Namespace=%q want=%q",
-						createRealm.Spec.Namespace,
-						tt.wantRealm.Spec.Namespace,
-					)
+				if createDoc.Spec.Namespace != tt.wantDoc.Spec.Namespace {
+					t.Errorf("CreateRealm Namespace=%q want=%q", createDoc.Spec.Namespace, tt.wantDoc.Spec.Namespace)
 				}
 			}
 
 			if tt.wantOutput != nil {
-				output := cmd.OutOrStdout().(*bytes.Buffer).String()
-				for _, expected := range tt.wantOutput {
-					if !strings.Contains(output, expected) {
-						t.Errorf("output missing expected string %q\nGot output:\n%s", expected, output)
+				out := cmd.OutOrStdout().(*bytes.Buffer).String()
+				for _, want := range tt.wantOutput {
+					if !strings.Contains(out, want) {
+						t.Errorf("output missing %q\nGot:\n%s", want, out)
 					}
 				}
 			}
@@ -700,91 +232,36 @@ func TestNewRealmCmdRunE(t *testing.T) {
 	}
 }
 
-func TestNewRealmCmd_AutocompleteRegistration(t *testing.T) {
+func TestNewRealmCmd_Structure(t *testing.T) {
 	cmd := realm.NewRealmCmd()
-
-	// Test that ValidArgsFunction is NOT set (create realm is the only command without autocomplete)
-	if cmd.ValidArgsFunction != nil {
-		t.Fatal("expected ValidArgsFunction to be nil for create realm command")
+	if cmd.Use != "realm [name]" {
+		t.Errorf("Use=%q want realm [name]", cmd.Use)
 	}
-
-	// Test that namespace flag exists
-	namespaceFlag := cmd.Flags().Lookup("namespace")
-	if namespaceFlag == nil {
-		t.Fatal("expected 'namespace' flag to exist")
+	if !cmd.SilenceUsage {
+		t.Error("expected SilenceUsage=true")
 	}
-
-	// Verify flag structure (completion function registration is verified by Cobra)
-	if namespaceFlag.Usage != "Containerd namespace for the realm (defaults to the realm name)" {
-		t.Errorf("unexpected namespace flag usage: %q", namespaceFlag.Usage)
+	if f := cmd.Flags().Lookup("namespace"); f == nil {
+		t.Fatal("expected namespace flag")
 	}
 }
 
-func setFlag(t *testing.T, cmd *cobra.Command, name, value string) {
-	t.Helper()
-	if err := cmd.Flags().Set(name, value); err != nil {
-		t.Fatalf("failed to set flag %s: %v", name, err)
-	}
+type fakeClient struct {
+	kukeonv1.FakeClient
+
+	createRealmFn func(doc v1beta1.RealmDoc) (kukeonv1.CreateRealmResult, error)
 }
 
-func captureStdout(fn func() error) (string, error) {
-	origStdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		return "", err
+func (f *fakeClient) CreateRealm(_ context.Context, doc v1beta1.RealmDoc) (kukeonv1.CreateRealmResult, error) {
+	if f.createRealmFn == nil {
+		return kukeonv1.CreateRealmResult{}, errors.New("unexpected CreateRealm call")
 	}
-
-	os.Stdout = w
-	runErr := fn()
-	_ = w.Close()
-	os.Stdout = origStdout
-
-	var buf bytes.Buffer
-	_, copyErr := io.Copy(&buf, r)
-	_ = r.Close()
-	if copyErr != nil {
-		return "", copyErr
-	}
-	return buf.String(), runErr
+	return f.createRealmFn(doc)
 }
 
-func newRealmTestCommand(t *testing.T, runPath string, noLogger bool) (*cobra.Command, *bytes.Buffer) {
-	t.Helper()
-
-	t.Cleanup(viper.Reset)
-	viper.Reset()
-
-	viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, runPath)
-	viper.Set(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey, filepath.Join(runPath, "containerd.sock"))
-
-	cmd := realm.NewRealmCmd()
-
-	var ctx context.Context
-	if noLogger {
-		ctx = context.Background()
-	} else {
-		ctx = context.WithValue(context.Background(), types.CtxLogger, testLogger())
-	}
-	cmd.SetContext(ctx)
-
+func newTestCommand() (*cobra.Command, *bytes.Buffer) {
+	cmd := &cobra.Command{Use: "test"}
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-
 	return cmd, buf
-}
-
-func testLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
-
-type fakeRealmController struct {
-	createRealmFn func(realm intmodel.Realm) (controller.CreateRealmResult, error)
-}
-
-func (f *fakeRealmController) CreateRealm(realm intmodel.Realm) (controller.CreateRealmResult, error) {
-	if f.createRealmFn == nil {
-		return controller.CreateRealmResult{}, errdefs.ErrCreateRealm
-	}
-	return f.createRealmFn(realm)
 }

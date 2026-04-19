@@ -53,16 +53,16 @@ func printHeader(cmd *cobra.Command, report controller.BootstrapReport)
 func printOverview(cmd *cobra.Command, report controller.BootstrapReport)
 
 //go:linkname printRealmActions github.com/eminwux/kukeon/cmd/kuke/init.printRealmActions
-func printRealmActions(cmd *cobra.Command, report controller.BootstrapReport)
+func printRealmActions(cmd *cobra.Command, section controller.RealmSection)
 
 //go:linkname printSpaceActions github.com/eminwux/kukeon/cmd/kuke/init.printSpaceActions
-func printSpaceActions(cmd *cobra.Command, report controller.BootstrapReport)
+func printSpaceActions(cmd *cobra.Command, section controller.SpaceSection)
 
 //go:linkname printStackActions github.com/eminwux/kukeon/cmd/kuke/init.printStackActions
-func printStackActions(cmd *cobra.Command, report controller.BootstrapReport)
+func printStackActions(cmd *cobra.Command, section controller.StackSection)
 
 //go:linkname printCellActions github.com/eminwux/kukeon/cmd/kuke/init.printCellActions
-func printCellActions(cmd *cobra.Command, report controller.BootstrapReport)
+func printCellActions(cmd *cobra.Command, section controller.CellSection, image string)
 
 //go:linkname printCNIActions github.com/eminwux/kukeon/cmd/kuke/init.printCNIActions
 func printCNIActions(cmd *cobra.Command, report controller.BootstrapReport)
@@ -75,6 +75,14 @@ func printCgroupAction(cmd *cobra.Command, label string, existedPre bool, exists
 
 //go:linkname runInit github.com/eminwux/kukeon/cmd/kuke/init.runInit
 func runInit(cmd *cobra.Command, args []string) error
+
+//go:linkname resolveKukeondImage github.com/eminwux/kukeon/cmd/kuke/init.resolveKukeondImage
+func resolveKukeondImage() string
+
+// ResolveKukeondImage exposes the unexported helper for tests.
+func ResolveKukeondImage() string {
+	return resolveKukeondImage()
+}
 
 // Exported helpers
 
@@ -90,20 +98,20 @@ func PrintOverview(cmd *cobra.Command, report controller.BootstrapReport) {
 	printOverview(cmd, report)
 }
 
-func PrintRealmActions(cmd *cobra.Command, report controller.BootstrapReport) {
-	printRealmActions(cmd, report)
+func PrintRealmActions(cmd *cobra.Command, section controller.RealmSection) {
+	printRealmActions(cmd, section)
 }
 
-func PrintSpaceActions(cmd *cobra.Command, report controller.BootstrapReport) {
-	printSpaceActions(cmd, report)
+func PrintSpaceActions(cmd *cobra.Command, section controller.SpaceSection) {
+	printSpaceActions(cmd, section)
 }
 
-func PrintStackActions(cmd *cobra.Command, report controller.BootstrapReport) {
-	printStackActions(cmd, report)
+func PrintStackActions(cmd *cobra.Command, section controller.StackSection) {
+	printStackActions(cmd, section)
 }
 
-func PrintCellActions(cmd *cobra.Command, report controller.BootstrapReport) {
-	printCellActions(cmd, report)
+func PrintCellActions(cmd *cobra.Command, section controller.CellSection, image string) {
+	printCellActions(cmd, section, image)
 }
 
 func PrintCNIActions(cmd *cobra.Command, report controller.BootstrapReport) {
@@ -173,9 +181,16 @@ func TestPrintHeader(t *testing.T) {
 		expected []string
 	}{
 		{
-			name: "initialized",
+			name: "initialized-default",
 			report: controller.BootstrapReport{
-				RealmCreated: true,
+				DefaultRealm: controller.RealmSection{RealmCreated: true},
+			},
+			expected: []string{"Initialized Kukeon runtime"},
+		},
+		{
+			name: "initialized-system",
+			report: controller.BootstrapReport{
+				SystemCell: controller.CellSection{CellCreated: true},
 			},
 			expected: []string{"Initialized Kukeon runtime"},
 		},
@@ -203,16 +218,25 @@ func TestPrintHeader(t *testing.T) {
 func TestPrintOverview(t *testing.T) {
 	cmd, buf := newOutputCommand()
 	report := controller.BootstrapReport{
-		RealmName:                "realm-a",
-		RealmContainerdNamespace: "namespace-a",
-		RunPath:                  "/tmp/run",
+		DefaultRealm: controller.RealmSection{
+			RealmName:                "realm-a",
+			RealmContainerdNamespace: "namespace-a",
+		},
+		SystemRealm: controller.RealmSection{
+			RealmName:                "kuke-system",
+			RealmContainerdNamespace: "kuke-system.kukeon.io",
+		},
+		RunPath:      "/tmp/run",
+		KukeondImage: "ghcr.io/eminwux/kukeon:v1.2.3",
 	}
 	PrintOverview(cmd, report)
 	got := buf.String()
 
 	want := []string{
 		"Realm: realm-a (namespace: namespace-a)",
+		"System realm: kuke-system (namespace: kuke-system.kukeon.io)",
 		"Run path: /tmp/run",
+		"Kukeond image: ghcr.io/eminwux/kukeon:v1.2.3",
 	}
 	for _, w := range want {
 		if !strings.Contains(got, w) {
@@ -224,12 +248,14 @@ func TestPrintOverview(t *testing.T) {
 func TestPrintRealmActions(t *testing.T) {
 	testCases := []struct {
 		name     string
-		report   controller.BootstrapReport
+		section  controller.RealmSection
 		expected []string
 	}{
 		{
 			name: "created",
-			report: controller.BootstrapReport{
+			section: controller.RealmSection{
+				RealmName:                          "default",
+				RealmContainerdNamespace:           "kukeon.io",
 				RealmCreated:                       true,
 				RealmContainerdNamespaceCreated:    true,
 				RealmCgroupCreated:                 true,
@@ -237,22 +263,26 @@ func TestPrintRealmActions(t *testing.T) {
 				RealmContainerdNamespaceExistsPost: true,
 			},
 			expected: []string{
-				"- realm: created",
-				"- containerd namespace: created",
+				"- realm \"default\": created",
+				"- containerd namespace \"kukeon.io\": created",
 				"- realm cgroup: created",
 			},
 		},
 		{
 			name: "already-existed",
-			report: controller.BootstrapReport{
+			section: controller.RealmSection{
+				RealmName:                          "default",
+				RealmContainerdNamespace:           "kukeon.io",
 				RealmCgroupExistsPre:               true,
 				RealmCgroupExistsPost:              true,
 				RealmContainerdNamespaceExistsPre:  true,
 				RealmContainerdNamespaceExistsPost: true,
+				RealmMetadataExistsPre:             true,
+				RealmMetadataExistsPost:            true,
 			},
 			expected: []string{
-				"- realm: already existed",
-				"- containerd namespace: already existed",
+				"- realm \"default\": already existed",
+				"- containerd namespace \"kukeon.io\": already existed",
 				"- realm cgroup: already existed",
 			},
 		},
@@ -261,7 +291,7 @@ func TestPrintRealmActions(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd, buf := newOutputCommand()
-			PrintRealmActions(cmd, tc.report)
+			PrintRealmActions(cmd, tc.section)
 			got := buf.String()
 			for _, want := range tc.expected {
 				if !strings.Contains(got, want) {
@@ -275,26 +305,28 @@ func TestPrintRealmActions(t *testing.T) {
 func TestPrintSpaceActions(t *testing.T) {
 	testCases := []struct {
 		name     string
-		report   controller.BootstrapReport
+		section  controller.SpaceSection
 		expected []string
 	}{
 		{
 			name: "created",
-			report: controller.BootstrapReport{
+			section: controller.SpaceSection{
+				SpaceName:              "default",
 				SpaceCNINetworkName:    "net1",
 				SpaceCreated:           true,
 				SpaceCNINetworkCreated: true,
 				SpaceCgroupCreated:     true,
 			},
 			expected: []string{
-				"- space: created",
+				"- space \"default\": created",
 				"- network \"net1\": created",
 				"- space cgroup: created",
 			},
 		},
 		{
 			name: "exists",
-			report: controller.BootstrapReport{
+			section: controller.SpaceSection{
+				SpaceName:                 "default",
 				SpaceCNINetworkName:       "net2",
 				SpaceMetadataExistsPre:    true,
 				SpaceMetadataExistsPost:   true,
@@ -304,7 +336,7 @@ func TestPrintSpaceActions(t *testing.T) {
 				SpaceCgroupExistsPost:     true,
 			},
 			expected: []string{
-				"- space: already existed",
+				"- space \"default\": already existed",
 				"- network \"net2\": already existed",
 				"- space cgroup: already existed",
 			},
@@ -314,7 +346,7 @@ func TestPrintSpaceActions(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd, buf := newOutputCommand()
-			PrintSpaceActions(cmd, tc.report)
+			PrintSpaceActions(cmd, tc.section)
 			got := buf.String()
 			for _, want := range tc.expected {
 				if !strings.Contains(got, want) {
@@ -328,31 +360,33 @@ func TestPrintSpaceActions(t *testing.T) {
 func TestPrintStackActions(t *testing.T) {
 	testCases := []struct {
 		name     string
-		report   controller.BootstrapReport
+		section  controller.StackSection
 		expected []string
 	}{
 		{
 			name: "created",
-			report: controller.BootstrapReport{
+			section: controller.StackSection{
+				StackName:             "default",
 				StackCreated:          true,
 				StackCgroupCreated:    true,
 				StackCgroupExistsPost: true,
 			},
 			expected: []string{
-				"- stack: created",
+				"- stack \"default\": created",
 				"- stack cgroup: created",
 			},
 		},
 		{
 			name: "already",
-			report: controller.BootstrapReport{
+			section: controller.StackSection{
+				StackName:               "default",
 				StackMetadataExistsPre:  true,
 				StackMetadataExistsPost: true,
 				StackCgroupExistsPre:    true,
 				StackCgroupExistsPost:   true,
 			},
 			expected: []string{
-				"- stack: already existed",
+				"- stack \"default\": already existed",
 				"- stack cgroup: already existed",
 			},
 		},
@@ -361,7 +395,7 @@ func TestPrintStackActions(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd, buf := newOutputCommand()
-			PrintStackActions(cmd, tc.report)
+			PrintStackActions(cmd, tc.section)
 			got := buf.String()
 			for _, want := range tc.expected {
 				if !strings.Contains(got, want) {
@@ -375,12 +409,14 @@ func TestPrintStackActions(t *testing.T) {
 func TestPrintCellActions(t *testing.T) {
 	testCases := []struct {
 		name     string
-		report   controller.BootstrapReport
+		section  controller.CellSection
+		image    string
 		expected []string
 	}{
 		{
 			name: "created",
-			report: controller.BootstrapReport{
+			section: controller.CellSection{
+				CellName:                    "kukeond",
 				CellCreated:                 true,
 				CellCgroupCreated:           true,
 				CellRootContainerCreated:    true,
@@ -389,8 +425,9 @@ func TestPrintCellActions(t *testing.T) {
 				CellRootContainerExistsPost: true,
 				CellStartedPost:             true,
 			},
+			image: "ghcr.io/eminwux/kukeon:v1.0.0",
 			expected: []string{
-				"- cell: created",
+				"- cell \"kukeond\": created (image ghcr.io/eminwux/kukeon:v1.0.0)",
 				"- cell cgroup: created",
 				"- cell root container cgroup: created",
 				"- cell containers cgroup: created",
@@ -398,7 +435,8 @@ func TestPrintCellActions(t *testing.T) {
 		},
 		{
 			name: "already",
-			report: controller.BootstrapReport{
+			section: controller.CellSection{
+				CellName:                    "kukeond",
 				CellMetadataExistsPre:       true,
 				CellMetadataExistsPost:      true,
 				CellCgroupExistsPre:         true,
@@ -409,18 +447,23 @@ func TestPrintCellActions(t *testing.T) {
 				CellStartedPost:             true,
 			},
 			expected: []string{
-				"- cell: already existed",
+				"- cell \"kukeond\": already existed",
 				"- cell cgroup: already existed",
 				"- cell root container cgroup: already existed",
 				"- cell containers cgroup: already existed",
 			},
+		},
+		{
+			name:     "not-provisioned",
+			section:  controller.CellSection{},
+			expected: []string{"- cell: not provisioned"},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd, buf := newOutputCommand()
-			PrintCellActions(cmd, tc.report)
+			PrintCellActions(cmd, tc.section, tc.image)
 			got := buf.String()
 			for _, want := range tc.expected {
 				if !strings.Contains(got, want) {
@@ -599,6 +642,71 @@ func TestRunInitErrors(t *testing.T) {
 			}
 			if tc.name == "controller failure" && (err == nil || errors.Is(err, errdefs.ErrLoggerNotFound)) {
 				t.Fatalf("controller failure case should propagate controller error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestResolveKukeondImage(t *testing.T) {
+	origVersion := config.Version
+	origRepo := config.KukeondImageRepo
+	t.Cleanup(func() {
+		config.Version = origVersion
+		config.KukeondImageRepo = origRepo
+		viper.Reset()
+	})
+
+	testCases := []struct {
+		name     string
+		version  string
+		repo     string
+		override string
+		want     string
+	}{
+		{
+			name:    "release-tag",
+			version: "v1.2.3",
+			repo:    "ghcr.io/eminwux/kukeon",
+			want:    "ghcr.io/eminwux/kukeon:v1.2.3",
+		},
+		{
+			name:    "dev-version-falls-back-to-latest",
+			version: "0.1.0",
+			repo:    "ghcr.io/eminwux/kukeon",
+			want:    "ghcr.io/eminwux/kukeon:latest",
+		},
+		{
+			name:    "fork-repo-injected-via-ldflags",
+			version: "v2.0.0",
+			repo:    "ghcr.io/forked-org/kukeon",
+			want:    "ghcr.io/forked-org/kukeon:v2.0.0",
+		},
+		{
+			name:     "flag-override-wins",
+			version:  "v1.2.3",
+			repo:     "ghcr.io/eminwux/kukeon",
+			override: "my.registry/custom/kukeond:dev",
+			want:     "my.registry/custom/kukeond:dev",
+		},
+		{
+			name: "empty-repo-falls-back-to-default",
+			// empty string in repo should revert to compiled-in default
+			version: "v1.0.0",
+			repo:    "",
+			want:    "ghcr.io/eminwux/kukeon:v1.0.0",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			viper.Reset()
+			config.Version = tc.version
+			config.KukeondImageRepo = tc.repo
+			if tc.override != "" {
+				viper.Set(config.KUKE_INIT_KUKEOND_IMAGE.ViperKey, tc.override)
+			}
+			if got := ResolveKukeondImage(); got != tc.want {
+				t.Fatalf("ResolveKukeondImage() = %q, want %q", got, tc.want)
 			}
 		})
 	}

@@ -33,7 +33,6 @@ type DeleteCellResult struct {
 
 // DeleteCell deletes a cell. Always deletes all containers first.
 func (b *Exec) DeleteCell(cell intmodel.Cell) (DeleteCellResult, error) {
-	defer b.runner.Close()
 	var res DeleteCellResult
 
 	internalCell, err := b.validateAndGetCell(cell)

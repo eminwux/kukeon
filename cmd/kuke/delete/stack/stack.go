@@ -17,27 +17,18 @@
 package stack
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
-	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/controller"
-	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-// StackController defines the interface for stack deletion operations.
-// It is exported for use in tests.
-type StackController interface {
-	DeleteStack(stack intmodel.Stack, force, cascade bool) (controller.DeleteStackResult, error)
-}
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
 func NewStackCmd() *cobra.Command {
@@ -49,65 +40,56 @@ func NewStackCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Check for mock controller in context (for testing)
-			var ctrl StackController
-			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(StackController); ok {
-				ctrl = mockCtrl
-			} else {
-				realCtrl, err := shared.ControllerFromCmd(cmd)
-				if err != nil {
-					return err
-				}
-				ctrl = &controllerWrapper{ctrl: realCtrl}
-			}
-
 			name := strings.TrimSpace(args[0])
 			realm := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_STACK_REALM.ViperKey))
 			if realm == "" {
-				realm = config.KUKE_DELETE_STACK_REALM.ValueOrDefault()
+				realm = strings.TrimSpace(config.KUKE_DELETE_STACK_REALM.ValueOrDefault())
 			}
-
 			space := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_STACK_SPACE.ViperKey))
 			if space == "" {
-				space = config.KUKE_DELETE_STACK_SPACE.ValueOrDefault()
+				space = strings.TrimSpace(config.KUKE_DELETE_STACK_SPACE.ValueOrDefault())
 			}
 
 			force := shared.ParseForceFlag(cmd)
 			cascade := shared.ParseCascadeFlag(cmd)
 
-			stackDoc := &v1beta1.StackDoc{
-				Metadata: v1beta1.StackMetadata{
-					Name: name,
-				},
+			doc := v1beta1.StackDoc{
+				Metadata: v1beta1.StackMetadata{Name: name},
 				Spec: v1beta1.StackSpec{
 					RealmID: realm,
 					SpaceID: space,
 				},
 			}
 
-			// Convert at boundary before calling controller
-			stackInternal, _, err := apischeme.NormalizeStack(*stackDoc)
+			client, err := resolveClient(cmd)
 			if err != nil {
-				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				return err
 			}
+			defer func() { _ = client.Close() }()
 
-			result, err := ctrl.DeleteStack(stackInternal, force, cascade)
+			result, err := client.DeleteStack(cmd.Context(), doc, force, cascade)
 			if err != nil {
 				return err
 			}
 
-			cmd.Printf("Deleted stack %q from space %q\n", result.StackName, result.SpaceName)
+			stackName := result.StackName
+			if stackName == "" {
+				stackName = name
+			}
+			spaceName := result.SpaceName
+			if spaceName == "" {
+				spaceName = space
+			}
+			cmd.Printf("Deleted stack %q from space %q\n", stackName, spaceName)
 			return nil
 		},
 	}
 
 	cmd.Flags().String("realm", "", "Realm that owns the stack")
 	_ = viper.BindPFlag(config.KUKE_DELETE_STACK_REALM.ViperKey, cmd.Flags().Lookup("realm"))
-
 	cmd.Flags().String("space", "", "Space that owns the stack")
 	_ = viper.BindPFlag(config.KUKE_DELETE_STACK_SPACE.ViperKey, cmd.Flags().Lookup("space"))
 
-	// Register autocomplete functions
 	cmd.ValidArgsFunction = config.CompleteStackNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
@@ -115,13 +97,9 @@ func NewStackCmd() *cobra.Command {
 	return cmd
 }
 
-type controllerWrapper struct {
-	ctrl *controller.Exec
-}
-
-func (w *controllerWrapper) DeleteStack(
-	stack intmodel.Stack,
-	force, cascade bool,
-) (controller.DeleteStackResult, error) {
-	return w.ctrl.DeleteStack(stack, force, cascade)
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
+	}
+	return kukeshared.ClientFromCmd(cmd)
 }

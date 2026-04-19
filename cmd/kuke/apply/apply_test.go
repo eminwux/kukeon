@@ -19,6 +19,7 @@ package apply_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -26,265 +27,123 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eminwux/kukeon/cmd/kuke/apply"
+	apply "github.com/eminwux/kukeon/cmd/kuke/apply"
 	"github.com/eminwux/kukeon/cmd/types"
-	"github.com/eminwux/kukeon/internal/apply/parser"
-	"github.com/eminwux/kukeon/internal/controller"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 )
 
-type fakeApplyController struct {
-	applyDocumentsFn func(docs []parser.Document) (controller.ApplyResult, error)
+func writeTempYAML(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write temp yaml: %v", err)
+	}
+	return path
 }
 
-func (f *fakeApplyController) ApplyDocuments(docs []parser.Document) (controller.ApplyResult, error) {
-	if f.applyDocumentsFn == nil {
-		return controller.ApplyResult{}, nil
-	}
-	return f.applyDocumentsFn(docs)
-}
-
-func TestNewApplyCmd(t *testing.T) {
-	cmd := apply.NewApplyCmd()
-	if cmd == nil {
-		t.Fatal("expected command to be created")
-	}
-	if cmd.Use != "apply -f <file>" {
-		t.Errorf("expected Use to be 'apply -f <file>', got %q", cmd.Use)
-	}
-}
-
-func TestNewApplyCmd_FileFlag(t *testing.T) {
-	cmd := apply.NewApplyCmd()
-	fileFlag := cmd.Flags().Lookup("file")
-	if fileFlag == nil {
-		t.Fatal("expected 'file' flag to exist")
-	}
-	if fileFlag.Usage != "File to read YAML from (use - for stdin)" {
-		t.Errorf("unexpected file flag usage: %q", fileFlag.Usage)
-	}
-}
-
-func TestNewApplyCmd_RunE_ValidationError(t *testing.T) {
-	cmd := apply.NewApplyCmd()
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-	cmd.SetContext(ctx)
-
-	cmd.SetArgs([]string{"-f", "/nonexistent/file.yaml"})
-	err := cmd.Execute()
-
-	if err == nil {
-		t.Fatal("expected error for nonexistent file, got nil")
-	}
-	if !strings.Contains(err.Error(), "failed to open file") {
-		t.Errorf("expected error about file opening, got: %v", err)
-	}
-}
-
-func TestNewApplyCmd_RunE_InvalidYAML(t *testing.T) {
-	// Create temporary file with invalid YAML
-	tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yaml")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	_, err = tmpFile.WriteString("invalid: yaml: [")
-	if err != nil {
-		t.Fatalf("failed to write to temp file: %v", err)
-	}
-	tmpFile.Close()
-
-	cmd := apply.NewApplyCmd()
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-	cmd.SetContext(ctx)
-
-	cmd.SetArgs([]string{"-f", tmpFile.Name()})
-	err = cmd.Execute()
-
-	if err == nil {
-		t.Fatal("expected error for invalid YAML, got nil")
-	}
-	if !strings.Contains(err.Error(), "failed to parse YAML") {
-		t.Errorf("expected error about YAML parsing, got: %v", err)
-	}
-}
-
-func TestNewApplyCmd_RunE_Success(t *testing.T) {
-	// Create temporary file with valid YAML
-	tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yaml")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	yaml := `apiVersion: v1beta1
+func TestApplyRunE(t *testing.T) {
+	const validYAML = `apiVersion: v1beta1
 kind: Realm
 metadata:
-  name: test-realm
+  name: r1
 spec:
-  namespace: test-ns
-`
-	_, err = tmpFile.WriteString(yaml)
-	if err != nil {
-		t.Fatalf("failed to write to temp file: %v", err)
-	}
-	tmpFile.Close()
-
-	cmd := apply.NewApplyCmd()
-	var outBuf, errBuf bytes.Buffer
-	cmd.SetOut(&outBuf)
-	cmd.SetErr(&errBuf)
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-
-	fakeCtrl := &fakeApplyController{
-		applyDocumentsFn: func(docs []parser.Document) (controller.ApplyResult, error) {
-			if len(docs) != 1 {
-				t.Errorf("expected 1 document, got %d", len(docs))
-			}
-			return controller.ApplyResult{
-				Resources: []controller.ResourceResult{
-					{
-						Index:  0,
-						Kind:   "Realm",
-						Name:   "test-realm",
-						Action: "created",
-					},
-				},
-			}, nil
-		},
-	}
-	ctx = context.WithValue(ctx, apply.MockControllerKey{}, fakeCtrl)
-	cmd.SetContext(ctx)
-
-	cmd.SetArgs([]string{"-f", tmpFile.Name()})
-	err = cmd.Execute()
-	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
-	}
-
-	output := outBuf.String()
-	if !strings.Contains(output, "Realm \"test-realm\": created") {
-		t.Errorf("expected output to contain 'Realm \"test-realm\": created', got: %q", output)
-	}
-}
-
-func TestNewApplyCmd_RunE_Stdin(t *testing.T) {
-	yaml := `apiVersion: v1beta1
-kind: Realm
-metadata:
-  name: test-realm
-spec:
-  namespace: test-ns
+  namespace: r1
 `
 
-	cmd := apply.NewApplyCmd()
-	var outBuf, errBuf bytes.Buffer
-	cmd.SetOut(&outBuf)
-	cmd.SetErr(&errBuf)
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-
-	fakeCtrl := &fakeApplyController{
-		applyDocumentsFn: func(_ []parser.Document) (controller.ApplyResult, error) {
-			return controller.ApplyResult{
-				Resources: []controller.ResourceResult{
-					{
-						Index:  0,
-						Kind:   "Realm",
-						Name:   "test-realm",
-						Action: "created",
-					},
+	tests := []struct {
+		name       string
+		args       []string
+		stdin      string
+		fake       *fakeClient
+		wantErr    string
+		wantOutput string
+	}{
+		{
+			name:    "missing file flag",
+			args:    []string{},
+			fake:    &fakeClient{},
+			wantErr: "required flag",
+		},
+		{
+			name: "success",
+			args: []string{"-f", writeTempYAML(t, validYAML)},
+			fake: &fakeClient{
+				applyFn: func(_ []byte) (kukeonv1.ApplyDocumentsResult, error) {
+					return kukeonv1.ApplyDocumentsResult{
+						Resources: []kukeonv1.ApplyResourceResult{
+							{Kind: "Realm", Name: "r1", Action: "created"},
+						},
+					}, nil
 				},
-			}, nil
+			},
+			wantOutput: `Realm "r1": created`,
+		},
+		{
+			name: "client returns error",
+			args: []string{"-f", writeTempYAML(t, validYAML)},
+			fake: &fakeClient{
+				applyFn: func(_ []byte) (kukeonv1.ApplyDocumentsResult, error) {
+					return kukeonv1.ApplyDocumentsResult{}, errors.New("server exploded")
+				},
+			},
+			wantErr: "server exploded",
+		},
+		{
+			name: "failure recorded as failed action",
+			args: []string{"-f", writeTempYAML(t, validYAML)},
+			fake: &fakeClient{
+				applyFn: func(_ []byte) (kukeonv1.ApplyDocumentsResult, error) {
+					return kukeonv1.ApplyDocumentsResult{
+						Resources: []kukeonv1.ApplyResourceResult{
+							{Kind: "Realm", Name: "r1", Action: "failed", Error: "boom"},
+						},
+					}, nil
+				},
+			},
+			wantErr: "some resources failed to apply",
 		},
 	}
-	ctx = context.WithValue(ctx, apply.MockControllerKey{}, fakeCtrl)
-	cmd.SetContext(ctx)
 
-	// Create a pipe to simulate stdin
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("failed to create pipe: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := apply.NewApplyCmd()
+			buf := &bytes.Buffer{}
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
 
-	go func() {
-		defer w.Close()
-		_, _ = w.WriteString(yaml)
-	}()
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+			ctx = context.WithValue(ctx, apply.MockControllerKey{}, kukeonv1.Client(tt.fake))
+			cmd.SetContext(ctx)
+			cmd.SetArgs(tt.args)
 
-	// Replace os.Stdin temporarily
-	oldStdin := os.Stdin
-	os.Stdin = r
-	defer func() {
-		os.Stdin = oldStdin
-		r.Close()
-	}()
-
-	cmd.SetArgs([]string{"-f", "-"})
-	err = cmd.Execute()
-	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
-	}
-}
-
-func TestNewApplyCmd_TestdataFixtures(t *testing.T) {
-	testdataDir := "testdata"
-	files := []string{
-		"realm.yaml",
-		"space.yaml",
-		"stack.yaml",
-		"cell.yaml",
-		"cell-updated.yaml",
-		"cell-removed-container.yaml",
-		"multi-resource.yaml",
-	}
-
-	for _, file := range files {
-		t.Run(file, func(t *testing.T) {
-			path := filepath.Join(testdataDir, file)
-			if _, err := os.Stat(path); err != nil {
-				t.Skipf("test fixture %q not found", path)
-			}
-
-			// Just verify the file can be parsed
-			f, err := os.Open(path)
-			if err != nil {
-				t.Fatalf("failed to open fixture: %v", err)
-			}
-			defer f.Close()
-
-			docs, err := parser.ParseDocuments(f)
-			if err != nil {
-				t.Fatalf("failed to parse fixture: %v", err)
-			}
-
-			if len(docs) == 0 {
-				t.Fatal("expected at least one document")
-			}
-
-			// Parse and validate each document
-			for i, rawDoc := range docs {
-				doc, parseErr := parser.ParseDocument(i, rawDoc)
-				if parseErr != nil {
-					t.Fatalf("failed to parse document %d: %v", i, parseErr)
+			err := cmd.Execute()
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("want err %q, got %v", tt.wantErr, err)
 				}
-
-				validationErr := parser.ValidateDocument(doc)
-				if validationErr != nil {
-					t.Fatalf("document %d failed validation: %v", i, validationErr)
-				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantOutput != "" && !strings.Contains(buf.String(), tt.wantOutput) {
+				t.Errorf("output missing %q\nGot:\n%s", tt.wantOutput, buf.String())
 			}
 		})
 	}
+}
+
+type fakeClient struct {
+	kukeonv1.FakeClient
+
+	applyFn func(raw []byte) (kukeonv1.ApplyDocumentsResult, error)
+}
+
+func (f *fakeClient) ApplyDocuments(_ context.Context, raw []byte) (kukeonv1.ApplyDocumentsResult, error) {
+	if f.applyFn == nil {
+		return kukeonv1.ApplyDocumentsResult{}, errors.New("unexpected ApplyDocuments call")
+	}
+	return f.applyFn(raw)
 }

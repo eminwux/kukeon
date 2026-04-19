@@ -98,11 +98,22 @@ var (
 	KUKEON_ROOT_LOG_LEVEL = DefineKV("KUKEON_LOG_LEVEL", "kukeon/logLevel", "info")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKEON_ROOT_CONTAINERD_SOCKET = DefineKV("KUKEON_CONTAINERD_SOCKET", "kukeon/containerd.socket")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKEON_ROOT_HOST = DefineKV("KUKEON_HOST", "kukeon/host", "unix:///run/kukeon/kukeond.sock")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKEON_ROOT_NO_DAEMON = DefineKV("KUKEON_NO_DAEMON", "kukeon/noDaemon", "false")
+
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKEOND_SOCKET = DefineKV("KUKEOND_SOCKET", "kukeond/socket", "/run/kukeon/kukeond.sock")
 
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_INIT_REALM = DefineKV("KUKE_INIT_REALM", "kuke/init/realm")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_INIT_SPACE = DefineKV("KUKE_INIT_SPACE", "kuke/init/space")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_INIT_KUKEOND_IMAGE = DefineKV("KUKE_INIT_KUKEOND_IMAGE", "kuke/init/kukeondImage")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_INIT_NO_WAIT = DefineKV("KUKE_INIT_NO_WAIT", "kuke/init/noWait", "false")
 
 	// Create command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable

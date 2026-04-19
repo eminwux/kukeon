@@ -21,31 +21,22 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
-	"github.com/eminwux/kukeon/cmd/kuke/kill/shared"
-	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/controller"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-type KillCellResult = controller.KillCellResult
-
-type cellController interface {
-	KillCell(cell intmodel.Cell) (KillCellResult, error)
-}
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
-// NewCellCmd builds the `kuke kill cell` subcommand.
 func NewCellCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "cell [name]",
 		Aliases:       []string{"ce"},
-		Short:         "Kill a cell",
+		Short:         "Immediately force-kill a cell",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -65,51 +56,37 @@ func NewCellCmd() *cobra.Command {
 				return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
 			}
 
-			var ctrl cellController
-			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(cellController); ok {
-				ctrl = mockCtrl
-			} else {
-				realCtrl, err := shared.ControllerFromCmd(cmd)
-				if err != nil {
-					return err
-				}
-				ctrl = realCtrl
-			}
-
-			cellDoc := &v1beta1.CellDoc{
+			doc := v1beta1.CellDoc{
 				APIVersion: v1beta1.APIVersionV1Beta1,
 				Kind:       v1beta1.KindCell,
-				Metadata: v1beta1.CellMetadata{
-					Name: name,
-				},
+				Metadata:   v1beta1.CellMetadata{Name: name, Labels: map[string]string{}},
 				Spec: v1beta1.CellSpec{
+					ID:      name,
 					RealmID: realm,
 					SpaceID: space,
 					StackID: stack,
 				},
 			}
 
-			// Convert at boundary before calling controller
-			cellInternal, _, err := apischeme.NormalizeCell(*cellDoc)
+			client, err := resolveClient(cmd)
 			if err != nil {
-				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				return err
 			}
+			defer func() { _ = client.Close() }()
 
-			result, err := ctrl.KillCell(cellInternal)
+			result, err := client.KillCell(cmd.Context(), doc)
 			if err != nil {
 				return err
 			}
 
-			// Use cell from result for output
 			cellName := result.Cell.Metadata.Name
-			stackName := result.Cell.Spec.StackName
 			if cellName == "" {
 				cellName = name
 			}
+			stackName := result.Cell.Spec.StackID
 			if stackName == "" {
 				stackName = stack
 			}
-
 			cmd.Printf("Killed cell %q from stack %q\n", cellName, stackName)
 			return nil
 		},
@@ -117,10 +94,8 @@ func NewCellCmd() *cobra.Command {
 
 	cmd.Flags().String("realm", "", "Realm that owns the cell")
 	_ = viper.BindPFlag(config.KUKE_KILL_CELL_REALM.ViperKey, cmd.Flags().Lookup("realm"))
-
 	cmd.Flags().String("space", "", "Space that owns the cell")
 	_ = viper.BindPFlag(config.KUKE_KILL_CELL_SPACE.ViperKey, cmd.Flags().Lookup("space"))
-
 	cmd.Flags().String("stack", "", "Stack that owns the cell")
 	_ = viper.BindPFlag(config.KUKE_KILL_CELL_STACK.ViperKey, cmd.Flags().Lookup("stack"))
 
@@ -130,4 +105,11 @@ func NewCellCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
 
 	return cmd
+}
+
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
+	}
+	return kukeshared.ClientFromCmd(cmd)
 }

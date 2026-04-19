@@ -21,21 +21,15 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
-	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
-	"github.com/eminwux/kukeon/internal/apischeme"
-	"github.com/eminwux/kukeon/internal/controller"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-type containerController interface {
-	DeleteContainer(container intmodel.Container) (controller.DeleteContainerResult, error)
-}
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
 func NewContainerCmd() *cobra.Command {
@@ -47,43 +41,26 @@ func NewContainerCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Check for mock controller in context (for testing)
-			var ctrl containerController
-			if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(containerController); ok {
-				ctrl = mockCtrl
-			} else {
-				realCtrl, err := shared.ControllerFromCmd(cmd)
-				if err != nil {
-					return err
-				}
-				ctrl = &controllerWrapper{ctrl: realCtrl}
-			}
-
 			name := strings.TrimSpace(args[0])
 			realm := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CONTAINER_REALM.ViperKey))
 			if realm == "" {
-				realm = config.KUKE_DELETE_CONTAINER_REALM.ValueOrDefault()
+				realm = strings.TrimSpace(config.KUKE_DELETE_CONTAINER_REALM.ValueOrDefault())
 			}
-
 			space := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CONTAINER_SPACE.ViperKey))
 			if space == "" {
-				space = config.KUKE_DELETE_CONTAINER_SPACE.ValueOrDefault()
+				space = strings.TrimSpace(config.KUKE_DELETE_CONTAINER_SPACE.ValueOrDefault())
 			}
-
 			stack := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CONTAINER_STACK.ViperKey))
 			if stack == "" {
-				stack = config.KUKE_DELETE_CONTAINER_STACK.ValueOrDefault()
+				stack = strings.TrimSpace(config.KUKE_DELETE_CONTAINER_STACK.ValueOrDefault())
 			}
-
 			cell := strings.TrimSpace(viper.GetString(config.KUKE_DELETE_CONTAINER_CELL.ViperKey))
 			if cell == "" {
 				return fmt.Errorf("%w (--cell)", errdefs.ErrCellNameRequired)
 			}
 
-			containerDoc := &v1beta1.ContainerDoc{
-				Metadata: v1beta1.ContainerMetadata{
-					Name: name,
-				},
+			doc := v1beta1.ContainerDoc{
+				Metadata: v1beta1.ContainerMetadata{Name: name},
 				Spec: v1beta1.ContainerSpec{
 					RealmID: realm,
 					SpaceID: space,
@@ -92,13 +69,13 @@ func NewContainerCmd() *cobra.Command {
 				},
 			}
 
-			// Convert at boundary before calling controller
-			containerInternal, _, err := apischeme.NormalizeContainer(*containerDoc)
+			client, err := resolveClient(cmd)
 			if err != nil {
-				return fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				return err
 			}
+			defer func() { _ = client.Close() }()
 
-			_, err = ctrl.DeleteContainer(containerInternal)
+			_, err = client.DeleteContainer(cmd.Context(), doc)
 			if err != nil {
 				return err
 			}
@@ -110,17 +87,13 @@ func NewContainerCmd() *cobra.Command {
 
 	cmd.Flags().String("realm", "", "Realm that owns the container")
 	_ = viper.BindPFlag(config.KUKE_DELETE_CONTAINER_REALM.ViperKey, cmd.Flags().Lookup("realm"))
-
 	cmd.Flags().String("space", "", "Space that owns the container")
 	_ = viper.BindPFlag(config.KUKE_DELETE_CONTAINER_SPACE.ViperKey, cmd.Flags().Lookup("space"))
-
 	cmd.Flags().String("stack", "", "Stack that owns the container")
 	_ = viper.BindPFlag(config.KUKE_DELETE_CONTAINER_STACK.ViperKey, cmd.Flags().Lookup("stack"))
-
 	cmd.Flags().String("cell", "", "Cell that owns the container")
 	_ = viper.BindPFlag(config.KUKE_DELETE_CONTAINER_CELL.ViperKey, cmd.Flags().Lookup("cell"))
 
-	// Register autocomplete functions for flags and positional argument
 	cmd.ValidArgsFunction = config.CompleteContainerNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
@@ -130,12 +103,9 @@ func NewContainerCmd() *cobra.Command {
 	return cmd
 }
 
-type controllerWrapper struct {
-	ctrl *controller.Exec
-}
-
-func (w *controllerWrapper) DeleteContainer(
-	container intmodel.Container,
-) (controller.DeleteContainerResult, error) {
-	return w.ctrl.DeleteContainer(container)
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
+	}
+	return kukeshared.ClientFromCmd(cmd)
 }

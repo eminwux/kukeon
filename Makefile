@@ -14,8 +14,16 @@ KUKEON_IMAGE_NAME := kukeon
 KUKEON_IMAGE_TAG ?= $(KUKEON_VERSION)
 KUKEON_DOCKER_IMAGE := $(KUKEON_REGISTRY)/$(KUKEON_IMAGE_NAME):$(KUKEON_IMAGE_TAG)
 
+# OCI repo path (no tag) that `kuke init` will resolve kukeond from when
+# --kukeond-image is not passed. Release pipeline overrides via env.
+KUKEON_IMAGE_REPO ?= ghcr.io/eminwux/kukeon
+
+LDFLAGS := -s -w \
+	-X $(MODULE)/cmd/config.Version=$(KUKEON_VERSION) \
+	-X $(MODULE)/cmd/config.KukeondImageRepo=$(KUKEON_IMAGE_REPO)
+
 # ----- Build matrix -----
-BINS = kuke
+BINS = kuke kukeond
 OS = linux
 ARCHS = amd64 arm64
 
@@ -28,8 +36,12 @@ release: release-build
 kuke:
 	go build \
 	-o kuke \
-	-ldflags="-s -w -X $(MODULE)/cmd/config.Version=$(KUKEON_VERSION)" \
+	-ldflags="$(LDFLAGS)" \
 	./cmd/
+
+# kukeond is the same binary as kuke, dispatched by argv[0] basename.
+kukeond: kuke
+	ln -sf kuke kukeond
 
 
 release-build:
@@ -40,14 +52,15 @@ release-build:
 			go build -a \
 			-trimpath \
 			-o kuke-$$OS-$$ARCH \
-			-ldflags="-s -w -X $(MODULE)/cmd/config.Version=$(KUKEON_VERSION)" \
+			-ldflags="$(LDFLAGS)" \
 			./cmd; \
+			ln -sf kuke-$$OS-$$ARCH kukeond-$$OS-$$ARCH; \
 		done \
 	done
 
 clean:
 	rm -rf $(HOME)/.kukeon/run/*
-	rm -rf kuke
+	rm -rf kuke kukeond
 
 kill:
 	(killall kukeond || true )
