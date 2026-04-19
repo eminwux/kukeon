@@ -42,6 +42,12 @@ func TestNewCNINetworkConfig(t *testing.T) {
 			wantBridge:  "",
 			wantSubnet:  "10.88.0.0/16",
 		},
+		{
+			name:        "long name is truncated to IFNAMSIZ-safe bridge",
+			networkName: "kuke-system-kukeon",
+			wantBridge:  cni.SafeBridgeName("kuke-system-kukeon"),
+			wantSubnet:  "10.88.0.0/16",
+		},
 	}
 
 	for _, tt := range tests {
@@ -58,6 +64,37 @@ func TestNewCNINetworkConfig(t *testing.T) {
 
 			if cfg.SubnetCIDR != tt.wantSubnet {
 				t.Errorf("NewCNINetworkConfig() subnetCIDR = %q, want %q", cfg.SubnetCIDR, tt.wantSubnet)
+			}
+		})
+	}
+}
+
+func TestSafeBridgeName(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantLen  int
+		wantSame bool
+	}{
+		{name: "empty", input: "", wantLen: 0, wantSame: true},
+		{name: "short passes through", input: "default-default", wantLen: 15, wantSame: true},
+		{name: "long is truncated to 15", input: "kuke-system-kukeon", wantLen: 15, wantSame: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := cni.SafeBridgeName(tt.input)
+			if len(got) != tt.wantLen {
+				t.Errorf("SafeBridgeName(%q) length = %d, want %d (got %q)", tt.input, len(got), tt.wantLen, got)
+			}
+			if tt.wantSame && got != tt.input {
+				t.Errorf("SafeBridgeName(%q) = %q, want unchanged", tt.input, got)
+			}
+			if !tt.wantSame && tt.input != "" && got == tt.input {
+				t.Errorf("SafeBridgeName(%q) unchanged, want truncated", tt.input)
+			}
+			if cni.SafeBridgeName(tt.input) != got {
+				t.Errorf("SafeBridgeName is not deterministic for %q", tt.input)
 			}
 		})
 	}
