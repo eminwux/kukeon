@@ -96,19 +96,69 @@ func NewContainerCmd() *cobra.Command {
 				return err
 			}
 
+			envList, err := cmd.Flags().GetStringArray("env")
+			if err != nil {
+				return err
+			}
+
+			portsList, err := cmd.Flags().GetStringArray("port")
+			if err != nil {
+				return err
+			}
+
+			volumesList, err := cmd.Flags().GetStringArray("volume")
+			if err != nil {
+				return err
+			}
+
+			networksList, err := cmd.Flags().GetStringArray("network")
+			if err != nil {
+				return err
+			}
+
+			networkAliasesList, err := cmd.Flags().GetStringArray("network-alias")
+			if err != nil {
+				return err
+			}
+
+			labelsList, err := cmd.Flags().GetStringArray("label")
+			if err != nil {
+				return err
+			}
+
+			labels, err := parseLabels(labelsList)
+			if err != nil {
+				return err
+			}
+
+			privileged := viper.GetBool(config.KUKE_CREATE_CONTAINER_PRIVILEGED.ViperKey)
+			root := viper.GetBool(config.KUKE_CREATE_CONTAINER_ROOT.ViperKey)
+			cniConfigPath := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_CNI_CONFIG_PATH.ViperKey))
+			restartPolicy := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_RESTART_POLICY.ViperKey))
+
 			containerDoc := &v1beta1.ContainerDoc{
 				Metadata: v1beta1.ContainerMetadata{
-					Name: name,
+					Name:   name,
+					Labels: labels,
 				},
 				Spec: v1beta1.ContainerSpec{
-					ID:      name,
-					RealmID: realm,
-					SpaceID: space,
-					StackID: stack,
-					CellID:  cell,
-					Image:   image,
-					Command: command,
-					Args:    argsList,
+					ID:              name,
+					RealmID:         realm,
+					SpaceID:         space,
+					StackID:         stack,
+					CellID:          cell,
+					Root:            root,
+					Image:           image,
+					Command:         command,
+					Args:            argsList,
+					Env:             envList,
+					Ports:           portsList,
+					Volumes:         volumesList,
+					Networks:        networksList,
+					NetworksAliases: networkAliasesList,
+					Privileged:      privileged,
+					CNIConfigPath:   cniConfigPath,
+					RestartPolicy:   restartPolicy,
 				},
 			}
 
@@ -163,6 +213,36 @@ func NewContainerCmd() *cobra.Command {
 	cmd.Flags().String("command", "", "Command to run in the container")
 	cmd.Flags().StringArray("args", []string{}, "Arguments to pass to the command")
 
+	cmd.Flags().StringArray("env", []string{}, "Environment variable in KEY=VALUE form (repeatable)")
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_ENV.ViperKey, cmd.Flags().Lookup("env"))
+
+	cmd.Flags().StringArray("port", []string{}, "Port mapping (repeatable)")
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_PORTS.ViperKey, cmd.Flags().Lookup("port"))
+
+	cmd.Flags().StringArray("volume", []string{}, "Volume mount (repeatable)")
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_VOLUMES.ViperKey, cmd.Flags().Lookup("volume"))
+
+	cmd.Flags().StringArray("network", []string{}, "Network to attach (repeatable)")
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_NETWORKS.ViperKey, cmd.Flags().Lookup("network"))
+
+	cmd.Flags().StringArray("network-alias", []string{}, "Network alias (repeatable)")
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_NETWORK_ALIASES.ViperKey, cmd.Flags().Lookup("network-alias"))
+
+	cmd.Flags().Bool("privileged", false, "Run the container in privileged mode")
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_PRIVILEGED.ViperKey, cmd.Flags().Lookup("privileged"))
+
+	cmd.Flags().Bool("root", false, "Run the container as a root cgroup container")
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_ROOT.ViperKey, cmd.Flags().Lookup("root"))
+
+	cmd.Flags().String("cni-config-path", "", "Path to the CNI configuration directory")
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_CNI_CONFIG_PATH.ViperKey, cmd.Flags().Lookup("cni-config-path"))
+
+	cmd.Flags().String("restart-policy", "", "Restart policy for the container")
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_RESTART_POLICY.ViperKey, cmd.Flags().Lookup("restart-policy"))
+
+	cmd.Flags().StringArray("label", []string{}, "Metadata label in KEY=VALUE form (repeatable)")
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_LABELS.ViperKey, cmd.Flags().Lookup("label"))
+
 	// Register autocomplete functions for flags and positional argument
 	cmd.ValidArgsFunction = config.CompleteContainerNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
@@ -210,4 +290,20 @@ func printContainerResult(cmd *cobra.Command, result controller.CreateContainerR
 // PrintContainerResult is exported for testing purposes.
 func PrintContainerResult(cmd *cobra.Command, result controller.CreateContainerResult, version v1beta1.Version) {
 	printContainerResult(cmd, result, version)
+}
+
+func parseLabels(entries []string) (map[string]string, error) {
+	labels := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		key, value, found := strings.Cut(entry, "=")
+		if !found {
+			return nil, fmt.Errorf("invalid label %q: expected KEY=VALUE", entry)
+		}
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return nil, fmt.Errorf("invalid label %q: key must not be empty", entry)
+		}
+		labels[key] = value
+	}
+	return labels, nil
 }

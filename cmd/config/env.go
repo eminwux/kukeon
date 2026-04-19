@@ -141,6 +141,39 @@ var (
 		"kuke/create/container/image",
 		"docker.io/library/debian:latest",
 	)
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_ENV = DefineKV("KUKE_CREATE_CONTAINER_ENV", "kuke/create/container/env")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_PORTS = DefineKV("KUKE_CREATE_CONTAINER_PORTS", "kuke/create/container/ports")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_VOLUMES = DefineKV("KUKE_CREATE_CONTAINER_VOLUMES", "kuke/create/container/volumes")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_NETWORKS = DefineKV("KUKE_CREATE_CONTAINER_NETWORKS", "kuke/create/container/networks")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_NETWORK_ALIASES = DefineKV(
+		"KUKE_CREATE_CONTAINER_NETWORK_ALIASES",
+		"kuke/create/container/networkAliases",
+	)
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_PRIVILEGED = DefineKV(
+		"KUKE_CREATE_CONTAINER_PRIVILEGED",
+		"kuke/create/container/privileged",
+		"false",
+	)
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_ROOT = DefineKV("KUKE_CREATE_CONTAINER_ROOT", "kuke/create/container/root", "false")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_CNI_CONFIG_PATH = DefineKV(
+		"KUKE_CREATE_CONTAINER_CNI_CONFIG_PATH",
+		"kuke/create/container/cniConfigPath",
+	)
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_RESTART_POLICY = DefineKV(
+		"KUKE_CREATE_CONTAINER_RESTART_POLICY",
+		"kuke/create/container/restartPolicy",
+	)
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_LABELS = DefineKV("KUKE_CREATE_CONTAINER_LABELS", "kuke/create/container/labels")
 
 	// Get command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
