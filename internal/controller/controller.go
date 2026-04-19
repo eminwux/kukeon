@@ -79,6 +79,10 @@ type Options struct {
 	// KukeondSocket is the unix socket path kukeond serves on. Used by bootstrap
 	// to build the bind-mount for the system cell.
 	KukeondSocket string
+	// ForceRegenerateCNI forces bootstrap to rewrite space conflists even when
+	// they already exist with the expected bridge name. Surfaces via
+	// `kuke init --force-regenerate-cni`.
+	ForceRegenerateCNI bool
 }
 
 func NewControllerExec(ctx context.Context, logger *slog.Logger, opts Options) *Exec {
@@ -87,8 +91,9 @@ func NewControllerExec(ctx context.Context, logger *slog.Logger, opts Options) *
 		logger: logger,
 		opts:   opts,
 		runner: runner.NewRunner(ctx, logger, runner.Options{
-			ContainerdSocket: opts.ContainerdSocket,
-			RunPath:          opts.RunPath,
+			ContainerdSocket:   opts.ContainerdSocket,
+			RunPath:            opts.RunPath,
+			ForceRegenerateCNI: opts.ForceRegenerateCNI,
 		}),
 	}
 }
