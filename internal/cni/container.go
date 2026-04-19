@@ -31,7 +31,7 @@ func (m *Manager) AddContainerToNetwork(ctx context.Context, containerID, netnsP
 
 	rt := buildRuntimeConf(containerID, netnsPath)
 	_, err := m.cniConf.AddNetworkList(ctx, m.netConf, rt)
-	return err
+	return translateCNIError(err, m.netConf.Name, bridgeNameFromNetConf(m.netConf))
 }
 
 // DelContainerFromNetwork removes a container from the CNI network.
@@ -41,7 +41,15 @@ func (m *Manager) DelContainerFromNetwork(ctx context.Context, containerID, netn
 	}
 
 	rt := buildRuntimeConf(containerID, netnsPath)
-	return m.cniConf.DelNetworkList(ctx, m.netConf, rt)
+	err := m.cniConf.DelNetworkList(ctx, m.netConf, rt)
+	return translateCNIError(err, m.netConf.Name, bridgeNameFromNetConf(m.netConf))
+}
+
+// BridgeName returns the bridge device name from the currently loaded
+// CNI conflist, or "" if no conflist is loaded or the conflist has no
+// bridge plugin.
+func (m *Manager) BridgeName() string {
+	return bridgeNameFromNetConf(m.netConf)
 }
 
 // buildRuntimeConf builds a RuntimeConf for container network operations.

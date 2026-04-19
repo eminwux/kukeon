@@ -454,6 +454,33 @@ func TestManager_CreateNetworkWithConfig(t *testing.T) {
 	}
 }
 
+func TestManager_CreateNetworkWithConfig_RejectsOversizedBridge(t *testing.T) {
+	dir := t.TempDir()
+	mgr, err := cni.NewManager("", dir, "")
+	if err != nil {
+		t.Fatalf("failed to create manager: %v", err)
+	}
+
+	// 18 chars — exceeds IFNAMSIZ-1 (15). Mimics the gap-doc scenario where
+	// a caller bypassed SafeBridgeName.
+	_, err = mgr.CreateNetworkWithConfig(cni.NetworkConfig{
+		Name:       "kuke-system-kukeon",
+		BridgeName: "kuke-system-kukeon",
+		SubnetCIDR: "10.88.0.0/16",
+	})
+	if err == nil {
+		t.Fatal("CreateNetworkWithConfig() err = nil, want ErrBridgeNameTooLong")
+	}
+	if !errors.Is(err, errdefs.ErrBridgeNameTooLong) {
+		t.Errorf("CreateNetworkWithConfig() err = %v, want errors.Is(_, ErrBridgeNameTooLong)", err)
+	}
+
+	// No conflist file should have been written.
+	if _, statErr := os.Stat(filepath.Join(dir, "kuke-system-kukeon.conflist")); !os.IsNotExist(statErr) {
+		t.Errorf("conflist should not exist after fail-fast: %v", statErr)
+	}
+}
+
 func TestManager_CreateNetwork(t *testing.T) {
 	tests := []struct {
 		name        string
