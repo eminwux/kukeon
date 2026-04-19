@@ -294,6 +294,114 @@ func TestManager_ExistsNetworkConfig(t *testing.T) {
 	}
 }
 
+func TestManager_ReadBridgeName(t *testing.T) {
+	bridgeFirst := `{
+  "cniVersion": "0.4.0",
+  "name": "net",
+  "plugins": [
+    {"type": "bridge", "bridge": "kuke-s-abcdef12"},
+    {"type": "loopback"}
+  ]
+}`
+	bridgeSecond := `{
+  "cniVersion": "0.4.0",
+  "name": "net",
+  "plugins": [
+    {"type": "loopback"},
+    {"type": "bridge", "bridge": "cni0"}
+  ]
+}`
+	noBridge := `{
+  "cniVersion": "0.4.0",
+  "name": "net",
+  "plugins": [{"type": "loopback"}]
+}`
+	missingPlugins := `{"cniVersion": "0.4.0", "name": "net"}`
+	preFixStale := `{
+  "cniVersion": "0.4.0",
+  "name": "kuke-system-kukeon",
+  "plugins": [
+    {"type": "bridge", "bridge": "kuke-system-kukeon"}
+  ]
+}`
+
+	tests := []struct {
+		name       string
+		contents   string // written if non-empty
+		setupNoOp  bool   // when true, do not create the file
+		wantBridge string
+		wantErr    error
+	}{
+		{name: "bridge plugin first", contents: bridgeFirst, wantBridge: "kuke-s-abcdef12"},
+		{name: "bridge plugin second", contents: bridgeSecond, wantBridge: "cni0"},
+		{name: "no bridge plugin", contents: noBridge, wantErr: errdefs.ErrBridgePluginMissing},
+		{name: "plugins field absent", contents: missingPlugins, wantErr: errdefs.ErrBridgePluginMissing},
+		{name: "pre-fix stale bridge name preserved for comparison", contents: preFixStale, wantBridge: "kuke-system-kukeon"},
+		{name: "file missing", setupNoOp: true, wantErr: errdefs.ErrNetworkNotFound},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "network.conflist")
+			if !tt.setupNoOp {
+				if err := os.WriteFile(configPath, []byte(tt.contents), 0o600); err != nil {
+					t.Fatalf("failed to write conflist: %v", err)
+				}
+			}
+
+			mgr, err := cni.NewManager("", dir, "")
+			if err != nil {
+				t.Fatalf("failed to create manager: %v", err)
+			}
+
+			got, err := mgr.ReadBridgeName(configPath)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("ReadBridgeName() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ReadBridgeName() error = %v, want nil", err)
+			}
+			if got != tt.wantBridge {
+				t.Errorf("ReadBridgeName() = %q, want %q", got, tt.wantBridge)
+			}
+		})
+	}
+
+	t.Run("malformed JSON", func(t *testing.T) {
+		dir := t.TempDir()
+		configPath := filepath.Join(dir, "network.conflist")
+		if err := os.WriteFile(configPath, []byte("not json"), 0o600); err != nil {
+			t.Fatalf("failed to write conflist: %v", err)
+		}
+		mgr, err := cni.NewManager("", dir, "")
+		if err != nil {
+			t.Fatalf("failed to create manager: %v", err)
+		}
+		_, err = mgr.ReadBridgeName(configPath)
+		if err == nil {
+			t.Fatal("ReadBridgeName() error = nil on malformed JSON, want error")
+		}
+		if errors.Is(err, errdefs.ErrNetworkNotFound) || errors.Is(err, errdefs.ErrBridgePluginMissing) {
+			t.Fatalf("ReadBridgeName() error = %v; want a JSON parse error (not a sentinel)", err)
+		}
+	})
+
+	t.Run("empty path", func(t *testing.T) {
+		dir := t.TempDir()
+		mgr, err := cni.NewManager("", dir, "")
+		if err != nil {
+			t.Fatalf("failed to create manager: %v", err)
+		}
+		if _, err = mgr.ReadBridgeName(""); err == nil {
+			t.Fatal("ReadBridgeName(\"\") error = nil, want error")
+		}
+	})
+}
+
 func TestManager_CreateNetworkWithConfig(t *testing.T) {
 	tests := []struct {
 		name       string
