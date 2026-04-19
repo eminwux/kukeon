@@ -1,0 +1,28 @@
+apiVersion: v1beta1
+kind: Cell
+metadata:
+  name: hello-world
+spec:
+  id: hello-world
+  realmId: default
+  spaceId: default
+  stackId: default
+  containers:
+    - id: web
+      image: docker.io/library/busybox:latest
+      command: /bin/sh
+      args:
+        - -c
+        - |
+          mkdir -p /www && \
+          cat > /www/index.html <<'HTML'
+          <!doctype html>
+          <html>
+            <head><meta charset="utf-8"><title>kukeon hello-world</title></head>
+            <body style="font-family: sans-serif">
+              <h1>Hello, world from kukeon!</h1>
+              <p>Served by busybox httpd inside a cell in the <code>default</code> realm.</p>
+            </body>
+          </html>
+          HTML
+          exec busybox httpd -f -v -p 8080 -h /www

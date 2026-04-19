@@ -86,6 +86,104 @@ default  main   default  Running  /kukeon/main/default/default
 
 Add `-o yaml` or `-o json` for full resource details.
 
+### Run a hello-world cell
+
+A minimal example that brings up a single container serving a static HTML page with busybox httpd lives at [`docs/examples/hello-world.yaml`](docs/examples/hello-world.yaml):
+
+```yaml
+apiVersion: v1beta1
+kind: Cell
+metadata:
+  name: hello-world
+spec:
+  id: hello-world
+  realmId: default
+  spaceId: default
+  stackId: default
+  containers:
+    - id: web
+      image: docker.io/library/busybox:latest
+      command: /bin/sh
+      args:
+        - -c
+        - |
+          mkdir -p /www && \
+          cat > /www/index.html <<'HTML'
+          <!doctype html>
+          <html>
+            <head><meta charset="utf-8"><title>kukeon hello-world</title></head>
+            <body style="font-family: sans-serif">
+              <h1>Hello, world from kukeon!</h1>
+              <p>Served by busybox httpd inside a cell in the <code>default</code> realm.</p>
+            </body>
+          </html>
+          HTML
+          exec busybox httpd -f -v -p 8080 -h /www
+```
+
+Apply it and verify the cell is running. Cell creation currently goes in-process (`--no-daemon`) because the `kukeond` container image does not yet bind-mount `/run/containerd/containerd.sock`:
+
+```bash
+# Create the cell (containers auto-start).
+sudo kuke apply -f docs/examples/hello-world.yaml --no-daemon
+
+# Confirm the cell is Ready.
+sudo kuke get cells --realm default --space default --stack default
+
+# Find the root container's IP on the default-default bridge (10.88.0.0/16) and curl it.
+ROOT_PID=$(sudo ctr -n kukeon.io task ls | awk '/hello-world_root/ {print $2}')
+CELL_IP=$(sudo nsenter -t "${ROOT_PID}" -n ip -4 -o addr show eth0 | awk '{print $4}' | cut -d/ -f1)
+curl http://${CELL_IP}:8080/
+```
+
+Tear it down with:
+
+```bash
+sudo kuke delete cell hello-world \
+    --realm default --space default --stack default --cascade --no-daemon
+```
+
+### Development environment
+
+Iterating on `kuke`/`kukeond` without a registry push: build from source, load the image into containerd by hand, then `kuke init` against it.
+
+**Prerequisite — create the `kuke-system.kukeon.io` namespace first.** `ctr images import` needs the target namespace to already exist; if it doesn't, the import succeeds silently but nothing lands in the namespace and the next `kuke init` will fail to find the image. The simplest bootstrap order is to let `kuke init` create the namespace first, then import, then re-run `kuke init` with your local image:
+
+```bash
+# 1. First bootstrap: creates the kuke-system.kukeon.io containerd namespace
+#    (and the rest of the hierarchy). The kukeond cell will fail to pull the
+#    default ghcr.io image without network — that's fine, we only need the
+#    namespace to exist. Alternatively create it directly:
+sudo ctr namespaces create kuke-system.kukeon.io
+
+# 2. Build the binaries. kukeond is argv[0]-dispatched from the kuke binary.
+rm -f kuke kukeond
+make kuke
+ln -sf kuke kukeond
+
+# 3. Build the container image and import it into the kuke-system namespace.
+#    VERSION only affects the embedded kuke --version string.
+docker build --build-arg VERSION=v0.0.0-dev -t kukeon-local:dev .
+docker save kukeon-local:dev | \
+    sudo ctr -n kuke-system.kukeon.io images import -
+
+# 4. Verify the image is present in the namespace.
+sudo ctr -n kuke-system.kukeon.io images ls | grep kukeon-local
+
+# 5. Run (or re-run) kuke init pointed at the locally-loaded image.
+sudo ./kuke init --kukeond-image docker.io/library/kukeon-local:dev
+```
+
+To iterate after a change, tear down just the kukeond cell (user data under `/opt/kukeon/default` is left intact) and repeat steps 2–5:
+
+```bash
+sudo kuke kill cell kukeond \
+    --realm kuke-system --space kukeon --stack kukeon --no-daemon
+sudo kuke delete cell kukeond \
+    --realm kuke-system --space kukeon --stack kukeon --no-daemon
+sudo rm -f /run/kukeon/kukeond.sock /run/kukeon/kukeond.pid
+```
+
 ### Autocomplete
 
 ```bash
