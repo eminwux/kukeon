@@ -24,7 +24,7 @@ import (
 )
 
 func DefaultRunPath() string {
-	return filepath.Join("/", "run", "kukeon")
+	return filepath.Join("/", "opt", "kukeon")
 }
 
 func GetRunPathFromEnvAndFlags(cmd *cobra.Command, viperKey string) (string, error) {

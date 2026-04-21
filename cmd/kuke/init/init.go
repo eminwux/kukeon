@@ -66,7 +66,7 @@ func setupInitCmd(cmd *cobra.Command) error {
 }
 
 func setFlags(cmd *cobra.Command) error {
-	cmd.Flags().String("realm", "main", "Name of default realm")
+	cmd.Flags().String("realm", "default", "Name of default realm")
 	err := viper.BindPFlag(config.KUKE_INIT_REALM.ViperKey, cmd.Flags().Lookup("realm"))
 	if err != nil {
 		return fmt.Errorf("failed to bind flag: %w", err)
