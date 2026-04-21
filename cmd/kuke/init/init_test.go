@@ -142,7 +142,7 @@ func TestSetFlags(t *testing.T) {
 		{
 			name:      "defaults",
 			args:      nil,
-			wantRealm: "main",
+			wantRealm: "default",
 			wantSpace: "default",
 		},
 		{
