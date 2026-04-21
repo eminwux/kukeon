@@ -74,14 +74,20 @@ func (b *Exec) CreateContainer(container intmodel.Container) (CreateContainerRes
 
 	// Build container spec to merge into cell
 	newContainerSpec := intmodel.ContainerSpec{
-		ID:        container.Spec.ID,
-		RealmName: realm,
-		SpaceName: space,
-		StackName: stack,
-		CellName:  cellName,
-		Image:     image,
-		Command:   container.Spec.Command,
-		Args:      container.Spec.Args,
+		ID:                     container.Spec.ID,
+		RealmName:              realm,
+		SpaceName:              space,
+		StackName:              stack,
+		CellName:               cellName,
+		Image:                  image,
+		Command:                container.Spec.Command,
+		Args:                   container.Spec.Args,
+		User:                   container.Spec.User,
+		ReadOnlyRootFilesystem: container.Spec.ReadOnlyRootFilesystem,
+		Capabilities:           container.Spec.Capabilities,
+		SecurityOpts:           container.Spec.SecurityOpts,
+		Tmpfs:                  container.Spec.Tmpfs,
+		Resources:              container.Spec.Resources,
 	}
 
 	// Build lookup cell for pre-state check and CreateContainer call

@@ -189,6 +189,40 @@ var (
 	)
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_CREATE_CONTAINER_LABELS = DefineKV("KUKE_CREATE_CONTAINER_LABELS", "kuke/create/container/labels")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_USER = DefineKV("KUKE_CREATE_CONTAINER_USER", "kuke/create/container/user")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_READ_ONLY = DefineKV(
+		"KUKE_CREATE_CONTAINER_READ_ONLY",
+		"kuke/create/container/readOnlyRootFilesystem",
+		"false",
+	)
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_CAP_DROP = DefineKV("KUKE_CREATE_CONTAINER_CAP_DROP", "kuke/create/container/capabilities/drop")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_CAP_ADD = DefineKV("KUKE_CREATE_CONTAINER_CAP_ADD", "kuke/create/container/capabilities/add")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_SECURITY_OPTS = DefineKV(
+		"KUKE_CREATE_CONTAINER_SECURITY_OPTS",
+		"kuke/create/container/securityOpts",
+	)
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_TMPFS = DefineKV("KUKE_CREATE_CONTAINER_TMPFS", "kuke/create/container/tmpfs")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_MEMORY = DefineKV(
+		"KUKE_CREATE_CONTAINER_MEMORY",
+		"kuke/create/container/resources/memoryLimitBytes",
+	)
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_CPU_SHARES = DefineKV(
+		"KUKE_CREATE_CONTAINER_CPU_SHARES",
+		"kuke/create/container/resources/cpuShares",
+	)
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONTAINER_PIDS_LIMIT = DefineKV(
+		"KUKE_CREATE_CONTAINER_PIDS_LIMIT",
+		"kuke/create/container/resources/pidsLimit",
+	)
 
 	// Get command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable

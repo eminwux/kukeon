@@ -18,6 +18,7 @@ package container
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
@@ -92,6 +93,37 @@ func NewContainerCmd() *cobra.Command {
 
 	cmd.Flags().StringArray("label", []string{}, "Metadata label in KEY=VALUE form (repeatable)")
 	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_LABELS.ViperKey, cmd.Flags().Lookup("label"))
+
+	cmd.Flags().String("user", "", `Run the container as UID[:GID] (e.g. "1000:1000")`)
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_USER.ViperKey, cmd.Flags().Lookup("user"))
+
+	cmd.Flags().Bool("read-only", false, "Mount the container's root filesystem read-only")
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_READ_ONLY.ViperKey, cmd.Flags().Lookup("read-only"))
+
+	cmd.Flags().StringArray("cap-drop", []string{}, "Linux capability to drop (repeatable, e.g. ALL or NET_ADMIN)")
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_CAP_DROP.ViperKey, cmd.Flags().Lookup("cap-drop"))
+
+	cmd.Flags().StringArray("cap-add", []string{}, "Linux capability to add (repeatable, e.g. NET_ADMIN)")
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_CAP_ADD.ViperKey, cmd.Flags().Lookup("cap-add"))
+
+	cmd.Flags().StringArray(
+		"security-opt",
+		[]string{},
+		`Security option (repeatable, e.g. "no-new-privileges" or "seccomp=unconfined")`,
+	)
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_SECURITY_OPTS.ViperKey, cmd.Flags().Lookup("security-opt"))
+
+	cmd.Flags().StringArray("tmpfs", []string{}, `Tmpfs mount "path[:opts]" (e.g. "/tmp:size=64m") (repeatable)`)
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_TMPFS.ViperKey, cmd.Flags().Lookup("tmpfs"))
+
+	cmd.Flags().String("memory", "", `Hard memory limit (bytes, or with suffix k/m/g, e.g. "4g")`)
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_MEMORY.ViperKey, cmd.Flags().Lookup("memory"))
+
+	cmd.Flags().Int64("cpu-shares", 0, "Relative CPU weight (cgroup cpu.shares)")
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_CPU_SHARES.ViperKey, cmd.Flags().Lookup("cpu-shares"))
+
+	cmd.Flags().Int64("pids-limit", 0, "Maximum number of PIDs in the container (0 to leave unset)")
+	_ = viper.BindPFlag(config.KUKE_CREATE_CONTAINER_PIDS_LIMIT.ViperKey, cmd.Flags().Lookup("pids-limit"))
 
 	cmd.ValidArgsFunction = config.CompleteContainerNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
@@ -182,29 +214,70 @@ func runCreateContainer(cmd *cobra.Command, args []string) error {
 	cniConfigPath := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_CNI_CONFIG_PATH.ViperKey))
 	restartPolicy := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_RESTART_POLICY.ViperKey))
 
+	user := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_USER.ViperKey))
+	readOnly := viper.GetBool(config.KUKE_CREATE_CONTAINER_READ_ONLY.ViperKey)
+
+	capDropList, err := cmd.Flags().GetStringArray("cap-drop")
+	if err != nil {
+		return err
+	}
+	capAddList, err := cmd.Flags().GetStringArray("cap-add")
+	if err != nil {
+		return err
+	}
+	securityOptsList, err := cmd.Flags().GetStringArray("security-opt")
+	if err != nil {
+		return err
+	}
+	tmpfsList, err := cmd.Flags().GetStringArray("tmpfs")
+	if err != nil {
+		return err
+	}
+	tmpfsMounts, err := parseTmpfsFlags(tmpfsList)
+	if err != nil {
+		return err
+	}
+
+	memoryRaw := strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CONTAINER_MEMORY.ViperKey))
+	memoryBytes, err := parseMemoryBytes(memoryRaw)
+	if err != nil {
+		return err
+	}
+	cpuShares := viper.GetInt64(config.KUKE_CREATE_CONTAINER_CPU_SHARES.ViperKey)
+	pidsLimit := viper.GetInt64(config.KUKE_CREATE_CONTAINER_PIDS_LIMIT.ViperKey)
+
+	capabilities := buildCapabilities(capDropList, capAddList)
+	resources := buildResources(memoryBytes, cpuShares, pidsLimit)
+
 	doc := v1beta1.NewContainerDoc(&v1beta1.ContainerDoc{
 		Metadata: v1beta1.ContainerMetadata{
 			Name:   name,
 			Labels: labels,
 		},
 		Spec: v1beta1.ContainerSpec{
-			ID:              name,
-			RealmID:         realm,
-			SpaceID:         space,
-			StackID:         stack,
-			CellID:          cell,
-			Root:            root,
-			Image:           image,
-			Command:         command,
-			Args:            argsList,
-			Env:             envList,
-			Ports:           portsList,
-			Volumes:         volumesList,
-			Networks:        networksList,
-			NetworksAliases: networkAliasesList,
-			Privileged:      privileged,
-			CNIConfigPath:   cniConfigPath,
-			RestartPolicy:   restartPolicy,
+			ID:                     name,
+			RealmID:                realm,
+			SpaceID:                space,
+			StackID:                stack,
+			CellID:                 cell,
+			Root:                   root,
+			Image:                  image,
+			Command:                command,
+			Args:                   argsList,
+			Env:                    envList,
+			Ports:                  portsList,
+			Volumes:                volumesList,
+			Networks:               networksList,
+			NetworksAliases:        networkAliasesList,
+			Privileged:             privileged,
+			User:                   user,
+			ReadOnlyRootFilesystem: readOnly,
+			Capabilities:           capabilities,
+			SecurityOpts:           securityOptsList,
+			Tmpfs:                  tmpfsMounts,
+			Resources:              resources,
+			CNIConfigPath:          cniConfigPath,
+			RestartPolicy:          restartPolicy,
 		},
 	})
 
@@ -251,6 +324,138 @@ func printContainerResult(cmd *cobra.Command, result kukeonv1.CreateContainerRes
 // PrintContainerResult is exported for testing purposes.
 func PrintContainerResult(cmd *cobra.Command, result kukeonv1.CreateContainerResult) {
 	printContainerResult(cmd, result)
+}
+
+func buildCapabilities(drop, add []string) *v1beta1.ContainerCapabilities {
+	drop = trimAndDropEmpty(drop)
+	add = trimAndDropEmpty(add)
+	if len(drop) == 0 && len(add) == 0 {
+		return nil
+	}
+	return &v1beta1.ContainerCapabilities{Drop: drop, Add: add}
+}
+
+func buildResources(memoryBytes, cpuShares, pidsLimit int64) *v1beta1.ContainerResources {
+	if memoryBytes <= 0 && cpuShares <= 0 && pidsLimit <= 0 {
+		return nil
+	}
+	res := &v1beta1.ContainerResources{}
+	if memoryBytes > 0 {
+		m := memoryBytes
+		res.MemoryLimitBytes = &m
+	}
+	if cpuShares > 0 {
+		s := cpuShares
+		res.CPUShares = &s
+	}
+	if pidsLimit > 0 {
+		p := pidsLimit
+		res.PidsLimit = &p
+	}
+	return res
+}
+
+func trimAndDropEmpty(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// parseTmpfsFlags parses docker-style "--tmpfs path[:opt1,opt2,...]" entries.
+// The size option ("size=<N>[k|m|g]") is promoted to the structured sizeBytes
+// field; everything else is preserved as a raw option string.
+func parseTmpfsFlags(entries []string) ([]v1beta1.ContainerTmpfsMount, error) {
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	mounts := make([]v1beta1.ContainerTmpfsMount, 0, len(entries))
+	for _, raw := range entries {
+		entry := strings.TrimSpace(raw)
+		if entry == "" {
+			continue
+		}
+		path := entry
+		var rawOpts string
+		if idx := strings.Index(entry, ":"); idx >= 0 {
+			path = strings.TrimSpace(entry[:idx])
+			rawOpts = entry[idx+1:]
+		}
+		if path == "" {
+			return nil, fmt.Errorf("invalid --tmpfs %q: path is required", raw)
+		}
+		mount := v1beta1.ContainerTmpfsMount{Path: path}
+		if rawOpts != "" {
+			for _, opt := range strings.Split(rawOpts, ",") {
+				opt = strings.TrimSpace(opt)
+				if opt == "" {
+					continue
+				}
+				if after, ok := strings.CutPrefix(opt, "size="); ok {
+					bytes, err := parseSizeBytes(after)
+					if err != nil {
+						return nil, fmt.Errorf("invalid --tmpfs %q: %w", raw, err)
+					}
+					mount.SizeBytes = bytes
+					continue
+				}
+				mount.Options = append(mount.Options, opt)
+			}
+		}
+		mounts = append(mounts, mount)
+	}
+	return mounts, nil
+}
+
+// parseMemoryBytes accepts a plain byte count or a value with a k/m/g (or
+// ki/mi/gi) suffix, matching the docker convention. Empty input returns 0.
+func parseMemoryBytes(raw string) (int64, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	return parseSizeBytes(raw)
+}
+
+func parseSizeBytes(raw string) (int64, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return 0, fmt.Errorf("size is empty")
+	}
+	multiplier := int64(1)
+	lower := strings.ToLower(s)
+	switch {
+	case strings.HasSuffix(lower, "gi"):
+		multiplier = 1024 * 1024 * 1024
+		s = s[:len(s)-2]
+	case strings.HasSuffix(lower, "mi"):
+		multiplier = 1024 * 1024
+		s = s[:len(s)-2]
+	case strings.HasSuffix(lower, "ki"):
+		multiplier = 1024
+		s = s[:len(s)-2]
+	case strings.HasSuffix(lower, "g"):
+		multiplier = 1024 * 1024 * 1024
+		s = s[:len(s)-1]
+	case strings.HasSuffix(lower, "m"):
+		multiplier = 1024 * 1024
+		s = s[:len(s)-1]
+	case strings.HasSuffix(lower, "k"):
+		multiplier = 1024
+		s = s[:len(s)-1]
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid size %q: %w", raw, err)
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("invalid size %q: must be non-negative", raw)
+	}
+	return n * multiplier, nil
 }
 
 func parseLabels(entries []string) (map[string]string, error) {

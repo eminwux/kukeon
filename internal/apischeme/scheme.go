@@ -263,23 +263,29 @@ func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, err
 				Labels: in.Metadata.Labels,
 			},
 			Spec: intmodel.ContainerSpec{
-				ID:              in.Spec.ID,
-				RealmName:       in.Spec.RealmID,
-				SpaceName:       in.Spec.SpaceID,
-				StackName:       in.Spec.StackID,
-				CellName:        in.Spec.CellID,
-				Root:            in.Spec.Root,
-				Image:           in.Spec.Image,
-				Command:         in.Spec.Command,
-				Args:            in.Spec.Args,
-				Env:             in.Spec.Env,
-				Ports:           in.Spec.Ports,
-				Volumes:         in.Spec.Volumes,
-				Networks:        in.Spec.Networks,
-				NetworksAliases: in.Spec.NetworksAliases,
-				Privileged:      in.Spec.Privileged,
-				CNIConfigPath:   in.Spec.CNIConfigPath,
-				RestartPolicy:   in.Spec.RestartPolicy,
+				ID:                     in.Spec.ID,
+				RealmName:              in.Spec.RealmID,
+				SpaceName:              in.Spec.SpaceID,
+				StackName:              in.Spec.StackID,
+				CellName:               in.Spec.CellID,
+				Root:                   in.Spec.Root,
+				Image:                  in.Spec.Image,
+				Command:                in.Spec.Command,
+				Args:                   in.Spec.Args,
+				Env:                    in.Spec.Env,
+				Ports:                  in.Spec.Ports,
+				Volumes:                in.Spec.Volumes,
+				Networks:               in.Spec.Networks,
+				NetworksAliases:        in.Spec.NetworksAliases,
+				Privileged:             in.Spec.Privileged,
+				User:                   in.Spec.User,
+				ReadOnlyRootFilesystem: in.Spec.ReadOnlyRootFilesystem,
+				Capabilities:           convertCapabilitiesToInternal(in.Spec.Capabilities),
+				SecurityOpts:           in.Spec.SecurityOpts,
+				Tmpfs:                  convertTmpfsMountsToInternal(in.Spec.Tmpfs),
+				Resources:              convertResourcesToInternal(in.Spec.Resources),
+				CNIConfigPath:          in.Spec.CNIConfigPath,
+				RestartPolicy:          in.Spec.RestartPolicy,
 			},
 			Status: intmodel.ContainerStatus{
 				Name:         in.Status.Name,
@@ -310,23 +316,29 @@ func BuildContainerExternalFromInternal(in intmodel.Container, apiVersion ext.Ve
 				Labels: in.Metadata.Labels,
 			},
 			Spec: ext.ContainerSpec{
-				ID:              in.Spec.ID,
-				RealmID:         in.Spec.RealmName,
-				SpaceID:         in.Spec.SpaceName,
-				StackID:         in.Spec.StackName,
-				CellID:          in.Spec.CellName,
-				Root:            in.Spec.Root,
-				Image:           in.Spec.Image,
-				Command:         in.Spec.Command,
-				Args:            in.Spec.Args,
-				Env:             in.Spec.Env,
-				Ports:           in.Spec.Ports,
-				Volumes:         in.Spec.Volumes,
-				Networks:        in.Spec.Networks,
-				NetworksAliases: in.Spec.NetworksAliases,
-				Privileged:      in.Spec.Privileged,
-				CNIConfigPath:   in.Spec.CNIConfigPath,
-				RestartPolicy:   in.Spec.RestartPolicy,
+				ID:                     in.Spec.ID,
+				RealmID:                in.Spec.RealmName,
+				SpaceID:                in.Spec.SpaceName,
+				StackID:                in.Spec.StackName,
+				CellID:                 in.Spec.CellName,
+				Root:                   in.Spec.Root,
+				Image:                  in.Spec.Image,
+				Command:                in.Spec.Command,
+				Args:                   in.Spec.Args,
+				Env:                    in.Spec.Env,
+				Ports:                  in.Spec.Ports,
+				Volumes:                in.Spec.Volumes,
+				Networks:               in.Spec.Networks,
+				NetworksAliases:        in.Spec.NetworksAliases,
+				Privileged:             in.Spec.Privileged,
+				User:                   in.Spec.User,
+				ReadOnlyRootFilesystem: in.Spec.ReadOnlyRootFilesystem,
+				Capabilities:           buildCapabilitiesExternalFromInternal(in.Spec.Capabilities),
+				SecurityOpts:           in.Spec.SecurityOpts,
+				Tmpfs:                  buildTmpfsMountsExternalFromInternal(in.Spec.Tmpfs),
+				Resources:              buildResourcesExternalFromInternal(in.Spec.Resources),
+				CNIConfigPath:          in.Spec.CNIConfigPath,
+				RestartPolicy:          in.Spec.RestartPolicy,
 			},
 			Status: ext.ContainerStatus{
 				Name:         in.Status.Name,
@@ -359,24 +371,30 @@ func NormalizeContainer(req ext.ContainerDoc) (intmodel.Container, ext.Version, 
 // This is used for nested ContainerSpecs in CellSpec.
 func convertContainerSpecToInternal(in ext.ContainerSpec) intmodel.ContainerSpec {
 	return intmodel.ContainerSpec{
-		ID:              in.ID,
-		ContainerdID:    in.ContainerdID,
-		RealmName:       in.RealmID,
-		SpaceName:       in.SpaceID,
-		StackName:       in.StackID,
-		CellName:        in.CellID,
-		Root:            in.Root,
-		Image:           in.Image,
-		Command:         in.Command,
-		Args:            in.Args,
-		Env:             in.Env,
-		Ports:           in.Ports,
-		Volumes:         in.Volumes,
-		Networks:        in.Networks,
-		NetworksAliases: in.NetworksAliases,
-		Privileged:      in.Privileged,
-		CNIConfigPath:   in.CNIConfigPath,
-		RestartPolicy:   in.RestartPolicy,
+		ID:                     in.ID,
+		ContainerdID:           in.ContainerdID,
+		RealmName:              in.RealmID,
+		SpaceName:              in.SpaceID,
+		StackName:              in.StackID,
+		CellName:               in.CellID,
+		Root:                   in.Root,
+		Image:                  in.Image,
+		Command:                in.Command,
+		Args:                   in.Args,
+		Env:                    in.Env,
+		Ports:                  in.Ports,
+		Volumes:                in.Volumes,
+		Networks:               in.Networks,
+		NetworksAliases:        in.NetworksAliases,
+		Privileged:             in.Privileged,
+		User:                   in.User,
+		ReadOnlyRootFilesystem: in.ReadOnlyRootFilesystem,
+		Capabilities:           convertCapabilitiesToInternal(in.Capabilities),
+		SecurityOpts:           in.SecurityOpts,
+		Tmpfs:                  convertTmpfsMountsToInternal(in.Tmpfs),
+		Resources:              convertResourcesToInternal(in.Resources),
+		CNIConfigPath:          in.CNIConfigPath,
+		RestartPolicy:          in.RestartPolicy,
 	}
 }
 
@@ -384,24 +402,102 @@ func convertContainerSpecToInternal(in ext.ContainerSpec) intmodel.ContainerSpec
 // This is used for nested ContainerSpecs in CellSpec.
 func BuildContainerSpecExternalFromInternal(in intmodel.ContainerSpec) ext.ContainerSpec {
 	return ext.ContainerSpec{
-		ID:              in.ID,
-		ContainerdID:    in.ContainerdID,
-		RealmID:         in.RealmName,
-		SpaceID:         in.SpaceName,
-		StackID:         in.StackName,
-		CellID:          in.CellName,
-		Root:            in.Root,
-		Image:           in.Image,
-		Command:         in.Command,
-		Args:            in.Args,
-		Env:             in.Env,
-		Ports:           in.Ports,
-		Volumes:         in.Volumes,
-		Networks:        in.Networks,
-		NetworksAliases: in.NetworksAliases,
-		Privileged:      in.Privileged,
-		CNIConfigPath:   in.CNIConfigPath,
-		RestartPolicy:   in.RestartPolicy,
+		ID:                     in.ID,
+		ContainerdID:           in.ContainerdID,
+		RealmID:                in.RealmName,
+		SpaceID:                in.SpaceName,
+		StackID:                in.StackName,
+		CellID:                 in.CellName,
+		Root:                   in.Root,
+		Image:                  in.Image,
+		Command:                in.Command,
+		Args:                   in.Args,
+		Env:                    in.Env,
+		Ports:                  in.Ports,
+		Volumes:                in.Volumes,
+		Networks:               in.Networks,
+		NetworksAliases:        in.NetworksAliases,
+		Privileged:             in.Privileged,
+		User:                   in.User,
+		ReadOnlyRootFilesystem: in.ReadOnlyRootFilesystem,
+		Capabilities:           buildCapabilitiesExternalFromInternal(in.Capabilities),
+		SecurityOpts:           in.SecurityOpts,
+		Tmpfs:                  buildTmpfsMountsExternalFromInternal(in.Tmpfs),
+		Resources:              buildResourcesExternalFromInternal(in.Resources),
+		CNIConfigPath:          in.CNIConfigPath,
+		RestartPolicy:          in.RestartPolicy,
+	}
+}
+
+func convertCapabilitiesToInternal(in *ext.ContainerCapabilities) *intmodel.ContainerCapabilities {
+	if in == nil {
+		return nil
+	}
+	return &intmodel.ContainerCapabilities{
+		Drop: in.Drop,
+		Add:  in.Add,
+	}
+}
+
+func buildCapabilitiesExternalFromInternal(in *intmodel.ContainerCapabilities) *ext.ContainerCapabilities {
+	if in == nil {
+		return nil
+	}
+	return &ext.ContainerCapabilities{
+		Drop: in.Drop,
+		Add:  in.Add,
+	}
+}
+
+func convertTmpfsMountsToInternal(in []ext.ContainerTmpfsMount) []intmodel.ContainerTmpfsMount {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]intmodel.ContainerTmpfsMount, len(in))
+	for i, m := range in {
+		out[i] = intmodel.ContainerTmpfsMount{
+			Path:      m.Path,
+			SizeBytes: m.SizeBytes,
+			Options:   m.Options,
+		}
+	}
+	return out
+}
+
+func buildTmpfsMountsExternalFromInternal(in []intmodel.ContainerTmpfsMount) []ext.ContainerTmpfsMount {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ext.ContainerTmpfsMount, len(in))
+	for i, m := range in {
+		out[i] = ext.ContainerTmpfsMount{
+			Path:      m.Path,
+			SizeBytes: m.SizeBytes,
+			Options:   m.Options,
+		}
+	}
+	return out
+}
+
+func convertResourcesToInternal(in *ext.ContainerResources) *intmodel.ContainerResources {
+	if in == nil {
+		return nil
+	}
+	return &intmodel.ContainerResources{
+		MemoryLimitBytes: in.MemoryLimitBytes,
+		CPUShares:        in.CPUShares,
+		PidsLimit:        in.PidsLimit,
+	}
+}
+
+func buildResourcesExternalFromInternal(in *intmodel.ContainerResources) *ext.ContainerResources {
+	if in == nil {
+		return nil
+	}
+	return &ext.ContainerResources{
+		MemoryLimitBytes: in.MemoryLimitBytes,
+		CPUShares:        in.CPUShares,
+		PidsLimit:        in.PidsLimit,
 	}
 }
 

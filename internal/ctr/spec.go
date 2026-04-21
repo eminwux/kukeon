@@ -18,8 +18,11 @@ package ctr
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 
 	containerd "github.com/containerd/containerd/v2/client"
@@ -202,6 +205,8 @@ func BuildContainerSpec(
 		specOpts = append(specOpts, oci.WithMounts(mounts))
 	}
 
+	specOpts = append(specOpts, securitySpecOpts(containerSpec)...)
+
 	return ContainerSpec{
 		ID:            containerdID,
 		Image:         containerSpec.Image,
@@ -254,4 +259,178 @@ func parseVolumeMounts(volumes []string) []runtimespec.Mount {
 		})
 	}
 	return mounts
+}
+
+// securitySpecOpts translates the security/isolation fields on the internal
+// ContainerSpec (user, readOnlyRootFilesystem, capabilities, securityOpts,
+// tmpfs, resources) into OCI spec options.
+func securitySpecOpts(spec intmodel.ContainerSpec) []oci.SpecOpts {
+	var opts []oci.SpecOpts
+
+	if spec.User != "" {
+		opts = append(opts, oci.WithUser(spec.User))
+	}
+
+	if spec.ReadOnlyRootFilesystem {
+		opts = append(opts, oci.WithRootFSReadonly())
+	}
+
+	if spec.Capabilities != nil {
+		if len(spec.Capabilities.Drop) > 0 {
+			opts = append(opts, oci.WithDroppedCapabilities(normalizeCapabilities(spec.Capabilities.Drop)))
+		}
+		if len(spec.Capabilities.Add) > 0 {
+			opts = append(opts, oci.WithAddedCapabilities(normalizeCapabilities(spec.Capabilities.Add)))
+		}
+	}
+
+	for _, entry := range spec.SecurityOpts {
+		opts = append(opts, securityOptSpecOpt(entry))
+	}
+
+	if mounts := buildTmpfsMounts(spec.Tmpfs); len(mounts) > 0 {
+		opts = append(opts, oci.WithMounts(mounts))
+	}
+
+	if spec.Resources != nil {
+		if spec.Resources.MemoryLimitBytes != nil && *spec.Resources.MemoryLimitBytes > 0 {
+			opts = append(opts, oci.WithMemoryLimit(uint64(*spec.Resources.MemoryLimitBytes)))
+		}
+		if spec.Resources.CPUShares != nil && *spec.Resources.CPUShares > 0 {
+			opts = append(opts, oci.WithCPUShares(uint64(*spec.Resources.CPUShares)))
+		}
+		if spec.Resources.PidsLimit != nil && *spec.Resources.PidsLimit > 0 {
+			opts = append(opts, oci.WithPidsLimit(*spec.Resources.PidsLimit))
+		}
+	}
+
+	return opts
+}
+
+// normalizeCapabilities ensures each capability name has the "CAP_" prefix and
+// is upper-case, which is what the OCI runtime spec expects. Callers are free
+// to write "NET_ADMIN" or "cap_net_admin"; both normalize to "CAP_NET_ADMIN".
+func normalizeCapabilities(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, c := range in {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		upper := strings.ToUpper(c)
+		if upper == "ALL" || strings.HasPrefix(upper, "CAP_") {
+			out = append(out, upper)
+			continue
+		}
+		out = append(out, "CAP_"+upper)
+	}
+	return out
+}
+
+// buildTmpfsMounts returns OCI mounts for each declared tmpfs entry. Size is
+// emitted as the standard tmpfs "size=N" option when set.
+func buildTmpfsMounts(entries []intmodel.ContainerTmpfsMount) []runtimespec.Mount {
+	if len(entries) == 0 {
+		return nil
+	}
+	mounts := make([]runtimespec.Mount, 0, len(entries))
+	for _, e := range entries {
+		path := strings.TrimSpace(e.Path)
+		if path == "" {
+			continue
+		}
+		options := []string{"nosuid", "nodev"}
+		if e.SizeBytes > 0 {
+			options = append(options, "size="+strconv.FormatInt(e.SizeBytes, 10))
+		}
+		options = append(options, e.Options...)
+		mounts = append(mounts, runtimespec.Mount{
+			Destination: path,
+			Source:      "tmpfs",
+			Type:        "tmpfs",
+			Options:     options,
+		})
+	}
+	return mounts
+}
+
+// securityOptSpecOpt parses a single docker-style security option
+// ("no-new-privileges", "seccomp=unconfined", "seccomp=/path/to/profile.json")
+// and returns a SpecOpts that applies it. Unknown keys return an error at
+// spec-apply time so callers see a clear failure rather than a silent pass.
+func securityOptSpecOpt(raw string) oci.SpecOpts {
+	entry := strings.TrimSpace(raw)
+	key, value, hasValue := splitSecurityOpt(entry)
+
+	switch strings.ToLower(key) {
+	case "no-new-privileges":
+		enabled := true
+		if hasValue {
+			parsed, err := strconv.ParseBool(value)
+			if err != nil {
+				return errorSpecOpt(fmt.Errorf("securityOpt %q: invalid bool: %w", raw, err))
+			}
+			enabled = parsed
+		}
+		return func(_ context.Context, _ oci.Client, _ *containers.Container, s *runtimespec.Spec) error {
+			if s.Process == nil {
+				s.Process = &runtimespec.Process{}
+			}
+			s.Process.NoNewPrivileges = enabled
+			return nil
+		}
+	case "seccomp":
+		return seccompSpecOpt(raw, value, hasValue)
+	default:
+		return errorSpecOpt(fmt.Errorf("unsupported securityOpt %q", raw))
+	}
+}
+
+// splitSecurityOpt parses "key=value" and "key:value" forms. A bare "key"
+// returns (key, "", false).
+func splitSecurityOpt(entry string) (key, value string, ok bool) {
+	if idx := strings.IndexAny(entry, "=:"); idx >= 0 {
+		return strings.TrimSpace(entry[:idx]), strings.TrimSpace(entry[idx+1:]), true
+	}
+	return entry, "", false
+}
+
+// seccompSpecOpt handles seccomp=unconfined (strip profile) and
+// seccomp=/path/to/profile.json (load + apply) forms.
+func seccompSpecOpt(raw, value string, hasValue bool) oci.SpecOpts {
+	if !hasValue || value == "" {
+		return errorSpecOpt(fmt.Errorf("securityOpt %q: seccomp requires a value (unconfined or profile path)", raw))
+	}
+	if strings.EqualFold(value, "unconfined") {
+		return func(_ context.Context, _ oci.Client, _ *containers.Container, s *runtimespec.Spec) error {
+			if s.Linux != nil {
+				s.Linux.Seccomp = nil
+			}
+			return nil
+		}
+	}
+	return func(_ context.Context, _ oci.Client, _ *containers.Container, s *runtimespec.Spec) error {
+		data, err := os.ReadFile(value)
+		if err != nil {
+			return fmt.Errorf("securityOpt %q: read seccomp profile: %w", raw, err)
+		}
+		profile := &runtimespec.LinuxSeccomp{}
+		if err = json.Unmarshal(data, profile); err != nil {
+			return fmt.Errorf("securityOpt %q: parse seccomp profile: %w", raw, err)
+		}
+		if s.Linux == nil {
+			s.Linux = &runtimespec.Linux{}
+		}
+		s.Linux.Seccomp = profile
+		return nil
+	}
+}
+
+// errorSpecOpt returns a SpecOpts that always fails with the given error. Used
+// to defer reporting of invalid user input until spec application so the call
+// site still composes cleanly.
+func errorSpecOpt(err error) oci.SpecOpts {
+	return func(_ context.Context, _ oci.Client, _ *containers.Container, _ *runtimespec.Spec) error {
+		return err
+	}
 }

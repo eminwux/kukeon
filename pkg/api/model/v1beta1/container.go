@@ -32,24 +32,52 @@ type ContainerMetadata struct {
 }
 
 type ContainerSpec struct {
-	ID              string   `json:"id"                      yaml:"id"`
-	ContainerdID    string   `json:"containerdId,omitempty"  yaml:"containerdId,omitempty"`
-	RealmID         string   `json:"realmId"                 yaml:"realmId"`
-	SpaceID         string   `json:"spaceId"                 yaml:"spaceId"`
-	StackID         string   `json:"stackId"                 yaml:"stackId"`
-	CellID          string   `json:"cellId"                  yaml:"cellId"`
-	Root            bool     `json:"root,omitempty"          yaml:"root,omitempty"`
-	Image           string   `json:"image"                   yaml:"image"`
-	Command         string   `json:"command"                 yaml:"command"`
-	Args            []string `json:"args"                    yaml:"args"`
-	Env             []string `json:"env"                     yaml:"env"`
-	Ports           []string `json:"ports"                   yaml:"ports"`
-	Volumes         []string `json:"volumes"                 yaml:"volumes"`
-	Networks        []string `json:"networks"                yaml:"networks"`
-	NetworksAliases []string `json:"networksAliases"         yaml:"networksAliases"`
-	Privileged      bool     `json:"privileged"              yaml:"privileged"`
-	CNIConfigPath   string   `json:"cniConfigPath,omitempty" yaml:"cniConfigPath,omitempty"`
-	RestartPolicy   string   `json:"restartPolicy"           yaml:"restartPolicy"`
+	ID                     string                 `json:"id"                               yaml:"id"`
+	ContainerdID           string                 `json:"containerdId,omitempty"           yaml:"containerdId,omitempty"`
+	RealmID                string                 `json:"realmId"                          yaml:"realmId"`
+	SpaceID                string                 `json:"spaceId"                          yaml:"spaceId"`
+	StackID                string                 `json:"stackId"                          yaml:"stackId"`
+	CellID                 string                 `json:"cellId"                           yaml:"cellId"`
+	Root                   bool                   `json:"root,omitempty"                   yaml:"root,omitempty"`
+	Image                  string                 `json:"image"                            yaml:"image"`
+	Command                string                 `json:"command"                          yaml:"command"`
+	Args                   []string               `json:"args"                             yaml:"args"`
+	Env                    []string               `json:"env"                              yaml:"env"`
+	Ports                  []string               `json:"ports"                            yaml:"ports"`
+	Volumes                []string               `json:"volumes"                          yaml:"volumes"`
+	Networks               []string               `json:"networks"                         yaml:"networks"`
+	NetworksAliases        []string               `json:"networksAliases"                  yaml:"networksAliases"`
+	Privileged             bool                   `json:"privileged"                       yaml:"privileged"`
+	User                   string                 `json:"user,omitempty"                   yaml:"user,omitempty"`
+	ReadOnlyRootFilesystem bool                   `json:"readOnlyRootFilesystem,omitempty" yaml:"readOnlyRootFilesystem,omitempty"`
+	Capabilities           *ContainerCapabilities `json:"capabilities,omitempty"           yaml:"capabilities,omitempty"`
+	SecurityOpts           []string               `json:"securityOpts,omitempty"           yaml:"securityOpts,omitempty"`
+	Tmpfs                  []ContainerTmpfsMount  `json:"tmpfs,omitempty"                  yaml:"tmpfs,omitempty"`
+	Resources              *ContainerResources    `json:"resources,omitempty"              yaml:"resources,omitempty"`
+	CNIConfigPath          string                 `json:"cniConfigPath,omitempty"          yaml:"cniConfigPath,omitempty"`
+	RestartPolicy          string                 `json:"restartPolicy"                    yaml:"restartPolicy"`
+}
+
+// ContainerCapabilities groups Linux capability deltas applied to the
+// container process relative to the image default set.
+type ContainerCapabilities struct {
+	Drop []string `json:"drop,omitempty" yaml:"drop,omitempty"`
+	Add  []string `json:"add,omitempty"  yaml:"add,omitempty"`
+}
+
+// ContainerTmpfsMount declares a tmpfs mount inside the container.
+type ContainerTmpfsMount struct {
+	Path      string   `json:"path"                yaml:"path"`
+	SizeBytes int64    `json:"sizeBytes,omitempty" yaml:"sizeBytes,omitempty"`
+	Options   []string `json:"options,omitempty"   yaml:"options,omitempty"`
+}
+
+// ContainerResources exposes the cgroup v2 knobs the orchestrator supports for
+// per-container resource limits.
+type ContainerResources struct {
+	MemoryLimitBytes *int64 `json:"memoryLimitBytes,omitempty" yaml:"memoryLimitBytes,omitempty"`
+	CPUShares        *int64 `json:"cpuShares,omitempty"        yaml:"cpuShares,omitempty"`
+	PidsLimit        *int64 `json:"pidsLimit,omitempty"        yaml:"pidsLimit,omitempty"`
 }
 
 type ContainerStatus struct {
@@ -158,6 +186,28 @@ func NewContainerDoc(from *ContainerDoc) *ContainerDoc {
 	out.Spec.Volumes = cloneSlice(out.Spec.Volumes)
 	out.Spec.Networks = cloneSlice(out.Spec.Networks)
 	out.Spec.NetworksAliases = cloneSlice(out.Spec.NetworksAliases)
+	out.Spec.SecurityOpts = cloneSlice(out.Spec.SecurityOpts)
+
+	if out.Spec.Capabilities != nil {
+		caps := *out.Spec.Capabilities
+		caps.Drop = cloneSlice(caps.Drop)
+		caps.Add = cloneSlice(caps.Add)
+		out.Spec.Capabilities = &caps
+	}
+
+	if len(out.Spec.Tmpfs) > 0 {
+		mounts := make([]ContainerTmpfsMount, len(out.Spec.Tmpfs))
+		for i, m := range out.Spec.Tmpfs {
+			m.Options = cloneSlice(m.Options)
+			mounts[i] = m
+		}
+		out.Spec.Tmpfs = mounts
+	}
+
+	if out.Spec.Resources != nil {
+		res := *out.Spec.Resources
+		out.Spec.Resources = &res
+	}
 
 	return &out
 }

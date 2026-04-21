@@ -30,24 +30,51 @@ type ContainerMetadata struct {
 }
 
 type ContainerSpec struct {
-	ID              string
-	ContainerdID    string
-	RealmName       string
-	SpaceName       string
-	StackName       string
-	CellName        string
-	Root            bool
-	Image           string
-	Command         string
-	Args            []string
-	Env             []string
-	Ports           []string
-	Volumes         []string
-	Networks        []string
-	NetworksAliases []string
-	Privileged      bool
-	CNIConfigPath   string
-	RestartPolicy   string
+	ID                     string
+	ContainerdID           string
+	RealmName              string
+	SpaceName              string
+	StackName              string
+	CellName               string
+	Root                   bool
+	Image                  string
+	Command                string
+	Args                   []string
+	Env                    []string
+	Ports                  []string
+	Volumes                []string
+	Networks               []string
+	NetworksAliases        []string
+	Privileged             bool
+	User                   string
+	ReadOnlyRootFilesystem bool
+	Capabilities           *ContainerCapabilities
+	SecurityOpts           []string
+	Tmpfs                  []ContainerTmpfsMount
+	Resources              *ContainerResources
+	CNIConfigPath          string
+	RestartPolicy          string
+}
+
+// ContainerCapabilities groups Linux capability deltas applied relative to the
+// image default set.
+type ContainerCapabilities struct {
+	Drop []string
+	Add  []string
+}
+
+// ContainerTmpfsMount declares a tmpfs mount inside the container.
+type ContainerTmpfsMount struct {
+	Path      string
+	SizeBytes int64
+	Options   []string
+}
+
+// ContainerResources exposes the cgroup v2 knobs supported per container.
+type ContainerResources struct {
+	MemoryLimitBytes *int64
+	CPUShares        *int64
+	PidsLimit        *int64
 }
 
 type ContainerStatus struct {
