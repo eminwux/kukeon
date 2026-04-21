@@ -1,4 +1,4 @@
-# 🌪️ kukeon: A Lightweight Container Orchestrator
+# 🌪️ kukeon: A Lightweight Container Orchestrator for structured, isolated, local-first container environments
 
 ![status: active](https://img.shields.io/badge/status-active-blue)
 ![state: alpha](https://img.shields.io/badge/state-alpha-orange)
@@ -6,13 +6,9 @@
 
 _Structured container environments on a single machine._
 
-Kukeon is a local-first, containerd-native orchestrator that sits between Docker and Kubernetes.
-It provides structure, networking, isolation, and lifecycle management for containers without the complexity of running a full cluster.
+Kukeon is a local-first, containerd-native orchestrator that sits between Docker and Kubernetes. It provides structure, networking, isolation, and lifecycle management for containers without the complexity of running a full cluster. At its core is `kukeond`, a small daemon that manages containerd, CNI networks, namespaces, and cgroups, and exposes a simple API. The `kuke` CLI and the future Web UI act as thin clients.
 
 **Note:** This project is under active development and not production ready.
-
-At its core is `kukeond`, a small daemon that manages containerd, CNI networks, namespaces, and cgroups, and exposes a simple API.
-The `kuke` CLI and the future Web UI act as thin clients.
 
 ## Quick Start
 
@@ -40,48 +36,58 @@ sudo ln -f /usr/local/bin/kuke /usr/local/bin/kukeond
 
 ### Initialize the runtime
 
-`kuke init` provisions the default hierarchy (realm `main`, space `default`, stack `default`), sets up CNI dirs, pulls the `kukeond` image, and starts the daemon. It touches `/opt/kukeon`, cgroups, and containerd, so it needs root:
+`kuke init` provisions the default hierarchy (realm `default`, space `default`, stack `default`), sets up CNI dirs, pulls the `kukeond` image, and starts the daemon. It touches `/opt/kukeon`, cgroups, and containerd, so it needs root:
 
 ```bash
 $ sudo kuke init
 Initialized Kukeon runtime
-Realm: main (namespace: kukeon-main)
+Realm: default (namespace: kukeon-default)
 System realm: kukeon-system (namespace: kukeon-system)
 Run path: /opt/kukeon
 Kukeond image: ghcr.io/eminwux/kukeon:v0.1.0
-Actions:
-    - kukeon root cgroup: created
-  - CNI config dir "/etc/cni/net.d": created
-  - CNI bin dir "/opt/cni/bin": already existed
-  Default hierarchy:
-    - realm "main": created
-    - containerd namespace "kukeon-main": created
-    - space "default": created
-    - network "default": created
-    - stack "default": created
-  System hierarchy:
-    - realm "kukeon-system": created
-    - cell "kukeond": created (image ghcr.io/eminwux/kukeon:v0.1.0)
+...
 kukeond is ready (unix:///opt/kukeon/run/kukeond.sock)
 ```
 
-### Verify with `kuke get`
+### Autocomplete
 
-List the realms, spaces, and stacks that `kuke init` just created:
+```bash
+cat >> ~/.bashrc <<EOF
+source <(kuke autocomplete bash)
+EOF
+```
+
+`kuke autocomplete zsh` and `kuke autocomplete fish` are also supported.
+
+## Documentation
+
+Complete documentation is available at [https://kukeon.io](https://kukeon.io), including concepts, architecture, CLI reference, manifest reference, guides, and tutorials.
+
+## Why kukeon
+
+Docker is simple but unstructured — everything lives in a flat list. Kubernetes is structured but heavy — you pay for a control plane whether you need one or not. Kukeon aims for the middle:
+
+- Reproducible: declarative YAML manifests describe every resource
+- Structured: Realm → Space → Stack → Cell → Container makes intent explicit
+- Isolated: each layer is a real Linux primitive (containerd namespace, CNI network, cgroup subtree)
+- Local-first: no cluster, no etcd, no scheduler
+- Transparent: inspect what the daemon did with `ctr`, `ip link`, `ls /sys/fs/cgroup`
+
+## Usage Examples
+
+Common workflows for working with realms, spaces, stacks, and cells.
+
+### List the default hierarchy
 
 ```bash
 $ sudo kuke get realms
-NAME           NAMESPACE       STATE    CGROUP
-main           kukeon-main     Running  /kukeon/main
-kukeon-system  kukeon-system   Running  /kukeon/kukeon-system
+NAME           NAMESPACE         STATE    CGROUP
+default        kukeon-default    Running  /kukeon/default
+kukeon-system  kukeon-system     Running  /kukeon/kukeon-system
 
-$ sudo kuke get spaces --realm main
-NAME     REALM  STATE    CGROUP
-default  main   Running  /kukeon/main/default
-
-$ sudo kuke get stacks --realm main --space default
-NAME     REALM  SPACE    STATE    CGROUP
-default  main   default  Running  /kukeon/main/default/default
+$ sudo kuke get spaces
+NAME     REALM    STATE    CGROUP
+default  default  Running  /kukeon/default/default
 ```
 
 Add `-o yaml` or `-o json` for full resource details.
@@ -114,7 +120,6 @@ spec:
             <head><meta charset="utf-8"><title>kukeon hello-world</title></head>
             <body style="font-family: sans-serif">
               <h1>Hello, world from kukeon!</h1>
-              <p>Served by busybox httpd inside a cell in the <code>default</code> realm.</p>
             </body>
           </html>
           HTML
@@ -184,20 +189,127 @@ sudo kuke delete cell kukeond \
 sudo rm -f /run/kukeon/kukeond.sock /run/kukeon/kukeond.pid
 ```
 
-### Autocomplete
+→ See [docs/site/guides/local-dev.md](docs/site/guides/local-dev.md) for the full dev loop.
 
-```bash
-cat >> ~/.bashrc <<EOF
-source <(kuke autocomplete bash)
-EOF
+## Core Concepts
+
+Kukeon defines a clear hierarchical model:
+
+```mermaid
+flowchart LR
+    Realm --> Space --> Stack --> Cell --> Container
 ```
 
-`kuke autocomplete zsh` and `kuke autocomplete fish` are also supported.
+- **Realm**: High-level environment mapped to a containerd namespace
+- **Space**: CNI network and cgroup subtree that define isolation
+- **Stack**: Logical grouping of related cells
+- **Cell**: A pod-like group. One root container owns the network namespace
+- **Container**: An OCI container running inside the cell
+
+Each layer is a real Linux primitive, not an invented abstraction. This structure avoids Docker's ambiguity and Kubernetes-level complexity.
+
+→ See [docs/site/concepts/overview.md](docs/site/concepts/overview.md) for the full concept guide.
+
+## Understanding kukeon Commands
+
+Two commands, one binary: kukeon uses hard links to provide different behaviors.
+
+| Command     | Purpose                                          | Run by                |
+| ----------- | ------------------------------------------------ | --------------------- |
+| `kuke`      | Client CLI — talks to the daemon                 | Users                 |
+| `kukeond`   | The daemon process itself                        | Process supervisor    |
+
+Both are the same binary; behavior is determined by the executable name at runtime.
+
+### `kuke` — the client
+
+Manages realms, spaces, stacks, cells, and containers through the daemon:
+
+```bash
+$ sudo kuke get realms          # List realms
+$ sudo kuke get cells --realm main --space default --stack default
+$ sudo kuke apply -f cell.yaml  # Apply a manifest
+$ sudo kuke delete cell mycell --realm ... --cascade
+```
+
+Everything `kuke` does goes through the daemon by default. Pass `--no-daemon` to run the operation in-process (requires root).
+
+### `kukeond` — the daemon
+
+Runs as the root container of the `kukeond` cell inside the dedicated `kukeon-system` realm. You don't normally run `kukeond` by hand; `kuke init` sets it up as a managed cell.
+
+→ See [docs/site/cli/commands.md](docs/site/cli/commands.md) for the complete CLI reference.
+
+## Components
+
+### kukeond
+
+A lightweight daemon responsible for:
+
+- containerd operations
+- creating network namespaces
+- running CNI plugins
+- managing cgroups
+- handling metadata and state
+- serving the API used by clients
+
+### kuke (CLI)
+
+A thin remote client that interacts with `kukeond`.
+
+### Web UI (future)
+
+A browser interface backed by the same API.
+
+## Dependencies
+
+- containerd
+- CNI plugins
+- Linux with cgroups v2
+
+## How It Works
+
+Kukeon sits between containerd and the user, translating declarative YAML into the right Linux primitives.
+
+1. A manifest defines a resource: YAML specifies realm, space, stack, cell, or container
+2. `kuke apply` sends the manifest to `kukeond` over a unix socket
+3. `kukeond` reconciles: creates containerd namespace, cgroup subtree, CNI network, containers
+4. State is persisted to `/opt/kukeon` for durability across daemon restarts
+5. `kuke get` and `kuke refresh` read live state back from containerd/CNI/cgroups
+
+## A Tool for Operators, Homelabbers, and Systems Engineers
+
+For people who want structured container environments on one machine.
+
+- Homelab and VPS users who want structured container environments
+- Systems engineers who prefer containerd over Docker
+- Developers who find Docker too simple and Kubernetes too complex
+- Operators who want clear isolation using namespaces, CNI, and cgroups
+
+## How kukeon Differs from Docker and Kubernetes
+
+Kukeon is designed for single-machine orchestration with real Linux isolation primitives. Key differences: an explicit Realm → Space → Stack → Cell → Container hierarchy (not a flat list), one CNI network per space (not one big network or ad-hoc bridges), one cgroup subtree per layer (not scattered), and no control plane (containerd, CNI, and cgroups are the only moving parts).
+
+Unlike Kubernetes, kukeon is not distributed. There is no scheduler, no etcd, no API server on port 6443 — just one daemon per host.
+
+Unlike Docker, kukeon does not treat containers as a flat set. Every container belongs to exactly one cell → stack → space → realm path.
+
+You can think of it as:
+
+> Proxmox for containers
+>
+> or
+>
+> A small Heroku that runs locally
+
+## Why kukeon Exists
+
+Running non-trivial container workloads on a single machine is awkward today. Docker is simple but leaves you to invent your own tenancy and network structure. Kubernetes has the structure but demands a cluster. Kukeon takes the structure — namespaces, networks, cgroups, a hierarchy of cells — and drops the cluster. The result is a single daemon that makes one machine feel organized without making it feel distributed.
 
 ## Philosophy
 
 «καὶ ὁ κυκεὼν διίσταται μὴ κινούμενος»
-“The barley-drink separates if it isn't stirred”
+"The barley-drink separates if it isn't stirred"
 
 Fragment DK 22B125
 Heraclitus, circa 500 BC
@@ -225,19 +337,6 @@ Kukeon aims to be:
 - safe and isolated using namespaces, CNI, and cgroups
 - easy to understand and reason about
 
-You can think of it as:
-
-Proxmox for containers
-or
-A small Heroku that runs locally
-
-### Target Users
-
-- Homelab and VPS users who want structured container environments
-- Systems engineers who prefer containerd over Docker
-- Developers who find Docker too simple and Kubernetes too complex
-- Operators who want clear isolation using namespaces, CNI, and cgroups
-
 ### Non-Goals
 
 - Being a full replacement for Kubernetes in large multi-node clusters
@@ -245,65 +344,11 @@ A small Heroku that runs locally
 - Reimplementing every Kubernetes feature or API
 - Hiding low-level primitives behind opaque abstractions
 
-## Core Concepts
+## Status and Roadmap
 
-Kukeon defines a clear hierarchical model:
+Kukeon is under active development, with a focus on correctness, clear abstractions, and stable primitives before adding integrations.
 
-```mermaid
-flowchart LR
-    Realm --> Space --> Stack --> Cell --> Container
-```
-
-- **Realm**: High-level environment mapped to a containerd namespace.
-- **Space**: CNI network and cgroup subtree that define isolation.
-- **Stack**: Logical grouping of related cells.
-- **Cell**: A pod-like group. One root container owns the network namespace.
-- **Container**: An OCI container running inside the cell.
-
-This structure avoids Docker’s ambiguity and Kubernetes-level complexity.
-
-## 🛠️ Components
-
-### kukeond
-
-A lightweight daemon responsible for:
-
-- containerd operations
-- creating network namespaces
-- running CNI plugins
-- managing cgroups
-- handling metadata and state
-- serving the API used by clients
-
-### kuke (CLI)
-
-A thin remote client that interacts with `kukeond`.
-
-### Web UI (future)
-
-A browser interface backed by the same API.
-
-## 🔌 Dependencies
-
-- containerd
-- CNI plugins
-- Linux with cgroups v2
-
-## Project Status
-
-- Active development
-- Interfaces and APIs may change
-- Not production ready
-
-Contributions, issues, and feedback are welcome.
-
-## Roadmap
-
-- Stabilize core model and API
-- Improve CLI ergonomics and UX
-- Solidify CNI integration and defaults
-- Add a minimal Web UI (read-only at first)
-- Expand documentation and examples
+→ See [ROADMAP.md](./ROADMAP.md) for work in progress and planned features.
 
 ## Contribute
 

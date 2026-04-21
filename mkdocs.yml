@@ -1,0 +1,127 @@
+site_name: kukeon
+site_description: A lightweight, containerd-native orchestrator for structured container environments on a single machine
+site_author: Emiliano Spinella (eminwux)
+site_url: https://kukeon.io
+
+repo_name: eminwux/kukeon
+repo_url: https://github.com/eminwux/kukeon
+edit_uri: edit/main/docs/site/
+
+docs_dir: docs/site
+site_dir: build
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.annotate
+    - content.code.copy
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Installation:
+      - install/prerequisites.md
+      - install/install-linux.md
+      - install/build-from-source.md
+  - Concepts:
+      - concepts/overview.md
+      - concepts/realm.md
+      - concepts/space.md
+      - concepts/stack.md
+      - concepts/cell.md
+      - concepts/container.md
+      - concepts/containerd-namespaces.md
+      - concepts/networking.md
+      - concepts/cgroups.md
+      - concepts/system-realm.md
+      - concepts/client-and-daemon.md
+  - Architecture:
+      - architecture/overview.md
+      - architecture/process-model.md
+      - architecture/api-versioning.md
+      - architecture/storage-layout.md
+  - Guides:
+      - guides/init-and-reset.md
+      - guides/apply-manifests.md
+      - guides/local-dev.md
+      - guides/autocomplete.md
+      - guides/troubleshooting.md
+  - CLI Reference:
+      - cli/commands.md
+      - cli/kuke.md
+      - cli/kuke-init.md
+      - cli/kuke-get.md
+      - cli/kuke-create.md
+      - cli/kuke-apply.md
+      - cli/kuke-delete.md
+      - cli/kuke-lifecycle.md
+      - cli/kuke-purge.md
+      - cli/kuke-refresh.md
+      - cli/kuke-autocomplete.md
+      - cli/kuke-version.md
+      - cli/kukeond.md
+  - Manifest Reference:
+      - manifests/overview.md
+      - manifests/realm.md
+      - manifests/space.md
+      - manifests/stack.md
+      - manifests/cell.md
+      - manifests/container.md
+  - Tutorials:
+      - tutorials/hello-world.md
+      - tutorials/first-stack.md
+  - FAQ: faq.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/eminwux/kukeon
+  version:
+    provider: mike
+
+plugins:
+  - search
+  - git-revision-date-localized:
+      enable_creation_date: true
