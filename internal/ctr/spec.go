@@ -201,7 +201,7 @@ func BuildContainerSpec(
 		specOpts = append(specOpts, oci.WithPrivileged)
 	}
 
-	if mounts := parseVolumeMounts(containerSpec.Volumes); len(mounts) > 0 {
+	if mounts := buildBindMounts(containerSpec.Volumes); len(mounts) > 0 {
 		specOpts = append(specOpts, oci.WithMounts(mounts))
 	}
 
@@ -216,44 +216,26 @@ func BuildContainerSpec(
 	}
 }
 
-// parseVolumeMounts translates the docker-style volume strings in
-// ContainerSpec.Volumes ("src:dst[:ro]") into OCI bind mounts. Entries that
-// do not contain a ":" are skipped (anonymous / named volumes are not yet
-// supported).
-func parseVolumeMounts(volumes []string) []runtimespec.Mount {
+// buildBindMounts translates ContainerSpec.Volumes into OCI bind mounts.
+// Entries are expected to be already validated (absolute source/target).
+func buildBindMounts(volumes []intmodel.VolumeMount) []runtimespec.Mount {
 	if len(volumes) == 0 {
 		return nil
 	}
 	mounts := make([]runtimespec.Mount, 0, len(volumes))
-	for _, raw := range volumes {
-		v := strings.TrimSpace(raw)
-		if v == "" {
-			continue
-		}
-		parts := strings.Split(v, ":")
-		if len(parts) < 2 {
-			continue
-		}
-		src, dst := parts[0], parts[1]
-		if src == "" || dst == "" {
+	for _, v := range volumes {
+		if v.Source == "" || v.Target == "" {
 			continue
 		}
 		options := []string{"rbind"}
-		if len(parts) >= 3 {
-			switch parts[2] {
-			case "ro":
-				options = append(options, "ro")
-			case "rw":
-				options = append(options, "rw")
-			default:
-				options = append(options, "rw")
-			}
+		if v.ReadOnly {
+			options = append(options, "ro")
 		} else {
 			options = append(options, "rw")
 		}
 		mounts = append(mounts, runtimespec.Mount{
-			Destination: dst,
-			Source:      src,
+			Destination: v.Target,
+			Source:      v.Source,
 			Type:        "bind",
 			Options:     options,
 		})

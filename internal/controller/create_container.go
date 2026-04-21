@@ -19,6 +19,8 @@ package controller
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -72,6 +74,11 @@ func (b *Exec) CreateContainer(container intmodel.Container) (CreateContainerRes
 		return res, errdefs.ErrInvalidImage
 	}
 
+	volumes, err := validateVolumes(container.Spec.Volumes)
+	if err != nil {
+		return res, err
+	}
+
 	// Build container spec to merge into cell
 	newContainerSpec := intmodel.ContainerSpec{
 		ID:                     container.Spec.ID,
@@ -82,6 +89,7 @@ func (b *Exec) CreateContainer(container intmodel.Container) (CreateContainerRes
 		Image:                  image,
 		Command:                container.Spec.Command,
 		Args:                   container.Spec.Args,
+		Volumes:                volumes,
 		User:                   container.Spec.User,
 		ReadOnlyRootFilesystem: container.Spec.ReadOnlyRootFilesystem,
 		Capabilities:           container.Spec.Capabilities,
@@ -256,4 +264,74 @@ func containerSpecExistsInternal(specs []intmodel.ContainerSpec, id string) bool
 		}
 	}
 	return false
+}
+
+// validateVolumes enforces the bind-mount contract: source and target are
+// required, both must be absolute paths, source must exist on the host, and
+// named / managed volumes (non-absolute source) are rejected.
+func validateVolumes(in []intmodel.VolumeMount) ([]intmodel.VolumeMount, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := make([]intmodel.VolumeMount, len(in))
+	for i, v := range in {
+		src := strings.TrimSpace(v.Source)
+		dst := strings.TrimSpace(v.Target)
+		if src == "" {
+			return nil, fmt.Errorf("%w (volume[%d])", errdefs.ErrVolumeSourceRequired, i)
+		}
+		if dst == "" {
+			return nil, fmt.Errorf("%w (volume[%d])", errdefs.ErrVolumeTargetRequired, i)
+		}
+		// Named / managed volumes have non-path sources (e.g. "my-vol"). Reject
+		// anything that is not an absolute host path so the user gets a clear
+		// error pointing at the deferred feature rather than a mount failure
+		// buried in containerd logs.
+		if !filepath.IsAbs(src) {
+			if !strings.ContainsRune(src, os.PathSeparator) {
+				return nil, fmt.Errorf(
+					"%w (volume[%d] source %q)",
+					errdefs.ErrVolumeNamedNotSupported,
+					i,
+					src,
+				)
+			}
+			return nil, fmt.Errorf(
+				"%w (volume[%d] source %q)",
+				errdefs.ErrVolumeSourceNotAbsolute,
+				i,
+				src,
+			)
+		}
+		if !filepath.IsAbs(dst) {
+			return nil, fmt.Errorf(
+				"%w (volume[%d] target %q)",
+				errdefs.ErrVolumeTargetNotAbsolute,
+				i,
+				dst,
+			)
+		}
+		if _, statErr := os.Stat(src); statErr != nil {
+			if os.IsNotExist(statErr) {
+				return nil, fmt.Errorf(
+					"%w (volume[%d] source %q)",
+					errdefs.ErrVolumeSourceNotFound,
+					i,
+					src,
+				)
+			}
+			return nil, fmt.Errorf(
+				"failed to stat volume[%d] source %q: %w",
+				i,
+				src,
+				statErr,
+			)
+		}
+		out[i] = intmodel.VolumeMount{
+			Source:   src,
+			Target:   dst,
+			ReadOnly: v.ReadOnly,
+		}
+	}
+	return out, nil
 }

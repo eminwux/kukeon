@@ -423,16 +423,17 @@ func kukeondCellDoc(image, socketPath, runPath, containerdSocket string) *v1beta
 		args = append(args, "--containerd-socket", containerdSocket)
 	}
 
-	volumes := []string{
-		fmt.Sprintf("%s:%s", socketDir(socketPath), socketDir(socketPath)),
+	sockDir := socketDir(socketPath)
+	volumes := []v1beta1.VolumeMount{
+		{Source: sockDir, Target: sockDir},
 	}
-	if runPath != "" && runPath != socketDir(socketPath) {
-		volumes = append(volumes, fmt.Sprintf("%s:%s", runPath, runPath))
+	if runPath != "" && runPath != sockDir {
+		volumes = append(volumes, v1beta1.VolumeMount{Source: runPath, Target: runPath})
 	}
 	if containerdSocket != "" {
 		ctrdDir := socketDir(containerdSocket)
-		if ctrdDir != socketDir(socketPath) && ctrdDir != runPath {
-			volumes = append(volumes, fmt.Sprintf("%s:%s", ctrdDir, ctrdDir))
+		if ctrdDir != sockDir && ctrdDir != runPath {
+			volumes = append(volumes, v1beta1.VolumeMount{Source: ctrdDir, Target: ctrdDir})
 		}
 	}
 

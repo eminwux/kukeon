@@ -23,7 +23,10 @@ spec:
   env:
     - "NGINX_HOST=example.com"
   ports: []
-  volumes: []
+  volumes:
+    - source: /srv/html
+      target: /usr/share/nginx/html
+      readOnly: true
   networks: []
   networksAliases: []
   privileged: false
@@ -56,7 +59,7 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 | `args`             | array of string  | no       | Arguments. Combined with `command`.                                                     |
 | `env`              | array of string  | no       | `KEY=VALUE` environment variables                                                       |
 | `ports`            | array of string  | no       | Reserved — port mapping semantics are not finalized                                     |
-| `volumes`          | array of string  | no       | Reserved — volume mount semantics are not finalized                                     |
+| `volumes`          | array of `VolumeMount` | no | Bind-mount host paths into the container (see [VolumeMount](#volumemount))            |
 | `networks`         | array of string  | no       | Additional CNI networks to join beyond the cell's default                               |
 | `networksAliases`  | array of string  | no       | DNS aliases for the container within its CNI networks                                   |
 | `privileged`       | bool             | no       | Run privileged (full capabilities, access to `/dev`, etc.)                              |
@@ -64,7 +67,17 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 | `restartPolicy`    | string           | no       | Restart policy. Reserved — restart semantics are not finalized.                         |
 
 !!! warning "Fields marked reserved"
-    `ports`, `volumes`, and `restartPolicy` are accepted by the schema today but their semantics are still being designed. Values round-trip (you can read back what you applied), but the controller does not act on them. See [ROADMAP.md](https://github.com/eminwux/kukeon/blob/main/ROADMAP.md) for the backlog.
+    `ports` and `restartPolicy` are accepted by the schema today but their semantics are still being designed. Values round-trip (you can read back what you applied), but the controller does not act on them. See [ROADMAP.md](https://github.com/eminwux/kukeon/blob/main/ROADMAP.md) for the backlog.
+
+### VolumeMount
+
+Each entry in `spec.volumes` is a bind mount of a host path into the container.
+
+| Field      | Type   | Required | Description                                                                 |
+|------------|--------|----------|-----------------------------------------------------------------------------|
+| `source`   | string | yes      | Absolute host path. Must exist at apply time. Named / managed volumes are not supported. |
+| `target`   | string | yes      | Absolute path inside the container                                          |
+| `readOnly` | bool   | no       | Mount read-only when `true` (writes fail with `EROFS`). Defaults to `false`. |
 
 ## status
 
