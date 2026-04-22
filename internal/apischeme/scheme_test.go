@@ -260,3 +260,88 @@ func TestContainerRoundTripV1Beta1(t *testing.T) {
 		t.Fatalf("unexpected output status: %+v", output.Status)
 	}
 }
+
+func TestContainerRoundTripSecurityFieldsV1Beta1(t *testing.T) {
+	mem := int64(4 * 1024 * 1024 * 1024)
+	shares := int64(512)
+	pids := int64(256)
+	input := ext.ContainerDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindContainer,
+		Metadata: ext.ContainerMetadata{
+			Name: "container-sec",
+		},
+		Spec: ext.ContainerSpec{
+			ID:                     "container-sec",
+			RealmID:                "realm0",
+			SpaceID:                "space0",
+			StackID:                "stack0",
+			CellID:                 "cell0",
+			Image:                  "alpine:latest",
+			User:                   "1000:1000",
+			ReadOnlyRootFilesystem: true,
+			Capabilities: &ext.ContainerCapabilities{
+				Drop: []string{"ALL"},
+				Add:  []string{"NET_ADMIN"},
+			},
+			SecurityOpts: []string{"no-new-privileges", "seccomp=unconfined"},
+			Tmpfs: []ext.ContainerTmpfsMount{
+				{Path: "/tmp", SizeBytes: 64 * 1024 * 1024, Options: []string{"mode=1777"}},
+			},
+			Resources: &ext.ContainerResources{
+				MemoryLimitBytes: &mem,
+				CPUShares:        &shares,
+				PidsLimit:        &pids,
+			},
+		},
+	}
+
+	internal, version, err := apischeme.NormalizeContainer(input)
+	if err != nil {
+		t.Fatalf("NormalizeContainer: %v", err)
+	}
+	if internal.Spec.User != "1000:1000" || !internal.Spec.ReadOnlyRootFilesystem {
+		t.Fatalf("user/readOnly not carried: %+v", internal.Spec)
+	}
+	if internal.Spec.Capabilities == nil ||
+		len(internal.Spec.Capabilities.Drop) != 1 ||
+		internal.Spec.Capabilities.Drop[0] != "ALL" ||
+		internal.Spec.Capabilities.Add[0] != "NET_ADMIN" {
+		t.Fatalf("capabilities not carried: %+v", internal.Spec.Capabilities)
+	}
+	if len(internal.Spec.SecurityOpts) != 2 || internal.Spec.SecurityOpts[0] != "no-new-privileges" {
+		t.Fatalf("securityOpts not carried: %+v", internal.Spec.SecurityOpts)
+	}
+	if len(internal.Spec.Tmpfs) != 1 || internal.Spec.Tmpfs[0].Path != "/tmp" ||
+		internal.Spec.Tmpfs[0].SizeBytes != 64*1024*1024 {
+		t.Fatalf("tmpfs not carried: %+v", internal.Spec.Tmpfs)
+	}
+	if internal.Spec.Resources == nil || internal.Spec.Resources.MemoryLimitBytes == nil ||
+		*internal.Spec.Resources.MemoryLimitBytes != mem {
+		t.Fatalf("resources not carried: %+v", internal.Spec.Resources)
+	}
+
+	output, err := apischeme.BuildContainerExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildContainerExternalFromInternal: %v", err)
+	}
+	if output.Spec.User != input.Spec.User ||
+		output.Spec.ReadOnlyRootFilesystem != input.Spec.ReadOnlyRootFilesystem {
+		t.Fatalf("user/readOnly did not round-trip: %+v", output.Spec)
+	}
+	if output.Spec.Capabilities == nil || output.Spec.Capabilities.Drop[0] != "ALL" ||
+		output.Spec.Capabilities.Add[0] != "NET_ADMIN" {
+		t.Fatalf("capabilities did not round-trip: %+v", output.Spec.Capabilities)
+	}
+	if len(output.Spec.SecurityOpts) != 2 {
+		t.Fatalf("securityOpts did not round-trip: %+v", output.Spec.SecurityOpts)
+	}
+	if len(output.Spec.Tmpfs) != 1 || output.Spec.Tmpfs[0].Path != "/tmp" ||
+		output.Spec.Tmpfs[0].SizeBytes != 64*1024*1024 {
+		t.Fatalf("tmpfs did not round-trip: %+v", output.Spec.Tmpfs)
+	}
+	if output.Spec.Resources == nil || output.Spec.Resources.MemoryLimitBytes == nil ||
+		*output.Spec.Resources.MemoryLimitBytes != mem {
+		t.Fatalf("resources did not round-trip: %+v", output.Spec.Resources)
+	}
+}

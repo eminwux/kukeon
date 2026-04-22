@@ -539,7 +539,136 @@ func diffContainerSpec(desired, actual *intmodel.ContainerSpec) DiffResult {
 		)
 	}
 
+	if desired.User != actual.User {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "user")
+		result.Details["user"] = fmt.Sprintf("user changed from %q to %q", actual.User, desired.User)
+	}
+
+	if desired.ReadOnlyRootFilesystem != actual.ReadOnlyRootFilesystem {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "readOnlyRootFilesystem")
+		result.Details["readOnlyRootFilesystem"] = fmt.Sprintf(
+			"readOnlyRootFilesystem changed from %v to %v",
+			actual.ReadOnlyRootFilesystem,
+			desired.ReadOnlyRootFilesystem,
+		)
+	}
+
+	if !capabilitiesEqual(desired.Capabilities, actual.Capabilities) {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "capabilities")
+		result.Details["capabilities"] = "capabilities changed"
+	}
+
+	if !slicesEqual(desired.SecurityOpts, actual.SecurityOpts) {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "securityOpts")
+		result.Details["securityOpts"] = "securityOpts changed"
+	}
+
+	if !tmpfsEqual(desired.Tmpfs, actual.Tmpfs) {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "tmpfs")
+		result.Details["tmpfs"] = "tmpfs mounts changed"
+	}
+
+	if !resourcesEqual(desired.Resources, actual.Resources) {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "resources")
+		result.Details["resources"] = "resource limits changed"
+	}
+
 	return result
+}
+
+func capabilitiesEqual(a, b *intmodel.ContainerCapabilities) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return len(capabilitiesDrop(a))+len(capabilitiesAdd(a)) == 0 &&
+			len(capabilitiesDrop(b))+len(capabilitiesAdd(b)) == 0
+	}
+	return slicesEqual(a.Drop, b.Drop) && slicesEqual(a.Add, b.Add)
+}
+
+func capabilitiesDrop(c *intmodel.ContainerCapabilities) []string {
+	if c == nil {
+		return nil
+	}
+	return c.Drop
+}
+
+func capabilitiesAdd(c *intmodel.ContainerCapabilities) []string {
+	if c == nil {
+		return nil
+	}
+	return c.Add
+}
+
+func tmpfsEqual(a, b []intmodel.ContainerTmpfsMount) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Path != b[i].Path || a[i].SizeBytes != b[i].SizeBytes {
+			return false
+		}
+		if !slicesEqual(a[i].Options, b[i].Options) {
+			return false
+		}
+	}
+	return true
+}
+
+func resourcesEqual(a, b *intmodel.ContainerResources) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		// Treat nil and zeroed-out as equal so setting to nil or clearing all
+		// pointers collapses to the same result.
+		return resourcesAreZero(a) && resourcesAreZero(b)
+	}
+	return int64PtrEqual(a.MemoryLimitBytes, b.MemoryLimitBytes) &&
+		int64PtrEqual(a.CPUShares, b.CPUShares) &&
+		int64PtrEqual(a.PidsLimit, b.PidsLimit)
+}
+
+func resourcesAreZero(r *intmodel.ContainerResources) bool {
+	if r == nil {
+		return true
+	}
+	return r.MemoryLimitBytes == nil && r.CPUShares == nil && r.PidsLimit == nil
+}
+
+func int64PtrEqual(a, b *int64) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
 }
 
 // Helper functions
