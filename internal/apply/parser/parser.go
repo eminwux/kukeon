@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -374,7 +375,45 @@ func ValidateDocument(doc *Document) *ValidationError {
 				Err:   errors.New("spec.image is required"),
 			}
 		}
+		if secretErr := validateSecrets(doc.ContainerDoc.Spec.Secrets); secretErr != nil {
+			return &ValidationError{
+				Index: doc.Index,
+				Kind:  doc.Kind,
+				Name:  doc.ContainerDoc.Metadata.Name,
+				Err:   secretErr,
+			}
+		}
 	}
 
+	return nil
+}
+
+// validateSecrets enforces the shape of secret references: name required,
+// exactly one of fromFile/fromEnv, and mountPath (if set) absolute.
+func validateSecrets(secrets []v1beta1.ContainerSecret) error {
+	for i, s := range secrets {
+		name := strings.TrimSpace(s.Name)
+		if name == "" {
+			return fmt.Errorf("%w (secrets[%d])", errdefs.ErrSecretNameRequired, i)
+		}
+		fromFile := strings.TrimSpace(s.FromFile)
+		fromEnv := strings.TrimSpace(s.FromEnv)
+		switch {
+		case fromFile == "" && fromEnv == "":
+			return fmt.Errorf("%w (secrets[%d] %q)", errdefs.ErrSecretSourceRequired, i, name)
+		case fromFile != "" && fromEnv != "":
+			return fmt.Errorf("%w (secrets[%d] %q)", errdefs.ErrSecretMultipleSources, i, name)
+		}
+		mountPath := strings.TrimSpace(s.MountPath)
+		if mountPath != "" && !filepath.IsAbs(mountPath) {
+			return fmt.Errorf(
+				"%w (secrets[%d] %q mountPath %q)",
+				errdefs.ErrSecretMountPathNotAbsolute,
+				i,
+				name,
+				mountPath,
+			)
+		}
+	}
 	return nil
 }

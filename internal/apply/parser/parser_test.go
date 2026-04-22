@@ -296,6 +296,157 @@ spec:
 	}
 }
 
+func TestValidateDocument_Container_SecretMissingSource(t *testing.T) {
+	yaml := `apiVersion: v1beta1
+kind: Container
+metadata:
+  name: test-container
+spec:
+  id: test-container
+  realmId: r
+  spaceId: s
+  stackId: k
+  cellId: c
+  image: alpine:latest
+  secrets:
+    - name: BROKEN
+`
+	doc, err := parser.ParseDocument(0, []byte(yaml))
+	if err != nil {
+		t.Fatalf("ParseDocument failed: %v", err)
+	}
+
+	validationErr := parser.ValidateDocument(doc)
+	if validationErr == nil {
+		t.Fatal("expected validation error for missing secret source, got nil")
+	}
+	if !strings.Contains(validationErr.Error(), errdefs.ErrSecretSourceRequired.Error()) {
+		t.Errorf("expected ErrSecretSourceRequired, got: %v", validationErr)
+	}
+}
+
+func TestValidateDocument_Container_SecretMultipleSources(t *testing.T) {
+	yaml := `apiVersion: v1beta1
+kind: Container
+metadata:
+  name: test-container
+spec:
+  id: test-container
+  realmId: r
+  spaceId: s
+  stackId: k
+  cellId: c
+  image: alpine:latest
+  secrets:
+    - name: BOTH
+      fromFile: /etc/foo
+      fromEnv: FOO
+`
+	doc, err := parser.ParseDocument(0, []byte(yaml))
+	if err != nil {
+		t.Fatalf("ParseDocument failed: %v", err)
+	}
+
+	validationErr := parser.ValidateDocument(doc)
+	if validationErr == nil {
+		t.Fatal("expected validation error for multiple secret sources, got nil")
+	}
+	if !strings.Contains(validationErr.Error(), errdefs.ErrSecretMultipleSources.Error()) {
+		t.Errorf("expected ErrSecretMultipleSources, got: %v", validationErr)
+	}
+}
+
+func TestValidateDocument_Container_SecretMissingName(t *testing.T) {
+	yaml := `apiVersion: v1beta1
+kind: Container
+metadata:
+  name: test-container
+spec:
+  id: test-container
+  realmId: r
+  spaceId: s
+  stackId: k
+  cellId: c
+  image: alpine:latest
+  secrets:
+    - fromEnv: FOO
+`
+	doc, err := parser.ParseDocument(0, []byte(yaml))
+	if err != nil {
+		t.Fatalf("ParseDocument failed: %v", err)
+	}
+
+	validationErr := parser.ValidateDocument(doc)
+	if validationErr == nil {
+		t.Fatal("expected validation error for missing secret name, got nil")
+	}
+	if !strings.Contains(validationErr.Error(), errdefs.ErrSecretNameRequired.Error()) {
+		t.Errorf("expected ErrSecretNameRequired, got: %v", validationErr)
+	}
+}
+
+func TestValidateDocument_Container_SecretMountPathNotAbsolute(t *testing.T) {
+	yaml := `apiVersion: v1beta1
+kind: Container
+metadata:
+  name: test-container
+spec:
+  id: test-container
+  realmId: r
+  spaceId: s
+  stackId: k
+  cellId: c
+  image: alpine:latest
+  secrets:
+    - name: TLS
+      fromFile: /etc/kukeon/secrets/tls.crt
+      mountPath: relative/tls.crt
+`
+	doc, err := parser.ParseDocument(0, []byte(yaml))
+	if err != nil {
+		t.Fatalf("ParseDocument failed: %v", err)
+	}
+
+	validationErr := parser.ValidateDocument(doc)
+	if validationErr == nil {
+		t.Fatal("expected validation error for relative mountPath, got nil")
+	}
+	if !strings.Contains(validationErr.Error(), errdefs.ErrSecretMountPathNotAbsolute.Error()) {
+		t.Errorf("expected ErrSecretMountPathNotAbsolute, got: %v", validationErr)
+	}
+}
+
+func TestValidateDocument_Container_SecretValidFormsAccepted(t *testing.T) {
+	yaml := `apiVersion: v1beta1
+kind: Container
+metadata:
+  name: test-container
+spec:
+  id: test-container
+  realmId: r
+  spaceId: s
+  stackId: k
+  cellId: c
+  image: alpine:latest
+  secrets:
+    - name: ANTHROPIC_API_KEY
+      fromFile: /etc/kukeon/secrets/anthropic.key
+    - name: GITHUB_TOKEN
+      fromEnv: GITHUB_TOKEN_SCOPED
+    - name: tls.crt
+      fromFile: /etc/kukeon/secrets/tls.crt
+      mountPath: /run/secrets/tls.crt
+`
+	doc, err := parser.ParseDocument(0, []byte(yaml))
+	if err != nil {
+		t.Fatalf("ParseDocument failed: %v", err)
+	}
+
+	if validationErr := parser.ValidateDocument(doc); validationErr != nil {
+		t.Fatalf("expected valid secrets to pass, got: %v", validationErr)
+	}
+}
+
 func TestValidateDocument_UnsupportedAPIVersion(t *testing.T) {
 	yaml := `apiVersion: v1alpha1
 kind: Realm

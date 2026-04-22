@@ -47,6 +47,7 @@ type client struct {
 	cgroupMountpointOnce  sync.Once
 	cgroupMountpoint      string
 	cgroupMountpointErr   error
+	secretsStagingDir     string
 }
 
 type Client interface {
@@ -71,6 +72,7 @@ type Client interface {
 	LoadCgroup(group string, mountpoint string) (*cgroup2.Manager, error)
 	DeleteCgroup(group, mountpoint string) error
 	CreateContainerFromSpec(intmodel.ContainerSpec) (containerd.Container, error)
+	SetSecretsStagingDir(dir string)
 
 	CreateContainer(spec ContainerSpec) (containerd.Container, error)
 	GetContainer(id string) (containerd.Container, error)
@@ -86,14 +88,26 @@ type Client interface {
 
 func NewClient(ctx context.Context, logger *slog.Logger, socket string) Client {
 	return &client{
-		ctx:        ctx,
-		logger:     logger,
-		socket:     socket,
-		namespace:  namespaces.Default,
-		cgroups:    make(map[string]*cgroup2.Manager),
-		containers: make(map[string]containerd.Container),
-		tasks:      make(map[string]containerd.Task),
+		ctx:               ctx,
+		logger:            logger,
+		socket:            socket,
+		namespace:         namespaces.Default,
+		cgroups:           make(map[string]*cgroup2.Manager),
+		containers:        make(map[string]containerd.Container),
+		tasks:             make(map[string]containerd.Task),
+		secretsStagingDir: DefaultSecretsStagingDir,
 	}
+}
+
+// SetSecretsStagingDir overrides the host directory under which per-container
+// secret files are staged before bind-mounting. Falls back to
+// DefaultSecretsStagingDir when dir is empty.
+func (c *client) SetSecretsStagingDir(dir string) {
+	if dir == "" {
+		c.secretsStagingDir = DefaultSecretsStagingDir
+		return
+	}
+	c.secretsStagingDir = dir
 }
 
 // verifyConnection checks if the containerd client connection is still valid

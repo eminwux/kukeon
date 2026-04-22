@@ -284,6 +284,7 @@ func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, err
 				SecurityOpts:           in.Spec.SecurityOpts,
 				Tmpfs:                  convertTmpfsMountsToInternal(in.Spec.Tmpfs),
 				Resources:              convertResourcesToInternal(in.Spec.Resources),
+				Secrets:                convertSecretsToInternal(in.Spec.Secrets),
 				CNIConfigPath:          in.Spec.CNIConfigPath,
 				RestartPolicy:          in.Spec.RestartPolicy,
 			},
@@ -337,6 +338,7 @@ func BuildContainerExternalFromInternal(in intmodel.Container, apiVersion ext.Ve
 				SecurityOpts:           in.Spec.SecurityOpts,
 				Tmpfs:                  buildTmpfsMountsExternalFromInternal(in.Spec.Tmpfs),
 				Resources:              buildResourcesExternalFromInternal(in.Spec.Resources),
+				Secrets:                buildSecretsExternalFromInternal(in.Spec.Secrets),
 				CNIConfigPath:          in.Spec.CNIConfigPath,
 				RestartPolicy:          in.Spec.RestartPolicy,
 			},
@@ -393,6 +395,7 @@ func convertContainerSpecToInternal(in ext.ContainerSpec) intmodel.ContainerSpec
 		SecurityOpts:           in.SecurityOpts,
 		Tmpfs:                  convertTmpfsMountsToInternal(in.Tmpfs),
 		Resources:              convertResourcesToInternal(in.Resources),
+		Secrets:                convertSecretsToInternal(in.Secrets),
 		CNIConfigPath:          in.CNIConfigPath,
 		RestartPolicy:          in.RestartPolicy,
 	}
@@ -424,6 +427,7 @@ func BuildContainerSpecExternalFromInternal(in intmodel.ContainerSpec) ext.Conta
 		SecurityOpts:           in.SecurityOpts,
 		Tmpfs:                  buildTmpfsMountsExternalFromInternal(in.Tmpfs),
 		Resources:              buildResourcesExternalFromInternal(in.Resources),
+		Secrets:                buildSecretsExternalFromInternal(in.Secrets),
 		CNIConfigPath:          in.CNIConfigPath,
 		RestartPolicy:          in.RestartPolicy,
 	}
@@ -499,6 +503,42 @@ func buildResourcesExternalFromInternal(in *intmodel.ContainerResources) *ext.Co
 		CPUShares:        in.CPUShares,
 		PidsLimit:        in.PidsLimit,
 	}
+}
+
+// convertSecretsToInternal copies external secret references into the internal
+// model. Only the reference metadata (name + source + optional mountPath) is
+// carried; there is no value field on either side.
+func convertSecretsToInternal(in []ext.ContainerSecret) []intmodel.ContainerSecret {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]intmodel.ContainerSecret, len(in))
+	for i, s := range in {
+		out[i] = intmodel.ContainerSecret{
+			Name:      s.Name,
+			FromFile:  s.FromFile,
+			FromEnv:   s.FromEnv,
+			MountPath: s.MountPath,
+		}
+	}
+	return out
+}
+
+// buildSecretsExternalFromInternal is the inverse of convertSecretsToInternal.
+func buildSecretsExternalFromInternal(in []intmodel.ContainerSecret) []ext.ContainerSecret {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ext.ContainerSecret, len(in))
+	for i, s := range in {
+		out[i] = ext.ContainerSecret{
+			Name:      s.Name,
+			FromFile:  s.FromFile,
+			FromEnv:   s.FromEnv,
+			MountPath: s.MountPath,
+		}
+	}
+	return out
 }
 
 func volumeMountsToInternal(in []ext.VolumeMount) []intmodel.VolumeMount {

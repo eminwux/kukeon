@@ -52,8 +52,20 @@ type ContainerSpec struct {
 	SecurityOpts           []string
 	Tmpfs                  []ContainerTmpfsMount
 	Resources              *ContainerResources
+	Secrets                []ContainerSecret
 	CNIConfigPath          string
 	RestartPolicy          string
+}
+
+// ContainerSecret references a credential resolved by the daemon at apply
+// time. Only the reference is persisted in the hub; the resolved value lives
+// only in the OCI runtime spec (for env injection) or in the staged secret
+// file (for mount mode).
+type ContainerSecret struct {
+	Name      string
+	FromFile  string
+	FromEnv   string
+	MountPath string
 }
 
 // VolumeMount is a bind mount of a host path into a container.
