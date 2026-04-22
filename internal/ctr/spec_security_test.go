@@ -70,7 +70,38 @@ func TestBuildContainerSpec_UserAndReadonlyRootfs(t *testing.T) {
 }
 
 func TestBuildContainerSpec_Capabilities(t *testing.T) {
-	spec := applyBuiltSpec(t, intmodel.ContainerSpec{
+	// Pre-populate a realistic default cap set so drop-ALL has something to
+	// clear. containerd's populateDefaultUnixSpec seeds this set at
+	// container-create time in production; applyBuiltSpec starts from an
+	// empty spec, so the test must seed it itself or drop-ALL passes
+	// vacuously.
+	defaults := []string{
+		"CAP_CHOWN",
+		"CAP_DAC_OVERRIDE",
+		"CAP_FSETID",
+		"CAP_FOWNER",
+		"CAP_MKNOD",
+		"CAP_NET_RAW",
+		"CAP_SETGID",
+		"CAP_SETUID",
+		"CAP_SETFCAP",
+		"CAP_SETPCAP",
+		"CAP_NET_BIND_SERVICE",
+		"CAP_SYS_CHROOT",
+		"CAP_KILL",
+		"CAP_AUDIT_WRITE",
+	}
+	spec := &runtimespec.Spec{
+		Process: &runtimespec.Process{
+			Capabilities: &runtimespec.LinuxCapabilities{
+				Bounding:  append([]string(nil), defaults...),
+				Permitted: append([]string(nil), defaults...),
+				Effective: append([]string(nil), defaults...),
+			},
+		},
+		Linux: &runtimespec.Linux{},
+	}
+	built := ctr.BuildContainerSpec(intmodel.ContainerSpec{
 		ID:        "c1",
 		Image:     "docker.io/library/busybox:latest",
 		CellName:  "cell",
@@ -82,17 +113,26 @@ func TestBuildContainerSpec_Capabilities(t *testing.T) {
 			Add:  []string{"NET_ADMIN"},
 		},
 	})
+	for _, opt := range built.SpecOpts {
+		if err := opt(context.Background(), nil, nil, spec); err != nil {
+			t.Fatalf("SpecOpts returned error: %v", err)
+		}
+	}
 
 	if spec.Process == nil || spec.Process.Capabilities == nil {
 		t.Fatalf("Process.Capabilities is nil")
 	}
-	// After drop ALL + add NET_ADMIN, the effective set should contain
-	// exactly CAP_NET_ADMIN and nothing else.
+	// After drop ALL + add NET_ADMIN, each cap set should contain exactly
+	// CAP_NET_ADMIN and nothing else — the defaults seeded above must be
+	// cleared.
 	if !containsOnly(spec.Process.Capabilities.Effective, "CAP_NET_ADMIN") {
 		t.Errorf("Effective caps = %v, want only CAP_NET_ADMIN", spec.Process.Capabilities.Effective)
 	}
 	if !containsOnly(spec.Process.Capabilities.Bounding, "CAP_NET_ADMIN") {
 		t.Errorf("Bounding caps = %v, want only CAP_NET_ADMIN", spec.Process.Capabilities.Bounding)
+	}
+	if !containsOnly(spec.Process.Capabilities.Permitted, "CAP_NET_ADMIN") {
+		t.Errorf("Permitted caps = %v, want only CAP_NET_ADMIN", spec.Process.Capabilities.Permitted)
 	}
 }
 

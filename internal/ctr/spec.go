@@ -276,11 +276,19 @@ func securitySpecOpts(spec intmodel.ContainerSpec) []oci.SpecOpts {
 	}
 
 	if spec.Capabilities != nil {
-		if len(spec.Capabilities.Drop) > 0 {
-			opts = append(opts, oci.WithDroppedCapabilities(normalizeCapabilities(spec.Capabilities.Drop)))
+		drop := normalizeCapabilities(spec.Capabilities.Drop)
+		add := normalizeCapabilities(spec.Capabilities.Add)
+		// "ALL" is not a real capability name — containerd's
+		// WithDroppedCapabilities does a literal string-match removal, so
+		// dropping "ALL" would leave the default cap set intact. Clear the
+		// whole set instead, then layer the add list on top.
+		if containsAllCaps(drop) {
+			opts = append(opts, oci.WithCapabilities(nil))
+		} else if len(drop) > 0 {
+			opts = append(opts, oci.WithDroppedCapabilities(drop))
 		}
-		if len(spec.Capabilities.Add) > 0 {
-			opts = append(opts, oci.WithAddedCapabilities(normalizeCapabilities(spec.Capabilities.Add)))
+		if len(add) > 0 {
+			opts = append(opts, oci.WithAddedCapabilities(add))
 		}
 	}
 
@@ -305,6 +313,17 @@ func securitySpecOpts(spec intmodel.ContainerSpec) []oci.SpecOpts {
 	}
 
 	return opts
+}
+
+// containsAllCaps reports whether the normalized capability list names the
+// "ALL" sentinel in any of its accepted spellings.
+func containsAllCaps(caps []string) bool {
+	for _, c := range caps {
+		if c == "ALL" || c == "CAP_ALL" {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizeCapabilities ensures each capability name has the "CAP_" prefix and
