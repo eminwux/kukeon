@@ -2,190 +2,190 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://kukeon.io/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/faq/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/getting-started/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/architecture/api-versioning/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/architecture/overview/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/architecture/process-model/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/architecture/storage-layout/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/cli/commands/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/cli/kuke-apply/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/cli/kuke-autocomplete/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/cli/kuke-create/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/cli/kuke-delete/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/cli/kuke-get/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/cli/kuke-init/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/cli/kuke-lifecycle/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/cli/kuke-purge/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/cli/kuke-refresh/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/cli/kuke-version/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/cli/kuke/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/cli/kukeond/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/concepts/cell/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/concepts/cgroups/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/concepts/client-and-daemon/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/concepts/container/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/concepts/containerd-namespaces/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/concepts/networking/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/concepts/overview/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/concepts/realm/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/concepts/space/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/concepts/stack/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/concepts/system-realm/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/guides/apply-manifests/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/guides/autocomplete/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/guides/init-and-reset/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/guides/local-dev/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/guides/troubleshooting/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/install/build-from-source/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/install/install-linux/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/install/prerequisites/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/manifests/cell/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/manifests/container/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/manifests/overview/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/manifests/realm/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/manifests/space/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/manifests/stack/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/tutorials/first-stack/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/tutorials/hello-world/</loc>
-         <lastmod>2026-04-21</lastmod>
+         <lastmod>2026-04-22</lastmod>
     </url>
 </urlset>
