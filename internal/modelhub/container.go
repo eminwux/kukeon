@@ -42,7 +42,7 @@ type ContainerSpec struct {
 	Args                   []string
 	Env                    []string
 	Ports                  []string
-	Volumes                []string
+	Volumes                []VolumeMount
 	Networks               []string
 	NetworksAliases        []string
 	Privileged             bool
@@ -54,6 +54,13 @@ type ContainerSpec struct {
 	Resources              *ContainerResources
 	CNIConfigPath          string
 	RestartPolicy          string
+}
+
+// VolumeMount is a bind mount of a host path into a container.
+type VolumeMount struct {
+	Source   string
+	Target   string
+	ReadOnly bool
 }
 
 // ContainerCapabilities groups Linux capability deltas applied relative to the

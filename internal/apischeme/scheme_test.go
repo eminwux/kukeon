@@ -223,6 +223,10 @@ func TestContainerRoundTripV1Beta1(t *testing.T) {
 			Args:     []string{"-c", "echo hello"},
 			Env:      []string{"ENV_VAR=value"},
 			Ports:    []string{"8080:80"},
+			Volumes: []ext.VolumeMount{
+				{Source: "/host/src", Target: "/container/dst"},
+				{Source: "/host/ro", Target: "/container/ro", ReadOnly: true},
+			},
 			Networks: []string{"network0"},
 		},
 		Status: ext.ContainerStatus{
@@ -258,6 +262,14 @@ func TestContainerRoundTripV1Beta1(t *testing.T) {
 	}
 	if output.Status.State != ext.ContainerStateReady {
 		t.Fatalf("unexpected output status: %+v", output.Status)
+	}
+	if len(output.Spec.Volumes) != len(input.Spec.Volumes) {
+		t.Fatalf("volumes len = %d, want %d", len(output.Spec.Volumes), len(input.Spec.Volumes))
+	}
+	for i, v := range input.Spec.Volumes {
+		if output.Spec.Volumes[i] != v {
+			t.Errorf("volume[%d] = %+v, want %+v", i, output.Spec.Volumes[i], v)
+		}
 	}
 }
 

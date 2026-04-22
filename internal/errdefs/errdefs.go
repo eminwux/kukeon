@@ -97,6 +97,17 @@ var (
 	ErrTaskNotFound      = errors.New("task not found")
 	ErrTaskNotRunning    = errors.New("task is not running")
 
+	// Volume-related errors.
+
+	ErrVolumeSourceRequired    = errors.New("volume source is required")
+	ErrVolumeTargetRequired    = errors.New("volume target is required")
+	ErrVolumeSourceNotAbsolute = errors.New("volume source must be an absolute host path")
+	ErrVolumeTargetNotAbsolute = errors.New("volume target must be an absolute container path")
+	ErrVolumeSourceNotFound    = errors.New("volume source does not exist on the host")
+	ErrVolumeNamedNotSupported = errors.New(
+		"named or managed volumes are not supported; use an absolute host path as source",
+	)
+
 	// CNI-related errors.
 
 	ErrBridgeNameTooLong = errors.New("bridge name exceeds Linux IFNAMSIZ limit")

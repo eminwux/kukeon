@@ -44,7 +44,7 @@ type ContainerSpec struct {
 	Args                   []string               `json:"args"                             yaml:"args"`
 	Env                    []string               `json:"env"                              yaml:"env"`
 	Ports                  []string               `json:"ports"                            yaml:"ports"`
-	Volumes                []string               `json:"volumes"                          yaml:"volumes"`
+	Volumes                []VolumeMount          `json:"volumes"                          yaml:"volumes"`
 	Networks               []string               `json:"networks"                         yaml:"networks"`
 	NetworksAliases        []string               `json:"networksAliases"                  yaml:"networksAliases"`
 	Privileged             bool                   `json:"privileged"                       yaml:"privileged"`
@@ -56,6 +56,13 @@ type ContainerSpec struct {
 	Resources              *ContainerResources    `json:"resources,omitempty"              yaml:"resources,omitempty"`
 	CNIConfigPath          string                 `json:"cniConfigPath,omitempty"          yaml:"cniConfigPath,omitempty"`
 	RestartPolicy          string                 `json:"restartPolicy"                    yaml:"restartPolicy"`
+}
+
+// VolumeMount is a bind mount of a host path into a container.
+type VolumeMount struct {
+	Source   string `json:"source"             yaml:"source"`
+	Target   string `json:"target"             yaml:"target"`
+	ReadOnly bool   `json:"readOnly,omitempty" yaml:"readOnly,omitempty"`
 }
 
 // ContainerCapabilities groups Linux capability deltas applied to the
@@ -147,7 +154,7 @@ func NewContainerDoc(from *ContainerDoc) *ContainerDoc {
 				Args:            []string{},
 				Env:             []string{},
 				Ports:           []string{},
-				Volumes:         []string{},
+				Volumes:         []VolumeMount{},
 				Networks:        []string{},
 				NetworksAliases: []string{},
 				Privileged:      false,
@@ -183,7 +190,7 @@ func NewContainerDoc(from *ContainerDoc) *ContainerDoc {
 	out.Spec.Args = cloneSlice(out.Spec.Args)
 	out.Spec.Env = cloneSlice(out.Spec.Env)
 	out.Spec.Ports = cloneSlice(out.Spec.Ports)
-	out.Spec.Volumes = cloneSlice(out.Spec.Volumes)
+	out.Spec.Volumes = cloneVolumeMounts(out.Spec.Volumes)
 	out.Spec.Networks = cloneSlice(out.Spec.Networks)
 	out.Spec.NetworksAliases = cloneSlice(out.Spec.NetworksAliases)
 	out.Spec.SecurityOpts = cloneSlice(out.Spec.SecurityOpts)
@@ -218,6 +225,16 @@ func cloneSlice(in []string) []string {
 	}
 
 	out := make([]string, len(in))
+	copy(out, in)
+	return out
+}
+
+func cloneVolumeMounts(in []VolumeMount) []VolumeMount {
+	if in == nil {
+		return []VolumeMount{}
+	}
+
+	out := make([]VolumeMount, len(in))
 	copy(out, in)
 	return out
 }

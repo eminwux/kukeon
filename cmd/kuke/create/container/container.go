@@ -192,6 +192,10 @@ func runCreateContainer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	volumeMounts, err := parseVolumeFlags(volumesList)
+	if err != nil {
+		return err
+	}
 	networksList, err := cmd.Flags().GetStringArray("network")
 	if err != nil {
 		return err
@@ -266,7 +270,7 @@ func runCreateContainer(cmd *cobra.Command, args []string) error {
 			Args:                   argsList,
 			Env:                    envList,
 			Ports:                  portsList,
-			Volumes:                volumesList,
+			Volumes:                volumeMounts,
 			Networks:               networksList,
 			NetworksAliases:        networkAliasesList,
 			Privileged:             privileged,
@@ -365,6 +369,57 @@ func trimAndDropEmpty(in []string) []string {
 		out = append(out, v)
 	}
 	return out
+}
+
+// parseVolumeFlags parses docker-style `--volume SRC:DST[:ro|rw]` flag values
+// into structured VolumeMounts. Missing mode defaults to rw; any other mode
+// value is rejected.
+func parseVolumeFlags(entries []string) ([]v1beta1.VolumeMount, error) {
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	out := make([]v1beta1.VolumeMount, 0, len(entries))
+	for _, raw := range entries {
+		entry := strings.TrimSpace(raw)
+		if entry == "" {
+			continue
+		}
+		parts := strings.Split(entry, ":")
+		if len(parts) < 2 || len(parts) > 3 {
+			return nil, fmt.Errorf(
+				"invalid --volume %q: expected SRC:DST[:ro|rw]",
+				raw,
+			)
+		}
+		src := strings.TrimSpace(parts[0])
+		dst := strings.TrimSpace(parts[1])
+		if src == "" || dst == "" {
+			return nil, fmt.Errorf(
+				"invalid --volume %q: source and target are both required",
+				raw,
+			)
+		}
+		var readOnly bool
+		if len(parts) == 3 {
+			switch strings.TrimSpace(parts[2]) {
+			case "ro":
+				readOnly = true
+			case "rw", "":
+				readOnly = false
+			default:
+				return nil, fmt.Errorf(
+					"invalid --volume %q: mode must be ro or rw",
+					raw,
+				)
+			}
+		}
+		out = append(out, v1beta1.VolumeMount{
+			Source:   src,
+			Target:   dst,
+			ReadOnly: readOnly,
+		})
+	}
+	return out, nil
 }
 
 // parseTmpfsFlags parses docker-style "--tmpfs path[:opt1,opt2,...]" entries.

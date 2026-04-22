@@ -117,7 +117,7 @@ func NewCellDoc(from *CellDoc) *CellDoc {
 			containers[i].Args = cloneSlice(container.Args)
 			containers[i].Env = cloneSlice(container.Env)
 			containers[i].Ports = cloneSlice(container.Ports)
-			containers[i].Volumes = cloneSlice(container.Volumes)
+			containers[i].Volumes = cloneVolumeMounts(container.Volumes)
 			containers[i].Networks = cloneSlice(container.Networks)
 			containers[i].NetworksAliases = cloneSlice(container.NetworksAliases)
 		}

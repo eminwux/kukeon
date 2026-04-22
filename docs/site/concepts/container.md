@@ -39,7 +39,10 @@ spec:
   env:
     - "NGINX_HOST=example.com"
   ports: []
-  volumes: []
+  volumes:
+    - source: /srv/html
+      target: /usr/share/nginx/html
+      readOnly: true
   networks: []
   networksAliases: []
   privileged: false

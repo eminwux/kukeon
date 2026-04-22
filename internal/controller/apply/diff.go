@@ -517,7 +517,7 @@ func diffContainerSpec(desired, actual *intmodel.ContainerSpec) DiffResult {
 		result.Details["ports"] = "ports changed"
 	}
 
-	if !slicesEqual(desired.Volumes, actual.Volumes) {
+	if !volumeMountsEqual(desired.Volumes, actual.Volumes) {
 		result.HasChanges = true
 		if result.ChangeType == ChangeTypeNone {
 			result.ChangeType = ChangeTypeCompatible
@@ -686,6 +686,18 @@ func mapsEqual(a, b map[string]string) bool {
 }
 
 func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func volumeMountsEqual(a, b []intmodel.VolumeMount) bool {
 	if len(a) != len(b) {
 		return false
 	}

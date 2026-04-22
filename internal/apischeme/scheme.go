@@ -274,7 +274,7 @@ func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, err
 				Args:                   in.Spec.Args,
 				Env:                    in.Spec.Env,
 				Ports:                  in.Spec.Ports,
-				Volumes:                in.Spec.Volumes,
+				Volumes:                volumeMountsToInternal(in.Spec.Volumes),
 				Networks:               in.Spec.Networks,
 				NetworksAliases:        in.Spec.NetworksAliases,
 				Privileged:             in.Spec.Privileged,
@@ -327,7 +327,7 @@ func BuildContainerExternalFromInternal(in intmodel.Container, apiVersion ext.Ve
 				Args:                   in.Spec.Args,
 				Env:                    in.Spec.Env,
 				Ports:                  in.Spec.Ports,
-				Volumes:                in.Spec.Volumes,
+				Volumes:                volumeMountsToExternal(in.Spec.Volumes),
 				Networks:               in.Spec.Networks,
 				NetworksAliases:        in.Spec.NetworksAliases,
 				Privileged:             in.Spec.Privileged,
@@ -383,7 +383,7 @@ func convertContainerSpecToInternal(in ext.ContainerSpec) intmodel.ContainerSpec
 		Args:                   in.Args,
 		Env:                    in.Env,
 		Ports:                  in.Ports,
-		Volumes:                in.Volumes,
+		Volumes:                volumeMountsToInternal(in.Volumes),
 		Networks:               in.Networks,
 		NetworksAliases:        in.NetworksAliases,
 		Privileged:             in.Privileged,
@@ -414,7 +414,7 @@ func BuildContainerSpecExternalFromInternal(in intmodel.ContainerSpec) ext.Conta
 		Args:                   in.Args,
 		Env:                    in.Env,
 		Ports:                  in.Ports,
-		Volumes:                in.Volumes,
+		Volumes:                volumeMountsToExternal(in.Volumes),
 		Networks:               in.Networks,
 		NetworksAliases:        in.NetworksAliases,
 		Privileged:             in.Privileged,
@@ -499,6 +499,36 @@ func buildResourcesExternalFromInternal(in *intmodel.ContainerResources) *ext.Co
 		CPUShares:        in.CPUShares,
 		PidsLimit:        in.PidsLimit,
 	}
+}
+
+func volumeMountsToInternal(in []ext.VolumeMount) []intmodel.VolumeMount {
+	if in == nil {
+		return nil
+	}
+	out := make([]intmodel.VolumeMount, len(in))
+	for i, v := range in {
+		out[i] = intmodel.VolumeMount{
+			Source:   v.Source,
+			Target:   v.Target,
+			ReadOnly: v.ReadOnly,
+		}
+	}
+	return out
+}
+
+func volumeMountsToExternal(in []intmodel.VolumeMount) []ext.VolumeMount {
+	if in == nil {
+		return nil
+	}
+	out := make([]ext.VolumeMount, len(in))
+	for i, v := range in {
+		out[i] = ext.VolumeMount{
+			Source:   v.Source,
+			Target:   v.Target,
+			ReadOnly: v.ReadOnly,
+		}
+	}
+	return out
 }
 
 // convertContainerStatusesToInternal converts a slice of external ContainerStatus to internal ContainerStatus.
