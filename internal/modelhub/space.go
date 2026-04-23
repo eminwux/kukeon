@@ -30,7 +30,37 @@ type SpaceMetadata struct {
 type SpaceSpec struct {
 	RealmName     string
 	CNIConfigPath string
+	Network       *SpaceNetwork
 	Defaults      *SpaceDefaults
+}
+
+// SpaceNetwork groups network-scoped policy applied to the space bridge.
+type SpaceNetwork struct {
+	Egress *EgressPolicy
+}
+
+// EgressPolicy constrains outbound traffic leaving the space bridge. nil
+// means unconstrained; EgressDefaultAllow with no allow rules matches the
+// same unconstrained behavior.
+type EgressPolicy struct {
+	Default EgressDefault
+	Allow   []EgressAllowRule
+}
+
+// EgressDefault is the fallthrough action when no allowlist rule matches.
+type EgressDefault string
+
+const (
+	EgressDefaultAllow EgressDefault = "allow"
+	EgressDefaultDeny  EgressDefault = "deny"
+)
+
+// EgressAllowRule describes a single permitted destination. Exactly one of
+// Host or CIDR must be set. Empty Ports means "any port on this destination".
+type EgressAllowRule struct {
+	Host  string
+	CIDR  string
+	Ports []int
 }
 
 // SpaceDefaults declares default values inherited by resources inside the

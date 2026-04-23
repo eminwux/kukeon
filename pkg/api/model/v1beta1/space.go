@@ -32,7 +32,43 @@ type SpaceMetadata struct {
 type SpaceSpec struct {
 	RealmID       string         `json:"realmId"                 yaml:"realmId"`
 	CNIConfigPath string         `json:"cniConfigPath,omitempty" yaml:"cniConfigPath,omitempty"`
+	Network       *SpaceNetwork  `json:"network,omitempty"       yaml:"network,omitempty"`
 	Defaults      *SpaceDefaults `json:"defaults,omitempty"      yaml:"defaults,omitempty"`
+}
+
+// SpaceNetwork groups network-scoped policy applied to the space bridge.
+type SpaceNetwork struct {
+	Egress *EgressPolicy `json:"egress,omitempty" yaml:"egress,omitempty"`
+}
+
+// EgressPolicy constrains outbound traffic leaving the space bridge toward the
+// host or external networks. When nil, traffic is unconstrained (current
+// behavior). An explicit Default=allow with no Allow rules also matches
+// current behavior.
+type EgressPolicy struct {
+	Default EgressDefault     `json:"default"         yaml:"default"`
+	Allow   []EgressAllowRule `json:"allow,omitempty" yaml:"allow,omitempty"`
+}
+
+// EgressDefault is the fallthrough action when no allowlist rule matches.
+type EgressDefault string
+
+const (
+	EgressDefaultAllow EgressDefault = "allow"
+	EgressDefaultDeny  EgressDefault = "deny"
+)
+
+// EgressAllowRule describes a single permitted destination. Exactly one of
+// Host or CIDR must be set. Ports, when non-empty, constrains to those TCP
+// destination ports; empty Ports means "any port on this destination".
+//
+// Host entries are resolved to IPs by the daemon at apply time; the resulting
+// iptables rules reflect the IPs known at that moment. See the Space manifest
+// docs for the TTL caveat.
+type EgressAllowRule struct {
+	Host  string `json:"host,omitempty"  yaml:"host,omitempty"`
+	CIDR  string `json:"cidr,omitempty"  yaml:"cidr,omitempty"`
+	Ports []int  `json:"ports,omitempty" yaml:"ports,omitempty"`
 }
 
 // SpaceDefaults declares default values that Kukeon inherits into resources

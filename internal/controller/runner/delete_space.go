@@ -89,6 +89,14 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 		}
 	}
 
+	// Remove egress policy (iptables chain + dispatch) before tearing
+	// down the bridge itself. Idempotent: safe when no policy was ever
+	// applied.
+	if policyErr := r.removeSpaceEgressPolicy(internalSpace); policyErr != nil {
+		r.logger.WarnContext(r.ctx, "failed to remove space egress policy", "error", policyErr)
+		// Continue teardown even if policy removal fails.
+	}
+
 	// Delete CNI network config and perform comprehensive CNI cleanup
 	var networkName string
 	networkName, err = naming.BuildSpaceNetworkName(realmName, internalSpace.Metadata.Name)
