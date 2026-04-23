@@ -17,11 +17,13 @@
 package apischeme_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	ext "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"gopkg.in/yaml.v3"
 )
 
 func TestRealmRoundTripV1Beta1(t *testing.T) {
@@ -355,5 +357,105 @@ func TestContainerRoundTripSecurityFieldsV1Beta1(t *testing.T) {
 	if output.Spec.Resources == nil || output.Spec.Resources.MemoryLimitBytes == nil ||
 		*output.Spec.Resources.MemoryLimitBytes != mem {
 		t.Fatalf("resources did not round-trip: %+v", output.Spec.Resources)
+	}
+}
+
+func TestContainerSecretsRoundTripV1Beta1(t *testing.T) {
+	input := ext.ContainerDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindContainer,
+		Metadata:   ext.ContainerMetadata{Name: "container-secrets"},
+		Spec: ext.ContainerSpec{
+			ID:      "container-secrets",
+			RealmID: "realm0",
+			SpaceID: "space0",
+			StackID: "stack0",
+			CellID:  "cell0",
+			Image:   "alpine:latest",
+			Secrets: []ext.ContainerSecret{
+				{Name: "ANTHROPIC_API_KEY", FromFile: "/etc/kukeon/secrets/anthropic.key"},
+				{Name: "GITHUB_TOKEN", FromEnv: "GITHUB_TOKEN_SCOPED"},
+				{
+					Name:      "tls.crt",
+					FromFile:  "/etc/kukeon/secrets/tls.crt",
+					MountPath: "/run/secrets/tls.crt",
+				},
+			},
+		},
+	}
+
+	internal, version, err := apischeme.NormalizeContainer(input)
+	if err != nil {
+		t.Fatalf("NormalizeContainer: %v", err)
+	}
+	if len(internal.Spec.Secrets) != 3 {
+		t.Fatalf("expected 3 internal secrets, got %d", len(internal.Spec.Secrets))
+	}
+	if internal.Spec.Secrets[0].Name != "ANTHROPIC_API_KEY" ||
+		internal.Spec.Secrets[0].FromFile != "/etc/kukeon/secrets/anthropic.key" ||
+		internal.Spec.Secrets[0].FromEnv != "" ||
+		internal.Spec.Secrets[0].MountPath != "" {
+		t.Fatalf("secret[0] did not normalize: %+v", internal.Spec.Secrets[0])
+	}
+	if internal.Spec.Secrets[2].MountPath != "/run/secrets/tls.crt" {
+		t.Fatalf("secret[2] mountPath did not normalize: %+v", internal.Spec.Secrets[2])
+	}
+
+	output, err := apischeme.BuildContainerExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildContainerExternalFromInternal: %v", err)
+	}
+	if len(output.Spec.Secrets) != len(input.Spec.Secrets) {
+		t.Fatalf(
+			"secrets len = %d, want %d",
+			len(output.Spec.Secrets),
+			len(input.Spec.Secrets),
+		)
+	}
+	for i, want := range input.Spec.Secrets {
+		got := output.Spec.Secrets[i]
+		if got != want {
+			t.Errorf("secret[%d] round-trip = %+v, want %+v", i, got, want)
+		}
+	}
+}
+
+// TestContainerSecretYAMLNeverLeaksValues ensures that a round-trip through
+// the external doc + YAML marshal path only serializes the reference fields,
+// never a resolved secret value. The internal model has no value field, so a
+// serialized container doc can only ever contain name + source metadata.
+func TestContainerSecretYAMLNeverLeaksValues(t *testing.T) {
+	internal := intmodel.Container{
+		Metadata: intmodel.ContainerMetadata{Name: "c"},
+		Spec: intmodel.ContainerSpec{
+			ID:        "c",
+			RealmName: "r", SpaceName: "s", StackName: "k", CellName: "cl",
+			Image: "alpine:latest",
+			Secrets: []intmodel.ContainerSecret{
+				{Name: "API_KEY", FromEnv: "API_KEY_SRC"},
+				{Name: "tls.crt", FromFile: "/etc/kukeon/secrets/tls.crt", MountPath: "/run/s/tls.crt"},
+			},
+		},
+	}
+
+	doc, err := apischeme.BuildContainerExternalFromInternal(internal, ext.APIVersionV1Beta1)
+	if err != nil {
+		t.Fatalf("BuildContainerExternalFromInternal: %v", err)
+	}
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		t.Fatalf("yaml.Marshal: %v", err)
+	}
+	rendered := string(out)
+
+	// The external secret struct only has name/fromFile/fromEnv/mountPath —
+	// any value-carrying field would appear here. Fail loudly if that
+	// invariant ever regresses. "data:" is omitted because "metadata:"
+	// contains it as a substring; "value:" and "contents:" are the keys we
+	// would expect to see if someone added a value-bearing field.
+	for _, forbidden := range []string{"value:", "contents:"} {
+		if strings.Contains(rendered, forbidden) {
+			t.Fatalf("rendered YAML contains forbidden key %q; full doc:\n%s", forbidden, rendered)
+		}
 	}
 }

@@ -483,6 +483,32 @@ func (c *client) CreateContainerFromSpec(
 
 	cellID := containerSpec.CellName
 
+	// Resolve declared secrets before building the OCI spec. Env entries are
+	// appended to containerSpec.Env (containerd stores these in its own
+	// runtime spec, not in kukeon metadata); file-mounted secrets are staged
+	// on the host at 0400 and added as read-only bind mounts.
+	containerdID := containerSpec.ContainerdID
+	if containerdID == "" {
+		containerdID = containerSpec.ID
+	}
+	resolved, err := resolveSecrets(containerdID, containerSpec.Secrets, DefaultSecretsStagingDir)
+	if err != nil {
+		c.logger.ErrorContext(
+			c.ctx,
+			"failed to resolve container secrets",
+			"id", containerSpec.ID,
+			"cell", cellID,
+			"err", formatError(err),
+		)
+		return nil, fmt.Errorf("failed to resolve secrets: %w", err)
+	}
+	if len(resolved.EnvAdds) > 0 {
+		containerSpec.Env = append(containerSpec.Env, resolved.EnvAdds...)
+	}
+	if len(resolved.MountAdds) > 0 {
+		containerSpec.Volumes = append(containerSpec.Volumes, resolved.MountAdds...)
+	}
+
 	// Convert to ctr.ContainerSpec using BuildContainerSpec
 	ctrSpec := BuildContainerSpec(containerSpec)
 

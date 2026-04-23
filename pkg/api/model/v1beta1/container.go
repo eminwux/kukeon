@@ -54,8 +54,21 @@ type ContainerSpec struct {
 	SecurityOpts           []string               `json:"securityOpts,omitempty"           yaml:"securityOpts,omitempty"`
 	Tmpfs                  []ContainerTmpfsMount  `json:"tmpfs,omitempty"                  yaml:"tmpfs,omitempty"`
 	Resources              *ContainerResources    `json:"resources,omitempty"              yaml:"resources,omitempty"`
+	Secrets                []ContainerSecret      `json:"secrets,omitempty"                yaml:"secrets,omitempty"`
 	CNIConfigPath          string                 `json:"cniConfigPath,omitempty"          yaml:"cniConfigPath,omitempty"`
 	RestartPolicy          string                 `json:"restartPolicy"                    yaml:"restartPolicy"`
+}
+
+// ContainerSecret references a credential that the daemon resolves at apply
+// time and injects into the container — either as an environment variable
+// (default) or as a read-only file when MountPath is set. Only the reference
+// is persisted; the resolved value is never written to status, metadata, or
+// logs.
+type ContainerSecret struct {
+	Name      string `json:"name"                yaml:"name"`
+	FromFile  string `json:"fromFile,omitempty"  yaml:"fromFile,omitempty"`
+	FromEnv   string `json:"fromEnv,omitempty"   yaml:"fromEnv,omitempty"`
+	MountPath string `json:"mountPath,omitempty" yaml:"mountPath,omitempty"`
 }
 
 // VolumeMount is a bind mount of a host path into a container.
@@ -194,6 +207,7 @@ func NewContainerDoc(from *ContainerDoc) *ContainerDoc {
 	out.Spec.Networks = cloneSlice(out.Spec.Networks)
 	out.Spec.NetworksAliases = cloneSlice(out.Spec.NetworksAliases)
 	out.Spec.SecurityOpts = cloneSlice(out.Spec.SecurityOpts)
+	out.Spec.Secrets = cloneSecrets(out.Spec.Secrets)
 
 	if out.Spec.Capabilities != nil {
 		caps := *out.Spec.Capabilities
@@ -235,6 +249,16 @@ func cloneVolumeMounts(in []VolumeMount) []VolumeMount {
 	}
 
 	out := make([]VolumeMount, len(in))
+	copy(out, in)
+	return out
+}
+
+func cloneSecrets(in []ContainerSecret) []ContainerSecret {
+	if in == nil {
+		return nil
+	}
+
+	out := make([]ContainerSecret, len(in))
 	copy(out, in)
 	return out
 }

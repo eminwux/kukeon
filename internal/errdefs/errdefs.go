@@ -112,4 +112,14 @@ var (
 
 	ErrBridgeNameTooLong = errors.New("bridge name exceeds Linux IFNAMSIZ limit")
 	ErrCNIPluginNotFound = errors.New("cni plugin not found")
+
+	// Secret-related errors.
+
+	ErrSecretNameRequired        = errors.New("secret name is required")
+	ErrSecretSourceRequired      = errors.New("secret requires exactly one of fromFile or fromEnv")
+	ErrSecretMultipleSources     = errors.New("secret must not set both fromFile and fromEnv")
+	ErrSecretMountPathNotAbsolute = errors.New("secret mountPath must be an absolute container path")
+	ErrSecretFromFileNotFound    = errors.New("secret fromFile path does not exist on the host")
+	ErrSecretFromEnvNotSet       = errors.New("secret fromEnv env var is not set on the daemon host")
+	ErrSecretStagingFailed       = errors.New("failed to stage secret file for mount")
 )

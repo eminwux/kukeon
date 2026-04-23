@@ -63,6 +63,7 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 | `networks`         | array of string  | no       | Additional CNI networks to join beyond the cell's default                               |
 | `networksAliases`  | array of string  | no       | DNS aliases for the container within its CNI networks                                   |
 | `privileged`       | bool             | no       | Run privileged (full capabilities, access to `/dev`, etc.)                              |
+| `secrets`          | array of `ContainerSecret` | no | Inject credentials resolved by the daemon — never written to status or YAML (see [ContainerSecret](#containersecret)) |
 | `cniConfigPath`    | string           | no       | Override the CNI config directory for this container                                    |
 | `restartPolicy`    | string           | no       | Restart policy. Reserved — restart semantics are not finalized.                         |
 
@@ -78,6 +79,32 @@ Each entry in `spec.volumes` is a bind mount of a host path into the container.
 | `source`   | string | yes      | Absolute host path. Must exist at apply time. Named / managed volumes are not supported. |
 | `target`   | string | yes      | Absolute path inside the container                                          |
 | `readOnly` | bool   | no       | Mount read-only when `true` (writes fail with `EROFS`). Defaults to `false`. |
+
+### ContainerSecret
+
+Each entry in `spec.secrets` references a credential the daemon resolves at apply time. Only the reference is persisted — the resolved value never appears in `kuke get -o yaml`, in object status, or in daemon logs.
+
+| Field        | Type   | Required | Description                                                                                                |
+|--------------|--------|----------|------------------------------------------------------------------------------------------------------------|
+| `name`       | string | yes      | Environment-variable name (default mode) or basename of the mounted secret file when `mountPath` is set    |
+| `fromFile`   | string | one of required | Absolute host path the daemon reads at apply time. Missing files produce a clear error.             |
+| `fromEnv`    | string | one of required | Name of an environment variable set on the daemon host. Missing env vars produce a clear error.     |
+| `mountPath`  | string | no       | Absolute path inside the container. When set, the secret is staged with mode `0400` and bind-mounted read-only instead of being injected as an env var. |
+
+Exactly one of `fromFile` / `fromEnv` must be set. Example:
+
+```yaml
+secrets:
+  - name: ANTHROPIC_API_KEY
+    fromFile: /etc/kukeon/secrets/anthropic.key
+  - name: GITHUB_TOKEN
+    fromEnv: GITHUB_TOKEN_SCOPED
+  - name: tls.crt
+    fromFile: /etc/kukeon/secrets/tls.crt
+    mountPath: /run/secrets/tls.crt
+```
+
+File-mount mode stages secrets under `/run/kukeon/secrets/<containerdId>/<name>` on the host, with owner-only read perms, then bind-mounts them read-only into the container. Because containerd persists resolved env vars in its own runtime spec, env-injection mode leaves the value in containerd's state; file-mount mode keeps it only in the tmpfs staging file.
 
 ## status
 
