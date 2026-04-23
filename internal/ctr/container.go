@@ -491,7 +491,7 @@ func (c *client) CreateContainerFromSpec(
 	if containerdID == "" {
 		containerdID = containerSpec.ID
 	}
-	resolved, err := resolveSecrets(containerdID, containerSpec.Secrets, c.secretsStagingDir)
+	resolved, err := resolveSecrets(containerdID, containerSpec.Secrets, DefaultSecretsStagingDir)
 	if err != nil {
 		c.logger.ErrorContext(
 			c.ctx,
