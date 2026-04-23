@@ -107,6 +107,9 @@ func (r *Exec) UpdateContainer(cell intmodel.Cell, desiredContainer intmodel.Con
 		}
 	}
 
+	// spec.defaults.container inheritance is applied in ensureCellContainers,
+	// below, for both the create and recreate-on-breaking-change paths.
+
 	// Update container in cell's containers list
 	if containerIndex >= 0 {
 		// Preserve containerd ID if not cleared

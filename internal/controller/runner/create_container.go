@@ -26,6 +26,11 @@ import (
 
 // CreateContainer creates a container in an existing cell by merging the container spec
 // into the cell's containers list. The cell must already exist.
+//
+// Inheritance of spec.defaults.container from the parent Space happens in
+// ensureCellContainers, which is the single choke point every creation and
+// update path traverses — so the post-merge (effective) configuration is
+// what gets persisted and what `kuke get container -o yaml` displays.
 func (r *Exec) CreateContainer(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error) {
 	// Get existing cell (returns internal model)
 	existingCell, err := r.GetCell(cell)

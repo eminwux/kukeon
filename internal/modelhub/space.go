@@ -30,6 +30,24 @@ type SpaceMetadata struct {
 type SpaceSpec struct {
 	RealmName     string
 	CNIConfigPath string
+	Defaults      *SpaceDefaults
+}
+
+// SpaceDefaults declares default values inherited by resources inside the
+// Space unless the resource's own spec overrides the field. See the external
+// v1beta1.SpaceDefaults type for user-facing documentation.
+type SpaceDefaults struct {
+	Container *SpaceContainerDefaults
+}
+
+// SpaceContainerDefaults mirrors the isolation fields on ContainerSpec.
+type SpaceContainerDefaults struct {
+	User                   string
+	ReadOnlyRootFilesystem *bool
+	Capabilities           *ContainerCapabilities
+	SecurityOpts           []string
+	Tmpfs                  []ContainerTmpfsMount
+	Resources              *ContainerResources
 }
 
 type SpaceStatus struct {

@@ -30,8 +30,35 @@ type SpaceMetadata struct {
 }
 
 type SpaceSpec struct {
-	RealmID       string `json:"realmId"                 yaml:"realmId"`
-	CNIConfigPath string `json:"cniConfigPath,omitempty" yaml:"cniConfigPath,omitempty"`
+	RealmID       string         `json:"realmId"                 yaml:"realmId"`
+	CNIConfigPath string         `json:"cniConfigPath,omitempty" yaml:"cniConfigPath,omitempty"`
+	Defaults      *SpaceDefaults `json:"defaults,omitempty"      yaml:"defaults,omitempty"`
+}
+
+// SpaceDefaults declares default values that Kukeon inherits into resources
+// created inside the Space unless the resource's own spec overrides the field.
+// It exists so the isolation envelope can be declared once on the Space and
+// reused by every Container that lives in it.
+type SpaceDefaults struct {
+	Container *SpaceContainerDefaults `json:"container,omitempty" yaml:"container,omitempty"`
+}
+
+// SpaceContainerDefaults mirrors the isolation-related fields on ContainerSpec.
+// Each field is applied to a Container only when the Container leaves it empty.
+// Inheritance is shallow: a Container that sets Capabilities replaces the Space
+// default outright — Drop and Add slices are not merged.
+//
+// ReadOnlyRootFilesystem is a *bool so the default can distinguish "not set"
+// from an explicit "false"; Container.Spec.ReadOnlyRootFilesystem is still a
+// plain bool, so a Container cannot opt out of a Space default that enables
+// it.
+type SpaceContainerDefaults struct {
+	User                   string                 `json:"user,omitempty"                   yaml:"user,omitempty"`
+	ReadOnlyRootFilesystem *bool                  `json:"readOnlyRootFilesystem,omitempty" yaml:"readOnlyRootFilesystem,omitempty"`
+	Capabilities           *ContainerCapabilities `json:"capabilities,omitempty"           yaml:"capabilities,omitempty"`
+	SecurityOpts           []string               `json:"securityOpts,omitempty"           yaml:"securityOpts,omitempty"`
+	Tmpfs                  []ContainerTmpfsMount  `json:"tmpfs,omitempty"                  yaml:"tmpfs,omitempty"`
+	Resources              *ContainerResources    `json:"resources,omitempty"              yaml:"resources,omitempty"`
 }
 
 type SpaceStatus struct {

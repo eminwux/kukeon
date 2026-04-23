@@ -135,6 +135,7 @@ func ConvertSpaceDocToInternal(in ext.SpaceDoc) (intmodel.Space, error) {
 			Spec: intmodel.SpaceSpec{
 				RealmName:     in.Spec.RealmID,
 				CNIConfigPath: in.Spec.CNIConfigPath,
+				Defaults:      convertSpaceDefaultsToInternal(in.Spec.Defaults),
 			},
 			Status: intmodel.SpaceStatus{
 				State:      intState,
@@ -172,6 +173,7 @@ func BuildSpaceExternalFromInternal(in intmodel.Space, apiVersion ext.Version) (
 			Spec: ext.SpaceSpec{
 				RealmID:       in.Spec.RealmName,
 				CNIConfigPath: in.Spec.CNIConfigPath,
+				Defaults:      buildSpaceDefaultsExternalFromInternal(in.Spec.Defaults),
 			},
 			Status: ext.SpaceStatus{
 				State:      extState,
@@ -539,6 +541,60 @@ func buildSecretsExternalFromInternal(in []intmodel.ContainerSecret) []ext.Conta
 		}
 	}
 	return out
+}
+
+func convertSpaceDefaultsToInternal(in *ext.SpaceDefaults) *intmodel.SpaceDefaults {
+	if in == nil {
+		return nil
+	}
+	return &intmodel.SpaceDefaults{
+		Container: convertSpaceContainerDefaultsToInternal(in.Container),
+	}
+}
+
+func buildSpaceDefaultsExternalFromInternal(in *intmodel.SpaceDefaults) *ext.SpaceDefaults {
+	if in == nil {
+		return nil
+	}
+	return &ext.SpaceDefaults{
+		Container: buildSpaceContainerDefaultsExternalFromInternal(in.Container),
+	}
+}
+
+func convertSpaceContainerDefaultsToInternal(in *ext.SpaceContainerDefaults) *intmodel.SpaceContainerDefaults {
+	if in == nil {
+		return nil
+	}
+	return &intmodel.SpaceContainerDefaults{
+		User:                   in.User,
+		ReadOnlyRootFilesystem: copyBoolPtr(in.ReadOnlyRootFilesystem),
+		Capabilities:           convertCapabilitiesToInternal(in.Capabilities),
+		SecurityOpts:           in.SecurityOpts,
+		Tmpfs:                  convertTmpfsMountsToInternal(in.Tmpfs),
+		Resources:              convertResourcesToInternal(in.Resources),
+	}
+}
+
+func buildSpaceContainerDefaultsExternalFromInternal(in *intmodel.SpaceContainerDefaults) *ext.SpaceContainerDefaults {
+	if in == nil {
+		return nil
+	}
+	return &ext.SpaceContainerDefaults{
+		User:                   in.User,
+		ReadOnlyRootFilesystem: copyBoolPtr(in.ReadOnlyRootFilesystem),
+		Capabilities:           buildCapabilitiesExternalFromInternal(in.Capabilities),
+		SecurityOpts:           in.SecurityOpts,
+		Tmpfs:                  buildTmpfsMountsExternalFromInternal(in.Tmpfs),
+		Resources:              buildResourcesExternalFromInternal(in.Resources),
+	}
+}
+
+func copyBoolPtr(in *bool) *bool {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
 }
 
 func volumeMountsToInternal(in []ext.VolumeMount) []intmodel.VolumeMount {
