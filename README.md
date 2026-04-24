@@ -1,14 +1,24 @@
-# 🌪️ kukeon: A Lightweight Container Orchestrator for structured, isolated, local-first container environments
+# 🌪️ kukeon: Agent-native orchestration for Linux hosts
 
 ![status: active](https://img.shields.io/badge/status-active-blue)
 ![state: alpha](https://img.shields.io/badge/state-alpha-orange)
 ![license: apache2](https://img.shields.io/badge/license-Apache%202.0-green)
 
-_Structured container environments on a single machine._
+_Declarative, self-hostable runtime for AI agents. Run them on your cloud VM, homelab, or any Linux host with containerd._
 
-Kukeon is a local-first, containerd-native orchestrator that sits between Docker and Kubernetes. It provides structure, networking, isolation, and lifecycle management for containers without the complexity of running a full cluster. At its core is `kukeond`, a small daemon that manages containerd, CNI networks, namespaces, and cgroups, and exposes a simple API. The `kuke` CLI and the future Web UI act as thin clients.
+Kukeon gives AI agents a first-class home on Linux: declarative sessions with bounded lifetime, PTY-attached workloads, isolation by realm/space/cell, and clean teardown with `onEnd.persist`. No SaaS, no vendor lock-in — kukeon runs wherever you already run Linux.
 
-**Note:** This project is under active development and not production ready.
+`kukeond` is a small daemon over containerd + CNI + cgroups. `kuke` is the CLI. The agent-native primitives — `Session`, `Interactive` containers, scoped secrets, default-deny network — are declared in YAML and reconciled on a single host.
+
+See **[docs/site/vision.md](docs/site/vision.md)** for the full "Kukeon for AI Agents" proposal.
+
+## Status
+
+Kukeon is pre-v1 and under active development. The agent-native story is usable once Session (#46) and Interactive UC2 (#57) ship; P0 primitives (Container volumes, security fields, scoped secrets, network policy) are landed.
+
+- Umbrella: #48
+- P1 anchors: #46, #57
+- Library substrate (sbsh): sbsh#118 ✅
 
 ## Quick Start
 
@@ -65,13 +75,27 @@ Complete documentation is available at [https://kukeon.io](https://kukeon.io), i
 
 ## Why kukeon
 
-Docker is simple but unstructured — everything lives in a flat list. Kubernetes is structured but heavy — you pay for a control plane whether you need one or not. Kukeon aims for the middle:
+AI agents need a runtime whose primitives match how they actually run: short-lived, untrusted-on-the-inside, network-scoped, declared per task, and torn down cleanly when done. Compose is too flat for that envelope; Kubernetes is too heavy to stand up per session. Kukeon aims for the shape agents need:
 
-- Reproducible: declarative YAML manifests describe every resource
-- Structured: Realm → Space → Stack → Cell → Container makes intent explicit
-- Isolated: each layer is a real Linux primitive (containerd namespace, CNI network, cgroup subtree)
-- Local-first: no cluster, no etcd, no scheduler
-- Transparent: inspect what the daemon did with `ctr`, `ip link`, `ls /sys/fs/cgroup`
+- **Session-scoped** — declare lifetime, budget, and `onEnd.persist` once; the orchestrator enforces the deadline and the teardown
+- **Isolated by layer** — `Realm` is a containerd namespace, `Space` is a CNI network + cgroup subtree + default-deny egress, `Cell` is a pod-like group. Each layer is a real Linux primitive
+- **Scoped secrets** — credentials ride in by reference (`fromFile` / `fromEnv`), never baked into the manifest or surfaced in `kuke get -o yaml`
+- **Declarative + reviewable** — one YAML per task, diffable in a PR, reproducible across hosts
+- **Self-hostable** — runs on your cloud VM, homelab, or laptop wherever containerd is available. No SaaS dependency
+- **Transparent** — the state is inspectable with `ctr`, `ip link`, and `ls /sys/fs/cgroup`; no hidden control plane
+
+### Also a great container orchestrator for single Linux hosts
+
+The same primitives that make kukeon suitable for agent sessions also make it a good fit for anyone who has outgrown `docker compose` but doesn't want to stand up a Kubernetes cluster. Docker is simple but unstructured: everything lives in a flat list. Kubernetes is structured but heavy: you pay for a control plane whether you need one or not. Kukeon sits in between — an explicit `Realm → Space → Stack → Cell → Container` hierarchy, one CNI network per space, one cgroup subtree per layer, and no distributed scheduler, etcd, or API server on port 6443.
+
+That makes it a natural fit for:
+
+- Homelab and VPS users who want structured container environments
+- Systems engineers who prefer containerd directly over Docker
+- Developers who find Docker too flat and Kubernetes too heavy
+- Operators who want isolation declared in terms of namespaces, CNI, and cgroups
+
+You can think of it as _Proxmox for containers_ — or a small Heroku that runs locally.
 
 ## Usage Examples
 
@@ -277,35 +301,6 @@ Kukeon sits between containerd and the user, translating declarative YAML into t
 4. State is persisted to `/opt/kukeon` for durability across daemon restarts
 5. `kuke get` and `kuke refresh` read live state back from containerd/CNI/cgroups
 
-## A Tool for Operators, Homelabbers, and Systems Engineers
-
-For people who want structured container environments on one machine.
-
-- Homelab and VPS users who want structured container environments
-- Systems engineers who prefer containerd over Docker
-- Developers who find Docker too simple and Kubernetes too complex
-- Operators who want clear isolation using namespaces, CNI, and cgroups
-
-## How kukeon Differs from Docker and Kubernetes
-
-Kukeon is designed for single-machine orchestration with real Linux isolation primitives. Key differences: an explicit Realm → Space → Stack → Cell → Container hierarchy (not a flat list), one CNI network per space (not one big network or ad-hoc bridges), one cgroup subtree per layer (not scattered), and no control plane (containerd, CNI, and cgroups are the only moving parts).
-
-Unlike Kubernetes, kukeon is not distributed. There is no scheduler, no etcd, no API server on port 6443 — just one daemon per host.
-
-Unlike Docker, kukeon does not treat containers as a flat set. Every container belongs to exactly one cell → stack → space → realm path.
-
-You can think of it as:
-
-> Proxmox for containers
->
-> or
->
-> A small Heroku that runs locally
-
-## Why kukeon Exists
-
-Running non-trivial container workloads on a single machine is awkward today. Docker is simple but leaves you to invent your own tenancy and network structure. Kubernetes has the structure but demands a cluster. Kukeon takes the structure — namespaces, networks, cgroups, a hierarchy of cells — and drops the cluster. The result is a single daemon that makes one machine feel organized without making it feel distributed.
-
 ## Philosophy
 
 «καὶ ὁ κυκεὼν διίσταται μὴ κινούμενος»
@@ -344,7 +339,7 @@ Kukeon aims to be:
 - Reimplementing every Kubernetes feature or API
 - Hiding low-level primitives behind opaque abstractions
 
-## Status and Roadmap
+## Roadmap
 
 Kukeon is under active development, with a focus on correctness, clear abstractions, and stable primitives before adding integrations.
 
