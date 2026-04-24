@@ -707,7 +707,7 @@ func createCellWithContainers(
 			SpaceID: spaceName,
 			StackID: stackName,
 			CellID:  cellName,
-			Image:   "docker.io/library/debian:latest",
+			Image:   "registry.eminwux.com/debian:latest",
 		})
 	}
 

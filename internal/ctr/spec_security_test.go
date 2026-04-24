@@ -52,7 +52,7 @@ func ptrInt64(v int64) *int64 { return &v }
 func TestBuildContainerSpec_UserAndReadonlyRootfs(t *testing.T) {
 	spec := applyBuiltSpec(t, intmodel.ContainerSpec{
 		ID:                     "c1",
-		Image:                  "docker.io/library/busybox:latest",
+		Image:                  "registry.eminwux.com/busybox:latest",
 		CellName:               "cell",
 		SpaceName:              "space",
 		RealmName:              "realm",
@@ -103,7 +103,7 @@ func TestBuildContainerSpec_Capabilities(t *testing.T) {
 	}
 	built := ctr.BuildContainerSpec(intmodel.ContainerSpec{
 		ID:        "c1",
-		Image:     "docker.io/library/busybox:latest",
+		Image:     "registry.eminwux.com/busybox:latest",
 		CellName:  "cell",
 		SpaceName: "space",
 		RealmName: "realm",
@@ -139,7 +139,7 @@ func TestBuildContainerSpec_Capabilities(t *testing.T) {
 func TestBuildContainerSpec_TmpfsMounts(t *testing.T) {
 	spec := applyBuiltSpec(t, intmodel.ContainerSpec{
 		ID:        "c1",
-		Image:     "docker.io/library/busybox:latest",
+		Image:     "registry.eminwux.com/busybox:latest",
 		CellName:  "cell",
 		SpaceName: "space",
 		RealmName: "realm",
@@ -173,7 +173,7 @@ func TestBuildContainerSpec_TmpfsMounts(t *testing.T) {
 func TestBuildContainerSpec_Resources(t *testing.T) {
 	spec := applyBuiltSpec(t, intmodel.ContainerSpec{
 		ID:        "c1",
-		Image:     "docker.io/library/busybox:latest",
+		Image:     "registry.eminwux.com/busybox:latest",
 		CellName:  "cell",
 		SpaceName: "space",
 		RealmName: "realm",
@@ -204,7 +204,7 @@ func TestBuildContainerSpec_Resources(t *testing.T) {
 func TestBuildContainerSpec_SecurityOptsNoNewPrivileges(t *testing.T) {
 	spec := applyBuiltSpec(t, intmodel.ContainerSpec{
 		ID:           "c1",
-		Image:        "docker.io/library/busybox:latest",
+		Image:        "registry.eminwux.com/busybox:latest",
 		CellName:     "cell",
 		SpaceName:    "space",
 		RealmName:    "realm",
@@ -226,7 +226,7 @@ func TestBuildContainerSpec_SecurityOptsSeccompUnconfined(t *testing.T) {
 	}
 	built := ctr.BuildContainerSpec(intmodel.ContainerSpec{
 		ID:           "c1",
-		Image:        "docker.io/library/busybox:latest",
+		Image:        "registry.eminwux.com/busybox:latest",
 		CellName:     "cell",
 		SpaceName:    "space",
 		RealmName:    "realm",
@@ -259,7 +259,7 @@ func TestBuildContainerSpec_SecurityOptsSeccompProfile(t *testing.T) {
 
 	spec := applyBuiltSpec(t, intmodel.ContainerSpec{
 		ID:           "c1",
-		Image:        "docker.io/library/busybox:latest",
+		Image:        "registry.eminwux.com/busybox:latest",
 		CellName:     "cell",
 		SpaceName:    "space",
 		RealmName:    "realm",
@@ -278,7 +278,7 @@ func TestBuildContainerSpec_SecurityOptsUnknownErrors(t *testing.T) {
 	spec := &runtimespec.Spec{Process: &runtimespec.Process{}, Linux: &runtimespec.Linux{}}
 	built := ctr.BuildContainerSpec(intmodel.ContainerSpec{
 		ID:           "c1",
-		Image:        "docker.io/library/busybox:latest",
+		Image:        "registry.eminwux.com/busybox:latest",
 		CellName:     "cell",
 		SpaceName:    "space",
 		RealmName:    "realm",
