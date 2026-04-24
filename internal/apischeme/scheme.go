@@ -135,6 +135,7 @@ func ConvertSpaceDocToInternal(in ext.SpaceDoc) (intmodel.Space, error) {
 			Spec: intmodel.SpaceSpec{
 				RealmName:     in.Spec.RealmID,
 				CNIConfigPath: in.Spec.CNIConfigPath,
+				Network:       convertSpaceNetworkToInternal(in.Spec.Network),
 				Defaults:      convertSpaceDefaultsToInternal(in.Spec.Defaults),
 			},
 			Status: intmodel.SpaceStatus{
@@ -173,6 +174,7 @@ func BuildSpaceExternalFromInternal(in intmodel.Space, apiVersion ext.Version) (
 			Spec: ext.SpaceSpec{
 				RealmID:       in.Spec.RealmName,
 				CNIConfigPath: in.Spec.CNIConfigPath,
+				Network:       buildSpaceNetworkExternalFromInternal(in.Spec.Network),
 				Defaults:      buildSpaceDefaultsExternalFromInternal(in.Spec.Defaults),
 			},
 			Status: ext.SpaceStatus{
@@ -788,4 +790,50 @@ func NormalizeCell(req ext.CellDoc) (intmodel.Cell, ext.Version, error) {
 		return intmodel.Cell{}, "", err
 	}
 	return internal, version, nil
+}
+
+func convertSpaceNetworkToInternal(in *ext.SpaceNetwork) *intmodel.SpaceNetwork {
+	if in == nil {
+		return nil
+	}
+	out := &intmodel.SpaceNetwork{}
+	if in.Egress != nil {
+		allow := make([]intmodel.EgressAllowRule, len(in.Egress.Allow))
+		for i, r := range in.Egress.Allow {
+			ports := append([]int(nil), r.Ports...)
+			allow[i] = intmodel.EgressAllowRule{
+				Host:  r.Host,
+				CIDR:  r.CIDR,
+				Ports: ports,
+			}
+		}
+		out.Egress = &intmodel.EgressPolicy{
+			Default: intmodel.EgressDefault(in.Egress.Default),
+			Allow:   allow,
+		}
+	}
+	return out
+}
+
+func buildSpaceNetworkExternalFromInternal(in *intmodel.SpaceNetwork) *ext.SpaceNetwork {
+	if in == nil {
+		return nil
+	}
+	out := &ext.SpaceNetwork{}
+	if in.Egress != nil {
+		allow := make([]ext.EgressAllowRule, len(in.Egress.Allow))
+		for i, r := range in.Egress.Allow {
+			ports := append([]int(nil), r.Ports...)
+			allow[i] = ext.EgressAllowRule{
+				Host:  r.Host,
+				CIDR:  r.CIDR,
+				Ports: ports,
+			}
+		}
+		out.Egress = &ext.EgressPolicy{
+			Default: ext.EgressDefault(in.Egress.Default),
+			Allow:   allow,
+		}
+	}
+	return out
 }

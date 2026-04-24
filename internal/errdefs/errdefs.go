@@ -113,6 +113,18 @@ var (
 	ErrBridgeNameTooLong = errors.New("bridge name exceeds Linux IFNAMSIZ limit")
 	ErrCNIPluginNotFound = errors.New("cni plugin not found")
 
+	// Network-policy-related errors.
+
+	ErrEgressRuleTargetRequired = errors.New("egress allow rule requires exactly one of host or cidr")
+	ErrEgressRuleTargetConflict = errors.New("egress allow rule must not set both host and cidr")
+	ErrEgressInvalidCIDR        = errors.New("egress allow rule cidr is not a valid CIDR")
+	ErrEgressInvalidHost        = errors.New("egress allow rule host is not a valid dns name")
+	ErrEgressInvalidPort        = errors.New("egress allow rule port must be within [1, 65535]")
+	ErrEgressInvalidDefault     = errors.New("egress default must be 'allow' or 'deny'")
+	ErrEgressHostResolution     = errors.New("failed to resolve egress allow rule host")
+	ErrEgressApply              = errors.New("failed to apply egress policy")
+	ErrEgressRemove             = errors.New("failed to remove egress policy")
+
 	// Secret-related errors.
 
 	ErrSecretNameRequired        = errors.New("secret name is required")

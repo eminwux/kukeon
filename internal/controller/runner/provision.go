@@ -158,6 +158,13 @@ func (r *Exec) provisionNewSpace(space intmodel.Space) (intmodel.Space, error) {
 	space.Status.CgroupPath = cgroupPath
 	space.Status.State = intmodel.SpaceStateReady
 
+	// Realize egress policy on the host firewall. iptables rules are safe
+	// to install before the bridge exists — they will match nothing until
+	// the CNI plugin brings the bridge up for the first container.
+	if policyErr := r.applySpaceEgressPolicy(space); policyErr != nil {
+		return intmodel.Space{}, policyErr
+	}
+
 	// Update space metadata
 	if updateErr := r.UpdateSpaceMetadata(space); updateErr != nil {
 		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateSpaceMetadata, updateErr)
@@ -266,6 +273,12 @@ func (r *Exec) ensureSpaceCNIConfig(space intmodel.Space) (intmodel.Space, error
 		"conf",
 		confPath,
 	)
+	// Re-apply egress policy on every Ensure so a daemon restart (or a
+	// manual `kuke apply` with a changed policy) converges the host
+	// firewall to the spec. iptables rules are idempotent via ensureRule.
+	if policyErr := r.applySpaceEgressPolicy(space); policyErr != nil {
+		return intmodel.Space{}, policyErr
+	}
 	return space, nil
 }
 

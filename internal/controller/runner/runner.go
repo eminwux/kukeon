@@ -23,6 +23,7 @@ import (
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/ctr"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/netpolicy"
 )
 
 type Runner interface {
@@ -99,6 +100,11 @@ type Exec struct {
 	ctrClient ctr.Client
 
 	cniConf *cni.Conf
+
+	// netPolicy applies and removes space egress policies on the host
+	// firewall. nil behaves as a NoopEnforcer so unit tests and read-only
+	// clients never touch iptables.
+	netPolicy netpolicy.Enforcer
 }
 
 type Options struct {
@@ -113,11 +119,21 @@ type Options struct {
 
 func NewRunner(ctx context.Context, logger *slog.Logger, opts Options) Runner {
 	return &Exec{
-		ctx:     ctx,
-		logger:  logger,
-		opts:    opts,
-		cniConf: &opts.CniConf,
+		ctx:       ctx,
+		logger:    logger,
+		opts:      opts,
+		cniConf:   &opts.CniConf,
+		netPolicy: netpolicy.NewIptablesEnforcer(logger),
 	}
+}
+
+// netPolicyEnforcer returns the configured enforcer or a no-op when the
+// runner was built without one (e.g., minimal test fixtures).
+func (r *Exec) netPolicyEnforcer() netpolicy.Enforcer {
+	if r.netPolicy == nil {
+		return netpolicy.NoopEnforcer{}
+	}
+	return r.netPolicy
 }
 
 func (r *Exec) BootstrapCNI(cfgDir, cacheDir, binDir string) (cni.BootstrapReport, error) {

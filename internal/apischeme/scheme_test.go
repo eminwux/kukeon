@@ -255,6 +255,81 @@ func TestStackRoundTripV1Beta1(t *testing.T) {
 	}
 }
 
+func TestSpaceEgressPolicyRoundTripV1Beta1(t *testing.T) {
+	input := ext.SpaceDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindSpace,
+		Metadata:   ext.SpaceMetadata{Name: "agents"},
+		Spec: ext.SpaceSpec{
+			RealmID: "main",
+			Network: &ext.SpaceNetwork{
+				Egress: &ext.EgressPolicy{
+					Default: ext.EgressDefaultDeny,
+					Allow: []ext.EgressAllowRule{
+						{Host: "api.anthropic.com", Ports: []int{443}},
+						{CIDR: "10.0.0.0/8", Ports: []int{5432}},
+					},
+				},
+			},
+		},
+	}
+	internal, version, err := apischeme.NormalizeSpace(input)
+	if err != nil {
+		t.Fatalf("NormalizeSpace: %v", err)
+	}
+	if version != ext.APIVersionV1Beta1 {
+		t.Fatalf("unexpected version: %s", version)
+	}
+	if internal.Spec.Network == nil || internal.Spec.Network.Egress == nil {
+		t.Fatalf("egress dropped in conversion: %+v", internal.Spec)
+	}
+	eg := internal.Spec.Network.Egress
+	if string(eg.Default) != string(ext.EgressDefaultDeny) {
+		t.Fatalf("default not preserved: %q", eg.Default)
+	}
+	if len(eg.Allow) != 2 {
+		t.Fatalf("allow rule count: got %d, want 2", len(eg.Allow))
+	}
+	if eg.Allow[0].Host != "api.anthropic.com" || len(eg.Allow[0].Ports) != 1 || eg.Allow[0].Ports[0] != 443 {
+		t.Fatalf("host rule not preserved: %+v", eg.Allow[0])
+	}
+
+	// Round-trip back to external.
+	out, err := apischeme.BuildSpaceExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildSpaceExternalFromInternal: %v", err)
+	}
+	if out.Spec.Network == nil || out.Spec.Network.Egress == nil {
+		t.Fatalf("egress dropped on reverse conversion: %+v", out.Spec)
+	}
+	if len(out.Spec.Network.Egress.Allow) != 2 {
+		t.Fatalf("allow rules lost on reverse conversion: %+v", out.Spec.Network.Egress)
+	}
+	// Confirm the YAML round-trip: re-serializing shouldn't blow up on
+	// the new nested struct.
+	if _, err = yaml.Marshal(out); err != nil {
+		t.Fatalf("yaml.Marshal: %v", err)
+	}
+}
+
+func TestSpaceEgressNilFieldsOmittedInYAML(t *testing.T) {
+	// Minimal space with no network/egress — YAML must not render a
+	// "network: null" line or expose the Egress pointer.
+	input := ext.SpaceDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindSpace,
+		Metadata:   ext.SpaceMetadata{Name: "blog"},
+		Spec:       ext.SpaceSpec{RealmID: "main"},
+	}
+	b, err := yaml.Marshal(input)
+	if err != nil {
+		t.Fatalf("yaml.Marshal: %v", err)
+	}
+	if strings.Contains(string(b), "network:") {
+		t.Fatalf("network field must be omitted when nil; got:\n%s", string(b))
+	}
+}
+
 func TestCellRoundTripV1Beta1(t *testing.T) {
 	input := ext.CellDoc{
 		APIVersion: ext.APIVersionV1Beta1,
