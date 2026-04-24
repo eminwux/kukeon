@@ -1,14 +1,14 @@
-# 🌪️ kukeon: Agent-native orchestration for Linux hosts
+# 🌪️ kukeon: Run AI agents on your own Linux.
 
 ![status: active](https://img.shields.io/badge/status-active-blue)
 ![state: alpha](https://img.shields.io/badge/state-alpha-orange)
 ![license: apache2](https://img.shields.io/badge/license-Apache%202.0-green)
 
-_Declarative, self-hostable runtime for AI agents. Run them on your cloud VM, homelab, or any Linux host with containerd._
+_Agent-native orchestration. Self-hosted. No walled garden._
 
-Kukeon gives AI agents a first-class home on Linux: declarative sessions with bounded lifetime, PTY-attached workloads, isolation by realm/space/cell, and clean teardown with `onEnd.persist`. No SaaS, no vendor lock-in — kukeon runs wherever you already run Linux.
+Your agent's context, state, and workspace live on **your** machines — not behind a SaaS login. Kukeon is a containerd-native runtime for AI agents on any Linux host: your cloud VM, your homelab, your laptop. Declarative sessions with bounded lifetime, PTY-attached workloads, and clean teardown — all on infrastructure you control.
 
-`kukeond` is a small daemon over containerd + CNI + cgroups. `kuke` is the CLI. The agent-native primitives — `Session`, `Interactive` containers, scoped secrets, default-deny network — are declared in YAML and reconciled on a single host.
+`kukeond` is a small daemon over containerd + CNI + cgroups. `kuke` is the CLI. Agent-native primitives — `Session`, `Interactive` containers, scoped secrets, default-deny networking — are declared in YAML and reconciled on a single host.
 
 See **[docs/site/vision.md](docs/site/vision.md)** for the full "Kukeon for AI Agents" proposal.
 
@@ -75,14 +75,13 @@ Complete documentation is available at [https://kukeon.io](https://kukeon.io), i
 
 ## Why kukeon
 
-AI agents need a runtime whose primitives match how they actually run: short-lived, untrusted-on-the-inside, network-scoped, declared per task, and torn down cleanly when done. Compose is too flat for that envelope; Kubernetes is too heavy to stand up per session. Kukeon aims for the shape agents need:
+**Your agents, your machines, your rules.** SaaS agent sandboxes (E2B, Daytona, Modal) force your agents to run on their cloud. Kukeon runs them on yours — a cloud VM, a homelab, a single Linux box with containerd. No vendor lock-in, no data leaving your infrastructure, no credit card.
 
-- **Session-scoped** — declare lifetime, budget, and `onEnd.persist` once; the orchestrator enforces the deadline and the teardown
-- **Isolated by layer** — `Realm` is a containerd namespace, `Space` is a CNI network + cgroup subtree + default-deny egress, `Cell` is a pod-like group. Each layer is a real Linux primitive
-- **Scoped secrets** — credentials ride in by reference (`fromFile` / `fromEnv`), never baked into the manifest or surfaced in `kuke get -o yaml`
-- **Declarative + reviewable** — one YAML per task, diffable in a PR, reproducible across hosts
-- **Self-hostable** — runs on your cloud VM, homelab, or laptop wherever containerd is available. No SaaS dependency
-- **Transparent** — the state is inspectable with `ctr`, `ip link`, and `ls /sys/fs/cgroup`; no hidden control plane
+- **Sovereign** — every byte of agent state lives on hosts you own
+- **Declarative** — Session + Interactive + onEnd.persist as first-class YAML
+- **Isolated** — realm/space/cell backed by real Linux primitives (containerd namespaces, CNI networks, cgroups)
+- **Self-hosted** — no cluster, no etcd, no scheduler, no SaaS
+- **Transparent** — inspect what the daemon did with `ctr`, `ip link`, `ls /sys/fs/cgroup`
 
 ### Also a great container orchestrator for single Linux hosts
 
