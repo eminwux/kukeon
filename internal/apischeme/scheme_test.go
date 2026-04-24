@@ -110,6 +110,105 @@ func TestSpaceRoundTripV1Beta1(t *testing.T) {
 	}
 }
 
+// TestSpaceDefaultsRoundTripV1Beta1 verifies that spec.defaults.container
+// survives NormalizeSpace → BuildSpaceExternalFromInternal with all nested
+// fields (user, readOnly, caps, securityOpts, tmpfs, resources) intact.
+func TestSpaceDefaultsRoundTripV1Beta1(t *testing.T) {
+	roTrue := true
+	memLimit := int64(4 * 1024 * 1024 * 1024)
+	input := ext.SpaceDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindSpace,
+		Metadata:   ext.SpaceMetadata{Name: "agent-sandbox"},
+		Spec: ext.SpaceSpec{
+			RealmID: "agents",
+			Defaults: &ext.SpaceDefaults{
+				Container: &ext.SpaceContainerDefaults{
+					User:                   "1000:1000",
+					ReadOnlyRootFilesystem: &roTrue,
+					Capabilities: &ext.ContainerCapabilities{
+						Drop: []string{"ALL"},
+						Add:  []string{"NET_BIND_SERVICE"},
+					},
+					SecurityOpts: []string{"no-new-privileges"},
+					Tmpfs: []ext.ContainerTmpfsMount{
+						{Path: "/tmp", SizeBytes: 64 * 1024 * 1024},
+					},
+					Resources: &ext.ContainerResources{
+						MemoryLimitBytes: &memLimit,
+					},
+				},
+			},
+		},
+	}
+
+	internal, version, err := apischeme.NormalizeSpace(input)
+	if err != nil {
+		t.Fatalf("NormalizeSpace failed: %v", err)
+	}
+	if internal.Spec.Defaults == nil || internal.Spec.Defaults.Container == nil {
+		t.Fatalf("internal Defaults.Container is nil after NormalizeSpace: %+v", internal.Spec.Defaults)
+	}
+	intContainer := internal.Spec.Defaults.Container
+	if intContainer.User != "1000:1000" {
+		t.Errorf("internal User = %q, want 1000:1000", intContainer.User)
+	}
+	if intContainer.ReadOnlyRootFilesystem == nil || !*intContainer.ReadOnlyRootFilesystem {
+		t.Errorf("internal ReadOnlyRootFilesystem = %v, want *true", intContainer.ReadOnlyRootFilesystem)
+	}
+	if intContainer.Capabilities == nil ||
+		len(intContainer.Capabilities.Drop) != 1 || intContainer.Capabilities.Drop[0] != "ALL" {
+		t.Errorf("internal Capabilities.Drop = %+v, want [ALL]", intContainer.Capabilities)
+	}
+	if len(intContainer.SecurityOpts) != 1 || intContainer.SecurityOpts[0] != "no-new-privileges" {
+		t.Errorf("internal SecurityOpts = %v", intContainer.SecurityOpts)
+	}
+	if len(intContainer.Tmpfs) != 1 || intContainer.Tmpfs[0].Path != "/tmp" {
+		t.Errorf("internal Tmpfs = %+v", intContainer.Tmpfs)
+	}
+	if intContainer.Resources == nil || intContainer.Resources.MemoryLimitBytes == nil ||
+		*intContainer.Resources.MemoryLimitBytes != memLimit {
+		t.Errorf("internal Resources = %+v, want MemoryLimit=4GiB", intContainer.Resources)
+	}
+
+	output, err := apischeme.BuildSpaceExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildSpaceExternalFromInternal failed: %v", err)
+	}
+	if output.Spec.Defaults == nil || output.Spec.Defaults.Container == nil {
+		t.Fatalf("external Defaults.Container is nil after round trip: %+v", output.Spec.Defaults)
+	}
+	extContainer := output.Spec.Defaults.Container
+	if extContainer.User != "1000:1000" {
+		t.Errorf("external User = %q, want 1000:1000", extContainer.User)
+	}
+	if extContainer.ReadOnlyRootFilesystem == nil || !*extContainer.ReadOnlyRootFilesystem {
+		t.Errorf("external ReadOnlyRootFilesystem not round-tripped: %v", extContainer.ReadOnlyRootFilesystem)
+	}
+	if extContainer.Capabilities == nil ||
+		len(extContainer.Capabilities.Drop) != 1 || extContainer.Capabilities.Drop[0] != "ALL" ||
+		len(extContainer.Capabilities.Add) != 1 || extContainer.Capabilities.Add[0] != "NET_BIND_SERVICE" {
+		t.Errorf("external Capabilities not round-tripped: %+v", extContainer.Capabilities)
+	}
+
+	// YAML round trip — ensures the tags decode / encode correctly.
+	encoded, err := yaml.Marshal(output)
+	if err != nil {
+		t.Fatalf("yaml.Marshal failed: %v", err)
+	}
+	var decoded ext.SpaceDoc
+	if err = yaml.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("yaml.Unmarshal failed: %v\nyaml:\n%s", err, encoded)
+	}
+	if decoded.Spec.Defaults == nil || decoded.Spec.Defaults.Container == nil ||
+		decoded.Spec.Defaults.Container.User != "1000:1000" {
+		t.Errorf("YAML round trip lost Defaults.Container: decoded=%+v", decoded.Spec.Defaults)
+	}
+	if !strings.Contains(string(encoded), "defaults:") {
+		t.Errorf("YAML missing defaults block: %s", encoded)
+	}
+}
+
 func TestStackRoundTripV1Beta1(t *testing.T) {
 	input := ext.StackDoc{
 		APIVersion: ext.APIVersionV1Beta1,

@@ -35,6 +35,7 @@ func (r *Exec) UpdateSpace(desired intmodel.Space) (intmodel.Space, error) {
 
 	// Update compatible fields
 	existing.Metadata.Labels = desired.Metadata.Labels
+	existing.Spec.Defaults = desired.Spec.Defaults
 	// Note: CNIConfigPath is not updated as it's a breaking change
 
 	// Update metadata file

@@ -177,6 +177,19 @@ func DiffSpace(desired, actual intmodel.Space) DiffResult {
 		result.Details["metadata.labels"] = labelsChangedMsg
 	}
 
+	// Compatible changes: spec.defaults.container. Inheritance is computed
+	// at container-create/update time, so changing defaults is non-breaking
+	// for already-running containers — only new or updated containers pick
+	// up the new envelope.
+	if !spaceDefaultsEqual(desired.Spec.Defaults, actual.Spec.Defaults) {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "spec.defaults.container")
+		result.Details["spec.defaults.container"] = "container defaults changed"
+	}
+
 	return result
 }
 
@@ -662,6 +675,56 @@ func resourcesAreZero(r *intmodel.ContainerResources) bool {
 }
 
 func int64PtrEqual(a, b *int64) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+// spaceDefaultsEqual reports whether two *SpaceDefaults describe the same
+// inherited envelope. A nil pointer is treated as equal to an empty defaults
+// block so that adding or clearing an explicitly-empty `spec.defaults` does
+// not register as a change.
+func spaceDefaultsEqual(a, b *intmodel.SpaceDefaults) bool {
+	ac := spaceDefaultsContainer(a)
+	bc := spaceDefaultsContainer(b)
+	if ac == nil && bc == nil {
+		return true
+	}
+	if ac == nil || bc == nil {
+		return spaceContainerDefaultsIsZero(ac) && spaceContainerDefaultsIsZero(bc)
+	}
+	return ac.User == bc.User &&
+		boolPtrEqual(ac.ReadOnlyRootFilesystem, bc.ReadOnlyRootFilesystem) &&
+		capabilitiesEqual(ac.Capabilities, bc.Capabilities) &&
+		slicesEqual(ac.SecurityOpts, bc.SecurityOpts) &&
+		tmpfsEqual(ac.Tmpfs, bc.Tmpfs) &&
+		resourcesEqual(ac.Resources, bc.Resources)
+}
+
+func spaceDefaultsContainer(d *intmodel.SpaceDefaults) *intmodel.SpaceContainerDefaults {
+	if d == nil {
+		return nil
+	}
+	return d.Container
+}
+
+func spaceContainerDefaultsIsZero(c *intmodel.SpaceContainerDefaults) bool {
+	if c == nil {
+		return true
+	}
+	return c.User == "" &&
+		c.ReadOnlyRootFilesystem == nil &&
+		c.Capabilities == nil &&
+		len(c.SecurityOpts) == 0 &&
+		len(c.Tmpfs) == 0 &&
+		c.Resources == nil
+}
+
+func boolPtrEqual(a, b *bool) bool {
 	if a == nil && b == nil {
 		return true
 	}

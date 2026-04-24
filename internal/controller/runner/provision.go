@@ -1069,6 +1069,10 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		return nil, errdefs.ErrStackNameRequired
 	}
 
+	if err := r.applyCellContainerDefaults(cell); err != nil {
+		return nil, err
+	}
+
 	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmName, spaceName)
 	if cniErr != nil {
 		return nil, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
@@ -1273,6 +1277,27 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 	return rootContainer, nil
 }
 
+// applyCellContainerDefaults loads the parent Space for the cell and merges
+// its spec.defaults.container into every container in the cell. The merge
+// runs in place and is idempotent — containers that already carry the
+// defaults are unchanged. This is the single entry point that every
+// container-creating flow (CreateCell, UpdateCell, CreateContainer,
+// UpdateContainer) funnels through.
+func (r *Exec) applyCellContainerDefaults(cell *intmodel.Cell) error {
+	spaceLookup := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{Name: cell.Spec.SpaceName},
+		Spec:     intmodel.SpaceSpec{RealmName: cell.Spec.RealmName},
+	}
+	parentSpace, err := r.GetSpace(spaceLookup)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
+	}
+	for i := range cell.Spec.Containers {
+		intmodel.ApplySpaceDefaultsToContainer(parentSpace, &cell.Spec.Containers[i])
+	}
+	return nil
+}
+
 // ensureCellContainers ensures the root container and all containers defined in the CellDoc exist.
 // The root container is ensured first, then all containers in doc.Spec.Containers are ensured.
 // If any container doesn't exist, it is created. Returns the root container or an error.
@@ -1300,6 +1325,10 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 	stackName := cell.Spec.StackName
 	if stackName == "" {
 		return nil, errdefs.ErrStackNameRequired
+	}
+
+	if err := r.applyCellContainerDefaults(cell); err != nil {
+		return nil, err
 	}
 
 	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmName, spaceName)
