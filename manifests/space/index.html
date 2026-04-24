@@ -2050,6 +2050,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#specnetworkegress-object-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.network.egress (object, optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#specdefaultscontainer-object-optional" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2403,6 +2414,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#specnetworkegress-object-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.network.egress (object, optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#specdefaultscontainer-object-optional" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2480,9 +2502,17 @@
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nt">spec</span><span class="p">:</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="nt">realmId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">main</span>
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">  </span><span class="nt">cniConfigPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/etc/cni/net.d</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="nt">status</span><span class="p">:</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">  </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Ready</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">  </span><span class="nt">cgroupPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/kukeon/main/default</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">  </span><span class="nt">network</span><span class="p">:</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="nt">egress</span><span class="p">:</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">      </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">deny</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">      </span><span class="nt">allow</span><span class="p">:</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api.anthropic.com</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">          </span><span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">443</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">cidr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.0.0.0/8</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">          </span><span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">5432</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="nt">status</span><span class="p">:</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">  </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Ready</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">  </span><span class="nt">cgroupPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/kukeon/main/default</span>
 </code></pre></div>
 <p>See <a href="../../concepts/space/">Concepts → Space</a> for what a space is.</p>
 <h2 id="spec">spec<a class="headerlink" href="#spec" title="Permanent link">&para;</a></h2>
@@ -2490,6 +2520,60 @@
 <p>The realm that owns this space. Matches the realm's <code>metadata.name</code>.</p>
 <h3 id="speccniconfigpath-string-optional"><code>spec.cniConfigPath</code> (string, optional)<a class="headerlink" href="#speccniconfigpath-string-optional" title="Permanent link">&para;</a></h3>
 <p>Directory where Kukeon writes this space's CNI conflist. Defaults to the system CNI config directory (<code>/etc/cni/net.d</code>). Override when you want per-space conflist isolation.</p>
+<h3 id="specnetworkegress-object-optional"><code>spec.network.egress</code> (object, optional)<a class="headerlink" href="#specnetworkegress-object-optional" title="Permanent link">&para;</a></h3>
+<p>Constrains outbound traffic leaving the space's bridge. When omitted, traffic is unconstrained — matching the pre-<code>v1beta1</code> behavior.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>default</code></td>
+<td><code>allow</code> | <code>deny</code></td>
+<td>Fallthrough action when no <code>allow</code> rule matches. Required when <code>egress</code> is set.</td>
+</tr>
+<tr>
+<td><code>allow</code></td>
+<td>list of allow rules</td>
+<td>Permitted destinations. Each entry sets exactly one of <code>host</code> or <code>cidr</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Each allow rule:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host</code></td>
+<td>string</td>
+<td>DNS name. Resolved to IPv4 addresses by the daemon at apply time.</td>
+</tr>
+<tr>
+<td><code>cidr</code></td>
+<td>string</td>
+<td>IPv4 CIDR. Enforced literally via iptables.</td>
+</tr>
+<tr>
+<td><code>ports</code></td>
+<td>list of ints</td>
+<td>TCP destination ports (1–65535). Empty means "any protocol and any port on this destination".</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Enforcement.</strong> When the policy is non-trivial (either <code>default: deny</code>, or <code>default: allow</code> with at least one allow rule), the daemon materializes it as a per-space chain in the iptables <code>filter</code> table named <code>KUKE-EGR-&lt;hash&gt;</code>, fed from a shared <code>KUKEON-EGRESS</code> chain hooked into <code>FORWARD</code>. Existing connections are preserved via a <code>RELATED,ESTABLISHED</code> short-circuit, so reply traffic for outbound flows initiated before a policy is applied is unaffected. The enforcement is bridge-scoped (<code>-i &lt;bridge&gt;</code>), so a single misconfigured space cannot affect traffic from other spaces in the same realm.</p>
+<p><strong>Hostname caveat (design path a).</strong> Hostnames are resolved to IPs once, at apply time, and the resolved IPs are written into iptables. If the target service publishes a new IP after the policy is applied, the rule will not cover it until you re-apply the space (for example, <code>kuke apply -f space.yaml</code>). Services behind large, frequently rotating CDNs are not a good fit for hostname rules in this release — prefer a CIDR rule if you control the upstream, or accept occasional 5xxs and re-apply on a schedule. A transparent egress proxy would address this, and is tracked as a separate primitive (out of scope for this issue).</p>
+<p><strong>Observability.</strong> When a space is deleted, the daemon logs the terminal DROP counter (packets + bytes) for its chain, tagged with the <code>kukeon:&lt;realm&gt;:&lt;space&gt;</code> comment. Operators can also inspect counters on a running policy at any time with <code>iptables -L KUKE-EGR-&lt;hash&gt; -n -v -x</code> or filter across all spaces with <code>iptables -S | grep kukeon:</code>.</p>
+<p><strong>Minimum-viable scope.</strong> When a rule specifies <code>ports</code>, enforcement is TCP-only; UDP and ICMP fall through to <code>default</code> for that destination. When <code>ports</code> is omitted, the rule matches any IP traffic to the destination. IPv6 addresses returned by DNS are ignored — the rules are IPv4-only. These gaps are tracked as follow-ups.</p>
 <h3 id="specdefaultscontainer-object-optional"><code>spec.defaults.container</code> (object, optional)<a class="headerlink" href="#specdefaultscontainer-object-optional" title="Permanent link">&para;</a></h3>
 <p>Default values inherited by every container created inside the space unless the container's own spec overrides the field. The space exists to declare the isolation envelope once — <code>spec.defaults.container</code> is how that envelope flows into every container.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
@@ -2577,7 +2661,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 24, 2026 12:19:30 UTC">April 24, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 24, 2026 13:44:49 UTC">April 24, 2026</span>
   </span>
 
     
