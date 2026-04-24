@@ -1,35 +1,36 @@
-# kukeon: A Lightweight Container Orchestrator
+# kukeon: Agent-native orchestration for Linux hosts
 
 ![status: active](https://img.shields.io/badge/status-active-blue)
 ![state: alpha](https://img.shields.io/badge/state-alpha-orange)
 ![license: apache2](https://img.shields.io/badge/license-Apache%202.0-green)
 
-_Structured container environments on a single machine._
+_Declarative, self-hostable runtime for AI agents._
 
-Kukeon is a local-first, containerd-native orchestrator that sits between Docker and Kubernetes. It provides structure, networking, isolation, and lifecycle management for containers without the complexity of running a full cluster.
+Kukeon gives AI agents a first-class home on Linux: declarative sessions with bounded lifetime, PTY-attached workloads, isolation by realm/space/cell, and clean teardown with `onEnd.persist`. No SaaS, no vendor lock-in — kukeon runs wherever you already run Linux.
 
 !!! warning "Alpha software"
     This project is under active development and not production ready. Interfaces and APIs may change.
 
-At its core is `kukeond`, a small daemon that manages containerd, CNI networks, namespaces, and cgroups, and exposes a simple API. The `kuke` CLI and the future Web UI act as thin clients.
+`kukeond` is a small daemon over containerd + CNI + cgroups. `kuke` is the CLI. The agent-native primitives — `Session`, `Interactive` containers, scoped secrets, default-deny network — are declared in YAML and reconciled on a single host.
+
+See the full **["Kukeon for AI Agents" proposal](vision.md)** for background and sequencing.
 
 ## Why kukeon
 
-Docker is simple but unstructured: everything lives in a flat list. Kubernetes is structured but heavy: you pay for a control plane whether you need one or not. Kukeon aims for the middle — a single, explicit hierarchy with strong isolation primitives and nothing else to operate.
+AI agents need a runtime whose primitives match how they actually run: short-lived, untrusted-on-the-inside, network-scoped, declared per task, and torn down cleanly when done. Compose is too flat for that envelope; Kubernetes is too heavy to stand up per session. Kukeon aims for the shape agents need:
 
-- **Reproducible** — declarative YAML manifests describe every resource
-- **Structured** — Realm → Space → Stack → Cell → Container makes intent explicit
-- **Isolated** — each layer is backed by real Linux primitives (containerd namespaces, CNI networks, cgroups)
-- **Local-first** — no cluster, no etcd, no scheduler. It runs on one host
-- **Transparent** — inspect what the daemon did with `ctr`, `ip link`, `ls /sys/fs/cgroup`
+- **Session-scoped** — declare lifetime, budget, and `onEnd.persist` once; the orchestrator enforces the deadline and the teardown
+- **Isolated by layer** — `Realm` is a containerd namespace, `Space` is a CNI network + cgroup subtree + default-deny egress, `Cell` is a pod-like group. Each layer is a real Linux primitive
+- **Scoped secrets** — credentials ride in by reference (`fromFile` / `fromEnv`), never baked into the manifest or surfaced in `kuke get -o yaml`
+- **Declarative + reviewable** — one YAML per task, diffable in a PR, reproducible across hosts
+- **Self-hostable** — runs on your cloud VM, homelab, or laptop wherever containerd is available. No SaaS dependency
+- **Transparent** — the state is inspectable with `ctr`, `ip link`, and `ls /sys/fs/cgroup`; no hidden control plane
 
-You can think of it as:
+### Also a great container orchestrator for single Linux hosts
 
-> Proxmox for containers
->
-> or
->
-> A small Heroku that runs locally
+The same primitives that make kukeon suitable for agent sessions also make it a good fit for anyone who has outgrown `docker compose` but doesn't want to stand up a Kubernetes cluster. Docker is simple but unstructured: everything lives in a flat list. Kubernetes is structured but heavy: you pay for a control plane whether you need one or not. Kukeon sits in between — an explicit `Realm → Space → Stack → Cell → Container` hierarchy, one CNI network per space, one cgroup subtree per layer, and no distributed scheduler.
+
+Homelab and VPS users, systems engineers who prefer containerd over Docker, and developers who find Docker too flat and Kubernetes too heavy are all first-class audiences.
 
 ## Core hierarchy
 
