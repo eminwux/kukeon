@@ -336,6 +336,20 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_START_CONTAINER_CELL = DefineKV("KUKE_START_CONTAINER_CELL", "kuke/start/container/cell")
 
+	// Attach command variables
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_ATTACH_REALM = DefineKV("KUKE_ATTACH_REALM", "kuke/attach/realm", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_ATTACH_SPACE = DefineKV("KUKE_ATTACH_SPACE", "kuke/attach/space", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_ATTACH_STACK = DefineKV("KUKE_ATTACH_STACK", "kuke/attach/stack", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_ATTACH_CELL = DefineKV("KUKE_ATTACH_CELL", "kuke/attach/cell")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_ATTACH_CONTAINER = DefineKV("KUKE_ATTACH_CONTAINER", "kuke/attach/container")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_ATTACH_SB_BINARY = DefineKV("KUKE_ATTACH_SB_BINARY", "kuke/attach/sbBinary", "sb")
+
 	// Stop command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_STOP_CELL_REALM = DefineKV("KUKE_STOP_CELL_REALM", "kuke/stop/cell/realm", "default")
