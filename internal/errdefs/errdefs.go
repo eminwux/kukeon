@@ -130,7 +130,7 @@ var (
 	// ErrAttachNotSupported is returned when an attach request targets a
 	// container that was not created with Attachable=true. The sbsh wrapper
 	// is only injected on opt-in; non-Attachable containers have no
-	// /run/sbsh.socket to connect to.
+	// /run/kukeon/tty/socket to connect to.
 	ErrAttachNotSupported = errors.New("container is not attachable; recreate with attachable=true")
 
 	// ErrAttachAmbiguous is returned by the `kuke attach` candidate picker

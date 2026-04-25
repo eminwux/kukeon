@@ -75,8 +75,8 @@ func TestBuildContainerSpec_AttachableFalseIsByteIdentical(t *testing.T) {
 	if hasMountAt(got, ctr.AttachableBinaryPath) {
 		t.Errorf("Attachable=false produced sbsh binary mount; should not")
 	}
-	if hasMountAt(got, ctr.AttachableSocketPath) {
-		t.Errorf("Attachable=false produced sbsh socket mount; should not")
+	if hasMountAt(got, ctr.AttachableTTYDir) {
+		t.Errorf("Attachable=false produced sbsh tty dir mount; should not")
 	}
 }
 
@@ -134,7 +134,7 @@ func TestBuildContainerSpec_AttachableTrue_MountsAndArgsWrap(t *testing.T) {
 
 	inj := ctr.AttachableInjection{
 		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
-		HostSocketPath: "/opt/kukeon/realm/space/stack/cell/c1/sbsh.io",
+		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
 	}
 
 	for _, tc := range cases {
@@ -163,19 +163,38 @@ func TestBuildContainerSpec_AttachableTrue_MountsAndArgsWrap(t *testing.T) {
 				t.Errorf("binary mount must be read-only, got options=%v", binMount.Options)
 			}
 
-			sockMount := findMount(spec, ctr.AttachableSocketPath)
-			if sockMount == nil {
-				t.Fatalf("expected bind mount at %s, got mounts=%+v", ctr.AttachableSocketPath, spec.Mounts)
+			ttyMount := findMount(spec, ctr.AttachableTTYDir)
+			if ttyMount == nil {
+				t.Fatalf("expected bind mount at %s, got mounts=%+v", ctr.AttachableTTYDir, spec.Mounts)
 			}
-			if sockMount.Source != inj.HostSocketPath {
-				t.Errorf("socket mount source = %q, want %q", sockMount.Source, inj.HostSocketPath)
+			if ttyMount.Source != inj.HostTTYDir {
+				t.Errorf("tty mount source = %q, want %q", ttyMount.Source, inj.HostTTYDir)
+			}
+			if containsString(ttyMount.Options, "ro") {
+				t.Errorf("tty mount must be read-write, got options=%v", ttyMount.Options)
+			}
+			// AC: exactly one rw bind whose source is the tty dir; the
+			// single-file /run/sbsh.socket mount must be gone.
+			if hasMountAt(spec, "/run/sbsh.socket") {
+				t.Errorf("legacy /run/sbsh.socket file mount still present: %+v", spec.Mounts)
+			}
+			ttyMounts := 0
+			for _, m := range spec.Mounts {
+				if m.Destination == ctr.AttachableTTYDir {
+					ttyMounts++
+				}
+			}
+			if ttyMounts != 1 {
+				t.Errorf("expected exactly one mount at %s, got %d", ctr.AttachableTTYDir, ttyMounts)
 			}
 
 			wantPrefix := []string{
 				ctr.AttachableBinaryPath,
 				ctr.AttachableSubcommand,
-				"--socket",
-				ctr.AttachableSocketPath,
+				"--run-path", ctr.AttachableTTYDir,
+				"--terminal-socket", ctr.AttachableSocketPath,
+				"--capture-file", ctr.AttachableCapturePath,
+				"--terminal-logfile", ctr.AttachableLogfilePath,
 				"--",
 			}
 			if len(spec.Process.Args) < len(wantPrefix) {
@@ -208,15 +227,17 @@ func TestBuildContainerSpec_AttachableTrue_EmptyImageArgs(t *testing.T) {
 	}
 	inj := ctr.AttachableInjection{
 		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
-		HostSocketPath: "/opt/kukeon/realm/space/stack/cell/c1/sbsh.io",
+		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
 	}
 	spec := applyBuiltSpecWith(t, in, nil, ctr.WithAttachableInjection(inj))
 
 	want := []string{
 		ctr.AttachableBinaryPath,
 		ctr.AttachableSubcommand,
-		"--socket",
-		ctr.AttachableSocketPath,
+		"--run-path", ctr.AttachableTTYDir,
+		"--terminal-socket", ctr.AttachableSocketPath,
+		"--capture-file", ctr.AttachableCapturePath,
+		"--terminal-logfile", ctr.AttachableLogfilePath,
 		"--",
 	}
 	if !reflect.DeepEqual(spec.Process.Args, want) {

@@ -58,12 +58,13 @@ type ContainerSpec struct {
 	CNIConfigPath          string                 `json:"cniConfigPath,omitempty"          yaml:"cniConfigPath,omitempty"`
 	RestartPolicy          string                 `json:"restartPolicy"                    yaml:"restartPolicy"`
 	// Attachable opts the container into sbsh-wrapper injection. When true,
-	// the daemon prepends `sbsh terminal --socket /run/sbsh.socket --` to
+	// the daemon prepends `sbsh terminal --run-path /run/kukeon/tty …` to
 	// process.args, bind-mounts the sbsh binary read-only at /.kukeon/bin/sbsh,
-	// and bind-mounts a per-container Unix socket at /run/sbsh.socket. The
-	// host-visible peer of the socket lives in the per-container metadata dir
-	// and is what `kuke attach` connects to. Default false — no behavior
-	// change for existing specs.
+	// and bind-mounts a per-container tty directory at /run/kukeon/tty (sbsh
+	// owns its socket, capture, and log files inside it). The host-visible
+	// peer of that directory lives in the per-container metadata dir and its
+	// `socket` entry is what `kuke attach` connects to. Default false — no
+	// behavior change for existing specs.
 	Attachable bool `json:"attachable,omitempty" yaml:"attachable,omitempty"`
 }
 

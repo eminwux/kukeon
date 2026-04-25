@@ -23,10 +23,18 @@ const (
 
 	KukeonMetadataFile = "metadata.json"
 
+	// KukeonContainerTTYDir is the basename of the per-container directory
+	// that owns the sbsh terminal socket plus its capture and log siblings.
+	// kukeon bind-mounts this directory (not a single file) into the
+	// container so sbsh's unlink-and-recreate of the socket inode stays
+	// host-visible.
+	KukeonContainerTTYDir = "tty"
+
 	// KukeonContainerSocketFile is the basename of the per-container sbsh
-	// control socket (host side). The container sees the same inode at
-	// /run/sbsh.socket via a bind mount injected by Attachable=true specs.
-	KukeonContainerSocketFile = "sbsh.io"
+	// terminal socket inside KukeonContainerTTYDir. The container sees the
+	// same inode at /run/kukeon/tty/socket via the directory bind mount
+	// injected by Attachable=true specs.
+	KukeonContainerSocketFile = "socket"
 
 	// Label keys shared across the user default hierarchy and the system hierarchy.
 	KukeonRealmLabelKey     = "realm.kukeon.io"

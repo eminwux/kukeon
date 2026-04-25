@@ -68,7 +68,7 @@ func TestAttachContainer_Attachable_RPCReturnsSocketPath(t *testing.T) {
 	// When the target is Attachable=true the daemon hands back the host
 	// socket path so the client can open it directly. The RPC layer must
 	// pass that path through verbatim and leave Err nil.
-	const wantSocket = "/opt/kukeon/default/default/default/cellA/work/sbsh.io"
+	const wantSocket = "/opt/kukeon/default/default/default/cellA/work/tty/socket"
 	core := &attachClientFake{result: kukeonv1.AttachContainerResult{HostSocketPath: wantSocket}}
 	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core)
 

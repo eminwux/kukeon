@@ -32,10 +32,25 @@ const (
 	// read-only inside the container.
 	AttachableBinaryPath = "/.kukeon/bin/sbsh"
 
-	// AttachableSocketPath is where the per-container sbsh control socket is
-	// bind-mounted inside the container. The host peer lives in the
-	// per-container metadata directory.
-	AttachableSocketPath = "/run/sbsh.socket"
+	// AttachableTTYDir is where the per-container tty directory is
+	// bind-mounted inside the container. sbsh creates and owns the socket,
+	// capture, and log files inside this directory; because it is a
+	// directory bind mount (not a file mount), sbsh's unlink-and-recreate
+	// of the socket inode stays host-visible.
+	AttachableTTYDir = "/run/kukeon/tty"
+
+	// AttachableSocketPath is the in-container path of the sbsh terminal
+	// socket. sbsh listens here; the host peer is the bind-mount source
+	// directory's `socket` entry, which `kuke attach` connects to.
+	AttachableSocketPath = AttachableTTYDir + "/socket"
+
+	// AttachableCapturePath is the in-container path of the sbsh capture
+	// file. Surfacing it to `kuke logs` is a follow-up.
+	AttachableCapturePath = AttachableTTYDir + "/capture"
+
+	// AttachableLogfilePath is the in-container path of the sbsh terminal
+	// log file. Surfacing it to `kuke logs` is a follow-up.
+	AttachableLogfilePath = AttachableTTYDir + "/log"
 
 	// AttachableSubcommand is the sbsh entrypoint subcommand used to wrap
 	// the workload's process. Hard-coded for the foundation slice; the
@@ -52,16 +67,23 @@ type AttachableInjection struct {
 	// bind-mounted RO at AttachableBinaryPath inside the container.
 	SbshBinaryPath string
 
-	// HostSocketPath is the host path of the per-container sbsh control
-	// socket. It will be bind-mounted at AttachableSocketPath inside the
-	// container, and is what `kuke attach` (#66) connects to.
-	HostSocketPath string
+	// HostTTYDir is the host path of the per-container tty directory that
+	// will be bind-mounted at AttachableTTYDir inside the container. The
+	// host-visible socket that `kuke attach` (#66) connects to is the
+	// `socket` entry inside this directory.
+	HostTTYDir string
 }
 
 // withAttachableMounts adds the two bind mounts that make sbsh reachable from
-// inside the container: the static binary (RO) and the per-container control
-// socket (RW). Used as an oci.SpecOpts so it composes with the rest of the
+// inside the container: the static binary (RO) and the per-container tty
+// directory (RW). Used as an oci.SpecOpts so it composes with the rest of the
 // spec build.
+//
+// The tty mount is a *directory* bind mount, not a file mount: sbsh's
+// listener does `os.Remove` + `Listen` on the destination, which under a
+// file bind would unlink the bind dirent and create a fresh socket inode on
+// the container's overlay — invisible to the host. A directory bind mount
+// keeps the inode host-visible by construction.
 func withAttachableMounts(inj AttachableInjection) oci.SpecOpts {
 	return oci.WithMounts([]runtimespec.Mount{
 		{
@@ -71,18 +93,19 @@ func withAttachableMounts(inj AttachableInjection) oci.SpecOpts {
 			Options:     []string{"rbind", "ro"},
 		},
 		{
-			Destination: AttachableSocketPath,
-			Source:      inj.HostSocketPath,
+			Destination: AttachableTTYDir,
+			Source:      inj.HostTTYDir,
 			Type:        "bind",
 			Options:     []string{"rbind", "rw"},
 		},
 	})
 }
 
-// withAttachableArgsWrap prepends `sbsh terminal --socket /run/sbsh.socket --`
-// to the container's process.args. It is composed *after* the normal
-// WithProcessArgs (or the image's default ENTRYPOINT/CMD) so the wrapped
-// command line is whatever would have run otherwise.
+// withAttachableArgsWrap prepends the sbsh terminal wrapper, with the
+// per-tty paths inside AttachableTTYDir, to the container's process.args.
+// It is composed *after* the normal WithProcessArgs (or the image's default
+// ENTRYPOINT/CMD) so the wrapped command line is whatever would have run
+// otherwise.
 //
 // OCI semantics: process.args is the merged "ENTRYPOINT + CMD" by the time
 // this opt runs (containerd's WithImageConfigArgs has already resolved image
@@ -98,8 +121,10 @@ func withAttachableArgsWrap() oci.SpecOpts {
 		wrapped := []string{
 			AttachableBinaryPath,
 			AttachableSubcommand,
-			"--socket",
-			AttachableSocketPath,
+			"--run-path", AttachableTTYDir,
+			"--terminal-socket", AttachableSocketPath,
+			"--capture-file", AttachableCapturePath,
+			"--terminal-logfile", AttachableLogfilePath,
 			"--",
 		}
 		s.Process.Args = append(wrapped, original...)
