@@ -134,11 +134,11 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 	// Step 2: apply the attachable cell fixture. Auto-starts the workload
 	// (apply is the path that drives Cell to Ready), so by the time it
 	// returns the container task should be RUNNING. The per-container
-	// sbsh socket appears once #74 lands the directory bind mount that
-	// makes sbsh's listener inode host-visible; this scenario depends on
-	// that and does not pre-create any placeholder file (the old
-	// workaround was broken because sbsh unlinks-and-recreates the
-	// destination, producing a fresh inode invisible to the host).
+	// sbsh socket appears thanks to #77's per-container tty/ directory bind
+	// mount, which makes sbsh's listener inode host-visible. This scenario
+	// does not pre-create any placeholder socket file (the old workaround
+	// was broken because sbsh unlinks-and-recreates the destination,
+	// producing a fresh inode invisible to the host).
 	applyAttachableCell(t, runPath, realmName, spaceName, stackName, cellName)
 
 	// Step 3: confirm the per-container sbsh socket is in place. The runner
