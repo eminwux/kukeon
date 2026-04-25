@@ -65,6 +65,7 @@ func stageHostSbsh(t *testing.T, runPath string) {
 	if err != nil {
 		t.Skipf("sbsh binary not found on PATH: %v", err)
 	}
+	requireSbshHasPostMergeFlags(t, hostSbsh)
 
 	dstDir := filepath.Join(fullRunPath, ctrpkg.SbshCacheSubdir, runtime.GOARCH)
 	if err = os.MkdirAll(dstDir, 0o755); err != nil {
@@ -86,6 +87,24 @@ func stageHostSbsh(t *testing.T, runPath string) {
 
 	if _, err = io.Copy(out, src); err != nil {
 		t.Fatalf("copy sbsh %q -> %q: %v", hostSbsh, dst, err)
+	}
+}
+
+// requireSbshHasPostMergeFlags ensures the host sbsh carries the flag set
+// the wrapper injected at #69 assumes (post sbsh#153, which added
+// `--capture-file` to the `sbsh terminal` subcommand). Without this guard a
+// stale sbsh on PATH manifests as `unknown flag: ...` deep inside the work
+// container's task, surfaced here only as a `waitForSocket` timeout — hard
+// to attribute. Skipping with a named cause saves the dig.
+func requireSbshHasPostMergeFlags(t *testing.T, hostSbsh string) {
+	t.Helper()
+	out, err := exec.Command(hostSbsh, "terminal", "--help").CombinedOutput()
+	if err != nil {
+		t.Fatalf("sbsh terminal --help failed: %v\noutput:\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "--capture-file") {
+		t.Skipf("host sbsh %q lacks `sbsh terminal --capture-file` (sbsh#153); "+
+			"upgrade sbsh on PATH and retry", hostSbsh)
 	}
 }
 
