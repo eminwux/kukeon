@@ -188,6 +188,21 @@ func (s *KukeonV1Service) StartContainer(args *kukeonv1.StartContainerArgs, repl
 	return nil
 }
 
+// AttachContainer is the placeholder endpoint shipped in #57. It enforces
+// the Attachable gate at the API boundary; the full client lands in #66.
+func (s *KukeonV1Service) AttachContainer(
+	args *kukeonv1.AttachContainerArgs,
+	reply *kukeonv1.AttachContainerReply,
+) error {
+	result, err := s.core.AttachContainer(s.ctx, args.Doc)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "AttachContainer returned error", "error", err)
+	}
+	return nil
+}
+
 func (s *KukeonV1Service) StopCell(args *kukeonv1.StopCellArgs, reply *kukeonv1.StopCellReply) error {
 	result, err := s.core.StopCell(s.ctx, args.Doc)
 	reply.Result = result

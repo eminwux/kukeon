@@ -291,6 +291,7 @@ func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, err
 				Secrets:                convertSecretsToInternal(in.Spec.Secrets),
 				CNIConfigPath:          in.Spec.CNIConfigPath,
 				RestartPolicy:          in.Spec.RestartPolicy,
+				Attachable:             in.Spec.Attachable,
 			},
 			Status: intmodel.ContainerStatus{
 				Name:         in.Status.Name,
@@ -345,6 +346,7 @@ func BuildContainerExternalFromInternal(in intmodel.Container, apiVersion ext.Ve
 				Secrets:                buildSecretsExternalFromInternal(in.Spec.Secrets),
 				CNIConfigPath:          in.Spec.CNIConfigPath,
 				RestartPolicy:          in.Spec.RestartPolicy,
+				Attachable:             in.Spec.Attachable,
 			},
 			Status: ext.ContainerStatus{
 				Name:         in.Status.Name,
@@ -402,6 +404,7 @@ func convertContainerSpecToInternal(in ext.ContainerSpec) intmodel.ContainerSpec
 		Secrets:                convertSecretsToInternal(in.Secrets),
 		CNIConfigPath:          in.CNIConfigPath,
 		RestartPolicy:          in.RestartPolicy,
+		Attachable:             in.Attachable,
 	}
 }
 
@@ -434,6 +437,7 @@ func BuildContainerSpecExternalFromInternal(in intmodel.ContainerSpec) ext.Conta
 		Secrets:                buildSecretsExternalFromInternal(in.Secrets),
 		CNIConfigPath:          in.CNIConfigPath,
 		RestartPolicy:          in.RestartPolicy,
+		Attachable:             in.Attachable,
 	}
 }
 

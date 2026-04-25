@@ -433,7 +433,11 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		}
 
 		// Recreate container fresh
-		_, err = r.ctrClient.CreateContainerFromSpec(containerSpec)
+		attachOpts, attachErr := r.attachableBuildOpts(containerSpec)
+		if attachErr != nil {
+			return intmodel.Cell{}, fmt.Errorf("failed to prepare attachable container %s: %w", ctrContainerID, attachErr)
+		}
+		_, err = r.ctrClient.CreateContainerFromSpec(containerSpec, attachOpts...)
 		if err != nil {
 			fields = appendCellLogFields([]any{"id", ctrContainerID}, cellID, cellName)
 			fields = append(
@@ -659,7 +663,11 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (intmodel.
 	}
 
 	// Recreate container fresh
-	_, err = r.ctrClient.CreateContainerFromSpec(*foundContainerSpec)
+	attachOpts, attachErr := r.attachableBuildOpts(*foundContainerSpec)
+	if attachErr != nil {
+		return intmodel.Cell{}, fmt.Errorf("failed to prepare attachable container %s: %w", containerID, attachErr)
+	}
+	_, err = r.ctrClient.CreateContainerFromSpec(*foundContainerSpec, attachOpts...)
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 		fields = append(

@@ -338,6 +338,22 @@ func (c *UnixClient) StartContainer(ctx context.Context, doc v1beta1.ContainerDo
 	return reply.Result, nil
 }
 
+// AttachContainer implements Client.
+func (c *UnixClient) AttachContainer(
+	ctx context.Context,
+	doc v1beta1.ContainerDoc,
+) (AttachContainerResult, error) {
+	args := &AttachContainerArgs{Doc: doc}
+	reply := &AttachContainerReply{}
+	if err := c.call(ctx, MethodAttachContainer, args, reply); err != nil {
+		return AttachContainerResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // StopCell implements Client.
 func (c *UnixClient) StopCell(ctx context.Context, doc v1beta1.CellDoc) (StopCellResult, error) {
 	args := &StopCellArgs{Doc: doc}

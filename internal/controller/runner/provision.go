@@ -1261,8 +1261,13 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				cell.Spec.Containers[i] = containerSpec
 			}
 
+			attachOpts, attachErr := r.attachableBuildOpts(containerSpec)
+			if attachErr != nil {
+				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
+			}
 			_, createErr = r.ctrClient.CreateContainerFromSpec(
 				containerSpec,
+				attachOpts...,
 			)
 			if createErr != nil {
 				fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
@@ -1673,8 +1678,13 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				createSpecFields...,
 			)
 
+			attachOpts, attachErr := r.attachableBuildOpts(containerSpec)
+			if attachErr != nil {
+				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
+			}
 			createdContainer, containerCreateErr := r.ctrClient.CreateContainerFromSpec(
 				containerSpec,
+				attachOpts...,
 			)
 			if containerCreateErr != nil {
 				// Check if the error indicates the container already exists

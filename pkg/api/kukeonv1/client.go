@@ -55,6 +55,10 @@ type Client interface {
 
 	StartCell(ctx context.Context, doc v1beta1.CellDoc) (StartCellResult, error)
 	StartContainer(ctx context.Context, doc v1beta1.ContainerDoc) (StartContainerResult, error)
+	// AttachContainer is the placeholder endpoint shipped in #57. It only
+	// validates that the target container has Attachable=true; the
+	// terminal-bridge client lands in #66.
+	AttachContainer(ctx context.Context, doc v1beta1.ContainerDoc) (AttachContainerResult, error)
 	StopCell(ctx context.Context, doc v1beta1.CellDoc) (StopCellResult, error)
 	StopContainer(ctx context.Context, doc v1beta1.ContainerDoc) (StopContainerResult, error)
 	KillCell(ctx context.Context, doc v1beta1.CellDoc) (KillCellResult, error)
@@ -143,12 +147,13 @@ const (
 	MethodListCells      = ServiceName + ".ListCells"
 	MethodListContainers = ServiceName + ".ListContainers"
 
-	MethodStartCell      = ServiceName + ".StartCell"
-	MethodStartContainer = ServiceName + ".StartContainer"
-	MethodStopCell       = ServiceName + ".StopCell"
-	MethodStopContainer  = ServiceName + ".StopContainer"
-	MethodKillCell       = ServiceName + ".KillCell"
-	MethodKillContainer  = ServiceName + ".KillContainer"
+	MethodStartCell       = ServiceName + ".StartCell"
+	MethodStartContainer  = ServiceName + ".StartContainer"
+	MethodAttachContainer = ServiceName + ".AttachContainer"
+	MethodStopCell        = ServiceName + ".StopCell"
+	MethodStopContainer   = ServiceName + ".StopContainer"
+	MethodKillCell        = ServiceName + ".KillCell"
+	MethodKillContainer   = ServiceName + ".KillContainer"
 
 	MethodDeleteRealm     = ServiceName + ".DeleteRealm"
 	MethodDeleteSpace     = ServiceName + ".DeleteSpace"

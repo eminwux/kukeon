@@ -55,6 +55,7 @@ type ContainerSpec struct {
 	Secrets                []ContainerSecret
 	CNIConfigPath          string
 	RestartPolicy          string
+	Attachable             bool
 }
 
 // ContainerSecret references a credential resolved by the daemon at apply

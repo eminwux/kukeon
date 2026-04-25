@@ -594,6 +594,44 @@ func TestContainerSecretsRoundTripV1Beta1(t *testing.T) {
 	}
 }
 
+// TestContainerAttachableRoundTrips ensures the new Attachable field
+// survives both directions of conversion (external→internal→external) and
+// across the nested cell-spec converters used when a Container appears
+// inside a CellSpec.
+func TestContainerAttachableRoundTrips(t *testing.T) {
+	cases := []bool{false, true}
+	for _, want := range cases {
+		input := ext.ContainerDoc{
+			APIVersion: ext.APIVersionV1Beta1,
+			Kind:       ext.KindContainer,
+			Metadata:   ext.ContainerMetadata{Name: "c"},
+			Spec: ext.ContainerSpec{
+				ID:         "c",
+				RealmID:    "r",
+				SpaceID:    "s",
+				StackID:    "st",
+				CellID:     "cl",
+				Image:      "alpine:latest",
+				Attachable: want,
+			},
+		}
+		internal, version, err := apischeme.NormalizeContainer(input)
+		if err != nil {
+			t.Fatalf("NormalizeContainer(%v): %v", want, err)
+		}
+		if internal.Spec.Attachable != want {
+			t.Errorf("internal.Spec.Attachable = %v, want %v", internal.Spec.Attachable, want)
+		}
+		out, err := apischeme.BuildContainerExternalFromInternal(internal, version)
+		if err != nil {
+			t.Fatalf("BuildContainerExternalFromInternal: %v", err)
+		}
+		if out.Spec.Attachable != want {
+			t.Errorf("round-trip ext.Spec.Attachable = %v, want %v", out.Spec.Attachable, want)
+		}
+	}
+}
+
 // TestContainerSecretYAMLNeverLeaksValues ensures that a round-trip through
 // the external doc + YAML marshal path only serializes the reference fields,
 // never a resolved secret value. The internal model has no value field, so a

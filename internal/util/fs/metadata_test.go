@@ -21,9 +21,30 @@ import (
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
+
+func TestContainerSocketPath(t *testing.T) {
+	got := fs.ContainerSocketPath("/opt/kukeon", "realm", "space", "stack", "cell", "c1")
+	want := "/opt/kukeon/realm/space/stack/cell/c1/" + consts.KukeonContainerSocketFile
+	if got != want {
+		t.Errorf("ContainerSocketPath = %q, want %q", got, want)
+	}
+}
+
+func TestContainerMetadataDir_AnchorsContainerSocket(t *testing.T) {
+	// The socket must live under the container's metadata dir, not anywhere
+	// else — `kuke attach` (#66) and the OCI bind-mount source rely on this
+	// being the single source of truth.
+	dir := fs.ContainerMetadataDir("/opt/kukeon", "r", "s", "st", "c", "co")
+	sock := fs.ContainerSocketPath("/opt/kukeon", "r", "s", "st", "c", "co")
+	want := dir + "/" + consts.KukeonContainerSocketFile
+	if sock != want {
+		t.Errorf("socket path = %q, want it under container metadata dir = %q", sock, want)
+	}
+}
 
 func TestDetectMetadataVersion(t *testing.T) {
 	tests := []struct {
