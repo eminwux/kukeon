@@ -90,13 +90,24 @@ func ContainerMetadataDir(baseRunPath, realmName, spaceName, stackName, cellName
 	)
 }
 
-// ContainerSocketPath returns the host-side path for a container's sbsh
-// control socket. This is the single source of truth for both the OCI
-// bind-mount source (the container sees it at /run/sbsh.socket) and the
-// host-visible path that `kuke attach` will connect to.
-func ContainerSocketPath(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
+// ContainerTTYDir returns the host-side per-container directory that owns
+// the sbsh terminal socket and its capture/log siblings. It is bind-mounted
+// into the container at /run/kukeon/tty so that sbsh's unlink-and-recreate
+// cycle on the socket inode stays host-visible.
+func ContainerTTYDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
 	return filepath.Join(
 		ContainerMetadataDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName),
+		consts.KukeonContainerTTYDir,
+	)
+}
+
+// ContainerSocketPath returns the host-side path for a container's sbsh
+// terminal socket. This is the single source of truth for both the
+// host-visible path that `kuke attach` connects to and the path sbsh listens
+// on inside the container (mediated by the ContainerTTYDir bind mount).
+func ContainerSocketPath(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
+	return filepath.Join(
+		ContainerTTYDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName),
 		consts.KukeonContainerSocketFile,
 	)
 }

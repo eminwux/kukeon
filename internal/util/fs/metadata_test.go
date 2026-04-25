@@ -26,23 +26,38 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
+func TestContainerTTYDir(t *testing.T) {
+	got := fs.ContainerTTYDir("/opt/kukeon", "realm", "space", "stack", "cell", "c1")
+	want := "/opt/kukeon/realm/space/stack/cell/c1/" + consts.KukeonContainerTTYDir
+	if got != want {
+		t.Errorf("ContainerTTYDir = %q, want %q", got, want)
+	}
+}
+
 func TestContainerSocketPath(t *testing.T) {
 	got := fs.ContainerSocketPath("/opt/kukeon", "realm", "space", "stack", "cell", "c1")
-	want := "/opt/kukeon/realm/space/stack/cell/c1/" + consts.KukeonContainerSocketFile
+	want := "/opt/kukeon/realm/space/stack/cell/c1/" +
+		consts.KukeonContainerTTYDir + "/" + consts.KukeonContainerSocketFile
 	if got != want {
 		t.Errorf("ContainerSocketPath = %q, want %q", got, want)
 	}
 }
 
-func TestContainerMetadataDir_AnchorsContainerSocket(t *testing.T) {
-	// The socket must live under the container's metadata dir, not anywhere
-	// else — `kuke attach` (#66) and the OCI bind-mount source rely on this
-	// being the single source of truth.
+func TestContainerMetadataDir_AnchorsContainerTTYDir(t *testing.T) {
+	// The tty dir (and the socket inside it) must live under the
+	// container's metadata dir, not anywhere else — `kuke attach` (#66)
+	// and the OCI bind-mount source rely on this being the single source
+	// of truth.
 	dir := fs.ContainerMetadataDir("/opt/kukeon", "r", "s", "st", "c", "co")
+	ttyDir := fs.ContainerTTYDir("/opt/kukeon", "r", "s", "st", "c", "co")
+	wantTTY := dir + "/" + consts.KukeonContainerTTYDir
+	if ttyDir != wantTTY {
+		t.Errorf("tty dir = %q, want it under container metadata dir = %q", ttyDir, wantTTY)
+	}
 	sock := fs.ContainerSocketPath("/opt/kukeon", "r", "s", "st", "c", "co")
-	want := dir + "/" + consts.KukeonContainerSocketFile
-	if sock != want {
-		t.Errorf("socket path = %q, want it under container metadata dir = %q", sock, want)
+	wantSock := wantTTY + "/" + consts.KukeonContainerSocketFile
+	if sock != wantSock {
+		t.Errorf("socket path = %q, want it under tty dir = %q", sock, wantSock)
 	}
 }
 

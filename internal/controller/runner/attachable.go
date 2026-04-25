@@ -28,31 +28,27 @@ import (
 // attachableBuildOpts returns the ctr.BuildOption slice to pass to
 // CreateContainerFromSpec for a given container spec. When Attachable=false
 // the slice is empty and the call is a no-op. When Attachable=true the
-// runner pre-creates the per-container directory (where the sbsh socket
-// will live) and resolves the sbsh binary path keyed off the *image* arch,
-// not the host arch — a cross-arch image running under emulation would
-// otherwise pick a binary the in-container ELF interpreter cannot run.
+// runner pre-creates the per-container tty/ directory (sbsh's bind-mount
+// source — sbsh creates the socket and its capture/log siblings there) and
+// resolves the sbsh binary path keyed off the *image* arch, not the host
+// arch — a cross-arch image running under emulation would otherwise pick a
+// binary the in-container ELF interpreter cannot run.
 func (r *Exec) attachableBuildOpts(spec intmodel.ContainerSpec) ([]ctr.BuildOption, error) {
 	if !spec.Attachable {
 		return nil, nil
 	}
 
-	dir := fs.ContainerMetadataDir(
+	ttyDir := fs.ContainerTTYDir(
 		r.opts.RunPath,
 		spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName,
 		spec.ID,
 	)
 	// 0700 so only the daemon (root) can reach the socket from the host
 	// side. Documented in the issue's "Socket security threat model".
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := os.MkdirAll(ttyDir, 0o700); err != nil {
 		return nil, err
 	}
 
-	socketPath := fs.ContainerSocketPath(
-		r.opts.RunPath,
-		spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName,
-		spec.ID,
-	)
 	binaryPath, err := r.ctrClient.ResolveSbshCachePath(spec.Image, r.opts.RunPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve sbsh cache path for %q: %w", spec.Image, err)
@@ -61,7 +57,7 @@ func (r *Exec) attachableBuildOpts(spec intmodel.ContainerSpec) ([]ctr.BuildOpti
 	return []ctr.BuildOption{
 		ctr.WithAttachableInjection(ctr.AttachableInjection{
 			SbshBinaryPath: binaryPath,
-			HostSocketPath: socketPath,
+			HostTTYDir:     ttyDir,
 		}),
 	}, nil
 }

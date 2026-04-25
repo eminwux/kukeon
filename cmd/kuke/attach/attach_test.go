@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	testHostSocket = "/opt/kukeon/r1/s1/st1/c1/work/sbsh.io"
+	testHostSocket = "/opt/kukeon/r1/s1/st1/c1/work/tty/socket"
 )
 
 type fakeClient struct {
