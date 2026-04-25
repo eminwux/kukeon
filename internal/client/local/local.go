@@ -861,12 +861,10 @@ func formatValidationErrors(validationErrors []*parser.ValidationError) error {
 
 // ---- Attach ----
 
-// AttachContainer is the in-process placeholder for the attach endpoint
-// shipped in #57. It enforces the Attachable gate at the API boundary by
-// looking up the target container and refusing the request when its
-// Attachable field is false. The full sbsh-client logic lands in #66; until
-// then this method always returns ErrAttachNotImplemented for permitted
-// targets so callers fail fast with a recognizable sentinel.
+// AttachContainer enforces the Attachable gate and resolves the host-side
+// sbsh control-socket path. Bytes never traverse this RPC — the caller
+// (`kuke attach`) opens HostSocketPath directly and runs the sbsh client
+// loop against it.
 func (c *Client) AttachContainer(_ context.Context, doc v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
 	internal, _, err := apischeme.NormalizeContainer(doc)
 	if err != nil {
@@ -882,7 +880,16 @@ func (c *Client) AttachContainer(_ context.Context, doc v1beta1.ContainerDoc) (k
 	if !res.Container.Spec.Attachable {
 		return kukeonv1.AttachContainerResult{}, errdefs.ErrAttachNotSupported
 	}
-	return kukeonv1.AttachContainerResult{}, errdefs.ErrAttachNotImplemented
+	return kukeonv1.AttachContainerResult{
+		HostSocketPath: fs.ContainerSocketPath(
+			c.ctrl.RunPath(),
+			res.Container.Spec.RealmName,
+			res.Container.Spec.SpaceName,
+			res.Container.Spec.StackName,
+			res.Container.Spec.CellName,
+			res.Container.Spec.ID,
+		),
+	}, nil
 }
 
 // ---- Ping ----

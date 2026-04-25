@@ -530,8 +530,6 @@ type PurgeContainerResult struct {
 // ---- Attach ----
 
 // AttachContainerArgs identifies the target container for an attach request.
-// The full client (#66) will add session-shape fields; this shape is the
-// minimum the placeholder endpoint needs to enforce the Attachable gate.
 type AttachContainerArgs struct {
 	Doc v1beta1.ContainerDoc
 }
@@ -541,10 +539,16 @@ type AttachContainerReply struct {
 	Err    *APIError
 }
 
-// AttachContainerResult is intentionally empty in #57. The fields the client
-// in #66 will populate (host socket path, terminal mode, etc.) live behind
-// the placeholder until that PR.
-type AttachContainerResult struct{}
+// AttachContainerResult carries the host-side coordinates the `kuke attach`
+// client needs to drive the sbsh terminal. Bytes never traverse this RPC —
+// the client opens HostSocketPath directly.
+type AttachContainerResult struct {
+	// HostSocketPath is the host path of the per-container sbsh control
+	// socket bind-mounted into the container at /run/sbsh.socket. Returned
+	// only when the target container has Attachable=true; otherwise the
+	// daemon errors with ErrAttachNotSupported.
+	HostSocketPath string
+}
 
 // ---- Refresh ----
 

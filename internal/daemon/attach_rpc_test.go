@@ -64,12 +64,12 @@ func TestAttachContainer_NotAttachable_RPCSurfacesSentinel(t *testing.T) {
 	}
 }
 
-func TestAttachContainer_Attachable_PlaceholderReturnsNotImplemented(t *testing.T) {
-	// When the target *is* Attachable=true the placeholder must still fail
-	// fast — the actual sbsh-bridge client lands in #66. The sentinel must
-	// be ErrAttachNotImplemented (not ErrAttachNotSupported), so a future
-	// `kuke attach` client can branch on it.
-	core := &attachClientFake{err: errdefs.ErrAttachNotImplemented}
+func TestAttachContainer_Attachable_RPCReturnsSocketPath(t *testing.T) {
+	// When the target is Attachable=true the daemon hands back the host
+	// socket path so the client can open it directly. The RPC layer must
+	// pass that path through verbatim and leave Err nil.
+	const wantSocket = "/opt/kukeon/default/default/default/cellA/work/sbsh.io"
+	core := &attachClientFake{result: kukeonv1.AttachContainerResult{HostSocketPath: wantSocket}}
 	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core)
 
 	args := &kukeonv1.AttachContainerArgs{Doc: v1beta1.ContainerDoc{}}
@@ -77,15 +77,11 @@ func TestAttachContainer_Attachable_PlaceholderReturnsNotImplemented(t *testing.
 	if err := svc.AttachContainer(args, reply); err != nil {
 		t.Fatalf("AttachContainer returned transport error: %v", err)
 	}
-	if reply.Err == nil {
-		t.Fatalf("expected wire-level Err to be populated, got nil")
+	if reply.Err != nil {
+		t.Fatalf("expected wire-level Err to be nil, got %v", kukeonv1.FromAPIError(reply.Err))
 	}
-	wireErr := kukeonv1.FromAPIError(reply.Err)
-	if !errors.Is(wireErr, errdefs.ErrAttachNotImplemented) {
-		t.Errorf("wire error %q does not unwrap to ErrAttachNotImplemented", wireErr)
-	}
-	if errors.Is(wireErr, errdefs.ErrAttachNotSupported) {
-		t.Errorf("attachable=true target must not produce ErrAttachNotSupported")
+	if reply.Result.HostSocketPath != wantSocket {
+		t.Errorf("HostSocketPath = %q, want %q", reply.Result.HostSocketPath, wantSocket)
 	}
 }
 

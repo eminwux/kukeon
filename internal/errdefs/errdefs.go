@@ -133,11 +133,16 @@ var (
 	// /run/sbsh.socket to connect to.
 	ErrAttachNotSupported = errors.New("container is not attachable; recreate with attachable=true")
 
-	// ErrAttachNotImplemented is returned by the daemon-side placeholder
-	// endpoint shipped in #57. The full sbsh-client implementation lands in
-	// #66; until then the endpoint exists only to enforce the Attachable
-	// gate so that misuse fails fast at the API boundary.
-	ErrAttachNotImplemented = errors.New("attach client not implemented yet (see kukeon#66)")
+	// ErrAttachAmbiguous is returned by the `kuke attach` candidate picker
+	// when --container is omitted and the target cell has more than one
+	// non-root attachable container. The error message lists the candidates
+	// so the operator can re-run with --container.
+	ErrAttachAmbiguous = errors.New("multiple attachable containers in cell; specify --container")
+
+	// ErrAttachNoCandidate is returned by the `kuke attach` candidate
+	// picker when --container is omitted and the target cell has zero
+	// non-root attachable containers.
+	ErrAttachNoCandidate = errors.New("no attachable container in cell")
 
 	// Secret-related errors.
 
