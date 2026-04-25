@@ -80,6 +80,27 @@ func CellMetadataPath(baseRunPath, realmName, spaceName, stackName, cellName str
 	)
 }
 
+// ContainerMetadataDir returns the per-container metadata directory inside the
+// owning cell's metadata tree. Used as the host anchor for per-container state
+// such as the sbsh control socket.
+func ContainerMetadataDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
+	return filepath.Join(
+		CellMetadataDir(baseRunPath, realmName, spaceName, stackName, cellName),
+		containerName,
+	)
+}
+
+// ContainerSocketPath returns the host-side path for a container's sbsh
+// control socket. This is the single source of truth for both the OCI
+// bind-mount source (the container sees it at /run/sbsh.socket) and the
+// host-visible path that `kuke attach` will connect to.
+func ContainerSocketPath(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
+	return filepath.Join(
+		ContainerMetadataDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName),
+		consts.KukeonContainerSocketFile,
+	)
+}
+
 type metadataHeader struct {
 	APIVersion string `json:"apiVersion"`
 	Kind       string `json:"kind"`

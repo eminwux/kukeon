@@ -454,8 +454,11 @@ func (c *client) DeleteContainer(id string, opts ContainerDeleteOptions) error {
 }
 
 // CreateContainerFromSpec converts an internal ContainerSpec to ctr.ContainerSpec and creates the container.
+// Variadic opts forward to BuildContainerSpec — used today only by the
+// runner when it needs to inject host-side paths for an Attachable spec.
 func (c *client) CreateContainerFromSpec(
 	containerSpec intmodel.ContainerSpec,
+	opts ...BuildOption,
 ) (containerd.Container, error) {
 	if containerSpec.ID == "" {
 		return nil, internalerrdefs.ErrEmptyContainerID
@@ -510,7 +513,7 @@ func (c *client) CreateContainerFromSpec(
 	}
 
 	// Convert to ctr.ContainerSpec using BuildContainerSpec
-	ctrSpec := BuildContainerSpec(containerSpec)
+	ctrSpec := BuildContainerSpec(containerSpec, opts...)
 
 	// Create the container
 	container, err := c.CreateContainer(ctrSpec)

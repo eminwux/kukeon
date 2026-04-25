@@ -23,6 +23,11 @@ const (
 
 	KukeonMetadataFile = "metadata.json"
 
+	// KukeonContainerSocketFile is the basename of the per-container sbsh
+	// control socket (host side). The container sees the same inode at
+	// /run/sbsh.socket via a bind mount injected by Attachable=true specs.
+	KukeonContainerSocketFile = "sbsh.io"
+
 	// Label keys shared across the user default hierarchy and the system hierarchy.
 	KukeonRealmLabelKey     = "realm.kukeon.io"
 	KukeonSpaceLabelKey     = "space.kukeon.io"

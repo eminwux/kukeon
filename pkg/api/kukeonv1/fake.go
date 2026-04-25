@@ -105,6 +105,10 @@ func (FakeClient) StartContainer(context.Context, v1beta1.ContainerDoc) (StartCo
 	return StartContainerResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) AttachContainer(context.Context, v1beta1.ContainerDoc) (AttachContainerResult, error) {
+	return AttachContainerResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) StopCell(context.Context, v1beta1.CellDoc) (StopCellResult, error) {
 	return StopCellResult{}, ErrUnexpectedCall
 }

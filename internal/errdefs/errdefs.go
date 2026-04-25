@@ -125,6 +125,20 @@ var (
 	ErrEgressApply              = errors.New("failed to apply egress policy")
 	ErrEgressRemove             = errors.New("failed to remove egress policy")
 
+	// Attach-related errors.
+
+	// ErrAttachNotSupported is returned when an attach request targets a
+	// container that was not created with Attachable=true. The sbsh wrapper
+	// is only injected on opt-in; non-Attachable containers have no
+	// /run/sbsh.socket to connect to.
+	ErrAttachNotSupported = errors.New("container is not attachable; recreate with attachable=true")
+
+	// ErrAttachNotImplemented is returned by the daemon-side placeholder
+	// endpoint shipped in #57. The full sbsh-client implementation lands in
+	// #66; until then the endpoint exists only to enforce the Attachable
+	// gate so that misuse fails fast at the API boundary.
+	ErrAttachNotImplemented = errors.New("attach client not implemented yet (see kukeon#66)")
+
 	// Secret-related errors.
 
 	ErrSecretNameRequired        = errors.New("secret name is required")

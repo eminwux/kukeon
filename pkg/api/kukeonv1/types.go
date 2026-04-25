@@ -527,6 +527,25 @@ type PurgeContainerResult struct {
 	Purged             []string
 }
 
+// ---- Attach ----
+
+// AttachContainerArgs identifies the target container for an attach request.
+// The full client (#66) will add session-shape fields; this shape is the
+// minimum the placeholder endpoint needs to enforce the Attachable gate.
+type AttachContainerArgs struct {
+	Doc v1beta1.ContainerDoc
+}
+
+type AttachContainerReply struct {
+	Result AttachContainerResult
+	Err    *APIError
+}
+
+// AttachContainerResult is intentionally empty in #57. The fields the client
+// in #66 will populate (host socket path, terminal mode, etc.) live behind
+// the placeholder until that PR.
+type AttachContainerResult struct{}
+
 // ---- Refresh ----
 
 type RefreshAllArgs struct{}

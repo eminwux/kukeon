@@ -144,12 +144,36 @@ func withUpdatedSpec(spec *oci.Spec) containerd.UpdateContainerOpts {
 	}
 }
 
+// BuildOption customizes BuildContainerSpec without changing its return type.
+// Used for caller-provided values that don't live on the model spec — today
+// just the host-side paths required when ContainerSpec.Attachable is true.
+type BuildOption func(*buildOpts)
+
+type buildOpts struct {
+	attachable AttachableInjection
+}
+
+// WithAttachableInjection configures the host-side paths used when wrapping
+// an Attachable container. Has no effect on a spec where Attachable is
+// false; in that case the option is silently ignored so callers can pass it
+// unconditionally.
+func WithAttachableInjection(inj AttachableInjection) BuildOption {
+	return func(o *buildOpts) {
+		o.attachable = inj
+	}
+}
+
 // BuildContainerSpec converts an internal ContainerSpec to ctr.ContainerSpec
 // with the expected defaults applied.
 // Uses ContainerdID if available, otherwise falls back to ID.
 func BuildContainerSpec(
 	containerSpec intmodel.ContainerSpec,
+	options ...BuildOption,
 ) ContainerSpec {
+	var opts buildOpts
+	for _, apply := range options {
+		apply(&opts)
+	}
 	// Use ContainerdID if available, otherwise fall back to ID
 	containerdID := containerSpec.ContainerdID
 	if containerdID == "" {
@@ -206,6 +230,17 @@ func BuildContainerSpec(
 	}
 
 	specOpts = append(specOpts, securitySpecOpts(containerSpec)...)
+
+	// Attachable wrapping is appended last so the args-wrap runs after any
+	// user-supplied WithProcessArgs above and after the image's ENTRYPOINT/CMD
+	// resolution that containerd applies at container-create time.
+	if containerSpec.Attachable {
+		specOpts = append(
+			specOpts,
+			withAttachableMounts(opts.attachable),
+			withAttachableArgsWrap(),
+		)
+	}
 
 	return ContainerSpec{
 		ID:            containerdID,

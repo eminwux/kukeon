@@ -859,6 +859,32 @@ func formatValidationErrors(validationErrors []*parser.ValidationError) error {
 	return fmt.Errorf("validation failed:\n  %s", strings.Join(msgs, "\n  "))
 }
 
+// ---- Attach ----
+
+// AttachContainer is the in-process placeholder for the attach endpoint
+// shipped in #57. It enforces the Attachable gate at the API boundary by
+// looking up the target container and refusing the request when its
+// Attachable field is false. The full sbsh-client logic lands in #66; until
+// then this method always returns ErrAttachNotImplemented for permitted
+// targets so callers fail fast with a recognizable sentinel.
+func (c *Client) AttachContainer(_ context.Context, doc v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
+	internal, _, err := apischeme.NormalizeContainer(doc)
+	if err != nil {
+		return kukeonv1.AttachContainerResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	res, err := c.ctrl.GetContainer(internal)
+	if err != nil {
+		return kukeonv1.AttachContainerResult{}, err
+	}
+	if !res.ContainerExists {
+		return kukeonv1.AttachContainerResult{}, errdefs.ErrContainerNotFound
+	}
+	if !res.Container.Spec.Attachable {
+		return kukeonv1.AttachContainerResult{}, errdefs.ErrAttachNotSupported
+	}
+	return kukeonv1.AttachContainerResult{}, errdefs.ErrAttachNotImplemented
+}
+
 // ---- Ping ----
 
 // Ping is a no-op in the in-process client: the controller is alive if this

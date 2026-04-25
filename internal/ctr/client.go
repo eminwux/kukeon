@@ -70,7 +70,7 @@ type Client interface {
 	NewCgroup(spec CgroupSpec) (*cgroup2.Manager, error)
 	LoadCgroup(group string, mountpoint string) (*cgroup2.Manager, error)
 	DeleteCgroup(group, mountpoint string) error
-	CreateContainerFromSpec(intmodel.ContainerSpec) (containerd.Container, error)
+	CreateContainerFromSpec(spec intmodel.ContainerSpec, opts ...BuildOption) (containerd.Container, error)
 
 	CreateContainer(spec ContainerSpec) (containerd.Container, error)
 	GetContainer(id string) (containerd.Container, error)
