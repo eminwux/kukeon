@@ -49,16 +49,22 @@ func SbshCachePath(baseRunPath, arch string) string {
 	return filepath.Join(baseRunPath, SbshCacheSubdir, arch, SbshBinaryName)
 }
 
-// ResolveSbshCachePath looks up the cached sbsh binary for an already-pulled
-// image. The arch is read from the image's OCI config (post-pull), which is
-// the regression this helper guards against: keying off runtime.GOARCH would
-// break cross-arch images that happen to run via emulation.
+// ResolveSbshCachePath looks up the cached sbsh binary for the given image
+// ref under the configured run path. The image is pulled (or fetched from
+// the local store if already present) and its arch is read from the OCI
+// config — keying off runtime.GOARCH would break cross-arch images that run
+// via emulation, which is the regression this helper guards against.
 //
-// Returns the host path on success; ErrInvalidImage when the arch cannot be
-// resolved from the image config.
-func (c *client) ResolveSbshCachePath(image containerd.Image, baseRunPath string) (string, error) {
-	if image == nil {
-		return "", fmt.Errorf("%w: image is nil", errdefs.ErrInvalidImage)
+// Returns the host path on success; ErrInvalidImage when the image ref is
+// empty or the arch cannot be resolved from the image config; whatever
+// pullImage returns when the pull itself fails.
+func (c *client) ResolveSbshCachePath(imageRef, baseRunPath string) (string, error) {
+	if imageRef == "" {
+		return "", fmt.Errorf("%w: image ref is empty", errdefs.ErrInvalidImage)
+	}
+	image, err := c.pullImage(imageRef)
+	if err != nil {
+		return "", err
 	}
 	arch, err := imageArchitecture(c.namespaceCtx(), image)
 	if err != nil {
@@ -68,9 +74,9 @@ func (c *client) ResolveSbshCachePath(image containerd.Image, baseRunPath string
 }
 
 // imageArchitecture returns the GOARCH-style architecture for an image,
-// reading it from the image's OCI config. Falls back to runtime.GOARCH only
-// when the image config is unreadable AND the image declares no platform —
-// kept narrow on purpose so silent host/image arch mismatches still surface.
+// reading it from the image's OCI config. Returns an error rather than
+// falling back to runtime.GOARCH so silent host/image arch mismatches
+// still surface.
 func imageArchitecture(ctx context.Context, image containerd.Image) (string, error) {
 	cfg, err := image.Spec(ctx)
 	if err != nil {
@@ -84,4 +90,3 @@ func imageArchitecture(ctx context.Context, image containerd.Image) (string, err
 	}
 	return arch, nil
 }
-

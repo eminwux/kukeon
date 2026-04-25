@@ -17,8 +17,8 @@
 package runner
 
 import (
+	"fmt"
 	"os"
-	"runtime"
 
 	"github.com/eminwux/kukeon/internal/ctr"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -29,12 +29,9 @@ import (
 // CreateContainerFromSpec for a given container spec. When Attachable=false
 // the slice is empty and the call is a no-op. When Attachable=true the
 // runner pre-creates the per-container directory (where the sbsh socket
-// will live) and resolves the host-arch sbsh binary path.
-//
-// The full multi-arch resolver lands in #67; for the foundation slice we key
-// off runtime.GOARCH so the manually-placed cache entry matches the host
-// (and therefore matches images built for the host arch, which is the only
-// case the stub is documented to cover).
+// will live) and resolves the sbsh binary path keyed off the *image* arch,
+// not the host arch — a cross-arch image running under emulation would
+// otherwise pick a binary the in-container ELF interpreter cannot run.
 func (r *Exec) attachableBuildOpts(spec intmodel.ContainerSpec) ([]ctr.BuildOption, error) {
 	if !spec.Attachable {
 		return nil, nil
@@ -56,7 +53,10 @@ func (r *Exec) attachableBuildOpts(spec intmodel.ContainerSpec) ([]ctr.BuildOpti
 		spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName,
 		spec.ID,
 	)
-	binaryPath := ctr.SbshCachePath(r.opts.RunPath, runtime.GOARCH)
+	binaryPath, err := r.ctrClient.ResolveSbshCachePath(spec.Image, r.opts.RunPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve sbsh cache path for %q: %w", spec.Image, err)
+	}
 
 	return []ctr.BuildOption{
 		ctr.WithAttachableInjection(ctr.AttachableInjection{

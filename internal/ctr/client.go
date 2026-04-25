@@ -82,6 +82,8 @@ type Client interface {
 
 	TaskStatus(id string) (containerd.Status, error)
 	TaskMetrics(id string) (*apitypes.Metric, error)
+
+	ResolveSbshCachePath(imageRef, baseRunPath string) (string, error)
 }
 
 func NewClient(ctx context.Context, logger *slog.Logger, socket string) Client {
