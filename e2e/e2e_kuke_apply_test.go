@@ -129,6 +129,7 @@ func TestKukeApply_VerifyTestdataYAMLs(t *testing.T) {
 		"space.yaml",
 		"stack.yaml",
 		"cell.yaml",
+		"attachable-cell.yaml",
 		"multi-resource.yaml",
 	}
 
