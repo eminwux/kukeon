@@ -1,0 +1,22 @@
+apiVersion: v1beta1
+kind: Cell
+metadata:
+  name: test-cell
+spec:
+  id: test-cell
+  realmId: test-realm
+  spaceId: test-space
+  stackId: test-stack
+  containers:
+    - id: root
+      root: true
+      image: registry.eminwux.com/busybox:latest
+      command: sleep
+      args:
+        - "3600"
+    - id: work
+      image: registry.eminwux.com/busybox:latest
+      command: sleep
+      args:
+        - "3600"
+      attachable: true
