@@ -30,6 +30,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/controller/runner"
+	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/metadata"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
@@ -744,5 +745,78 @@ func TestCreateRealm_StateReconciliation(t *testing.T) {
 				t.Logf("Test case: %s", tt.description)
 			}
 		})
+	}
+}
+
+// TestCreateRealm_NamespacePreSeeded_PersistsReady reproduces issue #94: when the
+// containerd namespace already exists at provisionNewRealm time (the real-world
+// trigger is `ctr -n kuke-system.kukeon.io images import` seeding the namespace
+// before `kuke init` runs), CreateRealm must still drive the realm to Ready with
+// a populated cgroupPath persisted to metadata.json — not park it as Failed with
+// an empty cgroupPath, which is what users see as `kuke get realms` reporting
+// the daemon's own home realm as Failed.
+func TestCreateRealm_NamespacePreSeeded_PersistsReady(t *testing.T) {
+	if _, err := os.Stat("/run/containerd/containerd.sock"); os.IsNotExist(err) {
+		t.Skip("containerd socket not available, skipping test")
+	}
+
+	r, _ := setupTestRunner(t)
+
+	hash := sha256.Sum256([]byte(t.Name()))
+	shortHash := hex.EncodeToString(hash[:])[:8]
+	realmName := "preseed-realm-" + shortHash
+	namespace := "preseed-ns-" + shortHash
+
+	// Pre-seed the containerd namespace via a separate client to mirror the
+	// `ctr -n <ns> images import` flow that triggers the bug in real `kuke init`
+	// runs.
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	preSeedClient := ctr.NewClient(ctx, logger, "/run/containerd/containerd.sock")
+	if err := preSeedClient.Connect(); err != nil {
+		t.Skipf("cannot connect to containerd: %v", err)
+	}
+	t.Cleanup(func() { _ = preSeedClient.Close() })
+	if err := preSeedClient.CreateNamespace(namespace); err != nil {
+		t.Fatalf("pre-seed namespace: %v", err)
+	}
+	t.Cleanup(func() { _ = preSeedClient.DeleteNamespace(namespace) })
+
+	realm := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{
+			Name: realmName,
+			Labels: map[string]string{
+				"kukeon.io/realm": namespace,
+			},
+		},
+		Spec: intmodel.RealmSpec{Namespace: namespace},
+	}
+
+	result, err := r.CreateRealm(realm)
+	if err != nil {
+		t.Fatalf("CreateRealm() unexpected error: %v", err)
+	}
+
+	if result.Status.State != intmodel.RealmStateReady {
+		t.Errorf("CreateRealm() in-memory state = %v, want Ready", result.Status.State)
+	}
+	if result.Status.CgroupPath == "" {
+		t.Error("CreateRealm() in-memory cgroupPath is empty, want non-empty")
+	}
+
+	// Persisted metadata is what `kuke get realms` reads — the bug surfaces
+	// because that is left half-written. Read it back via GetRealm to make sure
+	// the on-disk state agrees with the in-memory result.
+	persisted, getErr := r.GetRealm(intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{Name: realmName},
+	})
+	if getErr != nil {
+		t.Fatalf("GetRealm() failed: %v", getErr)
+	}
+	if persisted.Status.State != intmodel.RealmStateReady {
+		t.Errorf("persisted state = %v, want Ready", persisted.Status.State)
+	}
+	if persisted.Status.CgroupPath == "" {
+		t.Error("persisted cgroupPath is empty, want non-empty")
 	}
 }
