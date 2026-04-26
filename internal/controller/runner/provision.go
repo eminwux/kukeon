@@ -52,8 +52,13 @@ func (r *Exec) provisionNewRealm(realm intmodel.Realm) (intmodel.Realm, error) {
 		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateRealmMetadata, err)
 	}
 
-	// Create realm namespace
-	if err := r.createRealmContainerdNamespace(realm); err != nil {
+	// Create realm namespace. A pre-existing containerd namespace is benign on the
+	// idempotent kuke init path — kuke-system.kukeon.io is routinely seeded by
+	// `ctr -n kuke-system.kukeon.io images import` before init runs. Treat it as
+	// a no-op so we still proceed to cgroup creation and the Ready transition,
+	// matching the symmetry of ensureRealmContainerdNamespace.
+	if err := r.createRealmContainerdNamespace(realm); err != nil &&
+		!errors.Is(err, errdefs.ErrNamespaceAlreadyExists) {
 		// Set state to Failed and update metadata before returning error
 		realm.Status.State = intmodel.RealmStateFailed
 		_ = r.UpdateRealmMetadata(realm) // Best effort to save failed state
