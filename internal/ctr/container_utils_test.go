@@ -17,11 +17,35 @@
 package ctr_test
 
 import (
+	"context"
 	"testing"
 
 	ctr "github.com/eminwux/kukeon/internal/ctr"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
+
+// applyRootBuiltSpec composes the SpecOpts produced by BuildRootContainerSpec
+// against an empty runtime spec so tests can assert on the resulting OCI fields
+// without touching containerd. Mirrors applyBuiltSpec in spec_security_test.go.
+func applyRootBuiltSpec(
+	t *testing.T,
+	in intmodel.ContainerSpec,
+	labels map[string]string,
+) *runtimespec.Spec {
+	t.Helper()
+	spec := &runtimespec.Spec{
+		Process: &runtimespec.Process{},
+		Linux:   &runtimespec.Linux{},
+	}
+	built := ctr.BuildRootContainerSpec(in, labels)
+	for _, opt := range built.SpecOpts {
+		if err := opt(context.Background(), nil, nil, spec); err != nil {
+			t.Fatalf("SpecOpts returned error: %v", err)
+		}
+	}
+	return spec
+}
 
 func TestDefaultRootContainerSpec(t *testing.T) {
 	tests := []struct {
@@ -323,4 +347,232 @@ func TestNormalizeImageReference(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildRootContainerSpec_Volumes(t *testing.T) {
+	spec := applyRootBuiltSpec(t, intmodel.ContainerSpec{
+		ID:           "root",
+		ContainerdID: "containerd-root",
+		Image:        "registry.eminwux.com/busybox:latest",
+		Volumes: []intmodel.VolumeMount{
+			{Source: "/run/kukeon", Target: "/run/kukeon", ReadOnly: false},
+			{Source: "/opt/kukeon", Target: "/opt/kukeon", ReadOnly: true},
+		},
+	}, nil)
+
+	wantBindCount := 2
+	bindCount := 0
+	for _, m := range spec.Mounts {
+		if m.Type == "bind" {
+			bindCount++
+		}
+	}
+	if bindCount != wantBindCount {
+		t.Fatalf("bind mount count = %d, want %d, mounts=%+v", bindCount, wantBindCount, spec.Mounts)
+	}
+
+	var runMount, optMount *runtimespec.Mount
+	for i := range spec.Mounts {
+		switch spec.Mounts[i].Destination {
+		case "/run/kukeon":
+			runMount = &spec.Mounts[i]
+		case "/opt/kukeon":
+			optMount = &spec.Mounts[i]
+		}
+	}
+	if runMount == nil {
+		t.Fatalf("bind mount for /run/kukeon not found")
+	}
+	if runMount.Source != "/run/kukeon" {
+		t.Errorf("/run/kukeon source = %q, want /run/kukeon", runMount.Source)
+	}
+	if !containsStringRoot(runMount.Options, "rw") {
+		t.Errorf("/run/kukeon options = %v, want contains rw", runMount.Options)
+	}
+	if optMount == nil {
+		t.Fatalf("bind mount for /opt/kukeon not found")
+	}
+	if !containsStringRoot(optMount.Options, "ro") {
+		t.Errorf("/opt/kukeon options = %v, want contains ro", optMount.Options)
+	}
+}
+
+func TestBuildRootContainerSpec_UserAndReadonlyRootfs(t *testing.T) {
+	spec := applyRootBuiltSpec(t, intmodel.ContainerSpec{
+		ID:                     "root",
+		ContainerdID:           "containerd-root",
+		Image:                  "registry.eminwux.com/busybox:latest",
+		User:                   "1000:1000",
+		ReadOnlyRootFilesystem: true,
+	}, nil)
+
+	if spec.Process == nil || spec.Process.User.UID != 1000 || spec.Process.User.GID != 1000 {
+		t.Fatalf("Process.User = %+v, want UID=1000 GID=1000", spec.Process.User)
+	}
+	if spec.Root == nil || !spec.Root.Readonly {
+		t.Fatalf("Root.Readonly = %+v, want readonly=true", spec.Root)
+	}
+}
+
+func TestBuildRootContainerSpec_Capabilities(t *testing.T) {
+	defaults := []string{
+		"CAP_CHOWN",
+		"CAP_DAC_OVERRIDE",
+		"CAP_NET_RAW",
+		"CAP_SETGID",
+		"CAP_SETUID",
+	}
+	spec := &runtimespec.Spec{
+		Process: &runtimespec.Process{
+			Capabilities: &runtimespec.LinuxCapabilities{
+				Bounding:  append([]string(nil), defaults...),
+				Permitted: append([]string(nil), defaults...),
+				Effective: append([]string(nil), defaults...),
+			},
+		},
+		Linux: &runtimespec.Linux{},
+	}
+	built := ctr.BuildRootContainerSpec(intmodel.ContainerSpec{
+		ID:           "root",
+		ContainerdID: "containerd-root",
+		Image:        "registry.eminwux.com/busybox:latest",
+		Capabilities: &intmodel.ContainerCapabilities{
+			Drop: []string{"ALL"},
+			Add:  []string{"NET_ADMIN"},
+		},
+	}, nil)
+	for _, opt := range built.SpecOpts {
+		if err := opt(context.Background(), nil, nil, spec); err != nil {
+			t.Fatalf("SpecOpts returned error: %v", err)
+		}
+	}
+
+	if spec.Process == nil || spec.Process.Capabilities == nil {
+		t.Fatalf("Process.Capabilities is nil")
+	}
+	if !containsOnlyRoot(spec.Process.Capabilities.Effective, "CAP_NET_ADMIN") {
+		t.Errorf("Effective caps = %v, want only CAP_NET_ADMIN", spec.Process.Capabilities.Effective)
+	}
+	if !containsOnlyRoot(spec.Process.Capabilities.Bounding, "CAP_NET_ADMIN") {
+		t.Errorf("Bounding caps = %v, want only CAP_NET_ADMIN", spec.Process.Capabilities.Bounding)
+	}
+	if !containsOnlyRoot(spec.Process.Capabilities.Permitted, "CAP_NET_ADMIN") {
+		t.Errorf("Permitted caps = %v, want only CAP_NET_ADMIN", spec.Process.Capabilities.Permitted)
+	}
+}
+
+func TestBuildRootContainerSpec_SecurityOpts(t *testing.T) {
+	spec := applyRootBuiltSpec(t, intmodel.ContainerSpec{
+		ID:           "root",
+		ContainerdID: "containerd-root",
+		Image:        "registry.eminwux.com/busybox:latest",
+		SecurityOpts: []string{"no-new-privileges"},
+	}, nil)
+	if !spec.Process.NoNewPrivileges {
+		t.Fatalf("Process.NoNewPrivileges = false, want true")
+	}
+}
+
+func TestBuildRootContainerSpec_TmpfsMounts(t *testing.T) {
+	spec := applyRootBuiltSpec(t, intmodel.ContainerSpec{
+		ID:           "root",
+		ContainerdID: "containerd-root",
+		Image:        "registry.eminwux.com/busybox:latest",
+		Tmpfs: []intmodel.ContainerTmpfsMount{
+			{Path: "/tmp", SizeBytes: 64 * 1024 * 1024, Options: []string{"mode=1777"}},
+		},
+	}, nil)
+
+	var found *runtimespec.Mount
+	for i := range spec.Mounts {
+		if spec.Mounts[i].Destination == "/tmp" {
+			found = &spec.Mounts[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("tmpfs mount for /tmp not found, mounts=%+v", spec.Mounts)
+	}
+	if found.Type != "tmpfs" {
+		t.Errorf("mount type = %q, want %q", found.Type, "tmpfs")
+	}
+	if !containsStringRoot(found.Options, "size=67108864") {
+		t.Errorf("tmpfs options = %v, want size=67108864", found.Options)
+	}
+	if !containsStringRoot(found.Options, "mode=1777") {
+		t.Errorf("tmpfs options = %v, want mode=1777", found.Options)
+	}
+}
+
+func TestBuildRootContainerSpec_Resources(t *testing.T) {
+	mem := int64(4 * 1024 * 1024 * 1024)
+	cpu := int64(512)
+	pids := int64(256)
+	spec := applyRootBuiltSpec(t, intmodel.ContainerSpec{
+		ID:           "root",
+		ContainerdID: "containerd-root",
+		Image:        "registry.eminwux.com/busybox:latest",
+		Resources: &intmodel.ContainerResources{
+			MemoryLimitBytes: &mem,
+			CPUShares:        &cpu,
+			PidsLimit:        &pids,
+		},
+	}, nil)
+
+	if spec.Linux == nil || spec.Linux.Resources == nil {
+		t.Fatalf("Linux.Resources is nil")
+	}
+	if spec.Linux.Resources.Memory == nil || spec.Linux.Resources.Memory.Limit == nil ||
+		*spec.Linux.Resources.Memory.Limit != mem {
+		t.Errorf("Memory.Limit = %+v, want %d", spec.Linux.Resources.Memory, mem)
+	}
+	if spec.Linux.Resources.CPU == nil || spec.Linux.Resources.CPU.Shares == nil ||
+		*spec.Linux.Resources.CPU.Shares != 512 {
+		t.Errorf("CPU.Shares = %+v, want 512", spec.Linux.Resources.CPU)
+	}
+	if spec.Linux.Resources.Pids == nil || spec.Linux.Resources.Pids.Limit != 256 {
+		t.Errorf("Pids.Limit = %+v, want 256", spec.Linux.Resources.Pids)
+	}
+}
+
+// TestBuildRootContainerSpec_DefaultsUnaffected guards that the auto-default
+// root container path (no Volumes, no security fields) keeps its existing
+// minimal SpecOpts shape after the parity fix.
+func TestBuildRootContainerSpec_DefaultsUnaffected(t *testing.T) {
+	spec := applyRootBuiltSpec(t, ctr.DefaultRootContainerSpec(
+		"containerd-root",
+		"cell",
+		"realm",
+		"space",
+		"stack",
+		"",
+	), nil)
+
+	for _, m := range spec.Mounts {
+		if m.Type == "bind" {
+			t.Errorf("default root container produced bind mount %+v, want none", m)
+		}
+		if m.Type == "tmpfs" {
+			t.Errorf("default root container produced tmpfs mount %+v, want none", m)
+		}
+	}
+	if spec.Linux != nil && spec.Linux.Resources != nil {
+		t.Errorf("default root container set Linux.Resources = %+v, want nil", spec.Linux.Resources)
+	}
+	if spec.Process != nil && spec.Process.NoNewPrivileges {
+		t.Errorf("default root container set NoNewPrivileges = true, want false")
+	}
+}
+
+func containsStringRoot(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsOnlyRoot(xs []string, want string) bool {
+	return len(xs) == 1 && xs[0] == want
 }
