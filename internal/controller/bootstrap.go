@@ -422,7 +422,13 @@ func (b *Exec) bootstrapStack(section *StackSection, realmName, spaceName, stack
 // container creation (image unpack, image-config resolution) that reference
 // snapshot lowerdirs under that tree, and the mount syscalls execute in the
 // daemon container's mount namespace — without the bind-mount the kernel
-// returns ENOENT on the host paths.
+// returns ENOENT on the host paths. CNI state lives on the host too: the
+// conflists at /opt/cni/net.d are written by kuke init's in-process bootstrap
+// and have to be readable by the daemon on later applies; /var/lib/cni holds
+// host-local IPAM state, which daemon and --no-daemon must share so they
+// don't allocate the same IP twice; /opt/cni/cache holds the CNI invocation
+// cache that gives DEL stable arguments — a mismatch leaks veths and IPs
+// across daemon restarts.
 func kukeondCellDoc(image, socketPath, runPath, containerdSocket string) *v1beta1.CellDoc {
 	args := []string{"serve", "--socket", socketPath}
 	if runPath != "" {
@@ -437,6 +443,9 @@ func kukeondCellDoc(image, socketPath, runPath, containerdSocket string) *v1beta
 		{Source: sockDir, Target: sockDir},
 		{Source: "/sys/fs/cgroup", Target: "/sys/fs/cgroup"},
 		{Source: "/var/lib/containerd", Target: "/var/lib/containerd"},
+		{Source: "/opt/cni/net.d", Target: "/opt/cni/net.d"},
+		{Source: "/var/lib/cni", Target: "/var/lib/cni"},
+		{Source: "/opt/cni/cache", Target: "/opt/cni/cache"},
 	}
 	if runPath != "" && runPath != sockDir {
 		volumes = append(volumes, v1beta1.VolumeMount{Source: runPath, Target: runPath})
@@ -487,6 +496,19 @@ func ensureSocketDir(socketPath string) error {
 	dir := socketDir(socketPath)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create kukeond socket dir %q: %w", dir, err)
+	}
+	return nil
+}
+
+// ensureCNIStateDir creates /var/lib/cni so the kukeond cell's bind-mount has
+// a source. host-local IPAM only creates /var/lib/cni/networks/<net>/ on its
+// first allocation, which happens after the daemon is up — by then the cell
+// would have already failed to start with ENOENT on the bind source. The two
+// other CNI mounts (/opt/cni/net.d and /opt/cni/cache) are already created by
+// the earlier CNI bootstrap step.
+func ensureCNIStateDir() error {
+	if err := os.MkdirAll("/var/lib/cni", 0o755); err != nil {
+		return fmt.Errorf("create CNI state dir %q: %w", "/var/lib/cni", err)
 	}
 	return nil
 }

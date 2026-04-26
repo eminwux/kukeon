@@ -183,6 +183,9 @@ func (b *Exec) Bootstrap() (BootstrapReport, error) {
 		if err = ensureSocketDir(b.opts.KukeondSocket); err != nil {
 			return report, err
 		}
+		if err = ensureCNIStateDir(); err != nil {
+			return report, err
+		}
 		cellDoc := kukeondCellDoc(
 			b.opts.KukeondImage,
 			b.opts.KukeondSocket,

@@ -43,6 +43,9 @@ func TestKukeondCellDocVolumes(t *testing.T) {
 				{Source: "/run/kukeon", Target: "/run/kukeon"},
 				{Source: "/sys/fs/cgroup", Target: "/sys/fs/cgroup"},
 				{Source: "/var/lib/containerd", Target: "/var/lib/containerd"},
+				{Source: "/opt/cni/net.d", Target: "/opt/cni/net.d"},
+				{Source: "/var/lib/cni", Target: "/var/lib/cni"},
+				{Source: "/opt/cni/cache", Target: "/opt/cni/cache"},
 				{Source: "/opt/kukeon", Target: "/opt/kukeon"},
 				{Source: "/run/containerd", Target: "/run/containerd"},
 			},
@@ -55,6 +58,9 @@ func TestKukeondCellDocVolumes(t *testing.T) {
 				{Source: "/run/kukeon", Target: "/run/kukeon"},
 				{Source: "/sys/fs/cgroup", Target: "/sys/fs/cgroup"},
 				{Source: "/var/lib/containerd", Target: "/var/lib/containerd"},
+				{Source: "/opt/cni/net.d", Target: "/opt/cni/net.d"},
+				{Source: "/var/lib/cni", Target: "/var/lib/cni"},
+				{Source: "/opt/cni/cache", Target: "/opt/cni/cache"},
 			},
 		},
 		{
@@ -67,6 +73,9 @@ func TestKukeondCellDocVolumes(t *testing.T) {
 				{Source: "/run/kukeon", Target: "/run/kukeon"},
 				{Source: "/sys/fs/cgroup", Target: "/sys/fs/cgroup"},
 				{Source: "/var/lib/containerd", Target: "/var/lib/containerd"},
+				{Source: "/opt/cni/net.d", Target: "/opt/cni/net.d"},
+				{Source: "/var/lib/cni", Target: "/var/lib/cni"},
+				{Source: "/opt/cni/cache", Target: "/opt/cni/cache"},
 				{Source: "/opt/kukeon", Target: "/opt/kukeon"},
 			},
 		},
@@ -113,6 +122,45 @@ func TestKukeondCellDocVolumes(t *testing.T) {
 			}
 			if !hasContainerdData {
 				t.Errorf("missing /var/lib/containerd bind mount in volumes: %+v", got)
+			}
+
+			// CNI conflist directory must be shared so the daemon reads the
+			// same network definitions kuke init wrote in-process on the host.
+			var hasCniNetD bool
+			for _, v := range got {
+				if v.Source == "/opt/cni/net.d" && v.Target == "/opt/cni/net.d" {
+					hasCniNetD = true
+					break
+				}
+			}
+			if !hasCniNetD {
+				t.Errorf("missing /opt/cni/net.d bind mount in volumes: %+v", got)
+			}
+
+			// host-local IPAM state must be shared so daemon and --no-daemon
+			// don't allocate the same IP from the same subnet independently.
+			var hasCniState bool
+			for _, v := range got {
+				if v.Source == "/var/lib/cni" && v.Target == "/var/lib/cni" {
+					hasCniState = true
+					break
+				}
+			}
+			if !hasCniState {
+				t.Errorf("missing /var/lib/cni bind mount in volumes: %+v", got)
+			}
+
+			// CNI invocation cache must be shared so DEL sees the same ADD
+			// arguments and stops leaking veths and IPs across daemon restarts.
+			var hasCniCache bool
+			for _, v := range got {
+				if v.Source == "/opt/cni/cache" && v.Target == "/opt/cni/cache" {
+					hasCniCache = true
+					break
+				}
+			}
+			if !hasCniCache {
+				t.Errorf("missing /opt/cni/cache bind mount in volumes: %+v", got)
 			}
 		})
 	}
