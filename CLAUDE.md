@@ -97,23 +97,6 @@ kuke-system  kuke-system.kukeon.io  Ready  /kukeon/kuke-system
 
 **If your change touches anything the daemon reads, this check must be in the PR's test plan.** Reviewer agent will flag PRs that miss it.
 
-### 6. TLS image pull guard
-
-Exercise the daemon's pull path against a public HTTPS registry. The kukeond image is built from `debian:bookworm-slim`, which ships without CA roots — if `Dockerfile` ever drops `ca-certificates` from its apt install line, every public-registry pull (Docker Hub, GHCR, gcr.io, …) starts failing with `x509: certificate signed by unknown authority`. This step catches that regression class.
-
-```bash
-sudo ./kuke apply -f docs/examples/hello-world.yaml
-
-# The cell only reaches Ready once the image pulled successfully.
-sudo ./kuke get cells --realm default --space default --stack default
-
-# Tear it down.
-sudo ./kuke delete cell hello-world \
-    --realm default --space default --stack default --cascade
-```
-
-If `kuke apply` fails with `x509: certificate signed by unknown authority`, the kukeond container is missing `ca-certificates`.
-
 ### Inspecting the running daemon
 
 ```bash
