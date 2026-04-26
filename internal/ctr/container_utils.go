@@ -106,6 +106,13 @@ func BuildRootContainerSpec(
 		specOpts = append(specOpts, oci.WithHostNamespace(runtimespec.NetworkNamespace))
 	}
 
+	// Host PID: drop the PID LinuxNamespace entry so the root container
+	// shares the host's PID namespace. Mirrors the BuildContainerSpec rule
+	// so an explicit HostPID=true on a user-supplied root spec is honored.
+	if rootSpec.HostPID {
+		specOpts = append(specOpts, oci.WithHostNamespace(runtimespec.PIDNamespace))
+	}
+
 	rootLabels := copyLabels(labels)
 	rootLabels[rootContainerLabelKey] = rootContainerLabelValue
 

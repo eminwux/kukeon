@@ -170,6 +170,15 @@ func TestKukeondCellDocVolumes(t *testing.T) {
 			if !doc.Spec.Containers[0].HostNetwork {
 				t.Errorf("kukeond container must have HostNetwork=true")
 			}
+
+			// kukeond must run in the host's PID namespace so the in-process
+			// CNI bridge plugin can resolve the host PIDs that containerd
+			// returns from task.Pid() when attaching user cells. Without
+			// this, /proc/<host-pid>/ns/net inside the daemon is ENOENT
+			// and the user-cell network attach fails (issue #105).
+			if !doc.Spec.Containers[0].HostPID {
+				t.Errorf("kukeond container must have HostPID=true")
+			}
 		})
 	}
 }

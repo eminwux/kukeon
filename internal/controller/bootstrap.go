@@ -490,7 +490,19 @@ func kukeondCellDoc(image, socketPath, runPath, containerdSocket string) *v1beta
 					// any HostNetwork=true workload in the cell, so kukeond
 					// (which joins the root's netns) ends up on the host.
 					HostNetwork: true,
-					Privileged:  true,
+					// HostPID is needed by the CNI bridge plugin running
+					// inside kukeond: when it attaches a *user* cell to a
+					// network it receives the user-cell's root PID from
+					// containerd's task.Pid(), which is a *host* PID. With
+					// kukeond's own PID namespace, /proc/<host-pid>/ns/net
+					// returns ENOENT and the attach fails. HostPID=true
+					// drops the PID LinuxNamespace entry from kukeond's OCI
+					// spec so /proc inside the daemon reflects host PIDs.
+					// Distinct from HostNetwork — that fixed where kukeond's
+					// own iptables/bridges land; this fixes how kukeond
+					// resolves *other* containers' netns paths.
+					HostPID:    true,
+					Privileged: true,
 				},
 			},
 		},

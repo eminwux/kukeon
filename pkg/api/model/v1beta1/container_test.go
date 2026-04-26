@@ -44,3 +44,30 @@ func TestContainerSpec_HostNetworkDefault(t *testing.T) {
 		}
 	})
 }
+
+// TestContainerSpec_HostPIDDefault pins the zero-value behavior of the
+// HostPID field so existing manifests (which don't set it) keep their
+// per-container PID namespace. Issue #105.
+func TestContainerSpec_HostPIDDefault(t *testing.T) {
+	t.Run("zero value is false", func(t *testing.T) {
+		var spec ContainerSpec
+		if spec.HostPID {
+			t.Errorf("zero-value ContainerSpec.HostPID = true, want false")
+		}
+	})
+
+	t.Run("NewContainerDoc default is false", func(t *testing.T) {
+		doc := NewContainerDoc(nil)
+		if doc.Spec.HostPID {
+			t.Errorf("NewContainerDoc(nil).Spec.HostPID = true, want false")
+		}
+	})
+
+	t.Run("NewContainerDoc preserves explicit true", func(t *testing.T) {
+		in := &ContainerDoc{Spec: ContainerSpec{HostPID: true}}
+		out := NewContainerDoc(in)
+		if !out.Spec.HostPID {
+			t.Errorf("NewContainerDoc copy lost HostPID=true")
+		}
+	})
+}
