@@ -68,11 +68,24 @@ kill:
 test:
 	go test $(shell go list ./... | grep -v /e2e)
 
+# Tag the e2e suite uses to refer to the local kukeond image. The e2e harness
+# imports it into containerd's kuke-system namespace before running `kuke init`,
+# so the test does not depend on a published registry tag matching `git
+# describe`.
+KUKEON_E2E_IMAGE_DOCKER_NAME ?= kukeon-local:e2e
+KUKEON_E2E_IMAGE ?= docker.io/library/$(KUKEON_E2E_IMAGE_DOCKER_NAME)
+
 e2e: test-e2e
 .PHONY: test-e2e
 test-e2e: kuke
+	@echo "Building local kukeond image $(KUKEON_E2E_IMAGE_DOCKER_NAME) for e2e"
+	docker build --build-arg VERSION=v0.0.0-e2e -t $(KUKEON_E2E_IMAGE_DOCKER_NAME) .
 	@echo "Running e2e tests using binaries in project root"
-	HOME=$(HOME) PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$(PATH) E2E_BIN_DIR=$(CURDIR) go test -v ./e2e
+	HOME=$(HOME) PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$(PATH) \
+		E2E_BIN_DIR=$(CURDIR) \
+		KUKEON_E2E_IMAGE=$(KUKEON_E2E_IMAGE) \
+		KUKEON_E2E_IMAGE_DOCKER_NAME=$(KUKEON_E2E_IMAGE_DOCKER_NAME) \
+		go test -v ./e2e
 
 tag:
 	git tag -s v$(KUKEON_VERSION) -m "Release version $(KUKEON_VERSION)"

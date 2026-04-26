@@ -157,6 +157,66 @@ func buildKukeRunPathArgs(runPath string) []string {
 	return []string{"--run-path", runPath}
 }
 
+// loadKukeondImageIntoContainerd stages the local kukeond image into the
+// kuke-system containerd namespace and returns the fully-qualified image
+// reference to pass via `kuke init --kukeond-image`. It skips the test when
+// the harness env vars are unset (running `go test ./e2e` without the
+// `make e2e` wrapper) or when `docker` / `ctr` aren't on PATH. `kuke init`
+// otherwise resolves the kukeond image from `git describe` output, which
+// fails on dirty/untagged dev trees because that ref does not exist in any
+// registry.
+func loadKukeondImageIntoContainerd(t *testing.T) string {
+	t.Helper()
+
+	image := os.Getenv("KUKEON_E2E_IMAGE")
+	dockerName := os.Getenv("KUKEON_E2E_IMAGE_DOCKER_NAME")
+	if image == "" || dockerName == "" {
+		t.Skip(
+			"KUKEON_E2E_IMAGE / KUKEON_E2E_IMAGE_DOCKER_NAME unset; " +
+				"run via 'make e2e' (which builds the local kukeond image) " +
+				"or set both env vars manually",
+		)
+	}
+
+	dockerPath, err := exec.LookPath("docker")
+	if err != nil {
+		t.Skipf("docker binary not found, skipping kukeond image staging: %v", err)
+	}
+	ctrPath, err := exec.LookPath(ctr)
+	if err != nil {
+		t.Skipf("ctr binary not found, skipping kukeond image staging: %v", err)
+	}
+
+	tarPath := filepath.Join(t.TempDir(), "kukeond.tar")
+
+	saveCtx, saveCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer saveCancel()
+	saveCmd := exec.CommandContext(saveCtx, dockerPath, "save", "-o", tarPath, dockerName)
+	if out, saveErr := saveCmd.CombinedOutput(); saveErr != nil {
+		t.Fatalf(
+			"docker save %q failed: %v\noutput:\n%s\n"+
+				"hint: 'make e2e' builds this image; if running go test directly, build it first",
+			dockerName, saveErr, string(out),
+		)
+	}
+
+	importCtx, importCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer importCancel()
+	importCmd := exec.CommandContext(
+		importCtx, ctrPath,
+		"--namespace", consts.KukeSystemRealmNamespace,
+		"images", "import", tarPath,
+	)
+	if out, importErr := importCmd.CombinedOutput(); importErr != nil {
+		t.Fatalf(
+			"ctr -n %s images import %q failed: %v\noutput:\n%s",
+			consts.KukeSystemRealmNamespace, tarPath, importErr, string(out),
+		)
+	}
+
+	return image
+}
+
 // verifyContainerdNamespace verifies containerd namespace exists by running ctr ns ls.
 func verifyContainerdNamespace(t *testing.T, namespace string) bool {
 	t.Helper()

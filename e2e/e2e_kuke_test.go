@@ -243,8 +243,14 @@ func TestKuke_Init_VerifyState(t *testing.T) {
 		cleanupRealm(t, runPath, "default")
 	})
 
+	// Step 0.5: Stage the local kukeond image into containerd's kuke-system
+	// namespace. The Step 0 purge above wipes any prior image, and dev builds
+	// from a dirty/untagged tree resolve to a registry tag that doesn't exist,
+	// so init would fail on image pull without this.
+	kukeondImage := loadKukeondImageIntoContainerd(t)
+
 	// Step 1: Run init command
-	args := append(buildKukeRunPathArgs(runPath), "init")
+	args := append(buildKukeRunPathArgs(runPath), "init", "--kukeond-image", kukeondImage)
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Verify bootstrap report output contains expected content
