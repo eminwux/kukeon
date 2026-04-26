@@ -232,6 +232,14 @@ func BuildContainerSpec(
 		specOpts = append(specOpts, oci.WithHostNamespace(runtimespec.NetworkNamespace))
 	}
 
+	// Host PID: drop the PID LinuxNamespace entry so the container shares the
+	// host's PID namespace and /proc reflects host PIDs. Required for kukeond
+	// because the CNI bridge plugin running inside it resolves netns paths
+	// from host PIDs that containerd returns via task.Pid().
+	if containerSpec.HostPID {
+		specOpts = append(specOpts, oci.WithHostNamespace(runtimespec.PIDNamespace))
+	}
+
 	if mounts := buildBindMounts(containerSpec.Volumes); len(mounts) > 0 {
 		specOpts = append(specOpts, oci.WithMounts(mounts))
 	}

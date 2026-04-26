@@ -56,6 +56,15 @@ type ContainerSpec struct {
 	// iptables rules land in host scope where kubelet-style CNI plumbing
 	// belongs. Default false — no behavior change for existing specs.
 	HostNetwork            bool                   `json:"hostNetwork,omitempty"            yaml:"hostNetwork,omitempty"`
+	// HostPID opts the container into the host's PID namespace. When true,
+	// the runner omits the PID LinuxNamespace from the OCI spec so /proc
+	// inside the container reflects host PIDs. Used by the kukeond bootstrap
+	// so the CNI bridge plugin running inside the daemon can resolve the
+	// host PIDs containerd returns from task.Pid() — without this, attaching
+	// user cells to a network fails with `Statfs /proc/<host-pid>/ns/net:
+	// no such file or directory`. Default false — no behavior change for
+	// existing specs.
+	HostPID                bool                   `json:"hostPID,omitempty"                yaml:"hostPID,omitempty"`
 	User                   string                 `json:"user,omitempty"                   yaml:"user,omitempty"`
 	ReadOnlyRootFilesystem bool                   `json:"readOnlyRootFilesystem,omitempty" yaml:"readOnlyRootFilesystem,omitempty"`
 	Capabilities           *ContainerCapabilities `json:"capabilities,omitempty"           yaml:"capabilities,omitempty"`
@@ -189,6 +198,7 @@ func NewContainerDoc(from *ContainerDoc) *ContainerDoc {
 				NetworksAliases: []string{},
 				Privileged:      false,
 				HostNetwork:     false,
+				HostPID:         false,
 				CNIConfigPath:   "",
 				RestartPolicy:   "",
 			},

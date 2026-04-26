@@ -377,6 +377,155 @@ func TestBuildContainerSpec_HostNetwork(t *testing.T) {
 	}
 }
 
+// TestBuildContainerSpec_HostPID verifies the OCI spec produced by
+// BuildContainerSpec drops the PID LinuxNamespace entry exactly when
+// HostPID is true. Required for kukeond — without it, /proc inside the
+// daemon does not reflect host PIDs and the in-process CNI bridge plugin
+// fails to resolve user-cell netns paths (issue #105).
+func TestBuildContainerSpec_HostPID(t *testing.T) {
+	tests := []struct {
+		name      string
+		hostPID   bool
+		wantPIDNS bool
+	}{
+		{name: "host pid true drops pid ns entry", hostPID: true, wantPIDNS: false},
+		{name: "host pid false keeps pid ns entry", hostPID: false, wantPIDNS: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := ctr.BuildContainerSpec(intmodel.ContainerSpec{
+				ID:       "test-id",
+				Image:    "registry.eminwux.com/busybox:latest",
+				HostPID:  tt.hostPID,
+				CellName: "c", SpaceName: "s", RealmName: "r", StackName: "st",
+			})
+
+			ociSpec := &runtimespec.Spec{
+				Process: &runtimespec.Process{},
+				Linux: &runtimespec.Linux{
+					Namespaces: []runtimespec.LinuxNamespace{
+						{Type: runtimespec.NetworkNamespace},
+						{Type: runtimespec.PIDNamespace},
+						{Type: runtimespec.MountNamespace},
+					},
+				},
+			}
+			for _, opt := range spec.SpecOpts {
+				if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+					t.Fatalf("apply SpecOpts: %v", err)
+				}
+			}
+
+			var hasPID bool
+			for _, ns := range ociSpec.Linux.Namespaces {
+				if ns.Type == runtimespec.PIDNamespace {
+					hasPID = true
+					break
+				}
+			}
+			if hasPID != tt.wantPIDNS {
+				t.Errorf("PID namespace present = %v, want %v (namespaces=%+v)",
+					hasPID, tt.wantPIDNS, ociSpec.Linux.Namespaces)
+			}
+		})
+	}
+}
+
+// TestBuildContainerSpec_HostNetworkAndHostPID verifies that the two flags
+// are independent — setting one must not silently affect the other.
+func TestBuildContainerSpec_HostNetworkAndHostPID(t *testing.T) {
+	spec := ctr.BuildContainerSpec(intmodel.ContainerSpec{
+		ID:          "test-id",
+		Image:       "registry.eminwux.com/busybox:latest",
+		HostNetwork: true,
+		HostPID:     true,
+		CellName:    "c", SpaceName: "s", RealmName: "r", StackName: "st",
+	})
+
+	ociSpec := &runtimespec.Spec{
+		Process: &runtimespec.Process{},
+		Linux: &runtimespec.Linux{
+			Namespaces: []runtimespec.LinuxNamespace{
+				{Type: runtimespec.NetworkNamespace},
+				{Type: runtimespec.PIDNamespace},
+				{Type: runtimespec.MountNamespace},
+			},
+		},
+	}
+	for _, opt := range spec.SpecOpts {
+		if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+			t.Fatalf("apply SpecOpts: %v", err)
+		}
+	}
+
+	var hasNet, hasPID bool
+	for _, ns := range ociSpec.Linux.Namespaces {
+		switch ns.Type {
+		case runtimespec.NetworkNamespace:
+			hasNet = true
+		case runtimespec.PIDNamespace:
+			hasPID = true
+		}
+	}
+	if hasNet || hasPID {
+		t.Errorf("both HostNetwork and HostPID true must drop both ns entries; got net=%v pid=%v",
+			hasNet, hasPID)
+	}
+}
+
+// TestBuildRootContainerSpec_HostPID mirrors TestBuildContainerSpec_HostPID
+// for the root-container builder. A user-supplied root spec marked HostPID
+// must produce an OCI spec without the PID namespace entry.
+func TestBuildRootContainerSpec_HostPID(t *testing.T) {
+	tests := []struct {
+		name      string
+		hostPID   bool
+		wantPIDNS bool
+	}{
+		{name: "host pid true drops pid ns entry", hostPID: true, wantPIDNS: false},
+		{name: "host pid false keeps pid ns entry", hostPID: false, wantPIDNS: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := ctr.BuildRootContainerSpec(intmodel.ContainerSpec{
+				ID:           "root",
+				ContainerdID: "root-id",
+				Image:        "registry.eminwux.com/busybox:latest",
+				HostPID:      tt.hostPID,
+			}, nil)
+
+			ociSpec := &runtimespec.Spec{
+				Process: &runtimespec.Process{},
+				Linux: &runtimespec.Linux{
+					Namespaces: []runtimespec.LinuxNamespace{
+						{Type: runtimespec.NetworkNamespace},
+						{Type: runtimespec.PIDNamespace},
+					},
+				},
+			}
+			for _, opt := range spec.SpecOpts {
+				if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+					t.Fatalf("apply SpecOpts: %v", err)
+				}
+			}
+
+			var hasPID bool
+			for _, ns := range ociSpec.Linux.Namespaces {
+				if ns.Type == runtimespec.PIDNamespace {
+					hasPID = true
+					break
+				}
+			}
+			if hasPID != tt.wantPIDNS {
+				t.Errorf("PID namespace present = %v, want %v (namespaces=%+v)",
+					hasPID, tt.wantPIDNS, ociSpec.Linux.Namespaces)
+			}
+		})
+	}
+}
+
 // TestBuildRootContainerSpec_HostNetwork is the same assertion as
 // TestBuildContainerSpec_HostNetwork but for the root-container builder used
 // by the runner for the kukeond cell.
