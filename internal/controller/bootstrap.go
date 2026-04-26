@@ -417,7 +417,12 @@ func (b *Exec) bootstrapStack(section *StackSection, realmName, spaceName, stack
 // hierarchy at /sys/fs/cgroup is bind-mounted so kukeond can create the
 // realm/space/stack/cell cgroup tree for user workloads — without it, the
 // daemon container only sees a fresh read-only sysfs and cgroup creation
-// returns ENOENT.
+// returns ENOENT. The host containerd data root at /var/lib/containerd is
+// bind-mounted as well: kukeond performs in-process overlay mounts during
+// container creation (image unpack, image-config resolution) that reference
+// snapshot lowerdirs under that tree, and the mount syscalls execute in the
+// daemon container's mount namespace — without the bind-mount the kernel
+// returns ENOENT on the host paths.
 func kukeondCellDoc(image, socketPath, runPath, containerdSocket string) *v1beta1.CellDoc {
 	args := []string{"serve", "--socket", socketPath}
 	if runPath != "" {
@@ -431,6 +436,7 @@ func kukeondCellDoc(image, socketPath, runPath, containerdSocket string) *v1beta
 	volumes := []v1beta1.VolumeMount{
 		{Source: sockDir, Target: sockDir},
 		{Source: "/sys/fs/cgroup", Target: "/sys/fs/cgroup"},
+		{Source: "/var/lib/containerd", Target: "/var/lib/containerd"},
 	}
 	if runPath != "" && runPath != sockDir {
 		volumes = append(volumes, v1beta1.VolumeMount{Source: runPath, Target: runPath})
