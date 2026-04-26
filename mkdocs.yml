@@ -86,6 +86,7 @@ nav:
   - Guides:
       - guides/init-and-reset.md
       - guides/apply-manifests.md
+      - guides/attach-claude-code.md
       - guides/local-dev.md
       - guides/autocomplete.md
       - guides/troubleshooting.md
