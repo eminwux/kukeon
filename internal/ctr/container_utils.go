@@ -113,6 +113,16 @@ func BuildRootContainerSpec(
 		specOpts = append(specOpts, oci.WithHostNamespace(runtimespec.PIDNamespace))
 	}
 
+	// Bind mounts and security/isolation fields share the same translators as
+	// BuildContainerSpec so a user-supplied root container (RootContainerID)
+	// keeps its Volumes, User, Capabilities, SecurityOpts, Tmpfs, and
+	// Resources instead of having them silently dropped.
+	if mounts := buildBindMounts(rootSpec.Volumes); len(mounts) > 0 {
+		specOpts = append(specOpts, oci.WithMounts(mounts))
+	}
+
+	specOpts = append(specOpts, securitySpecOpts(rootSpec)...)
+
 	rootLabels := copyLabels(labels)
 	rootLabels[rootContainerLabelKey] = rootContainerLabelValue
 
