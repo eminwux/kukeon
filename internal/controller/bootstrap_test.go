@@ -42,6 +42,7 @@ func TestKukeondCellDocVolumes(t *testing.T) {
 			want: []v1beta1.VolumeMount{
 				{Source: "/run/kukeon", Target: "/run/kukeon"},
 				{Source: "/sys/fs/cgroup", Target: "/sys/fs/cgroup"},
+				{Source: "/var/lib/containerd", Target: "/var/lib/containerd"},
 				{Source: "/opt/kukeon", Target: "/opt/kukeon"},
 				{Source: "/run/containerd", Target: "/run/containerd"},
 			},
@@ -53,6 +54,7 @@ func TestKukeondCellDocVolumes(t *testing.T) {
 			want: []v1beta1.VolumeMount{
 				{Source: "/run/kukeon", Target: "/run/kukeon"},
 				{Source: "/sys/fs/cgroup", Target: "/sys/fs/cgroup"},
+				{Source: "/var/lib/containerd", Target: "/var/lib/containerd"},
 			},
 		},
 		{
@@ -64,6 +66,7 @@ func TestKukeondCellDocVolumes(t *testing.T) {
 			want: []v1beta1.VolumeMount{
 				{Source: "/run/kukeon", Target: "/run/kukeon"},
 				{Source: "/sys/fs/cgroup", Target: "/sys/fs/cgroup"},
+				{Source: "/var/lib/containerd", Target: "/var/lib/containerd"},
 				{Source: "/opt/kukeon", Target: "/opt/kukeon"},
 			},
 		},
@@ -96,6 +99,20 @@ func TestKukeondCellDocVolumes(t *testing.T) {
 			}
 			if !hasCgroup {
 				t.Errorf("missing /sys/fs/cgroup bind mount in volumes: %+v", got)
+			}
+
+			// Containerd data root must always be present so kukeond's in-process
+			// overlay mounts during cell creation (image unpack, image-config
+			// resolution) can resolve snapshot lowerdirs that live on the host.
+			var hasContainerdData bool
+			for _, v := range got {
+				if v.Source == "/var/lib/containerd" && v.Target == "/var/lib/containerd" {
+					hasContainerdData = true
+					break
+				}
+			}
+			if !hasContainerdData {
+				t.Errorf("missing /var/lib/containerd bind mount in volumes: %+v", got)
 			}
 		})
 	}
