@@ -7,9 +7,13 @@ This guide takes a freshly-`kuke init`-ed host from zero to an attached
 
 - `kuke init` has completed on the host (the `default/default/default`
   realm/space/stack tuple is in place — that's what `kuke init` provisions).
-- `sbsh` and `sb` are on the host's `$PATH`. `kuke attach` is a thin client
-  that hands the terminal off to `sb` via `syscall.Exec`; bytes never traverse
-  `kukeond`.
+- The on-host `sb` client is on the host's `$PATH`. `kuke attach` is a thin
+  client that hands the terminal off to `sb` via `syscall.Exec`; bytes never
+  traverse `kukeond`.
+- The static `sbsh` binary is staged in the kukeon cache at
+  `/opt/kukeon/cache/sbsh/<arch>/sbsh` (where `<arch>` is the image's GOARCH —
+  `amd64` on a typical Linux host). The runner bind-mounts that file
+  read-only into every Attachable container.
 
 If you haven't bootstrapped yet, see [Init and reset](init-and-reset.md).
 
@@ -45,11 +49,18 @@ selection, workspace) is the image's responsibility.
 ## 2. Apply it
 
 ```bash
-sudo kuke apply -f claude-code.yaml
+sudo kuke apply -f claude-code.yaml --no-daemon
 ```
 
 `apply` creates the cell and starts its containers. Once the command returns,
 the workload task is running and the per-container `sbsh` socket is in place.
+
+`--no-daemon` runs cell creation in-process. It is required today because the
+released `kukeond` image does not yet bind-mount the containerd socket — see
+[Apply manifests](apply-manifests.md) for the broader story.
+The cell's metadata still lands under `/opt/kukeon`, so the daemon picks it up
+the moment it's queried — that's why the next step (`kuke attach`) goes
+through the daemon without any further setup.
 
 ## 3. Attach
 
@@ -82,10 +93,11 @@ When you're done with the cell:
 
 ```bash
 sudo kuke delete cell claude-code \
-    --realm default --space default --stack default --cascade
+    --realm default --space default --stack default --cascade --no-daemon
 ```
 
 `--cascade` removes every container in the cell along with the cell itself.
+`--no-daemon` is paired with the apply path above for the same reason.
 
 ## See also
 
