@@ -31,6 +31,29 @@ import (
 	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
+// rootContainerWantsCNI returns true when StartCell should run the CNI attach
+// path for the cell's root container. Host-network containers (kukeond and
+// any future host-scope cell) have no per-container veth, so attaching them
+// to a CNI bridge would either error or — worse — create a host-side bridge
+// inside the daemon's own netns, hiding it from real host-scope tooling.
+func rootContainerWantsCNI(spec intmodel.ContainerSpec) bool {
+	return !spec.HostNetwork
+}
+
+// cellWantsHostNetworkRoot reports whether any container in the cell asked
+// for HostNetwork. The default-root path uses this to flip the auto-default
+// busybox root onto the host's netns, which the non-root containers then
+// join via JoinContainerNamespaces — so a single container marked
+// HostNetwork=true puts the whole cell on the host's network.
+func cellWantsHostNetworkRoot(cell intmodel.Cell) bool {
+	for _, c := range cell.Spec.Containers {
+		if c.HostNetwork {
+			return true
+		}
+	}
+	return false
+}
+
 // StartCell starts the root container and all containers defined in the CellDoc.
 // The root container is started first, then all containers in doc.Spec.Containers are started.
 func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
@@ -247,80 +270,66 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		UTS: fmt.Sprintf("/proc/%d/ns/uts", rootPID),
 	}
 
-	// Log CNI paths being used for debugging
-	// Note: NewManager applies defaults AFTER creating the CNI config,
-	// so if cniBinDir is empty, the CNI config will have an empty path array
-	cniBinDir := r.cniConf.CniBinDir
-	cniConfigDir := r.cniConf.CniConfigDir
-	cniCacheDir := r.cniConf.CniCacheDir
-	debugFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-	debugFields = append(
-		debugFields,
-		"space",
-		spaceID,
-		"realm",
-		realmID,
-		"stack",
-		stackID,
-		"cniBinDir",
-		cniBinDir,
-		"cniConfigDir",
-		cniConfigDir,
-		"cniCacheDir",
-		cniCacheDir,
-	)
-	if cniBinDir == "" {
-		debugFields = append(debugFields, "cniBinDirDefault", "/opt/cni/bin")
-	}
-	if cniConfigDir == "" {
-		debugFields = append(debugFields, "cniConfigDirDefault", "/opt/cni/net.d")
-	}
-	if cniCacheDir == "" {
-		debugFields = append(debugFields, "cniCacheDirDefault", "/opt/cni/cache")
-	}
-	r.logger.DebugContext(
-		r.ctx,
-		"creating CNI manager",
-		debugFields...,
-	)
-
-	cniMgr, mgrErr := cni.NewManager(
-		r.cniConf.CniBinDir,
-		r.cniConf.CniConfigDir,
-		r.cniConf.CniCacheDir,
-	)
-	if mgrErr != nil {
-		return intmodel.Cell{}, fmt.Errorf("%w: %w", internalerrdefs.ErrInitCniManager, mgrErr)
-	}
-
-	if loadErr := cniMgr.LoadNetworkConfigList(cniConfigPath); loadErr != nil {
-		fields = appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-		fields = append(
-			fields,
+	// Host-netns root containers (e.g. kukeond) have no per-container veth to
+	// wire up — CNI attach would create a host-side bridge inside the daemon's
+	// own netns, exactly the divergence we're avoiding. Skip the whole CNI
+	// dance for them.
+	if !rootContainerWantsCNI(rootContainerSpec) {
+		skipFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		skipFields = append(skipFields, "space", spaceID, "realm", realmID, "pid", rootPID)
+		r.logger.InfoContext(
+			r.ctx,
+			"skipping CNI attach for host-network root container",
+			skipFields...,
+		)
+	} else {
+		// Log CNI paths being used for debugging
+		// Note: NewManager applies defaults AFTER creating the CNI config,
+		// so if cniBinDir is empty, the CNI config will have an empty path array
+		cniBinDir := r.cniConf.CniBinDir
+		cniConfigDir := r.cniConf.CniConfigDir
+		cniCacheDir := r.cniConf.CniCacheDir
+		debugFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		debugFields = append(
+			debugFields,
 			"space",
 			spaceID,
 			"realm",
 			realmID,
-			"cniConfig",
-			cniConfigPath,
-			"err",
-			fmt.Sprintf("%v", loadErr),
+			"stack",
+			stackID,
+			"cniBinDir",
+			cniBinDir,
+			"cniConfigDir",
+			cniConfigDir,
+			"cniCacheDir",
+			cniCacheDir,
 		)
-		r.logger.ErrorContext(
+		if cniBinDir == "" {
+			debugFields = append(debugFields, "cniBinDirDefault", "/opt/cni/bin")
+		}
+		if cniConfigDir == "" {
+			debugFields = append(debugFields, "cniConfigDirDefault", "/opt/cni/net.d")
+		}
+		if cniCacheDir == "" {
+			debugFields = append(debugFields, "cniCacheDirDefault", "/opt/cni/cache")
+		}
+		r.logger.DebugContext(
 			r.ctx,
-			"failed to load CNI config",
-			fields...,
+			"creating CNI manager",
+			debugFields...,
 		)
-		return intmodel.Cell{}, fmt.Errorf("failed to load CNI config %s: %w", cniConfigPath, loadErr)
-	}
 
-	netnsPath := namespacePaths.Net
-	if addErr := cniMgr.AddContainerToNetwork(r.ctx, containerID, netnsPath); addErr != nil {
-		// Check if the error indicates the container is already attached to the network
-		// This can happen when the task was already running from a previous start
-		errMsg := addErr.Error()
-		if strings.Contains(errMsg, "already exists") {
-			// Container is already attached to the network, log and continue
+		cniMgr, mgrErr := cni.NewManager(
+			r.cniConf.CniBinDir,
+			r.cniConf.CniConfigDir,
+			r.cniConf.CniCacheDir,
+		)
+		if mgrErr != nil {
+			return intmodel.Cell{}, fmt.Errorf("%w: %w", internalerrdefs.ErrInitCniManager, mgrErr)
+		}
+
+		if loadErr := cniMgr.LoadNetworkConfigList(cniConfigPath); loadErr != nil {
 			fields = appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 			fields = append(
 				fields,
@@ -330,49 +339,77 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 				realmID,
 				"cniConfig",
 				cniConfigPath,
-				"netns",
-				netnsPath,
-			)
-			r.logger.DebugContext(
-				r.ctx,
-				"root container already attached to network, skipping",
-				fields...,
-			)
-			// Continue execution - container is already attached
-		} else {
-			// Log the actual CNI bin dir value being used (may be empty, which causes the error)
-			// Note: NewManager creates CNI config with this value BEFORE applying defaults,
-			// so if empty, the CNI config will search in an empty path array
-			cniBinDirValue := r.cniConf.CniBinDir
-			fields = appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-			fields = append(
-				fields,
-				"space",
-				spaceID,
-				"realm",
-				realmID,
-				"cniConfig",
-				cniConfigPath,
-				"netns",
-				netnsPath,
-				"cniBinDir",
-				cniBinDirValue,
 				"err",
-				fmt.Sprintf("%v", addErr),
+				fmt.Sprintf("%v", loadErr),
 			)
-			if cniBinDirValue == "" {
-				fields = append(
-					fields,
-					"cniBinDirNote",
-					"empty path - CNI config was created with empty plugin search path, default /opt/cni/bin not applied to CNI config",
-				)
-			}
 			r.logger.ErrorContext(
 				r.ctx,
-				"failed to attach root container to network",
+				"failed to load CNI config",
 				fields...,
 			)
-			return intmodel.Cell{}, fmt.Errorf("failed to attach root container %s to network: %w", containerID, addErr)
+			return intmodel.Cell{}, fmt.Errorf("failed to load CNI config %s: %w", cniConfigPath, loadErr)
+		}
+
+		netnsPath := namespacePaths.Net
+		if addErr := cniMgr.AddContainerToNetwork(r.ctx, containerID, netnsPath); addErr != nil {
+			// Check if the error indicates the container is already attached to the network
+			// This can happen when the task was already running from a previous start
+			errMsg := addErr.Error()
+			if strings.Contains(errMsg, "already exists") {
+				// Container is already attached to the network, log and continue
+				fields = appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+				fields = append(
+					fields,
+					"space",
+					spaceID,
+					"realm",
+					realmID,
+					"cniConfig",
+					cniConfigPath,
+					"netns",
+					netnsPath,
+				)
+				r.logger.DebugContext(
+					r.ctx,
+					"root container already attached to network, skipping",
+					fields...,
+				)
+				// Continue execution - container is already attached
+			} else {
+				// Log the actual CNI bin dir value being used (may be empty, which causes the error)
+				// Note: NewManager creates CNI config with this value BEFORE applying defaults,
+				// so if empty, the CNI config will search in an empty path array
+				cniBinDirValue := r.cniConf.CniBinDir
+				fields = appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+				fields = append(
+					fields,
+					"space",
+					spaceID,
+					"realm",
+					realmID,
+					"cniConfig",
+					cniConfigPath,
+					"netns",
+					netnsPath,
+					"cniBinDir",
+					cniBinDirValue,
+					"err",
+					fmt.Sprintf("%v", addErr),
+				)
+				if cniBinDirValue == "" {
+					fields = append(
+						fields,
+						"cniBinDirNote",
+						"empty path - CNI config was created with empty plugin search path, default /opt/cni/bin not applied to CNI config",
+					)
+				}
+				r.logger.ErrorContext(
+					r.ctx,
+					"failed to attach root container to network",
+					fields...,
+				)
+				return intmodel.Cell{}, fmt.Errorf("failed to attach root container %s to network: %w", containerID, addErr)
+			}
 		}
 	}
 

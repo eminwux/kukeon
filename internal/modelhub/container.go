@@ -46,6 +46,7 @@ type ContainerSpec struct {
 	Networks               []string
 	NetworksAliases        []string
 	Privileged             bool
+	HostNetwork            bool
 	User                   string
 	ReadOnlyRootFilesystem bool
 	Capabilities           *ContainerCapabilities
