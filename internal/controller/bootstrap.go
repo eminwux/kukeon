@@ -413,7 +413,11 @@ func (b *Exec) bootstrapStack(section *StackSection, realmName, spaceName, stack
 // passed via --run-path so that kukeond reads/writes the same metadata store
 // that kuke uses in --no-daemon mode. The host containerd socket directory is
 // also bind-mounted and --containerd-socket is forwarded so kukeond can reach
-// the same containerd daemon as kuke does on the host.
+// the same containerd daemon as kuke does on the host. The host cgroup2
+// hierarchy at /sys/fs/cgroup is bind-mounted so kukeond can create the
+// realm/space/stack/cell cgroup tree for user workloads — without it, the
+// daemon container only sees a fresh read-only sysfs and cgroup creation
+// returns ENOENT.
 func kukeondCellDoc(image, socketPath, runPath, containerdSocket string) *v1beta1.CellDoc {
 	args := []string{"serve", "--socket", socketPath}
 	if runPath != "" {
@@ -426,6 +430,7 @@ func kukeondCellDoc(image, socketPath, runPath, containerdSocket string) *v1beta
 	sockDir := socketDir(socketPath)
 	volumes := []v1beta1.VolumeMount{
 		{Source: sockDir, Target: sockDir},
+		{Source: "/sys/fs/cgroup", Target: "/sys/fs/cgroup"},
 	}
 	if runPath != "" && runPath != sockDir {
 		volumes = append(volumes, v1beta1.VolumeMount{Source: runPath, Target: runPath})
