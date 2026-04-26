@@ -21,7 +21,9 @@ FROM debian:bookworm-slim
 ARG TARGETOS
 ARG TARGETARCH
 
-RUN DEBIAN_FRONTEND=noninteractive apt update && apt install -y procps
+RUN DEBIAN_FRONTEND=noninteractive apt update \
+ && apt install -y procps ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /
 
