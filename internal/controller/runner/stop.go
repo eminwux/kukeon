@@ -134,7 +134,13 @@ func (r *Exec) StopCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		// Use ContainerdID from spec
 		containerID := containerSpec.ContainerdID
 		if containerID == "" {
-			return intmodel.Cell{}, fmt.Errorf("container %q has empty ContainerdID", containerSpec.ID)
+			r.logger.WarnContext(
+				r.ctx,
+				"container has empty ContainerdID, skipping",
+				"container",
+				containerSpec.ID,
+			)
+			continue
 		}
 
 		// Use container name with UUID for containerd operations
@@ -398,7 +404,13 @@ func (r *Exec) StopContainer(cell intmodel.Cell, containerID string) error {
 	// Use ContainerdID from spec
 	containerdID := foundContainerSpec.ContainerdID
 	if containerdID == "" {
-		return fmt.Errorf("container %q has empty ContainerdID", containerID)
+		r.logger.WarnContext(
+			r.ctx,
+			"container has empty ContainerdID, skipping",
+			"container",
+			containerID,
+		)
+		return nil
 	}
 
 	// Use containerd ID for containerd operations
