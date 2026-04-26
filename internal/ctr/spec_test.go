@@ -17,11 +17,13 @@
 package ctr_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/containerd/containerd/v2/pkg/oci"
 	ctr "github.com/eminwux/kukeon/internal/ctr"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
 
 func TestJoinContainerNamespaces(t *testing.T) {
@@ -233,6 +235,20 @@ func TestBuildContainerSpec(t *testing.T) {
 			wantImage: "registry.eminwux.com/busybox:latest",
 		},
 		{
+			name: "with host network",
+			containerSpec: intmodel.ContainerSpec{
+				ID:          "test-id",
+				Image:       "registry.eminwux.com/busybox:latest",
+				HostNetwork: true,
+				CellName:    "cell-1",
+				SpaceName:   "space-1",
+				RealmName:   "realm-1",
+				StackName:   "stack-1",
+			},
+			wantID:    "test-id",
+			wantImage: "registry.eminwux.com/busybox:latest",
+		},
+		{
 			name: "with CNI config path",
 			containerSpec: intmodel.ContainerSpec{
 				ID:            "test-id",
@@ -301,6 +317,113 @@ func TestBuildContainerSpec(t *testing.T) {
 
 			if tt.containerSpec.CNIConfigPath != "" && spec.CNIConfigPath != tt.containerSpec.CNIConfigPath {
 				t.Errorf("CNIConfigPath = %q, want %q", spec.CNIConfigPath, tt.containerSpec.CNIConfigPath)
+			}
+		})
+	}
+}
+
+// TestBuildContainerSpec_HostNetwork verifies the OCI spec produced by
+// BuildContainerSpec drops the network LinuxNamespace entry exactly when
+// HostNetwork is true. The runner relies on this — a remaining network entry
+// would tell runc to unshare a fresh netns at start, leaving daemon-installed
+// bridges/veths/iptables invisible to the host.
+func TestBuildContainerSpec_HostNetwork(t *testing.T) {
+	tests := []struct {
+		name        string
+		hostNetwork bool
+		wantNetNS   bool
+	}{
+		{name: "host network true drops netns entry", hostNetwork: true, wantNetNS: false},
+		{name: "host network false keeps netns entry", hostNetwork: false, wantNetNS: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := ctr.BuildContainerSpec(intmodel.ContainerSpec{
+				ID:          "test-id",
+				Image:       "registry.eminwux.com/busybox:latest",
+				HostNetwork: tt.hostNetwork,
+				CellName:    "c", SpaceName: "s", RealmName: "r", StackName: "st",
+			})
+
+			ociSpec := &runtimespec.Spec{
+				Process: &runtimespec.Process{},
+				Linux: &runtimespec.Linux{
+					Namespaces: []runtimespec.LinuxNamespace{
+						{Type: runtimespec.NetworkNamespace},
+						{Type: runtimespec.PIDNamespace},
+						{Type: runtimespec.MountNamespace},
+					},
+				},
+			}
+			for _, opt := range spec.SpecOpts {
+				if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+					t.Fatalf("apply SpecOpts: %v", err)
+				}
+			}
+
+			var hasNet bool
+			for _, ns := range ociSpec.Linux.Namespaces {
+				if ns.Type == runtimespec.NetworkNamespace {
+					hasNet = true
+					break
+				}
+			}
+			if hasNet != tt.wantNetNS {
+				t.Errorf("network namespace present = %v, want %v (namespaces=%+v)",
+					hasNet, tt.wantNetNS, ociSpec.Linux.Namespaces)
+			}
+		})
+	}
+}
+
+// TestBuildRootContainerSpec_HostNetwork is the same assertion as
+// TestBuildContainerSpec_HostNetwork but for the root-container builder used
+// by the runner for the kukeond cell.
+func TestBuildRootContainerSpec_HostNetwork(t *testing.T) {
+	tests := []struct {
+		name        string
+		hostNetwork bool
+		wantNetNS   bool
+	}{
+		{name: "host network true drops netns entry", hostNetwork: true, wantNetNS: false},
+		{name: "host network false keeps netns entry", hostNetwork: false, wantNetNS: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := ctr.BuildRootContainerSpec(intmodel.ContainerSpec{
+				ID:           "root",
+				ContainerdID: "root-id",
+				Image:        "registry.eminwux.com/busybox:latest",
+				HostNetwork:  tt.hostNetwork,
+			}, nil)
+
+			ociSpec := &runtimespec.Spec{
+				Process: &runtimespec.Process{},
+				Linux: &runtimespec.Linux{
+					Namespaces: []runtimespec.LinuxNamespace{
+						{Type: runtimespec.NetworkNamespace},
+						{Type: runtimespec.PIDNamespace},
+					},
+				},
+			}
+			for _, opt := range spec.SpecOpts {
+				if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+					t.Fatalf("apply SpecOpts: %v", err)
+				}
+			}
+
+			var hasNet bool
+			for _, ns := range ociSpec.Linux.Namespaces {
+				if ns.Type == runtimespec.NetworkNamespace {
+					hasNet = true
+					break
+				}
+			}
+			if hasNet != tt.wantNetNS {
+				t.Errorf("network namespace present = %v, want %v (namespaces=%+v)",
+					hasNet, tt.wantNetNS, ociSpec.Linux.Namespaces)
 			}
 		})
 	}

@@ -1817,6 +1817,13 @@ func (r *Exec) ensureCellRootContainerSpec(cell intmodel.Cell) (intmodel.Contain
 			stackName,
 			cniConfigPath,
 		)
+		// Propagate HostNetwork from any cell container to the default root
+		// container. Non-root containers join the root container's netns
+		// (see JoinContainerNamespaces), so the netns-owning root is the
+		// only place that decision can be made — set it host-network if any
+		// workload in the cell wants host-network. Used by the kukeond cell
+		// (issue #96) so the daemon's CNI/iptables work lands in host scope.
+		rootSpec.HostNetwork = cellWantsHostNetworkRoot(cell)
 	}
 
 	// Ensure required fields are set

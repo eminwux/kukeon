@@ -21,6 +21,7 @@ import (
 
 	"github.com/containerd/containerd/v2/pkg/oci"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
 
 const (
@@ -96,6 +97,13 @@ func BuildRootContainerSpec(
 
 	if rootSpec.Privileged {
 		specOpts = append(specOpts, oci.WithPrivileged)
+	}
+
+	// Host network: drop the network LinuxNamespace entry from the OCI spec so
+	// the container shares the host's netns. The runner separately skips CNI
+	// attach for these containers (no per-container veth to wire up).
+	if rootSpec.HostNetwork {
+		specOpts = append(specOpts, oci.WithHostNamespace(runtimespec.NetworkNamespace))
 	}
 
 	rootLabels := copyLabels(labels)

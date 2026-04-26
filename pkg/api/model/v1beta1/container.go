@@ -48,6 +48,14 @@ type ContainerSpec struct {
 	Networks               []string               `json:"networks"                         yaml:"networks"`
 	NetworksAliases        []string               `json:"networksAliases"                  yaml:"networksAliases"`
 	Privileged             bool                   `json:"privileged"                       yaml:"privileged"`
+	// HostNetwork opts the container into the host's network namespace.
+	// When true, the runner omits the network LinuxNamespace from the OCI
+	// spec (containerd's WithHostNamespace) and does not invoke CNI attach,
+	// since a host-netns container has no per-container veth to wire up.
+	// Used by the kukeond bootstrap so daemon-installed bridges, veths, and
+	// iptables rules land in host scope where kubelet-style CNI plumbing
+	// belongs. Default false — no behavior change for existing specs.
+	HostNetwork            bool                   `json:"hostNetwork,omitempty"            yaml:"hostNetwork,omitempty"`
 	User                   string                 `json:"user,omitempty"                   yaml:"user,omitempty"`
 	ReadOnlyRootFilesystem bool                   `json:"readOnlyRootFilesystem,omitempty" yaml:"readOnlyRootFilesystem,omitempty"`
 	Capabilities           *ContainerCapabilities `json:"capabilities,omitempty"           yaml:"capabilities,omitempty"`
@@ -180,6 +188,7 @@ func NewContainerDoc(from *ContainerDoc) *ContainerDoc {
 				Networks:        []string{},
 				NetworksAliases: []string{},
 				Privileged:      false,
+				HostNetwork:     false,
 				CNIConfigPath:   "",
 				RestartPolicy:   "",
 			},

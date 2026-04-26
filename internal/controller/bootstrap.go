@@ -474,16 +474,23 @@ func kukeondCellDoc(image, socketPath, runPath, containerdSocket string) *v1beta
 			StackID: consts.KukeSystemStackName,
 			Containers: []v1beta1.ContainerSpec{
 				{
-					ID:         consts.KukeSystemContainerName,
-					RealmID:    consts.KukeSystemRealmName,
-					SpaceID:    consts.KukeSystemSpaceName,
-					StackID:    consts.KukeSystemStackName,
-					CellID:     consts.KukeSystemCellName,
-					Image:      image,
-					Command:    "/bin/kukeond",
-					Args:       args,
-					Volumes:    volumes,
-					Privileged: true,
+					ID:      consts.KukeSystemContainerName,
+					RealmID: consts.KukeSystemRealmName,
+					SpaceID: consts.KukeSystemSpaceName,
+					StackID: consts.KukeSystemStackName,
+					CellID:  consts.KukeSystemCellName,
+					Image:   image,
+					Command: "/bin/kukeond",
+					Args:    args,
+					Volumes: volumes,
+					// kukeond orchestrates host-level networking (CNI bridges,
+					// veths, iptables MASQUERADE rules) — those need host
+					// scope, not the daemon's own netns. The cell's
+					// auto-default root container inherits HostNetwork from
+					// any HostNetwork=true workload in the cell, so kukeond
+					// (which joins the root's netns) ends up on the host.
+					HostNetwork: true,
+					Privileged:  true,
 				},
 			},
 		},

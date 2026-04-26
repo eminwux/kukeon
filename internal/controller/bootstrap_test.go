@@ -162,6 +162,14 @@ func TestKukeondCellDocVolumes(t *testing.T) {
 			if !hasCniCache {
 				t.Errorf("missing /opt/cni/cache bind mount in volumes: %+v", got)
 			}
+
+			// kukeond must run in the host's network namespace so the bridges,
+			// veths, and iptables rules it installs land in host scope. The
+			// runner reads HostNetwork to omit the netns entry from the OCI
+			// spec and skip CNI attach for the cell's root container.
+			if !doc.Spec.Containers[0].HostNetwork {
+				t.Errorf("kukeond container must have HostNetwork=true")
+			}
 		})
 	}
 }
