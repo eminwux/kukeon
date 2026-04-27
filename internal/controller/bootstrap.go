@@ -529,6 +529,13 @@ func ensureCNIStateDir() error {
 	if err := os.MkdirAll("/var/lib/cni", 0o750); err != nil {
 		return fmt.Errorf("create CNI state dir %q: %w", "/var/lib/cni", err)
 	}
+	// MkdirAll is a no-op when the dir already exists, so on upgrade from a
+	// prior install (or co-existing CNI installer) that left /var/lib/cni at
+	// 0o755, the mode would stay loose. Chmod here makes the tightening
+	// idempotent across upgrades.
+	if err := os.Chmod("/var/lib/cni", 0o750); err != nil {
+		return fmt.Errorf("chmod CNI state dir %q: %w", "/var/lib/cni", err)
+	}
 	return nil
 }
 
