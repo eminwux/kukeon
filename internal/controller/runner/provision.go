@@ -47,6 +47,18 @@ type ensureCgroupParams struct {
 }
 
 func (r *Exec) provisionNewRealm(realm intmodel.Realm) (intmodel.Realm, error) {
+	// Default empty Spec.Namespace to the realm name so the runner-layer
+	// API behaves symmetrically with the controller layer's defaulting
+	// (internal/controller/create_realm.go:57-62). Without this, callers
+	// that go straight to the runner — notably ReconcileSpace's "ensure
+	// parent realm exists" stub at internal/controller/apply/reconcile.go
+	// — would create a containerd namespace under the empty string,
+	// silently colocating every "naked" realm. Mirror the controller's
+	// behavior here so both layers converge on the same safe default.
+	if strings.TrimSpace(realm.Spec.Namespace) == "" {
+		realm.Spec.Namespace = strings.TrimSpace(realm.Metadata.Name)
+	}
+
 	// Update realm metadata with Creating state
 	if err := r.UpdateRealmMetadata(realm); err != nil {
 		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateRealmMetadata, err)
