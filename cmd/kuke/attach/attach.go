@@ -16,9 +16,9 @@
 
 // Package attach implements the `kuke attach` thin sbsh client subcommand.
 // The daemon validates the target's Attachable gate and returns the host
-// path of the per-container sbsh control socket; this subcommand opens the
-// socket via the on-host `sb` binary using syscall.Exec, so TTY/signal
-// handling falls through to sb directly. Bytes never traverse kukeond's
+// path of the per-container sbsh control socket; this subcommand drives
+// the interactive attach loop in-process via sbsh's pkg/attach library,
+// so kuke needs no on-host `sb` binary. Bytes never traverse kukeond's
 // RPC.
 package attach
 
@@ -27,16 +27,15 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"sort"
 	"strings"
-	"syscall"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/eminwux/sbsh/pkg/attach"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -44,14 +43,15 @@ import (
 // MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
-// MockExecKey is used to inject a mock execFn via context in tests, so the
-// real syscall.Exec (which would replace the test binary) is bypassed.
-type MockExecKey struct{}
+// MockRunKey is used to inject a mock runFn via context in tests, so the
+// real pkg/attach.Run (which would open a TTY and connect to a real
+// control socket) is bypassed.
+type MockRunKey struct{}
 
-// execFn replaces the running process with the named binary, à la syscall.Exec.
-// Returning an error means the exec call itself failed; on success the
-// function does not return.
-type execFn func(argv0 string, argv []string, envv []string) error
+// runFn drives the in-process sbsh attach loop. Returns nil on a clean
+// detach / context cancel and any unrecoverable controller error
+// otherwise.
+type runFn func(ctx context.Context, opts attach.Options) error
 
 // NewAttachCmd builds the `kuke attach` cobra command.
 func NewAttachCmd() *cobra.Command {
@@ -76,9 +76,6 @@ func NewAttachCmd() *cobra.Command {
 	cmd.Flags().String("container", "",
 		"Container within the cell to attach to (omit to auto-pick the only non-root attachable)")
 	_ = viper.BindPFlag(config.KUKE_ATTACH_CONTAINER.ViperKey, cmd.Flags().Lookup("container"))
-	cmd.Flags().String("sb-binary", config.KUKE_ATTACH_SB_BINARY.Default,
-		"Path to the on-host sb client binary (looked up on $PATH if not absolute)")
-	_ = viper.BindPFlag(config.KUKE_ATTACH_SB_BINARY.ViperKey, cmd.Flags().Lookup("sb-binary"))
 
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
@@ -95,7 +92,6 @@ func runAttach(cmd *cobra.Command, _ []string) error {
 	stack := strings.TrimSpace(viper.GetString(config.KUKE_ATTACH_STACK.ViperKey))
 	cell := strings.TrimSpace(viper.GetString(config.KUKE_ATTACH_CELL.ViperKey))
 	container := strings.TrimSpace(viper.GetString(config.KUKE_ATTACH_CONTAINER.ViperKey))
-	sbBinary := strings.TrimSpace(viper.GetString(config.KUKE_ATTACH_SB_BINARY.ViperKey))
 
 	if realm == "" {
 		return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
@@ -108,9 +104,6 @@ func runAttach(cmd *cobra.Command, _ []string) error {
 	}
 	if cell == "" {
 		return fmt.Errorf("%w (--cell)", errdefs.ErrCellNameRequired)
-	}
-	if sbBinary == "" {
-		sbBinary = config.KUKE_ATTACH_SB_BINARY.Default
 	}
 
 	client, err := resolveClient(cmd)
@@ -141,15 +134,13 @@ func runAttach(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("daemon returned empty HostSocketPath for container %q", container)
 	}
 
-	sbPath, err := resolveSbBinary(sbBinary)
-	if err != nil {
-		return err
-	}
-
-	exe := resolveExec(cmd)
-	argv := []string{sbPath, "attach", "--socket", result.HostSocketPath}
-	// On success exe replaces the current process and never returns.
-	return exe(sbPath, argv, os.Environ())
+	run := resolveRun(cmd)
+	return run(cmd.Context(), attach.Options{
+		SocketPath: result.HostSocketPath,
+		Stdin:      os.Stdin,
+		Stdout:     os.Stdout,
+		Stderr:     os.Stderr,
+	})
 }
 
 // pickAttachableContainer enumerates the cell's containers and returns the
@@ -187,20 +178,6 @@ func pickAttachableContainer(
 	}
 }
 
-// resolveSbBinary returns the absolute path of the sb client binary. If the
-// caller supplied an absolute path it is used verbatim; otherwise the name
-// is looked up on $PATH so operators can drop a binary anywhere.
-func resolveSbBinary(name string) (string, error) {
-	if strings.ContainsRune(name, os.PathSeparator) {
-		return name, nil
-	}
-	path, err := exec.LookPath(name)
-	if err != nil {
-		return "", fmt.Errorf("locate sb client binary %q on PATH: %w", name, err)
-	}
-	return path, nil
-}
-
 func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
 	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
 		return mockClient, nil
@@ -208,11 +185,11 @@ func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
 	return kukeshared.ClientFromCmd(cmd)
 }
 
-func resolveExec(cmd *cobra.Command) execFn {
-	if mock, ok := cmd.Context().Value(MockExecKey{}).(execFn); ok {
+func resolveRun(cmd *cobra.Command) runFn {
+	if mock, ok := cmd.Context().Value(MockRunKey{}).(runFn); ok {
 		return mock
 	}
-	return syscall.Exec
+	return attach.Run
 }
 
 func buildContainerDoc(name, realm, space, stack, cell string) v1beta1.ContainerDoc {

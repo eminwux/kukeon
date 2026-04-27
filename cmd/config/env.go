@@ -347,8 +347,6 @@ var (
 	KUKE_ATTACH_CELL = DefineKV("KUKE_ATTACH_CELL", "kuke/attach/cell")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_ATTACH_CONTAINER = DefineKV("KUKE_ATTACH_CONTAINER", "kuke/attach/container")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_ATTACH_SB_BINARY = DefineKV("KUKE_ATTACH_SB_BINARY", "kuke/attach/sbBinary", "sb")
 
 	// Stop command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
