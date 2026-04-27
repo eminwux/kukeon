@@ -212,15 +212,15 @@ func TestCreateRealm_LifecycleStateManagement(t *testing.T) {
 			description:             "When a realm exists in Failed state, it should remain in Failed state (no automatic recovery)",
 		},
 		{
-			name:                    "realm creation with invalid namespace - transitions to Failed",
+			name:                    "realm creation with empty namespace - defaults to realm name and reaches Ready",
 			realmName:               "test-realm-5",
-			namespace:               "", // Empty namespace will cause failure
+			namespace:               "", // Empty namespace defaults to realm name at the runner layer
 			setup:                   nil,
-			wantState:               intmodel.RealmStateFailed,
-			wantErr:                 true,
-			verifyStateInMetadata:   true, // Check that Failed state was persisted
-			skipIfContainerdMissing: false,
-			description:             "When namespace creation fails, realm should transition to Failed state",
+			wantState:               intmodel.RealmStateReady,
+			wantErr:                 false,
+			verifyStateInMetadata:   true,
+			skipIfContainerdMissing: true,
+			description:             "When namespace is empty, runner.CreateRealm defaults Spec.Namespace to the realm name (matching controller-layer defaulting in internal/controller/create_realm.go) so reconcile-style stub realms still provision successfully.",
 		},
 		{
 			name:      "realm creation with duplicate namespace - handles gracefully",
@@ -507,13 +507,13 @@ func TestProvisionNewRealm_ErrorHandling(t *testing.T) {
 			description:             "Successful realm creation should transition from Creating to Ready",
 		},
 		{
-			name:                    "namespace creation failure - Creating to Failed",
+			name:                    "empty namespace - defaults to realm name and reaches Ready",
 			realmName:               "fail-ns-realm",
-			namespace:               "", // Empty namespace will cause failure
-			wantState:               intmodel.RealmStateFailed,
-			wantErr:                 true,
-			skipIfContainerdMissing: false,
-			description:             "When namespace creation fails, realm should be marked as Failed",
+			namespace:               "", // Empty namespace defaults to realm name at the runner layer
+			wantState:               intmodel.RealmStateReady,
+			wantErr:                 false,
+			skipIfContainerdMissing: true,
+			description:             "When namespace is empty, runner.CreateRealm defaults Spec.Namespace to the realm name; the realm provisions successfully rather than parking as Failed.",
 		},
 	}
 
