@@ -86,7 +86,13 @@ func (r *Exec) DeleteRealm(realm intmodel.Realm) error {
 		r.processOrphanedContainers(r.ctx, containers)
 	}
 
-	// Purge all CNI networks for this realm
+	// Tear down each conflist + bridge link for this realm. Driven from
+	// CniConfigDir because that is the source of truth for which bridges
+	// were created — IPAM dirs under CNINetworksDir can be missing if a
+	// space's containers never started.
+	r.teardownRealmCNI(internalRealm.Metadata.Name)
+
+	// Purge IPAM/cache state for any leftover networks the realm owned.
 	// Network names follow the pattern: {realmName}-{spaceName}
 	// Scan /var/lib/cni/networks/ for all networks starting with realm name
 	cniNetworksDir := cni.CNINetworksDir

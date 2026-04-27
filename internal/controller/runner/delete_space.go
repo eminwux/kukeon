@@ -22,7 +22,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -97,28 +96,17 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 		// Continue teardown even if policy removal fails.
 	}
 
-	// Delete CNI network config and perform comprehensive CNI cleanup
+	// Delete CNI network config (and the bridge link it references) and
+	// perform comprehensive CNI cleanup.
 	var networkName string
 	networkName, err = naming.BuildSpaceNetworkName(realmName, internalSpace.Metadata.Name)
 	if err != nil {
 		r.logger.WarnContext(r.ctx, "failed to build network name, skipping CNI config deletion", "error", err)
 	} else {
-		var confPath string
-		confPath, err = r.resolveSpaceCNIConfigPath(realmName, internalSpace.Metadata.Name)
-		if err == nil {
-			var mgr *cni.Manager
-			mgr, err = cni.NewManager(
-				r.cniConf.CniBinDir,
-				r.cniConf.CniConfigDir,
-				r.cniConf.CniCacheDir,
-			)
-			if err == nil {
-				if err = mgr.DeleteNetwork(networkName, confPath); err != nil {
-					r.logger.WarnContext(r.ctx, "failed to delete CNI network config", "network", networkName, "error", err)
-					// Continue with comprehensive cleanup
-				}
-			}
-		}
+		confPath, _ := r.resolveSpaceCNIConfigPath(realmName, internalSpace.Metadata.Name)
+		// teardownSpaceCNI reads the bridge name from confPath BEFORE removing
+		// the conflist, then deletes the bridge link. Safe when confPath is "".
+		r.teardownSpaceCNI(networkName, confPath)
 		// Perform comprehensive CNI network cleanup (IPAM, cache entries, network directory)
 		_ = r.purgeCNIForNetwork(networkName)
 	}

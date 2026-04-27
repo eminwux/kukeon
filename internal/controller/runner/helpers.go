@@ -32,6 +32,7 @@ import (
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
@@ -188,6 +189,72 @@ func containsExactContainerID(content, containerID string) bool {
 	}
 
 	return matched
+}
+
+// teardownSpaceCNI runs the conflist+bridge teardown for a single network.
+// It is best-effort: failures are logged but do not propagate so callers can
+// continue with other cleanup steps. configPath may be empty; the cni.Manager
+// derives the default location from networkName.
+func (r *Exec) teardownSpaceCNI(networkName, configPath string) {
+	if networkName == "" {
+		return
+	}
+	mgr, err := cni.NewManager(r.cniConf.CniBinDir, r.cniConf.CniConfigDir, r.cniConf.CniCacheDir)
+	if err != nil {
+		r.logger.WarnContext(r.ctx, "failed to create CNI manager for teardown", "network", networkName, "error", err)
+		return
+	}
+	if err = mgr.TeardownNetwork(r.ctx, cni.IPBridgeRunner{}, networkName, configPath); err != nil {
+		r.logger.WarnContext(r.ctx, "failed to teardown CNI network", "network", networkName, "error", err)
+	}
+}
+
+// teardownRealmCNI enumerates each space directory under <RunPath>/<realm>/
+// and tears its network down (conflist + bridge link). The conflist is the
+// source of truth for the bridge name, so this is the only enumeration that
+// reliably finds every leaked bridge. Best-effort: per-entry failures are
+// logged and skipped.
+func (r *Exec) teardownRealmCNI(realmName string) {
+	if realmName == "" {
+		return
+	}
+	realmDir := fs.RealmMetadataDir(r.opts.RunPath, realmName)
+	entries, err := os.ReadDir(realmDir)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			r.logger.WarnContext(r.ctx, "failed to read realm metadata dir", "dir", realmDir, "error", err)
+		}
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		spaceName := entry.Name()
+		confPath, perr := fs.SpaceNetworkConfigPath(r.opts.RunPath, realmName, spaceName)
+		if perr != nil {
+			continue
+		}
+		if _, statErr := os.Stat(confPath); statErr != nil {
+			// No conflist (and therefore no bridge) for this space dir.
+			continue
+		}
+		networkName, nerr := naming.BuildSpaceNetworkName(realmName, spaceName)
+		if nerr != nil {
+			r.logger.WarnContext(
+				r.ctx,
+				"failed to derive network name",
+				"realm",
+				realmName,
+				"space",
+				spaceName,
+				"error",
+				nerr,
+			)
+			continue
+		}
+		r.teardownSpaceCNI(networkName, confPath)
+	}
 }
 
 // purgeCNIForNetwork removes all CNI-related resources for an entire network.
