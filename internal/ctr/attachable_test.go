@@ -192,9 +192,9 @@ func TestBuildContainerSpec_AttachableTrue_MountsAndArgsWrap(t *testing.T) {
 				ctr.AttachableBinaryPath,
 				ctr.AttachableSubcommand,
 				"--run-path", ctr.AttachableTTYDir,
-				"--terminal-socket", ctr.AttachableSocketPath,
+				"--socket", ctr.AttachableSocketPath,
 				"--capture-file", ctr.AttachableCapturePath,
-				"--terminal-logfile", ctr.AttachableLogfilePath,
+				"--log-file", ctr.AttachableLogfilePath,
 				"--",
 			}
 			if len(spec.Process.Args) < len(wantPrefix) {
@@ -235,9 +235,9 @@ func TestBuildContainerSpec_AttachableTrue_EmptyImageArgs(t *testing.T) {
 		ctr.AttachableBinaryPath,
 		ctr.AttachableSubcommand,
 		"--run-path", ctr.AttachableTTYDir,
-		"--terminal-socket", ctr.AttachableSocketPath,
+		"--socket", ctr.AttachableSocketPath,
 		"--capture-file", ctr.AttachableCapturePath,
-		"--terminal-logfile", ctr.AttachableLogfilePath,
+		"--log-file", ctr.AttachableLogfilePath,
 		"--",
 	}
 	if !reflect.DeepEqual(spec.Process.Args, want) {

@@ -122,9 +122,9 @@ func withAttachableArgsWrap() oci.SpecOpts {
 			AttachableBinaryPath,
 			AttachableSubcommand,
 			"--run-path", AttachableTTYDir,
-			"--terminal-socket", AttachableSocketPath,
+			"--socket", AttachableSocketPath,
 			"--capture-file", AttachableCapturePath,
-			"--terminal-logfile", AttachableLogfilePath,
+			"--log-file", AttachableLogfilePath,
 			"--",
 		}
 		s.Process.Args = append(wrapped, original...)
