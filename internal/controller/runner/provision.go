@@ -56,7 +56,7 @@ func (r *Exec) provisionNewRealm(realm intmodel.Realm) (intmodel.Realm, error) {
 	// silently colocating every "naked" realm. Mirror the controller's
 	// behavior here so both layers converge on the same safe default.
 	if strings.TrimSpace(realm.Spec.Namespace) == "" {
-		realm.Spec.Namespace = realm.Metadata.Name
+		realm.Spec.Namespace = strings.TrimSpace(realm.Metadata.Name)
 	}
 
 	// Update realm metadata with Creating state
