@@ -103,7 +103,7 @@ func requireSbshHasPostMergeFlags(t *testing.T, hostSbsh string) {
 		t.Fatalf("sbsh terminal --help failed: %v\noutput:\n%s", err, out)
 	}
 	help := string(out)
-	for _, flag := range []string{"--socket", "--capture-file", "--log-file"} {
+	for _, flag := range []string{"--run-path", "--socket", "--capture-file", "--log-file"} {
 		if !strings.Contains(help, flag) {
 			t.Skipf("host sbsh %q lacks `sbsh terminal %s`; "+
 				"upgrade or downgrade sbsh on PATH to a build whose `terminal` "+
