@@ -111,6 +111,14 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 		_ = r.purgeCNIForNetwork(networkName)
 	}
 
+	// Release the subnet allocation so the /24 becomes available for the
+	// next space create. Best-effort: a leftover network.json blocks future
+	// reuse but does not break the running daemon, so log and continue.
+	if relErr := r.subnetAllocator.Release(realmName, internalSpace.Metadata.Name); relErr != nil {
+		r.logger.WarnContext(r.ctx, "failed to release space subnet allocation",
+			"realm", realmName, "space", internalSpace.Metadata.Name, "error", relErr)
+	}
+
 	// Delete space cgroup
 	// Use the stored CgroupPath from space status (includes full hierarchy path)
 	// instead of rebuilding from DefaultSpaceSpec which only has the relative path

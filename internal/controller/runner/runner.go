@@ -101,6 +101,15 @@ type Exec struct {
 
 	cniConf *cni.Conf
 
+	// subnetAllocator hands out per-space /24 chunks of 10.88.0.0/16 and
+	// persists each assignment under <RunPath>/<realm>/<space>/network.json.
+	// Built eagerly in NewRunner (and in test fixtures) so the per-instance
+	// mutex inside *cni.SubnetAllocator is the single arbiter across all
+	// concurrent gRPC requests — a lazy init under no lock would let two
+	// parallel CreateSpace calls each construct their own allocator and
+	// regress #131's collision-on-10.88.0.1 bug.
+	subnetAllocator *cni.SubnetAllocator
+
 	// netPolicy applies and removes space egress policies on the host
 	// firewall. nil behaves as a NoopEnforcer so unit tests and read-only
 	// clients never touch iptables.
@@ -119,11 +128,12 @@ type Options struct {
 
 func NewRunner(ctx context.Context, logger *slog.Logger, opts Options) Runner {
 	return &Exec{
-		ctx:       ctx,
-		logger:    logger,
-		opts:      opts,
-		cniConf:   &opts.CniConf,
-		netPolicy: netpolicy.NewIptablesEnforcer(logger),
+		ctx:             ctx,
+		logger:          logger,
+		opts:            opts,
+		cniConf:         &opts.CniConf,
+		netPolicy:       netpolicy.NewIptablesEnforcer(logger),
+		subnetAllocator: cni.NewDefaultSubnetAllocator(opts.RunPath),
 	}
 }
 
