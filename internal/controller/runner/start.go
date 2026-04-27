@@ -295,7 +295,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	// dance for them.
 	if !rootContainerWantsCNI(rootContainerSpec) {
 		skipFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-		skipFields = append(skipFields, "space", spaceID, "realm", realmID, "pid", rootPID)
+		skipFields = append(skipFields, "space", spaceID, "realm", realmID, "pid", rootPID, "hostNetwork", rootContainerSpec.HostNetwork)
 		r.logger.InfoContext(
 			r.ctx,
 			"skipping CNI attach for host-network root container",
