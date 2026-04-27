@@ -543,10 +543,11 @@ type AttachContainerReply struct {
 // client needs to drive the sbsh terminal. Bytes never traverse this RPC —
 // the client opens HostSocketPath directly.
 type AttachContainerResult struct {
-	// HostSocketPath is the host path of the per-container sbsh control
-	// socket bind-mounted into the container at /run/sbsh.socket. Returned
-	// only when the target container has Attachable=true; otherwise the
-	// daemon errors with ErrAttachNotSupported.
+	// HostSocketPath is the host path of the per-container sbsh terminal
+	// socket. Inside the container the same inode is reachable at
+	// /run/kukeon/tty/socket via the tty directory bind mount. Returned only
+	// when the target container has Attachable=true; otherwise the daemon
+	// errors with ErrAttachNotSupported.
 	HostSocketPath string
 }
 
