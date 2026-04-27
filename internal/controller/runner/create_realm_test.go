@@ -59,6 +59,21 @@ func setupTestRunner(t *testing.T) (runner.Runner, string) {
 	return r, runPath
 }
 
+// registerRealmCleanup schedules a best-effort DeleteRealm at test end so the
+// kernel cgroup CreateRealm provisions under /sys/fs/cgroup (and the
+// containerd namespace it owns) does not leak across runs. DeleteRealm is
+// idempotent — a missing realm, missing cgroup, and missing namespace all
+// return nil — so this is safe to register before the test decides whether
+// to skip or fail.
+func registerRealmCleanup(t *testing.T, r runner.Runner, realmName string) {
+	t.Helper()
+	t.Cleanup(func() {
+		_ = r.DeleteRealm(intmodel.Realm{
+			Metadata: intmodel.RealmMetadata{Name: realmName},
+		})
+	})
+}
+
 // createRealmMetadata creates a realm metadata file with the specified state.
 func createRealmMetadata(t *testing.T, runPath, realmName, namespace string, state intmodel.RealmState) {
 	t.Helper()
@@ -322,6 +337,7 @@ func TestCreateRealm_LifecycleStateManagement(t *testing.T) {
 			}
 
 			r, runPath := setupTestRunner(t)
+			registerRealmCleanup(t, r, tt.realmName)
 
 			// Use unique namespace per test to avoid collisions
 			// Use a hash of the test name to create a short unique identifier (containerd has 76 char limit)
@@ -510,6 +526,7 @@ func TestProvisionNewRealm_ErrorHandling(t *testing.T) {
 			}
 
 			r, _ := setupTestRunner(t)
+			registerRealmCleanup(t, r, tt.realmName)
 
 			// Use unique namespace per test to avoid collisions
 			uniqueNamespace := tt.namespace
@@ -670,6 +687,7 @@ func TestCreateRealm_StateReconciliation(t *testing.T) {
 			r, runPath := setupTestRunner(t)
 			realmName := "reconcile-realm"
 			namespace := "reconcile-realm-ns"
+			registerRealmCleanup(t, r, realmName)
 
 			// Create realm metadata with initial state
 			createRealmMetadata(t, runPath, realmName, namespace, tt.initialState)
@@ -766,6 +784,7 @@ func TestCreateRealm_NamespacePreSeeded_PersistsReady(t *testing.T) {
 	shortHash := hex.EncodeToString(hash[:])[:8]
 	realmName := "preseed-realm-" + shortHash
 	namespace := "preseed-ns-" + shortHash
+	registerRealmCleanup(t, r, realmName)
 
 	// Pre-seed the containerd namespace via a separate client to mirror the
 	// `ctr -n <ns> images import` flow that triggers the bug in real `kuke init`
