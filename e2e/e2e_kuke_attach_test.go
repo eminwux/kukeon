@@ -90,21 +90,25 @@ func stageHostSbsh(t *testing.T, runPath string) {
 	}
 }
 
-// requireSbshHasPostMergeFlags ensures the host sbsh carries the flag set
-// the wrapper injected at #69 assumes (post sbsh#153, which added
-// `--capture-file` to the `sbsh terminal` subcommand). Without this guard a
-// stale sbsh on PATH manifests as `unknown flag: ...` deep inside the work
-// container's task, surfaced here only as a `waitForSocket` timeout — hard
-// to attribute. Skipping with a named cause saves the dig.
+// requireSbshHasPostMergeFlags ensures the host sbsh carries every flag the
+// in-container wrapper (`internal/ctr/attachable.go`) injects into the
+// workload's argv. Without this guard a stale or newer-renamed sbsh on PATH
+// manifests as `unknown flag: ...` deep inside the work container's task,
+// surfaced here only as a `waitForSocket` timeout — hard to attribute.
+// Skipping with a named cause saves the dig.
 func requireSbshHasPostMergeFlags(t *testing.T, hostSbsh string) {
 	t.Helper()
 	out, err := exec.Command(hostSbsh, "terminal", "--help").CombinedOutput()
 	if err != nil {
 		t.Fatalf("sbsh terminal --help failed: %v\noutput:\n%s", err, out)
 	}
-	if !strings.Contains(string(out), "--capture-file") {
-		t.Skipf("host sbsh %q lacks `sbsh terminal --capture-file` (sbsh#153); "+
-			"upgrade sbsh on PATH and retry", hostSbsh)
+	help := string(out)
+	for _, flag := range []string{"--socket", "--capture-file", "--log-file"} {
+		if !strings.Contains(help, flag) {
+			t.Skipf("host sbsh %q lacks `sbsh terminal %s`; "+
+				"upgrade or downgrade sbsh on PATH to a build whose `terminal` "+
+				"subcommand carries every wrapper flag and retry", hostSbsh, flag)
+		}
 	}
 }
 
