@@ -101,6 +101,12 @@ type Exec struct {
 
 	cniConf *cni.Conf
 
+	// subnetAllocator hands out per-space /24 chunks of 10.88.0.0/16 and
+	// persists each assignment under <RunPath>/<realm>/<space>/network.json.
+	// Lazily built on first use so unit-test fixtures that omit RunPath
+	// fall back to the package default without panicking.
+	subnetAllocator *cni.SubnetAllocator
+
 	// netPolicy applies and removes space egress policies on the host
 	// firewall. nil behaves as a NoopEnforcer so unit tests and read-only
 	// clients never touch iptables.
@@ -134,6 +140,18 @@ func (r *Exec) netPolicyEnforcer() netpolicy.Enforcer {
 		return netpolicy.NoopEnforcer{}
 	}
 	return r.netPolicy
+}
+
+// subnetAlloc returns the per-runner subnet allocator, building one on first
+// access. The allocator scans <RunPath> for existing per-space network.json
+// files, so a runner built with a real RunPath sees previously-assigned
+// subnets after a daemon restart without any explicit warm-up.
+func (r *Exec) subnetAlloc() *cni.SubnetAllocator {
+	if r.subnetAllocator != nil {
+		return r.subnetAllocator
+	}
+	r.subnetAllocator = cni.NewDefaultSubnetAllocator(r.opts.RunPath)
+	return r.subnetAllocator
 }
 
 func (r *Exec) BootstrapCNI(cfgDir, cacheDir, binDir string) (cni.BootstrapReport, error) {

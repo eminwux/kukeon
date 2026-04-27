@@ -229,7 +229,11 @@ func (r *Exec) ensureSpaceCNIConfig(space intmodel.Space) (intmodel.Space, error
 				"reason", regenReason,
 			)
 		}
-		if writeErr := fs.WriteSpaceNetworkConfig(confPath, networkName); writeErr != nil {
+		subnet, subnetErr := r.subnetForRegenerate(mgr, space, confPath, exists)
+		if subnetErr != nil {
+			return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrCreateNetwork, subnetErr)
+		}
+		if writeErr := fs.WriteSpaceNetworkConfig(confPath, networkName, subnet); writeErr != nil {
 			return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrCreateNetwork, writeErr)
 		}
 	}
@@ -285,6 +289,37 @@ func (r *Exec) ensureSpaceCNIConfig(space intmodel.Space) (intmodel.Space, error
 		return intmodel.Space{}, policyErr
 	}
 	return space, nil
+}
+
+// subnetForRegenerate picks the subnet to write into a regenerated conflist.
+// Order of preference:
+//
+//  1. An existing allocator state file (post-#131 spaces): use the
+//     persisted subnet so re-runs are stable.
+//  2. The current conflist's IPAM subnet (legacy spaces created before the
+//     allocator landed): preserve it so #131 deliberately leaves
+//     pre-existing shared-subnet spaces alone — migration is #133.
+//  3. As a last resort (no state file, no readable conflist subnet),
+//     allocate a fresh per-space /24.
+//
+// The legacy-preservation branch never writes allocator state, so a legacy
+// space stays legacy until it is recreated post-#131 or migrated by #133.
+func (r *Exec) subnetForRegenerate(
+	mgr *cni.Manager, space intmodel.Space, confPath string, conflistExists bool,
+) (string, error) {
+	alloc := r.subnetAlloc()
+	if persisted, err := alloc.LoadAssigned(space.Spec.RealmName, space.Metadata.Name); err != nil {
+		return "", err
+	} else if persisted != "" {
+		return persisted, nil
+	}
+	if conflistExists {
+		legacy, err := mgr.ReadSubnetCIDR(confPath)
+		if err == nil && legacy != "" {
+			return legacy, nil
+		}
+	}
+	return alloc.Allocate(space.Spec.RealmName, space.Metadata.Name)
 }
 
 // shouldRegenerateSpaceCNI decides whether ensureSpaceCNIConfig needs to
@@ -354,8 +389,13 @@ func (r *Exec) createSpaceCNIConfig(space intmodel.Space) (string, error) {
 		return "", errdefs.ErrNetworkAlreadyExists
 	}
 
+	subnet, allocErr := r.subnetAlloc().Allocate(space.Spec.RealmName, space.Metadata.Name)
+	if allocErr != nil {
+		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateNetwork, allocErr)
+	}
+
 	fmt.Fprintf(os.Stdout, "Creating space network '%s'\n", networkName)
-	if writeErr := fs.WriteSpaceNetworkConfig(confPath, networkName); writeErr != nil {
+	if writeErr := fs.WriteSpaceNetworkConfig(confPath, networkName, subnet); writeErr != nil {
 		r.logger.InfoContext(r.ctx, "failed to create space network", "err", fmt.Sprintf("%v", writeErr))
 		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateNetwork, writeErr)
 	}
@@ -368,6 +408,8 @@ func (r *Exec) createSpaceCNIConfig(space intmodel.Space) (string, error) {
 		networkName,
 		"conf",
 		confPath,
+		"subnet",
+		subnet,
 	)
 	return confPath, nil
 }

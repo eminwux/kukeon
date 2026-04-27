@@ -27,6 +27,12 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
+// bridgePluginType is the libcni "type" field value identifying the bridge
+// plugin entry inside a conflist. Hoisted to a package constant so the same
+// literal does not get tagged by goconst whenever a new conflist reader
+// (ReadBridgeName, ReadSubnetCIDR, ...) is added.
+const bridgePluginType = "bridge"
+
 // LoadNetworkConfigList loads a CNI network config list from the given path.
 func (m *Manager) LoadNetworkConfigList(configPath string) error {
 	if configPath == "" {
@@ -68,6 +74,67 @@ func (m *Manager) ExistsNetworkConfig(networkName, configPath string) (bool, str
 	return true, configPath, nil
 }
 
+// ReadSubnetCIDR parses the conflist at configPath and returns the IPAM
+// subnet of the first bridge plugin's first range. Returns
+// errdefs.ErrNetworkNotFound when the file is missing,
+// errdefs.ErrBridgePluginMissing when no bridge plugin is present, and a
+// wrapped JSON error for malformed content. The returned string may be empty
+// when the IPAM ranges entry has no `subnet` field, which callers should
+// treat the same as a missing assignment.
+func (m *Manager) ReadSubnetCIDR(configPath string) (string, error) {
+	if configPath == "" {
+		return "", errors.New("network config path is required")
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", errdefs.ErrNetworkNotFound
+		}
+		return "", err
+	}
+
+	var raw map[string]interface{}
+	if uErr := json.Unmarshal(data, &raw); uErr != nil {
+		return "", fmt.Errorf("parse conflist: %w", uErr)
+	}
+
+	plugins, ok := raw["plugins"].([]interface{})
+	if !ok {
+		return "", errdefs.ErrBridgePluginMissing
+	}
+
+	for _, p := range plugins {
+		plugin, pOK := p.(map[string]interface{})
+		if !pOK {
+			continue
+		}
+		if t, tOK := plugin["type"].(string); !tOK || t != bridgePluginType {
+			continue
+		}
+		ipam, ipamOK := plugin["ipam"].(map[string]interface{})
+		if !ipamOK {
+			return "", nil
+		}
+		ranges, rOK := ipam["ranges"].([]interface{})
+		if !rOK || len(ranges) == 0 {
+			return "", nil
+		}
+		first, fOK := ranges[0].([]interface{})
+		if !fOK || len(first) == 0 {
+			return "", nil
+		}
+		entry, eOK := first[0].(map[string]interface{})
+		if !eOK {
+			return "", nil
+		}
+		subnet, _ := entry["subnet"].(string)
+		return subnet, nil
+	}
+
+	return "", errdefs.ErrBridgePluginMissing
+}
+
 // ReadBridgeName parses the conflist at configPath and returns the `bridge` field of
 // the first plugin whose `type` is "bridge". Returns errdefs.ErrNetworkNotFound if the
 // file is missing, errdefs.ErrBridgePluginMissing if no bridge plugin is present, and
@@ -101,7 +168,7 @@ func (m *Manager) ReadBridgeName(configPath string) (string, error) {
 		if !pOK {
 			continue
 		}
-		if t, tOK := plugin["type"].(string); !tOK || t != "bridge" {
+		if t, tOK := plugin["type"].(string); !tOK || t != bridgePluginType {
 			continue
 		}
 		bridge, _ := plugin["bridge"].(string)

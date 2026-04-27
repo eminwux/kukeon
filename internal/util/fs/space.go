@@ -37,9 +37,13 @@ func SpaceNetworkConfigPath(baseRunPath, realmName, spaceName string) (string, e
 	return filepath.Join(RealmMetadataDir(baseRunPath, realmName), spaceName, "network.conflist"), nil
 }
 
-// WriteSpaceNetworkConfig writes the network conflist at the provided path.
-func WriteSpaceNetworkConfig(confPath, networkName string) error {
-	cfg := cni.NewCNINetworkConfig(networkName)
+// WriteSpaceNetworkConfig writes the network conflist at the provided path,
+// pinning the bridge to subnetCIDR. Pass an empty subnetCIDR to fall back to
+// the package default — left in place for tests and the legacy
+// shared-subnet path; runtime callers must allocate per-space subnets via
+// cni.SubnetAllocator and pass the result here.
+func WriteSpaceNetworkConfig(confPath, networkName, subnetCIDR string) error {
+	cfg := cni.NewCNINetworkConfigWithSubnet(networkName, subnetCIDR)
 	data, err := cni.BuildDefaultConflist(cfg.Name, cfg.BridgeName, cfg.SubnetCIDR)
 	if err != nil {
 		return err

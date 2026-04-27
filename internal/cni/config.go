@@ -25,12 +25,26 @@ import (
 // maxBridgeNameLen is the Linux IFNAMSIZ-1 limit for network interface names.
 const maxBridgeNameLen = 15
 
-// NewCNINetworkConfig builds a NetworkConfig with sensible defaults.
+// NewCNINetworkConfig builds a NetworkConfig with sensible defaults and the
+// package-default subnet (10.88.0.0/16). Prefer NewCNINetworkConfigWithSubnet
+// for runtime callers so each space can carry its allocator-assigned chunk;
+// this constructor stays for tests and any legacy path that has no allocator
+// in scope.
 func NewCNINetworkConfig(name string) NetworkConfig {
+	return NewCNINetworkConfigWithSubnet(name, defaultSubnetCIDR)
+}
+
+// NewCNINetworkConfigWithSubnet builds a NetworkConfig pinned to subnetCIDR.
+// Empty subnetCIDR falls back to the package default so callers without an
+// allocator handy still produce a valid config.
+func NewCNINetworkConfigWithSubnet(name, subnetCIDR string) NetworkConfig {
+	if subnetCIDR == "" {
+		subnetCIDR = defaultSubnetCIDR
+	}
 	return NetworkConfig{
 		Name:       name,
 		BridgeName: SafeBridgeName(name),
-		SubnetCIDR: defaultSubnetCIDR,
+		SubnetCIDR: subnetCIDR,
 	}
 }
 
