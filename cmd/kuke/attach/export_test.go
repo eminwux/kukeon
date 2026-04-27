@@ -16,14 +16,8 @@
 
 package attach
 
-// ExecFn is the test-visible alias of the unexported execFn type. Tests
-// build values of this type and store them under MockExecKey to bypass
-// the real syscall.Exec, which would replace the test binary on success.
-type ExecFn = execFn
-
-// ResolveSbBinaryForTest exposes resolveSbBinary to the external _test
-// package so the PATH-lookup vs absolute-path branches can be exercised
-// without going through the full cobra entry point.
-func ResolveSbBinaryForTest(name string) (string, error) {
-	return resolveSbBinary(name)
-}
+// RunFn is the test-visible alias of the unexported runFn type. Tests
+// build values of this type and store them under MockRunKey to bypass
+// the real pkg/attach.Run, which would open the user's TTY and connect
+// to a real control socket.
+type RunFn = runFn

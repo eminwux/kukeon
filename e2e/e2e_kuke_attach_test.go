@@ -33,13 +33,13 @@ import (
 
 // sbshDetachSequence is the keystroke pair that the sbsh client filter
 // recognises as a request to detach (Ctrl+] Ctrl+], adjacent). Forwarded
-// verbatim by the test so the on-host `sb attach` filter triggers.
+// verbatim by the test so the in-process pkg/attach filter triggers.
 var sbshDetachSequence = []byte{0x1d, 0x1d}
 
 // attachConnectGrace is how long the test waits between starting `kuke attach`
-// and sending the detach sequence. Long enough for syscall.Exec into `sb` and
-// the unix-socket handshake to complete on a busy CI runner; short enough that
-// a hung scenario surfaces quickly.
+// and sending the detach sequence. Long enough for the in-process pkg/attach
+// loop to enter raw mode and complete the unix-socket handshake on a busy CI
+// runner; short enough that a hung scenario surfaces quickly.
 const attachConnectGrace = 2 * time.Second
 
 // attachExitTimeout caps how long the test waits for `kuke attach` to exit
@@ -112,14 +112,12 @@ func requireSbshHasPostMergeFlags(t *testing.T, hostSbsh string) {
 // for `kuke attach`: it boots a cell that contains an Attachable container,
 // drives `kuke attach` over a real PTY, sends sbsh's detach keystroke
 // (Ctrl+] Ctrl+]), and verifies that `kuke attach` exits cleanly while the
-// underlying container task remains RUNNING. Requires the host `sbsh` and
-// `sb` binaries on PATH; the test is skipped if either is missing.
+// underlying container task remains RUNNING. Requires the host `sbsh`
+// binary on PATH (still used to populate the per-container sbsh cache);
+// the test is skipped if it is missing. No on-host `sb` binary is needed
+// — `kuke attach` drives the attach loop in-process via sbsh's pkg/attach.
 func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 	t.Parallel()
-
-	if _, err := exec.LookPath("sb"); err != nil {
-		t.Skipf("sb binary not found on PATH (required by `kuke attach`): %v", err)
-	}
 
 	// Setup: isolated runPath, unique resource names, in-process controller
 	// (`--no-daemon`) so the sbsh cache and per-container socket live under
@@ -162,7 +160,7 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 
 	// Step 3: confirm the per-container sbsh socket is in place. The runner
 	// creates the metadata dir at provision time and sbsh binds the socket
-	// inside the container at task start. If this is missing, `sb attach`
+	// inside the container at task start. If this is missing, pkg/attach
 	// would fail in a way that's hard to attribute, so check explicitly.
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -184,9 +182,11 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 		)...)
 	t.Cleanup(session.Close)
 
-	// Wait for sb attach to take over the PTY before sending the keystroke.
-	// Without this grace, the bytes can race the syscall.Exec into sb and
-	// land on the bare `kuke attach` process, which discards them.
+	// Wait for the in-process pkg/attach loop to take over the PTY before
+	// sending the keystroke. Without this grace, the bytes can race
+	// pkg/attach's raw-mode setup and land before its filter is wired up,
+	// in which case the detach sequence is forwarded verbatim instead of
+	// triggering a clean exit.
 	time.Sleep(attachConnectGrace)
 
 	if err = session.Write(sbshDetachSequence); err != nil {
@@ -204,8 +204,8 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 	}
 
 	// Step 5: assert the container task is still RUNNING. The detach should
-	// only tear down the sb client; the workload (sleep wrapped by sbsh
-	// terminal) keeps running inside the container.
+	// only tear down the in-process pkg/attach loop; the workload (sleep
+	// wrapped by sbsh terminal) keeps running inside the container.
 	cellID, err := getCellIDNoDaemon(t, runPath, realmName, spaceName, stackName, cellName)
 	if err != nil {
 		t.Fatalf("get cell ID: %v", err)

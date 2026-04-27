@@ -19,8 +19,6 @@ package attach_test
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -28,6 +26,7 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	sbshattach "github.com/eminwux/sbsh/pkg/attach"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -63,23 +62,22 @@ func (f *fakeClient) AttachContainer(
 	return f.attachContainerFn(doc)
 }
 
-// execCapture records the argv passed to syscall.Exec and returns nil so the
-// test treats the call as success (the real syscall.Exec never returns on
-// success, so nil is the in-test analogue).
-type execCapture struct {
+// runCapture records the Options passed to pkg/attach.Run and returns
+// nil so the test treats the call as a clean detach. The real Run would
+// open the user's TTY and connect to a control socket; bypassing it
+// keeps the test hermetic.
+type runCapture struct {
 	calls int
-	argv0 string
-	argv  []string
+	opts  sbshattach.Options
 }
 
-func (e *execCapture) fn(argv0 string, argv []string, _ []string) error {
-	e.calls++
-	e.argv0 = argv0
-	e.argv = argv
+func (r *runCapture) fn(_ context.Context, opts sbshattach.Options) error {
+	r.calls++
+	r.opts = opts
 	return nil
 }
 
-func newCmdWithCtx(t *testing.T, fc *fakeClient, exec *execCapture) *cobra.Command {
+func newCmdWithCtx(t *testing.T, fc *fakeClient, run *runCapture) *cobra.Command {
 	t.Helper()
 
 	cmd := attachcmd.NewAttachCmd()
@@ -87,8 +85,8 @@ func newCmdWithCtx(t *testing.T, fc *fakeClient, exec *execCapture) *cobra.Comma
 	if fc != nil {
 		ctx = context.WithValue(ctx, attachcmd.MockControllerKey{}, kukeonv1.Client(fc))
 	}
-	if exec != nil {
-		ctx = context.WithValue(ctx, attachcmd.MockExecKey{}, attachcmd.ExecFn(exec.fn))
+	if run != nil {
+		ctx = context.WithValue(ctx, attachcmd.MockRunKey{}, attachcmd.RunFn(run.fn))
 	}
 	cmd.SetContext(ctx)
 	cmd.SilenceErrors = true
@@ -113,25 +111,20 @@ func TestAttach_SingleNonRootAttachable_Succeeds(t *testing.T) {
 			return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
 		},
 	}
-	exec := &execCapture{}
-	cmd := newCmdWithCtx(t, fc, exec)
+	run := &runCapture{}
+	cmd := newCmdWithCtx(t, fc, run)
 	cmd.SetArgs([]string{
 		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
-		"--sb-binary", "/usr/local/bin/sb",
 	})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
-	if exec.calls != 1 {
-		t.Fatalf("exec called %d times, want 1", exec.calls)
+	if run.calls != 1 {
+		t.Fatalf("attach.Run called %d times, want 1", run.calls)
 	}
-	wantArgv := []string{"/usr/local/bin/sb", "attach", "--socket", testHostSocket}
-	if !strSliceEq(exec.argv, wantArgv) {
-		t.Errorf("argv = %v, want %v", exec.argv, wantArgv)
-	}
-	if exec.argv0 != "/usr/local/bin/sb" {
-		t.Errorf("argv0 = %q, want %q", exec.argv0, "/usr/local/bin/sb")
+	if run.opts.SocketPath != testHostSocket {
+		t.Errorf("Options.SocketPath = %q, want %q", run.opts.SocketPath, testHostSocket)
 	}
 }
 
@@ -147,11 +140,10 @@ func TestAttach_AmbiguousCandidates_ErrorsWithList(t *testing.T) {
 			}, nil
 		},
 	}
-	exec := &execCapture{}
-	cmd := newCmdWithCtx(t, fc, exec)
+	run := &runCapture{}
+	cmd := newCmdWithCtx(t, fc, run)
 	cmd.SetArgs([]string{
 		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
-		"--sb-binary", "/usr/local/bin/sb",
 	})
 
 	err := cmd.Execute()
@@ -166,8 +158,8 @@ func TestAttach_AmbiguousCandidates_ErrorsWithList(t *testing.T) {
 	if got := err.Error(); !strings.Contains(got, "claude, shell") {
 		t.Errorf("error message %q missing sorted candidate list", got)
 	}
-	if exec.calls != 0 {
-		t.Errorf("exec called %d times on ambiguous picker, want 0", exec.calls)
+	if run.calls != 0 {
+		t.Errorf("attach.Run called %d times on ambiguous picker, want 0", run.calls)
 	}
 }
 
@@ -183,19 +175,18 @@ func TestAttach_NoCandidate_Errors(t *testing.T) {
 			}, nil
 		},
 	}
-	exec := &execCapture{}
-	cmd := newCmdWithCtx(t, fc, exec)
+	run := &runCapture{}
+	cmd := newCmdWithCtx(t, fc, run)
 	cmd.SetArgs([]string{
 		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
-		"--sb-binary", "/usr/local/bin/sb",
 	})
 
 	err := cmd.Execute()
 	if !errors.Is(err, errdefs.ErrAttachNoCandidate) {
 		t.Fatalf("error %v does not unwrap to ErrAttachNoCandidate", err)
 	}
-	if exec.calls != 0 {
-		t.Errorf("exec called %d times on empty picker, want 0", exec.calls)
+	if run.calls != 0 {
+		t.Errorf("attach.Run called %d times on empty picker, want 0", run.calls)
 	}
 }
 
@@ -211,11 +202,10 @@ func TestAttach_RootContainerExcludedFromAutoPick(t *testing.T) {
 			}, nil
 		},
 	}
-	exec := &execCapture{}
-	cmd := newCmdWithCtx(t, fc, exec)
+	run := &runCapture{}
+	cmd := newCmdWithCtx(t, fc, run)
 	cmd.SetArgs([]string{
 		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
-		"--sb-binary", "/usr/local/bin/sb",
 	})
 
 	err := cmd.Execute()
@@ -236,20 +226,19 @@ func TestAttach_ExplicitContainer_NotAttachable_SurfacesSentinel(t *testing.T) {
 			return kukeonv1.AttachContainerResult{}, errdefs.ErrAttachNotSupported
 		},
 	}
-	exec := &execCapture{}
-	cmd := newCmdWithCtx(t, fc, exec)
+	run := &runCapture{}
+	cmd := newCmdWithCtx(t, fc, run)
 	cmd.SetArgs([]string{
 		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
 		"--container", "side",
-		"--sb-binary", "/usr/local/bin/sb",
 	})
 
 	err := cmd.Execute()
 	if !errors.Is(err, errdefs.ErrAttachNotSupported) {
 		t.Fatalf("error %v does not unwrap to ErrAttachNotSupported", err)
 	}
-	if exec.calls != 0 {
-		t.Errorf("exec called %d times on non-attachable target, want 0", exec.calls)
+	if run.calls != 0 {
+		t.Errorf("attach.Run called %d times on non-attachable target, want 0", run.calls)
 	}
 }
 
@@ -261,23 +250,21 @@ func TestAttach_ExplicitContainer_Attachable_Succeeds(t *testing.T) {
 			return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
 		},
 	}
-	exec := &execCapture{}
-	cmd := newCmdWithCtx(t, fc, exec)
+	run := &runCapture{}
+	cmd := newCmdWithCtx(t, fc, run)
 	cmd.SetArgs([]string{
 		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
 		"--container", "shell",
-		"--sb-binary", "/usr/local/bin/sb",
 	})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
-	if exec.calls != 1 {
-		t.Fatalf("exec called %d times, want 1", exec.calls)
+	if run.calls != 1 {
+		t.Fatalf("attach.Run called %d times, want 1", run.calls)
 	}
-	wantArgv := []string{"/usr/local/bin/sb", "attach", "--socket", testHostSocket}
-	if !strSliceEq(exec.argv, wantArgv) {
-		t.Errorf("argv = %v, want %v", exec.argv, wantArgv)
+	if run.opts.SocketPath != testHostSocket {
+		t.Errorf("Options.SocketPath = %q, want %q", run.opts.SocketPath, testHostSocket)
 	}
 }
 
@@ -323,7 +310,7 @@ func TestAttach_MissingFlags(t *testing.T) {
 			t.Setenv("KUKE_ATTACH_STACK", "")
 			t.Setenv("KUKE_ATTACH_CELL", "")
 
-			cmd := newCmdWithCtx(t, &fakeClient{}, &execCapture{})
+			cmd := newCmdWithCtx(t, &fakeClient{}, &runCapture{})
 			cmd.SetArgs(tc.args)
 
 			err := cmd.Execute()
@@ -332,60 +319,4 @@ func TestAttach_MissingFlags(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestResolveSbBinary_AbsolutePath_PassesThrough(t *testing.T) {
-	got, err := attachcmd.ResolveSbBinaryForTest("/opt/sb/bin/sb")
-	if err != nil {
-		t.Fatalf("ResolveSbBinary returned error: %v", err)
-	}
-	if got != "/opt/sb/bin/sb" {
-		t.Errorf("ResolveSbBinary = %q, want %q", got, "/opt/sb/bin/sb")
-	}
-}
-
-func TestResolveSbBinary_PathLookup_FindsBinaryOnPATH(t *testing.T) {
-	dir := t.TempDir()
-	binPath := filepath.Join(dir, "sb-test")
-	// Create an empty executable file. exec.LookPath only checks for the
-	// executable bit, so we don't need real content.
-	if err := writeExecutable(binPath); err != nil {
-		t.Fatalf("create test binary: %v", err)
-	}
-	t.Setenv("PATH", dir)
-
-	got, err := attachcmd.ResolveSbBinaryForTest("sb-test")
-	if err != nil {
-		t.Fatalf("ResolveSbBinary returned error: %v", err)
-	}
-	if got != binPath {
-		t.Errorf("ResolveSbBinary = %q, want %q", got, binPath)
-	}
-}
-
-func TestResolveSbBinary_PathLookup_MissingBinary_Errors(t *testing.T) {
-	t.Setenv("PATH", t.TempDir())
-	if _, err := attachcmd.ResolveSbBinaryForTest("definitely-not-on-path"); err == nil {
-		t.Fatal("ResolveSbBinary returned nil, want error for missing binary")
-	}
-}
-
-func strSliceEq(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func writeExecutable(path string) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
-	if err != nil {
-		return err
-	}
-	return f.Close()
 }
