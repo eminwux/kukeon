@@ -386,13 +386,13 @@ func TestBuildRootContainerSpec_Volumes(t *testing.T) {
 	if runMount.Source != "/run/kukeon" {
 		t.Errorf("/run/kukeon source = %q, want /run/kukeon", runMount.Source)
 	}
-	if !containsStringRoot(runMount.Options, "rw") {
+	if !containsString(runMount.Options, "rw") {
 		t.Errorf("/run/kukeon options = %v, want contains rw", runMount.Options)
 	}
 	if optMount == nil {
 		t.Fatalf("bind mount for /opt/kukeon not found")
 	}
-	if !containsStringRoot(optMount.Options, "ro") {
+	if !containsString(optMount.Options, "ro") {
 		t.Errorf("/opt/kukeon options = %v, want contains ro", optMount.Options)
 	}
 }
@@ -450,13 +450,13 @@ func TestBuildRootContainerSpec_Capabilities(t *testing.T) {
 	if spec.Process == nil || spec.Process.Capabilities == nil {
 		t.Fatalf("Process.Capabilities is nil")
 	}
-	if !containsOnlyRoot(spec.Process.Capabilities.Effective, "CAP_NET_ADMIN") {
+	if !containsOnly(spec.Process.Capabilities.Effective, "CAP_NET_ADMIN") {
 		t.Errorf("Effective caps = %v, want only CAP_NET_ADMIN", spec.Process.Capabilities.Effective)
 	}
-	if !containsOnlyRoot(spec.Process.Capabilities.Bounding, "CAP_NET_ADMIN") {
+	if !containsOnly(spec.Process.Capabilities.Bounding, "CAP_NET_ADMIN") {
 		t.Errorf("Bounding caps = %v, want only CAP_NET_ADMIN", spec.Process.Capabilities.Bounding)
 	}
-	if !containsOnlyRoot(spec.Process.Capabilities.Permitted, "CAP_NET_ADMIN") {
+	if !containsOnly(spec.Process.Capabilities.Permitted, "CAP_NET_ADMIN") {
 		t.Errorf("Permitted caps = %v, want only CAP_NET_ADMIN", spec.Process.Capabilities.Permitted)
 	}
 }
@@ -496,10 +496,10 @@ func TestBuildRootContainerSpec_TmpfsMounts(t *testing.T) {
 	if found.Type != "tmpfs" {
 		t.Errorf("mount type = %q, want %q", found.Type, "tmpfs")
 	}
-	if !containsStringRoot(found.Options, "size=67108864") {
+	if !containsString(found.Options, "size=67108864") {
 		t.Errorf("tmpfs options = %v, want size=67108864", found.Options)
 	}
-	if !containsStringRoot(found.Options, "mode=1777") {
+	if !containsString(found.Options, "mode=1777") {
 		t.Errorf("tmpfs options = %v, want mode=1777", found.Options)
 	}
 }
@@ -562,17 +562,4 @@ func TestBuildRootContainerSpec_DefaultsUnaffected(t *testing.T) {
 	if spec.Process != nil && spec.Process.NoNewPrivileges {
 		t.Errorf("default root container set NoNewPrivileges = true, want false")
 	}
-}
-
-func containsStringRoot(xs []string, want string) bool {
-	for _, x := range xs {
-		if x == want {
-			return true
-		}
-	}
-	return false
-}
-
-func containsOnlyRoot(xs []string, want string) bool {
-	return len(xs) == 1 && xs[0] == want
 }
