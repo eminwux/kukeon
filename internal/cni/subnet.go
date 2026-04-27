@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -133,7 +134,7 @@ func NewDefaultSubnetAllocator(runPath string) *SubnetAllocator {
 }
 
 // ParentCIDR returns the parent block this allocator subdivides. Exposed for
-// logging and tests.
+// tests.
 func (a *SubnetAllocator) ParentCIDR() string { return a.parentCIDR }
 
 // PrefixLen returns the per-space prefix length (e.g. 24 for /24 chunks).
@@ -258,10 +259,15 @@ func (a *SubnetAllocator) usedSubnetsLocked() (map[string]struct{}, error) {
 			path := filepath.Join(realmDir, space.Name(), SubnetStateFileName)
 			subnet, rErr := a.readState(path)
 			if rErr != nil {
-				// A corrupt network.json on disk should not block fresh
-				// allocations elsewhere — surface the path so an operator
-				// can clean it up, but keep allocating for healthy spaces.
-				return nil, rErr
+				// A corrupt network.json on disk must not block fresh
+				// allocations elsewhere: failing the scan turns one bad
+				// file into a host-wide denial of service for space
+				// creates. Surface the path through the daemon log so an
+				// operator can clean it up, then keep scanning for
+				// healthy spaces.
+				slog.Default().Warn("kukeon: skipping corrupt subnet state file during allocator scan",
+					"path", path, "error", rErr)
+				continue
 			}
 			if subnet == "" {
 				continue

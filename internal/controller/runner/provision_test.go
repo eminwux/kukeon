@@ -46,10 +46,11 @@ func newProvisionTestExec(t *testing.T, runPath string, forceRegenerateCNI bool)
 		ForceRegenerateCNI: forceRegenerateCNI,
 	}
 	return &Exec{
-		ctx:     context.Background(),
-		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
-		opts:    opts,
-		cniConf: &opts.CniConf,
+		ctx:             context.Background(),
+		logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
+		opts:            opts,
+		cniConf:         &opts.CniConf,
+		subnetAllocator: cni.NewDefaultSubnetAllocator(runPath),
 	}
 }
 
@@ -327,7 +328,7 @@ func TestRunnerSubnetAlloc_ReleasedSubnetIsReusedByNextCreate(t *testing.T) {
 	// just that call here so we can validate reuse without standing up
 	// containerd. The conflist on disk for "alpha" can stay — what
 	// matters for the next allocation is whether network.json is gone.
-	if relErr := r.subnetAlloc().Release(realmName, "alpha"); relErr != nil {
+	if relErr := r.subnetAllocator.Release(realmName, "alpha"); relErr != nil {
 		t.Fatalf("Release alpha: %v", relErr)
 	}
 

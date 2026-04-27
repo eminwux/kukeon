@@ -185,6 +185,48 @@ func TestSubnetAllocator_ReleaseIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestSubnetAllocator_AllocateSkipsCorruptStateFiles is the regression guard
+// for the fail-fast DoS surface flagged on PR #134 review: a single corrupt
+// network.json under one space must not block allocation in any other space.
+// The reviewer's concern was that one bad file taking down host-wide space
+// creates is far worse than continuing past it and warning the operator, so
+// the scan is required to keep going.
+func TestSubnetAllocator_AllocateSkipsCorruptStateFiles(t *testing.T) {
+	runPath := t.TempDir()
+
+	// Plant a garbage network.json under one realm/space pair.
+	corruptPath := filepath.Join(runPath, "default", "broken", cni.SubnetStateFileName)
+	if err := os.MkdirAll(filepath.Dir(corruptPath), 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(corruptPath, []byte("not-json"), 0o600); err != nil {
+		t.Fatalf("write garbage: %v", err)
+	}
+
+	a, err := cni.NewSubnetAllocator(runPath, "10.88.0.0/16", 24)
+	if err != nil {
+		t.Fatalf("NewSubnetAllocator: %v", err)
+	}
+
+	// Allocating a different space must succeed despite the corrupt sibling.
+	got, err := a.Allocate("default", "alpha")
+	if err != nil {
+		t.Fatalf("Allocate alpha skipped past corrupt sibling but failed: %v", err)
+	}
+	// The corrupt file contributes no entries to the used set, so the
+	// allocator hands out the lowest /24 in the parent.
+	if got != "10.88.0.0/24" {
+		t.Errorf("Allocate = %q, want 10.88.0.0/24 (lowest free; corrupt sibling must not occupy)", got)
+	}
+
+	// Direct LoadAssigned on the corrupt space still surfaces the error so
+	// callers that need the specific entry can see it. The skip-and-continue
+	// behaviour is scoped to scan-time, not point lookups.
+	if _, lerr := a.LoadAssigned("default", "broken"); !errors.Is(lerr, errdefs.ErrSubnetStateCorrupt) {
+		t.Errorf("LoadAssigned on corrupt space = %v, want ErrSubnetStateCorrupt", lerr)
+	}
+}
+
 func TestSubnetAllocator_AllocateScansAllRealms(t *testing.T) {
 	runPath := t.TempDir()
 	// Pre-seed a network.json under a different realm to prove the scanner

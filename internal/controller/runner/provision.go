@@ -307,7 +307,7 @@ func (r *Exec) ensureSpaceCNIConfig(space intmodel.Space) (intmodel.Space, error
 func (r *Exec) subnetForRegenerate(
 	mgr *cni.Manager, space intmodel.Space, confPath string, conflistExists bool,
 ) (string, error) {
-	alloc := r.subnetAlloc()
+	alloc := r.subnetAllocator
 	if persisted, err := alloc.LoadAssigned(space.Spec.RealmName, space.Metadata.Name); err != nil {
 		return "", err
 	} else if persisted != "" {
@@ -389,7 +389,7 @@ func (r *Exec) createSpaceCNIConfig(space intmodel.Space) (string, error) {
 		return "", errdefs.ErrNetworkAlreadyExists
 	}
 
-	subnet, allocErr := r.subnetAlloc().Allocate(space.Spec.RealmName, space.Metadata.Name)
+	subnet, allocErr := r.subnetAllocator.Allocate(space.Spec.RealmName, space.Metadata.Name)
 	if allocErr != nil {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateNetwork, allocErr)
 	}
