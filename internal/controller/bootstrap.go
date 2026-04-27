@@ -526,7 +526,7 @@ func ensureSocketDir(socketPath string) error {
 // other CNI mounts (/opt/cni/net.d and /opt/cni/cache) are already created by
 // the earlier CNI bootstrap step.
 func ensureCNIStateDir() error {
-	if err := os.MkdirAll("/var/lib/cni", 0o755); err != nil {
+	if err := os.MkdirAll("/var/lib/cni", 0o750); err != nil {
 		return fmt.Errorf("create CNI state dir %q: %w", "/var/lib/cni", err)
 	}
 	return nil
