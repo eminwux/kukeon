@@ -54,6 +54,28 @@ func cellWantsHostNetworkRoot(cell intmodel.Cell) bool {
 	return false
 }
 
+// validateExplicitRootHostNetwork enforces, for cells using explicit
+// rootContainerId, that the chosen root has HostNetwork=true whenever any
+// peer container has HostNetwork=true. The auto-default-root branch in
+// ensureCellRootContainerSpec already propagates host-network onto the
+// generated root, but the explicit-root branch reads the user's spec
+// verbatim — so a peer with HostNetwork=true alongside an explicit non-host
+// root would silently lose its host-network intent (peers join the root's
+// netns via JoinContainerNamespaces).
+func validateExplicitRootHostNetwork(cell intmodel.Cell, rootSpec intmodel.ContainerSpec) error {
+	if cell.Spec.RootContainerID == "" {
+		return nil
+	}
+	if cellWantsHostNetworkRoot(cell) && !rootSpec.HostNetwork {
+		return fmt.Errorf(
+			"%w: rootContainerId %q",
+			internalerrdefs.ErrExplicitRootHostNetworkMismatch,
+			cell.Spec.RootContainerID,
+		)
+	}
+	return nil
+}
+
 // StartCell starts the root container and all containers defined in the CellDoc.
 // The root container is started first, then all containers in doc.Spec.Containers are started.
 func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
