@@ -69,12 +69,16 @@ func (r *Exec) PurgeSpace(space intmodel.Space) error {
 		return nil
 	}
 
-	// Get network name
+	// Get network name and tear down conflist + bridge link, then purge
+	// the rest of the CNI state. DeleteSpace above already attempted the
+	// teardown, but it can be skipped on prior failure paths — call again
+	// idempotently so purge always converges.
 	var networkName string
 	if !spaceNotFound {
 		networkName, err = r.getSpaceNetworkName(internalSpace)
 		if err == nil {
-			// Purge entire network
+			r.teardownSpaceCNI(networkName, "")
+			// Purge IPAM and cache state for the network.
 			_ = r.purgeCNIForNetwork(networkName)
 		}
 	}
