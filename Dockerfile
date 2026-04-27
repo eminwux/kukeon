@@ -31,8 +31,13 @@ RUN DEBIAN_FRONTEND=noninteractive apt update \
  && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /opt/cni/bin \
- && curl -fsSL "https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGINS_VERSION}/cni-plugins-${TARGETOS}-${TARGETARCH}-${CNI_PLUGINS_VERSION}.tgz" \
-    | tar -xz -C /opt/cni/bin
+ && CNI_PLUGINS_TGZ="cni-plugins-${TARGETOS}-${TARGETARCH}-${CNI_PLUGINS_VERSION}.tgz" \
+ && CNI_PLUGINS_URL="https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGINS_VERSION}/${CNI_PLUGINS_TGZ}" \
+ && curl -fsSL -o "/tmp/${CNI_PLUGINS_TGZ}" "${CNI_PLUGINS_URL}" \
+ && curl -fsSL -o "/tmp/${CNI_PLUGINS_TGZ}.sha256" "${CNI_PLUGINS_URL}.sha256" \
+ && echo "$(awk '{print $1}' /tmp/${CNI_PLUGINS_TGZ}.sha256)  /tmp/${CNI_PLUGINS_TGZ}" | sha256sum -c - \
+ && tar -xz -C /opt/cni/bin -f "/tmp/${CNI_PLUGINS_TGZ}" \
+ && rm -f "/tmp/${CNI_PLUGINS_TGZ}" "/tmp/${CNI_PLUGINS_TGZ}.sha256"
 
 FROM debian:bookworm-slim
 
