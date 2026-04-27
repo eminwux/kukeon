@@ -67,6 +67,14 @@ var (
 	ErrCreateCell              = errors.New("failed to create cell")
 	ErrCreateRootContainer     = errors.New("failed to create root container")
 	ErrNetworkConfigNotLoaded  = errors.New("network config not loaded")
+	// ErrExplicitRootHostNetworkMismatch fires when a cell pins its root via
+	// rootContainerId but the chosen root has HostNetwork=false while at
+	// least one peer container has HostNetwork=true. Because peers join the
+	// root's netns via JoinContainerNamespaces, a per-container-netns root
+	// would silently swallow the peer's host-network intent.
+	ErrExplicitRootHostNetworkMismatch = errors.New(
+		"explicit rootContainerId must have hostNetwork: true when any cell container has hostNetwork: true",
+	)
 	ErrCellNameRequired        = errors.New("cell name is required")
 	ErrContainerNameRequired   = errors.New("container name is required")
 	ErrInvalidImage            = errors.New("invalid image reference")

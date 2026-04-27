@@ -1811,6 +1811,11 @@ func (r *Exec) ensureCellRootContainerSpec(cell intmodel.Cell) (intmodel.Contain
 				cell.Spec.RootContainerID,
 			)
 		}
+		// Reject the misalignment instead of silently overriding the
+		// user-provided root spec — see validateExplicitRootHostNetwork.
+		if err := validateExplicitRootHostNetwork(cell, rootSpec); err != nil {
+			return intmodel.ContainerSpec{}, err
+		}
 	} else {
 		// Create default root container spec
 		// Pass containerdID to set ContainerdID field, ID will be set to "root"

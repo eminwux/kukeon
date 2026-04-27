@@ -19,8 +19,10 @@
 package runner
 
 import (
+	"errors"
 	"testing"
 
+	internalerrdefs "github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
@@ -109,6 +111,85 @@ func TestCellWantsHostNetworkRoot(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := cellWantsHostNetworkRoot(tt.cell); got != tt.want {
 				t.Errorf("cellWantsHostNetworkRoot() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestValidateExplicitRootHostNetwork covers the explicit-root branch's
+// host-network alignment guard from issue #103. Without it, a peer with
+// HostNetwork=true alongside an explicit non-host root would silently lose
+// its host-network intent — peers join the root's netns via
+// JoinContainerNamespaces, so the root owns the decision.
+func TestValidateExplicitRootHostNetwork(t *testing.T) {
+	tests := []struct {
+		name     string
+		cell     intmodel.Cell
+		rootSpec intmodel.ContainerSpec
+		wantErr  bool
+	}{
+		{
+			name: "no explicit root — auto-default branch handles propagation",
+			cell: intmodel.Cell{Spec: intmodel.CellSpec{Containers: []intmodel.ContainerSpec{
+				{ID: "a", HostNetwork: true},
+			}}},
+			rootSpec: intmodel.ContainerSpec{},
+			wantErr:  false,
+		},
+		{
+			name: "explicit root, no peer wants host-network",
+			cell: intmodel.Cell{Spec: intmodel.CellSpec{
+				RootContainerID: "c2",
+				Containers: []intmodel.ContainerSpec{
+					{ID: "c1"}, {ID: "c2"},
+				},
+			}},
+			rootSpec: intmodel.ContainerSpec{ID: "c2"},
+			wantErr:  false,
+		},
+		{
+			name: "explicit root host-network, peers default — fine, peers join host netns",
+			cell: intmodel.Cell{Spec: intmodel.CellSpec{
+				RootContainerID: "c2",
+				Containers: []intmodel.ContainerSpec{
+					{ID: "c1"}, {ID: "c2", HostNetwork: true},
+				},
+			}},
+			rootSpec: intmodel.ContainerSpec{ID: "c2", HostNetwork: true},
+			wantErr:  false,
+		},
+		{
+			name: "explicit root host-network, peer also host-network — aligned",
+			cell: intmodel.Cell{Spec: intmodel.CellSpec{
+				RootContainerID: "c2",
+				Containers: []intmodel.ContainerSpec{
+					{ID: "c1", HostNetwork: true}, {ID: "c2", HostNetwork: true},
+				},
+			}},
+			rootSpec: intmodel.ContainerSpec{ID: "c2", HostNetwork: true},
+			wantErr:  false,
+		},
+		{
+			name: "peer wants host-network but explicit root does not — reject",
+			cell: intmodel.Cell{Spec: intmodel.CellSpec{
+				RootContainerID: "c2",
+				Containers: []intmodel.ContainerSpec{
+					{ID: "c1", HostNetwork: true}, {ID: "c2"},
+				},
+			}},
+			rootSpec: intmodel.ContainerSpec{ID: "c2"},
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateExplicitRootHostNetwork(tt.cell, tt.rootSpec)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateExplicitRootHostNetwork() err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !errors.Is(err, internalerrdefs.ErrExplicitRootHostNetworkMismatch) {
+				t.Errorf("err = %v, want wrapped ErrExplicitRootHostNetworkMismatch", err)
 			}
 		})
 	}
