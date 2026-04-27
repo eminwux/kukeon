@@ -63,9 +63,6 @@ func cellWantsHostNetworkRoot(cell intmodel.Cell) bool {
 // root would silently lose its host-network intent (peers join the root's
 // netns via JoinContainerNamespaces).
 func validateExplicitRootHostNetwork(cell intmodel.Cell, rootSpec intmodel.ContainerSpec) error {
-	if cell.Spec.RootContainerID == "" {
-		return nil
-	}
 	if cellWantsHostNetworkRoot(cell) && !rootSpec.HostNetwork {
 		return fmt.Errorf(
 			"%w: rootContainerId %q",

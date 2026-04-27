@@ -129,14 +129,6 @@ func TestValidateExplicitRootHostNetwork(t *testing.T) {
 		wantErr  bool
 	}{
 		{
-			name: "no explicit root — auto-default branch handles propagation",
-			cell: intmodel.Cell{Spec: intmodel.CellSpec{Containers: []intmodel.ContainerSpec{
-				{ID: "a", HostNetwork: true},
-			}}},
-			rootSpec: intmodel.ContainerSpec{},
-			wantErr:  false,
-		},
-		{
 			name: "explicit root, no peer wants host-network",
 			cell: intmodel.Cell{Spec: intmodel.CellSpec{
 				RootContainerID: "c2",
