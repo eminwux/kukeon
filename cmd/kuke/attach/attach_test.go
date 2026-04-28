@@ -63,9 +63,7 @@ func (f *fakeClient) AttachContainer(
 }
 
 // runCapture records the Options passed to pkg/attach.Run and returns
-// nil so the test treats the call as a clean detach. The real Run would
-// open the user's TTY and connect to a control socket; bypassing it
-// keeps the test hermetic.
+// nil so the test treats the call as a clean detach.
 type runCapture struct {
 	calls int
 	opts  sbshattach.Options
