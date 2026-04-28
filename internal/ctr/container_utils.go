@@ -91,6 +91,10 @@ func BuildRootContainerSpec(
 		specOpts = append(specOpts, oci.WithProcessArgs(processArgs...))
 	}
 
+	if rootSpec.WorkingDir != "" {
+		specOpts = append(specOpts, oci.WithProcessCwd(rootSpec.WorkingDir))
+	}
+
 	if len(rootSpec.Env) > 0 {
 		specOpts = append(specOpts, oci.WithEnv(rootSpec.Env))
 	}

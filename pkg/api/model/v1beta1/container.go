@@ -32,22 +32,26 @@ type ContainerMetadata struct {
 }
 
 type ContainerSpec struct {
-	ID                     string                 `json:"id"                               yaml:"id"`
-	ContainerdID           string                 `json:"containerdId,omitempty"           yaml:"containerdId,omitempty"`
-	RealmID                string                 `json:"realmId"                          yaml:"realmId"`
-	SpaceID                string                 `json:"spaceId"                          yaml:"spaceId"`
-	StackID                string                 `json:"stackId"                          yaml:"stackId"`
-	CellID                 string                 `json:"cellId"                           yaml:"cellId"`
-	Root                   bool                   `json:"root,omitempty"                   yaml:"root,omitempty"`
-	Image                  string                 `json:"image"                            yaml:"image"`
-	Command                string                 `json:"command"                          yaml:"command"`
-	Args                   []string               `json:"args"                             yaml:"args"`
-	Env                    []string               `json:"env"                              yaml:"env"`
-	Ports                  []string               `json:"ports"                            yaml:"ports"`
-	Volumes                []VolumeMount          `json:"volumes"                          yaml:"volumes"`
-	Networks               []string               `json:"networks"                         yaml:"networks"`
-	NetworksAliases        []string               `json:"networksAliases"                  yaml:"networksAliases"`
-	Privileged             bool                   `json:"privileged"                       yaml:"privileged"`
+	ID           string   `json:"id"                               yaml:"id"`
+	ContainerdID string   `json:"containerdId,omitempty"           yaml:"containerdId,omitempty"`
+	RealmID      string   `json:"realmId"                          yaml:"realmId"`
+	SpaceID      string   `json:"spaceId"                          yaml:"spaceId"`
+	StackID      string   `json:"stackId"                          yaml:"stackId"`
+	CellID       string   `json:"cellId"                           yaml:"cellId"`
+	Root         bool     `json:"root,omitempty"                   yaml:"root,omitempty"`
+	Image        string   `json:"image"                            yaml:"image"`
+	Command      string   `json:"command"                          yaml:"command"`
+	Args         []string `json:"args"                             yaml:"args"`
+	// WorkingDir sets the cwd of the spawned container process — OCI
+	// process.cwd, Docker WORKDIR, K8s Container.workingDir. Empty falls
+	// back to the image's WORKDIR (no behavior change for existing specs).
+	WorkingDir      string        `json:"workingDir,omitempty"             yaml:"workingDir,omitempty"`
+	Env             []string      `json:"env"                              yaml:"env"`
+	Ports           []string      `json:"ports"                            yaml:"ports"`
+	Volumes         []VolumeMount `json:"volumes"                          yaml:"volumes"`
+	Networks        []string      `json:"networks"                         yaml:"networks"`
+	NetworksAliases []string      `json:"networksAliases"                  yaml:"networksAliases"`
+	Privileged      bool          `json:"privileged"                       yaml:"privileged"`
 	// HostNetwork opts the container into the host's network namespace.
 	// When true, the runner omits the network LinuxNamespace from the OCI
 	// spec (containerd's WithHostNamespace) and does not invoke CNI attach,
@@ -55,7 +59,7 @@ type ContainerSpec struct {
 	// Used by the kukeond bootstrap so daemon-installed bridges, veths, and
 	// iptables rules land in host scope where kubelet-style CNI plumbing
 	// belongs. Default false — no behavior change for existing specs.
-	HostNetwork            bool                   `json:"hostNetwork,omitempty"            yaml:"hostNetwork,omitempty"`
+	HostNetwork bool `json:"hostNetwork,omitempty"            yaml:"hostNetwork,omitempty"`
 	// HostPID opts the container into the host's PID namespace. When true,
 	// the runner omits the PID LinuxNamespace from the OCI spec so /proc
 	// inside the container reflects host PIDs. Used by the kukeond bootstrap

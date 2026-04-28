@@ -389,16 +389,16 @@ func TestContainerRoundTripV1Beta1(t *testing.T) {
 			Labels: map[string]string{"i": "j"},
 		},
 		Spec: ext.ContainerSpec{
-			ID:       "container-id-0",
-			RealmID:  "realm0",
-			SpaceID:  "space0",
-			StackID:  "stack0",
-			CellID:   "cell0",
-			Image:    "alpine:latest",
-			Command:  "sh",
-			Args:     []string{"-c", "echo hello"},
-			Env:      []string{"ENV_VAR=value"},
-			Ports:    []string{"8080:80"},
+			ID:      "container-id-0",
+			RealmID: "realm0",
+			SpaceID: "space0",
+			StackID: "stack0",
+			CellID:  "cell0",
+			Image:   "alpine:latest",
+			Command: "sh",
+			Args:    []string{"-c", "echo hello"},
+			Env:     []string{"ENV_VAR=value"},
+			Ports:   []string{"8080:80"},
 			Volumes: []ext.VolumeMount{
 				{Source: "/host/src", Target: "/container/dst"},
 				{Source: "/host/ro", Target: "/container/ro", ReadOnly: true},
@@ -446,6 +446,91 @@ func TestContainerRoundTripV1Beta1(t *testing.T) {
 		if output.Spec.Volumes[i] != v {
 			t.Errorf("volume[%d] = %+v, want %+v", i, output.Spec.Volumes[i], v)
 		}
+	}
+}
+
+// TestCellRoundTripWorkingDirV1Beta1 covers the nested-ContainerSpec path:
+// `apply -f cell.yaml` lands here (containers live inside CellDoc), so the
+// per-container WorkingDir must survive Normalize → controller → Build with
+// no fields dropped, just like the standalone Container round-trip.
+func TestCellRoundTripWorkingDirV1Beta1(t *testing.T) {
+	input := ext.CellDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCell,
+		Metadata:   ext.CellMetadata{Name: "cell-wd"},
+		Spec: ext.CellSpec{
+			ID:      "cell-wd",
+			RealmID: "realm0",
+			SpaceID: "space0",
+			StackID: "stack0",
+			Containers: []ext.ContainerSpec{
+				{
+					ID:         "work",
+					Image:      "registry.eminwux.com/busybox:latest",
+					Command:    "/bin/sh",
+					WorkingDir: "/workspace",
+				},
+			},
+		},
+	}
+
+	internal, version, err := apischeme.NormalizeCell(input)
+	if err != nil {
+		t.Fatalf("NormalizeCell: %v", err)
+	}
+	if len(internal.Spec.Containers) != 1 ||
+		internal.Spec.Containers[0].WorkingDir != "/workspace" {
+		t.Fatalf("internal nested WorkingDir not carried: %+v", internal.Spec.Containers)
+	}
+
+	output, err := apischeme.BuildCellExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildCellExternalFromInternal: %v", err)
+	}
+	if len(output.Spec.Containers) != 1 ||
+		output.Spec.Containers[0].WorkingDir != "/workspace" {
+		t.Fatalf("nested WorkingDir did not round-trip: %+v", output.Spec.Containers)
+	}
+}
+
+// TestContainerRoundTripWorkingDirV1Beta1 guards the apply -f round-trip for
+// the workingDir field — a yaml/JSON producer must see the same value on the
+// way back out so an `apply -f cell.yaml | get -o yaml` cycle does not silently
+// drop it. Empty-in/empty-out is asserted in the Volumes round-trip above; this
+// test pins the non-empty path.
+func TestContainerRoundTripWorkingDirV1Beta1(t *testing.T) {
+	input := ext.ContainerDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindContainer,
+		Metadata: ext.ContainerMetadata{
+			Name: "container-wd",
+		},
+		Spec: ext.ContainerSpec{
+			ID:         "container-wd",
+			RealmID:    "realm0",
+			SpaceID:    "space0",
+			StackID:    "stack0",
+			CellID:     "cell0",
+			Image:      "alpine:latest",
+			WorkingDir: "/workspace",
+		},
+	}
+
+	internal, version, err := apischeme.NormalizeContainer(input)
+	if err != nil {
+		t.Fatalf("NormalizeContainer: %v", err)
+	}
+	if internal.Spec.WorkingDir != "/workspace" {
+		t.Fatalf("internal WorkingDir = %q, want %q", internal.Spec.WorkingDir, "/workspace")
+	}
+
+	output, err := apischeme.BuildContainerExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildContainerExternalFromInternal: %v", err)
+	}
+	if output.Spec.WorkingDir != input.Spec.WorkingDir {
+		t.Fatalf("WorkingDir did not round-trip: got %q, want %q",
+			output.Spec.WorkingDir, input.Spec.WorkingDir)
 	}
 }
 

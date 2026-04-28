@@ -322,6 +322,86 @@ func TestBuildContainerSpec(t *testing.T) {
 	}
 }
 
+// TestBuildContainerSpec_WorkingDir verifies the OCI spec produced by
+// BuildContainerSpec sets process.cwd from ContainerSpec.WorkingDir when set,
+// and leaves it untouched when empty so the image's WORKDIR survives.
+func TestBuildContainerSpec_WorkingDir(t *testing.T) {
+	tests := []struct {
+		name       string
+		workingDir string
+		preCwd     string
+		wantCwd    string
+	}{
+		{name: "empty leaves image cwd intact", workingDir: "", preCwd: "/from-image", wantCwd: "/from-image"},
+		{name: "set overrides image cwd", workingDir: "/workspace", preCwd: "/from-image", wantCwd: "/workspace"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := ctr.BuildContainerSpec(intmodel.ContainerSpec{
+				ID:         "test-id",
+				Image:      "registry.eminwux.com/busybox:latest",
+				WorkingDir: tt.workingDir,
+				CellName:   "c", SpaceName: "s", RealmName: "r", StackName: "st",
+			})
+
+			ociSpec := &runtimespec.Spec{
+				Process: &runtimespec.Process{Cwd: tt.preCwd},
+				Linux:   &runtimespec.Linux{},
+			}
+			for _, opt := range spec.SpecOpts {
+				if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+					t.Fatalf("apply SpecOpts: %v", err)
+				}
+			}
+
+			if ociSpec.Process.Cwd != tt.wantCwd {
+				t.Errorf("Process.Cwd = %q, want %q", ociSpec.Process.Cwd, tt.wantCwd)
+			}
+		})
+	}
+}
+
+// TestBuildRootContainerSpec_WorkingDir mirrors the user-container test for
+// the root-container builder so a user-supplied root spec marked with
+// WorkingDir is honored end-to-end.
+func TestBuildRootContainerSpec_WorkingDir(t *testing.T) {
+	tests := []struct {
+		name       string
+		workingDir string
+		preCwd     string
+		wantCwd    string
+	}{
+		{name: "empty leaves image cwd intact", workingDir: "", preCwd: "/from-image", wantCwd: "/from-image"},
+		{name: "set overrides image cwd", workingDir: "/workspace", preCwd: "/from-image", wantCwd: "/workspace"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := ctr.BuildRootContainerSpec(intmodel.ContainerSpec{
+				ID:           "root",
+				ContainerdID: "root-id",
+				Image:        "registry.eminwux.com/busybox:latest",
+				WorkingDir:   tt.workingDir,
+			}, nil)
+
+			ociSpec := &runtimespec.Spec{
+				Process: &runtimespec.Process{Cwd: tt.preCwd},
+				Linux:   &runtimespec.Linux{},
+			}
+			for _, opt := range spec.SpecOpts {
+				if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+					t.Fatalf("apply SpecOpts: %v", err)
+				}
+			}
+
+			if ociSpec.Process.Cwd != tt.wantCwd {
+				t.Errorf("Process.Cwd = %q, want %q", ociSpec.Process.Cwd, tt.wantCwd)
+			}
+		})
+	}
+}
+
 // TestBuildContainerSpec_HostNetwork verifies the OCI spec produced by
 // BuildContainerSpec drops the network LinuxNamespace entry exactly when
 // HostNetwork is true. The runner relies on this — a remaining network entry

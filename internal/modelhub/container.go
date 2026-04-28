@@ -40,6 +40,7 @@ type ContainerSpec struct {
 	Image                  string
 	Command                string
 	Args                   []string
+	WorkingDir             string
 	Env                    []string
 	Ports                  []string
 	Volumes                []VolumeMount
