@@ -56,6 +56,17 @@ const (
 	// the workload's process. Hard-coded for the foundation slice; the
 	// resolver in #67 will not change it.
 	AttachableSubcommand = "terminal"
+
+	// AttachableProfileFile is the basename of the sbsh TerminalProfile YAML
+	// the daemon writes into the per-container tty directory when a
+	// container declares a tty block. The host pre-writes the file in the
+	// bind-mount source so it appears under AttachableTTYDir inside the
+	// container, where sbsh resolves it via --profiles-dir + --profile.
+	AttachableProfileFile = "profile.yaml"
+
+	// AttachableProfileName is the profile.metadata.name written into the
+	// generated TerminalProfile and passed to `sbsh terminal --profile`.
+	AttachableProfileName = "kukeon"
 )
 
 // AttachableInjection carries the host-side paths needed to wrap a container's
@@ -72,6 +83,13 @@ type AttachableInjection struct {
 	// host-visible socket that `kuke attach` (#66) connects to is the
 	// `socket` entry inside this directory.
 	HostTTYDir string
+
+	// UseProfile, when true, instructs the wrapper to append
+	// `--profiles-dir AttachableTTYDir --profile AttachableProfileName` to
+	// the sbsh terminal invocation. The runner is responsible for writing
+	// the profile YAML to <HostTTYDir>/AttachableProfileFile before the
+	// container starts; the wrapper itself never touches the filesystem.
+	UseProfile bool
 }
 
 // withAttachableMounts adds the two bind mounts that make sbsh reachable from
@@ -107,26 +125,42 @@ func withAttachableMounts(inj AttachableInjection) oci.SpecOpts {
 // ENTRYPOINT/CMD) so the wrapped command line is whatever would have run
 // otherwise.
 //
+// When useProfile is true, the wrapper additionally points sbsh at the
+// per-container profile YAML the runner pre-wrote into HostTTYDir, so
+// the generated prompt and onInit scripts take effect on first attach.
+// `--profiles-dir` is a global flag on `sbsh` and must precede the
+// `terminal` subcommand; `--profile` is a per-subcommand flag on
+// `terminal` and must follow it. Swapping either placement makes sbsh
+// reject the invocation with `unknown flag`.
+//
 // OCI semantics: process.args is the merged "ENTRYPOINT + CMD" by the time
 // this opt runs (containerd's WithImageConfigArgs has already resolved image
 // defaults and any user override of either). We just wrap the result, which
 // is what Kubernetes failed to do correctly for years and what this issue
 // explicitly tests.
-func withAttachableArgsWrap() oci.SpecOpts {
+func withAttachableArgsWrap(useProfile bool) oci.SpecOpts {
 	return func(_ context.Context, _ oci.Client, _ *containers.Container, s *runtimespec.Spec) error {
 		if s.Process == nil {
 			s.Process = &runtimespec.Process{}
 		}
 		original := append([]string(nil), s.Process.Args...)
-		wrapped := []string{
-			AttachableBinaryPath,
-			AttachableSubcommand,
+		wrapped := []string{AttachableBinaryPath}
+		if useProfile {
+			wrapped = append(wrapped,
+				"--profiles-dir", AttachableTTYDir,
+			)
+		}
+		wrapped = append(wrapped, AttachableSubcommand)
+		if useProfile {
+			wrapped = append(wrapped, "--profile", AttachableProfileName)
+		}
+		wrapped = append(wrapped,
 			"--run-path", AttachableTTYDir,
 			"--socket", AttachableSocketPath,
 			"--capture-file", AttachableCapturePath,
 			"--log-file", AttachableLogfilePath,
 			"--",
-		}
+		)
 		s.Process.Args = append(wrapped, original...)
 		return nil
 	}

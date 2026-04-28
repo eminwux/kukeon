@@ -717,6 +717,285 @@ func TestContainerAttachableRoundTrips(t *testing.T) {
 	}
 }
 
+// TestContainerTtyRoundTripV1Beta1 covers the AC that a populated tty block
+// on an attachable container survives ConvertContainerDocToInternal +
+// BuildContainerExternalFromInternal with no fields dropped.
+func TestContainerTtyRoundTripV1Beta1(t *testing.T) {
+	input := ext.ContainerDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindContainer,
+		Metadata:   ext.ContainerMetadata{Name: "c"},
+		Spec: ext.ContainerSpec{
+			ID:      "c",
+			RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
+			Image:      "alpine:latest",
+			Attachable: true,
+			Tty: &ext.ContainerTty{
+				Prompt: `"\[\e[1;36m\]claude \u@\h\[\e[0m\]:\w\$ "`,
+				OnInit: []ext.TtyStage{
+					{Script: "git pull"},
+					{Script: "claude"},
+				},
+			},
+		},
+	}
+	internal, version, err := apischeme.NormalizeContainer(input)
+	if err != nil {
+		t.Fatalf("NormalizeContainer: %v", err)
+	}
+	if internal.Spec.Tty == nil {
+		t.Fatalf("internal.Spec.Tty = nil, want populated")
+	}
+	if internal.Spec.Tty.Prompt != input.Spec.Tty.Prompt {
+		t.Errorf("internal prompt = %q, want %q", internal.Spec.Tty.Prompt, input.Spec.Tty.Prompt)
+	}
+	if len(internal.Spec.Tty.OnInit) != 2 ||
+		internal.Spec.Tty.OnInit[0].Script != "git pull" ||
+		internal.Spec.Tty.OnInit[1].Script != "claude" {
+		t.Errorf("internal onInit = %+v, want [git pull, claude]", internal.Spec.Tty.OnInit)
+	}
+	out, err := apischeme.BuildContainerExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildContainerExternalFromInternal: %v", err)
+	}
+	if out.Spec.Tty == nil {
+		t.Fatalf("round-trip dropped tty block: %+v", out.Spec)
+	}
+	if out.Spec.Tty.Prompt != input.Spec.Tty.Prompt {
+		t.Errorf("round-trip prompt = %q, want %q", out.Spec.Tty.Prompt, input.Spec.Tty.Prompt)
+	}
+	if len(out.Spec.Tty.OnInit) != len(input.Spec.Tty.OnInit) {
+		t.Fatalf("round-trip onInit len = %d, want %d", len(out.Spec.Tty.OnInit), len(input.Spec.Tty.OnInit))
+	}
+	for i, s := range input.Spec.Tty.OnInit {
+		if out.Spec.Tty.OnInit[i].Script != s.Script {
+			t.Errorf("round-trip onInit[%d] = %q, want %q", i, out.Spec.Tty.OnInit[i].Script, s.Script)
+		}
+	}
+}
+
+// TestCellTtyRoundTripV1Beta1 covers the AC that a populated cell-level tty
+// block round-trips intact, with cell.tty.default referencing an attachable
+// container that exists in the same cell.
+func TestCellTtyRoundTripV1Beta1(t *testing.T) {
+	input := ext.CellDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCell,
+		Metadata:   ext.CellMetadata{Name: "cell-tty"},
+		Spec: ext.CellSpec{
+			ID:      "cell-tty",
+			RealmID: "r", SpaceID: "s", StackID: "st",
+			Tty: &ext.CellTty{Default: "work"},
+			Containers: []ext.ContainerSpec{
+				{
+					ID:         "work",
+					RealmID:    "r",
+					SpaceID:    "s",
+					StackID:    "st",
+					CellID:     "cell-tty",
+					Image:      "alpine:latest",
+					Attachable: true,
+					Tty: &ext.ContainerTty{
+						Prompt: `"\u@\h:\w\$ "`,
+						OnInit: []ext.TtyStage{{Script: "echo hi"}},
+					},
+				},
+			},
+		},
+	}
+	internal, version, err := apischeme.NormalizeCell(input)
+	if err != nil {
+		t.Fatalf("NormalizeCell: %v", err)
+	}
+	if internal.Spec.Tty == nil || internal.Spec.Tty.Default != "work" {
+		t.Fatalf("internal cell tty = %+v, want default=work", internal.Spec.Tty)
+	}
+	if len(internal.Spec.Containers) != 1 || internal.Spec.Containers[0].Tty == nil {
+		t.Fatalf("internal nested container tty dropped: %+v", internal.Spec.Containers)
+	}
+	if internal.Spec.Containers[0].Tty.Prompt == "" ||
+		len(internal.Spec.Containers[0].Tty.OnInit) != 1 {
+		t.Errorf("internal nested container tty fields wrong: %+v", internal.Spec.Containers[0].Tty)
+	}
+	out, err := apischeme.BuildCellExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildCellExternalFromInternal: %v", err)
+	}
+	if out.Spec.Tty == nil || out.Spec.Tty.Default != "work" {
+		t.Fatalf("round-trip cell tty = %+v, want default=work", out.Spec.Tty)
+	}
+	if len(out.Spec.Containers) != 1 || out.Spec.Containers[0].Tty == nil ||
+		out.Spec.Containers[0].Tty.Prompt != input.Spec.Containers[0].Tty.Prompt {
+		t.Fatalf("round-trip nested container tty did not survive: %+v", out.Spec.Containers[0].Tty)
+	}
+}
+
+// TestCellTtyZeroBlockOmittedOnRoundTrip confirms an absent cell.tty does
+// not turn into an empty `tty: {}` block on the output side. Distinguishes
+// the user-supplied "block omitted" case from "block present but empty".
+func TestCellTtyZeroBlockOmittedOnRoundTrip(t *testing.T) {
+	input := ext.CellDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCell,
+		Metadata:   ext.CellMetadata{Name: "cell"},
+		Spec: ext.CellSpec{
+			ID:      "cell",
+			RealmID: "r", SpaceID: "s", StackID: "st",
+		},
+	}
+	internal, version, err := apischeme.NormalizeCell(input)
+	if err != nil {
+		t.Fatalf("NormalizeCell: %v", err)
+	}
+	if internal.Spec.Tty != nil {
+		t.Errorf("internal cell tty = %+v, want nil for absent block", internal.Spec.Tty)
+	}
+	out, err := apischeme.BuildCellExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildCellExternalFromInternal: %v", err)
+	}
+	if out.Spec.Tty != nil {
+		t.Errorf("round-trip injected cell tty = %+v, want nil", out.Spec.Tty)
+	}
+}
+
+// TestContainerTtyRejectedWithoutAttachable enforces the AC that any tty
+// field set with attachable=false is a validation error.
+func TestContainerTtyRejectedWithoutAttachable(t *testing.T) {
+	cases := []struct {
+		name string
+		tty  *ext.ContainerTty
+	}{
+		{"prompt only", &ext.ContainerTty{Prompt: `"\u\$ "`}},
+		{"onInit only", &ext.ContainerTty{OnInit: []ext.TtyStage{{Script: "echo"}}}},
+		{"both set", &ext.ContainerTty{
+			Prompt: `"\u\$ "`,
+			OnInit: []ext.TtyStage{{Script: "echo"}},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := ext.ContainerDoc{
+				APIVersion: ext.APIVersionV1Beta1,
+				Kind:       ext.KindContainer,
+				Metadata:   ext.ContainerMetadata{Name: "c"},
+				Spec: ext.ContainerSpec{
+					ID:      "c",
+					RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
+					Image:      "alpine:latest",
+					Attachable: false,
+					Tty:        tc.tty,
+				},
+			}
+			if _, _, err := apischeme.NormalizeContainer(input); err == nil {
+				t.Fatalf("NormalizeContainer accepted tty with attachable=false; want error")
+			}
+		})
+	}
+}
+
+// TestContainerTtyEmptyBlockAcceptedWithoutAttachable confirms that an
+// explicitly empty tty block (`tty: {}`) on a non-attachable container is
+// equivalent to omitting the block — the validator must not reject it.
+func TestContainerTtyEmptyBlockAcceptedWithoutAttachable(t *testing.T) {
+	input := ext.ContainerDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindContainer,
+		Metadata:   ext.ContainerMetadata{Name: "c"},
+		Spec: ext.ContainerSpec{
+			ID:      "c",
+			RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
+			Image:      "alpine:latest",
+			Attachable: false,
+			Tty:        &ext.ContainerTty{},
+		},
+	}
+	if _, _, err := apischeme.NormalizeContainer(input); err != nil {
+		t.Fatalf("NormalizeContainer rejected empty tty block: %v", err)
+	}
+}
+
+// TestCellTtyDefaultValidation enforces the AC that CellTty.Default must
+// reference an existing attachable container in the same cell. Three cases:
+// missing reference, non-attachable reference, valid reference.
+func TestCellTtyDefaultValidation(t *testing.T) {
+	makeCell := func(defaultName string, containers []ext.ContainerSpec) ext.CellDoc {
+		return ext.CellDoc{
+			APIVersion: ext.APIVersionV1Beta1,
+			Kind:       ext.KindCell,
+			Metadata:   ext.CellMetadata{Name: "cell"},
+			Spec: ext.CellSpec{
+				ID:      "cell",
+				RealmID: "r", SpaceID: "s", StackID: "st",
+				Tty:        &ext.CellTty{Default: defaultName},
+				Containers: containers,
+			},
+		}
+	}
+
+	t.Run("default refs missing container", func(t *testing.T) {
+		doc := makeCell("ghost", []ext.ContainerSpec{
+			{ID: "work", Image: "alpine:latest", Attachable: true},
+		})
+		if _, _, err := apischeme.NormalizeCell(doc); err == nil {
+			t.Fatalf("NormalizeCell accepted unknown tty.default; want error")
+		}
+	})
+
+	t.Run("default refs non-attachable container", func(t *testing.T) {
+		doc := makeCell("plain", []ext.ContainerSpec{
+			{ID: "plain", Image: "alpine:latest", Attachable: false},
+		})
+		if _, _, err := apischeme.NormalizeCell(doc); err == nil {
+			t.Fatalf("NormalizeCell accepted tty.default on non-attachable; want error")
+		}
+	})
+
+	t.Run("default refs attachable container", func(t *testing.T) {
+		doc := makeCell("work", []ext.ContainerSpec{
+			{ID: "work", Image: "alpine:latest", Attachable: true},
+		})
+		if _, _, err := apischeme.NormalizeCell(doc); err != nil {
+			t.Fatalf("NormalizeCell rejected valid tty.default: %v", err)
+		}
+	})
+
+	t.Run("default empty is allowed", func(t *testing.T) {
+		doc := makeCell("", []ext.ContainerSpec{
+			{ID: "work", Image: "alpine:latest", Attachable: true},
+		})
+		if _, _, err := apischeme.NormalizeCell(doc); err != nil {
+			t.Fatalf("NormalizeCell rejected empty tty.default: %v", err)
+		}
+	})
+}
+
+// TestCellRejectsNestedContainerTtyWithoutAttachable confirms the
+// per-container validation also fires for containers carried inside a
+// CellSpec (not just a standalone ContainerDoc).
+func TestCellRejectsNestedContainerTtyWithoutAttachable(t *testing.T) {
+	doc := ext.CellDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCell,
+		Metadata:   ext.CellMetadata{Name: "cell"},
+		Spec: ext.CellSpec{
+			ID:      "cell",
+			RealmID: "r", SpaceID: "s", StackID: "st",
+			Containers: []ext.ContainerSpec{
+				{
+					ID:         "broken",
+					Image:      "alpine:latest",
+					Attachable: false,
+					Tty:        &ext.ContainerTty{Prompt: `"\u\$ "`},
+				},
+			},
+		},
+	}
+	if _, _, err := apischeme.NormalizeCell(doc); err == nil {
+		t.Fatalf("NormalizeCell accepted nested tty with attachable=false; want error")
+	}
+}
+
 // TestContainerSecretYAMLNeverLeaksValues ensures that a round-trip through
 // the external doc + YAML marshal path only serializes the reference fields,
 // never a resolved secret value. The internal model has no value field, so a

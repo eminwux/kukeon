@@ -54,10 +54,18 @@ func (r *Exec) attachableBuildOpts(spec intmodel.ContainerSpec) ([]ctr.BuildOpti
 		return nil, fmt.Errorf("resolve sbsh cache path for %q: %w", spec.Image, err)
 	}
 
+	useProfile := !spec.Tty.IsEmpty()
+	if useProfile {
+		if err = writeSbshProfile(ttyDir, spec); err != nil {
+			return nil, err
+		}
+	}
+
 	return []ctr.BuildOption{
 		ctr.WithAttachableInjection(ctr.AttachableInjection{
 			SbshBinaryPath: binaryPath,
 			HostTTYDir:     ttyDir,
+			UseProfile:     useProfile,
 		}),
 	}, nil
 }

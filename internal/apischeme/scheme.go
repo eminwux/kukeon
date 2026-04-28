@@ -261,6 +261,9 @@ func NormalizeStack(req ext.StackDoc) (intmodel.Stack, ext.Version, error) {
 func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, error) {
 	switch in.APIVersion {
 	case VersionV1Beta1, "": // default/empty treated as v1beta1
+		if err := validateContainerTty(in.Spec); err != nil {
+			return intmodel.Container{}, err
+		}
 		return intmodel.Container{
 			Metadata: intmodel.ContainerMetadata{
 				Name:   in.Metadata.Name,
@@ -295,6 +298,7 @@ func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, err
 				CNIConfigPath:          in.Spec.CNIConfigPath,
 				RestartPolicy:          in.Spec.RestartPolicy,
 				Attachable:             in.Spec.Attachable,
+				Tty:                    convertContainerTtyToInternal(in.Spec.Tty),
 			},
 			Status: intmodel.ContainerStatus{
 				Name:         in.Status.Name,
@@ -353,6 +357,7 @@ func BuildContainerExternalFromInternal(in intmodel.Container, apiVersion ext.Ve
 				CNIConfigPath:          in.Spec.CNIConfigPath,
 				RestartPolicy:          in.Spec.RestartPolicy,
 				Attachable:             in.Spec.Attachable,
+				Tty:                    buildContainerTtyExternalFromInternal(in.Spec.Tty),
 			},
 			Status: ext.ContainerStatus{
 				Name:         in.Status.Name,
@@ -414,6 +419,7 @@ func convertContainerSpecToInternal(in ext.ContainerSpec) intmodel.ContainerSpec
 		CNIConfigPath:          in.CNIConfigPath,
 		RestartPolicy:          in.RestartPolicy,
 		Attachable:             in.Attachable,
+		Tty:                    convertContainerTtyToInternal(in.Tty),
 	}
 }
 
@@ -450,7 +456,97 @@ func BuildContainerSpecExternalFromInternal(in intmodel.ContainerSpec) ext.Conta
 		CNIConfigPath:          in.CNIConfigPath,
 		RestartPolicy:          in.RestartPolicy,
 		Attachable:             in.Attachable,
+		Tty:                    buildContainerTtyExternalFromInternal(in.Tty),
 	}
+}
+
+// convertContainerTtyToInternal converts an external ContainerTty payload to
+// the internal modelhub mirror. Returns nil for a nil or zero-value input so
+// downstream callers can use the ContainerTty.IsEmpty contract.
+func convertContainerTtyToInternal(in *ext.ContainerTty) *intmodel.ContainerTty {
+	if in.IsEmpty() {
+		return nil
+	}
+	out := &intmodel.ContainerTty{Prompt: in.Prompt}
+	if len(in.OnInit) > 0 {
+		out.OnInit = make([]intmodel.TtyStage, len(in.OnInit))
+		for i, s := range in.OnInit {
+			out.OnInit[i] = intmodel.TtyStage{Script: s.Script}
+		}
+	}
+	return out
+}
+
+// buildContainerTtyExternalFromInternal is the inverse of
+// convertContainerTtyToInternal.
+func buildContainerTtyExternalFromInternal(in *intmodel.ContainerTty) *ext.ContainerTty {
+	if in.IsEmpty() {
+		return nil
+	}
+	out := &ext.ContainerTty{Prompt: in.Prompt}
+	if len(in.OnInit) > 0 {
+		out.OnInit = make([]ext.TtyStage, len(in.OnInit))
+		for i, s := range in.OnInit {
+			out.OnInit[i] = ext.TtyStage{Script: s.Script}
+		}
+	}
+	return out
+}
+
+// convertCellTtyToInternal converts an external CellTty payload to the
+// internal modelhub mirror. Returns nil when the block is absent or only
+// contains zero-value fields.
+func convertCellTtyToInternal(in *ext.CellTty) *intmodel.CellTty {
+	if in == nil || in.Default == "" {
+		return nil
+	}
+	return &intmodel.CellTty{Default: in.Default}
+}
+
+// buildCellTtyExternalFromInternal is the inverse of convertCellTtyToInternal.
+func buildCellTtyExternalFromInternal(in *intmodel.CellTty) *ext.CellTty {
+	if in == nil || in.Default == "" {
+		return nil
+	}
+	return &ext.CellTty{Default: in.Default}
+}
+
+// validateContainerTty enforces the AC that any tty field set on a
+// container with Attachable=false is a validation error. The tty block
+// is config that only takes effect when Attachable=true (the capability
+// gate); silently dropping it on a non-attachable container would let a
+// future apply silently ignore configured prompts/onInit scripts.
+func validateContainerTty(spec ext.ContainerSpec) error {
+	if spec.Attachable {
+		return nil
+	}
+	if spec.Tty.IsEmpty() {
+		return nil
+	}
+	return fmt.Errorf("container %q: tty fields require attachable: true", spec.ID)
+}
+
+// validateCellTty enforces the AC that CellTty.Default names an existing
+// attachable container in the same cell (or is empty).
+func validateCellTty(spec ext.CellSpec) error {
+	if spec.Tty == nil || spec.Tty.Default == "" {
+		return nil
+	}
+	for _, c := range spec.Containers {
+		if c.ID == spec.Tty.Default {
+			if !c.Attachable {
+				return fmt.Errorf(
+					"cell tty.default %q references container that is not attachable",
+					spec.Tty.Default,
+				)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf(
+		"cell tty.default %q does not match any container in this cell",
+		spec.Tty.Default,
+	)
 }
 
 func convertCapabilitiesToInternal(in *ext.ContainerCapabilities) *intmodel.ContainerCapabilities {
@@ -693,6 +789,14 @@ func buildContainerStatusesExternalFromInternal(in []intmodel.ContainerStatus) [
 func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 	switch in.APIVersion {
 	case VersionV1Beta1, "": // default/empty treated as v1beta1
+		for _, c := range in.Spec.Containers {
+			if err := validateContainerTty(c); err != nil {
+				return intmodel.Cell{}, err
+			}
+		}
+		if err := validateCellTty(in.Spec); err != nil {
+			return intmodel.Cell{}, err
+		}
 		cell := intmodel.Cell{
 			Metadata: intmodel.CellMetadata{
 				Name:   in.Metadata.Name,
@@ -704,6 +808,7 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 				SpaceName:       in.Spec.SpaceID,
 				StackName:       in.Spec.StackID,
 				RootContainerID: in.Spec.RootContainerID,
+				Tty:             convertCellTtyToInternal(in.Spec.Tty),
 			},
 			Status: intmodel.CellStatus{
 				State:      intmodel.CellState(in.Status.State),
@@ -758,6 +863,7 @@ func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ex
 				SpaceID:         in.Spec.SpaceName,
 				StackID:         in.Spec.StackName,
 				RootContainerID: in.Spec.RootContainerID,
+				Tty:             buildCellTtyExternalFromInternal(in.Spec.Tty),
 			},
 			Status: ext.CellStatus{
 				State:      ext.CellState(in.Status.State),

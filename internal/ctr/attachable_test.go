@@ -212,6 +212,74 @@ func TestBuildContainerSpec_AttachableTrue_MountsAndArgsWrap(t *testing.T) {
 	}
 }
 
+// TestBuildContainerSpec_AttachableTrue_ProfileFlagsInjected covers the
+// wrapper change for #139: when AttachableInjection.UseProfile is set, the
+// generated args carry `--profiles-dir <ttydir>` before the `terminal`
+// subcommand and `--profile <name>` immediately after it. Profile flags
+// are sbsh global flags, so positioning matters — `sbsh terminal
+// --profiles-dir …` would surface as `unknown flag` deep inside the
+// container task.
+func TestBuildContainerSpec_AttachableTrue_ProfileFlagsInjected(t *testing.T) {
+	in := intmodel.ContainerSpec{
+		ID:         "c1",
+		Image:      "registry.eminwux.com/busybox:latest",
+		CellName:   "cell",
+		SpaceName:  "space",
+		RealmName:  "realm",
+		StackName:  "stack",
+		Attachable: true,
+	}
+	inj := ctr.AttachableInjection{
+		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
+		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
+		UseProfile:     true,
+	}
+	spec := applyBuiltSpecWith(t, in, []string{"/bin/sh"}, ctr.WithAttachableInjection(inj))
+
+	want := []string{
+		ctr.AttachableBinaryPath,
+		"--profiles-dir", ctr.AttachableTTYDir,
+		ctr.AttachableSubcommand,
+		"--profile", ctr.AttachableProfileName,
+		"--run-path", ctr.AttachableTTYDir,
+		"--socket", ctr.AttachableSocketPath,
+		"--capture-file", ctr.AttachableCapturePath,
+		"--log-file", ctr.AttachableLogfilePath,
+		"--",
+		"/bin/sh",
+	}
+	if !reflect.DeepEqual(spec.Process.Args, want) {
+		t.Fatalf("Process.Args = %v\nwant %v", spec.Process.Args, want)
+	}
+}
+
+// TestBuildContainerSpec_AttachableTrue_NoProfileWhenUnset confirms the
+// wrapper does NOT inject --profiles-dir / --profile when UseProfile is
+// false — the legacy contract for attachable containers without a tty
+// block must stay byte-identical.
+func TestBuildContainerSpec_AttachableTrue_NoProfileWhenUnset(t *testing.T) {
+	in := intmodel.ContainerSpec{
+		ID:         "c1",
+		Image:      "registry.eminwux.com/busybox:latest",
+		CellName:   "cell",
+		SpaceName:  "space",
+		RealmName:  "realm",
+		StackName:  "stack",
+		Attachable: true,
+	}
+	inj := ctr.AttachableInjection{
+		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
+		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
+	}
+	spec := applyBuiltSpecWith(t, in, []string{"/bin/sh"}, ctr.WithAttachableInjection(inj))
+
+	for _, arg := range spec.Process.Args {
+		if arg == "--profiles-dir" || arg == "--profile" {
+			t.Fatalf("expected no profile flags when UseProfile=false, got %v", spec.Process.Args)
+		}
+	}
+}
+
 func TestBuildContainerSpec_AttachableTrue_EmptyImageArgs(t *testing.T) {
 	// An image whose ENTRYPOINT+CMD resolves to nothing (uncommon but valid)
 	// must still produce a wrapped args list — the wrapper prefix on its own,
