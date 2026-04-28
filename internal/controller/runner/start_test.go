@@ -20,8 +20,10 @@ package runner
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
+	containerd "github.com/containerd/containerd/v2/client"
 	internalerrdefs "github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
@@ -182,6 +184,118 @@ func TestValidateExplicitRootHostNetwork(t *testing.T) {
 			}
 			if tt.wantErr && !errors.Is(err, internalerrdefs.ErrExplicitRootHostNetworkMismatch) {
 				t.Errorf("err = %v, want wrapped ErrExplicitRootHostNetworkMismatch", err)
+			}
+		})
+	}
+}
+
+// TestCellTasksAllRunningFn pins the StartCell idempotency guard from
+// issue #149: only every-task-running yields a no-op skip. Anything else
+// — root not running, root status error, a non-root in any non-Running
+// state, a non-root with an empty ContainerdID — has to fall through to
+// the destructive teardown-and-recreate path so a wedged cell can still
+// recover.
+func TestCellTasksAllRunningFn(t *testing.T) {
+	const rootID = "space_stack_cell_root"
+
+	statusOf := func(states map[string]containerd.ProcessStatus) func(string) (containerd.Status, error) {
+		return func(id string) (containerd.Status, error) {
+			s, ok := states[id]
+			if !ok {
+				return containerd.Status{}, fmt.Errorf("no task for %q", id)
+			}
+			return containerd.Status{Status: s}, nil
+		}
+	}
+
+	cellWithPeers := func(peers ...intmodel.ContainerSpec) intmodel.Cell {
+		return intmodel.Cell{Spec: intmodel.CellSpec{Containers: peers}}
+	}
+
+	tests := []struct {
+		name string
+		cell intmodel.Cell
+		fn   func(string) (containerd.Status, error)
+		want bool
+	}{
+		{
+			name: "root running, no non-root containers — already up",
+			cell: intmodel.Cell{},
+			fn:   statusOf(map[string]containerd.ProcessStatus{rootID: containerd.Running}),
+			want: true,
+		},
+		{
+			name: "root running and all non-roots running — already up",
+			cell: cellWithPeers(
+				intmodel.ContainerSpec{ID: "a", ContainerdID: "cid_a"},
+				intmodel.ContainerSpec{ID: "b", ContainerdID: "cid_b"},
+			),
+			fn: statusOf(map[string]containerd.ProcessStatus{
+				rootID:  containerd.Running,
+				"cid_a": containerd.Running,
+				"cid_b": containerd.Running,
+			}),
+			want: true,
+		},
+		{
+			name: "explicit-root entry in Containers list is skipped",
+			cell: cellWithPeers(
+				intmodel.ContainerSpec{ID: "root", Root: true, ContainerdID: "ignored"},
+				intmodel.ContainerSpec{ID: "a", ContainerdID: "cid_a"},
+			),
+			fn: statusOf(map[string]containerd.ProcessStatus{
+				rootID:  containerd.Running,
+				"cid_a": containerd.Running,
+			}),
+			want: true,
+		},
+		{
+			name: "root TaskStatus errors — not up",
+			cell: intmodel.Cell{},
+			fn:   statusOf(map[string]containerd.ProcessStatus{}),
+			want: false,
+		},
+		{
+			name: "root stopped — not up",
+			cell: intmodel.Cell{},
+			fn:   statusOf(map[string]containerd.ProcessStatus{rootID: containerd.Stopped}),
+			want: false,
+		},
+		{
+			name: "root running, one non-root stopped — not up",
+			cell: cellWithPeers(
+				intmodel.ContainerSpec{ID: "a", ContainerdID: "cid_a"},
+				intmodel.ContainerSpec{ID: "b", ContainerdID: "cid_b"},
+			),
+			fn: statusOf(map[string]containerd.ProcessStatus{
+				rootID:  containerd.Running,
+				"cid_a": containerd.Running,
+				"cid_b": containerd.Stopped,
+			}),
+			want: false,
+		},
+		{
+			name: "non-root has empty ContainerdID — not up",
+			cell: cellWithPeers(
+				intmodel.ContainerSpec{ID: "a", ContainerdID: ""},
+			),
+			fn:   statusOf(map[string]containerd.ProcessStatus{rootID: containerd.Running}),
+			want: false,
+		},
+		{
+			name: "non-root TaskStatus errors — not up",
+			cell: cellWithPeers(
+				intmodel.ContainerSpec{ID: "a", ContainerdID: "cid_a"},
+			),
+			fn:   statusOf(map[string]containerd.ProcessStatus{rootID: containerd.Running}),
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := cellTasksAllRunningFn(tt.cell, rootID, tt.fn); got != tt.want {
+				t.Errorf("cellTasksAllRunningFn() = %v, want %v", got, tt.want)
 			}
 		})
 	}

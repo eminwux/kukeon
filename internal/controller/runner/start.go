@@ -73,6 +73,40 @@ func validateExplicitRootHostNetwork(cell intmodel.Cell, rootSpec intmodel.Conta
 	return nil
 }
 
+// cellTasksAllRunningFn is StartCell's idempotency guard, decoupled from
+// any specific containerd client so it can be unit-tested without a live
+// runtime. statusFn is called once for the root containerd ID and once
+// per non-root container; the cell is considered already running only if
+// every call returns containerd.Running. Issue #149: without this guard,
+// CreateCell→StartCell on an already-Ready cell tears the running root
+// container down and re-runs CNI ADD against its recreated peer, which
+// host-local IPAM rejects as a duplicate allocation under the same
+// container ID (we never ran CNI DEL on the teardown path).
+func cellTasksAllRunningFn(
+	cell intmodel.Cell,
+	rootContainerdID string,
+	statusFn func(id string) (containerd.Status, error),
+) bool {
+	rootStatus, err := statusFn(rootContainerdID)
+	if err != nil || rootStatus.Status != containerd.Running {
+		return false
+	}
+	for _, c := range cell.Spec.Containers {
+		if c.Root {
+			continue
+		}
+		cid := strings.TrimSpace(c.ContainerdID)
+		if cid == "" {
+			return false
+		}
+		s, statusErr := statusFn(cid)
+		if statusErr != nil || s.Status != containerd.Running {
+			return false
+		}
+	}
+	return true
+}
+
 // StartCell starts the root container and all containers defined in the CellDoc.
 // The root container is started first, then all containers in doc.Spec.Containers are started.
 func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
@@ -160,6 +194,30 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	containerID, err := naming.BuildRootContainerdID(spaceID, stackID, cellID)
 	if err != nil {
 		return intmodel.Cell{}, fmt.Errorf("failed to build root container containerd ID: %w", err)
+	}
+
+	// Idempotency guard (issue #149): if every container's task is already
+	// running, the cell is up. Skip the destructive teardown-and-recreate
+	// cycle below; otherwise we'd kill the running root, recreate it, and
+	// re-run CNI ADD against the same container ID — which host-local IPAM
+	// refuses as a duplicate allocation (we never run CNI DEL when we
+	// delete the old container, so the reservation persists).
+	if cellTasksAllRunningFn(internalCell, containerID, r.ctrClient.TaskStatus) {
+		internalCell.Status.State = intmodel.CellStateReady
+		if err = r.PopulateAndPersistCellContainerStatuses(&internalCell); err != nil {
+			r.logger.WarnContext(r.ctx, "failed to populate container statuses after idempotent StartCell skip",
+				"cell", cellName,
+				"error", err)
+			// best-effort, fall through with the Ready state we already set
+		}
+		skipFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		skipFields = append(skipFields, "space", spaceID, "realm", realmID)
+		r.logger.InfoContext(
+			r.ctx,
+			"cell tasks already running, StartCell is a no-op",
+			skipFields...,
+		)
+		return internalCell, nil
 	}
 
 	// Check if container exists and clean it up
