@@ -56,4 +56,11 @@ const (
 	KukeSystemStackName      = "kukeon"
 	KukeSystemCellName       = "kukeond"
 	KukeSystemContainerName  = "kukeond"
+
+	// KukeonSystemUser and KukeonSystemGroup name the system identity created
+	// by `kuke init` so a non-root operator added to the kukeon group can
+	// dial the kukeond socket without sudo. Writes under /opt/kukeon still
+	// require root; they go through the daemon.
+	KukeonSystemUser  = "kukeon"
+	KukeonSystemGroup = "kukeon"
 )
