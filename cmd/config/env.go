@@ -105,6 +105,8 @@ var (
 
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKEOND_SOCKET = DefineKV("KUKEOND_SOCKET", "kukeond/socket", "/run/kukeon/kukeond.sock")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKEOND_SOCKET_GID = DefineKV("KUKEOND_SOCKET_GID", "kukeond/socketGID", "0")
 
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_INIT_REALM = DefineKV("KUKE_INIT_REALM", "kuke/init/realm")

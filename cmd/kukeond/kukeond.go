@@ -66,6 +66,19 @@ func NewKukeondCmd() (*cobra.Command, error) {
 		return nil, err
 	}
 
+	cmd.PersistentFlags().Int(
+		"socket-gid", 0,
+		"Group ID to chown the listener socket to (mode 0o660 with group). "+
+			"Set by `kuke init` to the kukeon GID so non-root group members "+
+			"can dial the daemon after a kukeond restart.",
+	)
+	if err := viper.BindPFlag(
+		config.KUKEOND_SOCKET_GID.ViperKey,
+		cmd.PersistentFlags().Lookup("socket-gid"),
+	); err != nil {
+		return nil, err
+	}
+
 	cmd.PersistentFlags().String(
 		"log-level", "info",
 		"Log level (debug, info, warn, error)",

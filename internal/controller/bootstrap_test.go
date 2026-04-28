@@ -19,6 +19,7 @@
 package controller
 
 import (
+	"strings"
 	"testing"
 
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -83,7 +84,7 @@ func TestKukeondCellDocVolumes(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			doc := kukeondCellDoc(tc.image, tc.socketPath, tc.runPath, tc.containerdSocket)
+			doc := kukeondCellDoc(tc.image, tc.socketPath, tc.runPath, tc.containerdSocket, 0)
 			if len(doc.Spec.Containers) != 1 {
 				t.Fatalf("expected 1 container, got %d", len(doc.Spec.Containers))
 			}
@@ -178,6 +179,55 @@ func TestKukeondCellDocVolumes(t *testing.T) {
 			// and the user-cell network attach fails (issue #105).
 			if !doc.Spec.Containers[0].HostPID {
 				t.Errorf("kukeond container must have HostPID=true")
+			}
+		})
+	}
+}
+
+// TestKukeondCellDocSocketGIDArg guards the wire that lets kukeond restart
+// re-apply socket ownership without re-running kuke init: the cell args must
+// include `--socket-gid <gid>` whenever a kukeon GID is plumbed through.
+func TestKukeondCellDocSocketGIDArg(t *testing.T) {
+	tests := []struct {
+		name          string
+		gid           int
+		wantSocketGID bool
+		wantValue     string
+	}{
+		{name: "zero-omits-flag", gid: 0, wantSocketGID: false},
+		{name: "non-zero-emits-flag", gid: 1234, wantSocketGID: true, wantValue: "1234"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := kukeondCellDoc(
+				"docker.io/library/kukeon:dev",
+				"/run/kukeon/kukeond.sock",
+				"/opt/kukeon",
+				"/run/containerd/containerd.sock",
+				tc.gid,
+			)
+			args := doc.Spec.Containers[0].Args
+			joined := strings.Join(args, " ")
+			has := strings.Contains(joined, "--socket-gid")
+			if has != tc.wantSocketGID {
+				t.Fatalf("--socket-gid presence: got %v want %v (args=%v)", has, tc.wantSocketGID, args)
+			}
+			if !tc.wantSocketGID {
+				return
+			}
+			// Find the flag's value and confirm it matches.
+			for i, a := range args {
+				if a != "--socket-gid" {
+					continue
+				}
+				if i+1 >= len(args) {
+					t.Fatalf("--socket-gid has no value (args=%v)", args)
+				}
+				if args[i+1] != tc.wantValue {
+					t.Errorf("--socket-gid value: got %q want %q", args[i+1], tc.wantValue)
+				}
+				return
 			}
 		})
 	}

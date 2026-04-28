@@ -48,9 +48,12 @@ const (
 	// Files get 0o640 instead of 0o750: blanket-chmoding the tree to 0o750
 	// would mark JSON metadata files as executable, which has no purpose.
 	// Dirs need execute (traverse) for the kukeon group, so they stay
-	// 0o750.
-	kukeonRunDirMode      os.FileMode = 0o750
-	kukeonRunPathDirMode  os.FileMode = 0o750
+	// 0o750. The SGID bit is set on directories (mode 2750) so that files
+	// the daemon writes later (metadata.json, CNI state, etc.) inherit
+	// the kukeon group instead of landing as root:root and breaking
+	// `--no-daemon` reads for non-root operators.
+	kukeonRunDirMode      os.FileMode = os.ModeSetgid | 0o750
+	kukeonRunPathDirMode  os.FileMode = os.ModeSetgid | 0o750
 	kukeonRunPathFileMode os.FileMode = 0o640
 	kukeonSocketMode      os.FileMode = 0o660
 )
@@ -172,18 +175,9 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		runPath = config.DefaultRunPath()
 	}
 
-	opts := controller.Options{
-		RunPath:            runPath,
-		ContainerdSocket:   viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
-		KukeondImage:       image,
-		KukeondSocket:      socketPath,
-		ForceRegenerateCNI: viper.GetBool(config.KUKE_INIT_FORCE_REGENERATE_CNI.ViperKey),
-	}
-
-	logger.DebugContext(cmd.Context(), "running init", "opts", opts)
-
 	// Ensure the kukeon system user/group exist before bootstrap so the
-	// post-bootstrap chown step has a GID to apply.
+	// post-bootstrap chown step has a GID to apply, and so the kukeond cell
+	// is provisioned with --socket-gid pointing at it.
 	ensure, ensureErr := sysuser.EnsureUserGroup(
 		cmd.Context(),
 		consts.KukeonSystemUser,
@@ -193,6 +187,17 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	if ensureErr != nil {
 		return fmt.Errorf("ensure kukeon user/group: %w", ensureErr)
 	}
+
+	opts := controller.Options{
+		RunPath:            runPath,
+		ContainerdSocket:   viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
+		KukeondImage:       image,
+		KukeondSocket:      socketPath,
+		KukeondSocketGID:   ensure.GID,
+		ForceRegenerateCNI: viper.GetBool(config.KUKE_INIT_FORCE_REGENERATE_CNI.ViperKey),
+	}
+
+	logger.DebugContext(cmd.Context(), "running init", "opts", opts)
 
 	ctrl := controller.NewControllerExec(cmd.Context(), logger, opts)
 	report, bootstrapErr := ctrl.Bootstrap()
@@ -245,8 +250,8 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("apply kukeon ownership to %q: %w", socketPath, chownErr)
 	}
 	cmd.Println(fmt.Sprintf(
-		"  - socket %q: chown root:%s mode %#o",
-		socketPath, consts.KukeonSystemGroup, kukeonSocketMode,
+		"  - socket %q: chown root:%s mode %s",
+		socketPath, consts.KukeonSystemGroup, formatPosixMode(kukeonSocketMode),
 	))
 
 	cmd.Println(fmt.Sprintf("kukeond is ready (unix://%s)", socketPath))
@@ -354,16 +359,36 @@ func printPermissionsActions(cmd *cobra.Command, perms permissionsReport) {
 	}
 	if perms.RunDirApplied {
 		cmd.Println(fmt.Sprintf(
-			"    - %q: chown root:%s mode %#o",
-			perms.RunDirPath, perms.Group, kukeonRunDirMode,
+			"    - %q: chown root:%s mode %s",
+			perms.RunDirPath, perms.Group, formatPosixMode(kukeonRunDirMode),
 		))
 	}
 	if perms.RunPathApplied {
 		cmd.Println(fmt.Sprintf(
-			"    - %q (recursive): chown root:%s mode %#o (dirs) / %#o (files)",
-			perms.RunPath, perms.Group, kukeonRunPathDirMode, kukeonRunPathFileMode,
+			"    - %q (recursive): chown root:%s mode %s (dirs) / %s (files)",
+			perms.RunPath, perms.Group,
+			formatPosixMode(kukeonRunPathDirMode),
+			formatPosixMode(kukeonRunPathFileMode),
 		))
 	}
+}
+
+// formatPosixMode renders an os.FileMode as the on-disk POSIX octal mode
+// (including SUID/SGID/sticky bits), matching what `stat`/`ls -l` show.
+// Go's %#o on a FileMode prints internal flag bits like ModeSetgid (0x400000)
+// instead of the syscall-level 02750, which is unreadable in init output.
+func formatPosixMode(m os.FileMode) string {
+	val := uint32(m.Perm())
+	if m&os.ModeSetuid != 0 {
+		val |= 0o4000
+	}
+	if m&os.ModeSetgid != 0 {
+		val |= 0o2000
+	}
+	if m&os.ModeSticky != 0 {
+		val |= 0o1000
+	}
+	return fmt.Sprintf("0o%04o", val)
 }
 
 func printKukeonCgroupAction(cmd *cobra.Command, report controller.BootstrapReport) {

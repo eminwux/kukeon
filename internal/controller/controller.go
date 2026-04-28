@@ -80,6 +80,10 @@ type Options struct {
 	// KukeondSocket is the unix socket path kukeond serves on. Used by bootstrap
 	// to build the bind-mount for the system cell.
 	KukeondSocket string
+	// KukeondSocketGID, when non-zero, is passed to the kukeond cell as
+	// --socket-gid <gid> so the daemon can chown its listener socket on every
+	// restart. Set by `kuke init` to the kukeon group's numeric GID.
+	KukeondSocketGID int
 	// ForceRegenerateCNI forces bootstrap to rewrite space conflists even when
 	// they already exist with the expected bridge name. Surfaces via
 	// `kuke init --force-regenerate-cni`.
@@ -192,6 +196,7 @@ func (b *Exec) Bootstrap() (BootstrapReport, error) {
 			b.opts.KukeondSocket,
 			b.opts.RunPath,
 			b.opts.ContainerdSocket,
+			b.opts.KukeondSocketGID,
 		)
 		if err = b.bootstrapCell(&report.SystemCell, cellDoc); err != nil {
 			return report, err

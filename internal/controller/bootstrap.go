@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/consts"
@@ -429,13 +430,16 @@ func (b *Exec) bootstrapStack(section *StackSection, realmName, spaceName, stack
 // don't allocate the same IP twice; /opt/cni/cache holds the CNI invocation
 // cache that gives DEL stable arguments — a mismatch leaks veths and IPs
 // across daemon restarts.
-func kukeondCellDoc(image, socketPath, runPath, containerdSocket string) *v1beta1.CellDoc {
+func kukeondCellDoc(image, socketPath, runPath, containerdSocket string, socketGID int) *v1beta1.CellDoc {
 	args := []string{"serve", "--socket", socketPath}
 	if runPath != "" {
 		args = append(args, "--run-path", runPath)
 	}
 	if containerdSocket != "" {
 		args = append(args, "--containerd-socket", containerdSocket)
+	}
+	if socketGID > 0 {
+		args = append(args, "--socket-gid", strconv.Itoa(socketGID))
 	}
 
 	sockDir := socketDir(socketPath)
