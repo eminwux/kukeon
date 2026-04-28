@@ -75,6 +75,18 @@ func (r *runCapture) fn(_ context.Context, opts sbshattach.Options) error {
 	return nil
 }
 
+// runReturning is the mirror of runCapture for tests that want pkg/attach.Run
+// to return a specific error (rather than the clean-detach default).
+type runReturning struct {
+	calls int
+	err   error
+}
+
+func (r *runReturning) fn(_ context.Context, _ sbshattach.Options) error {
+	r.calls++
+	return r.err
+}
+
 func newCmdWithCtx(t *testing.T, fc *fakeClient, run *runCapture) *cobra.Command {
 	t.Helper()
 
@@ -263,6 +275,66 @@ func TestAttach_ExplicitContainer_Attachable_Succeeds(t *testing.T) {
 	}
 	if run.opts.SocketPath != testHostSocket {
 		t.Errorf("Options.SocketPath = %q, want %q", run.opts.SocketPath, testHostSocket)
+	}
+}
+
+// TestAttach_RunReturnsCleanDetachError covers the regression from #147:
+// when the user presses Ctrl+] Ctrl+], sbsh's controller fires the
+// Detach RPC and the embedded read/write copy goroutines exit, but that
+// teardown surfaces as "close requested: read/write routines exited"
+// from pkg/attach.Run. The wrapper must recognise that signature as a
+// benign session end and return nil so `kuke attach` exits 0.
+func TestAttach_RunReturnsCleanDetachError(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
+			return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
+		},
+	}
+	cleanDetachErr := errors.New("close requested: read/write routines exited")
+	run := &runReturning{err: cleanDetachErr}
+	cmd := newCmdWithCtx(t, fc, nil)
+	cmd.SetContext(context.WithValue(cmd.Context(), attachcmd.MockRunKey{}, attachcmd.RunFn(run.fn)))
+	cmd.SetArgs([]string{
+		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
+		"--container", "work",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute returned %v on clean-detach error, want nil", err)
+	}
+	if run.calls != 1 {
+		t.Fatalf("attach.Run called %d times, want 1", run.calls)
+	}
+}
+
+// TestAttach_RunReturnsRealError ensures that any pkg/attach.Run error
+// not matching the clean-detach signature still bubbles up — the wrapper
+// must not swallow real failures like socket-not-found or RPC errors.
+func TestAttach_RunReturnsRealError(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
+			return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
+		},
+	}
+	bootErr := errors.New("wait on ready: dial unix: connection refused")
+	run := &runReturning{err: bootErr}
+	cmd := newCmdWithCtx(t, fc, nil)
+	cmd.SetContext(context.WithValue(cmd.Context(), attachcmd.MockRunKey{}, attachcmd.RunFn(run.fn)))
+	cmd.SetArgs([]string{
+		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
+		"--container", "work",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("Execute returned nil on real error, want %v", bootErr)
+	}
+	if !errors.Is(err, bootErr) {
+		t.Fatalf("error %v does not unwrap to bootErr", err)
 	}
 }
 
