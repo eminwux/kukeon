@@ -158,13 +158,36 @@ func (b *Exec) purgeRealmCascade(realm intmodel.Realm, force, cascade, metadataE
 		}
 	}
 
-	// Perform standard delete first (only if metadata exists, as deleteRealmCascade requires metadata)
+	// Perform standard delete first (only if metadata exists, as deleteRealmCascade requires metadata).
+	// If it fails (e.g. DeleteNamespace can't remove a namespace whose snapshots
+	// are still pinned by a live task), still fall through to runner.PurgeRealm
+	// so the comprehensive cleanup runs in a single pass — runner.PurgeRealm
+	// is idempotent and goes further (orphaned containers, CNI tear-down, etc.),
+	// so a single failed deleteRealmCascade should not strand the user with a
+	// half-cleaned realm that requires re-running the command. If runner.PurgeRealm
+	// later succeeds, the realm is fully gone and the original delete error is
+	// no longer load-bearing — log it and treat the operation as a success.
+	var deleteErr error
 	if metadataExists {
 		if err := b.deleteRealmCascade(realm, force, cascade); err != nil {
-			return fmt.Errorf("failed to delete realm: %w", err)
+			deleteErr = fmt.Errorf("failed to delete realm: %w", err)
+			b.logger.WarnContext(
+				b.ctx,
+				"deleteRealmCascade failed; falling through to runner.PurgeRealm",
+				"realm",
+				realmName,
+				"error",
+				err,
+			)
 		}
 	}
 
 	// Perform comprehensive purge via runner (works even without metadata)
-	return b.runner.PurgeRealm(realm)
+	if purgeErr := b.runner.PurgeRealm(realm); purgeErr != nil {
+		if deleteErr != nil {
+			return fmt.Errorf("%w; runner purge also failed: %w", deleteErr, purgeErr)
+		}
+		return purgeErr
+	}
+	return nil
 }

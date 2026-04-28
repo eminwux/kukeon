@@ -235,35 +235,101 @@ func (c *client) CleanupNamespaceResources(namespace, snapshotter string) error 
 	c.logger.DebugContext(c.ctx, "cleaning up snapshots", "namespace", namespace, "snapshotter", snapshotter)
 	snapshotService := c.cClient.SnapshotService(snapshotter)
 
-	// Walk all snapshots and remove them
-	var snapshotKeys []string
-	err = snapshotService.Walk(nsCtx, func(_ context.Context, info snapshots.Info) error {
-		snapshotKeys = append(snapshotKeys, info.Name)
-		return nil
-	})
-	if err != nil {
-		c.logger.WarnContext(
+	// Iteratively remove snapshots until none remain or no progress is made.
+	// Walk order is implementation-defined (boltdb key order), so a single
+	// reverse-order pass cannot guarantee children are removed before parents
+	// when a parent has multiple children. A snapshot with extant children
+	// fails Remove with "must be empty"; on the next pass its children are
+	// gone and it succeeds. Cap iterations to bound work on a pathological
+	// graph; in practice the depth is small (image layers + a few committed
+	// container layers).
+	const maxSnapshotPasses = 32
+	for pass := range maxSnapshotPasses {
+		var snapshotKeys []string
+		err = snapshotService.Walk(nsCtx, func(_ context.Context, info snapshots.Info) error {
+			snapshotKeys = append(snapshotKeys, info.Name)
+			return nil
+		})
+		if err != nil {
+			c.logger.WarnContext(
+				c.ctx,
+				"failed to walk snapshots",
+				"namespace",
+				namespace,
+				"snapshotter",
+				snapshotter,
+				"error",
+				err,
+			)
+			break
+		}
+		if len(snapshotKeys) == 0 {
+			break
+		}
+		c.logger.DebugContext(
 			c.ctx,
-			"failed to walk snapshots",
+			"found snapshots",
 			"namespace",
 			namespace,
 			"snapshotter",
 			snapshotter,
-			"error",
-			err,
+			"count",
+			len(snapshotKeys),
+			"pass",
+			pass,
 		)
-	} else {
-		c.logger.DebugContext(c.ctx, "found snapshots", "namespace", namespace, "snapshotter", snapshotter, "count", len(snapshotKeys))
-		// Delete snapshots in reverse order (children before parents)
+		removedAny := false
 		for i := len(snapshotKeys) - 1; i >= 0; i-- {
 			key := snapshotKeys[i]
-			c.logger.DebugContext(c.ctx, "removing snapshot", "namespace", namespace, "snapshotter", snapshotter, "key", key)
+			c.logger.DebugContext(
+				c.ctx,
+				"removing snapshot",
+				"namespace",
+				namespace,
+				"snapshotter",
+				snapshotter,
+				"key",
+				key,
+			)
 			if removeErr := snapshotService.Remove(nsCtx, key); removeErr != nil {
-				c.logger.WarnContext(c.ctx, "failed to remove snapshot", "namespace", namespace, "snapshotter", snapshotter, "key", key, "error", removeErr)
-				// Continue with other snapshots
-			} else {
-				c.logger.DebugContext(c.ctx, "removed snapshot", "namespace", namespace, "snapshotter", snapshotter, "key", key)
+				c.logger.DebugContext(
+					c.ctx,
+					"snapshot remove deferred",
+					"namespace",
+					namespace,
+					"snapshotter",
+					snapshotter,
+					"key",
+					key,
+					"error",
+					removeErr,
+				)
+				continue
 			}
+			removedAny = true
+			c.logger.DebugContext(
+				c.ctx,
+				"removed snapshot",
+				"namespace",
+				namespace,
+				"snapshotter",
+				snapshotter,
+				"key",
+				key,
+			)
+		}
+		if !removedAny {
+			c.logger.WarnContext(
+				c.ctx,
+				"snapshot cleanup made no progress, giving up",
+				"namespace",
+				namespace,
+				"snapshotter",
+				snapshotter,
+				"remaining",
+				len(snapshotKeys),
+			)
+			break
 		}
 	}
 
