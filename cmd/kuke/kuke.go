@@ -38,6 +38,7 @@ import (
 	runcmd "github.com/eminwux/kukeon/cmd/kuke/run"
 	startcmd "github.com/eminwux/kukeon/cmd/kuke/start"
 	stopcmd "github.com/eminwux/kukeon/cmd/kuke/stop"
+	uninstallcmd "github.com/eminwux/kukeon/cmd/kuke/uninstall"
 	"github.com/eminwux/kukeon/cmd/kuke/version"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -131,6 +132,7 @@ func SetupKukeCmd(rootCmd *cobra.Command) error {
 	rootCmd.AddCommand(runcmd.NewRunCmd())
 	rootCmd.AddCommand(attachcmd.NewAttachCmd())
 	rootCmd.AddCommand(autocompletecmd.NewAutocompleteCmd())
+	rootCmd.AddCommand(uninstallcmd.NewUninstallCmd())
 	rootCmd.AddCommand(version.NewVersionCmd())
 
 	// Persistent flags

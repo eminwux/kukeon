@@ -59,6 +59,7 @@ type Controller interface {
 	PurgeCell(cell intmodel.Cell, force, cascade bool) (PurgeCellResult, error)
 	PurgeContainer(container intmodel.Container) (PurgeContainerResult, error)
 	RefreshAll() (RefreshResult, error)
+	Uninstall(opts UninstallOptions) (UninstallReport, error)
 	Close() error
 }
 
