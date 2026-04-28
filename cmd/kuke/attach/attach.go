@@ -135,12 +135,36 @@ func runAttach(cmd *cobra.Command, _ []string) error {
 	}
 
 	run := resolveRun(cmd)
-	return run(cmd.Context(), attach.Options{
+	if runErr := run(cmd.Context(), attach.Options{
 		SocketPath: result.HostSocketPath,
 		Stdin:      os.Stdin,
 		Stdout:     os.Stdout,
 		Stderr:     os.Stderr,
-	})
+	}); runErr != nil && !isCleanDetach(runErr) {
+		return runErr
+	}
+	return nil
+}
+
+// isCleanDetach reports whether err returned by the in-process attach
+// loop describes a normal session end rather than an unrecoverable
+// failure. The Ctrl+] Ctrl+] detach filter inside sbsh's pkg/attach
+// triggers a controller-level Detach RPC; the embedded read/write
+// goroutines then exit cleanly, but their teardown is reported as the
+// error "close requested: read/write routines exited" — sbsh does not
+// expose a sentinel for either layer in its public pkg/errors. The
+// remote terminal closing the connection (workload exited, peer hung
+// up) ends up on the same path, which from `kuke attach`'s perspective
+// is also a benign session end. Surface a clean exit code 0 in those
+// cases; any other failure (socket missing, RPC error, context done)
+// arrives without this signature and still bubbles up.
+func isCleanDetach(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "close requested") &&
+		strings.Contains(msg, "read/write routines exited")
 }
 
 // pickAttachableContainer enumerates the cell's containers and returns the
