@@ -59,6 +59,35 @@ type ContainerSpec struct {
 	CNIConfigPath          string
 	RestartPolicy          string
 	Attachable             bool
+	Tty                    *ContainerTty
+}
+
+// ContainerTty mirrors the v1beta1 ContainerTty payload. See the v1beta1
+// type for field semantics.
+type ContainerTty struct {
+	Prompt string
+	OnInit []TtyStage
+}
+
+// TtyStage mirrors the v1beta1 TtyStage payload.
+type TtyStage struct {
+	Script string
+}
+
+// IsEmpty reports whether the tty block carries no user-supplied config.
+func (t *ContainerTty) IsEmpty() bool {
+	if t == nil {
+		return true
+	}
+	if t.Prompt != "" {
+		return false
+	}
+	for _, s := range t.OnInit {
+		if s.Script != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // ContainerSecret references a credential resolved by the daemon at apply

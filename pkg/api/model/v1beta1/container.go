@@ -86,7 +86,49 @@ type ContainerSpec struct {
 	// peer of that directory lives in the per-container metadata dir and its
 	// `socket` entry is what `kuke attach` connects to. Default false — no
 	// behavior change for existing specs.
-	Attachable bool `json:"attachable,omitempty" yaml:"attachable,omitempty"`
+	Attachable bool `json:"attachable,omitempty"             yaml:"attachable,omitempty"`
+	// Tty configures shell-UX (prompt, init scripts) for the sbsh wrapper
+	// when Attachable=true. The container model already owns command, args,
+	// workingDir, and env, so Tty intentionally only adds layers the
+	// container model can't express. Setting any tty field with
+	// Attachable=false is a validation error.
+	Tty *ContainerTty `json:"tty,omitempty"                    yaml:"tty,omitempty"`
+}
+
+// ContainerTty carries per-attach shell-UX config that the daemon threads
+// into sbsh terminal on first attach. Has no effect unless Attachable=true.
+type ContainerTty struct {
+	// Prompt is the literal prompt expression sbsh sets in the wrapped
+	// shell, in the same form sbsh's TerminalProfile spec.shell.prompt
+	// accepts (e.g. a quoted PS1-style string).
+	Prompt string `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	// OnInit are scripts run once when the wrapped shell starts, in order.
+	OnInit []TtyStage `json:"onInit,omitempty" yaml:"onInit,omitempty"`
+}
+
+// TtyStage is a single onInit script entry. Wrapped in a struct rather than
+// a bare string so future stage knobs (timeout, runOn, etc.) can land
+// without breaking the YAML shape.
+type TtyStage struct {
+	Script string `json:"script,omitempty" yaml:"script,omitempty"`
+}
+
+// IsEmpty reports whether the tty block carries no user-supplied config —
+// i.e. equivalent to omitting the block entirely. Used by validation to
+// distinguish "explicitly empty" from "any field set".
+func (t *ContainerTty) IsEmpty() bool {
+	if t == nil {
+		return true
+	}
+	if t.Prompt != "" {
+		return false
+	}
+	for _, s := range t.OnInit {
+		if s.Script != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // ContainerSecret references a credential that the daemon resolves at apply

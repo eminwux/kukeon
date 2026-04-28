@@ -260,7 +260,7 @@ func BuildContainerSpec(
 		specOpts = append(
 			specOpts,
 			withAttachableMounts(opts.attachable),
-			withAttachableArgsWrap(),
+			withAttachableArgsWrap(opts.attachable.UseProfile),
 		)
 	}
 

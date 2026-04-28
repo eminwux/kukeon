@@ -35,7 +35,17 @@ type CellSpec struct {
 	SpaceID         string          `json:"spaceId"                   yaml:"spaceId"`
 	StackID         string          `json:"stackId"                   yaml:"stackId"`
 	RootContainerID string          `json:"rootContainerId,omitempty" yaml:"rootContainerId,omitempty"`
+	Tty             *CellTty        `json:"tty,omitempty"             yaml:"tty,omitempty"`
 	Containers      []ContainerSpec `json:"containers"                yaml:"containers"`
+}
+
+// CellTty is cell-level tty/attach config. Kept intentionally minimal: only
+// fields the container or container-level tty cannot express belong here.
+type CellTty struct {
+	// Default names the attachable container `kuke run -a` (phase 2a)
+	// selects when no --container flag is given. Must reference an
+	// existing container in this cell whose Attachable=true (or be empty).
+	Default string `json:"default,omitempty" yaml:"default,omitempty"`
 }
 
 type CellStatus struct {

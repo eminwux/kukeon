@@ -33,7 +33,14 @@ type CellSpec struct {
 	SpaceName       string
 	StackName       string
 	RootContainerID string
+	Tty             *CellTty
 	Containers      []ContainerSpec
+}
+
+// CellTty mirrors the v1beta1 CellTty payload. See the v1beta1 type for
+// field semantics.
+type CellTty struct {
+	Default string
 }
 
 type CellStatus struct {
