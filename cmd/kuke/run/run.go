@@ -50,17 +50,14 @@ type MockControllerKey struct{}
 // operator into the cell's attachable terminal once the cell is up.
 func NewRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "run (-f <file> | -p <profile> [<cell-name>])",
+		Use:   "run (-f <file> | -p <profile>)",
 		Short: "Create and start a single cell from a YAML file or a profile",
 		Long: "Create and start a single cell from a YAML file or stdin (-f), " +
 			"or from a per-user profile under $HOME/.kuke/profiles.d/<name>.yaml (-p). " +
 			"Conceptually `kuke apply -f` (single-cell) plus `kuke start cell`, but refuses " +
-			"to update a divergent on-disk spec. With -p, the optional positional argument " +
-			"overrides the materialized cell name.",
-		// MaximumNArgs(1) leaves room for the optional cell-name override
-		// `kuke run -p <profile> <cell-name>`. The handler rejects the arg
-		// when -p is not in use, so the -f form behaves as before.
-		Args:          cobra.MaximumNArgs(1),
+			"to update a divergent on-disk spec. To re-attach to an existing cell use " +
+			"`kuke attach <cell>`.",
+		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE:          runRun,
@@ -105,26 +102,19 @@ func NewRunCmd() *cobra.Command {
 // argument validation. Splitting it out keeps runRun under the funlen limit
 // while preserving the original control flow.
 type runFlags struct {
-	file             string
-	profileName      string
-	cellNameOverride string
-	output           string
-	doAttach         bool
-	containerFlag    string
+	file          string
+	profileName   string
+	output        string
+	doAttach      bool
+	containerFlag string
 }
 
-func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
+func parseRunFlags(cmd *cobra.Command, _ []string) (runFlags, error) {
 	flags := runFlags{
 		file:          strings.TrimSpace(viper.GetString(config.KUKE_RUN_FILE.ViperKey)),
 		profileName:   strings.TrimSpace(viper.GetString(config.KUKE_RUN_PROFILE.ViperKey)),
 		doAttach:      viper.GetBool(config.KUKE_RUN_ATTACH.ViperKey),
 		containerFlag: strings.TrimSpace(viper.GetString(config.KUKE_RUN_CONTAINER.ViperKey)),
-	}
-	if len(args) == 1 {
-		flags.cellNameOverride = strings.TrimSpace(args[0])
-	}
-	if flags.cellNameOverride != "" && flags.profileName == "" {
-		return runFlags{}, errors.New("positional <cell-name> argument is only valid together with -p/--profile")
 	}
 
 	output, err := cmd.Flags().GetString("output")
@@ -154,7 +144,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	cellDoc, err := loadCellDoc(flags.file, flags.profileName, flags.cellNameOverride)
+	cellDoc, err := loadCellDoc(flags.file, flags.profileName)
 	if err != nil {
 		return err
 	}
@@ -234,10 +224,10 @@ func attachAfterRun(
 
 // loadCellDoc dispatches to the file or profile loader. Exactly one of file or
 // profileName is non-empty (the cobra mutex enforces it before the handler
-// runs). cellNameOverride is honored only on the profile path.
-func loadCellDoc(file, profileName, cellNameOverride string) (v1beta1.CellDoc, error) {
+// runs).
+func loadCellDoc(file, profileName string) (v1beta1.CellDoc, error) {
 	if profileName != "" {
-		return loadFromProfile(profileName, cellNameOverride)
+		return loadFromProfile(profileName)
 	}
 	return loadFromFile(file)
 }
@@ -260,9 +250,9 @@ func loadFromFile(file string) (v1beta1.CellDoc, error) {
 
 // loadFromProfile resolves the active profiles directory, loads the named
 // profile, and materializes its CellSpec body into a CellDoc. The cell name
-// defaults to the profile metadata.name; cellNameOverride wins when set
-// (positional arg on `kuke run -p <profile> <cell-name>`).
-func loadFromProfile(profileName, cellNameOverride string) (v1beta1.CellDoc, error) {
+// is the profile metadata.name when spec.namePrefix is unset, otherwise
+// `<namePrefix>-<6hex>` so each invocation produces a fresh cell.
+func loadFromProfile(profileName string) (v1beta1.CellDoc, error) {
 	dir, err := cellprofile.ResolveDir()
 	if err != nil {
 		return v1beta1.CellDoc{}, err
@@ -271,7 +261,7 @@ func loadFromProfile(profileName, cellNameOverride string) (v1beta1.CellDoc, err
 	if err != nil {
 		return v1beta1.CellDoc{}, err
 	}
-	return cellprofile.Materialize(profile, cellNameOverride), nil
+	return cellprofile.Materialize(profile)
 }
 
 // parseSingleCellDoc parses raw YAML and returns the single-doc Cell. It errors

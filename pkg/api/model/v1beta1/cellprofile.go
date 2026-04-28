@@ -35,9 +35,16 @@ type CellProfileMetadata struct {
 // CellProfileSpec carries the location triple (realm/space/stack) plus a
 // CellSpec body. The location uses the user-facing names rather than internal
 // IDs so a profile is portable between hosts.
+//
+// NamePrefix toggles the profile between singleton and template modes:
+// when empty, `kuke run -p` materializes a cell named after metadata.name and
+// the same invocation is idempotent. When set, every invocation generates a
+// fresh `<NamePrefix>-<6hex>` cell so the profile behaves like a template
+// (mirrors K8s `metadata.generateName` and sbsh's "every start is fresh").
 type CellProfileSpec struct {
-	Realm string   `json:"realm,omitempty" yaml:"realm,omitempty"`
-	Space string   `json:"space,omitempty" yaml:"space,omitempty"`
-	Stack string   `json:"stack,omitempty" yaml:"stack,omitempty"`
-	Cell  CellSpec `json:"cell"            yaml:"cell"`
+	Realm      string   `json:"realm,omitempty"      yaml:"realm,omitempty"`
+	Space      string   `json:"space,omitempty"      yaml:"space,omitempty"`
+	Stack      string   `json:"stack,omitempty"      yaml:"stack,omitempty"`
+	NamePrefix string   `json:"namePrefix,omitempty" yaml:"namePrefix,omitempty"`
+	Cell       CellSpec `json:"cell"                 yaml:"cell"`
 }

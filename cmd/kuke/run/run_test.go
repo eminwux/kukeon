@@ -1084,25 +1084,62 @@ func TestRun_FromProfile_CreatesAndStarts(t *testing.T) {
 	if got := fc.createDoc.Spec.StackID; got != "claude" {
 		t.Errorf("StackID=%q want claude", got)
 	}
+	if got := fc.createDoc.Metadata.Labels["kukeon.io/profile"]; got != "claude-cell" {
+		t.Errorf("labels[kukeon.io/profile]=%q want claude-cell", got)
+	}
 }
 
-func TestRun_FromProfile_PositionalCellNameOverride(t *testing.T) {
+func TestRun_FromProfile_NamePrefix_GeneratesFreshCell(t *testing.T) {
+	// spec.namePrefix flips the profile from singleton to template: every
+	// invocation must produce a distinct cell name shaped like
+	// `<prefix>-<6hex>`. Drive two invocations and assert both names share
+	// the prefix and differ.
 	t.Cleanup(viper.Reset)
-	writeTempProfile(t)
-
-	fc := &fakeClient{
-		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-			return successCreateResult(doc), nil
-		},
+	dir := t.TempDir()
+	const profileYAML = `apiVersion: v1beta1
+kind: CellProfile
+metadata:
+  name: claude
+spec:
+  realm: default
+  space: agents
+  stack: claude
+  namePrefix: claude
+  cell:
+    containers:
+      - id: work
+        attachable: true
+        image: registry.eminwux.com/busybox:latest
+        command: /bin/sh
+`
+	if err := os.WriteFile(filepath.Join(dir, "claude.yaml"), []byte(profileYAML), 0o600); err != nil {
+		t.Fatalf("write profile: %v", err)
 	}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-p", "claude-cell", "my-cell"})
+	t.Setenv("KUKE_PROFILES_DIR", dir)
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if got := fc.createDoc.Metadata.Name; got != "my-cell" {
-		t.Errorf("cell name=%q want my-cell (positional override)", got)
+	names := make(map[string]struct{}, 2)
+	for i := range 2 {
+		fc := &fakeClient{
+			createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+				return successCreateResult(doc), nil
+			},
+		}
+		cmd, _ := newCmd(t, fc)
+		cmd.SetArgs([]string{"-p", "claude"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute #%d: %v", i, err)
+		}
+		name := fc.createDoc.Metadata.Name
+		if !strings.HasPrefix(name, "claude-") || len(name) != len("claude-")+6 {
+			t.Fatalf("cell name=%q want claude-<6hex>", name)
+		}
+		if _, dup := names[name]; dup {
+			t.Errorf("name=%q repeated across invocations", name)
+		}
+		names[name] = struct{}{}
+		if got := fc.createDoc.Metadata.Labels["kukeon.io/profile"]; got != "claude" {
+			t.Errorf("labels[kukeon.io/profile]=%q want claude", got)
+		}
 	}
 }
 
@@ -1169,7 +1206,9 @@ func TestRun_FromProfile_FileAndProfile_MutuallyExclusive(t *testing.T) {
 	}
 }
 
-func TestRun_PositionalArg_WithoutProfile_Errors(t *testing.T) {
+func TestRun_RejectsPositionalArgs(t *testing.T) {
+	// `kuke run` is for creating cells; re-attaching to a known cell is
+	// `kuke attach <cell>`'s job. Cobra's NoArgs guard enforces the split.
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{}
@@ -1177,8 +1216,11 @@ func TestRun_PositionalArg_WithoutProfile_Errors(t *testing.T) {
 	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "my-cell"})
 
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "positional <cell-name>") {
-		t.Fatalf("err=%v want positional-arg guard", err)
+	if err == nil {
+		t.Fatal("Execute returned nil, want positional-arg rejection")
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d want 0 on rejected args", fc.createCalls)
 	}
 }
 
