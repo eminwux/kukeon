@@ -1,0 +1,232 @@
+// Copyright 2025 Emiliano Spinella (eminwux)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// SPDX-License-Identifier: Apache-2.0
+
+package cellprofile_test
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/eminwux/kukeon/internal/cellprofile"
+	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+)
+
+const claudeProfile = `apiVersion: v1beta1
+kind: CellProfile
+metadata:
+  name: claude-cell
+spec:
+  realm: default
+  space: agents
+  stack: claude
+  cell:
+    tty:
+      default: work
+    containers:
+      - id: root
+        root: true
+        image: registry.eminwux.com/busybox:latest
+        command: sleep
+        args:
+          - "3600"
+      - id: work
+        attachable: true
+        image: registry.eminwux.com/claude-runner:latest
+        command: /bin/bash
+        workingDir: /workspace
+`
+
+func writeProfile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write profile %q: %v", path, err)
+	}
+}
+
+func TestLoad_ByFilename(t *testing.T) {
+	dir := t.TempDir()
+	writeProfile(t, dir, "claude-cell.yaml", claudeProfile)
+
+	got, err := cellprofile.Load(dir, "claude-cell")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Metadata.Name != "claude-cell" {
+		t.Errorf("metadata.name=%q want claude-cell", got.Metadata.Name)
+	}
+	if got.Spec.Realm != "default" {
+		t.Errorf("spec.realm=%q want default", got.Spec.Realm)
+	}
+	if got.Spec.Cell.Tty == nil || got.Spec.Cell.Tty.Default != "work" {
+		t.Errorf("cell.tty.default not preserved: %+v", got.Spec.Cell.Tty)
+	}
+	if len(got.Spec.Cell.Containers) != 2 {
+		t.Errorf("containers=%d want 2", len(got.Spec.Cell.Containers))
+	}
+}
+
+func TestLoad_ByMetadataName_FilenameMismatch(t *testing.T) {
+	// File named differently than metadata.name. Profile is still findable
+	// because the fallback scan keys on metadata.name.
+	dir := t.TempDir()
+	writeProfile(t, dir, "renamed.yaml", claudeProfile)
+
+	got, err := cellprofile.Load(dir, "claude-cell")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Metadata.Name != "claude-cell" {
+		t.Errorf("metadata.name=%q want claude-cell", got.Metadata.Name)
+	}
+}
+
+func TestLoad_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	_, err := cellprofile.Load(dir, "missing")
+	if !errors.Is(err, errdefs.ErrProfileNotFound) {
+		t.Fatalf("err=%v want ErrProfileNotFound", err)
+	}
+	if !strings.Contains(err.Error(), "missing") || !strings.Contains(err.Error(), dir) {
+		t.Errorf("err %q must name profile and dir", err)
+	}
+}
+
+func TestLoad_DirMissing_NotFound(t *testing.T) {
+	// ENOENT on the dir resolves to a profile-not-found error, not a hard
+	// filesystem failure: a fresh user with no profiles.d/ should hit the
+	// same error path as someone who has the dir but no matching file.
+	dir := filepath.Join(t.TempDir(), "absent")
+	_, err := cellprofile.Load(dir, "claude-cell")
+	if !errors.Is(err, errdefs.ErrProfileNotFound) {
+		t.Fatalf("err=%v want ErrProfileNotFound", err)
+	}
+}
+
+func TestLoad_WrongKind_Rejected(t *testing.T) {
+	dir := t.TempDir()
+	writeProfile(t, dir, "bad.yaml", `apiVersion: v1beta1
+kind: Cell
+metadata:
+  name: bad
+`)
+	_, err := cellprofile.Load(dir, "bad")
+	if err == nil {
+		t.Fatal("Load returned nil, want ErrProfileInvalid (or NotFound after fallthrough)")
+	}
+}
+
+func TestList_SkipsBrokenAndNonYAML(t *testing.T) {
+	dir := t.TempDir()
+	writeProfile(t, dir, "claude-cell.yaml", claudeProfile)
+	writeProfile(t, dir, "junk.yaml", "not: [valid")
+	writeProfile(t, dir, "readme.txt", "ignored")
+	if err := os.MkdirAll(filepath.Join(dir, "subdir"), 0o755); err != nil {
+		t.Fatalf("mkdir subdir: %v", err)
+	}
+
+	profiles, err := cellprofile.List(dir)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(profiles) != 1 || profiles[0].Metadata.Name != "claude-cell" {
+		t.Errorf("got %+v, want exactly [claude-cell]", profiles)
+	}
+}
+
+func TestResolveDir_EnvOverride(t *testing.T) {
+	t.Setenv(cellprofile.EnvProfilesDir, "/tmp/custom-profiles")
+	dir, err := cellprofile.ResolveDir()
+	if err != nil {
+		t.Fatalf("ResolveDir: %v", err)
+	}
+	if dir != "/tmp/custom-profiles" {
+		t.Errorf("dir=%q want /tmp/custom-profiles", dir)
+	}
+}
+
+func TestResolveDir_DefaultsUnderHome(t *testing.T) {
+	t.Setenv(cellprofile.EnvProfilesDir, "")
+	t.Setenv("HOME", "/tmp/fake-home")
+	dir, err := cellprofile.ResolveDir()
+	if err != nil {
+		t.Fatalf("ResolveDir: %v", err)
+	}
+	want := filepath.Join("/tmp/fake-home", cellprofile.DefaultDirSuffix)
+	if dir != want {
+		t.Errorf("dir=%q want %q", dir, want)
+	}
+}
+
+func TestMaterialize_DefaultName(t *testing.T) {
+	profile := &v1beta1.CellProfileDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindCellProfile,
+		Metadata:   v1beta1.CellProfileMetadata{Name: "claude-cell"},
+		Spec: v1beta1.CellProfileSpec{
+			Realm: "default",
+			Space: "agents",
+			Stack: "claude",
+			Cell: v1beta1.CellSpec{
+				Containers: []v1beta1.ContainerSpec{
+					{ID: "work", Image: "registry.eminwux.com/busybox:latest"},
+				},
+			},
+		},
+	}
+
+	doc := cellprofile.Materialize(profile, "")
+
+	if doc.Metadata.Name != "claude-cell" {
+		t.Errorf("metadata.name=%q want claude-cell (default to profile name)", doc.Metadata.Name)
+	}
+	if doc.Kind != v1beta1.KindCell || doc.APIVersion != v1beta1.APIVersionV1Beta1 {
+		t.Errorf("apiVersion/kind=%q/%q want v1beta1/Cell", doc.APIVersion, doc.Kind)
+	}
+	if doc.Spec.RealmID != "default" || doc.Spec.SpaceID != "agents" || doc.Spec.StackID != "claude" {
+		t.Errorf("location=%q/%q/%q want default/agents/claude",
+			doc.Spec.RealmID, doc.Spec.SpaceID, doc.Spec.StackID)
+	}
+	if doc.Spec.ID != "claude-cell" {
+		t.Errorf("spec.id=%q want claude-cell (defaulted from cell name)", doc.Spec.ID)
+	}
+}
+
+func TestMaterialize_NameOverride(t *testing.T) {
+	profile := &v1beta1.CellProfileDoc{
+		Metadata: v1beta1.CellProfileMetadata{Name: "claude-cell"},
+		Spec: v1beta1.CellProfileSpec{
+			Cell: v1beta1.CellSpec{
+				Containers: []v1beta1.ContainerSpec{
+					{ID: "work", Image: "registry.eminwux.com/busybox:latest"},
+				},
+			},
+		},
+	}
+
+	doc := cellprofile.Materialize(profile, "my-cell")
+
+	if doc.Metadata.Name != "my-cell" {
+		t.Errorf("metadata.name=%q want my-cell (positional override)", doc.Metadata.Name)
+	}
+	if doc.Spec.ID != "my-cell" {
+		t.Errorf("spec.id=%q want my-cell (override propagates)", doc.Spec.ID)
+	}
+}

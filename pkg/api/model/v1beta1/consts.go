@@ -33,6 +33,10 @@ const (
 	KindSpace Kind = "Space"
 	// KindStack identifies stack documents.
 	KindStack Kind = "Stack"
+	// KindCellProfile identifies per-user cell-template documents loaded by
+	// `kuke run -p`. Profiles are not server-side resources — `kuke apply`
+	// rejects them.
+	KindCellProfile Kind = "CellProfile"
 )
 
 // Common printable state strings.

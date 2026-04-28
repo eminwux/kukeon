@@ -155,6 +155,18 @@ var (
 	// non-root attachable containers.
 	ErrAttachNoCandidate = errors.New("no attachable container in cell")
 
+	// Profile-related errors.
+
+	// ErrProfileNotFound is returned when `kuke run -p <name>` cannot find
+	// a CellProfile under the active profiles directory. Wrapped errors
+	// must name the profile and the directory searched so the operator
+	// knows which file to drop.
+	ErrProfileNotFound = errors.New("profile not found")
+
+	// ErrProfileInvalid is returned when a CellProfile YAML fails to parse
+	// or violates the schema (missing kind, missing metadata.name, etc.).
+	ErrProfileInvalid = errors.New("profile is invalid")
+
 	// Secret-related errors.
 
 	ErrSecretNameRequired         = errors.New("secret name is required")

@@ -351,6 +351,8 @@ var (
 	KUKE_RUN_ATTACH = DefineKV("KUKE_RUN_ATTACH", "kuke/run/attach")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_CONTAINER = DefineKV("KUKE_RUN_CONTAINER", "kuke/run/container")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_RUN_PROFILE = DefineKV("KUKE_RUN_PROFILE", "kuke/run/profile")
 
 	// Attach command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
