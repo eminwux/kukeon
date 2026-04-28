@@ -14,11 +14,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package run implements the `kuke run -f <file>` verb: parse a single-cell
-// YAML doc, idempotently create-and-start the cell, and report the same
-// outcome other lifecycle verbs print. Phase 2a adds -a/--attach so the
-// same invocation can drop the operator into the cell's attachable
-// terminal; -p (profile) lands in phase 2b.
+// Package run implements the `kuke run` verb. The original `-f <file>` form
+// (phase 1c) parses a single-cell YAML doc and idempotently create-and-starts
+// the cell. Phase 2a added `-a/--attach` so the same invocation can drop the
+// operator into the cell's attachable terminal. Phase 2b adds `-p/--profile`,
+// which materializes a CellDoc from a per-user CellProfile under
+// $HOME/.kuke/profiles.d (or $KUKE_PROFILES_DIR) and then walks the same
+// create+start[+attach] path.
 package run
 
 import (
@@ -31,6 +33,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/apply/parser"
+	"github.com/eminwux/kukeon/internal/cellprofile"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -41,23 +44,37 @@ import (
 // MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
-// NewRunCmd builds the `kuke run` cobra command. Phase 1c implemented
-// `-f/--file`; phase 2a adds `-a/--attach` and `--container`; `-p/--profile`
-// (#D) extends this scaffold.
+// NewRunCmd builds the `kuke run` cobra command. `-f` reads a single-cell
+// YAML doc; `-p` reads a per-user CellProfile and materializes the same
+// CellDoc shape. Exactly one of the two is required. `-a` then drops the
+// operator into the cell's attachable terminal once the cell is up.
 func NewRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:           "run -f <file>",
-		Short:         "Create and start a single cell from a YAML file",
-		Long:          "Create and start a single cell from a YAML file or stdin. Conceptually `kuke apply -f` (single-cell) plus `kuke start cell`, but refuses to update a divergent on-disk spec.",
-		Args:          cobra.NoArgs,
+		Use:   "run (-f <file> | -p <profile> [<cell-name>])",
+		Short: "Create and start a single cell from a YAML file or a profile",
+		Long: "Create and start a single cell from a YAML file or stdin (-f), " +
+			"or from a per-user profile under $HOME/.kuke/profiles.d/<name>.yaml (-p). " +
+			"Conceptually `kuke apply -f` (single-cell) plus `kuke start cell`, but refuses " +
+			"to update a divergent on-disk spec. With -p, the optional positional argument " +
+			"overrides the materialized cell name.",
+		// MaximumNArgs(1) leaves room for the optional cell-name override
+		// `kuke run -p <profile> <cell-name>`. The handler rejects the arg
+		// when -p is not in use, so the -f form behaves as before.
+		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE:          runRun,
 	}
 
-	cmd.Flags().StringP("file", "f", "", "File to read YAML from (use - for stdin)")
+	cmd.Flags().StringP("file", "f", "", "File to read YAML from (use - for stdin); mutually exclusive with -p")
 	_ = viper.BindPFlag(config.KUKE_RUN_FILE.ViperKey, cmd.Flags().Lookup("file"))
-	_ = cmd.MarkFlagRequired("file")
+
+	cmd.Flags().StringP("profile", "p", "",
+		"Cell profile name to load from $HOME/.kuke/profiles.d (or $KUKE_PROFILES_DIR); mutually exclusive with -f")
+	_ = viper.BindPFlag(config.KUKE_RUN_PROFILE.ViperKey, cmd.Flags().Lookup("profile"))
+
+	cmd.MarkFlagsMutuallyExclusive("file", "profile")
+	cmd.MarkFlagsOneRequired("file", "profile")
 
 	cmd.Flags().StringP("output", "o", "", "Output format: json, yaml (default: human-readable)")
 	_ = viper.BindPFlag(config.KUKE_RUN_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
@@ -79,52 +96,65 @@ func NewRunCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
 	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
+	_ = cmd.RegisterFlagCompletionFunc("profile", config.CompleteProfileNames)
 
 	return cmd
 }
 
-func runRun(cmd *cobra.Command, _ []string) error {
-	file, err := cmd.Flags().GetString("file")
-	if err != nil {
-		return err
+// runFlags is the validated bundle of flag values runRun consumes after
+// argument validation. Splitting it out keeps runRun under the funlen limit
+// while preserving the original control flow.
+type runFlags struct {
+	file             string
+	profileName      string
+	cellNameOverride string
+	output           string
+	doAttach         bool
+	containerFlag    string
+}
+
+func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
+	flags := runFlags{
+		file:          strings.TrimSpace(viper.GetString(config.KUKE_RUN_FILE.ViperKey)),
+		profileName:   strings.TrimSpace(viper.GetString(config.KUKE_RUN_PROFILE.ViperKey)),
+		doAttach:      viper.GetBool(config.KUKE_RUN_ATTACH.ViperKey),
+		containerFlag: strings.TrimSpace(viper.GetString(config.KUKE_RUN_CONTAINER.ViperKey)),
 	}
-	if strings.TrimSpace(file) == "" {
-		return errors.New("file flag is required (use -f <file> or -f - for stdin)")
+	if len(args) == 1 {
+		flags.cellNameOverride = strings.TrimSpace(args[0])
+	}
+	if flags.cellNameOverride != "" && flags.profileName == "" {
+		return runFlags{}, errors.New("positional <cell-name> argument is only valid together with -p/--profile")
 	}
 
 	output, err := cmd.Flags().GetString("output")
 	if err != nil {
-		return err
+		return runFlags{}, err
 	}
-	output = strings.TrimSpace(output)
-	if output != "" && output != "json" && output != "yaml" {
-		return fmt.Errorf("invalid --output %q: want json or yaml", output)
+	flags.output = strings.TrimSpace(output)
+	if flags.output != "" && flags.output != "json" && flags.output != "yaml" {
+		return runFlags{}, fmt.Errorf("invalid --output %q: want json or yaml", flags.output)
 	}
 
-	doAttach := viper.GetBool(config.KUKE_RUN_ATTACH.ViperKey)
-	containerFlag := strings.TrimSpace(viper.GetString(config.KUKE_RUN_CONTAINER.ViperKey))
-	if !doAttach && containerFlag != "" {
-		return errors.New("--container is only valid together with -a/--attach")
+	if !flags.doAttach && flags.containerFlag != "" {
+		return runFlags{}, errors.New("--container is only valid together with -a/--attach")
 	}
-	if doAttach && output != "" {
+	if flags.doAttach && flags.output != "" {
 		// -a hands the terminal to sbsh; mixing structured -o output with an
 		// interactive attach loop produces garbled output that nothing can
 		// parse. Reject the combination so callers pick one mode.
-		return errors.New("--output is incompatible with -a/--attach")
+		return runFlags{}, errors.New("--output is incompatible with -a/--attach")
 	}
+	return flags, nil
+}
 
-	reader, cleanup, err := kukshared.ReadFileOrStdin(file)
+func runRun(cmd *cobra.Command, args []string) error {
+	flags, err := parseRunFlags(cmd, args)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = cleanup() }()
 
-	rawYAML, err := io.ReadAll(reader)
-	if err != nil {
-		return fmt.Errorf("failed to read input: %w", err)
-	}
-
-	cellDoc, err := parseSingleCellDoc(rawYAML)
+	cellDoc, err := loadCellDoc(flags.file, flags.profileName, flags.cellNameOverride)
 	if err != nil {
 		return err
 	}
@@ -158,11 +188,11 @@ func runRun(cmd *cobra.Command, _ []string) error {
 		// bridge plugin rejects with `duplicate allocation`. Pre-existing
 		// daemon bug, surfaced here because the AC requires idempotency.
 		if pre.Cell.Status.State == v1beta1.CellStateReady {
-			if printErr := printRunResult(cmd, noOpResultFromGet(pre), output); printErr != nil {
+			if printErr := printRunResult(cmd, noOpResultFromGet(pre), flags.output); printErr != nil {
 				return printErr
 			}
-			if doAttach {
-				return attachAfterRun(cmd, client, cellDoc, containerFlag)
+			if flags.doAttach {
+				return attachAfterRun(cmd, client, cellDoc, flags.containerFlag)
 			}
 			return nil
 		}
@@ -175,11 +205,11 @@ func runRun(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	if printErr := printRunResult(cmd, result, output); printErr != nil {
+	if printErr := printRunResult(cmd, result, flags.output); printErr != nil {
 		return printErr
 	}
-	if doAttach {
-		return attachAfterRun(cmd, client, cellDoc, containerFlag)
+	if flags.doAttach {
+		return attachAfterRun(cmd, client, cellDoc, flags.containerFlag)
 	}
 	return nil
 }
@@ -200,6 +230,48 @@ func attachAfterRun(
 		return err
 	}
 	return runAttachLoop(cmd, client, doc, target)
+}
+
+// loadCellDoc dispatches to the file or profile loader. Exactly one of file or
+// profileName is non-empty (the cobra mutex enforces it before the handler
+// runs). cellNameOverride is honored only on the profile path.
+func loadCellDoc(file, profileName, cellNameOverride string) (v1beta1.CellDoc, error) {
+	if profileName != "" {
+		return loadFromProfile(profileName, cellNameOverride)
+	}
+	return loadFromFile(file)
+}
+
+// loadFromFile preserves the phase-1c -f path: read the file (or stdin),
+// parse the single Cell document, and return it.
+func loadFromFile(file string) (v1beta1.CellDoc, error) {
+	reader, cleanup, err := kukshared.ReadFileOrStdin(file)
+	if err != nil {
+		return v1beta1.CellDoc{}, err
+	}
+	defer func() { _ = cleanup() }()
+
+	rawYAML, err := io.ReadAll(reader)
+	if err != nil {
+		return v1beta1.CellDoc{}, fmt.Errorf("failed to read input: %w", err)
+	}
+	return parseSingleCellDoc(rawYAML)
+}
+
+// loadFromProfile resolves the active profiles directory, loads the named
+// profile, and materializes its CellSpec body into a CellDoc. The cell name
+// defaults to the profile metadata.name; cellNameOverride wins when set
+// (positional arg on `kuke run -p <profile> <cell-name>`).
+func loadFromProfile(profileName, cellNameOverride string) (v1beta1.CellDoc, error) {
+	dir, err := cellprofile.ResolveDir()
+	if err != nil {
+		return v1beta1.CellDoc{}, err
+	}
+	profile, err := cellprofile.Load(dir, profileName)
+	if err != nil {
+		return v1beta1.CellDoc{}, err
+	}
+	return cellprofile.Materialize(profile, cellNameOverride), nil
 }
 
 // parseSingleCellDoc parses raw YAML and returns the single-doc Cell. It errors

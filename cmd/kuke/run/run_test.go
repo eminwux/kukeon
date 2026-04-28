@@ -564,7 +564,7 @@ func TestRun_InvalidOutput_Errors(t *testing.T) {
 	}
 }
 
-func TestRun_MissingFile_Errors(t *testing.T) {
+func TestRun_MissingFileAndProfile_Errors(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{}
@@ -572,8 +572,11 @@ func TestRun_MissingFile_Errors(t *testing.T) {
 	cmd.SetArgs([]string{})
 
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "required flag") {
-		t.Fatalf("err=%v want missing-flag error", err)
+	// MarkFlagsOneRequired produces "at least one of the flags in the group
+	// [file profile] is required" — match on the stable phrase rather than
+	// the exact wording so a cobra phrasing change doesn't break the test.
+	if err == nil || !strings.Contains(err.Error(), "[file profile]") {
+		t.Fatalf("err=%v want one-of error naming both flags", err)
 	}
 }
 
@@ -584,10 +587,13 @@ func TestNewRunCmd_AutocompleteRegistration(t *testing.T) {
 			t.Errorf("expected %q flag to exist", flag)
 		}
 	}
-	// File flag is required and short-aliased.
 	fileFlag := cmd.Flags().Lookup("file")
 	if fileFlag == nil || fileFlag.Shorthand != "f" {
 		t.Errorf("expected -f/--file flag, got %+v", fileFlag)
+	}
+	profileFlag := cmd.Flags().Lookup("profile")
+	if profileFlag == nil || profileFlag.Shorthand != "p" {
+		t.Errorf("expected -p/--profile flag, got %+v", profileFlag)
 	}
 	outputFlag := cmd.Flags().Lookup("output")
 	if outputFlag == nil || outputFlag.Shorthand != "o" {
@@ -1003,6 +1009,210 @@ func TestNewRunCmd_AttachFlagRegistered(t *testing.T) {
 	}
 	if got := cmd.Flags().Lookup("container"); got == nil {
 		t.Errorf("expected --container flag")
+	}
+}
+
+// claudeProfileYAML is the headline -p example from issue #142: a per-user
+// profile that opts a `work` container into attach + tty.default. Drives the
+// `-p -a` round-trip tests below.
+const claudeProfileYAML = `apiVersion: v1beta1
+kind: CellProfile
+metadata:
+  name: claude-cell
+spec:
+  realm: default
+  space: agents
+  stack: claude
+  cell:
+    tty:
+      default: work
+    containers:
+      - id: root
+        root: true
+        image: registry.eminwux.com/busybox:latest
+        command: sleep
+        args:
+          - "3600"
+      - id: work
+        attachable: true
+        image: registry.eminwux.com/busybox:latest
+        command: /bin/sh
+`
+
+// writeTempProfile drops the headline claudeProfileYAML in a t.TempDir as
+// `claude-cell.yaml` and points KUKE_PROFILES_DIR at it. The filename + content
+// are hard-coded because every -p test in this file targets the same headline
+// profile from issue #142; tests that exercise the metadata.name fallback or
+// alternative shapes live in the cellprofile package itself.
+func writeTempProfile(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "claude-cell.yaml")
+	if err := os.WriteFile(path, []byte(claudeProfileYAML), 0o600); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	t.Setenv("KUKE_PROFILES_DIR", dir)
+}
+
+func TestRun_FromProfile_CreatesAndStarts(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	writeTempProfile(t)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-p", "claude-cell"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.createCalls != 1 {
+		t.Fatalf("CreateCell calls=%d want 1", fc.createCalls)
+	}
+	if got := fc.createDoc.Metadata.Name; got != "claude-cell" {
+		t.Errorf("cell name=%q want claude-cell (default to profile name)", got)
+	}
+	if got := fc.createDoc.Spec.RealmID; got != "default" {
+		t.Errorf("RealmID=%q want default", got)
+	}
+	if got := fc.createDoc.Spec.SpaceID; got != "agents" {
+		t.Errorf("SpaceID=%q want agents", got)
+	}
+	if got := fc.createDoc.Spec.StackID; got != "claude" {
+		t.Errorf("StackID=%q want claude", got)
+	}
+}
+
+func TestRun_FromProfile_PositionalCellNameOverride(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	writeTempProfile(t)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-p", "claude-cell", "my-cell"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := fc.createDoc.Metadata.Name; got != "my-cell" {
+		t.Errorf("cell name=%q want my-cell (positional override)", got)
+	}
+}
+
+func TestRun_FromProfile_LocationFlagsOverride(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	writeTempProfile(t)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	// The materialized profile sets realm/space/stack already; --realm/--space/--stack
+	// flags must NOT override values the profile already provides — the same
+	// "doc wins over flag" rule that -f obeys.
+	cmd.SetArgs([]string{"-p", "claude-cell", "--realm", "x", "--space", "y", "--stack", "z"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := fc.createDoc.Spec.RealmID; got != "default" {
+		t.Errorf("RealmID=%q want default (profile must beat --realm)", got)
+	}
+}
+
+func TestRun_FromProfile_UnknownProfile_Errors(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	writeTempProfile(t)
+
+	fc := &fakeClient{}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-p", "ghost"})
+
+	err := cmd.Execute()
+	if !errors.Is(err, errdefs.ErrProfileNotFound) {
+		t.Fatalf("err=%v want ErrProfileNotFound", err)
+	}
+	if !strings.Contains(err.Error(), "ghost") {
+		t.Errorf("err %q must name the profile", err)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d want 0", fc.createCalls)
+	}
+}
+
+func TestRun_FromProfile_FileAndProfile_MutuallyExclusive(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	writeTempProfile(t)
+
+	fc := &fakeClient{}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-p", "claude-cell"})
+
+	err := cmd.Execute()
+	// MarkFlagsMutuallyExclusive emits "if any flags in the group [file profile]
+	// are set none of the others can be" — match on the [file profile] phrase
+	// rather than wording so cobra rephrasing doesn't break the test.
+	if err == nil || !strings.Contains(err.Error(), "[file profile]") {
+		t.Fatalf("err=%v want mutually-exclusive guard naming both flags", err)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d want 0", fc.createCalls)
+	}
+}
+
+func TestRun_PositionalArg_WithoutProfile_Errors(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "my-cell"})
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "positional <cell-name>") {
+		t.Fatalf("err=%v want positional-arg guard", err)
+	}
+}
+
+func TestRun_FromProfile_Attach_HeadlineFlow(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	writeTempProfile(t)
+
+	// Headline flow from the issue: `kuke run -p claude-cell -a` materializes
+	// the profile, creates+starts the cell, then attaches to cell.tty.default
+	// (the `work` container).
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: attachSuccessFn(),
+	}
+	run := &runCapture{}
+	cmd, _ := newCmdWithRun(t, fc, run)
+	cmd.SetArgs([]string{"-p", "claude-cell", "-a"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.createCalls != 1 {
+		t.Fatalf("CreateCell calls=%d want 1", fc.createCalls)
+	}
+	if fc.attachCalls != 1 {
+		t.Fatalf("AttachContainer calls=%d want 1", fc.attachCalls)
+	}
+	if got := fc.attachDoc.Metadata.Name; got != "work" {
+		t.Errorf("attach target=%q want work (cell.tty.default)", got)
+	}
+	if run.calls != 1 {
+		t.Errorf("attach loop calls=%d want 1", run.calls)
 	}
 }
 

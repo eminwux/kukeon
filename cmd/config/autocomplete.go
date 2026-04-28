@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/cellprofile"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/spf13/cobra"
@@ -459,6 +460,29 @@ func CompleteContainerNames(cmd *cobra.Command, args []string, toComplete string
 		}
 	}
 
+	return names, cobra.ShellCompDirectiveNoFileComp
+}
+
+// CompleteProfileNames provides shell completion for `-p/--profile` by listing
+// every CellProfile under the active profiles directory ($KUKE_PROFILES_DIR or
+// $HOME/.kuke/profiles.d). Errors swallow to an empty list — a fresh shell with
+// no profiles directory should not surface a noisy completion error.
+func CompleteProfileNames(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	dir, err := cellprofile.ResolveDir()
+	if err != nil {
+		return []string{}, cobra.ShellCompDirectiveNoFileComp
+	}
+	profiles, err := cellprofile.List(dir)
+	if err != nil {
+		return []string{}, cobra.ShellCompDirectiveNoFileComp
+	}
+	names := make([]string, 0, len(profiles))
+	for _, p := range profiles {
+		name := p.Metadata.Name
+		if toComplete == "" || strings.HasPrefix(name, toComplete) {
+			names = append(names, name)
+		}
+	}
 	return names, cobra.ShellCompDirectiveNoFileComp
 }
 
