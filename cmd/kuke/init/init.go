@@ -21,13 +21,17 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/sysuser"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -36,6 +40,19 @@ import (
 const (
 	kukeondReadyTimeout = 30 * time.Second
 	kukeondReadyTick    = 200 * time.Millisecond
+
+	// File modes applied by `kuke init` so the kukeon group can reach the
+	// runtime/socket without world access. Writes under /opt/kukeon still
+	// require root and go through the daemon.
+	//
+	// Files get 0o640 instead of 0o750: blanket-chmoding the tree to 0o750
+	// would mark JSON metadata files as executable, which has no purpose.
+	// Dirs need execute (traverse) for the kukeon group, so they stay
+	// 0o750.
+	kukeonRunDirMode      os.FileMode = 0o750
+	kukeonRunPathDirMode  os.FileMode = 0o750
+	kukeonRunPathFileMode os.FileMode = 0o640
+	kukeonSocketMode      os.FileMode = 0o660
 )
 
 func NewInitCmd() *cobra.Command {
@@ -150,8 +167,13 @@ func runInit(cmd *cobra.Command, _ []string) error {
 
 	image := resolveKukeondImage()
 
+	runPath := viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey)
+	if runPath == "" {
+		runPath = config.DefaultRunPath()
+	}
+
 	opts := controller.Options{
-		RunPath:            viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey),
+		RunPath:            runPath,
 		ContainerdSocket:   viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
 		KukeondImage:       image,
 		KukeondSocket:      socketPath,
@@ -160,21 +182,73 @@ func runInit(cmd *cobra.Command, _ []string) error {
 
 	logger.DebugContext(cmd.Context(), "running init", "opts", opts)
 
-	ctrl := controller.NewControllerExec(cmd.Context(), logger, opts)
-	report, err := ctrl.Bootstrap()
-	if err != nil {
-		return err
+	// Ensure the kukeon system user/group exist before bootstrap so the
+	// post-bootstrap chown step has a GID to apply.
+	ensure, ensureErr := sysuser.EnsureUserGroup(
+		cmd.Context(),
+		consts.KukeonSystemUser,
+		consts.KukeonSystemGroup,
+		sysuser.EnsureOptions{},
+	)
+	if ensureErr != nil {
+		return fmt.Errorf("ensure kukeon user/group: %w", ensureErr)
 	}
 
-	printBootstrapReport(cmd, report)
+	ctrl := controller.NewControllerExec(cmd.Context(), logger, opts)
+	report, bootstrapErr := ctrl.Bootstrap()
+	if bootstrapErr != nil {
+		return bootstrapErr
+	}
+
+	// Apply kukeon-managed ownership/modes. /run/kukeon is the socket's
+	// parent dir (already created by ensureSocketDir during bootstrap);
+	// /opt/kukeon is RunPath. Both end up root:kukeon mode 0o750 so the
+	// kukeon group can traverse without world access.
+	runDir := filepath.Dir(socketPath)
+	permsReport := permissionsReport{
+		User:         consts.KukeonSystemUser,
+		Group:        consts.KukeonSystemGroup,
+		UID:          ensure.UID,
+		GID:          ensure.GID,
+		UserCreated:  ensure.UserCreated,
+		GroupCreated: ensure.GroupCreated,
+		RunDirPath:   runDir,
+		RunPath:      runPath,
+		SocketPath:   socketPath,
+	}
+	if chownErr := sysuser.ChownAndChmod(runDir, 0, ensure.GID, kukeonRunDirMode); chownErr != nil {
+		return fmt.Errorf("apply kukeon ownership to %q: %w", runDir, chownErr)
+	}
+	permsReport.RunDirApplied = true
+	if chownErr := sysuser.ChownTreeAndChmod(
+		runPath, 0, ensure.GID, kukeonRunPathDirMode, kukeonRunPathFileMode,
+	); chownErr != nil {
+		return fmt.Errorf("apply kukeon ownership to %q: %w", runPath, chownErr)
+	}
+	permsReport.RunPathApplied = true
+
+	printBootstrapReport(cmd, report, permsReport)
 
 	if viper.GetBool(config.KUKE_INIT_NO_WAIT.ViperKey) {
 		return nil
 	}
 
-	if err = waitForKukeondReady(cmd.Context(), socketPath, kukeondReadyTimeout); err != nil {
-		return fmt.Errorf("kukeond did not become ready: %w", err)
+	if waitErr := waitForKukeondReady(cmd.Context(), socketPath, kukeondReadyTimeout); waitErr != nil {
+		return fmt.Errorf("kukeond did not become ready: %w", waitErr)
 	}
+
+	// The daemon (running inside the kukeond container) created the socket
+	// once it bound the listener. Apply kukeon ownership on it now so a
+	// non-root group member can dial it. Daemon restart resets the
+	// ownership; re-running `sudo kuke init` (idempotent) restores it.
+	if chownErr := sysuser.ChownAndChmod(socketPath, 0, ensure.GID, kukeonSocketMode); chownErr != nil {
+		return fmt.Errorf("apply kukeon ownership to %q: %w", socketPath, chownErr)
+	}
+	cmd.Println(fmt.Sprintf(
+		"  - socket %q: chown root:%s mode %#o",
+		socketPath, consts.KukeonSystemGroup, kukeonSocketMode,
+	))
+
 	cmd.Println(fmt.Sprintf("kukeond is ready (unix://%s)", socketPath))
 	return nil
 }
@@ -226,7 +300,23 @@ func pingKukeond(ctx context.Context, socketPath string) error {
 	return nil
 }
 
-func printBootstrapReport(cmd *cobra.Command, report controller.BootstrapReport) {
+// permissionsReport holds the chown/chmod outcome captured by runInit so the
+// printer can report it alongside the controller's BootstrapReport.
+type permissionsReport struct {
+	User           string
+	Group          string
+	UID            int
+	GID            int
+	UserCreated    bool
+	GroupCreated   bool
+	RunDirPath     string
+	RunPath        string
+	SocketPath     string
+	RunDirApplied  bool
+	RunPathApplied bool
+}
+
+func printBootstrapReport(cmd *cobra.Command, report controller.BootstrapReport, perms permissionsReport) {
 	printHeader(cmd, report)
 	printOverview(cmd, report)
 	cmd.Println("Actions:")
@@ -243,6 +333,37 @@ func printBootstrapReport(cmd *cobra.Command, report controller.BootstrapReport)
 	printSpaceActions(cmd, report.SystemSpace)
 	printStackActions(cmd, report.SystemStack)
 	printCellActions(cmd, report.SystemCell, report.KukeondImage)
+
+	printPermissionsActions(cmd, perms)
+}
+
+func printPermissionsActions(cmd *cobra.Command, perms permissionsReport) {
+	if perms.User == "" {
+		return
+	}
+	cmd.Println("  Permissions:")
+	if perms.GroupCreated {
+		cmd.Println(fmt.Sprintf("    - group %q: created (gid %d)", perms.Group, perms.GID))
+	} else {
+		cmd.Println(fmt.Sprintf("    - group %q: already existed (gid %d)", perms.Group, perms.GID))
+	}
+	if perms.UserCreated {
+		cmd.Println(fmt.Sprintf("    - user %q: created (uid %d)", perms.User, perms.UID))
+	} else {
+		cmd.Println(fmt.Sprintf("    - user %q: already existed (uid %d)", perms.User, perms.UID))
+	}
+	if perms.RunDirApplied {
+		cmd.Println(fmt.Sprintf(
+			"    - %q: chown root:%s mode %#o",
+			perms.RunDirPath, perms.Group, kukeonRunDirMode,
+		))
+	}
+	if perms.RunPathApplied {
+		cmd.Println(fmt.Sprintf(
+			"    - %q (recursive): chown root:%s mode %#o (dirs) / %#o (files)",
+			perms.RunPath, perms.Group, kukeonRunPathDirMode, kukeonRunPathFileMode,
+		))
+	}
 }
 
 func printKukeonCgroupAction(cmd *cobra.Command, report controller.BootstrapReport) {
