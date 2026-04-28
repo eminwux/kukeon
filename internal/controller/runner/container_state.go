@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -79,9 +80,9 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 
 	namespace := internalRealm.Spec.Namespace
 	if namespace == "" {
-		// Fallback to realm name if namespace is not set
-		namespace = realmName
-		r.logger.DebugContext(r.ctx, "realm has no namespace, using realm name as fallback",
+		// Fallback to <realm>.kukeon.io if namespace is not set
+		namespace = consts.RealmNamespace(realmName)
+		r.logger.DebugContext(r.ctx, "realm has no namespace, deriving from realm name",
 			"realm", realmName,
 			"namespace", namespace)
 	}

@@ -255,7 +255,7 @@ func TestPrintRealmActions(t *testing.T) {
 			name: "created",
 			section: controller.RealmSection{
 				RealmName:                          "default",
-				RealmContainerdNamespace:           "kukeon.io",
+				RealmContainerdNamespace:           "default.kukeon.io",
 				RealmCreated:                       true,
 				RealmContainerdNamespaceCreated:    true,
 				RealmCgroupCreated:                 true,
@@ -264,7 +264,7 @@ func TestPrintRealmActions(t *testing.T) {
 			},
 			expected: []string{
 				"- realm \"default\": created",
-				"- containerd namespace \"kukeon.io\": created",
+				"- containerd namespace \"default.kukeon.io\": created",
 				"- realm cgroup: created",
 			},
 		},
@@ -272,7 +272,7 @@ func TestPrintRealmActions(t *testing.T) {
 			name: "already-existed",
 			section: controller.RealmSection{
 				RealmName:                          "default",
-				RealmContainerdNamespace:           "kukeon.io",
+				RealmContainerdNamespace:           "default.kukeon.io",
 				RealmCgroupExistsPre:               true,
 				RealmCgroupExistsPost:              true,
 				RealmContainerdNamespaceExistsPre:  true,
@@ -282,7 +282,7 @@ func TestPrintRealmActions(t *testing.T) {
 			},
 			expected: []string{
 				"- realm \"default\": already existed",
-				"- containerd namespace \"kukeon.io\": already existed",
+				"- containerd namespace \"default.kukeon.io\": already existed",
 				"- realm cgroup: already existed",
 			},
 		},

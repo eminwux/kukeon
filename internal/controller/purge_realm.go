@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
@@ -46,10 +47,10 @@ func (b *Exec) PurgeRealm(realm intmodel.Realm, force, cascade bool) (PurgeRealm
 		return result, errdefs.ErrRealmNameRequired
 	}
 
-	// Default namespace to realm name if not set (matching CreateRealm behavior)
+	// Default namespace to <name>.kukeon.io if not set (matching CreateRealm behavior)
 	namespace := strings.TrimSpace(realm.Spec.Namespace)
 	if namespace == "" {
-		namespace = name
+		namespace = consts.RealmNamespace(name)
 		realm.Spec.Namespace = namespace
 	}
 

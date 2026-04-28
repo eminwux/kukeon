@@ -138,7 +138,7 @@ func (b *Exec) Bootstrap() (BootstrapReport, error) {
 	if err = b.bootstrapRealm(
 		&report.DefaultRealm,
 		consts.KukeonDefaultRealmName,
-		consts.KukeonDefaultRealmNamespace,
+		consts.RealmNamespace(consts.KukeonDefaultRealmName),
 	); err != nil {
 		return report, err
 	}
@@ -162,7 +162,7 @@ func (b *Exec) Bootstrap() (BootstrapReport, error) {
 	if err = b.bootstrapRealm(
 		&report.SystemRealm,
 		consts.KukeSystemRealmName,
-		consts.KukeSystemRealmNamespace,
+		consts.RealmNamespace(consts.KukeSystemRealmName),
 	); err != nil {
 		return report, err
 	}

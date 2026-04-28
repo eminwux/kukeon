@@ -44,18 +44,20 @@ const (
 	KukeonContainerLabelKey = "container.kukeon.io"
 
 	// Default user hierarchy created by `kuke init` for user workloads.
-	KukeonDefaultRealmName      = "default"
-	KukeonDefaultRealmNamespace = "kukeon.io"
-	KukeonDefaultSpaceName      = "default"
-	KukeonDefaultStackName      = "default"
+	KukeonDefaultRealmName = "default"
+	KukeonDefaultSpaceName = "default"
+	KukeonDefaultStackName = "default"
 
 	// System hierarchy created by `kuke init` for the kukeond daemon.
-	KukeSystemRealmName      = "kuke-system"
-	KukeSystemRealmNamespace = "kuke-system.kukeon.io"
-	KukeSystemSpaceName      = "kukeon"
-	KukeSystemStackName      = "kukeon"
-	KukeSystemCellName       = "kukeond"
-	KukeSystemContainerName  = "kukeond"
+	KukeSystemRealmName     = "kuke-system"
+	KukeSystemSpaceName     = "kukeon"
+	KukeSystemStackName     = "kukeon"
+	KukeSystemCellName      = "kukeond"
+	KukeSystemContainerName = "kukeond"
+
+	// realmNamespaceSuffix is the suffix appended to every realm name to form
+	// its containerd namespace. See RealmNamespace.
+	realmNamespaceSuffix = ".kukeon.io"
 
 	// KukeonSystemUser and KukeonSystemGroup name the system identity created
 	// by `kuke init` so a non-root operator added to the kukeon group can
@@ -64,3 +66,11 @@ const (
 	KukeonSystemUser  = "kukeon"
 	KukeonSystemGroup = "kukeon"
 )
+
+// RealmNamespace returns the containerd namespace for a realm: <realm>.kukeon.io.
+// This is the only place in the codebase that appends the .kukeon.io suffix to a
+// realm name; all bootstrap and user-realm code paths route through it so the
+// mapping stays consistent.
+func RealmNamespace(realm string) string {
+	return realm + realmNamespaceSuffix
+}

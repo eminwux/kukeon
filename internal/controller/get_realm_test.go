@@ -22,6 +22,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -191,12 +192,12 @@ func TestGetRealm_DefaultNamespace(t *testing.T) {
 		setupRunner       func(*fakeRunner, string)
 	}{
 		{
-			name:              "empty namespace defaults to realm name",
+			name:              "empty namespace defaults to <realm>.kukeon.io",
 			realmName:         "test-realm",
 			namespace:         "",
-			expectedNamespace: "test-realm",
+			expectedNamespace: consts.RealmNamespace("test-realm"),
 			setupRunner: func(f *fakeRunner, expectedNs string) {
-				realm := buildTestRealm("test-realm", "test-realm")
+				realm := buildTestRealm("test-realm", expectedNs)
 				f.GetRealmFn = func(_ intmodel.Realm) (intmodel.Realm, error) {
 					return realm, nil
 				}
@@ -212,12 +213,12 @@ func TestGetRealm_DefaultNamespace(t *testing.T) {
 			},
 		},
 		{
-			name:              "whitespace namespace defaults to realm name",
+			name:              "whitespace namespace defaults to <realm>.kukeon.io",
 			realmName:         "test-realm",
 			namespace:         "   ",
-			expectedNamespace: "test-realm",
+			expectedNamespace: consts.RealmNamespace("test-realm"),
 			setupRunner: func(f *fakeRunner, expectedNs string) {
-				realm := buildTestRealm("test-realm", "test-realm")
+				realm := buildTestRealm("test-realm", expectedNs)
 				f.GetRealmFn = func(_ intmodel.Realm) (intmodel.Realm, error) {
 					return realm, nil
 				}

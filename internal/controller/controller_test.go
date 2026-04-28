@@ -543,9 +543,11 @@ func setupTestController(t *testing.T, mockRunner runner.Runner) *controller.Exe
 // Resource builder helpers
 
 // buildTestRealm creates a test realm with the specified name and namespace.
+// An empty namespace argument is filled with consts.RealmNamespace(name) so
+// fixtures stay in sync with the controller-layer default in CreateRealm/PurgeRealm.
 func buildTestRealm(name, namespace string) intmodel.Realm {
 	if namespace == "" {
-		namespace = name
+		namespace = consts.RealmNamespace(name)
 	}
 	return intmodel.Realm{
 		Metadata: intmodel.RealmMetadata{

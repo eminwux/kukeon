@@ -81,11 +81,13 @@ func TestUninstall_PurgesWellKnownRealmsAndCleansFilesystem(t *testing.T) {
 	// Both well-known realms must be in the report, with their canonical
 	// containerd namespaces (the whole point of preferring well-known
 	// names over a stale/missing on-disk realm list).
-	if got := purged[consts.KukeonDefaultRealmName]; got != consts.KukeonDefaultRealmNamespace {
-		t.Errorf("default realm purged with namespace %q, want %q", got, consts.KukeonDefaultRealmNamespace)
+	wantDefaultNs := consts.RealmNamespace(consts.KukeonDefaultRealmName)
+	if got := purged[consts.KukeonDefaultRealmName]; got != wantDefaultNs {
+		t.Errorf("default realm purged with namespace %q, want %q", got, wantDefaultNs)
 	}
-	if got := purged[consts.KukeSystemRealmName]; got != consts.KukeSystemRealmNamespace {
-		t.Errorf("kuke-system realm purged with namespace %q, want %q", got, consts.KukeSystemRealmNamespace)
+	wantSystemNs := consts.RealmNamespace(consts.KukeSystemRealmName)
+	if got := purged[consts.KukeSystemRealmName]; got != wantSystemNs {
+		t.Errorf("kuke-system realm purged with namespace %q, want %q", got, wantSystemNs)
 	}
 
 	if !report.SocketDirRemove || !report.SocketDirExists {

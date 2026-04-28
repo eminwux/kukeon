@@ -194,11 +194,11 @@ func (b *Exec) collectRealmsForUninstall() ([]intmodel.Realm, error) {
 	wellKnown := []intmodel.Realm{
 		{
 			Metadata: intmodel.RealmMetadata{Name: consts.KukeonDefaultRealmName},
-			Spec:     intmodel.RealmSpec{Namespace: consts.KukeonDefaultRealmNamespace},
+			Spec:     intmodel.RealmSpec{Namespace: consts.RealmNamespace(consts.KukeonDefaultRealmName)},
 		},
 		{
 			Metadata: intmodel.RealmMetadata{Name: consts.KukeSystemRealmName},
-			Spec:     intmodel.RealmSpec{Namespace: consts.KukeSystemRealmNamespace},
+			Spec:     intmodel.RealmSpec{Namespace: consts.RealmNamespace(consts.KukeSystemRealmName)},
 		},
 	}
 
