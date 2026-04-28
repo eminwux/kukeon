@@ -924,7 +924,10 @@ func TestPurgeRealm_RunnerErrors(t *testing.T) {
 			errContains: "failed to purge space",
 		},
 		{
-			name:      "deleteRealmCascade error",
+			// deleteRealmCascade fails AND runner.PurgeRealm also fails — both errors are
+			// surfaced. (The single-failure case where runner.PurgeRealm recovers is
+			// covered separately in TestPurgeRealm_DeleteCascadeFailsButPurgeSucceeds.)
+			name:      "deleteRealmCascade error, purge also fails",
 			realmName: "test-realm",
 			namespace: "test-namespace",
 			force:     false,
@@ -945,6 +948,9 @@ func TestPurgeRealm_RunnerErrors(t *testing.T) {
 				}
 				f.DeleteRealmFn = func(_ intmodel.Realm) error {
 					return errors.New("deletion failed")
+				}
+				f.PurgeRealmFn = func(_ intmodel.Realm) error {
+					return errors.New("purge failed")
 				}
 			},
 			wantErr:     true,
@@ -1413,5 +1419,50 @@ func TestPurgeRealm_NameTrimming(t *testing.T) {
 				tt.wantResult(t, result)
 			}
 		})
+	}
+}
+
+// TestPurgeRealm_DeleteCascadeFailsButPurgeSucceeds covers the regression
+// from #171: deleteRealmCascade fails (e.g. namespace.Delete trips
+// "still has snapshots" because a live task pinned them), and the controller
+// must still call runner.PurgeRealm — runner.PurgeRealm kills orphans and
+// drains snapshots, so a single command leaves the host clean instead of
+// requiring the user to re-run.
+func TestPurgeRealm_DeleteCascadeFailsButPurgeSucceeds(t *testing.T) {
+	mockRunner := &fakeRunner{}
+	existingRealm := buildTestRealm("test-realm", "test-namespace")
+	mockRunner.GetRealmFn = func(_ intmodel.Realm) (intmodel.Realm, error) {
+		return existingRealm, nil
+	}
+	mockRunner.ExistsCgroupFn = func(_ any) (bool, error) {
+		return true, nil
+	}
+	mockRunner.ExistsRealmContainerdNamespaceFn = func(_ string) (bool, error) {
+		return true, nil
+	}
+	mockRunner.ListSpacesFn = func(_ string) ([]intmodel.Space, error) {
+		return []intmodel.Space{}, nil
+	}
+	mockRunner.DeleteRealmFn = func(_ intmodel.Realm) error {
+		return errors.New("namespace must be empty, still has snapshots on overlayfs snapshotter")
+	}
+	purgeCalled := false
+	mockRunner.PurgeRealmFn = func(_ intmodel.Realm) error {
+		purgeCalled = true
+		return nil
+	}
+
+	ctrl := setupTestController(t, mockRunner)
+	realm := buildTestRealm("test-realm", "test-namespace")
+
+	result, err := ctrl.PurgeRealm(realm, false, false)
+	if err != nil {
+		t.Fatalf("expected nil error after PurgeRealm recovery, got %v", err)
+	}
+	if !purgeCalled {
+		t.Fatal("expected runner.PurgeRealm to be called even after deleteRealmCascade failed")
+	}
+	if !result.PurgeSucceeded {
+		t.Errorf("expected PurgeSucceeded=true, got %+v", result)
 	}
 }

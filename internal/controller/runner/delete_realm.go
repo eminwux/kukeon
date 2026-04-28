@@ -48,18 +48,18 @@ func (r *Exec) DeleteRealm(realm intmodel.Realm) error {
 		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
-	// Delete realm cgroup
-	// Use the stored CgroupPath from realm status (includes full hierarchy path)
-	// instead of rebuilding from DefaultRealmSpec which only has the relative path
-	mountpoint := r.ctrClient.GetCgroupMountpoint()
-	cgroupGroup := internalRealm.Status.CgroupPath
-	if cgroupGroup == "" {
-		// Fallback to DefaultRealmSpec if CgroupPath is not set (for backwards compatibility)
-		spec := ctr.DefaultRealmSpec(internalRealm)
-		cgroupGroup = spec.Group
-	}
-	if err = r.ctrClient.DeleteCgroup(cgroupGroup, mountpoint); err != nil {
-		return fmt.Errorf("%w: failed to delete realm cgroup: %w", errdefs.ErrDeleteRealm, err)
+	// Find and clean up orphaned containers FIRST so their tasks are killed and
+	// their committed snapshots released before CleanupNamespaceResources tries
+	// to remove them — otherwise a live task holds the snapshot mount and
+	// snapshotService.Remove silently fails, leaving the namespace non-empty
+	// for the subsequent DeleteNamespace call.
+	r.logger.DebugContext(r.ctx, "starting to find orphaned containers", "namespace", internalRealm.Spec.Namespace)
+	containers, err := r.findOrphanedContainers(internalRealm.Spec.Namespace, "")
+	if err != nil {
+		r.logger.WarnContext(r.ctx, "failed to find orphaned containers", "error", err)
+	} else {
+		r.logger.DebugContext(r.ctx, "found orphaned containers", "count", len(containers))
+		r.processOrphanedContainers(r.ctx, containers)
 	}
 
 	// Clean up all namespace resources (images, snapshots, blobs) before deleting namespace
@@ -76,14 +76,19 @@ func (r *Exec) DeleteRealm(realm intmodel.Realm) error {
 		// Continue with namespace deletion attempt anyway
 	}
 
-	// Find and clean up orphaned containers before deleting namespace
-	r.logger.DebugContext(r.ctx, "starting to find orphaned containers", "namespace", internalRealm.Spec.Namespace)
-	containers, err := r.findOrphanedContainers(internalRealm.Spec.Namespace, "")
-	if err != nil {
-		r.logger.WarnContext(r.ctx, "failed to find orphaned containers", "error", err)
-	} else {
-		r.logger.DebugContext(r.ctx, "found orphaned containers", "count", len(containers))
-		r.processOrphanedContainers(r.ctx, containers)
+	// Delete realm cgroup after task processes are gone (otherwise cgroup
+	// removal fails with EBUSY because PIDs are still attached).
+	// Use the stored CgroupPath from realm status (includes full hierarchy path)
+	// instead of rebuilding from DefaultRealmSpec which only has the relative path
+	mountpoint := r.ctrClient.GetCgroupMountpoint()
+	cgroupGroup := internalRealm.Status.CgroupPath
+	if cgroupGroup == "" {
+		// Fallback to DefaultRealmSpec if CgroupPath is not set (for backwards compatibility)
+		spec := ctr.DefaultRealmSpec(internalRealm)
+		cgroupGroup = spec.Group
+	}
+	if err = r.ctrClient.DeleteCgroup(cgroupGroup, mountpoint); err != nil {
+		return fmt.Errorf("%w: failed to delete realm cgroup: %w", errdefs.ErrDeleteRealm, err)
 	}
 
 	// Tear down each conflist + bridge link for this realm. Driven from
