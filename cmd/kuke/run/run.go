@@ -21,6 +21,7 @@
 package run
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -155,7 +156,7 @@ func runRun(cmd *cobra.Command, _ []string) error {
 // Spec validation is deferred to validateResolvedCell so the caller can fill
 // realm/space/stack from --realm/--space/--stack or session defaults first.
 func parseSingleCellDoc(raw []byte) (v1beta1.CellDoc, error) {
-	rawDocs, err := parser.ParseDocuments(strings.NewReader(string(raw)))
+	rawDocs, err := parser.ParseDocuments(bytes.NewReader(raw))
 	if err != nil {
 		return v1beta1.CellDoc{}, fmt.Errorf("failed to parse YAML: %w", err)
 	}

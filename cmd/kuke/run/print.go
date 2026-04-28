@@ -129,11 +129,6 @@ func printOutcome(cmd *cobra.Command, label string, existsPost, created bool) {
 	}
 }
 
-// PrintRunResult is exported for testing.
-func PrintRunResult(cmd *cobra.Command, result kukeonv1.CreateCellResult, format string) error {
-	return printRunResult(cmd, result, format)
-}
-
 // noOpResultFromGet shapes a CreateCellResult for the
 // matching-spec + already-Ready short-circuit so the printer paths emit the
 // same fields whether the cell was just created or pre-existing.
