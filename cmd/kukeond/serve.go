@@ -31,6 +31,15 @@ import (
 	"github.com/spf13/viper"
 )
 
+// Socket modes applied to the kukeond unix listener. The narrow mode is the
+// fallback when no SocketGID was passed (root-only access); the group-readable
+// mode is used when init plumbed a kukeon GID through `--socket-gid` so a
+// non-root operator in the kukeon group can dial the daemon after restart.
+const (
+	socketModeRootOnly      os.FileMode = 0o600
+	socketModeGroupReadable os.FileMode = 0o660
+)
+
 func newServeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "serve",
@@ -63,9 +72,16 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		runPath = config.DefaultRunPath()
 	}
 
+	socketGID := viper.GetInt(config.KUKEOND_SOCKET_GID.ViperKey)
+	socketMode := socketModeRootOnly
+	if socketGID > 0 {
+		socketMode = socketModeGroupReadable
+	}
+
 	opts := daemon.Options{
 		SocketPath: socketPath,
-		SocketMode: 0o600,
+		SocketMode: socketMode,
+		SocketGID:  socketGID,
 		PIDFile:    filepath.Join(runPath, "kukeond.pid"),
 		Controller: controller.Options{
 			RunPath:          runPath,

@@ -219,6 +219,48 @@ func TestChownTreeAndChmod(t *testing.T) {
 	}
 }
 
+// TestChownTreeAndChmod_SGIDBit confirms the SGID bit on dirMode survives
+// the recursive walk. `kuke init` relies on this so daemon-written files
+// later inherit the kukeon group instead of falling back to root:root.
+func TestChownTreeAndChmod_SGIDBit(t *testing.T) {
+	root := t.TempDir()
+	subdir := filepath.Join(root, "sub")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	file := filepath.Join(subdir, "data.json")
+	if err := os.WriteFile(file, []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	uid, gid := os.Getuid(), os.Getgid()
+	dirMode := os.ModeSetgid | os.FileMode(0o750)
+	if err := sysuser.ChownTreeAndChmod(root, uid, gid, dirMode, 0o640); err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+
+	for _, p := range []string{root, subdir} {
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatalf("stat %q: %v", p, err)
+		}
+		if info.Mode()&os.ModeSetgid == 0 {
+			t.Errorf("%q: SGID bit not set (mode=%v)", p, info.Mode())
+		}
+		if got := info.Mode().Perm(); got != 0o750 {
+			t.Errorf("%q: perm bits got %#o want 0o750", p, got)
+		}
+	}
+
+	info, err := os.Stat(file)
+	if err != nil {
+		t.Fatalf("stat file: %v", err)
+	}
+	if info.Mode()&os.ModeSetgid != 0 {
+		t.Errorf("file should not carry SGID: mode=%v", info.Mode())
+	}
+}
+
 // runnerFunc adapts a function value to the CommandRunner interface for tests.
 type runnerFunc func(ctx context.Context, name string, args ...string) error
 

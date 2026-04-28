@@ -42,6 +42,11 @@ type Options struct {
 	SocketPath string
 	// SocketMode is the file mode applied to the socket after creation.
 	SocketMode os.FileMode
+	// SocketGID, when non-zero, is the group the listener socket is chowned
+	// to (uid stays root) so non-root members of that group can dial the
+	// daemon. Set by `kuke init` to the kukeon GID. Each Serve re-applies
+	// this so a daemon restart does not lose group access.
+	SocketGID int
 	// PIDFile, when non-empty, is written on Serve and removed on Stop.
 	PIDFile string
 	// Controller is forwarded to controller.NewControllerExec.
@@ -89,6 +94,16 @@ func (s *Server) Serve() error {
 	listener, err := net.Listen("unix", s.opts.SocketPath)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", s.opts.SocketPath, err)
+	}
+	if s.opts.SocketGID > 0 {
+		if chownErr := os.Chown(s.opts.SocketPath, 0, s.opts.SocketGID); chownErr != nil {
+			s.logger.WarnContext(s.ctx,
+				"chown socket to kukeon group failed; non-root operators will need sudo",
+				"socket", s.opts.SocketPath,
+				"gid", s.opts.SocketGID,
+				"error", chownErr,
+			)
+		}
 	}
 	if err := os.Chmod(s.opts.SocketPath, s.opts.SocketMode); err != nil {
 		_ = listener.Close()
