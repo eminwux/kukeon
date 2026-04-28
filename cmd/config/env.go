@@ -382,6 +382,9 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_STOP_CONTAINER_CELL = DefineKV("KUKE_STOP_CONTAINER_CELL", "kuke/stop/container/cell")
 
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_UNINSTALL_YES = DefineKV("KUKE_UNINSTALL_YES", "kuke/uninstall/yes", "false")
+
 	// Kill command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_KILL_CELL_REALM = DefineKV("KUKE_KILL_CELL_REALM", "kuke/kill/cell/realm", "default")
