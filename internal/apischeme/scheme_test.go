@@ -380,6 +380,63 @@ func TestCellRoundTripV1Beta1(t *testing.T) {
 	}
 }
 
+// TestCellRoundTripV1Beta1_NetworkBridgeName covers AC for #168: the cell
+// status persists Network.BridgeName through the external→internal→external
+// round-trip so daemon restarts can recover the iface mapping from the
+// cell metadata file alone.
+func TestCellRoundTripV1Beta1_NetworkBridgeName(t *testing.T) {
+	const wantBridge = "k-1a2b3c4d"
+
+	input := ext.CellDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCell,
+		Metadata: ext.CellMetadata{
+			Name:   "cell-net",
+			Labels: map[string]string{},
+		},
+		Spec: ext.CellSpec{
+			ID:         "cell-id-net",
+			RealmID:    "realm0",
+			SpaceID:    "space0",
+			StackID:    "stack0",
+			Containers: []ext.ContainerSpec{},
+		},
+		Status: ext.CellStatus{
+			State:      ext.CellStateReady,
+			CgroupPath: "/sys/fs/cgroup/cell-net",
+			Network: ext.CellNetworkStatus{
+				BridgeName: wantBridge,
+			},
+		},
+	}
+
+	internal, version, err := apischeme.NormalizeCell(input)
+	if err != nil {
+		t.Fatalf("NormalizeCell: %v", err)
+	}
+	if internal.Status.Network.BridgeName != wantBridge {
+		t.Errorf("internal bridge = %q, want %q", internal.Status.Network.BridgeName, wantBridge)
+	}
+
+	output, err := apischeme.BuildCellExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildCellExternalFromInternal: %v", err)
+	}
+	if output.Status.Network.BridgeName != wantBridge {
+		t.Errorf("external bridge = %q, want %q", output.Status.Network.BridgeName, wantBridge)
+	}
+
+	// The YAML rendering must include the bridgeName line so `kuke get
+	// cell -o yaml` surfaces it for operators.
+	rendered, err := yaml.Marshal(output)
+	if err != nil {
+		t.Fatalf("yaml.Marshal: %v", err)
+	}
+	if !strings.Contains(string(rendered), "bridgeName: "+wantBridge) {
+		t.Errorf("rendered YAML missing bridgeName entry; got:\n%s", string(rendered))
+	}
+}
+
 func TestContainerRoundTripV1Beta1(t *testing.T) {
 	input := ext.ContainerDoc{
 		APIVersion: ext.APIVersionV1Beta1,

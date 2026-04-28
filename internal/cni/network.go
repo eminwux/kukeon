@@ -184,8 +184,9 @@ func (m *Manager) CreateNetworkWithConfig(cfg NetworkConfig) (string, error) {
 	if bridge == "" {
 		bridge = defaultBridgeName
 	}
-	// Defense-in-depth: SafeBridgeName is supposed to truncate, but a caller
-	// bypassing it (or a future bug there) would otherwise write a conflist
+	// Defense-in-depth: SafeBridgeName is supposed to keep the bridge under
+	// IFNAMSIZ (it always emits k-{8hex} = 10 chars), but a caller that
+	// bypasses it (or a future bug there) would otherwise write a conflist
 	// that fails at bridge-create time with netlink ERANGE — a far less
 	// diagnosable error than this one.
 	if len(bridge) > maxBridgeNameLen {

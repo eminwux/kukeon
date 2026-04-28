@@ -31,9 +31,9 @@ func TestNewCNINetworkConfig(t *testing.T) {
 		wantSubnet  string
 	}{
 		{
-			name:        "success with name provided",
+			name:        "short name is hashed to k-{8hex}",
 			networkName: "test-network",
-			wantBridge:  "test-network",
+			wantBridge:  cni.SafeBridgeName("test-network"),
 			wantSubnet:  "10.88.0.0/16",
 		},
 		{
@@ -43,7 +43,7 @@ func TestNewCNINetworkConfig(t *testing.T) {
 			wantSubnet:  "10.88.0.0/16",
 		},
 		{
-			name:        "long name is truncated to IFNAMSIZ-safe bridge",
+			name:        "long name is hashed to k-{8hex}",
 			networkName: "kuke-system-kukeon",
 			wantBridge:  cni.SafeBridgeName("kuke-system-kukeon"),
 			wantSubnet:  "10.88.0.0/16",
@@ -71,14 +71,14 @@ func TestNewCNINetworkConfig(t *testing.T) {
 
 func TestSafeBridgeName(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		wantLen  int
-		wantSame bool
+		name      string
+		input     string
+		wantLen   int
+		wantEmpty bool
 	}{
-		{name: "empty", input: "", wantLen: 0, wantSame: true},
-		{name: "short passes through", input: "default-default", wantLen: 15, wantSame: true},
-		{name: "long is truncated to 15", input: "kuke-system-kukeon", wantLen: 15, wantSame: false},
+		{name: "empty stays empty", input: "", wantLen: 0, wantEmpty: true},
+		{name: "short input is hashed", input: "default-default", wantLen: 10},
+		{name: "long input is hashed", input: "kuke-system-kukeon", wantLen: 10},
 	}
 
 	for _, tt := range tests {
@@ -87,16 +87,49 @@ func TestSafeBridgeName(t *testing.T) {
 			if len(got) != tt.wantLen {
 				t.Errorf("SafeBridgeName(%q) length = %d, want %d (got %q)", tt.input, len(got), tt.wantLen, got)
 			}
-			if tt.wantSame && got != tt.input {
-				t.Errorf("SafeBridgeName(%q) = %q, want unchanged", tt.input, got)
+			if tt.wantEmpty {
+				if got != "" {
+					t.Errorf("SafeBridgeName(%q) = %q, want empty", tt.input, got)
+				}
+				return
 			}
-			if !tt.wantSame && tt.input != "" && got == tt.input {
-				t.Errorf("SafeBridgeName(%q) unchanged, want truncated", tt.input)
+			if got[:2] != "k-" {
+				t.Errorf("SafeBridgeName(%q) = %q, want k-{hash} prefix", tt.input, got)
 			}
 			if cni.SafeBridgeName(tt.input) != got {
 				t.Errorf("SafeBridgeName is not deterministic for %q", tt.input)
 			}
 		})
+	}
+}
+
+// TestSafeBridgeName_Determinism documents the determinism contract: same
+// realm/space → same hash, regardless of length or charset. Locks the rule
+// the issue calls out: "bridge-name determinism (same realm/space → same
+// hash)".
+func TestSafeBridgeName_Determinism(t *testing.T) {
+	cases := []string{
+		"default-alpha",
+		"kuke-system-kukeon",
+		"some-very-long-realm-name-foo-bar-baz",
+	}
+	for _, in := range cases {
+		t.Run(in, func(t *testing.T) {
+			a := cni.SafeBridgeName(in)
+			b := cni.SafeBridgeName(in)
+			if a != b {
+				t.Errorf("SafeBridgeName(%q) non-deterministic: %q vs %q", in, a, b)
+			}
+			if got := len(a); got != 10 {
+				t.Errorf("SafeBridgeName(%q) length = %d, want 10 (got %q)", in, got, a)
+			}
+		})
+	}
+	// Different inputs should generally hash to different outputs (this is
+	// not a collision-resistance proof — just a sanity check that we are
+	// not constant-folding to a single bucket).
+	if cni.SafeBridgeName("default-alpha") == cni.SafeBridgeName("default-beta") {
+		t.Errorf("two different network names hash to the same bridge — generator regressed")
 	}
 }
 

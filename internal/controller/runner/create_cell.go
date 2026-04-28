@@ -146,6 +146,18 @@ func (r *Exec) EnsureCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, ensureErr
 	}
 
+	// Backfill the bridge name on cells that pre-date the field. Same
+	// best-effort posture as in provisionNewCell: if we cannot derive it,
+	// leave the field empty rather than fail the ensure.
+	if ensuredCell.Status.Network.BridgeName == "" {
+		if bridge, brErr := cellSpaceBridgeName(ensuredCell); brErr == nil {
+			ensuredCell.Status.Network.BridgeName = bridge
+		} else {
+			r.logger.WarnContext(r.ctx, "could not derive cell bridge name on ensure",
+				"cell", ensuredCell.Metadata.Name, "error", brErr)
+		}
+	}
+
 	// Update metadata to persist the containers
 	if err := r.UpdateCellMetadata(ensuredCell); err != nil {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)

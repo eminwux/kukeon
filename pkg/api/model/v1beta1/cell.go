@@ -49,9 +49,18 @@ type CellTty struct {
 }
 
 type CellStatus struct {
-	State      CellState         `json:"state"      yaml:"state"`
-	CgroupPath string            `json:"cgroupPath" yaml:"cgroupPath"`
-	Containers []ContainerStatus `json:"containers" yaml:"containers"`
+	State      CellState         `json:"state"             yaml:"state"`
+	CgroupPath string            `json:"cgroupPath"        yaml:"cgroupPath"`
+	Network    CellNetworkStatus `json:"network,omitempty" yaml:"network,omitempty"`
+	Containers []ContainerStatus `json:"containers"        yaml:"containers"`
+}
+
+// CellNetworkStatus exposes the host-side bridge a cell is attached to.
+// Populated by the runner during cell provisioning so describe/get -o yaml
+// surfaces the iface name without recomputing the hash. Always emitted in
+// the canonical k-{8hex} form (see cni.SafeBridgeName).
+type CellNetworkStatus struct {
+	BridgeName string `json:"bridgeName,omitempty" yaml:"bridgeName,omitempty"`
 }
 
 type CellState int
@@ -101,6 +110,7 @@ func NewCellDoc(from *CellDoc) *CellDoc {
 			Status: CellStatus{
 				State:      CellStateUnknown,
 				CgroupPath: "",
+				Network:    CellNetworkStatus{},
 				Containers: []ContainerStatus{},
 			},
 		}

@@ -46,7 +46,17 @@ type CellTty struct {
 type CellStatus struct {
 	State      CellState
 	CgroupPath string
+	Network    CellNetworkStatus
 	Containers []ContainerStatus
+}
+
+// CellNetworkStatus records the network endpoints the cell is attached to.
+// BridgeName is the host-side Linux bridge derived via cni.SafeBridgeName
+// from the cell's space network — persisting it lets `kuke describe`/
+// `kuke get cell -o yaml` recover the human→iface mapping without
+// recomputing the hash.
+type CellNetworkStatus struct {
+	BridgeName string
 }
 
 type CellState int
