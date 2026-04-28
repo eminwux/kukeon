@@ -215,6 +215,13 @@ func BuildContainerSpec(
 		specOpts = append(specOpts, oci.WithProcessArgs(containerSpec.Args...))
 	}
 
+	// Set working directory (OCI process.cwd). Empty leaves the image's
+	// WORKDIR untouched — containerd's WithImageConfig populates Cwd from
+	// the image at create time, and overwriting it with "" would erase that.
+	if containerSpec.WorkingDir != "" {
+		specOpts = append(specOpts, oci.WithProcessCwd(containerSpec.WorkingDir))
+	}
+
 	// Set environment variables
 	if len(containerSpec.Env) > 0 {
 		specOpts = append(specOpts, oci.WithEnv(containerSpec.Env))
