@@ -329,6 +329,50 @@ func TestCreateRealm_ValidationErrors(t *testing.T) {
 	}
 }
 
+// TestCreateRealm_RejectsInvalidCharacters covers the AC for #168: realm
+// names containing "_" or "/" must be rejected at the controller boundary
+// before any runner state mutation. The fakeRunner deliberately fails the
+// test if the create path was reached.
+func TestCreateRealm_RejectsInvalidCharacters(t *testing.T) {
+	tests := []struct {
+		name      string
+		realmName string
+	}{
+		{name: "underscore in realm name", realmName: "team_alpha"},
+		{name: "slash in realm name", realmName: "team/alpha"},
+		{name: "underscore alone", realmName: "_"},
+		{name: "slash alone", realmName: "/"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRunner := &fakeRunner{
+				GetRealmFn: func(_ intmodel.Realm) (intmodel.Realm, error) {
+					t.Fatal("GetRealm called despite invalid name — validation should run first")
+					return intmodel.Realm{}, nil
+				},
+				CreateRealmFn: func(_ intmodel.Realm) (intmodel.Realm, error) {
+					t.Fatal("CreateRealm called despite invalid name — validation should run first")
+					return intmodel.Realm{}, nil
+				},
+			}
+
+			ctrl := setupTestController(t, mockRunner)
+			realm := intmodel.Realm{
+				Metadata: intmodel.RealmMetadata{Name: tt.realmName},
+			}
+
+			_, err := ctrl.CreateRealm(realm)
+			if err == nil {
+				t.Fatalf("expected error rejecting %q, got nil", tt.realmName)
+			}
+			if !errors.Is(err, errdefs.ErrInvalidRealmName) {
+				t.Errorf("expected ErrInvalidRealmName, got %v", err)
+			}
+		})
+	}
+}
+
 func TestCreateRealm_DefaultNamespace(t *testing.T) {
 	tests := []struct {
 		name        string

@@ -52,6 +52,7 @@ var (
 	ErrSpaceDocRequired       = errors.New("space document is required")
 	ErrSpaceNameRequired      = errors.New("space name is required")
 	ErrRealmNameRequired      = errors.New("realm name is required")
+	ErrInvalidRealmName       = errors.New("realm name is invalid")
 	ErrUpdateSpaceMetadata    = errors.New("failed to update space metadata")
 	ErrCreateSpace            = errors.New("failed to create space")
 	ErrCreateSpaceCgroup      = errors.New("failed to create space cgroup")

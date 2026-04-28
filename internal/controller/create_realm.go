@@ -24,6 +24,7 @@ import (
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 // CreateRealmResult reports the reconciliation outcomes for a realm.
@@ -51,9 +52,10 @@ func (b *Exec) CreateRealm(realm intmodel.Realm) (CreateRealmResult, error) {
 	var res CreateRealmResult
 
 	name := strings.TrimSpace(realm.Metadata.Name)
-	if name == "" {
-		return res, errdefs.ErrRealmNameRequired
+	if err := naming.ValidateRealmName(name); err != nil {
+		return res, err
 	}
+	realm.Metadata.Name = name
 	namespace := strings.TrimSpace(realm.Spec.Namespace)
 	if namespace == "" {
 		namespace = consts.RealmNamespace(name)

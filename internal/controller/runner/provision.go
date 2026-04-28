@@ -978,6 +978,17 @@ func (r *Exec) ensureStackCgroup(stack intmodel.Stack) (intmodel.Stack, error) {
 	return stack, nil
 }
 
+// cellSpaceBridgeName returns the host-side bridge interface name for the
+// cell's space. Returns an error if the realm or space is missing on the
+// cell spec — callers treat that as best-effort and log/continue.
+func cellSpaceBridgeName(cell intmodel.Cell) (string, error) {
+	networkName, err := naming.BuildSpaceNetworkName(cell.Spec.RealmName, cell.Spec.SpaceName)
+	if err != nil {
+		return "", err
+	}
+	return cni.SafeBridgeName(networkName), nil
+}
+
 func (r *Exec) provisionNewCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	// Update cell metadata
 	if err := r.UpdateCellMetadata(cell); err != nil {
@@ -992,6 +1003,21 @@ func (r *Exec) provisionNewCell(cell intmodel.Cell) (intmodel.Cell, error) {
 
 	// Update internal model with cgroup path
 	cell.Status.CgroupPath = cgroupPath
+
+	// Persist the host-side bridge this cell's space lands on. Computing it
+	// here (instead of the read path) keeps the cell self-describing for
+	// debug tooling and survives daemon restarts because the cell metadata
+	// file is rewritten in UpdateCellMetadata below.
+	if bridge, brErr := cellSpaceBridgeName(cell); brErr == nil {
+		cell.Status.Network.BridgeName = bridge
+	} else {
+		// Bridge name is best-effort metadata; failing to derive it must
+		// not block provisioning (the cell can still come up — the iface
+		// is created by CNI from the conflist regardless of what we
+		// record here).
+		r.logger.WarnContext(r.ctx, "could not derive cell bridge name",
+			"cell", cell.Metadata.Name, "error", brErr)
+	}
 
 	// Create pause container and all containers for the cell
 	_, err = r.createCellContainers(&cell)

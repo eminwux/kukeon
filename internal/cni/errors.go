@@ -45,7 +45,7 @@ func translateCNIError(err error, networkName, bridge string) error {
 	// other ERANGE causes (e.g. route table overflow) are left untranslated.
 	if strings.Contains(msg, "numerical result out of range") && len(bridge) > maxBridgeNameLen {
 		return fmt.Errorf(
-			"%w: bridge %q is %d chars, max %d (IFNAMSIZ-1); SafeBridgeName was expected to truncate — file a bug: %w",
+			"%w: bridge %q is %d chars, max %d (IFNAMSIZ-1); SafeBridgeName was expected to hash — file a bug: %w",
 			errdefs.ErrBridgeNameTooLong, bridge, len(bridge), maxBridgeNameLen, err,
 		)
 	}

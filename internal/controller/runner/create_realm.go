@@ -22,10 +22,15 @@ import (
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 func (r *Exec) CreateRealm(realm intmodel.Realm) (intmodel.Realm, error) {
 	r.logger.Debug("run-path", "run-path", r.opts.RunPath)
+
+	if err := naming.ValidateRealmName(realm.Metadata.Name); err != nil {
+		return intmodel.Realm{}, err
+	}
 
 	// Get existing realm (returns internal model)
 	existingRealm, err := r.GetRealm(realm)
