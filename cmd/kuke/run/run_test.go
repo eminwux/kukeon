@@ -33,6 +33,7 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	sbshattach "github.com/eminwux/sbsh/pkg/attach"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -104,12 +105,15 @@ func writeTempYAML(t *testing.T, content string) string {
 type fakeClient struct {
 	kukeonv1.FakeClient
 
-	getCellFn    func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error)
-	createCellFn func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error)
+	getCellFn         func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error)
+	createCellFn      func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error)
+	attachContainerFn func(doc v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error)
 
 	getCalls    int
 	createCalls int
+	attachCalls int
 	createDoc   v1beta1.CellDoc
+	attachDoc   v1beta1.ContainerDoc
 }
 
 func (f *fakeClient) GetCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
@@ -129,7 +133,37 @@ func (f *fakeClient) CreateCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv
 	return f.createCellFn(doc)
 }
 
+func (f *fakeClient) AttachContainer(
+	_ context.Context,
+	doc v1beta1.ContainerDoc,
+) (kukeonv1.AttachContainerResult, error) {
+	f.attachCalls++
+	f.attachDoc = doc
+	if f.attachContainerFn == nil {
+		return kukeonv1.AttachContainerResult{}, errors.New("unexpected AttachContainer call")
+	}
+	return f.attachContainerFn(doc)
+}
+
+// runCapture records the Options passed to the in-process attach loop and
+// returns nil so the test treats the call as a clean detach.
+type runCapture struct {
+	calls int
+	opts  sbshattach.Options
+}
+
+func (r *runCapture) fn(_ context.Context, opts sbshattach.Options) error {
+	r.calls++
+	r.opts = opts
+	return nil
+}
+
 func newCmd(t *testing.T, fc *fakeClient) (*cobra.Command, *bytes.Buffer) {
+	t.Helper()
+	return newCmdWithRun(t, fc, nil)
+}
+
+func newCmdWithRun(t *testing.T, fc *fakeClient, run *runCapture) (*cobra.Command, *bytes.Buffer) {
 	t.Helper()
 	cmd := runcmd.NewRunCmd()
 	buf := &bytes.Buffer{}
@@ -140,6 +174,9 @@ func newCmd(t *testing.T, fc *fakeClient) (*cobra.Command, *bytes.Buffer) {
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 	if fc != nil {
 		ctx = context.WithValue(ctx, runcmd.MockControllerKey{}, kukeonv1.Client(fc))
+	}
+	if run != nil {
+		ctx = context.WithValue(ctx, runcmd.MockRunKey{}, runcmd.RunFn(run.fn))
 	}
 	cmd.SetContext(ctx)
 	return cmd, buf
@@ -555,6 +592,417 @@ func TestNewRunCmd_AutocompleteRegistration(t *testing.T) {
 	outputFlag := cmd.Flags().Lookup("output")
 	if outputFlag == nil || outputFlag.Shorthand != "o" {
 		t.Errorf("expected -o/--output flag, got %+v", outputFlag)
+	}
+}
+
+// attachableCellYAML declares two attachable containers and pins
+// cell.tty.default to the second one so the precedence-rule tests below can
+// distinguish the explicit-default branch from the first-attachable branch.
+const attachableCellYAML = `apiVersion: v1beta1
+kind: Cell
+metadata:
+  name: my-cell
+spec:
+  id: my-cell
+  realmId: my-realm
+  spaceId: my-space
+  stackId: my-stack
+  tty:
+    default: claude
+  containers:
+    - id: root
+      root: true
+      image: registry.eminwux.com/busybox:latest
+      command: sleep
+      args:
+        - "3600"
+    - id: shell
+      attachable: true
+      image: registry.eminwux.com/busybox:latest
+      command: sleep
+      args:
+        - "3600"
+    - id: claude
+      attachable: true
+      image: registry.eminwux.com/busybox:latest
+      command: sleep
+      args:
+        - "3600"
+`
+
+// attachableNoDefaultYAML omits cell.tty.default so the first-attachable
+// fallback branch fires.
+const attachableNoDefaultYAML = `apiVersion: v1beta1
+kind: Cell
+metadata:
+  name: my-cell
+spec:
+  id: my-cell
+  realmId: my-realm
+  spaceId: my-space
+  stackId: my-stack
+  containers:
+    - id: root
+      root: true
+      image: registry.eminwux.com/busybox:latest
+      command: sleep
+      args:
+        - "3600"
+    - id: shell
+      attachable: true
+      image: registry.eminwux.com/busybox:latest
+      command: sleep
+      args:
+        - "3600"
+    - id: claude
+      attachable: true
+      image: registry.eminwux.com/busybox:latest
+      command: sleep
+      args:
+        - "3600"
+`
+
+const testHostSocket = "/opt/kukeon/r/s/st/c/work/tty/socket"
+
+func attachSuccessFn() func(v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
+	return func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
+		return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
+	}
+}
+
+func TestPickAttachTarget_PrefersExplicitContainer(t *testing.T) {
+	spec := v1beta1.CellSpec{
+		Tty: &v1beta1.CellTty{Default: "claude"},
+		Containers: []v1beta1.ContainerSpec{
+			{ID: "shell", Attachable: true},
+			{ID: "claude", Attachable: true},
+		},
+	}
+	got, err := runcmd.PickAttachTarget(spec, "my-cell", "shell")
+	if err != nil {
+		t.Fatalf("pickAttachTarget: %v", err)
+	}
+	if got != "shell" {
+		t.Errorf("got %q, want %q (--container must beat tty.default)", got, "shell")
+	}
+}
+
+func TestPickAttachTarget_FallsBackToTtyDefault(t *testing.T) {
+	spec := v1beta1.CellSpec{
+		Tty: &v1beta1.CellTty{Default: "claude"},
+		Containers: []v1beta1.ContainerSpec{
+			{ID: "shell", Attachable: true},
+			{ID: "claude", Attachable: true},
+		},
+	}
+	got, err := runcmd.PickAttachTarget(spec, "my-cell", "")
+	if err != nil {
+		t.Fatalf("pickAttachTarget: %v", err)
+	}
+	if got != "claude" {
+		t.Errorf("got %q, want %q (tty.default must beat first-attachable)", got, "claude")
+	}
+}
+
+func TestPickAttachTarget_FallsBackToFirstAttachable(t *testing.T) {
+	spec := v1beta1.CellSpec{
+		Containers: []v1beta1.ContainerSpec{
+			{ID: "root", Root: true},
+			{ID: "shell", Attachable: true},
+			{ID: "claude", Attachable: true},
+		},
+	}
+	got, err := runcmd.PickAttachTarget(spec, "my-cell", "")
+	if err != nil {
+		t.Fatalf("pickAttachTarget: %v", err)
+	}
+	if got != "shell" {
+		t.Errorf("got %q, want %q (first attachable wins, declaration order)", got, "shell")
+	}
+}
+
+func TestPickAttachTarget_NoAttachable_Errors(t *testing.T) {
+	spec := v1beta1.CellSpec{
+		Containers: []v1beta1.ContainerSpec{
+			{ID: "root", Root: true},
+			{ID: "side", Attachable: false},
+		},
+	}
+	_, err := runcmd.PickAttachTarget(spec, "my-cell", "")
+	if !errors.Is(err, errdefs.ErrAttachNoCandidate) {
+		t.Fatalf("err=%v want ErrAttachNoCandidate", err)
+	}
+	if !strings.Contains(err.Error(), "attachable: true") {
+		t.Errorf("error %q must guide operator to declare attachable=true", err)
+	}
+}
+
+func TestPickAttachTarget_ExplicitNonAttachable_NamesAttachables(t *testing.T) {
+	spec := v1beta1.CellSpec{
+		Containers: []v1beta1.ContainerSpec{
+			{ID: "root", Root: true},
+			{ID: "side", Attachable: false},
+			{ID: "shell", Attachable: true},
+		},
+	}
+	_, err := runcmd.PickAttachTarget(spec, "my-cell", "side")
+	if !errors.Is(err, errdefs.ErrAttachNotSupported) {
+		t.Fatalf("err=%v want ErrAttachNotSupported", err)
+	}
+	if !strings.Contains(err.Error(), "shell") {
+		t.Errorf("error %q must list available attachables", err)
+	}
+}
+
+func TestPickAttachTarget_ExplicitUnknown_NamesAttachables(t *testing.T) {
+	spec := v1beta1.CellSpec{
+		Containers: []v1beta1.ContainerSpec{
+			{ID: "root", Root: true},
+			{ID: "shell", Attachable: true},
+		},
+	}
+	_, err := runcmd.PickAttachTarget(spec, "my-cell", "ghost")
+	if !errors.Is(err, errdefs.ErrContainerNotFound) {
+		t.Fatalf("err=%v want ErrContainerNotFound", err)
+	}
+	if !strings.Contains(err.Error(), "shell") {
+		t.Errorf("error %q must list available attachables", err)
+	}
+}
+
+func TestRun_Attach_AfterCreate_UsesTtyDefault(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: attachSuccessFn(),
+	}
+	run := &runCapture{}
+	cmd, _ := newCmdWithRun(t, fc, run)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.createCalls != 1 {
+		t.Fatalf("CreateCell calls=%d want 1", fc.createCalls)
+	}
+	if fc.attachCalls != 1 {
+		t.Fatalf("AttachContainer calls=%d want 1", fc.attachCalls)
+	}
+	if got := fc.attachDoc.Metadata.Name; got != "claude" {
+		t.Errorf("AttachContainer target=%q want claude (tty.default)", got)
+	}
+	if run.calls != 1 {
+		t.Fatalf("attach loop calls=%d want 1", run.calls)
+	}
+	if run.opts.SocketPath != testHostSocket {
+		t.Errorf("SocketPath=%q want %q", run.opts.SocketPath, testHostSocket)
+	}
+}
+
+func TestRun_Attach_AfterCreate_FirstAttachableWhenNoDefault(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: attachSuccessFn(),
+	}
+	run := &runCapture{}
+	cmd, _ := newCmdWithRun(t, fc, run)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableNoDefaultYAML), "-a"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := fc.attachDoc.Metadata.Name; got != "shell" {
+		t.Errorf("AttachContainer target=%q want shell (first attachable)", got)
+	}
+}
+
+func TestRun_Attach_AfterCreate_ExplicitContainerWinsOverDefault(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: attachSuccessFn(),
+	}
+	run := &runCapture{}
+	cmd, _ := newCmdWithRun(t, fc, run)
+	cmd.SetArgs([]string{
+		"-f", writeTempYAML(t, attachableCellYAML),
+		"-a", "--container", "shell",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := fc.attachDoc.Metadata.Name; got != "shell" {
+		t.Errorf("AttachContainer target=%q want shell (--container must beat tty.default)", got)
+	}
+}
+
+func TestRun_Attach_NoCandidate_Errors_NoMutationOnAttach(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	// validCellYAML has no attachable containers — -a must fail with the
+	// explicit ErrAttachNoCandidate without driving the attach loop. The
+	// CreateCell ran already (fail-late after start is the documented UX);
+	// the cell is left Ready and the operator can re-run with --container or
+	// fix the spec.
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+	}
+	run := &runCapture{}
+	cmd, _ := newCmdWithRun(t, fc, run)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-a"})
+
+	err := cmd.Execute()
+	if !errors.Is(err, errdefs.ErrAttachNoCandidate) {
+		t.Fatalf("err=%v want ErrAttachNoCandidate", err)
+	}
+	if fc.attachCalls != 0 {
+		t.Errorf("AttachContainer calls=%d want 0", fc.attachCalls)
+	}
+	if run.calls != 0 {
+		t.Errorf("attach loop calls=%d want 0", run.calls)
+	}
+}
+
+func TestRun_Attach_BadContainerFlag_Errors(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+	}
+	run := &runCapture{}
+	cmd, out := newCmdWithRun(t, fc, run)
+	cmd.SetArgs([]string{
+		"-f", writeTempYAML(t, attachableCellYAML),
+		"-a", "--container", "ghost",
+	})
+
+	err := cmd.Execute()
+	if !errors.Is(err, errdefs.ErrContainerNotFound) {
+		t.Fatalf("err=%v want ErrContainerNotFound", err)
+	}
+	if !strings.Contains(err.Error(), "shell") || !strings.Contains(err.Error(), "claude") {
+		t.Errorf("err %q must list attachables (shell, claude); output:\n%s", err, out.String())
+	}
+	if fc.attachCalls != 0 {
+		t.Errorf("AttachContainer calls=%d want 0", fc.attachCalls)
+	}
+	if run.calls != 0 {
+		t.Errorf("attach loop calls=%d want 0", run.calls)
+	}
+}
+
+func TestRun_Attach_ContainerWithoutAttachFlag_Errors(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{}
+	cmd, _ := newCmdWithRun(t, fc, &runCapture{})
+	cmd.SetArgs([]string{
+		"-f", writeTempYAML(t, attachableCellYAML),
+		"--container", "shell",
+	})
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "--container is only valid") {
+		t.Fatalf("err=%v want '--container is only valid' guard", err)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d want 0 (must reject before mutating)", fc.createCalls)
+	}
+}
+
+func TestRun_Attach_OutputFlag_Errors(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{}
+	cmd, _ := newCmdWithRun(t, fc, &runCapture{})
+	cmd.SetArgs([]string{
+		"-f", writeTempYAML(t, attachableCellYAML),
+		"-a", "-o", "json",
+	})
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "incompatible") {
+		t.Fatalf("err=%v want incompatibility guard", err)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d want 0", fc.createCalls)
+	}
+}
+
+func TestRun_Attach_AlreadyReady_ShortCircuitThenAttaches(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	existing := v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
+		Spec: v1beta1.CellSpec{
+			RealmID: "my-realm",
+			SpaceID: "my-space",
+			StackID: "my-stack",
+			Tty:     &v1beta1.CellTty{Default: "claude"},
+			Containers: []v1beta1.ContainerSpec{
+				{ID: "root", Root: true, Image: "registry.eminwux.com/busybox:latest"},
+				{ID: "shell", Attachable: true, Image: "registry.eminwux.com/busybox:latest"},
+				{ID: "claude", Attachable: true, Image: "registry.eminwux.com/busybox:latest"},
+			},
+		},
+		Status: v1beta1.CellStatus{State: v1beta1.CellStateReady},
+	}
+	fc := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell:                existing,
+				MetadataExists:      true,
+				CgroupExists:        true,
+				RootContainerExists: true,
+			}, nil
+		},
+		attachContainerFn: attachSuccessFn(),
+	}
+	run := &runCapture{}
+	cmd, _ := newCmdWithRun(t, fc, run)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d want 0 (short-circuit on Ready)", fc.createCalls)
+	}
+	if fc.attachCalls != 1 {
+		t.Fatalf("AttachContainer calls=%d want 1", fc.attachCalls)
+	}
+	if got := fc.attachDoc.Metadata.Name; got != "claude" {
+		t.Errorf("AttachContainer target=%q want claude", got)
+	}
+	if run.calls != 1 {
+		t.Errorf("attach loop calls=%d want 1", run.calls)
+	}
+}
+
+func TestNewRunCmd_AttachFlagRegistered(t *testing.T) {
+	cmd := runcmd.NewRunCmd()
+	attachFlag := cmd.Flags().Lookup("attach")
+	if attachFlag == nil || attachFlag.Shorthand != "a" {
+		t.Errorf("expected -a/--attach flag, got %+v", attachFlag)
+	}
+	if got := cmd.Flags().Lookup("container"); got == nil {
+		t.Errorf("expected --container flag")
 	}
 }
 

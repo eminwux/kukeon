@@ -16,8 +16,9 @@
 
 // Package run implements the `kuke run -f <file>` verb: parse a single-cell
 // YAML doc, idempotently create-and-start the cell, and report the same
-// outcome other lifecycle verbs print. Phase 1c of the run epic; the -a
-// (attach) and -p (profile) flags land in later phases.
+// outcome other lifecycle verbs print. Phase 2a adds -a/--attach so the
+// same invocation can drop the operator into the cell's attachable
+// terminal; -p (profile) lands in phase 2b.
 package run
 
 import (
@@ -40,8 +41,9 @@ import (
 // MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
-// NewRunCmd builds the `kuke run` cobra command. Phase 1c implements only
-// `-f/--file`; `-a/--attach` (#C) and `-p/--profile` (#D) extend this scaffold.
+// NewRunCmd builds the `kuke run` cobra command. Phase 1c implemented
+// `-f/--file`; phase 2a adds `-a/--attach` and `--container`; `-p/--profile`
+// (#D) extends this scaffold.
 func NewRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "run -f <file>",
@@ -67,6 +69,13 @@ func NewRunCmd() *cobra.Command {
 	cmd.Flags().String("stack", "", "Stack that owns the cell (overrides spec.stackId only when the doc is empty)")
 	_ = viper.BindPFlag(config.KUKE_RUN_STACK.ViperKey, cmd.Flags().Lookup("stack"))
 
+	cmd.Flags().BoolP("attach", "a", false,
+		"After start, attach to the cell's attachable container (precedence: --container > cell.tty.default > first attachable)")
+	_ = viper.BindPFlag(config.KUKE_RUN_ATTACH.ViperKey, cmd.Flags().Lookup("attach"))
+	cmd.Flags().String("container", "",
+		"Container to attach to (only valid with -a; must be attachable)")
+	_ = viper.BindPFlag(config.KUKE_RUN_CONTAINER.ViperKey, cmd.Flags().Lookup("container"))
+
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
 	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
@@ -90,6 +99,18 @@ func runRun(cmd *cobra.Command, _ []string) error {
 	output = strings.TrimSpace(output)
 	if output != "" && output != "json" && output != "yaml" {
 		return fmt.Errorf("invalid --output %q: want json or yaml", output)
+	}
+
+	doAttach := viper.GetBool(config.KUKE_RUN_ATTACH.ViperKey)
+	containerFlag := strings.TrimSpace(viper.GetString(config.KUKE_RUN_CONTAINER.ViperKey))
+	if !doAttach && containerFlag != "" {
+		return errors.New("--container is only valid together with -a/--attach")
+	}
+	if doAttach && output != "" {
+		// -a hands the terminal to sbsh; mixing structured -o output with an
+		// interactive attach loop produces garbled output that nothing can
+		// parse. Reject the combination so callers pick one mode.
+		return errors.New("--output is incompatible with -a/--attach")
 	}
 
 	reader, cleanup, err := kukshared.ReadFileOrStdin(file)
@@ -137,7 +158,13 @@ func runRun(cmd *cobra.Command, _ []string) error {
 		// bridge plugin rejects with `duplicate allocation`. Pre-existing
 		// daemon bug, surfaced here because the AC requires idempotency.
 		if pre.Cell.Status.State == v1beta1.CellStateReady {
-			return printRunResult(cmd, noOpResultFromGet(pre), output)
+			if printErr := printRunResult(cmd, noOpResultFromGet(pre), output); printErr != nil {
+				return printErr
+			}
+			if doAttach {
+				return attachAfterRun(cmd, client, cellDoc, containerFlag)
+			}
+			return nil
 		}
 	case getErr != nil && !errors.Is(getErr, errdefs.ErrCellNotFound):
 		return getErr
@@ -148,7 +175,31 @@ func runRun(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	return printRunResult(cmd, result, output)
+	if printErr := printRunResult(cmd, result, output); printErr != nil {
+		return printErr
+	}
+	if doAttach {
+		return attachAfterRun(cmd, client, cellDoc, containerFlag)
+	}
+	return nil
+}
+
+// attachAfterRun resolves the post-start attach target per the documented
+// precedence and drives the in-process sbsh attach loop. The selection runs
+// against cellDoc.Spec rather than re-querying the daemon: by this point the
+// resolved doc is what we just told the daemon to create, so the attachable
+// set the user authored is authoritative.
+func attachAfterRun(
+	cmd *cobra.Command,
+	client kukeonv1.Client,
+	doc v1beta1.CellDoc,
+	containerFlag string,
+) error {
+	target, err := pickAttachTarget(doc.Spec, doc.Metadata.Name, containerFlag)
+	if err != nil {
+		return err
+	}
+	return runAttachLoop(cmd, client, doc, target)
 }
 
 // parseSingleCellDoc parses raw YAML and returns the single-doc Cell. It errors
