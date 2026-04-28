@@ -336,6 +336,18 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_START_CONTAINER_CELL = DefineKV("KUKE_START_CONTAINER_CELL", "kuke/start/container/cell")
 
+	// Run command variables.
+	//nolint:revive,gochecknoglobals,staticcheck,godoclint // ignore linter warning about this variable
+	KUKE_RUN_FILE = DefineKV("KUKE_RUN_FILE", "kuke/run/file")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_RUN_OUTPUT = DefineKV("KUKE_RUN_OUTPUT", "kuke/run/output")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_RUN_REALM = DefineKV("KUKE_RUN_REALM", "kuke/run/realm", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_RUN_SPACE = DefineKV("KUKE_RUN_SPACE", "kuke/run/space", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_RUN_STACK = DefineKV("KUKE_RUN_STACK", "kuke/run/stack", "default")
+
 	// Attach command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_ATTACH_REALM = DefineKV("KUKE_ATTACH_REALM", "kuke/attach/realm", "default")
