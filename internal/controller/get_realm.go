@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
@@ -44,7 +45,7 @@ func (b *Exec) GetRealm(realm intmodel.Realm) (GetRealmResult, error) {
 
 	namespace := strings.TrimSpace(realm.Spec.Namespace)
 	if namespace == "" {
-		namespace = name
+		namespace = consts.RealmNamespace(name)
 	}
 
 	// Build lookup realm for runner

@@ -338,7 +338,7 @@ func TestCreateRealm_DefaultNamespace(t *testing.T) {
 		wantResult  func(t *testing.T, result controller.CreateRealmResult)
 	}{
 		{
-			name:      "empty namespace defaults to realm name",
+			name:      "empty namespace defaults to <realm>.kukeon.io",
 			realmName: "test-realm",
 			namespace: "",
 			setupRunner: func(f *fakeRunner) {
@@ -346,22 +346,20 @@ func TestCreateRealm_DefaultNamespace(t *testing.T) {
 					return intmodel.Realm{}, errdefs.ErrRealmNotFound
 				}
 				f.CreateRealmFn = func(realm intmodel.Realm) (intmodel.Realm, error) {
-					// Verify namespace was set to realm name
-					if realm.Spec.Namespace != "test-realm" {
-						return intmodel.Realm{}, errors.New("namespace not set to realm name")
+					// Verify namespace was derived from the realm name via consts.RealmNamespace.
+					if realm.Spec.Namespace != consts.RealmNamespace("test-realm") {
+						return intmodel.Realm{}, errors.New("namespace not derived from realm name")
 					}
-					return buildTestRealm("test-realm", "test-realm"), nil
+					return buildTestRealm("test-realm", consts.RealmNamespace("test-realm")), nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.CreateRealmResult) {
-				if result.Realm.Spec.Namespace != "test-realm" {
-					t.Errorf("expected namespace to be 'test-realm', got %q", result.Realm.Spec.Namespace)
+				wantNs := consts.RealmNamespace("test-realm")
+				if result.Realm.Spec.Namespace != wantNs {
+					t.Errorf("expected namespace to be %q, got %q", wantNs, result.Realm.Spec.Namespace)
 				}
-				if result.Realm.Metadata.Labels[consts.KukeonRealmLabelKey] != "test-realm" {
-					t.Errorf(
-						"expected label to be 'test-realm', got %q",
-						result.Realm.Metadata.Labels[consts.KukeonRealmLabelKey],
-					)
+				if got := result.Realm.Metadata.Labels[consts.KukeonRealmLabelKey]; got != wantNs {
+					t.Errorf("expected label to be %q, got %q", wantNs, got)
 				}
 			},
 		},

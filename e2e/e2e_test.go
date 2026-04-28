@@ -204,13 +204,13 @@ func loadKukeondImageIntoContainerd(t *testing.T) string {
 	defer importCancel()
 	importCmd := exec.CommandContext(
 		importCtx, ctrPath,
-		"--namespace", consts.KukeSystemRealmNamespace,
+		"--namespace", consts.RealmNamespace(consts.KukeSystemRealmName),
 		"images", "import", tarPath,
 	)
 	if out, importErr := importCmd.CombinedOutput(); importErr != nil {
 		t.Fatalf(
 			"ctr -n %s images import %q failed: %v\noutput:\n%s",
-			consts.KukeSystemRealmNamespace, tarPath, importErr, string(out),
+			consts.RealmNamespace(consts.KukeSystemRealmName), tarPath, importErr, string(out),
 		)
 	}
 

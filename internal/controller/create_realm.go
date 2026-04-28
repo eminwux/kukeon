@@ -56,7 +56,7 @@ func (b *Exec) CreateRealm(realm intmodel.Realm) (CreateRealmResult, error) {
 	}
 	namespace := strings.TrimSpace(realm.Spec.Namespace)
 	if namespace == "" {
-		namespace = name
+		namespace = consts.RealmNamespace(name)
 		// Update realm with default namespace
 		realm.Spec.Namespace = namespace
 	}

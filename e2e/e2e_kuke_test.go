@@ -288,7 +288,7 @@ func TestKuke_Init_VerifyState(t *testing.T) {
 	}
 
 	// Step 4: Verify containerd namespace exists
-	namespace := "kukeon.io"
+	namespace := consts.RealmNamespace(consts.KukeonDefaultRealmName)
 	if !verifyContainerdNamespace(t, namespace) {
 		t.Fatalf("containerd namespace %q not found after init", namespace)
 	}

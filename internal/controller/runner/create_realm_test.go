@@ -212,15 +212,15 @@ func TestCreateRealm_LifecycleStateManagement(t *testing.T) {
 			description:             "When a realm exists in Failed state, it should remain in Failed state (no automatic recovery)",
 		},
 		{
-			name:                    "realm creation with empty namespace - defaults to realm name and reaches Ready",
+			name:                    "realm creation with empty namespace - defaults to <realm>.kukeon.io and reaches Ready",
 			realmName:               "test-realm-5",
-			namespace:               "", // Empty namespace defaults to realm name at the runner layer
+			namespace:               "", // Empty namespace defaults to <realm>.kukeon.io at the runner layer
 			setup:                   nil,
 			wantState:               intmodel.RealmStateReady,
 			wantErr:                 false,
 			verifyStateInMetadata:   true,
 			skipIfContainerdMissing: true,
-			description:             "When namespace is empty, runner.CreateRealm defaults Spec.Namespace to the realm name (matching controller-layer defaulting in internal/controller/create_realm.go) so reconcile-style stub realms still provision successfully.",
+			description:             "When namespace is empty, runner.CreateRealm defaults Spec.Namespace to consts.RealmNamespace(name) (matching controller-layer defaulting in internal/controller/create_realm.go) so reconcile-style stub realms still provision successfully.",
 		},
 		{
 			name:      "realm creation with duplicate namespace - handles gracefully",
@@ -507,13 +507,13 @@ func TestProvisionNewRealm_ErrorHandling(t *testing.T) {
 			description:             "Successful realm creation should transition from Creating to Ready",
 		},
 		{
-			name:                    "empty namespace - defaults to realm name and reaches Ready",
+			name:                    "empty namespace - defaults to <realm>.kukeon.io and reaches Ready",
 			realmName:               "fail-ns-realm",
-			namespace:               "", // Empty namespace defaults to realm name at the runner layer
+			namespace:               "", // Empty namespace defaults to <realm>.kukeon.io at the runner layer
 			wantState:               intmodel.RealmStateReady,
 			wantErr:                 false,
 			skipIfContainerdMissing: true,
-			description:             "When namespace is empty, runner.CreateRealm defaults Spec.Namespace to the realm name; the realm provisions successfully rather than parking as Failed.",
+			description:             "When namespace is empty, runner.CreateRealm defaults Spec.Namespace to consts.RealmNamespace(name); the realm provisions successfully rather than parking as Failed.",
 		},
 	}
 

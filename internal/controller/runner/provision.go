@@ -47,7 +47,7 @@ type ensureCgroupParams struct {
 }
 
 func (r *Exec) provisionNewRealm(realm intmodel.Realm) (intmodel.Realm, error) {
-	// Default empty Spec.Namespace to the realm name so the runner-layer
+	// Default empty Spec.Namespace to <realm>.kukeon.io so the runner-layer
 	// API behaves symmetrically with the controller layer's defaulting
 	// (internal/controller/create_realm.go:57-62). Without this, callers
 	// that go straight to the runner — notably ReconcileSpace's "ensure
@@ -56,7 +56,7 @@ func (r *Exec) provisionNewRealm(realm intmodel.Realm) (intmodel.Realm, error) {
 	// silently colocating every "naked" realm. Mirror the controller's
 	// behavior here so both layers converge on the same safe default.
 	if strings.TrimSpace(realm.Spec.Namespace) == "" {
-		realm.Spec.Namespace = strings.TrimSpace(realm.Metadata.Name)
+		realm.Spec.Namespace = consts.RealmNamespace(strings.TrimSpace(realm.Metadata.Name))
 	}
 
 	// Update realm metadata with Creating state

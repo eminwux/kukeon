@@ -22,6 +22,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -232,10 +233,11 @@ func TestPurgeRealm_SuccessfulPurgeWithoutMetadata(t *testing.T) {
 				if result.Realm.Metadata.Name != "test-realm" {
 					t.Errorf("expected realm name to be 'test-realm', got %q", result.Realm.Metadata.Name)
 				}
-				if result.Realm.Spec.Namespace != "test-realm" {
+				wantNs := consts.RealmNamespace("test-realm")
+				if result.Realm.Spec.Namespace != wantNs {
 					t.Errorf(
-						"expected namespace to default to realm name 'test-realm', got %q",
-						result.Realm.Spec.Namespace,
+						"expected namespace to default to %q, got %q",
+						wantNs, result.Realm.Spec.Namespace,
 					)
 				}
 				if result.Realm.Status.State != intmodel.RealmStateUnknown {
@@ -516,38 +518,41 @@ func TestPurgeRealm_DefaultNamespace(t *testing.T) {
 		wantErr     bool
 	}{
 		{
-			name:      "empty namespace defaults to realm name",
+			name:      "empty namespace defaults to <realm>.kukeon.io",
 			realmName: "test-realm",
 			namespace: "",
 			setupRunner: func(f *fakeRunner) {
+				wantNs := consts.RealmNamespace("test-realm")
 				f.GetRealmFn = func(_ intmodel.Realm) (intmodel.Realm, error) {
 					return intmodel.Realm{}, errdefs.ErrRealmNotFound
 				}
 				f.ExistsRealmContainerdNamespaceFn = func(namespace string) (bool, error) {
-					if namespace != "test-realm" {
-						t.Errorf("expected namespace to be 'test-realm', got %q", namespace)
+					if namespace != wantNs {
+						t.Errorf("expected namespace to be %q, got %q", wantNs, namespace)
 					}
 					return false, nil
 				}
 				f.PurgeRealmFn = func(realm intmodel.Realm) error {
-					if realm.Spec.Namespace != "test-realm" {
-						t.Errorf("expected namespace to be 'test-realm', got %q", realm.Spec.Namespace)
+					if realm.Spec.Namespace != wantNs {
+						t.Errorf("expected namespace to be %q, got %q", wantNs, realm.Spec.Namespace)
 					}
 					return nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.PurgeRealmResult) {
-				if result.Realm.Spec.Namespace != "test-realm" {
-					t.Errorf("expected namespace to default to 'test-realm', got %q", result.Realm.Spec.Namespace)
+				wantNs := consts.RealmNamespace("test-realm")
+				if result.Realm.Spec.Namespace != wantNs {
+					t.Errorf("expected namespace to default to %q, got %q", wantNs, result.Realm.Spec.Namespace)
 				}
 			},
 			wantErr: false,
 		},
 		{
-			name:      "whitespace namespace defaults to realm name",
+			name:      "whitespace namespace defaults to <realm>.kukeon.io",
 			realmName: "test-realm",
 			namespace: "   ",
 			setupRunner: func(f *fakeRunner) {
+				wantNs := consts.RealmNamespace("test-realm")
 				f.GetRealmFn = func(_ intmodel.Realm) (intmodel.Realm, error) {
 					return intmodel.Realm{}, errdefs.ErrRealmNotFound
 				}
@@ -555,15 +560,16 @@ func TestPurgeRealm_DefaultNamespace(t *testing.T) {
 					return false, nil
 				}
 				f.PurgeRealmFn = func(realm intmodel.Realm) error {
-					if realm.Spec.Namespace != "test-realm" {
-						t.Errorf("expected namespace to be 'test-realm', got %q", realm.Spec.Namespace)
+					if realm.Spec.Namespace != wantNs {
+						t.Errorf("expected namespace to be %q, got %q", wantNs, realm.Spec.Namespace)
 					}
 					return nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.PurgeRealmResult) {
-				if result.Realm.Spec.Namespace != "test-realm" {
-					t.Errorf("expected namespace to default to 'test-realm', got %q", result.Realm.Spec.Namespace)
+				wantNs := consts.RealmNamespace("test-realm")
+				if result.Realm.Spec.Namespace != wantNs {
+					t.Errorf("expected namespace to default to %q, got %q", wantNs, result.Realm.Spec.Namespace)
 				}
 			},
 			wantErr: false,
