@@ -60,13 +60,9 @@ const (
 	// AttachableProfileFile is the basename of the sbsh TerminalProfile YAML
 	// the daemon writes into the per-container tty directory when a
 	// container declares a tty block. The host pre-writes the file in the
-	// bind-mount source so it appears at AttachableProfilePath inside the
-	// container.
+	// bind-mount source so it appears under AttachableTTYDir inside the
+	// container, where sbsh resolves it via --profiles-dir + --profile.
 	AttachableProfileFile = "profile.yaml"
-
-	// AttachableProfilePath is the in-container path of the generated sbsh
-	// TerminalProfile YAML.
-	AttachableProfilePath = AttachableTTYDir + "/" + AttachableProfileFile
 
 	// AttachableProfileName is the profile.metadata.name written into the
 	// generated TerminalProfile and passed to `sbsh terminal --profile`.
@@ -132,9 +128,10 @@ func withAttachableMounts(inj AttachableInjection) oci.SpecOpts {
 // When useProfile is true, the wrapper additionally points sbsh at the
 // per-container profile YAML the runner pre-wrote into HostTTYDir, so
 // the generated prompt and onInit scripts take effect on first attach.
-// Profile flags are global on `sbsh`, so they sit before the `terminal`
-// subcommand — sbsh reports `unknown flag` if --profiles-dir/--profile are
-// passed after `terminal`.
+// `--profiles-dir` is a global flag on `sbsh` and must precede the
+// `terminal` subcommand; `--profile` is a per-subcommand flag on
+// `terminal` and must follow it. Swapping either placement makes sbsh
+// reject the invocation with `unknown flag`.
 //
 // OCI semantics: process.args is the merged "ENTRYPOINT + CMD" by the time
 // this opt runs (containerd's WithImageConfigArgs has already resolved image
