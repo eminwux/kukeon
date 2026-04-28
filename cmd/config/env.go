@@ -347,6 +347,10 @@ var (
 	KUKE_RUN_SPACE = DefineKV("KUKE_RUN_SPACE", "kuke/run/space", "default")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_STACK = DefineKV("KUKE_RUN_STACK", "kuke/run/stack", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_RUN_ATTACH = DefineKV("KUKE_RUN_ATTACH", "kuke/run/attach")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_RUN_CONTAINER = DefineKV("KUKE_RUN_CONTAINER", "kuke/run/container")
 
 	// Attach command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
