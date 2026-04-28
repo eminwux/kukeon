@@ -192,7 +192,10 @@ func TestMaterialize_DefaultName(t *testing.T) {
 		},
 	}
 
-	doc := cellprofile.Materialize(profile, "")
+	doc, err := cellprofile.Materialize(profile)
+	if err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
 
 	if doc.Metadata.Name != "claude-cell" {
 		t.Errorf("metadata.name=%q want claude-cell (default to profile name)", doc.Metadata.Name)
@@ -207,11 +210,18 @@ func TestMaterialize_DefaultName(t *testing.T) {
 	if doc.Spec.ID != "claude-cell" {
 		t.Errorf("spec.id=%q want claude-cell (defaulted from cell name)", doc.Spec.ID)
 	}
+	if got := doc.Metadata.Labels[cellprofile.LabelProfile]; got != "claude-cell" {
+		t.Errorf("labels[%q]=%q want claude-cell (profile-of-origin label)",
+			cellprofile.LabelProfile, got)
+	}
 }
 
-func TestMaterialize_NameOverride(t *testing.T) {
+func TestMaterialize_DefaultName_Idempotent(t *testing.T) {
+	// Without spec.namePrefix the same profile must produce the same cell name
+	// across invocations. This is the singleton path that pairs with the
+	// runner's already-exists idempotency.
 	profile := &v1beta1.CellProfileDoc{
-		Metadata: v1beta1.CellProfileMetadata{Name: "claude-cell"},
+		Metadata: v1beta1.CellProfileMetadata{Name: "singleton"},
 		Spec: v1beta1.CellProfileSpec{
 			Cell: v1beta1.CellSpec{
 				Containers: []v1beta1.ContainerSpec{
@@ -221,12 +231,101 @@ func TestMaterialize_NameOverride(t *testing.T) {
 		},
 	}
 
-	doc := cellprofile.Materialize(profile, "my-cell")
-
-	if doc.Metadata.Name != "my-cell" {
-		t.Errorf("metadata.name=%q want my-cell (positional override)", doc.Metadata.Name)
+	first, err := cellprofile.Materialize(profile)
+	if err != nil {
+		t.Fatalf("Materialize first: %v", err)
 	}
-	if doc.Spec.ID != "my-cell" {
-		t.Errorf("spec.id=%q want my-cell (override propagates)", doc.Spec.ID)
+	second, err := cellprofile.Materialize(profile)
+	if err != nil {
+		t.Fatalf("Materialize second: %v", err)
+	}
+	if first.Metadata.Name != "singleton" || second.Metadata.Name != "singleton" {
+		t.Fatalf("names=%q/%q want singleton/singleton", first.Metadata.Name, second.Metadata.Name)
+	}
+}
+
+func TestMaterialize_NamePrefix_GeneratesUniqueCells(t *testing.T) {
+	profile := &v1beta1.CellProfileDoc{
+		Metadata: v1beta1.CellProfileMetadata{Name: "claude"},
+		Spec: v1beta1.CellProfileSpec{
+			NamePrefix: "claude",
+			Cell: v1beta1.CellSpec{
+				Containers: []v1beta1.ContainerSpec{
+					{ID: "work", Image: "registry.eminwux.com/busybox:latest"},
+				},
+			},
+		},
+	}
+
+	const invocations = 3
+	seen := make(map[string]struct{}, invocations)
+	for i := range invocations {
+		doc, err := cellprofile.Materialize(profile)
+		if err != nil {
+			t.Fatalf("Materialize #%d: %v", i, err)
+		}
+		name := doc.Metadata.Name
+		if !strings.HasPrefix(name, "claude-") {
+			t.Errorf("name=%q want prefix claude-", name)
+		}
+		suffix := strings.TrimPrefix(name, "claude-")
+		if len(suffix) != 6 {
+			t.Errorf("suffix=%q len=%d want 6 lowercase hex chars", suffix, len(suffix))
+		}
+		const hexChars = "0123456789abcdef"
+		if strings.Trim(suffix, hexChars) != "" {
+			t.Errorf("suffix=%q contains non-lowercase-hex bytes", suffix)
+		}
+		if _, dup := seen[name]; dup {
+			t.Errorf("name=%q repeated across invocations (entropy too narrow?)", name)
+		}
+		seen[name] = struct{}{}
+		if doc.Spec.ID != name {
+			t.Errorf("spec.id=%q want %q (defaulted from generated name)", doc.Spec.ID, name)
+		}
+		if got := doc.Metadata.Labels[cellprofile.LabelProfile]; got != "claude" {
+			t.Errorf("labels[%q]=%q want claude (profile-of-origin survives namePrefix path)",
+				cellprofile.LabelProfile, got)
+		}
+	}
+}
+
+func TestMaterialize_LabelsMerged(t *testing.T) {
+	// User-set labels on the profile must survive into the cell, alongside
+	// the system-injected kukeon.io/profile=<name> label. Conflicts on the
+	// reserved key resolve to the system value (the label is identity, not
+	// user-controlled metadata).
+	profile := &v1beta1.CellProfileDoc{
+		Metadata: v1beta1.CellProfileMetadata{
+			Name: "claude",
+			Labels: map[string]string{
+				"team":                   "agents",
+				"owner":                  "ops",
+				cellprofile.LabelProfile: "should-be-overwritten",
+			},
+		},
+		Spec: v1beta1.CellProfileSpec{
+			Cell: v1beta1.CellSpec{
+				Containers: []v1beta1.ContainerSpec{
+					{ID: "work", Image: "registry.eminwux.com/busybox:latest"},
+				},
+			},
+		},
+	}
+
+	doc, err := cellprofile.Materialize(profile)
+	if err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	labels := doc.Metadata.Labels
+	if labels["team"] != "agents" {
+		t.Errorf("labels[team]=%q want agents (user label preserved)", labels["team"])
+	}
+	if labels["owner"] != "ops" {
+		t.Errorf("labels[owner]=%q want ops (user label preserved)", labels["owner"])
+	}
+	if labels[cellprofile.LabelProfile] != "claude" {
+		t.Errorf("labels[%q]=%q want claude (system label wins on conflict)",
+			cellprofile.LabelProfile, labels[cellprofile.LabelProfile])
 	}
 }

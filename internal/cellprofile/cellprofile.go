@@ -20,6 +20,8 @@
 package cellprofile
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -31,6 +33,16 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"gopkg.in/yaml.v3"
 )
+
+// LabelProfile is the cell label that records the CellProfile a cell was
+// materialized from. Set on every cell produced by Materialize so operators
+// can list all instances with `kuke get cells -l kukeon.io/profile=<name>`.
+const LabelProfile = "kukeon.io/profile"
+
+// nameSuffixBytes is the entropy width for namePrefix-generated cell names.
+// 3 bytes → 6 lowercase hex chars; matches K8s `generateName`'s suffix shape
+// closely enough that the names read familiar at a glance.
+const nameSuffixBytes = 3
 
 // EnvProfilesDir is the env var that overrides the default user profiles
 // directory. Picked up by ResolveDir; takes precedence over $HOME/.kuke/profiles.d.
@@ -157,14 +169,18 @@ func matchesName(profile *v1beta1.CellProfileDoc, name string) bool {
 }
 
 // Materialize converts a CellProfile into a CellDoc suitable for the same
-// path `kuke run -f` drives. The cell name comes from cellNameOverride if
-// non-empty, else the profile's metadata.name; the realm/space/stack triple
-// is taken from the profile spec verbatim (callers layer --realm/--space/--stack
-// flag overrides separately, mirroring the existing -f resolution).
-func Materialize(profile *v1beta1.CellProfileDoc, cellNameOverride string) v1beta1.CellDoc {
-	cellName := strings.TrimSpace(cellNameOverride)
-	if cellName == "" {
-		cellName = profile.Metadata.Name
+// path `kuke run -f` drives. When spec.namePrefix is set the cell name is
+// `<namePrefix>-<6hex>` (a fresh cell on every invocation); otherwise it
+// defaults to the profile's metadata.name and re-running the profile is
+// idempotent against the existing cell. The realm/space/stack triple is taken
+// from the profile spec verbatim — callers layer --realm/--space/--stack flag
+// overrides separately, mirroring the existing -f resolution. Every produced
+// cell also carries the kukeon.io/profile=<metadata.name> label so the set of
+// cells materialized from a profile is queryable via `kuke get cells -l`.
+func Materialize(profile *v1beta1.CellProfileDoc) (v1beta1.CellDoc, error) {
+	cellName, err := resolveCellName(profile)
+	if err != nil {
+		return v1beta1.CellDoc{}, err
 	}
 
 	spec := profile.Spec.Cell
@@ -180,19 +196,37 @@ func Materialize(profile *v1beta1.CellProfileDoc, cellNameOverride string) v1bet
 		Kind:       v1beta1.KindCell,
 		Metadata: v1beta1.CellMetadata{
 			Name:   cellName,
-			Labels: cloneLabels(profile.Metadata.Labels),
+			Labels: mergeLabels(profile.Metadata.Labels, LabelProfile, profile.Metadata.Name),
 		},
 		Spec: spec,
-	}
+	}, nil
 }
 
-func cloneLabels(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return map[string]string{}
+func resolveCellName(profile *v1beta1.CellProfileDoc) (string, error) {
+	prefix := strings.TrimSpace(profile.Spec.NamePrefix)
+	if prefix == "" {
+		return profile.Metadata.Name, nil
 	}
-	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
+	suffix, err := randomHexSuffix()
+	if err != nil {
+		return "", fmt.Errorf("generate name suffix for profile %q: %w", profile.Metadata.Name, err)
 	}
+	return prefix + "-" + suffix, nil
+}
+
+func randomHexSuffix() (string, error) {
+	b := make([]byte, nameSuffixBytes)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func mergeLabels(in map[string]string, k, v string) map[string]string {
+	out := make(map[string]string, len(in)+1)
+	for lk, lv := range in {
+		out[lk] = lv
+	}
+	out[k] = v
 	return out
 }
