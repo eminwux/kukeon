@@ -66,8 +66,8 @@ func TestPurgeRealm_SuccessfulPurgeWithMetadata(t *testing.T) {
 					return nil
 				}
 				// Mock comprehensive purge
-				f.PurgeRealmFn = func(_ intmodel.Realm) error {
-					return nil
+				f.PurgeRealmFn = func(_ intmodel.Realm) (bool, error) {
+					return true, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.PurgeRealmResult) {
@@ -127,8 +127,8 @@ func TestPurgeRealm_SuccessfulPurgeWithMetadata(t *testing.T) {
 				f.DeleteRealmFn = func(_ intmodel.Realm) error {
 					return nil
 				}
-				f.PurgeRealmFn = func(_ intmodel.Realm) error {
-					return nil
+				f.PurgeRealmFn = func(_ intmodel.Realm) (bool, error) {
+					return true, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.PurgeRealmResult) {
@@ -205,8 +205,8 @@ func TestPurgeRealm_SuccessfulPurgeWithoutMetadata(t *testing.T) {
 					return false, nil
 				}
 				// PurgeRealm is called even without metadata
-				f.PurgeRealmFn = func(_ intmodel.Realm) error {
-					return nil
+				f.PurgeRealmFn = func(_ intmodel.Realm) (bool, error) {
+					return true, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.PurgeRealmResult) {
@@ -329,8 +329,8 @@ func TestPurgeRealm_CascadePurge(t *testing.T) {
 				f.DeleteRealmFn = func(_ intmodel.Realm) error {
 					return nil
 				}
-				f.PurgeRealmFn = func(_ intmodel.Realm) error {
-					return nil
+				f.PurgeRealmFn = func(_ intmodel.Realm) (bool, error) {
+					return true, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.PurgeRealmResult) {
@@ -423,8 +423,8 @@ func TestPurgeRealm_ForcePurge(t *testing.T) {
 				f.DeleteRealmFn = func(_ intmodel.Realm) error {
 					return nil
 				}
-				f.PurgeRealmFn = func(_ intmodel.Realm) error {
-					return nil
+				f.PurgeRealmFn = func(_ intmodel.Realm) (bool, error) {
+					return true, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.PurgeRealmResult) {
@@ -532,11 +532,11 @@ func TestPurgeRealm_DefaultNamespace(t *testing.T) {
 					}
 					return false, nil
 				}
-				f.PurgeRealmFn = func(realm intmodel.Realm) error {
+				f.PurgeRealmFn = func(realm intmodel.Realm) (bool, error) {
 					if realm.Spec.Namespace != wantNs {
 						t.Errorf("expected namespace to be %q, got %q", wantNs, realm.Spec.Namespace)
 					}
-					return nil
+					return true, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.PurgeRealmResult) {
@@ -559,11 +559,11 @@ func TestPurgeRealm_DefaultNamespace(t *testing.T) {
 				f.ExistsRealmContainerdNamespaceFn = func(_ string) (bool, error) {
 					return false, nil
 				}
-				f.PurgeRealmFn = func(realm intmodel.Realm) error {
+				f.PurgeRealmFn = func(realm intmodel.Realm) (bool, error) {
 					if realm.Spec.Namespace != wantNs {
 						t.Errorf("expected namespace to be %q, got %q", wantNs, realm.Spec.Namespace)
 					}
-					return nil
+					return true, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.PurgeRealmResult) {
@@ -588,11 +588,11 @@ func TestPurgeRealm_DefaultNamespace(t *testing.T) {
 					}
 					return false, nil
 				}
-				f.PurgeRealmFn = func(realm intmodel.Realm) error {
+				f.PurgeRealmFn = func(realm intmodel.Realm) (bool, error) {
 					if realm.Spec.Namespace != "custom-namespace" {
 						t.Errorf("expected namespace to be 'custom-namespace', got %q", realm.Spec.Namespace)
 					}
-					return nil
+					return true, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.PurgeRealmResult) {
@@ -751,8 +751,8 @@ func TestPurgeRealm_GetRealmErrors(t *testing.T) {
 				f.ExistsRealmContainerdNamespaceFn = func(_ string) (bool, error) {
 					return false, nil
 				}
-				f.PurgeRealmFn = func(_ intmodel.Realm) error {
-					return nil
+				f.PurgeRealmFn = func(_ intmodel.Realm) (bool, error) {
+					return true, nil
 				}
 			},
 			wantErr: false,
@@ -955,8 +955,8 @@ func TestPurgeRealm_RunnerErrors(t *testing.T) {
 				f.DeleteRealmFn = func(_ intmodel.Realm) error {
 					return errors.New("deletion failed")
 				}
-				f.PurgeRealmFn = func(_ intmodel.Realm) error {
-					return errors.New("purge failed")
+				f.PurgeRealmFn = func(_ intmodel.Realm) (bool, error) {
+					return false, errors.New("purge failed")
 				}
 			},
 			wantErr:     true,
@@ -985,8 +985,8 @@ func TestPurgeRealm_RunnerErrors(t *testing.T) {
 				f.DeleteRealmFn = func(_ intmodel.Realm) error {
 					return nil
 				}
-				f.PurgeRealmFn = func(_ intmodel.Realm) error {
-					return errors.New("purge failed")
+				f.PurgeRealmFn = func(_ intmodel.Realm) (bool, error) {
+					return false, errors.New("purge failed")
 				}
 			},
 			wantErr: true,
@@ -1190,8 +1190,8 @@ func TestPurgeRealm_ResultConstruction(t *testing.T) {
 				f.DeleteRealmFn = func(_ intmodel.Realm) error {
 					return nil
 				}
-				f.PurgeRealmFn = func(_ intmodel.Realm) error {
-					return nil
+				f.PurgeRealmFn = func(_ intmodel.Realm) (bool, error) {
+					return true, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.PurgeRealmResult) {
@@ -1250,8 +1250,8 @@ func TestPurgeRealm_ResultConstruction(t *testing.T) {
 				f.DeleteRealmFn = func(_ intmodel.Realm) error {
 					return nil
 				}
-				f.PurgeRealmFn = func(_ intmodel.Realm) error {
-					return errors.New("purge failed")
+				f.PurgeRealmFn = func(_ intmodel.Realm) (bool, error) {
+					return false, errors.New("purge failed")
 				}
 			},
 			wantResult: func(t *testing.T, result controller.PurgeRealmResult) {
@@ -1341,11 +1341,11 @@ func TestPurgeRealm_NameTrimming(t *testing.T) {
 					}
 					return nil
 				}
-				f.PurgeRealmFn = func(realm intmodel.Realm) error {
+				f.PurgeRealmFn = func(realm intmodel.Realm) (bool, error) {
 					if realm.Metadata.Name != "test-realm" {
-						return errors.New("unexpected realm name")
+						return false, errors.New("unexpected realm name")
 					}
-					return nil
+					return true, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.PurgeRealmResult) {
@@ -1379,11 +1379,11 @@ func TestPurgeRealm_NameTrimming(t *testing.T) {
 				f.DeleteRealmFn = func(_ intmodel.Realm) error {
 					return nil
 				}
-				f.PurgeRealmFn = func(realm intmodel.Realm) error {
+				f.PurgeRealmFn = func(realm intmodel.Realm) (bool, error) {
 					if realm.Spec.Namespace != "test-namespace" {
-						return errors.New("unexpected namespace")
+						return false, errors.New("unexpected namespace")
 					}
-					return nil
+					return true, nil
 				}
 			},
 			wantResult: func(t *testing.T, result controller.PurgeRealmResult) {
@@ -1453,9 +1453,9 @@ func TestPurgeRealm_DeleteCascadeFailsButPurgeSucceeds(t *testing.T) {
 		return errors.New("namespace must be empty, still has snapshots on overlayfs snapshotter")
 	}
 	purgeCalled := false
-	mockRunner.PurgeRealmFn = func(_ intmodel.Realm) error {
+	mockRunner.PurgeRealmFn = func(_ intmodel.Realm) (bool, error) {
 		purgeCalled = true
-		return nil
+		return true, nil
 	}
 
 	ctrl := setupTestController(t, mockRunner)

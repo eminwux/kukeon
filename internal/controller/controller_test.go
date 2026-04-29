@@ -84,7 +84,7 @@ type fakeRunner struct {
 	ExistsCgroupFn func(doc any) (bool, error)
 
 	// Purge methods
-	PurgeRealmFn     func(realm intmodel.Realm) error
+	PurgeRealmFn     func(realm intmodel.Realm) (bool, error)
 	PurgeSpaceFn     func(space intmodel.Space) error
 	PurgeStackFn     func(stack intmodel.Stack) error
 	PurgeCellFn      func(cell intmodel.Cell) error
@@ -380,11 +380,11 @@ func (f *fakeRunner) ExistsCgroup(doc any) (bool, error) {
 
 // Purge methods
 
-func (f *fakeRunner) PurgeRealm(realm intmodel.Realm) error {
+func (f *fakeRunner) PurgeRealm(realm intmodel.Realm) (bool, error) {
 	if f.PurgeRealmFn != nil {
 		return f.PurgeRealmFn(realm)
 	}
-	return errors.New("unexpected call to PurgeRealm")
+	return false, errors.New("unexpected call to PurgeRealm")
 }
 
 func (f *fakeRunner) PurgeSpace(space intmodel.Space) error {

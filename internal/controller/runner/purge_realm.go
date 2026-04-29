@@ -29,18 +29,27 @@ import (
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
-// PurgeRealm performs comprehensive cleanup of a realm, including all child resources, CNI resources, and orphaned containers.
-func (r *Exec) PurgeRealm(realm intmodel.Realm) error {
+// PurgeRealm performs comprehensive cleanup of a realm, including all child
+// resources, CNI resources, and orphaned containers.
+//
+// Returns (namespaceRemoved, err). namespaceRemoved is true iff the
+// containerd namespace was actually removed (or was already gone). err is
+// non-nil only for fatal precondition failures (missing name, GetRealm error,
+// containerd connect error) or when DeleteNamespace itself failed — it is the
+// load-bearing piece of "purge". Best-effort cleanups (cgroup removal, CNI
+// teardown, orphaned-container drain) log warnings and do not surface as err
+// so a fully-cleaned namespace is never reported as a failed purge.
+func (r *Exec) PurgeRealm(realm intmodel.Realm) (bool, error) {
 	realmName := strings.TrimSpace(realm.Metadata.Name)
 	if realmName == "" {
-		return errdefs.ErrRealmNameRequired
+		return false, errdefs.ErrRealmNameRequired
 	}
 
 	// Get realm via internal model to ensure metadata accuracy (if available)
 	// Note: DeleteRealm is handled at the controller level, this function focuses on comprehensive cleanup
 	internalRealm, err := r.GetRealm(realm)
 	if err != nil && !errors.Is(err, errdefs.ErrRealmNotFound) {
-		return fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
+		return false, fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
 	}
 
 	// Use internalRealm if available, otherwise use provided realm as fallback
@@ -51,7 +60,7 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) error {
 	}
 
 	if err = r.ensureClientConnected(); err != nil {
-		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+		return false, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
 	// List ALL containers in namespace (even orphaned ones)
@@ -108,8 +117,15 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) error {
 		// Continue with namespace deletion attempt anyway
 	}
 
-	// Delete containerd namespace as part of comprehensive cleanup
+	// Delete containerd namespace as part of comprehensive cleanup. This is
+	// the load-bearing step of a purge — surface its failure to the caller
+	// so a leftover namespace renders as "FAILED" in the uninstall report
+	// instead of a bogus "purged".
+	namespaceRemoved := true
+	var nsErr error
 	if err = r.ctrClient.DeleteNamespace(realmForOps.Spec.Namespace); err != nil {
+		namespaceRemoved = false
+		nsErr = fmt.Errorf("failed to delete containerd namespace %q: %w", realmForOps.Spec.Namespace, err)
 		r.logger.WarnContext(
 			r.ctx,
 			"failed to delete containerd namespace",
@@ -118,7 +134,8 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) error {
 			"error",
 			err,
 		)
-		// Continue with other cleanup
+		// Continue with other cleanup so a single failure does not strand
+		// metadata/cgroup state on disk.
 	}
 
 	// Remove all metadata directories for realm and children
@@ -140,5 +157,5 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) error {
 		// Continue with cleanup even if cgroup deletion fails
 	}
 
-	return nil
+	return namespaceRemoved, nsErr
 }

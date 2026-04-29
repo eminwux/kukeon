@@ -47,7 +47,7 @@ func uninstallNoopRunner(extraRealms []intmodel.Realm) *fakeRunner {
 		return nil, nil
 	}
 	f.DeleteRealmFn = func(_ intmodel.Realm) error { return nil }
-	f.PurgeRealmFn = func(_ intmodel.Realm) error { return nil }
+	f.PurgeRealmFn = func(_ intmodel.Realm) (bool, error) { return true, nil }
 	return f
 }
 
@@ -64,9 +64,9 @@ func TestUninstall_PurgesWellKnownRealmsAndCleansFilesystem(t *testing.T) {
 
 	purged := map[string]string{} // name -> namespace
 	f := uninstallNoopRunner(nil)
-	f.PurgeRealmFn = func(r intmodel.Realm) error {
+	f.PurgeRealmFn = func(r intmodel.Realm) (bool, error) {
 		purged[r.Metadata.Name] = r.Spec.Namespace
-		return nil
+		return true, nil
 	}
 
 	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
@@ -144,9 +144,9 @@ func TestUninstall_MergesListedRealmsWithWellKnown(t *testing.T) {
 	f := uninstallNoopRunner([]intmodel.Realm{custom})
 
 	purgedNames := []string{}
-	f.PurgeRealmFn = func(r intmodel.Realm) error {
+	f.PurgeRealmFn = func(r intmodel.Realm) (bool, error) {
 		purgedNames = append(purgedNames, r.Metadata.Name)
-		return nil
+		return true, nil
 	}
 
 	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
@@ -178,11 +178,11 @@ func TestUninstall_PurgeFailureIsRecordedButCleanupContinues(t *testing.T) {
 
 	f := uninstallNoopRunner(nil)
 	failure := errors.New("synthetic purge failure")
-	f.PurgeRealmFn = func(r intmodel.Realm) error {
+	f.PurgeRealmFn = func(r intmodel.Realm) (bool, error) {
 		if r.Metadata.Name == consts.KukeSystemRealmName {
-			return failure
+			return false, failure
 		}
-		return nil
+		return true, nil
 	}
 
 	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
@@ -202,16 +202,48 @@ func TestUninstall_PurgeFailureIsRecordedButCleanupContinues(t *testing.T) {
 		t.Errorf("run path not removed after a realm purge failure (expected best-effort cleanup)")
 	}
 	// And the failing realm's outcome must be in the report so callers can
-	// surface what went wrong.
+	// surface what went wrong. NamespaceRemoved must be false so the renderer
+	// can flag the residual namespace from issue #193 instead of misreporting
+	// "purged".
 	var foundFailure bool
 	for _, outcome := range report.Realms {
-		if outcome.Name == consts.KukeSystemRealmName && outcome.Err != nil {
-			foundFailure = true
-			break
+		if outcome.Name != consts.KukeSystemRealmName {
+			continue
 		}
+		if outcome.Err == nil {
+			t.Errorf("expected failing realm to carry its err; got outcome=%+v", outcome)
+		}
+		if outcome.Purged {
+			t.Errorf("failing realm must not be marked Purged=true; got %+v", outcome)
+		}
+		if outcome.NamespaceRemoved {
+			t.Errorf("failing realm must report NamespaceRemoved=false (namespace survived); got %+v", outcome)
+		}
+		foundFailure = true
+		break
 	}
 	if !foundFailure {
 		t.Errorf("expected failing realm to be reported with its error; got %+v", report.Realms)
+	}
+
+	// The well-known "default" realm purged successfully — its outcome must
+	// be the converse: Purged + NamespaceRemoved both true.
+	var foundOK bool
+	for _, outcome := range report.Realms {
+		if outcome.Name != consts.KukeonDefaultRealmName {
+			continue
+		}
+		if !outcome.Purged || !outcome.NamespaceRemoved || outcome.Err != nil {
+			t.Errorf(
+				"successful realm outcome should be {Purged:true, NamespaceRemoved:true, Err:nil}; got %+v",
+				outcome,
+			)
+		}
+		foundOK = true
+		break
+	}
+	if !foundOK {
+		t.Errorf("expected successful default realm in report; got %+v", report.Realms)
 	}
 }
 
