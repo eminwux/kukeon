@@ -860,6 +860,26 @@ func formatValidationErrors(validationErrors []*parser.ValidationError) error {
 	return fmt.Errorf("validation failed:\n  %s", strings.Join(msgs, "\n  "))
 }
 
+// ---- Image ----
+
+// LoadImage imports an OCI/docker image tarball into the realm's containerd
+// namespace. The byte slice is wrapped in a bytes.Reader so the controller
+// can stream it through to containerd's Import API.
+func (c *Client) LoadImage(_ context.Context, realm string, tarball []byte) (kukeonv1.LoadImageResult, error) {
+	if len(tarball) == 0 {
+		return kukeonv1.LoadImageResult{}, errdefs.ErrTarballRequired
+	}
+	res, err := c.ctrl.LoadImage(realm, bytes.NewReader(tarball))
+	if err != nil {
+		return kukeonv1.LoadImageResult{}, err
+	}
+	return kukeonv1.LoadImageResult{
+		Realm:     res.Realm,
+		Namespace: res.Namespace,
+		Images:    res.Images,
+	}, nil
+}
+
 // ---- Attach ----
 
 // AttachContainer enforces the Attachable gate and resolves the host-side

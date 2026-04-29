@@ -85,6 +85,10 @@ type Client interface {
 	RefreshAll(ctx context.Context) (RefreshAllResult, error)
 	ApplyDocuments(ctx context.Context, rawYAML []byte) (ApplyDocumentsResult, error)
 
+	// LoadImage imports an OCI/docker image tarball into the named realm's
+	// containerd namespace. The tarball ships in-band; see LoadImageArgs.
+	LoadImage(ctx context.Context, realm string, tarball []byte) (LoadImageResult, error)
+
 	Ping(ctx context.Context) error
 }
 
@@ -176,6 +180,7 @@ const (
 
 	MethodRefreshAll     = ServiceName + ".RefreshAll"
 	MethodApplyDocuments = ServiceName + ".ApplyDocuments"
+	MethodLoadImage      = ServiceName + ".LoadImage"
 
 	MethodPing = ServiceName + ".Ping"
 )

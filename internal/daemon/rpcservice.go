@@ -389,3 +389,15 @@ func (s *KukeonV1Service) ApplyDocuments(args *kukeonv1.ApplyDocumentsArgs, repl
 	reply.Err = kukeonv1.ToAPIError(err)
 	return nil
 }
+
+// ---- Image ----
+
+func (s *KukeonV1Service) LoadImage(args *kukeonv1.LoadImageArgs, reply *kukeonv1.LoadImageReply) error {
+	result, err := s.core.LoadImage(s.ctx, args.Realm, args.Tarball)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "LoadImage returned error", "error", err)
+	}
+	return nil
+}

@@ -602,6 +602,19 @@ func (c *UnixClient) ApplyDocuments(ctx context.Context, rawYAML []byte) (ApplyD
 	return reply.Result, nil
 }
 
+// LoadImage implements Client.
+func (c *UnixClient) LoadImage(ctx context.Context, realm string, tarball []byte) (LoadImageResult, error) {
+	args := &LoadImageArgs{Realm: realm, Tarball: tarball}
+	reply := &LoadImageReply{}
+	if err := c.call(ctx, MethodLoadImage, args, reply); err != nil {
+		return LoadImageResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // Ping implements Client.
 func (c *UnixClient) Ping(ctx context.Context) error {
 	args := &PingArgs{}
