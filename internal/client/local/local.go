@@ -31,6 +31,7 @@ import (
 	"github.com/eminwux/kukeon/internal/apply/parser"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -866,30 +867,60 @@ func formatValidationErrors(validationErrors []*parser.ValidationError) error {
 // (`kuke attach`) opens HostSocketPath directly and runs the sbsh client
 // loop against it.
 func (c *Client) AttachContainer(_ context.Context, doc v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
-	internal, _, err := apischeme.NormalizeContainer(doc)
-	if err != nil {
-		return kukeonv1.AttachContainerResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-	res, err := c.ctrl.GetContainer(internal)
+	spec, err := c.resolveAttachable(doc)
 	if err != nil {
 		return kukeonv1.AttachContainerResult{}, err
-	}
-	if !res.ContainerExists {
-		return kukeonv1.AttachContainerResult{}, errdefs.ErrContainerNotFound
-	}
-	if !res.Container.Spec.Attachable {
-		return kukeonv1.AttachContainerResult{}, errdefs.ErrAttachNotSupported
 	}
 	return kukeonv1.AttachContainerResult{
 		HostSocketPath: fs.ContainerSocketPath(
 			c.ctrl.RunPath(),
-			res.Container.Spec.RealmName,
-			res.Container.Spec.SpaceName,
-			res.Container.Spec.StackName,
-			res.Container.Spec.CellName,
-			res.Container.Spec.ID,
+			spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
 		),
 	}, nil
+}
+
+// ---- Log ----
+
+// LogContainer enforces the Attachable gate and resolves the host-side path
+// of the per-container sbsh capture file. The Attachable gate is the same
+// invariant AttachContainer uses: only sbsh-wrapped containers have a
+// capture file. Bytes never traverse this RPC — the caller (`kuke log`)
+// opens HostCapturePath directly.
+func (c *Client) LogContainer(_ context.Context, doc v1beta1.ContainerDoc) (kukeonv1.LogContainerResult, error) {
+	spec, err := c.resolveAttachable(doc)
+	if err != nil {
+		return kukeonv1.LogContainerResult{}, err
+	}
+	return kukeonv1.LogContainerResult{
+		HostCapturePath: fs.ContainerCapturePath(
+			c.ctrl.RunPath(),
+			spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
+		),
+	}, nil
+}
+
+// resolveAttachable normalizes doc, looks up the container, and returns its
+// internal spec only when Attachable=true. It surfaces ErrConversionFailed
+// for malformed docs, ErrContainerNotFound when the container does not
+// exist, and ErrAttachNotSupported for non-Attachable targets — the
+// invariants both AttachContainer and LogContainer require before handing a
+// host path back to the caller.
+func (c *Client) resolveAttachable(doc v1beta1.ContainerDoc) (intmodel.ContainerSpec, error) {
+	internal, _, err := apischeme.NormalizeContainer(doc)
+	if err != nil {
+		return intmodel.ContainerSpec{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	res, err := c.ctrl.GetContainer(internal)
+	if err != nil {
+		return intmodel.ContainerSpec{}, err
+	}
+	if !res.ContainerExists {
+		return intmodel.ContainerSpec{}, errdefs.ErrContainerNotFound
+	}
+	if !res.Container.Spec.Attachable {
+		return intmodel.ContainerSpec{}, errdefs.ErrAttachNotSupported
+	}
+	return res.Container.Spec, nil
 }
 
 // ---- Ping ----

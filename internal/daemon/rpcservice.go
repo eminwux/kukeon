@@ -241,6 +241,22 @@ func (s *KukeonV1Service) AttachContainer(
 	return nil
 }
 
+// LogContainer enforces the Attachable gate at the API boundary and returns
+// the host path of the per-container sbsh capture file. Bytes never
+// traverse this RPC — the client tails HostCapturePath directly.
+func (s *KukeonV1Service) LogContainer(
+	args *kukeonv1.LogContainerArgs,
+	reply *kukeonv1.LogContainerReply,
+) error {
+	result, err := s.core.LogContainer(s.ctx, args.Doc)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "LogContainer returned error", "error", err)
+	}
+	return nil
+}
+
 func (s *KukeonV1Service) StopCell(args *kukeonv1.StopCellArgs, reply *kukeonv1.StopCellReply) error {
 	result, err := s.core.StopCell(s.ctx, args.Doc)
 	reply.Result = result

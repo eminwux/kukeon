@@ -36,6 +36,14 @@ const (
 	// injected by Attachable=true specs.
 	KukeonContainerSocketFile = "socket"
 
+	// KukeonContainerCaptureFile is the basename of the per-container sbsh
+	// capture file inside KukeonContainerTTYDir. sbsh writes the full tty
+	// byte stream — every byte the workload produced and every byte typed
+	// by an attached operator — into this file. `kuke log` tails the host
+	// path that resolves to the same inode as the in-container path
+	// /run/kukeon/tty/capture (see ctr.AttachableCapturePath).
+	KukeonContainerCaptureFile = "capture"
+
 	// Label keys shared across the user default hierarchy and the system hierarchy.
 	KukeonRealmLabelKey     = "realm.kukeon.io"
 	KukeonSpaceLabelKey     = "space.kukeon.io"

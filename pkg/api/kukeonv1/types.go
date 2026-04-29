@@ -551,6 +551,31 @@ type AttachContainerResult struct {
 	HostSocketPath string
 }
 
+// ---- Log ----
+
+// LogContainerArgs identifies the target container for a log request.
+type LogContainerArgs struct {
+	Doc v1beta1.ContainerDoc
+}
+
+type LogContainerReply struct {
+	Result LogContainerResult
+	Err    *APIError
+}
+
+// LogContainerResult carries the host-side coordinates the `kuke log` client
+// needs to tail the sbsh capture file. Bytes never traverse this RPC — the
+// client opens HostCapturePath directly.
+type LogContainerResult struct {
+	// HostCapturePath is the host path of the per-container sbsh capture
+	// file. Inside the container the same inode is reachable at
+	// /run/kukeon/tty/capture via the tty directory bind mount. Returned
+	// only when the target container has Attachable=true; otherwise the
+	// daemon errors with ErrAttachNotSupported (non-Attachable containers
+	// have no capture file).
+	HostCapturePath string
+}
+
 // ---- Refresh ----
 
 type RefreshAllArgs struct{}

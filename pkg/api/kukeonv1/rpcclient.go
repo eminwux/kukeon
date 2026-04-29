@@ -354,6 +354,22 @@ func (c *UnixClient) AttachContainer(
 	return reply.Result, nil
 }
 
+// LogContainer implements Client.
+func (c *UnixClient) LogContainer(
+	ctx context.Context,
+	doc v1beta1.ContainerDoc,
+) (LogContainerResult, error) {
+	args := &LogContainerArgs{Doc: doc}
+	reply := &LogContainerReply{}
+	if err := c.call(ctx, MethodLogContainer, args, reply); err != nil {
+		return LogContainerResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // StopCell implements Client.
 func (c *UnixClient) StopCell(ctx context.Context, doc v1beta1.CellDoc) (StopCellResult, error) {
 	args := &StopCellArgs{Doc: doc}

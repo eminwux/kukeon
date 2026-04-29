@@ -59,6 +59,12 @@ type Client interface {
 	// validates that the target container has Attachable=true; the
 	// terminal-bridge client lands in #66.
 	AttachContainer(ctx context.Context, doc v1beta1.ContainerDoc) (AttachContainerResult, error)
+	// LogContainer validates that the target container has Attachable=true
+	// and resolves the host-side path of the per-container sbsh capture
+	// file. Bytes never traverse this RPC — the caller (`kuke log`) reads
+	// the file directly. Same Attachable gate as AttachContainer: only
+	// containers wrapped by sbsh have a capture file to surface.
+	LogContainer(ctx context.Context, doc v1beta1.ContainerDoc) (LogContainerResult, error)
 	StopCell(ctx context.Context, doc v1beta1.CellDoc) (StopCellResult, error)
 	StopContainer(ctx context.Context, doc v1beta1.ContainerDoc) (StopContainerResult, error)
 	KillCell(ctx context.Context, doc v1beta1.CellDoc) (KillCellResult, error)
@@ -150,6 +156,7 @@ const (
 	MethodStartCell       = ServiceName + ".StartCell"
 	MethodStartContainer  = ServiceName + ".StartContainer"
 	MethodAttachContainer = ServiceName + ".AttachContainer"
+	MethodLogContainer    = ServiceName + ".LogContainer"
 	MethodStopCell        = ServiceName + ".StopCell"
 	MethodStopContainer   = ServiceName + ".StopContainer"
 	MethodKillCell        = ServiceName + ".KillCell"
