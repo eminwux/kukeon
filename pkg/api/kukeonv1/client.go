@@ -89,6 +89,14 @@ type Client interface {
 	// containerd namespace. The tarball ships in-band; see LoadImageArgs.
 	LoadImage(ctx context.Context, realm string, tarball []byte) (LoadImageResult, error)
 
+	// ListImages enumerates images in the named realm's containerd
+	// namespace.
+	ListImages(ctx context.Context, realm string) (ListImagesResult, error)
+
+	// GetImage returns metadata for the named image ref in the named
+	// realm. errdefs.ErrImageNotFound is returned when the ref is absent.
+	GetImage(ctx context.Context, realm, ref string) (GetImageResult, error)
+
 	Ping(ctx context.Context) error
 }
 
@@ -181,6 +189,8 @@ const (
 	MethodRefreshAll     = ServiceName + ".RefreshAll"
 	MethodApplyDocuments = ServiceName + ".ApplyDocuments"
 	MethodLoadImage      = ServiceName + ".LoadImage"
+	MethodListImages     = ServiceName + ".ListImages"
+	MethodGetImage       = ServiceName + ".GetImage"
 
 	MethodPing = ServiceName + ".Ping"
 )

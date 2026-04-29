@@ -30,6 +30,7 @@ import (
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/controller/runner"
+	"github.com/eminwux/kukeon/internal/ctr"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
@@ -113,7 +114,9 @@ type fakeRunner struct {
 	RefreshCellFn  func(cell intmodel.Cell) (intmodel.Cell, int, error)
 
 	// Image methods
-	LoadImageFn func(namespace string, reader io.Reader) ([]string, error)
+	LoadImageFn  func(namespace string, reader io.Reader) ([]string, error)
+	ListImagesFn func(namespace string) ([]ctr.ImageInfo, error)
+	GetImageFn   func(namespace, ref string) (ctr.ImageInfo, error)
 }
 
 // Realm methods
@@ -541,6 +544,20 @@ func (f *fakeRunner) LoadImage(namespace string, reader io.Reader) ([]string, er
 		return f.LoadImageFn(namespace, reader)
 	}
 	return nil, errors.New("unexpected call to LoadImage")
+}
+
+func (f *fakeRunner) ListImages(namespace string) ([]ctr.ImageInfo, error) {
+	if f.ListImagesFn != nil {
+		return f.ListImagesFn(namespace)
+	}
+	return nil, errors.New("unexpected call to ListImages")
+}
+
+func (f *fakeRunner) GetImage(namespace, ref string) (ctr.ImageInfo, error) {
+	if f.GetImageFn != nil {
+		return f.GetImageFn(namespace, ref)
+	}
+	return ctr.ImageInfo{}, errors.New("unexpected call to GetImage")
 }
 
 // Test helper functions

@@ -150,6 +150,19 @@ var (
 	// or `docker save` produced no output).
 	ErrTarballRequired = errors.New("image tarball is required")
 
+	// ErrImageNotFound is returned when a named image ref does not exist
+	// in the target realm's containerd namespace. Surfaces to operators
+	// from `kuke image get <ref>`.
+	ErrImageNotFound = errors.New("image not found")
+
+	// ErrGetImage wraps the underlying containerd error when fetching
+	// one image's metadata fails for reasons other than not-found.
+	ErrGetImage = errors.New("failed to get image")
+
+	// ErrListImages wraps the underlying containerd error when
+	// enumerating images in a realm's namespace fails.
+	ErrListImages = errors.New("failed to list images")
+
 	// Attach-related errors.
 
 	// ErrAttachNotSupported is returned when an attach request targets a

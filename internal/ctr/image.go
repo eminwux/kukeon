@@ -23,8 +23,23 @@ import (
 
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/core/leases"
+	"github.com/containerd/errdefs"
 	"github.com/containerd/platforms"
+	internalerrdefs "github.com/eminwux/kukeon/internal/errdefs"
 )
+
+// ImageInfo is the ctr-layer view of a containerd image. The fields are the
+// common subset surfaced to operators by `kuke image get`; downstream layers
+// re-encode this onto their own wire types so the ctr package does not leak
+// into pkg/api.
+type ImageInfo struct {
+	Name      string
+	Size      int64
+	CreatedAt time.Time
+	Digest    string
+	MediaType string
+	Labels    map[string]string
+}
 
 // ensureImageUnpacked ensures that an image is unpacked for the given snapshotter.
 // If the image is not unpacked, it will be unpacked. Returns an error if unpacking fails.
@@ -173,4 +188,93 @@ func (c *client) LoadImage(reader io.Reader) ([]string, error) {
 	}
 	c.logger.DebugContext(c.ctx, "imported image tarball", "namespace", c.Namespace(), "images", names)
 	return names, nil
+}
+
+// ListImages enumerates images in the client's current containerd namespace.
+// Size is best-effort: when containerd cannot resolve an image's size (e.g.
+// because content is missing locally), the entry is still surfaced with
+// Size=-1 so listing degrades gracefully instead of failing the whole call.
+func (c *client) ListImages() ([]ImageInfo, error) {
+	nsCtx := c.namespaceCtx()
+
+	imgs, err := c.cClient.ListImages(nsCtx)
+	if err != nil {
+		c.logger.ErrorContext(
+			c.ctx,
+			"failed to list images",
+			"namespace",
+			c.Namespace(),
+			"err",
+			formatError(err),
+		)
+		return nil, fmt.Errorf("%w: %w", internalerrdefs.ErrListImages, err)
+	}
+
+	out := make([]ImageInfo, 0, len(imgs))
+	for _, img := range imgs {
+		out = append(out, c.imageToInfo(img))
+	}
+	return out, nil
+}
+
+// GetImage returns metadata for the named image ref in the client's current
+// containerd namespace. Returns errdefs.ErrImageNotFound (the kukeon
+// sentinel) when containerd reports the ref absent so upper layers can map
+// to a clean error message.
+func (c *client) GetImage(ref string) (ImageInfo, error) {
+	nsCtx := c.namespaceCtx()
+
+	img, err := c.cClient.GetImage(nsCtx, ref)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return ImageInfo{}, fmt.Errorf("%w: %s", internalerrdefs.ErrImageNotFound, ref)
+		}
+		c.logger.ErrorContext(
+			c.ctx,
+			"failed to get image",
+			"namespace",
+			c.Namespace(),
+			"ref",
+			ref,
+			"err",
+			formatError(err),
+		)
+		return ImageInfo{}, fmt.Errorf("%w: %w", internalerrdefs.ErrGetImage, err)
+	}
+	return c.imageToInfo(img), nil
+}
+
+// imageToInfo extracts the ImageInfo subset from a containerd Image. Size is
+// resolved via the platform-default Size() helper; failure leaves Size=-1
+// rather than aborting because partial-content tarballs are common with
+// `docker save` (see LoadImage's WithSkipMissing rationale).
+func (c *client) imageToInfo(img containerd.Image) ImageInfo {
+	nsCtx := c.namespaceCtx()
+	meta := img.Metadata()
+	target := img.Target()
+
+	size := int64(-1)
+	if s, err := img.Size(nsCtx); err == nil {
+		size = s
+	} else {
+		c.logger.DebugContext(
+			c.ctx,
+			"failed to resolve image size",
+			"namespace",
+			c.Namespace(),
+			"image",
+			img.Name(),
+			"err",
+			formatError(err),
+		)
+	}
+
+	return ImageInfo{
+		Name:      img.Name(),
+		Size:      size,
+		CreatedAt: meta.CreatedAt,
+		Digest:    target.Digest.String(),
+		MediaType: target.MediaType,
+		Labels:    meta.Labels,
+	}
 }

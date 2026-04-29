@@ -16,7 +16,11 @@
 
 package kukeonv1
 
-import v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+import (
+	"time"
+
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+)
 
 // ---- Realm ----
 
@@ -661,4 +665,54 @@ type LoadImageResult struct {
 	Realm     string
 	Namespace string
 	Images    []string
+}
+
+// ImageInfo is the wire view of one containerd image. Size is best-effort:
+// the daemon emits -1 when containerd cannot resolve the size locally so the
+// CLI can render "-" rather than "0 B".
+type ImageInfo struct {
+	Name      string
+	Size      int64
+	CreatedAt time.Time
+	Digest    string
+	MediaType string
+	Labels    map[string]string
+}
+
+// ListImagesArgs is the wire request for ListImages.
+type ListImagesArgs struct {
+	Realm string
+}
+
+// ListImagesReply is the wire response for ListImages.
+type ListImagesReply struct {
+	Result ListImagesResult
+	Err    *APIError
+}
+
+// ListImagesResult lists the images present in a realm's containerd
+// namespace.
+type ListImagesResult struct {
+	Realm     string
+	Namespace string
+	Images    []ImageInfo
+}
+
+// GetImageArgs is the wire request for GetImage.
+type GetImageArgs struct {
+	Realm string
+	Ref   string
+}
+
+// GetImageReply is the wire response for GetImage.
+type GetImageReply struct {
+	Result GetImageResult
+	Err    *APIError
+}
+
+// GetImageResult carries the metadata of one named image in a realm.
+type GetImageResult struct {
+	Realm     string
+	Namespace string
+	Image     ImageInfo
 }

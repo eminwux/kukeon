@@ -401,3 +401,23 @@ func (s *KukeonV1Service) LoadImage(args *kukeonv1.LoadImageArgs, reply *kukeonv
 	}
 	return nil
 }
+
+func (s *KukeonV1Service) ListImages(args *kukeonv1.ListImagesArgs, reply *kukeonv1.ListImagesReply) error {
+	result, err := s.core.ListImages(s.ctx, args.Realm)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "ListImages returned error", "error", err)
+	}
+	return nil
+}
+
+func (s *KukeonV1Service) GetImage(args *kukeonv1.GetImageArgs, reply *kukeonv1.GetImageReply) error {
+	result, err := s.core.GetImage(s.ctx, args.Realm, args.Ref)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "GetImage returned error", "error", err)
+	}
+	return nil
+}

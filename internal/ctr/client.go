@@ -91,6 +91,16 @@ type Client interface {
 	// containerd namespace and returns the names of the imported images.
 	// Callers set the target namespace via SetNamespace before invoking.
 	LoadImage(reader io.Reader) ([]string, error)
+
+	// ListImages enumerates images in the client's current containerd
+	// namespace. Callers set the target namespace via SetNamespace before
+	// invoking.
+	ListImages() ([]ImageInfo, error)
+
+	// GetImage returns metadata for the named image ref in the client's
+	// current containerd namespace. Returns errdefs.ErrImageNotFound if
+	// the ref is absent.
+	GetImage(ref string) (ImageInfo, error)
 }
 
 func NewClient(ctx context.Context, logger *slog.Logger, socket string) Client {
