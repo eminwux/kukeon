@@ -102,6 +102,14 @@ type Runner interface {
 	// containerd namespace and returns the names of the imported images.
 	LoadImage(namespace string, reader io.Reader) ([]string, error)
 
+	// ListImages enumerates images in the given containerd namespace.
+	ListImages(namespace string) ([]ctr.ImageInfo, error)
+
+	// GetImage returns metadata for the named image ref in the given
+	// containerd namespace. Returns errdefs.ErrImageNotFound when the
+	// ref is absent.
+	GetImage(namespace, ref string) (ctr.ImageInfo, error)
+
 	Close() error
 }
 

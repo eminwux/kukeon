@@ -181,6 +181,14 @@ func (FakeClient) LoadImage(context.Context, string, []byte) (LoadImageResult, e
 	return LoadImageResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) ListImages(context.Context, string) (ListImagesResult, error) {
+	return ListImagesResult{}, ErrUnexpectedCall
+}
+
+func (FakeClient) GetImage(context.Context, string, string) (GetImageResult, error) {
+	return GetImageResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) Ping(context.Context) error {
 	return ErrUnexpectedCall
 }

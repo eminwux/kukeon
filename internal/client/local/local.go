@@ -880,6 +880,52 @@ func (c *Client) LoadImage(_ context.Context, realm string, tarball []byte) (kuk
 	}, nil
 }
 
+// ListImages enumerates images in the realm's containerd namespace. The
+// realm is validated by the controller layer; this wrapper only re-encodes
+// the controller's ImageInfo onto the wire type so callers never import
+// the controller package.
+func (c *Client) ListImages(_ context.Context, realm string) (kukeonv1.ListImagesResult, error) {
+	res, err := c.ctrl.ListImages(realm)
+	if err != nil {
+		return kukeonv1.ListImagesResult{}, err
+	}
+	out := kukeonv1.ListImagesResult{
+		Realm:     res.Realm,
+		Namespace: res.Namespace,
+		Images:    make([]kukeonv1.ImageInfo, 0, len(res.Images)),
+	}
+	for _, img := range res.Images {
+		out.Images = append(out.Images, controllerImageToWire(img))
+	}
+	return out, nil
+}
+
+// GetImage returns metadata for the named image ref in the realm.
+// errdefs.ErrImageNotFound is propagated unchanged so the wire layer can
+// emit the matching APIError Kind.
+func (c *Client) GetImage(_ context.Context, realm, ref string) (kukeonv1.GetImageResult, error) {
+	res, err := c.ctrl.GetImage(realm, ref)
+	if err != nil {
+		return kukeonv1.GetImageResult{}, err
+	}
+	return kukeonv1.GetImageResult{
+		Realm:     res.Realm,
+		Namespace: res.Namespace,
+		Image:     controllerImageToWire(res.Image),
+	}, nil
+}
+
+func controllerImageToWire(img controller.ImageInfo) kukeonv1.ImageInfo {
+	return kukeonv1.ImageInfo{
+		Name:      img.Name,
+		Size:      img.Size,
+		CreatedAt: img.CreatedAt,
+		Digest:    img.Digest,
+		MediaType: img.MediaType,
+		Labels:    img.Labels,
+	}
+}
+
 // ---- Attach ----
 
 // AttachContainer enforces the Attachable gate and resolves the host-side

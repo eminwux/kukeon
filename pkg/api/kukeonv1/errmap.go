@@ -58,6 +58,7 @@ var kindToSentinel = map[string]error{
 	"ContainerExists":         errdefs.ErrContainerExists,
 	"ConversionFailed":        errdefs.ErrConversionFailed,
 	"AttachNotSupported":      errdefs.ErrAttachNotSupported,
+	"ImageNotFound":           errdefs.ErrImageNotFound,
 }
 
 // sentinelToKind is the reverse lookup, populated lazily.

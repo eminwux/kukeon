@@ -615,6 +615,32 @@ func (c *UnixClient) LoadImage(ctx context.Context, realm string, tarball []byte
 	return reply.Result, nil
 }
 
+// ListImages implements Client.
+func (c *UnixClient) ListImages(ctx context.Context, realm string) (ListImagesResult, error) {
+	args := &ListImagesArgs{Realm: realm}
+	reply := &ListImagesReply{}
+	if err := c.call(ctx, MethodListImages, args, reply); err != nil {
+		return ListImagesResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
+// GetImage implements Client.
+func (c *UnixClient) GetImage(ctx context.Context, realm, ref string) (GetImageResult, error) {
+	args := &GetImageArgs{Realm: realm, Ref: ref}
+	reply := &GetImageReply{}
+	if err := c.call(ctx, MethodGetImage, args, reply); err != nil {
+		return GetImageResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // Ping implements Client.
 func (c *UnixClient) Ping(ctx context.Context) error {
 	args := &PingArgs{}
