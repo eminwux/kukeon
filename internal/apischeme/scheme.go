@@ -809,6 +809,7 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 				StackName:       in.Spec.StackID,
 				RootContainerID: in.Spec.RootContainerID,
 				Tty:             convertCellTtyToInternal(in.Spec.Tty),
+				AutoDelete:      in.Spec.AutoDelete,
 			},
 			Status: intmodel.CellStatus{
 				State:      intmodel.CellState(in.Status.State),
@@ -867,6 +868,7 @@ func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ex
 				StackID:         in.Spec.StackName,
 				RootContainerID: in.Spec.RootContainerID,
 				Tty:             buildCellTtyExternalFromInternal(in.Spec.Tty),
+				AutoDelete:      in.Spec.AutoDelete,
 			},
 			Status: ext.CellStatus{
 				State:      ext.CellState(in.Status.State),

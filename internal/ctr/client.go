@@ -82,6 +82,7 @@ type Client interface {
 
 	TaskStatus(id string) (containerd.Status, error)
 	TaskMetrics(id string) (*apitypes.Metric, error)
+	WaitTaskExit(ctx context.Context, id string) (<-chan containerd.ExitStatus, error)
 
 	ResolveSbshCachePath(imageRef, baseRunPath string) (string, error)
 }

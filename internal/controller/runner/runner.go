@@ -20,6 +20,7 @@ import (
 	"context"
 	"log/slog"
 
+	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/ctr"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -88,6 +89,8 @@ type Runner interface {
 	RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error)
 
 	GetContainerState(cell intmodel.Cell, containerID string) (intmodel.ContainerState, error)
+
+	WaitCellRootTaskExit(ctx context.Context, cell intmodel.Cell) (<-chan containerd.ExitStatus, error)
 
 	Close() error
 }

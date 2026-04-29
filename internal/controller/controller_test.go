@@ -25,6 +25,7 @@ import (
 	"log/slog"
 	"testing"
 
+	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller"
@@ -437,6 +438,15 @@ func (f *fakeRunner) Close() error {
 		return f.CloseFn()
 	}
 	return nil
+}
+
+// WaitCellRootTaskExit is unused by controller_test scenarios; no test
+// installs an FX yet, so a stable "unexpected call" stub is enough.
+func (f *fakeRunner) WaitCellRootTaskExit(
+	_ context.Context,
+	_ intmodel.Cell,
+) (<-chan containerd.ExitStatus, error) {
+	return nil, errors.New("unexpected call to WaitCellRootTaskExit")
 }
 
 // Apply

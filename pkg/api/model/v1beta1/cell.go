@@ -37,6 +37,12 @@ type CellSpec struct {
 	RootContainerID string          `json:"rootContainerId,omitempty" yaml:"rootContainerId,omitempty"`
 	Tty             *CellTty        `json:"tty,omitempty"             yaml:"tty,omitempty"`
 	Containers      []ContainerSpec `json:"containers"                yaml:"containers"`
+	// AutoDelete asks kukeond to delete this cell best-effort after its root
+	// container's task exits (any rc). Set by `kuke run --rm`. Cleanup is
+	// scoped to the cell only — never cascades to stack/space/realm. Best-
+	// effort: a daemon crash between task-exit and delete-completion leaves
+	// an orphan that #161's reconciliation loop will eventually sweep.
+	AutoDelete bool `json:"autoDelete,omitempty"      yaml:"autoDelete,omitempty"`
 }
 
 // CellTty is cell-level tty/attach config. Kept intentionally minimal: only
