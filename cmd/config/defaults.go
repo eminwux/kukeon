@@ -70,3 +70,15 @@ func DefaultProfilesFile() string {
 func DefaultServerConfigurationFile() string {
 	return filepath.Join("/", "etc", "kukeon", "kukeond.yaml")
 }
+
+// DefaultClientConfigurationFile is the on-disk path the `kuke` client reads
+// when the user does not pass `--configuration`. An absent file is not an
+// error — the client falls back to its hardcoded defaults.
+func DefaultClientConfigurationFile() string {
+	base, err := os.UserHomeDir()
+	if err != nil {
+		// fallback to tmp if home dir cannot be determined
+		base = "tmp"
+	}
+	return filepath.Join(base, ".kuke", "kuke.yaml")
+}
