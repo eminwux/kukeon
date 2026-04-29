@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -62,4 +63,72 @@ func Load(path string) (*v1beta1.ServerConfigurationDoc, error) {
 		)
 	}
 	return &doc, nil
+}
+
+// defaultDocument is the commented YAML written by WriteDefault on first
+// kukeond start. Every spec field is present with its in-binary default and
+// a header comment explaining its purpose so the operator can tweak the file
+// without consulting source. The string round-trips through Load.
+const defaultDocument = `# kukeond ServerConfiguration — auto-generated default.
+# kukeond reads this file via --configuration (default /etc/kukeon/kukeond.yaml).
+# Precedence: explicit --flag > KUKEON_*/KUKEOND_* env > this file > hardcoded default.
+# Existing files are never overwritten; delete this file to regenerate.
+apiVersion: v1beta1
+kind: ServerConfiguration
+metadata:
+  name: default
+spec:
+  # Unix socket path the daemon listens on.
+  # Default: /run/kukeon/kukeond.sock
+  socket: /run/kukeon/kukeond.sock
+
+  # Numeric group ID the daemon chowns its listener socket to (mode 0o660 with
+  # group). Zero means root-only access. ` + "`kuke init`" + ` plumbs the kukeon GID here
+  # so non-root group members can dial the daemon after a kukeond restart.
+  # Default: 0
+  socketGID: 0
+
+  # Kukeon runtime root — the on-disk hierarchy under which realms, spaces,
+  # stacks, and cells live.
+  # Default: /opt/kukeon
+  runPath: /opt/kukeon
+
+  # Path to the containerd unix socket the daemon connects to.
+  # Default: /run/containerd/containerd.sock
+  containerdSocket: /run/containerd/containerd.sock
+
+  # Daemon log level (debug, info, warn, error).
+  # Default: info
+  logLevel: info
+
+  # Container image ` + "`kuke init`" + ` provisions for the kukeond system cell.
+  # Read by ` + "`kuke init`" + ` only; the daemon ignores it. Empty means kuke init
+  # picks the release-matching ghcr.io/eminwux/kukeon image automatically.
+  # Default: ""
+  kukeondImage: ""
+`
+
+// WriteDefault writes the commented default ServerConfiguration to path when
+// the file is absent. Returns true only when this call created the file; an
+// existing file (any contents) is left untouched, satisfying the "first-write
+// only" rule. Creates the parent directory if missing. Any other failure is
+// returned wrapped.
+func WriteDefault(path string) (bool, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return false, fmt.Errorf("create parent directory for %q: %w", path, err)
+	}
+	// O_EXCL closes the TOCTOU race between Stat and Create — two concurrent
+	// kukeond starts can't both believe they wrote the file.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("create %q: %w", path, err)
+	}
+	defer f.Close()
+	if _, writeErr := f.WriteString(defaultDocument); writeErr != nil {
+		return false, fmt.Errorf("write %q: %w", path, writeErr)
+	}
+	return true, nil
 }

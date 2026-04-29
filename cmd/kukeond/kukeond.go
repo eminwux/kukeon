@@ -41,6 +41,12 @@ func NewKukeondCmd() (*cobra.Command, error) {
 			if path == "" {
 				path = config.DefaultServerConfigurationFile()
 			}
+			// First-run dump: when the operator did not pick a custom
+			// --configuration, write the commented defaults to the well-known
+			// path so a fresh host has a template to edit. Skipped silently
+			// on permission/IO failures — the daemon must still start with
+			// hardcoded defaults.
+			maybeWriteServerConfigurationDefault(cmd, path)
 			doc, err := serverconfig.Load(path)
 			if err != nil {
 				return fmt.Errorf("load server configuration: %w", err)
@@ -154,4 +160,22 @@ func applyServerConfiguration(cmd *cobra.Command, spec v1beta1.ServerConfigurati
 func envSet(v config.Var) bool {
 	_, ok := os.LookupEnv(v.EnvVar())
 	return ok
+}
+
+// maybeWriteServerConfigurationDefault writes the commented default
+// ServerConfiguration when the resolved --configuration path equals the
+// project default. The path-equality guard is the only filter: pointing
+// --configuration at a custom path opts out of the default-location dump
+// (the path won't equal the project default), while pointing it at the
+// default path is a no-op overwrite-guarded by O_EXCL inside WriteDefault.
+// This shape lets `kuke init` — which always plumbs --configuration
+// /etc/kukeon/kukeond.yaml into the kukeond cell — still produce a fresh
+// host's template on first boot. Errors are intentionally swallowed: a
+// read-only /etc or unwritable parent dir must not block the daemon from
+// starting on the in-binary defaults.
+func maybeWriteServerConfigurationDefault(_ *cobra.Command, path string) {
+	if path != config.DefaultServerConfigurationFile() {
+		return
+	}
+	_, _ = serverconfig.WriteDefault(path)
 }

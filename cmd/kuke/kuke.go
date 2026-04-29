@@ -252,12 +252,32 @@ func loadClientConfiguration(cmd *cobra.Command) error {
 	if path == "" {
 		path = config.DefaultClientConfigurationFile()
 	}
+	// First-run dump: when the operator did not pick a custom --configuration,
+	// write the commented defaults to the well-known path so a fresh host has a
+	// template to edit. Skipped silently on permission/IO failures — kuke must
+	// still run with hardcoded defaults.
+	maybeWriteClientConfigurationDefault(cmd, path)
 	doc, err := clientconfig.Load(path)
 	if err != nil {
 		return fmt.Errorf("load client configuration: %w", err)
 	}
 	applyClientConfiguration(cmd, doc.Spec)
 	return nil
+}
+
+// maybeWriteClientConfigurationDefault writes the commented default
+// ClientConfiguration when the resolved --configuration path equals the
+// project default. The path-equality guard is the only filter: pointing
+// --configuration at a custom path opts out of the default-location dump
+// (the path won't equal the project default), while pointing it at the
+// default path is a no-op overwrite-guarded by O_EXCL inside WriteDefault.
+// Errors are intentionally swallowed: kuke must still run when $HOME is
+// read-only or the parent directory cannot be created.
+func maybeWriteClientConfigurationDefault(_ *cobra.Command, path string) {
+	if path != config.DefaultClientConfigurationFile() {
+		return
+	}
+	_, _ = clientconfig.WriteDefault(path)
 }
 
 // applyClientConfiguration layers the loaded ClientConfiguration on top of
