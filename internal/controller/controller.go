@@ -85,6 +85,10 @@ type Options struct {
 	// --socket-gid <gid> so the daemon can chown its listener socket on every
 	// restart. Set by `kuke init` to the kukeon group's numeric GID.
 	KukeondSocketGID int
+	// KukeondConfiguration, when set, is passed to the kukeond cell as
+	// --configuration <path> and bind-mounted into the cell so the daemon
+	// re-reads the same ServerConfiguration on every restart.
+	KukeondConfiguration string
 	// ForceRegenerateCNI forces bootstrap to rewrite space conflists even when
 	// they already exist with the expected bridge name. Surfaces via
 	// `kuke init --force-regenerate-cni`.
@@ -192,12 +196,16 @@ func (b *Exec) Bootstrap() (BootstrapReport, error) {
 		if err = ensureCNIStateDir(); err != nil {
 			return report, err
 		}
+		if err = ensureServerConfigurationDir(b.opts.KukeondConfiguration); err != nil {
+			return report, err
+		}
 		cellDoc := kukeondCellDoc(
 			b.opts.KukeondImage,
 			b.opts.KukeondSocket,
 			b.opts.RunPath,
 			b.opts.ContainerdSocket,
 			b.opts.KukeondSocketGID,
+			b.opts.KukeondConfiguration,
 		)
 		if err = b.bootstrapCell(&report.SystemCell, cellDoc); err != nil {
 			return report, err

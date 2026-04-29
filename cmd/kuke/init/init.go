@@ -31,8 +31,10 @@ import (
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/serverconfig"
 	"github.com/eminwux/kukeon/internal/sysuser"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -128,11 +130,47 @@ func setFlags(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("failed to bind flag: %w", err)
 	}
+
+	cmd.Flags().String(
+		"server-configuration", config.KUKE_INIT_SERVER_CONFIGURATION.Default,
+		"Path to a ServerConfiguration YAML to seed the daemon with; "+
+			"absent file uses hardcoded defaults",
+	)
+	err = viper.BindPFlag(
+		config.KUKE_INIT_SERVER_CONFIGURATION.ViperKey,
+		cmd.Flags().Lookup("server-configuration"),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to bind flag: %w", err)
+	}
 	return nil
 }
 
 func setPersistentFlags(_ *cobra.Command) error {
 	return nil
+}
+
+// applyServerConfiguration layers the loaded ServerConfiguration on top of
+// viper for fields the operator did not explicitly set on the command line.
+// Flag-changed values win so a one-off `--kukeond-image` keeps overriding
+// the on-disk document.
+func applyServerConfiguration(cmd *cobra.Command, spec v1beta1.ServerConfigurationSpec) {
+	flags := cmd.Flags()
+	if spec.Socket != "" {
+		viper.Set(config.KUKEOND_SOCKET.ViperKey, spec.Socket)
+	}
+	if spec.RunPath != "" && !flags.Changed("run-path") {
+		viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, spec.RunPath)
+	}
+	if spec.ContainerdSocket != "" && !flags.Changed("containerd-socket") {
+		viper.Set(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey, spec.ContainerdSocket)
+	}
+	if spec.LogLevel != "" && !flags.Changed("log-level") {
+		viper.Set(config.KUKEON_ROOT_LOG_LEVEL.ViperKey, spec.LogLevel)
+	}
+	if spec.KukeondImage != "" && !flags.Changed("kukeond-image") {
+		viper.Set(config.KUKE_INIT_KUKEOND_IMAGE.ViperKey, spec.KukeondImage)
+	}
 }
 
 // resolveKukeondImage returns the kukeond container image to provision.
@@ -163,6 +201,16 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return errdefs.ErrLoggerNotFound
 	}
 
+	serverConfigPath := viper.GetString(config.KUKE_INIT_SERVER_CONFIGURATION.ViperKey)
+	if serverConfigPath == "" {
+		serverConfigPath = config.DefaultServerConfigurationFile()
+	}
+	serverDoc, err := serverconfig.Load(serverConfigPath)
+	if err != nil {
+		return fmt.Errorf("load server configuration: %w", err)
+	}
+	applyServerConfiguration(cmd, serverDoc.Spec)
+
 	socketPath := viper.GetString(config.KUKEOND_SOCKET.ViperKey)
 	if socketPath == "" {
 		socketPath = config.KUKEOND_SOCKET.Default
@@ -189,12 +237,13 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	}
 
 	opts := controller.Options{
-		RunPath:            runPath,
-		ContainerdSocket:   viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
-		KukeondImage:       image,
-		KukeondSocket:      socketPath,
-		KukeondSocketGID:   ensure.GID,
-		ForceRegenerateCNI: viper.GetBool(config.KUKE_INIT_FORCE_REGENERATE_CNI.ViperKey),
+		RunPath:              runPath,
+		ContainerdSocket:     viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
+		KukeondImage:         image,
+		KukeondSocket:        socketPath,
+		KukeondSocketGID:     ensure.GID,
+		KukeondConfiguration: serverConfigPath,
+		ForceRegenerateCNI:   viper.GetBool(config.KUKE_INIT_FORCE_REGENERATE_CNI.ViperKey),
 	}
 
 	logger.DebugContext(cmd.Context(), "running init", "opts", opts)

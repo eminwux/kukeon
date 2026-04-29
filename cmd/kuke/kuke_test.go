@@ -21,8 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -61,7 +59,6 @@ func TestNewKukeCmd(t *testing.T) {
 		t.Errorf("Short mismatch: got %q, want %q", cmd.Short, "Kukeon is a tool for managing Kukeon entities")
 	}
 
-	// Verify subcommands are added
 	expectedSubcommands := []string{"init", "create", "get", "delete", "start", "stop", "kill", "purge", "version"}
 	for _, subcmdName := range expectedSubcommands {
 		subcmd := cmd.Commands()
@@ -85,99 +82,26 @@ func TestNewKukeCmdPersistentPreRunE(t *testing.T) {
 		name        string
 		verbose     bool
 		logLevel    string
-		configSetup func() error
 		loader      kuke.ConfigLoader
 		wantErr     bool
 		wantErrMsg  string
 		checkLogger bool
 	}{
+		{name: "verbose disabled", verbose: false, checkLogger: false},
+		{name: "verbose enabled with default log level", verbose: true, checkLogger: true},
+		{name: "verbose enabled with debug log level", verbose: true, logLevel: "debug", checkLogger: true},
+		{name: "verbose enabled with info log level", verbose: true, logLevel: "info", checkLogger: true},
+		{name: "verbose enabled with warn log level", verbose: true, logLevel: "warn", checkLogger: true},
+		{name: "verbose enabled with error log level", verbose: true, logLevel: "error", checkLogger: true},
 		{
-			name:     "verbose disabled",
-			verbose:  false,
-			logLevel: "",
-			configSetup: func() error {
-				viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "")
-				return nil
-			},
-			loader:      nil, // Use real loader
-			wantErr:     false,
-			checkLogger: false,
-		},
-		{
-			name:     "verbose enabled with default log level",
-			verbose:  true,
-			logLevel: "",
-			configSetup: func() error {
-				viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "")
-				return nil
-			},
-			loader:      nil, // Use real loader
-			wantErr:     false,
-			checkLogger: true,
-		},
-		{
-			name:     "verbose enabled with debug log level",
-			verbose:  true,
-			logLevel: "debug",
-			configSetup: func() error {
-				viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "")
-				return nil
-			},
-			loader:      nil, // Use real loader
-			wantErr:     false,
-			checkLogger: true,
-		},
-		{
-			name:     "verbose enabled with info log level",
-			verbose:  true,
-			logLevel: "info",
-			configSetup: func() error {
-				viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "")
-				return nil
-			},
-			loader:      nil, // Use real loader
-			wantErr:     false,
-			checkLogger: true,
-		},
-		{
-			name:     "verbose enabled with warn log level",
-			verbose:  true,
-			logLevel: "warn",
-			configSetup: func() error {
-				viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "")
-				return nil
-			},
-			loader:      nil, // Use real loader
-			wantErr:     false,
-			checkLogger: true,
-		},
-		{
-			name:     "verbose enabled with error log level",
-			verbose:  true,
-			logLevel: "error",
-			configSetup: func() error {
-				viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "")
-				return nil
-			},
-			loader:      nil, // Use real loader
-			wantErr:     false,
-			checkLogger: true,
-		},
-		{
-			name:     "config loading error",
-			verbose:  false,
-			logLevel: "",
-			configSetup: func() error {
-				return nil
-			},
+			name: "config loading error",
 			loader: &fakeConfigLoader{
 				loadConfigFn: func() error {
 					return fmt.Errorf("config error: %w", errdefs.ErrConfig)
 				},
 			},
-			wantErr:     true,
-			wantErrMsg:  "config error",
-			checkLogger: false,
+			wantErr:    true,
+			wantErrMsg: "config error",
 		},
 	}
 
@@ -189,19 +113,12 @@ func TestNewKukeCmdPersistentPreRunE(t *testing.T) {
 				viper.Set(config.KUKEON_ROOT_LOG_LEVEL.ViperKey, tt.logLevel)
 			}
 
-			if tt.configSetup != nil {
-				if err := tt.configSetup(); err != nil {
-					t.Fatalf("configSetup() error = %v", err)
-				}
-			}
-
 			cmd, err := kuke.NewKukeCmd()
 			if err != nil {
 				t.Fatalf("NewKukeCmd() error = %v", err)
 			}
 
 			ctx := context.Background()
-			// Inject mock config loader via context if provided
 			if tt.loader != nil {
 				ctx = context.WithValue(ctx, kuke.MockConfigLoaderKey{}, tt.loader)
 			}
@@ -223,19 +140,16 @@ func TestNewKukeCmdPersistentPreRunE(t *testing.T) {
 				t.Fatalf("PersistentPreRunE() error = %v, want nil", err)
 			}
 
+			logger := cmd.Context().Value(types.CtxLogger)
 			if tt.checkLogger {
-				logger := cmd.Context().Value(types.CtxLogger)
 				if logger == nil {
 					t.Error("logger not found in context when verbose is enabled")
 				}
 				if _, ok := logger.(*slog.Logger); !ok {
 					t.Errorf("logger type mismatch: got %T, want *slog.Logger", logger)
 				}
-			} else {
-				logger := cmd.Context().Value(types.CtxLogger)
-				if logger != nil {
-					t.Error("logger found in context when verbose is disabled")
-				}
+			} else if logger != nil {
+				t.Error("logger found in context when verbose is disabled")
 			}
 		})
 	}
@@ -250,7 +164,6 @@ func TestSetupKukeCmd(t *testing.T) {
 		t.Fatalf("setupKukeCmd() error = %v, want nil", err)
 	}
 
-	// Verify subcommands are added
 	expectedSubcommands := []string{"init", "create", "get", "delete", "start", "stop", "kill", "purge", "version"}
 	commands := rootCmd.Commands()
 	commandMap := make(map[string]bool)
@@ -264,87 +177,65 @@ func TestSetupKukeCmd(t *testing.T) {
 		}
 	}
 
-	// Verify persistent flags exist
-	persistentFlags := []string{"run-path", "config", "containerd-socket", "verbose", "log-level"}
+	persistentFlags := []string{"run-path", "containerd-socket", "verbose", "log-level"}
 	for _, flagName := range persistentFlags {
 		flag := rootCmd.PersistentFlags().Lookup(flagName)
 		if flag == nil {
 			t.Errorf("persistent flag %q not found", flagName)
 		}
 	}
+
+	if rootCmd.PersistentFlags().Lookup("config") != nil {
+		t.Errorf("persistent flag %q must not be present (removed in favor of `kukeond --configuration`)", "config")
+	}
 }
 
 func TestSetPersistentLoggingFlags(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
-	tests := []struct {
-		name    string
-		rootCmd *cobra.Command
-		wantErr bool
-	}{
-		{
-			name:    "success",
-			rootCmd: &cobra.Command{Use: "test"},
-			wantErr: false,
-		},
+	rootCmd := &cobra.Command{Use: "test"}
+	if err := kuke.SetPersistentLoggingFlags(rootCmd); err != nil {
+		t.Fatalf("SetPersistentLoggingFlags() error = %v, want nil", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := kuke.SetPersistentLoggingFlags(tt.rootCmd)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("setPersistentLoggingFlags() error = %v, wantErr %v", err, tt.wantErr)
+	expectedFlags := []struct {
+		name         string
+		viperKey     string
+		defaultValue string
+	}{
+		{"run-path", config.KUKEON_ROOT_RUN_PATH.ViperKey, "/opt/kukeon"},
+		{
+			"containerd-socket",
+			config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey,
+			"/run/containerd/containerd.sock",
+		},
+		{"verbose", config.KUKEON_ROOT_VERBOSE.ViperKey, "false"},
+		{"log-level", config.KUKEON_ROOT_LOG_LEVEL.ViperKey, ""},
+	}
+
+	for _, flag := range expectedFlags {
+		f := rootCmd.PersistentFlags().Lookup(flag.name)
+		if f == nil {
+			t.Errorf("flag %q not found", flag.name)
+			continue
+		}
+
+		if flag.name == "verbose" {
+			if err := rootCmd.PersistentFlags().Set(flag.name, "true"); err != nil {
+				t.Fatalf("failed to set flag %q: %v", flag.name, err)
 			}
-
-			if !tt.wantErr {
-				// Verify all flags are defined
-				expectedFlags := []struct {
-					name         string
-					viperKey     string
-					defaultValue string
-				}{
-					{"run-path", config.KUKEON_ROOT_RUN_PATH.ViperKey, "/opt/kukeon"},
-					{"config", config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "/etc/kukeon/config.yaml"},
-					{
-						"containerd-socket",
-						config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey,
-						"/run/containerd/containerd.sock",
-					},
-					{"verbose", config.KUKEON_ROOT_VERBOSE.ViperKey, "false"},
-					{"log-level", config.KUKEON_ROOT_LOG_LEVEL.ViperKey, ""},
-				}
-
-				for _, flag := range expectedFlags {
-					f := tt.rootCmd.PersistentFlags().Lookup(flag.name)
-					if f == nil {
-						t.Errorf("flag %q not found", flag.name)
-						continue
-					}
-
-					// Test viper binding
-					if flag.name == "verbose" {
-						err = tt.rootCmd.PersistentFlags().Set(flag.name, "true")
-						if err != nil {
-							t.Fatalf("failed to set flag %q: %v", flag.name, err)
-						}
-						got := viper.GetBool(flag.viperKey)
-						if !got {
-							t.Errorf("viper binding mismatch for %q: got %v, want true", flag.name, got)
-						}
-					} else {
-						testValue := "test-value"
-						err = tt.rootCmd.PersistentFlags().Set(flag.name, testValue)
-						if err != nil {
-							t.Fatalf("failed to set flag %q: %v", flag.name, err)
-						}
-						got := viper.GetString(flag.viperKey)
-						if got != testValue {
-							t.Errorf("viper binding mismatch for %q: got %q, want %q", flag.name, got, testValue)
-						}
-					}
-				}
+			if !viper.GetBool(flag.viperKey) {
+				t.Errorf("viper binding mismatch for %q: got false, want true", flag.name)
 			}
-		})
+		} else {
+			testValue := "test-value"
+			if err := rootCmd.PersistentFlags().Set(flag.name, testValue); err != nil {
+				t.Fatalf("failed to set flag %q: %v", flag.name, err)
+			}
+			if got := viper.GetString(flag.viperKey); got != testValue {
+				t.Errorf("viper binding mismatch for %q: got %q, want %q", flag.name, got, testValue)
+			}
+		}
 	}
 }
 
@@ -352,158 +243,43 @@ func TestSetFlags(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	rootCmd := &cobra.Command{Use: "test"}
-	err := kuke.SetFlags(rootCmd)
-	if err != nil {
+	if err := kuke.SetFlags(rootCmd); err != nil {
 		t.Errorf("setFlags() error = %v, want nil", err)
 	}
 }
 
-func TestLoadConfig(t *testing.T) {
+func TestLoadConfigDefaults(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
-	tests := []struct {
-		name          string
-		setup         func(t *testing.T) (string, error)
-		cleanup       func(string) error
-		wantErr       bool
-		wantErrMsg    string
-		checkRunPath  bool
-		checkLogLevel bool
-	}{
-		{
-			name: "empty config file uses default",
-			setup: func(_ *testing.T) (string, error) {
-				viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "")
-				viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, "")
-				return "", nil
-			},
-			cleanup:       func(string) error { return nil },
-			wantErr:       false,
-			checkRunPath:  true,
-			checkLogLevel: true,
-		},
-		{
-			name: "set config file is used",
-			setup: func(t *testing.T) (string, error) {
-				tmpDir := t.TempDir()
-				configFile := filepath.Join(tmpDir, "config.yaml")
-				viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, configFile)
-				viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, "/custom/run/path")
-				return tmpDir, nil
-			},
-			cleanup:       func(string) error { return nil },
-			wantErr:       false,
-			checkRunPath:  true,
-			checkLogLevel: true,
-		},
-		{
-			name: "config file not found is acceptable",
-			setup: func(_ *testing.T) (string, error) {
-				viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "/nonexistent/path/config.yaml")
-				viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, "")
-				return "", nil
-			},
-			cleanup:       func(string) error { return nil },
-			wantErr:       false,
-			checkRunPath:  true,
-			checkLogLevel: true,
-		},
-		{
-			name: "valid config file with yaml content",
-			setup: func(t *testing.T) (string, error) {
-				tmpDir := t.TempDir()
-				configFile := filepath.Join(tmpDir, "config.yaml")
-				configContent := `kukeon:
-  runPath: /custom/run/path
-  logLevel: debug
-`
-				if err := os.WriteFile(configFile, []byte(configContent), 0o644); err != nil {
-					return "", err
-				}
-				viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, configFile)
-				viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, "")
-				return tmpDir, nil
-			},
-			cleanup:       func(string) error { return nil },
-			wantErr:       false,
-			checkRunPath:  true,
-			checkLogLevel: true,
-		},
-		{
-			name: "run path from viper",
-			setup: func(_ *testing.T) (string, error) {
-				viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "")
-				viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, "/custom/run/path")
-				return "", nil
-			},
-			cleanup:       func(string) error { return nil },
-			wantErr:       false,
-			checkRunPath:  true,
-			checkLogLevel: true,
-		},
-		{
-			name: "log level default is set",
-			setup: func(_ *testing.T) (string, error) {
-				viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "")
-				viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, "")
-				viper.Set(config.KUKEON_ROOT_LOG_LEVEL.ViperKey, "")
-				return "", nil
-			},
-			cleanup:       func(string) error { return nil },
-			wantErr:       false,
-			checkRunPath:  true,
-			checkLogLevel: true,
-		},
+	viper.Reset()
+	if err := kuke.LoadConfig(); err != nil {
+		t.Fatalf("LoadConfig() error = %v, want nil", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			viper.Reset()
+	if got := viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey); got == "" {
+		t.Error("LoadConfig did not set a default run path")
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_LOG_LEVEL.ViperKey); got == "" {
+		t.Error("LoadConfig did not set a default log level")
+	}
+}
 
-			tmpDir, err := tt.setup(t)
-			if err != nil {
-				t.Fatalf("setup() error = %v", err)
-			}
-			defer func() {
-				if cleanupErr := tt.cleanup(tmpDir); cleanupErr != nil {
-					t.Logf("cleanup() error = %v", cleanupErr)
-				}
-			}()
+func TestLoadConfigPreservesExplicitValues(t *testing.T) {
+	t.Cleanup(viper.Reset)
 
-			err = kuke.LoadConfig()
+	viper.Reset()
+	viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, "/custom/run/path")
+	viper.Set(config.KUKEON_ROOT_LOG_LEVEL.ViperKey, "debug")
 
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("LoadConfig() error = nil, want error containing %q", tt.wantErrMsg)
-				}
-				if tt.wantErrMsg != "" && !strings.Contains(err.Error(), tt.wantErrMsg) {
-					t.Fatalf("LoadConfig() error = %q, want error containing %q", err.Error(), tt.wantErrMsg)
-				}
-				return
-			}
+	if err := kuke.LoadConfig(); err != nil {
+		t.Fatalf("LoadConfig() error = %v, want nil", err)
+	}
 
-			if err != nil {
-				t.Fatalf("LoadConfig() error = %v, want nil", err)
-			}
-
-			if tt.checkRunPath {
-				runPath := viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey)
-				if runPath == "" {
-					t.Error("run path is empty after LoadConfig")
-				}
-			}
-
-			if tt.checkLogLevel {
-				logLevel := viper.GetString(config.KUKEON_ROOT_LOG_LEVEL.ViperKey)
-				if logLevel == "" {
-					// Check if default was set
-					logLevel = config.KUKEON_ROOT_LOG_LEVEL.ValueOrDefault()
-				}
-				if logLevel == "" {
-					t.Error("log level is empty after LoadConfig")
-				}
-			}
-		})
+	if got := viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey); got != "/custom/run/path" {
+		t.Errorf("RunPath: got %q, want %q", got, "/custom/run/path")
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_LOG_LEVEL.ViperKey); got != "debug" {
+		t.Errorf("LogLevel: got %q, want %q", got, "debug")
 	}
 }
 
@@ -522,50 +298,8 @@ func TestNewKukeCmdRun(t *testing.T) {
 	cmd.SetArgs([]string{})
 	cmd.Run(cmd, []string{})
 
-	output := outBuf.String()
-	if !strings.Contains(output, "kuke") {
-		t.Errorf("Run() output missing 'kuke'. Got: %q", output)
-	}
-}
-
-func TestNewKukeCmdWithConfigError(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	// This test verifies that setupKukeCmd errors are properly handled
-	// Since setupKukeCmd doesn't currently return errors in normal cases,
-	// we'll test the error path by ensuring the function handles nil subcommands
-	// (though this shouldn't happen in practice)
-
-	cmd, err := kuke.NewKukeCmd()
-	if err != nil {
-		t.Fatalf("NewKukeCmd() error = %v, want nil", err)
-	}
-
-	if cmd == nil {
-		t.Fatal("NewKukeCmd() returned nil command")
-	}
-}
-
-func TestPersistentPreRunEWithConfigError(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	cmd, err := kuke.NewKukeCmd()
-	if err != nil {
-		t.Fatalf("NewKukeCmd() error = %v", err)
-	}
-
-	// Set up a scenario where LoadConfig might fail
-	// We'll use an invalid config file that causes a non-ConfigFileNotFoundError
-	// This is hard to simulate, so we'll test the file not found case which is acceptable
-	viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "/nonexistent/path/config.yaml")
-	viper.Set(config.KUKEON_ROOT_VERBOSE.ViperKey, false)
-
-	ctx := context.Background()
-	cmd.SetContext(ctx)
-
-	err = cmd.PersistentPreRunE(cmd, []string{})
-	if err != nil {
-		t.Fatalf("PersistentPreRunE() error = %v, want nil (file not found is acceptable)", err)
+	if !strings.Contains(outBuf.String(), "kuke") {
+		t.Errorf("Run() output missing 'kuke'. Got: %q", outBuf.String())
 	}
 }
 
@@ -579,131 +313,28 @@ func TestPersistentPreRunELoggerContext(t *testing.T) {
 
 	viper.Set(config.KUKEON_ROOT_VERBOSE.ViperKey, true)
 	viper.Set(config.KUKEON_ROOT_LOG_LEVEL.ViperKey, "debug")
-	viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "")
 
 	ctx := context.Background()
 	cmd.SetContext(ctx)
 
-	err = cmd.PersistentPreRunE(cmd, []string{})
-	if err != nil {
+	if err = cmd.PersistentPreRunE(cmd, []string{}); err != nil {
 		t.Fatalf("PersistentPreRunE() error = %v, want nil", err)
 	}
 
-	// Verify logger is in context
-	logger := cmd.Context().Value(types.CtxLogger)
-	if logger == nil {
+	if logger := cmd.Context().Value(types.CtxLogger); logger == nil {
 		t.Fatal("logger not found in context")
-	}
-	if _, ok := logger.(*slog.Logger); !ok {
+	} else if _, ok := logger.(*slog.Logger); !ok {
 		t.Errorf("logger type mismatch: got %T, want *slog.Logger", logger)
 	}
-
-	// Verify levelVar is in context
-	levelVar := cmd.Context().Value(types.CtxLevelVar)
-	if levelVar == nil {
+	if levelVar := cmd.Context().Value(types.CtxLevelVar); levelVar == nil {
 		t.Fatal("levelVar not found in context")
 	}
-
-	// Verify handler is in context
-	handler := cmd.Context().Value(types.CtxHandler)
-	if handler == nil {
+	if handler := cmd.Context().Value(types.CtxHandler); handler == nil {
 		t.Fatal("handler not found in context")
 	}
 }
 
-func TestLoadConfigEnvironmentBinding(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	// Test that environment variables are bound
-	viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "")
-	viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, "")
-
-	err := kuke.LoadConfig()
-	if err != nil {
-		t.Fatalf("LoadConfig() error = %v, want nil", err)
-	}
-
-	// Verify environment binding was attempted (we can't easily test the actual binding
-	// without setting environment variables, but we can verify the function completes)
-}
-
-func TestSetPersistentLoggingFlagsViperBinding(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	rootCmd := &cobra.Command{Use: "test"}
-	err := kuke.SetPersistentLoggingFlags(rootCmd)
-	if err != nil {
-		t.Fatalf("SetPersistentLoggingFlags() error = %v, want nil", err)
-	}
-
-	// Test that flags are bound to viper by setting values and checking viper
-	testCases := []struct {
-		flagName  string
-		flagValue string
-		viperKey  string
-	}{
-		{"run-path", "/test/run/path", config.KUKEON_ROOT_RUN_PATH.ViperKey},
-		{"config", "/test/config.yaml", config.KUKEON_ROOT_CONFIG_FILE.ViperKey},
-		{"containerd-socket", "/test/containerd.sock", config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey},
-		{"log-level", "debug", config.KUKEON_ROOT_LOG_LEVEL.ViperKey},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.flagName, func(t *testing.T) {
-			setErr := rootCmd.PersistentFlags().Set(tc.flagName, tc.flagValue)
-			if setErr != nil {
-				t.Fatalf("failed to set flag %q: %v", tc.flagName, setErr)
-			}
-			got := viper.GetString(tc.viperKey)
-			if got != tc.flagValue {
-				t.Errorf("viper binding mismatch: got %q, want %q", got, tc.flagValue)
-			}
-		})
-	}
-
-	// Test verbose flag separately (it's a bool)
-	err = rootCmd.PersistentFlags().Set("verbose", "true")
-	if err != nil {
-		t.Fatalf("failed to set verbose flag: %v", err)
-	}
-	got := viper.GetBool(config.KUKEON_ROOT_VERBOSE.ViperKey)
-	if !got {
-		t.Errorf("viper binding mismatch for verbose: got %v, want true", got)
-	}
-}
-
-func TestLoadConfigWithValidYAML(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	tmpDir := t.TempDir()
-
-	configFile := filepath.Join(tmpDir, "config.yaml")
-	configContent := `kukeon:
-  runPath: /test/run/path
-  logLevel: warn
-  containerd:
-    socket: /test/containerd.sock
-`
-	var err error
-	err = os.WriteFile(configFile, []byte(configContent), 0o644)
-	if err != nil {
-		t.Fatalf("failed to write config file: %v", err)
-	}
-
-	viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, configFile)
-	viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, "")
-
-	err = kuke.LoadConfig()
-	if err != nil {
-		t.Fatalf("LoadConfig() error = %v, want nil", err)
-	}
-
-	// Verify config was read (viper should have the values)
-	// Note: The actual structure depends on how viper is configured
-	// We mainly verify that ReadInConfig didn't fail
-}
-
-func TestPersistentPreRunEWithLoggerDebugCall(t *testing.T) {
+func TestPersistentPreRunEConfigErrorWrapping(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	cmd, err := kuke.NewKukeCmd()
@@ -711,31 +342,22 @@ func TestPersistentPreRunEWithLoggerDebugCall(t *testing.T) {
 		t.Fatalf("NewKukeCmd() error = %v", err)
 	}
 
-	viper.Set(config.KUKEON_ROOT_VERBOSE.ViperKey, true)
-	viper.Set(config.KUKEON_ROOT_LOG_LEVEL.ViperKey, "debug")
-	viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "")
+	loader := &fakeConfigLoader{
+		loadConfigFn: func() error {
+			return fmt.Errorf("synthetic load error: %w", errdefs.ErrConfig)
+		},
+	}
 
-	// Capture stderr to verify debug logging
-	oldStderr := os.Stderr
-	r, w, _ := os.Pipe()
-	os.Stderr = w
-
-	ctx := context.Background()
+	ctx := context.WithValue(context.Background(), kuke.MockConfigLoaderKey{}, kuke.ConfigLoader(loader))
 	cmd.SetContext(ctx)
 
 	err = cmd.PersistentPreRunE(cmd, []string{})
-	if err != nil {
-		t.Fatalf("PersistentPreRunE() error = %v, want nil", err)
+	if err == nil {
+		t.Fatalf("PersistentPreRunE() error = nil, want error wrapping ErrConfig")
 	}
-
-	// Restore stderr
-	w.Close()
-	os.Stderr = oldStderr
-
-	// Read captured output (we don't assert on it, just verify it doesn't crash)
-	output := make([]byte, 1024)
-	_, _ = r.Read(output)
-	r.Close()
+	if !errors.Is(err, errdefs.ErrConfig) {
+		t.Errorf("PersistentPreRunE() error = %v, want error wrapping %v", err, errdefs.ErrConfig)
+	}
 }
 
 func TestNewKukeCmdSubcommandStructure(t *testing.T) {
@@ -751,7 +373,6 @@ func TestNewKukeCmdSubcommandStructure(t *testing.T) {
 		t.Fatal("no subcommands found")
 	}
 
-	// Verify each subcommand is a valid cobra.Command
 	for _, subcmd := range commands {
 		if subcmd == nil {
 			t.Error("found nil subcommand")
@@ -763,100 +384,39 @@ func TestNewKukeCmdSubcommandStructure(t *testing.T) {
 	}
 }
 
-func TestLoadConfigDefaultConfigFile(t *testing.T) {
+func TestSetPersistentLoggingFlagsViperBinding(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
-	viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "")
-	viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, "")
-
-	err := kuke.LoadConfig()
-	if err != nil {
-		t.Fatalf("LoadConfig() error = %v, want nil", err)
+	rootCmd := &cobra.Command{Use: "test"}
+	if err := kuke.SetPersistentLoggingFlags(rootCmd); err != nil {
+		t.Fatalf("SetPersistentLoggingFlags() error = %v, want nil", err)
 	}
 
-	// Verify that default config file path was set
-	// The actual path depends on DefaultConfigFile() implementation
-	// We mainly verify the function completes without error
-}
-
-func TestLoadConfigDefaultRunPath(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "")
-	viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, "")
-
-	err := kuke.LoadConfig()
-	if err != nil {
-		t.Fatalf("LoadConfig() error = %v, want nil", err)
+	testCases := []struct {
+		flagName  string
+		flagValue string
+		viperKey  string
+	}{
+		{"run-path", "/test/run/path", config.KUKEON_ROOT_RUN_PATH.ViperKey},
+		{"containerd-socket", "/test/containerd.sock", config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey},
+		{"log-level", "debug", config.KUKEON_ROOT_LOG_LEVEL.ViperKey},
 	}
 
-	// Verify that default run path was set
-	runPath := viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey)
-	if runPath == "" {
-		t.Error("run path is empty after LoadConfig with empty viper value")
+	for _, tc := range testCases {
+		t.Run(tc.flagName, func(t *testing.T) {
+			if err := rootCmd.PersistentFlags().Set(tc.flagName, tc.flagValue); err != nil {
+				t.Fatalf("failed to set flag %q: %v", tc.flagName, err)
+			}
+			if got := viper.GetString(tc.viperKey); got != tc.flagValue {
+				t.Errorf("viper binding mismatch: got %q, want %q", got, tc.flagValue)
+			}
+		})
 	}
 
-	// Check that it matches the default
-	defaultRunPath := config.DefaultRunPath()
-	// The run path might be set via environment or default, so we just verify it's not empty
-	if runPath == "" && defaultRunPath != "" {
-		t.Errorf("run path not set to default: got %q, want non-empty", runPath)
+	if err := rootCmd.PersistentFlags().Set("verbose", "true"); err != nil {
+		t.Fatalf("failed to set verbose flag: %v", err)
 	}
-}
-
-func TestPersistentPreRunEConfigErrorWrapping(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	cmd, err := kuke.NewKukeCmd()
-	if err != nil {
-		t.Fatalf("NewKukeCmd() error = %v", err)
-	}
-
-	viper.Set(config.KUKEON_ROOT_VERBOSE.ViperKey, false)
-	viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "")
-
-	// Create a scenario where LoadConfig would fail
-	// Since LoadConfig handles ConfigFileNotFoundError gracefully,
-	// we need to test a different error scenario
-	// For now, we'll test that the error wrapping works correctly
-	// by ensuring the function properly handles errors
-
-	ctx := context.Background()
-	cmd.SetContext(ctx)
-
-	err = cmd.PersistentPreRunE(cmd, []string{})
-	if err != nil {
-		// Check that error is wrapped with ErrConfig
-		if !errors.Is(err, errdefs.ErrConfig) {
-			t.Errorf("PersistentPreRunE() error = %v, want error wrapping %v", err, errdefs.ErrConfig)
-		}
-	}
-}
-
-// Helper function to create a test command with logger.
-func TestPersistentPreRunEWithNilLogger(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	cmd, err := kuke.NewKukeCmd()
-	if err != nil {
-		t.Fatalf("NewKukeCmd() error = %v", err)
-	}
-
-	viper.Set(config.KUKEON_ROOT_VERBOSE.ViperKey, false)
-	viper.Set(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, "")
-
-	ctx := context.Background()
-	cmd.SetContext(ctx)
-
-	// When verbose is false, logger should be nil
-	err = cmd.PersistentPreRunE(cmd, []string{})
-	if err != nil {
-		t.Fatalf("PersistentPreRunE() error = %v, want nil", err)
-	}
-
-	// Verify logger is not set when verbose is false
-	logger := cmd.Context().Value(types.CtxLogger)
-	if logger != nil {
-		t.Error("logger found in context when verbose is disabled")
+	if !viper.GetBool(config.KUKEON_ROOT_VERBOSE.ViperKey) {
+		t.Errorf("viper binding mismatch for verbose: got false, want true")
 	}
 }

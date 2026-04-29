@@ -37,6 +37,11 @@ const (
 	// `kuke run -p`. Profiles are not server-side resources — `kuke apply`
 	// rejects them.
 	KindCellProfile Kind = "CellProfile"
+	// KindServerConfiguration identifies the kukeond daemon's configuration
+	// document loaded via `kukeond --configuration` (and consumed by
+	// `kuke init --server-configuration`). Not a server-side resource —
+	// `kuke apply` rejects it.
+	KindServerConfiguration Kind = "ServerConfiguration"
 )
 
 // Common printable state strings.
