@@ -271,8 +271,8 @@ func loadFromFile(file string) (v1beta1.CellDoc, error) {
 
 // loadFromProfile resolves the active profiles directory, loads the named
 // profile, and materializes its CellSpec body into a CellDoc. The cell name
-// is the profile metadata.name when spec.namePrefix is unset, otherwise
-// `<namePrefix>-<6hex>` so each invocation produces a fresh cell.
+// is `<prefix>-<6hex>` — prefix defaults to metadata.name and is overridden
+// by spec.prefix — so every invocation produces a fresh cell.
 func loadFromProfile(profileName string) (v1beta1.CellDoc, error) {
 	dir, err := cellprofile.ResolveDir()
 	if err != nil {

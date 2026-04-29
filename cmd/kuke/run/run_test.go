@@ -1072,8 +1072,8 @@ func TestRun_FromProfile_CreatesAndStarts(t *testing.T) {
 	if fc.createCalls != 1 {
 		t.Fatalf("CreateCell calls=%d want 1", fc.createCalls)
 	}
-	if got := fc.createDoc.Metadata.Name; got != "claude-cell" {
-		t.Errorf("cell name=%q want claude-cell (default to profile name)", got)
+	if got := fc.createDoc.Metadata.Name; !strings.HasPrefix(got, "claude-cell-") || len(got) != len("claude-cell-")+6 {
+		t.Errorf("cell name=%q want claude-cell-<6hex> (default prefix from metadata.name)", got)
 	}
 	if got := fc.createDoc.Spec.RealmID; got != "default" {
 		t.Errorf("RealmID=%q want default", got)
@@ -1089,11 +1089,9 @@ func TestRun_FromProfile_CreatesAndStarts(t *testing.T) {
 	}
 }
 
-func TestRun_FromProfile_NamePrefix_GeneratesFreshCell(t *testing.T) {
-	// spec.namePrefix flips the profile from singleton to template: every
-	// invocation must produce a distinct cell name shaped like
-	// `<prefix>-<6hex>`. Drive two invocations and assert both names share
-	// the prefix and differ.
+func TestRun_FromProfile_PrefixOverride_GeneratesFreshCell(t *testing.T) {
+	// spec.prefix overrides the default prefix (metadata.name). Every
+	// invocation must produce a distinct cell name shaped `<prefix>-<6hex>`.
 	t.Cleanup(viper.Reset)
 	dir := t.TempDir()
 	const profileYAML = `apiVersion: v1beta1
@@ -1104,7 +1102,7 @@ spec:
   realm: default
   space: agents
   stack: claude
-  namePrefix: claude
+  prefix: agent
   cell:
     containers:
       - id: work
@@ -1130,15 +1128,15 @@ spec:
 			t.Fatalf("Execute #%d: %v", i, err)
 		}
 		name := fc.createDoc.Metadata.Name
-		if !strings.HasPrefix(name, "claude-") || len(name) != len("claude-")+6 {
-			t.Fatalf("cell name=%q want claude-<6hex>", name)
+		if !strings.HasPrefix(name, "agent-") || len(name) != len("agent-")+6 {
+			t.Fatalf("cell name=%q want agent-<6hex>", name)
 		}
 		if _, dup := names[name]; dup {
 			t.Errorf("name=%q repeated across invocations", name)
 		}
 		names[name] = struct{}{}
 		if got := fc.createDoc.Metadata.Labels["kukeon.io/profile"]; got != "claude" {
-			t.Errorf("labels[kukeon.io/profile]=%q want claude", got)
+			t.Errorf("labels[kukeon.io/profile]=%q want claude (label tracks metadata.name)", got)
 		}
 	}
 }
