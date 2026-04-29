@@ -221,6 +221,9 @@ func (r *realConfigLoader) LoadConfig() error {
 }
 
 func loadConfig() error {
+	_ = config.KUKEON_ROOT_HOST.BindEnv()
+	_ = config.KUKEON_ROOT_CONTAINERD_SOCKET.BindEnv()
+
 	_ = config.KUKEON_ROOT_RUN_PATH.BindEnv()
 	if viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey) == "" {
 		viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, config.DefaultRunPath())
