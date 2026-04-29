@@ -614,9 +614,13 @@ func (r *Exec) processOrphanedContainers(ctx context.Context, containers []strin
 	r.logger.InfoContext(ctx, "processing orphaned containers for deletion", "count", len(containers))
 	for i, containerID := range containers {
 		r.logger.DebugContext(ctx, "processing container", "index", i+1, "total", len(containers), "id", containerID)
-		// Try to delete container
+		// Force-stop: realm/space teardown is destructive by intent. Default
+		// SIGTERM with a 10s grace period leaves SIGKILL on the table for any
+		// stuck task, and a still-running task pins its snapshot mount —
+		// blocking CleanupNamespaceResources and the subsequent
+		// DeleteNamespace with "namespace not empty".
 		r.logger.DebugContext(ctx, "stopping container", "id", containerID)
-		_, _ = r.ctrClient.StopContainer(containerID, ctr.StopContainerOptions{})
+		_, _ = r.ctrClient.StopContainer(containerID, ctr.StopContainerOptions{Force: true})
 		r.logger.DebugContext(ctx, "deleting container", "id", containerID)
 		_ = r.ctrClient.DeleteContainer(containerID, ctr.ContainerDeleteOptions{
 			SnapshotCleanup: true,

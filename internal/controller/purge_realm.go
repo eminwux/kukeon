@@ -28,13 +28,14 @@ import (
 
 // PurgeRealmResult reports what was purged during realm purging.
 type PurgeRealmResult struct {
-	Realm          intmodel.Realm
-	RealmDeleted   bool     // Whether realm deletion succeeded
-	PurgeSucceeded bool     // Whether comprehensive purge succeeded
-	Force          bool     // Force flag that was used
-	Cascade        bool     // Cascade flag that was used
-	Deleted        []string // Resources that were deleted (standard cleanup)
-	Purged         []string // Additional resources purged (CNI, orphaned containers, etc.)
+	Realm            intmodel.Realm
+	RealmDeleted     bool     // Whether realm deletion succeeded
+	PurgeSucceeded   bool     // Whether comprehensive purge succeeded
+	NamespaceRemoved bool     // Whether the containerd namespace was actually removed
+	Force            bool     // Force flag that was used
+	Cascade          bool     // Cascade flag that was used
+	Deleted          []string // Resources that were deleted (standard cleanup)
+	Purged           []string // Additional resources purged (CNI, orphaned containers, etc.)
 }
 
 // PurgeRealm purges a realm with comprehensive cleanup. If cascade is true, purges all spaces first.
@@ -107,7 +108,9 @@ func (b *Exec) PurgeRealm(realm intmodel.Realm, force, cascade bool) (PurgeRealm
 	}
 
 	// Call private cascade method (handles cascade deletion, standard delete, and comprehensive purge)
-	if err = b.purgeRealmCascade(internalRealm, force, cascade, metadataExists); err != nil {
+	namespaceRemoved, err := b.purgeRealmCascade(internalRealm, force, cascade, metadataExists)
+	result.NamespaceRemoved = namespaceRemoved
+	if err != nil {
 		result.Purged = append(result.Purged, fmt.Sprintf("purge-error:%v", err))
 		result.PurgeSucceeded = false
 		// If metadata exists and delete failed, mark as not deleted
@@ -131,30 +134,31 @@ func (b *Exec) PurgeRealm(realm intmodel.Realm, force, cascade bool) (PurgeRealm
 }
 
 // purgeRealmCascade handles cascade deletion and purging logic using runner methods directly.
-// It returns an error if deletion/purging fails, but does not return result types.
-// metadataExists indicates whether realm metadata exists (affects cascade and delete operations).
-func (b *Exec) purgeRealmCascade(realm intmodel.Realm, force, cascade, metadataExists bool) error {
+// It returns whether the containerd namespace was actually removed and an
+// error if deletion/purging failed. metadataExists indicates whether realm
+// metadata exists (affects cascade and delete operations).
+func (b *Exec) purgeRealmCascade(realm intmodel.Realm, force, cascade, metadataExists bool) (bool, error) {
 	realmName := strings.TrimSpace(realm.Metadata.Name)
 
 	// If cascade is true, list and purge child resources (spaces) recursively (only if metadata exists)
 	if cascade && metadataExists {
 		spaces, err := b.runner.ListSpaces(realmName)
 		if err != nil {
-			return fmt.Errorf("failed to list spaces: %w", err)
+			return false, fmt.Errorf("failed to list spaces: %w", err)
 		}
 		for _, space := range spaces {
 			if err = b.purgeSpaceCascade(space, force, cascade); err != nil {
-				return fmt.Errorf("failed to purge space %q: %w", space.Metadata.Name, err)
+				return false, fmt.Errorf("failed to purge space %q: %w", space.Metadata.Name, err)
 			}
 		}
 	} else if !force && metadataExists {
 		// Validate no child resources exist (only if metadata exists)
 		spaces, err := b.runner.ListSpaces(realmName)
 		if err != nil {
-			return fmt.Errorf("failed to list spaces: %w", err)
+			return false, fmt.Errorf("failed to list spaces: %w", err)
 		}
 		if len(spaces) > 0 {
-			return fmt.Errorf("%w: realm %q has %d space(s). Use --cascade to purge them or --force to skip validation",
+			return false, fmt.Errorf("%w: realm %q has %d space(s). Use --cascade to purge them or --force to skip validation",
 				errdefs.ErrResourceHasDependencies, realmName, len(spaces))
 		}
 	}
@@ -183,12 +187,16 @@ func (b *Exec) purgeRealmCascade(realm intmodel.Realm, force, cascade, metadataE
 		}
 	}
 
-	// Perform comprehensive purge via runner (works even without metadata)
-	if purgeErr := b.runner.PurgeRealm(realm); purgeErr != nil {
+	// Perform comprehensive purge via runner (works even without metadata).
+	// Note: namespaceRemoved is the load-bearing signal — even when purgeErr
+	// is nil, a residual namespace surfaces here so callers can render
+	// "namespace not empty" instead of a misleading "purged" outcome.
+	namespaceRemoved, purgeErr := b.runner.PurgeRealm(realm)
+	if purgeErr != nil {
 		if deleteErr != nil {
-			return fmt.Errorf("%w; runner purge also failed: %w", deleteErr, purgeErr)
+			return namespaceRemoved, fmt.Errorf("%w; runner purge also failed: %w", deleteErr, purgeErr)
 		}
-		return purgeErr
+		return namespaceRemoved, purgeErr
 	}
-	return nil
+	return namespaceRemoved, nil
 }

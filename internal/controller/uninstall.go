@@ -57,11 +57,18 @@ type UninstallOptions struct {
 }
 
 // RealmPurgeOutcome reports the result of purging a single realm.
+//
+// Purged is the high-level "did the cleanup function complete without a
+// fatal error" flag; NamespaceRemoved is the narrower "did the containerd
+// namespace actually get removed" signal — the residual-namespace bug from
+// issue #193 is the case where Purged was true but NamespaceRemoved was
+// false, leaving the caller with a misleading "purged" report.
 type RealmPurgeOutcome struct {
-	Name      string
-	Namespace string
-	Purged    bool
-	Err       error
+	Name             string
+	Namespace        string
+	Purged           bool
+	NamespaceRemoved bool
+	Err              error
 }
 
 // UninstallReport summarizes what Uninstall did.
@@ -138,7 +145,9 @@ func (b *Exec) Uninstall(opts UninstallOptions) (UninstallReport, error) {
 			Name:      realm.Metadata.Name,
 			Namespace: realm.Spec.Namespace,
 		}
-		if _, err := b.PurgeRealm(realm, true, true); err != nil {
+		result, err := b.PurgeRealm(realm, true, true)
+		outcome.NamespaceRemoved = result.NamespaceRemoved
+		if err != nil {
 			outcome.Err = err
 			recordErr(fmt.Errorf("purge realm %q: %w", realm.Metadata.Name, err))
 		} else {

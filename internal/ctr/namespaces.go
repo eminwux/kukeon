@@ -23,6 +23,7 @@ import (
 	"slices"
 
 	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/leases"
 	"github.com/containerd/containerd/v2/core/snapshots"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/opencontainers/go-digest"
@@ -352,6 +353,29 @@ func (c *client) CleanupNamespaceResources(namespace, snapshotter string) error 
 				// Continue with other blobs
 			} else {
 				c.logger.DebugContext(c.ctx, "deleted blob", "namespace", namespace, "digest", dgst.String())
+			}
+		}
+	}
+
+	// Release any remaining leases. A pinned lease keeps content/snapshot
+	// references alive and blocks NamespaceService.Delete with "namespace not
+	// empty"; the image-pull path (image.go) creates per-pull leases and
+	// deletes them on success, but leases owned by orphaned operations or
+	// older kukeond versions can persist and must be cleared synchronously.
+	c.logger.DebugContext(c.ctx, "cleaning up leases", "namespace", namespace)
+	leaseManager := c.cClient.LeasesService()
+	existingLeases, err := leaseManager.List(nsCtx)
+	if err != nil {
+		c.logger.WarnContext(c.ctx, "failed to list leases", "namespace", namespace, "error", err)
+	} else {
+		c.logger.DebugContext(c.ctx, "found leases", "namespace", namespace, "count", len(existingLeases))
+		for _, lease := range existingLeases {
+			c.logger.DebugContext(c.ctx, "deleting lease", "namespace", namespace, "lease", lease.ID)
+			if deleteErr := leaseManager.Delete(nsCtx, lease, leases.SynchronousDelete); deleteErr != nil {
+				c.logger.WarnContext(c.ctx, "failed to delete lease", "namespace", namespace, "lease", lease.ID, "error", deleteErr)
+				// Continue with other leases
+			} else {
+				c.logger.DebugContext(c.ctx, "deleted lease", "namespace", namespace, "lease", lease.ID)
 			}
 		}
 	}
