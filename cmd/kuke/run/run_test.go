@@ -1258,6 +1258,128 @@ func TestRun_FromProfile_Attach_HeadlineFlow(t *testing.T) {
 	}
 }
 
+func TestRun_RmFlag_SetsAutoDeleteOnSpec(t *testing.T) {
+	// `kuke run --rm -f cell.yaml` must surface AutoDelete=true on the
+	// CellDoc the daemon receives, in both attached and detached modes.
+	// The daemon side (KukeonV1Service.CreateCell) reads that bool to
+	// install the auto-delete watcher.
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "--rm"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !fc.createDoc.Spec.AutoDelete {
+		t.Errorf("CreateCell received AutoDelete=false; --rm must set it true")
+	}
+}
+
+func TestRun_NoRmFlag_LeavesAutoDeleteFalse(t *testing.T) {
+	// Default is opt-in — without --rm, the daemon must not see AutoDelete
+	// flipped on. Guards against accidental regression where the CLI
+	// always sets the bool.
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML)})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.createDoc.Spec.AutoDelete {
+		t.Errorf("CreateCell received AutoDelete=true without --rm; default must be false")
+	}
+}
+
+func TestRun_RmFlag_RejectsNoDaemon(t *testing.T) {
+	// --rm needs a long-lived process to watch the root task. The --no-daemon
+	// CLI returns immediately after CreateCell, so the watcher would never
+	// run. Reject the combo at flag-parse — before any cell is mutated.
+	t.Cleanup(viper.Reset)
+	// The real --no-daemon flag is registered on rootCmd; in this run-only
+	// fixture we only have the run subcommand, so flip the underlying viper
+	// key directly. Either path lands the same bool in viper.
+	viper.Set(config.KUKEON_ROOT_NO_DAEMON.ViperKey, true)
+
+	fc := &fakeClient{}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "--rm"})
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "--rm is incompatible with --no-daemon") {
+		t.Fatalf("err=%v want '--rm is incompatible with --no-daemon'", err)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d want 0 (must reject before mutating)", fc.createCalls)
+	}
+}
+
+func TestRun_RmFlag_FromYAMLAlreadySet_StillHonored(t *testing.T) {
+	// A YAML manifest with `autoDelete: true` already in the spec must be
+	// honored even without --rm — the spec is the declarative source of
+	// truth and the CLI should not silently strip the bit.
+	t.Cleanup(viper.Reset)
+
+	const yamlWithAutoDelete = `apiVersion: v1beta1
+kind: Cell
+metadata:
+  name: my-cell
+spec:
+  id: my-cell
+  realmId: my-realm
+  spaceId: my-space
+  stackId: my-stack
+  autoDelete: true
+  containers:
+    - id: root
+      root: true
+      image: registry.eminwux.com/busybox:latest
+      command: sleep
+      args:
+        - "3600"
+`
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, yamlWithAutoDelete)})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !fc.createDoc.Spec.AutoDelete {
+		t.Errorf("CreateCell received AutoDelete=false; YAML autoDelete:true must survive when --rm is absent")
+	}
+}
+
+func TestNewRunCmd_RmFlagRegistered(t *testing.T) {
+	cmd := runcmd.NewRunCmd()
+	rmFlag := cmd.Flags().Lookup("rm")
+	if rmFlag == nil {
+		t.Fatal("expected --rm flag")
+	}
+	if rmFlag.Value.Type() != "bool" {
+		t.Errorf("--rm type=%q want bool", rmFlag.Value.Type())
+	}
+	if def := rmFlag.DefValue; def != "false" {
+		t.Errorf("--rm default=%q want false", def)
+	}
+}
+
 func TestPickLocation_DefaultsViaConfigKV(t *testing.T) {
 	// Sanity-check that the run command's KV defaults still resolve to "default"
 	// when viper is reset (mirrors session-default behavior on a fresh shell).

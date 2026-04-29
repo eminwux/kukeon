@@ -437,6 +437,78 @@ func TestCellRoundTripV1Beta1_NetworkBridgeName(t *testing.T) {
 	}
 }
 
+// TestCellRoundTripV1Beta1_AutoDelete locks down the AC for `kuke run --rm`:
+// the AutoDelete bool must survive the external→internal→external round-trip
+// and serialize as YAML so a daemon restart can re-read the auto-delete intent
+// from the cell metadata file (the future #161 reconciliation loop's hook).
+func TestCellRoundTripV1Beta1_AutoDelete(t *testing.T) {
+	input := ext.CellDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCell,
+		Metadata: ext.CellMetadata{
+			Name:   "cell-rm",
+			Labels: map[string]string{},
+		},
+		Spec: ext.CellSpec{
+			ID:         "cell-id-rm",
+			RealmID:    "realm0",
+			SpaceID:    "space0",
+			StackID:    "stack0",
+			AutoDelete: true,
+			Containers: []ext.ContainerSpec{},
+		},
+	}
+
+	internal, version, err := apischeme.NormalizeCell(input)
+	if err != nil {
+		t.Fatalf("NormalizeCell: %v", err)
+	}
+	if !internal.Spec.AutoDelete {
+		t.Errorf("internal AutoDelete = false, want true after Normalize")
+	}
+
+	output, err := apischeme.BuildCellExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildCellExternalFromInternal: %v", err)
+	}
+	if !output.Spec.AutoDelete {
+		t.Errorf("external AutoDelete = false, want true after Build")
+	}
+
+	rendered, err := yaml.Marshal(output)
+	if err != nil {
+		t.Fatalf("yaml.Marshal: %v", err)
+	}
+	if !strings.Contains(string(rendered), "autoDelete: true") {
+		t.Errorf("rendered YAML missing autoDelete entry; got:\n%s", string(rendered))
+	}
+}
+
+// TestCellRoundTripV1Beta1_AutoDeleteOmitted ensures the field stays omitted
+// from the YAML when unset — keeps existing manifests visually clean.
+func TestCellRoundTripV1Beta1_AutoDeleteOmitted(t *testing.T) {
+	input := ext.CellDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCell,
+		Metadata:   ext.CellMetadata{Name: "cell-noop"},
+		Spec: ext.CellSpec{
+			ID:         "cell-id-noop",
+			RealmID:    "realm0",
+			SpaceID:    "space0",
+			StackID:    "stack0",
+			Containers: []ext.ContainerSpec{},
+		},
+	}
+
+	rendered, err := yaml.Marshal(input)
+	if err != nil {
+		t.Fatalf("yaml.Marshal: %v", err)
+	}
+	if strings.Contains(string(rendered), "autoDelete:") {
+		t.Errorf("autoDelete must be omitted when false; got:\n%s", string(rendered))
+	}
+}
+
 func TestContainerRoundTripV1Beta1(t *testing.T) {
 	input := ext.ContainerDoc{
 		APIVersion: ext.APIVersionV1Beta1,

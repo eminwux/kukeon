@@ -35,6 +35,10 @@ type CellSpec struct {
 	RootContainerID string
 	Tty             *CellTty
 	Containers      []ContainerSpec
+	// AutoDelete mirrors v1beta1.CellSpec.AutoDelete. See that type for
+	// semantics; the field is round-tripped through cell metadata so the
+	// daemon can re-derive the auto-delete intent after a restart.
+	AutoDelete bool
 }
 
 // CellTty mirrors the v1beta1 CellTty payload. See the v1beta1 type for

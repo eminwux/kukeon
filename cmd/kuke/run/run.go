@@ -89,6 +89,11 @@ func NewRunCmd() *cobra.Command {
 	cmd.Flags().String("container", "",
 		"Container to attach to (only valid with -a; must be attachable)")
 	_ = viper.BindPFlag(config.KUKE_RUN_CONTAINER.ViperKey, cmd.Flags().Lookup("container"))
+	cmd.Flags().Bool("rm", false,
+		"Best-effort delete the cell after the root container's task exits "+
+			"(any rc). Daemon-mode only — incompatible with --no-daemon. "+
+			"A daemon crash between task-exit and delete may leave an orphan.")
+	_ = viper.BindPFlag(config.KUKE_RUN_RM.ViperKey, cmd.Flags().Lookup("rm"))
 
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
@@ -107,6 +112,7 @@ type runFlags struct {
 	output        string
 	doAttach      bool
 	containerFlag string
+	autoDelete    bool
 }
 
 func parseRunFlags(cmd *cobra.Command, _ []string) (runFlags, error) {
@@ -115,6 +121,7 @@ func parseRunFlags(cmd *cobra.Command, _ []string) (runFlags, error) {
 		profileName:   strings.TrimSpace(viper.GetString(config.KUKE_RUN_PROFILE.ViperKey)),
 		doAttach:      viper.GetBool(config.KUKE_RUN_ATTACH.ViperKey),
 		containerFlag: strings.TrimSpace(viper.GetString(config.KUKE_RUN_CONTAINER.ViperKey)),
+		autoDelete:    viper.GetBool(config.KUKE_RUN_RM.ViperKey),
 	}
 
 	output, err := cmd.Flags().GetString("output")
@@ -135,6 +142,12 @@ func parseRunFlags(cmd *cobra.Command, _ []string) (runFlags, error) {
 		// parse. Reject the combination so callers pick one mode.
 		return runFlags{}, errors.New("--output is incompatible with -a/--attach")
 	}
+	if flags.autoDelete && viper.GetBool(config.KUKEON_ROOT_NO_DAEMON.ViperKey) {
+		// --rm needs a long-lived process to watch the root task and trigger
+		// cleanup. The --no-daemon CLI exits as soon as create+start returns,
+		// so the watcher would never run.
+		return runFlags{}, errors.New("--rm is incompatible with --no-daemon")
+	}
 	return flags, nil
 }
 
@@ -150,6 +163,14 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	resolveCellLocation(&cellDoc)
+
+	if flags.autoDelete {
+		// The flag is the imperative knob; it always wins over a missing/false
+		// spec.autoDelete in the manifest. We never clear an explicit `true`
+		// in the YAML even without --rm — that's a declarative intent the
+		// operator wrote and the daemon should honor.
+		cellDoc.Spec.AutoDelete = true
+	}
 
 	if validateErr := validateResolvedCell(cellDoc); validateErr != nil {
 		return validateErr

@@ -22,21 +22,42 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
+
+// AutoDeleteLauncher installs a background watcher that deletes the cell
+// after its root containerd task exits. Called from CreateCell when the
+// resulting cell has Spec.AutoDelete=true (i.e., the operator passed
+// `kuke run --rm`). Returning an error logs and proceeds — auto-delete is
+// best-effort by design.
+type AutoDeleteLauncher func(ctx context.Context, doc v1beta1.CellDoc) error
 
 // KukeonV1Service implements the net/rpc server methods for the KukeonV1
 // service. Each method always returns nil to net/rpc and carries structured
 // errors inside the Reply envelope so errdefs sentinels survive the wire.
 type KukeonV1Service struct {
-	ctx    context.Context
-	logger *slog.Logger
-	core   kukeonv1.Client
+	ctx                context.Context
+	logger             *slog.Logger
+	core               kukeonv1.Client
+	autoDeleteLauncher AutoDeleteLauncher
 }
 
 // NewKukeonV1Service constructs a service bound to the given kukeon Client.
-// The service borrows the client; the caller owns its lifecycle.
-func NewKukeonV1Service(ctx context.Context, logger *slog.Logger, core kukeonv1.Client) *KukeonV1Service {
-	return &KukeonV1Service{ctx: ctx, logger: logger, core: core}
+// The service borrows the client; the caller owns its lifecycle. If
+// autoDeleteLauncher is non-nil, CreateCell consults it for cells whose
+// resulting spec asks for auto-delete.
+func NewKukeonV1Service(
+	ctx context.Context,
+	logger *slog.Logger,
+	core kukeonv1.Client,
+	autoDeleteLauncher AutoDeleteLauncher,
+) *KukeonV1Service {
+	return &KukeonV1Service{
+		ctx:                ctx,
+		logger:             logger,
+		core:               core,
+		autoDeleteLauncher: autoDeleteLauncher,
+	}
 }
 
 // CreateRealm is the net/rpc method for KukeonV1.CreateRealm.
@@ -74,12 +95,29 @@ func (s *KukeonV1Service) CreateStack(args *kukeonv1.CreateStackArgs, reply *kuk
 
 // CreateCell is the net/rpc method for KukeonV1.CreateCell. net/rpc requires
 // exported pointer-to-struct args and reply plus a single error return.
+//
+// When the request asks for auto-delete (`kuke run --rm` set Spec.AutoDelete)
+// and the cell was started, the service kicks off a best-effort watcher
+// goroutine that waits for the root task to exit and then kills+deletes the
+// cell. The watcher is owned by the daemon (s.ctx); a daemon crash before
+// task exit leaves an orphan, matching the documented behavior.
 func (s *KukeonV1Service) CreateCell(args *kukeonv1.CreateCellArgs, reply *kukeonv1.CreateCellReply) error {
 	result, err := s.core.CreateCell(s.ctx, args.Doc)
 	reply.Result = result
 	reply.Err = kukeonv1.ToAPIError(err)
 	if err != nil {
 		s.logger.DebugContext(s.ctx, "CreateCell returned error", "error", err)
+		return nil
+	}
+
+	if s.autoDeleteLauncher != nil && args.Doc.Spec.AutoDelete && result.Started {
+		if launchErr := s.autoDeleteLauncher(s.ctx, args.Doc); launchErr != nil {
+			s.logger.WarnContext(s.ctx, "failed to install --rm watcher; cell will not auto-delete",
+				"cell", args.Doc.Metadata.Name,
+				"realm", args.Doc.Spec.RealmID,
+				"error", launchErr,
+			)
+		}
 	}
 	return nil
 }
