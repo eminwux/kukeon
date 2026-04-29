@@ -915,6 +915,21 @@ func (c *Client) GetImage(_ context.Context, realm, ref string) (kukeonv1.GetIma
 	}, nil
 }
 
+// DeleteImage removes the named image ref from the realm's containerd
+// namespace. errdefs.ErrImageNotFound is propagated unchanged so the wire
+// layer can emit the matching APIError Kind.
+func (c *Client) DeleteImage(_ context.Context, realm, ref string) (kukeonv1.DeleteImageResult, error) {
+	res, err := c.ctrl.DeleteImage(realm, ref)
+	if err != nil {
+		return kukeonv1.DeleteImageResult{}, err
+	}
+	return kukeonv1.DeleteImageResult{
+		Realm:     res.Realm,
+		Namespace: res.Namespace,
+		Ref:       res.Ref,
+	}, nil
+}
+
 func controllerImageToWire(img controller.ImageInfo) kukeonv1.ImageInfo {
 	return kukeonv1.ImageInfo{
 		Name:      img.Name,

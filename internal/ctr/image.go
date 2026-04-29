@@ -244,6 +244,32 @@ func (c *client) GetImage(ref string) (ImageInfo, error) {
 	return c.imageToInfo(img), nil
 }
 
+// DeleteImage removes the named image ref from the client's current
+// containerd namespace. The kukeon ErrImageNotFound sentinel is returned
+// when containerd reports the ref absent so upper layers can map to a
+// clean error message; other errors are wrapped with ErrDeleteImage.
+func (c *client) DeleteImage(ref string) error {
+	nsCtx := c.namespaceCtx()
+
+	if err := c.cClient.ImageService().Delete(nsCtx, ref); err != nil {
+		if errdefs.IsNotFound(err) {
+			return fmt.Errorf("%w: %s", internalerrdefs.ErrImageNotFound, ref)
+		}
+		c.logger.ErrorContext(
+			c.ctx,
+			"failed to delete image",
+			"namespace",
+			c.Namespace(),
+			"ref",
+			ref,
+			"err",
+			formatError(err),
+		)
+		return fmt.Errorf("%w: %w", internalerrdefs.ErrDeleteImage, err)
+	}
+	return nil
+}
+
 // imageToInfo extracts the ImageInfo subset from a containerd Image. Size is
 // resolved via the platform-default Size() helper; failure leaves Size=-1
 // rather than aborting because partial-content tarballs are common with

@@ -163,6 +163,11 @@ var (
 	// enumerating images in a realm's namespace fails.
 	ErrListImages = errors.New("failed to list images")
 
+	// ErrDeleteImage wraps the underlying containerd error when removing
+	// one image from a realm's namespace fails for reasons other than
+	// not-found. Not-found is reported via ErrImageNotFound.
+	ErrDeleteImage = errors.New("failed to delete image")
+
 	// Attach-related errors.
 
 	// ErrAttachNotSupported is returned when an attach request targets a

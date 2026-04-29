@@ -421,3 +421,13 @@ func (s *KukeonV1Service) GetImage(args *kukeonv1.GetImageArgs, reply *kukeonv1.
 	}
 	return nil
 }
+
+func (s *KukeonV1Service) DeleteImage(args *kukeonv1.DeleteImageArgs, reply *kukeonv1.DeleteImageReply) error {
+	result, err := s.core.DeleteImage(s.ctx, args.Realm, args.Ref)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "DeleteImage returned error", "error", err)
+	}
+	return nil
+}

@@ -101,6 +101,12 @@ type Client interface {
 	// current containerd namespace. Returns errdefs.ErrImageNotFound if
 	// the ref is absent.
 	GetImage(ref string) (ImageInfo, error)
+
+	// DeleteImage removes the named image ref from the client's current
+	// containerd namespace. Returns errdefs.ErrImageNotFound if the ref
+	// is absent so callers can distinguish missing from operational
+	// failures.
+	DeleteImage(ref string) error
 }
 
 func NewClient(ctx context.Context, logger *slog.Logger, socket string) Client {

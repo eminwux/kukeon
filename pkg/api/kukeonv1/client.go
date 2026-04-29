@@ -97,6 +97,11 @@ type Client interface {
 	// realm. errdefs.ErrImageNotFound is returned when the ref is absent.
 	GetImage(ctx context.Context, realm, ref string) (GetImageResult, error)
 
+	// DeleteImage removes the named image ref from the named realm's
+	// containerd namespace. errdefs.ErrImageNotFound is returned when
+	// the ref does not exist.
+	DeleteImage(ctx context.Context, realm, ref string) (DeleteImageResult, error)
+
 	Ping(ctx context.Context) error
 }
 
@@ -191,6 +196,7 @@ const (
 	MethodLoadImage      = ServiceName + ".LoadImage"
 	MethodListImages     = ServiceName + ".ListImages"
 	MethodGetImage       = ServiceName + ".GetImage"
+	MethodDeleteImage    = ServiceName + ".DeleteImage"
 
 	MethodPing = ServiceName + ".Ping"
 )

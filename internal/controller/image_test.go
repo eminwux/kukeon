@@ -206,3 +206,109 @@ func TestGetImage_RunnerErrorIsWrapped(t *testing.T) {
 		t.Errorf("inner error should be preserved; got %q", err.Error())
 	}
 }
+
+func TestDeleteImage_Success(t *testing.T) {
+	wantNS := consts.RealmNamespace("default")
+
+	var gotNS, gotRef string
+	mock := &fakeRunner{
+		GetRealmFn: func(_ intmodel.Realm) (intmodel.Realm, error) {
+			return buildTestRealm("default", wantNS), nil
+		},
+		DeleteImageFn: func(ns, ref string) error {
+			gotNS = ns
+			gotRef = ref
+			return nil
+		},
+	}
+
+	ctrl := setupTestController(t, mock)
+	res, err := ctrl.DeleteImage("default", "docker.io/library/alpine:3.20")
+	if err != nil {
+		t.Fatalf("DeleteImage returned error: %v", err)
+	}
+	if gotNS != wantNS {
+		t.Errorf("runner saw namespace %q, want %q", gotNS, wantNS)
+	}
+	if gotRef != "docker.io/library/alpine:3.20" {
+		t.Errorf("runner saw ref %q, want docker.io/library/alpine:3.20", gotRef)
+	}
+	if res.Realm != "default" {
+		t.Errorf("Realm = %q, want default", res.Realm)
+	}
+	if res.Namespace != wantNS {
+		t.Errorf("Namespace = %q, want %q", res.Namespace, wantNS)
+	}
+	if res.Ref != "docker.io/library/alpine:3.20" {
+		t.Errorf("Ref = %q, want docker.io/library/alpine:3.20", res.Ref)
+	}
+}
+
+func TestDeleteImage_NotFoundIsPassedThrough(t *testing.T) {
+	mock := &fakeRunner{
+		GetRealmFn: func(_ intmodel.Realm) (intmodel.Realm, error) {
+			return buildTestRealm("default", ""), nil
+		},
+		DeleteImageFn: func(string, string) error {
+			return errdefs.ErrImageNotFound
+		},
+	}
+	ctrl := setupTestController(t, mock)
+	_, err := ctrl.DeleteImage("default", "docker.io/library/missing:1")
+	if !errors.Is(err, errdefs.ErrImageNotFound) {
+		t.Fatalf("expected ErrImageNotFound, got %v", err)
+	}
+}
+
+func TestDeleteImage_RealmNotFound(t *testing.T) {
+	mock := &fakeRunner{
+		GetRealmFn: func(_ intmodel.Realm) (intmodel.Realm, error) {
+			return intmodel.Realm{}, errdefs.ErrRealmNotFound
+		},
+	}
+	ctrl := setupTestController(t, mock)
+	_, err := ctrl.DeleteImage("ghost", "alpine")
+	if !errors.Is(err, errdefs.ErrRealmNotFound) {
+		t.Fatalf("expected ErrRealmNotFound, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "ghost") {
+		t.Errorf("error should name the missing realm; got %q", err.Error())
+	}
+}
+
+func TestDeleteImage_EmptyRealm(t *testing.T) {
+	mock := &fakeRunner{}
+	ctrl := setupTestController(t, mock)
+	_, err := ctrl.DeleteImage("   ", "alpine")
+	if !errors.Is(err, errdefs.ErrRealmNameRequired) {
+		t.Fatalf("expected ErrRealmNameRequired, got %v", err)
+	}
+}
+
+func TestDeleteImage_EmptyRefIsNotFound(t *testing.T) {
+	mock := &fakeRunner{}
+	ctrl := setupTestController(t, mock)
+	_, err := ctrl.DeleteImage("default", "  ")
+	if !errors.Is(err, errdefs.ErrImageNotFound) {
+		t.Fatalf("expected ErrImageNotFound, got %v", err)
+	}
+}
+
+func TestDeleteImage_RunnerErrorIsWrapped(t *testing.T) {
+	mock := &fakeRunner{
+		GetRealmFn: func(_ intmodel.Realm) (intmodel.Realm, error) {
+			return buildTestRealm("default", ""), nil
+		},
+		DeleteImageFn: func(string, string) error {
+			return errors.New("containerd unreachable")
+		},
+	}
+	ctrl := setupTestController(t, mock)
+	_, err := ctrl.DeleteImage("default", "alpine")
+	if !errors.Is(err, errdefs.ErrDeleteImage) {
+		t.Fatalf("expected ErrDeleteImage wrapper, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "containerd unreachable") {
+		t.Errorf("inner error should be preserved; got %q", err.Error())
+	}
+}

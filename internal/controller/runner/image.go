@@ -58,3 +58,22 @@ func (r *Exec) GetImage(namespace, ref string) (ctr.ImageInfo, error) {
 	r.ctrClient.SetNamespace(namespace)
 	return r.ctrClient.GetImage(ref)
 }
+
+// DeleteImage removes the named image ref from the given containerd
+// namespace. errdefs.ErrImageNotFound is propagated unchanged so callers
+// can use errors.Is for not-found detection.
+func (r *Exec) DeleteImage(namespace, ref string) error {
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return errdefs.ErrCheckNamespaceExists
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return errdefs.ErrImageNotFound
+	}
+	if err := r.ensureClientConnected(); err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	r.ctrClient.SetNamespace(namespace)
+	return r.ctrClient.DeleteImage(ref)
+}
