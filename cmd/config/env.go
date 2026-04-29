@@ -370,6 +370,21 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_ATTACH_CONTAINER = DefineKV("KUKE_ATTACH_CONTAINER", "kuke/attach/container")
 
+	// Log command variables.
+
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_LOG_REALM = DefineKV("KUKE_LOG_REALM", "kuke/log/realm", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_LOG_SPACE = DefineKV("KUKE_LOG_SPACE", "kuke/log/space", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_LOG_STACK = DefineKV("KUKE_LOG_STACK", "kuke/log/stack", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_LOG_CELL = DefineKV("KUKE_LOG_CELL", "kuke/log/cell")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_LOG_CONTAINER = DefineKV("KUKE_LOG_CONTAINER", "kuke/log/container")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_LOG_NO_FOLLOW = DefineKV("KUKE_LOG_NO_FOLLOW", "kuke/log/no-follow", "false")
+
 	// Stop command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_STOP_CELL_REALM = DefineKV("KUKE_STOP_CELL_REALM", "kuke/stop/cell/realm", "default")

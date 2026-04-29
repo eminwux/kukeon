@@ -112,6 +112,18 @@ func ContainerSocketPath(baseRunPath, realmName, spaceName, stackName, cellName,
 	)
 }
 
+// ContainerCapturePath returns the host-side path of the per-container sbsh
+// capture file. It is the host-visible peer of the in-container path
+// /run/kukeon/tty/capture (ctr.AttachableCapturePath); both resolve to the
+// same inode because the per-container tty directory is bind-mounted into
+// the container. `kuke log` tails this path.
+func ContainerCapturePath(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
+	return filepath.Join(
+		ContainerTTYDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName),
+		consts.KukeonContainerCaptureFile,
+	)
+}
+
 type metadataHeader struct {
 	APIVersion string `json:"apiVersion"`
 	Kind       string `json:"kind"`
