@@ -24,6 +24,21 @@ import (
 	"github.com/spf13/viper"
 )
 
+func bindKukeondEnv(t *testing.T) {
+	t.Helper()
+	for _, v := range []config.Var{
+		config.KUKEOND_SOCKET,
+		config.KUKEOND_SOCKET_GID,
+		config.KUKEON_ROOT_RUN_PATH,
+		config.KUKEON_ROOT_CONTAINERD_SOCKET,
+		config.KUKEON_ROOT_LOG_LEVEL,
+	} {
+		if err := v.BindEnv(); err != nil {
+			t.Fatalf("BindEnv %s: %v", v.EnvVar(), err)
+		}
+	}
+}
+
 func TestNewKukeondCmdHasConfigurationFlag(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
@@ -90,6 +105,42 @@ func TestApplyServerConfigurationFlagOverridesConfig(t *testing.T) {
 
 	if got := viper.GetString(config.KUKEOND_SOCKET.ViperKey); got != "/run/kukeon/from-flag.sock" {
 		t.Errorf("Socket flag override lost: got %q, want %q", got, "/run/kukeon/from-flag.sock")
+	}
+}
+
+func TestApplyServerConfigurationEnvOverridesConfig(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	viper.Reset()
+	cmd, err := NewKukeondCmd()
+	if err != nil {
+		t.Fatalf("NewKukeondCmd() error = %v", err)
+	}
+	bindKukeondEnv(t)
+
+	// Operator exported KUKEOND_SOCKET; the on-disk ServerConfiguration must
+	// not clobber it. Documents the precedence order in the PR description:
+	// --flag > env > ServerConfiguration > default.
+	t.Setenv(config.KUKEOND_SOCKET.EnvVar(), "/run/kukeon/from-env.sock")
+	t.Setenv(config.KUKEON_ROOT_LOG_LEVEL.EnvVar(), "debug")
+
+	spec := v1beta1.ServerConfigurationSpec{
+		Socket:   "/run/kukeon/from-config.sock",
+		LogLevel: "warn",
+		RunPath:  "/opt/kukeon-from-config",
+	}
+	applyServerConfiguration(cmd, spec)
+
+	if got := viper.GetString(config.KUKEOND_SOCKET.ViperKey); got != "/run/kukeon/from-env.sock" {
+		t.Errorf("Socket env override lost: got %q, want %q", got, "/run/kukeon/from-env.sock")
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_LOG_LEVEL.ViperKey); got != "debug" {
+		t.Errorf("LogLevel env override lost: got %q, want %q", got, "debug")
+	}
+	// Field with no env var set still picks up the ServerConfiguration value —
+	// the env check is per-field, not all-or-nothing.
+	if got := viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey); got != "/opt/kukeon-from-config" {
+		t.Errorf("RunPath: got %q, want %q", got, "/opt/kukeon-from-config")
 	}
 }
 

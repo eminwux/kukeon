@@ -151,26 +151,37 @@ func setPersistentFlags(_ *cobra.Command) error {
 }
 
 // applyServerConfiguration layers the loaded ServerConfiguration on top of
-// viper for fields the operator did not explicitly set on the command line.
-// Flag-changed values win so a one-off `--kukeond-image` keeps overriding
-// the on-disk document.
+// viper for fields the operator did not explicitly set on the command line
+// or via environment. Order of precedence: explicit `--flag` > env >
+// ServerConfiguration > flag default. Flag-changed values win so a one-off
+// `--kukeond-image` keeps overriding the on-disk document; env-set values
+// win because `viper.Set` would otherwise override viper's env binding.
 func applyServerConfiguration(cmd *cobra.Command, spec v1beta1.ServerConfigurationSpec) {
 	flags := cmd.Flags()
-	if spec.Socket != "" {
+	if spec.Socket != "" && !envSet(config.KUKEOND_SOCKET) {
 		viper.Set(config.KUKEOND_SOCKET.ViperKey, spec.Socket)
 	}
-	if spec.RunPath != "" && !flags.Changed("run-path") {
+	if spec.RunPath != "" && !flags.Changed("run-path") && !envSet(config.KUKEON_ROOT_RUN_PATH) {
 		viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, spec.RunPath)
 	}
-	if spec.ContainerdSocket != "" && !flags.Changed("containerd-socket") {
+	if spec.ContainerdSocket != "" && !flags.Changed("containerd-socket") &&
+		!envSet(config.KUKEON_ROOT_CONTAINERD_SOCKET) {
 		viper.Set(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey, spec.ContainerdSocket)
 	}
-	if spec.LogLevel != "" && !flags.Changed("log-level") {
+	if spec.LogLevel != "" && !flags.Changed("log-level") && !envSet(config.KUKEON_ROOT_LOG_LEVEL) {
 		viper.Set(config.KUKEON_ROOT_LOG_LEVEL.ViperKey, spec.LogLevel)
 	}
-	if spec.KukeondImage != "" && !flags.Changed("kukeond-image") {
+	if spec.KukeondImage != "" && !flags.Changed("kukeond-image") &&
+		!envSet(config.KUKE_INIT_KUKEOND_IMAGE) {
 		viper.Set(config.KUKE_INIT_KUKEOND_IMAGE.ViperKey, spec.KukeondImage)
 	}
+}
+
+// envSet reports whether the OS env var backing v is present (any value,
+// including empty string, counts as set — same semantics as viper's BindEnv).
+func envSet(v config.Var) bool {
+	_, ok := os.LookupEnv(v.EnvVar())
+	return ok
 }
 
 // resolveKukeondImage returns the kukeond container image to provision.
