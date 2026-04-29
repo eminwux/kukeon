@@ -641,6 +641,19 @@ func (c *UnixClient) GetImage(ctx context.Context, realm, ref string) (GetImageR
 	return reply.Result, nil
 }
 
+// DeleteImage implements Client.
+func (c *UnixClient) DeleteImage(ctx context.Context, realm, ref string) (DeleteImageResult, error) {
+	args := &DeleteImageArgs{Realm: realm, Ref: ref}
+	reply := &DeleteImageReply{}
+	if err := c.call(ctx, MethodDeleteImage, args, reply); err != nil {
+		return DeleteImageResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // Ping implements Client.
 func (c *UnixClient) Ping(ctx context.Context) error {
 	args := &PingArgs{}

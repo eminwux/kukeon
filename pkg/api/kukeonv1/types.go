@@ -716,3 +716,22 @@ type GetImageResult struct {
 	Namespace string
 	Image     ImageInfo
 }
+
+// DeleteImageArgs is the wire request for DeleteImage.
+type DeleteImageArgs struct {
+	Realm string
+	Ref   string
+}
+
+// DeleteImageReply is the wire response for DeleteImage.
+type DeleteImageReply struct {
+	Result DeleteImageResult
+	Err    *APIError
+}
+
+// DeleteImageResult reports the outcome of a `kuke image delete` removal.
+type DeleteImageResult struct {
+	Realm     string
+	Namespace string
+	Ref       string
+}

@@ -55,6 +55,13 @@ type GetImageResult struct {
 	Image     ImageInfo
 }
 
+// DeleteImageResult reports the outcome of a `kuke image delete` removal.
+type DeleteImageResult struct {
+	Realm     string
+	Namespace string
+	Ref       string
+}
+
 // ListImages enumerates images in the realm's containerd namespace. The
 // realm is validated up-front so callers see ErrRealmNotFound before any
 // containerd round-trip; the namespace mapping mirrors LoadImage.
@@ -128,6 +135,45 @@ func (b *Exec) GetImage(realm, ref string) (GetImageResult, error) {
 	res.Realm = realmName
 	res.Namespace = namespace
 	res.Image = ctrImageToControllerImage(img)
+	return res, nil
+}
+
+// DeleteImage removes the named image ref from the realm's containerd
+// namespace. errdefs.ErrImageNotFound is propagated unchanged so callers
+// (CLI, RPC) can map it to a clean "image not found" message.
+func (b *Exec) DeleteImage(realm, ref string) (DeleteImageResult, error) {
+	var res DeleteImageResult
+
+	realmName := strings.TrimSpace(realm)
+	if realmName == "" {
+		return res, errdefs.ErrRealmNameRequired
+	}
+	imageRef := strings.TrimSpace(ref)
+	if imageRef == "" {
+		return res, errdefs.ErrImageNotFound
+	}
+
+	lookup := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{Name: realmName},
+	}
+	if _, err := b.runner.GetRealm(lookup); err != nil {
+		if errors.Is(err, errdefs.ErrRealmNotFound) {
+			return res, fmt.Errorf("%w: %s", errdefs.ErrRealmNotFound, realmName)
+		}
+		return res, fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
+	}
+
+	namespace := consts.RealmNamespace(realmName)
+	if err := b.runner.DeleteImage(namespace, imageRef); err != nil {
+		if errors.Is(err, errdefs.ErrImageNotFound) {
+			return res, err
+		}
+		return res, fmt.Errorf("%w: %w", errdefs.ErrDeleteImage, err)
+	}
+
+	res.Realm = realmName
+	res.Namespace = namespace
+	res.Ref = imageRef
 	return res, nil
 }
 

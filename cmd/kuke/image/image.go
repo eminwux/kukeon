@@ -14,8 +14,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package image hosts the `kuke image` parent command and its subcommands.
-// Phase 2 ships `load` and `get`; `delete` arrives in #212.
+// Package image hosts the `kuke image` parent command and its subcommands:
+// `load` (#200), `get` (#211), and `delete` (#212).
 package image
 
 import (
@@ -36,6 +36,7 @@ func NewImageCmd() *cobra.Command {
 
 	cmd.AddCommand(NewLoadCmd())
 	cmd.AddCommand(NewGetCmd())
+	cmd.AddCommand(NewDeleteCmd())
 
 	return cmd
 }

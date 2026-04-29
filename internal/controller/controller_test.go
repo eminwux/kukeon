@@ -114,9 +114,10 @@ type fakeRunner struct {
 	RefreshCellFn  func(cell intmodel.Cell) (intmodel.Cell, int, error)
 
 	// Image methods
-	LoadImageFn  func(namespace string, reader io.Reader) ([]string, error)
-	ListImagesFn func(namespace string) ([]ctr.ImageInfo, error)
-	GetImageFn   func(namespace, ref string) (ctr.ImageInfo, error)
+	LoadImageFn   func(namespace string, reader io.Reader) ([]string, error)
+	ListImagesFn  func(namespace string) ([]ctr.ImageInfo, error)
+	GetImageFn    func(namespace, ref string) (ctr.ImageInfo, error)
+	DeleteImageFn func(namespace, ref string) error
 }
 
 // Realm methods
@@ -558,6 +559,13 @@ func (f *fakeRunner) GetImage(namespace, ref string) (ctr.ImageInfo, error) {
 		return f.GetImageFn(namespace, ref)
 	}
 	return ctr.ImageInfo{}, errors.New("unexpected call to GetImage")
+}
+
+func (f *fakeRunner) DeleteImage(namespace, ref string) error {
+	if f.DeleteImageFn != nil {
+		return f.DeleteImageFn(namespace, ref)
+	}
+	return errors.New("unexpected call to DeleteImage")
 }
 
 // Test helper functions

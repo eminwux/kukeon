@@ -189,6 +189,10 @@ func (FakeClient) GetImage(context.Context, string, string) (GetImageResult, err
 	return GetImageResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) DeleteImage(context.Context, string, string) (DeleteImageResult, error) {
+	return DeleteImageResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) Ping(context.Context) error {
 	return ErrUnexpectedCall
 }

@@ -110,6 +110,10 @@ type Runner interface {
 	// ref is absent.
 	GetImage(namespace, ref string) (ctr.ImageInfo, error)
 
+	// DeleteImage removes the named image ref from the given containerd
+	// namespace. Returns errdefs.ErrImageNotFound when the ref is absent.
+	DeleteImage(namespace, ref string) error
+
 	Close() error
 }
 
