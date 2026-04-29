@@ -3,6 +3,7 @@
 ![status: active](https://img.shields.io/badge/status-active-blue)
 ![state: alpha](https://img.shields.io/badge/state-alpha-orange)
 ![license: apache2](https://img.shields.io/badge/license-Apache%202.0-green)
+[![Test](https://github.com/eminwux/kukeon/actions/workflows/test.yaml/badge.svg?branch=main)](https://github.com/eminwux/kukeon/actions/workflows/test.yaml)
 
 _Agent-native orchestration. Self-hosted. No walled garden._
 
@@ -237,10 +238,10 @@ Each layer is a real Linux primitive, not an invented abstraction. This structur
 
 Two commands, one binary: kukeon uses hard links to provide different behaviors.
 
-| Command     | Purpose                                          | Run by                |
-| ----------- | ------------------------------------------------ | --------------------- |
-| `kuke`      | Client CLI — talks to the daemon                 | Users                 |
-| `kukeond`   | The daemon process itself                        | Process supervisor    |
+| Command   | Purpose                          | Run by             |
+| --------- | -------------------------------- | ------------------ |
+| `kuke`    | Client CLI — talks to the daemon | Users              |
+| `kukeond` | The daemon process itself        | Process supervisor |
 
 Both are the same binary; behavior is determined by the executable name at runtime.
 
