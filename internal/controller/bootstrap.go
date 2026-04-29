@@ -430,8 +430,19 @@ func (b *Exec) bootstrapStack(section *StackSection, realmName, spaceName, stack
 // don't allocate the same IP twice; /opt/cni/cache holds the CNI invocation
 // cache that gives DEL stable arguments — a mismatch leaks veths and IPs
 // across daemon restarts.
-func kukeondCellDoc(image, socketPath, runPath, containerdSocket string, socketGID int) *v1beta1.CellDoc {
+func kukeondCellDoc(
+	image, socketPath, runPath, containerdSocket string,
+	socketGID int,
+	configurationPath string,
+) *v1beta1.CellDoc {
 	args := []string{"serve", "--socket", socketPath}
+	// `kukeond` (the cobra root) processes --configuration in PersistentPreRunE,
+	// so the flag must come before the `serve` subcommand on the cell args. Cobra
+	// is permissive about positional ordering, but listing the persistent flag
+	// first matches what the operator types on the host shell.
+	if configurationPath != "" {
+		args = append([]string{"--configuration", configurationPath}, args...)
+	}
 	if runPath != "" {
 		args = append(args, "--run-path", runPath)
 	}
@@ -458,6 +469,12 @@ func kukeondCellDoc(image, socketPath, runPath, containerdSocket string, socketG
 		ctrdDir := socketDir(containerdSocket)
 		if ctrdDir != sockDir && ctrdDir != runPath {
 			volumes = append(volumes, v1beta1.VolumeMount{Source: ctrdDir, Target: ctrdDir})
+		}
+	}
+	if configurationPath != "" {
+		cfgDir := socketDir(configurationPath)
+		if !volumeContainsTarget(volumes, cfgDir) {
+			volumes = append(volumes, v1beta1.VolumeMount{Source: cfgDir, Target: cfgDir})
 		}
 	}
 
@@ -539,6 +556,33 @@ func ensureCNIStateDir() error {
 	// idempotent across upgrades.
 	if err := os.Chmod("/var/lib/cni", 0o750); err != nil {
 		return fmt.Errorf("chmod CNI state dir %q: %w", "/var/lib/cni", err)
+	}
+	return nil
+}
+
+// volumeContainsTarget reports whether vols already binds-into target. Used to
+// dedupe overlapping bind-mounts (e.g. /etc/kukeon being the same as another
+// path that the runtime already exposes to the daemon container).
+func volumeContainsTarget(vols []v1beta1.VolumeMount, target string) bool {
+	for _, v := range vols {
+		if v.Target == target {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureServerConfigurationDir creates the parent dir of the ServerConfiguration
+// path so the kukeond cell's bind-mount has a source. The file itself is
+// optional — kukeond's loader treats an absent file as "use defaults" — but
+// the directory must exist for the bind-mount to succeed.
+func ensureServerConfigurationDir(configurationPath string) error {
+	if configurationPath == "" {
+		return nil
+	}
+	dir := socketDir(configurationPath)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("create server configuration dir %q: %w", dir, err)
 	}
 	return nil
 }

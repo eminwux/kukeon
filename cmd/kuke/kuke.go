@@ -18,11 +18,9 @@ package kuke
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	applycmd "github.com/eminwux/kukeon/cmd/kuke/apply"
@@ -156,12 +154,6 @@ func SetPersistentLoggingFlags(rootCmd *cobra.Command) error {
 		return err
 	}
 
-	rootCmd.PersistentFlags().
-		String("config", "/etc/kukeon/config.yaml", "config file (default is /etc/kukeon/config.yaml)")
-	if err := viper.BindPFlag(config.KUKEON_ROOT_CONFIG_FILE.ViperKey, rootCmd.PersistentFlags().Lookup("config")); err != nil {
-		return err
-	}
-
 	rootCmd.PersistentFlags().String("containerd-socket", "/run/containerd/containerd.sock", "containerd socket file")
 	if err := viper.BindPFlag(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey, rootCmd.PersistentFlags().Lookup("containerd-socket")); err != nil {
 		return err
@@ -212,40 +204,14 @@ func (r *realConfigLoader) LoadConfig() error {
 }
 
 func loadConfig() error {
-	var configFile string
-	if viper.GetString(config.KUKEON_ROOT_CONFIG_FILE.ViperKey) == "" {
-		configFile = config.DefaultConfigFile()
-		viper.SetConfigName("config")
-		viper.SetConfigType("yaml")
-		// Add the directory containing the config file
-		viper.AddConfigPath(filepath.Dir(configFile))
-	}
-	_ = config.KUKEON_ROOT_CONFIG_FILE.BindEnv()
-
-	if err := config.KUKEON_ROOT_CONFIG_FILE.Set(configFile); err != nil {
-		return fmt.Errorf("%w: failed to set config file: %w", errdefs.ErrConfig, err)
-	}
-
-	var runPath string
-	runPath = viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey)
-	if runPath == "" {
-		runPath = config.DefaultRunPath()
-		viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, runPath)
-	}
 	_ = config.KUKEON_ROOT_RUN_PATH.BindEnv()
+	if viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey) == "" {
+		viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, config.DefaultRunPath())
+	}
 
 	_ = config.KUKEON_ROOT_LOG_LEVEL.BindEnv()
-	logLevel := viper.GetString(config.KUKEON_ROOT_LOG_LEVEL.ViperKey)
-	if logLevel == "" {
+	if viper.GetString(config.KUKEON_ROOT_LOG_LEVEL.ViperKey) == "" {
 		viper.Set(config.KUKEON_ROOT_LOG_LEVEL.ViperKey, "info")
-	}
-
-	if err := viper.ReadInConfig(); err != nil {
-		// File not found is OK if ENV is set
-		var configFileNotFoundError viper.ConfigFileNotFoundError
-		if !errors.As(err, &configFileNotFoundError) {
-			return fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
-		}
 	}
 
 	return nil

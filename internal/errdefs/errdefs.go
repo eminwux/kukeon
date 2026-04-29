@@ -169,6 +169,10 @@ var (
 	// or violates the schema (missing kind, missing metadata.name, etc.).
 	ErrProfileInvalid = errors.New("profile is invalid")
 
+	// ErrServerConfigurationInvalid is returned when a ServerConfiguration
+	// YAML fails to parse or violates the schema (wrong kind, etc.).
+	ErrServerConfigurationInvalid = errors.New("server configuration is invalid")
+
 	// Secret-related errors.
 
 	ErrSecretNameRequired         = errors.New("secret name is required")

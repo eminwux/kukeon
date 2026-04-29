@@ -63,12 +63,10 @@ func DefaultProfilesFile() string {
 	return filepath.Join(base, ".kukeon", "profiles.yaml")
 }
 
-func DefaultConfigFile() string {
-	base, err := os.UserHomeDir()
-	if err != nil {
-		// fallback to tmp if home dir cannot be determined
-		base = "tmp"
-	}
-
-	return filepath.Join(base, ".kukeon", "config.yaml")
+// DefaultServerConfigurationFile is the on-disk path the kukeond daemon and
+// `kuke init` read when the user does not pass `--configuration` or
+// `--server-configuration`. An absent file is not an error — the daemon
+// falls back to its hardcoded defaults.
+func DefaultServerConfigurationFile() string {
+	return filepath.Join("/", "etc", "kukeon", "kukeond.yaml")
 }

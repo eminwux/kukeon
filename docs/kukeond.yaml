@@ -1,0 +1,28 @@
+# kukeond ServerConfiguration example.
+#
+# Drop this file at /etc/kukeon/kukeond.yaml (the default --configuration path)
+# to seed the daemon's defaults, or pass --configuration <path> explicitly.
+# Each spec field is optional: an absent value falls back to the daemon's
+# hardcoded default. Explicit `--socket`, `--run-path`, etc. on the command
+# line still override values from this document.
+apiVersion: v1beta1
+kind: ServerConfiguration
+metadata:
+  name: default
+spec:
+  # Unix socket the daemon listens on.
+  socket: /run/kukeon/kukeond.sock
+  # Numeric GID to chown the listener socket to (mode 0o660 with group).
+  # 0 means root-only access. `kuke init` plumbs the kukeon group's GID
+  # in here automatically; only set this manually if you provision the
+  # group yourself.
+  socketGID: 0
+  # kukeon runtime root.
+  runPath: /opt/kukeon
+  # Containerd socket the daemon connects to.
+  containerdSocket: /run/containerd/containerd.sock
+  # Daemon log level: debug, info, warn, error.
+  logLevel: info
+  # Container image `kuke init` provisions for the kukeond system cell.
+  # Read by `kuke init --server-configuration` only; the daemon ignores it.
+  kukeondImage: ghcr.io/eminwux/kukeon:latest

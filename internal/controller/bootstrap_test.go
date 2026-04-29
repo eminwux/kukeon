@@ -84,7 +84,7 @@ func TestKukeondCellDocVolumes(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			doc := kukeondCellDoc(tc.image, tc.socketPath, tc.runPath, tc.containerdSocket, 0)
+			doc := kukeondCellDoc(tc.image, tc.socketPath, tc.runPath, tc.containerdSocket, 0, "")
 			if len(doc.Spec.Containers) != 1 {
 				t.Fatalf("expected 1 container, got %d", len(doc.Spec.Containers))
 			}
@@ -184,6 +184,69 @@ func TestKukeondCellDocVolumes(t *testing.T) {
 	}
 }
 
+// TestKukeondCellDocConfigurationArg guards the wire that lets kukeond
+// re-read its ServerConfiguration on every restart: the cell args must
+// include `--configuration <path>` and the path's parent directory must
+// be bind-mounted into the cell so the daemon can read the file.
+func TestKukeondCellDocConfigurationArg(t *testing.T) {
+	tests := []struct {
+		name              string
+		configurationPath string
+		wantArg           bool
+		wantVolumeSource  string
+	}{
+		{name: "empty-omits-flag", configurationPath: "", wantArg: false},
+		{
+			name:              "default-path",
+			configurationPath: "/etc/kukeon/kukeond.yaml",
+			wantArg:           true,
+			wantVolumeSource:  "/etc/kukeon",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := kukeondCellDoc(
+				"docker.io/library/kukeon:dev",
+				"/run/kukeon/kukeond.sock",
+				"/opt/kukeon",
+				"/run/containerd/containerd.sock",
+				0,
+				tc.configurationPath,
+			)
+			args := doc.Spec.Containers[0].Args
+			joined := strings.Join(args, " ")
+			has := strings.Contains(joined, "--configuration")
+			if has != tc.wantArg {
+				t.Fatalf("--configuration presence: got %v want %v (args=%v)", has, tc.wantArg, args)
+			}
+			if !tc.wantArg {
+				return
+			}
+			for i, a := range args {
+				if a != "--configuration" {
+					continue
+				}
+				if i+1 >= len(args) || args[i+1] != tc.configurationPath {
+					t.Errorf("--configuration value: got %v want %q", args, tc.configurationPath)
+				}
+				break
+			}
+			var hasVolume bool
+			for _, v := range doc.Spec.Containers[0].Volumes {
+				if v.Source == tc.wantVolumeSource && v.Target == tc.wantVolumeSource {
+					hasVolume = true
+					break
+				}
+			}
+			if !hasVolume {
+				t.Errorf("missing %q bind-mount in volumes: %+v",
+					tc.wantVolumeSource, doc.Spec.Containers[0].Volumes)
+			}
+		})
+	}
+}
+
 // TestKukeondCellDocSocketGIDArg guards the wire that lets kukeond restart
 // re-apply socket ownership without re-running kuke init: the cell args must
 // include `--socket-gid <gid>` whenever a kukeon GID is plumbed through.
@@ -206,6 +269,7 @@ func TestKukeondCellDocSocketGIDArg(t *testing.T) {
 				"/opt/kukeon",
 				"/run/containerd/containerd.sock",
 				tc.gid,
+				"",
 			)
 			args := doc.Spec.Containers[0].Args
 			joined := strings.Join(args, " ")
