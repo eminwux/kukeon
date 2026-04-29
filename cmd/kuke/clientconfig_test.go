@@ -214,3 +214,54 @@ spec:
 		t.Errorf("LogLevel: got %q, want %q", got, "warn")
 	}
 }
+
+// TestMaybeWriteClientConfigurationDefaultSkipsCustomPath locks the guard
+// that prevents tests (and operators pointing --configuration at a custom
+// location) from writing to ~/.kuke/kuke.yaml on the host. The path-equality
+// guard is what makes operator-supplied custom paths "opt out" of the
+// default-location dump (per the issue's "Both honor --configuration to opt
+// out of the default location" note).
+func TestMaybeWriteClientConfigurationDefaultSkipsCustomPath(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	viper.Reset()
+	cmd, err := NewKukeCmd()
+	if err != nil {
+		t.Fatalf("NewKukeCmd() error = %v", err)
+	}
+
+	dir := t.TempDir()
+	custom := filepath.Join(dir, "custom-kuke.yaml")
+	maybeWriteClientConfigurationDefault(cmd, custom)
+
+	if _, statErr := os.Stat(custom); !os.IsNotExist(statErr) {
+		t.Fatalf("custom path was written; got Stat err=%v, want IsNotExist", statErr)
+	}
+}
+
+// TestMaybeWriteClientConfigurationDefaultWritesAtDefaultPath proves the
+// happy path: when the resolved path equals the project default, the dump
+// fires and produces a parseable document. We swap $HOME to a TempDir so
+// DefaultClientConfigurationFile() resolves to a sandbox path and the
+// host's real ~/.kuke is untouched.
+func TestMaybeWriteClientConfigurationDefaultWritesAtDefaultPath(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	t.Setenv("HOME", t.TempDir())
+	defaultPath := config.DefaultClientConfigurationFile()
+	if _, statErr := os.Stat(defaultPath); !os.IsNotExist(statErr) {
+		t.Fatalf("HOME shim is leaky; default path already exists: %v", statErr)
+	}
+
+	viper.Reset()
+	cmd, err := NewKukeCmd()
+	if err != nil {
+		t.Fatalf("NewKukeCmd() error = %v", err)
+	}
+
+	maybeWriteClientConfigurationDefault(cmd, defaultPath)
+
+	if _, statErr := os.Stat(defaultPath); statErr != nil {
+		t.Fatalf("default-path write did not fire: %v", statErr)
+	}
+}

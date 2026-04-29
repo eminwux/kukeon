@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -61,4 +62,61 @@ func Load(path string) (*v1beta1.ClientConfigurationDoc, error) {
 		)
 	}
 	return &doc, nil
+}
+
+// defaultDocument is the commented YAML written by WriteDefault on first
+// kuke invocation. Every spec field is present with its in-binary default and
+// a header comment explaining its purpose so the operator can tweak the file
+// without consulting source. The string round-trips through Load.
+const defaultDocument = `# kuke ClientConfiguration — auto-generated default.
+# kuke reads this file via --configuration (default ~/.kuke/kuke.yaml).
+# Precedence: explicit --flag > KUKEON_* env > this file > hardcoded default.
+# Existing files are never overwritten; delete this file to regenerate.
+apiVersion: v1beta1
+kind: ClientConfiguration
+metadata:
+  name: default
+spec:
+  # kukeond endpoint kuke dials by default.
+  # Examples: unix:///run/kukeon/kukeond.sock, ssh://user@host
+  # Default: unix:///run/kukeon/kukeond.sock
+  host: unix:///run/kukeon/kukeond.sock
+
+  # Kukeon runtime root used by --no-daemon operations that read /opt/kukeon
+  # directly instead of going through kukeond.
+  # Default: /opt/kukeon
+  runPath: /opt/kukeon
+
+  # Containerd unix socket --no-daemon operations connect to.
+  # Default: /run/containerd/containerd.sock
+  containerdSocket: /run/containerd/containerd.sock
+
+  # Client log level when --verbose is on (debug, info, warn, error).
+  # Default: info
+  logLevel: info
+`
+
+// WriteDefault writes the commented default ClientConfiguration to path when
+// the file is absent. Returns true only when this call created the file; an
+// existing file (any contents) is left untouched, satisfying the "first-write
+// only" rule. Creates the parent directory if missing. Any other failure is
+// returned wrapped.
+func WriteDefault(path string) (bool, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return false, fmt.Errorf("create parent directory for %q: %w", path, err)
+	}
+	// O_EXCL closes the TOCTOU race between Stat and Create — two concurrent
+	// kuke invocations can't both believe they wrote the file.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("create %q: %w", path, err)
+	}
+	defer f.Close()
+	if _, writeErr := f.WriteString(defaultDocument); writeErr != nil {
+		return false, fmt.Errorf("write %q: %w", path, writeErr)
+	}
+	return true, nil
 }

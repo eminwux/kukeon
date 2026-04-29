@@ -17,6 +17,8 @@
 package kukeond
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/eminwux/kukeon/cmd/config"
@@ -158,5 +160,28 @@ func TestApplyServerConfigurationEmptyFieldsLeaveViperUntouched(t *testing.T) {
 
 	if got := viper.GetString(config.KUKEOND_SOCKET.ViperKey); got != "/run/kukeon/preexisting.sock" {
 		t.Errorf("empty spec must not overwrite existing viper value: got %q", got)
+	}
+}
+
+// TestMaybeWriteServerConfigurationDefaultSkipsCustomPath locks the guard
+// that prevents tests (and operators pointing --configuration at a custom
+// location) from writing to /etc/kukeon/kukeond.yaml on the host. The
+// path-equality guard is what makes operator-supplied custom paths opt out
+// of the default-location dump (per the issue's "Both honor --configuration
+// to opt out of the default location" note).
+func TestMaybeWriteServerConfigurationDefaultSkipsCustomPath(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	viper.Reset()
+	cmd, err := NewKukeondCmd()
+	if err != nil {
+		t.Fatalf("NewKukeondCmd() error = %v", err)
+	}
+
+	dir := t.TempDir()
+	custom := filepath.Join(dir, "custom-kukeond.yaml")
+	maybeWriteServerConfigurationDefault(cmd, custom)
+	if _, statErr := os.Stat(custom); !os.IsNotExist(statErr) {
+		t.Fatalf("custom path was written; got Stat err=%v, want IsNotExist", statErr)
 	}
 }
