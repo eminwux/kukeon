@@ -236,6 +236,8 @@ func loadConfig() error {
 		viper.Set(config.KUKEON_ROOT_LOG_LEVEL.ViperKey, "info")
 	}
 
+	_ = config.KUKE_GET_OUTPUT.BindEnv()
+
 	return nil
 }
 
