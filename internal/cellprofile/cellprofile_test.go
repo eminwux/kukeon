@@ -133,6 +133,30 @@ metadata:
 	}
 }
 
+func TestLoad_RejectsCellID(t *testing.T) {
+	// Materialized cell names are always generated, so a hardcoded spec.cell.id
+	// would silently produce N cells sharing one ID. Reject the field at load.
+	dir := t.TempDir()
+	writeProfile(t, dir, "with-id.yaml", `apiVersion: v1beta1
+kind: CellProfile
+metadata:
+  name: with-id
+spec:
+  cell:
+    id: pinned
+    containers:
+      - id: work
+        image: registry.eminwux.com/busybox:latest
+`)
+	_, err := cellprofile.Load(dir, "with-id")
+	if !errors.Is(err, errdefs.ErrProfileInvalid) {
+		t.Fatalf("err=%v want ErrProfileInvalid", err)
+	}
+	if !strings.Contains(err.Error(), "spec.cell.id") {
+		t.Errorf("err %q must name spec.cell.id", err)
+	}
+}
+
 func TestList_SkipsBrokenAndNonYAML(t *testing.T) {
 	dir := t.TempDir()
 	writeProfile(t, dir, "claude-cell.yaml", claudeProfile)
@@ -175,7 +199,10 @@ func TestResolveDir_DefaultsUnderHome(t *testing.T) {
 	}
 }
 
-func TestMaterialize_DefaultName(t *testing.T) {
+func TestMaterialize_DefaultPrefix(t *testing.T) {
+	// Without spec.prefix the prefix defaults to metadata.name; the cell name
+	// is `<metadata.name>-<6hex>` and the realm/space/stack triple flows
+	// through verbatim.
 	profile := &v1beta1.CellProfileDoc{
 		APIVersion: v1beta1.APIVersionV1Beta1,
 		Kind:       v1beta1.KindCellProfile,
@@ -197,8 +224,12 @@ func TestMaterialize_DefaultName(t *testing.T) {
 		t.Fatalf("Materialize: %v", err)
 	}
 
-	if doc.Metadata.Name != "claude-cell" {
-		t.Errorf("metadata.name=%q want claude-cell (default to profile name)", doc.Metadata.Name)
+	if !strings.HasPrefix(doc.Metadata.Name, "claude-cell-") {
+		t.Errorf("metadata.name=%q want prefix claude-cell-", doc.Metadata.Name)
+	}
+	suffix := strings.TrimPrefix(doc.Metadata.Name, "claude-cell-")
+	if len(suffix) != 6 {
+		t.Errorf("suffix=%q len=%d want 6 lowercase hex chars", suffix, len(suffix))
 	}
 	if doc.Kind != v1beta1.KindCell || doc.APIVersion != v1beta1.APIVersionV1Beta1 {
 		t.Errorf("apiVersion/kind=%q/%q want v1beta1/Cell", doc.APIVersion, doc.Kind)
@@ -207,8 +238,8 @@ func TestMaterialize_DefaultName(t *testing.T) {
 		t.Errorf("location=%q/%q/%q want default/agents/claude",
 			doc.Spec.RealmID, doc.Spec.SpaceID, doc.Spec.StackID)
 	}
-	if doc.Spec.ID != "claude-cell" {
-		t.Errorf("spec.id=%q want claude-cell (defaulted from cell name)", doc.Spec.ID)
+	if doc.Spec.ID != doc.Metadata.Name {
+		t.Errorf("spec.id=%q want %q (mirrors generated cell name)", doc.Spec.ID, doc.Metadata.Name)
 	}
 	if got := doc.Metadata.Labels[cellprofile.LabelProfile]; got != "claude-cell" {
 		t.Errorf("labels[%q]=%q want claude-cell (profile-of-origin label)",
@@ -216,39 +247,12 @@ func TestMaterialize_DefaultName(t *testing.T) {
 	}
 }
 
-func TestMaterialize_DefaultName_Idempotent(t *testing.T) {
-	// Without spec.namePrefix the same profile must produce the same cell name
-	// across invocations. This is the singleton path that pairs with the
-	// runner's already-exists idempotency.
+func TestMaterialize_DefaultPrefix_GeneratesUniqueCells(t *testing.T) {
+	// CellProfile is always a template: even without spec.prefix, successive
+	// calls must produce distinct names sharing the metadata.name prefix.
 	profile := &v1beta1.CellProfileDoc{
-		Metadata: v1beta1.CellProfileMetadata{Name: "singleton"},
+		Metadata: v1beta1.CellProfileMetadata{Name: "claude-cell"},
 		Spec: v1beta1.CellProfileSpec{
-			Cell: v1beta1.CellSpec{
-				Containers: []v1beta1.ContainerSpec{
-					{ID: "work", Image: "registry.eminwux.com/busybox:latest"},
-				},
-			},
-		},
-	}
-
-	first, err := cellprofile.Materialize(profile)
-	if err != nil {
-		t.Fatalf("Materialize first: %v", err)
-	}
-	second, err := cellprofile.Materialize(profile)
-	if err != nil {
-		t.Fatalf("Materialize second: %v", err)
-	}
-	if first.Metadata.Name != "singleton" || second.Metadata.Name != "singleton" {
-		t.Fatalf("names=%q/%q want singleton/singleton", first.Metadata.Name, second.Metadata.Name)
-	}
-}
-
-func TestMaterialize_NamePrefix_GeneratesUniqueCells(t *testing.T) {
-	profile := &v1beta1.CellProfileDoc{
-		Metadata: v1beta1.CellProfileMetadata{Name: "claude"},
-		Spec: v1beta1.CellProfileSpec{
-			NamePrefix: "claude",
 			Cell: v1beta1.CellSpec{
 				Containers: []v1beta1.ContainerSpec{
 					{ID: "work", Image: "registry.eminwux.com/busybox:latest"},
@@ -265,10 +269,44 @@ func TestMaterialize_NamePrefix_GeneratesUniqueCells(t *testing.T) {
 			t.Fatalf("Materialize #%d: %v", i, err)
 		}
 		name := doc.Metadata.Name
-		if !strings.HasPrefix(name, "claude-") {
-			t.Errorf("name=%q want prefix claude-", name)
+		if !strings.HasPrefix(name, "claude-cell-") {
+			t.Errorf("name=%q want prefix claude-cell-", name)
 		}
-		suffix := strings.TrimPrefix(name, "claude-")
+		if _, dup := seen[name]; dup {
+			t.Errorf("name=%q repeated across invocations", name)
+		}
+		seen[name] = struct{}{}
+		if got := doc.Metadata.Labels[cellprofile.LabelProfile]; got != "claude-cell" {
+			t.Errorf("labels[%q]=%q want claude-cell", cellprofile.LabelProfile, got)
+		}
+	}
+}
+
+func TestMaterialize_PrefixOverride_GeneratesUniqueCells(t *testing.T) {
+	profile := &v1beta1.CellProfileDoc{
+		Metadata: v1beta1.CellProfileMetadata{Name: "claude"},
+		Spec: v1beta1.CellProfileSpec{
+			Prefix: "agent",
+			Cell: v1beta1.CellSpec{
+				Containers: []v1beta1.ContainerSpec{
+					{ID: "work", Image: "registry.eminwux.com/busybox:latest"},
+				},
+			},
+		},
+	}
+
+	const invocations = 3
+	seen := make(map[string]struct{}, invocations)
+	for i := range invocations {
+		doc, err := cellprofile.Materialize(profile)
+		if err != nil {
+			t.Fatalf("Materialize #%d: %v", i, err)
+		}
+		name := doc.Metadata.Name
+		if !strings.HasPrefix(name, "agent-") {
+			t.Errorf("name=%q want prefix agent- (spec.prefix override)", name)
+		}
+		suffix := strings.TrimPrefix(name, "agent-")
 		if len(suffix) != 6 {
 			t.Errorf("suffix=%q len=%d want 6 lowercase hex chars", suffix, len(suffix))
 		}
@@ -281,10 +319,10 @@ func TestMaterialize_NamePrefix_GeneratesUniqueCells(t *testing.T) {
 		}
 		seen[name] = struct{}{}
 		if doc.Spec.ID != name {
-			t.Errorf("spec.id=%q want %q (defaulted from generated name)", doc.Spec.ID, name)
+			t.Errorf("spec.id=%q want %q (mirrors generated cell name)", doc.Spec.ID, name)
 		}
 		if got := doc.Metadata.Labels[cellprofile.LabelProfile]; got != "claude" {
-			t.Errorf("labels[%q]=%q want claude (profile-of-origin survives namePrefix path)",
+			t.Errorf("labels[%q]=%q want claude (profile-of-origin label tracks metadata.name, not prefix)",
 				cellprofile.LabelProfile, got)
 		}
 	}

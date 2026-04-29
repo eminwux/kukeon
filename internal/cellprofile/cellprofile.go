@@ -39,9 +39,10 @@ import (
 // can list all instances with `kuke get cells -l kukeon.io/profile=<name>`.
 const LabelProfile = "kukeon.io/profile"
 
-// nameSuffixBytes is the entropy width for namePrefix-generated cell names.
-// 3 bytes → 6 lowercase hex chars; matches K8s `generateName`'s suffix shape
-// closely enough that the names read familiar at a glance.
+// nameSuffixBytes is the entropy width for the suffix appended to every
+// generated cell name. 3 bytes → 6 lowercase hex chars; matches K8s
+// `generateName`'s suffix shape closely enough that the names read familiar
+// at a glance.
 const nameSuffixBytes = 3
 
 // EnvProfilesDir is the env var that overrides the default user profiles
@@ -161,6 +162,15 @@ func loadFile(path string) (*v1beta1.CellProfileDoc, error) {
 	if strings.TrimSpace(profile.Metadata.Name) == "" {
 		return nil, fmt.Errorf("profile %q: metadata.name is required: %w", path, errdefs.ErrProfileInvalid)
 	}
+	if strings.TrimSpace(profile.Spec.Cell.ID) != "" {
+		// Every materialized cell gets a generated `<prefix>-<6hex>` name; a
+		// hardcoded spec.cell.id would silently produce N cells sharing one ID.
+		// Reject loudly so the operator removes the stray field instead.
+		return nil, fmt.Errorf(
+			"profile %q: spec.cell.id must not be set on a CellProfile: %w",
+			path, errdefs.ErrProfileInvalid,
+		)
+	}
 	return &profile, nil
 }
 
@@ -169,14 +179,14 @@ func matchesName(profile *v1beta1.CellProfileDoc, name string) bool {
 }
 
 // Materialize converts a CellProfile into a CellDoc suitable for the same
-// path `kuke run -f` drives. When spec.namePrefix is set the cell name is
-// `<namePrefix>-<6hex>` (a fresh cell on every invocation); otherwise it
-// defaults to the profile's metadata.name and re-running the profile is
-// idempotent against the existing cell. The realm/space/stack triple is taken
-// from the profile spec verbatim — callers layer --realm/--space/--stack flag
-// overrides separately, mirroring the existing -f resolution. Every produced
-// cell also carries the kukeon.io/profile=<metadata.name> label so the set of
-// cells materialized from a profile is queryable via `kuke get cells -l`.
+// path `kuke run -f` drives. CellProfile is always a template: every call
+// returns a cell named `<prefix>-<6hex>`, where prefix is spec.prefix when set
+// and metadata.name otherwise. Singleton workloads belong on the Cell kind.
+// The realm/space/stack triple is taken from the profile spec verbatim —
+// callers layer --realm/--space/--stack flag overrides separately, mirroring
+// the existing -f resolution. Every produced cell also carries the
+// kukeon.io/profile=<metadata.name> label so the set of cells materialized
+// from a profile is queryable via `kuke get cells -l`.
 func Materialize(profile *v1beta1.CellProfileDoc) (v1beta1.CellDoc, error) {
 	cellName, err := resolveCellName(profile)
 	if err != nil {
@@ -187,9 +197,7 @@ func Materialize(profile *v1beta1.CellProfileDoc) (v1beta1.CellDoc, error) {
 	spec.RealmID = strings.TrimSpace(profile.Spec.Realm)
 	spec.SpaceID = strings.TrimSpace(profile.Spec.Space)
 	spec.StackID = strings.TrimSpace(profile.Spec.Stack)
-	if strings.TrimSpace(spec.ID) == "" {
-		spec.ID = cellName
-	}
+	spec.ID = cellName
 
 	return v1beta1.CellDoc{
 		APIVersion: v1beta1.APIVersionV1Beta1,
@@ -203,9 +211,9 @@ func Materialize(profile *v1beta1.CellProfileDoc) (v1beta1.CellDoc, error) {
 }
 
 func resolveCellName(profile *v1beta1.CellProfileDoc) (string, error) {
-	prefix := strings.TrimSpace(profile.Spec.NamePrefix)
+	prefix := strings.TrimSpace(profile.Spec.Prefix)
 	if prefix == "" {
-		return profile.Metadata.Name, nil
+		prefix = profile.Metadata.Name
 	}
 	suffix, err := randomHexSuffix()
 	if err != nil {
