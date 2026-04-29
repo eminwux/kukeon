@@ -187,9 +187,44 @@ func (c *client) GetNamespace(namespace string) (string, error) {
 	return "", nil
 }
 
-// CleanupNamespaceResources removes all images and snapshots from a namespace
-// This must be called before deleting the namespace, as containerd requires
-// namespaces to be empty before deletion.
+// KukeonKnownSnapshotters is the list of containerd snapshotters
+// CleanupNamespaceResources walks when no snapshotter is specified. Stays
+// in sync with the set of snapshotters supported by the kukeond image
+// (overlayfs in production; native is always present as containerd's
+// fallback). Listed in the order they will be drained — overlayfs first
+// because it is the only one populated on a real install, but the others
+// are tried so a host that experimented with btrfs/zfs/etc. still gets a
+// clean uninstall instead of "namespace not empty" surfacing the day after.
+//
+// Listed snapshotters that are not registered in the daemon return errors
+// from snapshotService.Walk; cleanupSnapshotsFor handles those at WARN and
+// keeps walking the rest.
+//
+//nolint:gochecknoglobals // Immutable enumeration; package-level so uninstall callers iterate without re-allocating.
+var KukeonKnownSnapshotters = []string{
+	"overlayfs",
+	"native",
+	"btrfs",
+	"zfs",
+	"devmapper",
+	"blockfile",
+}
+
+// CleanupNamespaceResources empties a containerd namespace so DeleteNamespace
+// (which requires the namespace to be empty) can succeed. It drains in this
+// fixed order:
+//  1. images,
+//  2. snapshots — for every snapshotter when `snapshotter == ""` (the
+//     uninstall path's default), or just the named snapshotter when one is
+//     specified explicitly,
+//  3. blobs (content store),
+//  4. leases.
+//
+// Each class logs a count summary at INFO and per-resource debug lines at
+// DEBUG, so a future "namespace not empty" failure points at the exact class
+// still pinning the namespace. Per-resource failures are logged at WARN and
+// processing continues — the goal is best-effort drain, with the load-bearing
+// signal coming from the caller's subsequent DeleteNamespace check.
 func (c *client) CleanupNamespaceResources(namespace, snapshotter string) error {
 	// Ensure client is connected
 	if c.cClient == nil {
@@ -229,109 +264,14 @@ func (c *client) CleanupNamespaceResources(namespace, snapshotter string) error 
 		}
 	}
 
-	// Clean up snapshots
+	// Clean up snapshots. Walk every known snapshotter when the caller did
+	// not pin one; older callers passing "overlayfs" still drain only that.
+	snapshotters := []string{snapshotter}
 	if snapshotter == "" {
-		snapshotter = "overlayfs" // Default snapshotter
+		snapshotters = KukeonKnownSnapshotters
 	}
-	c.logger.DebugContext(c.ctx, "cleaning up snapshots", "namespace", namespace, "snapshotter", snapshotter)
-	snapshotService := c.cClient.SnapshotService(snapshotter)
-
-	// Iteratively remove snapshots until none remain or no progress is made.
-	// Walk order is implementation-defined (boltdb key order), so a single
-	// reverse-order pass cannot guarantee children are removed before parents
-	// when a parent has multiple children. A snapshot with extant children
-	// fails Remove with "must be empty"; on the next pass its children are
-	// gone and it succeeds. Cap iterations to bound work on a pathological
-	// graph; in practice the depth is small (image layers + a few committed
-	// container layers).
-	const maxSnapshotPasses = 32
-	for pass := range maxSnapshotPasses {
-		var snapshotKeys []string
-		err = snapshotService.Walk(nsCtx, func(_ context.Context, info snapshots.Info) error {
-			snapshotKeys = append(snapshotKeys, info.Name)
-			return nil
-		})
-		if err != nil {
-			c.logger.WarnContext(
-				c.ctx,
-				"failed to walk snapshots",
-				"namespace",
-				namespace,
-				"snapshotter",
-				snapshotter,
-				"error",
-				err,
-			)
-			break
-		}
-		if len(snapshotKeys) == 0 {
-			break
-		}
-		c.logger.DebugContext(
-			c.ctx,
-			"found snapshots",
-			"namespace",
-			namespace,
-			"snapshotter",
-			snapshotter,
-			"count",
-			len(snapshotKeys),
-			"pass",
-			pass,
-		)
-		removedAny := false
-		for i := len(snapshotKeys) - 1; i >= 0; i-- {
-			key := snapshotKeys[i]
-			c.logger.DebugContext(
-				c.ctx,
-				"removing snapshot",
-				"namespace",
-				namespace,
-				"snapshotter",
-				snapshotter,
-				"key",
-				key,
-			)
-			if removeErr := snapshotService.Remove(nsCtx, key); removeErr != nil {
-				c.logger.DebugContext(
-					c.ctx,
-					"snapshot remove deferred",
-					"namespace",
-					namespace,
-					"snapshotter",
-					snapshotter,
-					"key",
-					key,
-					"error",
-					removeErr,
-				)
-				continue
-			}
-			removedAny = true
-			c.logger.DebugContext(
-				c.ctx,
-				"removed snapshot",
-				"namespace",
-				namespace,
-				"snapshotter",
-				snapshotter,
-				"key",
-				key,
-			)
-		}
-		if !removedAny {
-			c.logger.WarnContext(
-				c.ctx,
-				"snapshot cleanup made no progress, giving up",
-				"namespace",
-				namespace,
-				"snapshotter",
-				snapshotter,
-				"remaining",
-				len(snapshotKeys),
-			)
-			break
-		}
+	for _, snap := range snapshotters {
+		c.cleanupSnapshotsFor(nsCtx, namespace, snap)
 	}
 
 	// Clean up blobs (content)
@@ -368,7 +308,7 @@ func (c *client) CleanupNamespaceResources(namespace, snapshotter string) error 
 	if err != nil {
 		c.logger.WarnContext(c.ctx, "failed to list leases", "namespace", namespace, "error", err)
 	} else {
-		c.logger.DebugContext(c.ctx, "found leases", "namespace", namespace, "count", len(existingLeases))
+		c.logger.InfoContext(c.ctx, "draining leases", "namespace", namespace, "count", len(existingLeases))
 		for _, lease := range existingLeases {
 			c.logger.DebugContext(c.ctx, "deleting lease", "namespace", namespace, "lease", lease.ID)
 			if deleteErr := leaseManager.Delete(nsCtx, lease, leases.SynchronousDelete); deleteErr != nil {
@@ -381,4 +321,124 @@ func (c *client) CleanupNamespaceResources(namespace, snapshotter string) error 
 	}
 
 	return nil
+}
+
+// cleanupSnapshotsFor drains every snapshot under one snapshotter from the
+// supplied namespace context. Walks repeatedly so a parent with multiple
+// children clears once each pass — Walk order is implementation-defined
+// (boltdb key order), so a single reverse-order pass cannot guarantee
+// children are removed before parents. Capped at maxSnapshotPasses to bound
+// work on a pathological graph; in practice the depth is small (image layers
+// + a few committed container layers).
+func (c *client) cleanupSnapshotsFor(nsCtx context.Context, namespace, snapshotter string) {
+	if snapshotter == "" {
+		return
+	}
+	c.logger.DebugContext(c.ctx, "cleaning up snapshots", "namespace", namespace, "snapshotter", snapshotter)
+	snapshotService := c.cClient.SnapshotService(snapshotter)
+
+	const maxSnapshotPasses = 32
+	totalRemoved := 0
+	for pass := range maxSnapshotPasses {
+		removed, done := c.cleanupSnapshotPass(nsCtx, snapshotService, namespace, snapshotter, pass)
+		totalRemoved += removed
+		if done {
+			break
+		}
+	}
+	if totalRemoved > 0 {
+		c.logger.InfoContext(
+			c.ctx,
+			"drained snapshots",
+			"namespace",
+			namespace,
+			"snapshotter",
+			snapshotter,
+			"removed",
+			totalRemoved,
+		)
+	}
+}
+
+// cleanupSnapshotPass walks `snapshotter` once, removing as many snapshots as
+// it can in reverse-walk order. Returns the number of snapshots removed in
+// this pass and a `done` flag set when the loop should stop — either because
+// the snapshotter is unregistered, the namespace is empty, or the pass made
+// no forward progress.
+func (c *client) cleanupSnapshotPass(
+	nsCtx context.Context,
+	snapshotService snapshots.Snapshotter,
+	namespace, snapshotter string,
+	pass int,
+) (int, bool) {
+	var snapshotKeys []string
+	walkErr := snapshotService.Walk(nsCtx, func(_ context.Context, info snapshots.Info) error {
+		snapshotKeys = append(snapshotKeys, info.Name)
+		return nil
+	})
+	if walkErr != nil {
+		// Snapshotter not registered (or socket-level error). Common when
+		// iterating KukeonKnownSnapshotters on a host that only has
+		// overlayfs — log at DEBUG so we don't WARN-spam every uninstall.
+		c.logger.DebugContext(
+			c.ctx,
+			"snapshot walk failed; skipping snapshotter",
+			"namespace",
+			namespace,
+			"snapshotter",
+			snapshotter,
+			"error",
+			walkErr,
+		)
+		return 0, true
+	}
+	if len(snapshotKeys) == 0 {
+		return 0, true
+	}
+	c.logger.DebugContext(
+		c.ctx,
+		"found snapshots",
+		"namespace",
+		namespace,
+		"snapshotter",
+		snapshotter,
+		"count",
+		len(snapshotKeys),
+		"pass",
+		pass,
+	)
+	removed := 0
+	for i := len(snapshotKeys) - 1; i >= 0; i-- {
+		key := snapshotKeys[i]
+		if removeErr := snapshotService.Remove(nsCtx, key); removeErr != nil {
+			c.logger.DebugContext(
+				c.ctx,
+				"snapshot remove deferred",
+				"namespace",
+				namespace,
+				"snapshotter",
+				snapshotter,
+				"key",
+				key,
+				"error",
+				removeErr,
+			)
+			continue
+		}
+		removed++
+	}
+	if removed == 0 {
+		c.logger.WarnContext(
+			c.ctx,
+			"snapshot cleanup made no progress, giving up",
+			"namespace",
+			namespace,
+			"snapshotter",
+			snapshotter,
+			"remaining",
+			len(snapshotKeys),
+		)
+		return 0, true
+	}
+	return removed, false
 }

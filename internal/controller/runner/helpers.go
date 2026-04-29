@@ -606,6 +606,13 @@ func (r *Exec) getRootContainerContainerdID(cell intmodel.Cell) (string, error) 
 
 // processOrphanedContainers processes a list of orphaned containers by stopping,
 // deleting them, and purging their CNI resources.
+//
+// Stop/Delete failures are logged at WARN with the container ID and underlying
+// error so an operator can tell which container survived the drain. The drain
+// is best-effort by design — we keep going past per-container failures so a
+// single stuck container does not strand the rest — but the log line is the
+// only signal the caller has to surface the residual containers in the
+// "namespace not empty" precondition error from DeleteNamespace.
 func (r *Exec) processOrphanedContainers(ctx context.Context, containers []string) {
 	if len(containers) == 0 {
 		return
@@ -620,11 +627,29 @@ func (r *Exec) processOrphanedContainers(ctx context.Context, containers []strin
 		// blocking CleanupNamespaceResources and the subsequent
 		// DeleteNamespace with "namespace not empty".
 		r.logger.DebugContext(ctx, "stopping container", "id", containerID)
-		_, _ = r.ctrClient.StopContainer(containerID, ctr.StopContainerOptions{Force: true})
+		if _, stopErr := r.ctrClient.StopContainer(containerID, ctr.StopContainerOptions{Force: true}); stopErr != nil {
+			r.logger.WarnContext(
+				ctx,
+				"failed to stop orphaned container; continuing drain",
+				"id",
+				containerID,
+				"error",
+				stopErr,
+			)
+		}
 		r.logger.DebugContext(ctx, "deleting container", "id", containerID)
-		_ = r.ctrClient.DeleteContainer(containerID, ctr.ContainerDeleteOptions{
+		if delErr := r.ctrClient.DeleteContainer(containerID, ctr.ContainerDeleteOptions{
 			SnapshotCleanup: true,
-		})
+		}); delErr != nil {
+			r.logger.WarnContext(
+				ctx,
+				"failed to delete orphaned container; continuing drain",
+				"id",
+				containerID,
+				"error",
+				delErr,
+			)
+		}
 
 		// Get netns and purge CNI
 		r.logger.DebugContext(ctx, "getting container netns path", "id", containerID)

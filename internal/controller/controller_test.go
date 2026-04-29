@@ -41,6 +41,7 @@ type fakeRunner struct {
 	CreateRealmFn                    func(realm intmodel.Realm) (intmodel.Realm, error)
 	EnsureRealmFn                    func(realm intmodel.Realm) (intmodel.Realm, error)
 	ExistsRealmContainerdNamespaceFn func(namespace string) (bool, error)
+	ListContainerdNamespacesFn       func() ([]string, error)
 	DeleteRealmFn                    func(realm intmodel.Realm) error
 
 	// Space methods
@@ -147,6 +148,15 @@ func (f *fakeRunner) ExistsRealmContainerdNamespace(namespace string) (bool, err
 		return f.ExistsRealmContainerdNamespaceFn(namespace)
 	}
 	return false, errors.New("unexpected call to ExistsRealmContainerdNamespace")
+}
+
+func (f *fakeRunner) ListContainerdNamespaces() ([]string, error) {
+	if f.ListContainerdNamespacesFn != nil {
+		return f.ListContainerdNamespacesFn()
+	}
+	// Default to an empty list so tests that don't care about the suffix
+	// enumerator (the dominant case) don't have to install a stub.
+	return nil, nil
 }
 
 func (f *fakeRunner) DeleteRealm(realm intmodel.Realm) error {

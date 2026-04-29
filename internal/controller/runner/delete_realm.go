@@ -64,7 +64,8 @@ func (r *Exec) DeleteRealm(realm intmodel.Realm) error {
 
 	// Clean up all namespace resources (images, snapshots, blobs) before deleting namespace
 	// Namespace must be empty before deletion
-	if err = r.ctrClient.CleanupNamespaceResources(internalRealm.Spec.Namespace, "overlayfs"); err != nil {
+	// Pass "" to walk every known snapshotter — see ctr.KukeonKnownSnapshotters.
+	if err = r.ctrClient.CleanupNamespaceResources(internalRealm.Spec.Namespace, ""); err != nil {
 		r.logger.WarnContext(
 			r.ctx,
 			"failed to cleanup namespace resources",

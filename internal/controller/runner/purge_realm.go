@@ -105,7 +105,10 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) (bool, error) {
 
 	// Clean up all namespace resources (images, snapshots) before deleting namespace
 	// Namespace must be empty before deletion
-	if err = r.ctrClient.CleanupNamespaceResources(realmForOps.Spec.Namespace, "overlayfs"); err != nil {
+	// Pass "" to walk every known snapshotter (overlayfs/native/btrfs/zfs/...);
+	// uninstall on a host that experimented with a non-default snapshotter
+	// must not strand its leftover snapshots and surface "namespace not empty".
+	if err = r.ctrClient.CleanupNamespaceResources(realmForOps.Spec.Namespace, ""); err != nil {
 		r.logger.WarnContext(
 			r.ctx,
 			"failed to cleanup namespace resources",
@@ -125,12 +128,34 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) (bool, error) {
 	var nsErr error
 	if err = r.ctrClient.DeleteNamespace(realmForOps.Spec.Namespace); err != nil {
 		namespaceRemoved = false
-		nsErr = fmt.Errorf("failed to delete containerd namespace %q: %w", realmForOps.Spec.Namespace, err)
+		// Re-list containers in the namespace so the error message names the
+		// specific resources that survived the drain. The generic precondition
+		// "must be empty" message from containerd hides which container is
+		// pinning it; without the IDs an operator cannot tell whether the
+		// orphan-drain misfired (issue #195's symptom) or a different actor
+		// (image, snapshot, lease) is keeping the namespace alive.
+		residual, listErr := r.findOrphanedContainers(realmForOps.Spec.Namespace, "")
+		switch {
+		case listErr != nil:
+			nsErr = fmt.Errorf(
+				"failed to delete containerd namespace %q (re-list of survivors failed: %w): %w",
+				realmForOps.Spec.Namespace, listErr, err,
+			)
+		case len(residual) > 0:
+			nsErr = fmt.Errorf(
+				"failed to delete containerd namespace %q (residual containers: %s): %w",
+				realmForOps.Spec.Namespace, strings.Join(residual, ", "), err,
+			)
+		default:
+			nsErr = fmt.Errorf("failed to delete containerd namespace %q: %w", realmForOps.Spec.Namespace, err)
+		}
 		r.logger.WarnContext(
 			r.ctx,
 			"failed to delete containerd namespace",
 			"namespace",
 			realmForOps.Spec.Namespace,
+			"residual_containers",
+			residual,
 			"error",
 			err,
 		)

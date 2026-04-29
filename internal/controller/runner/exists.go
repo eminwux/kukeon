@@ -45,6 +45,20 @@ func (r *Exec) ExistsRealmContainerdNamespace(namespace string) (bool, error) {
 	return r.ctrClient.ExistsNamespace(namespace)
 }
 
+// ListContainerdNamespaces returns every containerd namespace visible to the
+// runner's client. A missing containerd socket returns an empty list rather
+// than an error so the uninstall path can degrade gracefully on hosts where
+// containerd was never running (or has already been torn down).
+func (r *Exec) ListContainerdNamespaces() ([]string, error) {
+	if _, err := os.Stat(r.opts.ContainerdSocket); os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err := r.ensureClientConnected(); err != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	return r.ctrClient.ListNamespaces()
+}
+
 // ExistsContainer checks if a container exists in containerd by its containerd ID.
 // It ensures the client is connected before making the call.
 func (r *Exec) ExistsContainer(containerdID string) (bool, error) {

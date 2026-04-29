@@ -63,9 +63,9 @@ const (
 	KukeSystemCellName      = "kukeond"
 	KukeSystemContainerName = "kukeond"
 
-	// realmNamespaceSuffix is the suffix appended to every realm name to form
-	// its containerd namespace. See RealmNamespace.
-	realmNamespaceSuffix = ".kukeon.io"
+	// RealmNamespaceSuffix is the suffix appended to every realm name to form
+	// its containerd namespace. See RealmNamespace and IsKukeonNamespace.
+	RealmNamespaceSuffix = ".kukeon.io"
 
 	// KukeonSystemUser and KukeonSystemGroup name the system identity created
 	// by `kuke init` so a non-root operator added to the kukeon group can
@@ -80,5 +80,27 @@ const (
 // realm name; all bootstrap and user-realm code paths route through it so the
 // mapping stays consistent.
 func RealmNamespace(realm string) string {
-	return realm + realmNamespaceSuffix
+	return realm + RealmNamespaceSuffix
+}
+
+// IsKukeonNamespace reports whether ns is a containerd namespace owned by
+// kukeon — i.e., one with the canonical .kukeon.io suffix and a non-empty
+// realm prefix. Used by the uninstall path to enumerate kukeon namespaces by
+// suffix so user-created realms whose on-disk metadata was wiped (issue #193's
+// partial-uninstall path) are still purged on a `kuke uninstall`.
+func IsKukeonNamespace(ns string) bool {
+	if len(ns) <= len(RealmNamespaceSuffix) {
+		return false
+	}
+	return ns[len(ns)-len(RealmNamespaceSuffix):] == RealmNamespaceSuffix
+}
+
+// RealmFromNamespace returns the realm name encoded in a containerd namespace
+// (the inverse of RealmNamespace). Returns the empty string when ns does not
+// have the kukeon suffix or when stripping the suffix would leave nothing.
+func RealmFromNamespace(ns string) string {
+	if !IsKukeonNamespace(ns) {
+		return ""
+	}
+	return ns[:len(ns)-len(RealmNamespaceSuffix)]
 }
