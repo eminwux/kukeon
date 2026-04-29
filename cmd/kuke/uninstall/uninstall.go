@@ -44,7 +44,11 @@ func NewUninstallCmd() *cobra.Command {
 	}
 
 	if err := setupUninstallCmd(cmd); err != nil {
-		return nil
+		// setupUninstallCmd only fails if viper.BindPFlag is handed a nil
+		// flag — unreachable by construction here. Panic surfaces a future
+		// flag-rename or typo at startup instead of letting nil flow into
+		// cobra.AddCommand and crash the root command registration.
+		panic(fmt.Sprintf("kukeon: uninstall command misconfigured: %v", err))
 	}
 	return cmd
 }
