@@ -639,3 +639,26 @@ type ApplyResourceResult struct {
 	Changes []string
 	Details map[string]string
 }
+
+// ---- Image ----
+
+// LoadImageArgs carries an OCI/docker image tarball plus the target realm.
+// The tarball ships as a byte slice (mirroring ApplyDocumentsArgs.RawYAML);
+// phase 1 sizes are bounded by the dev loop (≈100MB), so JSON-RPC roundtrip
+// cost is acceptable. Larger payloads will move to a streaming endpoint when
+// the multi-host story arrives.
+type LoadImageArgs struct {
+	Realm   string
+	Tarball []byte
+}
+
+type LoadImageReply struct {
+	Result LoadImageResult
+	Err    *APIError
+}
+
+type LoadImageResult struct {
+	Realm     string
+	Namespace string
+	Images    []string
+}

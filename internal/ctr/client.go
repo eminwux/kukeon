@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"sync"
 
@@ -85,6 +86,11 @@ type Client interface {
 	WaitTaskExit(ctx context.Context, id string) (<-chan containerd.ExitStatus, error)
 
 	ResolveSbshCachePath(imageRef, baseRunPath string) (string, error)
+
+	// LoadImage imports an OCI/docker image tarball into the client's current
+	// containerd namespace and returns the names of the imported images.
+	// Callers set the target namespace via SetNamespace before invoking.
+	LoadImage(reader io.Reader) ([]string, error)
 }
 
 func NewClient(ctx context.Context, logger *slog.Logger, socket string) Client {

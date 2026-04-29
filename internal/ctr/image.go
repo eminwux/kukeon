@@ -18,6 +18,7 @@ package ctr
 
 import (
 	"fmt"
+	"io"
 	"time"
 
 	containerd "github.com/containerd/containerd/v2/client"
@@ -139,4 +140,37 @@ func (c *client) pullImage(imageRef string) (containerd.Image, error) {
 	}
 
 	return image, nil
+}
+
+// LoadImage imports an OCI/docker image tarball into the client's current
+// containerd namespace and returns the names of the imported images. The
+// caller sets the target namespace via SetNamespace; namespaceCtx() then
+// scopes the import to that namespace.
+//
+// WithSkipMissing() mirrors `ctr images import`'s tolerance: multi-arch
+// tarballs produced by `docker save` reference platform-specific blobs the
+// docker daemon does not always include. Skipping missing blobs lets the
+// host-arch manifest land while ignoring the others.
+func (c *client) LoadImage(reader io.Reader) ([]string, error) {
+	nsCtx := c.namespaceCtx()
+
+	imgs, err := c.cClient.Import(nsCtx, reader, containerd.WithSkipMissing())
+	if err != nil {
+		c.logger.ErrorContext(
+			c.ctx,
+			"failed to import image tarball",
+			"namespace",
+			c.Namespace(),
+			"err",
+			formatError(err),
+		)
+		return nil, fmt.Errorf("failed to import image tarball: %w", err)
+	}
+
+	names := make([]string, 0, len(imgs))
+	for _, img := range imgs {
+		names = append(names, img.Name)
+	}
+	c.logger.DebugContext(c.ctx, "imported image tarball", "namespace", c.Namespace(), "images", names)
+	return names, nil
 }

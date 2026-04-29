@@ -177,6 +177,10 @@ func (FakeClient) ApplyDocuments(context.Context, []byte) (ApplyDocumentsResult,
 	return ApplyDocumentsResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) LoadImage(context.Context, string, []byte) (LoadImageResult, error) {
+	return LoadImageResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) Ping(context.Context) error {
 	return ErrUnexpectedCall
 }

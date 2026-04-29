@@ -138,6 +138,18 @@ var (
 	ErrEgressApply              = errors.New("failed to apply egress policy")
 	ErrEgressRemove             = errors.New("failed to remove egress policy")
 
+	// Image-related errors.
+
+	// ErrLoadImage is returned when importing an OCI/docker tarball into a
+	// realm's containerd namespace fails. Wrapped with the underlying
+	// containerd error so callers can inspect the cause.
+	ErrLoadImage = errors.New("failed to load image")
+
+	// ErrTarballRequired is returned when `kuke image load` receives an
+	// empty tarball (the file was empty, stdin was closed without bytes,
+	// or `docker save` produced no output).
+	ErrTarballRequired = errors.New("image tarball is required")
+
 	// Attach-related errors.
 
 	// ErrAttachNotSupported is returned when an attach request targets a

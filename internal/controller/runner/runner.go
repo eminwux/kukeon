@@ -18,6 +18,7 @@ package runner
 
 import (
 	"context"
+	"io"
 	"log/slog"
 
 	containerd "github.com/containerd/containerd/v2/client"
@@ -96,6 +97,10 @@ type Runner interface {
 	GetContainerState(cell intmodel.Cell, containerID string) (intmodel.ContainerState, error)
 
 	WaitCellRootTaskExit(ctx context.Context, cell intmodel.Cell) (<-chan containerd.ExitStatus, error)
+
+	// LoadImage imports an OCI/docker image tarball into the given
+	// containerd namespace and returns the names of the imported images.
+	LoadImage(namespace string, reader io.Reader) ([]string, error)
 
 	Close() error
 }

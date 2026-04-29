@@ -111,6 +111,9 @@ type fakeRunner struct {
 	RefreshSpaceFn func(space intmodel.Space) (intmodel.Space, bool, error)
 	RefreshStackFn func(stack intmodel.Stack) (intmodel.Stack, bool, error)
 	RefreshCellFn  func(cell intmodel.Cell) (intmodel.Cell, int, error)
+
+	// Image methods
+	LoadImageFn func(namespace string, reader io.Reader) ([]string, error)
 }
 
 // Realm methods
@@ -531,6 +534,13 @@ func (f *fakeRunner) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error)
 		return f.RefreshCellFn(cell)
 	}
 	return intmodel.Cell{}, 0, errors.New("unexpected call to RefreshCell")
+}
+
+func (f *fakeRunner) LoadImage(namespace string, reader io.Reader) ([]string, error) {
+	if f.LoadImageFn != nil {
+		return f.LoadImageFn(namespace, reader)
+	}
+	return nil, errors.New("unexpected call to LoadImage")
 }
 
 // Test helper functions
