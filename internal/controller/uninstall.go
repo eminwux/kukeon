@@ -21,6 +21,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
+	"time"
 
 	"github.com/eminwux/kukeon/internal/consts"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -54,6 +57,19 @@ type UninstallOptions struct {
 	// UserGroupRemover overrides the default userdel/groupdel routine.
 	// Tests inject a stub; production callers leave it nil.
 	UserGroupRemover UserGroupRemover
+	// KukeondPIDFile points at the kukeond PID file. The daemon-stop step
+	// signals the live daemon before any realm purge, so a fight between
+	// the in-process PurgeRealm and the running daemon's containerd session
+	// can never block the namespace delete with "namespace not empty".
+	// Empty disables the daemon-stop step; absent file is a no-op (the
+	// partial-uninstall path from #193).
+	KukeondPIDFile string
+	// DaemonStopper overrides the default PID-file-based stopper. Tests
+	// inject a stub; production callers leave it nil.
+	DaemonStopper DaemonStopper
+	// DaemonStopGracePeriod is the SIGTERM→SIGKILL grace window. Zero uses
+	// DefaultDaemonStopGracePeriod (5s).
+	DaemonStopGracePeriod time.Duration
 }
 
 // RealmPurgeOutcome reports the result of purging a single realm.
@@ -73,6 +89,7 @@ type RealmPurgeOutcome struct {
 
 // UninstallReport summarizes what Uninstall did.
 type UninstallReport struct {
+	Daemon          DaemonStopReport
 	Realms          []RealmPurgeOutcome
 	SocketDir       string
 	SocketDirExists bool
@@ -90,12 +107,20 @@ type UninstallReport struct {
 
 // Uninstall performs a comprehensive teardown of all kukeon runtime state.
 // Steps (in order):
+//  0. Stop the kukeond daemon (SIGTERM, then SIGKILL after a short grace) when
+//     a PID file is present. Doing this before any per-realm purge prevents
+//     the live daemon from racing the in-process containerd cleanup and
+//     pinning containers in `kuke-system.kukeon.io` while we are trying to
+//     drain it.
 //  1. Purge every realm with --cascade --force (drains spaces/stacks/cells/
 //     containers + tasks; the kukeond cell living inside `kuke-system` is
-//     killed and deleted as part of that cascade). Both well-known realms
-//     (`default`, `kuke-system`) are purged unconditionally so containerd
-//     namespaces left behind by an earlier partial uninstall are cleaned up
-//     even when on-disk metadata is already gone.
+//     killed and deleted as part of that cascade). Realms are enumerated by
+//     merging on-disk metadata with the set of containerd namespaces whose
+//     name carries the `.kukeon.io` suffix, so user-created realms whose
+//     metadata was wiped before `kuke uninstall` (the #193 partial-state
+//     path) still get their namespaces cleaned up. The two well-known
+//     realms (`default`, `kuke-system`) are kept as a safety floor so a
+//     containerd-list failure cannot strand them.
 //  2. RemoveAll on SocketDir (typically /run/kukeon).
 //  3. RemoveAll on the run path (typically /opt/kukeon).
 //  4. Remove the kukeon system user and group (no-op if absent).
@@ -124,6 +149,42 @@ func (b *Exec) Uninstall(opts UninstallOptions) (UninstallReport, error) {
 	recordErr := func(err error) {
 		if err != nil && firstErr == nil {
 			firstErr = err
+		}
+	}
+
+	// Step 0: stop the live kukeond daemon. Do this before realm enumeration
+	// so the controller's containerd client is not racing the daemon when
+	// PurgeRealm starts draining the kuke-system namespace.
+	pidFile := opts.KukeondPIDFile
+	if pidFile == "" && opts.SocketDir != "" {
+		// Default to <socketDir>/kukeond.pid so callers that pre-populate
+		// SocketDir (the CLI does) get the daemon-stop wired up automatically.
+		pidFile = filepath.Join(opts.SocketDir, "kukeond.pid")
+	}
+	if pidFile != "" {
+		stopper := opts.DaemonStopper
+		if stopper == nil {
+			stopper = stopDaemonByPIDFile
+		}
+		grace := opts.DaemonStopGracePeriod
+		if grace <= 0 {
+			grace = DefaultDaemonStopGracePeriod
+		}
+		daemonReport, daemonErr := stopper(b.ctx, pidFile, grace)
+		// Always record what the stopper saw, even on error — the report's
+		// PIDFile/PID/Signalled fields are how the CLI tells the operator
+		// whether the daemon-stop step actually fired.
+		report.Daemon = daemonReport
+		if daemonErr != nil {
+			b.logger.WarnContext(
+				b.ctx,
+				"uninstall: daemon-stop step failed; continuing with realm purge",
+				"pidFile",
+				pidFile,
+				"error",
+				daemonErr,
+			)
+			recordErr(fmt.Errorf("stop kukeond: %w", daemonErr))
 		}
 	}
 
@@ -196,9 +257,19 @@ func (b *Exec) Uninstall(opts UninstallOptions) (UninstallReport, error) {
 }
 
 // collectRealmsForUninstall returns every realm that should be purged,
-// merging on-disk metadata with the two well-known kukeon realms (so a
-// partial uninstall whose metadata was already wiped still cleans up
-// containerd namespaces by name).
+// merging three sources so a partial-uninstall path (metadata wiped before
+// `kuke uninstall`) still cleans up containerd namespaces:
+//  1. on-disk metadata via runner.ListRealms (the source of truth when present),
+//  2. live containerd namespaces matching `*.kukeon.io` (catches user-created
+//     realms whose metadata is gone — issue #193's partial-state path),
+//  3. the two well-known realms (`default`, `kuke-system`) as a safety floor
+//     so a failed containerd enumeration cannot strand them.
+//
+// The merge is order-stable: on-disk realms first (preserving ListRealms'
+// insertion order), then suffix-enumerated namespaces, then the well-known
+// floor — each de-duplicated against the previous step. Insertion order
+// matters because the renderer prints realms in this order, and operators
+// expect their named realms before "default" and "kuke-system".
 func (b *Exec) collectRealmsForUninstall() ([]intmodel.Realm, error) {
 	wellKnown := []intmodel.Realm{
 		{
@@ -211,22 +282,70 @@ func (b *Exec) collectRealmsForUninstall() ([]intmodel.Realm, error) {
 		},
 	}
 
-	listed, err := b.runner.ListRealms()
-	if err != nil {
-		return wellKnown, err
-	}
+	listed, listErr := b.runner.ListRealms()
 
-	seen := make(map[string]struct{}, len(listed)+len(wellKnown))
-	out := make([]intmodel.Realm, 0, len(listed)+len(wellKnown))
+	// Headroom for suffix-enumerated realms beyond the on-disk + well-known
+	// floor; small fixed reserve avoids an extra growth alloc on the common
+	// case of one or two user-created realms.
+	const suffixEnumeratedSlack = 4
+	seen := make(map[string]struct{}, len(listed)+len(wellKnown)+suffixEnumeratedSlack)
+	out := make([]intmodel.Realm, 0, len(listed)+len(wellKnown)+suffixEnumeratedSlack)
 	for _, realm := range listed {
 		seen[realm.Metadata.Name] = struct{}{}
 		out = append(out, realm)
 	}
+
+	suffixRealms, suffixErr := b.realmsFromContainerdNamespaces()
+	if suffixErr != nil {
+		b.logger.WarnContext(
+			b.ctx,
+			"uninstall: failed to enumerate containerd namespaces by suffix; falling back to well-known realms",
+			"error",
+			suffixErr,
+		)
+	}
+	for _, realm := range suffixRealms {
+		if _, ok := seen[realm.Metadata.Name]; ok {
+			continue
+		}
+		seen[realm.Metadata.Name] = struct{}{}
+		out = append(out, realm)
+	}
+
 	for _, realm := range wellKnown {
 		if _, ok := seen[realm.Metadata.Name]; ok {
 			continue
 		}
 		out = append(out, realm)
+	}
+	return out, listErr
+}
+
+// realmsFromContainerdNamespaces enumerates every containerd namespace and
+// returns realms for those whose name carries the `.kukeon.io` suffix. The
+// runner's containerd client is the single source of truth — non-kukeon
+// namespaces like "default" or "moby" are filtered out so this path cannot
+// accidentally purge a co-tenant's namespace. Returns the list deterministic
+// (sorted) so the report ordering does not flap between runs.
+func (b *Exec) realmsFromContainerdNamespaces() ([]intmodel.Realm, error) {
+	namespaces, err := b.runner.ListContainerdNamespaces()
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(namespaces)
+	out := make([]intmodel.Realm, 0, len(namespaces))
+	for _, ns := range namespaces {
+		if !consts.IsKukeonNamespace(ns) {
+			continue
+		}
+		realmName := consts.RealmFromNamespace(ns)
+		if realmName == "" {
+			continue
+		}
+		out = append(out, intmodel.Realm{
+			Metadata: intmodel.RealmMetadata{Name: realmName},
+			Spec:     intmodel.RealmSpec{Namespace: ns},
+		})
 	}
 	return out, nil
 }

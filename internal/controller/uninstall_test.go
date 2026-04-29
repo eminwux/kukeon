@@ -19,11 +19,14 @@
 package controller_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller"
@@ -258,4 +261,211 @@ func setupTestControllerWithRunPath(t *testing.T, mockRunner *fakeRunner, runPat
 		ContainerdSocket: "/test/containerd.sock",
 	}
 	return controller.NewControllerExecForTesting(ctx, logger, opts, mockRunner)
+}
+
+// TestUninstall_DaemonStopStep_PIDPresent verifies the daemon-stop step from
+// issue #195 fires before the realm-purge loop and surfaces the stub's report
+// verbatim. The whole point of running this step first is that the live
+// daemon's containerd session must be gone before PurgeRealm starts draining
+// `kuke-system.kukeon.io` — otherwise the daemon pins containers we are
+// trying to delete and the namespace delete fails.
+func TestUninstall_DaemonStopStep_PIDPresent(t *testing.T) {
+	tmpRunPath := t.TempDir()
+	tmpSocketDir := t.TempDir()
+
+	pidFilePath := filepath.Join(tmpSocketDir, "kukeond.pid")
+	if err := os.WriteFile(pidFilePath, []byte("12345\n"), 0o644); err != nil {
+		t.Fatalf("seed pid file: %v", err)
+	}
+
+	// Record purge ordering vs. daemon-stop ordering so we can assert the
+	// daemon was signalled before any realm purge ran.
+	var (
+		stopperCalledAt int
+		firstPurgeAt    int
+		callIdx         int
+	)
+
+	stopper := func(_ context.Context, gotPidFile string, gotGrace time.Duration) (controller.DaemonStopReport, error) {
+		callIdx++
+		stopperCalledAt = callIdx
+		if gotPidFile != pidFilePath {
+			t.Errorf("stopper got pidFile %q, want %q", gotPidFile, pidFilePath)
+		}
+		if gotGrace != 250*time.Millisecond {
+			t.Errorf("stopper got grace %v, want %v", gotGrace, 250*time.Millisecond)
+		}
+		return controller.DaemonStopReport{
+			PIDFilePresent: true,
+			PIDFile:        gotPidFile,
+			PID:            12345,
+			Signalled:      true,
+		}, nil
+	}
+
+	f := uninstallNoopRunner(nil)
+	f.PurgeRealmFn = func(_ intmodel.Realm) (bool, error) {
+		callIdx++
+		if firstPurgeAt == 0 {
+			firstPurgeAt = callIdx
+		}
+		return true, nil
+	}
+
+	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
+	report, err := ctrl.Uninstall(controller.UninstallOptions{
+		SocketDir:             tmpSocketDir,
+		KukeondPIDFile:        pidFilePath,
+		DaemonStopper:         stopper,
+		DaemonStopGracePeriod: 250 * time.Millisecond,
+		SkipUserGroup:         true,
+	})
+	if err != nil {
+		t.Fatalf("Uninstall returned error: %v", err)
+	}
+
+	if stopperCalledAt == 0 {
+		t.Fatalf("daemon stopper was never called; report.Daemon=%+v", report.Daemon)
+	}
+	if firstPurgeAt == 0 {
+		t.Fatalf("expected at least one PurgeRealm call (well-known realms); report=%+v", report)
+	}
+	if stopperCalledAt >= firstPurgeAt {
+		t.Errorf(
+			"daemon-stop must run before realm purge — stopperCalledAt=%d firstPurgeAt=%d",
+			stopperCalledAt, firstPurgeAt,
+		)
+	}
+
+	if !report.Daemon.PIDFilePresent {
+		t.Errorf("report.Daemon.PIDFilePresent=false, want true; got %+v", report.Daemon)
+	}
+	if report.Daemon.PID != 12345 {
+		t.Errorf("report.Daemon.PID=%d, want 12345", report.Daemon.PID)
+	}
+	if !report.Daemon.Signalled {
+		t.Errorf("report.Daemon.Signalled=false, want true; got %+v", report.Daemon)
+	}
+	if report.Daemon.PIDFile != pidFilePath {
+		t.Errorf("report.Daemon.PIDFile=%q, want %q", report.Daemon.PIDFile, pidFilePath)
+	}
+}
+
+// TestUninstall_DaemonStopStep_PIDAbsent covers the partial-uninstall path
+// from issue #193: the stopper still runs (Uninstall has to ask, since only
+// the stopper can read the PID file), but the report comes back saying no
+// daemon was found. The realm-purge loop must still execute — uninstall on
+// a host with no daemon running must not regress.
+func TestUninstall_DaemonStopStep_PIDAbsent(t *testing.T) {
+	tmpRunPath := t.TempDir()
+	tmpSocketDir := t.TempDir()
+	// Deliberately do NOT create kukeond.pid in tmpSocketDir.
+
+	var stopperCalls int
+	stopper := func(_ context.Context, gotPidFile string, _ time.Duration) (controller.DaemonStopReport, error) {
+		stopperCalls++
+		// PIDFilePresent=false signals "no live daemon to stop" without an error
+		// (matches the production stopper's read-ENOENT branch).
+		return controller.DaemonStopReport{
+			PIDFile:        gotPidFile,
+			PIDFilePresent: false,
+		}, nil
+	}
+
+	purgedNames := []string{}
+	f := uninstallNoopRunner(nil)
+	f.PurgeRealmFn = func(r intmodel.Realm) (bool, error) {
+		purgedNames = append(purgedNames, r.Metadata.Name)
+		return true, nil
+	}
+
+	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
+	report, err := ctrl.Uninstall(controller.UninstallOptions{
+		SocketDir:     tmpSocketDir,
+		DaemonStopper: stopper,
+		SkipUserGroup: true,
+	})
+	if err != nil {
+		t.Fatalf("Uninstall returned error: %v", err)
+	}
+
+	if stopperCalls != 1 {
+		t.Errorf("daemon stopper called %d times, want exactly 1", stopperCalls)
+	}
+	if report.Daemon.PIDFilePresent {
+		t.Errorf("report.Daemon.PIDFilePresent=true on a host with no PID file; got %+v", report.Daemon)
+	}
+	if report.Daemon.Signalled {
+		t.Errorf("report.Daemon.Signalled=true with no PID file; got %+v", report.Daemon)
+	}
+	// The well-known realms must still be purged — a stale or missing PID
+	// file must not block subsequent cleanup.
+	if len(purgedNames) == 0 {
+		t.Errorf("realm-purge loop did not run after PID-absent daemon-stop; want at least the well-known realms")
+	}
+}
+
+// TestUninstall_SuffixEnumeratorPurgesKukeonNamespacesOnly is the AC-required
+// suffix-enumeration test from issue #195: a containerd-namespace lister
+// returning a mix of `.kukeon.io` and unrelated namespaces (`moby`) must yield
+// purge calls only for the kukeon-suffixed ones, and never for `moby`.
+//
+// This is the partial-uninstall recovery path (#193): user-created realms
+// whose on-disk metadata was wiped are still cleaned up because containerd
+// is the source of truth for which namespaces actually exist.
+func TestUninstall_SuffixEnumeratorPurgesKukeonNamespacesOnly(t *testing.T) {
+	tmpRunPath := t.TempDir()
+
+	f := uninstallNoopRunner(nil)
+	// ListRealms returns nothing — the on-disk metadata path is empty,
+	// forcing the suffix-enumerator path to be the source of truth.
+	f.ListRealmsFn = func() ([]intmodel.Realm, error) { return nil, nil }
+	f.ListContainerdNamespacesFn = func() ([]string, error) {
+		return []string{
+			"default.kukeon.io",
+			"kuke-system.kukeon.io",
+			"myteam.kukeon.io",
+			"moby",
+		}, nil
+	}
+
+	purgedNames := map[string]string{} // name -> namespace
+	f.PurgeRealmFn = func(r intmodel.Realm) (bool, error) {
+		purgedNames[r.Metadata.Name] = r.Spec.Namespace
+		return true, nil
+	}
+
+	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
+	if _, err := ctrl.Uninstall(controller.UninstallOptions{
+		SkipUserGroup: true,
+	}); err != nil {
+		t.Fatalf("Uninstall returned error: %v", err)
+	}
+
+	wantPurged := map[string]string{
+		"default":     "default.kukeon.io",
+		"kuke-system": "kuke-system.kukeon.io",
+		"myteam":      "myteam.kukeon.io",
+	}
+	if len(purgedNames) != len(wantPurged) {
+		// Sort for deterministic error output.
+		got := make([]string, 0, len(purgedNames))
+		for k := range purgedNames {
+			got = append(got, k)
+		}
+		sort.Strings(got)
+		t.Fatalf(
+			"purged realms = %v, want exactly %v (3 .kukeon.io namespaces)",
+			got,
+			[]string{"default", "kuke-system", "myteam"},
+		)
+	}
+	for name, wantNs := range wantPurged {
+		if got := purgedNames[name]; got != wantNs {
+			t.Errorf("realm %q purged with namespace %q, want %q", name, got, wantNs)
+		}
+	}
+	if _, leaked := purgedNames["moby"]; leaked {
+		t.Errorf("moby was purged — non-kukeon namespaces must be filtered out; purged=%v", purgedNames)
+	}
 }

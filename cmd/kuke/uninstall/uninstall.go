@@ -163,6 +163,9 @@ func readLine(r io.Reader) (string, error) {
 func printReport(cmd *cobra.Command, report controller.UninstallReport) {
 	out := cmd.OutOrStdout()
 	fmt.Fprintln(out, "kuke uninstall:")
+	if report.Daemon.PIDFile != "" {
+		fmt.Fprintf(out, "  - kukeond: %s\n", daemonOutcome(report.Daemon))
+	}
 	for _, r := range report.Realms {
 		switch {
 		case r.Err != nil:
@@ -177,6 +180,23 @@ func printReport(cmd *cobra.Command, report controller.UninstallReport) {
 	fmt.Fprintf(out, "  - group %q: %s\n", report.GroupName, accountOutcome(report.GroupExisted, report.GroupRemoved))
 }
 
+// outcomeAbsent labels every "we didn't find the resource" branch in the
+// uninstall report so the operator sees the same word in every section.
+const outcomeAbsent = "absent"
+
+func daemonOutcome(d controller.DaemonStopReport) string {
+	switch {
+	case !d.PIDFilePresent:
+		return outcomeAbsent
+	case d.ForceKilled:
+		return fmt.Sprintf("force-killed (pid %d)", d.PID)
+	case d.Signalled:
+		return fmt.Sprintf("stopped (pid %d)", d.PID)
+	default:
+		return "stale pid file"
+	}
+}
+
 func dirOutcome(existed, removed bool) string {
 	switch {
 	case removed:
@@ -184,7 +204,7 @@ func dirOutcome(existed, removed bool) string {
 	case existed:
 		return "remove failed"
 	default:
-		return "absent"
+		return outcomeAbsent
 	}
 }
 
@@ -195,7 +215,7 @@ func accountOutcome(existed, removed bool) string {
 	case existed:
 		return "remove failed"
 	default:
-		return "absent"
+		return outcomeAbsent
 	}
 }
 

@@ -37,6 +37,11 @@ type Runner interface {
 	EnsureRealm(realm intmodel.Realm) (intmodel.Realm, error)
 	UpdateRealm(realm intmodel.Realm) (intmodel.Realm, error)
 	ExistsRealmContainerdNamespace(namespace string) (bool, error)
+	// ListContainerdNamespaces returns every containerd namespace the
+	// runner's client can see. Surfaced for the uninstall path so it can
+	// enumerate kukeon namespaces by `.kukeon.io` suffix and clean up
+	// user-created realms whose on-disk metadata was already wiped.
+	ListContainerdNamespaces() ([]string, error)
 	DeleteRealm(realm intmodel.Realm) error
 
 	GetSpace(space intmodel.Space) (intmodel.Space, error)
