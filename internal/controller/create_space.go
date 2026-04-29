@@ -24,6 +24,7 @@ import (
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 // CreateSpaceResult reports reconciliation outcomes for a space.
@@ -54,6 +55,10 @@ func (b *Exec) CreateSpace(space intmodel.Space) (CreateSpaceResult, error) {
 	if name == "" {
 		return res, errdefs.ErrSpaceNameRequired
 	}
+	if err := naming.ValidateHierarchyName("space", name); err != nil {
+		return res, err
+	}
+	space.Metadata.Name = name
 	realm := strings.TrimSpace(space.Spec.RealmName)
 	if realm == "" {
 		return res, errdefs.ErrRealmNameRequired

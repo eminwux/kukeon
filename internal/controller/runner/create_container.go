@@ -19,9 +19,11 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 // CreateContainer creates a container in an existing cell by merging the container spec
@@ -32,6 +34,12 @@ import (
 // update path traverses — so the post-merge (effective) configuration is
 // what gets persisted and what `kuke get container -o yaml` displays.
 func (r *Exec) CreateContainer(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error) {
+	trimmedID := strings.TrimSpace(container.ID)
+	if err := naming.ValidateHierarchyName("container", trimmedID); err != nil {
+		return intmodel.Cell{}, err
+	}
+	container.ID = trimmedID
+
 	// Get existing cell (returns internal model)
 	existingCell, err := r.GetCell(cell)
 	if err != nil {

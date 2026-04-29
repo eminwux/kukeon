@@ -25,6 +25,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 // CreateContainerResult reports reconciliation outcomes for container creation within a cell.
@@ -49,8 +50,14 @@ func (b *Exec) CreateContainer(container intmodel.Container) (CreateContainerRes
 	if containerName == "" {
 		return res, errdefs.ErrContainerNameRequired
 	}
+	if err := naming.ValidateHierarchyName("container", containerName); err != nil {
+		return res, err
+	}
+	container.Metadata.Name = containerName
 	if strings.TrimSpace(container.Spec.ID) == "" {
 		container.Spec.ID = containerName
+	} else {
+		container.Spec.ID = strings.TrimSpace(container.Spec.ID)
 	}
 
 	realm := strings.TrimSpace(container.Spec.RealmName)

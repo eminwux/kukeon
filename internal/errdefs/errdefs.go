@@ -81,6 +81,7 @@ var (
 	)
 	ErrCellNameRequired        = errors.New("cell name is required")
 	ErrContainerNameRequired   = errors.New("container name is required")
+	ErrInvalidName             = errors.New("name is invalid")
 	ErrInvalidImage            = errors.New("invalid image reference")
 	ErrDeleteRealm             = errors.New("failed to delete realm")
 	ErrDeleteSpace             = errors.New("failed to delete space")

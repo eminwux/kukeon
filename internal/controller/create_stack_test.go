@@ -958,3 +958,51 @@ func TestCreateStack_NameTrimming(t *testing.T) {
 		})
 	}
 }
+
+// TestCreateStack_RejectsInvalidCharacters covers the AC for #180: stack
+// names containing "_" or "/" must be rejected at the controller boundary
+// before any runner state mutation. The fakeRunner deliberately fails the
+// test if the create path was reached.
+func TestCreateStack_RejectsInvalidCharacters(t *testing.T) {
+	tests := []struct {
+		name      string
+		stackName string
+	}{
+		{name: "underscore in stack name", stackName: "my_stack"},
+		{name: "slash in stack name", stackName: "my/stack"},
+		{name: "underscore alone", stackName: "_"},
+		{name: "slash alone", stackName: "/"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRunner := &fakeRunner{
+				GetStackFn: func(_ intmodel.Stack) (intmodel.Stack, error) {
+					t.Fatal("GetStack called despite invalid name — validation should run first")
+					return intmodel.Stack{}, nil
+				},
+				CreateStackFn: func(_ intmodel.Stack) (intmodel.Stack, error) {
+					t.Fatal("CreateStack called despite invalid name — validation should run first")
+					return intmodel.Stack{}, nil
+				},
+			}
+
+			ctrl := setupTestController(t, mockRunner)
+			stack := intmodel.Stack{
+				Metadata: intmodel.StackMetadata{Name: tt.stackName},
+				Spec: intmodel.StackSpec{
+					RealmName: "valid-realm",
+					SpaceName: "valid-space",
+				},
+			}
+
+			_, err := ctrl.CreateStack(stack)
+			if err == nil {
+				t.Fatalf("expected error rejecting %q, got nil", tt.stackName)
+			}
+			if !errors.Is(err, errdefs.ErrInvalidName) {
+				t.Errorf("expected ErrInvalidName, got %v", err)
+			}
+		})
+	}
+}

@@ -19,14 +19,32 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 func (r *Exec) CreateCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	if err := r.ensureClientConnected(); err != nil {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+
+	trimmedName := strings.TrimSpace(cell.Metadata.Name)
+	if err := naming.ValidateHierarchyName("cell", trimmedName); err != nil {
+		return intmodel.Cell{}, err
+	}
+	cell.Metadata.Name = trimmedName
+
+	// Validate any container IDs embedded in the cell spec, mirroring the
+	// controller-side check so a malformed container ID is rejected here too.
+	for i := range cell.Spec.Containers {
+		id := strings.TrimSpace(cell.Spec.Containers[i].ID)
+		if err := naming.ValidateHierarchyName("container", id); err != nil {
+			return intmodel.Cell{}, err
+		}
+		cell.Spec.Containers[i].ID = id
 	}
 
 	// Get existing cell (returns internal model)

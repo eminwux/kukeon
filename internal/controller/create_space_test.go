@@ -849,3 +849,48 @@ func TestCreateSpace_NameTrimming(t *testing.T) {
 		})
 	}
 }
+
+// TestCreateSpace_RejectsInvalidCharacters covers the AC for #180: space
+// names containing "_" or "/" must be rejected at the controller boundary
+// before any runner state mutation. The fakeRunner deliberately fails the
+// test if the create path was reached.
+func TestCreateSpace_RejectsInvalidCharacters(t *testing.T) {
+	tests := []struct {
+		name      string
+		spaceName string
+	}{
+		{name: "underscore in space name", spaceName: "my_space"},
+		{name: "slash in space name", spaceName: "my/space"},
+		{name: "underscore alone", spaceName: "_"},
+		{name: "slash alone", spaceName: "/"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRunner := &fakeRunner{
+				GetSpaceFn: func(_ intmodel.Space) (intmodel.Space, error) {
+					t.Fatal("GetSpace called despite invalid name — validation should run first")
+					return intmodel.Space{}, nil
+				},
+				CreateSpaceFn: func(_ intmodel.Space) (intmodel.Space, error) {
+					t.Fatal("CreateSpace called despite invalid name — validation should run first")
+					return intmodel.Space{}, nil
+				},
+			}
+
+			ctrl := setupTestController(t, mockRunner)
+			space := intmodel.Space{
+				Metadata: intmodel.SpaceMetadata{Name: tt.spaceName},
+				Spec:     intmodel.SpaceSpec{RealmName: "valid-realm"},
+			}
+
+			_, err := ctrl.CreateSpace(space)
+			if err == nil {
+				t.Fatalf("expected error rejecting %q, got nil", tt.spaceName)
+			}
+			if !errors.Is(err, errdefs.ErrInvalidName) {
+				t.Errorf("expected ErrInvalidName, got %v", err)
+			}
+		})
+	}
+}

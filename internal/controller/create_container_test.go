@@ -1497,3 +1497,54 @@ func TestCreateContainer_ContainerObjectConstruction(t *testing.T) {
 		})
 	}
 }
+
+// TestCreateContainer_RejectsInvalidCharacters covers the AC for #180:
+// container names containing "_" or "/" must be rejected at the controller
+// boundary before any runner state mutation. The fakeRunner deliberately
+// fails the test if the create path was reached.
+func TestCreateContainer_RejectsInvalidCharacters(t *testing.T) {
+	tests := []struct {
+		name          string
+		containerName string
+	}{
+		{name: "underscore in container name", containerName: "my_container"},
+		{name: "slash in container name", containerName: "my/container"},
+		{name: "underscore alone", containerName: "_"},
+		{name: "slash alone", containerName: "/"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRunner := &fakeRunner{
+				GetCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
+					t.Fatal("GetCell called despite invalid container name — validation should run first")
+					return intmodel.Cell{}, nil
+				},
+				CreateContainerFn: func(_ intmodel.Cell, _ intmodel.ContainerSpec) (intmodel.Cell, error) {
+					t.Fatal("CreateContainer called despite invalid container name — validation should run first")
+					return intmodel.Cell{}, nil
+				},
+			}
+
+			ctrl := setupTestController(t, mockRunner)
+			container := intmodel.Container{
+				Metadata: intmodel.ContainerMetadata{Name: tt.containerName},
+				Spec: intmodel.ContainerSpec{
+					RealmName: "valid-realm",
+					SpaceName: "valid-space",
+					StackName: "valid-stack",
+					CellName:  "valid-cell",
+					Image:     "docker.io/library/alpine:3.19",
+				},
+			}
+
+			_, err := ctrl.CreateContainer(container)
+			if err == nil {
+				t.Fatalf("expected error rejecting %q, got nil", tt.containerName)
+			}
+			if !errors.Is(err, errdefs.ErrInvalidName) {
+				t.Errorf("expected ErrInvalidName, got %v", err)
+			}
+		})
+	}
+}
