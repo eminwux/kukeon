@@ -19,15 +19,23 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 func (r *Exec) CreateSpace(space intmodel.Space) (intmodel.Space, error) {
 	if err := r.ensureClientConnected(); err != nil {
 		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
+
+	trimmedName := strings.TrimSpace(space.Metadata.Name)
+	if err := naming.ValidateHierarchyName("space", trimmedName); err != nil {
+		return intmodel.Space{}, err
+	}
+	space.Metadata.Name = trimmedName
 
 	// Get existing space (returns internal model)
 	existingSpace, err := r.GetSpace(space)

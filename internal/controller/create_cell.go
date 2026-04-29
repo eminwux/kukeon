@@ -24,6 +24,7 @@ import (
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 // CreateCellResult reports reconciliation outcomes for a cell.
@@ -67,6 +68,10 @@ func (b *Exec) CreateCell(cell intmodel.Cell) (CreateCellResult, error) {
 	if name == "" {
 		return res, errdefs.ErrCellNameRequired
 	}
+	if err := naming.ValidateHierarchyName("cell", name); err != nil {
+		return res, err
+	}
+	cell.Metadata.Name = name
 	realm := strings.TrimSpace(cell.Spec.RealmName)
 	if realm == "" {
 		return res, errdefs.ErrRealmNameRequired
@@ -78,6 +83,20 @@ func (b *Exec) CreateCell(cell intmodel.Cell) (CreateCellResult, error) {
 	stack := strings.TrimSpace(cell.Spec.StackName)
 	if stack == "" {
 		return res, errdefs.ErrStackNameRequired
+	}
+
+	// Validate container names embedded in the cell spec so a malformed
+	// container ID is rejected at the cell-create boundary, before
+	// provisionNewCell would build a containerd ID with an embedded "_".
+	for i := range cell.Spec.Containers {
+		id := strings.TrimSpace(cell.Spec.Containers[i].ID)
+		if id == "" {
+			return res, errdefs.ErrContainerNameRequired
+		}
+		if err := naming.ValidateHierarchyName("container", id); err != nil {
+			return res, err
+		}
+		cell.Spec.Containers[i].ID = id
 	}
 
 	// Ensure default labels are set

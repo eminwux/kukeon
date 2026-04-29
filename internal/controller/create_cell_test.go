@@ -474,7 +474,7 @@ func TestCreateCell_ContainerOutcomes(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "empty container ID is skipped in outcomes",
+			name: "empty container ID is rejected at the cell-create boundary",
 			cell: intmodel.Cell{
 				Metadata: intmodel.CellMetadata{
 					Name: "test-cell",
@@ -485,36 +485,23 @@ func TestCreateCell_ContainerOutcomes(t *testing.T) {
 					StackName: "test-stack",
 					Containers: []intmodel.ContainerSpec{
 						{ID: "container1", Image: "image1"},
-						{ID: "", Image: "image2"}, // empty ID should be skipped
+						{ID: "", Image: "image2"},
 						{ID: "container3", Image: "image3"},
 					},
 				},
 			},
 			setupRunner: func(f *fakeRunner) {
 				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
-					return intmodel.Cell{}, errdefs.ErrCellNotFound
-				}
-				createdCell := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
-				createdCell.Spec.Containers = []intmodel.ContainerSpec{
-					{ID: "container1", Image: "image1"},
-					{ID: "", Image: "image2"},
-					{ID: "container3", Image: "image3"},
+					t.Fatal("GetCell called despite empty container ID — validation should run first")
+					return intmodel.Cell{}, nil
 				}
 				f.CreateCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
-					return createdCell, nil
-				}
-				f.StartCellFn = func(cell intmodel.Cell) (intmodel.Cell, error) {
-					cell.Status.State = intmodel.CellStateReady
-					return cell, nil
+					t.Fatal("CreateCell called despite empty container ID — validation should run first")
+					return intmodel.Cell{}, nil
 				}
 			},
-			wantResult: func(t *testing.T, result controller.CreateCellResult) {
-				// Only container1 and container3 should be in outcomes (empty ID skipped)
-				if len(result.Containers) != 2 {
-					t.Errorf("expected 2 container outcomes (empty ID skipped), got %d", len(result.Containers))
-				}
-			},
-			wantErr: false,
+			wantResult: nil,
+			wantErr:    true,
 		},
 	}
 
@@ -1426,6 +1413,104 @@ func TestCreateCell_NameTrimming(t *testing.T) {
 
 			if tt.wantResult != nil {
 				tt.wantResult(t, result)
+			}
+		})
+	}
+}
+
+// TestCreateCell_RejectsInvalidCharacters covers the AC for #180: cell
+// names containing "_" or "/" must be rejected at the controller boundary
+// before any runner state mutation. The fakeRunner deliberately fails the
+// test if the create path was reached.
+func TestCreateCell_RejectsInvalidCharacters(t *testing.T) {
+	tests := []struct {
+		name     string
+		cellName string
+	}{
+		{name: "underscore in cell name", cellName: "my_cell"},
+		{name: "slash in cell name", cellName: "my/cell"},
+		{name: "underscore alone", cellName: "_"},
+		{name: "slash alone", cellName: "/"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRunner := &fakeRunner{
+				GetCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
+					t.Fatal("GetCell called despite invalid name — validation should run first")
+					return intmodel.Cell{}, nil
+				},
+				CreateCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
+					t.Fatal("CreateCell called despite invalid name — validation should run first")
+					return intmodel.Cell{}, nil
+				},
+			}
+
+			ctrl := setupTestController(t, mockRunner)
+			cell := intmodel.Cell{
+				Metadata: intmodel.CellMetadata{Name: tt.cellName},
+				Spec: intmodel.CellSpec{
+					RealmName: "valid-realm",
+					SpaceName: "valid-space",
+					StackName: "valid-stack",
+				},
+			}
+
+			_, err := ctrl.CreateCell(cell)
+			if err == nil {
+				t.Fatalf("expected error rejecting %q, got nil", tt.cellName)
+			}
+			if !errors.Is(err, errdefs.ErrInvalidName) {
+				t.Errorf("expected ErrInvalidName, got %v", err)
+			}
+		})
+	}
+}
+
+// TestCreateCell_RejectsInvalidContainerCharacters covers the AC for #180:
+// container IDs embedded in a cell spec must also be rejected at the
+// controller boundary before any runner state mutation.
+func TestCreateCell_RejectsInvalidContainerCharacters(t *testing.T) {
+	tests := []struct {
+		name          string
+		containerName string
+	}{
+		{name: "underscore in container ID", containerName: "my_container"},
+		{name: "slash in container ID", containerName: "my/container"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRunner := &fakeRunner{
+				GetCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
+					t.Fatal("GetCell called despite invalid container ID — validation should run first")
+					return intmodel.Cell{}, nil
+				},
+				CreateCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
+					t.Fatal("CreateCell called despite invalid container ID — validation should run first")
+					return intmodel.Cell{}, nil
+				},
+			}
+
+			ctrl := setupTestController(t, mockRunner)
+			cell := intmodel.Cell{
+				Metadata: intmodel.CellMetadata{Name: "valid-cell"},
+				Spec: intmodel.CellSpec{
+					RealmName: "valid-realm",
+					SpaceName: "valid-space",
+					StackName: "valid-stack",
+					Containers: []intmodel.ContainerSpec{
+						{ID: tt.containerName, Image: "docker.io/library/alpine:3.19"},
+					},
+				},
+			}
+
+			_, err := ctrl.CreateCell(cell)
+			if err == nil {
+				t.Fatalf("expected error rejecting container %q, got nil", tt.containerName)
+			}
+			if !errors.Is(err, errdefs.ErrInvalidName) {
+				t.Errorf("expected ErrInvalidName, got %v", err)
 			}
 		})
 	}

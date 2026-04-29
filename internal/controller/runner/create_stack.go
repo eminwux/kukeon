@@ -19,15 +19,23 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 func (r *Exec) CreateStack(stack intmodel.Stack) (intmodel.Stack, error) {
 	if err := r.ensureClientConnected(); err != nil {
 		return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
+
+	trimmedName := strings.TrimSpace(stack.Metadata.Name)
+	if err := naming.ValidateHierarchyName("stack", trimmedName); err != nil {
+		return intmodel.Stack{}, err
+	}
+	stack.Metadata.Name = trimmedName
 
 	// Get existing stack (returns internal model)
 	existingStack, err := r.GetStack(stack)

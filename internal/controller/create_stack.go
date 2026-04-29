@@ -24,6 +24,7 @@ import (
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
 // CreateStackResult reports reconciliation outcomes for a stack.
@@ -51,6 +52,10 @@ func (b *Exec) CreateStack(stack intmodel.Stack) (CreateStackResult, error) {
 	if name == "" {
 		return res, errdefs.ErrStackNameRequired
 	}
+	if err := naming.ValidateHierarchyName("stack", name); err != nil {
+		return res, err
+	}
+	stack.Metadata.Name = name
 	realm := strings.TrimSpace(stack.Spec.RealmName)
 	if realm == "" {
 		return res, errdefs.ErrRealmNameRequired
