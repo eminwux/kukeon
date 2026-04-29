@@ -55,8 +55,7 @@ ln -sf kuke kukeond # kukeond is argv[0]-dispatched from the same binary
 docker build --build-arg VERSION=v0.0.0-dev -t kukeon-local:dev .
 docker tag kukeon-local:dev docker.io/library/kukeon-local:dev
 
-docker save kukeon-local:dev | \
-    sudo ctr -n kuke-system.kukeon.io images import -
+sudo ./kuke image load --from-docker kukeon-local:dev --realm kuke-system --no-daemon
 
 sudo ctr -n kuke-system.kukeon.io images ls | grep kukeon-local
 ```
