@@ -40,8 +40,10 @@ import (
 	uninstallcmd "github.com/eminwux/kukeon/cmd/kuke/uninstall"
 	"github.com/eminwux/kukeon/cmd/kuke/version"
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/clientconfig"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/logging"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -58,6 +60,10 @@ func NewKukeCmd() (*cobra.Command, error) {
 		Use:   "kuke",
 		Short: "Kukeon is a tool for managing Kukeon entities",
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			if err := loadClientConfiguration(cmd); err != nil {
+				return err
+			}
+
 			var logger *slog.Logger
 			if viper.GetBool(config.KUKEON_ROOT_VERBOSE.ViperKey) {
 				logLevel := viper.GetString(config.KUKEON_ROOT_LOG_LEVEL.ViperKey)
@@ -149,6 +155,17 @@ func SetupKukeCmd(rootCmd *cobra.Command) error {
 }
 
 func SetPersistentLoggingFlags(rootCmd *cobra.Command) error {
+	rootCmd.PersistentFlags().String(
+		"configuration", config.DefaultClientConfigurationFile(),
+		"Path to a ClientConfiguration YAML; absent file uses hardcoded defaults",
+	)
+	if err := viper.BindPFlag(
+		config.KUKE_CONFIGURATION.ViperKey,
+		rootCmd.PersistentFlags().Lookup("configuration"),
+	); err != nil {
+		return err
+	}
+
 	rootCmd.PersistentFlags().String("run-path", "/opt/kukeon", "Run path for the kukeon runtime")
 	if err := viper.BindPFlag(config.KUKEON_ROOT_RUN_PATH.ViperKey, rootCmd.PersistentFlags().Lookup("run-path")); err != nil {
 		return err
@@ -220,4 +237,67 @@ func loadConfig() error {
 // LoadConfig is a public wrapper for backward compatibility.
 func LoadConfig() error {
 	return loadConfig()
+}
+
+// loadClientConfiguration reads the ClientConfiguration document at
+// `--configuration` (default `~/.kuke/kuke.yaml`) and layers its values onto
+// viper for fields the operator did not set explicitly. Called from the root
+// PersistentPreRunE so every subcommand sees the seeded defaults before
+// reading viper.
+func loadClientConfiguration(cmd *cobra.Command) error {
+	path := viper.GetString(config.KUKE_CONFIGURATION.ViperKey)
+	if path == "" {
+		path = config.DefaultClientConfigurationFile()
+	}
+	doc, err := clientconfig.Load(path)
+	if err != nil {
+		return fmt.Errorf("load client configuration: %w", err)
+	}
+	applyClientConfiguration(cmd, doc.Spec)
+	return nil
+}
+
+// applyClientConfiguration layers the loaded ClientConfiguration on top of
+// viper for fields the operator did not explicitly set on the command line
+// or via environment. Order of precedence: explicit `--flag` > env >
+// ClientConfiguration > flag default. The flag check skips fields whose
+// `--flag` was changed; the env check skips fields whose env var is set —
+// without it, `viper.Set` would override viper's env binding and silently
+// invert env > YAML.
+func applyClientConfiguration(cmd *cobra.Command, spec v1beta1.ClientConfigurationSpec) {
+	if spec.Host != "" && !flagChanged(cmd, "host") && !envSet(config.KUKEON_ROOT_HOST) {
+		viper.Set(config.KUKEON_ROOT_HOST.ViperKey, spec.Host)
+	}
+	if spec.RunPath != "" && !flagChanged(cmd, "run-path") && !envSet(config.KUKEON_ROOT_RUN_PATH) {
+		viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, spec.RunPath)
+	}
+	if spec.ContainerdSocket != "" && !flagChanged(cmd, "containerd-socket") &&
+		!envSet(config.KUKEON_ROOT_CONTAINERD_SOCKET) {
+		viper.Set(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey, spec.ContainerdSocket)
+	}
+	if spec.LogLevel != "" && !flagChanged(cmd, "log-level") && !envSet(config.KUKEON_ROOT_LOG_LEVEL) {
+		viper.Set(config.KUKEON_ROOT_LOG_LEVEL.ViperKey, spec.LogLevel)
+	}
+}
+
+// flagChanged checks both the local and persistent flag sets so the helper
+// is correct in tests (where cmd is the root and persistent flags are not
+// yet merged into cmd.Flags()) and in production (where cmd is the leaf
+// subcommand and the merged set already contains the parent's persistent
+// flags).
+func flagChanged(cmd *cobra.Command, name string) bool {
+	if f := cmd.Flags().Lookup(name); f != nil && f.Changed {
+		return true
+	}
+	if f := cmd.PersistentFlags().Lookup(name); f != nil && f.Changed {
+		return true
+	}
+	return false
+}
+
+// envSet reports whether the OS env var backing v is present (any value,
+// including empty string, counts as set — same semantics as viper's BindEnv).
+func envSet(v config.Var) bool {
+	_, ok := os.LookupEnv(v.EnvVar())
+	return ok
 }

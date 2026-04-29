@@ -42,6 +42,11 @@ const (
 	// `kuke init --server-configuration`). Not a server-side resource —
 	// `kuke apply` rejects it.
 	KindServerConfiguration Kind = "ServerConfiguration"
+	// KindClientConfiguration identifies the kuke client's configuration
+	// document loaded via `kuke --configuration` (default
+	// `~/.kuke/kuke.yaml`). Not a server-side resource — `kuke apply`
+	// rejects it.
+	KindClientConfiguration Kind = "ClientConfiguration"
 )
 
 // Common printable state strings.

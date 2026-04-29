@@ -173,6 +173,10 @@ var (
 	// YAML fails to parse or violates the schema (wrong kind, etc.).
 	ErrServerConfigurationInvalid = errors.New("server configuration is invalid")
 
+	// ErrClientConfigurationInvalid is returned when a ClientConfiguration
+	// YAML fails to parse or violates the schema (wrong kind, etc.).
+	ErrClientConfigurationInvalid = errors.New("client configuration is invalid")
+
 	// Secret-related errors.
 
 	ErrSecretNameRequired         = errors.New("secret name is required")

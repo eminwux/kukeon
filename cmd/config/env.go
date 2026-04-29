@@ -100,6 +100,8 @@ var (
 	KUKEON_ROOT_HOST = DefineKV("KUKEON_HOST", "kukeon/host", "unix:///run/kukeon/kukeond.sock")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKEON_ROOT_NO_DAEMON = DefineKV("KUKEON_NO_DAEMON", "kukeon/noDaemon", "false")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CONFIGURATION = DefineKV("KUKE_CONFIGURATION", "kuke/configuration")
 
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKEOND_SOCKET = DefineKV("KUKEOND_SOCKET", "kukeond/socket", "/run/kukeon/kukeond.sock")
