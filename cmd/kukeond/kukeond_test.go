@@ -26,21 +26,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-func bindKukeondEnv(t *testing.T) {
-	t.Helper()
-	for _, v := range []config.Var{
-		config.KUKEOND_SOCKET,
-		config.KUKEOND_SOCKET_GID,
-		config.KUKEON_ROOT_RUN_PATH,
-		config.KUKEON_ROOT_CONTAINERD_SOCKET,
-		config.KUKEON_ROOT_LOG_LEVEL,
-	} {
-		if err := v.BindEnv(); err != nil {
-			t.Fatalf("BindEnv %s: %v", v.EnvVar(), err)
-		}
-	}
-}
-
 func TestNewKukeondCmdHasConfigurationFlag(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
@@ -118,23 +103,32 @@ func TestApplyServerConfigurationEnvOverridesConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewKukeondCmd() error = %v", err)
 	}
-	bindKukeondEnv(t)
 
-	// Operator exported KUKEOND_SOCKET; the on-disk ServerConfiguration must
-	// not clobber it. Documents the precedence order in the PR description:
-	// --flag > env > ServerConfiguration > default.
+	// Operator exported KUKEOND_SOCKET, KUKEON_CONTAINERD_SOCKET, and
+	// KUKEON_LOG_LEVEL; the on-disk ServerConfiguration must not clobber
+	// them. Documents the precedence order in the PR description:
+	// --flag > env > ServerConfiguration > default. The KUKEON_CONTAINERD_SOCKET
+	// assertion is the regression guard for issue #191 — without
+	// bindEnvVars() in NewKukeondCmd the env binding does not exist and
+	// viper falls back to the flag default, silently dropping both env
+	// and YAML.
 	t.Setenv(config.KUKEOND_SOCKET.EnvVar(), "/run/kukeon/from-env.sock")
+	t.Setenv(config.KUKEON_ROOT_CONTAINERD_SOCKET.EnvVar(), "/run/containerd/from-env.sock")
 	t.Setenv(config.KUKEON_ROOT_LOG_LEVEL.EnvVar(), "debug")
 
 	spec := v1beta1.ServerConfigurationSpec{
-		Socket:   "/run/kukeon/from-config.sock",
-		LogLevel: "warn",
-		RunPath:  "/opt/kukeon-from-config",
+		Socket:           "/run/kukeon/from-config.sock",
+		ContainerdSocket: "/run/containerd/from-config.sock",
+		LogLevel:         "warn",
+		RunPath:          "/opt/kukeon-from-config",
 	}
 	applyServerConfiguration(cmd, spec)
 
 	if got := viper.GetString(config.KUKEOND_SOCKET.ViperKey); got != "/run/kukeon/from-env.sock" {
 		t.Errorf("Socket env override lost: got %q, want %q", got, "/run/kukeon/from-env.sock")
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey); got != "/run/containerd/from-env.sock" {
+		t.Errorf("ContainerdSocket env override lost: got %q, want %q", got, "/run/containerd/from-env.sock")
 	}
 	if got := viper.GetString(config.KUKEON_ROOT_LOG_LEVEL.ViperKey); got != "debug" {
 		t.Errorf("LogLevel env override lost: got %q, want %q", got, "debug")

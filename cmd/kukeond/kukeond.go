@@ -124,8 +124,27 @@ func NewKukeondCmd() (*cobra.Command, error) {
 		return nil, err
 	}
 
+	bindEnvVars()
+
 	cmd.AddCommand(newServeCmd())
 	return cmd, nil
+}
+
+// bindEnvVars wires each kukeond viper key to its `KUKEON_…` / `KUKEOND_…`
+// environment variable. Without these calls, applyServerConfiguration's
+// envSet check skips the YAML write but viper has no env binding to read
+// from — so both env and YAML are silently ignored and the flag default
+// wins. Mirrors the BindEnv block in cmd/kuke/kuke.go's loadConfig.
+func bindEnvVars() {
+	for _, v := range []config.Var{
+		config.KUKEON_ROOT_CONTAINERD_SOCKET,
+		config.KUKEON_ROOT_RUN_PATH,
+		config.KUKEON_ROOT_LOG_LEVEL,
+		config.KUKEOND_SOCKET,
+		config.KUKEOND_SOCKET_GID,
+	} {
+		_ = v.BindEnv()
+	}
 }
 
 // applyServerConfiguration layers the loaded ServerConfiguration on top of
