@@ -427,4 +427,7 @@ var (
 	KUKE_KILL_CONTAINER_STACK = DefineKV("KUKE_KILL_CONTAINER_STACK", "kuke/kill/container/stack", "default")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_KILL_CONTAINER_CELL = DefineKV("KUKE_KILL_CONTAINER_CELL", "kuke/kill/container/cell")
+
+	//nolint:revive,gochecknoglobals,staticcheck // daemon command variables
+	KUKE_DAEMON_STOP_TIMEOUT = DefineKV("KUKE_DAEMON_STOP_TIMEOUT", "kuke/daemon/stop/timeout", "10s")
 )

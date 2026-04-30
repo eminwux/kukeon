@@ -109,7 +109,7 @@ func TestKuke_Start_Help(t *testing.T) {
 	}
 }
 
-// TestKuke_Daemon_Help tests `kuke daemon -h` and the `start` subcommand help.
+// TestKuke_Daemon_Help tests `kuke daemon -h` and the `start`/`stop` subcommand help.
 func TestKuke_Daemon_Help(t *testing.T) {
 	t.Parallel()
 
@@ -118,6 +118,8 @@ func TestKuke_Daemon_Help(t *testing.T) {
 		{"daemon", "--help"},
 		{"daemon", "start", "-h"},
 		{"daemon", "start", "--help"},
+		{"daemon", "stop", "-h"},
+		{"daemon", "stop", "--help"},
 	} {
 		exitCode, stdout, stderr := runBinary(t, nil, kuke, args...)
 		if exitCode != 0 {
@@ -141,6 +143,30 @@ func TestKuke_DaemonStart_Uninitialized(t *testing.T) {
 	mkdirRunPath(t, runPath)
 
 	args := append(buildKukeRunPathArgs(runPath), "daemon", "start")
+	exitCode, stdout, stderr := runBinary(t, nil, kuke, args...)
+	if exitCode == 0 {
+		t.Fatalf(
+			"expected non-zero exit code on uninitialized host; stdout=%s stderr=%s",
+			string(stdout), string(stderr),
+		)
+	}
+	combined := string(stdout) + string(stderr)
+	if !strings.Contains(combined, "kuke init") {
+		t.Fatalf("expected error to mention `kuke init`, got: %s", combined)
+	}
+}
+
+// TestKuke_DaemonStop_Uninitialized verifies that `kuke daemon stop` fails
+// with the same friendly "host not initialized" message as `daemon start` when
+// the run-path has no kukeond cell metadata. Mirrors the start-side guard so
+// regressions in either branch surface immediately.
+func TestKuke_DaemonStop_Uninitialized(t *testing.T) {
+	t.Parallel()
+
+	runPath := getRandomRunPath(t)
+	mkdirRunPath(t, runPath)
+
+	args := append(buildKukeRunPathArgs(runPath), "daemon", "stop")
 	exitCode, stdout, stderr := runBinary(t, nil, kuke, args...)
 	if exitCode == 0 {
 		t.Fatalf(
