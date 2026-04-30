@@ -45,8 +45,12 @@ func (l *logClientFake) LogContainer(
 	return l.result, l.err
 }
 
-func TestLogContainer_NotAttachable_RPCSurfacesSentinel(t *testing.T) {
-	core := &logClientFake{err: errdefs.ErrAttachNotSupported}
+// TestLogContainer_ContainerNotFound_RPCSurfacesSentinel pins down the
+// daemon RPC layer's pass-through of structured errors from the in-process
+// client. ErrContainerNotFound is the realistic sentinel callers can hit
+// since issue #203 dropped the Attachable gate inside LogContainer.
+func TestLogContainer_ContainerNotFound_RPCSurfacesSentinel(t *testing.T) {
+	core := &logClientFake{err: errdefs.ErrContainerNotFound}
 	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core, nil)
 
 	args := &kukeonv1.LogContainerArgs{Doc: v1beta1.ContainerDoc{}}
@@ -58,8 +62,8 @@ func TestLogContainer_NotAttachable_RPCSurfacesSentinel(t *testing.T) {
 		t.Fatalf("expected wire-level Err to be populated, got nil")
 	}
 	wireErr := kukeonv1.FromAPIError(reply.Err)
-	if !errors.Is(wireErr, errdefs.ErrAttachNotSupported) {
-		t.Errorf("wire error %q does not unwrap to ErrAttachNotSupported", wireErr)
+	if !errors.Is(wireErr, errdefs.ErrContainerNotFound) {
+		t.Errorf("wire error %q does not unwrap to ErrContainerNotFound", wireErr)
 	}
 }
 
@@ -78,5 +82,32 @@ func TestLogContainer_Attachable_RPCReturnsCapturePath(t *testing.T) {
 	}
 	if reply.Result.HostCapturePath != wantPath {
 		t.Errorf("HostCapturePath = %q, want %q", reply.Result.HostCapturePath, wantPath)
+	}
+}
+
+// TestLogContainer_NonAttachable_RPCReturnsLogPath pins the wire-level
+// passthrough of HostLogPath added in issue #203 — the field for the
+// containerd-shim cio.LogFile branch.
+func TestLogContainer_NonAttachable_RPCReturnsLogPath(t *testing.T) {
+	const wantPath = "/opt/kukeon/kuke-system/kukeon/kukeon/kukeond/kukeond/log"
+	core := &logClientFake{result: kukeonv1.LogContainerResult{HostLogPath: wantPath}}
+	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core, nil)
+
+	args := &kukeonv1.LogContainerArgs{Doc: v1beta1.ContainerDoc{}}
+	reply := &kukeonv1.LogContainerReply{}
+	if err := svc.LogContainer(args, reply); err != nil {
+		t.Fatalf("LogContainer returned transport error: %v", err)
+	}
+	if reply.Err != nil {
+		t.Fatalf("expected wire-level Err to be nil, got %v", kukeonv1.FromAPIError(reply.Err))
+	}
+	if reply.Result.HostLogPath != wantPath {
+		t.Errorf("HostLogPath = %q, want %q", reply.Result.HostLogPath, wantPath)
+	}
+	if reply.Result.HostCapturePath != "" {
+		t.Errorf(
+			"HostCapturePath = %q, want empty (non-Attachable should not populate it)",
+			reply.Result.HostCapturePath,
+		)
 	}
 }

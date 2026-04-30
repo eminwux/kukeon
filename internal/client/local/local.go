@@ -962,18 +962,41 @@ func (c *Client) AttachContainer(_ context.Context, doc v1beta1.ContainerDoc) (k
 
 // ---- Log ----
 
-// LogContainer enforces the Attachable gate and resolves the host-side path
-// of the per-container sbsh capture file. The Attachable gate is the same
-// invariant AttachContainer uses: only sbsh-wrapped containers have a
-// capture file. Bytes never traverse this RPC — the caller (`kuke log`)
-// opens HostCapturePath directly.
+// LogContainer resolves the host-side path of the per-container output
+// stream and returns it via LogContainerResult. The path varies by IO
+// model:
+//
+//   - Attachable containers are sbsh-wrapped, so stdout/stderr land in
+//     the sbsh capture file at HostCapturePath (current behavior).
+//   - Non-Attachable containers (including kukeond) have the runtime
+//     shim write stdout/stderr to HostLogPath via cio.LogFile (gap #4
+//     in docs/gaps-2026-04-19.md). The file is shim-owned; kuke just
+//     hands the path back so `kuke log` can read it.
+//
+// Bytes never traverse this RPC — the caller opens the returned path.
 func (c *Client) LogContainer(_ context.Context, doc v1beta1.ContainerDoc) (kukeonv1.LogContainerResult, error) {
-	spec, err := c.resolveAttachable(doc)
+	internal, _, err := apischeme.NormalizeContainer(doc)
+	if err != nil {
+		return kukeonv1.LogContainerResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	res, err := c.ctrl.GetContainer(internal)
 	if err != nil {
 		return kukeonv1.LogContainerResult{}, err
 	}
+	if !res.ContainerExists {
+		return kukeonv1.LogContainerResult{}, errdefs.ErrContainerNotFound
+	}
+	spec := res.Container.Spec
+	if spec.Attachable {
+		return kukeonv1.LogContainerResult{
+			HostCapturePath: fs.ContainerCapturePath(
+				c.ctrl.RunPath(),
+				spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
+			),
+		}, nil
+	}
 	return kukeonv1.LogContainerResult{
-		HostCapturePath: fs.ContainerCapturePath(
+		HostLogPath: fs.ContainerLogPath(
 			c.ctrl.RunPath(),
 			spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
 		),

@@ -282,27 +282,104 @@ func TestLog_NoCandidate_Errors(t *testing.T) {
 	}
 }
 
-func TestLog_ExplicitContainer_NotAttachable_SurfacesSentinel(t *testing.T) {
+// TestLog_NonAttachable_TailsHostLogPath locks in the issue-#203 contract:
+// a non-Attachable container is not gated out — the daemon returns
+// HostLogPath (cio.LogFile) and `kuke log` tails it the same way it tails
+// the sbsh capture file for Attachable containers.
+func TestLog_NonAttachable_TailsHostLogPath(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	const wantPath = "/opt/kukeon/r1/s1/st1/c1/side/log"
+	fc := &fakeClient{
+		logContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.LogContainerResult, error) {
+			return kukeonv1.LogContainerResult{HostLogPath: wantPath}, nil
+		},
+	}
+	tail := &tailCapture{payload: []byte("daemon-stderr-line\n")}
+	cmd, out := newCmdWithCtx(t, fc, tail)
+	cmd.SetArgs([]string{
+		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
+		"--container", "side", "--no-follow",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if tail.calls != 1 {
+		t.Fatalf("tail called %d times, want 1", tail.calls)
+	}
+	if tail.path != wantPath {
+		t.Errorf("tail path = %q, want %q", tail.path, wantPath)
+	}
+	if got := out.String(); got != "daemon-stderr-line\n" {
+		t.Errorf("stdout = %q, want %q", got, "daemon-stderr-line\n")
+	}
+}
+
+// TestLog_AmbiguousAcceptsNonAttachable checks the picker fallout from
+// the Attachable filter being dropped (issue #203): a cell with two
+// non-root containers — one Attachable, one not — must surface as
+// ambiguous because both are now valid log targets.
+func TestLog_AmbiguousAcceptsNonAttachable(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{
-		logContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.LogContainerResult, error) {
-			return kukeonv1.LogContainerResult{}, errdefs.ErrAttachNotSupported
+		listContainersFn: func(_, _, _, _ string) ([]v1beta1.ContainerSpec, error) {
+			return []v1beta1.ContainerSpec{
+				{ID: "root", Root: true},
+				{ID: "shell", Attachable: true},
+				{ID: "daemon"},
+			}, nil
 		},
 	}
 	tail := &tailCapture{}
 	cmd, _ := newCmdWithCtx(t, fc, tail)
 	cmd.SetArgs([]string{
 		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
-		"--container", "side",
 	})
 
 	err := cmd.Execute()
-	if !errors.Is(err, errdefs.ErrAttachNotSupported) {
-		t.Fatalf("error %v does not unwrap to ErrAttachNotSupported", err)
+	if !errors.Is(err, errdefs.ErrAttachAmbiguous) {
+		t.Fatalf("error %v does not unwrap to ErrAttachAmbiguous", err)
 	}
-	if tail.calls != 0 {
-		t.Errorf("tail called %d times on non-attachable target, want 0", tail.calls)
+	if got := err.Error(); !strings.Contains(got, "daemon, shell") {
+		t.Errorf("error message %q missing both candidates", got)
+	}
+}
+
+// TestLog_AutoPicksLoneNonAttachable checks the kukeond-cell shape:
+// a cell whose only non-root container is non-Attachable resolves to
+// that container without requiring --container on the command line.
+func TestLog_AutoPicksLoneNonAttachable(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	const wantPath = "/opt/kukeon/kuke-system/kukeon/kukeon/kukeond/kukeond/log"
+	fc := &fakeClient{
+		listContainersFn: func(_, _, _, _ string) ([]v1beta1.ContainerSpec, error) {
+			return []v1beta1.ContainerSpec{
+				{ID: "kukeon-system-root", Root: true},
+				{ID: "kukeond"},
+			}, nil
+		},
+		logContainerFn: func(doc v1beta1.ContainerDoc) (kukeonv1.LogContainerResult, error) {
+			if got := doc.Metadata.Name; got != "kukeond" {
+				t.Errorf("LogContainer called with name %q, want %q", got, "kukeond")
+			}
+			return kukeonv1.LogContainerResult{HostLogPath: wantPath}, nil
+		},
+	}
+	tail := &tailCapture{}
+	cmd, _ := newCmdWithCtx(t, fc, tail)
+	cmd.SetArgs([]string{
+		"--realm", "kuke-system", "--space", "kukeon", "--stack", "kukeon", "--cell", "kukeond",
+		"--no-follow",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if tail.path != wantPath {
+		t.Errorf("tail path = %q, want %q", tail.path, wantPath)
 	}
 }
 

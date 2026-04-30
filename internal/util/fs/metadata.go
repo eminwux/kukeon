@@ -124,6 +124,19 @@ func ContainerCapturePath(baseRunPath, realmName, spaceName, stackName, cellName
 	)
 }
 
+// ContainerLogPath returns the host-side path of the per-container stdout/
+// stderr log file written by the containerd runtime shim via cio.LogFile.
+// Used for non-Attachable containers (kukeond included): the shim opens this
+// path and appends every byte the task writes to stdout or stderr; `kuke log`
+// tails the same path. Attachable containers do not use this file — their
+// output is captured by sbsh into ContainerCapturePath.
+func ContainerLogPath(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
+	return filepath.Join(
+		ContainerMetadataDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName),
+		consts.KukeonContainerLogFile,
+	)
+}
+
 type metadataHeader struct {
 	APIVersion string `json:"apiVersion"`
 	Kind       string `json:"kind"`

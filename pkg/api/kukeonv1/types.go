@@ -568,16 +568,26 @@ type LogContainerReply struct {
 }
 
 // LogContainerResult carries the host-side coordinates the `kuke log` client
-// needs to tail the sbsh capture file. Bytes never traverse this RPC — the
-// client opens HostCapturePath directly.
+// needs to read the per-container output stream. Bytes never traverse this
+// RPC — the client opens the returned host path directly.
+//
+// Exactly one of HostCapturePath or HostLogPath is non-empty:
+//
+//   - Attachable containers route stdout/stderr through the sbsh terminal
+//     wrapper, which writes a tty byte stream to HostCapturePath.
+//   - Non-Attachable containers (including kukeond) have the runtime shim
+//     append stdout/stderr to HostLogPath via cio.LogFile.
 type LogContainerResult struct {
 	// HostCapturePath is the host path of the per-container sbsh capture
 	// file. Inside the container the same inode is reachable at
-	// /run/kukeon/tty/capture via the tty directory bind mount. Returned
-	// only when the target container has Attachable=true; otherwise the
-	// daemon errors with ErrAttachNotSupported (non-Attachable containers
-	// have no capture file).
+	// /run/kukeon/tty/capture via the tty directory bind mount. Set only
+	// when the target container has Attachable=true.
 	HostCapturePath string
+
+	// HostLogPath is the host path of the per-container log file written
+	// by the containerd runtime shim (cio.LogFile mode). Set only for
+	// non-Attachable containers; the file is shim-owned, kuke only reads.
+	HostLogPath string
 }
 
 // ---- Refresh ----

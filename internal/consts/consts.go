@@ -44,6 +44,14 @@ const (
 	// /run/kukeon/tty/capture (see ctr.AttachableCapturePath).
 	KukeonContainerCaptureFile = "capture"
 
+	// KukeonContainerLogFile is the basename of the per-container stdout/
+	// stderr log file written by the containerd runtime shim via cio.LogFile
+	// for non-Attachable containers (Attachable containers route output
+	// through sbsh's capture file instead). The shim is the writer; kuke
+	// only reads it. `kuke log` tails this file when targeting a non-
+	// Attachable container.
+	KukeonContainerLogFile = "log"
+
 	// Label keys shared across the user default hierarchy and the system hierarchy.
 	KukeonRealmLabelKey     = "realm.kukeon.io"
 	KukeonSpaceLabelKey     = "space.kukeon.io"
