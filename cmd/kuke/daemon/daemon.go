@@ -15,7 +15,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package daemon hosts the `kuke daemon` subcommand group, which exposes
-// daemon-lifecycle verbs (start, and later stop/kill/restart/reset). These
+// daemon-lifecycle verbs (start, stop, kill, and later restart/reset). These
 // commands operate on kukeond itself and therefore run in-process — they
 // cannot route through the daemon they are managing.
 package daemon
@@ -23,6 +23,7 @@ package daemon
 import (
 	"strings"
 
+	killcmd "github.com/eminwux/kukeon/cmd/kuke/daemon/kill"
 	startcmd "github.com/eminwux/kukeon/cmd/kuke/daemon/start"
 	stopcmd "github.com/eminwux/kukeon/cmd/kuke/daemon/stop"
 	"github.com/spf13/cobra"
@@ -49,6 +50,7 @@ func NewDaemonCmd() *cobra.Command {
 	cmd.AddCommand(
 		startcmd.NewStartCmd(),
 		stopcmd.NewStopCmd(),
+		killcmd.NewKillCmd(),
 	)
 
 	return cmd
@@ -56,7 +58,7 @@ func NewDaemonCmd() *cobra.Command {
 
 // completeDaemonSubcommands provides shell completion for daemon subcommand names.
 func completeDaemonSubcommands(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	subcommands := []string{"start", "stop"}
+	subcommands := []string{"start", "stop", "kill"}
 
 	if toComplete == "" {
 		return subcommands, cobra.ShellCompDirectiveNoFileComp
