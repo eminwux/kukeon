@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	killcmd "github.com/eminwux/kukeon/cmd/kuke/daemon/kill"
+	resetcmd "github.com/eminwux/kukeon/cmd/kuke/daemon/reset"
 	restartcmd "github.com/eminwux/kukeon/cmd/kuke/daemon/restart"
 	startcmd "github.com/eminwux/kukeon/cmd/kuke/daemon/start"
 	stopcmd "github.com/eminwux/kukeon/cmd/kuke/daemon/stop"
@@ -53,6 +54,7 @@ func NewDaemonCmd() *cobra.Command {
 		stopcmd.NewStopCmd(),
 		killcmd.NewKillCmd(),
 		restartcmd.NewRestartCmd(),
+		resetcmd.NewResetCmd(),
 	)
 
 	return cmd
@@ -60,7 +62,7 @@ func NewDaemonCmd() *cobra.Command {
 
 // completeDaemonSubcommands provides shell completion for daemon subcommand names.
 func completeDaemonSubcommands(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	subcommands := []string{"start", "stop", "kill", "restart"}
+	subcommands := []string{"start", "stop", "kill", "restart", "reset"}
 
 	if toComplete == "" {
 		return subcommands, cobra.ShellCompDirectiveNoFileComp
