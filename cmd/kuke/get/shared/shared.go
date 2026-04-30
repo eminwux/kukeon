@@ -23,6 +23,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/eminwux/kukeon/cmd/config"
 	createshared "github.com/eminwux/kukeon/cmd/kuke/create/shared"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/spf13/cobra"
@@ -49,17 +50,25 @@ const (
 	OutputFormatTable OutputFormat = "table"
 )
 
-// ParseOutputFormat parses and validates the --output flag from the command.
+// ParseOutputFormat resolves the output format using kuke's standard
+// precedence: explicit `--output`/`-o` flag > KUKEON_GET_OUTPUT env (and
+// any other source viper has bound to `kuke/get/output`) > table default.
+// Each `kuke get <kind>` subcommand binds its own `--output` flag to the
+// shared viper key at construction time, but viper only retains the last
+// binding for a given key; reading the active command's flag directly
+// keeps the flag working for every subcommand and lets viper handle the
+// env/config fall-throughs.
 func ParseOutputFormat(cmd *cobra.Command) (OutputFormat, error) {
-	output, err := cmd.Flags().GetString("output")
-	if err != nil {
-		return OutputFormatTable, err
+	output := ""
+	if cmd != nil && cmd.Flags().Changed("output") {
+		var err error
+		output, err = cmd.Flags().GetString("output")
+		if err != nil {
+			return OutputFormatTable, err
+		}
 	}
 	if output == "" {
-		output, _ = cmd.Flags().GetString("o")
-	}
-	if output == "" {
-		return OutputFormatTable, nil
+		output = viper.GetString(config.KUKE_GET_OUTPUT.ViperKey)
 	}
 
 	trimmed := strings.TrimSpace(output)

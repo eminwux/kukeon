@@ -24,6 +24,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -67,16 +68,6 @@ func TestParseOutputFormat(t *testing.T) {
 			wantFormat: shared.OutputFormatJSON,
 		},
 		{
-			name:       "short flag -o",
-			flags:      map[string]string{"o": "yaml"},
-			wantFormat: shared.OutputFormatYAML,
-		},
-		{
-			name:       "output flag takes precedence over -o",
-			flags:      map[string]string{"output": "json", "o": "yaml"},
-			wantFormat: shared.OutputFormatJSON,
-		},
-		{
 			name:    "invalid format",
 			flags:   map[string]string{"output": "xml"},
 			wantErr: "invalid output format",
@@ -91,8 +82,7 @@ func TestParseOutputFormat(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := &cobra.Command{Use: "test"}
-			cmd.Flags().String("output", "", "Output format")
-			cmd.Flags().StringP("o", "o", "", "Output format (short)")
+			cmd.Flags().StringP("output", "o", "", "Output format")
 
 			for name, value := range tt.flags {
 				if err := cmd.Flags().Set(name, value); err != nil {
@@ -112,6 +102,73 @@ func TestParseOutputFormat(t *testing.T) {
 				return
 			}
 
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if format != tt.wantFormat {
+				t.Errorf("expected format %q, got %q", tt.wantFormat, format)
+			}
+		})
+	}
+}
+
+func TestParseOutputFormatEnvAndFlagPrecedence(t *testing.T) {
+	if err := config.KUKE_GET_OUTPUT.BindEnv(); err != nil {
+		t.Fatalf("bind KUKEON_GET_OUTPUT: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		env        string
+		setEnv     bool
+		flag       string // empty means flag not set
+		wantFormat shared.OutputFormat
+	}{
+		{
+			name:       "env yaml is honored when flag unset",
+			env:        "yaml",
+			setEnv:     true,
+			wantFormat: shared.OutputFormatYAML,
+		},
+		{
+			name:       "env json is honored when flag unset",
+			env:        "json",
+			setEnv:     true,
+			wantFormat: shared.OutputFormatJSON,
+		},
+		{
+			name:       "explicit flag overrides env",
+			env:        "yaml",
+			setEnv:     true,
+			flag:       "json",
+			wantFormat: shared.OutputFormatJSON,
+		},
+		{
+			name:       "default table when neither set",
+			wantFormat: shared.OutputFormatTable,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Always seed the env via t.Setenv so the test always restores
+			// the prior value on exit, regardless of CI shell state.
+			t.Setenv(config.KUKE_GET_OUTPUT.Key, tt.env)
+			if !tt.setEnv {
+				if err := os.Unsetenv(config.KUKE_GET_OUTPUT.Key); err != nil {
+					t.Fatalf("unset env: %v", err)
+				}
+			}
+
+			cmd := &cobra.Command{Use: "test"}
+			cmd.Flags().StringP("output", "o", "", "Output format")
+			if tt.flag != "" {
+				if err := cmd.Flags().Set("output", tt.flag); err != nil {
+					t.Fatalf("set flag: %v", err)
+				}
+			}
+
+			format, err := shared.ParseOutputFormat(cmd)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
