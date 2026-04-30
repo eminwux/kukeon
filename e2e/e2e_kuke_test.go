@@ -17,6 +17,8 @@
 package e2e_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -109,7 +111,7 @@ func TestKuke_Start_Help(t *testing.T) {
 	}
 }
 
-// TestKuke_Daemon_Help tests `kuke daemon -h` and the `start`/`stop`/`kill` subcommand help.
+// TestKuke_Daemon_Help tests `kuke daemon -h` and the `start`/`stop`/`kill`/`reset` subcommand help.
 func TestKuke_Daemon_Help(t *testing.T) {
 	t.Parallel()
 
@@ -122,6 +124,8 @@ func TestKuke_Daemon_Help(t *testing.T) {
 		{"daemon", "stop", "--help"},
 		{"daemon", "kill", "-h"},
 		{"daemon", "kill", "--help"},
+		{"daemon", "reset", "-h"},
+		{"daemon", "reset", "--help"},
 	} {
 		exitCode, stdout, stderr := runBinary(t, nil, kuke, args...)
 		if exitCode != 0 {
@@ -243,6 +247,137 @@ func TestKuke_DaemonRestart_TimeoutFlag(t *testing.T) {
 	}
 	if !strings.Contains(string(stdout), "--timeout") {
 		t.Fatalf("expected --timeout in `kuke daemon restart --help`; got:\n%s", string(stdout))
+	}
+}
+
+// TestKuke_DaemonReset_Uninitialized verifies that `kuke daemon reset` fails
+// with the same friendly "host not initialized" message as the other daemon-
+// lifecycle verbs when the run-path has no kukeond cell metadata.
+func TestKuke_DaemonReset_Uninitialized(t *testing.T) {
+	t.Parallel()
+
+	runPath := getRandomRunPath(t)
+	mkdirRunPath(t, runPath)
+
+	args := append(buildKukeRunPathArgs(runPath), "daemon", "reset")
+	exitCode, stdout, stderr := runBinary(t, nil, kuke, args...)
+	if exitCode == 0 {
+		t.Fatalf(
+			"expected non-zero exit code on uninitialized host; stdout=%s stderr=%s",
+			string(stdout), string(stderr),
+		)
+	}
+	combined := string(stdout) + string(stderr)
+	if !strings.Contains(combined, "kuke init") {
+		t.Fatalf("expected error to mention `kuke init`, got: %s", combined)
+	}
+}
+
+// TestKuke_DaemonReset_Flags verifies the `--timeout` and `--purge-system`
+// flags are registered on `kuke daemon reset`. Their presence in --help is
+// the minimum guard that the wiring did not regress (#199 AC).
+func TestKuke_DaemonReset_Flags(t *testing.T) {
+	t.Parallel()
+
+	exitCode, stdout, stderr := runBinary(t, nil, kuke, "daemon", "reset", "--help")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0 from --help, got %d; stderr=%s", exitCode, string(stderr))
+	}
+	out := string(stdout)
+	for _, want := range []string{"--timeout", "--purge-system"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in `kuke daemon reset --help`; got:\n%s", want, out)
+		}
+	}
+}
+
+// TestKuke_DaemonReset_RoundTrip exercises the AC: `kuke init` → `kuke daemon
+// reset --purge-system` → `kuke init` produces a clean re-bootstrap. Skipped
+// without the make-e2e harness env (KUKEON_E2E_IMAGE / docker / ctr); runs in
+// the same environment that TestKuke_Init_VerifyState does.
+//
+// Not run with t.Parallel() so it does not race TestKuke_Init_VerifyState
+// on the shared /run/kukeon socket dir — go test interleaves serial tests
+// between parallel batches, which gives this test exclusive access to the
+// host-level state init touches.
+func TestKuke_DaemonReset_RoundTrip(t *testing.T) {
+	runPath := getRandomRunPath(t)
+	mkdirRunPath(t, runPath)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("could not get working dir: %v", err)
+	}
+	fullRunPath := filepath.Join(cwd, runPath)
+	defaultRealmDir := filepath.Join(fullRunPath, consts.KukeonDefaultRealmName)
+	systemRealmDir := filepath.Join(fullRunPath, consts.KukeSystemRealmName)
+
+	t.Cleanup(func() {
+		// Best-effort host-level cleanup: a final reset --purge-system if the
+		// test exited mid-flow. Failures here are diagnostic only.
+		args := append(buildKukeRunPathArgs(runPath), "daemon", "reset", "--purge-system")
+		_, _, _ = runBinary(t, nil, kuke, args...)
+
+		cleanupCell(
+			t, runPath,
+			consts.KukeSystemRealmName,
+			consts.KukeSystemSpaceName,
+			consts.KukeSystemStackName,
+			consts.KukeSystemCellName,
+		)
+		cleanupRealm(t, runPath, consts.KukeSystemRealmName)
+		cleanupRealm(t, runPath, consts.KukeonDefaultRealmName)
+	})
+
+	kukeondImage := loadKukeondImageIntoContainerd(t)
+
+	// Step 1: init.
+	args := append(buildKukeRunPathArgs(runPath), "init", "--kukeond-image", kukeondImage)
+	exitCode, stdout, stderr := runBinary(t, nil, kuke, args...)
+	if exitCode != 0 {
+		t.Fatalf("first init failed: code=%d stdout=%s stderr=%s", exitCode, string(stdout), string(stderr))
+	}
+	if _, statErr := os.Stat(defaultRealmDir); statErr != nil {
+		t.Fatalf("default realm dir missing after init: %v", statErr)
+	}
+	if _, statErr := os.Stat(systemRealmDir); statErr != nil {
+		t.Fatalf("kuke-system realm dir missing after init: %v", statErr)
+	}
+
+	// Seed a sentinel under default so the AC "user-realm data preserved" has
+	// something concrete to check after reset.
+	sentinelPath := filepath.Join(defaultRealmDir, "user-data.sentinel")
+	if writeErr := os.WriteFile(sentinelPath, []byte("preserve-me"), 0o600); writeErr != nil {
+		t.Fatalf("seed default-realm sentinel: %v", writeErr)
+	}
+
+	// Step 2: reset --purge-system.
+	args = append(buildKukeRunPathArgs(runPath), "daemon", "reset", "--purge-system")
+	exitCode, stdout, stderr = runBinary(t, nil, kuke, args...)
+	if exitCode != 0 {
+		t.Fatalf("daemon reset failed: code=%d stdout=%s stderr=%s", exitCode, string(stdout), string(stderr))
+	}
+	if _, statErr := os.Stat(systemRealmDir); !os.IsNotExist(statErr) {
+		t.Fatalf("kuke-system dir was not removed under --purge-system: stat err=%v", statErr)
+	}
+	if _, statErr := os.Stat(sentinelPath); statErr != nil {
+		t.Fatalf("default-realm sentinel must be preserved by reset: %v", statErr)
+	}
+
+	// Step 3: init again must produce a clean re-bootstrap.
+	args = append(buildKukeRunPathArgs(runPath), "init", "--kukeond-image", kukeondImage)
+	exitCode, stdout, stderr = runBinary(t, nil, kuke, args...)
+	if exitCode != 0 {
+		t.Fatalf("re-init after reset failed: code=%d stdout=%s stderr=%s", exitCode, string(stdout), string(stderr))
+	}
+	if _, statErr := os.Stat(systemRealmDir); statErr != nil {
+		t.Fatalf("kuke-system realm dir missing after re-init: %v", statErr)
+	}
+	if _, statErr := os.Stat(sentinelPath); statErr != nil {
+		t.Fatalf("default-realm sentinel must still be present after re-init: %v", statErr)
+	}
+	if !strings.Contains(string(stdout), "Initialized Kukeon runtime") {
+		t.Fatalf("re-init output missing bootstrap header; stdout=%s", string(stdout))
 	}
 }
 
