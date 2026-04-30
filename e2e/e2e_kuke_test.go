@@ -205,6 +205,47 @@ func TestKuke_DaemonKill_Uninitialized(t *testing.T) {
 	}
 }
 
+// TestKuke_DaemonRestart_Uninitialized verifies that `kuke daemon restart`
+// fails with the same friendly "host not initialized" message as `daemon
+// start`/`stop`/`kill` when the run-path has no kukeond cell metadata. The
+// stop-then-start composition must surface the same precondition as its
+// individual phases.
+func TestKuke_DaemonRestart_Uninitialized(t *testing.T) {
+	t.Parallel()
+
+	runPath := getRandomRunPath(t)
+	mkdirRunPath(t, runPath)
+
+	args := append(buildKukeRunPathArgs(runPath), "daemon", "restart")
+	exitCode, stdout, stderr := runBinary(t, nil, kuke, args...)
+	if exitCode == 0 {
+		t.Fatalf(
+			"expected non-zero exit code on uninitialized host; stdout=%s stderr=%s",
+			string(stdout), string(stderr),
+		)
+	}
+	combined := string(stdout) + string(stderr)
+	if !strings.Contains(combined, "kuke init") {
+		t.Fatalf("expected error to mention `kuke init`, got: %s", combined)
+	}
+}
+
+// TestKuke_DaemonRestart_TimeoutFlag verifies the `--timeout` flag is
+// registered on `kuke daemon restart`. The flag is the user-facing override
+// for the stop phase's grace period (#221 AC) — its presence in --help is the
+// minimum guard that the wiring did not regress.
+func TestKuke_DaemonRestart_TimeoutFlag(t *testing.T) {
+	t.Parallel()
+
+	exitCode, stdout, stderr := runBinary(t, nil, kuke, "daemon", "restart", "--help")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0 from --help, got %d; stderr=%s", exitCode, string(stderr))
+	}
+	if !strings.Contains(string(stdout), "--timeout") {
+		t.Fatalf("expected --timeout in `kuke daemon restart --help`; got:\n%s", string(stdout))
+	}
+}
+
 // TestKuke_Stop_Help tests kuke stop help.
 func TestKuke_Stop_Help(t *testing.T) {
 	t.Parallel()

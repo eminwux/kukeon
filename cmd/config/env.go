@@ -430,4 +430,6 @@ var (
 
 	//nolint:revive,gochecknoglobals,staticcheck // daemon command variables
 	KUKE_DAEMON_STOP_TIMEOUT = DefineKV("KUKE_DAEMON_STOP_TIMEOUT", "kuke/daemon/stop/timeout", "10s")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_DAEMON_RESTART_TIMEOUT = DefineKV("KUKE_DAEMON_RESTART_TIMEOUT", "kuke/daemon/restart/timeout", "10s")
 )
