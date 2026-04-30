@@ -87,6 +87,12 @@ type TaskIO struct {
 	Stderr string
 	// Terminal indicates if the task should have a TTY.
 	Terminal bool
+	// LogFilePath, when set, makes the runtime shim write the task's
+	// stdout and stderr to this host path via cio.LogFile. The shim
+	// opens the file in append mode; if no file exists yet it is
+	// created. Mutually exclusive with Terminal — log files do not
+	// pair with a TTY.
+	LogFilePath string
 }
 
 // ContainerDeleteOptions describes options for deleting a container.

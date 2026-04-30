@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -80,16 +82,29 @@ func (c *client) StartContainer(
 		c.dropTask(containerSpec.ID)
 	}
 
-	// Build IO creator
+	// Build IO creator. Selection order:
+	//   1. LogFilePath  — cio.LogFile, shim appends stdout+stderr to a host
+	//      file kuke can tail (used for non-Attachable containers including
+	//      kukeond — see internal/util/fs/metadata.go ContainerLogPath).
+	//   2. Terminal     — TTY-attached IO with no streams wired (sbsh later
+	//      claims stdio inside the container).
+	//   3. IO non-nil   — bare IO creator with no streams wired.
+	//   4. default      — cio.NullIO (output discarded).
 	var ioCreator cio.Creator
-	if taskSpec.IO != nil {
-		if taskSpec.IO.Terminal {
-			ioCreator = cio.NewCreator(cio.WithStreams(nil, nil, nil), cio.WithTerminal)
-		} else {
-			ioCreator = cio.NewCreator(cio.WithStreams(nil, nil, nil))
+	switch {
+	case taskSpec.IO != nil && taskSpec.IO.LogFilePath != "":
+		// The shim opens the path on first task write; create the parent
+		// dir up front so that creation fails loudly here rather than
+		// silently inside the shim.
+		if err = os.MkdirAll(filepath.Dir(taskSpec.IO.LogFilePath), 0o750); err != nil {
+			return nil, fmt.Errorf("create container log dir: %w", err)
 		}
-	} else {
-		// Default: no IO streams
+		ioCreator = cio.LogFile(taskSpec.IO.LogFilePath)
+	case taskSpec.IO != nil && taskSpec.IO.Terminal:
+		ioCreator = cio.NewCreator(cio.WithStreams(nil, nil, nil), cio.WithTerminal)
+	case taskSpec.IO != nil:
+		ioCreator = cio.NewCreator(cio.WithStreams(nil, nil, nil))
+	default:
 		ioCreator = cio.NullIO
 	}
 

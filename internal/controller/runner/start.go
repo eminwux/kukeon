@@ -28,8 +28,30 @@ import (
 	"github.com/eminwux/kukeon/internal/ctr"
 	internalerrdefs "github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
 )
+
+// containerLogTaskSpec returns a TaskSpec with cio.LogFile IO pointed at the
+// per-container log path for a non-Attachable container. Returns the zero
+// TaskSpec for Attachable containers (sbsh's capture file already covers
+// them) and for Root containers (pause-style — no useful stdout). Bytes flow
+// from the runtime shim into the file; `kuke log` later reads from the same
+// path. Centralised here so all three StartContainer call sites pick up the
+// same policy.
+func (r *Exec) containerLogTaskSpec(spec intmodel.ContainerSpec) ctr.TaskSpec {
+	if spec.Attachable || spec.Root {
+		return ctr.TaskSpec{}
+	}
+	return ctr.TaskSpec{
+		IO: &ctr.TaskIO{
+			LogFilePath: fs.ContainerLogPath(
+				r.opts.RunPath,
+				spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
+			),
+		},
+	}
+}
 
 // rootContainerWantsCNI returns true when StartCell should run the CNI attach
 // path for the cell's root container. Host-network containers (kukeond and
@@ -587,7 +609,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 			namespacePaths,
 		)
 
-		_, err = r.ctrClient.StartContainer(specWithNamespaces, ctr.TaskSpec{})
+		_, err = r.ctrClient.StartContainer(specWithNamespaces, r.containerLogTaskSpec(containerSpec))
 		if err != nil {
 			fields = appendCellLogFields([]any{"id", ctrContainerID}, cellID, cellName)
 			fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
@@ -817,7 +839,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (intmodel.
 		namespacePaths,
 	)
 
-	_, err = r.ctrClient.StartContainer(specWithNamespaces, ctr.TaskSpec{})
+	_, err = r.ctrClient.StartContainer(specWithNamespaces, r.containerLogTaskSpec(*foundContainerSpec))
 	if err != nil {
 		fields = appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 		fields = append(

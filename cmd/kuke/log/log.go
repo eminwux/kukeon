@@ -16,10 +16,18 @@
 
 // Package log implements the `kuke log` subcommand. It mirrors `kuke
 // attach`'s flag/arg shape but instead of opening an interactive sbsh
-// session it tails the per-container sbsh capture file. Bytes never
-// traverse the daemon RPC: the daemon validates the Attachable gate and
-// returns the host path of the capture file; this subcommand opens that
-// path directly.
+// session it tails the per-container output stream. Bytes never traverse
+// the daemon RPC: the daemon resolves the host path of the relevant
+// stream and this subcommand opens that path directly.
+//
+// Two paths exist depending on the target container's IO model:
+//
+//   - Attachable containers route output through sbsh, which writes a
+//     tty byte stream to HostCapturePath. `kuke log` tails that file.
+//   - Non-Attachable containers (including kukeond) have the containerd
+//     runtime shim write stdout/stderr to HostLogPath via cio.LogFile.
+//     `kuke log` tails that file. This is gap #4 in
+//     docs/gaps-2026-04-19.md and was implemented per issue #203.
 package log
 
 import (
@@ -65,7 +73,7 @@ func NewLogCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "log",
 		Aliases:       []string{"logs"},
-		Short:         "Tail the sbsh capture file of an Attachable container",
+		Short:         "Tail a container's stdout/stderr stream",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -81,7 +89,7 @@ func NewLogCmd() *cobra.Command {
 	cmd.Flags().String("cell", "", "Cell whose container's capture file to tail")
 	_ = viper.BindPFlag(config.KUKE_LOG_CELL.ViperKey, cmd.Flags().Lookup("cell"))
 	cmd.Flags().String("container", "",
-		"Container within the cell to read (omit to auto-pick the only non-root attachable)")
+		"Container within the cell to read (omit to auto-pick the only non-root container)")
 	_ = viper.BindPFlag(config.KUKE_LOG_CONTAINER.ViperKey, cmd.Flags().Lookup("container"))
 	cmd.Flags().Bool("no-follow", false, "Dump current capture file contents and exit (do not follow)")
 	_ = viper.BindPFlag(config.KUKE_LOG_NO_FOLLOW.ViperKey, cmd.Flags().Lookup("no-follow"))
@@ -123,7 +131,7 @@ func runLog(cmd *cobra.Command, _ []string) error {
 	defer func() { _ = client.Close() }()
 
 	if container == "" {
-		container, err = pickAttachableContainer(cmd.Context(), client, realm, space, stack, cell)
+		container, err = pickLogContainer(cmd.Context(), client, realm, space, stack, cell)
 		if err != nil {
 			return err
 		}
@@ -132,24 +140,27 @@ func runLog(cmd *cobra.Command, _ []string) error {
 	doc := buildContainerDoc(container, realm, space, stack, cell)
 	result, err := client.LogContainer(cmd.Context(), doc)
 	if err != nil {
-		if errors.Is(err, errdefs.ErrAttachNotSupported) {
-			return fmt.Errorf("container %q in cell %q is not attachable: %w", container, cell, err)
-		}
 		if errors.Is(err, errdefs.ErrContainerNotFound) {
 			return fmt.Errorf("container %q not found in cell %q", container, cell)
 		}
 		return err
 	}
-	if result.HostCapturePath == "" {
-		return fmt.Errorf("daemon returned empty HostCapturePath for container %q", container)
+	streamPath := result.HostCapturePath
+	if streamPath == "" {
+		streamPath = result.HostLogPath
+	}
+	if streamPath == "" {
+		return fmt.Errorf("daemon returned no stream path for container %q", container)
 	}
 
 	tail := resolveTail(cmd)
-	if tailErr := tail(cmd.Context(), result.HostCapturePath, cmd.OutOrStdout(), noFollow); tailErr != nil {
+	if tailErr := tail(cmd.Context(), streamPath, cmd.OutOrStdout(), noFollow); tailErr != nil {
 		if errors.Is(tailErr, os.ErrNotExist) {
 			return fmt.Errorf(
-				"cell %q container %q has no capture file at %s",
-				cell, container, result.HostCapturePath,
+				"cell %q container %q has no log file at %s (the runtime shim has not opened it yet — try again after the container produces output)",
+				cell,
+				container,
+				streamPath,
 			)
 		}
 		return tailErr
@@ -201,10 +212,12 @@ func tailFile(ctx context.Context, path string, out io.Writer, noFollow bool) er
 	}
 }
 
-// pickAttachableContainer enumerates the cell's containers and returns the
-// single non-root attachable one. Same shape and semantics as the
-// `kuke attach` picker — both subcommands target the same container set.
-func pickAttachableContainer(
+// pickLogContainer enumerates the cell's containers and returns the single
+// non-root one — Attachable or not, since `kuke log` is meaningful for both
+// IO models (sbsh-capture for Attachable, cio.LogFile for non-Attachable).
+// This is the diff vs the `kuke attach` picker, which still requires
+// Attachable=true.
+func pickLogContainer(
 	ctx context.Context,
 	client kukeonv1.Client,
 	realm, space, stack, cell string,
@@ -217,7 +230,7 @@ func pickAttachableContainer(
 	candidates := make([]string, 0, len(specs))
 	for i := range specs {
 		spec := specs[i]
-		if spec.Root || !spec.Attachable {
+		if spec.Root {
 			continue
 		}
 		candidates = append(candidates, spec.ID)
