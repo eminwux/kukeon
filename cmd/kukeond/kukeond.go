@@ -155,23 +155,44 @@ func bindEnvVars() {
 // without it, `viper.Set` would override viper's env binding and silently
 // invert env > YAML.
 func applyServerConfiguration(cmd *cobra.Command, spec v1beta1.ServerConfigurationSpec) {
-	flags := cmd.PersistentFlags()
-	if spec.Socket != "" && !flags.Changed("socket") && !envSet(config.KUKEOND_SOCKET) {
+	if spec.Socket != "" && !flagChanged(cmd, "socket") && !envSet(config.KUKEOND_SOCKET) {
 		viper.Set(config.KUKEOND_SOCKET.ViperKey, spec.Socket)
 	}
-	if spec.SocketGID != 0 && !flags.Changed("socket-gid") && !envSet(config.KUKEOND_SOCKET_GID) {
+	if spec.SocketGID != 0 && !flagChanged(cmd, "socket-gid") && !envSet(config.KUKEOND_SOCKET_GID) {
 		viper.Set(config.KUKEOND_SOCKET_GID.ViperKey, spec.SocketGID)
 	}
-	if spec.RunPath != "" && !flags.Changed("run-path") && !envSet(config.KUKEON_ROOT_RUN_PATH) {
+	if spec.RunPath != "" && !flagChanged(cmd, "run-path") && !envSet(config.KUKEON_ROOT_RUN_PATH) {
 		viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, spec.RunPath)
 	}
-	if spec.ContainerdSocket != "" && !flags.Changed("containerd-socket") &&
+	if spec.ContainerdSocket != "" && !flagChanged(cmd, "containerd-socket") &&
 		!envSet(config.KUKEON_ROOT_CONTAINERD_SOCKET) {
 		viper.Set(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey, spec.ContainerdSocket)
 	}
-	if spec.LogLevel != "" && !flags.Changed("log-level") && !envSet(config.KUKEON_ROOT_LOG_LEVEL) {
+	if spec.LogLevel != "" && !flagChanged(cmd, "log-level") && !envSet(config.KUKEON_ROOT_LOG_LEVEL) {
 		viper.Set(config.KUKEON_ROOT_LOG_LEVEL.ViperKey, spec.LogLevel)
 	}
+}
+
+// flagChanged reports whether `--<name>` was explicitly set on the command
+// line. cobra invokes PersistentPreRunE on the leaf subcommand, but kukeond's
+// persistent flags (socket, run-path, etc.) are defined on the root. On the
+// leaf, cmd.PersistentFlags() returns only the leaf's local persistent flag
+// set — it does not include parents' persistent flags — so a direct
+// `cmd.PersistentFlags().Changed("socket")` lookup misses and returns false
+// even when the operator passed `--socket`. cobra merges parent persistent
+// flags into the leaf's cmd.Flags() before PersistentPreRunE runs, so the
+// merged set is the production-correct read; the local PersistentFlags
+// fallback keeps the helper correct in unit tests that pass the root cmd
+// directly without going through Execute. Mirrors the same-named helper in
+// cmd/kuke/kuke.go.
+func flagChanged(cmd *cobra.Command, name string) bool {
+	if f := cmd.Flags().Lookup(name); f != nil && f.Changed {
+		return true
+	}
+	if f := cmd.PersistentFlags().Lookup(name); f != nil && f.Changed {
+		return true
+	}
+	return false
 }
 
 // envSet reports whether the OS env var backing v is present (any value,
