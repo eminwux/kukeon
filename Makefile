@@ -90,3 +90,7 @@ test-e2e: kuke
 tag:
 	git tag -s v$(KUKEON_VERSION) -m "Release version $(KUKEON_VERSION)"
 	git push origin v$(KUKEON_VERSION)
+
+.PHONY: dev-init
+dev-init:
+	./scripts/dev-init.sh
