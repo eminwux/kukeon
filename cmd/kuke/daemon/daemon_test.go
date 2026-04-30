@@ -69,6 +69,21 @@ func TestDaemonCmd_HasKillSubcommand(t *testing.T) {
 	}
 }
 
+func TestDaemonCmd_HasRestartSubcommand(t *testing.T) {
+	cmd := daemon.NewDaemonCmd()
+
+	var found bool
+	for _, sub := range cmd.Commands() {
+		if sub.Name() == "restart" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected `kuke daemon` to register a `restart` subcommand")
+	}
+}
+
 func TestDaemonCmd_HelpRunsWithoutArgs(t *testing.T) {
 	cmd := daemon.NewDaemonCmd()
 	buf := &bytes.Buffer{}
