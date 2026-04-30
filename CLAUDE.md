@@ -23,69 +23,15 @@ The `kukeond` daemon runs inside the **`kuke-system`** realm — specifically as
 
 When a change touches the build path, the daemon, or anything under `/opt/kukeon`, run this end-to-end before opening a PR.
 
-### 1. Tear down the existing runtime
-
-Only the `kuke-system` cell needs to be removed; user-realm data under `/opt/kukeon/default` is left intact. `--no-daemon` because the daemon is what we're tearing down.
+### One-shot: `make dev-init`
 
 ```bash
-sudo kuke kill cell kukeond \
-    --realm kuke-system --space kukeon --stack kukeon \
-    --no-daemon
-
-sudo kuke delete cell kukeond \
-    --realm kuke-system --space kukeon --stack kukeon \
-    --no-daemon
-
-sudo rm -f /run/kukeon/kukeond.sock /run/kukeon/kukeond.pid
+make dev-init
 ```
 
-After these: no containerd tasks in `kuke-system.kukeon.io`, no cell metadata in `/opt/kukeon/kuke-system/kukeon/kukeon/`, `/run/kukeon/` empty.
+`scripts/dev-init.sh` composes the full re-bootstrap loop: `make kuke` + `kukeond` symlink, `docker build` of `kukeon-local:dev`, `kuke daemon reset` of the prior cell, `kuke image load --from-docker` of the freshly built image into the `kuke-system` realm, `kuke init --kukeond-image docker.io/library/kukeon-local:dev`, and the daemon-parity check below. The script is idempotent — re-running on a healthy host produces a clean re-bootstrap.
 
-### 2. Build the binaries
-
-```bash
-rm -f kuke kukeond
-make kuke           # produces ./kuke
-ln -sf kuke kukeond # kukeond is argv[0]-dispatched from the same binary
-```
-
-### 3. Build and load the local `kukeond` image (no registry push)
-
-```bash
-docker build --build-arg VERSION=v0.0.0-dev -t kukeon-local:dev .
-docker tag kukeon-local:dev docker.io/library/kukeon-local:dev
-
-sudo ./kuke image load --from-docker kukeon-local:dev --realm kuke-system --no-daemon
-
-sudo ctr -n kuke-system.kukeon.io images ls | grep kukeon-local
-```
-
-### 4. Run `kuke init`
-
-```bash
-sudo ./kuke init --kukeond-image docker.io/library/kukeon-local:dev
-```
-
-Expected tail of output:
-
-```
-    - cell "kukeond": created (image docker.io/library/kukeon-local:dev)
-    - cell cgroup: created
-    - cell root container cgroup: created
-    - cell containers cgroup: created
-kukeond is ready (unix:///run/kukeon/kukeond.sock)
-```
-
-### 5. Daemon-parity check (the regression guard)
-
-Both commands must return identical output. If the daemon sees a different view of `/opt/kukeon` than the in-process controller, only the `--no-daemon` list will be populated — that's the bind-mount regression this check catches.
-
-```bash
-sudo ./kuke get realms              # goes through kukeond over the unix socket
-sudo ./kuke get realms --no-daemon  # bypasses kukeond; reads /opt/kukeon in-process
-```
-
-Expected (identical) output:
+The daemon-parity tail of the output (the regression guard) must read:
 
 ```
 NAME         NAMESPACE              STATE  CGROUP
@@ -94,7 +40,47 @@ default      kukeon.io              Ready  /kukeon/default
 kuke-system  kuke-system.kukeon.io  Ready  /kukeon/kuke-system
 ```
 
+Both `kuke get realms` and `kuke get realms --no-daemon` must produce that output. If only the `--no-daemon` list is populated, the daemon's view of `/opt/kukeon` diverged from the in-process controller — that's the bind-mount regression this check catches.
+
 **If your change touches anything the daemon reads, this check must be in the PR's test plan.** Reviewer agent will flag PRs that miss it.
+
+### Manual phases (fallback)
+
+To run individual phases by hand — e.g. while debugging a single phase — invoke them in order:
+
+1. **Tear down the existing runtime.** `sudo ./kuke daemon reset` stops + deletes the prior `kukeond` cell and clears `/run/kukeon/kukeond.{sock,pid}`. User-realm data under `/opt/kukeon/default` is left intact, so `kuke purge --cascade` on `default` can never take down the daemon. Pass `--purge-system` to additionally wipe `/opt/kukeon/kuke-system` for a fully clean re-bootstrap.
+
+2. **Build the binaries.**
+
+   ```bash
+   rm -f kuke kukeond
+   make kuke           # produces ./kuke
+   ln -sf kuke kukeond # kukeond is argv[0]-dispatched from the same binary
+   ```
+
+3. **Build and load the local `kukeond` image (no registry push).**
+
+   ```bash
+   docker build --build-arg VERSION=v0.0.0-dev -t kukeon-local:dev .
+   sudo ./kuke image load --from-docker kukeon-local:dev --realm kuke-system --no-daemon
+   sudo ctr -n kuke-system.kukeon.io images ls | grep kukeon-local
+   ```
+
+4. **Run `kuke init`.**
+
+   ```bash
+   sudo ./kuke init --kukeond-image docker.io/library/kukeon-local:dev
+   ```
+
+   Expected tail:
+
+   ```
+       - cell "kukeond": created (image docker.io/library/kukeon-local:dev)
+       - cell cgroup: created
+       - cell root container cgroup: created
+       - cell containers cgroup: created
+   kukeond is ready (unix:///run/kukeon/kukeond.sock)
+   ```
 
 ### Inspecting the running daemon
 
