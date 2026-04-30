@@ -109,6 +109,51 @@ func TestKuke_Start_Help(t *testing.T) {
 	}
 }
 
+// TestKuke_Daemon_Help tests `kuke daemon -h` and the `start` subcommand help.
+func TestKuke_Daemon_Help(t *testing.T) {
+	t.Parallel()
+
+	for _, args := range [][]string{
+		{"daemon", "-h"},
+		{"daemon", "--help"},
+		{"daemon", "start", "-h"},
+		{"daemon", "start", "--help"},
+	} {
+		exitCode, stdout, stderr := runBinary(t, nil, kuke, args...)
+		if exitCode != 0 {
+			t.Fatalf("expected exit code 0 for %v, got %d (stderr: %s)", args, exitCode, string(stderr))
+		}
+		if len(stdout) == 0 {
+			t.Fatalf("expected non-empty output for %v", args)
+		}
+	}
+}
+
+// TestKuke_DaemonStart_Uninitialized verifies that `kuke daemon start` fails
+// with a friendly "host not initialized" message when the run-path has no
+// kukeond cell metadata. Running against a fresh tmp run-path simulates the
+// no-init state without needing to tear down a real init (which would
+// require docker / kukeond image staging).
+func TestKuke_DaemonStart_Uninitialized(t *testing.T) {
+	t.Parallel()
+
+	runPath := getRandomRunPath(t)
+	mkdirRunPath(t, runPath)
+
+	args := append(buildKukeRunPathArgs(runPath), "daemon", "start")
+	exitCode, stdout, stderr := runBinary(t, nil, kuke, args...)
+	if exitCode == 0 {
+		t.Fatalf(
+			"expected non-zero exit code on uninitialized host; stdout=%s stderr=%s",
+			string(stdout), string(stderr),
+		)
+	}
+	combined := string(stdout) + string(stderr)
+	if !strings.Contains(combined, "kuke init") {
+		t.Fatalf("expected error to mention `kuke init`, got: %s", combined)
+	}
+}
+
 // TestKuke_Stop_Help tests kuke stop help.
 func TestKuke_Stop_Help(t *testing.T) {
 	t.Parallel()
