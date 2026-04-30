@@ -23,6 +23,7 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
@@ -92,6 +93,82 @@ func TestApplyServerConfigurationFlagOverridesConfig(t *testing.T) {
 
 	if got := viper.GetString(config.KUKEOND_SOCKET.ViperKey); got != "/run/kukeon/from-flag.sock" {
 		t.Errorf("Socket flag override lost: got %q, want %q", got, "/run/kukeon/from-flag.sock")
+	}
+}
+
+// TestApplyServerConfigurationFlagOverridesConfigViaExecute is the regression
+// guard for issue #210. cobra invokes PersistentPreRunE on the leaf
+// subcommand, but kukeond's persistent flags live on the root; before the
+// fix, applyServerConfiguration read cmd.PersistentFlags() on the leaf,
+// which does not include the parent's persistent flags, so the flag-changed
+// guard never fired and YAML silently overrode `--socket`. This test drives
+// the full cobra dispatch (cmd.Execute with the "serve" leaf path) so the
+// production code path is exercised — the sibling test above passes the
+// root cmd directly and would not catch this regression.
+func TestApplyServerConfigurationFlagOverridesConfigViaExecute(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	viper.Reset()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "kukeond.yaml")
+	yamlBody := []byte(`apiVersion: v1beta1
+kind: ServerConfiguration
+metadata:
+  name: default
+spec:
+  socket: /run/kukeon/from-config.sock
+  socketGID: 4242
+  runPath: /opt/kukeon-from-config
+  containerdSocket: /run/containerd/from-config.sock
+  logLevel: warn
+`)
+	if err := os.WriteFile(cfgPath, yamlBody, 0o600); err != nil {
+		t.Fatalf("write tmp ServerConfiguration: %v", err)
+	}
+
+	cmd, err := NewKukeondCmd()
+	if err != nil {
+		t.Fatalf("NewKukeondCmd() error = %v", err)
+	}
+	// Stub the serve leaf's RunE so Execute does not start the daemon.
+	// PersistentPreRunE still fires — that is the production path that
+	// dispatches applyServerConfiguration with cmd = leaf.
+	for _, sub := range cmd.Commands() {
+		if sub.Use == "serve" {
+			sub.RunE = func(*cobra.Command, []string) error { return nil }
+		}
+	}
+
+	cmd.SetArgs([]string{
+		"serve",
+		"--configuration", cfgPath,
+		"--socket", "/run/kukeon/from-flag.sock",
+		"--socket-gid", "1234",
+		"--run-path", "/opt/kukeon-from-flag",
+		"--containerd-socket", "/run/containerd/from-flag.sock",
+		"--log-level", "debug",
+	})
+	if execErr := cmd.Execute(); execErr != nil {
+		t.Fatalf("cmd.Execute() error = %v", execErr)
+	}
+
+	if got := viper.GetString(config.KUKEOND_SOCKET.ViperKey); got != "/run/kukeon/from-flag.sock" {
+		t.Errorf("Socket flag override lost via leaf-cmd dispatch: got %q, want %q",
+			got, "/run/kukeon/from-flag.sock")
+	}
+	if got := viper.GetInt(config.KUKEOND_SOCKET_GID.ViperKey); got != 1234 {
+		t.Errorf("SocketGID flag override lost via leaf-cmd dispatch: got %d, want %d", got, 1234)
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey); got != "/opt/kukeon-from-flag" {
+		t.Errorf("RunPath flag override lost via leaf-cmd dispatch: got %q, want %q",
+			got, "/opt/kukeon-from-flag")
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey); got != "/run/containerd/from-flag.sock" {
+		t.Errorf("ContainerdSocket flag override lost via leaf-cmd dispatch: got %q, want %q",
+			got, "/run/containerd/from-flag.sock")
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_LOG_LEVEL.ViperKey); got != "debug" {
+		t.Errorf("LogLevel flag override lost via leaf-cmd dispatch: got %q, want %q", got, "debug")
 	}
 }
 
