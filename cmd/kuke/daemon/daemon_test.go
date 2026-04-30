@@ -54,6 +54,21 @@ func TestDaemonCmd_HasStopSubcommand(t *testing.T) {
 	}
 }
 
+func TestDaemonCmd_HasKillSubcommand(t *testing.T) {
+	cmd := daemon.NewDaemonCmd()
+
+	var found bool
+	for _, sub := range cmd.Commands() {
+		if sub.Name() == "kill" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected `kuke daemon` to register a `kill` subcommand")
+	}
+}
+
 func TestDaemonCmd_HelpRunsWithoutArgs(t *testing.T) {
 	cmd := daemon.NewDaemonCmd()
 	buf := &bytes.Buffer{}
