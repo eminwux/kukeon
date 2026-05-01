@@ -603,6 +603,12 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 			fields...,
 		)
 
+		if err = r.attachablePostCreateChown(containerSpec); err != nil {
+			return intmodel.Cell{}, fmt.Errorf(
+				"failed to chown attachable tty dir for %s: %w", ctrContainerID, err,
+			)
+		}
+
 		// Use container name with UUID for containerd operations
 		specWithNamespaces := ctr.JoinContainerNamespaces(
 			ctr.ContainerSpec{ID: ctrContainerID},
@@ -832,6 +838,12 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (intmodel.
 		"created container",
 		fields...,
 	)
+
+	if err = r.attachablePostCreateChown(*foundContainerSpec); err != nil {
+		return intmodel.Cell{}, fmt.Errorf(
+			"failed to chown attachable tty dir for %s: %w", containerdID, err,
+		)
+	}
 
 	// Start container with namespace paths
 	specWithNamespaces := ctr.JoinContainerNamespaces(

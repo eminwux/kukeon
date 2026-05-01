@@ -1374,6 +1374,11 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				)
 				return nil, fmt.Errorf("failed to create container %s: %w", containerdID, createErr)
 			}
+			if chownErr := r.attachablePostCreateChown(containerSpec); chownErr != nil {
+				return nil, fmt.Errorf(
+					"failed to chown attachable tty dir for %s: %w", containerdID, chownErr,
+				)
+			}
 		}
 	}
 
@@ -1821,6 +1826,11 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 					"created container from cell",
 					successFields...,
 				)
+				if chownErr := r.attachablePostCreateChown(containerSpec); chownErr != nil {
+					return nil, fmt.Errorf(
+						"failed to chown attachable tty dir for %s: %w", containerdID, chownErr,
+					)
+				}
 			}
 		} else {
 			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)

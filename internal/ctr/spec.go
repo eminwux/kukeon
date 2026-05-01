@@ -130,6 +130,30 @@ func (c *client) applySpecOpts(container containerd.Container, opts []oci.SpecOp
 	return nil
 }
 
+// ContainerProcessUID returns the resolved process.User.UID from the
+// container's OCI runtime spec. The spec carries the post-resolution UID
+// after CreateContainerFromSpec has run — containerd's WithImageConfig
+// (and any caller-supplied WithUser) populates Process.User by parsing the
+// image's USER directive against the rootfs's /etc/passwd, so this returns
+// the actual numeric uid even when the image specified a username like
+// "claude". Returns an error if the spec cannot be loaded or has no
+// Process — both indicate the container was not created or was destroyed
+// between create and this call.
+func (c *client) ContainerProcessUID(container containerd.Container) (uint32, error) {
+	if container == nil {
+		return 0, errors.New("container is nil")
+	}
+	nsCtx := c.namespaceCtx()
+	spec, err := container.Spec(nsCtx)
+	if err != nil {
+		return 0, fmt.Errorf("read container spec: %w", err)
+	}
+	if spec == nil || spec.Process == nil {
+		return 0, errors.New("container spec has no Process")
+	}
+	return spec.Process.User.UID, nil
+}
+
 func withUpdatedSpec(spec *oci.Spec) containerd.UpdateContainerOpts {
 	return func(_ context.Context, _ *containerd.Client, c *containers.Container) error {
 		if spec == nil {

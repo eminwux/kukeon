@@ -104,6 +104,7 @@ func NewControllerExec(ctx context.Context, logger *slog.Logger, opts Options) *
 			ContainerdSocket:   opts.ContainerdSocket,
 			RunPath:            opts.RunPath,
 			ForceRegenerateCNI: opts.ForceRegenerateCNI,
+			KukeonGroupGID:     opts.KukeondSocketGID,
 		}),
 	}
 }
