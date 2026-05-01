@@ -86,6 +86,13 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Controller: controller.Options{
 			RunPath:          runPath,
 			ContainerdSocket: viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
+			// Forward the kukeon group GID into the runner so per-container
+			// Attachable tty directories created by daemon-mediated apply/start
+			// inherit the same group-traversal layout `kuke init` applies to
+			// /opt/kukeon. Without this the runner sees KukeonGroupGID=0 and
+			// falls back to 0700 root-only — regressing #258 repro A under the
+			// daemon path even when --socket-gid was set.
+			KukeondSocketGID: socketGID,
 		},
 	}
 

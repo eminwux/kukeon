@@ -149,6 +149,12 @@ type Options struct {
 	// even when one is present and its bridge name matches SafeBridgeName. Set by
 	// `kuke init --force-regenerate-cni` as an operator escape hatch.
 	ForceRegenerateCNI bool
+	// KukeonGroupGID, when non-zero, is the numeric GID of the kukeon system
+	// group. The runner uses it to chown the host-side per-container tty
+	// directory created for Attachable containers, so that members of the
+	// kukeon group can reach the per-container sbsh socket via the same
+	// group-traversal path that `kuke init` sets up on /opt/kukeon.
+	KukeonGroupGID int
 }
 
 func NewRunner(ctx context.Context, logger *slog.Logger, opts Options) Runner {
