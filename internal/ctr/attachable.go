@@ -18,6 +18,7 @@ package ctr
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/containerd/containerd/v2/core/containers"
 	"github.com/containerd/containerd/v2/pkg/oci"
@@ -67,6 +68,18 @@ const (
 	// AttachableProfileName is the profile.metadata.name written into the
 	// generated TerminalProfile and passed to `sbsh terminal --profile`.
 	AttachableProfileName = "kukeon"
+
+	// AttachableSocketMode is the octal mode passed to `sbsh terminal
+	// --socket-mode` when SocketGID is configured. 0660 = rw for owner
+	// (the container's runtime uid) + rw for group (the kukeon group), no
+	// world. Combined with `--socket-gid <kukeonGID>` this lets a non-root
+	// member of the kukeon group on the host `connect()` to the per-
+	// container sbsh control socket. Linux requires write permission on a
+	// socket inode to connect — group-readable alone is not enough.
+	//
+	// Available since sbsh v0.10.0; older sbsh binaries reject the flag and
+	// the wrapper omits it when the kukeon group GID is unset.
+	AttachableSocketMode = "0660"
 )
 
 // AttachableInjection carries the host-side paths needed to wrap a container's
@@ -90,6 +103,18 @@ type AttachableInjection struct {
 	// the profile YAML to <HostTTYDir>/AttachableProfileFile before the
 	// container starts; the wrapper itself never touches the filesystem.
 	UseProfile bool
+
+	// SocketGID, when non-zero, is the numeric GID of the kukeon system
+	// group on the host. The wrapper emits `sbsh terminal --socket-mode
+	// AttachableSocketMode --socket-gid <SocketGID>` so the per-container
+	// control socket is created with mode 0660 owned by the kukeon group,
+	// matching the group-traversal layout on the parent tty/ directory and
+	// `/opt/kukeon`. Zero (the default) preserves sbsh's hard-coded 0o600
+	// owner-only behavior — the legacy contract for callers that have no
+	// kukeon group configured. Requires sbsh v0.10.0 or later inside the
+	// container; the staged binary at /.kukeon/bin/sbsh must support the
+	// `--socket-mode` and `--socket-gid` flags.
+	SocketGID int
 }
 
 // withAttachableMounts adds the two bind mounts that make sbsh reachable from
@@ -125,7 +150,7 @@ func withAttachableMounts(inj AttachableInjection) oci.SpecOpts {
 // ENTRYPOINT/CMD) so the wrapped command line is whatever would have run
 // otherwise.
 //
-// When useProfile is true, the wrapper additionally points sbsh at the
+// When inj.UseProfile is true, the wrapper additionally points sbsh at the
 // per-container profile YAML the runner pre-wrote into HostTTYDir, so
 // the generated prompt and onInit scripts take effect on first attach.
 // `--profiles-dir` is a global flag on `sbsh` and must precede the
@@ -133,25 +158,32 @@ func withAttachableMounts(inj AttachableInjection) oci.SpecOpts {
 // `terminal` and must follow it. Swapping either placement makes sbsh
 // reject the invocation with `unknown flag`.
 //
+// When inj.SocketGID > 0, the wrapper also passes `--socket-mode 0660
+// --socket-gid <SocketGID>` to `sbsh terminal` so the per-container
+// control socket lands as 0660 owned by the kukeon group — without it,
+// sbsh's default 0o600 root-owned socket is unreachable for non-root
+// kukeon-group operators on the host even when the parent tty/ directory
+// is group-traversable. Both flags require sbsh v0.10.0 or later.
+//
 // OCI semantics: process.args is the merged "ENTRYPOINT + CMD" by the time
 // this opt runs (containerd's WithImageConfigArgs has already resolved image
 // defaults and any user override of either). We just wrap the result, which
 // is what Kubernetes failed to do correctly for years and what this issue
 // explicitly tests.
-func withAttachableArgsWrap(useProfile bool) oci.SpecOpts {
+func withAttachableArgsWrap(inj AttachableInjection) oci.SpecOpts {
 	return func(_ context.Context, _ oci.Client, _ *containers.Container, s *runtimespec.Spec) error {
 		if s.Process == nil {
 			s.Process = &runtimespec.Process{}
 		}
 		original := append([]string(nil), s.Process.Args...)
 		wrapped := []string{AttachableBinaryPath}
-		if useProfile {
+		if inj.UseProfile {
 			wrapped = append(wrapped,
 				"--profiles-dir", AttachableTTYDir,
 			)
 		}
 		wrapped = append(wrapped, AttachableSubcommand)
-		if useProfile {
+		if inj.UseProfile {
 			wrapped = append(wrapped, "--profile", AttachableProfileName)
 		}
 		wrapped = append(wrapped,
@@ -159,8 +191,14 @@ func withAttachableArgsWrap(useProfile bool) oci.SpecOpts {
 			"--socket", AttachableSocketPath,
 			"--capture-file", AttachableCapturePath,
 			"--log-file", AttachableLogfilePath,
-			"--",
 		)
+		if inj.SocketGID > 0 {
+			wrapped = append(wrapped,
+				"--socket-mode", AttachableSocketMode,
+				"--socket-gid", strconv.Itoa(inj.SocketGID),
+			)
+		}
+		wrapped = append(wrapped, "--")
 		s.Process.Args = append(wrapped, original...)
 		return nil
 	}

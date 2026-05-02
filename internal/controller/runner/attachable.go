@@ -17,8 +17,10 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/eminwux/kukeon/internal/ctr"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -82,16 +84,28 @@ func (r *Exec) attachableBuildOpts(spec intmodel.ContainerSpec) ([]ctr.BuildOpti
 		spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName,
 		spec.ID,
 	)
-	if err := os.MkdirAll(ttyDir, 0o0700); err != nil {
+	mode, gid := attachableTTYDirInitialPerms(r.opts.KukeonGroupGID)
+	if err := os.MkdirAll(ttyDir, mode); err != nil {
 		return nil, err
 	}
 	// MkdirAll leaves any pre-existing directory's mode intact and a fresh
-	// dir's mode is filtered by umask, so apply the desired mode explicitly.
-	mode, gid := attachableTTYDirInitialPerms(r.opts.KukeonGroupGID)
+	// dir's mode is filtered by umask, so apply the desired mode explicitly
+	// to both the leaf tty/ dir and its per-container parent. The parent
+	// holds the future per-container metadata.json and is the dir host-side
+	// kuke attach has to traverse to reach the socket inside tty/; a
+	// pre-existing 0o2700 from a daemon predating this fix would otherwise
+	// leave it unreachable to kukeon-group operators.
+	containerDir := filepath.Dir(ttyDir)
+	if err := os.Chmod(containerDir, mode); err != nil {
+		return nil, fmt.Errorf("chmod %q to %v: %w", containerDir, mode, err)
+	}
 	if err := os.Chmod(ttyDir, mode); err != nil {
 		return nil, fmt.Errorf("chmod %q to %v: %w", ttyDir, mode, err)
 	}
 	if gid > 0 {
+		if err := os.Chown(containerDir, 0, gid); err != nil {
+			return nil, fmt.Errorf("chown %q to root:%d: %w", containerDir, gid, err)
+		}
 		if err := os.Chown(ttyDir, 0, gid); err != nil {
 			return nil, fmt.Errorf("chown %q to root:%d: %w", ttyDir, gid, err)
 		}
@@ -114,6 +128,11 @@ func (r *Exec) attachableBuildOpts(spec intmodel.ContainerSpec) ([]ctr.BuildOpti
 			SbshBinaryPath: binaryPath,
 			HostTTYDir:     ttyDir,
 			UseProfile:     useProfile,
+			// Plumb the kukeon group GID so the in-container sbsh wrapper
+			// creates the control socket as 0660 root:kukeon — matching the
+			// host-side traversal layout `kuke init` sets up on /opt/kukeon.
+			// Zero falls back to sbsh's hard-coded 0600 owner-only default.
+			SocketGID: r.opts.KukeonGroupGID,
 		}),
 	}, nil
 }
@@ -160,6 +179,27 @@ func (r *Exec) attachablePostCreateChown(spec intmodel.ContainerSpec) error {
 	gid := r.opts.KukeonGroupGID
 	if chownErr := os.Chown(ttyDir, int(uid), gid); chownErr != nil {
 		return fmt.Errorf("chown %q to (uid=%d, gid=%d): %w", ttyDir, uid, gid, chownErr)
+	}
+	// Chown the per-container profile.yaml the runner pre-wrote inside
+	// ttyDir so the in-container sbsh wrapper (running as the resolved
+	// container uid) can open it. The file was created at 0o600 owned by
+	// the daemon (root); without this chown sbsh's profile loader fails
+	// with "permission denied", returns no profiles, and exits with
+	// "Failed to build terminal spec" before ever calling Listen — and the
+	// host-side socket inode the kukeon-group operator needs is never
+	// created. The chmod stays 0o600: the container uid is now the file
+	// owner, so it can read; group=kukeon is preserved by the parent
+	// dir's setgid bit so a future host-side reader path stays consistent.
+	profilePath := filepath.Join(ttyDir, ctr.AttachableProfileFile)
+	switch chownErr := os.Chown(profilePath, int(uid), gid); {
+	case chownErr == nil:
+	case errors.Is(chownErr, os.ErrNotExist):
+		// Container declared no tty block: the runner skipped writing
+		// profile.yaml and there is nothing to chown. The wrapper also
+		// runs without --profile in that case, so sbsh does not look for
+		// the file; this branch is the legacy attachable contract.
+	default:
+		return fmt.Errorf("chown %q to (uid=%d, gid=%d): %w", profilePath, uid, gid, chownErr)
 	}
 	return nil
 }
