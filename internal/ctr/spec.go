@@ -284,7 +284,7 @@ func BuildContainerSpec(
 		specOpts = append(
 			specOpts,
 			withAttachableMounts(opts.attachable),
-			withAttachableArgsWrap(opts.attachable.UseProfile),
+			withAttachableArgsWrap(opts.attachable),
 		)
 	}
 

@@ -313,6 +313,77 @@ func TestBuildContainerSpec_AttachableTrue_EmptyImageArgs(t *testing.T) {
 	}
 }
 
+// TestBuildContainerSpec_AttachableTrue_SocketFlagsEmittedWithGID covers the
+// kukeon-group attach end-to-end fix: when AttachableInjection.SocketGID is
+// non-zero, the wrapper appends `--socket-mode 0660 --socket-gid <gid>` to
+// the `sbsh terminal` invocation, immediately before the `--` workload
+// separator. Without these flags sbsh's control socket lands at 0o600
+// root-only and is unreachable to non-root members of the kukeon group on
+// the host even when the parent tty/ directory is group-traversable —
+// Linux requires write permission on the socket inode to connect.
+func TestBuildContainerSpec_AttachableTrue_SocketFlagsEmittedWithGID(t *testing.T) {
+	in := intmodel.ContainerSpec{
+		ID:         "c1",
+		Image:      "registry.eminwux.com/busybox:latest",
+		CellName:   "cell",
+		SpaceName:  "space",
+		RealmName:  "realm",
+		StackName:  "stack",
+		Attachable: true,
+	}
+	inj := ctr.AttachableInjection{
+		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
+		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
+		SocketGID:      986,
+	}
+	spec := applyBuiltSpecWith(t, in, []string{"/bin/sh"}, ctr.WithAttachableInjection(inj))
+
+	want := []string{
+		ctr.AttachableBinaryPath,
+		ctr.AttachableSubcommand,
+		"--run-path", ctr.AttachableTTYDir,
+		"--socket", ctr.AttachableSocketPath,
+		"--capture-file", ctr.AttachableCapturePath,
+		"--log-file", ctr.AttachableLogfilePath,
+		"--socket-mode", ctr.AttachableSocketMode,
+		"--socket-gid", "986",
+		"--",
+		"/bin/sh",
+	}
+	if !reflect.DeepEqual(spec.Process.Args, want) {
+		t.Fatalf("Process.Args = %v\nwant %v", spec.Process.Args, want)
+	}
+}
+
+// TestBuildContainerSpec_AttachableTrue_NoSocketFlagsWhenGIDUnset locks the
+// legacy fallback: with no kukeon group GID configured (SocketGID = 0) the
+// wrapper omits `--socket-mode` and `--socket-gid` so sbsh applies its
+// hard-coded 0o600 owner-only default — a host without sysuser.EnsureUserGroup
+// has no group to delegate access to, and we must not accidentally invoke
+// flags introduced in sbsh v0.10.0 against an older staged binary either.
+func TestBuildContainerSpec_AttachableTrue_NoSocketFlagsWhenGIDUnset(t *testing.T) {
+	in := intmodel.ContainerSpec{
+		ID:         "c1",
+		Image:      "registry.eminwux.com/busybox:latest",
+		CellName:   "cell",
+		SpaceName:  "space",
+		RealmName:  "realm",
+		StackName:  "stack",
+		Attachable: true,
+	}
+	inj := ctr.AttachableInjection{
+		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
+		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
+	}
+	spec := applyBuiltSpecWith(t, in, []string{"/bin/sh"}, ctr.WithAttachableInjection(inj))
+
+	for _, arg := range spec.Process.Args {
+		if arg == "--socket-mode" || arg == "--socket-gid" {
+			t.Fatalf("expected no socket flags when SocketGID=0, got %v", spec.Process.Args)
+		}
+	}
+}
+
 func findMount(spec *runtimespec.Spec, dest string) *runtimespec.Mount {
 	for i := range spec.Mounts {
 		if spec.Mounts[i].Destination == dest {

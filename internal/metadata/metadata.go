@@ -27,6 +27,14 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
+// metadataDirMode is the mode applied to the parent directory of a
+// metadata file: setgid + rwx-r-x---. The setgid bit lets newly-created
+// children inherit the kukeon group, matching the `/opt/kukeon` layout
+// `kuke init` sets up via sysuser.ChownTreeAndChmod. Group-traverse +
+// no-world-access keeps the host-side path reachable for kukeon-group
+// operators without exposing it to anyone else.
+const metadataDirMode os.FileMode = os.ModeSetgid | 0o0750
+
 func existsFilePath(filepath string) bool {
 	_, err := os.Stat(filepath)
 	if err == nil {
@@ -52,9 +60,22 @@ func WriteMetadata(ctx context.Context, logger *slog.Logger, metadata any, file 
 		return nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+	parentDir := filepath.Dir(file)
+	if err := os.MkdirAll(parentDir, metadataDirMode); err != nil {
 		logger.ErrorContext(ctx, "failed to write metadata dir", "file", file, "error", err)
 		return fmt.Errorf("mkdir terminal dir: %w", err)
+	}
+	// MkdirAll honors only the rwx permission bits — Linux silently strips
+	// the explicit setgid bit unless it's inherited from the parent (and
+	// /tmp on test hosts has no setgid, breaking the inheritance chain).
+	// Apply it after the fact so a newly-created cell or per-container dir
+	// is host-side traversable for the kukeon group, matching the layout
+	// `kuke init` sets up on /opt/kukeon. Existing dirs are re-chmoded to
+	// the canonical mode — idempotent and self-healing for hosts upgraded
+	// from a daemon that wrote 0o2700 (issue #260 gate 2).
+	if err := os.Chmod(parentDir, metadataDirMode|os.ModeSetgid); err != nil {
+		logger.ErrorContext(ctx, "failed to chmod metadata dir", "dir", parentDir, "error", err)
+		return fmt.Errorf("chmod metadata dir: %w", err)
 	}
 
 	err := writeMetadataFile(ctx, logger, metadata, file)
