@@ -355,11 +355,7 @@ func (r *Exec) refreshContainerStatus(cell intmodel.Cell, containerSpec *intmode
 // see up-to-date per-container state.
 func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, bool, error) {
 	originalStatus := cell.Status
-	newStatus := intmodel.CellStatus{
-		State:      intmodel.CellStateUnknown,
-		CgroupPath: originalStatus.CgroupPath,
-		Network:    originalStatus.Network,
-	}
+	newState := intmodel.CellStateUnknown
 
 	cgroupExists, cgroupErr := r.ExistsCgroup(cell)
 	switch {
@@ -367,20 +363,19 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, bool, error) {
 		r.logger.DebugContext(r.ctx, "failed to check cell cgroup",
 			"cell", cell.Metadata.Name, "error", cgroupErr)
 	case !cgroupExists:
-		newStatus.State = intmodel.CellStateUnknown
+		newState = intmodel.CellStateUnknown
 	default:
-		newStatus.State = r.deriveCellStateFromRootContainer(cell)
+		newState = r.deriveCellStateFromRootContainer(cell)
 	}
 
 	if err := r.populateCellContainerStatuses(&cell); err != nil {
 		r.logger.DebugContext(r.ctx, "populate container statuses failed",
 			"cell", cell.Metadata.Name, "error", err)
 	}
-	cell.Status.State = newStatus.State
-	cell.Status.CgroupPath = newStatus.CgroupPath
+	cell.Status.State = newState
 
 	updated := false
-	if originalStatus.State != cell.Status.State || originalStatus.CgroupPath != cell.Status.CgroupPath {
+	if originalStatus.State != cell.Status.State {
 		updated = true
 	}
 	if !containerStatusesEqual(originalStatus.Containers, cell.Status.Containers) {

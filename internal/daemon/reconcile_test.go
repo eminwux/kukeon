@@ -106,7 +106,9 @@ func TestServer_ReconcileLoopStopsWithContext(t *testing.T) {
 
 func newTestServer(t *testing.T, interval time.Duration) *Server {
 	t.Helper()
-	return newTestServerWithCtx(t, context.Background(), interval)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	return newTestServerWithCtx(t, ctx, interval)
 }
 
 func newTestServerWithCtx(t *testing.T, ctx context.Context, interval time.Duration) *Server {

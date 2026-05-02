@@ -73,6 +73,12 @@ type Server struct {
 	// it before Serve so they exercise the ticker without a real controller.
 	reconcileFn func() (controller.ReconcileResult, error)
 
+	// stopCh is closed by Stop to terminate the reconcile loop independently
+	// of s.ctx; loopWG lets Stop block until the loop exits, so core.Close
+	// never races an in-flight reconcile pass.
+	stopCh chan struct{}
+	loopWG sync.WaitGroup
+
 	mu       sync.Mutex
 	listener net.Listener
 	closed   bool
@@ -89,6 +95,7 @@ func NewServer(ctx context.Context, logger *slog.Logger, opts Options) *Server {
 		logger: logger,
 		opts:   opts,
 		core:   core,
+		stopCh: make(chan struct{}),
 	}
 	srv.reconcileFn = srv.core.ReconcileCells
 	return srv
@@ -157,15 +164,20 @@ func (s *Server) startReconcileLoop() {
 	}
 	s.logger.InfoContext(s.ctx, "starting reconcile loop",
 		"interval", s.opts.ReconcileInterval)
+	s.loopWG.Add(1)
 	go s.runReconcileLoop(s.opts.ReconcileInterval)
 }
 
 func (s *Server) runReconcileLoop(interval time.Duration) {
+	defer s.loopWG.Done()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-s.ctx.Done():
+			s.logger.InfoContext(s.ctx, "reconcile loop stopped")
+			return
+		case <-s.stopCh:
 			s.logger.InfoContext(s.ctx, "reconcile loop stopped")
 			return
 		case <-ticker.C:
@@ -235,6 +247,12 @@ func (s *Server) Stop() error {
 	listener := s.listener
 	s.listener = nil
 	s.mu.Unlock()
+
+	// Signal the reconcile loop to exit and wait for any in-flight pass to
+	// return before tearing down the controller — otherwise a tick already
+	// inside reconcileFn would race s.core.Close.
+	close(s.stopCh)
+	s.loopWG.Wait()
 
 	var firstErr error
 	if listener != nil {
