@@ -17,11 +17,13 @@
 package kukeond
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/internal/controller"
@@ -78,11 +80,14 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		socketMode = socketModeGroupReadable
 	}
 
+	reconcileInterval := parseReconcileInterval(logger, cmd.Context())
+
 	opts := daemon.Options{
-		SocketPath: socketPath,
-		SocketMode: socketMode,
-		SocketGID:  socketGID,
-		PIDFile:    filepath.Join(runPath, "kukeond.pid"),
+		SocketPath:        socketPath,
+		SocketMode:        socketMode,
+		SocketGID:         socketGID,
+		PIDFile:           filepath.Join(runPath, "kukeond.pid"),
+		ReconcileInterval: reconcileInterval,
 		Controller: controller.Options{
 			RunPath:          runPath,
 			ContainerdSocket: viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
@@ -118,4 +123,26 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	logger.InfoContext(cmd.Context(), "kukeond stopped")
 	return nil
+}
+
+// parseReconcileInterval reads the resolved reconcile-interval string out of
+// viper and parses it as a Go time.Duration. An empty value or a parse
+// failure logs a warning and falls back to the in-binary default so a typo
+// in the YAML never blocks the daemon from starting. A zero or negative
+// duration disables the loop on purpose — Server.startReconcileLoop honors
+// that and emits a "reconcile loop disabled" line.
+func parseReconcileInterval(logger *slog.Logger, ctx context.Context) time.Duration {
+	raw := viper.GetString(config.KUKEOND_RECONCILE_INTERVAL.ViperKey)
+	if raw == "" {
+		raw = config.KUKEOND_RECONCILE_INTERVAL.Default
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		fallback, _ := time.ParseDuration(config.KUKEOND_RECONCILE_INTERVAL.Default)
+		logger.WarnContext(ctx,
+			"invalid reconcile-interval; falling back to default",
+			"value", raw, "error", err, "fallback", fallback)
+		return fallback
+	}
+	return d
 }

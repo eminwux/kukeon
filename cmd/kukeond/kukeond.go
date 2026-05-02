@@ -124,6 +124,17 @@ func NewKukeondCmd() (*cobra.Command, error) {
 		return nil, err
 	}
 
+	cmd.PersistentFlags().String(
+		"reconcile-interval", config.KUKEOND_RECONCILE_INTERVAL.Default,
+		"Period of the cell-reconciliation loop (Go duration; 0 disables)",
+	)
+	if err := viper.BindPFlag(
+		config.KUKEOND_RECONCILE_INTERVAL.ViperKey,
+		cmd.PersistentFlags().Lookup("reconcile-interval"),
+	); err != nil {
+		return nil, err
+	}
+
 	bindEnvVars()
 
 	cmd.AddCommand(newServeCmd())
@@ -142,6 +153,7 @@ func bindEnvVars() {
 		config.KUKEON_ROOT_LOG_LEVEL,
 		config.KUKEOND_SOCKET,
 		config.KUKEOND_SOCKET_GID,
+		config.KUKEOND_RECONCILE_INTERVAL,
 	} {
 		_ = v.BindEnv()
 	}
@@ -170,6 +182,11 @@ func applyServerConfiguration(cmd *cobra.Command, spec v1beta1.ServerConfigurati
 	}
 	if spec.LogLevel != "" && !flagChanged(cmd, "log-level") && !envSet(config.KUKEON_ROOT_LOG_LEVEL) {
 		viper.Set(config.KUKEON_ROOT_LOG_LEVEL.ViperKey, spec.LogLevel)
+	}
+	if spec.ReconcileInterval != "" &&
+		!flagChanged(cmd, "reconcile-interval") &&
+		!envSet(config.KUKEOND_RECONCILE_INTERVAL) {
+		viper.Set(config.KUKEOND_RECONCILE_INTERVAL.ViperKey, spec.ReconcileInterval)
 	}
 }
 

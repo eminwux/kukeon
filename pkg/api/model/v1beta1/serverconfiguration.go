@@ -49,6 +49,11 @@ type ServerConfigurationSpec struct {
 	ContainerdSocket string `json:"containerdSocket,omitempty" yaml:"containerdSocket,omitempty"`
 	// LogLevel is the daemon log level (debug, info, warn, error).
 	LogLevel string `json:"logLevel,omitempty"         yaml:"logLevel,omitempty"`
+	// ReconcileInterval is the period of the daemon's background cell
+	// reconciliation loop, expressed as a Go time.Duration string (e.g.
+	// "30s", "1m"). Empty falls back to the in-binary default. A zero or
+	// negative duration disables the loop.
+	ReconcileInterval string `json:"reconcileInterval,omitempty" yaml:"reconcileInterval,omitempty"`
 	// KukeondImage is the container image `kuke init` provisions for the
 	// kukeond system cell. Read by `kuke init` only; the daemon ignores it.
 	KukeondImage string `json:"kukeondImage,omitempty"     yaml:"kukeondImage,omitempty"`

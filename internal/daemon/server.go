@@ -30,6 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/eminwux/kukeon/internal/client/local"
 	"github.com/eminwux/kukeon/internal/controller"
@@ -50,6 +51,10 @@ type Options struct {
 	SocketGID int
 	// PIDFile, when non-empty, is written on Serve and removed on Stop.
 	PIDFile string
+	// ReconcileInterval is the period of the background cell-reconciliation
+	// loop. Zero or negative disables the loop — useful for tests and for
+	// operators who explicitly opt out via `--reconcile-interval 0`.
+	ReconcileInterval time.Duration
 	// Controller is forwarded to controller.NewControllerExec.
 	Controller controller.Options
 }
@@ -63,6 +68,11 @@ type Server struct {
 	core *local.Client
 	rpc  *rpc.Server
 
+	// reconcileFn is the per-tick callable for the cell-reconciliation loop.
+	// Defaults to core.ReconcileCells; tests in the daemon package overwrite
+	// it before Serve so they exercise the ticker without a real controller.
+	reconcileFn func() (controller.ReconcileResult, error)
+
 	mu       sync.Mutex
 	listener net.Listener
 	closed   bool
@@ -74,12 +84,14 @@ func NewServer(ctx context.Context, logger *slog.Logger, opts Options) *Server {
 		opts.SocketMode = 0o600
 	}
 	core := local.New(ctx, logger, opts.Controller)
-	return &Server{
+	srv := &Server{
 		ctx:    ctx,
 		logger: logger,
 		opts:   opts,
 		core:   core,
 	}
+	srv.reconcileFn = srv.core.ReconcileCells
+	return srv
 }
 
 // Serve opens the listener and accepts connections until Stop is called or
@@ -128,8 +140,67 @@ func (s *Server) Serve() error {
 	}
 
 	s.logger.InfoContext(s.ctx, "kukeond listening", "socket", s.opts.SocketPath)
+	s.startReconcileLoop()
 	s.acceptLoop(listener)
 	return nil
+}
+
+// startReconcileLoop spawns the background cell-reconciliation ticker when
+// ReconcileInterval > 0. Lifetime is bound to s.ctx — daemon shutdown stops
+// the loop. Errors during a pass are logged and the loop continues. One log
+// line per pass: brief on success, detailed on failure (per #161 AC).
+func (s *Server) startReconcileLoop() {
+	if s.opts.ReconcileInterval <= 0 {
+		s.logger.InfoContext(s.ctx, "reconcile loop disabled",
+			"interval", s.opts.ReconcileInterval)
+		return
+	}
+	s.logger.InfoContext(s.ctx, "starting reconcile loop",
+		"interval", s.opts.ReconcileInterval)
+	go s.runReconcileLoop(s.opts.ReconcileInterval)
+}
+
+func (s *Server) runReconcileLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			s.logger.InfoContext(s.ctx, "reconcile loop stopped")
+			return
+		case <-ticker.C:
+			s.runReconcileOnce()
+		}
+	}
+}
+
+func (s *Server) runReconcileOnce() {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.ErrorContext(s.ctx, "reconcile pass panicked; loop continues",
+				"panic", r)
+		}
+	}()
+	res, err := s.reconcileFn()
+	switch {
+	case err != nil:
+		s.logger.ErrorContext(s.ctx, "reconcile pass failed",
+			"error", err,
+			"cells_scanned", res.CellsScanned,
+			"cells_updated", res.CellsUpdated,
+			"cells_errored", res.CellsErrored,
+			"errors", res.Errors)
+	case len(res.Errors) > 0:
+		s.logger.WarnContext(s.ctx, "reconcile pass completed with errors",
+			"cells_scanned", res.CellsScanned,
+			"cells_updated", res.CellsUpdated,
+			"cells_errored", res.CellsErrored,
+			"errors", res.Errors)
+	default:
+		s.logger.InfoContext(s.ctx, "reconcile ok",
+			"cells_scanned", res.CellsScanned,
+			"cells_updated", res.CellsUpdated)
+	}
 }
 
 func (s *Server) acceptLoop(listener net.Listener) {

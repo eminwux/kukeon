@@ -762,6 +762,15 @@ func (c *Client) PurgeContainer(_ context.Context, doc v1beta1.ContainerDoc) (ku
 	}, nil
 }
 
+// ---- Reconcile ----
+
+// ReconcileCells runs one pass of the daemon-side cell reconciliation loop.
+// Daemon-internal: not surfaced over the kukeonv1 wire — `kuke refresh` is
+// the on-demand, all-resources counterpart that clients use.
+func (c *Client) ReconcileCells() (controller.ReconcileResult, error) {
+	return c.ctrl.ReconcileCells()
+}
+
 // ---- Refresh ----
 
 func (c *Client) RefreshAll(_ context.Context) (kukeonv1.RefreshAllResult, error) {

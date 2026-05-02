@@ -337,3 +337,115 @@ func (r *Exec) refreshContainerStatus(cell intmodel.Cell, containerSpec *intmode
 
 	return updated, nil
 }
+
+// ReconcileCell is the daemon-side counterpart to RefreshCell. Where
+// RefreshCell derives cell.Status.State from cgroup existence alone (so
+// `kuke refresh` keeps its current shape), ReconcileCell additionally
+// considers the root container's task state — which is what flips a Ready
+// cell to Stopped when an operator runs `ctr task kill` outside of kukeon.
+//
+// State derivation:
+//   - cgroup check error or cgroup absent → Unknown
+//   - cgroup present, no root container in spec → Ready (cgroup-only cell)
+//   - cgroup present, root container task running/created/paused → Ready
+//   - cgroup present, root container missing in containerd or task
+//     stopped/unknown → Stopped
+//
+// Container statuses are also re-populated so callers (and `kuke get cell`)
+// see up-to-date per-container state.
+func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, bool, error) {
+	originalStatus := cell.Status
+	newStatus := intmodel.CellStatus{
+		State:      intmodel.CellStateUnknown,
+		CgroupPath: originalStatus.CgroupPath,
+		Network:    originalStatus.Network,
+	}
+
+	cgroupExists, cgroupErr := r.ExistsCgroup(cell)
+	switch {
+	case cgroupErr != nil:
+		r.logger.DebugContext(r.ctx, "failed to check cell cgroup",
+			"cell", cell.Metadata.Name, "error", cgroupErr)
+	case !cgroupExists:
+		newStatus.State = intmodel.CellStateUnknown
+	default:
+		newStatus.State = r.deriveCellStateFromRootContainer(cell)
+	}
+
+	if err := r.populateCellContainerStatuses(&cell); err != nil {
+		r.logger.DebugContext(r.ctx, "populate container statuses failed",
+			"cell", cell.Metadata.Name, "error", err)
+	}
+	cell.Status.State = newStatus.State
+	cell.Status.CgroupPath = newStatus.CgroupPath
+
+	updated := false
+	if originalStatus.State != cell.Status.State || originalStatus.CgroupPath != cell.Status.CgroupPath {
+		updated = true
+	}
+	if !containerStatusesEqual(originalStatus.Containers, cell.Status.Containers) {
+		updated = true
+	}
+
+	if updated {
+		if updateErr := r.UpdateCellMetadata(cell); updateErr != nil {
+			return cell, false, fmt.Errorf("failed to update cell metadata: %w", updateErr)
+		}
+	}
+	return cell, updated, nil
+}
+
+// deriveCellStateFromRootContainer resolves the cell's state from the root
+// container's task. Returns Ready when no root container is configured (a
+// cgroup-only cell counts as Ready by cgroup existence).
+func (r *Exec) deriveCellStateFromRootContainer(cell intmodel.Cell) intmodel.CellState {
+	rootSpec := findRootContainerSpec(cell)
+	if rootSpec == nil {
+		return intmodel.CellStateReady
+	}
+	state, err := r.GetContainerState(cell, rootSpec.ID)
+	if err != nil {
+		r.logger.DebugContext(r.ctx, "reconcile: failed to read root container state",
+			"cell", cell.Metadata.Name, "container", rootSpec.ID, "error", err)
+		return intmodel.CellStateUnknown
+	}
+	switch state {
+	case intmodel.ContainerStateReady,
+		intmodel.ContainerStatePending,
+		intmodel.ContainerStatePaused,
+		intmodel.ContainerStatePausing:
+		return intmodel.CellStateReady
+	case intmodel.ContainerStateStopped, intmodel.ContainerStateFailed:
+		return intmodel.CellStateStopped
+	default:
+		return intmodel.CellStateUnknown
+	}
+}
+
+func findRootContainerSpec(cell intmodel.Cell) *intmodel.ContainerSpec {
+	for i := range cell.Spec.Containers {
+		if cell.Spec.Containers[i].Root {
+			return &cell.Spec.Containers[i]
+		}
+	}
+	if cell.Spec.RootContainerID != "" {
+		for i := range cell.Spec.Containers {
+			if cell.Spec.Containers[i].ID == cell.Spec.RootContainerID {
+				return &cell.Spec.Containers[i]
+			}
+		}
+	}
+	return nil
+}
+
+func containerStatusesEqual(a, b []intmodel.ContainerStatus) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].ID != b[i].ID || a[i].State != b[i].State {
+			return false
+		}
+	}
+	return true
+}

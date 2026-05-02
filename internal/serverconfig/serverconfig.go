@@ -101,6 +101,13 @@ spec:
   # Default: info
   logLevel: info
 
+  # Period of the daemon's background cell-reconciliation loop, expressed as a
+  # Go time.Duration string. The loop walks every cell and re-derives
+  # ` + "`status.state`" + ` against observed container state once per tick. Zero or
+  # negative disables the loop.
+  # Default: 30s
+  reconcileInterval: 30s
+
   # Container image ` + "`kuke init`" + ` provisions for the kukeond system cell.
   # Read by ` + "`kuke init`" + ` only; the daemon ignores it. Empty means kuke init
   # picks the release-matching ghcr.io/eminwux/kukeon image automatically.
