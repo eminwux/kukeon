@@ -123,6 +123,65 @@ func TestLatchReadyObserved(t *testing.T) {
 	}
 }
 
+// TestMarkCellReady is the eager-latch contract synchronous Ready
+// writers (provisionNewCell, StartCell idempotent skip, StartCell
+// happy path, StartContainer, RecreateCell) all rely on. State and
+// ReadyObserved must close together — without that, a KillCell that
+// races the first reconciler tick (e.g. `kuke run -a --rm` exiting
+// attach inside the reconcile interval) flips persisted state Ready
+// → Stopped before any reconciler observation, leaving
+// readyObserved=false on disk. Subsequent ticks then see
+// originalState=Stopped, latchReadyObserved returns false, and
+// shouldAutoDeleteCell never fires (regression #275).
+func TestMarkCellReady(t *testing.T) {
+	cell := intmodel.Cell{Status: intmodel.CellStatus{
+		State:         intmodel.CellStatePending,
+		ReadyObserved: false,
+	}}
+	markCellReady(&cell)
+	if cell.Status.State != intmodel.CellStateReady {
+		t.Errorf("State = %v, want Ready", cell.Status.State)
+	}
+	if !cell.Status.ReadyObserved {
+		t.Errorf("ReadyObserved = false, want true")
+	}
+}
+
+// TestAutoDeleteSurvivesKillCellRace is the end-to-end invariant for
+// #275: after a synchronous Ready write followed by a synchronous
+// KillCell that flips state to Stopped (without touching the latch),
+// the persisted ReadyObserved must still be true so the next
+// reconciler tick gates AutoDelete on. Models the on-disk handoff
+// between the runner's synchronous writes and the reconciler's
+// shouldAutoDeleteCell predicate.
+func TestAutoDeleteSurvivesKillCellRace(t *testing.T) {
+	cell := intmodel.Cell{Status: intmodel.CellStatus{
+		State:         intmodel.CellStatePending,
+		ReadyObserved: false,
+	}}
+
+	// Runner writes Ready synchronously (StartCell happy path).
+	markCellReady(&cell)
+
+	// Synchronous KillCell flips state to Stopped without touching
+	// the latch — this is the persisted state the reconciler reads
+	// on its first tick after the race.
+	cell.Status.State = intmodel.CellStateStopped
+
+	persisted := cell.Status
+
+	// Reconciler tick: derive newState=Stopped from a not-yet-existing
+	// containerd task, run the latch over the persisted snapshot.
+	newState := intmodel.CellStateStopped
+	latched := latchReadyObserved(persisted.ReadyObserved, persisted.State, newState)
+	if !latched {
+		t.Fatalf("latchReadyObserved = false; AutoDelete gate would never fire")
+	}
+	if !shouldAutoDeleteCell(true, newState, latched) {
+		t.Errorf("shouldAutoDeleteCell = false; cell would be stranded in Stopped")
+	}
+}
+
 // TestShouldAutoDeleteCell is the complete gate guarding AutoDelete
 // cleanup: AutoDelete=true AND newState is a trigger (Stopped/Failed)
 // AND the ReadyObserved latch is set. The Ready-gate row is the

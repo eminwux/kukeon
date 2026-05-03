@@ -225,7 +225,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	// refuses as a duplicate allocation (we never run CNI DEL when we
 	// delete the old container, so the reservation persists).
 	if cellTasksAllRunningFn(internalCell, containerID, r.ctrClient.TaskStatus) {
-		internalCell.Status.State = intmodel.CellStateReady
+		markCellReady(&internalCell)
 		if err = r.PopulateAndPersistCellContainerStatuses(&internalCell); err != nil {
 			r.logger.WarnContext(r.ctx, "failed to populate container statuses after idempotent StartCell skip",
 				"cell", cellName,
@@ -636,8 +636,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		)
 	}
 
-	// Update cell state in internal model
-	internalCell.Status.State = intmodel.CellStateReady
+	markCellReady(&internalCell)
 
 	// Populate container statuses after starting cell and persist them
 	if err = r.PopulateAndPersistCellContainerStatuses(&internalCell); err != nil {
@@ -897,8 +896,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (intmodel.
 		return intmodel.Cell{}, fmt.Errorf("failed to retrieve cell after starting container: %w", err)
 	}
 
-	// Update cell state in internal model
-	updatedCell.Status.State = intmodel.CellStateReady
+	markCellReady(&updatedCell)
 
 	// Populate container statuses after starting cell and persist them
 	if err = r.PopulateAndPersistCellContainerStatuses(&updatedCell); err != nil {
