@@ -472,6 +472,18 @@ func shouldAutoDeleteCell(autoDelete bool, newState intmodel.CellState, readyObs
 	return autoDelete && cellStateAutoDeleteTriggers(newState) && readyObserved
 }
 
+// markCellReady stamps a synchronous Ready transition: state and the
+// ReadyObserved latch must close together. Without the eager latch
+// close, a KillCell that races the first reconciler tick (e.g. `kuke
+// run -a --rm` exiting attach within the reconcile interval) flips
+// persisted state Ready → Stopped before any reconciler observation,
+// leaving readyObserved=false on disk; subsequent ticks then see
+// originalState=Stopped and shouldAutoDeleteCell never fires.
+func markCellReady(cell *intmodel.Cell) {
+	cell.Status.State = intmodel.CellStateReady
+	cell.Status.ReadyObserved = true
+}
+
 // deriveCellStateFromRootContainer resolves the cell's state from the root
 // container's task. Returns Ready when no root container is configured (a
 // cgroup-only cell counts as Ready by cgroup existence).

@@ -148,8 +148,7 @@ func (r *Exec) RecreateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, fmt.Errorf("failed to recreate cell containers: %w", err)
 	}
 
-	// Update cell state
-	desired.Status.State = intmodel.CellStateReady
+	markCellReady(&desired)
 
 	// Update metadata
 	if updateErr := r.UpdateCellMetadata(desired); updateErr != nil {

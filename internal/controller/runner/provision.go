@@ -1025,8 +1025,7 @@ func (r *Exec) provisionNewCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, err
 	}
 
-	// Update cell state in internal model
-	cell.Status.State = intmodel.CellStateReady
+	markCellReady(&cell)
 
 	// Update cell metadata
 	if err = r.UpdateCellMetadata(cell); err != nil {
