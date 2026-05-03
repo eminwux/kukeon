@@ -45,6 +45,27 @@ func TestServer_ReconcileLoopFires(t *testing.T) {
 	waitForCalls(t, &calls, 2, 2*time.Second)
 }
 
+// TestServer_ReconcileLoopAcceptsCellsDeletedResult is the daemon-side
+// half of #266: a reconcile pass that reports CellsDeleted (the AutoDelete
+// migration's new counter) flows through runReconcileOnce without
+// disturbing the loop. The behavioral assertion is "loop continues
+// ticking", because all the daemon does with the counter is log it —
+// the per-cell kill+delete decision lives in the runner.
+func TestServer_ReconcileLoopAcceptsCellsDeletedResult(t *testing.T) {
+	srv := newTestServer(t, 20*time.Millisecond)
+	var calls atomic.Int32
+	srv.reconcileFn = func() (controller.ReconcileResult, error) {
+		calls.Add(1)
+		return controller.ReconcileResult{
+			CellsScanned: 1,
+			CellsDeleted: 1,
+		}, nil
+	}
+
+	startServer(t, srv)
+	waitForCalls(t, &calls, 3, 2*time.Second)
+}
+
 // TestServer_ReconcileLoopContinuesOnError is AC #5: errors during a pass
 // must be logged and the loop must keep ticking. A single failing pass
 // cannot wedge the loop or take the daemon down.

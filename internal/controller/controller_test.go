@@ -25,7 +25,6 @@ import (
 	"log/slog"
 	"testing"
 
-	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller"
@@ -112,7 +111,7 @@ type fakeRunner struct {
 	RefreshSpaceFn  func(space intmodel.Space) (intmodel.Space, bool, error)
 	RefreshStackFn  func(stack intmodel.Stack) (intmodel.Stack, bool, error)
 	RefreshCellFn   func(cell intmodel.Cell) (intmodel.Cell, int, error)
-	ReconcileCellFn func(cell intmodel.Cell) (intmodel.Cell, bool, error)
+	ReconcileCellFn func(cell intmodel.Cell) (intmodel.Cell, runner.ReconcileOutcome, error)
 
 	// Image methods
 	LoadImageFn   func(namespace string, reader io.Reader) ([]string, error)
@@ -458,15 +457,6 @@ func (f *fakeRunner) Close() error {
 	return nil
 }
 
-// WaitCellRootTaskExit is unused by controller_test scenarios; no test
-// installs an FX yet, so a stable "unexpected call" stub is enough.
-func (f *fakeRunner) WaitCellRootTaskExit(
-	_ context.Context,
-	_ intmodel.Cell,
-) (<-chan containerd.ExitStatus, error) {
-	return nil, errors.New("unexpected call to WaitCellRootTaskExit")
-}
-
 // Apply
 
 func (f *fakeRunner) UpdateRealm(realm intmodel.Realm) (intmodel.Realm, error) {
@@ -541,11 +531,11 @@ func (f *fakeRunner) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error)
 	return intmodel.Cell{}, 0, errors.New("unexpected call to RefreshCell")
 }
 
-func (f *fakeRunner) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, bool, error) {
+func (f *fakeRunner) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, runner.ReconcileOutcome, error) {
 	if f.ReconcileCellFn != nil {
 		return f.ReconcileCellFn(cell)
 	}
-	return intmodel.Cell{}, false, errors.New("unexpected call to ReconcileCell")
+	return intmodel.Cell{}, runner.ReconcileOutcome{}, errors.New("unexpected call to ReconcileCell")
 }
 
 func (f *fakeRunner) LoadImage(namespace string, reader io.Reader) ([]string, error) {

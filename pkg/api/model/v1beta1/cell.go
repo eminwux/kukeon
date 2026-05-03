@@ -39,9 +39,12 @@ type CellSpec struct {
 	Containers      []ContainerSpec `json:"containers"                yaml:"containers"`
 	// AutoDelete asks kukeond to delete this cell best-effort after its root
 	// container's task exits (any rc). Set by `kuke run --rm`. Cleanup is
-	// scoped to the cell only — never cascades to stack/space/realm. Best-
-	// effort: a daemon crash between task-exit and delete-completion leaves
-	// an orphan that #161's reconciliation loop will eventually sweep.
+	// scoped to the cell only — never cascades to stack/space/realm.
+	// Cleanup is driven by kukeond's reconcile loop: the next pass that
+	// observes the root task as Stopped/Failed runs KillCell+DeleteCell on
+	// the cell. Latency is bounded by the reconcile interval, and the
+	// trigger survives daemon restarts (no per-cell goroutine needs to be
+	// re-installed on startup).
 	AutoDelete bool `json:"autoDelete,omitempty"      yaml:"autoDelete,omitempty"`
 }
 

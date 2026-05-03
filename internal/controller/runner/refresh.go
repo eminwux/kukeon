@@ -353,7 +353,18 @@ func (r *Exec) refreshContainerStatus(cell intmodel.Cell, containerSpec *intmode
 //
 // Container statuses are also re-populated so callers (and `kuke get cell`)
 // see up-to-date per-container state.
-func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, bool, error) {
+//
+// AutoDelete: when Spec.AutoDelete is set and the freshly derived state is
+// Stopped or Failed, the reconciler kills + deletes the cell instead of
+// persisting the state transition. This subsumes the per-cell `kuke run
+// --rm` watcher (#161 unblocks the move): a single, restart-resilient
+// ticker is enough, no goroutine-per-cell, and an AutoDelete cell created
+// before a daemon restart still gets cleaned up on the next tick after
+// the daemon is back. Errors during kill/delete are returned to the
+// caller so the loop's per-pass `Errors` slice records them and the cell
+// is preserved for retry on the next tick (best-effort, like the watcher
+// it replaces).
+func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcome, error) {
 	originalStatus := cell.Status
 	newState := intmodel.CellStateUnknown
 
@@ -374,6 +385,10 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, bool, error) {
 	}
 	cell.Status.State = newState
 
+	if cell.Spec.AutoDelete && cellStateAutoDeleteTriggers(newState) {
+		return r.autoDeleteCell(cell)
+	}
+
 	updated := false
 	if originalStatus.State != cell.Status.State {
 		updated = true
@@ -384,10 +399,43 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, bool, error) {
 
 	if updated {
 		if updateErr := r.UpdateCellMetadata(cell); updateErr != nil {
-			return cell, false, fmt.Errorf("failed to update cell metadata: %w", updateErr)
+			return cell, ReconcileOutcome{}, fmt.Errorf("failed to update cell metadata: %w", updateErr)
 		}
 	}
-	return cell, updated, nil
+	return cell, ReconcileOutcome{Updated: updated}, nil
+}
+
+// autoDeleteCell runs the kill+delete sequence the per-cell watcher used
+// to drive. KillCell is best-effort and idempotent (the root task may
+// already be gone — that's the trigger condition); a kill failure is
+// surfaced as the error return and the cell is left alone, so the next
+// reconcile pass retries. Once kill succeeds, DeleteCell tears down
+// containers, cgroup, and metadata; an error here also bubbles up for
+// retry on the next tick.
+func (r *Exec) autoDeleteCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcome, error) {
+	r.logger.InfoContext(r.ctx, "reconcile: auto-deleting cell",
+		"cell", cell.Metadata.Name,
+		"realm", cell.Spec.RealmName,
+		"space", cell.Spec.SpaceName,
+		"stack", cell.Spec.StackName,
+		"state", cell.Status.State)
+
+	if _, err := r.KillCell(cell); err != nil {
+		return cell, ReconcileOutcome{}, fmt.Errorf("auto-delete: kill cell: %w", err)
+	}
+	if err := r.DeleteCell(cell); err != nil {
+		return cell, ReconcileOutcome{}, fmt.Errorf("auto-delete: delete cell: %w", err)
+	}
+	return cell, ReconcileOutcome{Deleted: true}, nil
+}
+
+// cellStateAutoDeleteTriggers returns true for the post-reconcile cell
+// states that mean "the root container is no longer running", which is
+// the trigger AutoDelete cares about. Unknown is deliberately excluded:
+// a transient containerd hiccup that flips a cell to Unknown should not
+// nuke the cell — wait for the next pass.
+func cellStateAutoDeleteTriggers(s intmodel.CellState) bool {
+	return s == intmodel.CellStateStopped || s == intmodel.CellStateFailed
 }
 
 // deriveCellStateFromRootContainer resolves the cell's state from the root

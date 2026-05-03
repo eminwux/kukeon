@@ -48,7 +48,7 @@ func (a *attachClientFake) AttachContainer(
 
 func TestAttachContainer_NotAttachable_RPCSurfacesSentinel(t *testing.T) {
 	core := &attachClientFake{err: errdefs.ErrAttachNotSupported}
-	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core, nil)
+	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core)
 
 	args := &kukeonv1.AttachContainerArgs{Doc: v1beta1.ContainerDoc{}}
 	reply := &kukeonv1.AttachContainerReply{}
@@ -70,7 +70,7 @@ func TestAttachContainer_Attachable_RPCReturnsSocketPath(t *testing.T) {
 	// pass that path through verbatim and leave Err nil.
 	const wantSocket = "/opt/kukeon/default/default/default/cellA/work/tty/socket"
 	core := &attachClientFake{result: kukeonv1.AttachContainerResult{HostSocketPath: wantSocket}}
-	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core, nil)
+	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core)
 
 	args := &kukeonv1.AttachContainerArgs{Doc: v1beta1.ContainerDoc{}}
 	reply := &kukeonv1.AttachContainerReply{}

@@ -21,12 +21,25 @@ import (
 	"io"
 	"log/slog"
 
-	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/ctr"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/netpolicy"
 )
+
+// ReconcileOutcome describes the per-cell effect of a single reconcile pass.
+// At most one of Updated / Deleted is true: an AutoDelete cell whose root
+// task has exited skips the persisted state-update path and runs the
+// kill+delete sequence instead, so callers see Deleted, not Updated.
+type ReconcileOutcome struct {
+	// Updated is true if the cell's status (state or container statuses)
+	// was written back to disk during the pass.
+	Updated bool
+	// Deleted is true if the reconciler killed and removed the cell as
+	// part of honoring Spec.AutoDelete. When true the input cell no
+	// longer exists in metadata.
+	Deleted bool
+}
 
 type Runner interface {
 	BootstrapCNI(cfgDir, cacheDir, binDir string) (cni.BootstrapReport, error)
@@ -95,13 +108,17 @@ type Runner interface {
 	RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error)
 	// ReconcileCell is the daemon-side counterpart to RefreshCell: it
 	// re-derives the cell's status from cgroup + root-container task state
-	// (so a Ready cell whose root task exits externally flips to Stopped).
-	// Returns the updated cell, whether persistence ran, and any error.
-	ReconcileCell(cell intmodel.Cell) (intmodel.Cell, bool, error)
+	// (so a Ready cell whose root task exits externally flips to Stopped),
+	// and — when Spec.AutoDelete is set on a cell that has reached
+	// Stopped/Failed — best-effort kills and deletes the cell instead of
+	// persisting the new status. Subsumes the per-cell `kuke run --rm`
+	// watcher: the trigger (cell stopped) is exactly what the loop already
+	// computes, and a single-instance, restart-resilient ticker means a
+	// cell whose Spec.AutoDelete=true survives a daemon restart without
+	// needing the daemon to re-install per-cell goroutines on startup.
+	ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcome, error)
 
 	GetContainerState(cell intmodel.Cell, containerID string) (intmodel.ContainerState, error)
-
-	WaitCellRootTaskExit(ctx context.Context, cell intmodel.Cell) (<-chan containerd.ExitStatus, error)
 
 	// LoadImage imports an OCI/docker image tarball into the given
 	// containerd namespace and returns the names of the imported images.

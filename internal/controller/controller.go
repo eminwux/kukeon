@@ -20,7 +20,6 @@ import (
 	"context"
 	"log/slog"
 
-	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller/runner"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -230,12 +229,3 @@ func (b *Exec) RunPath() string {
 	return b.opts.RunPath
 }
 
-// WaitCellRootTaskExit forwards to the runner. Surfaced so the daemon's
-// auto-delete watcher (`kuke run --rm`) can take a wait channel against
-// the cell's root containerd task without reaching into the runner directly.
-func (b *Exec) WaitCellRootTaskExit(
-	ctx context.Context,
-	cell intmodel.Cell,
-) (<-chan containerd.ExitStatus, error) {
-	return b.runner.WaitCellRootTaskExit(ctx, cell)
-}
