@@ -108,12 +108,15 @@ type fakeClient struct {
 	getCellFn         func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error)
 	createCellFn      func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error)
 	attachContainerFn func(doc v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error)
+	killCellFn        func(doc v1beta1.CellDoc) (kukeonv1.KillCellResult, error)
 
 	getCalls    int
 	createCalls int
 	attachCalls int
+	killCalls   int
 	createDoc   v1beta1.CellDoc
 	attachDoc   v1beta1.ContainerDoc
+	killDoc     v1beta1.CellDoc
 }
 
 func (f *fakeClient) GetCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
@@ -145,17 +148,41 @@ func (f *fakeClient) AttachContainer(
 	return f.attachContainerFn(doc)
 }
 
-// runCapture records the Options passed to the in-process attach loop and
-// returns nil so the test treats the call as a clean detach.
+func (f *fakeClient) KillCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+	f.killCalls++
+	f.killDoc = doc
+	if f.killCellFn == nil {
+		return kukeonv1.KillCellResult{}, errors.New("unexpected KillCell call")
+	}
+	return f.killCellFn(doc)
+}
+
+// runCapture records the Options passed to the in-process attach loop. By
+// default returns nil so the test treats the call as a clean detach; set
+// err to inject an attach-loop failure (e.g. control-socket lost).
 type runCapture struct {
 	calls int
 	opts  sbshattach.Options
+	err   error
 }
 
 func (r *runCapture) fn(_ context.Context, opts sbshattach.Options) error {
 	r.calls++
 	r.opts = opts
-	return nil
+	return r.err
+}
+
+// runErrorCapture is a thin wrapper used by tests that only care that the
+// attach loop returned a specific error — it shares the same shape as
+// runCapture so existing newCmdWithRun plumbing works unchanged.
+type runErrorCapture struct {
+	calls int
+	err   error
+}
+
+func (r *runErrorCapture) fn(_ context.Context, _ sbshattach.Options) error {
+	r.calls++
+	return r.err
 }
 
 func newCmd(t *testing.T, fc *fakeClient) (*cobra.Command, *bytes.Buffer) {
@@ -164,6 +191,15 @@ func newCmd(t *testing.T, fc *fakeClient) (*cobra.Command, *bytes.Buffer) {
 }
 
 func newCmdWithRun(t *testing.T, fc *fakeClient, run *runCapture) (*cobra.Command, *bytes.Buffer) {
+	t.Helper()
+	var fn runcmd.RunFn
+	if run != nil {
+		fn = run.fn
+	}
+	return newCmdWithRunFn(t, fc, fn)
+}
+
+func newCmdWithRunFn(t *testing.T, fc *fakeClient, run runcmd.RunFn) (*cobra.Command, *bytes.Buffer) {
 	t.Helper()
 	cmd := runcmd.NewRunCmd()
 	buf := &bytes.Buffer{}
@@ -176,7 +212,7 @@ func newCmdWithRun(t *testing.T, fc *fakeClient, run *runCapture) (*cobra.Comman
 		ctx = context.WithValue(ctx, runcmd.MockControllerKey{}, kukeonv1.Client(fc))
 	}
 	if run != nil {
-		ctx = context.WithValue(ctx, runcmd.MockRunKey{}, runcmd.RunFn(run.fn))
+		ctx = context.WithValue(ctx, runcmd.MockRunKey{}, run)
 	}
 	cmd.SetContext(ctx)
 	return cmd, buf
@@ -1361,6 +1397,241 @@ spec:
 	}
 	if !fc.createDoc.Spec.AutoDelete {
 		t.Errorf("CreateCell received AutoDelete=false; YAML autoDelete:true must survive when --rm is absent")
+	}
+}
+
+func TestRun_RmAttach_KillsCellAfterAttachLoopReturns(t *testing.T) {
+	// Issue #265: with -a --rm and a long-lived root (`sleep infinity`)
+	// peering an attachable container, the root task never exits when
+	// the operator detaches, so the reconciler's auto-delete trigger
+	// never fires. The CLI must call KillCell when the attach loop
+	// returns so the daemon's reconciler reaps the cell on the next
+	// tick.
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: attachSuccessFn(),
+		killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+			return kukeonv1.KillCellResult{Killed: true}, nil
+		},
+	}
+	run := &runCapture{}
+	cmd, _ := newCmdWithRun(t, fc, run)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a", "--rm"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !fc.createDoc.Spec.AutoDelete {
+		t.Errorf("CreateCell received AutoDelete=false; --rm must set it true")
+	}
+	if run.calls != 1 {
+		t.Fatalf("attach loop calls=%d want 1", run.calls)
+	}
+	if fc.killCalls != 1 {
+		t.Fatalf("KillCell calls=%d want 1 (must fire after attach loop returns)", fc.killCalls)
+	}
+	if got := fc.killDoc.Metadata.Name; got != "my-cell" {
+		t.Errorf("KillCell target=%q want my-cell", got)
+	}
+	if got := fc.killDoc.Spec.RealmID; got != "my-realm" {
+		t.Errorf("KillCell realm=%q want my-realm", got)
+	}
+}
+
+func TestRun_RmAttach_KillsCellEvenWhenAttachLoopErrors(t *testing.T) {
+	// --rm is best-effort cleanup keyed on "the operator is done", which
+	// is true regardless of whether the attach loop returned cleanly or
+	// errored. KillCell must still fire so a peer-shell crash does not
+	// leak the cell.
+	t.Cleanup(viper.Reset)
+
+	attachLoopErr := errors.New("control socket lost")
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: attachSuccessFn(),
+		killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+			return kukeonv1.KillCellResult{Killed: true}, nil
+		},
+	}
+	run := &runErrorCapture{err: attachLoopErr}
+	cmd, _ := newCmdWithRunFn(t, fc, run.fn)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a", "--rm"})
+
+	if err := cmd.Execute(); !errors.Is(err, attachLoopErr) {
+		t.Fatalf("Execute err=%v want attachLoopErr (must surface to caller)", err)
+	}
+	if fc.killCalls != 1 {
+		t.Errorf("KillCell calls=%d want 1 (must fire even when attach loop errors)", fc.killCalls)
+	}
+}
+
+func TestRun_RmAttach_KillCellFailureDoesNotMaskAttachExit(t *testing.T) {
+	// A KillCell RPC failure is logged to stderr but does not become the
+	// exit error: the operator has already detached, --rm is documented
+	// best-effort, and the daemon's reconciler is the safety net for any
+	// orphaned cell.
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: attachSuccessFn(),
+		killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+			return kukeonv1.KillCellResult{}, errors.New("daemon RPC: connection refused")
+		},
+	}
+	run := &runCapture{}
+	cmd, buf := newCmdWithRun(t, fc, run)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a", "--rm"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v (a KillCell failure on a clean detach must not surface as a run error)", err)
+	}
+	if fc.killCalls != 1 {
+		t.Fatalf("KillCell calls=%d want 1", fc.killCalls)
+	}
+	if !strings.Contains(buf.String(), "--rm cleanup: failed to kill cell") {
+		t.Errorf("expected stderr warning about KillCell failure, got:\n%s", buf.String())
+	}
+}
+
+func TestRun_RmAttach_KillCellNotFound_Silent(t *testing.T) {
+	// If the daemon's reconciler raced ahead and already reaped the cell
+	// (e.g. attach target was the root and exiting it triggered the
+	// existing root-task path), KillCell returns ErrCellNotFound. That
+	// is the expected idempotent outcome — no stderr noise.
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: attachSuccessFn(),
+		killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+			return kukeonv1.KillCellResult{}, errdefs.ErrCellNotFound
+		},
+	}
+	run := &runCapture{}
+	cmd, buf := newCmdWithRun(t, fc, run)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a", "--rm"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if strings.Contains(buf.String(), "--rm cleanup: failed to kill cell") {
+		t.Errorf("ErrCellNotFound must be silent (idempotent), got stderr:\n%s", buf.String())
+	}
+}
+
+func TestRun_RmNoAttach_DoesNotCallKillCell(t *testing.T) {
+	// Without -a, --rm preserves its original semantics: the daemon's
+	// reconciler watches the root task and reaps when it exits. The CLI
+	// must not pre-empt that path with a KillCell — that would break
+	// `kuke run --rm -f cell.yaml` for a long-running workload that the
+	// operator wants left running until it exits on its own.
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "--rm"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.killCalls != 0 {
+		t.Errorf("KillCell calls=%d want 0 (no -a means the reconciler owns cleanup)", fc.killCalls)
+	}
+}
+
+func TestRun_RmAttach_AlreadyReady_StillKillsCellAfterAttachLoopReturns(t *testing.T) {
+	// Idempotent branch regression guard: re-running `kuke run -a --rm`
+	// against an already-Ready cell with matching spec must still fire
+	// KillCell when the attach loop returns. Otherwise a user with a
+	// dangling cell from a pre-fix invocation cannot recover via -a --rm,
+	// reproducing the original #265 symptom.
+	t.Cleanup(viper.Reset)
+
+	existing := v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
+		Spec: v1beta1.CellSpec{
+			RealmID: "my-realm",
+			SpaceID: "my-space",
+			StackID: "my-stack",
+			Tty:     &v1beta1.CellTty{Default: "claude"},
+			Containers: []v1beta1.ContainerSpec{
+				{ID: "root", Root: true, Image: "registry.eminwux.com/busybox:latest"},
+				{ID: "shell", Attachable: true, Image: "registry.eminwux.com/busybox:latest"},
+				{ID: "claude", Attachable: true, Image: "registry.eminwux.com/busybox:latest"},
+			},
+		},
+		Status: v1beta1.CellStatus{State: v1beta1.CellStateReady},
+	}
+	fc := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell:                existing,
+				MetadataExists:      true,
+				CgroupExists:        true,
+				RootContainerExists: true,
+			}, nil
+		},
+		attachContainerFn: attachSuccessFn(),
+		killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+			return kukeonv1.KillCellResult{Killed: true}, nil
+		},
+	}
+	run := &runCapture{}
+	cmd, _ := newCmdWithRun(t, fc, run)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a", "--rm"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d want 0 (short-circuit on Ready)", fc.createCalls)
+	}
+	if run.calls != 1 {
+		t.Fatalf("attach loop calls=%d want 1", run.calls)
+	}
+	if fc.killCalls != 1 {
+		t.Fatalf("KillCell calls=%d want 1 (idempotent branch must also fire cleanup)", fc.killCalls)
+	}
+	if got := fc.killDoc.Metadata.Name; got != "my-cell" {
+		t.Errorf("KillCell target=%q want my-cell", got)
+	}
+}
+
+func TestRun_AttachNoRm_DoesNotCallKillCell(t *testing.T) {
+	// Defensive guard: -a alone must not engage cleanup. KillCell only
+	// fires when --rm is also set.
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: attachSuccessFn(),
+	}
+	run := &runCapture{}
+	cmd, _ := newCmdWithRun(t, fc, run)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.killCalls != 0 {
+		t.Errorf("KillCell calls=%d want 0 (-a without --rm must not clean up)", fc.killCalls)
 	}
 }
 
