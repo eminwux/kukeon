@@ -24,6 +24,11 @@ import "fmt"
 type ReconcileResult struct {
 	CellsScanned int
 	CellsUpdated int
+	// CellsDeleted counts cells the reconciler removed during the pass
+	// because Spec.AutoDelete=true and the root container's task had
+	// exited. Tracked separately from CellsUpdated so callers can tell
+	// "state flip persisted" apart from "cell is gone".
+	CellsDeleted int
 	CellsErrored int
 	Errors       []string
 }
@@ -68,7 +73,7 @@ func (b *Exec) ReconcileCells() (ReconcileResult, error) {
 				}
 				for _, cell := range cells {
 					result.CellsScanned++
-					_, updated, reconcileErr := b.runner.ReconcileCell(cell)
+					_, outcome, reconcileErr := b.runner.ReconcileCell(cell)
 					if reconcileErr != nil {
 						result.CellsErrored++
 						result.Errors = append(result.Errors,
@@ -77,7 +82,10 @@ func (b *Exec) ReconcileCells() (ReconcileResult, error) {
 								cell.Metadata.Name, reconcileErr))
 						continue
 					}
-					if updated {
+					switch {
+					case outcome.Deleted:
+						result.CellsDeleted++
+					case outcome.Updated:
 						result.CellsUpdated++
 					}
 				}

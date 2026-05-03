@@ -17,12 +17,10 @@
 package ctr
 
 import (
-	"context"
 	"fmt"
 
 	apitypes "github.com/containerd/containerd/api/types"
 	containerd "github.com/containerd/containerd/v2/client"
-	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
@@ -46,32 +44,6 @@ func (c *client) TaskStatus(id string) (containerd.Status, error) {
 	}
 
 	return status, nil
-}
-
-// WaitTaskExit returns a channel that receives the task's ExitStatus once the
-// task exits. The wait is bound to the given ctx — the namespace is taken
-// from the client's current namespace at call time. Used by the daemon's
-// auto-delete watcher (`kuke run --rm`); StopContainer keeps its own private
-// task.Wait call because it needs to react to a kill timeout.
-func (c *client) WaitTaskExit(ctx context.Context, id string) (<-chan containerd.ExitStatus, error) {
-	if id == "" {
-		return nil, errdefs.ErrEmptyContainerID
-	}
-
-	task, err := c.loadTask(id)
-	if err != nil {
-		return nil, err
-	}
-
-	c.namespaceMu.RLock()
-	ns := c.namespace
-	c.namespaceMu.RUnlock()
-
-	exitChan, err := task.Wait(namespaces.WithNamespace(ctx, ns))
-	if err != nil {
-		return nil, fmt.Errorf("failed to wait for task %s: %w", id, err)
-	}
-	return exitChan, nil
 }
 
 // TaskMetrics returns the metrics for a task.

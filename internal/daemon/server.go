@@ -35,7 +35,6 @@ import (
 	"github.com/eminwux/kukeon/internal/client/local"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
-	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // Options configures a Server.
@@ -140,7 +139,7 @@ func (s *Server) Serve() error {
 	}
 
 	s.rpc = rpc.NewServer()
-	svc := NewKukeonV1Service(s.ctx, s.logger, s.core, s.autoDeleteLauncher())
+	svc := NewKukeonV1Service(s.ctx, s.logger, s.core)
 	if err := s.rpc.RegisterName(kukeonv1.ServiceName, svc); err != nil {
 		_ = listener.Close()
 		return fmt.Errorf("register rpc service: %w", err)
@@ -200,18 +199,21 @@ func (s *Server) runReconcileOnce() {
 			"error", err,
 			"cells_scanned", res.CellsScanned,
 			"cells_updated", res.CellsUpdated,
+			"cells_deleted", res.CellsDeleted,
 			"cells_errored", res.CellsErrored,
 			"errors", res.Errors)
 	case len(res.Errors) > 0:
 		s.logger.WarnContext(s.ctx, "reconcile pass completed with errors",
 			"cells_scanned", res.CellsScanned,
 			"cells_updated", res.CellsUpdated,
+			"cells_deleted", res.CellsDeleted,
 			"cells_errored", res.CellsErrored,
 			"errors", res.Errors)
 	default:
 		s.logger.InfoContext(s.ctx, "reconcile ok",
 			"cells_scanned", res.CellsScanned,
-			"cells_updated", res.CellsUpdated)
+			"cells_updated", res.CellsUpdated,
+			"cells_deleted", res.CellsDeleted)
 	}
 }
 
@@ -288,19 +290,6 @@ func (s *Server) removeStaleSocket() error {
 		return nil
 	}
 	return fmt.Errorf("remove stale socket: %w", err)
-}
-
-// autoDeleteLauncher returns the AutoDeleteLauncher that the RPC service
-// hands a CellDoc to when it sees Spec.AutoDelete=true on a successful
-// CreateCell. The launcher delegates to *local.Client.WatchCellAutoDelete,
-// which spawns the wait-and-cleanup goroutine bound to the daemon context.
-func (s *Server) autoDeleteLauncher() AutoDeleteLauncher {
-	return func(_ context.Context, doc v1beta1.CellDoc) error {
-		// Always pass the daemon's context (s.ctx) — not the per-RPC ctx,
-		// which is cancelled when the CreateCell call returns. The watcher
-		// must outlive the RPC.
-		return s.core.WatchCellAutoDelete(s.ctx, s.logger, doc)
-	}
 }
 
 func (s *Server) writePIDFile() error {

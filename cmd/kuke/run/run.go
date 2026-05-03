@@ -92,7 +92,9 @@ func NewRunCmd() *cobra.Command {
 	cmd.Flags().Bool("rm", false,
 		"Best-effort delete the cell after the root container's task exits "+
 			"(any rc). Daemon-mode only — incompatible with --no-daemon. "+
-			"A daemon crash between task-exit and delete may leave an orphan.")
+			"Cleanup runs from kukeond's reconcile loop, so latency is "+
+			"bounded by the reconcile interval rather than firing the "+
+			"instant the task exits.")
 	_ = viper.BindPFlag(config.KUKE_RUN_RM.ViperKey, cmd.Flags().Lookup("rm"))
 
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)

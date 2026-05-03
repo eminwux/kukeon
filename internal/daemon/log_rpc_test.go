@@ -51,7 +51,7 @@ func (l *logClientFake) LogContainer(
 // since issue #203 dropped the Attachable gate inside LogContainer.
 func TestLogContainer_ContainerNotFound_RPCSurfacesSentinel(t *testing.T) {
 	core := &logClientFake{err: errdefs.ErrContainerNotFound}
-	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core, nil)
+	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core)
 
 	args := &kukeonv1.LogContainerArgs{Doc: v1beta1.ContainerDoc{}}
 	reply := &kukeonv1.LogContainerReply{}
@@ -70,7 +70,7 @@ func TestLogContainer_ContainerNotFound_RPCSurfacesSentinel(t *testing.T) {
 func TestLogContainer_Attachable_RPCReturnsCapturePath(t *testing.T) {
 	const wantPath = "/opt/kukeon/default/default/default/cellA/work/tty/capture"
 	core := &logClientFake{result: kukeonv1.LogContainerResult{HostCapturePath: wantPath}}
-	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core, nil)
+	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core)
 
 	args := &kukeonv1.LogContainerArgs{Doc: v1beta1.ContainerDoc{}}
 	reply := &kukeonv1.LogContainerReply{}
@@ -91,7 +91,7 @@ func TestLogContainer_Attachable_RPCReturnsCapturePath(t *testing.T) {
 func TestLogContainer_NonAttachable_RPCReturnsLogPath(t *testing.T) {
 	const wantPath = "/opt/kukeon/kuke-system/kukeon/kukeon/kukeond/kukeond/log"
 	core := &logClientFake{result: kukeonv1.LogContainerResult{HostLogPath: wantPath}}
-	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core, nil)
+	svc := daemon.NewKukeonV1Service(context.Background(), discardLogger(), core)
 
 	args := &kukeonv1.LogContainerArgs{Doc: v1beta1.ContainerDoc{}}
 	reply := &kukeonv1.LogContainerReply{}
