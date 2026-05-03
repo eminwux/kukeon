@@ -49,11 +49,12 @@ func TestApplyServerConfigurationDefaultsLayered(t *testing.T) {
 	}
 
 	spec := v1beta1.ServerConfigurationSpec{
-		Socket:           "/run/kukeon/from-config.sock",
-		SocketGID:        4242,
-		RunPath:          "/opt/kukeon-from-config",
-		ContainerdSocket: "/run/containerd/from-config.sock",
-		LogLevel:         "warn",
+		Socket:            "/run/kukeon/from-config.sock",
+		SocketGID:         4242,
+		RunPath:           "/opt/kukeon-from-config",
+		ContainerdSocket:  "/run/containerd/from-config.sock",
+		LogLevel:          "warn",
+		ReconcileInterval: "45s",
 	}
 	applyServerConfiguration(cmd, spec)
 
@@ -71,6 +72,9 @@ func TestApplyServerConfigurationDefaultsLayered(t *testing.T) {
 	}
 	if got := viper.GetString(config.KUKEON_ROOT_LOG_LEVEL.ViperKey); got != spec.LogLevel {
 		t.Errorf("LogLevel: got %q, want %q", got, spec.LogLevel)
+	}
+	if got := viper.GetString(config.KUKEOND_RECONCILE_INTERVAL.ViperKey); got != spec.ReconcileInterval {
+		t.Errorf("ReconcileInterval: got %q, want %q", got, spec.ReconcileInterval)
 	}
 }
 

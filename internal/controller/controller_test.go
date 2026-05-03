@@ -108,10 +108,11 @@ type fakeRunner struct {
 	UpdateContainerFn func(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)
 
 	// Refresh methods
-	RefreshRealmFn func(realm intmodel.Realm) (intmodel.Realm, bool, error)
-	RefreshSpaceFn func(space intmodel.Space) (intmodel.Space, bool, error)
-	RefreshStackFn func(stack intmodel.Stack) (intmodel.Stack, bool, error)
-	RefreshCellFn  func(cell intmodel.Cell) (intmodel.Cell, int, error)
+	RefreshRealmFn  func(realm intmodel.Realm) (intmodel.Realm, bool, error)
+	RefreshSpaceFn  func(space intmodel.Space) (intmodel.Space, bool, error)
+	RefreshStackFn  func(stack intmodel.Stack) (intmodel.Stack, bool, error)
+	RefreshCellFn   func(cell intmodel.Cell) (intmodel.Cell, int, error)
+	ReconcileCellFn func(cell intmodel.Cell) (intmodel.Cell, bool, error)
 
 	// Image methods
 	LoadImageFn   func(namespace string, reader io.Reader) ([]string, error)
@@ -538,6 +539,13 @@ func (f *fakeRunner) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error)
 		return f.RefreshCellFn(cell)
 	}
 	return intmodel.Cell{}, 0, errors.New("unexpected call to RefreshCell")
+}
+
+func (f *fakeRunner) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, bool, error) {
+	if f.ReconcileCellFn != nil {
+		return f.ReconcileCellFn(cell)
+	}
+	return intmodel.Cell{}, false, errors.New("unexpected call to ReconcileCell")
 }
 
 func (f *fakeRunner) LoadImage(namespace string, reader io.Reader) ([]string, error) {

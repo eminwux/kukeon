@@ -111,6 +111,10 @@ var (
 	KUKEOND_CONFIGURATION = DefineKV(
 		"KUKEOND_CONFIGURATION", "kukeond/configuration", "/etc/kukeon/kukeond.yaml",
 	)
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKEOND_RECONCILE_INTERVAL = DefineKV(
+		"KUKEOND_RECONCILE_INTERVAL", "kukeond/reconcileInterval", "30s",
+	)
 
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_INIT_REALM = DefineKV("KUKE_INIT_REALM", "kuke/init/realm")

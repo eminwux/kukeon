@@ -165,6 +165,9 @@ func (s *stubController) PurgeContainer(intmodel.Container) (controller.PurgeCon
 	panic("not used")
 }
 func (s *stubController) RefreshAll() (controller.RefreshResult, error) { panic("not used") }
+func (s *stubController) ReconcileCells() (controller.ReconcileResult, error) {
+	panic("not used")
+}
 
 // runCmd builds the cobra command, plugs in a stub controller and a logger,
 // and feeds the supplied stdin payload. Returns the captured stdout/stderr

@@ -93,6 +93,11 @@ type Runner interface {
 	RefreshSpace(space intmodel.Space) (intmodel.Space, bool, error)
 	RefreshStack(stack intmodel.Stack) (intmodel.Stack, bool, error)
 	RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error)
+	// ReconcileCell is the daemon-side counterpart to RefreshCell: it
+	// re-derives the cell's status from cgroup + root-container task state
+	// (so a Ready cell whose root task exits externally flips to Stopped).
+	// Returns the updated cell, whether persistence ran, and any error.
+	ReconcileCell(cell intmodel.Cell) (intmodel.Cell, bool, error)
 
 	GetContainerState(cell intmodel.Cell, containerID string) (intmodel.ContainerState, error)
 

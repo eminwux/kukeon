@@ -86,6 +86,28 @@ spec:
 	}
 }
 
+func TestLoadReconcileInterval(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kukeond.yaml")
+	content := `apiVersion: v1beta1
+kind: ServerConfiguration
+metadata:
+  name: default
+spec:
+  reconcileInterval: 7s
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	doc, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if doc.Spec.ReconcileInterval != "7s" {
+		t.Errorf("ReconcileInterval: got %q, want %q", doc.Spec.ReconcileInterval, "7s")
+	}
+}
+
 func TestLoadWrongKindRejected(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "kukeond.yaml")
@@ -193,6 +215,9 @@ func TestWriteDefaultCreatesFileWithDefaults(t *testing.T) {
 	if doc.Spec.KukeondImage != "" {
 		t.Errorf("Spec.KukeondImage: got %q, want empty (kuke init resolves at runtime)", doc.Spec.KukeondImage)
 	}
+	if doc.Spec.ReconcileInterval != "30s" {
+		t.Errorf("Spec.ReconcileInterval: got %q, want %q", doc.Spec.ReconcileInterval, "30s")
+	}
 
 	// AC: "Header comment explains each field's purpose and default."
 	raw, err := os.ReadFile(path)
@@ -209,6 +234,7 @@ func TestWriteDefaultCreatesFileWithDefaults(t *testing.T) {
 		"# Default: /opt/kukeon",
 		"# Default: /run/containerd/containerd.sock",
 		"# Default: info",
+		"# Default: 30s",
 		`# Default: ""`,
 	} {
 		if !strings.Contains(rawStr, marker) {
