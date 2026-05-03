@@ -209,7 +209,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 				return printErr
 			}
 			if flags.doAttach {
-				return attachAfterRun(cmd, client, cellDoc, flags.containerFlag)
+				return attachAndMaybeAutoDelete(cmd, client, cellDoc, flags)
 			}
 			return nil
 		}
@@ -226,22 +226,35 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return printErr
 	}
 	if flags.doAttach {
-		attachErr := attachAfterRun(cmd, client, cellDoc, flags.containerFlag)
-		if flags.autoDelete {
-			// With -a --rm, the operator's "I'm done" signal is the
-			// attach loop returning, not the root container exiting.
-			// When the attach target is a peer of a long-lived root
-			// (`sleep infinity` is the standard idiom), the root task
-			// never exits on its own and the reconciler's auto-delete
-			// trigger never fires. Send KillCell here so the root
-			// task is SIGKILL'd and the next reconcile pass reaps the
-			// cell. Best-effort per the --rm contract: a cleanup
-			// failure does not override attachErr.
-			autoDeleteAfterAttach(cmd, client, cellDoc)
-		}
-		return attachErr
+		return attachAndMaybeAutoDelete(cmd, client, cellDoc, flags)
 	}
 	return nil
+}
+
+// attachAndMaybeAutoDelete drives the attach loop and, under -a --rm, fires
+// KillCell once the loop returns. Both the create-and-start path and the
+// already-Ready idempotent short-circuit funnel through here so re-running
+// `kuke run -a --rm` against an up cell still gets cleanup on detach
+// (issue #265 regression: the original fix only patched the create path).
+//
+// With -a --rm, the operator's "I'm done" signal is the attach loop
+// returning, not the root container exiting. When the attach target is a
+// peer of a long-lived root (`sleep infinity` is the standard idiom), the
+// root task never exits on its own and the reconciler's auto-delete trigger
+// never fires. KillCell here SIGKILL's the root task so the next reconcile
+// pass reaps the cell. Best-effort per the --rm contract: a cleanup failure
+// does not override attachErr.
+func attachAndMaybeAutoDelete(
+	cmd *cobra.Command,
+	client kukeonv1.Client,
+	doc v1beta1.CellDoc,
+	flags runFlags,
+) error {
+	attachErr := attachAfterRun(cmd, client, doc, flags.containerFlag)
+	if flags.autoDelete {
+		autoDeleteAfterAttach(cmd, client, doc)
+	}
+	return attachErr
 }
 
 // autoDeleteAfterAttach drives the -a --rm cleanup path. KillCell is

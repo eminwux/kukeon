@@ -1554,6 +1554,64 @@ func TestRun_RmNoAttach_DoesNotCallKillCell(t *testing.T) {
 	}
 }
 
+func TestRun_RmAttach_AlreadyReady_StillKillsCellAfterAttachLoopReturns(t *testing.T) {
+	// Idempotent branch regression guard: re-running `kuke run -a --rm`
+	// against an already-Ready cell with matching spec must still fire
+	// KillCell when the attach loop returns. Otherwise a user with a
+	// dangling cell from a pre-fix invocation cannot recover via -a --rm,
+	// reproducing the original #265 symptom.
+	t.Cleanup(viper.Reset)
+
+	existing := v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
+		Spec: v1beta1.CellSpec{
+			RealmID: "my-realm",
+			SpaceID: "my-space",
+			StackID: "my-stack",
+			Tty:     &v1beta1.CellTty{Default: "claude"},
+			Containers: []v1beta1.ContainerSpec{
+				{ID: "root", Root: true, Image: "registry.eminwux.com/busybox:latest"},
+				{ID: "shell", Attachable: true, Image: "registry.eminwux.com/busybox:latest"},
+				{ID: "claude", Attachable: true, Image: "registry.eminwux.com/busybox:latest"},
+			},
+		},
+		Status: v1beta1.CellStatus{State: v1beta1.CellStateReady},
+	}
+	fc := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell:                existing,
+				MetadataExists:      true,
+				CgroupExists:        true,
+				RootContainerExists: true,
+			}, nil
+		},
+		attachContainerFn: attachSuccessFn(),
+		killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+			return kukeonv1.KillCellResult{Killed: true}, nil
+		},
+	}
+	run := &runCapture{}
+	cmd, _ := newCmdWithRun(t, fc, run)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a", "--rm"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d want 0 (short-circuit on Ready)", fc.createCalls)
+	}
+	if run.calls != 1 {
+		t.Fatalf("attach loop calls=%d want 1", run.calls)
+	}
+	if fc.killCalls != 1 {
+		t.Fatalf("KillCell calls=%d want 1 (idempotent branch must also fire cleanup)", fc.killCalls)
+	}
+	if got := fc.killDoc.Metadata.Name; got != "my-cell" {
+		t.Errorf("KillCell target=%q want my-cell", got)
+	}
+}
+
 func TestRun_AttachNoRm_DoesNotCallKillCell(t *testing.T) {
 	// Defensive guard: -a alone must not engage cleanup. KillCell only
 	// fires when --rm is also set.
