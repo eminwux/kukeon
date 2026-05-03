@@ -92,10 +92,13 @@ func NewRunCmd() *cobra.Command {
 	cmd.Flags().Bool("rm", false,
 		"Best-effort delete the cell after it is no longer needed "+
 			"(any rc). Without -a, the trigger is the root container's "+
-			"task exit. With -a, the trigger is the attach loop "+
-			"returning (clean detach, exit, or error) — the CLI then "+
-			"sends KillCell so a long-lived root (e.g. `sleep infinity`) "+
-			"does not pin the cell. Daemon-mode only — incompatible "+
+			"task exit. With -a, the trigger is the attach loop exiting "+
+			"because the workload terminated, the peer hung up, or an "+
+			"unrecoverable controller error fired — the CLI then sends "+
+			"KillCell so a long-lived root (e.g. `sleep infinity`) does "+
+			"not pin the cell. A clean ^]^] detach is NOT a trigger: the "+
+			"cell stays alive so the operator can re-attach later "+
+			"(parity with `kuke attach`). Daemon-mode only — incompatible "+
 			"with --no-daemon. Cleanup runs from kukeond's reconcile "+
 			"loop, so latency is bounded by the reconcile interval "+
 			"rather than firing the instant the trigger fires.")
@@ -231,27 +234,32 @@ func runRun(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// attachAndMaybeAutoDelete drives the attach loop and, under -a --rm, fires
-// KillCell once the loop returns. Both the create-and-start path and the
-// already-Ready idempotent short-circuit funnel through here so re-running
-// `kuke run -a --rm` against an up cell still gets cleanup on detach
-// (issue #265 regression: the original fix only patched the create path).
+// attachAndMaybeAutoDelete drives the attach loop and, under -a --rm,
+// fires KillCell once the loop returns — but only if the loop exited
+// because the workload ended (peer hangup, shell exit, controller
+// error). A clean ^]^] detach (issue #279) leaves the cell alive so the
+// operator can re-attach later, matching `kuke attach`'s exit-0
+// semantics.
 //
-// With -a --rm, the operator's "I'm done" signal is the attach loop
-// returning, not the root container exiting. When the attach target is a
-// peer of a long-lived root (`sleep infinity` is the standard idiom), the
-// root task never exits on its own and the reconciler's auto-delete trigger
-// never fires. KillCell here SIGKILL's the root task so the next reconcile
-// pass reaps the cell. Best-effort per the --rm contract: a cleanup failure
-// does not override attachErr.
+// Both the create-and-start path and the already-Ready idempotent
+// short-circuit funnel through here so re-running `kuke run -a --rm`
+// against an up cell still gets cleanup on workload exit (issue #265
+// regression: the original fix only patched the create path).
+//
+// When the attach target is a peer of a long-lived root (`sleep
+// infinity` is the standard idiom), the root task never exits on its
+// own and the reconciler's auto-delete trigger never fires. KillCell on
+// the workload-ended path SIGKILL's the root task so the next reconcile
+// pass reaps the cell. Best-effort per the --rm contract: a cleanup
+// failure does not override attachErr.
 func attachAndMaybeAutoDelete(
 	cmd *cobra.Command,
 	client kukeonv1.Client,
 	doc v1beta1.CellDoc,
 	flags runFlags,
 ) error {
-	attachErr := attachAfterRun(cmd, client, doc, flags.containerFlag)
-	if flags.autoDelete {
+	detached, attachErr := attachAfterRun(cmd, client, doc, flags.containerFlag)
+	if flags.autoDelete && !detached {
 		autoDeleteAfterAttach(cmd, client, doc)
 	}
 	return attachErr
@@ -275,20 +283,27 @@ func autoDeleteAfterAttach(cmd *cobra.Command, client kukeonv1.Client, doc v1bet
 	}
 }
 
-// attachAfterRun resolves the post-start attach target per the documented
-// precedence and drives the in-process sbsh attach loop. The selection runs
-// against cellDoc.Spec rather than re-querying the daemon: by this point the
-// resolved doc is what we just told the daemon to create, so the attachable
-// set the user authored is authoritative.
+// attachAfterRun resolves the post-start attach target per the
+// documented precedence and drives the in-process sbsh attach loop.
+// The selection runs against cellDoc.Spec rather than re-querying the
+// daemon: by this point the resolved doc is what we just told the
+// daemon to create, so the attachable set the user authored is
+// authoritative.
+//
+// Returns the (detached, err) tri-state from runAttachLoop. A
+// pre-attach selection failure is reported as (false, err) so
+// attachAndMaybeAutoDelete still fires KillCell — the operator asked
+// for --rm and the cell exists; whether or not the attach loop ever ran
+// does not change that intent.
 func attachAfterRun(
 	cmd *cobra.Command,
 	client kukeonv1.Client,
 	doc v1beta1.CellDoc,
 	containerFlag string,
-) error {
+) (bool, error) {
 	target, err := pickAttachTarget(doc.Spec, doc.Metadata.Name, containerFlag)
 	if err != nil {
-		return err
+		return false, err
 	}
 	return runAttachLoop(cmd, client, doc, target)
 }

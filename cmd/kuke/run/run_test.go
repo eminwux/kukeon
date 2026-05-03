@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -1400,13 +1401,15 @@ spec:
 	}
 }
 
-func TestRun_RmAttach_KillsCellAfterAttachLoopReturns(t *testing.T) {
-	// Issue #265: with -a --rm and a long-lived root (`sleep infinity`)
-	// peering an attachable container, the root task never exits when
-	// the operator detaches, so the reconciler's auto-delete trigger
-	// never fires. The CLI must call KillCell when the attach loop
-	// returns so the daemon's reconciler reaps the cell on the next
-	// tick.
+func TestRun_RmAttach_KeepsCellAliveOnCleanDetach(t *testing.T) {
+	// Issue #279: a clean ^]^] detach must NOT trigger the -a --rm
+	// KillCell. The operator may want to re-attach later — same
+	// semantics as `kuke attach`. Only workload-end signals (peer
+	// hangup, shell exit, controller error) should fire cleanup.
+	//
+	// Inject attach.ErrDetached as the attach-loop result; that is
+	// what sbsh v0.10.1 returns when the in-band detach keystroke
+	// fires.
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{
@@ -1418,12 +1421,52 @@ func TestRun_RmAttach_KillsCellAfterAttachLoopReturns(t *testing.T) {
 			return kukeonv1.KillCellResult{Killed: true}, nil
 		},
 	}
-	run := &runCapture{}
-	cmd, _ := newCmdWithRun(t, fc, run)
+	run := &runErrorCapture{
+		err: fmt.Errorf("wrapped by harness: %w", sbshattach.ErrDetached),
+	}
+	cmd, _ := newCmdWithRunFn(t, fc, run.fn)
 	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a", "--rm"})
 
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
+		t.Fatalf("Execute: %v (clean detach must surface as exit 0)", err)
+	}
+	if !fc.createDoc.Spec.AutoDelete {
+		t.Errorf("CreateCell received AutoDelete=false; --rm must set it true even when clean detach skips KillCell")
+	}
+	if run.calls != 1 {
+		t.Fatalf("attach loop calls=%d want 1", run.calls)
+	}
+	if fc.killCalls != 0 {
+		t.Fatalf("KillCell calls=%d want 0 (clean detach must leave cell alive for re-attach)", fc.killCalls)
+	}
+}
+
+func TestRun_RmAttach_KillsCellOnPeerClosed(t *testing.T) {
+	// Issue #265: with -a --rm and a long-lived root (`sleep infinity`)
+	// peering an attachable container, the root task never exits when
+	// the workload terminates on the peer side, so the reconciler's
+	// auto-delete trigger never fires. The CLI must call KillCell when
+	// the attach loop returns peer-closed so the daemon's reconciler
+	// reaps the cell on the next tick.
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: attachSuccessFn(),
+		killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+			return kukeonv1.KillCellResult{Killed: true}, nil
+		},
+	}
+	run := &runErrorCapture{
+		err: fmt.Errorf("wrapped by harness: %w", sbshattach.ErrPeerClosed),
+	}
+	cmd, _ := newCmdWithRunFn(t, fc, run.fn)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a", "--rm"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v (peer-closed must surface as exit 0 — workload ended)", err)
 	}
 	if !fc.createDoc.Spec.AutoDelete {
 		t.Errorf("CreateCell received AutoDelete=false; --rm must set it true")
@@ -1432,7 +1475,7 @@ func TestRun_RmAttach_KillsCellAfterAttachLoopReturns(t *testing.T) {
 		t.Fatalf("attach loop calls=%d want 1", run.calls)
 	}
 	if fc.killCalls != 1 {
-		t.Fatalf("KillCell calls=%d want 1 (must fire after attach loop returns)", fc.killCalls)
+		t.Fatalf("KillCell calls=%d want 1 (peer-closed must trigger cleanup)", fc.killCalls)
 	}
 	if got := fc.killDoc.Metadata.Name; got != "my-cell" {
 		t.Errorf("KillCell target=%q want my-cell", got)
@@ -1472,10 +1515,11 @@ func TestRun_RmAttach_KillsCellEvenWhenAttachLoopErrors(t *testing.T) {
 }
 
 func TestRun_RmAttach_KillCellFailureDoesNotMaskAttachExit(t *testing.T) {
-	// A KillCell RPC failure is logged to stderr but does not become the
-	// exit error: the operator has already detached, --rm is documented
-	// best-effort, and the daemon's reconciler is the safety net for any
-	// orphaned cell.
+	// On the workload-ended path (peer hangup / shell exit), a KillCell
+	// RPC failure is logged to stderr but does not become the exit
+	// error: --rm is documented best-effort and the daemon's reconciler
+	// is the safety net for any orphaned cell. The attach loop result
+	// dictates the run rc.
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{
@@ -1487,12 +1531,12 @@ func TestRun_RmAttach_KillCellFailureDoesNotMaskAttachExit(t *testing.T) {
 			return kukeonv1.KillCellResult{}, errors.New("daemon RPC: connection refused")
 		},
 	}
-	run := &runCapture{}
+	run := &runCapture{err: fmt.Errorf("wrapped by harness: %w", sbshattach.ErrPeerClosed)}
 	cmd, buf := newCmdWithRun(t, fc, run)
 	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a", "--rm"})
 
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v (a KillCell failure on a clean detach must not surface as a run error)", err)
+		t.Fatalf("Execute: %v (KillCell failure on workload-end must not surface as a run error)", err)
 	}
 	if fc.killCalls != 1 {
 		t.Fatalf("KillCell calls=%d want 1", fc.killCalls)
@@ -1506,7 +1550,9 @@ func TestRun_RmAttach_KillCellNotFound_Silent(t *testing.T) {
 	// If the daemon's reconciler raced ahead and already reaped the cell
 	// (e.g. attach target was the root and exiting it triggered the
 	// existing root-task path), KillCell returns ErrCellNotFound. That
-	// is the expected idempotent outcome — no stderr noise.
+	// is the expected idempotent outcome — no stderr noise. The attach
+	// loop must report a workload-end exit (peer hangup) so KillCell
+	// fires in the first place under the issue #279 semantics.
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{
@@ -1518,7 +1564,7 @@ func TestRun_RmAttach_KillCellNotFound_Silent(t *testing.T) {
 			return kukeonv1.KillCellResult{}, errdefs.ErrCellNotFound
 		},
 	}
-	run := &runCapture{}
+	run := &runCapture{err: fmt.Errorf("wrapped by harness: %w", sbshattach.ErrPeerClosed)}
 	cmd, buf := newCmdWithRun(t, fc, run)
 	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a", "--rm"})
 
@@ -1554,12 +1600,13 @@ func TestRun_RmNoAttach_DoesNotCallKillCell(t *testing.T) {
 	}
 }
 
-func TestRun_RmAttach_AlreadyReady_StillKillsCellAfterAttachLoopReturns(t *testing.T) {
+func TestRun_RmAttach_AlreadyReady_StillKillsCellOnPeerClosed(t *testing.T) {
 	// Idempotent branch regression guard: re-running `kuke run -a --rm`
 	// against an already-Ready cell with matching spec must still fire
-	// KillCell when the attach loop returns. Otherwise a user with a
-	// dangling cell from a pre-fix invocation cannot recover via -a --rm,
-	// reproducing the original #265 symptom.
+	// KillCell when the attach loop reports workload-end (peer hangup
+	// here). Otherwise a user with a dangling cell from a pre-fix
+	// invocation cannot recover via -a --rm, reproducing the original
+	// #265 symptom.
 	t.Cleanup(viper.Reset)
 
 	existing := v1beta1.CellDoc{
@@ -1591,7 +1638,7 @@ func TestRun_RmAttach_AlreadyReady_StillKillsCellAfterAttachLoopReturns(t *testi
 			return kukeonv1.KillCellResult{Killed: true}, nil
 		},
 	}
-	run := &runCapture{}
+	run := &runCapture{err: fmt.Errorf("wrapped by harness: %w", sbshattach.ErrPeerClosed)}
 	cmd, _ := newCmdWithRun(t, fc, run)
 	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a", "--rm"})
 

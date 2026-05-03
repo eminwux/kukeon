@@ -19,6 +19,7 @@ package attach_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -278,12 +279,12 @@ func TestAttach_ExplicitContainer_Attachable_Succeeds(t *testing.T) {
 	}
 }
 
-// TestAttach_RunReturnsCleanDetachError covers the regression from #147:
-// when the user presses Ctrl+] Ctrl+], sbsh's controller fires the
-// Detach RPC and the embedded read/write copy goroutines exit, but that
-// teardown surfaces as "close requested: read/write routines exited"
-// from pkg/attach.Run. The wrapper must recognise that signature as a
-// benign session end and return nil so `kuke attach` exits 0.
+// TestAttach_RunReturnsCleanDetachError covers the regression from
+// #147: when the user presses Ctrl+] Ctrl+], sbsh's controller fires
+// the Detach RPC and pkg/attach.Run returns attach.ErrDetached
+// (sbsh#192, available since sbsh v0.10.1). The wrapper must recognise
+// the public sentinel as a benign session end and return nil so `kuke
+// attach` exits 0.
 func TestAttach_RunReturnsCleanDetachError(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
@@ -292,7 +293,7 @@ func TestAttach_RunReturnsCleanDetachError(t *testing.T) {
 			return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
 		},
 	}
-	cleanDetachErr := errors.New("close requested: read/write routines exited")
+	cleanDetachErr := fmt.Errorf("wrapped by harness: %w", sbshattach.ErrDetached)
 	run := &runReturning{err: cleanDetachErr}
 	cmd := newCmdWithCtx(t, fc, nil)
 	cmd.SetContext(context.WithValue(cmd.Context(), attachcmd.MockRunKey{}, attachcmd.RunFn(run.fn)))
@@ -303,6 +304,36 @@ func TestAttach_RunReturnsCleanDetachError(t *testing.T) {
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute returned %v on clean-detach error, want nil", err)
+	}
+	if run.calls != 1 {
+		t.Fatalf("attach.Run called %d times, want 1", run.calls)
+	}
+}
+
+// TestAttach_RunReturnsPeerClosedError mirrors the clean-detach case for
+// the other benign session-end signal: pkg/attach.Run returns
+// attach.ErrPeerClosed when the remote terminal drops the IO connection
+// (workload exited, peer crashed). For `kuke attach` (a peer attach,
+// not the cell owner), this is also exit 0 — same semantics as detach.
+func TestAttach_RunReturnsPeerClosedError(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
+			return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
+		},
+	}
+	peerClosedErr := fmt.Errorf("wrapped by harness: %w", sbshattach.ErrPeerClosed)
+	run := &runReturning{err: peerClosedErr}
+	cmd := newCmdWithCtx(t, fc, nil)
+	cmd.SetContext(context.WithValue(cmd.Context(), attachcmd.MockRunKey{}, attachcmd.RunFn(run.fn)))
+	cmd.SetArgs([]string{
+		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
+		"--container", "work",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute returned %v on peer-closed error, want nil", err)
 	}
 	if run.calls != 1 {
 		t.Fatalf("attach.Run called %d times, want 1", run.calls)
