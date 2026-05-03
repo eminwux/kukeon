@@ -90,11 +90,15 @@ func NewRunCmd() *cobra.Command {
 		"Container to attach to (only valid with -a; must be attachable)")
 	_ = viper.BindPFlag(config.KUKE_RUN_CONTAINER.ViperKey, cmd.Flags().Lookup("container"))
 	cmd.Flags().Bool("rm", false,
-		"Best-effort delete the cell after the root container's task exits "+
-			"(any rc). Daemon-mode only — incompatible with --no-daemon. "+
-			"Cleanup runs from kukeond's reconcile loop, so latency is "+
-			"bounded by the reconcile interval rather than firing the "+
-			"instant the task exits.")
+		"Best-effort delete the cell after it is no longer needed "+
+			"(any rc). Without -a, the trigger is the root container's "+
+			"task exit. With -a, the trigger is the attach loop "+
+			"returning (clean detach, exit, or error) — the CLI then "+
+			"sends KillCell so a long-lived root (e.g. `sleep infinity`) "+
+			"does not pin the cell. Daemon-mode only — incompatible "+
+			"with --no-daemon. Cleanup runs from kukeond's reconcile "+
+			"loop, so latency is bounded by the reconcile interval "+
+			"rather than firing the instant the trigger fires.")
 	_ = viper.BindPFlag(config.KUKE_RUN_RM.ViperKey, cmd.Flags().Lookup("rm"))
 
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
@@ -222,9 +226,40 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return printErr
 	}
 	if flags.doAttach {
-		return attachAfterRun(cmd, client, cellDoc, flags.containerFlag)
+		attachErr := attachAfterRun(cmd, client, cellDoc, flags.containerFlag)
+		if flags.autoDelete {
+			// With -a --rm, the operator's "I'm done" signal is the
+			// attach loop returning, not the root container exiting.
+			// When the attach target is a peer of a long-lived root
+			// (`sleep infinity` is the standard idiom), the root task
+			// never exits on its own and the reconciler's auto-delete
+			// trigger never fires. Send KillCell here so the root
+			// task is SIGKILL'd and the next reconcile pass reaps the
+			// cell. Best-effort per the --rm contract: a cleanup
+			// failure does not override attachErr.
+			autoDeleteAfterAttach(cmd, client, cellDoc)
+		}
+		return attachErr
 	}
 	return nil
+}
+
+// autoDeleteAfterAttach drives the -a --rm cleanup path. KillCell is
+// idempotent — if the attach target was the root and the user typed
+// `exit`, the root task is already gone and KillCell just confirms it;
+// the kill+delete sequence in autoDeleteCell tolerates a missing task.
+// A KillCell failure (daemon down, RPC error, cell already gone) is
+// reported but not returned: the operator has detached, --rm is
+// best-effort, and the daemon's reconciler still owns final cleanup.
+func autoDeleteAfterAttach(cmd *cobra.Command, client kukeonv1.Client, doc v1beta1.CellDoc) {
+	if _, err := client.KillCell(cmd.Context(), doc); err != nil {
+		if errors.Is(err, errdefs.ErrCellNotFound) {
+			return
+		}
+		fmt.Fprintf(cmd.ErrOrStderr(),
+			"kuke run: --rm cleanup: failed to kill cell %q: %v\n",
+			doc.Metadata.Name, err)
+	}
 }
 
 // attachAfterRun resolves the post-start attach target per the documented
