@@ -437,6 +437,59 @@ func TestCellRoundTripV1Beta1_NetworkBridgeName(t *testing.T) {
 	}
 }
 
+// TestCellRoundTripV1Beta1_ReadyObserved covers the persistence side of
+// the AutoDelete Ready-gate from #269: the latch must round-trip
+// external→internal→external so it survives daemon restarts. Without
+// it, a `kuke run --rm` cell that was Ready at shutdown would lose the
+// latch on restart and miss its cleanup tick.
+func TestCellRoundTripV1Beta1_ReadyObserved(t *testing.T) {
+	input := ext.CellDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCell,
+		Metadata: ext.CellMetadata{
+			Name:   "cell-rm",
+			Labels: map[string]string{},
+		},
+		Spec: ext.CellSpec{
+			ID:         "cell-id-rm",
+			RealmID:    "realm0",
+			SpaceID:    "space0",
+			StackID:    "stack0",
+			Containers: []ext.ContainerSpec{},
+			AutoDelete: true,
+		},
+		Status: ext.CellStatus{
+			State:         ext.CellStateReady,
+			CgroupPath:    "/sys/fs/cgroup/cell-rm",
+			ReadyObserved: true,
+		},
+	}
+
+	internal, version, err := apischeme.NormalizeCell(input)
+	if err != nil {
+		t.Fatalf("NormalizeCell: %v", err)
+	}
+	if !internal.Status.ReadyObserved {
+		t.Errorf("internal ReadyObserved = false, want true")
+	}
+
+	output, err := apischeme.BuildCellExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildCellExternalFromInternal: %v", err)
+	}
+	if !output.Status.ReadyObserved {
+		t.Errorf("external ReadyObserved = false, want true")
+	}
+
+	rendered, err := yaml.Marshal(output)
+	if err != nil {
+		t.Fatalf("yaml.Marshal: %v", err)
+	}
+	if !strings.Contains(string(rendered), "readyObserved: true") {
+		t.Errorf("rendered YAML missing readyObserved entry; got:\n%s", string(rendered))
+	}
+}
+
 // TestCellRoundTripV1Beta1_AutoDelete locks down the AC for `kuke run --rm`:
 // the AutoDelete bool must survive the external→internal→external round-trip
 // and serialize as YAML so a daemon restart can re-read the auto-delete intent

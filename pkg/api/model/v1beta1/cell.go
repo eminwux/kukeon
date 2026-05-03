@@ -58,10 +58,16 @@ type CellTty struct {
 }
 
 type CellStatus struct {
-	State      CellState         `json:"state"             yaml:"state"`
-	CgroupPath string            `json:"cgroupPath"        yaml:"cgroupPath"`
-	Network    CellNetworkStatus `json:"network,omitempty" yaml:"network,omitempty"`
-	Containers []ContainerStatus `json:"containers"        yaml:"containers"`
+	State      CellState         `json:"state"                   yaml:"state"`
+	CgroupPath string            `json:"cgroupPath"              yaml:"cgroupPath"`
+	Network    CellNetworkStatus `json:"network,omitempty"       yaml:"network,omitempty"`
+	Containers []ContainerStatus `json:"containers"              yaml:"containers"`
+	// ReadyObserved is the persisted form of the one-way latch the
+	// reconciler uses to gate Spec.AutoDelete cleanup. Once a cell has
+	// been observed Ready it stays true across daemon restarts so that
+	// cleanup of a `kuke run --rm` cell that was already Ready at
+	// shutdown still fires on the next tick after restart.
+	ReadyObserved bool `json:"readyObserved,omitempty" yaml:"readyObserved,omitempty"`
 }
 
 // CellNetworkStatus exposes the host-side bridge a cell is attached to.

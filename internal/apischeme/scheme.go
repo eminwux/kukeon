@@ -817,7 +817,8 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 				Network: intmodel.CellNetworkStatus{
 					BridgeName: in.Status.Network.BridgeName,
 				},
-				Containers: convertContainerStatusesToInternal(in.Status.Containers),
+				Containers:    convertContainerStatusesToInternal(in.Status.Containers),
+				ReadyObserved: in.Status.ReadyObserved,
 			},
 		}
 
@@ -876,7 +877,8 @@ func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ex
 				Network: ext.CellNetworkStatus{
 					BridgeName: in.Status.Network.BridgeName,
 				},
-				Containers: buildContainerStatusesExternalFromInternal(in.Status.Containers),
+				Containers:    buildContainerStatusesExternalFromInternal(in.Status.Containers),
+				ReadyObserved: in.Status.ReadyObserved,
 			},
 		}
 

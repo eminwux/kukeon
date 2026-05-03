@@ -384,13 +384,18 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 			"cell", cell.Metadata.Name, "error", err)
 	}
 	cell.Status.State = newState
+	cell.Status.ReadyObserved = latchReadyObserved(
+		originalStatus.ReadyObserved, originalStatus.State, newState)
 
-	if cell.Spec.AutoDelete && cellStateAutoDeleteTriggers(newState) {
+	if shouldAutoDeleteCell(cell.Spec.AutoDelete, newState, cell.Status.ReadyObserved) {
 		return r.autoDeleteCell(cell)
 	}
 
 	updated := false
 	if originalStatus.State != cell.Status.State {
+		updated = true
+	}
+	if originalStatus.ReadyObserved != cell.Status.ReadyObserved {
 		updated = true
 	}
 	if !containerStatusesEqual(originalStatus.Containers, cell.Status.Containers) {
@@ -436,6 +441,35 @@ func (r *Exec) autoDeleteCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutco
 // nuke the cell — wait for the next pass.
 func cellStateAutoDeleteTriggers(s intmodel.CellState) bool {
 	return s == intmodel.CellStateStopped || s == intmodel.CellStateFailed
+}
+
+// latchReadyObserved is the one-way latch the reconciler uses to decide
+// whether a cell has ever been Ready. A cell that has never reached
+// Ready must not be auto-deleted: GetContainerState returns Stopped
+// for a not-yet-existing container (the "container does not exist in
+// containerd" branch in container_state.go), and the reconciler ticking
+// inside the gap between cgroup creation and root-container
+// registration in CreateCell would otherwise reap an in-flight cell.
+//
+// Inputs that latch ReadyObserved true:
+//   - the prior persisted ReadyObserved (the latch survives across
+//     ticks and across daemon restarts via CellStatus serialization),
+//   - newState == Ready (the current observation),
+//   - originalStatus.State == Ready (a synchronous Start persisted
+//     Ready into the cell metadata before this reconciler tick saw it,
+//     even on the first tick after a restart).
+func latchReadyObserved(prior bool, originalState, newState intmodel.CellState) bool {
+	return prior ||
+		newState == intmodel.CellStateReady ||
+		originalState == intmodel.CellStateReady
+}
+
+// shouldAutoDeleteCell returns true when the reconciler should kick off
+// AutoDelete cleanup. The latch (readyObserved) is the gate that
+// prevents an in-flight CreateCell from being reaped before the root
+// container has come up; see latchReadyObserved.
+func shouldAutoDeleteCell(autoDelete bool, newState intmodel.CellState, readyObserved bool) bool {
+	return autoDelete && cellStateAutoDeleteTriggers(newState) && readyObserved
 }
 
 // deriveCellStateFromRootContainer resolves the cell's state from the root

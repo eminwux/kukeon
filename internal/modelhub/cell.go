@@ -52,6 +52,16 @@ type CellStatus struct {
 	CgroupPath string
 	Network    CellNetworkStatus
 	Containers []ContainerStatus
+	// ReadyObserved is a one-way latch set the first time the cell has
+	// been observed Ready by ReconcileCell — either via the freshly
+	// derived state or via a persisted Ready state from a prior
+	// observation (or a synchronous Start that wrote Ready before the
+	// reconciler got there). The latch gates Spec.AutoDelete cleanup so
+	// a cell that has never been Ready (e.g. mid-creation, between
+	// cgroup setup and root-container registration, where
+	// GetContainerState reports Stopped for a not-yet-existing
+	// container) cannot be reaped by the reconciler.
+	ReadyObserved bool
 }
 
 // CellNetworkStatus records the network endpoints the cell is attached to.
