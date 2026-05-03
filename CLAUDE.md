@@ -14,7 +14,7 @@ Build, test, and smoke-test conventions for anyone — human or agent — workin
 
 | Realm         | Containerd namespace    | Purpose                                                      |
 | ------------- | ----------------------- | ------------------------------------------------------------ |
-| `default`     | `kukeon.io`             | User workloads. Created empty so `kuke create …` has a home. |
+| `default`     | `default.kukeon.io`     | User workloads. Created empty so `kuke create …` has a home. |
 | `kuke-system` | `kuke-system.kukeon.io` | System workloads owned by kukeon itself.                     |
 
 The `kukeond` daemon runs inside the **`kuke-system`** realm — specifically as a container inside the cell `kuke-system / kukeon / kukeon / kukeond` (realm / space / stack / cell). The `default` realm is deliberately left user-owned so `kuke purge --cascade` on it can never take down the daemon.
