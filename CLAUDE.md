@@ -36,7 +36,7 @@ The daemon-parity tail of the output (the regression guard) must read:
 ```
 NAME         NAMESPACE              STATE  CGROUP
 -----------  ---------------------  -----  -------------------
-default      kukeon.io              Ready  /kukeon/default
+default      default.kukeon.io      Ready  /kukeon/default
 kuke-system  kuke-system.kukeon.io  Ready  /kukeon/kuke-system
 ```
 
