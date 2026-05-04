@@ -11,7 +11,7 @@ require (
 	github.com/containerd/typeurl/v2 v2.2.3
 	github.com/containernetworking/cni v1.3.0
 	github.com/creack/pty v1.1.24
-	github.com/eminwux/sbsh v0.10.0
+	github.com/eminwux/sbsh v0.10.1
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/runtime-spec v1.2.1
 	github.com/spf13/cobra v1.10.1

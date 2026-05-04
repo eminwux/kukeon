@@ -23,6 +23,7 @@ import (
 	"os"
 	"strings"
 
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -107,13 +108,24 @@ func formatAttachableList(spec v1beta1.CellSpec) string {
 
 // runAttachLoop resolves the per-container sbsh control socket via the
 // daemon's AttachContainer RPC and drives the in-process attach loop.
-// Returns nil on clean detach.
+// Returns the tri-state used by the -a --rm cleanup decision in
+// attachAndMaybeAutoDelete:
+//
+//   - detached=true,  err=nil — operator pressed ^]^] (or peer issued
+//     a Detach RPC). Cell must stay alive.
+//   - detached=false, err=nil — peer dropped the connection (workload
+//     exited / hung up). Surface exit 0; -a --rm fires KillCell so a
+//     long-lived root does not pin the cell.
+//   - detached=false, err≠nil — pre-attach setup error or unrecoverable
+//     controller error. Surface to the user; -a --rm still fires
+//     KillCell because a half-detached session would otherwise leak
+//     the cell.
 func runAttachLoop(
 	cmd *cobra.Command,
 	client kukeonv1.Client,
 	doc v1beta1.CellDoc,
 	container string,
-) error {
+) (bool, error) {
 	containerDoc := v1beta1.ContainerDoc{
 		APIVersion: v1beta1.APIVersionV1Beta1,
 		Kind:       v1beta1.KindContainer,
@@ -133,26 +145,36 @@ func runAttachLoop(
 	result, err := client.AttachContainer(cmd.Context(), containerDoc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrAttachNotSupported) {
-			return fmt.Errorf("container %q in cell %q is not attachable: %w",
+			return false, fmt.Errorf("container %q in cell %q is not attachable: %w",
 				container, doc.Metadata.Name, err)
 		}
 		if errors.Is(err, errdefs.ErrContainerNotFound) {
-			return fmt.Errorf("container %q not found in cell %q",
+			return false, fmt.Errorf("container %q not found in cell %q",
 				container, doc.Metadata.Name)
 		}
-		return err
+		return false, err
 	}
 	if result.HostSocketPath == "" {
-		return fmt.Errorf("daemon returned empty HostSocketPath for container %q", container)
+		return false, fmt.Errorf("daemon returned empty HostSocketPath for container %q", container)
 	}
 
 	run := resolveRun(cmd)
-	return run(cmd.Context(), attach.Options{
+	runErr := run(cmd.Context(), attach.Options{
 		SocketPath: result.HostSocketPath,
 		Stdin:      os.Stdin,
 		Stdout:     os.Stdout,
 		Stderr:     os.Stderr,
 	})
+	switch kukeshared.ClassifyAttachExit(runErr) {
+	case kukeshared.AttachExitDetached:
+		return true, nil
+	case kukeshared.AttachExitPeerClosed:
+		return false, nil
+	case kukeshared.AttachExitError:
+		return false, runErr
+	default:
+		return false, runErr
+	}
 }
 
 func resolveRun(cmd *cobra.Command) runFn {
