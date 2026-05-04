@@ -33,6 +33,7 @@ all: clean kill $(BINS)
 .PHONY: release
 release: release-build
 
+.PHONY: kuke kukeond
 kuke:
 	go build \
 	-o kuke \
