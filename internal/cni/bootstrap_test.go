@@ -69,7 +69,22 @@ func TestBootstrapCNI(t *testing.T) {
 		},
 		{
 			name: "success with empty directories (uses defaults)",
-			setup: func(_ *testing.T, _ string) (string, string, string) {
+			setup: func(t *testing.T, _ string) (string, string, string) {
+				// This subtest exercises the production-default path —
+				// BootstrapCNI("","","") resolves to /opt/cni/{net.d,cache,bin},
+				// so it cannot be substituted with a tempdir without losing
+				// the tripwire. Skip on hosts where /opt/cni isn't writable
+				// (typical of non-root `go test` runs); under root or in
+				// privileged CI the subtest still runs.
+				if err := os.MkdirAll("/opt/cni", 0o750); err != nil {
+					t.Skipf("skip: /opt/cni not creatable by current user: %v", err)
+				}
+				probe, err := os.CreateTemp("/opt/cni", ".bootstrap-probe-*")
+				if err != nil {
+					t.Skipf("skip: /opt/cni not writable by current user: %v", err)
+				}
+				probe.Close()
+				_ = os.Remove(probe.Name())
 				return "", "", ""
 			},
 			wantReport: func(t *testing.T, report cni.BootstrapReport) {
