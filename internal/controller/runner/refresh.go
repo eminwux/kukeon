@@ -341,54 +341,82 @@ func (r *Exec) refreshContainerStatus(cell intmodel.Cell, containerSpec *intmode
 // ReconcileCell is the daemon-side counterpart to RefreshCell. Where
 // RefreshCell derives cell.Status.State from cgroup existence alone (so
 // `kuke refresh` keeps its current shape), ReconcileCell additionally
-// considers the root container's task state — which is what flips a Ready
-// cell to Stopped when an operator runs `ctr task kill` outside of kukeon.
+// considers container task state — which is what flips a Ready cell to
+// Stopped when an operator runs `ctr task kill` outside of kukeon, or
+// when the cell's non-root workloads have all exited.
 //
-// State derivation:
+// State derivation (see deriveCellState):
 //   - cgroup check error or cgroup absent → Unknown
-//   - cgroup present, no root container in spec → Ready (cgroup-only cell)
-//   - cgroup present, root container task running/created/paused → Ready
-//   - cgroup present, root container missing in containerd or task
-//     stopped/unknown → Stopped
+//   - cgroup present, no non-root container in spec (kukeond-style or
+//     cgroup-only cell) → derived from the root container's task state
+//     (the legacy behavior; root *is* the workload here)
+//   - cgroup present, at least one non-root container in spec → derived
+//     from the union of non-root container task states (Ready if any
+//     non-root is active; Stopped if every non-root is Stopped/Failed/
+//     non-existent; Unknown if any non-root reads back Unknown — the
+//     defensive read-side check that pairs with #301)
 //
-// Container statuses are also re-populated so callers (and `kuke get cell`)
-// see up-to-date per-container state.
+// Container statuses are populated up front so the derivation reads
+// them straight from the snapshot instead of re-querying containerd
+// (and so `kuke get cell` sees the same per-container view the
+// reconciler decided on).
 //
-// AutoDelete: when Spec.AutoDelete is set and the freshly derived state is
-// Stopped or Failed, the reconciler kills + deletes the cell instead of
-// persisting the state transition. This subsumes the per-cell `kuke run
-// --rm` watcher (#161 unblocks the move): a single, restart-resilient
-// ticker is enough, no goroutine-per-cell, and an AutoDelete cell created
-// before a daemon restart still gets cleaned up on the next tick after
-// the daemon is back. Errors during kill/delete are returned to the
-// caller so the loop's per-pass `Errors` slice records them and the cell
-// is preserved for retry on the next tick (best-effort, like the watcher
-// it replaces).
+// Wind-down side-effects: when the derivation flips to Stopped/Failed
+// and the cell has at least one non-root container in spec and the
+// root container task is still running, the reconciler kills the cell
+// so the root container shell stops too. Two flavors:
+//
+//   - AutoDelete=true: autoDeleteCell runs (KillCell + DeleteCell) and
+//     the cell metadata is removed. Subsumes the per-cell
+//     `kuke run --rm` watcher.
+//   - AutoDelete=false: windDownCell runs (KillCell only). The cell
+//     metadata is preserved in Stopped state for the operator to
+//     `kuke delete` explicitly — a long-lived `sleep infinity` root
+//     does not get to hold the cell open after every workload has
+//     exited.
+//
+// Both flavors are gated by the ReadyObserved latch so an in-flight
+// CreateCell (cgroup created, non-root containers not yet registered
+// → derivation reads Stopped from "container does not exist") is not
+// reaped before it ever reached Ready.
+//
+// Errors during kill/delete are returned to the caller so the loop's
+// per-pass `Errors` slice records them and the cell is preserved for
+// retry on the next tick (best-effort, like the watcher it replaces).
 func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcome, error) {
 	originalStatus := cell.Status
-	newState := intmodel.CellStateUnknown
 
 	cgroupExists, cgroupErr := r.ExistsCgroup(cell)
-	switch {
-	case cgroupErr != nil:
+	if cgroupErr != nil {
 		r.logger.DebugContext(r.ctx, "failed to check cell cgroup",
 			"cell", cell.Metadata.Name, "error", cgroupErr)
-	case !cgroupExists:
-		newState = intmodel.CellStateUnknown
-	default:
-		newState = r.deriveCellStateFromRootContainer(cell)
 	}
 
+	// Populate container statuses up front so the non-root-driven
+	// derivation can read them from the snapshot. The root container
+	// path also benefits — populate already queried it, so a single
+	// pass of GetContainerState calls covers both the per-container
+	// status array and the cell-state derivation.
 	if err := r.populateCellContainerStatuses(&cell); err != nil {
 		r.logger.DebugContext(r.ctx, "populate container statuses failed",
 			"cell", cell.Metadata.Name, "error", err)
 	}
+
+	newState := intmodel.CellStateUnknown
+	if cgroupErr == nil && cgroupExists {
+		newState = r.deriveCellState(cell)
+	}
+
 	cell.Status.State = newState
 	cell.Status.ReadyObserved = latchReadyObserved(
 		originalStatus.ReadyObserved, originalStatus.State, newState)
 
 	if shouldAutoDeleteCell(cell.Spec.AutoDelete, newState, cell.Status.ReadyObserved) {
 		return r.autoDeleteCell(cell)
+	}
+
+	if shouldWindDownCell(cell, newState) {
+		return r.windDownCell(cell)
 	}
 
 	updated := false
@@ -408,6 +436,32 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 		}
 	}
 	return cell, ReconcileOutcome{Updated: updated}, nil
+}
+
+// windDownCell is the non-AutoDelete counterpart to autoDeleteCell:
+// when a cell's non-root workloads have all exited, kill the cell
+// (KillCell handles the root task plus CNI detach plus cleanup) so
+// the root container shell does not zombie. Cell metadata is left
+// in place — the operator runs `kuke delete cell` explicitly when
+// they are done with it. KillCell already populates and persists
+// container statuses, so the caller need not double-write metadata.
+//
+// KillCell is best-effort and idempotent (workload containers that
+// are already gone are no-ops); errors surface so the next reconcile
+// pass retries.
+func (r *Exec) windDownCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcome, error) {
+	r.logger.InfoContext(r.ctx, "reconcile: winding down cell after non-root workloads exited",
+		"cell", cell.Metadata.Name,
+		"realm", cell.Spec.RealmName,
+		"space", cell.Spec.SpaceName,
+		"stack", cell.Spec.StackName,
+		"state", cell.Status.State)
+
+	updatedCell, err := r.KillCell(cell)
+	if err != nil {
+		return cell, ReconcileOutcome{}, fmt.Errorf("wind-down: kill cell: %w", err)
+	}
+	return updatedCell, ReconcileOutcome{Updated: true}, nil
 }
 
 // autoDeleteCell runs the kill+delete sequence the per-cell watcher used
@@ -472,6 +526,61 @@ func shouldAutoDeleteCell(autoDelete bool, newState intmodel.CellState, readyObs
 	return autoDelete && cellStateAutoDeleteTriggers(newState) && readyObserved
 }
 
+// shouldWindDownCell decides whether the reconciler should kill the
+// cell (root container + leftover plumbing) because its non-root
+// workloads have all exited. Same trigger states + ReadyObserved gate
+// as shouldAutoDeleteCell, plus two extra preconditions:
+//
+//   - At least one non-root container in spec. Without this, the cell
+//     is kukeond-style — the root *is* the workload, and killing it
+//     because "the workload is gone" would be circular. Those cells
+//     stay in their derived state and the operator stops them
+//     explicitly via `kuke daemon stop` / `kuke daemon reset`.
+//   - The root container task is still running. Once the root is dead
+//     there is nothing to wind down; firing again would be a wasted
+//     KillCell on every subsequent tick. Read from the freshly
+//     populated container statuses so this check costs no extra
+//     containerd round-trip.
+func shouldWindDownCell(cell intmodel.Cell, newState intmodel.CellState) bool {
+	if !cellStateAutoDeleteTriggers(newState) || !cell.Status.ReadyObserved {
+		return false
+	}
+	if !hasNonRootContainerSpec(cell.Spec.Containers) {
+		return false
+	}
+	rootSpec := findRootContainerSpec(cell)
+	if rootSpec == nil {
+		return false
+	}
+	return rootContainerStillRunning(rootSpec.ID, cell.Status.Containers)
+}
+
+// rootContainerStillRunning answers the "is the root task still
+// alive" question by consulting the snapshot
+// populateCellContainerStatuses just wrote. Returns false when the
+// root status is missing (populate skipped or partial — be
+// conservative and don't fire the wind-down kill on incomplete
+// data).
+func rootContainerStillRunning(rootID string, statuses []intmodel.ContainerStatus) bool {
+	for i := range statuses {
+		if statuses[i].ID != rootID {
+			continue
+		}
+		switch statuses[i].State {
+		case intmodel.ContainerStateReady,
+			intmodel.ContainerStatePending,
+			intmodel.ContainerStatePaused,
+			intmodel.ContainerStatePausing:
+			return true
+		case intmodel.ContainerStateStopped,
+			intmodel.ContainerStateFailed,
+			intmodel.ContainerStateUnknown:
+			return false
+		}
+	}
+	return false
+}
+
 // markCellReady stamps a synchronous Ready transition: state and the
 // ReadyObserved latch must close together. Without the eager latch
 // close, a KillCell that races the first reconciler tick (e.g. `kuke
@@ -482,6 +591,100 @@ func shouldAutoDeleteCell(autoDelete bool, newState intmodel.CellState, readyObs
 func markCellReady(cell *intmodel.Cell) {
 	cell.Status.State = intmodel.CellStateReady
 	cell.Status.ReadyObserved = true
+}
+
+// deriveCellState dispatches between the two derivation strategies
+// the reconciler supports. See ReconcileCell's contract comment for
+// the full state-machine description.
+//
+// kukeond-style cells (kuke-system / kukeon / kukeon / kukeond) and
+// cgroup-only cells have no non-root container in spec, so they fall
+// through to the legacy root-only derivation — without that fallback
+// the kukeond cell would have no signal to derive its state from
+// (its root *is* the workload, and there are no non-root entries to
+// union over). User-workload cells with at least one non-root
+// container in spec take the new derivation, which makes the cell
+// follow its workloads' lifecycle: a long-lived `sleep infinity`
+// root no longer holds the cell open after every workload has
+// exited.
+func (r *Exec) deriveCellState(cell intmodel.Cell) intmodel.CellState {
+	if !hasNonRootContainerSpec(cell.Spec.Containers) {
+		return r.deriveCellStateFromRootContainer(cell)
+	}
+	return deriveCellStateFromNonRootContainerStatuses(cell.Spec.Containers, cell.Status.Containers)
+}
+
+// deriveCellStateFromNonRootContainerStatuses unions the non-root
+// container task states the populate pass just snapshotted. Pure
+// (no containerd I/O) so it is straightforward to test.
+//
+// The "any non-root reads back Unknown ⇒ cell Unknown" branch is the
+// defensive read-side check that pairs with #301 — a transient
+// containerd hiccup or namespace-race-induced misread on a workload
+// container must not flip the cell to Stopped and trigger the
+// wind-down KillCell. Wait for the next reconcile pass to settle.
+//
+// "Container does not exist in containerd" is mapped to
+// ContainerStateStopped by GetContainerState, so a non-root workload
+// that exited and was reaped naturally counts toward "all stopped"
+// here.
+func deriveCellStateFromNonRootContainerStatuses(
+	specs []intmodel.ContainerSpec,
+	statuses []intmodel.ContainerStatus,
+) intmodel.CellState {
+	nonRootIDs := make(map[string]struct{}, len(specs))
+	for i := range specs {
+		if !specs[i].Root {
+			nonRootIDs[specs[i].ID] = struct{}{}
+		}
+	}
+
+	seen := 0
+	anyActive := false
+	anyUnknown := false
+	for i := range statuses {
+		if _, ok := nonRootIDs[statuses[i].ID]; !ok {
+			continue
+		}
+		seen++
+		switch statuses[i].State {
+		case intmodel.ContainerStateReady,
+			intmodel.ContainerStatePending,
+			intmodel.ContainerStatePaused,
+			intmodel.ContainerStatePausing:
+			anyActive = true
+		case intmodel.ContainerStateUnknown:
+			anyUnknown = true
+		case intmodel.ContainerStateStopped, intmodel.ContainerStateFailed:
+			// terminal — does not contribute to active.
+		}
+	}
+
+	if seen < len(nonRootIDs) {
+		// populate skipped or didn't reach every non-root spec — be
+		// defensive and stay Unknown so a partial-populate failure
+		// can't reap a healthy cell.
+		return intmodel.CellStateUnknown
+	}
+	if anyActive {
+		return intmodel.CellStateReady
+	}
+	if anyUnknown {
+		return intmodel.CellStateUnknown
+	}
+	return intmodel.CellStateStopped
+}
+
+// hasNonRootContainerSpec reports whether the cell has at least one
+// non-root container in spec — i.e. whether the new union-of-non-root
+// derivation applies.
+func hasNonRootContainerSpec(specs []intmodel.ContainerSpec) bool {
+	for i := range specs {
+		if !specs[i].Root {
+			return true
+		}
+	}
+	return false
 }
 
 // deriveCellStateFromRootContainer resolves the cell's state from the root
