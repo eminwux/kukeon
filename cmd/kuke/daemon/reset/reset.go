@@ -37,6 +37,7 @@ import (
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/hostfw"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
@@ -56,6 +57,11 @@ type MockSocketDirKey struct{}
 // /opt/kukeon/kuke-system from. Tests use this to point at a tmpdir so the
 // cleanup never touches the real /opt/kukeon.
 type MockRunPathKey struct{}
+
+// MockHostFwKey injects a hostfw.Installer (typically a fake) so unit
+// tests can assert the --purge-system path tears down the FORWARD
+// admission chain without requiring a real iptables binary.
+type MockHostFwKey struct{}
 
 // defaultTimeout matches `kuke daemon stop`'s grace period (#219) so the two
 // verbs agree on how long the SIGTERM phase gets before SIGKILL escalates.
@@ -167,8 +173,29 @@ func runReset(cmd *cobra.Command, _ []string) error {
 		if removed {
 			cmd.Printf("removed %s\n", systemDir)
 		}
+
+		if hostFwErr := tearDownHostFirewall(cmd, logger); hostFwErr != nil {
+			return hostFwErr
+		}
 	}
 
+	return nil
+}
+
+// tearDownHostFirewall removes the KUKEON-FORWARD chain installed by
+// `kuke init`. The `--purge-system` flag advertises a "fully clean
+// re-bootstrap"; without this step the chain dangles after the daemon
+// is gone. Skipped silently when iptables is not on PATH (the chain
+// could not have been installed in the first place).
+func tearDownHostFirewall(cmd *cobra.Command, logger *slog.Logger) error {
+	installer := resolveHostFwInstaller(cmd, logger)
+	if installer == nil {
+		return nil
+	}
+	if err := installer.Remove(cmd.Context()); err != nil {
+		return fmt.Errorf("remove host firewall admission rules: %w", err)
+	}
+	cmd.Printf("removed host firewall chain %s\n", hostfw.ChainName)
 	return nil
 }
 
@@ -311,6 +338,21 @@ func resolveSocketDir(cmd *cobra.Command) string {
 		socketPath = config.KUKEOND_SOCKET.Default
 	}
 	return filepath.Dir(socketPath)
+}
+
+// resolveHostFwInstaller picks the hostfw.Installer used by the
+// --purge-system step. Tests inject a fake via MockHostFwKey;
+// production builds an IptablesInstaller, returning nil when iptables
+// is absent so the cleanup is silently skipped (the chain could not
+// have been installed without iptables in the first place).
+func resolveHostFwInstaller(cmd *cobra.Command, logger *slog.Logger) hostfw.Installer {
+	if mock, ok := cmd.Context().Value(MockHostFwKey{}).(hostfw.Installer); ok {
+		return mock
+	}
+	if !hostfw.IsIptablesAvailable() {
+		return nil
+	}
+	return hostfw.NewIptablesInstaller(logger)
 }
 
 // resolveRunPath picks the run path for the --purge-system step. Tests inject

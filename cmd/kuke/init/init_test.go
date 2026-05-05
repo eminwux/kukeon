@@ -73,6 +73,25 @@ func printDirAction(cmd *cobra.Command, label string, path string, created bool,
 //go:linkname printCgroupAction github.com/eminwux/kukeon/cmd/kuke/init.printCgroupAction
 func printCgroupAction(cmd *cobra.Command, label string, existedPre bool, existsPost bool, created bool)
 
+//go:linkname printHostFirewallActions github.com/eminwux/kukeon/cmd/kuke/init.printHostFirewallActions
+func printHostFirewallActions(cmd *cobra.Command, h hostFirewallReport)
+
+// hostFirewallReport mirrors the unexported struct in cmd/kuke/init.
+// We re-declare the identical layout so go:linkname can pass instances
+// across the package boundary.
+type hostFirewallReport struct {
+	Applied      bool
+	Skipped      bool
+	Reason       string
+	Chain        string
+	BridgePrefix string
+}
+
+// PrintHostFirewallActions exposes the unexported printer for tests.
+func PrintHostFirewallActions(cmd *cobra.Command, h hostFirewallReport) {
+	printHostFirewallActions(cmd, h)
+}
+
 //go:linkname runInit github.com/eminwux/kukeon/cmd/kuke/init.runInit
 func runInit(cmd *cobra.Command, args []string) error
 
@@ -707,6 +726,62 @@ func TestResolveKukeondImage(t *testing.T) {
 			}
 			if got := ResolveKukeondImage(); got != tc.want {
 				t.Fatalf("ResolveKukeondImage() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPrintHostFirewallActions(t *testing.T) {
+	testCases := []struct {
+		name     string
+		report   hostFirewallReport
+		expected []string
+		notWant  []string
+	}{
+		{
+			name: "applied",
+			report: hostFirewallReport{
+				Applied:      true,
+				Chain:        "KUKEON-FORWARD",
+				BridgePrefix: "k-+",
+			},
+			expected: []string{
+				"Host firewall:",
+				"- chain \"KUKEON-FORWARD\": installed (admits k-+)",
+			},
+		},
+		{
+			name: "skipped",
+			report: hostFirewallReport{
+				Skipped: true,
+				Reason:  "iptables binary missing on PATH",
+			},
+			expected: []string{
+				"Host firewall:",
+				"- chain: skipped (iptables binary missing on PATH)",
+			},
+		},
+		{
+			name:    "neither-applied-nor-skipped-prints-nothing",
+			report:  hostFirewallReport{},
+			notWant: []string{"Host firewall"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, buf := newOutputCommand()
+			PrintHostFirewallActions(cmd, tc.report)
+			got := buf.String()
+			for _, want := range tc.expected {
+				if !strings.Contains(got, want) {
+					t.Fatalf("output %q missing %q", got, want)
+				}
+			}
+			for _, notWant := range tc.notWant {
+				if strings.Contains(got, notWant) {
+					t.Fatalf("output %q must not contain %q", got, notWant)
+				}
 			}
 		})
 	}

@@ -31,6 +31,7 @@ import (
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/hostfw"
 	"github.com/eminwux/kukeon/internal/serverconfig"
 	"github.com/eminwux/kukeon/internal/sysuser"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
@@ -265,34 +266,17 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return bootstrapErr
 	}
 
-	// Apply kukeon-managed ownership/modes. /run/kukeon is the socket's
-	// parent dir (already created by ensureSocketDir during bootstrap);
-	// /opt/kukeon is RunPath. Both end up root:kukeon mode 0o750 so the
-	// kukeon group can traverse without world access.
-	runDir := filepath.Dir(socketPath)
-	permsReport := permissionsReport{
-		User:         consts.KukeonSystemUser,
-		Group:        consts.KukeonSystemGroup,
-		UID:          ensure.UID,
-		GID:          ensure.GID,
-		UserCreated:  ensure.UserCreated,
-		GroupCreated: ensure.GroupCreated,
-		RunDirPath:   runDir,
-		RunPath:      runPath,
-		SocketPath:   socketPath,
+	permsReport, permsErr := applyKukeonOwnership(socketPath, runPath, ensure)
+	if permsErr != nil {
+		return permsErr
 	}
-	if chownErr := sysuser.ChownAndChmod(runDir, 0, ensure.GID, kukeonRunDirMode); chownErr != nil {
-		return fmt.Errorf("apply kukeon ownership to %q: %w", runDir, chownErr)
-	}
-	permsReport.RunDirApplied = true
-	if chownErr := sysuser.ChownTreeAndChmod(
-		runPath, 0, ensure.GID, kukeonRunPathDirMode, kukeonRunPathFileMode,
-	); chownErr != nil {
-		return fmt.Errorf("apply kukeon ownership to %q: %w", runPath, chownErr)
-	}
-	permsReport.RunPathApplied = true
 
-	printBootstrapReport(cmd, report, permsReport)
+	hostFwReport, hostFwErr := installHostFirewall(cmd.Context(), logger)
+	if hostFwErr != nil {
+		return hostFwErr
+	}
+
+	printBootstrapReport(cmd, report, permsReport, hostFwReport)
 
 	if viper.GetBool(config.KUKE_INIT_NO_WAIT.ViperKey) {
 		return nil
@@ -381,7 +365,12 @@ type permissionsReport struct {
 	RunPathApplied bool
 }
 
-func printBootstrapReport(cmd *cobra.Command, report controller.BootstrapReport, perms permissionsReport) {
+func printBootstrapReport(
+	cmd *cobra.Command,
+	report controller.BootstrapReport,
+	perms permissionsReport,
+	hostFw hostFirewallReport,
+) {
 	printHeader(cmd, report)
 	printOverview(cmd, report)
 	cmd.Println("Actions:")
@@ -400,6 +389,98 @@ func printBootstrapReport(cmd *cobra.Command, report controller.BootstrapReport,
 	printCellActions(cmd, report.SystemCell, report.KukeondImage)
 
 	printPermissionsActions(cmd, perms)
+	printHostFirewallActions(cmd, hostFw)
+}
+
+// applyKukeonOwnership chowns/chmods the runtime directories so the
+// kukeon group can dial the socket without world access. /run/kukeon is
+// the socket's parent dir (already created by ensureSocketDir during
+// bootstrap); /opt/kukeon is RunPath. Both end up root:kukeon mode
+// 0o750 so the kukeon group can traverse.
+func applyKukeonOwnership(
+	socketPath, runPath string,
+	ensure sysuser.EnsureResult,
+) (permissionsReport, error) {
+	runDir := filepath.Dir(socketPath)
+	report := permissionsReport{
+		User:         consts.KukeonSystemUser,
+		Group:        consts.KukeonSystemGroup,
+		UID:          ensure.UID,
+		GID:          ensure.GID,
+		UserCreated:  ensure.UserCreated,
+		GroupCreated: ensure.GroupCreated,
+		RunDirPath:   runDir,
+		RunPath:      runPath,
+		SocketPath:   socketPath,
+	}
+	if err := sysuser.ChownAndChmod(runDir, 0, ensure.GID, kukeonRunDirMode); err != nil {
+		return report, fmt.Errorf("apply kukeon ownership to %q: %w", runDir, err)
+	}
+	report.RunDirApplied = true
+	if err := sysuser.ChownTreeAndChmod(
+		runPath, 0, ensure.GID, kukeonRunPathDirMode, kukeonRunPathFileMode,
+	); err != nil {
+		return report, fmt.Errorf("apply kukeon ownership to %q: %w", runPath, err)
+	}
+	report.RunPathApplied = true
+	return report, nil
+}
+
+// hostFirewallReport captures the outcome of installing KUKEON-FORWARD so
+// the printer can surface it alongside the controller's BootstrapReport.
+type hostFirewallReport struct {
+	// Applied is true when the iptables installer ran successfully.
+	Applied bool
+	// Skipped is true when the installer was skipped because iptables is
+	// not on PATH (nftables-only host with no compat shim, minimal
+	// container, etc.).
+	Skipped bool
+	// Reason carries the human-readable reason when Skipped is true.
+	Reason string
+	// Chain names the installed iptables chain when Applied is true.
+	Chain string
+	// BridgePrefix names the iptables interface-wildcard the chain matches
+	// when Applied is true.
+	BridgePrefix string
+}
+
+// installHostFirewall installs the KUKEON-FORWARD admission rules so
+// cell egress is admitted past a restrictive FORWARD default policy.
+// On hosts without iptables on PATH, the step logs a warning and is
+// skipped so init still completes — operators on permissive-FORWARD
+// hosts (or hosts where they manage admission themselves) keep working.
+func installHostFirewall(ctx context.Context, logger *slog.Logger) (hostFirewallReport, error) {
+	if !hostfw.IsIptablesAvailable() {
+		const reason = "iptables binary missing on PATH"
+		logger.WarnContext(ctx,
+			"skipping host firewall admission rules: "+reason+
+				"; cells may lose egress on hosts where FORWARD default policy is DROP")
+		return hostFirewallReport{Skipped: true, Reason: reason}, nil
+	}
+	if applyErr := hostfw.NewIptablesInstaller(logger).Apply(ctx); applyErr != nil {
+		return hostFirewallReport{}, fmt.Errorf("install host firewall admission rules: %w", applyErr)
+	}
+	return hostFirewallReport{
+		Applied:      true,
+		Chain:        hostfw.ChainName,
+		BridgePrefix: hostfw.BridgePrefix,
+	}, nil
+}
+
+func printHostFirewallActions(cmd *cobra.Command, h hostFirewallReport) {
+	if !h.Applied && !h.Skipped {
+		return
+	}
+	cmd.Println("  Host firewall:")
+	switch {
+	case h.Applied:
+		cmd.Println(fmt.Sprintf(
+			"    - chain %q: installed (admits %s)",
+			h.Chain, h.BridgePrefix,
+		))
+	case h.Skipped:
+		cmd.Println(fmt.Sprintf("    - chain: skipped (%s)", h.Reason))
+	}
 }
 
 func printPermissionsActions(cmd *cobra.Command, perms permissionsReport) {

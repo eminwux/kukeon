@@ -32,10 +32,25 @@ import (
 	reset "github.com/eminwux/kukeon/cmd/kuke/daemon/reset"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/consts"
+	"github.com/eminwux/kukeon/internal/hostfw"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/viper"
 )
+
+// recordingInstaller is a hostfw.Installer that records whether Remove
+// was invoked, so reset_test can assert the --purge-system wiring fires
+// the host-firewall teardown hook.
+type recordingInstaller struct {
+	removed   bool
+	removeErr error
+}
+
+func (r *recordingInstaller) Apply(_ context.Context) error { return nil }
+func (r *recordingInstaller) Remove(_ context.Context) error {
+	r.removed = true
+	return r.removeErr
+}
 
 // TestDaemonReset covers the table of states the verb has to handle: a
 // running daemon (graceful stop+delete), an already-stopped daemon (skip
@@ -394,6 +409,7 @@ func TestDaemonReset_PreservesDefaultRealm(t *testing.T) {
 	ctx = context.WithValue(ctx, reset.MockClientKey{}, kukeonv1.Client(fake))
 	ctx = context.WithValue(ctx, reset.MockSocketDirKey{}, t.TempDir())
 	ctx = context.WithValue(ctx, reset.MockRunPathKey{}, runPath)
+	ctx = context.WithValue(ctx, reset.MockHostFwKey{}, hostfw.Installer(hostfw.NoopInstaller{}))
 	cmd.SetContext(ctx)
 	cmd.SetArgs([]string{"--purge-system"})
 
@@ -408,6 +424,139 @@ func TestDaemonReset_PreservesDefaultRealm(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), systemDir) {
 		t.Errorf("expected output to mention removed kuke-system dir; got:\n%s", buf.String())
+	}
+}
+
+// TestDaemonReset_PurgeSystemTearsDownHostFirewall pins the AC for #293:
+// `kuke daemon reset --purge-system` must invoke hostfw.Remove so the
+// KUKEON-FORWARD chain installed by `kuke init` does not dangle after a
+// fully-clean re-bootstrap.
+func TestDaemonReset_PurgeSystemTearsDownHostFirewall(t *testing.T) {
+	withFreshViper(t)
+
+	fake := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell: v1beta1.CellDoc{
+					Status: v1beta1.CellStatus{State: v1beta1.CellStateStopped},
+				},
+				MetadataExists: true,
+			}, nil
+		},
+		deleteCellFn: func(doc v1beta1.CellDoc) (kukeonv1.DeleteCellResult, error) {
+			return kukeonv1.DeleteCellResult{Cell: doc, MetadataDeleted: true}, nil
+		},
+	}
+	installer := &recordingInstaller{}
+
+	cmd := reset.NewResetCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, reset.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, reset.MockSocketDirKey{}, t.TempDir())
+	ctx = context.WithValue(ctx, reset.MockRunPathKey{}, t.TempDir())
+	ctx = context.WithValue(ctx, reset.MockHostFwKey{}, hostfw.Installer(installer))
+	cmd.SetContext(ctx)
+	cmd.SetArgs([]string{"--purge-system"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !installer.removed {
+		t.Fatal("expected hostfw.Remove to be invoked under --purge-system")
+	}
+	if !strings.Contains(buf.String(), hostfw.ChainName) {
+		t.Errorf("expected output to mention removed chain %q; got:\n%s", hostfw.ChainName, buf.String())
+	}
+}
+
+// TestDaemonReset_NoPurgeSystemDoesNotTouchHostFirewall keeps the
+// FORWARD chain in place for plain `kuke daemon reset` — the daemon may
+// be coming back up shortly and the chain is still needed for any cell
+// the operator brings up afterward.
+func TestDaemonReset_NoPurgeSystemDoesNotTouchHostFirewall(t *testing.T) {
+	withFreshViper(t)
+
+	fake := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell: v1beta1.CellDoc{
+					Status: v1beta1.CellStatus{State: v1beta1.CellStateStopped},
+				},
+				MetadataExists: true,
+			}, nil
+		},
+		deleteCellFn: func(doc v1beta1.CellDoc) (kukeonv1.DeleteCellResult, error) {
+			return kukeonv1.DeleteCellResult{Cell: doc, MetadataDeleted: true}, nil
+		},
+	}
+	installer := &recordingInstaller{}
+
+	cmd := reset.NewResetCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, reset.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, reset.MockSocketDirKey{}, t.TempDir())
+	ctx = context.WithValue(ctx, reset.MockRunPathKey{}, t.TempDir())
+	ctx = context.WithValue(ctx, reset.MockHostFwKey{}, hostfw.Installer(installer))
+	cmd.SetContext(ctx)
+	// no --purge-system
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if installer.removed {
+		t.Fatal("hostfw.Remove must not run without --purge-system")
+	}
+}
+
+// TestDaemonReset_PurgeSystemPropagatesHostFirewallError pins the
+// error-path: a Remove failure surfaces as a runReset error rather than
+// being silently swallowed, so a stuck chain does not hide as a clean
+// reset.
+func TestDaemonReset_PurgeSystemPropagatesHostFirewallError(t *testing.T) {
+	withFreshViper(t)
+
+	fake := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell: v1beta1.CellDoc{
+					Status: v1beta1.CellStatus{State: v1beta1.CellStateStopped},
+				},
+				MetadataExists: true,
+			}, nil
+		},
+		deleteCellFn: func(doc v1beta1.CellDoc) (kukeonv1.DeleteCellResult, error) {
+			return kukeonv1.DeleteCellResult{Cell: doc, MetadataDeleted: true}, nil
+		},
+	}
+	installer := &recordingInstaller{removeErr: errors.New("iptables down")}
+
+	cmd := reset.NewResetCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, reset.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, reset.MockSocketDirKey{}, t.TempDir())
+	ctx = context.WithValue(ctx, reset.MockRunPathKey{}, t.TempDir())
+	ctx = context.WithValue(ctx, reset.MockHostFwKey{}, hostfw.Installer(installer))
+	cmd.SetContext(ctx)
+	cmd.SetArgs([]string{"--purge-system"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when host-firewall teardown fails")
+	}
+	if !strings.Contains(err.Error(), "host firewall") {
+		t.Errorf("error should mention host firewall: %v", err)
 	}
 }
 
