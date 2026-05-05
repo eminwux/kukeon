@@ -362,7 +362,7 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_STACK = DefineKV("KUKE_RUN_STACK", "kuke/run/stack", "default")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_RUN_ATTACH = DefineKV("KUKE_RUN_ATTACH", "kuke/run/attach")
+	KUKE_RUN_DETACH = DefineKV("KUKE_RUN_DETACH", "kuke/run/detach")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_CONTAINER = DefineKV("KUKE_RUN_CONTAINER", "kuke/run/container")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable

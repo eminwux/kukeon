@@ -23,26 +23,26 @@ import (
 )
 
 // AttachExit classifies how an in-process sbsh attach loop ended.
-// `kuke attach` and `kuke run -a` both drive the same loop and need to
-// branch on the same three outcomes.
+// `kuke attach` and the default-attach branch of `kuke run` both drive
+// the same loop and need to branch on the same three outcomes.
 type AttachExit int
 
 const (
 	// AttachExitDetached signals a clean ^]^] (or peer-issued Detach
-	// RPC). The remote terminal is still alive and `kuke run -a --rm`
+	// RPC). The remote terminal is still alive and `kuke run --rm`
 	// must NOT kill the cell — the operator may want to re-attach.
 	AttachExitDetached AttachExit = iota
 
 	// AttachExitPeerClosed signals the remote terminal dropped the
 	// connection (workload exited, peer hung up). From the user's
 	// perspective the session ended cleanly (exit 0), but `kuke run
-	// -a --rm` should fire KillCell so a long-lived root (e.g.
+	// --rm` should fire KillCell so a long-lived root (e.g.
 	// `sleep infinity`) does not pin the cell.
 	AttachExitPeerClosed
 
 	// AttachExitError signals an unrecoverable controller error
 	// (control socket lost, RPC failure, context cancel, …). The
-	// caller surfaces the error to the user and `kuke run -a --rm`
+	// caller surfaces the error to the user and `kuke run --rm`
 	// fires KillCell so a half-detached session does not leak the
 	// cell.
 	AttachExitError
@@ -62,7 +62,7 @@ func ClassifyAttachExit(err error) AttachExit {
 	case err == nil:
 		// pkg/attach.Run already collapses context-canceled to nil; we
 		// treat a nil return as "operator ended the session cleanly",
-		// which for `kuke run -a --rm` means "leave the cell alive" —
+		// which for `kuke run --rm` means "leave the cell alive" —
 		// same semantics as ErrDetached.
 		return AttachExitDetached
 	case errors.Is(err, attach.ErrDetached):

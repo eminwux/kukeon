@@ -14,13 +14,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package run implements the `kuke run` verb. The original `-f <file>` form
-// (phase 1c) parses a single-cell YAML doc and idempotently create-and-starts
-// the cell. Phase 2a added `-a/--attach` so the same invocation can drop the
-// operator into the cell's attachable terminal. Phase 2b adds `-p/--profile`,
-// which materializes a CellDoc from a per-user CellProfile under
-// $HOME/.kuke/profiles.d (or $KUKE_PROFILES_DIR) and then walks the same
-// create+start[+attach] path.
+// Package run implements the `kuke run` verb. The `-f <file>` form parses a
+// single-cell YAML doc and idempotently create-and-starts the cell; the
+// `-p/--profile` form materializes a CellDoc from a per-user CellProfile under
+// $HOME/.kuke/profiles.d (or $KUKE_PROFILES_DIR) and walks the same path.
+//
+// `kuke run` attaches to the cell's attachable container by default, matching
+// `docker run` and `kubectl run -it`. Pass `-d/--detach` to return immediately
+// after start without attaching.
 package run
 
 import (
@@ -46,8 +47,9 @@ type MockControllerKey struct{}
 
 // NewRunCmd builds the `kuke run` cobra command. `-f` reads a single-cell
 // YAML doc; `-p` reads a per-user CellProfile and materializes the same
-// CellDoc shape. Exactly one of the two is required. `-a` then drops the
-// operator into the cell's attachable terminal once the cell is up.
+// CellDoc shape. Exactly one of the two is required. By default, after the
+// cell starts the CLI drops the operator into the cell's attachable terminal;
+// `-d/--detach` opts out of the post-start attach.
 func NewRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run (-f <file> | -p <profile>)",
@@ -83,25 +85,27 @@ func NewRunCmd() *cobra.Command {
 	cmd.Flags().String("stack", "", "Stack that owns the cell (overrides spec.stackId only when the doc is empty)")
 	_ = viper.BindPFlag(config.KUKE_RUN_STACK.ViperKey, cmd.Flags().Lookup("stack"))
 
-	cmd.Flags().BoolP("attach", "a", false,
-		"After start, attach to the cell's attachable container (precedence: --container > cell.tty.default > first attachable)")
-	_ = viper.BindPFlag(config.KUKE_RUN_ATTACH.ViperKey, cmd.Flags().Lookup("attach"))
+	cmd.Flags().BoolP("detach", "d", false,
+		"Return immediately after start without attaching (default: attach to the cell's "+
+			"attachable container, precedence --container > cell.tty.default > first attachable)")
+	_ = viper.BindPFlag(config.KUKE_RUN_DETACH.ViperKey, cmd.Flags().Lookup("detach"))
 	cmd.Flags().String("container", "",
-		"Container to attach to (only valid with -a; must be attachable)")
+		"Container to attach to (only valid in attach mode; rejected with -d/--detach; must be attachable)")
 	_ = viper.BindPFlag(config.KUKE_RUN_CONTAINER.ViperKey, cmd.Flags().Lookup("container"))
 	cmd.Flags().Bool("rm", false,
 		"Best-effort delete the cell after it is no longer needed "+
-			"(any rc). Without -a, the trigger is the root container's "+
-			"task exit. With -a, the trigger is the attach loop exiting "+
-			"because the workload terminated, the peer hung up, or an "+
-			"unrecoverable controller error fired — the CLI then sends "+
-			"KillCell so a long-lived root (e.g. `sleep infinity`) does "+
-			"not pin the cell. A clean ^]^] detach is NOT a trigger: the "+
-			"cell stays alive so the operator can re-attach later "+
-			"(parity with `kuke attach`). Daemon-mode only — incompatible "+
-			"with --no-daemon. Cleanup runs from kukeond's reconcile "+
-			"loop, so latency is bounded by the reconcile interval "+
-			"rather than firing the instant the trigger fires.")
+			"(any rc). With -d/--detach, the trigger is the root "+
+			"container's task exit. In the default attach mode, the "+
+			"trigger is the attach loop exiting because the workload "+
+			"terminated, the peer hung up, or an unrecoverable "+
+			"controller error fired — the CLI then sends KillCell so a "+
+			"long-lived root (e.g. `sleep infinity`) does not pin the "+
+			"cell. A clean ^]^] detach is NOT a trigger: the cell stays "+
+			"alive so the operator can re-attach later (parity with "+
+			"`kuke attach`). Daemon-mode only — incompatible with "+
+			"--no-daemon. Cleanup runs from kukeond's reconcile loop, "+
+			"so latency is bounded by the reconcile interval rather "+
+			"than firing the instant the trigger fires.")
 	_ = viper.BindPFlag(config.KUKE_RUN_RM.ViperKey, cmd.Flags().Lookup("rm"))
 
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
@@ -119,7 +123,7 @@ type runFlags struct {
 	file          string
 	profileName   string
 	output        string
-	doAttach      bool
+	detach        bool
 	containerFlag string
 	autoDelete    bool
 }
@@ -128,7 +132,7 @@ func parseRunFlags(cmd *cobra.Command, _ []string) (runFlags, error) {
 	flags := runFlags{
 		file:          strings.TrimSpace(viper.GetString(config.KUKE_RUN_FILE.ViperKey)),
 		profileName:   strings.TrimSpace(viper.GetString(config.KUKE_RUN_PROFILE.ViperKey)),
-		doAttach:      viper.GetBool(config.KUKE_RUN_ATTACH.ViperKey),
+		detach:        viper.GetBool(config.KUKE_RUN_DETACH.ViperKey),
 		containerFlag: strings.TrimSpace(viper.GetString(config.KUKE_RUN_CONTAINER.ViperKey)),
 		autoDelete:    viper.GetBool(config.KUKE_RUN_RM.ViperKey),
 	}
@@ -142,14 +146,15 @@ func parseRunFlags(cmd *cobra.Command, _ []string) (runFlags, error) {
 		return runFlags{}, fmt.Errorf("invalid --output %q: want json or yaml", flags.output)
 	}
 
-	if !flags.doAttach && flags.containerFlag != "" {
-		return runFlags{}, errors.New("--container is only valid together with -a/--attach")
+	if flags.detach && flags.containerFlag != "" {
+		return runFlags{}, errors.New("--container is incompatible with -d/--detach")
 	}
-	if flags.doAttach && flags.output != "" {
-		// -a hands the terminal to sbsh; mixing structured -o output with an
-		// interactive attach loop produces garbled output that nothing can
-		// parse. Reject the combination so callers pick one mode.
-		return runFlags{}, errors.New("--output is incompatible with -a/--attach")
+	if !flags.detach && flags.output != "" {
+		// The default attach mode hands the terminal to sbsh; mixing
+		// structured -o output with an interactive attach loop produces
+		// garbled output that nothing can parse. Reject the combination
+		// so callers pick one mode.
+		return runFlags{}, errors.New("--output is incompatible with attach mode (pass -d/--detach)")
 	}
 	if flags.autoDelete && viper.GetBool(config.KUKEON_ROOT_NO_DAEMON.ViperKey) {
 		// --rm needs a long-lived process to watch the root task and trigger
@@ -211,7 +216,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 			if printErr := printRunResult(cmd, noOpResultFromGet(pre), flags.output); printErr != nil {
 				return printErr
 			}
-			if flags.doAttach {
+			if !flags.detach {
 				return attachAndMaybeAutoDelete(cmd, client, cellDoc, flags)
 			}
 			return nil
@@ -228,21 +233,21 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if printErr := printRunResult(cmd, result, flags.output); printErr != nil {
 		return printErr
 	}
-	if flags.doAttach {
+	if !flags.detach {
 		return attachAndMaybeAutoDelete(cmd, client, cellDoc, flags)
 	}
 	return nil
 }
 
-// attachAndMaybeAutoDelete drives the attach loop and, under -a --rm,
-// fires KillCell once the loop returns — but only if the loop exited
-// because the workload ended (peer hangup, shell exit, controller
-// error). A clean ^]^] detach (issue #279) leaves the cell alive so the
-// operator can re-attach later, matching `kuke attach`'s exit-0
-// semantics.
+// attachAndMaybeAutoDelete drives the attach loop and, under --rm in
+// the default attach mode, fires KillCell once the loop returns — but
+// only if the loop exited because the workload ended (peer hangup,
+// shell exit, controller error). A clean ^]^] detach (issue #279)
+// leaves the cell alive so the operator can re-attach later, matching
+// `kuke attach`'s exit-0 semantics.
 //
 // Both the create-and-start path and the already-Ready idempotent
-// short-circuit funnel through here so re-running `kuke run -a --rm`
+// short-circuit funnel through here so re-running `kuke run --rm`
 // against an up cell still gets cleanup on workload exit (issue #265
 // regression: the original fix only patched the create path).
 //
@@ -265,7 +270,7 @@ func attachAndMaybeAutoDelete(
 	return attachErr
 }
 
-// autoDeleteAfterAttach drives the -a --rm cleanup path. KillCell is
+// autoDeleteAfterAttach drives the --rm cleanup path under attach mode. KillCell is
 // idempotent — if the attach target was the root and the user typed
 // `exit`, the root task is already gone and KillCell just confirms it;
 // the kill+delete sequence in autoDeleteCell tolerates a missing task.

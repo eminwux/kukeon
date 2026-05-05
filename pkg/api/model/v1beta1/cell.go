@@ -51,9 +51,10 @@ type CellSpec struct {
 // CellTty is cell-level tty/attach config. Kept intentionally minimal: only
 // fields the container or container-level tty cannot express belong here.
 type CellTty struct {
-	// Default names the attachable container `kuke run -a` (phase 2a)
-	// selects when no --container flag is given. Must reference an
-	// existing container in this cell whose Attachable=true (or be empty).
+	// Default names the attachable container the post-start attach
+	// (`kuke run`'s default mode) selects when no --container flag is
+	// given. Must reference an existing container in this cell whose
+	// Attachable=true (or be empty).
 	Default string `json:"default,omitempty" yaml:"default,omitempty"`
 }
 

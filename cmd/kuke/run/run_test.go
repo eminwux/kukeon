@@ -245,7 +245,7 @@ func TestRun_FromFile_CreatesAndStarts(t *testing.T) {
 		},
 	}
 	cmd, out := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML)})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -289,6 +289,7 @@ func TestRun_FlagFallback_WhenDocOmitsLocation(t *testing.T) {
 	cmd, _ := newCmd(t, fc)
 	cmd.SetArgs([]string{
 		"-f", writeTempYAML(t, cellYAMLNoLocation),
+		"-d",
 		"--realm", "flag-realm",
 		"--space", "flag-space",
 		"--stack", "flag-stack",
@@ -317,7 +318,7 @@ func TestRun_DefaultLocation_WhenDocAndFlagsOmit(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, cellYAMLNoLocation)})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, cellYAMLNoLocation), "-d"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -344,6 +345,7 @@ func TestRun_DocLocationWinsOverFlag(t *testing.T) {
 	cmd, _ := newCmd(t, fc)
 	cmd.SetArgs([]string{
 		"-f", writeTempYAML(t, validCellYAML),
+		"-d",
 		"--realm", "ignored", "--space", "ignored", "--stack", "ignored",
 	})
 
@@ -360,7 +362,7 @@ func TestRun_MultiDoc_Errors(t *testing.T) {
 
 	fc := &fakeClient{}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, multiDocYAML)})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, multiDocYAML), "-d"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -379,7 +381,7 @@ func TestRun_NonCellKind_Errors(t *testing.T) {
 
 	fc := &fakeClient{}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, realmDocYAML)})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, realmDocYAML), "-d"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -424,7 +426,7 @@ func TestRun_ExistingCell_MatchingSpec_AlreadyReady_ShortCircuits(t *testing.T) 
 		},
 	}
 	cmd, out := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML)})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -477,7 +479,7 @@ func TestRun_ExistingCell_MatchingSpec_NotReady_StillEnsures(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML)})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -514,7 +516,7 @@ func TestRun_ExistingCell_DivergingContainerSet_RefusesAndPointsToApply(t *testi
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML)})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -540,7 +542,7 @@ func TestRun_OutputJSON(t *testing.T) {
 		},
 	}
 	cmd, out := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-o", "json"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d", "-o", "json"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -567,7 +569,7 @@ func TestRun_OutputYAML(t *testing.T) {
 		},
 	}
 	cmd, out := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-o", "yaml"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d", "-o", "yaml"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -590,7 +592,7 @@ func TestRun_InvalidOutput_Errors(t *testing.T) {
 
 	fc := &fakeClient{}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-o", "table"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d", "-o", "table"})
 
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "invalid --output") {
@@ -824,7 +826,7 @@ func TestRun_Attach_AfterCreate_UsesTtyDefault(t *testing.T) {
 	}
 	run := &runCapture{}
 	cmd, _ := newCmdWithRun(t, fc, run)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -857,7 +859,7 @@ func TestRun_Attach_AfterCreate_FirstAttachableWhenNoDefault(t *testing.T) {
 	}
 	run := &runCapture{}
 	cmd, _ := newCmdWithRun(t, fc, run)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableNoDefaultYAML), "-a"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableNoDefaultYAML)})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -880,7 +882,7 @@ func TestRun_Attach_AfterCreate_ExplicitContainerWinsOverDefault(t *testing.T) {
 	cmd, _ := newCmdWithRun(t, fc, run)
 	cmd.SetArgs([]string{
 		"-f", writeTempYAML(t, attachableCellYAML),
-		"-a", "--container", "shell",
+		"--container", "shell",
 	})
 
 	if err := cmd.Execute(); err != nil {
@@ -894,11 +896,12 @@ func TestRun_Attach_AfterCreate_ExplicitContainerWinsOverDefault(t *testing.T) {
 func TestRun_Attach_NoCandidate_Errors_NoMutationOnAttach(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
-	// validCellYAML has no attachable containers — -a must fail with the
-	// explicit ErrAttachNoCandidate without driving the attach loop. The
-	// CreateCell ran already (fail-late after start is the documented UX);
-	// the cell is left Ready and the operator can re-run with --container or
-	// fix the spec.
+	// validCellYAML has no attachable containers — the default attach
+	// mode must fail with the explicit ErrAttachNoCandidate without
+	// driving the attach loop. The CreateCell ran already (fail-late
+	// after start is the documented UX); the cell is left Ready and
+	// the operator can re-run with --container, fix the spec, or pass
+	// -d/--detach.
 	fc := &fakeClient{
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
@@ -906,7 +909,7 @@ func TestRun_Attach_NoCandidate_Errors_NoMutationOnAttach(t *testing.T) {
 	}
 	run := &runCapture{}
 	cmd, _ := newCmdWithRun(t, fc, run)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-a"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML)})
 
 	err := cmd.Execute()
 	if !errors.Is(err, errdefs.ErrAttachNoCandidate) {
@@ -932,7 +935,7 @@ func TestRun_Attach_BadContainerFlag_Errors(t *testing.T) {
 	cmd, out := newCmdWithRun(t, fc, run)
 	cmd.SetArgs([]string{
 		"-f", writeTempYAML(t, attachableCellYAML),
-		"-a", "--container", "ghost",
+		"--container", "ghost",
 	})
 
 	err := cmd.Execute()
@@ -950,19 +953,22 @@ func TestRun_Attach_BadContainerFlag_Errors(t *testing.T) {
 	}
 }
 
-func TestRun_Attach_ContainerWithoutAttachFlag_Errors(t *testing.T) {
+func TestRun_Attach_ContainerWithDetachFlag_Errors(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
+	// --container only makes sense in the default attach mode; combining
+	// it with -d/--detach is a contradiction and must be rejected before
+	// any cell is mutated.
 	fc := &fakeClient{}
 	cmd, _ := newCmdWithRun(t, fc, &runCapture{})
 	cmd.SetArgs([]string{
 		"-f", writeTempYAML(t, attachableCellYAML),
-		"--container", "shell",
+		"-d", "--container", "shell",
 	})
 
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "--container is only valid") {
-		t.Fatalf("err=%v want '--container is only valid' guard", err)
+	if err == nil || !strings.Contains(err.Error(), "--container is incompatible") {
+		t.Fatalf("err=%v want '--container is incompatible with -d/--detach' guard", err)
 	}
 	if fc.createCalls != 0 {
 		t.Errorf("CreateCell calls=%d want 0 (must reject before mutating)", fc.createCalls)
@@ -976,7 +982,7 @@ func TestRun_Attach_OutputFlag_Errors(t *testing.T) {
 	cmd, _ := newCmdWithRun(t, fc, &runCapture{})
 	cmd.SetArgs([]string{
 		"-f", writeTempYAML(t, attachableCellYAML),
-		"-a", "-o", "json",
+		"-o", "json",
 	})
 
 	err := cmd.Execute()
@@ -1019,7 +1025,7 @@ func TestRun_Attach_AlreadyReady_ShortCircuitThenAttaches(t *testing.T) {
 	}
 	run := &runCapture{}
 	cmd, _ := newCmdWithRun(t, fc, run)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -1038,11 +1044,11 @@ func TestRun_Attach_AlreadyReady_ShortCircuitThenAttaches(t *testing.T) {
 	}
 }
 
-func TestNewRunCmd_AttachFlagRegistered(t *testing.T) {
+func TestNewRunCmd_DetachFlagRegistered(t *testing.T) {
 	cmd := runcmd.NewRunCmd()
-	attachFlag := cmd.Flags().Lookup("attach")
-	if attachFlag == nil || attachFlag.Shorthand != "a" {
-		t.Errorf("expected -a/--attach flag, got %+v", attachFlag)
+	detachFlag := cmd.Flags().Lookup("detach")
+	if detachFlag == nil || detachFlag.Shorthand != "d" {
+		t.Errorf("expected -d/--detach flag, got %+v", detachFlag)
 	}
 	if got := cmd.Flags().Lookup("container"); got == nil {
 		t.Errorf("expected --container flag")
@@ -1101,7 +1107,7 @@ func TestRun_FromProfile_CreatesAndStarts(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-p", "claude-cell"})
+	cmd.SetArgs([]string{"-p", "claude-cell", "-d"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -1160,7 +1166,7 @@ spec:
 			},
 		}
 		cmd, _ := newCmd(t, fc)
-		cmd.SetArgs([]string{"-p", "claude"})
+		cmd.SetArgs([]string{"-p", "claude", "-d"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("Execute #%d: %v", i, err)
 		}
@@ -1191,7 +1197,7 @@ func TestRun_FromProfile_LocationFlagsOverride(t *testing.T) {
 	// The materialized profile sets realm/space/stack already; --realm/--space/--stack
 	// flags must NOT override values the profile already provides — the same
 	// "doc wins over flag" rule that -f obeys.
-	cmd.SetArgs([]string{"-p", "claude-cell", "--realm", "x", "--space", "y", "--stack", "z"})
+	cmd.SetArgs([]string{"-p", "claude-cell", "-d", "--realm", "x", "--space", "y", "--stack", "z"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -1207,7 +1213,7 @@ func TestRun_FromProfile_UnknownProfile_Errors(t *testing.T) {
 
 	fc := &fakeClient{}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-p", "ghost"})
+	cmd.SetArgs([]string{"-p", "ghost", "-d"})
 
 	err := cmd.Execute()
 	if !errors.Is(err, errdefs.ErrProfileNotFound) {
@@ -1227,7 +1233,7 @@ func TestRun_FromProfile_FileAndProfile_MutuallyExclusive(t *testing.T) {
 
 	fc := &fakeClient{}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-p", "claude-cell"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-p", "claude-cell", "-d"})
 
 	err := cmd.Execute()
 	// MarkFlagsMutuallyExclusive emits "if any flags in the group [file profile]
@@ -1248,7 +1254,7 @@ func TestRun_RejectsPositionalArgs(t *testing.T) {
 
 	fc := &fakeClient{}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "my-cell"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d", "my-cell"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -1263,9 +1269,9 @@ func TestRun_FromProfile_Attach_HeadlineFlow(t *testing.T) {
 	t.Cleanup(viper.Reset)
 	writeTempProfile(t)
 
-	// Headline flow from the issue: `kuke run -p claude-cell -a` materializes
+	// Headline flow from the issue: `kuke run -p claude-cell` materializes
 	// the profile, creates+starts the cell, then attaches to cell.tty.default
-	// (the `work` container).
+	// (the `work` container) by default.
 	fc := &fakeClient{
 		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
 			return successCreateResult(doc), nil
@@ -1274,7 +1280,7 @@ func TestRun_FromProfile_Attach_HeadlineFlow(t *testing.T) {
 	}
 	run := &runCapture{}
 	cmd, _ := newCmdWithRun(t, fc, run)
-	cmd.SetArgs([]string{"-p", "claude-cell", "-a"})
+	cmd.SetArgs([]string{"-p", "claude-cell"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -1294,10 +1300,10 @@ func TestRun_FromProfile_Attach_HeadlineFlow(t *testing.T) {
 }
 
 func TestRun_RmFlag_SetsAutoDeleteOnSpec(t *testing.T) {
-	// `kuke run --rm -f cell.yaml` must surface AutoDelete=true on the
-	// CellDoc the daemon receives, in both attached and detached modes.
-	// The daemon side (KukeonV1Service.CreateCell) reads that bool to
-	// install the auto-delete watcher.
+	// `kuke run -d --rm -f cell.yaml` must surface AutoDelete=true on
+	// the CellDoc the daemon receives, in both attached and detached
+	// modes. The daemon side (KukeonV1Service.CreateCell) reads that
+	// bool to install the auto-delete watcher.
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{
@@ -1306,7 +1312,7 @@ func TestRun_RmFlag_SetsAutoDeleteOnSpec(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "--rm"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d", "--rm"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -1328,7 +1334,7 @@ func TestRun_NoRmFlag_LeavesAutoDeleteFalse(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML)})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -1350,7 +1356,7 @@ func TestRun_RmFlag_RejectsNoDaemon(t *testing.T) {
 
 	fc := &fakeClient{}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "--rm"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d", "--rm"})
 
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "--rm is incompatible with --no-daemon") {
@@ -1391,7 +1397,7 @@ spec:
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, yamlWithAutoDelete)})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, yamlWithAutoDelete), "-d"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -1402,10 +1408,11 @@ spec:
 }
 
 func TestRun_RmAttach_KeepsCellAliveOnCleanDetach(t *testing.T) {
-	// Issue #279: a clean ^]^] detach must NOT trigger the -a --rm
-	// KillCell. The operator may want to re-attach later — same
-	// semantics as `kuke attach`. Only workload-end signals (peer
-	// hangup, shell exit, controller error) should fire cleanup.
+	// Issue #279: a clean ^]^] detach must NOT trigger the --rm
+	// KillCell under the default attach mode. The operator may want
+	// to re-attach later — same semantics as `kuke attach`. Only
+	// workload-end signals (peer hangup, shell exit, controller
+	// error) should fire cleanup.
 	//
 	// Inject attach.ErrDetached as the attach-loop result; that is
 	// what sbsh v0.10.1 returns when the in-band detach keystroke
@@ -1425,7 +1432,7 @@ func TestRun_RmAttach_KeepsCellAliveOnCleanDetach(t *testing.T) {
 		err: fmt.Errorf("wrapped by harness: %w", sbshattach.ErrDetached),
 	}
 	cmd, _ := newCmdWithRunFn(t, fc, run.fn)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a", "--rm"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "--rm"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v (clean detach must surface as exit 0)", err)
@@ -1442,12 +1449,13 @@ func TestRun_RmAttach_KeepsCellAliveOnCleanDetach(t *testing.T) {
 }
 
 func TestRun_RmAttach_KillsCellOnPeerClosed(t *testing.T) {
-	// Issue #265: with -a --rm and a long-lived root (`sleep infinity`)
-	// peering an attachable container, the root task never exits when
-	// the workload terminates on the peer side, so the reconciler's
-	// auto-delete trigger never fires. The CLI must call KillCell when
-	// the attach loop returns peer-closed so the daemon's reconciler
-	// reaps the cell on the next tick.
+	// Issue #265: with --rm in the default attach mode and a
+	// long-lived root (`sleep infinity`) peering an attachable
+	// container, the root task never exits when the workload
+	// terminates on the peer side, so the reconciler's auto-delete
+	// trigger never fires. The CLI must call KillCell when the attach
+	// loop returns peer-closed so the daemon's reconciler reaps the
+	// cell on the next tick.
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{
@@ -1463,7 +1471,7 @@ func TestRun_RmAttach_KillsCellOnPeerClosed(t *testing.T) {
 		err: fmt.Errorf("wrapped by harness: %w", sbshattach.ErrPeerClosed),
 	}
 	cmd, _ := newCmdWithRunFn(t, fc, run.fn)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a", "--rm"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "--rm"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v (peer-closed must surface as exit 0 — workload ended)", err)
@@ -1504,7 +1512,7 @@ func TestRun_RmAttach_KillsCellEvenWhenAttachLoopErrors(t *testing.T) {
 	}
 	run := &runErrorCapture{err: attachLoopErr}
 	cmd, _ := newCmdWithRunFn(t, fc, run.fn)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a", "--rm"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "--rm"})
 
 	if err := cmd.Execute(); !errors.Is(err, attachLoopErr) {
 		t.Fatalf("Execute err=%v want attachLoopErr (must surface to caller)", err)
@@ -1533,7 +1541,7 @@ func TestRun_RmAttach_KillCellFailureDoesNotMaskAttachExit(t *testing.T) {
 	}
 	run := &runCapture{err: fmt.Errorf("wrapped by harness: %w", sbshattach.ErrPeerClosed)}
 	cmd, buf := newCmdWithRun(t, fc, run)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a", "--rm"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "--rm"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v (KillCell failure on workload-end must not surface as a run error)", err)
@@ -1566,7 +1574,7 @@ func TestRun_RmAttach_KillCellNotFound_Silent(t *testing.T) {
 	}
 	run := &runCapture{err: fmt.Errorf("wrapped by harness: %w", sbshattach.ErrPeerClosed)}
 	cmd, buf := newCmdWithRun(t, fc, run)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a", "--rm"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "--rm"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -1576,12 +1584,13 @@ func TestRun_RmAttach_KillCellNotFound_Silent(t *testing.T) {
 	}
 }
 
-func TestRun_RmNoAttach_DoesNotCallKillCell(t *testing.T) {
-	// Without -a, --rm preserves its original semantics: the daemon's
-	// reconciler watches the root task and reaps when it exits. The CLI
-	// must not pre-empt that path with a KillCell — that would break
-	// `kuke run --rm -f cell.yaml` for a long-running workload that the
-	// operator wants left running until it exits on its own.
+func TestRun_RmDetach_DoesNotCallKillCell(t *testing.T) {
+	// With -d/--detach, --rm preserves its original semantics: the
+	// daemon's reconciler watches the root task and reaps when it
+	// exits. The CLI must not pre-empt that path with a KillCell —
+	// that would break `kuke run -d --rm -f cell.yaml` for a
+	// long-running workload that the operator wants left running
+	// until it exits on its own.
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{
@@ -1590,22 +1599,22 @@ func TestRun_RmNoAttach_DoesNotCallKillCell(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "--rm"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d", "--rm"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if fc.killCalls != 0 {
-		t.Errorf("KillCell calls=%d want 0 (no -a means the reconciler owns cleanup)", fc.killCalls)
+		t.Errorf("KillCell calls=%d want 0 (-d means the reconciler owns cleanup)", fc.killCalls)
 	}
 }
 
 func TestRun_RmAttach_AlreadyReady_StillKillsCellOnPeerClosed(t *testing.T) {
-	// Idempotent branch regression guard: re-running `kuke run -a --rm`
+	// Idempotent branch regression guard: re-running `kuke run --rm`
 	// against an already-Ready cell with matching spec must still fire
 	// KillCell when the attach loop reports workload-end (peer hangup
 	// here). Otherwise a user with a dangling cell from a pre-fix
-	// invocation cannot recover via -a --rm, reproducing the original
+	// invocation cannot recover via --rm, reproducing the original
 	// #265 symptom.
 	t.Cleanup(viper.Reset)
 
@@ -1640,7 +1649,7 @@ func TestRun_RmAttach_AlreadyReady_StillKillsCellOnPeerClosed(t *testing.T) {
 	}
 	run := &runCapture{err: fmt.Errorf("wrapped by harness: %w", sbshattach.ErrPeerClosed)}
 	cmd, _ := newCmdWithRun(t, fc, run)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a", "--rm"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "--rm"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -1660,8 +1669,8 @@ func TestRun_RmAttach_AlreadyReady_StillKillsCellOnPeerClosed(t *testing.T) {
 }
 
 func TestRun_AttachNoRm_DoesNotCallKillCell(t *testing.T) {
-	// Defensive guard: -a alone must not engage cleanup. KillCell only
-	// fires when --rm is also set.
+	// Defensive guard: the default attach mode alone must not engage
+	// cleanup. KillCell only fires when --rm is also set.
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{
@@ -1672,13 +1681,13 @@ func TestRun_AttachNoRm_DoesNotCallKillCell(t *testing.T) {
 	}
 	run := &runCapture{}
 	cmd, _ := newCmdWithRun(t, fc, run)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-a"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if fc.killCalls != 0 {
-		t.Errorf("KillCell calls=%d want 0 (-a without --rm must not clean up)", fc.killCalls)
+		t.Errorf("KillCell calls=%d want 0 (attach without --rm must not clean up)", fc.killCalls)
 	}
 }
 

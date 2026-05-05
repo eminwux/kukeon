@@ -40,8 +40,8 @@ type MockRunKey struct{}
 // detach / context cancel and any unrecoverable controller error otherwise.
 type runFn func(ctx context.Context, opts attach.Options) error
 
-// pickAttachTarget resolves the container `kuke run -a` should attach to,
-// applying the documented precedence:
+// pickAttachTarget resolves the container the post-start attach should
+// connect to, applying the documented precedence:
 //
 //  1. explicit --container flag, when set
 //  2. cell.tty.default, when the spec sets it
@@ -85,7 +85,7 @@ func pickAttachTarget(spec v1beta1.CellSpec, cellName, explicit string) (string,
 	}
 
 	return "", fmt.Errorf(
-		"%w (cell %q); declare 'attachable: true' on one container or omit -a",
+		"%w (cell %q); declare 'attachable: true' on one container or pass -d/--detach",
 		errdefs.ErrAttachNoCandidate, cellName,
 	)
 }
@@ -108,18 +108,17 @@ func formatAttachableList(spec v1beta1.CellSpec) string {
 
 // runAttachLoop resolves the per-container sbsh control socket via the
 // daemon's AttachContainer RPC and drives the in-process attach loop.
-// Returns the tri-state used by the -a --rm cleanup decision in
+// Returns the tri-state used by the --rm cleanup decision in
 // attachAndMaybeAutoDelete:
 //
 //   - detached=true,  err=nil — operator pressed ^]^] (or peer issued
 //     a Detach RPC). Cell must stay alive.
 //   - detached=false, err=nil — peer dropped the connection (workload
-//     exited / hung up). Surface exit 0; -a --rm fires KillCell so a
+//     exited / hung up). Surface exit 0; --rm fires KillCell so a
 //     long-lived root does not pin the cell.
 //   - detached=false, err≠nil — pre-attach setup error or unrecoverable
-//     controller error. Surface to the user; -a --rm still fires
-//     KillCell because a half-detached session would otherwise leak
-//     the cell.
+//     controller error. Surface to the user; --rm still fires KillCell
+//     because a half-detached session would otherwise leak the cell.
 func runAttachLoop(
 	cmd *cobra.Command,
 	client kukeonv1.Client,
