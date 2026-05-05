@@ -61,6 +61,17 @@ func translateCNIError(err error, networkName, bridge string) error {
 		)
 	}
 
+	// Container veth already in the target netns. The bridge plugin emits
+	// "container veth name provided (eth0) already exists" (older versions)
+	// or "container veth name (\"eth0\") peer provided (\"vethXXXX\") already
+	// exists" (>= v1.5). Both share the "container veth name" + "already
+	// exists" pair, which is narrow enough to exclude the unrelated
+	// "file exists" / IPAM "duplicate allocation" / iptables conflicts that
+	// happen to share the looser "already exists" substring.
+	if strings.Contains(msg, "container veth name") && strings.Contains(msg, "already exists") {
+		return fmt.Errorf("%w: %w", errdefs.ErrCNIVethExists, err)
+	}
+
 	return err
 }
 
