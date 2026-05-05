@@ -451,11 +451,14 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 
 		netnsPath := namespacePaths.Net
 		if addErr := cniMgr.AddContainerToNetwork(r.ctx, containerID, netnsPath); addErr != nil {
-			// Check if the error indicates the container is already attached to the network
-			// This can happen when the task was already running from a previous start
-			errMsg := addErr.Error()
-			if strings.Contains(errMsg, "already exists") {
-				// Container is already attached to the network, log and continue
+			// The bridge plugin's "container veth name … already exists" is
+			// the one genuinely idempotent failure — a prior ADD reached veth
+			// setup before crashing, so eth0 and its IPAM record are intact
+			// and the retry can proceed. Match it via the typed sentinel so
+			// unrelated "already exists" / "file exists" plugin errors (IP
+			// conflicts, route duplicates, IPAM duplicate allocation,
+			// iptables) surface instead of being silently swallowed.
+			if errors.Is(addErr, internalerrdefs.ErrCNIVethExists) {
 				fields = appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 				fields = append(
 					fields,
@@ -467,13 +470,18 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 					cniConfigPath,
 					"netns",
 					netnsPath,
+					"err",
+					addErr.Error(),
 				)
-				r.logger.DebugContext(
+				// INFO so the idempotent-skip is visible without
+				// --log-level debug; the original error message goes in the
+				// "err" field so a real failure misclassified as idempotent
+				// is still traceable.
+				r.logger.InfoContext(
 					r.ctx,
-					"root container already attached to network, skipping",
+					"root container already attached to network, skipping CNI ADD",
 					fields...,
 				)
-				// Continue execution - container is already attached
 			} else {
 				// Log the actual CNI bin dir value being used (may be empty, which causes the error)
 				// Note: NewManager creates CNI config with this value BEFORE applying defaults,

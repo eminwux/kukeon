@@ -125,6 +125,16 @@ var (
 
 	ErrBridgeNameTooLong = errors.New("bridge name exceeds Linux IFNAMSIZ limit")
 	ErrCNIPluginNotFound = errors.New("cni plugin not found")
+	// ErrCNIVethExists fires when CNI ADD reports the container-side veth
+	// (eth0) is already present in the target netns — the bridge plugin's
+	// "container veth name … already exists" path. This is the one genuinely
+	// idempotent failure: the previous ADD reached veth setup before
+	// crashing, so the iface and its IPAM record are intact and a retry can
+	// proceed without re-running attach. All other "already exists" /
+	// "file exists" errors from the plugin chain (IP-addr conflicts, route
+	// duplicates, IPAM duplicate-allocation, iptables) are real failures
+	// that must surface.
+	ErrCNIVethExists = errors.New("cni container veth already exists in netns")
 
 	// Network-policy-related errors.
 

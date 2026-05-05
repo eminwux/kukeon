@@ -81,6 +81,66 @@ func TestTranslateCNIError(t *testing.T) {
 			bridge:      "cni0",
 			passthrough: true,
 		},
+		{
+			name: "container veth exists (bridge plugin <v1.5) → ErrCNIVethExists",
+			err: errors.New(
+				`plugin type="bridge" failed (add): container veth name provided (eth0) already exists`,
+			),
+			networkName:  "net",
+			bridge:       "cni0",
+			wantSentinel: errdefs.ErrCNIVethExists,
+			wantSubstr:   "container veth name",
+		},
+		{
+			name: "container veth exists (bridge plugin >=v1.5) → ErrCNIVethExists",
+			err: errors.New(
+				`plugin type="bridge" failed (add): container veth name ("eth0") peer provided ("veth123abc") already exists`,
+			),
+			networkName:  "net",
+			bridge:       "cni0",
+			wantSentinel: errdefs.ErrCNIVethExists,
+			wantSubstr:   "already exists",
+		},
+		{
+			// The original substring check would have swallowed this — it's
+			// the regression the new sentinel exists to prevent. Ensure the
+			// classifier passes it through unchanged so start.go's
+			// errors.Is gate surfaces it as a real failure.
+			name: "IP addr conflict → passthrough (not idempotent)",
+			err: errors.New(
+				`plugin type="bridge" failed (add): failed to add IP addr 10.88.0.5/16 to k-deadbeef: file exists`,
+			),
+			networkName: "net",
+			bridge:      "cni0",
+			passthrough: true,
+		},
+		{
+			name: "IPAM duplicate allocation → passthrough (not idempotent)",
+			err: errors.New(
+				`plugin type="host-local" failed (add): failed to allocate for range 0: 10.88.0.5 has been allocated to abc, duplicate allocation is not allowed`,
+			),
+			networkName: "net",
+			bridge:      "cni0",
+			passthrough: true,
+		},
+		{
+			name: "iptables rule already exists → passthrough (not idempotent)",
+			err: errors.New(
+				`plugin type="portmap" failed (add): running [/usr/sbin/iptables -t nat -N CNI-HOSTPORT-DNAT --wait]: exit status 1: iptables: Chain already exists`,
+			),
+			networkName: "net",
+			bridge:      "cni0",
+			passthrough: true,
+		},
+		{
+			name: "bridge link already exists but not a bridge → passthrough (real failure)",
+			err: errors.New(
+				`plugin type="bridge" failed (add): "kuke0" already exists but is not a bridge`,
+			),
+			networkName: "net",
+			bridge:      "cni0",
+			passthrough: true,
+		},
 	}
 
 	for _, tt := range tests {
