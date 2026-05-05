@@ -37,6 +37,7 @@ import (
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/firewall"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
@@ -166,6 +167,15 @@ func runReset(cmd *cobra.Command, _ []string) error {
 		}
 		if removed {
 			cmd.Printf("removed %s\n", systemDir)
+		}
+
+		// Symmetric with `kuke init`: full re-bootstrap should leave no
+		// kukeon-owned host firewall state behind. Per-space egress chains
+		// are torn down by space-deletion paths; this removes the host-wide
+		// admission chain installed at init time.
+		fwInstaller := firewall.NewInstaller(logger)
+		if fwErr := fwInstaller.Remove(cmd.Context()); fwErr != nil {
+			return fmt.Errorf("remove forward admission chain: %w", fwErr)
 		}
 	}
 

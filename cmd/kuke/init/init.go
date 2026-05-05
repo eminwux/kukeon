@@ -31,6 +31,7 @@ import (
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/firewall"
 	"github.com/eminwux/kukeon/internal/serverconfig"
 	"github.com/eminwux/kukeon/internal/sysuser"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
@@ -206,6 +207,50 @@ func resolveKukeondImage() string {
 	return fmt.Sprintf("%s:%s", repo, tag)
 }
 
+// installForwardAdmission installs the kukeon-owned FORWARD admission chain
+// so cells reach the network on hosts where `iptables -P FORWARD DROP` is
+// the default (Docker, firewalld, ufw, hardened distros). Idempotent —
+// re-running `kuke init` on a healthy host produces no rule churn.
+func installForwardAdmission(ctx context.Context, logger *slog.Logger) error {
+	if err := firewall.NewInstaller(logger).Install(ctx); err != nil {
+		return fmt.Errorf("install forward admission chain: %w", err)
+	}
+	return nil
+}
+
+// applyKukeonOwnership chown+chmods /run/kukeon (socket's parent dir,
+// already created by ensureSocketDir during bootstrap) and /opt/kukeon
+// (RunPath). Both end up root:kukeon mode 0o750 so the kukeon group can
+// traverse without world access.
+func applyKukeonOwnership(
+	socketPath, runPath string,
+	ensure sysuser.EnsureResult,
+) (permissionsReport, error) {
+	runDir := filepath.Dir(socketPath)
+	r := permissionsReport{
+		User:         consts.KukeonSystemUser,
+		Group:        consts.KukeonSystemGroup,
+		UID:          ensure.UID,
+		GID:          ensure.GID,
+		UserCreated:  ensure.UserCreated,
+		GroupCreated: ensure.GroupCreated,
+		RunDirPath:   runDir,
+		RunPath:      runPath,
+		SocketPath:   socketPath,
+	}
+	if err := sysuser.ChownAndChmod(runDir, 0, ensure.GID, kukeonRunDirMode); err != nil {
+		return r, fmt.Errorf("apply kukeon ownership to %q: %w", runDir, err)
+	}
+	r.RunDirApplied = true
+	if err := sysuser.ChownTreeAndChmod(
+		runPath, 0, ensure.GID, kukeonRunPathDirMode, kukeonRunPathFileMode,
+	); err != nil {
+		return r, fmt.Errorf("apply kukeon ownership to %q: %w", runPath, err)
+	}
+	r.RunPathApplied = true
+	return r, nil
+}
+
 func runInit(cmd *cobra.Command, _ []string) error {
 	logger, ok := cmd.Context().Value(types.CtxLogger).(*slog.Logger)
 	if !ok || logger == nil {
@@ -247,6 +292,10 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("ensure kukeon user/group: %w", ensureErr)
 	}
 
+	if fwErr := installForwardAdmission(cmd.Context(), logger); fwErr != nil {
+		return fwErr
+	}
+
 	opts := controller.Options{
 		RunPath:              runPath,
 		ContainerdSocket:     viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
@@ -265,32 +314,10 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return bootstrapErr
 	}
 
-	// Apply kukeon-managed ownership/modes. /run/kukeon is the socket's
-	// parent dir (already created by ensureSocketDir during bootstrap);
-	// /opt/kukeon is RunPath. Both end up root:kukeon mode 0o750 so the
-	// kukeon group can traverse without world access.
-	runDir := filepath.Dir(socketPath)
-	permsReport := permissionsReport{
-		User:         consts.KukeonSystemUser,
-		Group:        consts.KukeonSystemGroup,
-		UID:          ensure.UID,
-		GID:          ensure.GID,
-		UserCreated:  ensure.UserCreated,
-		GroupCreated: ensure.GroupCreated,
-		RunDirPath:   runDir,
-		RunPath:      runPath,
-		SocketPath:   socketPath,
+	permsReport, ownErr := applyKukeonOwnership(socketPath, runPath, ensure)
+	if ownErr != nil {
+		return ownErr
 	}
-	if chownErr := sysuser.ChownAndChmod(runDir, 0, ensure.GID, kukeonRunDirMode); chownErr != nil {
-		return fmt.Errorf("apply kukeon ownership to %q: %w", runDir, chownErr)
-	}
-	permsReport.RunDirApplied = true
-	if chownErr := sysuser.ChownTreeAndChmod(
-		runPath, 0, ensure.GID, kukeonRunPathDirMode, kukeonRunPathFileMode,
-	); chownErr != nil {
-		return fmt.Errorf("apply kukeon ownership to %q: %w", runPath, chownErr)
-	}
-	permsReport.RunPathApplied = true
 
 	printBootstrapReport(cmd, report, permsReport)
 
