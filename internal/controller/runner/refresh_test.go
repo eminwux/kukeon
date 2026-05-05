@@ -127,7 +127,7 @@ func TestLatchReadyObserved(t *testing.T) {
 // writers (provisionNewCell, StartCell idempotent skip, StartCell
 // happy path, StartContainer, RecreateCell) all rely on. State and
 // ReadyObserved must close together — without that, a KillCell that
-// races the first reconciler tick (e.g. `kuke run -a --rm` exiting
+// races the first reconciler tick (e.g. `kuke run --rm` exiting
 // attach inside the reconcile interval) flips persisted state Ready
 // → Stopped before any reconciler observation, leaving
 // readyObserved=false on disk. Subsequent ticks then see
