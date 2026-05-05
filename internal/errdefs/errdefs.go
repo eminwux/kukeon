@@ -148,6 +148,11 @@ var (
 	ErrEgressApply              = errors.New("failed to apply egress policy")
 	ErrEgressRemove             = errors.New("failed to remove egress policy")
 
+	// Firewall (FORWARD admission) errors.
+
+	ErrForwardAdmissionApply  = errors.New("failed to apply forward admission rules")
+	ErrForwardAdmissionRemove = errors.New("failed to remove forward admission rules")
+
 	// Image-related errors.
 
 	// ErrLoadImage is returned when importing an OCI/docker tarball into a
