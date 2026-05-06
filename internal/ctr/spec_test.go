@@ -606,6 +606,126 @@ func TestBuildRootContainerSpec_HostPID(t *testing.T) {
 	}
 }
 
+// TestBuildContainerSpec_HostCgroup verifies the OCI spec produced by
+// BuildContainerSpec appends a CgroupNamespace entry when HostCgroup is
+// false (the default, private) and omits it when HostCgroup is true.
+// Inverse of the HostNetwork/HostPID pattern — cgroup-ns is the only one
+// of the three that defaults to private, so the branch adds rather than
+// drops. Required for nested-runtime workloads (kuke init, dockerd, an
+// inner containerd) to write their cgroup tree under the cell instead of
+// the host's cgroup root and clear runc's "cgroup not empty" precheck.
+func TestBuildContainerSpec_HostCgroup(t *testing.T) {
+	tests := []struct {
+		name         string
+		hostCgroup   bool
+		wantCgroupNS bool
+	}{
+		{name: "host cgroup false appends cgroup ns entry", hostCgroup: false, wantCgroupNS: true},
+		{name: "host cgroup zero value appends cgroup ns entry", wantCgroupNS: true},
+		{name: "host cgroup true omits cgroup ns entry", hostCgroup: true, wantCgroupNS: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := ctr.BuildContainerSpec(intmodel.ContainerSpec{
+				ID:         "test-id",
+				Image:      "registry.eminwux.com/busybox:latest",
+				HostCgroup: tt.hostCgroup,
+				CellName:   "c", SpaceName: "s", RealmName: "r", StackName: "st",
+			})
+
+			// Starting OCI spec deliberately omits CgroupNamespace — that
+			// matches the OCI default, where cgroup-ns is *not* in the
+			// initial namespace list. The HostCgroup=false branch is
+			// expected to append it; HostCgroup=true is expected to leave
+			// the spec untouched.
+			ociSpec := &runtimespec.Spec{
+				Process: &runtimespec.Process{},
+				Linux: &runtimespec.Linux{
+					Namespaces: []runtimespec.LinuxNamespace{
+						{Type: runtimespec.NetworkNamespace},
+						{Type: runtimespec.PIDNamespace},
+						{Type: runtimespec.MountNamespace},
+					},
+				},
+			}
+			for _, opt := range spec.SpecOpts {
+				if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+					t.Fatalf("apply SpecOpts: %v", err)
+				}
+			}
+
+			var hasCgroup bool
+			for _, ns := range ociSpec.Linux.Namespaces {
+				if ns.Type == runtimespec.CgroupNamespace {
+					hasCgroup = true
+					break
+				}
+			}
+			if hasCgroup != tt.wantCgroupNS {
+				t.Errorf("cgroup namespace present = %v, want %v (namespaces=%+v)",
+					hasCgroup, tt.wantCgroupNS, ociSpec.Linux.Namespaces)
+			}
+		})
+	}
+}
+
+// TestBuildRootContainerSpec_HostCgroup mirrors
+// TestBuildContainerSpec_HostCgroup for the root-container builder. The
+// kukeond cell's root container relies on this — HostCgroup=true must
+// produce an OCI spec that does not append a CgroupNamespace entry, so
+// kukeond joins its parent's cgroup-ns and can write sibling cgroups
+// outside its own subtree.
+func TestBuildRootContainerSpec_HostCgroup(t *testing.T) {
+	tests := []struct {
+		name         string
+		hostCgroup   bool
+		wantCgroupNS bool
+	}{
+		{name: "host cgroup false appends cgroup ns entry", hostCgroup: false, wantCgroupNS: true},
+		{name: "host cgroup zero value appends cgroup ns entry", wantCgroupNS: true},
+		{name: "host cgroup true omits cgroup ns entry", hostCgroup: true, wantCgroupNS: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := ctr.BuildRootContainerSpec(intmodel.ContainerSpec{
+				ID:           "root",
+				ContainerdID: "root-id",
+				Image:        "registry.eminwux.com/busybox:latest",
+				HostCgroup:   tt.hostCgroup,
+			}, nil)
+
+			ociSpec := &runtimespec.Spec{
+				Process: &runtimespec.Process{},
+				Linux: &runtimespec.Linux{
+					Namespaces: []runtimespec.LinuxNamespace{
+						{Type: runtimespec.NetworkNamespace},
+						{Type: runtimespec.PIDNamespace},
+					},
+				},
+			}
+			for _, opt := range spec.SpecOpts {
+				if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+					t.Fatalf("apply SpecOpts: %v", err)
+				}
+			}
+
+			var hasCgroup bool
+			for _, ns := range ociSpec.Linux.Namespaces {
+				if ns.Type == runtimespec.CgroupNamespace {
+					hasCgroup = true
+					break
+				}
+			}
+			if hasCgroup != tt.wantCgroupNS {
+				t.Errorf("cgroup namespace present = %v, want %v (namespaces=%+v)",
+					hasCgroup, tt.wantCgroupNS, ociSpec.Linux.Namespaces)
+			}
+		})
+	}
+}
+
 // TestBuildRootContainerSpec_HostNetwork is the same assertion as
 // TestBuildContainerSpec_HostNetwork but for the root-container builder used
 // by the runner for the kukeond cell.

@@ -49,6 +49,7 @@ type ContainerSpec struct {
 	Privileged             bool
 	HostNetwork            bool
 	HostPID                bool
+	HostCgroup             bool
 	User                   string
 	ReadOnlyRootFilesystem bool
 	Capabilities           *ContainerCapabilities

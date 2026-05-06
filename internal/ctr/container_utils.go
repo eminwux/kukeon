@@ -117,6 +117,17 @@ func BuildRootContainerSpec(
 		specOpts = append(specOpts, oci.WithHostNamespace(runtimespec.PIDNamespace))
 	}
 
+	// Cgroup namespace: append the entry on the default (private) path so
+	// the root container is cgroup-isolated; omit it when HostCgroup=true
+	// so the root joins its parent's cgroup-ns. Mirrors the
+	// BuildContainerSpec rule for the root-container builder used by the
+	// kukeond cell, where HostCgroup=true is the carve-out.
+	if !rootSpec.HostCgroup {
+		specOpts = append(specOpts, oci.WithLinuxNamespace(runtimespec.LinuxNamespace{
+			Type: runtimespec.CgroupNamespace,
+		}))
+	}
+
 	// Bind mounts and security/isolation fields share the same translators as
 	// BuildContainerSpec so a user-supplied root container (RootContainerID)
 	// keeps its Volumes, User, Capabilities, SecurityOpts, Tmpfs, and

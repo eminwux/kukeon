@@ -418,7 +418,14 @@ func (b *Exec) bootstrapStack(section *StackSection, realmName, spaceName, stack
 // hierarchy at /sys/fs/cgroup is bind-mounted so kukeond can create the
 // realm/space/stack/cell cgroup tree for user workloads — without it, the
 // daemon container only sees a fresh read-only sysfs and cgroup creation
-// returns ENOENT. The host containerd data root at /var/lib/containerd is
+// returns ENOENT. Pinned alongside that bind-mount, HostCgroup=true on the
+// kukeond container opts it into its parent's cgroup namespace so its view
+// of /sys/fs/cgroup matches the host layout — with cgroup-ns private (the
+// default for user workloads), kukeond's cgroup root would re-anchor at its
+// own cell and sibling-cgroup creation under /kukeon/<realm>/... would
+// resolve against the wrong subtree. The two pieces (host bind-mount + host
+// cgroup-ns) are the kukeond cgroup carve-out and only make sense together.
+// The host containerd data root at /var/lib/containerd is
 // bind-mounted as well: kukeond performs in-process overlay mounts during
 // container creation (image unpack, image-config resolution) that reference
 // snapshot lowerdirs under that tree, and the mount syscalls execute in the
@@ -522,7 +529,18 @@ func kukeondCellDoc(
 					// Distinct from HostNetwork — that fixed where kukeond's
 					// own iptables/bridges land; this fixes how kukeond
 					// resolves *other* containers' netns paths.
-					HostPID:    true,
+					HostPID: true,
+					// HostCgroup keeps kukeond in its parent's cgroup
+					// namespace so its view of /sys/fs/cgroup matches the
+					// host layout — required because kukeond writes
+					// sibling cgroups under /kukeon/<realm>/... that live
+					// *outside* its own cell's subtree. With cgroup-ns
+					// private (the default), kukeond's cgroup root would
+					// re-anchor at its own cell and those writes would
+					// resolve against the wrong subtree. Pinned alongside
+					// the /sys/fs/cgroup host bind-mount in the volumes
+					// list above; the two are the kukeond cgroup carve-out.
+					HostCgroup: true,
 					Privileged: true,
 				},
 			},

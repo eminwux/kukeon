@@ -68,7 +68,22 @@ type ContainerSpec struct {
 	// user cells to a network fails with `Statfs /proc/<host-pid>/ns/net:
 	// no such file or directory`. Default false — no behavior change for
 	// existing specs.
-	HostPID                bool                   `json:"hostPID,omitempty"                yaml:"hostPID,omitempty"`
+	HostPID bool `json:"hostPID,omitempty"                yaml:"hostPID,omitempty"`
+	// HostCgroup, when true, opts the container into its parent's cgroup
+	// namespace. Default false unshares the cgroup-ns: the container sees
+	// its own cgroup as / and any nested runtime (containerd, runc,
+	// dockerd, kuke init) writes its cgroup tree under the cell — which
+	// is the property that lets a nested kuke init complete the runc
+	// task-create step that otherwise trips the "cgroup not empty"
+	// precheck.
+	//
+	// Set true only for kukeond-style cells that need to write cgroups
+	// *outside* their own subtree to manage user workloads. For ordinary
+	// workload containers, leave false.
+	//
+	// Translates to omitting the LinuxNamespace{Type: cgroup} entry from
+	// the OCI spec when true; appending it when false.
+	HostCgroup             bool                   `json:"hostCgroup,omitempty"             yaml:"hostCgroup,omitempty"`
 	User                   string                 `json:"user,omitempty"                   yaml:"user,omitempty"`
 	ReadOnlyRootFilesystem bool                   `json:"readOnlyRootFilesystem,omitempty" yaml:"readOnlyRootFilesystem,omitempty"`
 	Capabilities           *ContainerCapabilities `json:"capabilities,omitempty"           yaml:"capabilities,omitempty"`
