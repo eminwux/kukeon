@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -290,6 +291,15 @@ func BuildContainerSpec(
 		specOpts = append(specOpts, oci.WithMounts(mounts))
 	}
 
+	// Linux.CgroupsPath: place the container task inside the cell's cgroup
+	// subtree so cell-level resource accounting and limits actually constrain
+	// it. Without this, containerd's runc-shim default places the task under
+	// /<containerd-namespace>/<id>/, leaving the kukeon cgroup hierarchy
+	// decorative (issue #312).
+	if cgPath := cellCgroupsPath(containerSpec.CellCgroupPath, containerdID); cgPath != "" {
+		specOpts = append(specOpts, oci.WithCgroup(cgPath))
+	}
+
 	specOpts = append(specOpts, securitySpecOpts(containerSpec)...)
 
 	// Attachable wrapping is appended last so the args-wrap runs after any
@@ -310,6 +320,18 @@ func BuildContainerSpec(
 		SpecOpts:      specOpts,
 		CNIConfigPath: containerSpec.CNIConfigPath,
 	}
+}
+
+// cellCgroupsPath returns the absolute OCI Linux.CgroupsPath for a container
+// nested under its cell's cgroup, or "" when either the cell cgroup path or
+// the containerd id is missing (in which case the runc-shim default placement
+// applies). The returned path is absolute so runc treats it as a path under
+// the unified cgroup mount rather than as a systemd slice triple.
+func cellCgroupsPath(cellCgroupPath, containerdID string) string {
+	if cellCgroupPath == "" || containerdID == "" {
+		return ""
+	}
+	return filepath.Join(cellCgroupPath, containerdID)
 }
 
 // buildBindMounts translates ContainerSpec.Volumes into OCI bind mounts.

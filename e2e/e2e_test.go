@@ -243,6 +243,39 @@ func verifyContainerdNamespace(t *testing.T, namespace string) bool {
 	return strings.Contains(output, namespace)
 }
 
+// verifyContainerTaskInCellCgroup checks that a container's task cgroup is
+// nested under its cell cgroup and contains at least one PID. The on-disk
+// expectation is <mountpoint>/<cellGroup>/<containerdID>/cgroup.procs with a
+// non-empty body — i.e. runc honored Linux.CgroupsPath set by
+// BuildContainerSpec from cell.Status.CgroupPath. Issue #312: without that
+// wiring, the per-task cgroup is created elsewhere (under the containerd
+// namespace cgroup) and the path checked here doesn't exist.
+func verifyContainerTaskInCellCgroup(t *testing.T, cellGroup, containerdID string) bool {
+	t.Helper()
+
+	if cellGroup == "" || containerdID == "" {
+		return false
+	}
+
+	mountpoint := consts.CgroupFilesystemPath
+	relativeCell := strings.TrimPrefix(cellGroup, "/")
+	taskCgroup := filepath.Join(mountpoint, relativeCell, containerdID)
+
+	procsPath := filepath.Join(taskCgroup, "cgroup.procs")
+	data, err := os.ReadFile(procsPath)
+	if err != nil {
+		t.Logf("read %s: %v", procsPath, err)
+		return false
+	}
+	pids := strings.Fields(string(data))
+	if len(pids) == 0 {
+		t.Logf("cell-rooted task cgroup %s exists but cgroup.procs is empty", taskCgroup)
+		return false
+	}
+	t.Logf("verified container task PIDs %v under cell cgroup %s", pids, taskCgroup)
+	return true
+}
+
 // verifyCgroupPathExists verifies cgroup path exists in filesystem.
 func verifyCgroupPathExists(t *testing.T, cgroupPath string) bool {
 	t.Helper()

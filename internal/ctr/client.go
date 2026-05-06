@@ -62,6 +62,13 @@ type Client interface {
 	NewCgroup(spec CgroupSpec) (*cgroup2.Manager, error)
 	LoadCgroup(group string, mountpoint string) (*cgroup2.Manager, error)
 	DeleteCgroup(group, mountpoint string) error
+	// EnableCellSubtreeControllers enables the named cgroup-v2 controllers in
+	// the cell cgroup's own subtree_control AND in every ancestor's
+	// subtree_control up to the unified cgroup mount, so child cgroups (the
+	// per-container task cgroups runc creates under Linux.CgroupsPath)
+	// inherit the controllers and cell-level resource accounting / limits
+	// become effective. Issue #312.
+	EnableCellSubtreeControllers(group, mountpoint string, controllers []string) error
 	CreateContainerFromSpec(namespace string, spec intmodel.ContainerSpec, creds []RegistryCredentials, opts ...BuildOption) (containerd.Container, error)
 
 	CreateContainer(namespace string, spec ContainerSpec, creds []RegistryCredentials) (containerd.Container, error)

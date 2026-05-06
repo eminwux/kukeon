@@ -726,6 +726,125 @@ func TestBuildRootContainerSpec_HostCgroup(t *testing.T) {
 	}
 }
 
+// TestBuildContainerSpec_CgroupsPath verifies that BuildContainerSpec emits an
+// OCI Linux.CgroupsPath rooted at <CellCgroupPath>/<containerd-id> when the
+// caller plumbs a non-empty cell cgroup path through the model spec, and
+// leaves it untouched (runc-shim default placement) otherwise. Issue #312:
+// without this, container task cgroups land outside the kukeon cgroup tree
+// and cell-level resource accounting is impossible.
+func TestBuildContainerSpec_CgroupsPath(t *testing.T) {
+	tests := []struct {
+		name           string
+		cellCgroupPath string
+		containerdID   string
+		fallbackID     string
+		wantCgroups    string
+	}{
+		{
+			name:           "cell cgroup path joins containerd id",
+			cellCgroupPath: "/kukeon/r/s/st/c",
+			containerdID:   "s_st_c_app",
+			wantCgroups:    "/kukeon/r/s/st/c/s_st_c_app",
+		},
+		{
+			name:           "cell cgroup path falls back to base id when containerd id empty",
+			cellCgroupPath: "/kukeon/r/s/st/c",
+			fallbackID:     "app",
+			wantCgroups:    "/kukeon/r/s/st/c/app",
+		},
+		{
+			name:        "no cell cgroup path leaves cgroups path untouched",
+			fallbackID:  "app",
+			wantCgroups: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := ctr.BuildContainerSpec(intmodel.ContainerSpec{
+				ID:             tt.fallbackID,
+				ContainerdID:   tt.containerdID,
+				Image:          "registry.eminwux.com/busybox:latest",
+				CellCgroupPath: tt.cellCgroupPath,
+				CellName:       "c", SpaceName: "s", RealmName: "r", StackName: "st",
+			})
+
+			ociSpec := &runtimespec.Spec{
+				Process: &runtimespec.Process{},
+				Linux:   &runtimespec.Linux{},
+			}
+			for _, opt := range spec.SpecOpts {
+				if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+					t.Fatalf("apply SpecOpts: %v", err)
+				}
+			}
+
+			if ociSpec.Linux.CgroupsPath != tt.wantCgroups {
+				t.Errorf("Linux.CgroupsPath = %q, want %q",
+					ociSpec.Linux.CgroupsPath, tt.wantCgroups)
+			}
+		})
+	}
+}
+
+// TestBuildRootContainerSpec_CgroupsPath mirrors
+// TestBuildContainerSpec_CgroupsPath for the root-container builder. The
+// root container is the cell's first task and must land under the cell
+// cgroup just like the regular containers do.
+func TestBuildRootContainerSpec_CgroupsPath(t *testing.T) {
+	tests := []struct {
+		name           string
+		cellCgroupPath string
+		containerdID   string
+		fallbackID     string
+		wantCgroups    string
+	}{
+		{
+			name:           "cell cgroup path joins containerd id",
+			cellCgroupPath: "/kukeon/r/s/st/c",
+			containerdID:   "s_st_c_root",
+			wantCgroups:    "/kukeon/r/s/st/c/s_st_c_root",
+		},
+		{
+			name:           "cell cgroup path falls back to base id when containerd id empty",
+			cellCgroupPath: "/kukeon/r/s/st/c",
+			fallbackID:     "root",
+			wantCgroups:    "/kukeon/r/s/st/c/root",
+		},
+		{
+			name:         "no cell cgroup path leaves cgroups path untouched",
+			containerdID: "s_st_c_root",
+			wantCgroups:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := ctr.BuildRootContainerSpec(intmodel.ContainerSpec{
+				ID:             tt.fallbackID,
+				ContainerdID:   tt.containerdID,
+				Image:          "registry.eminwux.com/busybox:latest",
+				CellCgroupPath: tt.cellCgroupPath,
+			}, nil)
+
+			ociSpec := &runtimespec.Spec{
+				Process: &runtimespec.Process{},
+				Linux:   &runtimespec.Linux{},
+			}
+			for _, opt := range spec.SpecOpts {
+				if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+					t.Fatalf("apply SpecOpts: %v", err)
+				}
+			}
+
+			if ociSpec.Linux.CgroupsPath != tt.wantCgroups {
+				t.Errorf("Linux.CgroupsPath = %q, want %q",
+					ociSpec.Linux.CgroupsPath, tt.wantCgroups)
+			}
+		})
+	}
+}
+
 // TestBuildRootContainerSpec_HostNetwork is the same assertion as
 // TestBuildContainerSpec_HostNetwork but for the root-container builder used
 // by the runner for the kukeond cell.

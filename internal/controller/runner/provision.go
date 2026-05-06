@@ -1067,6 +1067,15 @@ func (r *Exec) createCellCgroup(cell intmodel.Cell) (string, error) {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateCellCgroup, createErr)
 	}
 
+	// Enable the cell-level resource controllers in the cgroup tree before
+	// any container task lands inside the cell. Without this, container
+	// task cgroups nested under <cell>/<containerd-id> have no controllers
+	// available and cell-level UpdateCgroup limits are decorative — exactly
+	// what issue #312 reports.
+	if subtreeErr := r.ctrClient.EnableCellSubtreeControllers(spec.Group, spec.Mountpoint, cellResourceControllers()); subtreeErr != nil {
+		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateCellCgroup, subtreeErr)
+	}
+
 	r.logger.InfoContext(
 		r.ctx,
 		"created cell cgroup",
@@ -1076,6 +1085,15 @@ func (r *Exec) createCellCgroup(cell intmodel.Cell) (string, error) {
 		cgroupPath,
 	)
 	return cgroupPath, nil
+}
+
+// cellResourceControllers names the cgroup-v2 controllers kukeon enables on a
+// cell's subtree so per-container cgroups inherit them and UpdateCgroup at
+// the cell level becomes effective. The set is filtered against the host
+// root's cgroup.controllers at apply time, so passing a controller missing
+// from a particular kernel build (e.g. "io" without blk-cgroup) is safe.
+func cellResourceControllers() []string {
+	return []string{"cpu", "memory", "io", "pids"}
 }
 
 func (r *Exec) ensureCellCgroup(cell intmodel.Cell) (intmodel.Cell, error) {
@@ -1130,6 +1148,15 @@ func (r *Exec) ensureCellCgroup(cell intmodel.Cell) (intmodel.Cell, error) {
 	if cellDoc.Status.CgroupPath != "" {
 		if err := r.UpdateCellMetadata(cell); err != nil {
 			return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
+		}
+		// Idempotent re-toggle of cell subtree controllers after every
+		// ensure-pass — covers daemon restart against pre-existing cells
+		// provisioned before issue #312 was fixed (and is a no-op on
+		// already-enabled subtrees).
+		if subtreeErr := r.ctrClient.EnableCellSubtreeControllers(cellDoc.Status.CgroupPath, r.ctrClient.GetCgroupMountpoint(), cellResourceControllers()); subtreeErr != nil {
+			r.logger.WarnContext(r.ctx,
+				"failed to enable cell subtree controllers on ensure-path",
+				"cell", cell.Metadata.Name, "error", subtreeErr)
 		}
 	}
 
@@ -1240,6 +1267,12 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		cell.Spec.RootContainerID = rootContainerBaseID
 	}
 
+	// Cell-rooted cgroup placement for every container task. cell.Status.CgroupPath
+	// is populated by createCellCgroup before this runs (and preserved through
+	// recreate paths via desired.Status.CgroupPath = existing.Status.CgroupPath),
+	// so it's safe to read here. See issue #312.
+	cellCgroupPath := cell.Status.CgroupPath
+
 	// Track root container for return value
 	var rootContainer containerd.Container
 
@@ -1265,6 +1298,9 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		}
 		if containerSpec.CNIConfigPath == "" {
 			containerSpec.CNIConfigPath = cniConfigPath
+		}
+		if containerSpec.CellCgroupPath == "" {
+			containerSpec.CellCgroupPath = cellCgroupPath
 		}
 		cell.Spec.Containers[i] = containerSpec
 
@@ -1516,6 +1552,13 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 			return nil, err
 		}
 
+		// Cell-rooted cgroup placement for the root container task (issue
+		// #312). Mirrors the wiring in createCellContainers and the regular-
+		// container loop below.
+		if rootContainerSpec.CellCgroupPath == "" {
+			rootContainerSpec.CellCgroupPath = cell.Status.CgroupPath
+		}
+
 		// Determine root container ID for RootContainerID field (use base name from ID field)
 		rootContainerBaseID := rootContainerSpec.ID
 
@@ -1636,6 +1679,13 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		}
 		if containerSpec.StackName == "" {
 			containerSpec.StackName = stackName
+		}
+		// Cell-rooted cgroup placement (issue #312). Mirrors the equivalent
+		// fill-in for createCellContainers; only takes effect when the cell
+		// has been provisioned and its Status.CgroupPath is populated.
+		if containerSpec.CellCgroupPath == "" {
+			containerSpec.CellCgroupPath = cell.Status.CgroupPath
+			cell.Spec.Containers[i] = containerSpec
 		}
 
 		// Build containerd ID using hierarchical format for containerd operations

@@ -206,6 +206,18 @@ func TestKuke_CreateCell_VerifyState(t *testing.T) {
 	if !verifyRootContainerTaskExists(t, realmNamespace, rootContainerID) {
 		t.Fatalf("root container task %q not found in containerd namespace %q", rootContainerID, realmNamespace)
 	}
+
+	// Step 12: Verify the root container task PID lands in the cell cgroup,
+	// not the runc-shim default placement under the containerd namespace
+	// cgroup. This is the regression check for issue #312 — without the
+	// Linux.CgroupsPath wiring, <cell>/<containerd-id>/cgroup.procs is
+	// missing and cell-level resource accounting is impossible.
+	if !verifyContainerTaskInCellCgroup(t, cell.Status.CgroupPath, rootContainerID) {
+		t.Fatalf(
+			"root container task %q not found under cell cgroup %q (issue #312)",
+			rootContainerID, cell.Status.CgroupPath,
+		)
+	}
 }
 
 // TestKuke_DeleteCell_VerifyState tests cell deletion with state-based verification.
