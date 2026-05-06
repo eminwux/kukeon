@@ -40,7 +40,7 @@ func TestTaskStatusValidation(t *testing.T) {
 	client := setupTestClientForTask(t)
 
 	// Test empty ID validation
-	_, err := client.TaskStatus("")
+	_, err := client.TaskStatus("test-ns", "")
 	if err == nil {
 		t.Error("TaskStatus with empty ID should return error")
 	}
@@ -55,7 +55,7 @@ func TestTaskMetricsValidation(t *testing.T) {
 	client := setupTestClientForTask(t)
 
 	// Test empty ID validation
-	_, err := client.TaskMetrics("")
+	_, err := client.TaskMetrics("test-ns", "")
 	if err == nil {
 		t.Error("TaskMetrics with empty ID should return error")
 	}
@@ -83,7 +83,7 @@ func TestTaskStatusErrorHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := client.TaskStatus(tt.id)
+			_, err := client.TaskStatus("test-ns", tt.id)
 
 			if tt.wantErr != nil {
 				if err == nil {
@@ -115,7 +115,7 @@ func TestTaskMetricsErrorHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := client.TaskMetrics(tt.id)
+			_, err := client.TaskMetrics("test-ns", tt.id)
 
 			if tt.wantErr != nil {
 				if err == nil {

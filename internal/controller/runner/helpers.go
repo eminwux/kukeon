@@ -640,7 +640,7 @@ func (r *Exec) processOrphanedContainers(ctx context.Context, namespace string, 
 
 		// Get netns and purge CNI
 		r.logger.DebugContext(ctx, "getting container netns path", "id", containerID)
-		netnsPath, _ := r.getContainerNetnsPath(containerID)
+		netnsPath, _ := r.getContainerNetnsPath(namespace, containerID)
 		// Try to determine network name from container ID pattern
 		// Container ID format: realm-space-cell-container
 		parts := strings.Split(containerID, "-")
