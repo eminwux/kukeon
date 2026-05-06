@@ -271,6 +271,21 @@ func BuildContainerSpec(
 		specOpts = append(specOpts, oci.WithHostNamespace(runtimespec.PIDNamespace))
 	}
 
+	// Cgroup namespace: cgroup-ns is the inverse of HostNetwork/HostPID — the
+	// OCI default leaves it shared with the parent, so the explicit branch
+	// here *adds* the LinuxNamespace entry on the safer (private) path and
+	// omits it on opt-in. Private cgroup-ns is what lets a nested runtime
+	// (kuke init, dockerd, podman, an inner containerd) write its cgroup
+	// tree under the cell instead of trampling the host's cgroup root, and
+	// is what clears runc's "cgroup not empty" precheck on cgroup-v2 hosts
+	// without systemd. See ContainerSpec.HostCgroup for the operator-facing
+	// rationale.
+	if !containerSpec.HostCgroup {
+		specOpts = append(specOpts, oci.WithLinuxNamespace(runtimespec.LinuxNamespace{
+			Type: runtimespec.CgroupNamespace,
+		}))
+	}
+
 	if mounts := buildBindMounts(containerSpec.Volumes); len(mounts) > 0 {
 		specOpts = append(specOpts, oci.WithMounts(mounts))
 	}
