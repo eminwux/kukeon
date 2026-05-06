@@ -98,7 +98,7 @@ func TestCreateContainerValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := client.CreateContainer("test-ns", tt.spec)
+			_, err := client.CreateContainer("test-ns", tt.spec, nil)
 
 			if tt.wantErr != nil {
 				if err == nil {
@@ -260,7 +260,7 @@ func TestCreateContainerFromSpecValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := client.CreateContainerFromSpec("test-ns", tt.spec)
+			_, err := client.CreateContainerFromSpec("test-ns", tt.spec, nil)
 
 			if tt.wantErr != nil {
 				if err == nil {

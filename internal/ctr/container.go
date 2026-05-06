@@ -284,7 +284,7 @@ func (c *client) StopContainer(
 }
 
 // CreateContainer creates a new container with the provided spec.
-func (c *client) CreateContainer(namespace string, spec ContainerSpec) (containerd.Container, error) {
+func (c *client) CreateContainer(namespace string, spec ContainerSpec, creds []RegistryCredentials) (containerd.Container, error) {
 	if err := validateContainerSpec(spec); err != nil {
 		return nil, err
 	}
@@ -298,8 +298,8 @@ func (c *client) CreateContainer(namespace string, spec ContainerSpec) (containe
 		return nil, internalerrdefs.ErrContainerExists
 	}
 
-	// Pull the image if needed (no registry credentials for basic CreateContainer)
-	image, err := c.pullImage(namespace, spec.Image, nil)
+	// Pull the image if needed
+	image, err := c.pullImage(namespace, spec.Image, creds)
 	if err != nil {
 		return nil, err
 	}
@@ -476,6 +476,7 @@ func (c *client) DeleteContainer(namespace, id string, opts ContainerDeleteOptio
 func (c *client) CreateContainerFromSpec(
 	namespace string,
 	containerSpec intmodel.ContainerSpec,
+	creds []RegistryCredentials,
 	opts ...BuildOption,
 ) (containerd.Container, error) {
 	if containerSpec.ID == "" {
@@ -534,7 +535,7 @@ func (c *client) CreateContainerFromSpec(
 	ctrSpec := BuildContainerSpec(containerSpec, opts...)
 
 	// Create the container
-	container, err := c.CreateContainer(namespace, ctrSpec)
+	container, err := c.CreateContainer(namespace, ctrSpec, creds)
 	if err != nil {
 		c.logger.ErrorContext(
 			c.ctx,

@@ -74,7 +74,7 @@ func attachableTTYDirInitialPerms(kukeonGroupGID int) (os.FileMode, int) {
 // `kuke init` sets up on /opt/kukeon. The owner is corrected to the
 // container's resolved uid by attachablePostCreateChown after
 // CreateContainerFromSpec runs.
-func (r *Exec) attachableBuildOpts(spec intmodel.ContainerSpec) ([]ctr.BuildOption, error) {
+func (r *Exec) attachableBuildOpts(namespace string, spec intmodel.ContainerSpec) ([]ctr.BuildOption, error) {
 	if !spec.Attachable {
 		return nil, nil
 	}
@@ -111,7 +111,7 @@ func (r *Exec) attachableBuildOpts(spec intmodel.ContainerSpec) ([]ctr.BuildOpti
 		}
 	}
 
-	binaryPath, err := r.ctrClient.ResolveSbshCachePath(spec.RealmName, spec.Image, r.opts.RunPath)
+	binaryPath, err := r.ctrClient.ResolveSbshCachePath(namespace, spec.Image, r.opts.RunPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve sbsh cache path for %q: %w", spec.Image, err)
 	}

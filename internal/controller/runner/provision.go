@@ -1195,6 +1195,8 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		return nil, fmt.Errorf("realm %q has no namespace", realmName)
 	}
 
+	creds := ctr.ConvertRealmCredentials(internalRealm.Spec.RegistryCredentials)
+
 	// Prepare root container: ensure it's in Containers array and RootContainerID is set
 	rootContainerdID, err := naming.BuildRootContainerdID(spaceName, stackName, cellID)
 	if err != nil {
@@ -1286,7 +1288,7 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 			rootLabels := buildRootContainerLabels(*cell)
 			ctrContainerSpec := ctr.BuildRootContainerSpec(containerSpec, rootLabels)
 
-			createdContainer, createErr = r.ctrClient.CreateContainer(namespace, ctrContainerSpec)
+			createdContainer, createErr = r.ctrClient.CreateContainer(namespace, ctrContainerSpec, creds)
 			if createErr != nil {
 				logFields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 				logFields = append(
@@ -1337,13 +1339,14 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				cell.Spec.Containers[i] = containerSpec
 			}
 
-			attachOpts, attachErr := r.attachableBuildOpts(containerSpec)
+			attachOpts, attachErr := r.attachableBuildOpts(namespace, containerSpec)
 			if attachErr != nil {
 				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
 			}
 			_, createErr = r.ctrClient.CreateContainerFromSpec(
 				namespace,
 				containerSpec,
+				creds,
 				attachOpts...,
 			)
 			if createErr != nil {
@@ -1451,6 +1454,8 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		return nil, fmt.Errorf("failed to get realm: %w", err)
 	}
 
+	creds := ctr.ConvertRealmCredentials(internalRealm.Spec.RegistryCredentials)
+
 	// Generate containerd ID with cell identifier for uniqueness
 	containerID, err := naming.BuildRootContainerdID(spaceName, stackName, cellID)
 	if err != nil {
@@ -1539,7 +1544,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		containerSpec := ctr.BuildRootContainerSpec(rootContainerSpec, rootLabels)
 
 		var createErr error
-		container, createErr = r.ctrClient.CreateContainer(internalRealm.Spec.Namespace, containerSpec)
+		container, createErr = r.ctrClient.CreateContainer(internalRealm.Spec.Namespace, containerSpec, creds)
 		if createErr != nil {
 			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 			fields = append(
@@ -1752,13 +1757,14 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				createSpecFields...,
 			)
 
-			attachOpts, attachErr := r.attachableBuildOpts(containerSpec)
+			attachOpts, attachErr := r.attachableBuildOpts(internalRealm.Spec.Namespace, containerSpec)
 			if attachErr != nil {
 				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
 			}
 			createdContainer, containerCreateErr := r.ctrClient.CreateContainerFromSpec(
 				internalRealm.Spec.Namespace,
 				containerSpec,
+				creds,
 				attachOpts...,
 			)
 			if containerCreateErr != nil {

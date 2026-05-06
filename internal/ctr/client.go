@@ -62,9 +62,9 @@ type Client interface {
 	NewCgroup(spec CgroupSpec) (*cgroup2.Manager, error)
 	LoadCgroup(group string, mountpoint string) (*cgroup2.Manager, error)
 	DeleteCgroup(group, mountpoint string) error
-	CreateContainerFromSpec(namespace string, spec intmodel.ContainerSpec, opts ...BuildOption) (containerd.Container, error)
+	CreateContainerFromSpec(namespace string, spec intmodel.ContainerSpec, creds []RegistryCredentials, opts ...BuildOption) (containerd.Container, error)
 
-	CreateContainer(namespace string, spec ContainerSpec) (containerd.Container, error)
+	CreateContainer(namespace string, spec ContainerSpec, creds []RegistryCredentials) (containerd.Container, error)
 	GetContainer(namespace, id string) (containerd.Container, error)
 	ListContainers(namespace string, filters ...string) ([]containerd.Container, error)
 	ExistsContainer(namespace, id string) (bool, error)
