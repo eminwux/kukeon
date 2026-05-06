@@ -320,6 +320,31 @@ func TestGetCgroupMountpoint(t *testing.T) {
 	}
 }
 
+// TestEnableCellAllSubtreeControllersValidation covers the input-validation
+// surface of the issue-#314 NestedCgroupRuntime entry point. The cgroup
+// hierarchy itself isn't writable from a unit test environment, so this
+// mirrors TestNewCgroupValidation: the empty group path must be rejected
+// with the shared sentinel; a syntactically valid group is allowed past
+// validation (the underlying cgroupfs read is then expected to fail in
+// the unit-test environment, which we don't assert on).
+func TestEnableCellAllSubtreeControllersValidation(t *testing.T) {
+	client := setupTestClientForCgroups(t)
+
+	if err := client.EnableCellAllSubtreeControllers("", "/sys/fs/cgroup"); err == nil {
+		t.Error("EnableCellAllSubtreeControllers(empty group) error = nil, want ErrEmptyGroupPath")
+	} else if !errors.Is(err, errdefs.ErrEmptyGroupPath) {
+		t.Errorf("EnableCellAllSubtreeControllers(empty group) error = %v, want ErrEmptyGroupPath", err)
+	}
+
+	// Syntactically valid group: validation must pass; downstream cgroupfs
+	// access then fails in the unit-test sandbox, which is fine — that is
+	// not a validation failure and must not surface ErrEmptyGroupPath.
+	if err := client.EnableCellAllSubtreeControllers("/kukeon/test", "/sys/fs/cgroup"); err != nil &&
+		errors.Is(err, errdefs.ErrEmptyGroupPath) {
+		t.Errorf("EnableCellAllSubtreeControllers(valid group) unexpected validation error: %v", err)
+	}
+}
+
 func TestGetCurrentCgroupPath(t *testing.T) {
 	client := setupTestClientForCgroups(t)
 

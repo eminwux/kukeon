@@ -69,6 +69,13 @@ type Client interface {
 	// inherit the controllers and cell-level resource accounting / limits
 	// become effective. Issue #312.
 	EnableCellSubtreeControllers(group, mountpoint string, controllers []string) error
+	// EnableCellAllSubtreeControllers is the cell/profile=NestedCgroupRuntime
+	// counterpart: it delegates the full host-available cgroup-v2 controller
+	// set on the cell's subtree_control (and every ancestor's), rather than
+	// the kukeon resource subset. Used by cells that host an inner cgroup
+	// runtime (an embedded containerd or systemd) which needs to in turn
+	// delegate arbitrary controllers to its own children. Issue #314.
+	EnableCellAllSubtreeControllers(group, mountpoint string) error
 	CreateContainerFromSpec(namespace string, spec intmodel.ContainerSpec, creds []RegistryCredentials, opts ...BuildOption) (containerd.Container, error)
 
 	CreateContainer(namespace string, spec ContainerSpec, creds []RegistryCredentials) (containerd.Container, error)
