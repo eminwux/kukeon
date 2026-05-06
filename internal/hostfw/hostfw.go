@@ -282,7 +282,8 @@ func (i *IptablesInstaller) findEgressPosition(ctx context.Context) int {
 			continue
 		}
 		pos++
-		if lineJumpsTo(line, netpolicy.MasterChainName) {
+		matches, _, _ := lineJumpsTo(line, netpolicy.MasterChainName)
+		if matches {
 			return pos
 		}
 	}
@@ -301,12 +302,15 @@ func (i *IptablesInstaller) deleteJumpsToChain(ctx context.Context) error {
 	}
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "-A FORWARD") || !lineJumpsTo(line, ChainName) {
+		if !strings.HasPrefix(line, "-A FORWARD") {
 			continue
 		}
-		args, parseErr := parseRuleLine(line)
+		matches, args, parseErr := lineJumpsTo(line, ChainName)
 		if parseErr != nil {
 			return parseErr
+		}
+		if !matches {
+			continue
 		}
 		if len(args) == 0 || args[0] != "-A" {
 			continue
@@ -365,20 +369,21 @@ func parseRuleLine(line string) ([]string, error) {
 }
 
 // lineJumpsTo reports whether an `iptables -S` line jumps to exactly the
-// named chain. Token-aware so a chain like "KUKEON-EGRESS-FOO" doesn't
-// match "KUKEON-EGRESS" the way a plain substring check would. A
-// malformed line (unterminated quote) is treated as no-match — the caller
-// will propagate any genuine parse failure on the subsequent
-// parseRuleLine call.
-func lineJumpsTo(line, target string) bool {
+// named chain, returning the parsed token vector alongside so the caller
+// can avoid re-parsing on a match. Token-aware so a chain like
+// "KUKEON-EGRESS-FOO" doesn't match "KUKEON-EGRESS" the way a plain
+// substring check would. A parse failure surfaces as a non-nil err so
+// the caller can choose: deleteJumpsToChain propagates to abort cleanup,
+// findEgressPosition treats it as a non-fatal no-match.
+func lineJumpsTo(line, target string) (bool, []string, error) {
 	tokens, err := parseRuleLine(line)
 	if err != nil {
-		return false
+		return false, nil, err
 	}
 	for i := 0; i+1 < len(tokens); i++ {
 		if tokens[i] == "-j" && tokens[i+1] == target {
-			return true
+			return true, tokens, nil
 		}
 	}
-	return false
+	return false, tokens, nil
 }
