@@ -28,6 +28,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/daemon"
+	"github.com/eminwux/kukeon/internal/instance"
 	"github.com/eminwux/kukeon/internal/logging"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -78,6 +79,15 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	socketMode := socketModeRootOnly
 	if socketGID > 0 {
 		socketMode = socketModeGroupReadable
+	}
+
+	if mismatchErr := instance.VerifyOrWrite(
+		runPath,
+		viper.GetString(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey),
+		viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey),
+	); mismatchErr != nil {
+		logger.ErrorContext(ctx, "instance metadata check failed", "error", mismatchErr)
+		return mismatchErr
 	}
 
 	reconcileInterval := parseReconcileInterval(logger, cmd.Context())

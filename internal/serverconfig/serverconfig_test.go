@@ -218,6 +218,13 @@ func TestWriteDefaultCreatesFileWithDefaults(t *testing.T) {
 	if doc.Spec.ReconcileInterval != "30s" {
 		t.Errorf("Spec.ReconcileInterval: got %q, want %q", doc.Spec.ReconcileInterval, "30s")
 	}
+	if doc.Spec.ContainerdNamespaceSuffix != "kukeon.io" {
+		t.Errorf("Spec.ContainerdNamespaceSuffix: got %q, want %q",
+			doc.Spec.ContainerdNamespaceSuffix, "kukeon.io")
+	}
+	if doc.Spec.CgroupRoot != "/kukeon" {
+		t.Errorf("Spec.CgroupRoot: got %q, want %q", doc.Spec.CgroupRoot, "/kukeon")
+	}
 
 	// AC: "Header comment explains each field's purpose and default."
 	raw, err := os.ReadFile(path)
@@ -236,6 +243,8 @@ func TestWriteDefaultCreatesFileWithDefaults(t *testing.T) {
 		"# Default: info",
 		"# Default: 30s",
 		`# Default: ""`,
+		"# Default: kukeon.io",
+		"# Default: /kukeon",
 	} {
 		if !strings.Contains(rawStr, marker) {
 			t.Errorf("missing per-field default marker %q in dumped YAML", marker)

@@ -16,9 +16,14 @@
 
 package consts
 
-const (
-	KukeonCgroupRoot = "/kukeon"
+import (
+	"fmt"
+	"strings"
 
+	"github.com/eminwux/kukeon/internal/errdefs"
+)
+
+const (
 	CgroupFilesystemPath = "/sys/fs/cgroup"
 
 	KukeonMetadataFile = "metadata.json"
@@ -71,17 +76,92 @@ const (
 	KukeSystemCellName      = "kukeond"
 	KukeSystemContainerName = "kukeond"
 
-	// RealmNamespaceSuffix is the suffix appended to every realm name to form
-	// its containerd namespace. See RealmNamespace and IsKukeonNamespace.
-	RealmNamespaceSuffix = ".kukeon.io"
-
 	// KukeonSystemUser and KukeonSystemGroup name the system identity created
 	// by `kuke init` so a non-root operator added to the kukeon group can
 	// dial the kukeond socket without sudo. Writes under /opt/kukeon still
 	// require root; they go through the daemon.
 	KukeonSystemUser  = "kukeon"
 	KukeonSystemGroup = "kukeon"
+
+	// DefaultRealmNamespaceSuffix is the in-binary default for the
+	// containerd namespace suffix appended to every realm name (without a
+	// leading dot — RealmNamespace adds the dot when joining). Operators
+	// override it via ServerConfiguration.spec.containerdNamespaceSuffix to
+	// run a parallel kukeon instance under a disjoint namespace.
+	DefaultRealmNamespaceSuffix = "kukeon.io"
+
+	// DefaultKukeonCgroupRoot is the in-binary default for the cgroup root
+	// under which all realms / spaces / stacks / cells live. Operators
+	// override it via ServerConfiguration.spec.cgroupRoot.
+	DefaultKukeonCgroupRoot = "/kukeon"
 )
+
+// RealmNamespaceSuffix is the suffix appended to every realm name to form
+// its containerd namespace. Always carries a leading "." so RealmNamespace
+// can append it directly to a realm name. Mutated by ConfigureRuntime at
+// process start when the operator supplies a non-default suffix via
+// ServerConfiguration; subsequent reads from controller / runner code
+// observe the configured value through the existing helpers.
+//
+//nolint:gochecknoglobals // process-wide runtime configuration override
+var RealmNamespaceSuffix = "." + DefaultRealmNamespaceSuffix
+
+// KukeonCgroupRoot is the cgroup root under which all realms / spaces /
+// stacks / cells live. Mutated by ConfigureRuntime at process start when
+// the operator supplies a non-default root via ServerConfiguration.
+//
+//nolint:gochecknoglobals // process-wide runtime configuration override
+var KukeonCgroupRoot = DefaultKukeonCgroupRoot
+
+// ConfigureRuntime overrides the package-level RealmNamespaceSuffix and
+// KukeonCgroupRoot for this process. The kukeond daemon and `kuke init`
+// call it once after loading ServerConfiguration so realm / cgroup
+// derivation downstream observes the operator-configured values.
+//
+// suffix is the operator-facing form without a leading dot (e.g.
+// "kukeon.io" or "dev.kukeon.io"); the leading dot is prepended internally.
+// cgroupRoot must be an absolute path under the unified cgroup hierarchy
+// (e.g. "/kukeon" or "/kukeon-dev"), trimmed of trailing slashes. Empty or
+// malformed inputs return an ErrServerConfigurationInvalid-wrapped error;
+// the caller is expected to refuse to start.
+func ConfigureRuntime(suffix, cgroupRoot string) error {
+	suffix = strings.TrimSpace(suffix)
+	if suffix == "" {
+		return fmt.Errorf("containerdNamespaceSuffix is empty: %w",
+			errdefs.ErrServerConfigurationInvalid)
+	}
+	if strings.HasPrefix(suffix, ".") || strings.HasSuffix(suffix, ".") {
+		return fmt.Errorf(
+			"containerdNamespaceSuffix %q must not start or end with '.': %w",
+			suffix, errdefs.ErrServerConfigurationInvalid)
+	}
+	if strings.ContainsAny(suffix, "/ \t\n") {
+		return fmt.Errorf(
+			"containerdNamespaceSuffix %q contains disallowed character: %w",
+			suffix, errdefs.ErrServerConfigurationInvalid)
+	}
+
+	originalCgroupRoot := cgroupRoot
+	cgroupRoot = strings.TrimSpace(cgroupRoot)
+	if cgroupRoot == "" {
+		return fmt.Errorf("cgroupRoot is empty: %w",
+			errdefs.ErrServerConfigurationInvalid)
+	}
+	if !strings.HasPrefix(cgroupRoot, "/") {
+		return fmt.Errorf(
+			"cgroupRoot %q must be an absolute path: %w",
+			cgroupRoot, errdefs.ErrServerConfigurationInvalid)
+	}
+	cgroupRoot = strings.TrimRight(cgroupRoot, "/")
+	if cgroupRoot == "" {
+		return fmt.Errorf("cgroupRoot %q resolves to root: %w",
+			originalCgroupRoot, errdefs.ErrServerConfigurationInvalid)
+	}
+
+	RealmNamespaceSuffix = "." + suffix
+	KukeonCgroupRoot = cgroupRoot
+	return nil
+}
 
 // RealmNamespace returns the containerd namespace for a realm: <realm>.kukeon.io.
 // This is the only place in the codebase that appends the .kukeon.io suffix to a

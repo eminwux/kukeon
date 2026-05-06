@@ -97,6 +97,12 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKEON_ROOT_CONTAINERD_SOCKET = DefineKV("KUKEON_CONTAINERD_SOCKET", "kukeon/containerd.socket")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKEON_ROOT_NAMESPACE_SUFFIX = DefineKV(
+		"KUKEON_NAMESPACE_SUFFIX", "kukeon/namespaceSuffix", "kukeon.io",
+	)
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKEON_ROOT_CGROUP_ROOT = DefineKV("KUKEON_CGROUP_ROOT", "kukeon/cgroupRoot", "/kukeon")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKEON_ROOT_HOST = DefineKV("KUKEON_HOST", "kukeon/host", "unix:///run/kukeon/kukeond.sock")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKEON_ROOT_NO_DAEMON = DefineKV("KUKEON_NO_DAEMON", "kukeon/noDaemon", "false")
