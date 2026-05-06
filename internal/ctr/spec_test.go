@@ -18,6 +18,7 @@ package ctr_test
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/containerd/containerd/v2/pkg/oci"
@@ -724,6 +725,173 @@ func TestBuildRootContainerSpec_HostCgroup(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestBuildContainerSpec_NestedCgroupRuntimeMount asserts that
+// BuildContainerSpec emits the cgroup2 mount at /sys/fs/cgroup exactly when
+// NestedCgroupRuntime is set and HostCgroup is not — pairing the in-cell
+// mount with the host-side subtree-controller delegation #318 added. Without
+// this, an inner runtime (dockerd, podman) inside a NestedCgroupRuntime cell
+// sees /sys/fs/cgroup as an empty mountpoint and aborts (#322). The unset
+// and HostCgroup-true cases must leave the mount list byte-identical to the
+// pre-#322 output so cells that don't opt in keep their existing OCI spec.
+func TestBuildContainerSpec_NestedCgroupRuntimeMount(t *testing.T) {
+	tests := []struct {
+		name      string
+		nested    bool
+		hostCG    bool
+		wantMount bool
+	}{
+		{name: "nested true and host cgroup false emits mount", nested: true, hostCG: false, wantMount: true},
+		{name: "nested false and host cgroup false omits mount", nested: false, hostCG: false, wantMount: false},
+		{name: "nested true and host cgroup true omits mount", nested: true, hostCG: true, wantMount: false},
+		{name: "nested zero values omit mount", wantMount: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := ctr.BuildContainerSpec(intmodel.ContainerSpec{
+				ID:                  "test-id",
+				Image:               "registry.eminwux.com/busybox:latest",
+				NestedCgroupRuntime: tt.nested,
+				HostCgroup:          tt.hostCG,
+				CellName:            "c", SpaceName: "s", RealmName: "r", StackName: "st",
+			})
+
+			ociSpec := &runtimespec.Spec{
+				Process: &runtimespec.Process{},
+				Linux:   &runtimespec.Linux{},
+			}
+			for _, opt := range spec.SpecOpts {
+				if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+					t.Fatalf("apply SpecOpts: %v", err)
+				}
+			}
+
+			var got *runtimespec.Mount
+			for i, m := range ociSpec.Mounts {
+				if m.Destination == "/sys/fs/cgroup" {
+					got = &ociSpec.Mounts[i]
+					break
+				}
+			}
+			if tt.wantMount {
+				if got == nil {
+					t.Fatalf("/sys/fs/cgroup mount missing; mounts=%+v", ociSpec.Mounts)
+				}
+				if got.Type != "cgroup" {
+					t.Errorf("mount.Type = %q, want %q", got.Type, "cgroup")
+				}
+				if got.Source != "cgroup" {
+					t.Errorf("mount.Source = %q, want %q", got.Source, "cgroup")
+				}
+				wantOpts := []string{"rw", "nosuid", "noexec", "nodev"}
+				if len(got.Options) != len(wantOpts) {
+					t.Fatalf("mount.Options = %v, want %v", got.Options, wantOpts)
+				}
+				for i, want := range wantOpts {
+					if got.Options[i] != want {
+						t.Errorf("mount.Options[%d] = %q, want %q", i, got.Options[i], want)
+					}
+				}
+			} else if got != nil {
+				t.Errorf("unexpected /sys/fs/cgroup mount on opt-out spec: %+v", *got)
+			}
+		})
+	}
+}
+
+// TestBuildContainerSpec_NestedCgroupRuntimeOffByteIdentical pins the
+// pre-#322 mount-list output for the opt-out path: a ContainerSpec with
+// NestedCgroupRuntime=false must produce the same Mounts slice as one with
+// the field omitted entirely. The byte-identical guarantee matters because
+// every existing cell on existing hosts is opt-out, and a stray cgroup2
+// entry would alter every running container's OCI spec on first reconcile
+// after the upgrade.
+func TestBuildContainerSpec_NestedCgroupRuntimeOffByteIdentical(t *testing.T) {
+	base := intmodel.ContainerSpec{
+		ID:       "test-id",
+		Image:    "registry.eminwux.com/busybox:latest",
+		CellName: "c", SpaceName: "s", RealmName: "r", StackName: "st",
+	}
+	want := mountListAfterApply(t, ctr.BuildContainerSpec(base))
+
+	off := base
+	off.NestedCgroupRuntime = false
+	got := mountListAfterApply(t, ctr.BuildContainerSpec(off))
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mount list diverged on opt-out path:\n got: %+v\nwant: %+v", got, want)
+	}
+}
+
+// TestBuildRootContainerSpec_NestedCgroupRuntimeMount mirrors
+// TestBuildContainerSpec_NestedCgroupRuntimeMount for the root-container
+// builder. A user-supplied root in a NestedCgroupRuntime cell must get the
+// same /sys/fs/cgroup wiring; the kukeond cell's HostCgroup=true root is
+// exempted by the same guard.
+func TestBuildRootContainerSpec_NestedCgroupRuntimeMount(t *testing.T) {
+	tests := []struct {
+		name      string
+		nested    bool
+		hostCG    bool
+		wantMount bool
+	}{
+		{name: "nested true and host cgroup false emits mount", nested: true, hostCG: false, wantMount: true},
+		{name: "nested false and host cgroup false omits mount", nested: false, hostCG: false, wantMount: false},
+		{name: "nested true and host cgroup true omits mount", nested: true, hostCG: true, wantMount: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := ctr.BuildRootContainerSpec(intmodel.ContainerSpec{
+				ID:                  "root",
+				ContainerdID:        "root-id",
+				Image:               "registry.eminwux.com/busybox:latest",
+				NestedCgroupRuntime: tt.nested,
+				HostCgroup:          tt.hostCG,
+			}, nil)
+
+			ociSpec := &runtimespec.Spec{
+				Process: &runtimespec.Process{},
+				Linux:   &runtimespec.Linux{},
+			}
+			for _, opt := range spec.SpecOpts {
+				if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+					t.Fatalf("apply SpecOpts: %v", err)
+				}
+			}
+
+			var hasMount bool
+			for _, m := range ociSpec.Mounts {
+				if m.Destination == "/sys/fs/cgroup" && m.Type == "cgroup" {
+					hasMount = true
+					break
+				}
+			}
+			if hasMount != tt.wantMount {
+				t.Errorf("/sys/fs/cgroup cgroup mount present = %v, want %v (mounts=%+v)",
+					hasMount, tt.wantMount, ociSpec.Mounts)
+			}
+		})
+	}
+}
+
+// mountListAfterApply runs the spec's SpecOpts against an empty OCI spec and
+// returns the resulting Mounts slice. Used by the byte-identical guard above
+// to compare the pre-#322 mount layout against the opt-out path.
+func mountListAfterApply(t *testing.T, spec ctr.ContainerSpec) []runtimespec.Mount {
+	t.Helper()
+	ociSpec := &runtimespec.Spec{
+		Process: &runtimespec.Process{},
+		Linux:   &runtimespec.Linux{},
+	}
+	for _, opt := range spec.SpecOpts {
+		if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+			t.Fatalf("apply SpecOpts: %v", err)
+		}
+	}
+	return ociSpec.Mounts
 }
 
 // TestBuildContainerSpec_CgroupsPath verifies that BuildContainerSpec emits an

@@ -128,6 +128,16 @@ func BuildRootContainerSpec(
 		}))
 	}
 
+	// NestedCgroupRuntime mount: mirrors the BuildContainerSpec path so a
+	// non-default root container in a NestedCgroupRuntime cell still gets
+	// /sys/fs/cgroup populated from its delegated subtree (issue #322). The
+	// kukeond cell's own root sets HostCgroup=true and is exempted by the
+	// guard; the daemon already gets cgroup2 visibility via the bootstrap
+	// bind-mount path in internal/controller/bootstrap.go.
+	if rootSpec.NestedCgroupRuntime && !rootSpec.HostCgroup {
+		specOpts = append(specOpts, oci.WithMounts([]runtimespec.Mount{nestedCgroupMount()}))
+	}
+
 	// Bind mounts and security/isolation fields share the same translators as
 	// BuildContainerSpec so a user-supplied root container (RootContainerID)
 	// keeps its Volumes, User, Capabilities, SecurityOpts, Tmpfs, and
