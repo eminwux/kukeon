@@ -61,6 +61,13 @@ type ContainerSpec struct {
 	RestartPolicy          string
 	Attachable             bool
 	Tty                    *ContainerTty
+	// CellCgroupPath is the absolute cgroup path of the parent cell (mirrors
+	// Cell.Status.CgroupPath). When set, BuildContainerSpec emits an OCI
+	// Linux.CgroupsPath rooted at <CellCgroupPath>/<containerd-id> so the
+	// container task lands inside the cell's cgroup subtree instead of
+	// containerd's runc-shim default placement. Populated by the runner at
+	// container-create time; not part of the persisted cell document.
+	CellCgroupPath string
 }
 
 // ContainerTty mirrors the v1beta1 ContainerTty payload. See the v1beta1

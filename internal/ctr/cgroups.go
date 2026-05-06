@@ -19,6 +19,7 @@ package ctr
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,6 +129,93 @@ func (c *client) AddProcessToCgroup(group, mountpoint string, pid int) error {
 		return err
 	}
 	return manager.AddProc(uint64(pid))
+}
+
+// EnableCellSubtreeControllers writes "+<ctrl>" to every ancestor's
+// cgroup.subtree_control file (root → cell parent) AND to the cell's own
+// cgroup.subtree_control. The library's Manager.ToggleControllers handles the
+// ancestor walk by design but skips the cell itself ("the leaf does not need
+// it") — for kukeon the cell is *not* a leaf, since runc nests per-container
+// task cgroups under it (issue #312), so the cell's own subtree_control must
+// also be populated for those children to inherit the controllers.
+//
+// Filters the requested set against what the host root cgroup advertises so
+// callers can pass the desired superset without worrying about kernel
+// configuration variance (e.g. the io controller is missing on hosts without
+// blk-cgroup compiled in).
+func (c *client) EnableCellSubtreeControllers(group, mountpoint string, controllers []string) error {
+	if err := validateGroupPath(group); err != nil {
+		return err
+	}
+	if len(controllers) == 0 {
+		return nil
+	}
+
+	mp := c.effectiveMountpoint(mountpoint)
+	available, err := readRootControllers(mp)
+	if err != nil {
+		return fmt.Errorf("read root cgroup.controllers: %w", err)
+	}
+	enable := intersectControllers(controllers, available)
+	if len(enable) == 0 {
+		return nil
+	}
+
+	manager, err := c.managerFor(group, mp)
+	if err != nil {
+		return err
+	}
+	if toggleErr := manager.ToggleControllers(enable, cgroup2.Enable); toggleErr != nil {
+		return fmt.Errorf("enable controllers in cell ancestors: %w", toggleErr)
+	}
+
+	cellPath := filepath.Join(mp, strings.TrimPrefix(group, "/"))
+	if writeErr := writeSubtreeEnable(filepath.Join(cellPath, "cgroup.subtree_control"), enable); writeErr != nil {
+		return fmt.Errorf("enable controllers in cell subtree_control: %w", writeErr)
+	}
+
+	c.logger.InfoContext(c.ctx, "enabled cell cgroup controllers",
+		"group", group, "mountpoint", mp, "controllers", enable)
+	return nil
+}
+
+func readRootControllers(mountpoint string) ([]string, error) {
+	data, err := os.ReadFile(filepath.Join(mountpoint, "cgroup.controllers"))
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(string(data)), nil
+}
+
+func intersectControllers(want, have []string) []string {
+	haveSet := make(map[string]struct{}, len(have))
+	for _, h := range have {
+		haveSet[h] = struct{}{}
+	}
+	out := make([]string, 0, len(want))
+	for _, w := range want {
+		if _, ok := haveSet[w]; ok {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+func writeSubtreeEnable(path string, controllers []string) error {
+	parts := make([]string, len(controllers))
+	for i, c := range controllers {
+		parts[i] = "+" + c
+	}
+	// Mirror cgroup2.Manager.writeSubtreeControl: O_WRONLY without O_TRUNC.
+	// cgroupfs files don't honor truncation; the write itself is interpreted
+	// additively (kernel applies "+cpu -io" line-by-line).
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString(strings.Join(parts, " "))
+	return err
 }
 
 // DeleteCgroup removes the cgroup. It will fail if processes are still attached.

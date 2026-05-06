@@ -318,6 +318,15 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, fmt.Errorf("failed to get root container spec: %w", err)
 	}
 
+	// CellCgroupPath is a runtime-only injection (not persisted with the cell
+	// document), so every BuildContainerSpec/BuildRootContainerSpec call site
+	// must populate it from cell.Status.CgroupPath right before the build —
+	// otherwise the destructive recreate done by StartCell here resets the
+	// container's OCI Linux.CgroupsPath to the runc-shim default. Issue #312.
+	if rootContainerSpec.CellCgroupPath == "" {
+		rootContainerSpec.CellCgroupPath = internalCell.Status.CgroupPath
+	}
+
 	rootLabels := buildRootContainerLabels(internalCell)
 	ctrContainerSpec := ctr.BuildRootContainerSpec(rootContainerSpec, rootLabels)
 
@@ -572,6 +581,12 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 			)
 		}
 
+		// CellCgroupPath: runtime-only injection — see the comment at the
+		// root-container recreate above. Issue #312.
+		if containerSpec.CellCgroupPath == "" {
+			containerSpec.CellCgroupPath = internalCell.Status.CgroupPath
+		}
+
 		// Recreate container fresh
 		attachOpts, attachErr := r.attachableBuildOpts(namespace, containerSpec, creds)
 		if attachErr != nil {
@@ -799,6 +814,12 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (intmodel.
 			"failed to delete existing container, continuing with recreation",
 			fields...,
 		)
+	}
+
+	// CellCgroupPath: runtime-only injection — fill from cell.Status.CgroupPath
+	// so the recreated container task lands under <cell>/<id>. Issue #312.
+	if foundContainerSpec.CellCgroupPath == "" {
+		foundContainerSpec.CellCgroupPath = cell.Status.CgroupPath
 	}
 
 	// Recreate container fresh

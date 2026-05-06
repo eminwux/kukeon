@@ -136,6 +136,13 @@ func BuildRootContainerSpec(
 		specOpts = append(specOpts, oci.WithMounts(mounts))
 	}
 
+	// Linux.CgroupsPath: same cell-rooted placement as BuildContainerSpec so
+	// the root container task lands inside the cell's cgroup subtree rather
+	// than the runc-shim default (issue #312).
+	if cgPath := cellCgroupsPath(rootSpec.CellCgroupPath, containerdID); cgPath != "" {
+		specOpts = append(specOpts, oci.WithCgroup(cgPath))
+	}
+
 	specOpts = append(specOpts, securitySpecOpts(rootSpec)...)
 
 	rootLabels := copyLabels(labels)
