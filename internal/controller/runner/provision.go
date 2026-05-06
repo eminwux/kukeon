@@ -25,6 +25,7 @@ import (
 
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/eminwux/kukeon/internal/apischeme"
+	"github.com/eminwux/kukeon/internal/cgroupcheck"
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/ctr"
@@ -1089,25 +1090,20 @@ func (r *Exec) createCellCgroup(cell intmodel.Cell) (string, error) {
 	return cgroupPath, nil
 }
 
-// cellResourceControllers names the cgroup-v2 controllers kukeon enables on a
-// cell's subtree so per-container cgroups inherit them and UpdateCgroup at
-// the cell level becomes effective. The set is filtered against the host
-// root's cgroup.controllers at apply time, so passing a controller missing
-// from a particular kernel build (e.g. "io" without blk-cgroup) is safe.
-func cellResourceControllers() []string {
-	return []string{"cpu", "memory", "io", "pids"}
-}
-
 // enableCellControllers picks between the resource-subset and full-set
 // subtree-control delegation based on cell.Spec.NestedCgroupRuntime, and
 // invokes the matching ctr.Client entry point. The two paths share the
 // same underlying writeSubtreeEnable + ToggleControllers logic; the only
 // difference is which controller set is enabled. Issue #314.
+//
+// The resource subset comes from cgroupcheck.CellResourceControllers so
+// the doctor pre-flight (`kuke doctor cgroups`) and the cell-creation
+// path stay in lockstep — issue #324.
 func (r *Exec) enableCellControllers(cell intmodel.Cell, group, mountpoint string) error {
 	if cell.Spec.NestedCgroupRuntime {
 		return r.ctrClient.EnableCellAllSubtreeControllers(group, mountpoint)
 	}
-	return r.ctrClient.EnableCellSubtreeControllers(group, mountpoint, cellResourceControllers())
+	return r.ctrClient.EnableCellSubtreeControllers(group, mountpoint, cgroupcheck.CellResourceControllers())
 }
 
 func (r *Exec) ensureCellCgroup(cell intmodel.Cell) (intmodel.Cell, error) {

@@ -32,6 +32,17 @@ step "Build kuke (and the kukeond symlink)"
 make kuke
 ln -sf kuke kukeond
 
+# Pre-flight: catch missing host cgroup-v2 controller delegation BEFORE the
+# multi-minute docker build runs (issue #324). On a fully-delegated host
+# this is silent; on a misconfigured host (e.g. cgroup namespace whose
+# parent only delegated a subset) it fails fast with the missing
+# controllers named and a copy-pasteable remediation. --probe attempts the
+# +<ctrl> write so the EOPNOTSUPP cgroup-namespace trap is distinguished
+# from "kernel does not support". Idempotent on a healthy host (write is
+# a no-op when the controller is already in subtree_control).
+step "Pre-flight: host cgroup controller delegation"
+sudo ./kuke doctor cgroups --probe
+
 step "Build local kukeond image (${LOCAL_TAG})"
 docker build --build-arg VERSION=v0.0.0-dev -t "${LOCAL_TAG}" .
 
