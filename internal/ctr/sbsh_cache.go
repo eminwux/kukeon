@@ -58,11 +58,11 @@ func SbshCachePath(baseRunPath, arch string) string {
 // Returns the host path on success; ErrInvalidImage when the image ref is
 // empty or the arch cannot be resolved from the image config; whatever
 // pullImage returns when the pull itself fails.
-func (c *client) ResolveSbshCachePath(namespace, imageRef, baseRunPath string) (string, error) {
+func (c *client) ResolveSbshCachePath(namespace, imageRef, baseRunPath string, creds []RegistryCredentials) (string, error) {
 	if imageRef == "" {
 		return "", fmt.Errorf("%w: image ref is empty", errdefs.ErrInvalidImage)
 	}
-	image, err := c.pullImage(namespace, imageRef, nil)
+	image, err := c.pullImage(namespace, imageRef, creds)
 	if err != nil {
 		return "", err
 	}

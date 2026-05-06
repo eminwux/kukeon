@@ -75,7 +75,7 @@ type Client interface {
 	TaskStatus(namespace, id string) (containerd.Status, error)
 	TaskMetrics(namespace, id string) (*apitypes.Metric, error)
 
-	ResolveSbshCachePath(namespace, imageRef, baseRunPath string) (string, error)
+	ResolveSbshCachePath(namespace, imageRef, baseRunPath string, creds []RegistryCredentials) (string, error)
 
 	// ContainerProcessUID returns the resolved process.User.UID from the
 	// given container's OCI runtime spec. Used after CreateContainerFromSpec

@@ -573,7 +573,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		}
 
 		// Recreate container fresh
-		attachOpts, attachErr := r.attachableBuildOpts(namespace, containerSpec)
+		attachOpts, attachErr := r.attachableBuildOpts(namespace, containerSpec, creds)
 		if attachErr != nil {
 			return intmodel.Cell{}, fmt.Errorf("failed to prepare attachable container %s: %w", ctrContainerID, attachErr)
 		}
@@ -802,7 +802,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (intmodel.
 	}
 
 	// Recreate container fresh
-	attachOpts, attachErr := r.attachableBuildOpts(namespace, *foundContainerSpec)
+	attachOpts, attachErr := r.attachableBuildOpts(namespace, *foundContainerSpec, creds)
 	if attachErr != nil {
 		return intmodel.Cell{}, fmt.Errorf("failed to prepare attachable container %s: %w", containerID, attachErr)
 	}

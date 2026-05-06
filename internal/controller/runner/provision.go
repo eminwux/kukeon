@@ -1339,7 +1339,7 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				cell.Spec.Containers[i] = containerSpec
 			}
 
-			attachOpts, attachErr := r.attachableBuildOpts(namespace, containerSpec)
+			attachOpts, attachErr := r.attachableBuildOpts(namespace, containerSpec, creds)
 			if attachErr != nil {
 				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
 			}
@@ -1757,7 +1757,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				createSpecFields...,
 			)
 
-			attachOpts, attachErr := r.attachableBuildOpts(internalRealm.Spec.Namespace, containerSpec)
+			attachOpts, attachErr := r.attachableBuildOpts(internalRealm.Spec.Namespace, containerSpec, creds)
 			if attachErr != nil {
 				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
 			}
