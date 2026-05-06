@@ -287,6 +287,19 @@ func BuildContainerSpec(
 		}))
 	}
 
+	// NestedCgroupRuntime: pair the private cgroup-ns with a cgroup2 mount
+	// so an inner runtime (dockerd, podman, an inner containerd, systemd)
+	// can read the controller list that #318's EnableCellAllSubtreeControllers
+	// just delegated host-side. Without this, /sys/fs/cgroup is an empty
+	// mountpoint inside the cell and dockerd's "Devices cgroup isn't
+	// mounted" probe aborts (issue #322). Gated on !HostCgroup because a
+	// HostCgroup cell already shares the host's cgroup hierarchy through
+	// kukeond's own bind-mount path; emitting a private cgroup mount on
+	// top would shadow it.
+	if containerSpec.NestedCgroupRuntime && !containerSpec.HostCgroup {
+		specOpts = append(specOpts, oci.WithMounts([]runtimespec.Mount{nestedCgroupMount()}))
+	}
+
 	if mounts := buildBindMounts(containerSpec.Volumes); len(mounts) > 0 {
 		specOpts = append(specOpts, oci.WithMounts(mounts))
 	}
@@ -319,6 +332,21 @@ func BuildContainerSpec(
 		Labels:        labels,
 		SpecOpts:      specOpts,
 		CNIConfigPath: containerSpec.CNIConfigPath,
+	}
+}
+
+// nestedCgroupMount returns the OCI Mount entry that exposes the cell's
+// delegated cgroup2 subtree at /sys/fs/cgroup inside the container. runc
+// resolves a Type:"cgroup" entry under a private cgroup-ns to the calling
+// process's cgroup root, which is exactly the scope #318's host-side
+// subtree-controller delegation prepared. Options match what systemd and
+// dockerd write for cgroup2 mounts.
+func nestedCgroupMount() runtimespec.Mount {
+	return runtimespec.Mount{
+		Destination: "/sys/fs/cgroup",
+		Source:      "cgroup",
+		Type:        "cgroup",
+		Options:     []string{"rw", "nosuid", "noexec", "nodev"},
 	}
 }
 

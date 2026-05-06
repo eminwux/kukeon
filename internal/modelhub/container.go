@@ -30,26 +30,36 @@ type ContainerMetadata struct {
 }
 
 type ContainerSpec struct {
-	ID                     string
-	ContainerdID           string
-	RealmName              string
-	SpaceName              string
-	StackName              string
-	CellName               string
-	Root                   bool
-	Image                  string
-	Command                string
-	Args                   []string
-	WorkingDir             string
-	Env                    []string
-	Ports                  []string
-	Volumes                []VolumeMount
-	Networks               []string
-	NetworksAliases        []string
-	Privileged             bool
-	HostNetwork            bool
-	HostPID                bool
-	HostCgroup             bool
+	ID              string
+	ContainerdID    string
+	RealmName       string
+	SpaceName       string
+	StackName       string
+	CellName        string
+	Root            bool
+	Image           string
+	Command         string
+	Args            []string
+	WorkingDir      string
+	Env             []string
+	Ports           []string
+	Volumes         []VolumeMount
+	Networks        []string
+	NetworksAliases []string
+	Privileged      bool
+	HostNetwork     bool
+	HostPID         bool
+	HostCgroup      bool
+	// NestedCgroupRuntime mirrors the parent cell's
+	// CellSpec.NestedCgroupRuntime opt-in (issue #314). When true and
+	// !HostCgroup, BuildContainerSpec/BuildRootContainerSpec append a
+	// cgroup2 mount at /sys/fs/cgroup so an inner runtime (dockerd,
+	// podman, an inner containerd) can read the controller set that
+	// the controller delegated host-side via
+	// EnableCellAllSubtreeControllers (#318). Propagated by the runner
+	// from cell.Spec.NestedCgroupRuntime at every BuildContainerSpec
+	// call site; not part of the persisted container document.
+	NestedCgroupRuntime    bool
 	User                   string
 	ReadOnlyRootFilesystem bool
 	Capabilities           *ContainerCapabilities

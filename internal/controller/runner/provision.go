@@ -1450,6 +1450,15 @@ func (r *Exec) applyCellContainerDefaults(cell *intmodel.Cell) error {
 	}
 	for i := range cell.Spec.Containers {
 		intmodel.ApplySpaceDefaultsToContainer(parentSpace, &cell.Spec.Containers[i])
+		// Propagate the cell-level NestedCgroupRuntime opt-in (#314) to
+		// every container so BuildContainerSpec can pair the private
+		// cgroup-ns with a /sys/fs/cgroup mount over the delegated
+		// subtree (#322). The flag is a per-cell decision because the
+		// host-side subtree-controller delegation in
+		// EnableCellAllSubtreeControllers is itself per-cell — a
+		// container cannot opt out individually without breaking the
+		// inner runtime that #318 enabled.
+		cell.Spec.Containers[i].NestedCgroupRuntime = cell.Spec.NestedCgroupRuntime
 	}
 	return nil
 }
@@ -1983,6 +1992,15 @@ func (r *Exec) ensureCellRootContainerSpec(cell intmodel.Cell) (intmodel.Contain
 		// (issue #96) so the daemon's CNI/iptables work lands in host scope.
 		rootSpec.HostNetwork = cellWantsHostNetworkRoot(cell)
 	}
+
+	// Propagate NestedCgroupRuntime from the cell to the root spec so a
+	// user-supplied or default-generated root container in a
+	// NestedCgroupRuntime cell gets the same /sys/fs/cgroup wiring as
+	// the rest of the cell's containers (#322). Mirrors the
+	// applyCellContainerDefaults loop for non-root containers; needed
+	// here because DefaultRootContainerSpec returns a freshly built
+	// spec that never passes through that loop.
+	rootSpec.NestedCgroupRuntime = cell.Spec.NestedCgroupRuntime
 
 	// Ensure required fields are set
 	rootSpec.Root = true
