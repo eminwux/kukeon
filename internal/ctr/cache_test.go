@@ -40,13 +40,13 @@ func TestStoreContainer(t *testing.T) {
 	// Test that storeContainer initializes the map
 	client.containers = nil
 	// Store nil to test map initialization (nil is valid for interface types)
-	client.storeContainer("test-id", nil)
+	client.storeContainer("test-ns", "test-id", nil)
 	if client.containers == nil {
 		t.Fatal("containers map should be initialized even with nil value")
 	}
 
 	// Verify the value was stored
-	if _, ok := client.containers["test-id"]; !ok {
+	if _, ok := client.containers[cacheKey("test-ns", "test-id")]; !ok {
 		t.Error("container should be stored in cache")
 	}
 }
@@ -56,13 +56,13 @@ func TestStoreContainerInitializesMap(t *testing.T) {
 	client.containers = nil // Simulate uninitialized map
 
 	// Store nil to test map initialization (nil is valid for interface types)
-	client.storeContainer("test-id", nil)
+	client.storeContainer("test-ns", "test-id", nil)
 
 	if client.containers == nil {
 		t.Fatal("containers map should be initialized")
 	}
 
-	if _, ok := client.containers["test-id"]; !ok {
+	if _, ok := client.containers[cacheKey("test-ns", "test-id")]; !ok {
 		t.Error("container should be stored in cache")
 	}
 }
@@ -77,11 +77,11 @@ func TestLoadContainerFromCache(t *testing.T) {
 
 func TestDropContainer(t *testing.T) {
 	client := setupTestClient(t)
-	client.storeContainer("test-id", nil)
+	client.storeContainer("test-ns", "test-id", nil)
 
-	client.dropContainer("test-id")
+	client.dropContainer("test-ns", "test-id")
 
-	if _, ok := client.containers["test-id"]; ok {
+	if _, ok := client.containers[cacheKey("test-ns", "test-id")]; ok {
 		t.Error("container should be removed from cache")
 	}
 }
@@ -90,7 +90,7 @@ func TestDropContainerNilMap(t *testing.T) {
 	client := setupTestClient(t)
 	client.containers = nil // Should not panic
 
-	client.dropContainer("test-id") // Should handle nil map gracefully
+	client.dropContainer("test-ns", "test-id") // Should handle nil map gracefully
 }
 
 func TestStoreTask(t *testing.T) {
@@ -98,13 +98,13 @@ func TestStoreTask(t *testing.T) {
 	// Test that storeTask initializes the map
 	client.tasks = nil
 	// Store nil to test map initialization (nil is valid for interface types)
-	client.storeTask("test-id", nil)
+	client.storeTask("test-ns", "test-id", nil)
 	if client.tasks == nil {
 		t.Fatal("tasks map should be initialized even with nil value")
 	}
 
 	// Verify the value was stored
-	if _, ok := client.tasks["test-id"]; !ok {
+	if _, ok := client.tasks[cacheKey("test-ns", "test-id")]; !ok {
 		t.Error("task should be stored in cache")
 	}
 }
@@ -114,13 +114,13 @@ func TestStoreTaskInitializesMap(t *testing.T) {
 	client.tasks = nil // Simulate uninitialized map
 
 	// Store nil to test map initialization (nil is valid for interface types)
-	client.storeTask("test-id", nil)
+	client.storeTask("test-ns", "test-id", nil)
 
 	if client.tasks == nil {
 		t.Fatal("tasks map should be initialized")
 	}
 
-	if _, ok := client.tasks["test-id"]; !ok {
+	if _, ok := client.tasks[cacheKey("test-ns", "test-id")]; !ok {
 		t.Error("task should be stored in cache")
 	}
 }
@@ -135,11 +135,11 @@ func TestLoadTaskFromCache(t *testing.T) {
 
 func TestDropTask(t *testing.T) {
 	client := setupTestClient(t)
-	client.storeTask("test-id", nil)
+	client.storeTask("test-ns", "test-id", nil)
 
-	client.dropTask("test-id")
+	client.dropTask("test-ns", "test-id")
 
-	if _, ok := client.tasks["test-id"]; ok {
+	if _, ok := client.tasks[cacheKey("test-ns", "test-id")]; ok {
 		t.Error("task should be removed from cache")
 	}
 }
@@ -148,7 +148,7 @@ func TestDropTaskNilMap(t *testing.T) {
 	client := setupTestClient(t)
 	client.tasks = nil // Should not panic
 
-	client.dropTask("test-id") // Should handle nil map gracefully
+	client.dropTask("test-ns", "test-id") // Should handle nil map gracefully
 }
 
 // Test concurrent access to container cache.
@@ -158,11 +158,11 @@ func TestContainerCacheConcurrency(t *testing.T) {
 	// Test concurrent writes
 	done := make(chan bool)
 	go func() {
-		client.storeContainer("test-1", nil)
+		client.storeContainer("test-ns", "test-1", nil)
 		done <- true
 	}()
 	go func() {
-		client.storeContainer("test-2", nil)
+		client.storeContainer("test-ns", "test-2", nil)
 		done <- true
 	}()
 	<-done
@@ -170,7 +170,7 @@ func TestContainerCacheConcurrency(t *testing.T) {
 
 	// Test concurrent writes only (read requires containerd client)
 	go func() {
-		client.storeContainer("test-3", nil)
+		client.storeContainer("test-ns", "test-3", nil)
 		done <- true
 	}()
 	<-done
@@ -188,11 +188,11 @@ func TestTaskCacheConcurrency(t *testing.T) {
 	// Test concurrent writes
 	done := make(chan bool)
 	go func() {
-		client.storeTask("test-1", nil)
+		client.storeTask("test-ns", "test-1", nil)
 		done <- true
 	}()
 	go func() {
-		client.storeTask("test-2", nil)
+		client.storeTask("test-ns", "test-2", nil)
 		done <- true
 	}()
 	<-done
@@ -200,7 +200,7 @@ func TestTaskCacheConcurrency(t *testing.T) {
 
 	// Test concurrent writes only (read requires containerd client)
 	go func() {
-		client.storeTask("test-3", nil)
+		client.storeTask("test-ns", "test-3", nil)
 		done <- true
 	}()
 	<-done

@@ -88,12 +88,12 @@ func withNamespacePathOpt(nsType runtimespec.LinuxNamespaceType, path string) oc
 	}
 }
 
-func (c *client) applySpecOpts(container containerd.Container, opts []oci.SpecOpts) error {
+func (c *client) applySpecOpts(namespace string, container containerd.Container, opts []oci.SpecOpts) error {
 	if len(opts) == 0 {
 		return nil
 	}
 
-	nsCtx := c.namespaceCtx()
+	nsCtx := c.namespaceCtx(namespace)
 	ociSpec, err := container.Spec(nsCtx)
 	if err != nil {
 		return fmt.Errorf("failed to load container spec: %w", err)
@@ -139,11 +139,11 @@ func (c *client) applySpecOpts(container containerd.Container, opts []oci.SpecOp
 // "claude". Returns an error if the spec cannot be loaded or has no
 // Process — both indicate the container was not created or was destroyed
 // between create and this call.
-func (c *client) ContainerProcessUID(container containerd.Container) (uint32, error) {
+func (c *client) ContainerProcessUID(namespace string, container containerd.Container) (uint32, error) {
 	if container == nil {
 		return 0, errors.New("container is nil")
 	}
-	nsCtx := c.namespaceCtx()
+	nsCtx := c.namespaceCtx(namespace)
 	spec, err := container.Spec(nsCtx)
 	if err != nil {
 		return 0, fmt.Errorf("read container spec: %w", err)

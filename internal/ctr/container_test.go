@@ -41,7 +41,7 @@ func TestContainerValidation(t *testing.T) {
 	client := setupTestClientForContainer(t)
 
 	// Test GetContainer with empty ID
-	_, err := client.GetContainer("")
+	_, err := client.GetContainer("test-ns", "")
 	if err == nil {
 		t.Error("GetContainer with empty ID should return error")
 	}
@@ -50,7 +50,7 @@ func TestContainerValidation(t *testing.T) {
 	}
 
 	// Test ExistsContainer with empty ID
-	_, err2 := client.ExistsContainer("")
+	_, err2 := client.ExistsContainer("test-ns", "")
 	if err2 == nil {
 		t.Error("ExistsContainer with empty ID should return error")
 	}
@@ -59,7 +59,7 @@ func TestContainerValidation(t *testing.T) {
 	}
 
 	// Test DeleteContainer with empty ID
-	err3 := client.DeleteContainer("", ctr.ContainerDeleteOptions{})
+	err3 := client.DeleteContainer("test-ns", "", ctr.ContainerDeleteOptions{})
 	if err3 == nil {
 		t.Error("DeleteContainer with empty ID should return error")
 	}
@@ -98,7 +98,7 @@ func TestCreateContainerValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := client.CreateContainer(tt.spec)
+			_, err := client.CreateContainer("test-ns", tt.spec, nil)
 
 			if tt.wantErr != nil {
 				if err == nil {
@@ -135,7 +135,7 @@ func TestStartContainerValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := client.StartContainer(tt.containerSpec, tt.taskSpec)
+			_, err := client.StartContainer("test-ns", tt.containerSpec, tt.taskSpec)
 
 			if tt.wantErr != nil {
 				if err == nil {
@@ -169,7 +169,7 @@ func TestStopContainerValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := client.StopContainer(tt.id, tt.opts)
+			_, err := client.StopContainer("test-ns", tt.id, tt.opts)
 
 			if tt.wantErr != nil {
 				if err == nil {
@@ -260,7 +260,7 @@ func TestCreateContainerFromSpecValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := client.CreateContainerFromSpec(tt.spec)
+			_, err := client.CreateContainerFromSpec("test-ns", tt.spec, nil)
 
 			if tt.wantErr != nil {
 				if err == nil {

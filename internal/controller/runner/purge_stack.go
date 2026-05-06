@@ -87,8 +87,6 @@ func (r *Exec) PurgeStack(stack intmodel.Stack) error {
 
 	// Find all containers in stack
 	if err = r.ensureClientConnected(); err == nil {
-		r.ctrClient.SetNamespace(realmNamespace)
-
 		pattern := fmt.Sprintf(
 			"%s-%s-%s",
 			stackForOps.Spec.RealmName,
@@ -99,7 +97,7 @@ func (r *Exec) PurgeStack(stack intmodel.Stack) error {
 		containers, err = r.findContainersByPattern(realmNamespace, pattern)
 		if err == nil {
 			for _, containerID := range containers {
-				netnsPath, _ := r.getContainerNetnsPath(containerID)
+				netnsPath, _ := r.getContainerNetnsPath(realmNamespace, containerID)
 				_ = r.purgeCNIForContainer(containerID, netnsPath, networkName)
 			}
 		}

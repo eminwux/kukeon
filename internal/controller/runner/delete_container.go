@@ -73,9 +73,6 @@ func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 		return fmt.Errorf("failed to get realm: %w", err)
 	}
 
-	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
-
 	// Find container in cell spec by ID (base name)
 	var foundContainerSpec *intmodel.ContainerSpec
 	for i := range cell.Spec.Containers {
@@ -119,11 +116,11 @@ func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 	}
 
 	// Comprehensive CNI cleanup before stopping/deleting
-	netnsPath, _ := r.getContainerNetnsPath(containerdID)
+	netnsPath, _ := r.getContainerNetnsPath(internalRealm.Spec.Namespace, containerdID)
 	_ = r.purgeCNIForContainer(containerdID, netnsPath, networkName)
 
 	// Stop the container using containerd ID
-	_, err = r.ctrClient.StopContainer(containerdID, ctr.StopContainerOptions{})
+	_, err = r.ctrClient.StopContainer(internalRealm.Spec.Namespace, containerdID, ctr.StopContainerOptions{})
 	if err != nil {
 		r.logger.WarnContext(
 			r.ctx,
@@ -138,7 +135,7 @@ func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 	}
 
 	// Delete the container from containerd using containerd ID
-	err = r.ctrClient.DeleteContainer(containerdID, ctr.ContainerDeleteOptions{
+	err = r.ctrClient.DeleteContainer(internalRealm.Spec.Namespace, containerdID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 	if err != nil {

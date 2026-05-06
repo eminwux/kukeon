@@ -332,22 +332,9 @@ func (r *Exec) findOrphanedContainers(namespace, pattern string) ([]string, erro
 		return nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
-	// Set namespace
-	oldNamespace := r.ctrClient.Namespace()
-	r.logger.DebugContext(
-		r.ctx,
-		"setting namespace for container listing",
-		"namespace",
-		namespace,
-		"old_namespace",
-		oldNamespace,
-	)
-	r.ctrClient.SetNamespace(namespace)
-	defer r.ctrClient.SetNamespace(oldNamespace)
-
 	// List all containers
 	r.logger.DebugContext(r.ctx, "listing containers from containerd", "namespace", namespace, "pattern", pattern)
-	containers, err := r.ctrClient.ListContainers()
+	containers, err := r.ctrClient.ListContainers(namespace)
 	if err != nil {
 		r.logger.ErrorContext(r.ctx, "failed to list containers", "error", err)
 		return nil, fmt.Errorf("failed to list containers: %w", err)
@@ -392,12 +379,12 @@ func (r *Exec) findCNIConfigPath(networkName string) (string, error) {
 }
 
 // getContainerNetnsPath attempts to get the network namespace path for a container.
-func (r *Exec) getContainerNetnsPath(containerID string) (string, error) {
+func (r *Exec) getContainerNetnsPath(namespace, containerID string) (string, error) {
 	if err := r.ensureClientConnected(); err != nil {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
-	container, err := r.ctrClient.GetContainer(containerID)
+	container, err := r.ctrClient.GetContainer(namespace, containerID)
 	if err != nil {
 		return "", err
 	}
@@ -471,7 +458,7 @@ func (r *Exec) detachRootContainerFromNetwork(
 	rootContainerID, cniConfigPath, namespace, cellID, cellName, spaceID, realmID string,
 ) {
 	var netnsPath string
-	rootContainer, err := r.ctrClient.GetContainer(rootContainerID)
+	rootContainer, err := r.ctrClient.GetContainer(namespace, rootContainerID)
 	if err == nil {
 		nsCtx := namespaces.WithNamespace(r.ctx, namespace)
 		rootTask, taskErr := rootContainer.Task(nsCtx, nil)
@@ -613,7 +600,7 @@ func (r *Exec) getRootContainerContainerdID(cell intmodel.Cell) (string, error) 
 // single stuck container does not strand the rest — but the log line is the
 // only signal the caller has to surface the residual containers in the
 // "namespace not empty" precondition error from DeleteNamespace.
-func (r *Exec) processOrphanedContainers(ctx context.Context, containers []string) {
+func (r *Exec) processOrphanedContainers(ctx context.Context, namespace string, containers []string) {
 	if len(containers) == 0 {
 		return
 	}
@@ -627,7 +614,7 @@ func (r *Exec) processOrphanedContainers(ctx context.Context, containers []strin
 		// blocking CleanupNamespaceResources and the subsequent
 		// DeleteNamespace with "namespace not empty".
 		r.logger.DebugContext(ctx, "stopping container", "id", containerID)
-		if _, stopErr := r.ctrClient.StopContainer(containerID, ctr.StopContainerOptions{Force: true}); stopErr != nil {
+		if _, stopErr := r.ctrClient.StopContainer(namespace, containerID, ctr.StopContainerOptions{Force: true}); stopErr != nil {
 			r.logger.WarnContext(
 				ctx,
 				"failed to stop orphaned container; continuing drain",
@@ -638,7 +625,7 @@ func (r *Exec) processOrphanedContainers(ctx context.Context, containers []strin
 			)
 		}
 		r.logger.DebugContext(ctx, "deleting container", "id", containerID)
-		if delErr := r.ctrClient.DeleteContainer(containerID, ctr.ContainerDeleteOptions{
+		if delErr := r.ctrClient.DeleteContainer(namespace, containerID, ctr.ContainerDeleteOptions{
 			SnapshotCleanup: true,
 		}); delErr != nil {
 			r.logger.WarnContext(
@@ -653,7 +640,7 @@ func (r *Exec) processOrphanedContainers(ctx context.Context, containers []strin
 
 		// Get netns and purge CNI
 		r.logger.DebugContext(ctx, "getting container netns path", "id", containerID)
-		netnsPath, _ := r.getContainerNetnsPath(containerID)
+		netnsPath, _ := r.getContainerNetnsPath(namespace, containerID)
 		// Try to determine network name from container ID pattern
 		// Container ID format: realm-space-cell-container
 		parts := strings.Split(containerID, "-")

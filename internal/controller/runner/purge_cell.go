@@ -83,10 +83,6 @@ func (r *Exec) PurgeCell(cell intmodel.Cell) error {
 		return nil // Continue anyway
 	}
 
-	// Set namespace
-	r.logger.DebugContext(r.ctx, "setting namespace for cell purge", "namespace", internalRealm.Spec.Namespace)
-	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
-
 	// Get space for network name
 	lookupSpace := intmodel.Space{
 		Metadata: intmodel.SpaceMetadata{
@@ -163,7 +159,7 @@ func (r *Exec) PurgeCell(cell intmodel.Cell) error {
 					r.logger.DebugContext(r.ctx, "processing container for CNI purge", "index", i+1, "total", len(containerIDs), "id", containerID)
 					// Try to get netns path
 					r.logger.DebugContext(r.ctx, "getting container netns path", "id", containerID)
-					netnsPath, _ := r.getContainerNetnsPath(containerID)
+					netnsPath, _ := r.getContainerNetnsPath(internalRealm.Spec.Namespace, containerID)
 					// Purge CNI resources
 					r.logger.DebugContext(r.ctx, "purging CNI resources for container", "id", containerID, "network", networkName)
 					_ = r.purgeCNIForContainer(containerID, netnsPath, networkName)

@@ -36,6 +36,5 @@ func (r *Exec) LoadImage(namespace string, reader io.Reader) ([]string, error) {
 	if err := r.ensureClientConnected(); err != nil {
 		return nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	r.ctrClient.SetNamespace(namespace)
-	return r.ctrClient.LoadImage(reader)
+	return r.ctrClient.LoadImage(namespace, reader)
 }

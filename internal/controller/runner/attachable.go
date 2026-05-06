@@ -74,7 +74,7 @@ func attachableTTYDirInitialPerms(kukeonGroupGID int) (os.FileMode, int) {
 // `kuke init` sets up on /opt/kukeon. The owner is corrected to the
 // container's resolved uid by attachablePostCreateChown after
 // CreateContainerFromSpec runs.
-func (r *Exec) attachableBuildOpts(spec intmodel.ContainerSpec) ([]ctr.BuildOption, error) {
+func (r *Exec) attachableBuildOpts(namespace string, spec intmodel.ContainerSpec, creds []ctr.RegistryCredentials) ([]ctr.BuildOption, error) {
 	if !spec.Attachable {
 		return nil, nil
 	}
@@ -111,7 +111,7 @@ func (r *Exec) attachableBuildOpts(spec intmodel.ContainerSpec) ([]ctr.BuildOpti
 		}
 	}
 
-	binaryPath, err := r.ctrClient.ResolveSbshCachePath(spec.Image, r.opts.RunPath)
+	binaryPath, err := r.ctrClient.ResolveSbshCachePath(namespace, spec.Image, r.opts.RunPath, creds)
 	if err != nil {
 		return nil, fmt.Errorf("resolve sbsh cache path for %q: %w", spec.Image, err)
 	}
@@ -150,7 +150,7 @@ func (r *Exec) attachableBuildOpts(spec intmodel.ContainerSpec) ([]ctr.BuildOpti
 // Group ownership and mode are preserved (the dir was already chmod'd to
 // 02750 root:kukeon by attachableBuildOpts), so kukeon-group members on
 // the host keep traverse access to the socket.
-func (r *Exec) attachablePostCreateChown(spec intmodel.ContainerSpec) error {
+func (r *Exec) attachablePostCreateChown(namespace string, spec intmodel.ContainerSpec) error {
 	if !spec.Attachable {
 		return nil
 	}
@@ -159,12 +159,12 @@ func (r *Exec) attachablePostCreateChown(spec intmodel.ContainerSpec) error {
 	if containerdID == "" {
 		containerdID = spec.ID
 	}
-	container, err := r.ctrClient.GetContainer(containerdID)
+	container, err := r.ctrClient.GetContainer(namespace, containerdID)
 	if err != nil {
 		return fmt.Errorf("get container %q: %w", containerdID, err)
 	}
 
-	uid, err := r.ctrClient.ContainerProcessUID(container)
+	uid, err := r.ctrClient.ContainerProcessUID(namespace, container)
 	if err != nil {
 		return fmt.Errorf("resolve process uid for %q: %w", containerdID, err)
 	}

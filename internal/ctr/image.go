@@ -43,8 +43,8 @@ type ImageInfo struct {
 
 // ensureImageUnpacked ensures that an image is unpacked for the given snapshotter.
 // If the image is not unpacked, it will be unpacked. Returns an error if unpacking fails.
-func (c *client) ensureImageUnpacked(image containerd.Image, snapshotter string) error {
-	nsCtx := c.namespaceCtx()
+func (c *client) ensureImageUnpacked(namespace string, image containerd.Image, snapshotter string) error {
+	nsCtx := c.namespaceCtx(namespace)
 
 	// Check if image is already unpacked
 	unpacked, err := image.IsUnpacked(nsCtx, snapshotter)
@@ -88,8 +88,8 @@ func (c *client) ensureImageUnpacked(image containerd.Image, snapshotter string)
 
 // pullImage pulls an image from a registry if it's not found locally.
 // Returns the image and any error encountered.
-func (c *client) pullImage(imageRef string) (containerd.Image, error) {
-	nsCtx := c.namespaceCtx()
+func (c *client) pullImage(namespace string, imageRef string, creds []RegistryCredentials) (containerd.Image, error) {
+	nsCtx := c.namespaceCtx(namespace)
 
 	// Try to get the image locally first
 	image, err := c.cClient.GetImage(nsCtx, imageRef)
@@ -138,8 +138,7 @@ func (c *client) pullImage(imageRef string) (containerd.Image, error) {
 		containerd.WithPlatform(platforms.Format(platform)),
 	}
 
-	// Get credentials from client (set when namespace was configured)
-	creds := c.GetRegistryCredentials()
+	// Use credentials passed as parameter
 	if len(creds) > 0 {
 		resolver := buildResolver(creds)
 		pullOpts = append(pullOpts, containerd.WithResolver(resolver))
@@ -157,17 +156,15 @@ func (c *client) pullImage(imageRef string) (containerd.Image, error) {
 	return image, nil
 }
 
-// LoadImage imports an OCI/docker image tarball into the client's current
-// containerd namespace and returns the names of the imported images. The
-// caller sets the target namespace via SetNamespace; namespaceCtx() then
-// scopes the import to that namespace.
+// LoadImage imports an OCI/docker image tarball into the specified
+// containerd namespace and returns the names of the imported images.
 //
 // WithSkipMissing() mirrors `ctr images import`'s tolerance: multi-arch
 // tarballs produced by `docker save` reference platform-specific blobs the
 // docker daemon does not always include. Skipping missing blobs lets the
 // host-arch manifest land while ignoring the others.
-func (c *client) LoadImage(reader io.Reader) ([]string, error) {
-	nsCtx := c.namespaceCtx()
+func (c *client) LoadImage(namespace string, reader io.Reader) ([]string, error) {
+	nsCtx := c.namespaceCtx(namespace)
 
 	imgs, err := c.cClient.Import(nsCtx, reader, containerd.WithSkipMissing())
 	if err != nil {
@@ -175,7 +172,7 @@ func (c *client) LoadImage(reader io.Reader) ([]string, error) {
 			c.ctx,
 			"failed to import image tarball",
 			"namespace",
-			c.Namespace(),
+			namespace,
 			"err",
 			formatError(err),
 		)
@@ -186,16 +183,16 @@ func (c *client) LoadImage(reader io.Reader) ([]string, error) {
 	for _, img := range imgs {
 		names = append(names, img.Name)
 	}
-	c.logger.DebugContext(c.ctx, "imported image tarball", "namespace", c.Namespace(), "images", names)
+	c.logger.DebugContext(c.ctx, "imported image tarball", "namespace", namespace, "images", names)
 	return names, nil
 }
 
-// ListImages enumerates images in the client's current containerd namespace.
+// ListImages enumerates images in the specified containerd namespace.
 // Size is best-effort: when containerd cannot resolve an image's size (e.g.
 // because content is missing locally), the entry is still surfaced with
 // Size=-1 so listing degrades gracefully instead of failing the whole call.
-func (c *client) ListImages() ([]ImageInfo, error) {
-	nsCtx := c.namespaceCtx()
+func (c *client) ListImages(namespace string) ([]ImageInfo, error) {
+	nsCtx := c.namespaceCtx(namespace)
 
 	imgs, err := c.cClient.ListImages(nsCtx)
 	if err != nil {
@@ -203,7 +200,7 @@ func (c *client) ListImages() ([]ImageInfo, error) {
 			c.ctx,
 			"failed to list images",
 			"namespace",
-			c.Namespace(),
+			namespace,
 			"err",
 			formatError(err),
 		)
@@ -212,17 +209,17 @@ func (c *client) ListImages() ([]ImageInfo, error) {
 
 	out := make([]ImageInfo, 0, len(imgs))
 	for _, img := range imgs {
-		out = append(out, c.imageToInfo(img))
+		out = append(out, c.imageToInfo(namespace, img))
 	}
 	return out, nil
 }
 
-// GetImage returns metadata for the named image ref in the client's current
+// GetImage returns metadata for the named image ref in the specified
 // containerd namespace. Returns errdefs.ErrImageNotFound (the kukeon
 // sentinel) when containerd reports the ref absent so upper layers can map
 // to a clean error message.
-func (c *client) GetImage(ref string) (ImageInfo, error) {
-	nsCtx := c.namespaceCtx()
+func (c *client) GetImage(namespace, ref string) (ImageInfo, error) {
+	nsCtx := c.namespaceCtx(namespace)
 
 	img, err := c.cClient.GetImage(nsCtx, ref)
 	if err != nil {
@@ -233,7 +230,7 @@ func (c *client) GetImage(ref string) (ImageInfo, error) {
 			c.ctx,
 			"failed to get image",
 			"namespace",
-			c.Namespace(),
+			namespace,
 			"ref",
 			ref,
 			"err",
@@ -241,15 +238,15 @@ func (c *client) GetImage(ref string) (ImageInfo, error) {
 		)
 		return ImageInfo{}, fmt.Errorf("%w: %w", internalerrdefs.ErrGetImage, err)
 	}
-	return c.imageToInfo(img), nil
+	return c.imageToInfo(namespace, img), nil
 }
 
-// DeleteImage removes the named image ref from the client's current
+// DeleteImage removes the named image ref from the specified
 // containerd namespace. The kukeon ErrImageNotFound sentinel is returned
 // when containerd reports the ref absent so upper layers can map to a
 // clean error message; other errors are wrapped with ErrDeleteImage.
-func (c *client) DeleteImage(ref string) error {
-	nsCtx := c.namespaceCtx()
+func (c *client) DeleteImage(namespace, ref string) error {
+	nsCtx := c.namespaceCtx(namespace)
 
 	if err := c.cClient.ImageService().Delete(nsCtx, ref); err != nil {
 		if errdefs.IsNotFound(err) {
@@ -259,7 +256,7 @@ func (c *client) DeleteImage(ref string) error {
 			c.ctx,
 			"failed to delete image",
 			"namespace",
-			c.Namespace(),
+			namespace,
 			"ref",
 			ref,
 			"err",
@@ -274,8 +271,8 @@ func (c *client) DeleteImage(ref string) error {
 // resolved via the platform-default Size() helper; failure leaves Size=-1
 // rather than aborting because partial-content tarballs are common with
 // `docker save` (see LoadImage's WithSkipMissing rationale).
-func (c *client) imageToInfo(img containerd.Image) ImageInfo {
-	nsCtx := c.namespaceCtx()
+func (c *client) imageToInfo(namespace string, img containerd.Image) ImageInfo {
+	nsCtx := c.namespaceCtx(namespace)
 	meta := img.Metadata()
 	target := img.Target()
 
@@ -287,7 +284,7 @@ func (c *client) imageToInfo(img containerd.Image) ImageInfo {
 			c.ctx,
 			"failed to resolve image size",
 			"namespace",
-			c.Namespace(),
+			namespace,
 			"image",
 			img.Name(),
 			"err",

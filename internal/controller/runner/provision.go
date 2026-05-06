@@ -1195,13 +1195,7 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		return nil, fmt.Errorf("realm %q has no namespace", realmName)
 	}
 
-	// Set namespace to realm namespace with credentials if available
-	if len(internalRealm.Spec.RegistryCredentials) > 0 {
-		creds := ctr.ConvertRealmCredentials(internalRealm.Spec.RegistryCredentials)
-		r.ctrClient.SetNamespaceWithCredentials(namespace, creds)
-	} else {
-		r.ctrClient.SetNamespace(namespace)
-	}
+	creds := ctr.ConvertRealmCredentials(internalRealm.Spec.RegistryCredentials)
 
 	// Prepare root container: ensure it's in Containers array and RootContainerID is set
 	rootContainerdID, err := naming.BuildRootContainerdID(spaceName, stackName, cellID)
@@ -1294,7 +1288,7 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 			rootLabels := buildRootContainerLabels(*cell)
 			ctrContainerSpec := ctr.BuildRootContainerSpec(containerSpec, rootLabels)
 
-			createdContainer, createErr = r.ctrClient.CreateContainer(ctrContainerSpec)
+			createdContainer, createErr = r.ctrClient.CreateContainer(namespace, ctrContainerSpec, creds)
 			if createErr != nil {
 				logFields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 				logFields = append(
@@ -1345,12 +1339,14 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				cell.Spec.Containers[i] = containerSpec
 			}
 
-			attachOpts, attachErr := r.attachableBuildOpts(containerSpec)
+			attachOpts, attachErr := r.attachableBuildOpts(namespace, containerSpec, creds)
 			if attachErr != nil {
 				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
 			}
 			_, createErr = r.ctrClient.CreateContainerFromSpec(
+				namespace,
 				containerSpec,
+				creds,
 				attachOpts...,
 			)
 			if createErr != nil {
@@ -1373,7 +1369,7 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				)
 				return nil, fmt.Errorf("failed to create container %s: %w", containerdID, createErr)
 			}
-			if chownErr := r.attachablePostCreateChown(containerSpec); chownErr != nil {
+			if chownErr := r.attachablePostCreateChown(namespace, containerSpec); chownErr != nil {
 				return nil, fmt.Errorf(
 					"failed to chown attachable tty dir for %s: %w", containerdID, chownErr,
 				)
@@ -1458,13 +1454,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		return nil, fmt.Errorf("failed to get realm: %w", err)
 	}
 
-	// Set namespace to realm namespace with credentials if available
-	if len(internalRealm.Spec.RegistryCredentials) > 0 {
-		creds := ctr.ConvertRealmCredentials(internalRealm.Spec.RegistryCredentials)
-		r.ctrClient.SetNamespaceWithCredentials(internalRealm.Spec.Namespace, creds)
-	} else {
-		r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
-	}
+	creds := ctr.ConvertRealmCredentials(internalRealm.Spec.RegistryCredentials)
 
 	// Generate containerd ID with cell identifier for uniqueness
 	containerID, err := naming.BuildRootContainerdID(spaceName, stackName, cellID)
@@ -1476,7 +1466,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 	var container containerd.Container
 
 	// Check if container exists
-	exists, err := r.ExistsContainer(containerID)
+	exists, err := r.ExistsContainer(internalRealm.Spec.Namespace, containerID)
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 		fields = append(fields, "space", spaceName, "realm", realmName, "err", fmt.Sprintf("%v", err))
@@ -1491,7 +1481,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 	if exists {
 		// Container exists, load it but continue to process other containers
 		var loadErr error
-		container, loadErr = r.ctrClient.GetContainer(containerID)
+		container, loadErr = r.ctrClient.GetContainer(internalRealm.Spec.Namespace, containerID)
 		if loadErr != nil {
 			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 			fields = append(fields, "space", spaceName, "realm", realmName, "err", fmt.Sprintf("%v", loadErr))
@@ -1554,7 +1544,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		containerSpec := ctr.BuildRootContainerSpec(rootContainerSpec, rootLabels)
 
 		var createErr error
-		container, createErr = r.ctrClient.CreateContainer(containerSpec)
+		container, createErr = r.ctrClient.CreateContainer(internalRealm.Spec.Namespace, containerSpec, creds)
 		if createErr != nil {
 			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 			fields = append(
@@ -1688,7 +1678,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		)
 
 		// Use containerd ID for containerd operations
-		exists, err = r.ExistsContainer(containerdID)
+		exists, err = r.ExistsContainer(internalRealm.Spec.Namespace, containerdID)
 		if err != nil {
 			// Some other error occurred (connection failure, permission error, etc.)
 			fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
@@ -1767,12 +1757,14 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				createSpecFields...,
 			)
 
-			attachOpts, attachErr := r.attachableBuildOpts(containerSpec)
+			attachOpts, attachErr := r.attachableBuildOpts(internalRealm.Spec.Namespace, containerSpec, creds)
 			if attachErr != nil {
 				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
 			}
 			createdContainer, containerCreateErr := r.ctrClient.CreateContainerFromSpec(
+				internalRealm.Spec.Namespace,
 				containerSpec,
+				creds,
 				attachOpts...,
 			)
 			if containerCreateErr != nil {
@@ -1825,7 +1817,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 					"created container from cell",
 					successFields...,
 				)
-				if chownErr := r.attachablePostCreateChown(containerSpec); chownErr != nil {
+				if chownErr := r.attachablePostCreateChown(internalRealm.Spec.Namespace, containerSpec); chownErr != nil {
 					return nil, fmt.Errorf(
 						"failed to chown attachable tty dir for %s: %w", containerdID, chownErr,
 					)

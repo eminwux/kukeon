@@ -108,9 +108,6 @@ func (r *Exec) StopCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, fmt.Errorf("realm %q has no namespace", realmName)
 	}
 
-	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(namespace)
-
 	// Stop all workload containers first
 	for _, containerSpec := range internalCell.Spec.Containers {
 		// Skip root container - it's handled separately afterwards
@@ -145,7 +142,7 @@ func (r *Exec) StopCell(cell intmodel.Cell) (intmodel.Cell, error) {
 
 		// Use container name with UUID for containerd operations
 		timeout := 5 * time.Second
-		_, err = r.ctrClient.StopContainer(containerID, ctr.StopContainerOptions{
+		_, err = r.ctrClient.StopContainer(namespace, containerID, ctr.StopContainerOptions{
 			Force:   true,
 			Timeout: &timeout,
 		})
@@ -171,7 +168,7 @@ func (r *Exec) StopCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		)
 
 		// Delete container after stopping
-		err = r.ctrClient.DeleteContainer(containerID, ctr.ContainerDeleteOptions{
+		err = r.ctrClient.DeleteContainer(namespace, containerID, ctr.ContainerDeleteOptions{
 			SnapshotCleanup: true,
 		})
 		if err != nil {
@@ -228,7 +225,7 @@ func (r *Exec) StopCell(cell intmodel.Cell) (intmodel.Cell, error) {
 
 	// Stop root container
 	timeout := 5 * time.Second
-	_, err = r.ctrClient.StopContainer(rootContainerID, ctr.StopContainerOptions{
+	_, err = r.ctrClient.StopContainer(namespace, rootContainerID, ctr.StopContainerOptions{
 		Force:   true,
 		Timeout: &timeout,
 	})
@@ -252,7 +249,7 @@ func (r *Exec) StopCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	}
 
 	// Delete root container after stopping
-	err = r.ctrClient.DeleteContainer(rootContainerID, ctr.ContainerDeleteOptions{
+	err = r.ctrClient.DeleteContainer(namespace, rootContainerID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 	if err != nil {
@@ -377,9 +374,6 @@ func (r *Exec) StopContainer(cell intmodel.Cell, containerID string) error {
 		return fmt.Errorf("realm %q has no namespace", realmName)
 	}
 
-	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(namespace)
-
 	// Find container in cell spec by ID (base name)
 	var foundContainerSpec *intmodel.ContainerSpec
 	for i := range cell.Spec.Containers {
@@ -415,7 +409,7 @@ func (r *Exec) StopContainer(cell intmodel.Cell, containerID string) error {
 
 	// Use containerd ID for containerd operations
 	timeout := 5 * time.Second
-	_, err = r.ctrClient.StopContainer(containerdID, ctr.StopContainerOptions{
+	_, err = r.ctrClient.StopContainer(namespace, containerdID, ctr.StopContainerOptions{
 		Force:   true,
 		Timeout: &timeout,
 	})
@@ -449,7 +443,7 @@ func (r *Exec) StopContainer(cell intmodel.Cell, containerID string) error {
 	)
 
 	// Delete container after stopping
-	err = r.ctrClient.DeleteContainer(containerdID, ctr.ContainerDeleteOptions{
+	err = r.ctrClient.DeleteContainer(namespace, containerdID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 	if err != nil {

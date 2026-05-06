@@ -85,14 +85,12 @@ func (r *Exec) PurgeSpace(space intmodel.Space) error {
 
 	// Find all containers in space
 	if err = r.ensureClientConnected(); err == nil {
-		r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
-
 		pattern := fmt.Sprintf("%s-%s", spaceForOps.Spec.RealmName, spaceForOps.Metadata.Name)
 		var containers []string
 		containers, err = r.findContainersByPattern(internalRealm.Spec.Namespace, pattern)
 		if err == nil {
 			for _, containerID := range containers {
-				netnsPath, _ := r.getContainerNetnsPath(containerID)
+				netnsPath, _ := r.getContainerNetnsPath(internalRealm.Spec.Namespace, containerID)
 				_ = r.purgeCNIForContainer(containerID, netnsPath, networkName)
 			}
 		}

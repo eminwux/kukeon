@@ -36,8 +36,7 @@ func (r *Exec) ListImages(namespace string) ([]ctr.ImageInfo, error) {
 	if err := r.ensureClientConnected(); err != nil {
 		return nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	r.ctrClient.SetNamespace(namespace)
-	return r.ctrClient.ListImages()
+	return r.ctrClient.ListImages(namespace)
 }
 
 // GetImage returns metadata for the named image ref in the given
@@ -55,8 +54,7 @@ func (r *Exec) GetImage(namespace, ref string) (ctr.ImageInfo, error) {
 	if err := r.ensureClientConnected(); err != nil {
 		return ctr.ImageInfo{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	r.ctrClient.SetNamespace(namespace)
-	return r.ctrClient.GetImage(ref)
+	return r.ctrClient.GetImage(namespace, ref)
 }
 
 // DeleteImage removes the named image ref from the given containerd
@@ -74,6 +72,5 @@ func (r *Exec) DeleteImage(namespace, ref string) error {
 	if err := r.ensureClientConnected(); err != nil {
 		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	r.ctrClient.SetNamespace(namespace)
-	return r.ctrClient.DeleteImage(ref)
+	return r.ctrClient.DeleteImage(namespace, ref)
 }

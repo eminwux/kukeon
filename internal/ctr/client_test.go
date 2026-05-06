@@ -39,11 +39,6 @@ func TestNewClient(t *testing.T) {
 	if _, ok := client.(ctr.Client); !ok {
 		t.Error("NewClient() should return a Client interface")
 	}
-
-	// Test default namespace
-	if client.Namespace() == "" {
-		t.Error("Client should have a default namespace")
-	}
 }
 
 func TestClientConnect(_ *testing.T) {

@@ -102,9 +102,6 @@ func (r *Exec) KillCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, fmt.Errorf("failed to get realm: %w", err)
 	}
 
-	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
-
 	// Kill all workload containers first
 	for _, containerSpec := range internalCell.Spec.Containers {
 		// Skip root container - it's handled separately afterwards
@@ -129,7 +126,7 @@ func (r *Exec) KillCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		}
 
 		// Use container name with UUID for containerd operations
-		err = r.killContainerTask(containerID, internalRealm.Spec.Namespace)
+		err = r.killContainerTask(internalRealm.Spec.Namespace, containerID)
 		if err != nil {
 			// Log warning but continue with other containers
 			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
@@ -152,7 +149,7 @@ func (r *Exec) KillCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		)
 
 		// Delete container after killing
-		err = r.ctrClient.DeleteContainer(containerID, ctr.ContainerDeleteOptions{
+		err = r.ctrClient.DeleteContainer(internalRealm.Spec.Namespace, containerID, ctr.ContainerDeleteOptions{
 			SnapshotCleanup: true,
 		})
 		if err != nil {
@@ -208,7 +205,7 @@ func (r *Exec) KillCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	)
 
 	// Kill root container
-	err = r.killContainerTask(rootContainerID, internalRealm.Spec.Namespace)
+	err = r.killContainerTask(internalRealm.Spec.Namespace, rootContainerID)
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
 		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
@@ -229,7 +226,7 @@ func (r *Exec) KillCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	}
 
 	// Delete root container after killing
-	err = r.ctrClient.DeleteContainer(rootContainerID, ctr.ContainerDeleteOptions{
+	err = r.ctrClient.DeleteContainer(internalRealm.Spec.Namespace, rootContainerID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 	if err != nil {
@@ -349,9 +346,6 @@ func (r *Exec) KillContainer(cell intmodel.Cell, containerID string) error {
 		return fmt.Errorf("failed to get realm: %w", err)
 	}
 
-	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
-
 	// Find container in cell spec by ID (base name)
 	var foundContainerSpec *intmodel.ContainerSpec
 	for i := range cell.Spec.Containers {
@@ -386,7 +380,7 @@ func (r *Exec) KillContainer(cell intmodel.Cell, containerID string) error {
 	}
 
 	// Use containerd ID for containerd operations
-	err = r.killContainerTask(containerdID, internalRealm.Spec.Namespace)
+	err = r.killContainerTask(internalRealm.Spec.Namespace, containerdID)
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 		fields = append(
@@ -417,7 +411,7 @@ func (r *Exec) KillContainer(cell intmodel.Cell, containerID string) error {
 	)
 
 	// Delete container after killing
-	err = r.ctrClient.DeleteContainer(containerdID, ctr.ContainerDeleteOptions{
+	err = r.ctrClient.DeleteContainer(internalRealm.Spec.Namespace, containerdID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 	if err != nil {
