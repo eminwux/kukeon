@@ -138,11 +138,6 @@ var (
 
 	// Host-firewall (FORWARD-chain admission) errors.
 
-	// ErrIptablesUnavailable fires when the iptables binary cannot be
-	// resolved on PATH. `kuke init` surfaces this as a clear bring-up
-	// blocker rather than silently failing — the bug class to catch is
-	// nftables-only hosts where the iptables compat shim is absent.
-	ErrIptablesUnavailable = errors.New("iptables binary not found on PATH")
 	// ErrHostFwApply wraps every iptables failure during host-firewall
 	// installation so callers can match with errors.Is.
 	ErrHostFwApply = errors.New("failed to install host firewall admission rules")

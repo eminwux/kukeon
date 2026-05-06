@@ -24,6 +24,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/hostfw"
 )
 
@@ -195,6 +196,38 @@ func TestApply_PlacesJumpAfterEgressChain(t *testing.T) {
 	}
 }
 
+// TestApply_DoesNotMatchEgressLikeSiblingChain pins the regression guard
+// for the egress-detection token-anchor: a chain named like
+// KUKEON-EGRESS-FOO must not be mistaken for KUKEON-EGRESS. With the
+// sibling chain at FORWARD pos 1 and KUKEON-EGRESS absent, the installer
+// must insert KUKEON-FORWARD at position 1, not position 2.
+func TestApply_DoesNotMatchEgressLikeSiblingChain(t *testing.T) {
+	runner := &fakeRunner{
+		respond: map[string]fakeResp{
+			"-L KUKEON-FORWARD -n":         {err: errors.New("absent")},
+			"-C FORWARD -j KUKEON-FORWARD": {err: errors.New("absent")},
+			"-S FORWARD": {out: []byte(
+				"-P FORWARD DROP\n" +
+					"-A FORWARD -j KUKEON-EGRESS-FOO\n",
+			)},
+		},
+	}
+	for _, r := range hostfw.BuildChainRules() {
+		check := strings.Join(append([]string{"-C", r.Chain}, r.Args...), " ")
+		runner.respond[check] = fakeResp{err: errors.New("absent")}
+	}
+
+	if err := newInstaller(runner).Apply(context.Background()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if !wasCalled(runner, []string{"-I", "FORWARD", "1", "-j", "KUKEON-FORWARD"}) {
+		t.Errorf("expected jump at position 1 when only a sibling chain is present; calls = %v", runner.calls)
+	}
+	if wasCalled(runner, []string{"-I", "FORWARD", "2", "-j", "KUKEON-FORWARD"}) {
+		t.Errorf("must not match KUKEON-EGRESS-FOO as KUKEON-EGRESS")
+	}
+}
+
 // TestApply_FailureWrappedAsHostFwApply pins the public error contract:
 // any iptables failure during Apply surfaces wrapped in
 // errdefs.ErrHostFwApply so callers can match with errors.Is.
@@ -209,8 +242,8 @@ func TestApply_FailureWrappedAsHostFwApply(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error; got nil")
 	}
-	if !strings.Contains(err.Error(), "host firewall") {
-		t.Errorf("error should mention host firewall: %v", err)
+	if !errors.Is(err, errdefs.ErrHostFwApply) {
+		t.Errorf("error should wrap errdefs.ErrHostFwApply: %v", err)
 	}
 }
 

@@ -282,7 +282,7 @@ func (i *IptablesInstaller) findEgressPosition(ctx context.Context) int {
 			continue
 		}
 		pos++
-		if strings.Contains(line, "-j "+netpolicy.MasterChainName) {
+		if lineJumpsTo(line, netpolicy.MasterChainName) {
 			return pos
 		}
 	}
@@ -301,7 +301,7 @@ func (i *IptablesInstaller) deleteJumpsToChain(ctx context.Context) error {
 	}
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "-A FORWARD") || !strings.Contains(line, "-j "+ChainName) {
+		if !strings.HasPrefix(line, "-A FORWARD") || !lineJumpsTo(line, ChainName) {
 			continue
 		}
 		args, parseErr := parseRuleLine(line)
@@ -362,4 +362,23 @@ func parseRuleLine(line string) ([]string, error) {
 		return nil, errors.New("unterminated quote in iptables -S line")
 	}
 	return out, nil
+}
+
+// lineJumpsTo reports whether an `iptables -S` line jumps to exactly the
+// named chain. Token-aware so a chain like "KUKEON-EGRESS-FOO" doesn't
+// match "KUKEON-EGRESS" the way a plain substring check would. A
+// malformed line (unterminated quote) is treated as no-match — the caller
+// will propagate any genuine parse failure on the subsequent
+// parseRuleLine call.
+func lineJumpsTo(line, target string) bool {
+	tokens, err := parseRuleLine(line)
+	if err != nil {
+		return false
+	}
+	for i := 0; i+1 < len(tokens); i++ {
+		if tokens[i] == "-j" && tokens[i+1] == target {
+			return true
+		}
+	}
+	return false
 }

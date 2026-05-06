@@ -195,7 +195,7 @@ func tearDownHostFirewall(cmd *cobra.Command, logger *slog.Logger) error {
 	if err := installer.Remove(cmd.Context()); err != nil {
 		return fmt.Errorf("remove host firewall admission rules: %w", err)
 	}
-	cmd.Printf("removed host firewall chain %s\n", hostfw.ChainName)
+	cmd.Printf("ensured host firewall chain %s removed\n", hostfw.ChainName)
 	return nil
 }
 

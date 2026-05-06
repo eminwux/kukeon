@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -32,6 +33,7 @@ import (
 	reset "github.com/eminwux/kukeon/cmd/kuke/daemon/reset"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/consts"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/hostfw"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -536,7 +538,9 @@ func TestDaemonReset_PurgeSystemPropagatesHostFirewallError(t *testing.T) {
 			return kukeonv1.DeleteCellResult{Cell: doc, MetadataDeleted: true}, nil
 		},
 	}
-	installer := &recordingInstaller{removeErr: errors.New("iptables down")}
+	installer := &recordingInstaller{
+		removeErr: fmt.Errorf("%w: iptables down", errdefs.ErrHostFwRemove),
+	}
 
 	cmd := reset.NewResetCmd()
 	buf := &bytes.Buffer{}
@@ -555,8 +559,8 @@ func TestDaemonReset_PurgeSystemPropagatesHostFirewallError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when host-firewall teardown fails")
 	}
-	if !strings.Contains(err.Error(), "host firewall") {
-		t.Errorf("error should mention host firewall: %v", err)
+	if !errors.Is(err, errdefs.ErrHostFwRemove) {
+		t.Errorf("error should wrap errdefs.ErrHostFwRemove: %v", err)
 	}
 }
 
