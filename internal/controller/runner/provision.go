@@ -1071,8 +1071,10 @@ func (r *Exec) createCellCgroup(cell intmodel.Cell) (string, error) {
 	// any container task lands inside the cell. Without this, container
 	// task cgroups nested under <cell>/<containerd-id> have no controllers
 	// available and cell-level UpdateCgroup limits are decorative — exactly
-	// what issue #312 reports.
-	if subtreeErr := r.ctrClient.EnableCellSubtreeControllers(spec.Group, spec.Mountpoint, cellResourceControllers()); subtreeErr != nil {
+	// what issue #312 reports. Cells with NestedCgroupRuntime opt in to
+	// delegating the full host-available controller set instead of the
+	// resource subset (issue #314).
+	if subtreeErr := r.enableCellControllers(cell, spec.Group, spec.Mountpoint); subtreeErr != nil {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateCellCgroup, subtreeErr)
 	}
 
@@ -1094,6 +1096,18 @@ func (r *Exec) createCellCgroup(cell intmodel.Cell) (string, error) {
 // from a particular kernel build (e.g. "io" without blk-cgroup) is safe.
 func cellResourceControllers() []string {
 	return []string{"cpu", "memory", "io", "pids"}
+}
+
+// enableCellControllers picks between the resource-subset and full-set
+// subtree-control delegation based on cell.Spec.NestedCgroupRuntime, and
+// invokes the matching ctr.Client entry point. The two paths share the
+// same underlying writeSubtreeEnable + ToggleControllers logic; the only
+// difference is which controller set is enabled. Issue #314.
+func (r *Exec) enableCellControllers(cell intmodel.Cell, group, mountpoint string) error {
+	if cell.Spec.NestedCgroupRuntime {
+		return r.ctrClient.EnableCellAllSubtreeControllers(group, mountpoint)
+	}
+	return r.ctrClient.EnableCellSubtreeControllers(group, mountpoint, cellResourceControllers())
 }
 
 func (r *Exec) ensureCellCgroup(cell intmodel.Cell) (intmodel.Cell, error) {
@@ -1152,8 +1166,11 @@ func (r *Exec) ensureCellCgroup(cell intmodel.Cell) (intmodel.Cell, error) {
 		// Idempotent re-toggle of cell subtree controllers after every
 		// ensure-pass — covers daemon restart against pre-existing cells
 		// provisioned before issue #312 was fixed (and is a no-op on
-		// already-enabled subtrees).
-		if subtreeErr := r.ctrClient.EnableCellSubtreeControllers(cellDoc.Status.CgroupPath, r.ctrClient.GetCgroupMountpoint(), cellResourceControllers()); subtreeErr != nil {
+		// already-enabled subtrees). Cells whose persisted spec carries
+		// NestedCgroupRuntime=true take the full-set delegation path so a
+		// daemon restart re-asserts the same controller set the cell was
+		// provisioned with (issue #314).
+		if subtreeErr := r.enableCellControllers(cell, cellDoc.Status.CgroupPath, r.ctrClient.GetCgroupMountpoint()); subtreeErr != nil {
 			r.logger.WarnContext(r.ctx,
 				"failed to enable cell subtree controllers on ensure-path",
 				"cell", cell.Metadata.Name, "error", subtreeErr)

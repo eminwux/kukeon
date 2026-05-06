@@ -157,11 +157,43 @@ func (c *client) EnableCellSubtreeControllers(group, mountpoint string, controll
 		return fmt.Errorf("read root cgroup.controllers: %w", err)
 	}
 	enable := intersectControllers(controllers, available)
+	return c.applyCellSubtreeControllers(group, mp, enable)
+}
+
+// EnableCellAllSubtreeControllers is the cell/profile=NestedCgroupRuntime
+// path: it delegates the *full* host-available cgroup-v2 controller set on
+// the cell's subtree_control (and every ancestor's), so a nested cgroup
+// runtime running inside the cell — e.g. an inner containerd or systemd
+// hosting its own children in sub-cgroups — can in turn delegate any
+// controller it wants.
+//
+// The ordinary cell path (EnableCellSubtreeControllers with the kukeon
+// resource subset) is what every kukeon-managed cell wants by default; the
+// "all" variant is the explicit opt-in cells request when they host a
+// nested runtime that needs more than the resource subset.
+func (c *client) EnableCellAllSubtreeControllers(group, mountpoint string) error {
+	if err := validateGroupPath(group); err != nil {
+		return err
+	}
+	mp := c.effectiveMountpoint(mountpoint)
+	available, err := readRootControllers(mp)
+	if err != nil {
+		return fmt.Errorf("read root cgroup.controllers: %w", err)
+	}
+	return c.applyCellSubtreeControllers(group, mp, available)
+}
+
+// applyCellSubtreeControllers is the shared body of the two
+// EnableCell*SubtreeControllers entry points. It assumes group has already
+// been validated and that controllers has been pre-filtered against the
+// host root's cgroup.controllers, so every entry is known-supported by the
+// running kernel.
+func (c *client) applyCellSubtreeControllers(group, mountpoint string, enable []string) error {
 	if len(enable) == 0 {
 		return nil
 	}
 
-	manager, err := c.managerFor(group, mp)
+	manager, err := c.managerFor(group, mountpoint)
 	if err != nil {
 		return err
 	}
@@ -169,13 +201,13 @@ func (c *client) EnableCellSubtreeControllers(group, mountpoint string, controll
 		return fmt.Errorf("enable controllers in cell ancestors: %w", toggleErr)
 	}
 
-	cellPath := filepath.Join(mp, strings.TrimPrefix(group, "/"))
+	cellPath := filepath.Join(mountpoint, strings.TrimPrefix(group, "/"))
 	if writeErr := writeSubtreeEnable(filepath.Join(cellPath, "cgroup.subtree_control"), enable); writeErr != nil {
 		return fmt.Errorf("enable controllers in cell subtree_control: %w", writeErr)
 	}
 
 	c.logger.InfoContext(c.ctx, "enabled cell cgroup controllers",
-		"group", group, "mountpoint", mp, "controllers", enable)
+		"group", group, "mountpoint", mountpoint, "controllers", enable)
 	return nil
 }
 

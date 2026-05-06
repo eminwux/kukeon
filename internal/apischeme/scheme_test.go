@@ -562,6 +562,81 @@ func TestCellRoundTripV1Beta1_AutoDeleteOmitted(t *testing.T) {
 	}
 }
 
+// TestCellRoundTripV1Beta1_NestedCgroupRuntime locks down issue #314: the
+// NestedCgroupRuntime opt-in must survive the external→internal→external
+// round-trip and serialize as YAML so the daemon can re-derive the
+// full-controller-delegation intent from the persisted cell metadata after
+// a restart and re-apply it on the ensure-pass.
+func TestCellRoundTripV1Beta1_NestedCgroupRuntime(t *testing.T) {
+	input := ext.CellDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCell,
+		Metadata: ext.CellMetadata{
+			Name:   "cell-nested",
+			Labels: map[string]string{},
+		},
+		Spec: ext.CellSpec{
+			ID:                  "cell-id-nested",
+			RealmID:             "realm0",
+			SpaceID:             "space0",
+			StackID:             "stack0",
+			NestedCgroupRuntime: true,
+			Containers:          []ext.ContainerSpec{},
+		},
+	}
+
+	internal, version, err := apischeme.NormalizeCell(input)
+	if err != nil {
+		t.Fatalf("NormalizeCell: %v", err)
+	}
+	if !internal.Spec.NestedCgroupRuntime {
+		t.Errorf("internal NestedCgroupRuntime = false, want true after Normalize")
+	}
+
+	output, err := apischeme.BuildCellExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildCellExternalFromInternal: %v", err)
+	}
+	if !output.Spec.NestedCgroupRuntime {
+		t.Errorf("external NestedCgroupRuntime = false, want true after Build")
+	}
+
+	rendered, err := yaml.Marshal(output)
+	if err != nil {
+		t.Fatalf("yaml.Marshal: %v", err)
+	}
+	if !strings.Contains(string(rendered), "nestedCgroupRuntime: true") {
+		t.Errorf("rendered YAML missing nestedCgroupRuntime entry; got:\n%s", string(rendered))
+	}
+}
+
+// TestCellRoundTripV1Beta1_NestedCgroupRuntimeOmitted ensures the field is
+// omitted from the YAML when unset — every existing cell manifest keeps the
+// same on-disk shape and the opt-in is invisible to operators that do not
+// need it.
+func TestCellRoundTripV1Beta1_NestedCgroupRuntimeOmitted(t *testing.T) {
+	input := ext.CellDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCell,
+		Metadata:   ext.CellMetadata{Name: "cell-default"},
+		Spec: ext.CellSpec{
+			ID:         "cell-id-default",
+			RealmID:    "realm0",
+			SpaceID:    "space0",
+			StackID:    "stack0",
+			Containers: []ext.ContainerSpec{},
+		},
+	}
+
+	rendered, err := yaml.Marshal(input)
+	if err != nil {
+		t.Fatalf("yaml.Marshal: %v", err)
+	}
+	if strings.Contains(string(rendered), "nestedCgroupRuntime:") {
+		t.Errorf("nestedCgroupRuntime must be omitted when false; got:\n%s", string(rendered))
+	}
+}
+
 func TestContainerRoundTripV1Beta1(t *testing.T) {
 	input := ext.ContainerDoc{
 		APIVersion: ext.APIVersionV1Beta1,

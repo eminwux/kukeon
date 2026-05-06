@@ -46,6 +46,15 @@ type CellSpec struct {
 	// trigger survives daemon restarts (no per-cell goroutine needs to be
 	// re-installed on startup).
 	AutoDelete bool `json:"autoDelete,omitempty"      yaml:"autoDelete,omitempty"`
+	// NestedCgroupRuntime opts the cell into delegating the full
+	// host-available cgroup-v2 controller set on its cgroup.subtree_control,
+	// rather than the kukeon resource subset (cpu/memory/io/pids). This is
+	// the knob a cell that hosts a nested cgroup runtime — an inner
+	// containerd, runc, or systemd that places its own children in
+	// sub-cgroups under the cell — needs so the inner runtime can in turn
+	// delegate any controller it wants to its workloads. Default false
+	// keeps the existing cell-as-leaf semantics (issue #312) untouched.
+	NestedCgroupRuntime bool `json:"nestedCgroupRuntime,omitempty" yaml:"nestedCgroupRuntime,omitempty"`
 }
 
 // CellTty is cell-level tty/attach config. Kept intentionally minimal: only
