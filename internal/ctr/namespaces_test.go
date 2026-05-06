@@ -33,41 +33,7 @@ func setupTestClientForNamespaces(t *testing.T) ctr.Client {
 	return ctr.NewClient(ctx, logger, "/test/socket")
 }
 
-// TestNamespaceMethods tests the exported namespace methods on Client interface.
-// Full testing requires mocking containerd namespace service and registry credentials.
-func TestNamespaceMethods(t *testing.T) {
-	client := setupTestClientForNamespaces(t)
-
-	// Test GetNamespace - should return default namespace for new client
-	ns := client.Namespace()
-	if ns == "" {
-		t.Error("Namespace should not be empty for new client")
-	}
-
-	// Test SetNamespace
-	client.SetNamespace("test-namespace")
-	if client.Namespace() != "test-namespace" {
-		t.Errorf("Namespace = %q, want %q", client.Namespace(), "test-namespace")
-	}
-
-	// Test SetNamespaceWithCredentials
-	creds := []ctr.RegistryCredentials{
-		{
-			Username:      "user",
-			Password:      "pass",
-			ServerAddress: "docker.io",
-		},
-	}
-	client.SetNamespaceWithCredentials("test-ns", creds)
-	if client.Namespace() != "test-ns" {
-		t.Errorf("Namespace = %q, want %q", client.Namespace(), "test-ns")
-	}
-	gotCreds := client.GetRegistryCredentials()
-	if len(gotCreds) != 1 || gotCreds[0].Username != "user" {
-		t.Errorf("GetRegistryCredentials() = %v, want credentials with username 'user'", gotCreds)
-	}
-}
-
+// TestDeleteNamespaceValidation tests DeleteNamespace input validation.
 func TestDeleteNamespaceValidation(t *testing.T) {
 	client := setupTestClientForNamespaces(t)
 
@@ -113,6 +79,7 @@ func TestDeleteNamespaceValidation(t *testing.T) {
 	}
 }
 
+// TestCleanupNamespaceResourcesValidation tests CleanupNamespaceResources input handling.
 func TestCleanupNamespaceResourcesValidation(t *testing.T) {
 	client := setupTestClientForNamespaces(t)
 
@@ -154,82 +121,5 @@ func TestCleanupNamespaceResourcesValidation(t *testing.T) {
 				t.Logf("CleanupNamespaceResources() error = %v (expected without containerd)", err)
 			}
 		})
-	}
-}
-
-func TestNamespaceStateTransitions(t *testing.T) {
-	client := setupTestClientForNamespaces(t)
-
-	// Test default namespace on creation
-	defaultNs := client.Namespace()
-	if defaultNs == "" {
-		t.Error("Client should have a default namespace on creation")
-	}
-
-	// Test namespace change after SetNamespace
-	newNs := "test-namespace-1"
-	client.SetNamespace(newNs)
-	if client.Namespace() != newNs {
-		t.Errorf("Namespace = %q, want %q after SetNamespace", client.Namespace(), newNs)
-	}
-
-	// Test that credentials are cleared on SetNamespace
-	creds := client.GetRegistryCredentials()
-	if creds != nil && len(creds) > 0 {
-		t.Errorf("GetRegistryCredentials() should return nil/empty after SetNamespace, got %v", creds)
-	}
-
-	// Test SetNamespaceWithCredentials preserves credentials
-	testCreds := []ctr.RegistryCredentials{
-		{
-			Username:      "user1",
-			Password:      "pass1",
-			ServerAddress: "docker.io",
-		},
-		{
-			Username:      "user2",
-			Password:      "pass2",
-			ServerAddress: "registry.example.com",
-		},
-	}
-	nsWithCreds := "test-namespace-2"
-	client.SetNamespaceWithCredentials(nsWithCreds, testCreds)
-
-	if client.Namespace() != nsWithCreds {
-		t.Errorf("Namespace = %q, want %q after SetNamespaceWithCredentials", client.Namespace(), nsWithCreds)
-	}
-
-	gotCreds := client.GetRegistryCredentials()
-	if len(gotCreds) != len(testCreds) {
-		t.Errorf("GetRegistryCredentials() count = %d, want %d", len(gotCreds), len(testCreds))
-	}
-	if len(gotCreds) > 0 {
-		if gotCreds[0].Username != testCreds[0].Username {
-			t.Errorf("GetRegistryCredentials()[0].Username = %q, want %q", gotCreds[0].Username, testCreds[0].Username)
-		}
-		if len(gotCreds) > 1 && gotCreds[1].Username != testCreds[1].Username {
-			t.Errorf("GetRegistryCredentials()[1].Username = %q, want %q", gotCreds[1].Username, testCreds[1].Username)
-		}
-	}
-
-	// Test state consistency - multiple namespace switches
-	client.SetNamespace("test-namespace-3")
-	if client.Namespace() != "test-namespace-3" {
-		t.Errorf("Namespace = %q, want 'test-namespace-3'", client.Namespace())
-	}
-	// Credentials should be cleared again
-	creds = client.GetRegistryCredentials()
-	if creds != nil && len(creds) > 0 {
-		t.Errorf("GetRegistryCredentials() should return nil/empty after SetNamespace, got %v", creds)
-	}
-
-	// Test SetNamespaceWithCredentials again
-	client.SetNamespaceWithCredentials("test-namespace-4", testCreds[:1])
-	if client.Namespace() != "test-namespace-4" {
-		t.Errorf("Namespace = %q, want 'test-namespace-4'", client.Namespace())
-	}
-	gotCreds = client.GetRegistryCredentials()
-	if len(gotCreds) != 1 {
-		t.Errorf("GetRegistryCredentials() count = %d, want 1", len(gotCreds))
 	}
 }

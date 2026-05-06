@@ -52,16 +52,14 @@ func (r *Exec) PurgeContainer(realm intmodel.Realm, containerID string) error {
 		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
-	r.ctrClient.SetNamespace(namespace)
-
 	// Try to stop and delete container
-	_, _ = r.ctrClient.StopContainer(containerID, ctr.StopContainerOptions{})
-	_ = r.ctrClient.DeleteContainer(containerID, ctr.ContainerDeleteOptions{
+	_, _ = r.ctrClient.StopContainer(namespace, containerID, ctr.StopContainerOptions{})
+	_ = r.ctrClient.DeleteContainer(namespace, containerID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 
 	// Get netns path if container is running
-	netnsPath, _ := r.getContainerNetnsPath(containerID)
+	netnsPath, _ := r.getContainerNetnsPath(namespace, containerID)
 
 	// Try to determine network name from container ID
 	parts := strings.Split(containerID, "-")

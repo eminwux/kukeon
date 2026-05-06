@@ -24,26 +24,32 @@ import (
 	internalerrdefs "github.com/eminwux/kukeon/internal/errdefs"
 )
 
+// cacheKey returns a unique key for a (namespace, id) pair.
+func cacheKey(namespace, id string) string {
+	return namespace + "/" + id
+}
+
 // storeContainer stores a container in the cache.
-func (c *client) storeContainer(id string, container containerd.Container) {
+func (c *client) storeContainer(namespace, id string, container containerd.Container) {
 	c.containersMu.Lock()
 	defer c.containersMu.Unlock()
 	if c.containers == nil {
 		c.containers = make(map[string]containerd.Container)
 	}
-	c.containers[id] = container
+	c.containers[cacheKey(namespace, id)] = container
 }
 
 // loadContainer loads a container from cache or containerd.
-func (c *client) loadContainer(id string) (containerd.Container, error) {
+func (c *client) loadContainer(namespace, id string) (containerd.Container, error) {
+	key := cacheKey(namespace, id)
 	c.containersMu.RLock()
-	if container, ok := c.containers[id]; ok {
+	if container, ok := c.containers[key]; ok {
 		c.containersMu.RUnlock()
 		return container, nil
 	}
 	c.containersMu.RUnlock()
 
-	nsCtx := c.namespaceCtx()
+	nsCtx := c.namespaceCtx(namespace)
 	container, err := c.cClient.LoadContainer(nsCtx, id)
 	if err != nil {
 		// Only wrap "not found" errors with ErrContainerNotFound
@@ -53,57 +59,58 @@ func (c *client) loadContainer(id string) (containerd.Container, error) {
 		}
 		return nil, err
 	}
-	c.storeContainer(id, container)
+	c.storeContainer(namespace, id, container)
 	return container, nil
 }
 
 // dropContainer removes a container from the cache.
-func (c *client) dropContainer(id string) {
+func (c *client) dropContainer(namespace, id string) {
 	c.containersMu.Lock()
 	defer c.containersMu.Unlock()
 	if c.containers != nil {
-		delete(c.containers, id)
+		delete(c.containers, cacheKey(namespace, id))
 	}
 }
 
 // storeTask stores a task in the cache.
-func (c *client) storeTask(id string, task containerd.Task) {
+func (c *client) storeTask(namespace, id string, task containerd.Task) {
 	c.tasksMu.Lock()
 	defer c.tasksMu.Unlock()
 	if c.tasks == nil {
 		c.tasks = make(map[string]containerd.Task)
 	}
-	c.tasks[id] = task
+	c.tasks[cacheKey(namespace, id)] = task
 }
 
 // loadTask loads a task from cache or container.
-func (c *client) loadTask(id string) (containerd.Task, error) {
+func (c *client) loadTask(namespace, id string) (containerd.Task, error) {
+	key := cacheKey(namespace, id)
 	c.tasksMu.RLock()
-	if task, ok := c.tasks[id]; ok {
+	if task, ok := c.tasks[key]; ok {
 		c.tasksMu.RUnlock()
 		return task, nil
 	}
 	c.tasksMu.RUnlock()
 
-	container, err := c.loadContainer(id)
+	container, err := c.loadContainer(namespace, id)
 	if err != nil {
 		return nil, err
 	}
 
-	nsCtx := c.namespaceCtx()
+	nsCtx := c.namespaceCtx(namespace)
 	task, err := container.Task(nsCtx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", internalerrdefs.ErrTaskNotFound, err)
 	}
-	c.storeTask(id, task)
+	c.storeTask(namespace, id, task)
 	return task, nil
 }
 
 // dropTask removes a task from the cache.
-func (c *client) dropTask(id string) {
+func (c *client) dropTask(namespace, id string) {
 	c.tasksMu.Lock()
 	defer c.tasksMu.Unlock()
 	if c.tasks != nil {
-		delete(c.tasks, id)
+		delete(c.tasks, cacheKey(namespace, id))
 	}
 }

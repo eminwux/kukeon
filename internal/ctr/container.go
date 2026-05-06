@@ -35,6 +35,7 @@ import (
 
 // StartContainer creates and starts a task for the container.
 func (c *client) StartContainer(
+	namespace string,
 	containerSpec ContainerSpec,
 	taskSpec TaskSpec,
 ) (containerd.Task, error) {
@@ -42,12 +43,12 @@ func (c *client) StartContainer(
 		return nil, internalerrdefs.ErrEmptyContainerID
 	}
 
-	container, err := c.loadContainer(containerSpec.ID)
+	container, err := c.loadContainer(namespace, containerSpec.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	nsCtx := c.namespaceCtx()
+	nsCtx := c.namespaceCtx(namespace)
 
 	if len(containerSpec.SpecOpts) > 0 {
 		if err = c.applySpecOpts(container, containerSpec.SpecOpts); err != nil {
@@ -128,12 +129,13 @@ func (c *client) StartContainer(
 	}
 
 	c.storeTask(containerSpec.ID, task)
-	c.logger.InfoContext(c.ctx, "started container", "id", containerSpec.ID)
+	c.logger.InfoContext(c.ctx, "started container", "id", containerSpec.ID, "namespace", namespace)
 	return task, nil
 }
 
 // StopContainer stops a running container task.
 func (c *client) StopContainer(
+	namespace string,
 	id string,
 	opts StopContainerOptions,
 ) (*containerd.ExitStatus, error) {
@@ -141,14 +143,14 @@ func (c *client) StopContainer(
 		return nil, internalerrdefs.ErrEmptyContainerID
 	}
 
-	c.logger.DebugContext(c.ctx, "starting to stop container", "id", id)
-	task, err := c.loadTask(id)
+	c.logger.DebugContext(c.ctx, "starting to stop container", "id", id, "namespace", namespace)
+	task, err := c.loadTask(namespace, id)
 	if err != nil {
 		c.logger.DebugContext(c.ctx, "failed to load task for container", "id", id, "error", err)
 		return nil, err
 	}
 
-	nsCtx := c.namespaceCtx()
+	nsCtx := c.namespaceCtx(namespace)
 
 	// Check task status
 	c.logger.DebugContext(c.ctx, "checking task status", "id", id)
@@ -247,7 +249,7 @@ func (c *client) StopContainer(
 		}
 	}
 
-	c.logger.InfoContext(c.ctx, "stopped container", "id", id, "exit_code", exitStatus.ExitCode())
+	c.logger.InfoContext(c.ctx, "stopped container", "id", id, "namespace", namespace, "exit_code", exitStatus.ExitCode())
 
 	// Verify task is actually stopped
 	finalStatus, err := task.Status(nsCtx)
@@ -276,18 +278,18 @@ func (c *client) StopContainer(
 	} else {
 		c.logger.DebugContext(c.ctx, "deleted stopped task", "id", id)
 	}
-	c.dropTask(id)
+	c.dropTask(namespace, id)
 
 	return &exitStatus, nil
 }
 
 // CreateContainer creates a new container with the provided spec.
-func (c *client) CreateContainer(spec ContainerSpec) (containerd.Container, error) {
+func (c *client) CreateContainer(namespace string, spec ContainerSpec) (containerd.Container, error) {
 	if err := validateContainerSpec(spec); err != nil {
 		return nil, err
 	}
 
-	nsCtx := c.namespaceCtx()
+	nsCtx := c.namespaceCtx(namespace)
 
 	// Check if container already exists
 	_, err := c.cClient.LoadContainer(nsCtx, spec.ID)
@@ -296,15 +298,15 @@ func (c *client) CreateContainer(spec ContainerSpec) (containerd.Container, erro
 		return nil, internalerrdefs.ErrContainerExists
 	}
 
-	// Pull the image if needed
-	image, err := c.pullImage(spec.Image)
+	// Pull the image if needed (no registry credentials for basic CreateContainer)
+	image, err := c.pullImage(namespace, spec.Image, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	// Ensure image is unpacked before creating container
 	// Use spec.Snapshotter if provided, otherwise empty string for default snapshotter
-	if err = c.ensureImageUnpacked(image, spec.Snapshotter); err != nil {
+	if err = c.ensureImageUnpacked(namespace, image, spec.Snapshotter); err != nil {
 		return nil, fmt.Errorf("failed to ensure image is unpacked: %w", err)
 	}
 
@@ -353,22 +355,22 @@ func (c *client) CreateContainer(spec ContainerSpec) (containerd.Container, erro
 		return nil, fmt.Errorf("failed to create container: %w", err)
 	}
 
-	c.storeContainer(spec.ID, container)
-	c.logger.InfoContext(c.ctx, "created container", "id", spec.ID, "image", spec.Image)
+	c.storeContainer(namespace, spec.ID, container)
+	c.logger.InfoContext(c.ctx, "created container", "id", spec.ID, "namespace", namespace, "image", spec.Image)
 	return container, nil
 }
 
 // GetContainer retrieves a container by ID.
-func (c *client) GetContainer(id string) (containerd.Container, error) {
+func (c *client) GetContainer(namespace, id string) (containerd.Container, error) {
 	if id == "" {
 		return nil, internalerrdefs.ErrEmptyContainerID
 	}
-	return c.loadContainer(id)
+	return c.loadContainer(namespace, id)
 }
 
 // ListContainers lists all containers matching the provided filters.
-func (c *client) ListContainers(filters ...string) ([]containerd.Container, error) {
-	nsCtx := c.namespaceCtx()
+func (c *client) ListContainers(namespace string, filters ...string) ([]containerd.Container, error) {
+	nsCtx := c.namespaceCtx(namespace)
 
 	containers, err := c.cClient.Containers(nsCtx, filters...)
 	if err != nil {
@@ -378,20 +380,20 @@ func (c *client) ListContainers(filters ...string) ([]containerd.Container, erro
 
 	// Update cache
 	for _, container := range containers {
-		c.storeContainer(container.ID(), container)
+		c.storeContainer(namespace, container.ID(), container)
 	}
 
-	c.logger.DebugContext(c.ctx, "listed containers", "count", len(containers))
+	c.logger.DebugContext(c.ctx, "listed containers", "namespace", namespace, "count", len(containers))
 	return containers, nil
 }
 
 // ExistsContainer checks if a container exists.
-func (c *client) ExistsContainer(id string) (bool, error) {
+func (c *client) ExistsContainer(namespace, id string) (bool, error) {
 	if id == "" {
 		return false, internalerrdefs.ErrEmptyContainerID
 	}
 
-	nsCtx := c.namespaceCtx()
+	nsCtx := c.namespaceCtx(namespace)
 	_, err := c.cClient.LoadContainer(nsCtx, id)
 	if err != nil {
 		// "Not found" is not an error for Exists - it's a valid result (container doesn't exist)
@@ -407,24 +409,24 @@ func (c *client) ExistsContainer(id string) (bool, error) {
 // DeleteContainer deletes a container.
 // It is idempotent - if the container doesn't exist, it returns nil (treating it as already deleted).
 // It automatically deletes any associated task before deleting the container.
-func (c *client) DeleteContainer(id string, opts ContainerDeleteOptions) error {
+func (c *client) DeleteContainer(namespace, id string, opts ContainerDeleteOptions) error {
 	if id == "" {
 		return internalerrdefs.ErrEmptyContainerID
 	}
 
-	c.logger.DebugContext(c.ctx, "starting to delete container", "id", id, "snapshot_cleanup", opts.SnapshotCleanup)
-	container, err := c.loadContainer(id)
+	c.logger.DebugContext(c.ctx, "starting to delete container", "id", id, "namespace", namespace, "snapshot_cleanup", opts.SnapshotCleanup)
+	container, err := c.loadContainer(namespace, id)
 	if err != nil {
 		// Container doesn't exist - treat as idempotent (already deleted)
 		if errors.Is(err, internalerrdefs.ErrContainerNotFound) {
-			c.logger.DebugContext(c.ctx, "container not found", "id", id)
+			c.logger.DebugContext(c.ctx, "container not found", "id", id, "namespace", namespace)
 			return nil
 		}
-		c.logger.DebugContext(c.ctx, "failed to load container for deletion", "id", id, "error", err)
+		c.logger.DebugContext(c.ctx, "failed to load container for deletion", "id", id, "namespace", namespace, "error", err)
 		return err
 	}
 
-	nsCtx := c.namespaceCtx()
+	nsCtx := c.namespaceCtx(namespace)
 
 	// Try to get and delete the task if it exists
 	c.logger.DebugContext(c.ctx, "checking for task to delete", "id", id)
@@ -455,16 +457,16 @@ func (c *client) DeleteContainer(id string, opts ContainerDeleteOptions) error {
 	if err != nil {
 		// Check if container was already deleted (race condition)
 		if errdefs.IsNotFound(err) {
-			c.logger.DebugContext(c.ctx, "container not found", "id", id)
-			c.dropContainer(id)
+			c.logger.DebugContext(c.ctx, "container not found", "id", id, "namespace", namespace)
+			c.dropContainer(namespace, id)
 			return nil
 		}
-		c.logger.ErrorContext(c.ctx, "failed to delete container", "id", id, "err", formatError(err))
+		c.logger.ErrorContext(c.ctx, "failed to delete container", "id", id, "namespace", namespace, "err", formatError(err))
 		return fmt.Errorf("failed to delete container: %w", err)
 	}
 
-	c.dropContainer(id)
-	c.logger.InfoContext(c.ctx, "deleted container", "id", id)
+	c.dropContainer(namespace, id)
+	c.logger.InfoContext(c.ctx, "deleted container", "id", id, "namespace", namespace)
 	return nil
 }
 
@@ -472,6 +474,7 @@ func (c *client) DeleteContainer(id string, opts ContainerDeleteOptions) error {
 // Variadic opts forward to BuildContainerSpec — used today only by the
 // runner when it needs to inject host-side paths for an Attachable spec.
 func (c *client) CreateContainerFromSpec(
+	namespace string,
 	containerSpec intmodel.ContainerSpec,
 	opts ...BuildOption,
 ) (containerd.Container, error) {
@@ -531,7 +534,7 @@ func (c *client) CreateContainerFromSpec(
 	ctrSpec := BuildContainerSpec(containerSpec, opts...)
 
 	// Create the container
-	container, err := c.CreateContainer(ctrSpec)
+	container, err := c.CreateContainer(namespace, ctrSpec)
 	if err != nil {
 		c.logger.ErrorContext(
 			c.ctx,
@@ -557,6 +560,8 @@ func (c *client) CreateContainerFromSpec(
 		containerSpec.SpaceName,
 		"realm",
 		containerSpec.RealmName,
+		"namespace",
+		namespace,
 	)
 	return container, nil
 }

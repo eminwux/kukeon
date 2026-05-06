@@ -204,14 +204,6 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, fmt.Errorf("realm %q has no namespace", realmID)
 	}
 
-	// Set namespace to realm namespace with credentials if available
-	if internalRealm.Spec.RegistryCredentials != nil {
-		creds := ctr.ConvertRealmCredentials(internalRealm.Spec.RegistryCredentials)
-		r.ctrClient.SetNamespaceWithCredentials(namespace, creds)
-	} else {
-		r.ctrClient.SetNamespace(namespace)
-	}
-
 	// Generate containerd ID with cell identifier for uniqueness
 	containerID, err := naming.BuildRootContainerdID(spaceID, stackID, cellID)
 	if err != nil {
@@ -224,7 +216,9 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	// re-run CNI ADD against the same container ID — which host-local IPAM
 	// refuses as a duplicate allocation (we never run CNI DEL when we
 	// delete the old container, so the reservation persists).
-	if cellTasksAllRunningFn(internalCell, containerID, r.ctrClient.TaskStatus) {
+	if cellTasksAllRunningFn(internalCell, containerID, func(id string) (containerd.Status, error) {
+		return r.ctrClient.TaskStatus(namespace, id)
+	}) {
 		markCellReady(&internalCell)
 		if err = r.PopulateAndPersistCellContainerStatuses(&internalCell); err != nil {
 			r.logger.WarnContext(r.ctx, "failed to populate container statuses after idempotent StartCell skip",
@@ -243,7 +237,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	}
 
 	// Check if container exists and clean it up
-	container, err := r.ctrClient.GetContainer(containerID)
+	container, err := r.ctrClient.GetContainer(namespace, containerID)
 	if err != nil {
 		// Container doesn't exist, will create fresh
 		if errors.Is(err, internalerrdefs.ErrContainerNotFound) {
@@ -283,7 +277,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		}
 
 		// Delete the container to remove stale spec
-		err = r.ctrClient.DeleteContainer(containerID, ctr.ContainerDeleteOptions{
+		err = r.ctrClient.DeleteContainer(namespace, containerID, ctr.ContainerDeleteOptions{
 			SnapshotCleanup: true,
 		})
 		if err != nil {
@@ -325,7 +319,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	rootLabels := buildRootContainerLabels(internalCell)
 	ctrContainerSpec := ctr.BuildRootContainerSpec(rootContainerSpec, rootLabels)
 
-	_, err = r.ctrClient.CreateContainer(ctrContainerSpec)
+	_, err = r.ctrClient.CreateContainer(namespace, ctrContainerSpec)
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
@@ -346,7 +340,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	)
 
 	// Start root container
-	rootTask, err := r.ctrClient.StartContainer(ctr.ContainerSpec{ID: containerID}, ctr.TaskSpec{})
+	rootTask, err := r.ctrClient.StartContainer(namespace, ctr.ContainerSpec{ID: containerID}, ctr.TaskSpec{})
 	if err != nil {
 		fields = appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
@@ -552,7 +546,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 
 		// Delete container if it exists (idempotent - DeleteContainer handles non-existent containers gracefully)
 		// This ensures any stale container specs and tasks are cleaned up before recreation
-		err = r.ctrClient.DeleteContainer(ctrContainerID, ctr.ContainerDeleteOptions{
+		err = r.ctrClient.DeleteContainer(namespace, ctrContainerID, ctr.ContainerDeleteOptions{
 			SnapshotCleanup: true,
 		})
 		if err != nil {
@@ -581,7 +575,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		if attachErr != nil {
 			return intmodel.Cell{}, fmt.Errorf("failed to prepare attachable container %s: %w", ctrContainerID, attachErr)
 		}
-		_, err = r.ctrClient.CreateContainerFromSpec(containerSpec, attachOpts...)
+		_, err = r.ctrClient.CreateContainerFromSpec(namespace, containerSpec, attachOpts...)
 		if err != nil {
 			fields = appendCellLogFields([]any{"id", ctrContainerID}, cellID, cellName)
 			fields = append(
@@ -611,7 +605,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 			fields...,
 		)
 
-		if err = r.attachablePostCreateChown(containerSpec); err != nil {
+		if err = r.attachablePostCreateChown(namespace, containerSpec); err != nil {
 			return intmodel.Cell{}, fmt.Errorf(
 				"failed to chown attachable tty dir for %s: %w", ctrContainerID, err,
 			)
@@ -623,7 +617,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 			namespacePaths,
 		)
 
-		_, err = r.ctrClient.StartContainer(specWithNamespaces, r.containerLogTaskSpec(containerSpec))
+		_, err = r.ctrClient.StartContainer(namespace, specWithNamespaces, r.containerLogTaskSpec(containerSpec))
 		if err != nil {
 			fields = appendCellLogFields([]any{"id", ctrContainerID}, cellID, cellName)
 			fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
@@ -704,14 +698,6 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (intmodel.
 		return intmodel.Cell{}, fmt.Errorf("realm %q has no namespace", realmName)
 	}
 
-	// Set namespace to realm namespace with credentials if available
-	if len(internalRealm.Spec.RegistryCredentials) > 0 {
-		creds := ctr.ConvertRealmCredentials(internalRealm.Spec.RegistryCredentials)
-		r.ctrClient.SetNamespaceWithCredentials(namespace, creds)
-	} else {
-		r.ctrClient.SetNamespace(namespace)
-	}
-
 	// Find container in cell spec by ID (base name)
 	var foundContainerSpec *intmodel.ContainerSpec
 	for i := range cell.Spec.Containers {
@@ -746,7 +732,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (intmodel.
 	}
 
 	// Get root container's namespace paths
-	rootContainer, err := r.ctrClient.GetContainer(rootContainerID)
+	rootContainer, err := r.ctrClient.GetContainer(namespace, rootContainerID)
 	if err != nil {
 		if errors.Is(err, internalerrdefs.ErrContainerNotFound) {
 			return intmodel.Cell{}, fmt.Errorf(
@@ -787,7 +773,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (intmodel.
 
 	// Delete container if it exists (idempotent - DeleteContainer handles non-existent containers gracefully)
 	// This ensures any stale container specs and tasks are cleaned up before recreation
-	err = r.ctrClient.DeleteContainer(containerdID, ctr.ContainerDeleteOptions{
+	err = r.ctrClient.DeleteContainer(namespace, containerdID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 	if err != nil {
@@ -816,7 +802,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (intmodel.
 	if attachErr != nil {
 		return intmodel.Cell{}, fmt.Errorf("failed to prepare attachable container %s: %w", containerID, attachErr)
 	}
-	_, err = r.ctrClient.CreateContainerFromSpec(*foundContainerSpec, attachOpts...)
+	_, err = r.ctrClient.CreateContainerFromSpec(namespace, *foundContainerSpec, attachOpts...)
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 		fields = append(
@@ -846,7 +832,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (intmodel.
 		fields...,
 	)
 
-	if err = r.attachablePostCreateChown(*foundContainerSpec); err != nil {
+	if err = r.attachablePostCreateChown(namespace, *foundContainerSpec); err != nil {
 		return intmodel.Cell{}, fmt.Errorf(
 			"failed to chown attachable tty dir for %s: %w", containerdID, err,
 		)
@@ -858,7 +844,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (intmodel.
 		namespacePaths,
 	)
 
-	_, err = r.ctrClient.StartContainer(specWithNamespaces, r.containerLogTaskSpec(*foundContainerSpec))
+	_, err = r.ctrClient.StartContainer(namespace, specWithNamespaces, r.containerLogTaskSpec(*foundContainerSpec))
 	if err != nil {
 		fields = appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 		fields = append(

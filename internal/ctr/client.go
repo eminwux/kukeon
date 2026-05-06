@@ -27,43 +27,34 @@ import (
 	cgroup2 "github.com/containerd/cgroups/v2/cgroup2"
 	apitypes "github.com/containerd/containerd/api/types"
 	containerd "github.com/containerd/containerd/v2/client"
-	"github.com/containerd/containerd/v2/pkg/namespaces"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
 type client struct {
-	ctx                   context.Context
-	logger                *slog.Logger
-	socket                string
-	cClient               *containerd.Client
-	namespace             string
-	namespaceMu           sync.RWMutex
-	registryCredentials   []RegistryCredentials
-	registryCredentialsMu sync.RWMutex
-	cgroups               map[string]*cgroup2.Manager
-	containersMu          sync.RWMutex
-	containers            map[string]containerd.Container
-	tasksMu               sync.RWMutex
-	tasks                 map[string]containerd.Task
-	cgroupMountpointOnce  sync.Once
-	cgroupMountpoint      string
-	cgroupMountpointErr   error
+	ctx                  context.Context
+	logger               *slog.Logger
+	socket               string
+	cClient              *containerd.Client
+	cgroups              map[string]*cgroup2.Manager
+	containersMu         sync.RWMutex
+	containers           map[string]containerd.Container
+	tasksMu              sync.RWMutex
+	tasks                map[string]containerd.Task
+	cgroupMountpointOnce sync.Once
+	cgroupMountpoint     string
+	cgroupMountpointErr  error
 }
 
 type Client interface {
 	Connect() error
 	Close() error
 
-	Namespace() string
 	CreateNamespace(namespace string) error
 	DeleteNamespace(namespace string) error
 	ListNamespaces() ([]string, error)
 	GetNamespace(namespace string) (string, error)
 	ExistsNamespace(namespace string) (bool, error)
-	SetNamespace(namespace string)
-	SetNamespaceWithCredentials(namespace string, creds []RegistryCredentials)
 	CleanupNamespaceResources(namespace, snapshotter string) error
-	GetRegistryCredentials() []RegistryCredentials
 
 	GetCgroupMountpoint() string
 	GetCurrentCgroupPath() (string, error)
@@ -71,20 +62,20 @@ type Client interface {
 	NewCgroup(spec CgroupSpec) (*cgroup2.Manager, error)
 	LoadCgroup(group string, mountpoint string) (*cgroup2.Manager, error)
 	DeleteCgroup(group, mountpoint string) error
-	CreateContainerFromSpec(spec intmodel.ContainerSpec, opts ...BuildOption) (containerd.Container, error)
+	CreateContainerFromSpec(namespace string, spec intmodel.ContainerSpec, opts ...BuildOption) (containerd.Container, error)
 
-	CreateContainer(spec ContainerSpec) (containerd.Container, error)
-	GetContainer(id string) (containerd.Container, error)
-	ListContainers(filters ...string) ([]containerd.Container, error)
-	ExistsContainer(id string) (bool, error)
-	DeleteContainer(id string, opts ContainerDeleteOptions) error
-	StartContainer(spec ContainerSpec, taskSpec TaskSpec) (containerd.Task, error)
-	StopContainer(id string, opts StopContainerOptions) (*containerd.ExitStatus, error)
+	CreateContainer(namespace string, spec ContainerSpec) (containerd.Container, error)
+	GetContainer(namespace, id string) (containerd.Container, error)
+	ListContainers(namespace string, filters ...string) ([]containerd.Container, error)
+	ExistsContainer(namespace, id string) (bool, error)
+	DeleteContainer(namespace, id string, opts ContainerDeleteOptions) error
+	StartContainer(namespace string, spec ContainerSpec, taskSpec TaskSpec) (containerd.Task, error)
+	StopContainer(namespace, id string, opts StopContainerOptions) (*containerd.ExitStatus, error)
 
-	TaskStatus(id string) (containerd.Status, error)
-	TaskMetrics(id string) (*apitypes.Metric, error)
+	TaskStatus(namespace, id string) (containerd.Status, error)
+	TaskMetrics(namespace, id string) (*apitypes.Metric, error)
 
-	ResolveSbshCachePath(imageRef, baseRunPath string) (string, error)
+	ResolveSbshCachePath(namespace, imageRef, baseRunPath string) (string, error)
 
 	// ContainerProcessUID returns the resolved process.User.UID from the
 	// given container's OCI runtime spec. Used after CreateContainerFromSpec
@@ -95,26 +86,23 @@ type Client interface {
 	// create its socket/log/capture files in the bind-mounted dir.
 	ContainerProcessUID(container containerd.Container) (uint32, error)
 
-	// LoadImage imports an OCI/docker image tarball into the client's current
+	// LoadImage imports an OCI/docker image tarball into the specified
 	// containerd namespace and returns the names of the imported images.
-	// Callers set the target namespace via SetNamespace before invoking.
-	LoadImage(reader io.Reader) ([]string, error)
+	LoadImage(namespace string, reader io.Reader) ([]string, error)
 
-	// ListImages enumerates images in the client's current containerd
-	// namespace. Callers set the target namespace via SetNamespace before
-	// invoking.
-	ListImages() ([]ImageInfo, error)
+	// ListImages enumerates images in the specified containerd namespace.
+	ListImages(namespace string) ([]ImageInfo, error)
 
-	// GetImage returns metadata for the named image ref in the client's
-	// current containerd namespace. Returns errdefs.ErrImageNotFound if
+	// GetImage returns metadata for the named image ref in the specified
+	// containerd namespace. Returns errdefs.ErrImageNotFound if
 	// the ref is absent.
-	GetImage(ref string) (ImageInfo, error)
+	GetImage(namespace, ref string) (ImageInfo, error)
 
-	// DeleteImage removes the named image ref from the client's current
+	// DeleteImage removes the named image ref from the specified
 	// containerd namespace. Returns errdefs.ErrImageNotFound if the ref
 	// is absent so callers can distinguish missing from operational
 	// failures.
-	DeleteImage(ref string) error
+	DeleteImage(namespace, ref string) error
 }
 
 func NewClient(ctx context.Context, logger *slog.Logger, socket string) Client {
@@ -122,7 +110,6 @@ func NewClient(ctx context.Context, logger *slog.Logger, socket string) Client {
 		ctx:        ctx,
 		logger:     logger,
 		socket:     socket,
-		namespace:  namespaces.Default,
 		cgroups:    make(map[string]*cgroup2.Manager),
 		containers: make(map[string]containerd.Container),
 		tasks:      make(map[string]containerd.Task),

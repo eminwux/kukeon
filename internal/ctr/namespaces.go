@@ -30,51 +30,8 @@ import (
 )
 
 // namespaceCtx returns a context with the namespace set.
-func (c *client) namespaceCtx() context.Context {
-	c.namespaceMu.RLock()
-	defer c.namespaceMu.RUnlock()
-	return namespaces.WithNamespace(c.ctx, c.namespace)
-}
-
-// SetNamespace sets the namespace for subsequent operations.
-// This clears any previously set registry credentials.
-func (c *client) SetNamespace(namespace string) {
-	c.namespaceMu.Lock()
-	defer c.namespaceMu.Unlock()
-	c.namespace = namespace
-	c.logger.DebugContext(c.ctx, "set namespace", "namespace", namespace)
-
-	// Clear credentials when namespace is set without credentials
-	c.registryCredentialsMu.Lock()
-	defer c.registryCredentialsMu.Unlock()
-	c.registryCredentials = nil
-}
-
-// SetNamespaceWithCredentials sets the namespace and associated registry credentials.
-// This should be called when switching to a realm's namespace.
-func (c *client) SetNamespaceWithCredentials(namespace string, creds []RegistryCredentials) {
-	c.namespaceMu.Lock()
-	defer c.namespaceMu.Unlock()
-	c.namespace = namespace
-	c.logger.DebugContext(c.ctx, "set namespace with credentials", "namespace", namespace, "creds_count", len(creds))
-
-	c.registryCredentialsMu.Lock()
-	defer c.registryCredentialsMu.Unlock()
-	c.registryCredentials = creds
-}
-
-// GetRegistryCredentials returns the current registry credentials for the namespace.
-func (c *client) GetRegistryCredentials() []RegistryCredentials {
-	c.registryCredentialsMu.RLock()
-	defer c.registryCredentialsMu.RUnlock()
-	return c.registryCredentials
-}
-
-// Namespace returns the current namespace.
-func (c *client) Namespace() string {
-	c.namespaceMu.RLock()
-	defer c.namespaceMu.RUnlock()
-	return c.namespace
+func (c *client) namespaceCtx(namespace string) context.Context {
+	return namespaces.WithNamespace(c.ctx, namespace)
 }
 
 func (c *client) CreateNamespace(namespace string) error {

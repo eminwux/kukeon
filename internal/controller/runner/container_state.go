@@ -87,14 +87,6 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 			"namespace", namespace)
 	}
 
-	// Set namespace for containerd operations
-	if r.ctrClient != nil {
-		r.ctrClient.SetNamespace(namespace)
-		r.logger.DebugContext(r.ctx, "set containerd namespace",
-			"namespace", namespace,
-			"realm", realmName)
-	}
-
 	// Find container in cell spec to get ContainerdID
 	var foundContainerSpec *intmodel.ContainerSpec
 	for i := range cell.Spec.Containers {
@@ -150,7 +142,7 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 		"namespace", namespace)
 
 	// Check if container exists in containerd
-	containerExists, err := r.ExistsContainer(containerdID)
+	containerExists, err := r.ctrClient.ExistsContainer(namespace, containerdID)
 	if err != nil {
 		r.logger.InfoContext(r.ctx, "failed to check container existence",
 			"container", containerID,
@@ -169,7 +161,7 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 	}
 
 	// Get container state using TaskStatus from ctr package
-	taskStatus, taskStatusErr := r.ctrClient.TaskStatus(containerdID)
+	taskStatus, taskStatusErr := r.ctrClient.TaskStatus(namespace, containerdID)
 	if taskStatusErr == nil {
 		// TaskStatus succeeded - convert and return
 		state := ctr.ConvertContainerdStatusToContainerState(taskStatus)

@@ -59,7 +59,7 @@ func (r *Exec) DeleteRealm(realm intmodel.Realm) error {
 		r.logger.WarnContext(r.ctx, "failed to find orphaned containers", "error", err)
 	} else {
 		r.logger.DebugContext(r.ctx, "found orphaned containers", "count", len(containers))
-		r.processOrphanedContainers(r.ctx, containers)
+		r.processOrphanedContainers(r.ctx, internalRealm.Spec.Namespace, containers)
 	}
 
 	// Clean up all namespace resources (images, snapshots, blobs) before deleting namespace

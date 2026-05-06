@@ -254,11 +254,6 @@ func (r *Exec) refreshContainerStatus(cell intmodel.Cell, containerSpec *intmode
 		namespace = internalRealm.Metadata.Name
 	}
 
-	// Set namespace for containerd operations
-	if r.ctrClient != nil {
-		r.ctrClient.SetNamespace(namespace)
-	}
-
 	// Get containerd ID
 	containerdID := containerSpec.ContainerdID
 	if containerdID == "" {
@@ -285,7 +280,7 @@ func (r *Exec) refreshContainerStatus(cell intmodel.Cell, containerSpec *intmode
 	// Check if container exists in containerd
 	containerExists := false
 	if r.ctrClient != nil {
-		containerExists, err = r.ExistsContainer(containerdID)
+		containerExists, err = r.ExistsContainer(namespace, containerdID)
 		if err != nil {
 			r.logger.DebugContext(r.ctx, "failed to check container existence",
 				"container", containerSpec.ID,
@@ -299,7 +294,7 @@ func (r *Exec) refreshContainerStatus(cell intmodel.Cell, containerSpec *intmode
 	var taskStatus containerd.Status
 	taskExists := false
 	if containerExists && r.ctrClient != nil {
-		taskStatus, err = r.ctrClient.TaskStatus(containerdID)
+		taskStatus, err = r.ctrClient.TaskStatus(namespace, containerdID)
 		if err != nil {
 			// Task might not exist even if container does
 			r.logger.DebugContext(r.ctx, "failed to get task status",

@@ -73,9 +73,6 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 		return fmt.Errorf("failed to get realm: %w", err)
 	}
 
-	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
-
 	cellSpaceName := internalCell.Spec.SpaceName
 	cellStackName := internalCell.Spec.StackName
 	cellID := internalCell.Spec.ID
@@ -126,12 +123,12 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 		}
 
 		// Get netns path and purge CNI before stopping/deleting
-		netnsPath, _ := r.getContainerNetnsPath(containerID)
+		netnsPath, _ := r.getContainerNetnsPath(internalRealm.Spec.Namespace, containerID)
 		_ = r.purgeCNIForContainer(containerID, netnsPath, networkName)
 
 		// Use container name with UUID for containerd operations
 		// Stop and delete the container
-		_, err = r.ctrClient.StopContainer(containerID, ctr.StopContainerOptions{})
+		_, err = r.ctrClient.StopContainer(internalRealm.Spec.Namespace, containerID, ctr.StopContainerOptions{})
 		if err != nil {
 			// Check if container/task doesn't exist - this is idempotent (already stopped/deleted)
 			if errors.Is(err, errdefs.ErrContainerNotFound) || errors.Is(err, errdefs.ErrTaskNotFound) {
@@ -153,7 +150,7 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 			}
 		}
 
-		err = r.ctrClient.DeleteContainer(containerID, ctr.ContainerDeleteOptions{
+		err = r.ctrClient.DeleteContainer(internalRealm.Spec.Namespace, containerID, ctr.ContainerDeleteOptions{
 			SnapshotCleanup: true,
 		})
 		if err != nil {
@@ -175,10 +172,10 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 	}
 
 	// Comprehensive CNI cleanup for root container before stopping/deleting
-	netnsPath, _ := r.getContainerNetnsPath(rootContainerID)
+	netnsPath, _ := r.getContainerNetnsPath(internalRealm.Spec.Namespace, rootContainerID)
 	_ = r.purgeCNIForContainer(rootContainerID, netnsPath, networkName)
 
-	_, err = r.ctrClient.StopContainer(rootContainerID, ctr.StopContainerOptions{Force: true})
+	_, err = r.ctrClient.StopContainer(internalRealm.Spec.Namespace, rootContainerID, ctr.StopContainerOptions{Force: true})
 	if err != nil {
 		// Check if container/task doesn't exist - this is idempotent (already stopped/deleted)
 		if errors.Is(err, errdefs.ErrContainerNotFound) || errors.Is(err, errdefs.ErrTaskNotFound) {
@@ -200,7 +197,7 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 		}
 	}
 
-	err = r.ctrClient.DeleteContainer(rootContainerID, ctr.ContainerDeleteOptions{
+	err = r.ctrClient.DeleteContainer(internalRealm.Spec.Namespace, rootContainerID, ctr.ContainerDeleteOptions{
 		SnapshotCleanup: true,
 	})
 	if err != nil {

@@ -70,7 +70,7 @@ func (r *Exec) PurgeRealm(realm intmodel.Realm) (bool, error) {
 		r.logger.WarnContext(r.ctx, "failed to find orphaned containers", "error", err)
 	} else {
 		r.logger.DebugContext(r.ctx, "found orphaned containers", "count", len(containers))
-		r.processOrphanedContainers(r.ctx, containers)
+		r.processOrphanedContainers(r.ctx, realmForOps.Spec.Namespace, containers)
 	}
 
 	// Tear down each conflist + bridge link for this realm. Driven from

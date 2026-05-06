@@ -64,9 +64,6 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 	}
 	internalRealm, realmErr := r.GetRealm(lookupRealm)
 	if realmErr == nil {
-		// Set namespace for container operations
-		r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
-
 		// Get space for network name
 		lookupSpace := intmodel.Space{
 			Metadata: intmodel.SpaceMetadata{
@@ -90,7 +87,7 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 			containers, findErr := r.findContainersByPattern(internalRealm.Spec.Namespace, pattern)
 			if findErr == nil {
 				for _, containerID := range containers {
-					netnsPath, _ := r.getContainerNetnsPath(containerID)
+					netnsPath, _ := r.getContainerNetnsPath(internalRealm.Spec.Namespace, containerID)
 					_ = r.purgeCNIForContainer(containerID, netnsPath, networkName)
 				}
 			}

@@ -61,11 +61,11 @@ func (r *Exec) ListContainerdNamespaces() ([]string, error) {
 
 // ExistsContainer checks if a container exists in containerd by its containerd ID.
 // It ensures the client is connected before making the call.
-func (r *Exec) ExistsContainer(containerdID string) (bool, error) {
+func (r *Exec) ExistsContainer(namespace, containerdID string) (bool, error) {
 	if err := r.ensureClientConnected(); err != nil {
 		return false, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
-	return r.ctrClient.ExistsContainer(containerdID)
+	return r.ctrClient.ExistsContainer(namespace, containerdID)
 }
 
 func (r *Exec) ExistsCellRootContainer(cell intmodel.Cell) (bool, error) {
@@ -118,9 +118,6 @@ func (r *Exec) ExistsCellRootContainer(cell intmodel.Cell) (bool, error) {
 		return false, fmt.Errorf("realm %q has no namespace", realmName)
 	}
 
-	// Set namespace to realm namespace
-	r.ctrClient.SetNamespace(namespace)
-
 	// Generate containerd ID with cell identifier for uniqueness
 	containerID, err := naming.BuildRootContainerdID(spaceName, stackName, cellID)
 	if err != nil {
@@ -128,7 +125,7 @@ func (r *Exec) ExistsCellRootContainer(cell intmodel.Cell) (bool, error) {
 	}
 
 	// Check if container exists
-	exists, err := r.ctrClient.ExistsContainer(containerID)
+	exists, err := r.ctrClient.ExistsContainer(namespace, containerID)
 	if err != nil {
 		// Other errors are actual failures
 		return false, fmt.Errorf("failed to check if root container exists: %w", err)

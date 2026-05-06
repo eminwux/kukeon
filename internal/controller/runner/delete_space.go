@@ -73,16 +73,13 @@ func (r *Exec) DeleteSpace(space intmodel.Space) error {
 	if realmErr != nil {
 		r.logger.WarnContext(r.ctx, "failed to get realm for CNI cleanup", "error", realmErr)
 	} else {
-		// Set namespace for container operations
-		r.ctrClient.SetNamespace(internalRealm.Spec.Namespace)
-
 		// Find containers by pattern and purge CNI for each
 		pattern := fmt.Sprintf("%s-%s", realmName, internalSpace.Metadata.Name)
 		containers, findErr := r.findContainersByPattern(internalRealm.Spec.Namespace, pattern)
 		if findErr == nil {
 			networkName, _ := r.getSpaceNetworkName(internalSpace)
 			for _, containerID := range containers {
-				netnsPath, _ := r.getContainerNetnsPath(containerID)
+				netnsPath, _ := r.getContainerNetnsPath(internalRealm.Spec.Namespace, containerID)
 				_ = r.purgeCNIForContainer(containerID, netnsPath, networkName)
 			}
 		}
