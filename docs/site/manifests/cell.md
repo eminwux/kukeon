@@ -32,14 +32,15 @@ See [Concepts → Cell](../concepts/cell.md) for what a cell is.
 
 ## spec
 
-| Field              | Type     | Required | Description                                                                              |
-|--------------------|----------|----------|------------------------------------------------------------------------------------------|
-| `id`               | string   | yes      | Cell identifier (matches `metadata.name`)                                                |
-| `realmId`          | string   | yes      | Realm that owns the cell                                                                 |
-| `spaceId`          | string   | yes      | Space that owns the cell                                                                 |
-| `stackId`          | string   | yes      | Stack that owns the cell                                                                 |
-| `rootContainerId`  | string   | no       | Identifier of the container that owns the cell's network namespace. Defaults to the first container in `containers` if unset. |
-| `containers`       | array    | yes      | Container specs (see [Container manifest](container.md) for fields)                      |
+| Field                 | Type   | Required | Description                                                                                                                                                                                                                                                                                                                          |
+| --------------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`                  | string | yes      | Cell identifier (matches `metadata.name`)                                                                                                                                                                                                                                                                                            |
+| `realmId`             | string | yes      | Realm that owns the cell                                                                                                                                                                                                                                                                                                             |
+| `spaceId`             | string | yes      | Space that owns the cell                                                                                                                                                                                                                                                                                                             |
+| `stackId`             | string | yes      | Stack that owns the cell                                                                                                                                                                                                                                                                                                             |
+| `rootContainerId`     | string | no       | Identifier of the container that owns the cell's network namespace. Defaults to the first container in `containers` if unset.                                                                                                                                                                                                        |
+| `containers`          | array  | yes      | Container specs (see [Container manifest](container.md) for fields)                                                                                                                                                                                                                                                                  |
+| `nestedCgroupRuntime` | bool   | no       | Opt-in: delegate the full host-available cgroup-v2 controller set on the cell's `cgroup.subtree_control`, instead of the default kukeon resource subset (`cpu`, `memory`, `io`, `pids`). Set this when the cell hosts a nested runtime that itself manages cgroups (e.g. a `kukeond` cell in dev-init phase 2). Defaults to `false`. |
 
 ### The root container
 
@@ -49,13 +50,21 @@ Exactly one container in the cell must be the root — it owns the network names
 - If `rootContainerId` is empty, the container with `spec.root: true` is used.
 - If neither is set, the first container in `containers` is the root.
 
+### Nested cgroup runtimes
+
+By default a cell's `cgroup.subtree_control` is populated with the kukeon resource controllers (`cpu`, `memory`, `io`, `pids`) — enough for per-container resource accounting and limits to work for the runc task cgroups runc nests under the cell.
+
+When a cell is itself going to manage further nested cgroups (the canonical case being a `kukeond` instance running inside a kukeon cell, dev-init phase 2), set `spec.nestedCgroupRuntime: true`. Kukeon then enables every controller the host root cgroup advertises (`cgroup.controllers`) on the cell's subtree — so the nested runtime can in turn enable the controllers it needs on its own children.
+
+This is opt-in because the default subset minimises the controller surface enabled per cell on hosts that may have many cells.
+
 ## status
 
-| Field         | Type                                                       | Description                                 |
-|---------------|------------------------------------------------------------|---------------------------------------------|
-| `state`       | `Pending`, `Ready`, `Stopped`, `Failed`, `Unknown`         | Lifecycle state                             |
-| `cgroupPath`  | string                                                     | Absolute cgroup path                        |
-| `containers`  | array of `ContainerStatus`                                 | Per-container status snapshot               |
+| Field        | Type                                               | Description                   |
+| ------------ | -------------------------------------------------- | ----------------------------- |
+| `state`      | `Pending`, `Ready`, `Stopped`, `Failed`, `Unknown` | Lifecycle state               |
+| `cgroupPath` | string                                             | Absolute cgroup path          |
+| `containers` | array of `ContainerStatus`                         | Per-container status snapshot |
 
 ## Minimal
 
