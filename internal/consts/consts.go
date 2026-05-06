@@ -141,6 +141,7 @@ func ConfigureRuntime(suffix, cgroupRoot string) error {
 			suffix, errdefs.ErrServerConfigurationInvalid)
 	}
 
+	originalCgroupRoot := cgroupRoot
 	cgroupRoot = strings.TrimSpace(cgroupRoot)
 	if cgroupRoot == "" {
 		return fmt.Errorf("cgroupRoot is empty: %w",
@@ -154,7 +155,7 @@ func ConfigureRuntime(suffix, cgroupRoot string) error {
 	cgroupRoot = strings.TrimRight(cgroupRoot, "/")
 	if cgroupRoot == "" {
 		return fmt.Errorf("cgroupRoot %q resolves to root: %w",
-			cgroupRoot, errdefs.ErrServerConfigurationInvalid)
+			originalCgroupRoot, errdefs.ErrServerConfigurationInvalid)
 	}
 
 	RealmNamespaceSuffix = "." + suffix

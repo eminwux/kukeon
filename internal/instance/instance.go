@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 )
@@ -130,8 +131,17 @@ func Write(runPath string, m Metadata) error {
 // matching, do nothing.
 //
 // suffix is the operator-facing form without a leading dot. cgroupRoot is
-// the absolute cgroup path; callers must pass the already-trimmed value.
+// the absolute cgroup path. Both inputs are canonicalized here (TrimSpace
+// on both, plus TrimRight slash on cgroupRoot, mirroring
+// consts.ConfigureRuntime) so callers can pass raw viper / flag values
+// without tripping a spurious mismatch when one start uses
+// "/kukeon-dev/" and the next uses "/kukeon-dev". Validation of
+// well-formedness lives in consts.ConfigureRuntime, which call sites
+// invoke before this.
 func VerifyOrWrite(runPath, suffix, cgroupRoot string) error {
+	suffix = strings.TrimSpace(suffix)
+	cgroupRoot = strings.TrimRight(strings.TrimSpace(cgroupRoot), "/")
+
 	prior, found, err := Load(runPath)
 	if err != nil {
 		return err

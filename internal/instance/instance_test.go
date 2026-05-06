@@ -117,6 +117,42 @@ func TestVerifyOrWriteMismatchedCgroupRootRefuses(t *testing.T) {
 	}
 }
 
+func TestVerifyOrWriteCanonicalizesTrailingSlashAndWhitespace(t *testing.T) {
+	// A first start with "/kukeon-dev/" (operator habit) must compare
+	// equal to a second start with "/kukeon-dev" (post-canonicalization
+	// inside consts.ConfigureRuntime). Same for surrounding whitespace
+	// on either input. Without canonicalization in VerifyOrWrite, the
+	// raw viper-string call sites would trip a spurious ErrInstanceMismatch.
+	runPath := t.TempDir()
+	if err := instance.VerifyOrWrite(runPath, "kukeon.io", "/kukeon-dev/"); err != nil {
+		t.Fatalf("seed with trailing slash: %v", err)
+	}
+	if err := instance.VerifyOrWrite(runPath, "kukeon.io", "/kukeon-dev"); err != nil {
+		t.Errorf("re-verify with canonical form: got %v, want nil", err)
+	}
+	if err := instance.VerifyOrWrite(runPath, "  kukeon.io  ", "  /kukeon-dev///  "); err != nil {
+		t.Errorf("re-verify with surrounding whitespace + redundant slashes: got %v, want nil", err)
+	}
+
+	// And the stored payload should be the canonical form, not the raw
+	// trailing-slash input — so a `cat /opt/kukeon/.kukeon-instance.json`
+	// matches what consts.KukeonCgroupRoot holds in-process.
+	got, found, loadErr := instance.Load(runPath)
+	if loadErr != nil {
+		t.Fatalf("Load: %v", loadErr)
+	}
+	if !found {
+		t.Fatalf("Load: found=false, want true")
+	}
+	if got.CgroupRoot != "/kukeon-dev" {
+		t.Errorf("stored CgroupRoot: got %q, want %q (canonical form)", got.CgroupRoot, "/kukeon-dev")
+	}
+	if got.ContainerdNamespaceSuffix != "kukeon.io" {
+		t.Errorf("stored ContainerdNamespaceSuffix: got %q, want %q",
+			got.ContainerdNamespaceSuffix, "kukeon.io")
+	}
+}
+
 func TestLoadAbsentReturnsNotFoundNoError(t *testing.T) {
 	runPath := t.TempDir()
 	_, found, err := instance.Load(runPath)
