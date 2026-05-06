@@ -23,6 +23,7 @@ import (
 	"os"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/serverconfig"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
@@ -52,6 +53,12 @@ func NewKukeondCmd() (*cobra.Command, error) {
 				return fmt.Errorf("load server configuration: %w", err)
 			}
 			applyServerConfiguration(cmd, doc.Spec)
+			if cfgErr := consts.ConfigureRuntime(
+				viper.GetString(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey),
+				viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey),
+			); cfgErr != nil {
+				return fmt.Errorf("configure runtime: %w", cfgErr)
+			}
 			return nil
 		},
 	}
@@ -135,6 +142,29 @@ func NewKukeondCmd() (*cobra.Command, error) {
 		return nil, err
 	}
 
+	cmd.PersistentFlags().String(
+		"containerd-namespace-suffix", config.KUKEON_ROOT_NAMESPACE_SUFFIX.Default,
+		"Suffix appended to every realm name to form its containerd namespace "+
+			"(e.g. \"kukeon.io\" -> \"default.kukeon.io\")",
+	)
+	if err := viper.BindPFlag(
+		config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey,
+		cmd.PersistentFlags().Lookup("containerd-namespace-suffix"),
+	); err != nil {
+		return nil, err
+	}
+
+	cmd.PersistentFlags().String(
+		"cgroup-root", config.KUKEON_ROOT_CGROUP_ROOT.Default,
+		"Cgroup root under which all realms / spaces / stacks / cells live",
+	)
+	if err := viper.BindPFlag(
+		config.KUKEON_ROOT_CGROUP_ROOT.ViperKey,
+		cmd.PersistentFlags().Lookup("cgroup-root"),
+	); err != nil {
+		return nil, err
+	}
+
 	bindEnvVars()
 
 	cmd.AddCommand(newServeCmd())
@@ -151,6 +181,8 @@ func bindEnvVars() {
 		config.KUKEON_ROOT_CONTAINERD_SOCKET,
 		config.KUKEON_ROOT_RUN_PATH,
 		config.KUKEON_ROOT_LOG_LEVEL,
+		config.KUKEON_ROOT_NAMESPACE_SUFFIX,
+		config.KUKEON_ROOT_CGROUP_ROOT,
 		config.KUKEOND_SOCKET,
 		config.KUKEOND_SOCKET_GID,
 		config.KUKEOND_RECONCILE_INTERVAL,
@@ -187,6 +219,16 @@ func applyServerConfiguration(cmd *cobra.Command, spec v1beta1.ServerConfigurati
 		!flagChanged(cmd, "reconcile-interval") &&
 		!envSet(config.KUKEOND_RECONCILE_INTERVAL) {
 		viper.Set(config.KUKEOND_RECONCILE_INTERVAL.ViperKey, spec.ReconcileInterval)
+	}
+	if spec.ContainerdNamespaceSuffix != "" &&
+		!flagChanged(cmd, "containerd-namespace-suffix") &&
+		!envSet(config.KUKEON_ROOT_NAMESPACE_SUFFIX) {
+		viper.Set(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey, spec.ContainerdNamespaceSuffix)
+	}
+	if spec.CgroupRoot != "" &&
+		!flagChanged(cmd, "cgroup-root") &&
+		!envSet(config.KUKEON_ROOT_CGROUP_ROOT) {
+		viper.Set(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey, spec.CgroupRoot)
 	}
 }
 

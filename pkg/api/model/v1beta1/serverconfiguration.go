@@ -38,23 +38,33 @@ type ServerConfigurationMetadata struct {
 // take precedence over values loaded from this document.
 type ServerConfigurationSpec struct {
 	// Socket is the unix socket path the daemon listens on.
-	Socket string `json:"socket,omitempty"           yaml:"socket,omitempty"`
+	Socket string `json:"socket,omitempty"                    yaml:"socket,omitempty"`
 	// SocketGID is the numeric group ID the daemon chowns its listener
 	// socket to (mode 0o660 with group). Zero means root-only access.
-	SocketGID int `json:"socketGID,omitempty"        yaml:"socketGID,omitempty"`
+	SocketGID int `json:"socketGID,omitempty"                 yaml:"socketGID,omitempty"`
 	// RunPath is the kukeon runtime root (e.g. /opt/kukeon).
-	RunPath string `json:"runPath,omitempty"          yaml:"runPath,omitempty"`
+	RunPath string `json:"runPath,omitempty"                   yaml:"runPath,omitempty"`
 	// ContainerdSocket is the path to the containerd unix socket the
 	// daemon connects to.
-	ContainerdSocket string `json:"containerdSocket,omitempty" yaml:"containerdSocket,omitempty"`
+	ContainerdSocket string `json:"containerdSocket,omitempty"          yaml:"containerdSocket,omitempty"`
 	// LogLevel is the daemon log level (debug, info, warn, error).
-	LogLevel string `json:"logLevel,omitempty"         yaml:"logLevel,omitempty"`
+	LogLevel string `json:"logLevel,omitempty"                  yaml:"logLevel,omitempty"`
 	// ReconcileInterval is the period of the daemon's background cell
 	// reconciliation loop, expressed as a Go time.Duration string (e.g.
 	// "30s", "1m"). Empty falls back to the in-binary default. A zero or
 	// negative duration disables the loop.
-	ReconcileInterval string `json:"reconcileInterval,omitempty" yaml:"reconcileInterval,omitempty"`
+	ReconcileInterval string `json:"reconcileInterval,omitempty"         yaml:"reconcileInterval,omitempty"`
 	// KukeondImage is the container image `kuke init` provisions for the
 	// kukeond system cell. Read by `kuke init` only; the daemon ignores it.
-	KukeondImage string `json:"kukeondImage,omitempty"     yaml:"kukeondImage,omitempty"`
+	KukeondImage string `json:"kukeondImage,omitempty"              yaml:"kukeondImage,omitempty"`
+	// ContainerdNamespaceSuffix is the suffix appended to every realm name
+	// to form its containerd namespace. Realm "default" + suffix
+	// "kukeon.io" -> namespace "default.kukeon.io". Lets two kukeon
+	// instances coexist on the same host under disjoint namespaces.
+	// Default: kukeon.io.
+	ContainerdNamespaceSuffix string `json:"containerdNamespaceSuffix,omitempty" yaml:"containerdNamespaceSuffix,omitempty"`
+	// CgroupRoot is the cgroup root under which all realms / spaces /
+	// stacks / cells live (e.g. /kukeon-dev for a parallel dev instance on
+	// the same host). Default: /kukeon.
+	CgroupRoot string `json:"cgroupRoot,omitempty"                yaml:"cgroupRoot,omitempty"`
 }

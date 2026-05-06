@@ -113,6 +113,19 @@ spec:
   # picks the release-matching ghcr.io/eminwux/kukeon image automatically.
   # Default: ""
   kukeondImage: ""
+
+  # Suffix appended to every realm name to form its containerd namespace.
+  # Realm "default" + suffix "kukeon.io" -> namespace "default.kukeon.io".
+  # Set to a different suffix (e.g. "dev.kukeon.io") to run a parallel
+  # kukeon instance on the same host under a disjoint containerd namespace.
+  # Default: kukeon.io
+  containerdNamespaceSuffix: kukeon.io
+
+  # Cgroup root under which all realms / spaces / stacks / cells live.
+  # Set to a different root (e.g. "/kukeon-dev") to run a parallel kukeon
+  # instance on the same host under a disjoint cgroup tree.
+  # Default: /kukeon
+  cgroupRoot: /kukeon
 `
 
 // WriteDefault writes the commented default ServerConfiguration to path when

@@ -218,6 +218,13 @@ var (
 	// YAML fails to parse or violates the schema (wrong kind, etc.).
 	ErrServerConfigurationInvalid = errors.New("server configuration is invalid")
 
+	// ErrInstanceMismatch is returned when the configured runPath was
+	// previously bootstrapped under a different containerdNamespaceSuffix
+	// or cgroupRoot. Migration of an existing host between suffixes /
+	// cgroup roots is out of scope; the operator must destroy the old run
+	// path and re-run `kuke init` against the new config.
+	ErrInstanceMismatch = errors.New("kukeon instance mismatch")
+
 	// ErrClientConfigurationInvalid is returned when a ClientConfiguration
 	// YAML fails to parse or violates the schema (wrong kind, etc.).
 	ErrClientConfigurationInvalid = errors.New("client configuration is invalid")

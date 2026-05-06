@@ -49,12 +49,14 @@ func TestApplyServerConfigurationDefaultsLayered(t *testing.T) {
 	}
 
 	spec := v1beta1.ServerConfigurationSpec{
-		Socket:            "/run/kukeon/from-config.sock",
-		SocketGID:         4242,
-		RunPath:           "/opt/kukeon-from-config",
-		ContainerdSocket:  "/run/containerd/from-config.sock",
-		LogLevel:          "warn",
-		ReconcileInterval: "45s",
+		Socket:                    "/run/kukeon/from-config.sock",
+		SocketGID:                 4242,
+		RunPath:                   "/opt/kukeon-from-config",
+		ContainerdSocket:          "/run/containerd/from-config.sock",
+		LogLevel:                  "warn",
+		ReconcileInterval:         "45s",
+		ContainerdNamespaceSuffix: "dev.kukeon.io",
+		CgroupRoot:                "/kukeon-dev",
 	}
 	applyServerConfiguration(cmd, spec)
 
@@ -75,6 +77,13 @@ func TestApplyServerConfigurationDefaultsLayered(t *testing.T) {
 	}
 	if got := viper.GetString(config.KUKEOND_RECONCILE_INTERVAL.ViperKey); got != spec.ReconcileInterval {
 		t.Errorf("ReconcileInterval: got %q, want %q", got, spec.ReconcileInterval)
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey); got != spec.ContainerdNamespaceSuffix {
+		t.Errorf("ContainerdNamespaceSuffix: got %q, want %q",
+			got, spec.ContainerdNamespaceSuffix)
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey); got != spec.CgroupRoot {
+		t.Errorf("CgroupRoot: got %q, want %q", got, spec.CgroupRoot)
 	}
 }
 

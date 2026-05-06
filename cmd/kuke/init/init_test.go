@@ -134,22 +134,33 @@ func TestSetFlags(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	testCases := []struct {
-		name      string
-		args      []string
-		wantRealm string
-		wantSpace string
+		name       string
+		args       []string
+		wantRealm  string
+		wantSpace  string
+		wantSuffix string
+		wantCgroup string
 	}{
 		{
-			name:      "defaults",
-			args:      nil,
-			wantRealm: "default",
-			wantSpace: "default",
+			name:       "defaults",
+			args:       nil,
+			wantRealm:  "default",
+			wantSpace:  "default",
+			wantSuffix: "kukeon.io",
+			wantCgroup: "/kukeon",
 		},
 		{
-			name:      "overrides",
-			args:      []string{"--realm=dev", "--space=blue"},
-			wantRealm: "dev",
-			wantSpace: "blue",
+			name: "overrides",
+			args: []string{
+				"--realm=dev",
+				"--space=blue",
+				"--containerd-namespace-suffix=dev.kukeon.io",
+				"--cgroup-root=/kukeon-dev",
+			},
+			wantRealm:  "dev",
+			wantSpace:  "blue",
+			wantSuffix: "dev.kukeon.io",
+			wantCgroup: "/kukeon-dev",
 		},
 	}
 
@@ -169,6 +180,12 @@ func TestSetFlags(t *testing.T) {
 			}
 			if got := viper.GetString(config.KUKE_INIT_SPACE.ViperKey); got != tc.wantSpace {
 				t.Errorf("space mismatch: got %q want %q", got, tc.wantSpace)
+			}
+			if got := viper.GetString(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey); got != tc.wantSuffix {
+				t.Errorf("namespace suffix mismatch: got %q want %q", got, tc.wantSuffix)
+			}
+			if got := viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey); got != tc.wantCgroup {
+				t.Errorf("cgroup root mismatch: got %q want %q", got, tc.wantCgroup)
 			}
 		})
 	}

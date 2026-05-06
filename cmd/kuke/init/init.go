@@ -32,6 +32,7 @@ import (
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/firewall"
+	"github.com/eminwux/kukeon/internal/instance"
 	"github.com/eminwux/kukeon/internal/serverconfig"
 	"github.com/eminwux/kukeon/internal/sysuser"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
@@ -144,6 +145,31 @@ func setFlags(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("failed to bind flag: %w", err)
 	}
+
+	cmd.Flags().String(
+		"containerd-namespace-suffix", config.KUKEON_ROOT_NAMESPACE_SUFFIX.Default,
+		"Suffix appended to every realm name to form its containerd namespace "+
+			"(e.g. \"kukeon.io\" -> \"default.kukeon.io\")",
+	)
+	err = viper.BindPFlag(
+		config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey,
+		cmd.Flags().Lookup("containerd-namespace-suffix"),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to bind flag: %w", err)
+	}
+
+	cmd.Flags().String(
+		"cgroup-root", config.KUKEON_ROOT_CGROUP_ROOT.Default,
+		"Cgroup root under which all realms / spaces / stacks / cells live",
+	)
+	err = viper.BindPFlag(
+		config.KUKEON_ROOT_CGROUP_ROOT.ViperKey,
+		cmd.Flags().Lookup("cgroup-root"),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to bind flag: %w", err)
+	}
 	return nil
 }
 
@@ -175,6 +201,16 @@ func applyServerConfiguration(cmd *cobra.Command, spec v1beta1.ServerConfigurati
 	if spec.KukeondImage != "" && !flags.Changed("kukeond-image") &&
 		!envSet(config.KUKE_INIT_KUKEOND_IMAGE) {
 		viper.Set(config.KUKE_INIT_KUKEOND_IMAGE.ViperKey, spec.KukeondImage)
+	}
+	if spec.ContainerdNamespaceSuffix != "" &&
+		!flags.Changed("containerd-namespace-suffix") &&
+		!envSet(config.KUKEON_ROOT_NAMESPACE_SUFFIX) {
+		viper.Set(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey, spec.ContainerdNamespaceSuffix)
+	}
+	if spec.CgroupRoot != "" &&
+		!flags.Changed("cgroup-root") &&
+		!envSet(config.KUKEON_ROOT_CGROUP_ROOT) {
+		viper.Set(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey, spec.CgroupRoot)
 	}
 }
 
@@ -267,6 +303,13 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	}
 	applyServerConfiguration(cmd, serverDoc.Spec)
 
+	if cfgErr := consts.ConfigureRuntime(
+		viper.GetString(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey),
+		viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey),
+	); cfgErr != nil {
+		return fmt.Errorf("configure runtime: %w", cfgErr)
+	}
+
 	socketPath := viper.GetString(config.KUKEOND_SOCKET.ViperKey)
 	if socketPath == "" {
 		socketPath = config.KUKEOND_SOCKET.Default
@@ -277,6 +320,14 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	runPath := viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey)
 	if runPath == "" {
 		runPath = config.DefaultRunPath()
+	}
+
+	if mismatchErr := instance.VerifyOrWrite(
+		runPath,
+		viper.GetString(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey),
+		viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey),
+	); mismatchErr != nil {
+		return mismatchErr
 	}
 
 	// Ensure the kukeon system user/group exist before bootstrap so the
