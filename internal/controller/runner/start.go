@@ -587,6 +587,17 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 			containerSpec.CellCgroupPath = internalCell.Status.CgroupPath
 		}
 
+		// NestedCgroupRuntime: runtime-only injection — same shape as
+		// CellCgroupPath. The per-container field is not persisted (see
+		// modelhub.ContainerSpec.NestedCgroupRuntime contract), so the
+		// reload-via-GetCell that StartCell does above strips the value
+		// that applyCellContainerDefaults set at create time. Repopulate
+		// from cell.Spec.NestedCgroupRuntime here, otherwise
+		// BuildContainerSpec skips the cgroup2 mount on the destructive
+		// recreate and #322 re-emerges for non-root containers after a
+		// daemon restart.
+		containerSpec.NestedCgroupRuntime = internalCell.Spec.NestedCgroupRuntime
+
 		// Recreate container fresh
 		attachOpts, attachErr := r.attachableBuildOpts(namespace, containerSpec, creds)
 		if attachErr != nil {
@@ -821,6 +832,13 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (intmodel.
 	if foundContainerSpec.CellCgroupPath == "" {
 		foundContainerSpec.CellCgroupPath = cell.Status.CgroupPath
 	}
+
+	// NestedCgroupRuntime: runtime-only injection — see the matching block
+	// in StartCell. The per-container field is not persisted, so a cell
+	// loaded post-restart drops the value that applyCellContainerDefaults
+	// set at create time; repopulate from cell.Spec.NestedCgroupRuntime
+	// before BuildContainerSpec runs in the destructive recreate below.
+	foundContainerSpec.NestedCgroupRuntime = cell.Spec.NestedCgroupRuntime
 
 	// Recreate container fresh
 	attachOpts, attachErr := r.attachableBuildOpts(namespace, *foundContainerSpec, creds)
