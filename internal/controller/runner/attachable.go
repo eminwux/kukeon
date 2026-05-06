@@ -164,7 +164,7 @@ func (r *Exec) attachablePostCreateChown(namespace string, spec intmodel.Contain
 		return fmt.Errorf("get container %q: %w", containerdID, err)
 	}
 
-	uid, err := r.ctrClient.ContainerProcessUID(container)
+	uid, err := r.ctrClient.ContainerProcessUID(namespace, container)
 	if err != nil {
 		return fmt.Errorf("resolve process uid for %q: %w", containerdID, err)
 	}

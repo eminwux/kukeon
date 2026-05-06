@@ -84,7 +84,7 @@ type Client interface {
 	// when the image carries a USER directive (or the cell profile sets
 	// container.user). Without this, sbsh inside the container fails to
 	// create its socket/log/capture files in the bind-mounted dir.
-	ContainerProcessUID(container containerd.Container) (uint32, error)
+	ContainerProcessUID(namespace string, container containerd.Container) (uint32, error)
 
 	// LoadImage imports an OCI/docker image tarball into the specified
 	// containerd namespace and returns the names of the imported images.

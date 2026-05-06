@@ -51,7 +51,7 @@ func (c *client) StartContainer(
 	nsCtx := c.namespaceCtx(namespace)
 
 	if len(containerSpec.SpecOpts) > 0 {
-		if err = c.applySpecOpts(container, containerSpec.SpecOpts); err != nil {
+		if err = c.applySpecOpts(namespace, container, containerSpec.SpecOpts); err != nil {
 			return nil, err
 		}
 	}
@@ -64,7 +64,7 @@ func (c *client) StartContainer(
 		status, err = existingTask.Status(nsCtx)
 		if err == nil && status.Status == containerd.Running {
 			c.logger.WarnContext(c.ctx, "task already running", "id", containerSpec.ID)
-			c.storeTask(containerSpec.ID, existingTask)
+			c.storeTask(namespace, containerSpec.ID, existingTask)
 			return existingTask, nil
 		}
 		// Task exists but is not running (stopped), delete it before creating a new one
@@ -80,7 +80,7 @@ func (c *client) StartContainer(
 				formatError(err),
 			)
 		}
-		c.dropTask(containerSpec.ID)
+		c.dropTask(namespace, containerSpec.ID)
 	}
 
 	// Build IO creator. Selection order:
@@ -128,7 +128,7 @@ func (c *client) StartContainer(
 		return nil, fmt.Errorf("failed to start task: %w", err)
 	}
 
-	c.storeTask(containerSpec.ID, task)
+	c.storeTask(namespace, containerSpec.ID, task)
 	c.logger.InfoContext(c.ctx, "started container", "id", containerSpec.ID, "namespace", namespace)
 	return task, nil
 }
@@ -441,7 +441,7 @@ func (c *client) DeleteContainer(namespace, id string, opts ContainerDeleteOptio
 		} else {
 			c.logger.DebugContext(c.ctx, "deleted task", "id", id)
 		}
-		c.dropTask(id)
+		c.dropTask(namespace, id)
 	} else {
 		c.logger.DebugContext(c.ctx, "no task found for container", "id", id)
 	}
