@@ -131,33 +131,55 @@ func (c *client) AddProcessToCgroup(group, mountpoint string, pid int) error {
 	return manager.AddProc(uint64(pid))
 }
 
-// EnableCellSubtreeControllers writes "+<ctrl>" to every ancestor's
-// cgroup.subtree_control file (root → cell parent) AND to the cell's own
+// EnsureSubtreeControllers writes "+<ctrl>" to every ancestor's
+// cgroup.subtree_control file (root → group's parent) AND to the group's own
 // cgroup.subtree_control. The library's Manager.ToggleControllers handles the
-// ancestor walk by design but skips the cell itself ("the leaf does not need
-// it") — for kukeon the cell is *not* a leaf, since runc nests per-container
-// task cgroups under it (issue #312), so the cell's own subtree_control must
+// ancestor walk by design but skips the group itself ("the leaf does not need
+// it") — for kukeon, every level (realm, space, stack, cell) is *not* a leaf,
+// since each has descendants nested under it (issue #327, generalising the
+// cell-only case from issue #312), so the group's own subtree_control must
 // also be populated for those children to inherit the controllers.
 //
 // Filters the requested set against what the host root cgroup advertises so
 // callers can pass the desired superset without worrying about kernel
 // configuration variance (e.g. the io controller is missing on hosts without
-// blk-cgroup compiled in).
-func (c *client) EnableCellSubtreeControllers(group, mountpoint string, controllers []string) error {
+// blk-cgroup compiled in). Returns the effective set actually written.
+//
+// The behaviour is idempotent — re-running on an already-delegated subtree
+// is a no-op for the kernel (additive "+ctrl" writes), so callers can use
+// it both on first provision and on every ensure-pass.
+//
+// An empty `controllers` slice short-circuits with (nil, nil): no validation
+// work, no kernel writes. Callers in provision.go always pass
+// cgroupcheck.CellResourceControllers() so this branch only triggers on the
+// degenerate empty-slice input.
+func (c *client) EnsureSubtreeControllers(group, mountpoint string, controllers []string) ([]string, error) {
 	if err := validateGroupPath(group); err != nil {
-		return err
+		return nil, err
 	}
 	if len(controllers) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	mp := c.effectiveMountpoint(mountpoint)
 	available, err := readRootControllers(mp)
 	if err != nil {
-		return fmt.Errorf("read root cgroup.controllers: %w", err)
+		return nil, fmt.Errorf("read root cgroup.controllers: %w", err)
 	}
 	enable := intersectControllers(controllers, available)
-	return c.applyCellSubtreeControllers(group, mp, enable)
+	if applyErr := c.applySubtreeControllers(group, mp, enable); applyErr != nil {
+		return nil, applyErr
+	}
+	return enable, nil
+}
+
+// EnableCellSubtreeControllers is a thin wrapper around
+// EnsureSubtreeControllers for the cell create/ensure call sites that pass
+// the kukeon resource subset (cgroupcheck.CellResourceControllers). Issue
+// #312.
+func (c *client) EnableCellSubtreeControllers(group, mountpoint string, controllers []string) error {
+	_, err := c.EnsureSubtreeControllers(group, mountpoint, controllers)
+	return err
 }
 
 // EnableCellAllSubtreeControllers is the cell/profile=NestedCgroupRuntime
@@ -165,7 +187,7 @@ func (c *client) EnableCellSubtreeControllers(group, mountpoint string, controll
 // the cell's subtree_control (and every ancestor's), so a nested cgroup
 // runtime running inside the cell — e.g. an inner containerd or systemd
 // hosting its own children in sub-cgroups — can in turn delegate any
-// controller it wants.
+// controller it wants. Issue #314.
 //
 // The ordinary cell path (EnableCellSubtreeControllers with the kukeon
 // resource subset) is what every kukeon-managed cell wants by default; the
@@ -180,15 +202,15 @@ func (c *client) EnableCellAllSubtreeControllers(group, mountpoint string) error
 	if err != nil {
 		return fmt.Errorf("read root cgroup.controllers: %w", err)
 	}
-	return c.applyCellSubtreeControllers(group, mp, available)
+	return c.applySubtreeControllers(group, mp, available)
 }
 
-// applyCellSubtreeControllers is the shared body of the two
-// EnableCell*SubtreeControllers entry points. It assumes group has already
-// been validated and that controllers has been pre-filtered against the
-// host root's cgroup.controllers, so every entry is known-supported by the
+// applySubtreeControllers is the shared body of EnsureSubtreeControllers and
+// EnableCellAllSubtreeControllers. It assumes group has already been
+// validated and that controllers has been pre-filtered against the host
+// root's cgroup.controllers, so every entry is known-supported by the
 // running kernel.
-func (c *client) applyCellSubtreeControllers(group, mountpoint string, enable []string) error {
+func (c *client) applySubtreeControllers(group, mountpoint string, enable []string) error {
 	if len(enable) == 0 {
 		return nil
 	}
@@ -198,15 +220,15 @@ func (c *client) applyCellSubtreeControllers(group, mountpoint string, enable []
 		return err
 	}
 	if toggleErr := manager.ToggleControllers(enable, cgroup2.Enable); toggleErr != nil {
-		return fmt.Errorf("enable controllers in cell ancestors: %w", toggleErr)
+		return fmt.Errorf("enable controllers in cgroup ancestors: %w", toggleErr)
 	}
 
-	cellPath := filepath.Join(mountpoint, strings.TrimPrefix(group, "/"))
-	if writeErr := writeSubtreeEnable(filepath.Join(cellPath, "cgroup.subtree_control"), enable); writeErr != nil {
-		return fmt.Errorf("enable controllers in cell subtree_control: %w", writeErr)
+	groupPath := filepath.Join(mountpoint, strings.TrimPrefix(group, "/"))
+	if writeErr := writeSubtreeEnable(filepath.Join(groupPath, "cgroup.subtree_control"), enable); writeErr != nil {
+		return fmt.Errorf("enable controllers in cgroup subtree_control: %w", writeErr)
 	}
 
-	c.logger.InfoContext(c.ctx, "enabled cell cgroup controllers",
+	c.logger.InfoContext(c.ctx, "enabled cgroup subtree controllers",
 		"group", group, "mountpoint", mountpoint, "controllers", enable)
 	return nil
 }
