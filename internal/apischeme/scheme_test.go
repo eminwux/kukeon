@@ -707,6 +707,141 @@ func TestContainerRoundTripV1Beta1(t *testing.T) {
 	}
 }
 
+// TestContainerRoundTripVolumeKindTmpfsV1Beta1 pins the tmpfs path on
+// VolumeMount: a YAML author who writes `kind: tmpfs` with size/mode must see
+// those fields survive Normalize → controller → Build with no drops, alongside
+// a plain bind entry (empty Kind preserves bind back-compat).
+func TestContainerRoundTripVolumeKindTmpfsV1Beta1(t *testing.T) {
+	input := ext.ContainerDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindContainer,
+		Metadata: ext.ContainerMetadata{
+			Name: "container-tmpfs",
+		},
+		Spec: ext.ContainerSpec{
+			ID:      "container-tmpfs",
+			RealmID: "realm0",
+			SpaceID: "space0",
+			StackID: "stack0",
+			CellID:  "cell0",
+			Image:   "alpine:latest",
+			Volumes: []ext.VolumeMount{
+				{Source: "/host/data", Target: "/data"},
+				{
+					Kind:      ext.VolumeKindTmpfs,
+					Target:    "/var/lib/containerd",
+					SizeBytes: 1 << 30,
+					Mode:      0o0755,
+				},
+				{
+					Kind:     ext.VolumeKindBind,
+					Source:   "/host/ro",
+					Target:   "/ro",
+					ReadOnly: true,
+				},
+			},
+		},
+	}
+
+	internal, version, err := apischeme.NormalizeContainer(input)
+	if err != nil {
+		t.Fatalf("NormalizeContainer: %v", err)
+	}
+	if version != ext.APIVersionV1Beta1 {
+		t.Fatalf("unexpected version: %s", version)
+	}
+	if got, want := len(internal.Spec.Volumes), len(input.Spec.Volumes); got != want {
+		t.Fatalf("internal volumes len = %d, want %d", got, want)
+	}
+	if internal.Spec.Volumes[1].Kind != intmodel.VolumeKindTmpfs {
+		t.Errorf("internal volume[1].Kind = %q, want %q",
+			internal.Spec.Volumes[1].Kind, intmodel.VolumeKindTmpfs)
+	}
+	if internal.Spec.Volumes[1].SizeBytes != 1<<30 {
+		t.Errorf("internal volume[1].SizeBytes = %d, want %d",
+			internal.Spec.Volumes[1].SizeBytes, 1<<30)
+	}
+	if internal.Spec.Volumes[1].Mode != 0o0755 {
+		t.Errorf("internal volume[1].Mode = %o, want %o",
+			internal.Spec.Volumes[1].Mode, 0o0755)
+	}
+
+	output, err := apischeme.BuildContainerExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildContainerExternalFromInternal: %v", err)
+	}
+	if got, want := len(output.Spec.Volumes), len(input.Spec.Volumes); got != want {
+		t.Fatalf("output volumes len = %d, want %d", got, want)
+	}
+	for i, want := range input.Spec.Volumes {
+		if output.Spec.Volumes[i] != want {
+			t.Errorf("volume[%d] = %+v, want %+v",
+				i, output.Spec.Volumes[i], want)
+		}
+	}
+}
+
+// TestCellRoundTripVolumeKindTmpfsV1Beta1 mirrors the standalone Container
+// test for the nested-container path that `apply -f cell.yaml` and the
+// CellProfile materializer travel: a tmpfs entry inside CellSpec.Containers[]
+// must keep Kind / SizeBytes / Mode through Normalize → controller → Build.
+func TestCellRoundTripVolumeKindTmpfsV1Beta1(t *testing.T) {
+	input := ext.CellDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCell,
+		Metadata:   ext.CellMetadata{Name: "cell-tmpfs"},
+		Spec: ext.CellSpec{
+			ID:      "cell-tmpfs",
+			RealmID: "realm0",
+			SpaceID: "space0",
+			StackID: "stack0",
+			Containers: []ext.ContainerSpec{
+				{
+					ID:      "work",
+					Image:   "registry.eminwux.com/busybox:latest",
+					Command: "/bin/sh",
+					Volumes: []ext.VolumeMount{
+						{
+							Kind:      ext.VolumeKindTmpfs,
+							Target:    "/var/lib/containerd",
+							SizeBytes: 512 * 1024 * 1024,
+							Mode:      0o0700,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	internal, version, err := apischeme.NormalizeCell(input)
+	if err != nil {
+		t.Fatalf("NormalizeCell: %v", err)
+	}
+	if len(internal.Spec.Containers) != 1 || len(internal.Spec.Containers[0].Volumes) != 1 {
+		t.Fatalf("internal nested volumes not carried: %+v", internal.Spec.Containers)
+	}
+	got := internal.Spec.Containers[0].Volumes[0]
+	if got.Kind != intmodel.VolumeKindTmpfs ||
+		got.Target != "/var/lib/containerd" ||
+		got.SizeBytes != 512*1024*1024 ||
+		got.Mode != 0o0700 {
+		t.Errorf("internal nested tmpfs mismatch: %+v", got)
+	}
+
+	output, err := apischeme.BuildCellExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildCellExternalFromInternal: %v", err)
+	}
+	if len(output.Spec.Containers) != 1 || len(output.Spec.Containers[0].Volumes) != 1 {
+		t.Fatalf("nested volumes did not round-trip: %+v", output.Spec.Containers)
+	}
+	if output.Spec.Containers[0].Volumes[0] != input.Spec.Containers[0].Volumes[0] {
+		t.Errorf("nested volume = %+v, want %+v",
+			output.Spec.Containers[0].Volumes[0],
+			input.Spec.Containers[0].Volumes[0])
+	}
+}
+
 // TestCellRoundTripWorkingDirV1Beta1 covers the nested-ContainerSpec path:
 // `apply -f cell.yaml` lands here (containers live inside CellDoc), so the
 // per-container WorkingDir must survive Normalize → controller → Build with

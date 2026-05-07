@@ -121,6 +121,12 @@ var (
 	ErrVolumeNamedNotSupported = errors.New(
 		"named or managed volumes are not supported; use an absolute host path as source",
 	)
+	ErrVolumeKindUnknown = errors.New(
+		"volume kind is not recognized; expected \"\", \"bind\", or \"tmpfs\"",
+	)
+	ErrVolumeTmpfsSourceForbidden = errors.New(
+		"tmpfs volume must not set a source; tmpfs is in-memory and has no host backing",
+	)
 
 	// CNI-related errors.
 

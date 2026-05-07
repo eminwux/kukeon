@@ -739,9 +739,12 @@ func volumeMountsToInternal(in []ext.VolumeMount) []intmodel.VolumeMount {
 	out := make([]intmodel.VolumeMount, len(in))
 	for i, v := range in {
 		out[i] = intmodel.VolumeMount{
-			Source:   v.Source,
-			Target:   v.Target,
-			ReadOnly: v.ReadOnly,
+			Kind:      intmodel.VolumeKind(v.Kind),
+			Source:    v.Source,
+			Target:    v.Target,
+			ReadOnly:  v.ReadOnly,
+			SizeBytes: v.SizeBytes,
+			Mode:      v.Mode,
 		}
 	}
 	return out
@@ -754,9 +757,12 @@ func volumeMountsToExternal(in []intmodel.VolumeMount) []ext.VolumeMount {
 	out := make([]ext.VolumeMount, len(in))
 	for i, v := range in {
 		out[i] = ext.VolumeMount{
-			Source:   v.Source,
-			Target:   v.Target,
-			ReadOnly: v.ReadOnly,
+			Kind:      ext.VolumeKind(v.Kind),
+			Source:    v.Source,
+			Target:    v.Target,
+			ReadOnly:  v.ReadOnly,
+			SizeBytes: v.SizeBytes,
+			Mode:      v.Mode,
 		}
 	}
 	return out
