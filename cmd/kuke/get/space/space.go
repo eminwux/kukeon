@@ -91,7 +91,8 @@ func NewSpaceCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return printSpaces(cmd, spaces, outputFormat)
+			showControllers, _ := cmd.Flags().GetBool("show-controllers")
+			return printSpaces(cmd, spaces, outputFormat, showControllers)
 		},
 	}
 
@@ -102,6 +103,10 @@ func NewSpaceCmd() *cobra.Command {
 		StringP("output", "o", "", "Output format (yaml, json, table). Default: table for list, yaml for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
+	cmd.Flags().Bool(
+		"show-controllers", false,
+		"Append a CONTROLLERS column listing the cgroup-v2 controllers delegated on each space's subtree (issue #328).",
+	)
 
 	cmd.ValidArgsFunction = config.CompleteSpaceNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
@@ -127,7 +132,12 @@ func printSpace(space *v1beta1.SpaceDoc, format shared.OutputFormat) error {
 	}
 }
 
-func printSpaces(cmd *cobra.Command, spaces []v1beta1.SpaceDoc, format shared.OutputFormat) error {
+func printSpaces(
+	cmd *cobra.Command,
+	spaces []v1beta1.SpaceDoc,
+	format shared.OutputFormat,
+	showControllers bool,
+) error {
 	switch format {
 	case shared.OutputFormatYAML:
 		return shared.PrintYAML(spaces)
@@ -139,6 +149,9 @@ func printSpaces(cmd *cobra.Command, spaces []v1beta1.SpaceDoc, format shared.Ou
 			return nil
 		}
 		headers := []string{"NAME", "REALM", "STATE", "CGROUP"}
+		if showControllers {
+			headers = append(headers, "CONTROLLERS")
+		}
 		rows := make([][]string, 0, len(spaces))
 		for i := range spaces {
 			s := &spaces[i]
@@ -147,7 +160,11 @@ func printSpaces(cmd *cobra.Command, spaces []v1beta1.SpaceDoc, format shared.Ou
 			if cgroup == "" {
 				cgroup = "-"
 			}
-			rows = append(rows, []string{s.Metadata.Name, s.Spec.RealmID, state, cgroup})
+			row := []string{s.Metadata.Name, s.Spec.RealmID, state, cgroup}
+			if showControllers {
+				row = append(row, shared.FormatControllers(s.Status.SubtreeControllers))
+			}
+			rows = append(rows, row)
 		}
 		shared.PrintTable(cmd, headers, rows)
 		return nil

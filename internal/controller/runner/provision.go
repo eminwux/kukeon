@@ -79,7 +79,7 @@ func (r *Exec) provisionNewRealm(realm intmodel.Realm) (intmodel.Realm, error) {
 	}
 
 	// Create realm cgroup
-	cgroupPath, err := r.createRealmCgroup(realm)
+	cgroupPath, subtreeControllers, err := r.createRealmCgroup(realm)
 	if err != nil {
 		// Set state to Failed and update metadata before returning error
 		realm.Status.State = intmodel.RealmStateFailed
@@ -87,8 +87,9 @@ func (r *Exec) provisionNewRealm(realm intmodel.Realm) (intmodel.Realm, error) {
 		return intmodel.Realm{}, err
 	}
 
-	// Update CgroupPath and state in internal model
+	// Update CgroupPath, SubtreeControllers (issue #328), and state in internal model
 	realm.Status.CgroupPath = cgroupPath
+	realm.Status.SubtreeControllers = subtreeControllers
 	realm.Status.State = intmodel.RealmStateReady
 
 	// Always update metadata after cgroup creation to ensure CgroupPath is saved
@@ -167,13 +168,14 @@ func (r *Exec) provisionNewSpace(space intmodel.Space) (intmodel.Space, error) {
 	space.Spec.CNIConfigPath = cniConfigPath
 
 	// Create space cgroup
-	cgroupPath, createErr := r.createSpaceCgroup(space)
+	cgroupPath, subtreeControllers, createErr := r.createSpaceCgroup(space)
 	if createErr != nil {
 		return intmodel.Space{}, createErr
 	}
 
-	// Update CgroupPath and state in internal model
+	// Update CgroupPath, SubtreeControllers (issue #328), and state in internal model
 	space.Status.CgroupPath = cgroupPath
+	space.Status.SubtreeControllers = subtreeControllers
 	space.Status.State = intmodel.SpaceStateReady
 
 	// Realize egress policy on the host firewall. iptables rules are safe
@@ -716,20 +718,31 @@ func (r *Exec) ensureSpaceCgroup(space intmodel.Space) (intmodel.Space, error) {
 		}
 		// Idempotent re-toggle of the space's subtree controllers — see the
 		// matching realm ensure-path note for the rationale (issue #327).
-		if subtreeErr := r.enableAncestorSubtreeControllers(spaceDoc.Status.CgroupPath, r.ctrClient.GetCgroupMountpoint()); subtreeErr != nil {
+		// Persist the effective set so SpaceStatus.SubtreeControllers
+		// reflects the live host-filtered set after every ensure-pass
+		// (issue #328). On error skip the persist — the warn-and-continue
+		// pattern matches the cell ensure path and avoids overwriting a
+		// previously-correct value with stale data.
+		if subtreeControllers, subtreeErr := r.enableAncestorSubtreeControllers(
+			spaceDoc.Status.CgroupPath, r.ctrClient.GetCgroupMountpoint()); subtreeErr != nil {
 			r.logger.WarnContext(r.ctx,
 				"failed to enable space subtree controllers on ensure-path",
 				"space", space.Metadata.Name, "error", subtreeErr)
+		} else if !equalStringSlices(space.Status.SubtreeControllers, subtreeControllers) {
+			space.Status.SubtreeControllers = subtreeControllers
+			if metaErr := r.UpdateSpaceMetadata(space); metaErr != nil {
+				return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateSpaceMetadata, metaErr)
+			}
 		}
 	}
 
 	return space, nil
 }
 
-func (r *Exec) createSpaceCgroup(space intmodel.Space) (string, error) {
+func (r *Exec) createSpaceCgroup(space intmodel.Space) (string, []string, error) {
 	// Extract realm name from space and validate
 	if space.Spec.RealmName == "" {
-		return "", errdefs.ErrRealmNameRequired
+		return "", nil, errdefs.ErrRealmNameRequired
 	}
 
 	// Fetch the realm internally for DefaultSpaceSpec
@@ -740,33 +753,36 @@ func (r *Exec) createSpaceCgroup(space intmodel.Space) (string, error) {
 	}
 	internalRealm, err := r.GetRealm(lookupRealm)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	spec := ctr.DefaultSpaceSpec(space)
 
 	// Ensure client is initialized and connected
 	if err = r.ensureClientConnected(); err != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+		return "", nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
 	// Build the cgroup path
 	spec, _, err = r.buildCgroupPath(spec)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	// Create the cgroup
 	cgroupPath, createErr := r.createCgroupInternal(spec)
 	if createErr != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateSpaceCgroup, createErr)
+		return "", nil, fmt.Errorf("%w: %w", errdefs.ErrCreateSpaceCgroup, createErr)
 	}
 
 	// Delegate the kukeon resource subset on the space's own subtree_control
 	// so an empty space (no descendant stack/cell yet) still carries the
-	// controllers — issue #327.
-	if subtreeErr := r.enableAncestorSubtreeControllers(spec.Group, spec.Mountpoint); subtreeErr != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateSpaceCgroup, subtreeErr)
+	// controllers — issue #327. The returned effective set bubbles back up
+	// so the caller can persist it on SpaceStatus.SubtreeControllers
+	// (issue #328).
+	subtreeControllers, subtreeErr := r.enableAncestorSubtreeControllers(spec.Group, spec.Mountpoint)
+	if subtreeErr != nil {
+		return "", nil, fmt.Errorf("%w: %w", errdefs.ErrCreateSpaceCgroup, subtreeErr)
 	}
 
 	r.logger.InfoContext(
@@ -779,37 +795,40 @@ func (r *Exec) createSpaceCgroup(space intmodel.Space) (string, error) {
 		"path",
 		cgroupPath,
 	)
-	return cgroupPath, nil
+	return cgroupPath, subtreeControllers, nil
 }
 
-func (r *Exec) createRealmCgroup(realm intmodel.Realm) (string, error) {
+func (r *Exec) createRealmCgroup(realm intmodel.Realm) (string, []string, error) {
 	spec := ctr.DefaultRealmSpec(realm)
 
 	// Ensure client is initialized and connected
 	if err := r.ensureClientConnected(); err != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+		return "", nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
 	// Build the cgroup path
 	var err error
 	spec, _, err = r.buildCgroupPath(spec)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	// Create the cgroup
 	cgroupPath, createErr := r.createCgroupInternal(spec)
 	if createErr != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateRealmCgroup, createErr)
+		return "", nil, fmt.Errorf("%w: %w", errdefs.ErrCreateRealmCgroup, createErr)
 	}
 
 	// Delegate the kukeon resource subset on the realm's own subtree_control
 	// so an empty realm (no descendant space/stack/cell yet) still carries
 	// the controllers — issue #327. Mirrors the cell-level call site below
 	// so each level explicitly populates its own subtree instead of
-	// relying on the first cell's ancestor walk to widen everything.
-	if subtreeErr := r.enableAncestorSubtreeControllers(spec.Group, spec.Mountpoint); subtreeErr != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateRealmCgroup, subtreeErr)
+	// relying on the first cell's ancestor walk to widen everything. The
+	// returned effective set bubbles back up so the caller can persist it
+	// on RealmStatus.SubtreeControllers (issue #328).
+	subtreeControllers, subtreeErr := r.enableAncestorSubtreeControllers(spec.Group, spec.Mountpoint)
+	if subtreeErr != nil {
+		return "", nil, fmt.Errorf("%w: %w", errdefs.ErrCreateRealmCgroup, subtreeErr)
 	}
 
 	r.logger.InfoContext(
@@ -820,7 +839,7 @@ func (r *Exec) createRealmCgroup(realm intmodel.Realm) (string, error) {
 		"path",
 		cgroupPath,
 	)
-	return cgroupPath, nil
+	return cgroupPath, subtreeControllers, nil
 }
 
 func (r *Exec) ensureRealmCgroup(realm intmodel.Realm) (intmodel.Realm, error) {
@@ -872,11 +891,19 @@ func (r *Exec) ensureRealmCgroup(realm intmodel.Realm) (intmodel.Realm, error) {
 		// ensure-pass — covers daemon restart against pre-#327 realms whose
 		// subtree_control was only populated as a side effect of the first
 		// cell. No-op on already-delegated subtrees. Log + continue on
-		// failure to mirror the cell ensure-path pattern.
-		if subtreeErr := r.enableAncestorSubtreeControllers(realmDoc.Status.CgroupPath, r.ctrClient.GetCgroupMountpoint()); subtreeErr != nil {
+		// failure to mirror the cell ensure-path pattern. Persist the
+		// effective set so RealmStatus.SubtreeControllers reflects the
+		// live host-filtered set after every ensure-pass (issue #328).
+		if subtreeControllers, subtreeErr := r.enableAncestorSubtreeControllers(
+			realmDoc.Status.CgroupPath, r.ctrClient.GetCgroupMountpoint()); subtreeErr != nil {
 			r.logger.WarnContext(r.ctx,
 				"failed to enable realm subtree controllers on ensure-path",
 				"realm", realm.Metadata.Name, "error", subtreeErr)
+		} else if !equalStringSlices(realm.Status.SubtreeControllers, subtreeControllers) {
+			realm.Status.SubtreeControllers = subtreeControllers
+			if metaErr := r.UpdateRealmMetadata(realm); metaErr != nil {
+				return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateRealmMetadata, metaErr)
+			}
 		}
 	} else {
 		// If cgroup path is still empty after ensureCgroupInternal, log warning
@@ -901,13 +928,14 @@ func (r *Exec) provisionNewStack(stack intmodel.Stack) (intmodel.Stack, error) {
 	}
 
 	// Create stack cgroup
-	cgroupPath, err := r.createStackCgroup(stack)
+	cgroupPath, subtreeControllers, err := r.createStackCgroup(stack)
 	if err != nil {
 		return intmodel.Stack{}, err
 	}
 
-	// Update CgroupPath and state in internal model
+	// Update CgroupPath, SubtreeControllers (issue #328), and state in internal model
 	stack.Status.CgroupPath = cgroupPath
+	stack.Status.SubtreeControllers = subtreeControllers
 	stack.Status.State = intmodel.StackStateReady
 
 	// Update stack metadata
@@ -918,40 +946,43 @@ func (r *Exec) provisionNewStack(stack intmodel.Stack) (intmodel.Stack, error) {
 	return stack, nil
 }
 
-func (r *Exec) createStackCgroup(stack intmodel.Stack) (string, error) {
+func (r *Exec) createStackCgroup(stack intmodel.Stack) (string, []string, error) {
 	// Extract realm and space names from stack and validate
 	if stack.Spec.RealmName == "" {
-		return "", errdefs.ErrRealmNameRequired
+		return "", nil, errdefs.ErrRealmNameRequired
 	}
 	if stack.Spec.SpaceName == "" {
-		return "", errdefs.ErrSpaceNameRequired
+		return "", nil, errdefs.ErrSpaceNameRequired
 	}
 
 	spec := ctr.DefaultStackSpec(stack)
 
 	// Ensure client is initialized and connected
 	if err := r.ensureClientConnected(); err != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+		return "", nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
 	// Build the cgroup path
 	var err error
 	spec, _, err = r.buildCgroupPath(spec)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	// Create the cgroup
 	cgroupPath, createErr := r.createCgroupInternal(spec)
 	if createErr != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateStackCgroup, createErr)
+		return "", nil, fmt.Errorf("%w: %w", errdefs.ErrCreateStackCgroup, createErr)
 	}
 
 	// Delegate the kukeon resource subset on the stack's own subtree_control
 	// so an empty stack (no descendant cell yet) still carries the
-	// controllers — issue #327.
-	if subtreeErr := r.enableAncestorSubtreeControllers(spec.Group, spec.Mountpoint); subtreeErr != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateStackCgroup, subtreeErr)
+	// controllers — issue #327. The returned effective set bubbles back up
+	// so the caller can persist it on StackStatus.SubtreeControllers
+	// (issue #328).
+	subtreeControllers, subtreeErr := r.enableAncestorSubtreeControllers(spec.Group, spec.Mountpoint)
+	if subtreeErr != nil {
+		return "", nil, fmt.Errorf("%w: %w", errdefs.ErrCreateStackCgroup, subtreeErr)
 	}
 
 	r.logger.InfoContext(
@@ -962,7 +993,7 @@ func (r *Exec) createStackCgroup(stack intmodel.Stack) (string, error) {
 		"path",
 		cgroupPath,
 	)
-	return cgroupPath, nil
+	return cgroupPath, subtreeControllers, nil
 }
 
 func (r *Exec) ensureStackCgroup(stack intmodel.Stack) (intmodel.Stack, error) {
@@ -1016,10 +1047,19 @@ func (r *Exec) ensureStackCgroup(stack intmodel.Stack) (intmodel.Stack, error) {
 		}
 		// Idempotent re-toggle of the stack's subtree controllers — see the
 		// matching realm ensure-path note for the rationale (issue #327).
-		if subtreeErr := r.enableAncestorSubtreeControllers(stackDoc.Status.CgroupPath, r.ctrClient.GetCgroupMountpoint()); subtreeErr != nil {
+		// Persist the effective set so StackStatus.SubtreeControllers
+		// reflects the live host-filtered set after every ensure-pass
+		// (issue #328).
+		if subtreeControllers, subtreeErr := r.enableAncestorSubtreeControllers(
+			stackDoc.Status.CgroupPath, r.ctrClient.GetCgroupMountpoint()); subtreeErr != nil {
 			r.logger.WarnContext(r.ctx,
 				"failed to enable stack subtree controllers on ensure-path",
 				"stack", stack.Metadata.Name, "error", subtreeErr)
+		} else if !equalStringSlices(stack.Status.SubtreeControllers, subtreeControllers) {
+			stack.Status.SubtreeControllers = subtreeControllers
+			if metaErr := r.UpdateStackMetadata(stack); metaErr != nil {
+				return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateStackMetadata, metaErr)
+			}
 		}
 	}
 
@@ -1044,13 +1084,17 @@ func (r *Exec) provisionNewCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	}
 
 	// Create cell cgroup
-	cgroupPath, err := r.createCellCgroup(cell)
+	cgroupPath, subtreeControllers, err := r.createCellCgroup(cell)
 	if err != nil {
 		return intmodel.Cell{}, err
 	}
 
-	// Update internal model with cgroup path
+	// Update internal model with cgroup path and effective subtree
+	// controllers (issue #328 — surfaces the result of enableCellControllers
+	// so operators can confirm the cell-level delegation from `kuke get
+	// cells -o yaml`).
 	cell.Status.CgroupPath = cgroupPath
+	cell.Status.SubtreeControllers = subtreeControllers
 
 	// Persist the host-side bridge this cell's space lands on. Computing it
 	// here (instead of the read path) keeps the cell self-describing for
@@ -1083,36 +1127,36 @@ func (r *Exec) provisionNewCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	return cell, nil
 }
 
-func (r *Exec) createCellCgroup(cell intmodel.Cell) (string, error) {
+func (r *Exec) createCellCgroup(cell intmodel.Cell) (string, []string, error) {
 	// Extract realm, space, and stack names from cell and validate
 	if cell.Spec.RealmName == "" {
-		return "", errdefs.ErrRealmNameRequired
+		return "", nil, errdefs.ErrRealmNameRequired
 	}
 	if cell.Spec.SpaceName == "" {
-		return "", errdefs.ErrSpaceNameRequired
+		return "", nil, errdefs.ErrSpaceNameRequired
 	}
 	if cell.Spec.StackName == "" {
-		return "", errdefs.ErrStackNameRequired
+		return "", nil, errdefs.ErrStackNameRequired
 	}
 
 	spec := ctr.DefaultCellSpec(cell)
 
 	// Ensure client is initialized and connected
 	if err := r.ensureClientConnected(); err != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+		return "", nil, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
 	// Build the cgroup path
 	var err error
 	spec, _, err = r.buildCgroupPath(spec)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	// Create the cgroup
 	cgroupPath, createErr := r.createCgroupInternal(spec)
 	if createErr != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateCellCgroup, createErr)
+		return "", nil, fmt.Errorf("%w: %w", errdefs.ErrCreateCellCgroup, createErr)
 	}
 
 	// Enable the cell-level resource controllers in the cgroup tree before
@@ -1121,9 +1165,12 @@ func (r *Exec) createCellCgroup(cell intmodel.Cell) (string, error) {
 	// available and cell-level UpdateCgroup limits are decorative — exactly
 	// what issue #312 reports. Cells with NestedCgroupRuntime opt in to
 	// delegating the full host-available controller set instead of the
-	// resource subset (issue #314).
-	if subtreeErr := r.enableCellControllers(cell, spec.Group, spec.Mountpoint); subtreeErr != nil {
-		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateCellCgroup, subtreeErr)
+	// resource subset (issue #314). The returned effective set bubbles
+	// back up so the caller can persist it on
+	// CellStatus.SubtreeControllers (issue #328).
+	subtreeControllers, subtreeErr := r.enableCellControllers(cell, spec.Group, spec.Mountpoint)
+	if subtreeErr != nil {
+		return "", nil, fmt.Errorf("%w: %w", errdefs.ErrCreateCellCgroup, subtreeErr)
 	}
 
 	r.logger.InfoContext(
@@ -1134,7 +1181,7 @@ func (r *Exec) createCellCgroup(cell intmodel.Cell) (string, error) {
 		"path",
 		cgroupPath,
 	)
-	return cgroupPath, nil
+	return cgroupPath, subtreeControllers, nil
 }
 
 // enableCellControllers picks between the resource-subset and full-set
@@ -1146,7 +1193,11 @@ func (r *Exec) createCellCgroup(cell intmodel.Cell) (string, error) {
 // The resource subset comes from cgroupcheck.CellResourceControllers so
 // the doctor pre-flight (`kuke doctor cgroups`) and the cell-creation
 // path stay in lockstep — issue #324.
-func (r *Exec) enableCellControllers(cell intmodel.Cell, group, mountpoint string) error {
+//
+// Returns the effective controller set actually written (filtered against
+// the host root) so the caller can persist it on
+// CellStatus.SubtreeControllers (issue #328).
+func (r *Exec) enableCellControllers(cell intmodel.Cell, group, mountpoint string) ([]string, error) {
 	if cell.Spec.NestedCgroupRuntime {
 		return r.ctrClient.EnableCellAllSubtreeControllers(group, mountpoint)
 	}
@@ -1158,12 +1209,30 @@ func (r *Exec) enableCellControllers(cell intmodel.Cell, group, mountpoint strin
 // populated independently of the first cell that lands under it. Without
 // this, an empty realm/space/stack carries no controllers — the cell-level
 // ToggleControllers walk only widens ancestors when a cell is created
-// (issue #327). Returning the underlying error lets callers in create-
+// (issue #327). Returns the effective controller set actually written so
+// the caller can persist it on the level's Status.SubtreeControllers
+// (issue #328); returning the underlying error lets callers in create-
 // paths fail hard while ensure-pass call sites can choose to log + continue
 // (matching the cell ensure-path pattern).
-func (r *Exec) enableAncestorSubtreeControllers(group, mountpoint string) error {
-	_, err := r.ctrClient.EnsureSubtreeControllers(group, mountpoint, cgroupcheck.CellResourceControllers())
-	return err
+func (r *Exec) enableAncestorSubtreeControllers(group, mountpoint string) ([]string, error) {
+	return r.ctrClient.EnsureSubtreeControllers(group, mountpoint, cgroupcheck.CellResourceControllers())
+}
+
+// equalStringSlices reports whether two []string values carry the same
+// elements in the same order. Used by the ensure-paths to skip a metadata
+// rewrite when SubtreeControllers is unchanged (issue #328 — the kernel
+// re-toggle is already idempotent; the metadata save costs an fsync, so
+// short-circuit on equality keeps the steady-state ensure pass cheap).
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *Exec) ensureCellCgroup(cell intmodel.Cell) (intmodel.Cell, error) {
@@ -1225,11 +1294,19 @@ func (r *Exec) ensureCellCgroup(cell intmodel.Cell) (intmodel.Cell, error) {
 		// already-enabled subtrees). Cells whose persisted spec carries
 		// NestedCgroupRuntime=true take the full-set delegation path so a
 		// daemon restart re-asserts the same controller set the cell was
-		// provisioned with (issue #314).
-		if subtreeErr := r.enableCellControllers(cell, cellDoc.Status.CgroupPath, r.ctrClient.GetCgroupMountpoint()); subtreeErr != nil {
+		// provisioned with (issue #314). Persist the effective set so
+		// CellStatus.SubtreeControllers reflects the live host-filtered set
+		// after every ensure-pass (issue #328).
+		if subtreeControllers, subtreeErr := r.enableCellControllers(
+			cell, cellDoc.Status.CgroupPath, r.ctrClient.GetCgroupMountpoint()); subtreeErr != nil {
 			r.logger.WarnContext(r.ctx,
 				"failed to enable cell subtree controllers on ensure-path",
 				"cell", cell.Metadata.Name, "error", subtreeErr)
+		} else if !equalStringSlices(cell.Status.SubtreeControllers, subtreeControllers) {
+			cell.Status.SubtreeControllers = subtreeControllers
+			if metaErr := r.UpdateCellMetadata(cell); metaErr != nil {
+				return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, metaErr)
+			}
 		}
 	}
 

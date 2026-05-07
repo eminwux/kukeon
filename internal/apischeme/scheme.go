@@ -58,8 +58,9 @@ func ConvertRealmDocToInternal(in ext.RealmDoc) (intmodel.Realm, error) {
 				RegistryCredentials: registryCreds,
 			},
 			Status: intmodel.RealmStatus{
-				State:      intmodel.RealmState(in.Status.State),
-				CgroupPath: in.Status.CgroupPath,
+				State:              intmodel.RealmState(in.Status.State),
+				CgroupPath:         in.Status.CgroupPath,
+				SubtreeControllers: cloneStringSlice(in.Status.SubtreeControllers),
 			},
 		}, nil
 	default:
@@ -91,8 +92,9 @@ func BuildRealmExternalFromInternal(in intmodel.Realm, apiVersion ext.Version) (
 				RegistryCredentials: registryCreds,
 			},
 			Status: ext.RealmStatus{
-				State:      ext.RealmState(in.Status.State),
-				CgroupPath: in.Status.CgroupPath,
+				State:              ext.RealmState(in.Status.State),
+				CgroupPath:         in.Status.CgroupPath,
+				SubtreeControllers: cloneStringSlice(in.Status.SubtreeControllers),
 			},
 		}, nil
 	default:
@@ -139,8 +141,9 @@ func ConvertSpaceDocToInternal(in ext.SpaceDoc) (intmodel.Space, error) {
 				Defaults:      convertSpaceDefaultsToInternal(in.Spec.Defaults),
 			},
 			Status: intmodel.SpaceStatus{
-				State:      intState,
-				CgroupPath: in.Status.CgroupPath,
+				State:              intState,
+				CgroupPath:         in.Status.CgroupPath,
+				SubtreeControllers: cloneStringSlice(in.Status.SubtreeControllers),
 			},
 		}, nil
 	default:
@@ -178,8 +181,9 @@ func BuildSpaceExternalFromInternal(in intmodel.Space, apiVersion ext.Version) (
 				Defaults:      buildSpaceDefaultsExternalFromInternal(in.Spec.Defaults),
 			},
 			Status: ext.SpaceStatus{
-				State:      extState,
-				CgroupPath: in.Status.CgroupPath,
+				State:              extState,
+				CgroupPath:         in.Status.CgroupPath,
+				SubtreeControllers: cloneStringSlice(in.Status.SubtreeControllers),
 			},
 		}, nil
 	default:
@@ -212,8 +216,9 @@ func ConvertStackDocToInternal(in ext.StackDoc) (intmodel.Stack, error) {
 				SpaceName: in.Spec.SpaceID,
 			},
 			Status: intmodel.StackStatus{
-				State:      intmodel.StackState(in.Status.State),
-				CgroupPath: in.Status.CgroupPath,
+				State:              intmodel.StackState(in.Status.State),
+				CgroupPath:         in.Status.CgroupPath,
+				SubtreeControllers: cloneStringSlice(in.Status.SubtreeControllers),
 			},
 		}, nil
 	default:
@@ -238,8 +243,9 @@ func BuildStackExternalFromInternal(in intmodel.Stack, apiVersion ext.Version) (
 				SpaceID: in.Spec.SpaceName,
 			},
 			Status: ext.StackStatus{
-				State:      ext.StackState(in.Status.State),
-				CgroupPath: in.Status.CgroupPath,
+				State:              ext.StackState(in.Status.State),
+				CgroupPath:         in.Status.CgroupPath,
+				SubtreeControllers: cloneStringSlice(in.Status.SubtreeControllers),
 			},
 		}, nil
 	default:
@@ -707,6 +713,17 @@ func buildSpaceContainerDefaultsExternalFromInternal(in *intmodel.SpaceContainer
 	}
 }
 
+// cloneStringSlice returns a deep copy of in. Used by Status conversions so
+// the external and internal models do not alias the same backing array.
+// Returns nil for nil/empty input so the resulting Status field stays nil
+// and `omitempty`-tagged JSON/YAML emit nothing (issue #328).
+func cloneStringSlice(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	return append([]string(nil), in...)
+}
+
 func copyBoolPtr(in *bool) *bool {
 	if in == nil {
 		return nil
@@ -817,8 +834,9 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 				NestedCgroupRuntime: in.Spec.NestedCgroupRuntime,
 			},
 			Status: intmodel.CellStatus{
-				State:      intmodel.CellState(in.Status.State),
-				CgroupPath: in.Status.CgroupPath,
+				State:              intmodel.CellState(in.Status.State),
+				CgroupPath:         in.Status.CgroupPath,
+				SubtreeControllers: cloneStringSlice(in.Status.SubtreeControllers),
 				Network: intmodel.CellNetworkStatus{
 					BridgeName: in.Status.Network.BridgeName,
 				},
@@ -878,8 +896,9 @@ func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ex
 				NestedCgroupRuntime: in.Spec.NestedCgroupRuntime,
 			},
 			Status: ext.CellStatus{
-				State:      ext.CellState(in.Status.State),
-				CgroupPath: in.Status.CgroupPath,
+				State:              ext.CellState(in.Status.State),
+				CgroupPath:         in.Status.CgroupPath,
+				SubtreeControllers: cloneStringSlice(in.Status.SubtreeControllers),
 				Network: ext.CellNetworkStatus{
 					BridgeName: in.Status.Network.BridgeName,
 				},

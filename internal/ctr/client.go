@@ -76,16 +76,23 @@ type Client interface {
 	// subtree_control up to the unified cgroup mount, so child cgroups (the
 	// per-container task cgroups runc creates under Linux.CgroupsPath)
 	// inherit the controllers and cell-level resource accounting / limits
-	// become effective. Thin wrapper around EnsureSubtreeControllers kept
-	// for the cell call sites' readability. Issue #312.
-	EnableCellSubtreeControllers(group, mountpoint string, controllers []string) error
+	// become effective. Returns the effective controller set actually
+	// written (the requested set filtered against the host root's
+	// cgroup.controllers) so the runner can persist it on
+	// CellStatus.SubtreeControllers (issue #328). Thin wrapper around
+	// EnsureSubtreeControllers kept for the cell call sites' readability.
+	// Issue #312.
+	EnableCellSubtreeControllers(group, mountpoint string, controllers []string) ([]string, error)
 	// EnableCellAllSubtreeControllers is the cell/profile=NestedCgroupRuntime
 	// counterpart: it delegates the full host-available cgroup-v2 controller
 	// set on the cell's subtree_control (and every ancestor's), rather than
-	// the kukeon resource subset. Used by cells that host an inner cgroup
-	// runtime (an embedded containerd or systemd) which needs to in turn
-	// delegate arbitrary controllers to its own children. Issue #314.
-	EnableCellAllSubtreeControllers(group, mountpoint string) error
+	// the kukeon resource subset. Returns the effective controller set
+	// actually written so the runner can persist it on
+	// CellStatus.SubtreeControllers (issue #328). Used by cells that host
+	// an inner cgroup runtime (an embedded containerd or systemd) which
+	// needs to in turn delegate arbitrary controllers to its own children.
+	// Issue #314.
+	EnableCellAllSubtreeControllers(group, mountpoint string) ([]string, error)
 	CreateContainerFromSpec(namespace string, spec intmodel.ContainerSpec, creds []RegistryCredentials, opts ...BuildOption) (containerd.Container, error)
 
 	CreateContainer(namespace string, spec ContainerSpec, creds []RegistryCredentials) (containerd.Container, error)

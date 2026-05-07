@@ -36,8 +36,12 @@ type StackSpec struct {
 }
 
 type StackStatus struct {
-	State      StackState `json:"state"      yaml:"state"`
-	CgroupPath string     `json:"cgroupPath" yaml:"cgroupPath"`
+	State      StackState `json:"state"                        yaml:"state"`
+	CgroupPath string     `json:"cgroupPath"                   yaml:"cgroupPath"`
+	// SubtreeControllers is the cgroup-v2 controller set actually
+	// delegated on this stack's own cgroup.subtree_control after the
+	// host-root filter (issue #328).
+	SubtreeControllers []string `json:"subtreeControllers,omitempty" yaml:"subtreeControllers,omitempty"`
 }
 
 type StackState int

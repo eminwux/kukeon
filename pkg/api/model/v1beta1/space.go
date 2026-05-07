@@ -98,8 +98,12 @@ type SpaceContainerDefaults struct {
 }
 
 type SpaceStatus struct {
-	State      SpaceState `json:"state"                yaml:"state"`
-	CgroupPath string     `json:"cgroupPath,omitempty" yaml:"cgroupPath,omitempty"`
+	State      SpaceState `json:"state"                        yaml:"state"`
+	CgroupPath string     `json:"cgroupPath,omitempty"         yaml:"cgroupPath,omitempty"`
+	// SubtreeControllers is the cgroup-v2 controller set actually
+	// delegated on this space's own cgroup.subtree_control after the
+	// host-root filter (issue #328).
+	SubtreeControllers []string `json:"subtreeControllers,omitempty" yaml:"subtreeControllers,omitempty"`
 }
 
 type SpaceState int

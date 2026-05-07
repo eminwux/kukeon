@@ -110,11 +110,11 @@ func (c *subtreeRecorderClient) LoadCgroup(string, string) (*cgroup2.Manager, er
 	panic("unexpected")
 }
 func (c *subtreeRecorderClient) DeleteCgroup(string, string) error { panic("unexpected") }
-func (c *subtreeRecorderClient) EnableCellSubtreeControllers(string, string, []string) error {
+func (c *subtreeRecorderClient) EnableCellSubtreeControllers(string, string, []string) ([]string, error) {
 	panic("unexpected")
 }
 
-func (c *subtreeRecorderClient) EnableCellAllSubtreeControllers(string, string) error {
+func (c *subtreeRecorderClient) EnableCellAllSubtreeControllers(string, string) ([]string, error) {
 	panic("unexpected")
 }
 
@@ -232,13 +232,20 @@ func seedRealmMetadata(t *testing.T, r *Exec, realmName string) {
 // TestEnableAncestorSubtreeControllersPassesResourceSubset pins the
 // invariant that every realm/space/stack create path delegates exactly the
 // kukeon resource subset (cgroupcheck.CellResourceControllers) — the same
-// set the doctor pre-flight expects on the host root. Issue #327.
+// set the doctor pre-flight expects on the host root. Issue #327. Also
+// pins that the helper returns the effective set so callers can persist
+// it on Status.SubtreeControllers (issue #328).
 func TestEnableAncestorSubtreeControllersPassesResourceSubset(t *testing.T) {
 	fake := &subtreeRecorderClient{mountpoint: "/sys/fs/cgroup"}
 	r := newSubtreeTestExec(t, fake)
 
-	if err := r.enableAncestorSubtreeControllers("/kukeon/foo", "/sys/fs/cgroup"); err != nil {
+	gotEffective, err := r.enableAncestorSubtreeControllers("/kukeon/foo", "/sys/fs/cgroup")
+	if err != nil {
 		t.Fatalf("enableAncestorSubtreeControllers() unexpected error: %v", err)
+	}
+	if want := cgroupcheck.CellResourceControllers(); !reflect.DeepEqual(gotEffective, want) {
+		t.Errorf("enableAncestorSubtreeControllers() effective = %v, want %v (issue #328)",
+			gotEffective, want)
 	}
 	if len(fake.ensureCalls) != 1 {
 		t.Fatalf("EnsureSubtreeControllers call count = %d, want 1", len(fake.ensureCalls))
@@ -267,7 +274,7 @@ func TestCreateRealmCgroupEmptyRealmDelegates(t *testing.T) {
 	}
 	r := newSubtreeTestExec(t, fake)
 
-	if _, err := r.createRealmCgroup(intmodel.Realm{
+	if _, _, err := r.createRealmCgroup(intmodel.Realm{
 		Metadata: intmodel.RealmMetadata{Name: "empty"},
 		Spec:     intmodel.RealmSpec{Namespace: "empty.kukeon.io"},
 	}); err != nil {
@@ -297,12 +304,12 @@ func TestCreateLevelCgroupsDelegateSubtreeControllers(t *testing.T) {
 	cases := []struct {
 		name      string
 		seed      func(t *testing.T, r *Exec)
-		call      func(r *Exec) (string, error)
+		call      func(r *Exec) (string, []string, error)
 		wantGroup string
 	}{
 		{
 			name: "realm",
-			call: func(r *Exec) (string, error) {
+			call: func(r *Exec) (string, []string, error) {
 				return r.createRealmCgroup(intmodel.Realm{
 					Metadata: intmodel.RealmMetadata{Name: "alpha"},
 					Spec:     intmodel.RealmSpec{Namespace: "alpha.kukeon.io"},
@@ -318,7 +325,7 @@ func TestCreateLevelCgroupsDelegateSubtreeControllers(t *testing.T) {
 				// lookup succeeds in the unit-test sandbox.
 				seedRealmMetadata(t, r, "alpha")
 			},
-			call: func(r *Exec) (string, error) {
+			call: func(r *Exec) (string, []string, error) {
 				return r.createSpaceCgroup(intmodel.Space{
 					Metadata: intmodel.SpaceMetadata{Name: "beta"},
 					Spec:     intmodel.SpaceSpec{RealmName: "alpha"},
@@ -328,7 +335,7 @@ func TestCreateLevelCgroupsDelegateSubtreeControllers(t *testing.T) {
 		},
 		{
 			name: "stack",
-			call: func(r *Exec) (string, error) {
+			call: func(r *Exec) (string, []string, error) {
 				return r.createStackCgroup(intmodel.Stack{
 					Metadata: intmodel.StackMetadata{Name: "gamma"},
 					Spec:     intmodel.StackSpec{RealmName: "alpha", SpaceName: "beta"},
@@ -349,12 +356,19 @@ func TestCreateLevelCgroupsDelegateSubtreeControllers(t *testing.T) {
 				tc.seed(t, r)
 			}
 
-			gotPath, err := tc.call(r)
+			gotPath, gotControllers, err := tc.call(r)
 			if err != nil {
 				t.Fatalf("%s create path unexpected error: %v", tc.name, err)
 			}
 			if gotPath != tc.wantGroup {
 				t.Errorf("%s cgroup path = %q, want %q", tc.name, gotPath, tc.wantGroup)
+			}
+			// Issue #328: every level's create path returns the effective
+			// controller set so the caller can persist it on
+			// Status.SubtreeControllers.
+			if want := cgroupcheck.CellResourceControllers(); !reflect.DeepEqual(gotControllers, want) {
+				t.Errorf("%s create returned controllers = %v, want %v",
+					tc.name, gotControllers, want)
 			}
 			if len(fake.ensureCalls) != 1 {
 				t.Fatalf(

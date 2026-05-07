@@ -366,13 +366,13 @@ func TestEnsureSubtreeControllersValidation(t *testing.T) {
 func TestEnableCellSubtreeControllersValidation(t *testing.T) {
 	client := setupTestClientForCgroups(t)
 
-	if err := client.EnableCellSubtreeControllers("", "/sys/fs/cgroup", []string{"cpu"}); err == nil {
+	if _, err := client.EnableCellSubtreeControllers("", "/sys/fs/cgroup", []string{"cpu"}); err == nil {
 		t.Error("EnableCellSubtreeControllers(empty group) error = nil, want ErrEmptyGroupPath")
 	} else if !errors.Is(err, errdefs.ErrEmptyGroupPath) {
 		t.Errorf("EnableCellSubtreeControllers(empty group) error = %v, want ErrEmptyGroupPath", err)
 	}
 
-	if err := client.EnableCellSubtreeControllers("/kukeon/test", "/sys/fs/cgroup", []string{"cpu"}); err != nil &&
+	if _, err := client.EnableCellSubtreeControllers("/kukeon/test", "/sys/fs/cgroup", []string{"cpu"}); err != nil &&
 		errors.Is(err, errdefs.ErrEmptyGroupPath) {
 		t.Errorf("EnableCellSubtreeControllers(valid group) unexpected validation error: %v", err)
 	}
@@ -388,7 +388,7 @@ func TestEnableCellSubtreeControllersValidation(t *testing.T) {
 func TestEnableCellAllSubtreeControllersValidation(t *testing.T) {
 	client := setupTestClientForCgroups(t)
 
-	if err := client.EnableCellAllSubtreeControllers("", "/sys/fs/cgroup"); err == nil {
+	if _, err := client.EnableCellAllSubtreeControllers("", "/sys/fs/cgroup"); err == nil {
 		t.Error("EnableCellAllSubtreeControllers(empty group) error = nil, want ErrEmptyGroupPath")
 	} else if !errors.Is(err, errdefs.ErrEmptyGroupPath) {
 		t.Errorf("EnableCellAllSubtreeControllers(empty group) error = %v, want ErrEmptyGroupPath", err)
@@ -397,7 +397,7 @@ func TestEnableCellAllSubtreeControllersValidation(t *testing.T) {
 	// Syntactically valid group: validation must pass; downstream cgroupfs
 	// access then fails in the unit-test sandbox, which is fine — that is
 	// not a validation failure and must not surface ErrEmptyGroupPath.
-	if err := client.EnableCellAllSubtreeControllers("/kukeon/test", "/sys/fs/cgroup"); err != nil &&
+	if _, err := client.EnableCellAllSubtreeControllers("/kukeon/test", "/sys/fs/cgroup"); err != nil &&
 		errors.Is(err, errdefs.ErrEmptyGroupPath) {
 		t.Errorf("EnableCellAllSubtreeControllers(valid group) unexpected validation error: %v", err)
 	}

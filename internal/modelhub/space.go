@@ -83,6 +83,11 @@ type SpaceContainerDefaults struct {
 type SpaceStatus struct {
 	State      SpaceState
 	CgroupPath string
+	// SubtreeControllers records the cgroup-v2 controllers actually
+	// delegated on this space's own cgroup.subtree_control after the
+	// effective filter against the host root's cgroup.controllers (issue
+	// #328).
+	SubtreeControllers []string
 }
 
 type SpaceState int

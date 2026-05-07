@@ -147,6 +147,88 @@ func TestNewRealmCmd_Structure(t *testing.T) {
 	if cmd.Flags().Lookup("output") == nil {
 		t.Fatal("expected output flag")
 	}
+	if cmd.Flags().Lookup("show-controllers") == nil {
+		t.Fatal("expected show-controllers flag (issue #328)")
+	}
+}
+
+// TestNewRealmCmd_ShowControllers pins the issue #328 surfacing rule:
+//
+//   - default `kuke get realms` MUST omit the CONTROLLERS column so the
+//     dev-init daemon-parity tail (NAME NAMESPACE STATE CGROUP) stays
+//     byte-identical to what kukeon's CLAUDE.md regression guard expects.
+//   - `--show-controllers` adds the column with the comma-joined effective
+//     set, falling back to "-" when SubtreeControllers is empty.
+func TestNewRealmCmd_ShowControllers(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	listFn := func() ([]v1beta1.RealmDoc, error) {
+		return []v1beta1.RealmDoc{
+			{
+				Metadata: v1beta1.RealmMetadata{Name: "default"},
+				Spec:     v1beta1.RealmSpec{Namespace: "default.kukeon.io"},
+				Status: v1beta1.RealmStatus{
+					CgroupPath:         "/kukeon/default",
+					SubtreeControllers: []string{"cpu", "memory", "io", "pids"},
+				},
+			},
+			{
+				Metadata: v1beta1.RealmMetadata{Name: "kuke-system"},
+				Spec:     v1beta1.RealmSpec{Namespace: "kuke-system.kukeon.io"},
+				Status: v1beta1.RealmStatus{
+					CgroupPath: "/kukeon/kuke-system",
+				},
+			},
+		}, nil
+	}
+
+	t.Run("default omits controllers column", func(t *testing.T) {
+		t.Cleanup(viper.Reset)
+
+		cmd := realm.NewRealmCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		ctx := context.WithValue(context.Background(),
+			realm.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{listRealmsFn: listFn}))
+		cmd.SetContext(ctx)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.Contains(buf.String(), "CONTROLLERS") {
+			t.Errorf("default output must NOT include CONTROLLERS column "+
+				"(issue #328 dev-init regression guard); got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("flag appends controllers column", func(t *testing.T) {
+		t.Cleanup(viper.Reset)
+
+		cmd := realm.NewRealmCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		ctx := context.WithValue(context.Background(),
+			realm.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{listRealmsFn: listFn}))
+		cmd.SetContext(ctx)
+		cmd.SetArgs([]string{"--show-controllers"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "CONTROLLERS") {
+			t.Errorf("expected CONTROLLERS column with --show-controllers; got:\n%s", out)
+		}
+		if !strings.Contains(out, "cpu,memory,io,pids") {
+			t.Errorf("expected joined controller list; got:\n%s", out)
+		}
+		// The empty-controllers row renders "-".
+		if !strings.Contains(out, "kuke-system") || !strings.Contains(out, " -") {
+			t.Errorf("expected empty controllers to render as '-'; got:\n%s", out)
+		}
+	})
 }
 
 type fakeClient struct {
