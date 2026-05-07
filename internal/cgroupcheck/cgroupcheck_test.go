@@ -82,6 +82,15 @@ func writeCgroupFiles(t *testing.T, controllers, subtree string) string {
 	return root
 }
 
+// writeCgroupType seeds a cgroup.type file in an existing fake host root
+// so the threaded-subtree classifier reads the value the test wants.
+func writeCgroupType(t *testing.T, root, value string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "cgroup.type"), []byte(value+"\n"), 0o644); err != nil {
+		t.Fatalf("write cgroup.type: %v", err)
+	}
+}
+
 func TestCheckAllEnabled(t *testing.T) {
 	root := writeCgroupFiles(t,
 		"cpuset cpu io memory hugetlb pids rdma misc",
@@ -233,6 +242,168 @@ func TestCheckProbeEOPNOTSUPP(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Errorf("FormatRemediation missing %q:\n%s", want, msg)
 		}
+	}
+}
+
+// TestCheckProbeThreadedSubtreeDomainOnly: when cgroup.type is "domain
+// threaded" and the probe write returns EOPNOTSUPP for a domain-only
+// controller (memory, io), the classifier must report
+// StatusThreadedSubtree — not StatusNotDelegated. The remediation must
+// name the threaded-subtree case and must not include the misleading
+// "escalate to the parent runtime" footer for the affected controllers
+// (the +<ctrl> tee fix line excludes them).
+func TestCheckProbeThreadedSubtreeDomainOnly(t *testing.T) {
+	root := writeCgroupFiles(t,
+		"cpuset cpu io memory pids",
+		"cpu pids",
+	)
+	writeCgroupType(t, root, "domain threaded")
+
+	probe := func(_, ctrl string) error {
+		if ctrl == "memory" || ctrl == "io" {
+			return syscall.EOPNOTSUPP
+		}
+		return nil
+	}
+
+	res, err := cgroupcheck.Check(root, cgroupcheck.CellResourceControllers(), probe)
+	if err != nil {
+		t.Fatalf("Check() unexpected error: %v", err)
+	}
+	for _, c := range []string{"memory", "io"} {
+		if got, want := res.Status[c], cgroupcheck.StatusThreadedSubtree; got != want {
+			t.Errorf("Status[%q] = %v, want %v", c, got, want)
+		}
+	}
+	if res.OK() {
+		t.Fatal("Check() OK=true with threaded-subtree EOPNOTSUPP failures")
+	}
+
+	msg := cgroupcheck.FormatRemediation(res)
+	for _, want := range []string{
+		"threaded-subtree forbids domain-only controllers",
+		"memory, io",
+		`"domain threaded"`,
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("FormatRemediation missing %q:\n%s", want, msg)
+		}
+	}
+	// The threaded-subtree fix is not "+<ctrl> | sudo tee" — those
+	// writes will EOPNOTSUPP again. The fix line must omit the
+	// threaded-subtree controllers so the suggestion stays correct.
+	if strings.Contains(msg, "+memory") || strings.Contains(msg, "+io") {
+		t.Errorf("FormatRemediation suggests +memory/+io tee fix for threaded-subtree controllers:\n%s", msg)
+	}
+	// And the threaded-subtree class must not be misclassified as the
+	// namespace trap, which would lead the operator to escalate
+	// pointlessly to the host/container runtime.
+	if strings.Contains(msg, "cgroup-namespace trap") {
+		t.Errorf("FormatRemediation surfaces cgroup-namespace trap stanza for threaded-subtree-only failures:\n%s", msg)
+	}
+}
+
+// TestCheckProbeThreadedTypeAlone: cgroup.type "threaded" (the cgroup is
+// itself a threaded child, not just a domain root with threaded
+// children) is the second value the kernel uses to gate domain-only
+// controllers. Pin the same classification path so a future regression
+// that only handles "domain threaded" still trips this test.
+func TestCheckProbeThreadedTypeAlone(t *testing.T) {
+	root := writeCgroupFiles(t,
+		"cpuset cpu io memory pids",
+		"cpu pids",
+	)
+	writeCgroupType(t, root, "threaded")
+
+	probe := func(_, ctrl string) error {
+		if ctrl == "memory" || ctrl == "io" {
+			return syscall.EOPNOTSUPP
+		}
+		return nil
+	}
+
+	res, err := cgroupcheck.Check(root, cgroupcheck.CellResourceControllers(), probe)
+	if err != nil {
+		t.Fatalf("Check() unexpected error: %v", err)
+	}
+	for _, c := range []string{"memory", "io"} {
+		if got, want := res.Status[c], cgroupcheck.StatusThreadedSubtree; got != want {
+			t.Errorf("Status[%q] = %v, want %v under cgroup.type=threaded", c, got, want)
+		}
+	}
+}
+
+// TestCheckProbeThreadedTypeThreadAwareControllerStaysNotDelegated: a
+// thread-aware controller (cpu, pids, ...) failing with EOPNOTSUPP on a
+// "domain threaded" cgroup is a real namespace trap, not the
+// threaded-subtree case — the kernel does allow these in a threaded
+// subtree. Misclassifying here would suppress the correct escalation
+// hint, so pin the boundary.
+func TestCheckProbeThreadedTypeThreadAwareControllerStaysNotDelegated(t *testing.T) {
+	root := writeCgroupFiles(t,
+		"cpuset cpu io memory pids",
+		"memory io",
+	)
+	writeCgroupType(t, root, "domain threaded")
+
+	probe := func(_, ctrl string) error {
+		if ctrl == "cpu" || ctrl == "pids" {
+			return syscall.EOPNOTSUPP
+		}
+		return nil
+	}
+
+	res, err := cgroupcheck.Check(root, cgroupcheck.CellResourceControllers(), probe)
+	if err != nil {
+		t.Fatalf("Check() unexpected error: %v", err)
+	}
+	for _, c := range []string{"cpu", "pids"} {
+		if got, want := res.Status[c], cgroupcheck.StatusNotDelegated; got != want {
+			t.Errorf("Status[%q] = %v, want %v (thread-aware controller in threaded subtree → namespace trap)",
+				c, got, want)
+		}
+	}
+}
+
+// TestCheckProbeMissingCgroupTypeFallsBackToNotDelegated: the
+// classifier's cgroup.type read must fail soft — when the file is
+// absent (e.g. tempdir-backed fakes that don't set it), an EOPNOTSUPP
+// probe write stays StatusNotDelegated rather than getting reclassified.
+// This pins the conservative-fallback contract so a future "treat
+// missing cgroup.type as threaded" change can't silently break the
+// existing namespace-trap diagnosis on hosts where cgroup.type is
+// genuinely unreadable.
+func TestCheckProbeMissingCgroupTypeFallsBackToNotDelegated(t *testing.T) {
+	root := writeCgroupFiles(t,
+		"cpuset cpu io memory pids",
+		"cpu pids",
+	)
+	// Deliberately do not write cgroup.type.
+
+	probe := func(_, ctrl string) error {
+		if ctrl == "memory" || ctrl == "io" {
+			return syscall.EOPNOTSUPP
+		}
+		return nil
+	}
+
+	res, err := cgroupcheck.Check(root, cgroupcheck.CellResourceControllers(), probe)
+	if err != nil {
+		t.Fatalf("Check() unexpected error: %v", err)
+	}
+	for _, c := range []string{"memory", "io"} {
+		if got, want := res.Status[c], cgroupcheck.StatusNotDelegated; got != want {
+			t.Errorf("Status[%q] = %v, want %v with cgroup.type absent", c, got, want)
+		}
+	}
+}
+
+// TestStatusThreadedSubtreeString pins the human-readable label so
+// downstream parsers / dev-init.sh greps that key on the label stay
+// stable.
+func TestStatusThreadedSubtreeString(t *testing.T) {
+	if got, want := cgroupcheck.StatusThreadedSubtree.String(), "threaded-subtree"; got != want {
+		t.Errorf("StatusThreadedSubtree.String() = %q, want %q", got, want)
 	}
 }
 

@@ -70,6 +70,14 @@ const (
 	// cgroup-namespace trap: cgroup.controllers advertises kernel support
 	// but the namespace's actual parent never delegated the controller.
 	StatusNotDelegated
+	// StatusThreadedSubtree — the probe write returned EOPNOTSUPP and
+	// cgroup.type at this scope is "domain threaded" or "threaded", so the
+	// kernel forbids enabling domain-only controllers (memory, io, ...) in
+	// this subtree_control regardless of delegation. Distinct from
+	// StatusNotDelegated because escalating to the parent runtime will not
+	// help — the fix lives at the threaded descendant or in this cgroup's
+	// own cgroup.type.
+	StatusThreadedSubtree
 	// StatusNeedsDelegation — listed in cgroup.controllers, missing from
 	// cgroup.subtree_control, and we did not probe (or probing wasn't
 	// permitted). The fix is "+<ctrl>" to cgroup.subtree_control, but the
@@ -93,6 +101,8 @@ func (s Status) String() string {
 		return "kernel-missing"
 	case StatusNotDelegated:
 		return "not-delegated"
+	case StatusThreadedSubtree:
+		return "threaded-subtree"
 	case StatusNeedsDelegation:
 		return "needs-delegation"
 	case StatusEnabledByProbe:
@@ -134,6 +144,7 @@ func (r Result) Unresolved() []string {
 			// Good terminal state.
 		case StatusKernelMissing,
 			StatusNotDelegated,
+			StatusThreadedSubtree,
 			StatusNeedsDelegation,
 			StatusPermissionDenied:
 			out = append(out, c)
@@ -233,22 +244,28 @@ func Check(hostRoot string, required []string, probe Prober) (Result, error) {
 			}
 			perr := probe(hostRoot, c)
 			res.ProbeErr[c] = perr
-			res.Status[c] = classifyProbeErr(perr)
+			res.Status[c] = classifyProbeErr(hostRoot, c, perr)
 		}
 	}
 	return res, nil
 }
 
 // classifyProbeErr maps the result of a probe write to a Status. The
-// distinction between StatusNotDelegated and StatusPermissionDenied is the
-// whole point of probing — getting it right keeps the remediation
-// suggestion correct.
-func classifyProbeErr(err error) Status {
+// distinction between StatusNotDelegated, StatusThreadedSubtree, and
+// StatusPermissionDenied is the whole point of probing — getting it right
+// keeps the remediation suggestion correct. EOPNOTSUPP on a domain-only
+// controller in a "domain threaded" / "threaded" cgroup is the
+// threaded-subtree trap, not the cgroup-namespace trap; reading
+// cgroup.type at hostRoot is what disambiguates them.
+func classifyProbeErr(hostRoot, controller string, err error) Status {
 	if err == nil {
 		return StatusEnabledByProbe
 	}
 	switch {
 	case errors.Is(err, syscall.EOPNOTSUPP), errors.Is(err, syscall.ENOTSUP):
+		if isThreadedSubtreeRoot(hostRoot) && isDomainOnlyController(controller) {
+			return StatusThreadedSubtree
+		}
 		return StatusNotDelegated
 	case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
 		return StatusPermissionDenied
@@ -257,6 +274,41 @@ func classifyProbeErr(err error) Status {
 	// unexpected error: the controller was advertised but the write did
 	// not land, which is the same operator-visible outcome.
 	return StatusNotDelegated
+}
+
+// isDomainOnlyController reports whether a cgroup-v2 controller is
+// forbidden in a threaded subtree's cgroup.subtree_control. The kernel
+// permits only thread-aware controllers (cpu, cpuset, perf_event, pids
+// per cgroup-v2.rst) in a threaded subtree; everything else is
+// domain-only and will EOPNOTSUPP on the +<ctrl> write. Adding to this
+// set without kernel support would silently reclassify a real namespace
+// trap as threaded-subtree, so the list is pinned narrowly.
+func isDomainOnlyController(c string) bool {
+	switch c {
+	case "cpu", "cpuset", "perf_event", "pids":
+		return false
+	}
+	return true
+}
+
+// isThreadedSubtreeRoot reports whether the cgroup at hostRoot is in a
+// threaded state where domain-only controllers cannot be enabled. The
+// kernel exposes two relevant cgroup.type values: "domain threaded" (a
+// domain that has a threaded child, so its subtree_control is restricted
+// to thread-aware controllers) and "threaded" (the cgroup is itself a
+// threaded child). A read failure conservatively returns false so the
+// classifier falls through to the existing namespace-trap diagnosis
+// rather than mislabeling on hosts where cgroup.type is not present.
+func isThreadedSubtreeRoot(hostRoot string) bool {
+	data, err := os.ReadFile(filepath.Join(hostRoot, "cgroup.type"))
+	if err != nil {
+		return false
+	}
+	switch strings.TrimSpace(string(data)) {
+	case "domain threaded", "threaded":
+		return true
+	}
+	return false
 }
 
 // FormatRemediation returns a human-readable, multi-line message describing
@@ -281,6 +333,15 @@ func FormatRemediation(r Result) string {
 		b.WriteString("    them. escalate to the host / container runtime above this\n")
 		b.WriteString("    shell to delegate the missing controllers.\n")
 	}
+	if g, ok := groups[StatusThreadedSubtree]; ok {
+		fmt.Fprintf(&b, "\n  threaded-subtree forbids domain-only controllers: %s\n", strings.Join(g, ", "))
+		b.WriteString("    cgroup.type at this scope is \"domain threaded\" or \"threaded\",\n")
+		b.WriteString("    so the kernel only permits thread-aware controllers (cpu,\n")
+		b.WriteString("    cpuset, perf_event, pids) in this subtree_control. escalating\n")
+		b.WriteString("    to the parent runtime will not help — fix the threaded\n")
+		b.WriteString("    descendant that promoted this cgroup, or change this scope's\n")
+		b.WriteString("    cgroup.type back to \"domain\" before retrying.\n")
+	}
 	if g, ok := groups[StatusKernelMissing]; ok {
 		fmt.Fprintf(&b, "\n  kernel does not support: %s\n", strings.Join(g, ", "))
 		b.WriteString("    the running kernel was built without these controllers, or\n")
@@ -303,8 +364,11 @@ func FormatRemediation(r Result) string {
 	parts := make([]string, 0, len(unresolved))
 	for _, c := range unresolved {
 		// "kernel-missing" controllers cannot be enabled by an operator
-		// write; omit them from the fix line so the suggestion is correct.
-		if r.Status[c] == StatusKernelMissing {
+		// write; "threaded-subtree" controllers will EOPNOTSUPP on the
+		// same +<ctrl> write the fix suggests. Omit both from the fix
+		// line so the suggestion is correct — the threaded-subtree
+		// stanza above already explains the right remediation.
+		if r.Status[c] == StatusKernelMissing || r.Status[c] == StatusThreadedSubtree {
 			continue
 		}
 		parts = append(parts, "+"+c)
