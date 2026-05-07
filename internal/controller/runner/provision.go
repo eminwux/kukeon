@@ -1801,12 +1801,14 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 
 	// Per-cell /etc/hostname / /etc/hosts: ensure the source files exist and
 	// every non-root container in cell.Spec.Containers carries the bind-mount
-	// path before the loop below builds OCI specs. Idempotent on the
-	// existing-root branch (re-renders the same content) and a fill-in for
-	// the no-root branch where the root spec was just stamped above. Issue
-	// #345.
-	if etcErr := r.renderCellEtcFilesPreCNI(cell); etcErr != nil {
-		return nil, fmt.Errorf("render cell etc files: %w", etcErr)
+	// path before the loop below builds OCI specs. On the existing-root
+	// branch the cell IP may already be rendered into /etc/hosts by a prior
+	// StartCell; use the existence-only helper so update_cell /
+	// update_container ticks don't truncate the IP line back to localhost-
+	// only. The no-root branch's pre-CNI render above remains the source of
+	// content for fresh cells. Issue #345.
+	if etcErr := r.ensureCellEtcFilesExistPreCNI(cell); etcErr != nil {
+		return nil, fmt.Errorf("ensure cell etc files: %w", etcErr)
 	}
 	r.stampCellEtcFilePathsOnContainers(cell)
 

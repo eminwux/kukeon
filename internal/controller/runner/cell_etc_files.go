@@ -170,6 +170,41 @@ func (r *Exec) renderCellEtcFilesPreCNI(cell *intmodel.Cell) error {
 	return renderCellEtcHosts(hostsPath, cellName, nil)
 }
 
+// ensureCellEtcFilesExistPreCNI guarantees the per-cell /etc/hostname and
+// /etc/hosts source files exist without rewriting them when they already
+// do. Use this on call paths where a prior StartCell may have rendered
+// /etc/hosts with the cell IP — an unconditional pre-CNI re-render would
+// truncate the IP line and regress the DNS-lookup fix issue #345 ships.
+// First-creation paths still call renderCellEtcFilesPreCNI directly.
+func (r *Exec) ensureCellEtcFilesExistPreCNI(cell *intmodel.Cell) error {
+	if cell == nil {
+		return nil
+	}
+	hostnamePath, hostsPath, suppressHosts := r.cellEtcFilePaths(cell)
+	if hostnamePath == "" {
+		return nil
+	}
+	cellName := strings.TrimSpace(cell.Metadata.Name)
+	if _, err := os.Stat(hostnamePath); err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("stat %s: %w", hostnamePath, err)
+		}
+		if rerr := renderCellEtcHostname(hostnamePath, cellName); rerr != nil {
+			return rerr
+		}
+	}
+	if suppressHosts {
+		return nil
+	}
+	if _, err := os.Stat(hostsPath); err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("stat %s: %w", hostsPath, err)
+		}
+		return renderCellEtcHosts(hostsPath, cellName, nil)
+	}
+	return nil
+}
+
 // renderCellEtcHostsWithIP rewrites the cell's /etc/hosts to include the
 // CNI-assigned cell IP. Called from StartCell after AddContainerToNetwork
 // succeeds (or returns the cached IP on the idempotent-veth-exists path).
