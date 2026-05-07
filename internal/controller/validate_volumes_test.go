@@ -75,6 +75,57 @@ func TestValidateVolumes(t *testing.T) {
 			in:      []intmodel.VolumeMount{{Source: filepath.Join(tmpDir, "nope"), Target: "/dst"}},
 			wantErr: errdefs.ErrVolumeSourceNotFound,
 		},
+		{
+			name: "explicit bind kind accepted",
+			in: []intmodel.VolumeMount{
+				{Kind: intmodel.VolumeKindBind, Source: existing, Target: "/dst"},
+			},
+		},
+		{
+			name: "tmpfs minimal",
+			in: []intmodel.VolumeMount{
+				{Kind: intmodel.VolumeKindTmpfs, Target: "/run/cache"},
+			},
+		},
+		{
+			name: "tmpfs with size and mode",
+			in: []intmodel.VolumeMount{
+				{
+					Kind:      intmodel.VolumeKindTmpfs,
+					Target:    "/var/lib/containerd",
+					SizeBytes: 1 << 30,
+					Mode:      0o0755,
+				},
+			},
+		},
+		{
+			name: "tmpfs rejects source",
+			in: []intmodel.VolumeMount{
+				{Kind: intmodel.VolumeKindTmpfs, Source: "/host/path", Target: "/dst"},
+			},
+			wantErr: errdefs.ErrVolumeTmpfsSourceForbidden,
+		},
+		{
+			name: "tmpfs requires target",
+			in: []intmodel.VolumeMount{
+				{Kind: intmodel.VolumeKindTmpfs},
+			},
+			wantErr: errdefs.ErrVolumeTargetRequired,
+		},
+		{
+			name: "tmpfs target must be absolute",
+			in: []intmodel.VolumeMount{
+				{Kind: intmodel.VolumeKindTmpfs, Target: "relative"},
+			},
+			wantErr: errdefs.ErrVolumeTargetNotAbsolute,
+		},
+		{
+			name: "unknown kind rejected",
+			in: []intmodel.VolumeMount{
+				{Kind: intmodel.VolumeKind("nfs"), Target: "/dst"},
+			},
+			wantErr: errdefs.ErrVolumeKindUnknown,
+		},
 	}
 
 	for _, tt := range tests {
@@ -105,5 +156,41 @@ func TestValidateVolumes_TrimsWhitespace(t *testing.T) {
 	}
 	if out[0].Source != tmpDir || out[0].Target != "/dst" {
 		t.Errorf("got %+v, expected source=%q target=\"/dst\"", out[0], tmpDir)
+	}
+}
+
+func TestValidateVolumes_PreservesTmpfsFields(t *testing.T) {
+	in := []intmodel.VolumeMount{{
+		Kind:      intmodel.VolumeKindTmpfs,
+		Target:    "/var/lib/containerd",
+		ReadOnly:  true,
+		SizeBytes: 1 << 30,
+		Mode:      0o0755,
+	}}
+	out, err := validateVolumes(in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("len = %d, want 1", len(out))
+	}
+	got := out[0]
+	if got.Kind != intmodel.VolumeKindTmpfs {
+		t.Errorf("Kind = %q, want %q", got.Kind, intmodel.VolumeKindTmpfs)
+	}
+	if got.Source != "" {
+		t.Errorf("Source = %q, want \"\"", got.Source)
+	}
+	if got.Target != "/var/lib/containerd" {
+		t.Errorf("Target = %q, want \"/var/lib/containerd\"", got.Target)
+	}
+	if !got.ReadOnly {
+		t.Errorf("ReadOnly = false, want true")
+	}
+	if got.SizeBytes != 1<<30 {
+		t.Errorf("SizeBytes = %d, want %d", got.SizeBytes, 1<<30)
+	}
+	if got.Mode != 0o0755 {
+		t.Errorf("Mode = %o, want %o", got.Mode, 0o0755)
 	}
 }

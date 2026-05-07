@@ -158,11 +158,31 @@ type ContainerSecret struct {
 	MountPath string `json:"mountPath,omitempty" yaml:"mountPath,omitempty"`
 }
 
-// VolumeMount is a bind mount of a host path into a container.
+// VolumeKind discriminates between the supported VolumeMount kinds. Mirrors
+// intmodel.VolumeKind. An empty value deserializes as VolumeKindBind so YAML
+// authored before the discriminator existed keeps its bind semantics.
+type VolumeKind string
+
+const (
+	// VolumeKindBind is a host bind mount. Source and Target are required.
+	VolumeKindBind VolumeKind = "bind"
+	// VolumeKindTmpfs is an in-memory tmpfs mount. Only Target is required;
+	// Source must be empty. SizeBytes and Mode tune the standard tmpfs
+	// size= and mode= options when non-zero.
+	VolumeKindTmpfs VolumeKind = "tmpfs"
+)
+
+// VolumeMount is a mount entry attached to a container. The Kind discriminator
+// selects the OCI mount type the runtime emits: bind (host path → container
+// path) or tmpfs (in-memory directory). Empty Kind means bind for back-compat
+// with YAML authored before the discriminator existed.
 type VolumeMount struct {
-	Source   string `json:"source"             yaml:"source"`
-	Target   string `json:"target"             yaml:"target"`
-	ReadOnly bool   `json:"readOnly,omitempty" yaml:"readOnly,omitempty"`
+	Kind      VolumeKind `json:"kind,omitempty"      yaml:"kind,omitempty"`
+	Source    string     `json:"source,omitempty"    yaml:"source,omitempty"`
+	Target    string     `json:"target"              yaml:"target"`
+	ReadOnly  bool       `json:"readOnly,omitempty"  yaml:"readOnly,omitempty"`
+	SizeBytes int64      `json:"sizeBytes,omitempty" yaml:"sizeBytes,omitempty"`
+	Mode      uint32     `json:"mode,omitempty"      yaml:"mode,omitempty"`
 }
 
 // ContainerCapabilities groups Linux capability deltas applied to the
