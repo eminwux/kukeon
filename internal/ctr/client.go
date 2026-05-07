@@ -62,12 +62,22 @@ type Client interface {
 	NewCgroup(spec CgroupSpec) (*cgroup2.Manager, error)
 	LoadCgroup(group string, mountpoint string) (*cgroup2.Manager, error)
 	DeleteCgroup(group, mountpoint string) error
+	// EnsureSubtreeControllers writes "+<ctrl>" to the named group's own
+	// cgroup.subtree_control AND to every ancestor up to the unified cgroup
+	// mount, so the group's children inherit the controllers. The level-
+	// agnostic primitive used by every realm/space/stack ensure path (issue
+	// #327) and by the cell wrappers below (issues #312, #314). Filters the
+	// requested set against what the host root advertises and returns the
+	// effective set actually written. Idempotent — re-running on an already-
+	// delegated subtree is a no-op.
+	EnsureSubtreeControllers(group, mountpoint string, controllers []string) ([]string, error)
 	// EnableCellSubtreeControllers enables the named cgroup-v2 controllers in
 	// the cell cgroup's own subtree_control AND in every ancestor's
 	// subtree_control up to the unified cgroup mount, so child cgroups (the
 	// per-container task cgroups runc creates under Linux.CgroupsPath)
 	// inherit the controllers and cell-level resource accounting / limits
-	// become effective. Issue #312.
+	// become effective. Thin wrapper around EnsureSubtreeControllers kept
+	// for the cell call sites' readability. Issue #312.
 	EnableCellSubtreeControllers(group, mountpoint string, controllers []string) error
 	// EnableCellAllSubtreeControllers is the cell/profile=NestedCgroupRuntime
 	// counterpart: it delegates the full host-available cgroup-v2 controller

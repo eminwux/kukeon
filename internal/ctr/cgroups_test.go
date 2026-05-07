@@ -320,6 +320,64 @@ func TestGetCgroupMountpoint(t *testing.T) {
 	}
 }
 
+// TestEnsureSubtreeControllersValidation covers the input-validation
+// surface of the issue-#327 level-agnostic entry point used by every
+// realm/space/stack provision path. Mirrors TestEnableCellAllSubtreeControllersValidation:
+// the empty group path must be rejected with the shared sentinel; an
+// empty controllers slice short-circuits (no validation error, no work);
+// a syntactically valid group with a non-empty controllers list passes
+// validation (the underlying cgroupfs read is then expected to fail in
+// the unit-test environment, which we don't assert on).
+func TestEnsureSubtreeControllersValidation(t *testing.T) {
+	client := setupTestClientForCgroups(t)
+
+	if _, err := client.EnsureSubtreeControllers("", "/sys/fs/cgroup", []string{"cpu"}); err == nil {
+		t.Error("EnsureSubtreeControllers(empty group) error = nil, want ErrEmptyGroupPath")
+	} else if !errors.Is(err, errdefs.ErrEmptyGroupPath) {
+		t.Errorf("EnsureSubtreeControllers(empty group) error = %v, want ErrEmptyGroupPath", err)
+	}
+
+	// Empty controllers list: short-circuit without touching the cgroup
+	// hierarchy. Must not return ErrEmptyGroupPath (group is valid) and
+	// must return a nil effective set.
+	got, err := client.EnsureSubtreeControllers("/kukeon/test", "/sys/fs/cgroup", nil)
+	if err != nil {
+		t.Errorf("EnsureSubtreeControllers(empty controllers) error = %v, want nil", err)
+	}
+	if got != nil {
+		t.Errorf("EnsureSubtreeControllers(empty controllers) effective = %v, want nil", got)
+	}
+
+	// Syntactically valid group + non-empty controllers: validation must
+	// pass; downstream cgroupfs access then fails in the unit-test sandbox,
+	// which is fine — that is not a validation failure and must not
+	// surface ErrEmptyGroupPath.
+	if _, validErr := client.EnsureSubtreeControllers("/kukeon/test", "/sys/fs/cgroup", []string{"cpu"}); validErr != nil &&
+		errors.Is(validErr, errdefs.ErrEmptyGroupPath) {
+		t.Errorf("EnsureSubtreeControllers(valid group) unexpected validation error: %v", validErr)
+	}
+}
+
+// TestEnableCellSubtreeControllersValidation pins the cell-wrapper's
+// validation behaviour after refactoring it onto EnsureSubtreeControllers
+// (issue #327). The semantics — empty group rejected, valid group allowed
+// past validation — must match the pre-refactor behaviour so cell call
+// sites in provision.go keep working unchanged.
+func TestEnableCellSubtreeControllersValidation(t *testing.T) {
+	client := setupTestClientForCgroups(t)
+
+	if err := client.EnableCellSubtreeControllers("", "/sys/fs/cgroup", []string{"cpu"}); err == nil {
+		t.Error("EnableCellSubtreeControllers(empty group) error = nil, want ErrEmptyGroupPath")
+	} else if !errors.Is(err, errdefs.ErrEmptyGroupPath) {
+		t.Errorf("EnableCellSubtreeControllers(empty group) error = %v, want ErrEmptyGroupPath", err)
+	}
+
+	if err := client.EnableCellSubtreeControllers("/kukeon/test", "/sys/fs/cgroup", []string{"cpu"}); err != nil &&
+		errors.Is(err, errdefs.ErrEmptyGroupPath) {
+		t.Errorf("EnableCellSubtreeControllers(valid group) unexpected validation error: %v", err)
+	}
+}
+
 // TestEnableCellAllSubtreeControllersValidation covers the input-validation
 // surface of the issue-#314 NestedCgroupRuntime entry point. The cgroup
 // hierarchy itself isn't writable from a unit test environment, so this

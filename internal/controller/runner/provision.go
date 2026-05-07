@@ -714,6 +714,13 @@ func (r *Exec) ensureSpaceCgroup(space intmodel.Space) (intmodel.Space, error) {
 		if err := r.UpdateSpaceMetadata(space); err != nil {
 			return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateSpaceMetadata, err)
 		}
+		// Idempotent re-toggle of the space's subtree controllers — see the
+		// matching realm ensure-path note for the rationale (issue #327).
+		if subtreeErr := r.enableAncestorSubtreeControllers(spaceDoc.Status.CgroupPath, r.ctrClient.GetCgroupMountpoint()); subtreeErr != nil {
+			r.logger.WarnContext(r.ctx,
+				"failed to enable space subtree controllers on ensure-path",
+				"space", space.Metadata.Name, "error", subtreeErr)
+		}
 	}
 
 	return space, nil
@@ -755,6 +762,13 @@ func (r *Exec) createSpaceCgroup(space intmodel.Space) (string, error) {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateSpaceCgroup, createErr)
 	}
 
+	// Delegate the kukeon resource subset on the space's own subtree_control
+	// so an empty space (no descendant stack/cell yet) still carries the
+	// controllers — issue #327.
+	if subtreeErr := r.enableAncestorSubtreeControllers(spec.Group, spec.Mountpoint); subtreeErr != nil {
+		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateSpaceCgroup, subtreeErr)
+	}
+
 	r.logger.InfoContext(
 		r.ctx,
 		"created space cgroup",
@@ -787,6 +801,15 @@ func (r *Exec) createRealmCgroup(realm intmodel.Realm) (string, error) {
 	cgroupPath, createErr := r.createCgroupInternal(spec)
 	if createErr != nil {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateRealmCgroup, createErr)
+	}
+
+	// Delegate the kukeon resource subset on the realm's own subtree_control
+	// so an empty realm (no descendant space/stack/cell yet) still carries
+	// the controllers — issue #327. Mirrors the cell-level call site below
+	// so each level explicitly populates its own subtree instead of
+	// relying on the first cell's ancestor walk to widen everything.
+	if subtreeErr := r.enableAncestorSubtreeControllers(spec.Group, spec.Mountpoint); subtreeErr != nil {
+		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateRealmCgroup, subtreeErr)
 	}
 
 	r.logger.InfoContext(
@@ -844,6 +867,16 @@ func (r *Exec) ensureRealmCgroup(realm intmodel.Realm) (intmodel.Realm, error) {
 	if realmDoc.Status.CgroupPath != "" {
 		if err := r.UpdateRealmMetadata(realm); err != nil {
 			return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateRealmMetadata, err)
+		}
+		// Idempotent re-toggle of the realm's subtree controllers on every
+		// ensure-pass — covers daemon restart against pre-#327 realms whose
+		// subtree_control was only populated as a side effect of the first
+		// cell. No-op on already-delegated subtrees. Log + continue on
+		// failure to mirror the cell ensure-path pattern.
+		if subtreeErr := r.enableAncestorSubtreeControllers(realmDoc.Status.CgroupPath, r.ctrClient.GetCgroupMountpoint()); subtreeErr != nil {
+			r.logger.WarnContext(r.ctx,
+				"failed to enable realm subtree controllers on ensure-path",
+				"realm", realm.Metadata.Name, "error", subtreeErr)
 		}
 	} else {
 		// If cgroup path is still empty after ensureCgroupInternal, log warning
@@ -914,6 +947,13 @@ func (r *Exec) createStackCgroup(stack intmodel.Stack) (string, error) {
 		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateStackCgroup, createErr)
 	}
 
+	// Delegate the kukeon resource subset on the stack's own subtree_control
+	// so an empty stack (no descendant cell yet) still carries the
+	// controllers — issue #327.
+	if subtreeErr := r.enableAncestorSubtreeControllers(spec.Group, spec.Mountpoint); subtreeErr != nil {
+		return "", fmt.Errorf("%w: %w", errdefs.ErrCreateStackCgroup, subtreeErr)
+	}
+
 	r.logger.InfoContext(
 		r.ctx,
 		"created stack cgroup",
@@ -973,6 +1013,13 @@ func (r *Exec) ensureStackCgroup(stack intmodel.Stack) (intmodel.Stack, error) {
 	if stackDoc.Status.CgroupPath != "" {
 		if err := r.UpdateStackMetadata(stack); err != nil {
 			return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateStackMetadata, err)
+		}
+		// Idempotent re-toggle of the stack's subtree controllers — see the
+		// matching realm ensure-path note for the rationale (issue #327).
+		if subtreeErr := r.enableAncestorSubtreeControllers(stackDoc.Status.CgroupPath, r.ctrClient.GetCgroupMountpoint()); subtreeErr != nil {
+			r.logger.WarnContext(r.ctx,
+				"failed to enable stack subtree controllers on ensure-path",
+				"stack", stack.Metadata.Name, "error", subtreeErr)
 		}
 	}
 
@@ -1104,6 +1151,19 @@ func (r *Exec) enableCellControllers(cell intmodel.Cell, group, mountpoint strin
 		return r.ctrClient.EnableCellAllSubtreeControllers(group, mountpoint)
 	}
 	return r.ctrClient.EnableCellSubtreeControllers(group, mountpoint, cgroupcheck.CellResourceControllers())
+}
+
+// enableAncestorSubtreeControllers delegates the kukeon resource subset on
+// a non-cell level (realm, space, stack) so the level's subtree_control is
+// populated independently of the first cell that lands under it. Without
+// this, an empty realm/space/stack carries no controllers — the cell-level
+// ToggleControllers walk only widens ancestors when a cell is created
+// (issue #327). Returning the underlying error lets callers in create-
+// paths fail hard while ensure-pass call sites can choose to log + continue
+// (matching the cell ensure-path pattern).
+func (r *Exec) enableAncestorSubtreeControllers(group, mountpoint string) error {
+	_, err := r.ctrClient.EnsureSubtreeControllers(group, mountpoint, cgroupcheck.CellResourceControllers())
+	return err
 }
 
 func (r *Exec) ensureCellCgroup(cell intmodel.Cell) (intmodel.Cell, error) {
