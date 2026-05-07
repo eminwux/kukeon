@@ -530,6 +530,118 @@ func TestCheckUnresolvedOrderMatchesRequired(t *testing.T) {
 // land "+<ctrl>" verbatim — cgroupfs interprets the line additively, so
 // the prober must not pad with newlines or other framing that would
 // change semantics on a real subtree_control file.
+// TestOnlyInternalProcessAllStatusInternalProcess: every unresolved
+// controller is StatusInternalProcess → the doctor's self-heal downgrade
+// can fire. Pins the all-EBUSY case dev-init.sh hits on a
+// NestedCgroupRuntime sandbox.
+func TestOnlyInternalProcessAllStatusInternalProcess(t *testing.T) {
+	root := writeCgroupFiles(t,
+		"cpuset cpu io memory pids",
+		"cpu pids",
+	)
+	probe := func(_, ctrl string) error {
+		if ctrl == "memory" || ctrl == "io" {
+			return syscall.EBUSY
+		}
+		return nil
+	}
+	res, err := cgroupcheck.Check(root, cgroupcheck.CellResourceControllers(), probe)
+	if err != nil {
+		t.Fatalf("Check() unexpected error: %v", err)
+	}
+	if !res.OnlyInternalProcess() {
+		t.Fatalf("OnlyInternalProcess() = false on all-EBUSY result; unresolved=%v", res.Unresolved())
+	}
+}
+
+// TestOnlyInternalProcessMixedReturnsFalse: when at least one unresolved
+// controller is not StatusInternalProcess (e.g. kernel-missing), the
+// runtime drain cannot self-heal it; the doctor must keep the failure
+// fatal. Pins the boundary so a future change can't silently downgrade
+// mixed-class failures.
+func TestOnlyInternalProcessMixedReturnsFalse(t *testing.T) {
+	// memory missing from cgroup.controllers (kernel-missing) AND io
+	// EBUSY on probe (internal-process). Mixed class → must return false.
+	root := writeCgroupFiles(t,
+		"cpuset cpu io pids",
+		"cpu pids",
+	)
+	probe := func(_, ctrl string) error {
+		if ctrl == "io" {
+			return syscall.EBUSY
+		}
+		return nil
+	}
+	res, err := cgroupcheck.Check(root, cgroupcheck.CellResourceControllers(), probe)
+	if err != nil {
+		t.Fatalf("Check() unexpected error: %v", err)
+	}
+	if res.OnlyInternalProcess() {
+		t.Fatalf("OnlyInternalProcess() = true on mixed-class result; unresolved=%v", res.Unresolved())
+	}
+}
+
+// TestOnlyInternalProcessFullyResolvedReturnsFalse: a result with no
+// unresolved controllers is not "only internal-process" — there's
+// nothing to downgrade. Otherwise the doctor's downgrade branch could
+// fire on a happy-path result and emit a misleading warning.
+func TestOnlyInternalProcessFullyResolvedReturnsFalse(t *testing.T) {
+	root := writeCgroupFiles(t,
+		"cpuset cpu io memory pids",
+		"cpu memory io pids",
+	)
+	res, err := cgroupcheck.Check(root, cgroupcheck.CellResourceControllers(), nil)
+	if err != nil {
+		t.Fatalf("Check() unexpected error: %v", err)
+	}
+	if !res.OK() {
+		t.Fatalf("Check() OK=false on fully-enabled host; unresolved=%v", res.Unresolved())
+	}
+	if res.OnlyInternalProcess() {
+		t.Errorf("OnlyInternalProcess() = true on OK result; want false")
+	}
+}
+
+// TestIsHostRootPopulatedReadsCgroupEvents: the populated half of the
+// self-heal fingerprint reads <hostRoot>/cgroup.events and keys on the
+// "populated 1" line. Pins both the file location and the exact line
+// match so a future format change in the kernel surface (or a bad
+// refactor) trips the test instead of silently breaking the gate.
+func TestIsHostRootPopulatedReadsCgroupEvents(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"populated-1", "populated 1\nfrozen 0\n", true},
+		{"populated-0", "populated 0\nfrozen 0\n", false},
+		{"missing-key", "frozen 0\n", false},
+		{"empty-file", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "cgroup.events"), []byte(tc.content), 0o644); err != nil {
+				t.Fatalf("seed cgroup.events: %v", err)
+			}
+			if got := cgroupcheck.IsHostRootPopulated(dir); got != tc.want {
+				t.Errorf("IsHostRootPopulated(%q) = %v, want %v\ncontent=%q", dir, got, tc.want, tc.content)
+			}
+		})
+	}
+}
+
+// TestIsHostRootPopulatedMissingFileReturnsFalse: a missing
+// cgroup.events (e.g. a non-cgroupfs path) must not error — the
+// conservative-fallback contract returns false so the doctor's
+// self-heal branch does not fire on a path that isn't even a cgroup.
+func TestIsHostRootPopulatedMissingFileReturnsFalse(t *testing.T) {
+	dir := t.TempDir()
+	if got := cgroupcheck.IsHostRootPopulated(dir); got != false {
+		t.Errorf("IsHostRootPopulated on missing file = %v, want false", got)
+	}
+}
+
 func TestDefaultProberWritesPlusController(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "cgroup.subtree_control")

@@ -164,6 +164,28 @@ func (r Result) Unresolved() []string {
 	return out
 }
 
+// OnlyInternalProcess reports whether every unresolved required controller
+// failed with StatusInternalProcess. Used by `kuke doctor cgroups` to
+// recognize the case where the applySubtreeControllers defensive
+// __bootstrap drain (internal/ctr, PR #340) self-heals the
+// no-internal-process EBUSY at `kuke init` time — the doctor's pre-flight
+// can surface the diagnostic but does not need to abort, since the runtime
+// would have proceeded anyway. Returns false when the result is fully
+// resolved or when any non-internal-process class still blocks (those
+// require operator action the runtime drain cannot supply).
+func (r Result) OnlyInternalProcess() bool {
+	unresolved := r.Unresolved()
+	if len(unresolved) == 0 {
+		return false
+	}
+	for _, c := range unresolved {
+		if r.Status[c] != StatusInternalProcess {
+			return false
+		}
+	}
+	return true
+}
+
 // ByStatus groups Required controllers by their classification, returning
 // only statuses that have at least one entry. Slice order within each
 // group matches Required.
@@ -408,6 +430,44 @@ func FormatRemediation(r Result) string {
 		b.WriteString("  escalate to the host / container runtime above this shell.\n")
 	}
 	return b.String()
+}
+
+// IsCgroupNsRoot reports whether /proc/self/cgroup pins the calling
+// process at its cgroup namespace's unified-hierarchy root ("0::/"). One
+// half of the fingerprint applySubtreeControllers (internal/ctr) uses to
+// gate its defensive __bootstrap drain — exposed here so the doctor's
+// pre-flight can apply the same gate without depending on internal/ctr.
+// A read failure or any path past "/" returns false so callers fall
+// through to the conservative "this is a hard failure" path.
+func IsCgroupNsRoot() bool {
+	data, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+		if strings.TrimSpace(line) == "0::/" {
+			return true
+		}
+	}
+	return false
+}
+
+// IsHostRootPopulated reports whether <hostRoot>/cgroup.events shows
+// "populated 1", i.e. the root cgroup contains processes that the
+// no-internal-process rule would EBUSY on a subtree_control widening.
+// The other half of applySubtreeControllers's defensive-drain gate. A
+// missing file or any read failure returns false (conservative).
+func IsHostRootPopulated(hostRoot string) bool {
+	data, err := os.ReadFile(filepath.Join(hostRoot, "cgroup.events"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+		if strings.TrimSpace(line) == "populated 1" {
+			return true
+		}
+	}
+	return false
 }
 
 // HostAdvertised returns the controller names in <hostRoot>/cgroup.controllers,

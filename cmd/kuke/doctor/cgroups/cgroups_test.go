@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	cgroupscmd "github.com/eminwux/kukeon/cmd/kuke/doctor/cgroups"
@@ -225,6 +226,168 @@ func TestCgroupsCmdNoSuchRoot(t *testing.T) {
 		t.Errorf("error message = %q, want it to mention 'cgroup pre-flight'", err.Error())
 	}
 	_ = stderr
+}
+
+// TestCgroupsCmdSelfHealDowngradeOnInternalProcess: when the only
+// unresolved class is the EBUSY no-internal-process trap (i.e. what
+// applySubtreeControllers's defensive __bootstrap drain self-heals at
+// `kuke init` time, PR #340) AND the host fingerprint matches both
+// defensive-drain clauses, the pre-flight surfaces the diagnostic on
+// stderr but exits 0 so dev-init.sh proceeds. This is the issue #342
+// repro: stop the doctor from rejecting hosts the runtime would heal.
+func TestCgroupsCmdSelfHealDowngradeOnInternalProcess(t *testing.T) {
+	root := writeFakeCgroup(t,
+		"cpuset cpu io memory pids",
+		"cpu pids",
+	)
+	// Inject a prober that returns EBUSY for memory/io (the
+	// no-internal-process trap) so the result lands in
+	// StatusInternalProcess for those controllers.
+	restoreProber := cgroupscmd.SetActiveProberForTest(func(_, ctrl string) error {
+		if ctrl == "memory" || ctrl == "io" {
+			return syscall.EBUSY
+		}
+		return nil
+	})
+	defer restoreProber()
+	// Force the gate to match (production reads /proc/self/cgroup +
+	// cgroup.events; tests inject directly).
+	restoreGate := cgroupscmd.SetSelfHealGateForTest(func(string) bool { return true })
+	defer restoreGate()
+
+	stdout, stderr, err := runCmd(t, "--root", root)
+	if err != nil {
+		t.Fatalf("self-heal Execute() error = %v\nstdout=%q\nstderr=%q", err, stdout, stderr)
+	}
+	if stdout != "" {
+		t.Errorf("self-heal stdout = %q, want empty (all output goes to stderr)", stdout)
+	}
+	// Diagnostic is still surfaced — operators must see what is about
+	// to happen.
+	for _, want := range []string{
+		"internal-process",
+		"no-internal-process rule",
+		"memory, io",
+		"applySubtreeControllers",
+		"__bootstrap",
+		"`kuke init` will proceed",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("self-heal stderr missing %q:\n%s", want, stderr)
+		}
+	}
+}
+
+// TestCgroupsCmdSelfHealNoDowngradeWithoutGate: if the
+// no-internal-process trap fires but the host fingerprint does NOT
+// match (gate returns false), the runtime drain would also not run, so
+// the pre-flight must remain fatal. Pins the gate as load-bearing —
+// without both clauses holding, the downgrade can't fire.
+func TestCgroupsCmdSelfHealNoDowngradeWithoutGate(t *testing.T) {
+	root := writeFakeCgroup(t,
+		"cpuset cpu io memory pids",
+		"cpu pids",
+	)
+	restoreProber := cgroupscmd.SetActiveProberForTest(func(_, ctrl string) error {
+		if ctrl == "memory" || ctrl == "io" {
+			return syscall.EBUSY
+		}
+		return nil
+	})
+	defer restoreProber()
+	restoreGate := cgroupscmd.SetSelfHealGateForTest(func(string) bool { return false })
+	defer restoreGate()
+
+	_, stderr, err := runCmd(t, "--root", root)
+	if err == nil {
+		t.Fatal("Execute() error = nil with EBUSY trap and gate=false, want fatal")
+	}
+	for _, want := range []string{"internal-process", "no-internal-process rule"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr missing %q:\n%s", want, stderr)
+		}
+	}
+	// The "self-heal" note must NOT be printed when the gate is false —
+	// the operator would otherwise be told `kuke init` will proceed
+	// when in fact it would EBUSY.
+	if strings.Contains(stderr, "`kuke init` will proceed") {
+		t.Errorf("self-heal note printed despite gate=false:\n%s", stderr)
+	}
+}
+
+// TestCgroupsCmdSelfHealNoDowngradeOnMixedClasses: the downgrade only
+// fires when EVERY unresolved controller is StatusInternalProcess. When
+// one controller is internal-process and another is kernel-missing,
+// the runtime drain cannot rescue the second, so the pre-flight must
+// remain fatal. Pins the OnlyInternalProcess boundary so a future
+// change can't silently downgrade mixed-class failures.
+func TestCgroupsCmdSelfHealNoDowngradeOnMixedClasses(t *testing.T) {
+	// memory advertised, io NOT advertised → io stays
+	// StatusKernelMissing regardless of probe; memory EBUSYs to
+	// StatusInternalProcess. Mixed → must remain fatal even with the
+	// gate matching.
+	root := writeFakeCgroup(t,
+		"cpuset cpu memory pids",
+		"cpu pids",
+	)
+	restoreProber := cgroupscmd.SetActiveProberForTest(func(_, ctrl string) error {
+		if ctrl == "memory" {
+			return syscall.EBUSY
+		}
+		return nil
+	})
+	defer restoreProber()
+	restoreGate := cgroupscmd.SetSelfHealGateForTest(func(string) bool { return true })
+	defer restoreGate()
+
+	_, stderr, err := runCmd(t, "--root", root)
+	if err == nil {
+		t.Fatal("Execute() error = nil on mixed internal-process + kernel-missing, want fatal")
+	}
+	if !strings.Contains(stderr, "kernel does not support") {
+		t.Errorf("stderr missing kernel-missing stanza on mixed-class failure:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "`kuke init` will proceed") {
+		t.Errorf("self-heal note printed despite kernel-missing controllers in the same result:\n%s", stderr)
+	}
+}
+
+// TestCgroupsCmdSelfHealNoDowngradeOnScoped: --scope paths probe a
+// sub-tree, not the cgroup-namespace mountpoint root. The runtime
+// drain in applySubtreeControllers only operates on the mountpoint
+// root, so a scoped EBUSY is genuinely operator-actionable and must
+// stay fatal even when the gate matches.
+func TestCgroupsCmdSelfHealNoDowngradeOnScoped(t *testing.T) {
+	root := t.TempDir()
+	writeFakeCgroupAt(t, root,
+		"cpuset cpu io memory pids",
+		"cpu memory io pids",
+	)
+	realmCg := "/kukeon/default"
+	writeFakeCgroupAt(t, filepath.Join(root, realmCg),
+		"cpuset cpu io memory pids",
+		"cpu pids",
+	)
+	restoreProber := cgroupscmd.SetActiveProberForTest(func(_, ctrl string) error {
+		if ctrl == "memory" || ctrl == "io" {
+			return syscall.EBUSY
+		}
+		return nil
+	})
+	defer restoreProber()
+	restoreGate := cgroupscmd.SetSelfHealGateForTest(func(string) bool { return true })
+	defer restoreGate()
+
+	client := &fakeScopedClient{realmExists: true, realmCgroupPath: realmCg}
+	_, stderr, err := runCmdWithClient(t, client,
+		"--scope", "realm", "default", "--root", root,
+	)
+	if err == nil {
+		t.Fatal("scope=realm Execute() error = nil with EBUSY at scoped path, want fatal")
+	}
+	if strings.Contains(stderr, "`kuke init` will proceed") {
+		t.Errorf("self-heal note printed for scoped pre-flight (runtime drain does not heal scoped EBUSY):\n%s", stderr)
+	}
 }
 
 // fakeScopedClient embeds FakeClient so only the Get* methods relevant to
