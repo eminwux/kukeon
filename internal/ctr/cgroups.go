@@ -17,6 +17,7 @@
 package ctr
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -29,6 +30,13 @@ import (
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 )
+
+// bootstrapLeafName is the leaf cgroup the defensive drain in
+// applySubtreeControllers relocates the cgroup-namespace root's processes
+// into when widening subtree_control would otherwise hit the no-internal-
+// process rule. Kept distinct from _payload (the cell-startup leaf) so
+// post-mortem inspection of /sys/fs/cgroup can tell the two layers apart.
+const bootstrapLeafName = "__bootstrap"
 
 // TODO(eminwux): add cgroup integration tests once CI exposes a writable cgroup v2 hierarchy.
 
@@ -131,6 +139,52 @@ func (c *client) AddProcessToCgroup(group, mountpoint string, pid int) error {
 	return manager.AddProc(uint64(pid))
 }
 
+// RelocateProcessesToLeaf drains every PID currently in <group>/cgroup.procs
+// into a freshly-mkdir'd leaf cgroup at <group>/<leaf>. Used by both the
+// cell-startup structural fix and the applySubtreeControllers defensive
+// drain to satisfy cgroup-v2's no-internal-process rule before the kernel
+// is asked to enable a non-thread-aware controller in <group>'s
+// subtree_control. Idempotent: re-running on an already-drained group is a
+// no-op (mkdir tolerates existing leaf, the procs read returns no PIDs).
+//
+// The leaf scope inherits the parent's controllers via the parent's
+// subtree_control walk that runs after the drain, so resource accounting
+// applied at <group> still constrains the leaf — the relocation moves
+// where PIDs live in the cgroup tree, not which limits apply to them.
+func (c *client) RelocateProcessesToLeaf(group, mountpoint, leaf string) error {
+	if err := validateGroupPath(group); err != nil {
+		return err
+	}
+	if leaf == "" || strings.ContainsAny(leaf, "/") || leaf == "." || leaf == ".." {
+		return errdefs.ErrInvalidLeafName
+	}
+
+	mp := c.effectiveMountpoint(mountpoint)
+	groupPath := filepath.Join(mp, strings.TrimPrefix(group, "/"))
+	leafPath := filepath.Join(groupPath, leaf)
+
+	if err := os.Mkdir(leafPath, 0o750); err != nil && !os.IsExist(err) {
+		return fmt.Errorf("create leaf cgroup %s: %w", leafPath, err)
+	}
+
+	pids, err := readCgroupProcs(filepath.Join(groupPath, "cgroup.procs"))
+	if err != nil {
+		return fmt.Errorf("read cgroup.procs in %s: %w", groupPath, err)
+	}
+	if len(pids) == 0 {
+		return nil
+	}
+
+	leafProcs := filepath.Join(leafPath, "cgroup.procs")
+	if writeErr := writeCgroupProcs(leafProcs, pids); writeErr != nil {
+		return fmt.Errorf("write cgroup.procs in %s: %w", leafPath, writeErr)
+	}
+
+	c.logger.InfoContext(c.ctx, "relocated processes to leaf cgroup",
+		"group", group, "leaf", leaf, "pids", len(pids))
+	return nil
+}
+
 // EnsureSubtreeControllers writes "+<ctrl>" to every ancestor's
 // cgroup.subtree_control file (root → group's parent) AND to the group's own
 // cgroup.subtree_control. The library's Manager.ToggleControllers handles the
@@ -218,6 +272,21 @@ func (c *client) applySubtreeControllers(group, mountpoint string, enable []stri
 		return nil
 	}
 
+	// Defensive no-internal-process drain (issue #336 scenario B). When kuke
+	// is invoked from inside a cgroup-namespace whose root cgroup carries
+	// processes (the shell, the kuke binary, anything else spawned by
+	// runc-exec into the cell's container-root cgroup directly), the
+	// ancestor walk below would EBUSY at the cgroup-ns root because
+	// cgroup-v2 forbids enabling non-thread-aware controllers in the
+	// subtree_control of a cgroup that hosts processes. Both clauses are
+	// required: /proc/self/cgroup == 0::/ guards against accidentally
+	// draining systemd's processes on a non-nested host (where the path
+	// shows the systemd slice, not the bare 0::/), and the populated check
+	// avoids the no-op mkdir+read on an empty root.
+	if drainErr := c.maybeDrainCgroupNsRoot(mountpoint); drainErr != nil {
+		return fmt.Errorf("drain cgroup-ns root before subtree_control widening: %w", drainErr)
+	}
+
 	manager, err := c.managerFor(group, mountpoint)
 	if err != nil {
 		return err
@@ -256,6 +325,112 @@ func intersectControllers(want, have []string) []string {
 		}
 	}
 	return out
+}
+
+// readCgroupProcs reads the PIDs from a cgroup.procs file. Empty lines are
+// skipped. Returns nil + nil if the file is empty.
+func readCgroupProcs(path string) ([]int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var pids []int
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var pid int
+		if _, parseErr := fmt.Sscanf(line, "%d", &pid); parseErr != nil {
+			return nil, fmt.Errorf("parse pid %q in %s: %w", line, path, parseErr)
+		}
+		pids = append(pids, pid)
+	}
+	if scanErr := scanner.Err(); scanErr != nil {
+		return nil, scanErr
+	}
+	return pids, nil
+}
+
+// writeCgroupProcs writes each PID into the target cgroup.procs file. The
+// kernel accepts one PID per write; batching them into a single write would
+// be rejected. Failures on individual PIDs are returned immediately so the
+// caller can decide whether the partial state is acceptable.
+func writeCgroupProcs(path string, pids []int) error {
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	for _, pid := range pids {
+		if _, writeErr := fmt.Fprintf(f, "%d\n", pid); writeErr != nil {
+			return fmt.Errorf("write pid %d: %w", pid, writeErr)
+		}
+	}
+	return nil
+}
+
+// maybeDrainCgroupNsRoot drains the cgroup-namespace root cgroup's procs
+// into a __bootstrap leaf when both gating clauses hold:
+//   - /proc/self/cgroup reports 0::/ (we are at the cgroup-ns root, not on
+//     a non-nested host where systemd's slice path would show)
+//   - the mountpoint root cgroup.events shows populated 1 (there are
+//     processes whose presence would EBUSY a subtree_control widening)
+//
+// Either clause failing short-circuits with nil — this is a defensive
+// primitive that must be a no-op on every call site that does not match
+// the cgroup-namespace-trap fingerprint.
+func (c *client) maybeDrainCgroupNsRoot(mountpoint string) error {
+	atRoot, err := procSelfCgroupAtRoot()
+	if err != nil || !atRoot {
+		return err
+	}
+	mp := c.effectiveMountpoint(mountpoint)
+	populated, err := cgroupPopulated(mp)
+	if err != nil || !populated {
+		return err
+	}
+	return c.RelocateProcessesToLeaf("/", mp, bootstrapLeafName)
+}
+
+// procSelfCgroupAtRoot reports whether the calling process's
+// /proc/self/cgroup is the unified-hierarchy root entry "0::/", i.e. the
+// process sits at its cgroup namespace's root. A non-zero hierarchy id or
+// any path past "/" means the process is in a deeper cgroup and the
+// no-internal-process trap does not apply at the mountpoint root.
+func procSelfCgroupAtRoot() (bool, error) {
+	data, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return false, fmt.Errorf("read /proc/self/cgroup: %w", err)
+	}
+	for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+		if strings.TrimSpace(line) == "0::/" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// cgroupPopulated reports whether the cgroup at the given path has its
+// "populated 1" flag set in cgroup.events. Returns false (no error) when
+// the file does not exist, so non-cgroupfs paths short-circuit cleanly.
+func cgroupPopulated(cgroupPath string) (bool, error) {
+	data, err := os.ReadFile(filepath.Join(cgroupPath, "cgroup.events"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+		if strings.TrimSpace(line) == "populated 1" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func writeSubtreeEnable(path string, controllers []string) error {

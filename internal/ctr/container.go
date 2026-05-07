@@ -128,9 +128,42 @@ func (c *client) StartContainer(
 		return nil, fmt.Errorf("failed to start task: %w", err)
 	}
 
+	// Drain the container's task PID into a _payload leaf cgroup so the
+	// container-root cgroup has no internal processes (issue #336 scenario
+	// A). The cgroup-namespace pin is sticky to the original placement, so
+	// moving the PID into a child after task.Start does not reshape the
+	// inside-cell view of /sys/fs/cgroup — but it does empty the cgroup-ns
+	// root cgroup.procs, which is what cgroup-v2's no-internal-process rule
+	// requires before any inner runtime (kuke init, dockerd, podman, an
+	// inner containerd) can widen subtree_control for non-thread-aware
+	// controllers like memory or io. Gated on the OCI spec carrying a
+	// non-empty Linux.CgroupsPath: the kukeon cell-container path always
+	// sets it via cellCgroupsPath, and HostCgroup containers leave it empty
+	// to share the host hierarchy through the kukeond bind mount.
+	if relocateErr := c.relocateContainerTaskToLeaf(nsCtx, container); relocateErr != nil {
+		c.logger.WarnContext(c.ctx,
+			"failed to relocate container task to _payload leaf",
+			"id", containerSpec.ID, "namespace", namespace, "err", formatError(relocateErr))
+	}
+
 	c.storeTask(namespace, containerSpec.ID, task)
 	c.logger.InfoContext(c.ctx, "started container", "id", containerSpec.ID, "namespace", namespace)
 	return task, nil
+}
+
+// relocateContainerTaskToLeaf moves the just-started container's PIDs into
+// a _payload leaf cgroup under its OCI Linux.CgroupsPath. See StartContainer
+// for the rationale (issue #336 scenario A). Returns nil when the container
+// has no CgroupsPath set (HostCgroup or non-cell containers).
+func (c *client) relocateContainerTaskToLeaf(nsCtx context.Context, container containerd.Container) error {
+	ociSpec, err := container.Spec(nsCtx)
+	if err != nil {
+		return fmt.Errorf("load container spec: %w", err)
+	}
+	if ociSpec.Linux == nil || ociSpec.Linux.CgroupsPath == "" {
+		return nil
+	}
+	return c.RelocateProcessesToLeaf(ociSpec.Linux.CgroupsPath, "", "_payload")
 }
 
 // StopContainer stops a running container task.

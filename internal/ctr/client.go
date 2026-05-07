@@ -93,6 +93,16 @@ type Client interface {
 	// needs to in turn delegate arbitrary controllers to its own children.
 	// Issue #314.
 	EnableCellAllSubtreeControllers(group, mountpoint string) ([]string, error)
+	// RelocateProcessesToLeaf drains every PID currently in <group>/cgroup.procs
+	// into a freshly-mkdir'd leaf cgroup at <group>/<leaf>. Used to satisfy
+	// cgroup-v2's no-internal-process rule (issue #336): subtree_control
+	// widening for non-thread-aware controllers (memory, io, ...) is rejected
+	// by the kernel when the target cgroup hosts processes directly. The
+	// leaf inherits the parent's controllers via the parent's subtree_control,
+	// so resource accounting at <group> still applies — the PIDs just live
+	// one level deeper. Idempotent: re-running on an already-drained group
+	// is a no-op.
+	RelocateProcessesToLeaf(group, mountpoint, leaf string) error
 	CreateContainerFromSpec(namespace string, spec intmodel.ContainerSpec, creds []RegistryCredentials, opts ...BuildOption) (containerd.Container, error)
 
 	CreateContainer(namespace string, spec ContainerSpec, creds []RegistryCredentials) (containerd.Container, error)

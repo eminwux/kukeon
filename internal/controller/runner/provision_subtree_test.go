@@ -118,6 +118,10 @@ func (c *subtreeRecorderClient) EnableCellAllSubtreeControllers(string, string) 
 	panic("unexpected")
 }
 
+func (c *subtreeRecorderClient) RelocateProcessesToLeaf(string, string, string) error {
+	panic("unexpected")
+}
+
 func (c *subtreeRecorderClient) CreateContainerFromSpec(
 	string, intmodel.ContainerSpec, []ctr.RegistryCredentials, ...ctr.BuildOption,
 ) (containerd.Container, error) {
