@@ -407,6 +407,75 @@ func TestStatusThreadedSubtreeString(t *testing.T) {
 	}
 }
 
+// TestStatusInternalProcessString pins the human-readable label for the
+// EBUSY (no-internal-process) class. Same reason as the threaded-subtree
+// pinning: downstream greps key on the label string.
+func TestStatusInternalProcessString(t *testing.T) {
+	if got, want := cgroupcheck.StatusInternalProcess.String(), "internal-process"; got != want {
+		t.Errorf("StatusInternalProcess.String() = %q, want %q", got, want)
+	}
+}
+
+// TestCheckProbeEBUSY: the no-internal-process trap from issue #335. The
+// kernel returns EBUSY when subtree_control is asked to enable
+// non-thread-aware controllers on a non-leaf cgroup that contains
+// processes in its own cgroup.procs. The classifier must report
+// StatusInternalProcess — not StatusNotDelegated. The remediation must
+// name the no-internal-process rule, must not advertise the misleading
+// "escalate to the parent runtime" footer for the affected controllers
+// (the +<ctrl> tee fix line excludes them), and must not surface the
+// cgroup-namespace trap stanza.
+func TestCheckProbeEBUSY(t *testing.T) {
+	root := writeCgroupFiles(t,
+		"cpuset cpu io memory pids",
+		"cpu pids",
+	)
+
+	probe := func(_, ctrl string) error {
+		if ctrl == "memory" || ctrl == "io" {
+			return syscall.EBUSY
+		}
+		return nil
+	}
+
+	res, err := cgroupcheck.Check(root, cgroupcheck.CellResourceControllers(), probe)
+	if err != nil {
+		t.Fatalf("Check() unexpected error: %v", err)
+	}
+	for _, c := range []string{"memory", "io"} {
+		if got, want := res.Status[c], cgroupcheck.StatusInternalProcess; got != want {
+			t.Errorf("Status[%q] = %v, want %v", c, got, want)
+		}
+	}
+	if res.OK() {
+		t.Fatal("Check() OK=true after EBUSY probe failures")
+	}
+
+	msg := cgroupcheck.FormatRemediation(res)
+	for _, want := range []string{
+		"no-internal-process rule",
+		"memory, io",
+		"move the",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("FormatRemediation missing %q:\n%s", want, msg)
+		}
+	}
+	// The internal-process fix is not "+<ctrl> | sudo tee" — those writes
+	// will EBUSY again until the operator first moves the contained
+	// processes out. The fix line must omit the affected controllers so
+	// the suggestion stays correct.
+	if strings.Contains(msg, "+memory") || strings.Contains(msg, "+io") {
+		t.Errorf("FormatRemediation suggests +memory/+io tee fix for internal-process controllers:\n%s", msg)
+	}
+	// And the internal-process class must not be misclassified as the
+	// namespace trap, which would lead the operator to escalate
+	// pointlessly to the host/container runtime.
+	if strings.Contains(msg, "cgroup-namespace trap") {
+		t.Errorf("FormatRemediation surfaces cgroup-namespace trap stanza for internal-process-only failures:\n%s", msg)
+	}
+}
+
 func TestCheckProbePermissionDenied(t *testing.T) {
 	root := writeCgroupFiles(t,
 		"cpuset cpu io memory pids",

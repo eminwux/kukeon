@@ -78,6 +78,14 @@ const (
 	// help — the fix lives at the threaded descendant or in this cgroup's
 	// own cgroup.type.
 	StatusThreadedSubtree
+	// StatusInternalProcess — the probe write returned EBUSY because this
+	// cgroup contains processes in its own cgroup.procs. Cgroup-v2's
+	// no-internal-process rule forbids enabling non-thread-aware
+	// controllers in subtree_control on a non-leaf cgroup that hosts
+	// processes. Distinct from StatusNotDelegated because the parent did
+	// delegate; the fix is to move the processes to a child cgroup (or
+	// accept that only thread-aware controllers can land here).
+	StatusInternalProcess
 	// StatusNeedsDelegation — listed in cgroup.controllers, missing from
 	// cgroup.subtree_control, and we did not probe (or probing wasn't
 	// permitted). The fix is "+<ctrl>" to cgroup.subtree_control, but the
@@ -103,6 +111,8 @@ func (s Status) String() string {
 		return "not-delegated"
 	case StatusThreadedSubtree:
 		return "threaded-subtree"
+	case StatusInternalProcess:
+		return "internal-process"
 	case StatusNeedsDelegation:
 		return "needs-delegation"
 	case StatusEnabledByProbe:
@@ -145,6 +155,7 @@ func (r Result) Unresolved() []string {
 		case StatusKernelMissing,
 			StatusNotDelegated,
 			StatusThreadedSubtree,
+			StatusInternalProcess,
 			StatusNeedsDelegation,
 			StatusPermissionDenied:
 			out = append(out, c)
@@ -251,12 +262,14 @@ func Check(hostRoot string, required []string, probe Prober) (Result, error) {
 }
 
 // classifyProbeErr maps the result of a probe write to a Status. The
-// distinction between StatusNotDelegated, StatusThreadedSubtree, and
-// StatusPermissionDenied is the whole point of probing — getting it right
-// keeps the remediation suggestion correct. EOPNOTSUPP on a domain-only
-// controller in a "domain threaded" / "threaded" cgroup is the
-// threaded-subtree trap, not the cgroup-namespace trap; reading
-// cgroup.type at hostRoot is what disambiguates them.
+// distinction between StatusNotDelegated, StatusThreadedSubtree,
+// StatusInternalProcess, and StatusPermissionDenied is the whole point of
+// probing — getting it right keeps the remediation suggestion correct.
+// EOPNOTSUPP on a domain-only controller in a "domain threaded" /
+// "threaded" cgroup is the threaded-subtree trap, not the
+// cgroup-namespace trap; reading cgroup.type at hostRoot is what
+// disambiguates them. EBUSY is the no-internal-process rule firing on a
+// non-leaf cgroup that contains processes, which has its own remediation.
 func classifyProbeErr(hostRoot, controller string, err error) Status {
 	if err == nil {
 		return StatusEnabledByProbe
@@ -267,6 +280,8 @@ func classifyProbeErr(hostRoot, controller string, err error) Status {
 			return StatusThreadedSubtree
 		}
 		return StatusNotDelegated
+	case errors.Is(err, syscall.EBUSY):
+		return StatusInternalProcess
 	case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
 		return StatusPermissionDenied
 	}
@@ -342,6 +357,15 @@ func FormatRemediation(r Result) string {
 		b.WriteString("    descendant that promoted this cgroup, or change this scope's\n")
 		b.WriteString("    cgroup.type back to \"domain\" before retrying.\n")
 	}
+	if g, ok := groups[StatusInternalProcess]; ok {
+		fmt.Fprintf(&b, "\n  no-internal-process rule (cgroup contains processes): %s\n", strings.Join(g, ", "))
+		b.WriteString("    cgroup-v2 forbids enabling non-thread-aware controllers in\n")
+		b.WriteString("    cgroup.subtree_control on a non-leaf cgroup that hosts\n")
+		b.WriteString("    processes in its own cgroup.procs. the parent did delegate;\n")
+		b.WriteString("    escalating to the parent runtime will not help. move the\n")
+		b.WriteString("    processes to a child cgroup, or accept that only thread-aware\n")
+		b.WriteString("    controllers (cpu, pids) can be enabled at this scope.\n")
+	}
 	if g, ok := groups[StatusKernelMissing]; ok {
 		fmt.Fprintf(&b, "\n  kernel does not support: %s\n", strings.Join(g, ", "))
 		b.WriteString("    the running kernel was built without these controllers, or\n")
@@ -365,10 +389,14 @@ func FormatRemediation(r Result) string {
 	for _, c := range unresolved {
 		// "kernel-missing" controllers cannot be enabled by an operator
 		// write; "threaded-subtree" controllers will EOPNOTSUPP on the
-		// same +<ctrl> write the fix suggests. Omit both from the fix
-		// line so the suggestion is correct — the threaded-subtree
-		// stanza above already explains the right remediation.
-		if r.Status[c] == StatusKernelMissing || r.Status[c] == StatusThreadedSubtree {
+		// same +<ctrl> write the fix suggests; "internal-process"
+		// controllers will EBUSY again until the operator first moves
+		// the contained processes out. Omit all three from the fix line
+		// so the suggestion is correct — each class's stanza above
+		// already explains the right remediation.
+		if r.Status[c] == StatusKernelMissing ||
+			r.Status[c] == StatusThreadedSubtree ||
+			r.Status[c] == StatusInternalProcess {
 			continue
 		}
 		parts = append(parts, "+"+c)
