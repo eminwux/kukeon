@@ -17,12 +17,14 @@
 package ctr
 
 import (
+	"reflect"
 	"testing"
 
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
 
-func TestBuildBindMounts(t *testing.T) {
+func TestBuildVolumeMounts_Bind(t *testing.T) {
 	tests := []struct {
 		name    string
 		in      []intmodel.VolumeMount
@@ -52,6 +54,12 @@ func TestBuildBindMounts(t *testing.T) {
 			wantRO:  []bool{false, true},
 		},
 		{
+			name:    "explicit bind kind matches default",
+			in:      []intmodel.VolumeMount{{Kind: intmodel.VolumeKindBind, Source: "/a", Target: "/b"}},
+			wantLen: 1,
+			wantRO:  []bool{false},
+		},
+		{
 			name:    "skip empty source",
 			in:      []intmodel.VolumeMount{{Source: "", Target: "/b"}},
 			wantLen: 0,
@@ -65,7 +73,7 @@ func TestBuildBindMounts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildBindMounts(tt.in)
+			got := buildVolumeMounts(tt.in)
 			if len(got) != tt.wantLen {
 				t.Fatalf("len = %d, want %d", len(got), tt.wantLen)
 			}
@@ -104,5 +112,141 @@ func TestBuildBindMounts(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestBuildVolumeMounts_BindParity locks the all-bind output to today's exact
+// runtimespec.Mount shape so unrelated callers (kukeond cell spec, attachable
+// wrapping, secret-injected mounts) keep their byte-identical OCI mounts after
+// the tmpfs branch landed. Acceptance criterion from issue #309.
+func TestBuildVolumeMounts_BindParity(t *testing.T) {
+	in := []intmodel.VolumeMount{
+		{Source: "/host/run", Target: "/run/kukeon"},
+		{Source: "/host/opt", Target: "/opt/kukeon", ReadOnly: true},
+	}
+	want := []runtimespec.Mount{
+		{
+			Destination: "/run/kukeon",
+			Source:      "/host/run",
+			Type:        "bind",
+			Options:     []string{"rbind", "rw"},
+		},
+		{
+			Destination: "/opt/kukeon",
+			Source:      "/host/opt",
+			Type:        "bind",
+			Options:     []string{"rbind", "ro"},
+		},
+	}
+	got := buildVolumeMounts(in)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("buildVolumeMounts(bind list) = %+v, want %+v", got, want)
+	}
+}
+
+func TestBuildVolumeMounts_Tmpfs(t *testing.T) {
+	tests := []struct {
+		name string
+		in   intmodel.VolumeMount
+		want runtimespec.Mount
+		skip bool
+	}{
+		{
+			name: "minimal",
+			in:   intmodel.VolumeMount{Kind: intmodel.VolumeKindTmpfs, Target: "/var/lib/containerd"},
+			want: runtimespec.Mount{
+				Destination: "/var/lib/containerd",
+				Source:      "tmpfs",
+				Type:        "tmpfs",
+				Options:     []string{"rw"},
+			},
+		},
+		{
+			name: "size and mode",
+			in: intmodel.VolumeMount{
+				Kind:      intmodel.VolumeKindTmpfs,
+				Target:    "/scratch",
+				SizeBytes: 1 << 30, // 1 GiB
+				Mode:      0o755,
+			},
+			want: runtimespec.Mount{
+				Destination: "/scratch",
+				Source:      "tmpfs",
+				Type:        "tmpfs",
+				Options:     []string{"size=1073741824", "mode=0755", "rw"},
+			},
+		},
+		{
+			name: "read-only",
+			in: intmodel.VolumeMount{
+				Kind:     intmodel.VolumeKindTmpfs,
+				Target:   "/cache",
+				ReadOnly: true,
+			},
+			want: runtimespec.Mount{
+				Destination: "/cache",
+				Source:      "tmpfs",
+				Type:        "tmpfs",
+				Options:     []string{"ro"},
+			},
+		},
+		{
+			name: "skip empty target",
+			in:   intmodel.VolumeMount{Kind: intmodel.VolumeKindTmpfs, Target: ""},
+			skip: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildVolumeMounts([]intmodel.VolumeMount{tt.in})
+			if tt.skip {
+				if len(got) != 0 {
+					t.Fatalf("expected entry to be skipped, got %+v", got)
+				}
+				return
+			}
+			if len(got) != 1 {
+				t.Fatalf("len = %d, want 1", len(got))
+			}
+			if !reflect.DeepEqual(got[0], tt.want) {
+				t.Fatalf("got %+v, want %+v", got[0], tt.want)
+			}
+		})
+	}
+}
+
+// TestBuildVolumeMounts_Mixed verifies that a list mixing bind and tmpfs
+// entries preserves declaration order and emits each kind's expected OCI
+// shape independently.
+func TestBuildVolumeMounts_Mixed(t *testing.T) {
+	in := []intmodel.VolumeMount{
+		{Source: "/host/run", Target: "/run/kukeon"},
+		{Kind: intmodel.VolumeKindTmpfs, Target: "/var/lib/containerd", SizeBytes: 512 << 20},
+		{Source: "/host/opt", Target: "/opt/kukeon", ReadOnly: true},
+	}
+	want := []runtimespec.Mount{
+		{
+			Destination: "/run/kukeon",
+			Source:      "/host/run",
+			Type:        "bind",
+			Options:     []string{"rbind", "rw"},
+		},
+		{
+			Destination: "/var/lib/containerd",
+			Source:      "tmpfs",
+			Type:        "tmpfs",
+			Options:     []string{"size=536870912", "rw"},
+		},
+		{
+			Destination: "/opt/kukeon",
+			Source:      "/host/opt",
+			Type:        "bind",
+			Options:     []string{"rbind", "ro"},
+		},
+	}
+	got := buildVolumeMounts(in)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("buildVolumeMounts(mixed) = %+v, want %+v", got, want)
 	}
 }

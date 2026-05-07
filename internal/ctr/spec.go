@@ -300,7 +300,7 @@ func BuildContainerSpec(
 		specOpts = append(specOpts, oci.WithMounts([]runtimespec.Mount{nestedCgroupMount()}))
 	}
 
-	if mounts := buildBindMounts(containerSpec.Volumes); len(mounts) > 0 {
+	if mounts := buildVolumeMounts(containerSpec.Volumes); len(mounts) > 0 {
 		specOpts = append(specOpts, oci.WithMounts(mounts))
 	}
 
@@ -362,31 +362,80 @@ func cellCgroupsPath(cellCgroupPath, containerdID string) string {
 	return filepath.Join(cellCgroupPath, containerdID)
 }
 
-// buildBindMounts translates ContainerSpec.Volumes into OCI bind mounts.
-// Entries are expected to be already validated (absolute source/target).
-func buildBindMounts(volumes []intmodel.VolumeMount) []runtimespec.Mount {
+// buildVolumeMounts translates ContainerSpec.Volumes into OCI mounts. The
+// VolumeMount.Kind discriminator selects the emitted mount type: empty or
+// VolumeKindBind produces a host bind mount (Source → Target), VolumeKindTmpfs
+// produces an in-memory tmpfs mount at Target with the runtime's standard
+// tmpfs Source. Entries are expected to be already validated (absolute paths
+// for the bind kind; absolute Target for the tmpfs kind). Unknown kinds are
+// skipped silently — validation belongs upstream.
+func buildVolumeMounts(volumes []intmodel.VolumeMount) []runtimespec.Mount {
 	if len(volumes) == 0 {
 		return nil
 	}
 	mounts := make([]runtimespec.Mount, 0, len(volumes))
 	for _, v := range volumes {
-		if v.Source == "" || v.Target == "" {
-			continue
+		switch v.Kind {
+		case intmodel.VolumeKindTmpfs:
+			if m, ok := tmpfsVolumeMount(v); ok {
+				mounts = append(mounts, m)
+			}
+		case "", intmodel.VolumeKindBind:
+			if m, ok := bindVolumeMount(v); ok {
+				mounts = append(mounts, m)
+			}
 		}
-		options := []string{"rbind"}
-		if v.ReadOnly {
-			options = append(options, "ro")
-		} else {
-			options = append(options, "rw")
-		}
-		mounts = append(mounts, runtimespec.Mount{
-			Destination: v.Target,
-			Source:      v.Source,
-			Type:        "bind",
-			Options:     options,
-		})
 	}
 	return mounts
+}
+
+// bindVolumeMount renders a bind-kind VolumeMount as an OCI Mount. Returns
+// (zero, false) when Source or Target is empty so the caller can skip the
+// entry — matching the historical buildBindMounts skip rule.
+func bindVolumeMount(v intmodel.VolumeMount) (runtimespec.Mount, bool) {
+	if v.Source == "" || v.Target == "" {
+		return runtimespec.Mount{}, false
+	}
+	options := []string{"rbind"}
+	if v.ReadOnly {
+		options = append(options, "ro")
+	} else {
+		options = append(options, "rw")
+	}
+	return runtimespec.Mount{
+		Destination: v.Target,
+		Source:      v.Source,
+		Type:        "bind",
+		Options:     options,
+	}, true
+}
+
+// tmpfsVolumeMount renders a tmpfs-kind VolumeMount as an OCI Mount. Returns
+// (zero, false) when Target is empty. SizeBytes and Mode emit the standard
+// tmpfs size= / mode= options when set; ReadOnly maps to ro/rw last in the
+// option list.
+func tmpfsVolumeMount(v intmodel.VolumeMount) (runtimespec.Mount, bool) {
+	if v.Target == "" {
+		return runtimespec.Mount{}, false
+	}
+	options := make([]string, 0)
+	if v.SizeBytes > 0 {
+		options = append(options, "size="+strconv.FormatInt(v.SizeBytes, 10))
+	}
+	if v.Mode != 0 {
+		options = append(options, fmt.Sprintf("mode=%04o", v.Mode))
+	}
+	if v.ReadOnly {
+		options = append(options, "ro")
+	} else {
+		options = append(options, "rw")
+	}
+	return runtimespec.Mount{
+		Destination: v.Target,
+		Source:      "tmpfs",
+		Type:        "tmpfs",
+		Options:     options,
+	}, true
 }
 
 // securitySpecOpts translates the security/isolation fields on the internal
