@@ -106,7 +106,7 @@ func TestManager_LoadNetworkConfigList(t *testing.T) {
 				// Verify config was loaded by trying to use it
 				// We can't directly access netConf, but we can verify it's loaded
 				// by checking that AddContainerToNetwork doesn't return ErrNetworkConfigNotLoaded
-				err := mgr.AddContainerToNetwork(context.Background(), "test-container", "/proc/123/ns/net")
+				_, err := mgr.AddContainerToNetwork(context.Background(), "test-container", "/proc/123/ns/net")
 				if err != nil && !errors.Is(err, errdefs.ErrNetworkConfigNotLoaded) {
 					// Config is loaded (error is from libcni, not from missing config)
 					return

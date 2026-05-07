@@ -80,6 +80,26 @@ func CellMetadataPath(baseRunPath, realmName, spaceName, stackName, cellName str
 	)
 }
 
+// CellEtcHostsPath returns the host-side path of the per-cell /etc/hosts file
+// kukeond renders and bind-mounts into every container in the cell. Lives
+// under the cell's metadata directory so cell teardown cleans it up.
+func CellEtcHostsPath(baseRunPath, realmName, spaceName, stackName, cellName string) string {
+	return filepath.Join(
+		CellMetadataDir(baseRunPath, realmName, spaceName, stackName, cellName),
+		"etc-hosts",
+	)
+}
+
+// CellEtcHostnamePath returns the host-side path of the per-cell /etc/hostname
+// file kukeond renders and bind-mounts into every container in the cell.
+// Lives under the cell's metadata directory so cell teardown cleans it up.
+func CellEtcHostnamePath(baseRunPath, realmName, spaceName, stackName, cellName string) string {
+	return filepath.Join(
+		CellMetadataDir(baseRunPath, realmName, spaceName, stackName, cellName),
+		"etc-hostname",
+	)
+}
+
 // ContainerMetadataDir returns the per-container metadata directory inside the
 // owning cell's metadata tree. Used as the host anchor for per-container state
 // such as the sbsh control socket.

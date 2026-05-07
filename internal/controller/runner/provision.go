@@ -1423,6 +1423,15 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 	// so it's safe to read here. See issue #312.
 	cellCgroupPath := cell.Status.CgroupPath
 
+	// Per-cell /etc/hostname and initial /etc/hosts (no IP yet — CNI ADD runs
+	// during StartCell and rewrites /etc/hosts with the assigned cell IP).
+	// Files must exist before runc consumes the OCI bind-mount entries below,
+	// so render them up front. Issue #345.
+	if err := r.renderCellEtcFilesPreCNI(cell); err != nil {
+		return nil, fmt.Errorf("render cell etc files: %w", err)
+	}
+	r.stampCellEtcFilePathsOnContainers(cell)
+
 	// Track root container for return value
 	var rootContainer containerd.Container
 
@@ -1742,6 +1751,19 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 			cell.Spec.RootContainerID = rootContainerBaseID
 		}
 
+		// Per-cell /etc/hostname and initial /etc/hosts (issue #345). Render
+		// before BuildRootContainerSpec so the bind-mount sources exist when
+		// runc creates the root container, and stamp the source paths onto
+		// rootContainerSpec so the OCI spec emits the bind-mount entries.
+		// The cell-wide stamp (after the if/else below) reaches non-root
+		// containers; the root needs the per-spec stamp because the local
+		// rootContainerSpec value is what feeds BuildRootContainerSpec here.
+		if etcErr := r.renderCellEtcFilesPreCNI(cell); etcErr != nil {
+			return nil, fmt.Errorf("render cell etc files: %w", etcErr)
+		}
+		hnPath, hPath, suppress := r.cellEtcFilePaths(cell)
+		stampEtcFilePathsOnContainerSpec(&rootContainerSpec, hnPath, hPath, suppress)
+
 		rootLabels := buildRootContainerLabels(*cell)
 		containerSpec := ctr.BuildRootContainerSpec(rootContainerSpec, rootLabels)
 
@@ -1776,6 +1798,17 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 			ensuredFields...,
 		)
 	}
+
+	// Per-cell /etc/hostname / /etc/hosts: ensure the source files exist and
+	// every non-root container in cell.Spec.Containers carries the bind-mount
+	// path before the loop below builds OCI specs. Idempotent on the
+	// existing-root branch (re-renders the same content) and a fill-in for
+	// the no-root branch where the root spec was just stamped above. Issue
+	// #345.
+	if etcErr := r.renderCellEtcFilesPreCNI(cell); etcErr != nil {
+		return nil, fmt.Errorf("render cell etc files: %w", etcErr)
+	}
+	r.stampCellEtcFilePathsOnContainers(cell)
 
 	// Log how many containers we're about to process
 	containerCountFields := appendCellLogFields([]any{"cell", cellID}, cellID, cellName)

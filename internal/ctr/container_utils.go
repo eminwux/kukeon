@@ -83,8 +83,27 @@ func BuildRootContainerSpec(
 		oci.WithDefaultPathEnv,
 	}
 
-	if containerdID != "" {
-		specOpts = append(specOpts, oci.WithHostname(containerdID))
+	// Hostname identifies the cell, not the hierarchical containerd ID. All
+	// containers in the cell share this root's UTS namespace via
+	// JoinContainerNamespaces, so the cell-name hostname is what `hostname`
+	// returns for every container. Falls back to the containerd ID only when
+	// the runner failed to populate CellName (defensive — every CreateCell /
+	// StartCell path stamps it). Issue #345.
+	hostname := strings.TrimSpace(rootSpec.CellName)
+	if hostname == "" {
+		hostname = containerdID
+	}
+	if hostname != "" {
+		specOpts = append(specOpts, oci.WithHostname(hostname))
+	}
+
+	// Per-cell /etc/hostname and /etc/hosts bind-mounts (issue #345). The
+	// runner renders both files under the cell's metadata directory before
+	// invoking this builder; an empty path here means the bind-mount is
+	// disabled (e.g. host-network root containers like kukeond, where the
+	// host's /etc/hosts is the right view).
+	if mounts := etcFileBindMounts(rootSpec.EtcHostsPath, rootSpec.EtcHostnamePath); len(mounts) > 0 {
+		specOpts = append(specOpts, oci.WithMounts(mounts))
 	}
 
 	if processArgs := buildRootProcessArgs(rootSpec); len(processArgs) > 0 {
