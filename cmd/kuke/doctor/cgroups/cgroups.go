@@ -168,6 +168,25 @@ func runDoctor(cmd *cobra.Command, root string, nested, probe, verbose bool, tar
 	return runCheck(cmd.OutOrStdout(), cmd.ErrOrStderr(), scopedRoot, nested, probe, verbose, target.label())
 }
 
+// activeProber is the cgroupcheck.Prober runCheck uses when --probe is
+// set. Indirected via a package var so unit tests can simulate the EBUSY
+// no-internal-process trap without writing to a real cgroupfs.
+//
+//nolint:gochecknoglobals // test seam for the production prober
+var activeProber = cgroupcheck.DefaultProber
+
+// selfHealGate reports whether the host fingerprint matches the case
+// applySubtreeControllers (internal/ctr) self-heals via its defensive
+// __bootstrap drain (PR #340) — both clauses (cgroup-namespace root and
+// the mountpoint root being populated) must hold. Indirected so unit
+// tests can simulate matching/non-matching hosts without touching
+// /proc/self/cgroup.
+//
+//nolint:gochecknoglobals // test seam for the cgroup-ns fingerprint check
+var selfHealGate = func(root string) bool {
+	return cgroupcheck.IsCgroupNsRoot() && cgroupcheck.IsHostRootPopulated(root)
+}
+
 // runCheck is the shared pre-flight body used by both the host-root and
 // --scope paths. scopeLabel is empty for the host-root path; non-empty
 // labels are printed as a "scope: ..." header so operators can tell which
@@ -181,7 +200,7 @@ func runCheck(stdout, stderr io.Writer, root string, nested, probe, verbose bool
 
 	var prober cgroupcheck.Prober
 	if probe {
-		prober = cgroupcheck.DefaultProber
+		prober = activeProber
 	}
 
 	res, err := cgroupcheck.Check(root, required, prober)
@@ -196,6 +215,27 @@ func runCheck(stdout, stderr io.Writer, root string, nested, probe, verbose bool
 			printScope(stdout, scopeLabel)
 			printStatus(stdout, res)
 		}
+		return nil
+	}
+
+	// Self-heal downgrade: when the only unresolved class is the EBUSY
+	// no-internal-process trap AND the host fingerprint matches what
+	// applySubtreeControllers (internal/ctr) drains via its defensive
+	// __bootstrap leaf (PR #340), `kuke init` would proceed anyway. Surface
+	// the diagnostic so the operator sees what is about to happen, but
+	// exit 0 so dev-init.sh proceeds. Restricted to the unscoped host-root
+	// path because the runtime drain only operates on the mountpoint root,
+	// not on a deeper scoped cgroup — a scoped EBUSY still requires
+	// operator action.
+	if scopeLabel == "" && res.OnlyInternalProcess() && selfHealGate(root) {
+		printScope(stderr, scopeLabel)
+		printStatus(stderr, res)
+		fmt.Fprint(stderr, "\n")
+		fmt.Fprint(stderr, cgroupcheck.FormatRemediation(res))
+		fmt.Fprint(stderr, "\nnote: the runtime will drain the cgroup-namespace root into a "+
+			"__bootstrap leaf\nbefore widening cgroup.subtree_control "+
+			"(internal/ctr applySubtreeControllers,\nPR #340). this is "+
+			"informational; `kuke init` will proceed.\n")
 		return nil
 	}
 
