@@ -142,7 +142,7 @@ func BuildRootContainerSpec(
 	// BuildContainerSpec so a user-supplied root container (RootContainerID)
 	// keeps its Volumes, User, Capabilities, SecurityOpts, Tmpfs, and
 	// Resources instead of having them silently dropped.
-	if mounts := buildBindMounts(rootSpec.Volumes); len(mounts) > 0 {
+	if mounts := buildVolumeMounts(rootSpec.Volumes); len(mounts) > 0 {
 		specOpts = append(specOpts, oci.WithMounts(mounts))
 	}
 

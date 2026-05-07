@@ -119,11 +119,36 @@ type ContainerSecret struct {
 	MountPath string
 }
 
-// VolumeMount is a bind mount of a host path into a container.
+// VolumeKind discriminates between the supported VolumeMount kinds. An empty
+// value is treated as VolumeKindBind so existing call sites that build a
+// VolumeMount without a Kind keep their bind-mount semantics.
+type VolumeKind string
+
+const (
+	// VolumeKindBind is a host bind mount. Source and Target are required.
+	VolumeKindBind VolumeKind = "bind"
+	// VolumeKindTmpfs is an in-memory tmpfs mount. Only Target is required;
+	// Source is implicit ("tmpfs"). SizeBytes and Mode tune the standard
+	// tmpfs size= and mode= options when non-zero.
+	VolumeKindTmpfs VolumeKind = "tmpfs"
+)
+
+// VolumeMount is a mount entry attached to a container. The Kind discriminator
+// selects the OCI mount type the runtime emits: bind (host path → container
+// path) or tmpfs (in-memory directory). Empty Kind means bind for back-compat
+// with call sites that predate the discriminator.
 type VolumeMount struct {
+	Kind     VolumeKind
 	Source   string
 	Target   string
 	ReadOnly bool
+	// SizeBytes is the tmpfs size= option in bytes. Only honored when
+	// Kind == VolumeKindTmpfs; zero leaves the kernel default.
+	SizeBytes int64
+	// Mode is the tmpfs mode= option as a 4-digit octal value (e.g. 0755).
+	// Only honored when Kind == VolumeKindTmpfs; zero leaves the kernel
+	// default (01777).
+	Mode uint32
 }
 
 // ContainerCapabilities groups Linux capability deltas applied relative to the
