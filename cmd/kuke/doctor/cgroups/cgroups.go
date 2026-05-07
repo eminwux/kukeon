@@ -54,6 +54,7 @@ func NewCgroupsCmd() *cobra.Command {
 		root    string
 		nested  bool
 		probe   bool
+		noProbe bool
 		verbose bool
 
 		scope string
@@ -74,9 +75,15 @@ func NewCgroupsCmd() *cobra.Command {
 			"against that directory instead of the host root — useful for\n" +
 			"diagnosing mid-tree delegation gaps when a workload below a given\n" +
 			"level fails to start.\n\n" +
+			"By default, the pre-flight probes any controller missing from\n" +
+			"cgroup.subtree_control with a +<ctrl> write so the cgroup-namespace\n" +
+			"trap (advertised but not delegated, write returns EOPNOTSUPP) is\n" +
+			"distinguished from \"merely needs the operator to enable it\". The\n" +
+			"probe is idempotent on healthy hosts and harmless on trapped ones;\n" +
+			"pass --no-probe to keep the pre-flight strictly read-only.\n\n" +
 			"Exit code 0: every required controller is enabled (or was enabled by\n" +
-			"the optional --probe write). Non-zero: at least one controller is\n" +
-			"missing or the cgroup directory could not be read.",
+			"the probe write). Non-zero: at least one controller is missing or the\n" +
+			"cgroup directory could not be read.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := scopedTarget{
@@ -88,7 +95,10 @@ func NewCgroupsCmd() *cobra.Command {
 			if len(args) > 0 {
 				target.name = strings.TrimSpace(args[0])
 			}
-			return runDoctor(cmd, root, nested, probe, verbose, target)
+			// --no-probe always wins over --probe so an explicit opt-out
+			// is unambiguous regardless of flag ordering.
+			effectiveProbe := probe && !noProbe
+			return runDoctor(cmd, root, nested, effectiveProbe, verbose, target)
 		},
 		// A failed pre-flight is a host-environment problem, not a CLI
 		// usage error — the structured remediation is the message we
@@ -101,9 +111,14 @@ func NewCgroupsCmd() *cobra.Command {
 		"path to the cgroup-v2 root (default: "+cgroupcheck.DefaultHostRoot()+")")
 	cmd.Flags().BoolVar(&nested, "nested-cgroup-runtime", false,
 		"check the controller set required when the kukeond cell opts into NestedCgroupRuntime")
-	cmd.Flags().BoolVar(&probe, "probe", false,
+	cmd.Flags().BoolVar(&probe, "probe", true,
 		"attempt a +<ctrl> write to cgroup.subtree_control for missing controllers; "+
-			"disambiguates the cgroup-namespace trap. Idempotent — leaves the host in a strictly better state on success.")
+			"disambiguates the cgroup-namespace trap (default true). Idempotent — leaves the host in a "+
+			"strictly better state on success. Pass --no-probe to keep the pre-flight read-only.")
+	cmd.Flags().BoolVar(&noProbe, "no-probe", false,
+		"opt out of the +<ctrl> probe write; the pre-flight stays strictly read-only and "+
+			"missing-but-advertised controllers are reported as needs-delegation without "+
+			"distinguishing the cgroup-namespace trap. Wins over --probe when both are set.")
 	cmd.Flags().BoolVar(&verbose, "verbose-status", false,
 		"print per-controller status even when the pre-flight passes")
 	cmd.Flags().StringVar(&scope, "scope", "",

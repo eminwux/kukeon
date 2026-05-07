@@ -98,18 +98,21 @@ func TestCgroupsCmdHappyPath(t *testing.T) {
 	}
 }
 
-// TestCgroupsCmdMissingFails: when memory + io are missing from
-// subtree_control, the command exits non-zero and the stderr remediation
-// names them and the canonical fix.
-func TestCgroupsCmdMissingFails(t *testing.T) {
+// TestCgroupsCmdMissingFailsNoProbe: with --no-probe, when memory + io are
+// missing from subtree_control, the command exits non-zero and the stderr
+// remediation names them and the canonical fix. Pinning --no-probe rather
+// than the bare default keeps the assertion stable now that probing is
+// the default behavior — the tempdir-backed subtree_control would otherwise
+// accept the +<ctrl> writes and the pre-flight would pass.
+func TestCgroupsCmdMissingFailsNoProbe(t *testing.T) {
 	root := writeFakeCgroup(t,
 		"cpuset cpu io memory pids",
 		"cpu pids",
 	)
 
-	_, stderr, err := runCmd(t, "--root", root)
+	_, stderr, err := runCmd(t, "--root", root, "--no-probe")
 	if err == nil {
-		t.Fatal("Execute() error = nil for host missing memory + io, want error")
+		t.Fatal("Execute() error = nil for host missing memory + io with --no-probe, want error")
 	}
 
 	for _, want := range []string{"memory", "io", "cgroup.subtree_control"} {
@@ -119,11 +122,34 @@ func TestCgroupsCmdMissingFails(t *testing.T) {
 	}
 }
 
+// TestCgroupsCmdProbesByDefault: a bare `kuke doctor cgroups` (no --probe,
+// no --no-probe) must probe by default — that is the fix #333 calls for.
+// On the tempdir-backed fake cgroup the +<ctrl> writes succeed, so missing
+// controllers end up StatusEnabledByProbe and the pre-flight exits 0.
+// This pins the new default so a future regression that re-disables probe
+// fails the test instead of silently regressing the user-visible behavior.
+func TestCgroupsCmdProbesByDefault(t *testing.T) {
+	root := writeFakeCgroup(t,
+		"cpuset cpu io memory pids",
+		"cpu pids",
+	)
+
+	stdout, stderr, err := runCmd(t, "--root", root)
+	if err != nil {
+		t.Fatalf("default-probe Execute() error = %v\nstdout=%q\nstderr=%q", err, stdout, stderr)
+	}
+	if stdout != "" {
+		t.Errorf("default-probe stdout = %q, want empty (silence on probe success)", stdout)
+	}
+}
+
 // TestCgroupsCmdProbeRecoversOnPlainFile: --probe writes "+<ctrl>" to the
 // fake subtree_control file. After the write the controllers are present
 // in the file and a re-read inside cgroupcheck classifies them as
 // EnabledByProbe → command returns success. Exercises the same probe
-// path dev-init.sh uses on a misconfigured host.
+// path dev-init.sh uses on a misconfigured host. Pinning the explicit
+// --probe form keeps the dev-init.sh callsite contractually covered even
+// after probe-by-default became the new default.
 func TestCgroupsCmdProbeRecoversOnPlainFile(t *testing.T) {
 	root := writeFakeCgroup(t,
 		"cpuset cpu io memory pids",
@@ -133,6 +159,28 @@ func TestCgroupsCmdProbeRecoversOnPlainFile(t *testing.T) {
 	stdout, stderr, err := runCmd(t, "--root", root, "--probe")
 	if err != nil {
 		t.Fatalf("probe-recover Execute() error = %v\nstdout=%q\nstderr=%q", err, stdout, stderr)
+	}
+}
+
+// TestCgroupsCmdNoProbeWinsOverProbe: when both --probe and --no-probe are
+// passed, --no-probe wins and the pre-flight stays read-only. Pins the
+// "explicit opt-out is unambiguous regardless of flag ordering" contract
+// so a future change can't silently re-enable probing for an operator who
+// asked for read-only.
+func TestCgroupsCmdNoProbeWinsOverProbe(t *testing.T) {
+	root := writeFakeCgroup(t,
+		"cpuset cpu io memory pids",
+		"cpu pids",
+	)
+
+	_, stderr, err := runCmd(t, "--root", root, "--probe", "--no-probe")
+	if err == nil {
+		t.Fatal("Execute() error = nil with --probe --no-probe and missing controllers, want error")
+	}
+	for _, want := range []string{"memory", "io"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr missing %q under --probe --no-probe:\n%s", want, stderr)
+		}
 	}
 }
 
@@ -156,7 +204,7 @@ func TestCgroupsCmdNestedFailsOnPartialSubtree(t *testing.T) {
 	full := "cpuset cpu io memory hugetlb pids rdma misc"
 	root := writeFakeCgroup(t, full, "cpu memory io pids")
 
-	_, stderr, err := runCmd(t, "--root", root, "--nested-cgroup-runtime")
+	_, stderr, err := runCmd(t, "--root", root, "--nested-cgroup-runtime", "--no-probe")
 	if err == nil {
 		t.Fatal("nested partial-subtree Execute() error = nil, want error")
 	}
@@ -328,7 +376,7 @@ func TestCgroupsCmdScopeFailsOnGap(t *testing.T) {
 	client := &fakeScopedClient{realmExists: true, realmCgroupPath: realmCg}
 
 	_, stderr, err := runCmdWithClient(t, client,
-		"--scope", "realm", "default", "--root", root,
+		"--scope", "realm", "default", "--root", root, "--no-probe",
 	)
 	if err == nil {
 		t.Fatal("scope=realm gap Execute() error = nil, want error")
