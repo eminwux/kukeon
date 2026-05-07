@@ -1013,6 +1013,283 @@ func TestBuildRootContainerSpec_CgroupsPath(t *testing.T) {
 	}
 }
 
+// TestBuildRootContainerSpec_Hostname pins the hostname-on-root contract
+// from issue #345: the cell's root container's UTS hostname must be the
+// cell name (so `hostname` returns `kuke-app` instead of the hierarchical
+// containerd id `default_default_kuke-app_root`), and a missing CellName
+// falls back defensively to the containerd id so a misrouted spec still
+// produces a usable hostname instead of an empty one. All non-root
+// containers in the cell join this UTS namespace and inherit the value.
+func TestBuildRootContainerSpec_Hostname(t *testing.T) {
+	tests := []struct {
+		name         string
+		cellName     string
+		containerdID string
+		wantHostname string
+	}{
+		{name: "cell name sets hostname", cellName: "kuke-app", containerdID: "s_st_kuke-app_root", wantHostname: "kuke-app"},
+		{name: "empty cell name falls back to containerd id", cellName: "", containerdID: "s_st_kuke-app_root", wantHostname: "s_st_kuke-app_root"},
+		{name: "whitespace cell name treated as empty", cellName: "   ", containerdID: "s_st_kuke-app_root", wantHostname: "s_st_kuke-app_root"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := ctr.BuildRootContainerSpec(intmodel.ContainerSpec{
+				ID:           "root",
+				ContainerdID: tt.containerdID,
+				Image:        "registry.eminwux.com/busybox:latest",
+				CellName:     tt.cellName,
+			}, nil)
+
+			ociSpec := &runtimespec.Spec{
+				Process: &runtimespec.Process{},
+				Linux:   &runtimespec.Linux{},
+			}
+			for _, opt := range spec.SpecOpts {
+				if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+					t.Fatalf("apply SpecOpts: %v", err)
+				}
+			}
+
+			if ociSpec.Hostname != tt.wantHostname {
+				t.Errorf("Hostname = %q, want %q", ociSpec.Hostname, tt.wantHostname)
+			}
+		})
+	}
+}
+
+// TestBuildContainerSpec_NoHostname pins the inverse half of issue #345:
+// non-root containers must not call oci.WithHostname. They share the root's
+// UTS namespace via JoinContainerNamespaces, so any hostname set on the
+// per-container spec would be overwritten at run-time anyway — but worse,
+// containerd persists the spec's Hostname in the on-disk container metadata
+// and a stray non-empty value there confuses tooling that inspects it. The
+// test asserts ociSpec.Hostname is whatever the prebuilt spec started with
+// (empty in this fixture), regardless of the model spec's identity fields.
+func TestBuildContainerSpec_NoHostname(t *testing.T) {
+	spec := ctr.BuildContainerSpec(intmodel.ContainerSpec{
+		ID:           "user-app",
+		ContainerdID: "s_st_kuke-app_user-app",
+		Image:        "registry.eminwux.com/busybox:latest",
+		CellName:     "kuke-app",
+		SpaceName:    "s",
+		RealmName:    "r",
+		StackName:    "st",
+	})
+
+	ociSpec := &runtimespec.Spec{
+		Process: &runtimespec.Process{},
+		Linux:   &runtimespec.Linux{},
+	}
+	for _, opt := range spec.SpecOpts {
+		if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+			t.Fatalf("apply SpecOpts: %v", err)
+		}
+	}
+
+	if ociSpec.Hostname != "" {
+		t.Errorf("Hostname = %q, want empty (non-root must not set hostname)", ociSpec.Hostname)
+	}
+}
+
+// TestBuildContainerSpec_EtcFileBindMounts pins the bind-mount half of issue
+// #345: when EtcHostsPath / EtcHostnamePath are stamped on the model spec,
+// BuildContainerSpec must emit two bind entries (Destination /etc/hosts and
+// /etc/hostname), each pointing at the supplied host source path with rbind
+// + ro options. Empty paths must produce no entry — that path is the host-
+// network carve-out where the host's /etc/hosts is the right view.
+func TestBuildContainerSpec_EtcFileBindMounts(t *testing.T) {
+	tests := []struct {
+		name            string
+		hostsPath       string
+		hostnamePath    string
+		wantHosts       bool
+		wantHostname    bool
+		wantHostsSrc    string
+		wantHostnameSrc string
+	}{
+		{
+			name:            "both paths set emits both bind mounts",
+			hostsPath:       "/run/kukeon/r/s/st/c/etc-hosts",
+			hostnamePath:    "/run/kukeon/r/s/st/c/etc-hostname",
+			wantHosts:       true,
+			wantHostname:    true,
+			wantHostsSrc:    "/run/kukeon/r/s/st/c/etc-hosts",
+			wantHostnameSrc: "/run/kukeon/r/s/st/c/etc-hostname",
+		},
+		{
+			name:            "only hostname path set emits hostname mount only",
+			hostsPath:       "",
+			hostnamePath:    "/run/kukeon/r/s/st/c/etc-hostname",
+			wantHosts:       false,
+			wantHostname:    true,
+			wantHostnameSrc: "/run/kukeon/r/s/st/c/etc-hostname",
+		},
+		{
+			name:         "both paths empty emits no etc bind mounts",
+			hostsPath:    "",
+			hostnamePath: "",
+			wantHosts:    false,
+			wantHostname: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := ctr.BuildContainerSpec(intmodel.ContainerSpec{
+				ID:              "user-app",
+				ContainerdID:    "s_st_c_user-app",
+				Image:           "registry.eminwux.com/busybox:latest",
+				EtcHostsPath:    tt.hostsPath,
+				EtcHostnamePath: tt.hostnamePath,
+				CellName:        "c", SpaceName: "s", RealmName: "r", StackName: "st",
+			})
+
+			ociSpec := &runtimespec.Spec{
+				Process: &runtimespec.Process{},
+				Linux:   &runtimespec.Linux{},
+			}
+			for _, opt := range spec.SpecOpts {
+				if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+					t.Fatalf("apply SpecOpts: %v", err)
+				}
+			}
+
+			assertEtcBindMounts(t, ociSpec.Mounts, tt.wantHosts, tt.wantHostname,
+				tt.wantHostsSrc, tt.wantHostnameSrc)
+		})
+	}
+}
+
+// TestBuildRootContainerSpec_EtcFileBindMounts mirrors the non-root test for
+// the root-container builder. The runner stamps the same host source paths
+// on the root spec; a regression in either builder would partially break the
+// cell — the root and its siblings would disagree on what `/etc/hosts`
+// resolves to.
+func TestBuildRootContainerSpec_EtcFileBindMounts(t *testing.T) {
+	tests := []struct {
+		name            string
+		hostsPath       string
+		hostnamePath    string
+		wantHosts       bool
+		wantHostname    bool
+		wantHostsSrc    string
+		wantHostnameSrc string
+	}{
+		{
+			name:            "both paths set emits both bind mounts",
+			hostsPath:       "/run/kukeon/r/s/st/c/etc-hosts",
+			hostnamePath:    "/run/kukeon/r/s/st/c/etc-hostname",
+			wantHosts:       true,
+			wantHostname:    true,
+			wantHostsSrc:    "/run/kukeon/r/s/st/c/etc-hosts",
+			wantHostnameSrc: "/run/kukeon/r/s/st/c/etc-hostname",
+		},
+		{
+			name:            "host-network root keeps hostname mount only",
+			hostsPath:       "",
+			hostnamePath:    "/run/kukeon/r/s/st/c/etc-hostname",
+			wantHosts:       false,
+			wantHostname:    true,
+			wantHostnameSrc: "/run/kukeon/r/s/st/c/etc-hostname",
+		},
+		{
+			name:         "both paths empty emits no etc bind mounts",
+			hostsPath:    "",
+			hostnamePath: "",
+			wantHosts:    false,
+			wantHostname: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := ctr.BuildRootContainerSpec(intmodel.ContainerSpec{
+				ID:              "root",
+				ContainerdID:    "s_st_c_root",
+				Image:           "registry.eminwux.com/busybox:latest",
+				CellName:        "c",
+				EtcHostsPath:    tt.hostsPath,
+				EtcHostnamePath: tt.hostnamePath,
+			}, nil)
+
+			ociSpec := &runtimespec.Spec{
+				Process: &runtimespec.Process{},
+				Linux:   &runtimespec.Linux{},
+			}
+			for _, opt := range spec.SpecOpts {
+				if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+					t.Fatalf("apply SpecOpts: %v", err)
+				}
+			}
+
+			assertEtcBindMounts(t, ociSpec.Mounts, tt.wantHosts, tt.wantHostname,
+				tt.wantHostsSrc, tt.wantHostnameSrc)
+		})
+	}
+}
+
+// assertEtcBindMounts verifies that the given OCI Mounts slice contains (or
+// omits) /etc/hosts and /etc/hostname bind entries with the expected source
+// paths and rbind/ro options.
+func assertEtcBindMounts(
+	t *testing.T,
+	mounts []runtimespec.Mount,
+	wantHosts, wantHostname bool,
+	wantHostsSrc, wantHostnameSrc string,
+) {
+	t.Helper()
+	var hostsM, hostnameM *runtimespec.Mount
+	for i := range mounts {
+		switch mounts[i].Destination {
+		case "/etc/hosts":
+			hostsM = &mounts[i]
+		case "/etc/hostname":
+			hostnameM = &mounts[i]
+		}
+	}
+
+	if wantHosts {
+		if hostsM == nil {
+			t.Fatalf("/etc/hosts bind mount missing; mounts=%+v", mounts)
+		}
+		if hostsM.Source != wantHostsSrc {
+			t.Errorf("/etc/hosts source = %q, want %q", hostsM.Source, wantHostsSrc)
+		}
+		if hostsM.Type != "bind" {
+			t.Errorf("/etc/hosts type = %q, want %q", hostsM.Type, "bind")
+		}
+		if !containsString(hostsM.Options, "rbind") {
+			t.Errorf("/etc/hosts options = %v, want contains rbind", hostsM.Options)
+		}
+		if !containsString(hostsM.Options, "ro") {
+			t.Errorf("/etc/hosts options = %v, want contains ro", hostsM.Options)
+		}
+	} else if hostsM != nil {
+		t.Errorf("unexpected /etc/hosts bind mount: %+v", *hostsM)
+	}
+
+	if wantHostname {
+		if hostnameM == nil {
+			t.Fatalf("/etc/hostname bind mount missing; mounts=%+v", mounts)
+		}
+		if hostnameM.Source != wantHostnameSrc {
+			t.Errorf("/etc/hostname source = %q, want %q", hostnameM.Source, wantHostnameSrc)
+		}
+		if hostnameM.Type != "bind" {
+			t.Errorf("/etc/hostname type = %q, want %q", hostnameM.Type, "bind")
+		}
+		if !containsString(hostnameM.Options, "rbind") {
+			t.Errorf("/etc/hostname options = %v, want contains rbind", hostnameM.Options)
+		}
+		if !containsString(hostnameM.Options, "ro") {
+			t.Errorf("/etc/hostname options = %v, want contains ro", hostnameM.Options)
+		}
+	} else if hostnameM != nil {
+		t.Errorf("unexpected /etc/hostname bind mount: %+v", *hostnameM)
+	}
+}
+
 // TestBuildRootContainerSpec_HostNetwork is the same assertion as
 // TestBuildContainerSpec_HostNetwork but for the root-container builder used
 // by the runner for the kukeond cell.

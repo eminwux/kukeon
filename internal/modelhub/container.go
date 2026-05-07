@@ -78,6 +78,18 @@ type ContainerSpec struct {
 	// containerd's runc-shim default placement. Populated by the runner at
 	// container-create time; not part of the persisted cell document.
 	CellCgroupPath string
+	// EtcHostsPath is the host-side path of a kukeond-rendered /etc/hosts file
+	// to bind-mount at /etc/hosts inside the container. Empty disables the
+	// bind-mount, leaving the image's /etc/hosts in place. Mirrors Docker's
+	// per-container hosts pattern; the source file lives under the cell's
+	// metadata directory so cell teardown cleans it up. Populated by the
+	// runner at container-create time; not part of the persisted document.
+	EtcHostsPath string
+	// EtcHostnamePath is the host-side path of a kukeond-rendered /etc/hostname
+	// file (cell name) to bind-mount at /etc/hostname inside the container.
+	// Empty disables the bind-mount. Same lifecycle and storage location as
+	// EtcHostsPath; not part of the persisted document.
+	EtcHostnamePath string
 }
 
 // ContainerTty mirrors the v1beta1 ContainerTty payload. See the v1beta1

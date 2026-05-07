@@ -224,9 +224,17 @@ func BuildContainerSpec(
 		oci.WithDefaultPathEnv,
 	}
 
-	// Set hostname to containerd ID if not empty
-	if containerdID != "" {
-		specOpts = append(specOpts, oci.WithHostname(containerdID))
+	// Hostname is set on the root container only; non-root containers inherit
+	// it via the shared UTS namespace established by JoinContainerNamespaces.
+	// See BuildRootContainerSpec for the WithHostname call site (issue #345).
+
+	// Per-cell /etc/hostname and /etc/hosts bind-mounts (issue #345). The host
+	// source files are rendered by the runner under the cell's metadata
+	// directory and reflect the cell name (and, for /etc/hosts, the CNI-
+	// assigned cell IP) so tools that resolve the container's own hostname
+	// (sudo, getent) work without timing out on DNS.
+	if mounts := etcFileBindMounts(containerSpec.EtcHostsPath, containerSpec.EtcHostnamePath); len(mounts) > 0 {
+		specOpts = append(specOpts, oci.WithMounts(mounts))
 	}
 
 	// Set command and args
@@ -333,6 +341,33 @@ func BuildContainerSpec(
 		SpecOpts:      specOpts,
 		CNIConfigPath: containerSpec.CNIConfigPath,
 	}
+}
+
+// etcFileBindMounts returns OCI bind-mount entries for the per-cell
+// /etc/hosts and /etc/hostname files, skipping each entry whose host source
+// path is empty. Both files are bind-mounted read-only because containers
+// have no business mutating identity files the runtime owns; the runner
+// re-renders the source on every cell start so updated content propagates
+// through the bind without remounting (issue #345).
+func etcFileBindMounts(hostsPath, hostnamePath string) []runtimespec.Mount {
+	var mounts []runtimespec.Mount
+	if hostsPath != "" {
+		mounts = append(mounts, runtimespec.Mount{
+			Destination: "/etc/hosts",
+			Source:      hostsPath,
+			Type:        "bind",
+			Options:     []string{"rbind", "ro"},
+		})
+	}
+	if hostnamePath != "" {
+		mounts = append(mounts, runtimespec.Mount{
+			Destination: "/etc/hostname",
+			Source:      hostnamePath,
+			Type:        "bind",
+			Options:     []string{"rbind", "ro"},
+		})
+	}
+	return mounts
 }
 
 // nestedCgroupMount returns the OCI Mount entry that exposes the cell's

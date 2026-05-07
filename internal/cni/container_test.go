@@ -59,13 +59,16 @@ func TestManager_AddContainerToNetwork(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mgr := tt.setup(t)
-			err := mgr.AddContainerToNetwork(context.Background(), tt.containerID, tt.netnsPath)
+			ip, err := mgr.AddContainerToNetwork(context.Background(), tt.containerID, tt.netnsPath)
 
 			if tt.wantErr != nil {
 				if err == nil {
 					t.Errorf("AddContainerToNetwork() error = nil, want %v", tt.wantErr)
 				} else if !errors.Is(err, tt.wantErr) {
 					t.Errorf("AddContainerToNetwork() error = %v, want %v", err, tt.wantErr)
+				}
+				if ip != nil {
+					t.Errorf("AddContainerToNetwork() ip = %v, want nil on error", ip)
 				}
 			} else {
 				if err != nil {

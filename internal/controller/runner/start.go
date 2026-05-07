@@ -19,6 +19,7 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 
 	containerd "github.com/containerd/containerd/v2/client"
@@ -327,6 +328,19 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		rootContainerSpec.CellCgroupPath = internalCell.Status.CgroupPath
 	}
 
+	// Per-cell /etc/hostname / initial /etc/hosts — render before the root's
+	// OCI spec is built so the bind-mount sources exist when runc consumes
+	// them, and stamp source paths onto rootContainerSpec so the OCI spec
+	// emits the bind-mount entries (issue #345). The cell-wide stamp below
+	// the CNI-attach block reaches non-root containers; the root needs the
+	// per-spec stamp because the local rootContainerSpec value is what feeds
+	// BuildRootContainerSpec on this fresh-recreate path.
+	if etcErr := r.renderCellEtcFilesPreCNI(&internalCell); etcErr != nil {
+		return intmodel.Cell{}, fmt.Errorf("render cell etc files: %w", etcErr)
+	}
+	hnPath, hPath, suppressHosts := r.cellEtcFilePaths(&internalCell)
+	stampEtcFilePathsOnContainerSpec(&rootContainerSpec, hnPath, hPath, suppressHosts)
+
 	rootLabels := buildRootContainerLabels(internalCell)
 	ctrContainerSpec := ctr.BuildRootContainerSpec(rootContainerSpec, rootLabels)
 
@@ -373,6 +387,12 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		IPC: fmt.Sprintf("/proc/%d/ns/ipc", rootPID),
 		UTS: fmt.Sprintf("/proc/%d/ns/uts", rootPID),
 	}
+
+	// CNI ADD's IPv4 result, if any. Captured here so the post-attach
+	// /etc/hosts re-render below can read it after the if/else block. nil
+	// for host-network cells (CNI skipped) and on the idempotent-skip path
+	// when the libcni cache lookup also fails. Issue #345.
+	var cellIP net.IP
 
 	// Host-netns root containers (e.g. kukeond) have no per-container veth to
 	// wire up — CNI attach would create a host-side bridge inside the daemon's
@@ -455,7 +475,9 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		}
 
 		netnsPath := namespacePaths.Net
-		if addErr := cniMgr.AddContainerToNetwork(r.ctx, containerID, netnsPath); addErr != nil {
+		var addErr error
+		cellIP, addErr = cniMgr.AddContainerToNetwork(r.ctx, containerID, netnsPath)
+		if addErr != nil {
 			// The bridge plugin's "container veth name … already exists" is
 			// the one genuinely idempotent failure — a prior ADD reached veth
 			// setup before crashing, so eth0 and its IPAM record are intact
@@ -487,6 +509,13 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 					"root container already attached to network, skipping CNI ADD",
 					fields...,
 				)
+				// Idempotent-skip path: the CNI ADD didn't run, so no fresh
+				// result was returned. The IPAM allocation persisted in the
+				// libcni cache from the prior successful run — recover it so
+				// /etc/hosts can still carry the cell IP. Issue #345.
+				if cellIP == nil {
+					cellIP = cniMgr.CachedIPv4ForContainer(containerID, netnsPath)
+				}
 			} else {
 				// Log the actual CNI bin dir value being used (may be empty, which causes the error)
 				// Note: NewManager creates CNI config with this value BEFORE applying defaults,
@@ -532,6 +561,28 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		"started root container",
 		infoFields...,
 	)
+
+	// Re-render the cell's /etc/hosts now that CNI assigned the cell IP. The
+	// container's bind-mount points to this file's inode, so an in-place
+	// rewrite (truncate + write) propagates the new content to the running
+	// root container without a remount. cellIP is nil for host-network cells
+	// or if the IPAM cache was unreadable on the idempotent-skip path; the
+	// renderer no-ops in either case. Stamp source paths onto every non-root
+	// containerSpec next so the bind-mount entries make it onto their OCI
+	// specs as the loop below recreates them. Issue #345.
+	if cellIP != nil {
+		if etcErr := r.renderCellEtcHostsWithIP(&internalCell, cellIP); etcErr != nil {
+			r.logger.WarnContext(r.ctx,
+				"failed to re-render cell /etc/hosts with cell IP",
+				"cell", cellName, "cellIP", cellIP.String(), "err", etcErr.Error())
+			// best-effort — non-fatal: pre-CNI render already produced a
+			// valid file with the localhost block, which is enough for
+			// non-self-resolution use cases. Surface as a warning so it's
+			// visible without breaking StartCell.
+		}
+	}
+	r.stampCellEtcFilePathsOnContainers(&internalCell)
+	cellSpec = internalCell.Spec
 
 	// Start all containers defined in the CellDoc
 	for _, containerSpec := range cellSpec.Containers {
