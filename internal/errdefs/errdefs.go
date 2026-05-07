@@ -94,6 +94,7 @@ var (
 
 	ErrEmptyGroupPath   = errors.New("cgroup group path is required")
 	ErrInvalidPID       = errors.New("pid must be greater than zero")
+	ErrInvalidLeafName  = errors.New("cgroup leaf name must be a single non-empty path segment")
 	ErrInvalidCPUWeight = errors.New("cpu weight must be within [1, 10000]")
 	ErrInvalidIOWeight  = errors.New("io weight must be within [1, 1000]")
 	ErrInvalidThrottle  = errors.New("io throttle entries require type, major, minor and rate")
