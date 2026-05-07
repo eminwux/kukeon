@@ -17,6 +17,7 @@
 package apischeme_test
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -1291,4 +1292,143 @@ func TestContainerSecretYAMLNeverLeaksValues(t *testing.T) {
 			t.Fatalf("rendered YAML contains forbidden key %q; full doc:\n%s", forbidden, rendered)
 		}
 	}
+}
+
+// TestSubtreeControllersRoundTripV1Beta1 pins the issue #328 plumbing: the
+// new Status.SubtreeControllers field must round-trip in both directions on
+// realm/space/stack/cell. Covered together because the field has identical
+// semantics on every level.
+func TestSubtreeControllersRoundTripV1Beta1(t *testing.T) {
+	want := []string{"cpu", "memory", "io", "pids"}
+
+	t.Run("realm", func(t *testing.T) {
+		ext2int, err := apischeme.ConvertRealmDocToInternal(ext.RealmDoc{
+			APIVersion: ext.APIVersionV1Beta1,
+			Kind:       ext.KindRealm,
+			Metadata:   ext.RealmMetadata{Name: "r0"},
+			Status:     ext.RealmStatus{SubtreeControllers: want},
+		})
+		if err != nil {
+			t.Fatalf("ConvertRealmDocToInternal: %v", err)
+		}
+		if !reflect.DeepEqual(ext2int.Status.SubtreeControllers, want) {
+			t.Errorf("ext→int realm SubtreeControllers = %v, want %v",
+				ext2int.Status.SubtreeControllers, want)
+		}
+		out, err := apischeme.BuildRealmExternalFromInternal(ext2int, ext.APIVersionV1Beta1)
+		if err != nil {
+			t.Fatalf("BuildRealmExternalFromInternal: %v", err)
+		}
+		if !reflect.DeepEqual(out.Status.SubtreeControllers, want) {
+			t.Errorf("int→ext realm SubtreeControllers = %v, want %v",
+				out.Status.SubtreeControllers, want)
+		}
+		// Aliasing guard: mutating the converted slice must not bleed into
+		// the source. cloneStringSlice is what enforces this.
+		out.Status.SubtreeControllers[0] = "MUTATED"
+		if ext2int.Status.SubtreeControllers[0] != "cpu" {
+			t.Errorf("realm SubtreeControllers aliased internal slice (got %q)",
+				ext2int.Status.SubtreeControllers[0])
+		}
+	})
+
+	t.Run("space", func(t *testing.T) {
+		ext2int, err := apischeme.ConvertSpaceDocToInternal(ext.SpaceDoc{
+			APIVersion: ext.APIVersionV1Beta1,
+			Kind:       ext.KindSpace,
+			Metadata:   ext.SpaceMetadata{Name: "s0"},
+			Spec:       ext.SpaceSpec{RealmID: "r0"},
+			Status:     ext.SpaceStatus{SubtreeControllers: want},
+		})
+		if err != nil {
+			t.Fatalf("ConvertSpaceDocToInternal: %v", err)
+		}
+		if !reflect.DeepEqual(ext2int.Status.SubtreeControllers, want) {
+			t.Errorf("ext→int space SubtreeControllers = %v, want %v",
+				ext2int.Status.SubtreeControllers, want)
+		}
+		out, err := apischeme.BuildSpaceExternalFromInternal(ext2int, ext.APIVersionV1Beta1)
+		if err != nil {
+			t.Fatalf("BuildSpaceExternalFromInternal: %v", err)
+		}
+		if !reflect.DeepEqual(out.Status.SubtreeControllers, want) {
+			t.Errorf("int→ext space SubtreeControllers = %v, want %v",
+				out.Status.SubtreeControllers, want)
+		}
+	})
+
+	t.Run("stack", func(t *testing.T) {
+		ext2int, err := apischeme.ConvertStackDocToInternal(ext.StackDoc{
+			APIVersion: ext.APIVersionV1Beta1,
+			Kind:       ext.KindStack,
+			Metadata:   ext.StackMetadata{Name: "st0"},
+			Spec:       ext.StackSpec{ID: "st0", RealmID: "r0", SpaceID: "s0"},
+			Status:     ext.StackStatus{SubtreeControllers: want},
+		})
+		if err != nil {
+			t.Fatalf("ConvertStackDocToInternal: %v", err)
+		}
+		if !reflect.DeepEqual(ext2int.Status.SubtreeControllers, want) {
+			t.Errorf("ext→int stack SubtreeControllers = %v, want %v",
+				ext2int.Status.SubtreeControllers, want)
+		}
+		out, err := apischeme.BuildStackExternalFromInternal(ext2int, ext.APIVersionV1Beta1)
+		if err != nil {
+			t.Fatalf("BuildStackExternalFromInternal: %v", err)
+		}
+		if !reflect.DeepEqual(out.Status.SubtreeControllers, want) {
+			t.Errorf("int→ext stack SubtreeControllers = %v, want %v",
+				out.Status.SubtreeControllers, want)
+		}
+	})
+
+	t.Run("cell", func(t *testing.T) {
+		ext2int, err := apischeme.ConvertCellDocToInternal(ext.CellDoc{
+			APIVersion: ext.APIVersionV1Beta1,
+			Kind:       ext.KindCell,
+			Metadata:   ext.CellMetadata{Name: "c0"},
+			Spec:       ext.CellSpec{ID: "c0", RealmID: "r0", SpaceID: "s0", StackID: "st0"},
+			Status:     ext.CellStatus{SubtreeControllers: want},
+		})
+		if err != nil {
+			t.Fatalf("ConvertCellDocToInternal: %v", err)
+		}
+		if !reflect.DeepEqual(ext2int.Status.SubtreeControllers, want) {
+			t.Errorf("ext→int cell SubtreeControllers = %v, want %v",
+				ext2int.Status.SubtreeControllers, want)
+		}
+		out, err := apischeme.BuildCellExternalFromInternal(ext2int, ext.APIVersionV1Beta1)
+		if err != nil {
+			t.Fatalf("BuildCellExternalFromInternal: %v", err)
+		}
+		if !reflect.DeepEqual(out.Status.SubtreeControllers, want) {
+			t.Errorf("int→ext cell SubtreeControllers = %v, want %v",
+				out.Status.SubtreeControllers, want)
+		}
+	})
+
+	// nil-on-empty: an empty-input Status must produce a nil slice in the
+	// converted form so `omitempty` keeps the field out of YAML/JSON.
+	t.Run("empty stays nil", func(t *testing.T) {
+		ext2int, err := apischeme.ConvertRealmDocToInternal(ext.RealmDoc{
+			APIVersion: ext.APIVersionV1Beta1,
+			Kind:       ext.KindRealm,
+			Metadata:   ext.RealmMetadata{Name: "r0"},
+		})
+		if err != nil {
+			t.Fatalf("ConvertRealmDocToInternal: %v", err)
+		}
+		if ext2int.Status.SubtreeControllers != nil {
+			t.Errorf("empty input produced non-nil internal slice: %v",
+				ext2int.Status.SubtreeControllers)
+		}
+		out, err := apischeme.BuildRealmExternalFromInternal(ext2int, ext.APIVersionV1Beta1)
+		if err != nil {
+			t.Fatalf("BuildRealmExternalFromInternal: %v", err)
+		}
+		if out.Status.SubtreeControllers != nil {
+			t.Errorf("empty input produced non-nil external slice: %v",
+				out.Status.SubtreeControllers)
+		}
+	})
 }

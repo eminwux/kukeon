@@ -101,7 +101,8 @@ func NewStackCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return printStacks(cmd, stacks, outputFormat)
+			showControllers, _ := cmd.Flags().GetBool("show-controllers")
+			return printStacks(cmd, stacks, outputFormat, showControllers)
 		},
 	}
 
@@ -113,6 +114,10 @@ func NewStackCmd() *cobra.Command {
 		StringP("output", "o", "", "Output format (yaml, json, table). Default: table for list, yaml for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
+	cmd.Flags().Bool(
+		"show-controllers", false,
+		"Append a CONTROLLERS column listing the cgroup-v2 controllers delegated on each stack's subtree (issue #328).",
+	)
 
 	cmd.ValidArgsFunction = config.CompleteStackNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
@@ -139,7 +144,12 @@ func printStack(stack *v1beta1.StackDoc, format shared.OutputFormat) error {
 	}
 }
 
-func printStacks(cmd *cobra.Command, stacks []v1beta1.StackDoc, format shared.OutputFormat) error {
+func printStacks(
+	cmd *cobra.Command,
+	stacks []v1beta1.StackDoc,
+	format shared.OutputFormat,
+	showControllers bool,
+) error {
 	switch format {
 	case shared.OutputFormatYAML:
 		return shared.PrintYAML(stacks)
@@ -151,6 +161,9 @@ func printStacks(cmd *cobra.Command, stacks []v1beta1.StackDoc, format shared.Ou
 			return nil
 		}
 		headers := []string{"NAME", "REALM", "SPACE", "STATE", "CGROUP"}
+		if showControllers {
+			headers = append(headers, "CONTROLLERS")
+		}
 		rows := make([][]string, 0, len(stacks))
 		for i := range stacks {
 			s := &stacks[i]
@@ -159,7 +172,11 @@ func printStacks(cmd *cobra.Command, stacks []v1beta1.StackDoc, format shared.Ou
 			if cgroup == "" {
 				cgroup = "-"
 			}
-			rows = append(rows, []string{s.Metadata.Name, s.Spec.RealmID, s.Spec.SpaceID, state, cgroup})
+			row := []string{s.Metadata.Name, s.Spec.RealmID, s.Spec.SpaceID, state, cgroup}
+			if showControllers {
+				row = append(row, shared.FormatControllers(s.Status.SubtreeControllers))
+			}
+			rows = append(rows, row)
 		}
 		shared.PrintTable(cmd, headers, rows)
 		return nil

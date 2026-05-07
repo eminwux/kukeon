@@ -160,6 +160,17 @@ func PrintTable(cmd *cobra.Command, headers []string, rows [][]string) {
 	}
 }
 
+// FormatControllers renders a Status.SubtreeControllers slice for the
+// CONTROLLERS table column emitted by `kuke get <kind> --show-controllers`
+// (issue #328). Empty input renders as "-" so the column never collapses
+// to an unaligned blank cell.
+func FormatControllers(controllers []string) string {
+	if len(controllers) == 0 {
+		return "-"
+	}
+	return strings.Join(controllers, ",")
+}
+
 // ControllerFromCmd reuses the controller helper from create/shared.
 func ControllerFromCmd(cmd *cobra.Command) (*controller.Exec, error) {
 	return createshared.ControllerFromCmd(cmd)

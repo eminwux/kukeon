@@ -55,8 +55,15 @@ type CellTty struct {
 type CellStatus struct {
 	State      CellState
 	CgroupPath string
-	Network    CellNetworkStatus
-	Containers []ContainerStatus
+	// SubtreeControllers records the cgroup-v2 controllers actually
+	// delegated on this cell's own cgroup.subtree_control after the
+	// effective filter against the host root's cgroup.controllers
+	// (issue #328). For NestedCgroupRuntime cells this carries the full
+	// host-available set; for ordinary cells it carries the kukeon
+	// resource subset (cgroupcheck.CellResourceControllers).
+	SubtreeControllers []string
+	Network            CellNetworkStatus
+	Containers         []ContainerStatus
 	// ReadyObserved is a one-way latch set the first time the cell has
 	// been observed Ready by ReconcileCell — either via the freshly
 	// derived state or via a persisted Ready state from a prior

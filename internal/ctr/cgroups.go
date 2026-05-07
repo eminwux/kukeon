@@ -176,10 +176,10 @@ func (c *client) EnsureSubtreeControllers(group, mountpoint string, controllers 
 // EnableCellSubtreeControllers is a thin wrapper around
 // EnsureSubtreeControllers for the cell create/ensure call sites that pass
 // the kukeon resource subset (cgroupcheck.CellResourceControllers). Issue
-// #312.
-func (c *client) EnableCellSubtreeControllers(group, mountpoint string, controllers []string) error {
-	_, err := c.EnsureSubtreeControllers(group, mountpoint, controllers)
-	return err
+// #312. Returns the effective set EnsureSubtreeControllers wrote so the
+// runner can stash it on CellStatus.SubtreeControllers (issue #328).
+func (c *client) EnableCellSubtreeControllers(group, mountpoint string, controllers []string) ([]string, error) {
+	return c.EnsureSubtreeControllers(group, mountpoint, controllers)
 }
 
 // EnableCellAllSubtreeControllers is the cell/profile=NestedCgroupRuntime
@@ -193,16 +193,19 @@ func (c *client) EnableCellSubtreeControllers(group, mountpoint string, controll
 // resource subset) is what every kukeon-managed cell wants by default; the
 // "all" variant is the explicit opt-in cells request when they host a
 // nested runtime that needs more than the resource subset.
-func (c *client) EnableCellAllSubtreeControllers(group, mountpoint string) error {
+func (c *client) EnableCellAllSubtreeControllers(group, mountpoint string) ([]string, error) {
 	if err := validateGroupPath(group); err != nil {
-		return err
+		return nil, err
 	}
 	mp := c.effectiveMountpoint(mountpoint)
 	available, err := readRootControllers(mp)
 	if err != nil {
-		return fmt.Errorf("read root cgroup.controllers: %w", err)
+		return nil, fmt.Errorf("read root cgroup.controllers: %w", err)
 	}
-	return c.applySubtreeControllers(group, mp, available)
+	if applyErr := c.applySubtreeControllers(group, mp, available); applyErr != nil {
+		return nil, applyErr
+	}
+	return available, nil
 }
 
 // applySubtreeControllers is the shared body of EnsureSubtreeControllers and

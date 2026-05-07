@@ -68,10 +68,16 @@ type CellTty struct {
 }
 
 type CellStatus struct {
-	State      CellState         `json:"state"                   yaml:"state"`
-	CgroupPath string            `json:"cgroupPath"              yaml:"cgroupPath"`
-	Network    CellNetworkStatus `json:"network,omitempty"       yaml:"network,omitempty"`
-	Containers []ContainerStatus `json:"containers"              yaml:"containers"`
+	State      CellState `json:"state"                        yaml:"state"`
+	CgroupPath string    `json:"cgroupPath"                   yaml:"cgroupPath"`
+	// SubtreeControllers is the cgroup-v2 controller set actually
+	// delegated on this cell's own cgroup.subtree_control after the
+	// host-root filter (issue #328). For NestedCgroupRuntime cells this
+	// is the full host-available set; for ordinary cells it's the
+	// kukeon resource subset (cpu/memory/io/pids).
+	SubtreeControllers []string          `json:"subtreeControllers,omitempty" yaml:"subtreeControllers,omitempty"`
+	Network            CellNetworkStatus `json:"network,omitempty"            yaml:"network,omitempty"`
+	Containers         []ContainerStatus `json:"containers"                   yaml:"containers"`
 	// ReadyObserved is the persisted form of the one-way latch the
 	// reconciler uses to gate Spec.AutoDelete cleanup. Once a cell has
 	// been observed Ready it stays true across daemon restarts so that
