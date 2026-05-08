@@ -1431,6 +1431,7 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		return nil, fmt.Errorf("render cell etc files: %w", err)
 	}
 	r.stampCellEtcFilePathsOnContainers(cell)
+	stampCellProfileNameOnContainers(cell)
 
 	// Track root container for return value
 	var rootContainer containerd.Container
@@ -1763,6 +1764,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		}
 		hnPath, hPath, suppress := r.cellEtcFilePaths(cell)
 		stampEtcFilePathsOnContainerSpec(&rootContainerSpec, hnPath, hPath, suppress)
+		stampCellProfileNameOnContainerSpec(&rootContainerSpec, cell)
 
 		rootLabels := buildRootContainerLabels(*cell)
 		containerSpec := ctr.BuildRootContainerSpec(rootContainerSpec, rootLabels)
@@ -1811,6 +1813,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		return nil, fmt.Errorf("ensure cell etc files: %w", etcErr)
 	}
 	r.stampCellEtcFilePathsOnContainers(cell)
+	stampCellProfileNameOnContainers(cell)
 
 	// Log how many containers we're about to process
 	containerCountFields := appendCellLogFields([]any{"cell", cellID}, cellID, cellName)

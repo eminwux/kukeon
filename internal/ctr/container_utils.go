@@ -114,8 +114,11 @@ func BuildRootContainerSpec(
 		specOpts = append(specOpts, oci.WithProcessCwd(rootSpec.WorkingDir))
 	}
 
-	if len(rootSpec.Env) > 0 {
-		specOpts = append(specOpts, oci.WithEnv(rootSpec.Env))
+	// KUKEON_* identity vars (issue #351) are merged with the user-supplied
+	// rootSpec.Env on the same rules as BuildContainerSpec: user entries win
+	// on key collisions, empty cell-context fields contribute nothing.
+	if env := kukeonContainerEnv(rootSpec); len(env) > 0 {
+		specOpts = append(specOpts, oci.WithEnv(env))
 	}
 
 	if rootSpec.Privileged {
