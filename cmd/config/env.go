@@ -375,6 +375,10 @@ var (
 	KUKE_RUN_PROFILE = DefineKV("KUKE_RUN_PROFILE", "kuke/run/profile")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_RM = DefineKV("KUKE_RUN_RM", "kuke/run/rm")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_RUN_NAME = DefineKV("KUKE_RUN_NAME", "kuke/run/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_RUN_PARAM_FILE = DefineKV("KUKE_RUN_PARAM_FILE", "kuke/run/param-file")
 
 	// Attach command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable

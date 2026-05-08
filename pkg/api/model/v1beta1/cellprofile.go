@@ -40,10 +40,30 @@ type CellProfileMetadata struct {
 // names; when unset, the prefix defaults to metadata.name. Every Materialize
 // call appends a `-<6hex>` suffix so each invocation produces a fresh cell —
 // CellProfile is always a template. Use the Cell kind for singleton workloads.
+//
+// Parameters declares the `${KEY}` substitution variables the profile body
+// references. `kuke run -p` resolves each declared parameter against the
+// caller's --param map, the parameter's Default, and (when permitted) the
+// kuke process's env, in that order. Profiles fail to load when the body
+// references a key that is not declared here, so typos surface at install
+// time rather than as a runtime mystery.
 type CellProfileSpec struct {
-	Realm  string   `json:"realm,omitempty"  yaml:"realm,omitempty"`
-	Space  string   `json:"space,omitempty"  yaml:"space,omitempty"`
-	Stack  string   `json:"stack,omitempty"  yaml:"stack,omitempty"`
-	Prefix string   `json:"prefix,omitempty" yaml:"prefix,omitempty"`
-	Cell   CellSpec `json:"cell"             yaml:"cell"`
+	Realm      string                 `json:"realm,omitempty"      yaml:"realm,omitempty"`
+	Space      string                 `json:"space,omitempty"      yaml:"space,omitempty"`
+	Stack      string                 `json:"stack,omitempty"      yaml:"stack,omitempty"`
+	Prefix     string                 `json:"prefix,omitempty"     yaml:"prefix,omitempty"`
+	Parameters []CellProfileParameter `json:"parameters,omitempty" yaml:"parameters,omitempty"`
+	Cell       CellSpec               `json:"cell"                 yaml:"cell"`
+}
+
+// CellProfileParameter declares one substitution variable used by the
+// profile body. Default is a pointer so YAML/JSON can distinguish "no
+// default" (nil) from an explicit empty default (""). The substitution
+// engine treats them differently: a missing default falls through to the
+// env-var lookup, while an explicit empty default short-circuits there.
+type CellProfileParameter struct {
+	Name        string  `json:"name"                  yaml:"name"`
+	Description string  `json:"description,omitempty" yaml:"description,omitempty"`
+	Default     *string `json:"default,omitempty"     yaml:"default,omitempty"`
+	Required    bool    `json:"required,omitempty"    yaml:"required,omitempty"`
 }

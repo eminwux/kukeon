@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
@@ -71,6 +72,22 @@ func NewRunCmd() *cobra.Command {
 	cmd.Flags().StringP("profile", "p", "",
 		"Cell profile name to load from $HOME/.kuke/profiles.d (or $KUKE_PROFILES_DIR); mutually exclusive with -f")
 	_ = viper.BindPFlag(config.KUKE_RUN_PROFILE.ViperKey, cmd.Flags().Lookup("profile"))
+
+	cmd.Flags().String("name", "",
+		"Override the materialized cell name (default: <metadata.name>-<6hex>). "+
+			"Only valid with -p; rejected with -f, where metadata.name is the cell name verbatim.")
+	_ = viper.BindPFlag(config.KUKE_RUN_NAME.ViperKey, cmd.Flags().Lookup("name"))
+
+	cmd.Flags().StringArray("param", nil,
+		"Profile parameter override as KEY=VALUE; repeatable. Only valid with -p. "+
+			"Each KEY must be declared in spec.parameters[]. Wins over the parameter's "+
+			"default and over --param-file when both set the same key.")
+
+	cmd.Flags().String("param-file", "",
+		"File of KEY=VALUE lines whose values seed profile parameters; one per line, "+
+			"`#` starts a comment. Same declaration rules as --param. CLI --param wins on "+
+			"duplicate keys.")
+	_ = viper.BindPFlag(config.KUKE_RUN_PARAM_FILE.ViperKey, cmd.Flags().Lookup("param-file"))
 
 	cmd.MarkFlagsMutuallyExclusive("file", "profile")
 	cmd.MarkFlagsOneRequired("file", "profile")
@@ -126,6 +143,9 @@ type runFlags struct {
 	detach        bool
 	containerFlag string
 	autoDelete    bool
+	nameOverride  string
+	paramArgs     []string
+	paramFile     string
 }
 
 func parseRunFlags(cmd *cobra.Command, _ []string) (runFlags, error) {
@@ -135,7 +155,15 @@ func parseRunFlags(cmd *cobra.Command, _ []string) (runFlags, error) {
 		detach:        viper.GetBool(config.KUKE_RUN_DETACH.ViperKey),
 		containerFlag: strings.TrimSpace(viper.GetString(config.KUKE_RUN_CONTAINER.ViperKey)),
 		autoDelete:    viper.GetBool(config.KUKE_RUN_RM.ViperKey),
+		nameOverride:  strings.TrimSpace(viper.GetString(config.KUKE_RUN_NAME.ViperKey)),
+		paramFile:     strings.TrimSpace(viper.GetString(config.KUKE_RUN_PARAM_FILE.ViperKey)),
 	}
+
+	paramArgs, err := cmd.Flags().GetStringArray("param")
+	if err != nil {
+		return runFlags{}, err
+	}
+	flags.paramArgs = paramArgs
 
 	output, err := cmd.Flags().GetString("output")
 	if err != nil {
@@ -162,6 +190,21 @@ func parseRunFlags(cmd *cobra.Command, _ []string) (runFlags, error) {
 		// so the watcher would never run.
 		return runFlags{}, errors.New("--rm is incompatible with --no-daemon")
 	}
+	if flags.file != "" {
+		// --name, --param, --param-file are profile-only knobs (per issue
+		// #355). With -f the file's metadata.name is authoritative and the
+		// substitution surface doesn't apply, so reject the combination
+		// rather than silently dropping the flag.
+		if flags.nameOverride != "" {
+			return runFlags{}, errors.New("--name is only valid with -p/--profile")
+		}
+		if len(flags.paramArgs) > 0 {
+			return runFlags{}, errors.New("--param is only valid with -p/--profile")
+		}
+		if flags.paramFile != "" {
+			return runFlags{}, errors.New("--param-file is only valid with -p/--profile")
+		}
+	}
 	return flags, nil
 }
 
@@ -171,7 +214,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	cellDoc, err := loadCellDoc(flags.file, flags.profileName)
+	cellDoc, err := loadCellDoc(flags)
 	if err != nil {
 		return err
 	}
@@ -313,14 +356,15 @@ func attachAfterRun(
 	return runAttachLoop(cmd, client, doc, target)
 }
 
-// loadCellDoc dispatches to the file or profile loader. Exactly one of file or
-// profileName is non-empty (the cobra mutex enforces it before the handler
-// runs).
-func loadCellDoc(file, profileName string) (v1beta1.CellDoc, error) {
-	if profileName != "" {
-		return loadFromProfile(profileName)
+// loadCellDoc dispatches to the file or profile loader. Exactly one of
+// flags.file or flags.profileName is non-empty (the cobra mutex enforces
+// this before the handler runs); --name and --param* are profile-only and
+// already rejected against -f in parseRunFlags.
+func loadCellDoc(flags runFlags) (v1beta1.CellDoc, error) {
+	if flags.profileName != "" {
+		return loadFromProfile(flags)
 	}
-	return loadFromFile(file)
+	return loadFromFile(flags.file)
 }
 
 // loadFromFile preserves the phase-1c -f path: read the file (or stdin),
@@ -340,19 +384,59 @@ func loadFromFile(file string) (v1beta1.CellDoc, error) {
 }
 
 // loadFromProfile resolves the active profiles directory, loads the named
-// profile, and materializes its CellSpec body into a CellDoc. The cell name
-// is `<prefix>-<6hex>` — prefix defaults to metadata.name and is overridden
-// by spec.prefix — so every invocation produces a fresh cell.
-func loadFromProfile(profileName string) (v1beta1.CellDoc, error) {
+// profile with `${KEY}` references substituted, and materializes its CellSpec
+// body into a CellDoc. By default the cell name is `<prefix>-<6hex>` (prefix
+// = spec.prefix or metadata.name); --name overrides it verbatim so callers
+// like the orchestrator can pin a deterministic name.
+//
+// Parameter resolution order matches the spec for issue #355:
+//  1. --param-file lines (lowest)
+//  2. --param flags (override the file on duplicate keys)
+//  3. spec.parameters[].default
+//  4. os.Getenv(KEY) — drawn from kuke's process env
+//  5. error if the parameter is required and still unset
+//
+// We thread os.LookupEnv as the env source because today profiles are
+// loaded by the kuke CLI (a one-shot process), so kuke's env IS the
+// substitution surface the spec calls "the kukeond process, not the
+// caller". A future move to daemon-side profile loading would swap this
+// for the daemon's env without changing the resolution order.
+func loadFromProfile(flags runFlags) (v1beta1.CellDoc, error) {
 	dir, err := cellprofile.ResolveDir()
 	if err != nil {
 		return v1beta1.CellDoc{}, err
 	}
-	profile, err := cellprofile.Load(dir, profileName)
+
+	cliParams, err := buildParamMap(flags)
 	if err != nil {
 		return v1beta1.CellDoc{}, err
 	}
-	return cellprofile.Materialize(profile)
+
+	profile, err := cellprofile.LoadResolved(dir, flags.profileName, cliParams, os.LookupEnv)
+	if err != nil {
+		return v1beta1.CellDoc{}, err
+	}
+	return cellprofile.MaterializeWithName(profile, flags.nameOverride)
+}
+
+// buildParamMap layers --param flags on top of --param-file contents.
+// Empty result is a valid input for LoadResolved (the profile may have all
+// defaults). The function is split out so the run-time errors for malformed
+// files / KEY=VALUE strings stay close to the call site.
+func buildParamMap(flags runFlags) (map[string]string, error) {
+	var fileParams map[string]string
+	if flags.paramFile != "" {
+		fp, err := cellprofile.ParseParamFile(flags.paramFile)
+		if err != nil {
+			return nil, err
+		}
+		fileParams = fp
+	}
+	cliParams, err := cellprofile.ParseParamArgs(flags.paramArgs)
+	if err != nil {
+		return nil, err
+	}
+	return cellprofile.MergeParams(fileParams, cliParams), nil
 }
 
 // parseSingleCellDoc parses raw YAML and returns the single-doc Cell. It errors
