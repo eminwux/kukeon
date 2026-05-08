@@ -255,9 +255,12 @@ func BuildContainerSpec(
 		specOpts = append(specOpts, oci.WithProcessCwd(containerSpec.WorkingDir))
 	}
 
-	// Set environment variables
-	if len(containerSpec.Env) > 0 {
-		specOpts = append(specOpts, oci.WithEnv(containerSpec.Env))
+	// Set environment variables. KUKEON_* identity vars (issue #351) are
+	// merged with the user-supplied containerSpec.Env, with user entries
+	// taking precedence on key collisions so an explicit override in a
+	// CellProfile still wins.
+	if env := kukeonContainerEnv(containerSpec); len(env) > 0 {
+		specOpts = append(specOpts, oci.WithEnv(env))
 	}
 
 	// Set privileged mode if specified
@@ -383,6 +386,66 @@ func nestedCgroupMount() runtimespec.Mount {
 		Type:        "cgroup",
 		Options:     []string{"rw", "nosuid", "noexec", "nodev"},
 	}
+}
+
+// kukeonContainerEnv builds the final container env: a set of KUKEON_*
+// identity vars derived from the container spec's cell-context fields,
+// merged with the user-supplied spec.Env. User entries override defaults on
+// key collisions; empty cell-context fields produce no entry. Order in the
+// returned slice is: surviving defaults in canonical order, then user
+// entries in their declared order. The merge is done here (rather than
+// trusting oci.WithEnv) because containerd's replaceOrAppendEnvValues
+// dedupes only against keys already present in spec.Process.Env when WithEnv
+// runs, so two entries with the same key inside a single overrides slice
+// would both end up in the final env. Issue #351.
+func kukeonContainerEnv(spec intmodel.ContainerSpec) []string {
+	defaults := kukeonDefaultEnv(spec)
+	switch {
+	case len(spec.Env) == 0:
+		return defaults
+	case len(defaults) == 0:
+		return spec.Env
+	}
+	userKeys := make(map[string]struct{}, len(spec.Env))
+	for _, kv := range spec.Env {
+		k, _, _ := strings.Cut(kv, "=")
+		userKeys[k] = struct{}{}
+	}
+	out := make([]string, 0, len(defaults)+len(spec.Env))
+	for _, kv := range defaults {
+		k, _, _ := strings.Cut(kv, "=")
+		if _, ok := userKeys[k]; ok {
+			continue
+		}
+		out = append(out, kv)
+	}
+	out = append(out, spec.Env...)
+	return out
+}
+
+// kukeonDefaultEnv returns the KUKEON_* identity entries that describe the
+// container's cell context. Each field contributes one entry only when set;
+// the order is profile → cell → container ID → realm/space/stack →
+// cgroup-path so `env | grep KUKEON_` reads top-down from the broadest
+// identity to the narrowest. Issue #351.
+func kukeonDefaultEnv(spec intmodel.ContainerSpec) []string {
+	pairs := []struct{ key, value string }{
+		{"KUKEON_CELL_PROFILE_NAME", spec.CellProfileName},
+		{"KUKEON_CELL_NAME", spec.CellName},
+		{"KUKEON_CONTAINER_ID", spec.ID},
+		{"KUKEON_REALM", spec.RealmName},
+		{"KUKEON_SPACE", spec.SpaceName},
+		{"KUKEON_STACK", spec.StackName},
+		{"KUKEON_CGROUP_PATH", spec.CellCgroupPath},
+	}
+	out := make([]string, 0, len(pairs))
+	for _, p := range pairs {
+		if p.value == "" {
+			continue
+		}
+		out = append(out, p.key+"="+p.value)
+	}
+	return out
 }
 
 // cellCgroupsPath returns the absolute OCI Linux.CgroupsPath for a container

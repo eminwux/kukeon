@@ -340,6 +340,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	}
 	hnPath, hPath, suppressHosts := r.cellEtcFilePaths(&internalCell)
 	stampEtcFilePathsOnContainerSpec(&rootContainerSpec, hnPath, hPath, suppressHosts)
+	stampCellProfileNameOnContainerSpec(&rootContainerSpec, &internalCell)
 
 	rootLabels := buildRootContainerLabels(internalCell)
 	ctrContainerSpec := ctr.BuildRootContainerSpec(rootContainerSpec, rootLabels)
@@ -582,6 +583,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		}
 	}
 	r.stampCellEtcFilePathsOnContainers(&internalCell)
+	stampCellProfileNameOnContainers(&internalCell)
 	cellSpec = internalCell.Spec
 
 	// Start all containers defined in the CellDoc
