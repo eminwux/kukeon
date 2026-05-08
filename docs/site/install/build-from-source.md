@@ -38,7 +38,7 @@ sudo ./kuke get realms
 `kuke init` bootstraps a `kukeond` cell from a container image. For iterating locally, you can build the image, load it into the right containerd namespace, and point `init` at it.
 
 !!! warning "Namespace must exist before `ctr images import`"
-    `ctr images import` needs the target namespace to already exist; otherwise the import succeeds silently but nothing lands in the namespace, and the next `kuke init` will fail to find the image.
+`ctr images import` needs the target namespace to already exist; otherwise the import succeeds silently but nothing lands in the namespace, and the next `kuke init` will fail to find the image.
 
 ```bash
 # 1. Create the kuke-system containerd namespace (either by running kuke init

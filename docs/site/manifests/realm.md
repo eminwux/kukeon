@@ -29,10 +29,10 @@ The containerd namespace this realm uses for its images, containers, and tasks. 
 
 Authentication for image registries. Scoped to the realm — two realms can use different credentials for the same registry.
 
-| Field           | Type   | Required | Description                                                                                     |
-|-----------------|--------|----------|-------------------------------------------------------------------------------------------------|
-| `username`      | string | yes      | Registry username                                                                              |
-| `password`      | string | yes      | Registry password or token                                                                     |
+| Field           | Type   | Required | Description                                                                                                 |
+| --------------- | ------ | -------- | ----------------------------------------------------------------------------------------------------------- |
+| `username`      | string | yes      | Registry username                                                                                           |
+| `password`      | string | yes      | Registry password or token                                                                                  |
 | `serverAddress` | string | no       | Registry server (e.g., `docker.io`, `ghcr.io`). If omitted, applies to the registry in the image reference. |
 
 ```yaml
@@ -45,10 +45,10 @@ spec:
 
 ## status
 
-| Field         | Type                              | Description                                             |
-|---------------|-----------------------------------|---------------------------------------------------------|
-| `state`       | `Pending`, `Creating`, `Ready`, `Deleting`, `Failed`, `Unknown` | Lifecycle state |
-| `cgroupPath`  | string                            | Absolute cgroup path: `/kukeon/<realm>`                 |
+| Field        | Type                                                            | Description                             |
+| ------------ | --------------------------------------------------------------- | --------------------------------------- |
+| `state`      | `Pending`, `Creating`, `Ready`, `Deleting`, `Failed`, `Unknown` | Lifecycle state                         |
+| `cgroupPath` | string                                                          | Absolute cgroup path: `/kukeon/<realm>` |
 
 `status` is populated by Kukeon; anything you set when applying is overwritten on reconcile.
 

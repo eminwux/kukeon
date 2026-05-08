@@ -10,10 +10,10 @@ Resources: `realm`, `space`, `stack`, `cell`, `container`.
 
 ## Persistent flags
 
-| Flag        | Default | Description                                                          |
-|-------------|---------|----------------------------------------------------------------------|
-| `--cascade` | `false` | Recursively purge children (does not apply to containers)            |
-| `--force`   | `false` | Skip validation; attempt purge regardless of current state           |
+| Flag        | Default | Description                                                |
+| ----------- | ------- | ---------------------------------------------------------- |
+| `--cascade` | `false` | Recursively purge children (does not apply to containers)  |
+| `--force`   | `false` | Skip validation; attempt purge regardless of current state |
 
 Plus all [global flags](kuke.md).
 

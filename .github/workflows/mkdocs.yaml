@@ -9,9 +9,9 @@ on:
     branches:
       - main
     paths:
-      - 'docs/site/**'
-      - 'mkdocs.yml'
-      - '.github/workflows/mkdocs.yaml'
+      - "docs/site/**"
+      - "mkdocs.yml"
+      - ".github/workflows/mkdocs.yaml"
   workflow_dispatch:
 
 jobs:

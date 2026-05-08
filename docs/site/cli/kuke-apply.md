@@ -8,10 +8,10 @@ kuke apply -f <file> [-o json|yaml]
 
 ## Flags
 
-| Flag                | Default | Description                                                     |
-|---------------------|---------|-----------------------------------------------------------------|
-| `--file`, `-f`      | _(required)_ | Path to a YAML file, or `-` for stdin                      |
-| `--output`, `-o`    | _(empty)_    | Output format: `json`, `yaml`. Default: human-readable.    |
+| Flag             | Default      | Description                                             |
+| ---------------- | ------------ | ------------------------------------------------------- |
+| `--file`, `-f`   | _(required)_ | Path to a YAML file, or `-` for stdin                   |
+| `--output`, `-o` | _(empty)_    | Output format: `json`, `yaml`. Default: human-readable. |
 
 Plus all [global flags](kuke.md).
 

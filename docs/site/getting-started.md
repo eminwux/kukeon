@@ -117,7 +117,7 @@ sudo kuke apply -f docs/examples/hello-world.yaml --no-daemon
 ```
 
 !!! info "Why `--no-daemon` here"
-    The released `kukeond` container image does not yet bind-mount `/run/containerd/containerd.sock`, so cell creation currently must run in-process via `--no-daemon`. This will change in a future release.
+The released `kukeond` container image does not yet bind-mount `/run/containerd/containerd.sock`, so cell creation currently must run in-process via `--no-daemon`. This will change in a future release.
 
 Confirm the cell is ready, find its IP on the default-default bridge, and curl it:
 

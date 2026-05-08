@@ -32,7 +32,7 @@ What's missing is not in the bones. It's in the fields.
 
 ## 2. The agent threat model, briefly
 
-Traditional container workloads are *adversarial on the outside, trusted on the inside*. The orchestrator defends a trusted service from hostile network traffic.
+Traditional container workloads are _adversarial on the outside, trusted on the inside_. The orchestrator defends a trusted service from hostile network traffic.
 
 Agent workloads invert this. The API endpoint is trusted (you deployed the key). The code running inside the container is not — not because the model is malicious, but because:
 
@@ -102,17 +102,17 @@ Bind mounts are the base case. Named volumes can wait. What matters is that `sou
 
 **Proposal.** Add the following fields to Container `spec`, each with safe defaults:
 
-| Field | Type | Default | Purpose |
-|---|---|---|---|
-| `user` | `"uid:gid"` | image default | Run as non-root |
-| `readOnlyRootFilesystem` | bool | `false` (for compat), `true` recommended | Lock rootfs |
-| `capabilities.drop` | `[]string` | `[]` | Drop Linux capabilities |
-| `capabilities.add` | `[]string` | `[]` | Add Linux capabilities (rarely needed) |
-| `securityOpts` | `[]string` | `[]` | Passthrough for `no-new-privileges`, seccomp profiles |
-| `tmpfs` | `[]{path, sizeBytes, options}` | `[]` | tmpfs mounts for ephemeral scratch |
-| `resources.memoryLimitBytes` | int | unset | Hard memory ceiling |
-| `resources.cpuShares` | int | unset | CPU weight |
-| `resources.pidsLimit` | int | unset | Prevent fork bombs |
+| Field                        | Type                           | Default                                  | Purpose                                               |
+| ---------------------------- | ------------------------------ | ---------------------------------------- | ----------------------------------------------------- |
+| `user`                       | `"uid:gid"`                    | image default                            | Run as non-root                                       |
+| `readOnlyRootFilesystem`     | bool                           | `false` (for compat), `true` recommended | Lock rootfs                                           |
+| `capabilities.drop`          | `[]string`                     | `[]`                                     | Drop Linux capabilities                               |
+| `capabilities.add`           | `[]string`                     | `[]`                                     | Add Linux capabilities (rarely needed)                |
+| `securityOpts`               | `[]string`                     | `[]`                                     | Passthrough for `no-new-privileges`, seccomp profiles |
+| `tmpfs`                      | `[]{path, sizeBytes, options}` | `[]`                                     | tmpfs mounts for ephemeral scratch                    |
+| `resources.memoryLimitBytes` | int                            | unset                                    | Hard memory ceiling                                   |
+| `resources.cpuShares`        | int                            | unset                                    | CPU weight                                            |
+| `resources.pidsLimit`        | int                            | unset                                    | Prevent fork bombs                                    |
 
 This is the minimum to express what `docker run --user X --read-only --cap-drop=ALL --security-opt=no-new-privileges --tmpfs=/tmp --memory=4g --pids-limit=512` expresses today. Without these, kukeon is strictly less expressive than compose for untrusted workloads.
 
@@ -120,7 +120,7 @@ This is the minimum to express what `docker run --user X --read-only --cap-drop=
 
 ### 4.3 `P1` — Isolation-envelope inheritance from Space
 
-**Problem.** If every Container in a Space needs the same cap drops, the same user, the same resource ceilings, repeating that per-container in YAML is error-prone. More importantly, it misses the point of the Space-as-envelope design — the Space exists *because* isolation should be declared once.
+**Problem.** If every Container in a Space needs the same cap drops, the same user, the same resource ceilings, repeating that per-container in YAML is error-prone. More importantly, it misses the point of the Space-as-envelope design — the Space exists _because_ isolation should be declared once.
 
 **Proposal.** Add a `spec.defaults` block on Space that is inherited by every Container in the Space unless overridden:
 
@@ -139,7 +139,7 @@ spec:
         drop: ["ALL"]
       securityOpts: ["no-new-privileges"]
       resources:
-        memoryLimitBytes: 4294967296   # 4 GiB
+        memoryLimitBytes: 4294967296 # 4 GiB
         pidsLimit: 512
       tmpfs:
         - { path: /tmp, sizeBytes: 268435456 }
@@ -147,7 +147,7 @@ spec:
 
 Per-container values override Space defaults; Space defaults override kukeon built-ins. Inheritance is shallow (no deep-merge surprises).
 
-**Why this is P1.** This is the move that turns kukeon from "compose with a hierarchy" into "compose where the hierarchy means something." Isolation posture becomes a property of *where* a container lives, not a property every author has to remember to set.
+**Why this is P1.** This is the move that turns kukeon from "compose with a hierarchy" into "compose where the hierarchy means something." Isolation posture becomes a property of _where_ a container lives, not a property every author has to remember to set.
 
 ### 4.4 `P1` — Network policy on Space
 
@@ -160,7 +160,7 @@ spec:
   realmId: agents
   network:
     egress:
-      default: deny           # or allow
+      default: deny # or allow
       allow:
         - host: api.anthropic.com
           ports: [443]
@@ -212,7 +212,7 @@ This primitive is what makes "ephemeral by default" the easy path. It also gives
 
 ### 4.6 `P1` — Scoped credential injection
 
-**Problem.** Today, credentials are passed via `env: ["ANTHROPIC_API_KEY=..."]`, which puts the secret in the manifest, in logs, and in `kuke get -o yaml` output. For agents, this is the wrong ergonomics *and* the wrong security posture.
+**Problem.** Today, credentials are passed via `env: ["ANTHROPIC_API_KEY=..."]`, which puts the secret in the manifest, in logs, and in `kuke get -o yaml` output. For agents, this is the wrong ergonomics _and_ the wrong security posture.
 
 **Proposal.** Add a `secrets` field on Container (or inherited from Space/Session) that references credentials by source, not by value:
 
@@ -221,7 +221,7 @@ secrets:
   - name: ANTHROPIC_API_KEY
     fromFile: /etc/kukeon/secrets/anthropic.key
   - name: GITHUB_TOKEN
-    fromEnv: GITHUB_TOKEN_SCOPED     # on the host, set by a wrapper
+    fromEnv: GITHUB_TOKEN_SCOPED # on the host, set by a wrapper
 ```
 
 Values are mounted into the container's environment or as files, never written into status or persisted in audit logs. The manifest is safe to commit.
@@ -255,7 +255,7 @@ When a budget is exceeded, the Session is terminated (not warned). The enforceme
 
 ### 4.8 `P2` — Causal audit trail
 
-**Problem.** "The blast radius is controlled" is a verifiable claim only if, after the Session ends, you can answer *exactly* what the agent did: what it read, what it wrote, where it connected, what commands it ran. Container logs don't cut it — they're unstructured and disappear with the container.
+**Problem.** "The blast radius is controlled" is a verifiable claim only if, after the Session ends, you can answer _exactly_ what the agent did: what it read, what it wrote, where it connected, what commands it ran. Container logs don't cut it — they're unstructured and disappear with the container.
 
 **Proposal.** The daemon writes a per-Session append-only audit log to a location the Session itself cannot write to:
 
@@ -351,7 +351,7 @@ spec:
   stackId: claude-code
   lifetime: { wallClock: 30m, idleTimeout: 5m }
   onEnd:
-    persist: [ { volume: /workspace/out } ]
+    persist: [{ volume: /workspace/out }]
 ---
 apiVersion: v1beta1
 kind: Cell
@@ -366,9 +366,16 @@ spec:
       command: claude
       args: ["--dangerously-skip-permissions"]
       volumes:
-        - { source: /home/alice/src/my-project, target: /workspace, readOnly: false }
+        - {
+            source: /home/alice/src/my-project,
+            target: /workspace,
+            readOnly: false,
+          }
       secrets:
-        - { name: ANTHROPIC_API_KEY, fromFile: /etc/kukeon/secrets/anthropic.key }
+        - {
+            name: ANTHROPIC_API_KEY,
+            fromFile: /etc/kukeon/secrets/anthropic.key,
+          }
 ```
 
 One file, one `kuke apply`, one Session, one `kuke delete` when done. The agent has a workspace, an egress-restricted network, a scoped credential, a hard deadline, and no access to anything on the host outside the declared workspace. That's the bar.
@@ -380,7 +387,7 @@ One file, one `kuke apply`, one Session, one `kuke delete` when done. The agent 
 A reasonable order of operations for the project:
 
 1. **Land `P0` first** (volumes, container security fields). This unblocks the compose-parity story and makes kukeon usable for any untrusted workload, agent or otherwise.
-2. **Then `P1`** (Space defaults, network policy, Session kind, scoped credentials). This is the stretch that makes kukeon *better than* compose for the agent case specifically.
+2. **Then `P1`** (Space defaults, network policy, Session kind, scoped credentials). This is the stretch that makes kukeon _better than_ compose for the agent case specifically.
 3. **Finally `P2`** (budgets, audit, approval gates). This is where the agent-native category bet is made — opt-in, ambitious, and optional for the project's homelab/VPS user base.
 
 `P0` is a few weeks of well-scoped work against an existing schema. `P1` is a quarter of design-heavy work but introduces no new architecture. `P2` is a project of its own and can wait until there's demand to justify it.

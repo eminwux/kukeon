@@ -11,9 +11,9 @@ Resources: `realm`, `space`, `stack`, `cell`, `container`. Each subcommand also 
 
 ## Common flags
 
-| Flag             | Description                                                                                           |
-|------------------|-------------------------------------------------------------------------------------------------------|
-| `--output`, `-o` | Output format: `yaml`, `json`, `table`. Default: `table` for list, `yaml` for a single resource.     |
+| Flag             | Description                                                                                      |
+| ---------------- | ------------------------------------------------------------------------------------------------ |
+| `--output`, `-o` | Output format: `yaml`, `json`, `table`. Default: `table` for list, `yaml` for a single resource. |
 
 Plus all [global flags](kuke.md) — most importantly `--no-daemon`.
 
@@ -21,13 +21,13 @@ Plus all [global flags](kuke.md) — most importantly `--no-daemon`.
 
 Each subcommand takes the flags that scope the query:
 
-| Subcommand          | Scope flags                                    |
-|---------------------|-----------------------------------------------|
-| `get realm [name]`   | none (realms are top-level)                   |
-| `get space [name]`   | `--realm` (default `default`)                 |
-| `get stack [name]`   | `--realm`, `--space`                          |
-| `get cell [name]`    | `--realm`, `--space`, `--stack`               |
-| `get container [name]` | `--realm`, `--space`, `--stack`, `--cell`  |
+| Subcommand             | Scope flags                               |
+| ---------------------- | ----------------------------------------- |
+| `get realm [name]`     | none (realms are top-level)               |
+| `get space [name]`     | `--realm` (default `default`)             |
+| `get stack [name]`     | `--realm`, `--space`                      |
+| `get cell [name]`      | `--realm`, `--space`, `--stack`           |
+| `get container [name]` | `--realm`, `--space`, `--stack`, `--cell` |
 
 All scope flags default to `default`. See the [realm default note](commands.md#convention-positional-arg--flags).
 

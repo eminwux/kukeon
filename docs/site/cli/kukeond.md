@@ -8,12 +8,12 @@ kukeond serve [flags]
 
 ## Persistent flags
 
-| Flag                    | Default                             | Description                                                                       |
-|-------------------------|-------------------------------------|-----------------------------------------------------------------------------------|
-| `--run-path`            | `/opt/kukeon`                       | Where the daemon reads/writes persistent state (shared with `kuke`)               |
-| `--containerd-socket`   | `/run/containerd/containerd.sock`   | Path to the containerd socket                                                     |
-| `--socket`              | `/run/kukeon/kukeond.sock`          | Unix socket the daemon listens on                                                 |
-| `--log-level`           | `info`                              | Log level: `debug`, `info`, `warn`, `error`                                       |
+| Flag                  | Default                           | Description                                                         |
+| --------------------- | --------------------------------- | ------------------------------------------------------------------- |
+| `--run-path`          | `/opt/kukeon`                     | Where the daemon reads/writes persistent state (shared with `kuke`) |
+| `--containerd-socket` | `/run/containerd/containerd.sock` | Path to the containerd socket                                       |
+| `--socket`            | `/run/kukeon/kukeond.sock`        | Unix socket the daemon listens on                                   |
+| `--log-level`         | `info`                            | Log level: `debug`, `info`, `warn`, `error`                         |
 
 `kukeond`'s `--run-path` matches `kuke`'s default — both binaries share the same `/opt/kukeon` tree. The socket and pid files live under `/run/kukeon` and are controlled by `--socket` independently.
 

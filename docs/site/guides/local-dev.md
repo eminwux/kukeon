@@ -55,12 +55,12 @@ sudo ./kuke init --kukeond-image docker.io/library/kukeon-local:dev
 
 ## Make targets
 
-| Target         | What it does                                                 |
-|----------------|--------------------------------------------------------------|
-| `make kuke`    | Build the `kuke` binary (same binary is used as `kukeond`)    |
-| `make test`    | Run the Go unit test suite                                   |
-| `make e2e`     | Run end-to-end tests against a real containerd (requires root)|
-| `make lint`    | Run `golangci-lint` with the repo's config                   |
+| Target      | What it does                                                   |
+| ----------- | -------------------------------------------------------------- |
+| `make kuke` | Build the `kuke` binary (same binary is used as `kukeond`)     |
+| `make test` | Run the Go unit test suite                                     |
+| `make e2e`  | Run end-to-end tests against a real containerd (requires root) |
+| `make lint` | Run `golangci-lint` with the repo's config                     |
 
 ## Running without the daemon
 

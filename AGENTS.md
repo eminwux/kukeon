@@ -357,11 +357,13 @@ func CompleteResourceNames(cmd *cobra.Command, args []string, toComplete string)
 ```
 
 The function parameters are:
+
 - `cmd`: The Cobra command being completed
 - `args`: Already provided arguments
 - `toComplete`: The prefix string the user has typed (for filtering)
 
 The return values are:
+
 - `[]string`: List of completion suggestions
 - `cobra.ShellCompDirective`: Directive controlling completion behavior (typically `cobra.ShellCompDirectiveNoFileComp`)
 
@@ -541,6 +543,7 @@ func TestCompleteRealmNames(t *testing.T) {
 ### 3. Test Scenarios
 
 Tests MUST cover:
+
 - Success cases with multiple resources
 - Empty list scenarios
 - Prefix filtering
@@ -731,6 +734,7 @@ This file demonstrates:
 **Why:** The create realm command is used to create new realms, so there are no existing realms to autocomplete. Users should type the realm name explicitly.
 
 **Implementation:**
+
 - Do NOT register `ValidArgsFunction` for the create realm command
 - The test `TestNewRealmCmd_AutocompleteRegistration` should verify that `ValidArgsFunction` is `nil`
 
@@ -907,6 +911,7 @@ This document establishes the **mandatory process** for verifying test consisten
 ## Purpose
 
 Regular verification of test consistency helps:
+
 - Identify missing tests across command groups
 - Ensure all commands follow the same testing patterns
 - Maintain consistent test coverage across similar command types
@@ -930,12 +935,15 @@ The verification process consists of six systematic steps:
 **Objective:** Create a complete inventory of all command files and their corresponding test files.
 
 **Actions:**
+
 1. Search for all command constructor functions:
+
    ```bash
    grep -r "^func New.*Cmd(" cmd/kuke --include="*.go" | grep -v "_test.go"
    ```
 
 2. Search for all test files:
+
    ```bash
    find cmd/kuke -name "*_test.go" -type f
    ```
@@ -945,6 +953,7 @@ The verification process consists of six systematic steps:
    - Note any commands without test files
 
 **Expected Output:**
+
 - List of all command files (e.g., `cmd/kuke/create/realm/realm.go`)
 - List of all test files (e.g., `cmd/kuke/create/realm/realm_test.go`)
 - Mapping between commands and their test files
@@ -954,7 +963,9 @@ The verification process consists of six systematic steps:
 **Objective:** Extract and categorize all test function names from each test file.
 
 **Actions:**
+
 1. Search for all test functions:
+
    ```bash
    grep -r "^func Test" cmd/kuke --include="*_test.go"
    ```
@@ -970,6 +981,7 @@ The verification process consists of six systematic steps:
    - **Other Tests**: Helper tests, utility tests, etc.
 
 **Expected Output:**
+
 - Complete list of test functions per file
 - Categorization of each test function by type
 - Identification of test function naming patterns
@@ -979,6 +991,7 @@ The verification process consists of six systematic steps:
 **Objective:** Create matrices showing which test types each command has or is missing.
 
 **Actions:**
+
 1. **For Parent Commands** (create, delete, get, start, stop, purge, kill):
    - Create a matrix with columns: Command, Metadata, Subcommands, Autocomplete, Persistent Flags, Viper Bindings
    - Mark each cell as ✅ (present) or ❌ (missing)
@@ -993,6 +1006,7 @@ The verification process consists of six systematic steps:
    - Note that they may have different expected test types
 
 **Expected Output:**
+
 - Parent commands test coverage matrix
 - Resource commands test coverage matrices (one per operation)
 - Special commands documentation
@@ -1002,6 +1016,7 @@ The verification process consists of six systematic steps:
 **Objective:** Determine which commands follow consistent patterns and identify outliers.
 
 **Actions:**
+
 1. **Group Commands by Type:**
    - Parent commands (create, delete, get, start, stop, purge, kill)
    - Resource commands by operation (create/realm, delete/realm, get/realm, etc.)
@@ -1018,6 +1033,7 @@ The verification process consists of six systematic steps:
    - Commands with unusual test structures
 
 **Expected Output:**
+
 - List of consistent patterns (e.g., "All start/stop resource commands have identical test patterns")
 - List of inconsistent patterns (e.g., "Some get commands missing execution tests")
 - Identification of outliers
@@ -1027,6 +1043,7 @@ The verification process consists of six systematic steps:
 **Objective:** Organize commands into consistency groups based on test coverage completeness.
 
 **Actions:**
+
 1. **Group 1: Fully Consistent Commands**
    - Commands that have all expected test types for their category
    - Mark as "Complete" in the matrix
@@ -1046,6 +1063,7 @@ The verification process consists of six systematic steps:
    - Document their unique patterns and why they differ
 
 **Expected Output:**
+
 - Commands grouped by consistency level
 - Summary of what makes each group consistent or inconsistent
 - Count of commands in each group
@@ -1055,6 +1073,7 @@ The verification process consists of six systematic steps:
 **Objective:** Create a comprehensive report documenting findings and recommendations.
 
 **Actions:**
+
 1. **Create Summary Section:**
    - Overall assessment of test coverage
    - Statistics (e.g., "X% of commands have complete coverage")
@@ -1081,6 +1100,7 @@ The verification process consists of six systematic steps:
    - Note any naming/style differences
 
 **Expected Output:**
+
 - Comprehensive markdown report (e.g., `TESTING_CONSISTENCY_REPORT.md`)
 - Clear recommendations prioritized by importance
 - Actionable items for improving test consistency
@@ -1090,6 +1110,7 @@ The verification process consists of six systematic steps:
 ### Parent Commands
 
 All parent commands (create, delete, get, start, stop, purge) should have:
+
 - ✅ `TestNew<Command>CmdMetadata` or `TestNew<Command>Cmd` (structure test)
 - ✅ `TestNew<Command>CmdRegistersSubcommands` (subcommand registration)
 - ✅ `TestNew<Command>Cmd_AutocompleteRegistration` (autocomplete for subcommands)
@@ -1101,6 +1122,7 @@ All parent commands (create, delete, get, start, stop, purge) should have:
 ### Resource Commands - Create
 
 All create resource commands should have:
+
 - ✅ `TestNew<Resource>Cmd` or `TestNew<Resource>CmdRunE` (structure/execution)
 - ✅ `TestNew<Resource>CmdRunE` (execution test)
 - ✅ `TestPrint<Resource>Result` (output formatting)
@@ -1111,6 +1133,7 @@ All create resource commands should have:
 ### Resource Commands - Delete
 
 All delete resource commands should have:
+
 - ✅ `TestNew<Resource>Cmd` (structure test, optional)
 - ✅ `TestNew<Resource>CmdRunE` (execution test)
 - ✅ `TestNew<Resource>Cmd_AutocompleteRegistration` (autocomplete)
@@ -1118,6 +1141,7 @@ All delete resource commands should have:
 ### Resource Commands - Get
 
 All get resource commands should have:
+
 - ✅ `TestNew<Resource>Cmd` (structure test, optional)
 - ✅ `TestNew<Resource>CmdRunE` (execution test)
 - ✅ `TestPrint<Resource>` and/or `TestPrint<Resources>` (output formatting)
@@ -1126,12 +1150,14 @@ All get resource commands should have:
 ### Resource Commands - Start/Stop
 
 All start/stop resource commands should have:
+
 - ✅ `TestNew<Resource>CmdRunE` (execution test)
 - ✅ `TestNew<Resource>Cmd_AutocompleteRegistration` (autocomplete)
 
 ### Resource Commands - Purge
 
 All purge resource commands should have:
+
 - ✅ `TestNew<Resource>Cmd` (structure test)
 - ✅ `TestNew<Resource>CmdRunE` (execution test)
 - ✅ `TestNew<Resource>Cmd_AutocompleteRegistration` (autocomplete)
@@ -1181,6 +1207,7 @@ When performing test consistency verification, ensure:
 ## Frequency
 
 This verification process should be performed:
+
 - **After major refactoring** of command structure
 - **Before releases** to ensure test quality
 - **When adding new command types** to ensure consistency
@@ -1249,6 +1276,7 @@ type RealmStatus struct {
 ```
 
 **Characteristics:**
+
 - No version information
 - Stable structure across API versions
 - Used by all internal business logic
@@ -1265,6 +1293,7 @@ func NormalizeRealm(req ext.RealmDoc) (intmodel.Realm, ext.Version, error)
 ```
 
 **Pattern for Each Resource:**
+
 - `Convert*DocToInternal` - External → Internal (handles version switching)
 - `Build*ExternalFromInternal` - Internal → External (for specified version)
 - `Normalize*` - External → Internal with version defaulting
@@ -1289,6 +1318,7 @@ external, err := apischeme.BuildRealmExternalFromInternal(internal, version)
 ### 1. All Resources MUST Have ModelHub Types
 
 **Required Files:**
+
 - `internal/modelhub/realm.go` ✅
 - `internal/modelhub/space.go` ✅
 - `internal/modelhub/stack.go` ❌ (missing)
@@ -1296,6 +1326,7 @@ external, err := apischeme.BuildRealmExternalFromInternal(internal, version)
 - `internal/modelhub/container.go` ❌ (missing)
 
 **Pattern:**
+
 ```go
 type <Resource> struct {
     Metadata <Resource>Metadata
@@ -1307,11 +1338,13 @@ type <Resource> struct {
 ### 2. All Resources MUST Have Apischeme Conversions
 
 **Required Functions (per resource):**
+
 - `Convert<Resource>DocToInternal(ext.<Resource>Doc) -> (intmodel.<Resource>, error)`
 - `Build<Resource>ExternalFromInternal(intmodel.<Resource>, ext.Version) -> (ext.<Resource>Doc, error)`
 - `Normalize<Resource>(ext.<Resource>Doc) -> (intmodel.<Resource>, ext.Version, error)`
 
 **Version Handling:**
+
 - Switch statements to handle different API versions
 - Default empty version to latest supported version
 - Return error for unsupported versions
@@ -1319,17 +1352,19 @@ type <Resource> struct {
 ### 3. Controllers MUST Use Internal Types
 
 **Controller Methods Should:**
+
 - Accept internal types as parameters (or convert at entry)
 - Return internal types (or convert at exit)
 - Work with modelhub types throughout business logic
 
 **Example:**
+
 ```go
 // GOOD: Controller works with internal types
 func (r *Exec) CreateRealm(internal intmodel.Realm) (*v1beta1.RealmDoc, error) {
     // Work with internal type
     internal.Status.State = intmodel.RealmStateCreating
-    
+
     // Convert at boundary
     version := apischeme.VersionV1Beta1
     external, err := apischeme.BuildRealmExternalFromInternal(internal, version)
@@ -1347,11 +1382,13 @@ func (r *Exec) CreateRealm(doc *v1beta1.RealmDoc) (*v1beta1.RealmDoc, error) {
 ### 4. Utility Functions MUST Use Internal Types
 
 **Utility Functions Should:**
+
 - Accept internal types as parameters
 - Work with modelhub types
 - Not import `pkg/api` packages
 
 **Example:**
+
 ```go
 // GOOD: Utility uses internal types
 func BuildSpaceNetworkName(internal intmodel.Space) (string, error) {
@@ -1371,6 +1408,7 @@ func BuildSpaceNetworkName(doc *v1beta1.SpaceDoc) (string, error) {
 ### ✅ ALLOWED Imports
 
 **Only `internal/apischeme` can import `pkg/api`:**
+
 - `internal/apischeme/scheme.go` ✅ (conversion layer)
 - `internal/apischeme/scheme_test.go` ✅ (test file)
 
@@ -1379,6 +1417,7 @@ func BuildSpaceNetworkName(doc *v1beta1.SpaceDoc) (string, error) {
 ### ❌ PROHIBITED Imports
 
 **These patterns are violations:**
+
 ```go
 // BAD: Direct import in controller
 import v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -1392,6 +1431,7 @@ import v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 ### ⚠️ SPECIAL CASES
 
 **Daemon API (`pkg/api/apidaemon`):**
+
 - `internal/daemon` importing `pkg/api/apidaemon` is currently acceptable
 - This is a control API, not a resource API
 - Less likely to require versioning
@@ -1407,13 +1447,13 @@ import v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 func Test<Resource>RoundTripV1Beta1(t *testing.T) {
     // External → Internal
     internal, version, err := apischeme.Normalize<Resource>(externalInput)
-    
+
     // Modify internal (simulate controller logic)
     internal.Status.State = intmodel.<Resource>StateReady
-    
+
     // Internal → External
     external, err := apischeme.Build<Resource>ExternalFromInternal(internal, version)
-    
+
     // Validate round-trip
     // ...
 }
@@ -1422,6 +1462,7 @@ func Test<Resource>RoundTripV1Beta1(t *testing.T) {
 ### 2. Version Support Tests
 
 **Test all supported versions:**
+
 - Test conversion for each API version
 - Test error handling for unsupported versions
 - Test version defaulting (empty version)
@@ -1429,6 +1470,7 @@ func Test<Resource>RoundTripV1Beta1(t *testing.T) {
 ### 3. Field Mapping Tests
 
 **Test field name differences:**
+
 - External uses `RealmID`, internal uses `RealmName`
 - Test that conversions handle field name mappings correctly
 - Test that all fields are preserved through conversion
@@ -1444,12 +1486,15 @@ This section documents the **mandatory process** for validating apischeme and mo
 **Objective:** Identify all resource types and their modelhub/apischeme coverage.
 
 **Actions:**
+
 1. List all `*Doc` types in `pkg/api/model/v1beta1/`:
+
    ```bash
    grep -r "^type.*Doc struct" pkg/api/model/v1beta1
    ```
 
 2. Check for corresponding modelhub types:
+
    ```bash
    find internal/modelhub -name "*.go" -type f
    ```
@@ -1460,6 +1505,7 @@ This section documents the **mandatory process** for validating apischeme and mo
    ```
 
 **Expected Output:**
+
 - Complete list of resource types in pkg/api
 - Coverage matrix showing which resources have modelhub types
 - Coverage matrix showing which resources have apischeme conversions
@@ -1469,7 +1515,9 @@ This section documents the **mandatory process** for validating apischeme and mo
 **Objective:** Identify all direct imports from `internal/` to `pkg/api`.
 
 **Actions:**
+
 1. Search for all `pkg/api` imports in `internal/`:
+
    ```bash
    grep -r "pkg/api" internal/ --include="*.go"
    ```
@@ -1486,6 +1534,7 @@ This section documents the **mandatory process** for validating apischeme and mo
    - Field access
 
 **Expected Output:**
+
 - Complete list of import violations
 - Categorized by package and purpose
 - Identification of acceptable vs. problematic imports
@@ -1495,6 +1544,7 @@ This section documents the **mandatory process** for validating apischeme and mo
 **Objective:** Verify conversion functions are complete and correct.
 
 **Actions:**
+
 1. Check for all three conversion functions per resource:
    - `Convert*DocToInternal`
    - `Build*ExternalFromInternal`
@@ -1511,6 +1561,7 @@ This section documents the **mandatory process** for validating apischeme and mo
    - Error cases are covered
 
 **Expected Output:**
+
 - List of complete conversion patterns
 - List of missing conversion functions
 - Test coverage assessment
@@ -1520,12 +1571,15 @@ This section documents the **mandatory process** for validating apischeme and mo
 **Objective:** Determine how controllers use conversions vs. direct API types.
 
 **Actions:**
+
 1. Search for apischeme usage in controllers:
+
    ```bash
    grep -r "apischeme\\.(Normalize|Convert|Build)" internal/controller
    ```
 
 2. Search for direct pkg/api usage:
+
    ```bash
    grep -r "v1beta1\\." internal/controller
    ```
@@ -1536,6 +1590,7 @@ This section documents the **mandatory process** for validating apischeme and mo
    - Where controllers bypass conversions
 
 **Expected Output:**
+
 - List of controllers using apischeme correctly
 - List of controllers bypassing conversions
 - Identification of conversion boundaries
@@ -1545,7 +1600,9 @@ This section documents the **mandatory process** for validating apischeme and mo
 **Objective:** Assess readiness for multiple API versions.
 
 **Actions:**
+
 1. Check supported versions:
+
    ```bash
    grep -r "VersionV1Beta1\\|VersionV1\\|VersionV1Beta2" internal/apischeme
    ```
@@ -1561,6 +1618,7 @@ This section documents the **mandatory process** for validating apischeme and mo
    - Storage layer is version-aware
 
 **Expected Output:**
+
 - Current version support status
 - Multi-version readiness assessment
 - Gaps in version handling
@@ -1570,6 +1628,7 @@ This section documents the **mandatory process** for validating apischeme and mo
 **Objective:** Create comprehensive report documenting findings.
 
 **Actions:**
+
 1. **Create Summary Section:**
    - Overall decoupling status
    - Coverage statistics
@@ -1591,6 +1650,7 @@ This section documents the **mandatory process** for validating apischeme and mo
    - Provide examples for missing resources
 
 **Expected Output:**
+
 - Comprehensive markdown report (`API_SCHEME_VALIDATION_REPORT.md`)
 - Prioritized recommendations
 - Actionable items for achieving full decoupling
@@ -1637,22 +1697,27 @@ The validation report should be saved as `API_SCHEME_VALIDATION_REPORT.md` in th
 ### Reference Implementation: Realm/Space
 
 **ModelHub Types:**
+
 - `internal/modelhub/realm.go` - Complete Realm type
 - `internal/modelhub/space.go` - Complete Space type
 
 **Apischeme Conversions:**
+
 - `internal/apischeme/scheme.go` - Complete conversion functions
 
 **Usage Pattern:**
+
 - `internal/controller/runner/runner.go:134` - `CreateRealm` uses apischeme
 - `internal/controller/runner/runner.go:419` - `CreateSpace` uses apischeme
 
 **Test Coverage:**
+
 - `internal/apischeme/scheme_test.go` - Round-trip test for Realm
 
 ### Missing Implementation: Stack, Cell, Container
 
 **Required Actions:**
+
 1. Create modelhub types (`internal/modelhub/stack.go`, etc.)
 2. Implement apischeme conversions
 3. Add round-trip tests

@@ -38,18 +38,18 @@ Directory where Kukeon writes this space's CNI conflist. Defaults to the system 
 
 Constrains outbound traffic leaving the space's bridge. When omitted, traffic is unconstrained — matching the pre-`v1beta1` behavior.
 
-| Field     | Type                              | Description                                                                 |
-|-----------|-----------------------------------|-----------------------------------------------------------------------------|
-| `default` | `allow` \| `deny`                 | Fallthrough action when no `allow` rule matches. Required when `egress` is set. |
-| `allow`   | list of allow rules               | Permitted destinations. Each entry sets exactly one of `host` or `cidr`.    |
+| Field     | Type                | Description                                                                     |
+| --------- | ------------------- | ------------------------------------------------------------------------------- |
+| `default` | `allow` \| `deny`   | Fallthrough action when no `allow` rule matches. Required when `egress` is set. |
+| `allow`   | list of allow rules | Permitted destinations. Each entry sets exactly one of `host` or `cidr`.        |
 
 Each allow rule:
 
-| Field   | Type          | Description                                                                          |
-|---------|---------------|--------------------------------------------------------------------------------------|
-| `host`  | string        | DNS name. Resolved to IPv4 addresses by the daemon at apply time.                    |
-| `cidr`  | string        | IPv4 CIDR. Enforced literally via iptables.                                          |
-| `ports` | list of ints  | TCP destination ports (1–65535). Empty means "any protocol and any port on this destination". |
+| Field   | Type         | Description                                                                                   |
+| ------- | ------------ | --------------------------------------------------------------------------------------------- |
+| `host`  | string       | DNS name. Resolved to IPv4 addresses by the daemon at apply time.                             |
+| `cidr`  | string       | IPv4 CIDR. Enforced literally via iptables.                                                   |
+| `ports` | list of ints | TCP destination ports (1–65535). Empty means "any protocol and any port on this destination". |
 
 **Enforcement.** When the policy is non-trivial (either `default: deny`, or `default: allow` with at least one allow rule), the daemon materializes it as a per-space chain in the iptables `filter` table named `KUKE-EGR-<hash>`, fed from a shared `KUKEON-EGRESS` chain hooked into `FORWARD`. Existing connections are preserved via a `RELATED,ESTABLISHED` short-circuit, so reply traffic for outbound flows initiated before a policy is applied is unaffected. The enforcement is bridge-scoped (`-i <bridge>`), so a single misconfigured space cannot affect traffic from other spaces in the same realm.
 
@@ -80,9 +80,9 @@ spec:
       securityOpts: ["no-new-privileges"]
       tmpfs:
         - path: /tmp
-          sizeBytes: 268435456   # 256 MiB
+          sizeBytes: 268435456 # 256 MiB
       resources:
-        memoryLimitBytes: 4294967296   # 4 GiB
+        memoryLimitBytes: 4294967296 # 4 GiB
         pidsLimit: 512
 ```
 
@@ -100,10 +100,10 @@ Supported fields (each mirrors `ContainerSpec`): `user`, `readOnlyRootFilesystem
 
 ## status
 
-| Field         | Type                           | Description                                            |
-|---------------|--------------------------------|--------------------------------------------------------|
-| `state`       | `Pending`, `Ready`, `Failed`, `Unknown` | Lifecycle state                               |
-| `cgroupPath`  | string                         | Absolute cgroup path: `/kukeon/<realm>/<space>`        |
+| Field        | Type                                    | Description                                     |
+| ------------ | --------------------------------------- | ----------------------------------------------- |
+| `state`      | `Pending`, `Ready`, `Failed`, `Unknown` | Lifecycle state                                 |
+| `cgroupPath` | string                                  | Absolute cgroup path: `/kukeon/<realm>/<space>` |
 
 ## Bridge naming
 

@@ -20,7 +20,7 @@ metadata:
   name: default
 spec:
   realmId: main
-  cniConfigPath: /etc/cni/net.d   # optional; defaults to system CNI dir
+  cniConfigPath: /etc/cni/net.d # optional; defaults to system CNI dir
 ```
 
 The full schema is in [Manifest Reference → Space](../manifests/space.md).

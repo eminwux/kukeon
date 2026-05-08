@@ -100,7 +100,7 @@ sudo ctr -n kukeon-default tasks attach client_wget
 You should see nginx's default HTML stream by every 5 seconds. Press `Ctrl-C` to detach from the task without killing it.
 
 !!! note "Reaching `web` by name"
-    In this example `wget http://web` works because the space's bridge has a resolver, and the `web` cell's root container registers itself by name. If your space has DNS turned off, you can replace the URL with the cell IP (find it via `kuke get cells --realm default --space tutorial --stack demo -o yaml` and look under `status.containers[].ip`).
+In this example `wget http://web` works because the space's bridge has a resolver, and the `web` cell's root container registers itself by name. If your space has DNS turned off, you can replace the URL with the cell IP (find it via `kuke get cells --realm default --space tutorial --stack demo -o yaml` and look under `status.containers[].ip`).
 
 ## 5. Tear it down
 

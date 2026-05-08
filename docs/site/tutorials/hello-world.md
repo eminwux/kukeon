@@ -79,7 +79,7 @@ curl http://${CELL_IP}:8080/
 You should see the HTML from the manifest.
 
 !!! note "Containerd namespace"
-    In the default bootstrap, the containerd namespace for `realm=default` is `kukeon-default`. If your realm is named differently, replace the namespace accordingly. Older layouts used `kukeon.io` as the default namespace.
+In the default bootstrap, the containerd namespace for `realm=default` is `kukeon-default`. If your realm is named differently, replace the namespace accordingly. Older layouts used `kukeon.io` as the default namespace.
 
 ## 5. Tear down
 

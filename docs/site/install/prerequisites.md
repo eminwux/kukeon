@@ -70,13 +70,13 @@ Running `kuke get` for read-only queries over the daemon socket does not require
 
 ## Disk paths kukeon touches
 
-| Path | Purpose |
-|------|---------|
-| `/opt/kukeon` | Default run path. Stores per-realm/space/stack metadata and runtime state. Configurable via `--run-path`. |
-| `/run/kukeon/kukeond.sock` | Default daemon socket. Configurable via `--socket` (kukeond) and `--host` (kuke). |
-| `/run/kukeon/kukeond.pid` | Daemon PID file. |
-| `/etc/cni/net.d` | Generated CNI conflists for each space. |
-| `/sys/fs/cgroup/kukeon/...` | Kukeon's cgroup subtree. |
+| Path                        | Purpose                                                                                                   |
+| --------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `/opt/kukeon`               | Default run path. Stores per-realm/space/stack metadata and runtime state. Configurable via `--run-path`. |
+| `/run/kukeon/kukeond.sock`  | Default daemon socket. Configurable via `--socket` (kukeond) and `--host` (kuke).                         |
+| `/run/kukeon/kukeond.pid`   | Daemon PID file.                                                                                          |
+| `/etc/cni/net.d`            | Generated CNI conflists for each space.                                                                   |
+| `/sys/fs/cgroup/kukeon/...` | Kukeon's cgroup subtree.                                                                                  |
 
 Nothing is written outside those paths without an explicit flag.
 

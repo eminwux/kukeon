@@ -27,7 +27,7 @@ EOF
 ```
 
 !!! note "zsh `compinit`"
-    If your zsh setup doesn't already call `compinit`, you may need to add `autoload -U compinit && compinit` before the `source` line.
+If your zsh setup doesn't already call `compinit`, you may need to add `autoload -U compinit && compinit` before the `source` line.
 
 ## fish
 

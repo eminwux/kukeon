@@ -152,4 +152,3 @@ func DispatchRule(p *Policy) Rule {
 		},
 	}
 }
-

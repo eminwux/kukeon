@@ -228,4 +228,3 @@ func (b *Exec) Close() error {
 func (b *Exec) RunPath() string {
 	return b.opts.RunPath
 }
-
