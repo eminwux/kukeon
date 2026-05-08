@@ -669,14 +669,14 @@ func printCellActions(cmd *cobra.Command, section controller.CellSection, image 
 		section.CellCgroupExistsPost,
 		section.CellCgroupCreated,
 	)
-	printCgroupAction(
+	printContainerAction(
 		cmd,
 		"cell root container",
 		section.CellRootContainerExistsPre,
 		section.CellRootContainerExistsPost,
 		section.CellRootContainerCreated,
 	)
-	printCgroupAction(
+	printStartAction(
 		cmd,
 		"cell containers",
 		section.CellStartedPre,
@@ -720,6 +720,36 @@ func printCgroupAction(cmd *cobra.Command, label string, existedPre bool, exists
 			cmd.Println(fmt.Sprintf("    - %s cgroup: missing (was previously present)", label))
 		} else {
 			cmd.Println(fmt.Sprintf("    - %s cgroup: missing", label))
+		}
+	}
+}
+
+func printContainerAction(cmd *cobra.Command, label string, existedPre bool, existsPost bool, created bool) {
+	switch {
+	case created:
+		cmd.Println(fmt.Sprintf("    - %s: created", label))
+	case existsPost:
+		cmd.Println(fmt.Sprintf("    - %s: already existed", label))
+	default:
+		if existedPre {
+			cmd.Println(fmt.Sprintf("    - %s: missing (was previously present)", label))
+		} else {
+			cmd.Println(fmt.Sprintf("    - %s: missing", label))
+		}
+	}
+}
+
+func printStartAction(cmd *cobra.Command, label string, startedPre bool, startedPost bool, started bool) {
+	switch {
+	case started:
+		cmd.Println(fmt.Sprintf("    - %s: started", label))
+	case startedPost:
+		cmd.Println(fmt.Sprintf("    - %s: already running", label))
+	default:
+		if startedPre {
+			cmd.Println(fmt.Sprintf("    - %s: stopped (was previously running)", label))
+		} else {
+			cmd.Println(fmt.Sprintf("    - %s: not running", label))
 		}
 	}
 }

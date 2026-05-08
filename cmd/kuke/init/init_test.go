@@ -73,6 +73,12 @@ func printDirAction(cmd *cobra.Command, label string, path string, created bool,
 //go:linkname printCgroupAction github.com/eminwux/kukeon/cmd/kuke/init.printCgroupAction
 func printCgroupAction(cmd *cobra.Command, label string, existedPre bool, existsPost bool, created bool)
 
+//go:linkname printContainerAction github.com/eminwux/kukeon/cmd/kuke/init.printContainerAction
+func printContainerAction(cmd *cobra.Command, label string, existedPre bool, existsPost bool, created bool)
+
+//go:linkname printStartAction github.com/eminwux/kukeon/cmd/kuke/init.printStartAction
+func printStartAction(cmd *cobra.Command, label string, startedPre bool, startedPost bool, started bool)
+
 //go:linkname runInit github.com/eminwux/kukeon/cmd/kuke/init.runInit
 func runInit(cmd *cobra.Command, args []string) error
 
@@ -124,6 +130,14 @@ func PrintDirAction(cmd *cobra.Command, label, path string, created, existsPost 
 
 func PrintCgroupAction(cmd *cobra.Command, label string, existedPre, existsPost, created bool) {
 	printCgroupAction(cmd, label, existedPre, existsPost, created)
+}
+
+func PrintContainerAction(cmd *cobra.Command, label string, existedPre, existsPost, created bool) {
+	printContainerAction(cmd, label, existedPre, existsPost, created)
+}
+
+func PrintStartAction(cmd *cobra.Command, label string, startedPre, startedPost, started bool) {
+	printStartAction(cmd, label, startedPre, startedPost, started)
 }
 
 func RunInit(cmd *cobra.Command) error {
@@ -446,8 +460,8 @@ func TestPrintCellActions(t *testing.T) {
 			expected: []string{
 				"- cell \"kukeond\": created (image ghcr.io/eminwux/kukeon:v1.0.0)",
 				"- cell cgroup: created",
-				"- cell root container cgroup: created",
-				"- cell containers cgroup: created",
+				"- cell root container: created",
+				"- cell containers: started",
 			},
 		},
 		{
@@ -466,8 +480,8 @@ func TestPrintCellActions(t *testing.T) {
 			expected: []string{
 				"- cell \"kukeond\": already existed",
 				"- cell cgroup: already existed",
-				"- cell root container cgroup: already existed",
-				"- cell containers cgroup: already existed",
+				"- cell root container: already existed",
+				"- cell containers: already running",
 			},
 		},
 		{
@@ -603,6 +617,104 @@ func TestPrintCgroupAction(t *testing.T) {
 			got := buf.String()
 			if !strings.Contains(got, tc.want) {
 				t.Fatalf("output %q missing %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPrintContainerAction(t *testing.T) {
+	testCases := []struct {
+		name       string
+		label      string
+		existedPre bool
+		existsPost bool
+		created    bool
+		want       string
+	}{
+		{
+			name:    "created",
+			label:   "cell root container",
+			created: true,
+			want:    "- cell root container: created",
+		},
+		{
+			name:       "exists",
+			label:      "cell root container",
+			existsPost: true,
+			want:       "- cell root container: already existed",
+		},
+		{
+			name:       "missing-with-history",
+			label:      "cell root container",
+			existedPre: true,
+			want:       "- cell root container: missing (was previously present)",
+		},
+		{
+			name:  "missing",
+			label: "cell root container",
+			want:  "- cell root container: missing",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, buf := newOutputCommand()
+			PrintContainerAction(cmd, tc.label, tc.existedPre, tc.existsPost, tc.created)
+			got := buf.String()
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("output %q missing %q", got, tc.want)
+			}
+			if strings.Contains(got, "cgroup") {
+				t.Fatalf("output %q must not contain \"cgroup\"", got)
+			}
+		})
+	}
+}
+
+func TestPrintStartAction(t *testing.T) {
+	testCases := []struct {
+		name        string
+		label       string
+		startedPre  bool
+		startedPost bool
+		started     bool
+		want        string
+	}{
+		{
+			name:    "started",
+			label:   "cell containers",
+			started: true,
+			want:    "- cell containers: started",
+		},
+		{
+			name:        "already-running",
+			label:       "cell containers",
+			startedPost: true,
+			want:        "- cell containers: already running",
+		},
+		{
+			name:       "stopped-with-history",
+			label:      "cell containers",
+			startedPre: true,
+			want:       "- cell containers: stopped (was previously running)",
+		},
+		{
+			name:  "not-running",
+			label: "cell containers",
+			want:  "- cell containers: not running",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, buf := newOutputCommand()
+			PrintStartAction(cmd, tc.label, tc.startedPre, tc.startedPost, tc.started)
+			got := buf.String()
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("output %q missing %q", got, tc.want)
+			}
+			if strings.Contains(got, "cgroup") {
+				t.Fatalf("output %q must not contain \"cgroup\"", got)
 			}
 		})
 	}
