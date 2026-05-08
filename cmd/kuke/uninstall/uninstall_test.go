@@ -318,5 +318,53 @@ func TestUninstall_DefaultRunPathFromConfig(t *testing.T) {
 	}
 }
 
+// TestUninstall_CleanupSkippedRendersSkipMarker pins the half-cleaned-host
+// rendering from issue #287: when the controller reports CleanupSkipped, the
+// CLI must replace each filesystem/account row with the skip marker rather
+// than misreporting "absent" or "removed". This is the operator-facing tell
+// that a residual containerd namespace blocked teardown.
+func TestUninstall_CleanupSkippedRendersSkipMarker(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	stepErr := errors.New("synthetic purge failure")
+	stub := &stubController{
+		uninstallFn: func(opts controller.UninstallOptions) (controller.UninstallReport, error) {
+			return controller.UninstallReport{
+				Realms: []controller.RealmPurgeOutcome{
+					{Name: "kuke-system", Namespace: "kuke-system.kukeon.io", Err: stepErr},
+				},
+				CleanupSkipped: true,
+				SocketDir:      opts.SocketDir,
+				RunPath:        "/opt/kukeon",
+				UserName:       "kukeon",
+				GroupName:      "kukeon",
+			}, stepErr
+		},
+	}
+
+	out, err := runCmd(t, stub, "", "--yes")
+	if err == nil {
+		t.Fatalf("expected error to propagate; got nil. output:\n%s", out)
+	}
+
+	wantMarkers := []string{
+		"skipped (realm purge failed)",
+		"filesystem + user/group cleanup skipped",
+	}
+	for _, want := range wantMarkers {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected output to contain %q; got:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"removed", "absent"} {
+		// Defensive: if the renderer falls back to dirOutcome/accountOutcome
+		// on a CleanupSkipped report, it'll mislabel the rows. The skip
+		// marker must replace those entirely.
+		if strings.Contains(out, ": "+unwanted) {
+			t.Errorf("CleanupSkipped report unexpectedly rendered %q line; got:\n%s", unwanted, out)
+		}
+	}
+}
+
 // Compile-time assertion: stubController must satisfy controller.Controller.
 var _ controller.Controller = (*stubController)(nil)

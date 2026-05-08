@@ -88,9 +88,16 @@ type RealmPurgeOutcome struct {
 }
 
 // UninstallReport summarizes what Uninstall did.
+//
+// CleanupSkipped is true when the filesystem + user/group teardown steps were
+// skipped because at least one realm failed to drop its containerd namespace.
+// Tearing out /opt/kukeon while a residual namespace is still pinning overlay
+// mounts on disk left a half-cleaned host where the next `kuke init` had to
+// coexist with stale containerd state — see issue #287.
 type UninstallReport struct {
 	Daemon          DaemonStopReport
 	Realms          []RealmPurgeOutcome
+	CleanupSkipped  bool
 	SocketDir       string
 	SocketDirExists bool
 	SocketDirRemove bool
@@ -125,6 +132,12 @@ type UninstallReport struct {
 //  3. RemoveAll on the run path (typically /opt/kukeon).
 //  4. Remove the kukeon system user and group (no-op if absent).
 //
+// Steps 2–4 are gated on every realm reporting NamespaceRemoved=true. When at
+// least one realm fails to drop its containerd namespace, the report's
+// CleanupSkipped flag is set and the filesystem + user/group teardown is left
+// for a follow-up run — see issue #287 for the half-cleaned-host failure
+// mode this prevents.
+//
 // Any step's error is recorded in the report. The first non-nil step error
 // is returned so callers can surface "uninstall failed at step X" without
 // dropping subsequent best-effort cleanup.
@@ -155,11 +168,14 @@ func (b *Exec) Uninstall(opts UninstallOptions) (UninstallReport, error) {
 	// Step 0: stop the live kukeond daemon. Do this before realm enumeration
 	// so the controller's containerd client is not racing the daemon when
 	// PurgeRealm starts draining the kuke-system namespace.
+	//
+	// The default PID-file path mirrors cmd/kukeond/serve.go's write path —
+	// kukeond writes its PID to <runPath>/kukeond.pid, so reading from any
+	// other location turns this step into a silent no-op (the #287 regression
+	// the daemon-stop step from #195 was supposed to prevent).
 	pidFile := opts.KukeondPIDFile
-	if pidFile == "" && opts.SocketDir != "" {
-		// Default to <socketDir>/kukeond.pid so callers that pre-populate
-		// SocketDir (the CLI does) get the daemon-stop wired up automatically.
-		pidFile = filepath.Join(opts.SocketDir, "kukeond.pid")
+	if pidFile == "" && b.opts.RunPath != "" {
+		pidFile = filepath.Join(b.opts.RunPath, "kukeond.pid")
 	}
 	if pidFile != "" {
 		stopper := opts.DaemonStopper
@@ -201,6 +217,7 @@ func (b *Exec) Uninstall(opts UninstallOptions) (UninstallReport, error) {
 		)
 	}
 
+	allNamespacesRemoved := true
 	for _, realm := range realms {
 		outcome := RealmPurgeOutcome{
 			Name:      realm.Metadata.Name,
@@ -214,7 +231,21 @@ func (b *Exec) Uninstall(opts UninstallOptions) (UninstallReport, error) {
 		} else {
 			outcome.Purged = true
 		}
+		if !outcome.NamespaceRemoved {
+			allNamespacesRemoved = false
+		}
 		report.Realms = append(report.Realms, outcome)
+	}
+
+	// Half-cleaned-host gate (issue #287): if any realm failed to drop its
+	// containerd namespace, leave /run/kukeon, /opt/kukeon, and the kukeon
+	// system user/group intact. Tearing those out while overlay snapshots in
+	// the residual namespace are still pinning files on disk strands the next
+	// `kuke init` with stale containerd state — and worse, can rip the bind
+	// mounts out from under a still-live daemon.
+	if !allNamespacesRemoved {
+		report.CleanupSkipped = true
+		return report, firstErr
 	}
 
 	// Step 2: tear down /run/kukeon.

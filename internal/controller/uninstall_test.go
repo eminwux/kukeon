@@ -172,11 +172,22 @@ func TestUninstall_MergesListedRealmsWithWellKnown(t *testing.T) {
 	}
 }
 
-func TestUninstall_PurgeFailureIsRecordedButCleanupContinues(t *testing.T) {
+// TestUninstall_PurgeFailureGatesFilesystemCleanup pins the half-cleaned-host
+// gate from issue #287: when at least one realm fails to drop its containerd
+// namespace, /run/kukeon, /opt/kukeon, and the kukeon system user/group must
+// be left intact so the host stays internally consistent. Tearing them out
+// while overlay snapshots in the residual namespace are still pinning files
+// on disk strands the next `kuke init` with stale containerd state.
+func TestUninstall_PurgeFailureGatesFilesystemCleanup(t *testing.T) {
 	tmpRunPath := t.TempDir()
 	tmpSocketDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmpRunPath, "marker"), []byte("x"), 0o644); err != nil {
+	runMarker := filepath.Join(tmpRunPath, "marker")
+	if err := os.WriteFile(runMarker, []byte("x"), 0o644); err != nil {
 		t.Fatalf("seed run path: %v", err)
+	}
+	socketMarker := filepath.Join(tmpSocketDir, "marker")
+	if err := os.WriteFile(socketMarker, []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed socket dir: %v", err)
 	}
 
 	f := uninstallNoopRunner(nil)
@@ -200,11 +211,22 @@ func TestUninstall_PurgeFailureIsRecordedButCleanupContinues(t *testing.T) {
 		t.Errorf("error %q does not mention failing realm %q", err, consts.KukeSystemRealmName)
 	}
 
-	// The cleanup steps must still have run despite the realm failure.
-	if !report.RunPathRemove {
-		t.Errorf("run path not removed after a realm purge failure (expected best-effort cleanup)")
+	if !report.CleanupSkipped {
+		t.Errorf("CleanupSkipped=false on a host with a failed realm purge; expected gate to fire")
 	}
-	// And the failing realm's outcome must be in the report so callers can
+	if report.RunPathRemove {
+		t.Errorf("run path was removed after a realm purge failure; expected gate to skip teardown")
+	}
+	if report.SocketDirRemove {
+		t.Errorf("socket dir was removed after a realm purge failure; expected gate to skip teardown")
+	}
+	if _, statErr := os.Stat(runMarker); statErr != nil {
+		t.Errorf("run-path marker missing — gate failed to preserve /opt/kukeon: %v", statErr)
+	}
+	if _, statErr := os.Stat(socketMarker); statErr != nil {
+		t.Errorf("socket-dir marker missing — gate failed to preserve /run/kukeon: %v", statErr)
+	}
+	// The failing realm's outcome must be in the report so callers can
 	// surface what went wrong. NamespaceRemoved must be false so the renderer
 	// can flag the residual namespace from issue #193 instead of misreporting
 	// "purged".
@@ -273,7 +295,10 @@ func TestUninstall_DaemonStopStep_PIDPresent(t *testing.T) {
 	tmpRunPath := t.TempDir()
 	tmpSocketDir := t.TempDir()
 
-	pidFilePath := filepath.Join(tmpSocketDir, "kukeond.pid")
+	// Match the production write path (cmd/kukeond/serve.go:99): kukeond
+	// writes its PID to <runPath>/kukeond.pid. Putting the seed file under
+	// the socket dir is the #287 misconfiguration this test must not pin.
+	pidFilePath := filepath.Join(tmpRunPath, "kukeond.pid")
 	if err := os.WriteFile(pidFilePath, []byte("12345\n"), 0o644); err != nil {
 		t.Fatalf("seed pid file: %v", err)
 	}
@@ -467,5 +492,51 @@ func TestUninstall_SuffixEnumeratorPurgesKukeonNamespacesOnly(t *testing.T) {
 	}
 	if _, leaked := purgedNames["moby"]; leaked {
 		t.Errorf("moby was purged — non-kukeon namespaces must be filtered out; purged=%v", purgedNames)
+	}
+}
+
+// TestUninstall_DefaultPIDFileResolvesToRunPath pins the controller's default
+// PID-file path against the production write path in cmd/kukeond/serve.go.
+//
+// Issue #287: the daemon-stop step from #195 was a silent no-op because
+// Uninstall defaulted KukeondPIDFile to <socketDir>/kukeond.pid while kukeond
+// itself writes <runPath>/kukeond.pid. This test guards against either side
+// drifting again — it asserts the path the controller hands the stopper is
+// exactly filepath.Join(opts.RunPath, "kukeond.pid").
+func TestUninstall_DefaultPIDFileResolvesToRunPath(t *testing.T) {
+	tmpRunPath := t.TempDir()
+	tmpSocketDir := t.TempDir()
+
+	wantPIDFile := filepath.Join(tmpRunPath, "kukeond.pid")
+	var gotPIDFile string
+	stopper := func(_ context.Context, gotPidFile string, _ time.Duration) (controller.DaemonStopReport, error) {
+		gotPIDFile = gotPidFile
+		return controller.DaemonStopReport{PIDFile: gotPidFile}, nil
+	}
+
+	f := uninstallNoopRunner(nil)
+	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
+	if _, err := ctrl.Uninstall(controller.UninstallOptions{
+		SocketDir:     tmpSocketDir,
+		DaemonStopper: stopper,
+		// KukeondPIDFile deliberately empty — the whole point is to exercise
+		// the controller's default-resolution path.
+		SkipUserGroup: true,
+	}); err != nil {
+		t.Fatalf("Uninstall returned error: %v", err)
+	}
+
+	if gotPIDFile != wantPIDFile {
+		t.Errorf(
+			"default PID-file path mismatch:\n  controller passed: %q\n  cmd/kukeond/serve.go writes: <runPath>/kukeond.pid -> %q",
+			gotPIDFile,
+			wantPIDFile,
+		)
+	}
+	if filepath.Dir(gotPIDFile) == tmpSocketDir {
+		t.Errorf(
+			"controller defaulted PID file under socket dir %q — that is the #287 regression",
+			tmpSocketDir,
+		)
 	}
 }
