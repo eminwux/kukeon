@@ -60,15 +60,15 @@ See [Manifest Reference → Container](../manifests/container.md) for the comple
 
 ## Lifecycle
 
-| State      | What it means                                                     |
-|------------|-------------------------------------------------------------------|
-| `Pending`  | Container metadata exists; containerd container not yet created   |
-| `Ready`    | Task is running                                                   |
-| `Stopped`  | Task has exited                                                   |
-| `Paused`   | Task is paused (cgroup-frozen)                                    |
-| `Pausing`  | Task is in the process of being paused                            |
-| `Failed`   | Task exited non-zero or was signalled                             |
-| `Unknown`  | Daemon can't determine state                                      |
+| State     | What it means                                                   |
+| --------- | --------------------------------------------------------------- |
+| `Pending` | Container metadata exists; containerd container not yet created |
+| `Ready`   | Task is running                                                 |
+| `Stopped` | Task has exited                                                 |
+| `Paused`  | Task is paused (cgroup-frozen)                                  |
+| `Pausing` | Task is in the process of being paused                          |
+| `Failed`  | Task exited non-zero or was signalled                           |
+| `Unknown` | Daemon can't determine state                                    |
 
 ## Operations
 
@@ -91,7 +91,7 @@ sudo kuke delete container side --cell hello-world \
 ```
 
 !!! note "`--image` default"
-    `kuke create container` defaults `--image` to `docker.io/library/debian:latest` when none is provided. Always pass `--image` explicitly if you care which image runs.
+`kuke create container` defaults `--image` to `docker.io/library/debian:latest` when none is provided. Always pass `--image` explicitly if you care which image runs.
 
 ## Related concepts
 

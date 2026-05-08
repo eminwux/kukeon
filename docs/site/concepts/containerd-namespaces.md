@@ -4,10 +4,10 @@ Kukeon doesn't run its own container runtime. It drives [containerd](https://con
 
 ## The mapping
 
-| Realm           | containerd namespace      |
-|-----------------|---------------------------|
-| `main`          | `kukeon-main`             |
-| `kukeon-system` | `kukeon-system`           |
+| Realm           | containerd namespace                                  |
+| --------------- | ----------------------------------------------------- |
+| `main`          | `kukeon-main`                                         |
+| `kukeon-system` | `kukeon-system`                                       |
 | `mytenant`      | `kukeon-mytenant` (or whatever `spec.namespace` says) |
 
 By default, each realm's namespace is `kukeon-<realm-name>`. The realm manifest can override this via `spec.namespace`.

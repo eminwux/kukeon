@@ -89,13 +89,13 @@ If you want to inspect what Kukeon pushed into containerd, use `ctr -n kukeon-<r
 
 ## What gets cleaned up, and when
 
-| Operation                       | Removes                                                                 |
-|---------------------------------|-------------------------------------------------------------------------|
-| `kuke delete realm --cascade`   | The realm subtree under the run path, cgroups, CNI conflists           |
-| `kuke delete space --cascade`   | The space subtree, cgroups, CNI conflist                                |
-| `kuke delete cell --cascade`    | The cell subtree, cgroups, containerd containers                        |
-| `kuke purge <resource>`         | Same as delete but more aggressive: force-removes residual state        |
-| Reboot                          | `/run/kukeon/*` disappears (tmpfs). `/opt/kukeon/*` persists.           |
+| Operation                     | Removes                                                          |
+| ----------------------------- | ---------------------------------------------------------------- |
+| `kuke delete realm --cascade` | The realm subtree under the run path, cgroups, CNI conflists     |
+| `kuke delete space --cascade` | The space subtree, cgroups, CNI conflist                         |
+| `kuke delete cell --cascade`  | The cell subtree, cgroups, containerd containers                 |
+| `kuke purge <resource>`       | Same as delete but more aggressive: force-removes residual state |
+| Reboot                        | `/run/kukeon/*` disappears (tmpfs). `/opt/kukeon/*` persists.    |
 
 `--no-daemon` versions of the same commands do exactly the same thing on disk — they just run in-process instead of going through the socket.
 

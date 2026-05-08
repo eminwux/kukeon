@@ -9,7 +9,7 @@ _Agent-native orchestration. Self-hosted. No walled garden._
 Your agent's context, state, and workspace live on **your** machines — not behind a SaaS login. Kukeon is a containerd-native runtime for AI agents on any Linux host: your cloud VM, your homelab, your laptop. Declarative sessions with bounded lifetime, PTY-attached workloads, and clean teardown — all on infrastructure you control.
 
 !!! warning "Alpha software"
-    This project is under active development and not production ready. Interfaces and APIs may change.
+This project is under active development and not production ready. Interfaces and APIs may change.
 
 `kukeond` is a small daemon over containerd + CNI + cgroups. `kuke` is the CLI. Agent-native primitives — `Session`, `Interactive` containers, scoped secrets, default-deny networking — are declared in YAML and reconciled on a single host.
 

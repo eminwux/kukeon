@@ -28,7 +28,7 @@ spec:
   containers:
     - id: nginx
       image: docker.io/library/nginx:alpine
-      root: true                 # owns the network namespace
+      root: true # owns the network namespace
     - id: sidecar
       image: docker.io/library/busybox:latest
       command: /bin/sh
@@ -53,13 +53,13 @@ See [Manifest Reference → Cell](../manifests/cell.md) for the full schema.
 
 ## Lifecycle
 
-| State        | What it means                                                   |
-|--------------|-----------------------------------------------------------------|
-| `Pending`    | Cell metadata exists; containers not yet created                |
-| `Ready`      | Root container is running; non-root containers are running      |
-| `Stopped`    | All containers have exited                                      |
-| `Failed`     | The root container failed to start or exited unexpectedly       |
-| `Unknown`    | The daemon can't determine the state (e.g., containerd offline) |
+| State     | What it means                                                   |
+| --------- | --------------------------------------------------------------- |
+| `Pending` | Cell metadata exists; containers not yet created                |
+| `Ready`   | Root container is running; non-root containers are running      |
+| `Stopped` | All containers have exited                                      |
+| `Failed`  | The root container failed to start or exited unexpectedly       |
+| `Unknown` | The daemon can't determine the state (e.g., containerd offline) |
 
 ## Operations
 

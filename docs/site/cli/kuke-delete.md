@@ -9,12 +9,12 @@ kuke delete -f <file>
 
 ## Persistent flags (inherited by every subcommand)
 
-| Flag         | Default | Description                                                                            |
-|--------------|---------|----------------------------------------------------------------------------------------|
-| `--cascade`  | `false` | Recursively delete child resources (realm → spaces → stacks → cells; not containers)   |
-| `--force`    | `false` | Skip validation; attempt deletion anyway                                               |
-| `--file`, `-f` | (empty) | Delete the resources listed in a YAML file                                           |
-| `--output`, `-o` | (empty) | Output format: `json`, `yaml`                                                      |
+| Flag             | Default | Description                                                                          |
+| ---------------- | ------- | ------------------------------------------------------------------------------------ |
+| `--cascade`      | `false` | Recursively delete child resources (realm → spaces → stacks → cells; not containers) |
+| `--force`        | `false` | Skip validation; attempt deletion anyway                                             |
+| `--file`, `-f`   | (empty) | Delete the resources listed in a YAML file                                           |
+| `--output`, `-o` | (empty) | Output format: `json`, `yaml`                                                        |
 
 Plus all [global flags](kuke.md).
 

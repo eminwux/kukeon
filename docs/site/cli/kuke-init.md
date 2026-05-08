@@ -10,13 +10,13 @@ Always runs as root: it touches `/sys/fs/cgroup`, containerd namespaces, `/opt/k
 
 ## Flags
 
-| Flag                      | Default                             | Description                                                                                 |
-|---------------------------|-------------------------------------|---------------------------------------------------------------------------------------------|
-| `--realm`                 | `default`                           | Name of the default user realm                                                              |
-| `--space`                 | `default`                           | Name of the default space inside the user realm                                             |
-| `--kukeond-image`         | `ghcr.io/eminwux/kukeon:<version>`  | Image to run the daemon cell. See [image resolution](#image-resolution).                    |
-| `--no-wait`               | `false`                             | Don't wait for the daemon socket after bootstrap                                            |
-| `--force-regenerate-cni`  | `false`                             | Rewrite every space's CNI conflist even if it exists. See [Troubleshooting](../guides/troubleshooting.md#kuke-init-fails-with-numerical-result-out-of-range). |
+| Flag                     | Default                            | Description                                                                                                                                                   |
+| ------------------------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--realm`                | `default`                          | Name of the default user realm                                                                                                                                |
+| `--space`                | `default`                          | Name of the default space inside the user realm                                                                                                               |
+| `--kukeond-image`        | `ghcr.io/eminwux/kukeon:<version>` | Image to run the daemon cell. See [image resolution](#image-resolution).                                                                                      |
+| `--no-wait`              | `false`                            | Don't wait for the daemon socket after bootstrap                                                                                                              |
+| `--force-regenerate-cni` | `false`                            | Rewrite every space's CNI conflist even if it exists. See [Troubleshooting](../guides/troubleshooting.md#kuke-init-fails-with-numerical-result-out-of-range). |
 
 Plus all [global flags](kuke.md).
 

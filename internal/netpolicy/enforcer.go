@@ -44,8 +44,8 @@ type Enforcer interface {
 // mutate iptables (e.g., `--no-daemon` read-only clients).
 type NoopEnforcer struct{}
 
-func (NoopEnforcer) Apply(_ context.Context, _ *Policy) error         { return nil }
-func (NoopEnforcer) Remove(_ context.Context, _, _ string) error      { return nil }
+func (NoopEnforcer) Apply(_ context.Context, _ *Policy) error    { return nil }
+func (NoopEnforcer) Remove(_ context.Context, _, _ string) error { return nil }
 
 // CommandRunner executes an iptables invocation and returns its combined
 // stdout+stderr. Tests inject a fake to capture invocations and return

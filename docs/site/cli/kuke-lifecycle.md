@@ -2,11 +2,11 @@
 
 Runtime lifecycle for cells and containers. These commands don't touch metadata — they operate on the containerd task under the resource.
 
-| Command      | Signal             | What it does                                                  |
-|--------------|--------------------|---------------------------------------------------------------|
-| `kuke start` | (create/start task)| Launch the container(s); no-op if already running             |
-| `kuke stop`  | `SIGTERM`          | Request graceful shutdown; container exits on its own terms   |
-| `kuke kill`  | `SIGKILL`          | Immediate termination; no graceful shutdown window            |
+| Command      | Signal              | What it does                                                |
+| ------------ | ------------------- | ----------------------------------------------------------- |
+| `kuke start` | (create/start task) | Launch the container(s); no-op if already running           |
+| `kuke stop`  | `SIGTERM`           | Request graceful shutdown; container exits on its own terms |
+| `kuke kill`  | `SIGKILL`           | Immediate termination; no graceful shutdown window          |
 
 All three take the same shape: `<verb> cell|container <name> <scope flags>`.
 
@@ -48,12 +48,12 @@ Sends SIGKILL. Useful when a container is unresponsive, or when tearing down the
 
 All three verbs share the same scope flags:
 
-| Flag       | Default    | Scope                 |
-|------------|-----------|-----------------------|
-| `--realm`  | `default` | Required for cell/container |
-| `--space`  | `default` | Required for cell/container |
-| `--stack`  | `default` | Required for cell/container |
-| `--cell`   | _(required for `container`)_ | Parent cell |
+| Flag      | Default                      | Scope                       |
+| --------- | ---------------------------- | --------------------------- |
+| `--realm` | `default`                    | Required for cell/container |
+| `--space` | `default`                    | Required for cell/container |
+| `--stack` | `default`                    | Required for cell/container |
+| `--cell`  | _(required for `container`)_ | Parent cell                 |
 
 Plus all [global flags](kuke.md).
 

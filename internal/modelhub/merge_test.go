@@ -23,7 +23,7 @@ import (
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
-func ptrBool(v bool) *bool   { return &v }
+func ptrBool(v bool) *bool    { return &v }
 func ptrInt64(v int64) *int64 { return &v }
 
 func spaceWithContainerDefaults(d *intmodel.SpaceContainerDefaults) intmodel.Space {

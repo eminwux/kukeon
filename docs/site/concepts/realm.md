@@ -20,7 +20,7 @@ metadata:
   labels: {}
 spec:
   namespace: kukeon-main
-  registryCredentials: []   # optional, per-registry
+  registryCredentials: [] # optional, per-registry
 ```
 
 The full schema is in [Manifest Reference → Realm](../manifests/realm.md).

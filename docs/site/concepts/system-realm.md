@@ -54,7 +54,7 @@ sudo rm -f /run/kukeon/kukeond.sock /run/kukeon/kukeond.pid
 See [Guides → Init and reset](../guides/init-and-reset.md) for the full teardown-and-bootstrap loop.
 
 !!! note "Older layouts"
-    On earlier versions of Kukeon, the system realm used `kuke-system.kukeon.io` as the containerd namespace. `kuke-system` and `kukeon-system` refer to the same concept depending on which version you bootstrapped the host with.
+On earlier versions of Kukeon, the system realm used `kuke-system.kukeon.io` as the containerd namespace. `kuke-system` and `kukeon-system` refer to the same concept depending on which version you bootstrapped the host with.
 
 ## Related concepts
 
