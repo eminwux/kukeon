@@ -251,14 +251,20 @@ func TestDaemonReset(t *testing.T) {
 }
 
 // TestDaemonReset_RemovesSocketAndPidFiles confirms the cleanup step actually
-// removes /run/kukeon/kukeond.{sock,pid} (or the per-test override) when both
-// files are present.
+// removes /run/kukeon/kukeond.sock and /opt/kukeon/kukeond.pid (or the
+// per-test overrides) when both files are present.
+//
+// kukeond.sock lives under the socket dir (KUKEOND_SOCKET's parent) while
+// kukeond.pid is written under the run path by cmd/kukeond/serve.go — pinning
+// the pid removal to the socket dir was the silent #287 no-op that left the
+// daemon-stop step in `kuke uninstall` looking at the wrong path.
 func TestDaemonReset_RemovesSocketAndPidFiles(t *testing.T) {
 	withFreshViper(t)
 
 	socketDir := t.TempDir()
+	runPath := t.TempDir()
 	sockPath := filepath.Join(socketDir, "kukeond.sock")
-	pidPath := filepath.Join(socketDir, "kukeond.pid")
+	pidPath := filepath.Join(runPath, "kukeond.pid")
 	if err := os.WriteFile(sockPath, []byte{}, 0o600); err != nil {
 		t.Fatalf("seed sock file: %v", err)
 	}
@@ -288,7 +294,7 @@ func TestDaemonReset_RemovesSocketAndPidFiles(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 	ctx = context.WithValue(ctx, reset.MockClientKey{}, kukeonv1.Client(fake))
 	ctx = context.WithValue(ctx, reset.MockSocketDirKey{}, socketDir)
-	ctx = context.WithValue(ctx, reset.MockRunPathKey{}, t.TempDir())
+	ctx = context.WithValue(ctx, reset.MockRunPathKey{}, runPath)
 	cmd.SetContext(ctx)
 	cmd.SetArgs(nil)
 

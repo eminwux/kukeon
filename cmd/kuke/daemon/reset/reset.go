@@ -147,8 +147,17 @@ func runReset(cmd *cobra.Command, _ []string) error {
 	)
 
 	socketDir := resolveSocketDir(cmd)
-	for _, name := range []string{"kukeond.sock", "kukeond.pid"} {
-		path := filepath.Join(socketDir, name)
+	runPath := resolveRunPath(cmd)
+	// kukeond.sock lives under the socket dir (/run/kukeon); kukeond.pid is
+	// written under the run path (/opt/kukeon) by cmd/kukeond/serve.go. The
+	// two diverge — pinning kukeond.pid to the socket dir was the silent #287
+	// no-op that left the daemon-stop step in `kuke uninstall` looking at the
+	// wrong path.
+	transientFiles := []string{
+		filepath.Join(socketDir, "kukeond.sock"),
+		filepath.Join(runPath, "kukeond.pid"),
+	}
+	for _, path := range transientFiles {
 		removed, removeErr := removeFileIfExists(path)
 		if removeErr != nil {
 			return fmt.Errorf("remove %q: %w", path, removeErr)
@@ -159,7 +168,6 @@ func runReset(cmd *cobra.Command, _ []string) error {
 	}
 
 	if purgeSystem {
-		runPath := resolveRunPath(cmd)
 		systemDir := filepath.Join(runPath, consts.KukeSystemRealmName)
 		removed, removeErr := removeDirIfExists(systemDir)
 		if removeErr != nil {

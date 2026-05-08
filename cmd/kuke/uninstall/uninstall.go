@@ -63,6 +63,14 @@ This is the global counterpart to "kuke purge" (which is per-resource). It:
   3. Removes the configured run path (default /opt/kukeon) recursively.
   4. Removes the kukeon system user and group (no-op if absent).
 
+If any realm fails to drop its containerd namespace, steps 2-4 are skipped:
+tearing out /opt/kukeon while a residual namespace is still pinning overlay
+mounts on disk would strand the next "kuke init" with stale containerd state.
+The report flags every dir/account row as "skipped (realm purge failed)" so
+the half-cleaned host is visible without scrolling to the trailing error.
+Resolve the realm-purge failure (often: stop the live daemon, remove the
+residual containerd namespace by hand) and re-run the command.
+
 The /usr/local/bin/kuke binary and the kukeond symlink are NOT removed —
 uninstalling runtime state is not the same as uninstalling the binary.
 
@@ -174,6 +182,14 @@ func printReport(cmd *cobra.Command, report controller.UninstallReport) {
 			fmt.Fprintf(out, "  - realm %q (namespace %q): purged\n", r.Name, r.Namespace)
 		}
 	}
+	if report.CleanupSkipped {
+		fmt.Fprintf(out, "  - %s: %s\n", report.SocketDir, outcomeSkipped)
+		fmt.Fprintf(out, "  - %s: %s\n", report.RunPath, outcomeSkipped)
+		fmt.Fprintf(out, "  - user %q: %s\n", report.UserName, outcomeSkipped)
+		fmt.Fprintf(out, "  - group %q: %s\n", report.GroupName, outcomeSkipped)
+		fmt.Fprintln(out, "  filesystem + user/group cleanup skipped: residual containerd namespace prevented teardown")
+		return
+	}
 	fmt.Fprintf(out, "  - %s: %s\n", report.SocketDir, dirOutcome(report.SocketDirExists, report.SocketDirRemove))
 	fmt.Fprintf(out, "  - %s: %s\n", report.RunPath, dirOutcome(report.RunPathExists, report.RunPathRemove))
 	fmt.Fprintf(out, "  - user %q: %s\n", report.UserName, accountOutcome(report.UserExisted, report.UserRemoved))
@@ -183,6 +199,11 @@ func printReport(cmd *cobra.Command, report controller.UninstallReport) {
 // outcomeAbsent labels every "we didn't find the resource" branch in the
 // uninstall report so the operator sees the same word in every section.
 const outcomeAbsent = "absent"
+
+// outcomeSkipped labels filesystem + user/group rows when the half-cleaned
+// host gate (issue #287) blocks teardown because a realm failed to drop its
+// containerd namespace.
+const outcomeSkipped = "skipped (realm purge failed)"
 
 func daemonOutcome(d controller.DaemonStopReport) string {
 	switch {
