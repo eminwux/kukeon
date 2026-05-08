@@ -22,7 +22,6 @@ package cellprofile
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -73,41 +72,70 @@ func ResolveDir() (string, error) {
 // is the convenient case but not authoritative, so two profiles can share a
 // directory regardless of how they were named on disk.
 //
+// `${KEY}` references in the body remain literal — substitution is a `kuke
+// run -p`-time concern. Use LoadResolved when the caller has --param values
+// to apply.
+//
 // Wraps errdefs.ErrProfileNotFound when the name does not resolve, including
 // the directory in the error so the operator knows where to drop the file.
 func Load(dir, name string) (*v1beta1.CellProfileDoc, error) {
+	profile, _, err := locate(dir, name)
+	return profile, err
+}
+
+// locate is the shared core for Load and LoadResolved: resolve the named
+// profile to a file, parse it, and return both the typed profile and the raw
+// yaml.Node tree. The node lets LoadResolved substitute scalars in the same
+// document tree the caller will eventually decode against — bypassing a YAML
+// → struct → YAML round-trip that would lose comments and re-quote scalars.
+func locate(dir, name string) (*v1beta1.CellProfileDoc, *yaml.Node, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, fmt.Errorf("%w: empty name", errdefs.ErrProfileInvalid)
+		return nil, nil, fmt.Errorf("%w: empty name", errdefs.ErrProfileInvalid)
 	}
 
 	for _, ext := range []string{".yaml", ".yml"} {
 		candidate := filepath.Join(dir, name+ext)
 		if _, statErr := os.Stat(candidate); statErr == nil {
-			profile, err := loadFile(candidate)
+			profile, node, err := loadFile(candidate)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if matchesName(profile, name) {
-				return profile, nil
+				return profile, node, nil
 			}
 		}
 	}
 
-	profiles, err := List(dir)
+	// Fallback: basename did not match. Scan the directory and return the
+	// first parseable profile whose metadata.name equals `name`. We re-read
+	// the matching file so the caller gets a fresh node tree (List discards
+	// nodes by design).
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		if errors.Is(err, errdefs.ErrProfileNotFound) {
-			return nil, fmt.Errorf("profile %q not found in %s: %w", name, dir, errdefs.ErrProfileNotFound)
+		if os.IsNotExist(err) {
+			return nil, nil, fmt.Errorf("profile %q not found in %s: %w", name, dir, errdefs.ErrProfileNotFound)
 		}
-		return nil, err
+		return nil, nil, fmt.Errorf("read profiles dir %q: %w", dir, err)
 	}
-	for _, p := range profiles {
-		if p.Metadata.Name == name {
-			out := p
-			return &out, nil
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		filename := e.Name()
+		if !strings.HasSuffix(filename, ".yaml") && !strings.HasSuffix(filename, ".yml") {
+			continue
+		}
+		path := filepath.Join(dir, filename)
+		profile, node, loadErr := loadFile(path)
+		if loadErr != nil {
+			continue
+		}
+		if profile.Metadata.Name == name {
+			return profile, node, nil
 		}
 	}
-	return nil, fmt.Errorf("profile %q not found in %s: %w", name, dir, errdefs.ErrProfileNotFound)
+	return nil, nil, fmt.Errorf("profile %q not found in %s: %w", name, dir, errdefs.ErrProfileNotFound)
 }
 
 // List returns every parseable CellProfile in dir, sorted by metadata.name.
@@ -132,7 +160,7 @@ func List(dir string) ([]v1beta1.CellProfileDoc, error) {
 		if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml") {
 			continue
 		}
-		profile, loadErr := loadFile(filepath.Join(dir, name))
+		profile, _, loadErr := loadFile(filepath.Join(dir, name))
 		if loadErr != nil {
 			continue
 		}
@@ -144,34 +172,46 @@ func List(dir string) ([]v1beta1.CellProfileDoc, error) {
 	return out, nil
 }
 
-func loadFile(path string) (*v1beta1.CellProfileDoc, error) {
+// loadFile parses a single profile YAML and returns both the typed profile
+// and the underlying yaml.Node tree. The node is needed by LoadResolved to
+// substitute `${KEY}` references in scalar values without round-tripping
+// through marshal/unmarshal. Validation runs here so any caller (Load,
+// LoadResolved, the List fallback) gets the same shape rejections.
+func loadFile(path string) (*v1beta1.CellProfileDoc, *yaml.Node, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read profile %q: %w", path, err)
+		return nil, nil, fmt.Errorf("read profile %q: %w", path, err)
+	}
+	var node yaml.Node
+	if unmarshalErr := yaml.Unmarshal(raw, &node); unmarshalErr != nil {
+		return nil, nil, fmt.Errorf("parse profile %q: %w: %w", path, errdefs.ErrProfileInvalid, unmarshalErr)
 	}
 	var profile v1beta1.CellProfileDoc
-	if unmarshalErr := yaml.Unmarshal(raw, &profile); unmarshalErr != nil {
-		return nil, fmt.Errorf("parse profile %q: %w: %w", path, errdefs.ErrProfileInvalid, unmarshalErr)
+	if decodeErr := node.Decode(&profile); decodeErr != nil {
+		return nil, nil, fmt.Errorf("parse profile %q: %w: %w", path, errdefs.ErrProfileInvalid, decodeErr)
 	}
 	if profile.Kind != v1beta1.KindCellProfile {
-		return nil, fmt.Errorf(
+		return nil, nil, fmt.Errorf(
 			"profile %q has kind %q, want %q: %w",
 			path, profile.Kind, v1beta1.KindCellProfile, errdefs.ErrProfileInvalid,
 		)
 	}
 	if strings.TrimSpace(profile.Metadata.Name) == "" {
-		return nil, fmt.Errorf("profile %q: metadata.name is required: %w", path, errdefs.ErrProfileInvalid)
+		return nil, nil, fmt.Errorf("profile %q: metadata.name is required: %w", path, errdefs.ErrProfileInvalid)
 	}
 	if strings.TrimSpace(profile.Spec.Cell.ID) != "" {
 		// Every materialized cell gets a generated `<prefix>-<6hex>` name; a
 		// hardcoded spec.cell.id would silently produce N cells sharing one ID.
 		// Reject loudly so the operator removes the stray field instead.
-		return nil, fmt.Errorf(
+		return nil, nil, fmt.Errorf(
 			"profile %q: spec.cell.id must not be set on a CellProfile: %w",
 			path, errdefs.ErrProfileInvalid,
 		)
 	}
-	return &profile, nil
+	if validateErr := validateParameters(&profile, &node, path); validateErr != nil {
+		return nil, nil, validateErr
+	}
+	return &profile, &node, nil
 }
 
 func matchesName(profile *v1beta1.CellProfileDoc, name string) bool {
@@ -188,7 +228,17 @@ func matchesName(profile *v1beta1.CellProfileDoc, name string) bool {
 // kukeon.io/profile=<metadata.name> label so the set of cells materialized
 // from a profile is queryable via `kuke get cells -l`.
 func Materialize(profile *v1beta1.CellProfileDoc) (v1beta1.CellDoc, error) {
-	cellName, err := resolveCellName(profile)
+	return MaterializeWithName(profile, "")
+}
+
+// MaterializeWithName is Materialize with an explicit cell-name override —
+// used by `kuke run -p ... --name <override>`. When nameOverride is non-empty
+// (after trim) it replaces the generated `<prefix>-<6hex>` name verbatim, so
+// callers can give the cell a deterministic identity (e.g., the orchestrator
+// dispatching `crew-dev-354` so it can later attach by name). When empty,
+// behavior matches Materialize.
+func MaterializeWithName(profile *v1beta1.CellProfileDoc, nameOverride string) (v1beta1.CellDoc, error) {
+	cellName, err := resolveCellName(profile, nameOverride)
 	if err != nil {
 		return v1beta1.CellDoc{}, err
 	}
@@ -210,7 +260,10 @@ func Materialize(profile *v1beta1.CellProfileDoc) (v1beta1.CellDoc, error) {
 	}, nil
 }
 
-func resolveCellName(profile *v1beta1.CellProfileDoc) (string, error) {
+func resolveCellName(profile *v1beta1.CellProfileDoc, nameOverride string) (string, error) {
+	if override := strings.TrimSpace(nameOverride); override != "" {
+		return override, nil
+	}
 	prefix := strings.TrimSpace(profile.Spec.Prefix)
 	if prefix == "" {
 		prefix = profile.Metadata.Name

@@ -25,6 +25,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -1702,6 +1703,233 @@ func TestNewRunCmd_RmFlagRegistered(t *testing.T) {
 	}
 	if def := rmFlag.DefValue; def != "false" {
 		t.Errorf("--rm default=%q want false", def)
+	}
+}
+
+// paramProfileYAML is the issue #355 example with three required parameters
+// and two defaults. Used to exercise the --param / --param-file / --name
+// path end-to-end through `kuke run`.
+const paramProfileYAML = `apiVersion: v1beta1
+kind: CellProfile
+metadata:
+  name: dev
+spec:
+  realm: default
+  space: agents
+  stack: claude
+  parameters:
+    - name: PROMPT
+      required: true
+    - name: PROJECT_REPO
+      required: true
+    - name: PROJECT_DIR
+      required: true
+    - name: AGENTS_REPO
+      default: "eminwux/agents"
+    - name: CLAUDE_IMAGE
+      default: "registry.eminwux.com/claude:latest"
+  cell:
+    containers:
+      - id: work
+        attachable: true
+        image: ${CLAUDE_IMAGE}
+        env:
+          - PROMPT=${PROMPT}
+          - PROJECT_REPO=${PROJECT_REPO}
+          - PROJECT_DIR=${PROJECT_DIR}
+          - AGENTS_REPO=${AGENTS_REPO}
+`
+
+func writeParamProfile(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dev.yaml")
+	if err := os.WriteFile(path, []byte(paramProfileYAML), 0o600); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	t.Setenv("KUKE_PROFILES_DIR", dir)
+}
+
+func TestRun_FromProfile_WithParams_Substitutes(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	writeParamProfile(t)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{
+		"-p", "dev", "-d",
+		"--name", "crew-dev-354",
+		"--param", "PROMPT=/pick-issue 354",
+		"--param", "PROJECT_REPO=https://github.com/eminwux/crew",
+		"--param", "PROJECT_DIR=crew",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if got := fc.createDoc.Metadata.Name; got != "crew-dev-354" {
+		t.Errorf("cell name=%q want crew-dev-354 (--name override)", got)
+	}
+	if got := fc.createDoc.Spec.ID; got != "crew-dev-354" {
+		t.Errorf("spec.id=%q want crew-dev-354", got)
+	}
+
+	c := fc.createDoc.Spec.Containers[0]
+	if c.Image != "registry.eminwux.com/claude:latest" {
+		t.Errorf("image=%q want registry.eminwux.com/claude:latest (default substituted)", c.Image)
+	}
+	wantEnv := []string{
+		"PROMPT=/pick-issue 354",
+		"PROJECT_REPO=https://github.com/eminwux/crew",
+		"PROJECT_DIR=crew",
+		"AGENTS_REPO=eminwux/agents",
+	}
+	if !reflect.DeepEqual(c.Env, wantEnv) {
+		t.Errorf("env=%v\nwant %v", c.Env, wantEnv)
+	}
+}
+
+func TestRun_FromProfile_WithParamFile(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	writeParamProfile(t)
+
+	paramFile := filepath.Join(t.TempDir(), "dev.params")
+	body := "# issue 355 example\n" +
+		"PROMPT=/pick-issue 354\n" +
+		"PROJECT_REPO=https://github.com/eminwux/crew\n" +
+		"PROJECT_DIR=crew\n"
+	if err := os.WriteFile(paramFile, []byte(body), 0o600); err != nil {
+		t.Fatalf("write param file: %v", err)
+	}
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-p", "dev", "-d", "--param-file", paramFile})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := fc.createDoc.Spec.Containers[0].Env[0]; got != "PROMPT=/pick-issue 354" {
+		t.Errorf("env[0]=%q want PROMPT=/pick-issue 354", got)
+	}
+}
+
+func TestRun_FromProfile_ParamFlagBeatsParamFile(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	writeParamProfile(t)
+
+	paramFile := filepath.Join(t.TempDir(), "dev.params")
+	body := "PROMPT=from-file\nPROJECT_REPO=x\nPROJECT_DIR=x\n"
+	if err := os.WriteFile(paramFile, []byte(body), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	// CLI --param targets the same key the file sets — flag wins (later-binding).
+	cmd.SetArgs([]string{
+		"-p", "dev", "-d",
+		"--param-file", paramFile,
+		"--param", "PROMPT=from-flag",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := fc.createDoc.Spec.Containers[0].Env[0]; got != "PROMPT=from-flag" {
+		t.Errorf("env[0]=%q want PROMPT=from-flag (CLI --param wins over file)", got)
+	}
+}
+
+func TestRun_FromProfile_RequiredMissing_Errors(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	writeParamProfile(t)
+
+	fc := &fakeClient{}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-p", "dev", "-d"})
+
+	err := cmd.Execute()
+	if !errors.Is(err, errdefs.ErrProfileInvalid) {
+		t.Fatalf("err=%v want ErrProfileInvalid", err)
+	}
+	if !strings.Contains(err.Error(), "PROMPT") {
+		t.Errorf("err %q must name a missing required parameter", err)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell called %d times; want 0 (substitution must error before RPC)", fc.createCalls)
+	}
+}
+
+func TestRun_FromProfile_UndeclaredParam_Errors(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	writeParamProfile(t)
+
+	fc := &fakeClient{}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{
+		"-p", "dev", "-d",
+		"--param", "PROMPT=x",
+		"--param", "PROJECT_REPO=x",
+		"--param", "PROJECT_DIR=x",
+		"--param", "TYPO=oops",
+	})
+
+	err := cmd.Execute()
+	if !errors.Is(err, errdefs.ErrProfileInvalid) {
+		t.Fatalf("err=%v want ErrProfileInvalid", err)
+	}
+	if !strings.Contains(err.Error(), "TYPO") {
+		t.Errorf("err %q must name the undeclared --param key", err)
+	}
+}
+
+func TestRun_FileMode_RejectsParamFlags(t *testing.T) {
+	// --name, --param, --param-file are profile-only knobs. With -f the file's
+	// metadata.name is authoritative and substitution doesn't apply, so the
+	// CLI rejects the combination rather than silently dropping the flag.
+	cases := []struct {
+		name string
+		flag []string
+		want string
+	}{
+		{"name", []string{"--name", "x"}, "--name is only valid"},
+		{"param", []string{"--param", "K=V"}, "--param is only valid"},
+		{"param-file", []string{"--param-file", "/tmp/whatever"}, "--param-file is only valid"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			fc := &fakeClient{}
+			cmd, _ := newCmd(t, fc)
+			args := []string{"-f", writeTempYAML(t, validCellYAML), "-d"}
+			args = append(args, tc.flag...)
+			cmd.SetArgs(args)
+
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatal("Execute returned nil; want error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err %q must contain %q", err, tc.want)
+			}
+			if fc.createCalls != 0 {
+				t.Errorf("CreateCell called; flag rejection must short-circuit before RPC")
+			}
+		})
 	}
 }
 
