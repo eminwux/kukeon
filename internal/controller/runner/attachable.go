@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/ctr"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
@@ -42,6 +43,18 @@ const attachableTTYDirRootMode os.FileMode = os.ModeSetgid | 0o0750
 // runPath). In that mode there is no group to delegate access to, so the
 // directory stays owner-only (0700).
 const attachableTTYDirNoGroupMode os.FileMode = 0o0700
+
+// attachableLogFileMode is the mode pre-applied to the per-container sbsh
+// capture and log files when the kukeon group GID is configured. 0640 =
+// rw for owner (the resolved container uid) + r for group (the kukeon
+// group), no world. Pre-creating the inodes at this mode before sbsh
+// runs forces sbsh's later `OpenFile(O_CREATE|...)` (which only sets the
+// mode on a fresh inode) to inherit the host-readable layout instead of
+// sbsh's hard-coded 0o600 owner-only default — that default blocks
+// non-root members of the kukeon group from tailing peer cells via
+// `kuke log`, even though the surrounding tty/ directory is already
+// group-traversable. Issue #366.
+const attachableLogFileMode os.FileMode = 0o0640
 
 // attachableTTYDirInitialPerms returns the (mode, gid) tuple to apply to a
 // freshly-prepared per-container tty directory before the workload
@@ -200,6 +213,55 @@ func (r *Exec) attachablePostCreateChown(namespace string, spec intmodel.Contain
 		// the file; this branch is the legacy attachable contract.
 	default:
 		return fmt.Errorf("chown %q to (uid=%d, gid=%d): %w", profilePath, uid, gid, chownErr)
+	}
+
+	if err := attachableEnsureLogFiles(ttyDir, int(uid), gid); err != nil {
+		return err
+	}
+	return nil
+}
+
+// attachableEnsureLogFiles pre-creates the per-container sbsh capture and
+// log files inside ttyDir at mode 0640 owned by (uid, gid) — the resolved
+// container uid and the kukeon group GID — so the in-container sbsh
+// process's later `OpenFile(O_CREATE|...)` finds existing inodes and
+// inherits the host-readable mode rather than sbsh's hard-coded 0o600
+// owner-only default. Without this pre-create a non-root host operator in
+// the kukeon group cannot tail peer cells via `kuke log` (issue #366),
+// even though the surrounding tty/ directory is already group-traversable.
+//
+// Idempotent: re-applies mode and ownership on every call so a daemon
+// restart that re-enters the start path tightens or relaxes pre-existing
+// inodes from a prior run uniformly.
+//
+// A no-op when gid is 0 — there is no kukeon group on the host, the
+// surrounding tty/ directory is already 0o0700 root-only by
+// attachableTTYDirInitialPerms, and widening these files to 0640 would
+// only change owner-rw to owner-rw + group-r-with-no-group-membership.
+// Skipping the pre-create in that branch preserves the legacy
+// 0o600 owner-only contract sbsh already produces.
+func attachableEnsureLogFiles(ttyDir string, uid, gid int) error {
+	if gid <= 0 {
+		return nil
+	}
+	for _, name := range []string{
+		consts.KukeonContainerCaptureFile,
+		consts.KukeonContainerLogFile,
+	} {
+		path := filepath.Join(ttyDir, name)
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, attachableLogFileMode)
+		if err != nil {
+			return fmt.Errorf("create %q: %w", path, err)
+		}
+		if cerr := f.Close(); cerr != nil {
+			return fmt.Errorf("close %q: %w", path, cerr)
+		}
+		if err := os.Chmod(path, attachableLogFileMode); err != nil {
+			return fmt.Errorf("chmod %q to %#o: %w", path, attachableLogFileMode, err)
+		}
+		if err := os.Chown(path, uid, gid); err != nil {
+			return fmt.Errorf("chown %q to (uid=%d, gid=%d): %w", path, uid, gid, err)
+		}
 	}
 	return nil
 }
