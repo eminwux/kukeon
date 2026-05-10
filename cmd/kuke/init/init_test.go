@@ -736,18 +736,32 @@ func TestRunInitErrors(t *testing.T) {
 			expectError: true,
 		},
 		{
-			name: "controller failure",
+			name: "unreachable containerd socket",
 			setup: func(t *testing.T, cmd *cobra.Command) {
 				t.Cleanup(viper.Reset)
 				tmp := t.TempDir()
 				viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, tmp)
 				viper.Set(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey, filepath.Join(tmp, "missing.sock"))
+				// Point at a non-existent ServerConfiguration so Load
+				// returns an empty doc and applyServerConfiguration does
+				// not override the bogus socket above with whatever lives
+				// in /etc/kukeon/kukeond.yaml on the test host.
+				viper.Set(
+					config.KUKE_INIT_SERVER_CONFIGURATION.ViperKey,
+					filepath.Join(tmp, "missing.yaml"),
+				)
+				// Re-seed package-init defaults that an earlier
+				// t.Cleanup(viper.Reset) in this package will have
+				// wiped — consts.ConfigureRuntime rejects empty values.
+				viper.Set(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey, config.KUKEON_ROOT_NAMESPACE_SUFFIX.Default)
+				viper.Set(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey, config.KUKEON_ROOT_CGROUP_ROOT.Default)
 				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 				cmd.SetContext(ctx)
 				cmd.SetOut(&bytes.Buffer{})
 				cmd.SetErr(&bytes.Buffer{})
 			},
+			wantErr:     errdefs.ErrConnectContainerd,
 			expectError: true,
 		},
 	}
@@ -768,9 +782,6 @@ func TestRunInitErrors(t *testing.T) {
 			}
 			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
 				t.Fatalf("expected error %v, got %v", tc.wantErr, err)
-			}
-			if tc.name == "controller failure" && (err == nil || errors.Is(err, errdefs.ErrLoggerNotFound)) {
-				t.Fatalf("controller failure case should propagate controller error, got %v", err)
 			}
 		})
 	}
