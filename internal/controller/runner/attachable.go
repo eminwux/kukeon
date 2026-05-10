@@ -133,6 +133,12 @@ func (r *Exec) attachableBuildOpts(namespace string, spec intmodel.ContainerSpec
 			// host-side traversal layout `kuke init` sets up on /opt/kukeon.
 			// Zero falls back to sbsh's hard-coded 0600 owner-only default.
 			SocketGID: r.opts.KukeonGroupGID,
+			// Same group plumbed for the capture transcript and log file so
+			// `kuke log` from a non-root kukeon-group operator can read the
+			// 0640 root:kukeon files sbsh writes inside ttyDir. Zero falls
+			// back to sbsh's hard-coded 0600 owner-only default.
+			CaptureGID: r.opts.KukeonGroupGID,
+			LogFileGID: r.opts.KukeonGroupGID,
 		}),
 	}, nil
 }
