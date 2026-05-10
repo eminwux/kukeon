@@ -79,6 +79,21 @@ var (
 	ErrExplicitRootHostNetworkMismatch = errors.New(
 		"explicit rootContainerId must have hostNetwork: true when any cell container has hostNetwork: true",
 	)
+	// ErrMultipleRootContainers fires when more than one container in a cell
+	// has root: true. Only one container can be the cell's root; any extras
+	// would either silently lose their Root intent or contradict an explicit
+	// rootContainerId. Surfaced by apischeme normalization so the user sees
+	// a hard error at apply time instead of a silent drop downstream.
+	ErrMultipleRootContainers = errors.New(
+		"only one container in a cell may have root: true",
+	)
+	// ErrRootContainerMismatch fires when rootContainerId is set on a cell
+	// but a different container in the array carries root: true. The
+	// Root-flagged container would otherwise silently end up as a non-root
+	// peer; a hard error forces the user to pick one canonical root.
+	ErrRootContainerMismatch = errors.New(
+		"rootContainerId disagrees with container marked root: true",
+	)
 	ErrCellNameRequired        = errors.New("cell name is required")
 	ErrContainerNameRequired   = errors.New("container name is required")
 	ErrInvalidName             = errors.New("name is invalid")

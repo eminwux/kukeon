@@ -19,6 +19,7 @@ package apischeme
 import (
 	"fmt"
 
+	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	ext "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -536,6 +537,62 @@ func validateContainerTty(spec ext.ContainerSpec) error {
 	return fmt.Errorf("container %q: tty fields require attachable: true", spec.ID)
 }
 
+// resolveCellRootContainer enforces the rules around CellSpec.RootContainerID
+// and ContainerSpec.Root and returns the resolved root container ID:
+//   - At most one container may carry root: true. Issue #349: a second
+//     root-flagged container would silently lose its Root intent, so it
+//     surfaces as a hard error here.
+//   - If RootContainerID is set, the named container must exist in the
+//     array, and any container marked root: true must be that same one.
+//   - If RootContainerID is empty but exactly one container has
+//     root: true, that container's ID is the resolved root. Callers
+//     building a normalized internal cell should overwrite
+//     spec.RootContainerID with the returned value so downstream code
+//     (runner.ensureCellRootContainerSpec, helpers.findRootContainer,
+//     etc.) sees a self-consistent cell.
+//   - If neither is set, returns "" — the runner builds a default root.
+func resolveCellRootContainer(spec intmodel.CellSpec) (string, error) {
+	var rootMarked []string
+	for _, c := range spec.Containers {
+		if c.Root {
+			rootMarked = append(rootMarked, c.ID)
+		}
+	}
+	if len(rootMarked) > 1 {
+		return "", fmt.Errorf("%w: %v", errdefs.ErrMultipleRootContainers, rootMarked)
+	}
+
+	if spec.RootContainerID != "" {
+		found := false
+		for _, c := range spec.Containers {
+			if c.ID == spec.RootContainerID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return "", fmt.Errorf(
+				"rootContainerId %q not found in containers array",
+				spec.RootContainerID,
+			)
+		}
+		if len(rootMarked) == 1 && rootMarked[0] != spec.RootContainerID {
+			return "", fmt.Errorf(
+				"%w: rootContainerId is %q but container %q has root: true",
+				errdefs.ErrRootContainerMismatch,
+				spec.RootContainerID,
+				rootMarked[0],
+			)
+		}
+		return spec.RootContainerID, nil
+	}
+
+	if len(rootMarked) == 1 {
+		return rootMarked[0], nil
+	}
+	return "", nil
+}
+
 // validateCellTty enforces the AC that CellTty.Default names an existing
 // attachable container in the same cell (or is empty).
 func validateCellTty(spec ext.CellSpec) error {
@@ -857,22 +914,17 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 			cell.Spec.Containers[i] = convertContainerSpecToInternal(extContainer)
 		}
 
-		// Validate that if RootContainerID is set, the container exists in Containers array
-		if cell.Spec.RootContainerID != "" {
-			found := false
-			for _, container := range cell.Spec.Containers {
-				if container.ID == cell.Spec.RootContainerID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return intmodel.Cell{}, fmt.Errorf(
-					"rootContainerId %q not found in containers array",
-					cell.Spec.RootContainerID,
-				)
-			}
+		// Resolve RootContainerID. Auto-populates the field when a
+		// container in the array carries root: true with no explicit
+		// rootContainerId set, so the runner's explicit-root branch
+		// (and every downstream consumer of cell.Spec.RootContainerID)
+		// sees the user-supplied root spec instead of a default-built
+		// one (issue #349).
+		resolvedRoot, err := resolveCellRootContainer(cell.Spec)
+		if err != nil {
+			return intmodel.Cell{}, err
 		}
+		cell.Spec.RootContainerID = resolvedRoot
 
 		return cell, nil
 	default:
@@ -919,21 +971,14 @@ func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ex
 			cell.Spec.Containers[i] = BuildContainerSpecExternalFromInternal(intContainer)
 		}
 
-		// Validate that if RootContainerID is set, the container exists in Containers array
-		if cell.Spec.RootContainerID != "" {
-			found := false
-			for _, container := range cell.Spec.Containers {
-				if container.ID == cell.Spec.RootContainerID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return ext.CellDoc{}, fmt.Errorf(
-					"rootContainerId %q not found in containers array",
-					cell.Spec.RootContainerID,
-				)
-			}
+		// Defensive validation on the way out: a malformed internal
+		// cell (e.g. constructed without going through ConvertCellDoc-
+		// ToInternal) should not silently round-trip. Reuses the same
+		// rules the inbound path applies; the resolved ID is ignored
+		// because the persisted RootContainerID is the source of truth
+		// for serialization.
+		if _, err := resolveCellRootContainer(in.Spec); err != nil {
+			return ext.CellDoc{}, err
 		}
 
 		return cell, nil
