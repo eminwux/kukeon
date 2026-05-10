@@ -45,6 +45,12 @@ const (
 	kukeondReadyTimeout = 30 * time.Second
 	kukeondReadyTick    = 200 * time.Millisecond
 
+	// defaultContainerdSocket is the conventional path of a standalone
+	// containerd's gRPC socket. Used as the fallback when no socket is
+	// configured (matches the containerd library's own default and the
+	// pre-flight in scripts/dev-init.sh).
+	defaultContainerdSocket = "/run/containerd/containerd.sock"
+
 	// File modes applied by `kuke init` so the kukeon group can reach the
 	// runtime/socket without world access. Writes under /opt/kukeon still
 	// require root and go through the daemon.
@@ -243,6 +249,29 @@ func resolveKukeondImage() string {
 	return fmt.Sprintf("%s:%s", repo, tag)
 }
 
+// preflightContainerdSocket fails fast when the configured containerd socket
+// does not exist or is not a socket file. Without this check, RunInit can
+// reach the controller bootstrap and silently succeed against an unreachable
+// socket — runner.ExistsRealmContainerdNamespace deliberately returns
+// (false, nil) on a missing socket for test ergonomics, which lets the
+// "namespace missing, create it" path proceed through downstream no-ops.
+func preflightContainerdSocket(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf(
+			"%w: %s — start containerd before re-running `kuke init`: %w",
+			errdefs.ErrConnectContainerd, path, err,
+		)
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf(
+			"%w: %s is not a socket file — verify containerd is running and the path is correct",
+			errdefs.ErrConnectContainerd, path,
+		)
+	}
+	return nil
+}
+
 // installForwardAdmission installs the kukeon-owned FORWARD admission chain
 // so cells reach the network on hosts where `iptables -P FORWARD DROP` is
 // the default (Docker, firewalld, ufw, hardened distros). Idempotent —
@@ -322,6 +351,14 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		runPath = config.DefaultRunPath()
 	}
 
+	containerdSocket := viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey)
+	if containerdSocket == "" {
+		containerdSocket = defaultContainerdSocket
+	}
+	if err = preflightContainerdSocket(containerdSocket); err != nil {
+		return err
+	}
+
 	if mismatchErr := instance.VerifyOrWrite(
 		runPath,
 		viper.GetString(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey),
@@ -349,7 +386,7 @@ func runInit(cmd *cobra.Command, _ []string) error {
 
 	opts := controller.Options{
 		RunPath:              runPath,
-		ContainerdSocket:     viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
+		ContainerdSocket:     containerdSocket,
 		KukeondImage:         image,
 		KukeondSocket:        socketPath,
 		KukeondSocketGID:     ensure.GID,
