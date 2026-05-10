@@ -50,7 +50,10 @@ func newBashCmd() *cobra.Command {
 			if rootCmd == nil {
 				return errors.New("failed to get root command")
 			}
-			return rootCmd.GenBashCompletion(os.Stdout)
+			// V2 routes every tab through `kuke __complete` and omits the
+			// inlined flag arrays V1 ships; matches zsh/fish behavior and
+			// avoids stale-script shadowing across re-installs (#375).
+			return rootCmd.GenBashCompletionV2(os.Stdout, true)
 		},
 	}
 }

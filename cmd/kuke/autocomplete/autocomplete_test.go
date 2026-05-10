@@ -82,59 +82,39 @@ func TestAutocompleteBash(t *testing.T) {
 	autocompleteCmd := autocomplete.NewAutocompleteCmd()
 	rootCmd.AddCommand(autocompleteCmd)
 
-	// Get bash subcommand
-	bashCmd, _, err := rootCmd.Find([]string{"autocomplete", "bash"})
-	if err != nil {
-		t.Fatalf("Failed to find bash subcommand: %v", err)
-	}
-
-	// Capture stdout
-	var buf bytes.Buffer
+	// Capture stdout — the bash RunE writes the generated script there.
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	// Execute command in goroutine
 	errChan := make(chan error, 1)
 	go func() {
-		bashCmd.SetOutput(&buf)
-		bashCmd.SetContext(ctx)
-		bashCmd.SetArgs([]string{})
-		err := bashCmd.Execute()
+		rootCmd.SetArgs([]string{"autocomplete", "bash"})
+		errChan <- rootCmd.Execute()
 		w.Close()
-		errChan <- err
 	}()
 
-	// Read output
 	var output bytes.Buffer
-	_, readErr := output.ReadFrom(r)
-	if readErr != nil {
+	if _, readErr := output.ReadFrom(r); readErr != nil {
 		t.Fatalf("Failed to read from pipe: %v", readErr)
 	}
 	r.Close()
-
-	// Restore stdout
 	os.Stdout = oldStdout
 
-	// Wait for command to complete
-	execErr := <-errChan
-	if execErr != nil {
+	if execErr := <-errChan; execErr != nil {
 		t.Fatalf("Execute() error = %v, want nil", execErr)
 	}
 
-	// Verify output contains bash completion script markers
+	// Verify output is the cobra V2 bash completion: it routes every tab
+	// through __complete via __kuke_get_completion_results, instead of the
+	// V1 __kuke_handle_go_custom_completion dispatcher that ships inlined
+	// flag arrays. Guards against a silent revert to V1 (#375).
 	outputStr := output.String()
-	if !strings.Contains(outputStr, "complete") && !strings.Contains(outputStr, "_kuke") {
-		// Bash completion scripts typically contain these markers
-		// But we'll just verify we got some output
-		if len(outputStr) == 0 {
-			t.Error("Expected non-empty output from bash completion generation")
-		}
+	if !strings.Contains(outputStr, "__kuke_get_completion_results") {
+		t.Errorf("bash completion is not cobra V2 (missing __kuke_get_completion_results marker)")
 	}
-
-	// Verify output is not empty
-	if len(outputStr) == 0 {
-		t.Error("Bash completion script output is empty")
+	if strings.Contains(outputStr, "__kuke_handle_go_custom_completion") {
+		t.Errorf("bash completion still contains V1 dispatcher __kuke_handle_go_custom_completion")
 	}
 }
 
