@@ -80,6 +80,18 @@ const (
 	// Available since sbsh v0.10.0; older sbsh binaries reject the flag and
 	// the wrapper omits it when the kukeon group GID is unset.
 	AttachableSocketMode = "0660"
+
+	// AttachableCaptureMode and AttachableLogFileMode are the octal modes
+	// passed to `sbsh terminal --capture-mode` / `--log-file-mode` when the
+	// corresponding GID is configured. 0640 = rw for owner (the container
+	// uid) + r for group (the kukeon group), no world. 0640 — not 0660 —
+	// because the host-side group only needs to tail the transcript via
+	// `kuke log`; the in-container sbsh process does the writes.
+	//
+	// Available since sbsh v0.10.2; older sbsh binaries reject the flags
+	// and the wrapper omits them when the corresponding GID is unset.
+	AttachableCaptureMode = "0640"
+	AttachableLogFileMode = "0640"
 )
 
 // AttachableInjection carries the host-side paths needed to wrap a container's
@@ -115,6 +127,26 @@ type AttachableInjection struct {
 	// container; the staged binary at /.kukeon/bin/sbsh must support the
 	// `--socket-mode` and `--socket-gid` flags.
 	SocketGID int
+
+	// CaptureGID and LogFileGID, when non-zero, are the numeric GIDs of
+	// the kukeon system group on the host. The wrapper emits `sbsh terminal
+	// --capture-mode AttachableCaptureMode --capture-gid <CaptureGID>` and
+	// `--log-file-mode AttachableLogFileMode --log-file-gid <LogFileGID>`
+	// so the per-container capture transcript and log file are created
+	// with mode 0640 owned by the kukeon group, matching the socket and
+	// parent tty/ layout — without these flags sbsh's default 0o600
+	// owner-only files are unreadable to non-root kukeon-group operators
+	// invoking `kuke log` from the host.
+	//
+	// In practice both will be the same GID (the kukeon group GID) for
+	// now, but separate fields keep the API parallel to SocketGID and
+	// leave room for divergent group choices later. Zero (the default)
+	// preserves sbsh's hard-coded 0o600 owner-only behavior. Requires
+	// sbsh v0.10.2 or later inside the container; the staged binary at
+	// /.kukeon/bin/sbsh must support the `--capture-mode`, `--capture-gid`,
+	// `--log-file-mode`, and `--log-file-gid` flags.
+	CaptureGID int
+	LogFileGID int
 }
 
 // withAttachableMounts adds the two bind mounts that make sbsh reachable from
@@ -165,6 +197,13 @@ func withAttachableMounts(inj AttachableInjection) oci.SpecOpts {
 // kukeon-group operators on the host even when the parent tty/ directory
 // is group-traversable. Both flags require sbsh v0.10.0 or later.
 //
+// When inj.CaptureGID > 0 or inj.LogFileGID > 0, the wrapper additionally
+// passes `--capture-mode 0640 --capture-gid <CaptureGID>` and
+// `--log-file-mode 0640 --log-file-gid <LogFileGID>` so the per-container
+// capture transcript and log file land as 0640 owned by the kukeon group,
+// allowing `kuke log` from a non-root kukeon-group operator to read them.
+// These flags require sbsh v0.10.2 or later.
+//
 // OCI semantics: process.args is the merged "ENTRYPOINT + CMD" by the time
 // this opt runs (containerd's WithImageConfigArgs has already resolved image
 // defaults and any user override of either). We just wrap the result, which
@@ -196,6 +235,18 @@ func withAttachableArgsWrap(inj AttachableInjection) oci.SpecOpts {
 			wrapped = append(wrapped,
 				"--socket-mode", AttachableSocketMode,
 				"--socket-gid", strconv.Itoa(inj.SocketGID),
+			)
+		}
+		if inj.CaptureGID > 0 {
+			wrapped = append(wrapped,
+				"--capture-mode", AttachableCaptureMode,
+				"--capture-gid", strconv.Itoa(inj.CaptureGID),
+			)
+		}
+		if inj.LogFileGID > 0 {
+			wrapped = append(wrapped,
+				"--log-file-mode", AttachableLogFileMode,
+				"--log-file-gid", strconv.Itoa(inj.LogFileGID),
 			)
 		}
 		wrapped = append(wrapped, "--")

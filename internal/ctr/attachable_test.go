@@ -384,6 +384,136 @@ func TestBuildContainerSpec_AttachableTrue_NoSocketFlagsWhenGIDUnset(t *testing.
 	}
 }
 
+// TestBuildContainerSpec_AttachableTrue_CaptureLogFlagsEmittedWithGID covers
+// the kukeon-group `kuke log` end-to-end fix (#369): when CaptureGID and
+// LogFileGID are non-zero, the wrapper appends `--capture-mode 0640
+// --capture-gid <gid>` and `--log-file-mode 0640 --log-file-gid <gid>` to
+// the `sbsh terminal` invocation, immediately before the `--` workload
+// separator. Without these flags sbsh's capture transcript and log file
+// land at 0o600 owner-only and are unreadable to non-root members of the
+// kukeon group on the host even when the parent tty/ directory is
+// group-traversable.
+func TestBuildContainerSpec_AttachableTrue_CaptureLogFlagsEmittedWithGID(t *testing.T) {
+	in := intmodel.ContainerSpec{
+		ID:         "c1",
+		Image:      "registry.eminwux.com/busybox:latest",
+		CellName:   "cell",
+		SpaceName:  "space",
+		RealmName:  "realm",
+		StackName:  "stack",
+		Attachable: true,
+	}
+	inj := ctr.AttachableInjection{
+		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
+		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
+		SocketGID:      986,
+		CaptureGID:     986,
+		LogFileGID:     986,
+	}
+	spec := applyBuiltSpecWith(t, in, []string{"/bin/sh"}, ctr.WithAttachableInjection(inj))
+
+	want := []string{
+		ctr.AttachableBinaryPath,
+		ctr.AttachableSubcommand,
+		"--run-path", ctr.AttachableTTYDir,
+		"--socket", ctr.AttachableSocketPath,
+		"--capture-file", ctr.AttachableCapturePath,
+		"--log-file", ctr.AttachableLogfilePath,
+		"--socket-mode", ctr.AttachableSocketMode,
+		"--socket-gid", "986",
+		"--capture-mode", ctr.AttachableCaptureMode,
+		"--capture-gid", "986",
+		"--log-file-mode", ctr.AttachableLogFileMode,
+		"--log-file-gid", "986",
+		"--",
+		"/bin/sh",
+	}
+	if !reflect.DeepEqual(spec.Process.Args, want) {
+		t.Fatalf("Process.Args = %v\nwant %v", spec.Process.Args, want)
+	}
+}
+
+// TestBuildContainerSpec_AttachableTrue_NoCaptureLogFlagsWhenGIDsUnset locks
+// the legacy fallback: with no kukeon group GID configured (CaptureGID = 0
+// and LogFileGID = 0) the wrapper omits the capture/log mode and gid flags
+// so sbsh applies its hard-coded 0o600 owner-only default. Mirrors the
+// socket-flag guard — we must not invoke flags introduced in sbsh v0.10.2
+// against an older staged binary.
+func TestBuildContainerSpec_AttachableTrue_NoCaptureLogFlagsWhenGIDsUnset(t *testing.T) {
+	in := intmodel.ContainerSpec{
+		ID:         "c1",
+		Image:      "registry.eminwux.com/busybox:latest",
+		CellName:   "cell",
+		SpaceName:  "space",
+		RealmName:  "realm",
+		StackName:  "stack",
+		Attachable: true,
+	}
+	inj := ctr.AttachableInjection{
+		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
+		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
+	}
+	spec := applyBuiltSpecWith(t, in, []string{"/bin/sh"}, ctr.WithAttachableInjection(inj))
+
+	for _, arg := range spec.Process.Args {
+		switch arg {
+		case "--capture-mode", "--capture-gid", "--log-file-mode", "--log-file-gid":
+			t.Fatalf("expected no capture/log flags when CaptureGID=0 and LogFileGID=0, got %v", spec.Process.Args)
+		}
+	}
+}
+
+// TestBuildContainerSpec_AttachableTrue_CaptureAndLogFlagsIndependent
+// confirms CaptureGID and LogFileGID are independently gated — setting one
+// must not emit the other's flags. Future callers may legitimately diverge
+// the two GIDs (e.g., capture readable to a broader audit group) and the
+// wrapper must respect that.
+func TestBuildContainerSpec_AttachableTrue_CaptureAndLogFlagsIndependent(t *testing.T) {
+	in := intmodel.ContainerSpec{
+		ID:         "c1",
+		Image:      "registry.eminwux.com/busybox:latest",
+		CellName:   "cell",
+		SpaceName:  "space",
+		RealmName:  "realm",
+		StackName:  "stack",
+		Attachable: true,
+	}
+
+	captureOnly := ctr.AttachableInjection{
+		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
+		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
+		CaptureGID:     986,
+	}
+	spec := applyBuiltSpecWith(t, in, []string{"/bin/sh"}, ctr.WithAttachableInjection(captureOnly))
+	hasFlag := func(args []string, flag string) bool {
+		for _, a := range args {
+			if a == flag {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasFlag(spec.Process.Args, "--capture-mode") || !hasFlag(spec.Process.Args, "--capture-gid") {
+		t.Fatalf("CaptureGID set: expected --capture-mode and --capture-gid, got %v", spec.Process.Args)
+	}
+	if hasFlag(spec.Process.Args, "--log-file-mode") || hasFlag(spec.Process.Args, "--log-file-gid") {
+		t.Fatalf("CaptureGID set, LogFileGID unset: expected no log-file flags, got %v", spec.Process.Args)
+	}
+
+	logOnly := ctr.AttachableInjection{
+		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
+		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
+		LogFileGID:     986,
+	}
+	spec = applyBuiltSpecWith(t, in, []string{"/bin/sh"}, ctr.WithAttachableInjection(logOnly))
+	if !hasFlag(spec.Process.Args, "--log-file-mode") || !hasFlag(spec.Process.Args, "--log-file-gid") {
+		t.Fatalf("LogFileGID set: expected --log-file-mode and --log-file-gid, got %v", spec.Process.Args)
+	}
+	if hasFlag(spec.Process.Args, "--capture-mode") || hasFlag(spec.Process.Args, "--capture-gid") {
+		t.Fatalf("LogFileGID set, CaptureGID unset: expected no capture flags, got %v", spec.Process.Args)
+	}
+}
+
 func findMount(spec *runtimespec.Spec, dest string) *runtimespec.Mount {
 	for i := range spec.Mounts {
 		if spec.Mounts[i].Destination == dest {
