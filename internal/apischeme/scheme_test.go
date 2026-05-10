@@ -17,11 +17,13 @@
 package apischeme_test
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	ext "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"gopkg.in/yaml.v3"
@@ -1566,4 +1568,200 @@ func TestSubtreeControllersRoundTripV1Beta1(t *testing.T) {
 				out.Status.SubtreeControllers)
 		}
 	})
+}
+
+// TestCellRootContainerIDAutoDerivedFromRootFlag covers issue #349: a Cell
+// whose YAML places root: true on a container in spec.containers[] but does
+// not set spec.rootContainerId must have RootContainerID auto-populated by
+// normalization. Without this, the runner's empty-RootContainerID branch in
+// ensureCellRootContainerSpec builds a default root spec and the user's
+// declared volumes (and any other container fields) silently disappear.
+func TestCellRootContainerIDAutoDerivedFromRootFlag(t *testing.T) {
+	input := ext.CellDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCell,
+		Metadata:   ext.CellMetadata{Name: "tmpfs-smoke"},
+		Spec: ext.CellSpec{
+			ID:      "tmpfs-smoke",
+			RealmID: "default",
+			SpaceID: "default",
+			StackID: "default",
+			Containers: []ext.ContainerSpec{
+				{
+					ID:    "root",
+					Root:  true,
+					Image: "registry.eminwux.com/busybox:latest",
+					Volumes: []ext.VolumeMount{
+						{Kind: "tmpfs", Target: "/var/lib/cache", SizeBytes: 16 * 1024 * 1024},
+					},
+				},
+			},
+		},
+	}
+
+	internal, _, err := apischeme.NormalizeCell(input)
+	if err != nil {
+		t.Fatalf("NormalizeCell: %v", err)
+	}
+	if got, want := internal.Spec.RootContainerID, "root"; got != want {
+		t.Fatalf("RootContainerID = %q, want %q (auto-derive from Root:true)", got, want)
+	}
+	if len(internal.Spec.Containers) != 1 {
+		t.Fatalf("containers len = %d, want 1", len(internal.Spec.Containers))
+	}
+	c := internal.Spec.Containers[0]
+	if !c.Root {
+		t.Errorf("Root flag dropped from container after normalize")
+	}
+	if len(c.Volumes) != 1 || c.Volumes[0].Target != "/var/lib/cache" {
+		t.Errorf("user volume dropped during normalize: %+v", c.Volumes)
+	}
+}
+
+// TestCellRootContainerIDLeftEmptyWhenNoRootFlag confirms the auto-derive
+// path is opt-in: a cell with no rootContainerId and no container marked
+// root: true keeps RootContainerID empty so the runner builds a default
+// root spec. This matches the kuke-system / system-realm pattern.
+func TestCellRootContainerIDLeftEmptyWhenNoRootFlag(t *testing.T) {
+	input := ext.CellDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCell,
+		Metadata:   ext.CellMetadata{Name: "no-root"},
+		Spec: ext.CellSpec{
+			ID:      "no-root",
+			RealmID: "default",
+			SpaceID: "default",
+			StackID: "default",
+			Containers: []ext.ContainerSpec{
+				{ID: "worker", Image: "registry.eminwux.com/busybox:latest"},
+			},
+		},
+	}
+
+	internal, _, err := apischeme.NormalizeCell(input)
+	if err != nil {
+		t.Fatalf("NormalizeCell: %v", err)
+	}
+	if internal.Spec.RootContainerID != "" {
+		t.Fatalf("RootContainerID = %q, want \"\"", internal.Spec.RootContainerID)
+	}
+}
+
+// TestCellRejectsMultipleRootTrueContainers asserts the multi-Root rule
+// from #349: at most one container in a cell may have root: true.
+// Otherwise either the second one's Root intent silently drops or we
+// pick a winner the user did not name — both are foot-guns.
+func TestCellRejectsMultipleRootTrueContainers(t *testing.T) {
+	input := ext.CellDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCell,
+		Metadata:   ext.CellMetadata{Name: "two-roots"},
+		Spec: ext.CellSpec{
+			ID:      "two-roots",
+			RealmID: "default",
+			SpaceID: "default",
+			StackID: "default",
+			Containers: []ext.ContainerSpec{
+				{ID: "a", Root: true, Image: "img"},
+				{ID: "b", Root: true, Image: "img"},
+			},
+		},
+	}
+
+	_, _, err := apischeme.NormalizeCell(input)
+	if err == nil {
+		t.Fatalf("NormalizeCell: want error, got nil")
+	}
+	if !errors.Is(err, errdefs.ErrMultipleRootContainers) {
+		t.Fatalf("err = %v, want wrapped ErrMultipleRootContainers", err)
+	}
+}
+
+// TestCellRejectsRootContainerIDMismatch asserts the explicit/Root-flag
+// agreement rule: if rootContainerId is set and a different container
+// carries root: true, that's a misconfiguration the user must resolve.
+// The Root-flagged peer would otherwise silently end up as a non-root
+// container.
+func TestCellRejectsRootContainerIDMismatch(t *testing.T) {
+	input := ext.CellDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCell,
+		Metadata:   ext.CellMetadata{Name: "mismatch"},
+		Spec: ext.CellSpec{
+			ID:              "mismatch",
+			RealmID:         "default",
+			SpaceID:         "default",
+			StackID:         "default",
+			RootContainerID: "a",
+			Containers: []ext.ContainerSpec{
+				{ID: "a", Image: "img"},
+				{ID: "b", Root: true, Image: "img"},
+			},
+		},
+	}
+
+	_, _, err := apischeme.NormalizeCell(input)
+	if err == nil {
+		t.Fatalf("NormalizeCell: want error, got nil")
+	}
+	if !errors.Is(err, errdefs.ErrRootContainerMismatch) {
+		t.Fatalf("err = %v, want wrapped ErrRootContainerMismatch", err)
+	}
+}
+
+// TestCellRootContainerIDAndRootFlagAgree confirms the no-op case:
+// rootContainerId set and the named container also carries root: true
+// is accepted (the explicit branch's existing happy path).
+func TestCellRootContainerIDAndRootFlagAgree(t *testing.T) {
+	input := ext.CellDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCell,
+		Metadata:   ext.CellMetadata{Name: "agree"},
+		Spec: ext.CellSpec{
+			ID:              "agree",
+			RealmID:         "default",
+			SpaceID:         "default",
+			StackID:         "default",
+			RootContainerID: "root",
+			Containers: []ext.ContainerSpec{
+				{ID: "root", Root: true, Image: "img"},
+				{ID: "worker", Image: "img"},
+			},
+		},
+	}
+
+	internal, _, err := apischeme.NormalizeCell(input)
+	if err != nil {
+		t.Fatalf("NormalizeCell: %v", err)
+	}
+	if internal.Spec.RootContainerID != "root" {
+		t.Fatalf("RootContainerID = %q, want %q", internal.Spec.RootContainerID, "root")
+	}
+}
+
+// TestBuildCellExternalRejectsMultipleRootTrue covers the defensive
+// validation on the outbound path: a malformed internal cell that
+// carries two Root:true containers must not silently round-trip out.
+func TestBuildCellExternalRejectsMultipleRootTrue(t *testing.T) {
+	internal := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "two-roots"},
+		Spec: intmodel.CellSpec{
+			ID:        "two-roots",
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "a", Root: true, Image: "img"},
+				{ID: "b", Root: true, Image: "img"},
+			},
+		},
+	}
+
+	_, err := apischeme.BuildCellExternalFromInternal(internal, ext.APIVersionV1Beta1)
+	if err == nil {
+		t.Fatalf("BuildCellExternalFromInternal: want error, got nil")
+	}
+	if !errors.Is(err, errdefs.ErrMultipleRootContainers) {
+		t.Fatalf("err = %v, want wrapped ErrMultipleRootContainers", err)
+	}
 }
