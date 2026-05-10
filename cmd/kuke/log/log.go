@@ -16,17 +16,20 @@
 
 // Package log implements the `kuke log` subcommand. It mirrors `kuke
 // attach`'s flag/arg shape but instead of opening an interactive sbsh
-// session it tails the per-container output stream. Bytes never traverse
-// the daemon RPC: the daemon resolves the host path of the relevant
-// stream and this subcommand opens that path directly.
+// session it prints the per-container output stream. By default it
+// dumps the current capture/log file contents and exits; pass
+// `-f`/`--follow` to tail until SIGINT, matching `kubectl logs` /
+// `docker logs` conventions. Bytes never traverse the daemon RPC:
+// the daemon resolves the host path of the relevant stream and this
+// subcommand opens that path directly.
 //
 // Two paths exist depending on the target container's IO model:
 //
 //   - Attachable containers route output through sbsh, which writes a
-//     tty byte stream to HostCapturePath. `kuke log` tails that file.
+//     tty byte stream to HostCapturePath. `kuke log` reads that file.
 //   - Non-Attachable containers (including kukeond) have the containerd
 //     runtime shim write stdout/stderr to HostLogPath via cio.LogFile.
-//     `kuke log` tails that file. This is gap #4 in
+//     `kuke log` reads that file. This is gap #4 in
 //     docs/gaps-2026-04-19.md and was implemented per issue #203.
 package log
 
@@ -59,9 +62,10 @@ type MockControllerKey struct{}
 type MockTailKey struct{}
 
 // tailFn opens path and copies its contents to out, then either returns
-// when ctx is cancelled (default follow mode) or returns immediately
-// after the first dump (noFollow). Real implementation: tailFile.
-type tailFn func(ctx context.Context, path string, out io.Writer, noFollow bool) error
+// immediately after the first dump (follow=false, the default) or keeps
+// streaming new bytes until ctx is cancelled (follow=true). Real
+// implementation: tailFile.
+type tailFn func(ctx context.Context, path string, out io.Writer, follow bool) error
 
 // pollInterval is how long the follow loop waits between EOF reads.
 // Polling is intentional: avoiding fsnotify keeps the dependency surface
@@ -73,7 +77,7 @@ func NewLogCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "log",
 		Aliases:       []string{"logs"},
-		Short:         "Tail a container's stdout/stderr stream",
+		Short:         "Print a container's stdout/stderr stream (use -f to follow)",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -91,8 +95,8 @@ func NewLogCmd() *cobra.Command {
 	cmd.Flags().String("container", "",
 		"Container within the cell to read (omit to auto-pick the only non-root container)")
 	_ = viper.BindPFlag(config.KUKE_LOG_CONTAINER.ViperKey, cmd.Flags().Lookup("container"))
-	cmd.Flags().Bool("no-follow", false, "Dump current capture file contents and exit (do not follow)")
-	_ = viper.BindPFlag(config.KUKE_LOG_NO_FOLLOW.ViperKey, cmd.Flags().Lookup("no-follow"))
+	cmd.Flags().BoolP("follow", "f", false, "Tail the file until SIGINT instead of printing current contents and exiting")
+	_ = viper.BindPFlag(config.KUKE_LOG_FOLLOW.ViperKey, cmd.Flags().Lookup("follow"))
 
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
@@ -109,7 +113,7 @@ func runLog(cmd *cobra.Command, _ []string) error {
 	stack := strings.TrimSpace(viper.GetString(config.KUKE_LOG_STACK.ViperKey))
 	cell := strings.TrimSpace(viper.GetString(config.KUKE_LOG_CELL.ViperKey))
 	container := strings.TrimSpace(viper.GetString(config.KUKE_LOG_CONTAINER.ViperKey))
-	noFollow := viper.GetBool(config.KUKE_LOG_NO_FOLLOW.ViperKey)
+	follow := viper.GetBool(config.KUKE_LOG_FOLLOW.ViperKey)
 
 	if realm == "" {
 		return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
@@ -154,7 +158,7 @@ func runLog(cmd *cobra.Command, _ []string) error {
 	}
 
 	tail := resolveTail(cmd)
-	if tailErr := tail(cmd.Context(), streamPath, cmd.OutOrStdout(), noFollow); tailErr != nil {
+	if tailErr := tail(cmd.Context(), streamPath, cmd.OutOrStdout(), follow); tailErr != nil {
 		if errors.Is(tailErr, os.ErrNotExist) {
 			return fmt.Errorf(
 				"cell %q container %q has no log file at %s (the runtime shim has not opened it yet — try again after the container produces output)",
@@ -168,12 +172,13 @@ func runLog(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// tailFile opens path and streams its bytes to out. With noFollow it
-// dumps the current contents and returns. Otherwise it dumps and then
-// polls for new bytes until ctx is cancelled (SIGINT/SIGTERM). On
-// cancellation it returns nil so `kuke log` exits 0 — the user
-// pressing Ctrl+C is a benign session end, not a failure.
-func tailFile(ctx context.Context, path string, out io.Writer, noFollow bool) error {
+// tailFile opens path and streams its bytes to out. With follow=false
+// (the default for `kuke log`) it dumps the current contents and
+// returns. With follow=true it dumps and then polls for new bytes until
+// ctx is cancelled (SIGINT/SIGTERM). On cancellation it returns nil so
+// `kuke log -f` exits 0 — the user pressing Ctrl+C is a benign session
+// end, not a failure.
+func tailFile(ctx context.Context, path string, out io.Writer, follow bool) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -183,7 +188,7 @@ func tailFile(ctx context.Context, path string, out io.Writer, noFollow bool) er
 	if _, copyErr := io.Copy(out, f); copyErr != nil {
 		return copyErr
 	}
-	if noFollow {
+	if !follow {
 		return nil
 	}
 

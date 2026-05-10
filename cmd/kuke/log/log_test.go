@@ -65,24 +65,25 @@ func (f *fakeClient) LogContainer(
 	return f.logContainerFn(doc)
 }
 
-// tailCapture records the (path, noFollow) it was called with and copies
+// tailCapture records the (path, follow) it was called with and copies
 // configured bytes to the writer so callers can assert on stdout.
 type tailCapture struct {
-	calls    int
-	path     string
-	noFollow bool
-	payload  []byte
-	err      error
+	calls   int
+	path    string
+	follow  bool
+	payload []byte
+	err     error
 	// blockUntilCancel makes the tail block on ctx.Done() before
 	// returning, modeling the real follow loop. When false the call
-	// returns immediately after writing payload (modeling --no-follow).
+	// returns immediately after writing payload (modeling the default
+	// dump-and-exit mode).
 	blockUntilCancel bool
 }
 
-func (t *tailCapture) fn(ctx context.Context, path string, out io.Writer, noFollow bool) error {
+func (t *tailCapture) fn(ctx context.Context, path string, out io.Writer, follow bool) error {
 	t.calls++
 	t.path = path
-	t.noFollow = noFollow
+	t.follow = follow
 	if t.payload != nil {
 		if _, err := out.Write(t.payload); err != nil {
 			return err
@@ -117,7 +118,7 @@ func newCmdWithCtx(t *testing.T, fc *fakeClient, tail *tailCapture) (*cobra.Comm
 	return cmd, out
 }
 
-func TestLog_NoFollow_DumpsCaptureAndExits(t *testing.T) {
+func TestLog_DefaultDumpsCaptureAndExits(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{
@@ -132,7 +133,7 @@ func TestLog_NoFollow_DumpsCaptureAndExits(t *testing.T) {
 	cmd, out := newCmdWithCtx(t, fc, tail)
 	cmd.SetArgs([]string{
 		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
-		"--container", "work", "--no-follow",
+		"--container", "work",
 	})
 
 	if err := cmd.Execute(); err != nil {
@@ -141,8 +142,8 @@ func TestLog_NoFollow_DumpsCaptureAndExits(t *testing.T) {
 	if tail.calls != 1 {
 		t.Fatalf("tail called %d times, want 1", tail.calls)
 	}
-	if !tail.noFollow {
-		t.Errorf("noFollow flag = false, want true")
+	if tail.follow {
+		t.Errorf("follow flag = true, want false (default dump-and-exit)")
 	}
 	if tail.path != testHostCapture {
 		t.Errorf("tail path = %q, want %q", tail.path, testHostCapture)
@@ -168,7 +169,7 @@ func TestLog_Follow_CancelsCleanlyOnCtxDone(t *testing.T) {
 	cmd.SetContext(ctx)
 	cmd.SetArgs([]string{
 		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
-		"--container", "work",
+		"--container", "work", "--follow",
 	})
 
 	var wg sync.WaitGroup
@@ -192,8 +193,8 @@ func TestLog_Follow_CancelsCleanlyOnCtxDone(t *testing.T) {
 	if tail.calls != 1 {
 		t.Fatalf("tail called %d times, want 1", tail.calls)
 	}
-	if tail.noFollow {
-		t.Errorf("noFollow flag = true, want false (follow mode)")
+	if !tail.follow {
+		t.Errorf("follow flag = false, want true")
 	}
 	if got := out.String(); got != "seed" {
 		t.Errorf("stdout = %q, want %q", got, "seed")
@@ -212,7 +213,7 @@ func TestLog_MissingCaptureFile_WrapsWithCellAndContainer(t *testing.T) {
 	cmd, _ := newCmdWithCtx(t, fc, tail)
 	cmd.SetArgs([]string{
 		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
-		"--container", "work", "--no-follow",
+		"--container", "work",
 	})
 
 	err := cmd.Execute()
@@ -299,7 +300,7 @@ func TestLog_NonAttachable_TailsHostLogPath(t *testing.T) {
 	cmd, out := newCmdWithCtx(t, fc, tail)
 	cmd.SetArgs([]string{
 		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
-		"--container", "side", "--no-follow",
+		"--container", "side",
 	})
 
 	if err := cmd.Execute(); err != nil {
@@ -372,7 +373,6 @@ func TestLog_AutoPicksLoneNonAttachable(t *testing.T) {
 	cmd, _ := newCmdWithCtx(t, fc, tail)
 	cmd.SetArgs([]string{
 		"--realm", "kuke-system", "--space", "kukeon", "--stack", "kukeon", "--cell", "kukeond",
-		"--no-follow",
 	})
 
 	if err := cmd.Execute(); err != nil {
@@ -431,10 +431,10 @@ func TestLog_MissingFlags(t *testing.T) {
 	}
 }
 
-// TestTailFile_NoFollow_DumpsAndReturns exercises the real tailFile
-// (not the mock) to lock in the dump-and-exit semantics required by the
-// --no-follow path.
-func TestTailFile_NoFollow_DumpsAndReturns(t *testing.T) {
+// TestTailFile_DefaultDumpsAndReturns exercises the real tailFile (not
+// the mock) to lock in the dump-and-exit semantics that the default
+// (no `-f`) `kuke log` invocation relies on.
+func TestTailFile_DefaultDumpsAndReturns(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "capture")
 	want := "hello sbsh\n"
@@ -457,7 +457,7 @@ func TestTailFile_NoFollow_DumpsAndReturns(t *testing.T) {
 	cmd.SetErr(out)
 	cmd.SetArgs([]string{
 		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
-		"--container", "work", "--no-follow",
+		"--container", "work",
 	})
 	t.Cleanup(viper.Reset)
 

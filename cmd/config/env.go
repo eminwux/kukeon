@@ -405,7 +405,7 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_LOG_CONTAINER = DefineKV("KUKE_LOG_CONTAINER", "kuke/log/container")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_LOG_NO_FOLLOW = DefineKV("KUKE_LOG_NO_FOLLOW", "kuke/log/no-follow", "false")
+	KUKE_LOG_FOLLOW = DefineKV("KUKE_LOG_FOLLOW", "kuke/log/follow", "false")
 
 	// Stop command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
