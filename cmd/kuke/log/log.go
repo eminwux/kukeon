@@ -72,6 +72,19 @@ type tailFn func(ctx context.Context, path string, out io.Writer, follow bool) e
 // small and behaves correctly for sbsh's append-only capture file.
 const pollInterval = 200 * time.Millisecond
 
+// TailFn is the exported alias for tailFile-shaped functions: open path,
+// dump current contents to out, and optionally follow until ctx is
+// cancelled. Sibling commands that share `kuke log`'s streaming semantics
+// (e.g. `kuke daemon logs`) accept values of this type for injection.
+type TailFn = tailFn
+
+// TailFile re-exports tailFile so sibling commands that share the same
+// log-streaming semantics (e.g. `kuke daemon logs`) can dispatch through
+// the same dump-and-exit / follow loop instead of duplicating it.
+func TailFile(ctx context.Context, path string, out io.Writer, follow bool) error {
+	return tailFile(ctx, path, out, follow)
+}
+
 // NewLogCmd builds the `kuke log` cobra command.
 func NewLogCmd() *cobra.Command {
 	cmd := &cobra.Command{
