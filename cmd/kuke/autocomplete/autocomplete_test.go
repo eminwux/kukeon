@@ -134,59 +134,40 @@ func TestAutocompleteZsh(t *testing.T) {
 	autocompleteCmd := autocomplete.NewAutocompleteCmd()
 	rootCmd.AddCommand(autocompleteCmd)
 
-	// Get zsh subcommand
-	zshCmd, _, err := rootCmd.Find([]string{"autocomplete", "zsh"})
-	if err != nil {
-		t.Fatalf("Failed to find zsh subcommand: %v", err)
-	}
-
-	// Capture stdout
-	var buf bytes.Buffer
+	// Capture stdout — the zsh RunE writes the generated script there.
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	// Execute command in goroutine
 	errChan := make(chan error, 1)
 	go func() {
-		zshCmd.SetOutput(&buf)
-		zshCmd.SetContext(ctx)
-		zshCmd.SetArgs([]string{})
-		err := zshCmd.Execute()
+		rootCmd.SetArgs([]string{"autocomplete", "zsh"})
+		errChan <- rootCmd.Execute()
 		w.Close()
-		errChan <- err
 	}()
 
-	// Read output
 	var output bytes.Buffer
-	_, readErr := output.ReadFrom(r)
-	if readErr != nil {
+	if _, readErr := output.ReadFrom(r); readErr != nil {
 		t.Fatalf("Failed to read from pipe: %v", readErr)
 	}
 	r.Close()
-
-	// Restore stdout
 	os.Stdout = oldStdout
 
-	// Wait for command to complete
-	execErr := <-errChan
-	if execErr != nil {
+	if execErr := <-errChan; execErr != nil {
 		t.Fatalf("Execute() error = %v, want nil", execErr)
 	}
 
-	// Verify output contains zsh completion script markers
+	// Guard against silent regression to a code path that returns root help
+	// (which contains neither marker) instead of running GenZshCompletion.
+	// `#compdef kuke` is the cobra zsh header; `__complete` is the V2
+	// request-dispatch verb that proves the script drives `kuke __complete`
+	// at runtime — the same hot path the bash V2 test guards.
 	outputStr := output.String()
-	if !strings.Contains(outputStr, "compdef") && !strings.Contains(outputStr, "#compdef") {
-		// Zsh completion scripts typically contain these markers
-		// But we'll just verify we got some output
-		if len(outputStr) == 0 {
-			t.Error("Expected non-empty output from zsh completion generation")
-		}
+	if !strings.Contains(outputStr, "#compdef kuke") {
+		t.Errorf("zsh completion missing #compdef header (got %d bytes)", len(outputStr))
 	}
-
-	// Verify output is not empty
-	if len(outputStr) == 0 {
-		t.Error("Zsh completion script output is empty")
+	if !strings.Contains(outputStr, "__complete") {
+		t.Errorf("zsh completion missing __complete V2 dispatch verb")
 	}
 }
 
@@ -206,59 +187,40 @@ func TestAutocompleteFish(t *testing.T) {
 	autocompleteCmd := autocomplete.NewAutocompleteCmd()
 	rootCmd.AddCommand(autocompleteCmd)
 
-	// Get fish subcommand
-	fishCmd, _, err := rootCmd.Find([]string{"autocomplete", "fish"})
-	if err != nil {
-		t.Fatalf("Failed to find fish subcommand: %v", err)
-	}
-
-	// Capture stdout
-	var buf bytes.Buffer
+	// Capture stdout — the fish RunE writes the generated script there.
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	// Execute command in goroutine
 	errChan := make(chan error, 1)
 	go func() {
-		fishCmd.SetOutput(&buf)
-		fishCmd.SetContext(ctx)
-		fishCmd.SetArgs([]string{})
-		err := fishCmd.Execute()
+		rootCmd.SetArgs([]string{"autocomplete", "fish"})
+		errChan <- rootCmd.Execute()
 		w.Close()
-		errChan <- err
 	}()
 
-	// Read output
 	var output bytes.Buffer
-	_, readErr := output.ReadFrom(r)
-	if readErr != nil {
+	if _, readErr := output.ReadFrom(r); readErr != nil {
 		t.Fatalf("Failed to read from pipe: %v", readErr)
 	}
 	r.Close()
-
-	// Restore stdout
 	os.Stdout = oldStdout
 
-	// Wait for command to complete
-	execErr := <-errChan
-	if execErr != nil {
+	if execErr := <-errChan; execErr != nil {
 		t.Fatalf("Execute() error = %v, want nil", execErr)
 	}
 
-	// Verify output contains fish completion script markers
+	// Guard against silent regression to a code path that returns root help
+	// (whose body contains the substring `complete` from the autocomplete
+	// Short description) instead of running GenFishCompletion. `complete -c
+	// kuke` is the per-arg dispatch fish needs; `__kuke_perform_completion`
+	// is the function that drives `kuke __complete` from the running shell.
 	outputStr := output.String()
-	if !strings.Contains(outputStr, "complete") {
-		// Fish completion scripts typically contain "complete" commands
-		// But we'll just verify we got some output
-		if len(outputStr) == 0 {
-			t.Error("Expected non-empty output from fish completion generation")
-		}
+	if !strings.Contains(outputStr, "complete -c kuke") {
+		t.Errorf("fish completion missing `complete -c kuke` dispatch (got %d bytes)", len(outputStr))
 	}
-
-	// Verify output is not empty
-	if len(outputStr) == 0 {
-		t.Error("Fish completion script output is empty")
+	if !strings.Contains(outputStr, "__kuke_perform_completion") {
+		t.Errorf("fish completion missing __kuke_perform_completion dispatcher")
 	}
 }
 
