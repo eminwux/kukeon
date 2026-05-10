@@ -32,6 +32,9 @@ step "Build kuke (and the kukeond symlink)"
 make kuke
 ln -sf kuke kukeond
 
+step "Install dev symlinks on PATH (make install-dev)"
+make install-dev
+
 # Pre-flight: catch missing host cgroup-v2 controller delegation BEFORE the
 # multi-minute docker build runs (issue #324). On a fully-delegated host
 # this is silent; on a misconfigured host (e.g. cgroup namespace whose

@@ -18,6 +18,10 @@ KUKEON_DOCKER_IMAGE := $(KUKEON_REGISTRY)/$(KUKEON_IMAGE_NAME):$(KUKEON_IMAGE_TA
 # --kukeond-image is not passed. Release pipeline overrides via env.
 KUKEON_IMAGE_REPO ?= ghcr.io/eminwux/kukeon
 
+# Directory `install-dev` symlinks the dev binaries into. Override for
+# rootless / non-standard PATH layouts (e.g. INSTALL_PREFIX=$HOME/.local/bin).
+INSTALL_PREFIX ?= /usr/local/bin
+
 LDFLAGS := -s -w \
 	-X $(MODULE)/cmd/config.Version=$(KUKEON_VERSION) \
 	-X $(MODULE)/cmd/config.KukeondImageRepo=$(KUKEON_IMAGE_REPO)
@@ -95,3 +99,18 @@ tag:
 .PHONY: dev-init
 dev-init:
 	./scripts/dev-init.sh
+
+# install-dev symlinks the in-tree dev binaries into INSTALL_PREFIX so
+# contributors can invoke `kuke` / `kukeond` from anywhere on the host after
+# `make dev-init`. Symlinks (not copies) so subsequent `make kuke` rebuilds
+# are picked up automatically — a stale hard copy is exactly the footgun a
+# dev workflow can't afford. argv[0] dispatch resolves `kukeond` to the
+# daemon entrypoint because the basename of the exec path is `kukeond`.
+.PHONY: install-dev uninstall-dev
+install-dev: kuke
+	ln -sf kuke kukeond
+	sudo ln -sf $(CURDIR)/kuke $(INSTALL_PREFIX)/kuke
+	sudo ln -sf $(CURDIR)/kuke $(INSTALL_PREFIX)/kukeond
+
+uninstall-dev:
+	sudo rm -f $(INSTALL_PREFIX)/kuke $(INSTALL_PREFIX)/kukeond
