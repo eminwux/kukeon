@@ -32,6 +32,7 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -56,43 +57,44 @@ type runFn func(ctx context.Context, opts attach.Options) error
 // NewAttachCmd builds the `kuke attach` cobra command.
 func NewAttachCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:           "attach",
+		Use:           "attach <cell>",
 		Aliases:       []string{"att"},
 		Short:         "Attach to an Attachable container's sbsh terminal",
-		Args:          cobra.NoArgs,
+		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE:          runAttach,
 	}
 
-	cmd.Flags().String("realm", "", "Realm that owns the cell")
+	cmd.Flags().String("realm", consts.KukeonDefaultRealmName, "Realm that owns the cell")
 	_ = viper.BindPFlag(config.KUKE_ATTACH_REALM.ViperKey, cmd.Flags().Lookup("realm"))
-	cmd.Flags().String("space", "", "Space that owns the cell")
+	cmd.Flags().String("space", consts.KukeonDefaultSpaceName, "Space that owns the cell")
 	_ = viper.BindPFlag(config.KUKE_ATTACH_SPACE.ViperKey, cmd.Flags().Lookup("space"))
-	cmd.Flags().String("stack", "", "Stack that owns the cell")
+	cmd.Flags().String("stack", consts.KukeonDefaultStackName, "Stack that owns the cell")
 	_ = viper.BindPFlag(config.KUKE_ATTACH_STACK.ViperKey, cmd.Flags().Lookup("stack"))
-	cmd.Flags().String("cell", "", "Cell to attach into")
-	_ = viper.BindPFlag(config.KUKE_ATTACH_CELL.ViperKey, cmd.Flags().Lookup("cell"))
 	cmd.Flags().String("container", "",
 		"Container within the cell to attach to (omit to auto-pick the only non-root attachable)")
 	_ = viper.BindPFlag(config.KUKE_ATTACH_CONTAINER.ViperKey, cmd.Flags().Lookup("container"))
 
+	cmd.ValidArgsFunction = config.CompleteCellNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
 	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
-	_ = cmd.RegisterFlagCompletionFunc("cell", config.CompleteCellNames)
 	_ = cmd.RegisterFlagCompletionFunc("container", config.CompleteContainerNames)
 
 	return cmd
 }
 
-func runAttach(cmd *cobra.Command, _ []string) error {
+func runAttach(cmd *cobra.Command, args []string) error {
+	cell := strings.TrimSpace(args[0])
 	realm := strings.TrimSpace(viper.GetString(config.KUKE_ATTACH_REALM.ViperKey))
 	space := strings.TrimSpace(viper.GetString(config.KUKE_ATTACH_SPACE.ViperKey))
 	stack := strings.TrimSpace(viper.GetString(config.KUKE_ATTACH_STACK.ViperKey))
-	cell := strings.TrimSpace(viper.GetString(config.KUKE_ATTACH_CELL.ViperKey))
 	container := strings.TrimSpace(viper.GetString(config.KUKE_ATTACH_CONTAINER.ViperKey))
 
+	if cell == "" {
+		return fmt.Errorf("%w (positional cell)", errdefs.ErrCellNameRequired)
+	}
 	if realm == "" {
 		return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
 	}
@@ -101,9 +103,6 @@ func runAttach(cmd *cobra.Command, _ []string) error {
 	}
 	if stack == "" {
 		return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
-	}
-	if cell == "" {
-		return fmt.Errorf("%w (--cell)", errdefs.ErrCellNameRequired)
 	}
 
 	client, err := resolveClient(cmd)

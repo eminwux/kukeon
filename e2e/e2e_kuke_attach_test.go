@@ -177,11 +177,10 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 	// Step 4: drive `kuke attach` over a real PTY and detach.
 	session := startPTY(t, nil, kuke,
 		appendNoDaemonRunPath(runPath,
-			"attach",
+			"attach", cellName,
 			"--realm", realmName,
 			"--space", spaceName,
 			"--stack", stackName,
-			"--cell", cellName,
 			"--container", "work",
 		)...)
 	t.Cleanup(session.Close)
