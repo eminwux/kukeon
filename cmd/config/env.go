@@ -388,8 +388,6 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_ATTACH_STACK = DefineKV("KUKE_ATTACH_STACK", "kuke/attach/stack", "default")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_ATTACH_CELL = DefineKV("KUKE_ATTACH_CELL", "kuke/attach/cell")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_ATTACH_CONTAINER = DefineKV("KUKE_ATTACH_CONTAINER", "kuke/attach/container")
 
 	// Log command variables.
