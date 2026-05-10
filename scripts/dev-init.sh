@@ -71,6 +71,11 @@ sudo ./kuke image load --from-docker "${LOCAL_TAG}" --realm kuke-system --no-dae
 step "Run kuke init with --kukeond-image ${KUKEOND_IMAGE_REF}"
 sudo ./kuke init --kukeond-image "${KUKEOND_IMAGE_REF}"
 
+step "Install kuke and kukeond on PATH (symlinks into INSTALL_PREFIX)"
+# `ln -sf` is idempotent — re-runs replace an existing symlink with an
+# identical one, so repeated `make dev-init` invocations stay clean.
+make install-dev
+
 step "Daemon parity check (both must show identical output)"
 sudo ./kuke get realms
 sudo ./kuke get realms --no-daemon

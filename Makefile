@@ -27,6 +27,11 @@ BINS = kuke kukeond
 OS = linux
 ARCHS = amd64 arm64
 
+# Where install-dev / uninstall-dev manage the host PATH symlinks. Contributors
+# can override (e.g. INSTALL_PREFIX=$HOME/.local/bin) when /usr/local/bin is
+# read-only or sudo-gated.
+INSTALL_PREFIX ?= /usr/local/bin
+
 
 all: clean kill $(BINS)
 
@@ -95,3 +100,17 @@ tag:
 .PHONY: dev-init
 dev-init:
 	./scripts/dev-init.sh
+
+# Symlink the freshly built dev binaries onto a PATH directory so contributors
+# can invoke `kuke` and `kukeond` directly after `make dev-init`. Symlink (not
+# copy) so the next `make kuke` is picked up automatically — a hard copy would
+# silently leave the previous build on PATH until the contributor remembers to
+# re-install. argv[0] dispatch follows the basename of the path used to exec,
+# so two parallel symlinks both pointing at the source binary work cleanly.
+.PHONY: install-dev uninstall-dev
+install-dev: kuke
+	sudo ln -sf $(CURDIR)/kuke $(INSTALL_PREFIX)/kuke
+	sudo ln -sf $(CURDIR)/kuke $(INSTALL_PREFIX)/kukeond
+
+uninstall-dev:
+	sudo rm -f $(INSTALL_PREFIX)/kuke $(INSTALL_PREFIX)/kukeond
