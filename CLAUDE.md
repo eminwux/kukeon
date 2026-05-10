@@ -23,6 +23,15 @@ The `kukeond` daemon runs inside the **`kuke-system`** realm — specifically as
 
 When a change touches the build path, the daemon, or anything under `/opt/kukeon`, run this end-to-end before opening a PR.
 
+### Prerequisites
+
+`make dev-init` requires two daemons to be running on the host:
+
+- **Docker daemon** — used to build the local `kukeon-local:dev` image. Start with `service docker start` (or `systemctl start docker`).
+- **Standalone containerd** at `/run/containerd/containerd.sock` — used by `kuke image load` and `kuke init`. This is _not_ the docker-private containerd at `/var/run/docker/containerd/containerd.toml`; `pgrep containerd` may show that one even when the system socket is missing. If `ls /run/containerd/containerd.sock` returns no such file, start it with `service containerd start` (or `systemctl start containerd`). On hosts with no init script and no systemd (e.g., the agent dev container), launch the binary directly: `containerd > /tmp/containerd.log 2>&1 &`.
+
+A failure in either daemon surfaces as a confusing error several phases into the script — `dial unix /var/run/docker.sock: connect: no such file or directory` for docker, or `failed to connect to containerd: ... dial unix:///run/containerd/containerd.sock: timeout` for containerd. Bring both up before invoking `make dev-init` to skip the rabbit hole.
+
 ### One-shot: `make dev-init`
 
 ```bash
