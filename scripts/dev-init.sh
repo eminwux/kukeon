@@ -46,6 +46,17 @@ make install-dev
 step "Pre-flight: host cgroup controller delegation"
 sudo ./kuke doctor cgroups --probe
 
+# Pre-flight: catch a missing standalone containerd BEFORE the multi-minute
+# docker build, and BEFORE the first-pass `kuke init` below whose tolerate-
+# non-zero (image-not-staged) would otherwise swallow the connection-timeout
+# error and surface a misleading downstream "realm not found: kuke-system"
+# at image load (issue #344).
+step "Pre-flight: containerd reachability"
+if [ ! -S /run/containerd/containerd.sock ]; then
+    printf 'containerd is not running at /run/containerd/containerd.sock — start it before re-running\n' >&2
+    exit 1
+fi
+
 step "Build local kukeond image (${LOCAL_TAG})"
 docker build --build-arg VERSION=v0.0.0-dev -t "${LOCAL_TAG}" .
 
