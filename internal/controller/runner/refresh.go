@@ -381,6 +381,29 @@ func (r *Exec) refreshContainerStatus(cell intmodel.Cell, containerSpec *intmode
 func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcome, error) {
 	originalStatus := cell.Status
 
+	// CellStateFailed is terminal (issue #407): once a cell has been marked
+	// Failed by a startup-path error in StartCell / StartContainer, the
+	// reconciler must keep the state sticky so a subsequent populate that
+	// reads back "no task" doesn't quietly downgrade Failed to Unknown or
+	// Stopped — and so cellStateAutoDeleteTriggers (which excludes Failed)
+	// cannot be bypassed via a re-derivation tick. Container statuses are
+	// still refreshed below so `kuke get cell -o yaml` shows the latest
+	// per-container view, but the cell-level state is left alone until the
+	// operator runs `kuke delete cell`.
+	if cellStateIsSticky(originalStatus.State) {
+		if err := r.populateCellContainerStatuses(&cell); err != nil {
+			r.logger.DebugContext(r.ctx, "populate container statuses failed",
+				"cell", cell.Metadata.Name, "error", err)
+		}
+		updated := !containerStatusesEqual(originalStatus.Containers, cell.Status.Containers)
+		if updated {
+			if updateErr := r.UpdateCellMetadata(cell); updateErr != nil {
+				return cell, ReconcileOutcome{}, fmt.Errorf("failed to update cell metadata: %w", updateErr)
+			}
+		}
+		return cell, ReconcileOutcome{Updated: updated}, nil
+	}
+
 	cgroupExists, cgroupErr := r.ExistsCgroup(cell)
 	if cgroupErr != nil {
 		r.logger.DebugContext(r.ctx, "failed to check cell cgroup",
@@ -483,13 +506,33 @@ func (r *Exec) autoDeleteCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutco
 	return cell, ReconcileOutcome{Deleted: true}, nil
 }
 
+// cellStateIsSticky reports whether the reconciler must preserve the cell's
+// persisted state instead of re-deriving from cgroup + container task state.
+// Currently a single state qualifies — CellStateFailed (the terminal Error
+// state introduced for issue #407). A Failed cell stays Failed across every
+// reconcile tick until the operator runs `kuke delete cell`, regardless of
+// what containerd reports for its (now-killed) containers. Extracted as a
+// pure function so the stickiness predicate is unit-testable without spinning
+// up a runner + containerd fake.
+func cellStateIsSticky(s intmodel.CellState) bool {
+	return s == intmodel.CellStateFailed
+}
+
 // cellStateAutoDeleteTriggers returns true for the post-reconcile cell
-// states that mean "the root container is no longer running", which is
-// the trigger AutoDelete cares about. Unknown is deliberately excluded:
-// a transient containerd hiccup that flips a cell to Unknown should not
-// nuke the cell — wait for the next pass.
+// states that mean "the root container is no longer running and the cell
+// has run its course successfully", which is the trigger AutoDelete cares
+// about. Excluded states:
+//
+//   - Unknown: a transient containerd hiccup that flips a cell to Unknown
+//     should not nuke the cell — wait for the next pass.
+//   - Failed (issue #407): the terminal Error state is reserved for
+//     startup-path failures and is deliberately sticky. `kuke run --rm`
+//     does not auto-clean a Failed cell — `--rm` only takes effect on a
+//     *successful* run that subsequently exits cleanly (i.e. Stopped).
+//     Preserving the cell on failure keeps the diagnostic surface (spec,
+//     captured logs) intact until the operator runs `kuke delete cell`.
 func cellStateAutoDeleteTriggers(s intmodel.CellState) bool {
-	return s == intmodel.CellStateStopped || s == intmodel.CellStateFailed
+	return s == intmodel.CellStateStopped
 }
 
 // latchReadyObserved is the one-way latch the reconciler uses to decide

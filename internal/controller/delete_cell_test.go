@@ -192,6 +192,49 @@ func TestDeleteCell_SuccessfulDeletionWithContainers(t *testing.T) {
 	}
 }
 
+// TestDeleteCell_FailedCellDeletesWithoutForce locks down the issue #407
+// contract that `kuke delete cell <name>` accepts a cell in the terminal
+// CellStateFailed state without any --force or extra flag. Stickiness of
+// Failed is enforced by the reconciler (cellStateAutoDeleteTriggers excludes
+// Failed); the operator's explicit delete is the one and only escape hatch.
+func TestDeleteCell_FailedCellDeletesWithoutForce(t *testing.T) {
+	mockRunner := &fakeRunner{}
+	existingCell := buildTestCell("failed-cell", "test-realm", "test-space", "test-stack")
+	existingCell.Status.State = intmodel.CellStateFailed
+	existingCell.Spec.Containers = []intmodel.ContainerSpec{
+		{ID: "work", Image: "alpine:latest"},
+	}
+
+	deleteCalled := false
+	mockRunner.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+		return existingCell, nil
+	}
+	mockRunner.ExistsCgroupFn = func(_ any) (bool, error) {
+		return true, nil
+	}
+	mockRunner.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+		return true, nil
+	}
+	mockRunner.DeleteCellFn = func(_ intmodel.Cell) error {
+		deleteCalled = true
+		return nil
+	}
+
+	ctrl := setupTestController(t, mockRunner)
+	cell := buildTestCell("failed-cell", "test-realm", "test-space", "test-stack")
+
+	result, err := ctrl.DeleteCell(cell)
+	if err != nil {
+		t.Fatalf("DeleteCell on Failed cell returned error: %v", err)
+	}
+	if !deleteCalled {
+		t.Error("runner.DeleteCell was not invoked — controller refused to delete a Failed cell")
+	}
+	if !result.MetadataDeleted {
+		t.Error("expected MetadataDeleted to be true on Failed cell deletion")
+	}
+}
+
 func TestDeleteCell_ValidationErrors(t *testing.T) {
 	tests := []struct {
 		name      string
