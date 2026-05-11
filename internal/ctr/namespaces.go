@@ -23,11 +23,24 @@ import (
 	"slices"
 
 	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/core/leases"
 	"github.com/containerd/containerd/v2/core/snapshots"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/opencontainers/go-digest"
 )
+
+// containerdNamespaceServices is the subset of containerd.Client used by
+// drainNamespaceResources. Extracted so a fake modeling lease→snapshot
+// pinning can drive the drain in unit tests without a real containerd —
+// real-containerd integration in this repo lives in the e2e suite, not the
+// per-package `make test` target. *containerd.Client satisfies it directly.
+type containerdNamespaceServices interface {
+	ImageService() images.Store
+	SnapshotService(name string) snapshots.Snapshotter
+	ContentStore() content.Store
+	LeasesService() leases.Manager
+}
 
 // namespaceCtx returns a context with the namespace set.
 func (c *client) namespaceCtx(namespace string) context.Context {
@@ -170,12 +183,22 @@ var KukeonKnownSnapshotters = []string{
 // CleanupNamespaceResources empties a containerd namespace so DeleteNamespace
 // (which requires the namespace to be empty) can succeed. It drains in this
 // fixed order:
-//  1. images,
-//  2. snapshots — for every snapshotter when `snapshotter == ""` (the
+//  1. leases (with leases.SynchronousDelete),
+//  2. images,
+//  3. snapshots — for every snapshotter when `snapshotter == ""` (the
 //     uninstall path's default), or just the named snapshotter when one is
 //     specified explicitly,
-//  3. blobs (content store),
-//  4. leases.
+//  4. blobs (content store).
+//
+// Leases run first because leases.SynchronousDelete triggers the containerd
+// GC scheduler's ScheduleAndWait sweep before returning. That sweep is what
+// reconciles any metadata-only snapshot entries the image-pull path left
+// behind (entries whose lease was the GC root keeping them reachable); a
+// straight Walk+Remove pass after the fact misses those because the
+// metadata snapshotter's Walk silently skips entries with no underlying
+// state (containerd v2 metadata/snapshot.go). Draining leases first lets the
+// GC sweep clear them, then the subsequent snapshotter walk handles whatever
+// the user/runtime layer still pinned directly.
 //
 // Each class logs a count summary at INFO and per-resource debug lines at
 // DEBUG, so a future "namespace not empty" failure points at the exact class
@@ -190,94 +213,144 @@ func (c *client) CleanupNamespaceResources(namespace, snapshotter string) error 
 		}
 	}
 
-	// Set namespace context for operations
 	nsCtx := namespaces.WithNamespace(c.ctx, namespace)
+	c.drainNamespaceResources(nsCtx, namespace, snapshotter, c.cClient)
+	return nil
+}
 
-	// Clean up images
-	c.logger.DebugContext(c.ctx, "listing images in namespace", "namespace", namespace)
-	images, err := c.cClient.ListImages(nsCtx)
-	if err != nil {
-		c.logger.WarnContext(c.ctx, "failed to list images", "namespace", namespace, "error", err)
-	} else {
-		c.logger.DebugContext(c.ctx, "found images in namespace", "namespace", namespace, "count", len(images))
-		for _, image := range images {
-			imageName := image.Name()
-			if imageName == "" {
-				// If image has no name, use target digest
-				if target := image.Target(); target.Digest.String() != "" {
-					imageName = target.Digest.String()
-				} else {
-					c.logger.WarnContext(c.ctx, "skipping image with no name or digest", "namespace", namespace)
-					continue
-				}
-			}
-			c.logger.DebugContext(c.ctx, "deleting image", "namespace", namespace, "image", imageName)
-			if deleteErr := c.cClient.ImageService().Delete(nsCtx, imageName); deleteErr != nil {
-				c.logger.WarnContext(c.ctx, "failed to delete image", "namespace", namespace, "image", imageName, "error", deleteErr)
-				// Continue with other images
-			} else {
-				c.logger.DebugContext(c.ctx, "deleted image", "namespace", namespace, "image", imageName)
-			}
-		}
-	}
+// drainNamespaceResources is the body of CleanupNamespaceResources split out
+// so unit tests can drive the drain order with a fake containerdNamespaceServices
+// that models lease→snapshot pinning. The order is load-bearing — see the
+// CleanupNamespaceResources doc for the GC-sweep rationale — and is therefore
+// asserted by TestCleanupNamespaceResourcesDrainsLeasePinnedSnapshots.
+func (c *client) drainNamespaceResources(
+	nsCtx context.Context,
+	namespace, snapshotter string,
+	srv containerdNamespaceServices,
+) {
+	c.drainLeases(nsCtx, namespace, srv)
+	c.drainImages(nsCtx, namespace, srv)
 
-	// Clean up snapshots. Walk every known snapshotter when the caller did
-	// not pin one; older callers passing "overlayfs" still drain only that.
 	snapshotters := []string{snapshotter}
 	if snapshotter == "" {
 		snapshotters = KukeonKnownSnapshotters
 	}
 	for _, snap := range snapshotters {
-		c.cleanupSnapshotsFor(nsCtx, namespace, snap)
+		c.cleanupSnapshotsFor(nsCtx, namespace, snap, srv)
 	}
 
-	// Clean up blobs (content)
+	c.drainBlobs(nsCtx, namespace, srv)
+}
+
+// drainLeases releases every lease in the namespace using
+// leases.SynchronousDelete so each delete blocks on the GC scheduler's
+// ScheduleAndWait sweep. That sweep is what reconciles metadata-only
+// snapshot orphans (entries whose lease was the only GC root keeping them
+// reachable); see the CleanupNamespaceResources doc for the full story.
+func (c *client) drainLeases(nsCtx context.Context, namespace string, srv containerdNamespaceServices) {
+	c.logger.DebugContext(c.ctx, "cleaning up leases", "namespace", namespace)
+	leaseManager := srv.LeasesService()
+	existingLeases, err := leaseManager.List(nsCtx)
+	if err != nil {
+		c.logger.WarnContext(c.ctx, "failed to list leases", "namespace", namespace, "error", err)
+		return
+	}
+	c.logger.InfoContext(c.ctx, "draining leases", "namespace", namespace, "count", len(existingLeases))
+	for _, lease := range existingLeases {
+		c.logger.DebugContext(c.ctx, "deleting lease", "namespace", namespace, "lease", lease.ID)
+		if deleteErr := leaseManager.Delete(nsCtx, lease, leases.SynchronousDelete); deleteErr != nil {
+			c.logger.WarnContext(
+				c.ctx,
+				"failed to delete lease",
+				"namespace",
+				namespace,
+				"lease",
+				lease.ID,
+				"error",
+				deleteErr,
+			)
+			continue
+		}
+		c.logger.DebugContext(c.ctx, "deleted lease", "namespace", namespace, "lease", lease.ID)
+	}
+}
+
+// drainImages deletes every image in the namespace via the metadata image
+// store. Image deletion only unlinks the metadata image bucket entry; the
+// underlying snapshot/blob refcount drops to zero and the next GC sweep (or
+// the snapshot/blob drain below) reclaims them.
+func (c *client) drainImages(nsCtx context.Context, namespace string, srv containerdNamespaceServices) {
+	c.logger.DebugContext(c.ctx, "listing images in namespace", "namespace", namespace)
+	imageStore := srv.ImageService()
+	imgs, err := imageStore.List(nsCtx)
+	if err != nil {
+		c.logger.WarnContext(c.ctx, "failed to list images", "namespace", namespace, "error", err)
+		return
+	}
+	c.logger.DebugContext(c.ctx, "found images in namespace", "namespace", namespace, "count", len(imgs))
+	for _, image := range imgs {
+		imageName := image.Name
+		if imageName == "" {
+			// If image has no name, use target digest
+			if image.Target.Digest.String() != "" {
+				imageName = image.Target.Digest.String()
+			} else {
+				c.logger.WarnContext(c.ctx, "skipping image with no name or digest", "namespace", namespace)
+				continue
+			}
+		}
+		c.logger.DebugContext(c.ctx, "deleting image", "namespace", namespace, "image", imageName)
+		if deleteErr := imageStore.Delete(nsCtx, imageName); deleteErr != nil {
+			c.logger.WarnContext(
+				c.ctx,
+				"failed to delete image",
+				"namespace",
+				namespace,
+				"image",
+				imageName,
+				"error",
+				deleteErr,
+			)
+			continue
+		}
+		c.logger.DebugContext(c.ctx, "deleted image", "namespace", namespace, "image", imageName)
+	}
+}
+
+// drainBlobs deletes every blob in the content store for the namespace.
+// Runs last because content-store entries are still referenced by leases
+// and images at the moment of cleanup; by the time the drain reaches here
+// those higher-level holders are gone and Delete proceeds.
+func (c *client) drainBlobs(nsCtx context.Context, namespace string, srv containerdNamespaceServices) {
 	c.logger.DebugContext(c.ctx, "cleaning up blobs", "namespace", namespace)
-	contentStore := c.cClient.ContentStore()
+	contentStore := srv.ContentStore()
 	var blobDigests []digest.Digest
-	err = contentStore.Walk(nsCtx, func(info content.Info) error {
+	err := contentStore.Walk(nsCtx, func(info content.Info) error {
 		blobDigests = append(blobDigests, info.Digest)
 		return nil
 	})
 	if err != nil {
 		c.logger.WarnContext(c.ctx, "failed to walk blobs", "namespace", namespace, "error", err)
-	} else {
-		c.logger.DebugContext(c.ctx, "found blobs", "namespace", namespace, "count", len(blobDigests))
-		for _, dgst := range blobDigests {
-			c.logger.DebugContext(c.ctx, "deleting blob", "namespace", namespace, "digest", dgst.String())
-			if deleteErr := contentStore.Delete(nsCtx, dgst); deleteErr != nil {
-				c.logger.WarnContext(c.ctx, "failed to delete blob", "namespace", namespace, "digest", dgst.String(), "error", deleteErr)
-				// Continue with other blobs
-			} else {
-				c.logger.DebugContext(c.ctx, "deleted blob", "namespace", namespace, "digest", dgst.String())
-			}
-		}
+		return
 	}
-
-	// Release any remaining leases. A pinned lease keeps content/snapshot
-	// references alive and blocks NamespaceService.Delete with "namespace not
-	// empty"; the image-pull path (image.go) creates per-pull leases and
-	// deletes them on success, but leases owned by orphaned operations or
-	// older kukeond versions can persist and must be cleared synchronously.
-	c.logger.DebugContext(c.ctx, "cleaning up leases", "namespace", namespace)
-	leaseManager := c.cClient.LeasesService()
-	existingLeases, err := leaseManager.List(nsCtx)
-	if err != nil {
-		c.logger.WarnContext(c.ctx, "failed to list leases", "namespace", namespace, "error", err)
-	} else {
-		c.logger.InfoContext(c.ctx, "draining leases", "namespace", namespace, "count", len(existingLeases))
-		for _, lease := range existingLeases {
-			c.logger.DebugContext(c.ctx, "deleting lease", "namespace", namespace, "lease", lease.ID)
-			if deleteErr := leaseManager.Delete(nsCtx, lease, leases.SynchronousDelete); deleteErr != nil {
-				c.logger.WarnContext(c.ctx, "failed to delete lease", "namespace", namespace, "lease", lease.ID, "error", deleteErr)
-				// Continue with other leases
-			} else {
-				c.logger.DebugContext(c.ctx, "deleted lease", "namespace", namespace, "lease", lease.ID)
-			}
+	c.logger.DebugContext(c.ctx, "found blobs", "namespace", namespace, "count", len(blobDigests))
+	for _, dgst := range blobDigests {
+		c.logger.DebugContext(c.ctx, "deleting blob", "namespace", namespace, "digest", dgst.String())
+		if deleteErr := contentStore.Delete(nsCtx, dgst); deleteErr != nil {
+			c.logger.WarnContext(
+				c.ctx,
+				"failed to delete blob",
+				"namespace",
+				namespace,
+				"digest",
+				dgst.String(),
+				"error",
+				deleteErr,
+			)
+			continue
 		}
+		c.logger.DebugContext(c.ctx, "deleted blob", "namespace", namespace, "digest", dgst.String())
 	}
-
-	return nil
 }
 
 // cleanupSnapshotsFor drains every snapshot under one snapshotter from the
@@ -287,12 +360,16 @@ func (c *client) CleanupNamespaceResources(namespace, snapshotter string) error 
 // children are removed before parents. Capped at maxSnapshotPasses to bound
 // work on a pathological graph; in practice the depth is small (image layers
 // + a few committed container layers).
-func (c *client) cleanupSnapshotsFor(nsCtx context.Context, namespace, snapshotter string) {
+func (c *client) cleanupSnapshotsFor(
+	nsCtx context.Context,
+	namespace, snapshotter string,
+	srv containerdNamespaceServices,
+) {
 	if snapshotter == "" {
 		return
 	}
 	c.logger.DebugContext(c.ctx, "cleaning up snapshots", "namespace", namespace, "snapshotter", snapshotter)
-	snapshotService := c.cClient.SnapshotService(snapshotter)
+	snapshotService := srv.SnapshotService(snapshotter)
 
 	const maxSnapshotPasses = 32
 	totalRemoved := 0
