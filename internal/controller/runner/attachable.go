@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/eminwux/kukeon/internal/ctr"
@@ -329,8 +330,15 @@ func resolveKukettyBinary() (string, error) {
 		}
 	}
 
-	// $PATH lookup is intentionally last and skipped silently on miss so
-	// the error names the explicit paths first.
+	// $PATH lookup is intentionally last: the error names the explicit
+	// paths first so an operator hitting "not found" sees the daemon path
+	// and the sibling lookup before the PATH miss. LookPath errors are
+	// swallowed — the only signal the caller cares about is "did any
+	// location resolve", and the path string is appended either way so
+	// the error trace shows PATH was consulted.
+	if p, err := exec.LookPath("kuketty"); err == nil {
+		return p, nil
+	}
 	tried = append(tried, "$PATH/kuketty")
 	return "", fmt.Errorf("kuketty binary not found in: %v", tried)
 }
