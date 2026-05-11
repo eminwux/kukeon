@@ -40,7 +40,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -148,7 +147,13 @@ func runLog(cmd *cobra.Command, _ []string) error {
 	defer func() { _ = client.Close() }()
 
 	if container == "" {
-		container, err = pickLogContainer(cmd.Context(), client, realm, space, stack, cell)
+		container, err = kukeshared.PickContainer(cmd.Context(), client, realm, space, stack, cell,
+			func(spec v1beta1.ContainerSpec) bool {
+				// `kuke log` accepts non-Attachable too — sbsh-capture
+				// for Attachable containers, cio.LogFile for the rest
+				// (e.g. kukeond). Only the root container is excluded.
+				return !spec.Root
+			})
 		if err != nil {
 			return err
 		}
@@ -227,42 +232,6 @@ func tailFile(ctx context.Context, path string, out io.Writer, follow bool) erro
 				return copyErr
 			}
 		}
-	}
-}
-
-// pickLogContainer enumerates the cell's containers and returns the single
-// non-root one — Attachable or not, since `kuke log` is meaningful for both
-// IO models (sbsh-capture for Attachable, cio.LogFile for non-Attachable).
-// This is the diff vs the `kuke attach` picker, which still requires
-// Attachable=true.
-func pickLogContainer(
-	ctx context.Context,
-	client kukeonv1.Client,
-	realm, space, stack, cell string,
-) (string, error) {
-	specs, err := client.ListContainers(ctx, realm, space, stack, cell)
-	if err != nil {
-		return "", err
-	}
-
-	candidates := make([]string, 0, len(specs))
-	for i := range specs {
-		spec := specs[i]
-		if spec.Root {
-			continue
-		}
-		candidates = append(candidates, spec.ID)
-	}
-	sort.Strings(candidates)
-
-	switch len(candidates) {
-	case 0:
-		return "", fmt.Errorf("%w (cell %q)", errdefs.ErrAttachNoCandidate, cell)
-	case 1:
-		return candidates[0], nil
-	default:
-		return "", fmt.Errorf("%w (cell %q): candidates: %s",
-			errdefs.ErrAttachAmbiguous, cell, strings.Join(candidates, ", "))
 	}
 }
 

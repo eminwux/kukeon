@@ -27,7 +27,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
@@ -112,7 +111,10 @@ func runAttach(cmd *cobra.Command, args []string) error {
 	defer func() { _ = client.Close() }()
 
 	if container == "" {
-		container, err = pickAttachableContainer(cmd.Context(), client, realm, space, stack, cell)
+		container, err = kukeshared.PickContainer(cmd.Context(), client, realm, space, stack, cell,
+			func(spec v1beta1.ContainerSpec) bool {
+				return !spec.Root && spec.Attachable
+			})
 		if err != nil {
 			return err
 		}
@@ -144,41 +146,6 @@ func runAttach(cmd *cobra.Command, args []string) error {
 		return runErr
 	}
 	return nil
-}
-
-// pickAttachableContainer enumerates the cell's containers and returns the
-// single non-root attachable one. Errors with ErrAttachNoCandidate when
-// none exist and ErrAttachAmbiguous (with the candidate list) when more
-// than one exist.
-func pickAttachableContainer(
-	ctx context.Context,
-	client kukeonv1.Client,
-	realm, space, stack, cell string,
-) (string, error) {
-	specs, err := client.ListContainers(ctx, realm, space, stack, cell)
-	if err != nil {
-		return "", err
-	}
-
-	candidates := make([]string, 0, len(specs))
-	for i := range specs {
-		spec := specs[i]
-		if spec.Root || !spec.Attachable {
-			continue
-		}
-		candidates = append(candidates, spec.ID)
-	}
-	sort.Strings(candidates)
-
-	switch len(candidates) {
-	case 0:
-		return "", fmt.Errorf("%w (cell %q)", errdefs.ErrAttachNoCandidate, cell)
-	case 1:
-		return candidates[0], nil
-	default:
-		return "", fmt.Errorf("%w (cell %q): candidates: %s",
-			errdefs.ErrAttachAmbiguous, cell, strings.Join(candidates, ", "))
-	}
 }
 
 func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
