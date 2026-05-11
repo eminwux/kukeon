@@ -28,6 +28,7 @@ import (
 	"unsafe"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	"github.com/eminwux/kukeon/cmd/kuke"
 	initpkg "github.com/eminwux/kukeon/cmd/kuke/init"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
@@ -802,30 +803,31 @@ func TestRunInitErrors(t *testing.T) {
 // init-specific knobs (KUKE_INIT_KUKEOND_IMAGE, KUKEON_RUN_PATH) so a future
 // change to applyServerConfiguration in init.go cannot regress the env
 // branch while the kukeond sibling test stays green.
+//
+// Issue #399 regression guard: the env bindings are wired exclusively via
+// the production code path — kuke.LoadConfig() for the shared KUKEON_*
+// keys and NewInitCmd() (which calls init's bindEnvVars()) for the
+// KUKE_INIT_* keys. Removing either call from production drops the
+// env binding for the corresponding key, this test fails, and the
+// silent-env-drop bug is caught before it ships.
 func TestApplyServerConfigurationEnvOverridesConfig(t *testing.T) {
 	t.Cleanup(viper.Reset)
 	viper.Reset()
 
+	// Set env before kuke.LoadConfig so the BindEnv'd lookup returns the
+	// env value and loadConfig's empty-default seeding (viper.Set of
+	// DefaultRunPath when KUKEON_RUN_PATH reads empty) does not stamp
+	// the runtime default on top of the env binding.
+	t.Setenv(config.KUKE_INIT_KUKEOND_IMAGE.EnvVar(), "ghcr.io/eminwux/kukeon:from-env")
+	t.Setenv(config.KUKEON_ROOT_RUN_PATH.EnvVar(), "/opt/kukeon-from-env")
+
+	if err := kuke.LoadConfig(); err != nil {
+		t.Fatalf("kuke.LoadConfig: %v", err)
+	}
 	cmd := initpkg.NewInitCmd()
 	if cmd == nil {
 		t.Fatal("NewInitCmd() returned nil")
 	}
-
-	// NewKukeondCmd wires its env bindings via bindEnvVars(); NewInitCmd
-	// defers env binding to kuke.go's loadConfig, which only registers the
-	// shared keys. Bind the init-specific keys explicitly so viper.Get
-	// reflects the env value once t.Setenv fires.
-	if err := config.KUKE_INIT_KUKEOND_IMAGE.BindEnv(); err != nil {
-		t.Fatalf("BindEnv KUKE_INIT_KUKEOND_IMAGE: %v", err)
-	}
-	if err := config.KUKEON_ROOT_RUN_PATH.BindEnv(); err != nil {
-		t.Fatalf("BindEnv KUKEON_ROOT_RUN_PATH: %v", err)
-	}
-
-	// Operator exported KUKE_INIT_KUKEOND_IMAGE and KUKEON_RUN_PATH; the
-	// on-disk ServerConfiguration must not clobber them.
-	t.Setenv(config.KUKE_INIT_KUKEOND_IMAGE.EnvVar(), "ghcr.io/eminwux/kukeon:from-env")
-	t.Setenv(config.KUKEON_ROOT_RUN_PATH.EnvVar(), "/opt/kukeon-from-env")
 
 	spec := v1beta1.ServerConfigurationSpec{
 		KukeondImage: "ghcr.io/eminwux/kukeon:from-config",

@@ -92,7 +92,28 @@ func setupInitCmd(cmd *cobra.Command) error {
 		return fmt.Errorf("failed to set persistent flags: %w", err)
 	}
 
+	bindEnvVars()
 	return nil
+}
+
+// bindEnvVars wires each kuke-init viper key to its `KUKE_INIT_*`
+// environment variable. Without these calls applyServerConfiguration's
+// envSet check skips the YAML write yet viper has no env binding to read
+// the value back from — so the operator-exported value is recognised as
+// a gate but its content is silently dropped, leaving the flag default
+// to win. Mirrors the BindEnv block in cmd/kukeond/kukeond.go's
+// bindEnvVars and the KUKEON_* binds in cmd/kuke/kuke.go's loadConfig.
+func bindEnvVars() {
+	for _, v := range []config.Var{
+		config.KUKE_INIT_REALM,
+		config.KUKE_INIT_SPACE,
+		config.KUKE_INIT_KUKEOND_IMAGE,
+		config.KUKE_INIT_NO_WAIT,
+		config.KUKE_INIT_FORCE_REGENERATE_CNI,
+		config.KUKE_INIT_SERVER_CONFIGURATION,
+	} {
+		_ = v.BindEnv()
+	}
 }
 
 func setFlags(cmd *cobra.Command) error {
