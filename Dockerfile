@@ -59,4 +59,12 @@ COPY --from=builder /workspace/kuke-${TARGETOS}-${TARGETARCH} /bin/kuke
 RUN ln /bin/kuke /bin/kukeond
 RUN chmod 0755 /bin/kuke /bin/kukeond
 
+# kuketty is the in-container terminal wrapper that replaces sbsh on the OCI
+# injection path (issue #165). It ships inside the kukeond image so the daemon
+# can stage it to a host-visible path on demand; the kukeond image is
+# kuketty's distribution channel — no separate per-arch artifact cache is
+# needed (the multi-arch story is the image's TARGETARCH story).
+COPY --from=builder /workspace/kuketty-${TARGETOS}-${TARGETARCH} /bin/kuketty
+RUN chmod 0755 /bin/kuketty
+
 CMD ["/bin/kukeond"]

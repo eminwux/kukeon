@@ -73,13 +73,21 @@ func TestBuildContainerSpec_AttachableFalseIsByteIdentical(t *testing.T) {
 		t.Fatalf("Attachable=false spec drifted from baseline:\n got=%+v\nwant=%+v", got, want)
 	}
 	if hasMountAt(got, ctr.AttachableBinaryPath) {
-		t.Errorf("Attachable=false produced sbsh binary mount; should not")
+		t.Errorf("Attachable=false produced kuketty binary mount; should not")
 	}
 	if hasMountAt(got, ctr.AttachableTTYDir) {
-		t.Errorf("Attachable=false produced sbsh tty dir mount; should not")
+		t.Errorf("Attachable=false produced kuketty tty dir mount; should not")
+	}
+	if hasMountAt(got, ctr.AttachableMetadataPath) {
+		t.Errorf("Attachable=false produced kuketty metadata mount; should not")
 	}
 }
 
+// TestBuildContainerSpec_AttachableTrue_MountsAndArgsWrap locks down the
+// post-swap (issue #165) wrapper contract: the OCI spec emits exactly three
+// bind mounts (kuketty binary RO, per-container tty dir RW, per-container
+// metadata file RO) and process.args is `[kuketty, --, originalArgs...]`.
+// No CLI flags — every runtime input flows through the metadata file.
 func TestBuildContainerSpec_AttachableTrue_MountsAndArgsWrap(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -133,8 +141,9 @@ func TestBuildContainerSpec_AttachableTrue_MountsAndArgsWrap(t *testing.T) {
 	}
 
 	inj := ctr.AttachableInjection{
-		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
-		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
+		KukettyBinaryPath: "/opt/kukeon/bin/kuketty",
+		HostTTYDir:        "/opt/kukeon/realm/space/stack/cell/c1/tty",
+		HostMetadataPath:  "/opt/kukeon/realm/space/stack/cell/c1/kuketty-metadata.json",
 	}
 
 	for _, tc := range cases {
@@ -156,8 +165,8 @@ func TestBuildContainerSpec_AttachableTrue_MountsAndArgsWrap(t *testing.T) {
 			if binMount == nil {
 				t.Fatalf("expected RO bind mount at %s, got mounts=%+v", ctr.AttachableBinaryPath, spec.Mounts)
 			}
-			if binMount.Source != inj.SbshBinaryPath {
-				t.Errorf("binary mount source = %q, want %q", binMount.Source, inj.SbshBinaryPath)
+			if binMount.Source != inj.KukettyBinaryPath {
+				t.Errorf("binary mount source = %q, want %q", binMount.Source, inj.KukettyBinaryPath)
 			}
 			if !containsString(binMount.Options, "ro") {
 				t.Errorf("binary mount must be read-only, got options=%v", binMount.Options)
@@ -173,30 +182,53 @@ func TestBuildContainerSpec_AttachableTrue_MountsAndArgsWrap(t *testing.T) {
 			if containsString(ttyMount.Options, "ro") {
 				t.Errorf("tty mount must be read-write, got options=%v", ttyMount.Options)
 			}
-			// AC: exactly one rw bind whose source is the tty dir; the
-			// single-file /run/sbsh.socket mount must be gone.
+
+			metaMount := findMount(spec, ctr.AttachableMetadataPath)
+			if metaMount == nil {
+				t.Fatalf("expected bind mount at %s, got mounts=%+v", ctr.AttachableMetadataPath, spec.Mounts)
+			}
+			if metaMount.Source != inj.HostMetadataPath {
+				t.Errorf("metadata mount source = %q, want %q", metaMount.Source, inj.HostMetadataPath)
+			}
+			if !containsString(metaMount.Options, "ro") {
+				t.Errorf("metadata mount must be read-only, got options=%v", metaMount.Options)
+			}
+
+			// AC: legacy single-file /run/sbsh.socket mount must be gone.
 			if hasMountAt(spec, "/run/sbsh.socket") {
 				t.Errorf("legacy /run/sbsh.socket file mount still present: %+v", spec.Mounts)
 			}
-			ttyMounts := 0
-			for _, m := range spec.Mounts {
-				if m.Destination == ctr.AttachableTTYDir {
-					ttyMounts++
-				}
-			}
-			if ttyMounts != 1 {
-				t.Errorf("expected exactly one mount at %s, got %d", ctr.AttachableTTYDir, ttyMounts)
+			// AC: legacy sbsh binary path must be gone — the swap to
+			// kuketty changes the binary's in-container destination, so
+			// the old path appearing in mounts would mean an unfinished
+			// rewrite.
+			if hasMountAt(spec, "/.kukeon/bin/sbsh") {
+				t.Errorf("legacy sbsh binary mount still present: %+v", spec.Mounts)
 			}
 
-			wantPrefix := []string{
-				ctr.AttachableBinaryPath,
-				ctr.AttachableSubcommand,
-				"--run-path", ctr.AttachableTTYDir,
-				"--socket", ctr.AttachableSocketPath,
-				"--capture-file", ctr.AttachableCapturePath,
-				"--log-file", ctr.AttachableLogfilePath,
-				"--",
+			// Exactly one mount per Destination among the three the wrapper
+			// owns.
+			counts := map[string]int{}
+			for _, m := range spec.Mounts {
+				switch m.Destination {
+				case ctr.AttachableBinaryPath, ctr.AttachableTTYDir, ctr.AttachableMetadataPath:
+					counts[m.Destination]++
+				}
 			}
+			for dest, want := range map[string]int{
+				ctr.AttachableBinaryPath:   1,
+				ctr.AttachableTTYDir:       1,
+				ctr.AttachableMetadataPath: 1,
+			} {
+				if counts[dest] != want {
+					t.Errorf("expected %d mount(s) at %s, got %d", want, dest, counts[dest])
+				}
+			}
+
+			// Post-swap wrapper contract: `[kuketty, --, originalArgs...]`.
+			// No subcommand, no flags — kuketty reads runtime config from
+			// the bind-mounted metadata file.
+			wantPrefix := []string{ctr.AttachableBinaryPath, "--"}
 			if len(spec.Process.Args) < len(wantPrefix) {
 				t.Fatalf("Process.Args = %v, missing wrapper prefix", spec.Process.Args)
 			}
@@ -208,82 +240,29 @@ func TestBuildContainerSpec_AttachableTrue_MountsAndArgsWrap(t *testing.T) {
 			if !reflect.DeepEqual(gotOriginal, tc.wantOriginal) {
 				t.Errorf("wrapped original args = %v, want %v", gotOriginal, tc.wantOriginal)
 			}
+
+			// Negative: no leftover sbsh flags must appear on the wrapped
+			// argv. Their presence would mean the wrapper rewrite missed
+			// a code path and is still rendering sbsh CLI input.
+			for _, banned := range []string{
+				"terminal", "--run-path", "--socket", "--capture-file",
+				"--log-file", "--profile", "--profiles-dir",
+				"--socket-mode", "--socket-gid", "--capture-mode",
+				"--capture-gid", "--log-file-mode", "--log-file-gid",
+			} {
+				for _, a := range spec.Process.Args {
+					if a == banned {
+						t.Errorf("legacy sbsh flag %q present in Process.Args = %v", banned, spec.Process.Args)
+					}
+				}
+			}
 		})
 	}
 }
 
-// TestBuildContainerSpec_AttachableTrue_ProfileFlagsInjected covers the
-// wrapper change for #139: when AttachableInjection.UseProfile is set, the
-// generated args carry `--profiles-dir <ttydir>` before the `terminal`
-// subcommand and `--profile <name>` immediately after it. Profile flags
-// are sbsh global flags, so positioning matters — `sbsh terminal
-// --profiles-dir …` would surface as `unknown flag` deep inside the
-// container task.
-func TestBuildContainerSpec_AttachableTrue_ProfileFlagsInjected(t *testing.T) {
-	in := intmodel.ContainerSpec{
-		ID:         "c1",
-		Image:      "registry.eminwux.com/busybox:latest",
-		CellName:   "cell",
-		SpaceName:  "space",
-		RealmName:  "realm",
-		StackName:  "stack",
-		Attachable: true,
-	}
-	inj := ctr.AttachableInjection{
-		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
-		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
-		UseProfile:     true,
-	}
-	spec := applyBuiltSpecWith(t, in, []string{"/bin/sh"}, ctr.WithAttachableInjection(inj))
-
-	want := []string{
-		ctr.AttachableBinaryPath,
-		"--profiles-dir", ctr.AttachableTTYDir,
-		ctr.AttachableSubcommand,
-		"--profile", ctr.AttachableProfileName,
-		"--run-path", ctr.AttachableTTYDir,
-		"--socket", ctr.AttachableSocketPath,
-		"--capture-file", ctr.AttachableCapturePath,
-		"--log-file", ctr.AttachableLogfilePath,
-		"--",
-		"/bin/sh",
-	}
-	if !reflect.DeepEqual(spec.Process.Args, want) {
-		t.Fatalf("Process.Args = %v\nwant %v", spec.Process.Args, want)
-	}
-}
-
-// TestBuildContainerSpec_AttachableTrue_NoProfileWhenUnset confirms the
-// wrapper does NOT inject --profiles-dir / --profile when UseProfile is
-// false — the legacy contract for attachable containers without a tty
-// block must stay byte-identical.
-func TestBuildContainerSpec_AttachableTrue_NoProfileWhenUnset(t *testing.T) {
-	in := intmodel.ContainerSpec{
-		ID:         "c1",
-		Image:      "registry.eminwux.com/busybox:latest",
-		CellName:   "cell",
-		SpaceName:  "space",
-		RealmName:  "realm",
-		StackName:  "stack",
-		Attachable: true,
-	}
-	inj := ctr.AttachableInjection{
-		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
-		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
-	}
-	spec := applyBuiltSpecWith(t, in, []string{"/bin/sh"}, ctr.WithAttachableInjection(inj))
-
-	for _, arg := range spec.Process.Args {
-		if arg == "--profiles-dir" || arg == "--profile" {
-			t.Fatalf("expected no profile flags when UseProfile=false, got %v", spec.Process.Args)
-		}
-	}
-}
-
+// TestBuildContainerSpec_AttachableTrue_EmptyImageArgs locks the empty-args
+// case: the wrapper prefix on its own, no original args.
 func TestBuildContainerSpec_AttachableTrue_EmptyImageArgs(t *testing.T) {
-	// An image whose ENTRYPOINT+CMD resolves to nothing (uncommon but valid)
-	// must still produce a wrapped args list — the wrapper prefix on its own,
-	// with no original args after it.
 	in := intmodel.ContainerSpec{
 		ID:         "c1",
 		Image:      "registry.eminwux.com/busybox:latest",
@@ -294,223 +273,15 @@ func TestBuildContainerSpec_AttachableTrue_EmptyImageArgs(t *testing.T) {
 		Attachable: true,
 	}
 	inj := ctr.AttachableInjection{
-		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
-		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
+		KukettyBinaryPath: "/opt/kukeon/bin/kuketty",
+		HostTTYDir:        "/opt/kukeon/realm/space/stack/cell/c1/tty",
+		HostMetadataPath:  "/opt/kukeon/realm/space/stack/cell/c1/kuketty-metadata.json",
 	}
 	spec := applyBuiltSpecWith(t, in, nil, ctr.WithAttachableInjection(inj))
 
-	want := []string{
-		ctr.AttachableBinaryPath,
-		ctr.AttachableSubcommand,
-		"--run-path", ctr.AttachableTTYDir,
-		"--socket", ctr.AttachableSocketPath,
-		"--capture-file", ctr.AttachableCapturePath,
-		"--log-file", ctr.AttachableLogfilePath,
-		"--",
-	}
+	want := []string{ctr.AttachableBinaryPath, "--"}
 	if !reflect.DeepEqual(spec.Process.Args, want) {
 		t.Errorf("Process.Args = %v, want %v", spec.Process.Args, want)
-	}
-}
-
-// TestBuildContainerSpec_AttachableTrue_SocketFlagsEmittedWithGID covers the
-// kukeon-group attach end-to-end fix: when AttachableInjection.SocketGID is
-// non-zero, the wrapper appends `--socket-mode 0660 --socket-gid <gid>` to
-// the `sbsh terminal` invocation, immediately before the `--` workload
-// separator. Without these flags sbsh's control socket lands at 0o600
-// root-only and is unreachable to non-root members of the kukeon group on
-// the host even when the parent tty/ directory is group-traversable —
-// Linux requires write permission on the socket inode to connect.
-func TestBuildContainerSpec_AttachableTrue_SocketFlagsEmittedWithGID(t *testing.T) {
-	in := intmodel.ContainerSpec{
-		ID:         "c1",
-		Image:      "registry.eminwux.com/busybox:latest",
-		CellName:   "cell",
-		SpaceName:  "space",
-		RealmName:  "realm",
-		StackName:  "stack",
-		Attachable: true,
-	}
-	inj := ctr.AttachableInjection{
-		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
-		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
-		SocketGID:      986,
-	}
-	spec := applyBuiltSpecWith(t, in, []string{"/bin/sh"}, ctr.WithAttachableInjection(inj))
-
-	want := []string{
-		ctr.AttachableBinaryPath,
-		ctr.AttachableSubcommand,
-		"--run-path", ctr.AttachableTTYDir,
-		"--socket", ctr.AttachableSocketPath,
-		"--capture-file", ctr.AttachableCapturePath,
-		"--log-file", ctr.AttachableLogfilePath,
-		"--socket-mode", ctr.AttachableSocketMode,
-		"--socket-gid", "986",
-		"--",
-		"/bin/sh",
-	}
-	if !reflect.DeepEqual(spec.Process.Args, want) {
-		t.Fatalf("Process.Args = %v\nwant %v", spec.Process.Args, want)
-	}
-}
-
-// TestBuildContainerSpec_AttachableTrue_NoSocketFlagsWhenGIDUnset locks the
-// legacy fallback: with no kukeon group GID configured (SocketGID = 0) the
-// wrapper omits `--socket-mode` and `--socket-gid` so sbsh applies its
-// hard-coded 0o600 owner-only default — a host without sysuser.EnsureUserGroup
-// has no group to delegate access to, and we must not accidentally invoke
-// flags introduced in sbsh v0.10.0 against an older staged binary either.
-func TestBuildContainerSpec_AttachableTrue_NoSocketFlagsWhenGIDUnset(t *testing.T) {
-	in := intmodel.ContainerSpec{
-		ID:         "c1",
-		Image:      "registry.eminwux.com/busybox:latest",
-		CellName:   "cell",
-		SpaceName:  "space",
-		RealmName:  "realm",
-		StackName:  "stack",
-		Attachable: true,
-	}
-	inj := ctr.AttachableInjection{
-		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
-		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
-	}
-	spec := applyBuiltSpecWith(t, in, []string{"/bin/sh"}, ctr.WithAttachableInjection(inj))
-
-	for _, arg := range spec.Process.Args {
-		if arg == "--socket-mode" || arg == "--socket-gid" {
-			t.Fatalf("expected no socket flags when SocketGID=0, got %v", spec.Process.Args)
-		}
-	}
-}
-
-// TestBuildContainerSpec_AttachableTrue_CaptureLogFlagsEmittedWithGID covers
-// the kukeon-group `kuke log` end-to-end fix (#369): when CaptureGID and
-// LogFileGID are non-zero, the wrapper appends `--capture-mode 0640
-// --capture-gid <gid>` and `--log-file-mode 0640 --log-file-gid <gid>` to
-// the `sbsh terminal` invocation, immediately before the `--` workload
-// separator. Without these flags sbsh's capture transcript and log file
-// land at 0o600 owner-only and are unreadable to non-root members of the
-// kukeon group on the host even when the parent tty/ directory is
-// group-traversable.
-func TestBuildContainerSpec_AttachableTrue_CaptureLogFlagsEmittedWithGID(t *testing.T) {
-	in := intmodel.ContainerSpec{
-		ID:         "c1",
-		Image:      "registry.eminwux.com/busybox:latest",
-		CellName:   "cell",
-		SpaceName:  "space",
-		RealmName:  "realm",
-		StackName:  "stack",
-		Attachable: true,
-	}
-	inj := ctr.AttachableInjection{
-		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
-		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
-		SocketGID:      986,
-		CaptureGID:     986,
-		LogFileGID:     986,
-	}
-	spec := applyBuiltSpecWith(t, in, []string{"/bin/sh"}, ctr.WithAttachableInjection(inj))
-
-	want := []string{
-		ctr.AttachableBinaryPath,
-		ctr.AttachableSubcommand,
-		"--run-path", ctr.AttachableTTYDir,
-		"--socket", ctr.AttachableSocketPath,
-		"--capture-file", ctr.AttachableCapturePath,
-		"--log-file", ctr.AttachableLogfilePath,
-		"--socket-mode", ctr.AttachableSocketMode,
-		"--socket-gid", "986",
-		"--capture-mode", ctr.AttachableCaptureMode,
-		"--capture-gid", "986",
-		"--log-file-mode", ctr.AttachableLogFileMode,
-		"--log-file-gid", "986",
-		"--",
-		"/bin/sh",
-	}
-	if !reflect.DeepEqual(spec.Process.Args, want) {
-		t.Fatalf("Process.Args = %v\nwant %v", spec.Process.Args, want)
-	}
-}
-
-// TestBuildContainerSpec_AttachableTrue_NoCaptureLogFlagsWhenGIDsUnset locks
-// the legacy fallback: with no kukeon group GID configured (CaptureGID = 0
-// and LogFileGID = 0) the wrapper omits the capture/log mode and gid flags
-// so sbsh applies its hard-coded 0o600 owner-only default. Mirrors the
-// socket-flag guard — we must not invoke flags introduced in sbsh v0.10.2
-// against an older staged binary.
-func TestBuildContainerSpec_AttachableTrue_NoCaptureLogFlagsWhenGIDsUnset(t *testing.T) {
-	in := intmodel.ContainerSpec{
-		ID:         "c1",
-		Image:      "registry.eminwux.com/busybox:latest",
-		CellName:   "cell",
-		SpaceName:  "space",
-		RealmName:  "realm",
-		StackName:  "stack",
-		Attachable: true,
-	}
-	inj := ctr.AttachableInjection{
-		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
-		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
-	}
-	spec := applyBuiltSpecWith(t, in, []string{"/bin/sh"}, ctr.WithAttachableInjection(inj))
-
-	for _, arg := range spec.Process.Args {
-		switch arg {
-		case "--capture-mode", "--capture-gid", "--log-file-mode", "--log-file-gid":
-			t.Fatalf("expected no capture/log flags when CaptureGID=0 and LogFileGID=0, got %v", spec.Process.Args)
-		}
-	}
-}
-
-// TestBuildContainerSpec_AttachableTrue_CaptureAndLogFlagsIndependent
-// confirms CaptureGID and LogFileGID are independently gated — setting one
-// must not emit the other's flags. Future callers may legitimately diverge
-// the two GIDs (e.g., capture readable to a broader audit group) and the
-// wrapper must respect that.
-func TestBuildContainerSpec_AttachableTrue_CaptureAndLogFlagsIndependent(t *testing.T) {
-	in := intmodel.ContainerSpec{
-		ID:         "c1",
-		Image:      "registry.eminwux.com/busybox:latest",
-		CellName:   "cell",
-		SpaceName:  "space",
-		RealmName:  "realm",
-		StackName:  "stack",
-		Attachable: true,
-	}
-
-	captureOnly := ctr.AttachableInjection{
-		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
-		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
-		CaptureGID:     986,
-	}
-	spec := applyBuiltSpecWith(t, in, []string{"/bin/sh"}, ctr.WithAttachableInjection(captureOnly))
-	hasFlag := func(args []string, flag string) bool {
-		for _, a := range args {
-			if a == flag {
-				return true
-			}
-		}
-		return false
-	}
-	if !hasFlag(spec.Process.Args, "--capture-mode") || !hasFlag(spec.Process.Args, "--capture-gid") {
-		t.Fatalf("CaptureGID set: expected --capture-mode and --capture-gid, got %v", spec.Process.Args)
-	}
-	if hasFlag(spec.Process.Args, "--log-file-mode") || hasFlag(spec.Process.Args, "--log-file-gid") {
-		t.Fatalf("CaptureGID set, LogFileGID unset: expected no log-file flags, got %v", spec.Process.Args)
-	}
-
-	logOnly := ctr.AttachableInjection{
-		SbshBinaryPath: "/opt/kukeon/cache/sbsh/amd64/sbsh",
-		HostTTYDir:     "/opt/kukeon/realm/space/stack/cell/c1/tty",
-		LogFileGID:     986,
-	}
-	spec = applyBuiltSpecWith(t, in, []string{"/bin/sh"}, ctr.WithAttachableInjection(logOnly))
-	if !hasFlag(spec.Process.Args, "--log-file-mode") || !hasFlag(spec.Process.Args, "--log-file-gid") {
-		t.Fatalf("LogFileGID set: expected --log-file-mode and --log-file-gid, got %v", spec.Process.Args)
-	}
-	if hasFlag(spec.Process.Args, "--capture-mode") || hasFlag(spec.Process.Args, "--capture-gid") {
-		t.Fatalf("LogFileGID set, CaptureGID unset: expected no capture flags, got %v", spec.Process.Args)
 	}
 }
 
