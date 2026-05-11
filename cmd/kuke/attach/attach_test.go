@@ -321,6 +321,34 @@ func TestAttach_ExplicitContainer_NotAttachable_SurfacesSentinel(t *testing.T) {
 	}
 }
 
+// TestAttach_ExplicitContainer_NotFound_SurfacesSentinel locks in the
+// ErrContainerNotFound branch's %w wrap: when AttachContainer's RPC reports
+// the named container doesn't exist, kuke attach must propagate the
+// sentinel so upstream callers can still errors.Is it.
+func TestAttach_ExplicitContainer_NotFound_SurfacesSentinel(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
+			return kukeonv1.AttachContainerResult{}, errdefs.ErrContainerNotFound
+		},
+	}
+	run := &runCapture{}
+	cmd := newCmdWithCtx(t, fc, run)
+	cmd.SetArgs([]string{
+		"--realm", "r1", "--space", "s1", "--stack", "st1",
+		"--container", "ghost", "c1",
+	})
+
+	err := cmd.Execute()
+	if !errors.Is(err, errdefs.ErrContainerNotFound) {
+		t.Fatalf("error %v does not unwrap to ErrContainerNotFound", err)
+	}
+	if run.calls != 0 {
+		t.Errorf("attach.Run called %d times on missing target, want 0", run.calls)
+	}
+}
+
 func TestAttach_ExplicitContainer_Attachable_Succeeds(t *testing.T) {
 	t.Cleanup(viper.Reset)
 

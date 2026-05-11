@@ -125,7 +125,7 @@ func runAttach(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("container %q in cell %q is not attachable: %w", container, cell, err)
 		}
 		if errors.Is(err, errdefs.ErrContainerNotFound) {
-			return fmt.Errorf("container %q not found in cell %q", container, cell)
+			return fmt.Errorf("container %q not found in cell %q: %w", container, cell, err)
 		}
 		return err
 	}
