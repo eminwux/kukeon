@@ -27,8 +27,10 @@ import (
 
 // TestCellStateAutoDeleteTriggers locks down the predicate the reconciler
 // uses to decide when Spec.AutoDelete=true should kick off cleanup. Stopped
-// and Failed are the only triggers — Unknown is excluded so a transient
-// containerd hiccup doesn't nuke the cell, and the running states stay
+// is the only trigger — Unknown is excluded so a transient containerd
+// hiccup doesn't nuke the cell, Failed is excluded per the issue #407
+// contract (the terminal Error state is sticky and preserves diagnostic
+// surface — `--rm` does not auto-clean it), and the running states stay
 // untouched.
 func TestCellStateAutoDeleteTriggers(t *testing.T) {
 	cases := []struct {
@@ -36,7 +38,7 @@ func TestCellStateAutoDeleteTriggers(t *testing.T) {
 		want  bool
 	}{
 		{intmodel.CellStateStopped, true},
-		{intmodel.CellStateFailed, true},
+		{intmodel.CellStateFailed, false},
 		{intmodel.CellStateReady, false},
 		{intmodel.CellStatePending, false},
 		{intmodel.CellStateUnknown, false},
@@ -204,11 +206,16 @@ func TestShouldAutoDeleteCell(t *testing.T) {
 			want:          true,
 		},
 		{
-			name:          "fires_on_failed_state",
+			// Issue #407: Failed is the terminal Error state and must
+			// NOT trigger AutoDelete. `kuke run --rm` only auto-cleans
+			// on a *successful* run that subsequently exits cleanly;
+			// a startup-path failure preserves the cell so the operator
+			// has a diagnostic surface to inspect.
+			name:          "blocked_on_failed_state_per_issue_407",
 			autoDelete:    true,
 			newState:      intmodel.CellStateFailed,
 			readyObserved: true,
-			want:          true,
+			want:          false,
 		},
 		{
 			name:          "blocked_when_autoDelete_false",
@@ -562,10 +569,14 @@ func TestShouldWindDownCell(t *testing.T) {
 			want:     true,
 		},
 		{
-			name:     "fires_on_failed_state",
+			// Issue #407: Failed cells are already torn down at the
+			// startup-failure transition (markCellFailedAfterStartupFailure
+			// runs KillCell before stamping Failed), so the wind-down
+			// predicate must NOT re-fire on them.
+			name:     "blocked_on_failed_state_per_issue_407",
 			cell:     cell(specsWithWork, rootRunningStatus, true),
 			newState: intmodel.CellStateFailed,
-			want:     true,
+			want:     false,
 		},
 		{
 			name:     "blocked_when_state_not_trigger",
@@ -604,5 +615,29 @@ func TestShouldWindDownCell(t *testing.T) {
 				t.Errorf("shouldWindDownCell(...) = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestCellStateIsSticky locks down the issue-#407 contract that the terminal
+// Error state must be preserved across reconcile ticks. Failed is sticky;
+// every other state is re-derivable. Pairs with the auto-delete/wind-down
+// predicate tests above: together they ensure a Failed cell stays Failed
+// until the operator runs `kuke delete cell`.
+func TestCellStateIsSticky(t *testing.T) {
+	cases := []struct {
+		state intmodel.CellState
+		want  bool
+	}{
+		{intmodel.CellStateFailed, true},
+		{intmodel.CellStateStopped, false},
+		{intmodel.CellStateReady, false},
+		{intmodel.CellStatePending, false},
+		{intmodel.CellStateUnknown, false},
+	}
+	for _, tc := range cases {
+		if got := cellStateIsSticky(tc.state); got != tc.want {
+			t.Errorf("cellStateIsSticky(%v) = %v, want %v",
+				tc.state, got, tc.want)
+		}
 	}
 }

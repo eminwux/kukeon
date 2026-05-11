@@ -130,9 +130,73 @@ func cellTasksAllRunningFn(
 	return true
 }
 
+// markCellFailedAfterStartupFailure transitions the cell to the terminal
+// CellStateFailed state (issue #407) when a non-validation, containerd-touching
+// step in StartCell / StartContainer returns an error. The cleanup itself is:
+//
+//   - best-effort KillCell on the cell so any container that did start (e.g.,
+//     the root container) is torn down — the cell holds no running processes
+//     once it enters Failed;
+//   - reload from metadata so we overwrite KillCell's own Stopped-write, then
+//     stamp Failed and persist via UpdateCellMetadata.
+//
+// The original startup error is returned unmodified by the caller; this helper
+// only writes the new state so the reconciler can later observe it as terminal
+// (cellStateAutoDeleteTriggers excludes Failed, and ReconcileCell treats
+// originalState==Failed as sticky). Errors from the kill/persist sub-steps are
+// logged at WARN — propagating them would mask the original startup cause.
+func (r *Exec) markCellFailedAfterStartupFailure(cell intmodel.Cell, cause error) {
+	cellName := strings.TrimSpace(cell.Metadata.Name)
+	if _, killErr := r.KillCell(cell); killErr != nil {
+		r.logger.WarnContext(r.ctx,
+			"failed to kill siblings while transitioning cell to Failed",
+			"cell", cellName, "cause", cause.Error(), "error", killErr.Error())
+	}
+
+	reloaded, getErr := r.GetCell(cell)
+	if getErr == nil {
+		cell = reloaded
+	} else {
+		r.logger.DebugContext(r.ctx,
+			"failed to reload cell metadata after KillCell while transitioning to Failed",
+			"cell", cellName, "error", getErr.Error())
+	}
+
+	cell.Status.State = intmodel.CellStateFailed
+	if updErr := r.UpdateCellMetadata(cell); updErr != nil {
+		r.logger.WarnContext(r.ctx,
+			"failed to persist Failed state after cell startup failure",
+			"cell", cellName, "cause", cause.Error(), "error", updErr.Error())
+		return
+	}
+	r.logger.InfoContext(r.ctx,
+		"cell transitioned to Failed after startup failure",
+		"cell", cellName, "cause", cause.Error())
+}
+
 // StartCell starts the root container and all containers defined in the CellDoc.
 // The root container is started first, then all containers in doc.Spec.Containers are started.
-func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
+//
+// If a containerd-touching step fails (CreateContainer, StartContainer, CNI
+// attach, attachable chown), the cell is transitioned to CellStateFailed and
+// any containers that did start are killed — issue #407. Errors raised before
+// the provisioning phase (input validation, realm lookup, idempotent-skip
+// path) leave the cell's persisted state alone.
+func (r *Exec) StartCell(cell intmodel.Cell) (_ intmodel.Cell, retErr error) {
+	// provisionStarted gates the defer below: only flip the cell to Failed
+	// when we've already entered the destructive recreate path. Validation
+	// errors (missing cell name, missing realm) and the idempotent-skip
+	// return predate this flip and must not stamp Failed onto a healthy
+	// cell. cellForCleanup is captured by the closure and overwritten with
+	// the fully-resolved internalCell after GetCell succeeds so KillCell's
+	// internal GetCell has the realm/space/stack identifiers it needs.
+	var provisionStarted bool
+	cellForCleanup := cell
+	defer func() {
+		if retErr != nil && provisionStarted {
+			r.markCellFailedAfterStartupFailure(cellForCleanup, retErr)
+		}
+	}()
 	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
 		return intmodel.Cell{}, internalerrdefs.ErrCellNameRequired
@@ -165,6 +229,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	if err != nil {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", internalerrdefs.ErrGetCell, err)
 	}
+	cellForCleanup = internalCell
 
 	cellSpec := internalCell.Spec
 	cellID := cellSpec.ID
@@ -238,6 +303,11 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		)
 		return internalCell, nil
 	}
+
+	// Past the idempotent-skip path: any subsequent error means we crashed
+	// mid-provisioning. Arm the defer above so the cell flips to Failed and
+	// any siblings already started get killed (issue #407).
+	provisionStarted = true
 
 	// Check if container exists and clean it up
 	container, err := r.ctrClient.GetContainer(namespace, containerID)
@@ -732,8 +802,19 @@ func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	return internalCell, nil
 }
 
-// StartContainer starts a specific container in a cell.
-func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (intmodel.Cell, error) {
+// StartContainer starts a specific container in a cell. Mirrors StartCell's
+// issue-#407 behavior: a containerd-touching failure (CreateContainer,
+// StartContainer, attachable chown) marks the cell as CellStateFailed and
+// kills any siblings the cell still holds, so a single non-root container
+// that cannot be brought up no longer leaves the cell wedged in Unknown.
+func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmodel.Cell, retErr error) {
+	var provisionStarted bool
+	cellForCleanup := cell
+	defer func() {
+		if retErr != nil && provisionStarted {
+			r.markCellFailedAfterStartupFailure(cellForCleanup, retErr)
+		}
+	}()
 	containerID = strings.TrimSpace(containerID)
 	if containerID == "" {
 		return intmodel.Cell{}, errors.New("container ID is required")
@@ -892,6 +973,11 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (intmodel.
 	// set at create time; repopulate from cell.Spec.NestedCgroupRuntime
 	// before BuildContainerSpec runs in the destructive recreate below.
 	foundContainerSpec.NestedCgroupRuntime = cell.Spec.NestedCgroupRuntime
+
+	// Past the idempotent recreate-prep: any subsequent error means we
+	// crashed mid-provisioning, so arm the defer to flip the cell to
+	// Failed (issue #407).
+	provisionStarted = true
 
 	// Recreate container fresh
 	attachOpts, attachErr := r.attachableBuildOpts(namespace, *foundContainerSpec, creds)
