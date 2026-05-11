@@ -203,16 +203,6 @@ func (r *Exec) writeKukettyMetadata(
 	if err != nil {
 		return fmt.Errorf("build kuketty terminal spec: %w", err)
 	}
-	// sbsh v0.11's terminalrunner.StartTerminal calls applyLogFilePerms on
-	// Spec.LogFile, which chmods the path without O_CREATE. In sbsh's own
-	// CLI, internal/logging.SetupFileLogger pre-creates the file; that helper
-	// is unexported, and the public pkg/terminal/server facade does not call
-	// it. The builder derives a non-empty LogFile by default, so the chmod
-	// hits ENOENT and the runner closes the terminal before the PTY spawns.
-	// applyLogFilePerms is a no-op when Spec.LogFile == "" (matching how
-	// sbsh's own pkg/terminal/server.Server unit test fixture configures the
-	// spec).
-	terminalSpec.LogFile = ""
 
 	doc := sbshapi.TerminalDoc{
 		APIVersion: sbshapi.APIVersionV1Beta1,

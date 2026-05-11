@@ -179,16 +179,6 @@ func TestWriteKukettyMetadata_KukeonGroupSet(t *testing.T) {
 	if doc.Spec.SetPrompt {
 		t.Errorf("Spec.SetPrompt = true, want false in phase 1b")
 	}
-	// LogFile cleared: sbsh v0.11 applyLogFilePerms chmods Spec.LogFile
-	// without O_CREATE (its CLI relies on internal SetupFileLogger, which
-	// the public server facade does not call). A non-empty derived LogFile
-	// from BuildTerminalSpec would trip ENOENT and close the terminal
-	// before the PTY spawns. Locked in so a future builder bump doesn't
-	// silently regress.
-	if doc.Spec.LogFile != "" {
-		t.Errorf("Spec.LogFile = %q, want empty (sbsh applyLogFilePerms no-ops on empty path)", doc.Spec.LogFile)
-	}
-
 	// File permissions: daemon-private (0o600). A future loosening of
 	// the parent dir must not silently expose the file.
 	info, statErr := os.Stat(path)

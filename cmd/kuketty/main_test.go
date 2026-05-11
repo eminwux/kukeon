@@ -218,64 +218,6 @@ func TestClaimSocketListener_BindsAndUnlinksStale(t *testing.T) {
 	}
 }
 
-// TestApplySocketPerms_ChmodsAndChowns covers the SCM-perm dance kuketty
-// has to run after claimSocketListener. sbsh's runner does this in
-// OpenSocketCtrl on the bind path it owns, but UseListener (the public
-// server facade's escape hatch) bypasses it — so kuketty must replicate
-// the chmod and (when set) chown. A regression here surfaces as a socket
-// the host-side kuke attach (running under the kukeon group) can no
-// longer connect to.
-func TestApplySocketPerms_ChmodsAndChowns(t *testing.T) {
-	dir := t.TempDir()
-	sock := filepath.Join(dir, "socket")
-	l, err := claimSocketListener(sock)
-	if err != nil {
-		t.Fatalf("claimSocketListener: %v", err)
-	}
-	t.Cleanup(func() { _ = l.Close() })
-
-	if err := applySocketPerms(sock, 0o660, nil); err != nil {
-		t.Fatalf("applySocketPerms: %v", err)
-	}
-	info, err := os.Stat(sock)
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o660 {
-		t.Errorf("socket perm = %#o, want 0o660", perm)
-	}
-}
-
-// TestApplySocketPerms_ZeroModeNoChange covers the "fall through to the
-// runner default" semantics for unset SocketMode: no chmod call, so the
-// inode's umask-clipped permissions stand. Mirrors sbsh's own default
-// when Spec.SocketMode is the zero value.
-func TestApplySocketPerms_ZeroModeNoChange(t *testing.T) {
-	dir := t.TempDir()
-	sock := filepath.Join(dir, "socket")
-	l, err := claimSocketListener(sock)
-	if err != nil {
-		t.Fatalf("claimSocketListener: %v", err)
-	}
-	t.Cleanup(func() { _ = l.Close() })
-
-	before, err := os.Stat(sock)
-	if err != nil {
-		t.Fatalf("stat before: %v", err)
-	}
-	if err := applySocketPerms(sock, 0, nil); err != nil {
-		t.Fatalf("applySocketPerms: %v", err)
-	}
-	after, err := os.Stat(sock)
-	if err != nil {
-		t.Fatalf("stat after: %v", err)
-	}
-	if before.Mode().Perm() != after.Mode().Perm() {
-		t.Errorf("perm changed from %#o to %#o on zero mode",
-			before.Mode().Perm(), after.Mode().Perm())
-	}
-}
-
 func TestIsCleanShutdown(t *testing.T) {
 	if !isCleanShutdown(nil) {
 		t.Errorf("nil err: not clean")

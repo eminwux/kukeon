@@ -42,6 +42,7 @@ import (
 	"syscall"
 
 	sbshapi "github.com/eminwux/sbsh/pkg/api"
+	sbshlogging "github.com/eminwux/sbsh/pkg/logging"
 	sbshserver "github.com/eminwux/sbsh/pkg/terminal/server"
 )
 
@@ -103,10 +104,6 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err = applySocketPerms(doc.Spec.SocketFile, doc.Spec.SocketMode, doc.Spec.SocketGID); err != nil {
-		_ = listener.Close()
-		return err
-	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -122,7 +119,11 @@ func run(args []string) error {
 		}
 	}()
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger, closeLogger, err := openTerminalLogger(doc.Spec.LogFile)
+	if err != nil {
+		return err
+	}
+	defer closeLogger()
 	srv, err := sbshserver.New(&doc.Spec, logger)
 	if err != nil {
 		return fmt.Errorf("server.New: %w", err)
@@ -182,26 +183,23 @@ func loadTerminalDoc(path string) (*sbshapi.TerminalDoc, error) {
 	return &doc, nil
 }
 
-// applySocketPerms chmods and optionally chowns the socket inode to
-// the Spec-declared mode and GID. sbsh's runner.OpenSocketCtrl applies
-// these on the path it binds itself, but the public pkg/terminal/server
-// facade's UseListener bypass means the chmod/chown is never run when
-// the caller owns the listener. kuketty does, so we replicate that step
-// here. Skipping the chmod when SocketMode is zero matches sbsh's
-// "fall through to the runner default" semantics and keeps existing
-// no-kukeon-group hosts on the OS umask-clipped permissions.
-func applySocketPerms(socketPath string, mode os.FileMode, gid *int) error {
-	if mode.Perm() != 0 {
-		if err := os.Chmod(socketPath, mode.Perm()); err != nil {
-			return fmt.Errorf("chmod %s to 0o%o: %w", socketPath, mode.Perm(), err)
-		}
+// openTerminalLogger pre-creates the per-terminal log file via sbsh's
+// public pkg/logging.NewFileLogger helper and returns the file-backed
+// slog.Logger plus a close func the caller must defer. sbsh's terminal
+// runner chmods the LogFile path during StartTerminal without O_CREATE,
+// so out-of-tree callers of pkg/terminal/server must pre-create the file
+// at the matching mode (per v0.11.1's pkg/logging package contract). An
+// empty path falls through to a discard logger for test fixtures that
+// bypass pkg/builder.BuildTerminalSpec.
+func openTerminalLogger(logfile string) (*slog.Logger, func(), error) {
+	if logfile == "" {
+		return slog.New(slog.NewTextHandler(io.Discard, nil)), func() {}, nil
 	}
-	if gid != nil {
-		if err := os.Chown(socketPath, -1, *gid); err != nil {
-			return fmt.Errorf("chown %s gid=%d: %w", socketPath, *gid, err)
-		}
+	fl, err := sbshlogging.NewFileLogger(logfile, "info")
+	if err != nil {
+		return nil, nil, fmt.Errorf("open log file %s: %w", logfile, err)
 	}
-	return nil
+	return fl.Logger, func() { _ = fl.File.Close() }, nil
 }
 
 // claimSocketListener removes any stale inode at the spec'd socket path
