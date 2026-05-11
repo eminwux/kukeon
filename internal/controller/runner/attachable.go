@@ -207,6 +207,25 @@ func (r *Exec) writeKukettyMetadata(
 		opts = append(opts, sbshbuilder.WithSocketGID(kukeonGroupGID))
 		opts = append(opts, sbshbuilder.WithCaptureGID(kukeonGroupGID))
 	}
+	// Log file is opt-in per-container via Tty.LogFile (phase 3 #289):
+	// when set, the daemon passes the path verbatim plus the kukeon-
+	// group-derived mode/GID (matches socket/capture treatment); when
+	// unset, the daemon clears sbsh-builder's auto-derived default
+	// after BuildTerminalSpec so the rendered Spec.LogFile stays zero.
+	// Empty Spec.LogFile is the contract kuketty's openTerminalLogger
+	// (cmd/kuketty/main.go) and sbsh's runner.applyLogFilePerms both
+	// honor as "no log file configured" — so a workload without
+	// Tty.LogFile produces no log writer setup end-to-end.
+	logFileConfigured := spec.Tty != nil && spec.Tty.LogFile != ""
+	if logFileConfigured {
+		opts = append(opts, sbshbuilder.WithLogFile(spec.Tty.LogFile))
+		if mode := modeIfGroupSet(kukeonGroupGID, ctr.AttachableLogFileMode); mode != "" {
+			opts = append(opts, sbshbuilder.WithLogFileMode(mode))
+		}
+		if kukeonGroupGID > 0 {
+			opts = append(opts, sbshbuilder.WithLogFileGID(kukeonGroupGID))
+		}
+	}
 	if len(workloadArgv) > 0 {
 		opts = append(opts, sbshbuilder.WithCommand(workloadArgv))
 	}
@@ -214,6 +233,21 @@ func (r *Exec) writeKukettyMetadata(
 	terminalSpec, err := sbshbuilder.BuildTerminalSpec(r.ctx, r.logger, ctr.AttachableTTYDir, opts...)
 	if err != nil {
 		return fmt.Errorf("build kuketty terminal spec: %w", err)
+	}
+	if !logFileConfigured {
+		// sbsh's profile builder unconditionally derives a default
+		// LogFile path from runPath + terminalID when the caller
+		// passes no WithLogFile. That default would land at
+		// /run/kukeon/tty/terminals/<id>/log inside the container —
+		// host-visible through the bind mount, but at a location the
+		// daemon does not advertise. Clearing the field lets kuketty's
+		// openTerminalLogger fall through to a discard logger and
+		// keeps sbsh's runner.applyLogFilePerms a no-op, so a cell
+		// without Tty.LogFile produces no log file at all (issue
+		// #289 AC #2).
+		terminalSpec.LogFile = ""
+		terminalSpec.LogFileMode = 0
+		terminalSpec.LogFileGID = nil
 	}
 
 	doc := sbshapi.TerminalDoc{
