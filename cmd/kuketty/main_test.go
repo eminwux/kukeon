@@ -17,26 +17,54 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
-	"reflect"
+	"os"
+	"path/filepath"
 	"testing"
+
+	sbshapi "github.com/eminwux/sbsh/pkg/api"
 )
 
-func TestParseArgs_Happy(t *testing.T) {
-	got, err := parseArgs([]string{"--", "/bin/sh", "-c", "echo hello"})
+// TestParseArgs_Default locks in the no-flags contract: with zero argv
+// the resolver returns the bind-mount path the OCI injection delivers
+// (`/.kukeon/kuketty/metadata.json`). This is the only invocation shape
+// kukeond uses, so a regression in the default would silently break every
+// attachable container start.
+func TestParseArgs_Default(t *testing.T) {
+	got, err := parseArgs(nil)
 	if err != nil {
-		t.Fatalf("parseArgs: %v", err)
+		t.Fatalf("parseArgs(nil): %v", err)
 	}
-	want := []string{"/bin/sh", "-c", "echo hello"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("workload = %v, want %v", got, want)
+	if got != defaultConfigPath {
+		t.Errorf("config = %q, want %q", got, defaultConfigPath)
 	}
 }
 
-func TestParseArgs_MissingSeparator(t *testing.T) {
-	_, err := parseArgs([]string{"/bin/sh"})
+// TestParseArgs_ConfigOverride exercises the only flag the wrapper exposes
+// — the optional `--config` for test/debug ergonomics. The OCI injection
+// path never sets it, but local smoke / e2e setups rely on it.
+func TestParseArgs_ConfigOverride(t *testing.T) {
+	want := "/tmp/kuketty-test.json"
+	got, err := parseArgs([]string{"--config", want})
+	if err != nil {
+		t.Fatalf("parseArgs(--config %s): %v", want, err)
+	}
+	if got != want {
+		t.Errorf("config = %q, want %q", got, want)
+	}
+}
+
+// TestParseArgs_RejectsPositional locks the "no positional argv" rule.
+// kuketty's earlier (phase 1) form took `-- <workload>`; phase 1b moves
+// the workload into Spec.Command/CommandArgs, so any leftover positional
+// argument from a stale OCI args wrap is a hard error rather than a
+// silently-ignored leak.
+func TestParseArgs_RejectsPositional(t *testing.T) {
+	_, err := parseArgs([]string{"--", "/bin/sh", "-c", "echo hello"})
 	if err == nil {
-		t.Fatalf("parseArgs returned nil, want usage error")
+		t.Fatalf("parseArgs returned nil, want usage error for positional")
 	}
 	var ue *usageError
 	if !errors.As(err, &ue) {
@@ -44,13 +72,171 @@ func TestParseArgs_MissingSeparator(t *testing.T) {
 	}
 }
 
-func TestParseArgs_EmptyWorkloadAfterSeparator(t *testing.T) {
-	_, err := parseArgs([]string{"--"})
+// TestParseArgs_UnknownFlag confirms a stray flag (e.g., a leftover
+// `--socket` from the sbsh wrapper) is rejected with a usageError. The
+// builder API is the *only* runtime surface — any flag is a regression.
+func TestParseArgs_UnknownFlag(t *testing.T) {
+	_, err := parseArgs([]string{"--socket", "/run/kukeon/tty/socket"})
 	if err == nil {
-		t.Fatalf("parseArgs returned nil, want usage error")
+		t.Fatalf("parseArgs returned nil, want usage error for unknown flag")
 	}
 	var ue *usageError
 	if !errors.As(err, &ue) {
 		t.Fatalf("parseArgs error = %T, want *usageError", err)
+	}
+}
+
+// TestLoadTerminalDoc_Happy locks the on-disk schema kukeon's render path
+// commits to: an api.TerminalDoc with APIVersion=sbsh/v1beta1 and
+// Kind=Terminal. Round-trips a minimal doc and confirms the decoded
+// spec values survive verbatim.
+func TestLoadTerminalDoc_Happy(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "metadata.json")
+	want := sbshapi.TerminalDoc{
+		APIVersion: sbshapi.APIVersionV1Beta1,
+		Kind:       sbshapi.KindTerminal,
+		Metadata:   sbshapi.TerminalMetadata{Name: "c1"},
+		Spec: sbshapi.TerminalSpec{
+			Command:     "/bin/sh",
+			CommandArgs: []string{"-c", "echo hello"},
+			SocketFile:  "/run/kukeon/tty/socket",
+			RunPath:     "/run/kukeon/tty",
+		},
+	}
+	writeDoc(t, path, want)
+
+	got, err := loadTerminalDoc(path)
+	if err != nil {
+		t.Fatalf("loadTerminalDoc: %v", err)
+	}
+	if got.Spec.Command != want.Spec.Command {
+		t.Errorf("Spec.Command = %q, want %q", got.Spec.Command, want.Spec.Command)
+	}
+	if got.Spec.SocketFile != want.Spec.SocketFile {
+		t.Errorf("Spec.SocketFile = %q, want %q", got.Spec.SocketFile, want.Spec.SocketFile)
+	}
+	if got.Metadata.Name != want.Metadata.Name {
+		t.Errorf("Metadata.Name = %q, want %q", got.Metadata.Name, want.Metadata.Name)
+	}
+}
+
+// TestLoadTerminalDoc_WrongAPIVersion locks the schema discriminator: a
+// document tagged with the wrong apiVersion (e.g., a stale kukeon-side
+// schema rendered by a daemon that hasn't been re-built) must fail loudly
+// rather than being silently interpreted as a Terminal.
+func TestLoadTerminalDoc_WrongAPIVersion(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "metadata.json")
+	doc := sbshapi.TerminalDoc{
+		APIVersion: "kuketty.kukeon.io/v1alpha1",
+		Kind:       sbshapi.KindTerminal,
+		Spec:       sbshapi.TerminalSpec{SocketFile: "/run/kukeon/tty/socket"},
+	}
+	writeDoc(t, path, doc)
+	_, err := loadTerminalDoc(path)
+	if err == nil {
+		t.Fatalf("loadTerminalDoc returned nil, want apiVersion error")
+	}
+}
+
+// TestLoadTerminalDoc_WrongKind catches the case where the apiVersion is
+// correct (sbsh/v1beta1) but the kind is e.g. TerminalProfile — kuketty
+// must refuse rather than apply profile semantics to a Terminal-shaped
+// runner.
+func TestLoadTerminalDoc_WrongKind(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "metadata.json")
+	doc := sbshapi.TerminalDoc{
+		APIVersion: sbshapi.APIVersionV1Beta1,
+		Kind:       sbshapi.KindTerminalProfile,
+		Spec:       sbshapi.TerminalSpec{SocketFile: "/run/kukeon/tty/socket"},
+	}
+	writeDoc(t, path, doc)
+	_, err := loadTerminalDoc(path)
+	if err == nil {
+		t.Fatalf("loadTerminalDoc returned nil, want kind error")
+	}
+}
+
+// TestLoadTerminalDoc_MissingSocket rejects a doc whose spec carries no
+// SocketFile — without it kuketty has nothing to bind, and a default
+// fallback would silently bind a path the host has no bind-mount for.
+func TestLoadTerminalDoc_MissingSocket(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "metadata.json")
+	doc := sbshapi.TerminalDoc{
+		APIVersion: sbshapi.APIVersionV1Beta1,
+		Kind:       sbshapi.KindTerminal,
+	}
+	writeDoc(t, path, doc)
+	_, err := loadTerminalDoc(path)
+	if err == nil {
+		t.Fatalf("loadTerminalDoc returned nil, want spec.socketIO error")
+	}
+}
+
+// TestLoadTerminalDoc_Malformed locks the json-parse error path so a
+// half-written file (crashed renderer) produces a clean failure rather
+// than a silently-zero TerminalDoc.
+func TestLoadTerminalDoc_Malformed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "metadata.json")
+	if err := os.WriteFile(path, []byte("{ not json"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_, err := loadTerminalDoc(path)
+	if err == nil {
+		t.Fatalf("loadTerminalDoc returned nil, want parse error")
+	}
+}
+
+// TestClaimSocketListener_BindsAndUnlinksStale exercises the
+// unlink-then-listen sequence: a stale file (from a prior crash on the
+// same in-container path) must be removed before Listen so the wrapper
+// does not hit EADDRINUSE on every restart.
+func TestClaimSocketListener_BindsAndUnlinksStale(t *testing.T) {
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "socket")
+	// Pre-create a stale plain file at the path; ensures the helper
+	// unlinks it before Listen rather than failing with EADDRINUSE.
+	if err := os.WriteFile(sock, nil, 0o600); err != nil {
+		t.Fatalf("pre-create stale: %v", err)
+	}
+	l, err := claimSocketListener(sock)
+	if err != nil {
+		t.Fatalf("claimSocketListener: %v", err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+
+	info, err := os.Stat(sock)
+	if err != nil {
+		t.Fatalf("stat socket: %v", err)
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		t.Errorf("path %s is not a socket: mode=%v", sock, info.Mode())
+	}
+}
+
+func TestIsCleanShutdown(t *testing.T) {
+	if !isCleanShutdown(nil) {
+		t.Errorf("nil err: not clean")
+	}
+	if !isCleanShutdown(context.Canceled) {
+		t.Errorf("context.Canceled: not clean")
+	}
+	if isCleanShutdown(errors.New("something went wrong")) {
+		t.Errorf("opaque err: reported clean")
+	}
+}
+
+func writeDoc(t *testing.T, path string, doc sbshapi.TerminalDoc) {
+	t.Helper()
+	data, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
 	}
 }

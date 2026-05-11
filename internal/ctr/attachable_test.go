@@ -84,70 +84,78 @@ func TestBuildContainerSpec_AttachableFalseIsByteIdentical(t *testing.T) {
 }
 
 // TestBuildContainerSpec_AttachableTrue_MountsAndArgsWrap locks down the
-// post-swap (issue #165) wrapper contract: the OCI spec emits exactly three
+// post-swap (issue #410) wrapper contract: the OCI spec emits exactly three
 // bind mounts (kuketty binary RO, per-container tty dir RW, per-container
-// metadata file RO) and process.args is `[kuketty, --, originalArgs...]`.
-// No CLI flags — every runtime input flows through the metadata file.
+// metadata file RO) and process.args is the single element `[kuketty]`.
+// No CLI flags, no trailing workload argv — the workload command moves into
+// the bind-mounted api.TerminalDoc's Spec.Command/CommandArgs via the
+// RenderMetadata callback (asserted separately).
 func TestBuildContainerSpec_AttachableTrue_MountsAndArgsWrap(t *testing.T) {
 	cases := []struct {
 		name         string
 		userCommand  string
 		userArgs     []string
 		imageArgs    []string // pre-seeded process.args = ENTRYPOINT+CMD
-		wantOriginal []string
+		wantWorkload []string
 	}{
 		{
 			name:         "image-only ENTRYPOINT, no user override",
 			userCommand:  "",
 			userArgs:     nil,
 			imageArgs:    []string{"/bin/sh"},
-			wantOriginal: []string{"/bin/sh"},
+			wantWorkload: []string{"/bin/sh"},
 		},
 		{
 			name:         "image-only CMD, no user override",
 			userCommand:  "",
 			userArgs:     nil,
 			imageArgs:    []string{"/usr/bin/python3"},
-			wantOriginal: []string{"/usr/bin/python3"},
+			wantWorkload: []string{"/usr/bin/python3"},
 		},
 		{
 			name:         "image ENTRYPOINT and CMD, no user override",
 			userCommand:  "",
 			userArgs:     nil,
 			imageArgs:    []string{"/bin/sh", "-c", "echo image"},
-			wantOriginal: []string{"/bin/sh", "-c", "echo image"},
+			wantWorkload: []string{"/bin/sh", "-c", "echo image"},
 		},
 		{
 			name:         "user overrides command (CMD analogue)",
 			userCommand:  "claude",
 			userArgs:     nil,
 			imageArgs:    []string{"/bin/sh"},
-			wantOriginal: []string{"claude"},
+			wantWorkload: []string{"claude"},
 		},
 		{
 			name:         "user overrides args (ENTRYPOINT-args analogue)",
 			userCommand:  "",
 			userArgs:     []string{"node", "server.js"},
 			imageArgs:    []string{"/bin/sh"},
-			wantOriginal: []string{"node", "server.js"},
+			wantWorkload: []string{"node", "server.js"},
 		},
 		{
 			name:         "user overrides both command and args",
 			userCommand:  "bash",
 			userArgs:     []string{"-l", "-c", "tail -F /var/log/x"},
 			imageArgs:    []string{"/bin/sh"},
-			wantOriginal: []string{"bash", "-l", "-c", "tail -F /var/log/x"},
+			wantWorkload: []string{"bash", "-l", "-c", "tail -F /var/log/x"},
 		},
-	}
-
-	inj := ctr.AttachableInjection{
-		KukettyBinaryPath: "/opt/kukeon/bin/kuketty",
-		HostTTYDir:        "/opt/kukeon/realm/space/stack/cell/c1/tty",
-		HostMetadataPath:  "/opt/kukeon/realm/space/stack/cell/c1/kuketty-metadata.json",
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			var capturedWorkload []string
+			renderCalls := 0
+			inj := ctr.AttachableInjection{
+				KukettyBinaryPath: "/opt/kukeon/bin/kuketty",
+				HostTTYDir:        "/opt/kukeon/realm/space/stack/cell/c1/tty",
+				HostMetadataPath:  "/opt/kukeon/realm/space/stack/cell/c1/kuketty-metadata.json",
+				RenderMetadata: func(workloadArgv []string) error {
+					renderCalls++
+					capturedWorkload = append([]string(nil), workloadArgv...)
+					return nil
+				},
+			}
 			in := intmodel.ContainerSpec{
 				ID:         "c1",
 				Image:      "registry.eminwux.com/busybox:latest",
@@ -225,20 +233,12 @@ func TestBuildContainerSpec_AttachableTrue_MountsAndArgsWrap(t *testing.T) {
 				}
 			}
 
-			// Post-swap wrapper contract: `[kuketty, --, originalArgs...]`.
-			// No subcommand, no flags — kuketty reads runtime config from
-			// the bind-mounted metadata file.
-			wantPrefix := []string{ctr.AttachableBinaryPath, "--"}
-			if len(spec.Process.Args) < len(wantPrefix) {
-				t.Fatalf("Process.Args = %v, missing wrapper prefix", spec.Process.Args)
-			}
-			gotPrefix := spec.Process.Args[:len(wantPrefix)]
-			if !reflect.DeepEqual(gotPrefix, wantPrefix) {
-				t.Errorf("wrapper prefix = %v, want %v", gotPrefix, wantPrefix)
-			}
-			gotOriginal := spec.Process.Args[len(wantPrefix):]
-			if !reflect.DeepEqual(gotOriginal, tc.wantOriginal) {
-				t.Errorf("wrapped original args = %v, want %v", gotOriginal, tc.wantOriginal)
+			// Phase-1b wrapper contract: `[kuketty]` exactly. No `--`,
+			// no trailing argv, no flags. The workload moves into the
+			// bind-mounted TerminalDoc via the RenderMetadata callback.
+			wantArgs := []string{ctr.AttachableBinaryPath}
+			if !reflect.DeepEqual(spec.Process.Args, wantArgs) {
+				t.Errorf("Process.Args = %v, want %v", spec.Process.Args, wantArgs)
 			}
 
 			// Negative: no leftover sbsh flags must appear on the wrapped
@@ -249,19 +249,32 @@ func TestBuildContainerSpec_AttachableTrue_MountsAndArgsWrap(t *testing.T) {
 				"--log-file", "--profile", "--profiles-dir",
 				"--socket-mode", "--socket-gid", "--capture-mode",
 				"--capture-gid", "--log-file-mode", "--log-file-gid",
+				"--", // phase-1b no longer uses the `--` separator either.
 			} {
 				for _, a := range spec.Process.Args {
 					if a == banned {
-						t.Errorf("legacy sbsh flag %q present in Process.Args = %v", banned, spec.Process.Args)
+						t.Errorf("legacy flag %q present in Process.Args = %v", banned, spec.Process.Args)
 					}
 				}
+			}
+
+			// Metadata renderer must fire exactly once with the resolved
+			// workload argv (image ENTRYPOINT+CMD merged with any user
+			// override, BEFORE the wrap clears Process.Args).
+			if renderCalls != 1 {
+				t.Errorf("RenderMetadata fired %d times, want 1", renderCalls)
+			}
+			if !reflect.DeepEqual(capturedWorkload, tc.wantWorkload) {
+				t.Errorf("RenderMetadata workload argv = %v, want %v", capturedWorkload, tc.wantWorkload)
 			}
 		})
 	}
 }
 
 // TestBuildContainerSpec_AttachableTrue_EmptyImageArgs locks the empty-args
-// case: the wrapper prefix on its own, no original args.
+// case: the wrapper rewrites Process.Args to `[kuketty]` and the renderer
+// sees an empty workload (which the runner-side renderer falls back to the
+// sbsh builder's hardcoded default, exercised in the runner test).
 func TestBuildContainerSpec_AttachableTrue_EmptyImageArgs(t *testing.T) {
 	in := intmodel.ContainerSpec{
 		ID:         "c1",
@@ -272,16 +285,29 @@ func TestBuildContainerSpec_AttachableTrue_EmptyImageArgs(t *testing.T) {
 		StackName:  "stack",
 		Attachable: true,
 	}
+	var capturedWorkload []string
+	renderCalls := 0
 	inj := ctr.AttachableInjection{
 		KukettyBinaryPath: "/opt/kukeon/bin/kuketty",
 		HostTTYDir:        "/opt/kukeon/realm/space/stack/cell/c1/tty",
 		HostMetadataPath:  "/opt/kukeon/realm/space/stack/cell/c1/kuketty-metadata.json",
+		RenderMetadata: func(workloadArgv []string) error {
+			renderCalls++
+			capturedWorkload = append([]string(nil), workloadArgv...)
+			return nil
+		},
 	}
 	spec := applyBuiltSpecWith(t, in, nil, ctr.WithAttachableInjection(inj))
 
-	want := []string{ctr.AttachableBinaryPath, "--"}
+	want := []string{ctr.AttachableBinaryPath}
 	if !reflect.DeepEqual(spec.Process.Args, want) {
 		t.Errorf("Process.Args = %v, want %v", spec.Process.Args, want)
+	}
+	if renderCalls != 1 {
+		t.Errorf("RenderMetadata fired %d times, want 1", renderCalls)
+	}
+	if len(capturedWorkload) != 0 {
+		t.Errorf("RenderMetadata workload argv = %v, want []", capturedWorkload)
 	}
 }
 

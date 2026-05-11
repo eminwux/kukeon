@@ -18,6 +18,7 @@ package ctr
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/containerd/containerd/v2/core/containers"
 	"github.com/containerd/containerd/v2/pkg/oci"
@@ -27,11 +28,11 @@ import (
 // Reserved in-container paths the kuketty wrapper claims. Documented as such
 // in pkg/api/model/v1beta1/container.go.
 //
-// kuketty (issue #165) replaces sbsh on the OCI injection path. Phase 1
-// honors the binary mount, the per-container tty directory mount, and the
-// per-container metadata file mount that drives kuketty's runtime
-// configuration. The wrapper is invoked with no CLI flags — every runtime
-// input flows through the metadata file (see pkg/kuketty).
+// kuketty (issue #165) replaces sbsh on the OCI injection path. Phase 1b
+// (#410) lands the attach-socket RPC server: kuketty consumes the
+// kukeond-rendered api.TerminalDoc directly via sbsh's pkg/terminal/server
+// facade. The wrapper is invoked with no CLI flags — every runtime input
+// flows through the bind-mounted metadata file.
 const (
 	// AttachableBinaryPath is where the kuketty binary is bind-mounted
 	// read-only inside the container. The host source is staged from
@@ -49,14 +50,12 @@ const (
 	// AttachableSocketPath is the in-container path of the kuketty attach
 	// control socket. kuketty listens here; the host peer is the bind-
 	// mount source directory's `socket` entry, which `kuke attach`
-	// connects to. (Phase 1b lands the RPC server behind this inode;
-	// phase 1 only creates the inode.)
+	// connects to.
 	AttachableSocketPath = AttachableTTYDir + "/socket"
 
 	// AttachableCapturePath is the declared in-container path for the
-	// kuketty capture transcript. Honored starting in phase 2 (#288); in
-	// phase 1 the path is rendered into the metadata file but kuketty
-	// does not yet write the transcript.
+	// kuketty capture transcript. Honored starting in phase 2 (#288);
+	// kuketty does not yet write the transcript in phase 1b.
 	AttachableCapturePath = AttachableTTYDir + "/capture"
 
 	// AttachableLogfilePath is the declared in-container path for the
@@ -73,7 +72,7 @@ const (
 	// AttachableMetadataPath is the fixed in-container path kuketty reads
 	// its runtime configuration from. The daemon bind-mounts the
 	// per-container metadata file over this path at OCI spec build time.
-	// Kept in sync with cmd/kuketty/main.go's metadataPath constant.
+	// Kept in sync with cmd/kuketty/main.go's defaultConfigPath constant.
 	AttachableMetadataPath = AttachableMetadataDir + "/metadata.json"
 
 	// AttachableMetadataFile is the basename of the host-side per-container
@@ -121,6 +120,17 @@ type AttachableInjection struct {
 	// the container starts; the OCI bind mount maps it to
 	// AttachableMetadataPath inside the container.
 	HostMetadataPath string
+
+	// RenderMetadata, when non-nil, is invoked from inside the OCI
+	// args-wrap spec opt with the resolved workload argv — i.e. the merge
+	// of the image's ENTRYPOINT + CMD and any user override that
+	// containerd's WithImageConfig and our WithProcessArgs have already
+	// applied to s.Process.Args by the time the wrap runs. The callback
+	// is expected to render the api.TerminalDoc with the workload argv
+	// baked into Spec.Command / Spec.CommandArgs and write it atomically
+	// to HostMetadataPath. nil disables metadata rendering — used by
+	// unit tests that exercise only the args-wrap shape.
+	RenderMetadata func(workloadArgv []string) error
 }
 
 // withAttachableMounts adds the three bind mounts that make kuketty
@@ -161,29 +171,28 @@ func withAttachableMounts(inj AttachableInjection) oci.SpecOpts {
 	})
 }
 
-// withAttachableArgsWrap prepends the kuketty invocation to the container's
-// process.args. It is composed *after* the normal WithProcessArgs (or the
-// image's default ENTRYPOINT/CMD) so the wrapped command line is whatever
-// would have run otherwise.
-//
-// The wrapper has no CLI flags by design (issue #165 redirect): kuketty
-// reads every runtime input from the bind-mounted metadata file. Only the
-// `--` positional separator stays on the command line so kuketty can tell
-// its own argv from the workload's.
-//
-// OCI semantics: process.args is the merged "ENTRYPOINT + CMD" by the time
-// this opt runs (containerd's WithImageConfigArgs has already resolved image
-// defaults and any user override of either). We just wrap the result, which
-// is what Kubernetes failed to do correctly for years and what the
-// attachable spec test explicitly locks down.
-func withAttachableArgsWrap() oci.SpecOpts {
+// withAttachableArgsWrap captures the resolved workload argv from
+// s.Process.Args (containerd's WithImageConfigArgs and any user-supplied
+// WithProcessArgs have already run by this point), hands the argv to the
+// injection's metadata renderer so kuketty receives the workload in
+// Spec.Command / Spec.CommandArgs of the bind-mounted api.TerminalDoc, and
+// then rewrites Process.Args to a single element: the kuketty binary path.
+// No CLI flags by design (issue #410 redirect): kuketty reads every runtime
+// input — including the workload to spawn — from the metadata file. The
+// optional `--config` override exists only for test/debug ergonomics and is
+// never set by this wrap.
+func withAttachableArgsWrap(inj AttachableInjection) oci.SpecOpts {
 	return func(_ context.Context, _ oci.Client, _ *containers.Container, s *runtimespec.Spec) error {
 		if s.Process == nil {
 			s.Process = &runtimespec.Process{}
 		}
-		original := append([]string(nil), s.Process.Args...)
-		wrapped := []string{AttachableBinaryPath, "--"}
-		s.Process.Args = append(wrapped, original...)
+		workload := append([]string(nil), s.Process.Args...)
+		if inj.RenderMetadata != nil {
+			if err := inj.RenderMetadata(workload); err != nil {
+				return fmt.Errorf("render kuketty metadata: %w", err)
+			}
+		}
+		s.Process.Args = []string{AttachableBinaryPath}
 		return nil
 	}
 }

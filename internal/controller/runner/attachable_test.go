@@ -16,17 +16,21 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//nolint:testpackage // exercises private attachableTTYDirInitialPerms.
+//nolint:testpackage // exercises private writeKukettyMetadata and attachableTTYDirInitialPerms.
 package runner
 
 import (
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/ctr"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
-	"github.com/eminwux/kukeon/pkg/kuketty"
+	sbshapi "github.com/eminwux/sbsh/pkg/api"
 )
 
 // TestAttachableTTYDirInitialPerms locks the (mode, gid) tuple for the per-
@@ -83,7 +87,7 @@ func TestAttachableTTYDirInitialPerms(t *testing.T) {
 // the constant itself: `os.FileMode(0o2750)` does NOT carry os.ModeSetgid
 // (the FileMode flag bits live above the perm bits), so a future refactor
 // that drops the explicit `os.ModeSetgid |` could silently produce a
-// directory without the setgid bit — and sbsh's later-created socket /
+// directory without the setgid bit — and kuketty's later-created socket /
 // log / capture siblings would land as root:root instead of inheriting the
 // kukeon group, breaking host-side group access on every restart.
 func TestAttachableTTYDirRootMode_SetsSGIDBit(t *testing.T) {
@@ -95,58 +99,88 @@ func TestAttachableTTYDirRootMode_SetsSGIDBit(t *testing.T) {
 	}
 }
 
-// TestWriteKukettyMetadata_KukeonGroupSet locks the phase-1 metadata
-// rendering when the daemon has a kukeon group configured: socket/capture/
-// log mode + gid are filled in so kuketty applies the kukeon-group
-// ownership the sbsh wrapper used to apply via flags.
+// TestWriteKukettyMetadata_KukeonGroupSet locks the phase-1b TerminalDoc
+// rendering when the daemon has a kukeon group configured: socket mode +
+// gid are filled in so kuketty applies the kukeon-group ownership the sbsh
+// wrapper used to apply via flags. APIVersion/Kind use sbsh's public
+// discriminator (api.APIVersionV1Beta1 + api.KindTerminal), and the
+// resolved workload argv lands in Spec.Command / Spec.CommandArgs (no
+// trailing argv on the OCI side).
 func TestWriteKukettyMetadata_KukeonGroupSet(t *testing.T) {
+	r := newTestRunner(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "kuketty-metadata.json")
 	spec := intmodel.ContainerSpec{
-		ID: "c1",
-		Tty: &intmodel.ContainerTty{
-			Prompt: "$ ",
-			OnInit: []intmodel.TtyStage{{Script: "echo init"}},
-		},
+		ID:        "c1",
+		RealmName: "rA",
+		SpaceName: "sB",
+		StackName: "kC",
+		CellName:  "lD",
 	}
 	const kukeonGID = 986
+	workload := []string{"/bin/sh", "-c", "echo hello"}
 
-	if err := writeKukettyMetadata(path, spec, kukeonGID); err != nil {
+	if err := r.writeKukettyMetadata(path, spec, kukeonGID, workload); err != nil {
 		t.Fatalf("writeKukettyMetadata: %v", err)
 	}
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read metadata: %v", err)
+	doc := readDoc(t, path)
+	if doc.APIVersion != sbshapi.APIVersionV1Beta1 {
+		t.Errorf("APIVersion = %q, want %q", doc.APIVersion, sbshapi.APIVersionV1Beta1)
 	}
-	md, err := kuketty.Unmarshal(data)
-	if err != nil {
-		t.Fatalf("unmarshal metadata: %v", err)
+	if doc.Kind != sbshapi.KindTerminal {
+		t.Errorf("Kind = %q, want %q", doc.Kind, sbshapi.KindTerminal)
 	}
-	if md.Meta.ContainerID != "c1" {
-		t.Errorf("ContainerID = %q, want c1", md.Meta.ContainerID)
+	if doc.Metadata.Name != "c1" {
+		t.Errorf("Metadata.Name = %q, want c1", doc.Metadata.Name)
 	}
-	if md.Spec.RunPath != ctr.AttachableTTYDir {
-		t.Errorf("RunPath = %q, want %q", md.Spec.RunPath, ctr.AttachableTTYDir)
+	wantLabels := map[string]string{
+		"kukeon.io/realm":        "rA",
+		"kukeon.io/space":        "sB",
+		"kukeon.io/stack":        "kC",
+		"kukeon.io/cell":         "lD",
+		"kukeon.io/container-id": "c1",
 	}
-	if md.Spec.Socket.Path != ctr.AttachableSocketPath {
-		t.Errorf("Socket.Path = %q, want %q", md.Spec.Socket.Path, ctr.AttachableSocketPath)
+	for k, want := range wantLabels {
+		if got := doc.Metadata.Labels[k]; got != want {
+			t.Errorf("Metadata.Labels[%q] = %q, want %q", k, got, want)
+		}
 	}
-	if md.Spec.Socket.Mode != ctr.AttachableSocketMode {
-		t.Errorf("Socket.Mode = %q, want %q", md.Spec.Socket.Mode, ctr.AttachableSocketMode)
+	if doc.Spec.SocketFile != ctr.AttachableSocketPath {
+		t.Errorf("Spec.SocketFile = %q, want %q", doc.Spec.SocketFile, ctr.AttachableSocketPath)
 	}
-	if md.Spec.Socket.GID != kukeonGID {
-		t.Errorf("Socket.GID = %d, want %d", md.Spec.Socket.GID, kukeonGID)
+	if doc.Spec.RunPath != ctr.AttachableTTYDir {
+		t.Errorf("Spec.RunPath = %q, want %q", doc.Spec.RunPath, ctr.AttachableTTYDir)
 	}
-	if md.Spec.Shell.Prompt != "$ " {
-		t.Errorf("Shell.Prompt = %q, want %q", md.Spec.Shell.Prompt, "$ ")
+	if doc.Spec.Command != "/bin/sh" {
+		t.Errorf("Spec.Command = %q, want /bin/sh", doc.Spec.Command)
 	}
-	if len(md.Spec.Shell.OnInit) != 1 || md.Spec.Shell.OnInit[0].Script != "echo init" {
-		t.Errorf("Shell.OnInit = %v, want [{Script: \"echo init\"}]", md.Spec.Shell.OnInit)
+	wantArgs := []string{"-c", "echo hello"}
+	if len(doc.Spec.CommandArgs) != len(wantArgs) {
+		t.Fatalf("Spec.CommandArgs len = %d, want %d (full=%v)", len(doc.Spec.CommandArgs), len(wantArgs), doc.Spec.CommandArgs)
 	}
-
-	// Permissions on the staged file: daemon-private (0o600). A future
-	// loosening of the parent dir must not silently expose the file.
+	for i, want := range wantArgs {
+		if doc.Spec.CommandArgs[i] != want {
+			t.Errorf("Spec.CommandArgs[%d] = %q, want %q", i, doc.Spec.CommandArgs[i], want)
+		}
+	}
+	// Permission fields: sbsh's builder accepts the canonical octal
+	// string "0660" via WithSocketMode and parses it into os.FileMode at
+	// build time. The doc round-trips it as the FileMode (perm bits).
+	if doc.Spec.SocketMode.Perm() != 0o660 {
+		t.Errorf("Spec.SocketMode = %v, want perm 0660", doc.Spec.SocketMode)
+	}
+	if doc.Spec.SocketGID == nil || *doc.Spec.SocketGID != kukeonGID {
+		t.Errorf("Spec.SocketGID = %v, want pointer to %d", doc.Spec.SocketGID, kukeonGID)
+	}
+	// SetPrompt off in phase 1b: arbitrary workloads (nginx, python)
+	// would receive a literal `export PS1=…` injection into stdin
+	// otherwise. Phase 4 (#290) wires Tty.Prompt through the builder.
+	if doc.Spec.SetPrompt {
+		t.Errorf("Spec.SetPrompt = true, want false in phase 1b")
+	}
+	// File permissions: daemon-private (0o600). A future loosening of
+	// the parent dir must not silently expose the file.
 	info, statErr := os.Stat(path)
 	if statErr != nil {
 		t.Fatalf("stat metadata: %v", statErr)
@@ -157,31 +191,45 @@ func TestWriteKukettyMetadata_KukeonGroupSet(t *testing.T) {
 }
 
 // TestWriteKukettyMetadata_NoKukeonGroup locks the legacy fallback: when
-// no kukeon group is configured (GID 0), mode strings are empty so kuketty
-// leaves the OS-default permissions on the socket inode — matching the
-// sbsh wrapper's behavior on a host with no kukeon group.
+// no kukeon group is configured (GID 0), neither SocketMode nor SocketGID
+// is set on the spec so the sbsh server leaves the OS-default
+// (umask-clipped) permissions on the socket inode — matching the sbsh
+// wrapper's behavior on a host with no kukeon group.
 func TestWriteKukettyMetadata_NoKukeonGroup(t *testing.T) {
+	r := newTestRunner(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "kuketty-metadata.json")
 	spec := intmodel.ContainerSpec{ID: "c1"}
 
-	if err := writeKukettyMetadata(path, spec, 0); err != nil {
+	if err := r.writeKukettyMetadata(path, spec, 0, []string{"/bin/sh"}); err != nil {
 		t.Fatalf("writeKukettyMetadata: %v", err)
 	}
+	doc := readDoc(t, path)
+	if doc.Spec.SocketMode.Perm() != 0 {
+		t.Errorf("Spec.SocketMode perm = %#o, want 0 (no kukeon group)", doc.Spec.SocketMode.Perm())
+	}
+	if doc.Spec.SocketGID != nil {
+		t.Errorf("Spec.SocketGID = %v, want nil (no kukeon group)", doc.Spec.SocketGID)
+	}
+}
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read metadata: %v", err)
+// TestWriteKukettyMetadata_EmptyWorkloadFallsBackToBuilderDefault: when
+// the OCI args-wrap captures an empty Process.Args (image with no
+// ENTRYPOINT/CMD and no user override), the renderer leaves Spec.Command
+// at sbsh's hardcoded default (/bin/bash -i) rather than rendering an
+// empty Command — server.New rejects empty Command, which would brick
+// every container with an unset entrypoint.
+func TestWriteKukettyMetadata_EmptyWorkloadFallsBackToBuilderDefault(t *testing.T) {
+	r := newTestRunner(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kuketty-metadata.json")
+
+	if err := r.writeKukettyMetadata(path, intmodel.ContainerSpec{ID: "c1"}, 0, nil); err != nil {
+		t.Fatalf("writeKukettyMetadata: %v", err)
 	}
-	md, err := kuketty.Unmarshal(data)
-	if err != nil {
-		t.Fatalf("unmarshal metadata: %v", err)
-	}
-	if md.Spec.Socket.Mode != "" {
-		t.Errorf("Socket.Mode = %q, want \"\" (no kukeon group)", md.Spec.Socket.Mode)
-	}
-	if md.Spec.Socket.GID != 0 {
-		t.Errorf("Socket.GID = %d, want 0", md.Spec.Socket.GID)
+	doc := readDoc(t, path)
+	if doc.Spec.Command == "" {
+		t.Errorf("Spec.Command is empty; expected the sbsh builder's hardcoded fallback")
 	}
 }
 
@@ -217,4 +265,25 @@ func TestStageKukettyBinary_ReusesExisting(t *testing.T) {
 	if string(data) != "\x7fELF stub" {
 		t.Fatalf("dst contents = %q, want stub (helper re-copied)", data)
 	}
+}
+
+func newTestRunner(t *testing.T) *Exec {
+	t.Helper()
+	return &Exec{
+		ctx:    context.Background(),
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+}
+
+func readDoc(t *testing.T, path string) sbshapi.TerminalDoc {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var doc sbshapi.TerminalDoc
+	if err = json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("unmarshal %s: %v", path, err)
+	}
+	return doc
 }
