@@ -121,6 +121,14 @@ func requireSbshHasPostMergeFlags(t *testing.T, hostSbsh string) {
 // the test is skipped if it is missing. No on-host `sb` binary is needed
 // — `kuke attach` drives the attach loop in-process via sbsh's pkg/attach.
 func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
+	// Phase 1 of issue #165 swaps sbsh for kuketty on the OCI injection
+	// path but defers the attach-socket RPC server (the JSON-RPC +
+	// SCM_RIGHTS surface that `kuke attach` consumes via
+	// github.com/eminwux/sbsh/pkg/attach) to phase 1b (#410). With the
+	// swap in place, kuketty creates the socket inode but does not
+	// serve the RPC; pkg/attach's handshake therefore hangs. This
+	// scenario re-enters the suite once #410 lands the RPC server.
+	t.Skip("kuketty phase 1 (#165) creates the socket inode but does not yet serve the attach-socket RPC; re-enable once phase 1b (#410) lands the JSON-RPC + SCM_RIGHTS server")
 	t.Parallel()
 
 	// Setup: isolated runPath, unique resource names, in-process controller

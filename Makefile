@@ -27,7 +27,7 @@ LDFLAGS := -s -w \
 	-X $(MODULE)/cmd/config.KukeondImageRepo=$(KUKEON_IMAGE_REPO)
 
 # ----- Build matrix -----
-BINS = kuke kukeond
+BINS = kuke kukeond kuketty
 OS = linux
 ARCHS = amd64 arm64
 
@@ -37,7 +37,7 @@ all: clean kill $(BINS)
 .PHONY: release
 release: release-build
 
-.PHONY: kuke kukeond
+.PHONY: kuke kukeond kuketty
 kuke:
 	go build \
 	-o kuke \
@@ -47,6 +47,17 @@ kuke:
 # kukeond is the same binary as kuke, dispatched by argv[0] basename.
 kukeond: kuke
 	ln -sf kuke kukeond
+
+# kuketty is the in-container terminal wrapper that replaces sbsh on the OCI
+# injection path (issue #165). It is deliberately a separate binary (not
+# argv[0]-dispatched from kuke) so its import set stays stdlib + a small pty
+# helper, controlling per-process RSS and startup time as attachable-container
+# count scales — see the issue body's "Why a separate binary" note.
+kuketty:
+	go build \
+	-o kuketty \
+	-ldflags="$(LDFLAGS)" \
+	./cmd/kuketty/
 
 
 release-build:
@@ -60,12 +71,18 @@ release-build:
 			-ldflags="$(LDFLAGS)" \
 			./cmd; \
 			ln -sf kuke-$$OS-$$ARCH kukeond-$$OS-$$ARCH; \
+			GO111MODULE=on CGO_ENABLED=0 GOOS=$$OS GOARCH=$$ARCH \
+			go build -a \
+			-trimpath \
+			-o kuketty-$$OS-$$ARCH \
+			-ldflags="$(LDFLAGS)" \
+			./cmd/kuketty; \
 		done \
 	done
 
 clean:
 	rm -rf $(HOME)/.kukeon/run/*
-	rm -rf kuke kukeond
+	rm -rf kuke kukeond kuketty
 
 kill:
 	(killall kukeond || true )
