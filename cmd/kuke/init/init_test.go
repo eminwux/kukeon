@@ -32,6 +32,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -85,9 +86,17 @@ func runInit(cmd *cobra.Command, args []string) error
 //go:linkname resolveKukeondImage github.com/eminwux/kukeon/cmd/kuke/init.resolveKukeondImage
 func resolveKukeondImage() string
 
+//go:linkname applyServerConfiguration github.com/eminwux/kukeon/cmd/kuke/init.applyServerConfiguration
+func applyServerConfiguration(cmd *cobra.Command, spec v1beta1.ServerConfigurationSpec)
+
 // ResolveKukeondImage exposes the unexported helper for tests.
 func ResolveKukeondImage() string {
 	return resolveKukeondImage()
+}
+
+// ApplyServerConfiguration exposes the unexported helper for tests.
+func ApplyServerConfiguration(cmd *cobra.Command, spec v1beta1.ServerConfigurationSpec) {
+	applyServerConfiguration(cmd, spec)
 }
 
 // Exported helpers
@@ -784,6 +793,57 @@ func TestRunInitErrors(t *testing.T) {
 				t.Fatalf("expected error %v, got %v", tc.wantErr, err)
 			}
 		})
+	}
+}
+
+// TestApplyServerConfigurationEnvOverridesConfig is the init-side mirror of
+// the kukeond test of the same name (cmd/kukeond/kukeond_test.go). It locks
+// the precedence rule --flag > env > ServerConfiguration > default for the
+// init-specific knobs (KUKE_INIT_KUKEOND_IMAGE, KUKEON_RUN_PATH) so a future
+// change to applyServerConfiguration in init.go cannot regress the env
+// branch while the kukeond sibling test stays green.
+func TestApplyServerConfigurationEnvOverridesConfig(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	viper.Reset()
+
+	cmd := initpkg.NewInitCmd()
+	if cmd == nil {
+		t.Fatal("NewInitCmd() returned nil")
+	}
+
+	// NewKukeondCmd wires its env bindings via bindEnvVars(); NewInitCmd
+	// defers env binding to kuke.go's loadConfig, which only registers the
+	// shared keys. Bind the init-specific keys explicitly so viper.Get
+	// reflects the env value once t.Setenv fires.
+	if err := config.KUKE_INIT_KUKEOND_IMAGE.BindEnv(); err != nil {
+		t.Fatalf("BindEnv KUKE_INIT_KUKEOND_IMAGE: %v", err)
+	}
+	if err := config.KUKEON_ROOT_RUN_PATH.BindEnv(); err != nil {
+		t.Fatalf("BindEnv KUKEON_ROOT_RUN_PATH: %v", err)
+	}
+
+	// Operator exported KUKE_INIT_KUKEOND_IMAGE and KUKEON_RUN_PATH; the
+	// on-disk ServerConfiguration must not clobber them.
+	t.Setenv(config.KUKE_INIT_KUKEOND_IMAGE.EnvVar(), "ghcr.io/eminwux/kukeon:from-env")
+	t.Setenv(config.KUKEON_ROOT_RUN_PATH.EnvVar(), "/opt/kukeon-from-env")
+
+	spec := v1beta1.ServerConfigurationSpec{
+		KukeondImage: "ghcr.io/eminwux/kukeon:from-config",
+		RunPath:      "/opt/kukeon-from-config",
+		LogLevel:     "warn",
+	}
+	ApplyServerConfiguration(cmd, spec)
+
+	if got := viper.GetString(config.KUKE_INIT_KUKEOND_IMAGE.ViperKey); got != "ghcr.io/eminwux/kukeon:from-env" {
+		t.Errorf("KukeondImage env override lost: got %q, want %q", got, "ghcr.io/eminwux/kukeon:from-env")
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey); got != "/opt/kukeon-from-env" {
+		t.Errorf("RunPath env override lost: got %q, want %q", got, "/opt/kukeon-from-env")
+	}
+	// Field with no env var set still picks up the ServerConfiguration value —
+	// the env check is per-field, not all-or-nothing.
+	if got := viper.GetString(config.KUKEON_ROOT_LOG_LEVEL.ViperKey); got != "warn" {
+		t.Errorf("LogLevel: got %q, want %q", got, "warn")
 	}
 }
 
