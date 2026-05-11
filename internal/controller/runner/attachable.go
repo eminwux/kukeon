@@ -17,6 +17,7 @@
 package runner
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -27,7 +28,8 @@ import (
 	"github.com/eminwux/kukeon/internal/ctr"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
-	"github.com/eminwux/kukeon/pkg/kuketty"
+	sbshapi "github.com/eminwux/sbsh/pkg/api"
+	sbshbuilder "github.com/eminwux/sbsh/pkg/builder"
 )
 
 // attachableTTYDirRootMode is the mode applied to the per-container tty
@@ -87,10 +89,11 @@ func attachableTTYDirInitialPerms(kukeonGroupGID int) (os.FileMode, int) {
 //   - stages the kuketty binary from kukeond's own /bin/kuketty (where the
 //     kukeond image places it) to a stable host path under <RunPath>/bin/
 //     so runc has a host-visible source for the kuketty bind mount;
-//   - renders the per-container terminal metadata document (see
-//     pkg/kuketty) into <containerDir>/kuketty-metadata.json, which the
-//     OCI spec bind-mounts onto kuketty's fixed in-container metadata
-//     path.
+//   - registers a metadata renderer that fires from inside the OCI
+//     args-wrap closure once containerd has resolved the workload argv,
+//     producing the per-container api.TerminalDoc at <containerDir>/
+//     kuketty-metadata.json that the bind mount maps onto kuketty's fixed
+//     in-container metadata path.
 //
 // The tty directory is created with mode 02750 owned by root:kukeon group
 // when the kukeon group GID is configured, so non-root operators in the
@@ -141,8 +144,9 @@ func (r *Exec) attachableBuildOpts(_ string, spec intmodel.ContainerSpec, _ []ct
 	}
 
 	metadataPath := filepath.Join(containerDir, ctr.AttachableMetadataFile)
-	if err = writeKukettyMetadata(metadataPath, spec, r.opts.KukeonGroupGID); err != nil {
-		return nil, err
+	kukeonGID := r.opts.KukeonGroupGID
+	renderer := func(workloadArgv []string) error {
+		return r.writeKukettyMetadata(metadataPath, spec, kukeonGID, workloadArgv)
 	}
 
 	return []ctr.BuildOption{
@@ -150,48 +154,79 @@ func (r *Exec) attachableBuildOpts(_ string, spec intmodel.ContainerSpec, _ []ct
 			KukettyBinaryPath: binaryPath,
 			HostTTYDir:        ttyDir,
 			HostMetadataPath:  metadataPath,
+			RenderMetadata:    renderer,
 		}),
 	}, nil
 }
 
-// writeKukettyMetadata renders the per-container terminal metadata document
-// and writes it atomically (tmp + rename) so a partially-written file is
-// never visible to a racing kuketty in the container. 0o600 because the file
-// lives inside the per-container parent directory, which is daemon-private
-// (0o2750 or 0o700) — keeping the inner file similarly tight guards against
-// a future loosening of the parent dir.
-func writeKukettyMetadata(path string, spec intmodel.ContainerSpec, kukeonGroupGID int) error {
-	md := &kuketty.Metadata{
-		APIVersion: kuketty.APIVersion,
-		Kind:       kuketty.Kind,
-		Meta:       kuketty.Meta{ContainerID: spec.ID},
-		Spec: kuketty.Spec{
-			RunPath: ctr.AttachableTTYDir,
-			Socket: kuketty.SocketSpec{
-				Path: ctr.AttachableSocketPath,
-				Mode: socketModeIfGroupSet(kukeonGroupGID, ctr.AttachableSocketMode),
-				GID:  kukeonGroupGID,
-			},
-			// Capture and Log paths are declared so phase 2/3 can land
-			// kuketty's writers without a schema bump. Phase 1 leaves the
-			// behavior unimplemented — Mode/GID are still rendered so the
-			// fix-up doesn't have to touch this file.
-			Capture: kuketty.CaptureSpec{
-				Path: ctr.AttachableCapturePath,
-				Mode: socketModeIfGroupSet(kukeonGroupGID, ctr.AttachableCaptureMode),
-				GID:  kukeonGroupGID,
-			},
-			Log: kuketty.LogSpec{
-				Path: ctr.AttachableLogfilePath,
-				Mode: socketModeIfGroupSet(kukeonGroupGID, ctr.AttachableLogFileMode),
-				GID:  kukeonGroupGID,
-			},
-			Shell: shellSpecFromTty(spec.Tty),
-		},
+// writeKukettyMetadata renders the per-container api.TerminalDoc and writes
+// it atomically (tmp + rename) so a partially-written file is never visible
+// to a racing kuketty in the container. 0o600 because the file lives inside
+// the per-container parent directory, which is daemon-private (0o2750 or
+// 0o700) — keeping the inner file similarly tight guards against a future
+// loosening of the parent dir.
+//
+// workloadArgv is the resolved Process.Args captured by the OCI args-wrap
+// closure (image ENTRYPOINT+CMD merged with any user override). It is moved
+// into TerminalSpec.Command / TerminalSpec.CommandArgs via sbsh's
+// builder.WithCommand so the kuketty side spawns the workload via sbsh's
+// terminal runner instead of the wrapper's argv. An empty workloadArgv
+// leaves the builder's profile default in place (sbsh's hardcoded default
+// profile is /bin/bash -i, matching the legacy fallback when the user
+// supplied no command).
+func (r *Exec) writeKukettyMetadata(
+	path string,
+	spec intmodel.ContainerSpec,
+	kukeonGroupGID int,
+	workloadArgv []string,
+) error {
+	opts := []sbshbuilder.TerminalOption{
+		sbshbuilder.WithSocketFile(ctr.AttachableSocketPath),
+		// DisableSetPrompt: phase 4 (#290) wires the cell's Tty.Prompt
+		// through to sbsh's PS1 rewriting; until then, leave the
+		// workload's PS1 alone — writing the default `(sbsh-$ID) $PS1`
+		// export into a non-shell workload (nginx, python) would inject
+		// literal text into its stdin.
+		sbshbuilder.WithDisableSetPrompt(true),
 	}
-	data, err := kuketty.Marshal(md)
+	if mode := socketModeIfGroupSet(kukeonGroupGID, ctr.AttachableSocketMode); mode != "" {
+		opts = append(opts, sbshbuilder.WithSocketMode(mode))
+	}
+	if kukeonGroupGID > 0 {
+		opts = append(opts, sbshbuilder.WithSocketGID(kukeonGroupGID))
+	}
+	if len(workloadArgv) > 0 {
+		opts = append(opts, sbshbuilder.WithCommand(workloadArgv))
+	}
+
+	terminalSpec, err := sbshbuilder.BuildTerminalSpec(r.ctx, r.logger, ctr.AttachableTTYDir, opts...)
 	if err != nil {
-		return err
+		return fmt.Errorf("build kuketty terminal spec: %w", err)
+	}
+	// sbsh v0.11's terminalrunner.StartTerminal calls applyLogFilePerms on
+	// Spec.LogFile, which chmods the path without O_CREATE. In sbsh's own
+	// CLI, internal/logging.SetupFileLogger pre-creates the file; that helper
+	// is unexported, and the public pkg/terminal/server facade does not call
+	// it. The builder derives a non-empty LogFile by default, so the chmod
+	// hits ENOENT and the runner closes the terminal before the PTY spawns.
+	// applyLogFilePerms is a no-op when Spec.LogFile == "" (matching how
+	// sbsh's own pkg/terminal/server.Server unit test fixture configures the
+	// spec).
+	terminalSpec.LogFile = ""
+
+	doc := sbshapi.TerminalDoc{
+		APIVersion: sbshapi.APIVersionV1Beta1,
+		Kind:       sbshapi.KindTerminal,
+		Metadata: sbshapi.TerminalMetadata{
+			Name:   spec.ID,
+			Labels: kukettyMetadataLabels(spec),
+		},
+		Spec: *terminalSpec,
+	}
+
+	data, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal kuketty metadata: %w", err)
 	}
 	tmp := path + ".tmp"
 	if err = os.WriteFile(tmp, data, 0o600); err != nil {
@@ -204,6 +239,33 @@ func writeKukettyMetadata(path string, spec intmodel.ContainerSpec, kukeonGroupG
 	return nil
 }
 
+// kukettyMetadataLabels stamps the cell-context identity on the rendered
+// TerminalDoc.Metadata so an operator inspecting the host-side file can
+// trace it back to the realm/space/stack/cell/container it belongs to
+// without having to walk the bind-mount source. Empty fields are dropped
+// rather than producing empty string values, so the labels map mirrors
+// what `kuke get` would show.
+func kukettyMetadataLabels(spec intmodel.ContainerSpec) map[string]string {
+	pairs := []struct{ key, value string }{
+		{"kukeon.io/realm", spec.RealmName},
+		{"kukeon.io/space", spec.SpaceName},
+		{"kukeon.io/stack", spec.StackName},
+		{"kukeon.io/cell", spec.CellName},
+		{"kukeon.io/container-id", spec.ID},
+	}
+	out := map[string]string{}
+	for _, p := range pairs {
+		if p.value == "" {
+			continue
+		}
+		out[p.key] = p.value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // socketModeIfGroupSet returns the octal-mode string only when the kukeon
 // group GID is configured; otherwise empty so kuketty applies the OS-default
 // (umask-clipped) mode — matching the legacy 0o600-owner-only fallback the
@@ -213,34 +275,6 @@ func socketModeIfGroupSet(gid int, mode string) string {
 		return mode
 	}
 	return ""
-}
-
-// shellSpecFromTty renders the cell's tty block into the metadata document.
-// Phase 1 declares the schema; phase 4 wires kuketty to apply the prompt
-// and run the onInit stages. The renderer lives here (not in pkg/kuketty)
-// because pkg/kuketty stays consumer-only and stdlib-only.
-//
-// tty is a pointer because the container spec's Tty field is *ContainerTty
-// (nil when the container declares no tty block); ContainerTty.IsEmpty
-// already handles the nil receiver.
-func shellSpecFromTty(tty *intmodel.ContainerTty) kuketty.ShellSpec {
-	if tty.IsEmpty() {
-		return kuketty.ShellSpec{}
-	}
-	out := kuketty.ShellSpec{Prompt: tty.Prompt}
-	if len(tty.OnInit) > 0 {
-		stages := make([]kuketty.Stage, 0, len(tty.OnInit))
-		for _, s := range tty.OnInit {
-			if s.Script == "" {
-				continue
-			}
-			stages = append(stages, kuketty.Stage{Script: s.Script})
-		}
-		if len(stages) > 0 {
-			out.OnInit = stages
-		}
-	}
-	return out
 }
 
 // stageKukettyBinary ensures a host-visible copy of the kuketty binary

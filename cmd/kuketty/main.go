@@ -16,68 +16,61 @@
 
 // kuketty is the kukeon-owned terminal wrapper that runs inside an attachable
 // container in place of sbsh. It reads its runtime configuration from a
-// bind-mounted metadata file (no CLI flags), runs the wrapped command under
-// a PTY, and creates the attach-socket inode at the metadata-declared path.
-//
-// Phase 1 (issue #165) scope: PTY exec + socket-inode creation. The
-// attach-socket RPC protocol — the JSON-RPC + SCM_RIGHTS surface that
-// `kuke attach` consumes via github.com/eminwux/sbsh/pkg/attach — lands in
-// phase 1b (#410). Capture-file (phase 2 / #288), log-file (phase 3 / #289),
-// and prompt/onInit rendering (phase 4 / #290) follow.
+// bind-mounted api.TerminalDoc (no CLI flags beyond an optional --config
+// override) and serves the JSON-RPC + SCM_RIGHTS attach protocol via sbsh's
+// public pkg/terminal/server facade, so `kuke attach` consumes the same
+// wire protocol it does on the host.
 //
 // kuketty is a standalone binary — not argv[0]-dispatched from the kuke
-// multi-call binary — so its import set stays stdlib + a small pty helper.
-// See the issue body's "Why a separate binary" note for the per-process RSS
-// + startup-time rationale at attachable-container scale.
+// multi-call binary — so its import set stays small (the sbsh facade closure
+// is well clear of the kuke + kukeond containerd / gRPC / protobuf closure).
+// See issue #165 for the per-process RSS + startup-time rationale at
+// attachable-container scale.
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
-	"os/exec"
 	"os/signal"
-	"strconv"
 	"syscall"
 
-	"github.com/creack/pty"
-	"github.com/eminwux/kukeon/pkg/kuketty"
+	sbshapi "github.com/eminwux/sbsh/pkg/api"
+	sbshserver "github.com/eminwux/sbsh/pkg/terminal/server"
 )
 
-// metadataPath is the fixed in-container path of the kukeond-rendered terminal
-// metadata file. The daemon bind-mounts the per-container metadata over this
-// path at OCI spec build time (see internal/ctr/attachable.go). Fixed (not a
-// flag) per the issue's "no CLI flags for runtime configuration" redirect.
-const metadataPath = "/.kukeon/kuketty/metadata.json"
+// defaultConfigPath is the fixed in-container path of the kukeond-rendered
+// api.TerminalDoc. The daemon bind-mounts the per-container metadata file
+// over this path at OCI spec build time (see internal/ctr/attachable.go).
+// Kept in sync with ctr.AttachableMetadataPath.
+const defaultConfigPath = "/.kukeon/kuketty/metadata.json"
 
-// exitCodeUsage is returned when the wrapper invocation is malformed (no `--`
-// separator or empty workload). 64 is the BSD EX_USAGE convention; matches
+// exitCodeUsage is returned when invocation is malformed (e.g. unknown flag,
+// missing config file argument). 64 is the BSD EX_USAGE convention; matches
 // sbsh's convention so an operator who replaced sbsh with kuketty in a
 // minimal smoke test does not get a confusingly different exit code.
 const exitCodeUsage = 64
 
-// exitCodeInternal is returned when kuketty itself fails before the workload
-// runs (metadata parse, PTY setup, socket listen). 70 is BSD EX_SOFTWARE.
+// exitCodeInternal is returned when kuketty itself fails (config parse,
+// socket listen, server bring-up). 70 is BSD EX_SOFTWARE. The workload's
+// own exit code is not surfaced through kuketty — the sbsh server reports
+// terminal-exit via its event loop and the attached client sees the
+// workload's status through the RPC, not the wrapper's exit code.
 const exitCodeInternal = 70
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		var (
-			usageErr   *usageError
-			internalEr *internalError
-			exitErr    *exec.ExitError
-		)
+		var usageErr *usageError
 		switch {
 		case errors.As(err, &usageErr):
 			fmt.Fprintf(os.Stderr, "kuketty: %v\n", err)
 			os.Exit(exitCodeUsage)
-		case errors.As(err, &exitErr):
-			os.Exit(exitErr.ExitCode())
-		case errors.As(err, &internalEr):
-			fmt.Fprintf(os.Stderr, "kuketty: %v\n", err)
-			os.Exit(exitCodeInternal)
 		default:
 			fmt.Fprintf(os.Stderr, "kuketty: %v\n", err)
 			os.Exit(exitCodeInternal)
@@ -85,165 +78,159 @@ func main() {
 	}
 }
 
-// usageError is the typed wrapper for malformed invocations so main() can map
-// it to exitCodeUsage without string-matching the error message.
+// usageError is the typed wrapper for malformed invocations so main() can
+// map it to exitCodeUsage without string-matching the error message.
 type usageError struct{ msg string }
 
 func (e *usageError) Error() string { return e.msg }
 
-// internalError wraps pre-workload failures (metadata, PTY, socket setup) so
-// they exit with EX_SOFTWARE rather than the workload's exit code, which is
-// reserved for the wrapped command itself.
-type internalError struct{ err error }
-
-func (e *internalError) Error() string { return e.err.Error() }
-func (e *internalError) Unwrap() error { return e.err }
-
-// run parses the wrapper invocation, loads the metadata file, claims the
-// attach-socket inode, and execs the workload under a PTY. Returns a typed
-// error so main() can map to the right exit code. The returned error is the
-// child's *exec.ExitError on a non-zero workload exit, so the wrapper
-// transparently propagates the workload's exit code.
+// run parses the (single optional) flag, loads the TerminalDoc from disk,
+// binds the control socket, and hands the listener + spec to sbsh's
+// server facade. Returns the terminating cause; main() maps the error
+// class to an exit code.
 func run(args []string) error {
-	workload, err := parseArgs(args)
+	configPath, err := parseArgs(args)
 	if err != nil {
 		return err
 	}
 
-	data, err := os.ReadFile(metadataPath)
+	doc, err := loadTerminalDoc(configPath)
 	if err != nil {
-		return &internalError{err: fmt.Errorf("read metadata %s: %w", metadataPath, err)}
-	}
-	md, err := kuketty.Unmarshal(data)
-	if err != nil {
-		return &internalError{err: err}
-	}
-
-	if listenErr := claimSocketInode(md.Spec.Socket); listenErr != nil {
-		return &internalError{err: listenErr}
-	}
-
-	if err = execUnderPTY(workload); err != nil {
 		return err
 	}
-	return nil
-}
 
-// parseArgs splits the wrapper argv at the `--` separator and returns the
-// workload command. The `--` is the only positional contract kuketty
-// exposes — without it, the wrapper cannot tell its own residual args from
-// the workload's, and silently guessing would mask kukeond regressions.
-func parseArgs(args []string) ([]string, error) {
-	sep := -1
-	for i, a := range args {
-		if a == "--" {
-			sep = i
-			break
-		}
-	}
-	if sep < 0 {
-		return nil, &usageError{msg: "missing '--' separator between kuketty and the wrapped workload"}
-	}
-	workload := args[sep+1:]
-	if len(workload) == 0 {
-		return nil, &usageError{msg: "no workload command after '--'"}
-	}
-	return workload, nil
-}
-
-// claimSocketInode creates the per-container attach-socket inode at
-// md.Path so it is host-visible through the per-container tty bind mount.
-// Phase 1 listens and goes silent: any client that connects (notably
-// `kuke attach` via pkg/attach) is closed immediately. Phase 1b (#410)
-// replaces this with the JSON-RPC + SCM_RIGHTS server `kuke attach`
-// actually consumes.
-//
-// Listening (not just touch+close) is what gives the socket the "socket"
-// file-type so the host-side waitForSocket helper (e2e) and any
-// administrative tooling that stats it can recognise it before the RPC
-// server is ready. A bare regular file would lie about the inode shape.
-//
-// Mode and GID are applied after listen() so the kukeon-group operator on
-// the host can dial the socket once phase 1b lands — preserving the
-// host-side group-traversal contract the sbsh wrapper already honored.
-// Empty Mode / zero GID is the legacy fallback that mirrors sbsh's 0600
-// owner-only default.
-func claimSocketInode(s kuketty.SocketSpec) error {
-	// Remove any stale inode at the path. A restart that lands on top of
-	// a previous run's leftover would otherwise hit EADDRINUSE before the
-	// first Listen.
-	if err := os.Remove(s.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove stale socket %s: %w", s.Path, err)
-	}
-	l, err := net.Listen("unix", s.Path)
+	listener, err := claimSocketListener(doc.Spec.SocketFile)
 	if err != nil {
-		return fmt.Errorf("listen on %s: %w", s.Path, err)
+		return err
 	}
-	if s.Mode != "" {
-		mode, parseErr := strconv.ParseUint(s.Mode, 8, 32)
-		if parseErr != nil {
-			return fmt.Errorf("parse socket mode %q: %w", s.Mode, parseErr)
-		}
-		if chmodErr := os.Chmod(s.Path, os.FileMode(mode)); chmodErr != nil {
-			return fmt.Errorf("chmod socket %s to %s: %w", s.Path, s.Mode, chmodErr)
-		}
+	if err = applySocketPerms(doc.Spec.SocketFile, doc.Spec.SocketMode, doc.Spec.SocketGID); err != nil {
+		_ = listener.Close()
+		return err
 	}
-	if s.GID > 0 {
-		if chownErr := os.Chown(s.Path, -1, s.GID); chownErr != nil {
-			return fmt.Errorf("chown socket %s to gid %d: %w", s.Path, s.GID, chownErr)
-		}
-	}
-	// Drain Accept until the socket is closed. Phase 1 has no RPC, so a
-	// client that connects is immediately disconnected; phase 1b swaps
-	// this drainer for the real server.
-	go func() {
-		for {
-			c, acceptErr := l.Accept()
-			if acceptErr != nil {
-				return
-			}
-			_ = c.Close()
-		}
-	}()
-	return nil
-}
 
-// execUnderPTY spawns the workload under a fresh pseudo-terminal, wires the
-// container task's stdio onto the master end, forwards SIGWINCH-equivalent
-// resize requests (none yet — phase 1b adds them), and propagates SIGINT/
-// SIGTERM to the child. Returns the child's *exec.ExitError on non-zero
-// exit so main() can transparently propagate the workload's exit code.
-func execUnderPTY(workload []string) error {
-	cmd := exec.Command(workload[0], workload[1:]...)
-	cmd.Env = os.Environ()
-
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
-		return &internalError{err: fmt.Errorf("pty.Start %v: %w", workload, err)}
-	}
-	defer func() { _ = ptmx.Close() }()
-
-	// containerd's task IO forwards the container's stdio to the runtime
-	// shim's pipes; tying the PTY master to those streams is what makes
-	// `ctr task attach` / `kuke log` see the workload's output. Phase 1b
-	// overrides this on attached clients via the RPC server's Subscribe
-	// stream; until then, the container's foreground output stays the
-	// shim's stdout/stderr.
-	go func() { _, _ = io.Copy(ptmx, os.Stdin) }()
-	go func() { _, _ = io.Copy(os.Stdout, ptmx) }()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 	go func() {
-		for sig := range sigCh {
-			if cmd.Process != nil {
-				_ = cmd.Process.Signal(sig)
-			}
+		select {
+		case <-sigCh:
+			cancel()
+		case <-ctx.Done():
 		}
 	}()
 
-	// Wait returns *exec.ExitError on non-zero exit — propagate verbatim
-	// so main() reflects the workload's exit code.
-	return cmd.Wait()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv, err := sbshserver.New(&doc.Spec, logger)
+	if err != nil {
+		return fmt.Errorf("server.New: %w", err)
+	}
+	if serveErr := srv.Serve(ctx, listener); serveErr != nil && !isCleanShutdown(serveErr) {
+		return fmt.Errorf("server.Serve: %w", serveErr)
+	}
+	return nil
+}
+
+// parseArgs accepts a single optional `--config <path>` override. Any other
+// argument is a usage error — kuketty has no other runtime configuration
+// flags (issue #410, extending issue #165's no-flags rule). The OCI
+// injection path never sets the override; it is provided for test / debug
+// ergonomics only.
+func parseArgs(args []string) (string, error) {
+	fs := flag.NewFlagSet("kuketty", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	configPath := fs.String("config", defaultConfigPath,
+		"path to the kuketty terminal config (an api.TerminalDoc JSON document); "+
+			"normally bind-mounted by kukeond at "+defaultConfigPath)
+	if err := fs.Parse(args); err != nil {
+		return "", &usageError{msg: err.Error()}
+	}
+	if fs.NArg() > 0 {
+		return "", &usageError{
+			msg: fmt.Sprintf("unexpected positional argument(s): %v", fs.Args()),
+		}
+	}
+	return *configPath, nil
+}
+
+// loadTerminalDoc reads the bind-mounted config file, decodes it as an
+// api.TerminalDoc, and validates the APIVersion + Kind discriminator so a
+// kuketty binary that loaded a malformed (or wrong-schema) file refuses
+// cleanly rather than silently misinterpreting fields.
+func loadTerminalDoc(path string) (*sbshapi.TerminalDoc, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config %s: %w", path, err)
+	}
+	var doc sbshapi.TerminalDoc
+	if err = json.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("parse config %s: %w", path, err)
+	}
+	if doc.APIVersion != sbshapi.APIVersionV1Beta1 {
+		return nil, fmt.Errorf("config %s: apiVersion %q, want %q",
+			path, doc.APIVersion, sbshapi.APIVersionV1Beta1)
+	}
+	if doc.Kind != sbshapi.KindTerminal {
+		return nil, fmt.Errorf("config %s: kind %q, want %q",
+			path, doc.Kind, sbshapi.KindTerminal)
+	}
+	if doc.Spec.SocketFile == "" {
+		return nil, fmt.Errorf("config %s: spec.socketIO is required", path)
+	}
+	return &doc, nil
+}
+
+// applySocketPerms chmods and optionally chowns the socket inode to
+// the Spec-declared mode and GID. sbsh's runner.OpenSocketCtrl applies
+// these on the path it binds itself, but the public pkg/terminal/server
+// facade's UseListener bypass means the chmod/chown is never run when
+// the caller owns the listener. kuketty does, so we replicate that step
+// here. Skipping the chmod when SocketMode is zero matches sbsh's
+// "fall through to the runner default" semantics and keeps existing
+// no-kukeon-group hosts on the OS umask-clipped permissions.
+func applySocketPerms(socketPath string, mode os.FileMode, gid *int) error {
+	if mode.Perm() != 0 {
+		if err := os.Chmod(socketPath, mode.Perm()); err != nil {
+			return fmt.Errorf("chmod %s to 0o%o: %w", socketPath, mode.Perm(), err)
+		}
+	}
+	if gid != nil {
+		if err := os.Chown(socketPath, -1, *gid); err != nil {
+			return fmt.Errorf("chown %s gid=%d: %w", socketPath, *gid, err)
+		}
+	}
+	return nil
+}
+
+// claimSocketListener removes any stale inode at the spec'd socket path
+// (a previous crash on the same in-container path would otherwise hit
+// EADDRINUSE on the first Listen) and binds a fresh listener. The
+// returned listener is owned by the caller — sbsh's server facade closes
+// it during shutdown via its underlying runner.
+func claimSocketListener(socketPath string) (net.Listener, error) {
+	if err := os.Remove(socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("remove stale socket %s: %w", socketPath, err)
+	}
+	l, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return nil, fmt.Errorf("listen on %s: %w", socketPath, err)
+	}
+	return l, nil
+}
+
+// isCleanShutdown reports whether the server.Serve terminating cause
+// represents an operator-initiated end of session rather than an internal
+// failure. Context cancellation (SIGINT/SIGTERM forwarded by the signal
+// handler) and a Stop call are both expected outcomes — they should map
+// to exit 0 from the workload-supervisor's perspective.
+func isCleanShutdown(err error) bool {
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	return false
 }
