@@ -182,6 +182,14 @@ func (r *Exec) writeKukettyMetadata(
 ) error {
 	opts := []sbshbuilder.TerminalOption{
 		sbshbuilder.WithSocketFile(ctr.AttachableSocketPath),
+		// Capture file is anchored to the kukeon-controlled per-container
+		// tty dir so `kuke log` (which tails ContainerCapturePath on the
+		// host) and the in-container writer see the same inode through the
+		// directory bind mount. Without an explicit WithCaptureFile, sbsh's
+		// profile builder derives a capture path from runPath + ID that
+		// would land outside the bind-mount, hiding the transcript from the
+		// host.
+		sbshbuilder.WithCaptureFile(ctr.AttachableCapturePath),
 		// DisableSetPrompt: phase 4 (#290) wires the cell's Tty.Prompt
 		// through to sbsh's PS1 rewriting; until then, leave the
 		// workload's PS1 alone — writing the default `(sbsh-$ID) $PS1`
@@ -189,11 +197,15 @@ func (r *Exec) writeKukettyMetadata(
 		// literal text into its stdin.
 		sbshbuilder.WithDisableSetPrompt(true),
 	}
-	if mode := socketModeIfGroupSet(kukeonGroupGID, ctr.AttachableSocketMode); mode != "" {
+	if mode := modeIfGroupSet(kukeonGroupGID, ctr.AttachableSocketMode); mode != "" {
 		opts = append(opts, sbshbuilder.WithSocketMode(mode))
+	}
+	if mode := modeIfGroupSet(kukeonGroupGID, ctr.AttachableCaptureMode); mode != "" {
+		opts = append(opts, sbshbuilder.WithCaptureMode(mode))
 	}
 	if kukeonGroupGID > 0 {
 		opts = append(opts, sbshbuilder.WithSocketGID(kukeonGroupGID))
+		opts = append(opts, sbshbuilder.WithCaptureGID(kukeonGroupGID))
 	}
 	if len(workloadArgv) > 0 {
 		opts = append(opts, sbshbuilder.WithCommand(workloadArgv))
@@ -256,11 +268,12 @@ func kukettyMetadataLabels(spec intmodel.ContainerSpec) map[string]string {
 	return out
 }
 
-// socketModeIfGroupSet returns the octal-mode string only when the kukeon
+// modeIfGroupSet returns the octal-mode string only when the kukeon
 // group GID is configured; otherwise empty so kuketty applies the OS-default
-// (umask-clipped) mode — matching the legacy 0o600-owner-only fallback the
-// sbsh wrapper had when no kukeon group existed.
-func socketModeIfGroupSet(gid int, mode string) string {
+// (umask-clipped) mode on the per-terminal inode the mode applies to
+// (socket, capture file, log file). Matches the legacy 0o600-owner-only
+// fallback the sbsh wrapper had when no kukeon group existed.
+func modeIfGroupSet(gid int, mode string) string {
 	if gid > 0 {
 		return mode
 	}

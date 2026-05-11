@@ -106,6 +106,12 @@ func TestAttachableTTYDirRootMode_SetsSGIDBit(t *testing.T) {
 // discriminator (api.APIVersionV1Beta1 + api.KindTerminal), and the
 // resolved workload argv lands in Spec.Command / Spec.CommandArgs (no
 // trailing argv on the OCI side).
+//
+// Phase 2 (#288) extends the same case to cover the capture-file fields:
+// CaptureFile is anchored to the per-container tty dir so `kuke log` and
+// sbsh's in-container writer see the same inode through the bind mount,
+// and CaptureMode/CaptureGID mirror the socket pattern (gated on kukeon
+// group configured).
 func TestWriteKukettyMetadata_KukeonGroupSet(t *testing.T) {
 	r := newTestRunner(t)
 	dir := t.TempDir()
@@ -173,6 +179,19 @@ func TestWriteKukettyMetadata_KukeonGroupSet(t *testing.T) {
 	if doc.Spec.SocketGID == nil || *doc.Spec.SocketGID != kukeonGID {
 		t.Errorf("Spec.SocketGID = %v, want pointer to %d", doc.Spec.SocketGID, kukeonGID)
 	}
+	// Capture fields (phase 2 #288): path is anchored on the kukeon-
+	// controlled in-container tty dir so the host-side ContainerCapturePath
+	// `kuke log` tails resolves to the same inode through the bind mount;
+	// mode + gid mirror the socket pattern.
+	if doc.Spec.CaptureFile != ctr.AttachableCapturePath {
+		t.Errorf("Spec.CaptureFile = %q, want %q", doc.Spec.CaptureFile, ctr.AttachableCapturePath)
+	}
+	if doc.Spec.CaptureMode.Perm() != 0o640 {
+		t.Errorf("Spec.CaptureMode = %v, want perm 0640", doc.Spec.CaptureMode)
+	}
+	if doc.Spec.CaptureGID == nil || *doc.Spec.CaptureGID != kukeonGID {
+		t.Errorf("Spec.CaptureGID = %v, want pointer to %d", doc.Spec.CaptureGID, kukeonGID)
+	}
 	// SetPrompt off in phase 1b: arbitrary workloads (nginx, python)
 	// would receive a literal `export PS1=…` injection into stdin
 	// otherwise. Phase 4 (#290) wires Tty.Prompt through the builder.
@@ -195,6 +214,12 @@ func TestWriteKukettyMetadata_KukeonGroupSet(t *testing.T) {
 // is set on the spec so the sbsh server leaves the OS-default
 // (umask-clipped) permissions on the socket inode — matching the sbsh
 // wrapper's behavior on a host with no kukeon group.
+//
+// Phase 2 (#288) extends the same case to cover the capture-file fields:
+// CaptureFile is still anchored to the kukeon-controlled per-container tty
+// dir so `kuke log` resolves to the same inode regardless of group config;
+// CaptureMode + CaptureGID stay zero so sbsh's runner falls through to its
+// OS-default mode and leaves the group unchanged.
 func TestWriteKukettyMetadata_NoKukeonGroup(t *testing.T) {
 	r := newTestRunner(t)
 	dir := t.TempDir()
@@ -210,6 +235,19 @@ func TestWriteKukettyMetadata_NoKukeonGroup(t *testing.T) {
 	}
 	if doc.Spec.SocketGID != nil {
 		t.Errorf("Spec.SocketGID = %v, want nil (no kukeon group)", doc.Spec.SocketGID)
+	}
+	// CaptureFile is set regardless of group config: kuketty must write
+	// the transcript at the kukeon-controlled bind-mount path so `kuke log`
+	// keeps tailing the host-side peer of the same inode. Mode + GID stay
+	// zero so sbsh's runner defaults apply.
+	if doc.Spec.CaptureFile != ctr.AttachableCapturePath {
+		t.Errorf("Spec.CaptureFile = %q, want %q", doc.Spec.CaptureFile, ctr.AttachableCapturePath)
+	}
+	if doc.Spec.CaptureMode.Perm() != 0 {
+		t.Errorf("Spec.CaptureMode perm = %#o, want 0 (no kukeon group)", doc.Spec.CaptureMode.Perm())
+	}
+	if doc.Spec.CaptureGID != nil {
+		t.Errorf("Spec.CaptureGID = %v, want nil (no kukeon group)", doc.Spec.CaptureGID)
 	}
 }
 
