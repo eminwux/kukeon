@@ -148,8 +148,8 @@ func runAttachLoop(
 				container, doc.Metadata.Name, err)
 		}
 		if errors.Is(err, errdefs.ErrContainerNotFound) {
-			return false, fmt.Errorf("container %q not found in cell %q",
-				container, doc.Metadata.Name)
+			return false, fmt.Errorf("container %q not found in cell %q: %w",
+				container, doc.Metadata.Name, err)
 		}
 		return false, err
 	}

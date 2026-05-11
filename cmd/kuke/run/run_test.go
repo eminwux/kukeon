@@ -954,6 +954,37 @@ func TestRun_Attach_BadContainerFlag_Errors(t *testing.T) {
 	}
 }
 
+// TestRun_Attach_AttachContainer_NotFound_SurfacesSentinel locks in the
+// ErrContainerNotFound branch's %w wrap in runAttachLoop: when the daemon's
+// AttachContainer RPC reports the target container doesn't exist, run must
+// propagate the sentinel so upstream callers can still errors.Is it.
+func TestRun_Attach_AttachContainer_NotFound_SurfacesSentinel(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
+			return kukeonv1.AttachContainerResult{}, errdefs.ErrContainerNotFound
+		},
+	}
+	run := &runCapture{}
+	cmd, _ := newCmdWithRun(t, fc, run)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
+
+	err := cmd.Execute()
+	if !errors.Is(err, errdefs.ErrContainerNotFound) {
+		t.Fatalf("err=%v want ErrContainerNotFound", err)
+	}
+	if fc.attachCalls != 1 {
+		t.Errorf("AttachContainer calls=%d want 1", fc.attachCalls)
+	}
+	if run.calls != 0 {
+		t.Errorf("attach loop calls=%d want 0", run.calls)
+	}
+}
+
 func TestRun_Attach_ContainerWithDetachFlag_Errors(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
