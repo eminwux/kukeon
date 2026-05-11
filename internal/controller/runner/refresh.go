@@ -38,9 +38,11 @@ func (r *Exec) RefreshRealm(realm intmodel.Realm) (intmodel.Realm, bool, error) 
 	switch {
 	case err != nil:
 		r.logger.DebugContext(r.ctx, "failed to check realm cgroup", "realm", realm.Metadata.Name, "error", err)
-		// If check fails, state remains Unknown (already set)
+		// If check fails, state remains Unknown (already set). CgroupReady stays
+		// false because we have no positive observation.
 	case cgroupExists:
 		newStatus.State = intmodel.RealmStateReady
+		newStatus.CgroupReady = true
 	default:
 		// Cgroup doesn't exist - realm is unknown
 		newStatus.State = intmodel.RealmStateUnknown
@@ -68,15 +70,30 @@ func (r *Exec) RefreshRealm(realm intmodel.Realm) (intmodel.Realm, bool, error) 
 		case namespaceExists && newStatus.State == intmodel.RealmStateReady:
 			// Namespace exists and cgroup exists - realm is ready
 			newStatus.State = intmodel.RealmStateReady
+			newStatus.ContainerdNamespaceReady = true
 		case !namespaceExists && newStatus.State == intmodel.RealmStateReady:
 			// Cgroup exists but namespace doesn't - realm is in inconsistent state
 			newStatus.State = intmodel.RealmStateUnknown
+		case namespaceExists:
+			// Namespace exists but cgroup absent/Unknown above; record the
+			// observation independently so callers can distinguish a missing
+			// cgroup from a missing namespace.
+			newStatus.ContainerdNamespaceReady = true
 		}
 	}
 
-	// Update if status changed
+	// Carry lifecycle timestamps + Reason/Message through unchanged so the
+	// stamping in UpdateRealmMetadata can apply its set-once invariants.
+	// Without this, the locally constructed newStatus would erase CreatedAt
+	// and ReadyAt every time the refresh path writes back.
+	carryRealmLifecycle(originalStatus, &newStatus)
+
+	// Update if anything changed
 	updated := false
-	if newStatus.State != originalStatus.State || newStatus.CgroupPath != originalStatus.CgroupPath {
+	if newStatus.State != originalStatus.State ||
+		newStatus.CgroupPath != originalStatus.CgroupPath ||
+		newStatus.CgroupReady != originalStatus.CgroupReady ||
+		newStatus.ContainerdNamespaceReady != originalStatus.ContainerdNamespaceReady {
 		realm.Status = newStatus
 		if updateErr := r.UpdateRealmMetadata(realm); updateErr != nil {
 			return realm, false, fmt.Errorf("failed to update realm metadata: %w", updateErr)
@@ -85,6 +102,19 @@ func (r *Exec) RefreshRealm(realm intmodel.Realm) (intmodel.Realm, bool, error) 
 	}
 
 	return realm, updated, nil
+}
+
+// carryRealmLifecycle preserves the lifecycle/reason fields the refresh
+// path does not derive from filesystem/containerd checks. CreatedAt and
+// ReadyAt are set-once and must survive the locally-built newStatus;
+// Reason/Message belong to whoever last set them (the reconciler in the
+// future, or a Failed-path writer today). UpdatedAt is intentionally
+// not carried — UpdateRealmMetadata stamps it on every persist.
+func carryRealmLifecycle(orig intmodel.RealmStatus, next *intmodel.RealmStatus) {
+	next.CreatedAt = orig.CreatedAt
+	next.ReadyAt = orig.ReadyAt
+	next.Reason = orig.Reason
+	next.Message = orig.Message
 }
 
 // RefreshSpace refreshes the status of a space by checking CNI config.
@@ -127,15 +157,25 @@ func (r *Exec) RefreshSpace(space intmodel.Space) (intmodel.Space, bool, error) 
 		case cgroupExists && newStatus.State == intmodel.SpaceStateReady:
 			// Both CNI and cgroup exist - space is ready
 			newStatus.State = intmodel.SpaceStateReady
+			newStatus.CgroupReady = true
 		case !cgroupExists && newStatus.State == intmodel.SpaceStateReady:
 			// CNI exists but cgroup doesn't - space is in inconsistent state
 			newStatus.State = intmodel.SpaceStateUnknown
+		case cgroupExists:
+			// Cgroup exists but CNI absent/Unknown above; record the cgroup
+			// observation independently so the field tracks reality, not the
+			// derived State.
+			newStatus.CgroupReady = true
 		}
 	}
 
-	// Update if status changed
+	carrySpaceLifecycle(originalStatus, &newStatus)
+
+	// Update if anything changed
 	updated := false
-	if newStatus.State != originalStatus.State || newStatus.CgroupPath != originalStatus.CgroupPath {
+	if newStatus.State != originalStatus.State ||
+		newStatus.CgroupPath != originalStatus.CgroupPath ||
+		newStatus.CgroupReady != originalStatus.CgroupReady {
 		space.Status = newStatus
 		if updateErr := r.UpdateSpaceMetadata(space); updateErr != nil {
 			return space, false, fmt.Errorf("failed to update space metadata: %w", updateErr)
@@ -144,6 +184,14 @@ func (r *Exec) RefreshSpace(space intmodel.Space) (intmodel.Space, bool, error) 
 	}
 
 	return space, updated, nil
+}
+
+// carrySpaceLifecycle is the Space counterpart of carryRealmLifecycle.
+func carrySpaceLifecycle(orig intmodel.SpaceStatus, next *intmodel.SpaceStatus) {
+	next.CreatedAt = orig.CreatedAt
+	next.ReadyAt = orig.ReadyAt
+	next.Reason = orig.Reason
+	next.Message = orig.Message
 }
 
 // RefreshStack refreshes the status of a stack by checking cgroup.
@@ -163,14 +211,19 @@ func (r *Exec) RefreshStack(stack intmodel.Stack) (intmodel.Stack, bool, error) 
 		// If check fails, state remains Unknown (already set)
 	case cgroupExists:
 		newStatus.State = intmodel.StackStateReady
+		newStatus.CgroupReady = true
 	default:
 		// Cgroup doesn't exist - stack is unknown
 		newStatus.State = intmodel.StackStateUnknown
 	}
 
-	// Update if status changed
+	carryStackLifecycle(originalStatus, &newStatus)
+
+	// Update if anything changed
 	updated := false
-	if newStatus.State != originalStatus.State || newStatus.CgroupPath != originalStatus.CgroupPath {
+	if newStatus.State != originalStatus.State ||
+		newStatus.CgroupPath != originalStatus.CgroupPath ||
+		newStatus.CgroupReady != originalStatus.CgroupReady {
 		stack.Status = newStatus
 		if updateErr := r.UpdateStackMetadata(stack); updateErr != nil {
 			return stack, false, fmt.Errorf("failed to update stack metadata: %w", updateErr)
@@ -179,6 +232,14 @@ func (r *Exec) RefreshStack(stack intmodel.Stack) (intmodel.Stack, bool, error) 
 	}
 
 	return stack, updated, nil
+}
+
+// carryStackLifecycle is the Stack counterpart of carryRealmLifecycle.
+func carryStackLifecycle(orig intmodel.StackStatus, next *intmodel.StackStatus) {
+	next.CreatedAt = orig.CreatedAt
+	next.ReadyAt = orig.ReadyAt
+	next.Reason = orig.Reason
+	next.Message = orig.Message
 }
 
 // RefreshCell refreshes the status of a cell and its containers.
@@ -198,10 +259,13 @@ func (r *Exec) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error) {
 		// If check fails, state remains Unknown (already set)
 	case cgroupExists:
 		newStatus.State = intmodel.CellStateReady
+		newStatus.CgroupReady = true
 	default:
 		// Cgroup doesn't exist - cell is unknown
 		newStatus.State = intmodel.CellStateUnknown
 	}
+
+	carryCellLifecycle(originalStatus, &newStatus)
 
 	// Refresh all containers in the cell (always attempt, regardless of cgroup check result)
 	containersUpdated := 0
@@ -221,7 +285,9 @@ func (r *Exec) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error) {
 
 	// Update cell metadata if status changed or containers were updated
 	cellUpdated := false
-	if newStatus.State != originalStatus.State || newStatus.CgroupPath != originalStatus.CgroupPath {
+	if newStatus.State != originalStatus.State ||
+		newStatus.CgroupPath != originalStatus.CgroupPath ||
+		newStatus.CgroupReady != originalStatus.CgroupReady {
 		cell.Status = newStatus
 		cellUpdated = true
 	}
@@ -234,6 +300,18 @@ func (r *Exec) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error) {
 	}
 
 	return cell, containersUpdated, nil
+}
+
+// carryCellLifecycle is the Cell counterpart of carryRealmLifecycle.
+// Network/Containers/ReadyObserved are not carried because the refresh
+// path either rebuilds them (Containers) or leaves them on the live cell
+// struct (Network, ReadyObserved); only the issue #166 fields need an
+// explicit carry from originalStatus to the locally-built newStatus.
+func carryCellLifecycle(orig intmodel.CellStatus, next *intmodel.CellStatus) {
+	next.CreatedAt = orig.CreatedAt
+	next.ReadyAt = orig.ReadyAt
+	next.Reason = orig.Reason
+	next.Message = orig.Message
 }
 
 // refreshContainerStatus refreshes the status of a container by introspecting containerd.

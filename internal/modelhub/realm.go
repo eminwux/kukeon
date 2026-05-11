@@ -16,6 +16,8 @@
 
 package modelhub
 
+import "time"
+
 type Realm struct {
 	Metadata RealmMetadata
 	Spec     RealmSpec
@@ -51,6 +53,25 @@ type RealmStatus struct {
 	// effective filter against the host root's cgroup.controllers (issue
 	// #328, surfacing the result of the helper landed by issue #327).
 	SubtreeControllers []string
+	// CreatedAt is the wall-clock time of the first persist. Stamped
+	// only when zero so the value never moves once set (issue #166).
+	CreatedAt time.Time
+	// UpdatedAt is the wall-clock time of the most recent persist.
+	UpdatedAt time.Time
+	// ReadyAt is the wall-clock time of the first State==Ready persist.
+	// Set-once: never overwritten by subsequent Ready transitions.
+	ReadyAt time.Time
+	// Reason is a short reason code summarizing why State is in its
+	// current value. Empty when no reason has been recorded.
+	Reason string
+	// Message is the human-readable detail backing Reason.
+	Message string
+	// CgroupReady reports whether CgroupPath was observed to exist on
+	// the host filesystem as of the last status write.
+	CgroupReady bool
+	// ContainerdNamespaceReady reports whether the realm's containerd
+	// namespace was observed to exist as of the last status write.
+	ContainerdNamespaceReady bool
 }
 
 type RealmState int

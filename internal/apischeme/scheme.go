@@ -59,9 +59,16 @@ func ConvertRealmDocToInternal(in ext.RealmDoc) (intmodel.Realm, error) {
 				RegistryCredentials: registryCreds,
 			},
 			Status: intmodel.RealmStatus{
-				State:              intmodel.RealmState(in.Status.State),
-				CgroupPath:         in.Status.CgroupPath,
-				SubtreeControllers: cloneStringSlice(in.Status.SubtreeControllers),
+				State:                    intmodel.RealmState(in.Status.State),
+				CgroupPath:               in.Status.CgroupPath,
+				SubtreeControllers:       cloneStringSlice(in.Status.SubtreeControllers),
+				CreatedAt:                in.Status.CreatedAt,
+				UpdatedAt:                in.Status.UpdatedAt,
+				ReadyAt:                  in.Status.ReadyAt,
+				Reason:                   in.Status.Reason,
+				Message:                  in.Status.Message,
+				CgroupReady:              in.Status.CgroupReady,
+				ContainerdNamespaceReady: in.Status.ContainerdNamespaceReady,
 			},
 		}, nil
 	default:
@@ -93,9 +100,16 @@ func BuildRealmExternalFromInternal(in intmodel.Realm, apiVersion ext.Version) (
 				RegistryCredentials: registryCreds,
 			},
 			Status: ext.RealmStatus{
-				State:              ext.RealmState(in.Status.State),
-				CgroupPath:         in.Status.CgroupPath,
-				SubtreeControllers: cloneStringSlice(in.Status.SubtreeControllers),
+				State:                    ext.RealmState(in.Status.State),
+				CgroupPath:               in.Status.CgroupPath,
+				SubtreeControllers:       cloneStringSlice(in.Status.SubtreeControllers),
+				CreatedAt:                in.Status.CreatedAt,
+				UpdatedAt:                in.Status.UpdatedAt,
+				ReadyAt:                  in.Status.ReadyAt,
+				Reason:                   in.Status.Reason,
+				Message:                  in.Status.Message,
+				CgroupReady:              in.Status.CgroupReady,
+				ContainerdNamespaceReady: in.Status.ContainerdNamespaceReady,
 			},
 		}, nil
 	default:
@@ -145,6 +159,12 @@ func ConvertSpaceDocToInternal(in ext.SpaceDoc) (intmodel.Space, error) {
 				State:              intState,
 				CgroupPath:         in.Status.CgroupPath,
 				SubtreeControllers: cloneStringSlice(in.Status.SubtreeControllers),
+				CreatedAt:          in.Status.CreatedAt,
+				UpdatedAt:          in.Status.UpdatedAt,
+				ReadyAt:            in.Status.ReadyAt,
+				Reason:             in.Status.Reason,
+				Message:            in.Status.Message,
+				CgroupReady:        in.Status.CgroupReady,
 			},
 		}, nil
 	default:
@@ -185,6 +205,12 @@ func BuildSpaceExternalFromInternal(in intmodel.Space, apiVersion ext.Version) (
 				State:              extState,
 				CgroupPath:         in.Status.CgroupPath,
 				SubtreeControllers: cloneStringSlice(in.Status.SubtreeControllers),
+				CreatedAt:          in.Status.CreatedAt,
+				UpdatedAt:          in.Status.UpdatedAt,
+				ReadyAt:            in.Status.ReadyAt,
+				Reason:             in.Status.Reason,
+				Message:            in.Status.Message,
+				CgroupReady:        in.Status.CgroupReady,
 			},
 		}, nil
 	default:
@@ -220,6 +246,12 @@ func ConvertStackDocToInternal(in ext.StackDoc) (intmodel.Stack, error) {
 				State:              intmodel.StackState(in.Status.State),
 				CgroupPath:         in.Status.CgroupPath,
 				SubtreeControllers: cloneStringSlice(in.Status.SubtreeControllers),
+				CreatedAt:          in.Status.CreatedAt,
+				UpdatedAt:          in.Status.UpdatedAt,
+				ReadyAt:            in.Status.ReadyAt,
+				Reason:             in.Status.Reason,
+				Message:            in.Status.Message,
+				CgroupReady:        in.Status.CgroupReady,
 			},
 		}, nil
 	default:
@@ -247,6 +279,12 @@ func BuildStackExternalFromInternal(in intmodel.Stack, apiVersion ext.Version) (
 				State:              ext.StackState(in.Status.State),
 				CgroupPath:         in.Status.CgroupPath,
 				SubtreeControllers: cloneStringSlice(in.Status.SubtreeControllers),
+				CreatedAt:          in.Status.CreatedAt,
+				UpdatedAt:          in.Status.UpdatedAt,
+				ReadyAt:            in.Status.ReadyAt,
+				Reason:             in.Status.Reason,
+				Message:            in.Status.Message,
+				CgroupReady:        in.Status.CgroupReady,
 			},
 		}, nil
 	default:
@@ -905,6 +943,12 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 				},
 				Containers:    convertContainerStatusesToInternal(in.Status.Containers),
 				ReadyObserved: in.Status.ReadyObserved,
+				CreatedAt:     in.Status.CreatedAt,
+				UpdatedAt:     in.Status.UpdatedAt,
+				ReadyAt:       in.Status.ReadyAt,
+				Reason:        in.Status.Reason,
+				Message:       in.Status.Message,
+				CgroupReady:   in.Status.CgroupReady,
 			},
 		}
 
@@ -962,6 +1006,12 @@ func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ex
 				},
 				Containers:    buildContainerStatusesExternalFromInternal(in.Status.Containers),
 				ReadyObserved: in.Status.ReadyObserved,
+				CreatedAt:     in.Status.CreatedAt,
+				UpdatedAt:     in.Status.UpdatedAt,
+				ReadyAt:       in.Status.ReadyAt,
+				Reason:        in.Status.Reason,
+				Message:       in.Status.Message,
+				CgroupReady:   in.Status.CgroupReady,
 			},
 		}
 

@@ -16,6 +16,8 @@
 
 package v1beta1
 
+import "time"
+
 type RealmDoc struct {
 	APIVersion Version       `json:"apiVersion" yaml:"apiVersion"`
 	Kind       Kind          `json:"kind"       yaml:"kind"`
@@ -52,6 +54,33 @@ type RealmStatus struct {
 	// delegated on this realm's own cgroup.subtree_control after the
 	// host-root filter (issue #328).
 	SubtreeControllers []string `json:"subtreeControllers,omitempty" yaml:"subtreeControllers,omitempty"`
+	// CreatedAt is the wall-clock time of the first persist for this
+	// realm. Bumped only when zero so the value never moves once set.
+	CreatedAt time.Time `json:"createdAt,omitempty"          yaml:"createdAt,omitempty"`
+	// UpdatedAt is the wall-clock time of the most recent persist.
+	UpdatedAt time.Time `json:"updatedAt,omitempty"          yaml:"updatedAt,omitempty"`
+	// ReadyAt is the wall-clock time of the first State==Ready persist.
+	// Set-once: never overwritten by subsequent Ready transitions or
+	// state flaps, so it serves as an immutable "first reached Ready"
+	// marker.
+	ReadyAt time.Time `json:"readyAt,omitempty"            yaml:"readyAt,omitempty"`
+	// Reason is a short reason code summarizing why State is in its
+	// current value. Empty when no reason has been recorded.
+	Reason string `json:"reason,omitempty"             yaml:"reason,omitempty"`
+	// Message is the human-readable detail backing Reason; especially
+	// valuable on State==Failed where it captures the immediate cause.
+	Message string `json:"message,omitempty"            yaml:"message,omitempty"`
+	// CgroupReady reports whether CgroupPath actually exists on the
+	// host filesystem as of the last status write. The CgroupPath
+	// field records the intent (the path where the cgroup should
+	// live); this re-verifies presence so callers can distinguish
+	// "configured" from "still mounted".
+	CgroupReady bool `json:"cgroupReady,omitempty"        yaml:"cgroupReady,omitempty"`
+	// ContainerdNamespaceReady reports whether the containerd
+	// namespace recorded in Spec.Namespace was actually present as of
+	// the last status write. Like CgroupReady, this separates intent
+	// from observation.
+	ContainerdNamespaceReady bool `json:"containerdNamespaceReady,omitempty" yaml:"containerdNamespaceReady,omitempty"`
 }
 
 type RealmState int

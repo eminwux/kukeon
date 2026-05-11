@@ -16,6 +16,8 @@
 
 package v1beta1
 
+import "time"
+
 type StackDoc struct {
 	APIVersion Version       `json:"apiVersion" yaml:"apiVersion"`
 	Kind       Kind          `json:"kind"       yaml:"kind"`
@@ -42,6 +44,14 @@ type StackStatus struct {
 	// delegated on this stack's own cgroup.subtree_control after the
 	// host-root filter (issue #328).
 	SubtreeControllers []string `json:"subtreeControllers,omitempty" yaml:"subtreeControllers,omitempty"`
+	// Lifecycle and runtime-health fields — see RealmStatus for the
+	// per-field contract; the semantics carry across all four kinds.
+	CreatedAt   time.Time `json:"createdAt,omitempty"          yaml:"createdAt,omitempty"`
+	UpdatedAt   time.Time `json:"updatedAt,omitempty"          yaml:"updatedAt,omitempty"`
+	ReadyAt     time.Time `json:"readyAt,omitempty"            yaml:"readyAt,omitempty"`
+	Reason      string    `json:"reason,omitempty"             yaml:"reason,omitempty"`
+	Message     string    `json:"message,omitempty"            yaml:"message,omitempty"`
+	CgroupReady bool      `json:"cgroupReady,omitempty"        yaml:"cgroupReady,omitempty"`
 }
 
 type StackState int

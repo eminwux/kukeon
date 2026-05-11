@@ -21,6 +21,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -1764,4 +1765,186 @@ func TestBuildCellExternalRejectsMultipleRootTrue(t *testing.T) {
 	if !errors.Is(err, errdefs.ErrMultipleRootContainers) {
 		t.Fatalf("err = %v, want wrapped ErrMultipleRootContainers", err)
 	}
+}
+
+// TestStatusLifecycleFieldsRoundTripV1Beta1 pins the issue #166 plumbing:
+// every kind's new Status lifecycle/probe fields must round-trip in both
+// directions. Realm additionally carries ContainerdNamespaceReady; the
+// other three kinds carry CgroupReady but no namespace probe. Bundled
+// because the contract is shared even if the field sets differ.
+func TestStatusLifecycleFieldsRoundTripV1Beta1(t *testing.T) {
+	createdAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	updatedAt := createdAt.Add(time.Hour)
+	readyAt := createdAt.Add(30 * time.Minute)
+
+	t.Run("realm", func(t *testing.T) {
+		in := ext.RealmDoc{
+			APIVersion: ext.APIVersionV1Beta1,
+			Kind:       ext.KindRealm,
+			Metadata:   ext.RealmMetadata{Name: "r0"},
+			Status: ext.RealmStatus{
+				CreatedAt:                createdAt,
+				UpdatedAt:                updatedAt,
+				ReadyAt:                  readyAt,
+				Reason:                   "RealmReady",
+				Message:                  "namespace + cgroup present",
+				CgroupReady:              true,
+				ContainerdNamespaceReady: true,
+			},
+		}
+		intRealm, err := apischeme.ConvertRealmDocToInternal(in)
+		if err != nil {
+			t.Fatalf("ConvertRealmDocToInternal: %v", err)
+		}
+		if !intRealm.Status.CreatedAt.Equal(createdAt) {
+			t.Errorf("ext→int CreatedAt = %v, want %v", intRealm.Status.CreatedAt, createdAt)
+		}
+		if !intRealm.Status.ReadyAt.Equal(readyAt) {
+			t.Errorf("ext→int ReadyAt = %v, want %v", intRealm.Status.ReadyAt, readyAt)
+		}
+		if intRealm.Status.Reason != "RealmReady" {
+			t.Errorf("ext→int Reason = %q, want RealmReady", intRealm.Status.Reason)
+		}
+		if !intRealm.Status.CgroupReady || !intRealm.Status.ContainerdNamespaceReady {
+			t.Errorf("ext→int probes = %v/%v, want true/true",
+				intRealm.Status.CgroupReady, intRealm.Status.ContainerdNamespaceReady)
+		}
+
+		out, err := apischeme.BuildRealmExternalFromInternal(intRealm, ext.APIVersionV1Beta1)
+		if err != nil {
+			t.Fatalf("BuildRealmExternalFromInternal: %v", err)
+		}
+		if !out.Status.UpdatedAt.Equal(updatedAt) {
+			t.Errorf("int→ext UpdatedAt = %v, want %v", out.Status.UpdatedAt, updatedAt)
+		}
+		if out.Status.Message != "namespace + cgroup present" {
+			t.Errorf("int→ext Message = %q, lost in round trip", out.Status.Message)
+		}
+		if !out.Status.ContainerdNamespaceReady {
+			t.Errorf("int→ext ContainerdNamespaceReady = false, lost in round trip")
+		}
+	})
+
+	t.Run("space", func(t *testing.T) {
+		in := ext.SpaceDoc{
+			APIVersion: ext.APIVersionV1Beta1,
+			Kind:       ext.KindSpace,
+			Metadata:   ext.SpaceMetadata{Name: "s0"},
+			Spec:       ext.SpaceSpec{RealmID: "r0"},
+			Status: ext.SpaceStatus{
+				CreatedAt:   createdAt,
+				UpdatedAt:   updatedAt,
+				ReadyAt:     readyAt,
+				Reason:      "CNIReady",
+				Message:     "cni conf installed",
+				CgroupReady: true,
+			},
+		}
+		intSpace, err := apischeme.ConvertSpaceDocToInternal(in)
+		if err != nil {
+			t.Fatalf("ConvertSpaceDocToInternal: %v", err)
+		}
+		out, err := apischeme.BuildSpaceExternalFromInternal(intSpace, ext.APIVersionV1Beta1)
+		if err != nil {
+			t.Fatalf("BuildSpaceExternalFromInternal: %v", err)
+		}
+		if !out.Status.CreatedAt.Equal(createdAt) || !out.Status.ReadyAt.Equal(readyAt) {
+			t.Errorf("space lifecycle timestamps lost in round trip: got %+v", out.Status)
+		}
+		if out.Status.Reason != "CNIReady" || !out.Status.CgroupReady {
+			t.Errorf("space reason/probe lost: got reason=%q cgroupReady=%v",
+				out.Status.Reason, out.Status.CgroupReady)
+		}
+	})
+
+	t.Run("stack", func(t *testing.T) {
+		in := ext.StackDoc{
+			APIVersion: ext.APIVersionV1Beta1,
+			Kind:       ext.KindStack,
+			Metadata:   ext.StackMetadata{Name: "st0"},
+			Spec:       ext.StackSpec{ID: "st0", RealmID: "r0", SpaceID: "s0"},
+			Status: ext.StackStatus{
+				CreatedAt:   createdAt,
+				UpdatedAt:   updatedAt,
+				ReadyAt:     readyAt,
+				Reason:      "CgroupReady",
+				CgroupReady: true,
+			},
+		}
+		intStack, err := apischeme.ConvertStackDocToInternal(in)
+		if err != nil {
+			t.Fatalf("ConvertStackDocToInternal: %v", err)
+		}
+		out, err := apischeme.BuildStackExternalFromInternal(intStack, ext.APIVersionV1Beta1)
+		if err != nil {
+			t.Fatalf("BuildStackExternalFromInternal: %v", err)
+		}
+		if !out.Status.UpdatedAt.Equal(updatedAt) || !out.Status.CgroupReady {
+			t.Errorf("stack lifecycle/probe lost: %+v", out.Status)
+		}
+	})
+
+	t.Run("cell", func(t *testing.T) {
+		in := ext.CellDoc{
+			APIVersion: ext.APIVersionV1Beta1,
+			Kind:       ext.KindCell,
+			Metadata:   ext.CellMetadata{Name: "c0"},
+			Spec:       ext.CellSpec{ID: "c0", RealmID: "r0", SpaceID: "s0", StackID: "st0"},
+			Status: ext.CellStatus{
+				CreatedAt:   createdAt,
+				UpdatedAt:   updatedAt,
+				ReadyAt:     readyAt,
+				Reason:      "RootRunning",
+				Message:     "root task active",
+				CgroupReady: true,
+			},
+		}
+		intCell, err := apischeme.ConvertCellDocToInternal(in)
+		if err != nil {
+			t.Fatalf("ConvertCellDocToInternal: %v", err)
+		}
+		out, err := apischeme.BuildCellExternalFromInternal(intCell, ext.APIVersionV1Beta1)
+		if err != nil {
+			t.Fatalf("BuildCellExternalFromInternal: %v", err)
+		}
+		if !out.Status.CreatedAt.Equal(createdAt) || !out.Status.ReadyAt.Equal(readyAt) {
+			t.Errorf("cell lifecycle timestamps lost in round trip: got %+v", out.Status)
+		}
+		if out.Status.Message != "root task active" || !out.Status.CgroupReady {
+			t.Errorf("cell message/probe lost: msg=%q cgroupReady=%v",
+				out.Status.Message, out.Status.CgroupReady)
+		}
+	})
+}
+
+// TestStatusLifecycleFieldsZeroDefault covers the AC bullet "existing
+// metadata.json files load with zero-value defaults (no migration)".
+// An external doc with no lifecycle fields set must convert to an
+// internal model with the same zero values, and round-trip back to
+// zero-valued external. This is what lets a daemon upgrade onto a
+// previously-written /opt/kukeon tree without rewriting every
+// metadata.json.
+func TestStatusLifecycleFieldsZeroDefault(t *testing.T) {
+	t.Run("realm zero defaults", func(t *testing.T) {
+		in := ext.RealmDoc{
+			APIVersion: ext.APIVersionV1Beta1,
+			Kind:       ext.KindRealm,
+			Metadata:   ext.RealmMetadata{Name: "r0"},
+		}
+		intRealm, err := apischeme.ConvertRealmDocToInternal(in)
+		if err != nil {
+			t.Fatalf("ConvertRealmDocToInternal: %v", err)
+		}
+		if !intRealm.Status.CreatedAt.IsZero() ||
+			!intRealm.Status.UpdatedAt.IsZero() ||
+			!intRealm.Status.ReadyAt.IsZero() {
+			t.Errorf("non-zero timestamps from zero-value input: %+v", intRealm.Status)
+		}
+		if intRealm.Status.Reason != "" || intRealm.Status.Message != "" {
+			t.Errorf("non-empty reason/message from zero-value input: %+v", intRealm.Status)
+		}
+		if intRealm.Status.CgroupReady || intRealm.Status.ContainerdNamespaceReady {
+			t.Errorf("non-false probes from zero-value input: %+v", intRealm.Status)
+		}
+	})
 }

@@ -20,6 +20,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"time"
 
 	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/ctr"
@@ -161,6 +162,12 @@ type Exec struct {
 	// firewall. nil behaves as a NoopEnforcer so unit tests and read-only
 	// clients never touch iptables.
 	netPolicy netpolicy.Enforcer
+
+	// nowFn returns the wall clock used for status timestamps (issue
+	// #166). nil falls through to time.Now in nowUTC; tests that need
+	// to freeze the clock override the function via the runner_test
+	// hook (see metadata_test.go).
+	nowFn func() time.Time
 }
 
 type Options struct {
