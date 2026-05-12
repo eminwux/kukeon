@@ -1,0 +1,417 @@
+# `kuke` CLI use-case reference
+
+What the `kuke` CLI should do, organized by **operator workflow** rather than alphabetically by command. Every section names the intent of the workflow, the command sequence, and the behavioral **invariants** the CLI must hold — stated as properties (exit code, side effect, idempotency) rather than verbatim stdout. Cosmetic output changes are expected; the invariants are what survives them.
+
+Every invariant in this document was verified against the actual CLI on a `make dev-init` host before the doc landed. Speculative behavior is not documented; workflows that depend on unmerged issues are explicitly marked **TODO** with the issue number.
+
+The companion `<project>/CLAUDE.md` has the build, smoke-test, and daemon-parity recipe operators run before opening a PR. This file documents what each command does in isolation; CLAUDE.md documents the end-to-end loop.
+
+## Conventions used in this doc
+
+- "Exit code 0" / "exit code non-zero" — the process exit status. Tooling automation should rely on this rather than scraping stdout.
+- "Side effect: X" — what changes on disk, in containerd, or in the daemon's view after the command completes.
+- "Idempotent" — re-running the command on a healthy host produces success without changing observable state. The CLI distinguishes "already existed" from "created" in the human-readable output but does not change the exit code.
+- "Daemon-mode" / "`--no-daemon`" — `kuke` is a client. By default it dials `unix:///run/kukeon/kukeond.sock`. With `--no-daemon` it runs the controller in-process and bypasses the socket; this requires root + a usable `/run/containerd/containerd.sock` and is the only path that works before `kuke init` or while the daemon is stopped.
+
+## Bootstrap & teardown
+
+### Initialize a new host
+
+**Intent.** Provision the two default realms (`default`, `kuke-system`) and the `kukeond` daemon cell, leaving the host ready to accept workloads via `kuke run` / `kuke apply` / `kuke create cell`.
+
+**Sequence.**
+
+```bash
+sudo kuke doctor cgroups                                    # optional pre-flight
+sudo kuke init --kukeond-image docker.io/library/<img>:<tag>
+```
+
+**Invariants.**
+
+- Exit code 0 on success; non-zero with a message naming the failed phase otherwise.
+- Side effect: `/opt/kukeon/{default,kuke-system}/...` populated; `/run/kukeon/{kukeond.sock,kukeond.pid}` created; containerd namespaces `default.kukeon.io` and `kuke-system.kukeon.io` exist; cgroup subtree `/kukeon/...` populated.
+- After success, `kuke get realms` and `kuke get realms --no-daemon` both list **at least** `default` and `kuke-system` in `Ready` state with their canonical namespaces. The two outputs must agree — divergence indicates the daemon's view of `/opt/kukeon` is stale (the bind-mount regression CLAUDE.md guards against).
+- Second invocation on a healthy host is idempotent: every phase reports "already existed", exit code 0, the daemon stays up.
+- `kuke doctor cgroups` on the same host exits 0 once cgroup controllers are delegated; non-zero output names which controller is missing and whether the kernel lacks support or the parent didn't delegate.
+
+### Lightweight teardown (dev loop)
+
+**Intent.** Stop the running daemon and clear its socket/pidfile so the next `kuke init` produces a clean re-bootstrap, **without** touching user-realm data under `/opt/kukeon/default`.
+
+**Sequence.**
+
+```bash
+sudo kuke daemon reset
+sudo kuke daemon reset --purge-system    # also wipes /opt/kukeon/kuke-system
+```
+
+**Invariants.**
+
+- Exit code 0 on success.
+- Side effect: kukeond cell stopped + deleted; `/run/kukeon/kukeond.{sock,pid}` removed.
+- `/opt/kukeon/default/**` is **never** touched by `daemon reset` (with or without `--purge-system`). This is the invariant that lets `daemon reset` be safe in a dev loop.
+- `--purge-system` additionally removes `/opt/kukeon/kuke-system`; without it, the system-realm tree is preserved.
+- Idempotent: re-running on a host with no daemon succeeds.
+
+### Full per-host teardown
+
+**Intent.** Wipe every kukeon-owned thing on the host so the next `kuke init` starts from nothing.
+
+**Sequence.**
+
+```bash
+sudo kuke uninstall          # interactive: prompts for "yes"
+sudo kuke uninstall -y       # non-interactive (scripts)
+```
+
+**Invariants.**
+
+- Without `-y`, the command prints a destructive-action prompt naming every artifact it will remove and waits on stdin. EOF or a non-`yes` answer aborts with non-zero exit and no destructive side effect.
+- With `-y`, exit code 0 on success. Side effect: every realm purged with `--cascade`; `/run/kukeon` and the configured run path (default `/opt/kukeon`) removed; the `kukeon` system user/group removed if present.
+- The binary at `/usr/local/bin/kuke` and the `kukeond` symlink are **never** removed — uninstalling runtime state is not the same as uninstalling the binary.
+- If any realm fails to drop its containerd namespace, the subsequent dir/account removal is **skipped** (not silently best-effort) and the report flags each skipped row. Exit code is non-zero so automation can branch on it.
+
+### Pre-flight host checks
+
+**Intent.** Surface host-environment problems with an actionable remediation **before** they fail mid-bootstrap.
+
+**Sequence.**
+
+```bash
+kuke doctor cgroups                       # host root
+sudo kuke doctor cgroups --scope realm <name>   # mid-tree
+kuke doctor cgroups --no-probe            # strictly read-only
+```
+
+**Invariants.**
+
+- Exit code 0 only when every controller `kuke init` will enable on the bootstrap cell is delegated on the probed subtree.
+- Non-zero exit distinguishes "kernel does not support `<ctrl>`" from "parent did not delegate `<ctrl>`" — the remediation suggestion changes accordingly.
+- Default mode performs a `+<ctrl>` write probe to disambiguate the cgroup-namespace trap (advertised but not delegated). The probe is idempotent on healthy hosts.
+- `--no-probe` is read-only: no `cgroup.subtree_control` writes regardless of host state.
+
+## Daemon lifecycle
+
+The kukeond daemon is itself a cell (`kuke-system / kukeon / kukeon / kukeond`). These commands act on that cell. They run in-process — they do not require the daemon to be up.
+
+### Start / stop / restart
+
+**Intent.** Bring the existing `kukeond` cell up or down without re-running the full `kuke init` bootstrap.
+
+**Sequence.**
+
+```bash
+sudo kuke daemon start
+sudo kuke daemon stop                  # SIGTERM, escalates to SIGKILL after --timeout
+sudo kuke daemon stop --timeout 30s
+sudo kuke daemon restart               # stop+start composed
+sudo kuke daemon kill                  # immediate SIGKILL escape hatch
+sudo kuke daemon logs                  # one-shot
+sudo kuke daemon logs -f               # follow until SIGINT
+```
+
+**Invariants.**
+
+- `daemon start` is idempotent. Running it while the daemon is up succeeds with a clear "already running" message; exit code 0.
+- `daemon stop` is idempotent. Running it while the daemon is down succeeds with a clear "already stopped" message; exit code 0.
+- `daemon start` errors when the host has not been `kuke init`-ed yet (no cell to start). Exit code non-zero with a message pointing the operator at `kuke init`.
+- `daemon kill` has no grace period; this is the escape hatch for a hung daemon. Use `stop` for the graceful path.
+- `daemon reset` is destructive (cell deletion + socket removal) and described in the Bootstrap & teardown section.
+- After `daemon stop`, daemon-routed commands (anything **without** `--no-daemon`) fail with `dial unix /run/kukeon/kukeond.sock: connect: no such file or directory` and exit non-zero. `--no-daemon` commands still work for the subset of operations the in-process controller supports.
+- `daemon logs` is a typed shortcut for `kuke log --realm kuke-system --space kukeon --stack kukeon --cell kukeond`; the coordinates are wired in. Exit code 0 even when the file is empty.
+
+## Realm / space / stack management
+
+### Listing the hierarchy
+
+**Intent.** Inspect what realms/spaces/stacks/cells/containers currently exist.
+
+**Sequence.**
+
+```bash
+kuke get realms                                  # alias: r, realm
+kuke get spaces
+kuke get stacks
+kuke get cells
+kuke get containers --cell <name>                # filter on any level
+kuke get realm <name> -o yaml                    # full spec+status
+kuke get realm <name> -o json
+kuke get realms --show-controllers               # cgroup-v2 controllers column
+```
+
+**Invariants.**
+
+- Exit code 0 even when the result set is empty; the CLI prints a brief "no resources found" line rather than failing.
+- Table output is the default for **lists**; YAML is the default for a **single named resource**. Both behaviors are overridable via `-o {yaml,json,table}`.
+- After `kuke init`, `kuke get realms` lists at least `default` and `kuke-system`. `kuke get realms --no-daemon` must produce the same row set — divergence is a regression (see CLAUDE.md daemon-parity guard).
+- `--show-controllers` appends a `CONTROLLERS` column; it is **off by default** so the default table matches the dev-init regression-guard tail in CLAUDE.md.
+- `kuke get realms --no-daemon` works without `sudo` when `/opt/kukeon` is readable by the `kukeon` group; this is the supported escape hatch when the daemon is down.
+
+### Creating a custom realm / space / stack
+
+**Intent.** Add additional isolation tiers beyond the `default` / `default` / `default` triple installed by `kuke init`. Realms map to containerd namespaces; spaces map to CNI networks; stacks group cells within a space.
+
+**Sequence.**
+
+```bash
+sudo kuke create realm myrealm
+sudo kuke create realm myrealm --namespace custom.kukeon.io
+sudo kuke create space myspace --realm myrealm
+sudo kuke create stack mystack --realm myrealm --space myspace
+sudo kuke create cell mycell --realm myrealm --space myspace --stack mystack
+```
+
+**Invariants.**
+
+- Exit code 0 on success. Each phase (metadata, containerd namespace, cgroup) reports `created` or `already existed`.
+- Idempotent: re-running with the same arguments succeeds and reports `already existed` on every phase. The CLI does not re-create or mutate an existing object.
+- `kuke create realm myrealm` does **not** create a default space/stack inside the new realm; the operator builds the inner hierarchy explicitly. (Only `kuke init` creates the `default/default/default` triple in the `default` realm.)
+- A child resource without its parent (e.g. `kuke create space x --realm does-not-exist`) errors with a parent-not-found message; exit code non-zero.
+
+### Purging a realm / space / stack / cell
+
+**Intent.** Remove a resource and its on-disk + in-containerd footprint with comprehensive cleanup. Distinct from `kuke delete` (deletes a single resource only when no children exist).
+
+**Sequence.**
+
+```bash
+sudo kuke purge realm myrealm                    # refuses if children exist
+sudo kuke purge realm myrealm --cascade          # drains children first
+sudo kuke purge realm myrealm --force            # skip validation
+sudo kuke purge cell <name> --realm r --space s --stack st
+```
+
+**Invariants.**
+
+- Without `--cascade` or `--force`, purging a parent that still has children exits non-zero with a message naming the child count: `Use --cascade to purge them or --force to skip validation`.
+- Side effect on success: realm metadata removed; containerd namespace dropped; cgroup subtree torn down; orphaned CNI resources cleaned.
+- Purging the `default` realm with `--cascade` is **safe**: `/opt/kukeon/default` is wiped but the daemon cell (in `kuke-system`) is untouched, so the daemon stays up. Re-creating the realm restores the user-facing tree.
+- Purging the `kuke-system` realm with `--cascade` **takes down the daemon** mid-RPC (it lives there). The CLI surfaces this as a connection-closed error (e.g. `Error: unexpected EOF`) on the issuing command and the daemon socket disappears. Recovery: re-run `kuke init` to rebuild the cell. Treat this as a destructive operator action — there is no in-band guard.
+- `kuke purge realm kuke-system` without `--cascade` refuses cleanly (child-resources error); the daemon survives.
+
+## Image management
+
+Images live in **realm-scoped containerd namespaces**. `kuke image` always takes `--realm <name>`; the lookup runs in `<realm>.kukeon.io`.
+
+**Sequence.**
+
+```bash
+sudo kuke image load --realm default <tarball.tar>
+sudo kuke image load --realm default -                          # stdin
+sudo kuke image load --realm kuke-system --from-docker <ref>    # docker save | load
+kuke image get --realm default                                  # alias: ls, list
+kuke image get --realm default <ref> -o yaml
+sudo kuke image delete --realm default <ref>                    # alias: rm, remove
+```
+
+**Invariants.**
+
+- Exit code 0 on successful load; the loaded image is then visible in `kuke image get --realm <same>`.
+- The positional tarball argument and `--from-docker` are mutually exclusive.
+- `--from-docker <ref>` shells out to `docker save`; if the docker daemon is unreachable or the ref is unknown, the command exits non-zero with the docker error surfaced (e.g. `No such image`).
+- `kuke image get --realm <r>` exits 0 even when the namespace is empty; the CLI prints a "No images found in realm" line rather than failing.
+- `kuke image delete --realm <r> <missing-ref>` exits non-zero with an `image not found` message that names the realm and ref.
+- The dev-loop pattern is `kuke image load --from-docker kukeon-local:dev --realm kuke-system --no-daemon` so the image is in place before `kuke init` brings up the daemon. The `--no-daemon` flag is required here because the daemon is not yet running.
+
+## Workload lifecycle
+
+A **cell** is the smallest scheduled unit. `kuke run` (single-cell, profile-aware) and `kuke apply` (multi-document, declarative) are the two entry points; `kuke create cell` is the by-name shortcut.
+
+### Run a one-off cell from YAML
+
+**Intent.** Materialize a cell from a YAML spec and start its containers. Optionally attach to the cell's attachable terminal.
+
+**Sequence.**
+
+```bash
+sudo kuke run -f docs/examples/hello-world.yaml             # attaches by default
+sudo kuke run -f docs/examples/hello-world.yaml -d          # detach: start and return
+sudo kuke run -p <profile> --param KEY=VAL --name custom    # from $HOME/.kuke/profiles.d
+sudo kuke run -f - < spec.yaml                              # stdin
+sudo kuke run -f spec.yaml --rm                             # auto-delete after exit
+```
+
+**Invariants.**
+
+- Exit code 0 once the cell is materialized and its containers started.
+- Side effect on success: the cell appears in `kuke get cells` in the `Ready` state with metadata under `/opt/kukeon/<realm>/<space>/<stack>/<cell>/metadata.json`.
+- Re-running `kuke run -f` against an existing cell whose on-disk spec **diverges** from the file is **refused**, not silently updated. The error message points the operator at `kuke apply -f` for the update path. Exit code non-zero.
+- `-f` and `-p` are mutually exclusive; `--name` is rejected with `-f` (the YAML's `metadata.name` is the cell name verbatim).
+- `--container` is only valid in attach mode; passing both `--container` and `-d/--detach` exits non-zero.
+- `--rm` is daemon-mode only and incompatible with `--no-daemon`. Cleanup latency is bounded by the daemon's reconcile interval (default 30s), not real-time.
+- A clean `^]^]` detach in attach mode does **not** trigger `--rm` cleanup; the cell stays alive for re-attach. Only workload termination, peer hangup, or an unrecoverable controller error fires cleanup.
+- `kuke run -f /missing.yaml` exits non-zero with a `failed to open file` error.
+- A reference to an unavailable image surfaces the containerd resolver error verbatim (e.g. `pull access denied, repository does not exist or may require authorization`) and exits non-zero; the half-created cell may need `kuke purge cell` to clean up.
+
+### Apply (declarative, multi-document)
+
+**Intent.** Reconcile a set of resources defined in a multi-document YAML stream to match the file. Updates existing resources where `kuke run` would refuse.
+
+**Sequence.**
+
+```bash
+sudo kuke apply -f manifest.yaml          # supports `---`-separated multi-doc
+sudo kuke apply -f -                      # stdin
+sudo kuke apply -f manifest.yaml -o json
+```
+
+**Invariants.**
+
+- Exit code 0 on success.
+- A non-existent file exits non-zero with `failed to open file`.
+- `apply` updates a divergent existing cell (e.g. after `kuke kill cell` left the root container missing) and reports `Cell <name>: updated` with a per-component summary. `kuke run -f` against the same divergent state would refuse.
+
+### Inspect, log, attach
+
+**Intent.** Read what a running cell is doing.
+
+**Sequence.**
+
+```bash
+kuke get cell <name> --realm <r> --space <s> --stack <st>
+kuke get container <name> --cell <c> ...
+kuke log --cell <c> --container <con>                  # one-shot
+kuke log --cell <c> --container <con> -f               # follow until SIGINT
+kuke attach <cell> --container <con>                   # alias: att
+```
+
+**Invariants.**
+
+- `kuke get cell <missing>` exits non-zero with a `not found` message that names the realm/space/stack scope it searched.
+- `kuke log` exits 0 with empty stdout when the container has produced no captured output yet. `-f` blocks until SIGINT.
+- `kuke log` and `kuke attach` auto-pick the container when the cell has exactly one non-root attachable; otherwise `--container` is required.
+- `kuke attach` requires an Attachable-tagged container (a sbsh-style terminal); attaching to a non-attachable container exits non-zero.
+
+### Stop, kill, delete, purge a cell
+
+**Intent.** Tear down a cell. Three verbs by escalating force:
+
+| Verb     | Semantics                                                                        |
+| -------- | -------------------------------------------------------------------------------- |
+| `stop`   | Graceful SIGTERM to the cell's containers; leaves metadata in `Stopped` state.   |
+| `kill`   | Immediate SIGKILL of containerd tasks; leaves metadata in `Stopped` state.       |
+| `delete` | Removes metadata; refuses if the cell still has running containers.              |
+| `purge`  | `delete` + comprehensive cleanup (orphaned containers, CNI, half-created state). |
+
+**Sequence.**
+
+```bash
+sudo kuke stop cell <name>
+sudo kuke kill cell <name>
+sudo kuke delete cell <name>
+sudo kuke purge cell <name> --realm <r> --space <s> --stack <st>
+```
+
+**Invariants.**
+
+- After `kill cell`, `kuke get cell` reports the cell in `Stopped`; metadata remains so `kuke apply -f` can re-materialize it.
+- After `delete cell`, the cell is absent from `kuke get cells`; exit code 0.
+- `kuke kill cell <half-created>` (a cell whose root container was never started, e.g. after an image-pull failure) exits non-zero with a `no RootContainerID set` error. The right verb in that state is `kuke purge cell`, which **succeeds** and tears down whatever metadata was written.
+- `delete cell <missing>` exits non-zero with a `not found` message scoped to the realm/space/stack.
+- `delete --cascade` and `delete --force` apply to parent resources (realm/space/stack), not to containers.
+
+### Refresh runtime status
+
+**Intent.** Re-introspect containerd + CNI and reconcile `.status` fields for every entity, without touching `.spec` or runtime state.
+
+**Sequence.**
+
+```bash
+sudo kuke refresh
+```
+
+**Invariants.**
+
+- Exit code 0 on success.
+- Side effect: `.status` fields on metadata files updated to match runtime; `.spec` is **never** modified, and no containers are started/stopped/restarted by this command.
+- Useful after an out-of-band containerd state change (e.g. crash recovery, manual `ctr` operation) where the daemon's view has drifted.
+
+## Inspection & health
+
+### Version
+
+```bash
+kuke version
+```
+
+**Invariants.** Exit code 0. Prints a single line. Format is the build's resolved version (`vMAJOR.MINOR.PATCH[-<offset>-g<sha>][-dirty]`). Suitable for `kuke version | grep` in CI.
+
+### Top-level help / no-args invocation
+
+```bash
+kuke
+kuke --help
+kuke <subcommand> --help
+```
+
+**Invariants.** Exit code 0 in all three forms. No subcommand prints the help text rather than failing — this is intentional so a bare `kuke` is discoverable.
+
+### Status snapshot — TODO (#202)
+
+A single command that prints the daemon's view of every realm/space/stack/cell in one screen will land with issue #202. Until then, compose `kuke get realms && kuke get spaces && kuke get stacks && kuke get cells` for the same picture, or `kuke daemon logs -f` for live activity.
+
+### `--no-daemon` future
+
+The `--no-daemon` flag is the in-process controller path. It is preserved during `kuke init` and `kuke daemon reset` (the daemon may not be running) and is documented as the escape hatch for inspection commands when the daemon is down. Its broader removal as a user-facing flag for daemon-served operations is tracked in issues #222, #223, and #226 — those workflows are intentionally **not** documented here as supported general-purpose paths.
+
+## Error & edge paths
+
+These are the negative paths most likely to surface a UX regression. Each is verified against the actual CLI.
+
+### Daemon socket missing
+
+**Setup.** Daemon stopped (`sudo kuke daemon stop`) or not yet `kuke init`-ed.
+
+**Invariants.**
+
+- Any daemon-routed command (no `--no-daemon`) exits non-zero with `Error: dial kukeond at /run/kukeon/kukeond.sock: dial unix /run/kukeon/kukeond.sock: connect: no such file or directory`. The path in the message is the resolved socket from flags/config, not a hardcoded constant.
+- `--no-daemon` variants of `kuke get`, `kuke create realm`, etc. continue to work for in-process-controller-supported operations (subject to root + a usable `/run/containerd/containerd.sock`).
+- `kuke daemon start` (when the host **has** been initialized) brings the socket back. `kuke init` brings it back from scratch.
+
+### Cascade-purge that would orphan the daemon
+
+**Invariants.**
+
+- `kuke purge realm kuke-system` without `--cascade` refuses with a child-resources error; exit non-zero; daemon unaffected.
+- `kuke purge realm kuke-system --cascade` removes the daemon cell mid-RPC. The issuing command receives a connection-closed error (e.g. `unexpected EOF`) and exits non-zero. The host requires `kuke init` to recover. There is no in-band guard; the operator owns this decision.
+
+### Double `kuke init`
+
+**Invariants.**
+
+- Idempotent. Every phase reports `already existed`; exit code 0; daemon stays up.
+
+### Image references
+
+**Invariants.**
+
+- `kuke image load --from-docker <missing-ref>` exits non-zero; the docker error (`No such image`) is surfaced in the message.
+- `kuke image delete --realm <r> <missing-ref>` exits non-zero with `image "<ref>" not found in realm "<r>"`.
+- A cell spec referencing an image absent from the target realm's containerd namespace fails at start-time with the containerd resolver error in the message (auth-denied, ref-not-resolved, etc.); the cell may persist in a half-created state and `kuke purge cell` is the recovery verb.
+
+### Conflicting `kuke run`
+
+**Invariants.**
+
+- `kuke run -f spec.yaml` against an existing cell with a diverging on-disk spec exits non-zero with `cell "<name>" exists with diverging spec (...); use \`kuke apply -f\` to update`. The CLI does **not** mutate the cell. The cell that drove the divergence detection is named explicitly so automation can branch.
+
+### Missing input files
+
+**Invariants.**
+
+- `kuke run -f /missing.yaml` and `kuke apply -f /missing.yaml` exit non-zero with `failed to open file "..." : open ...: no such file or directory`. The error message includes the resolved path the CLI tried.
+
+### Confirmation prompts
+
+**Invariants.**
+
+- `kuke uninstall` (without `-y`) prompts on stdin. EOF or any non-`yes` answer exits non-zero with no destructive side effect. Use `-y` in non-interactive contexts (cron, CI).
+
+## See also
+
+- `<project>/CLAUDE.md` — build, smoke-test, and daemon-parity recipe; the end-to-end loop a contributor runs before opening a PR.
+- `docs/examples/hello-world.yaml` — minimal Cell spec consumed by `kuke run -f`.
+- `internal/consts/consts.go` — source of truth for the `default` / `kuke-system` realm names and namespace suffix.
+- Issues that gate future use cases documented here as TODO:
+  - #202 — `kuke status` (consolidated host snapshot).
+  - #222, #223, #226 — `--no-daemon` removal for daemon-served operations.
