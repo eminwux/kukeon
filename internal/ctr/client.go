@@ -116,14 +116,12 @@ type Client interface {
 	TaskStatus(namespace, id string) (containerd.Status, error)
 	TaskMetrics(namespace, id string) (*apitypes.Metric, error)
 
-	ResolveSbshCachePath(namespace, imageRef, baseRunPath string, creds []RegistryCredentials) (string, error)
-
 	// ContainerProcessUID returns the resolved process.User.UID from the
 	// given container's OCI runtime spec. Used after CreateContainerFromSpec
 	// to chown the host-side per-container Attachable tty directory to the
 	// runtime uid the container will execute as — which can be non-root
 	// when the image carries a USER directive (or the cell profile sets
-	// container.user). Without this, sbsh inside the container fails to
+	// container.user). Without this, kuketty inside the container fails to
 	// create its socket/log/capture files in the bind-mounted dir.
 	ContainerProcessUID(namespace string, container containerd.Container) (uint32, error)
 

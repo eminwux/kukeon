@@ -152,12 +152,6 @@ func (c *deleteCellFakeClient) TaskMetrics(string, string) (*apitypes.Metric, er
 	return nil, nil
 }
 
-func (c *deleteCellFakeClient) ResolveSbshCachePath(
-	string, string, string, []ctr.RegistryCredentials,
-) (string, error) {
-	return "", nil
-}
-
 func (c *deleteCellFakeClient) ContainerProcessUID(string, containerd.Container) (uint32, error) {
 	return 0, nil
 }

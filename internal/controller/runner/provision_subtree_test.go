@@ -170,12 +170,6 @@ func (c *subtreeRecorderClient) TaskMetrics(string, string) (*apitypes.Metric, e
 	panic("unexpected")
 }
 
-func (c *subtreeRecorderClient) ResolveSbshCachePath(
-	string, string, string, []ctr.RegistryCredentials,
-) (string, error) {
-	panic("unexpected")
-}
-
 func (c *subtreeRecorderClient) ContainerProcessUID(string, containerd.Container) (uint32, error) {
 	panic("unexpected")
 }

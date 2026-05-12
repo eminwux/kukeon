@@ -18,16 +18,13 @@ package e2e_test
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 
-	ctrpkg "github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
@@ -48,78 +45,14 @@ const attachConnectGrace = 2 * time.Second
 // loudly instead of hanging the suite.
 const attachExitTimeout = 15 * time.Second
 
-// stageHostSbsh copies the on-host sbsh binary into the per-test sbsh cache
-// at the path the runner will resolve for the workload image. Required
-// because the runner only computes the cache path; populating it is an
-// out-of-band concern (today the test, in production the operator).
-func stageHostSbsh(t *testing.T, runPath string) {
-	t.Helper()
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("could not get working dir: %v", err)
-	}
-	fullRunPath := filepath.Join(cwd, runPath)
-
-	hostSbsh, err := exec.LookPath("sbsh")
-	if err != nil {
-		t.Skipf("sbsh binary not found on PATH: %v", err)
-	}
-	requireSbshHasPostMergeFlags(t, hostSbsh)
-
-	dstDir := filepath.Join(fullRunPath, ctrpkg.SbshCacheSubdir, runtime.GOARCH)
-	if err = os.MkdirAll(dstDir, 0o755); err != nil {
-		t.Fatalf("failed to create sbsh cache dir %q: %v", dstDir, err)
-	}
-	dst := filepath.Join(dstDir, ctrpkg.SbshBinaryName)
-
-	src, err := os.Open(hostSbsh)
-	if err != nil {
-		t.Fatalf("open host sbsh %q: %v", hostSbsh, err)
-	}
-	defer func() { _ = src.Close() }()
-
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-	if err != nil {
-		t.Fatalf("open dst sbsh %q: %v", dst, err)
-	}
-	defer func() { _ = out.Close() }()
-
-	if _, err = io.Copy(out, src); err != nil {
-		t.Fatalf("copy sbsh %q -> %q: %v", hostSbsh, dst, err)
-	}
-}
-
-// requireSbshHasPostMergeFlags ensures the host sbsh carries every flag the
-// in-container wrapper (`internal/ctr/attachable.go`) injects into the
-// workload's argv. Without this guard a stale or newer-renamed sbsh on PATH
-// manifests as `unknown flag: ...` deep inside the work container's task,
-// surfaced here only as a `waitForSocket` timeout — hard to attribute.
-// Skipping with a named cause saves the dig.
-func requireSbshHasPostMergeFlags(t *testing.T, hostSbsh string) {
-	t.Helper()
-	out, err := exec.Command(hostSbsh, "terminal", "--help").CombinedOutput()
-	if err != nil {
-		t.Fatalf("sbsh terminal --help failed: %v\noutput:\n%s", err, out)
-	}
-	help := string(out)
-	for _, flag := range []string{"--run-path", "--socket", "--capture-file", "--log-file"} {
-		if !strings.Contains(help, flag) {
-			t.Skipf("host sbsh %q lacks `sbsh terminal %s`; "+
-				"upgrade or downgrade sbsh on PATH to a build whose `terminal` "+
-				"subcommand carries every wrapper flag and retry", hostSbsh, flag)
-		}
-	}
-}
-
 // TestKuke_AttachDetach_KeepsTaskRunning is the phase 2a end-to-end scenario
 // for `kuke attach`: it boots a cell that contains an Attachable container,
 // drives `kuke attach` over a real PTY, sends sbsh's detach keystroke
 // (Ctrl+] Ctrl+]), and verifies that `kuke attach` exits cleanly while the
-// underlying container task remains RUNNING. Requires the host `sbsh`
-// binary on PATH (still used to populate the per-container sbsh cache);
-// the test is skipped if it is missing. No on-host `sb` binary is needed
-// — `kuke attach` drives the attach loop in-process via sbsh's pkg/attach.
+// underlying container task remains RUNNING. No on-host `sbsh` binary is
+// needed — the in-container attach server is kuketty (staged from the
+// runner's own /bin/kuketty), and `kuke attach` drives the attach loop
+// in-process via sbsh's pkg/attach.
 func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 	// Phase 1b (#410) lands the kuketty attach-socket RPC server: the
 	// in-container kuketty wraps sbsh's pkg/terminal/server facade so
@@ -130,11 +63,10 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 	t.Parallel()
 
 	// Setup: isolated runPath, unique resource names, in-process controller
-	// (`--no-daemon`) so the sbsh cache and per-container socket live under
-	// the test's runPath rather than the host daemon's.
+	// (`--no-daemon`) so the per-container socket lives under the test's
+	// runPath rather than the host daemon's.
 	runPath := getRandomRunPath(t)
 	mkdirRunPath(t, runPath)
-	stageHostSbsh(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
