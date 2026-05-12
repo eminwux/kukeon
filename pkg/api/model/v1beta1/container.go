@@ -116,9 +116,9 @@ type ContainerTty struct {
 	// Prompt is the literal prompt expression sbsh sets in the wrapped
 	// shell, in the same form sbsh's TerminalProfile spec.shell.prompt
 	// accepts (e.g. a quoted PS1-style string).
-	Prompt string `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	Prompt string `json:"prompt,omitempty"      yaml:"prompt,omitempty"`
 	// OnInit are scripts run once when the wrapped shell starts, in order.
-	OnInit []TtyStage `json:"onInit,omitempty" yaml:"onInit,omitempty"`
+	OnInit []TtyStage `json:"onInit,omitempty"      yaml:"onInit,omitempty"`
 	// LogFile is the in-container path where sbsh's runner writes its
 	// runtime/debug log. Empty (the default) means sbsh's runner skips
 	// log-writer setup entirely. Set this to a path inside the kuketty
@@ -129,7 +129,24 @@ type ContainerTty struct {
 	// — the daemon applies its system-wide AttachableLogFileMode and
 	// the kukeon-group GID, gated on the kukeon group being configured
 	// (matches the SocketMode/CaptureMode treatment).
-	LogFile string `json:"logFile,omitempty" yaml:"logFile,omitempty"`
+	LogFile string `json:"logFile,omitempty"     yaml:"logFile,omitempty"`
+	// Profile names the sbsh TerminalProfile (Metadata.Name) the daemon
+	// asks sbsh's builder to resolve when rendering this container's
+	// kuketty TerminalDoc. The profile YAML lives outside kukeon — sbsh's
+	// pkg/discovery loads it from ProfilesDir at OCI-injection time and
+	// stamps Prompt, SetPrompt, and Stages into the rendered Spec.
+	// Empty (the default) means "no profile": the renderer omits the
+	// builder option, Spec.Prompt / Spec.SetPrompt / Spec.Stages stay
+	// zero, and the workload runs without a prompt override or onInit
+	// stages. Phase 4 (#290).
+	Profile string `json:"profile,omitempty"     yaml:"profile,omitempty"`
+	// ProfilesDir is the host-side directory sbsh's builder scans for
+	// TerminalProfile YAML when resolving Profile. Empty means
+	// "use sbsh's default ($HOME/.sbsh/profiles.d/)"; that default is
+	// rarely the right answer on a daemon host with no operator HOME, so
+	// most cells that set Profile also set ProfilesDir to an explicit
+	// host path. Phase 4 (#290).
+	ProfilesDir string `json:"profilesDir,omitempty" yaml:"profilesDir,omitempty"`
 }
 
 // TtyStage is a single onInit script entry. Wrapped in a struct rather than
@@ -150,6 +167,12 @@ func (t *ContainerTty) IsEmpty() bool {
 		return false
 	}
 	if t.LogFile != "" {
+		return false
+	}
+	if t.Profile != "" {
+		return false
+	}
+	if t.ProfilesDir != "" {
 		return false
 	}
 	for _, s := range t.OnInit {

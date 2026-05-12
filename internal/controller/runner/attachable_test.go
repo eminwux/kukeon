@@ -352,6 +352,134 @@ func TestWriteKukettyMetadata_LogFileSet(t *testing.T) {
 	}
 }
 
+// TestWriteKukettyMetadata_ProfileConfigured locks phase 4 (#290): when
+// the cell's Tty.Profile and Tty.ProfilesDir are set, the renderer hands
+// both to sbsh's builder via WithProfile / WithProfilesDir. sbsh loads the
+// named TerminalProfile YAML, stamps Prompt + onInit Stages into the
+// rendered Spec, and SetPrompt stays true (the daemon's legacy
+// DisableSetPrompt safety belt drops away when a profile is explicitly
+// configured — the operator opted into PS1 rewriting).
+func TestWriteKukettyMetadata_ProfileConfigured(t *testing.T) {
+	const profileYAML = `apiVersion: sbsh/v1beta1
+kind: TerminalProfile
+metadata:
+  name: claude
+spec:
+  runTarget: local
+  shell:
+    cmd: /bin/bash
+    prompt: "\"phase4-prompt $PS1\""
+  stages:
+    onInit:
+      - script: "echo hello"
+      - script: "echo world"
+`
+	r := newTestRunner(t)
+	profilesDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(profilesDir, "claude.yaml"), []byte(profileYAML), 0o644); err != nil {
+		t.Fatalf("write profile yaml: %v", err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kuketty-metadata.json")
+	spec := intmodel.ContainerSpec{
+		ID: "c1",
+		Tty: &intmodel.ContainerTty{
+			Profile:     "claude",
+			ProfilesDir: profilesDir,
+		},
+	}
+
+	if err := r.writeKukettyMetadata(path, spec, 0, []string{"/bin/sh"}); err != nil {
+		t.Fatalf("writeKukettyMetadata: %v", err)
+	}
+	doc := readDoc(t, path)
+	if doc.Spec.Prompt != `"phase4-prompt $PS1"` {
+		t.Errorf("Spec.Prompt = %q, want %q", doc.Spec.Prompt, `"phase4-prompt $PS1"`)
+	}
+	if !doc.Spec.SetPrompt {
+		t.Errorf("Spec.SetPrompt = false, want true (profile drives it; daemon's DisableSetPrompt safety belt off)")
+	}
+	if len(doc.Spec.Stages.OnInit) != 2 {
+		t.Fatalf("Spec.Stages.OnInit len = %d, want 2", len(doc.Spec.Stages.OnInit))
+	}
+	if doc.Spec.Stages.OnInit[0].Script != "echo hello" ||
+		doc.Spec.Stages.OnInit[1].Script != "echo world" {
+		t.Errorf("Spec.Stages.OnInit = %+v, want [echo hello, echo world]", doc.Spec.Stages.OnInit)
+	}
+}
+
+// TestWriteKukettyMetadata_NoProfileKeepsSafeDefault locks AC #3 (#290):
+// when the cell does not configure a profile, the renderer omits the
+// builder's profile options and keeps the DisableSetPrompt safe default,
+// so Spec.SetPrompt stays false and Spec.Stages stays zero — a workload
+// that is not a shell (nginx, python) never receives a literal PS1
+// injection on its stdin.
+func TestWriteKukettyMetadata_NoProfileKeepsSafeDefault(t *testing.T) {
+	r := newTestRunner(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kuketty-metadata.json")
+	spec := intmodel.ContainerSpec{ID: "c1"}
+
+	if err := r.writeKukettyMetadata(path, spec, 0, []string{"/bin/sh"}); err != nil {
+		t.Fatalf("writeKukettyMetadata: %v", err)
+	}
+	doc := readDoc(t, path)
+	if doc.Spec.SetPrompt {
+		t.Errorf("Spec.SetPrompt = true, want false (no profile → DisableSetPrompt safety belt)")
+	}
+	if len(doc.Spec.Stages.OnInit) != 0 {
+		t.Errorf("Spec.Stages.OnInit = %+v, want empty (no profile)", doc.Spec.Stages.OnInit)
+	}
+	if len(doc.Spec.Stages.PostAttach) != 0 {
+		t.Errorf("Spec.Stages.PostAttach = %+v, want empty (no profile)", doc.Spec.Stages.PostAttach)
+	}
+}
+
+// TestWriteKukettyMetadata_ProfilesDirIgnoredWithoutProfile locks the
+// guard that ProfilesDir is only honored alongside Profile: when Profile
+// is empty, the renderer omits WithProfilesDir so sbsh's builder cannot
+// chase the configured dir for a "default" YAML the operator never asked
+// to load. SetPrompt stays false; Stages stays zero.
+func TestWriteKukettyMetadata_ProfilesDirIgnoredWithoutProfile(t *testing.T) {
+	// Stage a "default" profile in the dir that would set SetPrompt=true
+	// if sbsh were to load it. The renderer must skip the dir entirely.
+	const defaultYAML = `apiVersion: sbsh/v1beta1
+kind: TerminalProfile
+metadata:
+  name: default
+spec:
+  runTarget: local
+  shell:
+    cmd: /bin/bash
+    prompt: "\"should-not-apply $PS1\""
+  stages:
+    onInit:
+      - script: "echo should-not-run"
+`
+	r := newTestRunner(t)
+	profilesDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(profilesDir, "default.yaml"), []byte(defaultYAML), 0o644); err != nil {
+		t.Fatalf("write default profile: %v", err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kuketty-metadata.json")
+	spec := intmodel.ContainerSpec{
+		ID:  "c1",
+		Tty: &intmodel.ContainerTty{ProfilesDir: profilesDir},
+	}
+
+	if err := r.writeKukettyMetadata(path, spec, 0, []string{"/bin/sh"}); err != nil {
+		t.Fatalf("writeKukettyMetadata: %v", err)
+	}
+	doc := readDoc(t, path)
+	if doc.Spec.SetPrompt {
+		t.Errorf("Spec.SetPrompt = true, want false (ProfilesDir without Profile must not load any profile)")
+	}
+	if len(doc.Spec.Stages.OnInit) != 0 {
+		t.Errorf("Spec.Stages.OnInit = %+v, want empty (no Profile)", doc.Spec.Stages.OnInit)
+	}
+}
+
 // TestWriteKukettyMetadata_EmptyWorkloadFallsBackToBuilderDefault: when
 // the OCI args-wrap captures an empty Process.Args (image with no
 // ENTRYPOINT/CMD and no user override), the renderer leaves Spec.Command
