@@ -1131,6 +1131,7 @@ func TestContainerTtyRoundTripV1Beta1(t *testing.T) {
 					{Script: "git pull"},
 					{Script: "claude"},
 				},
+				LogFile: "/run/kukeon/tty/log",
 			},
 		},
 	}
@@ -1143,6 +1144,9 @@ func TestContainerTtyRoundTripV1Beta1(t *testing.T) {
 	}
 	if internal.Spec.Tty.Prompt != input.Spec.Tty.Prompt {
 		t.Errorf("internal prompt = %q, want %q", internal.Spec.Tty.Prompt, input.Spec.Tty.Prompt)
+	}
+	if internal.Spec.Tty.LogFile != input.Spec.Tty.LogFile {
+		t.Errorf("internal logFile = %q, want %q", internal.Spec.Tty.LogFile, input.Spec.Tty.LogFile)
 	}
 	if len(internal.Spec.Tty.OnInit) != 2 ||
 		internal.Spec.Tty.OnInit[0].Script != "git pull" ||
@@ -1158,6 +1162,9 @@ func TestContainerTtyRoundTripV1Beta1(t *testing.T) {
 	}
 	if out.Spec.Tty.Prompt != input.Spec.Tty.Prompt {
 		t.Errorf("round-trip prompt = %q, want %q", out.Spec.Tty.Prompt, input.Spec.Tty.Prompt)
+	}
+	if out.Spec.Tty.LogFile != input.Spec.Tty.LogFile {
+		t.Errorf("round-trip logFile = %q, want %q", out.Spec.Tty.LogFile, input.Spec.Tty.LogFile)
 	}
 	if len(out.Spec.Tty.OnInit) != len(input.Spec.Tty.OnInit) {
 		t.Fatalf("round-trip onInit len = %d, want %d", len(out.Spec.Tty.OnInit), len(input.Spec.Tty.OnInit))
@@ -1263,9 +1270,11 @@ func TestContainerTtyRejectedWithoutAttachable(t *testing.T) {
 	}{
 		{"prompt only", &ext.ContainerTty{Prompt: `"\u\$ "`}},
 		{"onInit only", &ext.ContainerTty{OnInit: []ext.TtyStage{{Script: "echo"}}}},
-		{"both set", &ext.ContainerTty{
-			Prompt: `"\u\$ "`,
-			OnInit: []ext.TtyStage{{Script: "echo"}},
+		{"logFile only", &ext.ContainerTty{LogFile: "/run/kukeon/tty/log"}},
+		{"all set", &ext.ContainerTty{
+			Prompt:  `"\u\$ "`,
+			OnInit:  []ext.TtyStage{{Script: "echo"}},
+			LogFile: "/run/kukeon/tty/log",
 		}},
 	}
 	for _, tc := range cases {

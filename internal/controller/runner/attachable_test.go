@@ -192,6 +192,19 @@ func TestWriteKukettyMetadata_KukeonGroupSet(t *testing.T) {
 	if doc.Spec.CaptureGID == nil || *doc.Spec.CaptureGID != kukeonGID {
 		t.Errorf("Spec.CaptureGID = %v, want pointer to %d", doc.Spec.CaptureGID, kukeonGID)
 	}
+	// Log fields (phase 3 #289) stay zero when the spec carries no
+	// Tty.LogFile, even with the kukeon group configured: the log writer
+	// is opt-in per-container and a kukeon-group-configured host must
+	// not silently start writing sbsh's runtime log on every workload.
+	if doc.Spec.LogFile != "" {
+		t.Errorf("Spec.LogFile = %q, want empty (no Tty.LogFile)", doc.Spec.LogFile)
+	}
+	if doc.Spec.LogFileMode.Perm() != 0 {
+		t.Errorf("Spec.LogFileMode perm = %#o, want 0 (no Tty.LogFile)", doc.Spec.LogFileMode.Perm())
+	}
+	if doc.Spec.LogFileGID != nil {
+		t.Errorf("Spec.LogFileGID = %v, want nil (no Tty.LogFile)", doc.Spec.LogFileGID)
+	}
 	// SetPrompt off in phase 1b: arbitrary workloads (nginx, python)
 	// would receive a literal `export PS1=…` injection into stdin
 	// otherwise. Phase 4 (#290) wires Tty.Prompt through the builder.
@@ -248,6 +261,94 @@ func TestWriteKukettyMetadata_NoKukeonGroup(t *testing.T) {
 	}
 	if doc.Spec.CaptureGID != nil {
 		t.Errorf("Spec.CaptureGID = %v, want nil (no kukeon group)", doc.Spec.CaptureGID)
+	}
+	// Log fields (phase 3 #289) stay zero with no Tty.LogFile and no
+	// kukeon group — the same opt-in invariant as the group-set case.
+	if doc.Spec.LogFile != "" {
+		t.Errorf("Spec.LogFile = %q, want empty (no Tty.LogFile)", doc.Spec.LogFile)
+	}
+	if doc.Spec.LogFileMode.Perm() != 0 {
+		t.Errorf("Spec.LogFileMode perm = %#o, want 0 (no Tty.LogFile)", doc.Spec.LogFileMode.Perm())
+	}
+	if doc.Spec.LogFileGID != nil {
+		t.Errorf("Spec.LogFileGID = %v, want nil (no Tty.LogFile)", doc.Spec.LogFileGID)
+	}
+}
+
+// TestWriteKukettyMetadata_LogFileSet locks phase 3 (#289) rendering when
+// the cell's container-tty config opts into the sbsh runner log writer:
+// Spec.LogFile carries the user-supplied path verbatim (no daemon-side
+// path rewriting — operators choose where it lands); LogFileMode and
+// LogFileGID mirror the socket/capture treatment, gated on the kukeon
+// group being configured. The two subcases fix the exhaustive matrix
+// against silent regressions.
+func TestWriteKukettyMetadata_LogFileSet(t *testing.T) {
+	cases := []struct {
+		name        string
+		kukeonGID   int
+		wantMode    os.FileMode
+		wantGIDPtr  bool
+		wantGIDVal  int
+		logFilePath string
+	}{
+		{
+			// Kukeon group configured: mode + gid filled in so a
+			// non-root operator in the kukeon group can read the log.
+			name:        "kukeon group set: mode+gid populated",
+			kukeonGID:   986,
+			wantMode:    0o640,
+			wantGIDPtr:  true,
+			wantGIDVal:  986,
+			logFilePath: ctr.AttachableLogfilePath,
+		},
+		{
+			// No kukeon group: mode+gid stay zero so sbsh's runner
+			// applies its OS-default umask-clipped permissions and
+			// leaves the group untouched (matches socket/capture).
+			name:        "no kukeon group: mode+gid stay zero",
+			kukeonGID:   0,
+			wantMode:    0,
+			wantGIDPtr:  false,
+			logFilePath: ctr.AttachableLogfilePath,
+		},
+		{
+			// User-supplied path outside the bind-mount: passed
+			// through verbatim. The operator owns the choice;
+			// the daemon does not rewrite or anchor it.
+			name:        "non-bind-mount path passed through verbatim",
+			kukeonGID:   986,
+			wantMode:    0o640,
+			wantGIDPtr:  true,
+			wantGIDVal:  986,
+			logFilePath: "/var/log/sbsh.log",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newTestRunner(t)
+			dir := t.TempDir()
+			path := filepath.Join(dir, "kuketty-metadata.json")
+			spec := intmodel.ContainerSpec{
+				ID:  "c1",
+				Tty: &intmodel.ContainerTty{LogFile: tc.logFilePath},
+			}
+			if err := r.writeKukettyMetadata(path, spec, tc.kukeonGID, []string{"/bin/sh"}); err != nil {
+				t.Fatalf("writeKukettyMetadata: %v", err)
+			}
+			doc := readDoc(t, path)
+			if doc.Spec.LogFile != tc.logFilePath {
+				t.Errorf("Spec.LogFile = %q, want %q", doc.Spec.LogFile, tc.logFilePath)
+			}
+			if doc.Spec.LogFileMode.Perm() != tc.wantMode {
+				t.Errorf("Spec.LogFileMode perm = %#o, want %#o", doc.Spec.LogFileMode.Perm(), tc.wantMode)
+			}
+			switch {
+			case tc.wantGIDPtr && (doc.Spec.LogFileGID == nil || *doc.Spec.LogFileGID != tc.wantGIDVal):
+				t.Errorf("Spec.LogFileGID = %v, want pointer to %d", doc.Spec.LogFileGID, tc.wantGIDVal)
+			case !tc.wantGIDPtr && doc.Spec.LogFileGID != nil:
+				t.Errorf("Spec.LogFileGID = %v, want nil", doc.Spec.LogFileGID)
+			}
+		})
 	}
 }
 

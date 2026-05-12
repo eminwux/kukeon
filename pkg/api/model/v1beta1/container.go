@@ -119,6 +119,17 @@ type ContainerTty struct {
 	Prompt string `json:"prompt,omitempty" yaml:"prompt,omitempty"`
 	// OnInit are scripts run once when the wrapped shell starts, in order.
 	OnInit []TtyStage `json:"onInit,omitempty" yaml:"onInit,omitempty"`
+	// LogFile is the in-container path where sbsh's runner writes its
+	// runtime/debug log. Empty (the default) means sbsh's runner skips
+	// log-writer setup entirely. Set this to a path inside the kuketty
+	// tty bind mount (e.g. "/run/kukeon/tty/log") if the operator wants
+	// the log file host-visible through the directory bind mount; any
+	// other in-container path is accepted and just stays inside the
+	// container's overlay. Mode and GID are not user-configurable here
+	// — the daemon applies its system-wide AttachableLogFileMode and
+	// the kukeon-group GID, gated on the kukeon group being configured
+	// (matches the SocketMode/CaptureMode treatment).
+	LogFile string `json:"logFile,omitempty" yaml:"logFile,omitempty"`
 }
 
 // TtyStage is a single onInit script entry. Wrapped in a struct rather than
@@ -136,6 +147,9 @@ func (t *ContainerTty) IsEmpty() bool {
 		return true
 	}
 	if t.Prompt != "" {
+		return false
+	}
+	if t.LogFile != "" {
 		return false
 	}
 	for _, s := range t.OnInit {
