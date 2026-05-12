@@ -16,6 +16,8 @@
 
 package v1beta1
 
+import "time"
+
 type CellDoc struct {
 	APIVersion Version      `json:"apiVersion" yaml:"apiVersion"`
 	Kind       Kind         `json:"kind"       yaml:"kind"`
@@ -84,6 +86,14 @@ type CellStatus struct {
 	// cleanup of a `kuke run --rm` cell that was already Ready at
 	// shutdown still fires on the next tick after restart.
 	ReadyObserved bool `json:"readyObserved,omitempty" yaml:"readyObserved,omitempty"`
+	// Lifecycle and runtime-health fields — see RealmStatus for the
+	// per-field contract; the semantics carry across all four kinds.
+	CreatedAt   time.Time `json:"createdAt,omitempty"     yaml:"createdAt,omitempty"`
+	UpdatedAt   time.Time `json:"updatedAt,omitempty"     yaml:"updatedAt,omitempty"`
+	ReadyAt     time.Time `json:"readyAt,omitempty"       yaml:"readyAt,omitempty"`
+	Reason      string    `json:"reason,omitempty"        yaml:"reason,omitempty"`
+	Message     string    `json:"message,omitempty"       yaml:"message,omitempty"`
+	CgroupReady bool      `json:"cgroupReady,omitempty"   yaml:"cgroupReady,omitempty"`
 }
 
 // CellNetworkStatus exposes the host-side bridge a cell is attached to.

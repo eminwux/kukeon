@@ -16,6 +16,8 @@
 
 package modelhub
 
+import "time"
+
 type Cell struct {
 	Metadata CellMetadata
 	Spec     CellSpec
@@ -74,6 +76,14 @@ type CellStatus struct {
 	// GetContainerState reports Stopped for a not-yet-existing
 	// container) cannot be reaped by the reconciler.
 	ReadyObserved bool
+	// Lifecycle and runtime-health fields (issue #166). See
+	// RealmStatus for the per-field contract.
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	ReadyAt     time.Time
+	Reason      string
+	Message     string
+	CgroupReady bool
 }
 
 // CellNetworkStatus records the network endpoints the cell is attached to.

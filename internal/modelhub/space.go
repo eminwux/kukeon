@@ -16,6 +16,8 @@
 
 package modelhub
 
+import "time"
+
 type Space struct {
 	Metadata SpaceMetadata
 	Spec     SpaceSpec
@@ -88,6 +90,14 @@ type SpaceStatus struct {
 	// effective filter against the host root's cgroup.controllers (issue
 	// #328).
 	SubtreeControllers []string
+	// Lifecycle and runtime-health fields (issue #166). See
+	// RealmStatus for the per-field contract.
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	ReadyAt     time.Time
+	Reason      string
+	Message     string
+	CgroupReady bool
 }
 
 type SpaceState int

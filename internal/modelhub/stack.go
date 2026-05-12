@@ -16,6 +16,8 @@
 
 package modelhub
 
+import "time"
+
 type Stack struct {
 	Metadata StackMetadata
 	Spec     StackSpec
@@ -41,6 +43,14 @@ type StackStatus struct {
 	// effective filter against the host root's cgroup.controllers (issue
 	// #328).
 	SubtreeControllers []string
+	// Lifecycle and runtime-health fields (issue #166). See
+	// RealmStatus for the per-field contract.
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	ReadyAt     time.Time
+	Reason      string
+	Message     string
+	CgroupReady bool
 }
 
 type StackState int
