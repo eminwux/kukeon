@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
@@ -152,9 +153,10 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 		t.Fatalf("get cell ID: %v", err)
 	}
 	containerdID := fmt.Sprintf("%s_%s_%s_%s", spaceName, stackName, cellID, "work")
-	if !verifyContainerTaskIsRunning(t, realmName, containerdID) {
+	realmNamespace := consts.RealmNamespace(realmName)
+	if !verifyContainerTaskIsRunning(t, realmNamespace, containerdID) {
 		t.Fatalf("container task %q in namespace %q is not RUNNING after detach",
-			containerdID, realmName)
+			containerdID, realmNamespace)
 	}
 }
 
