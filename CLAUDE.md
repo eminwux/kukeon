@@ -19,6 +19,10 @@ Build, test, and smoke-test conventions for anyone — human or agent — workin
 
 The `kukeond` daemon runs inside the **`kuke-system`** realm — specifically as a container inside the cell `kuke-system / kukeon / kukeon / kukeond` (realm / space / stack / cell). The `default` realm is deliberately left user-owned so `kuke purge --cascade` on it can never take down the daemon.
 
+## CLI use-case reference
+
+The full set of operator workflows the `kuke` CLI must support — each with its command sequence and behavioral invariants (exit codes, side effects, idempotency, error paths) — lives in [`docs/cli-use-cases.md`](docs/cli-use-cases.md). That document is workflow-oriented (not alphabetical by command) and is the source of truth for UX expectations the smoke test below does **not** cover, including image management, cell teardown verbs (`stop`/`kill`/`delete`/`purge`), and the cascade-purge / divergent-spec edge paths.
+
 ## Local smoke test: rebuild and re-run `kuke init`
 
 When a change touches the build path, the daemon, or anything under `/opt/kukeon`, run this end-to-end before opening a PR.
