@@ -179,30 +179,15 @@ sudo grep -q '"apiVersion": "sbsh/v1beta1"' "${ATTACH_SMOKE_METADATA}" \
 sudo grep -q '"kind": "Terminal"' "${ATTACH_SMOKE_METADATA}" \
     || { printf 'rendered metadata at %s missing kind Terminal\n' "${ATTACH_SMOKE_METADATA}" >&2; exit 1; }
 
-# PTY-driven `kuke attach` smoke. `expect` allocates a TTY (pkg/attach
-# requires one) and times out under 20s. The detach sequence is the same
-# Ctrl+] Ctrl+] sbsh registers — a clean exit confirms the kuketty server
-# is serving the JSON-RPC + SCM_RIGHTS protocol pkg/attach speaks.
-if ! command -v expect >/dev/null 2>&1; then
-    printf 'expect(1) not on PATH; install `expect` (apt: expect, rpm: expect) to run the kuke attach smoke\n' >&2
-    exit 1
-fi
-
+# PTY-driven `kuke attach` smoke. hack/attach-smoke allocates a TTY
+# (pkg/attach requires one), waits for pkg/attach's raw-mode keyboard
+# filter to wire up, sends the Ctrl+] Ctrl+] detach sequence sbsh
+# registers, and enforces a 20s overall deadline. A clean exit confirms
+# the kuketty server is serving the JSON-RPC + SCM_RIGHTS protocol
+# pkg/attach speaks.
 ATTACH_LOG="${ATTACH_SMOKE_TMP}/attach.log"
-expect <<EOF >"${ATTACH_LOG}" 2>&1
-set timeout 20
-spawn sudo ./kuke attach ${ATTACH_SMOKE_CELL} --realm ${ATTACH_SMOKE_REALM} --space ${ATTACH_SMOKE_SPACE} --stack ${ATTACH_SMOKE_STACK} --container ${ATTACH_SMOKE_CONTAINER}
-# Give pkg/attach time to wire its raw-mode keyboard filter before sending
-# the detach sequence — the filter is what recognizes ^]^] as detach
-# rather than forwarding the bytes verbatim.
-sleep 2
-send "\035\035"
-expect eof
-catch wait result
-set exitcode [lindex \$result 3]
-if {\$exitcode != 0} {
-    puts "kuke attach exited with code \$exitcode"
-    exit \$exitcode
-}
-EOF
+go run ./hack/attach-smoke --log "${ATTACH_LOG}" -- \
+    sudo ./kuke attach "${ATTACH_SMOKE_CELL}" \
+        --realm "${ATTACH_SMOKE_REALM}" --space "${ATTACH_SMOKE_SPACE}" \
+        --stack "${ATTACH_SMOKE_STACK}" --container "${ATTACH_SMOKE_CONTAINER}"
 echo "kuke attach exited cleanly (see ${ATTACH_LOG} for the full transcript)"
