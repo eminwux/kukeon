@@ -86,8 +86,8 @@ To run individual phases by hand — e.g. while debugging a single phase — inv
    ```
        - cell "kukeond": created (image docker.io/library/kukeon-local:dev)
        - cell cgroup: created
-       - cell root container cgroup: created
-       - cell containers cgroup: created
+       - cell root container: created
+       - cell containers: started
    kukeond is ready (unix:///run/kukeon/kukeond.sock)
    ```
 
