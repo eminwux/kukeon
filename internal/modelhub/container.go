@@ -105,9 +105,11 @@ type ContainerSpec struct {
 // ContainerTty mirrors the v1beta1 ContainerTty payload. See the v1beta1
 // type for field semantics.
 type ContainerTty struct {
-	Prompt  string
-	OnInit  []TtyStage
-	LogFile string
+	Prompt      string
+	OnInit      []TtyStage
+	LogFile     string
+	Profile     string
+	ProfilesDir string
 }
 
 // TtyStage mirrors the v1beta1 TtyStage payload.
@@ -124,6 +126,12 @@ func (t *ContainerTty) IsEmpty() bool {
 		return false
 	}
 	if t.LogFile != "" {
+		return false
+	}
+	if t.Profile != "" {
+		return false
+	}
+	if t.ProfilesDir != "" {
 		return false
 	}
 	for _, s := range t.OnInit {

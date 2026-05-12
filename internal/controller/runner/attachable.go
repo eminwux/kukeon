@@ -180,6 +180,7 @@ func (r *Exec) writeKukettyMetadata(
 	kukeonGroupGID int,
 	workloadArgv []string,
 ) error {
+	profileConfigured := spec.Tty != nil && spec.Tty.Profile != ""
 	opts := []sbshbuilder.TerminalOption{
 		sbshbuilder.WithSocketFile(ctr.AttachableSocketPath),
 		// Capture file is anchored to the kukeon-controlled per-container
@@ -190,12 +191,27 @@ func (r *Exec) writeKukettyMetadata(
 		// would land outside the bind-mount, hiding the transcript from the
 		// host.
 		sbshbuilder.WithCaptureFile(ctr.AttachableCapturePath),
-		// DisableSetPrompt: phase 4 (#290) wires the cell's Tty.Prompt
-		// through to sbsh's PS1 rewriting; until then, leave the
-		// workload's PS1 alone — writing the default `(sbsh-$ID) $PS1`
-		// export into a non-shell workload (nginx, python) would inject
-		// literal text into its stdin.
-		sbshbuilder.WithDisableSetPrompt(true),
+	}
+	// Phase 4 (#290) wires the cell's Tty.Profile through to sbsh's builder:
+	// when configured, WithProfile selects the TerminalProfile by name and
+	// WithProfilesDir points the loader at the host-side YAML directory.
+	// sbsh's builder stamps Prompt, SetPrompt, and Stages into the rendered
+	// TerminalSpec; no kukeon-side profile interpreter runs.
+	//
+	// When no profile is configured, both builder options are omitted (so
+	// sbsh's no-profile path runs) and DisableSetPrompt stays on — without
+	// it sbsh's hardcoded default would inject `(sbsh-$ID) $PS1` into a
+	// non-shell workload's stdin. ProfilesDir is only honored alongside
+	// Profile: in isolation it would prime sbsh's profile name to "default"
+	// and chase the configured dir for a YAML the operator never asked to
+	// load.
+	if profileConfigured {
+		opts = append(opts, sbshbuilder.WithProfile(spec.Tty.Profile))
+		if spec.Tty.ProfilesDir != "" {
+			opts = append(opts, sbshbuilder.WithProfilesDir(spec.Tty.ProfilesDir))
+		}
+	} else {
+		opts = append(opts, sbshbuilder.WithDisableSetPrompt(true))
 	}
 	if mode := modeIfGroupSet(kukeonGroupGID, ctr.AttachableSocketMode); mode != "" {
 		opts = append(opts, sbshbuilder.WithSocketMode(mode))
