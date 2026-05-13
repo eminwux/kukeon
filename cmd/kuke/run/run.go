@@ -508,15 +508,14 @@ func pickLocation(fromDoc string, kv *config.Var) string {
 	return strings.TrimSpace(kv.ValueOrDefault())
 }
 
-// divergedFields names the structural fields where the on-disk cell disagrees
-// with the file. We deliberately stop at structural identity (container count,
-// container id set, root container id, cell location) and do NOT compare
-// images/args/env: the runner normalizes container images on create
-// (auto-default root rewrites e.g. user-supplied image to docker.io/library/
-// busybox:latest), so a deep field-by-field diff would flag a freshly-created
-// cell as divergent on the very next `kuke run -f` invocation. Per the AC, a
-// genuine spec rewrite — adding/removing containers, swapping the root, moving
-// realm/space/stack — must route through `kuke apply -f` instead.
+// divergedFields names the fields where the on-disk cell disagrees with the
+// file. The check covers structural identity (container count, container id
+// set, cell location) and the operator-controlled per-container fields the
+// runner does NOT rewrite at create time (image, command, args, env, ports,
+// volumes, networks, host-namespace opts, privileged, attachable,
+// restartPolicy, workingDir). Per the AC for issue #468, a genuine spec
+// rewrite — including an image swap — must route through `kuke apply -f`
+// instead of silently no-opping under `kuke run -f`.
 //
 // Root containers are filtered out of the count/id-set comparison on both
 // sides. The runner synthesizes a root container during create if the YAML
@@ -526,6 +525,15 @@ func pickLocation(fromDoc string, kv *config.Var) string {
 // `kuke apply -f` even though nothing changed. Comparing only the
 // user-supplied (non-root) entries restores the idempotent path while still
 // catching real adds/removes/renames among the user containers.
+//
+// Fields filled in by the runner from `space.spec.defaults.container`
+// (user, readOnlyRootFilesystem, capabilities, securityOpts, tmpfs,
+// resources) are deliberately excluded from the per-container check: a
+// YAML that omits them would be filled in on create and then compare
+// non-equal on the next `run` against the same file, false-flagging the
+// idempotent path. Those fields still drive divergence detection on
+// `kuke apply -f`, which has the on-disk + post-merge view; `run` stops
+// at the user-authored surface.
 func divergedFields(actual, desired v1beta1.CellSpec) []string {
 	var diffs []string
 
@@ -567,8 +575,155 @@ func divergedFields(actual, desired v1beta1.CellSpec) []string {
 		if ac.Root != dc.Root {
 			diffs = append(diffs, fmt.Sprintf("spec.containers[%q].root", ac.ID))
 		}
+		for _, field := range divergedContainerFields(ac, dc) {
+			diffs = append(diffs, fmt.Sprintf("spec.containers[%q].%s", ac.ID, field))
+		}
 	}
 	return diffs
+}
+
+// divergedContainerFields returns the user-authored container fields where
+// actual disagrees with desired. Restricted to fields the runner does NOT
+// fill in or normalize at create/start time (so a fresh cell never
+// false-flags on the next `kuke run -f` of the same file): image, command,
+// args, workingDir, env, ports, volumes, networks, networksAliases,
+// privileged, hostNetwork, hostPID, hostCgroup, attachable, restartPolicy,
+// secrets, tty.
+// Fields that inherit from `space.spec.defaults.container` (see
+// internal/modelhub.ApplySpaceDefaultsToContainer) are deliberately
+// excluded — their on-disk value is post-merge while the YAML side is
+// pre-merge, so comparing them would always trip on a default-using YAML.
+func divergedContainerFields(actual, desired v1beta1.ContainerSpec) []string {
+	var fields []string
+	if actual.Image != desired.Image {
+		fields = append(fields, "image")
+	}
+	if actual.Command != desired.Command {
+		fields = append(fields, "command")
+	}
+	if !stringSlicesEqual(actual.Args, desired.Args) {
+		fields = append(fields, "args")
+	}
+	if actual.WorkingDir != desired.WorkingDir {
+		fields = append(fields, "workingDir")
+	}
+	if !stringSlicesEqual(actual.Env, desired.Env) {
+		fields = append(fields, "env")
+	}
+	if !stringSlicesEqual(actual.Ports, desired.Ports) {
+		fields = append(fields, "ports")
+	}
+	if !volumeMountsEqual(actual.Volumes, desired.Volumes) {
+		fields = append(fields, "volumes")
+	}
+	if !stringSlicesEqual(actual.Networks, desired.Networks) {
+		fields = append(fields, "networks")
+	}
+	if !stringSlicesEqual(actual.NetworksAliases, desired.NetworksAliases) {
+		fields = append(fields, "networksAliases")
+	}
+	if actual.Privileged != desired.Privileged {
+		fields = append(fields, "privileged")
+	}
+	if actual.HostNetwork != desired.HostNetwork {
+		fields = append(fields, "hostNetwork")
+	}
+	if actual.HostPID != desired.HostPID {
+		fields = append(fields, "hostPID")
+	}
+	if actual.HostCgroup != desired.HostCgroup {
+		fields = append(fields, "hostCgroup")
+	}
+	if actual.Attachable != desired.Attachable {
+		fields = append(fields, "attachable")
+	}
+	if actual.RestartPolicy != desired.RestartPolicy {
+		fields = append(fields, "restartPolicy")
+	}
+	if !containerSecretsEqual(actual.Secrets, desired.Secrets) {
+		fields = append(fields, "secrets")
+	}
+	if !containerTtysEqual(actual.Tty, desired.Tty) {
+		fields = append(fields, "tty")
+	}
+	return fields
+}
+
+// containerSecretsEqual compares two ContainerSecret slices field-by-field.
+// nil and empty are treated as equal so YAML that omits secrets does not
+// register as drift against on-disk metadata that persisted it as nil.
+// ContainerSecret carries only scalar string fields, so a direct == on each
+// element is enough.
+func containerSecretsEqual(a, b []v1beta1.ContainerSecret) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// containerTtysEqual compares two ContainerTty pointers. Empty values on
+// either side are treated as equal because
+// internal/apischeme.convertContainerTtyToInternal normalizes an IsEmpty
+// input to nil at persistence: on-disk Tty=nil and a YAML carrying an
+// otherwise-empty &ContainerTty{} must not register as drift.
+func containerTtysEqual(a, b *v1beta1.ContainerTty) bool {
+	if a.IsEmpty() && b.IsEmpty() {
+		return true
+	}
+	if a.IsEmpty() != b.IsEmpty() {
+		return false
+	}
+	if a.Prompt != b.Prompt ||
+		a.LogFile != b.LogFile ||
+		a.Profile != b.Profile ||
+		a.ProfilesDir != b.ProfilesDir {
+		return false
+	}
+	if len(a.OnInit) != len(b.OnInit) {
+		return false
+	}
+	for i := range a.OnInit {
+		if a.OnInit[i] != b.OnInit[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// stringSlicesEqual reports whether two []string carry the same elements
+// in the same order. nil and empty are treated as equal so YAML that
+// omits an optional list does not register as drift against on-disk
+// metadata that persisted it as an empty array.
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// volumeMountsEqual compares two VolumeMount slices field-by-field. The
+// VolumeMount struct has no slice/map fields, so a direct == on each
+// element is enough.
+func volumeMountsEqual(a, b []v1beta1.VolumeMount) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // nonRootContainers returns the user-supplied subset of cs — entries where
