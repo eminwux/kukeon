@@ -2,73 +2,107 @@
 
 The full rebuild / reload / re-init loop for iterating on `kuke` and `kukeond` from source.
 
-## The loop in one shell
+## Prerequisites
 
-After the first bootstrap, each iteration looks like this:
+`make dev-init` drives two host daemons. Bring both up before you start:
 
-```bash
-# 1. Stop and delete the current kukeond cell (user data is preserved)
-sudo kuke kill cell kukeond   --realm kukeon-system --space kukeon --stack kukeon --no-daemon
-sudo kuke delete cell kukeond --realm kukeon-system --space kukeon --stack kukeon --no-daemon
-sudo rm -f /run/kukeon/kukeond.sock /run/kukeon/kukeond.pid
+- **Docker daemon** — builds the local `kukeon-local:dev` image. Start with `service docker start` (or `systemctl start docker`).
+- **Standalone containerd** at `/run/containerd/containerd.sock` — used by `kuke image load --from-docker` and `kuke init`. This is _not_ the docker-private containerd at `/var/run/docker/containerd/containerd.toml`; `pgrep containerd` may show that one even when the system socket is missing. If `ls /run/containerd/containerd.sock` returns no such file, start it with `service containerd start` (or `systemctl start containerd`). On a host with no init script and no systemd, run the binary directly: `containerd > /tmp/containerd.log 2>&1 &`.
 
-# 2. Rebuild the binary
-make kuke
-ln -sf kuke kukeond
+If either daemon is missing, the failure surfaces several phases into `make dev-init` as a confusing error — `dial unix /var/run/docker.sock: connect: no such file or directory` for docker, or `failed to connect to containerd: ... dial unix:///run/containerd/containerd.sock: timeout` for containerd. Bring both up first to skip the rabbit hole.
 
-# 3. Rebuild the image and load it into the system namespace
-docker build --build-arg VERSION=v0.0.0-dev -t kukeon-local:dev .
-docker save kukeon-local:dev | \
-    sudo ctr -n kuke-system.kukeon.io images import -
+## The canonical loop: `make dev-init`
 
-# 4. Re-init pointing at the local image
-sudo ./kuke init --kukeond-image docker.io/library/kukeon-local:dev
-```
-
-Everything in `/opt/kukeon/<user-realm>/...` is untouched; only the system cell is replaced.
-
-## First-time bootstrap
-
-On a host with no prior Kukeon state, the containerd namespace `kuke-system.kukeon.io` doesn't exist yet, which means `ctr images import` into it will silently no-op. You have two choices:
-
-**Option A — let `kuke init` create the namespace, then re-init against the local image:**
+After the first bootstrap, each iteration is one command:
 
 ```bash
-# Will fail to pull the default ghcr.io image without network access —
-# that's fine, we only care about the namespace being created.
-sudo ./kuke init || true
-
-# Now the namespace exists; import and re-init.
-docker build --build-arg VERSION=v0.0.0-dev -t kukeon-local:dev .
-docker save kukeon-local:dev | sudo ctr -n kuke-system.kukeon.io images import -
-sudo ./kuke init --kukeond-image docker.io/library/kukeon-local:dev
+make dev-init
 ```
 
-**Option B — create the namespace by hand first:**
+`scripts/dev-init.sh` composes the full re-bootstrap: `make kuke` (and the `kukeond` symlink), `make install-dev` (host symlinks under `$(INSTALL_PREFIX)`, default `/usr/local/bin`), the cgroup pre-flight, `docker build` of `kukeon-local:dev`, `kuke daemon reset` of the prior cell, `kuke image load --from-docker` of the freshly built image into the `kuke-system` realm, `kuke init --kukeond-image docker.io/library/kukeon-local:dev`, and a daemon-parity check at the end. It's idempotent — re-running on a healthy host produces a clean re-bootstrap.
 
-```bash
-sudo ctr namespaces create kuke-system.kukeon.io
-docker build --build-arg VERSION=v0.0.0-dev -t kukeon-local:dev .
-docker save kukeon-local:dev | sudo ctr -n kuke-system.kukeon.io images import -
-sudo ./kuke init --kukeond-image docker.io/library/kukeon-local:dev
+The parity tail must read:
+
 ```
+NAME         NAMESPACE              STATE  CGROUP
+-----------  ---------------------  -----  -------------------
+default      default.kukeon.io      Ready  /kukeon/default
+kuke-system  kuke-system.kukeon.io  Ready  /kukeon/kuke-system
+```
+
+If only `kuke get realms --no-daemon` returns that table but `kuke get realms` (daemon-routed) does not, the daemon's view of `/opt/kukeon` diverged from the in-process controller — usually a missing bind-mount in the `kukeond` cell spec. See [Troubleshooting → `kuke get` and `kuke get --no-daemon` disagree](troubleshooting.md#kuke-get-and-kuke-get---no-daemon-disagree).
+
+User data under `/opt/kukeon/default/**` is untouched across iterations; only the system cell is replaced.
 
 ## Make targets
 
-| Target      | What it does                                                   |
-| ----------- | -------------------------------------------------------------- |
-| `make kuke` | Build the `kuke` binary (same binary is used as `kukeond`)     |
-| `make test` | Run the Go unit test suite                                     |
-| `make e2e`  | Run end-to-end tests against a real containerd (requires root) |
-| `make lint` | Run `golangci-lint` with the repo's config                     |
+| Target              | What it does                                                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `make kuke`         | Build the `kuke` binary (same binary is dispatched as `kukeond` via `argv[0]`)                                                |
+| `make install-dev`  | Symlink the in-tree `kuke` and `kukeond` binaries into `$(INSTALL_PREFIX)` (default `/usr/local/bin`). Idempotent (`ln -sf`). |
+| `make uninstall-dev`| Remove both symlinks from `$(INSTALL_PREFIX)`.                                                                                |
+| `make dev-init`     | The full canonical loop above. Auto-invokes `install-dev` so `sudo kuke …` works from any directory.                          |
+| `make test`         | Run the Go unit test suite                                                                                                    |
+| `make e2e`          | Run end-to-end tests against a real containerd (requires root)                                                                |
+| `make lint`         | Run `golangci-lint` with the repo's config                                                                                    |
+
+Override `INSTALL_PREFIX` for non-standard PATH layouts: `make install-dev INSTALL_PREFIX=$HOME/.local/bin`.
+
+Because `install-dev` lays down **symlinks** (not copies), the next `make kuke` is picked up automatically — `sudo kuke …` always runs the freshly built binary. The daemon, however, ships from the `kuke-system / kukeon / kukeon / kukeond` cell, so daemon-side changes still need a full `make dev-init` to rebuild the image and reload the cell.
+
+## Manual phases (fallback)
+
+To run individual phases by hand — typically while debugging a single phase:
+
+1. **Tear down the existing daemon cell.**
+
+   ```bash
+   sudo kuke daemon reset                  # preserves /opt/kukeon/default and /opt/kukeon/kuke-system
+   sudo kuke daemon reset --purge-system   # additionally wipes /opt/kukeon/kuke-system
+   ```
+
+   User-realm data under `/opt/kukeon/default` is preserved either way, so `kuke purge --cascade` on `default` can never take down the daemon.
+
+2. **Build the binaries.**
+
+   ```bash
+   make kuke
+   ln -sf kuke kukeond   # kukeond is argv[0]-dispatched from the same binary
+   ```
+
+3. **Build and load the local `kukeond` image.**
+
+   ```bash
+   docker build --build-arg VERSION=v0.0.0-dev -t kukeon-local:dev .
+   sudo ./kuke image load --from-docker kukeon-local:dev --realm kuke-system --no-daemon
+   sudo ctr -n kuke-system.kukeon.io images ls | grep kukeon-local
+   ```
+
+   `--no-daemon` is required because the daemon is not yet running.
+
+4. **Run `kuke init`.**
+
+   ```bash
+   sudo ./kuke init --kukeond-image docker.io/library/kukeon-local:dev
+   ```
+
+   Expected tail:
+
+   ```
+       - cell "kukeond": created (image docker.io/library/kukeon-local:dev)
+       - cell cgroup: created
+       - cell root container: created
+       - cell containers: started
+   kukeond is ready (unix:///run/kukeon/kukeond.sock)
+   ```
 
 ## Running without the daemon
 
-When iterating on controller code you often don't need to put the daemon back up at all. `--no-daemon` runs every `kuke` command in-process against your freshly built binary:
+When iterating on controller code you often don't need the daemon up at all. `--no-daemon` runs every `kuke` command in-process against your freshly built binary:
 
 ```bash
-sudo ./kuke get realms --no-daemon
-sudo ./kuke apply -f my-cell.yaml --no-daemon
+sudo kuke get realms --no-daemon
+sudo kuke apply -f my-cell.yaml --no-daemon
 ```
 
 This is the fastest feedback loop — no image build, no reload, just `make kuke` and go.
@@ -87,14 +121,14 @@ KUKEON_DEBUG_MODE=kukeond dlv exec ./__debug_bin -- serve
 A useful regression check after touching the controller:
 
 ```bash
-# Should be byte-identical
 diff <(sudo kuke get realms -o yaml) \
      <(sudo kuke get realms -o yaml --no-daemon)
 ```
 
-If they diverge, something is wrong with either the `kukeonv1` API surface or the daemon's bind-mount of the run path. See [Troubleshooting](troubleshooting.md).
+The two should be byte-identical. If they diverge, something is wrong with either the `kukeonv1` API surface or the daemon's bind-mount of the run path. See [Troubleshooting](troubleshooting.md).
 
 ## Related
 
 - [Build from source](../install/build-from-source.md) — initial build + image instructions
-- [Init and reset](init-and-reset.md) — teardown variants
+- [Init and reset](init-and-reset.md) — teardown variants and the daemon-reset / uninstall split
+- [Troubleshooting](troubleshooting.md) — common failures during bootstrap and daily use
