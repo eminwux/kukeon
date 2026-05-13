@@ -60,11 +60,18 @@ This is opt-in because the default subset minimises the controller surface enabl
 
 ## status
 
-| Field        | Type                                               | Description                   |
-| ------------ | -------------------------------------------------- | ----------------------------- |
-| `state`      | `Pending`, `Ready`, `Stopped`, `Failed`, `Unknown` | Lifecycle state               |
-| `cgroupPath` | string                                             | Absolute cgroup path          |
-| `containers` | array of `ContainerStatus`                         | Per-container status snapshot |
+| Field                | Type                                               | Description                                                                                                                                          |
+| -------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `state`              | `Pending`, `Ready`, `Stopped`, `Failed`, `Unknown` | Lifecycle state                                                                                                                                      |
+| `cgroupPath`         | string                                             | Absolute cgroup path                                                                                                                                 |
+| `subtreeControllers` | array of string                                    | Cgroup-v2 controller set actually delegated on this cell's `cgroup.subtree_control` after the host-root filter. For a `nestedCgroupRuntime: true` cell this is the full host-available set; otherwise the kukeon resource subset (`cpu`, `memory`, `io`, `pids`). |
+| `containers`         | array of `ContainerStatus`                         | Per-container status snapshot                                                                                                                        |
+| `createdAt`          | RFC3339 timestamp                                  | Wall-clock time of the first persist for this cell. Set once and never moves.                                                                        |
+| `updatedAt`          | RFC3339 timestamp                                  | Wall-clock time of the most recent persist.                                                                                                          |
+| `readyAt`            | RFC3339 timestamp                                  | Wall-clock time of the first `State==Ready` persist. Set-once.                                                                                       |
+| `reason`             | string                                             | Short reason code summarizing why `state` is in its current value.                                                                                   |
+| `message`            | string                                             | Human-readable detail backing `reason`; especially valuable on `state: Failed`.                                                                      |
+| `cgroupReady`        | bool                                               | Whether `cgroupPath` actually exists on the host filesystem as of the last status write.                                                             |
 
 ## Minimal
 

@@ -30,10 +30,17 @@ Today the stack schema requires both `metadata.name` and `spec.id`, and they sho
 
 ## status
 
-| Field        | Type                                    | Description                                             |
-| ------------ | --------------------------------------- | ------------------------------------------------------- |
-| `state`      | `Pending`, `Ready`, `Failed`, `Unknown` | Lifecycle state                                         |
-| `cgroupPath` | string                                  | Absolute cgroup path: `/kukeon/<realm>/<space>/<stack>` |
+| Field                | Type                                    | Description                                                                                                                                          |
+| -------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `state`              | `Pending`, `Ready`, `Failed`, `Unknown` | Lifecycle state                                                                                                                                      |
+| `cgroupPath`         | string                                  | Absolute cgroup path: `/kukeon/<realm>/<space>/<stack>`                                                                                              |
+| `subtreeControllers` | array of string                         | Cgroup-v2 controller set actually delegated on this stack's `cgroup.subtree_control` after the host-root filter (e.g. `cpu`, `memory`, `io`, `pids`) |
+| `createdAt`          | RFC3339 timestamp                       | Wall-clock time of the first persist. Set once and never moves.                                                                                      |
+| `updatedAt`          | RFC3339 timestamp                       | Wall-clock time of the most recent persist.                                                                                                          |
+| `readyAt`            | RFC3339 timestamp                       | Wall-clock time of the first `State==Ready` persist. Set-once.                                                                                       |
+| `reason`             | string                                  | Short reason code summarizing why `state` is in its current value.                                                                                   |
+| `message`            | string                                  | Human-readable detail backing `reason`; especially valuable on `state: Failed`.                                                                      |
+| `cgroupReady`        | bool                                    | Whether `cgroupPath` actually exists on the host filesystem as of the last status write.                                                             |
 
 ## Minimal
 

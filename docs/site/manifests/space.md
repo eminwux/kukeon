@@ -100,10 +100,17 @@ Supported fields (each mirrors `ContainerSpec`): `user`, `readOnlyRootFilesystem
 
 ## status
 
-| Field        | Type                                    | Description                                     |
-| ------------ | --------------------------------------- | ----------------------------------------------- |
-| `state`      | `Pending`, `Ready`, `Failed`, `Unknown` | Lifecycle state                                 |
-| `cgroupPath` | string                                  | Absolute cgroup path: `/kukeon/<realm>/<space>` |
+| Field                | Type                                    | Description                                                                                                                                          |
+| -------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `state`              | `Pending`, `Ready`, `Failed`, `Unknown` | Lifecycle state                                                                                                                                      |
+| `cgroupPath`         | string                                  | Absolute cgroup path: `/kukeon/<realm>/<space>`                                                                                                      |
+| `subtreeControllers` | array of string                         | Cgroup-v2 controller set actually delegated on this space's `cgroup.subtree_control` after the host-root filter (e.g. `cpu`, `memory`, `io`, `pids`) |
+| `createdAt`          | RFC3339 timestamp                       | Wall-clock time of the first persist. Set once and never moves.                                                                                      |
+| `updatedAt`          | RFC3339 timestamp                       | Wall-clock time of the most recent persist.                                                                                                          |
+| `readyAt`            | RFC3339 timestamp                       | Wall-clock time of the first `State==Ready` persist. Set-once.                                                                                       |
+| `reason`             | string                                  | Short reason code summarizing why `state` is in its current value.                                                                                   |
+| `message`            | string                                  | Human-readable detail backing `reason`; especially valuable on `state: Failed`.                                                                      |
+| `cgroupReady`        | bool                                    | Whether `cgroupPath` actually exists on the host filesystem as of the last status write.                                                             |
 
 ## Bridge naming
 
