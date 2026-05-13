@@ -2375,6 +2375,39 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#managed-etchosts-and-etchostname" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Managed /etc/hosts and /etc/hostname
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kukeon_-identity-environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KUKEON_* identity environment variables
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#host-cgroup-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Host cgroup mode
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2622,6 +2655,39 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#managed-etchosts-and-etchostname" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Managed /etc/hosts and /etc/hostname
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kukeon_-identity-environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KUKEON_* identity environment variables
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#host-cgroup-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Host cgroup mode
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2817,6 +2883,12 @@
 <td>Run privileged (full capabilities, access to <code>/dev</code>, etc.)</td>
 </tr>
 <tr>
+<td><code>hostCgroup</code></td>
+<td>bool</td>
+<td>no</td>
+<td>Opt the container into its parent's cgroup namespace (see <a href="#host-cgroup-mode">Host cgroup mode</a>)</td>
+</tr>
+<tr>
 <td><code>secrets</code></td>
 <td>array of <code>ContainerSecret</code></td>
 <td>no</td>
@@ -2841,7 +2913,7 @@
 </div>
 <p><code>ports</code> and <code>restartPolicy</code> are accepted by the schema today but their semantics are still being designed. Values round-trip (you can read back what you applied), but the controller does not act on them. See <a href="https://github.com/eminwux/kukeon/issues">GitHub Issues</a> for the backlog.</p>
 <h3 id="volumemount">VolumeMount<a class="headerlink" href="#volumemount" title="Permanent link">&para;</a></h3>
-<p>Each entry in <code>spec.volumes</code> is a bind mount of a host path into the container.</p>
+<p>Each entry in <code>spec.volumes</code> is a mount attached to the container. The <code>kind</code> discriminator selects which OCI mount type the runtime emits.</p>
 <table>
 <thead>
 <tr>
@@ -2853,10 +2925,16 @@
 </thead>
 <tbody>
 <tr>
+<td><code>kind</code></td>
+<td><code>bind</code>|<code>tmpfs</code></td>
+<td>no</td>
+<td>Mount type. Empty means <code>bind</code> for back-compat with YAML authored before the discriminator existed.</td>
+</tr>
+<tr>
 <td><code>source</code></td>
 <td>string</td>
-<td>yes</td>
-<td>Absolute host path. Must exist at apply time. Named / managed volumes are not supported.</td>
+<td>yes for <code>bind</code></td>
+<td>Absolute host path. Must exist at apply time. Named / managed volumes are not supported. Must be empty for <code>kind: tmpfs</code>.</td>
 </tr>
 <tr>
 <td><code>target</code></td>
@@ -2870,8 +2948,29 @@
 <td>no</td>
 <td>Mount read-only when <code>true</code> (writes fail with <code>EROFS</code>). Defaults to <code>false</code>.</td>
 </tr>
+<tr>
+<td><code>sizeBytes</code></td>
+<td>int</td>
+<td>no (<code>tmpfs</code> only)</td>
+<td>Tmpfs size in bytes. When non-zero, the standard tmpfs <code>size=</code> option is set. Ignored for <code>bind</code>.</td>
+</tr>
+<tr>
+<td><code>mode</code></td>
+<td>uint</td>
+<td>no (<code>tmpfs</code> only)</td>
+<td>Tmpfs root-directory mode (e.g. <code>0755</code>). When non-zero, the standard tmpfs <code>mode=</code> option is set. Ignored for <code>bind</code>.</td>
+</tr>
 </tbody>
 </table>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">volumes</span><span class="p">:</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/srv/html</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/usr/share/nginx/html</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tmpfs</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/tmp</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="nt">sizeBytes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">268435456</span><span class="w"> </span><span class="c1"># 256 MiB</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0755</span>
+</code></pre></div>
 <h3 id="containersecret">ContainerSecret<a class="headerlink" href="#containersecret" title="Permanent link">&para;</a></h3>
 <p>Each entry in <code>spec.secrets</code> references a credential the daemon resolves at apply time. Only the reference is persisted — the resolved value never appears in <code>kuke get -o yaml</code>, in object status, or in daemon logs.</p>
 <table>
@@ -2911,16 +3010,67 @@
 </tbody>
 </table>
 <p>Exactly one of <code>fromFile</code> / <code>fromEnv</code> must be set. Example:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">secrets</span><span class="p">:</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ANTHROPIC_API_KEY</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">fromFile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/etc/kukeon/secrets/anthropic.key</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GITHUB_TOKEN</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="nt">fromEnv</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GITHUB_TOKEN_SCOPED</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tls.crt</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="nt">fromFile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/etc/kukeon/secrets/tls.crt</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/run/secrets/tls.crt</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">secrets</span><span class="p">:</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ANTHROPIC_API_KEY</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">fromFile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/etc/kukeon/secrets/anthropic.key</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GITHUB_TOKEN</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="nt">fromEnv</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GITHUB_TOKEN_SCOPED</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tls.crt</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="nt">fromFile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/etc/kukeon/secrets/tls.crt</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/run/secrets/tls.crt</span>
 </code></pre></div>
 <p>File-mount mode stages secrets under <code>/run/kukeon/secrets/&lt;containerdId&gt;/&lt;name&gt;</code> on the host, with owner-only read perms, then bind-mounts them read-only into the container. Because containerd persists resolved env vars in its own runtime spec, env-injection mode leaves the value in containerd's state; file-mount mode keeps it only in the tmpfs staging file.</p>
+<h3 id="managed-etchosts-and-etchostname">Managed <code>/etc/hosts</code> and <code>/etc/hostname</code><a class="headerlink" href="#managed-etchosts-and-etchostname" title="Permanent link">&para;</a></h3>
+<p>Every container in a cell sees a managed <code>/etc/hostname</code> and (unless its cell's root container runs with <code>hostNetwork: true</code>) a managed <code>/etc/hosts</code>, bind-mounted in by kukeond.</p>
+<ul>
+<li><code>/etc/hostname</code> contains the <strong>cell's</strong> name plus a trailing newline. All containers in the same cell agree on the hostname.</li>
+<li><code>/etc/hosts</code> carries the standard localhost block plus a <code>&lt;cellIP&gt;\t&lt;cellName&gt;</code> line once CNI ADD has assigned the cell's address. The cell IP line is filled in once the cell is reachable; before that, only the localhost block is present.</li>
+</ul>
+<p>Host-network cells (cells whose root container is declared with <code>hostNetwork: true</code> — the kukeond carve-out) inherit the host's <code>/etc/hosts</code> directly; kukeond does not overlay one.</p>
+<h3 id="kukeon_-identity-environment-variables"><code>KUKEON_*</code> identity environment variables<a class="headerlink" href="#kukeon_-identity-environment-variables" title="Permanent link">&para;</a></h3>
+<p>Kukeon exports the container's location in the realm/space/stack/cell hierarchy as environment variables visible to the process at startup:</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>KUKEON_REALM</code></td>
+<td>The container's realm name</td>
+</tr>
+<tr>
+<td><code>KUKEON_SPACE</code></td>
+<td>The container's space name</td>
+</tr>
+<tr>
+<td><code>KUKEON_STACK</code></td>
+<td>The container's stack name</td>
+</tr>
+<tr>
+<td><code>KUKEON_CELL_NAME</code></td>
+<td>The container's cell name</td>
+</tr>
+<tr>
+<td><code>KUKEON_CONTAINER_ID</code></td>
+<td>The container's <code>spec.id</code></td>
+</tr>
+<tr>
+<td><code>KUKEON_CGROUP_PATH</code></td>
+<td>Absolute cgroup path of the cell</td>
+</tr>
+<tr>
+<td><code>KUKEON_CELL_PROFILE_NAME</code></td>
+<td>Name of the cell profile that materialized the cell, when applicable</td>
+</tr>
+</tbody>
+</table>
+<p>These pairs are appended to the container's effective environment so user-declared <code>spec.env</code> entries still take precedence on collision.</p>
+<h3 id="host-cgroup-mode">Host cgroup mode<a class="headerlink" href="#host-cgroup-mode" title="Permanent link">&para;</a></h3>
+<p><code>spec.hostCgroup: true</code> opts the container into its parent's cgroup namespace — the runtime omits the cgroup <code>LinuxNamespace</code> from the OCI spec, and the container sees the host cgroup tree directly instead of seeing its own cgroup as <code>/</code>.</p>
+<p>Set this only for cells that hosts a nested runtime (containerd, runc, dockerd, an inner <code>kuke init</code>) that needs to write cgroups <em>outside</em> its own subtree. For ordinary workload containers, leave it <code>false</code> (the default). The canonical use case is the kukeond cell in dev-init phase 2.</p>
 <h2 id="status">status<a class="headerlink" href="#status" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2979,13 +3129,13 @@
 </tbody>
 </table>
 <h2 id="minimal-embedded-in-a-cell">Minimal (embedded in a cell)<a class="headerlink" href="#minimal-embedded-in-a-cell" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">containers</span><span class="p">:</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">web</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker.io/library/busybox:latest</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/bin/sh</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="nt">args</span><span class="p">:</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-c</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;echo</span><span class="nv"> </span><span class="s">hello</span><span class="nv"> </span><span class="s">&amp;&amp;</span><span class="nv"> </span><span class="s">sleep</span><span class="nv"> </span><span class="s">3600&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">containers</span><span class="p">:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">web</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker.io/library/busybox:latest</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/bin/sh</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="nt">args</span><span class="p">:</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-c</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;echo</span><span class="nv"> </span><span class="s">hello</span><span class="nv"> </span><span class="s">&amp;&amp;</span><span class="nv"> </span><span class="s">sleep</span><span class="nv"> </span><span class="s">3600&quot;</span>
 </code></pre></div>
 <p>Only <code>id</code> and <code>image</code> are strictly required when embedded inside a cell — the <code>realmId</code>, <code>spaceId</code>, <code>stackId</code>, and <code>cellId</code> are inherited from the parent cell's spec.</p>
 
@@ -3010,7 +3160,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 19:10:51 UTC">May 13, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 20:38:09 UTC">May 13, 2026</span>
   </span>
 
     
