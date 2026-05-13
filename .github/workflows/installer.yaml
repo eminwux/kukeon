@@ -1,0 +1,140 @@
+name: Installer
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "scripts/install.sh"
+      - "docs/site/install.sh"
+      - "Makefile"
+      - ".github/workflows/installer.yaml"
+  push:
+    branches:
+      - main
+    paths:
+      - "scripts/install.sh"
+      - "docs/site/install.sh"
+      - "Makefile"
+      - ".github/workflows/installer.yaml"
+
+jobs:
+  # The canonical script lives at scripts/install.sh; docs/site/install.sh is
+  # the copy mkdocs publishes at https://kukeon.io/install.sh. `make install.sh`
+  # re-renders the copy; this job catches contributors who edited one and
+  # forgot to rerun the make target.
+  sync:
+    name: scripts/install.sh ↔ docs/site/install.sh in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Re-render docs/site/install.sh
+        run: make install.sh
+      - name: Fail if rendered output drifted from committed copy
+        run: |
+          if ! git diff --exit-code docs/site/install.sh; then
+            echo "::error::docs/site/install.sh is stale. Run 'make install.sh' and commit the result."
+            exit 1
+          fi
+
+  # Negative path: minimal container with no containerd installed. The script
+  # must report which prereq is missing, print a distro-aware hint, and exit
+  # non-zero. Validates AC: "On a fresh host without containerd, the script
+  # exits with a distro-aware install hint and non-zero status."
+  prereq-missing:
+    name: --check fails cleanly without containerd
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bash + curl (script dependencies)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends bash curl ca-certificates
+      - name: Run installer --check on an unprepared host
+        run: |
+          set +e
+          out="$(bash scripts/install.sh --check 2>&1)"
+          rc=$?
+          echo "$out"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::expected non-zero exit on a host without prereqs"
+            exit 1
+          fi
+          # The hint must name containerd specifically — generic "something
+          # missing" output would defeat the AC.
+          if ! echo "$out" | grep -q 'containerd'; then
+            echo "::error::expected the failure message to reference containerd"
+            exit 1
+          fi
+          # No files should be touched on the prereq-failure path.
+          if [ -e /usr/local/bin/kuke ]; then
+            echo "::error::installer touched /usr/local/bin/kuke despite prereq failure"
+            exit 1
+          fi
+
+  # Positive path: a host with containerd + CNI plugins reachable. The
+  # GitHub-hosted ubuntu-latest runner already runs containerd (Docker is
+  # preinstalled and live), so we only need to install the CNI plugin bundle
+  # to satisfy /opt/cni/bin. Validates AC: "`bash install.sh --check` runs
+  # prereq checks only and exits without touching the system."
+  prereq-pass:
+    name: --check passes with prereqs installed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install CNI plugins
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends containernetworking-plugins
+          # Debian/Ubuntu's containernetworking-plugins drops binaries at
+          # /usr/lib/cni; kukeon (matching CRI tools) expects /opt/cni/bin.
+          # Mirror the upstream layout the script checks for.
+          sudo mkdir -p /opt/cni/bin
+          for plugin in bridge loopback host-local; do
+            if [ -x "/usr/lib/cni/${plugin}" ]; then
+              sudo ln -sf "/usr/lib/cni/${plugin}" "/opt/cni/bin/${plugin}"
+            fi
+          done
+      - name: Confirm containerd is running on the runner
+        run: |
+          if [ ! -S /run/containerd/containerd.sock ]; then
+            echo "::error::containerd socket missing on the runner — runner image changed?"
+            exit 1
+          fi
+      - name: Run installer --check
+        run: bash scripts/install.sh --check
+
+  # End-to-end smoke: download a real release binary, install it to
+  # /usr/local/bin, and skip the kuke-init step (which would need root,
+  # cgroup writes, and a healthy containerd). Pinned to a known-good tag so
+  # the test doesn't drift with future releases. Checksum verification is
+  # skipped because pre-issue-#62 releases shipped without .sha256 assets;
+  # once a release lands with .sha256 published, drop the skip.
+  install-skip-init:
+    name: full install (KUKE_SKIP_INIT=1) against a real release
+    runs-on: ubuntu-latest
+    env:
+      KUKE_VERSION: v0.4.0
+      KUKE_SKIP_INIT: "1"
+      KUKE_SKIP_CHECKSUM: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install CNI plugins (prereqs)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends containernetworking-plugins
+          sudo mkdir -p /opt/cni/bin
+          for plugin in bridge loopback host-local; do
+            if [ -x "/usr/lib/cni/${plugin}" ]; then
+              sudo ln -sf "/usr/lib/cni/${plugin}" "/opt/cni/bin/${plugin}"
+            fi
+          done
+      - name: Run installer (download + install, skip init)
+        run: bash scripts/install.sh
+      - name: Verify installed artifacts
+        run: |
+          test -x /usr/local/bin/kuke
+          test -x /usr/local/bin/kukeond
+          /usr/local/bin/kuke version

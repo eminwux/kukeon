@@ -34,6 +34,26 @@ Get kukeon running on a single Linux host in minutes.
 ### Install
 
 ```bash
+curl -fsSL https://kukeon.io/install.sh | bash
+```
+
+The installer detects your platform, verifies the prerequisites above (and prints a distro-aware hint on any miss), downloads the latest release, verifies its `sha256` checksum, installs `kuke` + `kukeond` to `/usr/local/bin`, and runs `sudo kuke init` to bring the daemon up. Pass `--check` to run the prereq checks only without touching the system:
+
+```bash
+curl -fsSL https://kukeon.io/install.sh | bash -s -- --check
+```
+
+After install completes you should see the daemon's realm/space/stack hierarchy provisioned and `kukeond` listening on its unix socket:
+
+```text
+kukeond is ready (unix:///run/kukeon/kukeond.sock)
+```
+
+#### Manual install
+
+If you would rather drive each step yourself (e.g. installing onto an air-gapped host, or pinning a non-default release tag):
+
+```bash
 # Set your platform (defaults shown)
 export OS=linux        # Options: linux
 export ARCH=amd64      # Options: amd64, arm64
@@ -43,21 +63,9 @@ curl -L -o kuke https://github.com/eminwux/kukeon/releases/download/v0.1.0/kuke-
 chmod +x kuke && \
 sudo install -m 0755 kuke /usr/local/bin/kuke && \
 sudo ln -f /usr/local/bin/kuke /usr/local/bin/kukeond
-```
 
-### Initialize the runtime
-
-`kuke init` provisions the default hierarchy (realm `default`, space `default`, stack `default`), sets up CNI dirs, pulls the `kukeond` image, and starts the daemon. It touches `/opt/kukeon`, cgroups, and containerd, so it needs root:
-
-```bash
-$ sudo kuke init
-Initialized Kukeon runtime
-Realm: default (namespace: kukeon-default)
-System realm: kukeon-system (namespace: kukeon-system)
-Run path: /opt/kukeon
-Kukeond image: ghcr.io/eminwux/kukeon:v0.1.0
-...
-kukeond is ready (unix:///opt/kukeon/run/kukeond.sock)
+# Provision the default realm/space/stack hierarchy and start the daemon.
+sudo kuke init
 ```
 
 ### Autocomplete

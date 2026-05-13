@@ -131,3 +131,13 @@ install-dev: kuke
 
 uninstall-dev:
 	sudo rm -f $(INSTALL_PREFIX)/kuke $(INSTALL_PREFIX)/kukeond
+
+# Publish the one-line installer through the mkdocs site: copy
+# `scripts/install.sh` (canonical source) into `docs/site/install.sh` so
+# `mkdocs build` picks it up and the GitHub Pages workflow serves it at
+# https://kukeon.io/install.sh. A CI sync check (workflows/installer.yaml)
+# runs the same `cp` against `--exit-code git diff` to catch drift.
+.PHONY: install.sh
+install.sh:
+	cp scripts/install.sh docs/site/install.sh
+	chmod +x docs/site/install.sh
