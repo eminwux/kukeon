@@ -18,6 +18,7 @@ package uninstall
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -30,6 +31,13 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+// ErrAborted is returned when the interactive confirmation prompt receives
+// any answer other than "yes"/"y". It signals a clean abort to cobra so the
+// process exits non-zero, matching the documented invariant in
+// docs/cli-use-cases.md § "Full per-host teardown" (EOF or non-`yes` answer
+// aborts with non-zero exit and no destructive side effect).
+var ErrAborted = errors.New("uninstall aborted")
 
 // MockControllerKey injects a mock controller via cmd.Context() for tests.
 type MockControllerKey struct{}
@@ -108,7 +116,7 @@ func runUninstall(cmd *cobra.Command, _ []string) error {
 		}
 		if !confirmed {
 			cmd.Println("Aborted.")
-			return nil
+			return ErrAborted
 		}
 	}
 
