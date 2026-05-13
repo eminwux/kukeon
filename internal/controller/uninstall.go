@@ -193,12 +193,14 @@ func (b *Exec) Uninstall(opts UninstallOptions) (UninstallReport, error) {
 	// PurgeRealm starts draining the kuke-system namespace.
 	//
 	// The default PID-file path mirrors cmd/kukeond/serve.go's write path —
-	// kukeond writes its PID to <runPath>/kukeond.pid, so reading from any
-	// other location turns this step into a silent no-op (the #287 regression
-	// the daemon-stop step from #195 was supposed to prevent).
+	// kukeond writes its PID to <socketDir>/kukeond.pid (sibling of the
+	// socket, per the storage-layout.md design "Sockets and pid files belong
+	// in /run"). Reading from any other location turns this step into a
+	// silent no-op (the #287 regression the daemon-stop step from #195 was
+	// supposed to prevent).
 	pidFile := opts.KukeondPIDFile
-	if pidFile == "" && b.opts.RunPath != "" {
-		pidFile = filepath.Join(b.opts.RunPath, "kukeond.pid")
+	if pidFile == "" && opts.SocketDir != "" {
+		pidFile = filepath.Join(opts.SocketDir, "kukeond.pid")
 	}
 	if pidFile != "" {
 		stopper := opts.DaemonStopper

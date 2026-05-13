@@ -279,20 +279,21 @@ func TestDaemonReset(t *testing.T) {
 }
 
 // TestDaemonReset_RemovesSocketAndPidFiles confirms the cleanup step actually
-// removes /run/kukeon/kukeond.sock and /opt/kukeon/kukeond.pid (or the
-// per-test overrides) when both files are present.
+// removes /run/kukeon/kukeond.{sock,pid} (or the per-test overrides) when
+// both files are present.
 //
-// kukeond.sock lives under the socket dir (KUKEOND_SOCKET's parent) while
-// kukeond.pid is written under the run path by cmd/kukeond/serve.go — pinning
-// the pid removal to the socket dir was the silent #287 no-op that left the
-// daemon-stop step in `kuke uninstall` looking at the wrong path.
+// kukeond.sock and kukeond.pid both live under the socket dir (KUKEOND_SOCKET's
+// parent), matching the storage-layout.md design and cmd/kukeond/serve.go's
+// write path (filepath.Dir(--socket) + "kukeond.pid"). Pinning the pid removal
+// to the run path was the silent #287 no-op that left the daemon-stop step in
+// `kuke uninstall` looking at the wrong path.
 func TestDaemonReset_RemovesSocketAndPidFiles(t *testing.T) {
 	withFreshViper(t)
 
 	socketDir := t.TempDir()
 	runPath := t.TempDir()
 	sockPath := filepath.Join(socketDir, "kukeond.sock")
-	pidPath := filepath.Join(runPath, "kukeond.pid")
+	pidPath := filepath.Join(socketDir, "kukeond.pid")
 	if err := os.WriteFile(sockPath, []byte{}, 0o600); err != nil {
 		t.Fatalf("seed sock file: %v", err)
 	}

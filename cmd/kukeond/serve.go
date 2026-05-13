@@ -96,7 +96,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		SocketPath:        socketPath,
 		SocketMode:        socketMode,
 		SocketGID:         socketGID,
-		PIDFile:           filepath.Join(runPath, "kukeond.pid"),
+		PIDFile:           filepath.Join(filepath.Dir(socketPath), "kukeond.pid"),
 		ReconcileInterval: reconcileInterval,
 		Controller: controller.Options{
 			RunPath:          runPath,
