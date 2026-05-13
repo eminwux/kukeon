@@ -165,10 +165,12 @@ check_containerd() {
         return 1
     fi
     # Opportunistic responsiveness probe — only runs when `ctr` is on PATH
-    # so we don't add a hard dependency. A stale socket (containerd crashed
-    # but left its socket file behind) is rare but real; surfacing it here
-    # produces a clearer error than waiting for `kuke init` to fail mid-flight.
-    if command -v ctr >/dev/null 2>&1; then
+    # and we're root, since the containerd socket is typically root:root
+    # mode 660 and a non-root probe fails with EACCES (which we'd misread
+    # as a stale socket). A stale socket from a crashed daemon is rare but
+    # real, and root is the typical invocation context (curl … | sudo bash),
+    # so the probe still fires where it matters.
+    if [ "$(id -u)" -eq 0 ] && command -v ctr >/dev/null 2>&1; then
         if ! timeout 5 ctr version >/dev/null 2>&1; then
             fail "containerd socket present at ${sock} but not responsive"
             printf '    `ctr version` failed against the socket — containerd may be stopped\n' >&2
