@@ -8,7 +8,6 @@ Kukeon needs:
 
 - Linux with cgroups v2
 - [containerd](https://containerd.io/) running at `/run/containerd/containerd.sock`
-- [CNI plugins](https://github.com/containernetworking/plugins) available on the host (typically at `/opt/cni/bin`)
 
 See [Installation → Prerequisites](install/prerequisites.md) for details and quick install commands for each dependency.
 

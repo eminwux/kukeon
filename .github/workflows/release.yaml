@@ -29,6 +29,18 @@ jobs:
             KUKEON_VERSION=$KUKEON_VERSION \
             KUKEON_IMAGE_REPO=$KUKEON_IMAGE_REPO
 
+      # The one-line installer (https://kukeon.io/install.sh, issue #62)
+      # downloads the per-arch `.sha256` companion file and verifies it
+      # before placing the binary on the user's PATH. Generate one
+      # alongside every release asset so the verification step has
+      # something to check against.
+      - name: Generate sha256 checksums for release assets
+        run: |
+          for f in kuke-linux-amd64 kuke-linux-arm64 \
+                   kukeond-linux-amd64 kukeond-linux-arm64; do
+            sha256sum "$f" > "$f.sha256"
+          done
+
       - name: Create Github Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -36,6 +48,8 @@ jobs:
           gh release create "${GITHUB_REF#refs/tags/}" \
           ./kuke-linux-amd64 ./kuke-linux-arm64 \
           ./kukeond-linux-amd64 ./kukeond-linux-arm64 \
+          ./kuke-linux-amd64.sha256 ./kuke-linux-arm64.sha256 \
+          ./kukeond-linux-amd64.sha256 ./kukeond-linux-arm64.sha256 \
           --title "${GITHUB_REF#refs/tags/}" \
           --generate-notes \
           --notes "Container images (multi-arch: linux/amd64, linux/arm64):

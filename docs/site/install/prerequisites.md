@@ -1,10 +1,11 @@
 # Prerequisites
 
-Kukeon runs on a single Linux host and relies on three things being present before you install the binary:
+Kukeon runs on a single Linux host and relies on two things being present before you install the binary:
 
 1. A kernel with **cgroups v2** enabled
 2. A running **containerd** daemon
-3. The **CNI reference plugins**
+
+CNI plugins are bundled inside the `kukeond` container image, so the standard daemon-mediated install path does **not** need them on the host. If you plan to use the transitional `--no-daemon` flag for some operations, see the [`--no-daemon` host-CNI note below](#cni-plugins-for---no-daemon-only).
 
 ## Linux with cgroups v2
 
@@ -40,24 +41,19 @@ sudo ctr version
 
 Kukeon uses its own containerd namespaces (one per realm: `kukeon-<realm>`). It does not interfere with existing containerd namespaces used by Docker, nerdctl, or other tools.
 
-## CNI plugins
+## CNI plugins (for `--no-daemon` only)
 
-Kukeon's spaces map to CNI networks; it invokes the reference bridge plugin to set them up. The plugins need to live in `/opt/cni/bin` (configurable via the space spec, but the default is the standard CNI layout).
+The `kukeond` container image bundles the CNI reference plugins at `/opt/cni/bin` inside the container, and the daemon invokes them from there. The standard install path (`kuke init` → daemon-mediated operations) therefore does **not** require host-side CNI plugins.
 
-Install the latest release from [containernetworking/plugins](https://github.com/containernetworking/plugins):
+You only need to install plugins on the host if you plan to run operations with `--no-daemon`, which executes controllers in-process via the `kuke` binary instead of routing through `kukeond`. In that mode `kuke` shells out to plugin binaries at the host's `/opt/cni/bin`. See [`--no-daemon` host prerequisites](../cli/commands.md#-no-daemon-host-prerequisites) for the canonical reference. Note that `--no-daemon` is slated for removal from creation commands in a future release.
+
+If you do need it, install from [containernetworking/plugins](https://github.com/containernetworking/plugins):
 
 ```bash
 CNI_VERSION=v1.4.1
 sudo mkdir -p /opt/cni/bin
 curl -L https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz \
   | sudo tar -C /opt/cni/bin -xz
-```
-
-Verify:
-
-```bash
-$ ls /opt/cni/bin
-bandwidth  bridge  dhcp  firewall  host-device  host-local  ipvlan  ...
 ```
 
 At minimum Kukeon needs `bridge`, `host-local`, `loopback`, and `portmap`.
