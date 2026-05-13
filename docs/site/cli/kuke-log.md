@@ -3,22 +3,23 @@
 Print a container's stdout/stderr stream.
 
 ```
-kuke log  --realm <realm> --space <space> --stack <stack> --cell <cell> [flags]
-kuke logs --realm <realm> --space <space> --stack <stack> --cell <cell> [flags]      # alias
+kuke log  <cell> [flags]
+kuke logs <cell> [flags]      # alias
 ```
+
+`<cell>` is a positional argument. `--realm`, `--space`, and `--stack` all default to `default`, so for a cell in the default location you only need the cell name.
 
 By default, `kuke log` prints the current contents of the capture file and exits. Pass `-f`/`--follow` to tail until SIGINT.
 
 ## Flags
 
-| Flag             | Default      | Description                                                                       |
-| ---------------- | ------------ | --------------------------------------------------------------------------------- |
-| `--cell`         | _(required)_ | Cell whose container's capture file to tail                                       |
-| `--container`    | (auto-pick)  | Container within the cell to read (omit to auto-pick the only non-root container) |
-| `--realm`        | _(required)_ | Realm that owns the cell                                                          |
-| `--space`        | _(required)_ | Space that owns the cell                                                          |
-| `--stack`        | _(required)_ | Stack that owns the cell                                                          |
-| `--follow`, `-f` | `false`      | Tail the file until SIGINT instead of printing current contents and exiting       |
+| Flag             | Default     | Description                                                                       |
+| ---------------- | ----------- | --------------------------------------------------------------------------------- |
+| `--container`    | (auto-pick) | Container within the cell to read (omit to auto-pick the only non-root container) |
+| `--realm`        | `default`   | Realm that owns the cell                                                          |
+| `--space`        | `default`   | Space that owns the cell                                                          |
+| `--stack`        | `default`   | Stack that owns the cell                                                          |
+| `--follow`, `-f` | `false`     | Tail the file until SIGINT instead of printing current contents and exiting       |
 
 Plus all [global flags](kuke.md).
 
@@ -28,22 +29,20 @@ Plus all [global flags](kuke.md).
 
 Container selection: if the cell has exactly one non-root container, `--container` can be omitted. Otherwise, pass `--container` explicitly.
 
-`--realm`, `--space`, and `--stack` are all required — `kuke log` does not assume `default` for any of them. Pass each explicitly even when targeting the default realm/space/stack. (Note: `kuke attach` defaults these three to `default`; the two commands diverge here.)
-
 ## Examples
 
 ```bash
-# Print and exit
-sudo kuke log --realm default --space default --stack default --cell web
+# Print and exit (cell in default/default/default)
+sudo kuke log web
 
 # Follow until Ctrl-C
-sudo kuke log --realm default --space default --stack default --cell web -f
+sudo kuke log web -f
 
 # Explicit container in a multi-container cell
-sudo kuke log --realm default --space default --stack default --cell web --container nginx -f
+sudo kuke log web --container nginx -f
 
 # Non-default realm/space/stack
-sudo kuke log --realm default --space blog --stack wordpress --cell wp
+sudo kuke log wp --realm default --space blog --stack wordpress
 ```
 
 ## kuke log vs. kuke daemon logs

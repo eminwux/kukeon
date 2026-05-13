@@ -46,6 +46,7 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -87,46 +88,47 @@ func TailFile(ctx context.Context, path string, out io.Writer, follow bool) erro
 // NewLogCmd builds the `kuke log` cobra command.
 func NewLogCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:           "log",
+		Use:           "log <cell>",
 		Aliases:       []string{"logs"},
 		Short:         "Print a container's stdout/stderr stream (use -f to follow)",
-		Args:          cobra.NoArgs,
+		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE:          runLog,
 	}
 
-	cmd.Flags().String("realm", "", "Realm that owns the cell")
+	cmd.Flags().String("realm", consts.KukeonDefaultRealmName, "Realm that owns the cell")
 	_ = viper.BindPFlag(config.KUKE_LOG_REALM.ViperKey, cmd.Flags().Lookup("realm"))
-	cmd.Flags().String("space", "", "Space that owns the cell")
+	cmd.Flags().String("space", consts.KukeonDefaultSpaceName, "Space that owns the cell")
 	_ = viper.BindPFlag(config.KUKE_LOG_SPACE.ViperKey, cmd.Flags().Lookup("space"))
-	cmd.Flags().String("stack", "", "Stack that owns the cell")
+	cmd.Flags().String("stack", consts.KukeonDefaultStackName, "Stack that owns the cell")
 	_ = viper.BindPFlag(config.KUKE_LOG_STACK.ViperKey, cmd.Flags().Lookup("stack"))
-	cmd.Flags().String("cell", "", "Cell whose container's capture file to tail")
-	_ = viper.BindPFlag(config.KUKE_LOG_CELL.ViperKey, cmd.Flags().Lookup("cell"))
 	cmd.Flags().String("container", "",
 		"Container within the cell to read (omit to auto-pick the only non-root container)")
 	_ = viper.BindPFlag(config.KUKE_LOG_CONTAINER.ViperKey, cmd.Flags().Lookup("container"))
 	cmd.Flags().BoolP("follow", "f", false, "Tail the file until SIGINT instead of printing current contents and exiting")
 	_ = viper.BindPFlag(config.KUKE_LOG_FOLLOW.ViperKey, cmd.Flags().Lookup("follow"))
 
+	cmd.ValidArgsFunction = config.CompleteCellNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
 	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
-	_ = cmd.RegisterFlagCompletionFunc("cell", config.CompleteCellNames)
 	_ = cmd.RegisterFlagCompletionFunc("container", config.CompleteContainerNames)
 
 	return cmd
 }
 
-func runLog(cmd *cobra.Command, _ []string) error {
+func runLog(cmd *cobra.Command, args []string) error {
+	cell := strings.TrimSpace(args[0])
 	realm := strings.TrimSpace(viper.GetString(config.KUKE_LOG_REALM.ViperKey))
 	space := strings.TrimSpace(viper.GetString(config.KUKE_LOG_SPACE.ViperKey))
 	stack := strings.TrimSpace(viper.GetString(config.KUKE_LOG_STACK.ViperKey))
-	cell := strings.TrimSpace(viper.GetString(config.KUKE_LOG_CELL.ViperKey))
 	container := strings.TrimSpace(viper.GetString(config.KUKE_LOG_CONTAINER.ViperKey))
 	follow := viper.GetBool(config.KUKE_LOG_FOLLOW.ViperKey)
 
+	if cell == "" {
+		return fmt.Errorf("%w (positional cell)", errdefs.ErrCellNameRequired)
+	}
 	if realm == "" {
 		return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
 	}
@@ -135,9 +137,6 @@ func runLog(cmd *cobra.Command, _ []string) error {
 	}
 	if stack == "" {
 		return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
-	}
-	if cell == "" {
-		return fmt.Errorf("%w (--cell)", errdefs.ErrCellNameRequired)
 	}
 
 	client, err := resolveClient(cmd)

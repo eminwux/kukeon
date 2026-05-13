@@ -399,8 +399,6 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_LOG_STACK = DefineKV("KUKE_LOG_STACK", "kuke/log/stack", "default")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_LOG_CELL = DefineKV("KUKE_LOG_CELL", "kuke/log/cell")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_LOG_CONTAINER = DefineKV("KUKE_LOG_CONTAINER", "kuke/log/container")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_LOG_FOLLOW = DefineKV("KUKE_LOG_FOLLOW", "kuke/log/follow", "false")

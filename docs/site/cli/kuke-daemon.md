@@ -10,14 +10,14 @@ These commands act on the `kukeond` cell provisioned by `kuke init` (`kuke-syste
 
 ## Subcommands
 
-| Command              | What it does                                                              |
-| -------------------- | ------------------------------------------------------------------------- |
-| `kuke daemon start`  | Start the kukeond daemon cell                                             |
-| `kuke daemon stop`   | Gracefully stop the kukeond cell (SIGTERM, escalating to SIGKILL)         |
-| `kuke daemon kill`   | Immediately SIGKILL the kukeond daemon cell                               |
-| `kuke daemon restart`| Stop then start the kukeond daemon cell                                   |
-| `kuke daemon reset`  | Stop, delete metadata + cgroups, clear `/run/kukeon/kukeond.{sock,pid}`   |
-| `kuke daemon logs`   | Print the kukeond daemon's stdout/stderr (use `-f` to follow)             |
+| Command               | What it does                                                            |
+| --------------------- | ----------------------------------------------------------------------- |
+| `kuke daemon start`   | Start the kukeond daemon cell                                           |
+| `kuke daemon stop`    | Gracefully stop the kukeond cell (SIGTERM, escalating to SIGKILL)       |
+| `kuke daemon kill`    | Immediately SIGKILL the kukeond daemon cell                             |
+| `kuke daemon restart` | Stop then start the kukeond daemon cell                                 |
+| `kuke daemon reset`   | Stop, delete metadata + cgroups, clear `/run/kukeon/kukeond.{sock,pid}` |
+| `kuke daemon logs`    | Print the kukeond daemon's stdout/stderr (use `-f` to follow)           |
 
 All subcommands are idempotent: they succeed with a clear message when the daemon is already in the requested state.
 
@@ -29,9 +29,9 @@ Bring up the existing `kukeond` cell provisioned by `kuke init`. Returns success
 
 Send SIGTERM and wait up to `--timeout` (default 10s) for the daemon to exit; if the grace period expires, escalate to SIGKILL.
 
-| Flag        | Default | Description                                                |
-| ----------- | ------- | ---------------------------------------------------------- |
-| `--timeout` | `10s`   | Grace period before escalating from SIGTERM to SIGKILL     |
+| Flag        | Default | Description                                            |
+| ----------- | ------- | ------------------------------------------------------ |
+| `--timeout` | `10s`   | Grace period before escalating from SIGTERM to SIGKILL |
 
 ## kuke daemon kill
 
@@ -41,8 +41,8 @@ Force-kill the kukeond cell with no grace period. This is the escape hatch for a
 
 Compose `kuke daemon stop` and `kuke daemon start` into a single verb. When the daemon is already stopped, the stop phase is skipped and the start phase still runs.
 
-| Flag        | Default | Description                                                          |
-| ----------- | ------- | -------------------------------------------------------------------- |
+| Flag        | Default | Description                                                               |
+| ----------- | ------- | ------------------------------------------------------------------------- |
 | `--timeout` | `10s`   | Grace period for the stop phase before escalating from SIGTERM to SIGKILL |
 
 ## kuke daemon reset
@@ -53,14 +53,14 @@ Always runs as root: it touches `/sys/fs/cgroup`, containerd namespaces, and `/o
 
 Distinct from [`kuke uninstall`](kuke-uninstall.md), which is the per-host teardown (every realm, the kukeon system user/group, and the run path itself).
 
-| Flag             | Default | Description                                                              |
-| ---------------- | ------- | ------------------------------------------------------------------------ |
+| Flag             | Default | Description                                                                |
+| ---------------- | ------- | -------------------------------------------------------------------------- |
 | `--purge-system` | `false` | Also remove `/opt/kukeon/kuke-system` (user-realm data is still preserved) |
-| `--timeout`      | `10s`   | Grace period for the stop phase before escalating from SIGTERM to SIGKILL |
+| `--timeout`      | `10s`   | Grace period for the stop phase before escalating from SIGTERM to SIGKILL  |
 
 ## kuke daemon logs
 
-Print the `kukeond` container's stdout/stderr stream. Shortcut for `kuke log --realm kuke-system --space kukeon --stack kukeon --cell kukeond` — the coordinates are static and filled in for you.
+Print the `kukeond` container's stdout/stderr stream. Shortcut for `kuke log --realm kuke-system --space kukeon --stack kukeon kukeond` — the coordinates are static and filled in for you.
 
 ```
 kuke daemon logs [-f]
@@ -69,8 +69,8 @@ kuke daemon log  [-f]      # alias
 
 By default the current contents are printed and the command exits; pass `-f`/`--follow` to tail until SIGINT.
 
-| Flag             | Default | Description                                                  |
-| ---------------- | ------- | ------------------------------------------------------------ |
+| Flag             | Default | Description                                                        |
+| ---------------- | ------- | ------------------------------------------------------------------ |
 | `--follow`, `-f` | `false` | Tail until SIGINT instead of printing current contents and exiting |
 
 ## Examples
