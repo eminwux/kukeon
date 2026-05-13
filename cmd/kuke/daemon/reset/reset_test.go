@@ -106,13 +106,27 @@ func TestDaemonReset(t *testing.T) {
 			},
 		},
 		{
-			name: "host not initialized",
+			name: "missing cell metadata is idempotent (already torn down)",
 			fake: &fakeClient{
 				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
 					return kukeonv1.GetCellResult{MetadataExists: false}, nil
 				},
+				stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+					t.Fatalf("StopCell must not be called when metadata is already gone")
+					return kukeonv1.StopCellResult{}, nil
+				},
+				deleteCellFn: func(_ v1beta1.CellDoc) (kukeonv1.DeleteCellResult, error) {
+					t.Fatalf("DeleteCell must not be called when metadata is already gone")
+					return kukeonv1.DeleteCellResult{}, nil
+				},
 			},
-			wantErr: "kukeon host is not initialized",
+			wantOutputs: []string{
+				`kukeond cell already torn down (cell "kukeond" in realm "kuke-system")`,
+			},
+			wantNotOutputs: []string{
+				`kukeond cell deleted`,
+				`kukeond stopped`,
+			},
 		},
 		{
 			name: "GetCell error is wrapped",
@@ -414,6 +428,87 @@ func TestDaemonReset_PreservesDefaultRealm(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), systemDir) {
 		t.Errorf("expected output to mention removed kuke-system dir; got:\n%s", buf.String())
+	}
+}
+
+// TestDaemonReset_PurgeSystemAfterTeardown covers the AC: a second
+// `kuke daemon reset --purge-system` on an already-reset host (cell metadata
+// missing) still removes /opt/kukeon/kuke-system and exits 0.
+func TestDaemonReset_PurgeSystemAfterTeardown(t *testing.T) {
+	withFreshViper(t)
+
+	runPath := t.TempDir()
+	systemDir := filepath.Join(runPath, consts.KukeSystemRealmName)
+	if err := os.MkdirAll(systemDir, 0o750); err != nil {
+		t.Fatalf("mkdir kuke-system: %v", err)
+	}
+	systemMarker := filepath.Join(systemDir, "system-data.txt")
+	if err := os.WriteFile(systemMarker, []byte("system data"), 0o600); err != nil {
+		t.Fatalf("seed system marker: %v", err)
+	}
+
+	fake := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{MetadataExists: false}, nil
+		},
+	}
+
+	cmd := reset.NewResetCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, reset.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, reset.MockSocketDirKey{}, t.TempDir())
+	ctx = context.WithValue(ctx, reset.MockRunPathKey{}, runPath)
+	cmd.SetContext(ctx)
+	cmd.SetArgs([]string{"--purge-system"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error on already-reset host with --purge-system: %v", err)
+	}
+	if _, err := os.Stat(systemDir); !os.IsNotExist(err) {
+		t.Errorf("kuke-system dir must be removed even when cell metadata is already gone: stat err=%v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "already torn down") {
+		t.Errorf("expected output to mention idempotent already-torn-down notice; got:\n%s", out)
+	}
+}
+
+// TestDaemonReset_PurgeSystemAfterTeardownNoSystemDir confirms that the
+// `--purge-system` step is also idempotent when /opt/kukeon/kuke-system is
+// already absent: no error, no "removed" line for the system dir.
+func TestDaemonReset_PurgeSystemAfterTeardownNoSystemDir(t *testing.T) {
+	withFreshViper(t)
+
+	runPath := t.TempDir()
+
+	fake := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{MetadataExists: false}, nil
+		},
+	}
+
+	cmd := reset.NewResetCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, reset.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, reset.MockSocketDirKey{}, t.TempDir())
+	ctx = context.WithValue(ctx, reset.MockRunPathKey{}, runPath)
+	cmd.SetContext(ctx)
+	cmd.SetArgs([]string{"--purge-system"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error on fully-clean host with --purge-system: %v", err)
+	}
+	systemDir := filepath.Join(runPath, consts.KukeSystemRealmName)
+	if strings.Contains(buf.String(), "removed "+systemDir) {
+		t.Errorf("did not expect 'removed' line for absent kuke-system dir; got:\n%s", buf.String())
 	}
 }
 

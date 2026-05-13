@@ -250,9 +250,10 @@ func TestKuke_DaemonRestart_TimeoutFlag(t *testing.T) {
 	}
 }
 
-// TestKuke_DaemonReset_Uninitialized verifies that `kuke daemon reset` fails
-// with the same friendly "host not initialized" message as the other daemon-
-// lifecycle verbs when the run-path has no kukeond cell metadata.
+// TestKuke_DaemonReset_Uninitialized verifies that `kuke daemon reset` is
+// idempotent on a host with no kukeond cell metadata: exit 0 with an
+// "already torn down" notice rather than the "host not initialized" sentinel
+// reserved for read/write verbs.
 func TestKuke_DaemonReset_Uninitialized(t *testing.T) {
 	t.Parallel()
 
@@ -261,15 +262,15 @@ func TestKuke_DaemonReset_Uninitialized(t *testing.T) {
 
 	args := append(buildKukeRunPathArgs(runPath), "daemon", "reset")
 	exitCode, stdout, stderr := runBinary(t, nil, kuke, args...)
-	if exitCode == 0 {
+	if exitCode != 0 {
 		t.Fatalf(
-			"expected non-zero exit code on uninitialized host; stdout=%s stderr=%s",
-			string(stdout), string(stderr),
+			"expected exit 0 on uninitialized host (idempotent teardown); code=%d stdout=%s stderr=%s",
+			exitCode, string(stdout), string(stderr),
 		)
 	}
 	combined := string(stdout) + string(stderr)
-	if !strings.Contains(combined, "kuke init") {
-		t.Fatalf("expected error to mention `kuke init`, got: %s", combined)
+	if !strings.Contains(combined, "already torn down") {
+		t.Fatalf("expected output to mention 'already torn down', got: %s", combined)
 	}
 }
 
