@@ -29,8 +29,7 @@
 //     tty byte stream to HostCapturePath. `kuke log` reads that file.
 //   - Non-Attachable containers (including kukeond) have the containerd
 //     runtime shim write stdout/stderr to HostLogPath via cio.LogFile.
-//     `kuke log` reads that file. This is gap #4 in
-//     docs/gaps-2026-04-19.md and was implemented per issue #203.
+//     `kuke log` reads that file. Implemented per issue #203.
 package log
 
 import (
