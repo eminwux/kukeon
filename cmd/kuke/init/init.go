@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller"
@@ -341,6 +342,10 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	logger, ok := cmd.Context().Value(types.CtxLogger).(*slog.Logger)
 	if !ok || logger == nil {
 		return errdefs.ErrLoggerNotFound
+	}
+
+	if err := kukshared.RequireRoot("kuke init"); err != nil {
+		return err
 	}
 
 	serverConfigPath := viper.GetString(config.KUKE_INIT_SERVER_CONFIGURATION.ViperKey)

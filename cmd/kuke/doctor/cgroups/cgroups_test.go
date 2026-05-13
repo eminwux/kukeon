@@ -19,6 +19,7 @@ package cgroups_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,9 +27,25 @@ import (
 	"testing"
 
 	cgroupscmd "github.com/eminwux/kukeon/cmd/kuke/doctor/cgroups"
+	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
+
+// TestMain mocks the shared euid lookup to euid=0 for every test in this
+// package. The new fail-fast root gate on --probe would otherwise
+// short-circuit every default-probe and --probe test under non-root CI
+// runners (ubuntu-latest defaults to UID 1001), even though their fake
+// cgroupfs lives under t.TempDir() and never needs real root. Individual
+// cases that exercise the non-root rejection override this with their own
+// SetGeteuidForTesting call.
+func TestMain(m *testing.M) {
+	restore := kukshared.SetGeteuidForTesting(func() int { return 0 })
+	code := m.Run()
+	restore()
+	os.Exit(code)
+}
 
 // writeFakeCgroup materializes a directory pretending to be a cgroup-v2
 // root: cgroup.controllers + cgroup.subtree_control with the given
@@ -628,6 +645,50 @@ func TestCgroupsCmdScopeNotFound(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ghost") {
 		t.Errorf("error = %q, want it to name the missing realm", err.Error())
+	}
+}
+
+// TestCgroupsCmdProbeRequiresRoot pins the fail-fast UID gate that fires
+// only when probe is effective. The probe writes "+<ctrl>" to
+// cgroup.subtree_control, which is root-only on a real cgroup-v2 root —
+// the gate makes the failure mode "must run as root" instead of an EACCES
+// inside cgroupcheck.Probe. The read-only --no-probe path stays
+// unrestricted, covered by the sibling --no-probe test below.
+func TestCgroupsCmdProbeRequiresRoot(t *testing.T) {
+	restore := kukshared.SetGeteuidForTesting(func() int { return 1000 })
+	t.Cleanup(restore)
+
+	root := writeFakeCgroup(t,
+		"cpuset cpu io memory pids",
+		"cpu pids",
+	)
+
+	_, _, err := runCmd(t, "--root", root, "--probe")
+	if err == nil {
+		t.Fatal("Execute() error = nil under euid=1000 with --probe, want ErrMustRunAsRoot")
+	}
+	if !errors.Is(err, errdefs.ErrMustRunAsRoot) {
+		t.Fatalf("error does not wrap ErrMustRunAsRoot: %v", err)
+	}
+	if !strings.Contains(err.Error(), "kuke doctor cgroups --probe") {
+		t.Errorf("error does not name the subcommand: %v", err)
+	}
+}
+
+// TestCgroupsCmdNoProbeBypassesRootGate confirms the read-only --no-probe
+// path stays available to non-root operators — it only reads cgroup files
+// and never writes, so the UID gate must not fire.
+func TestCgroupsCmdNoProbeBypassesRootGate(t *testing.T) {
+	restore := kukshared.SetGeteuidForTesting(func() int { return 1000 })
+	t.Cleanup(restore)
+
+	root := writeFakeCgroup(t,
+		"cpuset cpu io memory hugetlb pids rdma misc",
+		"cpu memory io pids",
+	)
+
+	if _, _, err := runCmd(t, "--root", root, "--no-probe"); err != nil {
+		t.Fatalf("--no-probe rejected under euid=1000: %v", err)
 	}
 }
 

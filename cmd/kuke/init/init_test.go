@@ -30,6 +30,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke"
 	initpkg "github.com/eminwux/kukeon/cmd/kuke/init"
+	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -749,6 +750,11 @@ func TestRunInitErrors(t *testing.T) {
 			name: "unreachable containerd socket",
 			setup: func(t *testing.T, cmd *cobra.Command) {
 				t.Cleanup(viper.Reset)
+				// The fail-fast root check sits before the containerd
+				// preflight; mock euid=0 so this case still reaches the
+				// containerd path it was written to exercise.
+				restore := kukshared.SetGeteuidForTesting(func() int { return 0 })
+				t.Cleanup(restore)
 				tmp := t.TempDir()
 				viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, tmp)
 				viper.Set(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey, filepath.Join(tmp, "missing.sock"))
@@ -772,6 +778,20 @@ func TestRunInitErrors(t *testing.T) {
 				cmd.SetErr(&bytes.Buffer{})
 			},
 			wantErr:     errdefs.ErrConnectContainerd,
+			expectError: true,
+		},
+		{
+			name: "non-root user is rejected",
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				restore := kukshared.SetGeteuidForTesting(func() int { return 1000 })
+				t.Cleanup(restore)
+				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+				ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+				cmd.SetContext(ctx)
+				cmd.SetOut(&bytes.Buffer{})
+				cmd.SetErr(&bytes.Buffer{})
+			},
+			wantErr:     errdefs.ErrMustRunAsRoot,
 			expectError: true,
 		},
 	}

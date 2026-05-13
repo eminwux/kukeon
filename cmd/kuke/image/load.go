@@ -23,11 +23,13 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/eminwux/kukeon/cmd/config"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 // MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
@@ -45,6 +47,16 @@ func NewLoadCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// --no-daemon writes directly under /opt/kukeon/<realm>/…,
+			// which is root:kukeon after `kuke init`. Daemon-routed loads
+			// (the default) round-trip through kukeond and stay fine for
+			// `kukeon`-group rootless clients.
+			if viper.GetBool(config.KUKEON_ROOT_NO_DAEMON.ViperKey) {
+				if err := kukshared.RequireRoot("kuke image load --no-daemon"); err != nil {
+					return err
+				}
+			}
+
 			realm, err := cmd.Flags().GetString("realm")
 			if err != nil {
 				return err
