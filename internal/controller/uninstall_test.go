@@ -495,6 +495,124 @@ func TestUninstall_SuffixEnumeratorPurgesKukeonNamespacesOnly(t *testing.T) {
 	}
 }
 
+// TestUninstall_ReleasesBindMountsBeforeRmdir pins the #434 fix: a kukeon-
+// owned bind mount under /run/kukeon (or /opt/kukeon) must be unmounted by
+// the controller before the rmdir step, so a post-attach uninstall on a
+// `make dev-init` host (which leaves /run/kukeon/tty bind-mounted) exits 0.
+func TestUninstall_ReleasesBindMountsBeforeRmdir(t *testing.T) {
+	tmpRunPath := t.TempDir()
+	tmpSocketDir := t.TempDir()
+
+	socketMount := filepath.Join(tmpSocketDir, "tty")
+	runMount := filepath.Join(tmpRunPath, "default", "space")
+
+	// Order in which the releaser was called; the release of the socket-dir
+	// mount must happen before the rmdir on its parent fires, and the same
+	// for the run-path mount. We assert by checking the directory still
+	// exists at release-time.
+	released := []string{}
+	releaser := func(root string) ([]controller.MountReleaseAttempt, error) {
+		var target string
+		switch root {
+		case tmpSocketDir:
+			target = socketMount
+		case tmpRunPath:
+			target = runMount
+		default:
+			t.Errorf("releaser called with unexpected root %q", root)
+			return nil, nil
+		}
+		released = append(released, target)
+		return []controller.MountReleaseAttempt{{Target: target, Released: true}}, nil
+	}
+
+	f := uninstallNoopRunner(nil)
+	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
+	report, err := ctrl.Uninstall(controller.UninstallOptions{
+		SocketDir:     tmpSocketDir,
+		MountReleaser: releaser,
+		SkipUserGroup: true,
+	})
+	if err != nil {
+		t.Fatalf("Uninstall returned err=%v", err)
+	}
+
+	wantReleased := []string{socketMount, runMount}
+	sort.Strings(released)
+	sort.Strings(wantReleased)
+	if !equalStringSlices(released, wantReleased) {
+		t.Errorf("releaser invocations = %v, want %v", released, wantReleased)
+	}
+
+	if len(report.SocketDirMounts) != 1 || report.SocketDirMounts[0].Target != socketMount {
+		t.Errorf("report.SocketDirMounts = %+v, want one entry for %q", report.SocketDirMounts, socketMount)
+	}
+	if len(report.RunPathMounts) != 1 || report.RunPathMounts[0].Target != runMount {
+		t.Errorf("report.RunPathMounts = %+v, want one entry for %q", report.RunPathMounts, runMount)
+	}
+
+	// Successful release must let the dir teardown succeed.
+	if !report.SocketDirRemove {
+		t.Errorf("expected socket dir removed after successful unmount; got %+v", report)
+	}
+	if !report.RunPathRemove {
+		t.Errorf("expected run path removed after successful unmount; got %+v", report)
+	}
+}
+
+// TestUninstall_ResidualMountSurfacesInReportAndError pins the second half of
+// the #434 AC: when a kukeon-owned mount cannot be released, the report row
+// names the surviving mountpoint and the call returns a non-nil error so
+// automation can branch on exit status.
+func TestUninstall_ResidualMountSurfacesInReportAndError(t *testing.T) {
+	tmpRunPath := t.TempDir()
+	tmpSocketDir := t.TempDir()
+
+	stuckMount := filepath.Join(tmpSocketDir, "tty")
+	stuckErr := errors.New("synthetic EBUSY")
+
+	releaser := func(root string) ([]controller.MountReleaseAttempt, error) {
+		if root == tmpSocketDir {
+			return []controller.MountReleaseAttempt{{Target: stuckMount, Err: stuckErr}}, nil
+		}
+		return nil, nil
+	}
+
+	f := uninstallNoopRunner(nil)
+	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
+	report, err := ctrl.Uninstall(controller.UninstallOptions{
+		SocketDir:     tmpSocketDir,
+		MountReleaser: releaser,
+		SkipUserGroup: true,
+	})
+
+	if err == nil {
+		t.Fatalf("expected Uninstall error from residual mount; got nil")
+	}
+	if !errors.Is(err, stuckErr) {
+		t.Errorf("expected wrapped err to carry residual cause; got %v", err)
+	}
+	if !strings.Contains(err.Error(), stuckMount) {
+		t.Errorf("expected err to name surviving mountpoint %q; got %v", stuckMount, err)
+	}
+
+	if len(report.SocketDirMounts) != 1 || report.SocketDirMounts[0].Err == nil {
+		t.Errorf("expected report.SocketDirMounts to carry residual err; got %+v", report.SocketDirMounts)
+	}
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // TestUninstall_DefaultPIDFileResolvesToRunPath pins the controller's default
 // PID-file path against the production write path in cmd/kukeond/serve.go.
 //

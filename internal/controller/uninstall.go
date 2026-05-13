@@ -70,6 +70,11 @@ type UninstallOptions struct {
 	// DaemonStopGracePeriod is the SIGTERM→SIGKILL grace window. Zero uses
 	// DefaultDaemonStopGracePeriod (5s).
 	DaemonStopGracePeriod time.Duration
+	// MountReleaser releases live bind mounts under SocketDir and RunPath
+	// before the rmdir step. Production callers leave it nil (defaults to
+	// reading /proc/self/mounts + syscall.Unmount); tests inject a stub so
+	// they do not have to provision real mounts.
+	MountReleaser MountReleaser
 }
 
 // RealmPurgeOutcome reports the result of purging a single realm.
@@ -101,15 +106,27 @@ type UninstallReport struct {
 	SocketDir       string
 	SocketDirExists bool
 	SocketDirRemove bool
+	// SocketDirMounts records every kukeon-owned bind mount found under
+	// SocketDir at uninstall time and whether it was released. A non-empty
+	// list with all entries Released=true is the success path: the rmdir
+	// step that follows can now reach an empty directory. Any entry with
+	// Err!=nil names a mountpoint the kernel refused to detach — surfacing
+	// the busy target so the operator does not have to grep /proc/mounts to
+	// find what blocked the teardown (the #434 regression).
+	SocketDirMounts []MountReleaseAttempt
 	RunPath         string
 	RunPathExists   bool
 	RunPathRemove   bool
-	UserName        string
-	UserExisted     bool
-	UserRemoved     bool
-	GroupName       string
-	GroupExisted    bool
-	GroupRemoved    bool
+	// RunPathMounts is the RunPath analogue of SocketDirMounts; the run
+	// path is checked separately so a busy mount under /opt/kukeon does not
+	// mask a busy mount under /run/kukeon (and vice versa).
+	RunPathMounts []MountReleaseAttempt
+	UserName      string
+	UserExisted   bool
+	UserRemoved   bool
+	GroupName     string
+	GroupExisted  bool
+	GroupRemoved  bool
 }
 
 // Uninstall performs a comprehensive teardown of all kukeon runtime state.
@@ -128,8 +145,14 @@ type UninstallReport struct {
 //     path) still get their namespaces cleaned up. The two well-known
 //     realms (`default`, `kuke-system`) are kept as a safety floor so a
 //     containerd-list failure cannot strand them.
-//  2. RemoveAll on SocketDir (typically /run/kukeon).
-//  3. RemoveAll on the run path (typically /opt/kukeon).
+//  2. Release live kukeon-owned bind mounts under SocketDir, then RemoveAll
+//     on SocketDir (typically /run/kukeon). The unmount step is what makes a
+//     post-attach uninstall succeed: kuketty leaves a /run/kukeon/tty bind
+//     mount behind, and rmdir refuses to descend through it (the #434
+//     regression). A plain umount is tried first, falling back to lazy
+//     MNT_DETACH so the parent dir can still be removed when the mount has
+//     stragglers holding it open.
+//  3. The same release + RemoveAll for the run path (typically /opt/kukeon).
 //  4. Remove the kukeon system user and group (no-op if absent).
 //
 // Steps 2–4 are gated on every realm reporting NamespaceRemoved=true. When at
@@ -248,8 +271,22 @@ func (b *Exec) Uninstall(opts UninstallOptions) (UninstallReport, error) {
 		return report, firstErr
 	}
 
+	releaser := opts.MountReleaser
+	if releaser == nil {
+		releaser = releaseMountsUnder
+	}
+
 	// Step 2: tear down /run/kukeon.
 	if opts.SocketDir != "" {
+		mounts, residualErr := releaseAndRecord(releaser, opts.SocketDir, "socket dir", recordErr)
+		report.SocketDirMounts = mounts
+		// Removing the dir even after residual mounts is intentional: the
+		// rmdir will fail with EBUSY and the next-row "remove failed" output
+		// plus the residual MountReleaseAttempt entries together tell the
+		// operator exactly which bind kept it pinned. Aborting early would
+		// hide the parallel /opt/kukeon teardown and leave the operator with
+		// half the picture.
+		_ = residualErr
 		exists, removed, err := removePathIfExists(opts.SocketDir)
 		report.SocketDirExists = exists
 		report.SocketDirRemove = removed
@@ -260,6 +297,9 @@ func (b *Exec) Uninstall(opts UninstallOptions) (UninstallReport, error) {
 
 	// Step 3: tear down /opt/kukeon.
 	if b.opts.RunPath != "" {
+		mounts, residualErr := releaseAndRecord(releaser, b.opts.RunPath, "run path", recordErr)
+		report.RunPathMounts = mounts
+		_ = residualErr
 		exists, removed, err := removePathIfExists(b.opts.RunPath)
 		report.RunPathExists = exists
 		report.RunPathRemove = removed
@@ -379,6 +419,45 @@ func (b *Exec) realmsFromContainerdNamespaces() ([]intmodel.Realm, error) {
 		})
 	}
 	return out, nil
+}
+
+// releaseAndRecord drives the MountReleaser for one kukeon-owned directory,
+// turning any enumeration error and any per-mount residual into recordErr
+// callbacks (so they surface in the returned firstErr) while still handing
+// the per-mount attempts back to the caller for the report. label names the
+// directory class ("socket dir" / "run path") so the wrapped error is
+// readable in CLI output.
+func releaseAndRecord(
+	releaser MountReleaser,
+	root string,
+	label string,
+	recordErr func(error),
+) ([]MountReleaseAttempt, error) {
+	attempts, enumErr := releaser(root)
+	if enumErr != nil {
+		recordErr(fmt.Errorf("enumerate mounts under %s %q: %w", label, root, enumErr))
+		return attempts, enumErr
+	}
+	var firstResidual error
+	for _, attempt := range attempts {
+		if attempt.Err == nil {
+			continue
+		}
+		// Name the mountpoint in the wrapped error so a caller printing the
+		// returned error verbatim (e.g. cobra's "Error:" line) still sees
+		// the surviving target without having to walk the report — the
+		// #434 AC requires the operator-visible message to name what the
+		// kernel refused to release.
+		wrapped := fmt.Errorf(
+			"release mount %q under %s %q: %w",
+			attempt.Target, label, root, attempt.Err,
+		)
+		recordErr(wrapped)
+		if firstResidual == nil {
+			firstResidual = wrapped
+		}
+	}
+	return attempts, firstResidual
 }
 
 // removePathIfExists is a thin wrapper around os.RemoveAll that reports

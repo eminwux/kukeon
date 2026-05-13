@@ -198,10 +198,30 @@ func printReport(cmd *cobra.Command, report controller.UninstallReport) {
 		fmt.Fprintln(out, "  filesystem + user/group cleanup skipped: residual containerd namespace prevented teardown")
 		return
 	}
+	renderMountReleases(out, report.SocketDirMounts)
 	fmt.Fprintf(out, "  - %s: %s\n", report.SocketDir, dirOutcome(report.SocketDirExists, report.SocketDirRemove))
+	renderMountReleases(out, report.RunPathMounts)
 	fmt.Fprintf(out, "  - %s: %s\n", report.RunPath, dirOutcome(report.RunPathExists, report.RunPathRemove))
 	fmt.Fprintf(out, "  - user %q: %s\n", report.UserName, accountOutcome(report.UserExisted, report.UserRemoved))
 	fmt.Fprintf(out, "  - group %q: %s\n", report.GroupName, accountOutcome(report.GroupExisted, report.GroupRemoved))
+}
+
+// renderMountReleases prints one indented row per kukeon-owned bind mount
+// the controller tried to release before the rmdir step. Skipped when no
+// mounts were enumerated under the parent directory so the common case
+// (host with no live attach sessions) stays terse.
+func renderMountReleases(out io.Writer, attempts []controller.MountReleaseAttempt) {
+	for _, a := range attempts {
+		if a.Err != nil {
+			// Residual mount: the operator needs the path + the kernel's
+			// reason verbatim so manual recovery is obvious.
+			fmt.Fprintf(out, "  - mount %s: still busy: %v\n", a.Target, a.Err)
+			continue
+		}
+		if a.Released {
+			fmt.Fprintf(out, "  - mount %s: unmounted\n", a.Target)
+		}
+	}
 }
 
 // outcomeAbsent labels every "we didn't find the resource" branch in the

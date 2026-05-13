@@ -383,5 +383,49 @@ func TestUninstall_CleanupSkippedRendersSkipMarker(t *testing.T) {
 	}
 }
 
+// TestUninstall_RendersReleasedAndResidualMountRows pins the #434 renderer
+// half: the printed report has to surface both the successful unmount rows
+// (so an operator can see kuke did the work) and any residual mount rows
+// (so manual recovery is obvious without having to grep /proc/mounts).
+func TestUninstall_RendersReleasedAndResidualMountRows(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	stuckErr := errors.New("synthetic EBUSY")
+	stub := &stubController{
+		uninstallFn: func(opts controller.UninstallOptions) (controller.UninstallReport, error) {
+			return controller.UninstallReport{
+				SocketDir:       opts.SocketDir,
+				SocketDirExists: true,
+				SocketDirRemove: false,
+				SocketDirMounts: []controller.MountReleaseAttempt{
+					{Target: "/run/kukeon/tty", Err: stuckErr},
+				},
+				RunPath:       "/opt/kukeon",
+				RunPathExists: true,
+				RunPathRemove: true,
+				RunPathMounts: []controller.MountReleaseAttempt{
+					{Target: "/opt/kukeon/default/space", Released: true},
+				},
+				UserName:  "kukeon",
+				GroupName: "kukeon",
+			}, stuckErr
+		},
+	}
+	out, err := runCmd(t, stub, "", "--yes")
+	if err == nil {
+		t.Fatalf("expected non-zero error from residual mount; got nil\noutput:\n%s", out)
+	}
+	wantSubstrings := []string{
+		"mount /run/kukeon/tty: still busy",
+		"synthetic EBUSY",
+		"mount /opt/kukeon/default/space: unmounted",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected output to contain %q; got:\n%s", want, out)
+		}
+	}
+}
+
 // Compile-time assertion: stubController must satisfy controller.Controller.
 var _ controller.Controller = (*stubController)(nil)
