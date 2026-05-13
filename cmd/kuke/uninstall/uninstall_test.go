@@ -226,25 +226,42 @@ func TestUninstall_YesFlagSkipsPrompt(t *testing.T) {
 	}
 }
 
-func TestUninstall_PromptAbortsOnNo(t *testing.T) {
+// TestUninstall_PromptAbortsNonYes pins the docs/cli-use-cases.md invariant
+// that any non-"yes" answer (including "no", "n", and an empty line) aborts
+// with non-zero exit and no destructive side effect, matching the EOF path.
+// Issue #433 — tooling that gates on the documented "non-zero on abort"
+// contract was silently treating a "no" answer as success.
+func TestUninstall_PromptAbortsNonYes(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
-	called := false
-	stub := &stubController{
-		uninstallFn: func(controller.UninstallOptions) (controller.UninstallReport, error) {
-			called = true
-			return controller.UninstallReport{}, nil
-		},
+	answers := []struct {
+		name  string
+		stdin string
+	}{
+		{"no", "no\n"},
+		{"n", "n\n"},
+		{"empty line", "\n"},
 	}
-	out, err := runCmd(t, stub, "no\n")
-	if err != nil {
-		t.Fatalf("Execute returned: %v\noutput:\n%s", err, out)
-	}
-	if called {
-		t.Errorf("expected Uninstall not to fire after 'no' answer; output:\n%s", out)
-	}
-	if !strings.Contains(out, "Aborted.") {
-		t.Errorf("expected aborted message; got:\n%s", out)
+	for _, tc := range answers {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			stub := &stubController{
+				uninstallFn: func(controller.UninstallOptions) (controller.UninstallReport, error) {
+					called = true
+					return controller.UninstallReport{}, nil
+				},
+			}
+			out, err := runCmd(t, stub, tc.stdin)
+			if !errors.Is(err, uninstall.ErrAborted) {
+				t.Fatalf("expected ErrAborted, got %v; output:\n%s", err, out)
+			}
+			if called {
+				t.Errorf("expected Uninstall not to fire after %q answer; output:\n%s", tc.name, out)
+			}
+			if !strings.Contains(out, "Aborted.") {
+				t.Errorf("expected aborted message; got:\n%s", out)
+			}
+		})
 	}
 }
 
