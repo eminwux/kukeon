@@ -2703,6 +2703,29 @@
 
 <h1 id="init-and-reset">Init and reset<a class="headerlink" href="#init-and-reset" title="Permanent link">&para;</a></h1>
 <p>This guide covers the operations you'll run most often when bootstrapping, iterating on, or wiping a Kukeon host.</p>
+<p><code>kuke init</code> provisions <strong>two</strong> realms, each mapped to its own containerd namespace:</p>
+<table>
+<thead>
+<tr>
+<th>Realm</th>
+<th>Containerd namespace</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>default</code></td>
+<td><code>default.kukeon.io</code></td>
+<td>User workloads. Created empty so <code>kuke create …</code> has a home.</td>
+</tr>
+<tr>
+<td><code>kuke-system</code></td>
+<td><code>kuke-system.kukeon.io</code></td>
+<td>System workloads owned by kukeon itself (the <code>kukeond</code> daemon runs as a cell here).</td>
+</tr>
+</tbody>
+</table>
+<p>The daemon lives at <code>kuke-system / kukeon / kukeon / kukeond</code> (realm / space / stack / cell). The <code>default</code> realm is deliberately left user-owned so <code>kuke purge --cascade</code> on it can never take down the daemon.</p>
 <h2 id="fresh-bootstrap">Fresh bootstrap<a class="headerlink" href="#fresh-bootstrap" title="Permanent link">&para;</a></h2>
 <p>On a host that has never run Kukeon:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>init
@@ -2711,10 +2734,11 @@
 <ol>
 <li>Creates the kukeon cgroup root at <code>/sys/fs/cgroup/kukeon</code>.</li>
 <li>Ensures <code>/etc/cni/net.d</code> and <code>/opt/cni/bin</code> exist.</li>
-<li>Creates the default user realm (<code>default</code>, containerd namespace <code>kukeon-default</code>) and its default space and stack.</li>
-<li>Creates the system realm (<code>kukeon-system</code>) and the <code>kukeond</code> cell.</li>
+<li>Creates the <code>kukeon</code> system user/group so the socket can be group-readable.</li>
+<li>Creates the <code>default</code> user realm (containerd namespace <code>default.kukeon.io</code>) and its default space and stack.</li>
+<li>Creates the <code>kuke-system</code> system realm (containerd namespace <code>kuke-system.kukeon.io</code>) and the <code>kukeond</code> cell underneath it.</li>
 <li>Pulls the <code>kukeond</code> image.</li>
-<li>Starts the daemon; waits up to 30s for the socket to come up (unless you pass <code>--no-wait</code>).</li>
+<li>Starts the daemon; waits up to 30s for the socket at <code>/run/kukeon/kukeond.sock</code> to come up (unless you pass <code>--no-wait</code>).</li>
 </ol>
 <h2 id="re-init-reconcile">Re-init (reconcile)<a class="headerlink" href="#re-init-reconcile" title="Permanent link">&para;</a></h2>
 <p><code>kuke init</code> is idempotent. Re-running it on a host that's already been bootstrapped reconciles state and reports <code>already existed</code> for the parts it finds on disk:</p>
@@ -2728,20 +2752,19 @@
 </code></pre></div>
 <p>This rewrites every space's conflist, even the ones that already exist. It does not wipe anything else.</p>
 <h2 id="tear-down-the-daemon-for-iteration">Tear down the daemon for iteration<a class="headerlink" href="#tear-down-the-daemon-for-iteration" title="Permanent link">&para;</a></h2>
-<p>When you're hacking on <code>kukeond</code> and need to rebuild it, you want to stop the daemon without losing user data:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span><span class="nb">kill</span><span class="w"> </span>cell<span class="w"> </span>kukeond<span class="w">   </span>--realm<span class="w"> </span>kukeon-system<span class="w"> </span>--space<span class="w"> </span>kukeon<span class="w"> </span>--stack<span class="w"> </span>kukeon<span class="w"> </span>--no-daemon
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>cell<span class="w"> </span>kukeond<span class="w"> </span>--realm<span class="w"> </span>kukeon-system<span class="w"> </span>--space<span class="w"> </span>kukeon<span class="w"> </span>--stack<span class="w"> </span>kukeon<span class="w"> </span>--no-daemon
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span>/run/kukeon/kukeond.sock<span class="w"> </span>/run/kukeon/kukeond.pid
+<p>When you're hacking on <code>kukeond</code> and need to rebuild it, <code>kuke daemon reset</code> is the right verb:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>reset<span class="w">                  </span><span class="c1"># preserves /opt/kukeon/default and /opt/kukeon/kuke-system</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>reset<span class="w"> </span>--purge-system<span class="w">   </span><span class="c1"># additionally wipes /opt/kukeon/kuke-system</span>
 </code></pre></div>
-<p>Why <code>--no-daemon</code>: the daemon is what's being stopped, so <code>kuke</code> has to talk to containerd directly.</p>
-<p>User data under <code>/opt/kukeon/&lt;realm&gt;/...</code> (everything outside <code>kukeon-system</code>) is untouched.</p>
+<p><code>daemon reset</code> stops the <code>kukeond</code> cell (SIGTERM, escalating to SIGKILL after <code>--timeout</code>, default 10s), deletes the cell metadata + cgroups, and clears <code>/run/kukeon/kukeond.{sock,pid}</code>. It's idempotent — re-running on a host with no daemon succeeds.</p>
+<p><code>--purge-system</code> additionally removes <code>/opt/kukeon/kuke-system</code> for a fully clean re-bootstrap. Either way, user-realm data under <code>/opt/kukeon/default/**</code> is <strong>never</strong> touched — that's the invariant that lets <code>daemon reset</code> be safe in a dev loop.</p>
 <p>Rebuild and re-init:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>make<span class="w"> </span>kuke
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>docker<span class="w"> </span>build<span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">VERSION</span><span class="o">=</span>v0.0.0-dev<span class="w"> </span>-t<span class="w"> </span>kukeon-local:dev<span class="w"> </span>.
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>docker<span class="w"> </span>save<span class="w"> </span>kukeon-local:dev<span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>ctr<span class="w"> </span>-n<span class="w"> </span>kuke-system.kukeon.io<span class="w"> </span>images<span class="w"> </span>import<span class="w"> </span>-
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>sudo<span class="w"> </span>./kuke<span class="w"> </span>image<span class="w"> </span>load<span class="w"> </span>--from-docker<span class="w"> </span>kukeon-local:dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>--no-daemon
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>sudo<span class="w"> </span>./kuke<span class="w"> </span>init<span class="w"> </span>--kukeond-image<span class="w"> </span>docker.io/library/kukeon-local:dev
 </code></pre></div>
-<p>See <a href="../local-dev/">Local development</a> for the full dev loop.</p>
+<p><code>--no-daemon</code> on <code>kuke image load</code> is required here because the daemon is not yet running — the in-process controller talks to containerd directly. See <a href="../local-dev/">Local development</a> for the full dev loop, which is wrapped end-to-end as <code>make dev-init</code>.</p>
 <h2 id="wipe-a-realm">Wipe a realm<a class="headerlink" href="#wipe-a-realm" title="Permanent link">&para;</a></h2>
 <p>Cascaded delete removes the realm and everything under it (spaces, stacks, cells, containers, CNI conflists, cgroups, metadata):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>realm<span class="w"> </span>mytenant<span class="w"> </span>--cascade
@@ -2751,31 +2774,41 @@
 </code></pre></div>
 <p>See <a href="../../manifests/overview/">Manifest Reference</a> and <a href="../../cli/kuke-delete/">CLI Reference → delete</a> / <a href="../../cli/kuke-purge/">purge</a>.</p>
 <h2 id="full-host-wipe">Full host wipe<a class="headerlink" href="#full-host-wipe" title="Permanent link">&para;</a></h2>
-<p>Nuclear option: remove every trace of Kukeon from the host. Use this only if you're reinstalling from scratch.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># 1. Stop the daemon (if running)</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span><span class="nb">kill</span><span class="w"> </span>cell<span class="w"> </span>kukeond<span class="w"> </span>--realm<span class="w"> </span>kukeon-system<span class="w"> </span>--space<span class="w"> </span>kukeon<span class="w"> </span>--stack<span class="w"> </span>kukeon<span class="w"> </span>--no-daemon<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>cell<span class="w"> </span>kukeond<span class="w"> </span>--realm<span class="w"> </span>kukeon-system<span class="w"> </span>--space<span class="w"> </span>kukeon<span class="w"> </span>--stack<span class="w"> </span>kukeon<span class="w"> </span>--no-daemon<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span>/run/kukeon/kukeond.sock<span class="w"> </span>/run/kukeon/kukeond.pid
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="c1"># 2. Purge every user realm</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="k">for</span><span class="w"> </span>realm<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="k">$(</span>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realms<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span>--no-daemon<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.[] | select(.metadata.name != &quot;kukeon-system&quot;) | .metadata.name&#39;</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">    </span>sudo<span class="w"> </span>kuke<span class="w"> </span>purge<span class="w"> </span>realm<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$realm</span><span class="s2">&quot;</span><span class="w"> </span>--cascade<span class="w"> </span>--force<span class="w"> </span>--no-daemon
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="k">done</span>
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>
-<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="c1"># 3. Purge the system realm</span>
-<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>purge<span class="w"> </span>realm<span class="w"> </span>kukeon-system<span class="w"> </span>--cascade<span class="w"> </span>--force<span class="w"> </span>--no-daemon
-<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>
-<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="c1"># 4. Wipe on-disk state and cgroups</span>
-<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-rf<span class="w"> </span>/opt/kukeon
-<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-rf<span class="w"> </span>/sys/fs/cgroup/kukeon<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
-<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>
-<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="c1"># 5. Wipe generated CNI conflists (careful: skip if you run other CNI apps)</span>
-<a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span>/etc/cni/net.d/*.conflist
+<p>The "wipe every kukeon-owned thing on this host" verb is <code>kuke uninstall</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>uninstall<span class="w">          </span><span class="c1"># interactive: prompts for &quot;yes&quot;</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>uninstall<span class="w"> </span>-y<span class="w">       </span><span class="c1"># non-interactive (scripts)</span>
+</code></pre></div>
+<p>What it does, in order: stop the daemon, purge every realm with <code>--cascade</code> (including <code>kuke-system</code>), release kukeon-owned bind mounts under <code>/run/kukeon</code>, remove <code>/run/kukeon</code> and the configured run path (default <code>/opt/kukeon</code>), and remove the <code>kukeon</code> system user/group if present.</p>
+<p><strong>Half-cleaned-host gate.</strong> If any realm fails to drop its containerd namespace, the subsequent dir / account removal is <strong>skipped</strong> (not silently best-effort), every skipped row in the report is annotated, and the exit code is non-zero. Tearing out <code>/opt/kukeon</code> while a residual namespace is still pinning overlay mounts on disk would strand the next <code>kuke init</code> with stale containerd state — the skip is the safe default. Resolve the realm-purge failure (see <a href="../troubleshooting/#kuke-uninstall-reports-skipped-realm-purge-failed">Troubleshooting</a>) and re-run.</p>
+<p>The binary at <code>/usr/local/bin/kuke</code> and the <code>kukeond</code> symlink are <strong>never</strong> removed — uninstalling runtime state is not the same as uninstalling the binary. Drop the binaries with <code>make uninstall-dev</code> (dev installs) or your package manager.</p>
+<p>If <code>kuke uninstall</code> itself is broken, the equivalent manual sequence is:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># 1. Stop the daemon</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>reset<span class="w"> </span>--purge-system
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># 2. Purge every user realm</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="k">for</span><span class="w"> </span>realm<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="k">$(</span>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realms<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span>--no-daemon<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.[] | select(.metadata.name != &quot;kuke-system&quot;) | .metadata.name&#39;</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">    </span>sudo<span class="w"> </span>kuke<span class="w"> </span>purge<span class="w"> </span>realm<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$realm</span><span class="s2">&quot;</span><span class="w"> </span>--cascade<span class="w"> </span>--force<span class="w"> </span>--no-daemon
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="k">done</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="c1"># 3. Purge the system realm</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>purge<span class="w"> </span>realm<span class="w"> </span>kuke-system<span class="w"> </span>--cascade<span class="w"> </span>--force<span class="w"> </span>--no-daemon
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="c1"># 4. Release any leftover bind mounts under /run/kukeon</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>mount<span class="w"> </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span><span class="s1">&#39;$3 ~ &quot;^/run/kukeon&quot; {print $3}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>xargs<span class="w"> </span>-r<span class="w"> </span>sudo<span class="w"> </span>umount<span class="w"> </span>-l
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="c1"># 5. Wipe on-disk state and cgroups</span>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-rf<span class="w"> </span>/opt/kukeon<span class="w"> </span>/run/kukeon
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-rf<span class="w"> </span>/sys/fs/cgroup/kukeon<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="c1"># 6. Wipe generated CNI conflists (skip if you run other CNI apps on this host)</span>
+<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span>/etc/cni/net.d/*.conflist
 </code></pre></div>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../local-dev/">Local development</a> — the full rebuild / reload / re-init loop</li>
-<li><a href="../troubleshooting/">Troubleshooting</a> — what to do when init fails</li>
+<li><a href="../local-dev/">Local development</a> — the full rebuild / reload / re-init loop (wrapped as <code>make dev-init</code>)</li>
+<li><a href="../troubleshooting/">Troubleshooting</a> — what to do when init or uninstall fails</li>
+<li><a href="../../cli/kuke-daemon/">kuke daemon</a> — every <code>daemon</code> subcommand and flag</li>
+<li><a href="../../cli/kuke-uninstall/">kuke uninstall</a> — flag and invariant reference</li>
 </ul>
 
 
@@ -2799,7 +2832,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 21, 2026 12:22:34 UTC">April 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 20:56:07 UTC">May 13, 2026</span>
   </span>
 
     

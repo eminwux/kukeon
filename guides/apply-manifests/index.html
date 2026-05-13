@@ -1474,6 +1474,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#parameterized-cell-profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parameterized cell profiles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2671,6 +2682,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#parameterized-cell-profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parameterized cell profiles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2777,10 +2799,50 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>cell.yaml<span class="w"> </span>--no-daemon
 </code></pre></div>
 <p>See <a href="../../concepts/client-and-daemon/">Client and daemon</a> for the broader story.</p>
+<h2 id="parameterized-cell-profiles">Parameterized cell profiles<a class="headerlink" href="#parameterized-cell-profiles" title="Permanent link">&para;</a></h2>
+<p><code>kuke apply -f</code> consumes a <strong>fixed</strong> manifest — the file you ship is the spec the daemon reconciles to, with no substitution layer in between. When you need the same cell shape with different values per invocation (image tag, command, mount paths), reach for a <strong>cell profile</strong> loaded with <code>kuke run -p</code> instead of editing the YAML each time.</p>
+<p>A profile lives under <code>$HOME/.kuke/profiles.d/&lt;name&gt;.yaml</code> (or <code>$KUKE_PROFILES_DIR</code>) and declares its variable inputs alongside the cell spec:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellProfile</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shell</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">  </span><span class="nt">parameters</span><span class="p">:</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">IMAGE</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">      </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">container image to run</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">      </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">alpine:latest</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CMD</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="w">      </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">command to exec</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="w">      </span><span class="nt">required</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="w">  </span><span class="nt">containers</span><span class="p">:</span>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shell</span>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${IMAGE}</span>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;/bin/sh&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;-c&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;${CMD}&quot;</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p><code>kuke run -p</code> materializes one cell with a unique name (<code>&lt;metadata.name&gt;-&lt;6hex&gt;</code> by default; override with <code>--name</code>) and resolves each <code>${KEY}</code> reference in the body. Resolution order, highest first:</p>
+<ol>
+<li><code>--param KEY=VALUE</code> on the CLI (repeatable)</li>
+<li>Values from <code>--param-file &lt;path&gt;</code> (one <code>KEY=VALUE</code> per line, <code>#</code> starts a comment)</li>
+<li>The parameter's <code>default</code> in the profile</li>
+<li>The <code>kuke</code> process env (<code>os.LookupEnv</code>)</li>
+<li>Required + unset → error; non-required + unset → empty string</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Use defaults / env / required errors</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>kuke<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>shell<span class="w"> </span>--param<span class="w"> </span><span class="nv">CMD</span><span class="o">=</span><span class="s2">&quot;echo hi&quot;</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># Override the image too</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>kuke<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>shell<span class="w"> </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>alpine:edge<span class="w"> </span>--param<span class="w"> </span><span class="nv">CMD</span><span class="o">=</span><span class="s2">&quot;/bin/sh&quot;</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="c1"># Load a batch of values from a file, with a CLI override on top</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>kuke<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>shell<span class="w"> </span>--param-file<span class="w"> </span>./shell.env<span class="w"> </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>alpine:edge
+</code></pre></div>
+<p><code>--param</code>, <code>--param-file</code>, and <code>--name</code> are rejected when combined with <code>-f</code> (file mode is not a profile and has no parameter declarations). The substituted body is what reaches the daemon — there is no parameter layer in the manifest API itself.</p>
+<p>See <a href="../../cli/kuke-run/">kuke run</a> for the full flag surface.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../../manifests/overview/">Manifest Reference</a> — the full schema of every resource</li>
-<li><a href="../../cli/kuke-apply/">CLI Reference → apply</a> — every flag</li>
+<li><a href="../../cli/kuke-apply/">CLI Reference → apply</a> — every flag on <code>kuke apply</code></li>
+<li><a href="../../cli/kuke-run/">CLI Reference → run</a> — <code>-f</code> (file) and <code>-p</code> (profile) modes, including parameter handling</li>
 <li><a href="../../tutorials/hello-world/">Tutorials → Hello-world cell</a> — a worked example end-to-end</li>
 </ul>
 
@@ -2805,7 +2867,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 21, 2026 12:22:34 UTC">April 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 20:56:07 UTC">May 13, 2026</span>
   </span>
 
     

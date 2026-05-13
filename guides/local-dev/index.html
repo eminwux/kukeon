@@ -1436,10 +1436,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#the-loop-in-one-shell" class="md-nav__link">
+  <a href="#prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The loop in one shell
+        Prerequisites
       
     </span>
   </a>
@@ -1447,10 +1447,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#first-time-bootstrap" class="md-nav__link">
+  <a href="#the-canonical-loop-make-dev-init" class="md-nav__link">
     <span class="md-ellipsis">
       
-        First-time bootstrap
+        The canonical loop: make dev-init
       
     </span>
   </a>
@@ -1462,6 +1462,17 @@
     <span class="md-ellipsis">
       
         Make targets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manual-phases-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual phases (fallback)
       
     </span>
   </a>
@@ -2605,10 +2616,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#the-loop-in-one-shell" class="md-nav__link">
+  <a href="#prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The loop in one shell
+        Prerequisites
       
     </span>
   </a>
@@ -2616,10 +2627,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#first-time-bootstrap" class="md-nav__link">
+  <a href="#the-canonical-loop-make-dev-init" class="md-nav__link">
     <span class="md-ellipsis">
       
-        First-time bootstrap
+        The canonical loop: make dev-init
       
     </span>
   </a>
@@ -2631,6 +2642,17 @@
     <span class="md-ellipsis">
       
         Make targets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manual-phases-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual phases (fallback)
       
     </span>
   </a>
@@ -2703,44 +2725,26 @@
 
 <h1 id="local-development">Local development<a class="headerlink" href="#local-development" title="Permanent link">&para;</a></h1>
 <p>The full rebuild / reload / re-init loop for iterating on <code>kuke</code> and <code>kukeond</code> from source.</p>
-<h2 id="the-loop-in-one-shell">The loop in one shell<a class="headerlink" href="#the-loop-in-one-shell" title="Permanent link">&para;</a></h2>
-<p>After the first bootstrap, each iteration looks like this:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># 1. Stop and delete the current kukeond cell (user data is preserved)</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span><span class="nb">kill</span><span class="w"> </span>cell<span class="w"> </span>kukeond<span class="w">   </span>--realm<span class="w"> </span>kukeon-system<span class="w"> </span>--space<span class="w"> </span>kukeon<span class="w"> </span>--stack<span class="w"> </span>kukeon<span class="w"> </span>--no-daemon
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>cell<span class="w"> </span>kukeond<span class="w"> </span>--realm<span class="w"> </span>kukeon-system<span class="w"> </span>--space<span class="w"> </span>kukeon<span class="w"> </span>--stack<span class="w"> </span>kukeon<span class="w"> </span>--no-daemon
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span>/run/kukeon/kukeond.sock<span class="w"> </span>/run/kukeon/kukeond.pid
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># 2. Rebuild the binary</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>make<span class="w"> </span>kuke
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>ln<span class="w"> </span>-sf<span class="w"> </span>kuke<span class="w"> </span>kukeond
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="c1"># 3. Rebuild the image and load it into the system namespace</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>docker<span class="w"> </span>build<span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">VERSION</span><span class="o">=</span>v0.0.0-dev<span class="w"> </span>-t<span class="w"> </span>kukeon-local:dev<span class="w"> </span>.
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>docker<span class="w"> </span>save<span class="w"> </span>kukeon-local:dev<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">    </span>sudo<span class="w"> </span>ctr<span class="w"> </span>-n<span class="w"> </span>kuke-system.kukeon.io<span class="w"> </span>images<span class="w"> </span>import<span class="w"> </span>-
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="c1"># 4. Re-init pointing at the local image</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>sudo<span class="w"> </span>./kuke<span class="w"> </span>init<span class="w"> </span>--kukeond-image<span class="w"> </span>docker.io/library/kukeon-local:dev
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<p><code>make dev-init</code> drives two host daemons. Bring both up before you start:</p>
+<ul>
+<li><strong>Docker daemon</strong> — builds the local <code>kukeon-local:dev</code> image. Start with <code>service docker start</code> (or <code>systemctl start docker</code>).</li>
+<li><strong>Standalone containerd</strong> at <code>/run/containerd/containerd.sock</code> — used by <code>kuke image load --from-docker</code> and <code>kuke init</code>. This is <em>not</em> the docker-private containerd at <code>/var/run/docker/containerd/containerd.toml</code>; <code>pgrep containerd</code> may show that one even when the system socket is missing. If <code>ls /run/containerd/containerd.sock</code> returns no such file, start it with <code>service containerd start</code> (or <code>systemctl start containerd</code>). On a host with no init script and no systemd, run the binary directly: <code>containerd &gt; /tmp/containerd.log 2&gt;&amp;1 &amp;</code>.</li>
+</ul>
+<p>If either daemon is missing, the failure surfaces several phases into <code>make dev-init</code> as a confusing error — <code>dial unix /var/run/docker.sock: connect: no such file or directory</code> for docker, or <code>failed to connect to containerd: ... dial unix:///run/containerd/containerd.sock: timeout</code> for containerd. Bring both up first to skip the rabbit hole.</p>
+<h2 id="the-canonical-loop-make-dev-init">The canonical loop: <code>make dev-init</code><a class="headerlink" href="#the-canonical-loop-make-dev-init" title="Permanent link">&para;</a></h2>
+<p>After the first bootstrap, each iteration is one command:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>make<span class="w"> </span>dev-init
 </code></pre></div>
-<p>Everything in <code>/opt/kukeon/&lt;user-realm&gt;/...</code> is untouched; only the system cell is replaced.</p>
-<h2 id="first-time-bootstrap">First-time bootstrap<a class="headerlink" href="#first-time-bootstrap" title="Permanent link">&para;</a></h2>
-<p>On a host with no prior Kukeon state, the containerd namespace <code>kuke-system.kukeon.io</code> doesn't exist yet, which means <code>ctr images import</code> into it will silently no-op. You have two choices:</p>
-<p><strong>Option A — let <code>kuke init</code> create the namespace, then re-init against the local image:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Will fail to pull the default ghcr.io image without network access —</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># that&#39;s fine, we only care about the namespace being created.</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>sudo<span class="w"> </span>./kuke<span class="w"> </span>init<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># Now the namespace exists; import and re-init.</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>docker<span class="w"> </span>build<span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">VERSION</span><span class="o">=</span>v0.0.0-dev<span class="w"> </span>-t<span class="w"> </span>kukeon-local:dev<span class="w"> </span>.
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>docker<span class="w"> </span>save<span class="w"> </span>kukeon-local:dev<span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>ctr<span class="w"> </span>-n<span class="w"> </span>kuke-system.kukeon.io<span class="w"> </span>images<span class="w"> </span>import<span class="w"> </span>-
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>sudo<span class="w"> </span>./kuke<span class="w"> </span>init<span class="w"> </span>--kukeond-image<span class="w"> </span>docker.io/library/kukeon-local:dev
+<p><code>scripts/dev-init.sh</code> composes the full re-bootstrap: <code>make kuke</code> (and the <code>kukeond</code> symlink), <code>make install-dev</code> (host symlinks under <code>$(INSTALL_PREFIX)</code>, default <code>/usr/local/bin</code>), the cgroup pre-flight, <code>docker build</code> of <code>kukeon-local:dev</code>, <code>kuke daemon reset</code> of the prior cell, <code>kuke image load --from-docker</code> of the freshly built image into the <code>kuke-system</code> realm, <code>kuke init --kukeond-image docker.io/library/kukeon-local:dev</code>, and a daemon-parity check at the end. It's idempotent — re-running on a healthy host produces a clean re-bootstrap.</p>
+<p>The parity tail must read:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>NAME         NAMESPACE              STATE  CGROUP
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>-----------  ---------------------  -----  -------------------
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>default      default.kukeon.io      Ready  /kukeon/default
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>kuke-system  kuke-system.kukeon.io  Ready  /kukeon/kuke-system
 </code></pre></div>
-<p><strong>Option B — create the namespace by hand first:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>ctr<span class="w"> </span>namespaces<span class="w"> </span>create<span class="w"> </span>kuke-system.kukeon.io
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>docker<span class="w"> </span>build<span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">VERSION</span><span class="o">=</span>v0.0.0-dev<span class="w"> </span>-t<span class="w"> </span>kukeon-local:dev<span class="w"> </span>.
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>docker<span class="w"> </span>save<span class="w"> </span>kukeon-local:dev<span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>ctr<span class="w"> </span>-n<span class="w"> </span>kuke-system.kukeon.io<span class="w"> </span>images<span class="w"> </span>import<span class="w"> </span>-
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>sudo<span class="w"> </span>./kuke<span class="w"> </span>init<span class="w"> </span>--kukeond-image<span class="w"> </span>docker.io/library/kukeon-local:dev
-</code></pre></div>
+<p>If only <code>kuke get realms --no-daemon</code> returns that table but <code>kuke get realms</code> (daemon-routed) does not, the daemon's view of <code>/opt/kukeon</code> diverged from the in-process controller — usually a missing bind-mount in the <code>kukeond</code> cell spec. See <a href="../troubleshooting/#kuke-get-and-kuke-get---no-daemon-disagree">Troubleshooting → <code>kuke get</code> and <code>kuke get --no-daemon</code> disagree</a>.</p>
+<p>User data under <code>/opt/kukeon/default/**</code> is untouched across iterations; only the system cell is replaced.</p>
 <h2 id="make-targets">Make targets<a class="headerlink" href="#make-targets" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2752,7 +2756,19 @@
 <tbody>
 <tr>
 <td><code>make kuke</code></td>
-<td>Build the <code>kuke</code> binary (same binary is used as <code>kukeond</code>)</td>
+<td>Build the <code>kuke</code> binary (same binary is dispatched as <code>kukeond</code> via <code>argv[0]</code>)</td>
+</tr>
+<tr>
+<td><code>make install-dev</code></td>
+<td>Symlink the in-tree <code>kuke</code> and <code>kukeond</code> binaries into <code>$(INSTALL_PREFIX)</code> (default <code>/usr/local/bin</code>). Idempotent (<code>ln -sf</code>).</td>
+</tr>
+<tr>
+<td><code>make uninstall-dev</code></td>
+<td>Remove both symlinks from <code>$(INSTALL_PREFIX)</code>.</td>
+</tr>
+<tr>
+<td><code>make dev-init</code></td>
+<td>The full canonical loop above. Auto-invokes <code>install-dev</code> so <code>sudo kuke …</code> works from any directory.</td>
 </tr>
 <tr>
 <td><code>make test</code></td>
@@ -2768,28 +2784,65 @@
 </tr>
 </tbody>
 </table>
+<p>Override <code>INSTALL_PREFIX</code> for non-standard PATH layouts: <code>make install-dev INSTALL_PREFIX=$HOME/.local/bin</code>.</p>
+<p>Because <code>install-dev</code> lays down <strong>symlinks</strong> (not copies), the next <code>make kuke</code> is picked up automatically — <code>sudo kuke …</code> always runs the freshly built binary. The daemon, however, ships from the <code>kuke-system / kukeon / kukeon / kukeond</code> cell, so daemon-side changes still need a full <code>make dev-init</code> to rebuild the image and reload the cell.</p>
+<h2 id="manual-phases-fallback">Manual phases (fallback)<a class="headerlink" href="#manual-phases-fallback" title="Permanent link">&para;</a></h2>
+<p>To run individual phases by hand — typically while debugging a single phase:</p>
+<ol>
+<li><strong>Tear down the existing daemon cell.</strong></li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>reset<span class="w">                  </span><span class="c1"># preserves /opt/kukeon/default and /opt/kukeon/kuke-system</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>reset<span class="w"> </span>--purge-system<span class="w">   </span><span class="c1"># additionally wipes /opt/kukeon/kuke-system</span>
+</code></pre></div>
+<p>User-realm data under <code>/opt/kukeon/default</code> is preserved either way, so <code>kuke purge --cascade</code> on <code>default</code> can never take down the daemon.</p>
+<ol>
+<li><strong>Build the binaries.</strong></li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>make<span class="w"> </span>kuke
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>ln<span class="w"> </span>-sf<span class="w"> </span>kuke<span class="w"> </span>kukeond<span class="w">   </span><span class="c1"># kukeond is argv[0]-dispatched from the same binary</span>
+</code></pre></div>
+<ol>
+<li><strong>Build and load the local <code>kukeond</code> image.</strong></li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>docker<span class="w"> </span>build<span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">VERSION</span><span class="o">=</span>v0.0.0-dev<span class="w"> </span>-t<span class="w"> </span>kukeon-local:dev<span class="w"> </span>.
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>sudo<span class="w"> </span>./kuke<span class="w"> </span>image<span class="w"> </span>load<span class="w"> </span>--from-docker<span class="w"> </span>kukeon-local:dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>--no-daemon
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>sudo<span class="w"> </span>ctr<span class="w"> </span>-n<span class="w"> </span>kuke-system.kukeon.io<span class="w"> </span>images<span class="w"> </span>ls<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>kukeon-local
+</code></pre></div>
+<p><code>--no-daemon</code> is required because the daemon is not yet running.</p>
+<ol>
+<li><strong>Run <code>kuke init</code>.</strong></li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>sudo<span class="w"> </span>./kuke<span class="w"> </span>init<span class="w"> </span>--kukeond-image<span class="w"> </span>docker.io/library/kukeon-local:dev
+</code></pre></div>
+<p>Expected tail:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>    - cell &quot;kukeond&quot;: created (image docker.io/library/kukeon-local:dev)
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    - cell cgroup: created
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    - cell root container: created
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    - cell containers: started
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>kukeond is ready (unix:///run/kukeon/kukeond.sock)
+</code></pre></div>
 <h2 id="running-without-the-daemon">Running without the daemon<a class="headerlink" href="#running-without-the-daemon" title="Permanent link">&para;</a></h2>
-<p>When iterating on controller code you often don't need to put the daemon back up at all. <code>--no-daemon</code> runs every <code>kuke</code> command in-process against your freshly built binary:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sudo<span class="w"> </span>./kuke<span class="w"> </span>get<span class="w"> </span>realms<span class="w"> </span>--no-daemon
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sudo<span class="w"> </span>./kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>my-cell.yaml<span class="w"> </span>--no-daemon
+<p>When iterating on controller code you often don't need the daemon up at all. <code>--no-daemon</code> runs every <code>kuke</code> command in-process against your freshly built binary:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realms<span class="w"> </span>--no-daemon
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>my-cell.yaml<span class="w"> </span>--no-daemon
 </code></pre></div>
 <p>This is the fastest feedback loop — no image build, no reload, just <code>make kuke</code> and go.</p>
 <h2 id="debugging-from-an-ide">Debugging from an IDE<a class="headerlink" href="#debugging-from-an-ide" title="Permanent link">&para;</a></h2>
 <p><code>main.go</code> dispatches on <code>argv[0]</code>, which means running the binary from an IDE or <code>dlv</code> gives you an "unknown entry command" error (the binary is named something like <code>__debug_bin12345</code>). Set <code>KUKEON_DEBUG_MODE</code> to force a dispatch:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nv">KUKEON_DEBUG_MODE</span><span class="o">=</span>kuke<span class="w">    </span>dlv<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>./__debug_bin<span class="w"> </span>--<span class="w"> </span>get<span class="w"> </span>realms
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nv">KUKEON_DEBUG_MODE</span><span class="o">=</span>kukeond<span class="w"> </span>dlv<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>./__debug_bin<span class="w"> </span>--<span class="w"> </span>serve
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nv">KUKEON_DEBUG_MODE</span><span class="o">=</span>kuke<span class="w">    </span>dlv<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>./__debug_bin<span class="w"> </span>--<span class="w"> </span>get<span class="w"> </span>realms
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nv">KUKEON_DEBUG_MODE</span><span class="o">=</span>kukeond<span class="w"> </span>dlv<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>./__debug_bin<span class="w"> </span>--<span class="w"> </span>serve
 </code></pre></div>
 <h2 id="verifying-daemon-no-daemon-parity">Verifying daemon / no-daemon parity<a class="headerlink" href="#verifying-daemon-no-daemon-parity" title="Permanent link">&para;</a></h2>
 <p>A useful regression check after touching the controller:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Should be byte-identical</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>diff<span class="w"> </span>&lt;<span class="o">(</span>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realms<span class="w"> </span>-o<span class="w"> </span>yaml<span class="o">)</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">     </span>&lt;<span class="o">(</span>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realms<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span>--no-daemon<span class="o">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>diff<span class="w"> </span>&lt;<span class="o">(</span>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realms<span class="w"> </span>-o<span class="w"> </span>yaml<span class="o">)</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">     </span>&lt;<span class="o">(</span>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realms<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span>--no-daemon<span class="o">)</span>
 </code></pre></div>
-<p>If they diverge, something is wrong with either the <code>kukeonv1</code> API surface or the daemon's bind-mount of the run path. See <a href="../troubleshooting/">Troubleshooting</a>.</p>
+<p>The two should be byte-identical. If they diverge, something is wrong with either the <code>kukeonv1</code> API surface or the daemon's bind-mount of the run path. See <a href="../troubleshooting/">Troubleshooting</a>.</p>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../../install/build-from-source/">Build from source</a> — initial build + image instructions</li>
-<li><a href="../init-and-reset/">Init and reset</a> — teardown variants</li>
+<li><a href="../init-and-reset/">Init and reset</a> — teardown variants and the daemon-reset / uninstall split</li>
+<li><a href="../troubleshooting/">Troubleshooting</a> — common failures during bootstrap and daily use</li>
 </ul>
 
 
@@ -2813,7 +2866,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 8, 2026 11:43:42 UTC">May 8, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 20:56:07 UTC">May 13, 2026</span>
   </span>
 
     
