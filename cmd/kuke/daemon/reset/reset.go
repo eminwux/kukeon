@@ -17,10 +17,11 @@
 // Package reset implements `kuke daemon reset`, the lightweight dev-loop
 // teardown for the kukeond cell. It composes stop (with the same SIGTERM →
 // SIGKILL escalation as `kuke daemon stop`) plus delete, then clears the
-// transient socket/PID files under /run/kukeon. User-realm data under
-// /opt/kukeon/default/** is left untouched so a subsequent `kuke init` can
-// re-bootstrap without wiping user workloads. `--purge-system` additionally
-// removes /opt/kukeon/kuke-system for a fully clean re-bootstrap.
+// transient kukeond.{sock,pid} files under the socket dir (default
+// /run/kukeon). User-realm data under /opt/kukeon/default/** is left
+// untouched so a subsequent `kuke init` can re-bootstrap without wiping
+// user workloads. `--purge-system` additionally removes
+// /opt/kukeon/kuke-system for a fully clean re-bootstrap.
 package reset
 
 import (
@@ -160,14 +161,16 @@ func runReset(cmd *cobra.Command, _ []string) error {
 
 	socketDir := resolveSocketDir(cmd)
 	runPath := resolveRunPath(cmd)
-	// kukeond.sock lives under the socket dir (/run/kukeon); kukeond.pid is
-	// written under the run path (/opt/kukeon) by cmd/kukeond/serve.go. The
-	// two diverge — pinning kukeond.pid to the socket dir was the silent #287
-	// no-op that left the daemon-stop step in `kuke uninstall` looking at the
-	// wrong path.
+	// kukeond.sock and kukeond.pid both live under the socket dir
+	// (default /run/kukeon), matching the storage-layout.md design
+	// ("Sockets and pid files belong in /run"). cmd/kukeond/serve.go
+	// derives the pidfile path from filepath.Dir(--socket) so the two
+	// sides agree regardless of --socket overrides; pinning to runPath
+	// was the silent #287 no-op that left the daemon-stop step in
+	// `kuke uninstall` looking at the wrong path.
 	transientFiles := []string{
 		filepath.Join(socketDir, "kukeond.sock"),
-		filepath.Join(runPath, "kukeond.pid"),
+		filepath.Join(socketDir, "kukeond.pid"),
 	}
 	for _, path := range transientFiles {
 		removed, removeErr := removeFileIfExists(path)

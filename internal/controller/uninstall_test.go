@@ -295,10 +295,11 @@ func TestUninstall_DaemonStopStep_PIDPresent(t *testing.T) {
 	tmpRunPath := t.TempDir()
 	tmpSocketDir := t.TempDir()
 
-	// Match the production write path (cmd/kukeond/serve.go:99): kukeond
-	// writes its PID to <runPath>/kukeond.pid. Putting the seed file under
-	// the socket dir is the #287 misconfiguration this test must not pin.
-	pidFilePath := filepath.Join(tmpRunPath, "kukeond.pid")
+	// Match the production write path (cmd/kukeond/serve.go): kukeond
+	// writes its PID to <socketDir>/kukeond.pid (sibling of the socket, per
+	// the storage-layout.md design). Putting the seed file under the run
+	// path is the #287 misconfiguration this test must not pin.
+	pidFilePath := filepath.Join(tmpSocketDir, "kukeond.pid")
 	if err := os.WriteFile(pidFilePath, []byte("12345\n"), 0o644); err != nil {
 		t.Fatalf("seed pid file: %v", err)
 	}
@@ -613,19 +614,22 @@ func equalStringSlices(a, b []string) bool {
 	return true
 }
 
-// TestUninstall_DefaultPIDFileResolvesToRunPath pins the controller's default
-// PID-file path against the production write path in cmd/kukeond/serve.go.
+// TestUninstall_DefaultPIDFileResolvesToSocketDir pins the controller's
+// default PID-file path against the production write path in
+// cmd/kukeond/serve.go.
 //
-// Issue #287: the daemon-stop step from #195 was a silent no-op because
-// Uninstall defaulted KukeondPIDFile to <socketDir>/kukeond.pid while kukeond
-// itself writes <runPath>/kukeond.pid. This test guards against either side
-// drifting again — it asserts the path the controller hands the stopper is
-// exactly filepath.Join(opts.RunPath, "kukeond.pid").
-func TestUninstall_DefaultPIDFileResolvesToRunPath(t *testing.T) {
+// kukeond writes its PID to <socketDir>/kukeond.pid (sibling of the socket),
+// matching the storage-layout.md design "Sockets and pid files belong in
+// /run". Issue #287 was the inverse misalignment — Uninstall used to default
+// to <socketDir>/kukeond.pid while kukeond wrote <runPath>/kukeond.pid; the
+// fix kept the two aligned. This test guards against either side drifting
+// again — it asserts the path the controller hands the stopper is exactly
+// filepath.Join(opts.SocketDir, "kukeond.pid").
+func TestUninstall_DefaultPIDFileResolvesToSocketDir(t *testing.T) {
 	tmpRunPath := t.TempDir()
 	tmpSocketDir := t.TempDir()
 
-	wantPIDFile := filepath.Join(tmpRunPath, "kukeond.pid")
+	wantPIDFile := filepath.Join(tmpSocketDir, "kukeond.pid")
 	var gotPIDFile string
 	stopper := func(_ context.Context, gotPidFile string, _ time.Duration) (controller.DaemonStopReport, error) {
 		gotPIDFile = gotPidFile
@@ -646,15 +650,15 @@ func TestUninstall_DefaultPIDFileResolvesToRunPath(t *testing.T) {
 
 	if gotPIDFile != wantPIDFile {
 		t.Errorf(
-			"default PID-file path mismatch:\n  controller passed: %q\n  cmd/kukeond/serve.go writes: <runPath>/kukeond.pid -> %q",
+			"default PID-file path mismatch:\n  controller passed: %q\n  cmd/kukeond/serve.go writes: <socketDir>/kukeond.pid -> %q",
 			gotPIDFile,
 			wantPIDFile,
 		)
 	}
-	if filepath.Dir(gotPIDFile) == tmpSocketDir {
+	if filepath.Dir(gotPIDFile) == tmpRunPath {
 		t.Errorf(
-			"controller defaulted PID file under socket dir %q — that is the #287 regression",
-			tmpSocketDir,
+			"controller defaulted PID file under run path %q — that is the #287 regression",
+			tmpRunPath,
 		)
 	}
 }
