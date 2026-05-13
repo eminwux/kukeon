@@ -15,10 +15,19 @@ See **[docs/site/vision.md](docs/site/vision.md)** for the full "Kukeon for AI A
 
 ## Status
 
-Kukeon is pre-v1 and under active development. The agent-native story is usable once Session (#46) and Interactive UC2 (#57) ship; P0 primitives (Container volumes, security fields, scoped secrets, network policy) are landed.
+Kukeon is in **v0.5.0 beta**. The operator surface — realms, spaces, stacks, cells, containers, the daemon, `kuke init` / `apply` / `get` / `attach` / `log`, the one-line installer, and v0.4.0 manifest fields — is shipping and usable today. "Beta" means what's released works reliably; "pre-v1" means SemVer API stability isn't promised yet — minor releases can still introduce breaking changes to manifests, CLI verbs, and daemon semantics.
+
+Still pre-v1, gated by:
+
+- **Agent-native primitives** — Session (#46) and Interactive UC2 (#57) are the gate for the agent-native story.
+- **Schema rework** — crew-layers absorption into `CellBlueprint` / `CellConfig` / `Secret` (#423) is a breaking change.
+- **Daemon-only verbs** — `--no-daemon` retirement (#217) is mid-flight; the CLI surface is still moving.
+- **Reconciler-driven lifecycle** — convergent create/delete (#224) changes runtime semantics.
+
+References:
 
 - Umbrella: #48
-- P1 anchors: #46, #57
+- v0.5.0 release tracker: #440
 - Library substrate (sbsh): sbsh#118 ✅
 
 ## Quick Start
@@ -45,6 +54,10 @@ curl -fsSL https://kukeon.io/install.sh | bash -s -- --check
 After install completes you should see the daemon's realm/space/stack hierarchy provisioned and `kukeond` listening on its unix socket:
 
 ```text
+Realm: default (namespace: default.kukeon.io)
+System realm: kuke-system (namespace: kuke-system.kukeon.io)
+Run path: /opt/kukeon
+...
 kukeond is ready (unix:///run/kukeon/kukeond.sock)
 ```
 
@@ -58,7 +71,7 @@ export OS=linux        # Options: linux
 export ARCH=amd64      # Options: amd64, arm64
 
 # Install kuke (the CLI also dispatches as kukeond based on argv[0])
-curl -L -o kuke https://github.com/eminwux/kukeon/releases/download/v0.1.0/kuke-${OS}-${ARCH} && \
+curl -L -o kuke https://github.com/eminwux/kukeon/releases/download/v0.5.0/kuke-${OS}-${ARCH} && \
 chmod +x kuke && \
 sudo install -m 0755 kuke /usr/local/bin/kuke && \
 sudo ln -f /usr/local/bin/kuke /usr/local/bin/kukeond
@@ -88,6 +101,8 @@ EOF
 ```
 
 `kuke autocomplete zsh` and `kuke autocomplete fish` are also supported.
+
+Completions are dynamic: every tab dispatches through `kuke __complete`, so newly added profiles, realms, and cells (and `$KUKE_PROFILES_DIR` overrides) are picked up on the next tab without re-sourcing the script.
 
 ## Documentation
 
