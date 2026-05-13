@@ -119,32 +119,39 @@ func runReset(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("inspect kukeond cell: %w", err)
 	}
-	if !getRes.MetadataExists {
-		return errors.New("kukeon host is not initialized: kukeond cell metadata is missing; run `kuke init` first")
-	}
-
-	if isCellRunning(getRes.Cell) {
-		if stopErr := stopPhase(cmd, client, doc, timeout); stopErr != nil {
-			return stopErr
+	if getRes.MetadataExists {
+		if isCellRunning(getRes.Cell) {
+			if stopErr := stopPhase(cmd, client, doc, timeout); stopErr != nil {
+				return stopErr
+			}
+		} else {
+			cmd.Printf(
+				"kukeond was already stopped (cell %q in realm %q)\n",
+				consts.KukeSystemCellName, consts.KukeSystemRealmName,
+			)
 		}
-	} else {
+
+		delRes, err := client.DeleteCell(cmd.Context(), doc)
+		if err != nil {
+			return fmt.Errorf("delete kukeond cell: %w", err)
+		}
+		if !delRes.MetadataDeleted {
+			return errors.New("delete kukeond cell: controller reported no change")
+		}
 		cmd.Printf(
-			"kukeond was already stopped (cell %q in realm %q)\n",
+			"kukeond cell deleted (cell %q in realm %q)\n",
+			consts.KukeSystemCellName, consts.KukeSystemRealmName,
+		)
+	} else {
+		// Teardown verbs are idempotent — a second `kuke daemon reset` after
+		// the cell metadata is already gone should still finish the remaining
+		// transient-file / --purge-system steps and exit 0, rather than reuse
+		// the "host not initialized" sentinel that gates read/write verbs.
+		cmd.Printf(
+			"kukeond cell already torn down (cell %q in realm %q)\n",
 			consts.KukeSystemCellName, consts.KukeSystemRealmName,
 		)
 	}
-
-	delRes, err := client.DeleteCell(cmd.Context(), doc)
-	if err != nil {
-		return fmt.Errorf("delete kukeond cell: %w", err)
-	}
-	if !delRes.MetadataDeleted {
-		return errors.New("delete kukeond cell: controller reported no change")
-	}
-	cmd.Printf(
-		"kukeond cell deleted (cell %q in realm %q)\n",
-		consts.KukeSystemCellName, consts.KukeSystemRealmName,
-	)
 
 	socketDir := resolveSocketDir(cmd)
 	runPath := resolveRunPath(cmd)
