@@ -132,8 +132,8 @@ func TestLog_DefaultDumpsCaptureAndExits(t *testing.T) {
 	tail := &tailCapture{payload: []byte("captured-bytes")}
 	cmd, out := newCmdWithCtx(t, fc, tail)
 	cmd.SetArgs([]string{
-		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
-		"--container", "work",
+		"--realm", "r1", "--space", "s1", "--stack", "st1",
+		"--container", "work", "c1",
 	})
 
 	if err := cmd.Execute(); err != nil {
@@ -168,8 +168,8 @@ func TestLog_Follow_CancelsCleanlyOnCtxDone(t *testing.T) {
 	ctx, cancel := context.WithCancel(cmd.Context())
 	cmd.SetContext(ctx)
 	cmd.SetArgs([]string{
-		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
-		"--container", "work", "--follow",
+		"--realm", "r1", "--space", "s1", "--stack", "st1",
+		"--container", "work", "c1", "--follow",
 	})
 
 	var wg sync.WaitGroup
@@ -212,8 +212,8 @@ func TestLog_MissingCaptureFile_WrapsWithCellAndContainer(t *testing.T) {
 	tail := &tailCapture{err: os.ErrNotExist}
 	cmd, _ := newCmdWithCtx(t, fc, tail)
 	cmd.SetArgs([]string{
-		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
-		"--container", "work",
+		"--realm", "r1", "--space", "s1", "--stack", "st1",
+		"--container", "work", "c1",
 	})
 
 	err := cmd.Execute()
@@ -243,7 +243,7 @@ func TestLog_AmbiguousCandidates_ErrorsWithList(t *testing.T) {
 	tail := &tailCapture{}
 	cmd, _ := newCmdWithCtx(t, fc, tail)
 	cmd.SetArgs([]string{
-		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
+		"--realm", "r1", "--space", "s1", "--stack", "st1", "c1",
 	})
 
 	err := cmd.Execute()
@@ -271,7 +271,7 @@ func TestLog_NoCandidate_Errors(t *testing.T) {
 	tail := &tailCapture{}
 	cmd, _ := newCmdWithCtx(t, fc, tail)
 	cmd.SetArgs([]string{
-		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
+		"--realm", "r1", "--space", "s1", "--stack", "st1", "c1",
 	})
 
 	err := cmd.Execute()
@@ -299,8 +299,8 @@ func TestLog_NonAttachable_TailsHostLogPath(t *testing.T) {
 	tail := &tailCapture{payload: []byte("daemon-stderr-line\n")}
 	cmd, out := newCmdWithCtx(t, fc, tail)
 	cmd.SetArgs([]string{
-		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
-		"--container", "side",
+		"--realm", "r1", "--space", "s1", "--stack", "st1",
+		"--container", "side", "c1",
 	})
 
 	if err := cmd.Execute(); err != nil {
@@ -336,7 +336,7 @@ func TestLog_AmbiguousAcceptsNonAttachable(t *testing.T) {
 	tail := &tailCapture{}
 	cmd, _ := newCmdWithCtx(t, fc, tail)
 	cmd.SetArgs([]string{
-		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
+		"--realm", "r1", "--space", "s1", "--stack", "st1", "c1",
 	})
 
 	err := cmd.Execute()
@@ -372,7 +372,7 @@ func TestLog_AutoPicksLoneNonAttachable(t *testing.T) {
 	tail := &tailCapture{}
 	cmd, _ := newCmdWithCtx(t, fc, tail)
 	cmd.SetArgs([]string{
-		"--realm", "kuke-system", "--space", "kukeon", "--stack", "kukeon", "--cell", "kukeond",
+		"--realm", "kuke-system", "--space", "kukeon", "--stack", "kukeon", "kukeond",
 	})
 
 	if err := cmd.Execute(); err != nil {
@@ -380,6 +380,74 @@ func TestLog_AutoPicksLoneNonAttachable(t *testing.T) {
 	}
 	if tail.path != wantPath {
 		t.Errorf("tail path = %q, want %q", tail.path, wantPath)
+	}
+}
+
+// TestLog_PositionalCell_DefaultsRealmSpaceStack covers the issue-#374
+// contract: `kuke log <cell>` (no realm/space/stack flags) targets the
+// user-default hierarchy `default/default/default`. The runtime resolves
+// realm/space/stack from the flag defaults wired into NewLogCmd.
+func TestLog_PositionalCell_DefaultsRealmSpaceStack(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	var gotRealm, gotSpace, gotStack, gotCell string
+	fc := &fakeClient{
+		listContainersFn: func(realm, space, stack, cell string) ([]v1beta1.ContainerSpec, error) {
+			gotRealm, gotSpace, gotStack, gotCell = realm, space, stack, cell
+			return []v1beta1.ContainerSpec{
+				{ID: "root", Root: true},
+				{ID: "work", Attachable: true},
+			}, nil
+		},
+		logContainerFn: func(doc v1beta1.ContainerDoc) (kukeonv1.LogContainerResult, error) {
+			if got := doc.Spec.RealmID; got != "default" {
+				t.Errorf("doc.Spec.RealmID = %q, want %q", got, "default")
+			}
+			if got := doc.Spec.SpaceID; got != "default" {
+				t.Errorf("doc.Spec.SpaceID = %q, want %q", got, "default")
+			}
+			if got := doc.Spec.StackID; got != "default" {
+				t.Errorf("doc.Spec.StackID = %q, want %q", got, "default")
+			}
+			if got := doc.Spec.CellID; got != "hello" {
+				t.Errorf("doc.Spec.CellID = %q, want %q", got, "hello")
+			}
+			return kukeonv1.LogContainerResult{HostCapturePath: testHostCapture}, nil
+		},
+	}
+	tail := &tailCapture{}
+	cmd, _ := newCmdWithCtx(t, fc, tail)
+	cmd.SetArgs([]string{"hello"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if gotRealm != "default" || gotSpace != "default" || gotStack != "default" || gotCell != "hello" {
+		t.Errorf("ListContainers called with (%q, %q, %q, %q), want (default, default, default, hello)",
+			gotRealm, gotSpace, gotStack, gotCell)
+	}
+	if tail.calls != 1 {
+		t.Fatalf("tail called %d times, want 1", tail.calls)
+	}
+}
+
+// TestLog_RejectsCellFlag locks in the breaking change: the legacy
+// `--cell` flag was removed in favor of the positional arg. The cobra
+// parser must reject `--cell` rather than silently accepting it.
+func TestLog_RejectsCellFlag(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	cmd, _ := newCmdWithCtx(t, &fakeClient{}, &tailCapture{})
+	cmd.SetArgs([]string{
+		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("Execute returned nil, want unknown-flag error")
+	}
+	if !strings.Contains(err.Error(), "unknown flag") {
+		t.Errorf("error %q does not mention unknown flag", err.Error())
 	}
 }
 
@@ -392,33 +460,32 @@ func TestLog_MissingFlags(t *testing.T) {
 		wantErr error
 	}{
 		{
-			name:    "missing realm",
-			args:    []string{"--space", "s1", "--stack", "st1", "--cell", "c1"},
+			name:    "explicit empty realm",
+			args:    []string{"--realm", "", "--space", "s1", "--stack", "st1", "c1"},
 			wantErr: errdefs.ErrRealmNameRequired,
 		},
 		{
-			name:    "missing space",
-			args:    []string{"--realm", "r1", "--stack", "st1", "--cell", "c1"},
+			name:    "explicit empty space",
+			args:    []string{"--realm", "r1", "--space", "", "--stack", "st1", "c1"},
 			wantErr: errdefs.ErrSpaceNameRequired,
 		},
 		{
-			name:    "missing stack",
-			args:    []string{"--realm", "r1", "--space", "s1", "--cell", "c1"},
+			name:    "explicit empty stack",
+			args:    []string{"--realm", "r1", "--space", "s1", "--stack", "", "c1"},
 			wantErr: errdefs.ErrStackNameRequired,
-		},
-		{
-			name:    "missing cell",
-			args:    []string{"--realm", "r1", "--space", "s1", "--stack", "st1"},
-			wantErr: errdefs.ErrCellNameRequired,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Reset clears viper's defaults set by DefineKV at package
+			// init so an explicit `--realm ""` resolves to the empty
+			// string and trips the runtime guard. t.Setenv keeps the
+			// env-var path quiet too, in case the dev box exports a
+			// KUKE_LOG_*.
 			viper.Reset()
 			t.Setenv("KUKE_LOG_REALM", "")
 			t.Setenv("KUKE_LOG_SPACE", "")
 			t.Setenv("KUKE_LOG_STACK", "")
-			t.Setenv("KUKE_LOG_CELL", "")
 
 			cmd, _ := newCmdWithCtx(t, &fakeClient{}, &tailCapture{})
 			cmd.SetArgs(tc.args)
@@ -428,6 +495,24 @@ func TestLog_MissingFlags(t *testing.T) {
 				t.Fatalf("error %v does not unwrap to %v", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// TestLog_MissingCellArg covers the cobra arg-count guard: omitting the
+// positional <cell> exits before runLog ever runs, surfacing a
+// usage-style error rather than ErrCellNameRequired.
+func TestLog_MissingCellArg(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	cmd, _ := newCmdWithCtx(t, &fakeClient{}, &tailCapture{})
+	cmd.SetArgs([]string{"--realm", "r1", "--space", "s1", "--stack", "st1"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("Execute returned nil, want arg-count error")
+	}
+	if !strings.Contains(err.Error(), "accepts 1 arg") {
+		t.Errorf("error %q does not mention arg-count requirement", err.Error())
 	}
 }
 
@@ -456,8 +541,8 @@ func TestTailFile_DefaultDumpsAndReturns(t *testing.T) {
 	cmd.SetOut(out)
 	cmd.SetErr(out)
 	cmd.SetArgs([]string{
-		"--realm", "r1", "--space", "s1", "--stack", "st1", "--cell", "c1",
-		"--container", "work",
+		"--realm", "r1", "--space", "s1", "--stack", "st1",
+		"--container", "work", "c1",
 	})
 	t.Cleanup(viper.Reset)
 

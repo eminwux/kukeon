@@ -118,7 +118,7 @@ sudo kuke daemon logs -f               # follow until SIGINT
 - `daemon kill` has no grace period; this is the escape hatch for a hung daemon. Use `stop` for the graceful path.
 - `daemon reset` is destructive (cell deletion + socket removal) and described in the Bootstrap & teardown section.
 - After `daemon stop`, daemon-routed commands (anything **without** `--no-daemon`) fail with `dial unix /run/kukeon/kukeond.sock: connect: no such file or directory` and exit non-zero. `--no-daemon` commands still work for the subset of operations the in-process controller supports.
-- `daemon logs` is a typed shortcut for `kuke log --realm kuke-system --space kukeon --stack kukeon --cell kukeond`; the coordinates are wired in. Exit code 0 even when the file is empty.
+- `daemon logs` is a typed shortcut for `kuke log --realm kuke-system --space kukeon --stack kukeon kukeond`; the coordinates are wired in. Exit code 0 even when the file is empty.
 
 ## Realm / space / stack management
 
@@ -270,8 +270,8 @@ sudo kuke apply -f manifest.yaml -o json
 ```bash
 kuke get cell <name> --realm <r> --space <s> --stack <st>
 kuke get container <name> --cell <c> ...
-kuke log --cell <c> --container <con>                  # one-shot
-kuke log --cell <c> --container <con> -f               # follow until SIGINT
+kuke log <cell> --container <con>                      # one-shot
+kuke log <cell> --container <con> -f                   # follow until SIGINT
 kuke attach <cell> --container <con>                   # alias: att
 ```
 

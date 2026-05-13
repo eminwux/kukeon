@@ -61,7 +61,7 @@ func NewLogsCmd() *cobra.Command {
 		Short:   "Print the kukeond daemon's stdout/stderr (use -f to follow)",
 		Long: "Print the kukeond container's stdout/stderr stream.\n\n" +
 			"Shortcut for `kuke log --realm kuke-system --space kukeon " +
-			"--stack kukeon --cell kukeond`; the coordinates are static and " +
+			"--stack kukeon kukeond`; the coordinates are static and " +
 			"filled in for you. By default the current contents are printed " +
 			"and the command exits; pass -f/--follow to tail until SIGINT.",
 		Args:          cobra.NoArgs,
