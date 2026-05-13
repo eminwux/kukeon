@@ -19,6 +19,16 @@ status:
 
 Only `v1beta1` is currently defined. See [Architecture → API versioning](../architecture/api-versioning.md) for how Kukeon decouples the on-wire schema from internal types, which lets new versions coexist when they ship.
 
+## What's new in v0.5.0
+
+The v1beta1 schema picked up several additions since v0.3.0. The biggest ones, by kind:
+
+- **All four levels (realm / space / stack / cell)** now report `status.subtreeControllers` — the cgroup-v2 controller set actually delegated on the resource's own `cgroup.subtree_control` — and a uniform set of lifecycle fields (`createdAt`, `updatedAt`, `readyAt`, `reason`, `message`, `cgroupReady`). See each kind's `status` table.
+- **[Cell](cell.md)** — `spec.nestedCgroupRuntime` opts a cell into full controller delegation for nested runtimes (e.g. an inner kukeond). `spec.rootContainerId` selection rules are spelled out.
+- **[Container](container.md)** — `spec.hostCgroup` opts the container into its parent's cgroup namespace (kukeond-style host-cgroup mode). `spec.volumes[].kind` now discriminates `bind` vs `tmpfs`, with `sizeBytes` and `mode` knobs. Each container in a cell sees a managed `/etc/hosts` / `/etc/hostname` plus `KUKEON_*` identity environment variables.
+
+If you're moving from v0.3.0 or v0.4.0, the per-kind pages below are the source of truth.
+
 ## Kinds
 
 - [Realm](realm.md) — tenant boundary

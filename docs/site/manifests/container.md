@@ -63,6 +63,7 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 | `networks`        | array of string            | no       | Additional CNI networks to join beyond the cell's default                                                             |
 | `networksAliases` | array of string            | no       | DNS aliases for the container within its CNI networks                                                                 |
 | `privileged`      | bool                       | no       | Run privileged (full capabilities, access to `/dev`, etc.)                                                            |
+| `hostCgroup`      | bool                       | no       | Opt the container into its parent's cgroup namespace (see [Host cgroup mode](#host-cgroup-mode))                      |
 | `secrets`         | array of `ContainerSecret` | no       | Inject credentials resolved by the daemon — never written to status or YAML (see [ContainerSecret](#containersecret)) |
 | `cniConfigPath`   | string                     | no       | Override the CNI config directory for this container                                                                  |
 | `restartPolicy`   | string                     | no       | Restart policy. Reserved — restart semantics are not finalized.                                                       |
@@ -72,13 +73,27 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 
 ### VolumeMount
 
-Each entry in `spec.volumes` is a bind mount of a host path into the container.
+Each entry in `spec.volumes` is a mount attached to the container. The `kind` discriminator selects which OCI mount type the runtime emits.
 
-| Field      | Type   | Required | Description                                                                              |
-| ---------- | ------ | -------- | ---------------------------------------------------------------------------------------- |
-| `source`   | string | yes      | Absolute host path. Must exist at apply time. Named / managed volumes are not supported. |
-| `target`   | string | yes      | Absolute path inside the container                                                       |
-| `readOnly` | bool   | no       | Mount read-only when `true` (writes fail with `EROFS`). Defaults to `false`.             |
+| Field       | Type            | Required           | Description                                                                                                                                                                          |
+| ----------- | --------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `kind`      | `bind`\|`tmpfs` | no                 | Mount type. Empty means `bind` for back-compat with YAML authored before the discriminator existed.                                                                                  |
+| `source`    | string          | yes for `bind`     | Absolute host path. Must exist at apply time. Named / managed volumes are not supported. Must be empty for `kind: tmpfs`.                                                            |
+| `target`    | string          | yes                | Absolute path inside the container                                                                                                                                                   |
+| `readOnly`  | bool            | no                 | Mount read-only when `true` (writes fail with `EROFS`). Defaults to `false`.                                                                                                         |
+| `sizeBytes` | int             | no (`tmpfs` only)  | Tmpfs size in bytes. When non-zero, the standard tmpfs `size=` option is set. Ignored for `bind`.                                                                                    |
+| `mode`      | uint            | no (`tmpfs` only)  | Tmpfs root-directory mode (e.g. `0755`). When non-zero, the standard tmpfs `mode=` option is set. Ignored for `bind`.                                                                |
+
+```yaml
+volumes:
+  - source: /srv/html
+    target: /usr/share/nginx/html
+    readOnly: true
+  - kind: tmpfs
+    target: /tmp
+    sizeBytes: 268435456 # 256 MiB
+    mode: 0755
+```
 
 ### ContainerSecret
 
@@ -105,6 +120,37 @@ secrets:
 ```
 
 File-mount mode stages secrets under `/run/kukeon/secrets/<containerdId>/<name>` on the host, with owner-only read perms, then bind-mounts them read-only into the container. Because containerd persists resolved env vars in its own runtime spec, env-injection mode leaves the value in containerd's state; file-mount mode keeps it only in the tmpfs staging file.
+
+### Managed `/etc/hosts` and `/etc/hostname`
+
+Every container in a cell sees a managed `/etc/hostname` and (unless its cell's root container runs with `hostNetwork: true`) a managed `/etc/hosts`, bind-mounted in by kukeond.
+
+- `/etc/hostname` contains the **cell's** name plus a trailing newline. All containers in the same cell agree on the hostname.
+- `/etc/hosts` carries the standard localhost block plus a `<cellIP>\t<cellName>` line once CNI ADD has assigned the cell's address. The cell IP line is filled in once the cell is reachable; before that, only the localhost block is present.
+
+Host-network cells (cells whose root container is declared with `hostNetwork: true` — the kukeond carve-out) inherit the host's `/etc/hosts` directly; kukeond does not overlay one.
+
+### `KUKEON_*` identity environment variables
+
+Kukeon exports the container's location in the realm/space/stack/cell hierarchy as environment variables visible to the process at startup:
+
+| Variable                  | Value                                                              |
+| ------------------------- | ------------------------------------------------------------------ |
+| `KUKEON_REALM`            | The container's realm name                                         |
+| `KUKEON_SPACE`            | The container's space name                                         |
+| `KUKEON_STACK`            | The container's stack name                                         |
+| `KUKEON_CELL_NAME`        | The container's cell name                                          |
+| `KUKEON_CONTAINER_ID`     | The container's `spec.id`                                          |
+| `KUKEON_CGROUP_PATH`      | Absolute cgroup path of the cell                                   |
+| `KUKEON_CELL_PROFILE_NAME` | Name of the cell profile that materialized the cell, when applicable |
+
+These pairs are appended to the container's effective environment so user-declared `spec.env` entries still take precedence on collision.
+
+### Host cgroup mode
+
+`spec.hostCgroup: true` opts the container into its parent's cgroup namespace — the runtime omits the cgroup `LinuxNamespace` from the OCI spec, and the container sees the host cgroup tree directly instead of seeing its own cgroup as `/`.
+
+Set this only for cells that hosts a nested runtime (containerd, runc, dockerd, an inner `kuke init`) that needs to write cgroups *outside* its own subtree. For ordinary workload containers, leave it `false` (the default). The canonical use case is the kukeond cell in dev-init phase 2.
 
 ## status
 
