@@ -721,10 +721,21 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#from-a-release" class="md-nav__link">
+  <a href="#one-line-install-recommended" class="md-nav__link">
     <span class="md-ellipsis">
       
-        From a release
+        One-line install (recommended)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manual-install-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual install (fallback)
       
     </span>
   </a>
@@ -736,6 +747,17 @@
     <span class="md-ellipsis">
       
         Verify the install
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#daily-use-without-sudo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Daily use without sudo
       
     </span>
   </a>
@@ -2376,10 +2398,21 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#from-a-release" class="md-nav__link">
+  <a href="#one-line-install-recommended" class="md-nav__link">
     <span class="md-ellipsis">
       
-        From a release
+        One-line install (recommended)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manual-install-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual install (fallback)
       
     </span>
   </a>
@@ -2391,6 +2424,17 @@
     <span class="md-ellipsis">
       
         Verify the install
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#daily-use-without-sudo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Daily use without sudo
       
     </span>
   </a>
@@ -2440,40 +2484,100 @@
 
 
 <h1 id="install-on-linux">Install on Linux<a class="headerlink" href="#install-on-linux" title="Permanent link">&para;</a></h1>
-<p>Kukeon ships a single static binary per platform. The same binary behaves as <code>kuke</code> (the CLI) or <code>kukeond</code> (the daemon) depending on the name it is invoked under. You install the binary once and create a hard link for the second name.</p>
-<h2 id="from-a-release">From a release<a class="headerlink" href="#from-a-release" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Pick your platform</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OS</span><span class="o">=</span>linux<span class="w">             </span><span class="c1"># Options: linux</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ARCH</span><span class="o">=</span>amd64<span class="w">           </span><span class="c1"># Options: amd64, arm64</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># Download, install, and link</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>curl<span class="w"> </span>-L<span class="w"> </span>-o<span class="w"> </span>kuke<span class="w"> </span>https://github.com/eminwux/kukeon/releases/download/v0.1.0/kuke-<span class="si">${</span><span class="nv">OS</span><span class="si">}</span>-<span class="si">${</span><span class="nv">ARCH</span><span class="si">}</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>chmod<span class="w"> </span>+x<span class="w"> </span>kuke
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span>kuke<span class="w"> </span>/usr/local/bin/kuke
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>sudo<span class="w"> </span>ln<span class="w"> </span>-f<span class="w"> </span>/usr/local/bin/kuke<span class="w"> </span>/usr/local/bin/kukeond
+<p>Kukeon (v0.5.0 beta) ships a single static binary per platform. The same binary behaves as <code>kuke</code> (the CLI) or <code>kukeond</code> (the daemon) depending on the name it is invoked under: you install the binary once and create a hard link for the second name. The one-line installer below does both for you.</p>
+<p>Before installing, confirm cgroups v2 and containerd are in place — see <a href="../prerequisites/">Prerequisites</a>. The installer also checks them and exits with a distro-aware hint on any miss.</p>
+<h2 id="one-line-install-recommended">One-line install (recommended)<a class="headerlink" href="#one-line-install-recommended" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://kukeon.io/install.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash
+</code></pre></div>
+<p>The installer:</p>
+<ol>
+<li>Detects your platform (<code>linux/amd64</code> or <code>linux/arm64</code>) and refuses anything else.</li>
+<li>Verifies cgroups v2 is mounted and <code>/run/containerd/containerd.sock</code> is responsive. On any miss it prints a distro-aware hint and exits non-zero without touching the system.</li>
+<li>Downloads the latest release binary from GitHub, verifies its <code>.sha256</code> checksum, installs it to <code>/usr/local/bin/kuke</code>, and hard-links <code>kukeond</code> next to it.</li>
+<li>Runs <code>sudo kuke init</code> to bring up the daemon. Skipped on a host that already has a healthy <code>kukeond</code> listening on <code>/run/kukeon/kukeond.sock</code>.</li>
+</ol>
+<p>Pass <code>--check</code> to run the prereq checks only without touching the system:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://kukeon.io/install.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash<span class="w"> </span>-s<span class="w"> </span>--<span class="w"> </span>--check
+</code></pre></div>
+<p>Environment overrides the installer honors:</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>KUKE_VERSION</code></td>
+<td>Pin a specific release tag (default: resolve latest via GitHub).</td>
+</tr>
+<tr>
+<td><code>KUKE_REPO</code></td>
+<td>GitHub repo path for forks (default: <code>eminwux/kukeon</code>).</td>
+</tr>
+<tr>
+<td><code>KUKE_INSTALL_PREFIX</code></td>
+<td>Install dir (default: <code>/usr/local/bin</code>).</td>
+</tr>
+<tr>
+<td><code>KUKE_SKIP_INIT=1</code></td>
+<td>Skip the post-install <code>kuke init</code> step.</td>
+</tr>
+<tr>
+<td><code>KUKE_SKIP_CHECKSUM=1</code></td>
+<td>Skip <code>.sha256</code> verification (not recommended).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="manual-install-fallback">Manual install (fallback)<a class="headerlink" href="#manual-install-fallback" title="Permanent link">&para;</a></h2>
+<p>If you would rather drive each step yourself — e.g. installing onto an air-gapped host, pinning a non-default release tag, or scripting the install into an image build — the steps the one-liner runs are:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Pick your platform</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OS</span><span class="o">=</span>linux<span class="w">             </span><span class="c1"># Options: linux</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ARCH</span><span class="o">=</span>amd64<span class="w">           </span><span class="c1"># Options: amd64, arm64</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">KUKE_VERSION</span><span class="o">=</span>v0.5.0<span class="w">  </span><span class="c1"># Or the release you want to pin</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1"># Download, install, and hard-link</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>curl<span class="w"> </span>-L<span class="w"> </span>-o<span class="w"> </span>kuke<span class="w"> </span><span class="s2">&quot;https://github.com/eminwux/kukeon/releases/download/</span><span class="si">${</span><span class="nv">KUKE_VERSION</span><span class="si">}</span><span class="s2">/kuke-</span><span class="si">${</span><span class="nv">OS</span><span class="si">}</span><span class="s2">-</span><span class="si">${</span><span class="nv">ARCH</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>chmod<span class="w"> </span>+x<span class="w"> </span>kuke
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span>kuke<span class="w"> </span>/usr/local/bin/kuke
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>sudo<span class="w"> </span>ln<span class="w"> </span>-f<span class="w"> </span>/usr/local/bin/kuke<span class="w"> </span>/usr/local/bin/kukeond
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="c1"># Bring up the daemon</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>init
 </code></pre></div>
 <p>The hard link is required: <code>main.go</code> dispatches to <code>kuke</code> or <code>kukeond</code> by looking at <code>argv[0]</code> (see <a href="../../architecture/process-model/">Architecture → Process Model</a>). Running <code>kuke kukeond …</code> does <strong>not</strong> enter the daemon tree.</p>
 <h2 id="verify-the-install">Verify the install<a class="headerlink" href="#verify-the-install" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>$<span class="w"> </span>kuke<span class="w"> </span>version
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>v0.1.0
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>$<span class="w"> </span>kukeond<span class="w"> </span>--help
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>Kukeon<span class="w"> </span>daemon:<span class="w"> </span>hosts<span class="w"> </span>the<span class="w"> </span>kukeonv1<span class="w"> </span>API<span class="w"> </span>over<span class="w"> </span>a<span class="w"> </span>unix<span class="w"> </span>socket
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>...
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>$<span class="w"> </span>kuke<span class="w"> </span>version
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>v0.5.0
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>$<span class="w"> </span>kukeond<span class="w"> </span>--help
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>Kukeon<span class="w"> </span>daemon:<span class="w"> </span>hosts<span class="w"> </span>the<span class="w"> </span>kukeonv1<span class="w"> </span>API<span class="w"> </span>over<span class="w"> </span>a<span class="w"> </span>unix<span class="w"> </span>socket
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>...
 </code></pre></div>
+<p><code>kuke init</code> should have left the daemon listening on <code>/run/kukeon/kukeond.sock</code> and the canonical two-realm hierarchy provisioned:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>$<span class="w"> </span>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realms
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>NAME<span class="w">         </span>NAMESPACE<span class="w">              </span>STATE<span class="w">  </span>CGROUP
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>default<span class="w">      </span>default.kukeon.io<span class="w">      </span>Ready<span class="w">  </span>/kukeon/default
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>kuke-system<span class="w">  </span>kuke-system.kukeon.io<span class="w">  </span>Ready<span class="w">  </span>/kukeon/kuke-system
+</code></pre></div>
+<p><code>default</code> is the user-workload realm — <code>kuke create …</code> lands here by default. <code>kuke-system</code> is owned by Kukeon itself and hosts the <code>kukeond</code> daemon cell.</p>
+<h2 id="daily-use-without-sudo">Daily use without sudo<a class="headerlink" href="#daily-use-without-sudo" title="Permanent link">&para;</a></h2>
+<p><code>kuke init</code> provisions a system <code>kukeon</code> group and sets the kukeond socket to mode <code>0660 root:kukeon</code>. Add yourself to the group so daemon-routed commands (<code>kuke get</code>, <code>kuke create</code>, <code>kuke apply</code>, <code>kuke delete</code>, <code>kuke log</code>, <code>kuke attach</code>) don't need <code>sudo</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>sudo<span class="w"> </span>usermod<span class="w"> </span>-aG<span class="w"> </span>kukeon<span class="w"> </span><span class="nv">$USER</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># Log out and back in (or run `newgrp kukeon`) so the group takes effect, then:</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>kuke<span class="w"> </span>get<span class="w"> </span>realms
+</code></pre></div>
+<p>Operations that bypass the daemon still need root: <code>kuke init</code>, <code>kuke daemon reset</code>, <code>kuke image load --no-daemon</code>, <code>kuke doctor cgroups --probe</code>, and any command run with the <code>--no-daemon</code> flag.</p>
 <h2 id="uninstall">Uninstall<a class="headerlink" href="#uninstall" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span>/usr/local/bin/kuke<span class="w"> </span>/usr/local/bin/kukeond
+<p><code>kuke uninstall</code> removes all kukeon runtime state from the host — stops and deletes the <code>kukeond</code> cell, clears <code>/run/kukeon</code>, and wipes <code>/opt/kukeon</code> and the kukeon-generated CNI conflists. It prompts for interactive confirmation by default; pass <code>-y</code> to skip the prompt in scripts:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>uninstall<span class="w"> </span>-y
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span>/usr/local/bin/kuke<span class="w"> </span>/usr/local/bin/kukeond
 </code></pre></div>
-<p>If you want to wipe runtime state too, stop anything still running and remove the run path:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span><span class="nb">kill</span><span class="w"> </span>cell<span class="w"> </span>kukeond<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>--space<span class="w"> </span>kukeon<span class="w"> </span>--stack<span class="w"> </span>kukeon<span class="w"> </span>--no-daemon<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>cell<span class="w"> </span>kukeond<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>--space<span class="w"> </span>kukeon<span class="w"> </span>--stack<span class="w"> </span>kukeon<span class="w"> </span>--no-daemon<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span>/run/kukeon/kukeond.sock<span class="w"> </span>/run/kukeon/kukeond.pid
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-rf<span class="w"> </span>/opt/kukeon
-</code></pre></div>
-<p>The <code>/etc/cni/net.d/*.conflist</code> files Kukeon generated can be removed too if you are not using CNI for anything else; if other tools on the host use CNI, inspect the files first.</p>
+<p><code>uninstall</code> only touches CNI conflists Kukeon itself generated; other files under <code>/etc/cni/net.d</code> are left alone. If you want to remove the <code>kukeon</code> system group too, finish with <code>sudo groupdel kukeon</code>.</p>
 <h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../../getting-started/">Getting Started</a> — bootstrap the runtime</li>
+<li><a href="../../getting-started/">Getting Started</a> — bring up a hello-world cell</li>
 <li><a href="../build-from-source/">Build from source</a> — compile <code>kuke</code> / <code>kukeond</code> from a local checkout</li>
 </ul>
 
@@ -2498,7 +2602,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 21, 2026 12:22:34 UTC">April 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 19:31:01 UTC">May 13, 2026</span>
   </span>
 
     

@@ -2484,12 +2484,13 @@
 
 
 <h1 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h1>
-<p>Kukeon runs on a single Linux host and relies on two things being present before you install the binary:</p>
+<p>Kukeon (v0.5.0 beta) runs on a single Linux host and relies on two things being present before you install the binary:</p>
 <ol>
 <li>A kernel with <strong>cgroups v2</strong> enabled</li>
 <li>A running <strong>containerd</strong> daemon</li>
 </ol>
 <p>CNI plugins are bundled inside the <code>kukeond</code> container image, so the standard daemon-mediated install path does <strong>not</strong> need them on the host. If you plan to use the transitional <code>--no-daemon</code> flag for some operations, see the <a href="#cni-plugins-for---no-daemon-only"><code>--no-daemon</code> host-CNI note below</a>.</p>
+<p>The <a href="../install-linux/">one-line installer</a> checks both prereqs for you before touching the system; the notes below cover the same checks for operators driving the install manually or debugging a failed installer run.</p>
 <h2 id="linux-with-cgroups-v2">Linux with cgroups v2<a class="headerlink" href="#linux-with-cgroups-v2" title="Permanent link">&para;</a></h2>
 <p>Kukeon creates its own cgroup subtree rooted at <code>/kukeon</code>. That subtree lives under the host's cgroup v2 hierarchy (typically mounted at <code>/sys/fs/cgroup</code>).</p>
 <p>Check that cgroups v2 is the unified hierarchy:</p>
@@ -2497,35 +2498,43 @@
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>cgroup2<span class="w"> </span>on<span class="w"> </span>/sys/fs/cgroup<span class="w"> </span><span class="nb">type</span><span class="w"> </span>cgroup2<span class="w"> </span><span class="o">(</span>...<span class="o">)</span>
 </code></pre></div>
 <p>If you see <code>cgroup</code> (v1) instead, enable the unified hierarchy with <code>systemd.unified_cgroup_hierarchy=1</code> on the kernel command line and reboot.</p>
+<p>Once cgroups v2 is mounted, run the pre-flight to confirm the host's root cgroup delegates the controllers Kukeon needs (<code>cpu</code>, <code>memory</code>, <code>pids</code>, <code>io</code>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>doctor<span class="w"> </span>cgroups
+</code></pre></div>
+<p>The check passes silently when delegation is healthy and prints a per-controller diff when it isn't. Pass <code>--probe</code> to additionally attempt a write to <code>/sys/fs/cgroup/cgroup.subtree_control</code> — useful when you suspect that <code>+memory</code> or <code>+pids</code> are present in <code>cgroup.controllers</code> but blocked from delegation by a parent slice.</p>
 <h2 id="containerd">containerd<a class="headerlink" href="#containerd" title="Permanent link">&para;</a></h2>
 <p>Kukeon talks to containerd over its default socket at <code>/run/containerd/containerd.sock</code>. The path is configurable via <code>--containerd-socket</code> on both <code>kuke</code> and <code>kukeond</code>, but the default works for a stock containerd install on Debian/Ubuntu/Fedora/Arch.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Debian/Ubuntu</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sudo<span class="w"> </span>apt-get<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>containerd
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Fedora</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>sudo<span class="w"> </span>dnf<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>containerd
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Arch</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>sudo<span class="w"> </span>pacman<span class="w"> </span>-S<span class="w"> </span>containerd
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># Verify</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>--now<span class="w"> </span>containerd
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>sudo<span class="w"> </span>ctr<span class="w"> </span>version
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Debian/Ubuntu</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>sudo<span class="w"> </span>apt-get<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>containerd
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Fedora</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>sudo<span class="w"> </span>dnf<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>containerd
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># Arch</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>sudo<span class="w"> </span>pacman<span class="w"> </span>-S<span class="w"> </span>containerd
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="c1"># Verify</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>--now<span class="w"> </span>containerd
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>sudo<span class="w"> </span>ctr<span class="w"> </span>version
 </code></pre></div>
-<p>Kukeon uses its own containerd namespaces (one per realm: <code>kukeon-&lt;realm&gt;</code>). It does not interfere with existing containerd namespaces used by Docker, nerdctl, or other tools.</p>
+<p>Kukeon uses its own containerd namespaces (one per realm: <code>&lt;realm&gt;.kukeon.io</code>). <code>kuke init</code> provisions two by default — <code>default.kukeon.io</code> for user workloads and <code>kuke-system.kukeon.io</code> for the <code>kukeond</code> daemon. Kukeon does not interfere with existing containerd namespaces used by Docker, nerdctl, or other tools.</p>
 <h2 id="cni-plugins-for-no-daemon-only">CNI plugins (for <code>--no-daemon</code> only)<a class="headerlink" href="#cni-plugins-for-no-daemon-only" title="Permanent link">&para;</a></h2>
 <p>The <code>kukeond</code> container image bundles the CNI reference plugins at <code>/opt/cni/bin</code> inside the container, and the daemon invokes them from there. The standard install path (<code>kuke init</code> → daemon-mediated operations) therefore does <strong>not</strong> require host-side CNI plugins.</p>
 <p>You only need to install plugins on the host if you plan to run operations with <code>--no-daemon</code>, which executes controllers in-process via the <code>kuke</code> binary instead of routing through <code>kukeond</code>. In that mode <code>kuke</code> shells out to plugin binaries at the host's <code>/opt/cni/bin</code>. See <a href="../../cli/commands/#-no-daemon-host-prerequisites"><code>--no-daemon</code> host prerequisites</a> for the canonical reference. Note that <code>--no-daemon</code> is slated for removal from creation commands in a future release.</p>
 <p>If you do need it, install from <a href="https://github.com/containernetworking/plugins">containernetworking/plugins</a>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nv">CNI_VERSION</span><span class="o">=</span>v1.4.1
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>sudo<span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span>/opt/cni/bin
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>curl<span class="w"> </span>-L<span class="w"> </span>https://github.com/containernetworking/plugins/releases/download/<span class="si">${</span><span class="nv">CNI_VERSION</span><span class="si">}</span>/cni-plugins-linux-amd64-<span class="si">${</span><span class="nv">CNI_VERSION</span><span class="si">}</span>.tgz<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>tar<span class="w"> </span>-C<span class="w"> </span>/opt/cni/bin<span class="w"> </span>-xz
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nv">CNI_VERSION</span><span class="o">=</span>v1.4.1
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sudo<span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span>/opt/cni/bin
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>curl<span class="w"> </span>-L<span class="w"> </span>https://github.com/containernetworking/plugins/releases/download/<span class="si">${</span><span class="nv">CNI_VERSION</span><span class="si">}</span>/cni-plugins-linux-amd64-<span class="si">${</span><span class="nv">CNI_VERSION</span><span class="si">}</span>.tgz<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>tar<span class="w"> </span>-C<span class="w"> </span>/opt/cni/bin<span class="w"> </span>-xz
 </code></pre></div>
 <p>At minimum Kukeon needs <code>bridge</code>, <code>host-local</code>, <code>loopback</code>, and <code>portmap</code>.</p>
 <h2 id="root-privileges">Root / privileges<a class="headerlink" href="#root-privileges" title="Permanent link">&para;</a></h2>
-<p><code>kuke init</code>, <code>kuke apply</code>, and any command touching cgroups, netlink, or containerd namespaces needs root (or equivalent capabilities: <code>CAP_SYS_ADMIN</code>, <code>CAP_NET_ADMIN</code>, access to the containerd socket, write access to <code>/sys/fs/cgroup</code> and <code>/opt/kukeon</code>). For now, the working assumption is "run as root" (<code>sudo kuke ...</code>).</p>
-<p>Running <code>kuke get</code> for read-only queries over the daemon socket does not require root, as long as the user can read the socket at <code>/run/kukeon/kukeond.sock</code>.</p>
+<p>Two paths exist, depending on whether the command goes through <code>kukeond</code> or bypasses it:</p>
+<ul>
+<li><strong>Direct host writes need root.</strong> <code>kuke init</code>, <code>kuke daemon reset</code>, <code>kuke image load --no-daemon</code>, <code>kuke doctor cgroups --probe</code>, and anything else run with <code>--no-daemon</code> touch cgroups, netlink, containerd, or <code>/opt/kukeon</code> directly. Run them with <code>sudo</code>; otherwise they fail fast with a clear "must run as root" error before touching anything.</li>
+<li><strong>Daemon-routed commands do not need root.</strong> <code>kuke init</code> provisions a system <code>kukeon</code> group and sets the daemon socket at <code>/run/kukeon/kukeond.sock</code> to mode <code>0660 root:kukeon</code>. Adding a user to that group (<code>sudo usermod -aG kukeon $USER</code>, then re-login) is enough for <code>kuke get</code>, <code>kuke create</code>, <code>kuke apply</code>, <code>kuke delete</code>, <code>kuke log</code>, and <code>kuke attach</code> to work without <code>sudo</code>. Writes under <code>/opt/kukeon</code> still require root, but they go through the daemon.</li>
+</ul>
+<p>See <a href="../../getting-started/#daily-use-without-sudo">Getting Started → Daily use without sudo</a> for the post-init steps.</p>
 <h2 id="disk-paths-kukeon-touches">Disk paths kukeon touches<a class="headerlink" href="#disk-paths-kukeon-touches" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2585,7 +2594,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 12:10:15 UTC">May 13, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 19:31:01 UTC">May 13, 2026</span>
   </span>
 
     
