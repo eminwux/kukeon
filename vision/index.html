@@ -785,6 +785,45 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#9-status-as-of-v050" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Status as of v0.5.0
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Status as of v0.5.0">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#per-item-detail" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-item detail
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-this-means-for-v10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this means for v1.0
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2932,6 +2971,45 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#9-status-as-of-v050" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Status as of v0.5.0
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Status as of v0.5.0">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#per-item-detail" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-item detail
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-this-means-for-v10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this means for v1.0
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3305,6 +3383,85 @@
 <p>Kukeon did not set out to be an agent orchestrator, and it doesn't need to rebrand as one. But the primitives it happens to have — namespace-per-Realm, CNI-plus-cgroup-per-Space, declarative <code>apply</code>, local-first — are the right shape for a gap that is not well served today. Docker's surface is too flat, Kubernetes' surface is too heavy, and purpose-built agent sandboxes are one-off shell scripts dressed up as products.</p>
 <p>The proposal above is a path to take the gap without abandoning the project's stated direction. Most of what's needed is field additions to an existing schema. A few of the items are new kinds. None of them require kukeon to stop being what it already is.</p>
 <p>Whether to take the bet is the maintainer's call. This document is written to make the bet legible.</p>
+<hr />
+<h2 id="9-status-as-of-v050">9. Status as of v0.5.0<a class="headerlink" href="#9-status-as-of-v050" title="Permanent link">&para;</a></h2>
+<p>The proposal above was written before v0.4.0. Most of P0 and P1 has since shipped; P2 has not been started. This section reconciles each section-4 promise with what's in the tree today so the proposal can be read as a status document rather than a forecast.</p>
+<table>
+<thead>
+<tr>
+<th>§</th>
+<th>Item</th>
+<th>Priority</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4.1</td>
+<td>Volume mounts on Container</td>
+<td>P0</td>
+<td><strong>Shipped</strong> — <code>v0.4.0</code></td>
+</tr>
+<tr>
+<td>4.2</td>
+<td>Security fields on Container</td>
+<td>P0</td>
+<td><strong>Shipped</strong> — <code>v0.4.0</code></td>
+</tr>
+<tr>
+<td>4.3</td>
+<td>Isolation-envelope inheritance from Space</td>
+<td>P1</td>
+<td><strong>Shipped</strong> — <code>v0.4.0</code></td>
+</tr>
+<tr>
+<td>4.4</td>
+<td>Network policy on Space</td>
+<td>P1</td>
+<td><strong>Shipped</strong> — <code>v0.4.0</code></td>
+</tr>
+<tr>
+<td>4.5</td>
+<td><code>Session</code> kind</td>
+<td>P1</td>
+<td><strong>Deferred</strong> — closed wontfix</td>
+</tr>
+<tr>
+<td>4.6</td>
+<td>Scoped credential injection</td>
+<td>P1</td>
+<td><strong>Shipped</strong> — <code>v0.4.0</code></td>
+</tr>
+<tr>
+<td>4.7</td>
+<td>Capability budgets on Session</td>
+<td>P2</td>
+<td><strong>Not started</strong></td>
+</tr>
+<tr>
+<td>4.8</td>
+<td>Causal audit trail</td>
+<td>P2</td>
+<td><strong>Not started</strong></td>
+</tr>
+<tr>
+<td>4.9</td>
+<td>Approval gates</td>
+<td>P2</td>
+<td><strong>Not started</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="per-item-detail">Per-item detail<a class="headerlink" href="#per-item-detail" title="Permanent link">&para;</a></h3>
+<p><strong>4.1 — Volume mounts (P0).</strong> Promoted from reserved to active. The Container spec honors <code>volumes: [{source, target, readOnly}]</code> for host bind mounts and <code>volumes: [{kind: tmpfs, target, sizeBytes, mode}]</code> for ephemeral scratch. Wired through to the OCI runtime spec at cell-creation time.</p>
+<p><strong>4.2 — Security fields on Container (P0).</strong> All fields proposed in the priority-order table are present and honored: <code>user</code>, <code>readOnlyRootFilesystem</code>, <code>capabilities.{add,drop}</code>, <code>securityOpts</code>, <code>tmpfs</code>, and <code>resources.{memoryLimitBytes, cpuShares, pidsLimit}</code>. Defaults remain backwards-compatible (<code>readOnlyRootFilesystem: false</code>); operators opt into tighter posture per-container or per-Space (see 4.3).</p>
+<p><strong>4.3 — Space defaults inheritance (P1).</strong> Space spec exposes <code>spec.defaults.container</code> covering the same security/resource/tmpfs surface as 4.2. Inheritance is shallow; per-container values override Space defaults. This is the field that turns Space from "a CNI network" into "the isolation envelope."</p>
+<p><strong>4.4 — Network policy on Space (P1).</strong> Space spec exposes <code>spec.network.egress</code> with <code>default: deny|allow</code> plus an allowlist of <code>(host, ports)</code> or <code>(cidr, ports)</code> pairs. Enforcement is iptables/nftables on the space bridge for IP+port rules; hostname-targeted rules are resolved at policy-apply time. The transparent egress proxy mode the proposal outlined as the "honest" path for SNI inspection is not built — HTTPS allowlisting today is by destination IP after DNS resolution, with the proxy path left for a future P2 cycle.</p>
+<p><strong>4.5 — <code>Session</code> kind (P1).</strong> <a href="https://github.com/eminwux/kukeon/issues/46">Issue #46</a> closed as <code>wontfix</code>. The original proposal had <code>Session</code> carry lifetime, <code>onEnd.persist</code>, and budget enforcement in one kind. In practice, lifetime and persist semantics ended up better served by <code>kuke apply</code> + explicit teardown plus parameterized cell profiles (<a href="https://github.com/eminwux/kukeon/issues/358">#358</a>, shipped), and the budget/audit/approval pieces (4.7–4.9) are large enough to deserve their own kinds rather than overloading one. A dedicated lifetime/budget primitive may return in a later milestone if demand justifies it.</p>
+<p><strong>4.6 — Scoped credential injection (P1).</strong> Container spec has <code>secrets: [{name, fromFile|fromEnv, mountPath?}]</code>. Values are mounted as env vars or files at runtime and never written into status or audit logs. The external-broker integration outlined as the extended (P2-ish) variant is not built; secrets are sourced from the host filesystem or host env today.</p>
+<p><strong>4.7–4.9 — P2 items.</strong> Capability budgets, causal audit trail, and approval gates have no tracking issues open and no code on disk. They were deferred at proposal time as "the agent-native category bet" — opt-in, ambitious, and explicitly optional for kukeon's homelab/VPS user base. Reopening this work is gated on demand from real agent operators using the v0.5.0 substrate.</p>
+<h3 id="what-this-means-for-v10">What this means for v1.0<a class="headerlink" href="#what-this-means-for-v10" title="Permanent link">&para;</a></h3>
+<p>The agent-native gate — "give an agent a workspace, an egress-restricted network, a scoped credential, and a non-root sandbox by declaration" — is redeemed in v0.5.0 by the P0+P1-minus-Session set, and the <a href="#6-what-success-looks-like">Section 6 success manifest</a> shape works today (substituting explicit <code>kuke apply</code> + <code>kuke delete</code> for the deferred <code>Session</code> kind). The remaining gaps to v1.0 are schema/runtime tracks not covered by this proposal — see the <a href="../faq/#when-is-v10">FAQ on v1.0</a> for the gating issues.</p>
 
 
 
@@ -3327,7 +3484,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 8, 2026 11:43:42 UTC">May 8, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 21:02:55 UTC">May 13, 2026</span>
   </span>
 
     
