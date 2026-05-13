@@ -11,9 +11,10 @@ Resources: `realm`, `space`, `stack`, `cell`, `container`. Each subcommand also 
 
 ## Common flags
 
-| Flag             | Description                                                                                      |
-| ---------------- | ------------------------------------------------------------------------------------------------ |
-| `--output`, `-o` | Output format: `yaml`, `json`, `table`. Default: `table` for list, `yaml` for a single resource. |
+| Flag                 | Description                                                                                       |
+| -------------------- | ------------------------------------------------------------------------------------------------- |
+| `--output`, `-o`     | Output format: `yaml`, `json`, `table`. Default: `table` for list, `yaml` for a single resource.  |
+| `--show-controllers` | Append a `CONTROLLERS` column listing the cgroup-v2 controllers delegated on the subject's subtree. Off by default to keep the dev-init parity check stable. |
 
 Plus all [global flags](kuke.md) — most importantly `--no-daemon`.
 
@@ -37,26 +38,30 @@ All scope flags default to `default`. See the [realm default note](commands.md#c
 - **Single** (positional arg): returns the one matching resource. Default output is YAML.
 
 ```bash
-# Table of realms
+# Table of realms — the dev-init parity check expects this exact shape
 sudo kuke get realms
-NAME           NAMESPACE       STATE    CGROUP
-main           kukeon-main     Running  /kukeon/main
-kukeon-system  kukeon-system   Running  /kukeon/kukeon-system
+NAME         NAMESPACE              STATE  CGROUP
+-----------  ---------------------  -----  -------------------
+default      default.kukeon.io      Ready  /kukeon/default
+kuke-system  kuke-system.kukeon.io  Ready  /kukeon/kuke-system
 
 # Single realm as YAML
-sudo kuke get realm main -o yaml
+sudo kuke get realm default -o yaml
 
 # Single realm as JSON
-sudo kuke get realm main -o json
+sudo kuke get realm default -o json
 
-# Spaces in a non-default realm
-sudo kuke get spaces --realm main
+# Spaces in the default realm
+sudo kuke get spaces --realm default
 
 # Cells in a specific stack
-sudo kuke get cells --realm main --space default --stack default
+sudo kuke get cells --realm default --space default --stack default
 
-# All containers in the cell
-sudo kuke get containers --realm main --space default --stack default --cell hello-world
+# All containers in a cell
+sudo kuke get containers --realm default --space default --stack default --cell hello-world
+
+# Show which cgroup controllers are delegated to every realm
+sudo kuke get realms --show-controllers
 ```
 
 ## `get` vs `refresh`

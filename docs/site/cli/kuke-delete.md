@@ -5,6 +5,7 @@ Delete a resource. Can be called per-resource (`kuke delete realm foo`) or again
 ```
 kuke delete <resource> <name> [--cascade] [--force] [scope flags]
 kuke delete -f <file>
+kuke d      <resource> <name> ...                                # alias
 ```
 
 ## Persistent flags (inherited by every subcommand)
@@ -62,13 +63,13 @@ kuke delete container <name> --realm <r> --space <s> --stack <t> --cell <c>
 
 ```bash
 # Delete an empty cell
-sudo kuke delete cell web --realm main --space blog --stack wordpress
+sudo kuke delete cell web --realm default --space blog --stack wordpress
 
-# Cascade-delete an entire realm (all spaces, stacks, cells, containers)
+# Cascade-delete an entire user realm (all spaces, stacks, cells, containers)
 sudo kuke delete realm mytenant --cascade
 
 # Force-delete a container that's stuck in an unknown state
-sudo kuke delete container stuck --cell web --realm main --space blog --stack wordpress --force
+sudo kuke delete container stuck --cell web --realm default --space blog --stack wordpress --force
 
 # Delete every resource listed in a manifest
 sudo kuke delete -f site.yaml
@@ -82,4 +83,5 @@ sudo kuke delete -f site.yaml
 ## Related
 
 - [kuke purge](kuke-purge.md) — more aggressive variant
+- [kuke uninstall](kuke-uninstall.md) — full-host teardown (every realm, system user/group, run path)
 - [Init and reset](../guides/init-and-reset.md) — full-host reset workflows

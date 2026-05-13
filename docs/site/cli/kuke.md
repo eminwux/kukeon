@@ -12,11 +12,11 @@ These flags apply to every `kuke` subcommand. Defaults are shown in parentheses.
 
 ### `--run-path` (`/opt/kukeon`)
 
-Where Kukeon stores on-disk metadata for realms, spaces, stacks, cells, and containers. Must be writable by the process running `kuke` (typically root).
+Where Kukeon stores on-disk metadata for realms, spaces, stacks, cells, and containers. Must be writable by the process running `kuke` — typically root, or a member of the `kukeon` group when talking to the daemon over its group-readable socket.
 
-### `--config` (`/etc/kukeon/config.yaml`)
+### `--configuration` (`$HOME/.kuke/kuke.yaml`)
 
-Path to the configuration file. If the file doesn't exist, Kukeon falls back to command-line flags and environment variables only — a missing config file is not fatal.
+Path to a `ClientConfiguration` YAML. If the file doesn't exist, Kukeon falls back to command-line flags, environment variables, and hardcoded defaults — a missing config file is not fatal.
 
 ### `--containerd-socket` (`/run/containerd/containerd.sock`)
 
@@ -28,9 +28,9 @@ The daemon endpoint. Today only the `unix://` scheme is supported. The `ssh://us
 
 ### `--no-daemon` (`false`)
 
-Bypass `kukeond` and run the operation in-process. Requires root: the client now directly touches containerd, CNI, cgroups.
+Bypass `kukeond` and run the operation in-process. Requires root: the client now directly touches containerd, CNI, and cgroups.
 
-Use when the daemon is stopped, when bootstrapping (`kuke init`), or when working around the current limitation that the released daemon image doesn't bind-mount `/run/containerd/containerd.sock`.
+Use when the daemon is stopped, when bootstrapping (`kuke init` and `kuke image load --no-daemon` both run this path), or while debugging.
 
 Don't run two `--no-daemon` commands at the same time — they'll race on the same on-disk state.
 
@@ -44,7 +44,7 @@ One of `debug`, `info`, `warn`, `error`. Controls log verbosity when `--verbose`
 
 ## Environment variables
 
-Every flag also has a corresponding `KUKEON_*` environment variable (check via `--help` on a subcommand, or see `cmd/config/env.go`). Flags beat env vars beat the config file beats built-in defaults.
+Every flag also has a corresponding `KUKE_*` environment variable (check via `--help` on a subcommand, or see `cmd/config/env.go`). Flags beat env vars beat the config file beats built-in defaults.
 
 ## Examples
 

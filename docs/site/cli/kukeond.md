@@ -8,12 +8,17 @@ kukeond serve [flags]
 
 ## Persistent flags
 
-| Flag                  | Default                           | Description                                                         |
-| --------------------- | --------------------------------- | ------------------------------------------------------------------- |
-| `--run-path`          | `/opt/kukeon`                     | Where the daemon reads/writes persistent state (shared with `kuke`) |
-| `--containerd-socket` | `/run/containerd/containerd.sock` | Path to the containerd socket                                       |
-| `--socket`            | `/run/kukeon/kukeond.sock`        | Unix socket the daemon listens on                                   |
-| `--log-level`         | `info`                            | Log level: `debug`, `info`, `warn`, `error`                         |
+| Flag                              | Default                           | Description                                                                                                          |
+| --------------------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `--socket`                        | `/run/kukeon/kukeond.sock`        | Unix socket the daemon listens on                                                                                    |
+| `--socket-gid`                    | `0`                               | Group ID to chown the listener socket to (mode 0660 with group). Set by `kuke init` to the `kukeon` GID.             |
+| `--run-path`                      | `/opt/kukeon`                     | Where the daemon reads/writes persistent state (shared with `kuke`)                                                  |
+| `--containerd-socket`             | `/run/containerd/containerd.sock` | Path to the containerd socket                                                                                        |
+| `--configuration`                 | `/etc/kukeon/kukeond.yaml`        | `ServerConfiguration` YAML; absent file uses hardcoded defaults                                                      |
+| `--cgroup-root`                   | `/kukeon`                         | Cgroup root under which all realms / spaces / stacks / cells live                                                    |
+| `--containerd-namespace-suffix`   | `kukeon.io`                       | Suffix appended to every realm name to form its containerd namespace                                                 |
+| `--reconcile-interval`            | `30s`                             | Period of the cell-reconciliation loop (Go duration; `0` disables)                                                   |
+| `--log-level`                     | `info`                            | Log level: `debug`, `info`, `warn`, `error`                                                                          |
 
 `kukeond`'s `--run-path` matches `kuke`'s default — both binaries share the same `/opt/kukeon` tree. The socket and pid files live under `/run/kukeon` and are controlled by `--socket` independently.
 
@@ -23,7 +28,7 @@ kukeond serve [flags]
 kukeond serve
 ```
 
-Runs the daemon in the foreground. Listens on `--socket`, writes a pid file at `<run-path>/kukeond.pid`, and serves the `kukeonv1` API until it receives SIGINT or SIGTERM.
+Runs the daemon in the foreground. Listens on `--socket`, writes a pid file at `/run/kukeon/kukeond.pid`, and serves the `kukeonv1` API until it receives SIGINT or SIGTERM.
 
 On shutdown it closes the listener, removes the pid file, and drains in-flight requests on a best-effort basis.
 
@@ -38,4 +43,4 @@ This runs the daemon on the host directly. In the normal path, `kuke init` creat
 ## Signals
 
 - `SIGINT`, `SIGTERM` — clean shutdown.
-- `SIGKILL` — hard kill; leaves the socket and pid file behind. Clean up with `sudo rm -f /run/kukeon/kukeond.{sock,pid}` before restarting.
+- `SIGKILL` — hard kill; leaves the socket and pid file behind. Clean up with `sudo rm -f /run/kukeon/kukeond.{sock,pid}` before restarting (or use [`kuke daemon reset`](kuke-daemon.md)).

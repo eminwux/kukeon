@@ -42,7 +42,7 @@ kuke kill container  <name> --realm <r> --space <s> --stack <t> --cell <c>
 
 Aliases: `kuke kill` → `kuke k`.
 
-Sends SIGKILL. Useful when a container is unresponsive, or when tearing down the daemon (`kuke kill cell kukeond …`).
+Sends SIGKILL. Useful when a container is unresponsive. For the daemon itself, prefer the dedicated [`kuke daemon kill`](kuke-daemon.md) shortcut — it knows the daemon's static coordinates.
 
 ## Common flags
 
@@ -61,13 +61,13 @@ Plus all [global flags](kuke.md).
 
 ```bash
 # Start a cell
-sudo kuke start cell web --realm main --space blog --stack wordpress
+sudo kuke start cell web --realm default --space blog --stack wordpress
 
 # Graceful stop
-sudo kuke stop cell web --realm main --space blog --stack wordpress
+sudo kuke stop cell web --realm default --space blog --stack wordpress
 
-# Force-kill (useful for the daemon cell itself)
-sudo kuke kill cell kukeond --realm kukeon-system --space kukeon --stack kukeon --no-daemon
+# Force-kill an unresponsive container
+sudo kuke kill container stuck --cell web --realm default --space blog --stack wordpress
 ```
 
 ## Exit semantics
@@ -76,3 +76,8 @@ sudo kuke kill cell kukeond --realm kukeon-system --space kukeon --stack kukeon 
 - Exit non-zero: the daemon couldn't find the resource, the resource is in a state that doesn't allow the transition, or the underlying containerd/runtime call failed.
 
 After `stop`/`kill`, the resource is in `Stopped` state. `start` moves it to `Ready`. See [Cell](../concepts/cell.md#lifecycle) and [Container](../concepts/container.md#lifecycle) for the full state tables.
+
+## Related
+
+- [kuke run](kuke-run.md) — create + start a cell from a file or profile
+- [kuke daemon](kuke-daemon.md) — start/stop/restart/kill the `kukeond` daemon cell

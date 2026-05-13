@@ -65,7 +65,7 @@ kind: Space
 metadata:
   name: blog
 spec:
-  realmId: main
+  realmId: default
 ---
 apiVersion: v1beta1
 kind: Stack
@@ -73,7 +73,7 @@ metadata:
   name: wordpress
 spec:
   id: wordpress
-  realmId: main
+  realmId: default
   spaceId: blog
 EOF
 
@@ -81,17 +81,8 @@ EOF
 sudo kuke apply -f cell.yaml -o json
 ```
 
-## The `--no-daemon` caveat
-
-Today, cell creation has to run with `--no-daemon` because the released daemon image doesn't bind-mount the containerd socket. Until that ships, use:
-
-```bash
-sudo kuke apply -f cell.yaml --no-daemon
-```
-
-See [Client and daemon](../concepts/client-and-daemon.md).
-
 ## Related
 
+- [kuke run](kuke-run.md) — create + start a single cell in one shot
 - [Applying manifests](../guides/apply-manifests.md) — the longer guide
 - [Manifest Reference](../manifests/overview.md) — every field explained

@@ -93,13 +93,20 @@ nav:
       - cli/commands.md
       - cli/kuke.md
       - cli/kuke-init.md
+      - cli/kuke-doctor.md
       - cli/kuke-get.md
       - cli/kuke-create.md
       - cli/kuke-apply.md
+      - cli/kuke-run.md
       - cli/kuke-delete.md
       - cli/kuke-lifecycle.md
       - cli/kuke-purge.md
       - cli/kuke-refresh.md
+      - cli/kuke-log.md
+      - cli/kuke-attach.md
+      - cli/kuke-image.md
+      - cli/kuke-daemon.md
+      - cli/kuke-uninstall.md
       - cli/kuke-autocomplete.md
       - cli/kuke-version.md
       - cli/kukeond.md
