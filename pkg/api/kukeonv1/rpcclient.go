@@ -18,11 +18,14 @@ package kukeonv1
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/rpc"
 	"net/rpc/jsonrpc"
 	"sync"
+	"syscall"
 	"time"
 
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -50,6 +53,22 @@ func WithDialTimeout(d time.Duration) UnixOption {
 	return func(c *UnixClient) { c.dialTimeout = d }
 }
 
+// wrapDialError converts a unix-socket dial error into a user-facing error.
+// EACCES on the kukeond socket almost always means the caller is not a member
+// of the `kukeon` group — surface the remediation instead of a raw syscall
+// error. Other failure modes (socket missing, daemon down, timeout) pass
+// through unchanged so their existing messages are preserved.
+func wrapDialError(sockPath string, err error) error {
+	if errors.Is(err, syscall.EACCES) || errors.Is(err, fs.ErrPermission) {
+		return fmt.Errorf(
+			"dial kukeond at %s: permission denied — add yourself to the kukeon group "+
+				"(sudo usermod -aG kukeon $USER), then log out and back in: %w",
+			sockPath, err,
+		)
+	}
+	return fmt.Errorf("dial kukeond at %s: %w", sockPath, err)
+}
+
 // NewUnixClient returns a ctx-aware Client that dials the given unix socket
 // path on first use and reuses the connection for subsequent calls.
 func NewUnixClient(sockPath string, opts ...UnixOption) *UnixClient {
@@ -69,7 +88,7 @@ func (c *UnixClient) ensureConn(ctx context.Context) error {
 	d := net.Dialer{Timeout: c.dialTimeout}
 	conn, err := d.DialContext(ctx, "unix", c.sockPath)
 	if err != nil {
-		return fmt.Errorf("dial kukeond at %s: %w", c.sockPath, err)
+		return wrapDialError(c.sockPath, err)
 	}
 	c.conn = conn
 	c.rpcc = rpc.NewClientWithCodec(jsonrpc.NewClientCodec(conn))
