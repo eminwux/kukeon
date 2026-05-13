@@ -2,6 +2,15 @@
 
 This guide covers the operations you'll run most often when bootstrapping, iterating on, or wiping a Kukeon host.
 
+`kuke init` provisions **two** realms, each mapped to its own containerd namespace:
+
+| Realm         | Containerd namespace    | Purpose                                                                          |
+| ------------- | ----------------------- | -------------------------------------------------------------------------------- |
+| `default`     | `default.kukeon.io`     | User workloads. Created empty so `kuke create …` has a home.                     |
+| `kuke-system` | `kuke-system.kukeon.io` | System workloads owned by kukeon itself (the `kukeond` daemon runs as a cell here). |
+
+The daemon lives at `kuke-system / kukeon / kukeon / kukeond` (realm / space / stack / cell). The `default` realm is deliberately left user-owned so `kuke purge --cascade` on it can never take down the daemon.
+
 ## Fresh bootstrap
 
 On a host that has never run Kukeon:
@@ -14,10 +23,11 @@ That command:
 
 1. Creates the kukeon cgroup root at `/sys/fs/cgroup/kukeon`.
 2. Ensures `/etc/cni/net.d` and `/opt/cni/bin` exist.
-3. Creates the default user realm (`default`, containerd namespace `kukeon-default`) and its default space and stack.
-4. Creates the system realm (`kukeon-system`) and the `kukeond` cell.
-5. Pulls the `kukeond` image.
-6. Starts the daemon; waits up to 30s for the socket to come up (unless you pass `--no-wait`).
+3. Creates the `kukeon` system user/group so the socket can be group-readable.
+4. Creates the `default` user realm (containerd namespace `default.kukeon.io`) and its default space and stack.
+5. Creates the `kuke-system` system realm (containerd namespace `kuke-system.kukeon.io`) and the `kukeond` cell underneath it.
+6. Pulls the `kukeond` image.
+7. Starts the daemon; waits up to 30s for the socket at `/run/kukeon/kukeond.sock` to come up (unless you pass `--no-wait`).
 
 ## Re-init (reconcile)
 
@@ -41,28 +51,27 @@ This rewrites every space's conflist, even the ones that already exist. It does 
 
 ## Tear down the daemon for iteration
 
-When you're hacking on `kukeond` and need to rebuild it, you want to stop the daemon without losing user data:
+When you're hacking on `kukeond` and need to rebuild it, `kuke daemon reset` is the right verb:
 
 ```bash
-sudo kuke kill cell kukeond   --realm kukeon-system --space kukeon --stack kukeon --no-daemon
-sudo kuke delete cell kukeond --realm kukeon-system --space kukeon --stack kukeon --no-daemon
-sudo rm -f /run/kukeon/kukeond.sock /run/kukeon/kukeond.pid
+sudo kuke daemon reset                  # preserves /opt/kukeon/default and /opt/kukeon/kuke-system
+sudo kuke daemon reset --purge-system   # additionally wipes /opt/kukeon/kuke-system
 ```
 
-Why `--no-daemon`: the daemon is what's being stopped, so `kuke` has to talk to containerd directly.
+`daemon reset` stops the `kukeond` cell (SIGTERM, escalating to SIGKILL after `--timeout`, default 10s), deletes the cell metadata + cgroups, and clears `/run/kukeon/kukeond.{sock,pid}`. It's idempotent — re-running on a host with no daemon succeeds.
 
-User data under `/opt/kukeon/<realm>/...` (everything outside `kukeon-system`) is untouched.
+`--purge-system` additionally removes `/opt/kukeon/kuke-system` for a fully clean re-bootstrap. Either way, user-realm data under `/opt/kukeon/default/**` is **never** touched — that's the invariant that lets `daemon reset` be safe in a dev loop.
 
 Rebuild and re-init:
 
 ```bash
 make kuke
 docker build --build-arg VERSION=v0.0.0-dev -t kukeon-local:dev .
-docker save kukeon-local:dev | sudo ctr -n kuke-system.kukeon.io images import -
+sudo ./kuke image load --from-docker kukeon-local:dev --realm kuke-system --no-daemon
 sudo ./kuke init --kukeond-image docker.io/library/kukeon-local:dev
 ```
 
-See [Local development](local-dev.md) for the full dev loop.
+`--no-daemon` on `kuke image load` is required here because the daemon is not yet running — the in-process controller talks to containerd directly. See [Local development](local-dev.md) for the full dev loop, which is wrapped end-to-end as `make dev-init`.
 
 ## Wipe a realm
 
@@ -82,31 +91,47 @@ See [Manifest Reference](../manifests/overview.md) and [CLI Reference → delete
 
 ## Full host wipe
 
-Nuclear option: remove every trace of Kukeon from the host. Use this only if you're reinstalling from scratch.
+The "wipe every kukeon-owned thing on this host" verb is `kuke uninstall`:
 
 ```bash
-# 1. Stop the daemon (if running)
-sudo kuke kill cell kukeond --realm kukeon-system --space kukeon --stack kukeon --no-daemon || true
-sudo kuke delete cell kukeond --realm kukeon-system --space kukeon --stack kukeon --no-daemon || true
-sudo rm -f /run/kukeon/kukeond.sock /run/kukeon/kukeond.pid
+sudo kuke uninstall          # interactive: prompts for "yes"
+sudo kuke uninstall -y       # non-interactive (scripts)
+```
+
+What it does, in order: stop the daemon, purge every realm with `--cascade` (including `kuke-system`), release kukeon-owned bind mounts under `/run/kukeon`, remove `/run/kukeon` and the configured run path (default `/opt/kukeon`), and remove the `kukeon` system user/group if present.
+
+**Half-cleaned-host gate.** If any realm fails to drop its containerd namespace, the subsequent dir / account removal is **skipped** (not silently best-effort), every skipped row in the report is annotated, and the exit code is non-zero. Tearing out `/opt/kukeon` while a residual namespace is still pinning overlay mounts on disk would strand the next `kuke init` with stale containerd state — the skip is the safe default. Resolve the realm-purge failure (see [Troubleshooting](troubleshooting.md#kuke-uninstall-reports-skipped-realm-purge-failed)) and re-run.
+
+The binary at `/usr/local/bin/kuke` and the `kukeond` symlink are **never** removed — uninstalling runtime state is not the same as uninstalling the binary. Drop the binaries with `make uninstall-dev` (dev installs) or your package manager.
+
+If `kuke uninstall` itself is broken, the equivalent manual sequence is:
+
+```bash
+# 1. Stop the daemon
+sudo kuke daemon reset --purge-system
 
 # 2. Purge every user realm
-for realm in $(sudo kuke get realms -o json --no-daemon | jq -r '.[] | select(.metadata.name != "kukeon-system") | .metadata.name'); do
+for realm in $(sudo kuke get realms -o json --no-daemon | jq -r '.[] | select(.metadata.name != "kuke-system") | .metadata.name'); do
     sudo kuke purge realm "$realm" --cascade --force --no-daemon
 done
 
 # 3. Purge the system realm
-sudo kuke purge realm kukeon-system --cascade --force --no-daemon
+sudo kuke purge realm kuke-system --cascade --force --no-daemon
 
-# 4. Wipe on-disk state and cgroups
-sudo rm -rf /opt/kukeon
+# 4. Release any leftover bind mounts under /run/kukeon
+mount | awk '$3 ~ "^/run/kukeon" {print $3}' | xargs -r sudo umount -l
+
+# 5. Wipe on-disk state and cgroups
+sudo rm -rf /opt/kukeon /run/kukeon
 sudo rm -rf /sys/fs/cgroup/kukeon 2>/dev/null || true
 
-# 5. Wipe generated CNI conflists (careful: skip if you run other CNI apps)
+# 6. Wipe generated CNI conflists (skip if you run other CNI apps on this host)
 sudo rm -f /etc/cni/net.d/*.conflist
 ```
 
 ## Related
 
-- [Local development](local-dev.md) — the full rebuild / reload / re-init loop
-- [Troubleshooting](troubleshooting.md) — what to do when init fails
+- [Local development](local-dev.md) — the full rebuild / reload / re-init loop (wrapped as `make dev-init`)
+- [Troubleshooting](troubleshooting.md) — what to do when init or uninstall fails
+- [kuke daemon](../cli/kuke-daemon.md) — every `daemon` subcommand and flag
+- [kuke uninstall](../cli/kuke-uninstall.md) — flag and invariant reference

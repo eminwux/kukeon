@@ -109,8 +109,57 @@ sudo kuke apply -f cell.yaml --no-daemon
 
 See [Client and daemon](../concepts/client-and-daemon.md) for the broader story.
 
+## Parameterized cell profiles
+
+`kuke apply -f` consumes a **fixed** manifest — the file you ship is the spec the daemon reconciles to, with no substitution layer in between. When you need the same cell shape with different values per invocation (image tag, command, mount paths), reach for a **cell profile** loaded with `kuke run -p` instead of editing the YAML each time.
+
+A profile lives under `$HOME/.kuke/profiles.d/<name>.yaml` (or `$KUKE_PROFILES_DIR`) and declares its variable inputs alongside the cell spec:
+
+```yaml
+apiVersion: v1beta1
+kind: CellProfile
+metadata:
+  name: shell
+spec:
+  parameters:
+    - name: IMAGE
+      description: container image to run
+      default: alpine:latest
+    - name: CMD
+      description: command to exec
+      required: true
+  containers:
+    - id: shell
+      image: ${IMAGE}
+      command: ["/bin/sh", "-c", "${CMD}"]
+```
+
+`kuke run -p` materializes one cell with a unique name (`<metadata.name>-<6hex>` by default; override with `--name`) and resolves each `${KEY}` reference in the body. Resolution order, highest first:
+
+1. `--param KEY=VALUE` on the CLI (repeatable)
+2. Values from `--param-file <path>` (one `KEY=VALUE` per line, `#` starts a comment)
+3. The parameter's `default` in the profile
+4. The `kuke` process env (`os.LookupEnv`)
+5. Required + unset → error; non-required + unset → empty string
+
+```bash
+# Use defaults / env / required errors
+kuke run -p shell --param CMD="echo hi"
+
+# Override the image too
+kuke run -p shell --param IMAGE=alpine:edge --param CMD="/bin/sh"
+
+# Load a batch of values from a file, with a CLI override on top
+kuke run -p shell --param-file ./shell.env --param IMAGE=alpine:edge
+```
+
+`--param`, `--param-file`, and `--name` are rejected when combined with `-f` (file mode is not a profile and has no parameter declarations). The substituted body is what reaches the daemon — there is no parameter layer in the manifest API itself.
+
+See [kuke run](../cli/kuke-run.md) for the full flag surface.
+
 ## See also
 
 - [Manifest Reference](../manifests/overview.md) — the full schema of every resource
-- [CLI Reference → apply](../cli/kuke-apply.md) — every flag
+- [CLI Reference → apply](../cli/kuke-apply.md) — every flag on `kuke apply`
+- [CLI Reference → run](../cli/kuke-run.md) — `-f` (file) and `-p` (profile) modes, including parameter handling
 - [Tutorials → Hello-world cell](../tutorials/hello-world.md) — a worked example end-to-end
