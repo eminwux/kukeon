@@ -18,6 +18,7 @@ package apply
 
 import (
 	"fmt"
+	"strings"
 
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
@@ -318,8 +319,15 @@ func DiffCell(desired, actual intmodel.Cell) CellDiffResult {
 		return result
 	}
 
-	// Compatible changes: labels
-	if !mapsEqual(desired.Metadata.Labels, actual.Metadata.Labels) {
+	// Compatible changes: labels. The runner injects canonical
+	// `*.kukeon.io` keys (cell.kukeon.io, realm.kukeon.io, …) on
+	// CreateCell — these are controller-managed, not user-authored, and
+	// must not be compared against an empty `desired.Metadata.Labels`
+	// (issue #437 AC #3). Without this filter, every `kuke apply -f` of a
+	// label-free YAML against an existing cell reports
+	// `metadata.labels changed`, falls through to UpdateCell, and
+	// clobbers the canonical labels with the user's empty map.
+	if !userLabelsEqual(desired.Metadata.Labels, actual.Metadata.Labels) {
 		result.HasChanges = true
 		if result.ChangeType == ChangeTypeNone {
 			result.ChangeType = ChangeTypeCompatible
@@ -350,12 +358,15 @@ func DiffCell(desired, actual intmodel.Cell) CellDiffResult {
 		result.BreakingChanges = append(result.BreakingChanges, "spec.rootContainer")
 		result.RootContainerDetails["rootContainer"] = "root container added"
 	case desiredRoot == nil && actualRoot != nil:
-		// Root container removed
-		result.HasChanges = true
-		result.ChangeType = ChangeTypeBreaking
-		result.RootContainerChanged = true
-		result.BreakingChanges = append(result.BreakingChanges, "spec.rootContainer")
-		result.RootContainerDetails["rootContainer"] = "root container removed"
+		// The YAML omitted a root container and the runner synthesized one
+		// during create (see `internal/controller/runner/provision.go`'s
+		// `ensureCellRootContainerSpec` path — every cell ends up with a
+		// `Root: true` entry whether or not the user authored one). Treating
+		// the synthesized root as a "removal" caused `kuke apply -f` of an
+		// unchanged file to report `Cell <name>: updated\n  - root
+		// container recreated` and trip RecreateCell. The synthesized root
+		// is an implementation detail of cell creation, not a user-authored
+		// field the apply layer should drift-detect on; skip it.
 	}
 
 	// Diff child containers
@@ -735,6 +746,32 @@ func boolPtrEqual(a, b *bool) bool {
 }
 
 // Helper functions
+
+// userLabelsEqual compares the user-authored subset of two label maps,
+// filtering out controller-managed keys (anything with the `.kukeon.io`
+// suffix — `cell.kukeon.io`, `realm.kukeon.io`, …, injected during cell
+// creation). Used by DiffCell so the runner-managed canonical labels do
+// not register as drift on a same-file re-apply (issue #437).
+func userLabelsEqual(desired, actual map[string]string) bool {
+	return mapsEqual(filterManagedLabels(desired), filterManagedLabels(actual))
+}
+
+// filterManagedLabels returns a copy of m with controller-managed keys
+// removed. A key is considered managed when its full name ends with
+// `.kukeon.io` — the suffix every controller-injected label uses.
+func filterManagedLabels(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return m
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		if strings.HasSuffix(k, ".kukeon.io") {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
 
 func mapsEqual(a, b map[string]string) bool {
 	if len(a) != len(b) {

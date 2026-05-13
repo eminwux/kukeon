@@ -139,3 +139,157 @@ func TestDiffCell_RootContainerChanged(t *testing.T) {
 		t.Errorf("expected breaking change, got %v", diff.ChangeType)
 	}
 }
+
+// TestDiffCell_ManagedLabels_NoChange covers the apply-side label leak called
+// out in issue #437. The runner injects canonical labels (cell.kukeon.io,
+// realm.kukeon.io, …) on CreateCell. A user YAML that omits labels must not
+// be reported as a `metadata.labels changed` drift on the same-file re-apply
+// — otherwise apply reports `updated` on the unchanged file and falls through
+// to UpdateCell which clobbers the canonical labels with the user's empty
+// map.
+func TestDiffCell_ManagedLabels_NoChange(t *testing.T) {
+	desired := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "web", Image: "busybox:latest"},
+			},
+		},
+	}
+
+	actual := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: "hello-world",
+			Labels: map[string]string{
+				"cell.kukeon.io":  "hello-world",
+				"realm.kukeon.io": "default",
+				"space.kukeon.io": "default",
+				"stack.kukeon.io": "default",
+			},
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest"},
+				{ID: "web", Image: "busybox:latest"},
+			},
+		},
+	}
+
+	diff := apply.DiffCell(desired, actual)
+	if diff.HasChanges {
+		t.Errorf("expected no changes when actual carries only controller-managed labels, got: %+v", diff)
+	}
+}
+
+// TestDiffCell_UserLabels_StillDetectsDrift makes sure the managed-label
+// filter does not over-narrow: a real user-authored label change must still
+// register as drift.
+func TestDiffCell_UserLabels_StillDetectsDrift(t *testing.T) {
+	desired := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name:   "hello-world",
+			Labels: map[string]string{"env": "prod"},
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "web", Image: "busybox:latest"},
+			},
+		},
+	}
+
+	actual := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name: "hello-world",
+			Labels: map[string]string{
+				"cell.kukeon.io": "hello-world",
+				"env":            "staging",
+			},
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest"},
+				{ID: "web", Image: "busybox:latest"},
+			},
+		},
+	}
+
+	diff := apply.DiffCell(desired, actual)
+	if !diff.HasChanges {
+		t.Error("expected drift on user-authored label change")
+	}
+	found := false
+	for _, f := range diff.ChangedFields {
+		if f == "metadata.labels" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected metadata.labels in ChangedFields, got %v", diff.ChangedFields)
+	}
+}
+
+// TestDiffCell_SynthesizedRoot_NoChange exercises the same-file re-apply path
+// for a YAML that omits a root container (the canonical case —
+// docs/examples/hello-world.yaml). The runner synthesizes a root entry during
+// create, so the on-disk Containers slice picks up a `Root: true` element the
+// user never authored. DiffCell must not treat that synthesized root as a
+// removal — doing so trips RecreateCell and produces the spurious
+// `Cell <name>: updated\n  - root container recreated` output on every
+// idempotent re-apply (issue #437).
+func TestDiffCell_SynthesizedRoot_NoChange(t *testing.T) {
+	desired := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{
+					ID:    "web",
+					Image: "busybox:latest",
+				},
+			},
+		},
+	}
+
+	actual := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{
+					ID:    "root",
+					Root:  true,
+					Image: "busybox:latest",
+				},
+				{
+					ID:    "web",
+					Image: "busybox:latest",
+				},
+			},
+		},
+	}
+
+	diff := apply.DiffCell(desired, actual)
+	if diff.HasChanges {
+		t.Errorf("expected no changes for same-file re-apply, got changes: %+v", diff)
+	}
+	if diff.RootContainerChanged {
+		t.Error("synthesized root must not flag RootContainerChanged on re-apply")
+	}
+}

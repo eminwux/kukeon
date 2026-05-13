@@ -59,9 +59,41 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 		}
 	}
 
+	// Whether the desired side authored a root container. When the user YAML
+	// omits one (docs/examples/hello-world.yaml is the canonical case), the
+	// runner synthesized a root during create and the apply layer's diff
+	// already treats it as implementation detail (see
+	// `internal/controller/apply/diff.go`). UpdateCell must mirror that:
+	// preserve the actual root container in place, do not treat it as an
+	// orphan, and do not clear `Spec.RootContainerID` from the cell. Without
+	// this, every `kuke apply -f` of an unchanged file (issue #437) errored
+	// with "root container ... cannot be removed".
+	desiredHasRoot := false
+	for _, c := range desired.Spec.Containers {
+		if c.Root {
+			desiredHasRoot = true
+			break
+		}
+	}
+	var preservedRoot *intmodel.ContainerSpec
+	if !desiredHasRoot {
+		for i := range existing.Spec.Containers {
+			if existing.Spec.Containers[i].Root {
+				preservedRoot = &existing.Spec.Containers[i]
+				break
+			}
+		}
+	}
+
 	// Handle orphan containers (in actual but not in desired)
 	for id := range actualContainers {
 		if _, exists := desiredContainers[id]; !exists {
+			if actualContainers[id].Root && preservedRoot != nil {
+				// Runner-synthesized root: the user YAML omitted it, so the
+				// orphan check would otherwise refuse the update. Leave it
+				// alone (handled by the newContainers prepend below).
+				continue
+			}
 			// Root container cannot be removed from the cell
 			if actualContainers[id].Root {
 				return intmodel.Cell{}, fmt.Errorf(
@@ -109,7 +141,13 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 
 	// Update existing cell's containers list to match desired
 	// Preserve root container and existing containerd IDs where possible
-	newContainers := make([]intmodel.ContainerSpec, 0, len(desired.Spec.Containers))
+	newContainers := make([]intmodel.ContainerSpec, 0, len(desired.Spec.Containers)+1)
+	if preservedRoot != nil {
+		// Keep the synthesized root in front of the user-authored containers
+		// so RootContainerID still resolves and runner/refresh paths that
+		// scan Containers for the root see it.
+		newContainers = append(newContainers, *preservedRoot)
+	}
 	for _, desiredContainer := range desired.Spec.Containers {
 		if actualContainer, exists := actualContainers[desiredContainer.ID]; exists {
 			// Container exists, preserve containerd ID but update spec
@@ -182,7 +220,16 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 
 	// Update cell with new containers list
 	existing.Spec.Containers = newContainers
-	existing.Spec.RootContainerID = desired.Spec.RootContainerID
+	if preservedRoot != nil && desired.Spec.RootContainerID == "" {
+		// User YAML omitted the root container; preserve the existing
+		// RootContainerID so subsequent runner lookups still resolve.
+		// existing.Spec.RootContainerID is already set, so this is a no-op
+		// in the happy path — the explicit guard exists so a future
+		// refactor that clears existing.Spec.RootContainerID up-front does
+		// not silently drop it.
+	} else {
+		existing.Spec.RootContainerID = desired.Spec.RootContainerID
+	}
 
 	// Ensure all containers exist (will create missing ones, update existing ones)
 	if connectErr := r.ensureClientConnected(); connectErr != nil {
