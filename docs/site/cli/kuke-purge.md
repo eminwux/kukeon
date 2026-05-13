@@ -4,6 +4,7 @@ More aggressive variant of [`kuke delete`](kuke-delete.md). Removes metadata, re
 
 ```
 kuke purge <resource> <name> [--cascade] [--force] [scope flags]
+kuke p     <resource> <name> ...                                # alias
 ```
 
 Resources: `realm`, `space`, `stack`, `cell`, `container`.
@@ -22,11 +23,11 @@ Plus all [global flags](kuke.md).
 Shape and flags are identical to the equivalent `delete` subcommands:
 
 ```
-kuke purge realm     <name>                                 [--cascade] [--force]
-kuke purge space     <name> --realm <r>                     [--cascade] [--force]
-kuke purge stack     <name> --realm <r> --space <s>         [--cascade] [--force]
-kuke purge cell      <name> --realm <r> --space <s> --stack <t>  [--cascade] [--force]
-kuke purge container <name> --realm <r> --space <s> --stack <t> --cell <c> [--force]
+kuke purge realm     <name>                                              [--cascade] [--force]
+kuke purge space     <name> --realm <r>                                  [--cascade] [--force]
+kuke purge stack     <name> --realm <r> --space <s>                      [--cascade] [--force]
+kuke purge cell      <name> --realm <r> --space <s> --stack <t>          [--cascade] [--force]
+kuke purge container <name> --realm <r> --space <s> --stack <t> --cell <c>           [--force]
 ```
 
 ## When to use purge vs. delete
@@ -43,24 +44,38 @@ kuke purge container <name> --realm <r> --space <s> --stack <t> --cell <c> [--fo
 - CNI networks are torn down via the bridge plugin even when the metadata is inconsistent.
 - Conflist files are unlinked from disk.
 
+## Safe by design: purging the user realm
+
+`kuke purge --cascade` on the `default` (user) realm is **safe**: the daemon lives in `kuke-system / kukeon / kukeon / kukeond`, so the user-realm cascade can never take down the daemon. To wipe `default` and immediately reuse the host:
+
+```bash
+sudo kuke purge realm default --cascade --force
+sudo kuke create realm default
+sudo kuke create space  default --realm default
+sudo kuke create stack  default --realm default --space default
+```
+
 ## Examples
 
 ```bash
-# Purge a realm that delete wouldn't tear down
+# Purge a user realm that delete wouldn't tear down
 sudo kuke purge realm mytenant --cascade --force
 
 # Nuke a broken cell
-sudo kuke purge cell stuck --realm main --space default --stack default --cascade --force
+sudo kuke purge cell stuck --realm default --space default --stack default --cascade --force
 
 # Clean up a container that's been orphaned
-sudo kuke purge container ghost --cell web --realm main --space blog --stack wordpress --force
+sudo kuke purge container ghost --cell web --realm default --space blog --stack wordpress --force
 ```
 
 ## Caution
 
 `purge` is destructive and makes "best effort" its primary operating mode. It will keep going past errors that would halt `delete`. Use it when you're prepared to lose state that you didn't explicitly back up.
 
+For a full-host teardown (every realm, the kukeon system user/group, and `/opt/kukeon` itself), use [`kuke uninstall`](kuke-uninstall.md).
+
 ## Related
 
 - [kuke delete](kuke-delete.md) — the safer variant
+- [kuke uninstall](kuke-uninstall.md) — per-host teardown wrapping `purge --cascade`
 - [Init and reset → Full host wipe](../guides/init-and-reset.md#full-host-wipe) — uses `purge --cascade --force` in the nuclear path

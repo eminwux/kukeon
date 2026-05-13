@@ -26,8 +26,8 @@ A summary of what was inspected and what was updated:
 
 ```
 $ sudo kuke refresh
-Inspected 3 realms, 5 spaces, 6 stacks, 8 cells, 12 containers.
-Updated 2 resources.
+Inspected 2 realms, 2 spaces, 2 stacks, 1 cells, 1 containers.
+Updated 0 resources.
 ```
 
 ## When it's a no-op
@@ -43,5 +43,5 @@ So a typical "what's actually happening right now" workflow is:
 
 ```bash
 sudo kuke refresh
-sudo kuke get cells --realm main --space default --stack default
+sudo kuke get cells --realm default --space default --stack default
 ```
