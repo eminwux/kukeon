@@ -401,3 +401,41 @@ Kukeon did not set out to be an agent orchestrator, and it doesn't need to rebra
 The proposal above is a path to take the gap without abandoning the project's stated direction. Most of what's needed is field additions to an existing schema. A few of the items are new kinds. None of them require kukeon to stop being what it already is.
 
 Whether to take the bet is the maintainer's call. This document is written to make the bet legible.
+
+---
+
+## 9. Status as of v0.5.0
+
+The proposal above was written before v0.4.0. Most of P0 and P1 has since shipped; P2 has not been started. This section reconciles each section-4 promise with what's in the tree today so the proposal can be read as a status document rather than a forecast.
+
+| §   | Item                                              | Priority | Status                                    |
+| --- | ------------------------------------------------- | -------- | ----------------------------------------- |
+| 4.1 | Volume mounts on Container                        | P0       | **Shipped** — `v0.4.0`                    |
+| 4.2 | Security fields on Container                      | P0       | **Shipped** — `v0.4.0`                    |
+| 4.3 | Isolation-envelope inheritance from Space         | P1       | **Shipped** — `v0.4.0`                    |
+| 4.4 | Network policy on Space                           | P1       | **Shipped** — `v0.4.0`                    |
+| 4.5 | `Session` kind                                    | P1       | **Deferred** — closed wontfix             |
+| 4.6 | Scoped credential injection                       | P1       | **Shipped** — `v0.4.0`                    |
+| 4.7 | Capability budgets on Session                     | P2       | **Not started**                           |
+| 4.8 | Causal audit trail                                | P2       | **Not started**                           |
+| 4.9 | Approval gates                                    | P2       | **Not started**                           |
+
+### Per-item detail
+
+**4.1 — Volume mounts (P0).** Promoted from reserved to active. The Container spec honors `volumes: [{source, target, readOnly}]` for host bind mounts and `volumes: [{kind: tmpfs, target, sizeBytes, mode}]` for ephemeral scratch. Wired through to the OCI runtime spec at cell-creation time.
+
+**4.2 — Security fields on Container (P0).** All fields proposed in the priority-order table are present and honored: `user`, `readOnlyRootFilesystem`, `capabilities.{add,drop}`, `securityOpts`, `tmpfs`, and `resources.{memoryLimitBytes, cpuShares, pidsLimit}`. Defaults remain backwards-compatible (`readOnlyRootFilesystem: false`); operators opt into tighter posture per-container or per-Space (see 4.3).
+
+**4.3 — Space defaults inheritance (P1).** Space spec exposes `spec.defaults.container` covering the same security/resource/tmpfs surface as 4.2. Inheritance is shallow; per-container values override Space defaults. This is the field that turns Space from "a CNI network" into "the isolation envelope."
+
+**4.4 — Network policy on Space (P1).** Space spec exposes `spec.network.egress` with `default: deny|allow` plus an allowlist of `(host, ports)` or `(cidr, ports)` pairs. Enforcement is iptables/nftables on the space bridge for IP+port rules; hostname-targeted rules are resolved at policy-apply time. The transparent egress proxy mode the proposal outlined as the "honest" path for SNI inspection is not built — HTTPS allowlisting today is by destination IP after DNS resolution, with the proxy path left for a future P2 cycle.
+
+**4.5 — `Session` kind (P1).** [Issue #46](https://github.com/eminwux/kukeon/issues/46) closed as `wontfix`. The original proposal had `Session` carry lifetime, `onEnd.persist`, and budget enforcement in one kind. In practice, lifetime and persist semantics ended up better served by `kuke apply` + explicit teardown plus parameterized cell profiles ([#358](https://github.com/eminwux/kukeon/issues/358), shipped), and the budget/audit/approval pieces (4.7–4.9) are large enough to deserve their own kinds rather than overloading one. A dedicated lifetime/budget primitive may return in a later milestone if demand justifies it.
+
+**4.6 — Scoped credential injection (P1).** Container spec has `secrets: [{name, fromFile|fromEnv, mountPath?}]`. Values are mounted as env vars or files at runtime and never written into status or audit logs. The external-broker integration outlined as the extended (P2-ish) variant is not built; secrets are sourced from the host filesystem or host env today.
+
+**4.7–4.9 — P2 items.** Capability budgets, causal audit trail, and approval gates have no tracking issues open and no code on disk. They were deferred at proposal time as "the agent-native category bet" — opt-in, ambitious, and explicitly optional for kukeon's homelab/VPS user base. Reopening this work is gated on demand from real agent operators using the v0.5.0 substrate.
+
+### What this means for v1.0
+
+The agent-native gate — "give an agent a workspace, an egress-restricted network, a scoped credential, and a non-root sandbox by declaration" — is redeemed in v0.5.0 by the P0+P1-minus-Session set, and the [Section 6 success manifest](#6-what-success-looks-like) shape works today (substituting explicit `kuke apply` + `kuke delete` for the deferred `Session` kind). The remaining gaps to v1.0 are schema/runtime tracks not covered by this proposal — see the [FAQ on v1.0](faq.md#when-is-v10) for the gating issues.

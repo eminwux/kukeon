@@ -19,7 +19,7 @@ Scale, resiliency, and multi-node concerns are deliberately out of scope.
 
 ## Can I run Kukeon and Docker on the same host?
 
-Yes. Kukeon uses its own containerd namespaces (`kukeon-<realm>`). Docker uses `moby`. The two never see each other's containers.
+Yes. Kukeon uses its own containerd namespaces (`<realm>.kukeon.io` — `default.kukeon.io` and `kuke-system.kukeon.io` after `kuke init`). Docker uses `moby`. The two never see each other's containers.
 
 ## Can I run Kukeon without the daemon?
 
@@ -47,15 +47,33 @@ Not yet. One is on the roadmap. The `kukeonv1` API that the CLI uses is stable e
 
 ## Where does Kukeon write files on the host?
 
-See [Architecture → Storage layout](architecture/storage-layout.md). The short list: `/opt/kukeon`, `/run/kukeon`, `/sys/fs/cgroup/kukeon`, `/etc/cni/net.d/*.conflist`, containerd's own store (via namespaces `kukeon-<realm>`).
+See [Architecture → Storage layout](architecture/storage-layout.md). The short list: `/opt/kukeon`, `/run/kukeon`, `/sys/fs/cgroup/kukeon`, `/etc/cni/net.d/*.conflist`, containerd's own store (via namespaces `<realm>.kukeon.io`).
 
 ## Can I run multiple kukeon daemons on the same host?
 
-Not supported. The daemon assumes sole ownership of `/run/kukeon/kukeond.sock`, `/opt/kukeon`, and the `kukeon-*` containerd namespaces. Running two would race on all three.
+Not supported. The daemon assumes sole ownership of `/run/kukeon/kukeond.sock`, `/opt/kukeon`, and the `*.kukeon.io` containerd namespaces. Running two would race on all three.
 
 ## Is Kukeon production ready?
 
-No. It's in alpha and the APIs can still change. See [GitHub Issues](https://github.com/eminwux/kukeon/issues?q=is%3Aissue+is%3Aopen+label%3Aplanning) for what's still in flux.
+No. v0.5.0 graduated from alpha to **beta**: the core primitives (Realm, Space, Stack, Cell, Container), `kuke apply` round-trip, attach/log, and the `kukeond` daemon are stable enough for daily homelab and single-host use, but the public API is not frozen and a few in-flight tracks still change semantics. See [GitHub Issues](https://github.com/eminwux/kukeon/issues?q=is%3Aissue+is%3Aopen+label%3Aplanning) for what's still in flux.
+
+## What does beta mean for Kukeon?
+
+Beta is the "ready to use, not yet a SemVer promise" tier between alpha and v1.0:
+
+- **What you get:** the manifest schema (`v1beta1`), the `kuke` CLI surface documented in [CLI Reference](cli/commands.md), and the `kukeond` daemon behavior are intended to keep working as documented. Bugs are fixed forward, not by reshaping verbs.
+- **What you don't get yet:** a deprecation policy. The `v1beta1` API may still gain fields, rename kinds, or absorb new layers (see [#423](https://github.com/eminwux/kukeon/issues/423) for the planned crew-layers reshape) before `v1.0`. Update between minor releases by reading the release notes — assume a non-trivial migration can land in any minor until v1.0.
+- **What changes vs. alpha:** the user-visible flow (`kuke init` → `kuke apply` → `kuke get` → `kuke delete`) is no longer expected to break under you between point releases. Breaking changes go through a beta-deprecation cycle, not a silent rename.
+
+## When is v1.0?
+
+There is no calendar date. v1.0 is gated on closing the in-flight tracks that would otherwise force a breaking v2 a few months later:
+
+- **[#423](https://github.com/eminwux/kukeon/issues/423)** — crew-layers absorption (`CellBlueprint` / `CellConfig` / `Secret` replace today's `CellProfile`). Schema reshape; cannot be SemVer-stable until it lands.
+- **[#217](https://github.com/eminwux/kukeon/issues/217)** — `kuke daemon` subcommand group and `--no-daemon` retirement. CLI surface is still moving; the persistent flag exits the user-facing API at v1.0.
+- **[#224](https://github.com/eminwux/kukeon/issues/224)** — reconciler-driven `create`/`delete` convergence. Changes runtime semantics for create/delete to a desired-state model.
+
+Once those land and the project publishes a compat/deprecation policy, the next tag earns v1.0. The honest progression is **alpha → beta → 1.0**, not "alpha → 1.0 with a breaking change six months later."
 
 ## How do I report a bug or request a feature?
 
