@@ -1605,6 +1605,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../kuke-doctor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke doctor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../kuke-get/" class="md-nav__link">
         
   
@@ -1813,6 +1841,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../kuke-run/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../kuke-delete/" class="md-nav__link">
         
   
@@ -1905,6 +1961,146 @@
     
   
     kuke refresh
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-attach/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke attach
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-image/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke image
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-daemon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke daemon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-uninstall/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke uninstall
   
 
     
@@ -2525,13 +2721,13 @@
 <tbody>
 <tr>
 <td><code>--namespace</code></td>
-<td>(realm name)</td>
+<td><code>&lt;realm&gt;.kukeon.io</code> (derived)</td>
 <td>Containerd namespace for the realm</td>
 </tr>
 </tbody>
 </table>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>realm<span class="w"> </span>mytenant
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>realm<span class="w"> </span>mytenant<span class="w"> </span>--namespace<span class="w"> </span>kukeon-mytenant
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>realm<span class="w"> </span>mytenant<span class="w"> </span>--namespace<span class="w"> </span>mytenant.kukeon.io
 </code></pre></div>
 <h2 id="kuke-create-space">kuke create space<a class="headerlink" href="#kuke-create-space" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kuke create space [NAME] --realm &lt;realm&gt;
@@ -2552,7 +2748,7 @@
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>space<span class="w"> </span>blog<span class="w"> </span>--realm<span class="w"> </span>main
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>space<span class="w"> </span>blog<span class="w"> </span>--realm<span class="w"> </span>default
 </code></pre></div>
 <h2 id="kuke-create-stack">kuke create stack<a class="headerlink" href="#kuke-create-stack" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>kuke create stack [NAME] --realm &lt;realm&gt; --space &lt;space&gt;
@@ -2578,7 +2774,7 @@
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>stack<span class="w"> </span>wordpress<span class="w"> </span>--realm<span class="w"> </span>main<span class="w"> </span>--space<span class="w"> </span>blog
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>stack<span class="w"> </span>wordpress<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog
 </code></pre></div>
 <h2 id="kuke-create-cell">kuke create cell<a class="headerlink" href="#kuke-create-cell" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>kuke create cell [NAME] --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt;
@@ -2609,8 +2805,8 @@
 </tr>
 </tbody>
 </table>
-<p><code>create cell</code> creates an empty cell (no containers). Use <a href="../kuke-apply/"><code>kuke apply</code></a> with a manifest to create a cell with its containers in one step.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>main<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
+<p><code>create cell</code> creates an empty cell (no containers). Use <a href="../kuke-apply/"><code>kuke apply</code></a> with a manifest to create a cell with its containers in one step, or <a href="../kuke-run/"><code>kuke run</code></a> for a one-shot create+start.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
 </code></pre></div>
 <h2 id="kuke-create-container">kuke create container<a class="headerlink" href="#kuke-create-container" title="Permanent link">&para;</a></h2>
 <p>Adds a container to an existing cell.</p>
@@ -2676,6 +2872,11 @@
 <td>Volume mount</td>
 </tr>
 <tr>
+<td><code>--tmpfs</code></td>
+<td>(empty, repeatable)</td>
+<td>Tmpfs mount, <code>path[:opts]</code> (e.g. <code>/tmp:size=64m</code>)</td>
+</tr>
+<tr>
 <td><code>--network</code></td>
 <td>(empty, repeatable)</td>
 <td>Network to join</td>
@@ -2686,14 +2887,54 @@
 <td>Network alias</td>
 </tr>
 <tr>
+<td><code>--user</code></td>
+<td>(empty)</td>
+<td>Run as <code>UID[:GID]</code> (e.g. <code>1000:1000</code>)</td>
+</tr>
+<tr>
 <td><code>--privileged</code></td>
 <td><code>false</code></td>
 <td>Run privileged</td>
 </tr>
 <tr>
+<td><code>--read-only</code></td>
+<td><code>false</code></td>
+<td>Mount the root filesystem read-only</td>
+</tr>
+<tr>
 <td><code>--root</code></td>
 <td><code>false</code></td>
 <td>Mark this container as the cell's root container</td>
+</tr>
+<tr>
+<td><code>--cap-add</code></td>
+<td>(empty, repeatable)</td>
+<td>Linux capability to add (e.g. <code>NET_ADMIN</code>)</td>
+</tr>
+<tr>
+<td><code>--cap-drop</code></td>
+<td>(empty, repeatable)</td>
+<td>Linux capability to drop (e.g. <code>ALL</code> or <code>NET_ADMIN</code>)</td>
+</tr>
+<tr>
+<td><code>--security-opt</code></td>
+<td>(empty, repeatable)</td>
+<td>Security option (e.g. <code>no-new-privileges</code>, <code>seccomp=unconfined</code>)</td>
+</tr>
+<tr>
+<td><code>--cpu-shares</code></td>
+<td><code>0</code></td>
+<td>Relative CPU weight (cgroup <code>cpu.shares</code>)</td>
+</tr>
+<tr>
+<td><code>--memory</code></td>
+<td>(empty)</td>
+<td>Hard memory limit (bytes, or with suffix <code>k</code>/<code>m</code>/<code>g</code>)</td>
+</tr>
+<tr>
+<td><code>--pids-limit</code></td>
+<td><code>0</code></td>
+<td>Maximum number of PIDs (0 leaves unset)</td>
 </tr>
 <tr>
 <td><code>--cni-config-path</code></td>
@@ -2703,7 +2944,7 @@
 <tr>
 <td><code>--restart-policy</code></td>
 <td>(empty)</td>
-<td>Restart policy</td>
+<td>Restart policy for the container</td>
 </tr>
 <tr>
 <td><code>--label</code></td>
@@ -2713,19 +2954,20 @@
 </tbody>
 </table>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>container<span class="w"> </span>nginx<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">    </span>--cell<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>main<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">    </span>--cell<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span>--image<span class="w"> </span>docker.io/library/nginx:alpine<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span>--root
 </code></pre></div>
 <div class="admonition warning">
 <p class="admonition-title">The <code>--image</code> default</p>
-</div>
 <p>If you don't pass <code>--image</code>, Kukeon uses <code>docker.io/library/debian:latest</code>. Always pass <code>--image</code> explicitly when you care what runs.</p>
+</div>
 <h2 id="imperative-vs-declarative">Imperative vs. declarative<a class="headerlink" href="#imperative-vs-declarative" title="Permanent link">&para;</a></h2>
 <p><code>kuke create</code> is useful for quick experiments and one-off resources. For anything you want to commit, diff, or apply repeatedly, write a YAML manifest and use <a href="../kuke-apply/"><code>kuke apply</code></a>. Manifests are the unit of version control; imperative commands are not.</p>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../kuke-apply/">kuke apply</a> — declarative alternative</li>
+<li><a href="../kuke-run/">kuke run</a> — create + start a single cell in one shot</li>
 <li><a href="../../manifests/overview/">Manifest Reference</a> — the schema for each resource</li>
 </ul>
 
@@ -2750,7 +2992,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 8, 2026 11:43:42 UTC">May 8, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 20:07:10 UTC">May 13, 2026</span>
   </span>
 
     

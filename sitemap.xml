@@ -41,6 +41,10 @@
          <lastmod>2026-05-13</lastmod>
     </url>
     <url>
+         <loc>https://kukeon.io/cli/kuke-attach/</loc>
+         <lastmod>2026-05-13</lastmod>
+    </url>
+    <url>
          <loc>https://kukeon.io/cli/kuke-autocomplete/</loc>
          <lastmod>2026-05-13</lastmod>
     </url>
@@ -49,11 +53,23 @@
          <lastmod>2026-05-13</lastmod>
     </url>
     <url>
+         <loc>https://kukeon.io/cli/kuke-daemon/</loc>
+         <lastmod>2026-05-13</lastmod>
+    </url>
+    <url>
          <loc>https://kukeon.io/cli/kuke-delete/</loc>
          <lastmod>2026-05-13</lastmod>
     </url>
     <url>
+         <loc>https://kukeon.io/cli/kuke-doctor/</loc>
+         <lastmod>2026-05-13</lastmod>
+    </url>
+    <url>
          <loc>https://kukeon.io/cli/kuke-get/</loc>
+         <lastmod>2026-05-13</lastmod>
+    </url>
+    <url>
+         <loc>https://kukeon.io/cli/kuke-image/</loc>
          <lastmod>2026-05-13</lastmod>
     </url>
     <url>
@@ -65,11 +81,23 @@
          <lastmod>2026-05-13</lastmod>
     </url>
     <url>
+         <loc>https://kukeon.io/cli/kuke-log/</loc>
+         <lastmod>2026-05-13</lastmod>
+    </url>
+    <url>
          <loc>https://kukeon.io/cli/kuke-purge/</loc>
          <lastmod>2026-05-13</lastmod>
     </url>
     <url>
          <loc>https://kukeon.io/cli/kuke-refresh/</loc>
+         <lastmod>2026-05-13</lastmod>
+    </url>
+    <url>
+         <loc>https://kukeon.io/cli/kuke-run/</loc>
+         <lastmod>2026-05-13</lastmod>
+    </url>
+    <url>
+         <loc>https://kukeon.io/cli/kuke-uninstall/</loc>
          <lastmod>2026-05-13</lastmod>
     </url>
     <url>

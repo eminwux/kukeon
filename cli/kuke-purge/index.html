@@ -1605,6 +1605,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../kuke-doctor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke doctor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../kuke-get/" class="md-nav__link">
         
   
@@ -1669,6 +1697,34 @@
     
   
     kuke apply
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-run/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke run
   
 
     
@@ -1849,6 +1905,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#safe-by-design-purging-the-user-realm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Safe by design: purging the user realm
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#examples" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1905,6 +1972,146 @@
     
   
     kuke refresh
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-attach/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke attach
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-image/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke image
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-daemon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke daemon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-uninstall/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke uninstall
   
 
     
@@ -2453,6 +2660,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#safe-by-design-purging-the-user-realm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Safe by design: purging the user realm
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#examples" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2508,6 +2726,7 @@
 <h1 id="kuke-purge">kuke purge<a class="headerlink" href="#kuke-purge" title="Permanent link">&para;</a></h1>
 <p>More aggressive variant of <a href="../kuke-delete/"><code>kuke delete</code></a>. Removes metadata, releases runtime state, and cleans up residual artifacts (cgroups, CNI networks, containerd remnants) that <code>delete</code> would leave behind on error.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke purge &lt;resource&gt; &lt;name&gt; [--cascade] [--force] [scope flags]
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>kuke p     &lt;resource&gt; &lt;name&gt; ...                                # alias
 </code></pre></div>
 <p>Resources: <code>realm</code>, <code>space</code>, <code>stack</code>, <code>cell</code>, <code>container</code>.</p>
 <h2 id="persistent-flags">Persistent flags<a class="headerlink" href="#persistent-flags" title="Permanent link">&para;</a></h2>
@@ -2535,11 +2754,11 @@
 <p>Plus all <a href="../kuke/">global flags</a>.</p>
 <h2 id="per-resource-subcommands">Per-resource subcommands<a class="headerlink" href="#per-resource-subcommands" title="Permanent link">&para;</a></h2>
 <p>Shape and flags are identical to the equivalent <code>delete</code> subcommands:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke purge realm     &lt;name&gt;                                 [--cascade] [--force]
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>kuke purge space     &lt;name&gt; --realm &lt;r&gt;                     [--cascade] [--force]
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>kuke purge stack     &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt;         [--cascade] [--force]
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>kuke purge cell      &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt;  [--cascade] [--force]
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>kuke purge container &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt; --cell &lt;c&gt; [--force]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke purge realm     &lt;name&gt;                                              [--cascade] [--force]
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>kuke purge space     &lt;name&gt; --realm &lt;r&gt;                                  [--cascade] [--force]
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>kuke purge stack     &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt;                      [--cascade] [--force]
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>kuke purge cell      &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt;          [--cascade] [--force]
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>kuke purge container &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt; --cell &lt;c&gt;           [--force]
 </code></pre></div>
 <h2 id="when-to-use-purge-vs-delete">When to use purge vs. delete<a class="headerlink" href="#when-to-use-purge-vs-delete" title="Permanent link">&para;</a></h2>
 <ul>
@@ -2554,21 +2773,30 @@
 <li>CNI networks are torn down via the bridge plugin even when the metadata is inconsistent.</li>
 <li>Conflist files are unlinked from disk.</li>
 </ul>
+<h2 id="safe-by-design-purging-the-user-realm">Safe by design: purging the user realm<a class="headerlink" href="#safe-by-design-purging-the-user-realm" title="Permanent link">&para;</a></h2>
+<p><code>kuke purge --cascade</code> on the <code>default</code> (user) realm is <strong>safe</strong>: the daemon lives in <code>kuke-system / kukeon / kukeon / kukeond</code>, so the user-realm cascade can never take down the daemon. To wipe <code>default</code> and immediately reuse the host:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>purge<span class="w"> </span>realm<span class="w"> </span>default<span class="w"> </span>--cascade<span class="w"> </span>--force
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>realm<span class="w"> </span>default
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>space<span class="w">  </span>default<span class="w"> </span>--realm<span class="w"> </span>default
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>stack<span class="w">  </span>default<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>default
+</code></pre></div>
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Purge a realm that delete wouldn&#39;t tear down</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>purge<span class="w"> </span>realm<span class="w"> </span>mytenant<span class="w"> </span>--cascade<span class="w"> </span>--force
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Nuke a broken cell</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>purge<span class="w"> </span>cell<span class="w"> </span>stuck<span class="w"> </span>--realm<span class="w"> </span>main<span class="w"> </span>--space<span class="w"> </span>default<span class="w"> </span>--stack<span class="w"> </span>default<span class="w"> </span>--cascade<span class="w"> </span>--force
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># Clean up a container that&#39;s been orphaned</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>purge<span class="w"> </span>container<span class="w"> </span>ghost<span class="w"> </span>--cell<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>main<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress<span class="w"> </span>--force
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Purge a user realm that delete wouldn&#39;t tear down</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>purge<span class="w"> </span>realm<span class="w"> </span>mytenant<span class="w"> </span>--cascade<span class="w"> </span>--force
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># Nuke a broken cell</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>purge<span class="w"> </span>cell<span class="w"> </span>stuck<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>default<span class="w"> </span>--stack<span class="w"> </span>default<span class="w"> </span>--cascade<span class="w"> </span>--force
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># Clean up a container that&#39;s been orphaned</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>purge<span class="w"> </span>container<span class="w"> </span>ghost<span class="w"> </span>--cell<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress<span class="w"> </span>--force
 </code></pre></div>
 <h2 id="caution">Caution<a class="headerlink" href="#caution" title="Permanent link">&para;</a></h2>
 <p><code>purge</code> is destructive and makes "best effort" its primary operating mode. It will keep going past errors that would halt <code>delete</code>. Use it when you're prepared to lose state that you didn't explicitly back up.</p>
+<p>For a full-host teardown (every realm, the kukeon system user/group, and <code>/opt/kukeon</code> itself), use <a href="../kuke-uninstall/"><code>kuke uninstall</code></a>.</p>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../kuke-delete/">kuke delete</a> — the safer variant</li>
+<li><a href="../kuke-uninstall/">kuke uninstall</a> — per-host teardown wrapping <code>purge --cascade</code></li>
 <li><a href="../../guides/init-and-reset/#full-host-wipe">Init and reset → Full host wipe</a> — uses <code>purge --cascade --force</code> in the nuclear path</li>
 </ul>
 
@@ -2593,7 +2821,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 8, 2026 11:43:42 UTC">May 8, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 20:07:10 UTC">May 13, 2026</span>
   </span>
 
     

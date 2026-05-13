@@ -1605,6 +1605,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../kuke-doctor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke doctor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../kuke-get/" class="md-nav__link">
         
   
@@ -1669,6 +1697,34 @@
     
   
     kuke apply
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-run/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke run
   
 
     
@@ -1781,6 +1837,146 @@
     
   
     kuke refresh
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-attach/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke attach
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-image/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke image
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-daemon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke daemon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-uninstall/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke uninstall
   
 
     
@@ -2454,6 +2650,16 @@
 </thead>
 <tbody>
 <tr>
+<td><code>--socket</code></td>
+<td><code>/run/kukeon/kukeond.sock</code></td>
+<td>Unix socket the daemon listens on</td>
+</tr>
+<tr>
+<td><code>--socket-gid</code></td>
+<td><code>0</code></td>
+<td>Group ID to chown the listener socket to (mode 0660 with group). Set by <code>kuke init</code> to the <code>kukeon</code> GID.</td>
+</tr>
+<tr>
 <td><code>--run-path</code></td>
 <td><code>/opt/kukeon</code></td>
 <td>Where the daemon reads/writes persistent state (shared with <code>kuke</code>)</td>
@@ -2464,9 +2670,24 @@
 <td>Path to the containerd socket</td>
 </tr>
 <tr>
-<td><code>--socket</code></td>
-<td><code>/run/kukeon/kukeond.sock</code></td>
-<td>Unix socket the daemon listens on</td>
+<td><code>--configuration</code></td>
+<td><code>/etc/kukeon/kukeond.yaml</code></td>
+<td><code>ServerConfiguration</code> YAML; absent file uses hardcoded defaults</td>
+</tr>
+<tr>
+<td><code>--cgroup-root</code></td>
+<td><code>/kukeon</code></td>
+<td>Cgroup root under which all realms / spaces / stacks / cells live</td>
+</tr>
+<tr>
+<td><code>--containerd-namespace-suffix</code></td>
+<td><code>kukeon.io</code></td>
+<td>Suffix appended to every realm name to form its containerd namespace</td>
+</tr>
+<tr>
+<td><code>--reconcile-interval</code></td>
+<td><code>30s</code></td>
+<td>Period of the cell-reconciliation loop (Go duration; <code>0</code> disables)</td>
 </tr>
 <tr>
 <td><code>--log-level</code></td>
@@ -2479,7 +2700,7 @@
 <h2 id="kukeond-serve">kukeond serve<a class="headerlink" href="#kukeond-serve" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kukeond serve
 </code></pre></div>
-<p>Runs the daemon in the foreground. Listens on <code>--socket</code>, writes a pid file at <code>&lt;run-path&gt;/kukeond.pid</code>, and serves the <code>kukeonv1</code> API until it receives SIGINT or SIGTERM.</p>
+<p>Runs the daemon in the foreground. Listens on <code>--socket</code>, writes a pid file at <code>/run/kukeon/kukeond.pid</code>, and serves the <code>kukeonv1</code> API until it receives SIGINT or SIGTERM.</p>
 <p>On shutdown it closes the listener, removes the pid file, and drains in-flight requests on a best-effort basis.</p>
 <h2 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>kukeond<span class="w"> </span>serve<span class="w"> </span>--log-level<span class="w"> </span>debug
@@ -2488,7 +2709,7 @@
 <h2 id="signals">Signals<a class="headerlink" href="#signals" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>SIGINT</code>, <code>SIGTERM</code> — clean shutdown.</li>
-<li><code>SIGKILL</code> — hard kill; leaves the socket and pid file behind. Clean up with <code>sudo rm -f /run/kukeon/kukeond.{sock,pid}</code> before restarting.</li>
+<li><code>SIGKILL</code> — hard kill; leaves the socket and pid file behind. Clean up with <code>sudo rm -f /run/kukeon/kukeond.{sock,pid}</code> before restarting (or use <a href="../kuke-daemon/"><code>kuke daemon reset</code></a>).</li>
 </ul>
 
 
@@ -2512,7 +2733,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 8, 2026 11:43:42 UTC">May 8, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 20:07:10 UTC">May 13, 2026</span>
   </span>
 
     

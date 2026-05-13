@@ -12,13 +12,13 @@
         <meta name="author" content="Emiliano Spinella (eminwux)">
       
       
-        <link rel="canonical" href="https://kukeon.io/manifests/container/">
+        <link rel="canonical" href="https://kukeon.io/cli/kuke-run/">
       
       
-        <link rel="prev" href="../cell/">
+        <link rel="prev" href="../kuke-apply/">
       
       
-        <link rel="next" href="../../tutorials/hello-world/">
+        <link rel="next" href="../kuke-delete/">
       
       
         
@@ -29,7 +29,7 @@
     
     
       
-        <title>Container manifest - kukeon</title>
+        <title>kuke run - kukeon</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#container-manifest" class="md-skip">
+        <a href="#kuke-run" class="md-skip">
           Skip to content
         </a>
       
@@ -118,7 +118,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Container manifest
+              kuke run
             
           </span>
         </div>
@@ -366,11 +366,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../cli/commands/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../commands/" class="md-tabs__link">
           
   
   
@@ -386,13 +388,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../overview/" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../../manifests/overview/" class="md-tabs__link">
           
   
   
@@ -1461,28 +1461,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
-        
-          
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
             
   
   
@@ -1500,7 +1503,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_8">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1518,7 +1521,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/commands/" class="md-nav__link">
+      <a href="../commands/" class="md-nav__link">
         
   
   
@@ -1546,7 +1549,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke/" class="md-nav__link">
+      <a href="../kuke/" class="md-nav__link">
         
   
   
@@ -1574,7 +1577,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-init/" class="md-nav__link">
+      <a href="../kuke-init/" class="md-nav__link">
         
   
   
@@ -1602,7 +1605,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-doctor/" class="md-nav__link">
+      <a href="../kuke-doctor/" class="md-nav__link">
         
   
   
@@ -1630,7 +1633,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-get/" class="md-nav__link">
+      <a href="../kuke-get/" class="md-nav__link">
         
   
   
@@ -1658,7 +1661,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-create/" class="md-nav__link">
+      <a href="../kuke-create/" class="md-nav__link">
         
   
   
@@ -1686,7 +1689,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-apply/" class="md-nav__link">
+      <a href="../kuke-apply/" class="md-nav__link">
         
   
   
@@ -1694,574 +1697,6 @@
     
   
     kuke apply
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../cli/kuke-run/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke run
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../cli/kuke-delete/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke delete
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../cli/kuke-lifecycle/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke start / stop / kill
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../cli/kuke-purge/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke purge
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../cli/kuke-refresh/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke refresh
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../cli/kuke-log/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke log
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../cli/kuke-attach/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke attach
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../cli/kuke-image/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke image
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../cli/kuke-daemon/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke daemon
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../cli/kuke-uninstall/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke uninstall
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../cli/kuke-autocomplete/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke autocomplete
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../cli/kuke-version/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kuke version
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../cli/kukeond/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    kukeond
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-    
-  
-  
-  
-    
-    
-    
-    
-      
-        
-        
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
-      
-        
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
-        
-          
-          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Manifest Reference
-  
-
-    
-  </span>
-  
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_9">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Manifest Reference
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../overview/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Manifest reference
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../realm/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Realm manifest
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../space/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Space manifest
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../stack/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Stack manifest
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cell/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Cell manifest
   
 
     
@@ -2298,7 +1733,7 @@
   <span class="md-ellipsis">
     
   
-    Container manifest
+    kuke run
   
 
     
@@ -2316,7 +1751,7 @@
   <span class="md-ellipsis">
     
   
-    Container manifest
+    kuke run
   
 
     
@@ -2342,49 +1777,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#spec" class="md-nav__link">
+  <a href="#flags" class="md-nav__link">
     <span class="md-ellipsis">
       
-        spec
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="spec">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#volumemount" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        VolumeMount
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#containersecret" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ContainerSecret
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#status" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        status
+        Flags
       
     </span>
   </a>
@@ -2392,10 +1788,54 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#minimal-embedded-in-a-cell" class="md-nav__link">
+  <a href="#attach-vs-detach" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Minimal (embedded in a cell)
+        Attach vs. detach
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Profiles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cleanup-with-rm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup with --rm
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related
       
     </span>
   </a>
@@ -2406,6 +1846,571 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-delete/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke delete
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke start / stop / kill
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-purge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke purge
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-refresh/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke refresh
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-attach/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke attach
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-image/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke image
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-daemon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke daemon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-uninstall/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke uninstall
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-autocomplete/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke autocomplete
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-version/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke version
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kukeond/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kukeond
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manifest Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Manifest Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../manifests/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manifest reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../manifests/realm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Realm manifest
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../manifests/space/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Space manifest
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../manifests/stack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stack manifest
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../manifests/cell/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell manifest
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../manifests/container/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Container manifest
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2589,49 +2594,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#spec" class="md-nav__link">
+  <a href="#flags" class="md-nav__link">
     <span class="md-ellipsis">
       
-        spec
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="spec">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#volumemount" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        VolumeMount
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#containersecret" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ContainerSecret
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#status" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        status
+        Flags
       
     </span>
   </a>
@@ -2639,10 +2605,54 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#minimal-embedded-in-a-cell" class="md-nav__link">
+  <a href="#attach-vs-detach" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Minimal (embedded in a cell)
+        Attach vs. detach
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Profiles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cleanup-with-rm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup with --rm
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related
       
     </span>
   </a>
@@ -2669,325 +2679,135 @@
   
 
 
-<h1 id="container-manifest">Container manifest<a class="headerlink" href="#container-manifest" title="Permanent link">&para;</a></h1>
-<p>A container is normally declared as part of a cell's <code>spec.containers</code>, not as a top-level resource. The standalone shape still exists for CLI-level operations (<code>kuke get container …</code>).</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Container</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nt">metadata</span><span class="p">:</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">web</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{}</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">web</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">  </span><span class="nt">realmId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">main</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">  </span><span class="nt">spaceId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">  </span><span class="nt">stackId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">  </span><span class="nt">cellId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">hello-world</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">  </span><span class="nt">root</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker.io/library/nginx:alpine</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/bin/sh</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">  </span><span class="nt">args</span><span class="p">:</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-c</span>
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;exec</span><span class="nv"> </span><span class="s">nginx</span><span class="nv"> </span><span class="s">-g</span><span class="nv"> </span><span class="s">&#39;daemon</span><span class="nv"> </span><span class="s">off;&#39;&quot;</span>
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">  </span><span class="nt">env</span><span class="p">:</span>
-<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;NGINX_HOST=example.com&quot;</span>
-<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">  </span><span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span>
-<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="w">  </span><span class="nt">volumes</span><span class="p">:</span>
-<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/srv/html</span>
-<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="w">      </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/usr/share/nginx/html</span>
-<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="w">      </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="w">  </span><span class="nt">networks</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span>
-<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a><span class="w">  </span><span class="nt">networksAliases</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span>
-<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a><span class="w">  </span><span class="nt">privileged</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
-<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a><span class="w">  </span><span class="nt">cniConfigPath</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
-<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="w">  </span><span class="nt">restartPolicy</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
-<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="nt">status</span><span class="p">:</span>
-<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a><span class="w">  </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Ready</span>
-<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="w">  </span><span class="nt">startTime</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;2026-04-21T12:00:00Z&quot;</span>
-<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="w">  </span><span class="nt">finishTime</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;0001-01-01T00:00:00Z&quot;</span>
-<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a><span class="w">  </span><span class="nt">exitCode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
-<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a><span class="w">  </span><span class="nt">restartCount</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
-<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a><span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">...</span>
+<h1 id="kuke-run">kuke run<a class="headerlink" href="#kuke-run" title="Permanent link">&para;</a></h1>
+<p>Create and start a single cell from a YAML file or stdin (<code>-f</code>), or from a per-user profile under <code>$HOME/.kuke/profiles.d/&lt;name&gt;.yaml</code> (<code>-p</code>). Conceptually <code>kuke apply -f</code> (single-cell) plus <code>kuke start cell</code>, but refuses to update a divergent on-disk spec.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke run (-f &lt;file&gt; | -p &lt;profile&gt;) [flags]
 </code></pre></div>
-<p>See <a href="../../concepts/container/">Concepts → Container</a> for what a container is.</p>
-<h2 id="spec">spec<a class="headerlink" href="#spec" title="Permanent link">&para;</a></h2>
+<p>To re-attach to an existing cell, use <a href="../kuke-attach/"><code>kuke attach &lt;cell&gt;</code></a>.</p>
+<h2 id="flags">Flags<a class="headerlink" href="#flags" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Field</th>
-<th>Type</th>
-<th>Required</th>
+<th>Flag</th>
+<th>Default</th>
 <th>Description</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>id</code></td>
-<td>string</td>
-<td>yes</td>
-<td>Container identifier (matches <code>metadata.name</code>)</td>
+<td><code>--file</code>, <code>-f</code></td>
+<td><em>(one of <code>-f</code>/<code>-p</code>)</em></td>
+<td>YAML to read (path or <code>-</code> for stdin); mutually exclusive with <code>-p</code></td>
 </tr>
 <tr>
-<td><code>containerdId</code></td>
-<td>string</td>
-<td>no</td>
-<td>Populated by Kukeon with the containerd-level container id</td>
+<td><code>--profile</code>, <code>-p</code></td>
+<td><em>(one of <code>-f</code>/<code>-p</code>)</em></td>
+<td>Cell profile name to load from <code>$HOME/.kuke/profiles.d</code> (or <code>$KUKE_PROFILES_DIR</code>); mutually exclusive with <code>-f</code></td>
 </tr>
 <tr>
-<td><code>realmId</code></td>
-<td>string</td>
-<td>yes</td>
-<td>Realm that owns the container</td>
+<td><code>--name</code></td>
+<td><code>&lt;metadata.name&gt;-&lt;6hex&gt;</code></td>
+<td>Override the materialized cell name. Only valid with <code>-p</code>; rejected with <code>-f</code>, where <code>metadata.name</code> is the cell name verbatim</td>
 </tr>
 <tr>
-<td><code>spaceId</code></td>
-<td>string</td>
-<td>yes</td>
-<td>Space that owns the container</td>
+<td><code>--param</code></td>
+<td>(empty, repeatable)</td>
+<td>Profile parameter override as <code>KEY=VALUE</code>. Only valid with <code>-p</code>. Each <code>KEY</code> must be declared in <code>spec.parameters[]</code>. Wins over the default and over <code>--param-file</code>.</td>
 </tr>
 <tr>
-<td><code>stackId</code></td>
-<td>string</td>
-<td>yes</td>
-<td>Stack that owns the container</td>
+<td><code>--param-file</code></td>
+<td>(empty)</td>
+<td>File of <code>KEY=VALUE</code> lines whose values seed profile parameters; one per line, <code>#</code> starts a comment. Same declaration rules as <code>--param</code>. CLI <code>--param</code> wins on dups.</td>
 </tr>
 <tr>
-<td><code>cellId</code></td>
-<td>string</td>
-<td>yes</td>
-<td>Cell that owns the container</td>
+<td><code>--detach</code>, <code>-d</code></td>
+<td><code>false</code></td>
+<td>Return immediately after start without attaching</td>
 </tr>
 <tr>
-<td><code>root</code></td>
-<td>bool</td>
-<td>no</td>
-<td>Mark this as the cell's root container (owns the network namespace)</td>
+<td><code>--container</code></td>
+<td>(auto-pick)</td>
+<td>Container to attach to (attach mode only; rejected with <code>-d</code>). Precedence: <code>--container</code> &gt; <code>cell.tty.default</code> &gt; first attachable</td>
 </tr>
 <tr>
-<td><code>image</code></td>
-<td>string</td>
-<td>yes</td>
-<td>OCI image reference. Kukeon passes this to containerd's image pull.</td>
+<td><code>--rm</code></td>
+<td><code>false</code></td>
+<td>Best-effort delete the cell after it's no longer needed (any rc). See <a href="#cleanup-with---rm">Cleanup with <code>--rm</code></a>.</td>
 </tr>
 <tr>
-<td><code>command</code></td>
-<td>string</td>
-<td>no</td>
-<td>Command to run. If omitted, the image's <code>ENTRYPOINT</code> is used.</td>
+<td><code>--realm</code></td>
+<td>(from manifest)</td>
+<td>Realm that owns the cell (overrides <code>spec.realmId</code> only when the doc is empty)</td>
 </tr>
 <tr>
-<td><code>args</code></td>
-<td>array of string</td>
-<td>no</td>
-<td>Arguments. Combined with <code>command</code>.</td>
+<td><code>--space</code></td>
+<td>(from manifest)</td>
+<td>Space that owns the cell</td>
 </tr>
 <tr>
-<td><code>env</code></td>
-<td>array of string</td>
-<td>no</td>
-<td><code>KEY=VALUE</code> environment variables</td>
+<td><code>--stack</code></td>
+<td>(from manifest)</td>
+<td>Stack that owns the cell</td>
 </tr>
 <tr>
-<td><code>ports</code></td>
-<td>array of string</td>
-<td>no</td>
-<td>Reserved — port mapping semantics are not finalized</td>
-</tr>
-<tr>
-<td><code>volumes</code></td>
-<td>array of <code>VolumeMount</code></td>
-<td>no</td>
-<td>Bind-mount host paths into the container (see <a href="#volumemount">VolumeMount</a>)</td>
-</tr>
-<tr>
-<td><code>networks</code></td>
-<td>array of string</td>
-<td>no</td>
-<td>Additional CNI networks to join beyond the cell's default</td>
-</tr>
-<tr>
-<td><code>networksAliases</code></td>
-<td>array of string</td>
-<td>no</td>
-<td>DNS aliases for the container within its CNI networks</td>
-</tr>
-<tr>
-<td><code>privileged</code></td>
-<td>bool</td>
-<td>no</td>
-<td>Run privileged (full capabilities, access to <code>/dev</code>, etc.)</td>
-</tr>
-<tr>
-<td><code>secrets</code></td>
-<td>array of <code>ContainerSecret</code></td>
-<td>no</td>
-<td>Inject credentials resolved by the daemon — never written to status or YAML (see <a href="#containersecret">ContainerSecret</a>)</td>
-</tr>
-<tr>
-<td><code>cniConfigPath</code></td>
-<td>string</td>
-<td>no</td>
-<td>Override the CNI config directory for this container</td>
-</tr>
-<tr>
-<td><code>restartPolicy</code></td>
-<td>string</td>
-<td>no</td>
-<td>Restart policy. Reserved — restart semantics are not finalized.</td>
+<td><code>--output</code>, <code>-o</code></td>
+<td>(human-readable)</td>
+<td>Output format: <code>json</code>, <code>yaml</code></td>
 </tr>
 </tbody>
 </table>
-<div class="admonition warning">
-<p class="admonition-title">Fields marked reserved</p>
-</div>
-<p><code>ports</code> and <code>restartPolicy</code> are accepted by the schema today but their semantics are still being designed. Values round-trip (you can read back what you applied), but the controller does not act on them. See <a href="https://github.com/eminwux/kukeon/issues">GitHub Issues</a> for the backlog.</p>
-<h3 id="volumemount">VolumeMount<a class="headerlink" href="#volumemount" title="Permanent link">&para;</a></h3>
-<p>Each entry in <code>spec.volumes</code> is a bind mount of a host path into the container.</p>
-<table>
-<thead>
-<tr>
-<th>Field</th>
-<th>Type</th>
-<th>Required</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>source</code></td>
-<td>string</td>
-<td>yes</td>
-<td>Absolute host path. Must exist at apply time. Named / managed volumes are not supported.</td>
-</tr>
-<tr>
-<td><code>target</code></td>
-<td>string</td>
-<td>yes</td>
-<td>Absolute path inside the container</td>
-</tr>
-<tr>
-<td><code>readOnly</code></td>
-<td>bool</td>
-<td>no</td>
-<td>Mount read-only when <code>true</code> (writes fail with <code>EROFS</code>). Defaults to <code>false</code>.</td>
-</tr>
-</tbody>
-</table>
-<h3 id="containersecret">ContainerSecret<a class="headerlink" href="#containersecret" title="Permanent link">&para;</a></h3>
-<p>Each entry in <code>spec.secrets</code> references a credential the daemon resolves at apply time. Only the reference is persisted — the resolved value never appears in <code>kuke get -o yaml</code>, in object status, or in daemon logs.</p>
-<table>
-<thead>
-<tr>
-<th>Field</th>
-<th>Type</th>
-<th>Required</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>name</code></td>
-<td>string</td>
-<td>yes</td>
-<td>Environment-variable name (default mode) or basename of the mounted secret file when <code>mountPath</code> is set</td>
-</tr>
-<tr>
-<td><code>fromFile</code></td>
-<td>string</td>
-<td>one of required</td>
-<td>Absolute host path the daemon reads at apply time. Missing files produce a clear error.</td>
-</tr>
-<tr>
-<td><code>fromEnv</code></td>
-<td>string</td>
-<td>one of required</td>
-<td>Name of an environment variable set on the daemon host. Missing env vars produce a clear error.</td>
-</tr>
-<tr>
-<td><code>mountPath</code></td>
-<td>string</td>
-<td>no</td>
-<td>Absolute path inside the container. When set, the secret is staged with mode <code>0400</code> and bind-mounted read-only instead of being injected as an env var.</td>
-</tr>
-</tbody>
-</table>
-<p>Exactly one of <code>fromFile</code> / <code>fromEnv</code> must be set. Example:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">secrets</span><span class="p">:</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ANTHROPIC_API_KEY</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">fromFile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/etc/kukeon/secrets/anthropic.key</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GITHUB_TOKEN</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="nt">fromEnv</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GITHUB_TOKEN_SCOPED</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tls.crt</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="nt">fromFile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/etc/kukeon/secrets/tls.crt</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/run/secrets/tls.crt</span>
+<p>Plus all <a href="../kuke/">global flags</a>.</p>
+<h2 id="attach-vs-detach">Attach vs. detach<a class="headerlink" href="#attach-vs-detach" title="Permanent link">&para;</a></h2>
+<p>By default, <code>kuke run</code> attaches to the cell's attachable container after start. Precedence for which container to attach to:</p>
+<ol>
+<li><code>--container &lt;name&gt;</code> if set.</li>
+<li>The container marked <code>tty.default: true</code> in the cell spec.</li>
+<li>The single non-root attachable container, when there's exactly one.</li>
+</ol>
+<p>Pass <code>-d</code>/<code>--detach</code> to return immediately without attaching. <code>--container</code> is rejected together with <code>-d</code>.</p>
+<p>A clean <code>^]^]</code> detach exits the CLI but leaves the cell running so you can re-attach later with <a href="../kuke-attach/"><code>kuke attach</code></a>.</p>
+<h2 id="profiles">Profiles<a class="headerlink" href="#profiles" title="Permanent link">&para;</a></h2>
+<p>Profiles are YAML files under <code>$HOME/.kuke/profiles.d/&lt;name&gt;.yaml</code> (or <code>$KUKE_PROFILES_DIR</code>). A profile is a cell spec template with declared <code>spec.parameters[]</code>. Each invocation materializes one cell with a unique name (<code>&lt;metadata.name&gt;-&lt;6hex&gt;</code> by default; override with <code>--name</code>).</p>
+<p>Parameters are resolved in this order, last-write-wins per key:</p>
+<ol>
+<li>The parameter's <code>default</code> in the profile.</li>
+<li>Values from <code>--param-file &lt;path&gt;</code>.</li>
+<li>Values from each <code>--param KEY=VALUE</code> on the CLI.</li>
+</ol>
+<p>Keys not declared in <code>spec.parameters[]</code> are rejected.</p>
+<h2 id="cleanup-with-rm">Cleanup with <code>--rm</code><a class="headerlink" href="#cleanup-with-rm" title="Permanent link">&para;</a></h2>
+<p><code>--rm</code> best-effort deletes the cell after it's no longer needed (any return code). Daemon-mode only — incompatible with <code>--no-daemon</code>. Cleanup runs from <code>kukeond</code>'s reconcile loop, so latency is bounded by the reconcile interval rather than firing the instant the trigger fires.</p>
+<p>Triggers:</p>
+<ul>
+<li>With <code>-d</code>/<code>--detach</code>: the root container's task exits.</li>
+<li>In the default attach mode: the attach loop exits because the workload terminated, the peer hung up, or an unrecoverable controller error fired — the CLI then sends <code>KillCell</code> so a long-lived root (e.g. <code>sleep infinity</code>) doesn't pin the cell.</li>
+<li>A clean <code>^]^]</code> detach is <strong>not</strong> a trigger: the cell stays alive so the operator can re-attach later (parity with <code>kuke attach</code>).</li>
+</ul>
+<h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Run a one-shot cell from a file, attached</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>-f<span class="w"> </span>hello.yaml
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Run detached from a profile</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>kuke<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>shell<span class="w"> </span>--detach
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Materialize a profile with overridden parameters</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>kuke<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>shell<span class="w"> </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>alpine:latest<span class="w"> </span>--param<span class="w"> </span><span class="nv">CMD</span><span class="o">=</span><span class="s2">&quot;/bin/sh&quot;</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># Use a parameter file, with one CLI override winning on the same key</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>kuke<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>shell<span class="w"> </span>--param-file<span class="w"> </span>./shell.env<span class="w"> </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>alpine:edge
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="c1"># Pin the materialized cell name</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>kuke<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>shell<span class="w"> </span>--name<span class="w"> </span>my-shell<span class="w"> </span>--detach
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="c1"># One-shot job that cleans itself up after the workload exits</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>kuke<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>batch<span class="w"> </span>--rm
 </code></pre></div>
-<p>File-mount mode stages secrets under <code>/run/kukeon/secrets/&lt;containerdId&gt;/&lt;name&gt;</code> on the host, with owner-only read perms, then bind-mounts them read-only into the container. Because containerd persists resolved env vars in its own runtime spec, env-injection mode leaves the value in containerd's state; file-mount mode keeps it only in the tmpfs staging file.</p>
-<h2 id="status">status<a class="headerlink" href="#status" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Field</th>
-<th>Type</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>name</code></td>
-<td>string</td>
-<td>Matches <code>metadata.name</code></td>
-</tr>
-<tr>
-<td><code>id</code></td>
-<td>string</td>
-<td>Containerd container id</td>
-</tr>
-<tr>
-<td><code>state</code></td>
-<td><code>Pending</code>, <code>Ready</code>, <code>Stopped</code>, <code>Paused</code>, <code>Pausing</code>, <code>Failed</code>, <code>Unknown</code></td>
-<td>Lifecycle state</td>
-</tr>
-<tr>
-<td><code>restartCount</code></td>
-<td>int</td>
-<td>Times the container has restarted</td>
-</tr>
-<tr>
-<td><code>restartTime</code></td>
-<td>RFC3339 timestamp</td>
-<td>Last restart</td>
-</tr>
-<tr>
-<td><code>startTime</code></td>
-<td>RFC3339 timestamp</td>
-<td>Current (or last) start</td>
-</tr>
-<tr>
-<td><code>finishTime</code></td>
-<td>RFC3339 timestamp</td>
-<td>When the task exited (zero-value if still running)</td>
-</tr>
-<tr>
-<td><code>exitCode</code></td>
-<td>int</td>
-<td>Exit code of the last run (0 if still running)</td>
-</tr>
-<tr>
-<td><code>exitSignal</code></td>
-<td>string</td>
-<td>Signal that terminated the task, if any</td>
-</tr>
-</tbody>
-</table>
-<h2 id="minimal-embedded-in-a-cell">Minimal (embedded in a cell)<a class="headerlink" href="#minimal-embedded-in-a-cell" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">containers</span><span class="p">:</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">web</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker.io/library/busybox:latest</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/bin/sh</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="nt">args</span><span class="p">:</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-c</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;echo</span><span class="nv"> </span><span class="s">hello</span><span class="nv"> </span><span class="s">&amp;&amp;</span><span class="nv"> </span><span class="s">sleep</span><span class="nv"> </span><span class="s">3600&quot;</span>
-</code></pre></div>
-<p>Only <code>id</code> and <code>image</code> are strictly required when embedded inside a cell — the <code>realmId</code>, <code>spaceId</code>, <code>stackId</code>, and <code>cellId</code> are inherited from the parent cell's spec.</p>
+<h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../kuke-apply/">kuke apply</a> — declarative path; supports multi-document manifests</li>
+<li><a href="../kuke-attach/">kuke attach</a> — attach to an already-running cell</li>
+<li><a href="../kuke-create/#kuke-create-cell">kuke create cell</a> — imperative cell creation without a manifest</li>
+</ul>
 
 
 
@@ -3010,7 +2830,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 19:10:51 UTC">May 13, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 20:07:10 UTC">May 13, 2026</span>
   </span>
 
     
@@ -3020,7 +2840,7 @@
     <span class="md-icon" title="Created">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14.47 15.08 11 13V7h1.5v5.25l3.08 1.83c-.41.28-.79.62-1.11 1m-1.39 4.84c-.36.05-.71.08-1.08.08-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8c0 .37-.03.72-.08 1.08.69.1 1.33.32 1.92.64.1-.56.16-1.13.16-1.72 0-5.5-4.5-10-10-10S2 6.5 2 12s4.47 10 10 10c.59 0 1.16-.06 1.72-.16-.32-.59-.54-1.23-.64-1.92M18 15v3h-3v2h3v3h2v-3h3v-2h-3v-3z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 21, 2026 12:22:34 UTC">April 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 20:07:10 UTC">May 13, 2026</span>
   </span>
 
     

@@ -15,7 +15,7 @@
         <link rel="canonical" href="https://kukeon.io/cli/kuke-get/">
       
       
-        <link rel="prev" href="../kuke-init/">
+        <link rel="prev" href="../kuke-doctor/">
       
       
         <link rel="next" href="../kuke-create/">
@@ -1602,6 +1602,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-doctor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke doctor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -1791,6 +1819,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../kuke-run/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../kuke-delete/" class="md-nav__link">
         
   
@@ -1883,6 +1939,146 @@
     
   
     kuke refresh
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-attach/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke attach
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-image/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke image
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-daemon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke daemon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-uninstall/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke uninstall
   
 
     
@@ -2480,6 +2676,10 @@
 <td><code>--output</code>, <code>-o</code></td>
 <td>Output format: <code>yaml</code>, <code>json</code>, <code>table</code>. Default: <code>table</code> for list, <code>yaml</code> for a single resource.</td>
 </tr>
+<tr>
+<td><code>--show-controllers</code></td>
+<td>Append a <code>CONTROLLERS</code> column listing the cgroup-v2 controllers delegated on the subject's subtree. Off by default to keep the dev-init parity check stable.</td>
+</tr>
 </tbody>
 </table>
 <p>Plus all <a href="../kuke/">global flags</a> — most importantly <code>--no-daemon</code>.</p>
@@ -2521,26 +2721,30 @@
 <li><strong>List</strong> (no positional arg): returns every resource matching the scope flags. Default output is a table.</li>
 <li><strong>Single</strong> (positional arg): returns the one matching resource. Default output is YAML.</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Table of realms</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Table of realms — the dev-init parity check expects this exact shape</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realms
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>NAME<span class="w">           </span>NAMESPACE<span class="w">       </span>STATE<span class="w">    </span>CGROUP
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>main<span class="w">           </span>kukeon-main<span class="w">     </span>Running<span class="w">  </span>/kukeon/main
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>kukeon-system<span class="w">  </span>kukeon-system<span class="w">   </span>Running<span class="w">  </span>/kukeon/kukeon-system
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Single realm as YAML</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realm<span class="w"> </span>main<span class="w"> </span>-o<span class="w"> </span>yaml
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># Single realm as JSON</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realm<span class="w"> </span>main<span class="w"> </span>-o<span class="w"> </span>json
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="c1"># Spaces in a non-default realm</span>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>spaces<span class="w"> </span>--realm<span class="w"> </span>main
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="c1"># Cells in a specific stack</span>
-<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>cells<span class="w"> </span>--realm<span class="w"> </span>main<span class="w"> </span>--space<span class="w"> </span>default<span class="w"> </span>--stack<span class="w"> </span>default
-<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>
-<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="c1"># All containers in the cell</span>
-<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>containers<span class="w"> </span>--realm<span class="w"> </span>main<span class="w"> </span>--space<span class="w"> </span>default<span class="w"> </span>--stack<span class="w"> </span>default<span class="w"> </span>--cell<span class="w"> </span>hello-world
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>NAME<span class="w">         </span>NAMESPACE<span class="w">              </span>STATE<span class="w">  </span>CGROUP
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>-----------<span class="w">  </span>---------------------<span class="w">  </span>-----<span class="w">  </span>-------------------
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>default<span class="w">      </span>default.kukeon.io<span class="w">      </span>Ready<span class="w">  </span>/kukeon/default
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>kuke-system<span class="w">  </span>kuke-system.kukeon.io<span class="w">  </span>Ready<span class="w">  </span>/kukeon/kuke-system
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="c1"># Single realm as YAML</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realm<span class="w"> </span>default<span class="w"> </span>-o<span class="w"> </span>yaml
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="c1"># Single realm as JSON</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realm<span class="w"> </span>default<span class="w"> </span>-o<span class="w"> </span>json
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="c1"># Spaces in the default realm</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>spaces<span class="w"> </span>--realm<span class="w"> </span>default
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="c1"># Cells in a specific stack</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>cells<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>default<span class="w"> </span>--stack<span class="w"> </span>default
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="c1"># All containers in a cell</span>
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>containers<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>default<span class="w"> </span>--stack<span class="w"> </span>default<span class="w"> </span>--cell<span class="w"> </span>hello-world
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="c1"># Show which cgroup controllers are delegated to every realm</span>
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realms<span class="w"> </span>--show-controllers
 </code></pre></div>
 <h2 id="get-vs-refresh"><code>get</code> vs <code>refresh</code><a class="headerlink" href="#get-vs-refresh" title="Permanent link">&para;</a></h2>
 <p><code>get</code> reads metadata. It does not reconcile or update <code>.status</code>. If you want the status to reflect the live runtime state (after a crash, or after containerd reported a change), run <a href="../kuke-refresh/"><code>kuke refresh</code></a> first.</p>
@@ -2571,7 +2775,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 8, 2026 11:43:42 UTC">May 8, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 20:07:10 UTC">May 13, 2026</span>
   </span>
 
     

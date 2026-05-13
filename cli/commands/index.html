@@ -1713,6 +1713,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../kuke-doctor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke doctor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../kuke-get/" class="md-nav__link">
         
   
@@ -1777,6 +1805,34 @@
     
   
     kuke apply
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-run/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke run
   
 
     
@@ -1889,6 +1945,146 @@
     
   
     kuke refresh
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-attach/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke attach
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-image/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke image
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-daemon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke daemon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kuke-uninstall/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke uninstall
   
 
     
@@ -2511,8 +2707,16 @@
 <td>Bootstrap or reconcile a host</td>
 </tr>
 <tr>
+<td><code>kuke doctor</code></td>
+<td>Host pre-flight checks (cgroup-v2 delegation) before <code>kuke init</code></td>
+</tr>
+<tr>
 <td><code>kuke apply</code></td>
 <td>Apply resource definitions from YAML (multi-document supported)</td>
+</tr>
+<tr>
+<td><code>kuke run</code></td>
+<td>Create and start a single cell from a file or per-user profile</td>
 </tr>
 <tr>
 <td><code>kuke get</code></td>
@@ -2537,6 +2741,26 @@
 <tr>
 <td><code>kuke refresh</code></td>
 <td>Reconcile <code>.status</code> from live state without touching <code>.spec</code></td>
+</tr>
+<tr>
+<td><code>kuke log</code></td>
+<td>Print a container's stdout/stderr (use <code>-f</code> to follow)</td>
+</tr>
+<tr>
+<td><code>kuke attach</code></td>
+<td>Attach to an Attachable container's <code>sbsh</code> terminal</td>
+</tr>
+<tr>
+<td><code>kuke image</code></td>
+<td>Manage container images in a realm's containerd namespace</td>
+</tr>
+<tr>
+<td><code>kuke daemon</code></td>
+<td>Manage the <code>kukeond</code> daemon cell lifecycle</td>
+</tr>
+<tr>
+<td><code>kuke uninstall</code></td>
+<td>Remove all kukeon runtime state from this host</td>
 </tr>
 <tr>
 <td><code>kuke autocomplete</code></td>
@@ -2565,9 +2789,9 @@
 <td>Where Kukeon stores realm/space/stack/cell state</td>
 </tr>
 <tr>
-<td><code>--config</code></td>
-<td><code>/etc/kukeon/config.yaml</code></td>
-<td>Config file path</td>
+<td><code>--configuration</code></td>
+<td><code>$HOME/.kuke/kuke.yaml</code></td>
+<td>ClientConfiguration YAML; absent file uses defaults</td>
 </tr>
 <tr>
 <td><code>--containerd-socket</code></td>
@@ -2577,7 +2801,7 @@
 <tr>
 <td><code>--host</code></td>
 <td><code>unix:///run/kukeon/kukeond.sock</code></td>
-<td>Daemon endpoint (unix:// or ssh://)</td>
+<td>Daemon endpoint (<code>unix://</code> or <code>ssh://</code>)</td>
 </tr>
 <tr>
 <td><code>--no-daemon</code></td>
@@ -2615,13 +2839,20 @@
 <ul>
 <li><a href="../kuke/">kuke (root)</a></li>
 <li><a href="../kuke-init/">kuke init</a></li>
+<li><a href="../kuke-doctor/">kuke doctor</a></li>
 <li><a href="../kuke-get/">kuke get</a></li>
 <li><a href="../kuke-create/">kuke create</a></li>
 <li><a href="../kuke-apply/">kuke apply</a></li>
+<li><a href="../kuke-run/">kuke run</a></li>
 <li><a href="../kuke-delete/">kuke delete</a></li>
 <li><a href="../kuke-lifecycle/">kuke start / stop / kill</a></li>
 <li><a href="../kuke-purge/">kuke purge</a></li>
 <li><a href="../kuke-refresh/">kuke refresh</a></li>
+<li><a href="../kuke-log/">kuke log</a></li>
+<li><a href="../kuke-attach/">kuke attach</a></li>
+<li><a href="../kuke-image/">kuke image</a></li>
+<li><a href="../kuke-daemon/">kuke daemon</a></li>
+<li><a href="../kuke-uninstall/">kuke uninstall</a></li>
 <li><a href="../kuke-autocomplete/">kuke autocomplete</a></li>
 <li><a href="../kuke-version/">kuke version</a></li>
 <li><a href="../kukeond/">kukeond</a></li>
@@ -2648,7 +2879,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 12:10:15 UTC">May 13, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 20:07:10 UTC">May 13, 2026</span>
   </span>
 
     
