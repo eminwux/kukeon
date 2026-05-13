@@ -119,6 +119,14 @@ func NewKukeCmd() (*cobra.Command, error) {
 		},
 	}
 
+	// Wire the root to real streams so cobra's cmd.Print* helpers route
+	// non-error output to stdout. Without this, cobra's OutOrStderr() falls
+	// back to os.Stderr and every cmd.Print* in the tree lands on stderr,
+	// breaking `out=$(kuke …)` and `kuke … | xargs …`. Subcommands inherit
+	// these via cobra's getOut/getErr.
+	cmd.SetOut(os.Stdout)
+	cmd.SetErr(os.Stderr)
+
 	if err := SetupKukeCmd(cmd); err != nil {
 		return nil, fmt.Errorf("failed to setup kukeon command: %w", err)
 	}
