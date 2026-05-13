@@ -33,8 +33,9 @@ func (r *Exec) UpdateStack(desired intmodel.Stack) (intmodel.Stack, error) {
 		return intmodel.Stack{}, fmt.Errorf("%w: %w", errdefs.ErrGetStack, err)
 	}
 
-	// Update compatible fields
-	existing.Metadata.Labels = desired.Metadata.Labels
+	// Update compatible fields. Preserve controller-managed `*.kukeon.io`
+	// canonical labels when the user's desired doc omits them (issue #455).
+	existing.Metadata.Labels = mergeManagedLabels(existing.Metadata.Labels, desired.Metadata.Labels)
 	if desired.Spec.ID != "" {
 		existing.Spec.ID = desired.Spec.ID
 	}
