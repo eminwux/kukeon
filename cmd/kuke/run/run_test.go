@@ -758,6 +758,147 @@ func TestRun_ExistingCell_DivergingContainerImage_RefusesAndPointsToApply(t *tes
 	}
 }
 
+// TestRun_ExistingCell_DivergingContainerSecrets_RefusesAndPointsToApply
+// exercises the secrets branch of divergedContainerFields. Secrets is
+// user-authored, persisted to disk unchanged (apischeme round-trips it
+// verbatim), and not filled in from `space.spec.defaults.container` — so
+// the same no-op-on-drift failure mode that #468 closes for image applies.
+func TestRun_ExistingCell_DivergingContainerSecrets_RefusesAndPointsToApply(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	existing := v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
+		Spec: v1beta1.CellSpec{
+			RealmID: "my-realm",
+			SpaceID: "my-space",
+			StackID: "my-stack",
+			Containers: []v1beta1.ContainerSpec{
+				{
+					ID:      "root",
+					Root:    true,
+					Image:   "registry.eminwux.com/busybox:latest",
+					Command: "sleep",
+					Args:    []string{"3600"},
+				},
+				{
+					ID:      "work",
+					Image:   "registry.eminwux.com/busybox:latest",
+					Command: "sleep",
+					Args:    []string{"3600"},
+					Secrets: []v1beta1.ContainerSecret{
+						{Name: "db-pass", FromFile: "/etc/kukeon/secrets/db-pass"},
+					},
+				},
+			},
+		},
+		Status: v1beta1.CellStatus{State: v1beta1.CellStateReady},
+	}
+	fc := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell:                existing,
+				MetadataExists:      true,
+				CgroupExists:        true,
+				RootContainerExists: true,
+			}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute returned nil, want divergence error for secrets change")
+	}
+	if !strings.Contains(err.Error(), `cell "my-cell" exists with diverging spec`) {
+		t.Errorf("err=%q does not contain the diverging-spec phrase naming the cell", err)
+	}
+	if !strings.Contains(err.Error(), "kuke apply -f") {
+		t.Errorf("err=%q does not refer the operator to `kuke apply -f`", err)
+	}
+	if !strings.Contains(err.Error(), `spec.containers["work"].secrets`) {
+		t.Errorf("err=%q does not name the diverging secrets field on the user container", err)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d want 0 (must not mutate on divergence)", fc.createCalls)
+	}
+}
+
+// TestRun_ExistingCell_DivergingContainerTty_RefusesAndPointsToApply
+// exercises the tty branch of divergedContainerFields. ContainerTty is
+// user-authored shell-UX config the daemon persists verbatim and never
+// fills in from space defaults, so a drift here would silently skip the
+// configured prompt/profile/onInit on `kuke run -f` re-runs.
+func TestRun_ExistingCell_DivergingContainerTty_RefusesAndPointsToApply(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	existing := v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
+		Spec: v1beta1.CellSpec{
+			RealmID: "my-realm",
+			SpaceID: "my-space",
+			StackID: "my-stack",
+			Tty:     &v1beta1.CellTty{Default: "claude"},
+			Containers: []v1beta1.ContainerSpec{
+				{
+					ID:      "root",
+					Root:    true,
+					Image:   "registry.eminwux.com/busybox:latest",
+					Command: "sleep",
+					Args:    []string{"3600"},
+				},
+				{
+					ID:         "shell",
+					Attachable: true,
+					Image:      "registry.eminwux.com/busybox:latest",
+					Command:    "sleep",
+					Args:       []string{"3600"},
+				},
+				{
+					ID:         "claude",
+					Attachable: true,
+					Image:      "registry.eminwux.com/busybox:latest",
+					Command:    "sleep",
+					Args:       []string{"3600"},
+					Tty: &v1beta1.ContainerTty{
+						Prompt: `claude> `,
+					},
+				},
+			},
+		},
+		Status: v1beta1.CellStatus{State: v1beta1.CellStateReady},
+	}
+	fc := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell:                existing,
+				MetadataExists:      true,
+				CgroupExists:        true,
+				RootContainerExists: true,
+			}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-d"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute returned nil, want divergence error for tty change")
+	}
+	if !strings.Contains(err.Error(), `cell "my-cell" exists with diverging spec`) {
+		t.Errorf("err=%q does not contain the diverging-spec phrase naming the cell", err)
+	}
+	if !strings.Contains(err.Error(), "kuke apply -f") {
+		t.Errorf("err=%q does not refer the operator to `kuke apply -f`", err)
+	}
+	if !strings.Contains(err.Error(), `spec.containers["claude"].tty`) {
+		t.Errorf("err=%q does not name the diverging tty field on the user container", err)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d want 0 (must not mutate on divergence)", fc.createCalls)
+	}
+}
+
 func TestRun_OutputJSON(t *testing.T) {
 	t.Cleanup(viper.Reset)
 

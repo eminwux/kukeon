@@ -587,7 +587,8 @@ func divergedFields(actual, desired v1beta1.CellSpec) []string {
 // fill in or normalize at create/start time (so a fresh cell never
 // false-flags on the next `kuke run -f` of the same file): image, command,
 // args, workingDir, env, ports, volumes, networks, networksAliases,
-// privileged, hostNetwork, hostPID, hostCgroup, attachable, restartPolicy.
+// privileged, hostNetwork, hostPID, hostCgroup, attachable, restartPolicy,
+// secrets, tty.
 // Fields that inherit from `space.spec.defaults.container` (see
 // internal/modelhub.ApplySpaceDefaultsToContainer) are deliberately
 // excluded — their on-disk value is post-merge while the YAML side is
@@ -639,7 +640,59 @@ func divergedContainerFields(actual, desired v1beta1.ContainerSpec) []string {
 	if actual.RestartPolicy != desired.RestartPolicy {
 		fields = append(fields, "restartPolicy")
 	}
+	if !containerSecretsEqual(actual.Secrets, desired.Secrets) {
+		fields = append(fields, "secrets")
+	}
+	if !containerTtysEqual(actual.Tty, desired.Tty) {
+		fields = append(fields, "tty")
+	}
 	return fields
+}
+
+// containerSecretsEqual compares two ContainerSecret slices field-by-field.
+// nil and empty are treated as equal so YAML that omits secrets does not
+// register as drift against on-disk metadata that persisted it as nil.
+// ContainerSecret carries only scalar string fields, so a direct == on each
+// element is enough.
+func containerSecretsEqual(a, b []v1beta1.ContainerSecret) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// containerTtysEqual compares two ContainerTty pointers. Empty values on
+// either side are treated as equal because
+// internal/apischeme.convertContainerTtyToInternal normalizes an IsEmpty
+// input to nil at persistence: on-disk Tty=nil and a YAML carrying an
+// otherwise-empty &ContainerTty{} must not register as drift.
+func containerTtysEqual(a, b *v1beta1.ContainerTty) bool {
+	if a.IsEmpty() && b.IsEmpty() {
+		return true
+	}
+	if a.IsEmpty() != b.IsEmpty() {
+		return false
+	}
+	if a.Prompt != b.Prompt ||
+		a.LogFile != b.LogFile ||
+		a.Profile != b.Profile ||
+		a.ProfilesDir != b.ProfilesDir {
+		return false
+	}
+	if len(a.OnInit) != len(b.OnInit) {
+		return false
+	}
+	for i := range a.OnInit {
+		if a.OnInit[i] != b.OnInit[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // stringSlicesEqual reports whether two []string carry the same elements
