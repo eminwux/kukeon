@@ -33,8 +33,9 @@ func (r *Exec) UpdateRealm(desired intmodel.Realm) (intmodel.Realm, error) {
 		return intmodel.Realm{}, fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
 	}
 
-	// Update compatible fields
-	existing.Metadata.Labels = desired.Metadata.Labels
+	// Update compatible fields. Preserve controller-managed `*.kukeon.io`
+	// canonical labels when the user's desired doc omits them (issue #455).
+	existing.Metadata.Labels = mergeManagedLabels(existing.Metadata.Labels, desired.Metadata.Labels)
 	existing.Spec.RegistryCredentials = desired.Spec.RegistryCredentials
 
 	// Update metadata file

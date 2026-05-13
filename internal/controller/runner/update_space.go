@@ -33,8 +33,9 @@ func (r *Exec) UpdateSpace(desired intmodel.Space) (intmodel.Space, error) {
 		return intmodel.Space{}, fmt.Errorf("%w: %w", errdefs.ErrGetSpace, err)
 	}
 
-	// Update compatible fields
-	existing.Metadata.Labels = desired.Metadata.Labels
+	// Update compatible fields. Preserve controller-managed `*.kukeon.io`
+	// canonical labels when the user's desired doc omits them (issue #455).
+	existing.Metadata.Labels = mergeManagedLabels(existing.Metadata.Labels, desired.Metadata.Labels)
 	existing.Spec.Defaults = desired.Spec.Defaults
 	// Note: CNIConfigPath is not updated as it's a breaking change
 

@@ -38,8 +38,13 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 	}
 
-	// Update compatible metadata fields
-	existing.Metadata.Labels = desired.Metadata.Labels
+	// Update compatible metadata fields. Preserve controller-managed
+	// `*.kukeon.io` canonical labels (injected during create_cell.go) when
+	// the user's desired doc omits them — same rule the diff layer applies
+	// via `filterManagedLabels` (issue #437 / PR #454). Without this, a
+	// genuine spec change that legitimately routes through UpdateCell
+	// strips the canonical labels (issue #455).
+	existing.Metadata.Labels = mergeManagedLabels(existing.Metadata.Labels, desired.Metadata.Labels)
 
 	// Build maps of desired and actual containers by ID
 	desiredContainers := make(map[string]*intmodel.ContainerSpec)
