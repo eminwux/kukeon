@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 
@@ -418,5 +419,24 @@ func TestSetPersistentLoggingFlagsViperBinding(t *testing.T) {
 	}
 	if !viper.GetBool(config.KUKEON_ROOT_VERBOSE.ViperKey) {
 		t.Errorf("viper binding mismatch for verbose: got false, want true")
+	}
+}
+
+// TestNewKukeCmdStreams guards against cobra's OutOrStderr default — if
+// SetOut/SetErr are dropped from NewKukeCmd, every cmd.Print* call in the
+// subcommand tree silently routes to stderr. Issue #436.
+func TestNewKukeCmdStreams(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	cmd, err := kuke.NewKukeCmd()
+	if err != nil {
+		t.Fatalf("NewKukeCmd() error = %v, want nil", err)
+	}
+
+	if got := cmd.OutOrStdout(); got != os.Stdout {
+		t.Errorf("OutOrStdout() not wired to os.Stdout: got %T", got)
+	}
+	if got := cmd.ErrOrStderr(); got != os.Stderr {
+		t.Errorf("ErrOrStderr() not wired to os.Stderr: got %T", got)
 	}
 }
