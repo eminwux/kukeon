@@ -978,9 +978,9 @@ func (c *Client) AttachContainer(_ context.Context, doc v1beta1.ContainerDoc) (k
 //   - Attachable containers are sbsh-wrapped, so stdout/stderr land in
 //     the sbsh capture file at HostCapturePath (current behavior).
 //   - Non-Attachable containers (including kukeond) have the runtime
-//     shim write stdout/stderr to HostLogPath via cio.LogFile (gap #4
-//     in docs/gaps-2026-04-19.md). The file is shim-owned; kuke just
-//     hands the path back so `kuke log` can read it.
+//     shim write stdout/stderr to HostLogPath via cio.LogFile. The
+//     file is shim-owned; kuke just hands the path back so `kuke log`
+//     can read it.
 //
 // Bytes never traverse this RPC — the caller opens the returned path.
 func (c *Client) LogContainer(_ context.Context, doc v1beta1.ContainerDoc) (kukeonv1.LogContainerResult, error) {
