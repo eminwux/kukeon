@@ -84,6 +84,27 @@ spec:
         - "3600"
 `
 
+// cellYAMLUserContainersOnly mirrors docs/examples/hello-world.yaml: the user
+// declares only their workload container(s), and relies on the runner to
+// synthesize the root container during create. Used by the same-file re-run
+// regression below (issue #437).
+const cellYAMLUserContainersOnly = `apiVersion: v1beta1
+kind: Cell
+metadata:
+  name: my-cell
+spec:
+  id: my-cell
+  realmId: my-realm
+  spaceId: my-space
+  stackId: my-stack
+  containers:
+    - id: web
+      image: registry.eminwux.com/busybox:latest
+      command: sleep
+      args:
+        - "3600"
+`
+
 const multiDocYAML = validCellYAML + "\n---\n" + validCellYAML
 
 const realmDocYAML = `apiVersion: v1beta1
@@ -487,6 +508,97 @@ func TestRun_ExistingCell_MatchingSpec_NotReady_StillEnsures(t *testing.T) {
 	}
 	if fc.createCalls != 1 {
 		t.Fatalf("CreateCell calls=%d want 1 (must ensure+start when not Ready)", fc.createCalls)
+	}
+}
+
+// TestRun_ExistingCell_SynthesizedRoot_DoesNotDiverge covers the same-file
+// re-run path for a YAML that omits an explicit root container (the canonical
+// case — `docs/examples/hello-world.yaml`). The on-disk cell carries the
+// runner-synthesized root entry; a naive count comparison would treat actual=2
+// vs desired=1 as divergent and refuse the re-run with `spec.containers
+// (count: actual=2, desired=1)`. Per issue #437, the divergence check must
+// exclude the synthesized root on both sides so the idempotent path works.
+func TestRun_ExistingCell_SynthesizedRoot_DoesNotDiverge(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	existing := v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
+		Spec: v1beta1.CellSpec{
+			RealmID: "my-realm",
+			SpaceID: "my-space",
+			StackID: "my-stack",
+			Containers: []v1beta1.ContainerSpec{
+				{ID: "root", Root: true, Image: "registry.eminwux.com/busybox:latest"},
+				{ID: "web", Image: "registry.eminwux.com/busybox:latest"},
+			},
+		},
+		Status: v1beta1.CellStatus{State: v1beta1.CellStateReady},
+	}
+	fc := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell:                existing,
+				MetadataExists:      true,
+				CgroupExists:        true,
+				RootContainerExists: true,
+			}, nil
+		},
+	}
+	cmd, out := newCmd(t, fc)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, cellYAMLUserContainersOnly), "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute returned %v, want nil (re-run of same file must succeed)", err)
+	}
+	if fc.createCalls != 0 {
+		t.Fatalf("CreateCell calls=%d want 0 (short-circuit on matching spec + Ready)", fc.createCalls)
+	}
+	if !strings.Contains(out.String(), "  - metadata: already existed") {
+		t.Errorf("output missing 'already existed' marker:\n%s", out.String())
+	}
+}
+
+// TestRun_ExistingCell_SynthesizedRoot_RealDivergenceStillCaught makes sure
+// the issue #437 fix did not over-narrow: when the user adds a new container
+// to the YAML between runs, the refusal must still fire and name the
+// diverging field (count delta among user containers, not the synthesized
+// root).
+func TestRun_ExistingCell_SynthesizedRoot_RealDivergenceStillCaught(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	// On-disk: synthesized root + the original "web" container.
+	// YAML in cellYAMLUserContainersOnly: only "web".
+	// Real divergence: on-disk has an additional user container "extra".
+	existing := v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
+		Spec: v1beta1.CellSpec{
+			RealmID: "my-realm",
+			SpaceID: "my-space",
+			StackID: "my-stack",
+			Containers: []v1beta1.ContainerSpec{
+				{ID: "root", Root: true, Image: "registry.eminwux.com/busybox:latest"},
+				{ID: "web", Image: "registry.eminwux.com/busybox:latest"},
+				{ID: "extra", Image: "registry.eminwux.com/busybox:latest"},
+			},
+		},
+	}
+	fc := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{Cell: existing, MetadataExists: true}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, cellYAMLUserContainersOnly), "-d"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute returned nil, want divergence error for real user-container delta")
+	}
+	if !strings.Contains(err.Error(), "kuke apply -f") {
+		t.Errorf("err=%q does not refer the operator to `kuke apply -f`", err)
+	}
+	if !strings.Contains(err.Error(), "actual=2, desired=1") {
+		t.Errorf("err=%q should report user-container counts excluding the synthesized root, got count delta", err)
 	}
 }
 

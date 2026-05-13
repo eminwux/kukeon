@@ -517,6 +517,15 @@ func pickLocation(fromDoc string, kv *config.Var) string {
 // cell as divergent on the very next `kuke run -f` invocation. Per the AC, a
 // genuine spec rewrite — adding/removing containers, swapping the root, moving
 // realm/space/stack — must route through `kuke apply -f` instead.
+//
+// Root containers are filtered out of the count/id-set comparison on both
+// sides. The runner synthesizes a root container during create if the YAML
+// omitted one (`docs/examples/hello-world.yaml` is the canonical case), so a
+// raw count comparison would treat every re-run of an existing file as
+// divergent (actual=root+web, desired=web) and route the operator to
+// `kuke apply -f` even though nothing changed. Comparing only the
+// user-supplied (non-root) entries restores the idempotent path while still
+// catching real adds/removes/renames among the user containers.
 func divergedFields(actual, desired v1beta1.CellSpec) []string {
 	var diffs []string
 
@@ -533,19 +542,23 @@ func divergedFields(actual, desired v1beta1.CellSpec) []string {
 	if len(actual.Containers) == 0 {
 		return diffs
 	}
-	if len(actual.Containers) != len(desired.Containers) {
+
+	actualUser := nonRootContainers(actual.Containers)
+	desiredUser := nonRootContainers(desired.Containers)
+
+	if len(actualUser) != len(desiredUser) {
 		diffs = append(diffs, fmt.Sprintf(
 			"spec.containers (count: actual=%d, desired=%d)",
-			len(actual.Containers), len(desired.Containers),
+			len(actualUser), len(desiredUser),
 		))
 		return diffs
 	}
 
-	desiredByID := make(map[string]v1beta1.ContainerSpec, len(desired.Containers))
-	for _, c := range desired.Containers {
+	desiredByID := make(map[string]v1beta1.ContainerSpec, len(desiredUser))
+	for _, c := range desiredUser {
 		desiredByID[c.ID] = c
 	}
-	for _, ac := range actual.Containers {
+	for _, ac := range actualUser {
 		dc, ok := desiredByID[ac.ID]
 		if !ok {
 			diffs = append(diffs, fmt.Sprintf("spec.containers[%q] (missing in file)", ac.ID))
@@ -556,6 +569,19 @@ func divergedFields(actual, desired v1beta1.CellSpec) []string {
 		}
 	}
 	return diffs
+}
+
+// nonRootContainers returns the user-supplied subset of cs — entries where
+// Root is false. Used to exclude the runner-synthesized root from divergence
+// comparison; see divergedFields.
+func nonRootContainers(cs []v1beta1.ContainerSpec) []v1beta1.ContainerSpec {
+	out := make([]v1beta1.ContainerSpec, 0, len(cs))
+	for _, c := range cs {
+		if !c.Root {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
