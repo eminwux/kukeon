@@ -1,11 +1,13 @@
 # Prerequisites
 
-Kukeon runs on a single Linux host and relies on two things being present before you install the binary:
+Kukeon (v0.5.0 beta) runs on a single Linux host and relies on two things being present before you install the binary:
 
 1. A kernel with **cgroups v2** enabled
 2. A running **containerd** daemon
 
 CNI plugins are bundled inside the `kukeond` container image, so the standard daemon-mediated install path does **not** need them on the host. If you plan to use the transitional `--no-daemon` flag for some operations, see the [`--no-daemon` host-CNI note below](#cni-plugins-for---no-daemon-only).
+
+The [one-line installer](install-linux.md) checks both prereqs for you before touching the system; the notes below cover the same checks for operators driving the install manually or debugging a failed installer run.
 
 ## Linux with cgroups v2
 
@@ -19,6 +21,14 @@ cgroup2 on /sys/fs/cgroup type cgroup2 (...)
 ```
 
 If you see `cgroup` (v1) instead, enable the unified hierarchy with `systemd.unified_cgroup_hierarchy=1` on the kernel command line and reboot.
+
+Once cgroups v2 is mounted, run the pre-flight to confirm the host's root cgroup delegates the controllers Kukeon needs (`cpu`, `memory`, `pids`, `io`):
+
+```bash
+sudo kuke doctor cgroups
+```
+
+The check passes silently when delegation is healthy and prints a per-controller diff when it isn't. Pass `--probe` to additionally attempt a write to `/sys/fs/cgroup/cgroup.subtree_control` — useful when you suspect that `+memory` or `+pids` are present in `cgroup.controllers` but blocked from delegation by a parent slice.
 
 ## containerd
 
@@ -39,7 +49,7 @@ sudo systemctl enable --now containerd
 sudo ctr version
 ```
 
-Kukeon uses its own containerd namespaces (one per realm: `kukeon-<realm>`). It does not interfere with existing containerd namespaces used by Docker, nerdctl, or other tools.
+Kukeon uses its own containerd namespaces (one per realm: `<realm>.kukeon.io`). `kuke init` provisions two by default — `default.kukeon.io` for user workloads and `kuke-system.kukeon.io` for the `kukeond` daemon. Kukeon does not interfere with existing containerd namespaces used by Docker, nerdctl, or other tools.
 
 ## CNI plugins (for `--no-daemon` only)
 
@@ -60,9 +70,12 @@ At minimum Kukeon needs `bridge`, `host-local`, `loopback`, and `portmap`.
 
 ## Root / privileges
 
-`kuke init`, `kuke apply`, and any command touching cgroups, netlink, or containerd namespaces needs root (or equivalent capabilities: `CAP_SYS_ADMIN`, `CAP_NET_ADMIN`, access to the containerd socket, write access to `/sys/fs/cgroup` and `/opt/kukeon`). For now, the working assumption is "run as root" (`sudo kuke ...`).
+Two paths exist, depending on whether the command goes through `kukeond` or bypasses it:
 
-Running `kuke get` for read-only queries over the daemon socket does not require root, as long as the user can read the socket at `/run/kukeon/kukeond.sock`.
+- **Direct host writes need root.** `kuke init`, `kuke daemon reset`, `kuke image load --no-daemon`, `kuke doctor cgroups --probe`, and anything else run with `--no-daemon` touch cgroups, netlink, containerd, or `/opt/kukeon` directly. Run them with `sudo`; otherwise they fail fast with a clear "must run as root" error before touching anything.
+- **Daemon-routed commands do not need root.** `kuke init` provisions a system `kukeon` group and sets the daemon socket at `/run/kukeon/kukeond.sock` to mode `0660 root:kukeon`. Adding a user to that group (`sudo usermod -aG kukeon $USER`, then re-login) is enough for `kuke get`, `kuke create`, `kuke apply`, `kuke delete`, `kuke log`, and `kuke attach` to work without `sudo`. Writes under `/opt/kukeon` still require root, but they go through the daemon.
+
+See [Getting Started → Daily use without sudo](../getting-started.md#daily-use-without-sudo) for the post-init steps.
 
 ## Disk paths kukeon touches
 
