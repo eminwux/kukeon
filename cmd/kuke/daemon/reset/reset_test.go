@@ -30,12 +30,26 @@ import (
 	"time"
 
 	reset "github.com/eminwux/kukeon/cmd/kuke/daemon/reset"
+	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/consts"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/viper"
 )
+
+// TestMain mocks the shared euid lookup to euid=0 for every test in this
+// package so the new fail-fast root gate in runReset does not short-circuit
+// the existing fakes-driven coverage when CI runs as a non-root user
+// (ubuntu-latest defaults to UID 1001). Individual cases that exercise the
+// non-root path override this with their own SetGeteuidForTesting call.
+func TestMain(m *testing.M) {
+	restore := kukshared.SetGeteuidForTesting(func() int { return 0 })
+	code := m.Run()
+	restore()
+	os.Exit(code)
+}
 
 // TestDaemonReset covers the table of states the verb has to handle: a
 // running daemon (graceful stop+delete), an already-stopped daemon (skip
@@ -644,6 +658,39 @@ func TestDaemonReset_GracefulTimeoutEscalatesToKill(t *testing.T) {
 	}
 	if !strings.Contains(out, "kukeond cell deleted") {
 		t.Errorf("output missing delete-phase notice; got:\n%s", out)
+	}
+}
+
+// TestDaemonReset_NonRootIsRejected confirms the fail-fast UID gate rejects
+// non-root invocations before any side effect (cell lookup, sock/pid file
+// removal, --purge-system rm -rf). Symmetric with the same guard on
+// `kuke init`, `kuke image load --no-daemon`, and `kuke doctor cgroups
+// --probe`.
+func TestDaemonReset_NonRootIsRejected(t *testing.T) {
+	restore := kukshared.SetGeteuidForTesting(func() int { return 1000 })
+	t.Cleanup(restore)
+	withFreshViper(t)
+
+	cmd := reset.NewResetCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cmd.SetContext(context.WithValue(context.Background(), types.CtxLogger, logger))
+	cmd.SetArgs(nil)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("kuke daemon reset returned nil under euid=1000, want ErrMustRunAsRoot")
+	}
+	if !errors.Is(err, errdefs.ErrMustRunAsRoot) {
+		t.Fatalf("kuke daemon reset error does not wrap ErrMustRunAsRoot: %v", err)
+	}
+	if !strings.Contains(err.Error(), "kuke daemon reset") {
+		t.Errorf("error does not name the subcommand: %v", err)
+	}
+	if !strings.Contains(err.Error(), "sudo") {
+		t.Errorf("error does not suggest sudo: %v", err)
 	}
 }
 

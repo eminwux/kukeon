@@ -98,6 +98,16 @@ func NewCgroupsCmd() *cobra.Command {
 			// --no-probe always wins over --probe so an explicit opt-out
 			// is unambiguous regardless of flag ordering.
 			effectiveProbe := probe && !noProbe
+			// The probe writes "+<ctrl>" to cgroup.subtree_control, which
+			// is root-only on a real cgroup-v2 root. Fail fast with a
+			// named cause so operators see "must run as root" instead of
+			// a confusing EACCES inside cgroupcheck.Probe. The read-only
+			// --no-probe path stays unrestricted.
+			if effectiveProbe {
+				if err := shared.RequireRoot("kuke doctor cgroups --probe"); err != nil {
+					return err
+				}
+			}
 			return runDoctor(cmd, root, nested, effectiveProbe, verbose, target)
 		},
 		// A failed pre-flight is a host-environment problem, not a CLI

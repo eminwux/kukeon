@@ -27,9 +27,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eminwux/kukeon/cmd/config"
 	image "github.com/eminwux/kukeon/cmd/kuke/image"
+	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	"github.com/spf13/viper"
 )
 
 func TestLoadCmd_FromFileDefaultRealm(t *testing.T) {
@@ -136,6 +140,42 @@ func TestLoadCmd_ClientErrorPropagates(t *testing.T) {
 
 	if _, err := runLoad(t, fake, []string{tarPath}); err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("expected client error to propagate, got %v", err)
+	}
+}
+
+// TestLoadCmd_NoDaemonRequiresRoot pins the fail-fast UID gate that fires
+// only when --no-daemon (KUKEON_NO_DAEMON=true) is set. The daemon-routed
+// default path stays unrestricted so `kukeon`-group rootless clients keep
+// working — that is covered by every other test in this file, none of which
+// set the flag.
+func TestLoadCmd_NoDaemonRequiresRoot(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	viper.Set(config.KUKEON_ROOT_NO_DAEMON.ViperKey, true)
+	restore := kukshared.SetGeteuidForTesting(func() int { return 1000 })
+	t.Cleanup(restore)
+
+	dir := t.TempDir()
+	tarPath := filepath.Join(dir, "img.tar")
+	if err := os.WriteFile(tarPath, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write tarball: %v", err)
+	}
+
+	fake := &fakeClient{
+		loadImageFn: func(string, []byte) (kukeonv1.LoadImageResult, error) {
+			t.Fatal("LoadImage should not be invoked when the root gate fires")
+			return kukeonv1.LoadImageResult{}, nil
+		},
+	}
+
+	_, err := runLoad(t, fake, []string{tarPath})
+	if err == nil {
+		t.Fatal("kuke image load --no-daemon returned nil under euid=1000, want ErrMustRunAsRoot")
+	}
+	if !errors.Is(err, errdefs.ErrMustRunAsRoot) {
+		t.Fatalf("error does not wrap ErrMustRunAsRoot: %v", err)
+	}
+	if !strings.Contains(err.Error(), "kuke image load --no-daemon") {
+		t.Errorf("error does not name the subcommand: %v", err)
 	}
 }
 

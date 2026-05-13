@@ -260,4 +260,12 @@ var (
 	ErrSecretFromFileNotFound     = errors.New("secret fromFile path does not exist on the host")
 	ErrSecretFromEnvNotSet        = errors.New("secret fromEnv env var is not set on the daemon host")
 	ErrSecretStagingFailed        = errors.New("failed to stage secret file for mount")
+
+	// ErrMustRunAsRoot is returned by direct-write subcommands (kuke init,
+	// kuke daemon reset, kuke image load --no-daemon, kuke doctor cgroups
+	// --probe) when invoked with a non-zero effective UID. Wrapped errors
+	// must name the subcommand and suggest `sudo`. Daemon-routed verbs
+	// (kuke get, kuke create, kuke apply, kuke delete, …) do not gate on
+	// this — those are the supported `kukeon`-group rootless-client path.
+	ErrMustRunAsRoot = errors.New("command must run as root")
 )
