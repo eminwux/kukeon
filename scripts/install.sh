@@ -9,7 +9,7 @@
 #
 # Collapses the multi-step manual install (download → chmod → install →
 # hardlink → init) into a single invocation. Checks but never installs host
-# prerequisites (containerd, cgroups v2, CNI plugins) — auto-installing those
+# prerequisites (containerd, cgroups v2) — auto-installing those
 # has too much blast radius on arbitrary user systems; surface a distro-aware
 # hint instead.
 #
@@ -185,45 +185,18 @@ check_containerd() {
     ok "containerd socket present at ${sock}"
 }
 
-check_cni() {
-    local cni_dir=/opt/cni/bin
-    local required=(bridge loopback host-local)
-    if [ ! -d "$cni_dir" ]; then
-        fail "CNI plugin directory ${cni_dir} not found"
-        printf '    Install the CNI plugins package (provides bridge, loopback, host-local, …):\n' >&2
-        case "$(distro_family)" in
-            debian) printf '      sudo apt-get update && sudo apt-get install -y containernetworking-plugins\n' >&2 ;;
-            rhel)   printf '      sudo dnf install -y containernetworking-plugins\n' >&2 ;;
-            arch)   printf '      sudo pacman -S --noconfirm cni-plugins\n' >&2 ;;
-            suse)   printf '      sudo zypper install -y cni-plugins\n' >&2 ;;
-            *)      printf '      Download from https://github.com/containernetworking/plugins/releases\n' >&2
-                    printf '      and extract into /opt/cni/bin.\n' >&2 ;;
-        esac
-        PREREQ_FAILURES=$((PREREQ_FAILURES + 1))
-        return 1
-    fi
-    local missing=()
-    local plugin
-    for plugin in "${required[@]}"; do
-        if [ ! -x "${cni_dir}/${plugin}" ]; then
-            missing+=("$plugin")
-        fi
-    done
-    if [ "${#missing[@]}" -ne 0 ]; then
-        fail "CNI plugins missing from ${cni_dir}: ${missing[*]}"
-        printf '    Reinstall the containernetworking-plugins package or extract the upstream\n' >&2
-        printf '    release tarball into %s.\n' "$cni_dir" >&2
-        PREREQ_FAILURES=$((PREREQ_FAILURES + 1))
-        return 1
-    fi
-    ok "CNI plugins present at ${cni_dir} (${required[*]})"
-}
-
+# CNI plugins are deliberately NOT checked on the host: kukeond's container
+# image bundles them at /opt/cni/bin (Dockerfile cni-plugins stage), and
+# `kukeondCellDoc` (internal/controller/bootstrap.go) only bind-mounts CNI
+# state directories (/opt/cni/net.d, /var/lib/cni, /opt/cni/cache) from the
+# host — not the plugin binaries. Host plugins are needed only by `--no-daemon`
+# workflows (documented at docs/site/cli/commands.md). Requiring them in the
+# default install path would force every operator to apt-install a package
+# the standard daemon path never reads.
 run_prereqs() {
     step "Checking prerequisites"
     check_cgroupv2 || true
     check_containerd || true
-    check_cni || true
     if [ "$PREREQ_FAILURES" -gt 0 ]; then
         printf '\n' >&2
         fail "${PREREQ_FAILURES} prerequisite check(s) failed — see hints above."

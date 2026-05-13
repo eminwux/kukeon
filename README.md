@@ -29,7 +29,6 @@ Get kukeon running on a single Linux host in minutes.
 
 - Linux with cgroups v2
 - [containerd](https://containerd.io/) running at `/run/containerd/containerd.sock`
-- [CNI plugins](https://github.com/containernetworking/plugins) available on the host
 
 ### Install
 

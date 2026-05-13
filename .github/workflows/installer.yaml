@@ -74,29 +74,15 @@ jobs:
             exit 1
           fi
 
-  # Positive path: a host with containerd + CNI plugins reachable. The
-  # GitHub-hosted ubuntu-latest runner already runs containerd (Docker is
-  # preinstalled and live), so we only need to install the CNI plugin bundle
-  # to satisfy /opt/cni/bin. Validates AC: "`bash install.sh --check` runs
+  # Positive path: the GitHub-hosted ubuntu-latest runner already runs
+  # containerd (Docker is preinstalled and live), which is the only daemon
+  # the installer checks for. Validates AC: "`bash install.sh --check` runs
   # prereq checks only and exits without touching the system."
   prereq-pass:
     name: --check passes with prereqs installed
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install CNI plugins
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends containernetworking-plugins
-          # Debian/Ubuntu's containernetworking-plugins drops binaries at
-          # /usr/lib/cni; kukeon (matching CRI tools) expects /opt/cni/bin.
-          # Mirror the upstream layout the script checks for.
-          sudo mkdir -p /opt/cni/bin
-          for plugin in bridge loopback host-local; do
-            if [ -x "/usr/lib/cni/${plugin}" ]; then
-              sudo ln -sf "/usr/lib/cni/${plugin}" "/opt/cni/bin/${plugin}"
-            fi
-          done
       - name: Confirm containerd is running on the runner
         run: |
           if [ ! -S /run/containerd/containerd.sock ]; then
@@ -121,16 +107,6 @@ jobs:
       KUKE_SKIP_CHECKSUM: "1"
     steps:
       - uses: actions/checkout@v4
-      - name: Install CNI plugins (prereqs)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends containernetworking-plugins
-          sudo mkdir -p /opt/cni/bin
-          for plugin in bridge loopback host-local; do
-            if [ -x "/usr/lib/cni/${plugin}" ]; then
-              sudo ln -sf "/usr/lib/cni/${plugin}" "/opt/cni/bin/${plugin}"
-            fi
-          done
       - name: Run installer (download + install, skip init)
         run: bash scripts/install.sh
       - name: Verify installed artifacts
