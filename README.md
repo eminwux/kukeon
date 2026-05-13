@@ -67,6 +67,18 @@ sudo ln -f /usr/local/bin/kuke /usr/local/bin/kukeond
 sudo kuke init
 ```
 
+### Daily use without sudo
+
+`kuke init` provisions a system `kukeon` group and sets the kukeond socket to mode `0660 root:kukeon`. Add yourself to the group so daemon-routed commands (`kuke get`, `kuke create`, `kuke apply`, `kuke delete`, `kuke log`, `kuke attach`) don't need `sudo`:
+
+```bash
+sudo usermod -aG kukeon $USER
+# Log out and back in (or run `newgrp kukeon`) so the group takes effect, then:
+kuke get realms
+```
+
+Operations that bypass the daemon still need root: `kuke init`, `kuke daemon reset`, `kuke image load --no-daemon`, and any command run with the `--no-daemon` flag.
+
 ### Autocomplete
 
 ```bash
