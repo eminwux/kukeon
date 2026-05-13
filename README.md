@@ -377,7 +377,7 @@ Kukeon aims to be:
 
 Kukeon is under active development, with a focus on correctness, clear abstractions, and stable primitives before adding integrations.
 
-→ See [ROADMAP.md](./ROADMAP.md) for work in progress and planned features.
+→ The backlog is the roadmap: see [GitHub Issues](https://github.com/eminwux/kukeon/issues) — filter by `label:planning` for umbrellas and `priority:A` / `priority:B` for the active queue.
 
 ## Contribute
 

@@ -68,7 +68,7 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 | `restartPolicy`   | string                     | no       | Restart policy. Reserved — restart semantics are not finalized.                                                       |
 
 !!! warning "Fields marked reserved"
-`ports` and `restartPolicy` are accepted by the schema today but their semantics are still being designed. Values round-trip (you can read back what you applied), but the controller does not act on them. See [ROADMAP.md](https://github.com/eminwux/kukeon/blob/main/ROADMAP.md) for the backlog.
+`ports` and `restartPolicy` are accepted by the schema today but their semantics are still being designed. Values round-trip (you can read back what you applied), but the controller does not act on them. See [GitHub Issues](https://github.com/eminwux/kukeon/issues) for the backlog.
 
 ### VolumeMount
 

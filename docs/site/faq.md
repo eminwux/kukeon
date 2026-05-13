@@ -55,7 +55,7 @@ Not supported. The daemon assumes sole ownership of `/run/kukeon/kukeond.sock`, 
 
 ## Is Kukeon production ready?
 
-No. It's in alpha and the APIs can still change. See [ROADMAP.md](https://github.com/eminwux/kukeon/blob/main/ROADMAP.md) for what's still in flux.
+No. It's in alpha and the APIs can still change. See [GitHub Issues](https://github.com/eminwux/kukeon/issues?q=is%3Aissue+is%3Aopen+label%3Aplanning) for what's still in flux.
 
 ## How do I report a bug or request a feature?
 
