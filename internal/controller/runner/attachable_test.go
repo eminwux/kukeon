@@ -26,6 +26,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/ctr"
@@ -163,7 +164,12 @@ func TestWriteKukettyMetadata_KukeonGroupSet(t *testing.T) {
 	}
 	wantArgs := []string{"-c", "echo hello"}
 	if len(doc.Spec.CommandArgs) != len(wantArgs) {
-		t.Fatalf("Spec.CommandArgs len = %d, want %d (full=%v)", len(doc.Spec.CommandArgs), len(wantArgs), doc.Spec.CommandArgs)
+		t.Fatalf(
+			"Spec.CommandArgs len = %d, want %d (full=%v)",
+			len(doc.Spec.CommandArgs),
+			len(wantArgs),
+			doc.Spec.CommandArgs,
+		)
 	}
 	for i, want := range wantArgs {
 		if doc.Spec.CommandArgs[i] != want {
@@ -349,6 +355,202 @@ func TestWriteKukettyMetadata_LogFileSet(t *testing.T) {
 				t.Errorf("Spec.LogFileGID = %v, want nil", doc.Spec.LogFileGID)
 			}
 		})
+	}
+}
+
+// ttyFieldsCoveredByMapping is the structural half of #493's "every Tty
+// field must map" guard: it enumerates intmodel.ContainerTty via
+// reflection and fails the test when a declared field is missing from
+// mapperedFields, or when mapperedFields carries a stale entry the
+// struct no longer declares. The comprehensive test below supplies the
+// behavioral half (each mapped field has a TerminalDoc.Spec assertion).
+//
+// New fields landing on intmodel.ContainerTty must touch two places to
+// keep the test green:
+//
+//  1. Add the field name to mapperedFields here.
+//  2. Wire it through writeKukettyMetadata and add an assertion to
+//     TestWriteKukettyMetadata_AllTtyFieldsMap.
+//
+// Skipping step 1 fails the structural check; skipping step 2 fails the
+// per-field behavioral check. The pre-#494 silent-drop pattern (Tty.OnInit
+// declared on the schema but never read by the renderer) fails (2).
+func ttyFieldsCoveredByMapping(t *testing.T) {
+	t.Helper()
+	// Local map so the linter's gochecknoglobals rule stays clean and the
+	// list reads as part of the test contract rather than a package
+	// secret. Keep alphabetized.
+	mapperedFields := map[string]struct{}{
+		"LogFile": {},
+		"OnInit":  {},
+		"Prompt":  {},
+	}
+	typ := reflect.TypeOf(intmodel.ContainerTty{})
+	declared := make(map[string]struct{}, typ.NumField())
+	for i := range typ.NumField() {
+		name := typ.Field(i).Name
+		declared[name] = struct{}{}
+		if _, ok := mapperedFields[name]; !ok {
+			t.Errorf(
+				"intmodel.ContainerTty.%s is declared on the cell schema but missing from "+
+					"mapperedFields. Decide whether writeKukettyMetadata should stamp it onto "+
+					"TerminalDoc.Spec; if yes, wire it through and extend "+
+					"TestWriteKukettyMetadata_AllTtyFieldsMap with an assertion; if no, document "+
+					"the deliberate drop in a code comment and still add the field here so the "+
+					"reflect check sees it.",
+				name,
+			)
+		}
+	}
+	for name := range mapperedFields {
+		if _, ok := declared[name]; !ok {
+			t.Errorf(
+				"mapperedFields references %q but intmodel.ContainerTty no longer declares it — "+
+					"drop the stale entry.",
+				name,
+			)
+		}
+	}
+}
+
+// TestWriteKukettyMetadata_AllTtyFieldsMap is the comprehensive renderer
+// guard #493 calls for. It exercises three concentric invariants:
+//
+//  1. Reflective coverage (ttyFieldsCoveredByMapping): every field declared
+//     on intmodel.ContainerTty is listed in mapperedFields. New fields
+//     must touch this file or the test fails.
+//  2. Per-field behavior: each Tty.* knob set on the input has a non-zero
+//     counterpart on the rendered TerminalDoc.Spec. The pre-#494 Tty.OnInit
+//     drop (declared on the schema, never read by the renderer) is the
+//     canonical failure mode this catches.
+//  3. Renderer-default invariants the cell schema does NOT surface but the
+//     renderer is responsible for stamping on every TerminalDoc:
+//     EnvInherit, SocketFile, CaptureFile, RunPath. EnvInherit=true is the
+//     bug fix from #494 that this test pins — without it, sbsh's terminal
+//     runner spawns the workload with HOME + SBSH_* only, stripping the
+//     user-supplied env and the KUKEON_* identity vars the OCI Process.Env
+//     already carries (sbsh@v0.11.2/internal/terminal/terminalrunner/
+//     terminal.go:54). Pre-#494 the profile loader's no-profile fallback
+//     defaulted EnvInherit=true (sbsh@v0.11.1/internal/profile/
+//     profile.go:454), so the inline-builder migration silently regressed
+//     env passthrough.
+//
+// When a new field lands on ContainerTty, this is the test that fails
+// until the renderer is taught to forward it and the mapping list is
+// updated.
+func TestWriteKukettyMetadata_AllTtyFieldsMap(t *testing.T) {
+	ttyFieldsCoveredByMapping(t)
+
+	r := newTestRunner(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kuketty-metadata.json")
+
+	const wantPrompt = `"\u@\h:\w\$ "`
+	wantOnInit := []intmodel.TtyStage{
+		{Script: "echo hello"},
+		{Script: "echo world"},
+	}
+	const wantLogFile = ctr.AttachableLogfilePath
+	const kukeonGID = 986
+	workload := []string{"/bin/sh", "-c", "exec /workload"}
+
+	spec := intmodel.ContainerSpec{
+		ID:         "c1",
+		RealmName:  "rA",
+		SpaceName:  "sB",
+		StackName:  "kC",
+		CellName:   "lD",
+		Attachable: true,
+		Tty: &intmodel.ContainerTty{
+			Prompt:  wantPrompt,
+			OnInit:  wantOnInit,
+			LogFile: wantLogFile,
+		},
+	}
+
+	if err := r.writeKukettyMetadata(path, spec, kukeonGID, workload); err != nil {
+		t.Fatalf("writeKukettyMetadata: %v", err)
+	}
+	doc := readDoc(t, path)
+
+	// Tty.Prompt → Spec.Prompt + Spec.SetPrompt (sbsh's `SetPrompt =
+	// !DisableSetPrompt` rule flips SetPrompt on for a non-empty prompt).
+	if doc.Spec.Prompt != wantPrompt {
+		t.Errorf("Tty.Prompt: Spec.Prompt = %q, want %q", doc.Spec.Prompt, wantPrompt)
+	}
+	if !doc.Spec.SetPrompt {
+		t.Errorf("Tty.Prompt: Spec.SetPrompt = false, want true (non-empty inline prompt)")
+	}
+
+	// Tty.OnInit → Spec.Stages.OnInit. The pre-#494 silent-drop fix: each
+	// TtyStage.Script lands as an api.ExecStep.Script in order. Stages.PostAttach
+	// is not surfaced on the cell schema and must stay zero.
+	if len(doc.Spec.Stages.OnInit) != len(wantOnInit) {
+		t.Fatalf(
+			"Tty.OnInit: Spec.Stages.OnInit len = %d, want %d (full=%+v)",
+			len(doc.Spec.Stages.OnInit), len(wantOnInit), doc.Spec.Stages.OnInit,
+		)
+	}
+	for i, want := range wantOnInit {
+		if doc.Spec.Stages.OnInit[i].Script != want.Script {
+			t.Errorf(
+				"Tty.OnInit[%d]: Spec.Stages.OnInit[%d].Script = %q, want %q",
+				i, i, doc.Spec.Stages.OnInit[i].Script, want.Script,
+			)
+		}
+	}
+	if len(doc.Spec.Stages.PostAttach) != 0 {
+		t.Errorf("Spec.Stages.PostAttach = %+v, want empty (not surfaced on cell schema)", doc.Spec.Stages.PostAttach)
+	}
+
+	// Tty.LogFile → Spec.LogFile (verbatim, no daemon-side rewriting).
+	if doc.Spec.LogFile != wantLogFile {
+		t.Errorf("Tty.LogFile: Spec.LogFile = %q, want %q", doc.Spec.LogFile, wantLogFile)
+	}
+
+	// Renderer-default invariants the cell schema does NOT surface. These
+	// are kukeon-side contracts the renderer must stamp regardless of cell
+	// YAML — a regression in any of them silently changes runtime behavior.
+	if !doc.Spec.EnvInherit {
+		t.Errorf(
+			"Spec.EnvInherit = false, want true. kuketty must forward its os.Environ() " +
+				"(== OCI Process.Env, which contains user env + KUKEON_*) to the workload; " +
+				"without WithEnvInherit(true), sbsh's runner strips everything but HOME + SBSH_* " +
+				"(sbsh@v0.11.2/internal/terminal/terminalrunner/terminal.go:54). #494 regression.",
+		)
+	}
+	if doc.Spec.SocketFile != ctr.AttachableSocketPath {
+		t.Errorf(
+			"Spec.SocketFile = %q, want %q (kukeon-controlled bind-mount path)",
+			doc.Spec.SocketFile,
+			ctr.AttachableSocketPath,
+		)
+	}
+	if doc.Spec.CaptureFile != ctr.AttachableCapturePath {
+		t.Errorf(
+			"Spec.CaptureFile = %q, want %q (kukeon-controlled bind-mount path)",
+			doc.Spec.CaptureFile,
+			ctr.AttachableCapturePath,
+		)
+	}
+	if doc.Spec.RunPath != ctr.AttachableTTYDir {
+		t.Errorf("Spec.RunPath = %q, want %q (sbsh's per-terminal root)", doc.Spec.RunPath, ctr.AttachableTTYDir)
+	}
+
+	// workloadArgv → Spec.Command + Spec.CommandArgs. Sanity-checked here
+	// alongside the Tty assertions because the comprehensive test is the
+	// single place a contributor can read off "what the renderer produces
+	// from a fully-populated input" without chasing per-field tests.
+	if doc.Spec.Command != workload[0] {
+		t.Errorf("workloadArgv: Spec.Command = %q, want %q", doc.Spec.Command, workload[0])
+	}
+	if len(doc.Spec.CommandArgs) != len(workload)-1 {
+		t.Fatalf("workloadArgv: Spec.CommandArgs len = %d, want %d", len(doc.Spec.CommandArgs), len(workload)-1)
+	}
+	for i, want := range workload[1:] {
+		if doc.Spec.CommandArgs[i] != want {
+			t.Errorf("workloadArgv: Spec.CommandArgs[%d] = %q, want %q", i, doc.Spec.CommandArgs[i], want)
+		}
 	}
 }
 
