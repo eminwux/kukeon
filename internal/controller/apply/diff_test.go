@@ -293,3 +293,53 @@ func TestDiffCell_SynthesizedRoot_NoChange(t *testing.T) {
 		t.Error("synthesized root must not flag RootContainerChanged on re-apply")
 	}
 }
+
+// TestDiffCell_NonRootContainerBreaking_NamesField pins issue #469: when a
+// breaking change is rooted in a non-root container (e.g. image bump),
+// DiffCell must propagate the field name into the cell-level
+// BreakingChanges slice qualified by container ID. Otherwise the
+// reconcile-side error formatter ("cell %q has breaking changes: %v") prints
+// an empty `[]` and the operator has no way to tell what was rejected.
+func TestDiffCell_NonRootContainerBreaking_NamesField(t *testing.T) {
+	desired := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest"},
+				{ID: "web", Image: "nginx:1.27"},
+			},
+		},
+	}
+
+	actual := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest"},
+				{ID: "web", Image: "nginx:1.25"},
+			},
+		},
+	}
+
+	diff := apply.DiffCell(desired, actual)
+	if diff.ChangeType != apply.ChangeTypeBreaking {
+		t.Fatalf("expected breaking change, got %v", diff.ChangeType)
+	}
+	want := "containers[web].image"
+	found := false
+	for _, f := range diff.BreakingChanges {
+		if f == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected cell-level BreakingChanges to include %q, got %v", want, diff.BreakingChanges)
+	}
+}
