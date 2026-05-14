@@ -1,0 +1,54 @@
+# CellProfile for one-shot Claude Code prompts.
+#
+# Install at $HOME/.kuke/profiles.d/claude-code.yaml (or set
+# $KUKE_PROFILES_DIR), then invoke with:
+#
+#   sudo kuke run -p claude-code \
+#       --param PROMPT="explain the kukeon architecture in one sentence" --rm
+#
+# `kuke run -p` materializes a CellDoc named `claude-code-<6hex>` from this
+# template, substitutes ${IMAGE} / ${PROMPT}, and attaches to the `work`
+# container. The onInit script runs `claude --print "${PROMPT}"` once and
+# exits, so the attach loop closes and `--rm` reclaims the cell.
+#
+# Derived from eminwux/crew agents/pm/profiles/pm.yaml; the SSH bind, GPG
+# signing env, and agents/project-repo clone scripts have been stripped so
+# the first-time reader sees only the Claude-Code-specific shape. See the
+# companion guide at docs/site/guides/run-claude-code.md for the full
+# agent-runner reference.
+apiVersion: v1beta1
+kind: CellProfile
+metadata:
+  name: claude-code
+spec:
+  realm: default
+  space: default
+  stack: default
+  parameters:
+    - name: IMAGE
+      description: "Claude Code image reference"
+      default: docker.io/library/claude-code:latest
+    - name: PROMPT
+      description: "Prompt passed to `claude --print`"
+      required: true
+  cell:
+    autoDelete: true
+    tty:
+      default: work
+    containers:
+      - id: root
+        root: true
+        image: docker.io/library/busybox:latest
+        command: sleep
+        args:
+          - "infinity"
+      - id: work
+        attachable: true
+        image: ${IMAGE}
+        command: /bin/bash
+        workingDir: /home/claude
+        tty:
+          prompt: "claude> "
+          onInit:
+            - script: |
+                claude --print "${PROMPT}" && exit
