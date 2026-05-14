@@ -19,6 +19,7 @@ package apply
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/eminwux/kukeon/internal/controller/runner"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -383,13 +384,27 @@ func ReconcileCell(r runner.Runner, desired intmodel.Cell) (ReconcileResult, err
 	result.Changes = diff.ChangedFields
 	result.Details = diff.Details
 
-	// Add container change details
+	// Add container change details. The update branch surfaces the changed
+	// fields so `kuke apply -f` of an image bump reports
+	// `container "web" updated: image` instead of an opaque
+	// `container "web" updated` — the issue-#485 per-component summary the
+	// docs/cli-use-cases.md "apply updates a divergent existing cell" claim
+	// promises.
 	for _, containerDiff := range diff.Containers {
 		switch containerDiff.Action {
 		case "add":
 			result.Changes = append(result.Changes, fmt.Sprintf("container %q added", containerDiff.Name))
 		case "update":
-			result.Changes = append(result.Changes, fmt.Sprintf("container %q updated", containerDiff.Name))
+			fields := append([]string{}, containerDiff.ChangedFields...)
+			fields = append(fields, containerDiff.BreakingChanges...)
+			if len(fields) > 0 {
+				result.Changes = append(
+					result.Changes,
+					fmt.Sprintf("container %q updated: %s", containerDiff.Name, strings.Join(fields, ", ")),
+				)
+			} else {
+				result.Changes = append(result.Changes, fmt.Sprintf("container %q updated", containerDiff.Name))
+			}
 		}
 	}
 	for _, orphan := range diff.Orphans {

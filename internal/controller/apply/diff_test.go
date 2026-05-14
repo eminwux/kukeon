@@ -294,13 +294,14 @@ func TestDiffCell_SynthesizedRoot_NoChange(t *testing.T) {
 	}
 }
 
-// TestDiffCell_NonRootContainerBreaking_NamesField pins issue #469: when a
-// breaking change is rooted in a non-root container (e.g. image bump),
-// DiffCell must propagate the field name into the cell-level
-// BreakingChanges slice qualified by container ID. Otherwise the
-// reconcile-side error formatter ("cell %q has breaking changes: %v") prints
-// an empty `[]` and the operator has no way to tell what was rejected.
-func TestDiffCell_NonRootContainerBreaking_NamesField(t *testing.T) {
+// TestDiffCell_NonRootContainerImage_InPlaceUpdate pins issue #485: a
+// non-root container `image` change must NOT classify as breaking — the
+// runner's UpdateCell path stops, removes, recreates, and starts the
+// affected child in place. Otherwise the apply layer refuses the diff and
+// the docs/cli-use-cases.md "apply updates a divergent existing cell"
+// claim stays gapped (phase 1 #469 only fixed the empty-`[]` formatter on
+// the refusal message; this is the divergent-update use case itself).
+func TestDiffCell_NonRootContainerImage_InPlaceUpdate(t *testing.T) {
 	desired := intmodel.Cell{
 		Metadata: intmodel.CellMetadata{Name: "hello-world"},
 		Spec: intmodel.CellSpec{
@@ -328,18 +329,182 @@ func TestDiffCell_NonRootContainerBreaking_NamesField(t *testing.T) {
 	}
 
 	diff := apply.DiffCell(desired, actual)
-	if diff.ChangeType != apply.ChangeTypeBreaking {
-		t.Fatalf("expected breaking change, got %v", diff.ChangeType)
+	if !diff.HasChanges {
+		t.Fatal("expected changes")
 	}
-	want := "containers[web].image"
+	if diff.ChangeType != apply.ChangeTypeCompatible {
+		t.Fatalf("expected compatible (in-place updateable) change, got %v", diff.ChangeType)
+	}
+	if len(diff.BreakingChanges) != 0 {
+		t.Errorf("non-root image bump must not populate BreakingChanges, got %v", diff.BreakingChanges)
+	}
+	if len(diff.Containers) != 1 {
+		t.Fatalf("expected one ContainerDiff entry, got %d", len(diff.Containers))
+	}
+	cd := diff.Containers[0]
+	if cd.Name != "web" || cd.Action != "update" {
+		t.Errorf("expected web update, got %+v", cd)
+	}
+	if len(cd.BreakingChanges) != 0 {
+		t.Errorf("per-container BreakingChanges must be empty, got %v", cd.BreakingChanges)
+	}
+	foundImage := false
+	for _, f := range cd.ChangedFields {
+		if f == "image" {
+			foundImage = true
+			break
+		}
+	}
+	if !foundImage {
+		t.Errorf("expected ContainerDiff.ChangedFields to include %q, got %v", "image", cd.ChangedFields)
+	}
+}
+
+// TestDiffCell_NonRootContainerCommandArgs_InPlaceUpdate covers AC2 of
+// issue #485: `command` and `args` changes on non-root containers travel
+// the same in-place updateable path as `image`.
+func TestDiffCell_NonRootContainerCommandArgs_InPlaceUpdate(t *testing.T) {
+	desired := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest"},
+				{ID: "web", Image: "nginx:1.27", Command: "/new/cmd", Args: []string{"--new"}},
+			},
+		},
+	}
+
+	actual := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest"},
+				{ID: "web", Image: "nginx:1.27", Command: "/old/cmd", Args: []string{"--old"}},
+			},
+		},
+	}
+
+	diff := apply.DiffCell(desired, actual)
+	if diff.ChangeType != apply.ChangeTypeCompatible {
+		t.Fatalf("expected compatible change for command/args bump, got %v", diff.ChangeType)
+	}
+	if len(diff.BreakingChanges) != 0 {
+		t.Errorf("non-root command/args bump must not populate BreakingChanges, got %v", diff.BreakingChanges)
+	}
+	if len(diff.Containers) != 1 {
+		t.Fatalf("expected one ContainerDiff entry, got %d", len(diff.Containers))
+	}
+	cd := diff.Containers[0]
+	wantFields := map[string]bool{"command": false, "args": false}
+	for _, f := range cd.ChangedFields {
+		if _, ok := wantFields[f]; ok {
+			wantFields[f] = true
+		}
+	}
+	for f, seen := range wantFields {
+		if !seen {
+			t.Errorf("expected ContainerDiff.ChangedFields to include %q, got %v", f, cd.ChangedFields)
+		}
+	}
+}
+
+// TestDiffCell_RootContainerImage_StillBreaking pins AC4 of issue #485:
+// even after the non-root reclassification, root-container image changes
+// stay on the existing RecreateCell path so the cell-wide network/CNI
+// recreate dance is preserved.
+func TestDiffCell_RootContainerImage_StillBreaking(t *testing.T) {
+	desired := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:1.36"},
+			},
+		},
+	}
+
+	actual := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:1.35"},
+			},
+		},
+	}
+
+	diff := apply.DiffCell(desired, actual)
+	if !diff.RootContainerChanged {
+		t.Fatal("expected RootContainerChanged=true for root image bump")
+	}
+	if diff.ChangeType != apply.ChangeTypeBreaking {
+		t.Errorf("expected breaking change for root image bump, got %v", diff.ChangeType)
+	}
+}
+
+// TestDiffContainer_RootStillBreaking ensures the single-container
+// reconcile path (ReconcileContainer) keeps the breaking-change
+// classification for root containers — the rootContainer flag flows
+// through diffContainerSpec via desired.Spec.Root.
+func TestDiffContainer_RootStillBreaking(t *testing.T) {
+	desired := intmodel.Container{
+		Metadata: intmodel.ContainerMetadata{Name: "root"},
+		Spec: intmodel.ContainerSpec{
+			ID:        "root",
+			Root:      true,
+			RealmName: "default", SpaceName: "default", StackName: "default", CellName: "hello-world",
+			Image: "busybox:1.36",
+		},
+	}
+	actual := desired
+	actual.Spec.Image = "busybox:1.35"
+
+	diff := apply.DiffContainer(desired, actual)
+	if diff.ChangeType != apply.ChangeTypeBreaking {
+		t.Fatalf("expected breaking change for root image bump, got %v", diff.ChangeType)
+	}
 	found := false
 	for _, f := range diff.BreakingChanges {
-		if f == want {
+		if f == "image" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected cell-level BreakingChanges to include %q, got %v", want, diff.BreakingChanges)
+		t.Errorf("expected BreakingChanges to include image, got %v", diff.BreakingChanges)
+	}
+}
+
+// TestDiffContainer_NonRootInPlace mirrors the cell-level reclassification
+// at the single-container reconcile path: a non-root image bump must
+// surface as Compatible.
+func TestDiffContainer_NonRootInPlace(t *testing.T) {
+	desired := intmodel.Container{
+		Metadata: intmodel.ContainerMetadata{Name: "web"},
+		Spec: intmodel.ContainerSpec{
+			ID:        "web",
+			RealmName: "default", SpaceName: "default", StackName: "default", CellName: "hello-world",
+			Image: "nginx:1.27",
+		},
+	}
+	actual := desired
+	actual.Spec.Image = "nginx:1.25"
+
+	diff := apply.DiffContainer(desired, actual)
+	if diff.ChangeType != apply.ChangeTypeCompatible {
+		t.Fatalf("expected compatible change for non-root image bump, got %v", diff.ChangeType)
+	}
+	if len(diff.BreakingChanges) != 0 {
+		t.Errorf("non-root image bump must not populate BreakingChanges, got %v", diff.BreakingChanges)
 	}
 }

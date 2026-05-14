@@ -153,6 +153,14 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 		// scan Containers for the root see it.
 		newContainers = append(newContainers, *preservedRoot)
 	}
+	// recreatedIDs collects non-root container IDs whose image/command/args
+	// changed under the breaking-spec branch below. ensureCellContainers
+	// recreates the containerd container with the new spec (pulling the new
+	// image), but does not start it; the start happens further down via
+	// r.StartContainer once metadata has been persisted, so a successful
+	// apply leaves the recreated child running and the cell Ready. Issue
+	// #485.
+	var recreatedIDs []string
 	for _, desiredContainer := range desired.Spec.Containers {
 		if actualContainer, exists := actualContainers[desiredContainer.ID]; exists {
 			// Container exists, preserve containerd ID but update spec
@@ -202,6 +210,7 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 				}
 				// Clear containerd ID so it will be recreated
 				desiredContainer.ContainerdID = ""
+				recreatedIDs = append(recreatedIDs, desiredContainer.ID)
 			}
 		}
 		// Ensure container has proper parent references
@@ -249,6 +258,21 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 	// Update metadata
 	if updateErr := r.UpdateCellMetadata(existing); updateErr != nil {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, updateErr)
+	}
+
+	// Start non-root containers that were recreated above. ensureCellContainers
+	// pulled the new image and built a fresh containerd container, but did not
+	// start it; without this loop a `kuke apply -f` that bumps a non-root
+	// container's image leaves the recreated child in the Created state and
+	// the reconciler drives the cell back out of Ready. r.StartContainer is
+	// idempotent (delete + create + start) so the second create-call here is
+	// harmless — the freshly-pulled snapshot is reused. Issue #485.
+	for _, id := range recreatedIDs {
+		started, startErr := r.StartContainer(existing, id)
+		if startErr != nil {
+			return intmodel.Cell{}, fmt.Errorf("failed to start recreated container %q: %w", id, startErr)
+		}
+		existing = started
 	}
 
 	return existing, nil
