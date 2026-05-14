@@ -202,6 +202,21 @@ func (r *Exec) writeKukettyMetadata(
 		// lane that loaded sbsh TerminalProfile YAML from disk.
 		sbshbuilder.WithPrompt(prompt),
 		sbshbuilder.WithDisableSetPrompt(prompt == ""),
+		// Spec.EnvInherit=true tells sbsh's terminal runner to forward
+		// kuketty's os.Environ() (which is the container's OCI Process.Env
+		// — user-supplied containerSpec.Env merged with kukeon's KUKEON_*
+		// identity vars at ctr.BuildContainerSpec) to the workload child.
+		// Without it, sbsh's runner spawns the workload with only HOME +
+		// SBSH_* set (sbsh@v0.11.2/internal/terminal/terminalrunner/
+		// terminal.go:54) — every user env entry and every KUKEON_* entry
+		// gets stripped at the kuketty → workload boundary. Pre-#494 the
+		// profile lane's no-profile fallback defaulted EnvInherit=true
+		// (sbsh@v0.11.1/internal/profile/profile.go:454), so the inline-
+		// builder migration silently regressed env passthrough — this
+		// option restores the kukeon contract that the OCI Process.Env IS
+		// the workload's env. Pinned by the comprehensive renderer test in
+		// attachable_test.go so a future refactor cannot drop it.
+		sbshbuilder.WithEnvInherit(true),
 	}
 	if spec.Tty != nil && len(spec.Tty.OnInit) > 0 {
 		// Inline OnInit (#494): map the cell's TtyStage{Script} entries to
