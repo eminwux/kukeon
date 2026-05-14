@@ -407,6 +407,15 @@ func DiffCell(desired, actual intmodel.Cell) CellDiffResult {
 				result.HasChanges = true
 				if containerDiff.ChangeType == ChangeTypeBreaking {
 					result.ChangeType = ChangeTypeBreaking
+					// Qualify per-container breaking fields with the container ID
+					// so the cell-level error message in reconcile.go names them
+					// instead of printing an empty `[]`.
+					for _, field := range containerDiff.BreakingChanges {
+						result.BreakingChanges = append(
+							result.BreakingChanges,
+							fmt.Sprintf("containers[%s].%s", id, field),
+						)
+					}
 				} else if result.ChangeType == ChangeTypeNone {
 					result.ChangeType = containerDiff.ChangeType
 				}
