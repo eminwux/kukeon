@@ -39,7 +39,6 @@ func TestKuke_NoSpaces(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	args := append(buildKukeRunPathArgs(runPath), "get", "space", "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
@@ -60,7 +59,6 @@ func TestKuke_CreateSpace_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 
@@ -136,7 +134,6 @@ func TestKuke_DeleteSpace_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 
@@ -233,7 +230,6 @@ func TestKuke_PurgeSpace_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 

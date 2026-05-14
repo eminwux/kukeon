@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -110,46 +109,16 @@ func runBinary(t *testing.T, env []string, command string, args ...string) (int,
 	return exitCode, []byte(stdoutBuf.String()), []byte(stderrBuf.String())
 }
 
-// getRandomRunPath generates a temporary run path for test isolation.
+// getRandomRunPath returns a unique, absolute run path for the test, backed
+// by t.TempDir(). The directory is created up front and removed automatically
+// when the test ends, so callers do not need a separate create-or-cleanup
+// step. Each call returns its own path, which avoids contention on a shared
+// parent directory (issue #491: MkdirAll on a shared parent races
+// concurrent t.Cleanup RemoveAll from sibling parallel tests, surfacing as
+// ENOENT on the new leaf).
 func getRandomRunPath(t *testing.T) string {
 	t.Helper()
-	// Use timestamp-based ID for uniqueness
-	timestamp := time.Now().UnixNano()
-	rndDir := fmt.Sprintf("e-%d", timestamp)
-	fullDir := path.Join("tmp", rndDir)
-	return fullDir
-}
-
-// mkdirRunPath creates the temporary run path directory.
-func mkdirRunPath(t *testing.T, fullDir string) {
-	t.Helper()
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("could not get working dir: %v", err)
-	}
-	fullDir = filepath.Join(cwd, fullDir)
-	if err = os.MkdirAll(fullDir, 0o755); err != nil {
-		t.Fatalf("could not create dir %s: %v", fullDir, err)
-	}
-
-	// Register cleanup to remove the tmp directory after test
-	t.Cleanup(func() {
-		if removeErr := os.RemoveAll(fullDir); removeErr != nil {
-			t.Logf("failed to cleanup tmp directory %q: %v", fullDir, removeErr)
-		}
-
-		// Also remove parent tmp directory if it's empty
-		tmpDir := filepath.Dir(fullDir)
-		if tmpDir != "" && filepath.Base(tmpDir) == "tmp" {
-			entries, readErr := os.ReadDir(tmpDir)
-			if readErr == nil && len(entries) == 0 {
-				// tmp directory is empty, remove it
-				if removeErr := os.Remove(tmpDir); removeErr != nil {
-					t.Logf("failed to cleanup parent tmp directory %q: %v", tmpDir, removeErr)
-				}
-			}
-		}
-	})
+	return t.TempDir()
 }
 
 // buildKukeRunPathArgs builds --run-path flag arguments.
@@ -318,13 +287,7 @@ func generateUniqueSpaceName(t *testing.T) string {
 func verifySpaceCNIConfigExists(t *testing.T, runPath, realmName, spaceName string) bool {
 	t.Helper()
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("could not get working dir: %v", err)
-	}
-	fullRunPath := filepath.Join(cwd, runPath)
-
-	confPath, err := fs.SpaceNetworkConfigPath(fullRunPath, realmName, spaceName)
+	confPath, err := fs.SpaceNetworkConfigPath(runPath, realmName, spaceName)
 	if err != nil {
 		t.Logf("failed to build CNI config path: %v", err)
 		return false
@@ -338,14 +301,8 @@ func verifySpaceCNIConfigExists(t *testing.T, runPath, realmName, spaceName stri
 func verifySpaceMetadataExists(t *testing.T, runPath, realmName, spaceName string) bool {
 	t.Helper()
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("could not get working dir: %v", err)
-	}
-	fullRunPath := filepath.Join(cwd, runPath)
-
-	metadataPath := fs.SpaceMetadataPath(fullRunPath, realmName, spaceName)
-	_, err = os.Stat(metadataPath)
+	metadataPath := fs.SpaceMetadataPath(runPath, realmName, spaceName)
+	_, err := os.Stat(metadataPath)
 	return err == nil
 }
 
@@ -427,14 +384,8 @@ func generateUniqueStackName(t *testing.T) string {
 func verifyStackMetadataExists(t *testing.T, runPath, realmName, spaceName, stackName string) bool {
 	t.Helper()
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("could not get working dir: %v", err)
-	}
-	fullRunPath := filepath.Join(cwd, runPath)
-
-	metadataPath := fs.StackMetadataPath(fullRunPath, realmName, spaceName, stackName)
-	_, err = os.Stat(metadataPath)
+	metadataPath := fs.StackMetadataPath(runPath, realmName, spaceName, stackName)
+	_, err := os.Stat(metadataPath)
 	return err == nil
 }
 
@@ -545,14 +496,8 @@ func generateUniqueContainerName(t *testing.T) string {
 func verifyCellMetadataExists(t *testing.T, runPath, realmName, spaceName, stackName, cellName string) bool {
 	t.Helper()
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("could not get working dir: %v", err)
-	}
-	fullRunPath := filepath.Join(cwd, runPath)
-
-	metadataPath := fs.CellMetadataPath(fullRunPath, realmName, spaceName, stackName, cellName)
-	_, err = os.Stat(metadataPath)
+	metadataPath := fs.CellMetadataPath(runPath, realmName, spaceName, stackName, cellName)
+	_, err := os.Stat(metadataPath)
 	return err == nil
 }
 

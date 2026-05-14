@@ -30,7 +30,6 @@ func TestKukeDeleteF_Realm(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 
@@ -101,7 +100,6 @@ func TestKukeDeleteF_MultiResource(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 	spaceName := "delete-space-" + strings.TrimPrefix(realmName, "e-r-")
@@ -189,7 +187,6 @@ func TestKukeDeleteF_Cascade(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 	spaceName := "delete-cascade-space-" + strings.TrimPrefix(realmName, "e-r-")
@@ -270,7 +267,6 @@ func TestKukeDeleteF_Idempotent(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 
@@ -400,7 +396,6 @@ func TestDeleteF_Realm_VerifyAllResourcesDeleted(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 	namespace := realmName + "-ns"
@@ -480,7 +475,6 @@ func TestDeleteF_Space_VerifyAllResourcesDeleted(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
@@ -565,7 +559,6 @@ func TestDeleteF_Stack_VerifyAllResourcesDeleted(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
@@ -659,7 +652,6 @@ func TestDeleteF_Cell_VerifyAllResourcesDeleted(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
@@ -799,7 +791,6 @@ func TestDeleteF_Container_VerifyAllResourcesDeleted(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)

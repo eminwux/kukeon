@@ -239,7 +239,6 @@ func TestKukeApply_Realm_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 
 	// Cleanup: Delete realm
@@ -316,7 +315,6 @@ func TestKukeApply_Space_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 
@@ -396,7 +394,6 @@ func TestKukeApply_Stack_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
@@ -489,7 +486,6 @@ func TestKukeApply_Cell_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
@@ -638,7 +634,6 @@ func TestKukeApply_MultiResource_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)

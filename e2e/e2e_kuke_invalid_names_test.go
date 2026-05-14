@@ -31,7 +31,6 @@ func TestKuke_CreateSpace_RejectsInvalidNames(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	tests := []struct {
 		name      string
@@ -64,7 +63,6 @@ func TestKuke_CreateStack_RejectsInvalidNames(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	tests := []struct {
 		name      string
@@ -98,7 +96,6 @@ func TestKuke_CreateCell_RejectsInvalidNames(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	tests := []struct {
 		name     string
@@ -132,7 +129,6 @@ func TestKuke_CreateContainer_RejectsInvalidNames(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	tests := []struct {
 		name          string
