@@ -128,15 +128,6 @@ func runLog(cmd *cobra.Command, args []string) error {
 	if cell == "" {
 		return fmt.Errorf("%w (positional cell)", errdefs.ErrCellNameRequired)
 	}
-	if realm == "" {
-		return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
-	}
-	if space == "" {
-		return fmt.Errorf("%w (--space)", errdefs.ErrSpaceNameRequired)
-	}
-	if stack == "" {
-		return fmt.Errorf("%w (--stack)", errdefs.ErrStackNameRequired)
-	}
 
 	client, err := resolveClient(cmd)
 	if err != nil {

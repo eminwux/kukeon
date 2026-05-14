@@ -451,53 +451,6 @@ func TestLog_RejectsCellFlag(t *testing.T) {
 	}
 }
 
-func TestLog_MissingFlags(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	cases := []struct {
-		name    string
-		args    []string
-		wantErr error
-	}{
-		{
-			name:    "explicit empty realm",
-			args:    []string{"--realm", "", "--space", "s1", "--stack", "st1", "c1"},
-			wantErr: errdefs.ErrRealmNameRequired,
-		},
-		{
-			name:    "explicit empty space",
-			args:    []string{"--realm", "r1", "--space", "", "--stack", "st1", "c1"},
-			wantErr: errdefs.ErrSpaceNameRequired,
-		},
-		{
-			name:    "explicit empty stack",
-			args:    []string{"--realm", "r1", "--space", "s1", "--stack", "", "c1"},
-			wantErr: errdefs.ErrStackNameRequired,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Reset clears viper's defaults set by DefineKV at package
-			// init so an explicit `--realm ""` resolves to the empty
-			// string and trips the runtime guard. t.Setenv keeps the
-			// env-var path quiet too, in case the dev box exports a
-			// KUKE_LOG_*.
-			viper.Reset()
-			t.Setenv("KUKE_LOG_REALM", "")
-			t.Setenv("KUKE_LOG_SPACE", "")
-			t.Setenv("KUKE_LOG_STACK", "")
-
-			cmd, _ := newCmdWithCtx(t, &fakeClient{}, &tailCapture{})
-			cmd.SetArgs(tc.args)
-
-			err := cmd.Execute()
-			if !errors.Is(err, tc.wantErr) {
-				t.Fatalf("error %v does not unwrap to %v", err, tc.wantErr)
-			}
-		})
-	}
-}
-
 // TestLog_MissingCellArg covers the cobra arg-count guard: omitting the
 // positional <cell> exits before runLog ever runs, surfacing a
 // usage-style error rather than ErrCellNameRequired.
