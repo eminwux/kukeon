@@ -171,47 +171,43 @@ func (r *Exec) attachableBuildOpts(_ string, spec intmodel.ContainerSpec, _ []ct
 // into TerminalSpec.Command / TerminalSpec.CommandArgs via sbsh's
 // builder.WithCommand so the kuketty side spawns the workload via sbsh's
 // terminal runner instead of the wrapper's argv. An empty workloadArgv
-// leaves the builder's profile default in place (sbsh's hardcoded default
-// profile is /bin/bash -i, matching the legacy fallback when the user
-// supplied no command).
+// leaves sbsh's inline-builder default (/bin/bash -i) in place, matching
+// the legacy fallback when the user supplied no command.
 func (r *Exec) writeKukettyMetadata(
 	path string,
 	spec intmodel.ContainerSpec,
 	kukeonGroupGID int,
 	workloadArgv []string,
 ) error {
-	profileConfigured := spec.Tty != nil && spec.Tty.Profile != ""
+	prompt := ""
+	if spec.Tty != nil {
+		prompt = spec.Tty.Prompt
+	}
 	opts := []sbshbuilder.TerminalOption{
 		sbshbuilder.WithSocketFile(ctr.AttachableSocketPath),
 		// Capture file is anchored to the kukeon-controlled per-container
 		// tty dir so `kuke log` (which tails ContainerCapturePath on the
 		// host) and the in-container writer see the same inode through the
 		// directory bind mount. Without an explicit WithCaptureFile, sbsh's
-		// profile builder derives a capture path from runPath + ID that
+		// inline builder derives a capture path from runPath + ID that
 		// would land outside the bind-mount, hiding the transcript from the
 		// host.
 		sbshbuilder.WithCaptureFile(ctr.AttachableCapturePath),
+		// Spec.Prompt + Spec.SetPrompt are stamped from the cell's inline
+		// Tty.Prompt with no profile loader involved (#494): an empty
+		// prompt pairs with DisableSetPrompt(true) so a non-shell workload
+		// (nginx, python) never receives a literal `export PS1=…` on
+		// stdin; a non-empty prompt flips SetPrompt on (sbsh's
+		// `!DisableSetPrompt` rule). Replaces the phase-4 (#290) profile
+		// lane that loaded sbsh TerminalProfile YAML from disk.
+		sbshbuilder.WithPrompt(prompt),
+		sbshbuilder.WithDisableSetPrompt(prompt == ""),
 	}
-	// Phase 4 (#290) wires the cell's Tty.Profile through to sbsh's builder:
-	// when configured, WithProfile selects the TerminalProfile by name and
-	// WithProfilesDir points the loader at the host-side YAML directory.
-	// sbsh's builder stamps Prompt, SetPrompt, and Stages into the rendered
-	// TerminalSpec; no kukeon-side profile interpreter runs.
-	//
-	// When no profile is configured, both builder options are omitted (so
-	// sbsh's no-profile path runs) and DisableSetPrompt stays on — without
-	// it sbsh's hardcoded default would inject `(sbsh-$ID) $PS1` into a
-	// non-shell workload's stdin. ProfilesDir is only honored alongside
-	// Profile: in isolation it would prime sbsh's profile name to "default"
-	// and chase the configured dir for a YAML the operator never asked to
-	// load.
-	if profileConfigured {
-		opts = append(opts, sbshbuilder.WithProfile(spec.Tty.Profile))
-		if spec.Tty.ProfilesDir != "" {
-			opts = append(opts, sbshbuilder.WithProfilesDir(spec.Tty.ProfilesDir))
-		}
-	} else {
-		opts = append(opts, sbshbuilder.WithDisableSetPrompt(true))
+	if spec.Tty != nil && len(spec.Tty.OnInit) > 0 {
+		// Inline OnInit (#494): map the cell's TtyStage{Script} entries to
+		// sbsh's api.ExecStep{Script}. Before this lane existed, OnInit set
+		// on a cell with no profile was silently dropped (#494 problem 1).
+		opts = append(opts, sbshbuilder.WithOnInit(ttyStagesToExecSteps(spec.Tty.OnInit)))
 	}
 	if mode := modeIfGroupSet(kukeonGroupGID, ctr.AttachableSocketMode); mode != "" {
 		opts = append(opts, sbshbuilder.WithSocketMode(mode))
@@ -251,9 +247,9 @@ func (r *Exec) writeKukettyMetadata(
 		return fmt.Errorf("build kuketty terminal spec: %w", err)
 	}
 	if !logFileConfigured {
-		// sbsh's profile builder unconditionally derives a default
-		// LogFile path from runPath + terminalID when the caller
-		// passes no WithLogFile. That default would land at
+		// sbsh's inline builder unconditionally derives a default LogFile
+		// path from runPath + terminalID when the caller passes no
+		// WithLogFile (applyParamDefaults). That default would land at
 		// /run/kukeon/tty/terminals/<id>/log inside the container —
 		// host-visible through the bind mount, but at a location the
 		// daemon does not advertise. Clearing the field lets kuketty's
@@ -289,6 +285,21 @@ func (r *Exec) writeKukettyMetadata(
 		return fmt.Errorf("rename kuketty metadata %q -> %q: %w", tmp, path, err)
 	}
 	return nil
+}
+
+// ttyStagesToExecSteps maps the cell's inline Tty.OnInit entries into
+// sbsh's api.ExecStep slice. Each stage carries only Script today; sbsh's
+// ExecStep also supports Env, but the cell schema does not surface it yet
+// (a future TtyStage knob lands here without touching the renderer).
+func ttyStagesToExecSteps(in []intmodel.TtyStage) []sbshapi.ExecStep {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]sbshapi.ExecStep, len(in))
+	for i, s := range in {
+		out[i] = sbshapi.ExecStep{Script: s.Script}
+	}
+	return out
 }
 
 // kukettyMetadataLabels stamps the cell-context identity on the rendered
