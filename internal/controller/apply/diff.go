@@ -401,8 +401,13 @@ func DiffCell(desired, actual intmodel.Cell) CellDiffResult {
 				Action: "add",
 			})
 		} else {
-			// Container to update
-			containerDiff := diffContainerSpec(desiredContainer, actualContainer)
+			// Container to update. Non-root container — image/command/args
+			// are classified as in-place updateable (Compatible) here so
+			// UpdateCell stops, removes, recreates, and starts the affected
+			// child container instead of refusing the diff. The root
+			// container's image/command/args bypass diffContainerSpec via
+			// rootContainerSpecChanged above and stay on the recreate path.
+			containerDiff := diffContainerSpec(desiredContainer, actualContainer, false)
 			if containerDiff.HasChanges {
 				result.HasChanges = true
 				if containerDiff.ChangeType == ChangeTypeBreaking {
@@ -484,8 +489,12 @@ func DiffContainer(desired, actual intmodel.Container) DiffResult {
 		result.Details["metadata.labels"] = labelsChangedMsg
 	}
 
-	// Diff container spec
-	specDiff := diffContainerSpec(&desired.Spec, &actual.Spec)
+	// Diff container spec. Pass desired.Spec.Root so a root container under
+	// the single-container reconcile path keeps the existing
+	// breaking-change classification for image/command/args (cell-level
+	// callers always pass false because only non-root children flow
+	// through DiffCell's container loop).
+	specDiff := diffContainerSpec(&desired.Spec, &actual.Spec, desired.Spec.Root)
 	if specDiff.HasChanges {
 		result.HasChanges = true
 		if specDiff.ChangeType == ChangeTypeBreaking {
@@ -504,31 +513,41 @@ func DiffContainer(desired, actual intmodel.Container) DiffResult {
 }
 
 // diffContainerSpec compares two container specs.
-func diffContainerSpec(desired, actual *intmodel.ContainerSpec) DiffResult {
+//
+// `rootContainer` controls whether image/command/args changes are
+// classified as breaking. Root containers cannot be updated in place — the
+// runner's StartCell path bakes the root spec into namespace setup, so any
+// change to image/command/args has to flow through RecreateCell. Non-root
+// containers can be stopped, removed, recreated, and started under the
+// existing cell namespaces; UpdateCell already implements that recreate
+// dance (the apply layer just needs to stop refusing the diff). Issue
+// #485.
+//
+// which needs a per-field diff branch. Splitting into smaller helpers per
+// field group (env/ports/volumes, privileged/user/readonly,
+// capabilities/securityOpts/tmpfs/resources) would obscure the spec-vs-spec
+// shape readers reach for when adding a new field. The image/command/args
+// trio already lives in recordImageCmdArgsChange because those three share
+// the only non-trivial classification branch (root vs. non-root).
+//
+//nolint:funlen // The container spec is a flat list of ~12 fields, each of
+func diffContainerSpec(desired, actual *intmodel.ContainerSpec, rootContainer bool) DiffResult {
 	result := DiffResult{
 		Details: make(map[string]string),
 	}
 
-	// Breaking changes: image, command, args
 	if desired.Image != actual.Image {
-		result.HasChanges = true
-		result.ChangeType = ChangeTypeBreaking
-		result.BreakingChanges = append(result.BreakingChanges, "image")
-		result.Details["image"] = fmt.Sprintf("image changed from %q to %q", actual.Image, desired.Image)
+		recordImageCmdArgsChange(&result, rootContainer, "image",
+			fmt.Sprintf("image changed from %q to %q", actual.Image, desired.Image))
 	}
 
 	if desired.Command != actual.Command {
-		result.HasChanges = true
-		result.ChangeType = ChangeTypeBreaking
-		result.BreakingChanges = append(result.BreakingChanges, "command")
-		result.Details["command"] = fmt.Sprintf("command changed from %q to %q", actual.Command, desired.Command)
+		recordImageCmdArgsChange(&result, rootContainer, "command",
+			fmt.Sprintf("command changed from %q to %q", actual.Command, desired.Command))
 	}
 
 	if !slicesEqual(desired.Args, actual.Args) {
-		result.HasChanges = true
-		result.ChangeType = ChangeTypeBreaking
-		result.BreakingChanges = append(result.BreakingChanges, "args")
-		result.Details["args"] = "args changed"
+		recordImageCmdArgsChange(&result, rootContainer, "args", "args changed")
 	}
 
 	// Compatible changes: env, ports, volumes, etc.
@@ -631,6 +650,24 @@ func diffContainerSpec(desired, actual *intmodel.ContainerSpec) DiffResult {
 	}
 
 	return result
+}
+
+// recordImageCmdArgsChange routes an image/command/args diff into either
+// BreakingChanges (root container) or ChangedFields (non-root, in-place
+// updateable). Lives outside diffContainerSpec so the latter stays within
+// funlen's statement budget. Issue #485.
+func recordImageCmdArgsChange(result *DiffResult, rootContainer bool, field, detail string) {
+	result.HasChanges = true
+	if rootContainer {
+		result.ChangeType = ChangeTypeBreaking
+		result.BreakingChanges = append(result.BreakingChanges, field)
+	} else {
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, field)
+	}
+	result.Details[field] = detail
 }
 
 func capabilitiesEqual(a, b *intmodel.ContainerCapabilities) bool {
