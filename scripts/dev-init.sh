@@ -9,10 +9,11 @@
 # the manual "Local smoke test" sequence from CLAUDE.md into a runnable artifact.
 #
 # Idempotent: re-running on a healthy host produces a clean re-bootstrap.
-# On a fresh host (no /opt/kukeon/kuke-system) the script first runs `kuke
-# init` to create realm metadata so the subsequent `kuke image load --realm
-# kuke-system` has a realm to land into; cell provisioning during that
-# first-pass init may fail before the image is staged, which is expected.
+# On a fresh host (no /opt/kukeon/data/kuke-system) the script first runs
+# `kuke init` to create realm metadata so the subsequent `kuke image load
+# --realm kuke-system` has a realm to land into; cell provisioning during
+# that first-pass init may fail before the image is staged, which is
+# expected.
 
 set -euo pipefail
 
@@ -21,7 +22,12 @@ cd "${REPO_ROOT}"
 
 LOCAL_TAG="kukeon-local:dev"
 KUKEOND_IMAGE_REF="docker.io/library/${LOCAL_TAG}"
-SYSTEM_REALM_DIR="/opt/kukeon/kuke-system"
+# The on-disk metadata layout lives under /opt/kukeon/data/ — see
+# internal/consts.KukeonMetadataSubdir. Siblings of the data root (e.g.
+# /opt/kukeon/bin/kuketty staged by `kuke init`) intentionally fall outside
+# the reconcile-loop walker.
+METADATA_ROOT="/opt/kukeon/data"
+SYSTEM_REALM_DIR="${METADATA_ROOT}/kuke-system"
 KUKEOND_CELL_DIR="${SYSTEM_REALM_DIR}/kukeon/kukeon/kukeond"
 
 step() {
@@ -105,7 +111,7 @@ ATTACH_SMOKE_SPACE="ds"
 ATTACH_SMOKE_STACK="dks"
 ATTACH_SMOKE_CELL="cattach"
 ATTACH_SMOKE_CONTAINER="work"
-ATTACH_SMOKE_BASE="/opt/kukeon/${ATTACH_SMOKE_REALM}/${ATTACH_SMOKE_SPACE}/${ATTACH_SMOKE_STACK}/${ATTACH_SMOKE_CELL}/${ATTACH_SMOKE_CONTAINER}"
+ATTACH_SMOKE_BASE="${METADATA_ROOT}/${ATTACH_SMOKE_REALM}/${ATTACH_SMOKE_SPACE}/${ATTACH_SMOKE_STACK}/${ATTACH_SMOKE_CELL}/${ATTACH_SMOKE_CONTAINER}"
 ATTACH_SMOKE_SOCKET="${ATTACH_SMOKE_BASE}/tty/socket"
 ATTACH_SMOKE_METADATA="${ATTACH_SMOKE_BASE}/kuketty-metadata.json"
 ATTACH_SMOKE_TMP="$(mktemp -d)"

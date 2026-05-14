@@ -28,6 +28,14 @@ const (
 
 	KukeonMetadataFile = "metadata.json"
 
+	// KukeonMetadataSubdir is the basename of the subdirectory under the
+	// daemon's RunPath that owns kukeon's realm/space/stack/cell metadata
+	// tree. Walkers (ListRealms, the subnet allocator, daemon reset
+	// --purge-system) scope themselves to this subtree so non-metadata
+	// siblings of the RunPath — e.g. <RunPath>/bin staging kuketty, or the
+	// .kukeon-instance.json file — are not mistaken for realm directories.
+	KukeonMetadataSubdir = "data"
+
 	// KukeonContainerTTYDir is the basename of the per-container directory
 	// that owns the sbsh terminal socket plus its capture and log siblings.
 	// kukeon bind-mounts this directory (not a single file) into the

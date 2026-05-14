@@ -26,9 +26,29 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
+func TestMetadataRoot(t *testing.T) {
+	got := fs.MetadataRoot("/opt/kukeon")
+	want := "/opt/kukeon/" + consts.KukeonMetadataSubdir
+	if got != want {
+		t.Errorf("MetadataRoot = %q, want %q", got, want)
+	}
+}
+
+func TestRealmMetadataDir_UnderMetadataRoot(t *testing.T) {
+	// The realm dir must live under the metadata root, not directly under
+	// the RunPath: the reconcile loop (#473) walks MetadataRoot to enumerate
+	// realms, so anything outside it is invisible to the walker.
+	got := fs.RealmMetadataDir("/opt/kukeon", "realm")
+	want := "/opt/kukeon/" + consts.KukeonMetadataSubdir + "/realm"
+	if got != want {
+		t.Errorf("RealmMetadataDir = %q, want %q", got, want)
+	}
+}
+
 func TestContainerTTYDir(t *testing.T) {
 	got := fs.ContainerTTYDir("/opt/kukeon", "realm", "space", "stack", "cell", "c1")
-	want := "/opt/kukeon/realm/space/stack/cell/c1/" + consts.KukeonContainerTTYDir
+	want := "/opt/kukeon/" + consts.KukeonMetadataSubdir +
+		"/realm/space/stack/cell/c1/" + consts.KukeonContainerTTYDir
 	if got != want {
 		t.Errorf("ContainerTTYDir = %q, want %q", got, want)
 	}
@@ -36,7 +56,7 @@ func TestContainerTTYDir(t *testing.T) {
 
 func TestContainerSocketPath(t *testing.T) {
 	got := fs.ContainerSocketPath("/opt/kukeon", "realm", "space", "stack", "cell", "c1")
-	want := "/opt/kukeon/realm/space/stack/cell/c1/" +
+	want := "/opt/kukeon/" + consts.KukeonMetadataSubdir + "/realm/space/stack/cell/c1/" +
 		consts.KukeonContainerTTYDir + "/" + consts.KukeonContainerSocketFile
 	if got != want {
 		t.Errorf("ContainerSocketPath = %q, want %q", got, want)

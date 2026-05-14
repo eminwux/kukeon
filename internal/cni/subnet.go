@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
@@ -72,9 +73,14 @@ type SubnetState struct {
 // the source of truth: Allocate scans them at call time to discover which
 // subnets are already in use, so the allocator survives daemon restarts
 // without a separate cache.
+//
+// dataRoot is the metadata subtree under the daemon's RunPath
+// (<RunPath>/<consts.KukeonMetadataSubdir>); the allocator walks only that
+// subtree so non-metadata siblings of the RunPath (e.g. <RunPath>/bin) are not
+// mistaken for realm directories.
 type SubnetAllocator struct {
 	mu         sync.Mutex
-	runPath    string
+	dataRoot   string
 	parentCIDR string
 	prefixLen  int
 	parsedNet  *net.IPNet
@@ -84,8 +90,9 @@ type SubnetAllocator struct {
 }
 
 // NewSubnetAllocator builds an allocator that subdivides parentCIDR into
-// /prefixLen chunks and persists assignments under <runPath>/<realm>/<space>/.
-// Use NewDefaultSubnetAllocator for the standard /24 of /16 layout.
+// /prefixLen chunks and persists assignments under
+// <runPath>/<consts.KukeonMetadataSubdir>/<realm>/<space>/. Use
+// NewDefaultSubnetAllocator for the standard /24 of /16 layout.
 func NewSubnetAllocator(runPath, parentCIDR string, prefixLen int) (*SubnetAllocator, error) {
 	_, ipNet, err := net.ParseCIDR(parentCIDR)
 	if err != nil {
@@ -109,7 +116,7 @@ func NewSubnetAllocator(runPath, parentCIDR string, prefixLen int) (*SubnetAlloc
 	span := uint32(1) << uint(ipv4Bits-prefixLen)           //nolint:gosec // bounded by validation
 	totalSubnets := uint32(1) << uint(prefixLen-parentBits) //nolint:gosec // bounded by validation
 	return &SubnetAllocator{
-		runPath:    runPath,
+		dataRoot:   filepath.Join(runPath, consts.KukeonMetadataSubdir),
 		parentCIDR: parentCIDR,
 		prefixLen:  prefixLen,
 		parsedNet:  ipNet,
@@ -142,7 +149,7 @@ func (a *SubnetAllocator) PrefixLen() int { return a.prefixLen }
 
 // statePath returns the on-disk path for the (realm, space) network-state file.
 func (a *SubnetAllocator) statePath(realm, space string) string {
-	return filepath.Join(a.runPath, realm, space, SubnetStateFileName)
+	return filepath.Join(a.dataRoot, realm, space, SubnetStateFileName)
 }
 
 // LoadAssigned returns the subnet currently persisted for (realm, space), or
@@ -227,24 +234,25 @@ func (a *SubnetAllocator) Release(realm, space string) error {
 	return nil
 }
 
-// usedSubnetsLocked walks <runPath>/<realm>/<space>/network.json and returns
-// the set of subnets currently in use. Realm and space names are derived from
-// the directory layout, so the allocator does not need to know about realm
-// metadata. Caller must hold a.mu.
+// usedSubnetsLocked walks
+// <runPath>/<consts.KukeonMetadataSubdir>/<realm>/<space>/network.json and
+// returns the set of subnets currently in use. Realm and space names are
+// derived from the directory layout, so the allocator does not need to know
+// about realm metadata. Caller must hold a.mu.
 func (a *SubnetAllocator) usedSubnetsLocked() (map[string]struct{}, error) {
 	used := make(map[string]struct{})
-	realmEntries, err := os.ReadDir(a.runPath)
+	realmEntries, err := os.ReadDir(a.dataRoot)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return used, nil
 		}
-		return nil, fmt.Errorf("read run-path %s: %w", a.runPath, err)
+		return nil, fmt.Errorf("read metadata root %s: %w", a.dataRoot, err)
 	}
 	for _, realm := range realmEntries {
 		if !realm.IsDir() {
 			continue
 		}
-		realmDir := filepath.Join(a.runPath, realm.Name())
+		realmDir := filepath.Join(a.dataRoot, realm.Name())
 		spaceEntries, sErr := os.ReadDir(realmDir)
 		if sErr != nil {
 			if errors.Is(sErr, os.ErrNotExist) {

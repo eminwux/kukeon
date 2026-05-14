@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	cni "github.com/eminwux/kukeon/internal/cni"
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 )
 
@@ -87,7 +88,7 @@ func TestSubnetAllocator_AllocatePersistsToDisk(t *testing.T) {
 		t.Fatalf("Allocate: %v", err)
 	}
 
-	statePath := filepath.Join(runPath, "kuke-system", "kukeon", cni.SubnetStateFileName)
+	statePath := filepath.Join(runPath, consts.KukeonMetadataSubdir, "kuke-system", "kukeon", cni.SubnetStateFileName)
 	data, err := os.ReadFile(statePath)
 	if err != nil {
 		t.Fatalf("read state file: %v", err)
@@ -122,7 +123,7 @@ func TestSubnetAllocator_LoadAssignedReturnsEmptyWhenMissing(t *testing.T) {
 
 func TestSubnetAllocator_LoadAssignedReturnsCorruptError(t *testing.T) {
 	runPath := t.TempDir()
-	statePath := filepath.Join(runPath, "default", "broken", cni.SubnetStateFileName)
+	statePath := filepath.Join(runPath, consts.KukeonMetadataSubdir, "default", "broken", cni.SubnetStateFileName)
 	if err := os.MkdirAll(filepath.Dir(statePath), 0o750); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -153,7 +154,7 @@ func TestSubnetAllocator_ReleaseFreesSubnetForReuse(t *testing.T) {
 	if relErr := a.Release("default", "alpha"); relErr != nil {
 		t.Fatalf("Release alpha: %v", relErr)
 	}
-	statePath := filepath.Join(runPath, "default", "alpha", cni.SubnetStateFileName)
+	statePath := filepath.Join(runPath, consts.KukeonMetadataSubdir, "default", "alpha", cni.SubnetStateFileName)
 	if _, statErr := os.Stat(statePath); !os.IsNotExist(statErr) {
 		t.Errorf("Release left state file behind: stat err = %v", statErr)
 	}
@@ -195,7 +196,7 @@ func TestSubnetAllocator_AllocateSkipsCorruptStateFiles(t *testing.T) {
 	runPath := t.TempDir()
 
 	// Plant a garbage network.json under one realm/space pair.
-	corruptPath := filepath.Join(runPath, "default", "broken", cni.SubnetStateFileName)
+	corruptPath := filepath.Join(runPath, consts.KukeonMetadataSubdir, "default", "broken", cni.SubnetStateFileName)
 	if err := os.MkdirAll(filepath.Dir(corruptPath), 0o750); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -231,7 +232,7 @@ func TestSubnetAllocator_AllocateScansAllRealms(t *testing.T) {
 	runPath := t.TempDir()
 	// Pre-seed a network.json under a different realm to prove the scanner
 	// is global, not per-realm.
-	preSeeded := filepath.Join(runPath, "kuke-system", "kukeon", cni.SubnetStateFileName)
+	preSeeded := filepath.Join(runPath, consts.KukeonMetadataSubdir, "kuke-system", "kukeon", cni.SubnetStateFileName)
 	if err := os.MkdirAll(filepath.Dir(preSeeded), 0o750); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
