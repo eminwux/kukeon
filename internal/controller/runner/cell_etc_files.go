@@ -142,6 +142,21 @@ func stampEtcFilePathsOnContainerSpec(spec *intmodel.ContainerSpec, hostnamePath
 	}
 }
 
+// stampContainerRecreateRuntimeFields applies the runtime-only field stamps
+// that the single-container StartContainer recreate path needs before
+// invoking BuildContainerSpec via CreateContainerFromSpec. Mirrors the
+// cell-wide stampCellEtcFilePathsOnContainers + stampCellProfileNameOnContainers
+// pair the StartCell / ensureCellContainers paths run, but per-spec since
+// the recreate path holds a local container-spec pointer. Without this,
+// `kuke start container` drops the recreated container's /etc/hosts +
+// /etc/hostname bind-mounts and KUKEON_CELL_PROFILE_NAME env entry. Issue
+// #354.
+func (r *Exec) stampContainerRecreateRuntimeFields(spec *intmodel.ContainerSpec, cell *intmodel.Cell) {
+	hostnamePath, hostsPath, suppressHosts := r.cellEtcFilePaths(cell)
+	stampEtcFilePathsOnContainerSpec(spec, hostnamePath, hostsPath, suppressHosts)
+	stampCellProfileNameOnContainerSpec(spec, cell)
+}
+
 // renderCellEtcFilesPreCNI writes the per-cell /etc/hostname and an initial
 // /etc/hosts (localhost block only, no cell IP) so the bind-mount sources
 // exist before runc creates any container in the cell. Idempotent — every
