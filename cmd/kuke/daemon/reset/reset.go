@@ -18,10 +18,10 @@
 // teardown for the kukeond cell. It composes stop (with the same SIGTERM →
 // SIGKILL escalation as `kuke daemon stop`) plus delete, then clears the
 // transient kukeond.{sock,pid} files under the socket dir (default
-// /run/kukeon). User-realm data under /opt/kukeon/default/** is left
+// /run/kukeon). User-realm data under /opt/kukeon/data/default/** is left
 // untouched so a subsequent `kuke init` can re-bootstrap without wiping
 // user workloads. `--purge-system` additionally removes
-// /opt/kukeon/kuke-system for a fully clean re-bootstrap.
+// /opt/kukeon/data/kuke-system for a fully clean re-bootstrap.
 package reset
 
 import (
@@ -183,7 +183,7 @@ func runReset(cmd *cobra.Command, _ []string) error {
 	}
 
 	if purgeSystem {
-		systemDir := filepath.Join(runPath, consts.KukeSystemRealmName)
+		systemDir := filepath.Join(runPath, consts.KukeonMetadataSubdir, consts.KukeSystemRealmName)
 		removed, removeErr := removeDirIfExists(systemDir)
 		if removeErr != nil {
 			return fmt.Errorf("remove %q: %w", systemDir, removeErr)

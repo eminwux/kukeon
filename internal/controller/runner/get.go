@@ -508,7 +508,12 @@ func (r *Exec) ListContainers(realmName, spaceName, stackName, cellName string) 
 }
 
 func (r *Exec) ListRealms() ([]intmodel.Realm, error) {
-	realmsDir := r.opts.RunPath
+	// Scope the walk to <RunPath>/data so non-metadata siblings of the
+	// RunPath (e.g. /opt/kukeon/bin staging kuketty, or the
+	// .kukeon-instance.json file) are not mistaken for realm directories
+	// and do not trigger a "metadata file does not exist" ERROR every
+	// reconcile tick.
+	realmsDir := fs.MetadataRoot(r.opts.RunPath)
 	var results []intmodel.Realm
 
 	// Check if directory exists

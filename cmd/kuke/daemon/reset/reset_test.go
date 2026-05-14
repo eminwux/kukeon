@@ -389,8 +389,8 @@ func TestDaemonReset_PreservesDefaultRealm(t *testing.T) {
 	withFreshViper(t)
 
 	runPath := t.TempDir()
-	defaultDir := filepath.Join(runPath, consts.KukeonDefaultRealmName)
-	systemDir := filepath.Join(runPath, consts.KukeSystemRealmName)
+	defaultDir := filepath.Join(runPath, consts.KukeonMetadataSubdir, consts.KukeonDefaultRealmName)
+	systemDir := filepath.Join(runPath, consts.KukeonMetadataSubdir, consts.KukeSystemRealmName)
 	if err := os.MkdirAll(defaultDir, 0o750); err != nil {
 		t.Fatalf("mkdir default: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestDaemonReset_PurgeSystemAfterTeardown(t *testing.T) {
 	withFreshViper(t)
 
 	runPath := t.TempDir()
-	systemDir := filepath.Join(runPath, consts.KukeSystemRealmName)
+	systemDir := filepath.Join(runPath, consts.KukeonMetadataSubdir, consts.KukeSystemRealmName)
 	if err := os.MkdirAll(systemDir, 0o750); err != nil {
 		t.Fatalf("mkdir kuke-system: %v", err)
 	}
@@ -521,7 +521,7 @@ func TestDaemonReset_PurgeSystemAfterTeardownNoSystemDir(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("unexpected error on fully-clean host with --purge-system: %v", err)
 	}
-	systemDir := filepath.Join(runPath, consts.KukeSystemRealmName)
+	systemDir := filepath.Join(runPath, consts.KukeonMetadataSubdir, consts.KukeSystemRealmName)
 	if strings.Contains(buf.String(), "removed "+systemDir) {
 		t.Errorf("did not expect 'removed' line for absent kuke-system dir; got:\n%s", buf.String())
 	}
@@ -534,7 +534,7 @@ func TestDaemonReset_NoPurgeSystemKeepsKukeSystem(t *testing.T) {
 	withFreshViper(t)
 
 	runPath := t.TempDir()
-	systemDir := filepath.Join(runPath, consts.KukeSystemRealmName)
+	systemDir := filepath.Join(runPath, consts.KukeonMetadataSubdir, consts.KukeSystemRealmName)
 	if err := os.MkdirAll(systemDir, 0o750); err != nil {
 		t.Fatalf("mkdir kuke-system: %v", err)
 	}

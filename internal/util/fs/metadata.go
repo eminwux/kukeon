@@ -28,9 +28,19 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
+// MetadataRoot returns the root of kukeon's on-disk metadata tree under the
+// daemon's RunPath. All realm/space/stack/cell metadata lives beneath this
+// directory; siblings of the RunPath (e.g. <RunPath>/bin staging the kuketty
+// binary, or the .kukeon-instance.json file) stay outside it so the reconcile
+// loop and the subnet allocator can walk the metadata tree without treating
+// non-metadata subdirectories as realms.
+func MetadataRoot(baseRunPath string) string {
+	return filepath.Join(baseRunPath, consts.KukeonMetadataSubdir)
+}
+
 // RealmMetadataDir returns the metadata directory for the given realm.
 func RealmMetadataDir(baseRunPath, realmName string) string {
-	return filepath.Join(baseRunPath, realmName)
+	return filepath.Join(MetadataRoot(baseRunPath), realmName)
 }
 
 // RealmMetadataPath returns the metadata file path for the given realm.
