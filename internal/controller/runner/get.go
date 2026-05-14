@@ -198,7 +198,11 @@ func (r *Exec) ListSpaces(realmName string) ([]intmodel.Space, error) {
 // returns a single realm directory if it exists. Returns empty slice if realm/base
 // doesn't exist (graceful handling for listing operations).
 func (r *Exec) resolveRealmDirs(realmName string) ([]string, error) {
-	base := r.opts.RunPath
+	// Scope the all-realms walk to <RunPath>/data so non-metadata
+	// siblings of the RunPath (e.g. /opt/kukeon/bin staging kuketty, or
+	// the .kukeon-instance.json file) are not mistaken for realm
+	// directories. Mirrors the fix applied to ListRealms in #489.
+	base := fs.MetadataRoot(r.opts.RunPath)
 	var realmDirs []string
 
 	if strings.TrimSpace(realmName) != "" {
