@@ -61,7 +61,7 @@ Both `kuke get realms` and `kuke get realms --no-daemon` must produce that outpu
 
 To run individual phases by hand — e.g. while debugging a single phase — invoke them in order:
 
-1. **Tear down the existing runtime.** `sudo ./kuke daemon reset` stops + deletes the prior `kukeond` cell and clears `/run/kukeon/kukeond.{sock,pid}`. User-realm data under `/opt/kukeon/default` is left intact, so `kuke purge --cascade` on `default` can never take down the daemon. Pass `--purge-system` to additionally wipe `/opt/kukeon/kuke-system` for a fully clean re-bootstrap.
+1. **Tear down the existing runtime.** `sudo ./kuke daemon reset` stops + deletes the prior `kukeond` cell and clears `/run/kukeon/kukeond.{sock,pid}`. User-realm data under `/opt/kukeon/data/default` is left intact, so `kuke purge --cascade` on `default` can never take down the daemon. Pass `--purge-system` to additionally wipe `/opt/kukeon/data/kuke-system` for a fully clean re-bootstrap.
 
 2. **Build the binaries.**
 
