@@ -346,6 +346,23 @@ func ReconcileCell(r runner.Runner, desired intmodel.Cell) (ReconcileResult, err
 	// Diff desired vs actual
 	diff := DiffCell(desired, actual)
 	if !diff.HasChanges {
+		// Spec on disk matches the desired document, but the cell may have
+		// lost its runtime — e.g. `kuke kill cell` deletes the containerd
+		// containers and stamps the cell Stopped while leaving the metadata
+		// intact. A spec-only diff returns "unchanged" in that state, which
+		// silently violates the declarative contract that apply enforces
+		// "spec on disk → Ready cell". Re-derive the runtime when the
+		// persisted cell state says the containers are gone (issue #486).
+		if cellRuntimeNeedsRematerialize(actual) {
+			started, startErr := r.StartCell(desired)
+			if startErr != nil {
+				return result, fmt.Errorf("failed to re-materialize cell containers: %w", startErr)
+			}
+			result.Action = actionUpdated
+			result.Resource = started
+			result.Changes = []string{"runtime re-materialized"}
+			return result, nil
+		}
 		result.Resource = actual
 		return result, nil
 	}
@@ -517,6 +534,17 @@ func ReconcileContainer(r runner.Runner, desired intmodel.Container) (ReconcileR
 	}
 
 	return result, nil
+}
+
+// cellRuntimeNeedsRematerialize reports whether a spec-equal cell has lost
+// its runtime — typically after `kuke kill cell` deletes the containerd
+// containers and stamps the cell Stopped, but also covers Failed cells.
+// Apply must treat that as a re-materialize trigger so the declarative
+// invariant ("spec on disk → Ready cell") survives a runtime wipe. Issue
+// #486.
+func cellRuntimeNeedsRematerialize(cell intmodel.Cell) bool {
+	state := cell.Status.State
+	return state == intmodel.CellStateStopped || state == intmodel.CellStateFailed
 }
 
 // ReconcileResult represents the result of reconciling a resource.
