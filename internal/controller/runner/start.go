@@ -130,22 +130,59 @@ func cellTasksAllRunningFn(
 	return true
 }
 
-// markCellFailedAfterStartupFailure transitions the cell to the terminal
-// CellStateFailed state (issue #407) when a non-validation, containerd-touching
-// step in StartCell / StartContainer returns an error. The cleanup itself is:
+// maxFailureMessageLen caps Status.Message so a long, multi-line wrap from
+// `fmt.Errorf("%w: %w", …)` chains doesn't blow up `kuke get cell -o yaml`.
+// 256 bytes is comfortably wider than any error sentinel string in the repo
+// while still rendering as a single readable line.
+const maxFailureMessageLen = 256
+
+// truncateFailureMessage flattens cause's text into the single-line, bounded
+// form Status.Message expects: newlines/tabs collapsed to spaces, trimmed of
+// runs of whitespace, and capped at maxFailureMessageLen with a trailing
+// "..." indicator. Returns "" when cause is nil so callers don't need to
+// pre-guard.
+func truncateFailureMessage(cause error) string {
+	if cause == nil {
+		return ""
+	}
+	msg := cause.Error()
+	// Collapse any control-ish whitespace to a single space so the message
+	// always renders on one YAML/JSON line.
+	msg = strings.ReplaceAll(msg, "\n", " ")
+	msg = strings.ReplaceAll(msg, "\r", " ")
+	msg = strings.ReplaceAll(msg, "\t", " ")
+	msg = strings.Join(strings.Fields(msg), " ")
+	if len(msg) > maxFailureMessageLen {
+		// Truncate on a valid UTF-8 boundary so a multi-byte rune isn't
+		// split. Error strings are dominantly ASCII but registry tags
+		// and image refs can carry non-ASCII content.
+		msg = strings.ToValidUTF8(msg[:maxFailureMessageLen-3], "") + "..."
+	}
+	return msg
+}
+
+// markCellFailed transitions the cell to the terminal CellStateFailed state
+// (issue #407 for the Start*-stage paths; issue #504 for the CreateCell-stage
+// path). The cleanup itself is:
 //
 //   - best-effort KillCell on the cell so any container that did start (e.g.,
 //     the root container) is torn down — the cell holds no running processes
 //     once it enters Failed;
 //   - reload from metadata so we overwrite KillCell's own Stopped-write, then
-//     stamp Failed and persist via UpdateCellMetadata.
+//     stamp State=Failed plus Status.Reason / Status.Message so `kuke get
+//     cell -o yaml` shows the operator the failing stage and the wrapped
+//     cause, and persist via UpdateCellMetadata.
 //
 // The original startup error is returned unmodified by the caller; this helper
 // only writes the new state so the reconciler can later observe it as terminal
 // (cellStateAutoDeleteTriggers excludes Failed, and ReconcileCell treats
 // originalState==Failed as sticky). Errors from the kill/persist sub-steps are
 // logged at WARN — propagating them would mask the original startup cause.
-func (r *Exec) markCellFailedAfterStartupFailure(cell intmodel.Cell, cause error) {
+//
+// reason is a stable PascalCase label (e.g. "CreateCellFailed",
+// "StartCellFailed", "StartContainerFailed") so machine consumers can switch
+// on it without parsing the human-readable Message.
+func (r *Exec) markCellFailed(cell intmodel.Cell, reason string, cause error) {
 	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if _, killErr := r.KillCell(cell); killErr != nil {
 		r.logger.WarnContext(r.ctx,
@@ -163,6 +200,8 @@ func (r *Exec) markCellFailedAfterStartupFailure(cell intmodel.Cell, cause error
 	}
 
 	cell.Status.State = intmodel.CellStateFailed
+	cell.Status.Reason = reason
+	cell.Status.Message = truncateFailureMessage(cause)
 	if updErr := r.UpdateCellMetadata(cell); updErr != nil {
 		r.logger.WarnContext(r.ctx,
 			"failed to persist Failed state after cell startup failure",
@@ -171,7 +210,7 @@ func (r *Exec) markCellFailedAfterStartupFailure(cell intmodel.Cell, cause error
 	}
 	r.logger.InfoContext(r.ctx,
 		"cell transitioned to Failed after startup failure",
-		"cell", cellName, "cause", cause.Error())
+		"cell", cellName, "reason", reason, "cause", cause.Error())
 }
 
 // StartCell starts the root container and all containers defined in the CellDoc.
@@ -194,7 +233,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (_ intmodel.Cell, retErr error) {
 	cellForCleanup := cell
 	defer func() {
 		if retErr != nil && provisionStarted {
-			r.markCellFailedAfterStartupFailure(cellForCleanup, retErr)
+			r.markCellFailed(cellForCleanup, "StartCellFailed", retErr)
 		}
 	}()
 	cellName := strings.TrimSpace(cell.Metadata.Name)
@@ -812,7 +851,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 	cellForCleanup := cell
 	defer func() {
 		if retErr != nil && provisionStarted {
-			r.markCellFailedAfterStartupFailure(cellForCleanup, retErr)
+			r.markCellFailed(cellForCleanup, "StartContainerFailed", retErr)
 		}
 	}()
 	containerID = strings.TrimSpace(containerID)

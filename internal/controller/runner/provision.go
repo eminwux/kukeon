@@ -1078,53 +1078,74 @@ func cellSpaceBridgeName(cell intmodel.Cell) (string, error) {
 }
 
 func (r *Exec) provisionNewCell(cell intmodel.Cell) (intmodel.Cell, error) {
-	// Update cell metadata
-	if err := r.UpdateCellMetadata(cell); err != nil {
-		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
+	// The inner closure owns the actual provisioning work. The outer
+	// function captures provisionStarted via closure and, on any error
+	// past the stub write, flips the on-disk record to Failed with a
+	// Reason and Message so `kuke get cell -o yaml` shows the operator
+	// the failing stage instead of a derived Stopped (issue #504).
+	// A pre-stub UpdateCellMetadata failure leaves no metadata file to
+	// stamp Failed onto, so provisionStarted stays false and the helper
+	// is skipped. Closure pattern (instead of a named retErr + defer
+	// like StartCell / StartContainer) keeps the new code lint-clean
+	// against nonamedreturns.
+	var provisionStarted bool
+	out, err := func() (intmodel.Cell, error) {
+		// Update cell metadata
+		if err := r.UpdateCellMetadata(cell); err != nil {
+			return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
+		}
+
+		// Past the stub write: any subsequent error must flip the
+		// on-disk record to Failed.
+		provisionStarted = true
+
+		// Create cell cgroup
+		cgroupPath, subtreeControllers, err := r.createCellCgroup(cell)
+		if err != nil {
+			return intmodel.Cell{}, err
+		}
+
+		// Update internal model with cgroup path and effective subtree
+		// controllers (issue #328 — surfaces the result of
+		// enableCellControllers so operators can confirm the cell-level
+		// delegation from `kuke get cells -o yaml`).
+		cell.Status.CgroupPath = cgroupPath
+		cell.Status.SubtreeControllers = subtreeControllers
+
+		// Persist the host-side bridge this cell's space lands on.
+		// Computing it here (instead of the read path) keeps the cell
+		// self-describing for debug tooling and survives daemon
+		// restarts because the cell metadata file is rewritten in
+		// UpdateCellMetadata below.
+		if bridge, brErr := cellSpaceBridgeName(cell); brErr == nil {
+			cell.Status.Network.BridgeName = bridge
+		} else {
+			// Bridge name is best-effort metadata; failing to derive
+			// it must not block provisioning (the cell can still come
+			// up — the iface is created by CNI from the conflist
+			// regardless of what we record here).
+			r.logger.WarnContext(r.ctx, "could not derive cell bridge name",
+				"cell", cell.Metadata.Name, "error", brErr)
+		}
+
+		// Create pause container and all containers for the cell
+		if _, err = r.createCellContainers(&cell); err != nil {
+			return intmodel.Cell{}, err
+		}
+
+		markCellReady(&cell)
+
+		// Update cell metadata
+		if err = r.UpdateCellMetadata(cell); err != nil {
+			return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
+		}
+
+		return cell, nil
+	}()
+	if err != nil && provisionStarted {
+		r.markCellFailed(cell, "CreateCellFailed", err)
 	}
-
-	// Create cell cgroup
-	cgroupPath, subtreeControllers, err := r.createCellCgroup(cell)
-	if err != nil {
-		return intmodel.Cell{}, err
-	}
-
-	// Update internal model with cgroup path and effective subtree
-	// controllers (issue #328 — surfaces the result of enableCellControllers
-	// so operators can confirm the cell-level delegation from `kuke get
-	// cells -o yaml`).
-	cell.Status.CgroupPath = cgroupPath
-	cell.Status.SubtreeControllers = subtreeControllers
-
-	// Persist the host-side bridge this cell's space lands on. Computing it
-	// here (instead of the read path) keeps the cell self-describing for
-	// debug tooling and survives daemon restarts because the cell metadata
-	// file is rewritten in UpdateCellMetadata below.
-	if bridge, brErr := cellSpaceBridgeName(cell); brErr == nil {
-		cell.Status.Network.BridgeName = bridge
-	} else {
-		// Bridge name is best-effort metadata; failing to derive it must
-		// not block provisioning (the cell can still come up — the iface
-		// is created by CNI from the conflist regardless of what we
-		// record here).
-		r.logger.WarnContext(r.ctx, "could not derive cell bridge name",
-			"cell", cell.Metadata.Name, "error", brErr)
-	}
-
-	// Create pause container and all containers for the cell
-	_, err = r.createCellContainers(&cell)
-	if err != nil {
-		return intmodel.Cell{}, err
-	}
-
-	markCellReady(&cell)
-
-	// Update cell metadata
-	if err = r.UpdateCellMetadata(cell); err != nil {
-		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
-	}
-
-	return cell, nil
+	return out, err
 }
 
 func (r *Exec) createCellCgroup(cell intmodel.Cell) (string, []string, error) {
