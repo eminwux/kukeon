@@ -104,11 +104,7 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 	// creates the metadata dir at provision time and sbsh binds the socket
 	// inside the container at task start. If this is missing, pkg/attach
 	// would fail in a way that's hard to attribute, so check explicitly.
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("could not get working dir: %v", err)
-	}
-	socketPath := fs.ContainerSocketPath(filepath.Join(cwd, runPath),
+	socketPath := fs.ContainerSocketPath(runPath,
 		realmName, spaceName, stackName, cellName, "work")
 	waitForSocket(t, socketPath, 10*time.Second)
 
@@ -130,7 +126,7 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 	// triggering a clean exit.
 	time.Sleep(attachConnectGrace)
 
-	if err = session.Write(sbshDetachSequence); err != nil {
+	if err := session.Write(sbshDetachSequence); err != nil {
 		t.Fatalf("write sbsh detach sequence: %v", err)
 	}
 
