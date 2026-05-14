@@ -1,0 +1,25 @@
+apiVersion: v1beta1
+kind: Cell
+metadata:
+  name: claude-code
+spec:
+  id: claude-code
+  realmId: default
+  spaceId: default
+  stackId: default
+  tty:
+    default: work
+  containers:
+    - id: root
+      root: true
+      image: docker.io/library/busybox:latest
+      command: sleep
+      args:
+        - "infinity"
+    - id: work
+      attachable: true
+      image: docker.io/library/claude-code:latest
+      command: /bin/bash
+      workingDir: /home/claude
+      tty:
+        prompt: "claude> "
