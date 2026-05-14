@@ -48,7 +48,7 @@ type RegistryCredentials struct {
 }
 
 type RealmStatus struct {
-	State      RealmState `json:"state"`
+	State      RealmState `json:"state"                              yaml:"state"`
 	CgroupPath string     `json:"cgroupPath,omitempty"         yaml:"cgroupPath,omitempty"`
 	// SubtreeControllers is the cgroup-v2 controller set actually
 	// delegated on this realm's own cgroup.subtree_control after the
