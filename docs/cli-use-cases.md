@@ -133,7 +133,7 @@ kuke get realms                                  # alias: r, realm
 kuke get spaces
 kuke get stacks
 kuke get cells
-kuke get containers --cell <name>                # filter on any level
+kuke get containers --cell <name>                # filter within current scope
 kuke get realm <name> -o yaml                    # full spec+status
 kuke get realm <name> -o json
 kuke get realms --show-controllers               # cgroup-v2 controllers column
@@ -146,6 +146,7 @@ kuke get realms --show-controllers               # cgroup-v2 controllers column
 - After `kuke init`, `kuke get realms` lists at least `default` and `kuke-system`. `kuke get realms --no-daemon` must produce the same row set — divergence is a regression (see CLAUDE.md daemon-parity guard).
 - `--show-controllers` appends a `CONTROLLERS` column; it is **off by default** so the default table matches the dev-init regression-guard tail in CLAUDE.md.
 - `kuke get realms --no-daemon` works without `sudo` when `/opt/kukeon` is readable by the `kukeon` group; this is the supported escape hatch when the daemon is down.
+- `kuke get containers --cell <name>` (and `--space <name>` / `--stack <name>`) filter **within the scope passed on the command line**. The operator must supply matching `--realm/--space/--stack` to filter into a non-default scope. When a filter returns zero rows but the named cell/space/stack exists in a different scope, the table output appends a `Hint:` line naming the realm/space/stack where it does exist, so the operator can re-run with the right flags. The hint applies to the `table` output only — `-o yaml` and `-o json` still emit an empty list, exit code 0.
 
 ### Creating a custom realm / space / stack
 

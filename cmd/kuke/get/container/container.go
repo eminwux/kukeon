@@ -17,8 +17,10 @@
 package container
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -34,6 +36,8 @@ import (
 
 // MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
+
+const noContainersFoundMsg = "No containers found."
 
 type (
 	printObjectFunc  func(interface{}) error
@@ -177,6 +181,14 @@ func runContainerCmdWithDeps(
 		return err
 	}
 
+	emptyMsg := noContainersFoundMsg
+	if len(specs) == 0 && outputFormat == shared.OutputFormatTable {
+		emptyMsg = buildEmptyResultMessage(realm, space, stack, cell)
+		if hint := maybeBuildScopeHint(cmd.Context(), client, space, stack, cell); hint != "" {
+			emptyMsg = emptyMsg + "\n" + hint
+		}
+	}
+
 	containerStates := make(map[string]string, len(specs))
 	for i := range specs {
 		spec := specs[i]
@@ -205,7 +217,115 @@ func runContainerCmdWithDeps(
 		containerStates[spec.ID] = containerStateToString(probeResult.Container.Status.State)
 	}
 
-	return printContainersWithState(cmd, specs, containerStates, outputFormat, printYAML, printJSON, printTable)
+	return printContainersWithState(
+		cmd,
+		specs,
+		containerStates,
+		outputFormat,
+		emptyMsg,
+		printYAML,
+		printJSON,
+		printTable,
+	)
+}
+
+// buildEmptyResultMessage describes the queried filter set when zero rows
+// match, so the operator sees what filter actually fired instead of a bare
+// "No containers found." Empty filters are omitted.
+func buildEmptyResultMessage(realm, space, stack, cell string) string {
+	var parts []string
+	if cell != "" {
+		parts = append(parts, fmt.Sprintf("cell %q", cell))
+	}
+	if stack != "" {
+		parts = append(parts, fmt.Sprintf("stack %q", stack))
+	}
+	if space != "" {
+		parts = append(parts, fmt.Sprintf("space %q", space))
+	}
+	if realm != "" {
+		parts = append(parts, fmt.Sprintf("realm %q", realm))
+	}
+	if len(parts) == 0 {
+		return noContainersFoundMsg
+	}
+	return fmt.Sprintf("No containers found for %s.", strings.Join(parts, " "))
+}
+
+// maybeBuildScopeHint looks for the user-supplied --cell / --space / --stack
+// name in scopes other than the queried one. Issue #472: when scope-bound
+// filtering returns zero rows but the named entity exists elsewhere, the
+// operator otherwise has no clue where to find it. Returns the empty string
+// when there is nothing useful to surface (e.g. only --realm was set, or the
+// named entity does not exist anywhere). Fails open: any cross-scope lookup
+// error is treated as "no hint" rather than escalated.
+func maybeBuildScopeHint(
+	ctx context.Context,
+	client kukeonv1.Client,
+	space, stack, cell string,
+) string {
+	if cell == "" && stack == "" && space == "" {
+		return ""
+	}
+
+	allSpecs, err := client.ListContainers(ctx, "", "", "", "")
+	if err != nil {
+		return ""
+	}
+
+	type scope struct{ realm, space, stack string }
+	seen := map[scope]bool{}
+	for i := range allSpecs {
+		s := &allSpecs[i]
+		if cell != "" && s.CellID != cell {
+			continue
+		}
+		if stack != "" && s.StackID != stack {
+			continue
+		}
+		if space != "" && s.SpaceID != space {
+			continue
+		}
+		seen[scope{s.RealmID, s.SpaceID, s.StackID}] = true
+	}
+
+	if len(seen) == 0 {
+		return ""
+	}
+
+	sorted := make([]scope, 0, len(seen))
+	for sc := range seen {
+		sorted = append(sorted, sc)
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].realm != sorted[j].realm {
+			return sorted[i].realm < sorted[j].realm
+		}
+		if sorted[i].space != sorted[j].space {
+			return sorted[i].space < sorted[j].space
+		}
+		return sorted[i].stack < sorted[j].stack
+	})
+
+	var entityDesc string
+	switch {
+	case cell != "":
+		entityDesc = fmt.Sprintf("cell %q", cell)
+	case stack != "":
+		entityDesc = fmt.Sprintf("stack %q", stack)
+	case space != "":
+		entityDesc = fmt.Sprintf("space %q", space)
+	}
+
+	locs := make([]string, 0, len(sorted))
+	for _, sc := range sorted {
+		locs = append(locs, fmt.Sprintf("realm %q space %q stack %q", sc.realm, sc.space, sc.stack))
+	}
+
+	return fmt.Sprintf(
+		"Hint: %s exists in %s — pass --realm/--space/--stack to filter there.",
+		entityDesc, strings.Join(locs, "; "),
+	)
 }
 
 func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
@@ -234,6 +354,7 @@ func printContainersWithState(
 	containers []v1beta1.ContainerSpec,
 	containerStates map[string]string,
 	format shared.OutputFormat,
+	emptyMsg string,
 	printYAML printObjectFunc,
 	printJSON printObjectFunc,
 	printTable tablePrinterFunc,
@@ -245,7 +366,10 @@ func printContainersWithState(
 		return printJSON(containers)
 	case shared.OutputFormatTable:
 		if len(containers) == 0 {
-			cmd.Println("No containers found.")
+			if emptyMsg == "" {
+				emptyMsg = noContainersFoundMsg
+			}
+			cmd.Println(emptyMsg)
 			return nil
 		}
 		headers := []string{"NAME", "REALM", "SPACE", "STACK", "CELL", "ROOT", "IMAGE", "STATE"}
