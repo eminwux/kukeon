@@ -12,13 +12,13 @@
         <meta name="author" content="Emiliano Spinella (eminwux)">
       
       
-        <link rel="canonical" href="https://kukeon.io/concepts/networking/">
+        <link rel="canonical" href="https://kukeon.io/guides/run-claude-code/">
       
       
-        <link rel="prev" href="../containerd-namespaces/">
+        <link rel="prev" href="../apply-manifests/">
       
       
-        <link rel="next" href="../cgroups/">
+        <link rel="next" href="../local-dev/">
       
       
         
@@ -29,7 +29,7 @@
     
     
       
-        <title>Networking (CNI) - kukeon</title>
+        <title>Run Claude Code in a kukeon cell - kukeon</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#networking-cni" class="md-skip">
+        <a href="#run-claude-code-in-a-kukeon-cell" class="md-skip">
           Skip to content
         </a>
       
@@ -118,7 +118,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Networking (CNI)
+              Run Claude Code in a kukeon cell
             
           </span>
         </div>
@@ -306,13 +306,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../overview/" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../../concepts/overview/" class="md-tabs__link">
           
   
   
@@ -348,11 +346,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../guides/init-and-reset/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../init-and-reset/" class="md-tabs__link">
           
   
   
@@ -718,31 +718,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
             
   
   
@@ -760,7 +757,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -778,7 +775,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../overview/" class="md-nav__link">
+      <a href="../../concepts/overview/" class="md-nav__link">
         
   
   
@@ -806,7 +803,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../realm/" class="md-nav__link">
+      <a href="../../concepts/realm/" class="md-nav__link">
         
   
   
@@ -834,7 +831,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../space/" class="md-nav__link">
+      <a href="../../concepts/space/" class="md-nav__link">
         
   
   
@@ -862,7 +859,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../stack/" class="md-nav__link">
+      <a href="../../concepts/stack/" class="md-nav__link">
         
   
   
@@ -890,7 +887,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cell/" class="md-nav__link">
+      <a href="../../concepts/cell/" class="md-nav__link">
         
   
   
@@ -918,7 +915,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../container/" class="md-nav__link">
+      <a href="../../concepts/container/" class="md-nav__link">
         
   
   
@@ -946,7 +943,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../containerd-namespaces/" class="md-nav__link">
+      <a href="../../concepts/containerd-namespaces/" class="md-nav__link">
         
   
   
@@ -971,37 +968,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Networking (CNI)
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../concepts/networking/" class="md-nav__link">
         
   
   
@@ -1017,98 +987,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#the-shape-of-a-space-network" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The shape of a space network
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#bridge-names-and-the-15-character-limit" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Bridge names and the 15-character limit
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Bridge names and the 15-character limit">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#recovering-from-a-stale-conflist" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Recovering from a stale conflist
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cell-level-networking" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cell-level networking
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#inspecting-network-state" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Inspecting network state
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#related-concepts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Related concepts
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1121,7 +999,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cgroups/" class="md-nav__link">
+      <a href="../../concepts/cgroups/" class="md-nav__link">
         
   
   
@@ -1149,7 +1027,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../system-realm/" class="md-nav__link">
+      <a href="../../concepts/system-realm/" class="md-nav__link">
         
   
   
@@ -1177,7 +1055,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client-and-daemon/" class="md-nav__link">
+      <a href="../../concepts/client-and-daemon/" class="md-nav__link">
         
   
   
@@ -1382,28 +1260,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
-        
-          
-          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
             
   
   
@@ -1421,7 +1302,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1439,7 +1320,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/init-and-reset/" class="md-nav__link">
+      <a href="../init-and-reset/" class="md-nav__link">
         
   
   
@@ -1467,7 +1348,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/apply-manifests/" class="md-nav__link">
+      <a href="../apply-manifests/" class="md-nav__link">
         
   
   
@@ -1492,10 +1373,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../guides/run-claude-code/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run Claude Code in a kukeon cell
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1511,6 +1419,137 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-1-build-the-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1 — Build the image
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Step 1 — Build the image">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#whats-in-the-upstream-image-that-the-smoke-path-doesnt-need" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What's in the upstream image that the smoke path doesn't need
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2-load-the-image-into-the-default-realm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2 — Load the image into the default realm
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3-apply-and-attach-the-cell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3 — Apply and attach the Cell
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Step 3 — Apply and attach the Cell">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tear-down" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tear-down
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#optional-persist-claude-across-restarts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optional: persist ~/.claude across restarts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4-one-shot-prompts-via-a-cellprofile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4 — One-shot prompts via a CellProfile
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-to-go-next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where to go next
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1523,7 +1562,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/local-dev/" class="md-nav__link">
+      <a href="../local-dev/" class="md-nav__link">
         
   
   
@@ -1551,7 +1590,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/autocomplete/" class="md-nav__link">
+      <a href="../autocomplete/" class="md-nav__link">
         
   
   
@@ -1579,7 +1618,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/troubleshooting/" class="md-nav__link">
+      <a href="../troubleshooting/" class="md-nav__link">
         
   
   
@@ -2628,10 +2667,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#the-shape-of-a-space-network" class="md-nav__link">
+  <a href="#prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The shape of a space network
+        Prerequisites
       
     </span>
   </a>
@@ -2639,22 +2678,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bridge-names-and-the-15-character-limit" class="md-nav__link">
+  <a href="#step-1-build-the-image" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Bridge names and the 15-character limit
+        Step 1 — Build the image
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Bridge names and the 15-character limit">
+    <nav class="md-nav" aria-label="Step 1 — Build the image">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#recovering-from-a-stale-conflist" class="md-nav__link">
+  <a href="#whats-in-the-upstream-image-that-the-smoke-path-doesnt-need" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Recovering from a stale conflist
+        What's in the upstream image that the smoke path doesn't need
       
     </span>
   </a>
@@ -2667,10 +2706,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#cell-level-networking" class="md-nav__link">
+  <a href="#step-2-load-the-image-into-the-default-realm" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Cell-level networking
+        Step 2 — Load the image into the default realm
       
     </span>
   </a>
@@ -2678,10 +2717,49 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#inspecting-network-state" class="md-nav__link">
+  <a href="#step-3-apply-and-attach-the-cell" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Inspecting network state
+        Step 3 — Apply and attach the Cell
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Step 3 — Apply and attach the Cell">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tear-down" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tear-down
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#optional-persist-claude-across-restarts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optional: persist ~/.claude across restarts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4-one-shot-prompts-via-a-cellprofile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4 — One-shot prompts via a CellProfile
       
     </span>
   </a>
@@ -2689,10 +2767,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#related-concepts" class="md-nav__link">
+  <a href="#where-to-go-next" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Related concepts
+        Where to go next
       
     </span>
   </a>
@@ -2719,58 +2797,89 @@
   
 
 
-<h1 id="networking-cni">Networking (CNI)<a class="headerlink" href="#networking-cni" title="Permanent link">&para;</a></h1>
-<p>Kukeon uses the reference <a href="https://github.com/containernetworking/cni">CNI</a> plugins to give each space a network. There is nothing magic happening; Kukeon writes a conflist to disk and then invokes the CNI plugins the normal way when a cell's network namespace is set up.</p>
-<h2 id="the-shape-of-a-space-network">The shape of a space network<a class="headerlink" href="#the-shape-of-a-space-network" title="Permanent link">&para;</a></h2>
-<p>One space → one CNI network → one Linux bridge → one IP range.</p>
-<p>Concretely, when you create a space:</p>
+<h1 id="run-claude-code-in-a-kukeon-cell">Run Claude Code in a kukeon cell<a class="headerlink" href="#run-claude-code-in-a-kukeon-cell" title="Permanent link">&para;</a></h1>
+<p>This guide walks a freshly-<code>kuke init</code>-ed host from zero to a live Claude Code prompt running inside a kukeon cell — first as a long-lived Attachable <code>Cell</code>, then as a parametrized <code>CellProfile</code> you can drive with <code>kuke run -p</code> for one-shot prompts.</p>
+<p><a href="https://docs.claude.com/en/docs/claude-code/overview">Claude Code</a> is named in the <a href="../../vision/">Vision</a> as the canonical agent workload kukeon's isolation primitives are measured against. The companion artifacts under <a href="https://github.com/eminwux/kukeon/tree/main/docs/examples/claude-code"><code>docs/examples/claude-code/</code></a> are the smallest end-to-end shape: an image, a Cell, and a CellProfile.</p>
+<p>The example does <strong>not</strong> bake API keys into the image and does not configure auth — bring your own per the upstream <a href="https://docs.claude.com/en/docs/claude-code/setup">setup docs</a>. For the full agent-runner shape (SSH bind, signed commits, agents/project-repo clones), see <a href="https://github.com/eminwux/crew"><code>eminwux/crew</code></a> — this guide is derived from <code>crew/images/claude/Dockerfile</code> and <code>crew/agents/pm/profiles/pm.yaml</code> with that plumbing stripped out.</p>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Kukeon writes a CNI conflist at <code>/etc/cni/net.d/&lt;realm&gt;-&lt;space&gt;.conflist</code> (path configurable via <code>spec.cniConfigPath</code>).</li>
-<li>The conflist references the <code>bridge</code> plugin with a bridge name derived from the space (see below).</li>
-<li>The <code>host-local</code> plugin is used for IPAM.</li>
-<li>On first cell creation, the kernel bridge appears on the host as a regular <code>ip link show</code> interface.</li>
+<li>A host that has been bootstrapped with <a href="../init-and-reset/"><code>kuke init</code></a>. <code>kuke get realms</code> shows both <code>default</code> and <code>kuke-system</code> Ready.</li>
+<li>A local Docker (or <code>nerdctl build</code>) install for building the image.</li>
+<li>A copy of the three files under <code>docs/examples/claude-code/</code>:</li>
+<li><a href="https://github.com/eminwux/kukeon/blob/main/docs/examples/claude-code/Dockerfile"><code>Dockerfile</code></a></li>
+<li><a href="https://github.com/eminwux/kukeon/blob/main/docs/examples/claude-code/cell.yaml"><code>cell.yaml</code></a></li>
+<li><a href="https://github.com/eminwux/kukeon/blob/main/docs/examples/claude-code/profile.yaml"><code>profile.yaml</code></a></li>
 </ul>
-<p>For the out-of-the-box <code>main/default</code> space, the bridge sits on <code>10.88.0.0/16</code>.</p>
-<h2 id="bridge-names-and-the-15-character-limit">Bridge names and the 15-character limit<a class="headerlink" href="#bridge-names-and-the-15-character-limit" title="Permanent link">&para;</a></h2>
-<p>Linux interface names have a hard 15-character limit (<code>IFNAMSIZ - 1 = 15</code>). Kukeon's default bridge naming scheme — <code>kuke-&lt;realm&gt;-&lt;space&gt;</code> — can blow past that on long names:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke-main-default        # 16 chars, too long
+<h2 id="step-1-build-the-image">Step 1 — Build the image<a class="headerlink" href="#step-1-build-the-image" title="Permanent link">&para;</a></h2>
+<p>The example <code>Dockerfile</code> is the upstream <code>crew</code> image verbatim. It installs <code>nodejs</code> + <code>npm</code> + the <code>@anthropic-ai/claude-code</code> package as a non-root <code>claude</code> user on <code>debian:trixie-slim</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">cd</span><span class="w"> </span>docs/examples/claude-code
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>claude-code:latest<span class="w"> </span>.
 </code></pre></div>
-<p>Kukeon <strong>truncates safely</strong> before creating the bridge, using a stable hashing scheme so the same <code>(realm, space)</code> pair always produces the same bridge name. The CNI conflist records the actual bridge name that was used, and the daemon reads it back rather than recomputing.</p>
-<h3 id="recovering-from-a-stale-conflist">Recovering from a stale conflist<a class="headerlink" href="#recovering-from-a-stale-conflist" title="Permanent link">&para;</a></h3>
-<p>Older Kukeon versions computed bridge names without the safe-truncation rule. If you upgrade with a stale conflist on disk, the next <code>kuke init</code> or cell creation can fail with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>failed to attach ... to network: plugin type=&quot;bridge&quot; failed (add):
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>failed to create bridge &quot;kuke-...-...&quot;: could not add &quot;...&quot;:
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>numerical result out of range
-</code></pre></div>
-<p><code>numerical result out of range</code> is the kernel's <code>ERANGE</code> for "this interface name is too long." Fix:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>init<span class="w"> </span>--force-regenerate-cni
-</code></pre></div>
-<p>That flag rewrites every space's conflist with the current naming scheme.</p>
-<p>See <a href="../../guides/troubleshooting/#kuke-init-fails-with-numerical-result-out-of-range">Troubleshooting</a>.</p>
-<h2 id="cell-level-networking">Cell-level networking<a class="headerlink" href="#cell-level-networking" title="Permanent link">&para;</a></h2>
-<p>Inside a cell, only the root container has a network namespace — every other container joins it. So:</p>
+<p><code>nerdctl build -t claude-code:latest .</code> works the same way if you don't run Docker.</p>
+<h3 id="whats-in-the-upstream-image-that-the-smoke-path-doesnt-need">What's in the upstream image that the smoke path doesn't need<a class="headerlink" href="#whats-in-the-upstream-image-that-the-smoke-path-doesnt-need" title="Permanent link">&para;</a></h3>
+<p>The crew Dockerfile carries a handful of fleet-runner extras the Claude Code smoke does not exercise; they are kept verbatim so this Dockerfile remains drop-in usable on a crew-style host:</p>
 <ul>
-<li>Each cell has exactly one IP on the space's bridge.</li>
-<li><code>localhost</code> inside any container in the cell reaches every port bound by any container in the cell.</li>
-<li>Two cells in the same space can reach each other at the IP layer.</li>
-<li>Two cells in different spaces cannot reach each other unless a container explicitly joins both networks.</li>
+<li><strong><code>golang</code>, <code>gh</code>, <code>pre-commit</code>, <code>gnupg</code>, <code>ssh</code>, <code>jq</code>, <code>yq</code>, <code>make</code>, <code>gettext-base</code></strong> — the toolchain crew's <code>/dispatch</code> agents need to clone repos, sign commits, and run pre-commit. The smoke in this guide does not invoke any of them; trim them if you want a leaner image.</li>
+<li><strong><code>groupadd -g 988 kukeon</code> / <code>usermod -aG kukeon claude</code></strong> — fleet-specific. On crew's hosts gid 988 matches the host containerd socket group, so the <code>claude</code> user inside the cell can talk to a host-mounted socket. On a freshly-<code>kuke init</code>-ed host you do not bind-mount the containerd socket into the cell, so the supplementary group is inert. Leave it in if you ever expect to bind the socket; drop it for a strictly-Claude-Code image.</li>
 </ul>
-<h2 id="inspecting-network-state">Inspecting network state<a class="headerlink" href="#inspecting-network-state" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># List bridges</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>ip<span class="w"> </span>link<span class="w"> </span>show<span class="w"> </span><span class="nb">type</span><span class="w"> </span>bridge<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>kuke
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># Show the conflist for a space</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>cat<span class="w"> </span>/etc/cni/net.d/main-default.conflist
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># Find the pid of a cell&#39;s root container (from containerd) and peek into its netns</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="nv">ROOT_PID</span><span class="o">=</span><span class="k">$(</span>sudo<span class="w"> </span>ctr<span class="w"> </span>-n<span class="w"> </span>kukeon-main<span class="w"> </span>tasks<span class="w"> </span>ls<span class="w"> </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span><span class="s1">&#39;/&lt;cell&gt;_root/ {print $2}&#39;</span><span class="k">)</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>sudo<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">ROOT_PID</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span>-n<span class="w"> </span>ip<span class="w"> </span>-4<span class="w"> </span>addr
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>sudo<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">ROOT_PID</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span>-n<span class="w"> </span>ip<span class="w"> </span>route
+<p>The smoke path needs only <code>nodejs</code>, <code>npm</code>, the <code>@anthropic-ai/claude-code</code> package, and the non-root <code>claude</code> user.</p>
+<h2 id="step-2-load-the-image-into-the-default-realm">Step 2 — Load the image into the <code>default</code> realm<a class="headerlink" href="#step-2-load-the-image-into-the-default-realm" title="Permanent link">&para;</a></h2>
+<p>Every realm maps to its own containerd namespace (<a href="../../concepts/containerd-namespaces/">Containerd namespaces</a>). User workloads live in <code>default.kukeon.io</code>, so the cell's image has to be loaded into that namespace before <code>kuke apply</code> / <code>kuke run</code> can pull it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>image<span class="w"> </span>load<span class="w"> </span>--from-docker<span class="w"> </span>claude-code:latest
 </code></pre></div>
-<h2 id="related-concepts">Related concepts<a class="headerlink" href="#related-concepts" title="Permanent link">&para;</a></h2>
+<p><code>--realm default</code> is the default, so it can be omitted. Verify:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>image<span class="w"> </span>get<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>claude-code
+</code></pre></div>
+<p>If you don't run Docker, use the <code>nerdctl save … | sudo kuke image load -</code> form documented in <a href="../../cli/kuke-image/"><code>kuke image</code></a>.</p>
+<h2 id="step-3-apply-and-attach-the-cell">Step 3 — Apply and attach the Cell<a class="headerlink" href="#step-3-apply-and-attach-the-cell" title="Permanent link">&para;</a></h2>
+<p><code>cell.yaml</code> is a single Attachable <code>Cell</code> with two containers: a <code>busybox</code> root keeping the cell alive (<code>sleep infinity</code>) and a <code>work</code> container running the Claude Code image, marked <code>attachable: true</code> so <code>kuke attach</code> can connect a TTY to it.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>docs/examples/claude-code/cell.yaml
+</code></pre></div>
+<p><code>kuke apply</code> creates the cell. If you hit a daemon issue, <a href="../apply-manifests/#--no-daemon-caveat">retry under <code>--no-daemon</code></a>.</p>
+<p>Then connect a terminal to the <code>work</code> container:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>attach<span class="w"> </span>claude-code
+</code></pre></div>
+<p>You should land at a <code>claude&gt;</code> prompt inside the cell. From there, run <code>claude</code> to enter the upstream Claude Code REPL (you'll need to complete the upstream auth flow the first time — the example does not pre-bake an API key).</p>
+<p>Press <code>^]^]</code> (two consecutive <code>Ctrl-]</code> keystrokes) to detach cleanly. The cell keeps running; re-attach later with the same command.</p>
+<h3 id="tear-down">Tear-down<a class="headerlink" href="#tear-down" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>cell<span class="w"> </span>claude-code<span class="w"> </span>--cascade<span class="w"> </span>--no-daemon
+</code></pre></div>
+<p><code>--cascade</code> removes the cell's containers in the same call. The <code>--no-daemon</code> flag is the same caveat as in <code>kuke apply</code> — see <a href="../apply-manifests/#--no-daemon-caveat">Applying manifests</a>.</p>
+<h3 id="optional-persist-claude-across-restarts">Optional: persist <code>~/.claude</code> across restarts<a class="headerlink" href="#optional-persist-claude-across-restarts" title="Permanent link">&para;</a></h3>
+<p>The smoke path above keeps Claude Code's per-user state inside the cell's overlay. To survive <code>kuke delete cell</code> + re-apply, bind-mount a host directory under the <code>work</code> container:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">work</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">attachable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker.io/library/claude-code:latest</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/bin/bash</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">  </span><span class="nt">workingDir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/claude</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">  </span><span class="nt">volumes</span><span class="p">:</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/var/lib/claude-code/state</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="w">      </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/claude/.claude</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="w">  </span><span class="nt">tty</span><span class="p">:</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="w">    </span><span class="nt">prompt</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;claude&gt;</span><span class="nv"> </span><span class="s">&quot;</span>
+</code></pre></div>
+<p>This is optional — the smoke flow above does not need it.</p>
+<h2 id="step-4-one-shot-prompts-via-a-cellprofile">Step 4 — One-shot prompts via a <code>CellProfile</code><a class="headerlink" href="#step-4-one-shot-prompts-via-a-cellprofile" title="Permanent link">&para;</a></h2>
+<p>For "fire one prompt, tear the cell down on exit" jobs, install the example profile and drive it with <code>kuke run -p</code>. A <a href="../apply-manifests/#parameterized-cell-profiles">CellProfile</a> is a per-user reusable cell template loaded from <code>$HOME/.kuke/profiles.d/&lt;name&gt;.yaml</code> (or <code>$KUKE_PROFILES_DIR</code>).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>~/.kuke/profiles.d
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>cp<span class="w"> </span>docs/examples/claude-code/profile.yaml<span class="w"> </span>~/.kuke/profiles.d/claude-code.yaml
+</code></pre></div>
+<p>The profile declares two parameters: <code>IMAGE</code> (defaults to <code>docker.io/library/claude-code:latest</code>) and <code>PROMPT</code> (required). Its <code>tty.onInit</code> runs <code>claude --print "${PROMPT}" &amp;&amp; exit</code>, so the attach loop closes after the prompt's reply prints. <code>spec.cell.autoDelete: true</code> then deletes the materialized cell — no <code>--rm</code> flag required.</p>
+<p>Run it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>claude-code<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">    </span>--param<span class="w"> </span><span class="nv">PROMPT</span><span class="o">=</span><span class="s2">&quot;explain the kukeon architecture in one sentence&quot;</span>
+</code></pre></div>
+<p><code>kuke run -p</code> materializes a cell named <code>claude-code-&lt;6hex&gt;</code>, attaches to the <code>work</code> container, runs the onInit script, prints Claude Code's reply, and exits. Override <code>IMAGE</code> to pin a tag:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>claude-code<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">    </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>docker.io/library/claude-code:2026-05-14<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span>--param<span class="w"> </span><span class="nv">PROMPT</span><span class="o">=</span><span class="s2">&quot;…&quot;</span>
+</code></pre></div>
+<p>See <a href="../../cli/kuke-run/"><code>kuke run</code></a> for the full flag surface, including <code>--name</code>, <code>--param-file</code>, and the <code>-d</code>/<code>--detach</code> mode.</p>
+<h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../space/">Space</a> — owns the network</li>
-<li><a href="../cell/">Cell</a> — gets one IP on the bridge</li>
+<li><strong>The full crew agent-runner shape.</strong> <a href="https://github.com/eminwux/crew"><code>eminwux/crew</code></a> — SSH bind, GPG-signed commits, agents-repo clone, project-repo clone, the orchestrator that dispatches per-call cells. Two layers up from this guide.</li>
+<li><strong>Cell teardown verbs.</strong> <a href="https://github.com/eminwux/kukeon/blob/main/docs/cli-use-cases.md"><code>docs/cli-use-cases.md</code></a> — the full operator workflow reference, including <code>stop</code> / <code>kill</code> / <code>delete</code> / <code>purge --cascade</code> for cells.</li>
+<li><strong>Manifest reference.</strong> <a href="../apply-manifests/">Applying manifests</a> — multi-doc manifests, the <code>--no-daemon</code> caveat, profile parameter resolution order.</li>
 </ul>
 
 
@@ -2794,7 +2903,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 21, 2026 12:22:34 UTC">April 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 14, 2026 18:15:05 UTC">May 14, 2026</span>
   </span>
 
     
@@ -2804,7 +2913,7 @@
     <span class="md-icon" title="Created">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14.47 15.08 11 13V7h1.5v5.25l3.08 1.83c-.41.28-.79.62-1.11 1m-1.39 4.84c-.36.05-.71.08-1.08.08-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8c0 .37-.03.72-.08 1.08.69.1 1.33.32 1.92.64.1-.56.16-1.13.16-1.72 0-5.5-4.5-10-10-10S2 6.5 2 12s4.47 10 10 10c.59 0 1.16-.06 1.72-.16-.32-.59-.54-1.23-.64-1.92M18 15v3h-3v2h3v3h2v-3h3v-2h-3v-3z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 21, 2026 12:22:34 UTC">April 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 14, 2026 18:15:05 UTC">May 14, 2026</span>
   </span>
 
     
