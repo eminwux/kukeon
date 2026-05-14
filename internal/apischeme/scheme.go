@@ -517,10 +517,8 @@ func convertContainerTtyToInternal(in *ext.ContainerTty) *intmodel.ContainerTty 
 		return nil
 	}
 	out := &intmodel.ContainerTty{
-		Prompt:      in.Prompt,
-		LogFile:     in.LogFile,
-		Profile:     in.Profile,
-		ProfilesDir: in.ProfilesDir,
+		Prompt:  in.Prompt,
+		LogFile: in.LogFile,
 	}
 	if len(in.OnInit) > 0 {
 		out.OnInit = make([]intmodel.TtyStage, len(in.OnInit))
@@ -538,10 +536,8 @@ func buildContainerTtyExternalFromInternal(in *intmodel.ContainerTty) *ext.Conta
 		return nil
 	}
 	out := &ext.ContainerTty{
-		Prompt:      in.Prompt,
-		LogFile:     in.LogFile,
-		Profile:     in.Profile,
-		ProfilesDir: in.ProfilesDir,
+		Prompt:  in.Prompt,
+		LogFile: in.LogFile,
 	}
 	if len(in.OnInit) > 0 {
 		out.OnInit = make([]ext.TtyStage, len(in.OnInit))

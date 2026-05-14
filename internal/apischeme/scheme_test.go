@@ -1132,9 +1132,7 @@ func TestContainerTtyRoundTripV1Beta1(t *testing.T) {
 					{Script: "git pull"},
 					{Script: "claude"},
 				},
-				LogFile:     "/run/kukeon/tty/log",
-				Profile:     "claude",
-				ProfilesDir: "/opt/kukeon/profiles",
+				LogFile: "/run/kukeon/tty/log",
 			},
 		},
 	}
@@ -1150,12 +1148,6 @@ func TestContainerTtyRoundTripV1Beta1(t *testing.T) {
 	}
 	if internal.Spec.Tty.LogFile != input.Spec.Tty.LogFile {
 		t.Errorf("internal logFile = %q, want %q", internal.Spec.Tty.LogFile, input.Spec.Tty.LogFile)
-	}
-	if internal.Spec.Tty.Profile != input.Spec.Tty.Profile {
-		t.Errorf("internal profile = %q, want %q", internal.Spec.Tty.Profile, input.Spec.Tty.Profile)
-	}
-	if internal.Spec.Tty.ProfilesDir != input.Spec.Tty.ProfilesDir {
-		t.Errorf("internal profilesDir = %q, want %q", internal.Spec.Tty.ProfilesDir, input.Spec.Tty.ProfilesDir)
 	}
 	if len(internal.Spec.Tty.OnInit) != 2 ||
 		internal.Spec.Tty.OnInit[0].Script != "git pull" ||
@@ -1174,12 +1166,6 @@ func TestContainerTtyRoundTripV1Beta1(t *testing.T) {
 	}
 	if out.Spec.Tty.LogFile != input.Spec.Tty.LogFile {
 		t.Errorf("round-trip logFile = %q, want %q", out.Spec.Tty.LogFile, input.Spec.Tty.LogFile)
-	}
-	if out.Spec.Tty.Profile != input.Spec.Tty.Profile {
-		t.Errorf("round-trip profile = %q, want %q", out.Spec.Tty.Profile, input.Spec.Tty.Profile)
-	}
-	if out.Spec.Tty.ProfilesDir != input.Spec.Tty.ProfilesDir {
-		t.Errorf("round-trip profilesDir = %q, want %q", out.Spec.Tty.ProfilesDir, input.Spec.Tty.ProfilesDir)
 	}
 	if len(out.Spec.Tty.OnInit) != len(input.Spec.Tty.OnInit) {
 		t.Fatalf("round-trip onInit len = %d, want %d", len(out.Spec.Tty.OnInit), len(input.Spec.Tty.OnInit))
@@ -1286,14 +1272,10 @@ func TestContainerTtyRejectedWithoutAttachable(t *testing.T) {
 		{"prompt only", &ext.ContainerTty{Prompt: `"\u\$ "`}},
 		{"onInit only", &ext.ContainerTty{OnInit: []ext.TtyStage{{Script: "echo"}}}},
 		{"logFile only", &ext.ContainerTty{LogFile: "/run/kukeon/tty/log"}},
-		{"profile only", &ext.ContainerTty{Profile: "claude"}},
-		{"profilesDir only", &ext.ContainerTty{ProfilesDir: "/opt/kukeon/profiles"}},
 		{"all set", &ext.ContainerTty{
-			Prompt:      `"\u\$ "`,
-			OnInit:      []ext.TtyStage{{Script: "echo"}},
-			LogFile:     "/run/kukeon/tty/log",
-			Profile:     "claude",
-			ProfilesDir: "/opt/kukeon/profiles",
+			Prompt:  `"\u\$ "`,
+			OnInit:  []ext.TtyStage{{Script: "echo"}},
+			LogFile: "/run/kukeon/tty/log",
 		}},
 	}
 	for _, tc := range cases {

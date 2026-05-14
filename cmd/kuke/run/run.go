@@ -679,9 +679,7 @@ func containerTtysEqual(a, b *v1beta1.ContainerTty) bool {
 		return false
 	}
 	if a.Prompt != b.Prompt ||
-		a.LogFile != b.LogFile ||
-		a.Profile != b.Profile ||
-		a.ProfilesDir != b.ProfilesDir {
+		a.LogFile != b.LogFile {
 		return false
 	}
 	if len(a.OnInit) != len(b.OnInit) {
