@@ -21,7 +21,9 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	containerd "github.com/containerd/containerd/v2/client"
 	internalerrdefs "github.com/eminwux/kukeon/internal/errdefs"
@@ -298,5 +300,222 @@ func TestCellTasksAllRunningFn(t *testing.T) {
 				t.Errorf("cellTasksAllRunningFn() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestTruncateFailureMessage pins the single-line + length-bounded contract
+// markCellFailed relies on for Status.Message: long, multi-line wrapped
+// `fmt.Errorf("%w: %w", …)` chains must end up as a single, capped string
+// so `kuke get cell -o yaml` stays human-readable (issue #504).
+func TestTruncateFailureMessage(t *testing.T) {
+	t.Run("nil_cause_returns_empty", func(t *testing.T) {
+		if got := truncateFailureMessage(nil); got != "" {
+			t.Errorf("truncateFailureMessage(nil) = %q, want \"\"", got)
+		}
+	})
+
+	t.Run("newlines_collapsed_to_space", func(t *testing.T) {
+		err := errors.New("first line\nsecond line\twith tab")
+		got := truncateFailureMessage(err)
+		if strings.ContainsAny(got, "\n\r\t") {
+			t.Errorf("truncateFailureMessage left control whitespace in %q", got)
+		}
+		if got != "first line second line with tab" {
+			t.Errorf("truncateFailureMessage() = %q, want collapsed", got)
+		}
+	})
+
+	t.Run("long_cause_is_truncated_with_indicator", func(t *testing.T) {
+		long := strings.Repeat("a", maxFailureMessageLen+50)
+		got := truncateFailureMessage(errors.New(long))
+		if len(got) > maxFailureMessageLen {
+			t.Errorf("truncateFailureMessage returned %d bytes, want ≤ %d", len(got), maxFailureMessageLen)
+		}
+		if !strings.HasSuffix(got, "...") {
+			t.Errorf("truncated message %q missing trailing ellipsis indicator", got[len(got)-10:])
+		}
+	})
+
+	t.Run("short_cause_kept_verbatim", func(t *testing.T) {
+		err := fmt.Errorf("pull image: %w", errors.New("connection refused"))
+		got := truncateFailureMessage(err)
+		if got != "pull image: connection refused" {
+			t.Errorf("truncateFailureMessage() = %q, want verbatim", got)
+		}
+	})
+}
+
+// TestMarkCellFailed_PersistsReasonAndMessage verifies the helper writes
+// State=Failed, Status.Reason, and Status.Message onto the on-disk cell
+// document. Without this, the operator-facing reason for the failure stays
+// trapped in daemon logs and `kuke get cell -o yaml` shows a derived
+// Stopped (or worse, a Failed cell with empty Reason/Message). Issue #504.
+//
+// The helper internally invokes KillCell, which requires containerd
+// connectivity the unit test does not have — KillCell's error is logged at
+// WARN and swallowed by markCellFailed, so the persist step still runs.
+// The test is deliberately not asserting on KillCell behavior.
+func TestMarkCellFailed_PersistsReasonAndMessage(t *testing.T) {
+	t0 := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name        string
+		reason      string
+		cause       error
+		wantMessage string
+	}{
+		{
+			name:        "create_cell_failed",
+			reason:      "CreateCellFailed",
+			cause:       fmt.Errorf("createCellContainers: %w", errors.New("image pull: connection refused")),
+			wantMessage: "createCellContainers: image pull: connection refused",
+		},
+		{
+			name:        "start_cell_failed",
+			reason:      "StartCellFailed",
+			cause:       fmt.Errorf("failed to attach root container: %w", errors.New("cni: bridge plugin missing")),
+			wantMessage: "failed to attach root container: cni: bridge plugin missing",
+		},
+		{
+			name:        "start_container_failed",
+			reason:      "StartContainerFailed",
+			cause:       errors.New("failed to start container worker: containerd: task already exists"),
+			wantMessage: "failed to start container worker: containerd: task already exists",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runPath := t.TempDir()
+			r := newMetadataTestExec(t, runPath, t0)
+			cell := intmodel.Cell{
+				Metadata: intmodel.CellMetadata{Name: "c-" + tt.name},
+				Spec: intmodel.CellSpec{
+					ID:         "c-" + tt.name,
+					RealmName:  "default",
+					SpaceName:  "default",
+					StackName:  "default",
+					Containers: []intmodel.ContainerSpec{},
+				},
+				Status: intmodel.CellStatus{
+					State: intmodel.CellStatePending,
+				},
+			}
+			if err := r.UpdateCellMetadata(cell); err != nil {
+				t.Fatalf("UpdateCellMetadata (stub write): %v", err)
+			}
+
+			r.markCellFailed(cell, tt.reason, tt.cause)
+
+			got, err := r.GetCell(cell)
+			if err != nil {
+				t.Fatalf("GetCell: %v", err)
+			}
+			if got.Status.State != intmodel.CellStateFailed {
+				t.Errorf("Status.State = %v, want Failed", got.Status.State)
+			}
+			if got.Status.Reason != tt.reason {
+				t.Errorf("Status.Reason = %q, want %q", got.Status.Reason, tt.reason)
+			}
+			if got.Status.Message != tt.wantMessage {
+				t.Errorf("Status.Message = %q, want %q", got.Status.Message, tt.wantMessage)
+			}
+		})
+	}
+}
+
+// TestMarkCellFailed_LongCauseIsTruncated covers a real-world repro: a
+// chain of wrapped errors from CNI / IPAM / containerd can balloon past a
+// few hundred bytes. The Message field must stay capped + single-line on
+// disk so YAML emit doesn't bury the rest of `kuke get cell -o yaml`
+// output. Issue #504.
+func TestMarkCellFailed_LongCauseIsTruncated(t *testing.T) {
+	t0 := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, t0)
+
+	cell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "c-long"},
+		Spec: intmodel.CellSpec{
+			ID:         "c-long",
+			RealmName:  "default",
+			SpaceName:  "default",
+			StackName:  "default",
+			Containers: []intmodel.ContainerSpec{},
+		},
+		Status: intmodel.CellStatus{State: intmodel.CellStatePending},
+	}
+	if err := r.UpdateCellMetadata(cell); err != nil {
+		t.Fatalf("UpdateCellMetadata: %v", err)
+	}
+
+	cause := errors.New(strings.Repeat("x", maxFailureMessageLen*2))
+	r.markCellFailed(cell, "CreateCellFailed", cause)
+
+	got, err := r.GetCell(cell)
+	if err != nil {
+		t.Fatalf("GetCell: %v", err)
+	}
+	if got.Status.State != intmodel.CellStateFailed {
+		t.Errorf("Status.State = %v, want Failed", got.Status.State)
+	}
+	if got.Status.Reason != "CreateCellFailed" {
+		t.Errorf("Status.Reason = %q, want CreateCellFailed", got.Status.Reason)
+	}
+	if len(got.Status.Message) > maxFailureMessageLen {
+		t.Errorf("Status.Message length = %d, want ≤ %d", len(got.Status.Message), maxFailureMessageLen)
+	}
+	if !strings.HasSuffix(got.Status.Message, "...") {
+		t.Errorf(
+			"Status.Message missing truncation indicator: tail=%q",
+			got.Status.Message[len(got.Status.Message)-10:],
+		)
+	}
+}
+
+// TestMarkCellFailed_PreservesFieldsAcrossRefreshCarry guards the
+// reason/message carry on the refresh path. `carryCellLifecycle` already
+// copies Reason+Message from originalStatus to newStatus, but a regression
+// that wires a Failed-state writer in front of a refresh tick that drops
+// the field would leave the operator-facing breadcrumb empty after one
+// reconciler pass. The test simulates the carry by manually invoking
+// the helper and then mimicking the refresh-path `newStatus :=` reset.
+// Issue #504 acceptance criterion #4.
+func TestMarkCellFailed_PreservesFieldsAcrossRefreshCarry(t *testing.T) {
+	t0 := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, t0)
+	cell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "c-carry"},
+		Spec: intmodel.CellSpec{
+			ID:         "c-carry",
+			RealmName:  "default",
+			SpaceName:  "default",
+			StackName:  "default",
+			Containers: []intmodel.ContainerSpec{},
+		},
+		Status: intmodel.CellStatus{State: intmodel.CellStatePending},
+	}
+	if err := r.UpdateCellMetadata(cell); err != nil {
+		t.Fatalf("UpdateCellMetadata: %v", err)
+	}
+
+	r.markCellFailed(cell, "CreateCellFailed", errors.New("createCellContainers: image not found"))
+
+	got, err := r.GetCell(cell)
+	if err != nil {
+		t.Fatalf("GetCell: %v", err)
+	}
+
+	// Simulate a refresh tick: refresh builds newStatus from scratch then
+	// calls carryCellLifecycle to keep set-once fields. If the carry ever
+	// stops copying Reason/Message, this assert catches it.
+	newStatus := intmodel.CellStatus{State: intmodel.CellStateFailed}
+	carryCellLifecycle(got.Status, &newStatus)
+	if newStatus.Reason != "CreateCellFailed" {
+		t.Errorf("carryCellLifecycle dropped Reason: got %q", newStatus.Reason)
+	}
+	if newStatus.Message != "createCellContainers: image not found" {
+		t.Errorf("carryCellLifecycle dropped Message: got %q", newStatus.Message)
 	}
 }
