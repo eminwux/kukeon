@@ -48,7 +48,6 @@ func TestKuke_NoStacks(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	args := append(buildKukeRunPathArgs(runPath), "get", "stack", "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
@@ -69,7 +68,6 @@ func TestKuke_CreateStack_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
@@ -166,7 +164,6 @@ func TestKuke_DeleteStack_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
@@ -297,7 +294,6 @@ func TestKuke_PurgeStack_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)

@@ -67,7 +67,6 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 	// (`--no-daemon`) so the per-container socket lives under the test's
 	// runPath rather than the host daemon's.
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)

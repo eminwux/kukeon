@@ -51,7 +51,6 @@ func TestKuke_NoCells(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	args := append(buildKukeRunPathArgs(runPath), "get", "cell", "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
@@ -72,7 +71,6 @@ func TestKuke_CreateCell_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
@@ -226,7 +224,6 @@ func TestKuke_DeleteCell_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
@@ -419,7 +416,6 @@ func TestKuke_StartCell_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
@@ -574,7 +570,6 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
@@ -741,7 +736,6 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
@@ -908,7 +902,6 @@ func TestKuke_PurgeCell_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)

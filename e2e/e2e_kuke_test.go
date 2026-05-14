@@ -146,7 +146,6 @@ func TestKuke_DaemonStart_Uninitialized(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	args := append(buildKukeRunPathArgs(runPath), "daemon", "start")
 	exitCode, stdout, stderr := runBinary(t, nil, kuke, args...)
@@ -170,7 +169,6 @@ func TestKuke_DaemonStop_Uninitialized(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	args := append(buildKukeRunPathArgs(runPath), "daemon", "stop")
 	exitCode, stdout, stderr := runBinary(t, nil, kuke, args...)
@@ -193,7 +191,6 @@ func TestKuke_DaemonKill_Uninitialized(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	args := append(buildKukeRunPathArgs(runPath), "daemon", "kill")
 	exitCode, stdout, stderr := runBinary(t, nil, kuke, args...)
@@ -218,7 +215,6 @@ func TestKuke_DaemonRestart_Uninitialized(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	args := append(buildKukeRunPathArgs(runPath), "daemon", "restart")
 	exitCode, stdout, stderr := runBinary(t, nil, kuke, args...)
@@ -258,7 +254,6 @@ func TestKuke_DaemonReset_Uninitialized(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	args := append(buildKukeRunPathArgs(runPath), "daemon", "reset")
 	exitCode, stdout, stderr := runBinary(t, nil, kuke, args...)
@@ -303,15 +298,9 @@ func TestKuke_DaemonReset_Flags(t *testing.T) {
 // host-level state init touches.
 func TestKuke_DaemonReset_RoundTrip(t *testing.T) {
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("could not get working dir: %v", err)
-	}
-	fullRunPath := filepath.Join(cwd, runPath)
-	defaultRealmDir := filepath.Join(fullRunPath, consts.KukeonDefaultRealmName)
-	systemRealmDir := filepath.Join(fullRunPath, consts.KukeSystemRealmName)
+	defaultRealmDir := filepath.Join(runPath, consts.KukeonDefaultRealmName)
+	systemRealmDir := filepath.Join(runPath, consts.KukeSystemRealmName)
 
 	t.Cleanup(func() {
 		// Best-effort host-level cleanup: a final reset --purge-system if the
@@ -453,7 +442,6 @@ func TestKuke_Init_VerifyState(t *testing.T) {
 
 	// Setup: Use a fresh, isolated run path
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	// Step 0: Purge resources created by init in reverse dependency order
 	// (cleanup from previous runs that may have left orphaned containerd containers)

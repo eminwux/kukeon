@@ -42,14 +42,8 @@ func generateUniqueRealmName(t *testing.T) string {
 func verifyRealmMetadataExists(t *testing.T, runPath, realmName string) bool {
 	t.Helper()
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("could not get working dir: %v", err)
-	}
-	fullRunPath := filepath.Join(cwd, runPath)
-
-	metadataPath := fs.RealmMetadataPath(fullRunPath, realmName)
-	_, err = os.Stat(metadataPath)
+	metadataPath := fs.RealmMetadataPath(runPath, realmName)
+	_, err := os.Stat(metadataPath)
 	return err == nil
 }
 
@@ -133,7 +127,6 @@ func TestKuke_NoRealms(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 
 	args := append(buildKukeRunPathArgs(runPath), "get", "realm", "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
@@ -180,7 +173,6 @@ func TestKuke_CreateRealm_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 
 	// Cleanup: Delete realm
@@ -257,7 +249,6 @@ func TestKuke_DeleteRealm_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 
 	// Cleanup: Safety net (realm should already be deleted, but ensure cleanup if test fails partway)
@@ -349,7 +340,6 @@ func TestKuke_PurgeRealm_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
-	mkdirRunPath(t, runPath)
 	realmName := generateUniqueRealmName(t)
 
 	// Cleanup: Safety net (realm should already be purged, but ensure cleanup if test fails partway)
