@@ -93,14 +93,14 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 	// Step 2: apply the attachable cell fixture. Auto-starts the workload
 	// (apply is the path that drives Cell to Ready), so by the time it
 	// returns the container task should be RUNNING. The per-container
-	// sbsh socket appears thanks to #77's per-container tty/ directory bind
+	// kuketty socket appears thanks to #77's per-container tty/ directory bind
 	// mount, which makes sbsh's listener inode host-visible. This scenario
 	// does not pre-create any placeholder socket file (the old workaround
 	// was broken because sbsh unlinks-and-recreates the destination,
 	// producing a fresh inode invisible to the host).
 	applyAttachableCell(t, runPath, realmName, spaceName, stackName, cellName)
 
-	// Step 3: confirm the per-container sbsh socket is in place. The runner
+	// Step 3: confirm the per-container kuketty socket is in place. The runner
 	// creates the metadata dir at provision time and sbsh binds the socket
 	// inside the container at task start. If this is missing, pkg/attach
 	// would fail in a way that's hard to attribute, so check explicitly.
@@ -209,7 +209,7 @@ func absRunPath(runPath string) string {
 	return filepath.Join(cwd, runPath)
 }
 
-// waitForSocket polls until the per-container sbsh control socket appears
+// waitForSocket polls until the per-container kuketty control socket appears
 // or the timeout expires. Polling rather than fixed-sleep so a fast machine
 // is not penalised and a stuck task fails with a useful message.
 func waitForSocket(t *testing.T, path string, timeout time.Duration) {
@@ -222,7 +222,7 @@ func waitForSocket(t *testing.T, path string, timeout time.Duration) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("sbsh socket %q did not appear within %s", path, timeout)
+	t.Fatalf("kuketty socket %q did not appear within %s", path, timeout)
 }
 
 // verifyContainerTaskIsRunning returns true iff `ctr task ls` reports the
