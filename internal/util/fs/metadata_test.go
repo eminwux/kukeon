@@ -93,8 +93,15 @@ func TestContainerSocketSymlinkPath_DistinctPerContainer(t *testing.T) {
 	// Two distinct identity tuples must map to distinct short ids; sharing
 	// would collapse two containers onto the same dirent and the second
 	// provision would silently rewrite the first's target. Vary exactly
-	// one position per row so a coverage gap surfaces clearly. The pipe-
-	// separator concat-collision pair ("ab|c" vs "a|bc") is the last row.
+	// one position per row so a coverage gap surfaces clearly.
+	//
+	// The "pipe-in-name" row is the regression guard for the separator
+	// choice itself: "|" is a legal name byte (only "_" and "/" are
+	// rejected by naming.ValidateRealmName / naming.ValidateHierarchyName),
+	// so any non-"_"/"/" separator would let realm "a|b" + space "c"
+	// collide with realm "a" + space "b|c". The "concat" row is the
+	// classic split-shift case ("ab"+"c" vs "a"+"bc") that any
+	// fixed-byte separator catches.
 	type pair struct {
 		name string
 		a, b [5]string
@@ -106,6 +113,7 @@ func TestContainerSocketSymlinkPath_DistinctPerContainer(t *testing.T) {
 		{"space", [5]string{"r", "sA", "k", "c", "c1"}, [5]string{"r", "sB", "k", "c", "c1"}},
 		{"realm", [5]string{"rA", "s", "k", "c", "c1"}, [5]string{"rB", "s", "k", "c", "c1"}},
 		{"concat", [5]string{"ab", "c", "k", "c", "c1"}, [5]string{"a", "bc", "k", "c", "c1"}},
+		{"pipe-in-name", [5]string{"a|b", "c", "k", "c", "c1"}, [5]string{"a", "b|c", "k", "c", "c1"}},
 	}
 	for _, p := range pairs {
 		a := fs.ContainerSocketSymlinkPath("/opt/kukeon", p.a[0], p.a[1], p.a[2], p.a[3], p.a[4])

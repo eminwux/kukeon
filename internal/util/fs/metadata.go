@@ -182,15 +182,18 @@ func ContainerSocketSymlinkPath(baseRunPath, realmName, spaceName, stackName, ce
 
 // containerSocketShortID returns the 16-hex digest that names the per-
 // container symlink inside ContainerSocketSymlinkDir. Derived from
-// sha256("<realm>|<space>|<stack>|<cell>|<container>")[:8] so the same
-// identity tuple always resolves to the same name across processes; the
-// pipe separator avoids any concatenation collision between values that
-// happen to share a suffix/prefix (e.g. realm "ab" + space "c" vs realm
-// "a" + space "bc"). 64 bits of randomness puts collisions astronomically
-// out of reach for any plausible per-host container count.
+// sha256("<realm>_<space>_<stack>_<cell>_<container>")[:8] so the same
+// identity tuple always resolves to the same name across processes. The
+// "_" separator is chosen because naming.ValidateRealmName and
+// naming.ValidateHierarchyName both reject "_" (and "/") in any
+// identifier — every other byte, including "|", is a legal name
+// character — so the join is unambiguous: two distinct tuples cannot
+// produce the same concatenation regardless of any byte values inside
+// the names. 64 bits of randomness puts collisions astronomically out
+// of reach for any plausible per-host container count.
 func containerSocketShortID(realmName, spaceName, stackName, cellName, containerName string) string {
 	digest := sha256.Sum256([]byte(
-		realmName + "|" + spaceName + "|" + stackName + "|" + cellName + "|" + containerName,
+		realmName + "_" + spaceName + "_" + stackName + "_" + cellName + "_" + containerName,
 	))
 	return hex.EncodeToString(digest[:8])
 }
