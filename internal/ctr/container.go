@@ -137,9 +137,10 @@ func (c *client) StartContainer(
 	// requires before any inner runtime (kuke init, dockerd, podman, an
 	// inner containerd) can widen subtree_control for non-thread-aware
 	// controllers like memory or io. Gated on the OCI spec carrying a
-	// non-empty Linux.CgroupsPath: the kukeon cell-container path always
-	// sets it via cellCgroupsPath, and HostCgroup containers leave it empty
-	// to share the host hierarchy through the kukeond bind mount.
+	// non-empty Linux.CgroupsPath: cellCgroupsPath sets it whenever the
+	// container's CellCgroupPath is non-empty (cell containers, including
+	// HostCgroup ones whose CellCgroupPath is filled from cell.Status), and
+	// leaves it empty for raw containerd / non-cell containers.
 	if relocateErr := c.relocateContainerTaskToLeaf(nsCtx, container); relocateErr != nil {
 		c.logger.WarnContext(c.ctx,
 			"failed to relocate container task to _payload leaf",
@@ -154,7 +155,9 @@ func (c *client) StartContainer(
 // relocateContainerTaskToLeaf moves the just-started container's PIDs into
 // a _payload leaf cgroup under its OCI Linux.CgroupsPath. See StartContainer
 // for the rationale (issue #336 scenario A). Returns nil when the container
-// has no CgroupsPath set (HostCgroup or non-cell containers).
+// has no CgroupsPath set — raw containerd / non-cell containers whose
+// CellCgroupPath is empty. Cell containers with HostCgroup=true still relocate
+// because cellCgroupsPath fills Linux.CgroupsPath from their CellCgroupPath.
 func (c *client) relocateContainerTaskToLeaf(nsCtx context.Context, container containerd.Container) error {
 	ociSpec, err := container.Spec(nsCtx)
 	if err != nil {
