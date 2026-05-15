@@ -194,5 +194,18 @@ func (r *Exec) DeleteContainer(cell intmodel.Cell, containerID string) error {
 		_ = r.purgeCNIForContainer(containerdID, netnsPath, networkName)
 	}
 
+	// Unlink the SUN_PATH-safe socket symlink staged at provision time
+	// (issue #521). The symlink lives outside the cell metadata tree, so
+	// the CellMetadataDir RemoveAll path that delete_cell.go runs doesn't
+	// reach it; a missing dirent is fine — the helper is idempotent.
+	if symlinkErr := removeAttachableSocketSymlink(r.opts.RunPath, *foundContainerSpec); symlinkErr != nil {
+		r.logger.WarnContext(
+			r.ctx,
+			"failed to remove socket symlink",
+			"container", containerID,
+			"error", symlinkErr,
+		)
+	}
+
 	return nil
 }

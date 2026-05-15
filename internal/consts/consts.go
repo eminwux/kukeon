@@ -49,6 +49,27 @@ const (
 	// injected by Attachable=true specs.
 	KukeonContainerSocketFile = "socket"
 
+	// KukeonSocketSymlinkSubdir is the basename of the per-RunPath directory
+	// that holds SUN_PATH-safe symlinks to the deep per-container kuketty
+	// sockets (`<RunPath>/data/<realm>/<space>/<stack>/<cell>/<container>/
+	// tty/socket`). Linux `connect(2)` caps the path passed in
+	// sockaddr_un.sun_path at 108 bytes including the terminator (issue #521),
+	// and the deep metadata-rooted path overflows on long RunPaths or
+	// long realm/space/stack/cell IDs. The daemon stages a short symlink at
+	// `<RunPath>/s/<short>` at provision time; `kuke attach` connects via
+	// the symlink so the literal sun_path stays SUN_PATH-safe regardless of
+	// how deep the resolved target lives. Single-letter basename to spend
+	// the budget on the per-container short id, not the directory.
+	KukeonSocketSymlinkSubdir = "s"
+
+	// KukeonMaxSocketPath is Linux's UNIX_PATH_MAX minus the terminating
+	// NUL — the maximum number of bytes a path passed to `connect(2)` on a
+	// unix socket may occupy in sockaddr_un.sun_path. The daemon refuses to
+	// provision an Attachable container whose resolved host-side socket
+	// path would exceed this so the failure surfaces at provision time
+	// rather than at first `kuke attach` (issue #521).
+	KukeonMaxSocketPath = 107
+
 	// KukeonContainerCaptureFile is the basename of the per-container sbsh
 	// capture file inside KukeonContainerTTYDir. sbsh writes the full tty
 	// byte stream — every byte the workload produced and every byte typed

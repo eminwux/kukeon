@@ -224,7 +224,8 @@ func (b *Exec) Close() error {
 // RunPath returns the configured kukeon run path. Surfaced for callers that
 // need to derive host paths from the same root the controller writes to —
 // notably the in-process AttachContainer endpoint, which resolves the
-// per-container sbsh socket via fs.ContainerSocketPath.
+// SUN_PATH-safe per-container kuketty socket via
+// fs.ContainerSocketSymlinkPath.
 func (b *Exec) RunPath() string {
 	return b.opts.RunPath
 }

@@ -109,16 +109,52 @@ func runBinary(t *testing.T, env []string, command string, args ...string) (int,
 	return exitCode, []byte(stdoutBuf.String()), []byte(stderrBuf.String())
 }
 
-// getRandomRunPath returns a unique, absolute run path for the test, backed
-// by t.TempDir(). The directory is created up front and removed automatically
-// when the test ends, so callers do not need a separate create-or-cleanup
-// step. Each call returns its own path, which avoids contention on a shared
-// parent directory (issue #491: MkdirAll on a shared parent races
-// concurrent t.Cleanup RemoveAll from sibling parallel tests, surfacing as
-// ENOENT on the new leaf).
+// getRandomRunPath returns a unique, absolute run path for the test. When
+// the t.TempDir-rooted path would push the *deep* per-container kuketty
+// socket path (`<runPath>/data/<realm>/<space>/<stack>/<cell>/<container>/
+// tty/socket`) over Linux's UNIX_PATH_MAX, the helper falls back to a
+// short /tmp prefix and registers a cleanup so the suite stays SUN_PATH-
+// safe regardless of how Go names the t.TempDir parent (issue #521).
+//
+// The architectural fix (issue #521) routes `kuke attach` through a short
+// symlink, so the deep path length no longer breaks `connect(2)` —
+// but the fallback is deliberate defense-in-depth: a future regression
+// that accidentally re-introduces the deep-path dial would fail loudly
+// here instead of in CI.
+//
+// Each call returns its own path so parallel-sibling tests don't race
+// MkdirAll/Cleanup-RemoveAll on a shared parent (issue #491's regression
+// class).
 func getRandomRunPath(t *testing.T) string {
 	t.Helper()
-	return t.TempDir()
+	tempDir := t.TempDir()
+	if deepSocketPathFits(tempDir) {
+		return tempDir
+	}
+	// t.TempDir() is the standard, but here it is exactly what overflows
+	// SUN_PATH because Go derives the temp basename from the test
+	// function name (`TestKuke_AttachDetach_KeepsTaskRunning` is 39
+	// bytes). Drop to a short, name-free /tmp prefix instead.
+	short, err := os.MkdirTemp("/tmp", "ke-") //nolint:usetesting // intentional shorter prefix; see comment
+	if err != nil {
+		t.Fatalf("MkdirTemp(/tmp, ke-): %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(short) })
+	return short
+}
+
+// deepSocketPathFits reports whether the longest plausible per-container
+// kuketty socket path under runPath fits SUN_PATH. The longest e2e suffix
+// is `/data/<realm>/<space>/<stack>/<cell>/<container>/tty/socket` with
+// realm/space/stack/cell names produced by generateUnique*Name (`e-r-XX`,
+// `e-sp-XX`, `e-st-XX`, `e-ce-XX`) and the container name fixed to
+// "work" by the attach fixture — 52 bytes of suffix all in. The check is
+// against the deep path, not the SUN_PATH-safe symlink the runner stages,
+// because deep-path regressions are the failure mode this fallback
+// defends against (the symlink budget is comfortably wider).
+func deepSocketPathFits(runPath string) bool {
+	const deepSocketSuffixLen = len("/data/e-r-XX/e-sp-XX/e-st-XX/e-ce-XX/work/tty/socket")
+	return len(runPath)+deepSocketSuffixLen <= consts.KukeonMaxSocketPath
 }
 
 // buildKukeRunPathArgs builds --run-path flag arguments.

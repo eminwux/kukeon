@@ -25,7 +25,9 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/ctr"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	sbshapi "github.com/eminwux/sbsh/pkg/api"
@@ -104,6 +106,10 @@ func attachableTTYDirInitialPerms(kukeonGroupGID int) (os.FileMode, int) {
 func (r *Exec) attachableBuildOpts(_ string, spec intmodel.ContainerSpec, _ []ctr.RegistryCredentials) ([]ctr.BuildOption, error) {
 	if !spec.Attachable {
 		return nil, nil
+	}
+
+	if err := ensureAttachableSocketSymlink(r.opts.RunPath, spec); err != nil {
+		return nil, err
 	}
 
 	ttyDir := fs.ContainerTTYDir(
@@ -553,6 +559,85 @@ func (r *Exec) attachablePostCreateChown(namespace string, spec intmodel.Contain
 		// safety net rather than a hot path.
 	default:
 		return fmt.Errorf("chown %q to (uid=%d, gid=%d): %w", metadataPath, uid, gid, chownErr)
+	}
+	return nil
+}
+
+// attachableSocketSymlinkDirMode is the mode applied to <RunPath>/s when
+// the runner stages it on first Attachable provision. 0o755 mirrors the
+// /opt/kukeon root layout: world-traversable so any process can resolve a
+// staged symlink, world-listable so an operator can `ls` the directory
+// during troubleshooting. The symlinks themselves are never created
+// world-writable (symlink mode is ignored by Linux for symlink-following
+// `connect(2)`; the target inode's mode is what gates access).
+const attachableSocketSymlinkDirMode os.FileMode = 0o0755
+
+// ensureAttachableSocketSymlink stages the SUN_PATH-safe symlink that
+// `kuke attach` connects to (issue #521). The symlink lives at
+// fs.ContainerSocketSymlinkPath under a shallow <RunPath>/s/ subtree and
+// targets the deep fs.ContainerSocketPath inode that kuketty creates inside
+// the bind-mounted /run/kukeon/tty directory at runtime. The target inode
+// does not exist when this function runs — symlinks are pure strings — so
+// the function never blocks on container startup. Recreating the symlink
+// on a re-provision is idempotent: an existing entry is unlinked and
+// rewritten so a prior provision with a stale target gets corrected.
+//
+// The host-side socket path length is the gate: the function refuses to
+// stage a symlink whose resolved path would exceed
+// consts.KukeonMaxSocketPath bytes, surfacing errdefs.ErrSocketPathTooLong
+// with the offending path named. This is the provision-time fail-fast the
+// AC requires so a future operator-configured RunPath that overflows the
+// SUN_PATH budget cannot defer its failure to first `kuke attach`.
+func ensureAttachableSocketSymlink(runPath string, spec intmodel.ContainerSpec) error {
+	symlinkPath := fs.ContainerSocketSymlinkPath(
+		runPath,
+		spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
+	)
+	if len(symlinkPath) > consts.KukeonMaxSocketPath {
+		return fmt.Errorf("%w: %q is %d bytes (limit %d)",
+			errdefs.ErrSocketPathTooLong, symlinkPath, len(symlinkPath), consts.KukeonMaxSocketPath)
+	}
+
+	symlinkDir := fs.ContainerSocketSymlinkDir(runPath)
+	if err := os.MkdirAll(symlinkDir, attachableSocketSymlinkDirMode); err != nil {
+		return fmt.Errorf("mkdir %q: %w", symlinkDir, err)
+	}
+
+	target := fs.ContainerSocketPath(
+		runPath,
+		spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
+	)
+	// os.Symlink fails with EEXIST when a dirent already lives at the
+	// destination; the re-provision case clears it first so a stale target
+	// from a prior layout does not silently linger. Use os.Remove (not
+	// RemoveAll) so a hostile or buggy actor cannot trick us into deleting a
+	// real directory tree if the destination has somehow turned into one.
+	if err := os.Remove(symlinkPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove stale symlink %q: %w", symlinkPath, err)
+	}
+	if err := os.Symlink(target, symlinkPath); err != nil {
+		return fmt.Errorf("symlink %q -> %q: %w", symlinkPath, target, err)
+	}
+	return nil
+}
+
+// removeAttachableSocketSymlink unlinks the SUN_PATH-safe symlink staged by
+// ensureAttachableSocketSymlink. Best-effort: a missing entry is not an
+// error (idempotent under repeated cell / container deletes), but any
+// other failure is returned so the caller can surface the operator-
+// actionable case (e.g. permissions) without losing the signal. Skips
+// non-Attachable specs so the cell-delete path can call it
+// unconditionally.
+func removeAttachableSocketSymlink(runPath string, spec intmodel.ContainerSpec) error {
+	if !spec.Attachable {
+		return nil
+	}
+	symlinkPath := fs.ContainerSocketSymlinkPath(
+		runPath,
+		spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
+	)
+	if err := os.Remove(symlinkPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove socket symlink %q: %w", symlinkPath, err)
 	}
 	return nil
 }

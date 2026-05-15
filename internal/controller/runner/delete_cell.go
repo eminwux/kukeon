@@ -105,6 +105,22 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 
 	// Workload containers tracked on the cell spec.
 	for _, containerSpec := range internalCell.Spec.Containers {
+		// Unlink the per-container SUN_PATH-safe socket symlink staged at
+		// provision time (issue #521) before tearing down the container.
+		// The symlink lives at <RunPath>/s/<short>, outside the
+		// CellMetadataDir tree that the RemoveAll below would otherwise
+		// reach — leaving it behind would accumulate stale symlinks
+		// pointing at vanished bind-mount sources across re-creates. The
+		// helper short-circuits on non-Attachable specs.
+		if symlinkErr := removeAttachableSocketSymlink(r.opts.RunPath, containerSpec); symlinkErr != nil {
+			r.logger.WarnContext(
+				r.ctx,
+				"failed to remove socket symlink",
+				"container", containerSpec.ID,
+				"error", symlinkErr,
+			)
+		}
+
 		containerID := containerSpec.ContainerdID
 		if containerID == "" {
 			// A partial init can persist the cell document before the
