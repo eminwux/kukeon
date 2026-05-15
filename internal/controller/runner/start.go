@@ -165,13 +165,20 @@ func truncateFailureMessage(cause error) string {
 // (issue #407 for the Start*-stage paths; issue #504 for the CreateCell-stage
 // path). The cleanup itself is:
 //
+//   - reload from metadata and stamp State=Failed plus Status.Reason /
+//     Status.Message *before* KillCell runs, so the on-disk state is sticky
+//     from the start of the cleanup (issue #409). cellStateIsSticky(Failed)
+//     short-circuits ReconcileCell, so any reconcile tick that lands during
+//     KillCell — including the one tripped by `--rm`'s AutoDelete + a cell
+//     that already reached Ready — observes Failed and refuses to reap the
+//     cell.
 //   - best-effort KillCell on the cell so any container that did start (e.g.,
 //     the root container) is torn down — the cell holds no running processes
-//     once it enters Failed;
-//   - reload from metadata so we overwrite KillCell's own Stopped-write, then
-//     stamp State=Failed plus Status.Reason / Status.Message so `kuke get
-//     cell -o yaml` shows the operator the failing stage and the wrapped
-//     cause, and persist via UpdateCellMetadata.
+//     once it enters Failed. KillCell internally writes CellStateStopped at
+//     the end of its run, briefly re-exposing the pre-#409 race window;
+//   - reload again and re-stamp State=Failed + Reason + Message so the
+//     operator-facing breadcrumb survives KillCell's Stopped-write. `kuke get
+//     cell -o yaml` then shows the failing stage and the wrapped cause.
 //
 // The original startup error is returned unmodified by the caller; this helper
 // only writes the new state so the reconciler can later observe it as terminal
@@ -184,6 +191,27 @@ func truncateFailureMessage(cause error) string {
 // on it without parsing the human-readable Message.
 func (r *Exec) markCellFailed(cell intmodel.Cell, reason string, cause error) {
 	cellName := strings.TrimSpace(cell.Metadata.Name)
+	message := truncateFailureMessage(cause)
+
+	// Pre-kill Failed stamp (issue #409). Reload first so we don't overwrite
+	// any concurrent updates from earlier in the failure path, then mutate to
+	// Failed and persist before invoking KillCell.
+	if pre, preErr := r.GetCell(cell); preErr == nil {
+		cell = pre
+	} else {
+		r.logger.DebugContext(r.ctx,
+			"failed to reload cell metadata before pre-kill Failed stamp",
+			"cell", cellName, "error", preErr.Error())
+	}
+	cell.Status.State = intmodel.CellStateFailed
+	cell.Status.Reason = reason
+	cell.Status.Message = message
+	if preStampErr := r.UpdateCellMetadata(cell); preStampErr != nil {
+		r.logger.WarnContext(r.ctx,
+			"failed to pre-stamp Failed state before killing cell",
+			"cell", cellName, "cause", cause.Error(), "error", preStampErr.Error())
+	}
+
 	if _, killErr := r.KillCell(cell); killErr != nil {
 		r.logger.WarnContext(r.ctx,
 			"failed to kill siblings while transitioning cell to Failed",
@@ -201,7 +229,7 @@ func (r *Exec) markCellFailed(cell intmodel.Cell, reason string, cause error) {
 
 	cell.Status.State = intmodel.CellStateFailed
 	cell.Status.Reason = reason
-	cell.Status.Message = truncateFailureMessage(cause)
+	cell.Status.Message = message
 	if updErr := r.UpdateCellMetadata(cell); updErr != nil {
 		r.logger.WarnContext(r.ctx,
 			"failed to persist Failed state after cell startup failure",

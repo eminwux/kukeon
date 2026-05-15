@@ -19,9 +19,13 @@
 package runner
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -517,5 +521,79 @@ func TestMarkCellFailed_PreservesFieldsAcrossRefreshCarry(t *testing.T) {
 	}
 	if newStatus.Message != "createCellContainers: image not found" {
 		t.Errorf("carryCellLifecycle dropped Message: got %q", newStatus.Message)
+	}
+}
+
+// TestMarkCellFailed_PreStampsBeforeKillCell pins the issue #409 ordering:
+// markCellFailed must persist State=Failed *before* calling KillCell. Without
+// the pre-stamp, the on-disk state stays at its pre-failure value (e.g.
+// Ready) until KillCell's own PopulateAndPersistCellContainerStatuses writes
+// Stopped near the end of its run; on an AutoDelete + ReadyObserved cell a
+// reconcile tick that lands in that window would trip shouldAutoDeleteCell
+// and reap the cell before the post-kill Failed-stamp lands.
+//
+// We probe the ordering by counting UpdateCellMetadata calls during the
+// helper's run. nowFn is bumped once per persist via stampCellLifecycle, so
+// the call counter is a direct proxy for "how many UpdateCellMetadata writes
+// happened". KillCell errors out at ensureClientConnected in the unit-test
+// harness (no real containerd socket) so KillCell's own persist is skipped
+// — that leaves the counter as a clean probe for pre-stamp + post-kill
+// restamp.
+//
+// One write means the pre-stamp regressed (only the post-kill restamp ran).
+// Two writes means both the pre-stamp and the post-kill restamp ran, which
+// is the fixed contract.
+func TestMarkCellFailed_PreStampsBeforeKillCell(t *testing.T) {
+	base := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	var callCount int64
+	runPath := t.TempDir()
+	r := &Exec{
+		ctx:    context.Background(),
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		opts:   Options{RunPath: runPath},
+		nowFn: func() time.Time {
+			n := atomic.AddInt64(&callCount, 1)
+			return base.Add(time.Duration(n) * time.Second)
+		},
+	}
+
+	cell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "c-prekill"},
+		Spec: intmodel.CellSpec{
+			ID:         "c-prekill",
+			RealmName:  "default",
+			SpaceName:  "default",
+			StackName:  "default",
+			AutoDelete: true,
+			Containers: []intmodel.ContainerSpec{},
+		},
+		Status: intmodel.CellStatus{
+			State:         intmodel.CellStateReady,
+			ReadyObserved: true,
+		},
+	}
+	if err := r.UpdateCellMetadata(cell); err != nil {
+		t.Fatalf("UpdateCellMetadata seed: %v", err)
+	}
+	seed := atomic.LoadInt64(&callCount)
+
+	r.markCellFailed(cell, "StartContainerFailed", errors.New("createContainer: boom"))
+
+	got, err := r.GetCell(cell)
+	if err != nil {
+		t.Fatalf("GetCell: %v", err)
+	}
+	if got.Status.State != intmodel.CellStateFailed {
+		t.Errorf("Status.State = %v, want Failed", got.Status.State)
+	}
+	if !got.Status.ReadyObserved {
+		t.Errorf("Status.ReadyObserved = false, want true (one-way latch preserved across Failed transition)")
+	}
+
+	if delta := atomic.LoadInt64(&callCount) - seed; delta != 2 {
+		t.Errorf(
+			"UpdateCellMetadata writes during markCellFailed = %d, want 2 (pre-stamp + post-kill restamp). Issue #409.",
+			delta,
+		)
 	}
 }
