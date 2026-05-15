@@ -86,7 +86,7 @@ func TestApplyServerConfigurationDefaultsLayered(t *testing.T) {
 	if got := viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey); got != spec.CgroupRoot {
 		t.Errorf("CgroupRoot: got %q, want %q", got, spec.CgroupRoot)
 	}
-	if got := viper.GetInt64(config.KUKEON_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey); got != spec.DefaultMemoryLimitBytes {
+	if got := viper.GetInt64(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey); got != spec.DefaultMemoryLimitBytes {
 		t.Errorf("DefaultMemoryLimitBytes: got %d, want %d", got, spec.DefaultMemoryLimitBytes)
 	}
 }
@@ -108,7 +108,7 @@ func TestNewKukeondCmdHasDefaultMemoryLimitFlag(t *testing.T) {
 
 // TestApplyServerConfigurationDefaultMemoryLimitEnvOverridesConfig pins the
 // --flag > env > YAML > default precedence for the new field. The YAML value
-// must be ignored when KUKEON_DEFAULT_MEMORY_LIMIT_BYTES is set.
+// must be ignored when KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES is set.
 func TestApplyServerConfigurationDefaultMemoryLimitEnvOverridesConfig(t *testing.T) {
 	t.Cleanup(viper.Reset)
 	viper.Reset()
@@ -117,14 +117,14 @@ func TestApplyServerConfigurationDefaultMemoryLimitEnvOverridesConfig(t *testing
 	if err != nil {
 		t.Fatalf("NewKukeondCmd() error = %v", err)
 	}
-	t.Setenv(config.KUKEON_DEFAULT_MEMORY_LIMIT_BYTES.EnvVar(), "8589934592") // 8 GiB
+	t.Setenv(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES.EnvVar(), "8589934592") // 8 GiB
 
 	spec := v1beta1.ServerConfigurationSpec{
 		DefaultMemoryLimitBytes: 2 * 1024 * 1024 * 1024, // 2 GiB — must be ignored
 	}
 	applyServerConfiguration(cmd, spec)
 
-	if got := viper.GetInt64(config.KUKEON_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey); got != 8589934592 {
+	if got := viper.GetInt64(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey); got != 8589934592 {
 		t.Errorf("env override lost: got %d, want %d (8 GiB)", got, 8589934592)
 	}
 }

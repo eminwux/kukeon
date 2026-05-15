@@ -92,7 +92,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	reconcileInterval := parseReconcileInterval(logger, cmd.Context())
 
-	defaultMemoryLimitBytes := viper.GetInt64(config.KUKEON_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey)
+	defaultMemoryLimitBytes := viper.GetInt64(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey)
 	if defaultMemoryLimitBytes < 0 {
 		// A negative value is meaningless for memory.max — clamp to zero so a
 		// typo doesn't get plumbed down to oci.WithMemoryLimit, which takes a

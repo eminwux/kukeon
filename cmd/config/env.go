@@ -122,8 +122,8 @@ var (
 		"KUKEOND_RECONCILE_INTERVAL", "kukeond/reconcileInterval", "30s",
 	)
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKEON_DEFAULT_MEMORY_LIMIT_BYTES = DefineKV(
-		"KUKEON_DEFAULT_MEMORY_LIMIT_BYTES", "kukeond/defaultMemoryLimitBytes", "0",
+	KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES = DefineKV(
+		"KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES", "kukeond/defaultMemoryLimitBytes", "0",
 	)
 
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable

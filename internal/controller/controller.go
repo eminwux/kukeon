@@ -96,7 +96,7 @@ type Options struct {
 	// DefaultMemoryLimitBytes, when > 0, is the daemon-wide fallback memory
 	// limit (in bytes) applied to every admitted container whose
 	// ContainerSpec.Resources.MemoryLimitBytes is unset or zero. Surfaces via
-	// `kukeond serve --default-memory-limit-bytes`, KUKEON_DEFAULT_MEMORY_LIMIT_BYTES,
+	// `kukeond serve --default-memory-limit-bytes`, KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES,
 	// or ServerConfiguration.Spec.DefaultMemoryLimitBytes. Closes the host-
 	// wedge gap on no-swap + no-userspace-OOM hosts (issue #531). Zero (the
 	// default) preserves the prior behavior — no fallback, the kernel sees
