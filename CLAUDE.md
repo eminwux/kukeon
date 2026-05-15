@@ -107,3 +107,32 @@ sudo ctr -n kuke-system.kukeon.io container info \
 # /bin/kukeond serve --socket /run/kukeon/kukeond.sock --run-path /opt/kukeon
 ps -ef | grep '[k]ukeond serve'
 ```
+
+### Recovering from a failed `kuke uninstall`
+
+`kuke uninstall` tears down kukeon runtime state in this order: (0) stop the
+kukeond daemon, (1) purge every realm, (2) remove `/run/kukeon`, (3) remove
+the configured run path (default `/opt/kukeon`), (4) remove the kukeon
+system user and group.
+
+Steps 2–4 are gated on every realm reporting `NamespaceRemoved=true`. If any
+realm fails to drop its containerd namespace, the report renders each
+filesystem/account row as `skipped (realm purge failed)` and prints
+
+    filesystem + user/group cleanup skipped: residual containerd namespace prevented teardown
+
+This is the half-cleaned-host guard added in #287: tearing out `/opt/kukeon`
+while overlay snapshots in a residual namespace are still pinning files on
+disk would strand the next `kuke init` with stale containerd state and could
+rip the bind mounts out from under a still-live daemon.
+
+To recover:
+
+1. Inspect the residual namespace — e.g. `ctr -n <namespace> snapshots ls`,
+   `ctr -n <namespace> containers ls` — and clean it up by hand or via
+   `ctr namespace remove <namespace>` once the namespace is empty.
+2. Re-run `kuke uninstall --yes`. The realm-purge step will now succeed and
+   the gated cleanup steps (2–4) will run normally.
+
+A successful re-run produces the familiar tail (`/opt/kukeon: removed`,
+`user 'kukeon': removed`, etc.) with no `skipped` lines.
