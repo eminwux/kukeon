@@ -428,14 +428,11 @@ func (r *Exec) StartCell(cell intmodel.Cell) (_ intmodel.Cell, retErr error) {
 		return intmodel.Cell{}, fmt.Errorf("failed to get root container spec: %w", err)
 	}
 
-	// CellCgroupPath is a runtime-only injection (not persisted with the cell
-	// document), so every BuildContainerSpec/BuildRootContainerSpec call site
-	// must populate it from cell.Status.CgroupPath right before the build —
-	// otherwise the destructive recreate done by StartCell here resets the
-	// container's OCI Linux.CgroupsPath to the runc-shim default. Issue #312.
-	if rootContainerSpec.CellCgroupPath == "" {
-		rootContainerSpec.CellCgroupPath = internalCell.Status.CgroupPath
-	}
+	// CellCgroupPath: runtime-only injection — see setCellCgroupPath docs.
+	// The destructive recreate done by StartCell here would otherwise reset
+	// the container's OCI Linux.CgroupsPath to the runc-shim default
+	// (issue #312).
+	setCellCgroupPath(&rootContainerSpec, &internalCell)
 
 	// Per-cell /etc/hostname / initial /etc/hosts — render before the root's
 	// OCI spec is built so the bind-mount sources exist when runc consumes
@@ -745,9 +742,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (_ intmodel.Cell, retErr error) {
 
 		// CellCgroupPath: runtime-only injection — see the comment at the
 		// root-container recreate above. Issue #312.
-		if containerSpec.CellCgroupPath == "" {
-			containerSpec.CellCgroupPath = internalCell.Status.CgroupPath
-		}
+		setCellCgroupPath(&containerSpec, &internalCell)
 
 		// NestedCgroupRuntime: runtime-only injection — same shape as
 		// CellCgroupPath. The per-container field is not persisted (see
@@ -1002,9 +997,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 
 	// CellCgroupPath: runtime-only injection — fill from cell.Status.CgroupPath
 	// so the recreated container task lands under <cell>/<id>. Issue #312.
-	if foundContainerSpec.CellCgroupPath == "" {
-		foundContainerSpec.CellCgroupPath = cell.Status.CgroupPath
-	}
+	setCellCgroupPath(foundContainerSpec, &cell)
 
 	// NestedCgroupRuntime: runtime-only injection — see the matching block
 	// in StartCell. The per-container field is not persisted, so a cell
