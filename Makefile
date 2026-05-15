@@ -99,7 +99,7 @@ KUKEON_E2E_IMAGE ?= docker.io/library/$(KUKEON_E2E_IMAGE_DOCKER_NAME)
 
 e2e: test-e2e
 .PHONY: test-e2e
-test-e2e: kuke
+test-e2e: kuke kuketty
 	@echo "Building local kukeond image $(KUKEON_E2E_IMAGE_DOCKER_NAME) for e2e"
 	docker build --build-arg VERSION=v0.0.0-e2e -t $(KUKEON_E2E_IMAGE_DOCKER_NAME) .
 	@echo "Running e2e tests using binaries in project root"
