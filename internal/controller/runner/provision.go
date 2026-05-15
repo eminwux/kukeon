@@ -265,6 +265,11 @@ func (r *Exec) ensureSpaceCNIConfig(space intmodel.Space) (intmodel.Space, error
 		}
 		// Preserve any internal-only fields that might have been set
 		updatedSpace.Status.CgroupPath = space.Status.CgroupPath
+		// This path bypasses UpdateSpaceMetadata (CNIConfigPath would be
+		// dropped through the internal-model conversion), so apply the
+		// same lifecycle-timestamp invariants here — otherwise UpdatedAt
+		// would not advance on this persist. See #419, #418.
+		stampSpaceLifecycle(&updatedSpace, r.nowUTC())
 		// UpdateSpaceMetadata will convert to external, but CNIConfigPath is not in internal model
 		// So we need to ensure it's preserved. Since UpdateSpaceMetadata converts internal->external,
 		// and CNIConfigPath is not in internal, we need to handle this differently.
