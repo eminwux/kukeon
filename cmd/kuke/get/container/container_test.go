@@ -308,6 +308,39 @@ func TestNewContainerCmd(t *testing.T) {
 	}
 }
 
+// TestGetContainer_NotFound_SurfacesSentinel locks in the
+// ErrContainerNotFound branch's %w wrap: when GetContainer's RPC reports
+// the named container doesn't exist, `kuke get container <name>` must
+// propagate the sentinel so upstream callers can still errors.Is it.
+func TestGetContainer_NotFound_SurfacesSentinel(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.GetContainerResult, error) {
+			return kukeonv1.GetContainerResult{}, errdefs.ErrContainerNotFound
+		},
+	}
+	cmd := container.NewContainerCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, container.MockControllerKey{}, kukeonv1.Client(fc))
+	cmd.SetContext(ctx)
+	_ = cmd.Flags().Set("realm", "r1")
+	_ = cmd.Flags().Set("space", "s1")
+	_ = cmd.Flags().Set("stack", "st1")
+	_ = cmd.Flags().Set("cell", "ce1")
+	cmd.SetArgs([]string{"missing"})
+
+	err := cmd.Execute()
+	if !errors.Is(err, errdefs.ErrContainerNotFound) {
+		t.Fatalf("error %v does not unwrap to ErrContainerNotFound", err)
+	}
+}
+
 type fakeClient struct {
 	kukeonv1.FakeClient
 

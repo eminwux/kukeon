@@ -469,6 +469,34 @@ func TestLog_MissingCellArg(t *testing.T) {
 	}
 }
 
+// TestLog_ContainerNotFound_SurfacesSentinel locks in the
+// ErrContainerNotFound branch's %w wrap: when LogContainer's RPC reports
+// the named container doesn't exist, `kuke log` must propagate the
+// sentinel so upstream callers can still errors.Is it.
+func TestLog_ContainerNotFound_SurfacesSentinel(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		logContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.LogContainerResult, error) {
+			return kukeonv1.LogContainerResult{}, errdefs.ErrContainerNotFound
+		},
+	}
+	tail := &tailCapture{}
+	cmd, _ := newCmdWithCtx(t, fc, tail)
+	cmd.SetArgs([]string{
+		"--realm", "r1", "--space", "s1", "--stack", "st1",
+		"--container", "ghost", "c1",
+	})
+
+	err := cmd.Execute()
+	if !errors.Is(err, errdefs.ErrContainerNotFound) {
+		t.Fatalf("error %v does not unwrap to ErrContainerNotFound", err)
+	}
+	if tail.calls != 0 {
+		t.Errorf("tail called %d times on missing target, want 0", tail.calls)
+	}
+}
+
 // TestTailFile_DefaultDumpsAndReturns exercises the real tailFile (not
 // the mock) to lock in the dump-and-exit semantics that the default
 // (no `-f`) `kuke log` invocation relies on.

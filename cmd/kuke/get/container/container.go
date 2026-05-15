@@ -164,7 +164,7 @@ func runContainerCmdWithDeps(
 		result, err := client.GetContainer(cmd.Context(), doc)
 		if err != nil {
 			if errors.Is(err, errdefs.ErrContainerNotFound) {
-				return fmt.Errorf("container %q not found", name)
+				return fmt.Errorf("container %q not found: %w", name, err)
 			}
 			return err
 		}
