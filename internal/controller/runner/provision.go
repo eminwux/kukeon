@@ -1438,12 +1438,6 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		cell.Spec.RootContainerID = rootContainerBaseID
 	}
 
-	// Cell-rooted cgroup placement for every container task. cell.Status.CgroupPath
-	// is populated by createCellCgroup before this runs (and preserved through
-	// recreate paths via desired.Status.CgroupPath = existing.Status.CgroupPath),
-	// so it's safe to read here. See issue #312.
-	cellCgroupPath := cell.Status.CgroupPath
-
 	// Per-cell /etc/hostname and initial /etc/hosts (no IP yet — CNI ADD runs
 	// during StartCell and rewrites /etc/hosts with the assigned cell IP).
 	// Files must exist before runc consumes the OCI bind-mount entries below,
@@ -1480,9 +1474,11 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		if containerSpec.CNIConfigPath == "" {
 			containerSpec.CNIConfigPath = cniConfigPath
 		}
-		if containerSpec.CellCgroupPath == "" {
-			containerSpec.CellCgroupPath = cellCgroupPath
-		}
+		// Cell-rooted cgroup placement for every container task. cell.Status.CgroupPath
+		// is populated by createCellCgroup before this runs (and preserved through
+		// recreate paths via desired.Status.CgroupPath = existing.Status.CgroupPath),
+		// so it's safe to read here. See issue #312.
+		setCellCgroupPath(&containerSpec, cell)
 		cell.Spec.Containers[i] = containerSpec
 
 		var createdContainer containerd.Container
@@ -1745,9 +1741,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		// Cell-rooted cgroup placement for the root container task (issue
 		// #312). Mirrors the wiring in createCellContainers and the regular-
 		// container loop below.
-		if rootContainerSpec.CellCgroupPath == "" {
-			rootContainerSpec.CellCgroupPath = cell.Status.CgroupPath
-		}
+		setCellCgroupPath(&rootContainerSpec, cell)
 
 		// Determine root container ID for RootContainerID field (use base name from ID field)
 		rootContainerBaseID := rootContainerSpec.ID
@@ -1901,10 +1895,8 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		// Cell-rooted cgroup placement (issue #312). Mirrors the equivalent
 		// fill-in for createCellContainers; only takes effect when the cell
 		// has been provisioned and its Status.CgroupPath is populated.
-		if containerSpec.CellCgroupPath == "" {
-			containerSpec.CellCgroupPath = cell.Status.CgroupPath
-			cell.Spec.Containers[i] = containerSpec
-		}
+		setCellCgroupPath(&containerSpec, cell)
+		cell.Spec.Containers[i] = containerSpec
 
 		// Build containerd ID using hierarchical format for containerd operations
 		// Store it in ContainerdID field, keep base name in ID field
