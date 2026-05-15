@@ -93,25 +93,30 @@ type ContainerSpec struct {
 	Secrets                []ContainerSecret      `json:"secrets,omitempty"                yaml:"secrets,omitempty"`
 	CNIConfigPath          string                 `json:"cniConfigPath,omitempty"          yaml:"cniConfigPath,omitempty"`
 	RestartPolicy          string                 `json:"restartPolicy"                    yaml:"restartPolicy"`
-	// Attachable opts the container into sbsh-wrapper injection. When true,
-	// the daemon prepends `sbsh terminal --run-path /run/kukeon/tty …` to
-	// process.args, bind-mounts the sbsh binary read-only at /.kukeon/bin/sbsh,
-	// and bind-mounts a per-container tty directory at /run/kukeon/tty (sbsh
-	// owns its socket, capture, and log files inside it). The host-visible
-	// peer of that directory lives in the per-container metadata dir and its
-	// `socket` entry is what `kuke attach` connects to. Default false — no
-	// behavior change for existing specs.
+	// Attachable opts the container into kuketty-wrapper injection. When
+	// true, the daemon rewrites process.args to a single element
+	// [/.kukeon/bin/kuketty] — no CLI flags, every runtime input flows
+	// through the bind-mounted metadata file — bind-mounts the kuketty
+	// binary read-only at /.kukeon/bin/kuketty, bind-mounts a per-container
+	// tty directory at /run/kukeon/tty (kuketty owns the attach socket
+	// inside it; capture and log files land in later phases), and
+	// bind-mounts the per-container metadata file read-only at
+	// /.kukeon/kuketty/metadata.json (carries the rendered api.TerminalDoc
+	// with the workload argv baked into Spec.Command / Spec.CommandArgs).
+	// The host-visible peer of the tty directory lives in the per-container
+	// metadata dir and its `socket` entry is what `kuke attach` connects
+	// to. Default false — no behavior change for existing specs.
 	Attachable bool `json:"attachable,omitempty"             yaml:"attachable,omitempty"`
-	// Tty configures shell-UX (prompt, init scripts) for the sbsh wrapper
-	// when Attachable=true. The container model already owns command, args,
-	// workingDir, and env, so Tty intentionally only adds layers the
-	// container model can't express. Setting any tty field with
+	// Tty configures shell-UX (prompt, init scripts) for the kuketty
+	// wrapper when Attachable=true. The container model already owns
+	// command, args, workingDir, and env, so Tty intentionally only adds
+	// layers the container model can't express. Setting any tty field with
 	// Attachable=false is a validation error.
 	Tty *ContainerTty `json:"tty,omitempty"                    yaml:"tty,omitempty"`
 }
 
 // ContainerTty carries per-attach shell-UX config that the daemon threads
-// into sbsh terminal on first attach. Has no effect unless Attachable=true.
+// into kuketty on first attach. Has no effect unless Attachable=true.
 //
 // All fields are stamped directly onto the rendered sbsh TerminalSpec via
 // sbsh's inline builder lane (sbsh v0.11.2+, kukeon #494). The pre-#494
