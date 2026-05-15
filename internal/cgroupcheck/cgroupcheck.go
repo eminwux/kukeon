@@ -32,7 +32,6 @@ package cgroupcheck
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -489,13 +488,6 @@ func HostAdvertised(hostRoot string) ([]string, error) {
 func readControllers(path string) ([]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		// Return a more actionable error for the common "kuke doctor
-		// cgroups" misuse where the operator pointed --root at something
-		// that isn't a cgroup-v2 hierarchy.
-		var pathErr *fs.PathError
-		if errors.As(err, &pathErr) {
-			return nil, err
-		}
 		return nil, err
 	}
 	out := strings.Fields(string(data))
