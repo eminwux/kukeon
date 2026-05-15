@@ -107,3 +107,7 @@ sudo ctr -n kuke-system.kukeon.io container info \
 # /bin/kukeond serve --socket /run/kukeon/kukeond.sock --run-path /opt/kukeon
 ps -ef | grep '[k]ukeond serve'
 ```
+
+### Recovering from a failed `kuke uninstall`
+
+If `kuke uninstall` reports `skipped (realm purge failed)` and `filesystem + user/group cleanup skipped: residual containerd namespace prevented teardown`, see the **Full per-host teardown** section in [`docs/cli-use-cases.md`](docs/cli-use-cases.md) for the half-cleaned-host gate explanation and the namespace-cleanup + re-run recovery procedure.
