@@ -114,7 +114,7 @@ func TestParseOutputFormat(t *testing.T) {
 
 func TestParseOutputFormatEnvAndFlagPrecedence(t *testing.T) {
 	if err := config.KUKE_GET_OUTPUT.BindEnv(); err != nil {
-		t.Fatalf("bind KUKEON_GET_OUTPUT: %v", err)
+		t.Fatalf("bind KUKE_GET_OUTPUT: %v", err)
 	}
 
 	tests := []struct {
