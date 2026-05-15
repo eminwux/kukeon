@@ -267,6 +267,14 @@ func (r *Exec) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error) {
 
 	carryCellLifecycle(originalStatus, &newStatus)
 
+	// Run ReadyObserved through the same one-way latch ReconcileCell uses.
+	// Without this, `kuke refresh` racing a synchronous Ready write would
+	// wipe the latched ReadyObserved to false (newStatus is constructed
+	// without it and assigned wholesale below), defeating AutoDelete via
+	// the same mechanism as #275 — see issue #278.
+	newStatus.ReadyObserved = latchReadyObserved(
+		originalStatus.ReadyObserved, originalStatus.State, newStatus.State)
+
 	// Refresh all containers in the cell (always attempt, regardless of cgroup check result)
 	containersUpdated := 0
 	for i := range cell.Spec.Containers {
@@ -287,7 +295,8 @@ func (r *Exec) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error) {
 	cellUpdated := false
 	if newStatus.State != originalStatus.State ||
 		newStatus.CgroupPath != originalStatus.CgroupPath ||
-		newStatus.CgroupReady != originalStatus.CgroupReady {
+		newStatus.CgroupReady != originalStatus.CgroupReady ||
+		newStatus.ReadyObserved != originalStatus.ReadyObserved {
 		cell.Status = newStatus
 		cellUpdated = true
 	}
@@ -303,10 +312,12 @@ func (r *Exec) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error) {
 }
 
 // carryCellLifecycle is the Cell counterpart of carryRealmLifecycle.
-// Network/Containers/ReadyObserved are not carried because the refresh
-// path either rebuilds them (Containers) or leaves them on the live cell
-// struct (Network, ReadyObserved); only the issue #166 fields need an
-// explicit carry from originalStatus to the locally-built newStatus.
+// Network/Containers are not carried because the refresh path either
+// rebuilds them (Containers) or leaves them on the live cell struct
+// (Network). ReadyObserved is handled by the caller via
+// latchReadyObserved — it needs both the original and the freshly
+// derived State to apply the one-way latch, which carryCellLifecycle
+// does not see — so the carry-through happens inline in RefreshCell.
 func carryCellLifecycle(orig intmodel.CellStatus, next *intmodel.CellStatus) {
 	next.CreatedAt = orig.CreatedAt
 	next.ReadyAt = orig.ReadyAt
