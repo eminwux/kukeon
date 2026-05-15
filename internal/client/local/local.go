@@ -956,13 +956,20 @@ func controllerImageToWire(img controller.ImageInfo) kukeonv1.ImageInfo {
 // sbsh control-socket path. Bytes never traverse this RPC — the caller
 // (`kuke attach`) opens HostSocketPath directly and runs the sbsh client
 // loop against it.
+//
+// Returns the SUN_PATH-safe symlink path (fs.ContainerSocketSymlinkPath)
+// rather than the deep socket inode path so `connect(2)` never sees a
+// sun_path longer than 107 bytes regardless of how deep the resolved
+// metadata layout is (issue #521). The runner stages the symlink at
+// provision time so a re-derived path on a freshly-spawned `kuke attach`
+// is always pre-materialised.
 func (c *Client) AttachContainer(_ context.Context, doc v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
 	spec, err := c.resolveAttachable(doc)
 	if err != nil {
 		return kukeonv1.AttachContainerResult{}, err
 	}
 	return kukeonv1.AttachContainerResult{
-		HostSocketPath: fs.ContainerSocketPath(
+		HostSocketPath: fs.ContainerSocketSymlinkPath(
 			c.ctrl.RunPath(),
 			spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
 		),

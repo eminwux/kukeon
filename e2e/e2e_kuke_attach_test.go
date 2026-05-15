@@ -104,7 +104,11 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 	// creates the metadata dir at provision time and sbsh binds the socket
 	// inside the container at task start. If this is missing, pkg/attach
 	// would fail in a way that's hard to attribute, so check explicitly.
-	socketPath := fs.ContainerSocketPath(runPath,
+	// Polls the SUN_PATH-safe symlink the runner stages (issue #521) — the
+	// same handle `kuke attach` connects through. `os.Stat` follows the
+	// symlink, so the loop succeeds once kuketty creates the deep socket
+	// inode at the resolved target.
+	socketPath := fs.ContainerSocketSymlinkPath(runPath,
 		realmName, spaceName, stackName, cellName, "work")
 	waitForSocket(t, socketPath, 10*time.Second)
 

@@ -17,6 +17,8 @@
 package fs
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -131,15 +133,69 @@ func ContainerTTYDir(baseRunPath, realmName, spaceName, stackName, cellName, con
 	)
 }
 
-// ContainerSocketPath returns the host-side path for a container's sbsh
-// terminal socket. This is the single source of truth for both the
-// host-visible path that `kuke attach` connects to and the path sbsh listens
-// on inside the container (mediated by the ContainerTTYDir bind mount).
+// ContainerSocketPath returns the host-side path of the kuketty terminal
+// socket inode for a container — the bind-mount source path the kuketty
+// listener inside the container resolves to via /run/kukeon/tty/socket.
+// This path can be arbitrarily long (it inherits the full metadata layout
+// depth) and is NOT safe to pass to `connect(2)`; see
+// ContainerSocketSymlinkPath for the SUN_PATH-safe handle that
+// `kuke attach` uses.
 func ContainerSocketPath(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
 	return filepath.Join(
 		ContainerTTYDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName),
 		consts.KukeonContainerSocketFile,
 	)
+}
+
+// ContainerSocketSymlinkDir returns the per-RunPath directory that holds
+// SUN_PATH-safe symlinks to per-container kuketty sockets. The daemon
+// creates this directory once and stages one symlink per Attachable
+// container inside it; cell / container teardown removes the symlinks but
+// leaves the directory itself in place (idempotent — re-provisioning the
+// same container regenerates its symlink).
+func ContainerSocketSymlinkDir(baseRunPath string) string {
+	return filepath.Join(baseRunPath, consts.KukeonSocketSymlinkSubdir)
+}
+
+// ContainerSocketSymlinkPath returns the SUN_PATH-safe host-side path
+// `kuke attach` connects to. It is a short symlink staged by the daemon
+// inside ContainerSocketSymlinkDir that resolves to the deep socket inode
+// returned by ContainerSocketPath. Linux's sockaddr_un.sun_path is bounded
+// at 108 bytes including the terminator (consts.KukeonMaxSocketPath = 107
+// usable bytes); the deep metadata-rooted ContainerSocketPath overflows on
+// long RunPaths or long realm/space/stack/cell IDs (issue #521), so
+// every host-side `connect(2)` is routed through this short handle.
+//
+// The basename is a 16-hex (sha256[:8]) digest of the
+// realm|space|stack|cell|container tuple, which is deterministic across
+// process restarts (so a freshly-spawned `kuke attach` re-derives the same
+// path the provisioning runner staged) and uniquely identifies a
+// container without inheriting the depth of the metadata layout. With a
+// RunPath ≤ 60 bytes the resolved path is `<RunPath>/s/<16hex>` ≤ 79
+// bytes — well inside SUN_PATH.
+func ContainerSocketSymlinkPath(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
+	return filepath.Join(
+		ContainerSocketSymlinkDir(baseRunPath),
+		containerSocketShortID(realmName, spaceName, stackName, cellName, containerName),
+	)
+}
+
+// containerSocketShortID returns the 16-hex digest that names the per-
+// container symlink inside ContainerSocketSymlinkDir. Derived from
+// sha256("<realm>_<space>_<stack>_<cell>_<container>")[:8] so the same
+// identity tuple always resolves to the same name across processes. The
+// "_" separator is chosen because naming.ValidateRealmName and
+// naming.ValidateHierarchyName both reject "_" (and "/") in any
+// identifier — every other byte, including "|", is a legal name
+// character — so the join is unambiguous: two distinct tuples cannot
+// produce the same concatenation regardless of any byte values inside
+// the names. 64 bits of randomness puts collisions astronomically out
+// of reach for any plausible per-host container count.
+func containerSocketShortID(realmName, spaceName, stackName, cellName, containerName string) string {
+	digest := sha256.Sum256([]byte(
+		realmName + "_" + spaceName + "_" + stackName + "_" + cellName + "_" + containerName,
+	))
+	return hex.EncodeToString(digest[:8])
 }
 
 // ContainerCapturePath returns the host-side path of the per-container sbsh

@@ -224,6 +224,16 @@ var (
 	// non-root attachable containers.
 	ErrAttachNoCandidate = errors.New("no attachable container in cell")
 
+	// ErrSocketPathTooLong fires when the resolved host-side path of a
+	// per-container kuketty control socket would overflow Linux's
+	// sockaddr_un.sun_path buffer (consts.KukeonMaxSocketPath bytes plus
+	// the terminating NUL — UNIX_PATH_MAX = 108). The daemon refuses to
+	// provision the Attachable container so the failure surfaces at
+	// provision time with the offending path named, instead of deferring
+	// the failure to `kuke attach` where the kernel-level `connect(2)`
+	// returns the cryptic `invalid argument` (issue #521).
+	ErrSocketPathTooLong = errors.New("host-side kuketty socket path exceeds SUN_PATH")
+
 	// Profile-related errors.
 
 	// ErrProfileNotFound is returned when `kuke run -p <name>` cannot find
