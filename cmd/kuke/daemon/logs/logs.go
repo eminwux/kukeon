@@ -110,8 +110,8 @@ func runLogs(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		if errors.Is(err, errdefs.ErrContainerNotFound) {
 			return fmt.Errorf(
-				"kukeond container %q not found in cell %q",
-				consts.KukeSystemContainerName, consts.KukeSystemCellName,
+				"kukeond container %q not found in cell %q: %w",
+				consts.KukeSystemContainerName, consts.KukeSystemCellName, err,
 			)
 		}
 		return fmt.Errorf("resolve kukeond log path: %w", err)

@@ -297,6 +297,32 @@ func TestDaemonLogs_ContainerNotFound_NamedTarget(t *testing.T) {
 	}
 }
 
+// TestDaemonLogs_ContainerNotFound_SurfacesSentinel locks in the
+// ErrContainerNotFound branch's %w wrap: when LogContainer's RPC reports
+// the kukeond container doesn't exist, `kuke daemon logs` must propagate
+// the sentinel so upstream callers can still errors.Is it. Distinct from
+// TestDaemonLogs_ContainerNotFound_NamedTarget above, which only asserts
+// the human-readable message — they share the same fake but exercise the
+// two contracts (message + sentinel) independently.
+func TestDaemonLogs_ContainerNotFound_SurfacesSentinel(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{Cell: readyCell(), MetadataExists: true}, nil
+		},
+		logContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.LogContainerResult, error) {
+			return kukeonv1.LogContainerResult{}, errdefs.ErrContainerNotFound
+		},
+	}
+	cmd, _ := newCmd(t, fc, &tailCapture{})
+
+	err := cmd.Execute()
+	if !errors.Is(err, errdefs.ErrContainerNotFound) {
+		t.Fatalf("error %v does not unwrap to ErrContainerNotFound", err)
+	}
+}
+
 func TestDaemonLogs_MissingLogFile_NamesTheCause(t *testing.T) {
 	t.Cleanup(viper.Reset)
 

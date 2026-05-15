@@ -152,7 +152,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 	result, err := client.LogContainer(cmd.Context(), doc)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrContainerNotFound) {
-			return fmt.Errorf("container %q not found in cell %q", container, cell)
+			return fmt.Errorf("container %q not found in cell %q: %w", container, cell, err)
 		}
 		return err
 	}
