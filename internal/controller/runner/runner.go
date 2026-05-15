@@ -184,6 +184,13 @@ type Options struct {
 	// kukeon group can reach the per-container sbsh socket via the same
 	// group-traversal path that `kuke init` sets up on /opt/kukeon.
 	KukeonGroupGID int
+	// DefaultMemoryLimitBytes, when > 0, is forwarded to ctr.BuildContainerSpec
+	// / ctr.BuildRootContainerSpec via ctr.WithDefaultMemoryLimit so the
+	// kernel-level memory.max is written for any admitted container whose
+	// ContainerSpec does not already declare a positive
+	// Resources.MemoryLimitBytes. Plumbed from controller.Options of the
+	// same name. Zero preserves the prior behavior. Issue #531.
+	DefaultMemoryLimitBytes int64
 }
 
 func NewRunner(ctx context.Context, logger *slog.Logger, opts Options) Runner {
@@ -204,6 +211,17 @@ func (r *Exec) netPolicyEnforcer() netpolicy.Enforcer {
 		return netpolicy.NoopEnforcer{}
 	}
 	return r.netPolicy
+}
+
+// daemonDefaultBuildOpts returns ctr.BuildOption entries that carry daemon-
+// wide knobs into ctr.BuildContainerSpec / ctr.BuildRootContainerSpec. Today
+// just the daemon-default memory cap (issue #531); returns nil when no
+// daemon-wide options are configured so existing call sites pay no cost.
+func (r *Exec) daemonDefaultBuildOpts() []ctr.BuildOption {
+	if r.opts.DefaultMemoryLimitBytes <= 0 {
+		return nil
+	}
+	return []ctr.BuildOption{ctr.WithDefaultMemoryLimit(r.opts.DefaultMemoryLimitBytes)}
 }
 
 func (r *Exec) BootstrapCNI(cfgDir, cacheDir, binDir string) (cni.BootstrapReport, error) {

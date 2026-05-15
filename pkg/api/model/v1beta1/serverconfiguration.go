@@ -67,4 +67,14 @@ type ServerConfigurationSpec struct {
 	// stacks / cells live (e.g. /kukeon-dev for a parallel dev instance on
 	// the same host). Default: /kukeon.
 	CgroupRoot string `json:"cgroupRoot,omitempty"                yaml:"cgroupRoot,omitempty"`
+	// DefaultMemoryLimitBytes is the daemon-wide fallback memory limit
+	// applied to every admitted container whose
+	// ContainerSpec.Resources.MemoryLimitBytes is unset or zero. Closes the
+	// host-wedge gap on no-swap, no-userspace-OOM hosts where an unbounded
+	// container can consume enough RAM to evict the daemon and journald.
+	// Zero (the default) preserves the prior behavior — no fallback.
+	// Operators should set this on hosts without swap and without
+	// systemd-oomd / earlyoom. An explicit per-container limit always wins.
+	// Issue #531. Default: 0.
+	DefaultMemoryLimitBytes int64 `json:"defaultMemoryLimitBytes,omitempty"   yaml:"defaultMemoryLimitBytes,omitempty"`
 }

@@ -92,6 +92,18 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	reconcileInterval := parseReconcileInterval(logger, cmd.Context())
 
+	defaultMemoryLimitBytes := viper.GetInt64(config.KUKEON_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey)
+	if defaultMemoryLimitBytes < 0 {
+		// A negative value is meaningless for memory.max — clamp to zero so a
+		// typo doesn't get plumbed down to oci.WithMemoryLimit, which takes a
+		// uint64 and would silently wrap.
+		logger.WarnContext(ctx,
+			"default-memory-limit-bytes is negative; treating as 0 (disabled)",
+			"value", defaultMemoryLimitBytes,
+		)
+		defaultMemoryLimitBytes = 0
+	}
+
 	opts := daemon.Options{
 		SocketPath:        socketPath,
 		SocketMode:        socketMode,
@@ -107,7 +119,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			// /opt/kukeon. Without this the runner sees KukeonGroupGID=0 and
 			// falls back to 0700 root-only — regressing #258 repro A under the
 			// daemon path even when --socket-gid was set.
-			KukeondSocketGID: socketGID,
+			KukeondSocketGID:        socketGID,
+			DefaultMemoryLimitBytes: defaultMemoryLimitBytes,
 		},
 	}
 

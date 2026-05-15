@@ -1504,7 +1504,7 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 			}
 
 			rootLabels := buildRootContainerLabels(*cell)
-			ctrContainerSpec := ctr.BuildRootContainerSpec(containerSpec, rootLabels)
+			ctrContainerSpec := ctr.BuildRootContainerSpec(containerSpec, rootLabels, r.daemonDefaultBuildOpts()...)
 
 			createdContainer, createErr = r.ctrClient.CreateContainer(namespace, ctrContainerSpec, creds)
 			if createErr != nil {
@@ -1561,11 +1561,12 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 			if attachErr != nil {
 				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
 			}
+			buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
 			_, createErr = r.ctrClient.CreateContainerFromSpec(
 				namespace,
 				containerSpec,
 				creds,
-				attachOpts...,
+				buildOpts...,
 			)
 			if createErr != nil {
 				fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
@@ -1787,7 +1788,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		stampCellProfileNameOnContainerSpec(&rootContainerSpec, cell)
 
 		rootLabels := buildRootContainerLabels(*cell)
-		containerSpec := ctr.BuildRootContainerSpec(rootContainerSpec, rootLabels)
+		containerSpec := ctr.BuildRootContainerSpec(rootContainerSpec, rootLabels, r.daemonDefaultBuildOpts()...)
 
 		var createErr error
 		container, createErr = r.ctrClient.CreateContainer(internalRealm.Spec.Namespace, containerSpec, creds)
@@ -2026,11 +2027,12 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 			if attachErr != nil {
 				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
 			}
+			buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
 			createdContainer, containerCreateErr := r.ctrClient.CreateContainerFromSpec(
 				internalRealm.Spec.Namespace,
 				containerSpec,
 				creds,
-				attachOpts...,
+				buildOpts...,
 			)
 			if containerCreateErr != nil {
 				// Check if the error indicates the container already exists

@@ -477,7 +477,7 @@ func (r *Exec) StartCell(cell intmodel.Cell) (_ intmodel.Cell, retErr error) {
 	stampCellProfileNameOnContainerSpec(&rootContainerSpec, &internalCell)
 
 	rootLabels := buildRootContainerLabels(internalCell)
-	ctrContainerSpec := ctr.BuildRootContainerSpec(rootContainerSpec, rootLabels)
+	ctrContainerSpec := ctr.BuildRootContainerSpec(rootContainerSpec, rootLabels, r.daemonDefaultBuildOpts()...)
 
 	_, err = r.ctrClient.CreateContainer(namespace, ctrContainerSpec, creds)
 	if err != nil {
@@ -788,7 +788,8 @@ func (r *Exec) StartCell(cell intmodel.Cell) (_ intmodel.Cell, retErr error) {
 		if attachErr != nil {
 			return intmodel.Cell{}, fmt.Errorf("failed to prepare attachable container %s: %w", ctrContainerID, attachErr)
 		}
-		_, err = r.ctrClient.CreateContainerFromSpec(namespace, containerSpec, creds, attachOpts...)
+		buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
+		_, err = r.ctrClient.CreateContainerFromSpec(namespace, containerSpec, creds, buildOpts...)
 		if err != nil {
 			fields = appendCellLogFields([]any{"id", ctrContainerID}, cellID, cellName)
 			fields = append(
@@ -1053,7 +1054,8 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 	if attachErr != nil {
 		return intmodel.Cell{}, fmt.Errorf("failed to prepare attachable container %s: %w", containerID, attachErr)
 	}
-	_, err = r.ctrClient.CreateContainerFromSpec(namespace, *foundContainerSpec, creds, attachOpts...)
+	buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
+	_, err = r.ctrClient.CreateContainerFromSpec(namespace, *foundContainerSpec, creds, buildOpts...)
 	if err != nil {
 		fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
 		fields = append(

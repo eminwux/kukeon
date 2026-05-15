@@ -171,11 +171,13 @@ func withUpdatedSpec(spec *oci.Spec) containerd.UpdateContainerOpts {
 
 // BuildOption customizes BuildContainerSpec without changing its return type.
 // Used for caller-provided values that don't live on the model spec — today
-// just the host-side paths required when ContainerSpec.Attachable is true.
+// the host-side paths required when ContainerSpec.Attachable is true, and
+// the daemon-wide fallback memory limit applied when the spec carries none.
 type BuildOption func(*buildOpts)
 
 type buildOpts struct {
-	attachable AttachableInjection
+	attachable              AttachableInjection
+	defaultMemoryLimitBytes int64
 }
 
 // WithAttachableInjection configures the host-side paths used when wrapping
@@ -186,6 +188,28 @@ func WithAttachableInjection(inj AttachableInjection) BuildOption {
 	return func(o *buildOpts) {
 		o.attachable = inj
 	}
+}
+
+// WithDefaultMemoryLimit configures a daemon-wide fallback memory limit (in
+// bytes). The limit is applied via oci.WithMemoryLimit only when the
+// ContainerSpec does not already carry a positive Resources.MemoryLimitBytes
+// — an explicit per-container value always wins. A zero or negative argument
+// is a no-op so callers can pass it unconditionally. Issue #531.
+func WithDefaultMemoryLimit(bytes int64) BuildOption {
+	return func(o *buildOpts) {
+		if bytes > 0 {
+			o.defaultMemoryLimitBytes = bytes
+		}
+	}
+}
+
+// specHasMemoryLimit reports whether the spec already declares a positive
+// per-container memory limit. Used by BuildContainerSpec /
+// BuildRootContainerSpec to decide whether a daemon-default cap applies.
+func specHasMemoryLimit(spec intmodel.ContainerSpec) bool {
+	return spec.Resources != nil &&
+		spec.Resources.MemoryLimitBytes != nil &&
+		*spec.Resources.MemoryLimitBytes > 0
 }
 
 // BuildContainerSpec converts an internal ContainerSpec to ctr.ContainerSpec
@@ -325,6 +349,15 @@ func BuildContainerSpec(
 	}
 
 	specOpts = append(specOpts, securitySpecOpts(containerSpec)...)
+
+	// Daemon-default memory cap: applies only when the spec does not already
+	// carry a positive Resources.MemoryLimitBytes, so an explicit per-
+	// container limit always wins. Closes the "container admitted with
+	// memory.max=max" gap on no-swap, no-userspace-OOM hosts (issue #531).
+	if opts.defaultMemoryLimitBytes > 0 && !specHasMemoryLimit(containerSpec) {
+		//nolint:gosec // bounded by the > 0 guard above and clamped to >= 0 in cmd/kukeond/serve.go
+		specOpts = append(specOpts, oci.WithMemoryLimit(uint64(opts.defaultMemoryLimitBytes)))
+	}
 
 	// Attachable wrapping is appended last so the args-wrap runs after any
 	// user-supplied WithProcessArgs above and after the image's ENTRYPOINT/CMD
