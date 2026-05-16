@@ -22,15 +22,30 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 
 	kill "github.com/eminwux/kukeon/cmd/kuke/daemon/kill"
+	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/consts"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
+
+// TestMain mocks the shared euid lookup to euid=0 for every test in this
+// package so the fail-fast root gate in runKill does not short-circuit the
+// existing fakes-driven coverage when CI runs as a non-root user
+// (ubuntu-latest defaults to UID 1001). The dedicated non-root case overrides
+// this with its own SetGeteuidForTesting call.
+func TestMain(m *testing.M) {
+	restore := kukshared.SetGeteuidForTesting(func() int { return 0 })
+	code := m.Run()
+	restore()
+	os.Exit(code)
+}
 
 func TestDaemonKill(t *testing.T) {
 	tests := []struct {
@@ -170,6 +185,37 @@ func TestDaemonKill(t *testing.T) {
 				t.Errorf("output missing %q\nGot:\n%s", tt.wantOutput, buf.String())
 			}
 		})
+	}
+}
+
+// TestDaemonKill_NonRootIsRejected confirms the fail-fast UID gate rejects
+// non-root invocations before any side effect (cell lookup, in-process
+// controller construction). Symmetric with the same guard on `kuke daemon
+// reset` and the rest of the daemon-lifecycle verbs (#463).
+func TestDaemonKill_NonRootIsRejected(t *testing.T) {
+	restore := kukshared.SetGeteuidForTesting(func() int { return 1000 })
+	t.Cleanup(restore)
+
+	cmd := kill.NewKillCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cmd.SetContext(context.WithValue(context.Background(), types.CtxLogger, logger))
+	cmd.SetArgs(nil)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("kuke daemon kill returned nil under euid=1000, want ErrMustRunAsRoot")
+	}
+	if !errors.Is(err, errdefs.ErrMustRunAsRoot) {
+		t.Fatalf("kuke daemon kill error does not wrap ErrMustRunAsRoot: %v", err)
+	}
+	if !strings.Contains(err.Error(), "kuke daemon kill") {
+		t.Errorf("error does not name the subcommand: %v", err)
+	}
+	if !strings.Contains(err.Error(), "sudo") {
+		t.Errorf("error does not suggest sudo: %v", err)
 	}
 }
 

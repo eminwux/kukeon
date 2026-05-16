@@ -25,6 +25,7 @@ import (
 	"log/slog"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/client/local"
 	"github.com/eminwux/kukeon/internal/consts"
@@ -62,6 +63,10 @@ func runKill(cmd *cobra.Command, _ []string) error {
 	logger, ok := cmd.Context().Value(types.CtxLogger).(*slog.Logger)
 	if !ok || logger == nil {
 		return errdefs.ErrLoggerNotFound
+	}
+
+	if err := kukshared.RequireRoot("kuke daemon kill"); err != nil {
+		return err
 	}
 
 	client := resolveClient(cmd, logger)

@@ -30,6 +30,7 @@ import (
 
 	logscmd "github.com/eminwux/kukeon/cmd/kuke/daemon/logs"
 	logcmd "github.com/eminwux/kukeon/cmd/kuke/log"
+	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -38,6 +39,18 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+// TestMain mocks the shared euid lookup to euid=0 for every test in this
+// package so the fail-fast root gate in runLogs does not short-circuit the
+// existing fakes-driven coverage when CI runs as a non-root user
+// (ubuntu-latest defaults to UID 1001). The dedicated non-root case overrides
+// this with its own SetGeteuidForTesting call.
+func TestMain(m *testing.M) {
+	restore := kukshared.SetGeteuidForTesting(func() int { return 0 })
+	code := m.Run()
+	restore()
+	os.Exit(code)
+}
 
 const kukeondHostLogPath = "/opt/kukeon/kuke-system/kukeon/kukeon/kukeond/kukeond/log"
 
@@ -394,6 +407,38 @@ func TestDaemonLogs_CapturePathFallback(t *testing.T) {
 	}
 	if got := out.String(); got != "from-capture" {
 		t.Errorf("stdout = %q, want %q", got, "from-capture")
+	}
+}
+
+// TestDaemonLogs_NonRootIsRejected confirms the fail-fast UID gate rejects
+// non-root invocations before any side effect (cell lookup, in-process
+// controller construction). Symmetric with the same guard on `kuke daemon
+// reset` and the rest of the daemon-lifecycle verbs (#463).
+func TestDaemonLogs_NonRootIsRejected(t *testing.T) {
+	restore := kukshared.SetGeteuidForTesting(func() int { return 1000 })
+	t.Cleanup(restore)
+	viper.Reset()
+
+	cmd := logscmd.NewLogsCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cmd.SetContext(context.WithValue(context.Background(), types.CtxLogger, logger))
+	cmd.SetArgs(nil)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("kuke daemon logs returned nil under euid=1000, want ErrMustRunAsRoot")
+	}
+	if !errors.Is(err, errdefs.ErrMustRunAsRoot) {
+		t.Fatalf("kuke daemon logs error does not wrap ErrMustRunAsRoot: %v", err)
+	}
+	if !strings.Contains(err.Error(), "kuke daemon logs") {
+		t.Errorf("error does not name the subcommand: %v", err)
+	}
+	if !strings.Contains(err.Error(), "sudo") {
+		t.Errorf("error does not suggest sudo: %v", err)
 	}
 }
 
