@@ -30,7 +30,7 @@ The daemon endpoint. Today only the `unix://` scheme is supported. The `ssh://us
 
 Bypass `kukeond` and run the operation in-process. Requires root: the client now directly touches containerd, CNI, and cgroups.
 
-Use when the daemon is stopped, when bootstrapping (`kuke init` and `kuke image load --no-daemon` both run this path), or while debugging.
+Use when the daemon is stopped, when bootstrapping (`kuke init` runs this path), or while debugging. `kuke image *` is daemon-independent by design and is always in-process regardless of `--no-daemon`.
 
 Don't run two `--no-daemon` commands at the same time — they'll race on the same on-disk state.
 

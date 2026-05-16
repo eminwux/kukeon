@@ -192,7 +192,9 @@ else
 fi
 
 step "Load ${LOCAL_TAG} into the kuke-system realm"
-sudo --preserve-env=KUKEON_HOST ./kuke image load --from-docker "${LOCAL_TAG}" --realm kuke-system --no-daemon
+# `kuke image load` is in-process by design (#226); --no-daemon is not
+# passed because the flag is a no-op for image subcommands.
+sudo --preserve-env=KUKEON_HOST ./kuke image load --from-docker "${LOCAL_TAG}" --realm kuke-system
 
 step "Run kuke init with --kukeond-image ${KUKEOND_IMAGE_REF}"
 sudo --preserve-env=KUKEON_HOST,KUKEOND_SOCKET ./kuke init --kukeond-image "${KUKEOND_IMAGE_REF}"

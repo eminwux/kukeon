@@ -88,7 +88,7 @@ sudo usermod -aG kukeon $USER
 kuke get realms
 ```
 
-Operations that bypass the daemon still need root: `kuke init`, `kuke daemon reset`, `kuke image load --no-daemon`, `kuke doctor cgroups --probe`, and any command run with the `--no-daemon` flag.
+Operations that bypass the daemon still need root: `kuke init`, `kuke daemon reset`, `kuke image load` (in-process by design — `--no-daemon` is ignored on image subcommands), `kuke doctor cgroups --probe`, and any command run with the `--no-daemon` flag.
 
 ## Host supervisor
 

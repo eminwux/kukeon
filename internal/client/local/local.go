@@ -15,8 +15,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package local provides an in-process kukeonv1.Client backed by a
-// controller.Exec. Used by the CLI in --no-daemon mode and by the daemon
-// itself when servicing RPC calls.
+// controller.Exec. Used by the CLI in --no-daemon mode (workload commands
+// per #222), by the `kuke image *` subcommands as the always-in-process
+// path (#226), and by the daemon itself when servicing RPC calls.
 package local
 
 import (

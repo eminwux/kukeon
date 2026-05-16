@@ -230,7 +230,9 @@ sudo kuke image delete --realm default <ref>                    # alias: rm, rem
 - `--from-docker <ref>` shells out to `docker save`; if the docker daemon is unreachable or the ref is unknown, the command exits non-zero with the docker error surfaced (e.g. `No such image`).
 - `kuke image get --realm <r>` exits 0 even when the namespace is empty; the CLI prints a "No images found in realm" line rather than failing.
 - `kuke image delete --realm <r> <missing-ref>` exits non-zero with an `image not found` message that names the realm and ref.
-- The dev-loop pattern is `kuke image load --from-docker kukeon-local:dev --realm kuke-system --no-daemon` so the image is in place before `kuke init` brings up the daemon. The `--no-daemon` flag is required here because the daemon is not yet running.
+- `kuke image *` is daemon-independent by design (#217, #226): every subcommand wraps containerd's image API directly in-process and ignores the root persistent `--no-daemon` flag. There is no "with daemon" mode — the daemon does not serve image RPCs.
+- `kuke image load` writes to containerd's content store and must run as root; it fails fast with a friendly `must run as root` error under non-root euid rather than letting containerd surface an opaque EACCES later. `kuke image get` and `kuke image delete` do not impose their own UID gate — they fail with whatever containerd returns if the socket is unreachable.
+- The dev-loop pattern is `sudo kuke image load --from-docker kukeon-local:dev --realm kuke-system`; the image lands in containerd before `kuke init` brings up the daemon, which is fine because image operations never go through `kukeond`.
 
 ## Workload lifecycle
 

@@ -367,44 +367,6 @@ func (s *KukeonV1Service) ApplyDocuments(args *kukeonv1.ApplyDocumentsArgs, repl
 	return nil
 }
 
-// ---- Image ----
-
-func (s *KukeonV1Service) LoadImage(args *kukeonv1.LoadImageArgs, reply *kukeonv1.LoadImageReply) error {
-	result, err := s.core.LoadImage(s.ctx, args.Realm, args.Tarball)
-	reply.Result = result
-	reply.Err = kukeonv1.ToAPIError(err)
-	if err != nil {
-		s.logger.DebugContext(s.ctx, "LoadImage returned error", "error", err)
-	}
-	return nil
-}
-
-func (s *KukeonV1Service) ListImages(args *kukeonv1.ListImagesArgs, reply *kukeonv1.ListImagesReply) error {
-	result, err := s.core.ListImages(s.ctx, args.Realm)
-	reply.Result = result
-	reply.Err = kukeonv1.ToAPIError(err)
-	if err != nil {
-		s.logger.DebugContext(s.ctx, "ListImages returned error", "error", err)
-	}
-	return nil
-}
-
-func (s *KukeonV1Service) GetImage(args *kukeonv1.GetImageArgs, reply *kukeonv1.GetImageReply) error {
-	result, err := s.core.GetImage(s.ctx, args.Realm, args.Ref)
-	reply.Result = result
-	reply.Err = kukeonv1.ToAPIError(err)
-	if err != nil {
-		s.logger.DebugContext(s.ctx, "GetImage returned error", "error", err)
-	}
-	return nil
-}
-
-func (s *KukeonV1Service) DeleteImage(args *kukeonv1.DeleteImageArgs, reply *kukeonv1.DeleteImageReply) error {
-	result, err := s.core.DeleteImage(s.ctx, args.Realm, args.Ref)
-	reply.Result = result
-	reply.Err = kukeonv1.ToAPIError(err)
-	if err != nil {
-		s.logger.DebugContext(s.ctx, "DeleteImage returned error", "error", err)
-	}
-	return nil
-}
+// Image methods (LoadImage / ListImages / GetImage / DeleteImage) are
+// intentionally not served over RPC — `kuke image *` is daemon-independent
+// by design (#226). The CLI constructs a local in-process client directly.

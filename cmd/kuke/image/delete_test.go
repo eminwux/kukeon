@@ -134,7 +134,7 @@ func runDelete(t *testing.T, fake *fakeDeleteClient, args []string) (string, err
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-	ctx = context.WithValue(ctx, image.MockControllerKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, image.MockControllerKey{}, image.Client(fake))
 	cmd.SetContext(ctx)
 	cmd.SetArgs(args)
 	err := cmd.Execute()
@@ -142,9 +142,21 @@ func runDelete(t *testing.T, fake *fakeDeleteClient, args []string) (string, err
 }
 
 type fakeDeleteClient struct {
-	kukeonv1.FakeClient
-
 	deleteImageFn func(realm, ref string) (kukeonv1.DeleteImageResult, error)
+}
+
+func (f *fakeDeleteClient) Close() error { return nil }
+
+func (f *fakeDeleteClient) LoadImage(context.Context, string, []byte) (kukeonv1.LoadImageResult, error) {
+	return kukeonv1.LoadImageResult{}, errors.New("unexpected LoadImage call")
+}
+
+func (f *fakeDeleteClient) ListImages(context.Context, string) (kukeonv1.ListImagesResult, error) {
+	return kukeonv1.ListImagesResult{}, errors.New("unexpected ListImages call")
+}
+
+func (f *fakeDeleteClient) GetImage(context.Context, string, string) (kukeonv1.GetImageResult, error) {
+	return kukeonv1.GetImageResult{}, errors.New("unexpected GetImage call")
 }
 
 func (f *fakeDeleteClient) DeleteImage(_ context.Context, realm, ref string) (kukeonv1.DeleteImageResult, error) {

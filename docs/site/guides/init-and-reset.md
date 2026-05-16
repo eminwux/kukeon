@@ -4,9 +4,9 @@ This guide covers the operations you'll run most often when bootstrapping, itera
 
 `kuke init` provisions **two** realms, each mapped to its own containerd namespace:
 
-| Realm         | Containerd namespace    | Purpose                                                                          |
-| ------------- | ----------------------- | -------------------------------------------------------------------------------- |
-| `default`     | `default.kukeon.io`     | User workloads. Created empty so `kuke create …` has a home.                     |
+| Realm         | Containerd namespace    | Purpose                                                                             |
+| ------------- | ----------------------- | ----------------------------------------------------------------------------------- |
+| `default`     | `default.kukeon.io`     | User workloads. Created empty so `kuke create …` has a home.                        |
 | `kuke-system` | `kuke-system.kukeon.io` | System workloads owned by kukeon itself (the `kukeond` daemon runs as a cell here). |
 
 The daemon lives at `kuke-system / kukeon / kukeon / kukeond` (realm / space / stack / cell). The `default` realm is deliberately left user-owned so `kuke purge --cascade` on it can never take down the daemon.
@@ -67,11 +67,11 @@ Rebuild and re-init:
 ```bash
 make kuke
 docker build --build-arg VERSION=v0.0.0-dev -t kukeon-local:dev .
-sudo ./kuke image load --from-docker kukeon-local:dev --realm kuke-system --no-daemon
+sudo ./kuke image load --from-docker kukeon-local:dev --realm kuke-system
 sudo ./kuke init --kukeond-image docker.io/library/kukeon-local:dev
 ```
 
-`--no-daemon` on `kuke image load` is required here because the daemon is not yet running — the in-process controller talks to containerd directly. See [Local development](local-dev.md) for the full dev loop, which is wrapped end-to-end as `make dev-init`.
+`kuke image load` is daemon-independent by design — it always wraps containerd directly in-process — so the daemon does not need to be running to stage the bootstrap image. See [Local development](local-dev.md) for the full dev loop, which is wrapped end-to-end as `make dev-init`.
 
 ## Wipe a realm
 

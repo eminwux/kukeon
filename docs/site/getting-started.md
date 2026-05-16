@@ -63,7 +63,7 @@ sudo usermod -aG kukeon $USER
 # Log out and back in (or run `newgrp kukeon`) so the group takes effect.
 ```
 
-The rest of this guide assumes you have done that. If you skip this step, prepend `sudo` to every `kuke` command below. Operations that bypass the daemon still need root: `kuke init`, `kuke daemon reset`, `kuke image load --no-daemon`, `kuke doctor cgroups --probe`, and any command run with `--no-daemon`.
+The rest of this guide assumes you have done that. If you skip this step, prepend `sudo` to every `kuke` command below. Operations that bypass the daemon still need root: `kuke init`, `kuke daemon reset`, `kuke image load` (in-process by design — `--no-daemon` is ignored on image subcommands), `kuke doctor cgroups --probe`, and any command run with `--no-daemon`.
 
 ## 5. Verify with `kuke get`
 

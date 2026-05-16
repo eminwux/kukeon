@@ -665,8 +665,7 @@ func TestDaemonReset_GracefulTimeoutEscalatesToKill(t *testing.T) {
 // TestDaemonReset_NonRootIsRejected confirms the fail-fast UID gate rejects
 // non-root invocations before any side effect (cell lookup, sock/pid file
 // removal, --purge-system rm -rf). Symmetric with the same guard on
-// `kuke init`, `kuke image load --no-daemon`, and `kuke doctor cgroups
-// --probe`.
+// `kuke init`, `kuke image load`, and `kuke doctor cgroups --probe`.
 func TestDaemonReset_NonRootIsRejected(t *testing.T) {
 	restore := kukshared.SetGeteuidForTesting(func() int { return 1000 })
 	t.Cleanup(restore)

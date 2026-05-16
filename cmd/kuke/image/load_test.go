@@ -27,16 +27,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eminwux/kukeon/cmd/config"
 	image "github.com/eminwux/kukeon/cmd/kuke/image"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
-	"github.com/spf13/viper"
 )
 
 func TestLoadCmd_FromFileDefaultRealm(t *testing.T) {
+	withRootEuid(t)
+
 	dir := t.TempDir()
 	tarPath := filepath.Join(dir, "img.tar")
 	want := []byte("oci-tarball-bytes")
@@ -74,6 +74,8 @@ func TestLoadCmd_FromFileDefaultRealm(t *testing.T) {
 }
 
 func TestLoadCmd_FromStdinExplicitRealm(t *testing.T) {
+	withRootEuid(t)
+
 	want := []byte("stdin-tarball")
 
 	var gotRealm string
@@ -98,6 +100,8 @@ func TestLoadCmd_FromStdinExplicitRealm(t *testing.T) {
 }
 
 func TestLoadCmd_FromDockerAndPositionalAreMutuallyExclusive(t *testing.T) {
+	withRootEuid(t)
+
 	fake := &fakeClient{
 		loadImageFn: func(string, []byte) (kukeonv1.LoadImageResult, error) {
 			t.Fatal("client should not be invoked")
@@ -115,6 +119,8 @@ func TestLoadCmd_FromDockerAndPositionalAreMutuallyExclusive(t *testing.T) {
 }
 
 func TestLoadCmd_NoSourceIsAnError(t *testing.T) {
+	withRootEuid(t)
+
 	fake := &fakeClient{}
 	_, err := runLoad(t, fake, nil)
 	if err == nil {
@@ -126,6 +132,8 @@ func TestLoadCmd_NoSourceIsAnError(t *testing.T) {
 }
 
 func TestLoadCmd_ClientErrorPropagates(t *testing.T) {
+	withRootEuid(t)
+
 	dir := t.TempDir()
 	tarPath := filepath.Join(dir, "img.tar")
 	if err := os.WriteFile(tarPath, []byte("x"), 0o600); err != nil {
@@ -143,14 +151,12 @@ func TestLoadCmd_ClientErrorPropagates(t *testing.T) {
 	}
 }
 
-// TestLoadCmd_NoDaemonRequiresRoot pins the fail-fast UID gate that fires
-// only when --no-daemon (KUKEON_NO_DAEMON=true) is set. The daemon-routed
-// default path stays unrestricted so `kukeon`-group rootless clients keep
-// working — that is covered by every other test in this file, none of which
-// set the flag.
-func TestLoadCmd_NoDaemonRequiresRoot(t *testing.T) {
-	t.Cleanup(viper.Reset)
-	viper.Set(config.KUKEON_ROOT_NO_DAEMON.ViperKey, true)
+// TestLoadCmd_RequiresRoot pins the unconditional UID gate that fires on
+// every invocation (no longer tied to --no-daemon, since image commands are
+// in-process by design per #226). The gate is the friendly fail-fast that
+// keeps non-root operators from hitting an opaque EACCES later in the
+// containerd write path.
+func TestLoadCmd_RequiresRoot(t *testing.T) {
 	restore := kukshared.SetGeteuidForTesting(func() int { return 1000 })
 	t.Cleanup(restore)
 
@@ -169,17 +175,25 @@ func TestLoadCmd_NoDaemonRequiresRoot(t *testing.T) {
 
 	_, err := runLoad(t, fake, []string{tarPath})
 	if err == nil {
-		t.Fatal("kuke image load --no-daemon returned nil under euid=1000, want ErrMustRunAsRoot")
+		t.Fatal("kuke image load returned nil under euid=1000, want ErrMustRunAsRoot")
 	}
 	if !errors.Is(err, errdefs.ErrMustRunAsRoot) {
 		t.Fatalf("error does not wrap ErrMustRunAsRoot: %v", err)
 	}
-	if !strings.Contains(err.Error(), "kuke image load --no-daemon") {
+	if !strings.Contains(err.Error(), "kuke image load") {
 		t.Errorf("error does not name the subcommand: %v", err)
 	}
 }
 
 // --- helpers ---
+
+// withRootEuid stubs the euid probe so the RequireRoot gate at the top of
+// every image-write subcommand passes under any test runner UID.
+func withRootEuid(t *testing.T) {
+	t.Helper()
+	restore := kukshared.SetGeteuidForTesting(func() int { return 0 })
+	t.Cleanup(restore)
+}
 
 func runLoad(t *testing.T, fake *fakeClient, args []string) (string, error) {
 	t.Helper()
@@ -198,7 +212,7 @@ func runLoadWithStdin(t *testing.T, fake *fakeClient, args []string, stdin io.Re
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-	ctx = context.WithValue(ctx, image.MockControllerKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, image.MockControllerKey{}, image.Client(fake))
 	cmd.SetContext(ctx)
 	cmd.SetArgs(args)
 	err := cmd.Execute()
@@ -206,14 +220,26 @@ func runLoadWithStdin(t *testing.T, fake *fakeClient, args []string, stdin io.Re
 }
 
 type fakeClient struct {
-	kukeonv1.FakeClient
-
 	loadImageFn func(realm string, tarball []byte) (kukeonv1.LoadImageResult, error)
 }
+
+func (f *fakeClient) Close() error { return nil }
 
 func (f *fakeClient) LoadImage(_ context.Context, realm string, tarball []byte) (kukeonv1.LoadImageResult, error) {
 	if f.loadImageFn == nil {
 		return kukeonv1.LoadImageResult{}, errors.New("unexpected LoadImage call")
 	}
 	return f.loadImageFn(realm, tarball)
+}
+
+func (f *fakeClient) ListImages(context.Context, string) (kukeonv1.ListImagesResult, error) {
+	return kukeonv1.ListImagesResult{}, errors.New("unexpected ListImages call")
+}
+
+func (f *fakeClient) GetImage(context.Context, string, string) (kukeonv1.GetImageResult, error) {
+	return kukeonv1.GetImageResult{}, errors.New("unexpected GetImage call")
+}
+
+func (f *fakeClient) DeleteImage(context.Context, string, string) (kukeonv1.DeleteImageResult, error) {
+	return kukeonv1.DeleteImageResult{}, errors.New("unexpected DeleteImage call")
 }
