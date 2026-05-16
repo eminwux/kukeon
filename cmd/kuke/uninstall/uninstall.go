@@ -64,12 +64,15 @@ func NewUninstallCmd() *cobra.Command {
 const uninstallLongDesc = `Remove all kukeon runtime state from this host.
 
 This is the global counterpart to "kuke purge" (which is per-resource). It:
-  1. Purges every realm with --cascade (drains spaces, stacks, cells,
+  1. Stops, disables, and removes the kukeond systemd unit (no-op on hosts
+     without systemd, or where the unit was never installed). Done first so
+     a Restart=on-failure unit cannot respawn kukeond mid-uninstall.
+  2. Purges every realm with --cascade (drains spaces, stacks, cells,
      containers and their containerd tasks/containers, and deletes the
      containerd namespaces created by kukeon).
-  2. Removes /run/kukeon/ recursively.
-  3. Removes the configured run path (default /opt/kukeon) recursively.
-  4. Removes the kukeon system user and group (no-op if absent).
+  3. Removes /run/kukeon/ recursively.
+  4. Removes the configured run path (default /opt/kukeon) recursively.
+  5. Removes the kukeon system user and group (no-op if absent).
 
 If any realm fails to drop its containerd namespace, steps 2-4 are skipped:
 tearing out /opt/kukeon while a residual namespace is still pinning overlay
@@ -120,6 +123,19 @@ func runUninstall(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	// systemd unit teardown runs before realm/filesystem teardown per
+	// issue #541 AC #4: leaving Restart=on-failure on the unit while the
+	// controller's PID-file-based daemon-stop step fires would let systemd
+	// respawn kukeond mid-uninstall. Idempotent on hosts where the unit
+	// was never installed (dev hosts via `make dev-init`, systemd-less
+	// distros).
+	systemdRemover := resolveSystemdRemover(cmd)
+	systemdReport := systemdRemover(cmd.Context())
+	printSystemdRemoval(cmd, systemdReport)
+	if systemdReport.Err != nil {
+		return systemdReport.Err
+	}
+
 	ctrl := resolveController(cmd, logger, runPath)
 	defer func() { _ = ctrl.Close() }()
 
@@ -128,6 +144,43 @@ func runUninstall(cmd *cobra.Command, _ []string) error {
 	})
 	printReport(cmd, report)
 	return err
+}
+
+// resolveSystemdRemover returns the SystemdRemover used by runUninstall.
+// Tests inject a stub via MockSystemdRemoverKey; production always runs the
+// real systemctl-driven implementation.
+func resolveSystemdRemover(cmd *cobra.Command) SystemdRemover {
+	if mock, ok := cmd.Context().Value(MockSystemdRemoverKey{}).(SystemdRemover); ok {
+		return mock
+	}
+	return removeKukeondSystemdUnit
+}
+
+// printSystemdRemoval renders the SystemdRemovalReport as the first line of
+// the uninstall output so the operator sees the unit-teardown outcome
+// before the realm/filesystem rows. Quiet on the skip path: a host that
+// never had the unit installed (e.g. `make dev-init`) should not emit a
+// systemd row at all, matching the existing report's terse style on the
+// no-daemon path.
+func printSystemdRemoval(cmd *cobra.Command, r SystemdRemovalReport) {
+	out := cmd.OutOrStdout()
+	if r.Skipped {
+		// Quiet skip — no systemd row at all.
+		return
+	}
+	switch {
+	case r.Err != nil:
+		fmt.Fprintf(out, "  - systemd unit %s: failed: %v\n", r.UnitPath, r.Err)
+	case r.Stopped && r.Disabled && r.FileRemoved && r.DaemonReloaded:
+		fmt.Fprintf(out, "  - systemd unit %s: stopped, disabled, removed\n", r.UnitPath)
+	default:
+		// Partial: at least one best-effort sub-step did not succeed. Show
+		// each independently so the operator can tell which (e.g. stop
+		// failed because there's no systemd PID 1 vs. file remove
+		// succeeded — the binding step did its job).
+		fmt.Fprintf(out, "  - systemd unit %s: partial (stop=%t disable=%t remove=%t reload=%t)\n",
+			r.UnitPath, r.Stopped, r.Disabled, r.FileRemoved, r.DaemonReloaded)
+	}
 }
 
 func resolveController(cmd *cobra.Command, logger *slog.Logger, runPath string) controller.Controller {
@@ -144,6 +197,7 @@ func resolveController(cmd *cobra.Command, logger *slog.Logger, runPath string) 
 func confirm(cmd *cobra.Command, runPath, socketDir string) (bool, error) {
 	out := cmd.OutOrStdout()
 	fmt.Fprintln(out, "kuke uninstall will remove ALL kukeon runtime state on this host:")
+	fmt.Fprintln(out, "  - the kukeond systemd unit (stop + disable + remove, if installed)")
 	fmt.Fprintln(out, "  - every realm (cascade), including the kuke-system realm and the kukeond cell")
 	fmt.Fprintln(out, "  - the kukeon containerd namespaces")
 	fmt.Fprintf(out, "  - %s/ (kukeond socket dir)\n", socketDir)

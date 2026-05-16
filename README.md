@@ -45,7 +45,7 @@ Get kukeon running on a single Linux host in minutes.
 curl -fsSL https://kukeon.io/install.sh | bash
 ```
 
-The installer detects your platform, verifies the prerequisites above (and prints a distro-aware hint on any miss), downloads the latest release, verifies its `sha256` checksum, installs `kuke` + `kukeond` to `/usr/local/bin`, and runs `sudo kuke init` to bring the daemon up. Pass `--check` to run the prereq checks only without touching the system:
+The installer detects your platform, verifies the prerequisites above (and prints a distro-aware hint on any miss), downloads the latest release, verifies its `sha256` checksum, installs `kuke` + `kukeond` to `/usr/local/bin`, runs `sudo kuke init` to bring the daemon up, and (on systemd hosts) installs `/etc/systemd/system/kukeond.service` so kukeond comes back automatically after a host or containerd restart. On systemd-less hosts the unit step is skipped with a notice — bring kukeond up manually after each reboot with `sudo kuke daemon start`. Pass `--check` to run the prereq checks only without touching the system:
 
 ```bash
 curl -fsSL https://kukeon.io/install.sh | bash -s -- --check

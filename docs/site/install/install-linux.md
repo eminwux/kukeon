@@ -16,6 +16,7 @@ The installer:
 2. Verifies cgroups v2 is mounted and `/run/containerd/containerd.sock` is responsive. On any miss it prints a distro-aware hint and exits non-zero without touching the system.
 3. Downloads the latest release binary from GitHub, verifies its `.sha256` checksum, installs it to `/usr/local/bin/kuke`, and hard-links `kukeond` next to it.
 4. Runs `sudo kuke init` to bring up the daemon. Skipped on a host that already has a healthy `kukeond` listening on `/run/kukeon/kukeond.sock`.
+5. Installs `/etc/systemd/system/kukeond.service` and runs `systemctl enable --now kukeond.service` so the daemon comes back automatically after a host or containerd restart. Skipped with a notice on systemd-less hosts — bring kukeond up manually with `sudo kuke daemon start` after each reboot in that case.
 
 Pass `--check` to run the prereq checks only without touching the system:
 
@@ -89,9 +90,19 @@ kuke get realms
 
 Operations that bypass the daemon still need root: `kuke init`, `kuke daemon reset`, `kuke image load --no-daemon`, `kuke doctor cgroups --probe`, and any command run with the `--no-daemon` flag.
 
+## Host supervisor
+
+On systemd hosts the installer drops `/etc/systemd/system/kukeond.service`, ordered `After=containerd.service` / `Requires=containerd.service`. The unit's `ExecStart` is `kuke daemon start`, which is idempotent against an already-running daemon, and `Restart=on-failure` retries the bring-up if the daemon's cell cannot reach a starting containerd on first try. After a `systemctl reboot` the unit re-bootstraps the daemon without operator intervention.
+
+If your host has no systemd (some minimal container images, dev sandboxes), the installer prints a notice and skips the unit. Bring kukeond up manually after each reboot:
+
+```bash
+sudo kuke daemon start
+```
+
 ## Uninstall
 
-`kuke uninstall` removes all kukeon runtime state from the host — stops and deletes the `kukeond` cell, clears `/run/kukeon`, and wipes `/opt/kukeon` and the kukeon-generated CNI conflists. It prompts for interactive confirmation by default; pass `-y` to skip the prompt in scripts:
+`kuke uninstall` removes all kukeon runtime state from the host — stops, disables, and removes the `kukeond` systemd unit (if installed), then stops and deletes the `kukeond` cell, clears `/run/kukeon`, and wipes `/opt/kukeon` and the kukeon-generated CNI conflists. It prompts for interactive confirmation by default; pass `-y` to skip the prompt in scripts:
 
 ```bash
 sudo kuke uninstall -y
