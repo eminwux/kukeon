@@ -1783,9 +1783,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		if etcErr := r.renderCellEtcFilesPreCNI(cell); etcErr != nil {
 			return nil, fmt.Errorf("render cell etc files: %w", etcErr)
 		}
-		hnPath, hPath, suppress := r.cellEtcFilePaths(cell)
-		stampEtcFilePathsOnContainerSpec(&rootContainerSpec, hnPath, hPath, suppress)
-		stampCellProfileNameOnContainerSpec(&rootContainerSpec, cell)
+		r.stampContainerRecreateRuntimeFields(&rootContainerSpec, cell)
 
 		rootLabels := buildRootContainerLabels(*cell)
 		containerSpec := ctr.BuildRootContainerSpec(rootContainerSpec, rootLabels, r.daemonDefaultBuildOpts()...)
