@@ -52,8 +52,6 @@ PARENT_ATTACH_METADATA="/.kukeon/kuketty/metadata.json"
 NESTED_SOCKET_DIR="/run/kukeon-dev"
 NESTED_SOCKET_PATH="${NESTED_SOCKET_DIR}/kukeond.sock"
 NESTED_HOST_URI="unix://${NESTED_SOCKET_PATH}"
-NESTED_SERVER_CONFIG=""
-INIT_EXTRA_ARGS=()
 
 if [ -e "${NESTED_PROBE}" ]; then
     step "Nested kukeon detected (${NESTED_PROBE} present)"
@@ -90,22 +88,12 @@ if [ -e "${NESTED_PROBE}" ]; then
     # `kuke purge`, etc. — without per-call --host overrides.
     export KUKEON_HOST="${NESTED_HOST_URI}"
 
-    # `kuke init` does not env-bind KUKEOND_SOCKET (the daemon-side
-    # variable), so the supported channel for steering the daemon socket
-    # at init time is `--server-configuration`. We write a minimal
-    # ServerConfiguration document with `spec.socket` only — every other
-    # field falls back to the daemon's hardcoded default, matching the
-    # default-host invocation everywhere else.
-    NESTED_SERVER_CONFIG="$(mktemp -t kukeon-dev-init-nested-server-config.XXXXXX.yaml)"
-    cat > "${NESTED_SERVER_CONFIG}" <<EOF
-apiVersion: v1beta1
-kind: ServerConfiguration
-metadata:
-  name: kukeon-dev-init-nested
-spec:
-  socket: ${NESTED_SOCKET_PATH}
-EOF
-    INIT_EXTRA_ARGS+=("--server-configuration" "${NESTED_SERVER_CONFIG}")
+    # KUKEOND_SOCKET steers the daemon-side socket path read by `kuke
+    # init` (when seeding the kukeond cell's serve args) and `kuke daemon
+    # reset` (when resolving which kukeond.{sock,pid} to clean up). Both
+    # paths read it through viper via `KUKEOND_SOCKET.BindEnv` in
+    # cmd/kuke/kuke.go's loadConfig, so exporting it here is sufficient.
+    export KUKEOND_SOCKET="${NESTED_SOCKET_PATH}"
 fi
 
 # Post-flight: re-stat the parent's attach socket and metadata. Runs on
@@ -192,14 +180,13 @@ if [ ! -d "${SYSTEM_REALM_DIR}" ]; then
     # of that pass may fail because the local image is not yet staged in
     # containerd. Tolerate that — the second init below recreates the
     # cell after the image load succeeds.
-    sudo --preserve-env=KUKEON_HOST ./kuke init --kukeond-image "${KUKEOND_IMAGE_REF}" \
-        "${INIT_EXTRA_ARGS[@]}" \
+    sudo --preserve-env=KUKEON_HOST,KUKEOND_SOCKET ./kuke init --kukeond-image "${KUKEOND_IMAGE_REF}" \
         || echo "first-pass init returned non-zero (expected before image is staged); continuing"
 fi
 
 if [ -d "${KUKEOND_CELL_DIR}" ]; then
     step "Reset prior kukeond cell"
-    sudo --preserve-env=KUKEON_HOST ./kuke daemon reset
+    sudo --preserve-env=KUKEON_HOST,KUKEOND_SOCKET ./kuke daemon reset
 else
     step "No prior kukeond cell at ${KUKEOND_CELL_DIR}; skipping reset"
 fi
@@ -208,8 +195,7 @@ step "Load ${LOCAL_TAG} into the kuke-system realm"
 sudo --preserve-env=KUKEON_HOST ./kuke image load --from-docker "${LOCAL_TAG}" --realm kuke-system --no-daemon
 
 step "Run kuke init with --kukeond-image ${KUKEOND_IMAGE_REF}"
-sudo --preserve-env=KUKEON_HOST ./kuke init --kukeond-image "${KUKEOND_IMAGE_REF}" \
-    "${INIT_EXTRA_ARGS[@]}"
+sudo --preserve-env=KUKEON_HOST,KUKEOND_SOCKET ./kuke init --kukeond-image "${KUKEOND_IMAGE_REF}"
 
 step "Daemon parity check (both must show identical output)"
 sudo --preserve-env=KUKEON_HOST ./kuke get realms
@@ -249,9 +235,6 @@ teardown_attach_smoke_state() {
 cleanup_attach_smoke() {
     rm -rf "${ATTACH_SMOKE_TMP}"
     teardown_attach_smoke_state
-    if [ -n "${NESTED_SERVER_CONFIG}" ]; then
-        rm -f "${NESTED_SERVER_CONFIG}"
-    fi
     # Issue #547 AC#4: the parent host's `/run/kukeon/tty` bind must
     # still be live before this script exits. Runs after the nested
     # daemon's smoke artifacts are torn down so we catch any late

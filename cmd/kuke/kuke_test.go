@@ -284,6 +284,31 @@ func TestLoadConfigPreservesExplicitValues(t *testing.T) {
 	}
 }
 
+// TestLoadConfigBindsKukeondSocketEnv locks down the env binding for
+// KUKEOND_SOCKET / KUKEOND_SOCKET_GID added to mirror the daemon-side
+// binds (cmd/kukeond/kukeond.go:bindEnvVars). Without these, `kuke init`'s
+// applyServerConfiguration env-gate at cmd/kuke/init/init.go:216 sees the
+// env var, skips the YAML write, but viper has no binding to read it back
+// — so the resolved socket path silently falls through to the default and
+// `kuke daemon reset`'s resolveSocketDir cleans the wrong directory.
+func TestLoadConfigBindsKukeondSocketEnv(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	t.Setenv(config.KUKEOND_SOCKET.EnvVar(), "/run/kukeon-dev/kukeond.sock")
+	t.Setenv(config.KUKEOND_SOCKET_GID.EnvVar(), "1234")
+
+	viper.Reset()
+	if err := kuke.LoadConfig(); err != nil {
+		t.Fatalf("LoadConfig() error = %v, want nil", err)
+	}
+
+	if got := viper.GetString(config.KUKEOND_SOCKET.ViperKey); got != "/run/kukeon-dev/kukeond.sock" {
+		t.Errorf("KUKEOND_SOCKET: got %q, want %q", got, "/run/kukeon-dev/kukeond.sock")
+	}
+	if got := viper.GetString(config.KUKEOND_SOCKET_GID.ViperKey); got != "1234" {
+		t.Errorf("KUKEOND_SOCKET_GID: got %q, want %q", got, "1234")
+	}
+}
+
 func TestNewKukeCmdRun(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
