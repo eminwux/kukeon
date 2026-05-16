@@ -36,3 +36,33 @@ func SetSelfHealGateForTest(fn func(string) bool) func() {
 	selfHealGate = fn
 	return func() { selfHealGate = prev }
 }
+
+// SetHostProbesForTest swaps both host probes and returns a restore closure.
+// TestMain calls this to neutralize the production /proc readers so the
+// existing test corpus does not depend on the runner's actual swap or
+// userspace-OOM configuration; individual tests call it again locally to
+// simulate specific bad-config hosts. Either argument may be nil to leave
+// that probe untouched.
+func SetHostProbesForTest(swap, oom func() string) func() {
+	prevSwap, prevOOM := probeSwap, probeUserspaceOOM
+	if swap != nil {
+		probeSwap = swap
+	}
+	if oom != nil {
+		probeUserspaceOOM = oom
+	}
+	return func() {
+		probeSwap = prevSwap
+		probeUserspaceOOM = prevOOM
+	}
+}
+
+// ProbeSwapAtForTest exposes the path-parameterized swap probe so unit
+// tests can exercise its file-parsing branches against a tmpdir-backed
+// fake /proc/swaps.
+func ProbeSwapAtForTest(path string) string { return probeSwapAt(path) }
+
+// ProbeUserspaceOOMAtForTest exposes the path-parameterized OOM-guard
+// probe so unit tests can exercise its /proc-walking logic against a
+// tmpdir-backed fake /proc populated with synthetic <pid>/comm files.
+func ProbeUserspaceOOMAtForTest(procDir string) string { return probeUserspaceOOMAt(procDir) }

@@ -218,6 +218,16 @@ func runCheck(stdout, stderr io.Writer, root string, nested, probe, verbose bool
 		return fmt.Errorf("cgroup pre-flight: %w", err)
 	}
 
+	// Host-level probes only fire on the unscoped host-root path —
+	// per-realm/space/stack/cell scopes inspect a sub-tree, not the host
+	// environment, so the host warnings would be misleading there. Deferred
+	// so they reach the operator regardless of which exit branch the
+	// cgroup-check result lands in (silent success, self-heal downgrade,
+	// or fatal failure).
+	if scopeLabel == "" {
+		defer runHostProbes(stderr)
+	}
+
 	if res.OK() {
 		// Silence on success keeps the dev-init.sh tail clean — only
 		// surface details when --verbose-status is set.

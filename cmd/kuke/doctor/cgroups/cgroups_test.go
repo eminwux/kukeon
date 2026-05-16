@@ -33,17 +33,24 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
-// TestMain mocks the shared euid lookup to euid=0 for every test in this
-// package. The new fail-fast root gate on --probe would otherwise
+// TestMain mocks the shared euid lookup to euid=0 and neutralizes the
+// host-environment probes (swap + userspace OOM guard) for every test in
+// this package. The fail-fast root gate on --probe would otherwise
 // short-circuit every default-probe and --probe test under non-root CI
 // runners (ubuntu-latest defaults to UID 1001), even though their fake
-// cgroupfs lives under t.TempDir() and never needs real root. Individual
-// cases that exercise the non-root rejection override this with their own
-// SetGeteuidForTesting call.
+// cgroupfs lives under t.TempDir() and never needs real root. The host
+// probes default to no-op returns so existing tests do not depend on the
+// runner's actual /proc/swaps or running-process set; individual probe
+// tests below override these with their own SetHostProbesForTest call.
 func TestMain(m *testing.M) {
-	restore := kukshared.SetGeteuidForTesting(func() int { return 0 })
+	restoreEuid := kukshared.SetGeteuidForTesting(func() int { return 0 })
+	restoreProbes := cgroupscmd.SetHostProbesForTest(
+		func() string { return "" },
+		func() string { return "" },
+	)
 	code := m.Run()
-	restore()
+	restoreProbes()
+	restoreEuid()
 	os.Exit(code)
 }
 
