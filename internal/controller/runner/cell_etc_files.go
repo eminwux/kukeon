@@ -143,14 +143,15 @@ func stampEtcFilePathsOnContainerSpec(spec *intmodel.ContainerSpec, hostnamePath
 }
 
 // stampContainerRecreateRuntimeFields applies the runtime-only field stamps
-// that the single-container StartContainer recreate path needs before
-// invoking BuildContainerSpec via CreateContainerFromSpec. Mirrors the
-// cell-wide stampCellEtcFilePathsOnContainers + stampCellProfileNameOnContainers
-// pair the StartCell / ensureCellContainers paths run, but per-spec since
-// the recreate path holds a local container-spec pointer. Without this,
-// `kuke start container` drops the recreated container's /etc/hosts +
-// /etc/hostname bind-mounts and KUKEON_CELL_PROFILE_NAME env entry. Issue
-// #354.
+// that single-container and root-container build paths need before invoking
+// BuildContainerSpec / BuildRootContainerSpec on a local container-spec
+// pointer. Mirrors the cell-wide stampCellEtcFilePathsOnContainers +
+// stampCellProfileNameOnContainers pair the cell-wide paths run, but
+// per-spec for call sites that hold a local container-spec value (the
+// StartContainer recreate path of issue #354, the StartCell root-recreate
+// path, and the ensureCellContainers root-creation path). Without this,
+// the recreated/created container drops its /etc/hosts + /etc/hostname
+// bind-mounts and KUKEON_CELL_PROFILE_NAME env entry.
 func (r *Exec) stampContainerRecreateRuntimeFields(spec *intmodel.ContainerSpec, cell *intmodel.Cell) {
 	hostnamePath, hostsPath, suppressHosts := r.cellEtcFilePaths(cell)
 	stampEtcFilePathsOnContainerSpec(spec, hostnamePath, hostsPath, suppressHosts)
