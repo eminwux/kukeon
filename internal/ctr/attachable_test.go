@@ -190,6 +190,18 @@ func TestBuildContainerSpec_AttachableTrue_MountsAndArgsWrap(t *testing.T) {
 			if containsString(ttyMount.Options, "ro") {
 				t.Errorf("tty mount must be read-write, got options=%v", ttyMount.Options)
 			}
+			// Issue #547: the tty bind must be `rprivate` so a nested
+			// kukeond running inside the attachable cell (e.g.
+			// `make dev-init` inside a `kukeon-dev-root` cell) cannot
+			// propagate mount events back through the bind and break the
+			// parent host's attach plumbing for this cell.
+			if !containsString(ttyMount.Options, "rprivate") {
+				t.Errorf(
+					"tty mount must carry %q for nested-kukeon safety, got options=%v",
+					"rprivate",
+					ttyMount.Options,
+				)
+			}
 
 			metaMount := findMount(spec, ctr.AttachableMetadataPath)
 			if metaMount == nil {
