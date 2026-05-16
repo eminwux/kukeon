@@ -145,6 +145,16 @@ type AttachableInjection struct {
 // the container's overlay — invisible to the host. A directory bind mount
 // keeps the inode host-visible by construction.
 //
+// The tty mount is also pinned to `rprivate` propagation (issue #547). The
+// attachable cell hosts contributor workflows that nest a second kukeond
+// inside (`make dev-init` inside a `kukeon-dev-root` cell); without
+// `rprivate`, mount events from the nested kukeond's `/run/kukeon/...`
+// activity could propagate back through the directory bind into the parent
+// host's `<HostTTYDir>` and break the parent's `kuke attach` plumbing for
+// the cell. `rprivate` makes the bind a one-way window: the nested daemon
+// still sees the parent's socket / capture / log inodes, but no mount
+// event in either direction escapes the boundary.
+//
 // The metadata mount is a *file* bind mount: kuketty reads the file once at
 // startup and never mutates it, so the unlink-and-recreate trap that
 // affects the socket inode does not apply.
@@ -160,7 +170,7 @@ func withAttachableMounts(inj AttachableInjection) oci.SpecOpts {
 			Destination: AttachableTTYDir,
 			Source:      inj.HostTTYDir,
 			Type:        "bind",
-			Options:     []string{"rbind", "rw"},
+			Options:     []string{"rbind", "rw", "rprivate"},
 		},
 		{
 			Destination: AttachableMetadataPath,
