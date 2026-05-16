@@ -20,6 +20,39 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
+# Pre-flight: refuse to run inside an attachable kukeon cell (issue #545).
+# The presence of /.kukeon/bin/kuketty (ctr.AttachableBinaryPath) is the
+# canonical "we are inside an attachable cell" probe — the daemon bind-
+# mounts the kuketty binary at this fixed in-container path whenever it
+# provisions an attachable container. Running dev-init in that context
+# provisions a *nested* kukeond whose own bind of /run/kukeon collides
+# with the parent host's /run/kukeon/tty bind, leaving the parent's
+# `kuke attach <this-cell>` unrecoverably broken on exit. Refuse fast,
+# before any state-mutating step (kuke daemon reset, kuke init).
+# KUKEON_DEV_INIT_ALLOW_NESTED=1 is an explicit opt-in for contributors
+# who accept the breakage; the script still warns loudly under override.
+if [ -e "/.kukeon/bin/kuketty" ]; then
+    if [ "${KUKEON_DEV_INIT_ALLOW_NESTED:-0}" != "1" ]; then
+        cat >&2 <<'EOF'
+dev-init.sh: refusing to run — detected /.kukeon/bin/kuketty, which
+means this script is executing inside an attachable kukeon cell.
+Provisioning a nested kukeond clobbers the parent host's /run/kukeon/tty
+bind mount and leaves `kuke attach <this-cell>` from the parent host
+unrecoverably broken (issue #545). The only recovery is
+`kuke purge cell <this-cell>` + recreate from the parent host, which
+kills any running workload inside this cell.
+
+Options:
+  * Run dev-init on the host, not inside an attachable kukeon cell.
+  * To override and accept that the parent host's attach to this cell
+    will break, set KUKEON_DEV_INIT_ALLOW_NESTED=1.
+EOF
+        exit 1
+    fi
+    printf '\n!! KUKEON_DEV_INIT_ALLOW_NESTED=1 — parent host attach to this cell\n' >&2
+    printf '!! will likely break (issue #545). Continuing anyway.\n\n' >&2
+fi
+
 LOCAL_TAG="kukeon-local:dev"
 KUKEOND_IMAGE_REF="docker.io/library/${LOCAL_TAG}"
 # The on-disk metadata layout lives under /opt/kukeon/data/ — see
