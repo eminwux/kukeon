@@ -266,6 +266,15 @@ func TestProbeUserspaceOOMAt(t *testing.T) {
 			wantWarn: true,
 		},
 		{
+			name: "missing procDir",
+			setup: func(procDir string) {
+				if err := os.RemoveAll(procDir); err != nil {
+					t.Fatalf("remove procDir: %v", err)
+				}
+			},
+			wantWarn: false,
+		},
+		{
 			name: "systemd-oomd present",
 			setup: func(procDir string) {
 				writeFakeProcessAt(t, procDir, "42", "systemd-oomd")

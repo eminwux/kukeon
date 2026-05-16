@@ -103,6 +103,9 @@ func defaultProbeUserspaceOOM() string {
 // sandboxed environment without /proc silently skips the check rather
 // than emitting a false-positive warning.
 func probeUserspaceOOMAt(procDir string) string {
+	if _, err := os.Stat(procDir); err != nil {
+		return ""
+	}
 	for _, name := range []string{"systemd-oomd", "earlyoom", "oomd"} {
 		if processRunningAt(procDir, name) {
 			return ""
