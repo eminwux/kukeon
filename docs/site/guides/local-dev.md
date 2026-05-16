@@ -36,15 +36,15 @@ User data under `/opt/kukeon/default/**` is untouched across iterations; only th
 
 ## Make targets
 
-| Target              | What it does                                                                                                                  |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `make kuke`         | Build the `kuke` binary (same binary is dispatched as `kukeond` via `argv[0]`)                                                |
-| `make install-dev`  | Symlink the in-tree `kuke` and `kukeond` binaries into `$(INSTALL_PREFIX)` (default `/usr/local/bin`). Idempotent (`ln -sf`). |
-| `make uninstall-dev`| Remove both symlinks from `$(INSTALL_PREFIX)`.                                                                                |
-| `make dev-init`     | The full canonical loop above. Auto-invokes `install-dev` so `sudo kuke …` works from any directory.                          |
-| `make test`         | Run the Go unit test suite                                                                                                    |
-| `make e2e`          | Run end-to-end tests against a real containerd (requires root)                                                                |
-| `make lint`         | Run `golangci-lint` with the repo's config                                                                                    |
+| Target               | What it does                                                                                                                  |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `make kuke`          | Build the `kuke` binary (same binary is dispatched as `kukeond` via `argv[0]`)                                                |
+| `make install-dev`   | Symlink the in-tree `kuke` and `kukeond` binaries into `$(INSTALL_PREFIX)` (default `/usr/local/bin`). Idempotent (`ln -sf`). |
+| `make uninstall-dev` | Remove both symlinks from `$(INSTALL_PREFIX)`.                                                                                |
+| `make dev-init`      | The full canonical loop above. Auto-invokes `install-dev` so `sudo kuke …` works from any directory.                          |
+| `make test`          | Run the Go unit test suite                                                                                                    |
+| `make e2e`           | Run end-to-end tests against a real containerd (requires root)                                                                |
+| `make lint`          | Run `golangci-lint` with the repo's config                                                                                    |
 
 Override `INSTALL_PREFIX` for non-standard PATH layouts: `make install-dev INSTALL_PREFIX=$HOME/.local/bin`.
 
@@ -74,11 +74,11 @@ To run individual phases by hand — typically while debugging a single phase:
 
    ```bash
    docker build --build-arg VERSION=v0.0.0-dev -t kukeon-local:dev .
-   sudo ./kuke image load --from-docker kukeon-local:dev --realm kuke-system --no-daemon
+   sudo ./kuke image load --from-docker kukeon-local:dev --realm kuke-system
    sudo ctr -n kuke-system.kukeon.io images ls | grep kukeon-local
    ```
 
-   `--no-daemon` is required because the daemon is not yet running.
+   `kuke image *` is daemon-independent by design — it always wraps containerd directly in-process — so this command works whether `kukeond` is running or not.
 
 4. **Run `kuke init`.**
 

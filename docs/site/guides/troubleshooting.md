@@ -19,7 +19,7 @@ sudo usermod -aG kukeon $USER
 # Log out and back in so the new group membership is picked up.
 ```
 
-After logging back in, `id -nG | grep kukeon` should show the group. Daemon-routed commands now work without `sudo`. Commands that mutate the host (`kuke init`, `kuke daemon reset`, `kuke image load --no-daemon`, `kuke doctor cgroups --probe`) still require root regardless.
+After logging back in, `id -nG | grep kukeon` should show the group. Daemon-routed commands now work without `sudo`. Commands that mutate the host (`kuke init`, `kuke daemon reset`, `kuke image load` (in-process by design — `--no-daemon` is ignored on image subcommands), `kuke doctor cgroups --probe`) still require root regardless.
 
 ## `kuke doctor cgroups` exits non-zero
 
@@ -33,13 +33,13 @@ host cgroup pre-flight: 1 controller missing on /sys/fs/cgroup
 
 **What it means.** `kuke doctor cgroups` compares the cgroup's available + delegated controllers against the set `kukeon init` will enable on the `kukeond` bootstrap cell, then classifies each gap:
 
-| Status                 | Why it appears                                                                                                    | What to do                                                                                                |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `kernel-missing`       | The kernel was built without the named controller.                                                                | Rebuild the kernel with the controller compiled in, or switch hosts.                                      |
-| `needs-delegation`     | The controller is advertised in `cgroup.controllers` but not in `cgroup.subtree_control`. Operator can fix it.    | Run the `echo +<ctrl> \| sudo tee …` line the doctor prints.                                              |
-| `not-delegated`        | Probe write returned `EOPNOTSUPP`: the cgroup-namespace trap (advertised but not delegated by the parent).        | Escalate to whoever owns the parent cgroup — your own write cannot fix this.                              |
-| `threaded-subtree`     | Probe write returned `EOPNOTSUPP` and the target cgroup is `domain threaded` / `threaded`.                        | Domain-only controllers (memory, io, …) cannot be enabled in a threaded subtree; adjust the cgroup.type.  |
-| `internal-process`     | Probe write returned `EBUSY`: the cgroup-v2 no-internal-process rule (the cgroup holds processes).                | Move processes to a child cgroup, or accept thread-aware-only enablement at this scope.                   |
+| Status             | Why it appears                                                                                                 | What to do                                                                                               |
+| ------------------ | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `kernel-missing`   | The kernel was built without the named controller.                                                             | Rebuild the kernel with the controller compiled in, or switch hosts.                                     |
+| `needs-delegation` | The controller is advertised in `cgroup.controllers` but not in `cgroup.subtree_control`. Operator can fix it. | Run the `echo +<ctrl> \| sudo tee …` line the doctor prints.                                             |
+| `not-delegated`    | Probe write returned `EOPNOTSUPP`: the cgroup-namespace trap (advertised but not delegated by the parent).     | Escalate to whoever owns the parent cgroup — your own write cannot fix this.                             |
+| `threaded-subtree` | Probe write returned `EOPNOTSUPP` and the target cgroup is `domain threaded` / `threaded`.                     | Domain-only controllers (memory, io, …) cannot be enabled in a threaded subtree; adjust the cgroup.type. |
+| `internal-process` | Probe write returned `EBUSY`: the cgroup-v2 no-internal-process rule (the cgroup holds processes).             | Move processes to a child cgroup, or accept thread-aware-only enablement at this scope.                  |
 
 `--probe` is the default — it disambiguates `not-delegated` and `threaded-subtree` from `needs-delegation`. Pass `--no-probe` for a strictly read-only check (useful in CI before you have root); the trap classifications won't fire.
 
@@ -119,7 +119,7 @@ sudo ctr -n kuke-system.kukeon.io images ls | grep kukeon
 **Fix.** Use `kuke image load --from-docker` so the right namespace is created and populated in one step:
 
 ```bash
-sudo kuke image load --from-docker kukeon-local:dev --realm kuke-system --no-daemon
+sudo kuke image load --from-docker kukeon-local:dev --realm kuke-system
 ```
 
 If you load with `ctr` directly, the target namespace must exist or `ctr images import` silently no-ops. Use `kuke image load` to avoid that footgun.

@@ -52,10 +52,7 @@ func NewDeleteCmd() *cobra.Command {
 				return errdefs.ErrImageNotFound
 			}
 
-			client, err := resolveClient(cmd)
-			if err != nil {
-				return err
-			}
+			client := resolveClient(cmd)
 			defer func() { _ = client.Close() }()
 
 			res, err := client.DeleteImage(cmd.Context(), realm, ref)

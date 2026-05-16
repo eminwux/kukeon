@@ -16,11 +16,71 @@
 
 // Package image hosts the `kuke image` parent command and its subcommands:
 // `load` (#200), `get` (#211), and `delete` (#212).
+//
+// `kuke image *` is the canonical example of the "daemon-independent,
+// in-process by design" command category captured in #217: every subcommand
+// wraps containerd's image API directly. Whether `kukeond` is running has
+// no effect on their semantics — they manipulate containerd content, not
+// `/opt/kukeon/<realm>/` state — so they always construct a local
+// in-process Client. The root persistent `--no-daemon` flag is ignored
+// here (#226).
 package image
 
 import (
+	"context"
+	"io"
+	"log/slog"
+
+	"github.com/eminwux/kukeon/cmd/config"
+	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/internal/client/local"
+	"github.com/eminwux/kukeon/internal/controller"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
+
+// MockControllerKey injects a mock Client via context for tests. Shared by
+// every `kuke image *` subcommand so a single per-test fake can wire up
+// load/get/delete behavior together.
+type MockControllerKey struct{}
+
+// Client is the narrow surface every `kuke image *` subcommand uses. It is
+// satisfied by `*local.Client` (the in-process containerd-backed client)
+// and by per-test fakes injected via MockControllerKey. There is no RPC
+// implementation by design — see the package doc.
+type Client interface {
+	io.Closer
+
+	LoadImage(ctx context.Context, realm string, tarball []byte) (kukeonv1.LoadImageResult, error)
+	ListImages(ctx context.Context, realm string) (kukeonv1.ListImagesResult, error)
+	GetImage(ctx context.Context, realm, ref string) (kukeonv1.GetImageResult, error)
+	DeleteImage(ctx context.Context, realm, ref string) (kukeonv1.DeleteImageResult, error)
+}
+
+// resolveClient returns the Client every `kuke image *` subcommand uses.
+// Tests inject a fake via MockControllerKey; otherwise the result is a
+// fresh in-process local.Client wired to the root persistent --run-path
+// and --containerd-socket flags. The root persistent --no-daemon flag is
+// not consulted — image commands are in-process by design (#226).
+//
+// The logger fallback (a discard handler when LoggerFromCmd cannot find one
+// in the command context) makes this safe to call in tests that drive the
+// cobra cmd directly without seeding `types.CtxLogger`. There is no error
+// return because every branch produces a usable Client.
+func resolveClient(cmd *cobra.Command) Client {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(Client); ok {
+		return mockClient
+	}
+	logger, err := kukshared.LoggerFromCmd(cmd)
+	if err != nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	return local.New(cmd.Context(), logger, controller.Options{
+		RunPath:          viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey),
+		ContainerdSocket: viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
+	})
+}
 
 // NewImageCmd builds the `kuke image` parent command and registers its
 // subcommands. Persistent flags on the root kuke command are inherited

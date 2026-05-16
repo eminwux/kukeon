@@ -85,22 +85,12 @@ type Client interface {
 	RefreshAll(ctx context.Context) (RefreshAllResult, error)
 	ApplyDocuments(ctx context.Context, rawYAML []byte) (ApplyDocumentsResult, error)
 
-	// LoadImage imports an OCI/docker image tarball into the named realm's
-	// containerd namespace. The tarball ships in-band; see LoadImageArgs.
-	LoadImage(ctx context.Context, realm string, tarball []byte) (LoadImageResult, error)
-
-	// ListImages enumerates images in the named realm's containerd
-	// namespace.
-	ListImages(ctx context.Context, realm string) (ListImagesResult, error)
-
-	// GetImage returns metadata for the named image ref in the named
-	// realm. errdefs.ErrImageNotFound is returned when the ref is absent.
-	GetImage(ctx context.Context, realm, ref string) (GetImageResult, error)
-
-	// DeleteImage removes the named image ref from the named realm's
-	// containerd namespace. errdefs.ErrImageNotFound is returned when
-	// the ref does not exist.
-	DeleteImage(ctx context.Context, realm, ref string) (DeleteImageResult, error)
+	// NOTE: image operations (LoadImage / ListImages / GetImage /
+	// DeleteImage) are intentionally NOT on this interface. They are
+	// daemon-independent by design (#226) and live on the in-process
+	// client (`*local.Client`) only — see the `cmd/kuke/image` package's
+	// `Client` interface, which the image subcommands use directly. The
+	// RPC daemon does not serve image methods.
 
 	Ping(ctx context.Context) error
 }
@@ -193,10 +183,6 @@ const (
 
 	MethodRefreshAll     = ServiceName + ".RefreshAll"
 	MethodApplyDocuments = ServiceName + ".ApplyDocuments"
-	MethodLoadImage      = ServiceName + ".LoadImage"
-	MethodListImages     = ServiceName + ".ListImages"
-	MethodGetImage       = ServiceName + ".GetImage"
-	MethodDeleteImage    = ServiceName + ".DeleteImage"
 
 	MethodPing = ServiceName + ".Ping"
 )

@@ -72,7 +72,7 @@ At minimum Kukeon needs `bridge`, `host-local`, `loopback`, and `portmap`.
 
 Two paths exist, depending on whether the command goes through `kukeond` or bypasses it:
 
-- **Direct host writes need root.** `kuke init`, `kuke daemon reset`, `kuke image load --no-daemon`, `kuke doctor cgroups --probe`, and anything else run with `--no-daemon` touch cgroups, netlink, containerd, or `/opt/kukeon` directly. Run them with `sudo`; otherwise they fail fast with a clear "must run as root" error before touching anything.
+- **Direct host writes need root.** `kuke init`, `kuke daemon reset`, `kuke image load` (in-process by design — `--no-daemon` is ignored on image subcommands), `kuke doctor cgroups --probe`, and anything else run with `--no-daemon` touch cgroups, netlink, containerd, or `/opt/kukeon` directly. Run them with `sudo`; otherwise they fail fast with a clear "must run as root" error before touching anything.
 - **Daemon-routed commands do not need root.** `kuke init` provisions a system `kukeon` group and sets the daemon socket at `/run/kukeon/kukeond.sock` to mode `0660 root:kukeon`. Adding a user to that group (`sudo usermod -aG kukeon $USER`, then re-login) is enough for `kuke get`, `kuke create`, `kuke apply`, `kuke delete`, `kuke log`, and `kuke attach` to work without `sudo`. Writes under `/opt/kukeon` still require root, but they go through the daemon.
 
 See [Getting Started → Daily use without sudo](../getting-started.md#daily-use-without-sudo) for the post-init steps.

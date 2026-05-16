@@ -55,10 +55,7 @@ func NewGetCmd() *cobra.Command {
 				return err
 			}
 
-			client, err := resolveClient(cmd)
-			if err != nil {
-				return err
-			}
+			client := resolveClient(cmd)
 			defer func() { _ = client.Close() }()
 
 			if len(args) > 0 && strings.TrimSpace(args[0]) != "" {

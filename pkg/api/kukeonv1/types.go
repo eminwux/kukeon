@@ -655,31 +655,25 @@ type ApplyResourceResult struct {
 }
 
 // ---- Image ----
+//
+// Image result types live here (and not on the RPC interface) so the in-
+// process `*local.Client` returned by the daemon-independent `kuke image *`
+// path (#226) can keep using a wire-compatible shape without depending on
+// internal/controller. The Args/Reply wire envelopes were retired with the
+// RPC handlers — the daemon does not serve image methods.
 
-// LoadImageArgs carries an OCI/docker image tarball plus the target realm.
-// The tarball ships as a byte slice (mirroring ApplyDocumentsArgs.RawYAML);
-// phase 1 sizes are bounded by the dev loop (≈100MB), so JSON-RPC roundtrip
-// cost is acceptable. Larger payloads will move to a streaming endpoint when
-// the multi-host story arrives.
-type LoadImageArgs struct {
-	Realm   string
-	Tarball []byte
-}
-
-type LoadImageReply struct {
-	Result LoadImageResult
-	Err    *APIError
-}
-
+// LoadImageResult reports the outcome of a `kuke image load` import: the
+// realm/namespace it landed in and the canonical image refs containerd
+// recorded.
 type LoadImageResult struct {
 	Realm     string
 	Namespace string
 	Images    []string
 }
 
-// ImageInfo is the wire view of one containerd image. Size is best-effort:
-// the daemon emits -1 when containerd cannot resolve the size locally so the
-// CLI can render "-" rather than "0 B".
+// ImageInfo is the rendered view of one containerd image. Size is best-
+// effort: -1 is emitted when containerd cannot resolve the size locally so
+// the CLI renders "-" rather than "0 B".
 type ImageInfo struct {
 	Name      string
 	Size      int64
@@ -687,17 +681,6 @@ type ImageInfo struct {
 	Digest    string
 	MediaType string
 	Labels    map[string]string
-}
-
-// ListImagesArgs is the wire request for ListImages.
-type ListImagesArgs struct {
-	Realm string
-}
-
-// ListImagesReply is the wire response for ListImages.
-type ListImagesReply struct {
-	Result ListImagesResult
-	Err    *APIError
 }
 
 // ListImagesResult lists the images present in a realm's containerd
@@ -708,35 +691,11 @@ type ListImagesResult struct {
 	Images    []ImageInfo
 }
 
-// GetImageArgs is the wire request for GetImage.
-type GetImageArgs struct {
-	Realm string
-	Ref   string
-}
-
-// GetImageReply is the wire response for GetImage.
-type GetImageReply struct {
-	Result GetImageResult
-	Err    *APIError
-}
-
 // GetImageResult carries the metadata of one named image in a realm.
 type GetImageResult struct {
 	Realm     string
 	Namespace string
 	Image     ImageInfo
-}
-
-// DeleteImageArgs is the wire request for DeleteImage.
-type DeleteImageArgs struct {
-	Realm string
-	Ref   string
-}
-
-// DeleteImageReply is the wire response for DeleteImage.
-type DeleteImageReply struct {
-	Result DeleteImageResult
-	Err    *APIError
 }
 
 // DeleteImageResult reports the outcome of a `kuke image delete` removal.

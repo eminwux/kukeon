@@ -23,17 +23,12 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/eminwux/kukeon/cmd/config"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
-
-// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
-type MockControllerKey struct{}
 
 // NewLoadCmd builds the `kuke image load` subcommand. Either a positional
 // tarball path or `--from-docker <ref>` is required; passing both is a usage
@@ -47,14 +42,15 @@ func NewLoadCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// --no-daemon writes directly under /opt/kukeon/<realm>/…,
-			// which is root:kukeon after `kuke init`. Daemon-routed loads
-			// (the default) round-trip through kukeond and stay fine for
-			// `kukeon`-group rootless clients.
-			if viper.GetBool(config.KUKEON_ROOT_NO_DAEMON.ViperKey) {
-				if err := kukshared.RequireRoot("kuke image load --no-daemon"); err != nil {
-					return err
-				}
+			// `kuke image load` writes directly to containerd's content
+			// store as the in-process client; the containerd socket is
+			// root-only on a stock host. Fail fast under non-root euid
+			// with a friendly message rather than letting containerd
+			// surface an opaque EACCES later. The root persistent
+			// `--no-daemon` flag is ignored — load is in-process by
+			// design (#226).
+			if err := kukshared.RequireRoot("kuke image load"); err != nil {
+				return err
 			}
 
 			realm, err := cmd.Flags().GetString("realm")
@@ -77,10 +73,7 @@ func NewLoadCmd() *cobra.Command {
 				return err
 			}
 
-			client, err := resolveClient(cmd)
-			if err != nil {
-				return err
-			}
+			client := resolveClient(cmd)
 			defer func() { _ = client.Close() }()
 
 			result, err := client.LoadImage(cmd.Context(), realm, tarball)
@@ -157,13 +150,6 @@ func readFromDocker(cmd *cobra.Command, ref string) ([]byte, error) {
 		return nil, errdefs.ErrTarballRequired
 	}
 	return out, nil
-}
-
-func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
-	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
-		return mockClient, nil
-	}
-	return kukshared.ClientFromCmd(cmd)
 }
 
 func printLoadResult(cmd *cobra.Command, result kukeonv1.LoadImageResult) {

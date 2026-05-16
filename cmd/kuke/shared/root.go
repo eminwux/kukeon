@@ -41,8 +41,8 @@ func SetGeteuidForTesting(f func() int) func() {
 }
 
 // RequireRoot is the fail-fast UID gate used by direct-write subcommands
-// (kuke init, kuke daemon reset, kuke image load --no-daemon, kuke doctor
-// cgroups --probe). When the effective UID is non-zero it returns an error
+// (kuke init, kuke daemon reset, kuke image load, kuke doctor cgroups
+// --probe). When the effective UID is non-zero it returns an error
 // wrapping errdefs.ErrMustRunAsRoot that names the subcommand and suggests
 // re-running under `sudo`, so operators see a clear cause instead of a
 // confusing "operation not permitted" several phases in. Daemon-routed

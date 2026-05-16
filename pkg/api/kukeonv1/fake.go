@@ -177,22 +177,6 @@ func (FakeClient) ApplyDocuments(context.Context, []byte) (ApplyDocumentsResult,
 	return ApplyDocumentsResult{}, ErrUnexpectedCall
 }
 
-func (FakeClient) LoadImage(context.Context, string, []byte) (LoadImageResult, error) {
-	return LoadImageResult{}, ErrUnexpectedCall
-}
-
-func (FakeClient) ListImages(context.Context, string) (ListImagesResult, error) {
-	return ListImagesResult{}, ErrUnexpectedCall
-}
-
-func (FakeClient) GetImage(context.Context, string, string) (GetImageResult, error) {
-	return GetImageResult{}, ErrUnexpectedCall
-}
-
-func (FakeClient) DeleteImage(context.Context, string, string) (DeleteImageResult, error) {
-	return DeleteImageResult{}, ErrUnexpectedCall
-}
-
 func (FakeClient) Ping(context.Context) error {
 	return ErrUnexpectedCall
 }

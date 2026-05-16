@@ -10,11 +10,11 @@ Every realm maps to its own containerd namespace (`<realm>.kukeon.io`). `kuke im
 
 ## Subcommands
 
-| Command            | What it does                                                        |
-| ------------------ | ------------------------------------------------------------------- |
-| `kuke image load`  | Import an OCI/docker image tarball into a realm's containerd namespace |
-| `kuke image get`   | List or describe images in a realm's containerd namespace            |
-| `kuke image delete`| Remove an image from a realm's containerd namespace                  |
+| Command             | What it does                                                           |
+| ------------------- | ---------------------------------------------------------------------- |
+| `kuke image load`   | Import an OCI/docker image tarball into a realm's containerd namespace |
+| `kuke image get`    | List or describe images in a realm's containerd namespace              |
+| `kuke image delete` | Remove an image from a realm's containerd namespace                    |
 
 ## kuke image load
 
@@ -24,12 +24,12 @@ kuke image load [tarball | -] [flags]
 
 Import an OCI/docker image tarball into the containerd namespace mapped to `--realm`. Pass a tarball path, `-` for stdin, or `--from-docker <ref>` to shell out to `docker save`.
 
-`kuke image load --no-daemon` (the bootstrap path used by `kuke init`) requires root; it fails fast with a clear remediation if you forget `sudo`.
+`kuke image *` is daemon-independent by design: every subcommand wraps containerd's image API directly in-process and ignores the root persistent `--no-daemon` flag — there is no "with daemon" mode for images. `kuke image load` always requires root because it writes to containerd's content store; it fails fast with a clear remediation if you forget `sudo`.
 
-| Flag            | Default   | Description                                                                                       |
-| --------------- | --------- | ------------------------------------------------------------------------------------------------- |
+| Flag            | Default   | Description                                                                                         |
+| --------------- | --------- | --------------------------------------------------------------------------------------------------- |
 | `--from-docker` | (empty)   | Image reference to pipe in via `docker save <ref>` (mutually exclusive with the positional tarball) |
-| `--realm`       | `default` | Target realm; the image lands in `<realm>.kukeon.io`                                              |
+| `--realm`       | `default` | Target realm; the image lands in `<realm>.kukeon.io`                                                |
 
 ### Examples
 
@@ -38,7 +38,7 @@ Import an OCI/docker image tarball into the containerd namespace mapped to `--re
 sudo kuke image load my-image.tar
 
 # Pipe a docker-build into kuke-system for a local kukeond image
-sudo kuke image load --from-docker kukeon-local:dev --realm kuke-system --no-daemon
+sudo kuke image load --from-docker kukeon-local:dev --realm kuke-system
 
 # Stdin
 docker save myimage:latest | sudo kuke image load -
@@ -92,5 +92,5 @@ sudo kuke image delete docker.io/library/kukeon-local:dev --realm kuke-system
 
 ## Related
 
-- [kuke init](kuke-init.md) — uses `kuke image load --from-docker --no-daemon` in the local-dev bootstrap path
+- [kuke init](kuke-init.md) — uses `kuke image load --from-docker` in the local-dev bootstrap path
 - [Local development](../guides/local-dev.md) — first-time bootstrap with a local image
