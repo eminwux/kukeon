@@ -244,28 +244,51 @@ func carryStackLifecycle(orig intmodel.StackStatus, next *intmodel.StackStatus) 
 
 // RefreshCell refreshes the status of a cell and its containers.
 // Returns the updated cell, number of containers updated, and any error.
+//
+// Mirrors the container-aware derivation ReconcileCell does (#543): the
+// post-reboot scenario (cgroup wiped, container records survive, tasks
+// gone) must transition cells out of Unknown so `kuke refresh` surfaces
+// the same Cells / Containers updates the reconcile loop does. Pure
+// "cgroup-only" cell-state derivation would re-park them at Unknown.
 func (r *Exec) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error) {
 	originalStatus := cell.Status
+	originalContainerStatuses := append(
+		[]intmodel.ContainerStatus(nil), originalStatus.Containers...)
+
 	newStatus := intmodel.CellStatus{
 		State:      intmodel.CellStateUnknown, // Default to Unknown - will be updated if checks succeed
 		CgroupPath: originalStatus.CgroupPath,
 	}
 
-	// Check cgroup existence
+	// Check cgroup existence. Used to set CgroupReady and to guard the
+	// derivation pass below — when the filesystem check itself errors we
+	// have no positive observation either way and stay at Unknown.
 	cgroupExists, err := r.ExistsCgroup(cell)
-	switch {
-	case err != nil:
+	if err != nil {
 		r.logger.DebugContext(r.ctx, "failed to check cell cgroup", "cell", cell.Metadata.Name, "error", err)
-		// If check fails, state remains Unknown (already set)
-	case cgroupExists:
-		newStatus.State = intmodel.CellStateReady
+	} else if cgroupExists {
 		newStatus.CgroupReady = true
-	default:
-		// Cgroup doesn't exist - cell is unknown
-		newStatus.State = intmodel.CellStateUnknown
 	}
 
 	carryCellLifecycle(originalStatus, &newStatus)
+
+	// Populate container statuses so derivation reads from a fresh
+	// snapshot and so containersUpdated reflects per-container state
+	// changes (the post-reboot Unknown → Stopped transition that the
+	// AC #3 calls out for `kuke refresh`).
+	if populateErr := r.populateCellContainerStatuses(&cell); populateErr != nil {
+		r.logger.DebugContext(r.ctx, "populate container statuses failed",
+			"cell", cell.Metadata.Name, "error", populateErr)
+	}
+	newStatus.Containers = cell.Status.Containers
+
+	// Derive cell state from the container snapshot when the cgroup
+	// check didn't error. CreateCell-race protection comes from
+	// latchReadyObserved below — a cell that has never been observed
+	// Ready cannot be reaped regardless of what derivation reads back.
+	if err == nil {
+		newStatus.State = r.deriveCellState(cell)
+	}
 
 	// Run ReadyObserved through the same one-way latch ReconcileCell uses.
 	// Without this, `kuke refresh` racing a synchronous Ready write would
@@ -291,12 +314,23 @@ func (r *Exec) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error) {
 		}
 	}
 
+	// Surface per-container state transitions to the operator: any
+	// container whose snapshot State differs from the persisted record
+	// counts toward containersUpdated, so `kuke refresh` lists them
+	// under the Containers: line. Without this, refreshContainerStatus
+	// alone only fires the counter on a missing-ContainerdID fill-in.
+	if !containerStatusesEqual(originalContainerStatuses, newStatus.Containers) {
+		containersUpdated += countContainerStatusChanges(
+			originalContainerStatuses, newStatus.Containers)
+	}
+
 	// Update cell metadata if status changed or containers were updated
 	cellUpdated := false
 	if newStatus.State != originalStatus.State ||
 		newStatus.CgroupPath != originalStatus.CgroupPath ||
 		newStatus.CgroupReady != originalStatus.CgroupReady ||
-		newStatus.ReadyObserved != originalStatus.ReadyObserved {
+		newStatus.ReadyObserved != originalStatus.ReadyObserved ||
+		!containerStatusesEqual(originalContainerStatuses, newStatus.Containers) {
 		cell.Status = newStatus
 		cellUpdated = true
 	}
@@ -309,6 +343,24 @@ func (r *Exec) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error) {
 	}
 
 	return cell, containersUpdated, nil
+}
+
+// countContainerStatusChanges counts containers whose State differs
+// from the persisted record (or are newly present). Used by RefreshCell
+// to size the Containers: line in `kuke refresh` summaries.
+func countContainerStatusChanges(orig, next []intmodel.ContainerStatus) int {
+	prevByID := make(map[string]intmodel.ContainerState, len(orig))
+	for i := range orig {
+		prevByID[orig[i].ID] = orig[i].State
+	}
+	changed := 0
+	for i := range next {
+		prev, existed := prevByID[next[i].ID]
+		if !existed || prev != next[i].State {
+			changed++
+		}
+	}
+	return changed
 }
 
 // carryCellLifecycle is the Cell counterpart of carryRealmLifecycle.
@@ -493,7 +545,7 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 		return cell, ReconcileOutcome{Updated: updated}, nil
 	}
 
-	cgroupExists, cgroupErr := r.ExistsCgroup(cell)
+	_, cgroupErr := r.ExistsCgroup(cell)
 	if cgroupErr != nil {
 		r.logger.DebugContext(r.ctx, "failed to check cell cgroup",
 			"cell", cell.Metadata.Name, "error", cgroupErr)
@@ -509,8 +561,18 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 			"cell", cell.Metadata.Name, "error", err)
 	}
 
+	// Run derivation whenever the filesystem check succeeded, even when the
+	// cgroup is absent — a missing cgroup with surviving containerd
+	// containers and no tasks is the post-reboot signature (#543), and
+	// staying at Unknown there bypasses cellStateAutoDeleteTriggers /
+	// shouldWindDownCell forever. The cgroupErr != nil path still parks at
+	// Unknown because we have no positive observation of either side.
+	// The CreateCell-race protection that used to come from the cgroup
+	// gate is now carried entirely by latchReadyObserved: a cell that has
+	// never been observed Ready cannot be reaped, regardless of what
+	// derivation reads back.
 	newState := intmodel.CellStateUnknown
-	if cgroupErr == nil && cgroupExists {
+	if cgroupErr == nil {
 		newState = r.deriveCellState(cell)
 	}
 
