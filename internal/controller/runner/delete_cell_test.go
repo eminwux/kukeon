@@ -44,10 +44,15 @@ import (
 // tests. Methods unused by DeleteCell return zero values rather than panic so
 // adding a new code path through ctr.Client doesn't require revisiting this
 // fake — the controller-level error assertions catch unintended behavior.
+// Also reused by container_state / reconcile tests that need ExistsContainer
+// + TaskStatus hooks (the post-reboot reproduction in #543).
 type deleteCellFakeClient struct {
 	deleteContainerFn func(namespace, id string, opts ctr.ContainerDeleteOptions) error
 	stopContainerFn   func(namespace, id string, opts ctr.StopContainerOptions) (*containerd.ExitStatus, error)
 	listContainersFn  func(namespace string, filters ...string) ([]containerd.Container, error)
+	existsContainerFn func(namespace, id string) (bool, error)
+	taskStatusFn      func(namespace, id string) (containerd.Status, error)
+	loadCgroupFn      func(group, mountpoint string) (*cgroup2.Manager, error)
 }
 
 func (c *deleteCellFakeClient) Connect() error { return nil }
@@ -72,7 +77,10 @@ func (c *deleteCellFakeClient) NewCgroup(ctr.CgroupSpec) (*cgroup2.Manager, erro
 	return nil, nil
 }
 
-func (c *deleteCellFakeClient) LoadCgroup(string, string) (*cgroup2.Manager, error) {
+func (c *deleteCellFakeClient) LoadCgroup(group, mountpoint string) (*cgroup2.Manager, error) {
+	if c.loadCgroupFn != nil {
+		return c.loadCgroupFn(group, mountpoint)
+	}
 	//nolint:nilnil // same as NewCgroup
 	return nil, nil
 }
@@ -116,7 +124,10 @@ func (c *deleteCellFakeClient) ListContainers(namespace string, filters ...strin
 	return nil, nil
 }
 
-func (c *deleteCellFakeClient) ExistsContainer(string, string) (bool, error) {
+func (c *deleteCellFakeClient) ExistsContainer(namespace, id string) (bool, error) {
+	if c.existsContainerFn != nil {
+		return c.existsContainerFn(namespace, id)
+	}
 	return false, nil
 }
 
@@ -143,7 +154,10 @@ func (c *deleteCellFakeClient) StopContainer(
 	return nil, errdefs.ErrTaskNotFound
 }
 
-func (c *deleteCellFakeClient) TaskStatus(string, string) (containerd.Status, error) {
+func (c *deleteCellFakeClient) TaskStatus(namespace, id string) (containerd.Status, error) {
+	if c.taskStatusFn != nil {
+		return c.taskStatusFn(namespace, id)
+	}
 	return containerd.Status{}, nil
 }
 

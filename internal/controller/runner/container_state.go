@@ -174,6 +174,24 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 		return state, nil
 	}
 
+	// TaskStatus failed against an existing container: the container record
+	// survived but its task is gone. The headline case is a host reboot
+	// (cgroups + tasks wiped, container records survive in containerd's
+	// boltdb): without this branch the cell-level derivation can never see
+	// past Unknown and the reconciler leaves every previously-Ready cell
+	// stuck (#543). A wrapped ErrTaskNotFound is the "no task" signal
+	// loadTask emits via container.Task() — anything else is treated as a
+	// transient containerd RPC blip and stays Unknown to avoid reaping a
+	// cell on a misread.
+	if errors.Is(taskStatusErr, errdefs.ErrTaskNotFound) {
+		r.logger.InfoContext(r.ctx, "container exists but task is gone; reporting Stopped",
+			"container", containerID,
+			"containerdID", containerdID,
+			"namespace", namespace,
+			"error", taskStatusErr)
+		return intmodel.ContainerStateStopped, nil
+	}
+
 	// TaskStatus failed - return Unknown since we can't determine the state
 	r.logger.InfoContext(r.ctx, "failed to get container state via TaskStatus",
 		"container", containerID,
