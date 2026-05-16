@@ -165,6 +165,20 @@ func NewKukeondCmd() (*cobra.Command, error) {
 		return nil, err
 	}
 
+	cmd.PersistentFlags().Int64(
+		"default-memory-limit-bytes", 0,
+		"Daemon-wide fallback memory cap (bytes) for any admitted container "+
+			"whose Resources.MemoryLimitBytes is unset. 0 disables; an explicit "+
+			"per-container limit always wins. Recommended on hosts without swap "+
+			"and without a userspace OOM guard. (issue #531)",
+	)
+	if err := viper.BindPFlag(
+		config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey,
+		cmd.PersistentFlags().Lookup("default-memory-limit-bytes"),
+	); err != nil {
+		return nil, err
+	}
+
 	bindEnvVars()
 
 	cmd.AddCommand(newServeCmd())
@@ -186,6 +200,7 @@ func bindEnvVars() {
 		config.KUKEOND_SOCKET,
 		config.KUKEOND_SOCKET_GID,
 		config.KUKEOND_RECONCILE_INTERVAL,
+		config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES,
 	} {
 		_ = v.BindEnv()
 	}
@@ -229,6 +244,11 @@ func applyServerConfiguration(cmd *cobra.Command, spec v1beta1.ServerConfigurati
 		!flagChanged(cmd, "cgroup-root") &&
 		!envSet(config.KUKEON_ROOT_CGROUP_ROOT) {
 		viper.Set(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey, spec.CgroupRoot)
+	}
+	if spec.DefaultMemoryLimitBytes > 0 &&
+		!flagChanged(cmd, "default-memory-limit-bytes") &&
+		!envSet(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES) {
+		viper.Set(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey, spec.DefaultMemoryLimitBytes)
 	}
 }
 

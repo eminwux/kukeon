@@ -57,6 +57,7 @@ func TestApplyServerConfigurationDefaultsLayered(t *testing.T) {
 		ReconcileInterval:         "45s",
 		ContainerdNamespaceSuffix: "dev.kukeon.io",
 		CgroupRoot:                "/kukeon-dev",
+		DefaultMemoryLimitBytes:   2 * 1024 * 1024 * 1024,
 	}
 	applyServerConfiguration(cmd, spec)
 
@@ -84,6 +85,47 @@ func TestApplyServerConfigurationDefaultsLayered(t *testing.T) {
 	}
 	if got := viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey); got != spec.CgroupRoot {
 		t.Errorf("CgroupRoot: got %q, want %q", got, spec.CgroupRoot)
+	}
+	if got := viper.GetInt64(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey); got != spec.DefaultMemoryLimitBytes {
+		t.Errorf("DefaultMemoryLimitBytes: got %d, want %d", got, spec.DefaultMemoryLimitBytes)
+	}
+}
+
+// TestNewKukeondCmdHasDefaultMemoryLimitFlag asserts the persistent flag and
+// its viper / env bindings are wired so operators on no-swap hosts can set
+// the daemon-wide fallback (#531).
+func TestNewKukeondCmdHasDefaultMemoryLimitFlag(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	cmd, err := NewKukeondCmd()
+	if err != nil {
+		t.Fatalf("NewKukeondCmd() error = %v", err)
+	}
+	if flag := cmd.PersistentFlags().Lookup("default-memory-limit-bytes"); flag == nil {
+		t.Fatal("--default-memory-limit-bytes persistent flag not found")
+	}
+}
+
+// TestApplyServerConfigurationDefaultMemoryLimitEnvOverridesConfig pins the
+// --flag > env > YAML > default precedence for the new field. The YAML value
+// must be ignored when KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES is set.
+func TestApplyServerConfigurationDefaultMemoryLimitEnvOverridesConfig(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	viper.Reset()
+
+	cmd, err := NewKukeondCmd()
+	if err != nil {
+		t.Fatalf("NewKukeondCmd() error = %v", err)
+	}
+	t.Setenv(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES.EnvVar(), "8589934592") // 8 GiB
+
+	spec := v1beta1.ServerConfigurationSpec{
+		DefaultMemoryLimitBytes: 2 * 1024 * 1024 * 1024, // 2 GiB — must be ignored
+	}
+	applyServerConfiguration(cmd, spec)
+
+	if got := viper.GetInt64(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey); got != 8589934592 {
+		t.Errorf("env override lost: got %d, want %d (8 GiB)", got, 8589934592)
 	}
 }
 

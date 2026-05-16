@@ -64,10 +64,20 @@ func DefaultRootContainerSpec(
 // BuildRootContainerSpec converts the internal root container spec into an
 // internal ctr.ContainerSpec with the expected defaults applied.
 // Uses ContainerdID if available, otherwise falls back to ID.
+//
+// Variadic BuildOption is honored for the daemon-wide knobs that also affect
+// non-root containers — today the daemon-default memory cap (issue #531).
+// Per-spec-only BuildOptions like WithAttachableInjection have no effect on a
+// root container spec.
 func BuildRootContainerSpec(
 	rootSpec intmodel.ContainerSpec,
 	labels map[string]string,
+	options ...BuildOption,
 ) ContainerSpec {
+	var opts buildOpts
+	for _, apply := range options {
+		apply(&opts)
+	}
 	// Use ContainerdID if available, otherwise fall back to ID
 	containerdID := rootSpec.ContainerdID
 	if containerdID == "" {
@@ -176,6 +186,14 @@ func BuildRootContainerSpec(
 	}
 
 	specOpts = append(specOpts, securitySpecOpts(rootSpec)...)
+
+	// Daemon-default memory cap: mirrors BuildContainerSpec so the same fallback
+	// reaches root containers when the daemon is configured with one (#531).
+	// The spec wins when it already carries a positive limit.
+	if opts.defaultMemoryLimitBytes > 0 && !specHasMemoryLimit(rootSpec) {
+		//nolint:gosec // bounded by the > 0 guard above and clamped to >= 0 in cmd/kukeond/serve.go
+		specOpts = append(specOpts, oci.WithMemoryLimit(uint64(opts.defaultMemoryLimitBytes)))
+	}
 
 	rootLabels := copyLabels(labels)
 	rootLabels[rootContainerLabelKey] = rootContainerLabelValue

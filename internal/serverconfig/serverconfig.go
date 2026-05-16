@@ -126,6 +126,14 @@ spec:
   # instance on the same host under a disjoint cgroup tree.
   # Default: /kukeon
   cgroupRoot: /kukeon
+
+  # Daemon-wide fallback memory limit (in bytes) applied to every admitted
+  # container whose Resources.MemoryLimitBytes is unset or zero. An explicit
+  # per-container limit always wins. Recommended on hosts without swap and
+  # without a userspace OOM guard (systemd-oomd / earlyoom), where an
+  # unbounded workload can wedge the whole host. Zero disables the fallback.
+  # Default: 0
+  defaultMemoryLimitBytes: 0
 `
 
 // WriteDefault writes the commented default ServerConfiguration to path when
