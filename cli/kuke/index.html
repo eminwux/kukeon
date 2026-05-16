@@ -2845,7 +2845,7 @@
 <p>The daemon endpoint. Today only the <code>unix://</code> scheme is supported. The <code>ssh://user@host</code> scheme is reserved for a future remote-management feature; don't use it yet.</p>
 <h3 id="-no-daemon-false"><code>--no-daemon</code> (<code>false</code>)<a class="headerlink" href="#-no-daemon-false" title="Permanent link">&para;</a></h3>
 <p>Bypass <code>kukeond</code> and run the operation in-process. Requires root: the client now directly touches containerd, CNI, and cgroups.</p>
-<p>Use when the daemon is stopped, when bootstrapping (<code>kuke init</code> and <code>kuke image load --no-daemon</code> both run this path), or while debugging.</p>
+<p>Use when the daemon is stopped, when bootstrapping (<code>kuke init</code> runs this path), or while debugging. <code>kuke image *</code> is daemon-independent by design and is always in-process regardless of <code>--no-daemon</code>.</p>
 <p>Don't run two <code>--no-daemon</code> commands at the same time — they'll race on the same on-disk state.</p>
 <h3 id="-verbose-v-false"><code>--verbose</code>, <code>-v</code> (<code>false</code>)<a class="headerlink" href="#-verbose-v-false" title="Permanent link">&para;</a></h3>
 <p>Turn on structured slog output to stderr. Pair with <code>--log-level debug</code> for the chattiest view.</p>
@@ -2887,7 +2887,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 20:07:10 UTC">May 13, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 16, 2026 20:57:51 UTC">May 16, 2026</span>
   </span>
 
     
