@@ -51,7 +51,7 @@ const (
 )
 
 // ParseOutputFormat resolves the output format using kuke's standard
-// precedence: explicit `--output`/`-o` flag > KUKEON_GET_OUTPUT env (and
+// precedence: explicit `--output`/`-o` flag > KUKE_GET_OUTPUT env (and
 // any other source viper has bound to `kuke/get/output`) > table default.
 // Each `kuke get <kind>` subcommand binds its own `--output` flag to the
 // shared viper key at construction time, but viper only retains the last
