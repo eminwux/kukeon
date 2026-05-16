@@ -334,6 +334,74 @@ do_install() {
     else
         $SUDO kuke init
     fi
+
+    install_systemd_unit
+}
+
+# --- systemd unit ------------------------------------------------------------
+# Drops /etc/systemd/system/kukeond.service so the daemon survives host and
+# containerd restarts (issue #541). Without it, nothing brings kukeond back
+# after a reboot — containerd does not restart tasks across its own restart
+# and there is no host-level supervisor on the kuke side. The unit invokes
+# `kuke daemon start` (the in-process verb, idempotent against an already-
+# running daemon) ordered after containerd.service so the daemon's
+# containerd client always has a socket to talk to.
+#
+# Skipped on systemd-less hosts (dev containers, minimal images) with a
+# visible notice — the operator falls back to running `sudo kuke daemon start`
+# manually after each reboot. Re-running install.sh on a host that already
+# has the unit installed overwrites it and runs daemon-reload, so a version
+# bump that changes the unit contents picks up cleanly.
+SYSTEMD_UNIT_PATH="/etc/systemd/system/kukeond.service"
+
+install_systemd_unit() {
+    if ! command -v systemctl >/dev/null 2>&1; then
+        step "Configuring host supervisor"
+        warn "systemd not detected — skipping kukeond.service unit install."
+        printf '    On systemd-less hosts, bring kukeond up after each reboot with:\n' >&2
+        printf '      sudo kuke daemon start\n' >&2
+        return 0
+    fi
+    step "Installing kukeond.service systemd unit"
+    # Write through a tmpfile + atomic install so a concurrent systemd read of
+    # /etc/systemd/system never sees a half-written unit. `install -m 0644`
+    # mirrors the perms systemd-supplied units ship with.
+    local unit_tmp
+    unit_tmp="$(mktemp -t kukeond.service.XXXXXX)"
+    cat >"$unit_tmp" <<EOF
+[Unit]
+Description=kukeon daemon (kukeond)
+Documentation=https://kukeon.io
+After=containerd.service
+Requires=containerd.service
+
+[Service]
+# Type=oneshot + RemainAfterExit=yes: \`kuke daemon start\` is an in-process
+# verb that brings the kukeond cell up via containerd and then exits;
+# containerd supervises the kukeond container once it is running. The unit
+# stays "active" so \`systemctl status kukeond\` reports the bootstrap as
+# the supervised state, and Restart=on-failure retries the bootstrap if it
+# loses a race with containerd.service coming up.
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=${KUKE_INSTALL_PREFIX}/kuke daemon start
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    $SUDO install -m 0644 "$unit_tmp" "$SYSTEMD_UNIT_PATH"
+    rm -f "$unit_tmp"
+    $SUDO systemctl daemon-reload
+    # `enable --now` is idempotent when the daemon is already running (the
+    # oneshot ExecStart calls `kuke daemon start`, which itself returns
+    # success when the kukeond cell is up). On a fresh host where `kuke
+    # init` just ran, the daemon is already live and this call is a no-op
+    # start + a real enable; on a re-run after `systemctl disable`, this is
+    # the path that re-enables the unit.
+    $SUDO systemctl enable --now kukeond.service
+    ok "installed and enabled ${SYSTEMD_UNIT_PATH}"
 }
 
 # --- Next steps --------------------------------------------------------------

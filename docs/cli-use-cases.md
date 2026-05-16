@@ -67,13 +67,14 @@ sudo kuke uninstall -y       # non-interactive (scripts)
 **Invariants.**
 
 - Without `-y`, the command prints a destructive-action prompt naming every artifact it will remove and waits on stdin. EOF or a non-`yes` answer aborts with non-zero exit and no destructive side effect.
-- With `-y`, exit code 0 on success. Side effect: every realm purged with `--cascade`; `/run/kukeon` and the configured run path (default `/opt/kukeon`) removed; the `kukeon` system user/group removed if present.
+- With `-y`, exit code 0 on success. Side effect: the `kukeond` systemd unit (if installed) is stopped, disabled, and removed; every realm purged with `--cascade`; `/run/kukeon` and the configured run path (default `/opt/kukeon`) removed; the `kukeon` system user/group removed if present.
 - The binary at `/usr/local/bin/kuke` and the `kukeond` symlink are **never** removed — uninstalling runtime state is not the same as uninstalling the binary.
+- The systemd-unit teardown is a no-op (silent, no row in the report) on hosts where `systemctl` is absent or `/etc/systemd/system/kukeond.service` was never installed (e.g. `make dev-init` hosts).
 - If any realm fails to drop its containerd namespace, the subsequent dir/account removal is **skipped** (not silently best-effort) and the report flags each skipped row. Exit code is non-zero so automation can branch on it.
 
 **Recovering from a failed `kuke uninstall`.**
 
-`kuke uninstall` tears down kukeon runtime state in this order: (0) stop the kukeond daemon, (1) purge every realm, (2) remove `/run/kukeon`, (3) remove the configured run path (default `/opt/kukeon`), (4) remove the kukeon system user and group.
+`kuke uninstall` tears down kukeon runtime state in this order: (-1) stop+disable+remove the `kukeond` systemd unit (so a `Restart=on-failure` unit cannot respawn the daemon mid-uninstall), (0) stop the kukeond daemon, (1) purge every realm, (2) remove `/run/kukeon`, (3) remove the configured run path (default `/opt/kukeon`), (4) remove the kukeon system user and group.
 
 Steps 2–4 are gated on every realm reporting `NamespaceRemoved=true`. If any realm fails to drop its containerd namespace, the report renders each filesystem/account row as `skipped (realm purge failed)` and prints
 

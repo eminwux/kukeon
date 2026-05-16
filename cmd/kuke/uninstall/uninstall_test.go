@@ -171,10 +171,35 @@ func (s *stubController) ReconcileCells() (controller.ReconcileResult, error) {
 
 // runCmd builds the cobra command, plugs in a stub controller and a logger,
 // and feeds the supplied stdin payload. Returns the captured stdout/stderr
-// buffer so tests can assert on output.
+// buffer so tests can assert on output. A no-op systemd remover is injected
+// by default so tests stay hermetic on hosts that happen to have systemctl
+// and a stale unit file present; tests that need to exercise the systemd
+// teardown rendering call runCmdWithSystemd instead.
 func runCmd(
 	t *testing.T,
 	stub *stubController,
+	stdin string,
+	args ...string,
+) (string, error) {
+	t.Helper()
+	return runCmdWithSystemd(t, stub, skippedSystemdRemover, stdin, args...)
+}
+
+// skippedSystemdRemover stands in for the real removeKukeondSystemdUnit on
+// tests that do not care about the systemd path. Returns Skipped=true so the
+// renderer prints no systemd row, matching the dev-host code path.
+func skippedSystemdRemover(_ context.Context) uninstall.SystemdRemovalReport {
+	return uninstall.SystemdRemovalReport{
+		Skipped:    true,
+		SkipReason: "test stub",
+		UnitPath:   uninstall.SystemdUnitPath,
+	}
+}
+
+func runCmdWithSystemd(
+	t *testing.T,
+	stub *stubController,
+	systemd uninstall.SystemdRemover,
 	stdin string,
 	args ...string,
 ) (string, error) {
@@ -183,6 +208,7 @@ func runCmd(
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 	ctx = context.WithValue(ctx, uninstall.MockControllerKey{}, controller.Controller(stub))
+	ctx = context.WithValue(ctx, uninstall.MockSystemdRemoverKey{}, systemd)
 	cmd.SetContext(ctx)
 
 	out := &bytes.Buffer{}
@@ -424,6 +450,147 @@ func TestUninstall_RendersReleasedAndResidualMountRows(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected output to contain %q; got:\n%s", want, out)
 		}
+	}
+}
+
+// TestUninstall_SystemdUnitRemovedRendersRow pins the issue #541 AC #4
+// rendering: when the systemd remover reports a successful stop+disable+
+// remove, the CLI must emit a unit row above the realm/filesystem rows so
+// the operator sees the host-supervisor teardown happened.
+func TestUninstall_SystemdUnitRemovedRendersRow(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	ctrlCalled := false
+	stub := &stubController{
+		uninstallFn: func(controller.UninstallOptions) (controller.UninstallReport, error) {
+			ctrlCalled = true
+			return controller.UninstallReport{
+				SocketDir: "/run/kukeon",
+				RunPath:   "/opt/kukeon",
+				UserName:  "kukeon",
+				GroupName: "kukeon",
+			}, nil
+		},
+	}
+	systemd := func(_ context.Context) uninstall.SystemdRemovalReport {
+		return uninstall.SystemdRemovalReport{
+			UnitPath:       uninstall.SystemdUnitPath,
+			Stopped:        true,
+			Disabled:       true,
+			FileRemoved:    true,
+			DaemonReloaded: true,
+		}
+	}
+	out, err := runCmdWithSystemd(t, stub, systemd, "", "--yes")
+	if err != nil {
+		t.Fatalf("Execute returned: %v\noutput:\n%s", err, out)
+	}
+	if !ctrlCalled {
+		t.Errorf("controller.Uninstall did not fire after successful systemd teardown; output:\n%s", out)
+	}
+	wantRow := "systemd unit " + uninstall.SystemdUnitPath + ": stopped, disabled, removed"
+	if !strings.Contains(out, wantRow) {
+		t.Errorf("expected systemd row %q; got:\n%s", wantRow, out)
+	}
+}
+
+// TestUninstall_SystemdPartialPath pins the renderer's honesty on the
+// "file removed but best-effort sub-steps non-zero" path — e.g., a host
+// where systemctl is present but PID 1 is not systemd. The CLI must show
+// which sub-steps actually succeeded so the operator can verify the unit
+// file is gone without being misled by a "stopped, disabled, removed"
+// claim that did not match reality.
+func TestUninstall_SystemdPartialPath(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	stub := &stubController{
+		uninstallFn: func(controller.UninstallOptions) (controller.UninstallReport, error) {
+			return controller.UninstallReport{
+				SocketDir: "/run/kukeon",
+				RunPath:   "/opt/kukeon",
+				UserName:  "kukeon",
+				GroupName: "kukeon",
+			}, nil
+		},
+	}
+	systemd := func(_ context.Context) uninstall.SystemdRemovalReport {
+		// stop/disable/daemon-reload all failed (no systemd PID 1); file
+		// removed succeeded — the binding step.
+		return uninstall.SystemdRemovalReport{
+			UnitPath:    uninstall.SystemdUnitPath,
+			FileRemoved: true,
+		}
+	}
+	out, err := runCmdWithSystemd(t, stub, systemd, "", "--yes")
+	if err != nil {
+		t.Fatalf("Execute returned: %v\noutput:\n%s", err, out)
+	}
+	wantSubstr := "partial (stop=false disable=false remove=true reload=false)"
+	if !strings.Contains(out, wantSubstr) {
+		t.Errorf("expected partial row %q; got:\n%s", wantSubstr, out)
+	}
+}
+
+// TestUninstall_SystemdSkippedEmitsNoRow guards the dev-host AC: a host
+// where the unit was never installed (e.g. bootstrapped via `make
+// dev-init`) must produce no systemd row at all so the report stays terse.
+// The controller's realm/filesystem teardown still runs to completion.
+func TestUninstall_SystemdSkippedEmitsNoRow(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	stub := &stubController{
+		uninstallFn: func(controller.UninstallOptions) (controller.UninstallReport, error) {
+			return controller.UninstallReport{
+				SocketDir: "/run/kukeon",
+				RunPath:   "/opt/kukeon",
+				UserName:  "kukeon",
+				GroupName: "kukeon",
+			}, nil
+		},
+	}
+	out, err := runCmd(t, stub, "", "--yes")
+	if err != nil {
+		t.Fatalf("Execute returned: %v\noutput:\n%s", err, out)
+	}
+	if strings.Contains(out, "systemd unit") {
+		t.Errorf("Skipped systemd report unexpectedly rendered a row:\n%s", out)
+	}
+}
+
+// TestUninstall_SystemdFailureShortCircuits pins the ordering invariant:
+// if the systemd remover errors (e.g. daemon-reload fails on a broken PID
+// 1), realm purge / filesystem teardown must not run. Allowing the
+// controller to proceed while the unit is still respawn-eligible would
+// race the daemon-stop step and is the regression #541 AC #4 prevents.
+func TestUninstall_SystemdFailureShortCircuits(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	ctrlCalled := false
+	stub := &stubController{
+		uninstallFn: func(controller.UninstallOptions) (controller.UninstallReport, error) {
+			ctrlCalled = true
+			return controller.UninstallReport{}, nil
+		},
+	}
+	sentinel := errors.New("synthetic daemon-reload failure")
+	systemd := func(_ context.Context) uninstall.SystemdRemovalReport {
+		return uninstall.SystemdRemovalReport{
+			UnitPath:    uninstall.SystemdUnitPath,
+			Stopped:     true,
+			Disabled:    true,
+			FileRemoved: true,
+			Err:         sentinel,
+		}
+	}
+	out, err := runCmdWithSystemd(t, stub, systemd, "", "--yes")
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected sentinel error to propagate; got %v\noutput:\n%s", err, out)
+	}
+	if ctrlCalled {
+		t.Errorf("controller.Uninstall must not fire when systemd teardown failed; output:\n%s", out)
+	}
+	if !strings.Contains(out, "failed:") || !strings.Contains(out, "synthetic daemon-reload failure") {
+		t.Errorf("expected failure row to surface sentinel; got:\n%s", out)
 	}
 }
 
