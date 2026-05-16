@@ -22,15 +22,20 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/ctr"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/fs"
 	sbshapi "github.com/eminwux/sbsh/pkg/api"
 )
 
@@ -702,6 +707,68 @@ func TestStageKukettyBinary_ReusesExisting(t *testing.T) {
 	}
 	if string(data) != "\x7fELF stub" {
 		t.Fatalf("dst contents = %q, want stub (helper re-copied)", data)
+	}
+}
+
+// TestEnsureAttachableSocketSymlink_RefusesOverflow locks the provision-
+// time fail-fast added in #521 AC #2: when the resolved symlink path would
+// exceed consts.KukeonMaxSocketPath bytes, ensureAttachableSocketSymlink
+// must return errdefs.ErrSocketPathTooLong and stage no on-disk state.
+// Without this guard, a future refactor that drops or inverts the length
+// check would silently defer the failure to first `kuke attach`, where it
+// surfaces as an opaque connect(2) ENAMETOOLONG instead of a provision-
+// time error. The existing TestContainerSocketSymlinkPath_FitsSUNPath in
+// internal/util/fs only verifies that normal-shaped inputs stay under the
+// limit — it does not assert that the runner *refuses to provision* when
+// they do not.
+func TestEnsureAttachableSocketSymlink_RefusesOverflow(t *testing.T) {
+	// Pad a real tmp dir so len(runPath)+len("/s/")+16hex exceeds the
+	// budget by one byte. Using a real (existing) base path matters: the
+	// "no on-disk state" assertion below is only meaningful when the
+	// function *could* have created the symlink dir had the fail-fast
+	// regressed.
+	base := t.TempDir()
+	const sep = "/s/"
+	const shortIDLen = 16 // sha256[:8] hex == 16 chars (see containerSocketShortID)
+	padBytes := consts.KukeonMaxSocketPath + 1 - len(base) - len(sep) - shortIDLen
+	if padBytes < 1 {
+		padBytes = 1
+	}
+	runPath := filepath.Join(base, strings.Repeat("a", padBytes))
+	spec := intmodel.ContainerSpec{
+		ID:        "c1",
+		RealmName: "rA",
+		SpaceName: "sB",
+		StackName: "kC",
+		CellName:  "lD",
+	}
+
+	symlinkPath := fs.ContainerSocketSymlinkPath(
+		runPath, spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
+	)
+	if len(symlinkPath) <= consts.KukeonMaxSocketPath {
+		t.Fatalf("test setup wrong: symlinkPath len=%d <= limit=%d (path=%q)",
+			len(symlinkPath), consts.KukeonMaxSocketPath, symlinkPath)
+	}
+
+	err := ensureAttachableSocketSymlink(runPath, spec)
+	if !errors.Is(err, errdefs.ErrSocketPathTooLong) {
+		t.Fatalf("err = %v, want errors.Is(_, errdefs.ErrSocketPathTooLong)", err)
+	}
+
+	// On the fail-fast path, no on-disk state should land — neither the
+	// shallow <runPath>/s symlink directory nor the per-container symlink
+	// inode. If a future refactor reorders MkdirAll above the length check
+	// the dir assertion catches it; the symlink-inode assertion guards
+	// against a regression that fires the length check but still proceeds
+	// to os.Symlink after.
+	symlinkDir := fs.ContainerSocketSymlinkDir(runPath)
+	if _, statErr := os.Stat(symlinkDir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("symlink dir %q exists (stat err = %v), want ErrNotExist — fail-fast must not stage on-disk state",
+			symlinkDir, statErr)
+	}
+	if _, statErr := os.Lstat(symlinkPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("symlink %q exists (lstat err = %v), want ErrNotExist", symlinkPath, statErr)
 	}
 }
 
