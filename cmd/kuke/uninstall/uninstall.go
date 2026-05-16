@@ -74,7 +74,7 @@ This is the global counterpart to "kuke purge" (which is per-resource). It:
   4. Removes the configured run path (default /opt/kukeon) recursively.
   5. Removes the kukeon system user and group (no-op if absent).
 
-If any realm fails to drop its containerd namespace, steps 2-4 are skipped:
+If any realm fails to drop its containerd namespace, steps 3-5 are skipped:
 tearing out /opt/kukeon while a residual namespace is still pinning overlay
 mounts on disk would strand the next "kuke init" with stale containerd state.
 The report flags every dir/account row as "skipped (realm purge failed)" so
