@@ -99,15 +99,27 @@ KUKEON_E2E_IMAGE ?= docker.io/library/$(KUKEON_E2E_IMAGE_DOCKER_NAME)
 
 e2e: test-e2e
 .PHONY: test-e2e
+# `env -u KUKEOND_SOCKET` (rather than re-exporting an absent value) keeps the
+# AC's "no global KUKEOND_SOCKET for the test run" constraint honest: any
+# leftover from an interactive shell — including a parent dev-init.sh that
+# pinned `/run/kukeon-dev/kukeond.sock` for the nested daemon — is stripped
+# before `go test` so `kuke init --run-path <tempdir>` falls through to the
+# per-runPath auto-derivation. The nested probe (`/.kukeon/bin/kuketty`,
+# mirrors `scripts/dev-init.sh`) only emits a diagnostic; the unset is
+# unconditional because the e2e suite's daemon-bringing tests rely on the
+# per-test --run-path → socket derivation in either mode.
 test-e2e: kuke kuketty
 	@echo "Building local kukeond image $(KUKEON_E2E_IMAGE_DOCKER_NAME) for e2e"
 	docker build --build-arg VERSION=v0.0.0-e2e -t $(KUKEON_E2E_IMAGE_DOCKER_NAME) .
 	@echo "Running e2e tests using binaries in project root"
+	@if [ -x /.kukeon/bin/kuketty ]; then \
+		echo "[nested mode: kuke init --run-path <tempdir> derives <tempdir>/kukeond.sock; parent dev cell's /run/kukeon/ socket untouched]"; \
+	fi
 	HOME=$(HOME) PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$(PATH) \
 		E2E_BIN_DIR=$(CURDIR) \
 		KUKEON_E2E_IMAGE=$(KUKEON_E2E_IMAGE) \
 		KUKEON_E2E_IMAGE_DOCKER_NAME=$(KUKEON_E2E_IMAGE_DOCKER_NAME) \
-		go test -v ./e2e
+		env -u KUKEOND_SOCKET go test -v ./e2e
 
 tag:
 	git tag -s v$(KUKEON_VERSION) -m "Release version $(KUKEON_VERSION)"

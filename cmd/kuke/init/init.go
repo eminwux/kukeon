@@ -211,6 +211,50 @@ func setPersistentFlags(_ *cobra.Command) error {
 	return nil
 }
 
+// applyRunPathImpliesKukeondSocket derives the daemon's listen socket as
+// `<runPath>/kukeond.sock` when the operator passed `--run-path` explicitly
+// (flag or KUKEON_RUN_PATH env) but did not pin KUKEOND_SOCKET themselves.
+// Without this, `kuke init --run-path X` always bootstraps the kukeond
+// system cell bind-bound to the default `/run/kukeon/kukeond.sock` — which
+// collides with the parent host's daemon when running inside a nested
+// `kukeon-dev-root` cell (PR #548 bind-mounts the parent's `/run/kukeon/`
+// into the nest at the same path), and blocks per-test isolation in the
+// e2e suite's TestKuke_Init_VerifyState.
+//
+// Operator intent: `--run-path` is per-invocation, explicit "this run
+// lives under X" signal. The daemon socket living under X follows; the
+// operator who genuinely wants the in-tree convention restores it with
+// `KUKEOND_SOCKET=/run/kukeon/kukeond.sock kuke init --run-path X`.
+//
+// ServerConfiguration's spec.Socket trips !viper.IsSet through
+// applyServerConfiguration's viper.Set, so YAML-configured socket paths
+// are respected.
+func applyRunPathImpliesKukeondSocket(cmd *cobra.Command, runPath string) {
+	if viper.IsSet(config.KUKEOND_SOCKET.ViperKey) {
+		return
+	}
+	if !flagChanged(cmd, "run-path") && !envSet(config.KUKEON_ROOT_RUN_PATH) {
+		return
+	}
+	viper.Set(config.KUKEOND_SOCKET.ViperKey, filepath.Join(runPath, "kukeond.sock"))
+}
+
+// flagChanged checks both the local and persistent flag sets so the helper
+// is correct in both unit tests (where cmd is built bare and persistent
+// flags are not yet merged into cmd.Flags()) and in production (where
+// cmd is the leaf subcommand and the merged set already contains the
+// parent's persistent flags). Mirrors the helper of the same name in
+// cmd/kuke/kuke.go.
+func flagChanged(cmd *cobra.Command, name string) bool {
+	if f := cmd.Flags().Lookup(name); f != nil && f.Changed {
+		return true
+	}
+	if f := cmd.PersistentFlags().Lookup(name); f != nil && f.Changed {
+		return true
+	}
+	return false
+}
+
 // applyServerConfiguration layers the loaded ServerConfiguration on top of
 // viper for fields the operator did not explicitly set on the command line
 // or via environment. Order of precedence: explicit `--flag` > env >
@@ -371,16 +415,21 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("configure runtime: %w", cfgErr)
 	}
 
-	socketPath := viper.GetString(config.KUKEOND_SOCKET.ViperKey)
-	if socketPath == "" {
-		socketPath = config.KUKEOND_SOCKET.Default
-	}
-
 	image := resolveKukeondImage()
 
 	runPath := viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey)
 	if runPath == "" {
 		runPath = config.DefaultRunPath()
+	}
+
+	// Must run after applyServerConfiguration (which may viper.Set the
+	// socket from YAML) and after runPath is resolved (the derived value
+	// is `<runPath>/kukeond.sock`).
+	applyRunPathImpliesKukeondSocket(cmd, runPath)
+
+	socketPath := viper.GetString(config.KUKEOND_SOCKET.ViperKey)
+	if socketPath == "" {
+		socketPath = config.KUKEOND_SOCKET.Default
 	}
 
 	containerdSocket := viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey)
