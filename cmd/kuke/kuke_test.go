@@ -465,3 +465,87 @@ func TestNewKukeCmdStreams(t *testing.T) {
 		t.Errorf("ErrOrStderr() not wired to os.Stderr: got %T", got)
 	}
 }
+
+// TestRunPathImpliesNoDaemon locks down the issue #554 fix: explicit
+// `--run-path` (flag or env) promotes `--no-daemon` to true, but only when
+// `--no-daemon` itself was not set. The daemon ignores the client's
+// run-path, so a caller passing `--run-path` and reaching a daemon dial
+// would silently read/write the daemon's path instead — the failure mode
+// that broke 40/75 e2e tests under per-test `--run-path` isolation.
+func TestRunPathImpliesNoDaemon(t *testing.T) {
+	tests := []struct {
+		name            string
+		setFlag         bool   // --run-path on the command line
+		setEnv          string // KUKEON_RUN_PATH in env ("" = unset)
+		setNoDaemonFlag bool   // --no-daemon on the command line (=false)
+		setNoDaemonEnv  string // KUKEON_NO_DAEMON in env ("" = unset)
+		wantNoDaemon    bool
+	}{
+		{
+			name:         "neither set leaves no-daemon at default",
+			wantNoDaemon: false,
+		},
+		{
+			name:         "run-path flag promotes no-daemon",
+			setFlag:      true,
+			wantNoDaemon: true,
+		},
+		{
+			name:         "run-path env promotes no-daemon",
+			setEnv:       "/tmp/foo",
+			wantNoDaemon: true,
+		},
+		{
+			name:            "explicit --no-daemon=false blocks promotion",
+			setFlag:         true,
+			setNoDaemonFlag: true,
+			wantNoDaemon:    false,
+		},
+		{
+			name:           "KUKEON_NO_DAEMON=false blocks promotion",
+			setFlag:        true,
+			setNoDaemonEnv: "false",
+			wantNoDaemon:   false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			viper.Reset()
+
+			if tc.setEnv != "" {
+				t.Setenv(config.KUKEON_ROOT_RUN_PATH.EnvVar(), tc.setEnv)
+			}
+			if tc.setNoDaemonEnv != "" {
+				t.Setenv(config.KUKEON_ROOT_NO_DAEMON.EnvVar(), tc.setNoDaemonEnv)
+			}
+
+			cmd, err := kuke.NewKukeCmd()
+			if err != nil {
+				t.Fatalf("NewKukeCmd() error = %v", err)
+			}
+
+			if tc.setFlag {
+				if setErr := cmd.PersistentFlags().Set("run-path", "/tmp/from-flag"); setErr != nil {
+					t.Fatalf("set --run-path: %v", setErr)
+				}
+			}
+			if tc.setNoDaemonFlag {
+				if setErr := cmd.PersistentFlags().Set("no-daemon", "false"); setErr != nil {
+					t.Fatalf("set --no-daemon: %v", setErr)
+				}
+			}
+
+			cmd.SetContext(context.Background())
+			if preErr := cmd.PersistentPreRunE(cmd, []string{}); preErr != nil {
+				t.Fatalf("PersistentPreRunE: %v", preErr)
+			}
+
+			got := viper.GetBool(config.KUKEON_ROOT_NO_DAEMON.ViperKey)
+			if got != tc.wantNoDaemon {
+				t.Errorf("KUKEON_NO_DAEMON: got %v, want %v", got, tc.wantNoDaemon)
+			}
+		})
+	}
+}

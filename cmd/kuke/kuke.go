@@ -112,6 +112,8 @@ func NewKukeCmd() (*cobra.Command, error) {
 				}
 				return fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
 			}
+
+			applyRunPathImpliesNoDaemon(cmd)
 			return nil
 		},
 		Run: func(cmd *cobra.Command, _ []string) {
@@ -319,6 +321,27 @@ func applyClientConfiguration(cmd *cobra.Command, spec v1beta1.ClientConfigurati
 	}
 	if spec.LogLevel != "" && !flagChanged(cmd, "log-level") && !envSet(config.KUKEON_ROOT_LOG_LEVEL) {
 		viper.Set(config.KUKEON_ROOT_LOG_LEVEL.ViperKey, spec.LogLevel)
+	}
+}
+
+// applyRunPathImpliesNoDaemon promotes an explicit `--run-path` (flag or
+// `KUKEON_RUN_PATH` env) into `--no-daemon=true` when the operator did not
+// set `--no-daemon` themselves. The daemon ignores the client's run-path
+// (it serves whatever path it was started with), so the only way for a
+// caller-supplied `--run-path` to take effect is in-process. Without this
+// promotion, passing `--run-path /tmp/foo` silently dials the default
+// daemon socket and reads/writes someone else's run-path — the failure
+// mode that broke 40/75 e2e tests under per-test `--run-path` isolation.
+//
+// YAML-configured run-path does not trip this promotion: contributors
+// with a non-default ClientConfiguration shouldn't have their daemon
+// access silently disabled. Flag/env are explicit per-invocation intent;
+// YAML is ambient configuration.
+func applyRunPathImpliesNoDaemon(cmd *cobra.Command) {
+	runPathExplicit := flagChanged(cmd, "run-path") || envSet(config.KUKEON_ROOT_RUN_PATH)
+	noDaemonExplicit := flagChanged(cmd, "no-daemon") || envSet(config.KUKEON_ROOT_NO_DAEMON)
+	if runPathExplicit && !noDaemonExplicit {
+		viper.Set(config.KUKEON_ROOT_NO_DAEMON.ViperKey, true)
 	}
 }
 
