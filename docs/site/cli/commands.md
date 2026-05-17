@@ -41,20 +41,21 @@ Every `kuke` subcommand inherits these persistent flags from the root command:
 | `--configuration`     | `$HOME/.kuke/kuke.yaml`           | ClientConfiguration YAML; absent file uses defaults  |
 | `--containerd-socket` | `/run/containerd/containerd.sock` | Containerd socket                                    |
 | `--host`              | `unix:///run/kukeon/kukeond.sock` | Daemon endpoint (`unix://` or `ssh://`)              |
-| `--no-daemon`         | `false`                           | Bypass the daemon and run in-process (requires root) |
 | `--verbose`, `-v`     | `false`                           | Enable verbose logging on stderr                     |
 | `--log-level`         | `info`                            | Log level (`debug`, `info`, `warn`, `error`)         |
 
-### `--no-daemon` host prerequisites
+`--no-daemon` is **not** a root-persistent flag — it is only accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>` (see #222; the `get` kinds were retained per a user override on the original AC). For the remaining daemon-routed workload commands (`apply`, `create`, `run`, `attach`, `delete`, `kill`, `start`, `stop`, `log`, `refresh`), the in-process path is reached via `KUKEON_NO_DAEMON=true` or an explicit `--run-path` (which auto-promotes to in-process mode).
 
-With `--no-daemon`, the `kuke` binary runs the controllers in-process instead of routing the request to `kukeond`. Operations that touch networking (cell apply, network create) then shell out to CNI plugins from **the host's** `/opt/cni/bin` — the daemon's container image is not in the picture. So `--no-daemon` workflows additionally require:
+### In-process mode host prerequisites
+
+In in-process mode, the `kuke` binary runs the controllers itself instead of routing the request to `kukeond`. Operations that touch networking (cell apply, network create) then shell out to CNI plugins from **the host's** `/opt/cni/bin` — the daemon's container image is not in the picture. So in-process workflows additionally require:
 
 - CNI plugins on the host at `/opt/cni/bin` (e.g. `containernetworking-plugins` on Debian/Ubuntu, then symlinked from `/usr/lib/cni` since that distro packages them there)
 
 The default daemon path does **not** need host CNI plugins — `kukeond`'s image bundles them and only state dirs (`/opt/cni/net.d`, `/var/lib/cni`, `/opt/cni/cache`) are bind-mounted from the host.
 
-!!! warning "`--no-daemon` is transitional"
-    `--no-daemon` is slated for removal from creation commands in a future release; treat it as a debugging escape hatch rather than a supported deployment mode.
+!!! warning "In-process mode is transitional"
+    `KUKEON_NO_DAEMON=true` / the `--run-path` promotion path is slated for full removal once `ClientFromCmd`'s in-process branch is retired (#566). Treat it as a debugging escape hatch rather than a supported deployment mode.
 
 ## Convention: positional arg + flags
 

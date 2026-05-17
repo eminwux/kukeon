@@ -24,7 +24,7 @@ kuke image load [tarball | -] [flags]
 
 Import an OCI/docker image tarball into the containerd namespace mapped to `--realm`. Pass a tarball path, `-` for stdin, or `--from-docker <ref>` to shell out to `docker save`.
 
-`kuke image *` is daemon-independent by design: every subcommand wraps containerd's image API directly in-process and ignores the root persistent `--no-daemon` flag — there is no "with daemon" mode for images. `kuke image load` always requires root because it writes to containerd's content store; it fails fast with a clear remediation if you forget `sudo`.
+`kuke image *` is daemon-independent by design: every subcommand wraps containerd's image API directly in-process — there is no "with daemon" mode for images, and the `--no-daemon` flag is intentionally absent on these commands. `kuke image load` always requires root because it writes to containerd's content store; it fails fast with a clear remediation if you forget `sudo`.
 
 | Flag            | Default   | Description                                                                                         |
 | --------------- | --------- | --------------------------------------------------------------------------------------------------- |

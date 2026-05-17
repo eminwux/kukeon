@@ -26,25 +26,38 @@ Kukeon ships as a single binary that behaves as either `kuke` (client CLI) or `k
 
 It runs as the root container of the `kukeond` cell inside the [system realm](system-realm.md), so it's managed by the same primitives as any other workload.
 
-## `--no-daemon`: in-process mode
+## In-process mode
 
-`kuke` has a `--no-daemon` flag that bypasses the socket and executes the operation in-process. When you pass `--no-daemon`, `kuke` becomes the daemon for the duration of the command:
+`kuke` can bypass the socket and execute the operation in-process. The `--no-daemon` flag used to live on every subcommand; #222 retired it from the remaining daemon-routed workload commands (`apply`, `create`, `run`, `attach`, `delete`, `kill`, `start`, `stop`, `log`, `refresh`). On those commands the in-process path is now reached via:
+
+- `KUKEON_NO_DAEMON=true` in the environment, or
+- an explicit `--run-path /some/path` (which auto-promotes to in-process mode — the daemon ignores client-supplied run-paths, so a caller passing a non-default `--run-path` would otherwise silently read/write the daemon's path instead).
+
+`--no-daemon` itself stays accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>` (the `get` kinds were retained per a user override on the original #222 AC so the in-process escape hatch stays available for every resource lookup, not just `get realm`). `kuke image *` is daemon-independent by design (always in-process regardless of any of these knobs).
 
 ```bash
-sudo kuke apply -f cell.yaml --no-daemon
+# Workload command via env var
+sudo KUKEON_NO_DAEMON=true kuke apply -f cell.yaml
+
+# Workload command via --run-path promotion
+sudo kuke apply -f cell.yaml --run-path /opt/kukeon
+
+# Commands that still expose --no-daemon directly
+sudo kuke get realms --no-daemon
+sudo kuke get cells --no-daemon --realm default --space default --stack default
+sudo kuke purge realm myrealm --cascade --force --no-daemon
 ```
 
 When to use it:
 
 - **Bootstrapping** — `kuke init` runs in-process by necessity; the daemon isn't up yet.
 - **Daemon is down** — anything that should talk to `kukeond` but can't because the daemon is stopped or being rebuilt.
-- **Current release constraints** — the shipped `kukeond` container image does not yet bind-mount `/run/containerd/containerd.sock`, so cell creation currently runs `--no-daemon`. This will change in a future release.
 
 Trade-offs:
 
-- `--no-daemon` requires root (it talks directly to containerd, netlink, cgroups).
+- In-process mode requires root (it talks directly to containerd, netlink, cgroups).
 - There's no long-lived state holder, so every command is self-contained.
-- Two `--no-daemon` commands running at the same time will race on the same on-disk state. Don't do it.
+- Two in-process commands running at the same time will race on the same on-disk state. Don't do it.
 
 ## The `--host` flag
 
@@ -58,7 +71,7 @@ Other transports are on the roadmap (`ssh://user@host` is the intended future sh
 
 ## Parity between daemon and in-process
 
-`kuke get <resource>` and `kuke get <resource> --no-daemon` should return identical output on a healthy host. Divergence between them is a regression — if you see it, please file a bug. The two paths share the same reconciler and data store; the only difference is who holds the process.
+`kuke get realms` and `kuke get realms --no-daemon` should return identical output on a healthy host. Divergence between them is a regression — if you see it, please file a bug. The two paths share the same reconciler and data store; the only difference is who holds the process. The explicit-flag check survives on every `kuke get <kind>` after #222 (`get realm` is the one the CLAUDE.md dev-init regression guard exercises; the others are available as the same shape of escape hatch); #223 retires `get realm`'s parity-check role once `kuke status` (#202) absorbs the parity contract.
 
 ## Related concepts
 

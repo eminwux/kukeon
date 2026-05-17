@@ -96,6 +96,12 @@ func NewRealmCmd() *cobra.Command {
 		"Append a CONTROLLERS column listing the cgroup-v2 controllers delegated on each realm's subtree (issue #328). Off by default to keep the default table the daemon-parity dev-init regression guard expects.",
 	)
 
+	// `--no-daemon` is inherited as a persistent flag from the parent `get`
+	// command (registered in cmd/kuke/get/get.go) — every `get <kind>`
+	// keeps the flag per the user override on #222. The CLAUDE.md
+	// `make dev-init` regression guard runs `kuke get realms` vs
+	// `kuke get realms --no-daemon` against that inherited flag.
+
 	cmd.ValidArgsFunction = config.CompleteRealmNames
 	_ = cmd.RegisterFlagCompletionFunc("output", config.CompleteOutputFormat)
 	_ = cmd.RegisterFlagCompletionFunc("o", config.CompleteOutputFormat)

@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -93,6 +94,13 @@ func setupUninstallCmd(cmd *cobra.Command) error {
 	if err := viper.BindPFlag(config.KUKE_UNINSTALL_YES.ViperKey, cmd.Flags().Lookup("yes")); err != nil {
 		return fmt.Errorf("failed to bind flag: %w", err)
 	}
+
+	// `--no-daemon` is retained on uninstall per #222 ACs. uninstall is
+	// always in-process by construction (it tears down the daemon) — the
+	// flag is accepted as a no-op so existing operator muscle memory does
+	// not break.
+	kukshared.RegisterNoDaemonFlag(cmd)
+
 	return nil
 }
 

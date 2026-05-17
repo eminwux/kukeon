@@ -11,7 +11,7 @@ The companion `<project>/CLAUDE.md` has the build, smoke-test, and daemon-parity
 - "Exit code 0" / "exit code non-zero" — the process exit status. Tooling automation should rely on this rather than scraping stdout.
 - "Side effect: X" — what changes on disk, in containerd, or in the daemon's view after the command completes.
 - "Idempotent" — re-running the command on a healthy host produces success without changing observable state. The CLI distinguishes "already existed" from "created" in the human-readable output but does not change the exit code.
-- "Daemon-mode" / "`--no-daemon`" — `kuke` is a client. By default it dials `unix:///run/kukeon/kukeond.sock`. With `--no-daemon` it runs the controller in-process and bypasses the socket; this requires root + a usable `/run/containerd/containerd.sock` and is the only path that works before `kuke init` or while the daemon is stopped.
+- "Daemon-mode" / "in-process mode" — `kuke` is a client. By default it dials `unix:///run/kukeon/kukeond.sock`. In in-process mode it runs the controller directly and bypasses the socket; this requires root + a usable `/run/containerd/containerd.sock` and is the only path that works before `kuke init` or while the daemon is stopped. In-process mode is reached via the `--no-daemon` flag on the commands that still expose it (`init`, `uninstall`, `purge`, every `get <kind>` — per #222; the `get` kinds were retained per a user override on the original AC), via `KUKEON_NO_DAEMON=true` in the environment, or via an explicit `--run-path` (which auto-promotes to in-process mode).
 
 ## Bootstrap & teardown
 
@@ -135,7 +135,7 @@ sudo kuke daemon logs -f               # follow until SIGINT
 - `daemon start` errors when the host has not been `kuke init`-ed yet (no cell to start). Exit code non-zero with a message pointing the operator at `kuke init`.
 - `daemon kill` has no grace period; this is the escape hatch for a hung daemon. Use `stop` for the graceful path.
 - `daemon reset` is destructive (cell deletion + socket removal) and described in the Bootstrap & teardown section.
-- After `daemon stop`, daemon-routed commands (anything **without** `--no-daemon`) fail with `dial unix /run/kukeon/kukeond.sock: connect: no such file or directory` and exit non-zero. `--no-daemon` commands still work for the subset of operations the in-process controller supports.
+- After `daemon stop`, daemon-routed commands (anything **not** explicitly in in-process mode) fail with `dial unix /run/kukeon/kukeond.sock: connect: no such file or directory` and exit non-zero. In-process commands (the `--no-daemon`-accepting commands listed above, plus anything with `KUKEON_NO_DAEMON=true` or an explicit `--run-path`) still work for the subset of operations the in-process controller supports.
 - `daemon logs` is a typed shortcut for `kuke log --realm kuke-system --space kukeon --stack kukeon kukeond`; the coordinates are wired in. Exit code 0 even when the file is empty.
 
 ## Realm / space / stack management
@@ -230,7 +230,7 @@ sudo kuke image delete --realm default <ref>                    # alias: rm, rem
 - `--from-docker <ref>` shells out to `docker save`; if the docker daemon is unreachable or the ref is unknown, the command exits non-zero with the docker error surfaced (e.g. `No such image`).
 - `kuke image get --realm <r>` exits 0 even when the namespace is empty; the CLI prints a "No images found in realm" line rather than failing.
 - `kuke image delete --realm <r> <missing-ref>` exits non-zero with an `image not found` message that names the realm and ref.
-- `kuke image *` is daemon-independent by design (#217, #226): every subcommand wraps containerd's image API directly in-process and ignores the root persistent `--no-daemon` flag. There is no "with daemon" mode — the daemon does not serve image RPCs.
+- `kuke image *` is daemon-independent by design (#217, #226): every subcommand wraps containerd's image API directly in-process. There is no "with daemon" mode — the daemon does not serve image RPCs — and `--no-daemon` is not accepted on image commands after #222.
 - `kuke image load` writes to containerd's content store and must run as root; it fails fast with a friendly `must run as root` error under non-root euid rather than letting containerd surface an opaque EACCES later. `kuke image get` and `kuke image delete` do not impose their own UID gate — they fail with whatever containerd returns if the socket is unreachable.
 - The dev-loop pattern is `sudo kuke image load --from-docker kukeon-local:dev --realm kuke-system`; the image lands in containerd before `kuke init` brings up the daemon, which is fine because image operations never go through `kukeond`.
 
@@ -259,7 +259,7 @@ sudo kuke run -f spec.yaml --rm                             # auto-delete after 
 - Re-running `kuke run -f` against an existing cell whose on-disk spec **diverges** from the file is **refused**, not silently updated. The error message points the operator at `kuke apply -f` for the update path. Exit code non-zero.
 - `-f` and `-p` are mutually exclusive; `--name` is rejected with `-f` (the YAML's `metadata.name` is the cell name verbatim).
 - `--container` is only valid in attach mode; passing both `--container` and `-d/--detach` exits non-zero.
-- `--rm` is daemon-mode only and incompatible with `--no-daemon`. Cleanup latency is bounded by the daemon's reconcile interval (default 30s), not real-time.
+- `--rm` is daemon-mode only and incompatible with in-process mode (`KUKEON_NO_DAEMON=true` or `--run-path` promotion). Cleanup latency is bounded by the daemon's reconcile interval (default 30s), not real-time.
 - A clean `^]^]` detach in attach mode does **not** trigger `--rm` cleanup; the cell stays alive for re-attach. Only workload termination, peer hangup, or an unrecoverable controller error fires cleanup.
 - `kuke run -f /missing.yaml` exits non-zero with a `failed to open file` error.
 - A reference to an unavailable image surfaces the containerd resolver error verbatim (e.g. `pull access denied, repository does not exist or may require authorization`) and exits non-zero; the half-created cell may need `kuke purge cell` to clean up.
@@ -373,7 +373,7 @@ A single command that prints the daemon's view of every realm/space/stack/cell i
 
 ### `--no-daemon` future
 
-The `--no-daemon` flag is the in-process controller path. It is preserved during `kuke init` and `kuke daemon reset` (the daemon may not be running) and is documented as the escape hatch for inspection commands when the daemon is down. Its broader removal as a user-facing flag for daemon-served operations is tracked in issues #222, #223, and #226 — those workflows are intentionally **not** documented here as supported general-purpose paths.
+The `--no-daemon` flag was removed from the remaining daemon-routed workload commands (`apply`, `create`, `run`, `attach`, `delete`, `kill`, `start`, `stop`, `log`, `refresh`) by #222 — that workload-command removal is the current state. The flag is still accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>` (the `get` kinds were retained per a user override on the original AC so the in-process escape hatch stays available for every resource lookup, not just `get realm` for the daemon-parity check, retired by #223 once `kuke status` (#202) absorbs it). The in-process controller path itself stays reachable on workload commands via `KUKEON_NO_DAEMON=true` or the `--run-path` promotion, but is intentionally **not** documented here as a supported general-purpose path — the long-term arc deletes that branch entirely under #566.
 
 ## Error & edge paths
 
@@ -385,8 +385,8 @@ These are the negative paths most likely to surface a UX regression. Each is ver
 
 **Invariants.**
 
-- Any daemon-routed command (no `--no-daemon`) exits non-zero with `Error: dial kukeond at /run/kukeon/kukeond.sock: dial unix /run/kukeon/kukeond.sock: connect: no such file or directory`. The path in the message is the resolved socket from flags/config, not a hardcoded constant.
-- `--no-daemon` variants of `kuke get`, `kuke create realm`, etc. continue to work for in-process-controller-supported operations (subject to root + a usable `/run/containerd/containerd.sock`).
+- Any daemon-routed command (no in-process mode) exits non-zero with `Error: dial kukeond at /run/kukeon/kukeond.sock: dial unix /run/kukeon/kukeond.sock: connect: no such file or directory`. The path in the message is the resolved socket from flags/config, not a hardcoded constant.
+- In-process variants — `kuke get realms --no-daemon`, `kuke purge realm --cascade --force --no-daemon`, or any command run with `KUKEON_NO_DAEMON=true` / an explicit `--run-path` — continue to work for in-process-controller-supported operations (subject to root + a usable `/run/containerd/containerd.sock`).
 - `kuke daemon start` (when the host **has** been initialized) brings the socket back. `kuke init` brings it back from scratch.
 
 ### Cascade-purge that would orphan the daemon

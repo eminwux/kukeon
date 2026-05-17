@@ -30,7 +30,7 @@ default      default.kukeon.io      Ready  /kukeon/default
 kuke-system  kuke-system.kukeon.io  Ready  /kukeon/kuke-system
 ```
 
-If only `kuke get realms --no-daemon` returns that table but `kuke get realms` (daemon-routed) does not, the daemon's view of `/opt/kukeon` diverged from the in-process controller — usually a missing bind-mount in the `kukeond` cell spec. See [Troubleshooting → `kuke get` and `kuke get --no-daemon` disagree](troubleshooting.md#kuke-get-and-kuke-get---no-daemon-disagree).
+If only `kuke get realms --no-daemon` returns that table but `kuke get realms` (daemon-routed) does not, the daemon's view of `/opt/kukeon` diverged from the in-process controller — usually a missing bind-mount in the `kukeond` cell spec. (Every `kuke get <kind>` keeps the `--no-daemon` flag; `KUKEON_NO_DAEMON=true` and `--run-path /opt/kukeon` work too.) See [Troubleshooting → `kuke get` and `kuke get --no-daemon` disagree](troubleshooting.md#kuke-get-and-kuke-get---no-daemon-disagree).
 
 User data under `/opt/kukeon/default/**` is untouched across iterations; only the system cell is replaced.
 
@@ -98,11 +98,12 @@ To run individual phases by hand — typically while debugging a single phase:
 
 ## Running without the daemon
 
-When iterating on controller code you often don't need the daemon up at all. `--no-daemon` runs every `kuke` command in-process against your freshly built binary:
+When iterating on controller code you often don't need the daemon up at all. In-process mode runs every `kuke` command against your freshly built binary without the socket round-trip. Reach it by passing `--run-path /opt/kukeon` (which auto-promotes) or by exporting `KUKEON_NO_DAEMON=true`; the `--no-daemon` flag itself still works on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>`:
 
 ```bash
 sudo kuke get realms --no-daemon
-sudo kuke apply -f my-cell.yaml --no-daemon
+sudo kuke apply -f my-cell.yaml --run-path /opt/kukeon
+sudo KUKEON_NO_DAEMON=true kuke get cells --realm default --space default --stack default
 ```
 
 This is the fastest feedback loop — no image build, no reload, just `make kuke` and go.

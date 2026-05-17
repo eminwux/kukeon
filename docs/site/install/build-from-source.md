@@ -65,9 +65,9 @@ To iterate after a code change, tear down the kukeond cell (user data under `/op
 
 ```bash
 sudo kuke kill cell kukeond \
-    --realm kuke-system --space kukeon --stack kukeon --no-daemon
+    --realm kuke-system --space kukeon --stack kukeon --run-path /opt/kukeon
 sudo kuke delete cell kukeond \
-    --realm kuke-system --space kukeon --stack kukeon --no-daemon
+    --realm kuke-system --space kukeon --stack kukeon --run-path /opt/kukeon
 sudo rm -f /run/kukeon/kukeond.sock /run/kukeon/kukeond.pid
 
 # Rebuild, reload, re-init

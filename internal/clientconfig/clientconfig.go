@@ -82,12 +82,13 @@ spec:
   # Default: unix:///run/kukeon/kukeond.sock
   host: unix:///run/kukeon/kukeond.sock
 
-  # Kukeon runtime root used by --no-daemon operations that read /opt/kukeon
-  # directly instead of going through kukeond.
+  # Kukeon runtime root used by in-process operations that read /opt/kukeon
+  # directly instead of going through kukeond. An explicit --run-path on the
+  # CLI promotes the command into in-process mode.
   # Default: /opt/kukeon
   runPath: /opt/kukeon
 
-  # Containerd unix socket --no-daemon operations connect to.
+  # Containerd unix socket in-process operations connect to.
   # Default: /run/containerd/containerd.sock
   containerdSocket: /run/containerd/containerd.sock
 

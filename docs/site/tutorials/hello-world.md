@@ -47,10 +47,10 @@ It's a single cell with a single container. The container bootstraps an `index.h
 ## 2. Apply it
 
 ```bash
-sudo kuke apply -f docs/examples/hello-world.yaml --no-daemon
+sudo kuke apply -f docs/examples/hello-world.yaml
 ```
 
-`--no-daemon` is required today because the released daemon container image doesn't bind-mount the containerd socket. See [Client and daemon](../concepts/client-and-daemon.md).
+See [Client and daemon](../concepts/client-and-daemon.md) for how `kuke` routes through `kukeond` by default, and the in-process escape hatch when the daemon is down.
 
 ## 3. Confirm the cell is Ready
 
@@ -85,7 +85,7 @@ In the default bootstrap, the containerd namespace for `realm=default` is `kukeo
 
 ```bash
 sudo kuke delete cell hello-world \
-    --realm default --space default --stack default --cascade --no-daemon
+    --realm default --space default --stack default --cascade
 ```
 
 `--cascade` removes every container in the cell along with the cell itself.

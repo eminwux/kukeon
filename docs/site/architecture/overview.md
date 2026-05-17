@@ -10,7 +10,7 @@ flowchart TB
     end
 
     kuke -->|unix socket<br/>kukeonv1 API| kukeond
-    kuke -.->|--no-daemon<br/>in-process| externals
+    kuke -.->|in-process<br/>(--run-path / KUKEON_NO_DAEMON)| externals
 
     kukeond --> externals
 
@@ -34,7 +34,7 @@ A thin cobra CLI. It:
 - sends `kukeonv1` API requests;
 - formats the response as a table, YAML, or JSON.
 
-The only time `kuke` does real work itself is when `--no-daemon` is passed — then it runs the same controller code that `kukeond` would.
+The only time `kuke` does real work itself is when it's promoted into in-process mode — by an explicit `--run-path`, by `KUKEON_NO_DAEMON=true`, or (on the commands that still expose the flag: `init`, `uninstall`, `purge`, every `get <kind>`) by `--no-daemon`. In that mode it runs the same controller code that `kukeond` would.
 
 ## kukeond (daemon)
 
@@ -48,7 +48,7 @@ When a client calls `CreateCell`, the daemon orchestrates all three: create the 
 
 ## The controller / reconciler
 
-Both the daemon and `--no-daemon` share the same controller (`internal/controller`). The controller is the single place where "desired state → actual state" logic lives:
+Both the daemon and in-process mode share the same controller (`internal/controller`). The controller is the single place where "desired state → actual state" logic lives:
 
 ```
 apply/refresh request
