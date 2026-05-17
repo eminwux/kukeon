@@ -93,8 +93,9 @@ func GetControllerWithMockWrapper[T any](cmd *cobra.Command, mockKey any, wrappe
 
 // ClientFromCmd returns a kukeonv1.Client selected by the
 // `kukeon/noDaemon` viper key, which is fed (in precedence order) by:
-//   - `--no-daemon` on the four commands that still expose it (init,
-//     uninstall, purge, get realm — see #222).
+//   - `--no-daemon` on the commands that still expose it: `init`,
+//     `uninstall`, `purge`, and every `get <kind>` (see #222; the get
+//     kinds were retained per a user override on the original AC).
 //   - `KUKEON_NO_DAEMON=true` env var.
 //   - `applyRunPathImpliesNoDaemon`, which sets the key when `--run-path`
 //     is explicit and `--no-daemon` was not.

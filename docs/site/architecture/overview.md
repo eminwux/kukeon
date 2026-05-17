@@ -34,7 +34,7 @@ A thin cobra CLI. It:
 - sends `kukeonv1` API requests;
 - formats the response as a table, YAML, or JSON.
 
-The only time `kuke` does real work itself is when it's promoted into in-process mode — by an explicit `--run-path`, by `KUKEON_NO_DAEMON=true`, or (on the remaining flagged commands: `init`, `uninstall`, `purge`, `get realm`) by `--no-daemon`. In that mode it runs the same controller code that `kukeond` would.
+The only time `kuke` does real work itself is when it's promoted into in-process mode — by an explicit `--run-path`, by `KUKEON_NO_DAEMON=true`, or (on the commands that still expose the flag: `init`, `uninstall`, `purge`, every `get <kind>`) by `--no-daemon`. In that mode it runs the same controller code that `kukeond` would.
 
 ## kukeond (daemon)
 

@@ -11,7 +11,7 @@ The companion `<project>/CLAUDE.md` has the build, smoke-test, and daemon-parity
 - "Exit code 0" / "exit code non-zero" — the process exit status. Tooling automation should rely on this rather than scraping stdout.
 - "Side effect: X" — what changes on disk, in containerd, or in the daemon's view after the command completes.
 - "Idempotent" — re-running the command on a healthy host produces success without changing observable state. The CLI distinguishes "already existed" from "created" in the human-readable output but does not change the exit code.
-- "Daemon-mode" / "in-process mode" — `kuke` is a client. By default it dials `unix:///run/kukeon/kukeond.sock`. In in-process mode it runs the controller directly and bypasses the socket; this requires root + a usable `/run/containerd/containerd.sock` and is the only path that works before `kuke init` or while the daemon is stopped. In-process mode is reached via the `--no-daemon` flag on the four commands that still expose it (`init`, `uninstall`, `purge`, `get realm` — per #222), via `KUKEON_NO_DAEMON=true` in the environment, or via an explicit `--run-path` (which auto-promotes to in-process mode).
+- "Daemon-mode" / "in-process mode" — `kuke` is a client. By default it dials `unix:///run/kukeon/kukeond.sock`. In in-process mode it runs the controller directly and bypasses the socket; this requires root + a usable `/run/containerd/containerd.sock` and is the only path that works before `kuke init` or while the daemon is stopped. In-process mode is reached via the `--no-daemon` flag on the commands that still expose it (`init`, `uninstall`, `purge`, every `get <kind>` — per #222; the `get` kinds were retained per a user override on the original AC), via `KUKEON_NO_DAEMON=true` in the environment, or via an explicit `--run-path` (which auto-promotes to in-process mode).
 
 ## Bootstrap & teardown
 
@@ -135,7 +135,7 @@ sudo kuke daemon logs -f               # follow until SIGINT
 - `daemon start` errors when the host has not been `kuke init`-ed yet (no cell to start). Exit code non-zero with a message pointing the operator at `kuke init`.
 - `daemon kill` has no grace period; this is the escape hatch for a hung daemon. Use `stop` for the graceful path.
 - `daemon reset` is destructive (cell deletion + socket removal) and described in the Bootstrap & teardown section.
-- After `daemon stop`, daemon-routed commands (anything **not** explicitly in in-process mode) fail with `dial unix /run/kukeon/kukeond.sock: connect: no such file or directory` and exit non-zero. In-process commands (the four `--no-daemon`-accepting commands, plus anything with `KUKEON_NO_DAEMON=true` or an explicit `--run-path`) still work for the subset of operations the in-process controller supports.
+- After `daemon stop`, daemon-routed commands (anything **not** explicitly in in-process mode) fail with `dial unix /run/kukeon/kukeond.sock: connect: no such file or directory` and exit non-zero. In-process commands (the `--no-daemon`-accepting commands listed above, plus anything with `KUKEON_NO_DAEMON=true` or an explicit `--run-path`) still work for the subset of operations the in-process controller supports.
 - `daemon logs` is a typed shortcut for `kuke log --realm kuke-system --space kukeon --stack kukeon kukeond`; the coordinates are wired in. Exit code 0 even when the file is empty.
 
 ## Realm / space / stack management
@@ -373,7 +373,7 @@ A single command that prints the daemon's view of every realm/space/stack/cell i
 
 ### `--no-daemon` future
 
-The `--no-daemon` flag was removed from daemon-routed workload commands (`apply`, `create`, `run`, `attach`, `delete`, `kill`, `get cell|space|stack|container`, `start`, `stop`, `log`, `refresh`) by #222 — that workload-command removal is the current state. The flag is still accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and `kuke get realm` (the daemon-parity check, retired by #223 once `kuke status` (#202) absorbs it). The in-process controller path itself stays reachable on workload commands via `KUKEON_NO_DAEMON=true` or the `--run-path` promotion, but is intentionally **not** documented here as a supported general-purpose path — the long-term arc deletes that branch entirely under #566.
+The `--no-daemon` flag was removed from the remaining daemon-routed workload commands (`apply`, `create`, `run`, `attach`, `delete`, `kill`, `start`, `stop`, `log`, `refresh`) by #222 — that workload-command removal is the current state. The flag is still accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>` (the `get` kinds were retained per a user override on the original AC so the in-process escape hatch stays available for every resource lookup, not just `get realm` for the daemon-parity check, retired by #223 once `kuke status` (#202) absorbs it). The in-process controller path itself stays reachable on workload commands via `KUKEON_NO_DAEMON=true` or the `--run-path` promotion, but is intentionally **not** documented here as a supported general-purpose path — the long-term arc deletes that branch entirely under #566.
 
 ## Error & edge paths
 

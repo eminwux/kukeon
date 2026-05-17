@@ -19,19 +19,20 @@ package shared
 import "github.com/spf13/cobra"
 
 // noDaemonFlagUsage is the usage string for the `--no-daemon` flag, kept in
-// one place so the four retained registrations stay byte-identical.
+// one place so every retained registration stays byte-identical.
 const noDaemonFlagUsage = "bypass kukeond and run operations in-process (requires privileges)"
 
 // RegisterNoDaemonFlag registers `--no-daemon` as a local flag on cmd.
 //
 // `--no-daemon` used to be a root-persistent flag inherited by every
 // subcommand. #222 demoted it to a per-command opt-in: only the commands that
-// still accept it user-facing (kuke init, kuke uninstall, kuke purge,
-// kuke get realm) call this helper. Daemon-routed workload commands (apply,
-// create, run, attach, delete, kill, get cell/space/stack/container, start,
-// stop, log, refresh) no longer accept the flag at the CLI surface; they
-// still reach the in-process branch via the `--run-path` promotion in
-// applyRunPathImpliesNoDaemon and via `KUKEON_NO_DAEMON=true`.
+// still accept it user-facing (kuke init, kuke uninstall, and — via the
+// persistent variant below — kuke purge and every kuke get <kind>) call this
+// helper or its persistent sibling. Daemon-routed workload commands (apply,
+// create, run, attach, delete, kill, start, stop, log, refresh) no longer
+// accept the flag at the CLI surface; they still reach the in-process branch
+// via the `--run-path` promotion in applyRunPathImpliesNoDaemon and via
+// `KUKEON_NO_DAEMON=true`.
 //
 // Bind to viper at PreRun time, not here — see kuke.go's
 // rebindNoDaemonViperToLeaf for the reason (viper.BindPFlag is
@@ -42,9 +43,9 @@ func RegisterNoDaemonFlag(cmd *cobra.Command) {
 }
 
 // RegisterNoDaemonPersistentFlag registers `--no-daemon` as a persistent
-// flag on cmd. Used by `kuke purge`, where the flag must propagate to every
-// resource subcommand (realm/space/stack/cell/container) without each
-// having to call RegisterNoDaemonFlag individually.
+// flag on cmd. Used by `kuke purge` and `kuke get`, where the flag must
+// propagate to every resource subcommand (realm/space/stack/cell/container)
+// without each having to call RegisterNoDaemonFlag individually.
 func RegisterNoDaemonPersistentFlag(cmd *cobra.Command) {
 	cmd.PersistentFlags().Bool("no-daemon", false, noDaemonFlagUsage)
 }

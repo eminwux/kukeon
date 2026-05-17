@@ -44,7 +44,7 @@ Every `kuke` subcommand inherits these persistent flags from the root command:
 | `--verbose`, `-v`     | `false`                           | Enable verbose logging on stderr                     |
 | `--log-level`         | `info`                            | Log level (`debug`, `info`, `warn`, `error`)         |
 
-`--no-daemon` is **not** a root-persistent flag — it is only accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and `kuke get realm` (see #222). For daemon-routed workload commands (`apply`, `create`, `run`, `attach`, `delete`, `kill`, `get cell|space|stack|container`, `start`, `stop`, `log`, `refresh`), the in-process path is reached via `KUKEON_NO_DAEMON=true` or an explicit `--run-path` (which auto-promotes to in-process mode).
+`--no-daemon` is **not** a root-persistent flag — it is only accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>` (see #222; the `get` kinds were retained per a user override on the original AC). For the remaining daemon-routed workload commands (`apply`, `create`, `run`, `attach`, `delete`, `kill`, `start`, `stop`, `log`, `refresh`), the in-process path is reached via `KUKEON_NO_DAEMON=true` or an explicit `--run-path` (which auto-promotes to in-process mode).
 
 ### In-process mode host prerequisites
 

@@ -474,7 +474,7 @@ func TestNewKukeCmdStreams(t *testing.T) {
 // that broke 40/75 e2e tests under per-test `--run-path` isolation.
 //
 // `--no-daemon` is no longer a root-persistent flag (#222) — it only lives
-// on the four retained commands (init, uninstall, purge, get realm). The
+// on the retained commands (init, uninstall, purge, every get <kind>). The
 // flag-set-to-false case drives `kuke init` because that's a representative
 // leaf with the local `--no-daemon` flag; the env-set-to-false case stays
 // on the root since the envSet check in applyRunPathImpliesNoDaemon reads

@@ -28,12 +28,12 @@ It runs as the root container of the `kukeond` cell inside the [system realm](sy
 
 ## In-process mode
 
-`kuke` can bypass the socket and execute the operation in-process. The `--no-daemon` flag used to live on every subcommand; #222 retired it from daemon-routed workload commands (`apply`, `create`, `run`, `attach`, `delete`, `kill`, `get cell|space|stack|container`, `start`, `stop`, `log`, `refresh`). On those commands the in-process path is now reached via:
+`kuke` can bypass the socket and execute the operation in-process. The `--no-daemon` flag used to live on every subcommand; #222 retired it from the remaining daemon-routed workload commands (`apply`, `create`, `run`, `attach`, `delete`, `kill`, `start`, `stop`, `log`, `refresh`). On those commands the in-process path is now reached via:
 
 - `KUKEON_NO_DAEMON=true` in the environment, or
 - an explicit `--run-path /some/path` (which auto-promotes to in-process mode — the daemon ignores client-supplied run-paths, so a caller passing a non-default `--run-path` would otherwise silently read/write the daemon's path instead).
 
-`--no-daemon` itself stays accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and `kuke get realm` (the daemon-parity check), and `kuke image *` is daemon-independent by design (always in-process regardless of any of these knobs).
+`--no-daemon` itself stays accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>` (the `get` kinds were retained per a user override on the original #222 AC so the in-process escape hatch stays available for every resource lookup, not just `get realm`). `kuke image *` is daemon-independent by design (always in-process regardless of any of these knobs).
 
 ```bash
 # Workload command via env var
@@ -42,8 +42,9 @@ sudo KUKEON_NO_DAEMON=true kuke apply -f cell.yaml
 # Workload command via --run-path promotion
 sudo kuke apply -f cell.yaml --run-path /opt/kukeon
 
-# The four commands that still expose --no-daemon directly
+# Commands that still expose --no-daemon directly
 sudo kuke get realms --no-daemon
+sudo kuke get cells --no-daemon --realm default --space default --stack default
 sudo kuke purge realm myrealm --cascade --force --no-daemon
 ```
 
@@ -70,7 +71,7 @@ Other transports are on the roadmap (`ssh://user@host` is the intended future sh
 
 ## Parity between daemon and in-process
 
-`kuke get realms` and `kuke get realms --no-daemon` should return identical output on a healthy host. Divergence between them is a regression — if you see it, please file a bug. The two paths share the same reconciler and data store; the only difference is who holds the process. This explicit-flag check survives on `kuke get realm` after #222 specifically to keep the daemon-parity guard accessible; #223 retires it once `kuke status` (#202) absorbs the parity contract.
+`kuke get realms` and `kuke get realms --no-daemon` should return identical output on a healthy host. Divergence between them is a regression — if you see it, please file a bug. The two paths share the same reconciler and data store; the only difference is who holds the process. The explicit-flag check survives on every `kuke get <kind>` after #222 (`get realm` is the one the CLAUDE.md dev-init regression guard exercises; the others are available as the same shape of escape hatch); #223 retires `get realm`'s parity-check role once `kuke status` (#202) absorbs the parity contract.
 
 ## Related concepts
 

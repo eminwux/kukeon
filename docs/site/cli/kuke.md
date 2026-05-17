@@ -26,11 +26,11 @@ Path to the containerd socket. Only used when running in in-process mode; when t
 
 The daemon endpoint. Today only the `unix://` scheme is supported. The `ssh://user@host` scheme is reserved for a future remote-management feature; don't use it yet.
 
-### `--no-daemon` (only on `init` / `uninstall` / `purge` / `get realm`)
+### `--no-daemon` (only on `init` / `uninstall` / `purge` / `get <kind>`)
 
 Bypass `kukeond` and run the operation in-process. Requires root: the client now directly touches containerd, CNI, and cgroups.
 
-`--no-daemon` is **not** a root-persistent flag — it is only accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and `kuke get realm` (see #222). For daemon-routed workload commands (`apply`, `create`, `run`, `attach`, `delete`, `kill`, `get cell|space|stack|container`, `start`, `stop`, `log`, `refresh`), reach the in-process path via `KUKEON_NO_DAEMON=true` in the environment or via an explicit `--run-path /path` (which auto-promotes to in-process mode so a caller-supplied run-path is never silently sent to the wrong daemon).
+`--no-daemon` is **not** a root-persistent flag — it is only accepted on `kuke init`, `kuke uninstall`, `kuke purge`, and every `kuke get <kind>` (see #222; the `get` kinds were retained per a user override on the original AC so the in-process escape hatch stays available for every resource lookup, not just `get realm`). For the remaining daemon-routed workload commands (`apply`, `create`, `run`, `attach`, `delete`, `kill`, `start`, `stop`, `log`, `refresh`), reach the in-process path via `KUKEON_NO_DAEMON=true` in the environment or via an explicit `--run-path /path` (which auto-promotes to in-process mode so a caller-supplied run-path is never silently sent to the wrong daemon).
 
 `kuke image *` is daemon-independent by design and is always in-process regardless of any of these knobs.
 

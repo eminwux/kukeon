@@ -237,11 +237,13 @@ func loadConfig() error {
 	_ = config.KUKEOND_SOCKET_GID.BindEnv()
 
 	// `--no-daemon` is no longer a root-persistent flag (#222) — only the
-	// commands that still accept it user-facing register it locally (init,
-	// uninstall, purge, get realm). The env binding is what keeps
-	// `KUKEON_NO_DAEMON=true` reaching viper for callers that never go
-	// through one of those flag instances (e.g. the `--run-path` promotion
-	// path and the `KUKEON_NO_DAEMON=false` envSet check).
+	// commands that still accept it user-facing register it locally: `init`,
+	// `uninstall`, `purge` (persistent on the parent), and the parent `get`
+	// command (persistent — every `get <kind>` inherits it per the user
+	// override on #222). The env binding is what keeps `KUKEON_NO_DAEMON=true`
+	// reaching viper for callers that never go through one of those flag
+	// instances (e.g. the `--run-path` promotion path and the
+	// `KUKEON_NO_DAEMON=false` envSet check).
 	_ = config.KUKEON_ROOT_NO_DAEMON.BindEnv()
 
 	_ = config.KUKEON_ROOT_RUN_PATH.BindEnv()

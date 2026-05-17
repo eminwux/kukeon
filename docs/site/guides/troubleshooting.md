@@ -158,7 +158,7 @@ sudo kuke init
 
 ## `kuke get realms` and `kuke get realms --no-daemon` disagree
 
-**Symptom.** The same `kuke get realms` returns different data depending on whether it goes through the daemon or runs in-process (the `--no-daemon` flag is still accepted on `kuke get realm` as the canonical daemon-parity check; see #223 for its eventual retirement).
+**Symptom.** The same `kuke get realms` returns different data depending on whether it goes through the daemon or runs in-process (the `--no-daemon` flag is still accepted on every `kuke get <kind>`; `get realms` is the canonical daemon-parity check, see #223 for its eventual retirement once `kuke status` absorbs the parity contract).
 
 **What it means.** The `kukeond` container isn't bind-mounting `/opt/kukeon` (or `/run/kukeon`) correctly. Both code paths share a reconciler, so divergence is always about what the daemon can see on disk.
 
