@@ -91,6 +91,15 @@ jobs:
       # -v` PASS/FAIL line streams to the runner log immediately, instead
       # of waiting for libc's 4 KiB pipe-buffer flush — without this, a
       # stall mid-test shows as silence even though tests were progressing.
+      #
+      # `</dev/null` detaches stdin so the runner doesn't wait on it, and
+      # `> >(cat) 2> >(cat >&2)` re-parents stdout/stderr through fresh
+      # process-substitution pipes that close when `make` itself exits.
+      # Without this, a containerd-shim or CNI helper that inherits the
+      # step's stdout/stderr pipes keeps them open after `go test` returns,
+      # and GitHub Actions waits for those FDs to close before marking the
+      # step done — that's how a 67s test run becomes a 60+ min "hang"
+      # that not even `timeout-minutes` escapes.
       - name: Run e2e suite as root
         timeout-minutes: 20
-        run: stdbuf -oL -eL sudo -E env "PATH=$PATH" make e2e
+        run: stdbuf -oL -eL sudo -E env "PATH=$PATH" make e2e </dev/null > >(cat) 2> >(cat >&2)
