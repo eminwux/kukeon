@@ -55,6 +55,25 @@ jobs:
           sudo systemctl start containerd
           test -S /run/containerd/containerd.sock
 
+      # The e2e suite runs every workload command through the in-process
+      # controller (via the `--run-path` promotion in buildKukeRunPathArgs),
+      # which shells out to host-side CNI plugins at /opt/cni/bin — see
+      # docs/site/install/prerequisites.md §"CNI plugins (for in-process mode
+      # only)". Install the upstream containernetworking/plugins tarball to
+      # match that contract; the Debian/Ubuntu apt package lands at
+      # /usr/lib/cni and would miss the path kukeon's CNI manager probes.
+      - name: Install CNI plugins to /opt/cni/bin
+        env:
+          CNI_VERSION: v1.4.1
+        run: |
+          sudo mkdir -p /opt/cni/bin
+          curl -fsSL "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz" \
+            | sudo tar -C /opt/cni/bin -xz
+          test -x /opt/cni/bin/bridge
+          test -x /opt/cni/bin/host-local
+          test -x /opt/cni/bin/loopback
+          test -x /opt/cni/bin/portmap
+
       # `sudo -E env "PATH=$PATH"` re-injects the runner's PATH past sudoers'
       # secure_path so the actions/setup-go toolchain stays resolvable when
       # the Makefile invokes `go test` as root.
