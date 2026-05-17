@@ -36,6 +36,8 @@ When a change touches the build path, the daemon, or anything under `/opt/kukeon
 
 A failure in either daemon surfaces as a confusing error several phases into the script — `dial unix /var/run/docker.sock: connect: no such file or directory` for docker, or `failed to connect to containerd: ... dial unix:///run/containerd/containerd.sock: timeout` for containerd. Bring both up before invoking `make dev-init` to skip the rabbit hole.
 
+When run from inside a `kukeon-dev-root` cell (the canonical agent workflow), `make dev-init` automatically redirects the kukeond socket to `/run/kukeon-dev/` so it doesn't clobber the parent host's `kuke attach` plumbing — see [`docs/dev-init.md`](docs/dev-init.md) for the full bare-host vs. nested-mode contract.
+
 ### One-shot: `make dev-init`
 
 ```bash
