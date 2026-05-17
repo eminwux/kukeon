@@ -75,7 +75,7 @@ To run individual phases by hand — e.g. while debugging a single phase — inv
 
    ```bash
    docker build --build-arg VERSION=v0.0.0-dev -t kukeon-local:dev .
-   sudo ./kuke image load --from-docker kukeon-local:dev --realm kuke-system --no-daemon
+   sudo ./kuke image load --from-docker kukeon-local:dev --realm kuke-system
    sudo ctr -n kuke-system.kukeon.io images ls | grep kukeon-local
    ```
 
