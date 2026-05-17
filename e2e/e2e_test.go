@@ -157,9 +157,21 @@ func deepSocketPathFits(runPath string) bool {
 	return len(runPath)+deepSocketSuffixLen <= consts.KukeonMaxSocketPath
 }
 
-// buildKukeRunPathArgs builds --run-path flag arguments.
+// buildKukeRunPathArgs returns the canonical `--no-daemon --run-path <X>`
+// prefix every e2e invocation must carry. The two flags travel together
+// because the e2e suite has no shared kukeond running on its --run-path:
+// without --no-daemon, kuke would dial the host's daemon socket (whichever
+// /opt/kukeon path it was started against) and read/write someone else's
+// state. Per-test --run-path + in-process controller is the only mode that
+// keeps the suite hermetic on hosts where containerd is up but kukeond is
+// not (the common e2e harness shape).
+//
+// Note: --run-path alone already implies --no-daemon at the CLI layer via
+// applyRunPathImpliesNoDaemon (cmd/kuke/kuke.go), so this prefix is
+// belt-and-suspenders. Spelling both out keeps test source self-
+// documenting and severs the dependency on that promotion.
 func buildKukeRunPathArgs(runPath string) []string {
-	return []string{"--run-path", runPath}
+	return []string{"--no-daemon", "--run-path", runPath}
 }
 
 // loadKukeondImageIntoContainerd stages the local kukeond image into the
