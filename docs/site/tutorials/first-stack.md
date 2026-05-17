@@ -74,7 +74,7 @@ spec:
 ## 2. Apply it
 
 ```bash
-sudo kuke apply -f tutorial.yaml --no-daemon
+sudo kuke apply -f tutorial.yaml
 ```
 
 Kukeon creates the space, stack, and two cells in dependency order. The nginx cell gets one IP on the `tutorial` space's bridge; the busybox cell gets another.
@@ -106,10 +106,10 @@ In this example `wget http://web` works because the space's bridge has a resolve
 
 ```bash
 # Cascade-delete the whole stack (both cells and their containers)
-sudo kuke delete stack demo --realm default --space tutorial --cascade --no-daemon
+sudo kuke delete stack demo --realm default --space tutorial --cascade
 
 # Then the space (if you're done with it)
-sudo kuke delete space tutorial --realm default --cascade --no-daemon
+sudo kuke delete space tutorial --realm default --cascade
 ```
 
 ## What you just learned

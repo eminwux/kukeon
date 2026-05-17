@@ -472,12 +472,19 @@ func TestNewKukeCmdStreams(t *testing.T) {
 // run-path, so a caller passing `--run-path` and reaching a daemon dial
 // would silently read/write the daemon's path instead — the failure mode
 // that broke 40/75 e2e tests under per-test `--run-path` isolation.
+//
+// `--no-daemon` is no longer a root-persistent flag (#222) — it only lives
+// on the retained commands (init, uninstall, purge, every get <kind>). The
+// flag-set-to-false case drives `kuke init` because that's a representative
+// leaf with the local `--no-daemon` flag; the env-set-to-false case stays
+// on the root since the envSet check in applyRunPathImpliesNoDaemon reads
+// os.LookupEnv directly and doesn't depend on a cobra flag instance.
 func TestRunPathImpliesNoDaemon(t *testing.T) {
 	tests := []struct {
 		name            string
 		setFlag         bool   // --run-path on the command line
 		setEnv          string // KUKEON_RUN_PATH in env ("" = unset)
-		setNoDaemonFlag bool   // --no-daemon on the command line (=false)
+		setNoDaemonFlag bool   // --no-daemon on the leaf cmd (=false)
 		setNoDaemonEnv  string // KUKEON_NO_DAEMON in env ("" = unset)
 		wantNoDaemon    bool
 	}{
@@ -496,7 +503,7 @@ func TestRunPathImpliesNoDaemon(t *testing.T) {
 			wantNoDaemon: true,
 		},
 		{
-			name:            "explicit --no-daemon=false blocks promotion",
+			name:            "explicit --no-daemon=false on leaf blocks promotion",
 			setFlag:         true,
 			setNoDaemonFlag: true,
 			wantNoDaemon:    false,
@@ -526,19 +533,33 @@ func TestRunPathImpliesNoDaemon(t *testing.T) {
 				t.Fatalf("NewKukeCmd() error = %v", err)
 			}
 
+			// Find the leaf, then call ParseFlags so cobra merges the
+			// inherited persistent flag set (--run-path lives on root)
+			// into leaf.Flags(). Without the merge, neither
+			// flagChanged nor rebindNoDaemonViperToLeaf sees --run-path
+			// via cmd.Flags().Lookup, and the env case is the only
+			// path that can be exercised.
+			leaf, _, findErr := cmd.Find([]string{"init"})
+			if findErr != nil {
+				t.Fatalf("find init subcommand: %v", findErr)
+			}
+			if parseErr := leaf.ParseFlags(nil); parseErr != nil {
+				t.Fatalf("parse leaf flags: %v", parseErr)
+			}
+
 			if tc.setFlag {
-				if setErr := cmd.PersistentFlags().Set("run-path", "/tmp/from-flag"); setErr != nil {
-					t.Fatalf("set --run-path: %v", setErr)
+				if setErr := leaf.Flags().Set("run-path", "/tmp/from-flag"); setErr != nil {
+					t.Fatalf("set --run-path on leaf: %v", setErr)
 				}
 			}
 			if tc.setNoDaemonFlag {
-				if setErr := cmd.PersistentFlags().Set("no-daemon", "false"); setErr != nil {
-					t.Fatalf("set --no-daemon: %v", setErr)
+				if setErr := leaf.Flags().Set("no-daemon", "false"); setErr != nil {
+					t.Fatalf("set --no-daemon on leaf: %v", setErr)
 				}
 			}
 
-			cmd.SetContext(context.Background())
-			if preErr := cmd.PersistentPreRunE(cmd, []string{}); preErr != nil {
+			leaf.SetContext(context.Background())
+			if preErr := cmd.PersistentPreRunE(leaf, []string{}); preErr != nil {
 				t.Fatalf("PersistentPreRunE: %v", preErr)
 			}
 

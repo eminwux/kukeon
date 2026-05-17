@@ -21,7 +21,7 @@ Still pre-v1, gated by:
 
 - **Agent-native primitives** — Session (#46) and Interactive UC2 (#57) are the gate for the agent-native story.
 - **Schema rework** — crew-layers absorption into `CellBlueprint` / `CellConfig` / `Secret` (#423) is a breaking change.
-- **Daemon-only verbs** — `--no-daemon` retirement (#217) is mid-flight; the CLI surface is still moving.
+- **Daemon-only verbs** — `--no-daemon` retirement (#217) is mid-flight; the CLI surface is still moving. The flag is already gone from workload commands (`apply`, `create`, `run`, `attach`, `delete`, `kill`, `get` of non-realm kinds); in-process mode is still reachable via `KUKEON_NO_DAEMON=true` or an explicit `--run-path`.
 - **Reconciler-driven lifecycle** — convergent create/delete (#224) changes runtime semantics.
 
 References:
@@ -90,7 +90,7 @@ sudo usermod -aG kukeon $USER
 kuke get realms
 ```
 
-Operations that bypass the daemon still need root: `kuke init`, `kuke daemon reset`, `kuke image load` (in-process by design — `--no-daemon` is ignored on image subcommands), and any command run with the `--no-daemon` flag.
+Operations that bypass the daemon still need root: `kuke init`, `kuke daemon reset`, `kuke image load` (in-process by design — every `kuke image *` subcommand runs in-process), `kuke purge` / `kuke uninstall` with `--no-daemon`, and any command run with `KUKEON_NO_DAEMON=true` or an explicit `--run-path`.
 
 ### Autocomplete
 
@@ -184,11 +184,11 @@ spec:
           exec busybox httpd -f -v -p 8080 -h /www
 ```
 
-Apply it and verify the cell is running. Cell creation currently goes in-process (`--no-daemon`) because the `kukeond` container image does not yet bind-mount `/run/containerd/containerd.sock`:
+Apply it and verify the cell is running. Cell creation currently goes in-process because the `kukeond` container image does not yet bind-mount `/run/containerd/containerd.sock`; pass `--run-path /opt/kukeon` (or set `KUKEON_NO_DAEMON=true`) to skip the daemon round-trip:
 
 ```bash
 # Create the cell (containers auto-start).
-sudo kuke apply -f docs/examples/hello-world.yaml --no-daemon
+sudo kuke apply -f docs/examples/hello-world.yaml --run-path /opt/kukeon
 
 # Confirm the cell is Ready.
 sudo kuke get cells --realm default --space default --stack default
@@ -203,7 +203,7 @@ Tear it down with:
 
 ```bash
 sudo kuke delete cell hello-world \
-    --realm default --space default --stack default --cascade --no-daemon
+    --realm default --space default --stack default --cascade --run-path /opt/kukeon
 ```
 
 ### Development environment
@@ -241,11 +241,13 @@ To iterate after a change, tear down just the kukeond cell (user data under `/op
 
 ```bash
 sudo kuke kill cell kukeond \
-    --realm kuke-system --space kukeon --stack kukeon --no-daemon
+    --realm kuke-system --space kukeon --stack kukeon --run-path /opt/kukeon
 sudo kuke delete cell kukeond \
-    --realm kuke-system --space kukeon --stack kukeon --no-daemon
+    --realm kuke-system --space kukeon --stack kukeon --run-path /opt/kukeon
 sudo rm -f /run/kukeon/kukeond.sock /run/kukeon/kukeond.pid
 ```
+
+The `--run-path` promotion runs these commands in-process — required here because the daemon is what's being torn down.
 
 → See [docs/site/guides/local-dev.md](docs/site/guides/local-dev.md) for the full dev loop.
 
@@ -290,7 +292,7 @@ $ sudo kuke apply -f cell.yaml  # Apply a manifest
 $ sudo kuke delete cell mycell --realm ... --cascade
 ```
 
-Everything `kuke` does goes through the daemon by default. Pass `--no-daemon` to run the operation in-process (requires root).
+Everything `kuke` does goes through the daemon by default. Set `KUKEON_NO_DAEMON=true` (or pass `--run-path /opt/kukeon` to trigger the same promotion) to run the operation in-process — required when the daemon is down or being torn down (requires root).
 
 ### `kukeond` — the daemon
 

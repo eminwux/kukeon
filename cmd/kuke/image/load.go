@@ -46,9 +46,9 @@ func NewLoadCmd() *cobra.Command {
 			// store as the in-process client; the containerd socket is
 			// root-only on a stock host. Fail fast under non-root euid
 			// with a friendly message rather than letting containerd
-			// surface an opaque EACCES later. The root persistent
-			// `--no-daemon` flag is ignored — load is in-process by
-			// design (#226).
+			// surface an opaque EACCES later. `--no-daemon` is not on
+			// image commands after #222 — load is in-process by design
+			// (#226).
 			if err := kukshared.RequireRoot("kuke image load"); err != nil {
 				return err
 			}

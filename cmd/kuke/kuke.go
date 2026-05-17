@@ -113,6 +113,7 @@ func NewKukeCmd() (*cobra.Command, error) {
 				return fmt.Errorf("%w: %w", errdefs.ErrConfig, err)
 			}
 
+			rebindNoDaemonViperToLeaf(cmd)
 			applyRunPathImpliesNoDaemon(cmd)
 			return nil
 		},
@@ -200,14 +201,6 @@ func SetPersistentLoggingFlags(rootCmd *cobra.Command) error {
 		return err
 	}
 
-	rootCmd.PersistentFlags().Bool(
-		"no-daemon", false,
-		"bypass kukeond and run operations in-process (requires privileges)",
-	)
-	if err := viper.BindPFlag(config.KUKEON_ROOT_NO_DAEMON.ViperKey, rootCmd.PersistentFlags().Lookup("no-daemon")); err != nil {
-		return err
-	}
-
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose logging")
 	if err := viper.BindPFlag(config.KUKEON_ROOT_VERBOSE.ViperKey, rootCmd.PersistentFlags().Lookup("verbose")); err != nil {
 		return err
@@ -242,6 +235,16 @@ func loadConfig() error {
 
 	_ = config.KUKEOND_SOCKET.BindEnv()
 	_ = config.KUKEOND_SOCKET_GID.BindEnv()
+
+	// `--no-daemon` is no longer a root-persistent flag (#222) — only the
+	// commands that still accept it user-facing register it locally: `init`,
+	// `uninstall`, `purge` (persistent on the parent), and the parent `get`
+	// command (persistent — every `get <kind>` inherits it per the user
+	// override on #222). The env binding is what keeps `KUKEON_NO_DAEMON=true`
+	// reaching viper for callers that never go through one of those flag
+	// instances (e.g. the `--run-path` promotion path and the
+	// `KUKEON_NO_DAEMON=false` envSet check).
+	_ = config.KUKEON_ROOT_NO_DAEMON.BindEnv()
 
 	_ = config.KUKEON_ROOT_RUN_PATH.BindEnv()
 	if viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey) == "" {
@@ -321,6 +324,30 @@ func applyClientConfiguration(cmd *cobra.Command, spec v1beta1.ClientConfigurati
 	}
 	if spec.LogLevel != "" && !flagChanged(cmd, "log-level") && !envSet(config.KUKEON_ROOT_LOG_LEVEL) {
 		viper.Set(config.KUKEON_ROOT_LOG_LEVEL.ViperKey, spec.LogLevel)
+	}
+}
+
+// rebindNoDaemonViperToLeaf rebinds the `kukeon/noDaemon` viper key to the
+// `--no-daemon` flag on the leaf cmd being executed, if that cmd has one.
+// Required because #222 demoted `--no-daemon` from a single root-persistent
+// flag to per-command local flags registered on init/uninstall/purge/get
+// realm — viper.BindPFlag has last-bind-wins semantics, so binding at
+// command-tree construction time would leave viper pointing at whichever
+// command happened to register last and silently drop the actual leaf's
+// flag value. Rebinding here, at PreRun time, makes the binding follow the
+// command actually being executed.
+//
+// Cobra merges inherited persistent flags into Flags() before PersistentPreRunE
+// fires, so cmd.Flags().Lookup picks up both local registrations (init's own
+// flag) and persistent ones inherited from a parent (purge's parent flag
+// reaching purge realm). Commands without `--no-daemon` (apply, create, run,
+// attach, delete, kill, get cell/space/stack/container, start, stop, log,
+// refresh, image *, daemon *) get nil from Lookup and viper falls back to
+// the env binding from loadConfig (KUKEON_NO_DAEMON) and the Set override
+// from applyRunPathImpliesNoDaemon below.
+func rebindNoDaemonViperToLeaf(cmd *cobra.Command) {
+	if flag := cmd.Flags().Lookup("no-daemon"); flag != nil {
+		_ = viper.BindPFlag(config.KUKEON_ROOT_NO_DAEMON.ViperKey, flag)
 	}
 }
 

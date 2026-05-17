@@ -22,6 +22,7 @@ import (
 	cellcmd "github.com/eminwux/kukeon/cmd/kuke/get/cell"
 	containercmd "github.com/eminwux/kukeon/cmd/kuke/get/container"
 	realmcmd "github.com/eminwux/kukeon/cmd/kuke/get/realm"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	spacecmd "github.com/eminwux/kukeon/cmd/kuke/get/space"
 	stackcmd "github.com/eminwux/kukeon/cmd/kuke/get/stack"
 	"github.com/spf13/cobra"
@@ -41,6 +42,14 @@ func NewGetCmd() *cobra.Command {
 	}
 
 	cmd.ValidArgsFunction = completeGetSubcommands
+
+	// `--no-daemon` lives as a persistent flag on the parent `get` cmd so
+	// every `get <kind>` leaf inherits it. The original #222 AC retained the
+	// flag only on `get realm` (for the dev-init parity check); the user
+	// later overrode that to keep it available on every `get` kind because
+	// the in-process escape hatch is just as useful for spaces/stacks/cells
+	// /containers when the daemon is down.
+	kukeshared.RegisterNoDaemonPersistentFlag(cmd)
 
 	cmd.AddCommand(
 		realmcmd.NewRealmCmd(),

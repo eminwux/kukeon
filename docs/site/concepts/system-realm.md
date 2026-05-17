@@ -44,12 +44,12 @@ kukeond  kukeon-system    kukeon   kukeon   Ready
 Stopping or restarting the daemon:
 
 ```bash
-sudo kuke kill cell kukeond   --realm kukeon-system --space kukeon --stack kukeon --no-daemon
-sudo kuke delete cell kukeond --realm kukeon-system --space kukeon --stack kukeon --no-daemon
+sudo kuke kill cell kukeond   --realm kukeon-system --space kukeon --stack kukeon --run-path /opt/kukeon
+sudo kuke delete cell kukeond --realm kukeon-system --space kukeon --stack kukeon --run-path /opt/kukeon
 sudo rm -f /run/kukeon/kukeond.sock /run/kukeon/kukeond.pid
 ```
 
-`--no-daemon` is required because the daemon itself is what's being stopped — `kuke` has to talk to containerd directly.
+In-process mode is required because the daemon itself is what's being stopped — `kuke` has to talk to containerd directly. An explicit `--run-path` (or `KUKEON_NO_DAEMON=true`) promotes the command into in-process mode.
 
 See [Guides → Init and reset](../guides/init-and-reset.md) for the full teardown-and-bootstrap loop.
 

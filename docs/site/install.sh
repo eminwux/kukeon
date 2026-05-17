@@ -189,10 +189,11 @@ check_containerd() {
 # image bundles them at /opt/cni/bin (Dockerfile cni-plugins stage), and
 # `kukeondCellDoc` (internal/controller/bootstrap.go) only bind-mounts CNI
 # state directories (/opt/cni/net.d, /var/lib/cni, /opt/cni/cache) from the
-# host — not the plugin binaries. Host plugins are needed only by `--no-daemon`
-# workflows (documented at docs/site/cli/commands.md). Requiring them in the
-# default install path would force every operator to apt-install a package
-# the standard daemon path never reads.
+# host — not the plugin binaries. Host plugins are needed only by in-process
+# workflows (KUKEON_NO_DAEMON=true or explicit --run-path; documented at
+# docs/site/cli/commands.md). Requiring them in the default install path
+# would force every operator to apt-install a package the standard daemon
+# path never reads.
 run_prereqs() {
     step "Checking prerequisites"
     check_cgroupv2 || true

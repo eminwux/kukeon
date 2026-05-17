@@ -22,8 +22,8 @@
 // wraps containerd's image API directly. Whether `kukeond` is running has
 // no effect on their semantics — they manipulate containerd content, not
 // `/opt/kukeon/<realm>/` state — so they always construct a local
-// in-process Client. The root persistent `--no-daemon` flag is ignored
-// here (#226).
+// in-process Client. `--no-daemon` is not accepted on these commands —
+// the runtime ignore from #226 became a flag removal in #222.
 package image
 
 import (
@@ -61,8 +61,9 @@ type Client interface {
 // resolveClient returns the Client every `kuke image *` subcommand uses.
 // Tests inject a fake via MockControllerKey; otherwise the result is a
 // fresh in-process local.Client wired to the root persistent --run-path
-// and --containerd-socket flags. The root persistent --no-daemon flag is
-// not consulted — image commands are in-process by design (#226).
+// and --containerd-socket flags. `--no-daemon` is not on image commands
+// after #222; even when set via env, image commands ignore it — they are
+// in-process by design (#226).
 //
 // The logger fallback (a discard handler when LoggerFromCmd cannot find one
 // in the command context) makes this safe to call in tests that drive the

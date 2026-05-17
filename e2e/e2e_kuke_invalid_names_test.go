@@ -24,7 +24,7 @@ import (
 // TestKuke_CreateSpace_RejectsInvalidNames covers the AC for #180: invalid
 // space names ("_" or "/") must be rejected end-to-end with a non-zero exit
 // code and a clear error message that names the offending input. Run via the
-// in-process controller (--no-daemon) so the test is self-contained — the
+// in-process controller (via the `--run-path` promotion) so the test is self-contained — the
 // validator is wired at both controller and runner boundaries, so the same
 // rejection fires either way.
 func TestKuke_CreateSpace_RejectsInvalidNames(t *testing.T) {
