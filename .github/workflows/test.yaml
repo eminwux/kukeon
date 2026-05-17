@@ -23,3 +23,40 @@ jobs:
 
       - name: Run unit tests
         run: make test
+
+  # `make e2e` needs three host prerequisites — root (sudo -E), a docker
+  # daemon for `docker build` of the local kukeond image, and a standalone
+  # containerd at /run/containerd/containerd.sock (the bootstrap target for
+  # `kuke image load` + `kuke init`, distinct from the docker-private
+  # containerd socket at /var/run/docker/containerd/containerd.toml). Mirrors
+  # the local-dev contract documented in CLAUDE.md and
+  # docs/site/install/build-from-source.md. Runs in parallel with the unit
+  # job above (no shared resources).
+  e2e:
+    name: make e2e
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Ensure docker daemon is running
+        run: |
+          sudo systemctl start docker
+          sudo docker info > /dev/null
+
+      - name: Ensure standalone containerd is running
+        run: |
+          sudo systemctl start containerd
+          test -S /run/containerd/containerd.sock
+
+      # `sudo -E env "PATH=$PATH"` re-injects the runner's PATH past sudoers'
+      # secure_path so the actions/setup-go toolchain stays resolvable when
+      # the Makefile invokes `go test` as root.
+      - name: Run e2e suite as root
+        run: sudo -E env "PATH=$PATH" make e2e
