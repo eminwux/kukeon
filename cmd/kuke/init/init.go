@@ -93,6 +93,12 @@ func setupInitCmd(cmd *cobra.Command) error {
 		return fmt.Errorf("failed to set persistent flags: %w", err)
 	}
 
+	// `--no-daemon` is retained on init per #222 ACs even though init does
+	// not consult the viper key directly — it bootstraps the daemon, it does
+	// not talk to one. The flag stays accepted so existing operator muscle
+	// memory does not break; behavior is unchanged.
+	kukshared.RegisterNoDaemonFlag(cmd)
+
 	bindEnvVars()
 	return nil
 }

@@ -5,7 +5,7 @@ Kukeon (v0.5.0 beta) runs on a single Linux host and relies on two things being 
 1. A kernel with **cgroups v2** enabled
 2. A running **containerd** daemon
 
-CNI plugins are bundled inside the `kukeond` container image, so the standard daemon-mediated install path does **not** need them on the host. If you plan to use the transitional `--no-daemon` flag for some operations, see the [`--no-daemon` host-CNI note below](#cni-plugins-for---no-daemon-only).
+CNI plugins are bundled inside the `kukeond` container image, so the standard daemon-mediated install path does **not** need them on the host. If you plan to run any operation in in-process mode (`kuke get realm --no-daemon`, `kuke purge ... --no-daemon`, `KUKEON_NO_DAEMON=true ...`, or any command with an explicit `--run-path`), see the [host-CNI note below](#cni-plugins-for-in-process-mode-only).
 
 The [one-line installer](install-linux.md) checks both prereqs for you before touching the system; the notes below cover the same checks for operators driving the install manually or debugging a failed installer run.
 
@@ -51,11 +51,11 @@ sudo ctr version
 
 Kukeon uses its own containerd namespaces (one per realm: `<realm>.kukeon.io`). `kuke init` provisions two by default — `default.kukeon.io` for user workloads and `kuke-system.kukeon.io` for the `kukeond` daemon. Kukeon does not interfere with existing containerd namespaces used by Docker, nerdctl, or other tools.
 
-## CNI plugins (for `--no-daemon` only)
+## CNI plugins (for in-process mode only)
 
 The `kukeond` container image bundles the CNI reference plugins at `/opt/cni/bin` inside the container, and the daemon invokes them from there. The standard install path (`kuke init` → daemon-mediated operations) therefore does **not** require host-side CNI plugins.
 
-You only need to install plugins on the host if you plan to run operations with `--no-daemon`, which executes controllers in-process via the `kuke` binary instead of routing through `kukeond`. In that mode `kuke` shells out to plugin binaries at the host's `/opt/cni/bin`. See [`--no-daemon` host prerequisites](../cli/commands.md#-no-daemon-host-prerequisites) for the canonical reference. Note that `--no-daemon` is slated for removal from creation commands in a future release.
+You only need to install plugins on the host if you plan to run operations in in-process mode (`kuke get realm --no-daemon`, `kuke purge ... --no-daemon`, `KUKEON_NO_DAEMON=true ...`, or any command with an explicit `--run-path`), which executes controllers in-process via the `kuke` binary instead of routing through `kukeond`. In that mode `kuke` shells out to plugin binaries at the host's `/opt/cni/bin`. See [in-process mode host prerequisites](../cli/commands.md#in-process-mode-host-prerequisites) for the canonical reference. The in-process path itself is slated for retirement once `ClientFromCmd`'s in-process branch is removed (#566).
 
 If you do need it, install from [containernetworking/plugins](https://github.com/containernetworking/plugins):
 
@@ -72,7 +72,7 @@ At minimum Kukeon needs `bridge`, `host-local`, `loopback`, and `portmap`.
 
 Two paths exist, depending on whether the command goes through `kukeond` or bypasses it:
 
-- **Direct host writes need root.** `kuke init`, `kuke daemon reset`, `kuke image load` (in-process by design — `--no-daemon` is ignored on image subcommands), `kuke doctor cgroups --probe`, and anything else run with `--no-daemon` touch cgroups, netlink, containerd, or `/opt/kukeon` directly. Run them with `sudo`; otherwise they fail fast with a clear "must run as root" error before touching anything.
+- **Direct host writes need root.** `kuke init`, `kuke daemon reset`, `kuke image load` (in-process by design — image commands run in-process regardless of flags), `kuke doctor cgroups --probe`, and any command that runs in-process (the four `--no-daemon`-accepting commands, plus anything with `KUKEON_NO_DAEMON=true` or an explicit `--run-path`) touch cgroups, netlink, containerd, or `/opt/kukeon` directly. Run them with `sudo`; otherwise they fail fast with a clear "must run as root" error before touching anything.
 - **Daemon-routed commands do not need root.** `kuke init` provisions a system `kukeon` group and sets the daemon socket at `/run/kukeon/kukeond.sock` to mode `0660 root:kukeon`. Adding a user to that group (`sudo usermod -aG kukeon $USER`, then re-login) is enough for `kuke get`, `kuke create`, `kuke apply`, `kuke delete`, `kuke log`, and `kuke attach` to work without `sudo`. Writes under `/opt/kukeon` still require root, but they go through the daemon.
 
 See [Getting Started → Daily use without sudo](../getting-started.md#daily-use-without-sudo) for the post-init steps.

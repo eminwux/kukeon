@@ -120,7 +120,8 @@ func NewRunCmd() *cobra.Command {
 			"cell. A clean ^]^] detach is NOT a trigger: the cell stays "+
 			"alive so the operator can re-attach later (parity with "+
 			"`kuke attach`). Daemon-mode only — incompatible with "+
-			"--no-daemon. Cleanup runs from kukeond's reconcile loop, "+
+			"in-process mode (KUKEON_NO_DAEMON=true or `--run-path` "+
+			"promotion). Cleanup runs from kukeond's reconcile loop, "+
 			"so latency is bounded by the reconcile interval rather "+
 			"than firing the instant the trigger fires.")
 	_ = viper.BindPFlag(config.KUKE_RUN_RM.ViperKey, cmd.Flags().Lookup("rm"))
@@ -186,9 +187,14 @@ func parseRunFlags(cmd *cobra.Command, _ []string) (runFlags, error) {
 	}
 	if flags.autoDelete && viper.GetBool(config.KUKEON_ROOT_NO_DAEMON.ViperKey) {
 		// --rm needs a long-lived process to watch the root task and trigger
-		// cleanup. The --no-daemon CLI exits as soon as create+start returns,
-		// so the watcher would never run.
-		return runFlags{}, errors.New("--rm is incompatible with --no-daemon")
+		// cleanup. The in-process CLI path exits as soon as create+start
+		// returns, so the watcher would never run. `--no-daemon` is not a
+		// user-facing flag on `kuke run` after #222; the in-process path is
+		// reached via `--run-path` promotion or `KUKEON_NO_DAEMON=true`.
+		return runFlags{}, errors.New(
+			"--rm is incompatible with in-process mode " +
+				"(KUKEON_NO_DAEMON=true or --run-path promotion)",
+		)
 	}
 	if flags.file != "" {
 		// --name, --param, --param-file are profile-only knobs (per issue

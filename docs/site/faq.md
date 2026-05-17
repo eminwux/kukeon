@@ -23,7 +23,7 @@ Yes. Kukeon uses its own containerd namespaces (`<realm>.kukeon.io` — `default
 
 ## Can I run Kukeon without the daemon?
 
-Mostly, yes. Every `kuke` subcommand accepts `--no-daemon`, which runs the operation in-process. You lose the benefit of a long-lived state holder, but for one-off commands it works.
+Mostly, yes — but the explicit `--no-daemon` flag has been retired on daemon-routed workload commands (see #222). To run in-process you can either set `KUKEON_NO_DAEMON=true` in the environment, or pass an explicit `--run-path /some/path` (which auto-promotes to in-process mode). `--no-daemon` is still accepted on the commands where it remains an explicit toggle: `kuke init`, `kuke uninstall`, `kuke purge`, and `kuke get realm` (the last one keeps the daemon-parity escape hatch).
 
 See [Client and daemon](concepts/client-and-daemon.md).
 

@@ -91,12 +91,17 @@ func GetControllerWithMockWrapper[T any](cmd *cobra.Command, mockKey any, wrappe
 	return wrapper(realCtrl), nil
 }
 
-// ClientFromCmd returns a kukeonv1.Client selected by flags/env:
-//   - --no-daemon (or KUKEON_NO_DAEMON=true): in-process Client backed by a
-//     fresh controller.Exec. Requires privileges.
-//   - default: JSON-RPC Client dialing KUKEON_HOST (unix:///... today).
+// ClientFromCmd returns a kukeonv1.Client selected by the
+// `kukeon/noDaemon` viper key, which is fed (in precedence order) by:
+//   - `--no-daemon` on the four commands that still expose it (init,
+//     uninstall, purge, get realm — see #222).
+//   - `KUKEON_NO_DAEMON=true` env var.
+//   - `applyRunPathImpliesNoDaemon`, which sets the key when `--run-path`
+//     is explicit and `--no-daemon` was not.
 //
-// The caller owns the returned Client and must Close it.
+// True → in-process Client backed by a fresh controller.Exec (requires
+// privileges). False → JSON-RPC Client dialing KUKEON_HOST (unix:///...
+// today). The caller owns the returned Client and must Close it.
 func ClientFromCmd(cmd *cobra.Command) (kukeonv1.Client, error) {
 	if viper.GetBool(config.KUKEON_ROOT_NO_DAEMON.ViperKey) {
 		logger, err := LoggerFromCmd(cmd)

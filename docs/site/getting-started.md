@@ -63,7 +63,7 @@ sudo usermod -aG kukeon $USER
 # Log out and back in (or run `newgrp kukeon`) so the group takes effect.
 ```
 
-The rest of this guide assumes you have done that. If you skip this step, prepend `sudo` to every `kuke` command below. Operations that bypass the daemon still need root: `kuke init`, `kuke daemon reset`, `kuke image load` (in-process by design — `--no-daemon` is ignored on image subcommands), `kuke doctor cgroups --probe`, and any command run with `--no-daemon`.
+The rest of this guide assumes you have done that. If you skip this step, prepend `sudo` to every `kuke` command below. Operations that bypass the daemon still need root: `kuke init`, `kuke daemon reset`, `kuke image load` (in-process by design — image commands run in-process regardless of flags), `kuke doctor cgroups --probe`, and any command that runs in-process (`kuke get realm --no-daemon`, `kuke purge ... --no-daemon`, or any command with `KUKEON_NO_DAEMON=true` / an explicit `--run-path`).
 
 ## 5. Verify with `kuke get`
 
@@ -129,11 +129,8 @@ spec:
 Apply it:
 
 ```bash
-sudo kuke apply -f docs/examples/hello-world.yaml --no-daemon
+sudo kuke apply -f docs/examples/hello-world.yaml
 ```
-
-!!! info "Why `--no-daemon` here"
-The released `kukeond` container image does not yet bind-mount `/run/containerd/containerd.sock`, so cell creation currently must run in-process via `--no-daemon`. This will change in a future release; see issue #217 for the daemon-only verb track.
 
 Confirm the cell is ready, find its IP on the default-default bridge, and curl it:
 
@@ -149,7 +146,7 @@ Tear it down with:
 
 ```bash
 sudo kuke delete cell hello-world \
-    --realm default --space default --stack default --cascade --no-daemon
+    --realm default --space default --stack default --cascade
 ```
 
 ## 7. Enable shell autocomplete

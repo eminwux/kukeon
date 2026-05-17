@@ -30,7 +30,7 @@ default:
 
 - The CLI and the daemon share most of their code (the controller, the apischeme conversion, the error types). Shipping one binary means shipping half the bytes and testing one build.
 - Installers only need to copy one file; the hard link is a one-liner.
-- The CLI can fall back to "be the daemon for one command" (`--no-daemon`) without duplicating any logic.
+- The CLI can fall back to "be the daemon for one command" — in-process mode, reached via an explicit `--run-path` or `KUKEON_NO_DAEMON=true` — without duplicating any logic.
 
 ## The daemon process
 
@@ -49,7 +49,7 @@ The daemon does **not** fork or daemonize itself. When you run `kuke init`, the 
 Every `kuke` invocation is a short-lived process:
 
 1. Parse flags, load config.
-2. If `--no-daemon`, run the operation in-process.
+2. If promoted to in-process mode (explicit `--run-path`, `KUKEON_NO_DAEMON=true`, or one of the commands that still ship `--no-daemon`), run the operation in-process.
 3. Otherwise, dial the daemon socket, send one `kukeonv1` request, print the response, exit.
 
 Clients do not hold persistent connections. Each command opens a new socket, sends, receives, closes. There's no keepalive or session state.

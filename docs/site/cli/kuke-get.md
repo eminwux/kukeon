@@ -16,7 +16,7 @@ Resources: `realm`, `space`, `stack`, `cell`, `container`. Each subcommand also 
 | `--output`, `-o`     | Output format: `yaml`, `json`, `table`. Default: `table` for list, `yaml` for a single resource.  |
 | `--show-controllers` | Append a `CONTROLLERS` column listing the cgroup-v2 controllers delegated on the subject's subtree. Off by default to keep the dev-init parity check stable. |
 
-Plus all [global flags](kuke.md) — most importantly `--no-daemon`.
+Plus all [global flags](kuke.md). To bypass the daemon for a `get` call, set `KUKEON_NO_DAEMON=true` or pass `--run-path /opt/kukeon` (which auto-promotes the command into in-process mode); `kuke get realm` still also accepts the explicit `--no-daemon` flag.
 
 ## Hierarchy flags
 

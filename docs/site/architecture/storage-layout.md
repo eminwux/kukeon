@@ -97,7 +97,7 @@ If you want to inspect what Kukeon pushed into containerd, use `ctr -n kukeon-<r
 | `kuke purge <resource>`       | Same as delete but more aggressive: force-removes residual state |
 | Reboot                        | `/run/kukeon/*` disappears (tmpfs). `/opt/kukeon/*` persists.    |
 
-`--no-daemon` versions of the same commands do exactly the same thing on disk — they just run in-process instead of going through the socket.
+In-process runs of the same commands do exactly the same thing on disk — they just skip the socket and execute the controller in-process (reach in-process mode via `--run-path`, `KUKEON_NO_DAEMON=true`, or, on the commands that still ship it, `--no-daemon`).
 
 ## Read next
 

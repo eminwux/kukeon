@@ -25,6 +25,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/purge/realm"
 	"github.com/eminwux/kukeon/cmd/kuke/purge/space"
 	"github.com/eminwux/kukeon/cmd/kuke/purge/stack"
+	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -52,6 +53,13 @@ func NewPurgeCmd() *cobra.Command {
 	// Add persistent --force flag
 	cmd.PersistentFlags().Bool("force", false, "Skip validation and attempt purge anyway")
 	_ = viper.BindPFlag(config.KUKE_PURGE_FORCE.ViperKey, cmd.PersistentFlags().Lookup("force"))
+
+	// `--no-daemon` is retained on purge per #222 ACs — every purge
+	// subcommand calls ClientFromCmd, and the in-process branch is the
+	// only path that works when the daemon is down (the canonical
+	// disaster-recovery scenario for purge). Registered as a persistent
+	// flag so realm/space/stack/cell/container all inherit it.
+	kukshared.RegisterNoDaemonPersistentFlag(cmd)
 
 	cmd.AddCommand(
 		realm.NewRealmCmd(),

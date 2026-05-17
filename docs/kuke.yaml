@@ -15,10 +15,11 @@ spec:
   # Daemon endpoint kuke dials by default. Use a `unix://` URL for a
   # local daemon socket or `ssh://user@host` to reach a remote kukeond.
   host: unix:///run/kukeon/kukeond.sock
-  # kukeon runtime root used by `--no-daemon` operations that read
-  # /opt/kukeon directly instead of going through kukeond.
+  # kukeon runtime root used by in-process operations that read
+  # /opt/kukeon directly instead of going through kukeond. An explicit
+  # `--run-path` on the CLI promotes the command into in-process mode.
   runPath: /opt/kukeon
-  # Containerd socket `--no-daemon` operations connect to.
+  # Containerd socket in-process operations connect to.
   containerdSocket: /run/containerd/containerd.sock
   # Client log level when `--verbose` is on (debug, info, warn, error).
   logLevel: info

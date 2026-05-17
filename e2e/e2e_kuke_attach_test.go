@@ -64,8 +64,9 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 	t.Parallel()
 
 	// Setup: isolated runPath, unique resource names, in-process controller
-	// (`--no-daemon`) so the per-container socket lives under the test's
-	// runPath rather than the host daemon's.
+	// (promoted by passing `--run-path` to a workload command) so the
+	// per-container socket lives under the test's runPath rather than the
+	// host daemon's.
 	runPath := getRandomRunPath(t)
 
 	realmName := generateUniqueRealmName(t)
@@ -230,9 +231,9 @@ func verifyContainerTaskIsRunning(t *testing.T, namespace, containerID string) b
 
 // cleanupRealmNoDaemon, cleanupSpaceNoDaemon, cleanupStackNoDaemon, and
 // cleanupCellNoDaemon mirror the existing cleanup helpers but route through
-// `--no-daemon` so they use the same in-process controller as the test
-// itself. Without this the cleanup goes via the host daemon (different
-// runPath) and silently no-ops, leaving resources behind.
+// in-process mode (via the `--run-path` promotion) so they use the same
+// controller as the test itself. Without this the cleanup goes via the host
+// daemon (different runPath) and silently no-ops, leaving resources behind.
 func cleanupRealmNoDaemon(t *testing.T, runPath, realmName string) {
 	t.Helper()
 	args := append(buildKukeRunPathArgs(runPath), "delete", "realm", realmName, "--cascade")
@@ -262,7 +263,7 @@ func cleanupCellNoDaemon(t *testing.T, runPath, realmName, spaceName, stackName,
 
 // getCellIDNoDaemon mirrors getCellID but goes through the in-process
 // controller. The realm namespace argument used elsewhere collapses to the
-// realm name when --no-daemon owns the metadata.
+// realm name when the in-process controller owns the metadata.
 func getCellIDNoDaemon(t *testing.T, runPath, realmName, spaceName, stackName, cellName string) (string, error) {
 	t.Helper()
 

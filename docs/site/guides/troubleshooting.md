@@ -19,7 +19,7 @@ sudo usermod -aG kukeon $USER
 # Log out and back in so the new group membership is picked up.
 ```
 
-After logging back in, `id -nG | grep kukeon` should show the group. Daemon-routed commands now work without `sudo`. Commands that mutate the host (`kuke init`, `kuke daemon reset`, `kuke image load` (in-process by design — `--no-daemon` is ignored on image subcommands), `kuke doctor cgroups --probe`) still require root regardless.
+After logging back in, `id -nG | grep kukeon` should show the group. Daemon-routed commands now work without `sudo`. Commands that mutate the host (`kuke init`, `kuke daemon reset`, `kuke image load` (in-process by design — image commands run in-process regardless of flags), `kuke doctor cgroups --probe`) still require root regardless.
 
 ## `kuke doctor cgroups` exits non-zero
 
@@ -135,8 +135,9 @@ dial unix /run/kukeon/kukeond.sock: connect: no such file or directory
 **Diagnosis.**
 
 ```bash
-# Is the daemon cell running?
-sudo kuke get cells --realm kuke-system --space kukeon --stack kukeon --no-daemon
+# Is the daemon cell running? (in-process via --run-path promotion so
+# we don't depend on the daemon we are trying to diagnose)
+sudo kuke get cells --realm kuke-system --space kukeon --stack kukeon --run-path /opt/kukeon
 
 # Is the socket actually on disk?
 ls -l /run/kukeon/
@@ -155,9 +156,9 @@ sudo kuke daemon reset
 sudo kuke init
 ```
 
-## `kuke get` and `kuke get --no-daemon` disagree
+## `kuke get realms` and `kuke get realms --no-daemon` disagree
 
-**Symptom.** The same `get` returns different data depending on whether it goes through the daemon or runs in-process.
+**Symptom.** The same `kuke get realms` returns different data depending on whether it goes through the daemon or runs in-process (the `--no-daemon` flag is still accepted on `kuke get realm` as the canonical daemon-parity check; see #223 for its eventual retirement).
 
 **What it means.** The `kukeond` container isn't bind-mounting `/opt/kukeon` (or `/run/kukeon`) correctly. Both code paths share a reconciler, so divergence is always about what the daemon can see on disk.
 

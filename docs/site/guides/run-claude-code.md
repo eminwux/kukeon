@@ -59,7 +59,7 @@ If you don't run Docker, use the `nerdctl save … | sudo kuke image load -` for
 sudo kuke apply -f docs/examples/claude-code/cell.yaml
 ```
 
-`kuke apply` creates the cell. If you hit a daemon issue, [retry under `--no-daemon`](apply-manifests.md#--no-daemon-caveat).
+`kuke apply` creates the cell. If you hit a daemon issue, [retry in-process](apply-manifests.md#in-process-escape-hatch).
 
 Then connect a terminal to the `work` container:
 
@@ -74,10 +74,10 @@ Press `^]^]` (two consecutive `Ctrl-]` keystrokes) to detach cleanly. The cell k
 ### Tear-down
 
 ```bash
-sudo kuke delete cell claude-code --cascade --no-daemon
+sudo kuke delete cell claude-code --cascade
 ```
 
-`--cascade` removes the cell's containers in the same call. The `--no-daemon` flag is the same caveat as in `kuke apply` — see [Applying manifests](apply-manifests.md#--no-daemon-caveat).
+`--cascade` removes the cell's containers in the same call. If `kuke delete` fails because the daemon is down, fall back to in-process mode the same way `kuke apply` does — see [Applying manifests](apply-manifests.md#in-process-escape-hatch).
 
 ### Optional: persist `~/.claude` across restarts
 
@@ -130,4 +130,4 @@ See [`kuke run`](../cli/kuke-run.md) for the full flag surface, including `--nam
 
 - **The full crew agent-runner shape.** [`eminwux/crew`](https://github.com/eminwux/crew) — SSH bind, GPG-signed commits, agents-repo clone, project-repo clone, the orchestrator that dispatches per-call cells. Two layers up from this guide.
 - **Cell teardown verbs.** [`docs/cli-use-cases.md`](https://github.com/eminwux/kukeon/blob/main/docs/cli-use-cases.md) — the full operator workflow reference, including `stop` / `kill` / `delete` / `purge --cascade` for cells.
-- **Manifest reference.** [Applying manifests](apply-manifests.md) — multi-doc manifests, the `--no-daemon` caveat, profile parameter resolution order.
+- **Manifest reference.** [Applying manifests](apply-manifests.md) — multi-doc manifests, the in-process escape hatch, profile parameter resolution order.

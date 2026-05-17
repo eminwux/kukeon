@@ -1760,13 +1760,14 @@ func TestRun_NoRmFlag_LeavesAutoDeleteFalse(t *testing.T) {
 }
 
 func TestRun_RmFlag_RejectsNoDaemon(t *testing.T) {
-	// --rm needs a long-lived process to watch the root task. The --no-daemon
+	// --rm needs a long-lived process to watch the root task. The in-process
 	// CLI returns immediately after CreateCell, so the watcher would never
 	// run. Reject the combo at flag-parse — before any cell is mutated.
 	t.Cleanup(viper.Reset)
-	// The real --no-daemon flag is registered on rootCmd; in this run-only
-	// fixture we only have the run subcommand, so flip the underlying viper
-	// key directly. Either path lands the same bool in viper.
+	// `--no-daemon` is not a user-facing flag on `kuke run` after #222;
+	// the in-process path is reached via `--run-path` promotion or
+	// `KUKEON_NO_DAEMON=true`. Flip the underlying viper key directly to
+	// simulate either path.
 	viper.Set(config.KUKEON_ROOT_NO_DAEMON.ViperKey, true)
 
 	fc := &fakeClient{}
@@ -1774,8 +1775,8 @@ func TestRun_RmFlag_RejectsNoDaemon(t *testing.T) {
 	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d", "--rm"})
 
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "--rm is incompatible with --no-daemon") {
-		t.Fatalf("err=%v want '--rm is incompatible with --no-daemon'", err)
+	if err == nil || !strings.Contains(err.Error(), "--rm is incompatible with in-process mode") {
+		t.Fatalf("err=%v want '--rm is incompatible with in-process mode'", err)
 	}
 	if fc.createCalls != 0 {
 		t.Errorf("CreateCell calls=%d want 0 (must reject before mutating)", fc.createCalls)

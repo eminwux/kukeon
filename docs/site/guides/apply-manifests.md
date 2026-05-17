@@ -99,15 +99,17 @@ or multi-doc:
 cat realm.yaml space.yaml stack.yaml cell.yaml | sudo kuke apply -f -
 ```
 
-## `--no-daemon` caveat
+## In-process escape hatch
 
-Today, cell creation runs under `--no-daemon` because the released `kukeond` image doesn't bind-mount the containerd socket. If you see `apply` hang or fail when creating a cell, retry with `--no-daemon`:
+`kuke apply` routes through `kukeond` by default. When the daemon is down or you need to debug locally, reach the in-process path via `KUKEON_NO_DAEMON=true` in the env or an explicit `--run-path` (which auto-promotes to in-process mode):
 
 ```bash
-sudo kuke apply -f cell.yaml --no-daemon
+sudo KUKEON_NO_DAEMON=true kuke apply -f cell.yaml
+# or
+sudo kuke apply -f cell.yaml --run-path /opt/kukeon
 ```
 
-See [Client and daemon](../concepts/client-and-daemon.md) for the broader story.
+The `--no-daemon` flag itself was retired from workload commands by #222; see [Client and daemon](../concepts/client-and-daemon.md) for the broader story.
 
 ## Parameterized cell profiles
 
