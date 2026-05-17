@@ -83,11 +83,11 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 	// Step 1: provision realm/space/stack as plain create commands so the
 	// remaining apply call exercises the cell path and only the cell path.
 	runReturningBinary(t, nil, kuke,
-		appendNoDaemonRunPath(runPath, "create", "realm", realmName)...)
+		append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)...)
 	runReturningBinary(t, nil, kuke,
-		appendNoDaemonRunPath(runPath, "create", "space", spaceName, "--realm", realmName)...)
+		append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)...)
 	runReturningBinary(t, nil, kuke,
-		appendNoDaemonRunPath(runPath, "create", "stack", stackName,
+		append(buildKukeRunPathArgs(runPath), "create", "stack", stackName,
 			"--realm", realmName, "--space", spaceName)...)
 
 	// Step 2: apply the attachable cell fixture. Auto-starts the workload
@@ -114,7 +114,7 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 
 	// Step 4: drive `kuke attach` over a real PTY and detach.
 	session := startPTY(t, nil, kuke,
-		appendNoDaemonRunPath(runPath,
+		append(buildKukeRunPathArgs(runPath),
 			"attach", cellName,
 			"--realm", realmName,
 			"--space", spaceName,
@@ -180,37 +180,8 @@ func applyAttachableCell(t *testing.T, runPath, realmName, spaceName, stackName,
 		t.Fatalf("write tmp yaml: %v", err)
 	}
 
-	args := appendNoDaemonRunPath(runPath, "apply", "-f", tmpFile)
+	args := append(buildKukeRunPathArgs(runPath), "apply", "-f", tmpFile)
 	runReturningBinary(t, nil, kuke, args...)
-}
-
-// appendNoDaemonRunPath returns the standard `--no-daemon --run-path X`
-// prefix concatenated with the supplied args. Used by the attach scenario so
-// every kuke invocation hits the in-process controller backed by the test's
-// runPath, isolating from any host daemon. The runPath is resolved to an
-// absolute path so OCI bind-mount sources stay valid even when containerd
-// chroot-resolves them from its own work directory.
-func appendNoDaemonRunPath(runPath string, args ...string) []string {
-	abs := absRunPath(runPath)
-	out := make([]string, 0, len(args)+3)
-	out = append(out, "--no-daemon", "--run-path", abs)
-	return append(out, args...)
-}
-
-// absRunPath returns runPath rewritten as an absolute path under the test's
-// working directory if it is not already absolute. Pure path math; nothing
-// on disk is touched.
-func absRunPath(runPath string) string {
-	if filepath.IsAbs(runPath) {
-		return runPath
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		// Fallback: pass through as-is. Hard-fails the kuke invocation
-		// downstream with a clear error rather than masking it.
-		return runPath
-	}
-	return filepath.Join(cwd, runPath)
 }
 
 // waitForSocket polls until the per-container kuketty control socket appears
@@ -264,27 +235,27 @@ func verifyContainerTaskIsRunning(t *testing.T, namespace, containerID string) b
 // runPath) and silently no-ops, leaving resources behind.
 func cleanupRealmNoDaemon(t *testing.T, runPath, realmName string) {
 	t.Helper()
-	args := appendNoDaemonRunPath(runPath, "delete", "realm", realmName, "--cascade")
+	args := append(buildKukeRunPathArgs(runPath), "delete", "realm", realmName, "--cascade")
 	_, _, _ = runBinary(t, nil, kuke, args...)
 }
 
 func cleanupSpaceNoDaemon(t *testing.T, runPath, realmName, spaceName string) {
 	t.Helper()
-	args := appendNoDaemonRunPath(runPath, "delete", "space", spaceName,
+	args := append(buildKukeRunPathArgs(runPath), "delete", "space", spaceName,
 		"--realm", realmName, "--cascade")
 	_, _, _ = runBinary(t, nil, kuke, args...)
 }
 
 func cleanupStackNoDaemon(t *testing.T, runPath, realmName, spaceName, stackName string) {
 	t.Helper()
-	args := appendNoDaemonRunPath(runPath, "delete", "stack", stackName,
+	args := append(buildKukeRunPathArgs(runPath), "delete", "stack", stackName,
 		"--realm", realmName, "--space", spaceName, "--cascade")
 	_, _, _ = runBinary(t, nil, kuke, args...)
 }
 
 func cleanupCellNoDaemon(t *testing.T, runPath, realmName, spaceName, stackName, cellName string) {
 	t.Helper()
-	args := appendNoDaemonRunPath(runPath, "delete", "cell", cellName,
+	args := append(buildKukeRunPathArgs(runPath), "delete", "cell", cellName,
 		"--realm", realmName, "--space", spaceName, "--stack", stackName, "--cascade")
 	_, _, _ = runBinary(t, nil, kuke, args...)
 }
@@ -295,7 +266,7 @@ func cleanupCellNoDaemon(t *testing.T, runPath, realmName, spaceName, stackName,
 func getCellIDNoDaemon(t *testing.T, runPath, realmName, spaceName, stackName, cellName string) (string, error) {
 	t.Helper()
 
-	args := appendNoDaemonRunPath(runPath,
+	args := append(buildKukeRunPathArgs(runPath),
 		"get", "cell", cellName,
 		"--realm", realmName, "--space", spaceName, "--stack", stackName,
 		"--output", "json",

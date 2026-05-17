@@ -43,7 +43,7 @@ func TestKuke_CreateSpace_RejectsInvalidNames(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			args := appendNoDaemonRunPath(runPath,
+			args := append(buildKukeRunPathArgs(runPath),
 				"create", "space", tt.spaceName, "--realm", "default")
 			exitCode, _, stderr := runBinary(t, nil, kuke, args...)
 			if exitCode == 0 {
@@ -75,7 +75,7 @@ func TestKuke_CreateStack_RejectsInvalidNames(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			args := appendNoDaemonRunPath(runPath,
+			args := append(buildKukeRunPathArgs(runPath),
 				"create", "stack", tt.stackName,
 				"--realm", "default", "--space", "default")
 			exitCode, _, stderr := runBinary(t, nil, kuke, args...)
@@ -108,7 +108,7 @@ func TestKuke_CreateCell_RejectsInvalidNames(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			args := appendNoDaemonRunPath(runPath,
+			args := append(buildKukeRunPathArgs(runPath),
 				"create", "cell", tt.cellName,
 				"--realm", "default", "--space", "default", "--stack", "default")
 			exitCode, _, stderr := runBinary(t, nil, kuke, args...)
@@ -141,7 +141,7 @@ func TestKuke_CreateContainer_RejectsInvalidNames(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			args := appendNoDaemonRunPath(runPath,
+			args := append(buildKukeRunPathArgs(runPath),
 				"create", "container", tt.containerName,
 				"--realm", "default", "--space", "default",
 				"--stack", "default", "--cell", "default",
