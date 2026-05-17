@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/consts"
+	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
 // TestKuke_Help tests kuke help command.
@@ -299,8 +300,13 @@ func TestKuke_DaemonReset_Flags(t *testing.T) {
 func TestKuke_DaemonReset_RoundTrip(t *testing.T) {
 	runPath := getRandomRunPath(t)
 
-	defaultRealmDir := filepath.Join(runPath, consts.KukeonDefaultRealmName)
-	systemRealmDir := filepath.Join(runPath, consts.KukeSystemRealmName)
+	// PR #489 (2026-05-14) moved the on-disk layout to <runPath>/data/<realm>
+	// via fs.MetadataRoot; the prior <runPath>/<realm> form silently passes
+	// "must not exist" negative checks but always fails the positive stats
+	// after `kuke init` populates the real path. Route through the helper
+	// so a future layout change cannot drift the assertion silently.
+	defaultRealmDir := fs.RealmMetadataDir(runPath, consts.KukeonDefaultRealmName)
+	systemRealmDir := fs.RealmMetadataDir(runPath, consts.KukeSystemRealmName)
 
 	t.Cleanup(func() {
 		// Best-effort host-level cleanup: a final reset --purge-system if the
