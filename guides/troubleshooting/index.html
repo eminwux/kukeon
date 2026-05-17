@@ -1586,10 +1586,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#kuke-get-and-kuke-get-no-daemon-disagree" class="md-nav__link">
+  <a href="#kuke-get-realms-and-kuke-get-realms-no-daemon-disagree" class="md-nav__link">
     <span class="md-ellipsis">
       
-        kuke get and kuke get --no-daemon disagree
+        kuke get realms and kuke get realms --no-daemon disagree
       
     </span>
   </a>
@@ -2765,10 +2765,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#kuke-get-and-kuke-get-no-daemon-disagree" class="md-nav__link">
+  <a href="#kuke-get-realms-and-kuke-get-realms-no-daemon-disagree" class="md-nav__link">
     <span class="md-ellipsis">
       
-        kuke get and kuke get --no-daemon disagree
+        kuke get realms and kuke get realms --no-daemon disagree
       
     </span>
   </a>
@@ -2872,7 +2872,7 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sudo<span class="w"> </span>usermod<span class="w"> </span>-aG<span class="w"> </span>kukeon<span class="w"> </span><span class="nv">$USER</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># Log out and back in so the new group membership is picked up.</span>
 </code></pre></div>
-<p>After logging back in, <code>id -nG | grep kukeon</code> should show the group. Daemon-routed commands now work without <code>sudo</code>. Commands that mutate the host (<code>kuke init</code>, <code>kuke daemon reset</code>, <code>kuke image load</code> (in-process by design — <code>--no-daemon</code> is ignored on image subcommands), <code>kuke doctor cgroups --probe</code>) still require root regardless.</p>
+<p>After logging back in, <code>id -nG | grep kukeon</code> should show the group. Daemon-routed commands now work without <code>sudo</code>. Commands that mutate the host (<code>kuke init</code>, <code>kuke daemon reset</code>, <code>kuke image load</code> (in-process by design — image commands run in-process regardless of flags), <code>kuke doctor cgroups --probe</code>) still require root regardless.</p>
 <h2 id="kuke-doctor-cgroups-exits-non-zero"><code>kuke doctor cgroups</code> exits non-zero<a class="headerlink" href="#kuke-doctor-cgroups-exits-non-zero" title="Permanent link">&para;</a></h2>
 <p><strong>Symptom.</strong> The pre-flight reports a controller is missing or fails the <code>+&lt;ctrl&gt;</code> write probe:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>$ sudo kuke doctor cgroups
@@ -2969,11 +2969,12 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>dial unix /run/kukeon/kukeond.sock: connect: no such file or directory
 </code></pre></div>
 <p><strong>Diagnosis.</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Is the daemon cell running?</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>cells<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>--space<span class="w"> </span>kukeon<span class="w"> </span>--stack<span class="w"> </span>kukeon<span class="w"> </span>--no-daemon
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="c1"># Is the socket actually on disk?</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>ls<span class="w"> </span>-l<span class="w"> </span>/run/kukeon/
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Is the daemon cell running? (in-process via --run-path promotion so</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="c1"># we don&#39;t depend on the daemon we are trying to diagnose)</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>cells<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>--space<span class="w"> </span>kukeon<span class="w"> </span>--stack<span class="w"> </span>kukeon<span class="w"> </span>--run-path<span class="w"> </span>/opt/kukeon
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="c1"># Is the socket actually on disk?</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>ls<span class="w"> </span>-l<span class="w"> </span>/run/kukeon/
 </code></pre></div>
 <p><strong>Fix.</strong> If the daemon cell is stopped, start it:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>start
@@ -2982,8 +2983,8 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>reset
 <a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>init
 </code></pre></div>
-<h2 id="kuke-get-and-kuke-get-no-daemon-disagree"><code>kuke get</code> and <code>kuke get --no-daemon</code> disagree<a class="headerlink" href="#kuke-get-and-kuke-get-no-daemon-disagree" title="Permanent link">&para;</a></h2>
-<p><strong>Symptom.</strong> The same <code>get</code> returns different data depending on whether it goes through the daemon or runs in-process.</p>
+<h2 id="kuke-get-realms-and-kuke-get-realms-no-daemon-disagree"><code>kuke get realms</code> and <code>kuke get realms --no-daemon</code> disagree<a class="headerlink" href="#kuke-get-realms-and-kuke-get-realms-no-daemon-disagree" title="Permanent link">&para;</a></h2>
+<p><strong>Symptom.</strong> The same <code>kuke get realms</code> returns different data depending on whether it goes through the daemon or runs in-process (the <code>--no-daemon</code> flag is still accepted on every <code>kuke get &lt;kind&gt;</code>; <code>get realms</code> is the canonical daemon-parity check, see #223 for its eventual retirement once <code>kuke status</code> absorbs the parity contract).</p>
 <p><strong>What it means.</strong> The <code>kukeond</code> container isn't bind-mounting <code>/opt/kukeon</code> (or <code>/run/kukeon</code>) correctly. Both code paths share a reconciler, so divergence is always about what the daemon can see on disk.</p>
 <p><strong>Fix.</strong> Rebuild the daemon image with the correct mounts, reload, and re-init. See <a href="../local-dev/">Local development</a>.</p>
 <h2 id="ctr-can-see-containers-that-kuke-doesnt-list"><code>ctr</code> can see containers that <code>kuke</code> doesn't list<a class="headerlink" href="#ctr-can-see-containers-that-kuke-doesnt-list" title="Permanent link">&para;</a></h2>
@@ -3059,7 +3060,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 16, 2026 20:57:51 UTC">May 16, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 17, 2026 17:44:44 UTC">May 17, 2026</span>
   </span>
 
     

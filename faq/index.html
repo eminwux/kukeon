@@ -2871,7 +2871,7 @@
 <h2 id="can-i-run-kukeon-and-docker-on-the-same-host">Can I run Kukeon and Docker on the same host?<a class="headerlink" href="#can-i-run-kukeon-and-docker-on-the-same-host" title="Permanent link">&para;</a></h2>
 <p>Yes. Kukeon uses its own containerd namespaces (<code>&lt;realm&gt;.kukeon.io</code> — <code>default.kukeon.io</code> and <code>kuke-system.kukeon.io</code> after <code>kuke init</code>). Docker uses <code>moby</code>. The two never see each other's containers.</p>
 <h2 id="can-i-run-kukeon-without-the-daemon">Can I run Kukeon without the daemon?<a class="headerlink" href="#can-i-run-kukeon-without-the-daemon" title="Permanent link">&para;</a></h2>
-<p>Mostly, yes. Every <code>kuke</code> subcommand accepts <code>--no-daemon</code>, which runs the operation in-process. You lose the benefit of a long-lived state holder, but for one-off commands it works.</p>
+<p>Mostly, yes — but the explicit <code>--no-daemon</code> flag has been retired on daemon-routed workload commands (see #222). To run in-process you can either set <code>KUKEON_NO_DAEMON=true</code> in the environment, or pass an explicit <code>--run-path /some/path</code> (which auto-promotes to in-process mode). <code>--no-daemon</code> is still accepted on the commands where it remains an explicit toggle: <code>kuke init</code>, <code>kuke uninstall</code>, <code>kuke purge</code>, and every <code>kuke get &lt;kind&gt;</code> (the <code>get</code> kinds were retained per a user override on the original #222 AC so the in-process escape hatch stays available for every resource lookup, not just <code>get realm</code>).</p>
 <p>See <a href="../concepts/client-and-daemon/">Client and daemon</a>.</p>
 <h2 id="does-kukeon-work-on-macos">Does Kukeon work on macOS?<a class="headerlink" href="#does-kukeon-work-on-macos" title="Permanent link">&para;</a></h2>
 <p>Not directly. Kukeon needs Linux-specific primitives: cgroup v2, netlink, containerd. On macOS, you can run it inside a Linux VM (Lima, OrbStack, Colima, etc.). Native macOS support is not on the roadmap.</p>
@@ -2931,7 +2931,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 21:02:55 UTC">May 13, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 17, 2026 17:44:44 UTC">May 17, 2026</span>
   </span>
 
     

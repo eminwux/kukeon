@@ -1693,10 +1693,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#-no-daemon-false" class="md-nav__link">
+  <a href="#-no-daemon-only-on-init-uninstall-purge-get-kind" class="md-nav__link">
     <span class="md-ellipsis">
       
-        --no-daemon (false)
+        --no-daemon (only on init / uninstall / purge / get &lt;kind&gt;)
       
     </span>
   </a>
@@ -2739,10 +2739,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#-no-daemon-false" class="md-nav__link">
+  <a href="#-no-daemon-only-on-init-uninstall-purge-get-kind" class="md-nav__link">
     <span class="md-ellipsis">
       
-        --no-daemon (false)
+        --no-daemon (only on init / uninstall / purge / get &lt;kind&gt;)
       
     </span>
   </a>
@@ -2840,13 +2840,14 @@
 <h3 id="-configuration-homekukekukeyaml"><code>--configuration</code> (<code>$HOME/.kuke/kuke.yaml</code>)<a class="headerlink" href="#-configuration-homekukekukeyaml" title="Permanent link">&para;</a></h3>
 <p>Path to a <code>ClientConfiguration</code> YAML. If the file doesn't exist, Kukeon falls back to command-line flags, environment variables, and hardcoded defaults — a missing config file is not fatal.</p>
 <h3 id="-containerd-socket-runcontainerdcontainerdsock"><code>--containerd-socket</code> (<code>/run/containerd/containerd.sock</code>)<a class="headerlink" href="#-containerd-socket-runcontainerdcontainerdsock" title="Permanent link">&para;</a></h3>
-<p>Path to the containerd socket. Only used when running in <code>--no-daemon</code> mode; when talking to the daemon, containerd is accessed by the daemon, not the client.</p>
+<p>Path to the containerd socket. Only used when running in in-process mode; when talking to the daemon, containerd is accessed by the daemon, not the client.</p>
 <h3 id="-host-unixrunkukeonkukeondsock"><code>--host</code> (<code>unix:///run/kukeon/kukeond.sock</code>)<a class="headerlink" href="#-host-unixrunkukeonkukeondsock" title="Permanent link">&para;</a></h3>
 <p>The daemon endpoint. Today only the <code>unix://</code> scheme is supported. The <code>ssh://user@host</code> scheme is reserved for a future remote-management feature; don't use it yet.</p>
-<h3 id="-no-daemon-false"><code>--no-daemon</code> (<code>false</code>)<a class="headerlink" href="#-no-daemon-false" title="Permanent link">&para;</a></h3>
+<h3 id="-no-daemon-only-on-init-uninstall-purge-get-kind"><code>--no-daemon</code> (only on <code>init</code> / <code>uninstall</code> / <code>purge</code> / <code>get &lt;kind&gt;</code>)<a class="headerlink" href="#-no-daemon-only-on-init-uninstall-purge-get-kind" title="Permanent link">&para;</a></h3>
 <p>Bypass <code>kukeond</code> and run the operation in-process. Requires root: the client now directly touches containerd, CNI, and cgroups.</p>
-<p>Use when the daemon is stopped, when bootstrapping (<code>kuke init</code> runs this path), or while debugging. <code>kuke image *</code> is daemon-independent by design and is always in-process regardless of <code>--no-daemon</code>.</p>
-<p>Don't run two <code>--no-daemon</code> commands at the same time — they'll race on the same on-disk state.</p>
+<p><code>--no-daemon</code> is <strong>not</strong> a root-persistent flag — it is only accepted on <code>kuke init</code>, <code>kuke uninstall</code>, <code>kuke purge</code>, and every <code>kuke get &lt;kind&gt;</code> (see #222; the <code>get</code> kinds were retained per a user override on the original AC so the in-process escape hatch stays available for every resource lookup, not just <code>get realm</code>). For the remaining daemon-routed workload commands (<code>apply</code>, <code>create</code>, <code>run</code>, <code>attach</code>, <code>delete</code>, <code>kill</code>, <code>start</code>, <code>stop</code>, <code>log</code>, <code>refresh</code>), reach the in-process path via <code>KUKEON_NO_DAEMON=true</code> in the environment or via an explicit <code>--run-path /path</code> (which auto-promotes to in-process mode so a caller-supplied run-path is never silently sent to the wrong daemon).</p>
+<p><code>kuke image *</code> is daemon-independent by design and is always in-process regardless of any of these knobs.</p>
+<p>Don't run two in-process commands at the same time — they'll race on the same on-disk state.</p>
 <h3 id="-verbose-v-false"><code>--verbose</code>, <code>-v</code> (<code>false</code>)<a class="headerlink" href="#-verbose-v-false" title="Permanent link">&para;</a></h3>
 <p>Turn on structured slog output to stderr. Pair with <code>--log-level debug</code> for the chattiest view.</p>
 <h3 id="-log-level-info"><code>--log-level</code> (<code>info</code>)<a class="headerlink" href="#-log-level-info" title="Permanent link">&para;</a></h3>
@@ -2857,11 +2858,14 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Talk to a non-default socket</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>kuke<span class="w"> </span>--host<span class="w"> </span>unix:///tmp/kukeond.sock<span class="w"> </span>get<span class="w"> </span>realms
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Bypass the daemon</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>cell.yaml<span class="w"> </span>--no-daemon
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Bypass the daemon (in-process via env var)</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>sudo<span class="w"> </span><span class="nv">KUKEON_NO_DAEMON</span><span class="o">=</span><span class="nb">true</span><span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>cell.yaml
 <a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Verbose debug of a single apply</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>cell.yaml<span class="w"> </span>--verbose<span class="w"> </span>--log-level<span class="w"> </span>debug
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Bypass the daemon (in-process via --run-path promotion)</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>cell.yaml<span class="w"> </span>--run-path<span class="w"> </span>/opt/kukeon
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># Verbose debug of a single apply</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>cell.yaml<span class="w"> </span>--verbose<span class="w"> </span>--log-level<span class="w"> </span>debug
 </code></pre></div>
 <h2 id="subcommands">Subcommands<a class="headerlink" href="#subcommands" title="Permanent link">&para;</a></h2>
 <p>See <a href="../commands/">Commands overview</a> for the list.</p>
@@ -2887,7 +2891,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 16, 2026 20:57:51 UTC">May 16, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 17, 2026 17:44:44 UTC">May 17, 2026</span>
   </span>
 
     

@@ -2733,7 +2733,7 @@
 <ul>
 <li>The CLI and the daemon share most of their code (the controller, the apischeme conversion, the error types). Shipping one binary means shipping half the bytes and testing one build.</li>
 <li>Installers only need to copy one file; the hard link is a one-liner.</li>
-<li>The CLI can fall back to "be the daemon for one command" (<code>--no-daemon</code>) without duplicating any logic.</li>
+<li>The CLI can fall back to "be the daemon for one command" — in-process mode, reached via an explicit <code>--run-path</code> or <code>KUKEON_NO_DAEMON=true</code> — without duplicating any logic.</li>
 </ul>
 <h2 id="the-daemon-process">The daemon process<a class="headerlink" href="#the-daemon-process" title="Permanent link">&para;</a></h2>
 <p><code>kukeond</code> is a standard long-lived Go program. It:</p>
@@ -2749,7 +2749,7 @@
 <p>Every <code>kuke</code> invocation is a short-lived process:</p>
 <ol>
 <li>Parse flags, load config.</li>
-<li>If <code>--no-daemon</code>, run the operation in-process.</li>
+<li>If promoted to in-process mode (explicit <code>--run-path</code>, <code>KUKEON_NO_DAEMON=true</code>, or <code>--no-daemon</code> on one of the commands that still ship it — <code>init</code>, <code>uninstall</code>, <code>purge</code>, every <code>get &lt;kind&gt;</code>), run the operation in-process.</li>
 <li>Otherwise, dial the daemon socket, send one <code>kukeonv1</code> request, print the response, exit.</li>
 </ol>
 <p>Clients do not hold persistent connections. Each command opens a new socket, sends, receives, closes. There's no keepalive or session state.</p>
@@ -2785,7 +2785,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 21, 2026 12:22:34 UTC">April 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 17, 2026 17:44:44 UTC">May 17, 2026</span>
   </span>
 
     

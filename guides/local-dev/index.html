@@ -2771,7 +2771,7 @@
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>default      default.kukeon.io      Ready  /kukeon/default
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>kuke-system  kuke-system.kukeon.io  Ready  /kukeon/kuke-system
 </code></pre></div>
-<p>If only <code>kuke get realms --no-daemon</code> returns that table but <code>kuke get realms</code> (daemon-routed) does not, the daemon's view of <code>/opt/kukeon</code> diverged from the in-process controller — usually a missing bind-mount in the <code>kukeond</code> cell spec. See <a href="../troubleshooting/#kuke-get-and-kuke-get---no-daemon-disagree">Troubleshooting → <code>kuke get</code> and <code>kuke get --no-daemon</code> disagree</a>.</p>
+<p>If only <code>kuke get realms --no-daemon</code> returns that table but <code>kuke get realms</code> (daemon-routed) does not, the daemon's view of <code>/opt/kukeon</code> diverged from the in-process controller — usually a missing bind-mount in the <code>kukeond</code> cell spec. (Every <code>kuke get &lt;kind&gt;</code> keeps the <code>--no-daemon</code> flag; <code>KUKEON_NO_DAEMON=true</code> and <code>--run-path /opt/kukeon</code> work too.) See <a href="../troubleshooting/#kuke-get-and-kuke-get---no-daemon-disagree">Troubleshooting → <code>kuke get</code> and <code>kuke get --no-daemon</code> disagree</a>.</p>
 <p>User data under <code>/opt/kukeon/default/**</code> is untouched across iterations; only the system cell is replaced.</p>
 <h2 id="make-targets">Make targets<a class="headerlink" href="#make-targets" title="Permanent link">&para;</a></h2>
 <table>
@@ -2850,9 +2850,10 @@
 <a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>kukeond is ready (unix:///run/kukeon/kukeond.sock)
 </code></pre></div>
 <h2 id="running-without-the-daemon">Running without the daemon<a class="headerlink" href="#running-without-the-daemon" title="Permanent link">&para;</a></h2>
-<p>When iterating on controller code you often don't need the daemon up at all. <code>--no-daemon</code> runs every <code>kuke</code> command in-process against your freshly built binary:</p>
+<p>When iterating on controller code you often don't need the daemon up at all. In-process mode runs every <code>kuke</code> command against your freshly built binary without the socket round-trip. Reach it by passing <code>--run-path /opt/kukeon</code> (which auto-promotes) or by exporting <code>KUKEON_NO_DAEMON=true</code>; the <code>--no-daemon</code> flag itself still works on <code>kuke init</code>, <code>kuke uninstall</code>, <code>kuke purge</code>, and every <code>kuke get &lt;kind&gt;</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realms<span class="w"> </span>--no-daemon
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>my-cell.yaml<span class="w"> </span>--no-daemon
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>my-cell.yaml<span class="w"> </span>--run-path<span class="w"> </span>/opt/kukeon
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>sudo<span class="w"> </span><span class="nv">KUKEON_NO_DAEMON</span><span class="o">=</span><span class="nb">true</span><span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>cells<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>default<span class="w"> </span>--stack<span class="w"> </span>default
 </code></pre></div>
 <p>This is the fastest feedback loop — no image build, no reload, just <code>make kuke</code> and go.</p>
 <h2 id="debugging-from-an-ide">Debugging from an IDE<a class="headerlink" href="#debugging-from-an-ide" title="Permanent link">&para;</a></h2>
@@ -2894,7 +2895,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 16, 2026 20:57:51 UTC">May 16, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 17, 2026 17:44:44 UTC">May 17, 2026</span>
   </span>
 
     

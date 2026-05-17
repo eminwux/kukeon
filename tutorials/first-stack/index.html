@@ -2815,7 +2815,7 @@
 <a id="__codelineno-1-45" name="__codelineno-1-45" href="#__codelineno-1-45"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;while</span><span class="nv"> </span><span class="s">true;</span><span class="nv"> </span><span class="s">do</span><span class="nv"> </span><span class="s">wget</span><span class="nv"> </span><span class="s">-qO-</span><span class="nv"> </span><span class="s">http://web</span><span class="nv"> </span><span class="s">2&gt;/dev/null</span><span class="nv"> </span><span class="s">||</span><span class="nv"> </span><span class="s">true;</span><span class="nv"> </span><span class="s">sleep</span><span class="nv"> </span><span class="s">5;</span><span class="nv"> </span><span class="s">done&quot;</span>
 </code></pre></div>
 <h2 id="2-apply-it">2. Apply it<a class="headerlink" href="#2-apply-it" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>tutorial.yaml<span class="w"> </span>--no-daemon
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>tutorial.yaml
 </code></pre></div>
 <p>Kukeon creates the space, stack, and two cells in dependency order. The nginx cell gets one IP on the <code>tutorial</code> space's bridge; the busybox cell gets another.</p>
 <h2 id="3-check-the-network">3. Check the network<a class="headerlink" href="#3-check-the-network" title="Permanent link">&para;</a></h2>
@@ -2835,10 +2835,10 @@
 <p>In this example <code>wget http://web</code> works because the space's bridge has a resolver, and the <code>web</code> cell's root container registers itself by name. If your space has DNS turned off, you can replace the URL with the cell IP (find it via <code>kuke get cells --realm default --space tutorial --stack demo -o yaml</code> and look under <code>status.containers[].ip</code>).</p>
 <h2 id="5-tear-it-down">5. Tear it down<a class="headerlink" href="#5-tear-it-down" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Cascade-delete the whole stack (both cells and their containers)</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>stack<span class="w"> </span>demo<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>tutorial<span class="w"> </span>--cascade<span class="w"> </span>--no-daemon
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>stack<span class="w"> </span>demo<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>tutorial<span class="w"> </span>--cascade
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># Then the space (if you&#39;re done with it)</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>space<span class="w"> </span>tutorial<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--cascade<span class="w"> </span>--no-daemon
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>space<span class="w"> </span>tutorial<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--cascade
 </code></pre></div>
 <h2 id="what-you-just-learned">What you just learned<a class="headerlink" href="#what-you-just-learned" title="Permanent link">&para;</a></h2>
 <ul>
@@ -2874,7 +2874,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 8, 2026 11:43:42 UTC">May 8, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 17, 2026 17:44:44 UTC">May 17, 2026</span>
   </span>
 
     
