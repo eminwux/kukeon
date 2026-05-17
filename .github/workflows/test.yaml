@@ -77,5 +77,20 @@ jobs:
       # `sudo -E env "PATH=$PATH"` re-injects the runner's PATH past sudoers'
       # secure_path so the actions/setup-go toolchain stays resolvable when
       # the Makefile invokes `go test` as root.
+      #
+      # step-level timeout-minutes (vs. the implicit 360 min job default) is
+      # the diagnostic safety net: when a child of `go test` (e.g. an orphan
+      # containerd-shim or a hung CNI invocation) holds the runner's
+      # stdout/stderr pipe open past `go test`'s own exit, GitHub flushes
+      # the in-progress step's log only on step completion. A cancellation
+      # drops the buffer; a timeout-induced failure persists it. 20 min is
+      # ~10× the historical build+test phase wall-clock and bounds the
+      # blast radius without flagging legitimately slow runs.
+      #
+      # `stdbuf -oL -eL` forces line-buffered stdout/stderr so each `go test
+      # -v` PASS/FAIL line streams to the runner log immediately, instead
+      # of waiting for libc's 4 KiB pipe-buffer flush — without this, a
+      # stall mid-test shows as silence even though tests were progressing.
       - name: Run e2e suite as root
-        run: sudo -E env "PATH=$PATH" make e2e
+        timeout-minutes: 20
+        run: stdbuf -oL -eL sudo -E env "PATH=$PATH" make e2e
