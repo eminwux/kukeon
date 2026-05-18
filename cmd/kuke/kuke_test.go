@@ -570,3 +570,113 @@ func TestRunPathImpliesNoDaemon(t *testing.T) {
 		})
 	}
 }
+
+// TestRunPathImpliesKukeondSocket locks down the issue #570 fix: explicit
+// `--run-path` (flag or env) auto-derives KUKEOND_SOCKET = `<X>/kukeond.sock`
+// for every kuke subcommand, not just `kuke init` (#569). Without this,
+// `kuke daemon reset --run-path X` still cleans the default `/run/kukeon/`
+// while `kuke init --run-path X` lays the socket under X — the asymmetry
+// the source PR #569 flagged in its reviewer notes.
+//
+// The daemon-reset leaf is the canonical regression target; the init leaf
+// case re-verifies the same root promotion still satisfies init's
+// pre-#570 contract (init.go no longer calls the helper itself).
+func TestRunPathImpliesKukeondSocket(t *testing.T) {
+	tests := []struct {
+		name        string
+		leafArgs    []string
+		setFlag     bool   // --run-path on the command line
+		setEnv      string // KUKEON_RUN_PATH in env ("" = unset)
+		setSocket   string // KUKEOND_SOCKET in env ("" = unset)
+		preSet      string // pre-PreRunE viper.Set on KUKEOND_SOCKET ("" = skip)
+		wantSocket  string // empty string asserts viper key remains unset
+		wantNonZero bool   // for default-path cases, just assert non-empty
+	}{
+		{
+			name:       "no-flag-no-env-no-derivation",
+			leafArgs:   []string{"daemon", "reset"},
+			wantSocket: "",
+		},
+		{
+			name:       "run-path-flag-derives-on-reset",
+			leafArgs:   []string{"daemon", "reset"},
+			setFlag:    true,
+			wantSocket: "/tmp/issue-570/kukeond.sock",
+		},
+		{
+			name:       "run-path-env-derives-on-reset",
+			leafArgs:   []string{"daemon", "reset"},
+			setEnv:     "/tmp/issue-570-env",
+			wantSocket: "/tmp/issue-570-env/kukeond.sock",
+		},
+		{
+			name:       "run-path-flag-derives-on-init",
+			leafArgs:   []string{"init"},
+			setFlag:    true,
+			wantSocket: "/tmp/issue-570/kukeond.sock",
+		},
+		{
+			name:       "kukeond-socket-env-pinned-respects-env",
+			leafArgs:   []string{"daemon", "reset"},
+			setFlag:    true,
+			setSocket:  "/run/kukeon/operator.sock",
+			wantSocket: "/run/kukeon/operator.sock",
+		},
+		{
+			name:       "pre-set-viper-respects-existing-pin",
+			leafArgs:   []string{"daemon", "reset"},
+			setFlag:    true,
+			preSet:     "/run/kukeon/from-yaml.sock",
+			wantSocket: "/run/kukeon/from-yaml.sock",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			viper.Reset()
+
+			if tc.setEnv != "" {
+				t.Setenv(config.KUKEON_ROOT_RUN_PATH.EnvVar(), tc.setEnv)
+			}
+			if tc.setSocket != "" {
+				t.Setenv(config.KUKEOND_SOCKET.EnvVar(), tc.setSocket)
+			}
+
+			cmd, err := kuke.NewKukeCmd()
+			if err != nil {
+				t.Fatalf("NewKukeCmd() error = %v", err)
+			}
+
+			leaf, _, findErr := cmd.Find(tc.leafArgs)
+			if findErr != nil {
+				t.Fatalf("find %v subcommand: %v", tc.leafArgs, findErr)
+			}
+			if parseErr := leaf.ParseFlags(nil); parseErr != nil {
+				t.Fatalf("parse leaf flags: %v", parseErr)
+			}
+
+			if tc.setFlag {
+				if setErr := leaf.Flags().Set("run-path", "/tmp/issue-570"); setErr != nil {
+					t.Fatalf("set --run-path on leaf: %v", setErr)
+				}
+			}
+			if tc.preSet != "" {
+				// Stand-in for a pre-derivation pin (env binding's
+				// viper.Set on read, or a future caller that pre-pins
+				// the socket from YAML before the root PreRunE runs).
+				viper.Set(config.KUKEOND_SOCKET.ViperKey, tc.preSet)
+			}
+
+			leaf.SetContext(context.Background())
+			if preErr := cmd.PersistentPreRunE(leaf, []string{}); preErr != nil {
+				t.Fatalf("PersistentPreRunE: %v", preErr)
+			}
+
+			got := viper.GetString(config.KUKEOND_SOCKET.ViperKey)
+			if got != tc.wantSocket {
+				t.Errorf("KUKEOND_SOCKET: got %q, want %q", got, tc.wantSocket)
+			}
+		})
+	}
+}
