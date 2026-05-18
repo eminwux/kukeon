@@ -78,8 +78,7 @@ spec:
 		t.Fatalf("failed to write delete YAML file: %v", err)
 	}
 
-	// Delete the realm — `delete -f` routes in-process (see deleteYAMLFileFromTestdata note).
-	args = append(buildKukeRunPathArgs(runPath), "delete", "-f", deleteYamlFile)
+	args = append(buildKukeDaemonArgs(host), "delete", "-f", deleteYamlFile)
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	if len(output) == 0 {
@@ -169,7 +168,7 @@ spec:
 	}
 
 	// Delete resources (should delete in reverse dependency order: Space first, then Realm)
-	args = append(buildKukeRunPathArgs(runPath), "delete", "-f", deleteYamlFile)
+	args = append(buildKukeDaemonArgs(host), "delete", "-f", deleteYamlFile)
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	if len(output) == 0 {
@@ -250,7 +249,7 @@ spec:
 	}
 
 	// Delete realm with cascade flag
-	args = append(buildKukeRunPathArgs(runPath), "delete", "-f", deleteYamlFile, "--cascade")
+	args = append(buildKukeDaemonArgs(host), "delete", "-f", deleteYamlFile, "--cascade")
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	if len(output) == 0 {
@@ -269,8 +268,8 @@ spec:
 func TestKukeDeleteF_Idempotent(t *testing.T) {
 	t.Parallel()
 
-	// `delete -f` routes in-process, so no daemon is required for this test.
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 
@@ -291,7 +290,7 @@ spec:
 	}
 
 	// Try to delete non-existent realm (should be idempotent, not an error)
-	args := append(buildKukeRunPathArgs(runPath), "delete", "-f", deleteYamlFile)
+	args := append(buildKukeDaemonArgs(host), "delete", "-f", deleteYamlFile)
 	output1 := runReturningBinary(t, nil, kuke, args...)
 
 	if len(output1) == 0 {
@@ -373,13 +372,9 @@ func applyYAMLFileFromTestdata(t *testing.T, host, yamlFile string, replacements
 }
 
 // deleteYAMLFileFromTestdata reads a YAML file from testdata, applies replacements, and runs delete command.
-//
-// NOTE: `kuke delete -f` routes through ControllerFromCmd (in-process) rather than
-// ClientFromCmd (daemon-aware), so this helper takes runPath and uses the in-process
-// path. Tracked as #574; once fixed, callers can collapse back to the daemon helper.
 func deleteYAMLFileFromTestdata(
 	t *testing.T,
-	runPath, yamlFile string,
+	host, yamlFile string,
 	replacements map[string]string,
 	cascade bool,
 ) []byte {
@@ -387,8 +382,7 @@ func deleteYAMLFileFromTestdata(
 
 	tmpFile := writeTempYAMLFile(t, yamlFile, replacements)
 
-	// Build delete command arguments
-	args := append(buildKukeRunPathArgs(runPath), "delete", "-f", tmpFile)
+	args := append(buildKukeDaemonArgs(host), "delete", "-f", tmpFile)
 	if cascade {
 		args = append(args, "--cascade")
 	}
@@ -454,7 +448,7 @@ func TestDeleteF_Realm_VerifyAllResourcesDeleted(t *testing.T) {
 	}
 
 	// Step 3: Delete using delete -f
-	_ = deleteYAMLFileFromTestdata(t, runPath, "realm.yaml", replacements, false)
+	_ = deleteYAMLFileFromTestdata(t, host, "realm.yaml", replacements, false)
 
 	// Step 4: Verify containerd namespace does NOT exist
 	if verifyContainerdNamespace(t, namespace) {
@@ -539,7 +533,7 @@ func TestDeleteF_Space_VerifyAllResourcesDeleted(t *testing.T) {
 	}
 
 	// Step 4: Delete using delete -f
-	_ = deleteYAMLFileFromTestdata(t, runPath, "space.yaml", replacements, false)
+	_ = deleteYAMLFileFromTestdata(t, host, "space.yaml", replacements, false)
 
 	// Step 5: Verify CNI config file does NOT exist (network)
 	if verifySpaceCNIConfigExists(t, runPath, realmName, spaceName) {
@@ -638,7 +632,7 @@ func TestDeleteF_Stack_VerifyAllResourcesDeleted(t *testing.T) {
 	}
 
 	// Step 5: Delete using delete -f
-	_ = deleteYAMLFileFromTestdata(t, runPath, "stack.yaml", replacements, false)
+	_ = deleteYAMLFileFromTestdata(t, host, "stack.yaml", replacements, false)
 
 	// Step 6: Verify cgroup path does NOT exist
 	if verifyCgroupPathExists(t, cgroupPath) {
@@ -769,7 +763,7 @@ func TestDeleteF_Cell_VerifyAllResourcesDeleted(t *testing.T) {
 	}
 
 	// Step 6: Delete using delete -f
-	_ = deleteYAMLFileFromTestdata(t, runPath, "cell.yaml", replacements, false)
+	_ = deleteYAMLFileFromTestdata(t, host, "cell.yaml", replacements, false)
 
 	// Step 7: Verify cgroup path does NOT exist
 	if verifyCgroupPathExists(t, cgroupPath) {
@@ -938,8 +932,8 @@ spec:
 		t.Fatalf("failed to write container YAML file: %v", err)
 	}
 
-	// Step 7: Delete using delete -f (`delete -f` routes in-process; see deleteYAMLFileFromTestdata note)
-	args = append(buildKukeRunPathArgs(runPath), "delete", "-f", containerYAMLFile)
+	// Step 7: Delete using delete -f
+	args = append(buildKukeDaemonArgs(host), "delete", "-f", containerYAMLFile)
 	_ = runReturningBinary(t, nil, kuke, args...)
 
 	// Step 8: Verify container does NOT exist in containerd
