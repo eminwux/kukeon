@@ -26,6 +26,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eminwux/kukeon/cmd/kuke/daemon/internal/lifecycle"
 	kill "github.com/eminwux/kukeon/cmd/kuke/daemon/kill"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
@@ -167,7 +168,7 @@ func TestDaemonKill(t *testing.T) {
 			cmd.SetErr(buf)
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-			ctx = context.WithValue(ctx, kill.MockClientKey{}, kukeonv1.Client(tt.fake))
+			ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(tt.fake))
 			cmd.SetContext(ctx)
 			cmd.SetArgs(nil)
 

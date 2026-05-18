@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eminwux/kukeon/cmd/kuke/daemon/internal/lifecycle"
 	restart "github.com/eminwux/kukeon/cmd/kuke/daemon/restart"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
@@ -240,7 +241,7 @@ func TestDaemonRestart(t *testing.T) {
 			cmd.SetErr(buf)
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-			ctx = context.WithValue(ctx, restart.MockClientKey{}, kukeonv1.Client(tt.fake))
+			ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(tt.fake))
 			cmd.SetContext(ctx)
 			cmd.SetArgs(tt.args)
 
@@ -317,7 +318,7 @@ func TestDaemonRestart_GracefulTimeoutEscalatesToKillThenStarts(t *testing.T) {
 	cmd.SetErr(buf)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-	ctx = context.WithValue(ctx, restart.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
 	cmd.SetContext(ctx)
 	cmd.SetArgs([]string{"--timeout", "50ms"})
 
@@ -397,7 +398,7 @@ func TestDaemonRestart_TimeoutOverridesDefault(t *testing.T) {
 	cmd.SetErr(buf)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-	ctx = context.WithValue(ctx, restart.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
 	cmd.SetContext(ctx)
 	cmd.SetArgs([]string{"--timeout", "20ms"})
 
@@ -461,7 +462,7 @@ func TestDaemonRestart_KillCellErrorIsWrapped(t *testing.T) {
 	cmd.SetErr(buf)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-	ctx = context.WithValue(ctx, restart.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
 	cmd.SetContext(ctx)
 	cmd.SetArgs([]string{"--timeout", "20ms"})
 
