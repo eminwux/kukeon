@@ -103,6 +103,14 @@ func GetControllerWithMockWrapper[T any](cmd *cobra.Command, mockKey any, wrappe
 // True → in-process Client backed by a fresh controller.Exec (requires
 // privileges). False → JSON-RPC Client dialing KUKEON_HOST (unix:///...
 // today). The caller owns the returned Client and must Close it.
+//
+// Workload commands (apply, create *, run, attach, delete *, kill *) no
+// longer route through here — #566 routed them through DaemonClientFromCmd
+// so the in-process branch is unreachable from the workload CLI surface.
+// Surviving callers: log, refresh, start, stop, doctor/cgroups (in-process
+// reachable only via the `--run-path` promotion since they don't expose
+// `--no-daemon`), plus get *, purge *, init, uninstall (in-process
+// reachable via either the explicit `--no-daemon` flag or the promotion).
 func ClientFromCmd(cmd *cobra.Command) (kukeonv1.Client, error) {
 	if viper.GetBool(config.KUKEON_ROOT_NO_DAEMON.ViperKey) {
 		logger, err := LoggerFromCmd(cmd)
@@ -115,6 +123,28 @@ func ClientFromCmd(cmd *cobra.Command) (kukeonv1.Client, error) {
 		}), nil
 	}
 
+	return dialDaemon(cmd)
+}
+
+// DaemonClientFromCmd returns a kukeonv1.Client that always dials kukeond
+// (RPC only — never the in-process branch). #566 phase 3 routes every
+// workload command (apply, create *, run, attach, delete *, kill *)
+// through here so the user-facing CLI surface for those verbs has no
+// in-process escape hatch even when `--run-path` (which would otherwise
+// promote `KUKEON_NO_DAEMON=true` via applyRunPathImpliesNoDaemon) is set.
+// The promotion still fires for the surviving ClientFromCmd callers
+// enumerated above; for the workload commands it is now a no-op because
+// this helper ignores the `kukeon/noDaemon` viper key.
+//
+// The caller owns the returned Client and must Close it.
+func DaemonClientFromCmd(cmd *cobra.Command) (kukeonv1.Client, error) {
+	return dialDaemon(cmd)
+}
+
+// dialDaemon resolves the configured kukeond endpoint (KUKEON_HOST, with
+// fallback to the default) and dials it. Shared by ClientFromCmd's RPC
+// branch and DaemonClientFromCmd.
+func dialDaemon(cmd *cobra.Command) (kukeonv1.Client, error) {
 	host := viper.GetString(config.KUKEON_ROOT_HOST.ViperKey)
 	if host == "" {
 		host = config.KUKEON_ROOT_HOST.Default

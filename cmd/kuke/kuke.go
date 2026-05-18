@@ -341,10 +341,14 @@ func applyClientConfiguration(cmd *cobra.Command, spec v1beta1.ClientConfigurati
 // fires, so cmd.Flags().Lookup picks up both local registrations (init's own
 // flag) and persistent ones inherited from a parent (purge's parent flag
 // reaching purge realm). Commands without `--no-daemon` (apply, create, run,
-// attach, delete, kill, get cell/space/stack/container, start, stop, log,
-// refresh, image *, daemon *) get nil from Lookup and viper falls back to
-// the env binding from loadConfig (KUKEON_NO_DAEMON) and the Set override
-// from applyRunPathImpliesNoDaemon below.
+// attach, delete, kill, start, stop, log, refresh, image *, daemon *) get
+// nil from Lookup and viper falls back to the env binding from loadConfig
+// (KUKEON_NO_DAEMON) and the Set override from applyRunPathImpliesNoDaemon
+// below. Of those, the workload commands (apply, create *, run, attach,
+// delete *, kill *) ignore the viper key entirely after #566 — they go
+// through DaemonClientFromCmd, which always dials kukeond — so for them
+// the rebind path is a no-op even when `KUKEON_NO_DAEMON=true` or the
+// `--run-path` promotion lands.
 func rebindNoDaemonViperToLeaf(cmd *cobra.Command) {
 	if flag := cmd.Flags().Lookup("no-daemon"); flag != nil {
 		_ = viper.BindPFlag(config.KUKEON_ROOT_NO_DAEMON.ViperKey, flag)
@@ -364,6 +368,20 @@ func rebindNoDaemonViperToLeaf(cmd *cobra.Command) {
 // with a non-default ClientConfiguration shouldn't have their daemon
 // access silently disabled. Flag/env are explicit per-invocation intent;
 // YAML is ambient configuration.
+//
+// Surviving callers after #566 (workload commands no longer consult the
+// `kukeon/noDaemon` viper key — they route through DaemonClientFromCmd):
+//   - init, uninstall, purge *, get * — expose `--no-daemon` user-facing
+//     and inherit the promotion when the operator passes `--run-path`
+//     without `--no-daemon`.
+//   - log, refresh, start *, stop *, doctor/cgroups — no `--no-daemon`
+//     flag at the CLI surface; the promotion is the only path that
+//     reaches the in-process branch in shared.ClientFromCmd for these.
+//
+// For the workload commands (apply, create *, run, attach, delete *,
+// kill *) the promotion still fires (the PreRun hook is unconditional),
+// but the resulting viper bit is now inert because DaemonClientFromCmd
+// does not read it.
 func applyRunPathImpliesNoDaemon(cmd *cobra.Command) {
 	runPathExplicit := flagChanged(cmd, "run-path") || envSet(config.KUKEON_ROOT_RUN_PATH)
 	noDaemonExplicit := flagChanged(cmd, "no-daemon") || envSet(config.KUKEON_ROOT_NO_DAEMON)

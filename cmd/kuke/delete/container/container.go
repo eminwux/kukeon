@@ -107,5 +107,5 @@ func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
 	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
 		return mockClient, nil
 	}
-	return kukeshared.ClientFromCmd(cmd)
+	return kukeshared.DaemonClientFromCmd(cmd)
 }
