@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	applycmd "github.com/eminwux/kukeon/cmd/kuke/apply"
@@ -115,6 +116,7 @@ func NewKukeCmd() (*cobra.Command, error) {
 
 			rebindNoDaemonViperToLeaf(cmd)
 			applyRunPathImpliesNoDaemon(cmd)
+			applyRunPathImpliesKukeondSocket(cmd)
 			return nil
 		},
 		Run: func(cmd *cobra.Command, _ []string) {
@@ -388,6 +390,39 @@ func applyRunPathImpliesNoDaemon(cmd *cobra.Command) {
 	if runPathExplicit && !noDaemonExplicit {
 		viper.Set(config.KUKEON_ROOT_NO_DAEMON.ViperKey, true)
 	}
+}
+
+// applyRunPathImpliesKukeondSocket derives the daemon's listen socket as
+// `<runPath>/kukeond.sock` when the operator passed `--run-path` explicitly
+// (flag or KUKEON_RUN_PATH env) but did not pin KUKEOND_SOCKET themselves.
+// Promoted to root-PersistentPreRunE per #570 so non-init verbs that also
+// resolve the socket (notably `kuke daemon reset`, plus the other daemon
+// lifecycle verbs and any caller dialing kukeond) honor the same
+// `--run-path → <X>/kukeond.sock` contract `kuke init` does — without this,
+// `kuke init --run-path X` lays the socket under X but `kuke daemon reset
+// --run-path X` cleans the default `/run/kukeon/`, an operator footgun for
+// custom run-paths outside `t.TempDir()`.
+//
+// Init's `applyServerConfiguration` still wins for `spec.Socket` (it runs
+// later inside runInit and unconditionally viper.Set's when env is unset),
+// so YAML-configured socket paths remain authoritative for `kuke init`.
+//
+// KUKEOND_SOCKET is registered via DefineKVNoViperDefault (cmd/config/env.go)
+// precisely so this viper.IsSet check stays meaningful — viper.SetDefault
+// would trip IsSet even with no env/flag/YAML and silently disable
+// derivation.
+func applyRunPathImpliesKukeondSocket(cmd *cobra.Command) {
+	if viper.IsSet(config.KUKEOND_SOCKET.ViperKey) {
+		return
+	}
+	if !flagChanged(cmd, "run-path") && !envSet(config.KUKEON_ROOT_RUN_PATH) {
+		return
+	}
+	runPath := viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey)
+	if runPath == "" {
+		runPath = config.DefaultRunPath()
+	}
+	viper.Set(config.KUKEOND_SOCKET.ViperKey, filepath.Join(runPath, "kukeond.sock"))
 }
 
 // flagChanged checks both the local and persistent flag sets so the helper
