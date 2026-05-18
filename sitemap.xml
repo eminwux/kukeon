@@ -33,7 +33,11 @@
          <lastmod>2026-05-18</lastmod>
     </url>
     <url>
-         <loc>https://kukeon.io/blog/posts/kuke-run-as-a-docker-compatible-workflow-for-dev-containers/</loc>
+         <loc>https://kukeon.io/blog/</loc>
+         <lastmod>2026-05-18</lastmod>
+    </url>
+    <url>
+         <loc>https://kukeon.io/blog/2026/05/18/dev-containers-without-the-flag-soup-from-docker-run--it-to-kuke-run--f/</loc>
          <lastmod>2026-05-18</lastmod>
     </url>
     <url>
@@ -226,6 +230,14 @@
     </url>
     <url>
          <loc>https://kukeon.io/tutorials/hello-world/</loc>
+         <lastmod>2026-05-18</lastmod>
+    </url>
+    <url>
+         <loc>https://kukeon.io/blog/archive/2026/</loc>
+         <lastmod>2026-05-18</lastmod>
+    </url>
+    <url>
+         <loc>https://kukeon.io/blog/category/comparison/</loc>
          <lastmod>2026-05-18</lastmod>
     </url>
 </urlset>

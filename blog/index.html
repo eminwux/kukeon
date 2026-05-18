@@ -12,27 +12,31 @@
         <meta name="author" content="Emiliano Spinella (eminwux)">
       
       
-        <link rel="canonical" href="https://kukeon.io/blog/posts/kuke-run-as-a-docker-compatible-workflow-for-dev-containers/">
+        <link rel="canonical" href="https://kukeon.io/blog/">
       
       
+        <link rel="prev" href="../tutorials/first-stack/">
+      
+      
+        <link rel="next" href="category/comparison/">
       
       
         
       
       
-      <link rel="icon" href="../../../assets/images/favicon.png">
+      <link rel="icon" href="../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>Dev containers without the flag-soup: from docker run -it to kuke run -f - kukeon</title>
+        <title>Blog - kukeon</title>
       
     
     
-      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
       
         
-        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -51,7 +55,7 @@
       
     
     
-    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -76,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#dev-containers-without-the-flag-soup-from-docker-run-it-to-kuke-run-f" class="md-skip">
+        <a href="#blog" class="md-skip">
           Skip to content
         </a>
       
@@ -94,7 +98,7 @@
 
 <header class="md-header" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../../.." title="kukeon" class="md-header__button md-logo" aria-label="kukeon" data-md-component="logo">
+    <a href=".." title="kukeon" class="md-header__button md-logo" aria-label="kukeon" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -114,7 +118,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Dev containers without the flag-soup: from docker run -it to kuke run -f
+              Blog
             
           </span>
         </div>
@@ -227,7 +231,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../.." class="md-tabs__link">
+      <a href=".." class="md-tabs__link">
         
   
   
@@ -246,7 +250,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../../vision/" class="md-tabs__link">
+      <a href="../vision/" class="md-tabs__link">
         
   
   
@@ -265,7 +269,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../../getting-started/" class="md-tabs__link">
+      <a href="../getting-started/" class="md-tabs__link">
         
   
   
@@ -286,7 +290,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../../install/prerequisites/" class="md-tabs__link">
+        <a href="../install/prerequisites/" class="md-tabs__link">
           
   
   
@@ -306,7 +310,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../../concepts/overview/" class="md-tabs__link">
+        <a href="../concepts/overview/" class="md-tabs__link">
           
   
   
@@ -326,7 +330,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../../architecture/overview/" class="md-tabs__link">
+        <a href="../architecture/overview/" class="md-tabs__link">
           
   
   
@@ -346,7 +350,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../../guides/init-and-reset/" class="md-tabs__link">
+        <a href="../guides/init-and-reset/" class="md-tabs__link">
           
   
   
@@ -366,7 +370,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../../cli/commands/" class="md-tabs__link">
+        <a href="../cli/commands/" class="md-tabs__link">
           
   
   
@@ -386,7 +390,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../../manifests/overview/" class="md-tabs__link">
+        <a href="../manifests/overview/" class="md-tabs__link">
           
   
   
@@ -406,7 +410,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../../tutorials/hello-world/" class="md-tabs__link">
+        <a href="../tutorials/hello-world/" class="md-tabs__link">
           
   
   
@@ -422,9 +426,31 @@
   
   
   
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  
+  Blog
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
   
     <li class="md-tabs__item">
-      <a href="../../../faq/" class="md-tabs__link">
+      <a href="../faq/" class="md-tabs__link">
         
   
   
@@ -459,7 +485,7 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../../.." title="kukeon" class="md-nav__button md-logo" aria-label="kukeon" data-md-component="logo">
+    <a href=".." title="kukeon" class="md-nav__button md-logo" aria-label="kukeon" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -489,7 +515,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../.." class="md-nav__link">
+      <a href=".." class="md-nav__link">
         
   
   
@@ -516,7 +542,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../vision/" class="md-nav__link">
+      <a href="../vision/" class="md-nav__link">
         
   
   
@@ -543,7 +569,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../getting-started/" class="md-nav__link">
+      <a href="../getting-started/" class="md-nav__link">
         
   
   
@@ -624,7 +650,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../install/prerequisites/" class="md-nav__link">
+      <a href="../install/prerequisites/" class="md-nav__link">
         
   
   
@@ -652,7 +678,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../install/install-linux/" class="md-nav__link">
+      <a href="../install/install-linux/" class="md-nav__link">
         
   
   
@@ -680,7 +706,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../install/build-from-source/" class="md-nav__link">
+      <a href="../install/build-from-source/" class="md-nav__link">
         
   
   
@@ -769,7 +795,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../concepts/overview/" class="md-nav__link">
+      <a href="../concepts/overview/" class="md-nav__link">
         
   
   
@@ -797,7 +823,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../concepts/realm/" class="md-nav__link">
+      <a href="../concepts/realm/" class="md-nav__link">
         
   
   
@@ -825,7 +851,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../concepts/space/" class="md-nav__link">
+      <a href="../concepts/space/" class="md-nav__link">
         
   
   
@@ -853,7 +879,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../concepts/stack/" class="md-nav__link">
+      <a href="../concepts/stack/" class="md-nav__link">
         
   
   
@@ -881,7 +907,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../concepts/cell/" class="md-nav__link">
+      <a href="../concepts/cell/" class="md-nav__link">
         
   
   
@@ -909,7 +935,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../concepts/container/" class="md-nav__link">
+      <a href="../concepts/container/" class="md-nav__link">
         
   
   
@@ -937,7 +963,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../concepts/containerd-namespaces/" class="md-nav__link">
+      <a href="../concepts/containerd-namespaces/" class="md-nav__link">
         
   
   
@@ -965,7 +991,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../concepts/networking/" class="md-nav__link">
+      <a href="../concepts/networking/" class="md-nav__link">
         
   
   
@@ -993,7 +1019,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../concepts/cgroups/" class="md-nav__link">
+      <a href="../concepts/cgroups/" class="md-nav__link">
         
   
   
@@ -1021,7 +1047,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../concepts/system-realm/" class="md-nav__link">
+      <a href="../concepts/system-realm/" class="md-nav__link">
         
   
   
@@ -1049,7 +1075,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../concepts/client-and-daemon/" class="md-nav__link">
+      <a href="../concepts/client-and-daemon/" class="md-nav__link">
         
   
   
@@ -1138,7 +1164,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../architecture/overview/" class="md-nav__link">
+      <a href="../architecture/overview/" class="md-nav__link">
         
   
   
@@ -1166,7 +1192,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../architecture/process-model/" class="md-nav__link">
+      <a href="../architecture/process-model/" class="md-nav__link">
         
   
   
@@ -1194,7 +1220,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../architecture/api-versioning/" class="md-nav__link">
+      <a href="../architecture/api-versioning/" class="md-nav__link">
         
   
   
@@ -1222,7 +1248,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../architecture/storage-layout/" class="md-nav__link">
+      <a href="../architecture/storage-layout/" class="md-nav__link">
         
   
   
@@ -1311,7 +1337,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guides/init-and-reset/" class="md-nav__link">
+      <a href="../guides/init-and-reset/" class="md-nav__link">
         
   
   
@@ -1339,7 +1365,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guides/apply-manifests/" class="md-nav__link">
+      <a href="../guides/apply-manifests/" class="md-nav__link">
         
   
   
@@ -1367,7 +1393,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guides/run-claude-code/" class="md-nav__link">
+      <a href="../guides/run-claude-code/" class="md-nav__link">
         
   
   
@@ -1395,7 +1421,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guides/local-dev/" class="md-nav__link">
+      <a href="../guides/local-dev/" class="md-nav__link">
         
   
   
@@ -1423,7 +1449,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guides/autocomplete/" class="md-nav__link">
+      <a href="../guides/autocomplete/" class="md-nav__link">
         
   
   
@@ -1451,7 +1477,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guides/troubleshooting/" class="md-nav__link">
+      <a href="../guides/troubleshooting/" class="md-nav__link">
         
   
   
@@ -1540,7 +1566,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/commands/" class="md-nav__link">
+      <a href="../cli/commands/" class="md-nav__link">
         
   
   
@@ -1568,7 +1594,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kuke/" class="md-nav__link">
+      <a href="../cli/kuke/" class="md-nav__link">
         
   
   
@@ -1596,7 +1622,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kuke-init/" class="md-nav__link">
+      <a href="../cli/kuke-init/" class="md-nav__link">
         
   
   
@@ -1624,7 +1650,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kuke-doctor/" class="md-nav__link">
+      <a href="../cli/kuke-doctor/" class="md-nav__link">
         
   
   
@@ -1652,7 +1678,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kuke-get/" class="md-nav__link">
+      <a href="../cli/kuke-get/" class="md-nav__link">
         
   
   
@@ -1680,7 +1706,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kuke-create/" class="md-nav__link">
+      <a href="../cli/kuke-create/" class="md-nav__link">
         
   
   
@@ -1708,7 +1734,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kuke-apply/" class="md-nav__link">
+      <a href="../cli/kuke-apply/" class="md-nav__link">
         
   
   
@@ -1736,7 +1762,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kuke-run/" class="md-nav__link">
+      <a href="../cli/kuke-run/" class="md-nav__link">
         
   
   
@@ -1764,7 +1790,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kuke-delete/" class="md-nav__link">
+      <a href="../cli/kuke-delete/" class="md-nav__link">
         
   
   
@@ -1792,7 +1818,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kuke-lifecycle/" class="md-nav__link">
+      <a href="../cli/kuke-lifecycle/" class="md-nav__link">
         
   
   
@@ -1820,7 +1846,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kuke-purge/" class="md-nav__link">
+      <a href="../cli/kuke-purge/" class="md-nav__link">
         
   
   
@@ -1848,7 +1874,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kuke-refresh/" class="md-nav__link">
+      <a href="../cli/kuke-refresh/" class="md-nav__link">
         
   
   
@@ -1876,7 +1902,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kuke-log/" class="md-nav__link">
+      <a href="../cli/kuke-log/" class="md-nav__link">
         
   
   
@@ -1904,7 +1930,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kuke-attach/" class="md-nav__link">
+      <a href="../cli/kuke-attach/" class="md-nav__link">
         
   
   
@@ -1932,7 +1958,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kuke-image/" class="md-nav__link">
+      <a href="../cli/kuke-image/" class="md-nav__link">
         
   
   
@@ -1960,7 +1986,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kuke-daemon/" class="md-nav__link">
+      <a href="../cli/kuke-daemon/" class="md-nav__link">
         
   
   
@@ -1988,7 +2014,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kuke-uninstall/" class="md-nav__link">
+      <a href="../cli/kuke-uninstall/" class="md-nav__link">
         
   
   
@@ -2016,7 +2042,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kuke-autocomplete/" class="md-nav__link">
+      <a href="../cli/kuke-autocomplete/" class="md-nav__link">
         
   
   
@@ -2044,7 +2070,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kuke-version/" class="md-nav__link">
+      <a href="../cli/kuke-version/" class="md-nav__link">
         
   
   
@@ -2072,7 +2098,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../cli/kukeond/" class="md-nav__link">
+      <a href="../cli/kukeond/" class="md-nav__link">
         
   
   
@@ -2161,7 +2187,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../manifests/overview/" class="md-nav__link">
+      <a href="../manifests/overview/" class="md-nav__link">
         
   
   
@@ -2189,7 +2215,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../manifests/realm/" class="md-nav__link">
+      <a href="../manifests/realm/" class="md-nav__link">
         
   
   
@@ -2217,7 +2243,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../manifests/space/" class="md-nav__link">
+      <a href="../manifests/space/" class="md-nav__link">
         
   
   
@@ -2245,7 +2271,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../manifests/stack/" class="md-nav__link">
+      <a href="../manifests/stack/" class="md-nav__link">
         
   
   
@@ -2273,7 +2299,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../manifests/cell/" class="md-nav__link">
+      <a href="../manifests/cell/" class="md-nav__link">
         
   
   
@@ -2301,7 +2327,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../manifests/container/" class="md-nav__link">
+      <a href="../manifests/container/" class="md-nav__link">
         
   
   
@@ -2390,7 +2416,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../tutorials/hello-world/" class="md-nav__link">
+      <a href="../tutorials/hello-world/" class="md-nav__link">
         
   
   
@@ -2418,7 +2444,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../tutorials/first-stack/" class="md-nav__link">
+      <a href="../tutorials/first-stack/" class="md-nav__link">
         
   
   
@@ -2450,10 +2476,306 @@
       
   
   
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blog
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Blog
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+    
+      
+    
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_11_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_11_2" id="__nav_11_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Archive
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_11_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Archive
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+    
   
   
     <li class="md-nav__item">
-      <a href="../../../faq/" class="md-nav__link">
+      <a href="archive/2026/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_11_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_11_3" id="__nav_11_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Categories
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_11_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Categories
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+    
+  
+  
+    <li class="md-nav__item">
+      <a href="category/comparison/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    comparison
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
         
   
   
@@ -2493,69 +2815,6 @@
     
   
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#the-docker-run-it-flag-soup-problem" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The docker run -it flag-soup problem
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#setup-load-the-image-write-the-spec" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Setup: load the image, write the spec
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#the-walkthrough-run-detach-reattach-reconcile" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The walkthrough: run, detach, reattach, reconcile
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-you-get-spec-as-source-of-truth" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What you get: spec as source of truth
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#where-to-go-next" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Where to go next
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
 </nav>
                   </div>
                 </div>
@@ -2563,150 +2822,68 @@
             
           
           
-            <div class="md-content" data-md-component="content">
-              
-              <article class="md-content__inner md-typeset">
-                
-                  
-
-
-  
-  
-
-
-<h1 id="dev-containers-without-the-flag-soup-from-docker-run-it-to-kuke-run-f">Dev containers without the flag-soup: from <code>docker run -it</code> to <code>kuke run -f</code><a class="headerlink" href="#dev-containers-without-the-flag-soup-from-docker-run-it-to-kuke-run-f" title="Permanent link">&para;</a></h1>
-<p>If you've spent any time using Docker as your local dev environment, you know the shape of it: a long <code>docker run -it --name workspace ...</code> invocation, a moment of "wait, did I want <code>-d</code> or not?", and a flag-soup that lives only in your shell history until you forget which terminal you started it from. Turning that one-shot incantation into a persistent reattachable workspace is the friction <code>kuke run -f</code> is built to remove — by treating the cell as a declarative YAML spec instead of a command line.</p>
-<!-- more -->
-
-<h2 id="the-docker-run-it-flag-soup-problem">The <code>docker run -it</code> flag-soup problem<a class="headerlink" href="#the-docker-run-it-flag-soup-problem" title="Permanent link">&para;</a></h2>
-<p>The first time you run a dev container with Docker, it's easy:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span>--name<span class="w"> </span>workspace<span class="w"> </span>ubuntu:24.04<span class="w"> </span>bash
-</code></pre></div>
-<p>You land at a shell. You install your tools, edit some files, and exit. The container stops. The next time you want to come back, you reach for <code>docker start -ai workspace</code>, then wonder whether you wanted <code>docker exec -it workspace bash</code> instead because you forgot whether you'd stopped it. Want to add a volume mount? You <code>docker rm</code> the container and rebuild the invocation from scratch, because there's no spec to edit — the flags <em>are</em> the spec, and they live in your terminal scrollback.</p>
-<p>That's the friction. The container is real and persistent on disk, but its <em>definition</em> isn't.</p>
-<p>"What about <code>docker compose</code>?" is the natural next thought, and for stacks of related services it's the right answer — the spec lives in a file you can commit, edit, and re-apply. The trade is structure: compose projects are flat and directory-scoped, so <code>docker compose down</code> run from the wrong directory can take out unrelated containers when names collide. For a single reattachable dev workspace you don't need a whole stack; you need one cell. <code>kuke run -f</code> is the verb that runs one, and the <code>Realm → Space → Stack → Cell</code> hierarchy you'd reach for when you outgrow compose-shaped flatness stays out of the way for the single-cell case here.</p>
-<h2 id="setup-load-the-image-write-the-spec">Setup: load the image, write the spec<a class="headerlink" href="#setup-load-the-image-write-the-spec" title="Permanent link">&para;</a></h2>
-<p>A kukeon <strong>cell</strong> is the smallest scheduled unit — a YAML document describing one or more containers that run together. For a dev workspace, the smallest interesting cell is two containers: a root container holding the cell open, and an attachable container running your shell.</p>
-<p>First, pull the base image into your local Docker daemon, then load it into the <code>default</code> realm (kukeon's per-realm containerd namespace — the realm <code>kuke init</code> provisions for user workloads):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>pull<span class="w"> </span>ubuntu:24.04
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>image<span class="w"> </span>load<span class="w"> </span>--from-docker<span class="w"> </span>ubuntu:24.04<span class="w"> </span>--realm<span class="w"> </span>default
-</code></pre></div>
-<p><code>kuke image load --from-docker</code> shells out to <code>docker save</code> under the hood, so the image has to be in your local Docker daemon's content store first — that's what the <code>docker pull</code> is for. <code>--realm default</code> is the default and can be omitted; we spell it out here to make the namespace explicit.</p>
-<p>Now write the cell spec as <code>workspace.yaml</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Cell</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">metadata</span><span class="p">:</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">workspace</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">workspace</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">realmId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span><span class="nt">spaceId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span><span class="nt">stackId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span><span class="nt">containers</span><span class="p">:</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">root</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">      </span><span class="nt">root</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker.io/library/busybox:latest</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sleep</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">      </span><span class="nt">args</span><span class="p">:</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;infinity&quot;</span>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shell</span>
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="w">      </span><span class="nt">attachable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker.io/library/ubuntu:24.04</span>
-<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/bin/bash</span>
-<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="w">      </span><span class="nt">tty</span><span class="p">:</span>
-<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="w">        </span><span class="nt">prompt</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;workspace&gt;</span><span class="nv"> </span><span class="s">&quot;</span>
-</code></pre></div>
-<p>Compare that to the equivalent <code>docker run -it</code> invocation:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span>--name<span class="w"> </span>workspace<span class="w"> </span>ubuntu:24.04<span class="w"> </span>bash
-</code></pre></div>
-<p>The Docker command is shorter, but it's the only place that definition exists. The YAML is longer because it spells out the two-container shape — a root container keeping the cell alive, plus an attachable shell container — but it's a file. You can commit it next to your dotfiles, diff it across machines, and read it without typing <code>docker inspect</code>.</p>
-<h2 id="the-walkthrough-run-detach-reattach-reconcile">The walkthrough: run, detach, reattach, reconcile<a class="headerlink" href="#the-walkthrough-run-detach-reattach-reconcile" title="Permanent link">&para;</a></h2>
-<p>Materialize the cell and attach to its shell in one command:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>-f<span class="w"> </span>workspace.yaml
-</code></pre></div>
-<p><code>kuke run -f</code> creates the cell, starts its containers, and attaches your terminal to the <code>shell</code> container by default. You land at a <code>workspace&gt;</code> prompt, run whatever you came to run, and when you want to step away:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>^]^]    # press Ctrl-] twice to detach
-</code></pre></div>
-<p>This is the part that surprises operators coming from <code>docker run -it</code>. There, exiting the foreground process kills the container — you have to remember <code>-d</code> up-front, then add <code>docker exec -it workspace bash</code> afterward to come back. With <code>kuke run -f</code>, the cell keeps running once you detach; only workload termination or a peer hangup tears it down. The same command does both jobs: first-time creation <em>and</em> attach. There's no "did I want detached mode or not?" decision to make at start time.</p>
-<p>Confirm the cell is still alive:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>kuke<span class="w"> </span>get<span class="w"> </span>cells
-</code></pre></div>
-<p>It shows up in the <code>Ready</code> state. To come back, reattach explicitly:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>attach<span class="w"> </span>workspace<span class="w"> </span>--container<span class="w"> </span>shell
-</code></pre></div>
-<p><code>--container shell</code> is the explicit form. (When a cell has exactly one non-root attachable container, <code>kuke attach workspace</code> alone suffices — <code>--container</code> becomes required only when there's more than one.)</p>
-<p>Now suppose you want to add an environment variable, change the working directory, or pin a new image tag. With Docker, that means <code>docker rm workspace</code> plus a fresh <code>docker run -it ...</code> with the new flags. With kukeon, you edit <code>workspace.yaml</code> and reconcile:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>workspace.yaml
-</code></pre></div>
-<p><code>kuke apply -f</code> updates the cell to match the file. If you instead re-ran <code>kuke run -f workspace.yaml</code> against a cell whose on-disk spec diverged from the file, the CLI would refuse cleanly with a message pointing you at <code>kuke apply -f</code> — <code>run</code> is the "first-time materialize" verb, <code>apply</code> is the "reconcile to spec" verb, and the CLI keeps them straight so you can't accidentally clobber state.</p>
-<p>When you're done with the workspace:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>-f<span class="w"> </span>workspace.yaml
-</code></pre></div>
-<p>The same file that <code>run</code> and <code>apply</code> consumed also drives teardown — <code>kuke delete -f</code> removes every resource the manifest declares, so the spec stays the single source of truth across the cell's whole lifecycle. (<code>kuke delete cell workspace</code> is the by-name equivalent if you don't have the file handy.)</p>
-<p><code>kuke purge cell</code> exists too, but it's the recovery verb for <em>broken</em> state — for example, if an image-pull failure leaves the cell half-created and a subsequent <code>kuke kill cell</code> errors out with <code>no RootContainerID set</code>. For routine teardown of a healthy workspace, <code>kuke delete</code> is the right verb; <code>purge</code> is the heavier hammer you reach for when something in kukeon's state is wedged.</p>
-<h2 id="what-you-get-spec-as-source-of-truth">What you get: spec as source of truth<a class="headerlink" href="#what-you-get-spec-as-source-of-truth" title="Permanent link">&para;</a></h2>
-<p>The same workflow you've been building one flag at a time in your shell history is, in <code>kuke run -f</code>'s world, a file. Four things follow from that:</p>
-<ul>
-<li><strong>Versionable, diffable.</strong> <code>workspace.yaml</code> sits in your dotfiles repo. You can <code>git diff</code> it, share it, restore it on a new machine.</li>
-<li><strong>Structured persistence.</strong> The cell outlives every attach session. Detaching is cheap; reattaching is one command. No more "wait, did I leave that running with <code>-d</code>?".</li>
-<li><strong>Symmetric attach.</strong> <code>kuke run -f</code> is the first-time materialize-and-attach verb; <code>kuke attach</code> is the reattach verb. One mental model for "start" and "come back," not two.</li>
-<li><strong>A real update path.</strong> <code>kuke apply -f</code> reconciles the cell to match the spec. <code>kuke run -f</code> against a divergent cell refuses cleanly rather than silently overwriting — the two verbs encode the difference between "create" and "update" so you can't conflate them.</li>
-</ul>
-<p>The trade is honest: you write more YAML up-front than you write <code>docker run</code> flags. In exchange, the workspace stops being a thing that lives in your terminal scrollback and becomes a thing that lives in your repo.</p>
-<h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
-<ul>
-<li>For the full agent-runner shape — building a custom image, the Attachable cell pattern, and the parametrized <code>CellProfile</code> for one-shot prompts — see <a href="../../../guides/run-claude-code/">Run Claude Code in a kukeon cell</a>. The cell-spec pattern this post uses is the same one that guide walks through end-to-end.</li>
-<li>For the full surface of <code>kuke run -f</code> (including <code>-p</code> profile mode, <code>--rm</code> auto-delete, and the <code>-d/--detach</code> flag), see the <a href="../../../cli/kuke-run/"><code>kuke run</code> reference</a>.</li>
-<li>For everything <code>kuke apply</code>, <code>kuke attach</code>, <code>kuke delete</code>, and <code>kuke purge</code> will and won't do — exit codes, side effects, error paths — <code>docs/cli-use-cases.md</code> in the repo is the workflow-oriented source of truth.</li>
-</ul>
-
-
-
-
-
-
-
-  
-    
-  
-  
-    
-  
-
-
-  <aside class="md-source-file">
-    
+  <div class="md-content" data-md-component="content">
+    <div class="md-content__inner">
+      <header class="md-typeset">
+        <h1 id="blog">Blog<a class="headerlink" href="#blog" title="Permanent link">&para;</a></h1>
+<p>Posts on kukeon's design, workflows, and how it compares to other tooling for single-host container environments.</p>
+      </header>
       
-  <span class="md-source-file__fact">
-    <span class="md-icon" title="Last update">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
-    </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 18, 2026 18:20:50 UTC">May 18, 2026</span>
-  </span>
-
+        <article class="md-post md-post--excerpt">
+  <header class="md-post__header">
     
-    
-      
-  <span class="md-source-file__fact">
-    <span class="md-icon" title="Created">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14.47 15.08 11 13V7h1.5v5.25l3.08 1.83c-.41.28-.79.62-1.11 1m-1.39 4.84c-.36.05-.71.08-1.08.08-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8c0 .37-.03.72-.08 1.08.69.1 1.33.32 1.92.64.1-.56.16-1.13.16-1.72 0-5.5-4.5-10-10-10S2 6.5 2 12s4.47 10 10 10c.59 0 1.16-.06 1.72-.16-.32-.59-.54-1.23-.64-1.92M18 15v3h-3v2h3v3h2v-3h3v-2h-3v-3z"/></svg>
-    </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 18, 2026 18:20:50 UTC">May 18, 2026</span>
-  </span>
-
-    
-    
-    
-  </aside>
-
-
-
-
-
-                
-              </article>
-            </div>
+    <div class="md-post__meta md-meta">
+      <ul class="md-meta__list">
+        <li class="md-meta__item">
+          <time datetime="2026-05-18 00:00:00+00:00">May 18, 2026</time></li>
+        
+          <li class="md-meta__item">
+            in
+            
+              <a href="category/comparison/" class="md-meta__link">comparison</a></li>
+        
+        
           
+          <li class="md-meta__item">
+            
+              6 min read
+            
+          </li>
+        
+        
+      </ul>
+      
+    </div>
+  </header>
+  <div class="md-post__content md-typeset">
+    <h2 id="dev-containers-without-the-flag-soup-from-docker-run-it-to-kuke-run-f"><a class="toclink" href="2026/05/18/dev-containers-without-the-flag-soup-from-docker-run--it-to-kuke-run--f/">Dev containers without the flag-soup: from <code>docker run -it</code> to <code>kuke run -f</code></a></h2>
+<p>If you've spent any time using Docker as your local dev environment, you know the shape of it: a long <code>docker run -it --name workspace ...</code> invocation, a moment of "wait, did I want <code>-d</code> or not?", and a flag-soup that lives only in your shell history until you forget which terminal you started it from. Turning that one-shot incantation into a persistent reattachable workspace is the friction <code>kuke run -f</code> is built to remove — by treating the cell as a declarative YAML spec instead of a command line.</p>
+
+    
+      <nav class="md-post__action">
+        <a href="2026/05/18/dev-containers-without-the-flag-soup-from-docker-run--it-to-kuke-run--f/">
+          Continue reading
+        </a>
+      </nav>
+    
+    
+  </div>
+</article>
+      
+      
+        
+          
+
+
+
+<nav class="md-pagination">
+  
+</nav>
+        
+      
+    </div>
+  </div>
+
           
 <script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
         </div>
@@ -2762,10 +2939,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.annotate", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.annotate", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>

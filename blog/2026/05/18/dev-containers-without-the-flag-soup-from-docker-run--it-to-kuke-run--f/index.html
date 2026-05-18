@@ -12,31 +12,27 @@
         <meta name="author" content="Emiliano Spinella (eminwux)">
       
       
-        <link rel="canonical" href="https://kukeon.io/guides/troubleshooting/">
+        <link rel="canonical" href="https://kukeon.io/blog/2026/05/18/dev-containers-without-the-flag-soup-from-docker-run--it-to-kuke-run--f/">
       
       
-        <link rel="prev" href="../autocomplete/">
-      
-      
-        <link rel="next" href="../../cli/commands/">
       
       
         
       
       
-      <link rel="icon" href="../../assets/images/favicon.png">
+      <link rel="icon" href="../../../../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>Troubleshooting - kukeon</title>
+        <title>Dev containers without the flag-soup: from docker run -it to kuke run -f - kukeon</title>
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../../../../assets/stylesheets/main.484c7ddc.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../../../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -55,7 +51,7 @@
       
     
     
-    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../../../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -80,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#troubleshooting" class="md-skip">
+        <a href="#dev-containers-without-the-flag-soup-from-docker-run-it-to-kuke-run-f" class="md-skip">
           Skip to content
         </a>
       
@@ -98,7 +94,7 @@
 
 <header class="md-header" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../.." title="kukeon" class="md-header__button md-logo" aria-label="kukeon" data-md-component="logo">
+    <a href="../../../../.." title="kukeon" class="md-header__button md-logo" aria-label="kukeon" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -118,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Troubleshooting
+              Dev containers without the flag-soup: from docker run -it to kuke run -f
             
           </span>
         </div>
@@ -231,7 +227,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../.." class="md-tabs__link">
+      <a href="../../../../.." class="md-tabs__link">
         
   
   
@@ -250,7 +246,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../vision/" class="md-tabs__link">
+      <a href="../../../../../vision/" class="md-tabs__link">
         
   
   
@@ -269,7 +265,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../getting-started/" class="md-tabs__link">
+      <a href="../../../../../getting-started/" class="md-tabs__link">
         
   
   
@@ -290,7 +286,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../install/prerequisites/" class="md-tabs__link">
+        <a href="../../../../../install/prerequisites/" class="md-tabs__link">
           
   
   
@@ -310,7 +306,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../concepts/overview/" class="md-tabs__link">
+        <a href="../../../../../concepts/overview/" class="md-tabs__link">
           
   
   
@@ -330,7 +326,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../architecture/overview/" class="md-tabs__link">
+        <a href="../../../../../architecture/overview/" class="md-tabs__link">
           
   
   
@@ -346,13 +342,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../init-and-reset/" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../../../../../guides/init-and-reset/" class="md-tabs__link">
           
   
   
@@ -372,7 +366,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../cli/commands/" class="md-tabs__link">
+        <a href="../../../../../cli/commands/" class="md-tabs__link">
           
   
   
@@ -392,7 +386,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../manifests/overview/" class="md-tabs__link">
+        <a href="../../../../../manifests/overview/" class="md-tabs__link">
           
   
   
@@ -412,7 +406,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../tutorials/hello-world/" class="md-tabs__link">
+        <a href="../../../../../tutorials/hello-world/" class="md-tabs__link">
           
   
   
@@ -428,11 +422,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../blog/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../../../" class="md-tabs__link">
           
   
   
@@ -450,7 +446,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../faq/" class="md-tabs__link">
+      <a href="../../../../../faq/" class="md-tabs__link">
         
   
   
@@ -474,7 +470,9 @@
           
             
               
-              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" hidden>
                 <div class="md-sidebar__scrollwrap">
                   <div class="md-sidebar__inner">
                     
@@ -485,7 +483,7 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../.." title="kukeon" class="md-nav__button md-logo" aria-label="kukeon" data-md-component="logo">
+    <a href="../../../../.." title="kukeon" class="md-nav__button md-logo" aria-label="kukeon" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -515,7 +513,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../.." class="md-nav__link">
+      <a href="../../../../.." class="md-nav__link">
         
   
   
@@ -542,7 +540,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../vision/" class="md-nav__link">
+      <a href="../../../../../vision/" class="md-nav__link">
         
   
   
@@ -569,7 +567,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../getting-started/" class="md-nav__link">
+      <a href="../../../../../getting-started/" class="md-nav__link">
         
   
   
@@ -650,7 +648,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../install/prerequisites/" class="md-nav__link">
+      <a href="../../../../../install/prerequisites/" class="md-nav__link">
         
   
   
@@ -678,7 +676,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../install/install-linux/" class="md-nav__link">
+      <a href="../../../../../install/install-linux/" class="md-nav__link">
         
   
   
@@ -706,7 +704,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../install/build-from-source/" class="md-nav__link">
+      <a href="../../../../../install/build-from-source/" class="md-nav__link">
         
   
   
@@ -795,7 +793,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/overview/" class="md-nav__link">
+      <a href="../../../../../concepts/overview/" class="md-nav__link">
         
   
   
@@ -823,7 +821,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/realm/" class="md-nav__link">
+      <a href="../../../../../concepts/realm/" class="md-nav__link">
         
   
   
@@ -851,7 +849,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/space/" class="md-nav__link">
+      <a href="../../../../../concepts/space/" class="md-nav__link">
         
   
   
@@ -879,7 +877,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/stack/" class="md-nav__link">
+      <a href="../../../../../concepts/stack/" class="md-nav__link">
         
   
   
@@ -907,7 +905,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/cell/" class="md-nav__link">
+      <a href="../../../../../concepts/cell/" class="md-nav__link">
         
   
   
@@ -935,7 +933,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/container/" class="md-nav__link">
+      <a href="../../../../../concepts/container/" class="md-nav__link">
         
   
   
@@ -963,7 +961,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/containerd-namespaces/" class="md-nav__link">
+      <a href="../../../../../concepts/containerd-namespaces/" class="md-nav__link">
         
   
   
@@ -991,7 +989,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/networking/" class="md-nav__link">
+      <a href="../../../../../concepts/networking/" class="md-nav__link">
         
   
   
@@ -1019,7 +1017,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/cgroups/" class="md-nav__link">
+      <a href="../../../../../concepts/cgroups/" class="md-nav__link">
         
   
   
@@ -1047,7 +1045,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/system-realm/" class="md-nav__link">
+      <a href="../../../../../concepts/system-realm/" class="md-nav__link">
         
   
   
@@ -1075,7 +1073,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/client-and-daemon/" class="md-nav__link">
+      <a href="../../../../../concepts/client-and-daemon/" class="md-nav__link">
         
   
   
@@ -1164,7 +1162,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../architecture/overview/" class="md-nav__link">
+      <a href="../../../../../architecture/overview/" class="md-nav__link">
         
   
   
@@ -1192,7 +1190,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../architecture/process-model/" class="md-nav__link">
+      <a href="../../../../../architecture/process-model/" class="md-nav__link">
         
   
   
@@ -1220,7 +1218,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../architecture/api-versioning/" class="md-nav__link">
+      <a href="../../../../../architecture/api-versioning/" class="md-nav__link">
         
   
   
@@ -1248,7 +1246,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../architecture/storage-layout/" class="md-nav__link">
+      <a href="../../../../../architecture/storage-layout/" class="md-nav__link">
         
   
   
@@ -1280,31 +1278,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
         
           
-          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
             
   
   
@@ -1322,7 +1317,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1340,7 +1335,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../init-and-reset/" class="md-nav__link">
+      <a href="../../../../../guides/init-and-reset/" class="md-nav__link">
         
   
   
@@ -1368,7 +1363,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../apply-manifests/" class="md-nav__link">
+      <a href="../../../../../guides/apply-manifests/" class="md-nav__link">
         
   
   
@@ -1396,7 +1391,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../run-claude-code/" class="md-nav__link">
+      <a href="../../../../../guides/run-claude-code/" class="md-nav__link">
         
   
   
@@ -1424,7 +1419,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../local-dev/" class="md-nav__link">
+      <a href="../../../../../guides/local-dev/" class="md-nav__link">
         
   
   
@@ -1452,7 +1447,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../autocomplete/" class="md-nav__link">
+      <a href="../../../../../guides/autocomplete/" class="md-nav__link">
         
   
   
@@ -1477,37 +1472,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Troubleshooting
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../../../../guides/troubleshooting/" class="md-nav__link">
         
   
   
@@ -1523,169 +1491,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#kuke-exits-with-permission-denied-on-the-kukeond-socket" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke … exits with "permission denied" on the kukeond socket
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#kuke-doctor-cgroups-exits-non-zero" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke doctor cgroups exits non-zero
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#kuke-init-fails-with-numerical-result-out-of-range" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke init fails with "numerical result out of range"
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#unknown-entry-command-when-running-the-binary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        "unknown entry command" when running the binary
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#kuke-init-cant-find-the-kukeond-image" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke init can't find the kukeond image
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#daemon-socket-is-missing-or-stale" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Daemon socket is missing or stale
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#kuke-get-realms-and-kuke-get-realms-no-daemon-disagree" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke get realms and kuke get realms --no-daemon disagree
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#ctr-can-see-containers-that-kuke-doesnt-list" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ctr can see containers that kuke doesn't list
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#kuke-uninstall-reports-skipped-realm-purge-failed" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke uninstall reports skipped (realm purge failed)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#kuke-uninstall-y-fails-on-runkukeontty-device-or-resource-busy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke uninstall -y fails on /run/kukeon/tty: device or resource busy
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#leftover-state-after-delete" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Leftover state after delete
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#verbose-logging" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Verbose logging
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#when-all-else-fails" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        When all else fails
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1759,7 +1564,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/commands/" class="md-nav__link">
+      <a href="../../../../../cli/commands/" class="md-nav__link">
         
   
   
@@ -1787,7 +1592,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke/" class="md-nav__link">
+      <a href="../../../../../cli/kuke/" class="md-nav__link">
         
   
   
@@ -1815,7 +1620,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-init/" class="md-nav__link">
+      <a href="../../../../../cli/kuke-init/" class="md-nav__link">
         
   
   
@@ -1843,7 +1648,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-doctor/" class="md-nav__link">
+      <a href="../../../../../cli/kuke-doctor/" class="md-nav__link">
         
   
   
@@ -1871,7 +1676,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-get/" class="md-nav__link">
+      <a href="../../../../../cli/kuke-get/" class="md-nav__link">
         
   
   
@@ -1899,7 +1704,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-create/" class="md-nav__link">
+      <a href="../../../../../cli/kuke-create/" class="md-nav__link">
         
   
   
@@ -1927,7 +1732,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-apply/" class="md-nav__link">
+      <a href="../../../../../cli/kuke-apply/" class="md-nav__link">
         
   
   
@@ -1955,7 +1760,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-run/" class="md-nav__link">
+      <a href="../../../../../cli/kuke-run/" class="md-nav__link">
         
   
   
@@ -1983,7 +1788,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-delete/" class="md-nav__link">
+      <a href="../../../../../cli/kuke-delete/" class="md-nav__link">
         
   
   
@@ -2011,7 +1816,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-lifecycle/" class="md-nav__link">
+      <a href="../../../../../cli/kuke-lifecycle/" class="md-nav__link">
         
   
   
@@ -2039,7 +1844,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-purge/" class="md-nav__link">
+      <a href="../../../../../cli/kuke-purge/" class="md-nav__link">
         
   
   
@@ -2067,7 +1872,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-refresh/" class="md-nav__link">
+      <a href="../../../../../cli/kuke-refresh/" class="md-nav__link">
         
   
   
@@ -2095,7 +1900,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-log/" class="md-nav__link">
+      <a href="../../../../../cli/kuke-log/" class="md-nav__link">
         
   
   
@@ -2123,7 +1928,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-attach/" class="md-nav__link">
+      <a href="../../../../../cli/kuke-attach/" class="md-nav__link">
         
   
   
@@ -2151,7 +1956,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-image/" class="md-nav__link">
+      <a href="../../../../../cli/kuke-image/" class="md-nav__link">
         
   
   
@@ -2179,7 +1984,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-daemon/" class="md-nav__link">
+      <a href="../../../../../cli/kuke-daemon/" class="md-nav__link">
         
   
   
@@ -2207,7 +2012,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-uninstall/" class="md-nav__link">
+      <a href="../../../../../cli/kuke-uninstall/" class="md-nav__link">
         
   
   
@@ -2235,7 +2040,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-autocomplete/" class="md-nav__link">
+      <a href="../../../../../cli/kuke-autocomplete/" class="md-nav__link">
         
   
   
@@ -2263,7 +2068,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-version/" class="md-nav__link">
+      <a href="../../../../../cli/kuke-version/" class="md-nav__link">
         
   
   
@@ -2291,7 +2096,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kukeond/" class="md-nav__link">
+      <a href="../../../../../cli/kukeond/" class="md-nav__link">
         
   
   
@@ -2380,7 +2185,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../manifests/overview/" class="md-nav__link">
+      <a href="../../../../../manifests/overview/" class="md-nav__link">
         
   
   
@@ -2408,7 +2213,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../manifests/realm/" class="md-nav__link">
+      <a href="../../../../../manifests/realm/" class="md-nav__link">
         
   
   
@@ -2436,7 +2241,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../manifests/space/" class="md-nav__link">
+      <a href="../../../../../manifests/space/" class="md-nav__link">
         
   
   
@@ -2464,7 +2269,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../manifests/stack/" class="md-nav__link">
+      <a href="../../../../../manifests/stack/" class="md-nav__link">
         
   
   
@@ -2492,7 +2297,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../manifests/cell/" class="md-nav__link">
+      <a href="../../../../../manifests/cell/" class="md-nav__link">
         
   
   
@@ -2520,7 +2325,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../manifests/container/" class="md-nav__link">
+      <a href="../../../../../manifests/container/" class="md-nav__link">
         
   
   
@@ -2609,7 +2414,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/hello-world/" class="md-nav__link">
+      <a href="../../../../../tutorials/hello-world/" class="md-nav__link">
         
   
   
@@ -2637,7 +2442,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/first-stack/" class="md-nav__link">
+      <a href="../../../../../tutorials/first-stack/" class="md-nav__link">
         
   
   
@@ -2669,28 +2474,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_11" >
-        
-          
-          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="">
             
   
   
@@ -2708,7 +2516,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_11">
             <span class="md-nav__icon md-icon"></span>
             
@@ -2723,12 +2531,14 @@
                 
   
   
+    
+  
   
     
   
   
-    <li class="md-nav__item">
-      <a href="../../blog/" class="md-nav__link">
+    <li class="md-nav__item md-nav__item--active">
+      <a href="../../../../" class="md-nav__link">
         
   
   
@@ -2762,10 +2572,13 @@
       
       
         
+          
+          
+        
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
@@ -2774,7 +2587,7 @@
         <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_11_2" >
         
           
-          <label class="md-nav__link" for="__nav_11_2" id="__nav_11_2_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_11_2" id="__nav_11_2_label" tabindex="">
             
   
   
@@ -2812,7 +2625,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../blog/archive/2026/" class="md-nav__link">
+      <a href="../../../../archive/2026/" class="md-nav__link">
         
   
   
@@ -2854,10 +2667,13 @@
       
       
         
+          
+          
+        
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
@@ -2866,7 +2682,7 @@
         <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_11_3" >
         
           
-          <label class="md-nav__link" for="__nav_11_3" id="__nav_11_3_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_11_3" id="__nav_11_3_label" tabindex="">
             
   
   
@@ -2904,7 +2720,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../blog/category/comparison/" class="md-nav__link">
+      <a href="../../../../category/comparison/" class="md-nav__link">
         
   
   
@@ -2947,7 +2763,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../faq/" class="md-nav__link">
+      <a href="../../../../../faq/" class="md-nav__link">
         
   
   
@@ -2975,6 +2791,8 @@
             
             
               
+                
+              
               <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
                 <div class="md-sidebar__scrollwrap">
                   <div class="md-sidebar__inner">
@@ -2994,10 +2812,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#kuke-exits-with-permission-denied-on-the-kukeond-socket" class="md-nav__link">
+  <a href="#the-docker-run-it-flag-soup-problem" class="md-nav__link">
     <span class="md-ellipsis">
       
-        kuke … exits with "permission denied" on the kukeond socket
+        The docker run -it flag-soup problem
       
     </span>
   </a>
@@ -3005,10 +2823,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#kuke-doctor-cgroups-exits-non-zero" class="md-nav__link">
+  <a href="#setup-load-the-image-write-the-spec" class="md-nav__link">
     <span class="md-ellipsis">
       
-        kuke doctor cgroups exits non-zero
+        Setup: load the image, write the spec
       
     </span>
   </a>
@@ -3016,10 +2834,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#kuke-init-fails-with-numerical-result-out-of-range" class="md-nav__link">
+  <a href="#the-walkthrough-run-detach-reattach-reconcile" class="md-nav__link">
     <span class="md-ellipsis">
       
-        kuke init fails with "numerical result out of range"
+        The walkthrough: run, detach, reattach, reconcile
       
     </span>
   </a>
@@ -3027,10 +2845,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#unknown-entry-command-when-running-the-binary" class="md-nav__link">
+  <a href="#what-you-get-spec-as-source-of-truth" class="md-nav__link">
     <span class="md-ellipsis">
       
-        "unknown entry command" when running the binary
+        What you get: spec as source of truth
       
     </span>
   </a>
@@ -3038,98 +2856,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#kuke-init-cant-find-the-kukeond-image" class="md-nav__link">
+  <a href="#where-to-go-next" class="md-nav__link">
     <span class="md-ellipsis">
       
-        kuke init can't find the kukeond image
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#daemon-socket-is-missing-or-stale" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Daemon socket is missing or stale
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#kuke-get-realms-and-kuke-get-realms-no-daemon-disagree" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke get realms and kuke get realms --no-daemon disagree
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#ctr-can-see-containers-that-kuke-doesnt-list" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ctr can see containers that kuke doesn't list
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#kuke-uninstall-reports-skipped-realm-purge-failed" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke uninstall reports skipped (realm purge failed)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#kuke-uninstall-y-fails-on-runkukeontty-device-or-resource-busy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke uninstall -y fails on /run/kukeon/tty: device or resource busy
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#leftover-state-after-delete" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Leftover state after delete
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#verbose-logging" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Verbose logging
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#when-all-else-fails" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        When all else fails
+        Where to go next
       
     </span>
   </a>
@@ -3145,193 +2875,167 @@
             
           
           
-            <div class="md-content" data-md-component="content">
-              
-              <article class="md-content__inner md-typeset">
-                
-                  
+  <div class="md-content md-content--post" data-md-component="content">
+    <div class="md-sidebar md-sidebar--post" data-md-component="sidebar" data-md-type="navigation">
+      <div class="md-sidebar__scrollwrap">
+        <div class="md-sidebar__inner md-post">
+          <nav class="md-nav md-nav--primary">
+            <div class="md-post__back">
+              <div class="md-nav__title md-nav__container">
+                <a href="../../../../" class="md-nav__link">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+                  <span class="md-ellipsis">
+                    Back to index
+                  </span>
+                </a>
+              </div>
+            </div>
+            
+            <ul class="md-post__meta md-nav__list">
+              <li class="md-nav__item md-nav__item--section">
+                <div class="md-post__title">
+                  <span class="md-ellipsis">
+                    Metadata
+                  </span>
+                </div>
+                <nav class="md-nav">
+                  <ul class="md-nav__list">
+                    <li class="md-nav__item">
+                      <div class="md-nav__link">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 19H5V8h14m-3-7v2H8V1H6v2H5c-1.11 0-2 .89-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-1V1m-1 11h-5v5h5z"/></svg>
+                        <time datetime="2026-05-18 00:00:00+00:00" class="md-ellipsis">May 18, 2026</time>
+                      </div>
+                    </li>
+                    
+                    
+                      <li class="md-nav__item">
+                        <div class="md-nav__link">
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9 3v15h3V3zm3 2 4 13 3-1-4-13zM5 5v13h3V5zM3 19v2h18v-2z"/></svg>
+                          <span class="md-ellipsis">
+                            in
+                            
+                              <a href="../../../../category/comparison/">comparison</a></span>
+                        </div>
+                      </li>
+                    
+                    
+                      
+                      <li class="md-nav__item">
+                        <div class="md-nav__link">
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 20a8 8 0 0 0 8-8 8 8 0 0 0-8-8 8 8 0 0 0-8 8 8 8 0 0 0 8 8m0-18a10 10 0 0 1 10 10 10 10 0 0 1-10 10C6.47 22 2 17.5 2 12A10 10 0 0 1 12 2m.5 5v5.25l4.5 2.67-.75 1.23L11 13V7z"/></svg>
+                          <span class="md-ellipsis">
+                            
+                              6 min read
+                            
+                          </span>
+                        </div>
+                      </li>
+                    
+                  </ul>
+                </nav>
+              </li>
+            </ul>
+            
+          </nav>
+          
+        </div>
+      </div>
+    </div>
+    <article class="md-content__inner md-typeset">
+      
+        
+  
+
 
 
   
   
 
 
-<h1 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h1>
-<p>Common failure modes when bootstrapping or operating a Kukeon host, and what to do about them.</p>
-<h2 id="kuke-exits-with-permission-denied-on-the-kukeond-socket"><code>kuke …</code> exits with "permission denied" on the kukeond socket<a class="headerlink" href="#kuke-exits-with-permission-denied-on-the-kukeond-socket" title="Permanent link">&para;</a></h2>
-<p><strong>Symptom.</strong> A non-root invocation of any daemon-routed <code>kuke</code> command fails with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dial kukeond at /run/kukeon/kukeond.sock: permission denied — add yourself to the kukeon group (sudo usermod -aG kukeon $USER), then log out and back in: ...
+<h1 id="dev-containers-without-the-flag-soup-from-docker-run-it-to-kuke-run-f">Dev containers without the flag-soup: from <code>docker run -it</code> to <code>kuke run -f</code><a class="headerlink" href="#dev-containers-without-the-flag-soup-from-docker-run-it-to-kuke-run-f" title="Permanent link">&para;</a></h1>
+<p>If you've spent any time using Docker as your local dev environment, you know the shape of it: a long <code>docker run -it --name workspace ...</code> invocation, a moment of "wait, did I want <code>-d</code> or not?", and a flag-soup that lives only in your shell history until you forget which terminal you started it from. Turning that one-shot incantation into a persistent reattachable workspace is the friction <code>kuke run -f</code> is built to remove — by treating the cell as a declarative YAML spec instead of a command line.</p>
+<!-- more -->
+
+<h2 id="the-docker-run-it-flag-soup-problem">The <code>docker run -it</code> flag-soup problem<a class="headerlink" href="#the-docker-run-it-flag-soup-problem" title="Permanent link">&para;</a></h2>
+<p>The first time you run a dev container with Docker, it's easy:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span>--name<span class="w"> </span>workspace<span class="w"> </span>ubuntu:24.04<span class="w"> </span>bash
 </code></pre></div>
-<p><strong>What it means.</strong> <code>kuke init</code> creates the socket at <code>/run/kukeon/kukeond.sock</code> with mode <code>0660 root:kukeon</code>, so only members of the <code>kukeon</code> system group can dial it without <code>sudo</code>. The hint in the error is the fix.</p>
-<p><strong>Fix.</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sudo<span class="w"> </span>usermod<span class="w"> </span>-aG<span class="w"> </span>kukeon<span class="w"> </span><span class="nv">$USER</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># Log out and back in so the new group membership is picked up.</span>
+<p>You land at a shell. You install your tools, edit some files, and exit. The container stops. The next time you want to come back, you reach for <code>docker start -ai workspace</code>, then wonder whether you wanted <code>docker exec -it workspace bash</code> instead because you forgot whether you'd stopped it. Want to add a volume mount? You <code>docker rm</code> the container and rebuild the invocation from scratch, because there's no spec to edit — the flags <em>are</em> the spec, and they live in your terminal scrollback.</p>
+<p>That's the friction. The container is real and persistent on disk, but its <em>definition</em> isn't.</p>
+<p>"What about <code>docker compose</code>?" is the natural next thought, and for stacks of related services it's the right answer — the spec lives in a file you can commit, edit, and re-apply. The trade is structure: compose projects are flat and directory-scoped, so <code>docker compose down</code> run from the wrong directory can take out unrelated containers when names collide. For a single reattachable dev workspace you don't need a whole stack; you need one cell. <code>kuke run -f</code> is the verb that runs one, and the <code>Realm → Space → Stack → Cell</code> hierarchy you'd reach for when you outgrow compose-shaped flatness stays out of the way for the single-cell case here.</p>
+<h2 id="setup-load-the-image-write-the-spec">Setup: load the image, write the spec<a class="headerlink" href="#setup-load-the-image-write-the-spec" title="Permanent link">&para;</a></h2>
+<p>A kukeon <strong>cell</strong> is the smallest scheduled unit — a YAML document describing one or more containers that run together. For a dev workspace, the smallest interesting cell is two containers: a root container holding the cell open, and an attachable container running your shell.</p>
+<p>First, pull the base image into your local Docker daemon, then load it into the <code>default</code> realm (kukeon's per-realm containerd namespace — the realm <code>kuke init</code> provisions for user workloads):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>pull<span class="w"> </span>ubuntu:24.04
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>image<span class="w"> </span>load<span class="w"> </span>--from-docker<span class="w"> </span>ubuntu:24.04<span class="w"> </span>--realm<span class="w"> </span>default
 </code></pre></div>
-<p>After logging back in, <code>id -nG | grep kukeon</code> should show the group. Daemon-routed commands now work without <code>sudo</code>. Commands that mutate the host (<code>kuke init</code>, <code>kuke daemon reset</code>, <code>kuke image load</code> (in-process by design — image commands run in-process regardless of flags), <code>kuke doctor cgroups --probe</code>) still require root regardless.</p>
-<h2 id="kuke-doctor-cgroups-exits-non-zero"><code>kuke doctor cgroups</code> exits non-zero<a class="headerlink" href="#kuke-doctor-cgroups-exits-non-zero" title="Permanent link">&para;</a></h2>
-<p><strong>Symptom.</strong> The pre-flight reports a controller is missing or fails the <code>+&lt;ctrl&gt;</code> write probe:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>$ sudo kuke doctor cgroups
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>host cgroup pre-flight: 1 controller missing on /sys/fs/cgroup
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>  - memory: needs delegation (parent ran: echo +memory | sudo tee /sys/fs/cgroup/cgroup.subtree_control)
+<p><code>kuke image load --from-docker</code> shells out to <code>docker save</code> under the hood, so the image has to be in your local Docker daemon's content store first — that's what the <code>docker pull</code> is for. <code>--realm default</code> is the default and can be omitted; we spell it out here to make the namespace explicit.</p>
+<p>Now write the cell spec as <code>workspace.yaml</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Cell</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">workspace</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">workspace</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">realmId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span><span class="nt">spaceId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span><span class="nt">stackId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span><span class="nt">containers</span><span class="p">:</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">root</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">      </span><span class="nt">root</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker.io/library/busybox:latest</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sleep</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">      </span><span class="nt">args</span><span class="p">:</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;infinity&quot;</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shell</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="w">      </span><span class="nt">attachable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker.io/library/ubuntu:24.04</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/bin/bash</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="w">      </span><span class="nt">tty</span><span class="p">:</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="w">        </span><span class="nt">prompt</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;workspace&gt;</span><span class="nv"> </span><span class="s">&quot;</span>
 </code></pre></div>
-<p><strong>What it means.</strong> <code>kuke doctor cgroups</code> compares the cgroup's available + delegated controllers against the set <code>kukeon init</code> will enable on the <code>kukeond</code> bootstrap cell, then classifies each gap:</p>
-<table>
-<thead>
-<tr>
-<th>Status</th>
-<th>Why it appears</th>
-<th>What to do</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>kernel-missing</code></td>
-<td>The kernel was built without the named controller.</td>
-<td>Rebuild the kernel with the controller compiled in, or switch hosts.</td>
-</tr>
-<tr>
-<td><code>needs-delegation</code></td>
-<td>The controller is advertised in <code>cgroup.controllers</code> but not in <code>cgroup.subtree_control</code>. Operator can fix it.</td>
-<td>Run the <code>echo +&lt;ctrl&gt; \| sudo tee …</code> line the doctor prints.</td>
-</tr>
-<tr>
-<td><code>not-delegated</code></td>
-<td>Probe write returned <code>EOPNOTSUPP</code>: the cgroup-namespace trap (advertised but not delegated by the parent).</td>
-<td>Escalate to whoever owns the parent cgroup — your own write cannot fix this.</td>
-</tr>
-<tr>
-<td><code>threaded-subtree</code></td>
-<td>Probe write returned <code>EOPNOTSUPP</code> and the target cgroup is <code>domain threaded</code> / <code>threaded</code>.</td>
-<td>Domain-only controllers (memory, io, …) cannot be enabled in a threaded subtree; adjust the cgroup.type.</td>
-</tr>
-<tr>
-<td><code>internal-process</code></td>
-<td>Probe write returned <code>EBUSY</code>: the cgroup-v2 no-internal-process rule (the cgroup holds processes).</td>
-<td>Move processes to a child cgroup, or accept thread-aware-only enablement at this scope.</td>
-</tr>
-</tbody>
-</table>
-<p><code>--probe</code> is the default — it disambiguates <code>not-delegated</code> and <code>threaded-subtree</code> from <code>needs-delegation</code>. Pass <code>--no-probe</code> for a strictly read-only check (useful in CI before you have root); the trap classifications won't fire.</p>
-<p><strong>Exit codes.</strong></p>
+<p>Compare that to the equivalent <code>docker run -it</code> invocation:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span>--name<span class="w"> </span>workspace<span class="w"> </span>ubuntu:24.04<span class="w"> </span>bash
+</code></pre></div>
+<p>The Docker command is shorter, but it's the only place that definition exists. The YAML is longer because it spells out the two-container shape — a root container keeping the cell alive, plus an attachable shell container — but it's a file. You can commit it next to your dotfiles, diff it across machines, and read it without typing <code>docker inspect</code>.</p>
+<h2 id="the-walkthrough-run-detach-reattach-reconcile">The walkthrough: run, detach, reattach, reconcile<a class="headerlink" href="#the-walkthrough-run-detach-reattach-reconcile" title="Permanent link">&para;</a></h2>
+<p>Materialize the cell and attach to its shell in one command:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>-f<span class="w"> </span>workspace.yaml
+</code></pre></div>
+<p><code>kuke run -f</code> creates the cell, starts its containers, and attaches your terminal to the <code>shell</code> container by default. You land at a <code>workspace&gt;</code> prompt, run whatever you came to run, and when you want to step away:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>^]^]    # press Ctrl-] twice to detach
+</code></pre></div>
+<p>This is the part that surprises operators coming from <code>docker run -it</code>. There, exiting the foreground process kills the container — you have to remember <code>-d</code> up-front, then add <code>docker exec -it workspace bash</code> afterward to come back. With <code>kuke run -f</code>, the cell keeps running once you detach; only workload termination or a peer hangup tears it down. The same command does both jobs: first-time creation <em>and</em> attach. There's no "did I want detached mode or not?" decision to make at start time.</p>
+<p>Confirm the cell is still alive:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>kuke<span class="w"> </span>get<span class="w"> </span>cells
+</code></pre></div>
+<p>It shows up in the <code>Ready</code> state. To come back, reattach explicitly:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>attach<span class="w"> </span>workspace<span class="w"> </span>--container<span class="w"> </span>shell
+</code></pre></div>
+<p><code>--container shell</code> is the explicit form. (When a cell has exactly one non-root attachable container, <code>kuke attach workspace</code> alone suffices — <code>--container</code> becomes required only when there's more than one.)</p>
+<p>Now suppose you want to add an environment variable, change the working directory, or pin a new image tag. With Docker, that means <code>docker rm workspace</code> plus a fresh <code>docker run -it ...</code> with the new flags. With kukeon, you edit <code>workspace.yaml</code> and reconcile:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>workspace.yaml
+</code></pre></div>
+<p><code>kuke apply -f</code> updates the cell to match the file. If you instead re-ran <code>kuke run -f workspace.yaml</code> against a cell whose on-disk spec diverged from the file, the CLI would refuse cleanly with a message pointing you at <code>kuke apply -f</code> — <code>run</code> is the "first-time materialize" verb, <code>apply</code> is the "reconcile to spec" verb, and the CLI keeps them straight so you can't accidentally clobber state.</p>
+<p>When you're done with the workspace:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>-f<span class="w"> </span>workspace.yaml
+</code></pre></div>
+<p>The same file that <code>run</code> and <code>apply</code> consumed also drives teardown — <code>kuke delete -f</code> removes every resource the manifest declares, so the spec stays the single source of truth across the cell's whole lifecycle. (<code>kuke delete cell workspace</code> is the by-name equivalent if you don't have the file handy.)</p>
+<p><code>kuke purge cell</code> exists too, but it's the recovery verb for <em>broken</em> state — for example, if an image-pull failure leaves the cell half-created and a subsequent <code>kuke kill cell</code> errors out with <code>no RootContainerID set</code>. For routine teardown of a healthy workspace, <code>kuke delete</code> is the right verb; <code>purge</code> is the heavier hammer you reach for when something in kukeon's state is wedged.</p>
+<h2 id="what-you-get-spec-as-source-of-truth">What you get: spec as source of truth<a class="headerlink" href="#what-you-get-spec-as-source-of-truth" title="Permanent link">&para;</a></h2>
+<p>The same workflow you've been building one flag at a time in your shell history is, in <code>kuke run -f</code>'s world, a file. Four things follow from that:</p>
 <ul>
-<li><code>0</code> — every required controller is enabled (or was enabled by the probe write).</li>
-<li>non-zero — at least one controller is missing, the cgroup directory could not be read, or <code>--probe</code> was used without root.</li>
+<li><strong>Versionable, diffable.</strong> <code>workspace.yaml</code> sits in your dotfiles repo. You can <code>git diff</code> it, share it, restore it on a new machine.</li>
+<li><strong>Structured persistence.</strong> The cell outlives every attach session. Detaching is cheap; reattaching is one command. No more "wait, did I leave that running with <code>-d</code>?".</li>
+<li><strong>Symmetric attach.</strong> <code>kuke run -f</code> is the first-time materialize-and-attach verb; <code>kuke attach</code> is the reattach verb. One mental model for "start" and "come back," not two.</li>
+<li><strong>A real update path.</strong> <code>kuke apply -f</code> reconciles the cell to match the spec. <code>kuke run -f</code> against a divergent cell refuses cleanly rather than silently overwriting — the two verbs encode the difference between "create" and "update" so you can't conflate them.</li>
 </ul>
-<p><strong>Self-heal carve-out.</strong> On a <code>NestedCgroupRuntime</code> dev host where the cgroup-namespace root carries processes, the doctor still surfaces the <code>internal-process</code> diagnostic on stderr but exits 0 — the <code>kuke init</code> runtime drains those processes on its own, so <code>make dev-init</code> does not abort at the pre-flight.</p>
-<p>See <a href="../../cli/kuke-doctor/">kuke doctor cgroups</a> for the full flag list.</p>
-<h2 id="kuke-init-fails-with-numerical-result-out-of-range"><code>kuke init</code> fails with "numerical result out of range"<a class="headerlink" href="#kuke-init-fails-with-numerical-result-out-of-range" title="Permanent link">&para;</a></h2>
-<p><strong>Symptom.</strong> On re-init after upgrading Kukeon, a cell attaches to its bridge and fails with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>failed to attach root container ... to network:
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>plugin type=&quot;bridge&quot; failed (add): failed to create bridge
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>&quot;kuke-...-...&quot;: could not add &quot;...&quot;:
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>numerical result out of range
-</code></pre></div>
-<p><strong>What it means.</strong> <code>numerical result out of range</code> is the kernel's <code>ERANGE</code> error when an interface name exceeds 15 characters (<code>IFNAMSIZ - 1</code>). Older Kukeon versions didn't truncate long bridge names safely, so a stale CNI conflist on disk can pin a name that the current kernel rejects.</p>
-<p><strong>Fix.</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>init<span class="w"> </span>--force-regenerate-cni
-</code></pre></div>
-<p>That rewrites every space's conflist with the current naming scheme. The daemon re-reads the regenerated file on the next operation.</p>
-<p>If that still doesn't clear it, the file on disk wasn't regenerated for some reason — delete it explicitly:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>sudo<span class="w"> </span>rm<span class="w"> </span>/opt/kukeon/&lt;realm&gt;/&lt;space&gt;/network.conflist
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>sudo<span class="w"> </span>rm<span class="w"> </span>/etc/cni/net.d/&lt;realm&gt;-&lt;space&gt;.conflist
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>init
-</code></pre></div>
-<h2 id="unknown-entry-command-when-running-the-binary">"unknown entry command" when running the binary<a class="headerlink" href="#unknown-entry-command-when-running-the-binary" title="Permanent link">&para;</a></h2>
-<p><strong>Symptom.</strong> Running the binary prints:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>unknown entry command: __debug_bin12345
-</code></pre></div>
-<p><strong>What it means.</strong> <code>cmd/main.go</code> dispatches on <code>argv[0]</code>, expecting <code>kuke</code> or <code>kukeond</code>. From an IDE or a debugger, the binary is renamed something else.</p>
-<p><strong>Fix.</strong> Set <code>KUKEON_DEBUG_MODE</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nv">KUKEON_DEBUG_MODE</span><span class="o">=</span>kuke<span class="w">    </span>./your-built-binary<span class="w"> </span>get<span class="w"> </span>realms
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nv">KUKEON_DEBUG_MODE</span><span class="o">=</span>kukeond<span class="w"> </span>./your-built-binary<span class="w"> </span>serve
-</code></pre></div>
-<p>Or, install with the right hard link:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span>kuke<span class="w"> </span>/usr/local/bin/kuke
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>sudo<span class="w"> </span>ln<span class="w"> </span>-f<span class="w"> </span>/usr/local/bin/kuke<span class="w"> </span>/usr/local/bin/kukeond
-</code></pre></div>
-<h2 id="kuke-init-cant-find-the-kukeond-image"><code>kuke init</code> can't find the kukeond image<a class="headerlink" href="#kuke-init-cant-find-the-kukeond-image" title="Permanent link">&para;</a></h2>
-<p><strong>Symptom.</strong> <code>kuke init</code> fails at the "pull kukeond image" step, or the system cell stays in <code>Pending</code> because the image isn't in containerd.</p>
-<p><strong>Diagnosis.</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># The image should be listed here:</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>sudo<span class="w"> </span>ctr<span class="w"> </span>-n<span class="w"> </span>kuke-system.kukeon.io<span class="w"> </span>images<span class="w"> </span>ls<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>kukeon
-</code></pre></div>
-<p><strong>Fix.</strong> Use <code>kuke image load --from-docker</code> so the right namespace is created and populated in one step:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>image<span class="w"> </span>load<span class="w"> </span>--from-docker<span class="w"> </span>kukeon-local:dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system
-</code></pre></div>
-<p>If you load with <code>ctr</code> directly, the target namespace must exist or <code>ctr images import</code> silently no-ops. Use <code>kuke image load</code> to avoid that footgun.</p>
-<h2 id="daemon-socket-is-missing-or-stale">Daemon socket is missing or stale<a class="headerlink" href="#daemon-socket-is-missing-or-stale" title="Permanent link">&para;</a></h2>
-<p><strong>Symptom.</strong> <code>kuke</code> commands fail with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>dial unix /run/kukeon/kukeond.sock: connect: no such file or directory
-</code></pre></div>
-<p><strong>Diagnosis.</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Is the daemon cell running? (in-process via --run-path promotion so</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="c1"># we don&#39;t depend on the daemon we are trying to diagnose)</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>cells<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>--space<span class="w"> </span>kukeon<span class="w"> </span>--stack<span class="w"> </span>kukeon<span class="w"> </span>--run-path<span class="w"> </span>/opt/kukeon
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="c1"># Is the socket actually on disk?</span>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>ls<span class="w"> </span>-l<span class="w"> </span>/run/kukeon/
-</code></pre></div>
-<p><strong>Fix.</strong> If the daemon cell is stopped, start it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>start
-</code></pre></div>
-<p>If the socket exists but nothing responds, the daemon died while leaving the socket behind. Reset and re-init:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>reset
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>init
-</code></pre></div>
-<h2 id="kuke-get-realms-and-kuke-get-realms-no-daemon-disagree"><code>kuke get realms</code> and <code>kuke get realms --no-daemon</code> disagree<a class="headerlink" href="#kuke-get-realms-and-kuke-get-realms-no-daemon-disagree" title="Permanent link">&para;</a></h2>
-<p><strong>Symptom.</strong> The same <code>kuke get realms</code> returns different data depending on whether it goes through the daemon or runs in-process (the <code>--no-daemon</code> flag is still accepted on every <code>kuke get &lt;kind&gt;</code>; <code>get realms</code> is the canonical daemon-parity check, see #223 for its eventual retirement once <code>kuke status</code> absorbs the parity contract).</p>
-<p><strong>What it means.</strong> The <code>kukeond</code> container isn't bind-mounting <code>/opt/kukeon</code> (or <code>/run/kukeon</code>) correctly. Both code paths share a reconciler, so divergence is always about what the daemon can see on disk.</p>
-<p><strong>Fix.</strong> Rebuild the daemon image with the correct mounts, reload, and re-init. See <a href="../local-dev/">Local development</a>.</p>
-<h2 id="ctr-can-see-containers-that-kuke-doesnt-list"><code>ctr</code> can see containers that <code>kuke</code> doesn't list<a class="headerlink" href="#ctr-can-see-containers-that-kuke-doesnt-list" title="Permanent link">&para;</a></h2>
-<p><code>kuke get containers</code> filters by realm/space/stack/cell. If a container exists in <code>ctr -n &lt;realm&gt;.kukeon.io</code> but doesn't show up in <code>kuke get containers</code>, check:</p>
+<p>The trade is honest: you write more YAML up-front than you write <code>docker run</code> flags. In exchange, the workspace stops being a thing that lives in your terminal scrollback and becomes a thing that lives in your repo.</p>
+<h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
 <ul>
-<li>The containerd namespace — is it really <code>&lt;realm&gt;.kukeon.io</code> for your realm? <code>spec.namespace</code> on the realm manifest can override.</li>
-<li>The resource hierarchy — the container must have <code>realmId</code>, <code>spaceId</code>, <code>stackId</code>, <code>cellId</code> set correctly in its metadata. Containers created directly via <code>ctr</code> bypass Kukeon's metadata and won't be listed.</li>
-</ul>
-<h2 id="kuke-uninstall-reports-skipped-realm-purge-failed"><code>kuke uninstall</code> reports <code>skipped (realm purge failed)</code><a class="headerlink" href="#kuke-uninstall-reports-skipped-realm-purge-failed" title="Permanent link">&para;</a></h2>
-<p><strong>Symptom.</strong> <code>kuke uninstall -y</code> finishes non-zero, every filesystem / user / group row in the report is annotated <code>skipped (realm purge failed)</code>, and <code>/opt/kukeon</code> is still on disk.</p>
-<p><strong>What it means.</strong> If any realm fails to drop its containerd namespace, uninstall <strong>deliberately skips</strong> the subsequent dir / account removal steps. Tearing out <code>/opt/kukeon</code> while a residual namespace is still pinning overlay mounts on disk would strand the next <code>kuke init</code> with stale containerd state. The skip is the safe default — the half-cleaned host is visible without scrolling to the trailing error.</p>
-<p><strong>Fix.</strong> Resolve the realm-purge failure first, then re-run uninstall:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Look at the realm purge error in the uninstall report. Common causes:</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="c1"># - a live bind mount under /run/kukeon/&lt;...&gt; (see next section)</span>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="c1"># - a leftover process inside a container that didn&#39;t respond to SIGKILL</span>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="c1"># - a stale containerd snapshot the GC hasn&#39;t reclaimed</span>
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>
-<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="c1"># Once resolved:</span>
-<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>uninstall<span class="w"> </span>-y
-</code></pre></div>
-<h2 id="kuke-uninstall-y-fails-on-runkukeontty-device-or-resource-busy"><code>kuke uninstall -y</code> fails on <code>/run/kukeon/tty: device or resource busy</code><a class="headerlink" href="#kuke-uninstall-y-fails-on-runkukeontty-device-or-resource-busy" title="Permanent link">&para;</a></h2>
-<p><strong>Symptom.</strong> Uninstall reports <code>/run/kukeon: remove failed</code> and exits non-zero with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>Error: remove socket dir &quot;/run/kukeon&quot;: unlinkat /run/kukeon/tty: device or resource busy
-</code></pre></div>
-<p><strong>What it means.</strong> A <code>kuke attach</code>-style smoke or an interactive session left a bind mount under <code>/run/kukeon/tty/...</code> pinned to the host. <code>rmdir /run/kukeon</code> cannot succeed while a mount lives below it.</p>
-<p><strong>Fix.</strong> Current <code>kuke uninstall</code> releases kukeon-owned bind mounts before the <code>rmdir</code>, so this should self-resolve. If you're on an older binary, identify and unmount manually:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>mount<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>kukeon
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>sudo<span class="w"> </span>umount<span class="w"> </span>/run/kukeon/tty<span class="w">            </span><span class="c1"># or `umount -l` if it&#39;s still busy</span>
-<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>uninstall<span class="w"> </span>-y
-</code></pre></div>
-<h2 id="leftover-state-after-delete">Leftover state after <code>delete</code><a class="headerlink" href="#leftover-state-after-delete" title="Permanent link">&para;</a></h2>
-<p><strong>Symptom.</strong> <code>kuke delete cell foo --cascade</code> finishes, but you still see cgroups or network interfaces hanging around.</p>
-<p><strong>Fix.</strong> Use <code>kuke purge</code> instead — it's the more aggressive form that force-removes residual state:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>purge<span class="w"> </span>cell<span class="w"> </span>foo<span class="w"> </span>--cascade<span class="w"> </span>--force<span class="w"> </span>--realm<span class="w"> </span>...<span class="w"> </span>--space<span class="w"> </span>...<span class="w"> </span>--stack<span class="w"> </span>...
-</code></pre></div>
-<p>If that still doesn't clear everything, the tail end is usually:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># Dangling cgroup</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>sudo<span class="w"> </span>rmdir<span class="w"> </span>/sys/fs/cgroup/kukeon/&lt;realm&gt;/&lt;space&gt;/&lt;stack&gt;/&lt;cell&gt;<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
-<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>
-<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="c1"># Dangling bridge (only if the space is gone too)</span>
-<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>sudo<span class="w"> </span>ip<span class="w"> </span>link<span class="w"> </span>delete<span class="w"> </span>kuke-&lt;realm&gt;-&lt;space&gt;<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
-</code></pre></div>
-<h2 id="verbose-logging">Verbose logging<a class="headerlink" href="#verbose-logging" title="Permanent link">&para;</a></h2>
-<p>Add <code>--verbose</code> (or <code>-v</code>) to any <code>kuke</code> command to get structured slog output on stderr. Pair with <code>--log-level debug</code> for the most detail:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>init<span class="w"> </span>--verbose<span class="w"> </span>--log-level<span class="w"> </span>debug
-</code></pre></div>
-<p>The daemon's log level is set separately via <code>kukeond --log-level</code> in the cell spec.</p>
-<h2 id="when-all-else-fails">When all else fails<a class="headerlink" href="#when-all-else-fails" title="Permanent link">&para;</a></h2>
-<ul>
-<li>The full runtime state lives in <code>/opt/kukeon</code> (persistent), <code>/run/kukeon</code> (tmpfs), <code>/sys/fs/cgroup/kukeon</code> (runtime), <code>/etc/cni/net.d/*.conflist</code> (cache), and containerd namespaces <code>&lt;realm&gt;.kukeon.io</code>. Those are the only places Kukeon writes state.</li>
-<li>The "nuclear reset" sequence is in <a href="../init-and-reset/#full-host-wipe">Init and reset → Full host wipe</a>.</li>
-<li>Bug reports and questions welcome at <a href="https://github.com/eminwux/kukeon/issues">github.com/eminwux/kukeon/issues</a>.</li>
+<li>For the full agent-runner shape — building a custom image, the Attachable cell pattern, and the parametrized <code>CellProfile</code> for one-shot prompts — see <a href="../../../../../guides/run-claude-code/">Run Claude Code in a kukeon cell</a>. The cell-spec pattern this post uses is the same one that guide walks through end-to-end.</li>
+<li>For the full surface of <code>kuke run -f</code> (including <code>-p</code> profile mode, <code>--rm</code> auto-delete, and the <code>-d/--detach</code> flag), see the <a href="../../../../../cli/kuke-run/"><code>kuke run</code> reference</a>.</li>
+<li>For everything <code>kuke apply</code>, <code>kuke attach</code>, <code>kuke delete</code>, and <code>kuke purge</code> will and won't do — exit codes, side effects, error paths — <code>docs/cli-use-cases.md</code> in the repo is the workflow-oriented source of truth.</li>
 </ul>
 
 
@@ -3355,7 +3059,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 17, 2026 17:44:44 UTC">May 17, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 18, 2026 18:20:50 UTC">May 18, 2026</span>
   </span>
 
     
@@ -3365,7 +3069,7 @@
     <span class="md-icon" title="Created">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14.47 15.08 11 13V7h1.5v5.25l3.08 1.83c-.41.28-.79.62-1.11 1m-1.39 4.84c-.36.05-.71.08-1.08.08-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8c0 .37-.03.72-.08 1.08.69.1 1.33.32 1.92.64.1-.56.16-1.13.16-1.72 0-5.5-4.5-10-10-10S2 6.5 2 12s4.47 10 10 10c.59 0 1.16-.06 1.72-.16-.32-.59-.54-1.23-.64-1.92M18 15v3h-3v2h3v3h2v-3h3v-2h-3v-3z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 21, 2026 12:22:34 UTC">April 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 18, 2026 18:20:50 UTC">May 18, 2026</span>
   </span>
 
     
@@ -3375,12 +3079,14 @@
 
 
 
+  
 
 
-                
-              </article>
-            </div>
-          
+
+      
+    </article>
+  </div>
+
           
 <script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
         </div>
@@ -3436,10 +3142,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.annotate", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../../../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.annotate", "content.code.copy"], "search": "../../../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../../../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>
