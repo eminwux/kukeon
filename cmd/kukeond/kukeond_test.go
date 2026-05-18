@@ -311,3 +311,60 @@ func TestMaybeWriteServerConfigurationDefaultSkipsCustomPath(t *testing.T) {
 		t.Fatalf("custom path was written; got Stat err=%v, want IsNotExist", statErr)
 	}
 }
+
+// TestCurrentResolvedSpecReflectsViper is the kukeond-side regression guard
+// for issue #581: the spec we feed to serverconfig.WriteDefault must mirror
+// the flag-and-env-resolved viper state at first-write time, so the dumped
+// document records the values the daemon actually bound to instead of the
+// compile-time defaults. Mutating viper directly here proxies for the flag
+// and env paths — applyServerConfiguration has not run yet on the first-
+// write code path (the YAML doesn't exist), so viper holds exactly the
+// resolved state we want to snapshot.
+func TestCurrentResolvedSpecReflectsViper(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	viper.Reset()
+
+	if _, err := NewKukeondCmd(); err != nil {
+		t.Fatalf("NewKukeondCmd() error = %v", err)
+	}
+
+	viper.Set(config.KUKEOND_SOCKET.ViperKey, "/tmp/A/kukeond.sock")
+	viper.Set(config.KUKEOND_SOCKET_GID.ViperKey, 4242)
+	viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, "/tmp/A")
+	viper.Set(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey, "/run/containerd/test.sock")
+	viper.Set(config.KUKEON_ROOT_LOG_LEVEL.ViperKey, "debug")
+	viper.Set(config.KUKEOND_RECONCILE_INTERVAL.ViperKey, "45s")
+	viper.Set(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey, "dev.kukeon.io")
+	viper.Set(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey, "/kukeon-dev")
+	viper.Set(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey, int64(2*1024*1024*1024))
+
+	spec := currentResolvedSpec()
+
+	if spec.Socket != "/tmp/A/kukeond.sock" {
+		t.Errorf("Socket: got %q", spec.Socket)
+	}
+	if spec.SocketGID != 4242 {
+		t.Errorf("SocketGID: got %d", spec.SocketGID)
+	}
+	if spec.RunPath != "/tmp/A" {
+		t.Errorf("RunPath: got %q", spec.RunPath)
+	}
+	if spec.ContainerdSocket != "/run/containerd/test.sock" {
+		t.Errorf("ContainerdSocket: got %q", spec.ContainerdSocket)
+	}
+	if spec.LogLevel != "debug" {
+		t.Errorf("LogLevel: got %q", spec.LogLevel)
+	}
+	if spec.ReconcileInterval != "45s" {
+		t.Errorf("ReconcileInterval: got %q", spec.ReconcileInterval)
+	}
+	if spec.ContainerdNamespaceSuffix != "dev.kukeon.io" {
+		t.Errorf("ContainerdNamespaceSuffix: got %q", spec.ContainerdNamespaceSuffix)
+	}
+	if spec.CgroupRoot != "/kukeon-dev" {
+		t.Errorf("CgroupRoot: got %q", spec.CgroupRoot)
+	}
+	if spec.DefaultMemoryLimitBytes != int64(2*1024*1024*1024) {
+		t.Errorf("DefaultMemoryLimitBytes: got %d", spec.DefaultMemoryLimitBytes)
+	}
+}
