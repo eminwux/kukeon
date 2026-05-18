@@ -43,7 +43,7 @@ User data under `/opt/kukeon/default/**` is untouched across iterations; only th
 | `make uninstall-dev` | Remove both symlinks from `$(INSTALL_PREFIX)`.                                                                                |
 | `make dev-init`      | The full canonical loop above. Auto-invokes `install-dev` so `sudo kuke …` works from any directory.                          |
 | `make test`          | Run the Go unit test suite                                                                                                    |
-| `make e2e`           | Run end-to-end tests against a real containerd (requires root)                                                                |
+| `make e2e`           | Run end-to-end tests against a real containerd (requires root). Supports both a clean host and a nested run inside a `kukeon-dev-root` cell — each test derives its socket from its own `--run-path <tempdir>` so the parent dev cell's `/run/kukeon/` plumbing is untouched. |
 | `make lint`          | Run `golangci-lint` with the repo's config                                                                                    |
 
 Override `INSTALL_PREFIX` for non-standard PATH layouts: `make install-dev INSTALL_PREFIX=$HOME/.local/bin`.
