@@ -121,6 +121,8 @@ nav:
   - Tutorials:
       - tutorials/hello-world.md
       - tutorials/first-stack.md
+  - Blog:
+      - blog/index.md
   - FAQ: faq.md
 
 extra:
@@ -134,3 +136,4 @@ plugins:
   - search
   - git-revision-date-localized:
       enable_creation_date: true
+  - blog
