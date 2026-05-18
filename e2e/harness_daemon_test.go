@@ -171,8 +171,10 @@ func startKukeondDaemon(t *testing.T, runPath string) string {
 
 // buildKukeDaemonArgs returns the `--host <addr>` prefix every daemon-mode
 // e2e invocation must carry. Pair with startKukeondDaemon to route a
-// workload command to the per-test daemon instead of the in-process
-// controller that --run-path promotion would otherwise select.
+// workload command to the per-test daemon — required for apply, create *,
+// run, attach, delete *, kill * after #566 made the workload verbs
+// daemon-only at the code-path level (the `--run-path` promotion no longer
+// reaches an in-process branch for them).
 //
 // The in-process counterpart (buildKukeRunPathArgs) survives for the
 // daemon-parity check (`get realms --no-daemon`) and host-mutating verbs
