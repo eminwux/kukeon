@@ -228,7 +228,10 @@ func setPersistentFlags(_ *cobra.Command) error {
 //
 // ServerConfiguration's spec.Socket trips !viper.IsSet through
 // applyServerConfiguration's viper.Set, so YAML-configured socket paths
-// are respected.
+// are respected. KUKEOND_SOCKET is registered via DefineKVNoViperDefault
+// (cmd/config/env.go) precisely so this IsSet check stays meaningful —
+// viper.SetDefault would trip IsSet even with no env/flag/YAML and
+// silently disable derivation.
 func applyRunPathImpliesKukeondSocket(cmd *cobra.Command, runPath string) {
 	if viper.IsSet(config.KUKEOND_SOCKET.ViperKey) {
 		return

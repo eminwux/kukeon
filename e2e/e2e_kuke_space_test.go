@@ -26,11 +26,13 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
-// cleanupSpace deletes a space with cascade.
-func cleanupSpace(t *testing.T, runPath, realmName, spaceName string) {
+// cleanupSpace deletes a space with cascade through the per-test daemon.
+// Register after startKukeondDaemon so t.Cleanup's LIFO order runs delete
+// before the daemon is signaled.
+func cleanupSpace(t *testing.T, host, realmName, spaceName string) {
 	t.Helper()
 
-	args := append(buildKukeRunPathArgs(runPath), "delete", "space", spaceName, "--realm", realmName, "--cascade")
+	args := append(buildKukeDaemonArgs(host), "delete", "space", spaceName, "--realm", realmName, "--cascade")
 	_, _, _ = runBinary(t, nil, kuke, args...)
 }
 
@@ -39,8 +41,9 @@ func TestKuke_NoSpaces(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 
-	args := append(buildKukeRunPathArgs(runPath), "get", "space", "--output", "json")
+	args := append(buildKukeDaemonArgs(host), "get", "space", "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	var spaces []v1beta1.SpaceDoc
@@ -59,21 +62,22 @@ func TestKuke_CreateSpace_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 
 	// Cleanup: Delete space first, then realm (reverse dependency order)
 	t.Cleanup(func() {
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Create space
-	args = append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 3: Verify CNI config file exists
@@ -87,18 +91,18 @@ func TestKuke_CreateSpace_VerifyState(t *testing.T) {
 	}
 
 	// Step 5: Verify space appears in list (JSON parsing)
-	if !verifySpaceInList(t, runPath, realmName, spaceName) {
+	if !verifySpaceInList(t, host, realmName, spaceName) {
 		t.Fatalf("space %q not found in space list", spaceName)
 	}
 
 	// Step 6: Verify space can be retrieved individually
-	if !verifySpaceExists(t, runPath, realmName, spaceName) {
+	if !verifySpaceExists(t, host, realmName, spaceName) {
 		t.Fatalf("space %q cannot be retrieved individually", spaceName)
 	}
 
 	// Step 7: Verify cgroup path exists
 	// Get space JSON to extract cgroup path
-	args = append(buildKukeRunPathArgs(runPath), "get", "space", spaceName, "--realm", realmName, "--output", "json")
+	args = append(buildKukeDaemonArgs(host), "get", "space", spaceName, "--realm", realmName, "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	space, err := parseSpaceJSON(t, output)
@@ -134,21 +138,22 @@ func TestKuke_DeleteSpace_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 
 	// Cleanup: Safety net (space should already be deleted, but ensure cleanup if test fails partway)
 	t.Cleanup(func() {
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Create space (prerequisite for deletion test)
-	args = append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 3: Verify space exists initially (establish baseline)
@@ -160,16 +165,16 @@ func TestKuke_DeleteSpace_VerifyState(t *testing.T) {
 		t.Fatalf("space metadata file not found for space %q", spaceName)
 	}
 
-	if !verifySpaceInList(t, runPath, realmName, spaceName) {
+	if !verifySpaceInList(t, host, realmName, spaceName) {
 		t.Fatalf("space %q not found in space list", spaceName)
 	}
 
-	if !verifySpaceExists(t, runPath, realmName, spaceName) {
+	if !verifySpaceExists(t, host, realmName, spaceName) {
 		t.Fatalf("space %q cannot be retrieved individually", spaceName)
 	}
 
 	// Get space JSON to extract cgroup path for later verification
-	args = append(buildKukeRunPathArgs(runPath), "get", "space", spaceName, "--realm", realmName, "--output", "json")
+	args = append(buildKukeDaemonArgs(host), "get", "space", spaceName, "--realm", realmName, "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	space, err := parseSpaceJSON(t, output)
@@ -188,7 +193,7 @@ func TestKuke_DeleteSpace_VerifyState(t *testing.T) {
 	}
 
 	// Step 4: Delete the space
-	args = append(buildKukeRunPathArgs(runPath), "delete", "space", spaceName, "--realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "delete", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 5: Verify CNI config file does NOT exist
@@ -210,12 +215,12 @@ func TestKuke_DeleteSpace_VerifyState(t *testing.T) {
 	}
 
 	// Step 8: Verify space does NOT appear in list
-	if verifySpaceInList(t, runPath, realmName, spaceName) {
+	if verifySpaceInList(t, host, realmName, spaceName) {
 		t.Fatalf("space %q still appears in space list after deletion", spaceName)
 	}
 
 	// Step 9: Verify individual get FAILS (returns non-zero exit code)
-	args = append(buildKukeRunPathArgs(runPath), "get", "space", spaceName, "--realm", realmName, "--output", "json")
+	args = append(buildKukeDaemonArgs(host), "get", "space", spaceName, "--realm", realmName, "--output", "json")
 	exitCode, _, _ := runBinary(t, nil, kuke, args...)
 	if exitCode == 0 {
 		t.Fatalf("expected get space to fail after deletion, but got exit code 0")
@@ -230,21 +235,22 @@ func TestKuke_PurgeSpace_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 
 	// Cleanup: Safety net (space should already be purged, but ensure cleanup if test fails partway)
 	t.Cleanup(func() {
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Create space (prerequisite for purge test)
-	args = append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 3: Verify space exists initially (establish baseline)
@@ -256,16 +262,16 @@ func TestKuke_PurgeSpace_VerifyState(t *testing.T) {
 		t.Fatalf("space metadata file not found for space %q", spaceName)
 	}
 
-	if !verifySpaceInList(t, runPath, realmName, spaceName) {
+	if !verifySpaceInList(t, host, realmName, spaceName) {
 		t.Fatalf("space %q not found in space list", spaceName)
 	}
 
-	if !verifySpaceExists(t, runPath, realmName, spaceName) {
+	if !verifySpaceExists(t, host, realmName, spaceName) {
 		t.Fatalf("space %q cannot be retrieved individually", spaceName)
 	}
 
 	// Get space JSON to extract cgroup path for later verification
-	args = append(buildKukeRunPathArgs(runPath), "get", "space", spaceName, "--realm", realmName, "--output", "json")
+	args = append(buildKukeDaemonArgs(host), "get", "space", spaceName, "--realm", realmName, "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	space, err := parseSpaceJSON(t, output)
@@ -283,7 +289,8 @@ func TestKuke_PurgeSpace_VerifyState(t *testing.T) {
 		t.Fatalf("cgroup path %q does not exist in filesystem", cgroupPath)
 	}
 
-	// Step 4: Purge the space (comprehensive cleanup)
+	// Step 4: Purge the space (comprehensive cleanup) — in-process per the
+	// #565 AC so purge does not depend on the per-test daemon being alive.
 	args = append(buildKukeRunPathArgs(runPath), "purge", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
@@ -306,12 +313,12 @@ func TestKuke_PurgeSpace_VerifyState(t *testing.T) {
 	}
 
 	// Step 8: Verify space does NOT appear in list
-	if verifySpaceInList(t, runPath, realmName, spaceName) {
+	if verifySpaceInList(t, host, realmName, spaceName) {
 		t.Fatalf("space %q still appears in space list after purge", spaceName)
 	}
 
 	// Step 9: Verify individual get FAILS (returns non-zero exit code)
-	args = append(buildKukeRunPathArgs(runPath), "get", "space", spaceName, "--realm", realmName, "--output", "json")
+	args = append(buildKukeDaemonArgs(host), "get", "space", spaceName, "--realm", realmName, "--output", "json")
 	exitCode, _, _ := runBinary(t, nil, kuke, args...)
 	if exitCode == 0 {
 		t.Fatalf("expected get space to fail after purge, but got exit code 0")

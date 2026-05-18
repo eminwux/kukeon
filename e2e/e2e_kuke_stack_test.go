@@ -25,12 +25,14 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
-// cleanupStack deletes a stack with cascade.
-func cleanupStack(t *testing.T, runPath, realmName, spaceName, stackName string) {
+// cleanupStack deletes a stack with cascade through the per-test daemon.
+// Register after startKukeondDaemon so t.Cleanup's LIFO order runs delete
+// before the daemon is signaled.
+func cleanupStack(t *testing.T, host, realmName, spaceName, stackName string) {
 	t.Helper()
 
 	args := append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"delete",
 		"stack",
 		stackName,
@@ -48,8 +50,9 @@ func TestKuke_NoStacks(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 
-	args := append(buildKukeRunPathArgs(runPath), "get", "stack", "--output", "json")
+	args := append(buildKukeDaemonArgs(host), "get", "stack", "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	var stacks []v1beta1.StackDoc
@@ -68,28 +71,29 @@ func TestKuke_CreateStack_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
 
 	// Cleanup: Delete stack first, then space, then realm (reverse dependency order)
 	t.Cleanup(func() {
-		cleanupStack(t, runPath, realmName, spaceName, stackName)
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupStack(t, host, realmName, spaceName, stackName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Create space (prerequisite)
-	args = append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 3: Create stack
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"create",
 		"stack",
 		stackName,
@@ -106,19 +110,19 @@ func TestKuke_CreateStack_VerifyState(t *testing.T) {
 	}
 
 	// Step 5: Verify stack appears in list (JSON parsing)
-	if !verifyStackInList(t, runPath, realmName, spaceName, stackName) {
+	if !verifyStackInList(t, host, realmName, spaceName, stackName) {
 		t.Fatalf("stack %q not found in stack list", stackName)
 	}
 
 	// Step 6: Verify stack can be retrieved individually
-	if !verifyStackExists(t, runPath, realmName, spaceName, stackName) {
+	if !verifyStackExists(t, host, realmName, spaceName, stackName) {
 		t.Fatalf("stack %q cannot be retrieved individually", stackName)
 	}
 
 	// Step 7: Verify cgroup path exists
 	// Get stack JSON to extract cgroup path
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"stack",
 		stackName,
@@ -164,28 +168,29 @@ func TestKuke_DeleteStack_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
 
 	// Cleanup: Safety net (stack should already be deleted, but ensure cleanup if test fails partway)
 	t.Cleanup(func() {
-		cleanupStack(t, runPath, realmName, spaceName, stackName)
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupStack(t, host, realmName, spaceName, stackName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Create space (prerequisite)
-	args = append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 3: Create stack (prerequisite for deletion test)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"create",
 		"stack",
 		stackName,
@@ -201,17 +206,17 @@ func TestKuke_DeleteStack_VerifyState(t *testing.T) {
 		t.Fatalf("stack metadata file not found for stack %q", stackName)
 	}
 
-	if !verifyStackInList(t, runPath, realmName, spaceName, stackName) {
+	if !verifyStackInList(t, host, realmName, spaceName, stackName) {
 		t.Fatalf("stack %q not found in stack list", stackName)
 	}
 
-	if !verifyStackExists(t, runPath, realmName, spaceName, stackName) {
+	if !verifyStackExists(t, host, realmName, spaceName, stackName) {
 		t.Fatalf("stack %q cannot be retrieved individually", stackName)
 	}
 
 	// Get stack JSON to extract cgroup path for later verification
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"stack",
 		stackName,
@@ -241,7 +246,7 @@ func TestKuke_DeleteStack_VerifyState(t *testing.T) {
 
 	// Step 5: Delete the stack
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"delete",
 		"stack",
 		stackName,
@@ -263,13 +268,13 @@ func TestKuke_DeleteStack_VerifyState(t *testing.T) {
 	}
 
 	// Step 8: Verify stack does NOT appear in list
-	if verifyStackInList(t, runPath, realmName, spaceName, stackName) {
+	if verifyStackInList(t, host, realmName, spaceName, stackName) {
 		t.Fatalf("stack %q still appears in stack list after deletion", stackName)
 	}
 
 	// Step 9: Verify individual get FAILS (returns non-zero exit code)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"stack",
 		stackName,
@@ -294,28 +299,29 @@ func TestKuke_PurgeStack_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
 
 	// Cleanup: Safety net (stack should already be purged, but ensure cleanup if test fails partway)
 	t.Cleanup(func() {
-		cleanupStack(t, runPath, realmName, spaceName, stackName)
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupStack(t, host, realmName, spaceName, stackName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Create space (prerequisite)
-	args = append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 3: Create stack (prerequisite for purge test)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"create",
 		"stack",
 		stackName,
@@ -331,17 +337,17 @@ func TestKuke_PurgeStack_VerifyState(t *testing.T) {
 		t.Fatalf("stack metadata file not found for stack %q", stackName)
 	}
 
-	if !verifyStackInList(t, runPath, realmName, spaceName, stackName) {
+	if !verifyStackInList(t, host, realmName, spaceName, stackName) {
 		t.Fatalf("stack %q not found in stack list", stackName)
 	}
 
-	if !verifyStackExists(t, runPath, realmName, spaceName, stackName) {
+	if !verifyStackExists(t, host, realmName, spaceName, stackName) {
 		t.Fatalf("stack %q cannot be retrieved individually", stackName)
 	}
 
 	// Get stack JSON to extract cgroup path for later verification
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"stack",
 		stackName,
@@ -369,7 +375,8 @@ func TestKuke_PurgeStack_VerifyState(t *testing.T) {
 		t.Fatalf("cgroup path %q does not exist in filesystem", cgroupPath)
 	}
 
-	// Step 5: Purge the stack (comprehensive cleanup)
+	// Step 5: Purge the stack (comprehensive cleanup) — in-process per the
+	// #565 AC so purge does not depend on the per-test daemon being alive.
 	args = append(
 		buildKukeRunPathArgs(runPath),
 		"purge",
@@ -393,13 +400,13 @@ func TestKuke_PurgeStack_VerifyState(t *testing.T) {
 	}
 
 	// Step 8: Verify stack does NOT appear in list
-	if verifyStackInList(t, runPath, realmName, spaceName, stackName) {
+	if verifyStackInList(t, host, realmName, spaceName, stackName) {
 		t.Fatalf("stack %q still appears in stack list after purge", stackName)
 	}
 
 	// Step 9: Verify individual get FAILS (returns non-zero exit code)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"stack",
 		stackName,
