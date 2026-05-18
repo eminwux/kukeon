@@ -22,10 +22,12 @@
 package serverconfig
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"text/template"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -65,11 +67,14 @@ func Load(path string) (*v1beta1.ServerConfigurationDoc, error) {
 	return &doc, nil
 }
 
-// defaultDocument is the commented YAML written by WriteDefault on first
-// kukeond start. Every spec field is present with its in-binary default and
-// a header comment explaining its purpose so the operator can tweak the file
-// without consulting source. The string round-trips through Load.
-const defaultDocument = `# kukeond ServerConfiguration — auto-generated default.
+// defaultDocumentTemplate is the commented YAML rendered by WriteDefault on
+// first kukeond start. Every spec field is present with its in-binary default
+// surfaced in a `# Default: …` comment so the operator can tweak the file
+// without consulting source, and the live value is rendered from the spec the
+// caller passes in — so the on-disk document reflects what the daemon
+// actually bound to, not the compile-time defaults (issue #581). The string
+// round-trips through Load.
+const defaultDocumentTemplate = `# kukeond ServerConfiguration — auto-generated default.
 # kukeond reads this file via --configuration (default /etc/kukeon/kukeond.yaml).
 # Precedence: explicit --flag > KUKEON_*/KUKEOND_* env > this file > hardcoded default.
 # Existing files are never overwritten; delete this file to regenerate.
@@ -80,52 +85,52 @@ metadata:
 spec:
   # Unix socket path the daemon listens on.
   # Default: /run/kukeon/kukeond.sock
-  socket: /run/kukeon/kukeond.sock
+  socket: {{printf "%q" .Socket}}
 
   # Numeric group ID the daemon chowns its listener socket to (mode 0o660 with
   # group). Zero means root-only access. ` + "`kuke init`" + ` plumbs the kukeon GID here
   # so non-root group members can dial the daemon after a kukeond restart.
   # Default: 0
-  socketGID: 0
+  socketGID: {{.SocketGID}}
 
   # Kukeon runtime root — the on-disk hierarchy under which realms, spaces,
   # stacks, and cells live.
   # Default: /opt/kukeon
-  runPath: /opt/kukeon
+  runPath: {{printf "%q" .RunPath}}
 
   # Path to the containerd unix socket the daemon connects to.
   # Default: /run/containerd/containerd.sock
-  containerdSocket: /run/containerd/containerd.sock
+  containerdSocket: {{printf "%q" .ContainerdSocket}}
 
   # Daemon log level (debug, info, warn, error).
   # Default: info
-  logLevel: info
+  logLevel: {{printf "%q" .LogLevel}}
 
   # Period of the daemon's background cell-reconciliation loop, expressed as a
   # Go time.Duration string. The loop walks every cell and re-derives
   # ` + "`status.state`" + ` against observed container state once per tick. Zero or
   # negative disables the loop.
   # Default: 30s
-  reconcileInterval: 30s
+  reconcileInterval: {{printf "%q" .ReconcileInterval}}
 
   # Container image ` + "`kuke init`" + ` provisions for the kukeond system cell.
   # Read by ` + "`kuke init`" + ` only; the daemon ignores it. Empty means kuke init
   # picks the release-matching ghcr.io/eminwux/kukeon image automatically.
   # Default: ""
-  kukeondImage: ""
+  kukeondImage: {{printf "%q" .KukeondImage}}
 
   # Suffix appended to every realm name to form its containerd namespace.
   # Realm "default" + suffix "kukeon.io" -> namespace "default.kukeon.io".
   # Set to a different suffix (e.g. "dev.kukeon.io") to run a parallel
   # kukeon instance on the same host under a disjoint containerd namespace.
   # Default: kukeon.io
-  containerdNamespaceSuffix: kukeon.io
+  containerdNamespaceSuffix: {{printf "%q" .ContainerdNamespaceSuffix}}
 
   # Cgroup root under which all realms / spaces / stacks / cells live.
   # Set to a different root (e.g. "/kukeon-dev") to run a parallel kukeon
   # instance on the same host under a disjoint cgroup tree.
   # Default: /kukeon
-  cgroupRoot: /kukeon
+  cgroupRoot: {{printf "%q" .CgroupRoot}}
 
   # Daemon-wide fallback memory limit (in bytes) applied to every admitted
   # container whose Resources.MemoryLimitBytes is unset or zero. An explicit
@@ -133,15 +138,32 @@ spec:
   # without a userspace OOM guard (systemd-oomd / earlyoom), where an
   # unbounded workload can wedge the whole host. Zero disables the fallback.
   # Default: 0
-  defaultMemoryLimitBytes: 0
+  defaultMemoryLimitBytes: {{.DefaultMemoryLimitBytes}}
 `
 
-// WriteDefault writes the commented default ServerConfiguration to path when
-// the file is absent. Returns true only when this call created the file; an
-// existing file (any contents) is left untouched, satisfying the "first-write
-// only" rule. Creates the parent directory if missing. Any other failure is
-// returned wrapped.
-func WriteDefault(path string) (bool, error) {
+// defaultDocumentTmpl is the parsed template used by WriteDefault. Parsing
+// once at package init keeps the per-call cost down and surfaces any
+// future template-syntax breakage at process start rather than first write.
+//
+//nolint:gochecknoglobals // package-level parsed template — see godoc above.
+var defaultDocumentTmpl = template.Must(
+	template.New("kukeond-serverconfig-default").Parse(defaultDocumentTemplate),
+)
+
+// WriteDefault renders the commented default ServerConfiguration with the
+// resolved spec the caller passes and writes it to path when the file is
+// absent. Returns true only when this call created the file; an existing
+// file (any contents) is left untouched, satisfying the "first-write only"
+// rule. The spec's values are interpolated into the YAML so the on-disk
+// document reflects the values the daemon actually started with, not a
+// hardcoded snapshot of the compile-time defaults (issue #581). Creates
+// the parent directory if missing. Any other failure is returned wrapped.
+func WriteDefault(path string, spec v1beta1.ServerConfigurationSpec) (bool, error) {
+	var rendered bytes.Buffer
+	if err := defaultDocumentTmpl.Execute(&rendered, spec); err != nil {
+		return false, fmt.Errorf("render default server configuration: %w", err)
+	}
+
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return false, fmt.Errorf("create parent directory for %q: %w", path, err)
 	}
@@ -155,7 +177,7 @@ func WriteDefault(path string) (bool, error) {
 		return false, fmt.Errorf("create %q: %w", path, err)
 	}
 	defer f.Close()
-	if _, writeErr := f.WriteString(defaultDocument); writeErr != nil {
+	if _, writeErr := f.Write(rendered.Bytes()); writeErr != nil {
 		return false, fmt.Errorf("write %q: %w", path, writeErr)
 	}
 	return true, nil

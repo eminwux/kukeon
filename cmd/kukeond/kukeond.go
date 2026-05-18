@@ -292,9 +292,35 @@ func envSet(v config.Var) bool {
 // host's template on first boot. Errors are intentionally swallowed: a
 // read-only /etc or unwritable parent dir must not block the daemon from
 // starting on the in-binary defaults.
+//
+// The spec we hand to WriteDefault is read back from viper at write time so
+// the dumped document reflects the values the daemon actually bound to —
+// flag / env overrides included — instead of a hardcoded snapshot of the
+// compile-time defaults (issue #581). The YAML has not been loaded yet on
+// the first-write path, so viper holds exactly the flag-and-env-resolved
+// state we want to record.
 func maybeWriteServerConfigurationDefault(_ *cobra.Command, path string) {
 	if path != config.DefaultServerConfigurationFile() {
 		return
 	}
-	_, _ = serverconfig.WriteDefault(path)
+	_, _ = serverconfig.WriteDefault(path, currentResolvedSpec())
+}
+
+// currentResolvedSpec snapshots the post-flag, post-env viper state into a
+// ServerConfigurationSpec for serverconfig.WriteDefault. The KukeondImage
+// field is intentionally left empty — the daemon has no --kukeond-image
+// flag (it's a `kuke init` concern) and the commented default explains
+// that `kuke init` resolves the value at runtime.
+func currentResolvedSpec() v1beta1.ServerConfigurationSpec {
+	return v1beta1.ServerConfigurationSpec{
+		Socket:                    viper.GetString(config.KUKEOND_SOCKET.ViperKey),
+		SocketGID:                 viper.GetInt(config.KUKEOND_SOCKET_GID.ViperKey),
+		RunPath:                   viper.GetString(config.KUKEON_ROOT_RUN_PATH.ViperKey),
+		ContainerdSocket:          viper.GetString(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
+		LogLevel:                  viper.GetString(config.KUKEON_ROOT_LOG_LEVEL.ViperKey),
+		ReconcileInterval:         viper.GetString(config.KUKEOND_RECONCILE_INTERVAL.ViperKey),
+		ContainerdNamespaceSuffix: viper.GetString(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey),
+		CgroupRoot:                viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey),
+		DefaultMemoryLimitBytes:   viper.GetInt64(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey),
+	}
 }
