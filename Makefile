@@ -108,7 +108,7 @@ e2e: test-e2e
 # mirrors `scripts/dev-init.sh`) only emits a diagnostic; the unset is
 # unconditional because the e2e suite's daemon-bringing tests rely on the
 # per-test --run-path → socket derivation in either mode.
-test-e2e: kuke kuketty
+test-e2e: kuke kukeond kuketty
 	@echo "Building local kukeond image $(KUKEON_E2E_IMAGE_DOCKER_NAME) for e2e"
 	docker build --build-arg VERSION=v0.0.0-e2e -t $(KUKEON_E2E_IMAGE_DOCKER_NAME) .
 	@echo "Running e2e tests using binaries in project root"
