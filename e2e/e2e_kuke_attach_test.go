@@ -102,7 +102,7 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 	// does not pre-create any placeholder socket file (the old workaround
 	// was broken because sbsh unlinks-and-recreates the destination,
 	// producing a fresh inode invisible to the host).
-	applyAttachableCell(t, host, realmName, spaceName, stackName, cellName)
+	applyAttachableCell(t, host, "attachable-cell.yaml", realmName, spaceName, stackName, cellName)
 
 	// Step 3: confirm the per-container kuketty socket is in place. The runner
 	// creates the metadata dir at provision time and sbsh binds the socket
@@ -163,13 +163,149 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 	}
 }
 
-// applyAttachableCell substitutes test-side names into the
-// attachable-cell.yaml fixture and runs `kuke apply` against it via the
-// per-test daemon (apply is daemon-only after #566).
-func applyAttachableCell(t *testing.T, host, realmName, spaceName, stackName, cellName string) {
+// reattachMarkerSettle gives sh enough time to read and process the marker
+// assignment off the PTY before the test sends the detach keystroke. Without
+// this grace, a detach can race the assignment line and the variable never
+// makes it into sh's environment — session 2 then expands $MARKER to the
+// empty string and the continuity check fails for the wrong reason.
+const reattachMarkerSettle = 500 * time.Millisecond
+
+// reattachMarkerTimeout caps how long session 2 waits for sh's expansion of
+// $MARKER to surface on the PTY. The expansion is one local echo plus one
+// fork-free builtin call, so it lands in tens of milliseconds on a healthy
+// runner; the cap is set so a regression that breaks continuity fails loudly
+// instead of hanging the suite.
+const reattachMarkerTimeout = 10 * time.Second
+
+// TestKuke_AttachReattach_TerminalContinuity is the phase 2b scenario
+// (issue #72): after the phase 2a detach asserted in
+// TestKuke_AttachDetach_KeepsTaskRunning, a second `kuke attach` session
+// must reconnect to the *same* sbsh terminal — i.e. the same in-container
+// sh process — and observe state planted by session 1. Session 1 sets a
+// shell variable to a unique marker; session 2 reads it back via `echo`.
+// The marker is a sh variable (not a filesystem sentinel) so the check
+// asserts terminal continuity specifically — a freshly respawned sh after
+// detach would have lost the variable even with the container filesystem
+// intact.
+func TestKuke_AttachReattach_TerminalContinuity(t *testing.T) {
+	t.Parallel()
+
+	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
+
+	realmName := generateUniqueRealmName(t)
+	spaceName := generateUniqueSpaceName(t)
+	stackName := generateUniqueStackName(t)
+	cellName := generateUniqueCellName(t)
+
+	t.Cleanup(func() {
+		cleanupCellNoDaemon(t, runPath, realmName, spaceName, stackName, cellName)
+		cleanupStackNoDaemon(t, runPath, realmName, spaceName, stackName)
+		cleanupSpaceNoDaemon(t, runPath, realmName, spaceName)
+		cleanupRealmNoDaemon(t, runPath, realmName)
+	})
+
+	runReturningBinary(t, nil, kuke,
+		append(buildKukeDaemonArgs(host), "create", "realm", realmName)...)
+	runReturningBinary(t, nil, kuke,
+		append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)...)
+	runReturningBinary(t, nil, kuke,
+		append(buildKukeDaemonArgs(host), "create", "stack", stackName,
+			"--realm", realmName, "--space", spaceName)...)
+
+	// Apply the shell-workload variant: same cell shape as the phase 2a
+	// fixture, but the `work` container's command is `sh -i` rather than
+	// `sleep`, so the attached PTY exposes an interactive shell whose
+	// in-memory state the reattach check can probe.
+	applyAttachableCell(t, host, "attachable-shell-cell.yaml",
+		realmName, spaceName, stackName, cellName)
+
+	socketPath := fs.ContainerSocketSymlinkPath(runPath,
+		realmName, spaceName, stackName, cellName, "work")
+	waitForSocket(t, socketPath, 10*time.Second)
+
+	attachArgs := append(buildKukeDaemonArgs(host),
+		"attach", cellName,
+		"--realm", realmName,
+		"--space", spaceName,
+		"--stack", stackName,
+		"--container", "work",
+	)
+
+	// Unique per-run marker so a buffer leftover from any prior test run
+	// (or from sbsh's session-history replay on attach) cannot satisfy the
+	// substring check and mask a regression.
+	marker := fmt.Sprintf("KUKE_REATTACH_MARKER_%d", time.Now().UnixNano())
+
+	// Session 1: attach, plant the marker, detach.
+	session1 := startPTY(t, nil, kuke, attachArgs...)
+	t.Cleanup(session1.Close)
+
+	time.Sleep(attachConnectGrace)
+
+	if err := session1.Write([]byte(fmt.Sprintf("MARKER=%s\n", marker))); err != nil {
+		t.Fatalf("session 1: write marker assignment: %v", err)
+	}
+	time.Sleep(reattachMarkerSettle)
+
+	if err := session1.Write(sbshDetachSequence); err != nil {
+		t.Fatalf("session 1: write detach sequence: %v", err)
+	}
+
+	exitCode, output, waitErr := session1.Wait(attachExitTimeout)
+	if waitErr != nil && exitCode == -1 {
+		t.Fatalf("session 1: kuke attach did not exit cleanly within %s: %v\noutput:\n%s",
+			attachExitTimeout, waitErr, output)
+	}
+	if exitCode != 0 {
+		t.Fatalf("session 1: kuke attach exited with code %d (want 0)\noutput:\n%s",
+			exitCode, output)
+	}
+
+	// Session 2: reattach, expand $MARKER, confirm continuity.
+	session2 := startPTY(t, nil, kuke, attachArgs...)
+	t.Cleanup(session2.Close)
+
+	time.Sleep(attachConnectGrace)
+
+	if err := session2.Write([]byte("echo PROOF[$MARKER]\n")); err != nil {
+		t.Fatalf("session 2: write read command: %v", err)
+	}
+
+	// PROOF[<marker>] uniquely identifies the *expansion* — neither the
+	// PTY-local echo of session 1's assignment line nor the PTY-local
+	// echo of session 2's read command contains the literal "PROOF[..."
+	// wrapper around the marker value, so this substring only matches if
+	// sh actually expanded $MARKER inside session 2.
+	expected := fmt.Sprintf("PROOF[%s]", marker)
+	if err := session2.WaitForOutput([]byte(expected), reattachMarkerTimeout); err != nil {
+		t.Fatalf("session 2: marker continuity check failed: %v", err)
+	}
+
+	if err := session2.Write(sbshDetachSequence); err != nil {
+		t.Fatalf("session 2: write detach sequence: %v", err)
+	}
+	exitCode, output, waitErr = session2.Wait(attachExitTimeout)
+	if waitErr != nil && exitCode == -1 {
+		t.Fatalf("session 2: kuke attach did not exit cleanly within %s: %v\noutput:\n%s",
+			attachExitTimeout, waitErr, output)
+	}
+	if exitCode != 0 {
+		t.Fatalf("session 2: kuke attach exited with code %d (want 0)\noutput:\n%s",
+			exitCode, output)
+	}
+}
+
+// applyAttachableCell substitutes test-side names into the named attachable
+// cell fixture (under cmd/kuke/apply/testdata) and runs `kuke apply` against
+// it via the per-test daemon (apply is daemon-only after #566). Fixture
+// names are passed in so phase 2a's sleep-workload scenario and phase 2b's
+// shell-workload reattach scenario can share the substitution / temp-write
+// plumbing without copy-paste.
+func applyAttachableCell(t *testing.T, host, fixture, realmName, spaceName, stackName, cellName string) {
 	t.Helper()
 
-	yamlContent := readTestdataYAML(t, "attachable-cell.yaml")
+	yamlContent := readTestdataYAML(t, fixture)
 	for old, replacement := range map[string]string{
 		"test-realm": realmName,
 		"test-space": spaceName,
@@ -180,7 +316,7 @@ func applyAttachableCell(t *testing.T, host, realmName, spaceName, stackName, ce
 	}
 
 	tmpDir := t.TempDir()
-	tmpFile := filepath.Join(tmpDir, "attachable-cell.yaml")
+	tmpFile := filepath.Join(tmpDir, fixture)
 	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("write tmp yaml: %v", err)
 	}
