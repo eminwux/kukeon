@@ -20,11 +20,11 @@
 package kill
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	"github.com/eminwux/kukeon/cmd/kuke/daemon/internal/lifecycle"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/client/local"
@@ -36,10 +36,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
-
-// MockClientKey injects a kukeonv1.Client (typically a fake) via the command
-// context so unit tests can exercise runKill without a real controller.
-type MockClientKey struct{}
 
 // NewKillCmd builds the `kuke daemon kill` cobra command.
 func NewKillCmd() *cobra.Command {
@@ -79,10 +75,10 @@ func runKill(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("inspect kukeond cell: %w", err)
 	}
 	if !getRes.MetadataExists {
-		return errors.New("kukeon host is not initialized: kukeond cell metadata is missing; run `kuke init` first")
+		return errdefs.ErrHostNotInitialized
 	}
 
-	if !isCellRunning(getRes.Cell) {
+	if !lifecycle.IsCellRunning(getRes.Cell) {
 		cmd.Printf(
 			"kukeond is already stopped (cell %q in realm %q)\n",
 			consts.KukeSystemCellName, consts.KukeSystemRealmName,
@@ -95,7 +91,7 @@ func runKill(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("kill kukeond cell: %w", err)
 	}
 	if !killRes.Killed {
-		return errors.New("kill kukeond cell: controller reported no change")
+		return fmt.Errorf("kill kukeond cell: %w", errdefs.ErrControllerNoChange)
 	}
 
 	cmd.Printf(
@@ -124,24 +120,12 @@ func kukeondCellDoc() v1beta1.CellDoc {
 	}
 }
 
-// isCellRunning treats the cell as live if any container reports Ready, or if
-// the persisted cell state is Ready. Mirrors the check in `kuke daemon start`
-// and `kuke daemon stop` so all three verbs agree on what "running" means.
-func isCellRunning(cell v1beta1.CellDoc) bool {
-	for _, c := range cell.Status.Containers {
-		if c.State == v1beta1.ContainerStateReady {
-			return true
-		}
-	}
-	return cell.Status.State == v1beta1.CellStateReady
-}
-
 // resolveClient returns the kukeonv1.Client used by runKill. Tests inject a
-// fake via MockClientKey; production always builds an in-process client —
-// `kuke daemon` is daemon-lifecycle (per the umbrella in #217), so routing
-// through the daemon is impossible by definition.
+// fake via lifecycle.MockClientKey; production always builds an in-process
+// client — `kuke daemon` is daemon-lifecycle (per the umbrella in #217), so
+// routing through the daemon is impossible by definition.
 func resolveClient(cmd *cobra.Command, logger *slog.Logger) kukeonv1.Client {
-	if mockClient, ok := cmd.Context().Value(MockClientKey{}).(kukeonv1.Client); ok {
+	if mockClient, ok := cmd.Context().Value(lifecycle.MockClientKey{}).(kukeonv1.Client); ok {
 		return mockClient
 	}
 	opts := controller.Options{

@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eminwux/kukeon/cmd/kuke/daemon/internal/lifecycle"
 	logscmd "github.com/eminwux/kukeon/cmd/kuke/daemon/logs"
 	logcmd "github.com/eminwux/kukeon/cmd/kuke/log"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
@@ -111,7 +112,7 @@ func newCmd(t *testing.T, fc *fakeClient, tail *tailCapture) (*cobra.Command, *b
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 	if fc != nil {
-		ctx = context.WithValue(ctx, logscmd.MockClientKey{}, kukeonv1.Client(fc))
+		ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fc))
 	}
 	if tail != nil {
 		ctx = context.WithValue(ctx, logscmd.MockTailKey{}, logcmd.TailFn(tail.fn))

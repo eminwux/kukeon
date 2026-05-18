@@ -278,4 +278,22 @@ var (
 	// (kuke get, kuke create, kuke apply, kuke delete, …) do not gate on
 	// this — those are the supported `kukeon`-group rootless-client path.
 	ErrMustRunAsRoot = errors.New("command must run as root")
+
+	// kuke daemon lifecycle errors.
+
+	// ErrHostNotInitialized fires from every `kuke daemon` read/write verb
+	// (start, stop, kill, restart, reset, logs) when the kukeond cell
+	// metadata is missing — i.e. the host has not been bootstrapped yet.
+	// Centralised here so the surface text and errors.Is identity are
+	// shared across verbs.
+	ErrHostNotInitialized = errors.New(
+		"kukeon host is not initialized: kukeond cell metadata is missing; run `kuke init` first",
+	)
+
+	// ErrControllerNoChange fires when a Start/Stop/Kill/Delete controller
+	// call returns success but reports the cell was already in the target
+	// state. Callers wrap with `fmt.Errorf("<verb> kukeond cell: %w",
+	// errdefs.ErrControllerNoChange)` so `errors.Is` works across the
+	// boundary without diverging the surface text.
+	ErrControllerNoChange = errors.New("controller reported no change")
 )
