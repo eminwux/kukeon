@@ -142,7 +142,7 @@ func TestKukeApply_VerifyTestdataYAMLs(t *testing.T) {
 }
 
 // applyYAMLFile reads a YAML file, applies string replacements, writes to temp file, runs apply command.
-func applyYAMLFile(t *testing.T, runPath, yamlFile string, replacements map[string]string) []byte {
+func applyYAMLFile(t *testing.T, host, yamlFile string, replacements map[string]string) []byte {
 	t.Helper()
 
 	// Read the YAML file
@@ -162,18 +162,18 @@ func applyYAMLFile(t *testing.T, runPath, yamlFile string, replacements map[stri
 	}
 
 	// Run apply command
-	args := append(buildKukeRunPathArgs(runPath), "apply", "-f", tmpFile)
+	args := append(buildKukeDaemonArgs(host), "apply", "-f", tmpFile)
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	return output
 }
 
 // getContainerIDsFromCell gets all container IDs from a cell's spec.
-func getContainerIDsFromCell(t *testing.T, runPath, realmName, spaceName, stackName, cellName string) []string {
+func getContainerIDsFromCell(t *testing.T, host, realmName, spaceName, stackName, cellName string) []string {
 	t.Helper()
 
 	args := append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		cellName,
@@ -239,11 +239,12 @@ func TestKukeApply_Realm_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 
 	// Cleanup: Delete realm
 	t.Cleanup(func() {
-		cleanupRealm(t, runPath, realmName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Apply realm.yaml with name replacements
@@ -251,7 +252,7 @@ func TestKukeApply_Realm_VerifyState(t *testing.T) {
 		"test-realm": realmName,
 		"test-ns":    realmName + "-ns",
 	}
-	output := applyYAMLFile(t, runPath, "realm.yaml", replacements)
+	output := applyYAMLFile(t, host, "realm.yaml", replacements)
 
 	if len(output) == 0 {
 		t.Fatal("expected output from apply command")
@@ -269,17 +270,17 @@ func TestKukeApply_Realm_VerifyState(t *testing.T) {
 	}
 
 	// Verify realm appears in list
-	if !verifyRealmInList(t, runPath, realmName) {
+	if !verifyRealmInList(t, host, realmName) {
 		t.Fatalf("realm %q not found in realm list", realmName)
 	}
 
 	// Verify realm can be retrieved individually
-	if !verifyRealmExists(t, runPath, realmName) {
+	if !verifyRealmExists(t, host, realmName) {
 		t.Fatalf("realm %q cannot be retrieved individually", realmName)
 	}
 
 	// Verify cgroup path exists
-	args := append(buildKukeRunPathArgs(runPath), "get", "realm", realmName, "--output", "json")
+	args := append(buildKukeDaemonArgs(host), "get", "realm", realmName, "--output", "json")
 	realmOutput := runReturningBinary(t, nil, kuke, args...)
 
 	realm, err := parseRealmJSON(t, realmOutput)
@@ -315,17 +316,18 @@ func TestKukeApply_Space_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 
 	// Cleanup: Delete space first, then realm (reverse dependency order)
 	t.Cleanup(func() {
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Apply space.yaml with name replacements
@@ -333,7 +335,7 @@ func TestKukeApply_Space_VerifyState(t *testing.T) {
 		"test-space": spaceName,
 		"test-realm": realmName,
 	}
-	output := applyYAMLFile(t, runPath, "space.yaml", replacements)
+	output := applyYAMLFile(t, host, "space.yaml", replacements)
 
 	if len(output) == 0 {
 		t.Fatal("expected output from apply command")
@@ -350,17 +352,17 @@ func TestKukeApply_Space_VerifyState(t *testing.T) {
 	}
 
 	// Verify space appears in list
-	if !verifySpaceInList(t, runPath, realmName, spaceName) {
+	if !verifySpaceInList(t, host, realmName, spaceName) {
 		t.Fatalf("space %q not found in space list", spaceName)
 	}
 
 	// Verify space can be retrieved individually
-	if !verifySpaceExists(t, runPath, realmName, spaceName) {
+	if !verifySpaceExists(t, host, realmName, spaceName) {
 		t.Fatalf("space %q cannot be retrieved individually", spaceName)
 	}
 
 	// Verify cgroup path exists
-	args = append(buildKukeRunPathArgs(runPath), "get", "space", spaceName, "--realm", realmName, "--output", "json")
+	args = append(buildKukeDaemonArgs(host), "get", "space", spaceName, "--realm", realmName, "--output", "json")
 	spaceOutput := runReturningBinary(t, nil, kuke, args...)
 
 	space, err := parseSpaceJSON(t, spaceOutput)
@@ -394,23 +396,24 @@ func TestKukeApply_Stack_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
 
 	// Cleanup: Delete stack, space, realm (reverse dependency order)
 	t.Cleanup(func() {
-		cleanupStack(t, runPath, realmName, spaceName, stackName)
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupStack(t, host, realmName, spaceName, stackName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Create space (prerequisite)
-	args = append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 3: Apply stack.yaml with name replacements
@@ -419,7 +422,7 @@ func TestKukeApply_Stack_VerifyState(t *testing.T) {
 		"test-realm": realmName,
 		"test-space": spaceName,
 	}
-	output := applyYAMLFile(t, runPath, "stack.yaml", replacements)
+	output := applyYAMLFile(t, host, "stack.yaml", replacements)
 
 	if len(output) == 0 {
 		t.Fatal("expected output from apply command")
@@ -431,18 +434,18 @@ func TestKukeApply_Stack_VerifyState(t *testing.T) {
 	}
 
 	// Verify stack appears in list
-	if !verifyStackInList(t, runPath, realmName, spaceName, stackName) {
+	if !verifyStackInList(t, host, realmName, spaceName, stackName) {
 		t.Fatalf("stack %q not found in stack list", stackName)
 	}
 
 	// Verify stack can be retrieved individually
-	if !verifyStackExists(t, runPath, realmName, spaceName, stackName) {
+	if !verifyStackExists(t, host, realmName, spaceName, stackName) {
 		t.Fatalf("stack %q cannot be retrieved individually", stackName)
 	}
 
 	// Verify cgroup path exists
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"stack",
 		stackName,
@@ -486,6 +489,7 @@ func TestKukeApply_Cell_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
@@ -493,23 +497,23 @@ func TestKukeApply_Cell_VerifyState(t *testing.T) {
 
 	// Cleanup: Delete cell, stack, space, realm (reverse dependency order)
 	t.Cleanup(func() {
-		cleanupCell(t, runPath, realmName, spaceName, stackName, cellName)
-		cleanupStack(t, runPath, realmName, spaceName, stackName)
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupCell(t, host, realmName, spaceName, stackName, cellName)
+		cleanupStack(t, host, realmName, spaceName, stackName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Create space (prerequisite)
-	args = append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 3: Create stack (prerequisite)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"create",
 		"stack",
 		stackName,
@@ -527,7 +531,7 @@ func TestKukeApply_Cell_VerifyState(t *testing.T) {
 		"test-space": spaceName,
 		"test-stack": stackName,
 	}
-	output := applyYAMLFile(t, runPath, "cell.yaml", replacements)
+	output := applyYAMLFile(t, host, "cell.yaml", replacements)
 
 	if len(output) == 0 {
 		t.Fatal("expected output from apply command")
@@ -539,18 +543,18 @@ func TestKukeApply_Cell_VerifyState(t *testing.T) {
 	}
 
 	// Verify cell appears in list
-	if !verifyCellInList(t, runPath, realmName, spaceName, stackName, cellName) {
+	if !verifyCellInList(t, host, realmName, spaceName, stackName, cellName) {
 		t.Fatalf("cell %q not found in cell list", cellName)
 	}
 
 	// Verify cell can be retrieved individually
-	if !verifyCellExists(t, runPath, realmName, spaceName, stackName, cellName) {
+	if !verifyCellExists(t, host, realmName, spaceName, stackName, cellName) {
 		t.Fatalf("cell %q cannot be retrieved individually", cellName)
 	}
 
 	// Verify cgroup path exists
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		cellName,
@@ -596,7 +600,7 @@ func TestKukeApply_Cell_VerifyState(t *testing.T) {
 	}
 
 	// Get realm namespace for container verification
-	realmNamespace, err := getRealmNamespace(t, runPath, realmName)
+	realmNamespace, err := getRealmNamespace(t, host, realmName)
 	if err != nil {
 		t.Fatalf("failed to get realm namespace: %v", err)
 	}
@@ -622,7 +626,7 @@ func TestKukeApply_Cell_VerifyState(t *testing.T) {
 	}
 
 	// Get all container IDs from cell spec
-	containerIDs := getContainerIDsFromCell(t, runPath, realmName, spaceName, stackName, cellName)
+	containerIDs := getContainerIDsFromCell(t, host, realmName, spaceName, stackName, cellName)
 
 	// Verify all containers exist in containerd
 	verifyCellContainersExist(t, realmNamespace, spaceName, stackName, cellID, containerIDs)
@@ -634,15 +638,16 @@ func TestKukeApply_MultiResource_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
 
 	// Cleanup: Delete stack, space, realm (reverse dependency order)
 	t.Cleanup(func() {
-		cleanupStack(t, runPath, realmName, spaceName, stackName)
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupStack(t, host, realmName, spaceName, stackName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Apply multi-resource.yaml with name replacements
@@ -652,7 +657,7 @@ func TestKukeApply_MultiResource_VerifyState(t *testing.T) {
 		"multi-space": spaceName,
 		"multi-stack": stackName,
 	}
-	output := applyYAMLFile(t, runPath, "multi-resource.yaml", replacements)
+	output := applyYAMLFile(t, host, "multi-resource.yaml", replacements)
 
 	if len(output) == 0 {
 		t.Fatal("expected output from apply command")
@@ -668,16 +673,16 @@ func TestKukeApply_MultiResource_VerifyState(t *testing.T) {
 		t.Fatalf("realm metadata file not found for realm %q", realmName)
 	}
 
-	if !verifyRealmInList(t, runPath, realmName) {
+	if !verifyRealmInList(t, host, realmName) {
 		t.Fatalf("realm %q not found in realm list", realmName)
 	}
 
-	if !verifyRealmExists(t, runPath, realmName) {
+	if !verifyRealmExists(t, host, realmName) {
 		t.Fatalf("realm %q cannot be retrieved individually", realmName)
 	}
 
 	// Verify realm cgroup path
-	args := append(buildKukeRunPathArgs(runPath), "get", "realm", realmName, "--output", "json")
+	args := append(buildKukeDaemonArgs(host), "get", "realm", realmName, "--output", "json")
 	realmOutput := runReturningBinary(t, nil, kuke, args...)
 
 	realm, err := parseRealmJSON(t, realmOutput)
@@ -702,16 +707,16 @@ func TestKukeApply_MultiResource_VerifyState(t *testing.T) {
 		t.Fatalf("space metadata file not found for space %q", spaceName)
 	}
 
-	if !verifySpaceInList(t, runPath, realmName, spaceName) {
+	if !verifySpaceInList(t, host, realmName, spaceName) {
 		t.Fatalf("space %q not found in space list", spaceName)
 	}
 
-	if !verifySpaceExists(t, runPath, realmName, spaceName) {
+	if !verifySpaceExists(t, host, realmName, spaceName) {
 		t.Fatalf("space %q cannot be retrieved individually", spaceName)
 	}
 
 	// Verify space cgroup path
-	args = append(buildKukeRunPathArgs(runPath), "get", "space", spaceName, "--realm", realmName, "--output", "json")
+	args = append(buildKukeDaemonArgs(host), "get", "space", spaceName, "--realm", realmName, "--output", "json")
 	spaceOutput := runReturningBinary(t, nil, kuke, args...)
 
 	space, err := parseSpaceJSON(t, spaceOutput)
@@ -732,17 +737,17 @@ func TestKukeApply_MultiResource_VerifyState(t *testing.T) {
 		t.Fatalf("stack metadata file not found for stack %q", stackName)
 	}
 
-	if !verifyStackInList(t, runPath, realmName, spaceName, stackName) {
+	if !verifyStackInList(t, host, realmName, spaceName, stackName) {
 		t.Fatalf("stack %q not found in stack list", stackName)
 	}
 
-	if !verifyStackExists(t, runPath, realmName, spaceName, stackName) {
+	if !verifyStackExists(t, host, realmName, spaceName, stackName) {
 		t.Fatalf("stack %q cannot be retrieved individually", stackName)
 	}
 
 	// Verify stack cgroup path
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"stack",
 		stackName,

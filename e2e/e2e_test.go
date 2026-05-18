@@ -157,14 +157,27 @@ func deepSocketPathFits(runPath string) bool {
 	return len(runPath)+deepSocketSuffixLen <= consts.KukeonMaxSocketPath
 }
 
-// buildKukeRunPathArgs returns the canonical `--run-path <X>` prefix every
-// e2e invocation must carry. The e2e suite has no shared kukeond running on
-// its --run-path; without the in-process promotion that --run-path triggers,
-// kuke would dial the host's daemon socket (whichever /opt/kukeon path it
-// was started against) and read/write someone else's state. Per-test
-// --run-path + in-process controller is the only mode that keeps the suite
-// hermetic on hosts where containerd is up but kukeond is not (the common
-// e2e harness shape).
+// buildKukeRunPathArgs returns a `--run-path <X>` prefix for callers that
+// must run in the in-process controller path rather than dial a daemon.
+// Use buildKukeDaemonArgs (paired with startKukeondDaemon) for workload
+// commands — per-test daemon-mode is the suite's default now that phase 2
+// (#565) has landed.
+//
+// Legitimate survivors of this in-process helper:
+//   - `get realms --no-daemon`: the daemon-parity smoke (CLAUDE.md's
+//     regression guard contrasts the in-process realm view with the daemon's
+//     view; routing both sides through the daemon would defeat the check).
+//   - `purge` (any kind): purge is a host-mutating verb that must work
+//     regardless of daemon state, so e2e cleanups never depend on the
+//     per-test daemon still being alive.
+//   - `init` / `uninstall`: bootstrap/teardown verbs that bring up or tear
+//     down the daemon itself; they cannot route through it.
+//   - `kuke daemon …`: the daemon-lifecycle group; in-process by definition
+//     per the #217 categorization.
+//   - The attach test (e2e_kuke_attach_test.go) keeps its `*NoDaemon`
+//     cleanup helpers so the per-container kuketty socket inspection lines
+//     up with the same controller the test drives (see the comment in
+//     TestKuke_AttachDetach_KeepsTaskRunning for rationale).
 //
 // The in-process promotion comes from applyRunPathImpliesNoDaemon
 // (cmd/kuke/kuke.go), which auto-sets --no-daemon=true whenever --run-path
@@ -396,10 +409,10 @@ func parseSpaceJSON(t *testing.T, output []byte) (*v1beta1.SpaceDoc, error) {
 }
 
 // verifySpaceInList verifies space appears in kuke get space list.
-func verifySpaceInList(t *testing.T, runPath, realmName, spaceName string) bool {
+func verifySpaceInList(t *testing.T, host, realmName, spaceName string) bool {
 	t.Helper()
 
-	args := append(buildKukeRunPathArgs(runPath), "get", "space", "--realm", realmName, "--output", "json")
+	args := append(buildKukeDaemonArgs(host), "get", "space", "--realm", realmName, "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	spaces, err := parseSpaceListJSON(t, output)
@@ -418,10 +431,10 @@ func verifySpaceInList(t *testing.T, runPath, realmName, spaceName string) bool 
 }
 
 // verifySpaceExists verifies space can be retrieved individually.
-func verifySpaceExists(t *testing.T, runPath, realmName, spaceName string) bool {
+func verifySpaceExists(t *testing.T, host, realmName, spaceName string) bool {
 	t.Helper()
 
-	args := append(buildKukeRunPathArgs(runPath), "get", "space", spaceName, "--realm", realmName, "--output", "json")
+	args := append(buildKukeDaemonArgs(host), "get", "space", spaceName, "--realm", realmName, "--output", "json")
 	exitCode, stdout, _ := runBinary(t, nil, kuke, args...)
 
 	if exitCode != 0 {
@@ -479,11 +492,11 @@ func parseStackJSON(t *testing.T, output []byte) (*v1beta1.StackDoc, error) {
 }
 
 // verifyStackInList verifies stack appears in kuke get stack list.
-func verifyStackInList(t *testing.T, runPath, realmName, spaceName, stackName string) bool {
+func verifyStackInList(t *testing.T, host, realmName, spaceName, stackName string) bool {
 	t.Helper()
 
 	args := append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"stack",
 		"--realm",
@@ -511,11 +524,11 @@ func verifyStackInList(t *testing.T, runPath, realmName, spaceName, stackName st
 }
 
 // verifyStackExists verifies stack can be retrieved individually.
-func verifyStackExists(t *testing.T, runPath, realmName, spaceName, stackName string) bool {
+func verifyStackExists(t *testing.T, host, realmName, spaceName, stackName string) bool {
 	t.Helper()
 
 	args := append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"stack",
 		stackName,
@@ -591,11 +604,11 @@ func parseCellJSON(t *testing.T, output []byte) (*v1beta1.CellDoc, error) {
 }
 
 // verifyCellInList verifies cell appears in kuke get cell list.
-func verifyCellInList(t *testing.T, runPath, realmName, spaceName, stackName, cellName string) bool {
+func verifyCellInList(t *testing.T, host, realmName, spaceName, stackName, cellName string) bool {
 	t.Helper()
 
 	args := append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		"--realm",
@@ -625,11 +638,11 @@ func verifyCellInList(t *testing.T, runPath, realmName, spaceName, stackName, ce
 }
 
 // verifyCellExists verifies cell can be retrieved individually.
-func verifyCellExists(t *testing.T, runPath, realmName, spaceName, stackName, cellName string) bool {
+func verifyCellExists(t *testing.T, host, realmName, spaceName, stackName, cellName string) bool {
 	t.Helper()
 
 	args := append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		cellName,
@@ -658,10 +671,10 @@ func verifyCellExists(t *testing.T, runPath, realmName, spaceName, stackName, ce
 }
 
 // getRealmNamespace gets realm namespace from realm JSON.
-func getRealmNamespace(t *testing.T, runPath, realmName string) (string, error) {
+func getRealmNamespace(t *testing.T, host, realmName string) (string, error) {
 	t.Helper()
 
-	args := append(buildKukeRunPathArgs(runPath), "get", "realm", realmName, "--output", "json")
+	args := append(buildKukeDaemonArgs(host), "get", "realm", realmName, "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	realm, err := parseRealmJSON(t, output)
@@ -788,11 +801,11 @@ func verifyRootContainerTaskIsStopped(t *testing.T, namespace, containerID strin
 }
 
 // getCellID gets cell ID from cell JSON.
-func getCellID(t *testing.T, runPath, realmName, spaceName, stackName, cellName string) (string, error) {
+func getCellID(t *testing.T, host, realmName, spaceName, stackName, cellName string) (string, error) {
 	t.Helper()
 
 	args := append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		cellName,

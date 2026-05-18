@@ -30,11 +30,12 @@ func TestKukeDeleteF_Realm(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 
 	t.Cleanup(func() {
-		cleanupRealm(t, runPath, realmName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// First, create a realm using apply
@@ -54,11 +55,11 @@ spec:
 	}
 
 	// Apply to create the realm
-	args := append(buildKukeRunPathArgs(runPath), "apply", "-f", applyYamlFile)
+	args := append(buildKukeDaemonArgs(host), "apply", "-f", applyYamlFile)
 	_ = runReturningBinary(t, nil, kuke, args...)
 
 	// Verify realm was created
-	if !verifyRealmInList(t, runPath, realmName) {
+	if !verifyRealmInList(t, host, realmName) {
 		t.Fatalf("realm %q not found after apply", realmName)
 	}
 
@@ -77,7 +78,7 @@ spec:
 		t.Fatalf("failed to write delete YAML file: %v", err)
 	}
 
-	// Delete the realm
+	// Delete the realm — `delete -f` routes in-process (see deleteYAMLFileFromTestdata note).
 	args = append(buildKukeRunPathArgs(runPath), "delete", "-f", deleteYamlFile)
 	output := runReturningBinary(t, nil, kuke, args...)
 
@@ -86,7 +87,7 @@ spec:
 	}
 
 	// Verify realm was deleted
-	if verifyRealmInList(t, runPath, realmName) {
+	if verifyRealmInList(t, host, realmName) {
 		t.Errorf("realm %q still found in list after delete", realmName)
 	}
 
@@ -100,13 +101,14 @@ func TestKukeDeleteF_MultiResource(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 	spaceName := "delete-space-" + strings.TrimPrefix(realmName, "e-r-")
 
 	t.Cleanup(func() {
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// First, create resources using apply
@@ -133,14 +135,14 @@ spec:
 	}
 
 	// Apply to create resources
-	args := append(buildKukeRunPathArgs(runPath), "apply", "-f", applyYamlFile)
+	args := append(buildKukeDaemonArgs(host), "apply", "-f", applyYamlFile)
 	_ = runReturningBinary(t, nil, kuke, args...)
 
 	// Verify resources were created
-	if !verifyRealmInList(t, runPath, realmName) {
+	if !verifyRealmInList(t, host, realmName) {
 		t.Fatalf("realm %q not found after apply", realmName)
 	}
-	if !verifySpaceInList(t, runPath, realmName, spaceName) {
+	if !verifySpaceInList(t, host, realmName, spaceName) {
 		t.Fatalf("space %q not found after apply", spaceName)
 	}
 
@@ -175,10 +177,10 @@ spec:
 	}
 
 	// Verify resources were deleted
-	if verifySpaceInList(t, runPath, realmName, spaceName) {
+	if verifySpaceInList(t, host, realmName, spaceName) {
 		t.Errorf("space %q still found in list after delete", spaceName)
 	}
-	if verifyRealmInList(t, runPath, realmName) {
+	if verifyRealmInList(t, host, realmName) {
 		t.Errorf("realm %q still found in list after delete", realmName)
 	}
 }
@@ -187,13 +189,14 @@ func TestKukeDeleteF_Cascade(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 	spaceName := "delete-cascade-space-" + strings.TrimPrefix(realmName, "e-r-")
 
 	t.Cleanup(func() {
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// First, create resources using apply
@@ -220,14 +223,14 @@ spec:
 	}
 
 	// Apply to create resources
-	args := append(buildKukeRunPathArgs(runPath), "apply", "-f", applyYamlFile)
+	args := append(buildKukeDaemonArgs(host), "apply", "-f", applyYamlFile)
 	_ = runReturningBinary(t, nil, kuke, args...)
 
 	// Verify resources were created
-	if !verifyRealmInList(t, runPath, realmName) {
+	if !verifyRealmInList(t, host, realmName) {
 		t.Fatalf("realm %q not found after apply", realmName)
 	}
-	if !verifySpaceInList(t, runPath, realmName, spaceName) {
+	if !verifySpaceInList(t, host, realmName, spaceName) {
 		t.Fatalf("space %q not found after apply", spaceName)
 	}
 
@@ -255,10 +258,10 @@ spec:
 	}
 
 	// Verify both resources were deleted (cascade)
-	if verifySpaceInList(t, runPath, realmName, spaceName) {
+	if verifySpaceInList(t, host, realmName, spaceName) {
 		t.Errorf("space %q still found in list after cascade delete", spaceName)
 	}
-	if verifyRealmInList(t, runPath, realmName) {
+	if verifyRealmInList(t, host, realmName) {
 		t.Errorf("realm %q still found in list after delete", realmName)
 	}
 }
@@ -266,6 +269,7 @@ spec:
 func TestKukeDeleteF_Idempotent(t *testing.T) {
 	t.Parallel()
 
+	// `delete -f` routes in-process, so no daemon is required for this test.
 	runPath := getRandomRunPath(t)
 
 	realmName := generateUniqueRealmName(t)
@@ -356,19 +360,23 @@ func writeTempYAMLFile(t *testing.T, yamlFile string, replacements map[string]st
 }
 
 // applyYAMLFileFromTestdata reads a YAML file from testdata, applies replacements, and runs apply command.
-func applyYAMLFileFromTestdata(t *testing.T, runPath, yamlFile string, replacements map[string]string) []byte {
+func applyYAMLFileFromTestdata(t *testing.T, host, yamlFile string, replacements map[string]string) []byte {
 	t.Helper()
 
 	tmpFile := writeTempYAMLFile(t, yamlFile, replacements)
 
 	// Run apply command
-	args := append(buildKukeRunPathArgs(runPath), "apply", "-f", tmpFile)
+	args := append(buildKukeDaemonArgs(host), "apply", "-f", tmpFile)
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	return output
 }
 
 // deleteYAMLFileFromTestdata reads a YAML file from testdata, applies replacements, and runs delete command.
+//
+// NOTE: `kuke delete -f` routes through ControllerFromCmd (in-process) rather than
+// ClientFromCmd (daemon-aware), so this helper takes runPath and uses the in-process
+// path. Tracked as #574; once fixed, callers can collapse back to the daemon helper.
 func deleteYAMLFileFromTestdata(
 	t *testing.T,
 	runPath, yamlFile string,
@@ -396,13 +404,14 @@ func TestDeleteF_Realm_VerifyAllResourcesDeleted(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 	namespace := realmName + "-ns"
 
 	// Cleanup: Safety net
 	t.Cleanup(func() {
-		cleanupRealm(t, runPath, realmName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Apply realm.yaml to create the realm
@@ -410,7 +419,7 @@ func TestDeleteF_Realm_VerifyAllResourcesDeleted(t *testing.T) {
 		"test-realm": realmName,
 		"test-ns":    namespace,
 	}
-	_ = applyYAMLFileFromTestdata(t, runPath, "realm.yaml", replacements)
+	_ = applyYAMLFileFromTestdata(t, host, "realm.yaml", replacements)
 
 	// Step 2: Verify realm was created
 	if !verifyContainerdNamespace(t, namespace) {
@@ -421,12 +430,12 @@ func TestDeleteF_Realm_VerifyAllResourcesDeleted(t *testing.T) {
 		t.Fatalf("realm metadata file not found for realm %q", realmName)
 	}
 
-	if !verifyRealmInList(t, runPath, realmName) {
+	if !verifyRealmInList(t, host, realmName) {
 		t.Fatalf("realm %q not found in realm list", realmName)
 	}
 
 	// Get realm JSON to extract cgroup path
-	args := append(buildKukeRunPathArgs(runPath), "get", "realm", realmName, "--output", "json")
+	args := append(buildKukeDaemonArgs(host), "get", "realm", realmName, "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	realm, err := parseRealmJSON(t, output)
@@ -465,7 +474,7 @@ func TestDeleteF_Realm_VerifyAllResourcesDeleted(t *testing.T) {
 	}
 
 	// Step 7: Verify realm does NOT appear in list
-	if verifyRealmInList(t, runPath, realmName) {
+	if verifyRealmInList(t, host, realmName) {
 		t.Fatalf("realm %q still appears in realm list after deletion", realmName)
 	}
 }
@@ -475,18 +484,19 @@ func TestDeleteF_Space_VerifyAllResourcesDeleted(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 
 	// Cleanup: Safety net
 	t.Cleanup(func() {
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Apply space.yaml to create the space
@@ -494,7 +504,7 @@ func TestDeleteF_Space_VerifyAllResourcesDeleted(t *testing.T) {
 		"test-space": spaceName,
 		"test-realm": realmName,
 	}
-	_ = applyYAMLFileFromTestdata(t, runPath, "space.yaml", replacements)
+	_ = applyYAMLFileFromTestdata(t, host, "space.yaml", replacements)
 
 	// Step 3: Verify space was created
 	if !verifySpaceCNIConfigExists(t, runPath, realmName, spaceName) {
@@ -505,12 +515,12 @@ func TestDeleteF_Space_VerifyAllResourcesDeleted(t *testing.T) {
 		t.Fatalf("space metadata file not found for space %q", spaceName)
 	}
 
-	if !verifySpaceInList(t, runPath, realmName, spaceName) {
+	if !verifySpaceInList(t, host, realmName, spaceName) {
 		t.Fatalf("space %q not found in space list", spaceName)
 	}
 
 	// Get space JSON to extract cgroup path
-	args = append(buildKukeRunPathArgs(runPath), "get", "space", spaceName, "--realm", realmName, "--output", "json")
+	args = append(buildKukeDaemonArgs(host), "get", "space", spaceName, "--realm", realmName, "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	space, err := parseSpaceJSON(t, output)
@@ -549,7 +559,7 @@ func TestDeleteF_Space_VerifyAllResourcesDeleted(t *testing.T) {
 	}
 
 	// Step 8: Verify space does NOT appear in list
-	if verifySpaceInList(t, runPath, realmName, spaceName) {
+	if verifySpaceInList(t, host, realmName, spaceName) {
 		t.Fatalf("space %q still appears in space list after deletion", spaceName)
 	}
 }
@@ -559,6 +569,7 @@ func TestDeleteF_Stack_VerifyAllResourcesDeleted(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
@@ -566,17 +577,17 @@ func TestDeleteF_Stack_VerifyAllResourcesDeleted(t *testing.T) {
 
 	// Cleanup: Safety net
 	t.Cleanup(func() {
-		cleanupStack(t, runPath, realmName, spaceName, stackName)
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupStack(t, host, realmName, spaceName, stackName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Create space (prerequisite)
-	args = append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 3: Apply stack.yaml to create the stack
@@ -585,20 +596,20 @@ func TestDeleteF_Stack_VerifyAllResourcesDeleted(t *testing.T) {
 		"test-realm": realmName,
 		"test-space": spaceName,
 	}
-	_ = applyYAMLFileFromTestdata(t, runPath, "stack.yaml", replacements)
+	_ = applyYAMLFileFromTestdata(t, host, "stack.yaml", replacements)
 
 	// Step 4: Verify stack was created
 	if !verifyStackMetadataExists(t, runPath, realmName, spaceName, stackName) {
 		t.Fatalf("stack metadata file not found for stack %q", stackName)
 	}
 
-	if !verifyStackInList(t, runPath, realmName, spaceName, stackName) {
+	if !verifyStackInList(t, host, realmName, spaceName, stackName) {
 		t.Fatalf("stack %q not found in stack list", stackName)
 	}
 
 	// Get stack JSON to extract cgroup path
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"stack",
 		stackName,
@@ -642,7 +653,7 @@ func TestDeleteF_Stack_VerifyAllResourcesDeleted(t *testing.T) {
 	}
 
 	// Step 8: Verify stack does NOT appear in list
-	if verifyStackInList(t, runPath, realmName, spaceName, stackName) {
+	if verifyStackInList(t, host, realmName, spaceName, stackName) {
 		t.Fatalf("stack %q still appears in stack list after deletion", stackName)
 	}
 }
@@ -652,6 +663,7 @@ func TestDeleteF_Cell_VerifyAllResourcesDeleted(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
@@ -660,23 +672,23 @@ func TestDeleteF_Cell_VerifyAllResourcesDeleted(t *testing.T) {
 
 	// Cleanup: Safety net
 	t.Cleanup(func() {
-		cleanupCell(t, runPath, realmName, spaceName, stackName, cellName)
-		cleanupStack(t, runPath, realmName, spaceName, stackName)
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupCell(t, host, realmName, spaceName, stackName, cellName)
+		cleanupStack(t, host, realmName, spaceName, stackName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Create space (prerequisite)
-	args = append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 3: Create stack (prerequisite)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"create",
 		"stack",
 		stackName,
@@ -694,20 +706,20 @@ func TestDeleteF_Cell_VerifyAllResourcesDeleted(t *testing.T) {
 		"test-space": spaceName,
 		"test-stack": stackName,
 	}
-	_ = applyYAMLFileFromTestdata(t, runPath, "cell.yaml", replacements)
+	_ = applyYAMLFileFromTestdata(t, host, "cell.yaml", replacements)
 
 	// Step 5: Verify cell was created
 	if !verifyCellMetadataExists(t, runPath, realmName, spaceName, stackName, cellName) {
 		t.Fatalf("cell metadata file not found for cell %q", cellName)
 	}
 
-	if !verifyCellInList(t, runPath, realmName, spaceName, stackName, cellName) {
+	if !verifyCellInList(t, host, realmName, spaceName, stackName, cellName) {
 		t.Fatalf("cell %q not found in cell list", cellName)
 	}
 
 	// Get cell JSON to extract cgroup path and cell ID
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		cellName,
@@ -738,12 +750,12 @@ func TestDeleteF_Cell_VerifyAllResourcesDeleted(t *testing.T) {
 	}
 
 	// Get realm namespace and cell ID for root container verification
-	realmNamespace, err := getRealmNamespace(t, runPath, realmName)
+	realmNamespace, err := getRealmNamespace(t, host, realmName)
 	if err != nil {
 		t.Fatalf("failed to get realm namespace: %v", err)
 	}
 
-	cellID, err := getCellID(t, runPath, realmName, spaceName, stackName, cellName)
+	cellID, err := getCellID(t, host, realmName, spaceName, stackName, cellName)
 	if err != nil {
 		t.Fatalf("failed to get cell ID: %v", err)
 	}
@@ -781,7 +793,7 @@ func TestDeleteF_Cell_VerifyAllResourcesDeleted(t *testing.T) {
 	}
 
 	// Step 10: Verify cell does NOT appear in list
-	if verifyCellInList(t, runPath, realmName, spaceName, stackName, cellName) {
+	if verifyCellInList(t, host, realmName, spaceName, stackName, cellName) {
 		t.Fatalf("cell %q still appears in cell list after deletion", cellName)
 	}
 }
@@ -791,6 +803,7 @@ func TestDeleteF_Container_VerifyAllResourcesDeleted(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
@@ -801,23 +814,23 @@ func TestDeleteF_Container_VerifyAllResourcesDeleted(t *testing.T) {
 	// Cleanup: Safety net
 	t.Cleanup(func() {
 		cleanupContainer(t, runPath, realmName, spaceName, stackName, cellName, containerName)
-		cleanupCell(t, runPath, realmName, spaceName, stackName, cellName)
-		cleanupStack(t, runPath, realmName, spaceName, stackName)
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupCell(t, host, realmName, spaceName, stackName, cellName)
+		cleanupStack(t, host, realmName, spaceName, stackName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Create space (prerequisite)
-	args = append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 3: Create stack (prerequisite)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"create",
 		"stack",
 		stackName,
@@ -835,7 +848,7 @@ func TestDeleteF_Container_VerifyAllResourcesDeleted(t *testing.T) {
 		"test-space": spaceName,
 		"test-stack": stackName,
 	}
-	_ = applyYAMLFileFromTestdata(t, runPath, "cell.yaml", replacements)
+	_ = applyYAMLFileFromTestdata(t, host, "cell.yaml", replacements)
 
 	// Step 5: Verify cell and container were created
 	if !verifyCellMetadataExists(t, runPath, realmName, spaceName, stackName, cellName) {
@@ -843,12 +856,12 @@ func TestDeleteF_Container_VerifyAllResourcesDeleted(t *testing.T) {
 	}
 
 	// Get realm namespace and cell ID
-	realmNamespace, err := getRealmNamespace(t, runPath, realmName)
+	realmNamespace, err := getRealmNamespace(t, host, realmName)
 	if err != nil {
 		t.Fatalf("failed to get realm namespace: %v", err)
 	}
 
-	cellID, err := getCellID(t, runPath, realmName, spaceName, stackName, cellName)
+	cellID, err := getCellID(t, host, realmName, spaceName, stackName, cellName)
 	if err != nil {
 		t.Fatalf("failed to get cell ID: %v", err)
 	}
@@ -868,7 +881,7 @@ func TestDeleteF_Container_VerifyAllResourcesDeleted(t *testing.T) {
 
 	// Get cell JSON to verify container is in cell metadata
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		cellName,
@@ -925,7 +938,7 @@ spec:
 		t.Fatalf("failed to write container YAML file: %v", err)
 	}
 
-	// Step 7: Delete using delete -f
+	// Step 7: Delete using delete -f (`delete -f` routes in-process; see deleteYAMLFileFromTestdata note)
 	args = append(buildKukeRunPathArgs(runPath), "delete", "-f", containerYAMLFile)
 	_ = runReturningBinary(t, nil, kuke, args...)
 
@@ -949,7 +962,7 @@ spec:
 
 	// Step 10: Verify container removed from cell metadata
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		cellName,

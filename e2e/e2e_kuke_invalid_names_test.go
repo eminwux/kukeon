@@ -23,14 +23,15 @@ import (
 
 // TestKuke_CreateSpace_RejectsInvalidNames covers the AC for #180: invalid
 // space names ("_" or "/") must be rejected end-to-end with a non-zero exit
-// code and a clear error message that names the offending input. Run via the
-// in-process controller (via the `--run-path` promotion) so the test is self-contained — the
-// validator is wired at both controller and runner boundaries, so the same
-// rejection fires either way.
+// code and a clear error message that names the offending input. Routed
+// through the per-test daemon so the workload-command path matches the
+// suite's default mode post-#565; the validator is wired at both
+// controller and runner boundaries, so the same rejection fires either way.
 func TestKuke_CreateSpace_RejectsInvalidNames(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 
 	tests := []struct {
 		name      string
@@ -43,7 +44,7 @@ func TestKuke_CreateSpace_RejectsInvalidNames(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			args := append(buildKukeRunPathArgs(runPath),
+			args := append(buildKukeDaemonArgs(host),
 				"create", "space", tt.spaceName, "--realm", "default")
 			exitCode, _, stderr := runBinary(t, nil, kuke, args...)
 			if exitCode == 0 {
@@ -63,6 +64,7 @@ func TestKuke_CreateStack_RejectsInvalidNames(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 
 	tests := []struct {
 		name      string
@@ -75,7 +77,7 @@ func TestKuke_CreateStack_RejectsInvalidNames(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			args := append(buildKukeRunPathArgs(runPath),
+			args := append(buildKukeDaemonArgs(host),
 				"create", "stack", tt.stackName,
 				"--realm", "default", "--space", "default")
 			exitCode, _, stderr := runBinary(t, nil, kuke, args...)
@@ -96,6 +98,7 @@ func TestKuke_CreateCell_RejectsInvalidNames(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 
 	tests := []struct {
 		name     string
@@ -108,7 +111,7 @@ func TestKuke_CreateCell_RejectsInvalidNames(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			args := append(buildKukeRunPathArgs(runPath),
+			args := append(buildKukeDaemonArgs(host),
 				"create", "cell", tt.cellName,
 				"--realm", "default", "--space", "default", "--stack", "default")
 			exitCode, _, stderr := runBinary(t, nil, kuke, args...)
@@ -129,6 +132,7 @@ func TestKuke_CreateContainer_RejectsInvalidNames(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 
 	tests := []struct {
 		name          string
@@ -141,7 +145,7 @@ func TestKuke_CreateContainer_RejectsInvalidNames(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			args := append(buildKukeRunPathArgs(runPath),
+			args := append(buildKukeDaemonArgs(host),
 				"create", "container", tt.containerName,
 				"--realm", "default", "--space", "default",
 				"--stack", "default", "--cell", "default",
