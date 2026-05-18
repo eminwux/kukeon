@@ -7,6 +7,14 @@ on:
     branches:
       - main
 
+# Both jobs only check out the repo and run tests — no PR comments, no
+# release artifacts, no remote pushes. The minimal read-only default
+# scopes the GITHUB_TOKEN to what `actions/checkout` needs and silences
+# the CodeQL `actions/missing-workflow-permissions` finding raised on
+# this PR's introduction of the e2e job.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: make test
@@ -23,3 +31,108 @@ jobs:
 
       - name: Run unit tests
         run: make test
+
+  # `make e2e` needs three host prerequisites — root (sudo -E), a docker
+  # daemon for `docker build` of the local kukeond image, and a standalone
+  # containerd at /run/containerd/containerd.sock (the bootstrap target for
+  # `kuke image load` + `kuke init`, distinct from the docker-private
+  # containerd socket at /var/run/docker/containerd/containerd.toml). Mirrors
+  # the local-dev contract documented in CLAUDE.md and
+  # docs/site/install/build-from-source.md. Runs in parallel with the unit
+  # job above (no shared resources).
+  e2e:
+    name: make e2e
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Override systemd-resolved with a static /etc/resolv.conf pointing at
+      # public recursors. GH ubuntu-latest runners route DNS through
+      # systemd-resolved at 127.0.0.53, which has been observed to drop UDP
+      # responses under bursty parallel load — the e2e suite's parallel image
+      # pulls hit registry-1.docker.io and registry.eminwux.com from many
+      # workers simultaneously, surfacing as 20s `read udp 127.0.0.1:NNN->
+      # 127.0.0.53:53: i/o timeout` errors from containerd's image fetcher
+      # (observed on this PR's first green-everything-else run). Applied
+      # before `Ensure docker daemon is running` so dockerd inherits the
+      # static resolv.conf at startup; `options timeout:2 attempts:3` caps
+      # a failed query at 6s so we fail fast rather than re-burning 20s on
+      # every parallel pull if both upstreams ever go away together.
+      - name: Use static public DNS (bypass systemd-resolved)
+        run: |
+          sudo systemctl stop systemd-resolved 2>/dev/null || true
+          sudo rm -f /etc/resolv.conf
+          cat <<'EOF' | sudo tee /etc/resolv.conf > /dev/null
+          nameserver 1.1.1.1
+          nameserver 8.8.8.8
+          nameserver 1.0.0.1
+          options timeout:2 attempts:3
+          EOF
+          getent hosts registry-1.docker.io > /dev/null
+          getent hosts registry.eminwux.com > /dev/null
+
+      - name: Ensure docker daemon is running
+        run: |
+          sudo systemctl start docker
+          sudo docker info > /dev/null
+
+      - name: Ensure standalone containerd is running
+        run: |
+          sudo systemctl start containerd
+          test -S /run/containerd/containerd.sock
+
+      # The e2e suite runs every workload command through the in-process
+      # controller (via the `--run-path` promotion in buildKukeRunPathArgs),
+      # which shells out to host-side CNI plugins at /opt/cni/bin — see
+      # docs/site/install/prerequisites.md §"CNI plugins (for in-process mode
+      # only)". Install the upstream containernetworking/plugins tarball to
+      # match that contract; the Debian/Ubuntu apt package lands at
+      # /usr/lib/cni and would miss the path kukeon's CNI manager probes.
+      - name: Install CNI plugins to /opt/cni/bin
+        env:
+          CNI_VERSION: v1.4.1
+        run: |
+          sudo mkdir -p /opt/cni/bin
+          curl -fsSL "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz" \
+            | sudo tar -C /opt/cni/bin -xz
+          test -x /opt/cni/bin/bridge
+          test -x /opt/cni/bin/host-local
+          test -x /opt/cni/bin/loopback
+          test -x /opt/cni/bin/portmap
+
+      # `sudo -E env "PATH=$PATH"` re-injects the runner's PATH past sudoers'
+      # secure_path so the actions/setup-go toolchain stays resolvable when
+      # the Makefile invokes `go test` as root.
+      #
+      # step-level timeout-minutes (vs. the implicit 360 min job default) is
+      # the diagnostic safety net: when a child of `go test` (e.g. an orphan
+      # containerd-shim or a hung CNI invocation) holds the runner's
+      # stdout/stderr pipe open past `go test`'s own exit, GitHub flushes
+      # the in-progress step's log only on step completion. A cancellation
+      # drops the buffer; a timeout-induced failure persists it. 20 min is
+      # ~10× the historical build+test phase wall-clock and bounds the
+      # blast radius without flagging legitimately slow runs.
+      #
+      # `stdbuf -oL -eL` forces line-buffered stdout/stderr so each `go test
+      # -v` PASS/FAIL line streams to the runner log immediately, instead
+      # of waiting for libc's 4 KiB pipe-buffer flush — without this, a
+      # stall mid-test shows as silence even though tests were progressing.
+      #
+      # `</dev/null` detaches stdin so the runner doesn't wait on it, and
+      # `> >(cat) 2> >(cat >&2)` re-parents stdout/stderr through fresh
+      # process-substitution pipes that close when `make` itself exits.
+      # Without this, a containerd-shim or CNI helper that inherits the
+      # step's stdout/stderr pipes keeps them open after `go test` returns,
+      # and GitHub Actions waits for those FDs to close before marking the
+      # step done — that's how a 67s test run becomes a 60+ min "hang"
+      # that not even `timeout-minutes` escapes.
+      - name: Run e2e suite as root
+        timeout-minutes: 20
+        run: stdbuf -oL -eL sudo -E env "PATH=$PATH" make e2e </dev/null > >(cat) 2> >(cat >&2)
