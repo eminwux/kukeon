@@ -91,14 +91,6 @@ func resolveKukeondImage() string
 //go:linkname applyServerConfiguration github.com/eminwux/kukeon/cmd/kuke/init.applyServerConfiguration
 func applyServerConfiguration(cmd *cobra.Command, spec v1beta1.ServerConfigurationSpec)
 
-//go:linkname applyRunPathImpliesKukeondSocket github.com/eminwux/kukeon/cmd/kuke/init.applyRunPathImpliesKukeondSocket
-func applyRunPathImpliesKukeondSocket(cmd *cobra.Command, runPath string)
-
-// ApplyRunPathImpliesKukeondSocket exposes the unexported helper for tests.
-func ApplyRunPathImpliesKukeondSocket(cmd *cobra.Command, runPath string) {
-	applyRunPathImpliesKukeondSocket(cmd, runPath)
-}
-
 // ResolveKukeondImage exposes the unexported helper for tests.
 func ResolveKukeondImage() string {
 	return resolveKukeondImage()
@@ -874,116 +866,6 @@ func TestApplyServerConfigurationEnvOverridesConfig(t *testing.T) {
 	// the env check is per-field, not all-or-nothing.
 	if got := viper.GetString(config.KUKEON_ROOT_LOG_LEVEL.ViperKey); got != "warn" {
 		t.Errorf("LogLevel: got %q, want %q", got, "warn")
-	}
-}
-
-// TestApplyRunPathImpliesKukeondSocket locks in the issue #557 contract:
-// `kuke init --run-path X` (or KUKEON_RUN_PATH=X env) auto-derives the
-// daemon socket to `<X>/kukeond.sock` when KUKEOND_SOCKET is not pinned,
-// unblocking nested e2e (TestKuke_Init_VerifyState) without colliding with
-// the parent dev cell's `/run/kukeon/kukeond.sock` plumbing.
-func TestApplyRunPathImpliesKukeondSocket(t *testing.T) {
-	testCases := []struct {
-		name             string
-		runPathFlag      bool
-		runPathEnv       bool
-		socketEnv        string
-		preSetSocket     string // simulates applyServerConfiguration spec.Socket
-		runPath          string
-		wantSocketChange bool
-		wantSocket       string
-	}{
-		{
-			name:             "explicit-flag-and-no-socket-env-derives",
-			runPathFlag:      true,
-			runPath:          "/tmp/init-557",
-			wantSocketChange: true,
-			wantSocket:       "/tmp/init-557/kukeond.sock",
-		},
-		{
-			name:             "env-run-path-and-no-socket-env-derives",
-			runPathEnv:       true,
-			runPath:          "/tmp/init-557-env",
-			wantSocketChange: true,
-			wantSocket:       "/tmp/init-557-env/kukeond.sock",
-		},
-		{
-			name:        "implicit-run-path-no-derivation",
-			runPath:     "/opt/kukeon",
-			socketEnv:   "",
-			runPathFlag: false,
-			// Viper is reset in setup; with no env, no flag-changed, and
-			// no pre-set, GetString returns empty — the helper must not
-			// override that.
-			wantSocket: "",
-		},
-		{
-			name:        "explicit-flag-but-socket-env-pinned-respects-env",
-			runPathFlag: true,
-			runPath:     "/tmp/init-557",
-			socketEnv:   "/run/kukeon/operator.sock",
-			wantSocket:  "/run/kukeon/operator.sock",
-		},
-		{
-			name:         "explicit-flag-but-server-config-pinned-respects-yaml",
-			runPathFlag:  true,
-			runPath:      "/tmp/init-557",
-			preSetSocket: "/run/kukeon/from-yaml.sock",
-			wantSocket:   "/run/kukeon/from-yaml.sock",
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Cleanup(viper.Reset)
-			viper.Reset()
-
-			if tc.socketEnv != "" {
-				t.Setenv(config.KUKEOND_SOCKET.EnvVar(), tc.socketEnv)
-			}
-			if tc.runPathEnv {
-				t.Setenv(config.KUKEON_ROOT_RUN_PATH.EnvVar(), tc.runPath)
-			}
-
-			// Mirror production wiring: kuke.LoadConfig binds env keys.
-			if err := kuke.LoadConfig(); err != nil {
-				t.Fatalf("kuke.LoadConfig: %v", err)
-			}
-			cmd := initpkg.NewInitCmd()
-			if cmd == nil {
-				t.Fatal("NewInitCmd() returned nil")
-			}
-
-			// Re-register the persistent --run-path flag the root CLI
-			// adds, since NewInitCmd is built bare in this unit test.
-			cmd.PersistentFlags().String("run-path", "/opt/kukeon", "run path")
-			if err := viper.BindPFlag(
-				config.KUKEON_ROOT_RUN_PATH.ViperKey,
-				cmd.PersistentFlags().Lookup("run-path"),
-			); err != nil {
-				t.Fatalf("BindPFlag run-path: %v", err)
-			}
-
-			if tc.runPathFlag {
-				if err := cmd.PersistentFlags().Set("run-path", tc.runPath); err != nil {
-					t.Fatalf("flag set: %v", err)
-				}
-			}
-
-			if tc.preSetSocket != "" {
-				// Stand-in for applyServerConfiguration's viper.Set when
-				// ServerConfiguration's spec.Socket is non-empty and env
-				// is unset.
-				viper.Set(config.KUKEOND_SOCKET.ViperKey, tc.preSetSocket)
-			}
-
-			ApplyRunPathImpliesKukeondSocket(cmd, tc.runPath)
-
-			got := viper.GetString(config.KUKEOND_SOCKET.ViperKey)
-			if got != tc.wantSocket {
-				t.Errorf("socket: got %q, want %q", got, tc.wantSocket)
-			}
-		})
 	}
 }
 
