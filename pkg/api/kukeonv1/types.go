@@ -654,6 +654,40 @@ type ApplyResourceResult struct {
 	Details map[string]string
 }
 
+// ---- Delete ----
+
+// DeleteDocumentsArgs carries a raw multi-document YAML blob plus the same
+// cascade/force flags exposed on `kuke delete -f`. The server parses and
+// validates; validation errors are returned in the Reply.Err.
+type DeleteDocumentsArgs struct {
+	RawYAML []byte
+	Cascade bool
+	Force   bool
+}
+
+type DeleteDocumentsReply struct {
+	Result DeleteDocumentsResult
+	Err    *APIError
+}
+
+type DeleteDocumentsResult struct {
+	Resources []DeleteResourceResult
+}
+
+// DeleteResourceResult is the per-resource outcome of a DeleteDocuments call.
+// JSON/YAML tags preserve the lowercase `kuke delete -f -o json` shape that
+// previously came from internal/controller.ResourceDeleteResult's custom
+// marshalers (the wire is gob and ignores these tags).
+type DeleteResourceResult struct {
+	Index    int               `json:"index"              yaml:"index"`
+	Kind     string            `json:"kind"               yaml:"kind"`
+	Name     string            `json:"name"               yaml:"name"`
+	Action   string            `json:"action"             yaml:"action"`
+	Error    string            `json:"error,omitempty"    yaml:"error,omitempty"`
+	Cascaded []string          `json:"cascaded,omitempty" yaml:"cascaded,omitempty"`
+	Details  map[string]string `json:"details,omitempty"  yaml:"details,omitempty"`
+}
+
 // ---- Image ----
 //
 // Image result types live here (and not on the RPC interface) so the in-
