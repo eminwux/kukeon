@@ -42,6 +42,24 @@ func DefineKV(envName, viperKey string, defaultVal ...string) Var {
 	return v
 }
 
+// DefineKVNoViperDefault is like DefineKV but does not register the default
+// with viper.SetDefault. Use for keys whose downstream logic relies on
+// viper.IsSet to distinguish "operator pinned this explicitly" from
+// "fall through to derivation" — viper.SetDefault trips IsSet (viper v1.21)
+// and would silently disable the derivation. Callers must fall back to
+// .Default themselves via the `viper.GetString(...); if "" { = .Default }`
+// pattern. Currently used by KUKEOND_SOCKET so that
+// applyRunPathImpliesKukeondSocket can derive `<runPath>/kukeond.sock`
+// when no env / flag / YAML pinned the key.
+func DefineKVNoViperDefault(envName, viperKey, defaultVal string) Var {
+	return Var{
+		Key:        envName,
+		ViperKey:   viperKey,
+		Default:    defaultVal,
+		HasDefault: true,
+	}
+}
+
 func Define(envName string, defaultVal ...string) Var {
 	return DefineKV(envName, "", defaultVal...)
 }
@@ -110,7 +128,11 @@ var (
 	KUKE_CONFIGURATION = DefineKV("KUKE_CONFIGURATION", "kuke/configuration")
 
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKEOND_SOCKET = DefineKV("KUKEOND_SOCKET", "kukeond/socket", "/run/kukeon/kukeond.sock")
+	// KUKEOND_SOCKET intentionally bypasses viper.SetDefault — see
+	// DefineKVNoViperDefault and applyRunPathImpliesKukeondSocket.
+	KUKEOND_SOCKET = DefineKVNoViperDefault(
+		"KUKEOND_SOCKET", "kukeond/socket", "/run/kukeon/kukeond.sock",
+	)
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKEOND_SOCKET_GID = DefineKV("KUKEOND_SOCKET_GID", "kukeond/socketGID", "0")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable

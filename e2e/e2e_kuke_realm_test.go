@@ -72,10 +72,10 @@ func parseRealmJSON(t *testing.T, output []byte) (*v1beta1.RealmDoc, error) {
 }
 
 // verifyRealmInList verifies realm appears in kuke get realm list.
-func verifyRealmInList(t *testing.T, runPath, realmName string) bool {
+func verifyRealmInList(t *testing.T, host, realmName string) bool {
 	t.Helper()
 
-	args := append(buildKukeRunPathArgs(runPath), "get", "realm", "--output", "json")
+	args := append(buildKukeDaemonArgs(host), "get", "realm", "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	realms, err := parseRealmListJSON(t, output)
@@ -94,10 +94,10 @@ func verifyRealmInList(t *testing.T, runPath, realmName string) bool {
 }
 
 // verifyRealmExists verifies realm can be retrieved individually.
-func verifyRealmExists(t *testing.T, runPath, realmName string) bool {
+func verifyRealmExists(t *testing.T, host, realmName string) bool {
 	t.Helper()
 
-	args := append(buildKukeRunPathArgs(runPath), "get", "realm", realmName, "--output", "json")
+	args := append(buildKukeDaemonArgs(host), "get", "realm", realmName, "--output", "json")
 	exitCode, stdout, _ := runBinary(t, nil, kuke, args...)
 
 	if exitCode != 0 {
@@ -113,11 +113,14 @@ func verifyRealmExists(t *testing.T, runPath, realmName string) bool {
 	return realm.Metadata.Name == realmName
 }
 
-// cleanupRealm deletes a realm with cascade.
-func cleanupRealm(t *testing.T, runPath, realmName string) {
+// cleanupRealm deletes a realm with cascade through the per-test daemon. The
+// caller must register this cleanup after startKukeondDaemon so t.Cleanup's
+// LIFO order runs the delete before the daemon is signaled (otherwise the
+// kuke client would dial a closed socket and the realm would leak).
+func cleanupRealm(t *testing.T, host, realmName string) {
 	t.Helper()
 
-	args := append(buildKukeRunPathArgs(runPath), "delete", "realm", realmName, "--cascade")
+	args := append(buildKukeDaemonArgs(host), "delete", "realm", realmName, "--cascade")
 	// Don't fail if realm doesn't exist
 	_, _, _ = runBinary(t, nil, kuke, args...)
 }
@@ -127,8 +130,9 @@ func TestKuke_NoRealms(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 
-	args := append(buildKukeRunPathArgs(runPath), "get", "realm", "--output", "json")
+	args := append(buildKukeDaemonArgs(host), "get", "realm", "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	var realms []v1beta1.RealmDoc
@@ -173,15 +177,16 @@ func TestKuke_CreateRealm_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 
-	// Cleanup: Delete realm
+	// Cleanup: Delete realm (routed through the same per-test daemon)
 	t.Cleanup(func() {
-		cleanupRealm(t, runPath, realmName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Verify containerd namespace exists
@@ -197,18 +202,18 @@ func TestKuke_CreateRealm_VerifyState(t *testing.T) {
 	}
 
 	// Step 4: Verify realm appears in list (JSON parsing)
-	if !verifyRealmInList(t, runPath, realmName) {
+	if !verifyRealmInList(t, host, realmName) {
 		t.Fatalf("realm %q not found in realm list", realmName)
 	}
 
 	// Step 5: Verify realm can be retrieved individually
-	if !verifyRealmExists(t, runPath, realmName) {
+	if !verifyRealmExists(t, host, realmName) {
 		t.Fatalf("realm %q cannot be retrieved individually", realmName)
 	}
 
 	// Step 6: Verify cgroup path exists
 	// Get realm JSON to extract cgroup path
-	args = append(buildKukeRunPathArgs(runPath), "get", "realm", realmName, "--output", "json")
+	args = append(buildKukeDaemonArgs(host), "get", "realm", realmName, "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	realm, err := parseRealmJSON(t, output)
@@ -249,15 +254,16 @@ func TestKuke_DeleteRealm_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 
 	// Cleanup: Safety net (realm should already be deleted, but ensure cleanup if test fails partway)
 	t.Cleanup(func() {
-		cleanupRealm(t, runPath, realmName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite for deletion test)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Verify realm exists initially (establish baseline)
@@ -270,16 +276,16 @@ func TestKuke_DeleteRealm_VerifyState(t *testing.T) {
 		t.Fatalf("realm metadata file not found for realm %q", realmName)
 	}
 
-	if !verifyRealmInList(t, runPath, realmName) {
+	if !verifyRealmInList(t, host, realmName) {
 		t.Fatalf("realm %q not found in realm list", realmName)
 	}
 
-	if !verifyRealmExists(t, runPath, realmName) {
+	if !verifyRealmExists(t, host, realmName) {
 		t.Fatalf("realm %q cannot be retrieved individually", realmName)
 	}
 
 	// Get realm JSON to extract cgroup path for later verification
-	args = append(buildKukeRunPathArgs(runPath), "get", "realm", realmName, "--output", "json")
+	args = append(buildKukeDaemonArgs(host), "get", "realm", realmName, "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	realm, err := parseRealmJSON(t, output)
@@ -298,7 +304,7 @@ func TestKuke_DeleteRealm_VerifyState(t *testing.T) {
 	}
 
 	// Step 3: Delete the realm
-	args = append(buildKukeRunPathArgs(runPath), "delete", "realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "delete", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 4: Verify metadata file does NOT exist
@@ -320,12 +326,12 @@ func TestKuke_DeleteRealm_VerifyState(t *testing.T) {
 	}
 
 	// Step 7: Verify realm does NOT appear in list
-	if verifyRealmInList(t, runPath, realmName) {
+	if verifyRealmInList(t, host, realmName) {
 		t.Fatalf("realm %q still appears in realm list after deletion", realmName)
 	}
 
 	// Step 8: Verify individual get FAILS (returns non-zero exit code)
-	args = append(buildKukeRunPathArgs(runPath), "get", "realm", realmName, "--output", "json")
+	args = append(buildKukeDaemonArgs(host), "get", "realm", realmName, "--output", "json")
 	exitCode, _, _ := runBinary(t, nil, kuke, args...)
 	if exitCode == 0 {
 		t.Fatalf("expected get realm to fail after deletion, but got exit code 0")
@@ -340,15 +346,16 @@ func TestKuke_PurgeRealm_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 
 	// Cleanup: Safety net (realm should already be purged, but ensure cleanup if test fails partway)
 	t.Cleanup(func() {
-		cleanupRealm(t, runPath, realmName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite for purge test)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Verify realm exists initially (establish baseline)
@@ -361,16 +368,16 @@ func TestKuke_PurgeRealm_VerifyState(t *testing.T) {
 		t.Fatalf("realm metadata file not found for realm %q", realmName)
 	}
 
-	if !verifyRealmInList(t, runPath, realmName) {
+	if !verifyRealmInList(t, host, realmName) {
 		t.Fatalf("realm %q not found in realm list", realmName)
 	}
 
-	if !verifyRealmExists(t, runPath, realmName) {
+	if !verifyRealmExists(t, host, realmName) {
 		t.Fatalf("realm %q cannot be retrieved individually", realmName)
 	}
 
 	// Get realm JSON to extract cgroup path for later verification
-	args = append(buildKukeRunPathArgs(runPath), "get", "realm", realmName, "--output", "json")
+	args = append(buildKukeDaemonArgs(host), "get", "realm", realmName, "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	realm, err := parseRealmJSON(t, output)
@@ -388,7 +395,9 @@ func TestKuke_PurgeRealm_VerifyState(t *testing.T) {
 		t.Fatalf("cgroup path %q does not exist in filesystem", cgroupPath)
 	}
 
-	// Step 3: Purge the realm (comprehensive cleanup)
+	// Step 3: Purge the realm (comprehensive cleanup) — purge stays
+	// in-process per the #565 AC: it must run regardless of daemon state
+	// so cleanup paths are not coupled to the per-test daemon's lifetime.
 	args = append(buildKukeRunPathArgs(runPath), "purge", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
@@ -411,12 +420,12 @@ func TestKuke_PurgeRealm_VerifyState(t *testing.T) {
 	}
 
 	// Step 7: Verify realm does NOT appear in list
-	if verifyRealmInList(t, runPath, realmName) {
+	if verifyRealmInList(t, host, realmName) {
 		t.Fatalf("realm %q still appears in realm list after purge", realmName)
 	}
 
 	// Step 8: Verify individual get FAILS (returns non-zero exit code)
-	args = append(buildKukeRunPathArgs(runPath), "get", "realm", realmName, "--output", "json")
+	args = append(buildKukeDaemonArgs(host), "get", "realm", realmName, "--output", "json")
 	exitCode, _, _ := runBinary(t, nil, kuke, args...)
 	if exitCode == 0 {
 		t.Fatalf("expected get realm to fail after purge, but got exit code 0")

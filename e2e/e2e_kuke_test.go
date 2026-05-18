@@ -314,15 +314,20 @@ func TestKuke_DaemonReset_RoundTrip(t *testing.T) {
 		args := append(buildKukeRunPathArgs(runPath), "daemon", "reset", "--purge-system")
 		_, _, _ = runBinary(t, nil, kuke, args...)
 
-		cleanupCell(
+		// Use the *NoDaemon variants here — by the time cleanup fires, the
+		// init-spawned kukeond cell has already been torn down by the reset
+		// above, so the daemon-mode cleanupCell/cleanupRealm (#565) would
+		// dial a vanished socket and leave residue. In-process is the only
+		// mode that can guarantee post-test removal here.
+		cleanupCellNoDaemon(
 			t, runPath,
 			consts.KukeSystemRealmName,
 			consts.KukeSystemSpaceName,
 			consts.KukeSystemStackName,
 			consts.KukeSystemCellName,
 		)
-		cleanupRealm(t, runPath, consts.KukeSystemRealmName)
-		cleanupRealm(t, runPath, consts.KukeonDefaultRealmName)
+		cleanupRealmNoDaemon(t, runPath, consts.KukeSystemRealmName)
+		cleanupRealmNoDaemon(t, runPath, consts.KukeonDefaultRealmName)
 	})
 
 	kukeondImage := loadKukeondImageIntoContainerd(t)
@@ -488,26 +493,32 @@ func TestKuke_Init_VerifyState(t *testing.T) {
 		"purge", "realm", "default",
 	)...)
 
-	// Cleanup: Clean up resources created by init in reverse dependency order
+	// Cleanup: Clean up resources created by init in reverse dependency
+	// order. Use the *NoDaemon variants because the cleanup chain ends with
+	// `cleanupRealmNoDaemon(kuke-system) --cascade`, which tears down the
+	// kukeond cell that init brought up; subsequent `cleanupRealm(default)`
+	// would dial a dead socket if routed via daemon mode. In-process is the
+	// reliable mode here for the same reason it is in
+	// TestKuke_DaemonReset_RoundTrip and the attach test (#565 AC).
 	t.Cleanup(func() {
-		cleanupCell(
+		cleanupCellNoDaemon(
 			t, runPath,
 			consts.KukeSystemRealmName,
 			consts.KukeSystemSpaceName,
 			consts.KukeSystemStackName,
 			consts.KukeSystemCellName,
 		)
-		cleanupStack(
+		cleanupStackNoDaemon(
 			t, runPath,
 			consts.KukeSystemRealmName,
 			consts.KukeSystemSpaceName,
 			consts.KukeSystemStackName,
 		)
-		cleanupSpace(t, runPath, consts.KukeSystemRealmName, consts.KukeSystemSpaceName)
-		cleanupRealm(t, runPath, consts.KukeSystemRealmName)
-		cleanupStack(t, runPath, "default", "default", "default")
-		cleanupSpace(t, runPath, "default", "default")
-		cleanupRealm(t, runPath, "default")
+		cleanupSpaceNoDaemon(t, runPath, consts.KukeSystemRealmName, consts.KukeSystemSpaceName)
+		cleanupRealmNoDaemon(t, runPath, consts.KukeSystemRealmName)
+		cleanupStackNoDaemon(t, runPath, "default", "default", "default")
+		cleanupSpaceNoDaemon(t, runPath, "default", "default")
+		cleanupRealmNoDaemon(t, runPath, "default")
 	})
 
 	// Step 0.5: Stage the local kukeond image into containerd's kuke-system
@@ -540,17 +551,23 @@ func TestKuke_Init_VerifyState(t *testing.T) {
 		}
 	}
 
+	// `kuke init --run-path X` brings up the kuke-system kukeond cell on a
+	// socket derived from runPath (#569). Workload-command verifications
+	// below dial that socket per the #565 AC so the daemon-routed view is
+	// what we assert on, not the in-process controller's view.
+	host := "unix://" + filepath.Join(runPath, "kukeond.sock")
+
 	// Step 3: Verify default realm exists
 	realmName := "default"
 	if !verifyRealmMetadataExists(t, runPath, realmName) {
 		t.Fatalf("realm metadata file not found for default realm")
 	}
 
-	if !verifyRealmInList(t, runPath, realmName) {
+	if !verifyRealmInList(t, host, realmName) {
 		t.Fatalf("default realm not found in realm list")
 	}
 
-	if !verifyRealmExists(t, runPath, realmName) {
+	if !verifyRealmExists(t, host, realmName) {
 		t.Fatalf("default realm cannot be retrieved individually")
 	}
 
@@ -561,7 +578,7 @@ func TestKuke_Init_VerifyState(t *testing.T) {
 	}
 
 	// Step 5: Verify realm cgroup exists
-	args = append(buildKukeRunPathArgs(runPath), "get", "realm", realmName, "--output", "json")
+	args = append(buildKukeDaemonArgs(host), "get", "realm", realmName, "--output", "json")
 	realmOutput := runReturningBinary(t, nil, kuke, args...)
 
 	realm, err := parseRealmJSON(t, realmOutput)
@@ -583,11 +600,11 @@ func TestKuke_Init_VerifyState(t *testing.T) {
 		t.Fatalf("space metadata file not found for default space")
 	}
 
-	if !verifySpaceInList(t, runPath, realmName, spaceName) {
+	if !verifySpaceInList(t, host, realmName, spaceName) {
 		t.Fatalf("default space not found in space list")
 	}
 
-	if !verifySpaceExists(t, runPath, realmName, spaceName) {
+	if !verifySpaceExists(t, host, realmName, spaceName) {
 		t.Fatalf("default space cannot be retrieved individually")
 	}
 
@@ -597,7 +614,7 @@ func TestKuke_Init_VerifyState(t *testing.T) {
 	}
 
 	// Step 8: Verify space cgroup exists
-	args = append(buildKukeRunPathArgs(runPath), "get", "space", spaceName, "--realm", realmName, "--output", "json")
+	args = append(buildKukeDaemonArgs(host), "get", "space", spaceName, "--realm", realmName, "--output", "json")
 	spaceOutput := runReturningBinary(t, nil, kuke, args...)
 
 	space, err := parseSpaceJSON(t, spaceOutput)

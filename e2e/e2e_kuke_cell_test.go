@@ -26,12 +26,14 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
-// cleanupCell deletes a cell with cascade.
-func cleanupCell(t *testing.T, runPath, realmName, spaceName, stackName, cellName string) {
+// cleanupCell deletes a cell with cascade through the per-test daemon.
+// Register after startKukeondDaemon so t.Cleanup's LIFO order runs delete
+// before the daemon is signaled.
+func cleanupCell(t *testing.T, host, realmName, spaceName, stackName, cellName string) {
 	t.Helper()
 
 	args := append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"delete",
 		"cell",
 		cellName,
@@ -51,8 +53,9 @@ func TestKuke_NoCells(t *testing.T) {
 	t.Parallel()
 
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 
-	args := append(buildKukeRunPathArgs(runPath), "get", "cell", "--output", "json")
+	args := append(buildKukeDaemonArgs(host), "get", "cell", "--output", "json")
 	output := runReturningBinary(t, nil, kuke, args...)
 
 	var cells []v1beta1.CellDoc
@@ -71,6 +74,7 @@ func TestKuke_CreateCell_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
@@ -78,23 +82,23 @@ func TestKuke_CreateCell_VerifyState(t *testing.T) {
 
 	// Cleanup: Delete cell first, then stack, then space, then realm (reverse dependency order)
 	t.Cleanup(func() {
-		cleanupCell(t, runPath, realmName, spaceName, stackName, cellName)
-		cleanupStack(t, runPath, realmName, spaceName, stackName)
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupCell(t, host, realmName, spaceName, stackName, cellName)
+		cleanupStack(t, host, realmName, spaceName, stackName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Create space (prerequisite)
-	args = append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 3: Create stack (prerequisite)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"create",
 		"stack",
 		stackName,
@@ -107,7 +111,7 @@ func TestKuke_CreateCell_VerifyState(t *testing.T) {
 
 	// Step 4: Create cell
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"create",
 		"cell",
 		cellName,
@@ -126,19 +130,19 @@ func TestKuke_CreateCell_VerifyState(t *testing.T) {
 	}
 
 	// Step 6: Verify cell appears in list (JSON parsing)
-	if !verifyCellInList(t, runPath, realmName, spaceName, stackName, cellName) {
+	if !verifyCellInList(t, host, realmName, spaceName, stackName, cellName) {
 		t.Fatalf("cell %q not found in cell list", cellName)
 	}
 
 	// Step 7: Verify cell can be retrieved individually
-	if !verifyCellExists(t, runPath, realmName, spaceName, stackName, cellName) {
+	if !verifyCellExists(t, host, realmName, spaceName, stackName, cellName) {
 		t.Fatalf("cell %q cannot be retrieved individually", cellName)
 	}
 
 	// Step 8: Verify cgroup path exists
 	// Get cell JSON to extract cgroup path
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		cellName,
@@ -178,7 +182,7 @@ func TestKuke_CreateCell_VerifyState(t *testing.T) {
 	}
 
 	// Step 9: Get realm namespace
-	realmNamespace, err := getRealmNamespace(t, runPath, realmName)
+	realmNamespace, err := getRealmNamespace(t, host, realmName)
 	if err != nil {
 		t.Fatalf("failed to get realm namespace: %v", err)
 	}
@@ -224,6 +228,7 @@ func TestKuke_DeleteCell_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
@@ -231,23 +236,23 @@ func TestKuke_DeleteCell_VerifyState(t *testing.T) {
 
 	// Cleanup: Safety net (cell should already be deleted, but ensure cleanup if test fails partway)
 	t.Cleanup(func() {
-		cleanupCell(t, runPath, realmName, spaceName, stackName, cellName)
-		cleanupStack(t, runPath, realmName, spaceName, stackName)
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupCell(t, host, realmName, spaceName, stackName, cellName)
+		cleanupStack(t, host, realmName, spaceName, stackName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Create space (prerequisite)
-	args = append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 3: Create stack (prerequisite)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"create",
 		"stack",
 		stackName,
@@ -260,7 +265,7 @@ func TestKuke_DeleteCell_VerifyState(t *testing.T) {
 
 	// Step 4: Create cell (prerequisite for deletion test)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"create",
 		"cell",
 		cellName,
@@ -278,17 +283,17 @@ func TestKuke_DeleteCell_VerifyState(t *testing.T) {
 		t.Fatalf("cell metadata file not found for cell %q", cellName)
 	}
 
-	if !verifyCellInList(t, runPath, realmName, spaceName, stackName, cellName) {
+	if !verifyCellInList(t, host, realmName, spaceName, stackName, cellName) {
 		t.Fatalf("cell %q not found in cell list", cellName)
 	}
 
-	if !verifyCellExists(t, runPath, realmName, spaceName, stackName, cellName) {
+	if !verifyCellExists(t, host, realmName, spaceName, stackName, cellName) {
 		t.Fatalf("cell %q cannot be retrieved individually", cellName)
 	}
 
 	// Get cell JSON to extract cgroup path and cell ID for later verification
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		cellName,
@@ -319,7 +324,7 @@ func TestKuke_DeleteCell_VerifyState(t *testing.T) {
 	}
 
 	// Get realm namespace and cell ID for root container verification
-	realmNamespace, err := getRealmNamespace(t, runPath, realmName)
+	realmNamespace, err := getRealmNamespace(t, host, realmName)
 	if err != nil {
 		t.Fatalf("failed to get realm namespace: %v", err)
 	}
@@ -341,7 +346,7 @@ func TestKuke_DeleteCell_VerifyState(t *testing.T) {
 
 	// Step 6: Delete the cell
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"delete",
 		"cell",
 		cellName,
@@ -383,13 +388,13 @@ func TestKuke_DeleteCell_VerifyState(t *testing.T) {
 	}
 
 	// Step 10: Verify cell does NOT appear in list
-	if verifyCellInList(t, runPath, realmName, spaceName, stackName, cellName) {
+	if verifyCellInList(t, host, realmName, spaceName, stackName, cellName) {
 		t.Fatalf("cell %q still appears in cell list after deletion", cellName)
 	}
 
 	// Step 11: Verify individual get FAILS (returns non-zero exit code)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		cellName,
@@ -416,6 +421,7 @@ func TestKuke_StartCell_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
@@ -423,23 +429,23 @@ func TestKuke_StartCell_VerifyState(t *testing.T) {
 
 	// Cleanup: Delete cell, then stack, then space, then realm (reverse dependency order)
 	t.Cleanup(func() {
-		cleanupCell(t, runPath, realmName, spaceName, stackName, cellName)
-		cleanupStack(t, runPath, realmName, spaceName, stackName)
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupCell(t, host, realmName, spaceName, stackName, cellName)
+		cleanupStack(t, host, realmName, spaceName, stackName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Create space (prerequisite)
-	args = append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 3: Create stack (prerequisite)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"create",
 		"stack",
 		stackName,
@@ -452,7 +458,7 @@ func TestKuke_StartCell_VerifyState(t *testing.T) {
 
 	// Step 4: Create cell (cell should be in Pending state after creation)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"create",
 		"cell",
 		cellName,
@@ -466,7 +472,7 @@ func TestKuke_StartCell_VerifyState(t *testing.T) {
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 5: Get realm namespace and cell ID for container verification
-	realmNamespace, err := getRealmNamespace(t, runPath, realmName)
+	realmNamespace, err := getRealmNamespace(t, host, realmName)
 	if err != nil {
 		t.Fatalf("failed to get realm namespace: %v", err)
 	}
@@ -474,7 +480,7 @@ func TestKuke_StartCell_VerifyState(t *testing.T) {
 		t.Fatal("realm namespace is empty")
 	}
 
-	cellID, err := getCellID(t, runPath, realmName, spaceName, stackName, cellName)
+	cellID, err := getCellID(t, host, realmName, spaceName, stackName, cellName)
 	if err != nil {
 		t.Fatalf("failed to get cell ID: %v", err)
 	}
@@ -487,7 +493,7 @@ func TestKuke_StartCell_VerifyState(t *testing.T) {
 
 	// Step 7: Get cell state after creation
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		cellName,
@@ -510,7 +516,7 @@ func TestKuke_StartCell_VerifyState(t *testing.T) {
 	// Step 8: Start the cell only if not already running (containers may auto-start on creation)
 	if cell.Status.State == 0 {
 		args = append(
-			buildKukeRunPathArgs(runPath),
+			buildKukeDaemonArgs(host),
 			"start",
 			"cell",
 			cellName,
@@ -535,7 +541,7 @@ func TestKuke_StartCell_VerifyState(t *testing.T) {
 
 	// Step 10: Verify cell state updated to Ready
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		cellName,
@@ -570,6 +576,7 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
@@ -577,23 +584,23 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 
 	// Cleanup: Delete cell, then stack, then space, then realm (reverse dependency order)
 	t.Cleanup(func() {
-		cleanupCell(t, runPath, realmName, spaceName, stackName, cellName)
-		cleanupStack(t, runPath, realmName, spaceName, stackName)
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupCell(t, host, realmName, spaceName, stackName, cellName)
+		cleanupStack(t, host, realmName, spaceName, stackName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Create space (prerequisite)
-	args = append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 3: Create stack (prerequisite)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"create",
 		"stack",
 		stackName,
@@ -606,7 +613,7 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 
 	// Step 4: Create cell (containers auto-start on creation, so cell is Ready)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"create",
 		"cell",
 		cellName,
@@ -620,7 +627,7 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 5: Get realm namespace and cell ID for container verification
-	realmNamespace, err := getRealmNamespace(t, runPath, realmName)
+	realmNamespace, err := getRealmNamespace(t, host, realmName)
 	if err != nil {
 		t.Fatalf("failed to get realm namespace: %v", err)
 	}
@@ -628,7 +635,7 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 		t.Fatal("realm namespace is empty")
 	}
 
-	cellID, err := getCellID(t, runPath, realmName, spaceName, stackName, cellName)
+	cellID, err := getCellID(t, host, realmName, spaceName, stackName, cellName)
 	if err != nil {
 		t.Fatalf("failed to get cell ID: %v", err)
 	}
@@ -641,7 +648,7 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 
 	// Step 7: Verify cell is in Ready state and containers are running (baseline)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		cellName,
@@ -677,7 +684,7 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 
 	// Step 8: Stop the cell
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"stop",
 		"cell",
 		cellName,
@@ -701,7 +708,7 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 
 	// Step 10: Verify cell state updated to Stopped
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		cellName,
@@ -736,6 +743,7 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
@@ -743,23 +751,23 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 
 	// Cleanup: Delete cell, then stack, then space, then realm (reverse dependency order)
 	t.Cleanup(func() {
-		cleanupCell(t, runPath, realmName, spaceName, stackName, cellName)
-		cleanupStack(t, runPath, realmName, spaceName, stackName)
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupCell(t, host, realmName, spaceName, stackName, cellName)
+		cleanupStack(t, host, realmName, spaceName, stackName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Create space (prerequisite)
-	args = append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 3: Create stack (prerequisite)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"create",
 		"stack",
 		stackName,
@@ -772,7 +780,7 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 
 	// Step 4: Create cell (containers auto-start on creation, so cell is Ready)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"create",
 		"cell",
 		cellName,
@@ -786,7 +794,7 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 5: Get realm namespace and cell ID for container verification
-	realmNamespace, err := getRealmNamespace(t, runPath, realmName)
+	realmNamespace, err := getRealmNamespace(t, host, realmName)
 	if err != nil {
 		t.Fatalf("failed to get realm namespace: %v", err)
 	}
@@ -794,7 +802,7 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 		t.Fatal("realm namespace is empty")
 	}
 
-	cellID, err := getCellID(t, runPath, realmName, spaceName, stackName, cellName)
+	cellID, err := getCellID(t, host, realmName, spaceName, stackName, cellName)
 	if err != nil {
 		t.Fatalf("failed to get cell ID: %v", err)
 	}
@@ -807,7 +815,7 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 
 	// Step 7: Verify cell is in Ready state and containers are running (baseline)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		cellName,
@@ -843,7 +851,7 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 
 	// Step 8: Kill the cell
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"kill",
 		"cell",
 		cellName,
@@ -867,7 +875,7 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 
 	// Step 10: Verify cell state updated to Stopped
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		cellName,
@@ -902,6 +910,7 @@ func TestKuke_PurgeCell_VerifyState(t *testing.T) {
 
 	// Setup
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
 	stackName := generateUniqueStackName(t)
@@ -909,23 +918,23 @@ func TestKuke_PurgeCell_VerifyState(t *testing.T) {
 
 	// Cleanup: Safety net (cell should already be purged, but ensure cleanup if test fails partway)
 	t.Cleanup(func() {
-		cleanupCell(t, runPath, realmName, spaceName, stackName, cellName)
-		cleanupStack(t, runPath, realmName, spaceName, stackName)
-		cleanupSpace(t, runPath, realmName, spaceName)
-		cleanupRealm(t, runPath, realmName)
+		cleanupCell(t, host, realmName, spaceName, stackName, cellName)
+		cleanupStack(t, host, realmName, spaceName, stackName)
+		cleanupSpace(t, host, realmName, spaceName)
+		cleanupRealm(t, host, realmName)
 	})
 
 	// Step 1: Create realm (prerequisite)
-	args := append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)
+	args := append(buildKukeDaemonArgs(host), "create", "realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 2: Create space (prerequisite)
-	args = append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)
+	args = append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)
 	runReturningBinary(t, nil, kuke, args...)
 
 	// Step 3: Create stack (prerequisite)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"create",
 		"stack",
 		stackName,
@@ -938,7 +947,7 @@ func TestKuke_PurgeCell_VerifyState(t *testing.T) {
 
 	// Step 4: Create cell (prerequisite for purge test)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"create",
 		"cell",
 		cellName,
@@ -956,17 +965,17 @@ func TestKuke_PurgeCell_VerifyState(t *testing.T) {
 		t.Fatalf("cell metadata file not found for cell %q", cellName)
 	}
 
-	if !verifyCellInList(t, runPath, realmName, spaceName, stackName, cellName) {
+	if !verifyCellInList(t, host, realmName, spaceName, stackName, cellName) {
 		t.Fatalf("cell %q not found in cell list", cellName)
 	}
 
-	if !verifyCellExists(t, runPath, realmName, spaceName, stackName, cellName) {
+	if !verifyCellExists(t, host, realmName, spaceName, stackName, cellName) {
 		t.Fatalf("cell %q cannot be retrieved individually", cellName)
 	}
 
 	// Get cell JSON to extract cgroup path and cell ID for later verification
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		cellName,
@@ -997,7 +1006,7 @@ func TestKuke_PurgeCell_VerifyState(t *testing.T) {
 	}
 
 	// Get realm namespace and cell ID for root container verification
-	realmNamespace, err := getRealmNamespace(t, runPath, realmName)
+	realmNamespace, err := getRealmNamespace(t, host, realmName)
 	if err != nil {
 		t.Fatalf("failed to get realm namespace: %v", err)
 	}
@@ -1061,13 +1070,13 @@ func TestKuke_PurgeCell_VerifyState(t *testing.T) {
 	}
 
 	// Step 10: Verify cell does NOT appear in list
-	if verifyCellInList(t, runPath, realmName, spaceName, stackName, cellName) {
+	if verifyCellInList(t, host, realmName, spaceName, stackName, cellName) {
 		t.Fatalf("cell %q still appears in cell list after purge", cellName)
 	}
 
 	// Step 11: Verify individual get FAILS (returns non-zero exit code)
 	args = append(
-		buildKukeRunPathArgs(runPath),
+		buildKukeDaemonArgs(host),
 		"get",
 		"cell",
 		cellName,
