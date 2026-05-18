@@ -644,14 +644,18 @@ type ApplyDocumentsResult struct {
 	Resources []ApplyResourceResult
 }
 
+// ApplyResourceResult is the per-resource outcome of an ApplyDocuments call.
+// JSON/YAML tags preserve the lowercase `kuke apply -f -o json` shape that
+// matches the sibling `kuke delete -f -o json` contract on
+// [DeleteResourceResult] (the wire is gob and ignores these tags).
 type ApplyResourceResult struct {
-	Index   int
-	Kind    string
-	Name    string
-	Action  string
-	Error   string
-	Changes []string
-	Details map[string]string
+	Index   int               `json:"index"             yaml:"index"`
+	Kind    string            `json:"kind"              yaml:"kind"`
+	Name    string            `json:"name"              yaml:"name"`
+	Action  string            `json:"action"            yaml:"action"`
+	Error   string            `json:"error,omitempty"   yaml:"error,omitempty"`
+	Changes []string          `json:"changes,omitempty" yaml:"changes,omitempty"`
+	Details map[string]string `json:"details,omitempty" yaml:"details,omitempty"`
 }
 
 // ---- Delete ----
