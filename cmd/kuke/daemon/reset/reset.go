@@ -25,14 +25,13 @@
 package reset
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	"github.com/eminwux/kukeon/cmd/kuke/daemon/internal/lifecycle"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/client/local"
@@ -46,10 +45,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-// MockClientKey injects a kukeonv1.Client (typically a fake) via the command
-// context so unit tests can exercise runReset without a real controller.
-type MockClientKey struct{}
-
 // MockSocketDirKey overrides the directory containing kukeond.{sock,pid}.
 // Tests use this to point the cleanup step at a tmpdir; production reads the
 // path from KUKEOND_SOCKET viper config.
@@ -59,10 +54,6 @@ type MockSocketDirKey struct{}
 // /opt/kukeon/kuke-system from. Tests use this to point at a tmpdir so the
 // cleanup never touches the real /opt/kukeon.
 type MockRunPathKey struct{}
-
-// defaultTimeout matches `kuke daemon stop`'s grace period (#219) so the two
-// verbs agree on how long the SIGTERM phase gets before SIGKILL escalates.
-const defaultTimeout = 10 * time.Second
 
 // NewResetCmd builds the `kuke daemon reset` cobra command.
 func NewResetCmd() *cobra.Command {
@@ -86,7 +77,7 @@ func NewResetCmd() *cobra.Command {
 	}
 
 	cmd.Flags().Duration(
-		"timeout", defaultTimeout,
+		"timeout", lifecycle.DefaultTimeout,
 		"Grace period for the stop phase before escalating from SIGTERM to SIGKILL",
 	)
 	_ = viper.BindPFlag(config.KUKE_DAEMON_RESET_TIMEOUT.ViperKey, cmd.Flags().Lookup("timeout"))
@@ -112,7 +103,7 @@ func runReset(cmd *cobra.Command, _ []string) error {
 
 	timeout := viper.GetDuration(config.KUKE_DAEMON_RESET_TIMEOUT.ViperKey)
 	if timeout <= 0 {
-		timeout = defaultTimeout
+		timeout = lifecycle.DefaultTimeout
 	}
 	purgeSystem := viper.GetBool(config.KUKE_DAEMON_RESET_PURGE_SYSTEM.ViperKey)
 
@@ -126,8 +117,8 @@ func runReset(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("inspect kukeond cell: %w", err)
 	}
 	if getRes.MetadataExists {
-		if isCellRunning(getRes.Cell) {
-			if stopErr := stopPhase(cmd, client, doc, timeout); stopErr != nil {
+		if lifecycle.IsCellRunning(getRes.Cell) {
+			if stopErr := lifecycle.StopPhase(cmd, client, doc, timeout); stopErr != nil {
 				return stopErr
 			}
 		} else {
@@ -142,7 +133,7 @@ func runReset(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("delete kukeond cell: %w", err)
 		}
 		if !delRes.MetadataDeleted {
-			return errors.New("delete kukeond cell: controller reported no change")
+			return fmt.Errorf("delete kukeond cell: %w", errdefs.ErrControllerNoChange)
 		}
 		cmd.Printf(
 			"kukeond cell deleted (cell %q in realm %q)\n",
@@ -205,58 +196,6 @@ func runReset(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// stopPhase mirrors `kuke daemon stop`: graceful StopCell with SIGTERM →
-// SIGKILL escalation when the grace period expires. Duplicated here rather
-// than imported from the stop package to keep each daemon-lifecycle verb
-// self-contained — start/stop/kill/restart follow the same convention.
-func stopPhase(
-	cmd *cobra.Command,
-	client kukeonv1.Client,
-	doc v1beta1.CellDoc,
-	timeout time.Duration,
-) error {
-	type stopOutcome struct {
-		res kukeonv1.StopCellResult
-		err error
-	}
-	done := make(chan stopOutcome, 1)
-	go func() {
-		res, sErr := client.StopCell(cmd.Context(), doc)
-		done <- stopOutcome{res: res, err: sErr}
-	}()
-
-	select {
-	case out := <-done:
-		if out.err != nil {
-			return fmt.Errorf("stop kukeond cell: %w", out.err)
-		}
-		if !out.res.Stopped {
-			return errors.New("stop kukeond cell: controller reported no change")
-		}
-		cmd.Printf(
-			"kukeond stopped (cell %q in realm %q)\n",
-			consts.KukeSystemCellName, consts.KukeSystemRealmName,
-		)
-		return nil
-	case <-time.After(timeout):
-		killRes, killErr := client.KillCell(cmd.Context(), doc)
-		if killErr != nil {
-			return fmt.Errorf(
-				"kill kukeond cell after %s grace period expired: %w",
-				timeout, killErr,
-			)
-		}
-		if !killRes.Killed {
-			return errors.New("kill kukeond cell: controller reported no change")
-		}
-		cmd.Printf(
-			"kukeond force-killed after %s grace period expired (cell %q in realm %q)\n",
-			timeout, consts.KukeSystemCellName, consts.KukeSystemRealmName,
-		)
-		return nil
-	}
-}
-
 // removeFileIfExists removes a single file. Missing-file is a no-op so a
 // re-run of `kuke daemon reset` on a clean tree does not error.
 func removeFileIfExists(path string) (bool, error) {
@@ -305,24 +244,12 @@ func kukeondCellDoc() v1beta1.CellDoc {
 	}
 }
 
-// isCellRunning treats the cell as live if any container reports Ready, or if
-// the persisted cell state is Ready. Mirrors the check used by all other
-// daemon-lifecycle verbs so they agree on what "running" means.
-func isCellRunning(cell v1beta1.CellDoc) bool {
-	for _, c := range cell.Status.Containers {
-		if c.State == v1beta1.ContainerStateReady {
-			return true
-		}
-	}
-	return cell.Status.State == v1beta1.CellStateReady
-}
-
 // resolveClient returns the kukeonv1.Client used by runReset. Tests inject a
-// fake via MockClientKey; production always builds an in-process client —
-// `kuke daemon` is daemon-lifecycle (per the umbrella in #217), so routing
-// through the daemon is impossible by definition.
+// fake via lifecycle.MockClientKey; production always builds an in-process
+// client — `kuke daemon` is daemon-lifecycle (per the umbrella in #217), so
+// routing through the daemon is impossible by definition.
 func resolveClient(cmd *cobra.Command, logger *slog.Logger) kukeonv1.Client {
-	if mockClient, ok := cmd.Context().Value(MockClientKey{}).(kukeonv1.Client); ok {
+	if mockClient, ok := cmd.Context().Value(lifecycle.MockClientKey{}).(kukeonv1.Client); ok {
 		return mockClient
 	}
 	opts := controller.Options{

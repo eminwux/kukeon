@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eminwux/kukeon/cmd/kuke/daemon/internal/lifecycle"
 	reset "github.com/eminwux/kukeon/cmd/kuke/daemon/reset"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
@@ -247,7 +248,7 @@ func TestDaemonReset(t *testing.T) {
 			cmd.SetErr(buf)
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-			ctx = context.WithValue(ctx, reset.MockClientKey{}, kukeonv1.Client(tt.fake))
+			ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(tt.fake))
 			ctx = context.WithValue(ctx, reset.MockSocketDirKey{}, t.TempDir())
 			ctx = context.WithValue(ctx, reset.MockRunPathKey{}, t.TempDir())
 			cmd.SetContext(ctx)
@@ -321,7 +322,7 @@ func TestDaemonReset_RemovesSocketAndPidFiles(t *testing.T) {
 	cmd.SetErr(buf)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-	ctx = context.WithValue(ctx, reset.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
 	ctx = context.WithValue(ctx, reset.MockSocketDirKey{}, socketDir)
 	ctx = context.WithValue(ctx, reset.MockRunPathKey{}, runPath)
 	cmd.SetContext(ctx)
@@ -368,7 +369,7 @@ func TestDaemonReset_MissingSockAndPidIsNoOp(t *testing.T) {
 	cmd.SetErr(buf)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-	ctx = context.WithValue(ctx, reset.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
 	ctx = context.WithValue(ctx, reset.MockSocketDirKey{}, t.TempDir())
 	ctx = context.WithValue(ctx, reset.MockRunPathKey{}, t.TempDir())
 	cmd.SetContext(ctx)
@@ -426,7 +427,7 @@ func TestDaemonReset_PreservesDefaultRealm(t *testing.T) {
 	cmd.SetErr(buf)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-	ctx = context.WithValue(ctx, reset.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
 	ctx = context.WithValue(ctx, reset.MockSocketDirKey{}, t.TempDir())
 	ctx = context.WithValue(ctx, reset.MockRunPathKey{}, runPath)
 	cmd.SetContext(ctx)
@@ -474,7 +475,7 @@ func TestDaemonReset_PurgeSystemAfterTeardown(t *testing.T) {
 	cmd.SetErr(buf)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-	ctx = context.WithValue(ctx, reset.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
 	ctx = context.WithValue(ctx, reset.MockSocketDirKey{}, t.TempDir())
 	ctx = context.WithValue(ctx, reset.MockRunPathKey{}, runPath)
 	cmd.SetContext(ctx)
@@ -512,7 +513,7 @@ func TestDaemonReset_PurgeSystemAfterTeardownNoSystemDir(t *testing.T) {
 	cmd.SetErr(buf)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-	ctx = context.WithValue(ctx, reset.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
 	ctx = context.WithValue(ctx, reset.MockSocketDirKey{}, t.TempDir())
 	ctx = context.WithValue(ctx, reset.MockRunPathKey{}, runPath)
 	cmd.SetContext(ctx)
@@ -563,7 +564,7 @@ func TestDaemonReset_NoPurgeSystemKeepsKukeSystem(t *testing.T) {
 	cmd.SetErr(buf)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-	ctx = context.WithValue(ctx, reset.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
 	ctx = context.WithValue(ctx, reset.MockSocketDirKey{}, t.TempDir())
 	ctx = context.WithValue(ctx, reset.MockRunPathKey{}, runPath)
 	cmd.SetContext(ctx)
@@ -623,7 +624,7 @@ func TestDaemonReset_GracefulTimeoutEscalatesToKill(t *testing.T) {
 	cmd.SetErr(buf)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-	ctx = context.WithValue(ctx, reset.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
 	ctx = context.WithValue(ctx, reset.MockSocketDirKey{}, t.TempDir())
 	ctx = context.WithValue(ctx, reset.MockRunPathKey{}, t.TempDir())
 	cmd.SetContext(ctx)

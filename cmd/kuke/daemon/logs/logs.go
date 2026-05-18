@@ -33,6 +33,7 @@ import (
 	"os"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	"github.com/eminwux/kukeon/cmd/kuke/daemon/internal/lifecycle"
 	logcmd "github.com/eminwux/kukeon/cmd/kuke/log"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
@@ -45,10 +46,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
-
-// MockClientKey injects a kukeonv1.Client (typically a fake) via the command
-// context so unit tests can exercise runLogs without a real controller.
-type MockClientKey struct{}
 
 // MockTailKey injects a logcmd.TailFn via context for tests so the real
 // follow loop (which would block on a real file) can be bypassed.
@@ -99,11 +96,9 @@ func runLogs(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("inspect kukeond cell: %w", err)
 	}
 	if !getRes.MetadataExists {
-		return errors.New(
-			"kukeon host is not initialized: kukeond cell metadata is missing; run `kuke init` first",
-		)
+		return errdefs.ErrHostNotInitialized
 	}
-	if !isCellRunning(getRes.Cell) {
+	if !lifecycle.IsCellRunning(getRes.Cell) {
 		return fmt.Errorf(
 			"kukeond is not running (cell %q in realm %q); run `kuke daemon start` to bring it up "+
 				"(or `kuke status` to inspect)",
@@ -184,25 +179,12 @@ func kukeondContainerDoc() v1beta1.ContainerDoc {
 	}
 }
 
-// isCellRunning treats the cell as live if any container reports Ready, or
-// if the persisted cell state is Ready. Same definition the other daemon
-// lifecycle verbs use, so "not running" means the same thing across the
-// `kuke daemon` subcommand group.
-func isCellRunning(cell v1beta1.CellDoc) bool {
-	for _, c := range cell.Status.Containers {
-		if c.State == v1beta1.ContainerStateReady {
-			return true
-		}
-	}
-	return cell.Status.State == v1beta1.CellStateReady
-}
-
 // resolveClient returns the kukeonv1.Client used by runLogs. Tests inject a
-// fake via MockClientKey; production always builds an in-process client —
-// `kuke daemon logs` is part of the daemon-lifecycle umbrella, so it must
-// work even when the daemon socket is not reachable.
+// fake via lifecycle.MockClientKey; production always builds an in-process
+// client — `kuke daemon logs` is part of the daemon-lifecycle umbrella, so
+// it must work even when the daemon socket is not reachable.
 func resolveClient(cmd *cobra.Command, logger *slog.Logger) kukeonv1.Client {
-	if mockClient, ok := cmd.Context().Value(MockClientKey{}).(kukeonv1.Client); ok {
+	if mockClient, ok := cmd.Context().Value(lifecycle.MockClientKey{}).(kukeonv1.Client); ok {
 		return mockClient
 	}
 	opts := controller.Options{
