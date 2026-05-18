@@ -149,6 +149,27 @@ func (s *ptySession) Close() {
 	_ = s.pty.Close()
 }
 
+// WaitForOutput blocks until the captured PTY output contains the given
+// substring or the timeout fires. Returns nil on success; on timeout
+// returns an error whose message includes the captured output so the
+// caller's t.Fatalf message names what the buffer actually held. Used by
+// reattach scenarios that need to confirm a session-2 read landed before
+// asserting continuity (the PTY drain goroutine accumulates output
+// asynchronously, so a fixed-sleep would either over-wait on a healthy
+// runner or race the writer on a slow one).
+func (s *ptySession) WaitForOutput(pattern []byte, timeout time.Duration) error {
+	s.t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if bytes.Contains(s.snapshotOutput(), pattern) {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("pty output did not contain %q within %s; captured:\n%s",
+		pattern, timeout, s.snapshotOutput())
+}
+
 // snapshotOutput returns a copy of the output captured so far.
 func (s *ptySession) snapshotOutput() []byte {
 	s.mu.Lock()
