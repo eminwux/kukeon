@@ -2774,9 +2774,10 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Unit tests</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>go<span class="w"> </span><span class="nb">test</span><span class="w"> </span>./...
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># End-to-end tests (require containerd, root, and a disposable host)</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># End-to-end tests</span>
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>make<span class="w"> </span>e2e
 </code></pre></div>
+<p><code>make e2e</code> needs root, a running docker daemon, and standalone containerd at <code>/run/containerd/containerd.sock</code> (the same prerequisites <code>make dev-init</code> calls out under <a href="../../guides/local-dev/">Guides → Local development</a>). Both supported paths work: a clean host where the suite owns <code>/run/kukeon/</code>, and a nested run inside a kukeon-managed <code>kukeon-dev-root</code> cell where each test auto-derives its own socket from <code>--run-path &lt;tempdir&gt;</code> so the parent dev cell's <code>/run/kukeon/</code> plumbing is untouched (see <a href="https://github.com/eminwux/kukeon/blob/main/docs/dev-init.md"><code>docs/dev-init.md</code></a>).</p>
 
 
 
@@ -2799,7 +2800,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 17, 2026 17:44:44 UTC">May 17, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 18, 2026 08:21:13 UTC">May 18, 2026</span>
   </span>
 
     
