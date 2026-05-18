@@ -19,6 +19,7 @@ package deletecmd_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -28,8 +29,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	deletecmd "github.com/eminwux/kukeon/cmd/kuke/delete"
 	"github.com/eminwux/kukeon/cmd/types"
-	"github.com/eminwux/kukeon/internal/apply/parser"
-	"github.com/eminwux/kukeon/internal/controller"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -255,18 +255,27 @@ func findSubCommand(cmd *cobra.Command, name string) *cobra.Command {
 	return nil
 }
 
-type fakeDeleteController struct {
-	deleteDocumentsFn func(docs []parser.Document, cascade, force bool) (controller.DeleteResult, error)
+// fakeClient is the daemon-aware test seam for `kuke delete -f`. Embedding
+// kukeonv1.FakeClient defaults every unimplemented method to ErrUnexpectedCall,
+// which is the regression guard against this code path silently invoking
+// anything other than DeleteDocuments. The bug fixed in #574 is exactly this
+// invariant: `delete -f` must route through the Client (so `--host`/daemon
+// routing applies), not bypass it to construct an in-process controller.
+type fakeClient struct {
+	kukeonv1.FakeClient
+
+	deleteFn func(raw []byte, cascade, force bool) (kukeonv1.DeleteDocumentsResult, error)
 }
 
-func (f *fakeDeleteController) DeleteDocuments(
-	docs []parser.Document,
+func (f *fakeClient) DeleteDocuments(
+	_ context.Context,
+	raw []byte,
 	cascade, force bool,
-) (controller.DeleteResult, error) {
-	if f.deleteDocumentsFn == nil {
-		return controller.DeleteResult{}, nil
+) (kukeonv1.DeleteDocumentsResult, error) {
+	if f.deleteFn == nil {
+		return kukeonv1.DeleteDocumentsResult{}, errors.New("unexpected DeleteDocuments call")
 	}
-	return f.deleteDocumentsFn(docs, cascade, force)
+	return f.deleteFn(raw, cascade, force)
 }
 
 func TestNewDeleteCmd_FileFlag(t *testing.T) {
@@ -319,8 +328,8 @@ func TestNewDeleteCmd_RunE_InvalidYAML(t *testing.T) {
 	}
 	defer os.Remove(tmpFile.Name())
 
-	_, err = tmpFile.WriteString("invalid: yaml: [")
-	if err != nil {
+	const invalid = "invalid: yaml: ["
+	if _, err = tmpFile.WriteString(invalid); err != nil {
 		t.Fatalf("failed to write to temp file: %v", err)
 	}
 	tmpFile.Close()
@@ -331,6 +340,15 @@ func TestNewDeleteCmd_RunE_InvalidYAML(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	// Surface the invalid YAML through the client by having the fake echo
+	// the same shape the daemon would: validation rejection bubbled as an
+	// error from DeleteDocuments.
+	fakeCtrl := &fakeClient{
+		deleteFn: func(_ []byte, _, _ bool) (kukeonv1.DeleteDocumentsResult, error) {
+			return kukeonv1.DeleteDocumentsResult{}, errors.New("failed to parse YAML: invalid")
+		},
+	}
+	ctx = context.WithValue(ctx, deletecmd.MockControllerKey{}, kukeonv1.Client(fakeCtrl))
 	cmd.SetContext(ctx)
 
 	cmd.SetArgs([]string{"-f", tmpFile.Name()})
@@ -339,9 +357,8 @@ func TestNewDeleteCmd_RunE_InvalidYAML(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid YAML, got nil")
 	}
-	// Invalid YAML can result in either parsing error or validation error
-	if !strings.Contains(err.Error(), "failed to parse YAML") && !strings.Contains(err.Error(), "validation errors") {
-		t.Errorf("expected error about YAML parsing or validation, got: %v", err)
+	if !strings.Contains(err.Error(), "failed to parse YAML") {
+		t.Errorf("expected error about YAML parsing, got: %v", err)
 	}
 }
 
@@ -360,8 +377,7 @@ metadata:
 spec:
   namespace: test-ns
 `
-	_, err = tmpFile.WriteString(yaml)
-	if err != nil {
+	if _, err = tmpFile.WriteString(yaml); err != nil {
 		t.Fatalf("failed to write to temp file: %v", err)
 	}
 	tmpFile.Close()
@@ -374,10 +390,10 @@ spec:
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 
-	fakeCtrl := &fakeDeleteController{
-		deleteDocumentsFn: func(docs []parser.Document, cascade, force bool) (controller.DeleteResult, error) {
-			if len(docs) != 1 {
-				t.Errorf("expected 1 document, got %d", len(docs))
+	fakeCtrl := &fakeClient{
+		deleteFn: func(raw []byte, cascade, force bool) (kukeonv1.DeleteDocumentsResult, error) {
+			if !bytes.Contains(raw, []byte("test-realm")) {
+				t.Errorf("expected raw YAML to contain test-realm, got %q", string(raw))
 			}
 			if cascade {
 				t.Error("expected cascade to be false")
@@ -385,35 +401,28 @@ spec:
 			if force {
 				t.Error("expected force to be false")
 			}
-			return controller.DeleteResult{
-				Resources: []controller.ResourceDeleteResult{
-					{
-						Index:  0,
-						Kind:   "Realm",
-						Name:   "test-realm",
-						Action: "deleted",
-					},
+			return kukeonv1.DeleteDocumentsResult{
+				Resources: []kukeonv1.DeleteResourceResult{
+					{Index: 0, Kind: "Realm", Name: "test-realm", Action: "deleted"},
 				},
 			}, nil
 		},
 	}
-	ctx = context.WithValue(ctx, deletecmd.MockControllerKey{}, fakeCtrl)
+	ctx = context.WithValue(ctx, deletecmd.MockControllerKey{}, kukeonv1.Client(fakeCtrl))
 	cmd.SetContext(ctx)
 
 	cmd.SetArgs([]string{"-f", tmpFile.Name()})
-	err = cmd.Execute()
-	if err != nil {
+	if err = cmd.Execute(); err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
 	output := outBuf.String()
-	if !strings.Contains(output, "Realm \"test-realm\": deleted") {
+	if !strings.Contains(output, `Realm "test-realm": deleted`) {
 		t.Errorf("expected output to contain 'Realm \"test-realm\": deleted', got: %q", output)
 	}
 }
 
 func TestNewDeleteCmd_RunE_NotFound(t *testing.T) {
-	// Create temporary file with valid YAML
 	tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yaml")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -427,8 +436,7 @@ metadata:
 spec:
   namespace: test-ns
 `
-	_, err = tmpFile.WriteString(yaml)
-	if err != nil {
+	if _, err = tmpFile.WriteString(yaml); err != nil {
 		t.Fatalf("failed to write to temp file: %v", err)
 	}
 	tmpFile.Close()
@@ -441,37 +449,30 @@ spec:
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 
-	fakeCtrl := &fakeDeleteController{
-		deleteDocumentsFn: func(_ []parser.Document, _ bool, _ bool) (controller.DeleteResult, error) {
-			return controller.DeleteResult{
-				Resources: []controller.ResourceDeleteResult{
-					{
-						Index:  0,
-						Kind:   "Realm",
-						Name:   "test-realm",
-						Action: "not found",
-					},
+	fakeCtrl := &fakeClient{
+		deleteFn: func(_ []byte, _, _ bool) (kukeonv1.DeleteDocumentsResult, error) {
+			return kukeonv1.DeleteDocumentsResult{
+				Resources: []kukeonv1.DeleteResourceResult{
+					{Index: 0, Kind: "Realm", Name: "test-realm", Action: "not found"},
 				},
 			}, nil
 		},
 	}
-	ctx = context.WithValue(ctx, deletecmd.MockControllerKey{}, fakeCtrl)
+	ctx = context.WithValue(ctx, deletecmd.MockControllerKey{}, kukeonv1.Client(fakeCtrl))
 	cmd.SetContext(ctx)
 
 	cmd.SetArgs([]string{"-f", tmpFile.Name()})
-	err = cmd.Execute()
-	if err != nil {
+	if err = cmd.Execute(); err != nil {
 		t.Fatalf("expected no error for not found (idempotent), got: %v", err)
 	}
 
 	output := outBuf.String()
-	if !strings.Contains(output, "Realm \"test-realm\": not found") {
+	if !strings.Contains(output, `Realm "test-realm": not found`) {
 		t.Errorf("expected output to contain 'Realm \"test-realm\": not found', got: %q", output)
 	}
 }
 
 func TestNewDeleteCmd_RunE_CascadeFlag(t *testing.T) {
-	// Create temporary file with valid YAML
 	tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yaml")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -485,8 +486,7 @@ metadata:
 spec:
   namespace: test-ns
 `
-	_, err = tmpFile.WriteString(yaml)
-	if err != nil {
+	if _, err = tmpFile.WriteString(yaml); err != nil {
 		t.Fatalf("failed to write to temp file: %v", err)
 	}
 	tmpFile.Close()
@@ -499,13 +499,13 @@ spec:
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 
-	fakeCtrl := &fakeDeleteController{
-		deleteDocumentsFn: func(_ []parser.Document, cascade, _ bool) (controller.DeleteResult, error) {
+	fakeCtrl := &fakeClient{
+		deleteFn: func(_ []byte, cascade, _ bool) (kukeonv1.DeleteDocumentsResult, error) {
 			if !cascade {
 				t.Error("expected cascade to be true")
 			}
-			return controller.DeleteResult{
-				Resources: []controller.ResourceDeleteResult{
+			return kukeonv1.DeleteDocumentsResult{
+				Resources: []kukeonv1.DeleteResourceResult{
 					{
 						Index:    0,
 						Kind:     "Realm",
@@ -517,17 +517,16 @@ spec:
 			}, nil
 		},
 	}
-	ctx = context.WithValue(ctx, deletecmd.MockControllerKey{}, fakeCtrl)
+	ctx = context.WithValue(ctx, deletecmd.MockControllerKey{}, kukeonv1.Client(fakeCtrl))
 	cmd.SetContext(ctx)
 
 	cmd.SetArgs([]string{"-f", tmpFile.Name(), "--cascade"})
-	err = cmd.Execute()
-	if err != nil {
+	if err = cmd.Execute(); err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
 	output := outBuf.String()
-	if !strings.Contains(output, "Realm \"test-realm\": deleted") {
+	if !strings.Contains(output, `Realm "test-realm": deleted`) {
 		t.Errorf("expected output to contain 'Realm \"test-realm\": deleted', got: %q", output)
 	}
 	if !strings.Contains(output, "1 space(s) deleted (cascade)") {
@@ -535,8 +534,7 @@ spec:
 	}
 }
 
-func TestNewDeleteCmd_RunE_JSONOutput(t *testing.T) {
-	// Create temporary file with valid YAML
+func TestNewDeleteCmd_RunE_ForceFlag(t *testing.T) {
 	tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yaml")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -550,8 +548,150 @@ metadata:
 spec:
   namespace: test-ns
 `
-	_, err = tmpFile.WriteString(yaml)
+	if _, err = tmpFile.WriteString(yaml); err != nil {
+		t.Fatalf("failed to write to temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	cmd := deletecmd.NewDeleteCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+
+	fakeCtrl := &fakeClient{
+		deleteFn: func(_ []byte, _, force bool) (kukeonv1.DeleteDocumentsResult, error) {
+			if !force {
+				t.Error("expected force to be true")
+			}
+			return kukeonv1.DeleteDocumentsResult{
+				Resources: []kukeonv1.DeleteResourceResult{
+					{Index: 0, Kind: "Realm", Name: "test-realm", Action: "deleted"},
+				},
+			}, nil
+		},
+	}
+	ctx = context.WithValue(ctx, deletecmd.MockControllerKey{}, kukeonv1.Client(fakeCtrl))
+	cmd.SetContext(ctx)
+
+	cmd.SetArgs([]string{"-f", tmpFile.Name(), "--force"})
+	if err = cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestNewDeleteCmd_RunE_FailedExit(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yaml")
 	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	yaml := `apiVersion: v1beta1
+kind: Realm
+metadata:
+  name: test-realm
+spec:
+  namespace: test-ns
+`
+	if _, err = tmpFile.WriteString(yaml); err != nil {
+		t.Fatalf("failed to write to temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	cmd := deletecmd.NewDeleteCmd()
+	var outBuf bytes.Buffer
+	cmd.SetOut(&outBuf)
+	cmd.SetErr(&bytes.Buffer{})
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+
+	fakeCtrl := &fakeClient{
+		deleteFn: func(_ []byte, _, _ bool) (kukeonv1.DeleteDocumentsResult, error) {
+			return kukeonv1.DeleteDocumentsResult{
+				Resources: []kukeonv1.DeleteResourceResult{
+					{Index: 0, Kind: "Realm", Name: "test-realm", Action: "failed", Error: "boom"},
+				},
+			}, nil
+		},
+	}
+	ctx = context.WithValue(ctx, deletecmd.MockControllerKey{}, kukeonv1.Client(fakeCtrl))
+	cmd.SetContext(ctx)
+
+	cmd.SetArgs([]string{"-f", tmpFile.Name()})
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatal("expected non-nil error when daemon reports failed action")
+	}
+	if !strings.Contains(err.Error(), "some resources failed to delete") {
+		t.Errorf("expected aggregated failure error, got: %v", err)
+	}
+	if !strings.Contains(outBuf.String(), "Error: boom") {
+		t.Errorf("expected per-resource error in output, got: %q", outBuf.String())
+	}
+}
+
+func TestNewDeleteCmd_RunE_ClientError(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yaml")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	yaml := `apiVersion: v1beta1
+kind: Realm
+metadata:
+  name: test-realm
+spec:
+  namespace: test-ns
+`
+	if _, err = tmpFile.WriteString(yaml); err != nil {
+		t.Fatalf("failed to write to temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	cmd := deletecmd.NewDeleteCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+
+	fakeCtrl := &fakeClient{
+		deleteFn: func(_ []byte, _, _ bool) (kukeonv1.DeleteDocumentsResult, error) {
+			return kukeonv1.DeleteDocumentsResult{}, errors.New("dial unix: server unavailable")
+		},
+	}
+	ctx = context.WithValue(ctx, deletecmd.MockControllerKey{}, kukeonv1.Client(fakeCtrl))
+	cmd.SetContext(ctx)
+
+	cmd.SetArgs([]string{"-f", tmpFile.Name()})
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error to bubble from client, got nil")
+	}
+	if !strings.Contains(err.Error(), "server unavailable") {
+		t.Errorf("expected wrapped client error, got: %v", err)
+	}
+}
+
+func TestNewDeleteCmd_RunE_JSONOutput(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yaml")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	yaml := `apiVersion: v1beta1
+kind: Realm
+metadata:
+  name: test-realm
+spec:
+  namespace: test-ns
+`
+	if _, err = tmpFile.WriteString(yaml); err != nil {
 		t.Fatalf("failed to write to temp file: %v", err)
 	}
 	tmpFile.Close()
@@ -564,37 +704,33 @@ spec:
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 
-	fakeCtrl := &fakeDeleteController{
-		deleteDocumentsFn: func(_ []parser.Document, _ bool, _ bool) (controller.DeleteResult, error) {
-			return controller.DeleteResult{
-				Resources: []controller.ResourceDeleteResult{
-					{
-						Index:  0,
-						Kind:   "Realm",
-						Name:   "test-realm",
-						Action: "deleted",
-					},
+	fakeCtrl := &fakeClient{
+		deleteFn: func(_ []byte, _, _ bool) (kukeonv1.DeleteDocumentsResult, error) {
+			return kukeonv1.DeleteDocumentsResult{
+				Resources: []kukeonv1.DeleteResourceResult{
+					{Index: 0, Kind: "Realm", Name: "test-realm", Action: "deleted"},
 				},
 			}, nil
 		},
 	}
-	ctx = context.WithValue(ctx, deletecmd.MockControllerKey{}, fakeCtrl)
+	ctx = context.WithValue(ctx, deletecmd.MockControllerKey{}, kukeonv1.Client(fakeCtrl))
 	cmd.SetContext(ctx)
 
 	cmd.SetArgs([]string{"-f", tmpFile.Name(), "--output", "json"})
-	err = cmd.Execute()
-	if err != nil {
+	if err = cmd.Execute(); err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
 	output := outBuf.String()
-	if !strings.Contains(output, "kind") || !strings.Contains(output, "Realm") {
+	// JSON keys must remain lowercase (preserved via DeleteResourceResult tags
+	// — net/rpc gob wire is unaffected).
+	if !strings.Contains(output, `"kind"`) || !strings.Contains(output, "Realm") {
 		t.Errorf("expected JSON output with kind and Realm, got: %q", output)
 	}
-	if !strings.Contains(output, "name") || !strings.Contains(output, "test-realm") {
+	if !strings.Contains(output, `"name"`) || !strings.Contains(output, "test-realm") {
 		t.Errorf("expected JSON output with name and test-realm, got: %q", output)
 	}
-	if !strings.Contains(output, "action") || !strings.Contains(output, "deleted") {
+	if !strings.Contains(output, `"action"`) || !strings.Contains(output, "deleted") {
 		t.Errorf("expected JSON output with action and deleted, got: %q", output)
 	}
 }
@@ -616,21 +752,19 @@ spec:
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 
-	fakeCtrl := &fakeDeleteController{
-		deleteDocumentsFn: func(_ []parser.Document, _ bool, _ bool) (controller.DeleteResult, error) {
-			return controller.DeleteResult{
-				Resources: []controller.ResourceDeleteResult{
-					{
-						Index:  0,
-						Kind:   "Realm",
-						Name:   "test-realm",
-						Action: "deleted",
-					},
+	fakeCtrl := &fakeClient{
+		deleteFn: func(raw []byte, _, _ bool) (kukeonv1.DeleteDocumentsResult, error) {
+			if !bytes.Contains(raw, []byte("test-realm")) {
+				t.Errorf("expected raw YAML to contain test-realm, got %q", string(raw))
+			}
+			return kukeonv1.DeleteDocumentsResult{
+				Resources: []kukeonv1.DeleteResourceResult{
+					{Index: 0, Kind: "Realm", Name: "test-realm", Action: "deleted"},
 				},
 			}, nil
 		},
 	}
-	ctx = context.WithValue(ctx, deletecmd.MockControllerKey{}, fakeCtrl)
+	ctx = context.WithValue(ctx, deletecmd.MockControllerKey{}, kukeonv1.Client(fakeCtrl))
 	cmd.SetContext(ctx)
 
 	// Create a pipe to simulate stdin
@@ -653,14 +787,12 @@ spec:
 	}()
 
 	cmd.SetArgs([]string{"-f", "-"})
-	err = cmd.Execute()
-	if err != nil {
+	if err = cmd.Execute(); err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 }
 
 func TestNewDeleteCmd_RunE_ValidationError(t *testing.T) {
-	// Create temporary file with invalid document (missing required field)
 	tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yaml")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -674,8 +806,7 @@ metadata:
 spec:
   namespace: test-ns
 `
-	_, err = tmpFile.WriteString(yaml)
-	if err != nil {
+	if _, err = tmpFile.WriteString(yaml); err != nil {
 		t.Fatalf("failed to write to temp file: %v", err)
 	}
 	tmpFile.Close()
@@ -686,6 +817,14 @@ spec:
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	// Validation now happens client-side (local) or server-side (daemon);
+	// either path returns the validation error through DeleteDocuments.
+	fakeCtrl := &fakeClient{
+		deleteFn: func(_ []byte, _, _ bool) (kukeonv1.DeleteDocumentsResult, error) {
+			return kukeonv1.DeleteDocumentsResult{}, errors.New("validation failed:\n  metadata.name is required")
+		},
+	}
+	ctx = context.WithValue(ctx, deletecmd.MockControllerKey{}, kukeonv1.Client(fakeCtrl))
 	cmd.SetContext(ctx)
 
 	cmd.SetArgs([]string{"-f", tmpFile.Name()})
@@ -694,7 +833,7 @@ spec:
 	if err == nil {
 		t.Fatal("expected error for validation failure, got nil")
 	}
-	if !strings.Contains(err.Error(), "validation errors") {
+	if !strings.Contains(err.Error(), "validation") {
 		t.Errorf("expected error about validation, got: %v", err)
 	}
 }
