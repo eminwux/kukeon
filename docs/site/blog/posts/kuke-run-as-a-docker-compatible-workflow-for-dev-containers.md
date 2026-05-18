@@ -22,17 +22,20 @@ You land at a shell. You install your tools, edit some files, and exit. The cont
 
 That's the friction. The container is real and persistent on disk, but its *definition* isn't.
 
+"What about `docker compose`?" is the natural next thought, and for stacks of related services it's the right answer — the spec lives in a file you can commit, edit, and re-apply. The trade is structure: compose projects are flat and directory-scoped, so `docker compose down` run from the wrong directory can take out unrelated containers when names collide. For a single reattachable dev workspace you don't need a whole stack; you need one cell. `kuke run -f` is the verb that runs one, and the `Realm → Space → Stack → Cell` hierarchy you'd reach for when you outgrow compose-shaped flatness stays out of the way for the single-cell case here.
+
 ## Setup: load the image, write the spec
 
 A kukeon **cell** is the smallest scheduled unit — a YAML document describing one or more containers that run together. For a dev workspace, the smallest interesting cell is two containers: a root container holding the cell open, and an attachable container running your shell.
 
-First, load the base image into the `default` realm (kukeon's per-realm containerd namespace — the realm `kuke init` provisions for user workloads):
+First, pull the base image into your local Docker daemon, then load it into the `default` realm (kukeon's per-realm containerd namespace — the realm `kuke init` provisions for user workloads):
 
 ```bash
+docker pull ubuntu:24.04
 sudo kuke image load --from-docker ubuntu:24.04 --realm default
 ```
 
-`--realm default` is the default and can be omitted; we spell it out here to make the namespace explicit.
+`kuke image load --from-docker` shells out to `docker save` under the hood, so the image has to be in your local Docker daemon's content store first — that's what the `docker pull` is for. `--realm default` is the default and can be omitted; we spell it out here to make the namespace explicit.
 
 Now write the cell spec as `workspace.yaml`:
 
@@ -110,10 +113,12 @@ sudo kuke apply -f workspace.yaml
 When you're done with the workspace:
 
 ```bash
-sudo kuke purge cell workspace --realm default --space default --stack default
+sudo kuke delete -f workspace.yaml
 ```
 
-`purge` removes the cell and cleans up its on-disk footprint. It's also the recovery verb if something half-creates — for example, if an image-pull failure leaves the cell in a state where `kuke kill cell` would error out.
+The same file that `run` and `apply` consumed also drives teardown — `kuke delete -f` removes every resource the manifest declares, so the spec stays the single source of truth across the cell's whole lifecycle. (`kuke delete cell workspace` is the by-name equivalent if you don't have the file handy.)
+
+`kuke purge cell` exists too, but it's the recovery verb for *broken* state — for example, if an image-pull failure leaves the cell half-created and a subsequent `kuke kill cell` errors out with `no RootContainerID set`. For routine teardown of a healthy workspace, `kuke delete` is the right verb; `purge` is the heavier hammer you reach for when something in kukeon's state is wedged.
 
 ## What you get: spec as source of truth
 
@@ -130,4 +135,4 @@ The trade is honest: you write more YAML up-front than you write `docker run` fl
 
 - For the full agent-runner shape — building a custom image, the Attachable cell pattern, and the parametrized `CellProfile` for one-shot prompts — see [Run Claude Code in a kukeon cell](../../guides/run-claude-code.md). The cell-spec pattern this post uses is the same one that guide walks through end-to-end.
 - For the full surface of `kuke run -f` (including `-p` profile mode, `--rm` auto-delete, and the `-d/--detach` flag), see the [`kuke run` reference](../../cli/kuke-run.md).
-- For everything `kuke apply`, `kuke attach`, and `kuke purge` will and won't do — exit codes, side effects, error paths — `docs/cli-use-cases.md` in the repo is the workflow-oriented source of truth.
+- For everything `kuke apply`, `kuke attach`, `kuke delete`, and `kuke purge` will and won't do — exit codes, side effects, error paths — `docs/cli-use-cases.md` in the repo is the workflow-oriented source of truth.
