@@ -171,12 +171,31 @@ func TestLoadEmptyKindAccepted(t *testing.T) {
 	}
 }
 
+// canonicalDefaultsSpec mirrors the compile-time defaults documented in each
+// `# Default: …` comment in defaultDocumentTemplate. Use as the spec for
+// WriteDefault when a test wants the dumped YAML to match the documented
+// defaults verbatim.
+func canonicalDefaultsSpec() v1beta1.ServerConfigurationSpec {
+	return v1beta1.ServerConfigurationSpec{
+		Socket:                    "/run/kukeon/kukeond.sock",
+		SocketGID:                 0,
+		RunPath:                   "/opt/kukeon",
+		ContainerdSocket:          "/run/containerd/containerd.sock",
+		LogLevel:                  "info",
+		ReconcileInterval:         "30s",
+		KukeondImage:              "",
+		ContainerdNamespaceSuffix: "kukeon.io",
+		CgroupRoot:                "/kukeon",
+		DefaultMemoryLimitBytes:   0,
+	}
+}
+
 func TestWriteDefaultCreatesFileWithDefaults(t *testing.T) {
 	dir := t.TempDir()
 	// Nested parent directory exercises the MkdirAll branch.
 	path := filepath.Join(dir, "a", "b", "kukeond.yaml")
 
-	wrote, err := WriteDefault(path)
+	wrote, err := WriteDefault(path, canonicalDefaultsSpec())
 	if err != nil {
 		t.Fatalf("WriteDefault: %v", err)
 	}
@@ -260,7 +279,7 @@ func TestWriteDefaultLeavesExistingFileUntouched(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	wrote, err := WriteDefault(path)
+	wrote, err := WriteDefault(path, canonicalDefaultsSpec())
 	if err != nil {
 		t.Fatalf("WriteDefault: %v", err)
 	}
@@ -273,5 +292,99 @@ func TestWriteDefaultLeavesExistingFileUntouched(t *testing.T) {
 	}
 	if string(got) != string(preexisting) {
 		t.Errorf("file contents changed:\n got: %q\nwant: %q", got, preexisting)
+	}
+}
+
+// TestWriteDefaultRendersResolvedSpec is the regression guard for issue #581:
+// the dumped YAML must reflect the spec the caller passes (which on the
+// kukeond boot path mirrors the flag-and-env-resolved viper state), not a
+// hardcoded snapshot of the compile-time defaults. Before the fix,
+// `kukeond serve --run-path /tmp/A` wrote `runPath: /opt/kukeon` and
+// `socket: /run/kukeon/kukeond.sock` to /etc/kukeon/kukeond.yaml regardless
+// of the launched values; subsequent `kuke init --run-path /tmp/B`
+// invocations then read that lying file back via applyServerConfiguration
+// and silently bound the daemon to the leftover socket.
+func TestWriteDefaultRendersResolvedSpec(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kukeond.yaml")
+
+	spec := v1beta1.ServerConfigurationSpec{
+		Socket:                    "/tmp/A/kukeond.sock",
+		SocketGID:                 4242,
+		RunPath:                   "/tmp/A",
+		ContainerdSocket:          "/run/containerd/test.sock",
+		LogLevel:                  "debug",
+		ReconcileInterval:         "45s",
+		KukeondImage:              "docker.io/library/kukeon:test",
+		ContainerdNamespaceSuffix: "dev.kukeon.io",
+		CgroupRoot:                "/kukeon-dev",
+		DefaultMemoryLimitBytes:   2 * 1024 * 1024 * 1024,
+	}
+
+	wrote, err := WriteDefault(path, spec)
+	if err != nil {
+		t.Fatalf("WriteDefault: %v", err)
+	}
+	if !wrote {
+		t.Fatal("WriteDefault returned wrote=false on a fresh path")
+	}
+
+	doc, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() round-trip: %v", err)
+	}
+	if doc.Spec.Socket != spec.Socket {
+		t.Errorf("Spec.Socket: got %q, want %q (the launched value, not the binary default)",
+			doc.Spec.Socket, spec.Socket)
+	}
+	if doc.Spec.SocketGID != spec.SocketGID {
+		t.Errorf("Spec.SocketGID: got %d, want %d", doc.Spec.SocketGID, spec.SocketGID)
+	}
+	if doc.Spec.RunPath != spec.RunPath {
+		t.Errorf("Spec.RunPath: got %q, want %q (the launched value, not the binary default)",
+			doc.Spec.RunPath, spec.RunPath)
+	}
+	if doc.Spec.ContainerdSocket != spec.ContainerdSocket {
+		t.Errorf("Spec.ContainerdSocket: got %q, want %q", doc.Spec.ContainerdSocket, spec.ContainerdSocket)
+	}
+	if doc.Spec.LogLevel != spec.LogLevel {
+		t.Errorf("Spec.LogLevel: got %q, want %q", doc.Spec.LogLevel, spec.LogLevel)
+	}
+	if doc.Spec.ReconcileInterval != spec.ReconcileInterval {
+		t.Errorf("Spec.ReconcileInterval: got %q, want %q",
+			doc.Spec.ReconcileInterval, spec.ReconcileInterval)
+	}
+	if doc.Spec.KukeondImage != spec.KukeondImage {
+		t.Errorf("Spec.KukeondImage: got %q, want %q", doc.Spec.KukeondImage, spec.KukeondImage)
+	}
+	if doc.Spec.ContainerdNamespaceSuffix != spec.ContainerdNamespaceSuffix {
+		t.Errorf("Spec.ContainerdNamespaceSuffix: got %q, want %q",
+			doc.Spec.ContainerdNamespaceSuffix, spec.ContainerdNamespaceSuffix)
+	}
+	if doc.Spec.CgroupRoot != spec.CgroupRoot {
+		t.Errorf("Spec.CgroupRoot: got %q, want %q", doc.Spec.CgroupRoot, spec.CgroupRoot)
+	}
+	if doc.Spec.DefaultMemoryLimitBytes != spec.DefaultMemoryLimitBytes {
+		t.Errorf("Spec.DefaultMemoryLimitBytes: got %d, want %d",
+			doc.Spec.DefaultMemoryLimitBytes, spec.DefaultMemoryLimitBytes)
+	}
+
+	// The compile-time-default markers in the header comments must survive
+	// even when the rendered values diverge — the `# Default: …` line
+	// documents the binary's intrinsic default for the operator, not the
+	// current effective value.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read written file: %v", err)
+	}
+	rawStr := string(raw)
+	for _, marker := range []string{
+		"# Default: /run/kukeon/kukeond.sock",
+		"# Default: /opt/kukeon",
+		"# Default: /run/containerd/containerd.sock",
+	} {
+		if !strings.Contains(rawStr, marker) {
+			t.Errorf("missing compile-time-default marker %q in rendered YAML", marker)
+		}
 	}
 }
