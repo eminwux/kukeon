@@ -45,6 +45,31 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Override systemd-resolved with a static /etc/resolv.conf pointing at
+      # public recursors. GH ubuntu-latest runners route DNS through
+      # systemd-resolved at 127.0.0.53, which has been observed to drop UDP
+      # responses under bursty parallel load — the e2e suite's parallel image
+      # pulls hit registry-1.docker.io and registry.eminwux.com from many
+      # workers simultaneously, surfacing as 20s `read udp 127.0.0.1:NNN->
+      # 127.0.0.53:53: i/o timeout` errors from containerd's image fetcher
+      # (observed on this PR's first green-everything-else run). Applied
+      # before `Ensure docker daemon is running` so dockerd inherits the
+      # static resolv.conf at startup; `options timeout:2 attempts:3` caps
+      # a failed query at 6s so we fail fast rather than re-burning 20s on
+      # every parallel pull if both upstreams ever go away together.
+      - name: Use static public DNS (bypass systemd-resolved)
+        run: |
+          sudo systemctl stop systemd-resolved 2>/dev/null || true
+          sudo rm -f /etc/resolv.conf
+          cat <<'EOF' | sudo tee /etc/resolv.conf > /dev/null
+          nameserver 1.1.1.1
+          nameserver 8.8.8.8
+          nameserver 1.0.0.1
+          options timeout:2 attempts:3
+          EOF
+          getent hosts registry-1.docker.io > /dev/null
+          getent hosts registry.eminwux.com > /dev/null
+
       - name: Ensure docker daemon is running
         run: |
           sudo systemctl start docker
