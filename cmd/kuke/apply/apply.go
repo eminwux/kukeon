@@ -92,7 +92,7 @@ func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
 	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
 		return mockClient, nil
 	}
-	return kukshared.ClientFromCmd(cmd)
+	return kukshared.DaemonClientFromCmd(cmd)
 }
 
 func printApplyResult(cmd *cobra.Command, result kukeonv1.ApplyDocumentsResult) error {

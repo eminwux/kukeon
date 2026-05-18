@@ -63,11 +63,14 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 	// the suite.
 	t.Parallel()
 
-	// Setup: isolated runPath, unique resource names, in-process controller
-	// (promoted by passing `--run-path` to a workload command) so the
-	// per-container socket lives under the test's runPath rather than the
-	// host daemon's.
+	// Setup: isolated runPath + per-test kukeond bound to that runPath.
+	// Workload commands route through the daemon (#566 made them RPC-only),
+	// but because the daemon's --run-path matches the test's the daemon
+	// still lays down the per-container kuketty socket under the test's
+	// runPath — which is what `kuke attach` and the post-detach `ctr task
+	// ls` need to inspect.
 	runPath := getRandomRunPath(t)
+	host := startKukeondDaemon(t, runPath)
 
 	realmName := generateUniqueRealmName(t)
 	spaceName := generateUniqueSpaceName(t)
@@ -84,11 +87,11 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 	// Step 1: provision realm/space/stack as plain create commands so the
 	// remaining apply call exercises the cell path and only the cell path.
 	runReturningBinary(t, nil, kuke,
-		append(buildKukeRunPathArgs(runPath), "create", "realm", realmName)...)
+		append(buildKukeDaemonArgs(host), "create", "realm", realmName)...)
 	runReturningBinary(t, nil, kuke,
-		append(buildKukeRunPathArgs(runPath), "create", "space", spaceName, "--realm", realmName)...)
+		append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)...)
 	runReturningBinary(t, nil, kuke,
-		append(buildKukeRunPathArgs(runPath), "create", "stack", stackName,
+		append(buildKukeDaemonArgs(host), "create", "stack", stackName,
 			"--realm", realmName, "--space", spaceName)...)
 
 	// Step 2: apply the attachable cell fixture. Auto-starts the workload
@@ -99,7 +102,7 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 	// does not pre-create any placeholder socket file (the old workaround
 	// was broken because sbsh unlinks-and-recreates the destination,
 	// producing a fresh inode invisible to the host).
-	applyAttachableCell(t, runPath, realmName, spaceName, stackName, cellName)
+	applyAttachableCell(t, host, realmName, spaceName, stackName, cellName)
 
 	// Step 3: confirm the per-container kuketty socket is in place. The runner
 	// creates the metadata dir at provision time and sbsh binds the socket
@@ -115,7 +118,7 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 
 	// Step 4: drive `kuke attach` over a real PTY and detach.
 	session := startPTY(t, nil, kuke,
-		append(buildKukeRunPathArgs(runPath),
+		append(buildKukeDaemonArgs(host),
 			"attach", cellName,
 			"--realm", realmName,
 			"--space", spaceName,
@@ -161,8 +164,9 @@ func TestKuke_AttachDetach_KeepsTaskRunning(t *testing.T) {
 }
 
 // applyAttachableCell substitutes test-side names into the
-// attachable-cell.yaml fixture and runs `kuke apply` against it.
-func applyAttachableCell(t *testing.T, runPath, realmName, spaceName, stackName, cellName string) {
+// attachable-cell.yaml fixture and runs `kuke apply` against it via the
+// per-test daemon (apply is daemon-only after #566).
+func applyAttachableCell(t *testing.T, host, realmName, spaceName, stackName, cellName string) {
 	t.Helper()
 
 	yamlContent := readTestdataYAML(t, "attachable-cell.yaml")
@@ -181,7 +185,7 @@ func applyAttachableCell(t *testing.T, runPath, realmName, spaceName, stackName,
 		t.Fatalf("write tmp yaml: %v", err)
 	}
 
-	args := append(buildKukeRunPathArgs(runPath), "apply", "-f", tmpFile)
+	args := append(buildKukeDaemonArgs(host), "apply", "-f", tmpFile)
 	runReturningBinary(t, nil, kuke, args...)
 }
 
@@ -230,33 +234,37 @@ func verifyContainerTaskIsRunning(t *testing.T, namespace, containerID string) b
 }
 
 // cleanupRealmNoDaemon, cleanupSpaceNoDaemon, cleanupStackNoDaemon, and
-// cleanupCellNoDaemon mirror the existing cleanup helpers but route through
-// in-process mode (via the `--run-path` promotion) so they use the same
-// controller as the test itself. Without this the cleanup goes via the host
-// daemon (different runPath) and silently no-ops, leaving resources behind.
+// cleanupCellNoDaemon route through `purge --cascade` in-process (via the
+// `--run-path` promotion). Purge — not delete — because #566 made the
+// workload `delete *` verbs daemon-only, and these helpers must work
+// when no daemon is alive (post-reset, post-cascade-realm-teardown of the
+// kuke-system cell that ran kukeond). Purge keeps the in-process branch
+// per the issue's surviving-callers enumeration, so cleanup runs even
+// against a runPath whose owning daemon (if any) has already been torn
+// down by the test body.
 func cleanupRealmNoDaemon(t *testing.T, runPath, realmName string) {
 	t.Helper()
-	args := append(buildKukeRunPathArgs(runPath), "delete", "realm", realmName, "--cascade")
+	args := append(buildKukeRunPathArgs(runPath), "purge", "realm", realmName, "--cascade")
 	_, _, _ = runBinary(t, nil, kuke, args...)
 }
 
 func cleanupSpaceNoDaemon(t *testing.T, runPath, realmName, spaceName string) {
 	t.Helper()
-	args := append(buildKukeRunPathArgs(runPath), "delete", "space", spaceName,
+	args := append(buildKukeRunPathArgs(runPath), "purge", "space", spaceName,
 		"--realm", realmName, "--cascade")
 	_, _, _ = runBinary(t, nil, kuke, args...)
 }
 
 func cleanupStackNoDaemon(t *testing.T, runPath, realmName, spaceName, stackName string) {
 	t.Helper()
-	args := append(buildKukeRunPathArgs(runPath), "delete", "stack", stackName,
+	args := append(buildKukeRunPathArgs(runPath), "purge", "stack", stackName,
 		"--realm", realmName, "--space", spaceName, "--cascade")
 	_, _, _ = runBinary(t, nil, kuke, args...)
 }
 
 func cleanupCellNoDaemon(t *testing.T, runPath, realmName, spaceName, stackName, cellName string) {
 	t.Helper()
-	args := append(buildKukeRunPathArgs(runPath), "delete", "cell", cellName,
+	args := append(buildKukeRunPathArgs(runPath), "purge", "cell", cellName,
 		"--realm", realmName, "--space", spaceName, "--stack", stackName, "--cascade")
 	_, _, _ = runBinary(t, nil, kuke, args...)
 }

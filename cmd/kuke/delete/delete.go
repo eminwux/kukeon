@@ -162,7 +162,7 @@ func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
 	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
 		return mockClient, nil
 	}
-	return kukshared.ClientFromCmd(cmd)
+	return kukshared.DaemonClientFromCmd(cmd)
 }
 
 // printDeleteResult prints deletion results in human-readable format.

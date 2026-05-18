@@ -161,7 +161,9 @@ func deepSocketPathFits(runPath string) bool {
 // must run in the in-process controller path rather than dial a daemon.
 // Use buildKukeDaemonArgs (paired with startKukeondDaemon) for workload
 // commands — per-test daemon-mode is the suite's default now that phase 2
-// (#565) has landed.
+// (#565) has landed, and phase 3 (#566) made the workload verbs (apply,
+// create *, run, attach, delete *, kill *) daemon-only at the code-path
+// level, so they cannot use the in-process helper at all.
 //
 // Legitimate survivors of this in-process helper:
 //   - `get realms --no-daemon`: the daemon-parity smoke (CLAUDE.md's
@@ -169,15 +171,13 @@ func deepSocketPathFits(runPath string) bool {
 //     view; routing both sides through the daemon would defeat the check).
 //   - `purge` (any kind): purge is a host-mutating verb that must work
 //     regardless of daemon state, so e2e cleanups never depend on the
-//     per-test daemon still being alive.
+//     per-test daemon still being alive. The attach test's cleanup helpers
+//     (cleanup{Realm,Space,Stack,Cell}NoDaemon) call `purge --cascade` for
+//     this reason after #566 took `delete *` off the in-process branch.
 //   - `init` / `uninstall`: bootstrap/teardown verbs that bring up or tear
 //     down the daemon itself; they cannot route through it.
 //   - `kuke daemon …`: the daemon-lifecycle group; in-process by definition
 //     per the #217 categorization.
-//   - The attach test (e2e_kuke_attach_test.go) keeps its `*NoDaemon`
-//     cleanup helpers so the per-container kuketty socket inspection lines
-//     up with the same controller the test drives (see the comment in
-//     TestKuke_AttachDetach_KeepsTaskRunning for rationale).
 //
 // The in-process promotion comes from applyRunPathImpliesNoDaemon
 // (cmd/kuke/kuke.go), which auto-sets --no-daemon=true whenever --run-path

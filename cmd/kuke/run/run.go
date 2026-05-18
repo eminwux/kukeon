@@ -119,9 +119,7 @@ func NewRunCmd() *cobra.Command {
 			"long-lived root (e.g. `sleep infinity`) does not pin the "+
 			"cell. A clean ^]^] detach is NOT a trigger: the cell stays "+
 			"alive so the operator can re-attach later (parity with "+
-			"`kuke attach`). Daemon-mode only — incompatible with "+
-			"in-process mode (KUKEON_NO_DAEMON=true or `--run-path` "+
-			"promotion). Cleanup runs from kukeond's reconcile loop, "+
+			"`kuke attach`). Cleanup runs from kukeond's reconcile loop, "+
 			"so latency is bounded by the reconcile interval rather "+
 			"than firing the instant the trigger fires.")
 	_ = viper.BindPFlag(config.KUKE_RUN_RM.ViperKey, cmd.Flags().Lookup("rm"))
@@ -184,17 +182,6 @@ func parseRunFlags(cmd *cobra.Command, _ []string) (runFlags, error) {
 		// garbled output that nothing can parse. Reject the combination
 		// so callers pick one mode.
 		return runFlags{}, errors.New("--output is incompatible with attach mode (pass -d/--detach)")
-	}
-	if flags.autoDelete && viper.GetBool(config.KUKEON_ROOT_NO_DAEMON.ViperKey) {
-		// --rm needs a long-lived process to watch the root task and trigger
-		// cleanup. The in-process CLI path exits as soon as create+start
-		// returns, so the watcher would never run. `--no-daemon` is not a
-		// user-facing flag on `kuke run` after #222; the in-process path is
-		// reached via `--run-path` promotion or `KUKEON_NO_DAEMON=true`.
-		return runFlags{}, errors.New(
-			"--rm is incompatible with in-process mode " +
-				"(KUKEON_NO_DAEMON=true or --run-path promotion)",
-		)
 	}
 	if flags.file != "" {
 		// --name, --param, --param-file are profile-only knobs (per issue
@@ -747,5 +734,5 @@ func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
 	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
 		return mockClient, nil
 	}
-	return kukshared.ClientFromCmd(cmd)
+	return kukshared.DaemonClientFromCmd(cmd)
 }

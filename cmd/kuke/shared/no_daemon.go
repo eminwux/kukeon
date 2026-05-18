@@ -28,10 +28,14 @@ const noDaemonFlagUsage = "bypass kukeond and run operations in-process (require
 // subcommand. #222 demoted it to a per-command opt-in: only the commands that
 // still accept it user-facing (kuke init, kuke uninstall, and — via the
 // persistent variant below — kuke purge and every kuke get <kind>) call this
-// helper or its persistent sibling. Daemon-routed workload commands (apply,
-// create, run, attach, delete, kill, start, stop, log, refresh) no longer
-// accept the flag at the CLI surface; they still reach the in-process branch
-// via the `--run-path` promotion in applyRunPathImpliesNoDaemon and via
+// helper or its persistent sibling. The workload commands (apply, create,
+// run, attach, delete, kill) no longer accept the flag at the CLI surface
+// AND no longer reach the in-process branch at all — #566 routed them
+// through shared.DaemonClientFromCmd, which always dials kukeond. The
+// remaining non-workload commands without `--no-daemon` (start, stop, log,
+// refresh, doctor cgroups) keep the older shape: they go through
+// shared.ClientFromCmd and reach the in-process branch via the
+// `--run-path` promotion in applyRunPathImpliesNoDaemon or via
 // `KUKEON_NO_DAEMON=true`.
 //
 // Bind to viper at PreRun time, not here — see kuke.go's
