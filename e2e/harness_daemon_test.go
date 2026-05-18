@@ -111,17 +111,41 @@ func startKukeondDaemon(t *testing.T, runPath string) string {
 		t.Fatalf("start kukeond serve: %v", startErr)
 	}
 
+	// Single Wait() across the function: both the startup probe and the
+	// cleanup select on this channel. kill(pid, 0) cannot fast-fail an
+	// early-crashing daemon — on Linux an unreaped zombie answers signal 0
+	// as alive — so the only reliable early-exit signal is a real Wait().
+	exit := make(chan error, 1)
+	go func() { exit <- cmd.Wait() }()
+
 	// Wait for the listener socket to appear. `kukeond serve` writes the
 	// socket synchronously inside Serve before entering Accept, so the file's
 	// presence is a reliable readiness signal.
-	deadline := time.Now().Add(daemonStartupTimeout)
-	for {
+	deadline := time.NewTimer(daemonStartupTimeout)
+	defer deadline.Stop()
+	poll := time.NewTicker(50 * time.Millisecond)
+	defer poll.Stop()
+
+	started := false
+	for !started {
 		if _, statErr := os.Stat(sockPath); statErr == nil {
-			break
+			started = true
+			continue
 		}
-		if time.Now().After(deadline) {
+		select {
+		case waitErr := <-exit:
+			cancel()
+			logBytes, _ := os.ReadFile(logFile.Name())
+			_ = logFile.Close()
+			_ = os.Remove(logFile.Name())
+			_ = os.RemoveAll(sockDir)
+			t.Fatalf(
+				"kukeond exited before socket %s appeared (wait=%v); daemon log:\n%s",
+				sockPath, waitErr, string(logBytes),
+			)
+		case <-deadline.C:
 			_ = cmd.Process.Signal(syscall.SIGKILL)
-			_, _ = cmd.Process.Wait()
+			<-exit
 			cancel()
 			logBytes, _ := os.ReadFile(logFile.Name())
 			_ = logFile.Close()
@@ -131,34 +155,19 @@ func startKukeondDaemon(t *testing.T, runPath string) string {
 				"kukeond did not create socket %s within %s; daemon log:\n%s",
 				sockPath, daemonStartupTimeout, string(logBytes),
 			)
+		case <-poll.C:
 		}
-		// Detect early exit so the test fails fast with the daemon log
-		// instead of waiting out the timeout.
-		if exitedErr := cmd.Process.Signal(syscall.Signal(0)); exitedErr != nil {
-			cancel()
-			logBytes, _ := os.ReadFile(logFile.Name())
-			_ = logFile.Close()
-			_ = os.Remove(logFile.Name())
-			_ = os.RemoveAll(sockDir)
-			t.Fatalf(
-				"kukeond exited before socket %s appeared; daemon log:\n%s",
-				sockPath, string(logBytes),
-			)
-		}
-		time.Sleep(50 * time.Millisecond)
 	}
 
 	t.Cleanup(func() {
 		// Graceful shutdown: SIGTERM and wait. Escalate to SIGKILL if the
 		// daemon ignores the term within daemonShutdownTimeout.
 		_ = cmd.Process.Signal(syscall.SIGTERM)
-		done := make(chan error, 1)
-		go func() { done <- cmd.Wait() }()
 		select {
-		case <-done:
+		case <-exit:
 		case <-time.After(daemonShutdownTimeout):
 			_ = cmd.Process.Signal(syscall.SIGKILL)
-			<-done
+			<-exit
 		}
 		cancel()
 		_ = logFile.Close()
