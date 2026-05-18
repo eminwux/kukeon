@@ -17,8 +17,8 @@
 package deletecmd
 
 import (
-	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
@@ -29,18 +29,15 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/delete/space"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/stack"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
-	"github.com/eminwux/kukeon/internal/apply/parser"
-	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-type deleteController interface {
-	DeleteDocuments(docs []parser.Document, cascade, force bool) (controller.DeleteResult, error)
-}
-
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
+// Name kept for source-compat with existing test helpers; the value is now a
+// kukeonv1.Client (mirroring apply -f).
 type MockControllerKey struct{}
 
 // NewDeleteCmd builds the `kuke delete` parent command and registers all resource
@@ -115,71 +112,61 @@ func completeDeleteSubcommands(_ *cobra.Command, _ []string, toComplete string) 
 	return matches, cobra.ShellCompDirectiveNoFileComp
 }
 
-// handleFileDeletion handles deletion from a YAML file.
+// handleFileDeletion handles deletion from a YAML file by routing through the
+// daemon-aware kukeonv1.Client — symmetric with `kuke apply -f`. The previous
+// in-process `controller.Exec` shortcut was a #574-class bug: it bypassed
+// `--host`/`KUKEON_HOST` and read /opt/kukeon directly even when a daemon
+// was managing a different run path.
 func handleFileDeletion(cmd *cobra.Command, file string) error {
 	output, err := cmd.Flags().GetString("output")
 	if err != nil {
 		return err
 	}
 
-	// Read input
+	// Read raw YAML; the client (local or RPC) owns parse/validate.
 	reader, cleanup, err := kukshared.ReadFileOrStdin(file)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if cleanupErr := cleanup(); cleanupErr != nil {
-			// Log cleanup error but don't fail the operation
-			_ = cleanupErr
-		}
-	}()
+	defer func() { _ = cleanup() }()
 
-	// Parse and validate documents
-	docs, validationErrors, err := kukshared.ParseAndValidateDocuments(reader)
+	rawYAML, err := io.ReadAll(reader)
+	if err != nil {
+		return fmt.Errorf("failed to read input: %w", err)
+	}
+
+	client, err := resolveClient(cmd)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = client.Close() }()
+
+	cascade := shared.ParseCascadeFlag(cmd)
+	force := shared.ParseForceFlag(cmd)
+
+	result, err := client.DeleteDocuments(cmd.Context(), rawYAML, cascade, force)
 	if err != nil {
 		return err
 	}
 
-	// Report validation errors
-	if len(validationErrors) > 0 {
-		return kukshared.FormatValidationErrors(validationErrors)
-	}
-
-	if len(docs) == 0 {
-		return errors.New("no valid documents found in input")
-	}
-
-	// Get controller
-	var ctrl deleteController
-	if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(deleteController); ok {
-		ctrl = mockCtrl
-	} else {
-		realCtrl, ctrlErr := shared.ControllerFromCmd(cmd)
-		if ctrlErr != nil {
-			return ctrlErr
-		}
-		ctrl = realCtrl
-	}
-
-	// Get cascade and force flags
-	cascade := shared.ParseCascadeFlag(cmd)
-	force := shared.ParseForceFlag(cmd)
-
-	// Delete documents
-	result, err := ctrl.DeleteDocuments(docs, cascade, force)
-	if err != nil {
-		return fmt.Errorf("failed to delete documents: %w", err)
-	}
-
-	// Print results
 	if output == "json" || output == "yaml" {
 		return printDeleteResultJSON(cmd, result, output)
 	}
 	return printDeleteResult(cmd, result)
 }
 
+// resolveClient picks the test-injected mock from context if present, else
+// returns a real daemon-aware client via the shared resolver. Mirrors
+// apply.resolveClient so both `-f` paths share the same seam.
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
+	}
+	return kukshared.ClientFromCmd(cmd)
+}
+
 // printDeleteResult prints deletion results in human-readable format.
-func printDeleteResult(cmd *cobra.Command, result controller.DeleteResult) error {
+func printDeleteResult(cmd *cobra.Command, result kukeonv1.DeleteDocumentsResult) error {
 	hasFailures := false
 	for _, resource := range result.Resources {
 		switch resource.Action {
@@ -210,8 +197,8 @@ func printDeleteResult(cmd *cobra.Command, result controller.DeleteResult) error
 		case actionFailed:
 			hasFailures = true
 			cmd.Printf("%s %q: failed\n", resource.Kind, resource.Name)
-			if resource.Error != nil {
-				cmd.Printf("  Error: %v\n", resource.Error)
+			if resource.Error != "" {
+				cmd.Printf("  Error: %s\n", resource.Error)
 			}
 		}
 	}
@@ -224,9 +211,9 @@ func printDeleteResult(cmd *cobra.Command, result controller.DeleteResult) error
 }
 
 // printDeleteResultJSON prints deletion results in JSON or YAML format.
-func printDeleteResultJSON(cmd *cobra.Command, result controller.DeleteResult, format string) error {
+func printDeleteResultJSON(cmd *cobra.Command, result kukeonv1.DeleteDocumentsResult, format string) error {
 	output := struct {
-		Resources []controller.ResourceDeleteResult `json:"resources"`
+		Resources []kukeonv1.DeleteResourceResult `json:"resources" yaml:"resources"`
 	}{
 		Resources: result.Resources,
 	}

@@ -367,6 +367,18 @@ func (s *KukeonV1Service) ApplyDocuments(args *kukeonv1.ApplyDocumentsArgs, repl
 	return nil
 }
 
+// ---- Delete (file-driven) ----
+
+func (s *KukeonV1Service) DeleteDocuments(
+	args *kukeonv1.DeleteDocumentsArgs,
+	reply *kukeonv1.DeleteDocumentsReply,
+) error {
+	result, err := s.core.DeleteDocuments(s.ctx, args.RawYAML, args.Cascade, args.Force)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
 // Image methods (LoadImage / ListImages / GetImage / DeleteImage) are
 // intentionally not served over RPC — `kuke image *` is daemon-independent
 // by design (#226). The CLI constructs a local in-process client directly.

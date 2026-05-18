@@ -833,6 +833,47 @@ func (c *Client) ApplyDocuments(_ context.Context, rawYAML []byte) (kukeonv1.App
 	return out, nil
 }
 
+func (c *Client) DeleteDocuments(
+	_ context.Context,
+	rawYAML []byte,
+	cascade, force bool,
+) (kukeonv1.DeleteDocumentsResult, error) {
+	docs, validationErrors, err := parseAndValidate(rawYAML)
+	if err != nil {
+		return kukeonv1.DeleteDocumentsResult{}, err
+	}
+	if len(validationErrors) > 0 {
+		return kukeonv1.DeleteDocumentsResult{}, formatValidationErrors(validationErrors)
+	}
+	if len(docs) == 0 {
+		return kukeonv1.DeleteDocumentsResult{}, errors.New("no valid documents found in input")
+	}
+
+	res, err := c.ctrl.DeleteDocuments(docs, cascade, force)
+	if err != nil {
+		return kukeonv1.DeleteDocumentsResult{}, err
+	}
+
+	out := kukeonv1.DeleteDocumentsResult{
+		Resources: make([]kukeonv1.DeleteResourceResult, 0, len(res.Resources)),
+	}
+	for _, r := range res.Resources {
+		item := kukeonv1.DeleteResourceResult{
+			Index:    r.Index,
+			Kind:     r.Kind,
+			Name:     r.Name,
+			Action:   r.Action,
+			Cascaded: r.Cascaded,
+			Details:  r.Details,
+		}
+		if r.Error != nil {
+			item.Error = r.Error.Error()
+		}
+		out.Resources = append(out.Resources, item)
+	}
+	return out, nil
+}
+
 // parseAndValidate mirrors cmd/kuke/shared.ParseAndValidateDocuments, but
 // takes a byte slice so it works both server-side (from the wire) and in
 // the --no-daemon CLI path.

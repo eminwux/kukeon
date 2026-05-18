@@ -84,6 +84,11 @@ type Client interface {
 
 	RefreshAll(ctx context.Context) (RefreshAllResult, error)
 	ApplyDocuments(ctx context.Context, rawYAML []byte) (ApplyDocumentsResult, error)
+	// DeleteDocuments is the file-driven counterpart to ApplyDocuments —
+	// `kuke delete -f` sends the raw YAML over the wire so deletes honor
+	// `--host` routing the same way applies do. Per-resource cascade/force
+	// semantics match the single-kind Delete{Realm,Space,Stack} methods.
+	DeleteDocuments(ctx context.Context, rawYAML []byte, cascade, force bool) (DeleteDocumentsResult, error)
 
 	// NOTE: image operations (LoadImage / ListImages / GetImage /
 	// DeleteImage) are intentionally NOT on this interface. They are
@@ -181,8 +186,9 @@ const (
 	MethodPurgeCell      = ServiceName + ".PurgeCell"
 	MethodPurgeContainer = ServiceName + ".PurgeContainer"
 
-	MethodRefreshAll     = ServiceName + ".RefreshAll"
-	MethodApplyDocuments = ServiceName + ".ApplyDocuments"
+	MethodRefreshAll      = ServiceName + ".RefreshAll"
+	MethodApplyDocuments  = ServiceName + ".ApplyDocuments"
+	MethodDeleteDocuments = ServiceName + ".DeleteDocuments"
 
 	MethodPing = ServiceName + ".Ping"
 )

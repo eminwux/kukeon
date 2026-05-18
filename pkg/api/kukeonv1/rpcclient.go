@@ -621,6 +621,23 @@ func (c *UnixClient) ApplyDocuments(ctx context.Context, rawYAML []byte) (ApplyD
 	return reply.Result, nil
 }
 
+// DeleteDocuments implements Client.
+func (c *UnixClient) DeleteDocuments(
+	ctx context.Context,
+	rawYAML []byte,
+	cascade, force bool,
+) (DeleteDocumentsResult, error) {
+	args := &DeleteDocumentsArgs{RawYAML: rawYAML, Cascade: cascade, Force: force}
+	reply := &DeleteDocumentsReply{}
+	if err := c.call(ctx, MethodDeleteDocuments, args, reply); err != nil {
+		return DeleteDocumentsResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // Ping implements Client.
 func (c *UnixClient) Ping(ctx context.Context) error {
 	args := &PingArgs{}
