@@ -3,9 +3,29 @@ on:
   pull_request:
     branches:
       - main
+    # Skip on changes that can't affect Go build/test/e2e outcomes (docs-only
+    # PRs, mkdocs site edits, release tooling, etc.). `make e2e` shells out to
+    # `docker build` against the repo root Dockerfile and runs Go binaries
+    # produced from the Makefile, so both stay in the trigger set alongside
+    # `**/*.go` and the module files. The workflow self-reference ensures CI
+    # edits to this file still run their own job.
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - "Dockerfile"
+      - ".github/workflows/test.yaml"
   push:
     branches:
       - main
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - "Dockerfile"
+      - ".github/workflows/test.yaml"
 
 # Both jobs only check out the repo and run tests — no PR comments, no
 # release artifacts, no remote pushes. The minimal read-only default
