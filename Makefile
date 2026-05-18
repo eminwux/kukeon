@@ -108,6 +108,21 @@ e2e: test-e2e
 # mirrors `scripts/dev-init.sh`) only emits a diagnostic; the unset is
 # unconditional because the e2e suite's daemon-bringing tests rely on the
 # per-test --run-path → socket derivation in either mode.
+#
+# `KUKE_INIT_SERVER_CONFIGURATION=/dev/null` short-circuits cross-test
+# contamination via `/etc/kukeon/kukeond.yaml`: the first test's `kuke init`
+# brings up kukeond, which writes the auto-generated default YAML on first
+# start (internal/serverconfig.WriteDefault, O_EXCL — first writer wins). That
+# YAML hardcodes `spec.socket: /run/kukeon/kukeond.sock` regardless of what
+# socket the daemon was launched with (see issue #581). Subsequent tests'
+# `kuke init` reads it via applyServerConfiguration, calls
+# `viper.Set(KUKEOND_SOCKET, "/run/kukeon/kukeond.sock")`, and trips the
+# `viper.IsSet` gate in `applyRunPathImpliesKukeondSocket` — derivation is
+# skipped, kukeond comes up on the wrong socket, and the test's
+# `unix://<runPath>/kukeond.sock` client dial fails with "no such file or
+# directory". Pointing init at `/dev/null` (serverconfig.Load handles the
+# zero-byte read as an absent-doc fall-through, returning a zero-value
+# document with no error) keeps the contamination out of the init read path.
 test-e2e: kuke kukeond kuketty
 	@echo "Building local kukeond image $(KUKEON_E2E_IMAGE_DOCKER_NAME) for e2e"
 	docker build --build-arg VERSION=v0.0.0-e2e -t $(KUKEON_E2E_IMAGE_DOCKER_NAME) .
@@ -119,6 +134,7 @@ test-e2e: kuke kukeond kuketty
 		E2E_BIN_DIR=$(CURDIR) \
 		KUKEON_E2E_IMAGE=$(KUKEON_E2E_IMAGE) \
 		KUKEON_E2E_IMAGE_DOCKER_NAME=$(KUKEON_E2E_IMAGE_DOCKER_NAME) \
+		KUKE_INIT_SERVER_CONFIGURATION=/dev/null \
 		env -u KUKEOND_SOCKET go test -v ./e2e
 
 tag:
