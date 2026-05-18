@@ -135,6 +135,52 @@ spec:
 	}
 }
 
+// TestNewApplyCmd_RunE_JSONOutput locks the lowercase shape of
+// `kuke apply -f -o json` so the keys can't drift back to Go's default
+// uppercase marshaling. Mirrors TestNewDeleteCmd_RunE_JSONOutput on the
+// sibling delete command.
+func TestNewApplyCmd_RunE_JSONOutput(t *testing.T) {
+	const validYAML = `apiVersion: v1beta1
+kind: Realm
+metadata:
+  name: r1
+spec:
+  namespace: r1
+`
+
+	cmd := apply.NewApplyCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+
+	fc := &fakeClient{
+		applyFn: func(_ []byte) (kukeonv1.ApplyDocumentsResult, error) {
+			return kukeonv1.ApplyDocumentsResult{
+				Resources: []kukeonv1.ApplyResourceResult{
+					{Index: 0, Kind: "Realm", Name: "r1", Action: "created"},
+				},
+			}, nil
+		},
+	}
+	ctx = context.WithValue(ctx, apply.MockControllerKey{}, kukeonv1.Client(fc))
+	cmd.SetContext(ctx)
+
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validYAML), "--output", "json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	for _, want := range []string{`"index"`, `"kind"`, `"name"`, `"action"`, `"resources"`, "Realm", "r1", "created"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected JSON output to contain %q, got: %q", want, output)
+		}
+	}
+}
+
 type fakeClient struct {
 	kukeonv1.FakeClient
 
