@@ -264,11 +264,21 @@ func verifyContainerdNamespace(t *testing.T, namespace string) bool {
 
 // verifyContainerTaskInCellCgroup checks that a container's task cgroup is
 // nested under its cell cgroup and contains at least one PID. The on-disk
-// expectation is <mountpoint>/<cellGroup>/<containerdID>/cgroup.procs with a
-// non-empty body — i.e. runc honored Linux.CgroupsPath set by
-// BuildContainerSpec from cell.Status.CgroupPath. Issue #312: without that
-// wiring, the per-task cgroup is created elsewhere (under the containerd
-// namespace cgroup) and the path checked here doesn't exist.
+// expectation is the runtime invariant established by two stacked fixes:
+//
+//   - Issue #312 / fix #316: BuildContainerSpec must set Linux.CgroupsPath
+//     from cell.Status.CgroupPath so runc creates <cellGroup>/<containerdID>/
+//     instead of placing the task cgroup under the containerd namespace.
+//   - Issue #340: StartContainer must drain the just-started task PID out of
+//     <cellGroup>/<containerdID>/cgroup.procs into a <containerdID>/_payload
+//     leaf so the no-internal-process rule lets later runtimes widen
+//     subtree_control on the cell cgroup.
+//
+// Post-#340, the parent <containerdID>/cgroup.procs is intentionally empty
+// and the PID lives at <containerdID>/_payload/cgroup.procs — but only the
+// nested layout proves both fixes are still wired. Falls back to the parent
+// path so the helper still passes on a build that predates #340's leaf
+// relocation; either layout is a positive #312 signal.
 func verifyContainerTaskInCellCgroup(t *testing.T, cellGroup, containerdID string) bool {
 	t.Helper()
 
@@ -280,19 +290,24 @@ func verifyContainerTaskInCellCgroup(t *testing.T, cellGroup, containerdID strin
 	relativeCell := strings.TrimPrefix(cellGroup, "/")
 	taskCgroup := filepath.Join(mountpoint, relativeCell, containerdID)
 
-	procsPath := filepath.Join(taskCgroup, "cgroup.procs")
-	data, err := os.ReadFile(procsPath)
-	if err != nil {
-		t.Logf("read %s: %v", procsPath, err)
-		return false
+	for _, procsPath := range []string{
+		filepath.Join(taskCgroup, "_payload", "cgroup.procs"),
+		filepath.Join(taskCgroup, "cgroup.procs"),
+	} {
+		data, err := os.ReadFile(procsPath)
+		if err != nil {
+			t.Logf("read %s: %v", procsPath, err)
+			continue
+		}
+		pids := strings.Fields(string(data))
+		if len(pids) == 0 {
+			t.Logf("cell-rooted task cgroup %s exists but cgroup.procs is empty", procsPath)
+			continue
+		}
+		t.Logf("verified container task PIDs %v in %s", pids, procsPath)
+		return true
 	}
-	pids := strings.Fields(string(data))
-	if len(pids) == 0 {
-		t.Logf("cell-rooted task cgroup %s exists but cgroup.procs is empty", taskCgroup)
-		return false
-	}
-	t.Logf("verified container task PIDs %v under cell cgroup %s", pids, taskCgroup)
-	return true
+	return false
 }
 
 // verifyCgroupPathExists verifies cgroup path exists in filesystem.
