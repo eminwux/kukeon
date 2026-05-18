@@ -259,7 +259,7 @@ sudo kuke run -f spec.yaml --rm                             # auto-delete after 
 - Re-running `kuke run -f` against an existing cell whose on-disk spec **diverges** from the file is **refused**, not silently updated. The error message points the operator at `kuke apply -f` for the update path. Exit code non-zero.
 - `-f` and `-p` are mutually exclusive; `--name` is rejected with `-f` (the YAML's `metadata.name` is the cell name verbatim).
 - `--container` is only valid in attach mode; passing both `--container` and `-d/--detach` exits non-zero.
-- `--rm` is daemon-mode only and incompatible with in-process mode (`KUKEON_NO_DAEMON=true` or `--run-path` promotion). Cleanup latency is bounded by the daemon's reconcile interval (default 30s), not real-time.
+- `--rm` is processed by `kukeond`'s reconcile loop. `kuke run` is daemon-only after #566 — `KUKEON_NO_DAEMON=true` and `--run-path` promotion no longer reach an in-process branch for workload verbs, so `--rm` and `--run-path` are not mutually exclusive on `kuke run`. Cleanup latency is bounded by the daemon's reconcile interval (default 30s), not real-time.
 - A clean `^]^]` detach in attach mode does **not** trigger `--rm` cleanup; the cell stays alive for re-attach. Only workload termination, peer hangup, or an unrecoverable controller error fires cleanup.
 - `kuke run -f /missing.yaml` exits non-zero with a `failed to open file` error.
 - A reference to an unavailable image surfaces the containerd resolver error verbatim (e.g. `pull access denied, repository does not exist or may require authorization`) and exits non-zero; the half-created cell may need `kuke purge cell` to clean up.

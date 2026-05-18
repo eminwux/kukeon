@@ -53,7 +53,7 @@ Keys not declared in `spec.parameters[]` are rejected.
 
 ## Cleanup with `--rm`
 
-`--rm` best-effort deletes the cell after it's no longer needed (any return code). Daemon-mode only — incompatible with in-process mode (set with `KUKEON_NO_DAEMON=true` or by passing `--run-path`, which auto-promotes). Cleanup runs from `kukeond`'s reconcile loop, so latency is bounded by the reconcile interval rather than firing the instant the trigger fires.
+`--rm` best-effort deletes the cell after it's no longer needed (any return code). `kuke run` is daemon-only after #566 — `KUKEON_NO_DAEMON=true` and `--run-path` promotion are inert for workload verbs and no longer reach an in-process branch for `run`, so `--rm` is always available. Cleanup runs from `kukeond`'s reconcile loop, so latency is bounded by the reconcile interval rather than firing the instant the trigger fires.
 
 Triggers:
 
