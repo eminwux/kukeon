@@ -85,6 +85,8 @@ See [Guides → Local development](../guides/local-dev.md) for the full dev loop
 # Unit tests
 go test ./...
 
-# End-to-end tests (require containerd, root, and a disposable host)
+# End-to-end tests
 make e2e
 ```
+
+`make e2e` needs root, a running docker daemon, and standalone containerd at `/run/containerd/containerd.sock` (the same prerequisites `make dev-init` calls out under [Guides → Local development](../guides/local-dev.md)). Both supported paths work: a clean host where the suite owns `/run/kukeon/`, and a nested run inside a kukeon-managed `kukeon-dev-root` cell where each test auto-derives its own socket from `--run-path <tempdir>` so the parent dev cell's `/run/kukeon/` plumbing is untouched (see [`docs/dev-init.md`](https://github.com/eminwux/kukeon/blob/main/docs/dev-init.md)).
