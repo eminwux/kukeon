@@ -1132,7 +1132,8 @@ func TestContainerTtyRoundTripV1Beta1(t *testing.T) {
 					{Script: "git pull"},
 					{Script: "claude"},
 				},
-				LogFile: "/run/kukeon/tty/log",
+				LogFile:  "/run/kukeon/tty/custom.log",
+				LogLevel: "debug",
 			},
 		},
 	}
@@ -1148,6 +1149,9 @@ func TestContainerTtyRoundTripV1Beta1(t *testing.T) {
 	}
 	if internal.Spec.Tty.LogFile != input.Spec.Tty.LogFile {
 		t.Errorf("internal logFile = %q, want %q", internal.Spec.Tty.LogFile, input.Spec.Tty.LogFile)
+	}
+	if internal.Spec.Tty.LogLevel != input.Spec.Tty.LogLevel {
+		t.Errorf("internal logLevel = %q, want %q", internal.Spec.Tty.LogLevel, input.Spec.Tty.LogLevel)
 	}
 	if len(internal.Spec.Tty.OnInit) != 2 ||
 		internal.Spec.Tty.OnInit[0].Script != "git pull" ||
@@ -1166,6 +1170,9 @@ func TestContainerTtyRoundTripV1Beta1(t *testing.T) {
 	}
 	if out.Spec.Tty.LogFile != input.Spec.Tty.LogFile {
 		t.Errorf("round-trip logFile = %q, want %q", out.Spec.Tty.LogFile, input.Spec.Tty.LogFile)
+	}
+	if out.Spec.Tty.LogLevel != input.Spec.Tty.LogLevel {
+		t.Errorf("round-trip logLevel = %q, want %q", out.Spec.Tty.LogLevel, input.Spec.Tty.LogLevel)
 	}
 	if len(out.Spec.Tty.OnInit) != len(input.Spec.Tty.OnInit) {
 		t.Fatalf("round-trip onInit len = %d, want %d", len(out.Spec.Tty.OnInit), len(input.Spec.Tty.OnInit))
@@ -1272,10 +1279,12 @@ func TestContainerTtyRejectedWithoutAttachable(t *testing.T) {
 		{"prompt only", &ext.ContainerTty{Prompt: `"\u\$ "`}},
 		{"onInit only", &ext.ContainerTty{OnInit: []ext.TtyStage{{Script: "echo"}}}},
 		{"logFile only", &ext.ContainerTty{LogFile: "/run/kukeon/tty/log"}},
+		{"logLevel only", &ext.ContainerTty{LogLevel: "debug"}},
 		{"all set", &ext.ContainerTty{
-			Prompt:  `"\u\$ "`,
-			OnInit:  []ext.TtyStage{{Script: "echo"}},
-			LogFile: "/run/kukeon/tty/log",
+			Prompt:   `"\u\$ "`,
+			OnInit:   []ext.TtyStage{{Script: "echo"}},
+			LogFile:  "/run/kukeon/tty/log",
+			LogLevel: "debug",
 		}},
 	}
 	for _, tc := range cases {
@@ -1294,6 +1303,56 @@ func TestContainerTtyRejectedWithoutAttachable(t *testing.T) {
 			}
 			if _, _, err := apischeme.NormalizeContainer(input); err == nil {
 				t.Fatalf("NormalizeContainer accepted tty with attachable=false; want error")
+			}
+		})
+	}
+}
+
+// TestContainerTtyLogLevelEnumValidation enforces the AC that
+// Tty.LogLevel only accepts the empty string (defaults to "info" daemon-
+// side) or one of debug/info/warn/error. Unknown values are rejected at
+// apply time rather than silently coerced — the kuketty wrapper's debug
+// log is the operator's primary diagnostic when an attach session
+// misbehaves and a typo'd level must not silently lose verbosity. Issue
+// #599.
+func TestContainerTtyLogLevelEnumValidation(t *testing.T) {
+	accepted := []string{"", "debug", "info", "warn", "error"}
+	for _, level := range accepted {
+		t.Run("accepted/"+level, func(t *testing.T) {
+			input := ext.ContainerDoc{
+				APIVersion: ext.APIVersionV1Beta1,
+				Kind:       ext.KindContainer,
+				Metadata:   ext.ContainerMetadata{Name: "c"},
+				Spec: ext.ContainerSpec{
+					ID:      "c",
+					RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
+					Image:      "alpine:latest",
+					Attachable: true,
+					Tty:        &ext.ContainerTty{LogLevel: level},
+				},
+			}
+			if _, _, err := apischeme.NormalizeContainer(input); err != nil {
+				t.Fatalf("NormalizeContainer rejected level %q: %v", level, err)
+			}
+		})
+	}
+	rejected := []string{"trace", "DEBUG", "verbose", "fatal", "warning", "nope"}
+	for _, level := range rejected {
+		t.Run("rejected/"+level, func(t *testing.T) {
+			input := ext.ContainerDoc{
+				APIVersion: ext.APIVersionV1Beta1,
+				Kind:       ext.KindContainer,
+				Metadata:   ext.ContainerMetadata{Name: "c"},
+				Spec: ext.ContainerSpec{
+					ID:      "c",
+					RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
+					Image:      "alpine:latest",
+					Attachable: true,
+					Tty:        &ext.ContainerTty{LogLevel: level},
+				},
+			}
+			if _, _, err := apischeme.NormalizeContainer(input); err == nil {
+				t.Fatalf("NormalizeContainer accepted bogus level %q; want validation error", level)
 			}
 		})
 	}

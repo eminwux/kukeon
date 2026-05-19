@@ -191,6 +191,13 @@ type Options struct {
 	// Resources.MemoryLimitBytes. Plumbed from controller.Options of the
 	// same name. Zero preserves the prior behavior. Issue #531.
 	DefaultMemoryLimitBytes int64
+	// KukettyLogLevel is the daemon-wide default verbosity of the kuketty
+	// wrapper's slog output, threaded down from controller.Options into the
+	// renderer's resolveTtyLogLevel helper. Empty falls through to the
+	// hardcoded "info" inside that helper (preserves the behavior of test
+	// fixtures that build the runner directly with zero-value Options).
+	// Issue #599.
+	KukettyLogLevel string
 }
 
 func NewRunner(ctx context.Context, logger *slog.Logger, opts Options) Runner {

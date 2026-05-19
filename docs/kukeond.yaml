@@ -23,6 +23,11 @@ spec:
   containerdSocket: /run/containerd/containerd.sock
   # Daemon log level: debug, info, warn, error.
   logLevel: info
+  # Daemon-wide default verbosity for the kuketty wrapper's slog output,
+  # applied when an Attachable cell omits the per-container
+  # `spec.containers[].tty.logLevel` knob. Same enum as logLevel above.
+  # A per-container override always wins. Issue #599.
+  kukettyLogLevel: info
   # Container image `kuke init` provisions for the kukeond system cell.
   # Read by `kuke init --server-configuration` only; the daemon ignores it.
   kukeondImage: ghcr.io/eminwux/kukeon:latest
