@@ -51,11 +51,20 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// fixedProbe returns a ReachableProbe that always reports `reachable`. Used
+// to drive the socket-staleness branches deterministically without needing a
+// real listening socket — the production default would dial the configured
+// KUKEOND_SOCKET path, which is host-state dependent.
+func fixedProbe(reachable bool) lifecycle.ReachableProbe {
+	return func(_ context.Context, _ string, _ time.Duration) bool { return reachable }
+}
+
 func TestDaemonRestart(t *testing.T) {
 	tests := []struct {
 		name           string
 		args           []string
 		fake           *fakeClient
+		probe          lifecycle.ReachableProbe
 		wantErr        string
 		wantOutputs    []string
 		wantNotOutputs []string
@@ -96,7 +105,7 @@ func TestDaemonRestart(t *testing.T) {
 			},
 		},
 		{
-			name: "already-stopped cell skips stop phase and starts",
+			name: "already-stopped cell with unreachable socket skips stop phase and starts",
 			fake: &fakeClient{
 				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
 					return kukeonv1.GetCellResult{
@@ -114,9 +123,44 @@ func TestDaemonRestart(t *testing.T) {
 					return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
 				},
 			},
+			probe: fixedProbe(false),
 			wantOutputs: []string{
 				`kukeond was already stopped (cell "kukeond" in realm "kuke-system")`,
 				`kukeond started (cell "kukeond" in realm "kuke-system")`,
+			},
+		},
+		{
+			// Other-direction staleness fix (#611): metadata reads
+			// not-Ready but the socket still answers, so the daemon is
+			// live and the controller's status lags. Old behaviour
+			// would skip the stop phase and call StartCell on top of a
+			// running daemon; new behaviour falls through to StopPhase
+			// first so restart actually restarts.
+			name: "metadata says not-Ready but socket is reachable runs stop phase then starts",
+			fake: &fakeClient{
+				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{
+						Cell: v1beta1.CellDoc{
+							Status: v1beta1.CellStatus{State: v1beta1.CellStateStopped},
+						},
+						MetadataExists: true,
+					}, nil
+				},
+				stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+					return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
+				},
+				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+					return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
+				},
+			},
+			probe: fixedProbe(true),
+			wantOutputs: []string{
+				"metadata reports not-Ready but socket",
+				`kukeond stopped (cell "kukeond" in realm "kuke-system")`,
+				`kukeond started (cell "kukeond" in realm "kuke-system")`,
+			},
+			wantNotOutputs: []string{
+				`kukeond was already stopped`,
 			},
 		},
 		{
@@ -229,6 +273,7 @@ func TestDaemonRestart(t *testing.T) {
 					return kukeonv1.StartCellResult{Cell: doc, Started: false}, nil
 				},
 			},
+			probe:   fixedProbe(false),
 			wantErr: "start kukeond cell: controller reported no change",
 		},
 	}
@@ -242,6 +287,9 @@ func TestDaemonRestart(t *testing.T) {
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 			ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(tt.fake))
+			if tt.probe != nil {
+				ctx = context.WithValue(ctx, lifecycle.ReachableProbeKey{}, tt.probe)
+			}
 			cmd.SetContext(ctx)
 			cmd.SetArgs(tt.args)
 

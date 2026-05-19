@@ -132,6 +132,7 @@ sudo kuke daemon logs -f               # follow until SIGINT
 
 - `daemon start` is idempotent. Running it while the daemon is up succeeds with a clear "already running" message; exit code 0.
 - `daemon stop` is idempotent. Running it while the daemon is down succeeds with a clear "already stopped" message; exit code 0.
+- Idempotence is keyed on **liveness**, not persisted cell state. Each lifecycle verb dials the kukeond socket alongside reading the cell's `.status` so that an externally-killed daemon (OOM, host reboot mid-run, `kill -9`) does not silently mask itself as "already running" — `daemon start` falls through to bring the cell back up, while `daemon stop` / `kill` / `restart` falls through to act on a live daemon whose persisted status lags. The probe budget is sub-second; a stale-Ready or stale-not-Ready divergence is printed on stdout before the reconciling action runs.
 - `daemon start` errors when the host has not been `kuke init`-ed yet (no cell to start). Exit code non-zero with a message pointing the operator at `kuke init`.
 - `daemon kill` has no grace period; this is the escape hatch for a hung daemon. Use `stop` for the graceful path.
 - `daemon reset` is destructive (cell deletion + socket removal) and described in the Bootstrap & teardown section.

@@ -25,6 +25,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/eminwux/kukeon/cmd/kuke/daemon/internal/lifecycle"
 	start "github.com/eminwux/kukeon/cmd/kuke/daemon/start"
@@ -35,6 +36,14 @@ import (
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
+
+// fixedProbe returns a ReachableProbe that always reports `reachable`. Used
+// to drive the socket-staleness branches deterministically without needing a
+// real listening socket — the production default would dial the configured
+// KUKEOND_SOCKET path, which is host-state dependent.
+func fixedProbe(reachable bool) lifecycle.ReachableProbe {
+	return func(_ context.Context, _ string, _ time.Duration) bool { return reachable }
+}
 
 // TestMain mocks the shared euid lookup to euid=0 for every test in this
 // package so the fail-fast root gate in runStart does not short-circuit the
@@ -52,6 +61,7 @@ func TestDaemonStart(t *testing.T) {
 	tests := []struct {
 		name       string
 		fake       *fakeClient
+		probe      lifecycle.ReachableProbe
 		wantErr    string
 		wantOutput string
 	}{
@@ -72,10 +82,11 @@ func TestDaemonStart(t *testing.T) {
 					return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
 				},
 			},
+			probe:      fixedProbe(false),
 			wantOutput: `kukeond started (cell "kukeond" in realm "kuke-system")`,
 		},
 		{
-			name: "already-running cell is a no-op",
+			name: "already-running cell with reachable socket is a no-op",
 			fake: &fakeClient{
 				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
 					return kukeonv1.GetCellResult{
@@ -95,10 +106,11 @@ func TestDaemonStart(t *testing.T) {
 					return kukeonv1.StartCellResult{}, nil
 				},
 			},
+			probe:      fixedProbe(true),
 			wantOutput: `kukeond is already running (cell "kukeond" in realm "kuke-system")`,
 		},
 		{
-			name: "running by container state alone (stale cell metadata)",
+			name: "running by container state alone (stale cell metadata) with reachable socket",
 			fake: &fakeClient{
 				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
 					return kukeonv1.GetCellResult{
@@ -118,7 +130,39 @@ func TestDaemonStart(t *testing.T) {
 					return kukeonv1.StartCellResult{}, nil
 				},
 			},
+			probe:      fixedProbe(true),
 			wantOutput: "kukeond is already running",
+		},
+		{
+			// The headline failure mode this issue (#611) fixes: persisted
+			// state still reads Ready (daemon was OOM-killed / host-rebooted
+			// before the controller could write a "stopped" status), but the
+			// socket no longer answers. Old behaviour was to print "already
+			// running" and exit 0, leaving the operator to discover the
+			// missing daemon via the next daemon-routed command's
+			// dial-unix error. New behaviour: log the staleness and fall
+			// through to StartCell so the cell actually comes back up.
+			name: "metadata says Ready but socket is unreachable falls through to StartCell",
+			fake: &fakeClient{
+				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{
+						Cell: v1beta1.CellDoc{
+							Status: v1beta1.CellStatus{
+								State: v1beta1.CellStateReady,
+								Containers: []v1beta1.ContainerStatus{
+									{State: v1beta1.ContainerStateReady},
+								},
+							},
+						},
+						MetadataExists: true,
+					}, nil
+				},
+				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+					return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
+				},
+			},
+			probe:      fixedProbe(false),
+			wantOutput: "metadata reports Ready but socket",
 		},
 		{
 			name: "host not initialized",
@@ -153,6 +197,7 @@ func TestDaemonStart(t *testing.T) {
 					return kukeonv1.StartCellResult{}, errors.New("runner blew up")
 				},
 			},
+			probe:   fixedProbe(false),
 			wantErr: "start kukeond cell:",
 		},
 	}
@@ -165,6 +210,9 @@ func TestDaemonStart(t *testing.T) {
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 			ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(tt.fake))
+			if tt.probe != nil {
+				ctx = context.WithValue(ctx, lifecycle.ReachableProbeKey{}, tt.probe)
+			}
 			cmd.SetContext(ctx)
 			cmd.SetArgs(nil)
 

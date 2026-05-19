@@ -79,11 +79,30 @@ func runStart(cmd *cobra.Command, _ []string) error {
 	}
 
 	if lifecycle.IsCellRunning(getRes.Cell) {
+		probe := lifecycle.ResolveReachableProbe(cmd)
+		socketPath := lifecycle.ResolveSocketPath()
+		if probe(cmd.Context(), socketPath, lifecycle.DefaultReachableTimeout) {
+			cmd.Printf(
+				"kukeond is already running (cell %q in realm %q)\n",
+				consts.KukeSystemCellName, consts.KukeSystemRealmName,
+			)
+			return nil
+		}
+		// Persisted state reads Ready but the socket does not answer — the
+		// daemon was killed externally (OOM, host reboot mid-run, kill -9)
+		// and the metadata never got the "stopped" write. Reconcile by
+		// falling through to StartCell rather than claiming "already
+		// running" while the socket is missing.
 		cmd.Printf(
-			"kukeond is already running (cell %q in realm %q)\n",
-			consts.KukeSystemCellName, consts.KukeSystemRealmName,
+			"kukeond metadata reports Ready but socket %s is unreachable; restarting cell\n",
+			socketPath,
 		)
-		return nil
+		logger.WarnContext(cmd.Context(),
+			"daemon metadata stale: marked Ready but socket unreachable; restarting cell",
+			"socket", socketPath,
+			"cell", consts.KukeSystemCellName,
+			"realm", consts.KukeSystemRealmName,
+		)
 	}
 
 	startRes, err := client.StartCell(cmd.Context(), doc)

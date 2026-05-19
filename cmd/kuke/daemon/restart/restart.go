@@ -92,15 +92,40 @@ func runRestart(cmd *cobra.Command, _ []string) error {
 		return errdefs.ErrHostNotInitialized
 	}
 
-	if lifecycle.IsCellRunning(getRes.Cell) {
-		if stopErr := lifecycle.StopPhase(cmd, client, doc, timeout); stopErr != nil {
-			return stopErr
-		}
-	} else {
+	probe := lifecycle.ResolveReachableProbe(cmd)
+	socketPath := lifecycle.ResolveSocketPath()
+	socketReachable := probe(cmd.Context(), socketPath, lifecycle.DefaultReachableTimeout)
+	cellRunning := lifecycle.IsCellRunning(getRes.Cell)
+	switch {
+	case !cellRunning && !socketReachable:
 		cmd.Printf(
 			"kukeond was already stopped (cell %q in realm %q)\n",
 			consts.KukeSystemCellName, consts.KukeSystemRealmName,
 		)
+	case !cellRunning && socketReachable:
+		// Metadata lags behind a live daemon — fall through to StopPhase
+		// rather than skipping the stop phase and trying to re-start on
+		// top of an already-running cell.
+		cmd.Printf(
+			"kukeond metadata reports not-Ready but socket %s is reachable; stopping cell\n",
+			socketPath,
+		)
+		logger.WarnContext(cmd.Context(),
+			"daemon metadata stale: marked not-Ready but socket reachable; stopping cell",
+			"socket", socketPath,
+			"cell", consts.KukeSystemCellName,
+			"realm", consts.KukeSystemRealmName,
+		)
+		if stopErr := lifecycle.StopPhase(cmd, client, doc, timeout); stopErr != nil {
+			return stopErr
+		}
+	default:
+		// cellRunning — either fully-live or stale-Ready. Run StopPhase
+		// so the controller reconciles cell state regardless of which
+		// side is stale.
+		if stopErr := lifecycle.StopPhase(cmd, client, doc, timeout); stopErr != nil {
+			return stopErr
+		}
 	}
 
 	startRes, err := client.StartCell(cmd.Context(), doc)

@@ -25,6 +25,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/eminwux/kukeon/cmd/kuke/daemon/internal/lifecycle"
 	kill "github.com/eminwux/kukeon/cmd/kuke/daemon/kill"
@@ -35,6 +36,14 @@ import (
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
+
+// fixedProbe returns a ReachableProbe that always reports `reachable`. Used
+// to drive the socket-staleness branches deterministically without needing a
+// real listening socket — the production default would dial the configured
+// KUKEOND_SOCKET path, which is host-state dependent.
+func fixedProbe(reachable bool) lifecycle.ReachableProbe {
+	return func(_ context.Context, _ string, _ time.Duration) bool { return reachable }
+}
 
 // TestMain mocks the shared euid lookup to euid=0 for every test in this
 // package so the fail-fast root gate in runKill does not short-circuit the
@@ -52,6 +61,7 @@ func TestDaemonKill(t *testing.T) {
 	tests := []struct {
 		name       string
 		fake       *fakeClient
+		probe      lifecycle.ReachableProbe
 		wantErr    string
 		wantOutput string
 	}{
@@ -80,7 +90,7 @@ func TestDaemonKill(t *testing.T) {
 			wantOutput: `kukeond force-killed (cell "kukeond" in realm "kuke-system")`,
 		},
 		{
-			name: "already-stopped cell is a no-op",
+			name: "already-stopped cell with unreachable socket is a no-op",
 			fake: &fakeClient{
 				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
 					return kukeonv1.GetCellResult{
@@ -95,7 +105,31 @@ func TestDaemonKill(t *testing.T) {
 					return kukeonv1.KillCellResult{}, nil
 				},
 			},
+			probe:      fixedProbe(false),
 			wantOutput: `kukeond is already stopped (cell "kukeond" in realm "kuke-system")`,
+		},
+		{
+			// Other-direction staleness fix (#611): metadata reads
+			// not-Ready but the socket still answers, so the daemon is up
+			// and the controller's status simply lags. Old behaviour would
+			// silently no-op; new behaviour falls through to KillCell so
+			// the live daemon is actually torn down.
+			name: "metadata says not-Ready but socket is reachable falls through to KillCell",
+			fake: &fakeClient{
+				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{
+						Cell: v1beta1.CellDoc{
+							Status: v1beta1.CellStatus{State: v1beta1.CellStateStopped},
+						},
+						MetadataExists: true,
+					}, nil
+				},
+				killCellFn: func(doc v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+					return kukeonv1.KillCellResult{Cell: doc, Killed: true}, nil
+				},
+			},
+			probe:      fixedProbe(true),
+			wantOutput: "metadata reports not-Ready but socket",
 		},
 		{
 			name: "host not initialized",
@@ -169,6 +203,9 @@ func TestDaemonKill(t *testing.T) {
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 			ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(tt.fake))
+			if tt.probe != nil {
+				ctx = context.WithValue(ctx, lifecycle.ReachableProbeKey{}, tt.probe)
+			}
 			cmd.SetContext(ctx)
 			cmd.SetArgs(nil)
 

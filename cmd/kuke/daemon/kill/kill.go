@@ -79,11 +79,28 @@ func runKill(cmd *cobra.Command, _ []string) error {
 	}
 
 	if !lifecycle.IsCellRunning(getRes.Cell) {
+		probe := lifecycle.ResolveReachableProbe(cmd)
+		socketPath := lifecycle.ResolveSocketPath()
+		if !probe(cmd.Context(), socketPath, lifecycle.DefaultReachableTimeout) {
+			cmd.Printf(
+				"kukeond is already stopped (cell %q in realm %q)\n",
+				consts.KukeSystemCellName, consts.KukeSystemRealmName,
+			)
+			return nil
+		}
+		// Persisted state reads not-Ready but the socket answers — the
+		// daemon is up and metadata lags. Fall through to KillCell rather
+		// than silently no-op while the daemon is still serving.
 		cmd.Printf(
-			"kukeond is already stopped (cell %q in realm %q)\n",
-			consts.KukeSystemCellName, consts.KukeSystemRealmName,
+			"kukeond metadata reports not-Ready but socket %s is reachable; killing cell\n",
+			socketPath,
 		)
-		return nil
+		logger.WarnContext(cmd.Context(),
+			"daemon metadata stale: marked not-Ready but socket reachable; killing cell",
+			"socket", socketPath,
+			"cell", consts.KukeSystemCellName,
+			"realm", consts.KukeSystemRealmName,
+		)
 	}
 
 	killRes, err := client.KillCell(cmd.Context(), doc)
