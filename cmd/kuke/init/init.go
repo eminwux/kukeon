@@ -320,7 +320,23 @@ func preflightContainerdSocket(path string) error {
 // so cells reach the network on hosts where `iptables -P FORWARD DROP` is
 // the default (Docker, firewalld, ufw, hardened distros). Idempotent —
 // re-running `kuke init` on a healthy host produces no rule churn.
+//
+// On hosts without an iptables binary on PATH (minimal containers,
+// nftables-only distros that lack the iptables-nft compat shim), this
+// logs a WARN and continues: every runner call would otherwise fail and
+// abort bring-up. The host owner has implicitly opted out of
+// kukeon-managed FORWARD admission and is expected to provide whatever
+// equivalent the host needs (or run with FORWARD ACCEPT).
 func installForwardAdmission(ctx context.Context, logger *slog.Logger) error {
+	if !firewall.IsIptablesAvailable() {
+		logger.WarnContext(
+			ctx,
+			"iptables not found on PATH; skipping forward admission chain — kukeon-bridge traffic may be blocked if FORWARD default policy is DROP",
+			"chain",
+			firewall.ForwardChainName,
+		)
+		return nil
+	}
 	if err := firewall.NewInstaller(logger).Install(ctx); err != nil {
 		return fmt.Errorf("install forward admission chain: %w", err)
 	}

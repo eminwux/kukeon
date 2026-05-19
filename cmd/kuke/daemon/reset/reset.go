@@ -186,10 +186,19 @@ func runReset(cmd *cobra.Command, _ []string) error {
 		// Symmetric with `kuke init`: full re-bootstrap should leave no
 		// kukeon-owned host firewall state behind. Per-space egress chains
 		// are torn down by space-deletion paths; this removes the host-wide
-		// admission chain installed at init time.
-		fwInstaller := firewall.NewInstaller(logger)
-		if fwErr := fwInstaller.Remove(cmd.Context()); fwErr != nil {
-			return fmt.Errorf("remove forward admission chain: %w", fwErr)
+		// admission chain installed at init time. Skip silently when
+		// iptables is absent — the chain could not have been installed in
+		// the first place, mirroring init's warn-and-continue.
+		if firewall.IsIptablesAvailable() {
+			fwInstaller := firewall.NewInstaller(logger)
+			if fwErr := fwInstaller.Remove(cmd.Context()); fwErr != nil {
+				return fmt.Errorf("remove forward admission chain: %w", fwErr)
+			}
+		} else {
+			logger.DebugContext(cmd.Context(),
+				"iptables not found on PATH; skipping forward admission chain removal",
+				"chain", firewall.ForwardChainName,
+			)
 		}
 	}
 
