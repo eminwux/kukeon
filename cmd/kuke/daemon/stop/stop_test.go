@@ -51,11 +51,20 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// fixedProbe returns a ReachableProbe that always reports `reachable`. Used
+// to drive the socket-staleness branches deterministically without needing a
+// real listening socket — the production default would dial the configured
+// KUKEOND_SOCKET path, which is host-state dependent.
+func fixedProbe(reachable bool) lifecycle.ReachableProbe {
+	return func(_ context.Context, _ string, _ time.Duration) bool { return reachable }
+}
+
 func TestDaemonStop(t *testing.T) {
 	tests := []struct {
 		name       string
 		args       []string
 		fake       *fakeClient
+		probe      lifecycle.ReachableProbe
 		wantErr    string
 		wantOutput string
 	}{
@@ -88,7 +97,7 @@ func TestDaemonStop(t *testing.T) {
 			wantOutput: `kukeond stopped (cell "kukeond" in realm "kuke-system")`,
 		},
 		{
-			name: "already-stopped cell is a no-op",
+			name: "already-stopped cell with unreachable socket is a no-op",
 			fake: &fakeClient{
 				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
 					return kukeonv1.GetCellResult{
@@ -103,7 +112,31 @@ func TestDaemonStop(t *testing.T) {
 					return kukeonv1.StopCellResult{}, nil
 				},
 			},
+			probe:      fixedProbe(false),
 			wantOutput: `kukeond is already stopped (cell "kukeond" in realm "kuke-system")`,
+		},
+		{
+			// The other-direction staleness fix from #611: metadata reads
+			// not-Ready but the socket still answers, so the daemon is up
+			// and the controller's status simply lags. Old behaviour would
+			// silently no-op and leave the live daemon untouched. New
+			// behaviour: log the staleness and fall through to StopPhase.
+			name: "metadata says not-Ready but socket is reachable falls through to StopPhase",
+			fake: &fakeClient{
+				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{
+						Cell: v1beta1.CellDoc{
+							Status: v1beta1.CellStatus{State: v1beta1.CellStateStopped},
+						},
+						MetadataExists: true,
+					}, nil
+				},
+				stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+					return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
+				},
+			},
+			probe:      fixedProbe(true),
+			wantOutput: "metadata reports not-Ready but socket",
 		},
 		{
 			name: "host not initialized",
@@ -178,6 +211,9 @@ func TestDaemonStop(t *testing.T) {
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 			ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(tt.fake))
+			if tt.probe != nil {
+				ctx = context.WithValue(ctx, lifecycle.ReachableProbeKey{}, tt.probe)
+			}
 			cmd.SetContext(ctx)
 			cmd.SetArgs(tt.args)
 

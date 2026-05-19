@@ -91,11 +91,28 @@ func runStop(cmd *cobra.Command, _ []string) error {
 	}
 
 	if !lifecycle.IsCellRunning(getRes.Cell) {
+		probe := lifecycle.ResolveReachableProbe(cmd)
+		socketPath := lifecycle.ResolveSocketPath()
+		if !probe(cmd.Context(), socketPath, lifecycle.DefaultReachableTimeout) {
+			cmd.Printf(
+				"kukeond is already stopped (cell %q in realm %q)\n",
+				consts.KukeSystemCellName, consts.KukeSystemRealmName,
+			)
+			return nil
+		}
+		// Persisted state reads not-Ready but the socket answers — the
+		// daemon is up and metadata lags. Fall through to StopPhase
+		// rather than silently no-op while the daemon is still serving.
 		cmd.Printf(
-			"kukeond is already stopped (cell %q in realm %q)\n",
-			consts.KukeSystemCellName, consts.KukeSystemRealmName,
+			"kukeond metadata reports not-Ready but socket %s is reachable; stopping cell\n",
+			socketPath,
 		)
-		return nil
+		logger.WarnContext(cmd.Context(),
+			"daemon metadata stale: marked not-Ready but socket reachable; stopping cell",
+			"socket", socketPath,
+			"cell", consts.KukeSystemCellName,
+			"realm", consts.KukeSystemRealmName,
+		)
 	}
 
 	return lifecycle.StopPhase(cmd, client, doc, timeout)

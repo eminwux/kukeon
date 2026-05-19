@@ -21,16 +21,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/daemon/internal/lifecycle"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 func TestIsCellRunning(t *testing.T) {
@@ -174,6 +178,73 @@ func TestStopPhase_KillNoChangeWrapsSentinel(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "kill kukeond cell:") {
 		t.Fatalf("want wrap prefix \"kill kukeond cell:\", got %q", err.Error())
+	}
+}
+
+// TestIsDaemonReachable_Listening verifies the production probe answers true
+// against a real unix-socket listener. Pairs with the not-listening case to
+// pin both branches of the dial result.
+func TestIsDaemonReachable_Listening(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "kukeond.sock")
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen unix: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	if !lifecycle.IsDaemonReachable(context.Background(), socketPath, 500*time.Millisecond) {
+		t.Fatal("IsDaemonReachable returned false against a real listener")
+	}
+}
+
+// TestIsDaemonReachable_NotListening verifies the production probe answers
+// false when the socket path does not exist. Empty paths must also resolve
+// to false rather than dialing the empty string and surfacing a confusing
+// "invalid address" error.
+func TestIsDaemonReachable_NotListening(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nope.sock")
+	if lifecycle.IsDaemonReachable(context.Background(), missing, 100*time.Millisecond) {
+		t.Fatal("IsDaemonReachable returned true against a missing socket")
+	}
+	if lifecycle.IsDaemonReachable(context.Background(), "", 100*time.Millisecond) {
+		t.Fatal("IsDaemonReachable returned true for an empty socket path")
+	}
+}
+
+// TestResolveReachableProbe_DefaultAndInjected confirms the indirection
+// returns the production probe by default and honours a context-injected
+// fake — the contract every lifecycle verb relies on for unit testing.
+func TestResolveReachableProbe_DefaultAndInjected(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	if probe := lifecycle.ResolveReachableProbe(cmd); probe == nil {
+		t.Fatal("default probe must not be nil")
+	}
+
+	injected := func(_ context.Context, _ string, _ time.Duration) bool { return true }
+	cmd.SetContext(
+		context.WithValue(context.Background(), lifecycle.ReachableProbeKey{}, lifecycle.ReachableProbe(injected)),
+	)
+	probe := lifecycle.ResolveReachableProbe(cmd)
+	if !probe(context.Background(), "ignored", time.Millisecond) {
+		t.Fatal("ResolveReachableProbe did not return the injected fake")
+	}
+}
+
+// TestResolveSocketPath honours both an explicit viper override and the
+// registered default. Centralising the lookup means every lifecycle verb
+// agrees on which socket counts as the source of truth.
+func TestResolveSocketPath(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+
+	if got := lifecycle.ResolveSocketPath(); got != config.KUKEOND_SOCKET.Default {
+		t.Fatalf("default path: got %q, want %q", got, config.KUKEOND_SOCKET.Default)
+	}
+
+	viper.Set(config.KUKEOND_SOCKET.ViperKey, "/run/kukeon-dev/kukeond.sock")
+	if got := lifecycle.ResolveSocketPath(); got != "/run/kukeon-dev/kukeond.sock" {
+		t.Fatalf("override path: got %q, want %q", got, "/run/kukeon-dev/kukeond.sock")
 	}
 }
 

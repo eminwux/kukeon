@@ -24,13 +24,16 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"net"
 	"time"
 
+	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 // MockClientKey injects a kukeonv1.Client (typically a fake) via the command
@@ -45,6 +48,13 @@ type MockClientKey struct{}
 // verbs cannot drift on what "graceful" means.
 const DefaultTimeout = 10 * time.Second
 
+// DefaultReachableTimeout is the dial budget the lifecycle verbs use when
+// probing the kukeond socket. Short on purpose: the only acceptable failure
+// mode here is "the socket is dead" — a healthy daemon answers in <1ms over
+// the local unix socket, so 500ms is generous and a hung accept still
+// surfaces fast enough that the operator notices.
+const DefaultReachableTimeout = 500 * time.Millisecond
+
 // IsCellRunning treats the cell as live if any container reports Ready, or
 // if the persisted cell state is Ready. Every `kuke daemon` lifecycle verb
 // uses this to agree on what "running" means; the controller's StartCell
@@ -57,6 +67,63 @@ func IsCellRunning(cell v1beta1.CellDoc) bool {
 		}
 	}
 	return cell.Status.State == v1beta1.CellStateReady
+}
+
+// ReachableProbe reports whether a kukeond socket at socketPath answers a
+// short-budget dial. The lifecycle verbs use it together with IsCellRunning
+// to disambiguate the two staleness directions: persisted state says Ready
+// while the daemon has been externally killed (socket=down → start must
+// re-bring it up, stop must not silently no-op), and persisted state lags
+// behind a live daemon (socket=up → stop/kill must not silently no-op).
+type ReachableProbe func(ctx context.Context, socketPath string, timeout time.Duration) bool
+
+// ReachableProbeKey injects a custom ReachableProbe via the command context
+// so unit tests can drive the verbs without a real listening socket. Same
+// pattern as MockClientKey; production verbs call ResolveReachableProbe to
+// pick either the injected fake or the net.Dialer-backed default.
+type ReachableProbeKey struct{}
+
+// IsDaemonReachable is the production reachability probe: a bounded
+// net.Dialer-backed dial of the kukeond unix socket. Empty socketPath is
+// treated as unreachable so a missing config does not masquerade as "up".
+// The dial errors are intentionally not surfaced to the caller — the only
+// question this answers is "did the socket accept a connection within the
+// budget?", and any error (ENOENT, ECONNREFUSED, ETIMEDOUT) maps to no.
+func IsDaemonReachable(ctx context.Context, socketPath string, timeout time.Duration) bool {
+	if socketPath == "" {
+		return false
+	}
+	dialCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var d net.Dialer
+	conn, err := d.DialContext(dialCtx, "unix", socketPath)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+// ResolveReachableProbe picks the probe a lifecycle verb uses. Tests inject
+// a fake via ReachableProbeKey; production returns IsDaemonReachable. The
+// indirection lets every verb call the same one-liner without duplicating
+// the context-value lookup or hard-coding the default.
+func ResolveReachableProbe(cmd *cobra.Command) ReachableProbe {
+	if probe, ok := cmd.Context().Value(ReachableProbeKey{}).(ReachableProbe); ok && probe != nil {
+		return probe
+	}
+	return IsDaemonReachable
+}
+
+// ResolveSocketPath returns the kukeond socket path the reachability probe
+// should dial. Honours an explicit KUKEOND_SOCKET (env or viper) and falls
+// back to the registered default. Centralised so every lifecycle verb agrees
+// on which socket counts as the source of truth.
+func ResolveSocketPath() string {
+	if path := viper.GetString(config.KUKEOND_SOCKET.ViperKey); path != "" {
+		return path
+	}
+	return config.KUKEOND_SOCKET.Default
 }
 
 // StopPhase runs the graceful StopCell → SIGKILL escalation used by
