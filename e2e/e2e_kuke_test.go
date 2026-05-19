@@ -17,10 +17,13 @@
 package e2e_test
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/util/fs"
@@ -775,4 +778,206 @@ func TestKuke_Autocomplete_Fish(t *testing.T) {
 	if len(outputStr) < 50 {
 		t.Fatalf("fish completion script output too short: %d bytes", len(outputStr))
 	}
+}
+
+// TestKuke_Uninstall_VerifyState exercises the full init → create user-realm
+// cell → uninstall round-trip and asserts the post-teardown state is
+// genuinely clean. Sibling to TestKuke_Init_VerifyState (which is the
+// init-side state check); this one is the teardown-side regression guard
+// for the bug classes behind issues #193 (purged-but-namespace-survives),
+// #194 (residual namespaces), and #196 (kukeond-running-during-purge) —
+// each of which previously let `kuke uninstall` report success while
+// leaving containerd namespaces, /run/kukeon, or /opt/kukeon stragglers
+// on disk.
+//
+// Not run with t.Parallel(): uninstall touches host-global state (the
+// kukeon system user/group, every kukeon-suffixed containerd namespace,
+// the SocketDir + RunPath trees) so it must not race
+// TestKuke_Init_VerifyState or TestKuke_DaemonReset_RoundTrip, which
+// touch the same host-level surfaces.
+func TestKuke_Uninstall_VerifyState(t *testing.T) {
+	runPath := getRandomRunPath(t)
+	kukeondImage := loadKukeondImageIntoContainerd(t)
+
+	defaultNS := consts.RealmNamespace(consts.KukeonDefaultRealmName)
+	systemNS := consts.RealmNamespace(consts.KukeSystemRealmName)
+	// init brings up its own kukeond bound to <runPath>/kukeond.sock via
+	// the root-level --run-path → KUKEOND_SOCKET derivation (see
+	// applyRunPathImpliesKukeondSocket in cmd/kuke/kuke.go); subsequent
+	// workload commands dial that socket so the daemon-routed view is
+	// what we assert on. Matches the pattern in TestKuke_Init_VerifyState.
+	host := "unix://" + filepath.Join(runPath, "kukeond.sock")
+
+	t.Cleanup(func() {
+		// Best-effort post-test cleanup: if the test exited mid-flow (e.g.
+		// before the in-test uninstall fired), re-run uninstall so we don't
+		// strand the host's /run/kukeon, /opt/kukeon, or kukeon-suffixed
+		// containerd namespaces for the next test. Failures here are
+		// diagnostic only — the in-test uninstall is what the AC asserts on.
+		_, _, _ = runBinary(t, nil, kuke, append(
+			buildKukeRunPathArgs(runPath), "uninstall", "--yes",
+		)...)
+	})
+
+	// Step 1: init brings up the default + kuke-system realms and the
+	// kukeond cell inside kuke-system. Pre-uninstall state must be
+	// populated so the post-uninstall "gone" assertions below can't pass
+	// vacuously and silently hide a regression.
+	args := append(buildKukeRunPathArgs(runPath), "init", "--kukeond-image", kukeondImage)
+	exitCode, stdout, stderr := runBinary(t, nil, kuke, args...)
+	if exitCode != 0 {
+		t.Fatalf("kuke init failed: code=%d stdout=%s stderr=%s",
+			exitCode, string(stdout), string(stderr))
+	}
+	if !verifyContainerdNamespace(t, defaultNS) {
+		t.Fatalf("pre-uninstall: containerd namespace %q missing after init", defaultNS)
+	}
+	if !verifyContainerdNamespace(t, systemNS) {
+		t.Fatalf("pre-uninstall: containerd namespace %q missing after init", systemNS)
+	}
+	if _, statErr := os.Stat(runPath); statErr != nil {
+		t.Fatalf("pre-uninstall: runPath %q missing after init: %v", runPath, statErr)
+	}
+
+	// Step 2: provision a user-realm cell under the pre-created `default`
+	// space so uninstall has to drain both a kuke-system workload (the
+	// kukeond cell init brought up) and a user-realm workload. Without
+	// this, uninstall would only exercise the well-known-realm path and
+	// could regress on user-created realms silently — that is the failure
+	// mode the issue's AC cites for #194.
+	stackName := generateUniqueStackName(t)
+	cellName := generateUniqueCellName(t)
+	defaultRealm := consts.KukeonDefaultRealmName
+	const defaultSpace = "default"
+
+	args = append(buildKukeDaemonArgs(host),
+		"create", "stack", stackName, "--realm", defaultRealm, "--space", defaultSpace)
+	if exit, out, errOut := runBinary(t, nil, kuke, args...); exit != 0 {
+		t.Fatalf("create stack failed: code=%d stdout=%s stderr=%s",
+			exit, string(out), string(errOut))
+	}
+
+	args = append(buildKukeDaemonArgs(host),
+		"create", "cell", cellName,
+		"--realm", defaultRealm, "--space", defaultSpace, "--stack", stackName)
+	if exit, out, errOut := runBinary(t, nil, kuke, args...); exit != 0 {
+		t.Fatalf("create cell failed: code=%d stdout=%s stderr=%s",
+			exit, string(out), string(errOut))
+	}
+
+	// Step 3: uninstall. Tears down systemd unit (no-op on dev hosts),
+	// every realm cascade, /run/kukeon, /opt/kukeon, kukeon user/group.
+	args = append(buildKukeRunPathArgs(runPath), "uninstall", "--yes")
+	exitCode, stdout, stderr = runBinary(t, nil, kuke, args...)
+	if exitCode != 0 {
+		t.Fatalf("kuke uninstall failed: code=%d stdout=%s stderr=%s",
+			exitCode, string(stdout), string(stderr))
+	}
+
+	// Step 4: assert the host is genuinely clean.
+	//
+	// 4a. No kukeon-suffixed containerd namespaces survive. Enumerate
+	// every namespace via `ctr ns ls` and require none carry the
+	// `.kukeon.io` suffix — guards #193 / #194 directly. Tasks living
+	// in those namespaces are implicitly gone once the namespace is.
+	if surviving := listKukeonContainerdNamespaces(t); len(surviving) > 0 {
+		t.Fatalf("post-uninstall: kukeon-owned containerd namespaces survive: %v", surviving)
+	}
+
+	// 4b. runPath is gone. With --run-path X the root-level derivation
+	// collapses SocketDir and RunPath to the same dir, so a single check
+	// covers both AC items (`/run/kukeon` and `/opt/kukeon` analogues).
+	if _, statErr := os.Stat(runPath); !os.IsNotExist(statErr) {
+		t.Fatalf("post-uninstall: runPath %q must be gone, stat err=%v", runPath, statErr)
+	}
+
+	// 4c. kukeon system user/group are absent. The AC permits "gone or
+	// absent if they never existed"; both reduce to "id/getent reports
+	// absent" post-uninstall.
+	if systemUserExists(t, consts.KukeonSystemUser) {
+		t.Fatalf("post-uninstall: system user %q must be absent", consts.KukeonSystemUser)
+	}
+	if systemGroupExists(t, consts.KukeonSystemGroup) {
+		t.Fatalf("post-uninstall: system group %q must be absent", consts.KukeonSystemGroup)
+	}
+
+	// Step 5: re-init must succeed on the now-clean host. Uninstall
+	// dropped the kuke-system containerd namespace, which wiped the
+	// staged kukeond image with it — unlike daemon reset --purge-system
+	// (which only removes /opt/kukeon/data/kuke-system metadata). Reload
+	// before re-init or the second init fails on image pull.
+	_ = loadKukeondImageIntoContainerd(t)
+	args = append(buildKukeRunPathArgs(runPath), "init", "--kukeond-image", kukeondImage)
+	exitCode, stdout, stderr = runBinary(t, nil, kuke, args...)
+	if exitCode != 0 {
+		t.Fatalf("re-init after uninstall failed: code=%d stdout=%s stderr=%s",
+			exitCode, string(stdout), string(stderr))
+	}
+	if !verifyContainerdNamespace(t, defaultNS) {
+		t.Fatalf("post-reinit: containerd namespace %q missing", defaultNS)
+	}
+	if !verifyContainerdNamespace(t, systemNS) {
+		t.Fatalf("post-reinit: containerd namespace %q missing", systemNS)
+	}
+}
+
+// listKukeonContainerdNamespaces returns every containerd namespace whose
+// name carries the canonical `.kukeon.io` suffix. Used by the uninstall
+// VerifyState test to assert no kukeon-owned namespaces survived the
+// teardown — the regression guard for #193 / #194.
+//
+// Skipped at the t.Skipf level when `ctr` is not on PATH (consistent with
+// verifyContainerdNamespace's behavior); a missing binary cannot be
+// distinguished from a clean host, so the test refuses to declare success.
+func listKukeonContainerdNamespaces(t *testing.T) []string {
+	t.Helper()
+
+	ctrPath, err := exec.LookPath(ctr)
+	if err != nil {
+		t.Skipf("ctr binary not found, cannot verify post-uninstall namespace state: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, ctrPath, "ns", "ls")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ctr ns ls failed: %v, output: %s", err, string(out))
+	}
+
+	// `ctr ns ls` emits a `NAME LABELS` header followed by one namespace
+	// per line. Filter to the kukeon-suffixed names so the report names
+	// what survived without spamming "default", "moby", etc.
+	var surviving []string
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || fields[0] == "NAME" {
+			continue
+		}
+		if consts.IsKukeonNamespace(fields[0]) {
+			surviving = append(surviving, fields[0])
+		}
+	}
+	return surviving
+}
+
+// systemUserExists reports whether a system account by this name resolves
+// via `id -u`. Matches the contract used by controller/uninstall.go's
+// lookupUser so the test's "absent" assertion lines up with what the
+// production code's user-removal step considers absent.
+func systemUserExists(t *testing.T, name string) bool {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "id", "-u", name).Run() == nil
+}
+
+// systemGroupExists reports whether a system group by this name resolves
+// via `getent group`. Matches lookupGroup in controller/uninstall.go.
+func systemGroupExists(t *testing.T, name string) bool {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "getent", "group", name).Run() == nil
 }
