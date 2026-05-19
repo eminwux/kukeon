@@ -576,6 +576,48 @@ func TestWithSharedLockDoesNotResurrectAfterDelete(t *testing.T) {
 	}
 }
 
+// TestWithSharedLockReadsLegacyMetadataWithoutSidecar guards the
+// rollout path for #607: a host whose metadata files were written by a
+// pre-sidecar binary still has the data file on disk but no `.lock`
+// sidecar next to it. The shared-lock acquire must materialise the
+// sidecar in that case and let the read proceed, instead of treating
+// the missing sidecar as ErrMissingMetadataFile (which would surface
+// upstream as ErrRealmNotFound and break `kuke get realms --no-daemon`
+// + `kuke image load --realm …` on any host upgraded across the #607
+// boundary). The TOCTOU branch — data file ALSO missing — stays
+// covered by TestWithSharedLockDoesNotResurrectAfterDelete above.
+func TestWithSharedLockReadsLegacyMetadataWithoutSidecar(t *testing.T) {
+	tmp := t.TempDir()
+	parent := filepath.Join(tmp, "realm")
+	if err := os.MkdirAll(parent, 0o0750); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
+	file := filepath.Join(parent, "metadata.json")
+	logger := discardLogger()
+	ctx := context.Background()
+
+	// Stage the data file directly to simulate pre-#607 on-disk state:
+	// the data is there, the sidecar is not.
+	want := []byte(`{"k":"v"}`)
+	if err := os.WriteFile(file, want, 0o0640); err != nil {
+		t.Fatalf("seed legacy data file: %v", err)
+	}
+	if _, statErr := os.Stat(metadata.LockFilePath(file)); !os.IsNotExist(statErr) {
+		t.Fatalf("precondition: sidecar should not exist, stat err = %v", statErr)
+	}
+
+	got, err := metadata.ReadRaw(ctx, logger, file)
+	if err != nil {
+		t.Fatalf("ReadRaw on legacy file: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("ReadRaw payload = %q, want %q", got, want)
+	}
+	if _, statErr := os.Stat(metadata.LockFilePath(file)); statErr != nil {
+		t.Errorf("sidecar not materialised after legacy ReadRaw: stat err = %v", statErr)
+	}
+}
+
 // TestStressConcurrentWriteReadDelete hammers the same path with
 // concurrent Write/Read/Delete goroutines. After every goroutine
 // returns, the working dir must be in one of two well-defined terminal

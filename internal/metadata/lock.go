@@ -64,12 +64,14 @@ func LockFilePath(file string) string {
 //     WriteMetadata's existing create-new path. A writer always lands
 //     a sidecar — Phase 3 adopters can rely on that invariant.
 //
-//   - Shared (read path): neither the parent directory nor the sidecar
-//     is created. A missing sidecar surfaces as ErrMissingMetadataFile
-//     so a sibling DeleteMetadata that swept between the caller's
-//     existence pre-check and this acquire cannot be papered over by
-//     resurrecting a stale parent + sidecar that then leak after the
-//     read returns ErrMissingMetadataFile anyway.
+//   - Shared (read path): the sidecar is opened without O_CREATE so a
+//     sibling DeleteMetadata that swept between the caller's existence
+//     pre-check and this acquire surfaces as ErrMissingMetadataFile
+//     instead of being papered over by a resurrected parent + sidecar
+//     that then leak. The legacy fall-through below distinguishes that
+//     TOCTOU case from a data file written by a pre-sidecar binary
+//     (#607 rollout) where the data file is still on disk but its
+//     sidecar was never materialised.
 func acquireFlock(file string, exclusive bool) (func(), error) {
 	if exclusive {
 		parent := filepath.Dir(file)
@@ -83,13 +85,23 @@ func acquireFlock(file string, exclusive bool) (func(), error) {
 		openFlag |= os.O_CREATE
 	}
 	f, openErr := os.OpenFile(lockPath, openFlag, lockFilePerm)
-	if openErr != nil {
-		if !exclusive && os.IsNotExist(openErr) {
+	if openErr != nil && !exclusive && os.IsNotExist(openErr) {
+		// Either (a) the data file was concurrently deleted — the
+		// TOCTOU sweep ReadRaw's existence pre-check defends against,
+		// or (b) the data file is still on disk but was written by a
+		// pre-#607 binary that never staged a sidecar. Re-check the
+		// data file: gone → surface ErrMissingMetadataFile without
+		// resurrecting parent + sidecar; present → materialise the
+		// sidecar so legacy state stays readable.
+		if !existsFilePath(file) {
 			return nil, fmt.Errorf(
 				"sidecar lock file missing for %s: %w",
 				file, errdefs.ErrMissingMetadataFile,
 			)
 		}
+		f, openErr = os.OpenFile(lockPath, openFlag|os.O_CREATE, lockFilePerm)
+	}
+	if openErr != nil {
 		return nil, fmt.Errorf("open lock file %s: %w", lockPath, openErr)
 	}
 	mode := syscall.LOCK_SH
