@@ -240,25 +240,27 @@ func (r *Exec) writeKukettyMetadata(
 		opts = append(opts, sbshbuilder.WithSocketGID(kukeonGroupGID))
 		opts = append(opts, sbshbuilder.WithCaptureGID(kukeonGroupGID))
 	}
-	// Log file is opt-in per-container via Tty.LogFile (phase 3 #289):
-	// when set, the daemon passes the path verbatim plus the kukeon-
-	// group-derived mode/GID (matches socket/capture treatment); when
-	// unset, the daemon clears sbsh-builder's auto-derived default
-	// after BuildTerminalSpec so the rendered Spec.LogFile stays zero.
-	// Empty Spec.LogFile is the contract kuketty's openTerminalLogger
-	// (cmd/kuketty/main.go) and sbsh's runner.applyLogFilePerms both
-	// honor as "no log file configured" — so a workload without
-	// Tty.LogFile produces no log writer setup end-to-end.
-	logFileConfigured := spec.Tty != nil && spec.Tty.LogFile != ""
-	if logFileConfigured {
-		opts = append(opts, sbshbuilder.WithLogFile(spec.Tty.LogFile))
-		if mode := modeIfGroupSet(kukeonGroupGID, ctr.AttachableLogFileMode); mode != "" {
-			opts = append(opts, sbshbuilder.WithLogFileMode(mode))
-		}
-		if kukeonGroupGID > 0 {
-			opts = append(opts, sbshbuilder.WithLogFileGID(kukeonGroupGID))
-		}
+	// Kuketty's own slog output is always-on at a daemon-controlled in-
+	// container path (peer to AttachableSocketPath / AttachableCapturePath
+	// inside the per-container tty bind mount). Reverses #289 phase 3's
+	// opt-in design for the kuketty-process log specifically (issue #599):
+	// the wrapper's debug log is the operator's primary diagnostic when an
+	// attach session misbehaves, and gating it on cell YAML left a class of
+	// "kuketty crashed silently" bugs unobservable. The host-visible peer is
+	// fs.ContainerKukettyLogPath. Workload capture (AttachableCapturePath)
+	// stays a separate, opt-in concern.
+	opts = append(opts, sbshbuilder.WithLogFile(ctr.AttachableKukettyLogPath))
+	if mode := modeIfGroupSet(kukeonGroupGID, ctr.AttachableLogFileMode); mode != "" {
+		opts = append(opts, sbshbuilder.WithLogFileMode(mode))
 	}
+	if kukeonGroupGID > 0 {
+		opts = append(opts, sbshbuilder.WithLogFileGID(kukeonGroupGID))
+	}
+	// Tty.LogLevel is the only knob operators control on the wrapper-log
+	// side; empty defaults to "info". sbsh's pkg/logging.NewFileLogger
+	// rejects an empty level at file-open time, so the renderer pins the
+	// default here rather than threading the fallback through kuketty.
+	opts = append(opts, sbshbuilder.WithLogLevel(ttyLogLevelOrDefault(spec.Tty)))
 	if len(workloadArgv) > 0 {
 		opts = append(opts, sbshbuilder.WithCommand(workloadArgv))
 	}
@@ -266,21 +268,6 @@ func (r *Exec) writeKukettyMetadata(
 	terminalSpec, err := sbshbuilder.BuildTerminalSpec(r.ctx, r.logger, ctr.AttachableTTYDir, opts...)
 	if err != nil {
 		return fmt.Errorf("build kuketty terminal spec: %w", err)
-	}
-	if !logFileConfigured {
-		// sbsh's inline builder unconditionally derives a default LogFile
-		// path from runPath + terminalID when the caller passes no
-		// WithLogFile (applyParamDefaults). That default would land at
-		// /run/kukeon/tty/terminals/<id>/log inside the container —
-		// host-visible through the bind mount, but at a location the
-		// daemon does not advertise. Clearing the field lets kuketty's
-		// openTerminalLogger fall through to a discard logger and
-		// keeps sbsh's runner.applyLogFilePerms a no-op, so a cell
-		// without Tty.LogFile produces no log file at all (issue
-		// #289 AC #2).
-		terminalSpec.LogFile = ""
-		terminalSpec.LogFileMode = 0
-		terminalSpec.LogFileGID = nil
 	}
 
 	doc := sbshapi.TerminalDoc{
@@ -306,6 +293,20 @@ func (r *Exec) writeKukettyMetadata(
 		return fmt.Errorf("rename kuketty metadata %q -> %q: %w", tmp, path, err)
 	}
 	return nil
+}
+
+// ttyLogLevelOrDefault returns the operator-supplied LogLevel from the cell
+// schema, falling back to "info" when the spec carries no Tty block or the
+// operator left LogLevel empty. The fallback lives daemon-side rather than
+// in kuketty because sbsh's pkg/logging.NewFileLogger rejects an empty level
+// — pinning the default here keeps the wire format ("kuketty always reads
+// Spec.LogLevel verbatim") clean. Validated by apischeme.validateContainerTty
+// against the four-value enum (issue #599).
+func ttyLogLevelOrDefault(t *intmodel.ContainerTty) string {
+	if t == nil || t.LogLevel == "" {
+		return "info"
+	}
+	return t.LogLevel
 }
 
 // ttyStagesToExecSteps maps the cell's inline Tty.OnInit entries into

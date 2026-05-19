@@ -210,6 +210,20 @@ func ContainerCapturePath(baseRunPath, realmName, spaceName, stackName, cellName
 	)
 }
 
+// ContainerKukettyLogPath returns the host-side path of the per-Attachable-
+// container kuketty wrapper's own slog output. It is the host-visible peer of
+// the in-container ctr.AttachableKukettyLogPath; both resolve to the same
+// inode through the per-container tty directory bind mount. The path is
+// daemon-controlled (operators do not configure it via cell YAML) so an
+// operator debugging a misbehaving attach session always knows where to
+// look. Issue #599.
+func ContainerKukettyLogPath(baseRunPath, realmName, spaceName, stackName, cellName, containerName string) string {
+	return filepath.Join(
+		ContainerTTYDir(baseRunPath, realmName, spaceName, stackName, cellName, containerName),
+		consts.KukeonContainerKukettyLogFile,
+	)
+}
+
 // ContainerLogPath returns the host-side path of the per-container stdout/
 // stderr log file written by the containerd runtime shim via cio.LogFile.
 // Used for non-Attachable containers (kukeond included): the shim opens this

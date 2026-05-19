@@ -132,17 +132,15 @@ type ContainerTty struct {
 	// order. Forwarded to TerminalSpec.Stages.OnInit via sbsh's
 	// WithOnInit; an empty slice leaves Stages.OnInit zero.
 	OnInit []TtyStage `json:"onInit,omitempty"  yaml:"onInit,omitempty"`
-	// LogFile is the in-container path where sbsh's runner writes its
-	// runtime/debug log. Empty (the default) means sbsh's runner skips
-	// log-writer setup entirely. Set this to a path inside the kuketty
-	// tty bind mount (e.g. "/run/kukeon/tty/log") if the operator wants
-	// the log file host-visible through the directory bind mount; any
-	// other in-container path is accepted and just stays inside the
-	// container's overlay. Mode and GID are not user-configurable here
-	// — the daemon applies its system-wide AttachableLogFileMode and
-	// the kukeon-group GID, gated on the kukeon group being configured
-	// (matches the SocketMode/CaptureMode treatment).
-	LogFile string `json:"logFile,omitempty" yaml:"logFile,omitempty"`
+	// LogLevel controls the verbosity of the kuketty wrapper's own slog
+	// output. Accepted values: "debug", "info", "warn", "error". Empty
+	// is treated as "info" by the daemon. The path the log lands at is
+	// daemon-controlled (peer to capture inside the per-container tty
+	// directory — see ctr.AttachableKukettyLogPath and
+	// fs.ContainerKukettyLogPath); operators only pick the verbosity.
+	// Validation rejects unknown values at apply time rather than
+	// silently coercing to "info". Issue #599.
+	LogLevel string `json:"logLevel,omitempty" yaml:"logLevel,omitempty"`
 }
 
 // TtyStage is a single onInit script entry. Wrapped in a struct rather than
@@ -162,7 +160,7 @@ func (t *ContainerTty) IsEmpty() bool {
 	if t.Prompt != "" {
 		return false
 	}
-	if t.LogFile != "" {
+	if t.LogLevel != "" {
 		return false
 	}
 	for _, s := range t.OnInit {

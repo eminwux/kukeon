@@ -302,6 +302,7 @@ kuke attach <cell> --container <con>                   # alias: att
 - `kuke log` exits 0 with empty stdout when the container has produced no captured output yet. `-f` blocks until SIGINT.
 - `kuke log` and `kuke attach` auto-pick the container when the cell has exactly one non-root attachable; otherwise `--container` is required.
 - `kuke attach` requires an Attachable-tagged container (a sbsh-style terminal); attaching to a non-attachable container exits non-zero.
+- Every Attachable container's wrapper writes its own debug log to the per-container `tty/kuketty.log` (peer to `tty/capture` inside the kukeon-controlled bind mount); the path is daemon-controlled, always present after first attach, and operators read it directly to diagnose attach-session misbehavior. Verbosity is configurable per cell via `spec.containers[].tty.logLevel` (one of `debug` / `info` / `warn` / `error`; default `info`); the path itself is not operator-configurable.
 
 ### Stop, kill, delete, purge a cell
 

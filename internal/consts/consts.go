@@ -86,6 +86,17 @@ const (
 	// Attachable container.
 	KukeonContainerLogFile = "log"
 
+	// KukeonContainerKukettyLogFile is the basename of the per-Attachable-
+	// container kuketty wrapper's own slog output, inside KukeonContainerTTYDir
+	// (peer to the socket and capture files, same bind-mount visibility). The
+	// path is daemon-controlled — operators do not pick it, the same way they
+	// do not pick where `capture` lands — so kuketty always writes here and an
+	// operator who needs to debug an attach session knows exactly where to
+	// look. Distinct from the workload-capture file (KukeonContainerCaptureFile,
+	// "capture"), which carries the workload's tty byte stream and stays
+	// opt-in for the workload side. Issue #599.
+	KukeonContainerKukettyLogFile = "kuketty.log"
+
 	// Label keys shared across the user default hierarchy and the system hierarchy.
 	KukeonRealmLabelKey     = "realm.kukeon.io"
 	KukeonSpaceLabelKey     = "space.kukeon.io"

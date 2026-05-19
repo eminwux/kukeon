@@ -203,18 +203,24 @@ func TestWriteKukettyMetadata_KukeonGroupSet(t *testing.T) {
 	if doc.Spec.CaptureGID == nil || *doc.Spec.CaptureGID != kukeonGID {
 		t.Errorf("Spec.CaptureGID = %v, want pointer to %d", doc.Spec.CaptureGID, kukeonGID)
 	}
-	// Log fields (phase 3 #289) stay zero when the spec carries no
-	// Tty.LogFile, even with the kukeon group configured: the log writer
-	// is opt-in per-container and a kukeon-group-configured host must
-	// not silently start writing sbsh's runtime log on every workload.
-	if doc.Spec.LogFile != "" {
-		t.Errorf("Spec.LogFile = %q, want empty (no Tty.LogFile)", doc.Spec.LogFile)
+	// Kuketty log fields are always-on at the daemon-controlled
+	// AttachableKukettyLogPath (issue #599 reverses #289 phase 3 for the
+	// kuketty-process log specifically). The kukeon group is configured
+	// here, so mode + gid track the socket/capture pattern.
+	if doc.Spec.LogFile != ctr.AttachableKukettyLogPath {
+		t.Errorf("Spec.LogFile = %q, want %q (always-on kuketty log)", doc.Spec.LogFile, ctr.AttachableKukettyLogPath)
 	}
-	if doc.Spec.LogFileMode.Perm() != 0 {
-		t.Errorf("Spec.LogFileMode perm = %#o, want 0 (no Tty.LogFile)", doc.Spec.LogFileMode.Perm())
+	if doc.Spec.LogFileMode.Perm() != 0o640 {
+		t.Errorf("Spec.LogFileMode perm = %#o, want 0640 (kukeon group set)", doc.Spec.LogFileMode.Perm())
 	}
-	if doc.Spec.LogFileGID != nil {
-		t.Errorf("Spec.LogFileGID = %v, want nil (no Tty.LogFile)", doc.Spec.LogFileGID)
+	if doc.Spec.LogFileGID == nil || *doc.Spec.LogFileGID != kukeonGID {
+		t.Errorf("Spec.LogFileGID = %v, want pointer to %d", doc.Spec.LogFileGID, kukeonGID)
+	}
+	// LogLevel defaults to "info" when the cell omits it (sbsh's
+	// NewFileLogger rejects an empty level, so the daemon pins the
+	// default rather than threading the fallback through kuketty).
+	if doc.Spec.LogLevel != "info" {
+		t.Errorf("Spec.LogLevel = %q, want %q (default when Tty.LogLevel is empty)", doc.Spec.LogLevel, "info")
 	}
 	// SetPrompt off in phase 1b: arbitrary workloads (nginx, python)
 	// would receive a literal `export PS1=…` injection into stdin
@@ -273,65 +279,65 @@ func TestWriteKukettyMetadata_NoKukeonGroup(t *testing.T) {
 	if doc.Spec.CaptureGID != nil {
 		t.Errorf("Spec.CaptureGID = %v, want nil (no kukeon group)", doc.Spec.CaptureGID)
 	}
-	// Log fields (phase 3 #289) stay zero with no Tty.LogFile and no
-	// kukeon group — the same opt-in invariant as the group-set case.
-	if doc.Spec.LogFile != "" {
-		t.Errorf("Spec.LogFile = %q, want empty (no Tty.LogFile)", doc.Spec.LogFile)
+	// Kuketty log: always-on path even without a kukeon group, but
+	// mode + GID stay zero so sbsh's runner applies its OS-default
+	// (umask-clipped) mode and leaves the group untouched (matches
+	// the socket/capture treatment when no kukeon group is configured).
+	if doc.Spec.LogFile != ctr.AttachableKukettyLogPath {
+		t.Errorf("Spec.LogFile = %q, want %q (always-on kuketty log)", doc.Spec.LogFile, ctr.AttachableKukettyLogPath)
 	}
 	if doc.Spec.LogFileMode.Perm() != 0 {
-		t.Errorf("Spec.LogFileMode perm = %#o, want 0 (no Tty.LogFile)", doc.Spec.LogFileMode.Perm())
+		t.Errorf("Spec.LogFileMode perm = %#o, want 0 (no kukeon group)", doc.Spec.LogFileMode.Perm())
 	}
 	if doc.Spec.LogFileGID != nil {
-		t.Errorf("Spec.LogFileGID = %v, want nil (no Tty.LogFile)", doc.Spec.LogFileGID)
+		t.Errorf("Spec.LogFileGID = %v, want nil (no kukeon group)", doc.Spec.LogFileGID)
+	}
+	if doc.Spec.LogLevel != "info" {
+		t.Errorf("Spec.LogLevel = %q, want %q (default)", doc.Spec.LogLevel, "info")
 	}
 }
 
-// TestWriteKukettyMetadata_LogFileSet locks phase 3 (#289) rendering when
-// the cell's container-tty config opts into the sbsh runner log writer:
-// Spec.LogFile carries the user-supplied path verbatim (no daemon-side
-// path rewriting — operators choose where it lands); LogFileMode and
-// LogFileGID mirror the socket/capture treatment, gated on the kukeon
-// group being configured. The two subcases fix the exhaustive matrix
-// against silent regressions.
-func TestWriteKukettyMetadata_LogFileSet(t *testing.T) {
+// TestWriteKukettyMetadata_KukettyLogAlwaysOn locks issue #599's reversal of
+// #289 phase 3 for the kuketty-process log specifically: regardless of cell
+// YAML, every Attachable container renders Spec.LogFile pointing at the
+// daemon-controlled AttachableKukettyLogPath (peer to socket/capture inside
+// the per-container tty bind mount). Operators do not pick the path — the
+// only knob the cell schema surfaces is verbosity, validated separately.
+func TestWriteKukettyMetadata_KukettyLogAlwaysOn(t *testing.T) {
 	cases := []struct {
-		name        string
-		kukeonGID   int
-		wantMode    os.FileMode
-		wantGIDPtr  bool
-		wantGIDVal  int
-		logFilePath string
+		name      string
+		kukeonGID int
+		tty       *intmodel.ContainerTty
+		wantMode  os.FileMode
+		wantGID   *int
 	}{
 		{
-			// Kukeon group configured: mode + gid filled in so a
-			// non-root operator in the kukeon group can read the log.
-			name:        "kukeon group set: mode+gid populated",
-			kukeonGID:   986,
-			wantMode:    0o640,
-			wantGIDPtr:  true,
-			wantGIDVal:  986,
-			logFilePath: ctr.AttachableLogfilePath,
+			// No Tty block at all → still produces a log writer at the
+			// fixed daemon path. The pre-#599 design left Spec.LogFile
+			// empty here and operators had no diagnostic to read.
+			name:      "no Tty block: log still rendered",
+			kukeonGID: 986,
+			tty:       nil,
+			wantMode:  0o640,
+			wantGID:   intPtr(986),
 		},
 		{
-			// No kukeon group: mode+gid stay zero so sbsh's runner
-			// applies its OS-default umask-clipped permissions and
-			// leaves the group untouched (matches socket/capture).
-			name:        "no kukeon group: mode+gid stay zero",
-			kukeonGID:   0,
-			wantMode:    0,
-			wantGIDPtr:  false,
-			logFilePath: ctr.AttachableLogfilePath,
+			// Tty block carries unrelated fields (prompt) → log stays
+			// always-on.
+			name:      "Tty without LogLevel: log still rendered",
+			kukeonGID: 986,
+			tty:       &intmodel.ContainerTty{Prompt: `claude> `},
+			wantMode:  0o640,
+			wantGID:   intPtr(986),
 		},
 		{
-			// User-supplied path outside the bind-mount: passed
-			// through verbatim. The operator owns the choice;
-			// the daemon does not rewrite or anchor it.
-			name:        "non-bind-mount path passed through verbatim",
-			kukeonGID:   986,
-			wantMode:    0o640,
-			wantGIDPtr:  true,
-			wantGIDVal:  986,
-			logFilePath: "/var/log/sbsh.log",
+			// No kukeon group → log path still set, but mode + GID
+			// stay zero so sbsh's runner applies OS-default perms.
+			name:      "no kukeon group: log path set, mode+gid zero",
+			kukeonGID: 0,
+			tty:       nil,
+			wantMode:  0,
+			wantGID:   nil,
 		},
 	}
 	for _, tc := range cases {
@@ -339,29 +345,65 @@ func TestWriteKukettyMetadata_LogFileSet(t *testing.T) {
 			r := newTestRunner(t)
 			dir := t.TempDir()
 			path := filepath.Join(dir, "kuketty-metadata.json")
-			spec := intmodel.ContainerSpec{
-				ID:  "c1",
-				Tty: &intmodel.ContainerTty{LogFile: tc.logFilePath},
-			}
+			spec := intmodel.ContainerSpec{ID: "c1", Tty: tc.tty}
 			if err := r.writeKukettyMetadata(path, spec, tc.kukeonGID, []string{"/bin/sh"}); err != nil {
 				t.Fatalf("writeKukettyMetadata: %v", err)
 			}
 			doc := readDoc(t, path)
-			if doc.Spec.LogFile != tc.logFilePath {
-				t.Errorf("Spec.LogFile = %q, want %q", doc.Spec.LogFile, tc.logFilePath)
+			if doc.Spec.LogFile != ctr.AttachableKukettyLogPath {
+				t.Errorf("Spec.LogFile = %q, want %q (always-on)", doc.Spec.LogFile, ctr.AttachableKukettyLogPath)
 			}
 			if doc.Spec.LogFileMode.Perm() != tc.wantMode {
 				t.Errorf("Spec.LogFileMode perm = %#o, want %#o", doc.Spec.LogFileMode.Perm(), tc.wantMode)
 			}
 			switch {
-			case tc.wantGIDPtr && (doc.Spec.LogFileGID == nil || *doc.Spec.LogFileGID != tc.wantGIDVal):
-				t.Errorf("Spec.LogFileGID = %v, want pointer to %d", doc.Spec.LogFileGID, tc.wantGIDVal)
-			case !tc.wantGIDPtr && doc.Spec.LogFileGID != nil:
+			case tc.wantGID != nil && (doc.Spec.LogFileGID == nil || *doc.Spec.LogFileGID != *tc.wantGID):
+				t.Errorf("Spec.LogFileGID = %v, want pointer to %d", doc.Spec.LogFileGID, *tc.wantGID)
+			case tc.wantGID == nil && doc.Spec.LogFileGID != nil:
 				t.Errorf("Spec.LogFileGID = %v, want nil", doc.Spec.LogFileGID)
 			}
 		})
 	}
 }
+
+// TestWriteKukettyMetadata_LogLevelHonored locks the LogLevel plumbing
+// added in issue #599: when the cell sets Tty.LogLevel, the renderer
+// stamps it onto Spec.LogLevel verbatim; when the cell omits it (or
+// passes "" explicitly), the renderer pins the "info" default daemon-side
+// so kuketty's sbshlogging.NewFileLogger (which rejects an empty level)
+// always sees a usable value.
+func TestWriteKukettyMetadata_LogLevelHonored(t *testing.T) {
+	cases := []struct {
+		name      string
+		tty       *intmodel.ContainerTty
+		wantLevel string
+	}{
+		{"empty Tty: default info", nil, "info"},
+		{"empty LogLevel: default info", &intmodel.ContainerTty{Prompt: "x> "}, "info"},
+		{"debug", &intmodel.ContainerTty{LogLevel: "debug"}, "debug"},
+		{"warn", &intmodel.ContainerTty{LogLevel: "warn"}, "warn"},
+		{"error", &intmodel.ContainerTty{LogLevel: "error"}, "error"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newTestRunner(t)
+			dir := t.TempDir()
+			path := filepath.Join(dir, "kuketty-metadata.json")
+			spec := intmodel.ContainerSpec{ID: "c1", Tty: tc.tty}
+			if err := r.writeKukettyMetadata(path, spec, 0, []string{"/bin/sh"}); err != nil {
+				t.Fatalf("writeKukettyMetadata: %v", err)
+			}
+			doc := readDoc(t, path)
+			if doc.Spec.LogLevel != tc.wantLevel {
+				t.Errorf("Spec.LogLevel = %q, want %q", doc.Spec.LogLevel, tc.wantLevel)
+			}
+		})
+	}
+}
+
+// intPtr is a one-off helper for the always-on log table-test to avoid the
+// awkward "&literal" pattern inside struct initializers.
+func intPtr(v int) *int { return &v }
 
 // ttyFieldsCoveredByMapping is the structural half of #493's "every Tty
 // field must map" guard: it enumerates intmodel.ContainerTty via
@@ -386,9 +428,9 @@ func ttyFieldsCoveredByMapping(t *testing.T) {
 	// list reads as part of the test contract rather than a package
 	// secret. Keep alphabetized.
 	mapperedFields := map[string]struct{}{
-		"LogFile": {},
-		"OnInit":  {},
-		"Prompt":  {},
+		"LogLevel": {},
+		"OnInit":   {},
+		"Prompt":   {},
 	}
 	typ := reflect.TypeOf(intmodel.ContainerTty{})
 	declared := make(map[string]struct{}, typ.NumField())
@@ -455,7 +497,7 @@ func TestWriteKukettyMetadata_AllTtyFieldsMap(t *testing.T) {
 		{Script: "echo hello"},
 		{Script: "echo world"},
 	}
-	const wantLogFile = ctr.AttachableLogfilePath
+	const wantLogLevel = "debug"
 	const kukeonGID = 986
 	workload := []string{"/bin/sh", "-c", "exec /workload"}
 
@@ -467,9 +509,9 @@ func TestWriteKukettyMetadata_AllTtyFieldsMap(t *testing.T) {
 		CellName:   "lD",
 		Attachable: true,
 		Tty: &intmodel.ContainerTty{
-			Prompt:  wantPrompt,
-			OnInit:  wantOnInit,
-			LogFile: wantLogFile,
+			Prompt:   wantPrompt,
+			OnInit:   wantOnInit,
+			LogLevel: wantLogLevel,
 		},
 	}
 
@@ -508,9 +550,12 @@ func TestWriteKukettyMetadata_AllTtyFieldsMap(t *testing.T) {
 		t.Errorf("Spec.Stages.PostAttach = %+v, want empty (not surfaced on cell schema)", doc.Spec.Stages.PostAttach)
 	}
 
-	// Tty.LogFile → Spec.LogFile (verbatim, no daemon-side rewriting).
-	if doc.Spec.LogFile != wantLogFile {
-		t.Errorf("Tty.LogFile: Spec.LogFile = %q, want %q", doc.Spec.LogFile, wantLogFile)
+	// Tty.LogLevel → Spec.LogLevel (verbatim). The wrapper-log path
+	// itself is daemon-controlled and asserted via the always-on
+	// Spec.LogFile invariant a few lines below — operators only pick
+	// verbosity (issue #599).
+	if doc.Spec.LogLevel != wantLogLevel {
+		t.Errorf("Tty.LogLevel: Spec.LogLevel = %q, want %q", doc.Spec.LogLevel, wantLogLevel)
 	}
 
 	// Renderer-default invariants the cell schema does NOT surface. These
@@ -536,6 +581,17 @@ func TestWriteKukettyMetadata_AllTtyFieldsMap(t *testing.T) {
 			"Spec.CaptureFile = %q, want %q (kukeon-controlled bind-mount path)",
 			doc.Spec.CaptureFile,
 			ctr.AttachableCapturePath,
+		)
+	}
+	// Issue #599: kuketty's own slog output always lands at the daemon-
+	// controlled AttachableKukettyLogPath, regardless of cell YAML. Pre-#599
+	// this field was opt-in and operator-invisible by default, which left
+	// kuketty crashes silent.
+	if doc.Spec.LogFile != ctr.AttachableKukettyLogPath {
+		t.Errorf(
+			"Spec.LogFile = %q, want %q (always-on kuketty debug log)",
+			doc.Spec.LogFile,
+			ctr.AttachableKukettyLogPath,
 		)
 	}
 	if doc.Spec.RunPath != ctr.AttachableTTYDir {
