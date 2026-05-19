@@ -401,6 +401,133 @@ func TestWriteKukettyMetadata_LogLevelHonored(t *testing.T) {
 	}
 }
 
+// TestWriteKukettyMetadata_LogFileOverride locks the operator-override path
+// that #599's reviewer asked us to preserve: when a cell pins Tty.LogFile to
+// a custom in-container location (e.g., a fixed external mount), the renderer
+// stamps it verbatim — no daemon-side rewriting, no anchoring to the bind
+// mount. Default (LogFile empty) still resolves to the daemon-controlled
+// AttachableKukettyLogPath so the always-on contract from issue #599 holds.
+func TestWriteKukettyMetadata_LogFileOverride(t *testing.T) {
+	cases := []struct {
+		name    string
+		tty     *intmodel.ContainerTty
+		wantLog string
+	}{
+		{
+			"no Tty: daemon default",
+			nil,
+			ctr.AttachableKukettyLogPath,
+		},
+		{
+			"empty LogFile: daemon default",
+			&intmodel.ContainerTty{Prompt: "x> "},
+			ctr.AttachableKukettyLogPath,
+		},
+		{
+			"operator override inside bind mount",
+			&intmodel.ContainerTty{LogFile: ctr.AttachableTTYDir + "/custom.log"},
+			ctr.AttachableTTYDir + "/custom.log",
+		},
+		{
+			"operator override outside bind mount",
+			&intmodel.ContainerTty{LogFile: "/var/log/sbsh-debug.log"},
+			"/var/log/sbsh-debug.log",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newTestRunner(t)
+			dir := t.TempDir()
+			path := filepath.Join(dir, "kuketty-metadata.json")
+			spec := intmodel.ContainerSpec{ID: "c1", Tty: tc.tty}
+			if err := r.writeKukettyMetadata(path, spec, 986, []string{"/bin/sh"}); err != nil {
+				t.Fatalf("writeKukettyMetadata: %v", err)
+			}
+			doc := readDoc(t, path)
+			if doc.Spec.LogFile != tc.wantLog {
+				t.Errorf("Spec.LogFile = %q, want %q", doc.Spec.LogFile, tc.wantLog)
+			}
+			// Always-on invariant: regardless of override or default,
+			// Spec.LogFile is non-empty so kuketty's openTerminalLogger
+			// never falls through to the discard logger.
+			if doc.Spec.LogFile == "" {
+				t.Errorf("Spec.LogFile is empty; always-on invariant from #599 broken")
+			}
+		})
+	}
+}
+
+// TestWriteKukettyMetadata_LogLevelGlobalDefault locks #599's reviewer-asked
+// precedence chain for the kuketty log level: per-container Tty.LogLevel →
+// server-config kuketty.logLevel (plumbed via runner.Options.KukettyLogLevel)
+// → hardcoded "info". The daemon-wide knob lets operators flip every
+// attachable cell on the host without editing each cell YAML; the per-
+// container knob still wins so cell authors retain a local override.
+func TestWriteKukettyMetadata_LogLevelGlobalDefault(t *testing.T) {
+	cases := []struct {
+		name             string
+		tty              *intmodel.ContainerTty
+		serverConfig     string
+		wantLevel        string
+		whyCommentForLog string
+	}{
+		{
+			name:             "per-container wins over server-config",
+			tty:              &intmodel.ContainerTty{LogLevel: "debug"},
+			serverConfig:     "warn",
+			wantLevel:        "debug",
+			whyCommentForLog: "cell-supplied LogLevel must override the daemon-wide default",
+		},
+		{
+			name:             "server-config wins when per-container empty",
+			tty:              nil,
+			serverConfig:     "warn",
+			wantLevel:        "warn",
+			whyCommentForLog: "daemon-wide knob applies when the cell omits LogLevel",
+		},
+		{
+			name:             "server-config wins with non-LogLevel Tty fields",
+			tty:              &intmodel.ContainerTty{Prompt: "x> "},
+			serverConfig:     "error",
+			wantLevel:        "error",
+			whyCommentForLog: "Tty present but LogLevel empty still falls through to server-config",
+		},
+		{
+			name:             "hardcoded info when both empty",
+			tty:              nil,
+			serverConfig:     "",
+			wantLevel:        "info",
+			whyCommentForLog: "no per-container, no server-config — last-resort 'info' from the renderer",
+		},
+		{
+			name:             "per-container wins over empty server-config",
+			tty:              &intmodel.ContainerTty{LogLevel: "debug"},
+			serverConfig:     "",
+			wantLevel:        "debug",
+			whyCommentForLog: "cell wins regardless of whether the server-config tier is populated",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newTestRunner(t)
+			r.opts.KukettyLogLevel = tc.serverConfig
+			dir := t.TempDir()
+			path := filepath.Join(dir, "kuketty-metadata.json")
+			spec := intmodel.ContainerSpec{ID: "c1", Tty: tc.tty}
+			if err := r.writeKukettyMetadata(path, spec, 0, []string{"/bin/sh"}); err != nil {
+				t.Fatalf("writeKukettyMetadata: %v", err)
+			}
+			doc := readDoc(t, path)
+			if doc.Spec.LogLevel != tc.wantLevel {
+				t.Errorf(
+					"Spec.LogLevel = %q, want %q (%s)",
+					doc.Spec.LogLevel, tc.wantLevel, tc.whyCommentForLog,
+				)
+			}
+		})
+	}
+}
+
 // intPtr is a one-off helper for the always-on log table-test to avoid the
 // awkward "&literal" pattern inside struct initializers.
 func intPtr(v int) *int { return &v }
@@ -428,6 +555,7 @@ func ttyFieldsCoveredByMapping(t *testing.T) {
 	// list reads as part of the test contract rather than a package
 	// secret. Keep alphabetized.
 	mapperedFields := map[string]struct{}{
+		"LogFile":  {},
 		"LogLevel": {},
 		"OnInit":   {},
 		"Prompt":   {},
@@ -498,6 +626,11 @@ func TestWriteKukettyMetadata_AllTtyFieldsMap(t *testing.T) {
 		{Script: "echo world"},
 	}
 	const wantLogLevel = "debug"
+	// Exercise the LogFile override (#599 reviewer ask): the renderer must
+	// stamp the operator-supplied path verbatim instead of the daemon
+	// default at ctr.AttachableKukettyLogPath. Picked outside the bind-
+	// mount root to prove the daemon does not anchor or rewrite the path.
+	const wantLogFile = "/var/log/kuketty-override.log"
 	const kukeonGID = 986
 	workload := []string{"/bin/sh", "-c", "exec /workload"}
 
@@ -511,6 +644,7 @@ func TestWriteKukettyMetadata_AllTtyFieldsMap(t *testing.T) {
 		Tty: &intmodel.ContainerTty{
 			Prompt:   wantPrompt,
 			OnInit:   wantOnInit,
+			LogFile:  wantLogFile,
 			LogLevel: wantLogLevel,
 		},
 	}
@@ -583,15 +717,15 @@ func TestWriteKukettyMetadata_AllTtyFieldsMap(t *testing.T) {
 			ctr.AttachableCapturePath,
 		)
 	}
-	// Issue #599: kuketty's own slog output always lands at the daemon-
-	// controlled AttachableKukettyLogPath, regardless of cell YAML. Pre-#599
-	// this field was opt-in and operator-invisible by default, which left
-	// kuketty crashes silent.
-	if doc.Spec.LogFile != ctr.AttachableKukettyLogPath {
+	// Issue #599: Tty.LogFile override is stamped verbatim. Always-on
+	// behavior (Spec.LogFile non-empty regardless of cell YAML) is
+	// pinned by TestWriteKukettyMetadata_KukettyLogAlwaysOn; here we
+	// prove the override path round-trips without daemon-side rewriting.
+	if doc.Spec.LogFile != wantLogFile {
 		t.Errorf(
-			"Spec.LogFile = %q, want %q (always-on kuketty debug log)",
+			"Tty.LogFile: Spec.LogFile = %q, want %q (operator override stamped verbatim)",
 			doc.Spec.LogFile,
-			ctr.AttachableKukettyLogPath,
+			wantLogFile,
 		)
 	}
 	if doc.Spec.RunPath != ctr.AttachableTTYDir {

@@ -179,6 +179,19 @@ func NewKukeondCmd() (*cobra.Command, error) {
 		return nil, err
 	}
 
+	cmd.PersistentFlags().String(
+		"kuketty-log-level", config.KUKEOND_KUKETTY_LOG_LEVEL.Default,
+		"Daemon-wide default verbosity for the kuketty wrapper's own slog "+
+			"output (debug, info, warn, error). A per-container "+
+			"`spec.tty.logLevel` always wins. (issue #599)",
+	)
+	if err := viper.BindPFlag(
+		config.KUKEOND_KUKETTY_LOG_LEVEL.ViperKey,
+		cmd.PersistentFlags().Lookup("kuketty-log-level"),
+	); err != nil {
+		return nil, err
+	}
+
 	bindEnvVars()
 
 	cmd.AddCommand(newServeCmd())
@@ -201,6 +214,7 @@ func bindEnvVars() {
 		config.KUKEOND_SOCKET_GID,
 		config.KUKEOND_RECONCILE_INTERVAL,
 		config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES,
+		config.KUKEOND_KUKETTY_LOG_LEVEL,
 	} {
 		_ = v.BindEnv()
 	}
@@ -249,6 +263,11 @@ func applyServerConfiguration(cmd *cobra.Command, spec v1beta1.ServerConfigurati
 		!flagChanged(cmd, "default-memory-limit-bytes") &&
 		!envSet(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES) {
 		viper.Set(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey, spec.DefaultMemoryLimitBytes)
+	}
+	if spec.KukettyLogLevel != "" &&
+		!flagChanged(cmd, "kuketty-log-level") &&
+		!envSet(config.KUKEOND_KUKETTY_LOG_LEVEL) {
+		viper.Set(config.KUKEOND_KUKETTY_LOG_LEVEL.ViperKey, spec.KukettyLogLevel)
 	}
 }
 
@@ -322,5 +341,6 @@ func currentResolvedSpec() v1beta1.ServerConfigurationSpec {
 		ContainerdNamespaceSuffix: viper.GetString(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey),
 		CgroupRoot:                viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey),
 		DefaultMemoryLimitBytes:   viper.GetInt64(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey),
+		KukettyLogLevel:           viper.GetString(config.KUKEOND_KUKETTY_LOG_LEVEL.ViperKey),
 	}
 }

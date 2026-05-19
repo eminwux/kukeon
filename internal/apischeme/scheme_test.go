@@ -1132,6 +1132,7 @@ func TestContainerTtyRoundTripV1Beta1(t *testing.T) {
 					{Script: "git pull"},
 					{Script: "claude"},
 				},
+				LogFile:  "/run/kukeon/tty/custom.log",
 				LogLevel: "debug",
 			},
 		},
@@ -1145,6 +1146,9 @@ func TestContainerTtyRoundTripV1Beta1(t *testing.T) {
 	}
 	if internal.Spec.Tty.Prompt != input.Spec.Tty.Prompt {
 		t.Errorf("internal prompt = %q, want %q", internal.Spec.Tty.Prompt, input.Spec.Tty.Prompt)
+	}
+	if internal.Spec.Tty.LogFile != input.Spec.Tty.LogFile {
+		t.Errorf("internal logFile = %q, want %q", internal.Spec.Tty.LogFile, input.Spec.Tty.LogFile)
 	}
 	if internal.Spec.Tty.LogLevel != input.Spec.Tty.LogLevel {
 		t.Errorf("internal logLevel = %q, want %q", internal.Spec.Tty.LogLevel, input.Spec.Tty.LogLevel)
@@ -1163,6 +1167,9 @@ func TestContainerTtyRoundTripV1Beta1(t *testing.T) {
 	}
 	if out.Spec.Tty.Prompt != input.Spec.Tty.Prompt {
 		t.Errorf("round-trip prompt = %q, want %q", out.Spec.Tty.Prompt, input.Spec.Tty.Prompt)
+	}
+	if out.Spec.Tty.LogFile != input.Spec.Tty.LogFile {
+		t.Errorf("round-trip logFile = %q, want %q", out.Spec.Tty.LogFile, input.Spec.Tty.LogFile)
 	}
 	if out.Spec.Tty.LogLevel != input.Spec.Tty.LogLevel {
 		t.Errorf("round-trip logLevel = %q, want %q", out.Spec.Tty.LogLevel, input.Spec.Tty.LogLevel)
@@ -1271,10 +1278,12 @@ func TestContainerTtyRejectedWithoutAttachable(t *testing.T) {
 	}{
 		{"prompt only", &ext.ContainerTty{Prompt: `"\u\$ "`}},
 		{"onInit only", &ext.ContainerTty{OnInit: []ext.TtyStage{{Script: "echo"}}}},
+		{"logFile only", &ext.ContainerTty{LogFile: "/run/kukeon/tty/log"}},
 		{"logLevel only", &ext.ContainerTty{LogLevel: "debug"}},
 		{"all set", &ext.ContainerTty{
 			Prompt:   `"\u\$ "`,
 			OnInit:   []ext.TtyStage{{Script: "echo"}},
+			LogFile:  "/run/kukeon/tty/log",
 			LogLevel: "debug",
 		}},
 	}

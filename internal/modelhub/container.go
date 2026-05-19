@@ -107,6 +107,7 @@ type ContainerSpec struct {
 type ContainerTty struct {
 	Prompt   string
 	OnInit   []TtyStage
+	LogFile  string
 	LogLevel string
 }
 
@@ -121,6 +122,9 @@ func (t *ContainerTty) IsEmpty() bool {
 		return true
 	}
 	if t.Prompt != "" {
+		return false
+	}
+	if t.LogFile != "" {
 		return false
 	}
 	if t.LogLevel != "" {

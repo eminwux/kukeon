@@ -518,6 +518,7 @@ func convertContainerTtyToInternal(in *ext.ContainerTty) *intmodel.ContainerTty 
 	}
 	out := &intmodel.ContainerTty{
 		Prompt:   in.Prompt,
+		LogFile:  in.LogFile,
 		LogLevel: in.LogLevel,
 	}
 	if len(in.OnInit) > 0 {
@@ -537,6 +538,7 @@ func buildContainerTtyExternalFromInternal(in *intmodel.ContainerTty) *ext.Conta
 	}
 	out := &ext.ContainerTty{
 		Prompt:   in.Prompt,
+		LogFile:  in.LogFile,
 		LogLevel: in.LogLevel,
 	}
 	if len(in.OnInit) > 0 {

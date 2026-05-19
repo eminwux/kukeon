@@ -132,14 +132,27 @@ type ContainerTty struct {
 	// order. Forwarded to TerminalSpec.Stages.OnInit via sbsh's
 	// WithOnInit; an empty slice leaves Stages.OnInit zero.
 	OnInit []TtyStage `json:"onInit,omitempty"  yaml:"onInit,omitempty"`
+	// LogFile is an optional operator override for the in-container path
+	// the kuketty wrapper writes its slog output to. Empty (the default)
+	// makes the daemon stamp ctr.AttachableKukettyLogPath
+	// (/run/kukeon/tty/kuketty.log inside the bind mount — peer to the
+	// capture file), which is always present after first attach. Set this
+	// to a different in-container path when the cell needs the log to
+	// land somewhere else (custom bind mount, fixed external mount). Mode
+	// and GID are not user-configurable — the daemon applies its
+	// AttachableLogFileMode and the kukeon-group GID, gated on the
+	// kukeon group being configured (matches socket/capture treatment).
+	// Issue #599.
+	LogFile string `json:"logFile,omitempty" yaml:"logFile,omitempty"`
 	// LogLevel controls the verbosity of the kuketty wrapper's own slog
 	// output. Accepted values: "debug", "info", "warn", "error". Empty
-	// is treated as "info" by the daemon. The path the log lands at is
-	// daemon-controlled (peer to capture inside the per-container tty
-	// directory — see ctr.AttachableKukettyLogPath and
+	// falls through to the daemon-wide kuketty.logLevel set on
+	// ServerConfigurationSpec, which itself defaults to "info". The path
+	// the log lands at is daemon-controlled (peer to capture inside the
+	// per-container tty directory — see ctr.AttachableKukettyLogPath and
 	// fs.ContainerKukettyLogPath); operators only pick the verbosity.
 	// Validation rejects unknown values at apply time rather than
-	// silently coercing to "info". Issue #599.
+	// silently coercing. Issue #599.
 	LogLevel string `json:"logLevel,omitempty" yaml:"logLevel,omitempty"`
 }
 
@@ -158,6 +171,9 @@ func (t *ContainerTty) IsEmpty() bool {
 		return true
 	}
 	if t.Prompt != "" {
+		return false
+	}
+	if t.LogFile != "" {
 		return false
 	}
 	if t.LogLevel != "" {

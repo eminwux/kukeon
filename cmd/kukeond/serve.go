@@ -104,6 +104,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		defaultMemoryLimitBytes = 0
 	}
 
+	kukettyLogLevel := viper.GetString(config.KUKEOND_KUKETTY_LOG_LEVEL.ViperKey)
+	if kukettyLogLevel == "" {
+		kukettyLogLevel = config.KUKEOND_KUKETTY_LOG_LEVEL.Default
+	}
+
 	opts := daemon.Options{
 		SocketPath:        socketPath,
 		SocketMode:        socketMode,
@@ -121,6 +126,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			// daemon path even when --socket-gid was set.
 			KukeondSocketGID:        socketGID,
 			DefaultMemoryLimitBytes: defaultMemoryLimitBytes,
+			// Daemon-wide kuketty log-level fallback. The renderer uses it
+			// when a cell omits per-container Tty.LogLevel; empty here would
+			// trip sbsh's NewFileLogger inside the container at attach time
+			// (issue #599), so the empty-resolved case above pins "info".
+			KukettyLogLevel: kukettyLogLevel,
 		},
 	}
 

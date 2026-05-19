@@ -106,6 +106,13 @@ spec:
   # Default: info
   logLevel: {{printf "%q" .LogLevel}}
 
+  # Daemon-wide default verbosity for the kuketty wrapper's own slog output
+  # (debug, info, warn, error), applied when an Attachable cell omits the
+  # per-container ` + "`spec.containers[].tty.logLevel`" + ` knob. A per-container
+  # override always wins. Issue #599.
+  # Default: info
+  kukettyLogLevel: {{printf "%q" .KukettyLogLevel}}
+
   # Period of the daemon's background cell-reconciliation loop, expressed as a
   # Go time.Duration string. The loop walks every cell and re-derives
   # ` + "`status.state`" + ` against observed container state once per tick. Zero or
