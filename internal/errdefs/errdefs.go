@@ -41,6 +41,15 @@ var (
 	ErrUpdateRealmMetadata    = errors.New("failed to update realm metadata")
 	ErrCreateRealmNamespace   = errors.New("failed to create realm namespace")
 	ErrMissingMetadataFile    = errors.New("missing metadata file")
+	// ErrStaleResource fires from metadata.WriteMetadataCAS when the
+	// on-disk bytes diverged between the caller's prior read and the
+	// compare-and-swap write. Surfaces to a controller writer that read,
+	// mutated, and tried to persist a metadata document while another
+	// writer (daemon, `kuke --no-daemon`, or the reconciler) committed
+	// an intervening write under the same exclusive flock. The caller
+	// must re-read, re-apply the mutation, and retry — there is no
+	// silent merge of disjoint edits.
+	ErrStaleResource = errors.New("metadata resource changed since prior read")
 	ErrUnsupportedAPIVersion  = errors.New("unsupported apiVersion")
 	ErrUnknownKind            = errors.New("unknown kind")
 	ErrConversionFailed       = errors.New("conversion failed")
