@@ -147,6 +147,13 @@ var (
 	KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES = DefineKV(
 		"KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES", "kukeond/defaultMemoryLimitBytes", "0",
 	)
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	// KUKEOND_KUKETTY_LOG_LEVEL is the daemon-wide default verbosity of the
+	// kuketty wrapper's own slog output, applied when a cell omits the
+	// per-container Tty.LogLevel knob. Issue #599.
+	KUKEOND_KUKETTY_LOG_LEVEL = DefineKV(
+		"KUKEOND_KUKETTY_LOG_LEVEL", "kukeond/kukettyLogLevel", "info",
+	)
 
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_INIT_REALM = DefineKV("KUKE_INIT_REALM", "kuke/init/realm")

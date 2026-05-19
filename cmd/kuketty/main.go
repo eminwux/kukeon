@@ -119,7 +119,7 @@ func run(args []string) error {
 		}
 	}()
 
-	logger, closeLogger, err := openTerminalLogger(doc.Spec.LogFile)
+	logger, closeLogger, err := openTerminalLogger(doc.Spec.LogFile, doc.Spec.LogLevel)
 	if err != nil {
 		return err
 	}
@@ -190,12 +190,21 @@ func loadTerminalDoc(path string) (*sbshapi.TerminalDoc, error) {
 // so out-of-tree callers of pkg/terminal/server must pre-create the file
 // at the matching mode (per v0.11.1's pkg/logging package contract). An
 // empty path falls through to a discard logger for test fixtures that
-// bypass pkg/builder.BuildTerminalSpec.
-func openTerminalLogger(logfile string) (*slog.Logger, func(), error) {
+// bypass pkg/builder.BuildTerminalSpec; in the OCI-injection path the
+// daemon always stamps Spec.LogFile = ctr.AttachableKukettyLogPath
+// (issue #599).
+//
+// loglevel is the operator-supplied Tty.LogLevel from the cell schema,
+// already normalized to "info" by the renderer when the cell left it
+// empty (sbsh's NewFileLogger rejects an empty level).
+func openTerminalLogger(logfile, loglevel string) (*slog.Logger, func(), error) {
 	if logfile == "" {
 		return slog.New(slog.NewTextHandler(io.Discard, nil)), func() {}, nil
 	}
-	fl, err := sbshlogging.NewFileLogger(logfile, "info")
+	if loglevel == "" {
+		loglevel = "info"
+	}
+	fl, err := sbshlogging.NewFileLogger(logfile, loglevel)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open log file %s: %w", logfile, err)
 	}

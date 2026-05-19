@@ -49,6 +49,13 @@ type ServerConfigurationSpec struct {
 	ContainerdSocket string `json:"containerdSocket,omitempty"          yaml:"containerdSocket,omitempty"`
 	// LogLevel is the daemon log level (debug, info, warn, error).
 	LogLevel string `json:"logLevel,omitempty"                  yaml:"logLevel,omitempty"`
+	// KukettyLogLevel is the daemon-wide default verbosity of the kuketty
+	// wrapper's own slog output, applied to every Attachable container
+	// whose cell schema does not pin a per-container ContainerTty.LogLevel.
+	// Accepted values: "debug", "info", "warn", "error"; empty is treated
+	// as "info" by the daemon. Lets operators flip every attachable cell
+	// on the host to "debug" without editing each cell YAML. Issue #599.
+	KukettyLogLevel string `json:"kukettyLogLevel,omitempty"           yaml:"kukettyLogLevel,omitempty"`
 	// ReconcileInterval is the period of the daemon's background cell
 	// reconciliation loop, expressed as a Go time.Duration string (e.g.
 	// "30s", "1m"). Empty falls back to the in-binary default. A zero or

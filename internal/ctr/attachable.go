@@ -22,6 +22,7 @@ import (
 
 	"github.com/containerd/containerd/v2/core/containers"
 	"github.com/containerd/containerd/v2/pkg/oci"
+	"github.com/eminwux/kukeon/internal/consts"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -58,9 +59,17 @@ const (
 	// kuketty does not yet write the transcript in phase 1b.
 	AttachableCapturePath = AttachableTTYDir + "/capture"
 
-	// AttachableLogfilePath is the declared in-container path for the
-	// kuketty log file. Honored starting in phase 3 (#289).
-	AttachableLogfilePath = AttachableTTYDir + "/log"
+	// AttachableKukettyLogPath is the in-container path of the kuketty
+	// wrapper's own slog output. Peer to AttachableSocketPath and
+	// AttachableCapturePath inside the per-container TTY directory bind
+	// mount, so the host-side ContainerKukettyLogPath resolves to the same
+	// inode. The path is daemon-controlled — operators do not configure it
+	// per cell — so this file always exists after first attach regardless
+	// of cell YAML. Distinct from AttachableCapturePath (the workload's
+	// tty byte stream); this carries the wrapper's own debug log
+	// (issue #599, reversing #289 phase 3's opt-in design for the kuketty-
+	// process log specifically).
+	AttachableKukettyLogPath = AttachableTTYDir + "/" + consts.KukeonContainerKukettyLogFile
 
 	// AttachableMetadataDir is the in-container directory where the
 	// kukeond-rendered terminal metadata file lives. Kept under

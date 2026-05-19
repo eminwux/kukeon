@@ -102,6 +102,13 @@ type Options struct {
 	// default) preserves the prior behavior — no fallback, the kernel sees
 	// memory.max=max for any spec that did not declare a limit.
 	DefaultMemoryLimitBytes int64
+	// KukettyLogLevel is the daemon-wide default verbosity of the kuketty
+	// wrapper's slog output, applied when a cell omits per-container
+	// ContainerTty.LogLevel. Surfaces via `kukeond serve --kuketty-log-level`,
+	// KUKEOND_KUKETTY_LOG_LEVEL, or ServerConfiguration.Spec.KukettyLogLevel.
+	// Empty falls through to the hardcoded "info" default inside the renderer.
+	// Issue #599.
+	KukettyLogLevel string
 }
 
 func NewControllerExec(ctx context.Context, logger *slog.Logger, opts Options) *Exec {
@@ -115,6 +122,7 @@ func NewControllerExec(ctx context.Context, logger *slog.Logger, opts Options) *
 			ForceRegenerateCNI:      opts.ForceRegenerateCNI,
 			KukeonGroupGID:          opts.KukeondSocketGID,
 			DefaultMemoryLimitBytes: opts.DefaultMemoryLimitBytes,
+			KukettyLogLevel:         opts.KukettyLogLevel,
 		}),
 	}
 }

@@ -517,8 +517,9 @@ func convertContainerTtyToInternal(in *ext.ContainerTty) *intmodel.ContainerTty 
 		return nil
 	}
 	out := &intmodel.ContainerTty{
-		Prompt:  in.Prompt,
-		LogFile: in.LogFile,
+		Prompt:   in.Prompt,
+		LogFile:  in.LogFile,
+		LogLevel: in.LogLevel,
 	}
 	if len(in.OnInit) > 0 {
 		out.OnInit = make([]intmodel.TtyStage, len(in.OnInit))
@@ -536,8 +537,9 @@ func buildContainerTtyExternalFromInternal(in *intmodel.ContainerTty) *ext.Conta
 		return nil
 	}
 	out := &ext.ContainerTty{
-		Prompt:  in.Prompt,
-		LogFile: in.LogFile,
+		Prompt:   in.Prompt,
+		LogFile:  in.LogFile,
+		LogLevel: in.LogLevel,
 	}
 	if len(in.OnInit) > 0 {
 		out.OnInit = make([]ext.TtyStage, len(in.OnInit))
@@ -571,14 +573,36 @@ func buildCellTtyExternalFromInternal(in *intmodel.CellTty) *ext.CellTty {
 // is config that only takes effect when Attachable=true (the capability
 // gate); silently dropping it on a non-attachable container would let a
 // future apply silently ignore configured prompts/onInit scripts.
+//
+// It also enforces the LogLevel enum (issue #599): empty or one of
+// debug/info/warn/error. Unknown values are rejected at apply time
+// rather than silently coerced to "info" downstream, since the
+// kuketty wrapper's debug log is the operator's primary diagnostic
+// when an attach session misbehaves.
 func validateContainerTty(spec ext.ContainerSpec) error {
-	if spec.Attachable {
+	if !spec.Attachable {
+		if !spec.Tty.IsEmpty() {
+			return fmt.Errorf("container %q: tty fields require attachable: true", spec.ID)
+		}
 		return nil
 	}
-	if spec.Tty.IsEmpty() {
+	if spec.Tty == nil {
 		return nil
 	}
-	return fmt.Errorf("container %q: tty fields require attachable: true", spec.ID)
+	if err := validateTtyLogLevel(spec.Tty.LogLevel); err != nil {
+		return fmt.Errorf("container %q: %w", spec.ID, err)
+	}
+	return nil
+}
+
+// validateTtyLogLevel accepts the empty string (the daemon defaults to
+// "info" downstream) or one of the four sbsh log levels. Issue #599.
+func validateTtyLogLevel(level string) error {
+	switch level {
+	case "", "debug", "info", "warn", "error":
+		return nil
+	}
+	return fmt.Errorf("tty.logLevel %q: must be one of debug, info, warn, error", level)
 }
 
 // resolveCellRootContainer enforces the rules around CellSpec.RootContainerID
