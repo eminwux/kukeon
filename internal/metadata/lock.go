@@ -52,22 +52,44 @@ func LockFilePath(file string) string {
 	return file + LockFileSuffix
 }
 
-// acquireFlock opens (creating if absent) the sidecar lock file for the
-// metadata file at `file` and acquires the requested flock mode. The
-// returned release closes the underlying file descriptor, which the
-// kernel uses to drop the flock.
+// acquireFlock opens the sidecar lock file for the metadata file at
+// `file` and acquires the requested flock mode. The returned release
+// closes the underlying file descriptor, which the kernel uses to drop
+// the flock.
 //
-// The parent directory is created up-front so the sidecar has somewhere
-// to live; this matches WriteMetadata's existing MkdirAll on the
-// create-new path.
+// Side effects differ by mode:
+//
+//   - Exclusive (write path): the parent directory is created via
+//     MkdirAll and the sidecar is opened with O_CREATE, mirroring
+//     WriteMetadata's existing create-new path. A writer always lands
+//     a sidecar — Phase 3 adopters can rely on that invariant.
+//
+//   - Shared (read path): neither the parent directory nor the sidecar
+//     is created. A missing sidecar surfaces as ErrMissingMetadataFile
+//     so a sibling DeleteMetadata that swept between the caller's
+//     existence pre-check and this acquire cannot be papered over by
+//     resurrecting a stale parent + sidecar that then leak after the
+//     read returns ErrMissingMetadataFile anyway.
 func acquireFlock(file string, exclusive bool) (func(), error) {
-	parent := filepath.Dir(file)
-	if mkErr := os.MkdirAll(parent, metadataDirMode); mkErr != nil {
-		return nil, fmt.Errorf("mkdir lock parent %s: %w", parent, mkErr)
+	if exclusive {
+		parent := filepath.Dir(file)
+		if mkErr := os.MkdirAll(parent, metadataDirMode); mkErr != nil {
+			return nil, fmt.Errorf("mkdir lock parent %s: %w", parent, mkErr)
+		}
 	}
 	lockPath := LockFilePath(file)
-	f, openErr := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, lockFilePerm)
+	openFlag := os.O_RDWR
+	if exclusive {
+		openFlag |= os.O_CREATE
+	}
+	f, openErr := os.OpenFile(lockPath, openFlag, lockFilePerm)
 	if openErr != nil {
+		if !exclusive && os.IsNotExist(openErr) {
+			return nil, fmt.Errorf(
+				"sidecar lock file missing for %s: %w",
+				file, errdefs.ErrMissingMetadataFile,
+			)
+		}
 		return nil, fmt.Errorf("open lock file %s: %w", lockPath, openErr)
 	}
 	mode := syscall.LOCK_SH

@@ -210,10 +210,15 @@ func ReadRaw(ctx context.Context, logger *slog.Logger, file string) ([]byte, err
 // The sidecar lock file at <file>.lock is removed alongside the data
 // file so the parent-directory cleanup path still fires — without this,
 // the leftover .lock entry would keep the empty-dir branch from
-// triggering. The lock is not acquired during deletion because the
-// caller is teardown logic that owns the entity exclusively (cell /
-// stack / space / realm delete); racing writers on a being-deleted
-// resource is out of scope for the phase-1 primitives.
+// triggering.
+//
+// The remove window runs under the same exclusive flock writers take so
+// a concurrent WriteMetadata mid-write cannot end with a data file
+// stranded without its sidecar (the writer's atomicWriteFile rename
+// would otherwise race the unlocked deleter's rm-sidecar). The
+// existsFilePath short-circuit before the flock keeps the fast path
+// (nothing to delete) cheap; a sibling deleter racing past the
+// short-circuit is tolerated via IsNotExist on the actual os.Remove.
 func DeleteMetadata(ctx context.Context, logger *slog.Logger, file string) error {
 	logger.DebugContext(ctx, "deleting metadata", "file", file)
 
@@ -222,41 +227,38 @@ func DeleteMetadata(ctx context.Context, logger *slog.Logger, file string) error
 		return nil // Idempotent: file doesn't exist, consider it deleted
 	}
 
-	// Delete the metadata file
-	if err := os.Remove(file); err != nil {
-		logger.ErrorContext(ctx, "failed to delete metadata file", "file", file, "error", err)
-		return fmt.Errorf("failed to delete metadata file %s: %w", file, err)
-	}
-
-	logger.InfoContext(ctx, "deleted metadata file", "file", file)
-
-	// Best-effort removal of the sidecar lock file. A missing sidecar is
-	// fine (pre-flock writes or a writer that never created it); any
-	// other error is logged but not surfaced so a stale lock leftover
-	// cannot block the higher-level teardown.
-	lockPath := LockFilePath(file)
-	if rmErr := os.Remove(lockPath); rmErr != nil && !os.IsNotExist(rmErr) {
-		logger.DebugContext(ctx, "could not remove sidecar lock file", "file", lockPath, "error", rmErr)
-	}
-
-	// Try to remove the parent directory if it's empty
-	dir := filepath.Dir(file)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		// Directory might not exist or we can't read it - that's OK
-		logger.DebugContext(ctx, "could not read directory, skipping directory removal", "dir", dir, "error", err)
-		return nil
-	}
-
-	// If directory is empty (only . and ..), remove it
-	if len(entries) == 0 {
-		if err = os.Remove(dir); err != nil {
-			logger.DebugContext(ctx, "could not remove empty directory", "dir", dir, "error", err)
-			// Don't fail if we can't remove the directory
-		} else {
-			logger.DebugContext(ctx, "removed empty metadata directory", "dir", dir)
+	return WithExclusiveLock(ctx, logger, file, func() error {
+		if err := os.Remove(file); err != nil && !os.IsNotExist(err) {
+			logger.ErrorContext(ctx, "failed to delete metadata file", "file", file, "error", err)
+			return fmt.Errorf("failed to delete metadata file %s: %w", file, err)
 		}
-	}
 
-	return nil
+		logger.InfoContext(ctx, "deleted metadata file", "file", file)
+
+		// Best-effort removal of the sidecar lock file. A missing sidecar
+		// is fine (pre-flock writes or a writer that never created it);
+		// any other error is logged but not surfaced so a stale lock
+		// leftover cannot block the higher-level teardown.
+		lockPath := LockFilePath(file)
+		if rmErr := os.Remove(lockPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			logger.DebugContext(ctx, "could not remove sidecar lock file", "file", lockPath, "error", rmErr)
+		}
+
+		// Try to remove the parent directory if it's empty.
+		dir := filepath.Dir(file)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			logger.DebugContext(ctx, "could not read directory, skipping directory removal", "dir", dir, "error", err)
+			return nil
+		}
+		if len(entries) == 0 {
+			if err = os.Remove(dir); err != nil {
+				logger.DebugContext(ctx, "could not remove empty directory", "dir", dir, "error", err)
+			} else {
+				logger.DebugContext(ctx, "removed empty metadata directory", "dir", dir)
+			}
+		}
+
+		return nil
+	})
 }

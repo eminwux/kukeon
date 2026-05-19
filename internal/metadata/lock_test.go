@@ -25,6 +25,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -528,6 +530,132 @@ func TestWriteMetadataCASRetryAfterStale(t *testing.T) {
 	}
 	if got["counter"] != 101 {
 		t.Fatalf("counter after retry = %d, want 101", got["counter"])
+	}
+}
+
+// TestWithSharedLockDoesNotResurrectAfterDelete reproduces the TOCTOU
+// race the reviewer flagged in PR #607: a sibling DeleteMetadata sweeps
+// the parent dir + sidecar between a reader's existence pre-check and
+// the shared-lock acquire. The acquire must surface
+// ErrMissingMetadataFile WITHOUT recreating the parent dir or sidecar —
+// otherwise both leak after the read returns ErrMissingMetadataFile
+// anyway, and phase-3 adopters retrying on ErrStaleResource will widen
+// the window.
+//
+// We drive the race deterministically: seed normal state, then call
+// os.RemoveAll on the parent to simulate the deleter completing
+// mid-flight, then invoke WithSharedLock directly. A racy two-goroutine
+// arrangement would test the same property less reliably.
+func TestWithSharedLockDoesNotResurrectAfterDelete(t *testing.T) {
+	tmp := t.TempDir()
+	parent := filepath.Join(tmp, "cell")
+	file := filepath.Join(parent, "metadata.json")
+	logger := discardLogger()
+	ctx := context.Background()
+
+	if err := metadata.WriteMetadata(ctx, logger, map[string]string{"k": "v"}, file); err != nil {
+		t.Fatalf("seed WriteMetadata: %v", err)
+	}
+	if err := os.RemoveAll(parent); err != nil {
+		t.Fatalf("simulate concurrent DeleteMetadata: %v", err)
+	}
+
+	err := metadata.WithSharedLock(ctx, logger, file, func() error {
+		t.Errorf("fn ran despite missing data file — shared-lock acquire should have failed")
+		return nil
+	})
+	if !errors.Is(err, errdefs.ErrMissingMetadataFile) {
+		t.Fatalf("WithSharedLock after parent rm: err = %v, want ErrMissingMetadataFile", err)
+	}
+
+	if _, statErr := os.Stat(parent); !os.IsNotExist(statErr) {
+		t.Errorf("parent dir resurrected by shared-lock acquire: stat err = %v", statErr)
+	}
+	if _, statErr := os.Stat(metadata.LockFilePath(file)); !os.IsNotExist(statErr) {
+		t.Errorf("sidecar resurrected by shared-lock acquire: stat err = %v", statErr)
+	}
+}
+
+// TestStressConcurrentWriteReadDelete hammers the same path with
+// concurrent Write/Read/Delete goroutines. After every goroutine
+// returns, the working dir must be in one of two well-defined terminal
+// states:
+//
+//   - parent absent (last meaningful op was a successful DeleteMetadata
+//     that rmdir'd the empty parent), or
+//   - parent contains exactly {data file, sidecar} (last op was a
+//     WriteMetadata that completed atomically).
+//
+// Any other state is the reviewer's bug shape — orphan parent dir,
+// stray .lock without a data file, or data file without its sidecar.
+// Both pre-fix race windows (ReadRaw resurrecting parent+sidecar after
+// a sweep; DeleteMetadata racing a writer's atomicWriteFile rename to
+// strand data without a sidecar) would manifest here.
+func TestStressConcurrentWriteReadDelete(t *testing.T) {
+	tmp := t.TempDir()
+	parent := filepath.Join(tmp, "cell")
+	file := filepath.Join(parent, "metadata.json")
+	logger := discardLogger()
+	ctx := context.Background()
+
+	const (
+		writers  = 8
+		readers  = 8
+		deleters = 4
+		iters    = 50
+	)
+
+	var wg sync.WaitGroup
+	wg.Add(writers + readers + deleters)
+
+	for w := 0; w < writers; w++ {
+		go func(id int) {
+			defer wg.Done()
+			for i := 0; i < iters; i++ {
+				_ = metadata.WriteMetadata(ctx, logger, map[string]int{"w": id, "i": i}, file)
+			}
+		}(w)
+	}
+	for r := 0; r < readers; r++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iters; i++ {
+				_, _ = metadata.ReadRaw(ctx, logger, file)
+			}
+		}()
+	}
+	for d := 0; d < deleters; d++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iters; i++ {
+				_ = metadata.DeleteMetadata(ctx, logger, file)
+			}
+		}()
+	}
+	wg.Wait()
+
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			t.Fatalf("ReadDir parent: %v", err)
+		}
+		return // parent absent — clean terminal state
+	}
+
+	got := make([]string, 0, len(entries))
+	for _, e := range entries {
+		got = append(got, e.Name())
+	}
+	sort.Strings(got)
+
+	want := []string{
+		filepath.Base(file),
+		filepath.Base(file) + metadata.LockFileSuffix,
+	}
+	sort.Strings(want)
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("orphan terminal state after stress: parent contents = %v; want %v or empty parent", got, want)
 	}
 }
 
