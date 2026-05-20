@@ -180,6 +180,11 @@ func (r *Exec) EnsureCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	if err := r.UpdateCellMetadata(ensuredCell); err != nil {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, err)
 	}
+	// The write above may have bumped the generation (a merged container is
+	// a spec change). Sync the in-memory token so the caller's follow-up
+	// status persist (PopulateAndPersistCellContainerStatuses) is not
+	// rejected as stale against its own write.
+	r.refreshCellGeneration(&ensuredCell)
 
 	return ensuredCell, nil
 }

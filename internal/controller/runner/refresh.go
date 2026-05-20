@@ -17,12 +17,50 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 
 	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/naming"
 )
+
+// observedGenerationBehind reports whether the reconciler has not yet
+// recorded, via Status.ObservedGeneration, that it acted on the cell's
+// current Metadata.Generation. When true the reconciler persists even if no
+// derived status field changed, so ObservedGeneration converges to
+// Generation after a spec write and the AC5 stale-skip comparison stays
+// meaningful (a cell that reached Ready synchronously, never via a
+// reconcile persist, would otherwise sit at ObservedGeneration 0 forever).
+func observedGenerationBehind(status intmodel.CellStatus, generation int64) bool {
+	return status.ObservedGeneration != generation
+}
+
+// persistCellStatusGuarded stamps Status.ObservedGeneration with the
+// generation the reconciler observed when the cell was listed and persists
+// the cell — but only when no concurrent spec writer has advanced the
+// on-disk Generation past that observation. The guard rides the writer's
+// optimistic token: UpdateCellMetadata carries the observed generation, and
+// the writer rejects with errdefs.ErrStaleResource when the on-disk
+// generation has moved past it (or when a spec write lands in the CAS
+// window). A stale observation is reported as a benign skip (persisted ==
+// false, nil error): the next reconcile tick re-derives status from the
+// fresher spec rather than clobbering it with a stale view.
+func (r *Exec) persistCellStatusGuarded(cell intmodel.Cell) (bool, error) {
+	cell.Status.ObservedGeneration = cell.Metadata.Generation
+	if err := r.UpdateCellMetadata(cell); err != nil {
+		if errors.Is(err, errdefs.ErrStaleResource) {
+			r.logger.DebugContext(r.ctx,
+				"reconcile: skipping stale cell persist; on-disk generation advanced",
+				"cell", cell.Metadata.Name,
+				"observed", cell.Metadata.Generation)
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
 
 // RefreshRealm refreshes the status of a realm by checking cgroup and containerd namespace.
 // Returns the updated realm, whether it was updated, and any error.
@@ -336,8 +374,15 @@ func (r *Exec) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error) {
 	}
 
 	if cellUpdated || containersUpdated > 0 {
-		if updateErr := r.UpdateCellMetadata(cell); updateErr != nil {
+		persisted, updateErr := r.persistCellStatusGuarded(cell)
+		if updateErr != nil {
 			return cell, containersUpdated, fmt.Errorf("failed to update cell metadata: %w", updateErr)
+		}
+		// A concurrent spec write advanced the cell's generation past the
+		// refreshed view: the derived status was discarded rather than
+		// clobbering the newer spec, so report nothing updated.
+		if !persisted {
+			return cell, 0, nil
 		}
 		return cell, containersUpdated, nil
 	}
@@ -536,11 +581,14 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 			r.logger.DebugContext(r.ctx, "populate container statuses failed",
 				"cell", cell.Metadata.Name, "error", err)
 		}
-		updated := !containerStatusesEqual(originalStatus.Containers, cell.Status.Containers)
+		updated := !containerStatusesEqual(originalStatus.Containers, cell.Status.Containers) ||
+			observedGenerationBehind(originalStatus, cell.Metadata.Generation)
 		if updated {
-			if updateErr := r.UpdateCellMetadata(cell); updateErr != nil {
+			persisted, updateErr := r.persistCellStatusGuarded(cell)
+			if updateErr != nil {
 				return cell, ReconcileOutcome{}, fmt.Errorf("failed to update cell metadata: %w", updateErr)
 			}
+			updated = persisted
 		}
 		return cell, ReconcileOutcome{Updated: updated}, nil
 	}
@@ -598,11 +646,16 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 	if !containerStatusesEqual(originalStatus.Containers, cell.Status.Containers) {
 		updated = true
 	}
+	if observedGenerationBehind(originalStatus, cell.Metadata.Generation) {
+		updated = true
+	}
 
 	if updated {
-		if updateErr := r.UpdateCellMetadata(cell); updateErr != nil {
+		persisted, updateErr := r.persistCellStatusGuarded(cell)
+		if updateErr != nil {
 			return cell, ReconcileOutcome{}, fmt.Errorf("failed to update cell metadata: %w", updateErr)
 		}
+		updated = persisted
 	}
 	return cell, ReconcileOutcome{Updated: updated}, nil
 }
