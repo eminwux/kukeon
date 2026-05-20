@@ -51,8 +51,9 @@ func ConvertRealmDocToInternal(in ext.RealmDoc) (intmodel.Realm, error) {
 		}
 		return intmodel.Realm{
 			Metadata: intmodel.RealmMetadata{
-				Name:   in.Metadata.Name,
-				Labels: in.Metadata.Labels,
+				Name:       in.Metadata.Name,
+				Labels:     in.Metadata.Labels,
+				Generation: in.Metadata.Generation,
 			},
 			Spec: intmodel.RealmSpec{
 				Namespace:           in.Spec.Namespace,
@@ -69,6 +70,7 @@ func ConvertRealmDocToInternal(in ext.RealmDoc) (intmodel.Realm, error) {
 				Message:                  in.Status.Message,
 				CgroupReady:              in.Status.CgroupReady,
 				ContainerdNamespaceReady: in.Status.ContainerdNamespaceReady,
+				ObservedGeneration:       in.Status.ObservedGeneration,
 			},
 		}, nil
 	default:
@@ -92,8 +94,9 @@ func BuildRealmExternalFromInternal(in intmodel.Realm, apiVersion ext.Version) (
 			APIVersion: VersionV1Beta1,
 			Kind:       ext.KindRealm,
 			Metadata: ext.RealmMetadata{
-				Name:   in.Metadata.Name,
-				Labels: in.Metadata.Labels,
+				Name:       in.Metadata.Name,
+				Labels:     in.Metadata.Labels,
+				Generation: in.Metadata.Generation,
 			},
 			Spec: ext.RealmSpec{
 				Namespace:           in.Spec.Namespace,
@@ -110,6 +113,7 @@ func BuildRealmExternalFromInternal(in intmodel.Realm, apiVersion ext.Version) (
 				Message:                  in.Status.Message,
 				CgroupReady:              in.Status.CgroupReady,
 				ContainerdNamespaceReady: in.Status.ContainerdNamespaceReady,
+				ObservedGeneration:       in.Status.ObservedGeneration,
 			},
 		}, nil
 	default:
@@ -146,8 +150,9 @@ func ConvertSpaceDocToInternal(in ext.SpaceDoc) (intmodel.Space, error) {
 		}
 		return intmodel.Space{
 			Metadata: intmodel.SpaceMetadata{
-				Name:   in.Metadata.Name,
-				Labels: in.Metadata.Labels,
+				Name:       in.Metadata.Name,
+				Labels:     in.Metadata.Labels,
+				Generation: in.Metadata.Generation,
 			},
 			Spec: intmodel.SpaceSpec{
 				RealmName:     in.Spec.RealmID,
@@ -165,6 +170,7 @@ func ConvertSpaceDocToInternal(in ext.SpaceDoc) (intmodel.Space, error) {
 				Reason:             in.Status.Reason,
 				Message:            in.Status.Message,
 				CgroupReady:        in.Status.CgroupReady,
+				ObservedGeneration: in.Status.ObservedGeneration,
 			},
 		}, nil
 	default:
@@ -192,8 +198,9 @@ func BuildSpaceExternalFromInternal(in intmodel.Space, apiVersion ext.Version) (
 			APIVersion: VersionV1Beta1,
 			Kind:       ext.KindSpace,
 			Metadata: ext.SpaceMetadata{
-				Name:   in.Metadata.Name,
-				Labels: in.Metadata.Labels,
+				Name:       in.Metadata.Name,
+				Labels:     in.Metadata.Labels,
+				Generation: in.Metadata.Generation,
 			},
 			Spec: ext.SpaceSpec{
 				RealmID:       in.Spec.RealmName,
@@ -211,6 +218,7 @@ func BuildSpaceExternalFromInternal(in intmodel.Space, apiVersion ext.Version) (
 				Reason:             in.Status.Reason,
 				Message:            in.Status.Message,
 				CgroupReady:        in.Status.CgroupReady,
+				ObservedGeneration: in.Status.ObservedGeneration,
 			},
 		}, nil
 	default:
@@ -234,8 +242,9 @@ func ConvertStackDocToInternal(in ext.StackDoc) (intmodel.Stack, error) {
 	case VersionV1Beta1, "": // default/empty treated as v1beta1
 		return intmodel.Stack{
 			Metadata: intmodel.StackMetadata{
-				Name:   in.Metadata.Name,
-				Labels: in.Metadata.Labels,
+				Name:       in.Metadata.Name,
+				Labels:     in.Metadata.Labels,
+				Generation: in.Metadata.Generation,
 			},
 			Spec: intmodel.StackSpec{
 				ID:        in.Spec.ID,
@@ -252,6 +261,7 @@ func ConvertStackDocToInternal(in ext.StackDoc) (intmodel.Stack, error) {
 				Reason:             in.Status.Reason,
 				Message:            in.Status.Message,
 				CgroupReady:        in.Status.CgroupReady,
+				ObservedGeneration: in.Status.ObservedGeneration,
 			},
 		}, nil
 	default:
@@ -267,8 +277,9 @@ func BuildStackExternalFromInternal(in intmodel.Stack, apiVersion ext.Version) (
 			APIVersion: VersionV1Beta1,
 			Kind:       ext.KindStack,
 			Metadata: ext.StackMetadata{
-				Name:   in.Metadata.Name,
-				Labels: in.Metadata.Labels,
+				Name:       in.Metadata.Name,
+				Labels:     in.Metadata.Labels,
+				Generation: in.Metadata.Generation,
 			},
 			Spec: ext.StackSpec{
 				ID:      in.Spec.ID,
@@ -285,6 +296,7 @@ func BuildStackExternalFromInternal(in intmodel.Stack, apiVersion ext.Version) (
 				Reason:             in.Status.Reason,
 				Message:            in.Status.Message,
 				CgroupReady:        in.Status.CgroupReady,
+				ObservedGeneration: in.Status.ObservedGeneration,
 			},
 		}, nil
 	default:
@@ -951,8 +963,9 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 		}
 		cell := intmodel.Cell{
 			Metadata: intmodel.CellMetadata{
-				Name:   in.Metadata.Name,
-				Labels: in.Metadata.Labels,
+				Name:       in.Metadata.Name,
+				Labels:     in.Metadata.Labels,
+				Generation: in.Metadata.Generation,
 			},
 			Spec: intmodel.CellSpec{
 				ID:                  in.Spec.ID,
@@ -971,14 +984,15 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 				Network: intmodel.CellNetworkStatus{
 					BridgeName: in.Status.Network.BridgeName,
 				},
-				Containers:    convertContainerStatusesToInternal(in.Status.Containers),
-				ReadyObserved: in.Status.ReadyObserved,
-				CreatedAt:     in.Status.CreatedAt,
-				UpdatedAt:     in.Status.UpdatedAt,
-				ReadyAt:       in.Status.ReadyAt,
-				Reason:        in.Status.Reason,
-				Message:       in.Status.Message,
-				CgroupReady:   in.Status.CgroupReady,
+				Containers:         convertContainerStatusesToInternal(in.Status.Containers),
+				ReadyObserved:      in.Status.ReadyObserved,
+				CreatedAt:          in.Status.CreatedAt,
+				UpdatedAt:          in.Status.UpdatedAt,
+				ReadyAt:            in.Status.ReadyAt,
+				Reason:             in.Status.Reason,
+				Message:            in.Status.Message,
+				CgroupReady:        in.Status.CgroupReady,
+				ObservedGeneration: in.Status.ObservedGeneration,
 			},
 		}
 
@@ -1014,8 +1028,9 @@ func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ex
 			APIVersion: VersionV1Beta1,
 			Kind:       ext.KindCell,
 			Metadata: ext.CellMetadata{
-				Name:   in.Metadata.Name,
-				Labels: in.Metadata.Labels,
+				Name:       in.Metadata.Name,
+				Labels:     in.Metadata.Labels,
+				Generation: in.Metadata.Generation,
 			},
 			Spec: ext.CellSpec{
 				ID:                  in.Spec.ID,
@@ -1034,14 +1049,15 @@ func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ex
 				Network: ext.CellNetworkStatus{
 					BridgeName: in.Status.Network.BridgeName,
 				},
-				Containers:    buildContainerStatusesExternalFromInternal(in.Status.Containers),
-				ReadyObserved: in.Status.ReadyObserved,
-				CreatedAt:     in.Status.CreatedAt,
-				UpdatedAt:     in.Status.UpdatedAt,
-				ReadyAt:       in.Status.ReadyAt,
-				Reason:        in.Status.Reason,
-				Message:       in.Status.Message,
-				CgroupReady:   in.Status.CgroupReady,
+				Containers:         buildContainerStatusesExternalFromInternal(in.Status.Containers),
+				ReadyObserved:      in.Status.ReadyObserved,
+				CreatedAt:          in.Status.CreatedAt,
+				UpdatedAt:          in.Status.UpdatedAt,
+				ReadyAt:            in.Status.ReadyAt,
+				Reason:             in.Status.Reason,
+				Message:            in.Status.Message,
+				CgroupReady:        in.Status.CgroupReady,
+				ObservedGeneration: in.Status.ObservedGeneration,
 			},
 		}
 

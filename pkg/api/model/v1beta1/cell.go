@@ -29,6 +29,10 @@ type CellDoc struct {
 type CellMetadata struct {
 	Name   string            `json:"name"   yaml:"name"`
 	Labels map[string]string `json:"labels" yaml:"labels"`
+	// Generation is a monotonic counter bumped by a writer on each
+	// spec-changing update. Defaults to zero; phase 3 wires the writers to
+	// populate it. See ObservedGeneration on the status.
+	Generation int64 `json:"generation,omitempty" yaml:"generation,omitempty"`
 }
 
 type CellSpec struct {
@@ -94,6 +98,10 @@ type CellStatus struct {
 	Reason      string    `json:"reason,omitempty"        yaml:"reason,omitempty"`
 	Message     string    `json:"message,omitempty"       yaml:"message,omitempty"`
 	CgroupReady bool      `json:"cgroupReady,omitempty"   yaml:"cgroupReady,omitempty"`
+	// ObservedGeneration is the Metadata.Generation the reconciler last
+	// acted on. Defaults to zero; phase 3 wires the reconciler to compare
+	// it against Generation to skip stale work.
+	ObservedGeneration int64 `json:"observedGeneration,omitempty" yaml:"observedGeneration,omitempty"`
 }
 
 // CellNetworkStatus exposes the host-side bridge a cell is attached to.

@@ -29,6 +29,10 @@ type RealmDoc struct {
 type RealmMetadata struct {
 	Name   string            `json:"name"   yaml:"name"`
 	Labels map[string]string `json:"labels" yaml:"labels"`
+	// Generation is a monotonic counter bumped by a writer on each
+	// spec-changing update. Defaults to zero; phase 3 (issue #596 follow-up)
+	// wires the writers to populate it. See ObservedGeneration on the status.
+	Generation int64 `json:"generation,omitempty" yaml:"generation,omitempty"`
 }
 
 type RealmSpec struct {
@@ -81,6 +85,10 @@ type RealmStatus struct {
 	// the last status write. Like CgroupReady, this separates intent
 	// from observation.
 	ContainerdNamespaceReady bool `json:"containerdNamespaceReady,omitempty" yaml:"containerdNamespaceReady,omitempty"`
+	// ObservedGeneration is the Metadata.Generation the reconciler last
+	// acted on. Defaults to zero; phase 3 wires the reconciler to compare
+	// it against Generation to skip stale work.
+	ObservedGeneration int64 `json:"observedGeneration,omitempty" yaml:"observedGeneration,omitempty"`
 }
 
 type RealmState int
