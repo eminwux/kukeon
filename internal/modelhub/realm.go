@@ -27,6 +27,10 @@ type Realm struct {
 type RealmMetadata struct {
 	Name   string
 	Labels map[string]string
+	// Generation is a monotonic counter bumped by a writer on each
+	// spec-changing update. Defaults to zero; phase 3 (issue #596 follow-up)
+	// wires the writers to populate it. See ObservedGeneration on the status.
+	Generation int64
 }
 
 type RealmSpec struct {
@@ -72,6 +76,10 @@ type RealmStatus struct {
 	// ContainerdNamespaceReady reports whether the realm's containerd
 	// namespace was observed to exist as of the last status write.
 	ContainerdNamespaceReady bool
+	// ObservedGeneration is the Metadata.Generation the reconciler last
+	// acted on. Defaults to zero; phase 3 wires the reconciler to compare
+	// it against Generation to skip stale work.
+	ObservedGeneration int64
 }
 
 type RealmState int

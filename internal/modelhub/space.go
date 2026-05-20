@@ -27,6 +27,10 @@ type Space struct {
 type SpaceMetadata struct {
 	Name   string
 	Labels map[string]string
+	// Generation is a monotonic counter bumped by a writer on each
+	// spec-changing update. Defaults to zero; phase 3 wires the writers to
+	// populate it. See ObservedGeneration on the status.
+	Generation int64
 }
 
 type SpaceSpec struct {
@@ -98,6 +102,10 @@ type SpaceStatus struct {
 	Reason      string
 	Message     string
 	CgroupReady bool
+	// ObservedGeneration is the Metadata.Generation the reconciler last
+	// acted on. Defaults to zero; phase 3 wires the reconciler to compare
+	// it against Generation to skip stale work.
+	ObservedGeneration int64
 }
 
 type SpaceState int
