@@ -110,27 +110,56 @@ func (r *Exec) RecreateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, fmt.Errorf("failed to build root container containerd ID: %w", err)
 	}
 
-	_, err = r.ctrClient.StopContainer(internalRealm.Spec.Namespace, rootContainerID, ctr.StopContainerOptions{Force: true})
-	if err != nil {
-		r.logger.WarnContext(
-			r.ctx,
-			"failed to stop root container, continuing with deletion",
-			"container", rootContainerID,
-			"error", err,
-		)
-	}
+	// Release the root container's CNI/IPAM reservation before deleting it.
+	// createCellContainers below rebuilds the root under this same deterministic
+	// containerd ID and re-runs CNI ADD; without releasing first, host-local
+	// IPAM rejects the re-ADD as a duplicate allocation (issue #630). releaseCNI
+	// runs before the stop/delete so the netns is still valid for CNI DEL where
+	// applicable; purgeCNI scrubs the residual allocation file afterward.
+	cellName := strings.TrimSpace(existing.Metadata.Name)
+	cniConfigPath, _ := r.resolveSpaceCNIConfigPath(realmName, spaceName)
+	networkName := r.resolveRootCNINetworkName(realmName, spaceName)
+	_ = teardownRootContainerCNI(
+		func() {
+			r.detachRootContainerFromNetwork(
+				rootContainerID, cniConfigPath, internalRealm.Spec.Namespace, cellID, cellName, spaceName, realmName,
+			)
+		},
+		func() error {
+			if _, rootStopErr := r.ctrClient.StopContainer(
+				internalRealm.Spec.Namespace, rootContainerID, ctr.StopContainerOptions{Force: true},
+			); rootStopErr != nil {
+				r.logger.WarnContext(
+					r.ctx,
+					"failed to stop root container, continuing with deletion",
+					"container", rootContainerID,
+					"error", rootStopErr,
+				)
+			}
 
-	err = r.ctrClient.DeleteContainer(internalRealm.Spec.Namespace, rootContainerID, ctr.ContainerDeleteOptions{
-		SnapshotCleanup: true,
-	})
-	if err != nil {
-		r.logger.WarnContext(
-			r.ctx,
-			"failed to delete root container, continuing",
-			"container", rootContainerID,
-			"error", err,
-		)
-	}
+			delErr := r.ctrClient.DeleteContainer(
+				internalRealm.Spec.Namespace,
+				rootContainerID,
+				ctr.ContainerDeleteOptions{
+					SnapshotCleanup: true,
+				},
+			)
+			if delErr != nil {
+				r.logger.WarnContext(
+					r.ctx,
+					"failed to delete root container, continuing",
+					"container", rootContainerID,
+					"error", delErr,
+				)
+			}
+			return delErr
+		},
+		func() {
+			if networkName != "" {
+				_ = r.purgeCNIForContainer(rootContainerID, "", networkName)
+			}
+		},
+	)
 
 	// Clear containerd IDs from desired cell so containers will be recreated
 	for i := range desired.Spec.Containers {

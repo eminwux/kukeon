@@ -130,6 +130,29 @@ func cellTasksAllRunningFn(
 	return true
 }
 
+// teardownRootContainerCNI enforces issue #630's release-before-recreate
+// ordering: it runs CNI DEL against the old root container (releaseCNI) *before*
+// deleteContainer removes it, then runs the best-effort IPAM-file safety net
+// (purgeCNI) *after* the delete. Both StartCell's teardown-before-recreate
+// branch and RecreateCell rebuild the root under the *same* deterministic
+// containerd ID (naming.BuildRootContainerdID) and re-run CNI ADD against it;
+// without releasing the prior reservation first, host-local IPAM rejects the
+// re-ADD as a "duplicate allocation". releaseCNI must run while the old
+// container's netns is still valid (i.e. before its task is deleted), so it is
+// sequenced first; purgeCNI always runs, even when deleteContainer fails, so a
+// leaked allocation file is still scrubbed. deleteContainer's error is returned
+// for the caller to log (both call sites warn-and-continue on it).
+//
+// Decoupled from *Exec's concrete containerd/CNI clients — same rationale as
+// cellTasksAllRunningFn (issue #149) — so the ordering invariant is
+// unit-testable without a live runtime.
+func teardownRootContainerCNI(releaseCNI func(), deleteContainer func() error, purgeCNI func()) error {
+	releaseCNI()
+	delErr := deleteContainer()
+	purgeCNI()
+	return delErr
+}
+
 // maxFailureMessageLen caps Status.Message so a long, multi-line wrap from
 // `fmt.Errorf("%w: %w", …)` chains doesn't blow up `kuke get cell -o yaml`.
 // 256 bytes is comfortably wider than any error sentinel string in the repo
@@ -399,55 +422,57 @@ func (r *Exec) StartCell(cell intmodel.Cell) (_ intmodel.Cell, retErr error) {
 			)
 		}
 	} else {
-		// Container exists, check if it has a task and delete it
-		nsCtx := namespaces.WithNamespace(r.ctx, namespace)
-		task, taskErr := container.Task(nsCtx, nil)
-		if taskErr == nil {
-			// Task exists, delete it
-			_, deleteTaskErr := task.Delete(nsCtx, containerd.WithProcessKill)
-			if deleteTaskErr != nil {
-				fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-				fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", deleteTaskErr))
-				r.logger.WarnContext(
-					r.ctx,
-					"failed to delete existing task, continuing",
-					fields...,
+		// Container exists: release its CNI/IPAM reservation, then delete it.
+		// The root is recreated below under the same deterministic containerd
+		// ID and re-attached via CNI ADD; without the release-before-delete
+		// ordering here, host-local IPAM rejects that re-ADD as a duplicate
+		// allocation (issue #630). releaseCNI must run while the task's netns
+		// is still valid, so it is sequenced before the task delete; purgeCNI
+		// scrubs the residual allocation file afterward as a safety net.
+		networkName := r.resolveRootCNINetworkName(realmID, spaceID)
+		_ = teardownRootContainerCNI(
+			func() {
+				r.detachRootContainerFromNetwork(
+					containerID, cniConfigPath, namespace, cellID, cellName, spaceID, realmID,
 				)
-			}
-		}
+			},
+			func() error {
+				// Delete the task (if any) then the container to remove stale spec.
+				nsCtx := namespaces.WithNamespace(r.ctx, namespace)
+				if task, taskErr := container.Task(nsCtx, nil); taskErr == nil {
+					if _, deleteTaskErr := task.Delete(nsCtx, containerd.WithProcessKill); deleteTaskErr != nil {
+						fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+						fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", deleteTaskErr))
+						r.logger.WarnContext(r.ctx, "failed to delete existing task, continuing", fields...)
+					}
+				}
 
-		// Delete the container to remove stale spec
-		err = r.ctrClient.DeleteContainer(namespace, containerID, ctr.ContainerDeleteOptions{
-			SnapshotCleanup: true,
-		})
-		if err != nil {
-			// Check if container doesn't exist (might have been deleted between check and delete)
-			if errors.Is(err, internalerrdefs.ErrContainerNotFound) {
-				fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-				fields = append(fields, "space", spaceID, "realm", realmID)
-				r.logger.DebugContext(
-					r.ctx,
-					"root container already deleted, will create fresh",
-					fields...,
-				)
-			} else {
-				fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-				fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
-				r.logger.WarnContext(
-					r.ctx,
-					"failed to delete existing container, continuing",
-					fields...,
-				)
-			}
-		} else {
-			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-			fields = append(fields, "space", spaceID, "realm", realmID)
-			r.logger.InfoContext(
-				r.ctx,
-				"deleted existing root container for recreation",
-				fields...,
-			)
-		}
+				delErr := r.ctrClient.DeleteContainer(namespace, containerID, ctr.ContainerDeleteOptions{
+					SnapshotCleanup: true,
+				})
+				switch {
+				case delErr == nil:
+					fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+					fields = append(fields, "space", spaceID, "realm", realmID)
+					r.logger.InfoContext(r.ctx, "deleted existing root container for recreation", fields...)
+				case errors.Is(delErr, internalerrdefs.ErrContainerNotFound):
+					// Might have been deleted between check and delete.
+					fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+					fields = append(fields, "space", spaceID, "realm", realmID)
+					r.logger.DebugContext(r.ctx, "root container already deleted, will create fresh", fields...)
+				default:
+					fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+					fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", delErr))
+					r.logger.WarnContext(r.ctx, "failed to delete existing container, continuing", fields...)
+				}
+				return delErr
+			},
+			func() {
+				if networkName != "" {
+					_ = r.purgeCNIForContainer(containerID, "", networkName)
+				}
+			},
+		)
 	}
 
 	// Recreate root container fresh
