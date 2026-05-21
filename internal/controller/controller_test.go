@@ -60,7 +60,10 @@ type fakeRunner struct {
 	DeleteStackFn func(stack intmodel.Stack) error
 
 	// Secret methods
-	WriteSecretFn func(secret intmodel.Secret) (bool, error)
+	WriteSecretFn  func(secret intmodel.Secret) (bool, error)
+	GetSecretFn    func(secret intmodel.Secret) (intmodel.Secret, error)
+	ListSecretsFn  func(realmName, spaceName, stackName, cellName string) ([]intmodel.Secret, error)
+	DeleteSecretFn func(secret intmodel.Secret) error
 
 	// Cell methods
 	GetCellFn                 func(cell intmodel.Cell) (intmodel.Cell, error)
@@ -264,6 +267,27 @@ func (f *fakeRunner) WriteSecret(secret intmodel.Secret) (bool, error) {
 		return f.WriteSecretFn(secret)
 	}
 	return false, errors.New("unexpected call to WriteSecret")
+}
+
+func (f *fakeRunner) GetSecret(secret intmodel.Secret) (intmodel.Secret, error) {
+	if f.GetSecretFn != nil {
+		return f.GetSecretFn(secret)
+	}
+	return intmodel.Secret{}, errors.New("unexpected call to GetSecret")
+}
+
+func (f *fakeRunner) ListSecrets(realmName, spaceName, stackName, cellName string) ([]intmodel.Secret, error) {
+	if f.ListSecretsFn != nil {
+		return f.ListSecretsFn(realmName, spaceName, stackName, cellName)
+	}
+	return nil, errors.New("unexpected call to ListSecrets")
+}
+
+func (f *fakeRunner) DeleteSecret(secret intmodel.Secret) error {
+	if f.DeleteSecretFn != nil {
+		return f.DeleteSecretFn(secret)
+	}
+	return errors.New("unexpected call to DeleteSecret")
 }
 
 // Cell methods

@@ -103,6 +103,20 @@ type Runner interface {
 	// the scope itself.
 	WriteSecret(secret intmodel.Secret) (created bool, err error)
 
+	// GetSecret reports the metadata-only view of a single named, scoped
+	// `kind: Secret` and whether it exists on disk (issue #622). The bytes
+	// are never read — a stat confirms existence. Returns
+	// errdefs.ErrSecretNotFound when absent.
+	GetSecret(secret intmodel.Secret) (intmodel.Secret, error)
+	// ListSecrets enumerates the metadata of every Secret bound to the
+	// filter scope or any scope nested within it (issue #622). An empty
+	// realmName lists across all realms; the filter is a subtree prefix.
+	ListSecrets(realmName, spaceName, stackName, cellName string) ([]intmodel.Secret, error)
+	// DeleteSecret removes the daemon-stored bytes file for a single named,
+	// scoped Secret (issue #622). Returns errdefs.ErrSecretNotFound when
+	// the file is absent.
+	DeleteSecret(secret intmodel.Secret) error
+
 	ExistsCgroup(doc any) (bool, error)
 
 	PurgeRealm(realm intmodel.Realm) (namespaceRemoved bool, err error)

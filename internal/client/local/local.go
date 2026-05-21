@@ -327,6 +327,21 @@ func (c *Client) GetContainer(_ context.Context, doc v1beta1.ContainerDoc) (kuke
 	}, nil
 }
 
+func (c *Client) GetSecret(_ context.Context, doc v1beta1.SecretDoc) (kukeonv1.GetSecretResult, error) {
+	internal, _, err := apischeme.NormalizeSecret(doc)
+	if err != nil {
+		return kukeonv1.GetSecretResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	res, err := c.ctrl.GetSecret(internal)
+	if err != nil {
+		return kukeonv1.GetSecretResult{}, err
+	}
+	return kukeonv1.GetSecretResult{
+		Secret:         apischeme.ConvertSecretToExternal(res.Secret),
+		MetadataExists: res.MetadataExists,
+	}, nil
+}
+
 // ---- List ----
 
 func (c *Client) ListRealms(_ context.Context) ([]v1beta1.RealmDoc, error) {
@@ -390,6 +405,17 @@ func (c *Client) ListContainers(
 		return nil, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 	return derefDocs(ext), nil
+}
+
+func (c *Client) ListSecrets(
+	_ context.Context,
+	realmName, spaceName, stackName, cellName string,
+) ([]v1beta1.SecretDoc, error) {
+	secrets, err := c.ctrl.ListSecrets(realmName, spaceName, stackName, cellName)
+	if err != nil {
+		return nil, err
+	}
+	return apischeme.ConvertSecretListToExternal(secrets), nil
 }
 
 // derefDocs converts a []*T returned by fs.Convert* helpers into the
@@ -627,6 +653,21 @@ func (c *Client) DeleteContainer(_ context.Context, doc v1beta1.ContainerDoc) (k
 		CellMetadataExists: res.CellMetadataExists,
 		ContainerExists:    res.ContainerExists,
 		Deleted:            res.Deleted,
+	}, nil
+}
+
+func (c *Client) DeleteSecret(_ context.Context, doc v1beta1.SecretDoc) (kukeonv1.DeleteSecretResult, error) {
+	internal, _, err := apischeme.NormalizeSecret(doc)
+	if err != nil {
+		return kukeonv1.DeleteSecretResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	res, err := c.ctrl.DeleteSecret(internal)
+	if err != nil {
+		return kukeonv1.DeleteSecretResult{}, err
+	}
+	return kukeonv1.DeleteSecretResult{
+		Secret:  apischeme.ConvertSecretToExternal(res.Secret),
+		Deleted: res.Deleted,
 	}, nil
 }
 

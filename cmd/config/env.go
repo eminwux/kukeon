@@ -309,6 +309,16 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_GET_CONTAINER_CELL = DefineKV("KUKE_GET_CONTAINER_CELL", "kuke/get/container/cell")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_SECRET_NAME = DefineKV("KUKE_GET_SECRET_NAME", "kuke/get/secret/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_SECRET_REALM = DefineKV("KUKE_GET_SECRET_REALM", "kuke/get/secret/realm", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_SECRET_SPACE = DefineKV("KUKE_GET_SECRET_SPACE", "kuke/get/secret/space")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_SECRET_STACK = DefineKV("KUKE_GET_SECRET_STACK", "kuke/get/secret/stack")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_SECRET_CELL = DefineKV("KUKE_GET_SECRET_CELL", "kuke/get/secret/cell")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_GET_OUTPUT = DefineKV("KUKE_GET_OUTPUT", "kuke/get/output")
 
 	// Delete command variables
@@ -342,6 +352,16 @@ var (
 	KUKE_DELETE_CONTAINER_STACK = DefineKV("KUKE_DELETE_CONTAINER_STACK", "kuke/delete/container/stack", "default")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_DELETE_CONTAINER_CELL = DefineKV("KUKE_DELETE_CONTAINER_CELL", "kuke/delete/container/cell")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_DELETE_SECRET_NAME = DefineKV("KUKE_DELETE_SECRET_NAME", "kuke/delete/secret/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_DELETE_SECRET_REALM = DefineKV("KUKE_DELETE_SECRET_REALM", "kuke/delete/secret/realm", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_DELETE_SECRET_SPACE = DefineKV("KUKE_DELETE_SECRET_SPACE", "kuke/delete/secret/space")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_DELETE_SECRET_STACK = DefineKV("KUKE_DELETE_SECRET_STACK", "kuke/delete/secret/stack")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_DELETE_SECRET_CELL = DefineKV("KUKE_DELETE_SECRET_CELL", "kuke/delete/secret/cell")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_DELETE_FORCE = DefineKV("KUKE_DELETE_FORCE", "kuke/delete/force")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
