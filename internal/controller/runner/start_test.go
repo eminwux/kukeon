@@ -307,6 +307,50 @@ func TestCellTasksAllRunningFn(t *testing.T) {
 	}
 }
 
+// TestTeardownRootContainerCNI_OrderingAndSafetyNet is the regression guard for
+// issue #630. Both StartCell's teardown-before-recreate branch and RecreateCell
+// route their root-container teardown through teardownRootContainerCNI, which
+// must run CNI DEL (releaseCNI) *before* deleting the container so host-local
+// IPAM releases the reservation ahead of the re-ADD against the same
+// deterministic containerd ID — otherwise the re-ADD is rejected as a duplicate
+// allocation. The IPAM-file purge safety net must run *after* the delete, and
+// must run even when the delete fails so a leaked allocation file is still
+// scrubbed.
+func TestTeardownRootContainerCNI_OrderingAndSafetyNet(t *testing.T) {
+	t.Run("release_runs_before_delete_purge_runs_after", func(t *testing.T) {
+		var order []string
+		err := teardownRootContainerCNI(
+			func() { order = append(order, "release") },
+			func() error { order = append(order, "delete"); return nil },
+			func() { order = append(order, "purge") },
+		)
+		if err != nil {
+			t.Fatalf("teardownRootContainerCNI returned error: %v", err)
+		}
+		want := []string{"release", "delete", "purge"}
+		if strings.Join(order, ",") != strings.Join(want, ",") {
+			t.Errorf("call order = %v, want %v", order, want)
+		}
+	})
+
+	t.Run("purge_runs_and_error_propagates_when_delete_fails", func(t *testing.T) {
+		var order []string
+		sentinel := errors.New("delete failed")
+		err := teardownRootContainerCNI(
+			func() { order = append(order, "release") },
+			func() error { order = append(order, "delete"); return sentinel },
+			func() { order = append(order, "purge") },
+		)
+		if !errors.Is(err, sentinel) {
+			t.Errorf("err = %v, want %v", err, sentinel)
+		}
+		want := []string{"release", "delete", "purge"}
+		if strings.Join(order, ",") != strings.Join(want, ",") {
+			t.Errorf("call order = %v, want %v (purge must run even on delete failure)", order, want)
+		}
+	})
+}
+
 // TestTruncateFailureMessage pins the single-line + length-bounded contract
 // markCellFailed relies on for Status.Message: long, multi-line wrapped
 // `fmt.Errorf("%w: %w", …)` chains must end up as a single, capped string

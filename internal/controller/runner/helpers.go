@@ -451,6 +451,28 @@ func (r *Exec) getSpaceNetworkName(space intmodel.Space) (string, error) {
 	return naming.BuildSpaceNetworkName(realmName, space.Metadata.Name)
 }
 
+// resolveRootCNINetworkName resolves the CNI network name for a cell's space,
+// for use in the post-delete IPAM-file purge safety net (purgeCNIForContainer).
+// Best-effort: returns "" when the space can't be loaded or the name can't be
+// derived, mirroring the GetSpace+getSpaceNetworkName preamble that stop.go and
+// kill.go run before tearing the root container down. The empty result makes
+// purgeCNIForContainer a no-op rather than a panic.
+func (r *Exec) resolveRootCNINetworkName(realmName, spaceName string) string {
+	lookupSpace := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{Name: spaceName},
+		Spec:     intmodel.SpaceSpec{RealmName: realmName},
+	}
+	internalSpace, err := r.GetSpace(lookupSpace)
+	if err != nil {
+		return ""
+	}
+	networkName, err := r.getSpaceNetworkName(internalSpace)
+	if err != nil {
+		return ""
+	}
+	return networkName
+}
+
 // detachRootContainerFromNetwork detaches a root container from the CNI network.
 // It gets the container's PID and network namespace path, then calls CNI DEL to detach it.
 // This should be called before killing or stopping the container to ensure the namespace is still valid.
