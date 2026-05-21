@@ -118,15 +118,23 @@ func runBuild(ctx context.Context, cfg *buildConfig, progressW io.Writer) error 
 	if _, err := os.Stat(cfg.dockerfile); err != nil {
 		return fmt.Errorf("dockerfile %q: %w", cfg.dockerfile, err)
 	}
-	if err := os.MkdirAll(cfg.root, buildStateDirMode); err != nil {
-		return fmt.Errorf("create build state dir %q: %w", cfg.root, err)
-	}
 
 	suffix, err := resolveNamespaceSuffix(cfg.kukeondConfig)
 	if err != nil {
 		return err
 	}
 	namespace := realmNamespace(cfg.realm, suffix)
+
+	// Scope the default build state root per target namespace before creating
+	// it: BuildKit's cache under --root mirrors a single containerd content
+	// store, but that store is per-namespace, so a default root shared across
+	// namespaces makes build 2 reuse build 1's cache entry and skip
+	// re-materializing the layer into namespace 2's store — the unpack then
+	// can't find the blob (issue #663).
+	cfg.root = resolveBuildRoot(cfg.root, cfg.rootExplicit, namespace)
+	if err := os.MkdirAll(cfg.root, buildStateDirMode); err != nil {
+		return fmt.Errorf("create build state dir %q: %w", cfg.root, err)
+	}
 
 	ctrl, cleanup, err := newController(ctx, cfg, namespace)
 	if err != nil {
@@ -183,6 +191,22 @@ func runBuild(ctx context.Context, cfg *buildConfig, progressW io.Writer) error 
 		return fmt.Errorf("build %q: %w", cfg.tag, waitErr)
 	}
 	return nil
+}
+
+// resolveBuildRoot returns the directory BuildKit uses for its own state for a
+// build into namespace. The default root is scoped per namespace
+// (<root>/<namespace>) so consecutive builds targeting different containerd
+// namespaces never share a single BuildKit cache: a shared cache records a
+// layer as already materialized in the first namespace's content store, and
+// the `unpack: "true"` export into the second namespace then fails to find the
+// blob in that namespace's (separate) store — issue #663. An operator-supplied
+// --root (explicit) is honored verbatim; keeping it unique per namespace is
+// then the operator's responsibility.
+func resolveBuildRoot(root string, explicit bool, namespace string) string {
+	if explicit {
+		return root
+	}
+	return filepath.Join(root, namespace)
 }
 
 // newSolveOpt builds the BuildKit SolveOpt for a Dockerfile build: the

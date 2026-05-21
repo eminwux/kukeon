@@ -133,8 +133,15 @@ type buildConfig struct {
 	containerdSocket string
 	// root is the directory BuildKit uses for its own state (cache.db,
 	// history.db, snapshot metadata). Distinct from containerd's content
-	// store.
+	// store. When rootExplicit is false this is the base default and gets
+	// scoped per target namespace (see resolveBuildRoot); an operator-supplied
+	// --root is honored verbatim.
 	root string
+	// rootExplicit records whether the operator passed --root. The default
+	// build root is scoped per containerd namespace to keep each namespace's
+	// BuildKit cache isolated (issue #663); an explicit --root opts out of that
+	// scoping and is the operator's responsibility to keep unique per namespace.
+	rootExplicit bool
 	// kukeondConfig is the path to the kukeond.yaml from which kukebuild
 	// resolves the realm->namespace suffix (--kukeond-config). Empty falls
 	// back to /etc/kukeon/kukeond.yaml and then the hardcoded default suffix;
@@ -148,10 +155,13 @@ type buildConfig struct {
 // the docker-private containerd.
 const defaultContainerdSocket = "/run/containerd/containerd.sock"
 
-// defaultBuildRoot is where BuildKit keeps its own state (build cache,
-// history, snapshot metadata) — separate from containerd's content store, per
-// the issue notes. Under /var/lib so it survives across builds for cache
-// reuse; root-owned, matching kukebuild's root-on-host posture.
+// defaultBuildRoot is the base under which BuildKit keeps its own state (build
+// cache, history, snapshot metadata) — separate from containerd's content
+// store, per the issue notes. Under /var/lib so it survives across builds for
+// cache reuse; root-owned, matching kukebuild's root-on-host posture. The
+// effective default root is scoped per target namespace beneath this base
+// (<defaultBuildRoot>/<namespace>, see resolveBuildRoot) so each namespace's
+// cache stays isolated (issue #663).
 const defaultBuildRoot = "/var/lib/kukebuild"
 
 // defaultRealm matches the convention in cmd/kuke/image: the user-owned
@@ -189,7 +199,7 @@ func parseArgs(args []string) (*buildConfig, error) {
 		defaultContainerdSocket,
 		"host containerd socket the worker connects to",
 	)
-	root := fs.String("root", defaultBuildRoot, "directory for BuildKit's own state (cache, history, snapshots)")
+	root := fs.String("root", defaultBuildRoot, "directory for BuildKit's own state (cache, history, snapshots); the default is scoped per target namespace, an explicit value is used verbatim")
 	kukeondConfig := fs.String(
 		"kukeond-config",
 		"",
@@ -202,6 +212,13 @@ func parseArgs(args []string) (*buildConfig, error) {
 	if err := fs.Parse(args); err != nil {
 		return nil, &usageError{msg: err.Error()}
 	}
+
+	rootExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "root" {
+			rootExplicit = true
+		}
+	})
 
 	rest := fs.Args()
 	if len(rest) == 0 {
@@ -237,6 +254,7 @@ func parseArgs(args []string) (*buildConfig, error) {
 		buildArgs:        parsedArgs,
 		containerdSocket: strings.TrimSpace(*containerdSocket),
 		root:             strings.TrimSpace(*root),
+		rootExplicit:     rootExplicit,
 		kukeondConfig:    strings.TrimSpace(*kukeondConfig),
 	}, nil
 }
