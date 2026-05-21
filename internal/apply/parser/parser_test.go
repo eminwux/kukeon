@@ -447,6 +447,75 @@ spec:
 	}
 }
 
+func TestValidateDocument_Container_RepoValidation(t *testing.T) {
+	base := `apiVersion: v1beta1
+kind: Container
+metadata:
+  name: test-container
+spec:
+  id: test-container
+  realmId: r
+  spaceId: s
+  stackId: k
+  cellId: c
+  image: alpine:latest
+  attachable: true
+  repos:
+`
+	cases := []struct {
+		name     string
+		repoYAML string
+		wantErr  error // nil = expect pass
+	}{
+		{
+			name:     "missing name",
+			repoYAML: "    - target: /home/claude/p\n      url: https://example.com/p.git\n",
+			wantErr:  errdefs.ErrRepoNameRequired,
+		},
+		{
+			name:     "missing target",
+			repoYAML: "    - name: p\n      url: https://example.com/p.git\n",
+			wantErr:  errdefs.ErrRepoTargetRequired,
+		},
+		{
+			name:     "relative target",
+			repoYAML: "    - name: p\n      target: rel/p\n      url: https://example.com/p.git\n",
+			wantErr:  errdefs.ErrRepoTargetNotAbsolute,
+		},
+		{
+			name:     "missing url",
+			repoYAML: "    - name: p\n      target: /home/claude/p\n",
+			wantErr:  errdefs.ErrRepoURLRequired,
+		},
+		{
+			name:     "valid",
+			repoYAML: "    - name: project\n      target: /home/claude/project\n      branch: main\n      url: https://example.com/p.git\n      required: true\n",
+			wantErr:  nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := parser.ParseDocument(0, []byte(base+tc.repoYAML))
+			if err != nil {
+				t.Fatalf("ParseDocument failed: %v", err)
+			}
+			validationErr := parser.ValidateDocument(doc)
+			if tc.wantErr == nil {
+				if validationErr != nil {
+					t.Fatalf("expected valid repos to pass, got: %v", validationErr)
+				}
+				return
+			}
+			if validationErr == nil {
+				t.Fatalf("expected validation error %v, got nil", tc.wantErr)
+			}
+			if !strings.Contains(validationErr.Error(), tc.wantErr.Error()) {
+				t.Errorf("expected %v, got: %v", tc.wantErr, validationErr)
+			}
+		})
+	}
+}
+
 func TestValidateDocument_UnsupportedAPIVersion(t *testing.T) {
 	yaml := `apiVersion: v1alpha1
 kind: Realm

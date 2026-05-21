@@ -134,6 +134,15 @@ func run(args []string) error {
 		return err
 	}
 	defer closeLogger()
+
+	// Pre-Serve step (issue #617): clone/fetch the container's declared repos
+	// before the workload starts. A required-repo failure returns here, so
+	// kuketty exits non-zero before sbshserver.Serve and the daemon observes
+	// the task as Failed. An empty repos[] is a no-op.
+	if err = processRepos(ctx, doc.Spec.Repos, logger); err != nil {
+		return err
+	}
+
 	srv, err := sbshserver.New(spec, logger)
 	if err != nil {
 		return fmt.Errorf("server.New: %w", err)

@@ -67,10 +67,14 @@ type ContainerSpec struct {
 	Tmpfs                  []ContainerTmpfsMount
 	Resources              *ContainerResources
 	Secrets                []ContainerSecret
-	CNIConfigPath          string
-	RestartPolicy          string
-	Attachable             bool
-	Tty                    *ContainerTty
+	// Repos mirrors the v1beta1 ContainerSpec.Repos payload — git
+	// repositories kuketty clones/fetches in its pre-Serve step. See the
+	// v1beta1 type for field semantics. Issue #617.
+	Repos         []ContainerRepo
+	CNIConfigPath string
+	RestartPolicy string
+	Attachable    bool
+	Tty           *ContainerTty
 	// CellCgroupPath is the absolute cgroup path of the parent cell (mirrors
 	// Cell.Status.CgroupPath). When set, BuildContainerSpec emits an OCI
 	// Linux.CgroupsPath rooted at <CellCgroupPath>/<containerd-id> so the
@@ -181,6 +185,17 @@ type VolumeMount struct {
 	Mode uint32
 }
 
+// ContainerRepo mirrors the v1beta1 ContainerRepo payload — a git repository
+// the container depends on, cloned/fetched by kuketty pre-Serve. See the
+// v1beta1 type for field semantics. Issue #617.
+type ContainerRepo struct {
+	Name     string
+	Target   string
+	Branch   string
+	URL      string
+	Required bool
+}
+
 // ContainerCapabilities groups Linux capability deltas applied relative to the
 // image default set.
 type ContainerCapabilities struct {
@@ -212,6 +227,18 @@ type ContainerStatus struct {
 	FinishTime   time.Time
 	ExitCode     int
 	ExitSignal   string
+	// Repos reports the per-repo outcome of kuketty's pre-Serve clone/fetch
+	// step. Mirrors the v1beta1 ContainerStatus.Repos payload. Issue #617.
+	Repos []RepoStatus
+}
+
+// RepoStatus mirrors the v1beta1 RepoStatus payload. Issue #617.
+type RepoStatus struct {
+	Name   string
+	Target string
+	State  string
+	Commit string
+	Error  string
 }
 
 type ContainerState int
