@@ -48,6 +48,9 @@ func TestParseArgsDefaults(t *testing.T) {
 	if len(cfg.buildArgs) != 0 {
 		t.Errorf("buildArgs = %v, want empty", cfg.buildArgs)
 	}
+	if cfg.kukeondConfig != "" {
+		t.Errorf("kukeondConfig = %q, want empty (default path resolved at build time)", cfg.kukeondConfig)
+	}
 }
 
 func TestParseArgsAllFlags(t *testing.T) {
@@ -57,6 +60,7 @@ func TestParseArgsAllFlags(t *testing.T) {
 		"--realm", "kuke-system",
 		"--containerd-socket", "/tmp/c.sock",
 		"--root", "/tmp/state",
+		"--kukeond-config", "/tmp/kukeond.yaml",
 		"--build-arg", "FOO=bar",
 		"--build-arg", "BAZ=qux=quux",
 		"/ctx",
@@ -66,6 +70,9 @@ func TestParseArgsAllFlags(t *testing.T) {
 	}
 	if cfg.dockerfile != "/ctx/Dockerfile.alt" {
 		t.Errorf("dockerfile = %q", cfg.dockerfile)
+	}
+	if cfg.kukeondConfig != "/tmp/kukeond.yaml" {
+		t.Errorf("kukeondConfig = %q, want /tmp/kukeond.yaml", cfg.kukeondConfig)
 	}
 	if cfg.realm != "kuke-system" {
 		t.Errorf("realm = %q", cfg.realm)

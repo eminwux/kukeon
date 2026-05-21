@@ -29,7 +29,6 @@ import (
 	ctd "github.com/containerd/containerd/v2/client"
 	ctddefaults "github.com/containerd/containerd/v2/defaults"
 	"github.com/distribution/reference"
-	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/control"
 	"github.com/moby/buildkit/frontend"
@@ -96,8 +95,10 @@ const containerdDialTimeout = 60 * time.Second
 // runBuild wires BuildKit's in-process Controller (containerd worker backend +
 // Dockerfile frontend), connects a BuildKit client to it over an in-memory
 // gRPC pipe, and solves the Dockerfile, exporting the result as an OCI image
-// into the target realm's containerd namespace (<realm>.kukeon.io). progressW
-// receives the human-readable build progress.
+// into the target realm's containerd namespace (<realm>.<suffix>, where the
+// suffix is resolved from the operator's kukeond.yaml — see
+// resolveNamespaceSuffix). progressW receives the human-readable build
+// progress.
 func runBuild(ctx context.Context, cfg *buildConfig, progressW io.Writer) error {
 	// kukebuild writes directly into containerd's content store; the
 	// standalone containerd socket is root-only on a stock host. Fail fast
@@ -121,7 +122,11 @@ func runBuild(ctx context.Context, cfg *buildConfig, progressW io.Writer) error 
 		return fmt.Errorf("create build state dir %q: %w", cfg.root, err)
 	}
 
-	namespace := consts.RealmNamespace(cfg.realm)
+	suffix, err := resolveNamespaceSuffix(cfg.kukeondConfig)
+	if err != nil {
+		return err
+	}
+	namespace := realmNamespace(cfg.realm, suffix)
 
 	ctrl, cleanup, err := newController(ctx, cfg, namespace)
 	if err != nil {

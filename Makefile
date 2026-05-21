@@ -1,7 +1,18 @@
 RELEASE_DIR := release
 
+# kukebuild lives in its own Go module (cmd/kukebuild/go.mod, issue #655) whose
+# go-1.25 BuildKit closure is deliberately incompatible with the root module's
+# go-1.24.5 dependency graph (e.g. the monolithic vs. split google.golang.org/
+# genproto). The repo-root go.work wires both modules for editor / gopls
+# navigation, but a workspace-union build re-couples those graphs and fails with
+# an ambiguous import — the exact coupling this split removes. So every build /
+# test here runs per-module (GOWORK=off), matching the single-module resolution
+# CI and the Docker builder (no go.work) use. Exported so it reaches every
+# recipe and the $(shell) below.
+export GOWORK := off
+
 # ----- Version sourcing -----
-MODULE := $(shell go list -m)
+MODULE := $(shell GOWORK=off go list -m)
 
 # CI can pass KUKEON_VERSION (e.g., github.ref_name). If not, derive from git.
 ifndef KUKEON_VERSION
@@ -60,14 +71,18 @@ kuketty:
 	./cmd/kuketty/
 
 # kukebuild is the native image builder that embeds BuildKit as a library
-# (issue #522). Like kuketty it is a separate binary (not argv[0]-dispatched
-# from kuke) so BuildKit's transitive moby / runc / grpc closure stays out of
-# the kuke + kukeond import sets. `kuke build` shells out to it on PATH.
+# (issue #522). It lives in its own Go module (cmd/kukebuild/go.mod, issue #655)
+# so BuildKit's `go 1.25` floor and its moby / runc / grpc closure advance
+# independently of the root module (which stays on go 1.24.5 and links zero
+# BuildKit packages). The repo-root go.work wires both modules for local dev.
+# Built from inside its module dir so the workspace resolves the kukebuild
+# module's own go.mod/go.sum; the root-binary version ldflags don't apply
+# (kukebuild imports no cmd/config), so it links with -s -w only.
 kukebuild:
-	go build \
-	-o kukebuild \
-	-ldflags="$(LDFLAGS)" \
-	./cmd/kukebuild/
+	cd cmd/kukebuild && go build \
+	-o $(CURDIR)/kukebuild \
+	-ldflags="-s -w" \
+	.
 
 
 release-build:
@@ -87,12 +102,26 @@ release-build:
 			-o kuketty-$$OS-$$ARCH \
 			-ldflags="$(LDFLAGS)" \
 			./cmd/kuketty; \
+		done \
+	done
+
+# release-build deliberately omits kukebuild: it lives in its own Go module
+# (issue #655), is not shipped inside the kukeond container image (the Dockerfile
+# copies only kuke + kuketty), and is not a published release asset. Cross-build
+# it from its module via `make release-build-kukebuild` when a kukebuild release
+# artifact is wanted; the root Dockerfile builder (golang:1.24, no go.work)
+# never needs the go-1.25 BuildKit closure.
+.PHONY: release-build-kukebuild
+release-build-kukebuild:
+	for OS in $(OS); do \
+		for ARCH in $(ARCHS); do \
+			cd $(CURDIR)/cmd/kukebuild && \
 			GO111MODULE=on CGO_ENABLED=0 GOOS=$$OS GOARCH=$$ARCH \
 			go build -a \
 			-trimpath \
-			-o kukebuild-$$OS-$$ARCH \
-			-ldflags="$(LDFLAGS)" \
-			./cmd/kukebuild; \
+			-o $(CURDIR)/kukebuild-$$OS-$$ARCH \
+			-ldflags="-s -w" \
+			.; \
 		done \
 	done
 
@@ -103,8 +132,13 @@ clean:
 kill:
 	(killall kukeond || true )
 
+# `make test` covers both modules in the workspace: the root module's unit
+# tests (excluding the e2e suite) and the kukebuild module's tests. `go list
+# ./...` from the root lists only root-module packages — the nested kukebuild
+# module is excluded — so its tests are run explicitly from its module dir.
 test:
 	go test $(shell go list ./... | grep -v /e2e)
+	cd cmd/kukebuild && go test ./...
 
 # Tag the e2e suite uses to refer to the local kukeond image. The e2e harness
 # imports it into containerd's kuke-system namespace before running `kuke init`,

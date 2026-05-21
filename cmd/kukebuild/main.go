@@ -17,9 +17,18 @@
 // kukebuild is the kukeon-owned native image builder. It embeds BuildKit as a
 // library, drives BuildKit's Dockerfile frontend through an in-process
 // Controller backed by a containerd worker, and writes the resulting OCI image
-// straight into the target realm's containerd namespace (<realm>.kukeon.io, per
-// internal/consts). This removes the docker / nerdctl + buildkitd build
-// dependency from kukeon's "self-contained runtime" pitch — see issue #522.
+// straight into the target realm's containerd namespace (<realm>.<suffix>,
+// where the suffix is resolved from the operator's kukeond.yaml — see
+// config.go). This removes the docker / nerdctl + buildkitd build dependency
+// from kukeon's "self-contained runtime" pitch — see issue #522.
+//
+// kukebuild lives in its own Go module (cmd/kukebuild/go.mod, issue #655) so
+// BuildKit's `go 1.25` floor and its ~160-package moby / runc / grpc closure
+// advance independently of the root module, which stays on go 1.24.5 and links
+// zero BuildKit packages. The module is wired for local dev via the repo-root
+// go.work. kukebuild imports no kukeon package: the only cross-module surface
+// (the realm->namespace suffix) is resolved from the public kukeond.yaml
+// config key, not a private internal/consts symbol.
 //
 // kukebuild is a standalone binary — not argv[0]-dispatched from the kuke
 // multi-call binary — for the same reason kuketty is (see cmd/kuketty/main.go):
@@ -126,6 +135,11 @@ type buildConfig struct {
 	// history.db, snapshot metadata). Distinct from containerd's content
 	// store.
 	root string
+	// kukeondConfig is the path to the kukeond.yaml from which kukebuild
+	// resolves the realm->namespace suffix (--kukeond-config). Empty falls
+	// back to /etc/kukeon/kukeond.yaml and then the hardcoded default suffix;
+	// see resolveNamespaceSuffix.
+	kukeondConfig string
 }
 
 // defaultContainerdSocket is the standalone host containerd socket the
@@ -176,6 +190,11 @@ func parseArgs(args []string) (*buildConfig, error) {
 		"host containerd socket the worker connects to",
 	)
 	root := fs.String("root", defaultBuildRoot, "directory for BuildKit's own state (cache, history, snapshots)")
+	kukeondConfig := fs.String(
+		"kukeond-config",
+		"",
+		"path to kukeond.yaml; resolves the realm->namespace suffix (default /etc/kukeon/kukeond.yaml)",
+	)
 
 	var buildArgs repeatableFlag
 	fs.Var(&buildArgs, "build-arg", "set a build-time variable KEY=VALUE (repeatable)")
@@ -218,6 +237,7 @@ func parseArgs(args []string) (*buildConfig, error) {
 		buildArgs:        parsedArgs,
 		containerdSocket: strings.TrimSpace(*containerdSocket),
 		root:             strings.TrimSpace(*root),
+		kukeondConfig:    strings.TrimSpace(*kukeondConfig),
 	}, nil
 }
 

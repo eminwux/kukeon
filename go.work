@@ -1,0 +1,15 @@
+// This workspace wires the root module and the cmd/kukebuild module together
+// for editor / gopls cross-module navigation during local dev (issue #655).
+//
+// Do NOT build or test through the workspace: kukebuild's go-1.25 BuildKit
+// closure and the root module's go-1.24.5 graph are deliberately incompatible
+// (e.g. the monolithic vs. split google.golang.org/genproto), so a
+// workspace-union build fails with an ambiguous import — the very coupling this
+// split removes. Build and test each module on its own (GOWORK=off), which is
+// what `make` and CI do and what the Dockerfile builder (no go.work) sees.
+go 1.25.5
+
+use (
+	.
+	./cmd/kukebuild
+)

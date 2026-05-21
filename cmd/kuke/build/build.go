@@ -71,6 +71,11 @@ func NewBuildCmd() *cobra.Command {
 	cmd.Flags().StringP("tag", "t", "", "Image reference for the built image, name:tag (required)")
 	cmd.Flags().String("realm", consts.KukeonDefaultRealmName, "Target realm; the image lands in <realm>.kukeon.io")
 	cmd.Flags().StringArray("build-arg", nil, "Set a build-time variable KEY=VALUE (repeatable)")
+	cmd.Flags().String(
+		"kukeond-config",
+		"",
+		"Path to kukeond.yaml; resolves the realm namespace suffix (default /etc/kukeon/kukeond.yaml)",
+	)
 
 	return cmd
 }
@@ -128,10 +133,17 @@ func buildArgv(cmd *cobra.Command, args []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	kukeondConfig, err := cmd.Flags().GetString("kukeond-config")
+	if err != nil {
+		return nil, err
+	}
 
 	argv := []string{kukebuildBinary, "--tag", tag, "--realm", realm}
 	if strings.TrimSpace(file) != "" {
 		argv = append(argv, "--file", file)
+	}
+	if strings.TrimSpace(kukeondConfig) != "" {
+		argv = append(argv, "--kukeond-config", kukeondConfig)
 	}
 	for _, ba := range buildArgs {
 		argv = append(argv, "--build-arg", ba)
