@@ -18,6 +18,7 @@ package consts
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -122,6 +123,16 @@ const (
 	// require root; they go through the daemon.
 	KukeonSystemUser  = "kukeon"
 	KukeonSystemGroup = "kukeon"
+
+	// KukeonRunDirMode is the mode applied to the kukeond socket's parent
+	// directory (the /run/kukeon bind-mount source) by `kuke init` and
+	// re-asserted by `kuke daemon start`/`restart` so the directory survives
+	// a tmpfs clear (host reboot). The SGID bit makes files the daemon later
+	// writes there inherit the kukeon group instead of root:root; 0o750 lets
+	// the kukeon group traverse without world access. Single source of truth
+	// shared by the init bootstrap and the daemon start/restart recreate path
+	// so the two cannot drift on what `kuke init` produces.
+	KukeonRunDirMode os.FileMode = os.ModeSetgid | 0o750
 
 	// DefaultRealmNamespaceSuffix is the in-binary default for the
 	// containerd namespace suffix appended to every realm name (without a

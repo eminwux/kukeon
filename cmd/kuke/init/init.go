@@ -63,7 +63,6 @@ const (
 	// the daemon writes later (metadata.json, CNI state, etc.) inherit
 	// the kukeon group instead of landing as root:root and breaking
 	// `--no-daemon` reads for non-root operators.
-	kukeonRunDirMode      os.FileMode = os.ModeSetgid | 0o750
 	kukeonRunPathDirMode  os.FileMode = os.ModeSetgid | 0o750
 	kukeonRunPathFileMode os.FileMode = 0o640
 	kukeonSocketMode      os.FileMode = 0o660
@@ -363,7 +362,7 @@ func applyKukeonOwnership(
 		RunPath:      runPath,
 		SocketPath:   socketPath,
 	}
-	if err := sysuser.ChownAndChmod(runDir, 0, ensure.GID, kukeonRunDirMode); err != nil {
+	if err := sysuser.ChownAndChmod(runDir, 0, ensure.GID, consts.KukeonRunDirMode); err != nil {
 		return r, fmt.Errorf("apply kukeon ownership to %q: %w", runDir, err)
 	}
 	r.RunDirApplied = true
@@ -599,7 +598,7 @@ func printPermissionsActions(cmd *cobra.Command, perms permissionsReport) {
 	if perms.RunDirApplied {
 		cmd.Println(fmt.Sprintf(
 			"    - %q: chown root:%s mode %s",
-			perms.RunDirPath, perms.Group, formatPosixMode(kukeonRunDirMode),
+			perms.RunDirPath, perms.Group, formatPosixMode(consts.KukeonRunDirMode),
 		))
 	}
 	if perms.RunPathApplied {
