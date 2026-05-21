@@ -25,13 +25,13 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/eminwux/kukeon/internal/apischeme"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
-	sbshapi "github.com/eminwux/sbsh/pkg/api"
-	sbshbuilder "github.com/eminwux/sbsh/pkg/builder"
+	extmodel "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // attachableTTYDirRootMode is the mode applied to the per-container tty
@@ -93,9 +93,9 @@ func attachableTTYDirInitialPerms(kukeonGroupGID int) (os.FileMode, int) {
 //     so runc has a host-visible source for the kuketty bind mount;
 //   - registers a metadata renderer that fires from inside the OCI
 //     args-wrap closure once containerd has resolved the workload argv,
-//     producing the per-container api.TerminalDoc at <containerDir>/
-//     kuketty-metadata.json that the bind mount maps onto kuketty's fixed
-//     in-container metadata path.
+//     producing the per-container api/model/v1beta1.ContainerDoc at
+//     <containerDir>/kuketty-metadata.json that the bind mount maps onto
+//     kuketty's fixed in-container metadata path.
 //
 // The tty directory is created with mode 02750 owned by root:kukeon group
 // when the kukeon group GID is configured, so non-root operators in the
@@ -152,7 +152,7 @@ func (r *Exec) attachableBuildOpts(_ string, spec intmodel.ContainerSpec, _ []ct
 	metadataPath := filepath.Join(containerDir, ctr.AttachableMetadataFile)
 	kukeonGID := r.opts.KukeonGroupGID
 	renderer := func(workloadArgv []string) error {
-		return r.writeKukettyMetadata(metadataPath, spec, kukeonGID, workloadArgv)
+		return r.writeKukettyDoc(metadataPath, spec, kukeonGID, workloadArgv)
 	}
 
 	return []ctr.BuildOption{
@@ -165,156 +165,94 @@ func (r *Exec) attachableBuildOpts(_ string, spec intmodel.ContainerSpec, _ []ct
 	}, nil
 }
 
-// writeKukettyMetadata renders the per-container api.TerminalDoc and writes
-// it atomically (tmp + rename) so a partially-written file is never visible
-// to a racing kuketty in the container. 0o600 because the file lives inside
-// the per-container parent directory, which is daemon-private (0o2750 or
-// 0o700) — keeping the inner file similarly tight guards against a future
-// loosening of the parent dir.
+// writeKukettyDoc renders the per-container ContainerDoc and writes it
+// atomically (tmp + rename) so a partially-written file is never visible to a
+// racing kuketty in the container. 0o600 because the file lives inside the
+// per-container parent directory, which is daemon-private (0o2750 or 0o700) —
+// keeping the inner file similarly tight guards against a future loosening of
+// the parent dir.
 //
-// workloadArgv is the resolved Process.Args captured by the OCI args-wrap
-// closure (image ENTRYPOINT+CMD merged with any user override). It is moved
-// into TerminalSpec.Command / TerminalSpec.CommandArgs via sbsh's
-// builder.WithCommand so the kuketty side spawns the workload via sbsh's
-// terminal runner instead of the wrapper's argv. An empty workloadArgv
-// leaves sbsh's inline-builder default (/bin/bash -i) in place, matching
-// the legacy fallback when the user supplied no command.
-func (r *Exec) writeKukettyMetadata(
+// The mounted artifact carries kukeon's own ContainerSpec (issue #641), not a
+// pre-rendered sbsh TerminalDoc: kuketty reads ContainerDoc.Spec, runs sbsh's
+// builder, and serves. Three inputs the transform folds in are not knowable
+// inside the container, so the daemon resolves and stamps them here:
+//
+//   - the resolved workload argv (image ENTRYPOINT+CMD merged with any user
+//     override, captured by the OCI args-wrap closure) into Spec.Command /
+//     Spec.Args. An empty argv (image with no ENTRYPOINT/CMD and no override)
+//     leaves the converted Command/Args as-is so kuketty falls through to
+//     sbsh's inline-builder default (/bin/bash -i), matching the legacy
+//     WithCommand gate;
+//   - the kukeon-group GID into Spec.KukeonGroupGID, so kuketty applies the
+//     kukeon-group socket/capture/log ownership the daemon used to fold into
+//     the rendered TerminalSpec;
+//   - the resolved kuketty log level (per-container → server-config → "info")
+//     into Spec.Tty.LogLevel, allocating the Tty block when the cell omitted
+//     it so kuketty reads a non-empty level verbatim (sbsh's NewFileLogger
+//     rejects an empty level) with no daemon-side defaulting of its own.
+//
+// Everything else the transform needs — the fixed in-container socket /
+// capture / log paths and their modes — are kukeon contract constants kuketty
+// knows directly, so they are not carried in the doc.
+func (r *Exec) writeKukettyDoc(
 	path string,
 	spec intmodel.ContainerSpec,
 	kukeonGroupGID int,
 	workloadArgv []string,
 ) error {
-	prompt := ""
-	if spec.Tty != nil {
-		prompt = spec.Tty.Prompt
-	}
-	opts := []sbshbuilder.TerminalOption{
-		sbshbuilder.WithSocketFile(ctr.AttachableSocketPath),
-		// Capture file is anchored to the kukeon-controlled per-container
-		// tty dir so `kuke log` (which tails ContainerCapturePath on the
-		// host) and the in-container writer see the same inode through the
-		// directory bind mount. Without an explicit WithCaptureFile, sbsh's
-		// inline builder derives a capture path from runPath + ID that
-		// would land outside the bind-mount, hiding the transcript from the
-		// host.
-		sbshbuilder.WithCaptureFile(ctr.AttachableCapturePath),
-		// Spec.Prompt + Spec.SetPrompt are stamped from the cell's inline
-		// Tty.Prompt with no profile loader involved (#494): an empty
-		// prompt pairs with DisableSetPrompt(true) so a non-shell workload
-		// (nginx, python) never receives a literal `export PS1=…` on
-		// stdin; a non-empty prompt flips SetPrompt on (sbsh's
-		// `!DisableSetPrompt` rule). Replaces the phase-4 (#290) profile
-		// lane that loaded sbsh TerminalProfile YAML from disk.
-		sbshbuilder.WithPrompt(prompt),
-		sbshbuilder.WithDisableSetPrompt(prompt == ""),
-		// Spec.EnvInherit=true tells sbsh's terminal runner to forward
-		// kuketty's os.Environ() (which is the container's OCI Process.Env
-		// — user-supplied containerSpec.Env merged with kukeon's KUKEON_*
-		// identity vars at ctr.BuildContainerSpec) to the workload child.
-		// Without it, sbsh's runner spawns the workload with only HOME +
-		// SBSH_* set (sbsh@v0.11.2/internal/terminal/terminalrunner/
-		// terminal.go:54) — every user env entry and every KUKEON_* entry
-		// gets stripped at the kuketty → workload boundary. Pre-#494 the
-		// profile lane's no-profile fallback defaulted EnvInherit=true
-		// (sbsh@v0.11.1/internal/profile/profile.go:454), so the inline-
-		// builder migration silently regressed env passthrough — this
-		// option restores the kukeon contract that the OCI Process.Env IS
-		// the workload's env. Pinned by the comprehensive renderer test in
-		// attachable_test.go so a future refactor cannot drop it.
-		sbshbuilder.WithEnvInherit(true),
-	}
-	if spec.Tty != nil && len(spec.Tty.OnInit) > 0 {
-		// Inline OnInit (#494): map the cell's TtyStage{Script} entries to
-		// sbsh's api.ExecStep{Script}. Before this lane existed, OnInit set
-		// on a cell with no profile was silently dropped (#494 problem 1).
-		opts = append(opts, sbshbuilder.WithOnInit(ttyStagesToExecSteps(spec.Tty.OnInit)))
-	}
-	if mode := modeIfGroupSet(kukeonGroupGID, ctr.AttachableSocketMode); mode != "" {
-		opts = append(opts, sbshbuilder.WithSocketMode(mode))
-	}
-	if mode := modeIfGroupSet(kukeonGroupGID, ctr.AttachableCaptureMode); mode != "" {
-		opts = append(opts, sbshbuilder.WithCaptureMode(mode))
-	}
-	if kukeonGroupGID > 0 {
-		opts = append(opts, sbshbuilder.WithSocketGID(kukeonGroupGID))
-		opts = append(opts, sbshbuilder.WithCaptureGID(kukeonGroupGID))
-	}
-	// Kuketty's own slog output is always-on. The path defaults to a
-	// daemon-controlled location (peer to AttachableSocketPath /
-	// AttachableCapturePath inside the per-container tty bind mount, so
-	// the host-visible peer fs.ContainerKukettyLogPath resolves to the
-	// same inode) and reverses #289 phase 3's opt-in design specifically
-	// for the kuketty-process log (issue #599): the wrapper's debug log
-	// is the operator's primary diagnostic when an attach session
-	// misbehaves, and gating it on cell YAML left a class of "kuketty
-	// crashed silently" bugs unobservable. Cells that need the log to
-	// land elsewhere — custom bind mount, fixed external mount — pin
-	// Tty.LogFile to an alternate in-container path; the daemon stamps
-	// it verbatim without rewriting. Workload capture
-	// (AttachableCapturePath) stays a separate, opt-in concern.
-	opts = append(opts, sbshbuilder.WithLogFile(resolveTtyLogFile(spec.Tty)))
-	if mode := modeIfGroupSet(kukeonGroupGID, ctr.AttachableLogFileMode); mode != "" {
-		opts = append(opts, sbshbuilder.WithLogFileMode(mode))
-	}
-	if kukeonGroupGID > 0 {
-		opts = append(opts, sbshbuilder.WithLogFileGID(kukeonGroupGID))
-	}
-	// Tty.LogLevel resolution: per-container → server-config (plumbed
-	// via runner.Options.KukettyLogLevel) → hardcoded "info". sbsh's
-	// pkg/logging.NewFileLogger rejects an empty level at file-open
-	// time, so the renderer pins a non-empty default here rather than
-	// threading the fallback through kuketty.
-	opts = append(opts, sbshbuilder.WithLogLevel(resolveTtyLogLevel(spec.Tty, r.opts.KukettyLogLevel)))
+	extSpec := apischeme.BuildContainerSpecExternalFromInternal(spec)
+
+	// The terminal command derives solely from the resolved Process.Args the
+	// args-wrap captured — overwrite the user-authored Command/Args the
+	// conversion carried so the doc's Command is the authoritative resolved
+	// argv. An empty argv (image with no ENTRYPOINT/CMD and no override)
+	// leaves Command/Args empty so kuketty falls through to sbsh's
+	// inline-builder default (/bin/bash -i), matching the legacy gate.
+	extSpec.Command = ""
+	extSpec.Args = nil
 	if len(workloadArgv) > 0 {
-		opts = append(opts, sbshbuilder.WithCommand(workloadArgv))
+		extSpec.Command = workloadArgv[0]
+		extSpec.Args = append([]string(nil), workloadArgv[1:]...)
 	}
 
-	terminalSpec, err := sbshbuilder.BuildTerminalSpec(r.ctx, r.logger, ctr.AttachableTTYDir, opts...)
-	if err != nil {
-		return fmt.Errorf("build kuketty terminal spec: %w", err)
-	}
+	extSpec.KukeonGroupGID = kukeonGroupGID
 
-	doc := sbshapi.TerminalDoc{
-		APIVersion: sbshapi.APIVersionV1Beta1,
-		Kind:       sbshapi.KindTerminal,
-		Metadata: sbshapi.TerminalMetadata{
+	// Resolve the log level daemon-side (the server-config tier is not visible
+	// inside the container) and stamp it onto Tty.LogLevel so kuketty reads it
+	// verbatim. Allocate the Tty block when the cell omitted it entirely —
+	// buildContainerTtyExternalFromInternal returns nil for an empty Tty.
+	resolvedLevel := resolveTtyLogLevel(spec.Tty, r.opts.KukettyLogLevel)
+	if extSpec.Tty == nil {
+		extSpec.Tty = &extmodel.ContainerTty{}
+	}
+	extSpec.Tty.LogLevel = resolvedLevel
+
+	doc := extmodel.ContainerDoc{
+		APIVersion: extmodel.APIVersionV1Beta1,
+		Kind:       extmodel.KindContainer,
+		Metadata: extmodel.ContainerMetadata{
 			Name:   spec.ID,
 			Labels: kukettyMetadataLabels(spec),
 		},
-		Spec: *terminalSpec,
+		Spec: extSpec,
+		// Status is left zero: the daemon stamps spec only. kuketty (and the
+		// later crew-absorption phases of #423) own the status channel back
+		// into ContainerStatus. AC #1.
 	}
 
 	data, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal kuketty metadata: %w", err)
+		return fmt.Errorf("marshal kuketty doc: %w", err)
 	}
 	tmp := path + ".tmp"
 	if err = os.WriteFile(tmp, data, 0o600); err != nil {
-		return fmt.Errorf("write kuketty metadata %q: %w", tmp, err)
+		return fmt.Errorf("write kuketty doc %q: %w", tmp, err)
 	}
 	if err = os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("rename kuketty metadata %q -> %q: %w", tmp, path, err)
+		return fmt.Errorf("rename kuketty doc %q -> %q: %w", tmp, path, err)
 	}
 	return nil
-}
-
-// resolveTtyLogFile returns the in-container path the kuketty wrapper's
-// slog output lands at. Per #599 the path is daemon-controlled by default
-// (ctr.AttachableKukettyLogPath, the peer to capture inside the per-
-// container tty bind mount, so the host-visible peer is always
-// fs.ContainerKukettyLogPath). A cell may pin Tty.LogFile to an alternate
-// in-container path — the daemon stamps it verbatim without rewriting or
-// anchoring it to the bind mount. The always-on invariant holds either
-// way: Spec.LogFile is never empty after the renderer, so kuketty's
-// openTerminalLogger never falls through to the discard logger in the
-// OCI-injection path.
-func resolveTtyLogFile(t *intmodel.ContainerTty) string {
-	if t != nil && t.LogFile != "" {
-		return t.LogFile
-	}
-	return ctr.AttachableKukettyLogPath
 }
 
 // resolveTtyLogLevel returns the operator-supplied LogLevel from the cell
@@ -337,23 +275,8 @@ func resolveTtyLogLevel(t *intmodel.ContainerTty, serverConfigLevel string) stri
 	return "info"
 }
 
-// ttyStagesToExecSteps maps the cell's inline Tty.OnInit entries into
-// sbsh's api.ExecStep slice. Each stage carries only Script today; sbsh's
-// ExecStep also supports Env, but the cell schema does not surface it yet
-// (a future TtyStage knob lands here without touching the renderer).
-func ttyStagesToExecSteps(in []intmodel.TtyStage) []sbshapi.ExecStep {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]sbshapi.ExecStep, len(in))
-	for i, s := range in {
-		out[i] = sbshapi.ExecStep{Script: s.Script}
-	}
-	return out
-}
-
 // kukettyMetadataLabels stamps the cell-context identity on the rendered
-// TerminalDoc.Metadata so an operator inspecting the host-side file can
+// ContainerDoc.Metadata so an operator inspecting the host-side file can
 // trace it back to the realm/space/stack/cell/container it belongs to
 // without having to walk the bind-mount source. Empty fields are dropped
 // rather than producing empty string values, so the labels map mirrors
@@ -377,18 +300,6 @@ func kukettyMetadataLabels(spec intmodel.ContainerSpec) map[string]string {
 		return nil
 	}
 	return out
-}
-
-// modeIfGroupSet returns the octal-mode string only when the kukeon
-// group GID is configured; otherwise empty so kuketty applies the OS-default
-// (umask-clipped) mode on the per-terminal inode the mode applies to
-// (socket, capture file, log file). Matches the legacy 0o600-owner-only
-// fallback the sbsh wrapper had when no kukeon group existed.
-func modeIfGroupSet(gid int, mode string) string {
-	if gid > 0 {
-		return mode
-	}
-	return ""
 }
 
 // stageKukettyBinary ensures a host-visible copy of the kuketty binary

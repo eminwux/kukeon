@@ -101,9 +101,10 @@ type ContainerSpec struct {
 	// tty directory at /run/kukeon/tty (kuketty owns the attach socket
 	// inside it; capture and log files land in later phases), and
 	// bind-mounts the per-container metadata file read-only at
-	// /.kukeon/kuketty/metadata.json (carries the rendered api.TerminalDoc
-	// with the workload argv baked into Spec.Command / Spec.CommandArgs).
-	// The host-visible peer of the tty directory lives in the per-container
+	// /.kukeon/kuketty/metadata.json (carries this ContainerDoc with the
+	// resolved workload argv baked into Spec.Command / Spec.Args, from which
+	// kuketty builds the sbsh TerminalSpec it serves — issue #641). The
+	// host-visible peer of the tty directory lives in the per-container
 	// metadata dir and its `socket` entry is what `kuke attach` connects
 	// to. Default false — no behavior change for existing specs.
 	Attachable bool `json:"attachable,omitempty"             yaml:"attachable,omitempty"`
@@ -113,6 +114,18 @@ type ContainerSpec struct {
 	// layers the container model can't express. Setting any tty field with
 	// Attachable=false is a validation error.
 	Tty *ContainerTty `json:"tty,omitempty"                    yaml:"tty,omitempty"`
+	// KukeonGroupGID is a daemon-stamped transport field, not user-authored
+	// config. It carries the resolved kukeon-group GID into the ContainerDoc
+	// the daemon mounts at /.kukeon/kuketty/metadata.json so kuketty can apply
+	// the kukeon-group ownership (socket / capture / log GID + mode) the daemon
+	// used to fold into the rendered TerminalSpec — a value not knowable from
+	// inside the container. Zero means no kukeon group is configured (kuketty
+	// then leaves OS-default permissions on the inodes it creates, matching the
+	// no-group fallback). Always zero on the persisted ContainerDoc and on
+	// `kuke get` output (omitempty): the daemon populates it only on the
+	// kuketty-mounted doc, and the read path never round-trips it back into the
+	// internal model. Issue #641.
+	KukeonGroupGID int `json:"kukeonGroupGID,omitempty"         yaml:"kukeonGroupGID,omitempty"`
 }
 
 // ContainerTty carries per-attach shell-UX config that the daemon threads

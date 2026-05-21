@@ -16,9 +16,10 @@
 
 // kuketty is the kukeon-owned terminal wrapper that runs inside an attachable
 // container in place of sbsh. It reads its runtime configuration from a
-// bind-mounted api.TerminalDoc (no CLI flags beyond an optional --config
-// override) and serves the JSON-RPC + SCM_RIGHTS attach protocol via sbsh's
-// public pkg/terminal/server facade, so `kuke attach` consumes the same
+// bind-mounted kukeon ContainerDoc (no CLI flags beyond an optional --config
+// override), builds the sbsh TerminalSpec from kukeon's own ContainerSpec
+// (issue #641), and serves the JSON-RPC + SCM_RIGHTS attach protocol via
+// sbsh's public pkg/terminal/server facade, so `kuke attach` consumes the same
 // wire protocol it does on the host.
 //
 // kuketty is a standalone binary — not argv[0]-dispatched from the kuke
@@ -41,15 +42,15 @@ import (
 	"os/signal"
 	"syscall"
 
-	sbshapi "github.com/eminwux/sbsh/pkg/api"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	sbshlogging "github.com/eminwux/sbsh/pkg/logging"
 	sbshserver "github.com/eminwux/sbsh/pkg/terminal/server"
 )
 
 // defaultConfigPath is the fixed in-container path of the kukeond-rendered
-// api.TerminalDoc. The daemon bind-mounts the per-container metadata file
-// over this path at OCI spec build time (see internal/ctr/attachable.go).
-// Kept in sync with ctr.AttachableMetadataPath.
+// ContainerDoc. The daemon bind-mounts the per-container metadata file over
+// this path at OCI spec build time (see internal/ctr/attachable.go). Kept in
+// sync with ctr.AttachableMetadataPath.
 const defaultConfigPath = "/.kukeon/kuketty/metadata.json"
 
 // exitCodeUsage is returned when invocation is malformed (e.g. unknown flag,
@@ -85,22 +86,17 @@ type usageError struct{ msg string }
 
 func (e *usageError) Error() string { return e.msg }
 
-// run parses the (single optional) flag, loads the TerminalDoc from disk,
-// binds the control socket, and hands the listener + spec to sbsh's
-// server facade. Returns the terminating cause; main() maps the error
-// class to an exit code.
+// run parses the (single optional) flag, loads the ContainerDoc from disk,
+// builds the sbsh TerminalSpec from kukeon's own ContainerSpec, binds the
+// control socket, and hands the listener + spec to sbsh's server facade.
+// Returns the terminating cause; main() maps the error class to an exit code.
 func run(args []string) error {
 	configPath, err := parseArgs(args)
 	if err != nil {
 		return err
 	}
 
-	doc, err := loadTerminalDoc(configPath)
-	if err != nil {
-		return err
-	}
-
-	listener, err := claimSocketListener(doc.Spec.SocketFile)
+	doc, err := loadContainerDoc(configPath)
 	if err != nil {
 		return err
 	}
@@ -119,12 +115,26 @@ func run(args []string) error {
 		}
 	}()
 
-	logger, closeLogger, err := openTerminalLogger(doc.Spec.LogFile, doc.Spec.LogLevel)
+	// Build the sbsh TerminalSpec from kukeon's ContainerSpec (issue #641).
+	// A bootstrap stderr logger covers the build step; the file-backed logger
+	// kuketty serves under is opened from the resulting spec below.
+	buildLogger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	spec, err := buildTerminalSpec(ctx, buildLogger, doc.Spec)
+	if err != nil {
+		return err
+	}
+
+	listener, err := claimSocketListener(spec.SocketFile)
+	if err != nil {
+		return err
+	}
+
+	logger, closeLogger, err := openTerminalLogger(spec.LogFile, spec.LogLevel)
 	if err != nil {
 		return err
 	}
 	defer closeLogger()
-	srv, err := sbshserver.New(&doc.Spec, logger)
+	srv, err := sbshserver.New(spec, logger)
 	if err != nil {
 		return fmt.Errorf("server.New: %w", err)
 	}
@@ -143,7 +153,7 @@ func parseArgs(args []string) (string, error) {
 	fs := flag.NewFlagSet("kuketty", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	configPath := fs.String("config", defaultConfigPath,
-		"path to the kuketty terminal config (an api.TerminalDoc JSON document); "+
+		"path to the kuketty config (a kukeon ContainerDoc JSON document); "+
 			"normally bind-mounted by kukeond at "+defaultConfigPath)
 	if err := fs.Parse(args); err != nil {
 		return "", &usageError{msg: err.Error()}
@@ -156,29 +166,28 @@ func parseArgs(args []string) (string, error) {
 	return *configPath, nil
 }
 
-// loadTerminalDoc reads the bind-mounted config file, decodes it as an
-// api.TerminalDoc, and validates the APIVersion + Kind discriminator so a
-// kuketty binary that loaded a malformed (or wrong-schema) file refuses
-// cleanly rather than silently misinterpreting fields.
-func loadTerminalDoc(path string) (*sbshapi.TerminalDoc, error) {
+// loadContainerDoc reads the bind-mounted config file, decodes it as a kukeon
+// ContainerDoc, and validates the APIVersion + Kind discriminator so a kuketty
+// binary that loaded a malformed (or wrong-schema) file refuses cleanly rather
+// than silently misinterpreting fields. The socket path is no longer validated
+// here — kuketty derives it from the kukeon contract constant when it builds
+// the TerminalSpec (issue #641), so it is never read off the doc.
+func loadContainerDoc(path string) (*v1beta1.ContainerDoc, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
-	var doc sbshapi.TerminalDoc
+	var doc v1beta1.ContainerDoc
 	if err = json.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
-	if doc.APIVersion != sbshapi.APIVersionV1Beta1 {
+	if doc.APIVersion != v1beta1.APIVersionV1Beta1 {
 		return nil, fmt.Errorf("config %s: apiVersion %q, want %q",
-			path, doc.APIVersion, sbshapi.APIVersionV1Beta1)
+			path, doc.APIVersion, v1beta1.APIVersionV1Beta1)
 	}
-	if doc.Kind != sbshapi.KindTerminal {
+	if doc.Kind != v1beta1.KindContainer {
 		return nil, fmt.Errorf("config %s: kind %q, want %q",
-			path, doc.Kind, sbshapi.KindTerminal)
-	}
-	if doc.Spec.SocketFile == "" {
-		return nil, fmt.Errorf("config %s: spec.socketIO is required", path)
+			path, doc.Kind, v1beta1.KindContainer)
 	}
 	return &doc, nil
 }
