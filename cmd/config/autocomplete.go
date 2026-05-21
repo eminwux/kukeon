@@ -17,40 +17,86 @@
 package config
 
 import (
+	"context"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/cellprofile"
+	"github.com/eminwux/kukeon/internal/client/local"
 	"github.com/eminwux/kukeon/internal/controller"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-// MockControllerKey is used to inject mock controllers in tests via context.
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in
+// tests, matching the convention every other command package uses (see e.g.
+// cmd/kuke/get/cell). Despite the historical name it now carries a
+// kukeonv1.Client, not a controller.Exec.
 type MockControllerKey struct{}
 
-// controllerFromCmd creates a controller.Exec from the command context.
-// This duplicates the logic from cmd/kuke/create/shared to avoid import cycles.
-// If a mock controller is provided in the context, it will be used instead of creating a real one.
-func controllerFromCmd(cmd *cobra.Command) (*controller.Exec, error) {
-	// Check for mock controller in context (for testing)
-	if mockCtrl, ok := cmd.Context().Value(MockControllerKey{}).(*controller.Exec); ok {
-		return mockCtrl, nil
+// completionTimeout bounds how long a completer waits on the daemon before
+// degrading to an empty list. Shell completion must never block the prompt,
+// so this is deliberately short: a slow, hung, or unreachable daemon yields
+// no candidates rather than a frozen terminal (issue #634).
+const completionTimeout = 2 * time.Second
+
+// completionClient returns the kukeonv1.Client the completers resolve resource
+// names through. It mirrors shared.ClientFromCmd's source selection so
+// completion reflects the same authoritative view `kuke get …` shows the user
+// running it: the `kukeon/noDaemon` viper key picks the in-process controller
+// (local.New, direct on-disk metadata reads, requires privileges) versus the
+// kukeond daemon (RPC over the configured KUKEON_HOST socket).
+//
+// The default is the daemon path. This is the fix for issue #634: the
+// completers previously read /opt/kukeon/data directly via controller.Exec,
+// which an unprivileged shell user cannot read on the standard root-owned
+// install, so completion silently returned nothing while `kuke get …` (which
+// routes through the group-accessible daemon socket) worked. Routing
+// completion through the daemon makes it work for any user who can already
+// run `kuke get …`.
+//
+// --no-daemon story: completion follows the same `kukeon/noDaemon` viper key
+// the get verbs honor — there is no second selection path to keep in sync.
+// One caveat is worth stating because it shapes what works at a live prompt:
+// cobra's hidden `__complete` command does not run the root PersistentPreRunE,
+// and it does not mark inherited *persistent flags* (`--host`, `--no-daemon`,
+// `--run-path`) as changed for the completion request. So during real shell
+// completion those flags do not reach viper; what does reach it is the env
+// (KUKEON_HOST, KUKEON_NO_DAEMON, KUKEON_RUN_PATH, bound via config.DefineKV's
+// viper.SetDefault plus the env bindings) and the built-in defaults. In
+// practice that is exactly right for the standard install: completion dials
+// the default kukeond socket (or KUKEON_HOST when the operator overrides it)
+// and stays on the daemon path. The in-process branch remains reachable when
+// the viper key is set directly — programmatically or via KUKEON_NO_DAEMON —
+// which is also how the unit tests exercise it.
+//
+// The caller owns the returned Client and must Close it.
+func completionClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	// Check for an injected mock client in context (for testing).
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
 	}
 
-	logger, ok := cmd.Context().Value(types.CtxLogger).(*slog.Logger)
-	if !ok || logger == nil {
-		return nil, errdefs.ErrLoggerNotFound
+	if viper.GetBool(KUKEON_ROOT_NO_DAEMON.ViperKey) {
+		logger, ok := cmd.Context().Value(types.CtxLogger).(*slog.Logger)
+		if !ok || logger == nil {
+			return nil, errdefs.ErrLoggerNotFound
+		}
+		return local.New(cmd.Context(), logger, controller.Options{
+			RunPath:          viper.GetString(KUKEON_ROOT_RUN_PATH.ViperKey),
+			ContainerdSocket: viper.GetString(KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
+		}), nil
 	}
 
-	opts := controller.Options{
-		RunPath:          viper.GetString(KUKEON_ROOT_RUN_PATH.ViperKey),
-		ContainerdSocket: viper.GetString(KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey),
+	host := viper.GetString(KUKEON_ROOT_HOST.ViperKey)
+	if host == "" {
+		host = KUKEON_ROOT_HOST.Default
 	}
-
-	return controller.NewControllerExec(cmd.Context(), logger, opts), nil
+	return kukeonv1.Dial(cmd.Context(), host)
 }
 
 // getFlagValueWithDefault gets a flag value, falling back to Viper (which includes defaults) and then to a provided default.
@@ -130,15 +176,19 @@ func CompleteRealmNames(cmd *cobra.Command, args []string, toComplete string) ([
 		}
 	}
 
-	ctrl, err := controllerFromCmd(cmd)
+	client, err := completionClient(cmd)
 	if err != nil {
-		// Return empty completion on error (controller unavailable)
+		// Return empty completion on error (client unavailable)
 		return []string{}, cobra.ShellCompDirectiveNoFileComp
 	}
+	defer func() { _ = client.Close() }()
 
-	realms, err := ctrl.ListRealms()
+	ctx, cancel := context.WithTimeout(cmd.Context(), completionTimeout)
+	defer cancel()
+
+	realms, err := client.ListRealms(ctx)
 	if err != nil {
-		// Return empty completion on error
+		// Return empty completion on error (daemon unreachable, timeout, etc.)
 		return []string{}, cobra.ShellCompDirectiveNoFileComp
 	}
 
@@ -189,11 +239,12 @@ func CompleteSpaceNames(cmd *cobra.Command, args []string, toComplete string) ([
 		}
 	}
 
-	ctrl, err := controllerFromCmd(cmd)
+	client, err := completionClient(cmd)
 	if err != nil {
-		// Return empty completion on error (controller unavailable)
+		// Return empty completion on error (client unavailable)
 		return []string{}, cobra.ShellCompDirectiveNoFileComp
 	}
+	defer func() { _ = client.Close() }()
 
 	// Read realm flag with default fallback
 	realmName := getFlagValueWithDefault(cmd, "realm", "default")
@@ -208,10 +259,13 @@ func CompleteSpaceNames(cmd *cobra.Command, args []string, toComplete string) ([
 		}
 	}
 
+	ctx, cancel := context.WithTimeout(cmd.Context(), completionTimeout)
+	defer cancel()
+
 	// List spaces, optionally filtered by realm
-	spaces, err := ctrl.ListSpaces(realmName)
+	spaces, err := client.ListSpaces(ctx, realmName)
 	if err != nil {
-		// Return empty completion on error
+		// Return empty completion on error (daemon unreachable, timeout, etc.)
 		return []string{}, cobra.ShellCompDirectiveNoFileComp
 	}
 
@@ -262,11 +316,12 @@ func CompleteStackNames(cmd *cobra.Command, args []string, toComplete string) ([
 		}
 	}
 
-	ctrl, err := controllerFromCmd(cmd)
+	client, err := completionClient(cmd)
 	if err != nil {
-		// Return empty completion on error (controller unavailable)
+		// Return empty completion on error (client unavailable)
 		return []string{}, cobra.ShellCompDirectiveNoFileComp
 	}
+	defer func() { _ = client.Close() }()
 
 	// Read realm and space flags with default fallback
 	realmName := getFlagValueWithDefault(cmd, "realm", "default")
@@ -282,10 +337,13 @@ func CompleteStackNames(cmd *cobra.Command, args []string, toComplete string) ([
 		}
 	}
 
+	ctx, cancel := context.WithTimeout(cmd.Context(), completionTimeout)
+	defer cancel()
+
 	// List stacks, optionally filtered by realm and space
-	stacks, err := ctrl.ListStacks(realmName, spaceName)
+	stacks, err := client.ListStacks(ctx, realmName, spaceName)
 	if err != nil {
-		// Return empty completion on error
+		// Return empty completion on error (daemon unreachable, timeout, etc.)
 		return []string{}, cobra.ShellCompDirectiveNoFileComp
 	}
 
@@ -336,11 +394,12 @@ func CompleteCellNames(cmd *cobra.Command, args []string, toComplete string) ([]
 		}
 	}
 
-	ctrl, err := controllerFromCmd(cmd)
+	client, err := completionClient(cmd)
 	if err != nil {
-		// Return empty completion on error (controller unavailable)
+		// Return empty completion on error (client unavailable)
 		return []string{}, cobra.ShellCompDirectiveNoFileComp
 	}
+	defer func() { _ = client.Close() }()
 
 	// Read realm, space, and stack flags with default fallback
 	realmName := getFlagValueWithDefault(cmd, "realm", "default")
@@ -357,10 +416,13 @@ func CompleteCellNames(cmd *cobra.Command, args []string, toComplete string) ([]
 		}
 	}
 
+	ctx, cancel := context.WithTimeout(cmd.Context(), completionTimeout)
+	defer cancel()
+
 	// List cells, optionally filtered by realm, space, and stack
-	cells, err := ctrl.ListCells(realmName, spaceName, stackName)
+	cells, err := client.ListCells(ctx, realmName, spaceName, stackName)
 	if err != nil {
-		// Return empty completion on error
+		// Return empty completion on error (daemon unreachable, timeout, etc.)
 		return []string{}, cobra.ShellCompDirectiveNoFileComp
 	}
 
@@ -411,11 +473,12 @@ func CompleteContainerNames(cmd *cobra.Command, args []string, toComplete string
 		}
 	}
 
-	ctrl, err := controllerFromCmd(cmd)
+	client, err := completionClient(cmd)
 	if err != nil {
-		// Return empty completion on error (controller unavailable)
+		// Return empty completion on error (client unavailable)
 		return []string{}, cobra.ShellCompDirectiveNoFileComp
 	}
+	defer func() { _ = client.Close() }()
 
 	// Read required flags with default fallback (cell has no default)
 	realmName := getFlagValueWithDefault(cmd, "realm", "default")
@@ -438,10 +501,13 @@ func CompleteContainerNames(cmd *cobra.Command, args []string, toComplete string
 		return []string{}, cobra.ShellCompDirectiveNoFileComp
 	}
 
+	ctx, cancel := context.WithTimeout(cmd.Context(), completionTimeout)
+	defer cancel()
+
 	// List containers filtered by realm, space, stack, and cell
-	containers, err := ctrl.ListContainers(realmName, spaceName, stackName, cellName)
+	containers, err := client.ListContainers(ctx, realmName, spaceName, stackName, cellName)
 	if err != nil {
-		// Return empty completion on error
+		// Return empty completion on error (daemon unreachable, timeout, etc.)
 		return []string{}, cobra.ShellCompDirectiveNoFileComp
 	}
 

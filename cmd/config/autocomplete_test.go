@@ -126,6 +126,12 @@ func setupTestCommand(t *testing.T, runPath string, noLogger bool) *cobra.Comman
 
 	viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, runPath)
 	viper.Set(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey, filepath.Join(runPath, "containerd.sock"))
+	// These on-disk-metadata fixtures exercise the in-process completion path.
+	// Issue #634 made the daemon the default source for the completers, so set
+	// the same `kukeon/noDaemon` viper key the get verbs honor to keep these
+	// cases reading the metadata tree under runPath. The daemon-backed path is
+	// covered separately by the mock-client tests below.
+	viper.Set(config.KUKEON_ROOT_NO_DAEMON.ViperKey, true)
 
 	cmd := &cobra.Command{Use: "test"}
 

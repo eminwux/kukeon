@@ -18,6 +18,8 @@ package e2e_test
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,7 +28,9 @@ import (
 	"time"
 
 	"github.com/eminwux/kukeon/internal/consts"
+	"github.com/eminwux/kukeon/internal/metadata"
 	"github.com/eminwux/kukeon/internal/util/fs"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // TestKuke_Help tests kuke help command.
@@ -711,6 +715,110 @@ func TestKuke_Autocomplete_Bash(t *testing.T) {
 	// Step 4: Verify output is substantial (bash completion scripts are typically hundreds of lines)
 	if len(outputStr) < 50 {
 		t.Fatalf("bash completion script output too short: %d bytes", len(outputStr))
+	}
+}
+
+// seedCellMetadata writes the realm/space/stack/cell metadata chain on disk
+// under runPath so a daemon bound to that run path lists the cell without any
+// containerd interaction (ListCells is a pure on-disk traversal). This keeps
+// the completion e2e free of the containerd/cgroup/root prerequisites that
+// `kuke create cell` would pull in, while still exercising the daemon RPC
+// path end-to-end.
+func seedCellMetadata(t *testing.T, runPath, realm, space, stack, cell string) {
+	t.Helper()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	write := func(dir string, doc any) {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %q: %v", dir, err)
+		}
+		path := filepath.Join(dir, consts.KukeonMetadataFile)
+		if err := metadata.WriteMetadata(context.Background(), logger, doc, path); err != nil {
+			t.Fatalf("write metadata %q: %v", path, err)
+		}
+	}
+
+	write(fs.RealmMetadataDir(runPath, realm), &v1beta1.RealmDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindRealm,
+		Metadata:   v1beta1.RealmMetadata{Name: realm},
+		Spec:       v1beta1.RealmSpec{Namespace: realm + "-ns"},
+		Status:     v1beta1.RealmStatus{State: v1beta1.RealmStateReady},
+	})
+	write(fs.SpaceMetadataDir(runPath, realm, space), &v1beta1.SpaceDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindSpace,
+		Metadata:   v1beta1.SpaceMetadata{Name: space},
+		Spec:       v1beta1.SpaceSpec{RealmID: realm},
+		Status:     v1beta1.SpaceStatus{State: v1beta1.SpaceStateReady},
+	})
+	write(fs.StackMetadataDir(runPath, realm, space, stack), &v1beta1.StackDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindStack,
+		Metadata:   v1beta1.StackMetadata{Name: stack},
+		Spec:       v1beta1.StackSpec{RealmID: realm, SpaceID: space},
+		Status:     v1beta1.StackStatus{State: v1beta1.StackStateReady},
+	})
+	write(fs.CellMetadataDir(runPath, realm, space, stack, cell), &v1beta1.CellDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindCell,
+		Metadata:   v1beta1.CellMetadata{Name: cell},
+		Spec:       v1beta1.CellSpec{ID: cell, RealmID: realm, SpaceID: space, StackID: stack},
+		Status:     v1beta1.CellStatus{State: v1beta1.CellStateReady},
+	})
+}
+
+// TestKuke_Autocomplete_GetCell_ViaDaemon is the regression guard for issue
+// #634: `kuke __complete get cell ”` must surface cell names resolved through
+// the kukeond daemon, not the metadata-direct controller read that an
+// unprivileged shell user cannot perform against a root-owned /opt/kukeon.
+// It mirrors the manual repro in the issue (which returned `:4` with zero
+// candidates) but against a daemon that knows about a seeded cell, asserting
+// the cell name appears and the directive is ShellCompDirectiveNoFileComp.
+func TestKuke_Autocomplete_GetCell_ViaDaemon(t *testing.T) {
+	t.Parallel()
+
+	runPath := getRandomRunPath(t)
+	realm, space, stack, cell := "rcomp", "scomp", "stcomp", "cellcomp"
+	seedCellMetadata(t, runPath, realm, space, stack, cell)
+
+	host := startKukeondDaemon(t, runPath)
+
+	// `kuke __complete <command line…> <toComplete>`: the trailing "" is the
+	// positional cell name being completed. The completer's daemon endpoint is
+	// pointed at the per-test kukeond via KUKEON_HOST rather than `--host`:
+	// cobra's `__complete` does not mark inherited persistent flags as changed
+	// for the completion request (and skips the root PreRun), so the `--host`
+	// flag would not reach viper here — the env var does. This mirrors how an
+	// operator on a non-default socket drives completion (see the
+	// completionClient doc in cmd/config/autocomplete.go).
+	exitCode, stdout, stderr := runBinary(t, []string{"KUKEON_HOST=" + host}, kuke,
+		"__complete",
+		"get", "cell",
+		"--realm", realm, "--space", space, "--stack", stack,
+		"",
+	)
+	if exitCode != 0 {
+		t.Fatalf("__complete exited %d; stdout=%q stderr=%q", exitCode, string(stdout), string(stderr))
+	}
+
+	out := string(stdout)
+
+	// The seeded cell must appear as a candidate.
+	foundCell := false
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == cell {
+			foundCell = true
+			break
+		}
+	}
+	if !foundCell {
+		t.Errorf("expected cell %q in completion candidates; got stdout=%q stderr=%q", cell, out, string(stderr))
+	}
+
+	// cobra emits the directive as a `:<bitmask>` line; ShellCompDirectiveNoFileComp == 4.
+	if !strings.Contains(out, ":4") {
+		t.Errorf("expected ShellCompDirectiveNoFileComp (:4) in completion output; got %q", out)
 	}
 }
 
