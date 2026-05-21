@@ -117,6 +117,33 @@ func TestRunBuildExecHandoff(t *testing.T) {
 	}
 }
 
+func TestRunBuildForwardsKukeondConfig(t *testing.T) {
+	var gotArgv []string
+	withStubs(t,
+		func(string) (string, error) { return "/usr/local/bin/kukebuild", nil },
+		func(_ string, argv []string, _ []string) error { gotArgv = argv; return nil },
+	)
+
+	cmd := NewBuildCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"-t", "x:1", "--kukeond-config", "/etc/kukeon/alt.yaml", "."})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	want := []string{
+		"kukebuild",
+		"--tag", "x:1",
+		"--realm", consts.KukeonDefaultRealmName,
+		"--kukeond-config", "/etc/kukeon/alt.yaml",
+		".",
+	}
+	if !reflect.DeepEqual(gotArgv, want) {
+		t.Errorf("argv = %v, want %v", gotArgv, want)
+	}
+}
+
 func TestRunBuildDefaultRealm(t *testing.T) {
 	var gotArgv []string
 	withStubs(t,

@@ -1,6 +1,11 @@
 /zold/
 /kuke*
 /kukeond
+# go.work is committed (wires the cmd/kukebuild module for editor / gopls
+# navigation, issue #655) but go.work.sum is not: builds run per-module
+# (GOWORK=off, see Makefile), so the workspace sum has no build-reproducibility
+# role here and only drifts. go regenerates it on demand for workspace tooling.
+/go.work.sum
 /TODO
 **/__debug_bin*
 /node_modules/**
