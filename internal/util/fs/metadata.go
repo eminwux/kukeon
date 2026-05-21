@@ -237,6 +237,44 @@ func ContainerLogPath(baseRunPath, realmName, spaceName, stackName, cellName, co
 	)
 }
 
+// SecretScopeDir returns the metadata directory of the scope a `kind: Secret`
+// is bound to (issue #619). The scope is the deepest non-empty coordinate:
+// passing only realmName yields the realm dir, realmName+spaceName the space
+// dir, and so on. Empty deeper coordinates are ignored — the caller is
+// responsible for having validated coordinate completeness (a non-empty cell
+// requires a non-empty stack, space, and realm) before calling.
+func SecretScopeDir(baseRunPath, realmName, spaceName, stackName, cellName string) string {
+	switch {
+	case cellName != "":
+		return CellMetadataDir(baseRunPath, realmName, spaceName, stackName, cellName)
+	case stackName != "":
+		return StackMetadataDir(baseRunPath, realmName, spaceName, stackName)
+	case spaceName != "":
+		return SpaceMetadataDir(baseRunPath, realmName, spaceName)
+	default:
+		return RealmMetadataDir(baseRunPath, realmName)
+	}
+}
+
+// SecretsDir returns the per-scope secrets directory — the root-only
+// (0o700) directory under the scope's metadata tree that owns daemon-managed
+// secret bytes. Nested inside the scope dir so scope teardown reclaims it.
+func SecretsDir(baseRunPath, realmName, spaceName, stackName, cellName string) string {
+	return filepath.Join(
+		SecretScopeDir(baseRunPath, realmName, spaceName, stackName, cellName),
+		consts.KukeonSecretsSubdir,
+	)
+}
+
+// SecretPath returns the host-side path of a single daemon-managed secret's
+// bytes: <scope>/secrets/<name>, root-owned and 0o600.
+func SecretPath(baseRunPath, realmName, spaceName, stackName, cellName, secretName string) string {
+	return filepath.Join(
+		SecretsDir(baseRunPath, realmName, spaceName, stackName, cellName),
+		secretName,
+	)
+}
+
 type metadataHeader struct {
 	APIVersion string `json:"apiVersion"`
 	Kind       string `json:"kind"`

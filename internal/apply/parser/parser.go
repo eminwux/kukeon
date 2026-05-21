@@ -41,6 +41,7 @@ type Document struct {
 	StackDoc     *v1beta1.StackDoc
 	CellDoc      *v1beta1.CellDoc
 	ContainerDoc *v1beta1.ContainerDoc
+	SecretDoc    *v1beta1.SecretDoc
 }
 
 // ValidationError represents a validation error for a specific document.
@@ -161,6 +162,14 @@ func ParseDocument(index int, raw []byte) (*Document, error) {
 		doc.ContainerDoc = &containerDoc
 		doc.APIVersion = containerDoc.APIVersion
 
+	case v1beta1.KindSecret:
+		var secretDoc v1beta1.SecretDoc
+		if unmarshalErr := yaml.Unmarshal(raw, &secretDoc); unmarshalErr != nil {
+			return nil, fmt.Errorf("document %d: failed to parse Secret: %w", index, unmarshalErr)
+		}
+		doc.SecretDoc = &secretDoc
+		doc.APIVersion = secretDoc.APIVersion
+
 	default:
 		return nil, fmt.Errorf("document %d: %w: %s", index, errdefs.ErrUnknownKind, kind)
 	}
@@ -187,7 +196,8 @@ func ValidateDocument(doc *Document) *ValidationError {
 
 	// Validate kind
 	switch doc.Kind {
-	case v1beta1.KindRealm, v1beta1.KindSpace, v1beta1.KindStack, v1beta1.KindCell, v1beta1.KindContainer:
+	case v1beta1.KindRealm, v1beta1.KindSpace, v1beta1.KindStack, v1beta1.KindCell,
+		v1beta1.KindContainer, v1beta1.KindSecret:
 		// Valid kind
 	default:
 		return &ValidationError{
@@ -391,8 +401,66 @@ func ValidateDocument(doc *Document) *ValidationError {
 				Err:   repoErr,
 			}
 		}
+
+	case v1beta1.KindSecret:
+		if doc.SecretDoc == nil {
+			return &ValidationError{
+				Index: doc.Index,
+				Kind:  doc.Kind,
+				Err:   errors.New("secret document is nil"),
+			}
+		}
+		if doc.SecretDoc.Metadata.Name == "" {
+			return &ValidationError{
+				Index: doc.Index,
+				Kind:  doc.Kind,
+				Err:   errors.New("metadata.name is required"),
+			}
+		}
+		if secretErr := validateSecretScope(doc.SecretDoc.Metadata); secretErr != nil {
+			return &ValidationError{
+				Index: doc.Index,
+				Kind:  doc.Kind,
+				Name:  doc.SecretDoc.Metadata.Name,
+				Err:   secretErr,
+			}
+		}
+		if strings.TrimSpace(doc.SecretDoc.Spec.Data) == "" {
+			return &ValidationError{
+				Index: doc.Index,
+				Kind:  doc.Kind,
+				Name:  doc.SecretDoc.Metadata.Name,
+				Err:   errdefs.ErrSecretDataRequired,
+			}
+		}
 	}
 
+	return nil
+}
+
+// validateSecretScope enforces the `kind: Secret` scope-coordinate contract:
+// metadata.realm is always required, and a deeper coordinate may only be set
+// when every shallower one is also set (a cell-scoped secret must name its
+// stack, space, and realm). It does not check that the scope exists on the
+// host — that reachability gate runs at reconcile time against the runner,
+// because only the daemon can read /opt/kukeon. Issue #619.
+func validateSecretScope(md v1beta1.SecretMetadata) error {
+	realm := strings.TrimSpace(md.Realm)
+	space := strings.TrimSpace(md.Space)
+	stack := strings.TrimSpace(md.Stack)
+	cell := strings.TrimSpace(md.Cell)
+
+	if realm == "" {
+		return errdefs.ErrSecretRealmRequired
+	}
+	// A deeper coordinate requires all shallower ones. Walk outward: the
+	// first non-empty coordinate that sits below an empty parent is a gap.
+	if cell != "" && stack == "" {
+		return fmt.Errorf("%w (cell set without stack)", errdefs.ErrSecretScopeIncomplete)
+	}
+	if stack != "" && space == "" {
+		return fmt.Errorf("%w (stack set without space)", errdefs.ErrSecretScopeIncomplete)
+	}
 	return nil
 }
 

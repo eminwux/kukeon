@@ -2089,3 +2089,44 @@ func TestStatusLifecycleFieldsZeroDefault(t *testing.T) {
 		}
 	})
 }
+
+// TestNormalizeSecret_FlatFieldCopy pins the issue #619 conversion: the scope
+// coordinates and the material copy across verbatim, and an unsupported
+// apiVersion is rejected.
+func TestNormalizeSecret_FlatFieldCopy(t *testing.T) {
+	in := ext.SecretDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindSecret,
+		Metadata: ext.SecretMetadata{
+			Name:  "anthropic-token",
+			Realm: "default",
+			Space: "team-a",
+		},
+		Spec: ext.SecretSpec{Data: "s3cr3t"},
+	}
+
+	got, version, err := apischeme.NormalizeSecret(in)
+	if err != nil {
+		t.Fatalf("NormalizeSecret() error = %v", err)
+	}
+	if version != apischeme.VersionV1Beta1 {
+		t.Errorf("version = %q, want %q", version, apischeme.VersionV1Beta1)
+	}
+	want := intmodel.Secret{
+		Metadata: intmodel.SecretMetadata{Name: "anthropic-token", Realm: "default", Space: "team-a"},
+		Spec:     intmodel.SecretSpec{Data: "s3cr3t"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("NormalizeSecret() = %+v, want %+v", got, want)
+	}
+}
+
+func TestNormalizeSecret_UnsupportedVersion(t *testing.T) {
+	_, _, err := apischeme.NormalizeSecret(ext.SecretDoc{APIVersion: "v0alpha9"})
+	if err == nil {
+		t.Fatal("NormalizeSecret() error = nil, want unsupported-version error")
+	}
+	if !strings.Contains(err.Error(), "unsupported apiVersion for Secret") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}

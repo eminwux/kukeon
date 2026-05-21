@@ -132,6 +132,40 @@ func NormalizeRealm(req ext.RealmDoc) (intmodel.Realm, ext.Version, error) {
 	return internal, version, nil
 }
 
+// ConvertSecretDocToInternal converts an external SecretDoc to the internal
+// hub type (issue #619). A Secret has no status to map, so this is a flat
+// field copy of the scope coordinates and the material.
+func ConvertSecretDocToInternal(in ext.SecretDoc) (intmodel.Secret, error) {
+	switch in.APIVersion {
+	case VersionV1Beta1, "": // default/empty treated as v1beta1
+		return intmodel.Secret{
+			Metadata: intmodel.SecretMetadata{
+				Name:  in.Metadata.Name,
+				Realm: in.Metadata.Realm,
+				Space: in.Metadata.Space,
+				Stack: in.Metadata.Stack,
+				Cell:  in.Metadata.Cell,
+			},
+			Spec: intmodel.SecretSpec{
+				Data: in.Spec.Data,
+			},
+		}, nil
+	default:
+		return intmodel.Secret{}, fmt.Errorf("unsupported apiVersion for Secret: %s", in.APIVersion)
+	}
+}
+
+// NormalizeSecret takes an external SecretDoc request and returns an internal
+// object and chosen apiVersion.
+func NormalizeSecret(req ext.SecretDoc) (intmodel.Secret, ext.Version, error) {
+	version := DefaultVersion(req.APIVersion)
+	internal, err := ConvertSecretDocToInternal(req)
+	if err != nil {
+		return intmodel.Secret{}, "", err
+	}
+	return internal, version, nil
+}
+
 // ConvertSpaceDocToInternal converts an external SpaceDoc to the internal hub type.
 func ConvertSpaceDocToInternal(in ext.SpaceDoc) (intmodel.Space, error) {
 	switch in.APIVersion {

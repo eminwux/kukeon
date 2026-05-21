@@ -216,3 +216,55 @@ func TestDetectMetadataVersion(t *testing.T) {
 		})
 	}
 }
+
+// TestSecretScopeDir_PicksDeepestCoordinate pins the issue #619 scope-path
+// rule: the secret's scope dir is the metadata dir of the deepest non-empty
+// coordinate, so realm/space/stack/cell-scoped secrets each nest under their
+// own scope and are reclaimed by that scope's teardown.
+func TestSecretScopeDir_PicksDeepestCoordinate(t *testing.T) {
+	const base = "/opt/kukeon"
+	tests := []struct {
+		name                            string
+		realm, space, stack, cell, want string
+	}{
+		{
+			name:  "realm scope",
+			realm: "kuke-system",
+			want:  fs.RealmMetadataDir(base, "kuke-system"),
+		},
+		{
+			name:  "space scope",
+			realm: "default", space: "team-a",
+			want: fs.SpaceMetadataDir(base, "default", "team-a"),
+		},
+		{
+			name:  "stack scope",
+			realm: "default", space: "team-a", stack: "web",
+			want: fs.StackMetadataDir(base, "default", "team-a", "web"),
+		},
+		{
+			name:  "cell scope",
+			realm: "default", space: "team-a", stack: "web", cell: "api",
+			want: fs.CellMetadataDir(base, "default", "team-a", "web", "api"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := fs.SecretScopeDir(base, tt.realm, tt.space, tt.stack, tt.cell)
+			if got != tt.want {
+				t.Errorf("SecretScopeDir = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSecretPath_UnderSecretsSubdir confirms a secret's bytes path is
+// <scope>/secrets/<name>, nesting the secrets/ subdir inside the scope dir.
+func TestSecretPath_UnderSecretsSubdir(t *testing.T) {
+	const base = "/opt/kukeon"
+	got := fs.SecretPath(base, "kuke-system", "", "", "", "anthropic-token")
+	want := fs.RealmMetadataDir(base, "kuke-system") + "/" + consts.KukeonSecretsSubdir + "/anthropic-token"
+	if got != want {
+		t.Errorf("SecretPath = %q, want %q", got, want)
+	}
+}

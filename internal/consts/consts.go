@@ -37,6 +37,15 @@ const (
 	// .kukeon-instance.json file — are not mistaken for realm directories.
 	KukeonMetadataSubdir = "data"
 
+	// KukeonSecretsSubdir is the basename of the per-scope subdirectory that
+	// owns daemon-managed `kind: Secret` bytes (issue #619). It lives inside
+	// the scope's metadata directory (e.g. <RunPath>/data/<realm>/secrets/) so
+	// the same os.RemoveAll that purge/delete already runs on a scope's
+	// metadata dir reclaims its secrets too. Unlike the 0o2750 setgid
+	// metadata directories the kuke group can traverse, the secrets directory
+	// and the files in it are root-only (0o700 / 0o600).
+	KukeonSecretsSubdir = "secrets"
+
 	// KukeonContainerTTYDir is the basename of the per-container directory
 	// that owns the sbsh terminal socket plus its capture and log siblings.
 	// kukeon bind-mounts this directory (not a single file) into the

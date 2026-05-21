@@ -202,6 +202,23 @@ func (b *Exec) ApplyDocuments(docs []parser.Document) (ApplyResult, error) {
 			resourceResult.Name = container.Metadata.Name
 			reconcileResult, reconcileErr = applypkg.ReconcileContainer(b.runner, container)
 
+		case v1beta1.KindSecret:
+			if doc.SecretDoc == nil {
+				resourceResult.Action = actionFailed
+				resourceResult.Error = errors.New("secret document is nil")
+				result.Resources = append(result.Resources, resourceResult)
+				continue
+			}
+			secret, _, err := apischeme.NormalizeSecret(*doc.SecretDoc)
+			if err != nil {
+				resourceResult.Action = actionFailed
+				resourceResult.Error = fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				result.Resources = append(result.Resources, resourceResult)
+				continue
+			}
+			resourceResult.Name = secret.Metadata.Name
+			reconcileResult, reconcileErr = applypkg.ReconcileSecret(b.runner, secret)
+
 		default:
 			resourceResult.Action = actionFailed
 			resourceResult.Error = fmt.Errorf("%w: %s", errdefs.ErrUnknownKind, doc.Kind)

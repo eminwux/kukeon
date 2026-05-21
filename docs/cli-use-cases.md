@@ -288,6 +288,48 @@ sudo kuke apply -f manifest.yaml -o json
 - A non-existent file exits non-zero with `failed to open file`.
 - `apply` updates a divergent existing cell (e.g. after `kuke kill cell` left the root container missing) and reports `Cell <name>: updated` with a per-component summary. `kuke run -f` against the same divergent state would refuse.
 
+### Secrets (`kind: Secret`)
+
+**Intent.** Store a named, scoped, daemon-managed credential. Phase 3a (issue #619) ships the storage primitive and the `apply` verb only — there is **no** `get` / `delete` verb (tracked in #622) and **no** way to reference a stored secret from a container yet (`ContainerSecret.secretRef`, tracked in #623). The existing `containers[].secrets[].fromFile` / `fromEnv` sources are unaffected and stay supported.
+
+**Sequence.**
+
+```bash
+sudo kuke apply -f secret.yaml
+```
+
+```yaml
+apiVersion: v1beta1
+kind: Secret
+metadata:
+  name: anthropic-token
+  realm: kuke-system # scope coordinates; deepest non-empty wins
+  # space: team-a               # optional — space-scoped
+  # stack: web                  # optional — stack-scoped (requires space)
+  # cell: api                   # optional — cell-scoped (requires stack)
+spec:
+  data: <bytes> # write-only; never echoed back
+```
+
+**Storage layout.** The daemon writes the bytes to a root-owned file under the scope's metadata tree:
+
+```
+<runPath>/data/<realm>/secrets/<name>                         # realm-scoped
+<runPath>/data/<realm>/<space>/secrets/<name>                 # space-scoped
+<runPath>/data/<realm>/<space>/<stack>/secrets/<name>         # stack-scoped
+<runPath>/data/<realm>/<space>/<stack>/<cell>/secrets/<name>  # cell-scoped
+```
+
+The `secrets/` directory is `0700` and each secret file is `0600`, both owned by root — stricter than the `0o2750` setgid metadata directories, so the `kuke` group cannot read secret material. Nesting `secrets/` inside the scope's metadata directory means the same teardown that reclaims a scope (`kuke purge` / `kuke delete`, which `rm -rf` the scope dir) reclaims its secrets too. No crypto-at-rest in v1 — this matches kubelet's default file-backed secret model.
+
+**Invariants.**
+
+- Exit code 0 on success; the result reports `created` on the first apply of a name and `updated` on re-apply (write-through — the daemon overwrites without reading the prior bytes back to diff them).
+- `metadata.name` and `metadata.realm` are required. A deeper scope coordinate requires every shallower one (a `cell`-scoped secret must also name its `stack` and `space`); a gap exits non-zero.
+- `spec.data` is required and must be non-empty; an empty `data` exits non-zero.
+- The scope must already exist — apply does **not** auto-create a missing realm/space/stack/cell for a secret (unlike the hierarchy reconcilers). An unreachable scope exits non-zero with a `scope does not exist` message.
+- `spec.data` is never echoed back in any apply output, daemon log, or audit trail.
+
 ### Inspect, log, attach
 
 **Intent.** Read what a running cell is doing.

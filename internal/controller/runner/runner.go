@@ -95,6 +95,14 @@ type Runner interface {
 	UpdateStack(stack intmodel.Stack) (intmodel.Stack, error)
 	DeleteStack(stack intmodel.Stack) error
 
+	// WriteSecret persists a `kind: Secret`'s bytes to the daemon-managed,
+	// root-owned, 0o600 file under the scope's metadata tree (issue #619).
+	// It returns whether the file was newly created (vs. overwritten). The
+	// caller (ReconcileSecret) is responsible for having verified the scope
+	// exists; WriteSecret only creates the secrets/ subdir and the file, not
+	// the scope itself.
+	WriteSecret(secret intmodel.Secret) (created bool, err error)
+
 	ExistsCgroup(doc any) (bool, error)
 
 	PurgeRealm(realm intmodel.Realm) (namespaceRemoved bool, err error)
