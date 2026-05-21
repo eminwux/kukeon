@@ -138,12 +138,19 @@ func run(args []string) error {
 	// Pre-Serve step (issue #617): clone/fetch the container's declared repos
 	// before the workload starts. A required-repo failure returns here, so
 	// kuketty exits non-zero before sbshserver.Serve and the daemon observes
-	// the task as Failed. An empty repos[] is a no-op.
-	if err = processRepos(ctx, doc.Spec.Repos, logger); err != nil {
+	// the task as Failed (the RPC below is never reached on that path — AC #5).
+	// An empty repos[] is a no-op. The per-repo outcomes feed the GetSetupStatus
+	// verb registered on the control server below (issue #642).
+	repoStatuses, err := processRepos(ctx, doc.Spec.Repos, logger)
+	if err != nil {
 		return err
 	}
 
-	srv, err := sbshserver.New(spec, logger)
+	// Register the GetSetupStatus verb on the same control socket the daemon
+	// dials for `kuke attach`, so kukeond can pull the repo outcomes post-Serve
+	// and write ContainerStatus.Repos (issue #642). ContainerStatus is the
+	// single source of truth — there is no status file in the container.
+	srv, err := sbshserver.New(spec, logger, setupStatusOption(repoStatuses)...)
 	if err != nil {
 		return fmt.Errorf("server.New: %w", err)
 	}

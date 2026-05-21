@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/eminwux/kukeon/internal/kuketty/setupstatus"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -68,11 +69,19 @@ func makeSourceRepo(t *testing.T, fileName string) string {
 }
 
 func TestProcessRepos_EmptyIsNoOp(t *testing.T) {
-	if err := processRepos(context.Background(), nil, discardLogger()); err != nil {
+	statuses, err := processRepos(context.Background(), nil, discardLogger())
+	if err != nil {
 		t.Fatalf("nil repos should be a no-op, got %v", err)
 	}
-	if err := processRepos(context.Background(), []v1beta1.ContainerRepo{}, discardLogger()); err != nil {
+	if statuses != nil {
+		t.Fatalf("nil repos should yield nil statuses, got %v", statuses)
+	}
+	statuses, err = processRepos(context.Background(), []v1beta1.ContainerRepo{}, discardLogger())
+	if err != nil {
 		t.Fatalf("empty repos should be a no-op, got %v", err)
+	}
+	if statuses != nil {
+		t.Fatalf("empty repos should yield nil statuses, got %v", statuses)
 	}
 }
 
@@ -83,11 +92,25 @@ func TestProcessRepos_ClonesIntoTarget(t *testing.T) {
 	repos := []v1beta1.ContainerRepo{
 		{Name: "project", Target: target, Branch: "main", URL: src, Required: true},
 	}
-	if err := processRepos(context.Background(), repos, discardLogger()); err != nil {
+	statuses, err := processRepos(context.Background(), repos, discardLogger())
+	if err != nil {
 		t.Fatalf("processRepos: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(target, "README.md")); err != nil {
+	if _, err = os.Stat(filepath.Join(target, "README.md")); err != nil {
 		t.Fatalf("expected cloned file: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("want 1 status, got %d: %v", len(statuses), statuses)
+	}
+	got := statuses[0]
+	if got.Name != "project" || got.Target != target || got.State != setupstatus.StateCloned {
+		t.Errorf("unexpected status: %+v", got)
+	}
+	if got.Commit == "" {
+		t.Errorf("cloned repo should report a resolved HEAD commit, got empty")
+	}
+	if got.Error != "" {
+		t.Errorf("successful clone should report no error, got %q", got.Error)
 	}
 }
 
@@ -99,7 +122,7 @@ func TestProcessRepos_FetchesExistingCheckout(t *testing.T) {
 	}
 
 	// First pass clones.
-	if err := processRepos(context.Background(), repos, discardLogger()); err != nil {
+	if _, err := processRepos(context.Background(), repos, discardLogger()); err != nil {
 		t.Fatalf("first processRepos (clone): %v", err)
 	}
 
@@ -110,11 +133,18 @@ func TestProcessRepos_FetchesExistingCheckout(t *testing.T) {
 	gitRun(t, src, "add", ".")
 	gitRun(t, src, "commit", "-m", "second")
 
-	if err := processRepos(context.Background(), repos, discardLogger()); err != nil {
+	statuses, err := processRepos(context.Background(), repos, discardLogger())
+	if err != nil {
 		t.Fatalf("second processRepos (fetch): %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(target, "second.txt")); err != nil {
+	if _, err = os.Stat(filepath.Join(target, "second.txt")); err != nil {
 		t.Errorf("fetch should have fast-forwarded the new commit: %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].State != setupstatus.StateFetched {
+		t.Fatalf("want a single fetched status, got %+v", statuses)
+	}
+	if statuses[0].Commit == "" {
+		t.Errorf("fetched repo should report a resolved HEAD commit, got empty")
 	}
 }
 
@@ -129,9 +159,18 @@ func TestProcessRepos_RequiredFailurePropagates(t *testing.T) {
 		},
 	}
 
-	err := processRepos(context.Background(), repos, discardLogger())
+	statuses, err := processRepos(context.Background(), repos, discardLogger())
 	if !errors.Is(err, errRequiredRepoFailed) {
 		t.Fatalf("want errRequiredRepoFailed, got %v", err)
+	}
+	// Even on the required-failure path the partial statuses are returned so
+	// callers (and tests) can see the failure detail, though kuketty exits
+	// before Serve so the RPC never reports them.
+	if len(statuses) != 1 || statuses[0].State != setupstatus.StateFailed {
+		t.Fatalf("want a single failed status, got %+v", statuses)
+	}
+	if statuses[0].Error == "" {
+		t.Errorf("failed repo should carry an error detail, got empty")
 	}
 }
 
@@ -146,8 +185,12 @@ func TestProcessRepos_NonRequiredFailureDoesNotPropagate(t *testing.T) {
 		},
 	}
 
-	if err := processRepos(context.Background(), repos, discardLogger()); err != nil {
+	statuses, err := processRepos(context.Background(), repos, discardLogger())
+	if err != nil {
 		t.Fatalf("non-required failure must not propagate, got %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].State != setupstatus.StateFailed {
+		t.Fatalf("a non-required failure should still be reported as a failed status, got %+v", statuses)
 	}
 }
 
@@ -159,12 +202,22 @@ func TestProcessRepos_RequiredFailureAfterSuccessStillPropagates(t *testing.T) {
 		{Name: "bad", Target: filepath.Join(dir, "bad"), URL: filepath.Join(dir, "nope"), Required: true},
 	}
 
-	err := processRepos(context.Background(), repos, discardLogger())
+	statuses, err := processRepos(context.Background(), repos, discardLogger())
 	if !errors.Is(err, errRequiredRepoFailed) {
 		t.Fatalf("want errRequiredRepoFailed, got %v", err)
 	}
 	// The good repo (declared before the failing one) was still resolved.
 	if _, statErr := os.Stat(filepath.Join(dir, "good", "README.md")); statErr != nil {
 		t.Errorf("expected the non-required repo to clone despite a later required failure: %v", statErr)
+	}
+	// Statuses preserve declaration order: good (cloned) then bad (failed).
+	if len(statuses) != 2 {
+		t.Fatalf("want 2 statuses, got %d: %+v", len(statuses), statuses)
+	}
+	if statuses[0].Name != "good" || statuses[0].State != setupstatus.StateCloned {
+		t.Errorf("status[0] = %+v, want good/cloned", statuses[0])
+	}
+	if statuses[1].Name != "bad" || statuses[1].State != setupstatus.StateFailed {
+		t.Errorf("status[1] = %+v, want bad/failed", statuses[1])
 	}
 }

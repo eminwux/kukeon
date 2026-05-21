@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/kuketty/setupstatus"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -43,65 +44,76 @@ var errRequiredRepoFailed = errors.New("one or more required repos failed to res
 // repos[] straight from the spec (since kuketty owns the spec→TerminalSpec
 // build, issue #641) means there is no daemon-rendered sidecar doc.
 //
-// An empty repos[] is a no-op (nil) — the common case. When any repo marked
-// required fails, processRepos logs each outcome and returns
-// errRequiredRepoFailed; non-required failures are logged but do not
-// propagate. Per-repo status reporting into ContainerStatus.Repos rides the
-// GetSetupStatus RPC in phase 1b (#642) — phase 1a clones and logs only.
-func processRepos(ctx context.Context, repos []v1beta1.ContainerRepo, logger *slog.Logger) error {
+// An empty repos[] is a no-op (nil statuses) — the common case. When any repo
+// marked required fails, processRepos logs each outcome and returns
+// errRequiredRepoFailed alongside the partial statuses collected so far;
+// non-required failures are logged but do not propagate. The returned
+// statuses are the payload the GetSetupStatus RPC reports into
+// ContainerStatus.Repos (phase 1b, #642) — kukeond pulls them post-Serve. On
+// a required failure kuketty exits before Serve, so those statuses are never
+// reachable over the RPC; that path stays exit-code-driven (AC #5).
+func processRepos(ctx context.Context, repos []v1beta1.ContainerRepo, logger *slog.Logger) ([]setupstatus.Repo, error) {
 	if len(repos) == 0 {
-		return nil
+		return nil, nil
 	}
 
+	statuses := make([]setupstatus.Repo, 0, len(repos))
 	var requiredFailed bool
 	for i := range repos {
 		repo := repos[i]
-		if err := resolveRepo(ctx, repo, logger); err != nil {
+		status := resolveRepo(ctx, repo, logger)
+		statuses = append(statuses, status)
+		if status.State == setupstatus.StateFailed {
 			logger.WarnContext(ctx, "repo resolution failed",
-				"repo", repo.Name, "target", repo.Target, "required", repo.Required, "error", err)
+				"repo", repo.Name, "target", repo.Target, "required", repo.Required, "error", status.Error)
 			if repo.Required {
 				requiredFailed = true
 			}
-			continue
 		}
 	}
 
 	if requiredFailed {
-		return errRequiredRepoFailed
+		return statuses, errRequiredRepoFailed
 	}
-	return nil
+	return statuses, nil
 }
 
-// resolveRepo clones or fetches a single repo. If target/.git already exists it
-// fetches + fast-forwards (clone-if-absent idempotency: the writable rootfs
-// persists across kuke stop/start, so a restart never re-clones); otherwise it
-// clones. On success it logs the resolved HEAD commit.
-func resolveRepo(ctx context.Context, repo v1beta1.ContainerRepo, logger *slog.Logger) error {
+// resolveRepo clones or fetches a single repo and returns its resolved
+// setupstatus.Repo. If target/.git already exists it fetches + fast-forwards
+// (clone-if-absent idempotency: the writable rootfs persists across
+// kuke stop/start, so a restart never re-clones); otherwise it clones. On
+// success it logs the resolved HEAD commit and reports State cloned/fetched
+// with the commit; on failure it reports State failed with the error detail.
+func resolveRepo(ctx context.Context, repo v1beta1.ContainerRepo, logger *slog.Logger) setupstatus.Repo {
+	status := setupstatus.Repo{Name: repo.Name, Target: repo.Target}
+
 	gitDir := filepath.Join(repo.Target, ".git")
 	exists := false
 	if info, statErr := os.Stat(gitDir); statErr == nil && info.IsDir() {
 		exists = true
 	}
 
-	state := "cloned"
+	state := setupstatus.StateCloned
 	var opErr error
 	if exists {
-		state = "fetched"
+		state = setupstatus.StateFetched
 		opErr = fetchRepo(ctx, repo)
 	} else {
 		opErr = cloneRepo(ctx, repo)
 	}
 	if opErr != nil {
-		return opErr
+		status.State = setupstatus.StateFailed
+		status.Error = opErr.Error()
+		return status
 	}
 
-	commit := ""
+	status.State = state
 	if head, headErr := repoHead(ctx, repo.Target); headErr == nil {
-		commit = head
+		status.Commit = head
 	}
 	logger.InfoContext(ctx, "repo resolved",
-		"repo", repo.Name, "target", repo.Target, "state", state, "commit", commit)
-	return nil
+		"repo", repo.Name, "target", repo.Target, "state", status.State, "commit", status.Commit)
+	return status
 }
 
 // cloneRepo clones repo.URL into repo.Target, optionally pinned to repo.Branch.
