@@ -321,6 +321,9 @@ func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, err
 		if err := validateContainerTty(in.Spec); err != nil {
 			return intmodel.Container{}, err
 		}
+		if err := validateContainerGit(in.Spec); err != nil {
+			return intmodel.Container{}, err
+		}
 		return intmodel.Container{
 			Metadata: intmodel.ContainerMetadata{
 				Name:   in.Metadata.Name,
@@ -354,6 +357,7 @@ func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, err
 				Resources:              convertResourcesToInternal(in.Spec.Resources),
 				Secrets:                convertSecretsToInternal(in.Spec.Secrets),
 				Repos:                  reposToInternal(in.Spec.Repos),
+				Git:                    gitToInternal(in.Spec.Git),
 				CNIConfigPath:          in.Spec.CNIConfigPath,
 				RestartPolicy:          in.Spec.RestartPolicy,
 				Attachable:             in.Spec.Attachable,
@@ -416,6 +420,7 @@ func BuildContainerExternalFromInternal(in intmodel.Container, apiVersion ext.Ve
 				Resources:              buildResourcesExternalFromInternal(in.Spec.Resources),
 				Secrets:                buildSecretsExternalFromInternal(in.Spec.Secrets),
 				Repos:                  reposToExternal(in.Spec.Repos),
+				Git:                    gitToExternal(in.Spec.Git),
 				CNIConfigPath:          in.Spec.CNIConfigPath,
 				RestartPolicy:          in.Spec.RestartPolicy,
 				Attachable:             in.Spec.Attachable,
@@ -481,6 +486,7 @@ func convertContainerSpecToInternal(in ext.ContainerSpec) intmodel.ContainerSpec
 		Resources:              convertResourcesToInternal(in.Resources),
 		Secrets:                convertSecretsToInternal(in.Secrets),
 		Repos:                  reposToInternal(in.Repos),
+		Git:                    gitToInternal(in.Git),
 		CNIConfigPath:          in.CNIConfigPath,
 		RestartPolicy:          in.RestartPolicy,
 		Attachable:             in.Attachable,
@@ -520,6 +526,7 @@ func BuildContainerSpecExternalFromInternal(in intmodel.ContainerSpec) ext.Conta
 		Resources:              buildResourcesExternalFromInternal(in.Resources),
 		Secrets:                buildSecretsExternalFromInternal(in.Secrets),
 		Repos:                  reposToExternal(in.Repos),
+		Git:                    gitToExternal(in.Git),
 		CNIConfigPath:          in.CNIConfigPath,
 		RestartPolicy:          in.RestartPolicy,
 		Attachable:             in.Attachable,
@@ -884,6 +891,91 @@ func repoStatusesToExternal(in []intmodel.RepoStatus) []ext.RepoStatus {
 	return out
 }
 
+// gitToInternal copies the external git sugar block into the internal model,
+// deep-copying the Author/Committer pointers and Sign slice. Issue #618.
+func gitToInternal(in *ext.ContainerGit) *intmodel.ContainerGit {
+	if in == nil {
+		return nil
+	}
+	out := &intmodel.ContainerGit{
+		SigningKey:     in.SigningKey,
+		Sign:           cloneStringSlice(in.Sign),
+		AllowedSigners: in.AllowedSigners,
+	}
+	if in.Author != nil {
+		out.Author = &intmodel.GitIdentity{Name: in.Author.Name, Email: in.Author.Email}
+	}
+	if in.Committer != nil {
+		out.Committer = &intmodel.GitIdentity{Name: in.Committer.Name, Email: in.Committer.Email}
+	}
+	return out
+}
+
+// gitToExternal is the inverse of gitToInternal.
+func gitToExternal(in *intmodel.ContainerGit) *ext.ContainerGit {
+	if in == nil {
+		return nil
+	}
+	out := &ext.ContainerGit{
+		SigningKey:     in.SigningKey,
+		Sign:           cloneStringSlice(in.Sign),
+		AllowedSigners: in.AllowedSigners,
+	}
+	if in.Author != nil {
+		out.Author = &ext.GitIdentity{Name: in.Author.Name, Email: in.Author.Email}
+	}
+	if in.Committer != nil {
+		out.Committer = &ext.GitIdentity{Name: in.Committer.Name, Email: in.Committer.Email}
+	}
+	return out
+}
+
+// validateContainerGit enforces the ContainerGit invariants (issue #618):
+//   - author and committer each require both name and email when present, so
+//     a half-specified identity never renders a GIT_AUTHOR_EMAIL= empty entry.
+//   - sign requires signingKey, since commit.gpgsign/tag.gpgsign with no
+//     user.signingkey makes git fail the commit at runtime rather than at
+//     apply time.
+//   - each sign entry must be a known target (commits or tags), rejected at
+//     apply time rather than silently dropped during expansion.
+func validateContainerGit(spec ext.ContainerSpec) error {
+	git := spec.Git
+	if git == nil {
+		return nil
+	}
+	if err := validateGitIdentity("author", git.Author); err != nil {
+		return fmt.Errorf("container %q: %w", spec.ID, err)
+	}
+	if err := validateGitIdentity("committer", git.Committer); err != nil {
+		return fmt.Errorf("container %q: %w", spec.ID, err)
+	}
+	for _, s := range git.Sign {
+		if s != ext.GitSignCommits && s != ext.GitSignTags {
+			return fmt.Errorf(
+				"container %q: git.sign %q: must be one of %q, %q",
+				spec.ID, s, ext.GitSignCommits, ext.GitSignTags,
+			)
+		}
+	}
+	if len(git.Sign) > 0 && git.SigningKey == "" {
+		return fmt.Errorf("container %q: git.sign requires git.signingKey to be set", spec.ID)
+	}
+	return nil
+}
+
+// validateGitIdentity rejects a git identity that sets only one of name/email
+// — both are required so the expanded GIT_*_NAME / GIT_*_EMAIL pair is never
+// half-empty.
+func validateGitIdentity(role string, id *ext.GitIdentity) error {
+	if id == nil {
+		return nil
+	}
+	if id.Name == "" || id.Email == "" {
+		return fmt.Errorf("git.%s requires both name and email", role)
+	}
+	return nil
+}
+
 func convertSpaceDefaultsToInternal(in *ext.SpaceDefaults) *intmodel.SpaceDefaults {
 	if in == nil {
 		return nil
@@ -1035,6 +1127,9 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 	case VersionV1Beta1, "": // default/empty treated as v1beta1
 		for _, c := range in.Spec.Containers {
 			if err := validateContainerTty(c); err != nil {
+				return intmodel.Cell{}, err
+			}
+			if err := validateContainerGit(c); err != nil {
 				return intmodel.Cell{}, err
 			}
 		}

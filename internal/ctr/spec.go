@@ -422,17 +422,20 @@ func nestedCgroupMount() runtimespec.Mount {
 }
 
 // kukeonContainerEnv builds the final container env: a set of KUKEON_*
-// identity vars derived from the container spec's cell-context fields,
-// merged with the user-supplied spec.Env. User entries override defaults on
-// key collisions; empty cell-context fields produce no entry. Order in the
-// returned slice is: surviving defaults in canonical order, then user
-// entries in their declared order. The merge is done here (rather than
+// identity vars derived from the container spec's cell-context fields, plus
+// the GIT_AUTHOR_* / GIT_COMMITTER_* / GIT_CONFIG_* block expanded from
+// spec.Git (issue #618), all merged with the user-supplied spec.Env. User
+// entries override defaults on key collisions; empty cell-context fields and
+// an absent git block produce no entries. Order in the returned slice is:
+// surviving defaults in canonical order, then user entries in their declared
+// order. The merge is done here (rather than
 // trusting oci.WithEnv) because containerd's replaceOrAppendEnvValues
 // dedupes only against keys already present in spec.Process.Env when WithEnv
 // runs, so two entries with the same key inside a single overrides slice
 // would both end up in the final env. Issue #351.
 func kukeonContainerEnv(spec intmodel.ContainerSpec) []string {
 	defaults := kukeonDefaultEnv(spec)
+	defaults = append(defaults, gitEnv(spec.Git)...)
 	switch {
 	case len(spec.Env) == 0:
 		return defaults
@@ -477,6 +480,67 @@ func kukeonDefaultEnv(spec intmodel.ContainerSpec) []string {
 			continue
 		}
 		out = append(out, p.key+"="+p.value)
+	}
+	return out
+}
+
+// gitEnv expands a container's git identity/signing sugar (ContainerSpec.Git)
+// into the GIT_AUTHOR_* / GIT_COMMITTER_* / GIT_CONFIG_* env-var block git
+// reads natively, replacing the hand-rolled block crew templates duplicate
+// per cell today. Returns nil when git is unset. The GIT_CONFIG_* signing
+// pairs are emitted in crew's canonical order — user.signingkey, gpg.format,
+// commit.gpgsign, tag.gpgsign, gpg.ssh.allowedSignersFile — with
+// GIT_CONFIG_COUNT tracking the live pair count, so a block that omits signing
+// renders no GIT_CONFIG_* entries at all. gpg.format=ssh is implied by a
+// non-empty signingKey (kukeon signs with SSH keys). The returned entries are
+// merged with the user's explicit env by kukeonContainerEnv, where an explicit
+// env: entry wins on key collision. Issue #618.
+func gitEnv(git *intmodel.ContainerGit) []string {
+	if git == nil {
+		return nil
+	}
+	var out []string
+	if git.Author != nil {
+		out = append(out,
+			"GIT_AUTHOR_NAME="+git.Author.Name,
+			"GIT_AUTHOR_EMAIL="+git.Author.Email,
+		)
+	}
+	if git.Committer != nil {
+		out = append(out,
+			"GIT_COMMITTER_NAME="+git.Committer.Name,
+			"GIT_COMMITTER_EMAIL="+git.Committer.Email,
+		)
+	}
+
+	type configPair struct{ key, value string }
+	var pairs []configPair
+	if git.SigningKey != "" {
+		pairs = append(pairs,
+			configPair{"user.signingkey", git.SigningKey},
+			configPair{"gpg.format", "ssh"},
+		)
+	}
+	for _, s := range git.Sign {
+		switch s {
+		case intmodel.GitSignCommits:
+			pairs = append(pairs, configPair{"commit.gpgsign", "true"})
+		case intmodel.GitSignTags:
+			pairs = append(pairs, configPair{"tag.gpgsign", "true"})
+		}
+	}
+	if git.AllowedSigners != "" {
+		pairs = append(pairs, configPair{"gpg.ssh.allowedSignersFile", git.AllowedSigners})
+	}
+	if len(pairs) > 0 {
+		out = append(out, "GIT_CONFIG_COUNT="+strconv.Itoa(len(pairs)))
+		for i, p := range pairs {
+			n := strconv.Itoa(i)
+			out = append(out,
+				"GIT_CONFIG_KEY_"+n+"="+p.key,
+				"GIT_CONFIG_VALUE_"+n+"="+p.value,
+			)
+		}
 	}
 	return out
 }
