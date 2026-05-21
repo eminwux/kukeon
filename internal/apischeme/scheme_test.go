@@ -1148,6 +1148,73 @@ func TestContainerSecretsRoundTripV1Beta1(t *testing.T) {
 	}
 }
 
+// TestContainerSecretRefRoundTripV1Beta1 ensures the secretRef source survives
+// external→internal→external conversion, including a deep-copy of the pointer
+// (not a shared referent). Issue #623.
+func TestContainerSecretRefRoundTripV1Beta1(t *testing.T) {
+	input := ext.ContainerDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindContainer,
+		Metadata:   ext.ContainerMetadata{Name: "container-secretref"},
+		Spec: ext.ContainerSpec{
+			ID:      "container-secretref",
+			RealmID: "realm0",
+			SpaceID: "space0",
+			StackID: "stack0",
+			CellID:  "cell0",
+			Image:   "alpine:latest",
+			Secrets: []ext.ContainerSecret{
+				{
+					Name:      "ANTHROPIC_AUTH_TOKEN",
+					SecretRef: &ext.ContainerSecretRef{Name: "anthropic-token", Realm: "kuke-system"},
+				},
+				{
+					Name: "tls.crt",
+					SecretRef: &ext.ContainerSecretRef{
+						Name:  "tls-cert",
+						Realm: "default",
+						Space: "ai",
+						Stack: "agents",
+						Cell:  "claude",
+					},
+					MountPath: "/run/secrets/tls.crt",
+				},
+			},
+		},
+	}
+
+	internal, version, err := apischeme.NormalizeContainer(input)
+	if err != nil {
+		t.Fatalf("NormalizeContainer: %v", err)
+	}
+	if internal.Spec.Secrets[0].SecretRef == nil ||
+		internal.Spec.Secrets[0].SecretRef.Name != "anthropic-token" ||
+		internal.Spec.Secrets[0].SecretRef.Realm != "kuke-system" {
+		t.Fatalf("secret[0] secretRef did not normalize: %+v", internal.Spec.Secrets[0].SecretRef)
+	}
+	if internal.Spec.Secrets[1].SecretRef == nil ||
+		internal.Spec.Secrets[1].SecretRef.Cell != "claude" {
+		t.Fatalf("secret[1] secretRef did not normalize: %+v", internal.Spec.Secrets[1].SecretRef)
+	}
+
+	output, err := apischeme.BuildContainerExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildContainerExternalFromInternal: %v", err)
+	}
+	for i, want := range input.Spec.Secrets {
+		got := output.Spec.Secrets[i]
+		if got.Name != want.Name || got.MountPath != want.MountPath {
+			t.Errorf("secret[%d] round-trip = %+v, want %+v", i, got, want)
+		}
+		if got.SecretRef == nil || *got.SecretRef != *want.SecretRef {
+			t.Errorf("secret[%d] secretRef round-trip = %+v, want %+v", i, got.SecretRef, want.SecretRef)
+		}
+		if got.SecretRef == want.SecretRef {
+			t.Errorf("secret[%d] secretRef pointer not deep-copied", i)
+		}
+	}
+}
+
 // TestContainerAttachableRoundTrips ensures the new Attachable field
 // survives both directions of conversion (external→internal→external) and
 // across the nested cell-spec converters used when a Container appears

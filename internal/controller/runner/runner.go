@@ -243,14 +243,20 @@ func (r *Exec) netPolicyEnforcer() netpolicy.Enforcer {
 }
 
 // daemonDefaultBuildOpts returns ctr.BuildOption entries that carry daemon-
-// wide knobs into ctr.BuildContainerSpec / ctr.BuildRootContainerSpec. Today
-// just the daemon-default memory cap (issue #531); returns nil when no
-// daemon-wide options are configured so existing call sites pay no cost.
+// wide knobs into ctr.BuildContainerSpec / ctr.BuildRootContainerSpec: the
+// daemon-default memory cap (issue #531) and the RunPath used to resolve a
+// ContainerSecret.secretRef from its scope's secrets tree (issue #623).
+// Returns nil when no daemon-wide options are configured so existing call
+// sites pay no cost.
 func (r *Exec) daemonDefaultBuildOpts() []ctr.BuildOption {
-	if r.opts.DefaultMemoryLimitBytes <= 0 {
-		return nil
+	var opts []ctr.BuildOption
+	if r.opts.DefaultMemoryLimitBytes > 0 {
+		opts = append(opts, ctr.WithDefaultMemoryLimit(r.opts.DefaultMemoryLimitBytes))
 	}
-	return []ctr.BuildOption{ctr.WithDefaultMemoryLimit(r.opts.DefaultMemoryLimitBytes)}
+	if r.opts.RunPath != "" {
+		opts = append(opts, ctr.WithSecretRunPath(r.opts.RunPath))
+	}
+	return opts
 }
 
 func (r *Exec) BootstrapCNI(cfgDir, cacheDir, binDir string) (cni.BootstrapReport, error) {

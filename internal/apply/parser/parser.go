@@ -490,20 +490,34 @@ func validateRepos(repos []v1beta1.ContainerRepo) error {
 }
 
 // validateSecrets enforces the shape of secret references: name required,
-// exactly one of fromFile/fromEnv, and mountPath (if set) absolute.
+// exactly one of fromFile/fromEnv/secretRef, and mountPath (if set) absolute.
 func validateSecrets(secrets []v1beta1.ContainerSecret) error {
 	for i, s := range secrets {
 		name := strings.TrimSpace(s.Name)
 		if name == "" {
 			return fmt.Errorf("%w (secrets[%d])", errdefs.ErrSecretNameRequired, i)
 		}
-		fromFile := strings.TrimSpace(s.FromFile)
-		fromEnv := strings.TrimSpace(s.FromEnv)
+		// Exactly one of fromFile / fromEnv / secretRef must be set.
+		sources := 0
+		if strings.TrimSpace(s.FromFile) != "" {
+			sources++
+		}
+		if strings.TrimSpace(s.FromEnv) != "" {
+			sources++
+		}
+		if s.SecretRef != nil {
+			sources++
+		}
 		switch {
-		case fromFile == "" && fromEnv == "":
+		case sources == 0:
 			return fmt.Errorf("%w (secrets[%d] %q)", errdefs.ErrSecretSourceRequired, i, name)
-		case fromFile != "" && fromEnv != "":
+		case sources > 1:
 			return fmt.Errorf("%w (secrets[%d] %q)", errdefs.ErrSecretMultipleSources, i, name)
+		}
+		if s.SecretRef != nil {
+			if refErr := validateSecretRef(*s.SecretRef, i, name); refErr != nil {
+				return refErr
+			}
 		}
 		mountPath := strings.TrimSpace(s.MountPath)
 		if mountPath != "" && !filepath.IsAbs(mountPath) {
@@ -515,6 +529,36 @@ func validateSecrets(secrets []v1beta1.ContainerSecret) error {
 				mountPath,
 			)
 		}
+	}
+	return nil
+}
+
+// validateSecretRef enforces the secretRef shape: a referenced name plus a
+// scope that follows the same coordinate contract as a kind: Secret — realm
+// always required, a deeper coordinate only when every shallower one is set.
+// It does not check that the Secret exists on the host; that reachability gate
+// runs at container-start time against the runner, because only the daemon can
+// read the scope's secrets tree. Issue #623.
+func validateSecretRef(ref v1beta1.ContainerSecretRef, i int, name string) error {
+	if strings.TrimSpace(ref.Name) == "" {
+		return fmt.Errorf("%w (secrets[%d] %q)", errdefs.ErrSecretRefNameRequired, i, name)
+	}
+	realm := strings.TrimSpace(ref.Realm)
+	space := strings.TrimSpace(ref.Space)
+	stack := strings.TrimSpace(ref.Stack)
+	cell := strings.TrimSpace(ref.Cell)
+	if realm == "" {
+		return fmt.Errorf("%w (secrets[%d] %q)", errdefs.ErrSecretRefRealmRequired, i, name)
+	}
+	if cell != "" && stack == "" {
+		return fmt.Errorf(
+			"%w (secrets[%d] %q: cell set without stack)", errdefs.ErrSecretRefScopeIncomplete, i, name,
+		)
+	}
+	if stack != "" && space == "" {
+		return fmt.Errorf(
+			"%w (secrets[%d] %q: stack set without space)", errdefs.ErrSecretRefScopeIncomplete, i, name,
+		)
 	}
 	return nil
 }

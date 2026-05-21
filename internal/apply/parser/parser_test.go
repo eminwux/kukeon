@@ -448,6 +448,133 @@ spec:
 	}
 }
 
+func TestValidateDocument_Container_SecretRefValidFormsAccepted(t *testing.T) {
+	yaml := `apiVersion: v1beta1
+kind: Container
+metadata:
+  name: test-container
+spec:
+  id: test-container
+  realmId: r
+  spaceId: s
+  stackId: k
+  cellId: c
+  image: alpine:latest
+  secrets:
+    - name: ANTHROPIC_AUTH_TOKEN
+      secretRef:
+        name: anthropic-token
+        realm: kuke-system
+    - name: tls.crt
+      secretRef:
+        name: tls-cert
+        realm: default
+        space: ai
+        stack: agents
+        cell: claude
+      mountPath: /run/secrets/tls.crt
+`
+	doc, err := parser.ParseDocument(0, []byte(yaml))
+	if err != nil {
+		t.Fatalf("ParseDocument failed: %v", err)
+	}
+
+	if validationErr := parser.ValidateDocument(doc); validationErr != nil {
+		t.Fatalf("expected valid secretRef forms to pass, got: %v", validationErr)
+	}
+}
+
+func TestValidateDocument_Container_SecretRefValidation(t *testing.T) {
+	base := `apiVersion: v1beta1
+kind: Container
+metadata:
+  name: test-container
+spec:
+  id: test-container
+  realmId: r
+  spaceId: s
+  stackId: k
+  cellId: c
+  image: alpine:latest
+  secrets:
+    - name: TOKEN
+      secretRef:
+`
+	cases := []struct {
+		name    string
+		refYAML string
+		wantErr error
+	}{
+		{
+			name:    "missing name",
+			refYAML: "        realm: kuke-system\n",
+			wantErr: errdefs.ErrSecretRefNameRequired,
+		},
+		{
+			name:    "missing realm",
+			refYAML: "        name: anthropic-token\n",
+			wantErr: errdefs.ErrSecretRefRealmRequired,
+		},
+		{
+			name:    "cell without stack",
+			refYAML: "        name: anthropic-token\n        realm: default\n        space: ai\n        cell: claude\n",
+			wantErr: errdefs.ErrSecretRefScopeIncomplete,
+		},
+		{
+			name:    "stack without space",
+			refYAML: "        name: anthropic-token\n        realm: default\n        stack: agents\n",
+			wantErr: errdefs.ErrSecretRefScopeIncomplete,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := parser.ParseDocument(0, []byte(base+tc.refYAML))
+			if err != nil {
+				t.Fatalf("ParseDocument failed: %v", err)
+			}
+			validationErr := parser.ValidateDocument(doc)
+			if validationErr == nil {
+				t.Fatalf("expected validation error for %s, got nil", tc.name)
+			}
+			if !strings.Contains(validationErr.Error(), tc.wantErr.Error()) {
+				t.Errorf("expected %v, got: %v", tc.wantErr, validationErr)
+			}
+		})
+	}
+}
+
+func TestValidateDocument_Container_SecretRefRejectsExtraSource(t *testing.T) {
+	yaml := `apiVersion: v1beta1
+kind: Container
+metadata:
+  name: test-container
+spec:
+  id: test-container
+  realmId: r
+  spaceId: s
+  stackId: k
+  cellId: c
+  image: alpine:latest
+  secrets:
+    - name: TOKEN
+      fromEnv: SOME_ENV
+      secretRef:
+        name: anthropic-token
+        realm: kuke-system
+`
+	doc, err := parser.ParseDocument(0, []byte(yaml))
+	if err != nil {
+		t.Fatalf("ParseDocument failed: %v", err)
+	}
+	validationErr := parser.ValidateDocument(doc)
+	if validationErr == nil {
+		t.Fatal("expected validation error for fromEnv + secretRef, got nil")
+	}
+	if !strings.Contains(validationErr.Error(), errdefs.ErrSecretMultipleSources.Error()) {
+		t.Errorf("expected ErrSecretMultipleSources, got: %v", validationErr)
+	}
+}
+
 func TestValidateDocument_Container_RepoValidation(t *testing.T) {
 	base := `apiVersion: v1beta1
 kind: Container

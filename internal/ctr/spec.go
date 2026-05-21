@@ -178,6 +178,7 @@ type BuildOption func(*buildOpts)
 type buildOpts struct {
 	attachable              AttachableInjection
 	defaultMemoryLimitBytes int64
+	secretRunPath           string
 }
 
 // WithAttachableInjection configures the host-side paths used when wrapping
@@ -199,6 +200,21 @@ func WithDefaultMemoryLimit(bytes int64) BuildOption {
 	return func(o *buildOpts) {
 		if bytes > 0 {
 			o.defaultMemoryLimitBytes = bytes
+		}
+	}
+}
+
+// WithSecretRunPath carries the daemon's RunPath into CreateContainerFromSpec
+// so a ContainerSecret with a secretRef can be resolved from the referenced
+// scope's secrets tree (<RunPath>/data/<scope>/secrets/<name>, issue #619).
+// Has no effect on BuildContainerSpec itself — the value is consumed by
+// resolveSecrets before the OCI spec is built. An empty argument is a no-op so
+// callers can pass it unconditionally; specs that declare no secretRef never
+// touch the path. Issue #623.
+func WithSecretRunPath(runPath string) BuildOption {
+	return func(o *buildOpts) {
+		if runPath != "" {
+			o.secretRunPath = runPath
 		}
 	}
 }
