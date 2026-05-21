@@ -214,6 +214,17 @@ var (
 	// not-found. Not-found is reported via ErrImageNotFound.
 	ErrDeleteImage = errors.New("failed to delete image")
 
+	// ErrImageTagRequired is returned when `kuke build` is invoked without a
+	// -t/--tag — the built image needs a name to land under in the realm's
+	// containerd namespace.
+	ErrImageTagRequired = errors.New("image tag is required (-t name:tag)")
+
+	// ErrKukebuildNotFound is returned by `kuke build` when the standalone
+	// `kukebuild` binary (which embeds BuildKit, issue #522) is not on PATH.
+	// `kuke build` is a thin shim that exec's kukebuild; without it the build
+	// cannot proceed.
+	ErrKukebuildNotFound = errors.New("kukebuild binary not found")
+
 	// Attach-related errors.
 
 	// ErrAttachNotSupported is returned when an attach request targets a

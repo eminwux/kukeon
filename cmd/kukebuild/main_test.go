@@ -1,0 +1,156 @@
+// Copyright 2025 Emiliano Spinella (eminwux)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import (
+	"errors"
+	"path/filepath"
+	"testing"
+)
+
+func TestParseArgsDefaults(t *testing.T) {
+	cfg, err := parseArgs([]string{"-t", "demo:latest", "/ctx"})
+	if err != nil {
+		t.Fatalf("parseArgs: unexpected error: %v", err)
+	}
+	if cfg.tag != "demo:latest" {
+		t.Errorf("tag = %q, want demo:latest", cfg.tag)
+	}
+	if cfg.contextDir != "/ctx" {
+		t.Errorf("contextDir = %q, want /ctx", cfg.contextDir)
+	}
+	if want := filepath.Join("/ctx", "Dockerfile"); cfg.dockerfile != want {
+		t.Errorf("dockerfile = %q, want %q", cfg.dockerfile, want)
+	}
+	if cfg.realm != defaultRealm {
+		t.Errorf("realm = %q, want %q", cfg.realm, defaultRealm)
+	}
+	if cfg.containerdSocket != defaultContainerdSocket {
+		t.Errorf("containerdSocket = %q, want %q", cfg.containerdSocket, defaultContainerdSocket)
+	}
+	if cfg.root != defaultBuildRoot {
+		t.Errorf("root = %q, want %q", cfg.root, defaultBuildRoot)
+	}
+	if len(cfg.buildArgs) != 0 {
+		t.Errorf("buildArgs = %v, want empty", cfg.buildArgs)
+	}
+}
+
+func TestParseArgsAllFlags(t *testing.T) {
+	cfg, err := parseArgs([]string{
+		"--file", "/ctx/Dockerfile.alt",
+		"--tag", "reg/app:v1",
+		"--realm", "kuke-system",
+		"--containerd-socket", "/tmp/c.sock",
+		"--root", "/tmp/state",
+		"--build-arg", "FOO=bar",
+		"--build-arg", "BAZ=qux=quux",
+		"/ctx",
+	})
+	if err != nil {
+		t.Fatalf("parseArgs: unexpected error: %v", err)
+	}
+	if cfg.dockerfile != "/ctx/Dockerfile.alt" {
+		t.Errorf("dockerfile = %q", cfg.dockerfile)
+	}
+	if cfg.realm != "kuke-system" {
+		t.Errorf("realm = %q", cfg.realm)
+	}
+	if cfg.containerdSocket != "/tmp/c.sock" {
+		t.Errorf("containerdSocket = %q", cfg.containerdSocket)
+	}
+	if cfg.root != "/tmp/state" {
+		t.Errorf("root = %q", cfg.root)
+	}
+	if cfg.buildArgs["FOO"] != "bar" {
+		t.Errorf("buildArgs[FOO] = %q, want bar", cfg.buildArgs["FOO"])
+	}
+	// A value containing '=' must survive intact (only the first '=' splits).
+	if cfg.buildArgs["BAZ"] != "qux=quux" {
+		t.Errorf("buildArgs[BAZ] = %q, want qux=quux", cfg.buildArgs["BAZ"])
+	}
+}
+
+func TestParseArgsShortAliases(t *testing.T) {
+	cfg, err := parseArgs([]string{"-f", "/ctx/Containerfile", "-t", "x:1", "/ctx"})
+	if err != nil {
+		t.Fatalf("parseArgs: unexpected error: %v", err)
+	}
+	if cfg.dockerfile != "/ctx/Containerfile" {
+		t.Errorf("dockerfile = %q, want /ctx/Containerfile", cfg.dockerfile)
+	}
+	if cfg.tag != "x:1" {
+		t.Errorf("tag = %q, want x:1", cfg.tag)
+	}
+}
+
+func TestNormalizeImageName(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"app:dev", "docker.io/library/app:dev"},
+		{"kukeon-smoke:dev", "docker.io/library/kukeon-smoke:dev"},
+		{"app", "docker.io/library/app:latest"},
+		{"ghcr.io/eminwux/kukeon:v1", "ghcr.io/eminwux/kukeon:v1"},
+		{"docker.io/library/app:dev", "docker.io/library/app:dev"},
+	}
+	for _, tc := range cases {
+		got, err := normalizeImageName(tc.in)
+		if err != nil {
+			t.Errorf("normalizeImageName(%q): unexpected error: %v", tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("normalizeImageName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestNormalizeImageNameInvalid(t *testing.T) {
+	if _, err := normalizeImageName("Invalid Tag!!"); err == nil {
+		t.Error("normalizeImageName(invalid): expected error, got nil")
+	}
+}
+
+func TestParseArgsUsageErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"no context", []string{"-t", "x:1"}},
+		{"no tag", []string{"/ctx"}},
+		{"empty tag", []string{"-t", "  ", "/ctx"}},
+		{"empty realm", []string{"-t", "x:1", "--realm", "", "/ctx"}},
+		{"extra positional", []string{"-t", "x:1", "/ctx", "/extra"}},
+		{"bad build-arg no equals", []string{"-t", "x:1", "--build-arg", "FOO", "/ctx"}},
+		{"bad build-arg empty key", []string{"-t", "x:1", "--build-arg", "=v", "/ctx"}},
+		{"unknown flag", []string{"-t", "x:1", "--nope", "/ctx"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseArgs(tc.args)
+			if err == nil {
+				t.Fatalf("parseArgs(%v): expected error, got nil", tc.args)
+			}
+			var ue *usageError
+			if !errors.As(err, &ue) {
+				t.Errorf("parseArgs(%v): error %v is not a *usageError", tc.args, err)
+			}
+		})
+	}
+}
