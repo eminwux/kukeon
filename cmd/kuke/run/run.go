@@ -57,8 +57,11 @@ func NewRunCmd() *cobra.Command {
 		Short: "Create and start a single cell from a YAML file or a profile",
 		Long: "Create and start a single cell from a YAML file or stdin (-f), " +
 			"or from a per-user profile under $HOME/.kuke/profiles.d/<name>.yaml (-p). " +
-			"Conceptually `kuke apply -f` (single-cell) plus `kuke start cell`, but refuses " +
-			"to update a divergent on-disk spec. To re-attach to an existing cell use " +
+			"-f is create-or-attach by metadata.name: a missing cell is created and " +
+			"attached; a Ready cell is attached as a no-op; a Stopped cell is started " +
+			"then attached; a divergent on-disk spec is refused (use `kuke apply -f` to " +
+			"update); a cell in an error or partial state is refused with a " +
+			"`kuke delete cell <name>` pointer. To re-attach to an existing cell use " +
 			"`kuke attach <cell>`.",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
@@ -242,25 +245,15 @@ func runRun(cmd *cobra.Command, args []string) error {
 				strings.Join(changed, ", "),
 			)
 		}
-		// Matching spec + already-Ready cell: print a no-op summary without
-		// re-entering the daemon's CreateCell→StartCell path. That path is
-		// not safe to re-enter on a healthy cell today: runner.StartCell
-		// re-attaches the root container to its CNI network, which the
-		// bridge plugin rejects with `duplicate allocation`. Pre-existing
-		// daemon bug, surfaced here because the AC requires idempotency.
-		if pre.Cell.Status.State == v1beta1.CellStateReady {
-			if printErr := printRunResult(cmd, noOpResultFromGet(pre), flags.output); printErr != nil {
-				return printErr
-			}
-			if !flags.detach {
-				return attachAndMaybeAutoDelete(cmd, client, cellDoc, flags)
-			}
-			return nil
-		}
+		// A live cell whose on-disk spec matches the file: drive the
+		// create-or-attach state machine instead of re-entering CreateCell.
+		return runExistingCell(cmd, client, cellDoc, pre, flags)
 	case getErr != nil && !errors.Is(getErr, errdefs.ErrCellNotFound):
 		return getErr
 	}
 
+	// No live cell (ErrCellNotFound, or a nil read with no metadata): create
+	// the cell and attach.
 	result, err := client.CreateCell(cmd.Context(), cellDoc)
 	if err != nil {
 		return err
@@ -269,6 +262,63 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if printErr := printRunResult(cmd, result, flags.output); printErr != nil {
 		return printErr
 	}
+	if !flags.detach {
+		return attachAndMaybeAutoDelete(cmd, client, cellDoc, flags)
+	}
+	return nil
+}
+
+// runExistingCell drives the create-or-attach state machine for a live cell
+// whose on-disk spec already matches the file (the caller rejected divergence
+// before delegating here). The four terminal states:
+//
+//   - Ready   → print a no-op summary, then attach. Re-entering the daemon's
+//     CreateCell→StartCell path on a healthy cell trips the runner's CNI
+//     duplicate-allocation bug (#630), so the short-circuit is mandatory, not
+//     just an optimisation.
+//   - Stopped → StartCell, then attach. The routing is the correct verb (the
+//     prior fall-through to CreateCell was itself an unsafe re-entry). The
+//     live start+attach is gated on the same CNI fix (#630): StartCell re-ADDs
+//     the root container to its bridge network, which the daemon rejects with
+//     `duplicate allocation` until it releases the prior allocation on
+//     teardown. The path converges with no further CLI change once #630 lands.
+//   - error / partial (Pending, Failed, Unknown) → refuse with a
+//     `kuke delete cell <name>` pointer (parity with the `-c` identity contract
+//     in #625). `run` does not reconcile a degraded cell in place; the operator
+//     deletes and re-runs.
+func runExistingCell(
+	cmd *cobra.Command,
+	client kukeonv1.Client,
+	cellDoc v1beta1.CellDoc,
+	pre kukeonv1.GetCellResult,
+	flags runFlags,
+) error {
+	switch pre.Cell.Status.State {
+	case v1beta1.CellStateReady:
+		if printErr := printRunResult(cmd, noOpResultFromGet(pre), flags.output); printErr != nil {
+			return printErr
+		}
+	case v1beta1.CellStateStopped:
+		startRes, err := client.StartCell(cmd.Context(), cellDoc)
+		if err != nil {
+			return err
+		}
+		if printErr := printRunResult(cmd, startedResultFromGet(pre, startRes.Started), flags.output); printErr != nil {
+			return printErr
+		}
+	case v1beta1.CellStatePending, v1beta1.CellStateFailed, v1beta1.CellStateUnknown:
+		// error / partial: no clean start path. Refuse and point the operator
+		// at delete-then-rerun. Listing the states explicitly (rather than a
+		// default) keeps the exhaustive linter as a forward guard: a new
+		// CellState must be categorised here deliberately.
+		return fmt.Errorf(
+			"cell %q exists in %s state; delete it with `kuke delete cell %s` before re-running",
+			cellDoc.Metadata.Name,
+			pre.Cell.Status.State.String(),
+			cellDoc.Metadata.Name,
+		)
+	}
+
 	if !flags.detach {
 		return attachAndMaybeAutoDelete(cmd, client, cellDoc, flags)
 	}

@@ -257,6 +257,11 @@ sudo kuke run -f spec.yaml --rm                             # auto-delete after 
 
 - Exit code 0 once the cell is materialized and its containers started.
 - Side effect on success: the cell appears in `kuke get cells` in the `Ready` state with metadata under `/opt/kukeon/<realm>/<space>/<stack>/<cell>/metadata.json`.
+- `kuke run -f` is **create-or-attach keyed by `metadata.name`**. Against a cell whose on-disk spec matches the file, the runtime state selects the transition:
+  - **No live cell** → create the cell, start its containers, attach.
+  - **Ready** → no-op summary (no re-create), then attach.
+  - **Stopped** → `StartCell`, then attach (no re-create). The prior fall-through to create was an unsafe re-entry; the live start+attach converges once the CNI duplicate-allocation fix (#630) lands.
+  - **Error / partial** (`Pending`, `Failed`, `Unknown`) → refused with `cell "<name>" exists in <state> state; delete it with \`kuke delete cell <name>\` before re-running`. Exit code non-zero. `run` does not reconcile a degraded cell in place.
 - Re-running `kuke run -f` against an existing cell whose on-disk spec **diverges** from the file is **refused**, not silently updated. The error message points the operator at `kuke apply -f` for the update path. Exit code non-zero.
 - `-f` and `-p` are mutually exclusive; `--name` is rejected with `-f` (the YAML's `metadata.name` is the cell name verbatim).
 - `--container` is only valid in attach mode; passing both `--container` and `-d/--detach` exits non-zero.
