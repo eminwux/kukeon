@@ -24,7 +24,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	sbshapi "github.com/eminwux/sbsh/pkg/api"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // TestParseArgs_Default locks in the no-flags contract: with zero argv
@@ -86,108 +86,89 @@ func TestParseArgs_UnknownFlag(t *testing.T) {
 	}
 }
 
-// TestLoadTerminalDoc_Happy locks the on-disk schema kukeon's render path
-// commits to: an api.TerminalDoc with APIVersion=sbsh/v1beta1 and
-// Kind=Terminal. Round-trips a minimal doc and confirms the decoded
-// spec values survive verbatim.
-func TestLoadTerminalDoc_Happy(t *testing.T) {
+// TestLoadContainerDoc_Happy locks the on-disk schema the daemon's render
+// path commits to after issue #641: a kukeon ContainerDoc with
+// APIVersion=v1beta1 and Kind=Container. Round-trips a minimal doc and
+// confirms the decoded spec values survive verbatim.
+func TestLoadContainerDoc_Happy(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "metadata.json")
-	want := sbshapi.TerminalDoc{
-		APIVersion: sbshapi.APIVersionV1Beta1,
-		Kind:       sbshapi.KindTerminal,
-		Metadata:   sbshapi.TerminalMetadata{Name: "c1"},
-		Spec: sbshapi.TerminalSpec{
-			Command:     "/bin/sh",
-			CommandArgs: []string{"-c", "echo hello"},
-			SocketFile:  "/run/kukeon/tty/socket",
-			RunPath:     "/run/kukeon/tty",
+	want := v1beta1.ContainerDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindContainer,
+		Metadata:   v1beta1.ContainerMetadata{Name: "c1"},
+		Spec: v1beta1.ContainerSpec{
+			ID:      "c1",
+			Command: "/bin/sh",
+			Args:    []string{"-c", "echo hello"},
 		},
 	}
 	writeDoc(t, path, want)
 
-	got, err := loadTerminalDoc(path)
+	got, err := loadContainerDoc(path)
 	if err != nil {
-		t.Fatalf("loadTerminalDoc: %v", err)
+		t.Fatalf("loadContainerDoc: %v", err)
 	}
 	if got.Spec.Command != want.Spec.Command {
 		t.Errorf("Spec.Command = %q, want %q", got.Spec.Command, want.Spec.Command)
 	}
-	if got.Spec.SocketFile != want.Spec.SocketFile {
-		t.Errorf("Spec.SocketFile = %q, want %q", got.Spec.SocketFile, want.Spec.SocketFile)
+	if len(got.Spec.Args) != len(want.Spec.Args) {
+		t.Fatalf("Spec.Args = %v, want %v", got.Spec.Args, want.Spec.Args)
 	}
 	if got.Metadata.Name != want.Metadata.Name {
 		t.Errorf("Metadata.Name = %q, want %q", got.Metadata.Name, want.Metadata.Name)
 	}
 }
 
-// TestLoadTerminalDoc_WrongAPIVersion locks the schema discriminator: a
+// TestLoadContainerDoc_WrongAPIVersion locks the schema discriminator: a
 // document tagged with the wrong apiVersion (e.g., a stale kukeon-side
 // schema rendered by a daemon that hasn't been re-built) must fail loudly
-// rather than being silently interpreted as a Terminal.
-func TestLoadTerminalDoc_WrongAPIVersion(t *testing.T) {
+// rather than being silently interpreted.
+func TestLoadContainerDoc_WrongAPIVersion(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "metadata.json")
-	doc := sbshapi.TerminalDoc{
+	doc := v1beta1.ContainerDoc{
 		APIVersion: "kuketty.kukeon.io/v1alpha1",
-		Kind:       sbshapi.KindTerminal,
-		Spec:       sbshapi.TerminalSpec{SocketFile: "/run/kukeon/tty/socket"},
+		Kind:       v1beta1.KindContainer,
+		Spec:       v1beta1.ContainerSpec{ID: "c1"},
 	}
 	writeDoc(t, path, doc)
-	_, err := loadTerminalDoc(path)
+	_, err := loadContainerDoc(path)
 	if err == nil {
-		t.Fatalf("loadTerminalDoc returned nil, want apiVersion error")
+		t.Fatalf("loadContainerDoc returned nil, want apiVersion error")
 	}
 }
 
-// TestLoadTerminalDoc_WrongKind catches the case where the apiVersion is
-// correct (sbsh/v1beta1) but the kind is e.g. TerminalProfile — kuketty
-// must refuse rather than apply profile semantics to a Terminal-shaped
-// runner.
-func TestLoadTerminalDoc_WrongKind(t *testing.T) {
+// TestLoadContainerDoc_WrongKind catches the case where the apiVersion is
+// correct (v1beta1) but the kind is e.g. Cell — kuketty must refuse rather
+// than apply Container semantics to a different-shaped doc.
+func TestLoadContainerDoc_WrongKind(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "metadata.json")
-	doc := sbshapi.TerminalDoc{
-		APIVersion: sbshapi.APIVersionV1Beta1,
-		Kind:       sbshapi.KindTerminalProfile,
-		Spec:       sbshapi.TerminalSpec{SocketFile: "/run/kukeon/tty/socket"},
+	doc := v1beta1.ContainerDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindCell,
+		Spec:       v1beta1.ContainerSpec{ID: "c1"},
 	}
 	writeDoc(t, path, doc)
-	_, err := loadTerminalDoc(path)
+	_, err := loadContainerDoc(path)
 	if err == nil {
-		t.Fatalf("loadTerminalDoc returned nil, want kind error")
+		t.Fatalf("loadContainerDoc returned nil, want kind error")
 	}
 }
 
-// TestLoadTerminalDoc_MissingSocket rejects a doc whose spec carries no
-// SocketFile — without it kuketty has nothing to bind, and a default
-// fallback would silently bind a path the host has no bind-mount for.
-func TestLoadTerminalDoc_MissingSocket(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "metadata.json")
-	doc := sbshapi.TerminalDoc{
-		APIVersion: sbshapi.APIVersionV1Beta1,
-		Kind:       sbshapi.KindTerminal,
-	}
-	writeDoc(t, path, doc)
-	_, err := loadTerminalDoc(path)
-	if err == nil {
-		t.Fatalf("loadTerminalDoc returned nil, want spec.socketIO error")
-	}
-}
-
-// TestLoadTerminalDoc_Malformed locks the json-parse error path so a
+// TestLoadContainerDoc_Malformed locks the json-parse error path so a
 // half-written file (crashed renderer) produces a clean failure rather
-// than a silently-zero TerminalDoc.
-func TestLoadTerminalDoc_Malformed(t *testing.T) {
+// than a silently-zero ContainerDoc.
+func TestLoadContainerDoc_Malformed(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "metadata.json")
 	if err := os.WriteFile(path, []byte("{ not json"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	_, err := loadTerminalDoc(path)
+	_, err := loadContainerDoc(path)
 	if err == nil {
-		t.Fatalf("loadTerminalDoc returned nil, want parse error")
+		t.Fatalf("loadContainerDoc returned nil, want parse error")
 	}
 }
 
@@ -230,7 +211,7 @@ func TestIsCleanShutdown(t *testing.T) {
 	}
 }
 
-func writeDoc(t *testing.T, path string, doc sbshapi.TerminalDoc) {
+func writeDoc(t *testing.T, path string, doc v1beta1.ContainerDoc) {
 	t.Helper()
 	data, err := json.Marshal(doc)
 	if err != nil {

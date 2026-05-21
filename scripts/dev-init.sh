@@ -203,15 +203,17 @@ step "Daemon parity check (both must show identical output)"
 sudo --preserve-env=KUKEON_HOST ./kuke get realms
 sudo ./kuke get realms --no-daemon
 
-# Phase 1b smoke (#410): the daemon's metadata-rendering path now emits
-# api.TerminalDoc consumed by kuketty's sbsh-backed RPC server. A regression
-# in the renderer or the kuketty image bundle would otherwise surface only
-# the next time someone ran `kuke attach`, well after the dev-init success
-# message had lulled the contributor into a false sense of safety. Drive a
-# disposable attachable cell through the daemon, wait for kuketty to bind
-# the per-container socket, sanity-check the rendered TerminalDoc, and run
-# a PTY-driven `kuke attach` that detaches cleanly via the standard ^]^]
-# sequence.
+# Phase 1b smoke (#410): the daemon's metadata-rendering path emits the
+# bind-mounted kuketty config consumed by kuketty's sbsh-backed RPC server.
+# Since issue #641 that config is a kukeon ContainerDoc (kuketty builds the
+# sbsh TerminalSpec from it in-process) rather than a pre-rendered TerminalDoc.
+# A regression in the renderer or the kuketty image bundle would otherwise
+# surface only the next time someone ran `kuke attach`, well after the
+# dev-init success message had lulled the contributor into a false sense of
+# safety. Drive a disposable attachable cell through the daemon, wait for
+# kuketty to bind the per-container socket, sanity-check the rendered
+# ContainerDoc, and run a PTY-driven `kuke attach` that detaches cleanly via
+# the standard ^]^] sequence.
 step "kuke attach smoke against a kuketty-wrapped cell"
 
 ATTACH_SMOKE_REALM="dev-init-attach"
@@ -292,13 +294,16 @@ done
 sudo test -S "${ATTACH_SMOKE_SOCKET}" \
     || { printf 'kuketty socket not bound at %s after 20s\n' "${ATTACH_SMOKE_SOCKET}" >&2; exit 1; }
 
-# Validate the on-disk schema discriminator. A renderer regression
-# (e.g. kukeon-side v1alpha1 schema sneaking back in) is caught here
-# rather than as an opaque "kind/apiVersion mismatch" in the kuketty log.
-sudo grep -q '"apiVersion": "sbsh/v1beta1"' "${ATTACH_SMOKE_METADATA}" \
-    || { printf 'rendered metadata at %s missing apiVersion sbsh/v1beta1\n' "${ATTACH_SMOKE_METADATA}" >&2; exit 1; }
-sudo grep -q '"kind": "Terminal"' "${ATTACH_SMOKE_METADATA}" \
-    || { printf 'rendered metadata at %s missing kind Terminal\n' "${ATTACH_SMOKE_METADATA}" >&2; exit 1; }
+# Validate the on-disk schema discriminator. Since issue #641 the daemon
+# mounts a kukeon ContainerDoc (apiVersion v1beta1, kind Container) rather
+# than a pre-rendered sbsh TerminalDoc — kuketty reads ContainerDoc.Spec and
+# builds the TerminalSpec itself. A renderer regression (e.g. an old
+# TerminalDoc schema sneaking back in) is caught here rather than as an opaque
+# kind/apiVersion mismatch in the kuketty log.
+sudo grep -q '"apiVersion": "v1beta1"' "${ATTACH_SMOKE_METADATA}" \
+    || { printf 'rendered metadata at %s missing apiVersion v1beta1\n' "${ATTACH_SMOKE_METADATA}" >&2; exit 1; }
+sudo grep -q '"kind": "Container"' "${ATTACH_SMOKE_METADATA}" \
+    || { printf 'rendered metadata at %s missing kind Container\n' "${ATTACH_SMOKE_METADATA}" >&2; exit 1; }
 
 # PTY-driven `kuke attach` smoke. hack/attach-smoke allocates a TTY
 # (pkg/attach requires one), waits for pkg/attach's raw-mode keyboard

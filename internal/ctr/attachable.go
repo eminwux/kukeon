@@ -30,10 +30,12 @@ import (
 // in pkg/api/model/v1beta1/container.go.
 //
 // kuketty (issue #165) replaces sbsh on the OCI injection path. Phase 1b
-// (#410) lands the attach-socket RPC server: kuketty consumes the
-// kukeond-rendered api.TerminalDoc directly via sbsh's pkg/terminal/server
-// facade. The wrapper is invoked with no CLI flags — every runtime input
-// flows through the bind-mounted metadata file.
+// (#410) lands the attach-socket RPC server. Issue #641 makes the daemon mount
+// kukeon's own api/model/v1beta1.ContainerDoc instead of a pre-rendered sbsh
+// TerminalDoc: kuketty reads ContainerDoc.Spec, builds the TerminalSpec, and
+// serves it via sbsh's pkg/terminal/server facade. The wrapper is invoked with
+// no CLI flags — every runtime input flows through the bind-mounted metadata
+// file.
 const (
 	// AttachableBinaryPath is where the kuketty binary is bind-mounted
 	// read-only inside the container. The host source is staged from
@@ -135,10 +137,10 @@ type AttachableInjection struct {
 	// of the image's ENTRYPOINT + CMD and any user override that
 	// containerd's WithImageConfig and our WithProcessArgs have already
 	// applied to s.Process.Args by the time the wrap runs. The callback
-	// is expected to render the api.TerminalDoc with the workload argv
-	// baked into Spec.Command / Spec.CommandArgs and write it atomically
-	// to HostMetadataPath. nil disables metadata rendering — used by
-	// unit tests that exercise only the args-wrap shape.
+	// is expected to render the ContainerDoc with the workload argv baked
+	// into Spec.Command / Spec.Args and write it atomically to
+	// HostMetadataPath. nil disables metadata rendering — used by unit
+	// tests that exercise only the args-wrap shape.
 	RenderMetadata func(workloadArgv []string) error
 }
 
@@ -194,8 +196,8 @@ func withAttachableMounts(inj AttachableInjection) oci.SpecOpts {
 // s.Process.Args (containerd's WithImageConfigArgs and any user-supplied
 // WithProcessArgs have already run by this point), hands the argv to the
 // injection's metadata renderer so kuketty receives the workload in
-// Spec.Command / Spec.CommandArgs of the bind-mounted api.TerminalDoc, and
-// then rewrites Process.Args to a single element: the kuketty binary path.
+// Spec.Command / Spec.Args of the bind-mounted ContainerDoc, and then
+// rewrites Process.Args to a single element: the kuketty binary path.
 // No CLI flags by design (issue #410 redirect): kuketty reads every runtime
 // input — including the workload to spawn — from the metadata file. The
 // optional `--config` override exists only for test/debug ergonomics and is
