@@ -62,6 +62,61 @@ func (r *Exec) persistCellStatusGuarded(cell intmodel.Cell) (bool, error) {
 	return true, nil
 }
 
+// persistRealmStatusGuarded persists a realm whose status the refresh path
+// just re-derived, treating a CAS rejection from a concurrent spec writer as
+// a benign skip rather than a hard error. UpdateRealmMetadata rides the
+// writer's optimistic token (phase 3 — #633) and returns
+// errdefs.ErrStaleResource when the on-disk generation has advanced past the
+// observation the refresh read with. Mirrors persistCellStatusGuarded so the
+// realm/space/stack refresh paths match the cell path: a stale race
+// self-heals on the next refresh tick instead of surfacing as a reported
+// `Errors:` line in `kuke refresh` (issue #636).
+func (r *Exec) persistRealmStatusGuarded(realm intmodel.Realm) (bool, error) {
+	if err := r.UpdateRealmMetadata(realm); err != nil {
+		if errors.Is(err, errdefs.ErrStaleResource) {
+			r.logger.DebugContext(r.ctx,
+				"refresh: skipping stale realm persist; on-disk generation advanced",
+				"realm", realm.Metadata.Name,
+				"observed", realm.Metadata.Generation)
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// persistSpaceStatusGuarded is the Space counterpart of
+// persistRealmStatusGuarded.
+func (r *Exec) persistSpaceStatusGuarded(space intmodel.Space) (bool, error) {
+	if err := r.UpdateSpaceMetadata(space); err != nil {
+		if errors.Is(err, errdefs.ErrStaleResource) {
+			r.logger.DebugContext(r.ctx,
+				"refresh: skipping stale space persist; on-disk generation advanced",
+				"space", space.Metadata.Name,
+				"observed", space.Metadata.Generation)
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// persistStackStatusGuarded is the Stack counterpart of
+// persistRealmStatusGuarded.
+func (r *Exec) persistStackStatusGuarded(stack intmodel.Stack) (bool, error) {
+	if err := r.UpdateStackMetadata(stack); err != nil {
+		if errors.Is(err, errdefs.ErrStaleResource) {
+			r.logger.DebugContext(r.ctx,
+				"refresh: skipping stale stack persist; on-disk generation advanced",
+				"stack", stack.Metadata.Name,
+				"observed", stack.Metadata.Generation)
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // RefreshRealm refreshes the status of a realm by checking cgroup and containerd namespace.
 // Returns the updated realm, whether it was updated, and any error.
 func (r *Exec) RefreshRealm(realm intmodel.Realm) (intmodel.Realm, bool, error) {
@@ -133,10 +188,14 @@ func (r *Exec) RefreshRealm(realm intmodel.Realm) (intmodel.Realm, bool, error) 
 		newStatus.CgroupReady != originalStatus.CgroupReady ||
 		newStatus.ContainerdNamespaceReady != originalStatus.ContainerdNamespaceReady {
 		realm.Status = newStatus
-		if updateErr := r.UpdateRealmMetadata(realm); updateErr != nil {
+		persisted, updateErr := r.persistRealmStatusGuarded(realm)
+		if updateErr != nil {
 			return realm, false, fmt.Errorf("failed to update realm metadata: %w", updateErr)
 		}
-		updated = true
+		// A concurrent spec write advanced the realm's generation past the
+		// refreshed view: the derived status was skipped rather than
+		// clobbering the newer spec, so report nothing updated.
+		updated = persisted
 	}
 
 	return realm, updated, nil
@@ -215,10 +274,13 @@ func (r *Exec) RefreshSpace(space intmodel.Space) (intmodel.Space, bool, error) 
 		newStatus.CgroupPath != originalStatus.CgroupPath ||
 		newStatus.CgroupReady != originalStatus.CgroupReady {
 		space.Status = newStatus
-		if updateErr := r.UpdateSpaceMetadata(space); updateErr != nil {
+		persisted, updateErr := r.persistSpaceStatusGuarded(space)
+		if updateErr != nil {
 			return space, false, fmt.Errorf("failed to update space metadata: %w", updateErr)
 		}
-		updated = true
+		// A concurrent spec write advanced the space's generation past the
+		// refreshed view: skip rather than clobber the newer spec.
+		updated = persisted
 	}
 
 	return space, updated, nil
@@ -263,10 +325,13 @@ func (r *Exec) RefreshStack(stack intmodel.Stack) (intmodel.Stack, bool, error) 
 		newStatus.CgroupPath != originalStatus.CgroupPath ||
 		newStatus.CgroupReady != originalStatus.CgroupReady {
 		stack.Status = newStatus
-		if updateErr := r.UpdateStackMetadata(stack); updateErr != nil {
+		persisted, updateErr := r.persistStackStatusGuarded(stack)
+		if updateErr != nil {
 			return stack, false, fmt.Errorf("failed to update stack metadata: %w", updateErr)
 		}
-		updated = true
+		// A concurrent spec write advanced the stack's generation past the
+		// refreshed view: skip rather than clobber the newer spec.
+		updated = persisted
 	}
 
 	return stack, updated, nil
