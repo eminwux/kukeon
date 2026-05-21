@@ -153,6 +153,28 @@ func teardownRootContainerCNI(releaseCNI func(), deleteContainer func() error, p
 	return delErr
 }
 
+// purgeStaleRootContainerCNI is the create-fresh-path safety net for the
+// root-container CNI re-ADD collision (issue #649). After a clean stop/kill the
+// root container is *deleted*, so StartCell's container-exists teardown branch
+// (teardownRootContainerCNI) never runs on the next start — but a best-effort
+// stop/kill purge that failed (netns already gone, mismatched network name, or
+// a crash mid-teardown) can leave a stale /var/lib/cni/networks/<network>/<ip>
+// reservation keyed to the deterministic root-container ID. host-local then
+// rejects the re-ADD as a duplicate allocation. This scrubs that reservation
+// before CNI ADD on the ErrContainerNotFound branch, giving the create-fresh
+// path the same second line of defence the teardown branch already has.
+//
+// Best-effort and a no-op when networkName is "" (resolveRootCNINetworkName
+// couldn't derive a name), so a clean start with no stale reservation is
+// unaffected. Decoupled from the concrete CNI client — same rationale as
+// teardownRootContainerCNI — so the run/no-op decision is unit-testable.
+func purgeStaleRootContainerCNI(networkName string, purge func()) {
+	if networkName == "" {
+		return
+	}
+	purge()
+}
+
 // maxFailureMessageLen caps Status.Message so a long, multi-line wrap from
 // `fmt.Errorf("%w: %w", …)` chains doesn't blow up `kuke get cell -o yaml`.
 // 256 bytes is comfortably wider than any error sentinel string in the repo
@@ -411,6 +433,16 @@ func (r *Exec) StartCell(cell intmodel.Cell) (_ intmodel.Cell, retErr error) {
 				"root container does not exist, will create fresh",
 				fields...,
 			)
+			// Create-fresh safety net (issue #649): the root container is gone,
+			// so the teardown branch below never runs — but a prior stop/kill
+			// (or a crash mid-teardown) may have left a stale host-local IPAM
+			// reservation keyed to this deterministic root-container ID. Scrub
+			// it before CNI ADD so the re-ADD isn't rejected as a duplicate
+			// allocation. Best-effort and a no-op when no stale file exists.
+			networkName := r.resolveRootCNINetworkName(realmID, spaceID)
+			purgeStaleRootContainerCNI(networkName, func() {
+				_ = r.purgeCNIForContainer(containerID, "", networkName)
+			})
 		} else {
 			// Other errors are unexpected
 			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)

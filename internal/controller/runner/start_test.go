@@ -351,6 +351,32 @@ func TestTeardownRootContainerCNI_OrderingAndSafetyNet(t *testing.T) {
 	})
 }
 
+// TestPurgeStaleRootContainerCNI_CreateFreshSafetyNet is the regression guard
+// for issue #649. On StartCell's ErrContainerNotFound (create-fresh) branch the
+// root container is already deleted, so the teardownRootContainerCNI net never
+// runs — purgeStaleRootContainerCNI must scrub a stale host-local IPAM
+// reservation keyed to the deterministic root-container ID before CNI ADD so
+// the re-ADD isn't rejected as a duplicate allocation. The purge is best-effort
+// and must be a no-op when resolveRootCNINetworkName couldn't derive a name (""),
+// leaving a clean start with no stale reservation unaffected.
+func TestPurgeStaleRootContainerCNI_CreateFreshSafetyNet(t *testing.T) {
+	t.Run("purge_runs_when_network_name_resolves", func(t *testing.T) {
+		called := false
+		purgeStaleRootContainerCNI("kuke-default", func() { called = true })
+		if !called {
+			t.Error("purge must run on the create-fresh path when the network name resolves")
+		}
+	})
+
+	t.Run("purge_is_noop_when_network_name_empty", func(t *testing.T) {
+		called := false
+		purgeStaleRootContainerCNI("", func() { called = true })
+		if called {
+			t.Error("purge must be a no-op when network name is empty (clean start unaffected)")
+		}
+	})
+}
+
 // TestTruncateFailureMessage pins the single-line + length-bounded contract
 // markCellFailed relies on for Status.Message: long, multi-line wrapped
 // `fmt.Errorf("%w: %w", …)` chains must end up as a single, capped string
