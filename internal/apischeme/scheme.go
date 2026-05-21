@@ -353,6 +353,7 @@ func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, err
 				Tmpfs:                  convertTmpfsMountsToInternal(in.Spec.Tmpfs),
 				Resources:              convertResourcesToInternal(in.Spec.Resources),
 				Secrets:                convertSecretsToInternal(in.Spec.Secrets),
+				Repos:                  reposToInternal(in.Spec.Repos),
 				CNIConfigPath:          in.Spec.CNIConfigPath,
 				RestartPolicy:          in.Spec.RestartPolicy,
 				Attachable:             in.Spec.Attachable,
@@ -368,6 +369,7 @@ func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, err
 				FinishTime:   in.Status.FinishTime,
 				ExitCode:     in.Status.ExitCode,
 				ExitSignal:   in.Status.ExitSignal,
+				Repos:        repoStatusesToInternal(in.Status.Repos),
 			},
 		}, nil
 	default:
@@ -413,6 +415,7 @@ func BuildContainerExternalFromInternal(in intmodel.Container, apiVersion ext.Ve
 				Tmpfs:                  buildTmpfsMountsExternalFromInternal(in.Spec.Tmpfs),
 				Resources:              buildResourcesExternalFromInternal(in.Spec.Resources),
 				Secrets:                buildSecretsExternalFromInternal(in.Spec.Secrets),
+				Repos:                  reposToExternal(in.Spec.Repos),
 				CNIConfigPath:          in.Spec.CNIConfigPath,
 				RestartPolicy:          in.Spec.RestartPolicy,
 				Attachable:             in.Spec.Attachable,
@@ -428,6 +431,7 @@ func BuildContainerExternalFromInternal(in intmodel.Container, apiVersion ext.Ve
 				FinishTime:   in.Status.FinishTime,
 				ExitCode:     in.Status.ExitCode,
 				ExitSignal:   in.Status.ExitSignal,
+				Repos:        repoStatusesToExternal(in.Status.Repos),
 			},
 		}, nil
 	default:
@@ -476,6 +480,7 @@ func convertContainerSpecToInternal(in ext.ContainerSpec) intmodel.ContainerSpec
 		Tmpfs:                  convertTmpfsMountsToInternal(in.Tmpfs),
 		Resources:              convertResourcesToInternal(in.Resources),
 		Secrets:                convertSecretsToInternal(in.Secrets),
+		Repos:                  reposToInternal(in.Repos),
 		CNIConfigPath:          in.CNIConfigPath,
 		RestartPolicy:          in.RestartPolicy,
 		Attachable:             in.Attachable,
@@ -514,6 +519,7 @@ func BuildContainerSpecExternalFromInternal(in intmodel.ContainerSpec) ext.Conta
 		Tmpfs:                  buildTmpfsMountsExternalFromInternal(in.Tmpfs),
 		Resources:              buildResourcesExternalFromInternal(in.Resources),
 		Secrets:                buildSecretsExternalFromInternal(in.Secrets),
+		Repos:                  reposToExternal(in.Repos),
 		CNIConfigPath:          in.CNIConfigPath,
 		RestartPolicy:          in.RestartPolicy,
 		Attachable:             in.Attachable,
@@ -799,6 +805,80 @@ func buildSecretsExternalFromInternal(in []intmodel.ContainerSecret) []ext.Conta
 			FromFile:  s.FromFile,
 			FromEnv:   s.FromEnv,
 			MountPath: s.MountPath,
+		}
+	}
+	return out
+}
+
+// reposToInternal copies external repo declarations into the internal model.
+// Issue #617.
+func reposToInternal(in []ext.ContainerRepo) []intmodel.ContainerRepo {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]intmodel.ContainerRepo, len(in))
+	for i, r := range in {
+		out[i] = intmodel.ContainerRepo{
+			Name:     r.Name,
+			Target:   r.Target,
+			Branch:   r.Branch,
+			URL:      r.URL,
+			Required: r.Required,
+		}
+	}
+	return out
+}
+
+// reposToExternal is the inverse of reposToInternal.
+func reposToExternal(in []intmodel.ContainerRepo) []ext.ContainerRepo {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ext.ContainerRepo, len(in))
+	for i, r := range in {
+		out[i] = ext.ContainerRepo{
+			Name:     r.Name,
+			Target:   r.Target,
+			Branch:   r.Branch,
+			URL:      r.URL,
+			Required: r.Required,
+		}
+	}
+	return out
+}
+
+// repoStatusesToInternal copies external per-repo status into the internal
+// model. Issue #617.
+func repoStatusesToInternal(in []ext.RepoStatus) []intmodel.RepoStatus {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]intmodel.RepoStatus, len(in))
+	for i, s := range in {
+		out[i] = intmodel.RepoStatus{
+			Name:   s.Name,
+			Target: s.Target,
+			State:  s.State,
+			Commit: s.Commit,
+			Error:  s.Error,
+		}
+	}
+	return out
+}
+
+// repoStatusesToExternal is the inverse of repoStatusesToInternal.
+func repoStatusesToExternal(in []intmodel.RepoStatus) []ext.RepoStatus {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ext.RepoStatus, len(in))
+	for i, s := range in {
+		out[i] = ext.RepoStatus{
+			Name:   s.Name,
+			Target: s.Target,
+			State:  s.State,
+			Commit: s.Commit,
+			Error:  s.Error,
 		}
 	}
 	return out

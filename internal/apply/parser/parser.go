@@ -383,8 +383,41 @@ func ValidateDocument(doc *Document) *ValidationError {
 				Err:   secretErr,
 			}
 		}
+		if repoErr := validateRepos(doc.ContainerDoc.Spec.Repos); repoErr != nil {
+			return &ValidationError{
+				Index: doc.Index,
+				Kind:  doc.Kind,
+				Name:  doc.ContainerDoc.Metadata.Name,
+				Err:   repoErr,
+			}
+		}
 	}
 
+	return nil
+}
+
+// validateRepos enforces the shape of repo declarations: name required, target
+// required and absolute, url required. Mirrors validateSecrets. kuketty reads
+// repos[] straight from the mounted ContainerDoc.Spec and performs no
+// validation of its own, so this apply-time gate is the single check before a
+// malformed repos[] reaches the wrapper. Issue #617.
+func validateRepos(repos []v1beta1.ContainerRepo) error {
+	for i, r := range repos {
+		name := strings.TrimSpace(r.Name)
+		if name == "" {
+			return fmt.Errorf("%w (repos[%d])", errdefs.ErrRepoNameRequired, i)
+		}
+		target := strings.TrimSpace(r.Target)
+		if target == "" {
+			return fmt.Errorf("%w (repos[%d] %q)", errdefs.ErrRepoTargetRequired, i, name)
+		}
+		if !filepath.IsAbs(target) {
+			return fmt.Errorf("%w (repos[%d] %q target %q)", errdefs.ErrRepoTargetNotAbsolute, i, name, target)
+		}
+		if strings.TrimSpace(r.URL) == "" {
+			return fmt.Errorf("%w (repos[%d] %q)", errdefs.ErrRepoURLRequired, i, name)
+		}
+	}
 	return nil
 }
 

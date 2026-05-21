@@ -91,8 +91,18 @@ type ContainerSpec struct {
 	Tmpfs                  []ContainerTmpfsMount  `json:"tmpfs,omitempty"                  yaml:"tmpfs,omitempty"`
 	Resources              *ContainerResources    `json:"resources,omitempty"              yaml:"resources,omitempty"`
 	Secrets                []ContainerSecret      `json:"secrets,omitempty"                yaml:"secrets,omitempty"`
-	CNIConfigPath          string                 `json:"cniConfigPath,omitempty"          yaml:"cniConfigPath,omitempty"`
-	RestartPolicy          string                 `json:"restartPolicy"                    yaml:"restartPolicy"`
+	// Repos declares git repositories the container depends on. The kuketty
+	// wrapper clones (or fetches) each one in a pre-Serve step using the
+	// container's own git identity (~/.ssh, ~/.gitconfig, GIT_SSH_COMMAND),
+	// so the daemon never touches user-owned SSH keys. kuketty reads them
+	// straight from this ContainerDoc.Spec (it owns the spec→TerminalSpec
+	// build since issue #641) — there is no sidecar doc. Has no effect unless
+	// Attachable=true (kuketty owns the resolution step). Per-repo outcome
+	// surfaces in ContainerStatus.Repos over RPC in phase 1b (#642). Issue
+	// #617, phase 1a of #423.
+	Repos         []ContainerRepo `json:"repos,omitempty"                  yaml:"repos,omitempty"`
+	CNIConfigPath string          `json:"cniConfigPath,omitempty"          yaml:"cniConfigPath,omitempty"`
+	RestartPolicy string          `json:"restartPolicy"                    yaml:"restartPolicy"`
 	// Attachable opts the container into kuketty-wrapper injection. When
 	// true, the daemon rewrites process.args to a single element
 	// [/.kukeon/bin/kuketty] — no CLI flags, every runtime input flows
@@ -239,6 +249,33 @@ type VolumeMount struct {
 	Mode      uint32     `json:"mode,omitempty"      yaml:"mode,omitempty"`
 }
 
+// ContainerRepo declares a git repository the container depends on. kuketty
+// clones (or fetches) it into Target before the workload starts, replacing the
+// hand-rolled `if [ ! -d $DIR/.git ]; then git clone …; fi` blocks that crew
+// templates duplicate in onInit scripts today. The clone state becomes daemon-
+// observable via ContainerStatus.Repos (reported over RPC in phase 1b, #642)
+// rather than buried in attach stderr. Issue #617, phase 1a of #423.
+type ContainerRepo struct {
+	// Name is the operator-facing identifier for the repo, echoed back in
+	// per-repo status. Required.
+	Name string `json:"name"               yaml:"name"`
+	// Target is the absolute in-container path the repo is cloned into.
+	// Required.
+	Target string `json:"target"             yaml:"target"`
+	// Branch is the branch to check out. Empty clones the remote's default
+	// branch.
+	Branch string `json:"branch,omitempty"   yaml:"branch,omitempty"`
+	// URL is the clone URL. In phases 1–3 it is supplied via scalar
+	// ${PARAM} substitution; phase 4 (#423) enables structural slot fill
+	// from a CellConfig. Required.
+	URL string `json:"url"                yaml:"url"`
+	// Required gates failure handling. When true, a clone/fetch failure
+	// makes kuketty exit non-zero before sbsh starts, so the daemon
+	// observes the container task as Failed. When false (the default) the
+	// failure is logged but the container proceeds.
+	Required bool `json:"required,omitempty" yaml:"required,omitempty"`
+}
+
 // ContainerCapabilities groups Linux capability deltas applied to the
 // container process relative to the image default set.
 type ContainerCapabilities struct {
@@ -262,15 +299,34 @@ type ContainerResources struct {
 }
 
 type ContainerStatus struct {
-	Name         string         `json:"name"         yaml:"name"`
-	ID           string         `json:"id"           yaml:"id"`
-	State        ContainerState `json:"state"        yaml:"state"`
-	RestartCount int            `json:"restartCount" yaml:"restartCount"`
-	RestartTime  time.Time      `json:"restartTime"  yaml:"restartTime"`
-	StartTime    time.Time      `json:"startTime"    yaml:"startTime"`
-	FinishTime   time.Time      `json:"finishTime"   yaml:"finishTime"`
-	ExitCode     int            `json:"exitCode"     yaml:"exitCode"`
-	ExitSignal   string         `json:"exitSignal"   yaml:"exitSignal"`
+	Name         string         `json:"name"            yaml:"name"`
+	ID           string         `json:"id"              yaml:"id"`
+	State        ContainerState `json:"state"           yaml:"state"`
+	RestartCount int            `json:"restartCount"    yaml:"restartCount"`
+	RestartTime  time.Time      `json:"restartTime"     yaml:"restartTime"`
+	StartTime    time.Time      `json:"startTime"       yaml:"startTime"`
+	FinishTime   time.Time      `json:"finishTime"      yaml:"finishTime"`
+	ExitCode     int            `json:"exitCode"        yaml:"exitCode"`
+	ExitSignal   string         `json:"exitSignal"      yaml:"exitSignal"`
+	// Repos reports the per-repo outcome of kuketty's pre-Serve clone/fetch
+	// step for an Attachable container's Spec.Repos. Empty for containers
+	// with no repos[] or that have not yet been provisioned. Populated over
+	// the GetSetupStatus RPC in phase 1b (#642); phase 1a lands the schema
+	// only. Issue #617.
+	Repos []RepoStatus `json:"repos,omitempty" yaml:"repos,omitempty"`
+}
+
+// RepoStatus is the resolved state of a single ContainerRepo after kuketty's
+// pre-Serve step. Populated in phase 1b (#642). Issue #617.
+type RepoStatus struct {
+	Name   string `json:"name"             yaml:"name"`
+	Target string `json:"target"           yaml:"target"`
+	// State is one of "cloned", "fetched", or "failed".
+	State string `json:"state"            yaml:"state"`
+	// Commit is the resolved HEAD commit (full SHA) on success.
+	Commit string `json:"commit,omitempty" yaml:"commit,omitempty"`
+	// Error is the failure detail when State == "failed".
+	Error string `json:"error,omitempty"  yaml:"error,omitempty"`
 }
 
 type ContainerState int
@@ -371,6 +427,8 @@ func NewContainerDoc(from *ContainerDoc) *ContainerDoc {
 	out.Spec.NetworksAliases = cloneSlice(out.Spec.NetworksAliases)
 	out.Spec.SecurityOpts = cloneSlice(out.Spec.SecurityOpts)
 	out.Spec.Secrets = cloneSecrets(out.Spec.Secrets)
+	out.Spec.Repos = cloneRepos(out.Spec.Repos)
+	out.Status.Repos = cloneRepoStatuses(out.Status.Repos)
 
 	if out.Spec.Capabilities != nil {
 		caps := *out.Spec.Capabilities
@@ -422,6 +480,26 @@ func cloneSecrets(in []ContainerSecret) []ContainerSecret {
 	}
 
 	out := make([]ContainerSecret, len(in))
+	copy(out, in)
+	return out
+}
+
+func cloneRepos(in []ContainerRepo) []ContainerRepo {
+	if in == nil {
+		return nil
+	}
+
+	out := make([]ContainerRepo, len(in))
+	copy(out, in)
+	return out
+}
+
+func cloneRepoStatuses(in []RepoStatus) []RepoStatus {
+	if in == nil {
+		return nil
+	}
+
+	out := make([]RepoStatus, len(in))
 	copy(out, in)
 	return out
 }

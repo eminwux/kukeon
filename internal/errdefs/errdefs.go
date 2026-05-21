@@ -49,7 +49,7 @@ var (
 	// an intervening write under the same exclusive flock. The caller
 	// must re-read, re-apply the mutation, and retry — there is no
 	// silent merge of disjoint edits.
-	ErrStaleResource = errors.New("metadata resource changed since prior read")
+	ErrStaleResource          = errors.New("metadata resource changed since prior read")
 	ErrUnsupportedAPIVersion  = errors.New("unsupported apiVersion")
 	ErrUnknownKind            = errors.New("unknown kind")
 	ErrConversionFailed       = errors.New("conversion failed")
@@ -279,6 +279,13 @@ var (
 	ErrSecretFromFileNotFound     = errors.New("secret fromFile path does not exist on the host")
 	ErrSecretFromEnvNotSet        = errors.New("secret fromEnv env var is not set on the daemon host")
 	ErrSecretStagingFailed        = errors.New("failed to stage secret file for mount")
+
+	// Repo-related errors (containers[].repos[], issue #617).
+
+	ErrRepoNameRequired      = errors.New("repo name is required")
+	ErrRepoTargetRequired    = errors.New("repo target is required")
+	ErrRepoTargetNotAbsolute = errors.New("repo target must be an absolute container path")
+	ErrRepoURLRequired       = errors.New("repo url is required")
 
 	// ErrMustRunAsRoot is returned by direct-write subcommands (kuke init,
 	// kuke daemon reset, kuke image load, kuke doctor cgroups --probe)

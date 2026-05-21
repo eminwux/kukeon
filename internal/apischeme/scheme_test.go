@@ -710,6 +710,79 @@ func TestContainerRoundTripV1Beta1(t *testing.T) {
 	}
 }
 
+// TestContainerRoundTripReposV1Beta1 pins the repos[] spec and the per-repo
+// status round trip: a YAML author's containers[].repos[] must survive
+// Normalize → controller → Build with no drops, and the controller-populated
+// ContainerStatus.Repos must survive Build out to the external doc. Issue #617.
+func TestContainerRoundTripReposV1Beta1(t *testing.T) {
+	input := ext.ContainerDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindContainer,
+		Metadata:   ext.ContainerMetadata{Name: "work"},
+		Spec: ext.ContainerSpec{
+			ID:         "work",
+			RealmID:    "realm0",
+			SpaceID:    "space0",
+			StackID:    "stack0",
+			CellID:     "cell0",
+			Image:      "alpine:latest",
+			Attachable: true,
+			Repos: []ext.ContainerRepo{
+				{
+					Name:     "project",
+					Target:   "/home/claude/project",
+					Branch:   "main",
+					URL:      "git@example.com:org/p.git",
+					Required: true,
+				},
+				{Name: "docs", Target: "/home/claude/docs", URL: "https://example.com/docs.git"},
+			},
+		},
+		Status: ext.ContainerStatus{State: ext.ContainerStatePending},
+	}
+
+	internal, version, err := apischeme.NormalizeContainer(input)
+	if err != nil {
+		t.Fatalf("NormalizeContainer failed: %v", err)
+	}
+	if len(internal.Spec.Repos) != 2 {
+		t.Fatalf("internal repos len = %d, want 2", len(internal.Spec.Repos))
+	}
+	if internal.Spec.Repos[0] != (intmodel.ContainerRepo{
+		Name: "project", Target: "/home/claude/project", Branch: "main", URL: "git@example.com:org/p.git", Required: true,
+	}) {
+		t.Errorf("internal repo[0] = %+v", internal.Spec.Repos[0])
+	}
+
+	// Simulate the controller stamping per-repo status read back from kuketty.
+	internal.Status.Repos = []intmodel.RepoStatus{
+		{Name: "project", Target: "/home/claude/project", State: "cloned", Commit: "deadbeef"},
+		{Name: "docs", Target: "/home/claude/docs", State: "failed", Error: "boom"},
+	}
+
+	output, err := apischeme.BuildContainerExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildContainerExternalFromInternal failed: %v", err)
+	}
+	if len(output.Spec.Repos) != 2 {
+		t.Fatalf("output repos len = %d, want 2", len(output.Spec.Repos))
+	}
+	for i := range input.Spec.Repos {
+		if output.Spec.Repos[i] != input.Spec.Repos[i] {
+			t.Errorf("repo[%d] = %+v, want %+v", i, output.Spec.Repos[i], input.Spec.Repos[i])
+		}
+	}
+	if len(output.Status.Repos) != 2 {
+		t.Fatalf("output status repos len = %d, want 2", len(output.Status.Repos))
+	}
+	if output.Status.Repos[0].State != "cloned" || output.Status.Repos[0].Commit != "deadbeef" {
+		t.Errorf("status repo[0] = %+v", output.Status.Repos[0])
+	}
+	if output.Status.Repos[1].State != "failed" || output.Status.Repos[1].Error != "boom" {
+		t.Errorf("status repo[1] = %+v", output.Status.Repos[1])
+	}
+}
+
 // TestContainerRoundTripVolumeKindTmpfsV1Beta1 pins the tmpfs path on
 // VolumeMount: a YAML author who writes `kind: tmpfs` with size/mode must see
 // those fields survive Normalize → controller → Build with no drops, alongside
