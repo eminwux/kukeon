@@ -272,10 +272,16 @@ func runRun(cmd *cobra.Command, args []string) error {
 // whose on-disk spec already matches the file (the caller rejected divergence
 // before delegating here). The four terminal states:
 //
-//   - Ready   → print a no-op summary, then attach. Re-entering the daemon's
-//     CreateCell→StartCell path on a healthy cell trips the runner's CNI
-//     duplicate-allocation bug (#630), so the short-circuit is mandatory, not
-//     just an optimisation.
+//   - Ready   → reconcile against containerd first. The recorded state asserts
+//     a live root container; if containerd has lost it (a daemon/host restart
+//     per #648 dropped the containers while the on-disk metadata survived), the
+//     no-op summary would report phantom `container … already existed` /
+//     `containers: started` and then attach to a dead socket
+//     (`connection refused`, #654). On that divergence, refuse with a
+//     delete-then-rerun pointer. Otherwise print a no-op summary, then attach.
+//     Re-entering the daemon's CreateCell→StartCell path on a healthy cell trips
+//     the runner's CNI duplicate-allocation bug (#630), so the short-circuit is
+//     mandatory, not just an optimisation.
 //   - Stopped → StartCell, then attach. The routing is the correct verb (the
 //     prior fall-through to CreateCell was itself an unsafe re-entry). The
 //     live start+attach is gated on the same CNI fix (#630): StartCell re-ADDs
@@ -295,6 +301,28 @@ func runExistingCell(
 ) error {
 	switch pre.Cell.Status.State {
 	case v1beta1.CellStateReady:
+		// Divergence guard (#654): the metadata records this cell as Ready, but
+		// containerd no longer has its root container — typically a daemon/host
+		// restart (#648) dropped the cell's containers while the on-disk
+		// metadata survived. Trusting the stale metadata would print phantom
+		// `already existed` / `containers: started` lines and then attach to a
+		// socket backed by nothing (`connection refused`). Refuse with a
+		// delete-then-rerun pointer instead. We deliberately do not recreate in
+		// place: re-entering CreateCell/StartCell here is the exact #630 CNI
+		// duplicate-allocation re-entry the Ready short-circuit exists to avoid,
+		// and the operator-driven delete releases any half-held allocation
+		// cleanly. (A legitimately Stopped cell has no root container in
+		// containerd by design — StopCell deletes it — so this guard is scoped
+		// to Ready, where the container is asserted live.)
+		if !pre.RootContainerExists {
+			return fmt.Errorf(
+				"cell %q is recorded Ready but its containers are gone from containerd "+
+					"(kukeon metadata and containerd have diverged); "+
+					"delete it with `kuke delete cell %s` before re-running",
+				cellDoc.Metadata.Name,
+				cellDoc.Metadata.Name,
+			)
+		}
 		if printErr := printRunResult(cmd, noOpResultFromGet(pre), flags.output); printErr != nil {
 			return printErr
 		}
