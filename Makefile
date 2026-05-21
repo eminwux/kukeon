@@ -27,7 +27,7 @@ LDFLAGS := -s -w \
 	-X $(MODULE)/cmd/config.KukeondImageRepo=$(KUKEON_IMAGE_REPO)
 
 # ----- Build matrix -----
-BINS = kuke kukeond kuketty
+BINS = kuke kukeond kuketty kukebuild
 OS = linux
 ARCHS = amd64 arm64
 
@@ -37,7 +37,7 @@ all: clean kill $(BINS)
 .PHONY: release
 release: release-build
 
-.PHONY: kuke kukeond kuketty
+.PHONY: kuke kukeond kuketty kukebuild
 kuke:
 	go build \
 	-o kuke \
@@ -59,6 +59,16 @@ kuketty:
 	-ldflags="$(LDFLAGS)" \
 	./cmd/kuketty/
 
+# kukebuild is the native image builder that embeds BuildKit as a library
+# (issue #522). Like kuketty it is a separate binary (not argv[0]-dispatched
+# from kuke) so BuildKit's transitive moby / runc / grpc closure stays out of
+# the kuke + kukeond import sets. `kuke build` shells out to it on PATH.
+kukebuild:
+	go build \
+	-o kukebuild \
+	-ldflags="$(LDFLAGS)" \
+	./cmd/kukebuild/
+
 
 release-build:
 	# Build for all OS and ARCH combinations
@@ -77,12 +87,18 @@ release-build:
 			-o kuketty-$$OS-$$ARCH \
 			-ldflags="$(LDFLAGS)" \
 			./cmd/kuketty; \
+			GO111MODULE=on CGO_ENABLED=0 GOOS=$$OS GOARCH=$$ARCH \
+			go build -a \
+			-trimpath \
+			-o kukebuild-$$OS-$$ARCH \
+			-ldflags="$(LDFLAGS)" \
+			./cmd/kukebuild; \
 		done \
 	done
 
 clean:
 	rm -rf $(HOME)/.kukeon/run/*
-	rm -rf kuke kukeond kuketty
+	rm -rf kuke kukeond kuketty kukebuild
 
 kill:
 	(killall kukeond || true )
