@@ -105,6 +105,13 @@ func runStart(cmd *cobra.Command, _ []string) error {
 		)
 	}
 
+	// Recreate /run/kukeon (the cell's bind-mount source) if a reboot wiped
+	// the tmpfs — only `kuke init` created it, so without this the start
+	// fails with "open /run/kukeon: no such file or directory".
+	if ensureErr := lifecycle.ResolveEnsureSocketDir(cmd)(); ensureErr != nil {
+		return fmt.Errorf("ensure kukeond socket dir: %w", ensureErr)
+	}
+
 	startRes, err := client.StartCell(cmd.Context(), doc)
 	if err != nil {
 		return fmt.Errorf("start kukeond cell: %w", err)

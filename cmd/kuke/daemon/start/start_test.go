@@ -210,6 +210,7 @@ func TestDaemonStart(t *testing.T) {
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 			ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(tt.fake))
+			ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
 			if tt.probe != nil {
 				ctx = context.WithValue(ctx, lifecycle.ReachableProbeKey{}, tt.probe)
 			}

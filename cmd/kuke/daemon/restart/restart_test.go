@@ -287,6 +287,7 @@ func TestDaemonRestart(t *testing.T) {
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 			ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(tt.fake))
+			ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
 			if tt.probe != nil {
 				ctx = context.WithValue(ctx, lifecycle.ReachableProbeKey{}, tt.probe)
 			}
@@ -367,6 +368,7 @@ func TestDaemonRestart_GracefulTimeoutEscalatesToKillThenStarts(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
 	cmd.SetContext(ctx)
 	cmd.SetArgs([]string{"--timeout", "50ms"})
 
@@ -447,6 +449,7 @@ func TestDaemonRestart_TimeoutOverridesDefault(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
 	cmd.SetContext(ctx)
 	cmd.SetArgs([]string{"--timeout", "20ms"})
 
@@ -511,6 +514,7 @@ func TestDaemonRestart_KillCellErrorIsWrapped(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
 	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
 	cmd.SetContext(ctx)
 	cmd.SetArgs([]string{"--timeout", "20ms"})
 
