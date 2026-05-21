@@ -39,9 +39,11 @@
 // embedded buildkitd).
 //
 // Phase 1 (#522) wires the engine and validates a trivial single-stage
-// Dockerfile. Multi-stage validation against kukeon's own Dockerfile, plus
-// --secret / --cache-* / --push / --platform flags, are deferred to the phase
-// 1b / 2 follow-ups (#616, #523, #524, #646).
+// Dockerfile. Phase 1b (#616) validated multi-stage, COPY --from=, --build-arg
+// and --platform=$BUILDPLATFORM against kukeon's own Dockerfile end-to-end
+// (host network mode + the default overlayfs snapshotter sufficed). The
+// --secret / --cache-* / --push / --platform-flag surface is deferred to the
+// phase 2 follow-ups (#523, #524, #646).
 package main
 
 import (

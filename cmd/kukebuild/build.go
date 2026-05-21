@@ -59,8 +59,9 @@ const grpcMaxMsgSize = 1 << 30
 
 // dockerfileFrontend is BuildKit's built-in Dockerfile frontend key. The
 // frontend handles multi-stage, COPY --from=, --build-arg and
-// --platform=$BUILDPLATFORM at the library level (phase 1b, #616, validates
-// those against kukeon's own Dockerfile).
+// --platform=$BUILDPLATFORM at the library level — phase 1b (#616) validated
+// all four against kukeon's own multi-stage Dockerfile end-to-end, with no
+// frontend-side wiring beyond the attrs newSolveOpt already sets.
 const dockerfileFrontend = "dockerfile.v0"
 
 // localNameContext / localNameDockerfile are the LocalMounts keys BuildKit's
@@ -319,10 +320,14 @@ func newController(ctx context.Context, cfg *buildConfig, namespace string) (*co
 // newWorkerController builds a single-worker controller using BuildKit's
 // containerd worker backend. The worker connects to cfg.containerdSocket and
 // is scoped to the realm's containerd namespace, so the image exporter writes
-// layers + manifest into <realm>.kukeon.io. Host network mode keeps phase 1
-// simple — a trivial single-stage Dockerfile needs no build network, and the
-// CNI / build-network quirks that surface on a real multi-stage build are
-// deferred to phase 1b (#616).
+// layers + manifest into <realm>.kukeon.io. Host network mode (the build
+// containers share the host's network namespace) was confirmed sufficient in
+// phase 1b (#616): kukeon's own Dockerfile reaches the network from a RUN step
+// for the CNI-plugins curl-fetch + sha256-verify, and that succeeds over host
+// mode with no CNI / build-network wiring — no bridge provider is needed.
+// SnapshotterName is the containerd default (overlayfs on Linux); phase 1b
+// confirmed it handles multi-stage cache reuse and COPY --from= against the
+// real recipe without further plumbing.
 func newWorkerController(
 	ctx context.Context,
 	cfg *buildConfig,
