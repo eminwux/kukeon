@@ -70,7 +70,12 @@ type ContainerSpec struct {
 	// Repos mirrors the v1beta1 ContainerSpec.Repos payload — git
 	// repositories kuketty clones/fetches in its pre-Serve step. See the
 	// v1beta1 type for field semantics. Issue #617.
-	Repos         []ContainerRepo
+	Repos []ContainerRepo
+	// Git mirrors the v1beta1 ContainerSpec.Git payload — declarative git
+	// identity/signing sugar that BuildContainerSpec / BuildRootContainerSpec
+	// expand into the GIT_AUTHOR_* / GIT_COMMITTER_* / GIT_CONFIG_* env block.
+	// See the v1beta1 type for field semantics. Issue #618.
+	Git           *ContainerGit
 	CNIConfigPath string
 	RestartPolicy string
 	Attachable    bool
@@ -194,6 +199,30 @@ type ContainerRepo struct {
 	Branch   string
 	URL      string
 	Required bool
+}
+
+// GitSignTarget enumerates the artefacts ContainerGit.Sign can enable signing
+// for. Mirrors the v1beta1 constants.
+const (
+	GitSignCommits = "commits"
+	GitSignTags    = "tags"
+)
+
+// ContainerGit mirrors the v1beta1 ContainerGit payload — declarative sugar
+// over the GIT_AUTHOR_* / GIT_COMMITTER_* / GIT_CONFIG_* env-var protocol. See
+// the v1beta1 type for field semantics. Issue #618.
+type ContainerGit struct {
+	Author         *GitIdentity
+	Committer      *GitIdentity
+	SigningKey     string
+	Sign           []string
+	AllowedSigners string
+}
+
+// GitIdentity mirrors the v1beta1 GitIdentity payload.
+type GitIdentity struct {
+	Name  string
+	Email string
 }
 
 // ContainerCapabilities groups Linux capability deltas applied relative to the

@@ -100,9 +100,19 @@ type ContainerSpec struct {
 	// Attachable=true (kuketty owns the resolution step). Per-repo outcome
 	// surfaces in ContainerStatus.Repos over RPC in phase 1b (#642). Issue
 	// #617, phase 1a of #423.
-	Repos         []ContainerRepo `json:"repos,omitempty"                  yaml:"repos,omitempty"`
-	CNIConfigPath string          `json:"cniConfigPath,omitempty"          yaml:"cniConfigPath,omitempty"`
-	RestartPolicy string          `json:"restartPolicy"                    yaml:"restartPolicy"`
+	Repos []ContainerRepo `json:"repos,omitempty"                  yaml:"repos,omitempty"`
+	// Git declares the container's git identity and signing config as
+	// declarative sugar over the GIT_AUTHOR_* / GIT_COMMITTER_* / GIT_CONFIG_*
+	// environment-variable protocol git reads natively. The container runtime
+	// expands it into that env-var block before container start (merged with
+	// any explicit env: entries, which win on key collision), so cell
+	// templates carry a four-line git: block instead of the hand-rolled
+	// ~13-line GIT_* env duplication. The signingKey path stays per-container
+	// (root-cell vs non-root-cell key paths are not globalised). Issue #618,
+	// phase 2 of #423.
+	Git           *ContainerGit `json:"git,omitempty"                    yaml:"git,omitempty"`
+	CNIConfigPath string        `json:"cniConfigPath,omitempty"          yaml:"cniConfigPath,omitempty"`
+	RestartPolicy string        `json:"restartPolicy"                    yaml:"restartPolicy"`
 	// Attachable opts the container into kuketty-wrapper injection. When
 	// true, the daemon rewrites process.args to a single element
 	// [/.kukeon/bin/kuketty] — no CLI flags, every runtime input flows
@@ -276,6 +286,52 @@ type ContainerRepo struct {
 	Required bool `json:"required,omitempty" yaml:"required,omitempty"`
 }
 
+// GitSignTarget enumerates the artefacts ContainerGit.Sign can enable signing
+// for. An entry maps to the matching git config key (commit.gpgsign /
+// tag.gpgsign) in the expanded GIT_CONFIG_* block.
+const (
+	// GitSignCommits enables commit signing (commit.gpgsign=true).
+	GitSignCommits = "commits"
+	// GitSignTags enables tag signing (tag.gpgsign=true).
+	GitSignTags = "tags"
+)
+
+// ContainerGit is declarative sugar over the GIT_AUTHOR_* / GIT_COMMITTER_* /
+// GIT_CONFIG_* env-var protocol git reads natively. The container runtime
+// expands it into that env block before container start. Author/Committer
+// render the GIT_AUTHOR_*/GIT_COMMITTER_* identity vars; SigningKey, Sign, and
+// AllowedSigners render the GIT_CONFIG_* signing pairs (user.signingkey,
+// gpg.format=ssh, commit.gpgsign, tag.gpgsign, gpg.ssh.allowedSignersFile)
+// with GIT_CONFIG_COUNT tracking the live pair count. Issue #618.
+type ContainerGit struct {
+	// Author sets git's author identity (GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL).
+	// Both name and email are required when present.
+	Author *GitIdentity `json:"author,omitempty"         yaml:"author,omitempty"`
+	// Committer sets git's committer identity (GIT_COMMITTER_NAME /
+	// GIT_COMMITTER_EMAIL). Both name and email are required when present.
+	Committer *GitIdentity `json:"committer,omitempty"      yaml:"committer,omitempty"`
+	// SigningKey is the absolute in-container path to the signing key
+	// (user.signingkey). kukeon signs with SSH keys, so a non-empty
+	// SigningKey also renders gpg.format=ssh. Per-container — root-cell vs
+	// non-root-cell key paths stay local to the container, not globalised.
+	SigningKey string `json:"signingKey,omitempty"     yaml:"signingKey,omitempty"`
+	// Sign enables signing for the listed artefacts: "commits"
+	// (commit.gpgsign=true) and/or "tags" (tag.gpgsign=true). Requires
+	// SigningKey to be set.
+	Sign []string `json:"sign,omitempty"           yaml:"sign,omitempty"`
+	// AllowedSigners is the absolute in-container path to git's SSH
+	// allowed-signers file (gpg.ssh.allowedSignersFile), used to verify
+	// signatures. Optional; rendered only when set. Crew sets this today, so
+	// the field exists for the env block to be a strict superset of crew's.
+	AllowedSigners string `json:"allowedSigners,omitempty" yaml:"allowedSigners,omitempty"`
+}
+
+// GitIdentity is a name/email pair for a git author or committer identity.
+type GitIdentity struct {
+	Name  string `json:"name"  yaml:"name"`
+	Email string `json:"email" yaml:"email"`
+}
+
 // ContainerCapabilities groups Linux capability deltas applied to the
 // container process relative to the image default set.
 type ContainerCapabilities struct {
@@ -428,6 +484,7 @@ func NewContainerDoc(from *ContainerDoc) *ContainerDoc {
 	out.Spec.SecurityOpts = cloneSlice(out.Spec.SecurityOpts)
 	out.Spec.Secrets = cloneSecrets(out.Spec.Secrets)
 	out.Spec.Repos = cloneRepos(out.Spec.Repos)
+	out.Spec.Git = cloneGit(out.Spec.Git)
 	out.Status.Repos = cloneRepoStatuses(out.Status.Repos)
 
 	if out.Spec.Capabilities != nil {
@@ -492,6 +549,26 @@ func cloneRepos(in []ContainerRepo) []ContainerRepo {
 	out := make([]ContainerRepo, len(in))
 	copy(out, in)
 	return out
+}
+
+// cloneGit deep-copies a ContainerGit, including its Author/Committer
+// pointers and Sign slice, so a cloned ContainerDoc shares no mutable state
+// with its source.
+func cloneGit(in *ContainerGit) *ContainerGit {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	if in.Author != nil {
+		author := *in.Author
+		out.Author = &author
+	}
+	if in.Committer != nil {
+		committer := *in.Committer
+		out.Committer = &committer
+	}
+	out.Sign = cloneSlice(in.Sign)
+	return &out
 }
 
 func cloneRepoStatuses(in []RepoStatus) []RepoStatus {
