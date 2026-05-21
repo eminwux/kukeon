@@ -130,14 +130,17 @@ type fakeClient struct {
 
 	getCellFn         func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error)
 	createCellFn      func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error)
+	startCellFn       func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error)
 	attachContainerFn func(doc v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error)
 	killCellFn        func(doc v1beta1.CellDoc) (kukeonv1.KillCellResult, error)
 
 	getCalls    int
 	createCalls int
+	startCalls  int
 	attachCalls int
 	killCalls   int
 	createDoc   v1beta1.CellDoc
+	startDoc    v1beta1.CellDoc
 	attachDoc   v1beta1.ContainerDoc
 	killDoc     v1beta1.CellDoc
 }
@@ -157,6 +160,15 @@ func (f *fakeClient) CreateCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv
 		return kukeonv1.CreateCellResult{}, errors.New("unexpected CreateCell call")
 	}
 	return f.createCellFn(doc)
+}
+
+func (f *fakeClient) StartCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+	f.startCalls++
+	f.startDoc = doc
+	if f.startCellFn == nil {
+		return kukeonv1.StartCellResult{}, errors.New("unexpected StartCell call")
+	}
+	return f.startCellFn(doc)
 }
 
 func (f *fakeClient) AttachContainer(
@@ -472,12 +484,11 @@ func TestRun_ExistingCell_MatchingSpec_AlreadyReady_ShortCircuits(t *testing.T) 
 	}
 }
 
-func TestRun_ExistingCell_MatchingSpec_NotReady_StillEnsures(t *testing.T) {
+func TestRun_ExistingCell_MatchingSpec_Stopped_StartsAndAttaches(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
-	// Cell exists with matching spec but its runtime state is not Ready
-	// (Pending/Stopped). Run must fall through to CreateCell so the daemon
-	// can ensure resources and start containers.
+	// Cell exists with matching spec but is Stopped. Run must call StartCell
+	// (not CreateCell — that was an unsafe re-entry per #630) and then attach.
 	existing := v1beta1.CellDoc{
 		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
 		Spec: v1beta1.CellSpec{
@@ -511,25 +522,96 @@ func TestRun_ExistingCell_MatchingSpec_NotReady_StillEnsures(t *testing.T) {
 				RootContainerExists: true,
 			}, nil
 		},
-		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-			return kukeonv1.CreateCellResult{
-				Cell:                    doc,
-				Created:                 false,
-				MetadataExistsPost:      true,
-				CgroupExistsPost:        true,
-				RootContainerExistsPost: true,
-				Started:                 true,
-			}, nil
+		startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+			return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
 		},
 	}
-	cmd, _ := newCmd(t, fc)
+	cmd, out := newCmd(t, fc)
 	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if fc.createCalls != 1 {
-		t.Fatalf("CreateCell calls=%d want 1 (must ensure+start when not Ready)", fc.createCalls)
+	if fc.createCalls != 0 {
+		t.Fatalf("CreateCell calls=%d want 0 (Stopped must start, not re-create)", fc.createCalls)
+	}
+	if fc.startCalls != 1 {
+		t.Fatalf("StartCell calls=%d want 1 (Stopped must start)", fc.startCalls)
+	}
+	if !strings.Contains(out.String(), "  - containers: started") {
+		t.Errorf("output missing 'containers: started' marker:\n%s", out.String())
+	}
+}
+
+func TestRun_ExistingCell_MatchingSpec_ErrorPartial_Refuses(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	// A cell in an error / partial state has no clean start path. Run must
+	// refuse with a `kuke delete cell <name>` pointer (parity with the `-c`
+	// identity contract in #625) rather than re-create or start.
+	base := v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
+		Spec: v1beta1.CellSpec{
+			RealmID: "my-realm",
+			SpaceID: "my-space",
+			StackID: "my-stack",
+			Containers: []v1beta1.ContainerSpec{
+				{
+					ID:      "root",
+					Root:    true,
+					Image:   "registry.eminwux.com/busybox:latest",
+					Command: "sleep",
+					Args:    []string{"3600"},
+				},
+				{
+					ID:      "work",
+					Image:   "registry.eminwux.com/busybox:latest",
+					Command: "sleep",
+					Args:    []string{"3600"},
+				},
+			},
+		},
+	}
+
+	for _, tc := range []struct {
+		name  string
+		state v1beta1.CellState
+	}{
+		{"failed", v1beta1.CellStateFailed},
+		{"pending", v1beta1.CellStatePending},
+		{"unknown", v1beta1.CellStateUnknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			existing := base
+			existing.Status = v1beta1.CellStatus{State: tc.state}
+			fc := &fakeClient{
+				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{
+						Cell:                existing,
+						MetadataExists:      true,
+						CgroupExists:        true,
+						RootContainerExists: true,
+					}, nil
+				},
+			}
+			cmd, _ := newCmd(t, fc)
+			cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d"})
+
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatalf("Execute: want refusal error for %s state, got nil", tc.state.String())
+			}
+			if !strings.Contains(err.Error(), "kuke delete cell my-cell") {
+				t.Errorf("error missing `kuke delete cell` pointer: %v", err)
+			}
+			if fc.createCalls != 0 {
+				t.Errorf("CreateCell calls=%d want 0 (must refuse, not re-create)", fc.createCalls)
+			}
+			if fc.startCalls != 0 {
+				t.Errorf("StartCell calls=%d want 0 (must refuse, not start)", fc.startCalls)
+			}
+		})
 	}
 }
 

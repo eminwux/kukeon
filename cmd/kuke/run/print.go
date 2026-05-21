@@ -150,3 +150,13 @@ func noOpResultFromGet(pre kukeonv1.GetCellResult) kukeonv1.CreateCellResult {
 	}
 	return res
 }
+
+// startedResultFromGet shapes a CreateCellResult for the matching-spec +
+// Stopped → StartCell path: the cell already existed on disk (Created=false),
+// so the rollup mirrors noOpResultFromGet but reflects the StartCell outcome
+// in Started rather than always reporting "not started".
+func startedResultFromGet(pre kukeonv1.GetCellResult, started bool) kukeonv1.CreateCellResult {
+	res := noOpResultFromGet(pre)
+	res.Started = started
+	return res
+}
