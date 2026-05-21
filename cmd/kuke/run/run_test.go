@@ -484,6 +484,81 @@ func TestRun_ExistingCell_MatchingSpec_AlreadyReady_ShortCircuits(t *testing.T) 
 	}
 }
 
+func TestRun_ExistingCell_RecordedReady_ContainerdLostContainers_Refuses(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	// #654: the cell is recorded Ready on disk, but containerd no longer has
+	// its root container (a daemon/host restart dropped the containers while
+	// the metadata survived). Run must NOT print phantom `already existed` /
+	// `containers: started` lines and must NOT attach to the dead socket;
+	// instead it refuses with a divergence message + delete-then-rerun pointer.
+	existing := v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
+		Spec: v1beta1.CellSpec{
+			RealmID: "my-realm",
+			SpaceID: "my-space",
+			StackID: "my-stack",
+			Containers: []v1beta1.ContainerSpec{
+				{
+					ID:      "root",
+					Root:    true,
+					Image:   "registry.eminwux.com/busybox:latest",
+					Command: "sleep",
+					Args:    []string{"3600"},
+				},
+				{
+					ID:      "work",
+					Image:   "registry.eminwux.com/busybox:latest",
+					Command: "sleep",
+					Args:    []string{"3600"},
+				},
+			},
+		},
+		Status: v1beta1.CellStatus{State: v1beta1.CellStateReady},
+	}
+	fc := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell:           existing,
+				MetadataExists: true,
+				CgroupExists:   true,
+				// Containerd lost the root container — the divergence signal.
+				RootContainerExists: false,
+			}, nil
+		},
+	}
+	// Default (attach) mode: the bug attaches to a dead socket. Omit -d so the
+	// test exercises the path that would otherwise reach the failing attach.
+	cmd, out := newCmd(t, fc)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML)})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute: want divergence refusal, got nil")
+	}
+	if !strings.Contains(err.Error(), "diverged") {
+		t.Errorf("error missing divergence wording: %v", err)
+	}
+	if !strings.Contains(err.Error(), "kuke delete cell my-cell") {
+		t.Errorf("error missing `kuke delete cell` recovery pointer: %v", err)
+	}
+	if strings.Contains(out.String(), "already existed") {
+		t.Errorf("must not print phantom `already existed` for a diverged cell:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "containers: started") {
+		t.Errorf("must not print phantom `containers: started` for a diverged cell:\n%s", out.String())
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d want 0 (refuse, do not re-enter create — #630)", fc.createCalls)
+	}
+	if fc.startCalls != 0 {
+		t.Errorf("StartCell calls=%d want 0 (refuse, do not re-enter start — #630)", fc.startCalls)
+	}
+	if fc.attachCalls != 0 {
+		t.Errorf("AttachContainer calls=%d want 0 (must not attach to a dead socket)", fc.attachCalls)
+	}
+}
+
 func TestRun_ExistingCell_MatchingSpec_Stopped_StartsAndAttaches(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
