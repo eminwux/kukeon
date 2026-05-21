@@ -186,6 +186,180 @@ func TestUpdateRealmMetadataConcurrentWritesConverge(t *testing.T) {
 	}
 }
 
+// TestPersistRealmStatusGuardedSkipsWhenBehind pins issue #636 for the realm
+// refresh path: when a concurrent spec write has advanced the on-disk
+// Generation past the value the refresh observed, the guarded persist skips
+// (persisted=false, nil err) rather than surfacing ErrStaleResource as a hard
+// error; a current observation persists normally. Mirrors the cell path's
+// persistCellStatusGuarded behavior.
+func TestPersistRealmStatusGuardedSkipsWhenBehind(t *testing.T) {
+	r := newGenerationTestExec(t, t.TempDir())
+	seed := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{Name: "r-guard"},
+		Spec:     intmodel.RealmSpec{Namespace: "r-guard.kukeon.io"},
+		Status:   intmodel.RealmStatus{State: intmodel.RealmStateReady},
+	}
+	if err := r.UpdateRealmMetadata(seed); err != nil {
+		t.Fatalf("seed UpdateRealmMetadata: %v", err)
+	}
+
+	// Capture the stale refresh view (generation 1) before the spec moves.
+	staleView := readRealmGeneration(t, r, "r-guard")
+
+	// A concurrent spec writer advances the realm to generation 2.
+	specWrite := readRealmGeneration(t, r, "r-guard")
+	specWrite.Spec.RegistryCredentials = append(specWrite.Spec.RegistryCredentials,
+		intmodel.RegistryCredentials{ServerAddress: "reg-a"})
+	if err := r.UpdateRealmMetadata(specWrite); err != nil {
+		t.Fatalf("concurrent spec UpdateRealmMetadata: %v", err)
+	}
+
+	// The refresh tries to persist a status flip against its stale view.
+	staleView.Status.State = intmodel.RealmStateUnknown
+	persisted, err := r.persistRealmStatusGuarded(staleView)
+	if err != nil {
+		t.Fatalf("guarded persist (stale): %v", err)
+	}
+	if persisted {
+		t.Fatal("guarded persist reported persisted=true for a stale observation")
+	}
+	afterSkip := readRealmGeneration(t, r, "r-guard")
+	if len(afterSkip.Spec.RegistryCredentials) != 1 {
+		t.Error("spec clobbered by stale refresh: RegistryCredentials reverted")
+	}
+	if afterSkip.Status.State == intmodel.RealmStateUnknown {
+		t.Error("stale status flip leaked to disk despite the skip")
+	}
+
+	// A current observation (generation 2) persists.
+	current := readRealmGeneration(t, r, "r-guard")
+	current.Status.State = intmodel.RealmStateUnknown
+	persisted, err = r.persistRealmStatusGuarded(current)
+	if err != nil {
+		t.Fatalf("guarded persist (current): %v", err)
+	}
+	if !persisted {
+		t.Fatal("guarded persist skipped a current observation")
+	}
+	if readRealmGeneration(t, r, "r-guard").Status.State != intmodel.RealmStateUnknown {
+		t.Error("status flip not persisted for a current observation")
+	}
+}
+
+// TestPersistSpaceStatusGuardedSkipsWhenBehind is the Space counterpart.
+func TestPersistSpaceStatusGuardedSkipsWhenBehind(t *testing.T) {
+	r := newGenerationTestExec(t, t.TempDir())
+	seed := intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{Name: "sp-guard"},
+		Spec:     intmodel.SpaceSpec{RealmName: "r1", CNIConfigPath: "/etc/cni/sp.conf"},
+		Status:   intmodel.SpaceStatus{State: intmodel.SpaceStateReady},
+	}
+	if err := r.UpdateSpaceMetadata(seed); err != nil {
+		t.Fatalf("seed UpdateSpaceMetadata: %v", err)
+	}
+	read := func() intmodel.Space {
+		got, err := r.readSpaceInternal(fs.SpaceMetadataPath(r.opts.RunPath, "r1", "sp-guard"))
+		if err != nil {
+			t.Fatalf("readSpaceInternal: %v", err)
+		}
+		return got
+	}
+
+	staleView := read()
+
+	specWrite := read()
+	specWrite.Spec.CNIConfigPath = "/etc/cni/sp-moved.conf"
+	if err := r.UpdateSpaceMetadata(specWrite); err != nil {
+		t.Fatalf("concurrent spec UpdateSpaceMetadata: %v", err)
+	}
+
+	staleView.Status.State = intmodel.SpaceStateUnknown
+	persisted, err := r.persistSpaceStatusGuarded(staleView)
+	if err != nil {
+		t.Fatalf("guarded persist (stale): %v", err)
+	}
+	if persisted {
+		t.Fatal("guarded persist reported persisted=true for a stale observation")
+	}
+	afterSkip := read()
+	if afterSkip.Spec.CNIConfigPath != "/etc/cni/sp-moved.conf" {
+		t.Error("spec clobbered by stale refresh: CNIConfigPath reverted")
+	}
+	if afterSkip.Status.State == intmodel.SpaceStateUnknown {
+		t.Error("stale status flip leaked to disk despite the skip")
+	}
+
+	current := read()
+	current.Status.State = intmodel.SpaceStateUnknown
+	persisted, err = r.persistSpaceStatusGuarded(current)
+	if err != nil {
+		t.Fatalf("guarded persist (current): %v", err)
+	}
+	if !persisted {
+		t.Fatal("guarded persist skipped a current observation")
+	}
+	if read().Status.State != intmodel.SpaceStateUnknown {
+		t.Error("status flip not persisted for a current observation")
+	}
+}
+
+// TestPersistStackStatusGuardedSkipsWhenBehind is the Stack counterpart.
+func TestPersistStackStatusGuardedSkipsWhenBehind(t *testing.T) {
+	r := newGenerationTestExec(t, t.TempDir())
+	seed := intmodel.Stack{
+		Metadata: intmodel.StackMetadata{Name: "st-guard"},
+		Spec:     intmodel.StackSpec{ID: "stk-1", RealmName: "r1", SpaceName: "s1"},
+		Status:   intmodel.StackStatus{State: intmodel.StackStateReady},
+	}
+	if err := r.UpdateStackMetadata(seed); err != nil {
+		t.Fatalf("seed UpdateStackMetadata: %v", err)
+	}
+	read := func() intmodel.Stack {
+		got, err := r.readStackInternal(fs.StackMetadataPath(r.opts.RunPath, "r1", "s1", "st-guard"))
+		if err != nil {
+			t.Fatalf("readStackInternal: %v", err)
+		}
+		return got
+	}
+
+	staleView := read()
+
+	specWrite := read()
+	specWrite.Spec.ID = "stk-2"
+	if err := r.UpdateStackMetadata(specWrite); err != nil {
+		t.Fatalf("concurrent spec UpdateStackMetadata: %v", err)
+	}
+
+	staleView.Status.State = intmodel.StackStateUnknown
+	persisted, err := r.persistStackStatusGuarded(staleView)
+	if err != nil {
+		t.Fatalf("guarded persist (stale): %v", err)
+	}
+	if persisted {
+		t.Fatal("guarded persist reported persisted=true for a stale observation")
+	}
+	afterSkip := read()
+	if afterSkip.Spec.ID != "stk-2" {
+		t.Error("spec clobbered by stale refresh: Spec.ID reverted")
+	}
+	if afterSkip.Status.State == intmodel.StackStateUnknown {
+		t.Error("stale status flip leaked to disk despite the skip")
+	}
+
+	current := read()
+	current.Status.State = intmodel.StackStateUnknown
+	persisted, err = r.persistStackStatusGuarded(current)
+	if err != nil {
+		t.Fatalf("guarded persist (current): %v", err)
+	}
+	if !persisted {
+		t.Fatal("guarded persist skipped a current observation")
+	}
+	if read().Status.State != intmodel.StackStateUnknown {
+		t.Error("status flip not persisted for a current observation")
+	}
+}
+
 func seedCell(t *testing.T, r *Exec) intmodel.Cell {
 	t.Helper()
 	cell := intmodel.Cell{
