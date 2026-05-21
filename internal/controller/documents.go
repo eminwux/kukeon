@@ -40,6 +40,12 @@ func SortDocumentsByKind(docs []parser.Document, reverse bool) []parser.Document
 		v1beta1.KindCell:      4,
 		v1beta1.KindContainer: 5,
 	}
+	// Secrets sort one past the deepest hierarchy kind so any scope
+	// (realm/space/stack/cell) bundled in the same apply file is materialized
+	// before a secret that targets it — apply rejects a secret whose scope
+	// does not yet exist. Derived from the map length rather than a literal so
+	// it stays correct if a kind is inserted above.
+	kindOrder[v1beta1.KindSecret] = len(kindOrder) + 1
 
 	// Sort by kind order, then by original index
 	sort.Slice(sorted, func(i, j int) bool {

@@ -291,6 +291,16 @@ var (
 	ErrSecretFromEnvNotSet        = errors.New("secret fromEnv env var is not set on the daemon host")
 	ErrSecretStagingFailed        = errors.New("failed to stage secret file for mount")
 
+	// Secret kind (kind: Secret) storage-primitive errors (issue #619).
+
+	ErrSecretRealmRequired   = errors.New("secret metadata.realm is required")
+	ErrSecretScopeIncomplete = errors.New(
+		"secret scope is incomplete: a deeper scope coordinate requires all shallower ones",
+	)
+	ErrSecretDataRequired  = errors.New("secret spec.data is required and must not be empty")
+	ErrSecretScopeNotFound = errors.New("secret scope does not exist")
+	ErrWriteSecret         = errors.New("failed to write secret bytes")
+
 	// Repo-related errors (containers[].repos[], issue #617).
 
 	ErrRepoNameRequired      = errors.New("repo name is required")

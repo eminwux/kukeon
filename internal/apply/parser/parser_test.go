@@ -18,6 +18,7 @@ package parser_test
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -760,5 +761,123 @@ spec:
 	}
 	if !strings.Contains(string(docs[2]), "kind: Stack") {
 		t.Errorf("expected third document to be a Stack")
+	}
+}
+
+// TestParseDocument_Secret confirms a Secret document parses into the typed
+// SecretDoc with its scope coordinates and material (issue #619).
+func TestParseDocument_Secret(t *testing.T) {
+	yaml := `
+apiVersion: v1beta1
+kind: Secret
+metadata:
+  name: anthropic-token
+  realm: kuke-system
+spec:
+  data: s3cr3t-bytes`
+
+	doc, err := parser.ParseDocument(0, []byte(yaml))
+	if err != nil {
+		t.Fatalf("ParseDocument failed: %v", err)
+	}
+	if doc.Kind != v1beta1.KindSecret {
+		t.Errorf("Kind = %q, want %q", doc.Kind, v1beta1.KindSecret)
+	}
+	if doc.SecretDoc == nil {
+		t.Fatal("SecretDoc is nil")
+	}
+	if doc.SecretDoc.Metadata.Name != "anthropic-token" {
+		t.Errorf("name = %q, want anthropic-token", doc.SecretDoc.Metadata.Name)
+	}
+	if doc.SecretDoc.Metadata.Realm != "kuke-system" {
+		t.Errorf("realm = %q, want kuke-system", doc.SecretDoc.Metadata.Realm)
+	}
+	if doc.SecretDoc.Spec.Data != "s3cr3t-bytes" {
+		t.Errorf("data = %q, want s3cr3t-bytes", doc.SecretDoc.Spec.Data)
+	}
+}
+
+// TestValidateDocument_Secret exercises the issue #619 apply-time gates that
+// don't require the runner: name required, realm required, scope-coordinate
+// completeness, and non-empty data. The scope-reachability gate is enforced
+// at reconcile time and is not covered here.
+func TestValidateDocument_Secret(t *testing.T) {
+	base := func() *v1beta1.SecretDoc {
+		return &v1beta1.SecretDoc{
+			APIVersion: v1beta1.APIVersionV1Beta1,
+			Kind:       v1beta1.KindSecret,
+			Metadata:   v1beta1.SecretMetadata{Name: "tok", Realm: "default"},
+			Spec:       v1beta1.SecretSpec{Data: "x"},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func(*v1beta1.SecretDoc)
+		wantErr error // nil means valid
+	}{
+		{name: "valid realm-scoped", mutate: func(*v1beta1.SecretDoc) {}},
+		{
+			name:   "valid cell-scoped",
+			mutate: func(d *v1beta1.SecretDoc) { d.Metadata.Space, d.Metadata.Stack, d.Metadata.Cell = "s", "st", "c" },
+		},
+		{
+			name:    "missing name",
+			mutate:  func(d *v1beta1.SecretDoc) { d.Metadata.Name = "" },
+			wantErr: nil, // name error is a plain errors.New, asserted by message below
+		},
+		{
+			name:    "missing realm",
+			mutate:  func(d *v1beta1.SecretDoc) { d.Metadata.Realm = "" },
+			wantErr: errdefs.ErrSecretRealmRequired,
+		},
+		{
+			name:    "stack without space",
+			mutate:  func(d *v1beta1.SecretDoc) { d.Metadata.Stack = "st" },
+			wantErr: errdefs.ErrSecretScopeIncomplete,
+		},
+		{
+			name:    "cell without stack",
+			mutate:  func(d *v1beta1.SecretDoc) { d.Metadata.Space, d.Metadata.Cell = "s", "c" },
+			wantErr: errdefs.ErrSecretScopeIncomplete,
+		},
+		{
+			name:    "empty data",
+			mutate:  func(d *v1beta1.SecretDoc) { d.Spec.Data = "   " },
+			wantErr: errdefs.ErrSecretDataRequired,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			secretDoc := base()
+			tt.mutate(secretDoc)
+			doc := &parser.Document{
+				Index:      0,
+				APIVersion: secretDoc.APIVersion,
+				Kind:       v1beta1.KindSecret,
+				SecretDoc:  secretDoc,
+			}
+			err := parser.ValidateDocument(doc)
+
+			// "missing name" surfaces a plain errors.New, not a sentinel, so
+			// it is asserted by message rather than via errors.Is.
+			if tt.name == "missing name" {
+				if err == nil || !strings.Contains(err.Error(), "metadata.name is required") {
+					t.Fatalf("err = %v, want metadata.name required", err)
+				}
+				return
+			}
+
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Fatalf("ValidateDocument() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !errors.Is(err.Err, tt.wantErr) {
+				t.Fatalf("ValidateDocument() = %v, want %v", err, tt.wantErr)
+			}
+		})
 	}
 }

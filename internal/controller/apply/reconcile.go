@@ -536,6 +536,102 @@ func ReconcileContainer(r runner.Runner, desired intmodel.Container) (ReconcileR
 	return result, nil
 }
 
+// ReconcileSecret reconciles a desired `kind: Secret` by verifying its scope
+// exists and persisting its bytes to the daemon-managed file (issue #619).
+//
+// Unlike the hierarchy reconcilers, ReconcileSecret never auto-creates a
+// missing parent: a Secret targets an existing scope, so an unreachable
+// realm/space/stack/cell is an apply-time error, not an implicit create. The
+// scope coordinates are validated for completeness at parse time
+// (validateSecretScope); this function adds the reachability gate the AC
+// requires (scope must exist). The secret material itself is written
+// write-through — re-applying overwrites and reports "updated"; the daemon
+// never reads the bytes back to diff them, keeping the never-round-tripped
+// contract crisp.
+func ReconcileSecret(r runner.Runner, desired intmodel.Secret) (ReconcileResult, error) {
+	result := ReconcileResult{
+		Action: "unchanged",
+		Kind:   "Secret",
+		Name:   desired.Metadata.Name,
+	}
+
+	if err := ensureSecretScopeExists(r, desired.Metadata); err != nil {
+		return result, err
+	}
+
+	created, writeErr := r.WriteSecret(desired)
+	if writeErr != nil {
+		return result, writeErr
+	}
+	if created {
+		result.Action = actionCreated
+	} else {
+		result.Action = actionUpdated
+	}
+	return result, nil
+}
+
+// ensureSecretScopeExists verifies every scope coordinate the secret names is
+// reachable, deepest-first short-circuiting on the first miss. A NotFound is
+// translated to errdefs.ErrSecretScopeNotFound so apply surfaces a single,
+// stable "scope does not exist" error regardless of which level is missing.
+func ensureSecretScopeExists(r runner.Runner, md intmodel.SecretMetadata) error {
+	if _, err := r.GetRealm(intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{Name: md.Realm},
+	}); err != nil {
+		return scopeLookupError(err, "realm", md.Realm)
+	}
+
+	if md.Space != "" {
+		if _, err := r.GetSpace(intmodel.Space{
+			Metadata: intmodel.SpaceMetadata{Name: md.Space},
+			Spec:     intmodel.SpaceSpec{RealmName: md.Realm},
+		}); err != nil {
+			return scopeLookupError(err, "space", md.Space)
+		}
+	}
+
+	if md.Stack != "" {
+		if _, err := r.GetStack(intmodel.Stack{
+			Metadata: intmodel.StackMetadata{Name: md.Stack},
+			Spec:     intmodel.StackSpec{RealmName: md.Realm, SpaceName: md.Space},
+		}); err != nil {
+			return scopeLookupError(err, "stack", md.Stack)
+		}
+	}
+
+	if md.Cell != "" {
+		if _, err := r.GetCell(intmodel.Cell{
+			Metadata: intmodel.CellMetadata{Name: md.Cell},
+			Spec: intmodel.CellSpec{
+				RealmName: md.Realm,
+				SpaceName: md.Space,
+				StackName: md.Stack,
+			},
+		}); err != nil {
+			return scopeLookupError(err, "cell", md.Cell)
+		}
+	}
+
+	return nil
+}
+
+// scopeLookupError maps a scope Get failure to a stable error. A NotFound at
+// any level becomes ErrSecretScopeNotFound (the AC's "scope must exist"
+// gate); any other error (e.g. a corrupt metadata read) is propagated with
+// context so it is not masked as a missing scope.
+func scopeLookupError(err error, level, name string) error {
+	switch {
+	case errors.Is(err, errdefs.ErrRealmNotFound),
+		errors.Is(err, errdefs.ErrSpaceNotFound),
+		errors.Is(err, errdefs.ErrStackNotFound),
+		errors.Is(err, errdefs.ErrCellNotFound):
+		return fmt.Errorf("%w: %s %q", errdefs.ErrSecretScopeNotFound, level, name)
+	default:
+		return fmt.Errorf("failed to verify secret scope %s %q: %w", level, name, err)
+	}
+}
+
 // ReconcileResult represents the result of reconciling a resource.
 type ReconcileResult struct {
 	Action   string            // "created", "updated", "unchanged", "deleted"

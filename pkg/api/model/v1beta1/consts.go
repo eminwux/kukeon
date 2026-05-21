@@ -33,6 +33,11 @@ const (
 	KindSpace Kind = "Space"
 	// KindStack identifies stack documents.
 	KindStack Kind = "Stack"
+	// KindSecret identifies named, scoped, daemon-managed credential
+	// documents (issue #619). `kuke apply` writes the secret bytes to a
+	// root-owned file under the scope's metadata tree; phase 3a ships no
+	// `get`/`delete`/referencing surface (tracked in #622 and #623).
+	KindSecret Kind = "Secret"
 	// KindCellProfile identifies per-user cell-template documents loaded by
 	// `kuke run -p`. Profiles are not server-side resources — `kuke apply`
 	// rejects them.
