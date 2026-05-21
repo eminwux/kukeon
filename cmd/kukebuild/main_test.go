@@ -45,6 +45,9 @@ func TestParseArgsDefaults(t *testing.T) {
 	if cfg.root != defaultBuildRoot {
 		t.Errorf("root = %q, want %q", cfg.root, defaultBuildRoot)
 	}
+	if cfg.rootExplicit {
+		t.Error("rootExplicit = true, want false when --root is not supplied")
+	}
 	if len(cfg.buildArgs) != 0 {
 		t.Errorf("buildArgs = %v, want empty", cfg.buildArgs)
 	}
@@ -82,6 +85,9 @@ func TestParseArgsAllFlags(t *testing.T) {
 	}
 	if cfg.root != "/tmp/state" {
 		t.Errorf("root = %q", cfg.root)
+	}
+	if !cfg.rootExplicit {
+		t.Error("rootExplicit = false, want true when --root is supplied")
 	}
 	if cfg.buildArgs["FOO"] != "bar" {
 		t.Errorf("buildArgs[FOO] = %q, want bar", cfg.buildArgs["FOO"])
