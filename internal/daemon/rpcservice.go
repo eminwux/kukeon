@@ -150,6 +150,13 @@ func (s *KukeonV1Service) GetContainer(args *kukeonv1.GetContainerArgs, reply *k
 	return nil
 }
 
+func (s *KukeonV1Service) GetSecret(args *kukeonv1.GetSecretArgs, reply *kukeonv1.GetSecretReply) error {
+	result, err := s.core.GetSecret(s.ctx, args.Doc)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
 // ---- List ----
 
 func (s *KukeonV1Service) ListRealms(_ *kukeonv1.ListRealmsArgs, reply *kukeonv1.ListRealmsReply) error {
@@ -183,6 +190,13 @@ func (s *KukeonV1Service) ListCells(args *kukeonv1.ListCellsArgs, reply *kukeonv
 func (s *KukeonV1Service) ListContainers(args *kukeonv1.ListContainersArgs, reply *kukeonv1.ListContainersReply) error {
 	containers, err := s.core.ListContainers(s.ctx, args.RealmName, args.SpaceName, args.StackName, args.CellName)
 	reply.Containers = containers
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
+func (s *KukeonV1Service) ListSecrets(args *kukeonv1.ListSecretsArgs, reply *kukeonv1.ListSecretsReply) error {
+	secrets, err := s.core.ListSecrets(s.ctx, args.RealmName, args.SpaceName, args.StackName, args.CellName)
+	reply.Secrets = secrets
 	reply.Err = kukeonv1.ToAPIError(err)
 	return nil
 }
@@ -297,6 +311,13 @@ func (s *KukeonV1Service) DeleteContainer(
 	reply *kukeonv1.DeleteContainerReply,
 ) error {
 	result, err := s.core.DeleteContainer(s.ctx, args.Doc)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
+func (s *KukeonV1Service) DeleteSecret(args *kukeonv1.DeleteSecretArgs, reply *kukeonv1.DeleteSecretReply) error {
+	result, err := s.core.DeleteSecret(s.ctx, args.Doc)
 	reply.Result = result
 	reply.Err = kukeonv1.ToAPIError(err)
 	return nil

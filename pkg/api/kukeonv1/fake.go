@@ -77,6 +77,10 @@ func (FakeClient) GetContainer(context.Context, v1beta1.ContainerDoc) (GetContai
 	return GetContainerResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) GetSecret(context.Context, v1beta1.SecretDoc) (GetSecretResult, error) {
+	return GetSecretResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) ListRealms(context.Context) ([]v1beta1.RealmDoc, error) {
 	return nil, ErrUnexpectedCall
 }
@@ -94,6 +98,10 @@ func (FakeClient) ListCells(context.Context, string, string, string) ([]v1beta1.
 }
 
 func (FakeClient) ListContainers(context.Context, string, string, string, string) ([]v1beta1.ContainerSpec, error) {
+	return nil, ErrUnexpectedCall
+}
+
+func (FakeClient) ListSecrets(context.Context, string, string, string, string) ([]v1beta1.SecretDoc, error) {
 	return nil, ErrUnexpectedCall
 }
 
@@ -147,6 +155,10 @@ func (FakeClient) DeleteCell(context.Context, v1beta1.CellDoc) (DeleteCellResult
 
 func (FakeClient) DeleteContainer(context.Context, v1beta1.ContainerDoc) (DeleteContainerResult, error) {
 	return DeleteContainerResult{}, ErrUnexpectedCall
+}
+
+func (FakeClient) DeleteSecret(context.Context, v1beta1.SecretDoc) (DeleteSecretResult, error) {
+	return DeleteSecretResult{}, ErrUnexpectedCall
 }
 
 func (FakeClient) PurgeRealm(context.Context, v1beta1.RealmDoc, bool, bool) (PurgeRealmResult, error) {

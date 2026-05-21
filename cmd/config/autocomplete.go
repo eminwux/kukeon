@@ -529,6 +529,66 @@ func CompleteContainerNames(cmd *cobra.Command, args []string, toComplete string
 	return names, cobra.ShellCompDirectiveNoFileComp
 }
 
+// CompleteSecretNames provides shell completion for `kind: Secret` names by
+// listing existing secrets (issue #622). It can be used as a ValidArgsFunction
+// or for flag completion. Scope flags filter the candidate set: --realm
+// defaults to "default", while --space/--stack/--cell are unset by default
+// (an unset deeper coordinate means "list the whole subtree"). When used as a
+// ValidArgsFunction it requires --realm to be set before completing.
+func CompleteSecretNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) >= 1 && toComplete == "" {
+		if cmd.ValidArgsFunction != nil {
+			testArgs := make([]string, len(args), len(args)+1)
+			copy(testArgs, args)
+			testArgs = append(testArgs, "test")
+			if cmd.Args != nil {
+				if err := cmd.Args(cmd, testArgs); err != nil {
+					return []string{}, cobra.ShellCompDirectiveNoFileComp
+				}
+			}
+		}
+	}
+
+	client, err := completionClient(cmd)
+	if err != nil {
+		return []string{}, cobra.ShellCompDirectiveNoFileComp
+	}
+	defer func() { _ = client.Close() }()
+
+	realmName := getFlagValueWithDefault(cmd, "realm", "default")
+	spaceName := getFlagValueWithDefault(cmd, "space", "")
+	stackName := getFlagValueWithDefault(cmd, "stack", "")
+	cellName := getFlagValueWithDefault(cmd, "cell", "")
+
+	if cmd.ValidArgsFunction != nil && len(args) == 0 {
+		if realmName == "" {
+			return []string{}, cobra.ShellCompDirectiveNoFileComp
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(cmd.Context(), completionTimeout)
+	defer cancel()
+
+	secrets, err := client.ListSecrets(ctx, realmName, spaceName, stackName, cellName)
+	if err != nil {
+		return []string{}, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	seen := make(map[string]bool)
+	names := make([]string, 0, len(secrets))
+	for _, secret := range secrets {
+		name := secret.Metadata.Name
+		if toComplete == "" || strings.HasPrefix(name, toComplete) {
+			if !seen[name] {
+				seen[name] = true
+				names = append(names, name)
+			}
+		}
+	}
+
+	return names, cobra.ShellCompDirectiveNoFileComp
+}
+
 // CompleteProfileNames provides shell completion for `-p/--profile` by listing
 // every CellProfile under the active profiles directory ($KUKE_PROFILES_DIR or
 // $HOME/.kuke/profiles.d). Errors swallow to an empty list — a fresh shell with

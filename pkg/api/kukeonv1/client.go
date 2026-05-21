@@ -43,6 +43,10 @@ type Client interface {
 	GetStack(ctx context.Context, doc v1beta1.StackDoc) (GetStackResult, error)
 	GetCell(ctx context.Context, doc v1beta1.CellDoc) (GetCellResult, error)
 	GetContainer(ctx context.Context, doc v1beta1.ContainerDoc) (GetContainerResult, error)
+	// GetSecret reports the metadata-only view of a single named, scoped
+	// `kind: Secret` (issue #622). Spec.data is never echoed — the bytes do
+	// not traverse this RPC by design (#619).
+	GetSecret(ctx context.Context, doc v1beta1.SecretDoc) (GetSecretResult, error)
 
 	ListRealms(ctx context.Context) ([]v1beta1.RealmDoc, error)
 	ListSpaces(ctx context.Context, realmName string) ([]v1beta1.SpaceDoc, error)
@@ -52,6 +56,10 @@ type Client interface {
 		ctx context.Context,
 		realmName, spaceName, stackName, cellName string,
 	) ([]v1beta1.ContainerSpec, error)
+	// ListSecrets enumerates the metadata of every Secret bound to the
+	// filter scope or any scope nested within it (issue #622). An empty
+	// realmName lists across all realms. spec.data is never echoed.
+	ListSecrets(ctx context.Context, realmName, spaceName, stackName, cellName string) ([]v1beta1.SecretDoc, error)
 
 	StartCell(ctx context.Context, doc v1beta1.CellDoc) (StartCellResult, error)
 	StartContainer(ctx context.Context, doc v1beta1.ContainerDoc) (StartContainerResult, error)
@@ -75,6 +83,9 @@ type Client interface {
 	DeleteStack(ctx context.Context, doc v1beta1.StackDoc, force, cascade bool) (DeleteStackResult, error)
 	DeleteCell(ctx context.Context, doc v1beta1.CellDoc) (DeleteCellResult, error)
 	DeleteContainer(ctx context.Context, doc v1beta1.ContainerDoc) (DeleteContainerResult, error)
+	// DeleteSecret removes a single named, scoped Secret's daemon-stored
+	// file (issue #622). The live-reference safety gate ships in phase 3c.
+	DeleteSecret(ctx context.Context, doc v1beta1.SecretDoc) (DeleteSecretResult, error)
 
 	PurgeRealm(ctx context.Context, doc v1beta1.RealmDoc, force, cascade bool) (PurgeRealmResult, error)
 	PurgeSpace(ctx context.Context, doc v1beta1.SpaceDoc, force, cascade bool) (PurgeSpaceResult, error)
@@ -158,12 +169,14 @@ const (
 	MethodGetStack     = ServiceName + ".GetStack"
 	MethodGetCell      = ServiceName + ".GetCell"
 	MethodGetContainer = ServiceName + ".GetContainer"
+	MethodGetSecret    = ServiceName + ".GetSecret"
 
 	MethodListRealms     = ServiceName + ".ListRealms"
 	MethodListSpaces     = ServiceName + ".ListSpaces"
 	MethodListStacks     = ServiceName + ".ListStacks"
 	MethodListCells      = ServiceName + ".ListCells"
 	MethodListContainers = ServiceName + ".ListContainers"
+	MethodListSecrets    = ServiceName + ".ListSecrets"
 
 	MethodStartCell       = ServiceName + ".StartCell"
 	MethodStartContainer  = ServiceName + ".StartContainer"
@@ -179,6 +192,7 @@ const (
 	MethodDeleteStack     = ServiceName + ".DeleteStack"
 	MethodDeleteCell      = ServiceName + ".DeleteCell"
 	MethodDeleteContainer = ServiceName + ".DeleteContainer"
+	MethodDeleteSecret    = ServiceName + ".DeleteSecret"
 
 	MethodPurgeRealm     = ServiceName + ".PurgeRealm"
 	MethodPurgeSpace     = ServiceName + ".PurgeSpace"

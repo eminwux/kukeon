@@ -166,6 +166,37 @@ func NormalizeSecret(req ext.SecretDoc) (intmodel.Secret, ext.Version, error) {
 	return internal, version, nil
 }
 
+// ConvertSecretToExternal builds a metadata-only external SecretDoc from the
+// internal hub type (issue #622). Spec.Data is deliberately left zero: the
+// get/list verbs never echo the secret material, preserving the
+// never-round-tripped contract from #619.
+func ConvertSecretToExternal(in intmodel.Secret) ext.SecretDoc {
+	return ext.SecretDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindSecret,
+		Metadata: ext.SecretMetadata{
+			Name:  in.Metadata.Name,
+			Realm: in.Metadata.Realm,
+			Space: in.Metadata.Space,
+			Stack: in.Metadata.Stack,
+			Cell:  in.Metadata.Cell,
+		},
+	}
+}
+
+// ConvertSecretListToExternal maps a slice of internal Secrets to metadata-only
+// external SecretDocs (issue #622).
+func ConvertSecretListToExternal(in []intmodel.Secret) []ext.SecretDoc {
+	if in == nil {
+		return nil
+	}
+	out := make([]ext.SecretDoc, len(in))
+	for i := range in {
+		out[i] = ConvertSecretToExternal(in[i])
+	}
+	return out
+}
+
 // ConvertSpaceDocToInternal converts an external SpaceDoc to the internal hub type.
 func ConvertSpaceDocToInternal(in ext.SpaceDoc) (intmodel.Space, error) {
 	switch in.APIVersion {

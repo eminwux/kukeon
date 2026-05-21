@@ -263,6 +263,19 @@ func (c *UnixClient) GetContainer(ctx context.Context, doc v1beta1.ContainerDoc)
 	return reply.Result, nil
 }
 
+// GetSecret implements Client.
+func (c *UnixClient) GetSecret(ctx context.Context, doc v1beta1.SecretDoc) (GetSecretResult, error) {
+	args := &GetSecretArgs{Doc: doc}
+	reply := &GetSecretReply{}
+	if err := c.call(ctx, MethodGetSecret, args, reply); err != nil {
+		return GetSecretResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // ListRealms implements Client.
 func (c *UnixClient) ListRealms(ctx context.Context) ([]v1beta1.RealmDoc, error) {
 	args := &ListRealmsArgs{}
@@ -329,6 +342,22 @@ func (c *UnixClient) ListContainers(
 		return reply.Containers, FromAPIError(reply.Err)
 	}
 	return reply.Containers, nil
+}
+
+// ListSecrets implements Client.
+func (c *UnixClient) ListSecrets(
+	ctx context.Context,
+	realmName, spaceName, stackName, cellName string,
+) ([]v1beta1.SecretDoc, error) {
+	args := &ListSecretsArgs{RealmName: realmName, SpaceName: spaceName, StackName: stackName, CellName: cellName}
+	reply := &ListSecretsReply{}
+	if err := c.call(ctx, MethodListSecrets, args, reply); err != nil {
+		return nil, err
+	}
+	if reply.Err != nil {
+		return reply.Secrets, FromAPIError(reply.Err)
+	}
+	return reply.Secrets, nil
 }
 
 // StartCell implements Client.
@@ -511,6 +540,19 @@ func (c *UnixClient) DeleteContainer(ctx context.Context, doc v1beta1.ContainerD
 	reply := &DeleteContainerReply{}
 	if err := c.call(ctx, MethodDeleteContainer, args, reply); err != nil {
 		return DeleteContainerResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
+// DeleteSecret implements Client.
+func (c *UnixClient) DeleteSecret(ctx context.Context, doc v1beta1.SecretDoc) (DeleteSecretResult, error) {
+	args := &DeleteSecretArgs{Doc: doc}
+	reply := &DeleteSecretReply{}
+	if err := c.call(ctx, MethodDeleteSecret, args, reply); err != nil {
+		return DeleteSecretResult{}, err
 	}
 	if reply.Err != nil {
 		return reply.Result, FromAPIError(reply.Err)

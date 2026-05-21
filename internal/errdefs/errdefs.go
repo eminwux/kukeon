@@ -301,6 +301,15 @@ var (
 	ErrSecretScopeNotFound = errors.New("secret scope does not exist")
 	ErrWriteSecret         = errors.New("failed to write secret bytes")
 
+	// Secret kind read/delete-verb errors (issue #622). The bytes are never
+	// surfaced by these paths — get reports metadata only, delete removes the
+	// daemon-stored file.
+
+	ErrSecretNotFound = errors.New("secret not found")
+	ErrGetSecret      = errors.New("failed to get secret")
+	ErrListSecrets    = errors.New("failed to list secrets")
+	ErrDeleteSecret   = errors.New("failed to delete secret")
+
 	// Repo-related errors (containers[].repos[], issue #617).
 
 	ErrRepoNameRequired      = errors.New("repo name is required")

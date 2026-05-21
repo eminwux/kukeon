@@ -196,6 +196,22 @@ type GetContainerResult struct {
 	ContainerExists    bool
 }
 
+type GetSecretArgs struct {
+	Doc v1beta1.SecretDoc
+}
+
+type GetSecretReply struct {
+	Result GetSecretResult
+	Err    *APIError
+}
+
+// GetSecretResult carries the metadata-only view of a Secret. Secret.Spec.Data
+// is never populated — the bytes do not traverse this RPC (issue #619/#622).
+type GetSecretResult struct {
+	Secret         v1beta1.SecretDoc
+	MetadataExists bool
+}
+
 // ---- List ----
 
 type ListRealmsArgs struct{}
@@ -245,6 +261,19 @@ type ListContainersArgs struct {
 type ListContainersReply struct {
 	Containers []v1beta1.ContainerSpec
 	Err        *APIError
+}
+
+type ListSecretsArgs struct {
+	RealmName string
+	SpaceName string
+	StackName string
+	CellName  string
+}
+
+// ListSecretsReply carries metadata-only SecretDocs — Spec.Data is never set.
+type ListSecretsReply struct {
+	Secrets []v1beta1.SecretDoc
+	Err     *APIError
 }
 
 // ---- Lifecycle (Start/Stop/Kill) ----
@@ -410,6 +439,22 @@ type DeleteCellResult struct {
 	ContainersDeleted bool
 	CgroupDeleted     bool
 	MetadataDeleted   bool
+}
+
+type DeleteSecretArgs struct {
+	Doc v1beta1.SecretDoc
+}
+
+type DeleteSecretReply struct {
+	Result DeleteSecretResult
+	Err    *APIError
+}
+
+// DeleteSecretResult reports the removed Secret (metadata only) and whether the
+// file existed to delete.
+type DeleteSecretResult struct {
+	Secret  v1beta1.SecretDoc
+	Deleted bool
 }
 
 type DeleteContainerArgs struct {
