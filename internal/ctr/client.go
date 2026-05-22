@@ -35,6 +35,7 @@ type client struct {
 	logger               *slog.Logger
 	socket               string
 	cClient              *containerd.Client
+	cgroupsMu            sync.RWMutex
 	cgroups              map[string]*cgroup2.Manager
 	containersMu         sync.RWMutex
 	containers           map[string]containerd.Container
