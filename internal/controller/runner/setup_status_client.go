@@ -30,9 +30,10 @@ import (
 
 // setupStatusDialTimeout bounds the connect + round-trip to a container's
 // kuketty control socket. The pull is a best-effort enrichment of a `kuke get`
-// read (see populateRepoStatuses): a slow or wedged kuketty must never stall
-// the status read, so the call gives up quickly and leaves Repos empty rather
-// than blocking the operator's `kuke get`.
+// read (see repoStatuses / populateCellContainerStatuses in helpers.go): a
+// slow or wedged kuketty must never stall the status read, so the call gives
+// up quickly and leaves Repos empty rather than blocking the operator's
+// `kuke get`.
 const setupStatusDialTimeout = 2 * time.Second
 
 // pullSetupStatus dials a container's kuketty control socket and invokes the
