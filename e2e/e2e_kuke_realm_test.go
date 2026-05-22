@@ -23,7 +23,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/util/fs"
@@ -33,9 +32,7 @@ import (
 // generateUniqueRealmName generates a unique realm name for tests.
 func generateUniqueRealmName(t *testing.T) string {
 	t.Helper()
-	timestamp := time.Now().UnixNano()
-	hexID := fmt.Sprintf("%02x", timestamp&0xFF)
-	return fmt.Sprintf("e-r-%s", hexID)
+	return fmt.Sprintf("e-r-%s", uniqueNameID())
 }
 
 // verifyRealmMetadataExists verifies realm metadata file exists.
