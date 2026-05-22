@@ -24,6 +24,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	ctd "github.com/containerd/containerd/v2/client"
@@ -260,6 +261,16 @@ func newSolveOpt(cfg *buildConfig, authProvider session.Attachable) (*client.Sol
 	}
 	for k, v := range cfg.buildArgs {
 		frontendAttrs["build-arg:"+k] = v
+	}
+
+	// --platform: the Dockerfile frontend reads the comma-separated `platform`
+	// attr (frontend/dockerui keyTargetPlatform) and, for more than one target,
+	// emits a per-arch ref set that the image exporter writes as a single
+	// manifest list into the realm namespace — no exporter-side wiring beyond
+	// this attr (phase 2c #646). cfg.platforms is already normalized + validated
+	// at parse time; empty leaves the frontend on its build-host default.
+	if len(cfg.platforms) > 0 {
+		frontendAttrs["platform"] = strings.Join(cfg.platforms, ",")
 	}
 
 	name, err := normalizeImageName(cfg.tag)

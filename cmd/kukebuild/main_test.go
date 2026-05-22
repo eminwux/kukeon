@@ -218,6 +218,73 @@ func TestParseArgsPushRequiresQualifiedTag(t *testing.T) {
 	}
 }
 
+func TestParseArgsPlatform(t *testing.T) {
+	// No --platform: single-image build-host default (nil platforms).
+	cfg, err := parseArgs([]string{"-t", "x:1", "/ctx"})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	if len(cfg.platforms) != 0 {
+		t.Errorf("platforms = %v, want empty when --platform is not supplied", cfg.platforms)
+	}
+
+	// A single target normalizes and is carried through.
+	cfg, err = parseArgs([]string{"-t", "x:1", "--platform", "linux/amd64", "/ctx"})
+	if err != nil {
+		t.Fatalf("parseArgs(single platform): %v", err)
+	}
+	if got := []string{"linux/amd64"}; !reflect.DeepEqual(cfg.platforms, got) {
+		t.Errorf("platforms = %v, want %v", cfg.platforms, got)
+	}
+
+	// A comma-separated list yields the normalized multi-platform set in order.
+	cfg, err = parseArgs([]string{"-t", "x:1", "--platform", "linux/amd64,linux/arm64", "/ctx"})
+	if err != nil {
+		t.Fatalf("parseArgs(multi platform): %v", err)
+	}
+	want := []string{"linux/amd64", "linux/arm64"}
+	if !reflect.DeepEqual(cfg.platforms, want) {
+		t.Errorf("platforms = %v, want %v", cfg.platforms, want)
+	}
+}
+
+func TestParsePlatformsNormalizesAliasesAndSpacing(t *testing.T) {
+	// arm64 is normalized to its canonical os/arch; surrounding whitespace and a
+	// trailing empty segment are tolerated.
+	got, err := parsePlatforms("linux/arm64/v8 , linux/amd64,")
+	if err != nil {
+		t.Fatalf("parsePlatforms: %v", err)
+	}
+	want := []string{"linux/arm64", "linux/amd64"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("parsePlatforms = %v, want %v", got, want)
+	}
+}
+
+func TestParsePlatformsUsageErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"platform garbage", []string{"-t", "x:1", "--platform", "not a platform!!", "/ctx"}},
+		{"platform empty value", []string{"-t", "x:1", "--platform", " , ", "/ctx"}},
+		{"platform duplicate", []string{"-t", "x:1", "--platform", "linux/amd64,linux/amd64", "/ctx"}},
+		{"platform duplicate via alias", []string{"-t", "x:1", "--platform", "linux/arm64,linux/arm64/v8", "/ctx"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseArgs(tc.args)
+			if err == nil {
+				t.Fatalf("parseArgs(%v): expected error, got nil", tc.args)
+			}
+			var ue *usageError
+			if !errors.As(err, &ue) {
+				t.Errorf("parseArgs(%v): error %v is not a *usageError", tc.args, err)
+			}
+		})
+	}
+}
+
 func TestParseArgsShortAliases(t *testing.T) {
 	cfg, err := parseArgs([]string{"-f", "/ctx/Containerfile", "-t", "x:1", "/ctx"})
 	if err != nil {
