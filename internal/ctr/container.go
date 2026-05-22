@@ -326,9 +326,10 @@ func (c *client) CreateContainer(namespace string, spec ContainerSpec, creds []R
 	}
 
 	nsCtx := c.namespaceCtx(namespace)
+	cc := c.conn()
 
 	// Check if container already exists
-	_, err := c.cClient.LoadContainer(nsCtx, spec.ID)
+	_, err := cc.LoadContainer(nsCtx, spec.ID)
 	if err == nil {
 		c.logger.WarnContext(c.ctx, "container already exists", "id", spec.ID)
 		return nil, internalerrdefs.ErrContainerExists
@@ -385,7 +386,7 @@ func (c *client) CreateContainer(namespace string, spec ContainerSpec, creds []R
 		opts = append(opts, containerd.WithContainerLabels(spec.Labels))
 	}
 
-	container, err := c.cClient.NewContainer(nsCtx, spec.ID, opts...)
+	container, err := cc.NewContainer(nsCtx, spec.ID, opts...)
 	if err != nil {
 		c.logger.ErrorContext(c.ctx, "failed to create container", "id", spec.ID, "err", formatError(err))
 		return nil, fmt.Errorf("failed to create container: %w", err)
@@ -408,7 +409,7 @@ func (c *client) GetContainer(namespace, id string) (containerd.Container, error
 func (c *client) ListContainers(namespace string, filters ...string) ([]containerd.Container, error) {
 	nsCtx := c.namespaceCtx(namespace)
 
-	containers, err := c.cClient.Containers(nsCtx, filters...)
+	containers, err := c.conn().Containers(nsCtx, filters...)
 	if err != nil {
 		c.logger.ErrorContext(c.ctx, "failed to list containers", "err", formatError(err))
 		return nil, fmt.Errorf("failed to list containers: %w", err)
@@ -430,7 +431,7 @@ func (c *client) ExistsContainer(namespace, id string) (bool, error) {
 	}
 
 	nsCtx := c.namespaceCtx(namespace)
-	_, err := c.cClient.LoadContainer(nsCtx, id)
+	_, err := c.conn().LoadContainer(nsCtx, id)
 	if err != nil {
 		// "Not found" is not an error for Exists - it's a valid result (container doesn't exist)
 		if errdefs.IsNotFound(err) {

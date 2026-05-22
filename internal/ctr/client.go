@@ -224,6 +224,20 @@ func (c *client) Close() error {
 	return c.closeLocked()
 }
 
+// conn returns the current containerd client snapshotted under cClientMu, so a
+// reader observes a consistent pointer even while Connect()'s reconnect path is
+// concurrently swapping c.cClient (issue #709 — #695 guarded only the writer).
+// The lock is held just for the pointer read; the snapshot is then used for the
+// whole operation, so the reader path is never serialized against an in-flight
+// RPC and a concurrent reconnect cannot tear an operation already dereferencing
+// the prior pointer. Returns nil if the client has not connected yet — callers
+// that have not already gated on Connect() must nil-check.
+func (c *client) conn() *containerd.Client {
+	c.cClientMu.Lock()
+	defer c.cClientMu.Unlock()
+	return c.cClient
+}
+
 // closeLocked tears down c.cClient. The caller must hold c.cClientMu — it is
 // invoked both by the public Close() (which takes the lock) and by Connect()'s
 // reconnect path (which already holds the lock), so the teardown stays guarded

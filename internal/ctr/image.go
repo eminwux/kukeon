@@ -90,9 +90,10 @@ func (c *client) ensureImageUnpacked(namespace string, image containerd.Image, s
 // Returns the image and any error encountered.
 func (c *client) pullImage(namespace string, imageRef string, creds []RegistryCredentials) (containerd.Image, error) {
 	nsCtx := c.namespaceCtx(namespace)
+	cc := c.conn()
 
 	// Try to get the image locally first
-	image, err := c.cClient.GetImage(nsCtx, imageRef)
+	image, err := cc.GetImage(nsCtx, imageRef)
 	if err == nil {
 		return image, nil
 	}
@@ -102,7 +103,7 @@ func (c *client) pullImage(namespace string, imageRef string, creds []RegistryCr
 
 	// Create a lease for the pull operation to avoid lease management issues
 	// The lease will be automatically cleaned up when the context is done
-	leaseManager := c.cClient.LeasesService()
+	leaseManager := cc.LeasesService()
 	lease, leaseErr := leaseManager.Create(
 		nsCtx,
 		leases.WithID(fmt.Sprintf("pull-%s-%d", imageRef, time.Now().UnixNano())),
@@ -147,7 +148,7 @@ func (c *client) pullImage(namespace string, imageRef string, creds []RegistryCr
 		c.logger.DebugContext(c.ctx, "pulling image anonymously", "image", imageRef)
 	}
 
-	image, err = c.cClient.Pull(nsCtx, imageRef, pullOpts...)
+	image, err = cc.Pull(nsCtx, imageRef, pullOpts...)
 	if err != nil {
 		c.logger.ErrorContext(c.ctx, "failed to pull image", "image", imageRef, "err", formatError(err))
 		return nil, fmt.Errorf("failed to pull image %s: %w", imageRef, err)
@@ -166,7 +167,7 @@ func (c *client) pullImage(namespace string, imageRef string, creds []RegistryCr
 func (c *client) LoadImage(namespace string, reader io.Reader) ([]string, error) {
 	nsCtx := c.namespaceCtx(namespace)
 
-	imgs, err := c.cClient.Import(nsCtx, reader, containerd.WithSkipMissing())
+	imgs, err := c.conn().Import(nsCtx, reader, containerd.WithSkipMissing())
 	if err != nil {
 		c.logger.ErrorContext(
 			c.ctx,
@@ -194,7 +195,7 @@ func (c *client) LoadImage(namespace string, reader io.Reader) ([]string, error)
 func (c *client) ListImages(namespace string) ([]ImageInfo, error) {
 	nsCtx := c.namespaceCtx(namespace)
 
-	imgs, err := c.cClient.ListImages(nsCtx)
+	imgs, err := c.conn().ListImages(nsCtx)
 	if err != nil {
 		c.logger.ErrorContext(
 			c.ctx,
@@ -221,7 +222,7 @@ func (c *client) ListImages(namespace string) ([]ImageInfo, error) {
 func (c *client) GetImage(namespace, ref string) (ImageInfo, error) {
 	nsCtx := c.namespaceCtx(namespace)
 
-	img, err := c.cClient.GetImage(nsCtx, ref)
+	img, err := c.conn().GetImage(nsCtx, ref)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
 			return ImageInfo{}, fmt.Errorf("%w: %s", internalerrdefs.ErrImageNotFound, ref)
@@ -248,7 +249,7 @@ func (c *client) GetImage(namespace, ref string) (ImageInfo, error) {
 func (c *client) DeleteImage(namespace, ref string) error {
 	nsCtx := c.namespaceCtx(namespace)
 
-	if err := c.cClient.ImageService().Delete(nsCtx, ref); err != nil {
+	if err := c.conn().ImageService().Delete(nsCtx, ref); err != nil {
 		if errdefs.IsNotFound(err) {
 			return fmt.Errorf("%w: %s", internalerrdefs.ErrImageNotFound, ref)
 		}
