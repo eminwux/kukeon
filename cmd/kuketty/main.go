@@ -151,18 +151,21 @@ func run(args []string) error {
 	// failed create stage returns here so kuketty exits non-zero before
 	// sbshserver.Serve and the daemon observes the task as Failed. runOn: start
 	// (and absent) stages are not run here — they were forwarded to sbsh's
-	// Stages.OnInit at buildTerminalSpec and run in-shell every boot. Reporting
-	// per-stage outcomes into ContainerStatus.Stages over the RPC is phase B
-	// (#689); this phase wires the executor only.
-	if err := processStages(ctx, createStages(doc.Spec.Tty), logger); err != nil {
+	// Stages.OnInit at buildTerminalSpec and run in-shell every boot. The
+	// per-stage outcomes feed the GetSetupStatus verb registered below (issue
+	// #689); on the failure path stageStatuses is discarded with the error and
+	// the verb is never reached.
+	stageStatuses, err := processStages(ctx, createStages(doc.Spec.Tty), logger)
+	if err != nil {
 		return err
 	}
 
 	// Register the GetSetupStatus verb on the same control socket the daemon
-	// dials for `kuke attach`, so kukeond can pull the repo outcomes post-Serve
-	// and write ContainerStatus.Repos (issue #642). ContainerStatus is the
-	// single source of truth — there is no status file in the container.
-	srv, err := sbshserver.New(spec, logger, setupStatusOption(repoStatuses)...)
+	// dials for `kuke attach`, so kukeond can pull the repo + create-stage
+	// outcomes post-Serve and write ContainerStatus.Repos / .Stages (issues
+	// #642, #689). ContainerStatus is the single source of truth — there is no
+	// status file in the container.
+	srv, err := sbshserver.New(spec, logger, setupStatusOption(repoStatuses, stageStatuses)...)
 	if err != nil {
 		return fmt.Errorf("server.New: %w", err)
 	}

@@ -34,6 +34,7 @@ import (
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // purgeCNIForContainer removes all CNI-related resources for a specific container.
@@ -728,11 +729,12 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 			ExitCode:     0,           // TODO: retrieve from containerd
 			ExitSignal:   "",          // TODO: retrieve from containerd
 		}
-		// Pull per-repo clone/fetch outcome over the kuketty control socket
-		// (issue #642). Best-effort: only Attachable containers that declared
-		// repos[] and are Ready can serve the verb, and any failure leaves
-		// Repos empty rather than blocking the status read.
-		status.Repos = r.repoStatuses(cell, containerSpec, state)
+		// Pull per-repo clone/fetch and per-create-stage outcomes over the
+		// kuketty control socket (issues #642, #689) in a single dial.
+		// Best-effort: only Attachable containers that declared repos[] or
+		// create stages and are Ready can serve the verb, and any failure leaves
+		// Repos/Stages empty rather than blocking the status read.
+		status.Repos, status.Stages = r.setupStatuses(cell, containerSpec, state)
 		statuses = append(statuses, status)
 	}
 
@@ -740,25 +742,31 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 	return nil
 }
 
-// repoStatuses pulls the per-repo clone/fetch outcome from a container's
-// kuketty control socket via the GetSetupStatus RPC (issue #642), mapping the
-// wire payload into the internal RepoStatus the controller persists in
-// ContainerStatus.Repos. ContainerStatus is the single source of truth — there
-// is no status file in the container.
+// setupStatuses pulls the per-repo clone/fetch outcome and the per-create-stage
+// outcome from a container's kuketty control socket via the GetSetupStatus RPC
+// (issues #642, #689) in a single dial, mapping the wire payload into the
+// internal RepoStatus / StageStatus the controller persists in
+// ContainerStatus.Repos / .Stages. ContainerStatus is the single source of
+// truth — there is no status file in the container.
 //
-// The pull is skipped (returns nil) unless the container is Attachable, has
-// declared repos[], and is Ready: a kuketty that has not reached Serve does
-// not yet serve the verb, and one that exited on a required-repo failure never
-// will (its outcome comes from the task-failed signal + kuketty log instead —
-// AC #5). Any dial/call error is logged at debug and yields nil so a wedged or
-// still-starting kuketty never stalls `kuke get`.
-func (r *Exec) repoStatuses(
+// The pull is skipped (returns nil, nil) unless the container is Attachable,
+// Ready, and declared at least one repo[] or runOn: create stage: a kuketty
+// that has not reached Serve does not yet serve the verb, one that exited on a
+// required-repo or create-stage failure never will (its outcome comes from the
+// task-failed signal + kuketty log instead — AC #5), and a container with
+// neither repos nor create stages has nothing to report. Any dial/call error is
+// logged at debug and yields nil so a wedged or still-starting kuketty never
+// stalls `kuke get`.
+func (r *Exec) setupStatuses(
 	cell *intmodel.Cell,
 	containerSpec intmodel.ContainerSpec,
 	state intmodel.ContainerState,
-) []intmodel.RepoStatus {
-	if !containerSpec.Attachable || len(containerSpec.Repos) == 0 || state != intmodel.ContainerStateReady {
-		return nil
+) ([]intmodel.RepoStatus, []intmodel.StageStatus) {
+	if !containerSpec.Attachable || state != intmodel.ContainerStateReady {
+		return nil, nil
+	}
+	if len(containerSpec.Repos) == 0 && !hasCreateStages(containerSpec) {
+		return nil, nil
 	}
 
 	socketPath := fs.ContainerSocketSymlinkPath(
@@ -766,15 +774,30 @@ func (r *Exec) repoStatuses(
 		cell.Spec.RealmName, cell.Spec.SpaceName, cell.Spec.StackName, cell.Metadata.Name,
 		containerSpec.ID,
 	)
-	repos, err := pullSetupStatus(r.ctx, socketPath)
+	reply, err := pullSetupStatus(r.ctx, socketPath)
 	if err != nil {
-		r.logger.DebugContext(r.ctx, "failed to pull repo setup status",
+		r.logger.DebugContext(r.ctx, "failed to pull setup status",
 			"container", containerSpec.ID,
 			"socket", socketPath,
 			"error", err)
-		return nil
+		return nil, nil
 	}
-	return setupStatusToInternal(repos)
+	return repoStatusToInternal(reply.Repos), stageStatusToInternal(reply.Stages)
+}
+
+// hasCreateStages reports whether the container declares at least one runOn:
+// create TtyStage — the gate (alongside repos[]) for dialing kuketty's setup
+// status verb. Mirrors cmd/kuketty's createStages selection.
+func hasCreateStages(containerSpec intmodel.ContainerSpec) bool {
+	if containerSpec.Tty == nil {
+		return false
+	}
+	for _, s := range containerSpec.Tty.OnInit {
+		if s.RunOn == v1beta1.RunOnCreate {
+			return true
+		}
+	}
+	return false
 }
 
 // PopulateAndPersistCellContainerStatuses populates container statuses from containerd

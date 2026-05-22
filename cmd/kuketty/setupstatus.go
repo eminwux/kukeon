@@ -23,42 +23,45 @@ import (
 
 // setupStatusHandler is the receiver kuketty registers as a custom JSON-RPC
 // service on the sbsh control server (issue #642). It serves the per-repo
-// outcome of the pre-Serve clone/fetch step (issue #617) so kukeond can pull
-// it post-Serve and write ContainerStatus.Repos.
+// outcome of the pre-Serve clone/fetch step (issue #617) and the per-stage
+// outcome of the pre-Serve runOn: create execution (issue #689) so kukeond can
+// pull them post-Serve and write ContainerStatus.Repos / .Stages.
 //
 // The statuses are captured once, before Serve brings the control RPC live,
 // and never mutated afterward, so the read in GetSetupStatus needs no
-// synchronization — the slice is published happens-before the server goroutine
-// that serves the verb is started.
+// synchronization — the slices are published happens-before the server
+// goroutine that serves the verb is started.
 type setupStatusHandler struct {
-	repos []setupstatus.Repo
+	repos  []setupstatus.Repo
+	stages []setupstatus.Stage
 }
 
-// GetSetupStatus reports kuketty's pre-Serve repo outcomes. The wire method is
-// "<setupstatus.ServiceName>.GetSetupStatus" (see setupstatus.Method). The
-// net/rpc signature scheme requires (args, reply *T) error with exported
-// argument/reply types — satisfied by setupstatus.Args and setupstatus.Reply.
-// The error return is mandated by that signature even though this read-only
-// verb never fails; net/rpc would reject the method as an RPC handler without
-// it.
+// GetSetupStatus reports kuketty's pre-Serve repo + create-stage outcomes. The
+// wire method is "<setupstatus.ServiceName>.GetSetupStatus" (see
+// setupstatus.Method). The net/rpc signature scheme requires (args, reply *T)
+// error with exported argument/reply types — satisfied by setupstatus.Args and
+// setupstatus.Reply. The error return is mandated by that signature even though
+// this read-only verb never fails; net/rpc would reject the method as an RPC
+// handler without it.
 //
 //nolint:unparam // error return required by net/rpc's handler signature (see godoc above)
 func (h *setupStatusHandler) GetSetupStatus(_ setupstatus.Args, reply *setupstatus.Reply) error {
 	reply.Repos = h.repos
+	reply.Stages = h.stages
 	return nil
 }
 
 // setupStatusOption returns the sbsh server option that registers the
-// GetSetupStatus verb on the control socket, carrying the resolved repo
-// statuses. Returned as a slice so run() can splat it into server.New
-// uniformly whether or not there are repos to report — an empty repos[] still
-// registers the verb (kukeond gets an empty Reply rather than a dial error,
-// keeping the daemon-side pull a single code path).
-func setupStatusOption(repos []setupstatus.Repo) []sbshserver.Option {
+// GetSetupStatus verb on the control socket, carrying the resolved repo +
+// create-stage statuses. Returned as a slice so run() can splat it into
+// server.New uniformly whether or not there is anything to report — empty
+// repos[]/stages[] still register the verb (kukeond gets an empty Reply rather
+// than a dial error, keeping the daemon-side pull a single code path).
+func setupStatusOption(repos []setupstatus.Repo, stages []setupstatus.Stage) []sbshserver.Option {
 	return []sbshserver.Option{
 		sbshserver.WithHandlers(sbshserver.Handler{
 			Name:     setupstatus.ServiceName,
-			Receiver: &setupStatusHandler{repos: repos},
+			Receiver: &setupStatusHandler{repos: repos, stages: stages},
 		}),
 	}
 }

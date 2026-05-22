@@ -130,12 +130,14 @@ func (b *Exec) GetContainer(container intmodel.Container) (GetContainerResult, e
 				ID:    name,
 				State: actualState,
 				// GetCell populated per-container statuses, including the
-				// per-repo clone/fetch outcome pulled over the GetSetupStatus
-				// RPC (issue #642). Carry the Repos slice through so
-				// `kuke get container <name> -o yaml/json` surfaces it; the
+				// per-repo clone/fetch outcome and per-create-stage outcome
+				// pulled over the GetSetupStatus RPC (issues #642, #689). Carry
+				// the Repos / Stages slices through so
+				// `kuke get container <name> -o yaml/json` surfaces them; the
 				// rest of the status is rebuilt inline from the freshly-queried
 				// containerd state above.
-				Repos: repoStatusesForContainer(internalCell, name),
+				Repos:  repoStatusesForContainer(internalCell, name),
+				Stages: stageStatusesForContainer(internalCell, name),
 			},
 		}
 	} else {
@@ -157,6 +159,19 @@ func repoStatusesForContainer(cell intmodel.Cell, name string) []intmodel.RepoSt
 	for i := range cell.Status.Containers {
 		if cell.Status.Containers[i].ID == name {
 			return cell.Status.Containers[i].Repos
+		}
+	}
+	return nil
+}
+
+// stageStatusesForContainer returns the per-create-stage outcome that GetCell
+// pulled into the cell's container statuses (over the GetSetupStatus RPC, issue
+// #689) for the named container, or nil when the container has no stage status
+// (no runOn: create stages, not yet Ready, or the pull was unavailable).
+func stageStatusesForContainer(cell intmodel.Cell, name string) []intmodel.StageStatus {
+	for i := range cell.Status.Containers {
+		if cell.Status.Containers[i].ID == name {
+			return cell.Status.Containers[i].Stages
 		}
 	}
 	return nil
