@@ -473,6 +473,23 @@ func (r *Exec) resolveRootCNINetworkName(realmName, spaceName string) string {
 	return networkName
 }
 
+// buildRootCNINetworkName derives the CNI network name for a cell's space
+// deterministically from the realm and space names, without consulting space
+// metadata. Teardown paths (stop/kill/delete) use this for the post-delete
+// IPAM-file purge safety net (purgeCNIForContainer) so the purge runs even when
+// space metadata is gone or corrupt — the network name is a pure function of
+// (realm, space) per naming.BuildSpaceNetworkName, so the GetSpace round-trip
+// resolveRootCNINetworkName performs on the re-ADD side is unnecessary here and
+// its failure must not silently skip the purge (issue #685). Returns "" only
+// when realm/space are empty, which the teardown callers already guard against.
+func (r *Exec) buildRootCNINetworkName(realmName, spaceName string) string {
+	networkName, err := naming.BuildSpaceNetworkName(realmName, spaceName)
+	if err != nil {
+		return ""
+	}
+	return networkName
+}
+
 // detachRootContainerFromNetwork detaches a root container from the CNI network.
 // It gets the container's PID and network namespace path, then calls CNI DEL to detach it.
 // This should be called before killing or stopping the container to ensure the namespace is still valid.

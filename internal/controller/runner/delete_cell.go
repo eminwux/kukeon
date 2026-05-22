@@ -81,20 +81,10 @@ func (r *Exec) DeleteCell(cell intmodel.Cell) error {
 		cellID = internalCell.Metadata.Name
 	}
 
-	// Get space for network name
-	lookupSpace := intmodel.Space{
-		Metadata: intmodel.SpaceMetadata{
-			Name: cellSpaceName,
-		},
-		Spec: intmodel.SpaceSpec{
-			RealmName: internalCell.Spec.RealmName,
-		},
-	}
-	space, spaceErr := r.GetSpace(lookupSpace)
-	var networkName string
-	if spaceErr == nil {
-		networkName, _ = r.getSpaceNetworkName(space)
-	}
+	// Resolve the network name deterministically from realm+space so the
+	// post-delete CNI/IPAM purge below runs even when space metadata is gone or
+	// corrupt (issue #685). The name is a pure function of (realm, space).
+	networkName := r.buildRootCNINetworkName(internalCell.Spec.RealmName, cellSpaceName)
 
 	// Aggregate container-deletion failures rather than swallow them. Issue
 	// #371: a single warn-and-continue on a non-NotFound DeleteContainer
