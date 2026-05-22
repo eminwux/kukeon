@@ -90,10 +90,10 @@ const (
 // Stage is the resolved state of a single runOn: create TtyStage after
 // kuketty's pre-Serve execution. Field set mirrors
 // api/model/v1beta1.StageStatus so the daemon can map it straight into
-// ContainerStatus.Stages. Index is the stage's 0-based position among the
-// container's create stages, in declaration order — the stable identity phase
-// A (#635) carries through (the run-once "done" key is settled in phase C,
-// #690).
+// ContainerStatus.Stages. Index is the stage's 0-based position within the
+// container's full Tty.OnInit list (not its position among create stages
+// alone), in declaration order — the stable identity phase A (#635) carries
+// through (the run-once "done" key is settled in phase C, #690).
 type Stage struct {
 	Index int `json:"index"`
 	// State is one of StageDone or StageFailed.
