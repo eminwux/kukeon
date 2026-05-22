@@ -1270,7 +1270,8 @@ func TestContainerTtyRoundTripV1Beta1(t *testing.T) {
 				Prompt: `"\[\e[1;36m\]claude \u@\h\[\e[0m\]:\w\$ "`,
 				OnInit: []ext.TtyStage{
 					{Script: "git pull"},
-					{Script: "claude"},
+					{Script: "npm ci", RunOn: ext.RunOnCreate},
+					{Script: "claude", RunOn: ext.RunOnStart},
 				},
 				LogFile:  "/run/kukeon/tty/custom.log",
 				LogLevel: "debug",
@@ -1293,10 +1294,13 @@ func TestContainerTtyRoundTripV1Beta1(t *testing.T) {
 	if internal.Spec.Tty.LogLevel != input.Spec.Tty.LogLevel {
 		t.Errorf("internal logLevel = %q, want %q", internal.Spec.Tty.LogLevel, input.Spec.Tty.LogLevel)
 	}
-	if len(internal.Spec.Tty.OnInit) != 2 ||
+	if len(internal.Spec.Tty.OnInit) != 3 ||
 		internal.Spec.Tty.OnInit[0].Script != "git pull" ||
-		internal.Spec.Tty.OnInit[1].Script != "claude" {
-		t.Errorf("internal onInit = %+v, want [git pull, claude]", internal.Spec.Tty.OnInit)
+		internal.Spec.Tty.OnInit[1].Script != "npm ci" ||
+		internal.Spec.Tty.OnInit[1].RunOn != ext.RunOnCreate ||
+		internal.Spec.Tty.OnInit[2].Script != "claude" ||
+		internal.Spec.Tty.OnInit[2].RunOn != ext.RunOnStart {
+		t.Errorf("internal onInit = %+v, want [git pull, npm ci/create, claude/start]", internal.Spec.Tty.OnInit)
 	}
 	out, err := apischeme.BuildContainerExternalFromInternal(internal, version)
 	if err != nil {
@@ -1319,7 +1323,10 @@ func TestContainerTtyRoundTripV1Beta1(t *testing.T) {
 	}
 	for i, s := range input.Spec.Tty.OnInit {
 		if out.Spec.Tty.OnInit[i].Script != s.Script {
-			t.Errorf("round-trip onInit[%d] = %q, want %q", i, out.Spec.Tty.OnInit[i].Script, s.Script)
+			t.Errorf("round-trip onInit[%d].Script = %q, want %q", i, out.Spec.Tty.OnInit[i].Script, s.Script)
+		}
+		if out.Spec.Tty.OnInit[i].RunOn != s.RunOn {
+			t.Errorf("round-trip onInit[%d].RunOn = %q, want %q", i, out.Spec.Tty.OnInit[i].RunOn, s.RunOn)
 		}
 	}
 }
@@ -1495,6 +1502,91 @@ func TestContainerTtyLogLevelEnumValidation(t *testing.T) {
 				t.Fatalf("NormalizeContainer accepted bogus level %q; want validation error", level)
 			}
 		})
+	}
+}
+
+// TestContainerTtyStageRunOnEnumValidation enforces the AC that a stage's
+// runOn only accepts the empty string (treated as "start"), "start", or
+// "create". An unknown value (typically a typo like "craete") is rejected at
+// apply time rather than silently routed to the start lane and re-run on every
+// boot. Issue #635.
+func TestContainerTtyStageRunOnEnumValidation(t *testing.T) {
+	accepted := []string{"", ext.RunOnStart, ext.RunOnCreate}
+	for _, runOn := range accepted {
+		t.Run("accepted/"+runOn, func(t *testing.T) {
+			input := ext.ContainerDoc{
+				APIVersion: ext.APIVersionV1Beta1,
+				Kind:       ext.KindContainer,
+				Metadata:   ext.ContainerMetadata{Name: "c"},
+				Spec: ext.ContainerSpec{
+					ID:      "c",
+					RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
+					Image:      "alpine:latest",
+					Attachable: true,
+					Tty:        &ext.ContainerTty{OnInit: []ext.TtyStage{{Script: "echo hi", RunOn: runOn}}},
+				},
+			}
+			if _, _, err := apischeme.NormalizeContainer(input); err != nil {
+				t.Fatalf("NormalizeContainer rejected runOn %q: %v", runOn, err)
+			}
+		})
+	}
+	rejected := []string{"craete", "START", "Create", "boot", "once", "delete"}
+	for _, runOn := range rejected {
+		t.Run("rejected/"+runOn, func(t *testing.T) {
+			input := ext.ContainerDoc{
+				APIVersion: ext.APIVersionV1Beta1,
+				Kind:       ext.KindContainer,
+				Metadata:   ext.ContainerMetadata{Name: "c"},
+				Spec: ext.ContainerSpec{
+					ID:      "c",
+					RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
+					Image:      "alpine:latest",
+					Attachable: true,
+					Tty:        &ext.ContainerTty{OnInit: []ext.TtyStage{{Script: "echo hi", RunOn: runOn}}},
+				},
+			}
+			if _, _, err := apischeme.NormalizeContainer(input); err == nil {
+				t.Fatalf("NormalizeContainer accepted bogus runOn %q; want validation error", runOn)
+			}
+		})
+	}
+}
+
+// TestContainerStatusStagesRoundTrip pins the ContainerStatus.Stages schema
+// (#635): stage status stamped on the internal model survives the build back
+// to v1beta1. Schema only this phase; phase B (#689) populates it over RPC.
+func TestContainerStatusStagesRoundTrip(t *testing.T) {
+	input := ext.ContainerDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindContainer,
+		Metadata:   ext.ContainerMetadata{Name: "c"},
+		Spec: ext.ContainerSpec{
+			ID:      "c",
+			RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
+			Image: "alpine:latest",
+		},
+	}
+	internal, version, err := apischeme.NormalizeContainer(input)
+	if err != nil {
+		t.Fatalf("NormalizeContainer: %v", err)
+	}
+	internal.Status.Stages = []intmodel.StageStatus{
+		{Index: 1, State: "ran"},
+		{Index: 3, State: "failed", Error: "boom"},
+	}
+	out, err := apischeme.BuildContainerExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildContainerExternalFromInternal: %v", err)
+	}
+	if len(out.Status.Stages) != 2 {
+		t.Fatalf("output status stages len = %d, want 2", len(out.Status.Stages))
+	}
+	if out.Status.Stages[0] != (ext.StageStatus{Index: 1, State: "ran"}) {
+		t.Errorf("status stage[0] = %+v", out.Status.Stages[0])
+	}
+	if out.Status.Stages[1] != (ext.StageStatus{Index: 3, State: "failed", Error: "boom"}) {
+		t.Errorf("status stage[1] = %+v", out.Status.Stages[1])
 	}
 }
 

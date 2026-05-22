@@ -190,11 +190,30 @@ type ContainerTty struct {
 }
 
 // TtyStage is a single onInit script entry. Wrapped in a struct rather than
-// a bare string so future stage knobs (timeout, runOn, etc.) can land
-// without breaking the YAML shape.
+// a bare string so future stage knobs (timeout, etc.) can land without
+// breaking the YAML shape.
 type TtyStage struct {
 	Script string `json:"script,omitempty" yaml:"script,omitempty"`
+	// RunOn controls when the stage runs. Empty or "start" (RunOnStart) keeps
+	// today's behavior: the script is forwarded to sbsh's Stages.OnInit and
+	// runs in the wrapped shell on every boot. "create" (RunOnCreate) routes
+	// the script into kuketty's pre-Serve executor, where it runs to completion
+	// as a separate step instead of being handed to sbsh — the foundation for
+	// run-once-per-cell-instance setup (the run-once render gate itself lands
+	// in phase C, #690; this phase adds the field + routing + executor). Any
+	// other value is rejected at apply time by validateContainerTty. Issue #635.
+	RunOn string `json:"runOn,omitempty" yaml:"runOn,omitempty"`
 }
+
+// TtyStage.RunOn values. Empty deserializes as RunOnStart.
+const (
+	// RunOnStart forwards the stage to sbsh's Stages.OnInit (in-shell, every
+	// boot). The default when RunOn is empty.
+	RunOnStart = "start"
+	// RunOnCreate routes the stage into kuketty's pre-Serve executor: it runs
+	// to completion before the workload starts and is never handed to sbsh.
+	RunOnCreate = "create"
+)
 
 // IsEmpty reports whether the tty block carries no user-supplied config —
 // i.e. equivalent to omitting the block entirely. Used by validation to
@@ -213,7 +232,7 @@ func (t *ContainerTty) IsEmpty() bool {
 		return false
 	}
 	for _, s := range t.OnInit {
-		if s.Script != "" {
+		if s.Script != "" || s.RunOn != "" {
 			return false
 		}
 	}
@@ -398,6 +417,12 @@ type ContainerStatus struct {
 	// the GetSetupStatus RPC in phase 1b (#642); phase 1a lands the schema
 	// only. Issue #617.
 	Repos []RepoStatus `json:"repos,omitempty" yaml:"repos,omitempty"`
+	// Stages reports the per-stage outcome of kuketty's pre-Serve execution of
+	// the container's runOn: create TtyStages, in declaration order. Empty for
+	// containers with no create stages or that have not yet been provisioned.
+	// Populated over the GetSetupStatus RPC in phase B (#689); this phase (#635)
+	// lands the schema only. Issue #635.
+	Stages []StageStatus `json:"stages,omitempty" yaml:"stages,omitempty"`
 }
 
 // RepoStatus is the resolved state of a single ContainerRepo after kuketty's
@@ -411,6 +436,23 @@ type RepoStatus struct {
 	Commit string `json:"commit,omitempty" yaml:"commit,omitempty"`
 	// Error is the failure detail when State == "failed".
 	Error string `json:"error,omitempty"  yaml:"error,omitempty"`
+}
+
+// StageStatus is the resolved state of a single runOn: create TtyStage after
+// kuketty's pre-Serve execution. Populated in phase B (#689); this phase
+// (#635) lands the schema only. The stage-identity / run-once "done" key (e.g.
+// a content hash) is settled in phase C (#690), where the render gate that
+// consumes it lands — until then Index (declaration order among create stages)
+// is the only identity carried. Issue #635.
+type StageStatus struct {
+	// Index is the 0-based position of the stage among the container's create
+	// stages, in declaration order.
+	Index int `json:"index"           yaml:"index"`
+	// State is the resolved outcome (e.g. "ran" or "failed"); the exact value
+	// set is defined by the phase-B populator (#689).
+	State string `json:"state"           yaml:"state"`
+	// Error is the failure detail when State reports a failure.
+	Error string `json:"error,omitempty" yaml:"error,omitempty"`
 }
 
 type ContainerState int
@@ -521,6 +563,7 @@ func NewContainerDoc(from *ContainerDoc) *ContainerDoc {
 	out.Spec.Repos = cloneRepos(out.Spec.Repos)
 	out.Spec.Git = cloneGit(out.Spec.Git)
 	out.Status.Repos = cloneRepoStatuses(out.Status.Repos)
+	out.Status.Stages = cloneStageStatuses(out.Status.Stages)
 
 	if out.Spec.Capabilities != nil {
 		caps := *out.Spec.Capabilities
@@ -620,6 +663,16 @@ func cloneRepoStatuses(in []RepoStatus) []RepoStatus {
 	}
 
 	out := make([]RepoStatus, len(in))
+	copy(out, in)
+	return out
+}
+
+func cloneStageStatuses(in []StageStatus) []StageStatus {
+	if in == nil {
+		return nil
+	}
+
+	out := make([]StageStatus, len(in))
 	copy(out, in)
 	return out
 }

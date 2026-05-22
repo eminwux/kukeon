@@ -439,6 +439,7 @@ func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, err
 				ExitCode:     in.Status.ExitCode,
 				ExitSignal:   in.Status.ExitSignal,
 				Repos:        repoStatusesToInternal(in.Status.Repos),
+				Stages:       stageStatusesToInternal(in.Status.Stages),
 			},
 		}, nil
 	default:
@@ -502,6 +503,7 @@ func BuildContainerExternalFromInternal(in intmodel.Container, apiVersion ext.Ve
 				ExitCode:     in.Status.ExitCode,
 				ExitSignal:   in.Status.ExitSignal,
 				Repos:        repoStatusesToExternal(in.Status.Repos),
+				Stages:       stageStatusesToExternal(in.Status.Stages),
 			},
 		}, nil
 	default:
@@ -614,7 +616,7 @@ func convertContainerTtyToInternal(in *ext.ContainerTty) *intmodel.ContainerTty 
 	if len(in.OnInit) > 0 {
 		out.OnInit = make([]intmodel.TtyStage, len(in.OnInit))
 		for i, s := range in.OnInit {
-			out.OnInit[i] = intmodel.TtyStage{Script: s.Script}
+			out.OnInit[i] = intmodel.TtyStage{Script: s.Script, RunOn: s.RunOn}
 		}
 	}
 	return out
@@ -634,7 +636,7 @@ func buildContainerTtyExternalFromInternal(in *intmodel.ContainerTty) *ext.Conta
 	if len(in.OnInit) > 0 {
 		out.OnInit = make([]ext.TtyStage, len(in.OnInit))
 		for i, s := range in.OnInit {
-			out.OnInit[i] = ext.TtyStage{Script: s.Script}
+			out.OnInit[i] = ext.TtyStage{Script: s.Script, RunOn: s.RunOn}
 		}
 	}
 	return out
@@ -682,6 +684,11 @@ func validateContainerTty(spec ext.ContainerSpec) error {
 	if err := validateTtyLogLevel(spec.Tty.LogLevel); err != nil {
 		return fmt.Errorf("container %q: %w", spec.ID, err)
 	}
+	for i, s := range spec.Tty.OnInit {
+		if err := validateTtyStageRunOn(s.RunOn); err != nil {
+			return fmt.Errorf("container %q: onInit[%d]: %w", spec.ID, i, err)
+		}
+	}
 	return nil
 }
 
@@ -693,6 +700,19 @@ func validateTtyLogLevel(level string) error {
 		return nil
 	}
 	return fmt.Errorf("tty.logLevel %q: must be one of debug, info, warn, error", level)
+}
+
+// validateTtyStageRunOn accepts the empty string (treated as "start"
+// downstream) or one of the two known runOn values. Unknown values are
+// rejected at apply time rather than silently routed to the default lane, so a
+// typo'd `runOn: craete` surfaces as an error instead of running the stage on
+// every boot. Issue #635.
+func validateTtyStageRunOn(runOn string) error {
+	switch runOn {
+	case "", ext.RunOnStart, ext.RunOnCreate:
+		return nil
+	}
+	return fmt.Errorf("tty stage runOn %q: must be one of %q, %q (or empty)", runOn, ext.RunOnStart, ext.RunOnCreate)
 }
 
 // resolveCellRootContainer enforces the rules around CellSpec.RootContainerID
@@ -982,6 +1002,39 @@ func repoStatusesToExternal(in []intmodel.RepoStatus) []ext.RepoStatus {
 			State:  s.State,
 			Commit: s.Commit,
 			Error:  s.Error,
+		}
+	}
+	return out
+}
+
+// stageStatusesToInternal copies external per-stage status into the internal
+// model. Schema only this phase; populated in phase B (#689). Issue #635.
+func stageStatusesToInternal(in []ext.StageStatus) []intmodel.StageStatus {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]intmodel.StageStatus, len(in))
+	for i, s := range in {
+		out[i] = intmodel.StageStatus{
+			Index: s.Index,
+			State: s.State,
+			Error: s.Error,
+		}
+	}
+	return out
+}
+
+// stageStatusesToExternal is the inverse of stageStatusesToInternal.
+func stageStatusesToExternal(in []intmodel.StageStatus) []ext.StageStatus {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ext.StageStatus, len(in))
+	for i, s := range in {
+		out[i] = ext.StageStatus{
+			Index: s.Index,
+			State: s.State,
+			Error: s.Error,
 		}
 	}
 	return out
