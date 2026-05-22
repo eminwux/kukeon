@@ -710,11 +710,53 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 			ExitCode:     0,           // TODO: retrieve from containerd
 			ExitSignal:   "",          // TODO: retrieve from containerd
 		}
+		// Pull per-repo clone/fetch outcome over the kuketty control socket
+		// (issue #642). Best-effort: only Attachable containers that declared
+		// repos[] and are Ready can serve the verb, and any failure leaves
+		// Repos empty rather than blocking the status read.
+		status.Repos = r.repoStatuses(cell, containerSpec, state)
 		statuses = append(statuses, status)
 	}
 
 	cell.Status.Containers = statuses
 	return nil
+}
+
+// repoStatuses pulls the per-repo clone/fetch outcome from a container's
+// kuketty control socket via the GetSetupStatus RPC (issue #642), mapping the
+// wire payload into the internal RepoStatus the controller persists in
+// ContainerStatus.Repos. ContainerStatus is the single source of truth — there
+// is no status file in the container.
+//
+// The pull is skipped (returns nil) unless the container is Attachable, has
+// declared repos[], and is Ready: a kuketty that has not reached Serve does
+// not yet serve the verb, and one that exited on a required-repo failure never
+// will (its outcome comes from the task-failed signal + kuketty log instead —
+// AC #5). Any dial/call error is logged at debug and yields nil so a wedged or
+// still-starting kuketty never stalls `kuke get`.
+func (r *Exec) repoStatuses(
+	cell *intmodel.Cell,
+	containerSpec intmodel.ContainerSpec,
+	state intmodel.ContainerState,
+) []intmodel.RepoStatus {
+	if !containerSpec.Attachable || len(containerSpec.Repos) == 0 || state != intmodel.ContainerStateReady {
+		return nil
+	}
+
+	socketPath := fs.ContainerSocketSymlinkPath(
+		r.opts.RunPath,
+		cell.Spec.RealmName, cell.Spec.SpaceName, cell.Spec.StackName, cell.Metadata.Name,
+		containerSpec.ID,
+	)
+	repos, err := pullSetupStatus(r.ctx, socketPath)
+	if err != nil {
+		r.logger.DebugContext(r.ctx, "failed to pull repo setup status",
+			"container", containerSpec.ID,
+			"socket", socketPath,
+			"error", err)
+		return nil
+	}
+	return setupStatusToInternal(repos)
 }
 
 // PopulateAndPersistCellContainerStatuses populates container statuses from containerd

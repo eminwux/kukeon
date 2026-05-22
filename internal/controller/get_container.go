@@ -129,6 +129,13 @@ func (b *Exec) GetContainer(container intmodel.Container) (GetContainerResult, e
 				Name:  name,
 				ID:    name,
 				State: actualState,
+				// GetCell populated per-container statuses, including the
+				// per-repo clone/fetch outcome pulled over the GetSetupStatus
+				// RPC (issue #642). Carry the Repos slice through so
+				// `kuke get container <name> -o yaml/json` surfaces it; the
+				// rest of the status is rebuilt inline from the freshly-queried
+				// containerd state above.
+				Repos: repoStatusesForContainer(internalCell, name),
 			},
 		}
 	} else {
@@ -140,6 +147,19 @@ func (b *Exec) GetContainer(container intmodel.Container) (GetContainerResult, e
 	}
 
 	return res, nil
+}
+
+// repoStatusesForContainer returns the per-repo clone/fetch outcome that
+// GetCell pulled into the cell's container statuses (over the GetSetupStatus
+// RPC, issue #642) for the named container, or nil when the container has no
+// repo status (no repos[], not yet Ready, or the pull was unavailable).
+func repoStatusesForContainer(cell intmodel.Cell, name string) []intmodel.RepoStatus {
+	for i := range cell.Status.Containers {
+		if cell.Status.Containers[i].ID == name {
+			return cell.Status.Containers[i].Repos
+		}
+	}
+	return nil
 }
 
 // ListContainers lists all containers, optionally filtered by realm, space, stack, and/or cell.
