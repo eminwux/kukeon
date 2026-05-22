@@ -144,13 +144,13 @@ make kuke kukebuild
 ln -sf kuke kukeond
 
 step "Install dev symlinks on PATH (make install-dev)"
+# install-dev symlinks kuke/kukeond and — because `make kuke kukebuild` above
+# has built it — kukebuild into INSTALL_PREFIX (/usr/local/bin by default). The
+# `kuke build` step below runs as `sudo ./kuke build`, a thin shim that resolves
+# `kukebuild` via PATH and exec's it, so kukebuild must sit on root's
+# secure_path; routing it through install-dev keeps a single PATH-placement
+# mechanism.
 make install-dev
-# `kuke build` (used below in place of the old docker build) is a thin shim
-# that resolves the standalone `kukebuild` binary via PATH and exec's it. The
-# build step runs as `sudo ./kuke build`, so kukebuild must sit on root's
-# secure_path. install-dev only symlinks kuke/kukeond into /usr/local/bin, so
-# place kukebuild there too (mirroring install-dev's INSTALL_PREFIX default).
-sudo ln -sf "${REPO_ROOT}/kukebuild" /usr/local/bin/kukebuild
 
 # Pre-flight: catch missing host cgroup-v2 controller delegation BEFORE the
 # multi-minute kuke build runs (issue #324). On a fully-delegated host
