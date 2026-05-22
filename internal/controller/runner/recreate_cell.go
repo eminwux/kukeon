@@ -111,11 +111,12 @@ func (r *Exec) RecreateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 	}
 
 	// Release the root container's CNI/IPAM reservation before deleting it.
-	// createCellContainers below rebuilds the root under this same deterministic
-	// containerd ID and re-runs CNI ADD; without releasing first, host-local
-	// IPAM rejects the re-ADD as a duplicate allocation (issue #630). releaseCNI
-	// runs before the stop/delete so the netns is still valid for CNI DEL where
-	// applicable; purgeCNI scrubs the residual allocation file afterward.
+	// createCellContainers below rebuilds the root container record under this
+	// same deterministic containerd ID, and the StartCell call at the end of
+	// RecreateCell re-runs CNI ADD against it; without releasing first,
+	// host-local IPAM rejects the re-ADD as a duplicate allocation (issue #630).
+	// releaseCNI runs before the stop/delete so the netns is still valid for CNI
+	// DEL where applicable; purgeCNI scrubs the residual allocation file afterward.
 	cellName := strings.TrimSpace(existing.Metadata.Name)
 	cniConfigPath, _ := r.resolveSpaceCNIConfigPath(realmName, spaceName)
 	networkName := r.resolveRootCNINetworkName(realmName, spaceName)
@@ -175,12 +176,25 @@ func (r *Exec) RecreateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, fmt.Errorf("failed to recreate cell containers: %w", err)
 	}
 
-	markCellReady(&desired)
-
-	// Update metadata
+	// Persist the recreated container records (new root spec + freshly assigned
+	// containerd IDs) so StartCell's GetCell reads them. Ready is intentionally
+	// NOT stamped here: createCellContainers only created container *records* —
+	// no task is running and CNI ADD has not run yet (issue #682). Stamping
+	// Ready now would leave the cell reporting Ready over created-but-not-started
+	// containers if StartCell never ran.
 	if updateErr := r.UpdateCellMetadata(desired); updateErr != nil {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrUpdateCellMetadata, updateErr)
 	}
 
-	return desired, nil
+	// Bring the recreated cell to the same running state a fresh create -> start
+	// produces before Ready is stamped — mirrors the create branch in
+	// apply/reconcile.go (CreateCell -> StartCell). StartCell starts the tasks,
+	// runs CNI ADD against the deterministic root ID, and stamps + persists Ready
+	// only once the cell is actually up.
+	started, startErr := r.StartCell(desired)
+	if startErr != nil {
+		return intmodel.Cell{}, fmt.Errorf("failed to start recreated cell: %w", startErr)
+	}
+
+	return started, nil
 }
