@@ -469,7 +469,10 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 		// allocation (issue #630). releaseCNI must run while the task's netns
 		// is still valid, so it is sequenced before the task delete; purgeCNI
 		// scrubs the residual allocation file afterward as a safety net.
-		networkName := r.resolveRootCNINetworkName(realmID, spaceID)
+		// Resolve the purge's network name deterministically from realm+space so
+		// the scrub runs even when space metadata is gone or corrupt (issue #685),
+		// matching the stop/kill/delete teardown paths.
+		networkName := r.buildRootCNINetworkName(realmID, spaceID)
 		_ = teardownRootContainerCNI(
 			func() {
 				r.detachRootContainerFromNetwork(
