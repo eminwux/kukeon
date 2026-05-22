@@ -29,7 +29,7 @@ import (
 // RecreateCell stops all containers in the cell, deletes them, and recreates the cell
 // with the new root container spec. This is used when the root container spec changes
 // (image, command, or args).
-func (r *Exec) RecreateCell(desired intmodel.Cell) (intmodel.Cell, error) {
+func (r *Exec) RecreateCell(desired intmodel.Cell) (_ intmodel.Cell, retErr error) {
 	defer r.lockCell(desired)()
 
 	// Get existing cell
@@ -37,6 +37,22 @@ func (r *Exec) RecreateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 	if err != nil {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 	}
+
+	// Once the destructive recreate begins creating fresh containers, any later
+	// failure must roll the cell back — tear down the containers/IPAM already
+	// created and stamp Failed — so a half-recreated cell never lingers as Ready
+	// or Unknown (issue #718). Mirrors StartCell's provisionStarted gate (issue
+	// #407). Armed immediately before createCellContainers and disarmed before
+	// startCellLocked, which owns its own markCellFailed("StartCellFailed") for
+	// the start phase; leaving the gate armed across it would re-run a redundant
+	// kill cycle.
+	var provisionStarted bool
+	cellForCleanup := existing
+	defer func() {
+		if retErr != nil && provisionStarted {
+			r.markCellFailed(cellForCleanup, "RecreateCellFailed", retErr)
+		}
+	}()
 
 	// Stop all containers in the cell
 	_, stopErr := r.stopCellLocked(existing)
@@ -172,6 +188,10 @@ func (r *Exec) RecreateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 	// Preserve existing metadata and status where appropriate
 	desired.Status.CgroupPath = existing.Status.CgroupPath
 
+	// Past this point a failure has created fresh containers (and possibly an
+	// IPAM reservation); arm the rollback defer so they don't leak.
+	provisionStarted = true
+
 	// Recreate cell containers (this will create root container and all child containers)
 	_, err = r.createCellContainers(&desired)
 	if err != nil {
@@ -193,6 +213,10 @@ func (r *Exec) RecreateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 	// apply/reconcile.go (CreateCell -> StartCell). StartCell starts the tasks,
 	// runs CNI ADD against the deterministic root ID, and stamps + persists Ready
 	// only once the cell is actually up.
+	// startCellLocked owns its own failure cleanup (markCellFailed with reason
+	// "StartCellFailed", issue #407), so disarm the local gate to avoid a
+	// redundant kill cycle on the start path.
+	provisionStarted = false
 	started, startErr := r.startCellLocked(desired)
 	if startErr != nil {
 		return intmodel.Cell{}, fmt.Errorf("failed to start recreated cell: %w", startErr)

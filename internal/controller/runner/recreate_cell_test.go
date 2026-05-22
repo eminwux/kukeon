@@ -35,6 +35,7 @@ import (
 	"github.com/eminwux/kukeon/internal/metadata"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
+	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -51,10 +52,13 @@ func (t recreateCellTask) Pid() uint32 { return t.pid }
 
 // recreateCellFakeClient reuses deleteCellFakeClient for the bulk of the
 // ctr.Client surface and adds the StartContainer hook RecreateCell -> StartCell
-// needs (the embedded fake returns a nil task, which would panic at Pid()).
+// needs (the embedded fake returns a nil task, which would panic at Pid()), plus
+// a CreateContainerFromSpec hook so a non-root container creation can be made to
+// fail mid-recreate.
 type recreateCellFakeClient struct {
 	*deleteCellFakeClient
-	startContainerFn func(namespace string, spec ctr.ContainerSpec, taskSpec ctr.TaskSpec) (containerd.Task, error)
+	startContainerFn          func(namespace string, spec ctr.ContainerSpec, taskSpec ctr.TaskSpec) (containerd.Task, error)
+	createContainerFromSpecFn func(namespace string, spec intmodel.ContainerSpec, creds []ctr.RegistryCredentials, opts ...ctr.BuildOption) (containerd.Container, error)
 }
 
 func (c *recreateCellFakeClient) StartContainer(
@@ -64,6 +68,15 @@ func (c *recreateCellFakeClient) StartContainer(
 		return c.startContainerFn(namespace, spec, taskSpec)
 	}
 	return c.deleteCellFakeClient.StartContainer(namespace, spec, taskSpec)
+}
+
+func (c *recreateCellFakeClient) CreateContainerFromSpec(
+	namespace string, spec intmodel.ContainerSpec, creds []ctr.RegistryCredentials, opts ...ctr.BuildOption,
+) (containerd.Container, error) {
+	if c.createContainerFromSpecFn != nil {
+		return c.createContainerFromSpecFn(namespace, spec, creds, opts...)
+	}
+	return c.deleteCellFakeClient.CreateContainerFromSpec(namespace, spec, creds, opts...)
 }
 
 var _ ctr.Client = (*recreateCellFakeClient)(nil)
@@ -221,5 +234,103 @@ func TestRecreateCell_DoesNotStampReadyWhenStartFails(t *testing.T) {
 	}
 	if persisted.Status.State == intmodel.CellStateReady {
 		t.Error("cell persisted Ready after the root task failed to start (issue #682 AC #2)")
+	}
+}
+
+// recreateCellMultiContainerCell builds an existing (on-disk) multi-container
+// cell and the matching desired cell carrying a changed root image. Both the
+// host-network root and the single workload carry their deterministic
+// containerd IDs so the rollback's killCellLocked has concrete IDs to tear
+// down. The desired cell is a deep copy with the new image so RecreateCell's
+// leading GetCell reads the existing one back and createCellContainers
+// operates on the desired one.
+func recreateCellMultiContainerCell(
+	t *testing.T, realm, space, stack, name, oldImage, newImage string,
+) (existing, desired intmodel.Cell, rootID, workloadID string) {
+	t.Helper()
+	rootID, err := naming.BuildRootContainerdID(space, stack, name)
+	if err != nil {
+		t.Fatalf("BuildRootContainerdID: %v", err)
+	}
+	workloadID, err = naming.BuildContainerdID(space, stack, name, "app")
+	if err != nil {
+		t.Fatalf("BuildContainerdID: %v", err)
+	}
+	build := func(image string) intmodel.Cell {
+		return intmodel.Cell{
+			Metadata: intmodel.CellMetadata{Name: name},
+			Spec: intmodel.CellSpec{
+				ID:              name,
+				RealmName:       realm,
+				SpaceName:       space,
+				StackName:       stack,
+				RootContainerID: "root",
+				Containers: []intmodel.ContainerSpec{
+					{ID: "root", Root: true, HostNetwork: true, Image: image, ContainerdID: rootID},
+					{ID: "app", Image: "alpine:3.18", ContainerdID: workloadID},
+				},
+			},
+			Status: intmodel.CellStatus{State: intmodel.CellStatePending},
+		}
+	}
+	return build(oldImage), build(newImage), rootID, workloadID
+}
+
+// TestRecreateCell_RollsBackWhenContainerCreateFails is the regression guard
+// for issue #718: a createCellContainers failure on a later container used to
+// propagate the error with no rollback — the root container already created
+// leaked as an orphan and the cell metadata was never flipped to Failed. The
+// fix routes that path through markCellFailed("RecreateCellFailed"), which
+// tears the created containers/IPAM down and stamps the terminal Failed state.
+func TestRecreateCell_RollsBackWhenContainerCreateFails(t *testing.T) {
+	const (
+		realm = "default"
+		space = "default"
+		stack = "default"
+		cell  = "web"
+	)
+
+	createBoom := errors.New("workload container create refused")
+	fake := &recreateCellFakeClient{
+		deleteCellFakeClient: &deleteCellFakeClient{},
+		// Fail the non-root container creation inside createCellContainers so
+		// RecreateCell never reaches the start phase — the genuinely-unhandled
+		// rollback path the issue targets.
+		createContainerFromSpecFn: func(
+			_ string, _ intmodel.ContainerSpec, _ []ctr.RegistryCredentials, _ ...ctr.BuildOption,
+		) (containerd.Container, error) {
+			return nil, createBoom
+		},
+	}
+	existing, desired, _, _ := recreateCellMultiContainerCell(
+		t, realm, space, stack, cell, "alpine:3.18", "alpine:3.19",
+	)
+	r := newRecreateCellTestExec(t, fake)
+	seedDeleteCellRealm(t, r, realm)
+	seedRecreateCellSpace(t, r, realm, space)
+
+	existing.Status.State = intmodel.CellStateReady
+	if err := r.UpdateCellMetadata(existing); err != nil {
+		t.Fatalf("seed existing cell: %v", err)
+	}
+
+	if _, err := r.RecreateCell(desired); err == nil {
+		t.Fatal("RecreateCell returned nil error despite createCellContainers failing")
+	}
+
+	persisted, err := r.GetCell(desired)
+	if err != nil {
+		t.Fatalf("GetCell after failed RecreateCell: %v", err)
+	}
+	// State=Failed + Reason="RecreateCellFailed" is produced only by the new
+	// rollback defer, and markCellFailed unconditionally runs killCellLocked
+	// (the orphan-container + IPAM teardown, covered by kill_test.go) before
+	// stamping it — so this pair is the precise routing guard. Pre-fix the
+	// createCellContainers error propagated with the cell left Ready.
+	if persisted.Status.State != intmodel.CellStateFailed {
+		t.Errorf("cell State = %v, want Failed after createCellContainers failure (issue #718)", persisted.Status.State)
+	}
+	if persisted.Status.Reason != "RecreateCellFailed" {
+		t.Errorf("cell Reason = %q, want \"RecreateCellFailed\"", persisted.Status.Reason)
 	}
 }
