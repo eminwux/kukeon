@@ -34,6 +34,7 @@ type client struct {
 	ctx                  context.Context
 	logger               *slog.Logger
 	socket               string
+	cClientMu            sync.Mutex
 	cClient              *containerd.Client
 	cgroupsMu            sync.RWMutex
 	cgroups              map[string]*cgroup2.Manager
@@ -170,6 +171,15 @@ func (c *client) verifyConnection() error {
 }
 
 func (c *client) Connect() error {
+	// cClientMu serializes the read-modify-write of c.cClient so concurrent
+	// first-use callers (the first RPC handler and the first reconcile tick,
+	// per issue #684) can't each observe nil and each dial containerd —
+	// leaking N-1 connections and racing on the pointer. The sync.Once in the
+	// runner serializes wrapper construction; this lock serializes the
+	// connection the wrapper owns.
+	c.cClientMu.Lock()
+	defer c.cClientMu.Unlock()
+
 	// If already connected, verify the connection is still valid
 	if c.cClient != nil {
 		err := c.verifyConnection()
@@ -187,7 +197,7 @@ func (c *client) Connect() error {
 			"error",
 			err,
 		)
-		_ = c.Close() // Close the invalid connection
+		_ = c.closeLocked() // Close the invalid connection (lock already held)
 	}
 
 	// Create new connection
@@ -200,7 +210,7 @@ func (c *client) Connect() error {
 
 	// Verify the new connection works
 	if err = c.verifyConnection(); err != nil {
-		_ = c.Close()
+		_ = c.closeLocked() // lock already held
 		return fmt.Errorf("failed to verify new connection: %w", err)
 	}
 
@@ -209,6 +219,16 @@ func (c *client) Connect() error {
 }
 
 func (c *client) Close() error {
+	c.cClientMu.Lock()
+	defer c.cClientMu.Unlock()
+	return c.closeLocked()
+}
+
+// closeLocked tears down c.cClient. The caller must hold c.cClientMu — it is
+// invoked both by the public Close() (which takes the lock) and by Connect()'s
+// reconnect path (which already holds the lock), so the teardown stays guarded
+// without re-entrant locking.
+func (c *client) closeLocked() error {
 	if c.cClient != nil {
 		err := c.cClient.Close()
 		if err != nil {
