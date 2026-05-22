@@ -20,7 +20,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
@@ -98,6 +101,169 @@ func (r *Exec) GetBlueprint(blueprint intmodel.CellBlueprint) (intmodel.CellBlue
 	}
 
 	return intmodel.CellBlueprint{Metadata: md, Document: data}, nil
+}
+
+// ListBlueprints enumerates the metadata of every CellBlueprint bound to the
+// scope identified by the filter coordinates, plus every Blueprint bound to a
+// deeper scope nested within it (issue #643). The filter is a prefix: an empty
+// realmName lists across all realms; a set realmName with an empty spaceName
+// lists realm-scoped blueprints and everything under that realm; and so on.
+// This mirrors the subtree-filter semantics of ListSecrets, but bounded at
+// stack depth — a Blueprint is never cell-scoped (#620). The returned carriers
+// are metadata-only (Document nil): the scope coordinates come from the path
+// and the name from the file basename, so a list never parses every document.
+func (r *Exec) ListBlueprints(realmName, spaceName, stackName string) ([]intmodel.CellBlueprint, error) {
+	realmDirs, err := r.resolveRealmDirs(realmName)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrListBlueprints, err)
+	}
+
+	var out []intmodel.CellBlueprint
+	for _, realmDir := range realmDirs {
+		realm := filepath.Base(realmDir)
+		if walkErr := r.collectBlueprintSubtree(&out, realm, spaceName, stackName); walkErr != nil {
+			return nil, fmt.Errorf("%w: %w", errdefs.ErrListBlueprints, walkErr)
+		}
+	}
+	return out, nil
+}
+
+// collectBlueprintSubtree appends the metadata of every CellBlueprint bound to
+// scope (realm, space, stack) — where a trailing coordinate that is "" marks
+// the filter floor — and every Blueprint in scopes nested within it. The rule
+// mirrors collectSecretSubtree: collect a level's own blueprints only when the
+// next-deeper filter coordinate is empty, and descend into a child only when it
+// matches a set filter coordinate or the filter is empty at that level. The
+// walk is bounded at stack depth, so cell directories are never descended.
+func (r *Exec) collectBlueprintSubtree(out *[]intmodel.CellBlueprint, realm, space, stack string) error {
+	if space == "" {
+		if err := r.collectBlueprintsInScope(out, realm, "", ""); err != nil {
+			return err
+		}
+	}
+
+	spaces, err := r.blueprintChildScopeNames(fs.RealmMetadataDir(r.opts.RunPath, realm), space)
+	if err != nil {
+		return err
+	}
+	for _, sp := range spaces {
+		if stack == "" {
+			if err = r.collectBlueprintsInScope(out, realm, sp, ""); err != nil {
+				return err
+			}
+		}
+
+		stacks, stErr := r.blueprintChildScopeNames(fs.SpaceMetadataDir(r.opts.RunPath, realm, sp), stack)
+		if stErr != nil {
+			return stErr
+		}
+		for _, st := range stacks {
+			if err = r.collectBlueprintsInScope(out, realm, sp, st); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// blueprintChildScopeNames returns the child-scope subdirectory names directly
+// under dir, excluding both reserved resource subdirectories (secrets/ and
+// blueprints/) so neither is mistaken for a child space or stack. When want is
+// non-empty it filters to that single child (returned only if it exists). A
+// missing dir yields no children, matching the list verbs' "no match ⇒ empty".
+func (r *Exec) blueprintChildScopeNames(dir, want string) ([]string, error) {
+	if strings.TrimSpace(want) != "" {
+		child := filepath.Join(dir, want)
+		info, err := os.Stat(child)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("failed to stat scope dir %q: %w", child, err)
+		}
+		if !info.IsDir() {
+			return nil, nil
+		}
+		return []string{want}, nil
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read scope dir %q: %w", dir, err)
+	}
+	var names []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if entry.Name() == consts.KukeonSecretsSubdir || entry.Name() == consts.KukeonBlueprintsSubdir {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	return names, nil
+}
+
+// collectBlueprintsInScope appends the metadata of every CellBlueprint stored
+// directly at the given scope (realm, space, stack). The in-flight
+// ".blueprint-*.tmp" temp files WriteBlueprint creates are skipped so a
+// concurrent apply never surfaces a half-written name.
+func (r *Exec) collectBlueprintsInScope(out *[]intmodel.CellBlueprint, realm, space, stack string) error {
+	dir := fs.BlueprintsDir(r.opts.RunPath, realm, space, stack)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to read blueprints dir %q: %w", dir, err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, ".blueprint-") && strings.HasSuffix(name, ".tmp") {
+			continue
+		}
+		*out = append(*out, intmodel.CellBlueprint{
+			Metadata: intmodel.CellBlueprintMetadata{
+				Name:  name,
+				Realm: realm,
+				Space: space,
+				Stack: stack,
+			},
+		})
+	}
+	return nil
+}
+
+// DeleteBlueprint removes the daemon-stored document file for a single named,
+// scoped CellBlueprint (issue #643). Returns errdefs.ErrBlueprintNotFound when
+// the file is absent so the caller can report a clear "not found" instead of a
+// silent success. Unlike DeleteSecret there is no live-reference gate: a cell
+// materialized by `kuke run -b` is a fresh, independent copy (#620), so
+// removing the blueprint never breaks a running cell.
+func (r *Exec) DeleteBlueprint(blueprint intmodel.CellBlueprint) error {
+	md := blueprint.Metadata
+	path := fs.BlueprintPath(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Name)
+
+	if err := os.Remove(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return errdefs.ErrBlueprintNotFound
+		}
+		return fmt.Errorf("%w: %w", errdefs.ErrDeleteBlueprint, err)
+	}
+
+	r.logger.InfoContext(r.ctx, "blueprint deleted",
+		"name", md.Name,
+		"realm", md.Realm,
+		"space", md.Space,
+		"stack", md.Stack,
+	)
+	return nil
 }
 
 // atomicWriteFileMode writes data to path via a temp file in the same

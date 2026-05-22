@@ -589,6 +589,63 @@ func CompleteSecretNames(cmd *cobra.Command, args []string, toComplete string) (
 	return names, cobra.ShellCompDirectiveNoFileComp
 }
 
+// CompleteBlueprintNames provides shell completion for blueprint name args by
+// listing every CellBlueprint visible in the active scope filter (issue #643).
+// A Blueprint is never cell-scoped, so the filter bottoms out at stack. Errors
+// swallow to an empty list so a down daemon never surfaces a noisy completion.
+func CompleteBlueprintNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) >= 1 && toComplete == "" {
+		if cmd.ValidArgsFunction != nil {
+			testArgs := make([]string, len(args), len(args)+1)
+			copy(testArgs, args)
+			testArgs = append(testArgs, "test")
+			if cmd.Args != nil {
+				if err := cmd.Args(cmd, testArgs); err != nil {
+					return []string{}, cobra.ShellCompDirectiveNoFileComp
+				}
+			}
+		}
+	}
+
+	client, err := completionClient(cmd)
+	if err != nil {
+		return []string{}, cobra.ShellCompDirectiveNoFileComp
+	}
+	defer func() { _ = client.Close() }()
+
+	realmName := getFlagValueWithDefault(cmd, "realm", "default")
+	spaceName := getFlagValueWithDefault(cmd, "space", "")
+	stackName := getFlagValueWithDefault(cmd, "stack", "")
+
+	if cmd.ValidArgsFunction != nil && len(args) == 0 {
+		if realmName == "" {
+			return []string{}, cobra.ShellCompDirectiveNoFileComp
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(cmd.Context(), completionTimeout)
+	defer cancel()
+
+	blueprints, err := client.ListBlueprints(ctx, realmName, spaceName, stackName)
+	if err != nil {
+		return []string{}, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	seen := make(map[string]bool)
+	names := make([]string, 0, len(blueprints))
+	for _, bp := range blueprints {
+		name := bp.Metadata.Name
+		if toComplete == "" || strings.HasPrefix(name, toComplete) {
+			if !seen[name] {
+				seen[name] = true
+				names = append(names, name)
+			}
+		}
+	}
+
+	return names, cobra.ShellCompDirectiveNoFileComp
+}
+
 // CompleteProfileNames provides shell completion for `-p/--profile` by listing
 // every CellProfile under the active profiles directory ($KUKE_PROFILES_DIR or
 // $HOME/.kuke/profiles.d). Errors swallow to an empty list — a fresh shell with

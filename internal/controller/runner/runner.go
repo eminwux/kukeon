@@ -131,6 +131,16 @@ type Runner interface {
 	// `kuke run -b` can materialize it. Returns errdefs.ErrBlueprintNotFound
 	// when the file is absent.
 	GetBlueprint(blueprint intmodel.CellBlueprint) (intmodel.CellBlueprint, error)
+	// ListBlueprints enumerates the metadata of every CellBlueprint bound to
+	// the filter scope or any scope nested within it (issue #643). An empty
+	// realmName lists across all realms; the filter is a subtree prefix
+	// bounded at stack depth (a Blueprint is never cell-scoped). The returned
+	// carriers are metadata-only — the document is not read.
+	ListBlueprints(realmName, spaceName, stackName string) ([]intmodel.CellBlueprint, error)
+	// DeleteBlueprint removes the daemon-stored document file for a single
+	// named, scoped CellBlueprint (issue #643). Returns
+	// errdefs.ErrBlueprintNotFound when the file is absent.
+	DeleteBlueprint(blueprint intmodel.CellBlueprint) error
 
 	ExistsCgroup(doc any) (bool, error)
 

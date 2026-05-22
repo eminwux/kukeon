@@ -66,6 +66,11 @@ type Client interface {
 	// filter scope or any scope nested within it (issue #622). An empty
 	// realmName lists across all realms. spec.data is never echoed.
 	ListSecrets(ctx context.Context, realmName, spaceName, stackName, cellName string) ([]v1beta1.SecretDoc, error)
+	// ListBlueprints enumerates the metadata of every CellBlueprint bound to
+	// the filter scope or any scope nested within it (issue #643). An empty
+	// realmName lists across all realms. A Blueprint is never cell-scoped, so
+	// there is no cell coordinate. The spec is not populated for a list.
+	ListBlueprints(ctx context.Context, realmName, spaceName, stackName string) ([]v1beta1.CellBlueprintDoc, error)
 
 	StartCell(ctx context.Context, doc v1beta1.CellDoc) (StartCellResult, error)
 	StartContainer(ctx context.Context, doc v1beta1.ContainerDoc) (StartContainerResult, error)
@@ -92,6 +97,10 @@ type Client interface {
 	// DeleteSecret removes a single named, scoped Secret's daemon-stored
 	// file (issue #622). The live-reference safety gate ships in phase 3c.
 	DeleteSecret(ctx context.Context, doc v1beta1.SecretDoc) (DeleteSecretResult, error)
+	// DeleteBlueprint removes a single named, scoped CellBlueprint's
+	// daemon-stored document (issue #643). No live-reference gate: cells
+	// materialized from a blueprint are independent copies (#620).
+	DeleteBlueprint(ctx context.Context, doc v1beta1.CellBlueprintDoc) (DeleteBlueprintResult, error)
 
 	PurgeRealm(ctx context.Context, doc v1beta1.RealmDoc, force, cascade bool) (PurgeRealmResult, error)
 	PurgeSpace(ctx context.Context, doc v1beta1.SpaceDoc, force, cascade bool) (PurgeSpaceResult, error)
@@ -184,6 +193,7 @@ const (
 	MethodListCells      = ServiceName + ".ListCells"
 	MethodListContainers = ServiceName + ".ListContainers"
 	MethodListSecrets    = ServiceName + ".ListSecrets"
+	MethodListBlueprints = ServiceName + ".ListBlueprints"
 
 	MethodStartCell       = ServiceName + ".StartCell"
 	MethodStartContainer  = ServiceName + ".StartContainer"
@@ -200,6 +210,7 @@ const (
 	MethodDeleteCell      = ServiceName + ".DeleteCell"
 	MethodDeleteContainer = ServiceName + ".DeleteContainer"
 	MethodDeleteSecret    = ServiceName + ".DeleteSecret"
+	MethodDeleteBlueprint = ServiceName + ".DeleteBlueprint"
 
 	MethodPurgeRealm     = ServiceName + ".PurgeRealm"
 	MethodPurgeSpace     = ServiceName + ".PurgeSpace"

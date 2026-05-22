@@ -300,6 +300,19 @@ type ListSecretsReply struct {
 	Err     *APIError
 }
 
+type ListBlueprintsArgs struct {
+	RealmName string
+	SpaceName string
+	StackName string
+}
+
+// ListBlueprintsReply carries metadata-only CellBlueprintDocs — the spec (cell
+// template, parameters, slots) is never populated for a list (issue #643).
+type ListBlueprintsReply struct {
+	Blueprints []v1beta1.CellBlueprintDoc
+	Err        *APIError
+}
+
 // ---- Lifecycle (Start/Stop/Kill) ----
 
 type StartCellArgs struct {
@@ -479,6 +492,22 @@ type DeleteSecretReply struct {
 type DeleteSecretResult struct {
 	Secret  v1beta1.SecretDoc
 	Deleted bool
+}
+
+type DeleteBlueprintArgs struct {
+	Doc v1beta1.CellBlueprintDoc
+}
+
+type DeleteBlueprintReply struct {
+	Result DeleteBlueprintResult
+	Err    *APIError
+}
+
+// DeleteBlueprintResult reports the removed Blueprint (metadata only) and
+// whether the file existed to delete.
+type DeleteBlueprintResult struct {
+	Blueprint v1beta1.CellBlueprintDoc
+	Deleted   bool
 }
 
 type DeleteContainerArgs struct {

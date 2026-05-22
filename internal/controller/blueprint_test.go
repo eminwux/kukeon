@@ -95,3 +95,101 @@ func TestGetBlueprint_ValidatesScope(t *testing.T) {
 		})
 	}
 }
+
+// TestListBlueprints_DelegatesAfterFilterValidation confirms the controller
+// validates the filter's scope contiguity and forwards the trimmed coordinates
+// to the runner (issue #643).
+func TestListBlueprints_DelegatesAfterFilterValidation(t *testing.T) {
+	var gotRealm, gotSpace, gotStack string
+	mockRunner := &fakeRunner{
+		ListBlueprintsFn: func(realm, space, stack string) ([]intmodel.CellBlueprint, error) {
+			gotRealm, gotSpace, gotStack = realm, space, stack
+			return []intmodel.CellBlueprint{
+				{Metadata: intmodel.CellBlueprintMetadata{Name: "web", Realm: realm, Space: space}},
+			}, nil
+		},
+	}
+	ctrl := setupTestController(t, mockRunner)
+
+	got, err := ctrl.ListBlueprints("  default ", "team-a", "")
+	if err != nil {
+		t.Fatalf("ListBlueprints() error = %v", err)
+	}
+	if gotRealm != "default" || gotSpace != "team-a" || gotStack != "" {
+		t.Errorf("runner got (%q,%q,%q), want (default,team-a,)", gotRealm, gotSpace, gotStack)
+	}
+	if len(got) != 1 || got[0].Metadata.Name != "web" {
+		t.Errorf("ListBlueprints() = %+v, want one blueprint named web", got)
+	}
+}
+
+func TestListBlueprints_RejectsIncompleteFilter(t *testing.T) {
+	ctrl := setupTestController(t, &fakeRunner{})
+
+	tests := []struct {
+		name                string
+		realm, space, stack string
+	}{
+		{"scope_without_realm", "", "team-a", ""},
+		{"stack_without_space", "default", "", "web"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := ctrl.ListBlueprints(tt.realm, tt.space, tt.stack); !errors.Is(
+				err, errdefs.ErrBlueprintScopeIncomplete,
+			) {
+				t.Errorf("ListBlueprints() error = %v, want ErrBlueprintScopeIncomplete", err)
+			}
+		})
+	}
+}
+
+func TestDeleteBlueprint_NotFoundFriendlyError(t *testing.T) {
+	mockRunner := &fakeRunner{
+		DeleteBlueprintFn: func(intmodel.CellBlueprint) error {
+			return errdefs.ErrBlueprintNotFound
+		},
+	}
+	ctrl := setupTestController(t, mockRunner)
+
+	_, err := ctrl.DeleteBlueprint(intmodel.CellBlueprint{
+		Metadata: intmodel.CellBlueprintMetadata{Name: "ghost", Realm: "default"},
+	})
+	if err == nil || err.Error() != `blueprint "ghost" not found` {
+		t.Errorf("DeleteBlueprint() error = %v, want `blueprint \"ghost\" not found`", err)
+	}
+}
+
+func TestDeleteBlueprint_SuccessReportsDeleted(t *testing.T) {
+	var gotMeta intmodel.CellBlueprintMetadata
+	mockRunner := &fakeRunner{
+		DeleteBlueprintFn: func(bp intmodel.CellBlueprint) error {
+			gotMeta = bp.Metadata
+			return nil
+		},
+	}
+	ctrl := setupTestController(t, mockRunner)
+
+	res, err := ctrl.DeleteBlueprint(intmodel.CellBlueprint{
+		Metadata: intmodel.CellBlueprintMetadata{Name: "web", Realm: "default", Space: "team-a"},
+	})
+	if err != nil {
+		t.Fatalf("DeleteBlueprint() error = %v", err)
+	}
+	if !res.Deleted {
+		t.Error("Deleted = false, want true")
+	}
+	if gotMeta.Name != "web" || gotMeta.Realm != "default" || gotMeta.Space != "team-a" {
+		t.Errorf("runner got metadata %+v, want web/default/team-a", gotMeta)
+	}
+}
+
+func TestDeleteBlueprint_ValidatesScope(t *testing.T) {
+	ctrl := setupTestController(t, &fakeRunner{})
+
+	if _, err := ctrl.DeleteBlueprint(intmodel.CellBlueprint{
+		Metadata: intmodel.CellBlueprintMetadata{Realm: "default"},
+	}); !errors.Is(err, errdefs.ErrBlueprintNameRequired) {
+		t.Errorf("DeleteBlueprint() error = %v, want ErrBlueprintNameRequired", err)
+	}
+}

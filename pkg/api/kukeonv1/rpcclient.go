@@ -375,6 +375,22 @@ func (c *UnixClient) ListSecrets(
 	return reply.Secrets, nil
 }
 
+// ListBlueprints implements Client.
+func (c *UnixClient) ListBlueprints(
+	ctx context.Context,
+	realmName, spaceName, stackName string,
+) ([]v1beta1.CellBlueprintDoc, error) {
+	args := &ListBlueprintsArgs{RealmName: realmName, SpaceName: spaceName, StackName: stackName}
+	reply := &ListBlueprintsReply{}
+	if err := c.call(ctx, MethodListBlueprints, args, reply); err != nil {
+		return nil, err
+	}
+	if reply.Err != nil {
+		return reply.Blueprints, FromAPIError(reply.Err)
+	}
+	return reply.Blueprints, nil
+}
+
 // StartCell implements Client.
 func (c *UnixClient) StartCell(ctx context.Context, doc v1beta1.CellDoc) (StartCellResult, error) {
 	args := &StartCellArgs{Doc: doc}
@@ -568,6 +584,21 @@ func (c *UnixClient) DeleteSecret(ctx context.Context, doc v1beta1.SecretDoc) (D
 	reply := &DeleteSecretReply{}
 	if err := c.call(ctx, MethodDeleteSecret, args, reply); err != nil {
 		return DeleteSecretResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
+// DeleteBlueprint implements Client.
+func (c *UnixClient) DeleteBlueprint(
+	ctx context.Context, doc v1beta1.CellBlueprintDoc,
+) (DeleteBlueprintResult, error) {
+	args := &DeleteBlueprintArgs{Doc: doc}
+	reply := &DeleteBlueprintReply{}
+	if err := c.call(ctx, MethodDeleteBlueprint, args, reply); err != nil {
+		return DeleteBlueprintResult{}, err
 	}
 	if reply.Err != nil {
 		return reply.Result, FromAPIError(reply.Err)

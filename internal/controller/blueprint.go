@@ -60,6 +60,52 @@ func (b *Exec) GetBlueprint(blueprint intmodel.CellBlueprint) (GetBlueprintResul
 	return res, nil
 }
 
+// DeleteBlueprintResult reports the outcome of removing a single CellBlueprint's
+// daemon-stored document file.
+type DeleteBlueprintResult struct {
+	Blueprint intmodel.CellBlueprint
+	Deleted   bool
+}
+
+// ListBlueprints lists the metadata of every CellBlueprint bound to the filter
+// scope or any scope nested within it (issue #643). An empty realm lists across
+// all realms; the filter coordinates must still be contiguous (no gap below a
+// set level), and — a Blueprint never being cell-scoped — there is no cell
+// coordinate.
+func (b *Exec) ListBlueprints(realmName, spaceName, stackName string) ([]intmodel.CellBlueprint, error) {
+	if err := validateBlueprintScopeFilter(realmName, spaceName, stackName); err != nil {
+		return nil, err
+	}
+	return b.runner.ListBlueprints(
+		strings.TrimSpace(realmName),
+		strings.TrimSpace(spaceName),
+		strings.TrimSpace(stackName),
+	)
+}
+
+// DeleteBlueprint removes a single named, scoped CellBlueprint's daemon-stored
+// document. Returns a "not found" error when the blueprint does not exist,
+// matching the DeleteSecret contract. There is no live-reference gate: cells
+// materialized from a blueprint are independent copies (#620).
+func (b *Exec) DeleteBlueprint(blueprint intmodel.CellBlueprint) (DeleteBlueprintResult, error) {
+	var res DeleteBlueprintResult
+
+	if err := validateBlueprintLookup(blueprint.Metadata); err != nil {
+		return res, err
+	}
+
+	if err := b.runner.DeleteBlueprint(blueprint); err != nil {
+		if errors.Is(err, errdefs.ErrBlueprintNotFound) {
+			return res, fmt.Errorf("blueprint %q not found", blueprint.Metadata.Name)
+		}
+		return res, fmt.Errorf("%w: %w", errdefs.ErrDeleteBlueprint, err)
+	}
+
+	res.Deleted = true
+	res.Blueprint = blueprint
+	return res, nil
+}
+
 // validateBlueprintLookup enforces the scope contract for a single-blueprint
 // get: name and realm are mandatory and the scope coordinates must be
 // contiguous, with the Blueprint-specific rule that a cell coordinate is never
@@ -72,6 +118,24 @@ func validateBlueprintLookup(md intmodel.CellBlueprintMetadata) error {
 		return errdefs.ErrBlueprintRealmRequired
 	}
 	if strings.TrimSpace(md.Stack) != "" && strings.TrimSpace(md.Space) == "" {
+		return fmt.Errorf("%w (stack set without space)", errdefs.ErrBlueprintScopeIncomplete)
+	}
+	return nil
+}
+
+// validateBlueprintScopeFilter enforces the scope contract for a list filter:
+// realm is optional (an empty realm lists across all realms), but a set deeper
+// coordinate still requires every shallower one. A Blueprint is never
+// cell-scoped, so the filter bottoms out at stack.
+func validateBlueprintScopeFilter(realm, space, stack string) error {
+	realm = strings.TrimSpace(realm)
+	space = strings.TrimSpace(space)
+	stack = strings.TrimSpace(stack)
+
+	if realm == "" && (space != "" || stack != "") {
+		return fmt.Errorf("%w (scope set without realm)", errdefs.ErrBlueprintScopeIncomplete)
+	}
+	if stack != "" && space == "" {
 		return fmt.Errorf("%w (stack set without space)", errdefs.ErrBlueprintScopeIncomplete)
 	}
 	return nil
