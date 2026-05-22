@@ -32,13 +32,12 @@ import (
 // MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
-// unsafeDeleteWarning documents the temporary window the AC of issue #622 calls
-// out: until the secretRef referencing path ships in phase 3c, delete cannot
-// know whether a live container still references the secret, so it removes the
-// file unconditionally.
-const unsafeDeleteWarning = "WARNING: until the secretRef referencing path ships (phase 3c), this verb " +
-	"cannot detect a live container that references the secret and will delete it " +
-	"unconditionally. Deleting a referenced secret may break running workloads."
+// deleteGuardNote documents the live-reference safety gate wired in phase 3c
+// (issue #623): the verb refuses to delete a Secret while any cell's container
+// still references it via secretRef, naming the referencing cells so the
+// operator can detach or delete them first.
+const deleteGuardNote = "Deletion is refused while a cell's container references the secret via " +
+	"secretRef; the error lists the referencing cells so they can be detached or deleted first."
 
 // NewSecretCmd builds `kuke delete secret <name>` (issue #622). It removes the
 // daemon-stored bytes file for a single named, scoped Secret. The secret is
@@ -48,7 +47,7 @@ func NewSecretCmd() *cobra.Command {
 		Use:           "secret [name]",
 		Aliases:       []string{"sec"},
 		Short:         "Delete a kind: Secret",
-		Long:          "Delete a kind: Secret's daemon-stored bytes.\n\n" + unsafeDeleteWarning,
+		Long:          "Delete a kind: Secret's daemon-stored bytes.\n\n" + deleteGuardNote,
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,

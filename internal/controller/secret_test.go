@@ -20,6 +20,7 @@ package controller_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -145,6 +146,7 @@ func TestListSecrets_PassesScopeThrough(t *testing.T) {
 
 func TestDeleteSecret_ReportsNotFound(t *testing.T) {
 	ctrl := setupTestController(t, &fakeRunner{
+		ListCellsFn: func(_, _, _ string) ([]intmodel.Cell, error) { return nil, nil },
 		DeleteSecretFn: func(_ intmodel.Secret) error {
 			return errdefs.ErrSecretNotFound
 		},
@@ -164,6 +166,7 @@ func TestDeleteSecret_ReportsNotFound(t *testing.T) {
 func TestDeleteSecret_Succeeds(t *testing.T) {
 	var deleted intmodel.Secret
 	ctrl := setupTestController(t, &fakeRunner{
+		ListCellsFn: func(_, _, _ string) ([]intmodel.Cell, error) { return nil, nil },
 		DeleteSecretFn: func(s intmodel.Secret) error {
 			deleted = s
 			return nil
@@ -181,5 +184,82 @@ func TestDeleteSecret_Succeeds(t *testing.T) {
 	}
 	if deleted.Metadata.Name != "tok" {
 		t.Errorf("runner received name %q, want tok", deleted.Metadata.Name)
+	}
+}
+
+// cellWithSecretRef builds a one-container cell whose single secret references
+// the given scoped secret, for exercising the live-reference delete guard.
+func cellWithSecretRef(cellName string, ref intmodel.ContainerSecretRef) intmodel.Cell {
+	return intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: cellName},
+		Spec: intmodel.CellSpec{
+			RealmName: ref.Realm, SpaceName: "team-a", StackName: "web",
+			Containers: []intmodel.ContainerSpec{{
+				Secrets: []intmodel.ContainerSecret{{Name: "TOKEN", SecretRef: &ref}},
+			}},
+		},
+	}
+}
+
+// TestDeleteSecret_RefusesWhenReferenced pins AC5 (issue #623): delete is
+// refused while a cell's container references the secret via secretRef, the
+// error names the referencing cell, and the runner delete never fires.
+func TestDeleteSecret_RefusesWhenReferenced(t *testing.T) {
+	var deleteCalled bool
+	ctrl := setupTestController(t, &fakeRunner{
+		ListCellsFn: func(_, _, _ string) ([]intmodel.Cell, error) {
+			return []intmodel.Cell{
+				cellWithSecretRef("api", intmodel.ContainerSecretRef{Name: "tok", Realm: "default"}),
+			}, nil
+		},
+		DeleteSecretFn: func(_ intmodel.Secret) error {
+			deleteCalled = true
+			return nil
+		},
+	})
+
+	res, err := ctrl.DeleteSecret(intmodel.Secret{
+		Metadata: intmodel.SecretMetadata{Name: "tok", Realm: "default"},
+	})
+	if !errors.Is(err, errdefs.ErrSecretInUse) {
+		t.Fatalf("DeleteSecret() error = %v, want ErrSecretInUse", err)
+	}
+	if res.Deleted {
+		t.Errorf("Deleted = true, want false when referenced")
+	}
+	if deleteCalled {
+		t.Errorf("runner.DeleteSecret called, want skipped when referenced")
+	}
+	if !strings.Contains(err.Error(), "api") {
+		t.Errorf("error %q does not name the referencing cell", err)
+	}
+}
+
+// TestDeleteSecret_IgnoresNonMatchingRef confirms a secretRef to a different
+// secret (different scope) does not block deletion — the match is by resolved
+// storage path, not by name alone.
+func TestDeleteSecret_IgnoresNonMatchingRef(t *testing.T) {
+	var deleteCalled bool
+	ctrl := setupTestController(t, &fakeRunner{
+		ListCellsFn: func(_, _, _ string) ([]intmodel.Cell, error) {
+			return []intmodel.Cell{
+				// Same name, different realm scope → different on-disk path.
+				cellWithSecretRef("api", intmodel.ContainerSecretRef{Name: "tok", Realm: "other"}),
+			}, nil
+		},
+		DeleteSecretFn: func(_ intmodel.Secret) error {
+			deleteCalled = true
+			return nil
+		},
+	})
+
+	res, err := ctrl.DeleteSecret(intmodel.Secret{
+		Metadata: intmodel.SecretMetadata{Name: "tok", Realm: "default"},
+	})
+	if err != nil {
+		t.Fatalf("DeleteSecret() error = %v, want nil", err)
+	}
+	if !res.Deleted || !deleteCalled {
+		t.Errorf("Deleted=%v deleteCalled=%v, want both true for non-matching ref", res.Deleted, deleteCalled)
 	}
 }

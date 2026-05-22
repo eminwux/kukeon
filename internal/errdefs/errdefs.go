@@ -299,6 +299,7 @@ var (
 		"secret secretRef scope is incomplete: a deeper scope coordinate requires all shallower ones",
 	)
 	ErrSecretRefNotFound = errors.New("referenced secret does not exist in the requested scope")
+	ErrSecretInUse       = errors.New("secret is referenced by a live container via secretRef")
 
 	// Secret kind (kind: Secret) storage-primitive errors (issue #619).
 

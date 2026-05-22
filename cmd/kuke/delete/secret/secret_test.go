@@ -132,13 +132,13 @@ func TestDeleteSecret(t *testing.T) {
 	}
 }
 
-// TestDeleteSecret_HelpDocumentsUnsafeWindow confirms the verb's long help
-// names the temporary unconditional-delete window the AC of issue #622 calls
-// out, so the operator sees the phase-3c caveat.
-func TestDeleteSecret_HelpDocumentsUnsafeWindow(t *testing.T) {
+// TestDeleteSecret_HelpDocumentsReferenceGuard confirms the verb's long help
+// names the live-reference safety gate wired in phase 3c (issue #623), so the
+// operator knows deletion is refused while a cell references the secret.
+func TestDeleteSecret_HelpDocumentsReferenceGuard(t *testing.T) {
 	cmd := secret.NewSecretCmd()
-	if !strings.Contains(cmd.Long, "phase 3c") {
-		t.Errorf("delete secret long help does not document the phase-3c unsafe-delete window\nGot:\n%s", cmd.Long)
+	if !strings.Contains(cmd.Long, "secretRef") {
+		t.Errorf("delete secret long help does not document the live-reference guard\nGot:\n%s", cmd.Long)
 	}
 }
 

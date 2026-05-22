@@ -109,7 +109,7 @@ Each entry in `spec.secrets` references a credential the daemon resolves at appl
 
 Exactly one of `fromFile` / `fromEnv` / `secretRef` must be set.
 
-`secretRef` carries the referenced Secret's `name` plus its scope coordinates, following the same contract as [`kind: Secret`](#) metadata: `realm` is always required, and a deeper coordinate (`space` → `stack` → `cell`) may only be set when every shallower one is. A container may reference a Secret owned by a different scope — e.g. a workload in `default` reading a `kuke-system`-scoped token. Example:
+`secretRef` carries the referenced Secret's `name` plus its scope coordinates, following the same contract as `kind: Secret` metadata: `realm` is always required, and a deeper coordinate (`space` → `stack` → `cell`) may only be set when every shallower one is. A container may reference a Secret owned by a different scope — e.g. a workload in `default` reading a `kuke-system`-scoped token. Example:
 
 ```yaml
 secrets:
