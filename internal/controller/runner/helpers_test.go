@@ -145,18 +145,6 @@ func TestIsValidationError(t *testing.T) {
 	}
 }
 
-// TestResolveRootCNINetworkName_EmptyWhenSpaceMissing pins the best-effort
-// contract the issue #630 teardown sites rely on: when the space metadata
-// can't be loaded, resolveRootCNINetworkName returns "" rather than panicking,
-// which makes the downstream purgeCNIForContainer safety net a no-op instead
-// of dereferencing a nil network name.
-func TestResolveRootCNINetworkName_EmptyWhenSpaceMissing(t *testing.T) {
-	r := newMetadataTestExec(t, t.TempDir(), time.Now())
-	if got := r.resolveRootCNINetworkName("default", "nonexistent-space"); got != "" {
-		t.Errorf("resolveRootCNINetworkName() = %q, want \"\" when space metadata is absent", got)
-	}
-}
-
 // TestBuildRootCNINetworkName_DeterministicWhenSpaceMissing is the regression
 // guard for issue #685. The stop/kill/delete teardown sites used to resolve the
 // purge-target network name via GetSpace+getSpaceNetworkName and swallow the
