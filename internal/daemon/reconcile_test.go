@@ -45,6 +45,27 @@ func TestServer_ReconcileLoopFires(t *testing.T) {
 	waitForCalls(t, &calls, 2, 2*time.Second)
 }
 
+// TestServer_ReconcileRunsEagerlyOnStartup confirms the daemon runs one
+// reconcile pass immediately on startup, before the first ticker interval
+// elapses (#671). A large interval is used so the only way a call can land
+// inside the short deadline is the eager startup pass — not the ticker. The
+// headline case is a host restart that dropped containerd's tasks/records:
+// the eager pass converges the stale on-disk Status (and triggers AutoDelete
+// cleanup of now-phantom cells) at once instead of after a full interval.
+func TestServer_ReconcileRunsEagerlyOnStartup(t *testing.T) {
+	srv := newTestServer(t, 10*time.Second)
+	var calls atomic.Int32
+	srv.reconcileFn = func() (controller.ReconcileResult, error) {
+		calls.Add(1)
+		return controller.ReconcileResult{CellsScanned: 1}, nil
+	}
+
+	startServer(t, srv)
+	// Far shorter than the 10s interval: a call here can only come from the
+	// eager startup pass.
+	waitForCalls(t, &calls, 1, 1*time.Second)
+}
+
 // TestServer_ReconcileLoopAcceptsCellsDeletedResult is the daemon-side
 // half of #266: a reconcile pass that reports CellsDeleted (the AutoDelete
 // migration's new counter) flows through runReconcileOnce without
