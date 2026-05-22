@@ -181,6 +181,56 @@ func TestRunBuildForwardsKukeondConfig(t *testing.T) {
 	}
 }
 
+func TestRunBuildForwardsPush(t *testing.T) {
+	var gotArgv []string
+	withStubs(t,
+		func(string) (string, error) { return "/usr/local/bin/kukebuild", nil },
+		func(_ string, argv []string, _ []string) error { gotArgv = argv; return nil },
+	)
+
+	cmd := NewBuildCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"-t", "registry:5000/app:dev", "--push", "."})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	want := []string{
+		"kukebuild",
+		"--tag", "registry:5000/app:dev",
+		"--realm", consts.KukeonDefaultRealmName,
+		"--push",
+		".",
+	}
+	if !reflect.DeepEqual(gotArgv, want) {
+		t.Errorf("argv = %v, want %v", gotArgv, want)
+	}
+}
+
+// Without --push the shim forwards no --push flag (it is a boolean default-off).
+func TestRunBuildNoPushByDefault(t *testing.T) {
+	var gotArgv []string
+	withStubs(t,
+		func(string) (string, error) { return "/usr/local/bin/kukebuild", nil },
+		func(_ string, argv []string, _ []string) error { gotArgv = argv; return nil },
+	)
+
+	cmd := NewBuildCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"-t", "x:1", "."})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	for _, a := range gotArgv {
+		if a == "--push" {
+			t.Errorf("argv = %v, must not contain --push when the flag is unset", gotArgv)
+		}
+	}
+}
+
 func TestRunBuildDefaultRealm(t *testing.T) {
 	var gotArgv []string
 	withStubs(t,

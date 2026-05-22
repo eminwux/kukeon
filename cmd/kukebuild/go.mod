@@ -5,6 +5,7 @@ go 1.25.5
 require (
 	github.com/containerd/containerd/v2 v2.2.1
 	github.com/distribution/reference v0.6.0
+	github.com/docker/cli v29.2.1+incompatible
 	github.com/moby/buildkit v0.28.1
 	github.com/tonistiigi/fsutil v0.0.0-20251211185533-a2aa163d723f
 	golang.org/x/sync v0.19.0
@@ -42,6 +43,7 @@ require (
 	github.com/containernetworking/cni v1.3.0 // indirect
 	github.com/containernetworking/plugins v1.9.0 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.0 // indirect
+	github.com/docker/docker-credential-helpers v0.9.5 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
@@ -55,6 +57,7 @@ require (
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.3 // indirect
+	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-immutable-radix/v2 v2.1.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/hiddeco/sshsig v0.2.0 // indirect

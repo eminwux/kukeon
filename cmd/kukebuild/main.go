@@ -43,8 +43,10 @@
 // and --platform=$BUILDPLATFORM against kukeon's own Dockerfile end-to-end
 // (host network mode + the default overlayfs snapshotter sufficed). Phase 2a
 // (#523) adds build-time file secrets (--secret) and local-disk cache
-// export/import (--cache-to / --cache-from). The --push / --platform-flag
-// surface remains deferred to the phase 2 follow-ups (#524, #646).
+// export/import (--cache-to / --cache-from). Phase 2b (#524) adds direct
+// registry push (--push) with docker-config-compatible credential resolution
+// (see auth.go). The --platform multi-platform surface remains deferred to its
+// phase 2 follow-up (#646).
 package main
 
 import (
@@ -160,6 +162,12 @@ type buildConfig struct {
 	// backends are deferred.
 	cacheExports []cacheSpec
 	cacheImports []cacheSpec
+	// push, when true, pushes the built image to its tag's registry after the
+	// build succeeds (--push, phase 2b #524). The image is still written to the
+	// target realm's containerd namespace — push is additive. Requires tag to be
+	// a fully qualified registry reference; credentials resolve per the --push
+	// precedence (see auth.go).
+	push bool
 }
 
 // secretSpec is a resolved --secret entry: a build secret named id, sourced
@@ -245,6 +253,13 @@ func parseArgs(args []string) (*buildConfig, error) {
 	var cacheFrom repeatableFlag
 	fs.Var(&cacheFrom, "cache-from", "import build cache: type=local,src=PATH (repeatable)")
 
+	push := fs.Bool(
+		"push",
+		false,
+		"after a successful build, push the image to its tag's registry (requires a fully qualified REGISTRY/REPO:TAG); "+
+			"credentials resolve from $DOCKER_CONFIG/config.json, then ~/.docker/config.json, then $KUKEON_REGISTRY_AUTH",
+	)
+
 	if err := fs.Parse(args); err != nil {
 		return nil, &usageError{msg: err.Error()}
 	}
@@ -270,6 +285,11 @@ func parseArgs(args []string) (*buildConfig, error) {
 	}
 	if strings.TrimSpace(*realm) == "" {
 		return nil, &usageError{msg: "--realm must not be empty"}
+	}
+	if *push {
+		if err := requirePushableReference(strings.TrimSpace(*tag)); err != nil {
+			return nil, err
+		}
 	}
 
 	parsedArgs, err := parseBuildArgs(buildArgs)
@@ -308,6 +328,7 @@ func parseArgs(args []string) (*buildConfig, error) {
 		secrets:          parsedSecrets,
 		cacheExports:     parsedCacheExports,
 		cacheImports:     parsedCacheImports,
+		push:             *push,
 	}, nil
 }
 

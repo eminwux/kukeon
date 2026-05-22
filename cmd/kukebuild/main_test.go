@@ -20,6 +20,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -173,6 +174,47 @@ func TestParseSecretsUsageErrors(t *testing.T) {
 				t.Errorf("parseArgs(%v): error %v is not a *usageError", tc.args, err)
 			}
 		})
+	}
+}
+
+func TestParseArgsPush(t *testing.T) {
+	// --push defaults off.
+	cfg, err := parseArgs([]string{"-t", "registry:5000/app:dev", "/ctx"})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	if cfg.push {
+		t.Error("push = true, want false when --push is not supplied")
+	}
+
+	// --push with a fully qualified reference parses and sets the flag.
+	cfg, err = parseArgs([]string{"-t", "registry:5000/app:dev", "--push", "/ctx"})
+	if err != nil {
+		t.Fatalf("parseArgs(--push qualified): %v", err)
+	}
+	if !cfg.push {
+		t.Error("push = false, want true when --push is supplied")
+	}
+}
+
+func TestParseArgsPushRequiresQualifiedTag(t *testing.T) {
+	// --push with a bare name:tag is a usageError naming the required form.
+	cases := [][]string{
+		{"-t", "app:dev", "--push", "/ctx"},
+		{"-t", "eminwux/kukeon:v1", "--push", "/ctx"}, // docker-hub repo, host not explicit
+	}
+	for _, args := range cases {
+		_, err := parseArgs(args)
+		if err == nil {
+			t.Fatalf("parseArgs(%v): expected error, got nil", args)
+		}
+		var ue *usageError
+		if !errors.As(err, &ue) {
+			t.Errorf("parseArgs(%v): error %v is not a *usageError", args, err)
+		}
+		if !strings.Contains(err.Error(), "REGISTRY/REPO:TAG") {
+			t.Errorf("parseArgs(%v): error %q does not name REGISTRY/REPO:TAG", args, err)
+		}
 	}
 }
 

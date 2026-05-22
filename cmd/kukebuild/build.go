@@ -169,7 +169,27 @@ func runBuild(ctx context.Context, cfg *buildConfig, progressW io.Writer) error 
 	}
 	defer func() { _ = c.Close() }()
 
-	solveOpt, err := newSolveOpt(cfg)
+	// Resolve registry credentials before the solve when pushing, so a
+	// misconfigured docker config fails fast and credsFound can tailor an
+	// anonymous-rejection error after the push attempt. registryHost is safe to
+	// recompute — parseArgs already validated the reference is fully qualified.
+	var (
+		authProvider session.Attachable
+		pushHost     string
+		credsFound   bool
+	)
+	if cfg.push {
+		pushHost, err = registryHost(cfg.tag)
+		if err != nil {
+			return err
+		}
+		authProvider, credsFound, err = newAuthProvider(os.Getenv, pushHost)
+		if err != nil {
+			return err
+		}
+	}
+
+	solveOpt, err := newSolveOpt(cfg, authProvider)
 	if err != nil {
 		return err
 	}
@@ -192,6 +212,9 @@ func runBuild(ctx context.Context, cfg *buildConfig, progressW io.Writer) error 
 		return derr
 	})
 	if waitErr := eg.Wait(); waitErr != nil {
+		if cfg.push && isRegistryAuthError(waitErr) {
+			return pushAuthError(cfg.tag, pushHost, credsFound, waitErr)
+		}
 		return fmt.Errorf("build %q: %w", cfg.tag, waitErr)
 	}
 	return nil
@@ -217,8 +240,12 @@ func resolveBuildRoot(root string, explicit bool, namespace string) string {
 // Dockerfile frontend, the context + dockerfile local mounts, the
 // forwarded --build-arg values, and the containerd image exporter that names
 // the result cfg.tag. The "image" exporter writes into the worker's
-// containerd namespace, which newController points at <realm>.kukeon.io.
-func newSolveOpt(cfg *buildConfig) (*client.SolveOpt, error) {
+// containerd namespace, which newController points at <realm>.kukeon.io. When
+// cfg.push is set the same exporter also pushes to the tag's registry (push is
+// additive — the image still lands in the namespace) and authProvider, a
+// BuildKit session attachable carrying the resolved registry credentials, is
+// attached to the session; authProvider is nil when cfg.push is false.
+func newSolveOpt(cfg *buildConfig, authProvider session.Attachable) (*client.SolveOpt, error) {
 	contextFS, err := fsutil.NewFS(cfg.contextDir)
 	if err != nil {
 		return nil, fmt.Errorf("open build context %q: %w", cfg.contextDir, err)
@@ -259,6 +286,18 @@ func newSolveOpt(cfg *buildConfig) (*client.SolveOpt, error) {
 				},
 			},
 		},
+	}
+
+	// --push: the image exporter both writes the image into the containerd
+	// namespace (the name/unpack attrs above) and pushes it to the tag's
+	// registry. push is therefore additive, not substitutive — the local image
+	// remains inspectable via `kuke image get`. The auth provider rides in on
+	// the session so BuildKit resolves registry credentials during the push.
+	if cfg.push {
+		solveOpt.Exports[0].Attrs["push"] = "true"
+		if authProvider != nil {
+			solveOpt.Session = append(solveOpt.Session, authProvider)
+		}
 	}
 
 	// Build secrets ride in on a session attachable: the Dockerfile frontend
