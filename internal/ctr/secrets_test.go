@@ -24,7 +24,22 @@ import (
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/fs"
 )
+
+// writeScopedSecret stages a daemon-managed Secret's bytes at the #619 storage
+// layout under runPath so a secretRef resolution test can read them back.
+func writeScopedSecret(t *testing.T, runPath, realm, space, stack, cell, name, value string) {
+	t.Helper()
+	dir := fs.SecretsDir(runPath, realm, space, stack, cell)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir secrets dir: %v", err)
+	}
+	path := fs.SecretPath(runPath, realm, space, stack, cell, name)
+	if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
+		t.Fatalf("write scoped secret: %v", err)
+	}
+}
 
 func TestResolveSecretsFromFileEnvInjection(t *testing.T) {
 	t.Parallel()
@@ -39,7 +54,7 @@ func TestResolveSecretsFromFileEnvInjection(t *testing.T) {
 		{Name: "ANTHROPIC_API_KEY", FromFile: secretPath},
 	}
 
-	got, err := resolveSecrets("cntr-1", secrets, filepath.Join(dir, "staging"))
+	got, err := resolveSecrets("cntr-1", secrets, filepath.Join(dir, "staging"), "")
 	if err != nil {
 		t.Fatalf("resolveSecrets: %v", err)
 	}
@@ -58,7 +73,7 @@ func TestResolveSecretsFromEnvInjection(t *testing.T) {
 		{Name: "GITHUB_TOKEN", FromEnv: "KUKEON_TEST_SCOPED_TOKEN"},
 	}
 
-	got, err := resolveSecrets("cntr-2", secrets, t.TempDir())
+	got, err := resolveSecrets("cntr-2", secrets, t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("resolveSecrets: %v", err)
 	}
@@ -85,7 +100,7 @@ func TestResolveSecretsFileMountMode(t *testing.T) {
 		},
 	}
 
-	got, err := resolveSecrets("cntr-3", secrets, stagingDir)
+	got, err := resolveSecrets("cntr-3", secrets, stagingDir, "")
 	if err != nil {
 		t.Fatalf("resolveSecrets: %v", err)
 	}
@@ -130,7 +145,7 @@ func TestResolveSecretsMissingFileErrors(t *testing.T) {
 		{Name: "MISSING", FromFile: "/nonexistent/path/secret"},
 	}
 
-	_, err := resolveSecrets("cntr-4", secrets, t.TempDir())
+	_, err := resolveSecrets("cntr-4", secrets, t.TempDir(), "")
 	if err == nil {
 		t.Fatalf("expected error for missing file")
 	}
@@ -149,7 +164,7 @@ func TestResolveSecretsMissingEnvErrors(t *testing.T) {
 		{Name: "MISSING", FromEnv: "KUKEON_TEST_MISSING_SECRET_VAR"},
 	}
 
-	_, err := resolveSecrets("cntr-5", secrets, t.TempDir())
+	_, err := resolveSecrets("cntr-5", secrets, t.TempDir(), "")
 	if err == nil {
 		t.Fatalf("expected error for missing env var")
 	}
@@ -165,7 +180,7 @@ func TestResolveSecretsRejectsMultipleSources(t *testing.T) {
 		{Name: "BOTH", FromFile: "/tmp/x", FromEnv: "Y"},
 	}
 
-	_, err := resolveSecrets("cntr-6", secrets, t.TempDir())
+	_, err := resolveSecrets("cntr-6", secrets, t.TempDir(), "")
 	if !errors.Is(err, errdefs.ErrSecretMultipleSources) {
 		t.Fatalf("want ErrSecretMultipleSources, got %v", err)
 	}
@@ -176,7 +191,7 @@ func TestResolveSecretsRejectsMissingSource(t *testing.T) {
 
 	secrets := []intmodel.ContainerSecret{{Name: "NOSRC"}}
 
-	_, err := resolveSecrets("cntr-7", secrets, t.TempDir())
+	_, err := resolveSecrets("cntr-7", secrets, t.TempDir(), "")
 	if !errors.Is(err, errdefs.ErrSecretSourceRequired) {
 		t.Fatalf("want ErrSecretSourceRequired, got %v", err)
 	}
@@ -189,7 +204,7 @@ func TestResolveSecretsRejectsRelativeMountPath(t *testing.T) {
 		{Name: "X", FromEnv: "HOME", MountPath: "relative/path"},
 	}
 
-	_, err := resolveSecrets("cntr-8", secrets, t.TempDir())
+	_, err := resolveSecrets("cntr-8", secrets, t.TempDir(), "")
 	if !errors.Is(err, errdefs.ErrSecretMountPathNotAbsolute) {
 		t.Fatalf("want ErrSecretMountPathNotAbsolute, got %v", err)
 	}
@@ -198,7 +213,7 @@ func TestResolveSecretsRejectsRelativeMountPath(t *testing.T) {
 func TestResolveSecretsEmptySliceIsNoop(t *testing.T) {
 	t.Parallel()
 
-	got, err := resolveSecrets("cntr-9", nil, "")
+	got, err := resolveSecrets("cntr-9", nil, "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -221,7 +236,7 @@ func TestResolveSecretsMixesEnvAndMountModes(t *testing.T) {
 		{Name: "tls.crt", FromFile: certPath, MountPath: "/run/secrets/tls.crt"},
 	}
 
-	got, err := resolveSecrets("cntr-10", secrets, stagingDir)
+	got, err := resolveSecrets("cntr-10", secrets, stagingDir, "")
 	if err != nil {
 		t.Fatalf("resolveSecrets: %v", err)
 	}
@@ -230,5 +245,109 @@ func TestResolveSecretsMixesEnvAndMountModes(t *testing.T) {
 	}
 	if len(got.MountAdds) != 1 || got.MountAdds[0].Target != "/run/secrets/tls.crt" {
 		t.Fatalf("mount adds = %#v", got.MountAdds)
+	}
+}
+
+func TestResolveSecretsFromSecretRefEnvInjection(t *testing.T) {
+	t.Parallel()
+
+	runPath := t.TempDir()
+	// Stage a kuke-system-realm-scoped Secret; the referencing container need
+	// not live in that scope — the ref names its own scope coordinates.
+	writeScopedSecret(t, runPath, "kuke-system", "", "", "", "anthropic-token", "sk-ant-ref")
+
+	secrets := []intmodel.ContainerSecret{
+		{
+			Name:      "ANTHROPIC_AUTH_TOKEN",
+			SecretRef: &intmodel.ContainerSecretRef{Name: "anthropic-token", Realm: "kuke-system"},
+		},
+	}
+
+	got, err := resolveSecrets("cntr-ref-1", secrets, t.TempDir(), runPath)
+	if err != nil {
+		t.Fatalf("resolveSecrets: %v", err)
+	}
+	if len(got.MountAdds) != 0 {
+		t.Fatalf("expected no mount adds, got %d", len(got.MountAdds))
+	}
+	if len(got.EnvAdds) != 1 || got.EnvAdds[0] != "ANTHROPIC_AUTH_TOKEN=sk-ant-ref" {
+		t.Fatalf("unexpected env adds: %#v", got.EnvAdds)
+	}
+}
+
+func TestResolveSecretsFromSecretRefMountMode(t *testing.T) {
+	t.Parallel()
+
+	runPath := t.TempDir()
+	stagingDir := t.TempDir()
+	writeScopedSecret(t, runPath, "default", "ai", "agents", "claude", "tls.crt", "-----BEGIN CERT-----")
+
+	secrets := []intmodel.ContainerSecret{
+		{
+			Name: "tls.crt",
+			SecretRef: &intmodel.ContainerSecretRef{
+				Name:  "tls.crt",
+				Realm: "default",
+				Space: "ai",
+				Stack: "agents",
+				Cell:  "claude",
+			},
+			MountPath: "/etc/secrets/tls.crt",
+		},
+	}
+
+	got, err := resolveSecrets("cntr-ref-2", secrets, stagingDir, runPath)
+	if err != nil {
+		t.Fatalf("resolveSecrets: %v", err)
+	}
+	if len(got.EnvAdds) != 0 {
+		t.Fatalf("expected no env adds, got %#v", got.EnvAdds)
+	}
+	if len(got.MountAdds) != 1 {
+		t.Fatalf("expected 1 mount add, got %d", len(got.MountAdds))
+	}
+	wantSource := filepath.Join(stagingDir, "cntr-ref-2", "tls.crt")
+	if got.MountAdds[0].Source != wantSource {
+		t.Fatalf("mount source = %q want %q", got.MountAdds[0].Source, wantSource)
+	}
+	data, err := os.ReadFile(wantSource)
+	if err != nil {
+		t.Fatalf("read staged file: %v", err)
+	}
+	if string(data) != "-----BEGIN CERT-----" {
+		t.Fatalf("staged contents = %q", data)
+	}
+}
+
+func TestResolveSecretsSecretRefMissingErrors(t *testing.T) {
+	t.Parallel()
+
+	secrets := []intmodel.ContainerSecret{
+		{
+			Name:      "ABSENT",
+			SecretRef: &intmodel.ContainerSecretRef{Name: "no-such-secret", Realm: "kuke-system"},
+		},
+	}
+
+	_, err := resolveSecrets("cntr-ref-3", secrets, t.TempDir(), t.TempDir())
+	if !errors.Is(err, errdefs.ErrSecretRefNotFound) {
+		t.Fatalf("want ErrSecretRefNotFound, got %v", err)
+	}
+}
+
+func TestResolveSecretsRejectsRefPlusOtherSource(t *testing.T) {
+	t.Parallel()
+
+	secrets := []intmodel.ContainerSecret{
+		{
+			Name:      "BOTH",
+			FromEnv:   "HOME",
+			SecretRef: &intmodel.ContainerSecretRef{Name: "x", Realm: "kuke-system"},
+		},
+	}
+
+	_, err := resolveSecrets("cntr-ref-4", secrets, t.TempDir(), t.TempDir())
+	if !errors.Is(err, errdefs.ErrSecretMultipleSources) {
+		t.Fatalf("want ErrSecretMultipleSources, got %v", err)
 	}
 }

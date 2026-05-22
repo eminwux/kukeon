@@ -99,14 +99,17 @@ volumes:
 
 Each entry in `spec.secrets` references a credential the daemon resolves at apply time. Only the reference is persisted — the resolved value never appears in `kuke get -o yaml`, in object status, or in daemon logs.
 
-| Field       | Type   | Required        | Description                                                                                                                                             |
-| ----------- | ------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`      | string | yes             | Environment-variable name (default mode) or basename of the mounted secret file when `mountPath` is set                                                 |
-| `fromFile`  | string | one of required | Absolute host path the daemon reads at apply time. Missing files produce a clear error.                                                                 |
-| `fromEnv`   | string | one of required | Name of an environment variable set on the daemon host. Missing env vars produce a clear error.                                                         |
-| `mountPath` | string | no              | Absolute path inside the container. When set, the secret is staged with mode `0400` and bind-mounted read-only instead of being injected as an env var. |
+| Field       | Type                | Required        | Description                                                                                                                                             |
+| ----------- | ------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`      | string              | yes             | Environment-variable name (default mode) or basename of the mounted secret file when `mountPath` is set                                                 |
+| `fromFile`  | string              | one of required | Absolute host path the daemon reads at apply time. Missing files produce a clear error.                                                                 |
+| `fromEnv`   | string              | one of required | Name of an environment variable set on the daemon host. Missing env vars produce a clear error.                                                         |
+| `secretRef` | `ContainerSecretRef` | one of required | Reference to a daemon-managed `kind: Secret` by name and scope. Resolved from the scope's secrets tree at container start; a missing Secret produces a clear error naming the expected scope path. |
+| `mountPath` | string              | no              | Absolute path inside the container. When set, the secret is staged with mode `0400` and bind-mounted read-only instead of being injected as an env var. |
 
-Exactly one of `fromFile` / `fromEnv` must be set. Example:
+Exactly one of `fromFile` / `fromEnv` / `secretRef` must be set.
+
+`secretRef` carries the referenced Secret's `name` plus its scope coordinates, following the same contract as `kind: Secret` metadata: `realm` is always required, and a deeper coordinate (`space` → `stack` → `cell`) may only be set when every shallower one is. A container may reference a Secret owned by a different scope — e.g. a workload in `default` reading a `kuke-system`-scoped token. Example:
 
 ```yaml
 secrets:
@@ -117,7 +120,19 @@ secrets:
   - name: tls.crt
     fromFile: /etc/kukeon/secrets/tls.crt
     mountPath: /run/secrets/tls.crt
+  - name: ANTHROPIC_AUTH_TOKEN
+    secretRef:
+      name: anthropic-token
+      realm: kuke-system
 ```
+
+| `ContainerSecretRef` field | Type   | Required | Description                                          |
+| -------------------------- | ------ | -------- | ---------------------------------------------------- |
+| `name`                     | string | yes      | The referenced Secret's name within its scope        |
+| `realm`                    | string | yes      | Always-required top-level scope coordinate           |
+| `space`                    | string | no       | Scopes the reference to a space within `realm`       |
+| `stack`                    | string | no       | Scopes the reference to a stack within `space`       |
+| `cell`                     | string | no       | Scopes the reference to a cell within `stack`        |
 
 File-mount mode stages secrets under `/run/kukeon/secrets/<containerdId>/<name>` on the host, with owner-only read perms, then bind-mounts them read-only into the container. Because containerd persists resolved env vars in its own runtime spec, env-injection mode leaves the value in containerd's state; file-mount mode keeps it only in the tmpfs staging file.
 

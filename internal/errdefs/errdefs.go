@@ -284,12 +284,22 @@ var (
 	// Secret-related errors.
 
 	ErrSecretNameRequired         = errors.New("secret name is required")
-	ErrSecretSourceRequired       = errors.New("secret requires exactly one of fromFile or fromEnv")
-	ErrSecretMultipleSources      = errors.New("secret must not set both fromFile and fromEnv")
+	ErrSecretSourceRequired       = errors.New("secret requires exactly one of fromFile, fromEnv, or secretRef")
+	ErrSecretMultipleSources      = errors.New("secret must set exactly one of fromFile, fromEnv, or secretRef")
 	ErrSecretMountPathNotAbsolute = errors.New("secret mountPath must be an absolute container path")
 	ErrSecretFromFileNotFound     = errors.New("secret fromFile path does not exist on the host")
 	ErrSecretFromEnvNotSet        = errors.New("secret fromEnv env var is not set on the daemon host")
 	ErrSecretStagingFailed        = errors.New("failed to stage secret file for mount")
+
+	// ContainerSecret.secretRef source errors (issue #623).
+
+	ErrSecretRefNameRequired    = errors.New("secret secretRef.name is required")
+	ErrSecretRefRealmRequired   = errors.New("secret secretRef.realm is required")
+	ErrSecretRefScopeIncomplete = errors.New(
+		"secret secretRef scope is incomplete: a deeper scope coordinate requires all shallower ones",
+	)
+	ErrSecretRefNotFound = errors.New("referenced secret does not exist in the requested scope")
+	ErrSecretInUse       = errors.New("secret is referenced by a live container via secretRef")
 
 	// Secret kind (kind: Secret) storage-primitive errors (issue #619).
 

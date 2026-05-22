@@ -225,11 +225,39 @@ func (t *ContainerTty) IsEmpty() bool {
 // (default) or as a read-only file when MountPath is set. Only the reference
 // is persisted; the resolved value is never written to status, metadata, or
 // logs.
+//
+// Exactly one source must be set: FromFile (host-path reference), FromEnv
+// (daemon-host env var), or SecretRef (a daemon-managed kind: Secret resolved
+// from its scope's storage tree, issue #623). The env-vs-file dispatch is the
+// same for all three: empty MountPath injects an env var, a set MountPath
+// stages a read-only file mount.
 type ContainerSecret struct {
-	Name      string `json:"name"                yaml:"name"`
-	FromFile  string `json:"fromFile,omitempty"  yaml:"fromFile,omitempty"`
-	FromEnv   string `json:"fromEnv,omitempty"   yaml:"fromEnv,omitempty"`
-	MountPath string `json:"mountPath,omitempty" yaml:"mountPath,omitempty"`
+	Name      string              `json:"name"                yaml:"name"`
+	FromFile  string              `json:"fromFile,omitempty"  yaml:"fromFile,omitempty"`
+	FromEnv   string              `json:"fromEnv,omitempty"   yaml:"fromEnv,omitempty"`
+	SecretRef *ContainerSecretRef `json:"secretRef,omitempty" yaml:"secretRef,omitempty"`
+	MountPath string              `json:"mountPath,omitempty" yaml:"mountPath,omitempty"`
+}
+
+// ContainerSecretRef points at a daemon-managed kind: Secret (issue #619) by
+// name and scope. The scope follows the same coordinate contract as
+// SecretMetadata: Realm is always required and a deeper coordinate may only be
+// set when every shallower one is (a cell-scoped reference must also name its
+// stack, space, and realm). The reference resolves to the same on-disk path
+// the Secret's bytes were written to, so a container in one realm may
+// reference a Secret owned by another (e.g. a workload in `default` reading a
+// `kuke-system`-scoped token). Issue #623.
+type ContainerSecretRef struct {
+	// Name is the referenced Secret's name within its scope. Required.
+	Name string `json:"name"            yaml:"name"`
+	// Realm is the always-required top-level scope coordinate.
+	Realm string `json:"realm"           yaml:"realm"`
+	// Space, when set, scopes the reference to a space within Realm.
+	Space string `json:"space,omitempty" yaml:"space,omitempty"`
+	// Stack, when set, scopes the reference to a stack within Space.
+	Stack string `json:"stack,omitempty" yaml:"stack,omitempty"`
+	// Cell, when set, scopes the reference to a cell within Stack.
+	Cell string `json:"cell,omitempty"  yaml:"cell,omitempty"`
 }
 
 // VolumeKind discriminates between the supported VolumeMount kinds. Mirrors
@@ -538,6 +566,14 @@ func cloneSecrets(in []ContainerSecret) []ContainerSecret {
 
 	out := make([]ContainerSecret, len(in))
 	copy(out, in)
+	// copy() is shallow: deep-copy the SecretRef pointer so a clone never
+	// shares the referent struct with the original.
+	for i := range out {
+		if in[i].SecretRef != nil {
+			ref := *in[i].SecretRef
+			out[i].SecretRef = &ref
+		}
+	}
 	return out
 }
 

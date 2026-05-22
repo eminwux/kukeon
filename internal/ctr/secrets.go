@@ -24,6 +24,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
 // DefaultSecretsStagingDir is the host directory the daemon uses to stage
@@ -45,17 +46,23 @@ type resolvedSecrets struct {
 	MountAdds []intmodel.VolumeMount
 }
 
-// resolveSecrets reads each declared ContainerSecret from its host source
-// (file or env var) and returns env-var strings plus bind mounts for file
-// mode. Resolved values never appear in the returned strings beyond the env
-// entries themselves; callers must not log EnvAdds.
+// resolveSecrets reads each declared ContainerSecret from its source — a host
+// file (fromFile), a daemon-host env var (fromEnv), or a daemon-managed
+// kind: Secret (secretRef, issue #623) — and returns env-var strings plus bind
+// mounts for file mode. Resolved values never appear in the returned strings
+// beyond the env entries themselves; callers must not log EnvAdds.
 //
 // stagingDir is the host directory under which per-container secret files
-// are written (mode 0400). The directory is created on demand.
+// are written (mode 0400). The directory is created on demand. runPath is the
+// daemon's RunPath, used to locate secretRef material under the referenced
+// scope's secrets tree (the same <RunPath>/data/<scope>/secrets/<name> layout
+// the storage primitive writes — issue #619); callers that declare no
+// secretRef may pass "".
 func resolveSecrets(
 	containerdID string,
 	secrets []intmodel.ContainerSecret,
 	stagingDir string,
+	runPath string,
 ) (resolvedSecrets, error) {
 	var out resolvedSecrets
 	if len(secrets) == 0 {
@@ -75,12 +82,25 @@ func resolveSecrets(
 		if name == "" {
 			return resolvedSecrets{}, fmt.Errorf("%w (secrets[%d])", errdefs.ErrSecretNameRequired, i)
 		}
+		// Exactly one of fromFile / fromEnv / secretRef must be set. This is
+		// already enforced by the apply parser, but the runner is reachable
+		// from reconcile paths that bypass apply, so re-check defensively.
+		sources := 0
+		if fromFile != "" {
+			sources++
+		}
+		if fromEnv != "" {
+			sources++
+		}
+		if s.SecretRef != nil {
+			sources++
+		}
 		switch {
-		case fromFile == "" && fromEnv == "":
+		case sources == 0:
 			return resolvedSecrets{}, fmt.Errorf(
 				"%w (secrets[%d] %q)", errdefs.ErrSecretSourceRequired, i, name,
 			)
-		case fromFile != "" && fromEnv != "":
+		case sources > 1:
 			return resolvedSecrets{}, fmt.Errorf(
 				"%w (secrets[%d] %q)", errdefs.ErrSecretMultipleSources, i, name,
 			)
@@ -92,7 +112,7 @@ func resolveSecrets(
 			)
 		}
 
-		value, err := readSecretValue(fromFile, fromEnv, name)
+		value, err := readSecretValue(s, runPath)
 		if err != nil {
 			return resolvedSecrets{}, err
 		}
@@ -130,8 +150,15 @@ func resolveSecrets(
 	return out, nil
 }
 
-func readSecretValue(fromFile, fromEnv, name string) (string, error) {
-	if fromFile != "" {
+func readSecretValue(s intmodel.ContainerSecret, runPath string) (string, error) {
+	name := strings.TrimSpace(s.Name)
+	fromFile := strings.TrimSpace(s.FromFile)
+	fromEnv := strings.TrimSpace(s.FromEnv)
+
+	switch {
+	case s.SecretRef != nil:
+		return readSecretRefValue(*s.SecretRef, runPath, name)
+	case fromFile != "":
 		data, err := os.ReadFile(fromFile)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -143,15 +170,36 @@ func readSecretValue(fromFile, fromEnv, name string) (string, error) {
 			return "", fmt.Errorf("failed to read secret %q from %q: %w", name, fromFile, err)
 		}
 		return string(data), nil
+	default:
+		value, ok := os.LookupEnv(fromEnv)
+		if !ok {
+			return "", fmt.Errorf(
+				"%w (secret %q env %q)",
+				errdefs.ErrSecretFromEnvNotSet, name, fromEnv,
+			)
+		}
+		return value, nil
 	}
-	value, ok := os.LookupEnv(fromEnv)
-	if !ok {
-		return "", fmt.Errorf(
-			"%w (secret %q env %q)",
-			errdefs.ErrSecretFromEnvNotSet, name, fromEnv,
-		)
+}
+
+// readSecretRefValue reads a daemon-managed kind: Secret's bytes from its
+// scope's storage tree (issue #619 layout, fs.SecretPath). A missing file
+// surfaces ErrSecretRefNotFound naming the referenced secret and its expected
+// scope path; the path lets the operator confirm the scope, but the bytes are
+// never logged. Issue #623.
+func readSecretRefValue(ref intmodel.ContainerSecretRef, runPath, name string) (string, error) {
+	path := fs.SecretPath(runPath, ref.Realm, ref.Space, ref.Stack, ref.Cell, ref.Name)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf(
+				"%w (secret %q ref %q at %q)",
+				errdefs.ErrSecretRefNotFound, name, ref.Name, path,
+			)
+		}
+		return "", fmt.Errorf("failed to read referenced secret %q from %q: %w", ref.Name, path, err)
 	}
-	return value, nil
+	return string(data), nil
 }
 
 // writeSecretFile writes the secret value atomically with 0400 perms so the

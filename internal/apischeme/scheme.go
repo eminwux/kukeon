@@ -859,10 +859,26 @@ func convertSecretsToInternal(in []ext.ContainerSecret) []intmodel.ContainerSecr
 			Name:      s.Name,
 			FromFile:  s.FromFile,
 			FromEnv:   s.FromEnv,
+			SecretRef: secretRefToInternal(s.SecretRef),
 			MountPath: s.MountPath,
 		}
 	}
 	return out
+}
+
+// secretRefToInternal copies an external ContainerSecretRef into the internal
+// model, preserving nil. Issue #623.
+func secretRefToInternal(in *ext.ContainerSecretRef) *intmodel.ContainerSecretRef {
+	if in == nil {
+		return nil
+	}
+	return &intmodel.ContainerSecretRef{
+		Name:  in.Name,
+		Realm: in.Realm,
+		Space: in.Space,
+		Stack: in.Stack,
+		Cell:  in.Cell,
+	}
 }
 
 // buildSecretsExternalFromInternal is the inverse of convertSecretsToInternal.
@@ -876,10 +892,25 @@ func buildSecretsExternalFromInternal(in []intmodel.ContainerSecret) []ext.Conta
 			Name:      s.Name,
 			FromFile:  s.FromFile,
 			FromEnv:   s.FromEnv,
+			SecretRef: secretRefToExternal(s.SecretRef),
 			MountPath: s.MountPath,
 		}
 	}
 	return out
+}
+
+// secretRefToExternal is the inverse of secretRefToInternal. Issue #623.
+func secretRefToExternal(in *intmodel.ContainerSecretRef) *ext.ContainerSecretRef {
+	if in == nil {
+		return nil
+	}
+	return &ext.ContainerSecretRef{
+		Name:  in.Name,
+		Realm: in.Realm,
+		Space: in.Space,
+		Stack: in.Stack,
+		Cell:  in.Cell,
+	}
 }
 
 // reposToInternal copies external repo declarations into the internal model.

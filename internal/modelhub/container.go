@@ -150,12 +150,25 @@ func (t *ContainerTty) IsEmpty() bool {
 // ContainerSecret references a credential resolved by the daemon at apply
 // time. Only the reference is persisted in the hub; the resolved value lives
 // only in the OCI runtime spec (for env injection) or in the staged secret
-// file (for mount mode).
+// file (for mount mode). Exactly one source must be set: FromFile, FromEnv, or
+// SecretRef (a daemon-managed kind: Secret, issue #623).
 type ContainerSecret struct {
 	Name      string
 	FromFile  string
 	FromEnv   string
+	SecretRef *ContainerSecretRef
 	MountPath string
+}
+
+// ContainerSecretRef mirrors the v1beta1 ContainerSecretRef payload — a name +
+// scope pointing at a daemon-managed kind: Secret (issue #619). See the
+// v1beta1 type for the scope-coordinate contract. Issue #623.
+type ContainerSecretRef struct {
+	Name  string
+	Realm string
+	Space string
+	Stack string
+	Cell  string
 }
 
 // VolumeKind discriminates between the supported VolumeMount kinds. An empty

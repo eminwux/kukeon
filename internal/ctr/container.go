@@ -544,12 +544,18 @@ func (c *client) CreateContainerFromSpec(
 	// Resolve declared secrets before building the OCI spec. Env entries are
 	// appended to containerSpec.Env (containerd stores these in its own
 	// runtime spec, not in kukeon metadata); file-mounted secrets are staged
-	// on the host at 0400 and added as read-only bind mounts.
+	// on the host at 0400 and added as read-only bind mounts. The daemon's
+	// RunPath (forwarded via WithSecretRunPath) lets a secretRef resolve from
+	// the referenced scope's secrets tree (issue #623).
 	containerdID := containerSpec.ContainerdID
 	if containerdID == "" {
 		containerdID = containerSpec.ID
 	}
-	resolved, err := resolveSecrets(containerdID, containerSpec.Secrets, DefaultSecretsStagingDir)
+	var bo buildOpts
+	for _, apply := range opts {
+		apply(&bo)
+	}
+	resolved, err := resolveSecrets(containerdID, containerSpec.Secrets, DefaultSecretsStagingDir, bo.secretRunPath)
 	if err != nil {
 		c.logger.ErrorContext(
 			c.ctx,

@@ -23,6 +23,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/fs"
 )
 
 // GetSecretResult reports the metadata-only view of a single `kind: Secret`
@@ -85,16 +86,27 @@ func (b *Exec) ListSecrets(realmName, spaceName, stackName, cellName string) ([]
 // Returns a "not found" error when the secret does not exist, matching the
 // DeleteRealm contract.
 //
-// NOTE: the live-reference safety gate the AC describes — refusing to delete a
-// Secret a running container still references via secretRef — is wired by the
-// separately-filed phase-3c slice that introduces the referencing path. Until
-// 3c lands, delete is unconditional; the verb's help text documents this
-// temporary unsafe-delete window.
+// Live-reference safety gate (issue #623, AC5): before unlinking, scan every
+// persisted cell's container specs for a secretRef pointing at this secret. If
+// any references it, refuse with ErrSecretInUse naming the referencing cells —
+// deleting the bytes out from under a live container would break it on its next
+// start. This mirrors the DeleteRealm dependency guard.
 func (b *Exec) DeleteSecret(secret intmodel.Secret) (DeleteSecretResult, error) {
 	var res DeleteSecretResult
 
 	if err := validateSecretLookup(secret.Metadata); err != nil {
 		return res, err
+	}
+
+	refs, err := b.secretReferences(secret.Metadata)
+	if err != nil {
+		return res, fmt.Errorf("%w: check live references: %w", errdefs.ErrDeleteSecret, err)
+	}
+	if len(refs) > 0 {
+		return res, fmt.Errorf(
+			"%w: secret %q is referenced by %d cell(s): %s. Delete or detach them before deleting the secret",
+			errdefs.ErrSecretInUse, secret.Metadata.Name, len(refs), strings.Join(refs, ", "),
+		)
 	}
 
 	if err := b.runner.DeleteSecret(secret); err != nil {
@@ -107,6 +119,47 @@ func (b *Exec) DeleteSecret(secret intmodel.Secret) (DeleteSecretResult, error) 
 	res.Deleted = true
 	res.Secret = secret
 	return res, nil
+}
+
+// secretReferences returns the scope paths of every persisted cell whose
+// container specs reference the given secret via secretRef. The match is by
+// resolved storage path (fs.SecretPath), so a reference and the target secret
+// are "the same secret" exactly when they resolve to the same on-disk file —
+// the identity the resolver (internal/ctr.readSecretRefValue) reads at
+// container start. Each referencing cell is listed once, even when several of
+// its containers reference the secret.
+func (b *Exec) secretReferences(md intmodel.SecretMetadata) ([]string, error) {
+	targetPath := fs.SecretPath(b.opts.RunPath, md.Realm, md.Space, md.Stack, md.Cell, md.Name)
+
+	cells, err := b.runner.ListCells("", "", "")
+	if err != nil {
+		return nil, err
+	}
+
+	var refs []string
+	seen := make(map[string]struct{})
+	for _, cell := range cells {
+		scope := fmt.Sprintf("%s/%s/%s/%s",
+			cell.Spec.RealmName, cell.Spec.SpaceName, cell.Spec.StackName, cell.Metadata.Name)
+		for _, c := range cell.Spec.Containers {
+			for _, s := range c.Secrets {
+				if s.SecretRef == nil {
+					continue
+				}
+				ref := s.SecretRef
+				refPath := fs.SecretPath(b.opts.RunPath, ref.Realm, ref.Space, ref.Stack, ref.Cell, ref.Name)
+				if refPath != targetPath {
+					continue
+				}
+				if _, ok := seen[scope]; ok {
+					continue
+				}
+				seen[scope] = struct{}{}
+				refs = append(refs, scope)
+			}
+		}
+	}
+	return refs, nil
 }
 
 // validateSecretLookup enforces the scope contract for a single-secret get or
