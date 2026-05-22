@@ -649,6 +649,24 @@ func diffContainerSpec(desired, actual *intmodel.ContainerSpec, rootContainer bo
 		result.Details["resources"] = "resource limits changed"
 	}
 
+	if !secretsEqual(desired.Secrets, actual.Secrets) {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "secrets")
+		result.Details["secrets"] = "secrets changed"
+	}
+
+	if !reposEqual(desired.Repos, actual.Repos) {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "repos")
+		result.Details["repos"] = "repos changed"
+	}
+
 	return result
 }
 
@@ -853,6 +871,45 @@ func volumeMountsEqual(a, b []intmodel.VolumeMount) bool {
 		}
 	}
 	return true
+}
+
+func reposEqual(a, b []intmodel.ContainerRepo) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		// ContainerRepo is a flat struct of comparable fields.
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func secretsEqual(a, b []intmodel.ContainerSecret) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Name != b[i].Name ||
+			a[i].FromFile != b[i].FromFile ||
+			a[i].FromEnv != b[i].FromEnv ||
+			a[i].MountPath != b[i].MountPath ||
+			!secretRefEqual(a[i].SecretRef, b[i].SecretRef) {
+			return false
+		}
+	}
+	return true
+}
+
+func secretRefEqual(a, b *intmodel.ContainerSecretRef) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
 }
 
 func registryCredentialsEqual(a, b []intmodel.RegistryCredentials) bool {
