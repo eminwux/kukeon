@@ -108,3 +108,24 @@ func TestResolveRootCNINetworkName_EmptyWhenSpaceMissing(t *testing.T) {
 		t.Errorf("resolveRootCNINetworkName() = %q, want \"\" when space metadata is absent", got)
 	}
 }
+
+// TestBuildRootCNINetworkName_DeterministicWhenSpaceMissing is the regression
+// guard for issue #685. The stop/kill/delete teardown sites used to resolve the
+// purge-target network name via GetSpace+getSpaceNetworkName and swallow the
+// GetSpace error, so when space metadata was gone or corrupt networkName stayed
+// "" and the post-delete CNI/IPAM purge (purgeCNIForContainer) was gated out —
+// leaking the root container's IPAM reservation at /var/lib/cni/networks/<net>/<ip>.
+// buildRootCNINetworkName derives the name deterministically from (realm, space)
+// so the purge gate is satisfied even with no space metadata on disk. Contrast
+// TestResolveRootCNINetworkName_EmptyWhenSpaceMissing above: the re-ADD helper
+// deliberately still returns "" so attach is skipped for a vanished space.
+func TestBuildRootCNINetworkName_DeterministicWhenSpaceMissing(t *testing.T) {
+	r := newMetadataTestExec(t, t.TempDir(), time.Now())
+	// No space metadata is seeded under the tmpdir RunPath, so GetSpace would
+	// fail here — the exact condition that used to leave networkName empty.
+	got := r.buildRootCNINetworkName("default", "nonexistent-space")
+	want := "default-nonexistent-space"
+	if got != want {
+		t.Errorf("buildRootCNINetworkName() = %q, want %q when space metadata is absent", got, want)
+	}
+}

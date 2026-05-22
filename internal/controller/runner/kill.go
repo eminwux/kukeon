@@ -178,20 +178,10 @@ func (r *Exec) KillCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, err
 	}
 
-	// Get space to resolve network name for fallback cleanup
-	var networkName string
-	lookupSpace := intmodel.Space{
-		Metadata: intmodel.SpaceMetadata{
-			Name: spaceID,
-		},
-		Spec: intmodel.SpaceSpec{
-			RealmName: realmID,
-		},
-	}
-	internalSpace, spaceErr := r.GetSpace(lookupSpace)
-	if spaceErr == nil {
-		networkName, _ = r.getSpaceNetworkName(internalSpace)
-	}
+	// Resolve the network name deterministically from realm+space so the
+	// post-delete CNI/IPAM purge below runs even when space metadata is gone or
+	// corrupt (issue #685). The name is a pure function of (realm, space).
+	networkName := r.buildRootCNINetworkName(realmID, spaceID)
 
 	// Detach root container from CNI network before killing (needed for CNI detach)
 	r.detachRootContainerFromNetwork(
