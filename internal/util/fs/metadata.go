@@ -275,6 +275,42 @@ func SecretPath(baseRunPath, realmName, spaceName, stackName, cellName, secretNa
 	)
 }
 
+// BlueprintScopeDir returns the metadata directory of the scope a
+// `kind: CellBlueprint` is bound to (issue #620). Unlike a Secret, a Blueprint
+// is scopable at realm/space/stack only — never cell — so the deepest
+// coordinate this resolves is the stack dir. The caller is responsible for
+// having validated coordinate completeness.
+func BlueprintScopeDir(baseRunPath, realmName, spaceName, stackName string) string {
+	switch {
+	case stackName != "":
+		return StackMetadataDir(baseRunPath, realmName, spaceName, stackName)
+	case spaceName != "":
+		return SpaceMetadataDir(baseRunPath, realmName, spaceName)
+	default:
+		return RealmMetadataDir(baseRunPath, realmName)
+	}
+}
+
+// BlueprintsDir returns the per-scope blueprints directory — the root-owned,
+// world-readable (0o755) directory under the scope's metadata tree that owns
+// daemon-managed blueprint documents (issue #620). Nested inside the scope dir
+// so scope teardown reclaims it.
+func BlueprintsDir(baseRunPath, realmName, spaceName, stackName string) string {
+	return filepath.Join(
+		BlueprintScopeDir(baseRunPath, realmName, spaceName, stackName),
+		consts.KukeonBlueprintsSubdir,
+	)
+}
+
+// BlueprintPath returns the host-side path of a single daemon-managed
+// blueprint document: <scope>/blueprints/<name>, root-owned and 0o644.
+func BlueprintPath(baseRunPath, realmName, spaceName, stackName, blueprintName string) string {
+	return filepath.Join(
+		BlueprintsDir(baseRunPath, realmName, spaceName, stackName),
+		blueprintName,
+	)
+}
+
 type metadataHeader struct {
 	APIVersion string `json:"apiVersion"`
 	Kind       string `json:"kind"`

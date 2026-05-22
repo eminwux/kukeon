@@ -32,16 +32,17 @@ import (
 
 // Document represents a parsed YAML document with its type information.
 type Document struct {
-	Index        int
-	Raw          []byte
-	APIVersion   v1beta1.Version
-	Kind         v1beta1.Kind
-	RealmDoc     *v1beta1.RealmDoc
-	SpaceDoc     *v1beta1.SpaceDoc
-	StackDoc     *v1beta1.StackDoc
-	CellDoc      *v1beta1.CellDoc
-	ContainerDoc *v1beta1.ContainerDoc
-	SecretDoc    *v1beta1.SecretDoc
+	Index            int
+	Raw              []byte
+	APIVersion       v1beta1.Version
+	Kind             v1beta1.Kind
+	RealmDoc         *v1beta1.RealmDoc
+	SpaceDoc         *v1beta1.SpaceDoc
+	StackDoc         *v1beta1.StackDoc
+	CellDoc          *v1beta1.CellDoc
+	ContainerDoc     *v1beta1.ContainerDoc
+	SecretDoc        *v1beta1.SecretDoc
+	CellBlueprintDoc *v1beta1.CellBlueprintDoc
 }
 
 // ValidationError represents a validation error for a specific document.
@@ -170,6 +171,14 @@ func ParseDocument(index int, raw []byte) (*Document, error) {
 		doc.SecretDoc = &secretDoc
 		doc.APIVersion = secretDoc.APIVersion
 
+	case v1beta1.KindCellBlueprint:
+		var blueprintDoc v1beta1.CellBlueprintDoc
+		if unmarshalErr := yaml.Unmarshal(raw, &blueprintDoc); unmarshalErr != nil {
+			return nil, fmt.Errorf("document %d: failed to parse CellBlueprint: %w", index, unmarshalErr)
+		}
+		doc.CellBlueprintDoc = &blueprintDoc
+		doc.APIVersion = blueprintDoc.APIVersion
+
 	default:
 		return nil, fmt.Errorf("document %d: %w: %s", index, errdefs.ErrUnknownKind, kind)
 	}
@@ -197,7 +206,7 @@ func ValidateDocument(doc *Document) *ValidationError {
 	// Validate kind
 	switch doc.Kind {
 	case v1beta1.KindRealm, v1beta1.KindSpace, v1beta1.KindStack, v1beta1.KindCell,
-		v1beta1.KindContainer, v1beta1.KindSecret:
+		v1beta1.KindContainer, v1beta1.KindSecret, v1beta1.KindCellBlueprint:
 		// Valid kind
 	default:
 		return &ValidationError{
@@ -433,6 +442,11 @@ func ValidateDocument(doc *Document) *ValidationError {
 				Err:   errdefs.ErrSecretDataRequired,
 			}
 		}
+
+	case v1beta1.KindCellBlueprint:
+		if validationErr := validateBlueprint(doc); validationErr != nil {
+			return validationErr
+		}
 	}
 
 	return nil
@@ -456,6 +470,104 @@ func validateSecretSegment(value string) error {
 		strings.ContainsRune(value, '\\') ||
 		strings.ContainsRune(value, filepath.Separator) {
 		return errdefs.ErrSecretCoordUnsafe
+	}
+	return nil
+}
+
+// validateBlueprint enforces the structural contract for a kind: CellBlueprint
+// document (issue #620): name + scope coordinates, a non-empty cell template,
+// and the repo/secret slot shapes. The scope reachability gate (the named
+// realm/space/stack must exist) runs at reconcile time against the runner, the
+// same split the Secret kind uses (only the daemon can read /opt/kukeon).
+func validateBlueprint(doc *Document) *ValidationError {
+	if doc.CellBlueprintDoc == nil {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Err: errors.New("blueprint document is nil")}
+	}
+	bp := doc.CellBlueprintDoc
+	if strings.TrimSpace(bp.Metadata.Name) == "" {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Err: errdefs.ErrBlueprintNameRequired}
+	}
+	if scopeErr := validateBlueprintScope(bp.Metadata); scopeErr != nil {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name, Err: scopeErr}
+	}
+	if len(bp.Spec.Cell.Containers) == 0 {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name, Err: errdefs.ErrBlueprintCellRequired}
+	}
+	for _, c := range bp.Spec.Cell.Containers {
+		if repoErr := validateBlueprintRepos(c.Repos); repoErr != nil {
+			return &ValidationError{Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name, Err: repoErr}
+		}
+		if secretErr := validateBlueprintSecretSlots(c.Secrets); secretErr != nil {
+			return &ValidationError{Index: doc.Index, Kind: doc.Kind, Name: bp.Metadata.Name, Err: secretErr}
+		}
+	}
+	return nil
+}
+
+// validateBlueprintScope enforces the Blueprint scope-coordinate contract:
+// metadata.realm is always required, a deeper coordinate may only be set when
+// every shallower one is, and — unlike a Secret — a Blueprint may not be
+// cell-scoped (a template scoped to one cell is nonsensical, #423).
+func validateBlueprintScope(md v1beta1.CellBlueprintMetadata) error {
+	realm := strings.TrimSpace(md.Realm)
+	space := strings.TrimSpace(md.Space)
+	stack := strings.TrimSpace(md.Stack)
+
+	if realm == "" {
+		return errdefs.ErrBlueprintRealmRequired
+	}
+	if stack != "" && space == "" {
+		return fmt.Errorf("%w (stack set without space)", errdefs.ErrBlueprintScopeIncomplete)
+	}
+	return nil
+}
+
+// validateBlueprintRepos enforces the blueprint repo-slot shape: name required,
+// target required and absolute. Unlike the Cell/Container apply path
+// (validateRepos), url is NOT required: a repo with no url is a structural slot
+// a CellConfig fills (#624). A url supplied inline (directly or via ${PARAM})
+// is carried through to the materialized cell unchanged.
+func validateBlueprintRepos(repos []v1beta1.ContainerRepo) error {
+	for i, r := range repos {
+		name := strings.TrimSpace(r.Name)
+		if name == "" {
+			return fmt.Errorf("%w (repos[%d])", errdefs.ErrRepoNameRequired, i)
+		}
+		target := strings.TrimSpace(r.Target)
+		if target == "" {
+			return fmt.Errorf("%w (repos[%d] %q)", errdefs.ErrRepoTargetRequired, i, name)
+		}
+		if !filepath.IsAbs(target) {
+			return fmt.Errorf("%w (repos[%d] %q target %q)", errdefs.ErrRepoTargetNotAbsolute, i, name, target)
+		}
+	}
+	return nil
+}
+
+// validateBlueprintSecretSlots enforces the blueprint secret-slot shape: name
+// required; mode (default "env") one of env/file; env mode requires envName;
+// file mode requires an absolute mountPath. The source side (which kind: Secret
+// provides the bytes) is intentionally absent — a CellConfig fills it (#624).
+func validateBlueprintSecretSlots(slots []v1beta1.BlueprintSecretSlot) error {
+	for i, s := range slots {
+		name := strings.TrimSpace(s.Name)
+		if name == "" {
+			return fmt.Errorf("%w (secrets[%d])", errdefs.ErrBlueprintSecretSlotNameRequired, i)
+		}
+		mode := strings.TrimSpace(s.Mode)
+		switch mode {
+		case "", v1beta1.BlueprintSecretModeEnv:
+			if strings.TrimSpace(s.EnvName) == "" {
+				return fmt.Errorf("%w (secrets[%d] %q)", errdefs.ErrBlueprintSecretSlotEnvName, i, name)
+			}
+		case v1beta1.BlueprintSecretModeFile:
+			mountPath := strings.TrimSpace(s.MountPath)
+			if mountPath == "" || !filepath.IsAbs(mountPath) {
+				return fmt.Errorf("%w (secrets[%d] %q)", errdefs.ErrBlueprintSecretSlotMountPath, i, name)
+			}
+		default:
+			return fmt.Errorf("%w (secrets[%d] %q mode %q)", errdefs.ErrBlueprintSecretSlotMode, i, name, mode)
+		}
 	}
 	return nil
 }

@@ -46,6 +46,15 @@ const (
 	// and the files in it are root-only (0o700 / 0o600).
 	KukeonSecretsSubdir = "secrets"
 
+	// KukeonBlueprintsSubdir is the basename of the per-scope subdirectory that
+	// owns daemon-managed `kind: CellBlueprint` documents (issue #620). Like
+	// the secrets subdir it lives inside the scope's metadata directory (e.g.
+	// <RunPath>/data/<realm>/blueprints/) so a scope teardown reclaims it.
+	// Unlike secrets, a blueprint carries no credential bytes — only template
+	// references — so the directory and files are root-owned but world-readable
+	// (0o755 / 0o644).
+	KukeonBlueprintsSubdir = "blueprints"
+
 	// KukeonContainerTTYDir is the basename of the per-container directory
 	// that owns the sbsh terminal socket plus its capture and log siblings.
 	// kukeon bind-mounts this directory (not a single file) into the

@@ -218,6 +218,24 @@ type GetSecretResult struct {
 	MetadataExists bool
 }
 
+type GetBlueprintArgs struct {
+	Doc v1beta1.CellBlueprintDoc
+}
+
+type GetBlueprintReply struct {
+	Result GetBlueprintResult
+	Err    *APIError
+}
+
+// GetBlueprintResult carries the full CellBlueprintDoc read from daemon
+// storage (issue #620). Unlike GetSecretResult the whole document is
+// populated — a blueprint carries only template references, no secret bytes —
+// so `kuke run -b` can materialize it.
+type GetBlueprintResult struct {
+	Blueprint      v1beta1.CellBlueprintDoc
+	MetadataExists bool
+}
+
 // ---- List ----
 
 type ListRealmsArgs struct{}

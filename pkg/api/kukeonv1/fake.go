@@ -81,6 +81,10 @@ func (FakeClient) GetSecret(context.Context, v1beta1.SecretDoc) (GetSecretResult
 	return GetSecretResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) GetBlueprint(context.Context, v1beta1.CellBlueprintDoc) (GetBlueprintResult, error) {
+	return GetBlueprintResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) ListRealms(context.Context) ([]v1beta1.RealmDoc, error) {
 	return nil, ErrUnexpectedCall
 }

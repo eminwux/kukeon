@@ -47,6 +47,12 @@ type Client interface {
 	// `kind: Secret` (issue #622). Spec.data is never echoed — the bytes do
 	// not traverse this RPC by design (#619).
 	GetSecret(ctx context.Context, doc v1beta1.SecretDoc) (GetSecretResult, error)
+	// GetBlueprint reads one named, scoped `kind: CellBlueprint`'s full
+	// document from daemon storage (issue #620). Unlike GetSecret the whole
+	// document is returned — a blueprint carries only template references —
+	// so `kuke run -b` can materialize it. The input doc carries the name and
+	// scope coordinates only; the spec is ignored.
+	GetBlueprint(ctx context.Context, doc v1beta1.CellBlueprintDoc) (GetBlueprintResult, error)
 
 	ListRealms(ctx context.Context) ([]v1beta1.RealmDoc, error)
 	ListSpaces(ctx context.Context, realmName string) ([]v1beta1.SpaceDoc, error)
@@ -170,6 +176,7 @@ const (
 	MethodGetCell      = ServiceName + ".GetCell"
 	MethodGetContainer = ServiceName + ".GetContainer"
 	MethodGetSecret    = ServiceName + ".GetSecret"
+	MethodGetBlueprint = ServiceName + ".GetBlueprint"
 
 	MethodListRealms     = ServiceName + ".ListRealms"
 	MethodListSpaces     = ServiceName + ".ListSpaces"

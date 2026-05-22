@@ -118,6 +118,20 @@ type Runner interface {
 	// the file is absent.
 	DeleteSecret(secret intmodel.Secret) error
 
+	// WriteBlueprint persists a `kind: CellBlueprint`'s serialized document to
+	// the daemon-managed, root-owned, world-readable file under the scope's
+	// metadata tree (issue #620). Returns whether the file was newly created
+	// (vs. overwritten). The caller (ReconcileBlueprint) is responsible for
+	// having verified the scope exists.
+	WriteBlueprint(blueprint intmodel.CellBlueprint) (created bool, err error)
+
+	// GetBlueprint reads a single named, scoped CellBlueprint's document off
+	// disk (issue #620). Unlike GetSecret the full document is returned — a
+	// blueprint carries only template references, no credential bytes — so
+	// `kuke run -b` can materialize it. Returns errdefs.ErrBlueprintNotFound
+	// when the file is absent.
+	GetBlueprint(blueprint intmodel.CellBlueprint) (intmodel.CellBlueprint, error)
+
 	ExistsCgroup(doc any) (bool, error)
 
 	PurgeRealm(realm intmodel.Realm) (namespaceRemoved bool, err error)

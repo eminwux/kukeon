@@ -616,6 +616,81 @@ func ensureSecretScopeExists(r runner.Runner, md intmodel.SecretMetadata) error 
 	return nil
 }
 
+// ReconcileBlueprint reconciles a desired `kind: CellBlueprint` by verifying
+// its scope exists and persisting its document to the daemon-managed file
+// (issue #620). Like ReconcileSecret it never auto-creates a missing scope: a
+// Blueprint targets an existing realm/space/stack, so an unreachable scope is
+// an apply-time error. The document is written write-through — re-applying
+// overwrites and reports "updated".
+func ReconcileBlueprint(r runner.Runner, desired intmodel.CellBlueprint) (ReconcileResult, error) {
+	result := ReconcileResult{
+		Action: "unchanged",
+		Kind:   "CellBlueprint",
+		Name:   desired.Metadata.Name,
+	}
+
+	if err := ensureBlueprintScopeExists(r, desired.Metadata); err != nil {
+		return result, err
+	}
+
+	created, writeErr := r.WriteBlueprint(desired)
+	if writeErr != nil {
+		return result, writeErr
+	}
+	if created {
+		result.Action = actionCreated
+	} else {
+		result.Action = actionUpdated
+	}
+	return result, nil
+}
+
+// ensureBlueprintScopeExists verifies every scope coordinate the blueprint
+// names is reachable, deepest-first. A Blueprint is scopable at realm/space/
+// stack only (never cell), so the walk stops at the stack. A NotFound is
+// translated to errdefs.ErrBlueprintScopeNotFound.
+func ensureBlueprintScopeExists(r runner.Runner, md intmodel.CellBlueprintMetadata) error {
+	if _, err := r.GetRealm(intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{Name: md.Realm},
+	}); err != nil {
+		return blueprintScopeLookupError(err, "realm", md.Realm)
+	}
+
+	if md.Space != "" {
+		if _, err := r.GetSpace(intmodel.Space{
+			Metadata: intmodel.SpaceMetadata{Name: md.Space},
+			Spec:     intmodel.SpaceSpec{RealmName: md.Realm},
+		}); err != nil {
+			return blueprintScopeLookupError(err, "space", md.Space)
+		}
+	}
+
+	if md.Stack != "" {
+		if _, err := r.GetStack(intmodel.Stack{
+			Metadata: intmodel.StackMetadata{Name: md.Stack},
+			Spec:     intmodel.StackSpec{RealmName: md.Realm, SpaceName: md.Space},
+		}); err != nil {
+			return blueprintScopeLookupError(err, "stack", md.Stack)
+		}
+	}
+
+	return nil
+}
+
+// blueprintScopeLookupError maps a scope Get failure to a stable error. A
+// NotFound at any level becomes ErrBlueprintScopeNotFound; any other error is
+// propagated with context so it is not masked as a missing scope.
+func blueprintScopeLookupError(err error, level, name string) error {
+	switch {
+	case errors.Is(err, errdefs.ErrRealmNotFound),
+		errors.Is(err, errdefs.ErrSpaceNotFound),
+		errors.Is(err, errdefs.ErrStackNotFound):
+		return fmt.Errorf("%w: %s %q", errdefs.ErrBlueprintScopeNotFound, level, name)
+	default:
+		return fmt.Errorf("failed to verify blueprint scope %s %q: %w", level, name, err)
+	}
+}
+
 // scopeLookupError maps a scope Get failure to a stable error. A NotFound at
 // any level becomes ErrSecretScopeNotFound (the AC's "scope must exist"
 // gate); any other error (e.g. a corrupt metadata read) is propagated with
