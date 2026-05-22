@@ -293,4 +293,9 @@ const (
 	ContainerStatePausing
 	ContainerStateFailed
 	ContainerStateUnknown
+	// ContainerStateNotCreated marks a container with no containerd record at
+	// all — distinct from Stopped (a record that exists but whose task is
+	// gone). Appended last to keep the ordinals in lockstep with the v1beta1
+	// ContainerState enum, which scheme.go converts by direct int cast.
+	ContainerStateNotCreated
 )

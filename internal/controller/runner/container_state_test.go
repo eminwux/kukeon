@@ -92,13 +92,15 @@ func TestGetContainerState_TaskNotFound_ReturnsStopped(t *testing.T) {
 	}
 }
 
-// TestGetContainerState_ContainerGoneAlsoStopped sanity-checks the existing
-// pre-fix path: a container that's been removed from containerd entirely
-// (operator ran `ctr -n <ns> containers rm` between boots) reads back as
-// Stopped via the "container does not exist" branch. The Layer 2 fix added
-// in #543 must not regress this case — both paths land at Stopped so the
-// cell-level derivation reaches a terminal state either way.
-func TestGetContainerState_ContainerGoneAlsoStopped(t *testing.T) {
+// TestGetContainerState_ContainerAbsentReturnsNotCreated locks down the #670
+// reporting fix: a container with no containerd record at all (never realized,
+// or reaped/lost — operator ran `ctr -n <ns> containers rm`, or the records
+// vanished per #671) must read back as NotCreated, NOT Stopped. Collapsing the
+// two makes a cell whose containers were lost indistinguishable from a normally
+// stopped cell. The reconciler still treats NotCreated as terminal alongside
+// Stopped (see refresh.go), so the cell-level derivation reaches a terminal
+// state either way — only the reported per-container STATE differs.
+func TestGetContainerState_ContainerAbsentReturnsNotCreated(t *testing.T) {
 	realm, space, stack, cellName := "default", "kukeon", "kukeon", "web"
 	containerID, containerdID := "root", "kukeon_kukeon_web_root"
 
@@ -114,9 +116,9 @@ func TestGetContainerState_ContainerGoneAlsoStopped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetContainerState: unexpected error: %v", err)
 	}
-	if state != intmodel.ContainerStateStopped {
+	if state != intmodel.ContainerStateNotCreated {
 		t.Errorf(
-			"GetContainerState = %v, want Stopped (container fully gone branch — sanity check the existing path isn't regressed)",
+			"GetContainerState = %v, want NotCreated (no containerd record must not collapse to Stopped, #670)",
 			state,
 		)
 	}

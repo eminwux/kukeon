@@ -339,6 +339,8 @@ func parseContainerState(in string, out *ContainerState) error {
 		*out = ContainerStateFailed
 	case StateUnknownStr:
 		*out = ContainerStateUnknown
+	case StateNotCreatedStr:
+		*out = ContainerStateNotCreated
 	default:
 		return fmt.Errorf("container state: unknown label %q", in)
 	}
@@ -347,7 +349,7 @@ func parseContainerState(in string, out *ContainerState) error {
 
 func assignContainerStateInt(i int, out *ContainerState) error {
 	v := ContainerState(i)
-	if v < ContainerStatePending || v > ContainerStateUnknown {
+	if v < ContainerStatePending || v > ContainerStateNotCreated {
 		return fmt.Errorf("container state: int %d out of range", i)
 	}
 	*out = v

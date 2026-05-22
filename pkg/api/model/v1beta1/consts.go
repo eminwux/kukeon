@@ -65,4 +65,7 @@ const (
 	StateUnknownStr  = "Unknown"
 	StateCreatingStr = "Creating"
 	StateDeletingStr = "Deleting"
+	// StateNotCreatedStr is the display label for a container with no
+	// containerd record at all (see ContainerStateNotCreated).
+	StateNotCreatedStr = "NotCreated"
 )

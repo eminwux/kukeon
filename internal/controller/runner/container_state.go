@@ -152,12 +152,17 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 	}
 
 	if !containerExists {
-		// Container doesn't exist in containerd
+		// No containerd record at all — distinct from Stopped (a record that
+		// exists but whose task is gone, handled below). Reporting must not
+		// collapse the two: an absent record means the container was never
+		// realized or was reaped/lost, which an operator needs to tell apart
+		// from a normal clean stop (#670). The reconciler treats NotCreated
+		// exactly like Stopped for its lifecycle decisions — see refresh.go.
 		r.logger.InfoContext(r.ctx, "container does not exist in containerd",
 			"container", containerID,
 			"containerdID", containerdID,
 			"namespace", namespace)
-		return intmodel.ContainerStateStopped, nil
+		return intmodel.ContainerStateNotCreated, nil
 	}
 
 	// Get container state using TaskStatus from ctr package
