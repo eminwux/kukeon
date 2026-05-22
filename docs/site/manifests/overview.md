@@ -47,6 +47,10 @@ Required, string. Unique within its parent. The name is also what you use as `re
 
 Optional, map of string to string. Arbitrary key-value metadata. Not used by any Kukeon logic today; labels are preserved on round-trip.
 
+### `metadata.generation`
+
+Read-only, integer. Monotonic counter bumped by a writer on each spec-changing update, so a reconciler can tell whether it has observed the latest spec (compare against `status.observedGeneration`). Defaults to zero and is omitted when zero. Writers do not bump it yet, so it stays absent until a later release wires them up. Present on realm, space, stack, and cell — not container.
+
 ### `status.state`
 
 Read-only. Managed by Kukeon. Takes one of:

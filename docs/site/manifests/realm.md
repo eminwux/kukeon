@@ -57,6 +57,7 @@ spec:
 | `message`                  | string                                                          | Human-readable detail backing `reason`; especially valuable on `state: Failed`.                                                                   |
 | `cgroupReady`              | bool                                                            | Whether `cgroupPath` actually exists on the host filesystem as of the last status write — separates intent from observation.                      |
 | `containerdNamespaceReady` | bool                                                            | Whether the containerd namespace recorded in `spec.namespace` was actually present as of the last status write.                                   |
+| `observedGeneration`       | int                                                             | The `metadata.generation` the reconciler last acted on. Defaults to zero (omitted) and stays inert until writers begin bumping `generation`; the reconciler then compares the two to skip stale work. |
 
 `status` is populated by Kukeon; anything you set when applying is overwritten on reconcile.
 
