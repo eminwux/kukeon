@@ -20,6 +20,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/eminwux/kukeon/internal/cni"
@@ -168,6 +169,13 @@ type Exec struct {
 	opts   Options
 
 	ctrClient ctr.Client
+	// ctrClientOnce serializes the lazy construction of ctrClient so two
+	// concurrent first-use goroutines (e.g. the first RPC handler and the
+	// first reconcile tick) cannot each build a client and overwrite the
+	// other's assignment — a data race on the pointer plus a duplicate
+	// containerd connection (issue #684). Connect() itself stays outside the
+	// Once so the reconnect-on-broken-connection path still runs every call.
+	ctrClientOnce sync.Once
 
 	cniConf *cni.Conf
 
@@ -274,8 +282,13 @@ func (r *Exec) Close() error {
 // ensureClientConnected ensures the containerd client is initialized and connected.
 // It creates a new client if needed, and reconnects if the connection was closed.
 func (r *Exec) ensureClientConnected() error {
-	if r.ctrClient == nil {
-		r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
-	}
+	r.ctrClientOnce.Do(func() {
+		// Guard the nil check so a test-injected fake (constructed via
+		// &Exec{ctrClient: fake}) survives — only a runner that started with
+		// no client builds the real one here.
+		if r.ctrClient == nil {
+			r.ctrClient = ctr.NewClient(r.ctx, r.logger, r.opts.ContainerdSocket)
+		}
+	})
 	return r.ctrClient.Connect()
 }
