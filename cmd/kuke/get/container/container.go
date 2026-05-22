@@ -414,6 +414,8 @@ func containerStateToString(state v1beta1.ContainerState) string {
 		return "Pausing"
 	case v1beta1.ContainerStateFailed:
 		return "Failed"
+	case v1beta1.ContainerStateNotCreated:
+		return "NotCreated"
 	default:
 		return "Unknown"
 	}

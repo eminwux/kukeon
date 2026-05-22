@@ -806,9 +806,10 @@ func cellStateAutoDeleteTriggers(s intmodel.CellState) bool {
 
 // latchReadyObserved is the one-way latch the reconciler uses to decide
 // whether a cell has ever been Ready. A cell that has never reached
-// Ready must not be auto-deleted: GetContainerState returns Stopped
+// Ready must not be auto-deleted: GetContainerState returns NotCreated
 // for a not-yet-existing container (the "container does not exist in
-// containerd" branch in container_state.go), and the reconciler ticking
+// containerd" branch in container_state.go), which the cell-level
+// derivation treats as Stopped, and the reconciler ticking
 // inside the gap between cgroup creation and root-container
 // registration in CreateCell would otherwise reap an in-flight cell.
 //
@@ -881,6 +882,7 @@ func rootContainerStillRunning(rootID string, statuses []intmodel.ContainerStatu
 			return true
 		case intmodel.ContainerStateStopped,
 			intmodel.ContainerStateFailed,
+			intmodel.ContainerStateNotCreated,
 			intmodel.ContainerStateUnknown:
 			return false
 		}
@@ -932,9 +934,10 @@ func (r *Exec) deriveCellState(cell intmodel.Cell) intmodel.CellState {
 // wind-down KillCell. Wait for the next reconcile pass to settle.
 //
 // "Container does not exist in containerd" is mapped to
-// ContainerStateStopped by GetContainerState, so a non-root workload
-// that exited and was reaped naturally counts toward "all stopped"
-// here.
+// ContainerStateNotCreated by GetContainerState; this derivation treats
+// NotCreated as a terminal state alongside Stopped/Failed, so a non-root
+// workload that exited and was reaped naturally still counts toward "all
+// stopped" here.
 func deriveCellStateFromNonRootContainerStatuses(
 	specs []intmodel.ContainerSpec,
 	statuses []intmodel.ContainerStatus,
@@ -962,8 +965,11 @@ func deriveCellStateFromNonRootContainerStatuses(
 			anyActive = true
 		case intmodel.ContainerStateUnknown:
 			anyUnknown = true
-		case intmodel.ContainerStateStopped, intmodel.ContainerStateFailed:
-			// terminal — does not contribute to active.
+		case intmodel.ContainerStateStopped,
+			intmodel.ContainerStateFailed,
+			intmodel.ContainerStateNotCreated:
+			// terminal — does not contribute to active. A reaped/absent
+			// workload (NotCreated) counts the same as a clean stop here.
 		}
 	}
 
@@ -1014,7 +1020,9 @@ func (r *Exec) deriveCellStateFromRootContainer(cell intmodel.Cell) intmodel.Cel
 		intmodel.ContainerStatePaused,
 		intmodel.ContainerStatePausing:
 		return intmodel.CellStateReady
-	case intmodel.ContainerStateStopped, intmodel.ContainerStateFailed:
+	case intmodel.ContainerStateStopped,
+		intmodel.ContainerStateFailed,
+		intmodel.ContainerStateNotCreated:
 		return intmodel.CellStateStopped
 	default:
 		return intmodel.CellStateUnknown

@@ -360,6 +360,21 @@ func TestDeriveCellStateFromNonRootContainerStatuses(t *testing.T) {
 			want: intmodel.CellStateStopped,
 		},
 		{
+			name: "absent_workload_counts_as_terminal_like_stopped",
+			specs: []intmodel.ContainerSpec{
+				{ID: "root", Root: true},
+				{ID: "work", Root: false},
+			},
+			// The workload's containerd record vanished (#670/#671) — the
+			// reconciler must still wind the cell down, exactly as for a
+			// clean stop. NotCreated is terminal here.
+			statuses: []intmodel.ContainerStatus{
+				{ID: "root", State: intmodel.ContainerStateReady},
+				{ID: "work", State: intmodel.ContainerStateNotCreated},
+			},
+			want: intmodel.CellStateStopped,
+		},
+		{
 			name: "workload_reads_back_unknown_blocks_stopped_defensive_against_301",
 			specs: []intmodel.ContainerSpec{
 				{ID: "root", Root: true},
