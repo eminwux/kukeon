@@ -257,7 +257,7 @@ func (r *Exec) markCellFailed(cell intmodel.Cell, reason string, cause error) {
 			"cell", cellName, "cause", cause.Error(), "error", preStampErr.Error())
 	}
 
-	if _, killErr := r.KillCell(cell); killErr != nil {
+	if _, killErr := r.killCellLocked(cell); killErr != nil {
 		r.logger.WarnContext(r.ctx,
 			"failed to kill siblings while transitioning cell to Failed",
 			"cell", cellName, "cause", cause.Error(), "error", killErr.Error())
@@ -294,7 +294,15 @@ func (r *Exec) markCellFailed(cell intmodel.Cell, reason string, cause error) {
 // any containers that did start are killed — issue #407. Errors raised before
 // the provisioning phase (input validation, realm lookup, idempotent-skip
 // path) leave the cell's persisted state alone.
-func (r *Exec) StartCell(cell intmodel.Cell) (_ intmodel.Cell, retErr error) {
+func (r *Exec) StartCell(cell intmodel.Cell) (intmodel.Cell, error) {
+	defer r.lockCell(cell)()
+	return r.startCellLocked(cell)
+}
+
+// startCellLocked is the body of StartCell. The caller must hold the per-cell
+// lifecycle lock (the StartCell wrapper, or a nesting op such as RecreateCell
+// that already holds it). It must not be called without the lock held.
+func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr error) {
 	// provisionStarted gates the defer below: only flip the cell to Failed
 	// when we've already entered the destructive recreate path. Validation
 	// errors (missing cell name, missing realm) and the idempotent-skip

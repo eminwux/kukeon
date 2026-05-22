@@ -30,6 +30,8 @@ import (
 // with the new root container spec. This is used when the root container spec changes
 // (image, command, or args).
 func (r *Exec) RecreateCell(desired intmodel.Cell) (intmodel.Cell, error) {
+	defer r.lockCell(desired)()
+
 	// Get existing cell
 	existing, err := r.GetCell(desired)
 	if err != nil {
@@ -37,7 +39,7 @@ func (r *Exec) RecreateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 	}
 
 	// Stop all containers in the cell
-	_, stopErr := r.StopCell(existing)
+	_, stopErr := r.stopCellLocked(existing)
 	if stopErr != nil {
 		r.logger.WarnContext(
 			r.ctx,
@@ -191,7 +193,7 @@ func (r *Exec) RecreateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 	// apply/reconcile.go (CreateCell -> StartCell). StartCell starts the tasks,
 	// runs CNI ADD against the deterministic root ID, and stamps + persists Ready
 	// only once the cell is actually up.
-	started, startErr := r.StartCell(desired)
+	started, startErr := r.startCellLocked(desired)
 	if startErr != nil {
 		return intmodel.Cell{}, fmt.Errorf("failed to start recreated cell: %w", startErr)
 	}
