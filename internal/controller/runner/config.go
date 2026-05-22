@@ -20,7 +20,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
@@ -80,4 +83,191 @@ func (r *Exec) WriteConfig(config intmodel.CellConfig) (bool, error) {
 		"stack", md.Stack,
 	)
 	return created, nil
+}
+
+// GetConfig reads a single named, scoped CellConfig's document off disk (issue
+// #644). Like GetBlueprint — and unlike GetSecret — the full document is read
+// back and returned: a Config carries only a blueprint reference, scalar
+// values, and slot fills (no credential bytes), so the whole document is safe
+// to surface for `kuke get config`. Returns errdefs.ErrConfigNotFound when the
+// file is absent.
+func (r *Exec) GetConfig(config intmodel.CellConfig) (intmodel.CellConfig, error) {
+	md := config.Metadata
+	path := fs.ConfigPath(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Name)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return intmodel.CellConfig{}, errdefs.ErrConfigNotFound
+		}
+		return intmodel.CellConfig{}, fmt.Errorf("%w: %w", errdefs.ErrGetConfig, err)
+	}
+
+	return intmodel.CellConfig{Metadata: md, Document: data}, nil
+}
+
+// ListConfigs enumerates the metadata of every CellConfig bound to the scope
+// identified by the filter coordinates, plus every Config bound to a deeper
+// scope nested within it (issue #644). The filter is a prefix: an empty
+// realmName lists across all realms; a set realmName with an empty spaceName
+// lists realm-scoped configs and everything under that realm; and so on. This
+// mirrors the subtree-filter semantics of ListBlueprints, bounded at stack
+// depth — a Config is never cell-scoped (#624). The returned carriers are
+// metadata-only (Document nil): the scope coordinates come from the path and
+// the name from the file basename, so a list never parses every document.
+func (r *Exec) ListConfigs(realmName, spaceName, stackName string) ([]intmodel.CellConfig, error) {
+	realmDirs, err := r.resolveRealmDirs(realmName)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errdefs.ErrListConfigs, err)
+	}
+
+	var out []intmodel.CellConfig
+	for _, realmDir := range realmDirs {
+		realm := filepath.Base(realmDir)
+		if walkErr := r.collectConfigSubtree(&out, realm, spaceName, stackName); walkErr != nil {
+			return nil, fmt.Errorf("%w: %w", errdefs.ErrListConfigs, walkErr)
+		}
+	}
+	return out, nil
+}
+
+// collectConfigSubtree appends the metadata of every CellConfig bound to scope
+// (realm, space, stack) — where a trailing coordinate that is "" marks the
+// filter floor — and every Config in scopes nested within it. The rule mirrors
+// collectBlueprintSubtree: collect a level's own configs only when the
+// next-deeper filter coordinate is empty, and descend into a child only when it
+// matches a set filter coordinate or the filter is empty at that level. The
+// walk is bounded at stack depth, so cell directories are never descended.
+func (r *Exec) collectConfigSubtree(out *[]intmodel.CellConfig, realm, space, stack string) error {
+	if space == "" {
+		if err := r.collectConfigsInScope(out, realm, "", ""); err != nil {
+			return err
+		}
+	}
+
+	spaces, err := r.configChildScopeNames(fs.RealmMetadataDir(r.opts.RunPath, realm), space)
+	if err != nil {
+		return err
+	}
+	for _, sp := range spaces {
+		if stack == "" {
+			if err = r.collectConfigsInScope(out, realm, sp, ""); err != nil {
+				return err
+			}
+		}
+
+		stacks, stErr := r.configChildScopeNames(fs.SpaceMetadataDir(r.opts.RunPath, realm, sp), stack)
+		if stErr != nil {
+			return stErr
+		}
+		for _, st := range stacks {
+			if err = r.collectConfigsInScope(out, realm, sp, st); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// configChildScopeNames returns the child-scope subdirectory names directly
+// under dir, excluding all three reserved resource subdirectories (secrets/,
+// blueprints/, configs/) so none is mistaken for a child space or stack. When
+// want is non-empty it filters to that single child (returned only if it
+// exists). A missing dir yields no children, matching the list verbs' "no match
+// ⇒ empty". Note this excludes configs/ as well as secrets/blueprints — a
+// reserved subdir at any scope level is never a child scope.
+func (r *Exec) configChildScopeNames(dir, want string) ([]string, error) {
+	if strings.TrimSpace(want) != "" {
+		child := filepath.Join(dir, want)
+		info, err := os.Stat(child)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("failed to stat scope dir %q: %w", child, err)
+		}
+		if !info.IsDir() {
+			return nil, nil
+		}
+		return []string{want}, nil
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read scope dir %q: %w", dir, err)
+	}
+	var names []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		switch entry.Name() {
+		case consts.KukeonSecretsSubdir, consts.KukeonBlueprintsSubdir, consts.KukeonConfigsSubdir:
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	return names, nil
+}
+
+// collectConfigsInScope appends the metadata of every CellConfig stored
+// directly at the given scope (realm, space, stack). The in-flight
+// ".config-*.tmp" temp files WriteConfig creates are skipped so a concurrent
+// apply never surfaces a half-written name.
+func (r *Exec) collectConfigsInScope(out *[]intmodel.CellConfig, realm, space, stack string) error {
+	dir := fs.ConfigsDir(r.opts.RunPath, realm, space, stack)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to read configs dir %q: %w", dir, err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, ".config-") && strings.HasSuffix(name, ".tmp") {
+			continue
+		}
+		*out = append(*out, intmodel.CellConfig{
+			Metadata: intmodel.CellConfigMetadata{
+				Name:  name,
+				Realm: realm,
+				Space: space,
+				Stack: stack,
+			},
+		})
+	}
+	return nil
+}
+
+// DeleteConfig removes the daemon-stored document file for a single named,
+// scoped CellConfig (issue #644). Returns errdefs.ErrConfigNotFound when the
+// file is absent so the caller can report a clear "not found" instead of a
+// silent success. Deleting a Config never touches the cell it materialized —
+// that is `kuke delete cell` — so there is no live-reference gate here; the
+// back-reference notice is computed and surfaced by the controller layer.
+func (r *Exec) DeleteConfig(config intmodel.CellConfig) error {
+	md := config.Metadata
+	path := fs.ConfigPath(r.opts.RunPath, md.Realm, md.Space, md.Stack, md.Name)
+
+	if err := os.Remove(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return errdefs.ErrConfigNotFound
+		}
+		return fmt.Errorf("%w: %w", errdefs.ErrDeleteConfig, err)
+	}
+
+	r.logger.InfoContext(r.ctx, "config deleted",
+		"name", md.Name,
+		"realm", md.Realm,
+		"space", md.Space,
+		"stack", md.Stack,
+	)
+	return nil
 }

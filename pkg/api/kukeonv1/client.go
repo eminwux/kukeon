@@ -53,6 +53,12 @@ type Client interface {
 	// so `kuke run -b` can materialize it. The input doc carries the name and
 	// scope coordinates only; the spec is ignored.
 	GetBlueprint(ctx context.Context, doc v1beta1.CellBlueprintDoc) (GetBlueprintResult, error)
+	// GetConfig reads one named, scoped `kind: CellConfig`'s full document
+	// from daemon storage (issue #644). Like GetBlueprint the whole document
+	// is returned — a Config carries no credential bytes — so the blueprint
+	// ref, values, and slot fills surface to `kuke get config`. The input doc
+	// carries the name and scope coordinates only; the spec is ignored.
+	GetConfig(ctx context.Context, doc v1beta1.CellConfigDoc) (GetConfigResult, error)
 
 	ListRealms(ctx context.Context) ([]v1beta1.RealmDoc, error)
 	ListSpaces(ctx context.Context, realmName string) ([]v1beta1.SpaceDoc, error)
@@ -71,6 +77,11 @@ type Client interface {
 	// realmName lists across all realms. A Blueprint is never cell-scoped, so
 	// there is no cell coordinate. The spec is not populated for a list.
 	ListBlueprints(ctx context.Context, realmName, spaceName, stackName string) ([]v1beta1.CellBlueprintDoc, error)
+	// ListConfigs enumerates the metadata of every CellConfig bound to the
+	// filter scope or any scope nested within it (issue #644). An empty
+	// realmName lists across all realms. A Config is never cell-scoped, so
+	// there is no cell coordinate. The spec is not populated for a list.
+	ListConfigs(ctx context.Context, realmName, spaceName, stackName string) ([]v1beta1.CellConfigDoc, error)
 
 	StartCell(ctx context.Context, doc v1beta1.CellDoc) (StartCellResult, error)
 	StartContainer(ctx context.Context, doc v1beta1.ContainerDoc) (StartContainerResult, error)
@@ -101,6 +112,11 @@ type Client interface {
 	// daemon-stored document (issue #643). No live-reference gate: cells
 	// materialized from a blueprint are independent copies (#620).
 	DeleteBlueprint(ctx context.Context, doc v1beta1.CellBlueprintDoc) (DeleteBlueprintResult, error)
+	// DeleteConfig removes a single named, scoped CellConfig's daemon-stored
+	// document (issue #644). No live-reference gate: deleting a Config never
+	// deletes the cell it materialized. The result reports any live cells that
+	// still carry the back-reference label so the caller can emit a notice.
+	DeleteConfig(ctx context.Context, doc v1beta1.CellConfigDoc) (DeleteConfigResult, error)
 
 	PurgeRealm(ctx context.Context, doc v1beta1.RealmDoc, force, cascade bool) (PurgeRealmResult, error)
 	PurgeSpace(ctx context.Context, doc v1beta1.SpaceDoc, force, cascade bool) (PurgeSpaceResult, error)
@@ -186,6 +202,7 @@ const (
 	MethodGetContainer = ServiceName + ".GetContainer"
 	MethodGetSecret    = ServiceName + ".GetSecret"
 	MethodGetBlueprint = ServiceName + ".GetBlueprint"
+	MethodGetConfig    = ServiceName + ".GetConfig"
 
 	MethodListRealms     = ServiceName + ".ListRealms"
 	MethodListSpaces     = ServiceName + ".ListSpaces"
@@ -194,6 +211,7 @@ const (
 	MethodListContainers = ServiceName + ".ListContainers"
 	MethodListSecrets    = ServiceName + ".ListSecrets"
 	MethodListBlueprints = ServiceName + ".ListBlueprints"
+	MethodListConfigs    = ServiceName + ".ListConfigs"
 
 	MethodStartCell       = ServiceName + ".StartCell"
 	MethodStartContainer  = ServiceName + ".StartContainer"
@@ -211,6 +229,7 @@ const (
 	MethodDeleteContainer = ServiceName + ".DeleteContainer"
 	MethodDeleteSecret    = ServiceName + ".DeleteSecret"
 	MethodDeleteBlueprint = ServiceName + ".DeleteBlueprint"
+	MethodDeleteConfig    = ServiceName + ".DeleteConfig"
 
 	MethodPurgeRealm     = ServiceName + ".PurgeRealm"
 	MethodPurgeSpace     = ServiceName + ".PurgeSpace"

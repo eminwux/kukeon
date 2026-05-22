@@ -85,6 +85,10 @@ func (FakeClient) GetBlueprint(context.Context, v1beta1.CellBlueprintDoc) (GetBl
 	return GetBlueprintResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) GetConfig(context.Context, v1beta1.CellConfigDoc) (GetConfigResult, error) {
+	return GetConfigResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) ListRealms(context.Context) ([]v1beta1.RealmDoc, error) {
 	return nil, ErrUnexpectedCall
 }
@@ -110,6 +114,10 @@ func (FakeClient) ListSecrets(context.Context, string, string, string, string) (
 }
 
 func (FakeClient) ListBlueprints(context.Context, string, string, string) ([]v1beta1.CellBlueprintDoc, error) {
+	return nil, ErrUnexpectedCall
+}
+
+func (FakeClient) ListConfigs(context.Context, string, string, string) ([]v1beta1.CellConfigDoc, error) {
 	return nil, ErrUnexpectedCall
 }
 
@@ -171,6 +179,10 @@ func (FakeClient) DeleteSecret(context.Context, v1beta1.SecretDoc) (DeleteSecret
 
 func (FakeClient) DeleteBlueprint(context.Context, v1beta1.CellBlueprintDoc) (DeleteBlueprintResult, error) {
 	return DeleteBlueprintResult{}, ErrUnexpectedCall
+}
+
+func (FakeClient) DeleteConfig(context.Context, v1beta1.CellConfigDoc) (DeleteConfigResult, error) {
+	return DeleteConfigResult{}, ErrUnexpectedCall
 }
 
 func (FakeClient) PurgeRealm(context.Context, v1beta1.RealmDoc, bool, bool) (PurgeRealmResult, error) {

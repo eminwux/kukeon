@@ -291,6 +291,21 @@ func (c *UnixClient) GetBlueprint(
 	return reply.Result, nil
 }
 
+// GetConfig implements Client.
+func (c *UnixClient) GetConfig(
+	ctx context.Context, doc v1beta1.CellConfigDoc,
+) (GetConfigResult, error) {
+	args := &GetConfigArgs{Doc: doc}
+	reply := &GetConfigReply{}
+	if err := c.call(ctx, MethodGetConfig, args, reply); err != nil {
+		return GetConfigResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // ListRealms implements Client.
 func (c *UnixClient) ListRealms(ctx context.Context) ([]v1beta1.RealmDoc, error) {
 	args := &ListRealmsArgs{}
@@ -389,6 +404,22 @@ func (c *UnixClient) ListBlueprints(
 		return reply.Blueprints, FromAPIError(reply.Err)
 	}
 	return reply.Blueprints, nil
+}
+
+// ListConfigs implements Client.
+func (c *UnixClient) ListConfigs(
+	ctx context.Context,
+	realmName, spaceName, stackName string,
+) ([]v1beta1.CellConfigDoc, error) {
+	args := &ListConfigsArgs{RealmName: realmName, SpaceName: spaceName, StackName: stackName}
+	reply := &ListConfigsReply{}
+	if err := c.call(ctx, MethodListConfigs, args, reply); err != nil {
+		return nil, err
+	}
+	if reply.Err != nil {
+		return reply.Configs, FromAPIError(reply.Err)
+	}
+	return reply.Configs, nil
 }
 
 // StartCell implements Client.
@@ -599,6 +630,21 @@ func (c *UnixClient) DeleteBlueprint(
 	reply := &DeleteBlueprintReply{}
 	if err := c.call(ctx, MethodDeleteBlueprint, args, reply); err != nil {
 		return DeleteBlueprintResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
+// DeleteConfig implements Client.
+func (c *UnixClient) DeleteConfig(
+	ctx context.Context, doc v1beta1.CellConfigDoc,
+) (DeleteConfigResult, error) {
+	args := &DeleteConfigArgs{Doc: doc}
+	reply := &DeleteConfigReply{}
+	if err := c.call(ctx, MethodDeleteConfig, args, reply); err != nil {
+		return DeleteConfigResult{}, err
 	}
 	if reply.Err != nil {
 		return reply.Result, FromAPIError(reply.Err)

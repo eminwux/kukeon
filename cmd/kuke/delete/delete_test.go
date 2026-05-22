@@ -50,7 +50,7 @@ func TestNewDeleteCmdMetadata(t *testing.T) {
 		{
 			name: "short description",
 			check: func(t *testing.T, cmd *cobra.Command) {
-				expected := "Delete Kukeon resources (realm, space, stack, cell, container, secret, blueprint)"
+				expected := "Delete Kukeon resources (realm, space, stack, cell, container, secret, blueprint, config)"
 				if cmd.Short != expected {
 					t.Fatalf("expected Short to be %q, got %q", expected, cmd.Short)
 				}
@@ -207,7 +207,7 @@ func TestNewDeleteCmd_AutocompleteRegistration(t *testing.T) {
 
 	// Test the completion function directly
 	completions, _ := cmd.ValidArgsFunction(cmd, []string{}, "")
-	expected := []string{"realm", "space", "stack", "cell", "container", "secret", "blueprint"}
+	expected := []string{"realm", "space", "stack", "cell", "container", "secret", "blueprint", "config"}
 	if len(completions) != len(expected) {
 		t.Fatalf("expected %d completions, got %d", len(expected), len(completions))
 	}
@@ -227,7 +227,7 @@ func TestNewDeleteCmd_AutocompleteRegistration(t *testing.T) {
 
 	// Test prefix filtering
 	filtered, _ := cmd.ValidArgsFunction(cmd, []string{}, "c")
-	expectedFiltered := []string{"cell", "container"}
+	expectedFiltered := []string{"cell", "container", "config"}
 	if len(filtered) != len(expectedFiltered) {
 		t.Fatalf("expected %d filtered completions, got %d", len(expectedFiltered), len(filtered))
 	}
