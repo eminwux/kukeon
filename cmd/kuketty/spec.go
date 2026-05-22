@@ -155,6 +155,26 @@ func buildTerminalSpec(
 	if err != nil {
 		return nil, fmt.Errorf("build kuketty terminal spec: %w", err)
 	}
+
+	// Anchor sbsh's metadata.json inside the per-container tty bind mount
+	// (issue #672). sbsh writes metadata.json via an atomic
+	// create-temp-then-rename that needs write+exec on the holding directory at
+	// every point in the terminal lifecycle — create AND close. The legacy
+	// layout (RunPath/terminals/<id>/, mode 0700, owned by the creating uid)
+	// denied the close-time write whenever the closing uid differed from the
+	// creating uid. We pin MetadataDir to attachableTTYDir — the directory the
+	// daemon bind-mounts and attachablePostCreateChown re-owns to the resolved
+	// container uid — so the holding dir is always the kukeon-owned, host-
+	// visible tty dir. Setting it explicitly (rather than leaning on sbsh's
+	// implicit "MetadataDir = dirname(LogFile) when all three artifact paths are
+	// caller-supplied" derivation) keeps metadata.json in the bind mount even
+	// when an operator pins Tty.LogFile outside it, and survives a future
+	// refactor that drops one of the WithSocketFile/WithCaptureFile/WithLogFile
+	// options (which would otherwise empty MetadataDir and resurrect the
+	// terminals/<id>/ layout). No basename collision: kuketty's own rendered doc
+	// is kuketty-metadata.json; sbsh writes metadata.json.
+	terminalSpec.MetadataDir = attachableTTYDir
+
 	return terminalSpec, nil
 }
 

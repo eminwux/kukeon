@@ -245,6 +245,34 @@ func TestBuildTerminalSpec_LogFileOverride(t *testing.T) {
 	}
 }
 
+// TestBuildTerminalSpec_MetadataDirAnchored locks #672: metadata.json is always
+// written into the per-container tty bind mount (attachableTTYDir), the dir the
+// daemon owns and attachablePostCreateChown re-owns to the resolved container
+// uid — never the legacy single-owner RunPath/terminals/<id>/ subtree whose
+// 0700/creating-uid ownership denied the close-time write. The anchor must hold
+// regardless of where the operator points Tty.LogFile: leaning on sbsh's
+// implicit "MetadataDir = dirname(LogFile)" derivation would let an
+// out-of-bind-mount log path (the "override outside bind mount" case) drag
+// metadata.json out of the kukeon-owned, host-visible dir.
+func TestBuildTerminalSpec_MetadataDirAnchored(t *testing.T) {
+	cases := []struct {
+		name string
+		tty  *v1beta1.ContainerTty
+	}{
+		{"no Tty: daemon default log", nil},
+		{"log inside bind mount", &v1beta1.ContainerTty{LogFile: attachableTTYDir + "/custom.log"}},
+		{"log outside bind mount", &v1beta1.ContainerTty{LogFile: "/var/log/sbsh-debug.log"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := buildSpec(t, v1beta1.ContainerSpec{ID: "c1", Command: "/bin/sh", KukeonGroupGID: 986, Tty: tc.tty})
+			if out.MetadataDir != attachableTTYDir {
+				t.Errorf("MetadataDir = %q, want %q (anchored in tty bind mount)", out.MetadataDir, attachableTTYDir)
+			}
+		})
+	}
+}
+
 // ttyFieldsCoveredByMapping is the structural half of #493's "every Tty field
 // must map" guard, ported to kuketty (which now owns the transform and reads
 // the v1beta1 schema). It enumerates v1beta1.ContainerTty via reflection and
