@@ -4,7 +4,7 @@ Every resource in Kukeon has a YAML schema. All manifests share the same shape:
 
 ```yaml
 apiVersion: v1beta1
-kind: <Realm|Space|Stack|Cell|Container>
+kind: <Realm|Space|Stack|Cell|Container|Secret>
 metadata:
   name: <string>
   labels:
@@ -36,6 +36,7 @@ If you're moving from v0.3.0 or v0.4.0, the per-kind pages below are the source 
 - [Stack](stack.md) — logical group of cells
 - [Cell](cell.md) — pod-like group of containers
 - [Container](container.md) — OCI container
+- [Secret](secret.md) — named, scoped, daemon-managed credential
 
 ## Common fields
 
