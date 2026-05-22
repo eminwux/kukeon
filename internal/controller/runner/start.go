@@ -164,7 +164,7 @@ func teardownRootContainerCNI(releaseCNI func(), deleteContainer func() error, p
 // before CNI ADD on the ErrContainerNotFound branch, giving the create-fresh
 // path the same second line of defence the teardown branch already has.
 //
-// Best-effort and a no-op when networkName is "" (resolveRootCNINetworkName
+// Best-effort and a no-op when networkName is "" (buildRootCNINetworkName
 // couldn't derive a name), so a clean start with no stale reservation is
 // unaffected. Decoupled from the concrete CNI client — same rationale as
 // teardownRootContainerCNI — so the run/no-op decision is unit-testable.
@@ -447,7 +447,10 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 			// reservation keyed to this deterministic root-container ID. Scrub
 			// it before CNI ADD so the re-ADD isn't rejected as a duplicate
 			// allocation. Best-effort and a no-op when no stale file exists.
-			networkName := r.resolveRootCNINetworkName(realmID, spaceID)
+			// Resolve the network name deterministically from realm+space so
+			// the scrub runs even when space metadata is gone or corrupt
+			// (issue #685), matching the stop/kill/delete teardown paths.
+			networkName := r.buildRootCNINetworkName(realmID, spaceID)
 			purgeStaleRootContainerCNI(networkName, func() {
 				_ = r.purgeCNIForContainer(containerID, "", networkName)
 			})

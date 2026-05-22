@@ -357,7 +357,7 @@ func TestTeardownRootContainerCNI_OrderingAndSafetyNet(t *testing.T) {
 // runs — purgeStaleRootContainerCNI must scrub a stale host-local IPAM
 // reservation keyed to the deterministic root-container ID before CNI ADD so
 // the re-ADD isn't rejected as a duplicate allocation. The purge is best-effort
-// and must be a no-op when resolveRootCNINetworkName couldn't derive a name (""),
+// and must be a no-op when buildRootCNINetworkName couldn't derive a name (""),
 // leaving a clean start with no stale reservation unaffected.
 func TestPurgeStaleRootContainerCNI_CreateFreshSafetyNet(t *testing.T) {
 	t.Run("purge_runs_when_network_name_resolves", func(t *testing.T) {
