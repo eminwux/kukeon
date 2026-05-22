@@ -547,6 +547,8 @@ func (c *client) effectiveMountpoint(mountpoint string) string {
 }
 
 func (c *client) storeManager(group string, manager *cgroup2.Manager) {
+	c.cgroupsMu.Lock()
+	defer c.cgroupsMu.Unlock()
 	if c.cgroups == nil {
 		c.cgroups = make(map[string]*cgroup2.Manager)
 	}
@@ -554,6 +556,8 @@ func (c *client) storeManager(group string, manager *cgroup2.Manager) {
 }
 
 func (c *client) dropManager(group string) {
+	c.cgroupsMu.Lock()
+	defer c.cgroupsMu.Unlock()
 	if c.cgroups == nil {
 		return
 	}
@@ -564,7 +568,10 @@ func (c *client) managerFor(group, mountpoint string) (*cgroup2.Manager, error) 
 	if err := validateGroupPath(group); err != nil {
 		return nil, err
 	}
-	if manager, ok := c.cgroups[group]; ok {
+	c.cgroupsMu.RLock()
+	manager, ok := c.cgroups[group]
+	c.cgroupsMu.RUnlock()
+	if ok {
 		return manager, nil
 	}
 	mp := c.effectiveMountpoint(mountpoint)
