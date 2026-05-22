@@ -327,6 +327,14 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_GET_BLUEPRINT_STACK = DefineKV("KUKE_GET_BLUEPRINT_STACK", "kuke/get/blueprint/stack")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_CONFIG_NAME = DefineKV("KUKE_GET_CONFIG_NAME", "kuke/get/config/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_CONFIG_REALM = DefineKV("KUKE_GET_CONFIG_REALM", "kuke/get/config/realm", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_CONFIG_SPACE = DefineKV("KUKE_GET_CONFIG_SPACE", "kuke/get/config/space")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_GET_CONFIG_STACK = DefineKV("KUKE_GET_CONFIG_STACK", "kuke/get/config/stack")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_GET_OUTPUT = DefineKV("KUKE_GET_OUTPUT", "kuke/get/output")
 
 	// Delete command variables
@@ -378,6 +386,14 @@ var (
 	KUKE_DELETE_BLUEPRINT_SPACE = DefineKV("KUKE_DELETE_BLUEPRINT_SPACE", "kuke/delete/blueprint/space")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_DELETE_BLUEPRINT_STACK = DefineKV("KUKE_DELETE_BLUEPRINT_STACK", "kuke/delete/blueprint/stack")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_DELETE_CONFIG_NAME = DefineKV("KUKE_DELETE_CONFIG_NAME", "kuke/delete/config/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_DELETE_CONFIG_REALM = DefineKV("KUKE_DELETE_CONFIG_REALM", "kuke/delete/config/realm", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_DELETE_CONFIG_SPACE = DefineKV("KUKE_DELETE_CONFIG_SPACE", "kuke/delete/config/space")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_DELETE_CONFIG_STACK = DefineKV("KUKE_DELETE_CONFIG_STACK", "kuke/delete/config/stack")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_DELETE_FORCE = DefineKV("KUKE_DELETE_FORCE", "kuke/delete/force")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable

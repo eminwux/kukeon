@@ -1,0 +1,120 @@
+// Copyright 2025 Emiliano Spinella (eminwux)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// SPDX-License-Identifier: Apache-2.0
+
+package config
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/eminwux/kukeon/cmd/config"
+	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+)
+
+// MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
+type MockControllerKey struct{}
+
+// NewConfigCmd builds `kuke delete config <name>` (issue #644). It removes the
+// daemon-stored document for a single named, scoped CellConfig. The config is
+// identified by its name plus its binding scope (--realm/--space/--stack). A
+// Config is never cell-scoped, so there is no --cell flag.
+//
+// Deleting a Config does NOT delete the cell it materialized (that is
+// `kuke delete cell`). When a live cell still carries the back-reference label
+// to this config the command emits a one-line notice — never a refusal —
+// pointing the operator at `kuke delete cell <name>`.
+func NewConfigCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:           "config [name]",
+		Aliases:       []string{"cfg"},
+		Short:         "Delete a kind: CellConfig",
+		Args:          cobra.ExactArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: false,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := strings.TrimSpace(args[0])
+
+			realm := strings.TrimSpace(config.KUKE_DELETE_CONFIG_REALM.ValueOrDefault())
+			space := config.KUKE_DELETE_CONFIG_SPACE.ValueOrDefault()
+			stack := config.KUKE_DELETE_CONFIG_STACK.ValueOrDefault()
+			if realm == "" {
+				return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
+			}
+
+			doc := v1beta1.CellConfigDoc{
+				APIVersion: v1beta1.APIVersionV1Beta1,
+				Kind:       v1beta1.KindCellConfig,
+				Metadata: v1beta1.CellConfigMetadata{
+					Name:  name,
+					Realm: realm,
+					Space: strings.TrimSpace(space),
+					Stack: strings.TrimSpace(stack),
+				},
+			}
+
+			client, err := resolveClient(cmd)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = client.Close() }()
+
+			result, err := client.DeleteConfig(cmd.Context(), doc)
+			if err != nil {
+				return err
+			}
+
+			configName := name
+			if result.Config.Metadata.Name != "" {
+				configName = result.Config.Metadata.Name
+			}
+			cmd.Printf("Deleted config %q\n", configName)
+			for _, cell := range result.BackRefCells {
+				cmd.Printf(
+					"Note: cell %q was materialized from this config and was not deleted; "+
+						"run 'kuke delete cell %s' to remove it.\n",
+					cell, name,
+				)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().String("realm", "", "Realm the config is bound to")
+	_ = viper.BindPFlag(config.KUKE_DELETE_CONFIG_REALM.ViperKey, cmd.Flags().Lookup("realm"))
+	cmd.Flags().String("space", "", "Space the config is bound to")
+	_ = viper.BindPFlag(config.KUKE_DELETE_CONFIG_SPACE.ViperKey, cmd.Flags().Lookup("space"))
+	cmd.Flags().String("stack", "", "Stack the config is bound to")
+	_ = viper.BindPFlag(config.KUKE_DELETE_CONFIG_STACK.ViperKey, cmd.Flags().Lookup("stack"))
+
+	cmd.ValidArgsFunction = config.CompleteConfigNames
+	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
+	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
+	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
+
+	return cmd
+}
+
+func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
+	if mockClient, ok := cmd.Context().Value(MockControllerKey{}).(kukeonv1.Client); ok {
+		return mockClient, nil
+	}
+	return kukeshared.DaemonClientFromCmd(cmd)
+}

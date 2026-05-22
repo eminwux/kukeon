@@ -20,10 +20,13 @@
 package runner
 
 import (
+	"errors"
 	"os"
+	"sort"
 	"testing"
 	"time"
 
+	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
@@ -128,5 +131,193 @@ func TestWriteConfig_DeeperScopeNestsUnderScopeDir(t *testing.T) {
 	realmScoped := fs.ConfigPath(runPath, "kuke-system", "", "", "dev")
 	if _, err := os.Stat(realmScoped); !os.IsNotExist(err) {
 		t.Errorf("config leaked into realm scope at %s (err=%v)", realmScoped, err)
+	}
+}
+
+// TestGetConfig_ReturnsFullDocument confirms GetConfig reads the full document
+// back (like GetBlueprint, a Config carries no credential bytes) and reports
+// ErrConfigNotFound for an absent name.
+func TestGetConfig_ReturnsFullDocument(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	stored := intmodel.CellConfig{
+		Metadata: intmodel.CellConfigMetadata{Name: "web", Realm: "default", Space: "team-a"},
+		Document: []byte("the-config-body"),
+	}
+	if _, err := r.WriteConfig(stored); err != nil {
+		t.Fatalf("WriteConfig() error = %v", err)
+	}
+
+	got, err := r.GetConfig(intmodel.CellConfig{
+		Metadata: intmodel.CellConfigMetadata{Name: "web", Realm: "default", Space: "team-a"},
+	})
+	if err != nil {
+		t.Fatalf("GetConfig() error = %v", err)
+	}
+	if string(got.Document) != "the-config-body" {
+		t.Errorf("Document = %q, want the-config-body (full body must round-trip)", got.Document)
+	}
+}
+
+func TestGetConfig_NotFound(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	_, err := r.GetConfig(intmodel.CellConfig{
+		Metadata: intmodel.CellConfigMetadata{Name: "ghost", Realm: "default"},
+	})
+	if !errors.Is(err, errdefs.ErrConfigNotFound) {
+		t.Errorf("GetConfig() error = %v, want ErrConfigNotFound", err)
+	}
+}
+
+// configScopeKey is a stable identity for a listed config, used to compare
+// ListConfigs output independent of walk order.
+func configScopeKey(c intmodel.CellConfig) string {
+	return c.Metadata.Realm + "/" + c.Metadata.Space + "/" + c.Metadata.Stack + "/" + c.Metadata.Name
+}
+
+func listedConfigKeys(t *testing.T, r *Exec, realm, space, stack string) []string {
+	t.Helper()
+	got, err := r.ListConfigs(realm, space, stack)
+	if err != nil {
+		t.Fatalf("ListConfigs(%q,%q,%q) error = %v", realm, space, stack, err)
+	}
+	keys := make([]string, 0, len(got))
+	for _, c := range got {
+		keys = append(keys, configScopeKey(c))
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// seedConfig writes a metadata-only config at the given scope for list/delete
+// walk tests; the document body is irrelevant to those paths.
+func seedConfig(t *testing.T, r *Exec, name, realm, space, stack string) {
+	t.Helper()
+	cfg := intmodel.CellConfig{
+		Metadata: intmodel.CellConfigMetadata{Name: name, Realm: realm, Space: space, Stack: stack},
+		Document: []byte("x"),
+	}
+	if _, err := r.WriteConfig(cfg); err != nil {
+		t.Fatalf("seed WriteConfig(%q @ %s/%s/%s) error = %v", name, realm, space, stack, err)
+	}
+}
+
+// TestListConfigs_SubtreeFilterSemantics pins the issue #644 list contract: an
+// empty filter lists the whole subtree, a realm filter scopes to that realm,
+// and a deeper coordinate excludes shallower scopes — mirroring ListBlueprints,
+// bounded at stack (a Config is never cell-scoped).
+func TestListConfigs_SubtreeFilterSemantics(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	seedConfig(t, r, "realm-cfg", "default", "", "")
+	seedConfig(t, r, "space-cfg", "default", "team-a", "")
+	seedConfig(t, r, "stack-cfg", "default", "team-a", "web")
+	seedConfig(t, r, "other-realm-cfg", "prod", "", "")
+
+	all := listedConfigKeys(t, r, "", "", "")
+	wantAll := []string{
+		"default///realm-cfg",
+		"default/team-a//space-cfg",
+		"default/team-a/web/stack-cfg",
+		"prod///other-realm-cfg",
+	}
+	if !equalStrings(all, wantAll) {
+		t.Errorf("ListConfigs(all) = %v, want %v", all, wantAll)
+	}
+
+	realmFiltered := listedConfigKeys(t, r, "default", "", "")
+	wantRealm := []string{
+		"default///realm-cfg",
+		"default/team-a//space-cfg",
+		"default/team-a/web/stack-cfg",
+	}
+	if !equalStrings(realmFiltered, wantRealm) {
+		t.Errorf("ListConfigs(default) = %v, want %v", realmFiltered, wantRealm)
+	}
+
+	spaceFiltered := listedConfigKeys(t, r, "default", "team-a", "")
+	wantSpace := []string{
+		"default/team-a//space-cfg",
+		"default/team-a/web/stack-cfg",
+	}
+	if !equalStrings(spaceFiltered, wantSpace) {
+		t.Errorf("ListConfigs(default,team-a) = %v, want %v", spaceFiltered, wantSpace)
+	}
+
+	stackFiltered := listedConfigKeys(t, r, "default", "team-a", "web")
+	wantStack := []string{"default/team-a/web/stack-cfg"}
+	if !equalStrings(stackFiltered, wantStack) {
+		t.Errorf("ListConfigs(default,team-a,web) = %v, want %v", stackFiltered, wantStack)
+	}
+}
+
+// TestListConfigs_IgnoresReservedSubdirs confirms the walk never mistakes a
+// sibling secrets/, blueprints/, or configs/ reserved subdirectory for a child
+// space or stack, and that an in-flight temp file is skipped. The configs/
+// exclusion is the case the blueprint walker misses (it predates #624's configs
+// subdir); listing configs across the realm subtree must not recurse into the
+// realm's own configs/ dir as a phantom space.
+func TestListConfigs_IgnoresReservedSubdirs(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	seedConfig(t, r, "realm-cfg", "default", "", "")
+	// A realm-scoped secret creates default/secrets/; a realm-scoped blueprint
+	// creates default/blueprints/; the seeded config already created
+	// default/configs/. None must surface as a child space.
+	if _, err := r.WriteSecret(intmodel.Secret{
+		Metadata: intmodel.SecretMetadata{Name: "tok", Realm: "default"},
+		Spec:     intmodel.SecretSpec{Data: "v"},
+	}); err != nil {
+		t.Fatalf("seed WriteSecret error = %v", err)
+	}
+	seedBlueprint(t, r, "bp", "default", "", "")
+	// Drop an in-flight temp file alongside the realm config; it must be
+	// skipped, not surfaced as a config named ".config-xyz.tmp".
+	tmpPath := fs.ConfigPath(runPath, "default", "", "", ".config-xyz.tmp")
+	if err := os.WriteFile(tmpPath, []byte("partial"), 0o644); err != nil {
+		t.Fatalf("seed temp file error = %v", err)
+	}
+
+	got := listedConfigKeys(t, r, "", "", "")
+	want := []string{"default///realm-cfg"}
+	if !equalStrings(got, want) {
+		t.Errorf("ListConfigs(all) = %v, want %v (reserved subdirs + temp file must be ignored)", got, want)
+	}
+}
+
+func TestDeleteConfig_RemovesFile(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	seedConfig(t, r, "web", "default", "team-a", "")
+	path := fs.ConfigPath(runPath, "default", "team-a", "", "web")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("precondition: config not seeded: %v", err)
+	}
+
+	if err := r.DeleteConfig(intmodel.CellConfig{
+		Metadata: intmodel.CellConfigMetadata{Name: "web", Realm: "default", Space: "team-a"},
+	}); err != nil {
+		t.Fatalf("DeleteConfig() error = %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("config file still present after delete (err=%v)", err)
+	}
+}
+
+func TestDeleteConfig_NotFound(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	err := r.DeleteConfig(intmodel.CellConfig{
+		Metadata: intmodel.CellConfigMetadata{Name: "ghost", Realm: "default"},
+	})
+	if !errors.Is(err, errdefs.ErrConfigNotFound) {
+		t.Errorf("DeleteConfig() error = %v, want ErrConfigNotFound", err)
 	}
 }

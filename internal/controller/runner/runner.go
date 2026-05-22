@@ -149,6 +149,22 @@ type Runner interface {
 	// verified the config's scope exists and the referenced blueprint resolves.
 	WriteConfig(config intmodel.CellConfig) (created bool, err error)
 
+	// GetConfig reads a single named, scoped CellConfig's document off disk
+	// (issue #644). Like GetBlueprint the full document is returned — a Config
+	// carries only a blueprint ref, scalar values, and slot fills, no credential
+	// bytes. Returns errdefs.ErrConfigNotFound when the file is absent.
+	GetConfig(config intmodel.CellConfig) (intmodel.CellConfig, error)
+	// ListConfigs enumerates the metadata of every CellConfig bound to the
+	// filter scope or any scope nested within it (issue #644). An empty
+	// realmName lists across all realms; the filter is a subtree prefix bounded
+	// at stack depth (a Config is never cell-scoped). The returned carriers are
+	// metadata-only — the document is not read.
+	ListConfigs(realmName, spaceName, stackName string) ([]intmodel.CellConfig, error)
+	// DeleteConfig removes the daemon-stored document file for a single named,
+	// scoped CellConfig (issue #644). Returns errdefs.ErrConfigNotFound when the
+	// file is absent. Deleting a Config never touches the cell it materialized.
+	DeleteConfig(config intmodel.CellConfig) error
+
 	ExistsCgroup(doc any) (bool, error)
 
 	PurgeRealm(realm intmodel.Realm) (namespaceRemoved bool, err error)

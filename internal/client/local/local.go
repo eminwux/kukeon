@@ -367,6 +367,30 @@ func (c *Client) GetBlueprint(
 	}, nil
 }
 
+func (c *Client) GetConfig(
+	_ context.Context, doc v1beta1.CellConfigDoc,
+) (kukeonv1.GetConfigResult, error) {
+	internal, _, err := apischeme.NormalizeCellConfig(doc)
+	if err != nil {
+		return kukeonv1.GetConfigResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	res, err := c.ctrl.GetConfig(internal)
+	if err != nil {
+		return kukeonv1.GetConfigResult{}, err
+	}
+	if !res.MetadataExists {
+		return kukeonv1.GetConfigResult{MetadataExists: false}, nil
+	}
+	ext, err := apischeme.ConvertCellConfigToExternal(res.Config)
+	if err != nil {
+		return kukeonv1.GetConfigResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	return kukeonv1.GetConfigResult{
+		Config:         ext,
+		MetadataExists: true,
+	}, nil
+}
+
 // ---- List ----
 
 func (c *Client) ListRealms(_ context.Context) ([]v1beta1.RealmDoc, error) {
@@ -452,6 +476,17 @@ func (c *Client) ListBlueprints(
 		return nil, err
 	}
 	return apischeme.ConvertCellBlueprintListToExternal(blueprints), nil
+}
+
+func (c *Client) ListConfigs(
+	_ context.Context,
+	realmName, spaceName, stackName string,
+) ([]v1beta1.CellConfigDoc, error) {
+	configs, err := c.ctrl.ListConfigs(realmName, spaceName, stackName)
+	if err != nil {
+		return nil, err
+	}
+	return apischeme.ConvertCellConfigListToExternal(configs), nil
 }
 
 // derefDocs converts a []*T returned by fs.Convert* helpers into the
@@ -721,6 +756,24 @@ func (c *Client) DeleteBlueprint(
 	return kukeonv1.DeleteBlueprintResult{
 		Blueprint: apischeme.ConvertCellBlueprintMetadataToExternal(res.Blueprint),
 		Deleted:   res.Deleted,
+	}, nil
+}
+
+func (c *Client) DeleteConfig(
+	_ context.Context, doc v1beta1.CellConfigDoc,
+) (kukeonv1.DeleteConfigResult, error) {
+	internal, _, err := apischeme.NormalizeCellConfig(doc)
+	if err != nil {
+		return kukeonv1.DeleteConfigResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	res, err := c.ctrl.DeleteConfig(internal)
+	if err != nil {
+		return kukeonv1.DeleteConfigResult{}, err
+	}
+	return kukeonv1.DeleteConfigResult{
+		Config:       apischeme.ConvertCellConfigMetadataToExternal(res.Config),
+		Deleted:      res.Deleted,
+		BackRefCells: res.BackRefCells,
 	}, nil
 }
 

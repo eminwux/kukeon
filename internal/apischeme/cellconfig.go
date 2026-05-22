@@ -76,3 +76,34 @@ func ConvertCellConfigToExternal(in intmodel.CellConfig) (ext.CellConfigDoc, err
 	}
 	return doc, nil
 }
+
+// ConvertCellConfigMetadataToExternal builds a metadata-only external
+// CellConfigDoc from the internal carrier's metadata (issue #644). Unlike
+// ConvertCellConfigToExternal it does not read the stored Document — the list
+// and delete verbs surface scope coordinates and name only, never the config
+// body (blueprint ref, values, slot fills).
+func ConvertCellConfigMetadataToExternal(in intmodel.CellConfig) ext.CellConfigDoc {
+	return ext.CellConfigDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCellConfig,
+		Metadata: ext.CellConfigMetadata{
+			Name:  in.Metadata.Name,
+			Realm: in.Metadata.Realm,
+			Space: in.Metadata.Space,
+			Stack: in.Metadata.Stack,
+		},
+	}
+}
+
+// ConvertCellConfigListToExternal maps a slice of internal CellConfigs to
+// metadata-only external CellConfigDocs (issue #644).
+func ConvertCellConfigListToExternal(in []intmodel.CellConfig) []ext.CellConfigDoc {
+	if in == nil {
+		return nil
+	}
+	out := make([]ext.CellConfigDoc, len(in))
+	for i := range in {
+		out[i] = ConvertCellConfigMetadataToExternal(in[i])
+	}
+	return out
+}

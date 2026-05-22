@@ -417,6 +417,16 @@ var (
 	// ErrWriteConfig wraps a failure to persist a CellConfig document.
 	ErrWriteConfig = errors.New("failed to write config document")
 
+	// CellConfig read/delete-verb errors (issue #644, phase 4b-ii of #423).
+	// Get returns the full document; list returns metadata only; delete
+	// removes the daemon-stored file (and emits a back-reference notice, never
+	// a refusal, when a live cell still carries the kukeon.io/config label).
+
+	ErrConfigNotFound = errors.New("config not found")
+	ErrGetConfig      = errors.New("failed to get config")
+	ErrListConfigs    = errors.New("failed to list configs")
+	ErrDeleteConfig   = errors.New("failed to delete config document")
+
 	// ErrMustRunAsRoot is returned by direct-write subcommands (kuke init,
 	// kuke daemon reset, kuke image load, kuke doctor cgroups --probe)
 	// when invoked with a non-zero effective UID. Wrapped errors must

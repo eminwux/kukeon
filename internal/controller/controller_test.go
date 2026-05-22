@@ -72,7 +72,10 @@ type fakeRunner struct {
 	DeleteBlueprintFn func(bp intmodel.CellBlueprint) error
 
 	// Config methods
-	WriteConfigFn func(config intmodel.CellConfig) (bool, error)
+	WriteConfigFn  func(config intmodel.CellConfig) (bool, error)
+	GetConfigFn    func(config intmodel.CellConfig) (intmodel.CellConfig, error)
+	ListConfigsFn  func(realmName, spaceName, stackName string) ([]intmodel.CellConfig, error)
+	DeleteConfigFn func(config intmodel.CellConfig) error
 
 	// Cell methods
 	GetCellFn                 func(cell intmodel.Cell) (intmodel.Cell, error)
@@ -336,6 +339,27 @@ func (f *fakeRunner) WriteConfig(config intmodel.CellConfig) (bool, error) {
 		return f.WriteConfigFn(config)
 	}
 	return false, errors.New("unexpected call to WriteConfig")
+}
+
+func (f *fakeRunner) GetConfig(config intmodel.CellConfig) (intmodel.CellConfig, error) {
+	if f.GetConfigFn != nil {
+		return f.GetConfigFn(config)
+	}
+	return intmodel.CellConfig{}, errors.New("unexpected call to GetConfig")
+}
+
+func (f *fakeRunner) ListConfigs(realmName, spaceName, stackName string) ([]intmodel.CellConfig, error) {
+	if f.ListConfigsFn != nil {
+		return f.ListConfigsFn(realmName, spaceName, stackName)
+	}
+	return nil, errors.New("unexpected call to ListConfigs")
+}
+
+func (f *fakeRunner) DeleteConfig(config intmodel.CellConfig) error {
+	if f.DeleteConfigFn != nil {
+		return f.DeleteConfigFn(config)
+	}
+	return errors.New("unexpected call to DeleteConfig")
 }
 
 // Cell methods

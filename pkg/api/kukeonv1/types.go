@@ -236,6 +236,24 @@ type GetBlueprintResult struct {
 	MetadataExists bool
 }
 
+type GetConfigArgs struct {
+	Doc v1beta1.CellConfigDoc
+}
+
+type GetConfigReply struct {
+	Result GetConfigResult
+	Err    *APIError
+}
+
+// GetConfigResult carries the full CellConfigDoc read from daemon storage
+// (issue #644). Unlike GetSecretResult the whole document is populated — a
+// Config carries only a blueprint ref, scalar values, and slot fills, no
+// credential bytes — so `kuke get config` can surface the binding.
+type GetConfigResult struct {
+	Config         v1beta1.CellConfigDoc
+	MetadataExists bool
+}
+
 // ---- List ----
 
 type ListRealmsArgs struct{}
@@ -311,6 +329,19 @@ type ListBlueprintsArgs struct {
 type ListBlueprintsReply struct {
 	Blueprints []v1beta1.CellBlueprintDoc
 	Err        *APIError
+}
+
+type ListConfigsArgs struct {
+	RealmName string
+	SpaceName string
+	StackName string
+}
+
+// ListConfigsReply carries metadata-only CellConfigDocs — the spec (blueprint
+// ref, values, slot fills) is never populated for a list (issue #644).
+type ListConfigsReply struct {
+	Configs []v1beta1.CellConfigDoc
+	Err     *APIError
 }
 
 // ---- Lifecycle (Start/Stop/Kill) ----
@@ -508,6 +539,26 @@ type DeleteBlueprintReply struct {
 type DeleteBlueprintResult struct {
 	Blueprint v1beta1.CellBlueprintDoc
 	Deleted   bool
+}
+
+type DeleteConfigArgs struct {
+	Doc v1beta1.CellConfigDoc
+}
+
+type DeleteConfigReply struct {
+	Result DeleteConfigResult
+	Err    *APIError
+}
+
+// DeleteConfigResult reports the removed Config (metadata only), whether the
+// file existed to delete, and the scope paths of any live cells that still
+// carry the kukeon.io/config back-reference label (issue #644). BackRefCells is
+// informational — deleting a Config never deletes the cell it materialized — so
+// the CLI surfaces a one-line notice pointing at `kuke delete cell <name>`.
+type DeleteConfigResult struct {
+	Config       v1beta1.CellConfigDoc
+	Deleted      bool
+	BackRefCells []string
 }
 
 type DeleteContainerArgs struct {

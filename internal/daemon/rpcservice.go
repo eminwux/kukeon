@@ -164,6 +164,13 @@ func (s *KukeonV1Service) GetBlueprint(args *kukeonv1.GetBlueprintArgs, reply *k
 	return nil
 }
 
+func (s *KukeonV1Service) GetConfig(args *kukeonv1.GetConfigArgs, reply *kukeonv1.GetConfigReply) error {
+	result, err := s.core.GetConfig(s.ctx, args.Doc)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
 // ---- List ----
 
 func (s *KukeonV1Service) ListRealms(_ *kukeonv1.ListRealmsArgs, reply *kukeonv1.ListRealmsReply) error {
@@ -213,6 +220,15 @@ func (s *KukeonV1Service) ListBlueprints(
 ) error {
 	blueprints, err := s.core.ListBlueprints(s.ctx, args.RealmName, args.SpaceName, args.StackName)
 	reply.Blueprints = blueprints
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
+func (s *KukeonV1Service) ListConfigs(
+	args *kukeonv1.ListConfigsArgs, reply *kukeonv1.ListConfigsReply,
+) error {
+	configs, err := s.core.ListConfigs(s.ctx, args.RealmName, args.SpaceName, args.StackName)
+	reply.Configs = configs
 	reply.Err = kukeonv1.ToAPIError(err)
 	return nil
 }
@@ -343,6 +359,15 @@ func (s *KukeonV1Service) DeleteBlueprint(
 	args *kukeonv1.DeleteBlueprintArgs, reply *kukeonv1.DeleteBlueprintReply,
 ) error {
 	result, err := s.core.DeleteBlueprint(s.ctx, args.Doc)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
+func (s *KukeonV1Service) DeleteConfig(
+	args *kukeonv1.DeleteConfigArgs, reply *kukeonv1.DeleteConfigReply,
+) error {
+	result, err := s.core.DeleteConfig(s.ctx, args.Doc)
 	reply.Result = result
 	reply.Err = kukeonv1.ToAPIError(err)
 	return nil
