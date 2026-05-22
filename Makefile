@@ -87,6 +87,7 @@ kukebuild:
 
 release-build:
 	# Build for all OS and ARCH combinations
+	set -e; \
 	for OS in $(OS); do \
 		for ARCH in $(ARCHS); do \
 			GO111MODULE=on CGO_ENABLED=0 GOOS=$$OS GOARCH=$$ARCH \
@@ -113,6 +114,7 @@ release-build:
 # never needs the go-1.25 BuildKit closure.
 .PHONY: release-build-kukebuild
 release-build-kukebuild:
+	set -e; \
 	for OS in $(OS); do \
 		for ARCH in $(ARCHS); do \
 			cd $(CURDIR)/cmd/kukebuild && \
