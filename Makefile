@@ -136,8 +136,16 @@ kill:
 # tests (excluding the e2e suite) and the kukebuild module's tests. `go list
 # ./...` from the root lists only root-module packages — the nested kukebuild
 # module is excluded — so its tests are run explicitly from its module dir.
-test:
+# Split into per-module sub-targets so CI can run each as its own named step
+# and a red run names the failing component (issue #696); `make test` keeps
+# running both locally. GOWORK=off (exported above) reaches every sub-recipe.
+.PHONY: test test-root test-kukebuild
+test: test-root test-kukebuild
+
+test-root:
 	go test $(shell go list ./... | grep -v /e2e)
+
+test-kukebuild:
 	cd cmd/kukebuild && go test ./...
 
 # Tag the e2e suite uses to refer to the local kukeond image. The e2e harness
