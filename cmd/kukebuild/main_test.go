@@ -19,6 +19,7 @@ package main
 import (
 	"errors"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -95,6 +96,83 @@ func TestParseArgsAllFlags(t *testing.T) {
 	// A value containing '=' must survive intact (only the first '=' splits).
 	if cfg.buildArgs["BAZ"] != "qux=quux" {
 		t.Errorf("buildArgs[BAZ] = %q, want qux=quux", cfg.buildArgs["BAZ"])
+	}
+}
+
+func TestParseArgsSecretsAndCache(t *testing.T) {
+	cfg, err := parseArgs([]string{
+		"-t", "x:1",
+		"--secret", "id=npmrc,src=/host/.npmrc",
+		"--secret", "id=tok,src=/host/tok",
+		"--cache-to", "type=local,dest=/cache/out",
+		"--cache-from", "type=local,src=/cache/in",
+		"/ctx",
+	})
+	if err != nil {
+		t.Fatalf("parseArgs: unexpected error: %v", err)
+	}
+	wantSecrets := []secretSpec{
+		{id: "npmrc", src: "/host/.npmrc"},
+		{id: "tok", src: "/host/tok"},
+	}
+	if !reflect.DeepEqual(cfg.secrets, wantSecrets) {
+		t.Errorf("secrets = %+v, want %+v", cfg.secrets, wantSecrets)
+	}
+	if len(cfg.cacheExports) != 1 || cfg.cacheExports[0].typ != "local" ||
+		cfg.cacheExports[0].attrs["dest"] != "/cache/out" {
+		t.Errorf("cacheExports = %+v, want one local entry dest=/cache/out", cfg.cacheExports)
+	}
+	if len(cfg.cacheImports) != 1 || cfg.cacheImports[0].typ != "local" ||
+		cfg.cacheImports[0].attrs["src"] != "/cache/in" {
+		t.Errorf("cacheImports = %+v, want one local entry src=/cache/in", cfg.cacheImports)
+	}
+}
+
+func TestParseSecretsForwardsExtraCacheAttrs(t *testing.T) {
+	// Non-type cache attrs (e.g. mode) pass through to BuildKit verbatim.
+	cfg, err := parseArgs([]string{
+		"-t", "x:1",
+		"--cache-to", "type=local,dest=/c,mode=max",
+		"/ctx",
+	})
+	if err != nil {
+		t.Fatalf("parseArgs: unexpected error: %v", err)
+	}
+	if got := cfg.cacheExports[0].attrs["mode"]; got != "max" {
+		t.Errorf("cacheExports[0].attrs[mode] = %q, want max", got)
+	}
+	if _, ok := cfg.cacheExports[0].attrs["type"]; ok {
+		t.Error("type must not be carried in attrs (it is the cacheSpec.typ field)")
+	}
+}
+
+func TestParseSecretsUsageErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"secret missing id", []string{"-t", "x:1", "--secret", "src=/p", "/ctx"}},
+		{"secret missing src", []string{"-t", "x:1", "--secret", "id=n", "/ctx"}},
+		{"secret env source deferred", []string{"-t", "x:1", "--secret", "id=n,env=TOKEN", "/ctx"}},
+		{"secret unknown key", []string{"-t", "x:1", "--secret", "id=n,src=/p,foo=bar", "/ctx"}},
+		{"secret no equals", []string{"-t", "x:1", "--secret", "id", "/ctx"}},
+		{"cache-to missing type", []string{"-t", "x:1", "--cache-to", "dest=/c", "/ctx"}},
+		{"cache-to non-local type", []string{"-t", "x:1", "--cache-to", "type=registry,ref=r", "/ctx"}},
+		{"cache-to missing dest", []string{"-t", "x:1", "--cache-to", "type=local", "/ctx"}},
+		{"cache-from missing src", []string{"-t", "x:1", "--cache-from", "type=local", "/ctx"}},
+		{"cache-from non-local type", []string{"-t", "x:1", "--cache-from", "type=s3", "/ctx"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseArgs(tc.args)
+			if err == nil {
+				t.Fatalf("parseArgs(%v): expected error, got nil", tc.args)
+			}
+			var ue *usageError
+			if !errors.As(err, &ue) {
+				t.Errorf("parseArgs(%v): error %v is not a *usageError", tc.args, err)
+			}
+		})
 	}
 }
 

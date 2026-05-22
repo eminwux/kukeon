@@ -41,9 +41,10 @@
 // Phase 1 (#522) wires the engine and validates a trivial single-stage
 // Dockerfile. Phase 1b (#616) validated multi-stage, COPY --from=, --build-arg
 // and --platform=$BUILDPLATFORM against kukeon's own Dockerfile end-to-end
-// (host network mode + the default overlayfs snapshotter sufficed). The
-// --secret / --cache-* / --push / --platform-flag surface is deferred to the
-// phase 2 follow-ups (#523, #524, #646).
+// (host network mode + the default overlayfs snapshotter sufficed). Phase 2a
+// (#523) adds build-time file secrets (--secret) and local-disk cache
+// export/import (--cache-to / --cache-from). The --push / --platform-flag
+// surface remains deferred to the phase 2 follow-ups (#524, #646).
 package main
 
 import (
@@ -149,6 +150,32 @@ type buildConfig struct {
 	// back to /etc/kukeon/kukeond.yaml and then the hardcoded default suffix;
 	// see resolveNamespaceSuffix.
 	kukeondConfig string
+	// secrets are the --secret entries: build-time file secrets exposed to the
+	// Dockerfile at /run/secrets/<id> via RUN --mount=type=secret,id=<id>.
+	// File-based only in phase 2a (#523); env-var-source secrets are deferred.
+	secrets []secretSpec
+	// cacheExports / cacheImports are the --cache-to / --cache-from entries,
+	// forwarded to BuildKit's CacheExports / CacheImports. Scoped to
+	// type=local (local-disk export/import) in phase 2a (#523); registry/s3/gha
+	// backends are deferred.
+	cacheExports []cacheSpec
+	cacheImports []cacheSpec
+}
+
+// secretSpec is a resolved --secret entry: a build secret named id, sourced
+// from the host file at src. BuildKit exposes it inside a RUN step that opts in
+// with --mount=type=secret,id=<id> at the BuildKit-standard /run/secrets/<id>.
+type secretSpec struct {
+	id  string
+	src string
+}
+
+// cacheSpec is a resolved --cache-to / --cache-from entry: a BuildKit cache
+// backend type plus its attributes (e.g. type=local with dest/src). Forwarded
+// verbatim to BuildKit's CacheOptionsEntry.
+type cacheSpec struct {
+	typ   string
+	attrs map[string]string
 }
 
 // defaultContainerdSocket is the standalone host containerd socket the
@@ -211,6 +238,13 @@ func parseArgs(args []string) (*buildConfig, error) {
 	var buildArgs repeatableFlag
 	fs.Var(&buildArgs, "build-arg", "set a build-time variable KEY=VALUE (repeatable)")
 
+	var secrets repeatableFlag
+	fs.Var(&secrets, "secret", "expose a file secret to the build at /run/secrets/NAME: id=NAME,src=PATH (repeatable)")
+	var cacheTo repeatableFlag
+	fs.Var(&cacheTo, "cache-to", "export build cache: type=local,dest=PATH (repeatable)")
+	var cacheFrom repeatableFlag
+	fs.Var(&cacheFrom, "cache-from", "import build cache: type=local,src=PATH (repeatable)")
+
 	if err := fs.Parse(args); err != nil {
 		return nil, &usageError{msg: err.Error()}
 	}
@@ -243,6 +277,19 @@ func parseArgs(args []string) (*buildConfig, error) {
 		return nil, err
 	}
 
+	parsedSecrets, err := parseSecrets(secrets)
+	if err != nil {
+		return nil, err
+	}
+	parsedCacheExports, err := parseCacheOpts(cacheTo, "cache-to")
+	if err != nil {
+		return nil, err
+	}
+	parsedCacheImports, err := parseCacheOpts(cacheFrom, "cache-from")
+	if err != nil {
+		return nil, err
+	}
+
 	dockerfile := *file
 	if strings.TrimSpace(dockerfile) == "" {
 		dockerfile = filepath.Join(contextDir, "Dockerfile")
@@ -258,6 +305,9 @@ func parseArgs(args []string) (*buildConfig, error) {
 		root:             strings.TrimSpace(*root),
 		rootExplicit:     rootExplicit,
 		kukeondConfig:    strings.TrimSpace(*kukeondConfig),
+		secrets:          parsedSecrets,
+		cacheExports:     parsedCacheExports,
+		cacheImports:     parsedCacheImports,
 	}, nil
 }
 
@@ -272,6 +322,102 @@ func parseBuildArgs(raw []string) (map[string]string, error) {
 			return nil, &usageError{msg: fmt.Sprintf("invalid --build-arg %q: expected KEY=VALUE", kv)}
 		}
 		out[k] = v
+	}
+	return out, nil
+}
+
+// parseCSVPairs splits a comma-separated KEY=VALUE list (e.g.
+// "id=NAME,src=PATH") into a map. Empty segments are skipped; a segment without
+// an `=` or with an empty key is a usage error attributed to --<flag>. The
+// caller validates the recognized keys.
+func parseCSVPairs(flag, raw string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, seg := range strings.Split(raw, ",") {
+		if strings.TrimSpace(seg) == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(seg, "=")
+		k = strings.TrimSpace(k)
+		if !ok || k == "" {
+			return nil, &usageError{msg: fmt.Sprintf("invalid --%s %q: expected comma-separated KEY=VALUE pairs", flag, raw)}
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
+// parseSecrets turns the raw --secret values into resolved secretSpecs. The
+// supported form is `id=NAME,src=PATH`: a host file exposed to the build at
+// /run/secrets/NAME. Both keys are required, env-var-source secrets (`env=…`)
+// are rejected as deferred (issue #523 out-of-scope), and an unknown key is a
+// usage error so a typo surfaces at parse time.
+func parseSecrets(raw []string) ([]secretSpec, error) {
+	out := make([]secretSpec, 0, len(raw))
+	for _, s := range raw {
+		kv, err := parseCSVPairs("secret", s)
+		if err != nil {
+			return nil, err
+		}
+		if env, ok := kv["env"]; ok {
+			return nil, &usageError{msg: fmt.Sprintf(
+				"invalid --secret %q: env-var-source secrets (env=%s) are not supported yet; use src=PATH", s, env)}
+		}
+		for k := range kv {
+			if k != "id" && k != "src" {
+				return nil, &usageError{msg: fmt.Sprintf("invalid --secret %q: unknown key %q (expected id, src)", s, k)}
+			}
+		}
+		id := strings.TrimSpace(kv["id"])
+		src := strings.TrimSpace(kv["src"])
+		if id == "" {
+			return nil, &usageError{msg: fmt.Sprintf("invalid --secret %q: id is required (id=NAME,src=PATH)", s)}
+		}
+		if src == "" {
+			return nil, &usageError{msg: fmt.Sprintf("invalid --secret %q: src is required — file-based secrets only (id=NAME,src=PATH)", s)}
+		}
+		out = append(out, secretSpec{id: id, src: src})
+	}
+	return out, nil
+}
+
+// parseCacheOpts turns the raw --cache-to / --cache-from values into resolved
+// cacheSpecs. Only `type=local` is supported in phase 2a (#523): cache-to
+// requires `dest=PATH`, cache-from requires `src=PATH`. A missing or non-local
+// type, or a missing path, is a usage error; registry/s3/gha backends are
+// rejected as deferred. All non-type keys are forwarded verbatim to BuildKit so
+// optional local-cache attrs (e.g. mode, compression) pass through.
+func parseCacheOpts(raw []string, flag string) ([]cacheSpec, error) {
+	requiredAttr := "dest"
+	if flag == "cache-from" {
+		requiredAttr = "src"
+	}
+	out := make([]cacheSpec, 0, len(raw))
+	for _, s := range raw {
+		kv, err := parseCSVPairs(flag, s)
+		if err != nil {
+			return nil, err
+		}
+		typ := strings.TrimSpace(kv["type"])
+		if typ == "" {
+			return nil, &usageError{msg: fmt.Sprintf(
+				"invalid --%s %q: type is required (only type=local is supported)", flag, s)}
+		}
+		if typ != "local" {
+			return nil, &usageError{msg: fmt.Sprintf(
+				"invalid --%s %q: type=%s is not supported yet; only type=local (local-disk cache) is available", flag, s, typ)}
+		}
+		if strings.TrimSpace(kv[requiredAttr]) == "" {
+			return nil, &usageError{msg: fmt.Sprintf(
+				"invalid --%s %q: type=local requires %s=PATH", flag, s, requiredAttr)}
+		}
+		attrs := make(map[string]string, len(kv))
+		for k, v := range kv {
+			if k == "type" {
+				continue
+			}
+			attrs[k] = v
+		}
+		out = append(out, cacheSpec{typ: typ, attrs: attrs})
 	}
 	return out, nil
 }

@@ -16,7 +16,73 @@
 
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// newSolveOptFixture writes a minimal build context (an empty Dockerfile) into
+// a temp dir and returns a buildConfig pointed at it. Callers add secrets /
+// cache entries before calling newSolveOpt.
+func newSolveOptFixture(t *testing.T) *buildConfig {
+	t.Helper()
+	dir := t.TempDir()
+	dockerfile := filepath.Join(dir, "Dockerfile")
+	if err := os.WriteFile(dockerfile, []byte("FROM scratch\n"), 0o600); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	return &buildConfig{contextDir: dir, dockerfile: dockerfile, tag: "x:1"}
+}
+
+func TestNewSolveOptWiresCache(t *testing.T) {
+	cfg := newSolveOptFixture(t)
+	cfg.cacheExports = []cacheSpec{{typ: "local", attrs: map[string]string{"dest": "/c/out"}}}
+	cfg.cacheImports = []cacheSpec{{typ: "local", attrs: map[string]string{"src": "/c/in"}}}
+
+	so, err := newSolveOpt(cfg)
+	if err != nil {
+		t.Fatalf("newSolveOpt: %v", err)
+	}
+	if len(so.CacheExports) != 1 || so.CacheExports[0].Type != "local" ||
+		so.CacheExports[0].Attrs["dest"] != "/c/out" {
+		t.Errorf("CacheExports = %+v, want one local dest=/c/out", so.CacheExports)
+	}
+	if len(so.CacheImports) != 1 || so.CacheImports[0].Type != "local" ||
+		so.CacheImports[0].Attrs["src"] != "/c/in" {
+		t.Errorf("CacheImports = %+v, want one local src=/c/in", so.CacheImports)
+	}
+	if len(so.Session) != 0 {
+		t.Errorf("Session = %d entries, want 0 when no secrets", len(so.Session))
+	}
+}
+
+func TestNewSolveOptWiresSecrets(t *testing.T) {
+	cfg := newSolveOptFixture(t)
+	secretFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(secretFile, []byte("s3cr3t"), 0o600); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+	cfg.secrets = []secretSpec{{id: "tok", src: secretFile}}
+
+	so, err := newSolveOpt(cfg)
+	if err != nil {
+		t.Fatalf("newSolveOpt: %v", err)
+	}
+	// One secretsprovider attachable is added to the session.
+	if len(so.Session) != 1 {
+		t.Errorf("Session = %d entries, want 1 secrets provider", len(so.Session))
+	}
+}
+
+func TestNewSolveOptSecretFileMissing(t *testing.T) {
+	cfg := newSolveOptFixture(t)
+	cfg.secrets = []secretSpec{{id: "tok", src: filepath.Join(t.TempDir(), "does-not-exist")}}
+
+	if _, err := newSolveOpt(cfg); err == nil {
+		t.Fatal("newSolveOpt: expected error for missing secret file, got nil")
+	}
+}
 
 func TestResolveBuildRoot(t *testing.T) {
 	cases := []struct {

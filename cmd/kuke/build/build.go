@@ -53,14 +53,22 @@ var (
 // NewBuildCmd builds the `kuke build` subcommand.
 func NewBuildCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "build [-f Dockerfile] [-t name:tag] [--realm <name>] [--build-arg K=V]... <context>",
+		Use: "build [-f Dockerfile] [-t name:tag] [--realm <name>] [--build-arg K=V]... " +
+			"[--secret id=NAME,src=PATH]... [--cache-to type=local,dest=PATH]... " +
+			"[--cache-from type=local,src=PATH]... <context>",
 		Short: "Build an OCI image from a Dockerfile into a realm's containerd namespace",
 		Long: "Build an OCI image from a Dockerfile using kukeon's native builder.\n\n" +
 			"`kuke build` is a thin shim: it locates the `kukebuild` binary on PATH and\n" +
 			"exec's it. `kukebuild` embeds BuildKit, builds the context with the Dockerfile\n" +
 			"frontend, and writes the resulting image into the containerd namespace mapped\n" +
 			"to --realm (<realm>.kukeon.io), ready for `kuke image get` and `kuke create`.\n\n" +
-			"No docker or standalone buildkitd is required — only a running host containerd.",
+			"No docker or standalone buildkitd is required — only a running host containerd.\n\n" +
+			"Build-time secrets: --secret id=NAME,src=PATH mounts a host file into the build\n" +
+			"at /run/secrets/NAME, consumed by a Dockerfile `RUN --mount=type=secret,id=NAME`.\n" +
+			"File-based secrets only; the flag is repeatable.\n\n" +
+			"Build cache: --cache-to type=local,dest=PATH exports the build cache to a local\n" +
+			"directory and --cache-from type=local,src=PATH imports it back, reusing layers\n" +
+			"across builds. Only type=local is supported; both flags are repeatable.",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -76,6 +84,13 @@ func NewBuildCmd() *cobra.Command {
 		"",
 		"Path to kukeond.yaml; resolves the realm namespace suffix (default /etc/kukeon/kukeond.yaml)",
 	)
+	cmd.Flags().StringArray(
+		"secret",
+		nil,
+		"Expose a file secret to the build at /run/secrets/NAME: id=NAME,src=PATH (repeatable)",
+	)
+	cmd.Flags().StringArray("cache-to", nil, "Export build cache: type=local,dest=PATH (repeatable)")
+	cmd.Flags().StringArray("cache-from", nil, "Import build cache: type=local,src=PATH (repeatable)")
 
 	return cmd
 }
@@ -137,6 +152,18 @@ func buildArgv(cmd *cobra.Command, args []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	secrets, err := cmd.Flags().GetStringArray("secret")
+	if err != nil {
+		return nil, err
+	}
+	cacheTo, err := cmd.Flags().GetStringArray("cache-to")
+	if err != nil {
+		return nil, err
+	}
+	cacheFrom, err := cmd.Flags().GetStringArray("cache-from")
+	if err != nil {
+		return nil, err
+	}
 
 	argv := []string{kukebuildBinary, "--tag", tag, "--realm", realm}
 	if strings.TrimSpace(file) != "" {
@@ -147,6 +174,15 @@ func buildArgv(cmd *cobra.Command, args []string) ([]string, error) {
 	}
 	for _, ba := range buildArgs {
 		argv = append(argv, "--build-arg", ba)
+	}
+	for _, s := range secrets {
+		argv = append(argv, "--secret", s)
+	}
+	for _, c := range cacheTo {
+		argv = append(argv, "--cache-to", c)
+	}
+	for _, c := range cacheFrom {
+		argv = append(argv, "--cache-from", c)
 	}
 	// Context directory is positional and validated by cobra.ExactArgs(1).
 	argv = append(argv, args[0])
