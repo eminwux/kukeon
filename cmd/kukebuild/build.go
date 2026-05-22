@@ -18,7 +18,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -105,14 +104,8 @@ const containerdDialTimeout = 60 * time.Second
 // resolveNamespaceSuffix). progressW receives the human-readable build
 // progress.
 func runBuild(ctx context.Context, cfg *buildConfig, progressW io.Writer) error {
-	// kukebuild writes directly into containerd's content store; the
-	// standalone containerd socket is root-only on a stock host. Fail fast
-	// under non-root rather than letting containerd surface an opaque EACCES
-	// several phases in. Same posture as `kuke image load --no-daemon`.
-	if os.Geteuid() != 0 {
-		return errors.New(
-			"kukebuild writes to root-owned containerd state — re-run as root (e.g. via `sudo kuke build`)",
-		)
+	if err := requireRoot(); err != nil {
+		return err
 	}
 
 	if fi, err := os.Stat(cfg.contextDir); err != nil {
