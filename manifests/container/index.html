@@ -2446,6 +2446,34 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#containertty" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ContainerTty
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ContainerTty">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ttystage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TtyStage
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#managed-etchosts-and-etchostname" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3051,6 +3079,34 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#containertty" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ContainerTty
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ContainerTty">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ttystage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TtyStage
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#managed-etchosts-and-etchostname" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3329,6 +3385,12 @@
 <td>string</td>
 <td>no</td>
 <td>Restart policy. Reserved — restart semantics are not finalized.</td>
+</tr>
+<tr>
+<td><code>tty</code></td>
+<td><code>ContainerTty</code></td>
+<td>no</td>
+<td>Shell-UX config for the kuketty wrapper (prompt, init scripts, logging) — requires <code>attachable: true</code> (see <a href="#containertty">ContainerTty</a>)</td>
 </tr>
 </tbody>
 </table>
@@ -3629,6 +3691,78 @@
 <a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">commits</span>
 <a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">  </span><span class="nt">allowedSigners</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/run/secrets/allowed_signers</span>
 </code></pre></div>
+<h3 id="containertty">ContainerTty<a class="headerlink" href="#containertty" title="Permanent link">&para;</a></h3>
+<p><code>spec.tty</code> configures shell-UX for the kuketty wrapper. Has no effect unless <code>spec.attachable</code> is <code>true</code> — setting any <code>tty</code> field with <code>attachable: false</code> is rejected at apply time.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>prompt</code></td>
+<td>string</td>
+<td>no</td>
+<td>Literal prompt expression stamped onto the wrapped shell's prompt. Empty leaves the shell's own prompt untouched.</td>
+</tr>
+<tr>
+<td><code>onInit</code></td>
+<td>array of <code>TtyStage</code></td>
+<td>no</td>
+<td>Init script stages, run in declaration order (see <a href="#ttystage">TtyStage</a>).</td>
+</tr>
+<tr>
+<td><code>logFile</code></td>
+<td>string</td>
+<td>no</td>
+<td>Operator override for the in-container path the kuketty wrapper writes its log output to. Empty (default) lands at <code>/run/kukeon/tty/kuketty.log</code> inside the bind mount.</td>
+</tr>
+<tr>
+<td><code>logLevel</code></td>
+<td>string</td>
+<td>no</td>
+<td>Verbosity of the kuketty wrapper's own log output: <code>debug</code>, <code>info</code>, <code>warn</code>, or <code>error</code>. Empty inherits the daemon-wide default (<code>info</code>). Unknown values are rejected at apply time.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="ttystage">TtyStage<a class="headerlink" href="#ttystage" title="Permanent link">&para;</a></h4>
+<p>Each entry in <code>tty.onInit</code> is a single init-script stage.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>script</code></td>
+<td>string</td>
+<td>no</td>
+<td>Shell script body for the stage.</td>
+</tr>
+<tr>
+<td><code>runOn</code></td>
+<td>string</td>
+<td>no</td>
+<td>When the stage runs. Empty or <code>start</code> forwards the script to sbsh's onInit, so it runs in the wrapped shell on every boot. <code>create</code> routes the script into kuketty's pre-Serve executor, where it runs once to completion before the workload starts. Any other value is rejected at apply time.</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">tty</span><span class="p">:</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">prompt</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;claude&gt;</span><span class="nv"> </span><span class="s">&quot;</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nt">onInit</span><span class="p">:</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">script</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">echo &quot;ready&quot;</span><span class="w"> </span><span class="c1"># runOn defaults to start — runs on every boot</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">script</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./bootstrap.sh</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">      </span><span class="nt">runOn</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">create</span><span class="w"> </span><span class="c1"># runs once to completion before the workload starts</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">  </span><span class="nt">logLevel</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">debug</span>
+</code></pre></div>
 <h3 id="managed-etchosts-and-etchostname">Managed <code>/etc/hosts</code> and <code>/etc/hostname</code><a class="headerlink" href="#managed-etchosts-and-etchostname" title="Permanent link">&para;</a></h3>
 <p>Every container in a cell sees a managed <code>/etc/hostname</code> and (unless its cell's root container runs with <code>hostNetwork: true</code>) a managed <code>/etc/hosts</code>, bind-mounted in by kukeond.</p>
 <ul>
@@ -3738,13 +3872,13 @@
 </tbody>
 </table>
 <h2 id="minimal-embedded-in-a-cell">Minimal (embedded in a cell)<a class="headerlink" href="#minimal-embedded-in-a-cell" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">containers</span><span class="p">:</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">web</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker.io/library/busybox:latest</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/bin/sh</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">    </span><span class="nt">args</span><span class="p">:</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-c</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;echo</span><span class="nv"> </span><span class="s">hello</span><span class="nv"> </span><span class="s">&amp;&amp;</span><span class="nv"> </span><span class="s">sleep</span><span class="nv"> </span><span class="s">3600&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">containers</span><span class="p">:</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">web</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker.io/library/busybox:latest</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/bin/sh</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">    </span><span class="nt">args</span><span class="p">:</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-c</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;echo</span><span class="nv"> </span><span class="s">hello</span><span class="nv"> </span><span class="s">&amp;&amp;</span><span class="nv"> </span><span class="s">sleep</span><span class="nv"> </span><span class="s">3600&quot;</span>
 </code></pre></div>
 <p>Only <code>id</code> and <code>image</code> are strictly required when embedded inside a cell — the <code>realmId</code>, <code>spaceId</code>, <code>stackId</code>, and <code>cellId</code> are inherited from the parent cell's spec.</p>
 
@@ -3769,7 +3903,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 22, 2026 13:25:11 UTC">May 22, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 22, 2026 14:50:47 UTC">May 22, 2026</span>
   </span>
 
     
