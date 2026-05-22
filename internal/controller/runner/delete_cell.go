@@ -31,6 +31,15 @@ import (
 )
 
 func (r *Exec) DeleteCell(cell intmodel.Cell) error {
+	defer r.lockCell(cell)()
+	return r.deleteCellLocked(cell)
+}
+
+// deleteCellLocked is the body of DeleteCell. The caller must hold the per-cell
+// lifecycle lock (the DeleteCell wrapper, or a nesting op such as ReconcileCell's
+// auto-delete or PurgeCell that already holds it). It must not be called without
+// the lock held.
+func (r *Exec) deleteCellLocked(cell intmodel.Cell) error {
 	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
 		return errdefs.ErrCellNameRequired

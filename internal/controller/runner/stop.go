@@ -32,6 +32,14 @@ import (
 // is still valid. If detachment fails or the container is already stopped, fallback cleanup removes
 // IPAM allocations directly.
 func (r *Exec) StopCell(cell intmodel.Cell) (intmodel.Cell, error) {
+	defer r.lockCell(cell)()
+	return r.stopCellLocked(cell)
+}
+
+// stopCellLocked is the body of StopCell. The caller must hold the per-cell
+// lifecycle lock (the StopCell wrapper, or a nesting op such as RecreateCell
+// that already holds it). It must not be called without the lock held.
+func (r *Exec) stopCellLocked(cell intmodel.Cell) (intmodel.Cell, error) {
 	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
 		return intmodel.Cell{}, errdefs.ErrCellNameRequired

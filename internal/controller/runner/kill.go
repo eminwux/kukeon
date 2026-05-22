@@ -29,6 +29,15 @@ import (
 // KillCell immediately force-kills all containers in a cell (workload containers first, then root container).
 // It detaches the root container from the CNI network before killing it.
 func (r *Exec) KillCell(cell intmodel.Cell) (intmodel.Cell, error) {
+	defer r.lockCell(cell)()
+	return r.killCellLocked(cell)
+}
+
+// killCellLocked is the body of KillCell. The caller must hold the per-cell
+// lifecycle lock (the KillCell wrapper, or a nesting op such as StartCell's
+// failure cleanup or ReconcileCell's wind-down/auto-delete that already holds
+// it). It must not be called without the lock held.
+func (r *Exec) killCellLocked(cell intmodel.Cell) (intmodel.Cell, error) {
 	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
 		return intmodel.Cell{}, errdefs.ErrCellNameRequired

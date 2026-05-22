@@ -31,6 +31,8 @@ import (
 
 // PurgeCell performs comprehensive cleanup of a cell, including CNI resources and orphaned containers.
 func (r *Exec) PurgeCell(cell intmodel.Cell) error {
+	defer r.lockCell(cell)()
+
 	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
 		return errdefs.ErrCellNameRequired
@@ -49,7 +51,7 @@ func (r *Exec) PurgeCell(cell intmodel.Cell) error {
 	}
 
 	// First, perform standard delete
-	if err := r.DeleteCell(cell); err != nil {
+	if err := r.deleteCellLocked(cell); err != nil {
 		// Log but continue with purge even if delete fails
 		r.logger.WarnContext(r.ctx, "delete failed, continuing with purge", "error", err)
 	}

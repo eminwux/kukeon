@@ -630,6 +630,8 @@ func (r *Exec) refreshContainerStatus(cell intmodel.Cell, containerSpec *intmode
 // per-pass `Errors` slice records them and the cell is preserved for
 // retry on the next tick (best-effort, like the watcher it replaces).
 func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcome, error) {
+	defer r.lockCell(cell)()
+
 	originalStatus := cell.Status
 
 	// CellStateFailed is terminal (issue #407): once a cell has been marked
@@ -744,7 +746,7 @@ func (r *Exec) windDownCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcome
 		"stack", cell.Spec.StackName,
 		"state", cell.Status.State)
 
-	updatedCell, err := r.KillCell(cell)
+	updatedCell, err := r.killCellLocked(cell)
 	if err != nil {
 		return cell, ReconcileOutcome{}, fmt.Errorf("wind-down: kill cell: %w", err)
 	}
@@ -766,10 +768,10 @@ func (r *Exec) autoDeleteCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutco
 		"stack", cell.Spec.StackName,
 		"state", cell.Status.State)
 
-	if _, err := r.KillCell(cell); err != nil {
+	if _, err := r.killCellLocked(cell); err != nil {
 		return cell, ReconcileOutcome{}, fmt.Errorf("auto-delete: kill cell: %w", err)
 	}
-	if err := r.DeleteCell(cell); err != nil {
+	if err := r.deleteCellLocked(cell); err != nil {
 		return cell, ReconcileOutcome{}, fmt.Errorf("auto-delete: delete cell: %w", err)
 	}
 	return cell, ReconcileOutcome{Deleted: true}, nil

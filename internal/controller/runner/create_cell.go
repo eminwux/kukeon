@@ -27,6 +27,8 @@ import (
 )
 
 func (r *Exec) CreateCell(cell intmodel.Cell) (intmodel.Cell, error) {
+	defer r.lockCell(cell)()
+
 	if err := r.ensureClientConnected(); err != nil {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}

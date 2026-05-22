@@ -212,6 +212,14 @@ type Exec struct {
 	// to freeze the clock override the function via the runner_test
 	// hook (see metadata_test.go).
 	nowFn func() time.Time
+
+	// cellLocks serializes the containerd+CNI side-effect span of the cell
+	// lifecycle ops against each other on the same cell (issue #714). Keyed
+	// per realm/space/stack/cell so unrelated cells never serialize. Lazily
+	// built via cellLocksOnce so *Exec values constructed directly in tests
+	// (not via NewRunner) share the same lock semantics.
+	cellLocks     *cellLockManager
+	cellLocksOnce sync.Once
 }
 
 type Options struct {
