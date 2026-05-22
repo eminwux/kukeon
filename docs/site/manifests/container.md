@@ -86,6 +86,7 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 | `git`             | `ContainerGit`             | no       | Declarative git identity + signing, expanded into `GIT_AUTHOR_*`/`GIT_COMMITTER_*`/`GIT_CONFIG_*` env before start (see [ContainerGit](#containergit)) |
 | `cniConfigPath`   | string                     | no       | Override the CNI config directory for this container                                                                                                   |
 | `restartPolicy`   | string                     | no       | Restart policy. Reserved — restart semantics are not finalized.                                                                                        |
+| `tty`             | `ContainerTty`             | no       | Shell-UX config for the kuketty wrapper (prompt, init scripts, logging) — requires `attachable: true` (see [ContainerTty](#containertty))              |
 
 !!! warning "Fields marked reserved"
 `ports` and `restartPolicy` are accepted by the schema today but their semantics are still being designed. Values round-trip (you can read back what you applied), but the controller does not act on them. See [GitHub Issues](https://github.com/eminwux/kukeon/issues) for the backlog.
@@ -207,6 +208,36 @@ git:
   sign:
     - commits
   allowedSigners: /run/secrets/allowed_signers
+```
+
+### ContainerTty
+
+`spec.tty` configures shell-UX for the kuketty wrapper. Has no effect unless `spec.attachable` is `true` — setting any `tty` field with `attachable: false` is rejected at apply time.
+
+| Field      | Type                | Required | Description                                                                                                                                                                         |
+| ---------- | ------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prompt`   | string              | no       | Literal prompt expression stamped onto the wrapped shell's prompt. Empty leaves the shell's own prompt untouched.                                                                   |
+| `onInit`   | array of `TtyStage` | no       | Init script stages, run in declaration order (see [TtyStage](#ttystage)).                                                                                                           |
+| `logFile`  | string              | no       | Operator override for the in-container path the kuketty wrapper writes its log output to. Empty (default) lands at `/run/kukeon/tty/kuketty.log` inside the bind mount.             |
+| `logLevel` | string              | no       | Verbosity of the kuketty wrapper's own log output: `debug`, `info`, `warn`, or `error`. Empty inherits the daemon-wide default (`info`). Unknown values are rejected at apply time. |
+
+#### TtyStage
+
+Each entry in `tty.onInit` is a single init-script stage.
+
+| Field    | Type   | Required | Description                                                                                                                                                                                                                                                                                      |
+| -------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `script` | string | no       | Shell script body for the stage.                                                                                                                                                                                                                                                                 |
+| `runOn`  | string | no       | When the stage runs. Empty or `start` forwards the script to sbsh's onInit, so it runs in the wrapped shell on every boot. `create` routes the script into kuketty's pre-Serve executor, where it runs once to completion before the workload starts. Any other value is rejected at apply time. |
+
+```yaml
+tty:
+  prompt: "claude> "
+  onInit:
+    - script: echo "ready" # runOn defaults to start — runs on every boot
+    - script: ./bootstrap.sh
+      runOn: create # runs once to completion before the workload starts
+  logLevel: debug
 ```
 
 ### Managed `/etc/hosts` and `/etc/hostname`
