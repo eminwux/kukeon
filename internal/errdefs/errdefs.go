@@ -291,6 +291,15 @@ var (
 	ErrSecretFromEnvNotSet        = errors.New("secret fromEnv env var is not set on the daemon host")
 	ErrSecretStagingFailed        = errors.New("failed to stage secret file for mount")
 
+	// ErrSecretCoordUnsafe guards every secret name and scope coordinate that
+	// flows into fs.SecretPath against path traversal: a "/" or "\" separator,
+	// a "." or ".." element, or a NUL byte would let filepath.Join escape the
+	// secrets tree (issue #673). Shared by both validateSecretRef and
+	// validateSecretScope so the whole secret subsystem is covered.
+	ErrSecretCoordUnsafe = errors.New(
+		"secret name and scope coordinates must not contain path separators or '.'/'..' elements",
+	)
+
 	// ContainerSecret.secretRef source errors (issue #623).
 
 	ErrSecretRefNameRequired    = errors.New("secret secretRef.name is required")

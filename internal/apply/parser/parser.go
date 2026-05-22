@@ -438,6 +438,28 @@ func ValidateDocument(doc *Document) *ValidationError {
 	return nil
 }
 
+// validateSecretSegment rejects a single secret name or scope coordinate that
+// would escape the secrets tree once fs.SecretPath filepath.Join's it into a
+// host path: a "/" or "\" separator, a "." or ".." element, or a NUL byte.
+// Empty values are the caller's concern (a missing coordinate is legal; an
+// empty name is rejected separately), so this only guards non-empty segments.
+// Issue #673.
+func validateSecretSegment(value string) error {
+	if value == "" {
+		return nil
+	}
+	if value == "." || value == ".." {
+		return errdefs.ErrSecretCoordUnsafe
+	}
+	if strings.ContainsRune(value, 0) ||
+		strings.ContainsRune(value, '/') ||
+		strings.ContainsRune(value, '\\') ||
+		strings.ContainsRune(value, filepath.Separator) {
+		return errdefs.ErrSecretCoordUnsafe
+	}
+	return nil
+}
+
 // validateSecretScope enforces the `kind: Secret` scope-coordinate contract:
 // metadata.realm is always required, and a deeper coordinate may only be set
 // when every shallower one is also set (a cell-scoped secret must name its
@@ -460,6 +482,18 @@ func validateSecretScope(md v1beta1.SecretMetadata) error {
 	}
 	if stack != "" && space == "" {
 		return fmt.Errorf("%w (stack set without space)", errdefs.ErrSecretScopeIncomplete)
+	}
+	// Reject any name or coordinate that would escape the secrets tree.
+	for _, seg := range []struct{ field, value string }{
+		{"metadata.name", strings.TrimSpace(md.Name)},
+		{"metadata.realm", realm},
+		{"metadata.space", space},
+		{"metadata.stack", stack},
+		{"metadata.cell", cell},
+	} {
+		if err := validateSecretSegment(seg.value); err != nil {
+			return fmt.Errorf("%w (%s)", err, seg.field)
+		}
 	}
 	return nil
 }
@@ -559,6 +593,18 @@ func validateSecretRef(ref v1beta1.ContainerSecretRef, i int, name string) error
 		return fmt.Errorf(
 			"%w (secrets[%d] %q: stack set without space)", errdefs.ErrSecretRefScopeIncomplete, i, name,
 		)
+	}
+	// Reject any referenced name or coordinate that would escape the secrets tree.
+	for _, seg := range []struct{ field, value string }{
+		{"secretRef.name", strings.TrimSpace(ref.Name)},
+		{"secretRef.realm", realm},
+		{"secretRef.space", space},
+		{"secretRef.stack", stack},
+		{"secretRef.cell", cell},
+	} {
+		if err := validateSecretSegment(seg.value); err != nil {
+			return fmt.Errorf("%w (secrets[%d] %q %s)", err, i, name, seg.field)
+		}
 	}
 	return nil
 }

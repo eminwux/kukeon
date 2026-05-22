@@ -525,6 +525,21 @@ spec:
 			refYAML: "        name: anthropic-token\n        realm: default\n        stack: agents\n",
 			wantErr: errdefs.ErrSecretRefScopeIncomplete,
 		},
+		{
+			name:    "name traversal",
+			refYAML: "        name: ../../../etc/shadow\n        realm: kuke-system\n",
+			wantErr: errdefs.ErrSecretCoordUnsafe,
+		},
+		{
+			name:    "realm traversal",
+			refYAML: "        name: anthropic-token\n        realm: ..\n",
+			wantErr: errdefs.ErrSecretCoordUnsafe,
+		},
+		{
+			name:    "cell separator",
+			refYAML: "        name: anthropic-token\n        realm: default\n        space: ai\n        stack: agents\n        cell: claude/../../root\n",
+			wantErr: errdefs.ErrSecretCoordUnsafe,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -972,6 +987,28 @@ func TestValidateDocument_Secret(t *testing.T) {
 			name:    "empty data",
 			mutate:  func(d *v1beta1.SecretDoc) { d.Spec.Data = "   " },
 			wantErr: errdefs.ErrSecretDataRequired,
+		},
+		{
+			name:    "name traversal dotdot",
+			mutate:  func(d *v1beta1.SecretDoc) { d.Metadata.Name = "../../../etc/shadow" },
+			wantErr: errdefs.ErrSecretCoordUnsafe,
+		},
+		{
+			name:    "name is dotdot",
+			mutate:  func(d *v1beta1.SecretDoc) { d.Metadata.Name = ".." },
+			wantErr: errdefs.ErrSecretCoordUnsafe,
+		},
+		{
+			name:    "realm separator",
+			mutate:  func(d *v1beta1.SecretDoc) { d.Metadata.Realm = "default/../kuke-system" },
+			wantErr: errdefs.ErrSecretCoordUnsafe,
+		},
+		{
+			name: "cell traversal",
+			mutate: func(d *v1beta1.SecretDoc) {
+				d.Metadata.Space, d.Metadata.Stack, d.Metadata.Cell = "s", "st", ".."
+			},
+			wantErr: errdefs.ErrSecretCoordUnsafe,
 		},
 	}
 
