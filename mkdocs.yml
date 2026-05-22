@@ -118,6 +118,7 @@ nav:
       - manifests/stack.md
       - manifests/cell.md
       - manifests/container.md
+      - manifests/secret.md
   - Tutorials:
       - tutorials/hello-world.md
       - tutorials/first-stack.md
