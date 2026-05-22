@@ -2,7 +2,7 @@
 # Copyright 2025 Emiliano Spinella (eminwux)
 # SPDX-License-Identifier: Apache-2.0
 #
-# dev-init.sh — local kukeond build + load + init loop for contributors.
+# dev-init.sh — local kukeond build + init loop for contributors.
 #
 # Composes existing primitives end-to-end so a `kuke init` runs against the
 # locally built kukeond image instead of the registry-resolved default. Lifts
@@ -10,10 +10,9 @@
 #
 # Idempotent: re-running on a healthy host produces a clean re-bootstrap.
 # On a fresh host (no /opt/kukeon/data/kuke-system) the script first runs
-# `kuke init` to create realm metadata so the subsequent `kuke image load
-# --realm kuke-system` has a realm to land into; cell provisioning during
-# that first-pass init may fail before the image is staged, which is
-# expected.
+# `kuke init` to create realm metadata so the subsequent `kuke build --realm
+# kuke-system` has a realm to write into; cell provisioning during that
+# first-pass init may fail before the image is built, which is expected.
 
 set -euo pipefail
 
@@ -132,7 +131,7 @@ verify_parent_attach_intact() {
 }
 
 # Register the post-flight check BEFORE any state-mutating step so an
-# early failure (e.g. during `make kuke`, `docker build`, or the first
+# early failure (e.g. during `make kuke`, `kuke build`, or the first
 # `kuke init`) still surfaces a disturbance of the parent's attach
 # plumbing. The smoke section below replaces this trap with
 # `cleanup_attach_smoke`, whose last step is the same
@@ -140,15 +139,21 @@ verify_parent_attach_intact() {
 # holds at every exit point in the script.
 trap 'verify_parent_attach_intact || exit 1' EXIT
 
-step "Build kuke (and the kukeond symlink)"
-make kuke
+step "Build kuke, kukebuild (and the kukeond symlink)"
+make kuke kukebuild
 ln -sf kuke kukeond
 
 step "Install dev symlinks on PATH (make install-dev)"
 make install-dev
+# `kuke build` (used below in place of the old docker build) is a thin shim
+# that resolves the standalone `kukebuild` binary via PATH and exec's it. The
+# build step runs as `sudo ./kuke build`, so kukebuild must sit on root's
+# secure_path. install-dev only symlinks kuke/kukeond into /usr/local/bin, so
+# place kukebuild there too (mirroring install-dev's INSTALL_PREFIX default).
+sudo ln -sf "${REPO_ROOT}/kukebuild" /usr/local/bin/kukebuild
 
 # Pre-flight: catch missing host cgroup-v2 controller delegation BEFORE the
-# multi-minute docker build runs (issue #324). On a fully-delegated host
+# multi-minute kuke build runs (issue #324). On a fully-delegated host
 # this is silent; on a misconfigured host (e.g. cgroup namespace whose
 # parent only delegated a subset) it fails fast with the missing
 # controllers named and a copy-pasteable remediation. --probe attempts the
@@ -159,27 +164,25 @@ step "Pre-flight: host cgroup controller delegation"
 sudo ./kuke doctor cgroups --probe
 
 # Pre-flight: catch a missing standalone containerd BEFORE the multi-minute
-# docker build, and BEFORE the first-pass `kuke init` below whose tolerate-
-# non-zero (image-not-staged) would otherwise swallow the connection-timeout
-# error and surface a misleading downstream "realm not found: kuke-system"
-# at image load (issue #344).
+# kuke build (kukebuild dials the same /run/containerd/containerd.sock), and
+# BEFORE the first-pass `kuke init` below whose tolerate-non-zero (image-not-
+# staged) would otherwise swallow the connection-timeout error and surface a
+# misleading downstream "realm not found: kuke-system" at build time
+# (issue #344).
 step "Pre-flight: containerd reachability"
 if [ ! -S /run/containerd/containerd.sock ]; then
     printf 'containerd is not running at /run/containerd/containerd.sock — start it before re-running\n' >&2
     exit 1
 fi
 
-step "Build local kukeond image (${LOCAL_TAG})"
-docker build --build-arg VERSION=v0.0.0-dev -t "${LOCAL_TAG}" .
-
 if [ ! -d "${SYSTEM_REALM_DIR}" ]; then
     step "First-time bootstrap: run kuke init to create realm metadata"
-    # The kuke-system realm must exist before `kuke image load --realm
-    # kuke-system` will accept the load. On a fresh host that realm is
-    # created by kuke init's bootstrap pass; cell provisioning at the end
-    # of that pass may fail because the local image is not yet staged in
-    # containerd. Tolerate that — the second init below recreates the
-    # cell after the image load succeeds.
+    # The kuke-system realm must exist before `kuke build --realm
+    # kuke-system` will write the image into its containerd namespace. On a
+    # fresh host that realm is created by kuke init's bootstrap pass; cell
+    # provisioning at the end of that pass may fail because the local image
+    # is not yet built into containerd. Tolerate that — the second init
+    # below recreates the cell after the build succeeds.
     sudo --preserve-env=KUKEON_HOST,KUKEOND_SOCKET ./kuke init --kukeond-image "${KUKEOND_IMAGE_REF}" \
         || echo "first-pass init returned non-zero (expected before image is staged); continuing"
 fi
@@ -191,10 +194,15 @@ else
     step "No prior kukeond cell at ${KUKEOND_CELL_DIR}; skipping reset"
 fi
 
-step "Load ${LOCAL_TAG} into the kuke-system realm"
-# `kuke image load` is in-process by design (#226); --no-daemon is not
-# passed because the flag is a no-op for image subcommands.
-sudo --preserve-env=KUKEON_HOST ./kuke image load --from-docker "${LOCAL_TAG}" --realm kuke-system
+step "Build ${LOCAL_TAG} into the kuke-system realm"
+# `kuke build` shells out to `kukebuild`, which embeds BuildKit and writes the
+# image straight into the kuke-system realm's containerd namespace — no docker
+# daemon, no docker-private containerd, no `--from-docker` loader hop. The -t
+# short tag normalizes to docker.io/library/kukeon-local:dev (kukebuild's
+# normalizeImageName), the exact ref `kuke init --kukeond-image` resolves below.
+sudo --preserve-env=KUKEON_HOST ./kuke build --build-arg VERSION=v0.0.0-dev \
+    -t "${LOCAL_TAG}" \
+    --realm kuke-system .
 
 step "Run kuke init with --kukeond-image ${KUKEOND_IMAGE_REF}"
 sudo --preserve-env=KUKEON_HOST,KUKEOND_SOCKET ./kuke init --kukeond-image "${KUKEOND_IMAGE_REF}"

@@ -29,12 +29,13 @@ When a change touches the build path, the daemon, or anything under `/opt/kukeon
 
 ### Prerequisites
 
-`make dev-init` requires two daemons to be running on the host:
+`make dev-init` requires one daemon to be running on the host:
 
-- **Docker daemon** — used to build the local `kukeon-local:dev` image. Start with `service docker start` (or `systemctl start docker`).
-- **Standalone containerd** at `/run/containerd/containerd.sock` — used by `kuke image load` and `kuke init`. This is _not_ the docker-private containerd at `/var/run/docker/containerd/containerd.toml`; `pgrep containerd` may show that one even when the system socket is missing. If `ls /run/containerd/containerd.sock` returns no such file, start it with `service containerd start` (or `systemctl start containerd`). On hosts with no init script and no systemd (e.g., the agent dev container), launch the binary directly: `containerd > /tmp/containerd.log 2>&1 &`.
+- **Standalone containerd** at `/run/containerd/containerd.sock` — used by `kuke build` and `kuke init`. This is _not_ the docker-private containerd at `/var/run/docker/containerd/containerd.toml`; `pgrep containerd` may show that one even when the system socket is missing. If `ls /run/containerd/containerd.sock` returns no such file, start it with `service containerd start` (or `systemctl start containerd`). On hosts with no init script and no systemd (e.g., the agent dev container), launch the binary directly: `containerd > /tmp/containerd.log 2>&1 &`.
 
-A failure in either daemon surfaces as a confusing error several phases into the script — `dial unix /var/run/docker.sock: connect: no such file or directory` for docker, or `failed to connect to containerd: ... dial unix:///run/containerd/containerd.sock: timeout` for containerd. Bring both up before invoking `make dev-init` to skip the rabbit hole.
+No docker daemon is required. `kuke build` invokes the standalone `kukebuild` binary on the host — a BuildKit-as-library image builder that writes straight into the target realm's containerd namespace over the same `/run/containerd/containerd.sock`. `make dev-init`'s build phase produces `kukebuild` alongside `kuke` and places it on `PATH` (`/usr/local/bin`) so the `sudo ./kuke build` step resolves it; a missing `kukebuild` fails fast with `kuke build`'s "not found on PATH" message.
+
+A containerd failure surfaces as a confusing error several phases into the script — `failed to connect to containerd: ... dial unix:///run/containerd/containerd.sock: timeout`. Bring it up before invoking `make dev-init` to skip the rabbit hole.
 
 When run from inside a `kukeon-dev-root` cell (the canonical agent workflow), `make dev-init` automatically redirects the kukeond socket to `/run/kukeon-dev/` so it doesn't clobber the parent host's `kuke attach` plumbing — see [`docs/dev-init.md`](docs/dev-init.md) for the full bare-host vs. nested-mode contract.
 
@@ -44,7 +45,7 @@ When run from inside a `kukeon-dev-root` cell (the canonical agent workflow), `m
 make dev-init
 ```
 
-`scripts/dev-init.sh` composes the full re-bootstrap loop: `make kuke` + `kukeond` symlink, `docker build` of `kukeon-local:dev`, `kuke daemon reset` of the prior cell, `kuke image load --from-docker` of the freshly built image into the `kuke-system` realm, `kuke init --kukeond-image docker.io/library/kukeon-local:dev`, and the daemon-parity check below. The script is idempotent — re-running on a healthy host produces a clean re-bootstrap.
+`scripts/dev-init.sh` composes the full re-bootstrap loop: `make kuke kukebuild` + `kukeond` symlink, `kuke daemon reset` of the prior cell, `kuke build -t kukeon-local:dev --realm kuke-system .` building the image straight into the `kuke-system` realm's containerd namespace, `kuke init --kukeond-image docker.io/library/kukeon-local:dev`, and the daemon-parity check below. The script is idempotent — re-running on a healthy host produces a clean re-bootstrap.
 
 The daemon-parity tail of the output (the regression guard) must read:
 
@@ -68,16 +69,21 @@ To run individual phases by hand — e.g. while debugging a single phase — inv
 2. **Build the binaries.**
 
    ```bash
-   rm -f kuke kukeond
-   make kuke           # produces ./kuke
+   rm -f kuke kukeond kukebuild
+   make kuke kukebuild # produces ./kuke and ./kukebuild
    ln -sf kuke kukeond # kukeond is argv[0]-dispatched from the same binary
+   sudo ln -sf "$(pwd)/kukebuild" /usr/local/bin/kukebuild # kuke build resolves kukebuild via PATH
    ```
 
-3. **Build and load the local `kukeond` image (no registry push).**
+3. **Build the local `kukeond` image into the `kuke-system` realm (no registry push).**
+
+   `kuke build` invokes `kukebuild` (BuildKit as a library), which writes the
+   image straight into the realm's containerd namespace — no docker daemon and
+   no `--from-docker` loader hop. The `kuke-system` realm must already exist
+   (created by an earlier `kuke init` pass).
 
    ```bash
-   docker build --build-arg VERSION=v0.0.0-dev -t kukeon-local:dev .
-   sudo ./kuke image load --from-docker kukeon-local:dev --realm kuke-system
+   sudo ./kuke build --build-arg VERSION=v0.0.0-dev -t kukeon-local:dev --realm kuke-system .
    sudo ctr -n kuke-system.kukeon.io images ls | grep kukeon-local
    ```
 
