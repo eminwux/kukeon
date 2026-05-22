@@ -26,7 +26,48 @@ import (
 	"time"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
+
+// TestHasCreateStages covers the gate setupStatuses uses to decide whether a
+// container has anything stage-side worth dialing kuketty for.
+func TestHasCreateStages(t *testing.T) {
+	tests := []struct {
+		name string
+		spec intmodel.ContainerSpec
+		want bool
+	}{
+		{
+			name: "nil tty has no create stages",
+			spec: intmodel.ContainerSpec{Tty: nil},
+			want: false,
+		},
+		{
+			name: "tty with only start stages has no create stages",
+			spec: intmodel.ContainerSpec{Tty: &intmodel.ContainerTty{OnInit: []intmodel.TtyStage{
+				{Script: "echo hi", RunOn: v1beta1.RunOnStart},
+				{Script: "echo bye"},
+			}}},
+			want: false,
+		},
+		{
+			name: "tty with a create stage is detected",
+			spec: intmodel.ContainerSpec{Tty: &intmodel.ContainerTty{OnInit: []intmodel.TtyStage{
+				{Script: "echo hi", RunOn: v1beta1.RunOnStart},
+				{Script: "git clone ...", RunOn: v1beta1.RunOnCreate},
+			}}},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasCreateStages(tt.spec); got != tt.want {
+				t.Errorf("hasCreateStages = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestIsValidationError(t *testing.T) {
 	tests := []struct {

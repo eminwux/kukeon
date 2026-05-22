@@ -824,6 +824,65 @@ func TestGetContainer_NameTrimming(t *testing.T) {
 	}
 }
 
+// TestGetContainer_SurfacesSetupStatuses confirms GetContainer carries the
+// per-repo and per-create-stage outcomes that GetCell pulled into the cell's
+// container statuses through into result.Container.Status, so
+// `kuke get container <name> -o yaml/json` renders them (issues #642, #689).
+func TestGetContainer_SurfacesSetupStatuses(t *testing.T) {
+	mockRunner := &fakeRunner{}
+
+	existingCell := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
+	existingCell.Spec.Containers = []intmodel.ContainerSpec{
+		{ID: "test-container", Image: "alpine:latest"},
+	}
+	// GetCell-populated per-container statuses, including the stage/repo outcomes
+	// pulled over the GetSetupStatus RPC.
+	existingCell.Status.Containers = []intmodel.ContainerStatus{
+		{
+			ID: "test-container",
+			Repos: []intmodel.RepoStatus{
+				{Name: "app", Target: "/work/app", State: "cloned", Commit: "abc123"},
+			},
+			Stages: []intmodel.StageStatus{
+				{Index: 0, State: "done"},
+				{Index: 2, State: "failed", Error: "stage 2: exit 1"},
+			},
+		},
+	}
+	mockRunner.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+		return existingCell, nil
+	}
+	mockRunner.GetContainerStateFn = func(_ intmodel.Cell, _ string) (intmodel.ContainerState, error) {
+		return intmodel.ContainerStateReady, nil
+	}
+
+	ctrl := setupTestController(t, mockRunner)
+	container := buildTestContainer(
+		"test-container", "test-realm", "test-space", "test-stack", "test-cell", "alpine:latest",
+	)
+
+	result, err := ctrl.GetContainer(container)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	gotRepos := result.Container.Status.Repos
+	if len(gotRepos) != 1 || gotRepos[0].Name != "app" || gotRepos[0].State != "cloned" {
+		t.Errorf("Status.Repos = %+v, want one cloned repo named app", gotRepos)
+	}
+
+	gotStages := result.Container.Status.Stages
+	if len(gotStages) != 2 {
+		t.Fatalf("Status.Stages = %+v, want 2 stages", gotStages)
+	}
+	if gotStages[0].Index != 0 || gotStages[0].State != "done" || gotStages[0].Error != "" {
+		t.Errorf("Status.Stages[0] = %+v, want done stage at index 0", gotStages[0])
+	}
+	if gotStages[1].Index != 2 || gotStages[1].State != "failed" || gotStages[1].Error != "stage 2: exit 1" {
+		t.Errorf("Status.Stages[1] = %+v, want failed stage at index 2 with detail", gotStages[1])
+	}
+}
+
 // TestListContainers_SuccessfulRetrieval tests successful retrieval of containers list.
 func TestListContainers_SuccessfulRetrieval(t *testing.T) {
 	tests := []struct {

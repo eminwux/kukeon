@@ -51,10 +51,13 @@ const Method = ServiceName + "." + MethodName
 type Args struct{}
 
 // Reply is the GetSetupStatus response: the per-repo outcome of kuketty's
-// pre-Serve clone/fetch step, in the order the repos were declared on the
-// container spec. An empty Repos means the container declared no repos[].
+// pre-Serve clone/fetch step (Repos) plus the per-stage outcome of its
+// pre-Serve runOn: create execution (Stages), each in the order the items were
+// declared on the container spec. An empty Repos means the container declared
+// no repos[]; an empty Stages means it declared no runOn: create stages.
 type Reply struct {
-	Repos []Repo `json:"repos"`
+	Repos  []Repo  `json:"repos"`
+	Stages []Stage `json:"stages"`
 }
 
 // Repo is the resolved state of a single ContainerRepo after kuketty's
@@ -82,4 +85,34 @@ const (
 	StateFetched = "fetched"
 	// StateFailed means the clone/fetch failed; Error carries the detail.
 	StateFailed = "failed"
+)
+
+// Stage is the resolved state of a single runOn: create TtyStage after
+// kuketty's pre-Serve execution. Field set mirrors
+// api/model/v1beta1.StageStatus so the daemon can map it straight into
+// ContainerStatus.Stages. Index is the stage's 0-based position among the
+// container's create stages, in declaration order — the stable identity phase
+// A (#635) carries through (the run-once "done" key is settled in phase C,
+// #690).
+type Stage struct {
+	Index int `json:"index"`
+	// State is one of StageDone or StageFailed.
+	State string `json:"state"`
+	// Error is the failure detail when State == StageFailed; empty otherwise.
+	Error string `json:"error,omitempty"`
+}
+
+// Stage state values. Mirror the create-stage outcome set v1beta1.StageStatus
+// documents. A create stage carries no per-stage Required knob — every create
+// stage is implicitly required (see cmd/kuketty's errRequiredStageFailed) — so
+// kuketty exits before Serve on the first failure and the GetSetupStatus verb,
+// reachable only post-Serve, in practice only ever serves StageDone stages
+// (the same post-Serve-only path required repos take, AC #5 of #617).
+// StageFailed completes the wire contract and is exercised on the executor's
+// pre-Serve failure return.
+const (
+	// StageDone means the stage's Script ran to completion successfully.
+	StageDone = "done"
+	// StageFailed means the stage's Script failed; Error carries the detail.
+	StageFailed = "failed"
 )

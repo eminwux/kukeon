@@ -30,24 +30,27 @@ import (
 
 // setupStatusDialTimeout bounds the connect + round-trip to a container's
 // kuketty control socket. The pull is a best-effort enrichment of a `kuke get`
-// read (see repoStatuses / populateCellContainerStatuses in helpers.go): a
+// read (see setupStatuses / populateCellContainerStatuses in helpers.go): a
 // slow or wedged kuketty must never stall the status read, so the call gives
-// up quickly and leaves Repos empty rather than blocking the operator's
+// up quickly and leaves Repos/Stages empty rather than blocking the operator's
 // `kuke get`.
 const setupStatusDialTimeout = 2 * time.Second
 
 // pullSetupStatus dials a container's kuketty control socket and invokes the
-// GetSetupStatus verb (issue #642), returning the per-repo clone/fetch outcome
-// kuketty reported after its pre-Serve step. The socket is the same one
-// `kuke attach` connects to; the verb is served over the same JSON-RPC codec,
-// so a stdlib net/rpc/jsonrpc client is wire-compatible for this non-FD method
-// (sbsh's own pkg/rpcclient uses the same codec for its non-FD verbs).
+// GetSetupStatus verb (issues #642, #689), returning the full Reply — the
+// per-repo clone/fetch outcome and the per-create-stage outcome kuketty
+// reported after its pre-Serve steps. One dial serves both: the socket is the
+// same one `kuke attach` connects to; the verb is served over the same
+// JSON-RPC codec, so a stdlib net/rpc/jsonrpc client is wire-compatible for
+// this non-FD method (sbsh's own pkg/rpcclient uses the same codec for its
+// non-FD verbs).
 //
 // The whole call is bounded by setupStatusDialTimeout. Callers treat any error
-// as "status not available yet" and proceed with an empty Repos — the verb is
-// only reachable once kuketty is past Serve (container Ready), and a container
-// that exited on a required-repo failure never serves it (AC #5).
-func pullSetupStatus(ctx context.Context, socketPath string) ([]setupstatus.Repo, error) {
+// as "status not available yet" and proceed with empty Repos/Stages — the verb
+// is only reachable once kuketty is past Serve (container Ready), and a
+// container that exited on a required-repo or create-stage failure never serves
+// it (AC #5).
+func pullSetupStatus(ctx context.Context, socketPath string) (*setupstatus.Reply, error) {
 	dialCtx, cancel := context.WithTimeout(ctx, setupStatusDialTimeout)
 	defer cancel()
 
@@ -71,14 +74,14 @@ func pullSetupStatus(ctx context.Context, socketPath string) ([]setupstatus.Repo
 	if callErr := client.Call(setupstatus.Method, setupstatus.Args{}, &reply); callErr != nil {
 		return nil, fmt.Errorf("call %s on %q: %w", setupstatus.Method, socketPath, callErr)
 	}
-	return reply.Repos, nil
+	return &reply, nil
 }
 
-// setupStatusToInternal maps the wire payload onto the internal RepoStatus
+// repoStatusToInternal maps the wire repo payload onto the internal RepoStatus
 // type the controller persists in ContainerStatus.Repos. Returns nil for an
 // empty input so a container with no repos[] reports a nil Repos (mirrors the
 // omitempty wire/YAML shape) rather than an empty slice.
-func setupStatusToInternal(repos []setupstatus.Repo) []intmodel.RepoStatus {
+func repoStatusToInternal(repos []setupstatus.Repo) []intmodel.RepoStatus {
 	if len(repos) == 0 {
 		return nil
 	}
@@ -90,6 +93,25 @@ func setupStatusToInternal(repos []setupstatus.Repo) []intmodel.RepoStatus {
 			State:  r.State,
 			Commit: r.Commit,
 			Error:  r.Error,
+		}
+	}
+	return out
+}
+
+// stageStatusToInternal maps the wire create-stage payload onto the internal
+// StageStatus type the controller persists in ContainerStatus.Stages. Returns
+// nil for an empty input so a container with no create stages reports a nil
+// Stages (mirrors the omitempty wire/YAML shape) rather than an empty slice.
+func stageStatusToInternal(stages []setupstatus.Stage) []intmodel.StageStatus {
+	if len(stages) == 0 {
+		return nil
+	}
+	out := make([]intmodel.StageStatus, len(stages))
+	for i, s := range stages {
+		out[i] = intmodel.StageStatus{
+			Index: s.Index,
+			State: s.State,
+			Error: s.Error,
 		}
 	}
 	return out
