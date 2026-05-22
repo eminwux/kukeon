@@ -40,7 +40,7 @@ func TestNewSolveOptWiresCache(t *testing.T) {
 	cfg.cacheExports = []cacheSpec{{typ: "local", attrs: map[string]string{"dest": "/c/out"}}}
 	cfg.cacheImports = []cacheSpec{{typ: "local", attrs: map[string]string{"src": "/c/in"}}}
 
-	so, err := newSolveOpt(cfg)
+	so, err := newSolveOpt(cfg, nil)
 	if err != nil {
 		t.Fatalf("newSolveOpt: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestNewSolveOptWiresSecrets(t *testing.T) {
 	}
 	cfg.secrets = []secretSpec{{id: "tok", src: secretFile}}
 
-	so, err := newSolveOpt(cfg)
+	so, err := newSolveOpt(cfg, nil)
 	if err != nil {
 		t.Fatalf("newSolveOpt: %v", err)
 	}
@@ -79,8 +79,63 @@ func TestNewSolveOptSecretFileMissing(t *testing.T) {
 	cfg := newSolveOptFixture(t)
 	cfg.secrets = []secretSpec{{id: "tok", src: filepath.Join(t.TempDir(), "does-not-exist")}}
 
-	if _, err := newSolveOpt(cfg); err == nil {
+	if _, err := newSolveOpt(cfg, nil); err == nil {
 		t.Fatal("newSolveOpt: expected error for missing secret file, got nil")
+	}
+}
+
+func TestNewSolveOptWiresPush(t *testing.T) {
+	cfg := newSolveOptFixture(t)
+	cfg.tag = "registry:5000/app:dev"
+	cfg.push = true
+	// A real auth attachable, resolved with the env fallback so the test needs
+	// no on-disk docker config.
+	ap, _, err := newAuthProvider(fakeEnv(map[string]string{"HOME": t.TempDir()}), "registry:5000")
+	if err != nil {
+		t.Fatalf("newAuthProvider: %v", err)
+	}
+
+	so, err := newSolveOpt(cfg, ap)
+	if err != nil {
+		t.Fatalf("newSolveOpt: %v", err)
+	}
+	if got := so.Exports[0].Attrs["push"]; got != "true" {
+		t.Errorf(`Exports[0].Attrs["push"] = %q, want "true"`, got)
+	}
+	if len(so.Session) != 1 {
+		t.Errorf("Session = %d entries, want 1 (the auth provider)", len(so.Session))
+	}
+}
+
+func TestNewSolveOptNoPushByDefault(t *testing.T) {
+	cfg := newSolveOptFixture(t) // push defaults to false
+	so, err := newSolveOpt(cfg, nil)
+	if err != nil {
+		t.Fatalf("newSolveOpt: %v", err)
+	}
+	if _, ok := so.Exports[0].Attrs["push"]; ok {
+		t.Error(`Exports[0].Attrs["push"] is set, want absent when --push is off`)
+	}
+	if len(so.Session) != 0 {
+		t.Errorf("Session = %d entries, want 0 when not pushing", len(so.Session))
+	}
+}
+
+// A push build with a nil auth provider (anonymous push) still sets the push
+// attr and must not panic appending to the session.
+func TestNewSolveOptPushNilAuth(t *testing.T) {
+	cfg := newSolveOptFixture(t)
+	cfg.tag = "registry:5000/app:dev"
+	cfg.push = true
+	so, err := newSolveOpt(cfg, nil)
+	if err != nil {
+		t.Fatalf("newSolveOpt: %v", err)
+	}
+	if so.Exports[0].Attrs["push"] != "true" {
+		t.Error(`Exports[0].Attrs["push"] != "true" for an anonymous push`)
+	}
+	if len(so.Session) != 0 {
+		t.Errorf("Session = %d entries, want 0 for nil auth provider", len(so.Session))
 	}
 }
 

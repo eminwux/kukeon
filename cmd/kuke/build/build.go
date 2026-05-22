@@ -55,7 +55,7 @@ func NewBuildCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "build [-f Dockerfile] [-t name:tag] [--realm <name>] [--build-arg K=V]... " +
 			"[--secret id=NAME,src=PATH]... [--cache-to type=local,dest=PATH]... " +
-			"[--cache-from type=local,src=PATH]... <context>",
+			"[--cache-from type=local,src=PATH]... [--push] <context>",
 		Short: "Build an OCI image from a Dockerfile into a realm's containerd namespace",
 		Long: "Build an OCI image from a Dockerfile using kukeon's native builder.\n\n" +
 			"`kuke build` is a thin shim: it locates the `kukebuild` binary on PATH and\n" +
@@ -68,7 +68,13 @@ func NewBuildCmd() *cobra.Command {
 			"File-based secrets only; the flag is repeatable.\n\n" +
 			"Build cache: --cache-to type=local,dest=PATH exports the build cache to a local\n" +
 			"directory and --cache-from type=local,src=PATH imports it back, reusing layers\n" +
-			"across builds. Only type=local is supported; both flags are repeatable.",
+			"across builds. Only type=local is supported; both flags are repeatable.\n\n" +
+			"Registry push: --push pushes the built image to its tag's registry after a\n" +
+			"successful build. The tag must be a fully qualified registry reference\n" +
+			"(REGISTRY/REPO:TAG); a bare name:tag is rejected. Push is additive — the image\n" +
+			"is still written to the realm's containerd namespace. Credentials resolve in\n" +
+			"order: (1) $DOCKER_CONFIG/config.json when DOCKER_CONFIG is set, (2)\n" +
+			"~/.docker/config.json, (3) the KUKEON_REGISTRY_AUTH env var (base64 user:pass).",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -91,6 +97,13 @@ func NewBuildCmd() *cobra.Command {
 	)
 	cmd.Flags().StringArray("cache-to", nil, "Export build cache: type=local,dest=PATH (repeatable)")
 	cmd.Flags().StringArray("cache-from", nil, "Import build cache: type=local,src=PATH (repeatable)")
+	cmd.Flags().Bool(
+		"push",
+		false,
+		"After a successful build, push the image to its tag's registry (requires a fully qualified "+
+			"REGISTRY/REPO:TAG); credentials resolve from $DOCKER_CONFIG/config.json, then ~/.docker/config.json, "+
+			"then $KUKEON_REGISTRY_AUTH",
+	)
 
 	return cmd
 }
@@ -164,6 +177,10 @@ func buildArgv(cmd *cobra.Command, args []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	push, err := cmd.Flags().GetBool("push")
+	if err != nil {
+		return nil, err
+	}
 
 	argv := []string{kukebuildBinary, "--tag", tag, "--realm", realm}
 	if strings.TrimSpace(file) != "" {
@@ -183,6 +200,9 @@ func buildArgv(cmd *cobra.Command, args []string) ([]string, error) {
 	}
 	for _, c := range cacheFrom {
 		argv = append(argv, "--cache-from", c)
+	}
+	if push {
+		argv = append(argv, "--push")
 	}
 	// Context directory is positional and validated by cobra.ExactArgs(1).
 	argv = append(argv, args[0])
