@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/apischeme"
+	"github.com/eminwux/kukeon/internal/cellconfig"
 	"github.com/eminwux/kukeon/internal/controller/runner"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -688,6 +690,112 @@ func blueprintScopeLookupError(err error, level, name string) error {
 		return fmt.Errorf("%w: %s %q", errdefs.ErrBlueprintScopeNotFound, level, name)
 	default:
 		return fmt.Errorf("failed to verify blueprint scope %s %q: %w", level, name, err)
+	}
+}
+
+// ReconcileConfig reconciles a desired `kind: CellConfig` by verifying its own
+// scope exists, resolving the referenced CellBlueprint from daemon storage,
+// validating the config's structural slot fills against that blueprint's
+// declared slots, and persisting the config document (issue #624). Like
+// ReconcileSecret/ReconcileBlueprint it never auto-creates a missing scope, and
+// the document is written write-through — re-applying overwrites and reports
+// "updated". The slot-fill match runs here (not at parse time) because only the
+// daemon can read the stored blueprint the config references.
+func ReconcileConfig(r runner.Runner, desired intmodel.CellConfig) (ReconcileResult, error) {
+	result := ReconcileResult{
+		Action: "unchanged",
+		Kind:   "CellConfig",
+		Name:   desired.Metadata.Name,
+	}
+
+	if err := ensureConfigScopeExists(r, desired.Metadata); err != nil {
+		return result, err
+	}
+
+	cfgDoc, err := apischeme.ConvertCellConfigToExternal(desired)
+	if err != nil {
+		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
+	ref := cfgDoc.Spec.Blueprint
+	bpCarrier, getErr := r.GetBlueprint(intmodel.CellBlueprint{
+		Metadata: intmodel.CellBlueprintMetadata{
+			Name:  ref.Name,
+			Realm: ref.Realm,
+			Space: ref.Space,
+			Stack: ref.Stack,
+		},
+	})
+	if getErr != nil {
+		if errors.Is(getErr, errdefs.ErrBlueprintNotFound) {
+			return result, fmt.Errorf("%w: %q (realm %q)", errdefs.ErrConfigBlueprintNotFound, ref.Name, ref.Realm)
+		}
+		return result, fmt.Errorf("failed to read referenced blueprint %q: %w", ref.Name, getErr)
+	}
+	bpDoc, bpErr := apischeme.ConvertCellBlueprintToExternal(bpCarrier)
+	if bpErr != nil {
+		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, bpErr)
+	}
+
+	if slotErr := cellconfig.ValidateSlotFill(cfgDoc, bpDoc); slotErr != nil {
+		return result, slotErr
+	}
+
+	created, writeErr := r.WriteConfig(desired)
+	if writeErr != nil {
+		return result, writeErr
+	}
+	if created {
+		result.Action = actionCreated
+	} else {
+		result.Action = actionUpdated
+	}
+	return result, nil
+}
+
+// ensureConfigScopeExists verifies every scope coordinate the config names is
+// reachable, deepest-first. A Config is scopable at realm/space/stack only
+// (never cell), so the walk stops at the stack. A NotFound is translated to
+// errdefs.ErrConfigScopeNotFound.
+func ensureConfigScopeExists(r runner.Runner, md intmodel.CellConfigMetadata) error {
+	if _, err := r.GetRealm(intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{Name: md.Realm},
+	}); err != nil {
+		return configScopeLookupError(err, "realm", md.Realm)
+	}
+
+	if md.Space != "" {
+		if _, err := r.GetSpace(intmodel.Space{
+			Metadata: intmodel.SpaceMetadata{Name: md.Space},
+			Spec:     intmodel.SpaceSpec{RealmName: md.Realm},
+		}); err != nil {
+			return configScopeLookupError(err, "space", md.Space)
+		}
+	}
+
+	if md.Stack != "" {
+		if _, err := r.GetStack(intmodel.Stack{
+			Metadata: intmodel.StackMetadata{Name: md.Stack},
+			Spec:     intmodel.StackSpec{RealmName: md.Realm, SpaceName: md.Space},
+		}); err != nil {
+			return configScopeLookupError(err, "stack", md.Stack)
+		}
+	}
+
+	return nil
+}
+
+// configScopeLookupError maps a scope Get failure to a stable error. A NotFound
+// at any level becomes ErrConfigScopeNotFound; any other error is propagated
+// with context so it is not masked as a missing scope.
+func configScopeLookupError(err error, level, name string) error {
+	switch {
+	case errors.Is(err, errdefs.ErrRealmNotFound),
+		errors.Is(err, errdefs.ErrSpaceNotFound),
+		errors.Is(err, errdefs.ErrStackNotFound):
+		return fmt.Errorf("%w: %s %q", errdefs.ErrConfigScopeNotFound, level, name)
+	default:
+		return fmt.Errorf("failed to verify config scope %s %q: %w", level, name, err)
 	}
 }
 

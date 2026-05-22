@@ -375,6 +375,48 @@ var (
 		"blueprint secret slot with mode \"file\" requires an absolute mountPath",
 	)
 
+	// CellConfig kind (kind: CellConfig) errors (issue #624, phase 4b-i of #423).
+
+	ErrConfigNameRequired  = errors.New("config metadata.name is required")
+	ErrConfigRealmRequired = errors.New("config metadata.realm is required")
+	// ErrConfigScopeIncomplete fires when a deeper scope coordinate is set
+	// without every shallower one. A Config is scopable at realm/space/stack
+	// only, so a set cell coordinate is itself a violation.
+	ErrConfigScopeIncomplete = errors.New(
+		"config scope is incomplete: a deeper scope coordinate requires all shallower ones (and a Config may not be cell-scoped)",
+	)
+	// ErrConfigBlueprintRefRequired fires when spec.blueprint omits the
+	// referenced blueprint's name or realm — both are required to resolve it.
+	ErrConfigBlueprintRefRequired = errors.New("config spec.blueprint requires name and realm")
+	// ErrConfigBlueprintRefScopeIncomplete fires when the referenced blueprint's
+	// scope coordinates are incomplete (a deeper coordinate without a shallower).
+	ErrConfigBlueprintRefScopeIncomplete = errors.New(
+		"config spec.blueprint scope is incomplete: a deeper coordinate requires all shallower ones",
+	)
+	// ErrConfigRepoFillURLRequired fires when a spec.repos fill omits its url —
+	// the fill exists to supply the clone source the blueprint left open.
+	ErrConfigRepoFillURLRequired = errors.New("config repo slot fill requires url")
+	// ErrConfigSecretFillRefRequired fires when a spec.secrets fill omits its
+	// secretRef (name + realm) — the fill exists to supply the secret source.
+	ErrConfigSecretFillRefRequired = errors.New("config secret slot fill requires secretRef name and realm")
+	// ErrConfigBlueprintNotFound fires at apply time when the referenced
+	// blueprint cannot be read from daemon storage at its named scope.
+	ErrConfigBlueprintNotFound = errors.New("config references a blueprint that does not exist")
+	// ErrConfigUnknownRepoSlot fires when spec.repos names a slot the referenced
+	// blueprint does not declare as a structural repo slot.
+	ErrConfigUnknownRepoSlot = errors.New("config fills a repo slot the blueprint does not declare")
+	// ErrConfigUnknownSecretSlot fires when spec.secrets names a slot the
+	// referenced blueprint does not declare.
+	ErrConfigUnknownSecretSlot = errors.New("config fills a secret slot the blueprint does not declare")
+	// ErrConfigRequiredSlotUnfilled fires when a required structural slot the
+	// blueprint declares is not filled by the config.
+	ErrConfigRequiredSlotUnfilled = errors.New("config leaves a required blueprint slot unfilled")
+	// ErrConfigScopeNotFound fires when the config's own scope (realm/space/
+	// stack) does not exist on the host at apply time.
+	ErrConfigScopeNotFound = errors.New("config scope does not exist")
+	// ErrWriteConfig wraps a failure to persist a CellConfig document.
+	ErrWriteConfig = errors.New("failed to write config document")
+
 	// ErrMustRunAsRoot is returned by direct-write subcommands (kuke init,
 	// kuke daemon reset, kuke image load, kuke doctor cgroups --probe)
 	// when invoked with a non-zero effective UID. Wrapped errors must

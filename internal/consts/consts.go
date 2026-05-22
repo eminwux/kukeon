@@ -55,6 +55,15 @@ const (
 	// (0o755 / 0o644).
 	KukeonBlueprintsSubdir = "blueprints"
 
+	// KukeonConfigsSubdir is the basename of the per-scope subdirectory that
+	// owns daemon-managed `kind: CellConfig` documents (issue #624). Like the
+	// blueprints subdir it lives inside the scope's metadata directory (e.g.
+	// <RunPath>/data/<realm>/configs/) so a scope teardown reclaims it, and like
+	// a blueprint a config carries only references (a blueprint name, repo URLs,
+	// secretRefs) — no credential bytes — so the directory and files are
+	// root-owned but world-readable (0o755 / 0o644).
+	KukeonConfigsSubdir = "configs"
+
 	// KukeonContainerTTYDir is the basename of the per-container directory
 	// that owns the sbsh terminal socket plus its capture and log siblings.
 	// kukeon bind-mounts this directory (not a single file) into the
