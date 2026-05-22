@@ -20,11 +20,18 @@
 package runner
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
+	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -168,5 +175,145 @@ func TestBuildRootCNINetworkName_DeterministicWhenSpaceMissing(t *testing.T) {
 	want := "default-nonexistent-space"
 	if got != want {
 		t.Errorf("buildRootCNINetworkName() = %q, want %q when space metadata is absent", got, want)
+	}
+}
+
+// TestContainsExactContainerID covers the safety-net matcher every CNI/IPAM
+// leak fix in this subsystem relies on to decide whether a host-local IPAM
+// file belongs to the container being purged. The prefix false-positive case
+// is the load-bearing one: container IDs routinely share a common prefix, and
+// a substring match would purge a live sibling's reservation.
+func TestContainsExactContainerID(t *testing.T) {
+	const id = "cid-100"
+	tests := []struct {
+		name        string
+		content     string
+		containerID string
+		want        bool
+	}{
+		{
+			name:        "empty container ID never matches",
+			content:     "anything",
+			containerID: "",
+			want:        false,
+		},
+		{
+			name:        "exact match after trimming whitespace",
+			content:     id + "\n",
+			containerID: id,
+			want:        true,
+		},
+		{
+			name:        "host-local IPAM file with ifname line matches",
+			content:     id + "\neth0\n",
+			containerID: id,
+			want:        true,
+		},
+		{
+			name:        "container ID embedded in structured JSON matches",
+			content:     `{"containerID":"` + id + `"}`,
+			containerID: id,
+			want:        true,
+		},
+		{
+			name:        "shared-prefix sibling does not match",
+			content:     "cid-1000\neth0\n",
+			containerID: id,
+			want:        false,
+		},
+		{
+			name:        "shared-prefix suffix does not match",
+			content:     id + "extra\n",
+			containerID: id,
+			want:        false,
+		},
+		{
+			name:        "last_reserved_ip content without the ID does not match",
+			content:     "10.88.0.5\n",
+			containerID: id,
+			want:        false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := containsExactContainerID(tt.content, tt.containerID); got != tt.want {
+				t.Errorf("containsExactContainerID(%q, %q) = %v, want %v", tt.content, tt.containerID, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPurgeCNIForContainer_RemovesOnlyMatchingIPAMFile pins the core of the
+// post-delete IPAM purge safety net: scanning the host-local networks dir and
+// removing only the IPAM allocation file whose content names the container
+// being purged. The shared-prefix sibling and the last_reserved_ip bookkeeping
+// file must survive — purging either would leak or corrupt a live reservation.
+func TestPurgeCNIForContainer_RemovesOnlyMatchingIPAMFile(t *testing.T) {
+	const (
+		networkName  = "default-myspace"
+		containerID  = "cid-100"
+		matchingIP   = "10.88.0.5"
+		siblingIP    = "10.88.0.6"
+		siblingID    = "cid-1000"
+		reservedFile = "last_reserved_ip.0"
+	)
+
+	// Redirect the host-local IPAM scan at a temp dir; production never
+	// reassigns CNINetworksDir, so this is the only writer.
+	networksRoot := t.TempDir()
+	prevNetworksDir := cni.CNINetworksDir
+	cni.CNINetworksDir = networksRoot
+	t.Cleanup(func() { cni.CNINetworksDir = prevNetworksDir })
+
+	ipamDir := filepath.Join(networksRoot, networkName)
+	if err := os.MkdirAll(ipamDir, 0o755); err != nil {
+		t.Fatalf("mkdir ipam dir: %v", err)
+	}
+	writeFile := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(ipamDir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	// IP file whose content names our container — must be removed.
+	writeFile(matchingIP, containerID+"\neth0\n")
+	// Same-prefix sibling owned by a different container — must survive.
+	writeFile(siblingIP, siblingID+"\neth0\n")
+	// IPAM bookkeeping file holding an IP, not a container ID — must survive.
+	writeFile(reservedFile, matchingIP+"\n")
+
+	tmp := t.TempDir()
+	r := &Exec{
+		ctx:    context.Background(),
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		// Empty conf dir makes findCNIConfigPath miss, so the CNI DEL block
+		// (which needs a real plugin chain) is skipped; the cache dir points
+		// at an empty temp dir so the cache scan finds nothing on the host.
+		cniConf: &cni.Conf{CniConfigDir: tmp, CniBinDir: tmp, CniCacheDir: tmp},
+	}
+
+	// Empty netnsPath: the dead/absent-task purge path the teardown sites hit.
+	if err := r.purgeCNIForContainer(containerID, "", networkName); err != nil {
+		t.Fatalf("purgeCNIForContainer returned error: %v", err)
+	}
+
+	entries, err := os.ReadDir(ipamDir)
+	if err != nil {
+		t.Fatalf("read ipam dir after purge: %v", err)
+	}
+	var remaining []string
+	for _, e := range entries {
+		remaining = append(remaining, e.Name())
+	}
+	sort.Strings(remaining)
+	want := []string{reservedFile, siblingIP}
+	sort.Strings(want)
+	if len(remaining) != len(want) {
+		t.Fatalf("remaining files = %v, want %v", remaining, want)
+	}
+	for i := range want {
+		if remaining[i] != want[i] {
+			t.Fatalf("remaining files = %v, want %v", remaining, want)
+		}
 	}
 }

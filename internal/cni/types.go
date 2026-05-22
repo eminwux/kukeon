@@ -104,4 +104,6 @@ const (
 
 // CNINetworksDir is the standard directory where CNI stores network state and IPAM allocations.
 // This is the default location used by CNI plugins for host-local IPAM.
-const CNINetworksDir = "/var/lib/cni/networks"
+// It is a var rather than a const so tests can redirect the host-local IPAM
+// scan in purgeCNIForContainer at a temp dir; production never reassigns it.
+var CNINetworksDir = "/var/lib/cni/networks"
