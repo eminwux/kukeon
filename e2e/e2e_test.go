@@ -18,13 +18,17 @@ package e2e_test
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,6 +41,31 @@ const (
 	kuke = "kuke"
 	ctr  = "ctr"
 )
+
+var (
+	// nameSeed is a per-process random base for unique test-resource names. Seeding
+	// from crypto/rand ensures a realm/namespace left behind by a crashed prior run
+	// cannot collide with a fresh run's first-allocated name (e.g. e-r-1).
+	nameSeed = func() uint64 {
+		var b [2]byte
+		if _, err := rand.Read(b[:]); err != nil {
+			return uint64(time.Now().UnixNano() & 0xFFFF)
+		}
+		return uint64(binary.BigEndian.Uint16(b[:]))
+	}()
+	// nameCounter is a process-wide monotonic counter shared by every generator, so
+	// no two names allocated within a single `go test` run can collide regardless of
+	// how closely in time they are requested.
+	nameCounter atomic.Uint64
+)
+
+// uniqueNameID returns a short, collision-free identifier for test-resource names.
+// The seed+counter sum is rendered in base36 (lowercase 0-9a-z) to stay a valid
+// containerd namespace label while keeping names within the namespace-label and
+// /opt/kukeon/data metadata-path length limits the harness already fights.
+func uniqueNameID() string {
+	return strconv.FormatUint(nameSeed+nameCounter.Add(1), 36)
+}
 
 // runReturningBinary runs the provided binary with args, fails the test on non-zero exit or empty output.
 // If the binary file does not exist, the test is skipped.
@@ -356,9 +385,7 @@ func verifyCgroupPathExists(t *testing.T, cgroupPath string) bool {
 // generateUniqueSpaceName generates a unique space name for tests.
 func generateUniqueSpaceName(t *testing.T) string {
 	t.Helper()
-	timestamp := time.Now().UnixNano()
-	hexID := fmt.Sprintf("%02x", timestamp&0xFF)
-	return fmt.Sprintf("e-sp-%s", hexID)
+	return fmt.Sprintf("e-sp-%s", uniqueNameID())
 }
 
 // verifySpaceCNIConfigExists verifies CNI config file exists.
@@ -453,9 +480,7 @@ func verifySpaceExists(t *testing.T, host, realmName, spaceName string) bool {
 // generateUniqueStackName generates a unique stack name for tests.
 func generateUniqueStackName(t *testing.T) string {
 	t.Helper()
-	timestamp := time.Now().UnixNano()
-	hexID := fmt.Sprintf("%02x", timestamp&0xFF)
-	return fmt.Sprintf("e-st-%s", hexID)
+	return fmt.Sprintf("e-st-%s", uniqueNameID())
 }
 
 // verifyStackMetadataExists verifies stack metadata file exists.
@@ -557,17 +582,13 @@ func verifyStackExists(t *testing.T, host, realmName, spaceName, stackName strin
 // generateUniqueCellName generates a unique cell name for tests.
 func generateUniqueCellName(t *testing.T) string {
 	t.Helper()
-	timestamp := time.Now().UnixNano()
-	hexID := fmt.Sprintf("%02x", timestamp&0xFF)
-	return fmt.Sprintf("e-ce-%s", hexID)
+	return fmt.Sprintf("e-ce-%s", uniqueNameID())
 }
 
 // generateUniqueContainerName generates a unique container name for tests.
 func generateUniqueContainerName(t *testing.T) string {
 	t.Helper()
-	timestamp := time.Now().UnixNano()
-	hexID := fmt.Sprintf("%02x", timestamp&0xFF)
-	return fmt.Sprintf("e-co-%s", hexID)
+	return fmt.Sprintf("e-co-%s", uniqueNameID())
 }
 
 // verifyCellMetadataExists verifies cell metadata file exists.
