@@ -53,8 +53,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run unit tests
-        run: make test
+      # Split per Go module so a red run names the failing component in the
+      # step status (issue #696): root-module unit tests vs. the standalone
+      # cmd/kukebuild module. Both still run on every PR/push; GOWORK=off is
+      # preserved by the Makefile's top-level export, so neither step re-couples
+      # the workspace-union import graph.
+      - name: Run root-module tests
+        run: make test-root
+
+      - name: Run kukebuild module tests
+        run: make test-kukebuild
 
   # `make e2e` needs three host prerequisites — root (sudo -E), a docker
   # daemon for `docker build` of the local kukeond image, and a standalone
