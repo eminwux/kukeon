@@ -119,8 +119,9 @@ func (c *client) applySpecOpts(namespace string, container containerd.Container,
 		}
 	}
 
+	cc := c.conn()
 	for _, opt := range opts {
-		if err = opt(nsCtx, c.cClient, nil, ociSpec); err != nil {
+		if err = opt(nsCtx, cc, nil, ociSpec); err != nil {
 			return fmt.Errorf("failed to apply spec option: %w", err)
 		}
 	}

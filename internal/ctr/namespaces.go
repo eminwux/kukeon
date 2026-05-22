@@ -49,7 +49,7 @@ func (c *client) namespaceCtx(namespace string) context.Context {
 
 func (c *client) CreateNamespace(namespace string) error {
 	c.logger.DebugContext(c.ctx, "creating namespace", "namespace", namespace)
-	namespaces := c.cClient.NamespaceService()
+	namespaces := c.conn().NamespaceService()
 
 	err := namespaces.Create(c.ctx, namespace, nil)
 	if err != nil {
@@ -74,14 +74,16 @@ func (c *client) DeleteNamespace(namespace string) error {
 	}
 
 	// Ensure client is connected
-	if c.cClient == nil {
+	cc := c.conn()
+	if cc == nil {
 		if err := c.Connect(); err != nil {
 			return fmt.Errorf("failed to connect to containerd: %w", err)
 		}
+		cc = c.conn()
 	}
 
 	c.logger.DebugContext(c.ctx, "deleting namespace", "namespace", namespace)
-	namespaces := c.cClient.NamespaceService()
+	namespaces := cc.NamespaceService()
 
 	// Check if namespace exists first
 	nsList, err := namespaces.List(c.ctx)
@@ -117,7 +119,7 @@ func (c *client) DeleteNamespace(namespace string) error {
 func (c *client) ListNamespaces() ([]string, error) {
 	c.logger.DebugContext(c.ctx, "listing namespaces")
 
-	namespaces := c.cClient.NamespaceService()
+	namespaces := c.conn().NamespaceService()
 	// containerd requires a namespace for most API calls.
 	// But listing namespaces does not require entering one.
 
@@ -140,7 +142,7 @@ func (c *client) ExistsNamespace(namespace string) (bool, error) {
 
 func (c *client) GetNamespace(namespace string) (string, error) {
 	c.logger.DebugContext(c.ctx, "getting namespace", "namespace", namespace)
-	namespaces := c.cClient.NamespaceService()
+	namespaces := c.conn().NamespaceService()
 
 	nsList, err := namespaces.List(c.ctx)
 	if err != nil {
@@ -207,14 +209,16 @@ var KukeonKnownSnapshotters = []string{
 // signal coming from the caller's subsequent DeleteNamespace check.
 func (c *client) CleanupNamespaceResources(namespace, snapshotter string) error {
 	// Ensure client is connected
-	if c.cClient == nil {
+	cc := c.conn()
+	if cc == nil {
 		if err := c.Connect(); err != nil {
 			return fmt.Errorf("failed to connect to containerd: %w", err)
 		}
+		cc = c.conn()
 	}
 
 	nsCtx := namespaces.WithNamespace(c.ctx, namespace)
-	c.drainNamespaceResources(nsCtx, namespace, snapshotter, c.cClient)
+	c.drainNamespaceResources(nsCtx, namespace, snapshotter, cc)
 	return nil
 }
 

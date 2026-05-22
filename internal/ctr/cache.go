@@ -50,7 +50,7 @@ func (c *client) loadContainer(namespace, id string) (containerd.Container, erro
 	c.containersMu.RUnlock()
 
 	nsCtx := c.namespaceCtx(namespace)
-	container, err := c.cClient.LoadContainer(nsCtx, id)
+	container, err := c.conn().LoadContainer(nsCtx, id)
 	if err != nil {
 		// Only wrap "not found" errors with ErrContainerNotFound
 		// Other errors (connection failures, permission errors, etc.) should be returned as-is
