@@ -111,6 +111,7 @@ Supported fields (each mirrors `ContainerSpec`): `user`, `readOnlyRootFilesystem
 | `reason`             | string                                  | Short reason code summarizing why `state` is in its current value.                                                                                   |
 | `message`            | string                                  | Human-readable detail backing `reason`; especially valuable on `state: Failed`.                                                                      |
 | `cgroupReady`        | bool                                    | Whether `cgroupPath` actually exists on the host filesystem as of the last status write.                                                             |
+| `observedGeneration` | int                                     | The `metadata.generation` the reconciler last acted on. Defaults to zero (omitted) and stays inert until writers begin bumping `generation`; the reconciler then compares the two to skip stale work. |
 
 ## Bridge naming
 
