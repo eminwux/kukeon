@@ -135,9 +135,13 @@ func (r *Exec) RecreateCell(desired intmodel.Cell) (_ intmodel.Cell, retErr erro
 	// host-local IPAM rejects the re-ADD as a duplicate allocation (issue #630).
 	// releaseCNI runs before the stop/delete so the netns is still valid for CNI
 	// DEL where applicable; purgeCNI scrubs the residual allocation file afterward.
+	// Resolve the purge's network name deterministically from realm+space so the
+	// scrub runs even when space metadata is gone or corrupt (issue #685), matching
+	// the stop/kill/delete teardown paths; the name is a pure function of (realm,
+	// space).
 	cellName := strings.TrimSpace(existing.Metadata.Name)
 	cniConfigPath, _ := r.resolveSpaceCNIConfigPath(realmName, spaceName)
-	networkName := r.resolveRootCNINetworkName(realmName, spaceName)
+	networkName := r.buildRootCNINetworkName(realmName, spaceName)
 	_ = teardownRootContainerCNI(
 		func() {
 			r.detachRootContainerFromNetwork(
