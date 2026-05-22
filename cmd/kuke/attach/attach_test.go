@@ -40,7 +40,26 @@ type fakeClient struct {
 	kukeonv1.FakeClient
 
 	listContainersFn  func(realm, space, stack, cell string) ([]v1beta1.ContainerSpec, error)
+	getCellFn         func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error)
 	attachContainerFn func(doc v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error)
+}
+
+// GetCell backs the divergence guard. With no getCellFn set it reports a
+// healthy Ready cell whose root task is live, so attach proceeds — the default
+// for every test not exercising the divergence path.
+func (f *fakeClient) GetCell(
+	_ context.Context,
+	doc v1beta1.CellDoc,
+) (kukeonv1.GetCellResult, error) {
+	if f.getCellFn != nil {
+		return f.getCellFn(doc)
+	}
+	return kukeonv1.GetCellResult{
+		Cell:                     v1beta1.CellDoc{Status: v1beta1.CellStatus{State: v1beta1.CellStateReady}},
+		MetadataExists:           true,
+		RootContainerExists:      true,
+		RootContainerTaskRunning: true,
+	}, nil
 }
 
 func (f *fakeClient) ListContainers(
@@ -372,6 +391,55 @@ func TestAttach_ExplicitContainer_Attachable_Succeeds(t *testing.T) {
 	}
 	if run.opts.SocketPath != testHostSocket {
 		t.Errorf("Options.SocketPath = %q, want %q", run.opts.SocketPath, testHostSocket)
+	}
+}
+
+// TestAttach_RecordedReady_TaskGone_Refuses covers #683: the cell metadata
+// records Ready and the containerd container record still exists (it survives a
+// host/daemon restart), but the backing root task is gone. Attach must refuse
+// with the diverged-state error and never reach AttachContainer / the sbsh
+// loop — otherwise it hands back a socket backed by a dead task.
+func TestAttach_RecordedReady_TaskGone_Refuses(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	attachCalls := 0
+	fc := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell:           v1beta1.CellDoc{Status: v1beta1.CellStatus{State: v1beta1.CellStateReady}},
+				MetadataExists: true,
+				// Record survived the restart; the task did not.
+				RootContainerExists:      true,
+				RootContainerTaskRunning: false,
+			}, nil
+		},
+		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
+			attachCalls++
+			return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
+		},
+	}
+	run := &runCapture{}
+	cmd := newCmdWithCtx(t, fc, run)
+	cmd.SetArgs([]string{
+		"--realm", "r1", "--space", "s1", "--stack", "st1",
+		"--container", "work", "c1",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute returned nil, want divergence refusal")
+	}
+	if !strings.Contains(err.Error(), "diverged") {
+		t.Errorf("error %q missing divergence wording", err.Error())
+	}
+	if !strings.Contains(err.Error(), "kuke delete cell c1") {
+		t.Errorf("error %q missing `kuke delete cell` recovery pointer", err.Error())
+	}
+	if attachCalls != 0 {
+		t.Errorf("AttachContainer calls=%d, want 0 (must not attach to a dead socket)", attachCalls)
+	}
+	if run.calls != 0 {
+		t.Errorf("attach.Run called %d times, want 0", run.calls)
 	}
 }
 

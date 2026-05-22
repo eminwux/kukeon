@@ -301,27 +301,24 @@ func runExistingCell(
 ) error {
 	switch pre.Cell.Status.State {
 	case v1beta1.CellStateReady:
-		// Divergence guard (#654): the metadata records this cell as Ready, but
-		// containerd no longer has its root container — typically a daemon/host
-		// restart (#648) dropped the cell's containers while the on-disk
-		// metadata survived. Trusting the stale metadata would print phantom
-		// `already existed` / `containers: started` lines and then attach to a
-		// socket backed by nothing (`connection refused`). Refuse with a
+		// Divergence guard (#654, #683): the metadata records this cell as
+		// Ready, but its root-container task is gone from containerd — typically
+		// a daemon/host restart (#648) dropped the cell's tasks while the
+		// container records and on-disk metadata survived. Keying on record
+		// existence alone (#654's original guard) passes in that case because
+		// the records outlive the tasks, so we gate on task liveness instead
+		// (#683). Trusting the stale metadata would print phantom `already
+		// existed` / `containers: started` lines and then attach to a socket
+		// backed by nothing (`connection refused`). Refuse with a
 		// delete-then-rerun pointer instead. We deliberately do not recreate in
 		// place: re-entering CreateCell/StartCell here is the exact #630 CNI
 		// duplicate-allocation re-entry the Ready short-circuit exists to avoid,
 		// and the operator-driven delete releases any half-held allocation
-		// cleanly. (A legitimately Stopped cell has no root container in
-		// containerd by design — StopCell deletes it — so this guard is scoped
-		// to Ready, where the container is asserted live.)
-		if !pre.RootContainerExists {
-			return fmt.Errorf(
-				"cell %q is recorded Ready but its containers are gone from containerd "+
-					"(kukeon metadata and containerd have diverged); "+
-					"delete it with `kuke delete cell %s` before re-running",
-				cellDoc.Metadata.Name,
-				cellDoc.Metadata.Name,
-			)
+		// cleanly. (A legitimately Stopped cell has no live root task by
+		// design — StopCell deletes it — so this guard is scoped to Ready, where
+		// the task is asserted live.)
+		if err := kukshared.GuardCellTaskLiveness(pre, cellDoc.Metadata.Name); err != nil {
+			return err
 		}
 		if printErr := printRunResult(cmd, noOpResultFromGet(pre), flags.output); printErr != nil {
 			return printErr

@@ -120,6 +120,19 @@ func runAttach(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Divergence guard (#683): refuse to attach to a cell whose metadata records
+	// it Ready but whose root-container task is gone from containerd (post-reboot
+	// divergence). Without this, attach hands back a socket backed by a dead task
+	// and the sbsh loop fails with `connection refused`. Shares the run path's
+	// guard so both entry points refuse identically.
+	cellGet, err := client.GetCell(cmd.Context(), buildCellDoc(cell, realm, space, stack))
+	if err != nil {
+		return err
+	}
+	if err := kukeshared.GuardCellTaskLiveness(cellGet, cell); err != nil {
+		return err
+	}
+
 	doc := buildContainerDoc(container, realm, space, stack, cell)
 	result, err := client.AttachContainer(cmd.Context(), doc)
 	if err != nil {
@@ -160,6 +173,25 @@ func resolveRun(cmd *cobra.Command) runFn {
 		return mock
 	}
 	return attach.Run
+}
+
+// buildCellDoc assembles the lookup CellDoc the divergence guard queries via
+// GetCell. Only the identity coordinates are needed — GetCell resolves the
+// persisted spec and the live root-task status from them.
+func buildCellDoc(cell, realm, space, stack string) v1beta1.CellDoc {
+	return v1beta1.CellDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindCell,
+		Metadata: v1beta1.CellMetadata{
+			Name:   cell,
+			Labels: make(map[string]string),
+		},
+		Spec: v1beta1.CellSpec{
+			RealmID: realm,
+			SpaceID: space,
+			StackID: stack,
+		},
+	}
 }
 
 func buildContainerDoc(name, realm, space, stack, cell string) v1beta1.ContainerDoc {

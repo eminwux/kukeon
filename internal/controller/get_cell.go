@@ -31,6 +31,13 @@ type GetCellResult struct {
 	MetadataExists      bool
 	CgroupExists        bool
 	RootContainerExists bool
+	// RootContainerTaskRunning reports whether the cell's root container has a
+	// live containerd task (status Running). RootContainerExists keys on the
+	// containerd container *record*, which survives a host/daemon restart while
+	// the backing task does not (#654, #683): a record-existence check passes
+	// even when attaching would land on a dead socket. Callers gating an attach
+	// must consult this task-liveness signal, not record existence.
+	RootContainerTaskRunning bool
 }
 
 // GetCell retrieves a single cell and reports its current state.
@@ -96,10 +103,50 @@ func (b *Exec) GetCell(cell intmodel.Cell) (GetCellResult, error) {
 		if err != nil {
 			return res, fmt.Errorf("failed to check root container: %w", err)
 		}
+		if res.RootContainerExists {
+			res.RootContainerTaskRunning, err = b.rootContainerTaskRunning(internalCell)
+			if err != nil {
+				return res, fmt.Errorf("failed to check root container task: %w", err)
+			}
+		}
 		res.Cell = internalCell
 	}
 
 	return res, nil
+}
+
+// rootContainerTaskRunning reports whether the cell's root container has a live
+// containerd task. It locates the root container in the cell spec (Root=true,
+// falling back to RootContainerID) and queries its actual task status; only a
+// Running task (intmodel.ContainerStateReady) counts as live. A cell whose root
+// is absent from the spec is treated as live, matching the reconciler's
+// deriveCellStateFromRootContainer: the divergence this signal exists to catch
+// is a present-but-dead root, not a synthesized one.
+func (b *Exec) rootContainerTaskRunning(cell intmodel.Cell) (bool, error) {
+	rootID := rootContainerID(cell)
+	if rootID == "" {
+		return true, nil
+	}
+	state, err := b.runner.GetContainerState(cell, rootID)
+	if err != nil {
+		return false, err
+	}
+	return state == intmodel.ContainerStateReady, nil
+}
+
+// rootContainerID returns the spec ID of the cell's root container, preferring
+// the Root=true flag and falling back to Spec.RootContainerID. Empty when the
+// spec carries no root container.
+func rootContainerID(cell intmodel.Cell) string {
+	for i := range cell.Spec.Containers {
+		if cell.Spec.Containers[i].Root {
+			return cell.Spec.Containers[i].ID
+		}
+	}
+	if cell.Spec.RootContainerID != "" {
+		return cell.Spec.RootContainerID
+	}
+	return ""
 }
 
 // ListCells lists all cells, optionally filtered by realm, space, and/or stack.
