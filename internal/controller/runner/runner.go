@@ -142,6 +142,13 @@ type Runner interface {
 	// errdefs.ErrBlueprintNotFound when the file is absent.
 	DeleteBlueprint(blueprint intmodel.CellBlueprint) error
 
+	// WriteConfig persists a `kind: CellConfig`'s serialized document to the
+	// daemon-managed, root-owned, world-readable file under the scope's metadata
+	// tree (issue #624). Returns whether the file was newly created (vs.
+	// overwritten). The caller (ReconcileConfig) is responsible for having
+	// verified the config's scope exists and the referenced blueprint resolves.
+	WriteConfig(config intmodel.CellConfig) (created bool, err error)
+
 	ExistsCgroup(doc any) (bool, error)
 
 	PurgeRealm(realm intmodel.Realm) (namespaceRemoved bool, err error)

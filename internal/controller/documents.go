@@ -52,6 +52,13 @@ func SortDocumentsByKind(docs []parser.Document, reverse bool) []parser.Document
 	// that targets it (reconcile rejects a blueprint whose scope does not yet
 	// exist). Evaluated after the Secret line so it lands one slot further out.
 	kindOrder[v1beta1.KindCellBlueprint] = len(kindOrder) + 1
+	// CellConfigs reference a CellBlueprint and validate their slot fills
+	// against it at reconcile time, so they sort after CellBlueprints: a
+	// blueprint bundled in the same apply file is written before a config that
+	// references it (reconcile rejects a config whose blueprint does not yet
+	// exist). Evaluated after the CellBlueprint line so it lands one slot
+	// further out.
+	kindOrder[v1beta1.KindCellConfig] = len(kindOrder) + 1
 
 	// Sort by kind order, then by original index
 	sort.Slice(sorted, func(i, j int) bool {

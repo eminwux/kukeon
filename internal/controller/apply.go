@@ -236,6 +236,23 @@ func (b *Exec) ApplyDocuments(docs []parser.Document) (ApplyResult, error) {
 			resourceResult.Name = blueprint.Metadata.Name
 			reconcileResult, reconcileErr = applypkg.ReconcileBlueprint(b.runner, blueprint)
 
+		case v1beta1.KindCellConfig:
+			if doc.CellConfigDoc == nil {
+				resourceResult.Action = actionFailed
+				resourceResult.Error = errors.New("config document is nil")
+				result.Resources = append(result.Resources, resourceResult)
+				continue
+			}
+			config, _, err := apischeme.NormalizeCellConfig(*doc.CellConfigDoc)
+			if err != nil {
+				resourceResult.Action = actionFailed
+				resourceResult.Error = fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+				result.Resources = append(result.Resources, resourceResult)
+				continue
+			}
+			resourceResult.Name = config.Metadata.Name
+			reconcileResult, reconcileErr = applypkg.ReconcileConfig(b.runner, config)
+
 		default:
 			resourceResult.Action = actionFailed
 			resourceResult.Error = fmt.Errorf("%w: %s", errdefs.ErrUnknownKind, doc.Kind)

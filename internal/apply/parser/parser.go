@@ -43,6 +43,7 @@ type Document struct {
 	ContainerDoc     *v1beta1.ContainerDoc
 	SecretDoc        *v1beta1.SecretDoc
 	CellBlueprintDoc *v1beta1.CellBlueprintDoc
+	CellConfigDoc    *v1beta1.CellConfigDoc
 }
 
 // ValidationError represents a validation error for a specific document.
@@ -179,6 +180,14 @@ func ParseDocument(index int, raw []byte) (*Document, error) {
 		doc.CellBlueprintDoc = &blueprintDoc
 		doc.APIVersion = blueprintDoc.APIVersion
 
+	case v1beta1.KindCellConfig:
+		var configDoc v1beta1.CellConfigDoc
+		if unmarshalErr := yaml.Unmarshal(raw, &configDoc); unmarshalErr != nil {
+			return nil, fmt.Errorf("document %d: failed to parse CellConfig: %w", index, unmarshalErr)
+		}
+		doc.CellConfigDoc = &configDoc
+		doc.APIVersion = configDoc.APIVersion
+
 	default:
 		return nil, fmt.Errorf("document %d: %w: %s", index, errdefs.ErrUnknownKind, kind)
 	}
@@ -206,7 +215,8 @@ func ValidateDocument(doc *Document) *ValidationError {
 	// Validate kind
 	switch doc.Kind {
 	case v1beta1.KindRealm, v1beta1.KindSpace, v1beta1.KindStack, v1beta1.KindCell,
-		v1beta1.KindContainer, v1beta1.KindSecret, v1beta1.KindCellBlueprint:
+		v1beta1.KindContainer, v1beta1.KindSecret, v1beta1.KindCellBlueprint,
+		v1beta1.KindCellConfig:
 		// Valid kind
 	default:
 		return &ValidationError{
@@ -447,6 +457,11 @@ func ValidateDocument(doc *Document) *ValidationError {
 		if validationErr := validateBlueprint(doc); validationErr != nil {
 			return validationErr
 		}
+
+	case v1beta1.KindCellConfig:
+		if validationErr := validateConfig(doc); validationErr != nil {
+			return validationErr
+		}
 	}
 
 	return nil
@@ -568,6 +583,84 @@ func validateBlueprintSecretSlots(slots []v1beta1.BlueprintSecretSlot) error {
 		default:
 			return fmt.Errorf("%w (secrets[%d] %q mode %q)", errdefs.ErrBlueprintSecretSlotMode, i, name, mode)
 		}
+	}
+	return nil
+}
+
+// validateConfig enforces the structural contract for a kind: CellConfig
+// document (issue #624): name + scope coordinates, a present blueprint
+// reference, and the shape of each repo/secret slot fill. The slot-fill match
+// against the *referenced blueprint's declared slots* (unknown slot, required
+// slot unfilled) runs at reconcile time, the same split the Blueprint/Secret
+// scope-reachability gate uses — only the daemon can read the stored blueprint.
+func validateConfig(doc *Document) *ValidationError {
+	if doc.CellConfigDoc == nil {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Err: errors.New("config document is nil")}
+	}
+	cfg := doc.CellConfigDoc
+	if strings.TrimSpace(cfg.Metadata.Name) == "" {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Err: errdefs.ErrConfigNameRequired}
+	}
+	if scopeErr := validateConfigScope(cfg.Metadata); scopeErr != nil {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Name: cfg.Metadata.Name, Err: scopeErr}
+	}
+	if refErr := validateConfigBlueprintRef(cfg.Spec.Blueprint); refErr != nil {
+		return &ValidationError{Index: doc.Index, Kind: doc.Kind, Name: cfg.Metadata.Name, Err: refErr}
+	}
+	for name, fill := range cfg.Spec.Repos {
+		if strings.TrimSpace(fill.URL) == "" {
+			return &ValidationError{
+				Index: doc.Index, Kind: doc.Kind, Name: cfg.Metadata.Name,
+				Err: fmt.Errorf("%w (repos[%q])", errdefs.ErrConfigRepoFillURLRequired, name),
+			}
+		}
+	}
+	for name, fill := range cfg.Spec.Secrets {
+		if fill.SecretRef == nil ||
+			strings.TrimSpace(fill.SecretRef.Name) == "" ||
+			strings.TrimSpace(fill.SecretRef.Realm) == "" {
+			return &ValidationError{
+				Index: doc.Index, Kind: doc.Kind, Name: cfg.Metadata.Name,
+				Err: fmt.Errorf("%w (secrets[%q])", errdefs.ErrConfigSecretFillRefRequired, name),
+			}
+		}
+	}
+	return nil
+}
+
+// validateConfigScope enforces the CellConfig scope-coordinate contract:
+// metadata.realm is always required, a deeper coordinate may only be set when
+// every shallower one is, and — like a Blueprint — a Config may not be
+// cell-scoped.
+func validateConfigScope(md v1beta1.CellConfigMetadata) error {
+	realm := strings.TrimSpace(md.Realm)
+	space := strings.TrimSpace(md.Space)
+	stack := strings.TrimSpace(md.Stack)
+
+	if realm == "" {
+		return errdefs.ErrConfigRealmRequired
+	}
+	if stack != "" && space == "" {
+		return fmt.Errorf("%w (stack set without space)", errdefs.ErrConfigScopeIncomplete)
+	}
+	return nil
+}
+
+// validateConfigBlueprintRef enforces the referenced-blueprint shape: name and
+// realm are required, and the optional space/stack coordinates follow the same
+// deeper-requires-shallower contract. It does not check the blueprint exists on
+// the host — that reachability gate runs at reconcile time against the runner.
+func validateConfigBlueprintRef(ref v1beta1.CellConfigBlueprintRef) error {
+	name := strings.TrimSpace(ref.Name)
+	realm := strings.TrimSpace(ref.Realm)
+	space := strings.TrimSpace(ref.Space)
+	stack := strings.TrimSpace(ref.Stack)
+
+	if name == "" || realm == "" {
+		return errdefs.ErrConfigBlueprintRefRequired
+	}
+	if stack != "" && space == "" {
+		return fmt.Errorf("%w (stack set without space)", errdefs.ErrConfigBlueprintRefScopeIncomplete)
 	}
 	return nil
 }

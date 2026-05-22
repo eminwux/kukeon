@@ -50,6 +50,15 @@ const (
 	// `<prefix>-<6hex>` cell. The get/delete verbs (#643), CellConfig (#624),
 	// and `kuke run -c` (#625) build on this foundation.
 	KindCellBlueprint Kind = "CellBlueprint"
+	// KindCellConfig identifies a daemon-stored cell identity that binds a
+	// CellBlueprint to a concrete instance (issue #624, phase 4b-i of #423). A
+	// CellConfig references a Blueprint by name+scope, supplies the scalar
+	// values and the structural repo/secret slot fills, and owns the
+	// deterministic name of the at-most-one live cell it materializes.
+	// `kuke apply` writes it to a root-owned, world-readable file under the
+	// scope's metadata tree; the `kuke run -c` verb + identity state machine
+	// that runs it land in #625, and the get/delete verbs in #644.
+	KindCellConfig Kind = "CellConfig"
 	// KindServerConfiguration identifies the kukeond daemon's configuration
 	// document loaded via `kukeond --configuration` (and consumed by
 	// `kuke init --server-configuration`). Not a server-side resource —

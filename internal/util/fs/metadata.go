@@ -311,6 +311,42 @@ func BlueprintPath(baseRunPath, realmName, spaceName, stackName, blueprintName s
 	)
 }
 
+// ConfigScopeDir returns the metadata directory of the scope a
+// `kind: CellConfig` is bound to (issue #624). Like a CellBlueprint a Config is
+// scopable at realm/space/stack only — never cell — so the deepest coordinate
+// this resolves is the stack dir. The caller is responsible for having
+// validated coordinate completeness.
+func ConfigScopeDir(baseRunPath, realmName, spaceName, stackName string) string {
+	switch {
+	case stackName != "":
+		return StackMetadataDir(baseRunPath, realmName, spaceName, stackName)
+	case spaceName != "":
+		return SpaceMetadataDir(baseRunPath, realmName, spaceName)
+	default:
+		return RealmMetadataDir(baseRunPath, realmName)
+	}
+}
+
+// ConfigsDir returns the per-scope configs directory — the root-owned,
+// world-readable (0o755) directory under the scope's metadata tree that owns
+// daemon-managed config documents (issue #624). Nested inside the scope dir so
+// scope teardown reclaims it.
+func ConfigsDir(baseRunPath, realmName, spaceName, stackName string) string {
+	return filepath.Join(
+		ConfigScopeDir(baseRunPath, realmName, spaceName, stackName),
+		consts.KukeonConfigsSubdir,
+	)
+}
+
+// ConfigPath returns the host-side path of a single daemon-managed config
+// document: <scope>/configs/<name>, root-owned and 0o644.
+func ConfigPath(baseRunPath, realmName, spaceName, stackName, configName string) string {
+	return filepath.Join(
+		ConfigsDir(baseRunPath, realmName, spaceName, stackName),
+		configName,
+	)
+}
+
 type metadataHeader struct {
 	APIVersion string `json:"apiVersion"`
 	Kind       string `json:"kind"`

@@ -71,6 +71,9 @@ type fakeRunner struct {
 	ListBlueprintsFn  func(realmName, spaceName, stackName string) ([]intmodel.CellBlueprint, error)
 	DeleteBlueprintFn func(bp intmodel.CellBlueprint) error
 
+	// Config methods
+	WriteConfigFn func(config intmodel.CellConfig) (bool, error)
+
 	// Cell methods
 	GetCellFn                 func(cell intmodel.Cell) (intmodel.Cell, error)
 	ListCellsFn               func(realmName, spaceName, stackName string) ([]intmodel.Cell, error)
@@ -324,6 +327,15 @@ func (f *fakeRunner) DeleteBlueprint(bp intmodel.CellBlueprint) error {
 		return f.DeleteBlueprintFn(bp)
 	}
 	return errors.New("unexpected call to DeleteBlueprint")
+}
+
+// Config methods
+
+func (f *fakeRunner) WriteConfig(config intmodel.CellConfig) (bool, error) {
+	if f.WriteConfigFn != nil {
+		return f.WriteConfigFn(config)
+	}
+	return false, errors.New("unexpected call to WriteConfig")
 }
 
 // Cell methods
