@@ -35,6 +35,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/apply/parser"
+	"github.com/eminwux/kukeon/internal/cellblueprint"
 	"github.com/eminwux/kukeon/internal/cellprofile"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
@@ -53,10 +54,14 @@ type MockControllerKey struct{}
 // `-d/--detach` opts out of the post-start attach.
 func NewRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "run (-f <file> | -p <profile>)",
-		Short: "Create and start a single cell from a YAML file or a profile",
+		Use:   "run (-f <file> | -p <profile> | -b <blueprint>)",
+		Short: "Create and start a single cell from a YAML file, a profile, or a daemon-stored blueprint",
 		Long: "Create and start a single cell from a YAML file or stdin (-f), " +
-			"or from a per-user profile under $HOME/.kuke/profiles.d/<name>.yaml (-p). " +
+			"from a per-user profile under $HOME/.kuke/profiles.d/<name>.yaml (-p), " +
+			"or from a daemon-stored CellBlueprint (-b), resolved from the scope named by " +
+			"--realm/--space/--stack. -b substitutes scalar --param values and materializes " +
+			"a fresh <prefix>-<6hex> cell every invocation; structural slot fill (repo URLs, " +
+			"secret sources) requires a CellConfig and `kuke run -c` (#625). " +
 			"-f is create-or-attach by metadata.name: a missing cell is created and " +
 			"attached; a Ready cell is attached as a no-op; a Stopped cell is started " +
 			"then attached; a divergent on-disk spec is refused (use `kuke apply -f` to " +
@@ -73,27 +78,34 @@ func NewRunCmd() *cobra.Command {
 	_ = viper.BindPFlag(config.KUKE_RUN_FILE.ViperKey, cmd.Flags().Lookup("file"))
 
 	cmd.Flags().StringP("profile", "p", "",
-		"Cell profile name to load from $HOME/.kuke/profiles.d (or $KUKE_PROFILES_DIR); mutually exclusive with -f")
+		"Cell profile name to load from $HOME/.kuke/profiles.d (or $KUKE_PROFILES_DIR); mutually exclusive with -f/-b. "+
+			"Deprecated: apply a kind: CellBlueprint and use -b/-c instead.")
 	_ = viper.BindPFlag(config.KUKE_RUN_PROFILE.ViperKey, cmd.Flags().Lookup("profile"))
+
+	cmd.Flags().StringP("blueprint", "b", "",
+		"Daemon-stored CellBlueprint name to run, resolved from the scope named by "+
+			"--realm/--space/--stack; mutually exclusive with -f/-p. Substitutes scalar --param "+
+			"values and materializes a fresh <prefix>-<6hex> cell.")
+	_ = viper.BindPFlag(config.KUKE_RUN_BLUEPRINT.ViperKey, cmd.Flags().Lookup("blueprint"))
 
 	cmd.Flags().String("name", "",
 		"Override the materialized cell name (default: <metadata.name>-<6hex>). "+
-			"Only valid with -p; rejected with -f, where metadata.name is the cell name verbatim.")
+			"Valid with -p/-b; rejected with -f, where metadata.name is the cell name verbatim.")
 	_ = viper.BindPFlag(config.KUKE_RUN_NAME.ViperKey, cmd.Flags().Lookup("name"))
 
 	cmd.Flags().StringArray("param", nil,
-		"Profile parameter override as KEY=VALUE; repeatable. Only valid with -p. "+
+		"Scalar parameter override as KEY=VALUE; repeatable. Valid with -p/-b. "+
 			"Each KEY must be declared in spec.parameters[]. Wins over the parameter's "+
 			"default and over --param-file when both set the same key.")
 
 	cmd.Flags().String("param-file", "",
-		"File of KEY=VALUE lines whose values seed profile parameters; one per line, "+
+		"File of KEY=VALUE lines whose values seed scalar parameters; one per line, "+
 			"`#` starts a comment. Same declaration rules as --param. CLI --param wins on "+
 			"duplicate keys.")
 	_ = viper.BindPFlag(config.KUKE_RUN_PARAM_FILE.ViperKey, cmd.Flags().Lookup("param-file"))
 
-	cmd.MarkFlagsMutuallyExclusive("file", "profile")
-	cmd.MarkFlagsOneRequired("file", "profile")
+	cmd.MarkFlagsMutuallyExclusive("file", "profile", "blueprint")
+	cmd.MarkFlagsOneRequired("file", "profile", "blueprint")
 
 	cmd.Flags().StringP("output", "o", "", "Output format: json, yaml (default: human-readable)")
 	_ = viper.BindPFlag(config.KUKE_RUN_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
@@ -141,6 +153,7 @@ func NewRunCmd() *cobra.Command {
 type runFlags struct {
 	file          string
 	profileName   string
+	blueprintName string
 	output        string
 	detach        bool
 	containerFlag string
@@ -154,6 +167,7 @@ func parseRunFlags(cmd *cobra.Command, _ []string) (runFlags, error) {
 	flags := runFlags{
 		file:          strings.TrimSpace(viper.GetString(config.KUKE_RUN_FILE.ViperKey)),
 		profileName:   strings.TrimSpace(viper.GetString(config.KUKE_RUN_PROFILE.ViperKey)),
+		blueprintName: strings.TrimSpace(viper.GetString(config.KUKE_RUN_BLUEPRINT.ViperKey)),
 		detach:        viper.GetBool(config.KUKE_RUN_DETACH.ViperKey),
 		containerFlag: strings.TrimSpace(viper.GetString(config.KUKE_RUN_CONTAINER.ViperKey)),
 		autoDelete:    viper.GetBool(config.KUKE_RUN_RM.ViperKey),
@@ -187,18 +201,18 @@ func parseRunFlags(cmd *cobra.Command, _ []string) (runFlags, error) {
 		return runFlags{}, errors.New("--output is incompatible with attach mode (pass -d/--detach)")
 	}
 	if flags.file != "" {
-		// --name, --param, --param-file are profile-only knobs (per issue
-		// #355). With -f the file's metadata.name is authoritative and the
-		// substitution surface doesn't apply, so reject the combination
-		// rather than silently dropping the flag.
+		// --name, --param, --param-file are template knobs (per issue #355)
+		// shared by the -p and -b paths. With -f the file's metadata.name is
+		// authoritative and the substitution surface doesn't apply, so reject
+		// the combination rather than silently dropping the flag.
 		if flags.nameOverride != "" {
-			return runFlags{}, errors.New("--name is only valid with -p/--profile")
+			return runFlags{}, errors.New("--name is only valid with -p/--profile or -b/--blueprint")
 		}
 		if len(flags.paramArgs) > 0 {
-			return runFlags{}, errors.New("--param is only valid with -p/--profile")
+			return runFlags{}, errors.New("--param is only valid with -p/--profile or -b/--blueprint")
 		}
 		if flags.paramFile != "" {
-			return runFlags{}, errors.New("--param-file is only valid with -p/--profile")
+			return runFlags{}, errors.New("--param-file is only valid with -p/--profile or -b/--blueprint")
 		}
 	}
 	return flags, nil
@@ -210,7 +224,16 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	cellDoc, err := loadCellDoc(flags)
+	// Resolve the client first: the -b path resolves its blueprint from daemon
+	// storage over this client, so it must be live before loadCellDoc runs. The
+	// -f/-p paths ignore it during load.
+	client, err := resolveClient(cmd)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = client.Close() }()
+
+	cellDoc, err := loadCellDoc(cmd, client, flags)
 	if err != nil {
 		return err
 	}
@@ -228,12 +251,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if validateErr := validateResolvedCell(cellDoc); validateErr != nil {
 		return validateErr
 	}
-
-	client, err := resolveClient(cmd)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = client.Close() }()
 
 	pre, getErr := client.GetCell(cmd.Context(), cellDoc)
 	switch {
@@ -424,15 +441,73 @@ func attachAfterRun(
 	return runAttachLoop(cmd, client, doc, target)
 }
 
-// loadCellDoc dispatches to the file or profile loader. Exactly one of
-// flags.file or flags.profileName is non-empty (the cobra mutex enforces
-// this before the handler runs); --name and --param* are profile-only and
-// already rejected against -f in parseRunFlags.
-func loadCellDoc(flags runFlags) (v1beta1.CellDoc, error) {
-	if flags.profileName != "" {
+// loadCellDoc dispatches to the file, profile, or blueprint loader. Exactly
+// one of flags.file / flags.profileName / flags.blueprintName is non-empty (the
+// cobra mutex enforces this before the handler runs); --name and --param* are
+// template knobs already rejected against -f in parseRunFlags. The blueprint
+// path resolves over client; the file/profile paths ignore it.
+func loadCellDoc(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (v1beta1.CellDoc, error) {
+	switch {
+	case flags.blueprintName != "":
+		return loadFromBlueprint(cmd, client, flags)
+	case flags.profileName != "":
+		fmt.Fprintln(cmd.ErrOrStderr(),
+			"kuke run: -p/--profile is deprecated and will be removed (#626); "+
+				"apply a kind: CellBlueprint and use `kuke run -b` (or `kuke run -c` for a CellConfig, #625).")
 		return loadFromProfile(flags)
+	default:
+		return loadFromFile(flags.file)
 	}
-	return loadFromFile(flags.file)
+}
+
+// loadFromBlueprint resolves the named CellBlueprint from daemon storage at the
+// scope named by --realm/--space/--stack, substitutes scalar --param values,
+// and materializes a fresh `<prefix>-<6hex>` CellDoc (--name overrides the name
+// verbatim). The blueprint's metadata scope drives the materialized cell's
+// realm/space/stack; resolveCellLocation later fills any coordinate the
+// blueprint left empty from the run flags / session defaults.
+//
+// The lookup scope takes realm from --realm (defaulted to "default") and
+// space/stack only when the operator set them *explicitly* — via the flag or
+// the KUKE_RUN_SPACE/STACK env var. The session default for those keys is
+// "default" (DefineKV calls viper.SetDefault), so reading them through viper
+// would wrongly narrow every lookup to default/default and hide realm-scoped
+// blueprints; explicitScope reads the raw flag/env instead. A blueprint that
+// declares structural slots the inline path cannot fill (secret slots, required
+// repo slots with no url) is refused by Materialize with a pointer to
+// `kuke run -c`.
+func loadFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (v1beta1.CellDoc, error) {
+	cliParams, err := buildParamMap(flags)
+	if err != nil {
+		return v1beta1.CellDoc{}, err
+	}
+
+	lookup := v1beta1.CellBlueprintDoc{
+		Metadata: v1beta1.CellBlueprintMetadata{
+			Name:  flags.blueprintName,
+			Realm: pickLocation("", &config.KUKE_RUN_REALM),
+			Space: explicitScope(cmd, "space", &config.KUKE_RUN_SPACE),
+			Stack: explicitScope(cmd, "stack", &config.KUKE_RUN_STACK),
+		},
+	}
+
+	res, err := client.GetBlueprint(cmd.Context(), lookup)
+	if err != nil {
+		return v1beta1.CellDoc{}, err
+	}
+	if !res.MetadataExists {
+		return v1beta1.CellDoc{}, fmt.Errorf(
+			"%w (blueprint %q in scope realm=%q space=%q stack=%q)",
+			errdefs.ErrBlueprintNotFound, lookup.Metadata.Name,
+			lookup.Metadata.Realm, lookup.Metadata.Space, lookup.Metadata.Stack,
+		)
+	}
+
+	resolved, err := cellblueprint.Resolve(res.Blueprint, cliParams, os.LookupEnv)
+	if err != nil {
+		return v1beta1.CellDoc{}, err
+	}
+	return cellblueprint.MaterializeWithName(resolved, flags.nameOverride)
 }
 
 // loadFromFile preserves the phase-1c -f path: read the file (or stdin),
@@ -564,6 +639,24 @@ func resolveCellLocation(doc *v1beta1.CellDoc) {
 	doc.Spec.RealmID = pickLocation(doc.Spec.RealmID, &config.KUKE_RUN_REALM)
 	doc.Spec.SpaceID = pickLocation(doc.Spec.SpaceID, &config.KUKE_RUN_SPACE)
 	doc.Spec.StackID = pickLocation(doc.Spec.StackID, &config.KUKE_RUN_STACK)
+}
+
+// explicitScope returns a blueprint-lookup scope coordinate only when the
+// operator set it explicitly — the cobra flag was changed on this invocation,
+// or the backing env var (kv.Key) is present in the environment. It deliberately
+// bypasses viper.GetString: DefineKV registers a viper default of "default" for
+// the run space/stack keys, so viper would report "default" for an unset
+// coordinate and narrow every lookup to default/default, hiding realm-scoped
+// blueprints. An empty return means "don't constrain this coordinate".
+func explicitScope(cmd *cobra.Command, flagName string, kv *config.Var) string {
+	if cmd.Flags().Changed(flagName) {
+		v, _ := cmd.Flags().GetString(flagName)
+		return strings.TrimSpace(v)
+	}
+	if v, ok := os.LookupEnv(kv.Key); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
 }
 
 func pickLocation(fromDoc string, kv *config.Var) string {

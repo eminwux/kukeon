@@ -42,6 +42,14 @@ const (
 	// `kuke run -p`. Profiles are not server-side resources — `kuke apply`
 	// rejects them.
 	KindCellProfile Kind = "CellProfile"
+	// KindCellBlueprint identifies daemon-stored, scopable parametrized cell
+	// templates (issue #620, phase 4a-i of #423). A *new* kind introduced
+	// alongside CellProfile — not a rename. `kuke apply` writes the blueprint
+	// to a root-owned, world-readable file under the scope's metadata tree;
+	// `kuke run -b` resolves it from daemon storage and materializes a fresh
+	// `<prefix>-<6hex>` cell. The get/delete verbs (#643), CellConfig (#624),
+	// and `kuke run -c` (#625) build on this foundation.
+	KindCellBlueprint Kind = "CellBlueprint"
 	// KindServerConfiguration identifies the kukeond daemon's configuration
 	// document loaded via `kukeond --configuration` (and consumed by
 	// `kuke init --server-configuration`). Not a server-side resource —

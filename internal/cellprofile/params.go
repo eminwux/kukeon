@@ -321,6 +321,30 @@ func cloneNode(n *yaml.Node) *yaml.Node {
 	return &out
 }
 
+// SubstituteScalars rewrites every `${KEY}` occurrence inside the scalar
+// values of node with values[KEY], in place. It is the exported entry point
+// the CellBlueprint materialize path (issue #620) shares with the CellProfile
+// loader: both substitute the same `${KEY}` shape against a declared parameter
+// map. Keys absent from values are left as literal `${KEY}` (callers validate
+// references first). Mapping keys are never rewritten.
+func SubstituteScalars(node *yaml.Node, values map[string]string) {
+	substituteScalars(node, values)
+}
+
+// CloneNode returns a deep copy of n so substitutions don't mutate the input.
+// Exported for the CellBlueprint materialize path (issue #620).
+func CloneNode(n *yaml.Node) *yaml.Node {
+	return cloneNode(n)
+}
+
+// ParamRefRE returns the compiled `${KEY}` reference matcher shared by the
+// profile and blueprint substitution paths. Exposed so the blueprint resolver
+// can scan a template body for the parameter shape without re-deriving the
+// regex. Issue #620.
+func ParamRefRE() *regexp.Regexp {
+	return paramRefRE
+}
+
 // ParseParamArgs validates a slice of `KEY=VALUE` strings (from --param) and
 // returns the equivalent map. Empty values are allowed (`KEY=` → "");
 // missing `=` errors. Duplicate keys: last occurrence wins, matching `docker

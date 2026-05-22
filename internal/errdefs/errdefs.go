@@ -336,6 +336,43 @@ var (
 	ErrRepoTargetNotAbsolute = errors.New("repo target must be an absolute container path")
 	ErrRepoURLRequired       = errors.New("repo url is required")
 
+	// CellBlueprint kind (kind: CellBlueprint) storage-primitive errors
+	// (issue #620, phase 4a-i of #423).
+
+	ErrBlueprintNameRequired  = errors.New("blueprint metadata.name is required")
+	ErrBlueprintRealmRequired = errors.New("blueprint metadata.realm is required")
+	// ErrBlueprintScopeIncomplete fires when a deeper scope coordinate is set
+	// without every shallower one. A Blueprint is scopable at realm/space/stack
+	// only, so a set cell coordinate is itself a violation.
+	ErrBlueprintScopeIncomplete = errors.New(
+		"blueprint scope is incomplete: a deeper scope coordinate requires all shallower ones (and a Blueprint may not be cell-scoped)",
+	)
+	ErrBlueprintScopeNotFound = errors.New("blueprint scope does not exist")
+	ErrBlueprintCellRequired  = errors.New("blueprint spec.cell.containers is required and cannot be empty")
+	ErrWriteBlueprint         = errors.New("failed to write blueprint document")
+	ErrBlueprintNotFound      = errors.New("blueprint not found")
+	ErrGetBlueprint           = errors.New("failed to get blueprint")
+	// ErrBlueprintStructuralSlots fires when `kuke run -b` is asked to run a
+	// blueprint that declares structural slots (secret slots, or repo slots
+	// with no url) the inline scalar-param path cannot fill. Such blueprints
+	// require a CellConfig and `kuke run -c` (#625).
+	ErrBlueprintStructuralSlots = errors.New(
+		"blueprint declares structural slots that require a CellConfig: inline `kuke run -b` fills scalar parameters only",
+	)
+	// ErrBlueprintInvalid is returned when `kuke run -b` cannot resolve a
+	// blueprint's scalar parameters (an undeclared --param key, or a required
+	// parameter left unset). The analog of ErrProfileInvalid for the -b path.
+	ErrBlueprintInvalid = errors.New("blueprint is invalid")
+
+	// CellBlueprint slot-declaration shape errors (issue #620).
+
+	ErrBlueprintSecretSlotNameRequired = errors.New("blueprint secret slot name is required")
+	ErrBlueprintSecretSlotMode         = errors.New("blueprint secret slot mode must be \"env\" or \"file\"")
+	ErrBlueprintSecretSlotEnvName      = errors.New("blueprint secret slot with mode \"env\" requires envName")
+	ErrBlueprintSecretSlotMountPath    = errors.New(
+		"blueprint secret slot with mode \"file\" requires an absolute mountPath",
+	)
+
 	// ErrMustRunAsRoot is returned by direct-write subcommands (kuke init,
 	// kuke daemon reset, kuke image load, kuke doctor cgroups --probe)
 	// when invoked with a non-zero effective UID. Wrapped errors must

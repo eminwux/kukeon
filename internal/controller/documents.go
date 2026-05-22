@@ -46,6 +46,12 @@ func SortDocumentsByKind(docs []parser.Document, reverse bool) []parser.Document
 	// does not yet exist. Derived from the map length rather than a literal so
 	// it stays correct if a kind is inserted above.
 	kindOrder[v1beta1.KindSecret] = len(kindOrder) + 1
+	// CellBlueprints, like Secrets, target an existing scope (realm/space/stack)
+	// rather than creating one, so they sort after the hierarchy kinds: any
+	// scope bundled in the same apply file is materialized before a blueprint
+	// that targets it (reconcile rejects a blueprint whose scope does not yet
+	// exist). Evaluated after the Secret line so it lands one slot further out.
+	kindOrder[v1beta1.KindCellBlueprint] = len(kindOrder) + 1
 
 	// Sort by kind order, then by original index
 	sort.Slice(sorted, func(i, j int) bool {

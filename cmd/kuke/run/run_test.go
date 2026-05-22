@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -133,6 +134,7 @@ type fakeClient struct {
 	startCellFn       func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error)
 	attachContainerFn func(doc v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error)
 	killCellFn        func(doc v1beta1.CellDoc) (kukeonv1.KillCellResult, error)
+	getBlueprintFn    func(doc v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error)
 
 	getCalls    int
 	createCalls int
@@ -190,6 +192,16 @@ func (f *fakeClient) KillCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.
 		return kukeonv1.KillCellResult{}, errors.New("unexpected KillCell call")
 	}
 	return f.killCellFn(doc)
+}
+
+func (f *fakeClient) GetBlueprint(
+	_ context.Context,
+	doc v1beta1.CellBlueprintDoc,
+) (kukeonv1.GetBlueprintResult, error) {
+	if f.getBlueprintFn == nil {
+		return kukeonv1.GetBlueprintResult{}, errors.New("unexpected GetBlueprint call")
+	}
+	return f.getBlueprintFn(doc)
 }
 
 // runCapture records the Options passed to the in-process attach loop. By
@@ -1203,10 +1215,11 @@ func TestRun_MissingFileAndProfile_Errors(t *testing.T) {
 
 	err := cmd.Execute()
 	// MarkFlagsOneRequired produces "at least one of the flags in the group
-	// [file profile] is required" — match on the stable phrase rather than
-	// the exact wording so a cobra phrasing change doesn't break the test.
-	if err == nil || !strings.Contains(err.Error(), "[file profile]") {
-		t.Fatalf("err=%v want one-of error naming both flags", err)
+	// [file profile blueprint] is required" — match on the stable group
+	// listing rather than the exact wording so a cobra phrasing change doesn't
+	// break the test.
+	if err == nil || !strings.Contains(err.Error(), "[file profile blueprint]") {
+		t.Fatalf("err=%v want one-of error naming the file/profile/blueprint group", err)
 	}
 }
 
@@ -2583,5 +2596,134 @@ func TestPickLocation_DefaultsViaConfigKV(t *testing.T) {
 	}
 	if got := strings.TrimSpace(config.KUKE_RUN_STACK.ValueOrDefault()); got != "default" {
 		t.Errorf("KUKE_RUN_STACK default=%q want default", got)
+	}
+}
+
+// blueprintDoc returns a minimal runnable CellBlueprintDoc the fake daemon can
+// hand back over GetBlueprint, with one ${TAG} parameter substituted into the
+// image.
+func blueprintDoc() v1beta1.CellBlueprintDoc {
+	def := "latest"
+	return v1beta1.CellBlueprintDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindCellBlueprint,
+		Metadata: v1beta1.CellBlueprintMetadata{
+			Name:  "web",
+			Realm: "my-realm",
+			Space: "my-space",
+			Stack: "my-stack",
+		},
+		Spec: v1beta1.CellBlueprintSpec{
+			Prefix:     "web",
+			Parameters: []v1beta1.CellProfileParameter{{Name: "TAG", Default: &def}},
+			Cell: v1beta1.BlueprintCellSpec{
+				Containers: []v1beta1.BlueprintContainer{
+					{ID: "main", Image: "registry.example.com/web:${TAG}", Attachable: true},
+				},
+			},
+		},
+	}
+}
+
+func TestRun_FromBlueprint_ResolvesAndCreates(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getBlueprintFn: func(doc v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			// The lookup carries the requested name + scope; echo back the body.
+			if doc.Metadata.Name != "web" {
+				t.Errorf("lookup name=%q want web", doc.Metadata.Name)
+			}
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return kukeonv1.CreateCellResult{
+				Cell: doc, Created: true, MetadataExistsPost: true,
+				CgroupCreated: true, CgroupExistsPost: true,
+				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
+				Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
+			}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-b", "web", "--param", "TAG=v2", "--realm", "my-realm", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.createCalls != 1 {
+		t.Fatalf("CreateCell calls=%d want 1", fc.createCalls)
+	}
+	// Fresh <prefix>-<6hex> name, scope from blueprint metadata, ${TAG} filled.
+	if got := fc.createDoc.Metadata.Name; !regexp.MustCompile(`^web-[0-9a-f]{6}$`).MatchString(got) {
+		t.Errorf("cell name=%q want web-<6hex>", got)
+	}
+	if got := fc.createDoc.Spec.RealmID; got != "my-realm" {
+		t.Errorf("RealmID=%q want my-realm", got)
+	}
+	if got := fc.createDoc.Spec.Containers[0].Image; got != "registry.example.com/web:v2" {
+		t.Errorf("image=%q want ${TAG} substituted to v2", got)
+	}
+}
+
+func TestRun_FromBlueprint_NotFound_Errors(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{MetadataExists: false}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-b", "ghost", "--realm", "my-realm", "-d"})
+
+	err := cmd.Execute()
+	if err == nil || !errors.Is(err, errdefs.ErrBlueprintNotFound) {
+		t.Fatalf("err=%v want ErrBlueprintNotFound", err)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell called %d times, want 0 on not-found", fc.createCalls)
+	}
+}
+
+func TestRun_FromBlueprint_NameOverride(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return kukeonv1.CreateCellResult{
+				Cell: doc, Created: true, MetadataExistsPost: true,
+				CgroupCreated: true, CgroupExistsPost: true,
+				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
+				Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
+			}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-b", "web", "--name", "pinned", "--realm", "my-realm", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := fc.createDoc.Metadata.Name; got != "pinned" {
+		t.Errorf("cell name=%q want pinned (--name override)", got)
+	}
+}
+
+func TestRun_Profile_EmitsDeprecationNotice(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{}
+	cmd, out := newCmd(t, fc)
+	// A bogus profile dir so the load fails fast after the notice prints; we
+	// assert only that the deprecation notice reached stderr (shared buffer).
+	cmd.SetArgs([]string{"-p", "nonexistent-profile", "-d"})
+	_ = cmd.Execute()
+
+	if !strings.Contains(out.String(), "-p/--profile is deprecated") {
+		t.Errorf("expected -p deprecation notice, got:\n%s", out.String())
 	}
 }

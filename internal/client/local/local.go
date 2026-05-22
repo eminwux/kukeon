@@ -343,6 +343,30 @@ func (c *Client) GetSecret(_ context.Context, doc v1beta1.SecretDoc) (kukeonv1.G
 	}, nil
 }
 
+func (c *Client) GetBlueprint(
+	_ context.Context, doc v1beta1.CellBlueprintDoc,
+) (kukeonv1.GetBlueprintResult, error) {
+	internal, _, err := apischeme.NormalizeCellBlueprint(doc)
+	if err != nil {
+		return kukeonv1.GetBlueprintResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	res, err := c.ctrl.GetBlueprint(internal)
+	if err != nil {
+		return kukeonv1.GetBlueprintResult{}, err
+	}
+	if !res.MetadataExists {
+		return kukeonv1.GetBlueprintResult{MetadataExists: false}, nil
+	}
+	ext, err := apischeme.ConvertCellBlueprintToExternal(res.Blueprint)
+	if err != nil {
+		return kukeonv1.GetBlueprintResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	return kukeonv1.GetBlueprintResult{
+		Blueprint:      ext,
+		MetadataExists: true,
+	}, nil
+}
+
 // ---- List ----
 
 func (c *Client) ListRealms(_ context.Context) ([]v1beta1.RealmDoc, error) {

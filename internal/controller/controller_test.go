@@ -65,6 +65,10 @@ type fakeRunner struct {
 	ListSecretsFn  func(realmName, spaceName, stackName, cellName string) ([]intmodel.Secret, error)
 	DeleteSecretFn func(secret intmodel.Secret) error
 
+	// Blueprint methods
+	WriteBlueprintFn func(bp intmodel.CellBlueprint) (bool, error)
+	GetBlueprintFn   func(bp intmodel.CellBlueprint) (intmodel.CellBlueprint, error)
+
 	// Cell methods
 	GetCellFn                 func(cell intmodel.Cell) (intmodel.Cell, error)
 	ListCellsFn               func(realmName, spaceName, stackName string) ([]intmodel.Cell, error)
@@ -288,6 +292,22 @@ func (f *fakeRunner) DeleteSecret(secret intmodel.Secret) error {
 		return f.DeleteSecretFn(secret)
 	}
 	return errors.New("unexpected call to DeleteSecret")
+}
+
+// Blueprint methods
+
+func (f *fakeRunner) WriteBlueprint(bp intmodel.CellBlueprint) (bool, error) {
+	if f.WriteBlueprintFn != nil {
+		return f.WriteBlueprintFn(bp)
+	}
+	return false, errors.New("unexpected call to WriteBlueprint")
+}
+
+func (f *fakeRunner) GetBlueprint(bp intmodel.CellBlueprint) (intmodel.CellBlueprint, error) {
+	if f.GetBlueprintFn != nil {
+		return f.GetBlueprintFn(bp)
+	}
+	return intmodel.CellBlueprint{}, errors.New("unexpected call to GetBlueprint")
 }
 
 // Cell methods

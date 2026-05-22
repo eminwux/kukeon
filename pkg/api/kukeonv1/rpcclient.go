@@ -276,6 +276,21 @@ func (c *UnixClient) GetSecret(ctx context.Context, doc v1beta1.SecretDoc) (GetS
 	return reply.Result, nil
 }
 
+// GetBlueprint implements Client.
+func (c *UnixClient) GetBlueprint(
+	ctx context.Context, doc v1beta1.CellBlueprintDoc,
+) (GetBlueprintResult, error) {
+	args := &GetBlueprintArgs{Doc: doc}
+	reply := &GetBlueprintReply{}
+	if err := c.call(ctx, MethodGetBlueprint, args, reply); err != nil {
+		return GetBlueprintResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // ListRealms implements Client.
 func (c *UnixClient) ListRealms(ctx context.Context) ([]v1beta1.RealmDoc, error) {
 	args := &ListRealmsArgs{}
