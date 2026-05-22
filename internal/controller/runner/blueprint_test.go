@@ -22,6 +22,7 @@ package runner
 import (
 	"errors"
 	"os"
+	"sort"
 	"testing"
 	"time"
 
@@ -170,4 +171,163 @@ func TestWriteBlueprint_DeeperScopeNestsUnderScopeDir(t *testing.T) {
 	if _, err := os.Stat(realmScoped); !os.IsNotExist(err) {
 		t.Errorf("blueprint leaked into realm scope at %s (err=%v)", realmScoped, err)
 	}
+}
+
+// blueprintScopeKey is a stable identity for a listed blueprint, used to
+// compare ListBlueprints output independent of walk order.
+func blueprintScopeKey(bp intmodel.CellBlueprint) string {
+	return bp.Metadata.Realm + "/" + bp.Metadata.Space + "/" + bp.Metadata.Stack + "/" + bp.Metadata.Name
+}
+
+func listedKeys(t *testing.T, r *Exec, realm, space, stack string) []string {
+	t.Helper()
+	got, err := r.ListBlueprints(realm, space, stack)
+	if err != nil {
+		t.Fatalf("ListBlueprints(%q,%q,%q) error = %v", realm, space, stack, err)
+	}
+	keys := make([]string, 0, len(got))
+	for _, bp := range got {
+		keys = append(keys, blueprintScopeKey(bp))
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// seedBlueprint writes a metadata-only blueprint at the given scope for list/
+// delete walk tests; the document body is irrelevant to those paths.
+func seedBlueprint(t *testing.T, r *Exec, name, realm, space, stack string) {
+	t.Helper()
+	bp := intmodel.CellBlueprint{
+		Metadata: intmodel.CellBlueprintMetadata{Name: name, Realm: realm, Space: space, Stack: stack},
+		Document: []byte("x"),
+	}
+	if _, err := r.WriteBlueprint(bp); err != nil {
+		t.Fatalf("seed WriteBlueprint(%q @ %s/%s/%s) error = %v", name, realm, space, stack, err)
+	}
+}
+
+// TestListBlueprints_SubtreeFilterSemantics pins the issue #643 list contract:
+// an empty filter lists the whole subtree, a realm filter scopes to that realm,
+// and a deeper coordinate excludes shallower scopes — mirroring ListSecrets but
+// bounded at stack (a Blueprint is never cell-scoped).
+func TestListBlueprints_SubtreeFilterSemantics(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	seedBlueprint(t, r, "realm-bp", "default", "", "")
+	seedBlueprint(t, r, "space-bp", "default", "team-a", "")
+	seedBlueprint(t, r, "stack-bp", "default", "team-a", "web")
+	seedBlueprint(t, r, "other-realm-bp", "prod", "", "")
+
+	all := listedKeys(t, r, "", "", "")
+	wantAll := []string{
+		"default///realm-bp",
+		"default/team-a//space-bp",
+		"default/team-a/web/stack-bp",
+		"prod///other-realm-bp",
+	}
+	if !equalStrings(all, wantAll) {
+		t.Errorf("ListBlueprints(all) = %v, want %v", all, wantAll)
+	}
+
+	realmFiltered := listedKeys(t, r, "default", "", "")
+	wantRealm := []string{
+		"default///realm-bp",
+		"default/team-a//space-bp",
+		"default/team-a/web/stack-bp",
+	}
+	if !equalStrings(realmFiltered, wantRealm) {
+		t.Errorf("ListBlueprints(default) = %v, want %v", realmFiltered, wantRealm)
+	}
+
+	// A set space coordinate excludes the realm-scoped blueprint.
+	spaceFiltered := listedKeys(t, r, "default", "team-a", "")
+	wantSpace := []string{
+		"default/team-a//space-bp",
+		"default/team-a/web/stack-bp",
+	}
+	if !equalStrings(spaceFiltered, wantSpace) {
+		t.Errorf("ListBlueprints(default,team-a) = %v, want %v", spaceFiltered, wantSpace)
+	}
+
+	// A set stack coordinate excludes the realm- and space-scoped blueprints.
+	stackFiltered := listedKeys(t, r, "default", "team-a", "web")
+	wantStack := []string{"default/team-a/web/stack-bp"}
+	if !equalStrings(stackFiltered, wantStack) {
+		t.Errorf("ListBlueprints(default,team-a,web) = %v, want %v", stackFiltered, wantStack)
+	}
+}
+
+// TestListBlueprints_IgnoresReservedSubdirs confirms the walk never mistakes a
+// sibling secrets/ or blueprints/ reserved subdirectory for a child space or
+// stack, and that an in-flight temp file is skipped.
+func TestListBlueprints_IgnoresReservedSubdirs(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	seedBlueprint(t, r, "realm-bp", "default", "", "")
+	// A realm-scoped secret creates default/secrets/; a realm-scoped blueprint
+	// already created default/blueprints/. Neither must surface as a space.
+	if _, err := r.WriteSecret(intmodel.Secret{
+		Metadata: intmodel.SecretMetadata{Name: "tok", Realm: "default"},
+		Spec:     intmodel.SecretSpec{Data: "v"},
+	}); err != nil {
+		t.Fatalf("seed WriteSecret error = %v", err)
+	}
+	// Drop an in-flight temp file alongside the realm blueprint; it must be
+	// skipped, not surfaced as a blueprint named ".blueprint-xyz.tmp".
+	tmpPath := fs.BlueprintPath(runPath, "default", "", "", ".blueprint-xyz.tmp")
+	if err := os.WriteFile(tmpPath, []byte("partial"), 0o644); err != nil {
+		t.Fatalf("seed temp file error = %v", err)
+	}
+
+	got := listedKeys(t, r, "", "", "")
+	want := []string{"default///realm-bp"}
+	if !equalStrings(got, want) {
+		t.Errorf("ListBlueprints(all) = %v, want %v (reserved subdirs + temp file must be ignored)", got, want)
+	}
+}
+
+func TestDeleteBlueprint_RemovesFile(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	seedBlueprint(t, r, "web", "default", "team-a", "")
+	path := fs.BlueprintPath(runPath, "default", "team-a", "", "web")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("precondition: blueprint not seeded: %v", err)
+	}
+
+	if err := r.DeleteBlueprint(intmodel.CellBlueprint{
+		Metadata: intmodel.CellBlueprintMetadata{Name: "web", Realm: "default", Space: "team-a"},
+	}); err != nil {
+		t.Fatalf("DeleteBlueprint() error = %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("blueprint file still present after delete (err=%v)", err)
+	}
+}
+
+func TestDeleteBlueprint_NotFound(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	err := r.DeleteBlueprint(intmodel.CellBlueprint{
+		Metadata: intmodel.CellBlueprintMetadata{Name: "ghost", Realm: "default"},
+	})
+	if !errors.Is(err, errdefs.ErrBlueprintNotFound) {
+		t.Errorf("DeleteBlueprint() error = %v, want ErrBlueprintNotFound", err)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

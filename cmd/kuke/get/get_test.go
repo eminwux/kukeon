@@ -41,7 +41,7 @@ func TestNewGetCmdMetadata(t *testing.T) {
 		{
 			name: "short description",
 			check: func(t *testing.T, cmd *cobra.Command) {
-				expected := "Get or list Kukeon resources (realm, space, stack, cell, container, secret)"
+				expected := "Get or list Kukeon resources (realm, space, stack, cell, container, secret, blueprint)"
 				if cmd.Short != expected {
 					t.Fatalf("expected Short to be %q, got %q", expected, cmd.Short)
 				}
@@ -103,7 +103,7 @@ func TestNewGetCmd_AutocompleteRegistration(t *testing.T) {
 
 	// Test the completion function directly
 	completions, _ := cmd.ValidArgsFunction(cmd, []string{}, "")
-	expected := []string{"realm", "space", "stack", "cell", "container", "secret"}
+	expected := []string{"realm", "space", "stack", "cell", "container", "secret", "blueprint"}
 	if len(completions) != len(expected) {
 		t.Fatalf("expected %d completions, got %d", len(expected), len(completions))
 	}

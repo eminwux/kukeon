@@ -443,6 +443,17 @@ func (c *Client) ListSecrets(
 	return apischeme.ConvertSecretListToExternal(secrets), nil
 }
 
+func (c *Client) ListBlueprints(
+	_ context.Context,
+	realmName, spaceName, stackName string,
+) ([]v1beta1.CellBlueprintDoc, error) {
+	blueprints, err := c.ctrl.ListBlueprints(realmName, spaceName, stackName)
+	if err != nil {
+		return nil, err
+	}
+	return apischeme.ConvertCellBlueprintListToExternal(blueprints), nil
+}
+
 // derefDocs converts a []*T returned by fs.Convert* helpers into the
 // wire-friendly []T form (pointer slices don't round-trip cleanly through
 // net/rpc+jsonrpc — jsonrpc would encode them correctly but gob couldn't,
@@ -693,6 +704,23 @@ func (c *Client) DeleteSecret(_ context.Context, doc v1beta1.SecretDoc) (kukeonv
 	return kukeonv1.DeleteSecretResult{
 		Secret:  apischeme.ConvertSecretToExternal(res.Secret),
 		Deleted: res.Deleted,
+	}, nil
+}
+
+func (c *Client) DeleteBlueprint(
+	_ context.Context, doc v1beta1.CellBlueprintDoc,
+) (kukeonv1.DeleteBlueprintResult, error) {
+	internal, _, err := apischeme.NormalizeCellBlueprint(doc)
+	if err != nil {
+		return kukeonv1.DeleteBlueprintResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	res, err := c.ctrl.DeleteBlueprint(internal)
+	if err != nil {
+		return kukeonv1.DeleteBlueprintResult{}, err
+	}
+	return kukeonv1.DeleteBlueprintResult{
+		Blueprint: apischeme.ConvertCellBlueprintMetadataToExternal(res.Blueprint),
+		Deleted:   res.Deleted,
 	}, nil
 }
 

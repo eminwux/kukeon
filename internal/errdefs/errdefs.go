@@ -352,6 +352,8 @@ var (
 	ErrWriteBlueprint         = errors.New("failed to write blueprint document")
 	ErrBlueprintNotFound      = errors.New("blueprint not found")
 	ErrGetBlueprint           = errors.New("failed to get blueprint")
+	ErrListBlueprints         = errors.New("failed to list blueprints")
+	ErrDeleteBlueprint        = errors.New("failed to delete blueprint document")
 	// ErrBlueprintStructuralSlots fires when `kuke run -b` is asked to run a
 	// blueprint that declares structural slots (secret slots, or repo slots
 	// with no url) the inline scalar-param path cannot fill. Such blueprints

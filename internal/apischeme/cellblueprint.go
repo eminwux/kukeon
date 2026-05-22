@@ -76,3 +76,34 @@ func ConvertCellBlueprintToExternal(in intmodel.CellBlueprint) (ext.CellBlueprin
 	}
 	return doc, nil
 }
+
+// ConvertCellBlueprintMetadataToExternal builds a metadata-only external
+// CellBlueprintDoc from the internal carrier's metadata (issue #643). Unlike
+// ConvertCellBlueprintToExternal it does not read the stored Document — the
+// list and delete verbs surface scope coordinates and name only, never the
+// template body.
+func ConvertCellBlueprintMetadataToExternal(in intmodel.CellBlueprint) ext.CellBlueprintDoc {
+	return ext.CellBlueprintDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCellBlueprint,
+		Metadata: ext.CellBlueprintMetadata{
+			Name:  in.Metadata.Name,
+			Realm: in.Metadata.Realm,
+			Space: in.Metadata.Space,
+			Stack: in.Metadata.Stack,
+		},
+	}
+}
+
+// ConvertCellBlueprintListToExternal maps a slice of internal CellBlueprints to
+// metadata-only external CellBlueprintDocs (issue #643).
+func ConvertCellBlueprintListToExternal(in []intmodel.CellBlueprint) []ext.CellBlueprintDoc {
+	if in == nil {
+		return nil
+	}
+	out := make([]ext.CellBlueprintDoc, len(in))
+	for i := range in {
+		out[i] = ConvertCellBlueprintMetadataToExternal(in[i])
+	}
+	return out
+}

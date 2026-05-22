@@ -109,6 +109,10 @@ func (FakeClient) ListSecrets(context.Context, string, string, string, string) (
 	return nil, ErrUnexpectedCall
 }
 
+func (FakeClient) ListBlueprints(context.Context, string, string, string) ([]v1beta1.CellBlueprintDoc, error) {
+	return nil, ErrUnexpectedCall
+}
+
 func (FakeClient) StartCell(context.Context, v1beta1.CellDoc) (StartCellResult, error) {
 	return StartCellResult{}, ErrUnexpectedCall
 }
@@ -163,6 +167,10 @@ func (FakeClient) DeleteContainer(context.Context, v1beta1.ContainerDoc) (Delete
 
 func (FakeClient) DeleteSecret(context.Context, v1beta1.SecretDoc) (DeleteSecretResult, error) {
 	return DeleteSecretResult{}, ErrUnexpectedCall
+}
+
+func (FakeClient) DeleteBlueprint(context.Context, v1beta1.CellBlueprintDoc) (DeleteBlueprintResult, error) {
+	return DeleteBlueprintResult{}, ErrUnexpectedCall
 }
 
 func (FakeClient) PurgeRealm(context.Context, v1beta1.RealmDoc, bool, bool) (PurgeRealmResult, error) {

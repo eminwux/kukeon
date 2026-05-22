@@ -208,6 +208,15 @@ func (s *KukeonV1Service) ListSecrets(args *kukeonv1.ListSecretsArgs, reply *kuk
 	return nil
 }
 
+func (s *KukeonV1Service) ListBlueprints(
+	args *kukeonv1.ListBlueprintsArgs, reply *kukeonv1.ListBlueprintsReply,
+) error {
+	blueprints, err := s.core.ListBlueprints(s.ctx, args.RealmName, args.SpaceName, args.StackName)
+	reply.Blueprints = blueprints
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
 // ---- Lifecycle ----
 
 func (s *KukeonV1Service) StartCell(args *kukeonv1.StartCellArgs, reply *kukeonv1.StartCellReply) error {
@@ -325,6 +334,15 @@ func (s *KukeonV1Service) DeleteContainer(
 
 func (s *KukeonV1Service) DeleteSecret(args *kukeonv1.DeleteSecretArgs, reply *kukeonv1.DeleteSecretReply) error {
 	result, err := s.core.DeleteSecret(s.ctx, args.Doc)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
+func (s *KukeonV1Service) DeleteBlueprint(
+	args *kukeonv1.DeleteBlueprintArgs, reply *kukeonv1.DeleteBlueprintReply,
+) error {
+	result, err := s.core.DeleteBlueprint(s.ctx, args.Doc)
 	reply.Result = result
 	reply.Err = kukeonv1.ToAPIError(err)
 	return nil
