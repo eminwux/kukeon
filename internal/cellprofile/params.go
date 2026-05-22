@@ -331,20 +331,6 @@ func SubstituteScalars(node *yaml.Node, values map[string]string) {
 	substituteScalars(node, values)
 }
 
-// CloneNode returns a deep copy of n so substitutions don't mutate the input.
-// Exported for the CellBlueprint materialize path (issue #620).
-func CloneNode(n *yaml.Node) *yaml.Node {
-	return cloneNode(n)
-}
-
-// ParamRefRE returns the compiled `${KEY}` reference matcher shared by the
-// profile and blueprint substitution paths. Exposed so the blueprint resolver
-// can scan a template body for the parameter shape without re-deriving the
-// regex. Issue #620.
-func ParamRefRE() *regexp.Regexp {
-	return paramRefRE
-}
-
 // ParseParamArgs validates a slice of `KEY=VALUE` strings (from --param) and
 // returns the equivalent map. Empty values are allowed (`KEY=` → "");
 // missing `=` errors. Duplicate keys: last occurrence wins, matching `docker
