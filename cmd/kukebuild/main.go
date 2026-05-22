@@ -60,6 +60,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/containerd/platforms"
 )
 
 // exitCodeUsage is returned when invocation is malformed (unknown flag,
@@ -168,6 +170,13 @@ type buildConfig struct {
 	// a fully qualified registry reference; credentials resolve per the --push
 	// precedence (see auth.go).
 	push bool
+	// platforms are the --platform os/arch[/variant] targets (phase 2c #646).
+	// When more than one is set, the build output is a single manifest list (one
+	// image reference covering every target arch), not per-arch tags. Empty
+	// means a single image for the build host's platform — the phase-1 default.
+	// Normalized to containerd's canonical form at parse time; forwarded to the
+	// Dockerfile frontend's `platform` attr (see newSolveOpt).
+	platforms []string
 }
 
 // secretSpec is a resolved --secret entry: a build secret named id, sourced
@@ -253,6 +262,13 @@ func parseArgs(args []string) (*buildConfig, error) {
 	var cacheFrom repeatableFlag
 	fs.Var(&cacheFrom, "cache-from", "import build cache: type=local,src=PATH (repeatable)")
 
+	platform := fs.String(
+		"platform",
+		"",
+		"comma-separated os/arch[/variant] targets (e.g. linux/amd64,linux/arm64); "+
+			"multiple targets produce a single manifest list, not per-arch tags",
+	)
+
 	push := fs.Bool(
 		"push",
 		false,
@@ -309,6 +325,10 @@ func parseArgs(args []string) (*buildConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	parsedPlatforms, err := parsePlatforms(*platform)
+	if err != nil {
+		return nil, err
+	}
 
 	dockerfile := *file
 	if strings.TrimSpace(dockerfile) == "" {
@@ -329,7 +349,44 @@ func parseArgs(args []string) (*buildConfig, error) {
 		cacheExports:     parsedCacheExports,
 		cacheImports:     parsedCacheImports,
 		push:             *push,
+		platforms:        parsedPlatforms,
 	}, nil
+}
+
+// parsePlatforms turns the raw --platform value into normalized os/arch[/variant]
+// targets. The value is comma-separated (e.g. "linux/amd64,linux/arm64"); each
+// entry is parsed and normalized to containerd's canonical form so a typo
+// (unknown os/arch, malformed triple) surfaces as a usage error at parse time
+// rather than mid-solve. An empty value yields nil — the phase-1 single-image,
+// build-host-platform default. Duplicate targets are a usage error so an
+// operator does not silently produce a manifest list with redundant entries.
+func parsePlatforms(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	out := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, seg := range strings.Split(raw, ",") {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			continue
+		}
+		p, err := platforms.Parse(seg)
+		if err != nil {
+			return nil, &usageError{msg: fmt.Sprintf(
+				"invalid --platform %q: %v (expected os/arch[/variant], e.g. linux/amd64)", seg, err)}
+		}
+		norm := platforms.Format(platforms.Normalize(p))
+		if _, dup := seen[norm]; dup {
+			return nil, &usageError{msg: fmt.Sprintf("invalid --platform: duplicate target %q", norm)}
+		}
+		seen[norm] = struct{}{}
+		out = append(out, norm)
+	}
+	if len(out) == 0 {
+		return nil, &usageError{msg: fmt.Sprintf("invalid --platform %q: no targets parsed", raw)}
+	}
+	return out, nil
 }
 
 // parseBuildArgs turns the raw --build-arg values into a KEY=VALUE map. Each

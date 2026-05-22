@@ -181,6 +181,56 @@ func TestRunBuildForwardsKukeondConfig(t *testing.T) {
 	}
 }
 
+func TestRunBuildForwardsPlatform(t *testing.T) {
+	var gotArgv []string
+	withStubs(t,
+		func(string) (string, error) { return "/usr/local/bin/kukebuild", nil },
+		func(_ string, argv []string, _ []string) error { gotArgv = argv; return nil },
+	)
+
+	cmd := NewBuildCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"-t", "x:1", "--platform", "linux/amd64,linux/arm64", "."})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	want := []string{
+		"kukebuild",
+		"--tag", "x:1",
+		"--realm", consts.KukeonDefaultRealmName,
+		"--platform", "linux/amd64,linux/arm64",
+		".",
+	}
+	if !reflect.DeepEqual(gotArgv, want) {
+		t.Errorf("argv = %v, want %v", gotArgv, want)
+	}
+}
+
+// Without --platform the shim forwards no --platform flag (single-image default).
+func TestRunBuildNoPlatformByDefault(t *testing.T) {
+	var gotArgv []string
+	withStubs(t,
+		func(string) (string, error) { return "/usr/local/bin/kukebuild", nil },
+		func(_ string, argv []string, _ []string) error { gotArgv = argv; return nil },
+	)
+
+	cmd := NewBuildCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"-t", "x:1", "."})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	for _, a := range gotArgv {
+		if a == "--platform" {
+			t.Errorf("argv = %v, must not contain --platform when the flag is unset", gotArgv)
+		}
+	}
+}
+
 func TestRunBuildForwardsPush(t *testing.T) {
 	var gotArgv []string
 	withStubs(t,

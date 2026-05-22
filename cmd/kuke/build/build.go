@@ -55,7 +55,7 @@ func NewBuildCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "build [-f Dockerfile] [-t name:tag] [--realm <name>] [--build-arg K=V]... " +
 			"[--secret id=NAME,src=PATH]... [--cache-to type=local,dest=PATH]... " +
-			"[--cache-from type=local,src=PATH]... [--push] <context>",
+			"[--cache-from type=local,src=PATH]... [--platform os/arch,...] [--push] <context>",
 		Short: "Build an OCI image from a Dockerfile into a realm's containerd namespace",
 		Long: "Build an OCI image from a Dockerfile using kukeon's native builder.\n\n" +
 			"`kuke build` is a thin shim: it locates the `kukebuild` binary on PATH and\n" +
@@ -69,6 +69,12 @@ func NewBuildCmd() *cobra.Command {
 			"Build cache: --cache-to type=local,dest=PATH exports the build cache to a local\n" +
 			"directory and --cache-from type=local,src=PATH imports it back, reusing layers\n" +
 			"across builds. Only type=local is supported; both flags are repeatable.\n\n" +
+			"Multi-platform: --platform linux/amd64,linux/arm64 builds for each target arch\n" +
+			"and writes the result as a single manifest list — one image reference covering\n" +
+			"every arch, not per-arch tags (operators expecting name:tag-amd64 / -arm64 will\n" +
+			"not find them). `kuke image get --realm <name>` shows the list; each per-arch\n" +
+			"manifest is individually pullable. Distinct from a Dockerfile's $BUILDPLATFORM\n" +
+			"arg, which selects the build host's platform; --platform selects the output set.\n\n" +
 			"Registry push: --push pushes the built image to its tag's registry after a\n" +
 			"successful build. The tag must be a fully qualified registry reference\n" +
 			"(REGISTRY/REPO:TAG); a bare name:tag is rejected. Push is additive — the image\n" +
@@ -97,6 +103,12 @@ func NewBuildCmd() *cobra.Command {
 	)
 	cmd.Flags().StringArray("cache-to", nil, "Export build cache: type=local,dest=PATH (repeatable)")
 	cmd.Flags().StringArray("cache-from", nil, "Import build cache: type=local,src=PATH (repeatable)")
+	cmd.Flags().String(
+		"platform",
+		"",
+		"Comma-separated os/arch[/variant] targets (e.g. linux/amd64,linux/arm64); multiple targets "+
+			"produce a single manifest list, not per-arch tags",
+	)
 	cmd.Flags().Bool(
 		"push",
 		false,
@@ -177,6 +189,10 @@ func buildArgv(cmd *cobra.Command, args []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	platform, err := cmd.Flags().GetString("platform")
+	if err != nil {
+		return nil, err
+	}
 	push, err := cmd.Flags().GetBool("push")
 	if err != nil {
 		return nil, err
@@ -200,6 +216,9 @@ func buildArgv(cmd *cobra.Command, args []string) ([]string, error) {
 	}
 	for _, c := range cacheFrom {
 		argv = append(argv, "--cache-from", c)
+	}
+	if strings.TrimSpace(platform) != "" {
+		argv = append(argv, "--platform", platform)
 	}
 	if push {
 		argv = append(argv, "--push")

@@ -139,6 +139,45 @@ func TestNewSolveOptPushNilAuth(t *testing.T) {
 	}
 }
 
+func TestNewSolveOptWiresPlatform(t *testing.T) {
+	// Multiple platforms set the comma-separated `platform` frontend attr; the
+	// Dockerfile frontend turns that into a manifest-list result.
+	cfg := newSolveOptFixture(t)
+	cfg.platforms = []string{"linux/amd64", "linux/arm64"}
+
+	so, err := newSolveOpt(cfg, nil)
+	if err != nil {
+		t.Fatalf("newSolveOpt: %v", err)
+	}
+	if got := so.FrontendAttrs["platform"]; got != "linux/amd64,linux/arm64" {
+		t.Errorf(`FrontendAttrs["platform"] = %q, want "linux/amd64,linux/arm64"`, got)
+	}
+}
+
+func TestNewSolveOptSinglePlatform(t *testing.T) {
+	cfg := newSolveOptFixture(t)
+	cfg.platforms = []string{"linux/arm64"}
+
+	so, err := newSolveOpt(cfg, nil)
+	if err != nil {
+		t.Fatalf("newSolveOpt: %v", err)
+	}
+	if got := so.FrontendAttrs["platform"]; got != "linux/arm64" {
+		t.Errorf(`FrontendAttrs["platform"] = %q, want "linux/arm64"`, got)
+	}
+}
+
+func TestNewSolveOptNoPlatformByDefault(t *testing.T) {
+	cfg := newSolveOptFixture(t) // platforms unset
+	so, err := newSolveOpt(cfg, nil)
+	if err != nil {
+		t.Fatalf("newSolveOpt: %v", err)
+	}
+	if _, ok := so.FrontendAttrs["platform"]; ok {
+		t.Error(`FrontendAttrs["platform"] is set, want absent when --platform is off`)
+	}
+}
+
 func TestResolveBuildRoot(t *testing.T) {
 	cases := []struct {
 		name      string
