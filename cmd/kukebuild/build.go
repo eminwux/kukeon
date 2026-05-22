@@ -29,12 +29,15 @@ import (
 	ctd "github.com/containerd/containerd/v2/client"
 	ctddefaults "github.com/containerd/containerd/v2/defaults"
 	"github.com/distribution/reference"
+	"github.com/moby/buildkit/cache/remotecache"
+	localremotecache "github.com/moby/buildkit/cache/remotecache/local"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/control"
 	"github.com/moby/buildkit/frontend"
 	dockerfile "github.com/moby/buildkit/frontend/dockerfile/builder"
 	"github.com/moby/buildkit/frontend/gateway/forwarder"
 	"github.com/moby/buildkit/session"
+	"github.com/moby/buildkit/session/secrets/secretsprovider"
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/solver/bboltcachestorage"
 	"github.com/moby/buildkit/util/db/boltutil"
@@ -237,7 +240,7 @@ func newSolveOpt(cfg *buildConfig) (*client.SolveOpt, error) {
 		return nil, err
 	}
 
-	return &client.SolveOpt{
+	solveOpt := &client.SolveOpt{
 		Frontend:      dockerfileFrontend,
 		FrontendAttrs: frontendAttrs,
 		LocalMounts: map[string]fsutil.FS{
@@ -256,16 +259,48 @@ func newSolveOpt(cfg *buildConfig) (*client.SolveOpt, error) {
 				},
 			},
 		},
-	}, nil
+	}
+
+	// Build secrets ride in on a session attachable: the Dockerfile frontend
+	// requests a secret by id over the session, and the secretsprovider serves
+	// it from the host file. A RUN step opts in with
+	// --mount=type=secret,id=<id>, which BuildKit mounts at /run/secrets/<id>.
+	// NewStore stats each src up front, so a missing/oversized secret file
+	// fails fast here rather than mid-solve.
+	if len(cfg.secrets) > 0 {
+		sources := make([]secretsprovider.Source, 0, len(cfg.secrets))
+		for _, s := range cfg.secrets {
+			sources = append(sources, secretsprovider.Source{ID: s.id, FilePath: s.src})
+		}
+		store, err := secretsprovider.NewStore(sources)
+		if err != nil {
+			return nil, fmt.Errorf("prepare build secrets: %w", err)
+		}
+		solveOpt.Session = append(solveOpt.Session, secretsprovider.NewSecretProvider(store))
+	}
+
+	// Local cache export/import: the BuildKit client wires the dest/src dirs
+	// into a content store and the session itself (see client.parseCacheOptions
+	// for type=local), so kukebuild only has to forward the entries.
+	for _, ce := range cfg.cacheExports {
+		solveOpt.CacheExports = append(solveOpt.CacheExports, client.CacheOptionsEntry{Type: ce.typ, Attrs: ce.attrs})
+	}
+	for _, ci := range cfg.cacheImports {
+		solveOpt.CacheImports = append(solveOpt.CacheImports, client.CacheOptionsEntry{Type: ci.typ, Attrs: ci.attrs})
+	}
+
+	return solveOpt, nil
 }
 
 // newController assembles BuildKit's in-process Controller backed by a
 // containerd worker pointed at cfg.containerdSocket and scoped to the realm's
 // containerd namespace. It mirrors buildkitd's own newController
-// (cmd/buildkitd/main.go) trimmed to the phase-1 surface: the Dockerfile
-// frontend only, no remote-cache import/export resolvers (those are phase 2a,
-// #523), no tracing, no gateway frontend. The returned cleanup closes the
-// history DB and the worker controller; callers must defer it.
+// (cmd/buildkitd/main.go) trimmed to the phase-1/2a surface: the Dockerfile
+// frontend only, no registry-backed cache resolvers (registry/s3/gha cache is
+// deferred — phase 2a only wires local-disk cache, which the BuildKit client
+// handles via content stores, no controller-side resolver), no tracing, no
+// gateway frontend. The returned cleanup closes the history DB and the worker
+// controller; callers must defer it.
 func newController(ctx context.Context, cfg *buildConfig, namespace string) (*control.Controller, func(), error) {
 	sessionManager, err := session.NewManager()
 	if err != nil {
@@ -297,12 +332,22 @@ func newController(ctx context.Context, cfg *buildConfig, namespace string) (*co
 		WorkerController: wc,
 		Frontends:        frontends,
 		CacheManager:     solver.NewCacheManager(ctx, "local", cacheStorage, worker.NewCacheResultStorage(wc)),
-		HistoryDB:        historyDB,
-		CacheStore:       cacheStorage,
-		LeaseManager:     w.LeaseManager(),
-		ContentStore:     w.ContentStore(),
-		GarbageCollect:   w.GarbageCollect,
-		GracefulStop:     ctx.Done(),
+		// Register the local-disk cache exporter/importer so --cache-to /
+		// --cache-from type=local resolve (issue #523). Registry/s3/gha backends
+		// are deferred — only "local" is wired, matching buildkitd's
+		// remoteCacheExporterFuncs map trimmed to the phase-2a surface.
+		ResolveCacheExporterFuncs: map[string]remotecache.ResolveCacheExporterFunc{
+			"local": localremotecache.ResolveCacheExporterFunc(sessionManager),
+		},
+		ResolveCacheImporterFuncs: map[string]remotecache.ResolveCacheImporterFunc{
+			"local": localremotecache.ResolveCacheImporterFunc(sessionManager),
+		},
+		HistoryDB:      historyDB,
+		CacheStore:     cacheStorage,
+		LeaseManager:   w.LeaseManager(),
+		ContentStore:   w.ContentStore(),
+		GarbageCollect: w.GarbageCollect,
+		GracefulStop:   ctx.Done(),
 	})
 	if err != nil {
 		_ = historyDB.Close()

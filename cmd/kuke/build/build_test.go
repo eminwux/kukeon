@@ -117,6 +117,43 @@ func TestRunBuildExecHandoff(t *testing.T) {
 	}
 }
 
+func TestRunBuildForwardsSecretsAndCache(t *testing.T) {
+	var gotArgv []string
+	withStubs(t,
+		func(string) (string, error) { return "/usr/local/bin/kukebuild", nil },
+		func(_ string, argv []string, _ []string) error { gotArgv = argv; return nil },
+	)
+
+	cmd := NewBuildCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{
+		"-t", "x:1",
+		"--secret", "id=npmrc,src=/host/.npmrc",
+		"--secret", "id=tok,src=/host/tok",
+		"--cache-to", "type=local,dest=/cache/out",
+		"--cache-from", "type=local,src=/cache/in",
+		".",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	want := []string{
+		"kukebuild",
+		"--tag", "x:1",
+		"--realm", consts.KukeonDefaultRealmName,
+		"--secret", "id=npmrc,src=/host/.npmrc",
+		"--secret", "id=tok,src=/host/tok",
+		"--cache-to", "type=local,dest=/cache/out",
+		"--cache-from", "type=local,src=/cache/in",
+		".",
+	}
+	if !reflect.DeepEqual(gotArgv, want) {
+		t.Errorf("argv = %v, want %v", gotArgv, want)
+	}
+}
+
 func TestRunBuildForwardsKukeondConfig(t *testing.T) {
 	var gotArgv []string
 	withStubs(t,
