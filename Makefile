@@ -201,14 +201,21 @@ dev-init:
 # are picked up automatically — a stale hard copy is exactly the footgun a
 # dev workflow can't afford. argv[0] dispatch resolves `kukeond` to the
 # daemon entrypoint because the basename of the exec path is `kukeond`.
+#
+# kukebuild is symlinked only when it has been built (the `[ -f ]` guard), so
+# `kuke build` resolves it on PATH after `make dev-init` (which runs `make kuke
+# kukebuild` before this target) without imposing kukebuild's separate-module
+# build on a plain `make install-dev`. Routing it through INSTALL_PREFIX here
+# keeps a single PATH-placement mechanism instead of a second one in dev-init.sh.
 .PHONY: install-dev uninstall-dev
 install-dev: kuke
 	ln -sf kuke kukeond
 	sudo ln -sf $(CURDIR)/kuke $(INSTALL_PREFIX)/kuke
 	sudo ln -sf $(CURDIR)/kuke $(INSTALL_PREFIX)/kukeond
+	@[ -f $(CURDIR)/kukebuild ] && sudo ln -sf $(CURDIR)/kukebuild $(INSTALL_PREFIX)/kukebuild || true
 
 uninstall-dev:
-	sudo rm -f $(INSTALL_PREFIX)/kuke $(INSTALL_PREFIX)/kukeond
+	sudo rm -f $(INSTALL_PREFIX)/kuke $(INSTALL_PREFIX)/kukeond $(INSTALL_PREFIX)/kukebuild
 
 # Publish the one-line installer through the mkdocs site: copy
 # `scripts/install.sh` (canonical source) into `docs/site/install.sh` so
