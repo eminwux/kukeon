@@ -119,7 +119,11 @@ func buildTerminalSpec(
 	}
 	if spec.Tty != nil && len(spec.Tty.OnInit) > 0 {
 		// Inline OnInit (#494): map the cell's TtyStage{Script} entries to
-		// sbsh's api.ExecStep{Script}.
+		// sbsh's api.ExecStep{Script}. Only runOn: start (and absent) stages
+		// forward here — runOn: create stages run in kuketty's pre-Serve
+		// executor instead and are never handed to sbsh (#635). An all-create
+		// OnInit therefore yields a nil ExecStep slice, leaving Stages.OnInit
+		// zero just as an absent block would.
 		opts = append(opts, sbshbuilder.WithOnInit(ttyStagesToExecSteps(spec.Tty.OnInit)))
 	}
 	if mode := modeIfGroupSet(kukeonGroupGID, attachableSocketMode); mode != "" {
@@ -214,18 +218,53 @@ func resolveTtyLogLevel(t *v1beta1.ContainerTty) string {
 }
 
 // ttyStagesToExecSteps maps the cell's inline Tty.OnInit entries into sbsh's
-// api.ExecStep slice. Each stage carries only Script today; sbsh's ExecStep
-// also supports Env, but the cell schema does not surface it yet (a future
-// TtyStage knob lands here without touching the transform).
+// api.ExecStep slice. Only runOn: start (and absent — the default) stages are
+// forwarded; runOn: create stages are routed into kuketty's pre-Serve executor
+// (see createStages / processStages) and skipped here. Each forwarded stage
+// carries only Script today; sbsh's ExecStep also supports Env, but the cell
+// schema does not surface it yet (a future TtyStage knob lands here without
+// touching the transform). Issue #635.
 func ttyStagesToExecSteps(in []v1beta1.TtyStage) []sbshapi.ExecStep {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]sbshapi.ExecStep, len(in))
-	for i, s := range in {
-		out[i] = sbshapi.ExecStep{Script: s.Script}
+	out := make([]sbshapi.ExecStep, 0, len(in))
+	for _, s := range in {
+		if s.RunOn == v1beta1.RunOnCreate {
+			continue
+		}
+		out = append(out, sbshapi.ExecStep{Script: s.Script})
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
+}
+
+// createStages returns the runOn: create stages from the container's
+// Tty.OnInit, in declaration order, paired with their index within the full
+// OnInit slice so the pre-Serve executor and the (phase B) status reporter
+// share one stable identity. Returns nil when the tty block is absent or
+// declares no create stages. Issue #635.
+func createStages(tty *v1beta1.ContainerTty) []indexedStage {
+	if tty == nil {
+		return nil
+	}
+	var out []indexedStage
+	for i, s := range tty.OnInit {
+		if s.RunOn == v1beta1.RunOnCreate {
+			out = append(out, indexedStage{Index: i, Stage: s})
+		}
+	}
+	return out
+}
+
+// indexedStage pairs a create stage with its position in the container's full
+// OnInit slice — the identity carried into ContainerStatus.Stages (#635). The
+// run-once "done" key (e.g. a content hash) is settled in phase C (#690).
+type indexedStage struct {
+	Index int
+	Stage v1beta1.TtyStage
 }
 
 // modeIfGroupSet returns the octal-mode string only when the kukeon group GID

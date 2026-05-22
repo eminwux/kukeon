@@ -120,9 +120,12 @@ type ContainerTty struct {
 	LogLevel string
 }
 
-// TtyStage mirrors the v1beta1 TtyStage payload.
+// TtyStage mirrors the v1beta1 TtyStage payload. See the v1beta1 type for
+// field semantics. RunOn is empty/"start" (forward to sbsh's Stages.OnInit) or
+// "create" (kuketty pre-Serve executor). Issue #635.
 type TtyStage struct {
 	Script string
+	RunOn  string
 }
 
 // IsEmpty reports whether the tty block carries no user-supplied config.
@@ -140,7 +143,7 @@ func (t *ContainerTty) IsEmpty() bool {
 		return false
 	}
 	for _, s := range t.OnInit {
-		if s.Script != "" {
+		if s.Script != "" || s.RunOn != "" {
 			return false
 		}
 	}
@@ -272,6 +275,11 @@ type ContainerStatus struct {
 	// Repos reports the per-repo outcome of kuketty's pre-Serve clone/fetch
 	// step. Mirrors the v1beta1 ContainerStatus.Repos payload. Issue #617.
 	Repos []RepoStatus
+	// Stages reports the per-stage outcome of kuketty's pre-Serve execution of
+	// the container's runOn: create stages. Mirrors the v1beta1
+	// ContainerStatus.Stages payload; schema only this phase, populated in
+	// phase B (#689). Issue #635.
+	Stages []StageStatus
 }
 
 // RepoStatus mirrors the v1beta1 RepoStatus payload. Issue #617.
@@ -281,6 +289,13 @@ type RepoStatus struct {
 	State  string
 	Commit string
 	Error  string
+}
+
+// StageStatus mirrors the v1beta1 StageStatus payload. Issue #635.
+type StageStatus struct {
+	Index int
+	State string
+	Error string
 }
 
 type ContainerState int

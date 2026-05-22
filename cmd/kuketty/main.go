@@ -146,6 +146,18 @@ func run(args []string) error {
 		return err
 	}
 
+	// Pre-Serve step (issue #635): run the container's runOn: create TtyStages
+	// to completion before the workload starts. Like a required-repo failure, a
+	// failed create stage returns here so kuketty exits non-zero before
+	// sbshserver.Serve and the daemon observes the task as Failed. runOn: start
+	// (and absent) stages are not run here — they were forwarded to sbsh's
+	// Stages.OnInit at buildTerminalSpec and run in-shell every boot. Reporting
+	// per-stage outcomes into ContainerStatus.Stages over the RPC is phase B
+	// (#689); this phase wires the executor only.
+	if err := processStages(ctx, createStages(doc.Spec.Tty), logger); err != nil {
+		return err
+	}
+
 	// Register the GetSetupStatus verb on the same control socket the daemon
 	// dials for `kuke attach`, so kukeond can pull the repo outcomes post-Serve
 	// and write ContainerStatus.Repos (issue #642). ContainerStatus is the

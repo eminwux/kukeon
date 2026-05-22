@@ -461,5 +461,97 @@ func TestBuildTerminalSpec_EmptyWorkloadFallsBackToBuilderDefault(t *testing.T) 
 	}
 }
 
+// TestTtyStagesToExecSteps_RoutingSplit locks the runOn routing split (#635):
+// only runOn: start (and absent) stages forward to sbsh's Stages.OnInit;
+// runOn: create stages are skipped here (they run in the pre-Serve executor).
+func TestTtyStagesToExecSteps_RoutingSplit(t *testing.T) {
+	in := []v1beta1.TtyStage{
+		{Script: "echo absent"},                             // absent → start lane
+		{Script: "echo start", RunOn: v1beta1.RunOnStart},   // explicit start → start lane
+		{Script: "echo create", RunOn: v1beta1.RunOnCreate}, // create → skipped here
+		{Script: "echo absent2"},                            // absent → start lane
+	}
+	got := ttyStagesToExecSteps(in)
+	want := []string{"echo absent", "echo start", "echo absent2"}
+	if len(got) != len(want) {
+		t.Fatalf("ExecSteps len = %d, want %d (%+v)", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if got[i].Script != w {
+			t.Errorf("ExecStep[%d].Script = %q, want %q", i, got[i].Script, w)
+		}
+	}
+}
+
+// TestTtyStagesToExecSteps_AllCreateYieldsNil: an OnInit made entirely of
+// create stages forwards nothing to sbsh — same shape as an absent block.
+func TestTtyStagesToExecSteps_AllCreateYieldsNil(t *testing.T) {
+	in := []v1beta1.TtyStage{
+		{Script: "echo a", RunOn: v1beta1.RunOnCreate},
+		{Script: "echo b", RunOn: v1beta1.RunOnCreate},
+	}
+	if got := ttyStagesToExecSteps(in); got != nil {
+		t.Errorf("ttyStagesToExecSteps = %+v, want nil (all create stages skipped)", got)
+	}
+}
+
+// TestBuildTerminalSpec_StartAndAbsentRoundTripUnchanged: runOn: start and
+// absent stages land in Stages.OnInit byte-for-byte as before, with the create
+// stage filtered out — the AC that today's behavior is unchanged for start.
+func TestBuildTerminalSpec_StartAndAbsentRoundTripUnchanged(t *testing.T) {
+	out := buildSpec(t, v1beta1.ContainerSpec{
+		ID:      "c1",
+		Command: "/bin/sh",
+		Tty: &v1beta1.ContainerTty{
+			OnInit: []v1beta1.TtyStage{
+				{Script: "echo hello"},
+				{Script: "npm ci", RunOn: v1beta1.RunOnCreate},
+				{Script: "echo world", RunOn: v1beta1.RunOnStart},
+			},
+		},
+	})
+	if len(out.Stages.OnInit) != 2 {
+		t.Fatalf("Stages.OnInit len = %d, want 2 (create stage filtered)", len(out.Stages.OnInit))
+	}
+	if out.Stages.OnInit[0].Script != "echo hello" || out.Stages.OnInit[1].Script != "echo world" {
+		t.Errorf("Stages.OnInit = %+v, want [echo hello, echo world]", out.Stages.OnInit)
+	}
+}
+
+// TestCreateStages_FiltersAndIndexes locks createStages (#635): it returns only
+// runOn: create stages, paired with their index within the full OnInit slice.
+func TestCreateStages_FiltersAndIndexes(t *testing.T) {
+	tty := &v1beta1.ContainerTty{
+		OnInit: []v1beta1.TtyStage{
+			{Script: "echo a"}, // 0: start lane
+			{Script: "npm ci", RunOn: v1beta1.RunOnCreate},  // 1: create
+			{Script: "echo b", RunOn: v1beta1.RunOnStart},   // 2: start lane
+			{Script: "seed.sh", RunOn: v1beta1.RunOnCreate}, // 3: create
+		},
+	}
+	got := createStages(tty)
+	if len(got) != 2 {
+		t.Fatalf("createStages len = %d, want 2", len(got))
+	}
+	if got[0].Index != 1 || got[0].Stage.Script != "npm ci" {
+		t.Errorf("createStages[0] = %+v, want index 1 / npm ci", got[0])
+	}
+	if got[1].Index != 3 || got[1].Stage.Script != "seed.sh" {
+		t.Errorf("createStages[1] = %+v, want index 3 / seed.sh", got[1])
+	}
+}
+
+// TestCreateStages_NilAndNoCreate: an absent tty block or one with no create
+// stages yields nil.
+func TestCreateStages_NilAndNoCreate(t *testing.T) {
+	if got := createStages(nil); got != nil {
+		t.Errorf("createStages(nil) = %+v, want nil", got)
+	}
+	tty := &v1beta1.ContainerTty{OnInit: []v1beta1.TtyStage{{Script: "echo a"}}}
+	if got := createStages(tty); got != nil {
+		t.Errorf("createStages with no create stages = %+v, want nil", got)
+	}
+}
+
 // intPtr is a one-off helper for the always-on log table-test.
 func intPtr(v int) *int { return &v }
