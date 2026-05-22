@@ -508,3 +508,93 @@ func TestDiffContainer_NonRootInPlace(t *testing.T) {
 		t.Errorf("non-root image bump must not populate BreakingChanges, got %v", diff.BreakingChanges)
 	}
 }
+
+func hasChangedField(diff apply.DiffResult, field string) bool {
+	for _, f := range diff.ChangedFields {
+		if f == field {
+			return true
+		}
+	}
+	return false
+}
+
+// TestDiffContainer_ReposChange exercises the repos[]-only edit path: an apply
+// that touches only Spec.Repos must register as a compatible change so the
+// reconcile triggers, rather than being realized lazily on the next start
+// (issue #647).
+func TestDiffContainer_ReposChange(t *testing.T) {
+	desired := intmodel.Container{
+		Metadata: intmodel.ContainerMetadata{Name: "web"},
+		Spec: intmodel.ContainerSpec{
+			ID:        "web",
+			RealmName: "default", SpaceName: "default", StackName: "default", CellName: "hello-world",
+			Image: "nginx:1.27",
+			Repos: []intmodel.ContainerRepo{{Name: "app", URL: "https://example.com/app.git", Target: "/src"}},
+		},
+	}
+	actual := desired
+	actual.Spec.Repos = []intmodel.ContainerRepo{{Name: "app", URL: "https://example.com/app.git", Target: "/srv"}}
+
+	diff := apply.DiffContainer(desired, actual)
+	if diff.ChangeType != apply.ChangeTypeCompatible {
+		t.Fatalf("expected compatible change for repos edit, got %v", diff.ChangeType)
+	}
+	if !hasChangedField(diff, "repos") {
+		t.Errorf("expected ChangedFields to include repos, got %v", diff.ChangedFields)
+	}
+}
+
+// TestDiffContainer_SecretsChange exercises the secrets[]-only edit path,
+// including the SecretRef pointer-value comparison (issue #647).
+func TestDiffContainer_SecretsChange(t *testing.T) {
+	desired := intmodel.Container{
+		Metadata: intmodel.ContainerMetadata{Name: "web"},
+		Spec: intmodel.ContainerSpec{
+			ID:        "web",
+			RealmName: "default", SpaceName: "default", StackName: "default", CellName: "hello-world",
+			Image: "nginx:1.27",
+			Secrets: []intmodel.ContainerSecret{{
+				Name:      "db",
+				SecretRef: &intmodel.ContainerSecretRef{Name: "db-creds", Realm: "default"},
+			}},
+		},
+	}
+	actual := desired
+	actual.Spec.Secrets = []intmodel.ContainerSecret{{
+		Name:      "db",
+		SecretRef: &intmodel.ContainerSecretRef{Name: "db-creds", Realm: "prod"},
+	}}
+
+	diff := apply.DiffContainer(desired, actual)
+	if diff.ChangeType != apply.ChangeTypeCompatible {
+		t.Fatalf("expected compatible change for secrets edit, got %v", diff.ChangeType)
+	}
+	if !hasChangedField(diff, "secrets") {
+		t.Errorf("expected ChangedFields to include secrets, got %v", diff.ChangedFields)
+	}
+}
+
+// TestDiffContainer_ReposSecretsNoChange guards the equality helpers: identical
+// repos/secrets (including a populated SecretRef) must not register drift on a
+// same-spec re-apply.
+func TestDiffContainer_ReposSecretsNoChange(t *testing.T) {
+	desired := intmodel.Container{
+		Metadata: intmodel.ContainerMetadata{Name: "web"},
+		Spec: intmodel.ContainerSpec{
+			ID:        "web",
+			RealmName: "default", SpaceName: "default", StackName: "default", CellName: "hello-world",
+			Image: "nginx:1.27",
+			Repos: []intmodel.ContainerRepo{{Name: "app", URL: "https://example.com/app.git", Target: "/src", Required: true}},
+			Secrets: []intmodel.ContainerSecret{{
+				Name:      "db",
+				SecretRef: &intmodel.ContainerSecretRef{Name: "db-creds", Realm: "default"},
+			}},
+		},
+	}
+	actual := desired
+
+	diff := apply.DiffContainer(desired, actual)
+	if diff.HasChanges {
+		t.Fatalf("expected no changes for identical repos/secrets, got %v", diff.ChangedFields)
+	}
+}
