@@ -169,6 +169,28 @@ func (s *Server) startReconcileLoop() {
 
 func (s *Server) runReconcileLoop(interval time.Duration) {
 	defer s.loopWG.Done()
+
+	// Run one pass immediately, before the first ticker tick, so a freshly
+	// started daemon converges every cell's persisted Status to live
+	// containerd reality at once instead of serving the pre-restart snapshot
+	// for up to a full interval. The headline case is a host restart that
+	// dropped containerd's tasks/records (#671): the on-disk metadata still
+	// reads Ready and lists containers that no longer exist, so without this
+	// eager pass `kuke get cell` shows stale state and AutoDelete cleanup of
+	// now-phantom cells is delayed until the first tick. Gated on the same
+	// shutdown signals as the loop so a daemon cancelled before the loop
+	// starts does not run a pass.
+	select {
+	case <-s.ctx.Done():
+		s.logger.InfoContext(s.ctx, "reconcile loop stopped")
+		return
+	case <-s.stopCh:
+		s.logger.InfoContext(s.ctx, "reconcile loop stopped")
+		return
+	default:
+		s.runReconcileOnce()
+	}
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
