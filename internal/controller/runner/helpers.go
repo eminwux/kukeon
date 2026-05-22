@@ -493,63 +493,70 @@ func (r *Exec) buildRootCNINetworkName(realmName, spaceName string) string {
 }
 
 // detachRootContainerFromNetwork detaches a root container from the CNI network.
-// It gets the container's PID and network namespace path, then calls CNI DEL to detach it.
-// This should be called before killing or stopping the container to ensure the namespace is still valid.
+// It resolves the root task's network namespace and calls CNI DEL to detach it.
+// This should be called before killing or stopping the container so a live netns
+// is used when one exists.
+//
+// The CNI DEL is issued unconditionally — with an empty netns when the root task
+// is already dead or absent (OOM, crash, host reboot left the container record
+// but no task). Previously the whole DEL was nested behind a live-task / PID>0
+// guard, so the dead-task path was a silent no-op and the clean plugin-chain
+// release never ran; only the post-delete IP-file purge safety net did (#715,
+// the clean-DEL residual of the file-purge fix #708). host-local IPAM DEL keys
+// off the container ID and tolerates a missing netns, and chained plugins are
+// required by the CNI spec to complete DEL without error when their resources
+// are already gone — so a best-effort empty-netns DEL still releases the
+// reservation rather than leaking it.
 func (r *Exec) detachRootContainerFromNetwork(
 	rootContainerID, cniConfigPath, namespace, cellID, cellName, spaceID, realmID string,
 ) {
-	var netnsPath string
-	rootContainer, err := r.ctrClient.GetContainer(namespace, rootContainerID)
-	if err == nil {
-		nsCtx := namespaces.WithNamespace(r.ctx, namespace)
-		rootTask, taskErr := rootContainer.Task(nsCtx, nil)
-		if taskErr == nil {
-			rootPID := rootTask.Pid()
-			if rootPID > 0 {
-				netnsPath = fmt.Sprintf("/proc/%d/ns/net", rootPID)
+	netnsPath := r.rootContainerNetnsPath(namespace, rootContainerID)
 
-				// Detach root container from CNI network BEFORE killing/stopping
-				// This ensures the namespace is still valid
-				cniMgr, mgrErr := cni.NewManager(
-					r.cniConf.CniBinDir,
-					r.cniConf.CniConfigDir,
-					r.cniConf.CniCacheDir,
-				)
-				if mgrErr == nil {
-					if loadErr := cniMgr.LoadNetworkConfigList(cniConfigPath); loadErr == nil {
-						if delErr := cniMgr.DelContainerFromNetwork(r.ctx, rootContainerID, netnsPath); delErr != nil {
-							// Log warning but continue - will try comprehensive cleanup after deletion
-							fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
-							fields = append(
-								fields,
-								"space",
-								spaceID,
-								"realm",
-								realmID,
-								"netns",
-								netnsPath,
-								"err",
-								fmt.Sprintf("%v", delErr),
-							)
-							r.logger.WarnContext(
-								r.ctx,
-								"failed to detach root container from network, will try comprehensive cleanup after deletion",
-								fields...,
-							)
-						} else {
-							fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
-							fields = append(fields, "space", spaceID, "realm", realmID, "netns", netnsPath)
-							r.logger.InfoContext(
-								r.ctx,
-								"detached root container from network",
-								fields...,
-							)
-						}
-					}
-				}
-			}
-		}
+	cniMgr, mgrErr := cni.NewManager(
+		r.cniConf.CniBinDir,
+		r.cniConf.CniConfigDir,
+		r.cniConf.CniCacheDir,
+	)
+	if mgrErr != nil {
+		return
 	}
+	if loadErr := cniMgr.LoadNetworkConfigList(cniConfigPath); loadErr != nil {
+		return
+	}
+
+	fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
+	fields = append(fields, "space", spaceID, "realm", realmID, "netns", netnsPath)
+	if delErr := cniMgr.DelContainerFromNetwork(r.ctx, rootContainerID, netnsPath); delErr != nil {
+		// Log warning but continue - will try comprehensive cleanup after deletion
+		fields = append(fields, "err", fmt.Sprintf("%v", delErr))
+		r.logger.WarnContext(
+			r.ctx,
+			"failed to detach root container from network, will try comprehensive cleanup after deletion",
+			fields...,
+		)
+		return
+	}
+	r.logger.InfoContext(r.ctx, "detached root container from network", fields...)
+}
+
+// rootContainerNetnsPath resolves the network-namespace path of a cell's root
+// task, or "" when the container record is absent, its task is already dead, or
+// the PID is unset. The "" cases are the dead/absent-task path detachRootContainerFromNetwork
+// still issues a best-effort CNI DEL on (#715).
+func (r *Exec) rootContainerNetnsPath(namespace, rootContainerID string) string {
+	rootContainer, err := r.ctrClient.GetContainer(namespace, rootContainerID)
+	if err != nil {
+		return ""
+	}
+	nsCtx := namespaces.WithNamespace(r.ctx, namespace)
+	rootTask, taskErr := rootContainer.Task(nsCtx, nil)
+	if taskErr != nil {
+		return ""
+	}
+	if rootPID := rootTask.Pid(); rootPID > 0 {
+		return fmt.Sprintf("/proc/%d/ns/net", rootPID)
+	}
+	return ""
 }
 
 func appendCellLogFields(fields []any, cellID, cellName string) []any {
