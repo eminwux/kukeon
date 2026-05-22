@@ -300,10 +300,11 @@ func (c *Client) GetCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.GetCe
 		return kukeonv1.GetCellResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 	return kukeonv1.GetCellResult{
-		Cell:                *extCell,
-		MetadataExists:      res.MetadataExists,
-		CgroupExists:        res.CgroupExists,
-		RootContainerExists: res.RootContainerExists,
+		Cell:                     *extCell,
+		MetadataExists:           res.MetadataExists,
+		CgroupExists:             res.CgroupExists,
+		RootContainerExists:      res.RootContainerExists,
+		RootContainerTaskRunning: res.RootContainerTaskRunning,
 	}, nil
 }
 

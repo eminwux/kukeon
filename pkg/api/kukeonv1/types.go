@@ -179,6 +179,12 @@ type GetCellResult struct {
 	MetadataExists      bool
 	CgroupExists        bool
 	RootContainerExists bool
+	// RootContainerTaskRunning reports whether the cell's root container has a
+	// live containerd task. Distinct from RootContainerExists, which keys on the
+	// containerd record that survives a host/daemon restart while the task does
+	// not (#654, #683). Attach gating must consult task liveness, not record
+	// existence, to avoid handing back a dead socket.
+	RootContainerTaskRunning bool
 }
 
 type GetContainerArgs struct {

@@ -463,10 +463,11 @@ func TestRun_ExistingCell_MatchingSpec_AlreadyReady_ShortCircuits(t *testing.T) 
 	fc := &fakeClient{
 		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
 			return kukeonv1.GetCellResult{
-				Cell:                existing,
-				MetadataExists:      true,
-				CgroupExists:        true,
-				RootContainerExists: true,
+				Cell:                     existing,
+				MetadataExists:           true,
+				CgroupExists:             true,
+				RootContainerExists:      true,
+				RootContainerTaskRunning: true,
 			}, nil
 		},
 	}
@@ -553,6 +554,72 @@ func TestRun_ExistingCell_RecordedReady_ContainerdLostContainers_Refuses(t *test
 	}
 	if fc.startCalls != 0 {
 		t.Errorf("StartCell calls=%d want 0 (refuse, do not re-enter start — #630)", fc.startCalls)
+	}
+	if fc.attachCalls != 0 {
+		t.Errorf("AttachContainer calls=%d want 0 (must not attach to a dead socket)", fc.attachCalls)
+	}
+}
+
+// TestRun_ExistingCell_RecordedReady_TaskGone_Refuses covers #683: unlike #654
+// (the root container *record* is gone), here the record survived a host/daemon
+// restart but its backing task did not. The original record-existence guard
+// would pass — RootContainerExists is true — and run would attach to a dead
+// socket. The task-liveness guard must refuse instead, identically to the
+// record-gone case: no phantom output, no attach, divergence error.
+func TestRun_ExistingCell_RecordedReady_TaskGone_Refuses(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	existing := v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
+		Spec: v1beta1.CellSpec{
+			RealmID: "my-realm",
+			SpaceID: "my-space",
+			StackID: "my-stack",
+			Containers: []v1beta1.ContainerSpec{
+				{
+					ID:      "root",
+					Root:    true,
+					Image:   "registry.eminwux.com/busybox:latest",
+					Command: "sleep",
+					Args:    []string{"3600"},
+				},
+				{
+					ID:      "work",
+					Image:   "registry.eminwux.com/busybox:latest",
+					Command: "sleep",
+					Args:    []string{"3600"},
+				},
+			},
+		},
+		Status: v1beta1.CellStatus{State: v1beta1.CellStateReady},
+	}
+	fc := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell:           existing,
+				MetadataExists: true,
+				CgroupExists:   true,
+				// Record survived the restart; the task did not — the #683 signal.
+				RootContainerExists:      true,
+				RootContainerTaskRunning: false,
+			}, nil
+		},
+	}
+	cmd, out := newCmd(t, fc)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML)})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute: want divergence refusal, got nil")
+	}
+	if !strings.Contains(err.Error(), "diverged") {
+		t.Errorf("error missing divergence wording: %v", err)
+	}
+	if !strings.Contains(err.Error(), "kuke delete cell my-cell") {
+		t.Errorf("error missing `kuke delete cell` recovery pointer: %v", err)
+	}
+	if strings.Contains(out.String(), "already existed") {
+		t.Errorf("must not print phantom `already existed` for a diverged cell:\n%s", out.String())
 	}
 	if fc.attachCalls != 0 {
 		t.Errorf("AttachContainer calls=%d want 0 (must not attach to a dead socket)", fc.attachCalls)
@@ -727,10 +794,11 @@ func TestRun_ExistingCell_SynthesizedRoot_DoesNotDiverge(t *testing.T) {
 	fc := &fakeClient{
 		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
 			return kukeonv1.GetCellResult{
-				Cell:                existing,
-				MetadataExists:      true,
-				CgroupExists:        true,
-				RootContainerExists: true,
+				Cell:                     existing,
+				MetadataExists:           true,
+				CgroupExists:             true,
+				RootContainerExists:      true,
+				RootContainerTaskRunning: true,
 			}, nil
 		},
 	}
@@ -1587,10 +1655,11 @@ func TestRun_Attach_AlreadyReady_ShortCircuitThenAttaches(t *testing.T) {
 	fc := &fakeClient{
 		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
 			return kukeonv1.GetCellResult{
-				Cell:                existing,
-				MetadataExists:      true,
-				CgroupExists:        true,
-				RootContainerExists: true,
+				Cell:                     existing,
+				MetadataExists:           true,
+				CgroupExists:             true,
+				RootContainerExists:      true,
+				RootContainerTaskRunning: true,
 			}, nil
 		},
 		attachContainerFn: attachSuccessFn(),
@@ -2203,10 +2272,11 @@ func TestRun_RmAttach_AlreadyReady_StillKillsCellOnPeerClosed(t *testing.T) {
 	fc := &fakeClient{
 		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
 			return kukeonv1.GetCellResult{
-				Cell:                existing,
-				MetadataExists:      true,
-				CgroupExists:        true,
-				RootContainerExists: true,
+				Cell:                     existing,
+				MetadataExists:           true,
+				CgroupExists:             true,
+				RootContainerExists:      true,
+				RootContainerTaskRunning: true,
 			}, nil
 		},
 		attachContainerFn: attachSuccessFn(),

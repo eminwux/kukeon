@@ -105,6 +105,82 @@ func TestGetCell_SuccessfulRetrieval(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			// #683: root container record exists and its task is Running — the
+			// cell is genuinely live, so RootContainerTaskRunning is true.
+			name:      "root container task running",
+			cellName:  "test-cell",
+			realmName: "test-realm",
+			spaceName: "test-space",
+			stackName: "test-stack",
+			setupRunner: func(f *fakeRunner) {
+				cell := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
+				cell.Spec.Containers = []intmodel.ContainerSpec{
+					{ID: "root", Root: true},
+				}
+				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return cell, nil
+				}
+				f.ExistsCgroupFn = func(_ any) (bool, error) {
+					return true, nil
+				}
+				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+					return true, nil
+				}
+				f.GetContainerStateFn = func(_ intmodel.Cell, containerID string) (intmodel.ContainerState, error) {
+					if containerID != "root" {
+						t.Errorf("GetContainerState called for %q, want root", containerID)
+					}
+					return intmodel.ContainerStateReady, nil
+				}
+			},
+			wantResult: func(t *testing.T, result controller.GetCellResult) {
+				if !result.RootContainerExists {
+					t.Error("expected RootContainerExists to be true")
+				}
+				if !result.RootContainerTaskRunning {
+					t.Error("expected RootContainerTaskRunning to be true")
+				}
+			},
+			wantErr: false,
+		},
+		{
+			// #683 headline case: the record survives a host/daemon restart but
+			// the task is gone (Stopped). RootContainerExists stays true while
+			// RootContainerTaskRunning must report false so attach gating refuses.
+			name:      "root container record present but task gone",
+			cellName:  "test-cell",
+			realmName: "test-realm",
+			spaceName: "test-space",
+			stackName: "test-stack",
+			setupRunner: func(f *fakeRunner) {
+				cell := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
+				cell.Spec.Containers = []intmodel.ContainerSpec{
+					{ID: "root", Root: true},
+				}
+				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return cell, nil
+				}
+				f.ExistsCgroupFn = func(_ any) (bool, error) {
+					return true, nil
+				}
+				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+					return true, nil
+				}
+				f.GetContainerStateFn = func(_ intmodel.Cell, _ string) (intmodel.ContainerState, error) {
+					return intmodel.ContainerStateStopped, nil
+				}
+			},
+			wantResult: func(t *testing.T, result controller.GetCellResult) {
+				if !result.RootContainerExists {
+					t.Error("expected RootContainerExists to be true (record survives restart)")
+				}
+				if result.RootContainerTaskRunning {
+					t.Error("expected RootContainerTaskRunning to be false (task gone)")
+				}
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -470,6 +546,33 @@ func TestGetCell_RunnerErrors(t *testing.T) {
 			},
 			wantErr:     nil,
 			errContains: "failed to check root container",
+		},
+		{
+			name:      "root container task check fails",
+			cellName:  "test-cell",
+			realmName: "test-realm",
+			spaceName: "test-space",
+			stackName: "test-stack",
+			setupRunner: func(f *fakeRunner) {
+				cell := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
+				cell.Spec.Containers = []intmodel.ContainerSpec{
+					{ID: "root", Root: true},
+				}
+				f.GetCellFn = func(_ intmodel.Cell) (intmodel.Cell, error) {
+					return cell, nil
+				}
+				f.ExistsCgroupFn = func(_ any) (bool, error) {
+					return true, nil
+				}
+				f.ExistsCellRootContainerFn = func(_ intmodel.Cell) (bool, error) {
+					return true, nil
+				}
+				f.GetContainerStateFn = func(_ intmodel.Cell, _ string) (intmodel.ContainerState, error) {
+					return intmodel.ContainerStateUnknown, errors.New("task status query failed")
+				}
+			},
+			wantErr:     nil,
+			errContains: "failed to check root container task",
 		},
 	}
 
