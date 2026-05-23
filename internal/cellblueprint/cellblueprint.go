@@ -25,13 +25,12 @@
 package cellblueprint
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/cellprofile"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"gopkg.in/yaml.v3"
 )
@@ -41,10 +40,6 @@ import (
 // every cell produced by `kuke run -b` so operators can list all instances
 // with `kuke get cells -l kukeon.io/blueprint=<name>`.
 const LabelBlueprint = "kukeon.io/blueprint"
-
-// nameSuffixBytes is the entropy width for the `<prefix>-<6hex>` suffix —
-// 3 bytes → 6 lowercase hex chars, matching cellprofile.
-const nameSuffixBytes = 3
 
 // Resolve substitutes `${KEY}` scalar parameters in the blueprint body against
 // the resolution order cliParams[k] > parameters[k].default > lookupEnv(k),
@@ -268,19 +263,11 @@ func resolveCellName(doc v1beta1.CellBlueprintDoc, nameOverride string) (string,
 	if prefix == "" {
 		prefix = doc.Metadata.Name
 	}
-	suffix, err := randomHexSuffix()
+	suffix, err := naming.RandomHexSuffix(naming.DefaultCellNameSuffixBytes)
 	if err != nil {
 		return "", fmt.Errorf("generate name suffix for blueprint %q: %w", doc.Metadata.Name, err)
 	}
 	return prefix + "-" + suffix, nil
-}
-
-func randomHexSuffix() (string, error) {
-	b := make([]byte, nameSuffixBytes)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
 }
 
 func cloneCellTty(in *v1beta1.CellTty) *v1beta1.CellTty {

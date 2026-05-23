@@ -17,21 +17,14 @@
 package cellconfig
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/cellblueprint"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
-
-// nameSuffixBytes is the entropy width for the `<config-name>-<6hex>` suffix
-// used by `kuke run -c --generate-name` (#754) — 3 bytes → 6 lowercase hex
-// chars, matching cellblueprint's `<prefix>-<6hex>` shape so the generated
-// `-c` cells are visually indistinguishable from `-b`/`-p` generated cells.
-const nameSuffixBytes = 3
 
 // Materialize converts a CellConfig + its referenced CellBlueprint into a
 // runtime CellDoc (issue #625). It is the config analog of
@@ -282,9 +275,9 @@ func cloneCellTty(in *v1beta1.CellTty) *v1beta1.CellTty {
 // visually indistinguishable from generated-cell-per-invocation spawns of the
 // other run verbs while preserving the kukeon.io/config back-reference label.
 func GenerateName(configName string) (string, error) {
-	b := make([]byte, nameSuffixBytes)
-	if _, err := rand.Read(b); err != nil {
+	suffix, err := naming.RandomHexSuffix(naming.DefaultCellNameSuffixBytes)
+	if err != nil {
 		return "", fmt.Errorf("config %q: generate cell name suffix: %w", configName, err)
 	}
-	return strings.TrimSpace(configName) + "-" + hex.EncodeToString(b), nil
+	return strings.TrimSpace(configName) + "-" + suffix, nil
 }
