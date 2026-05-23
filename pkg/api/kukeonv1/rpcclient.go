@@ -784,3 +784,19 @@ func (c *UnixClient) Ping(ctx context.Context) error {
 	}
 	return nil
 }
+
+// PingVersion returns the daemon's reported build version. The wire reply
+// has carried Version since the RPC's introduction; the helper exposes it
+// to callers (notably `kuke status`) without forcing them to hand-roll the
+// Ping wire.
+func (c *UnixClient) PingVersion(ctx context.Context) (string, error) {
+	args := &PingArgs{}
+	reply := &PingReply{}
+	if err := c.call(ctx, MethodPing, args, reply); err != nil {
+		return "", err
+	}
+	if reply.Err != nil {
+		return "", FromAPIError(reply.Err)
+	}
+	return reply.Version, nil
+}

@@ -1243,5 +1243,15 @@ func (c *Client) Ping(_ context.Context) error {
 	return nil
 }
 
+// PingVersion returns the empty string for the in-process branch: there
+// is no separate daemon to interrogate, and pulling the running
+// binary's version here would force this package to import cmd/config,
+// reintroducing the autocomplete cycle (cmd/config → internal/client/local).
+// `kuke status` only calls PingVersion on the daemon-RPC client; the
+// in-process branch implements it just to satisfy the interface.
+func (c *Client) PingVersion(_ context.Context) (string, error) {
+	return "", nil
+}
+
 // Verify interface compliance at compile time.
 var _ kukeonv1.Client = (*Client)(nil)
