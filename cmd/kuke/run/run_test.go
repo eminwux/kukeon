@@ -1225,12 +1225,16 @@ func TestRun_MissingFileAndProfile_Errors(t *testing.T) {
 	cmd.SetArgs([]string{})
 
 	err := cmd.Execute()
-	// MarkFlagsOneRequired produces "at least one of the flags in the group
-	// [file profile blueprint config] is required" — match on the stable
-	// group listing rather than the exact wording so a cobra phrasing change
-	// doesn't break the test.
-	if err == nil || !strings.Contains(err.Error(), "[file profile blueprint config]") {
-		t.Fatalf("err=%v want one-of error naming the file/profile/blueprint/config group", err)
+	// Issue #813: the cobra MarkFlagsOneRequired group no longer spans the
+	// CellConfig source (now positional), so parseRunFlags hand-rolls the
+	// at-least-one check. Match on the stable phrasing it emits — naming all
+	// four sources — rather than the prior cobra group listing.
+	if err == nil ||
+		!strings.Contains(err.Error(), "<config>") ||
+		!strings.Contains(err.Error(), "-f/--file") ||
+		!strings.Contains(err.Error(), "-p/--profile") ||
+		!strings.Contains(err.Error(), "-b/--blueprint") {
+		t.Fatalf("err=%v want one-of error naming the <config>/-f/-p/-b sources", err)
 	}
 }
 
@@ -1252,6 +1256,16 @@ func TestNewRunCmd_AutocompleteRegistration(t *testing.T) {
 	outputFlag := cmd.Flags().Lookup("output")
 	if outputFlag == nil || outputFlag.Shorthand != "o" {
 		t.Errorf("expected -o/--output flag, got %+v", outputFlag)
+	}
+	// Issue #813: the CellConfig source moved from `-c/--config` to the
+	// optional positional argument. Assert the flag is gone and the positional
+	// completer is wired so a regression that re-adds `-c` or drops the
+	// completer wiring fails this test.
+	if f := cmd.Flags().Lookup("config"); f != nil {
+		t.Errorf("`config` flag must be removed (#813); got %+v", f)
+	}
+	if cmd.ValidArgsFunction == nil {
+		t.Error("ValidArgsFunction must be wired to CompleteConfigNames for the positional <config> arg")
 	}
 }
 
@@ -2831,7 +2845,7 @@ func TestRun_FromConfig_CreatesWithStableNameAndBackRef(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-c", "prod", "--realm", "cfg-realm", "-d"})
+	cmd.SetArgs([]string{"prod", "--realm", "cfg-realm", "-d"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -2906,7 +2920,7 @@ func TestRun_FromConfig_LiveReadyCell_AttachesWithoutCreate(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-c", "prod", "--realm", "cfg-realm", "-d"})
+	cmd.SetArgs([]string{"prod", "--realm", "cfg-realm", "-d"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -2939,7 +2953,7 @@ func TestRun_FromConfig_LiveStoppedCell_StartsThenAttaches(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-c", "prod", "--realm", "cfg-realm", "-d"})
+	cmd.SetArgs([]string{"prod", "--realm", "cfg-realm", "-d"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -2972,7 +2986,7 @@ func TestRun_FromConfig_LiveFailedCell_RefusesWithDeletePointer(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-c", "prod", "--realm", "cfg-realm", "-d"})
+	cmd.SetArgs([]string{"prod", "--realm", "cfg-realm", "-d"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -3024,7 +3038,7 @@ func TestRun_FromConfig_DivergentSpec_RefusesAndPointsToApply(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-c", "prod", "--realm", "cfg-realm", "-d"})
+	cmd.SetArgs([]string{"prod", "--realm", "cfg-realm", "-d"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -3117,7 +3131,7 @@ func TestRun_FromConfig_NotFound_Errors(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-c", "ghost", "--realm", "cfg-realm", "-d"})
+	cmd.SetArgs([]string{"ghost", "--realm", "cfg-realm", "-d"})
 
 	err := cmd.Execute()
 	if err == nil || !errors.Is(err, errdefs.ErrConfigNotFound) {
@@ -3140,7 +3154,7 @@ func TestRun_FromConfig_BlueprintMissing_Errors(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-c", "prod", "--realm", "cfg-realm", "-d"})
+	cmd.SetArgs([]string{"prod", "--realm", "cfg-realm", "-d"})
 
 	err := cmd.Execute()
 	if err == nil || !errors.Is(err, errdefs.ErrBlueprintNotFound) {
@@ -3159,9 +3173,21 @@ func TestRun_FromConfig_RejectsParamFlags(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"--param", []string{"-c", "prod", "--param", "K=V", "-d"}, "--param is not valid with -c"},
-		{"--param-file", []string{"-c", "prod", "--param-file", "/tmp/p", "-d"}, "--param-file is not valid with -c"},
-		{"--name", []string{"-c", "prod", "--name", "pinned", "-d"}, "--name is not valid with -c"},
+		{
+			"--param",
+			[]string{"prod", "--param", "K=V", "-d"},
+			"--param is not valid with the <config> positional",
+		},
+		{
+			"--param-file",
+			[]string{"prod", "--param-file", "/tmp/p", "-d"},
+			"--param-file is not valid with the <config> positional",
+		},
+		{
+			"--name",
+			[]string{"prod", "--name", "pinned", "-d"},
+			"--name is not valid with the <config> positional",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Cleanup(viper.Reset)
@@ -3176,20 +3202,61 @@ func TestRun_FromConfig_RejectsParamFlags(t *testing.T) {
 	}
 }
 
-func TestRun_RunVerbMutex_RejectsCAndB(t *testing.T) {
-	t.Cleanup(viper.Reset)
+// TestRun_PositionalConfig_MutexWithFlagSources covers issue #813's AC: the
+// <config> positional is rejected when combined with -b/-f/-p; the rejection
+// message names all four sources so the operator sees the full set without
+// re-running with --help.
+func TestRun_PositionalConfig_MutexWithFlagSources(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			"-b conflicts with positional",
+			[]string{"prod", "-b", "web", "--realm", "cfg-realm", "-d"},
+			"the <config> positional is mutually exclusive with -b/--blueprint",
+		},
+		{
+			"-f conflicts with positional",
+			[]string{"prod", "-f", "/tmp/never-read.yaml", "-d"},
+			"the <config> positional is mutually exclusive with -f/--file",
+		},
+		{
+			"-p conflicts with positional",
+			[]string{"prod", "-p", "shell", "-d"},
+			"the <config> positional is mutually exclusive with -p/--profile",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			fc := &fakeClient{}
+			cmd, _ := newCmd(t, fc)
+			cmd.SetArgs(tc.args)
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err=%v want substring %q", err, tc.want)
+			}
+		})
+	}
+}
 
+// TestRun_PositionalConfig_TooManyArgs covers the cobra.MaximumNArgs(1) gate:
+// the operator can pass at most one positional. A second positional must be
+// rejected so a stray argument is surfaced rather than silently dropped.
+func TestRun_PositionalConfig_TooManyArgs(t *testing.T) {
+	t.Cleanup(viper.Reset)
 	fc := &fakeClient{}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-c", "prod", "-b", "web", "--realm", "cfg-realm", "-d"})
+	cmd.SetArgs([]string{"prod", "stray", "-d"})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatalf("Execute err=nil want mutex rejection of -c with -b")
+		t.Fatalf("Execute err=nil want cobra rejection of >1 positional arg")
 	}
 }
 
 // TestRun_FromConfig_GenerateName_FreshCellPerInvocation covers AC #1+#2 of #754:
-// `kuke run -c <config> -g` materializes a fresh <config-name>-<6hex> cell on
+// `kuke run <config> -g` materializes a fresh <config-name>-<6hex> cell on
 // each invocation, and the cell carries the kukeon.io/config=<config-name>
 // lineage label so `kuke get cells -l kukeon.io/config=<name>` still enumerates
 // every spawn.
@@ -3230,7 +3297,7 @@ func TestRun_FromConfig_GenerateName_FreshCellPerInvocation(t *testing.T) {
 			createCellFn: createCell,
 		}
 		cmd, _ := newCmd(t, fc)
-		cmd.SetArgs([]string{"-c", "prod", "-g", "--realm", "cfg-realm", "-d"})
+		cmd.SetArgs([]string{"prod", "-g", "--realm", "cfg-realm", "-d"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("Execute (iteration %d): %v", i, err)
 		}
@@ -3286,7 +3353,7 @@ func TestRun_FromConfig_NoGenerateName_UsesStableName(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-c", "prod", "--realm", "cfg-realm", "-d"})
+	cmd.SetArgs([]string{"prod", "--realm", "cfg-realm", "-d"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -3303,7 +3370,7 @@ func TestRun_FromConfig_GenerateNameAndName_MutuallyExclusive(t *testing.T) {
 
 	fc := &fakeClient{}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-c", "prod", "-g", "--name", "pinned", "--realm", "cfg-realm", "-d"})
+	cmd.SetArgs([]string{"prod", "-g", "--name", "pinned", "--realm", "cfg-realm", "-d"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatalf("Execute err=nil want mutex rejection of --name with --generate-name")
@@ -3341,7 +3408,7 @@ func TestRun_FromConfig_GenerateNameWithRm_SetsAutoDelete(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-c", "prod", "-g", "--rm", "--realm", "cfg-realm", "-d"})
+	cmd.SetArgs([]string{"prod", "-g", "--rm", "--realm", "cfg-realm", "-d"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -3359,7 +3426,8 @@ func TestRun_FromConfig_GenerateNameWithRm_SetsAutoDelete(t *testing.T) {
 }
 
 // TestRun_GenerateName_OnlyValidWithConfig covers the defensive UX guard: -g
-// is a -c-only flag. Allowing it silently on -f (where metadata.name is
+// is a CellConfig-only knob (only the <config> positional reaches the daemon-
+// stored CellConfig path). Allowing it silently on -f (where metadata.name is
 // authoritative) or -p/-b (which already generate <prefix>-<6hex>) would seed
 // a wrong mental model that -g toggles a default that isn't actually flipped.
 func TestRun_GenerateName_OnlyValidWithConfig(t *testing.T) {
@@ -3371,17 +3439,17 @@ func TestRun_GenerateName_OnlyValidWithConfig(t *testing.T) {
 		{
 			"-f rejects -g",
 			[]string{"-f", "/tmp/never-read.yaml", "-g", "-d"},
-			"--generate-name is only valid with -c/--config",
+			"--generate-name is only valid with the <config> positional",
 		},
 		{
 			"-p rejects -g",
 			[]string{"-p", "shell", "-g", "-d"},
-			"--generate-name is only valid with -c/--config",
+			"--generate-name is only valid with the <config> positional",
 		},
 		{
 			"-b rejects -g",
 			[]string{"-b", "web", "-g", "-d"},
-			"--generate-name is only valid with -c/--config",
+			"--generate-name is only valid with the <config> positional",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
