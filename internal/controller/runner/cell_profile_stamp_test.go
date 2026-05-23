@@ -19,7 +19,6 @@ package runner
 import (
 	"testing"
 
-	"github.com/eminwux/kukeon/internal/cellprofile"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
@@ -31,7 +30,7 @@ func TestStampCellProfileNameOnContainers(t *testing.T) {
 	cell := &intmodel.Cell{
 		Metadata: intmodel.CellMetadata{
 			Name:   "kukeon-pr-a4aaab",
-			Labels: map[string]string{cellprofile.LabelProfile: "kukeon-pr"},
+			Labels: map[string]string{labelCellProfileLegacy: "kukeon-pr"},
 		},
 		Spec: intmodel.CellSpec{
 			Containers: []intmodel.ContainerSpec{
@@ -90,7 +89,7 @@ func TestStampCellProfileNameOnContainers_NilSafe(_ *testing.T) {
 func TestStampCellProfileNameOnContainerSpec(t *testing.T) {
 	cell := &intmodel.Cell{
 		Metadata: intmodel.CellMetadata{
-			Labels: map[string]string{cellprofile.LabelProfile: "kukeon-pr"},
+			Labels: map[string]string{labelCellProfileLegacy: "kukeon-pr"},
 		},
 	}
 	root := &intmodel.ContainerSpec{ID: "root"}

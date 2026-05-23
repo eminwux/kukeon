@@ -323,17 +323,9 @@ var (
 	// returns the cryptic `invalid argument` (issue #521).
 	ErrSocketPathTooLong = errors.New("host-side kuketty socket path exceeds SUN_PATH")
 
-	// Profile-related errors.
-
-	// ErrProfileNotFound is returned when `kuke run -p <name>` cannot find
-	// a CellProfile under the active profiles directory. Wrapped errors
-	// must name the profile and the directory searched so the operator
-	// knows which file to drop.
-	ErrProfileNotFound = errors.New("profile not found")
-
-	// ErrProfileInvalid is returned when a CellProfile YAML fails to parse
-	// or violates the schema (missing kind, missing metadata.name, etc.).
-	ErrProfileInvalid = errors.New("profile is invalid")
+	// (Profile-related sentinels — ErrProfileNotFound, ErrProfileInvalid —
+	// were removed in #626 alongside the CellProfile kind. Blueprint
+	// equivalents below cover the surviving paths.)
 
 	// ErrServerConfigurationInvalid is returned when a ServerConfiguration
 	// YAML fails to parse or violates the schema (wrong kind, etc.).
@@ -430,9 +422,10 @@ var (
 	ErrBlueprintStructuralSlots = errors.New(
 		"blueprint declares structural slots that require a CellConfig: inline `kuke run -b` fills scalar parameters only",
 	)
-	// ErrBlueprintInvalid is returned when `kuke run -b` cannot resolve a
-	// blueprint's scalar parameters (an undeclared --param key, or a required
-	// parameter left unset). The analog of ErrProfileInvalid for the -b path.
+	// ErrBlueprintInvalid is returned when `kuke run -b` / `kuke apply -b`
+	// cannot resolve a blueprint's scalar parameters (an undeclared --param
+	// key, a required parameter left unset, or a malformed --param/--param-file
+	// argument).
 	ErrBlueprintInvalid = errors.New("blueprint is invalid")
 
 	// CellBlueprint slot-declaration shape errors (issue #620).

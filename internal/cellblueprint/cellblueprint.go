@@ -15,20 +15,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package cellblueprint resolves daemon-stored CellBlueprint templates into
-// CellDocs for `kuke run -b`. It is the blueprint analog of the cellprofile
-// package: scalar `${KEY}` substitution (shared with cellprofile via
-// SubstituteScalars), a fresh `<prefix>-<6hex>` cell name per invocation, and a
-// kukeon.io/blueprint back-reference label. Structural slots (secret slots,
-// repo slots with no url) are *not* fillable inline — they require a CellConfig
-// (`kuke run -c`, #625) — so materialization drops unfilled optional slots and
-// refuses unfilled required ones.
+// CellDocs for `kuke run -b`. It supplies scalar `${KEY}` substitution (via
+// substituteScalars in params.go), generates a fresh `<prefix>-<6hex>` cell
+// name per invocation, and stamps a kukeon.io/blueprint back-reference label.
+// Structural slots (secret slots, repo slots with no url) are *not* fillable
+// inline — they require a CellConfig (`kuke run -c`, #625) — so
+// materialization drops unfilled optional slots and refuses unfilled required
+// ones.
 package cellblueprint
 
 import (
 	"fmt"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/cellprofile"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -36,16 +35,14 @@ import (
 )
 
 // LabelBlueprint is the cell label recording the CellBlueprint a cell was
-// materialized from, the blueprint analog of cellprofile.LabelProfile. Set on
-// every cell produced by `kuke run -b` so operators can list all instances
-// with `kuke get cells -l kukeon.io/blueprint=<name>`.
+// materialized from. Set on every cell produced by `kuke run -b` so operators
+// can list all instances with `kuke get cells -l kukeon.io/blueprint=<name>`.
 const LabelBlueprint = "kukeon.io/blueprint"
 
 // Resolve substitutes `${KEY}` scalar parameters in the blueprint body against
 // the resolution order cliParams[k] > parameters[k].default > lookupEnv(k),
-// returning a resolved copy of the document. It mirrors
-// cellprofile.LoadResolved's contract (issue #355) for the daemon-stored
-// blueprint path:
+// returning a resolved copy of the document. Contract (issue #355) for the
+// daemon-stored blueprint path:
 //
 //   - an undeclared --param key errors (typo at call time);
 //   - a parameter declared required that resolves to no value errors;
@@ -72,7 +69,7 @@ func Resolve(
 		return v1beta1.CellBlueprintDoc{}, fmt.Errorf("blueprint %q: parse for substitution: %w", doc.Metadata.Name, unmarshalErr)
 	}
 
-	cellprofile.SubstituteScalars(&node, values)
+	substituteScalars(&node, values)
 
 	var out v1beta1.CellBlueprintDoc
 	if decodeErr := node.Decode(&out); decodeErr != nil {
@@ -86,8 +83,8 @@ func Resolve(
 
 // resolveValues validates cliParams against the declared parameters and builds
 // the substitution value map. The substitution leaves `default` declarations
-// themselves untouched (cellprofile.SubstituteScalars rewrites every scalar,
-// but a missing key is left literal; declared params are always in the map).
+// themselves untouched (substituteScalars rewrites every scalar, but a missing
+// key is left literal; declared params are always in the map).
 func resolveValues(
 	doc v1beta1.CellBlueprintDoc,
 	cliParams map[string]string,
@@ -135,8 +132,8 @@ func resolveValues(
 	return values, nil
 }
 
-// Materialize converts a resolved blueprint into a CellDoc, equivalent to
-// cellprofile.Materialize for the -b path. See MaterializeWithName.
+// Materialize converts a resolved blueprint into a CellDoc. See
+// MaterializeWithName for the override-aware form.
 func Materialize(doc v1beta1.CellBlueprintDoc) (v1beta1.CellDoc, error) {
 	return MaterializeWithName(doc, "")
 }

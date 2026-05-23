@@ -189,6 +189,18 @@ func ParseDocument(index int, raw []byte) (*Document, error) {
 		doc.APIVersion = configDoc.APIVersion
 
 	default:
+		// kind: CellProfile was removed in #626. Give the operator an
+		// explicit migration pointer instead of the generic unknown-kind
+		// error, since a YAML written for the old kind is a common stumble
+		// during the cutover.
+		if kind == "CellProfile" {
+			return nil, fmt.Errorf(
+				"document %d: %w: %s (the CellProfile kind was removed in #626 — "+
+					"convert to kind: CellBlueprint and use `kuke run -b` / `kuke run -c`; "+
+					"see docs/site/guides/migrate-cellprofile-to-blueprint.md)",
+				index, errdefs.ErrUnknownKind, kind,
+			)
+		}
 		return nil, fmt.Errorf("document %d: %w: %s", index, errdefs.ErrUnknownKind, kind)
 	}
 

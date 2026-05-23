@@ -486,8 +486,6 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_CONTAINER = DefineKV("KUKE_RUN_CONTAINER", "kuke/run/container")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_RUN_PROFILE = DefineKV("KUKE_RUN_PROFILE", "kuke/run/profile")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_BLUEPRINT = DefineKV("KUKE_RUN_BLUEPRINT", "kuke/run/blueprint")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_RM = DefineKV("KUKE_RUN_RM", "kuke/run/rm")

@@ -102,7 +102,7 @@ EOF
 
 `kuke autocomplete zsh` and `kuke autocomplete fish` are also supported.
 
-Completions are dynamic: every tab dispatches through `kuke __complete`, so newly added profiles, realms, and cells (and `$KUKE_PROFILES_DIR` overrides) are picked up on the next tab without re-sourcing the script.
+Completions are dynamic: every tab dispatches through `kuke __complete`, so newly added blueprints, configs, realms, and cells are picked up on the next tab without re-sourcing the script.
 
 ## Documentation
 

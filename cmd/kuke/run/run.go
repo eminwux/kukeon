@@ -15,9 +15,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package run implements the `kuke run` verb. The `-f <file>` form parses a
-// single-cell YAML doc and idempotently create-and-starts the cell; the
-// `-p/--profile` form materializes a CellDoc from a per-user CellProfile under
-// $HOME/.kuke/profiles.d (or $KUKE_PROFILES_DIR) and walks the same path.
+// single-cell YAML doc and idempotently create-and-starts the cell; the `-b`
+// and `-c` forms resolve a daemon-stored CellBlueprint or CellConfig and walk
+// the same create-or-attach state machine. The legacy `-p/--profile` form
+// (client-side CellProfile loader under $HOME/.kuke/profiles.d) was removed
+// in #626 — it is intercepted at flag-parse time and replaced with a
+// migration pointer.
 //
 // `kuke run` attaches to the cell's attachable container by default, matching
 // `docker run` and `kubectl run -it`. Pass `-d/--detach` to return immediately
@@ -38,7 +41,6 @@ import (
 	"github.com/eminwux/kukeon/internal/apply/parser"
 	"github.com/eminwux/kukeon/internal/cellblueprint"
 	"github.com/eminwux/kukeon/internal/cellconfig"
-	"github.com/eminwux/kukeon/internal/cellprofile"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -46,22 +48,29 @@ import (
 	"github.com/spf13/viper"
 )
 
+// errRemovedProfileFlag is the migration-pointer error swapped in by the
+// SetFlagErrorFunc below when the operator types the removed `-p`/`--profile`
+// flag. Defined once so tests can match on it via errors.Is.
+var errRemovedProfileFlag = errors.New(
+	"kuke run: -p/--profile (CellProfile) was removed in #626 — apply a " +
+		"kind: CellBlueprint and use `kuke run -b <name>` (or `kuke run -c <config>` " +
+		"for a daemon-stored CellConfig); see docs/site/guides/migrate-cellprofile-to-blueprint.md",
+)
+
 // MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
 // NewRunCmd builds the `kuke run` cobra command. The optional positional arg
-// names a daemon-stored CellConfig; `-f` reads a single-cell YAML doc; `-p`
-// reads a per-user CellProfile; `-b` names a daemon-stored CellBlueprint.
-// Exactly one of the four is required. By default, after the cell starts the
-// CLI drops the operator into the cell's attachable terminal; `-d/--detach`
-// opts out of the post-start attach.
+// names a daemon-stored CellConfig; `-f` reads a single-cell YAML doc; `-b`
+// names a daemon-stored CellBlueprint. Exactly one of the three is required.
+// By default, after the cell starts the CLI drops the operator into the
+// cell's attachable terminal; `-d/--detach` opts out of the post-start attach.
 func NewRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "run [<config> | -f <file> | -p <profile> | -b <blueprint>]",
-		Short: "Create and start a single cell from a daemon-stored CellConfig (positional), a YAML file, a profile, or a daemon-stored blueprint",
+		Use:   "run [<config> | -f <file> | -b <blueprint>]",
+		Short: "Create and start a single cell from a daemon-stored CellConfig (positional), a YAML file, or a daemon-stored blueprint",
 		Long: "Create and start a single cell from a daemon-stored CellConfig " +
-			"(positional `<config>` name), from a YAML file or stdin (-f), from a " +
-			"per-user profile under $HOME/.kuke/profiles.d/<name>.yaml (-p), or from " +
+			"(positional `<config>` name), from a YAML file or stdin (-f), or from " +
 			"a daemon-stored CellBlueprint (-b), resolved from the scope named by " +
 			"--realm/--space/--stack. The positional `<config>` is the highest-frequency " +
 			"path (daily dev-cell spawn-and-attach); the other sources stay flag-driven " +
@@ -95,7 +104,7 @@ func NewRunCmd() *cobra.Command {
 			"`kuke delete cell <name>` pointer. To re-attach to an existing cell use " +
 			"`kuke attach <cell>`. --env KEY=VALUE is the orthogonal runtime knob " +
 			"(repeatable; per-invocation injection into the attachable container's env at " +
-			"start time). It works with every source (positional, -f, -p, -b) and every " +
+			"start time). It works with every source (positional, -f, -b) and every " +
 			"identity flag (--new, --clone, --reuse); the entries do not change the cell " +
 			"spec and do not persist, so the divergent-spec check above does not trip on " +
 			"prior --env-injected keys.",
@@ -106,24 +115,34 @@ func NewRunCmd() *cobra.Command {
 		RunE:              runRun,
 	}
 
-	cmd.Flags().
-		StringP("file", "f", "", "File to read YAML from (use - for stdin); mutually exclusive with the <config> positional and -p/-b")
-	_ = viper.BindPFlag(config.KUKE_RUN_FILE.ViperKey, cmd.Flags().Lookup("file"))
+	// Intercept pflag's "unknown shorthand flag: 'p'" / "unknown flag: --profile"
+	// at parse time and swap in the migration pointer — issue #626 removed the
+	// -p/--profile flag, and a generic cobra error wouldn't name the replacement.
+	// Other unknown-flag errors fall through unchanged.
+	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		if err == nil {
+			return nil
+		}
+		msg := err.Error()
+		if strings.Contains(msg, "shorthand flag: 'p'") || strings.Contains(msg, "flag: --profile") {
+			return errRemovedProfileFlag
+		}
+		return err
+	})
 
-	cmd.Flags().StringP("profile", "p", "",
-		"Cell profile name to load from $HOME/.kuke/profiles.d (or $KUKE_PROFILES_DIR); mutually exclusive with -f/-b and the <config> positional. "+
-			"Deprecated: apply a kind: CellBlueprint and use -b (or pass the <config> positional for a CellConfig) instead.")
-	_ = viper.BindPFlag(config.KUKE_RUN_PROFILE.ViperKey, cmd.Flags().Lookup("profile"))
+	cmd.Flags().
+		StringP("file", "f", "", "File to read YAML from (use - for stdin); mutually exclusive with the <config> positional and -b")
+	_ = viper.BindPFlag(config.KUKE_RUN_FILE.ViperKey, cmd.Flags().Lookup("file"))
 
 	cmd.Flags().StringP("blueprint", "b", "",
 		"Daemon-stored CellBlueprint name to run, resolved from the scope named by "+
-			"--realm/--space/--stack; mutually exclusive with -f/-p and the <config> positional. Substitutes scalar --param "+
+			"--realm/--space/--stack; mutually exclusive with -f and the <config> positional. Substitutes scalar --param "+
 			"values and materializes a fresh <prefix>-<6hex> cell.")
 	_ = viper.BindPFlag(config.KUKE_RUN_BLUEPRINT.ViperKey, cmd.Flags().Lookup("blueprint"))
 
 	cmd.Flags().String("name", "",
 		"Override the materialized cell name (default: <metadata.name>-<6hex>). "+
-			"Valid with -p/-b; rejected with -f, where metadata.name is the cell name "+
+			"Valid with -b; rejected with -f, where metadata.name is the cell name "+
 			"verbatim. Valid with the <config> positional: `<config> --name X` does "+
 			"idempotent attach to cell X using the Config's spec; `<config> --new "+
 			"--name X` is the create-or-fail variant (fail if X exists). Without "+
@@ -138,7 +157,7 @@ func NewRunCmd() *cobra.Command {
 			"to pin a specific cell name (create-or-fail: `--new --name X` fails if cell X "+
 			"already exists in the realm) and with --rm (one-shot ephemeral cell). Only "+
 			"valid with the <config> positional — rejected with -f (where metadata.name is the "+
-			"cell name verbatim) and redundant for -p/-b (which already generate a fresh name). "+
+			"cell name verbatim) and redundant for -b (which already generates a fresh name). "+
 			"Mutually exclusive with --clone (which forks a persistent clone Config) "+
 			"and --reuse (which restarts an existing clone). For multi-instance from one Config use --clone instead.")
 	_ = viper.BindPFlag(config.KUKE_RUN_NEW.ViperKey, cmd.Flags().Lookup("new"))
@@ -186,7 +205,7 @@ func NewRunCmd() *cobra.Command {
 			"container's spec env OVERRIDES the spec value. --env is the per-invocation knob "+
 			"(runtime; does not change the cell spec); for render-time spec substitution use "+
 			"--param (blueprint path only). Valid with all source paths (the <config> "+
-			"positional, -f, -p, -b) and all identity flags (--new, --clone, --reuse). The "+
+			"positional, -f, -b) and all identity flags (--new, --clone, --reuse). The "+
 			"injected entries do NOT persist into the cell metadata, so the divergent-spec "+
 			"check on a subsequent `kuke run <config>` (without --env) does not trip on the "+
 			"prior injection. With --reuse, each invocation re-injects against the restarted "+
@@ -198,7 +217,7 @@ func NewRunCmd() *cobra.Command {
 	// not bound here.
 
 	cmd.Flags().StringArray("param", nil,
-		"Scalar parameter override as KEY=VALUE; repeatable. Valid with -p/-b. "+
+		"Scalar parameter override as KEY=VALUE; repeatable. Valid with -b. "+
 			"Each KEY must be declared in spec.parameters[]. Wins over the parameter's "+
 			"default and over --param-file when both set the same key. Rejected with the "+
 			"<config> positional: a CellConfig carries its own spec.values, edit the Config instead.")
@@ -214,7 +233,7 @@ func NewRunCmd() *cobra.Command {
 	// sources; parseRunFlags hand-rolls the positional-vs-flag mutex and the
 	// "exactly one source required" check (cobra has no MarkFlagsOneRequired
 	// equivalent that spans flags + positionals).
-	cmd.MarkFlagsMutuallyExclusive("file", "profile", "blueprint")
+	cmd.MarkFlagsMutuallyExclusive("file", "blueprint")
 	// Identity-flag mutex on the <config> path (#839): --new and --clone are
 	// distinct operations (ephemeral cell vs. fork the Config). The
 	// `--clone ↔ --rm` mutex lands below after the --rm flag itself is
@@ -280,7 +299,6 @@ func NewRunCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
 	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
-	_ = cmd.RegisterFlagCompletionFunc("profile", config.CompleteProfileNames)
 	_ = cmd.RegisterFlagCompletionFunc("blueprint", config.CompleteBlueprintNames)
 	// The positional <config> is wired via ValidArgsFunction on the cobra
 	// command above (where `-c` previously routed flag completion).
@@ -293,7 +311,6 @@ func NewRunCmd() *cobra.Command {
 // while preserving the original control flow.
 type runFlags struct {
 	file          string
-	profileName   string
 	blueprintName string
 	configName    string
 	output        string
@@ -316,11 +333,11 @@ type runFlags struct {
 }
 
 // validateSourceMutex enforces the "exactly one source" contract across the
-// four `kuke run` inputs after issue #813 moved CellConfig from `-c/--config`
+// three `kuke run` inputs after issue #813 moved CellConfig from `-c/--config`
 // to the positional `<config>` argument. Cobra's MarkFlagsMutuallyExclusive
 // / MarkFlagsOneRequired only span flags, so this check hand-rolls the
 // positional-vs-flag mutex and the at-least-one-source guard; the
-// flag-vs-flag mutex among `-f`/`-p`/`-b` stays cobra-side in NewRunCmd.
+// flag-vs-flag mutex among `-f`/`-b` stays cobra-side in NewRunCmd.
 // Pulling the branches out of parseRunFlags keeps gocyclo within its
 // budget for the larger validator.
 func validateSourceMutex(flags runFlags) error {
@@ -329,20 +346,16 @@ func validateSourceMutex(flags runFlags) error {
 		case flags.file != "":
 			return errors.New(
 				"the <config> positional is mutually exclusive with -f/--file " +
-					"(pick one source: <config>, -f, -p, or -b)")
-		case flags.profileName != "":
-			return errors.New(
-				"the <config> positional is mutually exclusive with -p/--profile " +
-					"(pick one source: <config>, -f, -p, or -b)")
+					"(pick one source: <config>, -f, or -b)")
 		case flags.blueprintName != "":
 			return errors.New(
 				"the <config> positional is mutually exclusive with -b/--blueprint " +
-					"(pick one source: <config>, -f, -p, or -b)")
+					"(pick one source: <config>, -f, or -b)")
 		}
 	}
-	if flags.configName == "" && flags.file == "" && flags.profileName == "" && flags.blueprintName == "" {
+	if flags.configName == "" && flags.file == "" && flags.blueprintName == "" {
 		return errors.New(
-			"at least one of <config> (positional), -f/--file, -p/--profile, or -b/--blueprint is required")
+			"at least one of <config> (positional), -f/--file, or -b/--blueprint is required")
 	}
 	return nil
 }
@@ -350,7 +363,6 @@ func validateSourceMutex(flags runFlags) error {
 func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 	flags := runFlags{
 		file:          strings.TrimSpace(viper.GetString(config.KUKE_RUN_FILE.ViperKey)),
-		profileName:   strings.TrimSpace(viper.GetString(config.KUKE_RUN_PROFILE.ViperKey)),
 		blueprintName: strings.TrimSpace(viper.GetString(config.KUKE_RUN_BLUEPRINT.ViperKey)),
 		detach:        viper.GetBool(config.KUKE_RUN_DETACH.ViperKey),
 		containerFlag: strings.TrimSpace(viper.GetString(config.KUKE_RUN_CONTAINER.ViperKey)),
@@ -406,17 +418,17 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 	}
 	if flags.file != "" {
 		// --name, --param, --param-file are template knobs (per issue #355)
-		// shared by the -p and -b paths. With -f the file's metadata.name is
-		// authoritative and the substitution surface doesn't apply, so reject
-		// the combination rather than silently dropping the flag.
+		// for the -b path. With -f the file's metadata.name is authoritative
+		// and the substitution surface doesn't apply, so reject the
+		// combination rather than silently dropping the flag.
 		if flags.nameOverride != "" {
-			return runFlags{}, errors.New("--name is only valid with -p/--profile or -b/--blueprint")
+			return runFlags{}, errors.New("--name is only valid with -b/--blueprint")
 		}
 		if len(flags.paramArgs) > 0 {
-			return runFlags{}, errors.New("--param is only valid with -p/--profile or -b/--blueprint")
+			return runFlags{}, errors.New("--param is only valid with -b/--blueprint")
 		}
 		if flags.paramFile != "" {
-			return runFlags{}, errors.New("--param-file is only valid with -p/--profile or -b/--blueprint")
+			return runFlags{}, errors.New("--param-file is only valid with -b/--blueprint")
 		}
 		if flags.newCell {
 			return runFlags{}, errors.New(
@@ -432,28 +444,28 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 		}
 	}
 	// --new is a CellConfig-only knob (only the <config> positional reaches the
-	// daemon-stored CellConfig path). With -p/-b the default already generates
+	// daemon-stored CellConfig path). With -b the default already generates
 	// a fresh <prefix>-<6hex> per invocation, so accepting --new there would
 	// silently no-op and seed the mental model that --new toggles a default
 	// that isn't actually flipped — reject so the operator notices.
 	if flags.newCell && flags.configName == "" && flags.file == "" {
 		return runFlags{}, errors.New(
-			"--new is only valid with the <config> positional; -p and -b already materialize a " +
+			"--new is only valid with the <config> positional; -b already materializes a " +
 				"fresh <prefix>-<6hex> cell per invocation")
 	}
 	// --clone is a CellConfig-only knob; it forks a daemon-stored CellConfig
 	// and only the <config> positional reaches that artifact. Reject with
-	// -p/-b for the same "no silent no-op" reason as --new.
+	// -b for the same "no silent no-op" reason as --new.
 	if flags.clone && flags.configName == "" && flags.file == "" {
 		return runFlags{}, errors.New(
-			"--clone is only valid with the <config> positional; -p and -b have no Config to fork")
+			"--clone is only valid with the <config> positional; -b has no Config to fork")
 	}
 	// --reuse is a CellConfig-only knob; it pulls from the clone pool of a
 	// daemon-stored CellConfig and only the <config> positional reaches the
-	// pool. Reject with -p/-b for the same "no silent no-op" reason as --new.
+	// pool. Reject with -b for the same "no silent no-op" reason as --new.
 	if flags.reuse && flags.configName == "" && flags.file == "" {
 		return runFlags{}, errors.New(
-			"--reuse is only valid with the <config> positional; -p and -b have no clone pool to draw from")
+			"--reuse is only valid with the <config> positional; -b has no clone pool to draw from")
 	}
 	if flags.configName != "" {
 		// A CellConfig carries its own scalar values, so --param / --param-file
@@ -491,7 +503,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	// Resolve the client first: the -b path resolves its blueprint from daemon
 	// storage over this client, so it must be live before loadCellDoc runs. The
-	// -f/-p paths ignore it during load.
+	// -f path ignores it during load.
 	client, err := resolveClient(cmd)
 	if err != nil {
 		return err
@@ -646,14 +658,14 @@ func runAfterReuseClaim(
 // without `--new`, and `-b --name`) routes destructive updates away from
 // `run` — `run` is a pure read-and-materialize verb, so a divergent target is
 // the operator's signal to either reconcile (Config-lineage cells) or delete
-// and re-run (Blueprint-lineage and bare `-f`/`-p` cells). The error pointer
+// and re-run (Blueprint-lineage and bare `-f` cells). The error pointer
 // is shaped to match the source: `<config>` → `kuke restart cell <name>`
 // (#821's restart picks up the daemon-side OutOfSync detection #820 wires and
 // reconciles implicitly; the cell name is the Config's StableName), `-b
 // --name <cell>` → `kuke delete cell <cell>` + re-run (Blueprint-lineage cells
 // have no implicit reconcile per #819's umbrella; the operator promotes to a
-// CellConfig for restart-driven reconcile workflows), and the bare `-f` / `-p`
-// fallback keeps the `kuke apply -f` pointer because those paths carry the
+// CellConfig for restart-driven reconcile workflows), and the bare `-f`
+// fallback keeps the `kuke apply -f` pointer because that path carries the
 // spec on disk. The `--new` path never reaches this function: it takes a
 // separate branch in runRun that treats any existing cell as a hard collision
 // (no divergence reconcile pointer makes sense — `restart cell` would
@@ -853,24 +865,18 @@ type loadResult struct {
 	StartResult kukeonv1.StartCellResult
 }
 
-// loadCellDoc dispatches to the file, profile, blueprint, or config loader.
-// Exactly one of flags.file / flags.profileName / flags.blueprintName /
-// flags.configName is non-empty (the cobra mutex enforces this before the
-// handler runs); --name and --param* are template knobs already rejected
-// against -f and -c in parseRunFlags. The blueprint and config paths resolve
-// over client; the file/profile paths ignore it.
+// loadCellDoc dispatches to the file, blueprint, or config loader. Exactly
+// one of flags.file / flags.blueprintName / flags.configName is non-empty
+// (the cobra mutex enforces this before the handler runs); --name and --param*
+// are template knobs already rejected against -f and the <config> positional
+// in parseRunFlags. The blueprint and config paths resolve over client; the
+// file path ignores it.
 func loadCellDoc(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (loadResult, error) {
 	switch {
 	case flags.configName != "":
 		return loadFromConfig(cmd, client, flags)
 	case flags.blueprintName != "":
 		doc, err := loadFromBlueprint(cmd, client, flags)
-		return loadResult{Doc: doc}, err
-	case flags.profileName != "":
-		fmt.Fprintln(cmd.ErrOrStderr(),
-			"kuke run: -p/--profile is deprecated and will be removed (#626); "+
-				"apply a kind: CellBlueprint and use `kuke run -b` (or `kuke run <config>` for a CellConfig).")
-		doc, err := loadFromProfile(flags)
 		return loadResult{Doc: doc}, err
 	default:
 		doc, err := loadFromFile(flags.file)
@@ -1120,60 +1126,24 @@ func loadFromFile(file string) (v1beta1.CellDoc, error) {
 	return parseSingleCellDoc(rawYAML)
 }
 
-// loadFromProfile resolves the active profiles directory, loads the named
-// profile with `${KEY}` references substituted, and materializes its CellSpec
-// body into a CellDoc. By default the cell name is `<prefix>-<6hex>` (prefix
-// = spec.prefix or metadata.name); --name overrides it verbatim so callers
-// like the orchestrator can pin a deterministic name.
-//
-// Parameter resolution order matches the spec for issue #355:
-//  1. --param-file lines (lowest)
-//  2. --param flags (override the file on duplicate keys)
-//  3. spec.parameters[].default
-//  4. os.Getenv(KEY) — drawn from kuke's process env
-//  5. error if the parameter is required and still unset
-//
-// We thread os.LookupEnv as the env source because today profiles are
-// loaded by the kuke CLI (a one-shot process), so kuke's env IS the
-// substitution surface the spec calls "the kukeond process, not the
-// caller". A future move to daemon-side profile loading would swap this
-// for the daemon's env without changing the resolution order.
-func loadFromProfile(flags runFlags) (v1beta1.CellDoc, error) {
-	dir, err := cellprofile.ResolveDir()
-	if err != nil {
-		return v1beta1.CellDoc{}, err
-	}
-
-	cliParams, err := buildParamMap(flags)
-	if err != nil {
-		return v1beta1.CellDoc{}, err
-	}
-
-	profile, err := cellprofile.LoadResolved(dir, flags.profileName, cliParams, os.LookupEnv)
-	if err != nil {
-		return v1beta1.CellDoc{}, err
-	}
-	return cellprofile.MaterializeWithName(profile, flags.nameOverride)
-}
-
 // buildParamMap layers --param flags on top of --param-file contents.
-// Empty result is a valid input for LoadResolved (the profile may have all
-// defaults). The function is split out so the run-time errors for malformed
-// files / KEY=VALUE strings stay close to the call site.
+// Empty result is a valid input for cellblueprint.Resolve (the blueprint may
+// have all defaults). The function is split out so the run-time errors for
+// malformed files / KEY=VALUE strings stay close to the call site.
 func buildParamMap(flags runFlags) (map[string]string, error) {
 	var fileParams map[string]string
 	if flags.paramFile != "" {
-		fp, err := cellprofile.ParseParamFile(flags.paramFile)
+		fp, err := cellblueprint.ParseParamFile(flags.paramFile)
 		if err != nil {
 			return nil, err
 		}
 		fileParams = fp
 	}
-	cliParams, err := cellprofile.ParseParamArgs(flags.paramArgs)
+	cliParams, err := cellblueprint.ParseParamArgs(flags.paramArgs)
 	if err != nil {
 		return nil, err
 	}
-	return cellprofile.MergeParams(fileParams, cliParams), nil
+	return cellblueprint.MergeParams(fileParams, cliParams), nil
 }
 
 // parseSingleCellDoc parses raw YAML and returns the single-doc Cell. It errors

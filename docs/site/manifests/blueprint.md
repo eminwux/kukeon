@@ -9,8 +9,8 @@ metadata:
   # space: team-a    # optional — space-scoped
   # stack: agents    # optional — stack-scoped (requires space)
 spec:
-  prefix: cc           # cell-name prefix; defaults to metadata.name
-  parameters:          # scalar ${KEY} substitutions
+  prefix: cc # cell-name prefix; defaults to metadata.name
+  parameters: # scalar ${KEY} substitutions
     - name: MODEL
       default: claude-sonnet-4-6
   cell:
@@ -21,7 +21,7 @@ spec:
         # ... full container template ...
 ```
 
-A `CellBlueprint` is a daemon-stored, parametrized cell template. It is the daemon-side analog of the user-local `CellProfile`: where a profile is materialized client-side by `kuke run -p`, a blueprint is written to daemon storage by `kuke apply` and run with `kuke run -b`, so it can be applied, scoped, listed, and referenced by a [`CellConfig`](config.md). A blueprint declares the cell template plus two fill channels — scalar `${KEY}` parameters resolved at run time and structural repo/secret slots a Config fills.
+A `CellBlueprint` is a daemon-stored, parametrized cell template. It is written to daemon storage by `kuke apply` and run with `kuke run -b`, so it can be applied, scoped, listed, and referenced by a [`CellConfig`](config.md). A blueprint declares the cell template plus two fill channels — scalar `${KEY}` parameters resolved at run time and structural repo/secret slots a Config fills. (Until [#626](https://github.com/eminwux/kukeon/issues/626) the user-local `CellProfile` kind covered the scalar-only slice client-side; CellBlueprint and CellConfig replaced it — see the [migration guide](../guides/migrate-cellprofile-to-blueprint.md) for the cutover recipe.)
 
 See [`kuke run -b`](../cli/kuke-run.md) for the run-side verb and [`CellConfig`](config.md) for the identity binding that lets a blueprint stand up an idempotent, named cell rather than a fresh `<prefix>-<6hex>` one each invocation.
 
@@ -29,12 +29,12 @@ See [`kuke run -b`](../cli/kuke-run.md) for the run-side verb and [`CellConfig`]
 
 A Blueprint is scopable at realm, space, or stack — never cell. A template scoped to a single cell is nonsensical: the blueprint exists to materialize cells, not to live inside one. The scope is the deepest non-empty coordinate, and a deeper coordinate may only be set when every shallower one is.
 
-| Field    | Type              | Required | Description                                                                |
-| -------- | ----------------- | -------- | -------------------------------------------------------------------------- |
-| `name`   | string            | yes      | The blueprint's name, unique within its scope.                             |
-| `realm`  | string            | yes      | The always-required top-level scope coordinate.                            |
-| `space`  | string            | no       | When set, scopes the blueprint to a space within `realm`.                  |
-| `stack`  | string            | no       | When set, scopes the blueprint to a stack within `space` (requires space). |
+| Field    | Type              | Required | Description                                                                                                             |
+| -------- | ----------------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `name`   | string            | yes      | The blueprint's name, unique within its scope.                                                                          |
+| `realm`  | string            | yes      | The always-required top-level scope coordinate.                                                                         |
+| `space`  | string            | no       | When set, scopes the blueprint to a space within `realm`.                                                               |
+| `stack`  | string            | no       | When set, scopes the blueprint to a stack within `space` (requires space).                                              |
 | `labels` | map[string]string | no       | Copied onto every cell materialized from this blueprint, in addition to the `kukeon.io/blueprint` back-reference label. |
 
 ## spec
@@ -47,23 +47,23 @@ Cell-name prefix used when generating the `<prefix>-<6hex>` name on each `kuke r
 
 Declared `${KEY}` substitution variables the cell body references. `kuke run -b` resolves each parameter against `--param K=V`, the parameter's `default`, and (when permitted) the caller's environment, in that order. An undeclared `--param` errors at call time so typos surface immediately. A `required: true` parameter that resolves to no value errors.
 
-| Field         | Type   | Required | Description                                                       |
-| ------------- | ------ | -------- | ----------------------------------------------------------------- |
-| `name`        | string | yes      | The substitution variable's name (referenced as `${name}`).       |
-| `description` | string | no       | Free-form documentation.                                          |
+| Field         | Type   | Required | Description                                                                                                        |
+| ------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `name`        | string | yes      | The substitution variable's name (referenced as `${name}`).                                                        |
+| `description` | string | no       | Free-form documentation.                                                                                           |
 | `default`     | string | no       | Default value when `--param` is not supplied. Empty string is a valid default and short-circuits the env-fallback. |
-| `required`    | bool   | no       | When `true`, the blueprint fails to run if the parameter resolves to no value. |
+| `required`    | bool   | no       | When `true`, the blueprint fails to run if the parameter resolves to no value.                                     |
 
 ### `spec.cell` (object, required)
 
 The cell template body. It mirrors a [`Cell`](cell.md) manifest's user-authorable surface, but each container additionally carries structural slot declarations — repo slots with no inline `url`, and secret slots — that a [`CellConfig`](config.md) fills.
 
-| Field                       | Type                | Required | Description                                                  |
-| --------------------------- | ------------------- | -------- | ------------------------------------------------------------ |
-| `tty`                       | object              | no       | Cell-level TTY configuration; see [Cell](cell.md).           |
-| `containers[]`              | list                | yes      | The cell's containers; see below.                            |
-| `autoDelete`                | bool                | no       | When `true`, the materialized cell auto-deletes on exit.     |
-| `nestedCgroupRuntime`       | bool                | no       | Opts the cell into full controller delegation for a nested runtime (e.g. an inner kukeond). See [Cell](cell.md). |
+| Field                 | Type   | Required | Description                                                                                                      |
+| --------------------- | ------ | -------- | ---------------------------------------------------------------------------------------------------------------- |
+| `tty`                 | object | no       | Cell-level TTY configuration; see [Cell](cell.md).                                                               |
+| `containers[]`        | list   | yes      | The cell's containers; see below.                                                                                |
+| `autoDelete`          | bool   | no       | When `true`, the materialized cell auto-deletes on exit.                                                         |
+| `nestedCgroupRuntime` | bool   | no       | Opts the cell into full controller delegation for a nested runtime (e.g. an inner kukeond). See [Cell](cell.md). |
 
 ### `spec.cell.containers[]` (list, required)
 
@@ -79,13 +79,13 @@ Same shape as [ContainerRepo](container.md). Unlike a hand-written `Cell` / `Con
 
 Slot-only channel: the blueprint declares the **consumption side** (where the resolved bytes land inside the container), and a `CellConfig` supplies the **source side** (which `kind: Secret` provides the bytes). Because a blueprint never carries the source, a blueprint that declares secret slots cannot run inline with `-b` — it requires `kuke run -c` with a `CellConfig` that fills the slots.
 
-| Field        | Type   | Required                   | Description                                                                |
-| ------------ | ------ | -------------------------- | -------------------------------------------------------------------------- |
-| `name`       | string | yes                        | The slot's identity, unique within the container; a `CellConfig` matches by this name. |
-| `mode`       | string | no (default `env`)         | `env` injects an environment variable named `envName`; `file` stages a read-only mount at `mountPath`. |
-| `envName`    | string | when `mode: env`           | Environment variable name. Independent of the slot `name`, so the consumption side can change without renaming the slot. |
-| `mountPath`  | string | when `mode: file`          | Absolute in-container path for the read-only file mount.                   |
-| `required`   | bool   | no                         | When `true`, a `CellConfig` must fill the slot. Required slots also block inline `-b`. |
+| Field       | Type   | Required           | Description                                                                                                              |
+| ----------- | ------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `name`      | string | yes                | The slot's identity, unique within the container; a `CellConfig` matches by this name.                                   |
+| `mode`      | string | no (default `env`) | `env` injects an environment variable named `envName`; `file` stages a read-only mount at `mountPath`.                   |
+| `envName`   | string | when `mode: env`   | Environment variable name. Independent of the slot `name`, so the consumption side can change without renaming the slot. |
+| `mountPath` | string | when `mode: file`  | Absolute in-container path for the read-only file mount.                                                                 |
+| `required`  | bool   | no                 | When `true`, a `CellConfig` must fill the slot. Required slots also block inline `-b`.                                   |
 
 ## Storage layout
 

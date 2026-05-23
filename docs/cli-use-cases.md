@@ -248,7 +248,7 @@ sudo kuke image delete --realm default <ref>                    # alias: rm, rem
 
 ## Workload lifecycle
 
-A **cell** is the smallest scheduled unit. `kuke run` (single-cell, profile-aware) and `kuke apply` (multi-document, declarative) are the two entry points; `kuke create cell` is the by-name shortcut.
+A **cell** is the smallest scheduled unit. `kuke run` (single-cell, blueprint- and config-aware) and `kuke apply` (multi-document, declarative) are the two entry points; `kuke create cell` is the by-name shortcut.
 
 ### Run a one-off cell from YAML
 
@@ -259,7 +259,8 @@ A **cell** is the smallest scheduled unit. `kuke run` (single-cell, profile-awar
 ```bash
 sudo kuke run -f docs/examples/hello-world.yaml             # attaches by default
 sudo kuke run -f docs/examples/hello-world.yaml -d          # detach: start and return
-sudo kuke run -p <profile> --param KEY=VAL --name custom    # from $HOME/.kuke/profiles.d
+sudo kuke run -b <blueprint> --param KEY=VAL --name custom  # from daemon-stored CellBlueprint
+sudo kuke run -c <config>                                   # from daemon-stored CellConfig (idempotent)
 sudo kuke run -f - < spec.yaml                              # stdin
 sudo kuke run -f spec.yaml --rm                             # auto-delete after exit
 sudo kuke run -b <blueprint> --param KEY=VAL                # daemon-stored CellBlueprint, fresh <prefix>-<6hex> cell per invocation
@@ -273,6 +274,8 @@ sudo kuke run <config> --clone --name Y                     # named create-or-fa
 sudo kuke run <config> --reuse -d                           # restart a healthy-Stopped clone in place (overlay preserved); fall back to --clone on empty pool
 ```
 
+> The legacy `kuke run -p <profile>` form (client-side `CellProfile` loader from `$HOME/.kuke/profiles.d`) was removed in [#626](https://github.com/eminwux/kukeon/issues/626). Typing it now exits non-zero with a migration pointer to [`docs/site/guides/migrate-cellprofile-to-blueprint.md`](site/guides/migrate-cellprofile-to-blueprint.md).
+
 **Invariants.**
 
 - Exit code 0 once the cell is materialized and its containers started.
@@ -283,7 +286,7 @@ sudo kuke run <config> --reuse -d                           # restart a healthy-
   - **Stopped** → `StartCell`, then attach (no re-create). The prior fall-through to create was an unsafe re-entry; the live start+attach converges once the CNI duplicate-allocation fix (#630) lands.
   - **Error / partial** (`Pending`, `Failed`, `Unknown`) → refused with `cell "<name>" exists in <state> state; delete it with \`kuke delete cell <name>\` before re-running`. Exit code non-zero. `run` does not reconcile a degraded cell in place.
 - Re-running `kuke run -f` against an existing cell whose on-disk spec **diverges** from the file is **refused**, not silently updated. The error message points the operator at `kuke apply -f` for the update path. Exit code non-zero.
-- `-f` and `-p` are mutually exclusive; `--name` is rejected with `-f` (the YAML's `metadata.name` is the cell name verbatim).
+- `-f`, `-b`, and `-c` are mutually exclusive; `--name` is rejected with `-f` (the YAML's `metadata.name` is the cell name verbatim) and with `-c` (the cell name is the Config's deterministic stable name).
 - `--container` is only valid in attach mode; passing both `--container` and `-d/--detach` exits non-zero.
 - `--rm` is processed by `kukeond`'s reconcile loop. `kuke run` is daemon-only after #566 — `KUKEON_NO_DAEMON=true` and `--run-path` promotion no longer reach an in-process branch for workload verbs, so `--rm` and `--run-path` are not mutually exclusive on `kuke run`. Cleanup latency is bounded by the daemon's reconcile interval (default 30s), not real-time.
 - A clean `^]^]` detach in attach mode does **not** trigger `--rm` cleanup; the cell stays alive for re-attach. Only workload termination, peer hangup, or an unrecoverable controller error fires cleanup.

@@ -38,17 +38,15 @@ const (
 	// root-owned file under the scope's metadata tree; phase 3a ships no
 	// `get`/`delete`/referencing surface (tracked in #622 and #623).
 	KindSecret Kind = "Secret"
-	// KindCellProfile identifies per-user cell-template documents loaded by
-	// `kuke run -p`. Profiles are not server-side resources — `kuke apply`
-	// rejects them.
-	KindCellProfile Kind = "CellProfile"
 	// KindCellBlueprint identifies daemon-stored, scopable parametrized cell
-	// templates (issue #620, phase 4a-i of #423). A *new* kind introduced
-	// alongside CellProfile — not a rename. `kuke apply` writes the blueprint
-	// to a root-owned, world-readable file under the scope's metadata tree;
-	// `kuke run -b` resolves it from daemon storage and materializes a fresh
-	// `<prefix>-<6hex>` cell. The get/delete verbs (#643), CellConfig (#624),
-	// and `kuke run -c` (#625) build on this foundation.
+	// templates (issue #620, phase 4a-i of #423). `kuke apply` writes the
+	// blueprint to a root-owned, world-readable file under the scope's
+	// metadata tree; `kuke run -b` resolves it from daemon storage and
+	// materializes a fresh `<prefix>-<6hex>` cell. The get/delete verbs
+	// (#643), CellConfig (#624), and `kuke run -c` (#625) build on this
+	// foundation. The legacy client-side CellProfile kind (`kuke run -p`)
+	// that originally co-existed was removed in #626 — Blueprint + Config are
+	// the only template path now.
 	KindCellBlueprint Kind = "CellBlueprint"
 	// KindCellConfig identifies a daemon-stored cell identity that binds a
 	// CellBlueprint to a concrete instance (issue #624, phase 4b-i of #423). A

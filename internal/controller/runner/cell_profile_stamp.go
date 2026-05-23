@@ -17,18 +17,27 @@
 package runner
 
 import (
-	"github.com/eminwux/kukeon/internal/cellprofile"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
+// labelCellProfileLegacy is the legacy "kukeon.io/profile" cell label that the
+// removed CellProfile materializer (#626) stamped on cells generated from a
+// per-user profile. New cells never receive it, but cells persisted before the
+// cleanup still carry it on disk; the stamping helpers below propagate that
+// legacy value onto runtime container specs so KUKEON_CELL_PROFILE_NAME still
+// surfaces in the workload env for long-lived legacy cells.
+const labelCellProfileLegacy = "kukeon.io/profile"
+
 // stampCellProfileNameOnContainers fills CellProfileName on every container
-// in the cell from cell.Metadata.Labels[cellprofile.LabelProfile] (the label
-// Materialize stamps when a cell is generated from a CellProfile). No-op when
-// the label is absent — cells created from a plain CellDoc carry no profile
-// identity. Mirrors the runtime-only stamping shape of
-// stampCellEtcFilePathsOnContainers / CellCgroupPath: BuildContainerSpec /
-// BuildRootContainerSpec read the field, but it is not part of the persisted
-// container document. Issue #351.
+// in the cell from cell.Metadata.Labels[labelCellProfileLegacy] (the label
+// the removed CellProfile materializer stamped when a cell was generated from
+// a CellProfile). No-op when the label is absent — cells created from a plain
+// CellDoc, CellBlueprint, or CellConfig carry no profile identity. Mirrors
+// the runtime-only stamping shape of stampCellEtcFilePathsOnContainers /
+// CellCgroupPath: BuildContainerSpec / BuildRootContainerSpec read the field,
+// but it is not part of the persisted container document. Issue #351; the
+// CellProfile producer was removed in #626 but the read-side stamp is kept
+// for legacy cells still on disk.
 func stampCellProfileNameOnContainers(cell *intmodel.Cell) {
 	if cell == nil {
 		return
@@ -60,5 +69,5 @@ func cellProfileNameFromCell(cell *intmodel.Cell) string {
 	if cell == nil || cell.Metadata.Labels == nil {
 		return ""
 	}
-	return cell.Metadata.Labels[cellprofile.LabelProfile]
+	return cell.Metadata.Labels[labelCellProfileLegacy]
 }

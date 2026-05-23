@@ -27,7 +27,6 @@ import (
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/cellblueprint"
 	"github.com/eminwux/kukeon/internal/cellconfig"
-	"github.com/eminwux/kukeon/internal/cellprofile"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -393,17 +392,17 @@ func overlayScope(doc *v1beta1.CellDoc, flags createCellFlags) {
 func buildParamMap(flags createCellFlags) (map[string]string, error) {
 	var fileParams map[string]string
 	if flags.paramFile != "" {
-		fp, err := cellprofile.ParseParamFile(flags.paramFile)
+		fp, err := cellblueprint.ParseParamFile(flags.paramFile)
 		if err != nil {
 			return nil, err
 		}
 		fileParams = fp
 	}
-	cliParams, err := cellprofile.ParseParamArgs(flags.paramArgs)
+	cliParams, err := cellblueprint.ParseParamArgs(flags.paramArgs)
 	if err != nil {
 		return nil, err
 	}
-	return cellprofile.MergeParams(fileParams, cliParams), nil
+	return cellblueprint.MergeParams(fileParams, cliParams), nil
 }
 
 func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
