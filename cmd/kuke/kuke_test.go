@@ -60,7 +60,7 @@ func TestNewKukeCmd(t *testing.T) {
 		t.Errorf("Short mismatch: got %q, want %q", cmd.Short, "Kukeon is a tool for managing Kukeon entities")
 	}
 
-	expectedSubcommands := []string{"init", "create", "get", "delete", "start", "stop", "kill", "purge", "version"}
+	expectedSubcommands := []string{"init", "create", "get", "delete", "start", "stop", "restart", "kill", "purge", "version"}
 	for _, subcmdName := range expectedSubcommands {
 		subcmd := cmd.Commands()
 		found := false
@@ -165,7 +165,7 @@ func TestSetupKukeCmd(t *testing.T) {
 		t.Fatalf("setupKukeCmd() error = %v, want nil", err)
 	}
 
-	expectedSubcommands := []string{"init", "create", "get", "delete", "start", "stop", "kill", "purge", "version"}
+	expectedSubcommands := []string{"init", "create", "get", "delete", "start", "stop", "restart", "kill", "purge", "version"}
 	commands := rootCmd.Commands()
 	commandMap := make(map[string]bool)
 	for _, cmd := range commands {

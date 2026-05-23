@@ -488,6 +488,14 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_LOG_FOLLOW = DefineKV("KUKE_LOG_FOLLOW", "kuke/log/follow", "false")
 
+	// Restart command variables
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_RESTART_CELL_REALM = DefineKV("KUKE_RESTART_CELL_REALM", "kuke/restart/cell/realm", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_RESTART_CELL_SPACE = DefineKV("KUKE_RESTART_CELL_SPACE", "kuke/restart/cell/space", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_RESTART_CELL_STACK = DefineKV("KUKE_RESTART_CELL_STACK", "kuke/restart/cell/stack", "default")
+
 	// Stop command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_STOP_CELL_REALM = DefineKV("KUKE_STOP_CELL_REALM", "kuke/stop/cell/realm", "default")
