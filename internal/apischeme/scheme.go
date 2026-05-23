@@ -1372,6 +1372,9 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 				Message:            in.Status.Message,
 				CgroupReady:        in.Status.CgroupReady,
 				ObservedGeneration: in.Status.ObservedGeneration,
+				OutOfSync:          in.Status.OutOfSync,
+				OutOfSyncReason:    in.Status.OutOfSyncReason,
+				OutOfSyncError:     in.Status.OutOfSyncError,
 			},
 		}
 
@@ -1437,6 +1440,9 @@ func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ex
 				Message:            in.Status.Message,
 				CgroupReady:        in.Status.CgroupReady,
 				ObservedGeneration: in.Status.ObservedGeneration,
+				OutOfSync:          in.Status.OutOfSync,
+				OutOfSyncReason:    in.Status.OutOfSyncReason,
+				OutOfSyncError:     in.Status.OutOfSyncError,
 			},
 		}
 

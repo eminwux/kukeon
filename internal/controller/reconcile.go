@@ -73,7 +73,7 @@ func (b *Exec) ReconcileCells() (ReconcileResult, error) {
 				}
 				for _, cell := range cells {
 					result.CellsScanned++
-					_, outcome, reconcileErr := b.runner.ReconcileCell(cell)
+					reconciled, outcome, reconcileErr := b.runner.ReconcileCell(cell)
 					if reconcileErr != nil {
 						result.CellsErrored++
 						result.Errors = append(result.Errors,
@@ -86,6 +86,30 @@ func (b *Exec) ReconcileCells() (ReconcileResult, error) {
 					case outcome.Deleted:
 						result.CellsDeleted++
 					case outcome.Updated:
+						result.CellsUpdated++
+					}
+					// OutOfSync detection (issue #820, foundation phase of
+					// #819's umbrella): for Config-lineage cells, surface a
+					// persistent OutOfSync flag in status by re-deriving
+					// the would-be cell from the daemon-stored Config +
+					// Blueprint and diffing against the live spec. Skips
+					// deleted cells (the reconcile outcome already wiped
+					// them) and cells without the kukeon.io/config label.
+					// A persisted write counts toward CellsUpdated so the
+					// reconcile summary reflects the metadata flip.
+					if outcome.Deleted {
+						continue
+					}
+					syncUpdated, syncErr := reconcileCellOutOfSync(b.runner, reconciled)
+					if syncErr != nil {
+						result.CellsErrored++
+						result.Errors = append(result.Errors,
+							fmt.Sprintf("OutOfSync detect cell %s/%s/%s/%s: %v",
+								realmName, spaceName, stackName,
+								cell.Metadata.Name, syncErr))
+						continue
+					}
+					if syncUpdated && !outcome.Updated {
 						result.CellsUpdated++
 					}
 				}

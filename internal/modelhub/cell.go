@@ -92,6 +92,18 @@ type CellStatus struct {
 	// acted on. Defaults to zero; phase 3 wires the reconciler to compare
 	// it against Generation to skip stale work.
 	ObservedGeneration int64
+	// OutOfSync is true when the daemon's reconciler detects that this
+	// cell's live spec has diverged from what its lineage Config would
+	// materialize (issue #820, foundation phase of #819's umbrella). Only
+	// set on cells carrying the kukeon.io/config lineage label; cells
+	// without that label leave it false. OutOfSyncReason carries a short
+	// human-readable summary when true. OutOfSyncError carries a distinct
+	// failure surface when the reconciler could not compute divergence at
+	// all (referenced Blueprint missing, materialization error) — when
+	// non-empty, OutOfSync stays false because divergence is undecidable.
+	OutOfSync       bool
+	OutOfSyncReason string
+	OutOfSyncError  string
 }
 
 // CellNetworkStatus records the network endpoints the cell is attached to.

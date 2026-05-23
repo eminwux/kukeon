@@ -27,8 +27,8 @@ type CellDoc struct {
 }
 
 type CellMetadata struct {
-	Name   string            `json:"name"   yaml:"name"`
-	Labels map[string]string `json:"labels" yaml:"labels"`
+	Name   string            `json:"name"                 yaml:"name"`
+	Labels map[string]string `json:"labels"               yaml:"labels"`
 	// Generation is a monotonic counter bumped by a writer on each
 	// spec-changing update. Defaults to zero; phase 3 wires the writers to
 	// populate it. See ObservedGeneration on the status.
@@ -36,13 +36,13 @@ type CellMetadata struct {
 }
 
 type CellSpec struct {
-	ID              string          `json:"id"                        yaml:"id"`
-	RealmID         string          `json:"realmId"                   yaml:"realmId"`
-	SpaceID         string          `json:"spaceId"                   yaml:"spaceId"`
-	StackID         string          `json:"stackId"                   yaml:"stackId"`
-	RootContainerID string          `json:"rootContainerId,omitempty" yaml:"rootContainerId,omitempty"`
-	Tty             *CellTty        `json:"tty,omitempty"             yaml:"tty,omitempty"`
-	Containers      []ContainerSpec `json:"containers"                yaml:"containers"`
+	ID              string          `json:"id"                            yaml:"id"`
+	RealmID         string          `json:"realmId"                       yaml:"realmId"`
+	SpaceID         string          `json:"spaceId"                       yaml:"spaceId"`
+	StackID         string          `json:"stackId"                       yaml:"stackId"`
+	RootContainerID string          `json:"rootContainerId,omitempty"     yaml:"rootContainerId,omitempty"`
+	Tty             *CellTty        `json:"tty,omitempty"                 yaml:"tty,omitempty"`
+	Containers      []ContainerSpec `json:"containers"                    yaml:"containers"`
 	// AutoDelete asks kukeond to delete this cell best-effort after its root
 	// container's task exits (any rc). Set by `kuke run --rm`. Cleanup is
 	// scoped to the cell only — never cascades to stack/space/realm.
@@ -51,7 +51,7 @@ type CellSpec struct {
 	// the cell. Latency is bounded by the reconcile interval, and the
 	// trigger survives daemon restarts (no per-cell goroutine needs to be
 	// re-installed on startup).
-	AutoDelete bool `json:"autoDelete,omitempty"      yaml:"autoDelete,omitempty"`
+	AutoDelete bool `json:"autoDelete,omitempty"          yaml:"autoDelete,omitempty"`
 	// NestedCgroupRuntime opts the cell into delegating the full
 	// host-available cgroup-v2 controller set on its cgroup.subtree_control,
 	// rather than the kukeon resource subset (cpu/memory/io/pids). This is
@@ -89,19 +89,31 @@ type CellStatus struct {
 	// been observed Ready it stays true across daemon restarts so that
 	// cleanup of a `kuke run --rm` cell that was already Ready at
 	// shutdown still fires on the next tick after restart.
-	ReadyObserved bool `json:"readyObserved,omitempty" yaml:"readyObserved,omitempty"`
+	ReadyObserved bool `json:"readyObserved,omitempty"      yaml:"readyObserved,omitempty"`
 	// Lifecycle and runtime-health fields — see RealmStatus for the
 	// per-field contract; the semantics carry across all four kinds.
-	CreatedAt   time.Time `json:"createdAt,omitempty"     yaml:"createdAt,omitempty"`
-	UpdatedAt   time.Time `json:"updatedAt,omitempty"     yaml:"updatedAt,omitempty"`
-	ReadyAt     time.Time `json:"readyAt,omitempty"       yaml:"readyAt,omitempty"`
-	Reason      string    `json:"reason,omitempty"        yaml:"reason,omitempty"`
-	Message     string    `json:"message,omitempty"       yaml:"message,omitempty"`
-	CgroupReady bool      `json:"cgroupReady,omitempty"   yaml:"cgroupReady,omitempty"`
+	CreatedAt   time.Time `json:"createdAt,omitempty"          yaml:"createdAt,omitempty"`
+	UpdatedAt   time.Time `json:"updatedAt,omitempty"          yaml:"updatedAt,omitempty"`
+	ReadyAt     time.Time `json:"readyAt,omitempty"            yaml:"readyAt,omitempty"`
+	Reason      string    `json:"reason,omitempty"             yaml:"reason,omitempty"`
+	Message     string    `json:"message,omitempty"            yaml:"message,omitempty"`
+	CgroupReady bool      `json:"cgroupReady,omitempty"        yaml:"cgroupReady,omitempty"`
 	// ObservedGeneration is the Metadata.Generation the reconciler last
 	// acted on. Defaults to zero; phase 3 wires the reconciler to compare
 	// it against Generation to skip stale work.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty" yaml:"observedGeneration,omitempty"`
+	// OutOfSync is true when the daemon's reconciler detects that this
+	// cell's live spec has diverged from what its lineage Config would
+	// materialize (issue #820, foundation phase of #819's umbrella). Only
+	// set on cells carrying the kukeon.io/config lineage label; cells
+	// without that label leave it false. OutOfSyncReason carries a short
+	// human-readable summary when true. OutOfSyncError carries a distinct
+	// failure surface when the reconciler could not compute divergence at
+	// all (referenced Blueprint missing, materialization error) — when
+	// non-empty, OutOfSync stays false because divergence is undecidable.
+	OutOfSync       bool   `json:"outOfSync,omitempty"          yaml:"outOfSync,omitempty"`
+	OutOfSyncReason string `json:"outOfSyncReason,omitempty"    yaml:"outOfSyncReason,omitempty"`
+	OutOfSyncError  string `json:"outOfSyncError,omitempty"     yaml:"outOfSyncError,omitempty"`
 }
 
 // CellNetworkStatus exposes the host-side bridge a cell is attached to.
