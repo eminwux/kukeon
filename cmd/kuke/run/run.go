@@ -588,10 +588,11 @@ func loadCellDoc(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (v1
 // the KUKE_RUN_SPACE/STACK env var. The session default for those keys is
 // "default" (DefineKV calls viper.SetDefault), so reading them through viper
 // would wrongly narrow every lookup to default/default and hide realm-scoped
-// blueprints; explicitScope reads the raw flag/env instead. A blueprint that
-// declares structural slots the inline path cannot fill (secret slots, required
-// repo slots with no url) is refused by Materialize with a pointer to
-// `kuke run -c`.
+// blueprints; cmd/kuke/shared.ExplicitScope reads the raw flag/env instead,
+// and `kuke apply -b/-c` consumes the same helper for symmetric scope
+// resolution. A blueprint that declares structural slots the inline path
+// cannot fill (secret slots, required repo slots with no url) is refused by
+// Materialize with a pointer to `kuke run -c`.
 func loadFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (v1beta1.CellDoc, error) {
 	cliParams, err := buildParamMap(flags)
 	if err != nil {
@@ -601,9 +602,9 @@ func loadFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags runFlag
 	lookup := v1beta1.CellBlueprintDoc{
 		Metadata: v1beta1.CellBlueprintMetadata{
 			Name:  flags.blueprintName,
-			Realm: pickLocation("", &config.KUKE_RUN_REALM),
-			Space: explicitScope(cmd, "space", &config.KUKE_RUN_SPACE),
-			Stack: explicitScope(cmd, "stack", &config.KUKE_RUN_STACK),
+			Realm: kukshared.PickLookupRealm(cmd, &config.KUKE_RUN_REALM),
+			Space: kukshared.ExplicitScope(cmd, "space", &config.KUKE_RUN_SPACE),
+			Stack: kukshared.ExplicitScope(cmd, "stack", &config.KUKE_RUN_STACK),
 		},
 	}
 
@@ -648,9 +649,9 @@ func loadFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) 
 		Kind:       v1beta1.KindCellConfig,
 		Metadata: v1beta1.CellConfigMetadata{
 			Name:  flags.configName,
-			Realm: pickLocation("", &config.KUKE_RUN_REALM),
-			Space: explicitScope(cmd, "space", &config.KUKE_RUN_SPACE),
-			Stack: explicitScope(cmd, "stack", &config.KUKE_RUN_STACK),
+			Realm: kukshared.PickLookupRealm(cmd, &config.KUKE_RUN_REALM),
+			Space: kukshared.ExplicitScope(cmd, "space", &config.KUKE_RUN_SPACE),
+			Stack: kukshared.ExplicitScope(cmd, "stack", &config.KUKE_RUN_STACK),
 		},
 	}
 
@@ -833,24 +834,14 @@ func resolveCellLocation(doc *v1beta1.CellDoc) {
 	doc.Spec.StackID = pickLocation(doc.Spec.StackID, &config.KUKE_RUN_STACK)
 }
 
-// explicitScope returns a blueprint-lookup scope coordinate only when the
-// operator set it explicitly — the cobra flag was changed on this invocation,
-// or the backing env var (kv.Key) is present in the environment. It deliberately
-// bypasses viper.GetString: DefineKV registers a viper default of "default" for
-// the run space/stack keys, so viper would report "default" for an unset
-// coordinate and narrow every lookup to default/default, hiding realm-scoped
-// blueprints. An empty return means "don't constrain this coordinate".
-func explicitScope(cmd *cobra.Command, flagName string, kv *config.Var) string {
-	if cmd.Flags().Changed(flagName) {
-		v, _ := cmd.Flags().GetString(flagName)
-		return strings.TrimSpace(v)
-	}
-	if v, ok := os.LookupEnv(kv.Key); ok {
-		return strings.TrimSpace(v)
-	}
-	return ""
-}
-
+// pickLocation fills a realm/space/stack coordinate on the materialised cell
+// doc itself. The doc wins when it sets a value; otherwise viper.GetString
+// (bound to the cobra flag in NewRunCmd) provides the operator's per-session
+// pin; otherwise kv.ValueOrDefault walks env → default. Lookup-side scope
+// resolution lives in cmd/kuke/shared.PickLookupRealm / ExplicitScope —
+// those bypass viper for the IsSet-trip reason their commentary explains;
+// pickLocation here is the materialised-cell fill path that does want the
+// viper-backed session pin.
 func pickLocation(fromDoc string, kv *config.Var) string {
 	if v := strings.TrimSpace(fromDoc); v != "" {
 		return v

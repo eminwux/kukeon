@@ -286,9 +286,9 @@ func loadFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags applyFl
 	lookup := v1beta1.CellBlueprintDoc{
 		Metadata: v1beta1.CellBlueprintMetadata{
 			Name:  flags.blueprintName,
-			Realm: pickRealm(cmd),
-			Space: explicitScope(cmd, "space"),
-			Stack: explicitScope(cmd, "stack"),
+			Realm: kukshared.PickLookupRealm(cmd, &config.KUKE_RUN_REALM),
+			Space: kukshared.ExplicitScope(cmd, "space", &config.KUKE_RUN_SPACE),
+			Stack: kukshared.ExplicitScope(cmd, "stack", &config.KUKE_RUN_STACK),
 		},
 	}
 
@@ -317,9 +317,9 @@ func loadFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags applyFlags
 		Kind:       v1beta1.KindCellConfig,
 		Metadata: v1beta1.CellConfigMetadata{
 			Name:  flags.configName,
-			Realm: pickRealm(cmd),
-			Space: explicitScope(cmd, "space"),
-			Stack: explicitScope(cmd, "stack"),
+			Realm: kukshared.PickLookupRealm(cmd, &config.KUKE_RUN_REALM),
+			Space: kukshared.ExplicitScope(cmd, "space", &config.KUKE_RUN_SPACE),
+			Stack: kukshared.ExplicitScope(cmd, "stack", &config.KUKE_RUN_STACK),
 		},
 	}
 
@@ -386,39 +386,19 @@ func buildParamMap(flags applyFlags) (map[string]string, error) {
 }
 
 // resolveCellLocation fills missing realm/space/stack on the materialised doc
-// from --realm/--space/--stack. The materialised doc usually carries the
-// Blueprint/Config's coordinates already; this only fills empties.
+// from --realm/--space/--stack (or the KUKE_RUN_* env-var fallbacks the shared
+// helpers consume). The materialised doc usually carries the Blueprint/Config's
+// coordinates already; this only fills empties.
 func resolveCellLocation(cmd *cobra.Command, doc *v1beta1.CellDoc) {
 	if strings.TrimSpace(doc.Spec.RealmID) == "" {
-		doc.Spec.RealmID = pickRealm(cmd)
+		doc.Spec.RealmID = kukshared.PickLookupRealm(cmd, &config.KUKE_RUN_REALM)
 	}
 	if strings.TrimSpace(doc.Spec.SpaceID) == "" {
-		doc.Spec.SpaceID = explicitScope(cmd, "space")
+		doc.Spec.SpaceID = kukshared.ExplicitScope(cmd, "space", &config.KUKE_RUN_SPACE)
 	}
 	if strings.TrimSpace(doc.Spec.StackID) == "" {
-		doc.Spec.StackID = explicitScope(cmd, "stack")
+		doc.Spec.StackID = kukshared.ExplicitScope(cmd, "stack", &config.KUKE_RUN_STACK)
 	}
-}
-
-// pickRealm returns the --realm value if set, falling back to "default" so the
-// lookup always names a realm (parity with `kuke run`'s default).
-func pickRealm(cmd *cobra.Command) string {
-	if v, _ := cmd.Flags().GetString("realm"); strings.TrimSpace(v) != "" {
-		return strings.TrimSpace(v)
-	}
-	return "default"
-}
-
-// explicitScope returns the named scope flag only when the operator set it
-// explicitly. Mirrors run.explicitScope so realm-scoped Blueprints/Configs (no
-// space or stack coordinate) are findable; the cobra flag default of "" stays
-// "do not constrain this coordinate".
-func explicitScope(cmd *cobra.Command, flagName string) string {
-	if !cmd.Flags().Changed(flagName) {
-		return ""
-	}
-	v, _ := cmd.Flags().GetString(flagName)
-	return strings.TrimSpace(v)
 }
 
 // assertCellLineage refuses to reconcile a live cell whose lineage label does

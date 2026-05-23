@@ -667,6 +667,135 @@ func TestApply_ConfigNotFound_Errors(t *testing.T) {
 	}
 }
 
+// TestApply_FromBlueprint_EnvVarScopeFallback locks the symmetry with
+// `kuke run -b/-c`: when the operator pinned KUKE_RUN_REALM /
+// KUKE_RUN_SPACE / KUKE_RUN_STACK in their shell, `kuke apply -b` reads
+// the same scope, not the cobra default. Regression guard for #776 — the
+// pre-fix apply code path took --realm strictly from the flag and ignored
+// the env-var fallback `kuke run -b` honored via the shared helpers.
+func TestApply_FromBlueprint_EnvVarScopeFallback(t *testing.T) {
+	t.Setenv("KUKE_RUN_REALM", "from-env-realm")
+	t.Setenv("KUKE_RUN_SPACE", "from-env-space")
+	t.Setenv("KUKE_RUN_STACK", "from-env-stack")
+
+	gotLookup := v1beta1.CellBlueprintMetadata{}
+	fc := &fakeClient{
+		getBlueprintFn: func(doc v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			gotLookup = doc.Metadata
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		getCellFn: func(v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{}, errdefs.ErrCellNotFound
+		},
+		applyFn: func([]byte) (kukeonv1.ApplyDocumentsResult, error) {
+			return kukeonv1.ApplyDocumentsResult{
+				Resources: []kukeonv1.ApplyResourceResult{{Kind: "Cell", Name: "myCell", Action: "created"}},
+			}, nil
+		},
+	}
+
+	if _, err := runApplyRef(t, fc, []string{"-b", "web", "--name", "myCell"}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if gotLookup.Realm != "from-env-realm" {
+		t.Errorf("blueprint lookup realm=%q want from-env-realm (KUKE_RUN_REALM ignored)", gotLookup.Realm)
+	}
+	if gotLookup.Space != "from-env-space" {
+		t.Errorf("blueprint lookup space=%q want from-env-space (KUKE_RUN_SPACE ignored)", gotLookup.Space)
+	}
+	if gotLookup.Stack != "from-env-stack" {
+		t.Errorf("blueprint lookup stack=%q want from-env-stack (KUKE_RUN_STACK ignored)", gotLookup.Stack)
+	}
+}
+
+// TestApply_FromConfig_EnvVarScopeFallback is the -c counterpart of the
+// regression above. The Config lookup must also pick up KUKE_RUN_REALM /
+// SPACE / STACK from the operator's shell when no --realm/--space/--stack
+// flag is set.
+func TestApply_FromConfig_EnvVarScopeFallback(t *testing.T) {
+	t.Setenv("KUKE_RUN_REALM", "from-env-realm")
+	t.Setenv("KUKE_RUN_SPACE", "from-env-space")
+	t.Setenv("KUKE_RUN_STACK", "from-env-stack")
+
+	gotLookup := v1beta1.CellConfigMetadata{}
+	fc := &fakeClient{
+		getConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			gotLookup = doc.Metadata
+			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
+		},
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
+		},
+		getCellFn: func(v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{}, errdefs.ErrCellNotFound
+		},
+		applyFn: func([]byte) (kukeonv1.ApplyDocumentsResult, error) {
+			return kukeonv1.ApplyDocumentsResult{
+				Resources: []kukeonv1.ApplyResourceResult{
+					{Kind: "Cell", Name: cellconfig.StableName("prod"), Action: "created"},
+				},
+			}, nil
+		},
+	}
+
+	if _, err := runApplyRef(t, fc, []string{"-c", "prod"}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if gotLookup.Realm != "from-env-realm" {
+		t.Errorf("config lookup realm=%q want from-env-realm", gotLookup.Realm)
+	}
+	if gotLookup.Space != "from-env-space" {
+		t.Errorf("config lookup space=%q want from-env-space", gotLookup.Space)
+	}
+	if gotLookup.Stack != "from-env-stack" {
+		t.Errorf("config lookup stack=%q want from-env-stack", gotLookup.Stack)
+	}
+}
+
+// TestApply_FromBlueprint_FlagWinsOverEnvVar pins the precedence: when
+// both --realm and KUKE_RUN_REALM are set, the flag wins. Same shape for
+// --space / --stack. Symmetric with the shared.ExplicitScope contract.
+func TestApply_FromBlueprint_FlagWinsOverEnvVar(t *testing.T) {
+	t.Setenv("KUKE_RUN_REALM", "from-env-realm")
+	t.Setenv("KUKE_RUN_SPACE", "from-env-space")
+	t.Setenv("KUKE_RUN_STACK", "from-env-stack")
+
+	gotLookup := v1beta1.CellBlueprintMetadata{}
+	fc := &fakeClient{
+		getBlueprintFn: func(doc v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			gotLookup = doc.Metadata
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		getCellFn: func(v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{}, errdefs.ErrCellNotFound
+		},
+		applyFn: func([]byte) (kukeonv1.ApplyDocumentsResult, error) {
+			return kukeonv1.ApplyDocumentsResult{
+				Resources: []kukeonv1.ApplyResourceResult{{Kind: "Cell", Name: "myCell", Action: "created"}},
+			}, nil
+		},
+	}
+
+	_, err := runApplyRef(t, fc, []string{
+		"-b", "web", "--name", "myCell",
+		"--realm", "flag-realm",
+		"--space", "flag-space",
+		"--stack", "flag-stack",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if gotLookup.Realm != "flag-realm" {
+		t.Errorf("blueprint lookup realm=%q want flag-realm (env should not override flag)", gotLookup.Realm)
+	}
+	if gotLookup.Space != "flag-space" {
+		t.Errorf("blueprint lookup space=%q want flag-space", gotLookup.Space)
+	}
+	if gotLookup.Stack != "flag-stack" {
+		t.Errorf("blueprint lookup stack=%q want flag-stack", gotLookup.Stack)
+	}
+}
+
 type fakeClient struct {
 	kukeonv1.FakeClient
 
