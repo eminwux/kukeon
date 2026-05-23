@@ -2088,6 +2088,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#targeting-a-specific-instance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Targeting a specific instance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#behavior" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3012,6 +3023,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#targeting-a-specific-instance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Targeting a specific instance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#behavior" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3113,9 +3135,23 @@
 <td><code>false</code></td>
 <td>Skip the interactive confirmation prompt (use this in scripts)</td>
 </tr>
+<tr>
+<td><code>--server-configuration</code></td>
+<td><code>/etc/kukeon/kukeond.yaml</code></td>
+<td>Path to a <code>ServerConfiguration</code> YAML targeting a specific kukeond instance; scopes the suffix-gated namespace enumeration to that instance</td>
+</tr>
 </tbody>
 </table>
 <p>Plus all <a href="../kuke/">global flags</a>.</p>
+<h2 id="targeting-a-specific-instance">Targeting a specific instance<a class="headerlink" href="#targeting-a-specific-instance" title="Permanent link">&para;</a></h2>
+<p><code>kuke uninstall --server-configuration &lt;path&gt;</code> reads the same precedence chain as <code>kuke init</code> and <code>kuke daemon …</code>:</p>
+<ol>
+<li><code>--server-configuration &lt;path&gt;</code> (flag)</li>
+<li><code>KUKEOND_CONFIGURATION</code> environment variable</li>
+<li><code>/etc/kukeon/kukeond.yaml</code> (default file)</li>
+<li>Hardcoded defaults (absent file)</li>
+</ol>
+<p>The configured <code>containerdNamespaceSuffix</code> scopes the realm-enumeration loop — an uninstall configured for a non-default suffix (e.g. <code>dev.kukeon.io</code>) enumerates only <code>*.dev.kukeon.io</code> namespaces and never touches the default-instance ones. Running <code>sudo kuke uninstall --server-configuration ./kukeond-dev.yaml</code> tears down the dev instance only.</p>
 <h2 id="behavior">Behavior<a class="headerlink" href="#behavior" title="Permanent link">&para;</a></h2>
 <p>By default, <code>kuke uninstall</code> asks for interactive confirmation before doing anything. Pass <code>--yes</code>/<code>-y</code> to skip the prompt.</p>
 <p>If any realm fails to drop its containerd namespace, steps 2–4 are <strong>skipped</strong>: tearing out <code>/opt/kukeon</code> while a residual namespace is still pinning overlay mounts on disk would strand the next <code>kuke init</code> with stale containerd state. The report flags every dir/account row as <code>skipped (realm purge failed)</code> so the half-cleaned host is visible without scrolling to the trailing error.</p>
@@ -3187,7 +3223,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 20:07:10 UTC">May 13, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 23, 2026 15:44:22 UTC">May 23, 2026</span>
   </span>
 
     
