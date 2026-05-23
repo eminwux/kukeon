@@ -93,13 +93,23 @@ const (
 // ContainerStatus.Stages. Index is the stage's 0-based position within the
 // container's full Tty.OnInit list (not its position among create stages
 // alone), in declaration order — the stable identity phase A (#635) carries
-// through (the run-once "done" key is settled in phase C, #690).
+// through. The run-once "done" key is the content Hash (phase C1, #690).
 type Stage struct {
 	Index int `json:"index"`
 	// State is one of StageDone or StageFailed.
 	State string `json:"state"`
 	// Error is the failure detail when State == StageFailed; empty otherwise.
 	Error string `json:"error,omitempty"`
+	// Hash is the content hash of the stage's TtyStage (Script + RunOn),
+	// computed by the daemon at record time and used by the controller-side
+	// merge to carry done records across stop/start (an entry preserves only
+	// when its Hash still matches the live spec's stage Hash at the same
+	// Index). Always empty on the wire today: kuketty does not stamp it; the
+	// daemon re-derives the Hash from cell.Spec when mapping wire→internal
+	// (see internal/controller/runner mergeStageStatuses). The field exists on
+	// the wire shape so a future kuketty-side change could populate it without
+	// a wire break — no producer change ships in this phase. Phase C1 (#690).
+	Hash string `json:"hash,omitempty"`
 }
 
 // Stage state values. Mirror the create-stage outcome set v1beta1.StageStatus

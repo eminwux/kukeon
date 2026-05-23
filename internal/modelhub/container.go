@@ -291,11 +291,16 @@ type RepoStatus struct {
 	Error  string
 }
 
-// StageStatus mirrors the v1beta1 StageStatus payload. Issue #635.
+// StageStatus mirrors the v1beta1 StageStatus payload. Phase C1 (#690) adds
+// the Hash key the controller-side merge uses to carry done records across
+// stop/start. Issue #635.
 type StageStatus struct {
 	Index int
 	State string
 	Error string
+	// Hash is the content hash of the stage at record time — the run-once
+	// "done" key. See the v1beta1 type for the merge contract.
+	Hash string
 }
 
 type ContainerState int

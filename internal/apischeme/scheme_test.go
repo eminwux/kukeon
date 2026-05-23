@@ -1586,7 +1586,7 @@ func TestContainerStatusStagesRoundTrip(t *testing.T) {
 		t.Fatalf("NormalizeContainer: %v", err)
 	}
 	internal.Status.Stages = []intmodel.StageStatus{
-		{Index: 1, State: "ran"},
+		{Index: 1, State: "ran", Hash: "abc1234567890def"},
 		{Index: 3, State: "failed", Error: "boom"},
 	}
 	out, err := apischeme.BuildContainerExternalFromInternal(internal, version)
@@ -1596,7 +1596,10 @@ func TestContainerStatusStagesRoundTrip(t *testing.T) {
 	if len(out.Status.Stages) != 2 {
 		t.Fatalf("output status stages len = %d, want 2", len(out.Status.Stages))
 	}
-	if out.Status.Stages[0] != (ext.StageStatus{Index: 1, State: "ran"}) {
+	// Hash round-trips end-to-end (phase C1, #690): the durable run-once key
+	// the controller stamps must survive the internal -> external build so
+	// `kuke get container -o yaml` renders it.
+	if out.Status.Stages[0] != (ext.StageStatus{Index: 1, State: "ran", Hash: "abc1234567890def"}) {
 		t.Errorf("status stage[0] = %+v", out.Status.Stages[0])
 	}
 	if out.Status.Stages[1] != (ext.StageStatus{Index: 3, State: "failed", Error: "boom"}) {
