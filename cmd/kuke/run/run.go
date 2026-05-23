@@ -69,13 +69,15 @@ func NewRunCmd() *cobra.Command {
 			"values plus repo / secret slot fills the first time and attaching to the " +
 			"existing cell on subsequent runs (idempotent). When the live cell's spec " +
 			"differs from the materialisation of the current Config + Blueprint, -c " +
-			"warns to stderr and attaches to the live state rather than reconciling. " +
-			"-f is create-or-attach by metadata.name: a missing cell is created and " +
-			"attached; a Ready cell is attached as a no-op; a Stopped cell is started " +
-			"then attached; a divergent on-disk spec is refused (use `kuke apply -f` to " +
-			"update); a cell in an error or partial state is refused with a " +
-			"`kuke delete cell <name>` pointer. To re-attach to an existing cell use " +
-			"`kuke attach <cell>`.",
+			"refuses to attach and points the operator at `kuke apply -c <config>` to " +
+			"reconcile (stops, updates, starts). -b with --name applies the same " +
+			"discipline against the pinned cell name, pointing at " +
+			"`kuke apply -b <bp> --name <cell>`. -f is create-or-attach by " +
+			"metadata.name: a missing cell is created and attached; a Ready cell is " +
+			"attached as a no-op; a Stopped cell is started then attached; a divergent " +
+			"on-disk spec is refused (use `kuke apply -f` to update); a cell in an " +
+			"error or partial state is refused with a `kuke delete cell <name>` " +
+			"pointer. To re-attach to an existing cell use `kuke attach <cell>`.",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -298,30 +300,12 @@ func runRun(cmd *cobra.Command, args []string) error {
 	switch {
 	case getErr == nil && pre.MetadataExists:
 		if changed := divergedFields(pre.Cell.Spec, cellDoc.Spec); len(changed) > 0 {
-			if flags.configName != "" {
-				// The -c verb attaches to live state on divergence rather than
-				// refusing: the divergent-spec warning in #625 explicitly
-				// directs the operator at a reconcile verb (`kuke apply -c`,
-				// out of scope here). The warning text is fixed by the AC; the
-				// reader sees only "differs" rather than the field list because
-				// the diff surfaces in `kuke get cell` and a one-line warning
-				// is more legible than an inline field dump.
-				fmt.Fprintf(cmd.ErrOrStderr(),
-					"live cell spec differs from CellConfig %s; attaching to live state — kuke apply -c %s to reconcile\n",
-					flags.configName, flags.configName,
-				)
-			} else {
-				return fmt.Errorf(
-					"cell %q exists with diverging spec (%s); use `kuke apply -f` to update",
-					cellDoc.Metadata.Name,
-					strings.Join(changed, ", "),
-				)
+			if rejectErr := rejectDivergentNamedCell(cellDoc, changed, flags); rejectErr != nil {
+				return rejectErr
 			}
 		}
-		// A live cell whose on-disk spec matches the file (or, for -c, that
-		// is being attached-to despite divergence per the warning above):
-		// drive the create-or-attach state machine instead of re-entering
-		// CreateCell.
+		// A live cell whose on-disk spec matches the file: drive the
+		// create-or-attach state machine instead of re-entering CreateCell.
 		return runExistingCell(cmd, client, cellDoc, pre, flags)
 	case getErr != nil && !errors.Is(getErr, errdefs.ErrCellNotFound):
 		return getErr
@@ -341,6 +325,44 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return attachAndMaybeAutoDelete(cmd, client, cellDoc, flags)
 	}
 	return nil
+}
+
+// rejectDivergentNamedCell refuses to attach when a named live cell's spec
+// diverges from the materialization the operator just asked us to run. Every
+// `kuke run` source that pins a deterministic cell name (`-f`, `-c`, and
+// `-b --name`) routes destructive updates through `kuke apply` instead — `run`
+// is a pure read-and-materialize verb, so a divergent target is the operator's
+// signal to either reconcile via `apply` or delete and re-run. The error
+// pointer is shaped to match the source: `-c` → `kuke apply -c <config>`
+// (cell name is the Config's stable name, `apply -c` recomputes it),
+// `-b --name <cell>` → `kuke apply -b <bp> --name <cell>` (the operator pinned
+// the name, so `apply` needs the same pin), and the bare `-f` / `-p` fallback
+// keeps the original `kuke apply -f` pointer because those paths carry the
+// spec on disk. `-b` without `--name` materializes a fresh `<prefix>-<6hex>`
+// cell every invocation, so a name collision against an existing cell with
+// the same generated suffix is statistically negligible and not handled here.
+func rejectDivergentNamedCell(cellDoc v1beta1.CellDoc, changed []string, flags runFlags) error {
+	fields := strings.Join(changed, ", ")
+	switch {
+	case flags.configName != "":
+		return fmt.Errorf(
+			"live cell %q spec differs from CellConfig %q (%s) — refusing to attach; "+
+				"use `kuke apply -c %s` to reconcile (stops, updates, starts)",
+			cellDoc.Metadata.Name, flags.configName, fields, flags.configName,
+		)
+	case flags.blueprintName != "" && flags.nameOverride != "":
+		return fmt.Errorf(
+			"live cell %q spec differs from CellBlueprint %q (%s) — refusing to attach; "+
+				"use `kuke apply -b %s --name %s` to reconcile (stops, updates, starts)",
+			cellDoc.Metadata.Name, flags.blueprintName, fields,
+			flags.blueprintName, cellDoc.Metadata.Name,
+		)
+	default:
+		return fmt.Errorf(
+			"cell %q exists with diverging spec (%s); use `kuke apply -f` to update",
+			cellDoc.Metadata.Name, fields,
+		)
+	}
 }
 
 // runExistingCell drives the create-or-attach state machine for a live cell

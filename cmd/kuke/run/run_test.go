@@ -2986,13 +2986,13 @@ func TestRun_FromConfig_LiveFailedCell_RefusesWithDeletePointer(t *testing.T) {
 	}
 }
 
-func TestRun_FromConfig_DivergentSpec_WarnsAndAttaches(t *testing.T) {
+func TestRun_FromConfig_DivergentSpec_RefusesAndPointsToApply(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	// Simulate divergence by returning a Ready cell whose container image
-	// disagrees with what Materialize(cfg, bp) would build. The warning text
-	// must match the AC verbatim and CreateCell/StartCell must not fire — the
-	// -c contract is attach-with-warning, not reconcile.
+	// disagrees with what Materialize(cfg, bp) would build. Per #753 the -c
+	// contract on divergence is to refuse with a `kuke apply -c` pointer, not
+	// warn-and-attach — CreateCell/StartCell must not fire.
 	fc := &fakeClient{
 		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
 			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
@@ -3023,18 +3023,88 @@ func TestRun_FromConfig_DivergentSpec_WarnsAndAttaches(t *testing.T) {
 			}, nil
 		},
 	}
-	cmd, out := newCmd(t, fc)
+	cmd, _ := newCmd(t, fc)
 	cmd.SetArgs([]string{"-c", "prod", "--realm", "cfg-realm", "-d"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute err=%v want nil (warn-only on divergence)", err)
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("Execute err=nil want refusal on divergent spec")
 	}
-	want := "live cell spec differs from CellConfig prod; attaching to live state — kuke apply -c prod to reconcile"
-	if !strings.Contains(out.String(), want) {
-		t.Errorf("expected divergent-spec warning to contain %q, got:\n%s", want, out.String())
+	// Mirrors the existing -f rejection: names the cell, names the source
+	// (CellConfig "prod"), enumerates the diverging field(s), and hands the
+	// operator the exact reconcile invocation. The stable name == config name
+	// for the -c path, so the pointer omits --name.
+	for _, want := range []string{
+		`live cell "prod" spec differs from CellConfig "prod"`,
+		`spec.containers["main"].image`,
+		"refusing to attach",
+		"kuke apply -c prod",
+		"reconcile",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err=%q missing substring %q", err, want)
+		}
 	}
 	if fc.createCalls != 0 || fc.startCalls != 0 {
-		t.Errorf("CreateCell=%d StartCell=%d want both 0 (warn-only)", fc.createCalls, fc.startCalls)
+		t.Errorf("CreateCell=%d StartCell=%d want both 0 (refuse on divergence)", fc.createCalls, fc.startCalls)
+	}
+}
+
+// TestRun_FromBlueprint_NamedDivergent_RefusesAndPointsToApply covers #753's
+// -b --name addition: a pinned-name `kuke run -b <bp> --name <cell>` against a
+// live cell whose spec has diverged from the materialisation must refuse with
+// a `kuke apply -b <bp> --name <cell>` pointer (mirroring the -c reject), not
+// silently attach to the diverged state. The generated-name path
+// (`kuke run -b <bp>` without --name) is unaffected because each invocation
+// materialises a fresh `<prefix>-<6hex>` cell, so a collision against an
+// existing cell is statistically negligible.
+func TestRun_FromBlueprint_NamedDivergent_RefusesAndPointsToApply(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			// Same divergence shape as the -c test: deep-copy then mutate the
+			// user container's image. blueprintDoc() declares only the "main"
+			// user container (the runner-synthesised root is filtered out of
+			// divergedFields).
+			live := doc
+			live.Spec.Containers = append([]v1beta1.ContainerSpec(nil), doc.Spec.Containers...)
+			for i := range live.Spec.Containers {
+				if live.Spec.Containers[i].ID == "main" {
+					live.Spec.Containers[i].Image = "registry.example.com/web:stale"
+					break
+				}
+			}
+			live.Status.State = v1beta1.CellStateReady
+			return kukeonv1.GetCellResult{
+				Cell: live, MetadataExists: true,
+				RootContainerExists: true, RootContainerTaskRunning: true,
+			}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-b", "web", "--name", "pinned", "--param", "TAG=v2", "--realm", "my-realm", "-d"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("Execute err=nil want refusal on divergent spec")
+	}
+	for _, want := range []string{
+		`live cell "pinned" spec differs from CellBlueprint "web"`,
+		`spec.containers["main"].image`,
+		"refusing to attach",
+		"kuke apply -b web --name pinned",
+		"reconcile",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err=%q missing substring %q", err, want)
+		}
+	}
+	if fc.createCalls != 0 || fc.startCalls != 0 {
+		t.Errorf("CreateCell=%d StartCell=%d want both 0 (refuse on divergence)", fc.createCalls, fc.startCalls)
 	}
 }
 
