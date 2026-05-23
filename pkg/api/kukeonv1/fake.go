@@ -220,3 +220,7 @@ func (FakeClient) DeleteDocuments(context.Context, []byte, bool, bool) (DeleteDo
 func (FakeClient) Ping(context.Context) error {
 	return ErrUnexpectedCall
 }
+
+func (FakeClient) PingVersion(context.Context) (string, error) {
+	return "", ErrUnexpectedCall
+}

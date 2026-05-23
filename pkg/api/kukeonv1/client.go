@@ -140,6 +140,13 @@ type Client interface {
 	// RPC daemon does not serve image methods.
 
 	Ping(ctx context.Context) error
+	// PingVersion is the Ping sibling that surfaces the daemon's reported
+	// build version alongside the ack. `kuke status` uses it to render the
+	// daemon row; the in-process client returns the current process's
+	// version (config.Version), so the value is well-defined on both
+	// transports. New callers preferring the existing ack-only contract
+	// stay on Ping.
+	PingVersion(ctx context.Context) (string, error)
 }
 
 // CreateCellArgs is the wire request for CreateCell.

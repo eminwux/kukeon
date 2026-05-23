@@ -41,6 +41,7 @@ import (
 	refreshcmd "github.com/eminwux/kukeon/cmd/kuke/refresh"
 	runcmd "github.com/eminwux/kukeon/cmd/kuke/run"
 	startcmd "github.com/eminwux/kukeon/cmd/kuke/start"
+	statuscmd "github.com/eminwux/kukeon/cmd/kuke/status"
 	stopcmd "github.com/eminwux/kukeon/cmd/kuke/stop"
 	uninstallcmd "github.com/eminwux/kukeon/cmd/kuke/uninstall"
 	"github.com/eminwux/kukeon/cmd/kuke/version"
@@ -150,6 +151,7 @@ func SetupKukeCmd(rootCmd *cobra.Command) error {
 	rootCmd.AddCommand(deletecmd.NewDeleteCmd())
 	rootCmd.AddCommand(doctorcmd.NewDoctorCmd())
 	rootCmd.AddCommand(startcmd.NewStartCmd())
+	rootCmd.AddCommand(statuscmd.NewStatusCmd())
 	rootCmd.AddCommand(stopcmd.NewStopCmd())
 	rootCmd.AddCommand(killcmd.NewKillCmd())
 	rootCmd.AddCommand(purgecmd.NewPurgeCmd())
