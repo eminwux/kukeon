@@ -4,27 +4,27 @@
 apiVersion: v1beta1
 kind: CellConfig
 metadata:
-  name: prod                # also the deterministic name of the materialized cell
-  realm: kuke-system        # scope coordinates; deepest non-empty wins
+  name: prod # also the deterministic name of the materialized cell
+  realm: kuke-system # scope coordinates; deepest non-empty wins
   # space: team-a           # optional — space-scoped
   # stack: agents           # optional — stack-scoped (requires space)
 spec:
   blueprint:
-    name: claude-code       # cross-scope reference; deeper coordinates optional
+    name: claude-code # cross-scope reference; deeper coordinates optional
     realm: kuke-system
-  values:                   # scalar ${KEY} fills for the blueprint's parameters
+  values: # scalar ${KEY} fills for the blueprint's parameters
     MODEL: claude-opus-4-7
-  repos:                    # structural repo slot fills, keyed by slot name
+  repos: # structural repo slot fills, keyed by slot name
     workspace:
       url: https://github.com/example/repo
-  secrets:                  # structural secret slot fills, keyed by slot name
+  secrets: # structural secret slot fills, keyed by slot name
     anthropic-token:
       secretRef:
         name: anthropic-token
         realm: kuke-system
 ```
 
-A `CellConfig` binds a [`CellBlueprint`](blueprint.md) to a concrete, idempotent cell **identity**. Where a Blueprint answers *"what does this cell look like?"*, a Config answers *"which instance?"*: a name with a deterministic derivation, the scalar `values` filled into the blueprint's parameters, and the structural repo/secret slot fills keyed by the blueprint's slot names. A Config materializes at most one live cell per scope.
+A `CellConfig` binds a [`CellBlueprint`](blueprint.md) to a concrete, idempotent cell **identity**. Where a Blueprint answers _"what does this cell look like?"_, a Config answers _"which instance?"_: a name with a deterministic derivation, the scalar `values` filled into the blueprint's parameters, and the structural repo/secret slot fills keyed by the blueprint's slot names. A Config materializes at most one live cell per scope.
 
 See [`kuke run -c`](../cli/kuke-run.md) for the identity state machine that decides whether `kuke run -c <config>` materializes a fresh cell, attaches to an existing one, or refuses because the in-cluster cell diverged from the Config's current spec.
 
@@ -32,13 +32,13 @@ See [`kuke run -c`](../cli/kuke-run.md) for the identity state machine that deci
 
 A Config is scopable at realm, space, or stack — never cell. A Config materializes a cell; scoping it to a single cell is nonsensical. The scope is the deepest non-empty coordinate, and a deeper coordinate may only be set when every shallower one is.
 
-| Field    | Type              | Required | Description                                                              |
-| -------- | ----------------- | -------- | ------------------------------------------------------------------------ |
+| Field    | Type              | Required | Description                                                                                                                                                   |
+| -------- | ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `name`   | string            | yes      | The config's name, unique within its scope. Also the deterministic name of the materialized cell — see [Identity and stable name](#identity-and-stable-name). |
-| `realm`  | string            | yes      | The always-required top-level scope coordinate.                          |
-| `space`  | string            | no       | When set, scopes the config to a space within `realm`.                   |
-| `stack`  | string            | no       | When set, scopes the config to a stack within `space` (requires space).  |
-| `labels` | map[string]string | no       | Copied onto the materialized cell, in addition to the `kukeon.io/config` back-reference label. |
+| `realm`  | string            | yes      | The always-required top-level scope coordinate.                                                                                                               |
+| `space`  | string            | no       | When set, scopes the config to a space within `realm`.                                                                                                        |
+| `stack`  | string            | no       | When set, scopes the config to a stack within `space` (requires space).                                                                                       |
+| `labels` | map[string]string | no       | Copied onto the materialized cell, in addition to the `kukeon.io/config` back-reference label.                                                                |
 
 ## spec
 
@@ -46,12 +46,12 @@ A Config is scopable at realm, space, or stack — never cell. A Config material
 
 Cross-scope reference to the [`CellBlueprint`](blueprint.md) this Config instantiates.
 
-| Field   | Type   | Required | Description                                                                |
-| ------- | ------ | -------- | -------------------------------------------------------------------------- |
-| `name`  | string | yes      | The referenced blueprint's name within its scope.                          |
-| `realm` | string | yes      | The blueprint's always-required top-level scope coordinate.                |
-| `space` | string | no       | When set, scopes the reference to a space within `realm`.                  |
-| `stack` | string | no       | When set, scopes the reference to a stack within `space`.                  |
+| Field   | Type   | Required | Description                                                 |
+| ------- | ------ | -------- | ----------------------------------------------------------- |
+| `name`  | string | yes      | The referenced blueprint's name within its scope.           |
+| `realm` | string | yes      | The blueprint's always-required top-level scope coordinate. |
+| `space` | string | no       | When set, scopes the reference to a space within `realm`.   |
+| `stack` | string | no       | When set, scopes the reference to a stack within `space`.   |
 
 The reference may cross scopes: a Config in one realm may instantiate a Blueprint owned by another (for example, a `default`-realm Config referencing a `kuke-system`-scoped template), the same cross-scope freedom a `secretRef` has.
 
@@ -65,10 +65,10 @@ Structural repo slot fills, keyed by the blueprint's repo slot `name`. Each entr
 
 #### CellConfigRepoFill
 
-| Field    | Type   | Required | Description                                                  |
-| -------- | ------ | -------- | ------------------------------------------------------------ |
-| `url`    | string | yes      | The clone URL filling the slot.                              |
-| `branch` | string | no       | The branch to check out. Empty clones the remote's default.  |
+| Field    | Type   | Required | Description                                                 |
+| -------- | ------ | -------- | ----------------------------------------------------------- |
+| `url`    | string | yes      | The clone URL filling the slot.                             |
+| `branch` | string | no       | The branch to check out. Empty clones the remote's default. |
 
 ### `spec.secrets` (map[string][SecretFill](#cellconfigsecretfill), optional)
 
@@ -76,16 +76,16 @@ Structural secret slot fills, keyed by the blueprint's secret slot `name`. The b
 
 #### CellConfigSecretFill
 
-| Field       | Type                | Required | Description                                                        |
-| ----------- | ------------------- | -------- | ------------------------------------------------------------------ |
-| `secretRef` | object              | yes      | Points at the `kind: Secret` that provides the slot's bytes. Same shape as [Container `secretRef`](container.md) — `name` + `realm` (required), `space` / `stack` / `cell` (optional, deepest-non-empty wins). |
+| Field       | Type   | Required | Description                                                                                                                                                                                                    |
+| ----------- | ------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `secretRef` | object | yes      | Points at the `kind: Secret` that provides the slot's bytes. Same shape as [Container `secretRef`](container.md) — `name` + `realm` (required), `space` / `stack` / `cell` (optional, deepest-non-empty wins). |
 
 ## Slot fills
 
 A `CellConfig` fills the structural slots a [`CellBlueprint`](blueprint.md) declares. Slot matching is by **name**, across all of the blueprint's containers — the same slot name on two containers shares a single Config-side entry. The validation gates are:
 
 - A Config that fills a slot the blueprint does not declare is an apply-time error (unknown repo slot / unknown secret slot).
-- A *required* slot the blueprint declares that the Config leaves unfilled is an apply-time error. A slot is treated as required if **any** declaration of that name across the blueprint's containers is required.
+- A _required_ slot the blueprint declares that the Config leaves unfilled is an apply-time error. A slot is treated as required if **any** declaration of that name across the blueprint's containers is required.
 - Optional unfilled slots are dropped silently from the materialized container.
 
 The two channels are independent: scalar `values` are blueprint-side parameters resolved at run time (see the blueprint's [`spec.parameters[]`](blueprint.md)), while `repos:` and `secrets:` are structural slot fills validated at apply time. A `${KEY}` parameter is not a slot, and a slot is not a `${KEY}` parameter.
@@ -97,7 +97,7 @@ A `CellConfig` materializes **at most one** live cell within its scope. The cell
 The matching contract:
 
 - Every cell `kuke run -c` materializes carries the `kukeon.io/config=<name>` back-reference label. The runtime locates the at-most-one live cell a Config owns by listing cells in the Config's scope with that label.
-- A divergent-spec warning fires when the in-cluster cell's spec disagrees with the Config's current spec (after re-resolving scalar values and slot fills). The state machine that drives materialise / attach / refuse on divergence lives in [`kuke run -c`](../cli/kuke-run.md).
+- When the in-cluster cell's spec diverges from the Config's current spec (after re-resolving scalar values and slot fills), `kuke run -c` refuses to attach and points at [`kuke apply -c <config>`](../cli/kuke-apply.md) to reconcile — `run` stays a pure read/materialize verb, and destructive updates (stop, update, start) route through `kuke apply -c`. The full identity state machine (no cell → materialize, running → attach, stopped → start-then-attach, divergent → refuse with `apply -c` pointer, error state → refuse with `kuke delete cell` pointer) lives in [`kuke run -c`](../cli/kuke-run.md).
 
 This is the structural contrast with a [`CellBlueprint`](blueprint.md): a blueprint is always-fresh (`<prefix>-<6hex>` per invocation), a config is always-named (`<configName>` per binding).
 
