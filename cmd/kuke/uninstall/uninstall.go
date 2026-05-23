@@ -101,6 +101,13 @@ func setupUninstallCmd(cmd *cobra.Command) error {
 	// not break.
 	kukshared.RegisterNoDaemonFlag(cmd)
 
+	// --server-configuration targets a specific kukeond instance, via the
+	// shared precedence chain (flag > KUKEOND_CONFIGURATION env > default
+	// file > hardcoded defaults). Scopes uninstall's suffix-gated namespace
+	// enumeration to the configured instance — an uninstall on dev cannot
+	// purge prod namespaces. Issue #284.
+	kukshared.RegisterServerConfigurationFlag(cmd)
+
 	return nil
 }
 
@@ -108,6 +115,15 @@ func runUninstall(cmd *cobra.Command, _ []string) error {
 	logger, ok := cmd.Context().Value(types.CtxLogger).(*slog.Logger)
 	if !ok || logger == nil {
 		return errdefs.ErrLoggerNotFound
+	}
+
+	// Resolve --server-configuration before reading runPath / socketPath /
+	// suffix from viper, so a `kuke uninstall --server-configuration
+	// ./kukeond-dev.yaml` scopes both the filesystem teardown and the
+	// suffix-gated namespace enumeration (collectRealmsForUninstall) to
+	// the dev instance only. Issue #284.
+	if _, _, err := kukshared.LoadServerConfigurationFromFlag(cmd); err != nil {
+		return err
 	}
 
 	socketPath := viper.GetString(config.KUKEOND_SOCKET.ViperKey)

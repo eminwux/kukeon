@@ -34,7 +34,6 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/firewall"
 	"github.com/eminwux/kukeon/internal/instance"
-	"github.com/eminwux/kukeon/internal/serverconfig"
 	"github.com/eminwux/kukeon/internal/sysuser"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -109,6 +108,11 @@ func setupInitCmd(cmd *cobra.Command) error {
 // a gate but its content is silently dropped, leaving the flag default
 // to win. Mirrors the BindEnv block in cmd/kukeond/kukeond.go's
 // bindEnvVars and the KUKEON_* binds in cmd/kuke/kuke.go's loadConfig.
+//
+// KUKEOND_CONFIGURATION (the new single source of truth for the
+// --server-configuration path, issue #284) is bound by
+// kukshared.LoadServerConfigurationFromFlag at runtime, not here, so the
+// binding follows the leaf command being executed.
 func bindEnvVars() {
 	for _, v := range []config.Var{
 		config.KUKE_INIT_REALM,
@@ -116,7 +120,6 @@ func bindEnvVars() {
 		config.KUKE_INIT_KUKEOND_IMAGE,
 		config.KUKE_INIT_NO_WAIT,
 		config.KUKE_INIT_FORCE_REGENERATE_CNI,
-		config.KUKE_INIT_SERVER_CONFIGURATION,
 	} {
 		_ = v.BindEnv()
 	}
@@ -166,18 +169,13 @@ func setFlags(cmd *cobra.Command) error {
 		return fmt.Errorf("failed to bind flag: %w", err)
 	}
 
-	cmd.Flags().String(
-		"server-configuration", config.KUKE_INIT_SERVER_CONFIGURATION.Default,
-		"Path to a ServerConfiguration YAML to seed the daemon with; "+
-			"absent file uses hardcoded defaults",
-	)
-	err = viper.BindPFlag(
-		config.KUKE_INIT_SERVER_CONFIGURATION.ViperKey,
-		cmd.Flags().Lookup("server-configuration"),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to bind flag: %w", err)
-	}
+	// --server-configuration is the shared admin-instance selector across
+	// kuke init, kuke daemon {start,stop,kill,reset,restart}, and kuke
+	// uninstall (issue #284). Registration declares the flag without binding
+	// to viper; LoadServerConfigurationFromFlag rebinds at RunE time so
+	// viper.BindPFlag's last-bind-wins semantics cannot have one verb's flag
+	// silently drive another's.
+	kukshared.RegisterServerConfigurationFlag(cmd)
 
 	cmd.Flags().String(
 		"containerd-namespace-suffix", config.KUKEON_ROOT_NAMESPACE_SUFFIX.Default,
@@ -226,40 +224,25 @@ func flagChanged(cmd *cobra.Command, name string) bool {
 	return false
 }
 
-// applyServerConfiguration layers the loaded ServerConfiguration on top of
-// viper for fields the operator did not explicitly set on the command line
-// or via environment. Order of precedence: explicit `--flag` > env >
+// applyServerConfiguration layers the init-specific ServerConfiguration
+// fields onto viper. The common admin fields (socket, runPath,
+// containerdSocket, logLevel, namespaceSuffix, cgroupRoot) are owned by the
+// shared helper kukshared.ApplyServerConfigurationCommonFields, which
+// runInit calls via kukshared.LoadServerConfigurationFromFlag before this
+// function. That split keeps one source of truth for the admin-common
+// precedence chain across kuke init, kuke daemon {start,stop,kill,reset,
+// restart}, and kuke uninstall (issue #284) while leaving init's own
+// kukeondImage knob — which the daemon ignores and no other admin verb
+// consumes — here.
+//
+// Order of precedence is unchanged: explicit `--flag` > env >
 // ServerConfiguration > flag default. Flag-changed values win so a one-off
 // `--kukeond-image` keeps overriding the on-disk document; env-set values
 // win because `viper.Set` would otherwise override viper's env binding.
 func applyServerConfiguration(cmd *cobra.Command, spec v1beta1.ServerConfigurationSpec) {
-	flags := cmd.Flags()
-	if spec.Socket != "" && !envSet(config.KUKEOND_SOCKET) {
-		viper.Set(config.KUKEOND_SOCKET.ViperKey, spec.Socket)
-	}
-	if spec.RunPath != "" && !flags.Changed("run-path") && !envSet(config.KUKEON_ROOT_RUN_PATH) {
-		viper.Set(config.KUKEON_ROOT_RUN_PATH.ViperKey, spec.RunPath)
-	}
-	if spec.ContainerdSocket != "" && !flags.Changed("containerd-socket") &&
-		!envSet(config.KUKEON_ROOT_CONTAINERD_SOCKET) {
-		viper.Set(config.KUKEON_ROOT_CONTAINERD_SOCKET.ViperKey, spec.ContainerdSocket)
-	}
-	if spec.LogLevel != "" && !flags.Changed("log-level") && !envSet(config.KUKEON_ROOT_LOG_LEVEL) {
-		viper.Set(config.KUKEON_ROOT_LOG_LEVEL.ViperKey, spec.LogLevel)
-	}
-	if spec.KukeondImage != "" && !flags.Changed("kukeond-image") &&
+	if spec.KukeondImage != "" && !flagChanged(cmd, "kukeond-image") &&
 		!envSet(config.KUKE_INIT_KUKEOND_IMAGE) {
 		viper.Set(config.KUKE_INIT_KUKEOND_IMAGE.ViperKey, spec.KukeondImage)
-	}
-	if spec.ContainerdNamespaceSuffix != "" &&
-		!flags.Changed("containerd-namespace-suffix") &&
-		!envSet(config.KUKEON_ROOT_NAMESPACE_SUFFIX) {
-		viper.Set(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey, spec.ContainerdNamespaceSuffix)
-	}
-	if spec.CgroupRoot != "" &&
-		!flags.Changed("cgroup-root") &&
-		!envSet(config.KUKEON_ROOT_CGROUP_ROOT) {
-		viper.Set(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey, spec.CgroupRoot)
 	}
 }
 
@@ -385,22 +368,17 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	serverConfigPath := viper.GetString(config.KUKE_INIT_SERVER_CONFIGURATION.ViperKey)
-	if serverConfigPath == "" {
-		serverConfigPath = config.DefaultServerConfigurationFile()
-	}
-	serverDoc, err := serverconfig.Load(serverConfigPath)
+	// Resolve --server-configuration via the shared precedence chain
+	// (flag > KUKEOND_CONFIGURATION env > /etc/kukeon/kukeond.yaml > zero
+	// document), layer the common admin fields onto viper, and call
+	// consts.ConfigureRuntime. The init-specific kukeondImage field is not
+	// part of the shared overlay — it is applied below alongside the
+	// returned spec so the resolveKukeondImage call observes it.
+	serverSpec, serverConfigPath, err := kukshared.LoadServerConfigurationFromFlag(cmd)
 	if err != nil {
-		return fmt.Errorf("load server configuration: %w", err)
+		return err
 	}
-	applyServerConfiguration(cmd, serverDoc.Spec)
-
-	if cfgErr := consts.ConfigureRuntime(
-		viper.GetString(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey),
-		viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey),
-	); cfgErr != nil {
-		return fmt.Errorf("configure runtime: %w", cfgErr)
-	}
+	applyServerConfiguration(cmd, serverSpec)
 
 	image := resolveKukeondImage()
 

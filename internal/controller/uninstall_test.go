@@ -496,6 +496,111 @@ func TestUninstall_SuffixEnumeratorPurgesKukeonNamespacesOnly(t *testing.T) {
 	}
 }
 
+// TestUninstall_SuffixIsolationAcrossInstances pins the issue #284 AC:
+// an uninstall configured for a non-default containerd-namespace suffix
+// (e.g. "dev.kukeon.io") must not enumerate or purge namespaces belonging
+// to the default-suffix instance (".kukeon.io"). The suffix-gated
+// enumeration in collectRealmsForUninstall + IsKukeonNamespace is the
+// barrier — when the dev daemon's ServerConfiguration is loaded, consts.
+// ConfigureRuntime mutates the package-level RealmNamespaceSuffix and
+// every downstream `IsKukeonNamespace`/`RealmFromNamespace` call observes
+// the dev suffix; the prod-suffix namespaces fall through as foreign and
+// the well-known realm floor lands on the dev-suffix variants. This test
+// fakes the runtime override directly (rather than going through the CLI
+// loader) so the controller-level invariant is locked independently of
+// the cmd/-side plumbing.
+func TestUninstall_SuffixIsolationAcrossInstances(t *testing.T) {
+	// Save/restore the runtime-override globals so the test mirrors the
+	// consts_test withRuntime helper without taking a dependency on its
+	// package. Cannot run in parallel — the package vars are process state.
+	prevSuffix := consts.RealmNamespaceSuffix
+	prevRoot := consts.KukeonCgroupRoot
+	t.Cleanup(func() {
+		consts.RealmNamespaceSuffix = prevSuffix //nolint:reassign // restore runtime-overridable global
+		consts.KukeonCgroupRoot = prevRoot       //nolint:reassign // restore runtime-overridable global
+	})
+	if err := consts.ConfigureRuntime("dev.kukeon.io", "/kukeon-dev"); err != nil {
+		t.Fatalf("ConfigureRuntime(dev.kukeon.io, /kukeon-dev): %v", err)
+	}
+
+	tmpRunPath := t.TempDir()
+
+	f := uninstallNoopRunner(nil)
+	// ListRealms returns nothing — the suffix-enumerator path is the source
+	// of truth, and the well-known realm floor will land on the dev-suffix
+	// variants because consts.RealmNamespace observes the configured suffix.
+	f.ListRealmsFn = func() ([]intmodel.Realm, error) { return nil, nil }
+	// A containerd-namespace lister returning a mix of dev-instance,
+	// default-instance, and unrelated namespaces. The dev-configured
+	// uninstall must touch only `*.dev.kukeon.io`.
+	f.ListContainerdNamespacesFn = func() ([]string, error) {
+		return []string{
+			"default.dev.kukeon.io",     // dev instance — must purge
+			"kuke-system.dev.kukeon.io", // dev instance — must purge
+			"myteam.dev.kukeon.io",      // dev instance — must purge
+			"default.kukeon.io",         // prod instance — must NOT purge
+			"kuke-system.kukeon.io",     // prod instance — must NOT purge
+			"prodteam.kukeon.io",        // prod instance — must NOT purge
+			"moby",                      // foreign — must NOT purge
+		}, nil
+	}
+
+	purgedNames := map[string]string{} // name -> namespace
+	f.PurgeRealmFn = func(r intmodel.Realm) (bool, error) {
+		purgedNames[r.Metadata.Name] = r.Spec.Namespace
+		return true, nil
+	}
+
+	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
+	if _, err := ctrl.Uninstall(controller.UninstallOptions{
+		SkipUserGroup: true,
+	}); err != nil {
+		t.Fatalf("Uninstall returned error: %v", err)
+	}
+
+	wantPurged := map[string]string{
+		"default":     "default.dev.kukeon.io",
+		"kuke-system": "kuke-system.dev.kukeon.io",
+		"myteam":      "myteam.dev.kukeon.io",
+	}
+	if len(purgedNames) != len(wantPurged) {
+		got := make([]string, 0, len(purgedNames))
+		for k := range purgedNames {
+			got = append(got, k)
+		}
+		sort.Strings(got)
+		t.Fatalf(
+			"purged realms = %v, want exactly %v (only dev-suffixed namespaces)",
+			got, []string{"default", "kuke-system", "myteam"},
+		)
+	}
+	for name, wantNs := range wantPurged {
+		if got := purgedNames[name]; got != wantNs {
+			t.Errorf("realm %q purged with namespace %q, want %q", name, got, wantNs)
+		}
+	}
+
+	// Prod-instance namespaces must not have been touched. A leak here is
+	// the failure mode the AC's "uninstall on dev cannot enumerate or purge
+	// prod namespaces" prohibits.
+	for _, prodNs := range []string{
+		"default.kukeon.io",
+		"kuke-system.kukeon.io",
+		"prodteam.kukeon.io",
+		"moby",
+	} {
+		for purgedName, purgedNs := range purgedNames {
+			if purgedNs == prodNs {
+				t.Errorf(
+					"prod-instance namespace %q leaked into dev uninstall (purged as realm %q); "+
+						"cross-instance isolation must filter it out",
+					prodNs, purgedName,
+				)
+			}
+		}
+	}
+}
+
 // TestUninstall_ReleasesBindMountsBeforeRmdir pins the #434 fix: a kukeon-
 // owned bind mount under /run/kukeon (or /opt/kukeon) must be unmounted by
 // the controller before the rmdir step, so a post-attach uninstall on a

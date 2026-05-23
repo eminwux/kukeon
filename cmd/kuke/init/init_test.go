@@ -761,9 +761,11 @@ func TestRunInitErrors(t *testing.T) {
 				// Point at a non-existent ServerConfiguration so Load
 				// returns an empty doc and applyServerConfiguration does
 				// not override the bogus socket above with whatever lives
-				// in /etc/kukeon/kukeond.yaml on the test host.
+				// in /etc/kukeon/kukeond.yaml on the test host. Issue #284
+				// collapsed KUKE_INIT_SERVER_CONFIGURATION into
+				// KUKEOND_CONFIGURATION — one source of truth.
 				viper.Set(
-					config.KUKE_INIT_SERVER_CONFIGURATION.ViperKey,
+					config.KUKEOND_CONFIGURATION.ViperKey,
 					filepath.Join(tmp, "missing.yaml"),
 				)
 				// Re-seed package-init defaults that an earlier
@@ -820,9 +822,12 @@ func TestRunInitErrors(t *testing.T) {
 // TestApplyServerConfigurationEnvOverridesConfig is the init-side mirror of
 // the kukeond test of the same name (cmd/kukeond/kukeond_test.go). It locks
 // the precedence rule --flag > env > ServerConfiguration > default for the
-// init-specific knobs (KUKE_INIT_KUKEOND_IMAGE, KUKEON_RUN_PATH) so a future
-// change to applyServerConfiguration in init.go cannot regress the env
-// branch while the kukeond sibling test stays green.
+// init-specific knobs (KUKE_INIT_KUKEOND_IMAGE) and the admin-common knobs
+// (KUKEON_RUN_PATH, KUKEON_LOG_LEVEL) so a future change to
+// applyServerConfiguration in init.go — or to the shared
+// ApplyServerConfigurationCommonFields helper it now delegates to (issue
+// #284) — cannot regress the env branch while the kukeond sibling test
+// stays green.
 //
 // Issue #399 regression guard: the env bindings are wired exclusively via
 // the production code path — kuke.LoadConfig() for the shared KUKEON_*
@@ -854,6 +859,12 @@ func TestApplyServerConfigurationEnvOverridesConfig(t *testing.T) {
 		RunPath:      "/opt/kukeon-from-config",
 		LogLevel:     "warn",
 	}
+	// Mirror the production order: runInit calls the shared loader (which
+	// applies the admin-common fields via ApplyServerConfigurationCommonFields),
+	// then init's own applyServerConfiguration handles the init-specific
+	// kukeondImage. We invoke both directly here so the test isolates the
+	// precedence rule from the YAML I/O path.
+	kukshared.ApplyServerConfigurationCommonFields(cmd, spec)
 	ApplyServerConfiguration(cmd, spec)
 
 	if got := viper.GetString(config.KUKE_INIT_KUKEOND_IMAGE.ViperKey); got != "ghcr.io/eminwux/kukeon:from-env" {

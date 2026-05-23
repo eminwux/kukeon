@@ -68,6 +68,7 @@ sudo kuke uninstall -y       # non-interactive (scripts)
 
 - Without `-y`, the command prints a destructive-action prompt naming every artifact it will remove and waits on stdin. EOF or a non-`yes` answer aborts with non-zero exit and no destructive side effect.
 - With `-y`, exit code 0 on success. Side effect: the `kukeond` systemd unit (if installed) is stopped, disabled, and removed; every realm purged with `--cascade`; `/run/kukeon` and the configured run path (default `/opt/kukeon`) removed; the `kukeon` system user/group removed if present.
+- `kuke uninstall` accepts `--server-configuration <path>` (default `/etc/kukeon/kukeond.yaml`) to target a specific kukeond instance. Precedence: `--flag > KUKEOND_CONFIGURATION env > /etc/kukeon/kukeond.yaml > hardcoded defaults`. The loaded `containerdNamespaceSuffix` scopes the realm enumeration — `sudo kuke uninstall --server-configuration ./kukeond-dev.yaml` enumerates and purges only `*.dev.kukeon.io` namespaces and never touches the default-instance ones. Same flag on `kuke init` and `kuke daemon …`.
 - The binary at `/usr/local/bin/kuke` and the `kukeond` symlink are **never** removed — uninstalling runtime state is not the same as uninstalling the binary.
 - The systemd-unit teardown is a no-op (silent, no row in the report) on hosts where `systemctl` is absent or `/etc/systemd/system/kukeond.service` was never installed (e.g. `make dev-init` hosts).
 - If any realm fails to drop its containerd namespace, the subsequent dir/account removal is **skipped** (not silently best-effort) and the report flags each skipped row. Exit code is non-zero so automation can branch on it.
@@ -130,6 +131,7 @@ sudo kuke daemon logs -f               # follow until SIGINT
 
 **Invariants.**
 
+- Every `kuke daemon …` subcommand accepts `--server-configuration <path>` (default `/etc/kukeon/kukeond.yaml`) to target a specific kukeond instance. Precedence: `--flag > KUKEOND_CONFIGURATION env > /etc/kukeon/kukeond.yaml > hardcoded defaults` — the same chain `kukeond` itself uses. `sudo kuke daemon stop --server-configuration ./kukeond-dev.yaml` signals only the dev instance; the prod kukeond (under the default `/etc/kukeon/kukeond.yaml`) is untouched. Same flag on `kuke init` and `kuke uninstall`.
 - `daemon start` is idempotent. Running it while the daemon is up succeeds with a clear "already running" message; exit code 0.
 - `daemon stop` is idempotent. Running it while the daemon is down succeeds with a clear "already stopped" message; exit code 0.
 - Idempotence is keyed on **liveness**, not persisted cell state. Each lifecycle verb dials the kukeond socket alongside reading the cell's `.status` so that an externally-killed daemon (OOM, host reboot mid-run, `kill -9`) does not silently mask itself as "already running" — `daemon start` falls through to bring the cell back up, while `daemon stop` / `kill` / `restart` falls through to act on a live daemon whose persisted status lags. The probe budget is sub-second; a stale-Ready or stale-not-Ready divergence is printed on stdout before the reconciling action runs.
