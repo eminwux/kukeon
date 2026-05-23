@@ -23,7 +23,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
@@ -188,47 +187,6 @@ func (r *Exec) collectSecretSubtree(out *[]intmodel.Secret, realm, space, stack,
 		}
 	}
 	return nil
-}
-
-// childScopeNames returns the child-resource subdirectory names directly under
-// dir, excluding the reserved secrets/ subdirectory. When want is non-empty it
-// is treated as a filter: only that child is returned, and only if it exists.
-// A missing dir yields no children (graceful, matching the list verbs' "no
-// filter match ⇒ empty" contract).
-func (r *Exec) childScopeNames(dir, want string) ([]string, error) {
-	if strings.TrimSpace(want) != "" {
-		child := filepath.Join(dir, want)
-		info, err := os.Stat(child)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil, nil
-			}
-			return nil, fmt.Errorf("failed to stat scope dir %q: %w", child, err)
-		}
-		if !info.IsDir() {
-			return nil, nil
-		}
-		return []string{want}, nil
-	}
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to read scope dir %q: %w", dir, err)
-	}
-	var names []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		if entry.Name() == consts.KukeonSecretsSubdir {
-			continue
-		}
-		names = append(names, entry.Name())
-	}
-	return names, nil
 }
 
 // collectSecretsInScope appends the metadata of every Secret stored directly at
