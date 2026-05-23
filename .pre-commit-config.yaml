@@ -39,6 +39,14 @@ repos:
     rev: v2.6.2
     hooks:
       - id: golangci-lint
+        # cmd/kukebuild lives in its own go 1.25 module (#662 module split).
+        # v2.6.2's binary is built with go 1.24; with go.work enabled, the
+        # workspace package loader pulls kukebuild into analysis and the
+        # type checker panics ("package requires newer Go version go1.25").
+        # Disable workspace mode so the hook only sees the root module
+        # (go 1.24.5). cmd/kukebuild stays unlinted by pre-commit until
+        # golangci-lint is bumped to a release built with go 1.25+ (#693).
+        entry: env GOWORK=off golangci-lint run --new-from-rev HEAD --fix
         args: ["./..."]
 
   - repo: https://github.com/pre-commit/mirrors-prettier
