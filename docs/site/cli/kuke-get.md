@@ -7,7 +7,7 @@ kuke get <resource> [NAME] [flags]
 kuke g   <resource> [NAME] [flags]      # alias
 ```
 
-Resources: `realm`, `space`, `stack`, `cell`, `container`. Each subcommand also accepts its plural (`realms`, `spaces`, …) and a short alias (`r`, `sp`, `st`, `ce`, `co`).
+Resources: `realm`, `space`, `stack`, `cell`, `container`, `blueprint`, `config`. Each subcommand also accepts its plural (`realms`, `spaces`, …, `blueprints`, `configs`) and a short alias (`r`, `sp`, `st`, `ce`, `co`, `bp`, `cfg`).
 
 ## Common flags
 
@@ -22,13 +22,15 @@ Plus all [global flags](kuke.md). Every `kuke get <kind>` accepts the explicit `
 
 Each subcommand takes the flags that scope the query:
 
-| Subcommand             | Scope flags                               |
-| ---------------------- | ----------------------------------------- |
-| `get realm [name]`     | none (realms are top-level)               |
-| `get space [name]`     | `--realm` (default `default`)             |
-| `get stack [name]`     | `--realm`, `--space`                      |
-| `get cell [name]`      | `--realm`, `--space`, `--stack`           |
-| `get container [name]` | `--realm`, `--space`, `--stack`, `--cell` |
+| Subcommand             | Scope flags                                      |
+| ---------------------- | ------------------------------------------------ |
+| `get realm [name]`     | none (realms are top-level)                      |
+| `get space [name]`     | `--realm` (default `default`)                    |
+| `get stack [name]`     | `--realm`, `--space`                             |
+| `get cell [name]`      | `--realm`, `--space`, `--stack`                  |
+| `get container [name]` | `--realm`, `--space`, `--stack`, `--cell`        |
+| `get blueprint [name]` | `--realm`, `--space`, `--stack` (no `--cell` — Blueprints are never cell-scoped) |
+| `get config [name]`    | `--realm`, `--space`, `--stack` (no `--cell` — Configs are never cell-scoped)    |
 
 All scope flags default to `default`. See the [realm default note](commands.md#convention-positional-arg--flags).
 
@@ -62,6 +64,12 @@ sudo kuke get containers --realm default --space default --stack default --cell 
 
 # Show which cgroup controllers are delegated to every realm
 sudo kuke get realms --show-controllers
+
+# List every daemon-stored CellBlueprint bound to the kuke-system realm
+sudo kuke get blueprints --realm kuke-system
+
+# Show one CellConfig as YAML
+sudo kuke get config kukeon-dev --realm kuke-system -o yaml
 ```
 
 ## `get` vs `refresh`

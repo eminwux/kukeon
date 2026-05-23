@@ -53,6 +53,22 @@ kuke delete container <name> --realm <r> --space <s> --stack <t> --cell <c>
 
 `--cascade` does not apply to containers — they're already leaves.
 
+### kuke delete blueprint
+
+```
+kuke delete blueprint <name> --realm <r> [--space <s>] [--stack <t>] [--force]
+```
+
+Removes the daemon-stored CellBlueprint document bound to the named scope. Cells previously materialised from this blueprint are independent copies and are **not** affected. `--cascade` does not apply — a Blueprint has no children in the resource hierarchy.
+
+### kuke delete config
+
+```
+kuke delete config <name> --realm <r> [--space <s>] [--stack <t>] [--force]
+```
+
+Removes the daemon-stored CellConfig document bound to the named scope. The at-most-one live cell the Config materialised is **not** torn down — delete it separately with `kuke delete cell <name>`. When a live cell still carries the back-reference label to this Config, `kuke delete config` emits a one-line notice pointing at the cell to delete (never a refusal). `--cascade` does not apply — a Config has no children in the resource hierarchy.
+
 ## Behavior
 
 1. **Without `--cascade`**, delete fails if the resource has children. It refuses to leave orphaned subtrees behind.
@@ -73,6 +89,12 @@ sudo kuke delete container stuck --cell web --realm default --space blog --stack
 
 # Delete every resource listed in a manifest
 sudo kuke delete -f site.yaml
+
+# Remove a daemon-stored CellBlueprint (materialised cells are untouched)
+sudo kuke delete blueprint dev --realm kuke-system
+
+# Remove a daemon-stored CellConfig (the live cell it owns is not torn down)
+sudo kuke delete config kukeon-dev --realm kuke-system
 ```
 
 ## delete vs. purge

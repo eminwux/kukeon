@@ -1,22 +1,31 @@
 # kuke run
 
-Create and start a single cell from a YAML file or stdin (`-f`), or from a per-user profile under `$HOME/.kuke/profiles.d/<name>.yaml` (`-p`). Conceptually `kuke apply -f` (single-cell) plus `kuke start cell`, but refuses to update a divergent on-disk spec.
+Create and start a single cell from one of four sources:
+
+- `-f <file>` — a single-cell YAML doc (or `-` for stdin).
+- `-p <profile>` — a per-user profile under `$HOME/.kuke/profiles.d/<name>.yaml`. **Deprecated; will be removed in #626** — author new templates as `kind: CellBlueprint` and run them via `-b`/`-c` instead.
+- `-b <blueprint>` — a daemon-stored CellBlueprint, resolved from the scope named by `--realm`/`--space`/`--stack`. Substitutes scalar `--param` values and materializes a fresh `<prefix>-<6hex>` cell every invocation.
+- `-c <config>` — a daemon-stored CellConfig, resolved from the same scope. Stable-named and idempotent: walks the identity state machine and attaches to the at-most-one live cell the Config owns.
+
+Conceptually `kuke apply -f` (single-cell) plus `kuke start cell`, but refuses to update a divergent on-disk spec.
 
 ```
-kuke run (-f <file> | -p <profile>) [flags]
+kuke run (-f <file> | -p <profile> | -b <blueprint> | -c <config>) [flags]
 ```
 
 To re-attach to an existing cell, use [`kuke attach <cell>`](kuke-attach.md).
 
 ## Flags
 
-| Flag                | Default                   | Description                                                                                                                                                          |
-| ------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--file`, `-f`      | _(one of `-f`/`-p`)_      | YAML to read (path or `-` for stdin); mutually exclusive with `-p`                                                                                                   |
-| `--profile`, `-p`   | _(one of `-f`/`-p`)_      | Cell profile name to load from `$HOME/.kuke/profiles.d` (or `$KUKE_PROFILES_DIR`); mutually exclusive with `-f`                                                      |
-| `--name`            | `<metadata.name>-<6hex>`  | Override the materialized cell name. Only valid with `-p`; rejected with `-f`, where `metadata.name` is the cell name verbatim                                       |
-| `--param`           | (empty, repeatable)       | Profile parameter override as `KEY=VALUE`. Only valid with `-p`. Each `KEY` must be declared in `spec.parameters[]`. Wins over the default and over `--param-file`.   |
-| `--param-file`      | (empty)                   | File of `KEY=VALUE` lines whose values seed profile parameters; one per line, `#` starts a comment. Same declaration rules as `--param`. CLI `--param` wins on dups. |
+| Flag                | Default                          | Description                                                                                                                                                                                                                                                                                          |
+| ------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--file`, `-f`      | _(one of `-f`/`-p`/`-b`/`-c`)_   | YAML to read (path or `-` for stdin); mutually exclusive with `-p`/`-b`/`-c`                                                                                                                                                                                                                         |
+| `--profile`, `-p`   | _(one of `-f`/`-p`/`-b`/`-c`)_   | Cell profile name to load from `$HOME/.kuke/profiles.d` (or `$KUKE_PROFILES_DIR`); mutually exclusive with `-f`/`-b`/`-c`. **Deprecated; will be removed in #626** — use `-b`/`-c` instead                                                                                                           |
+| `--blueprint`, `-b` | _(one of `-f`/`-p`/`-b`/`-c`)_   | Daemon-stored CellBlueprint name to run, resolved from the scope named by `--realm`/`--space`/`--stack`; mutually exclusive with `-f`/`-p`/`-c`. Substitutes scalar `--param` values and materializes a fresh `<prefix>-<6hex>` cell                                                                |
+| `--config`, `-c`    | _(one of `-f`/`-p`/`-b`/`-c`)_   | Daemon-stored CellConfig name to run, resolved from the same scope; mutually exclusive with `-f`/`-p`/`-b`. The Config carries its own scalar values and structural slot fills (repos, secrets), so `--name`/`--param`/`--param-file` are rejected with `-c`. Idempotent: walks the identity state machine and attaches to the at-most-one live cell the Config owns by stable name |
+| `--name`            | `<metadata.name>-<6hex>`         | Override the materialized cell name. Valid with `-p`/`-b`; rejected with `-f` (where `metadata.name` is the cell name verbatim) and with `-c` (where the cell name is the Config's stable name)                                                                                                     |
+| `--param`           | (empty, repeatable)              | Scalar parameter override as `KEY=VALUE`. Valid with `-p`/`-b`. Each `KEY` must be declared in `spec.parameters[]`. Wins over the default and over `--param-file`. Rejected with `-c` — a CellConfig carries its own `spec.values`; edit the Config instead                                          |
+| `--param-file`      | (empty)                          | File of `KEY=VALUE` lines whose values seed scalar parameters; one per line, `#` starts a comment. Same declaration rules as `--param`. CLI `--param` wins on dups. Rejected with `-c` (same reason as `--param`)                                                                                    |
 | `--detach`, `-d`    | `false`                   | Return immediately after start without attaching                                                                                                                     |
 | `--container`       | (auto-pick)               | Container to attach to (attach mode only; rejected with `-d`). Precedence: `--container` > `cell.tty.default` > first attachable                                     |
 | `--rm`              | `false`                   | Best-effort delete the cell after it's no longer needed (any rc). See [Cleanup with `--rm`](#cleanup-with---rm).                                                     |
@@ -41,6 +50,8 @@ A clean `^]^]` detach exits the CLI but leaves the cell running so you can re-at
 
 ## Profiles
 
+> **Deprecated; will be removed in #626.** Author new templates as `kind: CellBlueprint` and run them via `-b`/`-c` (see [Blueprints and Configs](#blueprints-and-configs) below).
+
 Profiles are YAML files under `$HOME/.kuke/profiles.d/<name>.yaml` (or `$KUKE_PROFILES_DIR`). A profile is a cell spec template with declared `spec.parameters[]`. Each invocation materializes one cell with a unique name (`<metadata.name>-<6hex>` by default; override with `--name`).
 
 Parameters are resolved in this order, last-write-wins per key:
@@ -50,6 +61,30 @@ Parameters are resolved in this order, last-write-wins per key:
 3. Values from each `--param KEY=VALUE` on the CLI.
 
 Keys not declared in `spec.parameters[]` are rejected.
+
+## Blueprints and Configs
+
+`-b`/`--blueprint` and `-c`/`--config` both run daemon-stored templates instead of an on-disk file. They are resolved by name in the scope named by `--realm`/`--space`/`--stack` — the same lookup `kuke get blueprint <name>` / `kuke get config <name>` performs.
+
+The two verbs cover different operator workflows:
+
+- **`-b <blueprint>` — fresh cell per invocation.** A CellBlueprint is a template with declared `spec.parameters[]`. Each `kuke run -b` materializes a new cell with a `<prefix>-<6hex>` name; scalar `--param KEY=VALUE` (or `--param-file`) overrides the Blueprint's defaults. Behaves like `-p` did, but the template lives in the daemon's store rather than `$HOME/.kuke/profiles.d`.
+- **`-c <config>` — stable-named, idempotent.** A CellConfig binds a CellBlueprint reference to concrete scalar values plus structural slot fills (repo bindings, secret references). The cell name is the Config's `metadata.name`. `--param`/`--param-file`/`--name` are rejected with `-c` because the Config already owns its values — edit the Config instead.
+
+### Identity state machine for `-c`
+
+Each `kuke run -c <config>` walks the Config's identity state and converges:
+
+| Live cell state                 | Behavior                                                                                                                            |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| No cell with the Config's name  | Materialize from the referenced Blueprint with the Config's values + slot fills, create the cell, attach.                           |
+| Live and running                | Attach to the existing cell (no-op create).                                                                                         |
+| Live but stopped                | Start the existing cell, then attach.                                                                                               |
+| Live but in an error / partial state | Refuse with a `kuke delete cell <name>` pointer; do not attempt to recover by recreating.                                      |
+
+If the live cell's spec differs from the materialisation of the *current* Config + Blueprint (someone edited the Config or the underlying Blueprint after the cell was last materialised), `-c` emits a divergence warning to stderr and attaches to the live state — it does **not** reconcile the cell to the new spec. Use `kuke delete cell <name>` followed by `kuke run -c <name>` to pick up the new spec.
+
+See [`kind: CellBlueprint`](../manifests/blueprint.md) and [`kind: CellConfig`](../manifests/config.md) for the full manifest reference.
 
 ## Cleanup with `--rm`
 
@@ -81,6 +116,15 @@ kuke run -p shell --name my-shell --detach
 
 # One-shot job that cleans itself up after the workload exits
 kuke run -p batch --rm
+
+# Run a daemon-stored CellBlueprint with a scalar param override (fresh cell)
+sudo kuke run -b dev --realm kuke-system --param PROJECT_DIR=kukeon
+
+# Run a daemon-stored CellConfig (stable-named; attaches if the cell already exists)
+sudo kuke run -c kukeon-dev --realm kuke-system
+
+# Same Config, but detach instead of attaching after start
+sudo kuke run -c kukeon-dev --realm kuke-system -d
 ```
 
 ## Related
