@@ -201,7 +201,15 @@
          <lastmod>2026-05-23</lastmod>
     </url>
     <url>
+         <loc>https://kukeon.io/manifests/blueprint/</loc>
+         <lastmod>2026-05-23</lastmod>
+    </url>
+    <url>
          <loc>https://kukeon.io/manifests/cell/</loc>
+         <lastmod>2026-05-23</lastmod>
+    </url>
+    <url>
+         <loc>https://kukeon.io/manifests/config/</loc>
          <lastmod>2026-05-23</lastmod>
     </url>
     <url>

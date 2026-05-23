@@ -12,13 +12,13 @@
         <meta name="author" content="Emiliano Spinella (eminwux)">
       
       
-        <link rel="canonical" href="https://kukeon.io/guides/init-and-reset/">
+        <link rel="canonical" href="https://kukeon.io/manifests/config/">
       
       
-        <link rel="prev" href="../../architecture/storage-layout/">
+        <link rel="prev" href="../blueprint/">
       
       
-        <link rel="next" href="../apply-manifests/">
+        <link rel="next" href="../../tutorials/hello-world/">
       
       
         
@@ -29,7 +29,7 @@
     
     
       
-        <title>Init and reset - kukeon</title>
+        <title>CellConfig manifest - kukeon</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#init-and-reset" class="md-skip">
+        <a href="#cellconfig-manifest" class="md-skip">
           Skip to content
         </a>
       
@@ -118,7 +118,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Init and reset
+              CellConfig manifest
             
           </span>
         </div>
@@ -346,13 +346,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="./" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../../guides/init-and-reset/" class="md-tabs__link">
           
   
   
@@ -388,11 +386,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../manifests/overview/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../overview/" class="md-tabs__link">
           
   
   
@@ -1280,31 +1280,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
         
           
-          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
             
   
   
@@ -1322,7 +1319,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1337,37 +1334,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Init and reset
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../guides/init-and-reset/" class="md-nav__link">
         
   
   
@@ -1383,103 +1353,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#fresh-bootstrap" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Fresh bootstrap
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#re-init-reconcile" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Re-init (reconcile)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#re-init-after-a-generator-fix" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Re-init after a generator fix
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#tear-down-the-daemon-for-iteration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Tear down the daemon for iteration
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#wipe-a-realm" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Wipe a realm
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#full-host-wipe" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Full host wipe
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#related" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Related
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1492,7 +1365,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../apply-manifests/" class="md-nav__link">
+      <a href="../../guides/apply-manifests/" class="md-nav__link">
         
   
   
@@ -1520,7 +1393,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../run-claude-code/" class="md-nav__link">
+      <a href="../../guides/run-claude-code/" class="md-nav__link">
         
   
   
@@ -1548,7 +1421,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../local-dev/" class="md-nav__link">
+      <a href="../../guides/local-dev/" class="md-nav__link">
         
   
   
@@ -1576,7 +1449,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../autocomplete/" class="md-nav__link">
+      <a href="../../guides/autocomplete/" class="md-nav__link">
         
   
   
@@ -1604,7 +1477,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../troubleshooting/" class="md-nav__link">
+      <a href="../../guides/troubleshooting/" class="md-nav__link">
         
   
   
@@ -2257,28 +2130,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
-        
-          
-          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -2296,7 +2172,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
@@ -2314,7 +2190,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../manifests/overview/" class="md-nav__link">
+      <a href="../overview/" class="md-nav__link">
         
   
   
@@ -2342,7 +2218,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../manifests/realm/" class="md-nav__link">
+      <a href="../realm/" class="md-nav__link">
         
   
   
@@ -2370,7 +2246,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../manifests/space/" class="md-nav__link">
+      <a href="../space/" class="md-nav__link">
         
   
   
@@ -2398,7 +2274,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../manifests/stack/" class="md-nav__link">
+      <a href="../stack/" class="md-nav__link">
         
   
   
@@ -2426,7 +2302,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../manifests/cell/" class="md-nav__link">
+      <a href="../cell/" class="md-nav__link">
         
   
   
@@ -2454,7 +2330,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../manifests/container/" class="md-nav__link">
+      <a href="../container/" class="md-nav__link">
         
   
   
@@ -2482,7 +2358,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../manifests/secret/" class="md-nav__link">
+      <a href="../secret/" class="md-nav__link">
         
   
   
@@ -2510,7 +2386,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../manifests/blueprint/" class="md-nav__link">
+      <a href="../blueprint/" class="md-nav__link">
         
   
   
@@ -2535,10 +2411,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../manifests/config/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CellConfig manifest
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -2554,6 +2457,187 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        metadata
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#spec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="spec">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#specblueprint-object-required" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.blueprint (object, required)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#specvalues-mapstringstring-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.values (map[string]string, optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#specrepos-mapstringrepofill-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.repos (map[string]RepoFill, optional)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="spec.repos (map[string]RepoFill, optional)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cellconfigrepofill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CellConfigRepoFill
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#specsecrets-mapstringsecretfill-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.secrets (map[string]SecretFill, optional)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="spec.secrets (map[string]SecretFill, optional)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cellconfigsecretfill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CellConfigSecretFill
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#slot-fills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Slot fills
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#identity-and-stable-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Identity and stable name
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#storage-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storage layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Invariants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#minimal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -3012,10 +3096,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#fresh-bootstrap" class="md-nav__link">
+  <a href="#metadata" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Fresh bootstrap
+        metadata
       
     </span>
   </a>
@@ -3023,10 +3107,105 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#re-init-reconcile" class="md-nav__link">
+  <a href="#spec" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Re-init (reconcile)
+        spec
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="spec">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#specblueprint-object-required" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.blueprint (object, required)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#specvalues-mapstringstring-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.values (map[string]string, optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#specrepos-mapstringrepofill-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.repos (map[string]RepoFill, optional)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="spec.repos (map[string]RepoFill, optional)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cellconfigrepofill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CellConfigRepoFill
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#specsecrets-mapstringsecretfill-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        spec.secrets (map[string]SecretFill, optional)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="spec.secrets (map[string]SecretFill, optional)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cellconfigsecretfill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CellConfigSecretFill
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#slot-fills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Slot fills
       
     </span>
   </a>
@@ -3034,10 +3213,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#re-init-after-a-generator-fix" class="md-nav__link">
+  <a href="#identity-and-stable-name" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Re-init after a generator fix
+        Identity and stable name
       
     </span>
   </a>
@@ -3045,10 +3224,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#tear-down-the-daemon-for-iteration" class="md-nav__link">
+  <a href="#storage-layout" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Tear down the daemon for iteration
+        Storage layout
       
     </span>
   </a>
@@ -3056,10 +3235,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#wipe-a-realm" class="md-nav__link">
+  <a href="#invariants" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Wipe a realm
+        Invariants
       
     </span>
   </a>
@@ -3067,21 +3246,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#full-host-wipe" class="md-nav__link">
+  <a href="#minimal" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Full host wipe
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#related" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Related
+        Minimal
       
     </span>
   </a>
@@ -3108,115 +3276,217 @@
   
 
 
-<h1 id="init-and-reset">Init and reset<a class="headerlink" href="#init-and-reset" title="Permanent link">&para;</a></h1>
-<p>This guide covers the operations you'll run most often when bootstrapping, iterating on, or wiping a Kukeon host.</p>
-<p><code>kuke init</code> provisions <strong>two</strong> realms, each mapped to its own containerd namespace:</p>
+<h1 id="cellconfig-manifest">CellConfig manifest<a class="headerlink" href="#cellconfig-manifest" title="Permanent link">&para;</a></h1>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellConfig</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">prod</span><span class="w">                </span><span class="c1"># also the deterministic name of the materialized cell</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span><span class="w">        </span><span class="c1"># scope coordinates; deepest non-empty wins</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="c1"># space: team-a           # optional — space-scoped</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="c1"># stack: agents           # optional — stack-scoped (requires space)</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">  </span><span class="nt">blueprint</span><span class="p">:</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-code</span><span class="w">       </span><span class="c1"># cross-scope reference; deeper coordinates optional</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">    </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">  </span><span class="nt">values</span><span class="p">:</span><span class="w">                   </span><span class="c1"># scalar ${KEY} fills for the blueprint&#39;s parameters</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">    </span><span class="nt">MODEL</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-opus-4-7</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">  </span><span class="nt">repos</span><span class="p">:</span><span class="w">                    </span><span class="c1"># structural repo slot fills, keyed by slot name</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">    </span><span class="nt">workspace</span><span class="p">:</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">      </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://github.com/example/repo</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">  </span><span class="nt">secrets</span><span class="p">:</span><span class="w">                  </span><span class="c1"># structural secret slot fills, keyed by slot name</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">    </span><span class="nt">anthropic-token</span><span class="p">:</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">      </span><span class="nt">secretRef</span><span class="p">:</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">anthropic-token</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="w">        </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
+</code></pre></div>
+<p>A <code>CellConfig</code> binds a <a href="../blueprint/"><code>CellBlueprint</code></a> to a concrete, idempotent cell <strong>identity</strong>. Where a Blueprint answers <em>"what does this cell look like?"</em>, a Config answers <em>"which instance?"</em>: a name with a deterministic derivation, the scalar <code>values</code> filled into the blueprint's parameters, and the structural repo/secret slot fills keyed by the blueprint's slot names. A Config materializes at most one live cell per scope.</p>
+<p>See <a href="../../cli/kuke-run/"><code>kuke run -c</code></a> for the identity state machine that decides whether <code>kuke run -c &lt;config&gt;</code> materializes a fresh cell, attaches to an existing one, or refuses because the in-cluster cell diverged from the Config's current spec.</p>
+<h2 id="metadata">metadata<a class="headerlink" href="#metadata" title="Permanent link">&para;</a></h2>
+<p>A Config is scopable at realm, space, or stack — never cell. A Config materializes a cell; scoping it to a single cell is nonsensical. The scope is the deepest non-empty coordinate, and a deeper coordinate may only be set when every shallower one is.</p>
 <table>
 <thead>
 <tr>
-<th>Realm</th>
-<th>Containerd namespace</th>
-<th>Purpose</th>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>default</code></td>
-<td><code>default.kukeon.io</code></td>
-<td>User workloads. Created empty so <code>kuke create …</code> has a home.</td>
+<td><code>name</code></td>
+<td>string</td>
+<td>yes</td>
+<td>The config's name, unique within its scope. Also the deterministic name of the materialized cell — see <a href="#identity-and-stable-name">Identity and stable name</a>.</td>
 </tr>
 <tr>
-<td><code>kuke-system</code></td>
-<td><code>kuke-system.kukeon.io</code></td>
-<td>System workloads owned by kukeon itself (the <code>kukeond</code> daemon runs as a cell here).</td>
+<td><code>realm</code></td>
+<td>string</td>
+<td>yes</td>
+<td>The always-required top-level scope coordinate.</td>
+</tr>
+<tr>
+<td><code>space</code></td>
+<td>string</td>
+<td>no</td>
+<td>When set, scopes the config to a space within <code>realm</code>.</td>
+</tr>
+<tr>
+<td><code>stack</code></td>
+<td>string</td>
+<td>no</td>
+<td>When set, scopes the config to a stack within <code>space</code> (requires space).</td>
+</tr>
+<tr>
+<td><code>labels</code></td>
+<td>map[string]string</td>
+<td>no</td>
+<td>Copied onto the materialized cell, in addition to the <code>kukeon.io/config</code> back-reference label.</td>
 </tr>
 </tbody>
 </table>
-<p>The daemon lives at <code>kuke-system / kukeon / kukeon / kukeond</code> (realm / space / stack / cell). The <code>default</code> realm is deliberately left user-owned so <code>kuke purge --cascade</code> on it can never take down the daemon.</p>
-<h2 id="fresh-bootstrap">Fresh bootstrap<a class="headerlink" href="#fresh-bootstrap" title="Permanent link">&para;</a></h2>
-<p>On a host that has never run Kukeon:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>init
-</code></pre></div>
-<p>That command:</p>
-<ol>
-<li>Creates the kukeon cgroup root at <code>/sys/fs/cgroup/kukeon</code>.</li>
-<li>Ensures <code>/etc/cni/net.d</code> and <code>/opt/cni/bin</code> exist.</li>
-<li>Creates the <code>kukeon</code> system user/group so the socket can be group-readable.</li>
-<li>Creates the <code>default</code> user realm (containerd namespace <code>default.kukeon.io</code>) and its default space and stack.</li>
-<li>Creates the <code>kuke-system</code> system realm (containerd namespace <code>kuke-system.kukeon.io</code>) and the <code>kukeond</code> cell underneath it.</li>
-<li>Pulls the <code>kukeond</code> image.</li>
-<li>Starts the daemon; waits up to 30s for the socket at <code>/run/kukeon/kukeond.sock</code> to come up (unless you pass <code>--no-wait</code>).</li>
-</ol>
-<h2 id="re-init-reconcile">Re-init (reconcile)<a class="headerlink" href="#re-init-reconcile" title="Permanent link">&para;</a></h2>
-<p><code>kuke init</code> is idempotent. Re-running it on a host that's already been bootstrapped reconciles state and reports <code>already existed</code> for the parts it finds on disk:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>init
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># Kukeon runtime already initialized</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># ...</span>
-</code></pre></div>
-<h2 id="re-init-after-a-generator-fix">Re-init after a generator fix<a class="headerlink" href="#re-init-after-a-generator-fix" title="Permanent link">&para;</a></h2>
-<p>Some bugs (most notably the CNI bridge-name length bug) fix themselves in new code but leave stale files on disk. To regenerate every space's conflist:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>init<span class="w"> </span>--force-regenerate-cni
-</code></pre></div>
-<p>This rewrites every space's conflist, even the ones that already exist. It does not wipe anything else.</p>
-<h2 id="tear-down-the-daemon-for-iteration">Tear down the daemon for iteration<a class="headerlink" href="#tear-down-the-daemon-for-iteration" title="Permanent link">&para;</a></h2>
-<p>When you're hacking on <code>kukeond</code> and need to rebuild it, <code>kuke daemon reset</code> is the right verb:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>reset<span class="w">                  </span><span class="c1"># preserves /opt/kukeon/default and /opt/kukeon/kuke-system</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>reset<span class="w"> </span>--purge-system<span class="w">   </span><span class="c1"># additionally wipes /opt/kukeon/kuke-system</span>
-</code></pre></div>
-<p><code>daemon reset</code> stops the <code>kukeond</code> cell (SIGTERM, escalating to SIGKILL after <code>--timeout</code>, default 10s), deletes the cell metadata + cgroups, and clears <code>/run/kukeon/kukeond.{sock,pid}</code>. It's idempotent — re-running on a host with no daemon succeeds.</p>
-<p><code>--purge-system</code> additionally removes <code>/opt/kukeon/kuke-system</code> for a fully clean re-bootstrap. Either way, user-realm data under <code>/opt/kukeon/default/**</code> is <strong>never</strong> touched — that's the invariant that lets <code>daemon reset</code> be safe in a dev loop.</p>
-<p>Rebuild and re-init:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>make<span class="w"> </span>kuke
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>docker<span class="w"> </span>build<span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">VERSION</span><span class="o">=</span>v0.0.0-dev<span class="w"> </span>-t<span class="w"> </span>kukeon-local:dev<span class="w"> </span>.
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>sudo<span class="w"> </span>./kuke<span class="w"> </span>image<span class="w"> </span>load<span class="w"> </span>--from-docker<span class="w"> </span>kukeon-local:dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>sudo<span class="w"> </span>./kuke<span class="w"> </span>init<span class="w"> </span>--kukeond-image<span class="w"> </span>docker.io/library/kukeon-local:dev
-</code></pre></div>
-<p><code>kuke image load</code> is daemon-independent by design — it always wraps containerd directly in-process — so the daemon does not need to be running to stage the bootstrap image. See <a href="../local-dev/">Local development</a> for the full dev loop, which is wrapped end-to-end as <code>make dev-init</code>.</p>
-<h2 id="wipe-a-realm">Wipe a realm<a class="headerlink" href="#wipe-a-realm" title="Permanent link">&para;</a></h2>
-<p>Cascaded delete removes the realm and everything under it (spaces, stacks, cells, containers, CNI conflists, cgroups, metadata):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>realm<span class="w"> </span>mytenant<span class="w"> </span>--cascade
-</code></pre></div>
-<p>If that fails because something in the realm is in a weird state, <code>purge</code> is the more aggressive form:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>purge<span class="w"> </span>realm<span class="w"> </span>mytenant<span class="w"> </span>--cascade<span class="w"> </span>--force
-</code></pre></div>
-<p>See <a href="../../manifests/overview/">Manifest Reference</a> and <a href="../../cli/kuke-delete/">CLI Reference → delete</a> / <a href="../../cli/kuke-purge/">purge</a>.</p>
-<h2 id="full-host-wipe">Full host wipe<a class="headerlink" href="#full-host-wipe" title="Permanent link">&para;</a></h2>
-<p>The "wipe every kukeon-owned thing on this host" verb is <code>kuke uninstall</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>uninstall<span class="w">          </span><span class="c1"># interactive: prompts for &quot;yes&quot;</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>uninstall<span class="w"> </span>-y<span class="w">       </span><span class="c1"># non-interactive (scripts)</span>
-</code></pre></div>
-<p>What it does, in order: stop the daemon, purge every realm with <code>--cascade</code> (including <code>kuke-system</code>), release kukeon-owned bind mounts under <code>/run/kukeon</code>, remove <code>/run/kukeon</code> and the configured run path (default <code>/opt/kukeon</code>), and remove the <code>kukeon</code> system user/group if present.</p>
-<p><strong>Half-cleaned-host gate.</strong> If any realm fails to drop its containerd namespace, the subsequent dir / account removal is <strong>skipped</strong> (not silently best-effort), every skipped row in the report is annotated, and the exit code is non-zero. Tearing out <code>/opt/kukeon</code> while a residual namespace is still pinning overlay mounts on disk would strand the next <code>kuke init</code> with stale containerd state — the skip is the safe default. Resolve the realm-purge failure (see <a href="../troubleshooting/#kuke-uninstall-reports-skipped-realm-purge-failed">Troubleshooting</a>) and re-run.</p>
-<p>The binary at <code>/usr/local/bin/kuke</code> and the <code>kukeond</code> symlink are <strong>never</strong> removed — uninstalling runtime state is not the same as uninstalling the binary. Drop the binaries with <code>make uninstall-dev</code> (dev installs) or your package manager.</p>
-<p>If <code>kuke uninstall</code> itself is broken, the equivalent manual sequence is:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># 1. Stop the daemon</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>reset<span class="w"> </span>--purge-system
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># 2. Purge every user realm</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="k">for</span><span class="w"> </span>realm<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="k">$(</span>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realms<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span>--no-daemon<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.[] | select(.metadata.name != &quot;kuke-system&quot;) | .metadata.name&#39;</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">    </span>sudo<span class="w"> </span>kuke<span class="w"> </span>purge<span class="w"> </span>realm<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$realm</span><span class="s2">&quot;</span><span class="w"> </span>--cascade<span class="w"> </span>--force<span class="w"> </span>--no-daemon
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="k">done</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="c1"># 3. Purge the system realm</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>purge<span class="w"> </span>realm<span class="w"> </span>kuke-system<span class="w"> </span>--cascade<span class="w"> </span>--force<span class="w"> </span>--no-daemon
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="c1"># 4. Release any leftover bind mounts under /run/kukeon</span>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>mount<span class="w"> </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span><span class="s1">&#39;$3 ~ &quot;^/run/kukeon&quot; {print $3}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>xargs<span class="w"> </span>-r<span class="w"> </span>sudo<span class="w"> </span>umount<span class="w"> </span>-l
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>
-<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="c1"># 5. Wipe on-disk state and cgroups</span>
-<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-rf<span class="w"> </span>/opt/kukeon<span class="w"> </span>/run/kukeon
-<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-rf<span class="w"> </span>/sys/fs/cgroup/kukeon<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
-<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>
-<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="c1"># 6. Wipe generated CNI conflists (skip if you run other CNI apps on this host)</span>
-<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a>sudo<span class="w"> </span>rm<span class="w"> </span>-f<span class="w"> </span>/etc/cni/net.d/*.conflist
-</code></pre></div>
-<h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
+<h2 id="spec">spec<a class="headerlink" href="#spec" title="Permanent link">&para;</a></h2>
+<h3 id="specblueprint-object-required"><code>spec.blueprint</code> (object, required)<a class="headerlink" href="#specblueprint-object-required" title="Permanent link">&para;</a></h3>
+<p>Cross-scope reference to the <a href="../blueprint/"><code>CellBlueprint</code></a> this Config instantiates.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>yes</td>
+<td>The referenced blueprint's name within its scope.</td>
+</tr>
+<tr>
+<td><code>realm</code></td>
+<td>string</td>
+<td>yes</td>
+<td>The blueprint's always-required top-level scope coordinate.</td>
+</tr>
+<tr>
+<td><code>space</code></td>
+<td>string</td>
+<td>no</td>
+<td>When set, scopes the reference to a space within <code>realm</code>.</td>
+</tr>
+<tr>
+<td><code>stack</code></td>
+<td>string</td>
+<td>no</td>
+<td>When set, scopes the reference to a stack within <code>space</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The reference may cross scopes: a Config in one realm may instantiate a Blueprint owned by another (for example, a <code>default</code>-realm Config referencing a <code>kuke-system</code>-scoped template), the same cross-scope freedom a <code>secretRef</code> has.</p>
+<h3 id="specvalues-mapstringstring-optional"><code>spec.values</code> (map[string]string, optional)<a class="headerlink" href="#specvalues-mapstringstring-optional" title="Permanent link">&para;</a></h3>
+<p>Scalar fills for the blueprint's <code>${KEY}</code> parameters. Stored verbatim; resolution happens at run time. An undeclared key in <code>values</code> errors at apply time (typos surface immediately).</p>
+<h3 id="specrepos-mapstringrepofill-optional"><code>spec.repos</code> (map[string]<a href="#cellconfigrepofill">RepoFill</a>, optional)<a class="headerlink" href="#specrepos-mapstringrepofill-optional" title="Permanent link">&para;</a></h3>
+<p>Structural repo slot fills, keyed by the blueprint's repo slot <code>name</code>. Each entry supplies the clone URL the blueprint deliberately left open.</p>
+<h4 id="cellconfigrepofill">CellConfigRepoFill<a class="headerlink" href="#cellconfigrepofill" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>url</code></td>
+<td>string</td>
+<td>yes</td>
+<td>The clone URL filling the slot.</td>
+</tr>
+<tr>
+<td><code>branch</code></td>
+<td>string</td>
+<td>no</td>
+<td>The branch to check out. Empty clones the remote's default.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="specsecrets-mapstringsecretfill-optional"><code>spec.secrets</code> (map[string]<a href="#cellconfigsecretfill">SecretFill</a>, optional)<a class="headerlink" href="#specsecrets-mapstringsecretfill-optional" title="Permanent link">&para;</a></h3>
+<p>Structural secret slot fills, keyed by the blueprint's secret slot <code>name</code>. The blueprint owns the consumption side (env var or file mount) declared on the slot; this map supplies the source side — which <code>kind: Secret</code> provides the bytes.</p>
+<h4 id="cellconfigsecretfill">CellConfigSecretFill<a class="headerlink" href="#cellconfigsecretfill" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>secretRef</code></td>
+<td>object</td>
+<td>yes</td>
+<td>Points at the <code>kind: Secret</code> that provides the slot's bytes. Same shape as <a href="../container/">Container <code>secretRef</code></a> — <code>name</code> + <code>realm</code> (required), <code>space</code> / <code>stack</code> / <code>cell</code> (optional, deepest-non-empty wins).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="slot-fills">Slot fills<a class="headerlink" href="#slot-fills" title="Permanent link">&para;</a></h2>
+<p>A <code>CellConfig</code> fills the structural slots a <a href="../blueprint/"><code>CellBlueprint</code></a> declares. Slot matching is by <strong>name</strong>, across all of the blueprint's containers — the same slot name on two containers shares a single Config-side entry. The validation gates are:</p>
 <ul>
-<li><a href="../local-dev/">Local development</a> — the full rebuild / reload / re-init loop (wrapped as <code>make dev-init</code>)</li>
-<li><a href="../troubleshooting/">Troubleshooting</a> — what to do when init or uninstall fails</li>
-<li><a href="../../cli/kuke-daemon/">kuke daemon</a> — every <code>daemon</code> subcommand and flag</li>
-<li><a href="../../cli/kuke-uninstall/">kuke uninstall</a> — flag and invariant reference</li>
+<li>A Config that fills a slot the blueprint does not declare is an apply-time error (unknown repo slot / unknown secret slot).</li>
+<li>A <em>required</em> slot the blueprint declares that the Config leaves unfilled is an apply-time error. A slot is treated as required if <strong>any</strong> declaration of that name across the blueprint's containers is required.</li>
+<li>Optional unfilled slots are dropped silently from the materialized container.</li>
 </ul>
+<p>The two channels are independent: scalar <code>values</code> are blueprint-side parameters resolved at run time (see the blueprint's <a href="../blueprint/"><code>spec.parameters[]</code></a>), while <code>repos:</code> and <code>secrets:</code> are structural slot fills validated at apply time. A <code>${KEY}</code> parameter is not a slot, and a slot is not a <code>${KEY}</code> parameter.</p>
+<h2 id="identity-and-stable-name">Identity and stable name<a class="headerlink" href="#identity-and-stable-name" title="Permanent link">&para;</a></h2>
+<p>A <code>CellConfig</code> materializes <strong>at most one</strong> live cell within its scope. The cell's deterministic name is <code>metadata.name</code> verbatim — not <code>&lt;name&gt;-&lt;hash-of-values&gt;</code> and not <code>&lt;name&gt;-&lt;6hex&gt;</code>. The derivation is value-independent on purpose: editing <code>spec.values</code> keeps the same cell identity so subsequent <code>kuke run -c</code> invocations attach to the existing cell rather than spawning a fresh one and orphaning the old.</p>
+<p>The matching contract:</p>
+<ul>
+<li>Every cell <code>kuke run -c</code> materializes carries the <code>kukeon.io/config=&lt;name&gt;</code> back-reference label. The runtime locates the at-most-one live cell a Config owns by listing cells in the Config's scope with that label.</li>
+<li>A divergent-spec warning fires when the in-cluster cell's spec disagrees with the Config's current spec (after re-resolving scalar values and slot fills). The state machine that drives materialise / attach / refuse on divergence lives in <a href="../../cli/kuke-run/"><code>kuke run -c</code></a>.</li>
+</ul>
+<p>This is the structural contrast with a <a href="../blueprint/"><code>CellBlueprint</code></a>: a blueprint is always-fresh (<code>&lt;prefix&gt;-&lt;6hex&gt;</code> per invocation), a config is always-named (<code>&lt;configName&gt;</code> per binding).</p>
+<h2 id="storage-layout">Storage layout<a class="headerlink" href="#storage-layout" title="Permanent link">&para;</a></h2>
+<p>The daemon writes the config document to a root-owned, world-readable file under the scope's metadata tree:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>&lt;runPath&gt;/data/&lt;realm&gt;/configs/&lt;name&gt;                         # realm-scoped
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>&lt;runPath&gt;/data/&lt;realm&gt;/&lt;space&gt;/configs/&lt;name&gt;                 # space-scoped
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>&lt;runPath&gt;/data/&lt;realm&gt;/&lt;space&gt;/&lt;stack&gt;/configs/&lt;name&gt;         # stack-scoped
+</code></pre></div>
+<p>The <code>configs/</code> directory is <code>0755</code> and each config document is <code>0644</code>, both owned by root. A config carries only references (a blueprint name, repo URLs, secretRefs) — no credential bytes — so the directory is world-readable, unlike <code>secrets/</code>. Because <code>configs/</code> nests inside the scope's metadata directory, the same teardown that reclaims a scope (<code>kuke purge</code> / <code>kuke delete</code>) reclaims its configs.</p>
+<h2 id="invariants">Invariants<a class="headerlink" href="#invariants" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>One Config → at most one live cell within scope.</strong> The deterministic stable name is <code>metadata.name</code> verbatim; subsequent <code>kuke run -c</code> invocations attach to the existing cell or refuse on divergence rather than spawning a duplicate.</li>
+<li><strong>Back-reference.</strong> Every materialized cell carries the <code>kukeon.io/config=&lt;name&gt;</code> label, so an operator can find a Config's live cell with <code>kuke get cells -l kukeon.io/config=&lt;name&gt;</code>.</li>
+<li><strong>Apply-time slot validation.</strong> A Config that fills an undeclared slot, or that leaves a required slot unfilled, errors at apply time against the referenced blueprint's current shape — not at run time.</li>
+<li><strong>Cross-scope references.</strong> A Config may reference a Blueprint in a different scope; the same is true of the <code>secretRef</code> inside each secret slot fill.</li>
+</ul>
+<h2 id="minimal">Minimal<a class="headerlink" href="#minimal" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellConfig</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">prod</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">blueprint</span><span class="p">:</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-code</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span><span class="nt">values</span><span class="p">:</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span><span class="nt">MODEL</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-opus-4-7</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">  </span><span class="nt">repos</span><span class="p">:</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">    </span><span class="nt">workspace</span><span class="p">:</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">      </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://github.com/example/repo</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">  </span><span class="nt">secrets</span><span class="p">:</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">    </span><span class="nt">anthropic-token</span><span class="p">:</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">      </span><span class="nt">secretRef</span><span class="p">:</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">anthropic-token</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">        </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
+</code></pre></div>
+<p>A realm-scoped Config named <code>prod</code> that instantiates the <code>claude-code</code> blueprint (also realm-scoped), overrides the <code>MODEL</code> scalar parameter, fills the <code>workspace</code> repo slot, and fills the <code>anthropic-token</code> secret slot from the existing <code>kind: Secret</code> of the same name. Run with <code>sudo kuke run -c prod --realm kuke-system</code>; re-running attaches to the same cell.</p>
 
 
 
@@ -3239,7 +3509,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 16, 2026 20:57:51 UTC">May 16, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 23, 2026 10:45:03 UTC">May 23, 2026</span>
   </span>
 
     
@@ -3249,7 +3519,7 @@
     <span class="md-icon" title="Created">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14.47 15.08 11 13V7h1.5v5.25l3.08 1.83c-.41.28-.79.62-1.11 1m-1.39 4.84c-.36.05-.71.08-1.08.08-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8c0 .37-.03.72-.08 1.08.69.1 1.33.32 1.92.64.1-.56.16-1.13.16-1.72 0-5.5-4.5-10-10-10S2 6.5 2 12s4.47 10 10 10c.59 0 1.16-.06 1.72-.16-.32-.59-.54-1.23-.64-1.92M18 15v3h-3v2h3v3h2v-3h3v-2h-3v-3z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 21, 2026 12:22:34 UTC">April 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 23, 2026 10:45:03 UTC">May 23, 2026</span>
   </span>
 
     
