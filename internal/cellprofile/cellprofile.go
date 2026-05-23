@@ -20,8 +20,6 @@
 package cellprofile
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"gopkg.in/yaml.v3"
 )
@@ -37,12 +36,6 @@ import (
 // materialized from. Set on every cell produced by Materialize so operators
 // can list all instances with `kuke get cells -l kukeon.io/profile=<name>`.
 const LabelProfile = "kukeon.io/profile"
-
-// nameSuffixBytes is the entropy width for the suffix appended to every
-// generated cell name. 3 bytes → 6 lowercase hex chars; matches K8s
-// `generateName`'s suffix shape closely enough that the names read familiar
-// at a glance.
-const nameSuffixBytes = 3
 
 // EnvProfilesDir is the env var that overrides the default user profiles
 // directory. Picked up by ResolveDir; takes precedence over $HOME/.kuke/profiles.d.
@@ -268,19 +261,11 @@ func resolveCellName(profile *v1beta1.CellProfileDoc, nameOverride string) (stri
 	if prefix == "" {
 		prefix = profile.Metadata.Name
 	}
-	suffix, err := randomHexSuffix()
+	suffix, err := naming.RandomHexSuffix(naming.DefaultCellNameSuffixBytes)
 	if err != nil {
 		return "", fmt.Errorf("generate name suffix for profile %q: %w", profile.Metadata.Name, err)
 	}
 	return prefix + "-" + suffix, nil
-}
-
-func randomHexSuffix() (string, error) {
-	b := make([]byte, nameSuffixBytes)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
 }
 
 func mergeLabels(in map[string]string, k, v string) map[string]string {
