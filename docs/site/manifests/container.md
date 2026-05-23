@@ -228,9 +228,15 @@ Each entry in `tty.onInit` is a single init-script stage.
 | Field    | Type   | Required | Description                                                                                                                                                                                                                                                                                      |
 | -------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `script` | string | no       | Shell script body for the stage.                                                                                                                                                                                                                                                                 |
-| `runOn`  | string | no       | When the stage runs. Empty or `start` forwards the script to sbsh's onInit, so it runs in the wrapped shell on every boot. `create` routes the script into kuketty's pre-Serve executor, where it runs once to completion before the workload starts. Any other value is rejected at apply time. |
+| `runOn`  | string | no       | When the stage runs. Empty or `start` forwards the script to sbsh's onInit, so it runs in the wrapped shell on every boot. `create` routes the script into kuketty's pre-Serve executor, where it runs once to completion before the workload starts. A stage with `runOn: create` requires the container to declare at least one persistent writable mount (a `spec.volumes` entry of `kind: bind` that is not `readOnly`); otherwise the stage's side effects evaporate on the next recreate while the run-once gate would silently report `done`, and apischeme rejects the spec at apply time. Any other value is rejected at apply time. |
 
 ```yaml
+volumes:
+  - kind: bind
+    source: /srv/workspace
+    target: /workspace
+    # runOn: create stages below require a persistent writable mount so
+    # their side effects survive container recreate.
 tty:
   prompt: "claude> "
   onInit:
