@@ -3187,3 +3187,212 @@ func TestRun_RunVerbMutex_RejectsCAndB(t *testing.T) {
 		t.Fatalf("Execute err=nil want mutex rejection of -c with -b")
 	}
 }
+
+// TestRun_FromConfig_GenerateName_FreshCellPerInvocation covers AC #1+#2 of #754:
+// `kuke run -c <config> -g` materializes a fresh <config-name>-<6hex> cell on
+// each invocation, and the cell carries the kukeon.io/config=<config-name>
+// lineage label so `kuke get cells -l kukeon.io/config=<name>` still enumerates
+// every spawn.
+func TestRun_FromConfig_GenerateName_FreshCellPerInvocation(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	// Track every materialized cell name across two invocations. Reusing the
+	// same fakeClient across invocations would carry createDoc state but not
+	// names, so we capture them explicitly.
+	var names []string
+	getCell := func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+		// Each generated name is fresh, so GetCell never finds a live cell —
+		// returning ErrCellNotFound funnels both invocations through CreateCell.
+		return kukeonv1.GetCellResult{}, errdefs.ErrCellNotFound
+	}
+	createCell := func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+		names = append(names, doc.Metadata.Name)
+		return kukeonv1.CreateCellResult{
+			Cell: doc, Created: true, MetadataExistsPost: true,
+			CgroupCreated: true, CgroupExistsPost: true,
+			RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
+			Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
+		}, nil
+	}
+
+	for i := range 2 {
+		// viper persists module-globally; reset per invocation so the previous
+		// -g/--generate-name binding doesn't leak into the next Execute call.
+		viper.Reset()
+		fc := &fakeClient{
+			getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+				return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
+			},
+			getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+				return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
+			},
+			getCellFn:    getCell,
+			createCellFn: createCell,
+		}
+		cmd, _ := newCmd(t, fc)
+		cmd.SetArgs([]string{"-c", "prod", "-g", "--realm", "cfg-realm", "-d"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute (iteration %d): %v", i, err)
+		}
+		if fc.createCalls != 1 {
+			t.Fatalf("CreateCell calls=%d want 1 on -g invocation %d", fc.createCalls, i)
+		}
+		// Back-reference label survives the generated-name path.
+		if got := fc.createDoc.Metadata.Labels["kukeon.io/config"]; got != "prod" {
+			t.Errorf("kukeon.io/config label=%q want prod (iteration %d)", got, i)
+		}
+	}
+
+	if len(names) != 2 {
+		t.Fatalf("captured %d names, want 2: %v", len(names), names)
+	}
+	for _, n := range names {
+		prefix := "prod-"
+		if len(n) != len(prefix)+6 || n[:len(prefix)] != prefix {
+			t.Errorf("cell name=%q does not match <config-name>-<6hex> shape", n)
+		}
+		for _, r := range n[len(prefix):] {
+			if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+				t.Errorf("cell name suffix rune %q in %q not lowercase hex", r, n)
+				break
+			}
+		}
+	}
+	if names[0] == names[1] {
+		t.Errorf("two -g invocations produced the same name %q; expected distinct <prefix>-<6hex>", names[0])
+	}
+}
+
+// TestRun_FromConfig_NoGenerateName_UsesStableName guards against a regression
+// against PR #742's idempotent-attach contract: without -g, the cell name is
+// still the Config's stable name (verbatim metadata.name).
+func TestRun_FromConfig_NoGenerateName_UsesStableName(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
+		},
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
+		},
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return kukeonv1.CreateCellResult{
+				Cell: doc, Created: true, MetadataExistsPost: true,
+				CgroupCreated: true, CgroupExistsPost: true,
+				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
+				Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
+			}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-c", "prod", "--realm", "cfg-realm", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := fc.createDoc.Metadata.Name; got != "prod" {
+		t.Errorf("cell name=%q want prod (StableName, no -g)", got)
+	}
+}
+
+// TestRun_FromConfig_GenerateNameAndName_MutuallyExclusive covers AC #3: -g and
+// --name combined error out at cobra's flag-mutex layer.
+func TestRun_FromConfig_GenerateNameAndName_MutuallyExclusive(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-c", "prod", "-g", "--name", "pinned", "--realm", "cfg-realm", "-d"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("Execute err=nil want mutex rejection of --name with --generate-name")
+	}
+	// Cobra's MarkFlagsMutuallyExclusive surfaces both flag names in its
+	// rejection; assert at least one shape rather than the exact string so a
+	// cobra phrasing tweak doesn't churn the test.
+	if !strings.Contains(err.Error(), "generate-name") && !strings.Contains(err.Error(), "name") {
+		t.Errorf("err=%v does not mention either flag name", err)
+	}
+}
+
+// TestRun_FromConfig_GenerateNameWithRm_SetsAutoDelete covers AC #5: `-c -g
+// --rm` materializes an ephemeral generated cell from the Config. The
+// AutoDelete=true on the spec is the daemon-side trigger the reconcile loop
+// keys on after detach; cell + overlay cleanup is handled by the same
+// machinery exercised by TestRun_RmFlag_SetsAutoDeleteOnSpec.
+func TestRun_FromConfig_GenerateNameWithRm_SetsAutoDelete(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
+		},
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
+		},
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return kukeonv1.CreateCellResult{
+				Cell: doc, Created: true, MetadataExistsPost: true,
+				CgroupCreated: true, CgroupExistsPost: true,
+				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
+				Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
+			}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-c", "prod", "-g", "--rm", "--realm", "cfg-realm", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !fc.createDoc.Spec.AutoDelete {
+		t.Errorf("AutoDelete=false want true under --rm")
+	}
+	// Sanity-check the name path: --rm did not divert the -g materialization
+	// back to the StableName branch.
+	prefix := "prod-"
+	got := fc.createDoc.Metadata.Name
+	if len(got) != len(prefix)+6 || got[:len(prefix)] != prefix {
+		t.Errorf("cell name=%q does not match <config-name>-<6hex> shape under --rm", got)
+	}
+}
+
+// TestRun_GenerateName_OnlyValidWithConfig covers the defensive UX guard: -g
+// is a -c-only flag. Allowing it silently on -f (where metadata.name is
+// authoritative) or -p/-b (which already generate <prefix>-<6hex>) would seed
+// a wrong mental model that -g toggles a default that isn't actually flipped.
+func TestRun_GenerateName_OnlyValidWithConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			"-f rejects -g",
+			[]string{"-f", "/tmp/never-read.yaml", "-g", "-d"},
+			"--generate-name is only valid with -c/--config",
+		},
+		{
+			"-p rejects -g",
+			[]string{"-p", "shell", "-g", "-d"},
+			"--generate-name is only valid with -c/--config",
+		},
+		{
+			"-b rejects -g",
+			[]string{"-b", "web", "-g", "-d"},
+			"--generate-name is only valid with -c/--config",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			fc := &fakeClient{}
+			cmd, _ := newCmd(t, fc)
+			cmd.SetArgs(tc.args)
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err=%v want substring %q", err, tc.want)
+			}
+		})
+	}
+}

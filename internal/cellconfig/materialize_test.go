@@ -308,3 +308,101 @@ func TestMaterialize_PropagatesResolveError(t *testing.T) {
 		t.Fatalf("err=%v want ErrBlueprintInvalid (required param TAG unset)", err)
 	}
 }
+
+// TestMaterializeWithName_OverrideWinsOverStableName pins the #754 escape hatch:
+// when the caller pins a name, the materialized cell uses it verbatim instead of
+// the StableName(cfg.Metadata.Name) used on the empty-override path. The
+// kukeon.io/config back-reference label still points at the Config (lineage
+// preserved across generated-name spawns).
+func TestMaterializeWithName_OverrideWinsOverStableName(t *testing.T) {
+	bp := minimalBlueprint()
+	cfg := v1beta1.CellConfigDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindCellConfig,
+		Metadata:   v1beta1.CellConfigMetadata{Name: "prod", Realm: "cfg-realm"},
+		Spec: v1beta1.CellConfigSpec{
+			Blueprint: v1beta1.CellConfigBlueprintRef{Name: "web", Realm: "bp-realm"},
+			Values:    map[string]string{"TAG": "v2"},
+			Repos: map[string]v1beta1.CellConfigRepoFill{
+				"src": {URL: "https://example.com/src.git"},
+			},
+			Secrets: map[string]v1beta1.CellConfigSecretFill{
+				"token": {SecretRef: &v1beta1.ContainerSecretRef{Name: "api-token", Realm: "cfg-realm"}},
+			},
+		},
+	}
+
+	cell, err := MaterializeWithName(cfg, bp, "prod-ab12cd")
+	if err != nil {
+		t.Fatalf("MaterializeWithName: %v", err)
+	}
+	if got := cell.Metadata.Name; got != "prod-ab12cd" {
+		t.Errorf("cell name=%q want prod-ab12cd (override)", got)
+	}
+	if got := cell.Spec.ID; got != "prod-ab12cd" {
+		t.Errorf("cell spec.ID=%q want prod-ab12cd (override)", got)
+	}
+	if got := cell.Metadata.Labels[LabelConfig]; got != "prod" {
+		t.Errorf("LabelConfig=%q want prod (back-reference preserved across override)", got)
+	}
+}
+
+// TestMaterializeWithName_EmptyOverrideUsesStableName guards the no-regression
+// path: callers that pass "" still get the deterministic stable-name behavior
+// the #742 idempotent-attach contract depends on.
+func TestMaterializeWithName_EmptyOverrideUsesStableName(t *testing.T) {
+	bp := minimalBlueprint()
+	cfg := v1beta1.CellConfigDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindCellConfig,
+		Metadata:   v1beta1.CellConfigMetadata{Name: "prod", Realm: "cfg-realm"},
+		Spec: v1beta1.CellConfigSpec{
+			Blueprint: v1beta1.CellConfigBlueprintRef{Name: "web", Realm: "bp-realm"},
+			Values:    map[string]string{"TAG": "v2"},
+			Repos: map[string]v1beta1.CellConfigRepoFill{
+				"src": {URL: "https://example.com/src.git"},
+			},
+			Secrets: map[string]v1beta1.CellConfigSecretFill{
+				"token": {SecretRef: &v1beta1.ContainerSecretRef{Name: "api-token", Realm: "cfg-realm"}},
+			},
+		},
+	}
+
+	cell, err := MaterializeWithName(cfg, bp, "")
+	if err != nil {
+		t.Fatalf("MaterializeWithName: %v", err)
+	}
+	if got := cell.Metadata.Name; got != "prod" {
+		t.Errorf("cell name=%q want prod (StableName fallback on empty override)", got)
+	}
+}
+
+// TestGenerateName_ShapeAndUniqueness pins the `<config-name>-<6hex>` shape
+// and verifies independent calls return distinct suffixes.
+func TestGenerateName_ShapeAndUniqueness(t *testing.T) {
+	const cfgName = "prod"
+	seen := make(map[string]struct{}, 16)
+	for range 16 {
+		got, err := GenerateName(cfgName)
+		if err != nil {
+			t.Fatalf("GenerateName: %v", err)
+		}
+		prefix := cfgName + "-"
+		if len(got) != len(prefix)+6 {
+			t.Errorf("GenerateName len=%d (%q) want %d (`<config-name>-<6hex>`)", len(got), got, len(prefix)+6)
+		}
+		if got[:len(prefix)] != prefix {
+			t.Errorf("GenerateName prefix=%q want %q", got[:len(prefix)], prefix)
+		}
+		for _, r := range got[len(prefix):] {
+			if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+				t.Errorf("GenerateName suffix rune %q in %q not lowercase hex", r, got)
+				break
+			}
+		}
+		if _, dup := seen[got]; dup {
+			t.Errorf("GenerateName produced duplicate name %q across 16 calls", got)
+		}
+		seen[got] = struct{}{}
+	}
+}

@@ -72,12 +72,15 @@ func NewRunCmd() *cobra.Command {
 			"refuses to attach and points the operator at `kuke apply -c <config>` to " +
 			"reconcile (stops, updates, starts). -b with --name applies the same " +
 			"discipline against the pinned cell name, pointing at " +
-			"`kuke apply -b <bp> --name <cell>`. -f is create-or-attach by " +
-			"metadata.name: a missing cell is created and attached; a Ready cell is " +
-			"attached as a no-op; a Stopped cell is started then attached; a divergent " +
-			"on-disk spec is refused (use `kuke apply -f` to update); a cell in an " +
-			"error or partial state is refused with a `kuke delete cell <name>` " +
-			"pointer. To re-attach to an existing cell use `kuke attach <cell>`.",
+			"`kuke apply -b <bp> --name <cell>`. -c -g/--generate-name materializes " +
+			"a fresh <config-name>-<6hex> cell on every invocation instead — opt-in " +
+			"fire-and-forget sandboxes from a Config, preserving the kukeon.io/config " +
+			"lineage label. -f is create-or-attach by metadata.name: a missing cell " +
+			"is created and attached; a Ready cell is attached as a no-op; a Stopped " +
+			"cell is started then attached; a divergent on-disk spec is refused " +
+			"(use `kuke apply -f` to update); a cell in an error or partial state " +
+			"is refused with a `kuke delete cell <name>` pointer. To re-attach to an " +
+			"existing cell use `kuke attach <cell>`.",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -104,14 +107,25 @@ func NewRunCmd() *cobra.Command {
 			"carries its own scalar values and structural slot fills (repos, secrets), "+
 			"so --param/--param-file/--name are rejected with -c. Idempotent: walks "+
 			"the identity state machine and attaches to the at-most-one live cell the "+
-			"Config owns by stable name.")
+			"Config owns by stable name. Pass -g/--generate-name to opt out of the "+
+			"stable name and materialize a fresh <config-name>-<6hex> cell per invocation.")
 	_ = viper.BindPFlag(config.KUKE_RUN_CONFIG.ViperKey, cmd.Flags().Lookup("config"))
 
 	cmd.Flags().String("name", "",
 		"Override the materialized cell name (default: <metadata.name>-<6hex>). "+
 			"Valid with -p/-b; rejected with -f, where metadata.name is the cell name "+
-			"verbatim, and with -c, whose name is the Config's deterministic stable name.")
+			"verbatim, and with -c, whose name is the Config's deterministic stable name "+
+			"(use -g/--generate-name on -c to opt into a generated <config-name>-<6hex>).")
 	_ = viper.BindPFlag(config.KUKE_RUN_NAME.ViperKey, cmd.Flags().Lookup("name"))
+
+	cmd.Flags().BoolP("generate-name", "g", false,
+		"Materialize a fresh `<config-name>-<6hex>` cell on every -c invocation instead "+
+			"of the Config's deterministic stable name. Each invocation produces a distinct "+
+			"cell; the kukeon.io/config=<name> lineage label is preserved (operator can list "+
+			"all spawns: `kuke get cells -l kukeon.io/config=<name>`). Mutually exclusive "+
+			"with --name. Only valid with -c — rejected with -f (where metadata.name is the "+
+			"cell name verbatim) and redundant for -p/-b (which already generate a fresh name).")
+	_ = viper.BindPFlag(config.KUKE_RUN_GENERATE_NAME.ViperKey, cmd.Flags().Lookup("generate-name"))
 
 	cmd.Flags().StringArray("param", nil,
 		"Scalar parameter override as KEY=VALUE; repeatable. Valid with -p/-b. "+
@@ -127,6 +141,7 @@ func NewRunCmd() *cobra.Command {
 
 	cmd.MarkFlagsMutuallyExclusive("file", "profile", "blueprint", "config")
 	cmd.MarkFlagsOneRequired("file", "profile", "blueprint", "config")
+	cmd.MarkFlagsMutuallyExclusive("name", "generate-name")
 
 	cmd.Flags().StringP("output", "o", "", "Output format: json, yaml (default: human-readable)")
 	_ = viper.BindPFlag(config.KUKE_RUN_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
@@ -183,6 +198,7 @@ type runFlags struct {
 	containerFlag string
 	autoDelete    bool
 	nameOverride  string
+	generateName  bool
 	paramArgs     []string
 	paramFile     string
 }
@@ -197,6 +213,7 @@ func parseRunFlags(cmd *cobra.Command, _ []string) (runFlags, error) {
 		containerFlag: strings.TrimSpace(viper.GetString(config.KUKE_RUN_CONTAINER.ViperKey)),
 		autoDelete:    viper.GetBool(config.KUKE_RUN_RM.ViperKey),
 		nameOverride:  strings.TrimSpace(viper.GetString(config.KUKE_RUN_NAME.ViperKey)),
+		generateName:  viper.GetBool(config.KUKE_RUN_GENERATE_NAME.ViperKey),
 		paramFile:     strings.TrimSpace(viper.GetString(config.KUKE_RUN_PARAM_FILE.ViperKey)),
 	}
 
@@ -239,6 +256,19 @@ func parseRunFlags(cmd *cobra.Command, _ []string) (runFlags, error) {
 		if flags.paramFile != "" {
 			return runFlags{}, errors.New("--param-file is only valid with -p/--profile or -b/--blueprint")
 		}
+		if flags.generateName {
+			return runFlags{}, errors.New(
+				"--generate-name is only valid with -c/--config; -f uses metadata.name verbatim")
+		}
+	}
+	// -g/--generate-name is a -c-only knob. With -p/-b the default already
+	// generates a fresh <prefix>-<6hex> per invocation, so accepting -g there
+	// would silently no-op and seed the mental model that -g toggles a default
+	// that isn't actually flipped — reject so the operator notices.
+	if flags.generateName && flags.configName == "" && flags.file == "" {
+		return runFlags{}, errors.New(
+			"--generate-name is only valid with -c/--config; -p and -b already materialize a " +
+				"fresh <prefix>-<6hex> cell per invocation")
 	}
 	if flags.configName != "" {
 		// A CellConfig carries its own scalar values and a deterministic
@@ -338,13 +368,16 @@ func runRun(cmd *cobra.Command, args []string) error {
 // `-b --name <cell>` → `kuke apply -b <bp> --name <cell>` (the operator pinned
 // the name, so `apply` needs the same pin), and the bare `-f` / `-p` fallback
 // keeps the original `kuke apply -f` pointer because those paths carry the
-// spec on disk. `-b` without `--name` materializes a fresh `<prefix>-<6hex>`
-// cell every invocation, so a name collision against an existing cell with
-// the same generated suffix is statistically negligible and not handled here.
+// spec on disk. `-b` without `--name` and `-c -g` both materialize a fresh
+// `<prefix>-<6hex>` cell every invocation, so a name collision against an
+// existing cell with the same generated suffix is statistically negligible
+// and not handled here (the `-c` branch below is gated on `!generateName`
+// for that reason — the `apply -c` pointer would reconcile to the stable
+// name, not to the colliding generated one).
 func rejectDivergentNamedCell(cellDoc v1beta1.CellDoc, changed []string, flags runFlags) error {
 	fields := strings.Join(changed, ", ")
 	switch {
-	case flags.configName != "":
+	case flags.configName != "" && !flags.generateName:
 		return fmt.Errorf(
 			"live cell %q spec differs from CellConfig %q (%s) — refusing to attach; "+
 				"use `kuke apply -c %s` to reconcile (stops, updates, starts)",
@@ -654,7 +687,19 @@ func loadFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) 
 		)
 	}
 
-	return cellconfig.Materialize(cfgRes.Config, bpRes.Blueprint)
+	nameOverride := ""
+	if flags.generateName {
+		// `<config-name>-<6hex>` — fresh cell per invocation, kukeon.io/config
+		// label preserved by Materialize so operators can still enumerate spawns
+		// with `kuke get cells -l kukeon.io/config=<name>` (#754). The Config's
+		// idempotent-attach contract from #742 still owns the no-override path.
+		generated, genErr := cellconfig.GenerateName(cfgRes.Config.Metadata.Name)
+		if genErr != nil {
+			return v1beta1.CellDoc{}, genErr
+		}
+		nameOverride = generated
+	}
+	return cellconfig.MaterializeWithName(cfgRes.Config, bpRes.Blueprint, nameOverride)
 }
 
 // loadFromFile preserves the phase-1c -f path: read the file (or stdin),
