@@ -198,7 +198,7 @@ var (
 
 	// ErrImageNotFound is returned when a named image ref does not exist
 	// in the target realm's containerd namespace. Surfaces to operators
-	// from `kuke image get <ref>`.
+	// from `kuke get image <ref>`.
 	ErrImageNotFound = errors.New("image not found")
 
 	// ErrGetImage wraps the underlying containerd error when fetching

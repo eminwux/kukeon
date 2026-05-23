@@ -46,7 +46,7 @@ sudo kuke image load --from-docker claude-code:latest
 `--realm default` is the default, so it can be omitted. Verify:
 
 ```bash
-sudo kuke image get | grep claude-code
+sudo kuke get images | grep claude-code
 ```
 
 If you don't run Docker, use the `nerdctl save … | sudo kuke image load -` form documented in [`kuke image`](../cli/kuke-image.md).

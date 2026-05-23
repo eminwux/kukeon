@@ -155,6 +155,9 @@ kuke get spaces
 kuke get stacks
 kuke get cells
 kuke get containers --cell <name>                # filter within current scope
+kuke get images                                  # cross-realm by default
+kuke get image --realm <name>                    # narrow to one realm
+kuke get image <ref> --realm <name>              # describe a single image (yaml default)
 kuke get realm <name> -o yaml                    # full spec+status
 kuke get realm <name> -o json
 kuke get realms --show-controllers               # cgroup-v2 controllers column
@@ -167,6 +170,8 @@ kuke get realms --show-controllers               # cgroup-v2 controllers column
 - After `kuke init`, `kuke get realms` lists at least `default` and `kuke-system`. `kuke get realms --no-daemon` must produce the same row set — divergence is a regression (see CLAUDE.md daemon-parity guard).
 - `--show-controllers` appends a `CONTROLLERS` column; it is **off by default** so the default table matches the dev-init regression-guard tail in CLAUDE.md.
 - `kuke get realms --no-daemon` works without `sudo` when `/opt/kukeon` is readable by the `kukeon` group; this is the supported escape hatch when the daemon is down.
+- `kuke get image[s]` lists across **every realm** by default; columns are `NAME REALM SIZE AGE`. `--realm <r>` narrows to one realm but keeps the `REALM` column for grep-ability. `-o wide` appends `CREATED` and `DIGEST`. `-o yaml` / `-o json` emit one `kukeonv1.ListImagesResult` per realm. With a positional `<ref>` the command describes a single image (yaml by default, `-o json` switches to json); `--realm` defaults to `default` on this path.
+- `kuke get image` is daemon-independent: image methods do not traverse the kukeond RPC (#226), so the persistent `--no-daemon` on `kuke get` is a no-op for this leaf — every invocation goes in-process via the containerd socket.
 - `kuke get containers --cell <name>` (and `--space <name>` / `--stack <name>`) filter **within the scope passed on the command line**. The operator must supply matching `--realm/--space/--stack` to filter into a non-default scope. When a filter returns zero rows but the named cell/space/stack exists in a different scope, the table output appends a `Hint:` line naming the realm/space/stack where it does exist, so the operator can re-run with the right flags. The hint applies to the `table` output only — `-o yaml` and `-o json` still emit an empty list, exit code 0.
 
 ### Creating a custom realm / space / stack
@@ -213,7 +218,7 @@ sudo kuke purge cell <name> --realm r --space s --stack st
 
 ## Image management
 
-Images live in **realm-scoped containerd namespaces**. `kuke image` always takes `--realm <name>`; the lookup runs in `<realm>.kukeon.io`.
+Images live in **realm-scoped containerd namespaces**. `kuke image load` / `kuke image delete` always take `--realm <name>`; the lookup runs in `<realm>.kukeon.io`. Listing and describing images moved to the `kuke get` family in #824 — see the _Listing the hierarchy_ section above for `kuke get image[s]`.
 
 **Sequence.**
 
@@ -221,20 +226,21 @@ Images live in **realm-scoped containerd namespaces**. `kuke image` always takes
 sudo kuke image load --realm default <tarball.tar>
 sudo kuke image load --realm default -                          # stdin
 sudo kuke image load --realm kuke-system --from-docker <ref>    # docker save | load
-kuke image get --realm default                                  # alias: ls, list
-kuke image get --realm default <ref> -o yaml
+kuke get images                                                 # cross-realm listing
+kuke get image --realm default                                  # narrow to one realm
+kuke get image <ref> --realm default -o yaml                    # describe a single image
 sudo kuke image delete --realm default <ref>                    # alias: rm, remove
 ```
 
 **Invariants.**
 
-- Exit code 0 on successful load; the loaded image is then visible in `kuke image get --realm <same>`.
+- Exit code 0 on successful load; the loaded image is then visible in `kuke get image --realm <same>` (and in the cross-realm `kuke get images` default).
 - The positional tarball argument and `--from-docker` are mutually exclusive.
 - `--from-docker <ref>` shells out to `docker save`; if the docker daemon is unreachable or the ref is unknown, the command exits non-zero with the docker error surfaced (e.g. `No such image`).
-- `kuke image get --realm <r>` exits 0 even when the namespace is empty; the CLI prints a "No images found in realm" line rather than failing.
+- `kuke get image --realm <r>` exits 0 even when the namespace is empty; the CLI prints a `No images found.` line rather than failing.
 - `kuke image delete --realm <r> <missing-ref>` exits non-zero with an `image not found` message that names the realm and ref.
-- `kuke image *` is daemon-independent by design (#217, #226): every subcommand wraps containerd's image API directly in-process. There is no "with daemon" mode — the daemon does not serve image RPCs — and `--no-daemon` is not accepted on image commands after #222.
-- `kuke image load` writes to containerd's content store and must run as root; it fails fast with a friendly `must run as root` error under non-root euid rather than letting containerd surface an opaque EACCES later. `kuke image get` and `kuke image delete` do not impose their own UID gate — they fail with whatever containerd returns if the socket is unreachable.
+- `kuke image *` and `kuke get image` are daemon-independent by design (#217, #226): they wrap containerd's image API directly in-process. There is no "with daemon" mode — the daemon does not serve image RPCs — and `--no-daemon` is not accepted on `kuke image *` commands after #222 (it is a silent no-op on `kuke get image`, inherited from the persistent `kuke get` flag).
+- `kuke image load` writes to containerd's content store and must run as root; it fails fast with a friendly `must run as root` error under non-root euid rather than letting containerd surface an opaque EACCES later. `kuke get image` and `kuke image delete` do not impose their own UID gate — they fail with whatever containerd returns if the socket is unreachable.
 - The dev-loop pattern is `sudo kuke image load --from-docker kukeon-local:dev --realm kuke-system`; the image lands in containerd before `kuke init` brings up the daemon, which is fine because image operations never go through `kukeond`.
 
 ## Workload lifecycle

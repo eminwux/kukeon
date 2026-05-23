@@ -15,7 +15,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package image hosts the `kuke image` parent command and its subcommands:
-// `load` (#200), `get` (#211), and `delete` (#212).
+// `load` (#200) and `delete` (#212). Image *listing* moved to the
+// `kuke get image` leaf in #824 — see `cmd/kuke/get/image`.
 //
 // `kuke image *` is the canonical example of the "daemon-independent,
 // in-process by design" command category captured in #217: every subcommand
@@ -53,8 +54,6 @@ type Client interface {
 	io.Closer
 
 	LoadImage(ctx context.Context, realm string, tarball []byte) (kukeonv1.LoadImageResult, error)
-	ListImages(ctx context.Context, realm string) (kukeonv1.ListImagesResult, error)
-	GetImage(ctx context.Context, realm, ref string) (kukeonv1.GetImageResult, error)
 	DeleteImage(ctx context.Context, realm, ref string) (kukeonv1.DeleteImageResult, error)
 }
 
@@ -96,7 +95,6 @@ func NewImageCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(NewLoadCmd())
-	cmd.AddCommand(NewGetCmd())
 	cmd.AddCommand(NewDeleteCmd())
 
 	return cmd

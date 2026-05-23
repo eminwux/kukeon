@@ -29,7 +29,7 @@ import (
 )
 
 // ImageInfo is the ctr-layer view of a containerd image. The fields are the
-// common subset surfaced to operators by `kuke image get`; downstream layers
+// common subset surfaced to operators by `kuke get image`; downstream layers
 // re-encode this onto their own wire types so the ctr package does not leak
 // into pkg/api.
 type ImageInfo struct {

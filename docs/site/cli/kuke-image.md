@@ -6,14 +6,15 @@ Manage container images in a realm's containerd namespace.
 kuke image [command]
 ```
 
-Every realm maps to its own containerd namespace (`<realm>.kukeon.io`). `kuke image` lists, loads, and deletes images inside that namespace. The default realm is `default` (containerd namespace `default.kukeon.io`); pass `--realm kuke-system` to operate on the system realm where the `kukeond` image lives.
+Every realm maps to its own containerd namespace (`<realm>.kukeon.io`). `kuke image` loads and deletes images inside that namespace. The default realm is `default` (containerd namespace `default.kukeon.io`); pass `--realm kuke-system` to operate on the system realm where the `kukeond` image lives.
+
+Listing and describing images moved to the `kuke get` family in #824 — use [`kuke get image[s]`](kuke-get.md) for both the cross-realm default and the single-image describe form. The old `kuke image get` / `kuke image ls` / `kuke image list` aliases are gone (no deprecation window).
 
 ## Subcommands
 
 | Command             | What it does                                                           |
 | ------------------- | ---------------------------------------------------------------------- |
 | `kuke image load`   | Import an OCI/docker image tarball into a realm's containerd namespace |
-| `kuke image get`    | List or describe images in a realm's containerd namespace              |
 | `kuke image delete` | Remove an image from a realm's containerd namespace                    |
 
 ## kuke image load
@@ -42,31 +43,6 @@ sudo kuke image load --from-docker kukeon-local:dev --realm kuke-system
 
 # Stdin
 docker save myimage:latest | sudo kuke image load -
-```
-
-## kuke image get
-
-```
-kuke image get [ref] [flags]
-kuke image ls  [ref] [flags]      # alias
-```
-
-| Flag             | Default   | Description                                                                                       |
-| ---------------- | --------- | ------------------------------------------------------------------------------------------------- |
-| `--realm`        | `default` | Target realm; the lookup runs in `<realm>.kukeon.io`                                              |
-| `--output`, `-o` | (auto)    | Output format (`yaml`, `json`, `table`). Default: `table` for list, `yaml` for a single resource. |
-
-### Examples
-
-```bash
-# List images in the default realm
-sudo kuke image get
-
-# List images in the system realm (where the kukeond image lives)
-sudo kuke image get --realm kuke-system
-
-# Describe a single image as YAML
-sudo kuke image get docker.io/library/nginx:alpine -o yaml
 ```
 
 ## kuke image delete

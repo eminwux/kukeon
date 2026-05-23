@@ -7,13 +7,13 @@ kuke get <resource> [NAME] [flags]
 kuke g   <resource> [NAME] [flags]      # alias
 ```
 
-Resources: `realm`, `space`, `stack`, `cell`, `container`, `blueprint`, `config`. Each subcommand also accepts its plural (`realms`, `spaces`, …, `blueprints`, `configs`) and a short alias (`r`, `sp`, `st`, `ce`, `co`, `bp`, `cfg`).
+Resources: `realm`, `space`, `stack`, `cell`, `container`, `image`, `blueprint`, `config`. Each subcommand also accepts its plural (`realms`, `spaces`, …, `images`, `blueprints`, `configs`) and a short alias (`r`, `sp`, `st`, `ce`, `co`, `img`, `bp`, `cfg`).
 
 ## Common flags
 
-| Flag                 | Description                                                                                       |
-| -------------------- | ------------------------------------------------------------------------------------------------- |
-| `--output`, `-o`     | Output format: `yaml`, `json`, `table`. Default: `table` for list, `yaml` for a single resource.  |
+| Flag                 | Description                                                                                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--output`, `-o`     | Output format: `yaml`, `json`, `table`. Default: `table` for list, `yaml` for a single resource.                                                             |
 | `--show-controllers` | Append a `CONTROLLERS` column listing the cgroup-v2 controllers delegated on the subject's subtree. Off by default to keep the dev-init parity check stable. |
 
 Plus all [global flags](kuke.md). Every `kuke get <kind>` accepts the explicit `--no-daemon` flag to bypass the daemon (inherited as a persistent flag from the parent `get` command); `KUKEON_NO_DAEMON=true` and `--run-path /opt/kukeon` (which auto-promotes the command into in-process mode) work as well.
@@ -22,15 +22,16 @@ Plus all [global flags](kuke.md). Every `kuke get <kind>` accepts the explicit `
 
 Each subcommand takes the flags that scope the query:
 
-| Subcommand             | Scope flags                                      |
-| ---------------------- | ------------------------------------------------ |
-| `get realm [name]`     | none (realms are top-level)                      |
-| `get space [name]`     | `--realm` (default `default`)                    |
-| `get stack [name]`     | `--realm`, `--space`                             |
-| `get cell [name]`      | `--realm`, `--space`, `--stack`                  |
-| `get container [name]` | `--realm`, `--space`, `--stack`, `--cell`        |
-| `get blueprint [name]` | `--realm`, `--space`, `--stack` (no `--cell` — Blueprints are never cell-scoped) |
-| `get config [name]`    | `--realm`, `--space`, `--stack` (no `--cell` — Configs are never cell-scoped)    |
+| Subcommand             | Scope flags                                                                          |
+| ---------------------- | ------------------------------------------------------------------------------------ |
+| `get realm [name]`     | none (realms are top-level)                                                          |
+| `get space [name]`     | `--realm` (default `default`)                                                        |
+| `get stack [name]`     | `--realm`, `--space`                                                                 |
+| `get cell [name]`      | `--realm`, `--space`, `--stack`                                                      |
+| `get container [name]` | `--realm`, `--space`, `--stack`, `--cell`                                            |
+| `get image [ref]`      | `--realm` (omit for cross-realm listing; defaults to `default` on the describe path) |
+| `get blueprint [name]` | `--realm`, `--space`, `--stack` (no `--cell` — Blueprints are never cell-scoped)     |
+| `get config [name]`    | `--realm`, `--space`, `--stack` (no `--cell` — Configs are never cell-scoped)        |
 
 All scope flags default to `default`. See the [realm default note](commands.md#convention-positional-arg--flags).
 
@@ -61,6 +62,15 @@ sudo kuke get cells --realm default --space default --stack default
 
 # All containers in a cell
 sudo kuke get containers --realm default --space default --stack default --cell hello-world
+
+# Images across every realm (cross-realm by default)
+sudo kuke get images
+
+# Narrow to one realm; -o wide adds CREATED and DIGEST columns
+sudo kuke get image --realm kuke-system -o wide
+
+# Describe a single image as YAML (defaults --realm to `default` on this path)
+sudo kuke get image docker.io/library/nginx:alpine -o yaml
 
 # Show which cgroup controllers are delegated to every realm
 sudo kuke get realms --show-controllers

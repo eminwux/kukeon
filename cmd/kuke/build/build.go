@@ -61,7 +61,7 @@ func NewBuildCmd() *cobra.Command {
 			"`kuke build` is a thin shim: it locates the `kukebuild` binary on PATH and\n" +
 			"exec's it. `kukebuild` embeds BuildKit, builds the context with the Dockerfile\n" +
 			"frontend, and writes the resulting image into the containerd namespace mapped\n" +
-			"to --realm (<realm>.kukeon.io), ready for `kuke image get` and `kuke create`.\n\n" +
+			"to --realm (<realm>.kukeon.io), ready for `kuke get image` and `kuke create`.\n\n" +
 			"No docker or standalone buildkitd is required — only a running host containerd.\n\n" +
 			"Build-time secrets: --secret id=NAME,src=PATH mounts a host file into the build\n" +
 			"at /run/secrets/NAME, consumed by a Dockerfile `RUN --mount=type=secret,id=NAME`.\n" +
@@ -72,7 +72,7 @@ func NewBuildCmd() *cobra.Command {
 			"Multi-platform: --platform linux/amd64,linux/arm64 builds for each target arch\n" +
 			"and writes the result as a single manifest list — one image reference covering\n" +
 			"every arch, not per-arch tags (operators expecting name:tag-amd64 / -arm64 will\n" +
-			"not find them). `kuke image get --realm <name>` shows the list; each per-arch\n" +
+			"not find them). `kuke get image --realm <name>` shows the list; each per-arch\n" +
 			"manifest is individually pullable. Distinct from a Dockerfile's $BUILDPLATFORM\n" +
 			"arg, which selects the build host's platform; --platform selects the output set.\n\n" +
 			"Registry push: --push pushes the built image to its tag's registry after a\n" +
