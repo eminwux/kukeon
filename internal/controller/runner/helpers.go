@@ -681,10 +681,29 @@ func (r *Exec) processOrphanedContainers(ctx context.Context, namespace string, 
 
 // populateCellContainerStatuses queries containerd for the status of all containers
 // in a cell and populates cell.Status.Containers array.
+//
+// Stage carry-forward (phase C1, #690): per-create-stage done records are
+// merged with the previously-persisted Stages snapshot before the overwrite,
+// so a stop -> start cycle preserves the run-once "done" set the
+// (phase C2, #737) render gate consumes — the live pull is empty while a
+// container is non-Ready and would otherwise wipe the records on every stop
+// (see mergeStageStatuses for the Index + Hash gate). The merge is anchored
+// on the live cell.Spec, so an edited create stage's prior done drops on the
+// next populate.
 func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 	if len(cell.Spec.Containers) == 0 {
 		cell.Status.Containers = []intmodel.ContainerStatus{}
 		return nil
+	}
+
+	// Snapshot prior Stages keyed by container ID so the post-pull merge can
+	// re-thread done records across a stop -> start. The unconditional
+	// cell.Status.Containers overwrite at the end of this function would
+	// otherwise drop them whenever the live pull returns nil (container not
+	// Ready, or pull failed) and strand phase C2's render gate.
+	priorStages := make(map[string][]intmodel.StageStatus, len(cell.Status.Containers))
+	for _, prev := range cell.Status.Containers {
+		priorStages[prev.ID] = prev.Stages
 	}
 
 	statuses := make([]intmodel.ContainerStatus, 0, len(cell.Spec.Containers))
@@ -718,7 +737,12 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 		// Best-effort: only Attachable containers that declared repos[] or
 		// create stages and are Ready can serve the verb, and any failure leaves
 		// Repos/Stages empty rather than blocking the status read.
-		status.Repos, status.Stages = r.setupStatuses(cell, containerSpec, state)
+		var liveStages []intmodel.StageStatus
+		status.Repos, liveStages = r.setupStatuses(cell, containerSpec, state)
+		// Merge live + prior stages against the current spec so done
+		// records survive stop/start and edited stages drop their prior
+		// done. See mergeStageStatuses for the Index + Hash contract.
+		status.Stages = mergeStageStatuses(containerSpec, priorStages[containerSpec.ID], liveStages)
 		statuses = append(statuses, status)
 	}
 

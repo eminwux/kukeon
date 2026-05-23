@@ -439,20 +439,27 @@ type RepoStatus struct {
 }
 
 // StageStatus is the resolved state of a single runOn: create TtyStage after
-// kuketty's pre-Serve execution. Populated in phase B (#689); this phase
-// (#635) lands the schema only. The stage-identity / run-once "done" key (e.g.
-// a content hash) is settled in phase C (#690), where the render gate that
-// consumes it lands — until then Index (declaration order among create stages)
-// is the only identity carried. Issue #635.
+// kuketty's pre-Serve execution. Populated in phase B (#689). Phase C1 (#690)
+// adds the durable Hash key + merge that carries done records across
+// stop/start; phase C2 (#737) lands the render-time gate that consumes them.
+// Issue #635.
 type StageStatus struct {
-	// Index is the 0-based position of the stage among the container's create
-	// stages, in declaration order.
+	// Index is the 0-based position of the stage within the container's full
+	// Tty.OnInit list (not its position among create stages alone), in
+	// declaration order.
 	Index int `json:"index"           yaml:"index"`
-	// State is the resolved outcome (e.g. "ran" or "failed"); the exact value
-	// set is defined by the phase-B populator (#689).
+	// State is the resolved outcome ("done" or "failed"); the daemon-side
+	// populator (phase B, #689) sets it from the wire payload.
 	State string `json:"state"           yaml:"state"`
 	// Error is the failure detail when State reports a failure.
 	Error string `json:"error,omitempty" yaml:"error,omitempty"`
+	// Hash is the content hash of the stage at record time — the run-once
+	// "done" key. The daemon stamps it from the live spec and the controller
+	// preserves a done entry across stop/start only when its Hash still
+	// matches the current spec's stage Hash at the same Index, so an edited
+	// stage (new content) drops its prior done record on the next populate.
+	// Phase C1 (#690).
+	Hash string `json:"hash,omitempty"  yaml:"hash,omitempty"`
 }
 
 type ContainerState int

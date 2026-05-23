@@ -102,6 +102,12 @@ func repoStatusToInternal(repos []setupstatus.Repo) []intmodel.RepoStatus {
 // StageStatus type the controller persists in ContainerStatus.Stages. Returns
 // nil for an empty input so a container with no create stages reports a nil
 // Stages (mirrors the omitempty wire/YAML shape) rather than an empty slice.
+//
+// Hash is intentionally not copied from the wire shape here — kuketty does
+// not stamp it today (the wire payload always carries an empty Hash; see
+// setupstatus.Stage). The daemon-side merge stamps Hash from the live
+// container spec at the matching Index, so populating it here would only
+// shadow the merge's authoritative computation. Phase C1 (#690).
 func stageStatusToInternal(stages []setupstatus.Stage) []intmodel.StageStatus {
 	if len(stages) == 0 {
 		return nil

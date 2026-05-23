@@ -1059,7 +1059,9 @@ func repoStatusesToExternal(in []intmodel.RepoStatus) []ext.RepoStatus {
 }
 
 // stageStatusesToInternal copies external per-stage status into the internal
-// model. Schema only this phase; populated in phase B (#689). Issue #635.
+// model. Phase B (#689) populates the field; phase C1 (#690) added the Hash
+// key the controller-side merge uses to carry done records across stop/start.
+// Issue #635.
 func stageStatusesToInternal(in []ext.StageStatus) []intmodel.StageStatus {
 	if len(in) == 0 {
 		return nil
@@ -1070,6 +1072,7 @@ func stageStatusesToInternal(in []ext.StageStatus) []intmodel.StageStatus {
 			Index: s.Index,
 			State: s.State,
 			Error: s.Error,
+			Hash:  s.Hash,
 		}
 	}
 	return out
@@ -1086,6 +1089,7 @@ func stageStatusesToExternal(in []intmodel.StageStatus) []ext.StageStatus {
 			Index: s.Index,
 			State: s.State,
 			Error: s.Error,
+			Hash:  s.Hash,
 		}
 	}
 	return out
