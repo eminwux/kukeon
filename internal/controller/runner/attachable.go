@@ -103,7 +103,14 @@ func attachableTTYDirInitialPerms(kukeonGroupGID int) (os.FileMode, int) {
 // path `kuke init` sets up on /opt/kukeon. The owner is corrected to the
 // container's resolved uid by attachablePostCreateChown after
 // CreateContainerFromSpec runs.
-func (r *Exec) attachableBuildOpts(_ string, spec intmodel.ContainerSpec, _ []ctr.RegistryCredentials) ([]ctr.BuildOption, error) {
+//
+// priorStages carries the controller-side ContainerStatus.Stages snapshot
+// for this container (sourced from cell.Status.Containers at each call
+// site). The renderer threads it into writeKukettyDoc so the phase-C2 (#737)
+// render-time gate can omit already-done runOn: create stages from the next
+// boot's ContainerDoc. Pass nil on a fresh-create boot — every create stage
+// renders normally and runs on the next boot.
+func (r *Exec) attachableBuildOpts(_ string, spec intmodel.ContainerSpec, _ []ctr.RegistryCredentials, priorStages []intmodel.StageStatus) ([]ctr.BuildOption, error) {
 	if !spec.Attachable {
 		return nil, nil
 	}
@@ -152,7 +159,7 @@ func (r *Exec) attachableBuildOpts(_ string, spec intmodel.ContainerSpec, _ []ct
 	metadataPath := filepath.Join(containerDir, ctr.AttachableMetadataFile)
 	kukeonGID := r.opts.KukeonGroupGID
 	renderer := func(workloadArgv []string) error {
-		return r.writeKukettyDoc(metadataPath, spec, kukeonGID, workloadArgv)
+		return r.writeKukettyDoc(metadataPath, spec, kukeonGID, workloadArgv, priorStages)
 	}
 
 	return []ctr.BuildOption{
@@ -194,11 +201,22 @@ func (r *Exec) attachableBuildOpts(_ string, spec intmodel.ContainerSpec, _ []ct
 // Everything else the transform needs — the fixed in-container socket /
 // capture / log paths and their modes — are kukeon contract constants kuketty
 // knows directly, so they are not carried in the doc.
+//
+// priorStages is the controller-side ContainerStatus.Stages snapshot for this
+// container (after mergeStageStatuses has dropped stale-hash and non-done
+// entries). The render-time gate (applyStageRenderGate) consults its
+// State == "done" entries to clear the Script of any matching runOn: create
+// stage in the rendered OnInit, so kuketty's runStage no-ops the gated
+// execution — phase C2 (#737) of the run-once-per-cell-instance setup. The
+// rendered ContainerDoc is the render-time evidence the gate fired (gated
+// stages carry an empty Script in Spec.Tty.OnInit). A nil priorStages is a
+// fresh-create boot — every create stage renders normally and runs.
 func (r *Exec) writeKukettyDoc(
 	path string,
 	spec intmodel.ContainerSpec,
 	kukeonGroupGID int,
 	workloadArgv []string,
+	priorStages []intmodel.StageStatus,
 ) error {
 	extSpec := apischeme.BuildContainerSpecExternalFromInternal(spec)
 
@@ -226,6 +244,15 @@ func (r *Exec) writeKukettyDoc(
 		extSpec.Tty = &extmodel.ContainerTty{}
 	}
 	extSpec.Tty.LogLevel = resolvedLevel
+
+	// Phase C2 (#737) render-time gate: clear Script on any runOn: create
+	// stage whose content hash matches a prior State == "done" record so
+	// kuketty's pre-Serve executor no-ops the execution on this boot. The
+	// TtyStage entry stays at its position in the rendered OnInit so
+	// kuketty's createStages emits Stage.Index aligned with the live
+	// spec.Tty.OnInit position the daemon-side mergeStageStatuses anchors
+	// on. See applyStageRenderGate for the contract.
+	applyStageRenderGate(extSpec.Tty.OnInit, priorStages)
 
 	doc := extmodel.ContainerDoc{
 		APIVersion: extmodel.APIVersionV1Beta1,

@@ -134,3 +134,67 @@ func mergeStageStatuses(
 func toV1beta1Stage(in intmodel.TtyStage) v1beta1.TtyStage {
 	return v1beta1.TtyStage{Script: in.Script, RunOn: in.RunOn}
 }
+
+// priorStagesForContainer returns the persisted ContainerStatus.Stages slice
+// for the named container in cell.Status.Containers, or nil when no matching
+// status entry exists. Used by the four attachableBuildOpts call sites in
+// start.go / provision.go to source the done-set the render gate consumes.
+// A fresh-create boot (no prior status entry yet, or status not yet
+// populated) returns nil — every runOn: create stage renders normally and
+// runs on the next boot. Phase C2 (#737).
+func priorStagesForContainer(cell intmodel.Cell, containerID string) []intmodel.StageStatus {
+	for _, s := range cell.Status.Containers {
+		if s.ID == containerID {
+			return s.Stages
+		}
+	}
+	return nil
+}
+
+// applyStageRenderGate is the phase-C2 (#737) render-time gate: it clears the
+// Script of any runOn: create TtyStage in the rendered ContainerDoc whose
+// content hash matches a State == "done" record in priorStages. Kuketty's
+// runStage no-ops on an empty Script (cmd/kuketty/stages.go runStage), so the
+// gated stage's side effects do not re-run on the next boot — which is the
+// AC's stated intent ("on a subsequent boot, omits create stages whose hash
+// appears in the done-set"). The rendered ContainerDoc is the render-time
+// evidence the gate fired: a gated stage carries an empty Script in
+// Spec.Tty.OnInit while non-gated stages carry their authored Script verbatim.
+//
+// The gate clears Script rather than dropping the TtyStage entry outright so
+// the rendered OnInit slice retains the same length and positions as the
+// live cell.Spec.Tty.OnInit. kuketty's createStages (cmd/kuketty/spec.go)
+// stamps Stage.Index = position-in-the-received-OnInit, and the daemon-side
+// mergeStageStatuses anchors liveByIndex on position-in-the-live-spec — a
+// length-changing filter would mis-align the two and silently drop the live
+// signal for the just-completed (re-)run of an edited stage. Preserving the
+// slot keeps both sides anchored on a single positional identity, at the
+// cost of one no-op runStage iteration per gated stage on each boot.
+//
+// priorStages is the merged controller-side snapshot (see mergeStageStatuses):
+// only entries with State == StageDone and a non-empty Hash gate. A nil or
+// empty priorStages is a fresh-create boot — nothing is gated.
+func applyStageRenderGate(onInit []v1beta1.TtyStage, priorStages []intmodel.StageStatus) {
+	if len(onInit) == 0 || len(priorStages) == 0 {
+		return
+	}
+	doneHashes := make(map[string]struct{}, len(priorStages))
+	for _, st := range priorStages {
+		if st.State != setupstatus.StageDone || st.Hash == "" {
+			continue
+		}
+		doneHashes[st.Hash] = struct{}{}
+	}
+	if len(doneHashes) == 0 {
+		return
+	}
+	for i := range onInit {
+		if onInit[i].RunOn != v1beta1.RunOnCreate {
+			continue
+		}
+		hash := stageContentHash(onInit[i])
+		if _, gated := doneHashes[hash]; gated {
+			onInit[i].Script = ""
+		}
+	}
+}

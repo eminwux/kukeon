@@ -225,6 +225,128 @@ func TestMergeStageStatuses_Cases(t *testing.T) {
 	}
 }
 
+// TestPriorStagesForContainer covers the lookup helper the four
+// attachableBuildOpts call sites in start.go / provision.go use to source
+// the done-set the render gate consumes. Phase C2 (#737).
+func TestPriorStagesForContainer(t *testing.T) {
+	stages := []intmodel.StageStatus{
+		{Index: 0, State: setupstatus.StageDone, Hash: "h0"},
+	}
+	cell := intmodel.Cell{
+		Status: intmodel.CellStatus{
+			Containers: []intmodel.ContainerStatus{
+				{ID: "other", Stages: []intmodel.StageStatus{{Index: 0, State: setupstatus.StageFailed}}},
+				{ID: "target", Stages: stages},
+			},
+		},
+	}
+
+	got := priorStagesForContainer(cell, "target")
+	if len(got) != 1 || got[0].Hash != "h0" {
+		t.Errorf("priorStagesForContainer(target) = %+v, want stages for target", got)
+	}
+
+	if priorStagesForContainer(cell, "missing") != nil {
+		t.Errorf("priorStagesForContainer(missing) should return nil for unknown container")
+	}
+
+	// An empty cell.Status.Containers (fresh-create boot, no populate yet)
+	// returns nil rather than panicking. The render gate then no-ops on
+	// nil priorStages and every create stage renders normally.
+	if priorStagesForContainer(intmodel.Cell{}, "any") != nil {
+		t.Errorf("priorStagesForContainer on empty cell should return nil")
+	}
+}
+
+// TestApplyStageRenderGate covers the unit-level behavior of the gate
+// helper: clears Script on runOn: create stages whose content hash matches a
+// done-record in priorStages, leaves non-create stages and create stages
+// without a matching done-record untouched, preserves slice length so
+// kuketty's createStages-emitted Stage.Index aligns with the live spec
+// position, and ignores failed / hash-less prior records. Phase C2 (#737).
+func TestApplyStageRenderGate(t *testing.T) {
+	doneStage := v1beta1.TtyStage{Script: "npm ci", RunOn: v1beta1.RunOnCreate}
+	startStage := v1beta1.TtyStage{Script: "echo hi", RunOn: v1beta1.RunOnStart}
+	freshStage := v1beta1.TtyStage{Script: "db-seed", RunOn: v1beta1.RunOnCreate}
+	doneHash := stageContentHash(doneStage)
+
+	tests := []struct {
+		name       string
+		onInit     []v1beta1.TtyStage
+		prior      []intmodel.StageStatus
+		wantScript []string // expected Script at each position; "" = gated
+	}{
+		{
+			name:       "no prior stages: every create stage renders unchanged",
+			onInit:     []v1beta1.TtyStage{doneStage, startStage, freshStage},
+			prior:      nil,
+			wantScript: []string{doneStage.Script, startStage.Script, freshStage.Script},
+		},
+		{
+			name:       "empty OnInit: no-op",
+			onInit:     nil,
+			prior:      []intmodel.StageStatus{{Index: 0, State: setupstatus.StageDone, Hash: doneHash}},
+			wantScript: nil,
+		},
+		{
+			name:   "done-record gates matching create stage by hash",
+			onInit: []v1beta1.TtyStage{doneStage, startStage, freshStage},
+			prior: []intmodel.StageStatus{
+				{Index: 0, State: setupstatus.StageDone, Hash: doneHash},
+			},
+			wantScript: []string{"", startStage.Script, freshStage.Script},
+		},
+		{
+			name:   "failed prior record never gates",
+			onInit: []v1beta1.TtyStage{doneStage},
+			prior: []intmodel.StageStatus{
+				{Index: 0, State: setupstatus.StageFailed, Hash: doneHash},
+			},
+			wantScript: []string{doneStage.Script},
+		},
+		{
+			name:   "hash-less done record never gates",
+			onInit: []v1beta1.TtyStage{doneStage},
+			prior: []intmodel.StageStatus{
+				{Index: 0, State: setupstatus.StageDone},
+			},
+			wantScript: []string{doneStage.Script},
+		},
+		{
+			name:   "non-matching hash never gates",
+			onInit: []v1beta1.TtyStage{doneStage},
+			prior: []intmodel.StageStatus{
+				{Index: 0, State: setupstatus.StageDone, Hash: "deadbeef0000beef"},
+			},
+			wantScript: []string{doneStage.Script},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clone the input so cases don't pollute each other.
+			onInit := append([]v1beta1.TtyStage(nil), tt.onInit...)
+			applyStageRenderGate(onInit, tt.prior)
+			if len(onInit) != len(tt.wantScript) {
+				t.Fatalf("len(onInit) = %d, want %d (gate must preserve slice length)", len(onInit), len(tt.wantScript))
+			}
+			for i, want := range tt.wantScript {
+				if onInit[i].Script != want {
+					t.Errorf("onInit[%d].Script = %q, want %q", i, onInit[i].Script, want)
+				}
+			}
+			// The gate must not flip RunOn — that would change createStages
+			// selection in kuketty and disalign the wire Index.
+			for i := range onInit {
+				if onInit[i].RunOn != tt.onInit[i].RunOn {
+					t.Errorf("onInit[%d].RunOn changed: was %q, now %q (gate must never touch RunOn)",
+						i, tt.onInit[i].RunOn, onInit[i].RunOn)
+				}
+			}
+		})
+	}
+}
+
 // TestMergeStageStatuses_AnchorsOnIndexInFullOnInit guards against a regression
 // where the merge would re-index create-stages contiguously (0, 1, ...) instead
 // of using their position in the full OnInit slice. The setupstatus wire

@@ -852,8 +852,12 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 		// daemon restart.
 		containerSpec.NestedCgroupRuntime = internalCell.Spec.NestedCgroupRuntime
 
-		// Recreate container fresh
-		attachOpts, attachErr := r.attachableBuildOpts(namespace, containerSpec, creds)
+		// Recreate container fresh. priorStages threads the controller-side
+		// ContainerStatus.Stages snapshot into the renderer so the phase-C2
+		// (#737) gate can omit already-done runOn: create stages from the
+		// rendered ContainerDoc on this boot.
+		priorStages := priorStagesForContainer(internalCell, containerSpec.ID)
+		attachOpts, attachErr := r.attachableBuildOpts(namespace, containerSpec, creds, priorStages)
 		if attachErr != nil {
 			return intmodel.Cell{}, fmt.Errorf("failed to prepare attachable container %s: %w", ctrContainerID, attachErr)
 		}
@@ -1118,8 +1122,12 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 	// Failed (issue #407).
 	provisionStarted = true
 
-	// Recreate container fresh
-	attachOpts, attachErr := r.attachableBuildOpts(namespace, *foundContainerSpec, creds)
+	// Recreate container fresh. priorStages threads the controller-side
+	// ContainerStatus.Stages snapshot into the renderer so the phase-C2
+	// (#737) gate can omit already-done runOn: create stages from the
+	// rendered ContainerDoc on this boot.
+	priorStages := priorStagesForContainer(cell, foundContainerSpec.ID)
+	attachOpts, attachErr := r.attachableBuildOpts(namespace, *foundContainerSpec, creds, priorStages)
 	if attachErr != nil {
 		return intmodel.Cell{}, fmt.Errorf("failed to prepare attachable container %s: %w", containerID, attachErr)
 	}

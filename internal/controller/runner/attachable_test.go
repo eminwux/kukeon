@@ -32,6 +32,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/internal/kuketty/setupstatus"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
 	extmodel "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -124,7 +125,7 @@ func TestWriteKukettyDoc_EmitsContainerDoc(t *testing.T) {
 	const kukeonGID = 986
 	workload := []string{"/bin/sh", "-c", "echo hello"}
 
-	if err := r.writeKukettyDoc(path, spec, kukeonGID, workload); err != nil {
+	if err := r.writeKukettyDoc(path, spec, kukeonGID, workload, nil); err != nil {
 		t.Fatalf("writeKukettyDoc: %v", err)
 	}
 
@@ -210,7 +211,7 @@ func TestWriteKukettyDoc_EmptyWorkloadClearsCommand(t *testing.T) {
 	path := filepath.Join(dir, "kuketty-metadata.json")
 	spec := intmodel.ContainerSpec{ID: "c1", Command: "/bin/leftover", Args: []string{"x"}}
 
-	if err := r.writeKukettyDoc(path, spec, 0, nil); err != nil {
+	if err := r.writeKukettyDoc(path, spec, 0, nil, nil); err != nil {
 		t.Fatalf("writeKukettyDoc: %v", err)
 	}
 	doc := readDoc(t, path)
@@ -246,7 +247,7 @@ func TestWriteKukettyDoc_LogLevelResolution(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "kuketty-metadata.json")
 			spec := intmodel.ContainerSpec{ID: "c1", Tty: tc.tty}
-			if err := r.writeKukettyDoc(path, spec, 0, []string{"/bin/sh"}); err != nil {
+			if err := r.writeKukettyDoc(path, spec, 0, []string{"/bin/sh"}, nil); err != nil {
 				t.Fatalf("writeKukettyDoc: %v", err)
 			}
 			doc := readDoc(t, path)
@@ -272,7 +273,7 @@ func TestWriteKukettyDoc_LogFileOverridePreserved(t *testing.T) {
 	const override = "/var/log/sbsh-debug.log"
 	spec := intmodel.ContainerSpec{ID: "c1", Tty: &intmodel.ContainerTty{LogFile: override}}
 
-	if err := r.writeKukettyDoc(path, spec, 0, []string{"/bin/sh"}); err != nil {
+	if err := r.writeKukettyDoc(path, spec, 0, []string{"/bin/sh"}, nil); err != nil {
 		t.Fatalf("writeKukettyDoc: %v", err)
 	}
 	doc := readDoc(t, path)
@@ -374,6 +375,240 @@ func TestEnsureAttachableSocketSymlink_RefusesOverflow(t *testing.T) {
 	}
 	if _, statErr := os.Lstat(symlinkPath); !errors.Is(statErr, os.ErrNotExist) {
 		t.Errorf("symlink %q exists (lstat err = %v), want ErrNotExist", symlinkPath, statErr)
+	}
+}
+
+// TestWriteKukettyDoc_RenderGate_OmitsDoneCreateStagesOnRestart locks AC #1:
+// on a subsequent boot, the rendered ContainerDoc gates already-done runOn:
+// create stages so kuketty's pre-Serve executor no-ops their execution. The
+// gate clears the Script of each gated stage (preserving the TtyStage entry
+// at its OnInit position so kuketty's createStages emits Stage.Index aligned
+// with the live spec.Tty.OnInit position the daemon-side merge anchors on);
+// non-create stages and create stages with no prior done record are
+// untouched. Phase C2 (#737).
+func TestWriteKukettyDoc_RenderGate_OmitsDoneCreateStagesOnRestart(t *testing.T) {
+	r := newTestRunner(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kuketty-metadata.json")
+
+	doneStage := intmodel.TtyStage{Script: "npm ci", RunOn: extmodel.RunOnCreate}
+	startStage := intmodel.TtyStage{Script: "echo welcome", RunOn: extmodel.RunOnStart}
+	freshStage := intmodel.TtyStage{Script: "db-seed", RunOn: extmodel.RunOnCreate}
+	doneHash := stageContentHash(toV1beta1Stage(doneStage))
+
+	spec := intmodel.ContainerSpec{
+		ID:         "c1",
+		Attachable: true,
+		Tty: &intmodel.ContainerTty{
+			OnInit: []intmodel.TtyStage{doneStage, startStage, freshStage},
+		},
+	}
+	priorStages := []intmodel.StageStatus{
+		{Index: 0, State: setupstatus.StageDone, Hash: doneHash},
+		// freshStage at Index 2 has no prior record — must render unchanged.
+	}
+
+	if err := r.writeKukettyDoc(path, spec, 0, []string{"/bin/sh"}, priorStages); err != nil {
+		t.Fatalf("writeKukettyDoc: %v", err)
+	}
+	doc := readDoc(t, path)
+	if doc.Spec.Tty == nil {
+		t.Fatalf("Spec.Tty is nil")
+	}
+	if len(doc.Spec.Tty.OnInit) != 3 {
+		t.Fatalf("len(Spec.Tty.OnInit) = %d, want 3 (slice length must be preserved so kuketty's Stage.Index aligns with spec position)", len(doc.Spec.Tty.OnInit))
+	}
+	// Gated create stage: Script cleared, RunOn preserved so kuketty's
+	// createStages still picks it up at the correct Index. The on-disk
+	// evidence the gate fired is the empty Script alongside an unchanged
+	// RunOn.
+	if doc.Spec.Tty.OnInit[0].Script != "" {
+		t.Errorf("OnInit[0].Script = %q, want empty (gate must clear done create stage's Script)", doc.Spec.Tty.OnInit[0].Script)
+	}
+	if doc.Spec.Tty.OnInit[0].RunOn != extmodel.RunOnCreate {
+		t.Errorf("OnInit[0].RunOn = %q, want %q (gate must not touch RunOn — preserving createStages selection)", doc.Spec.Tty.OnInit[0].RunOn, extmodel.RunOnCreate)
+	}
+	// Non-create stages are never gated.
+	if doc.Spec.Tty.OnInit[1].Script != startStage.Script {
+		t.Errorf("OnInit[1].Script = %q, want %q (runOn: start must not be touched)", doc.Spec.Tty.OnInit[1].Script, startStage.Script)
+	}
+	if doc.Spec.Tty.OnInit[1].RunOn != extmodel.RunOnStart {
+		t.Errorf("OnInit[1].RunOn = %q, want %q", doc.Spec.Tty.OnInit[1].RunOn, extmodel.RunOnStart)
+	}
+	// Create stage with no prior done record: unchanged.
+	if doc.Spec.Tty.OnInit[2].Script != freshStage.Script {
+		t.Errorf("OnInit[2].Script = %q, want %q (fresh create stage with no prior done must render unchanged)", doc.Spec.Tty.OnInit[2].Script, freshStage.Script)
+	}
+}
+
+// TestWriteKukettyDoc_RenderGate_EditedStageReRuns locks AC #2: an edited
+// runOn: create stage produces a new content hash that no longer matches the
+// prior done record, so the gate does not fire and the stage's Script is
+// rendered verbatim — kuketty's pre-Serve executor re-runs it. Phase C2
+// (#737).
+func TestWriteKukettyDoc_RenderGate_EditedStageReRuns(t *testing.T) {
+	r := newTestRunner(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kuketty-metadata.json")
+
+	priorStage := intmodel.TtyStage{Script: "npm ci", RunOn: extmodel.RunOnCreate}
+	editedStage := intmodel.TtyStage{Script: "npm ci --omit=dev", RunOn: extmodel.RunOnCreate}
+	priorHash := stageContentHash(toV1beta1Stage(priorStage))
+	editedHash := stageContentHash(toV1beta1Stage(editedStage))
+	if priorHash == editedHash {
+		t.Fatalf("test premise violated: edited stage hashes identically to prior")
+	}
+
+	spec := intmodel.ContainerSpec{
+		ID:         "c1",
+		Attachable: true,
+		Tty: &intmodel.ContainerTty{
+			OnInit: []intmodel.TtyStage{editedStage},
+		},
+	}
+	priorStages := []intmodel.StageStatus{
+		{Index: 0, State: setupstatus.StageDone, Hash: priorHash},
+	}
+
+	if err := r.writeKukettyDoc(path, spec, 0, []string{"/bin/sh"}, priorStages); err != nil {
+		t.Fatalf("writeKukettyDoc: %v", err)
+	}
+	doc := readDoc(t, path)
+	if doc.Spec.Tty == nil || len(doc.Spec.Tty.OnInit) != 1 {
+		t.Fatalf("Spec.Tty.OnInit = %+v, want single-entry", doc.Spec.Tty)
+	}
+	if doc.Spec.Tty.OnInit[0].Script != editedStage.Script {
+		t.Errorf("OnInit[0].Script = %q, want %q (edited hash must not match prior done — gate must not fire)",
+			doc.Spec.Tty.OnInit[0].Script, editedStage.Script)
+	}
+}
+
+// TestWriteKukettyDoc_RenderGate_ReconcileRollback locks AC #3 (#625 phase
+// 4.3 interaction): when reconcile drives a container back to a prior spec
+// version, the done-set's hashes either still match (gate fires — skip) or
+// no longer match (gate does not fire — re-run). The done-set is keyed on
+// content Hash, not OnInit position, so a rollback that re-orders or
+// reintroduces a stage with the same content still hits the gate at its new
+// position.
+//
+// Scenario: container originally had OnInit = [A_create]. Operator added a
+// new pre-step B_create at position 0 (OnInit = [B_create, A_create]), let
+// it run, then reconcile rolled the spec back to [A_create]. A's hash is in
+// the done-set; the rolled-back spec must render A's Script cleared at its
+// new position 0.
+func TestWriteKukettyDoc_RenderGate_ReconcileRollback(t *testing.T) {
+	r := newTestRunner(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kuketty-metadata.json")
+
+	stageA := intmodel.TtyStage{Script: "setup-env", RunOn: extmodel.RunOnCreate}
+	stageB := intmodel.TtyStage{Script: "pre-step", RunOn: extmodel.RunOnCreate}
+	hashA := stageContentHash(toV1beta1Stage(stageA))
+	hashB := stageContentHash(toV1beta1Stage(stageB))
+
+	// Rolled-back spec: only stageA remains (at the now-shifted position 0).
+	spec := intmodel.ContainerSpec{
+		ID:         "c1",
+		Attachable: true,
+		Tty: &intmodel.ContainerTty{
+			OnInit: []intmodel.TtyStage{stageA},
+		},
+	}
+	// Pre-rollback persisted done set carried done records for both stages.
+	// On the next populate after rollback, mergeStageStatuses (anchored on
+	// spec.Tty.OnInit positions) would have dropped stageB's done record
+	// because the rolled-back spec has no stage at that Index. The render
+	// gate consumes the merged set, but exercising the gate's hash-keyed
+	// semantics directly here keeps this test focused on AC #3 rather than
+	// re-testing mergeStageStatuses: we pass the post-merge priorStages
+	// stageA carries forward at its new Index, and confirm the rendered
+	// Script is cleared.
+	priorStages := []intmodel.StageStatus{
+		{Index: 0, State: setupstatus.StageDone, Hash: hashA},
+	}
+
+	if err := r.writeKukettyDoc(path, spec, 0, []string{"/bin/sh"}, priorStages); err != nil {
+		t.Fatalf("writeKukettyDoc: %v", err)
+	}
+	doc := readDoc(t, path)
+	if doc.Spec.Tty == nil || len(doc.Spec.Tty.OnInit) != 1 {
+		t.Fatalf("Spec.Tty.OnInit = %+v, want single-entry (rolled-back spec)", doc.Spec.Tty)
+	}
+	if doc.Spec.Tty.OnInit[0].Script != "" {
+		t.Errorf("OnInit[0].Script = %q, want empty (stageA's hash %s is in done-set; gate must fire at its new position)",
+			doc.Spec.Tty.OnInit[0].Script, hashA)
+	}
+
+	// Second sub-scenario: a rolled-back spec whose stages no longer have
+	// matching hashes in the prior done-set (e.g., reconcile rolled forward
+	// instead and introduced a fresh stage) must render every create stage
+	// verbatim. The hash for stageB is in the prior done-set but stageB
+	// itself is not in the rolled-back OnInit — there is nothing to gate.
+	freshStage := intmodel.TtyStage{Script: "fresh-step", RunOn: extmodel.RunOnCreate}
+	specFresh := intmodel.ContainerSpec{
+		ID:         "c1",
+		Attachable: true,
+		Tty: &intmodel.ContainerTty{
+			OnInit: []intmodel.TtyStage{freshStage},
+		},
+	}
+	priorFresh := []intmodel.StageStatus{
+		// hashB belongs to stageB which no longer exists in spec.
+		{Index: 0, State: setupstatus.StageDone, Hash: hashB},
+	}
+	pathFresh := filepath.Join(dir, "fresh.json")
+	if err := r.writeKukettyDoc(pathFresh, specFresh, 0, []string{"/bin/sh"}, priorFresh); err != nil {
+		t.Fatalf("writeKukettyDoc: %v", err)
+	}
+	docFresh := readDoc(t, pathFresh)
+	if docFresh.Spec.Tty == nil || len(docFresh.Spec.Tty.OnInit) != 1 {
+		t.Fatalf("fresh: Spec.Tty.OnInit = %+v, want single-entry", docFresh.Spec.Tty)
+	}
+	if docFresh.Spec.Tty.OnInit[0].Script != freshStage.Script {
+		t.Errorf("fresh: OnInit[0].Script = %q, want %q (no hash overlap with done-set — gate must not fire)",
+			docFresh.Spec.Tty.OnInit[0].Script, freshStage.Script)
+	}
+}
+
+// TestWriteKukettyDoc_RenderGate_IgnoresFailedAndMissingHash guards two
+// edges of the done-set derivation: a State == "failed" record must not gate
+// (a failed stage gets a fresh chance on restart per phase B's exit-before-
+// Serve contract), and a record with an empty Hash must not gate (the
+// run-once key is the content hash; a missing key is unparseable). The
+// merge upstream (mergeStageStatuses) already enforces these invariants on
+// the persisted snapshot, but the gate itself must be defensive: a future
+// caller that bypasses the merge (e.g., a test fixture, or a #625 reconcile
+// path that builds the done-set differently) cannot accidentally gate on
+// a failed or hash-less record.
+func TestWriteKukettyDoc_RenderGate_IgnoresFailedAndMissingHash(t *testing.T) {
+	r := newTestRunner(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kuketty-metadata.json")
+
+	stage := intmodel.TtyStage{Script: "boot-it", RunOn: extmodel.RunOnCreate}
+	hash := stageContentHash(toV1beta1Stage(stage))
+
+	spec := intmodel.ContainerSpec{
+		ID:         "c1",
+		Attachable: true,
+		Tty: &intmodel.ContainerTty{
+			OnInit: []intmodel.TtyStage{stage},
+		},
+	}
+	// Two records that look like they cover Index 0 but neither qualifies
+	// to gate: failed (not done) and done-without-hash (key-less).
+	priorStages := []intmodel.StageStatus{
+		{Index: 0, State: setupstatus.StageFailed, Error: "boom", Hash: hash},
+		{Index: 0, State: setupstatus.StageDone}, // Hash empty
+	}
+
+	if err := r.writeKukettyDoc(path, spec, 0, []string{"/bin/sh"}, priorStages); err != nil {
+		t.Fatalf("writeKukettyDoc: %v", err)
+	}
+	doc := readDoc(t, path)
+	if doc.Spec.Tty.OnInit[0].Script != stage.Script {
+		t.Errorf("OnInit[0].Script = %q, want %q (failed/key-less records must never gate)",
+			doc.Spec.Tty.OnInit[0].Script, stage.Script)
 	}
 }
 
