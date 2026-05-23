@@ -48,99 +48,100 @@ import (
 // MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
-// NewRunCmd builds the `kuke run` cobra command. `-f` reads a single-cell
-// YAML doc; `-p` reads a per-user CellProfile and materializes the same
-// CellDoc shape. Exactly one of the two is required. By default, after the
-// cell starts the CLI drops the operator into the cell's attachable terminal;
-// `-d/--detach` opts out of the post-start attach.
+// NewRunCmd builds the `kuke run` cobra command. The optional positional arg
+// names a daemon-stored CellConfig; `-f` reads a single-cell YAML doc; `-p`
+// reads a per-user CellProfile; `-b` names a daemon-stored CellBlueprint.
+// Exactly one of the four is required. By default, after the cell starts the
+// CLI drops the operator into the cell's attachable terminal; `-d/--detach`
+// opts out of the post-start attach.
 func NewRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "run (-f <file> | -p <profile> | -b <blueprint> | -c <config>)",
-		Short: "Create and start a single cell from a YAML file, a profile, a daemon-stored blueprint, or a daemon-stored config",
-		Long: "Create and start a single cell from a YAML file or stdin (-f), " +
-			"from a per-user profile under $HOME/.kuke/profiles.d/<name>.yaml (-p), " +
-			"from a daemon-stored CellBlueprint (-b), or from a daemon-stored " +
-			"CellConfig (-c), resolved from the scope named by --realm/--space/--stack. " +
-			"-b substitutes scalar --param values and materializes a fresh " +
-			"<prefix>-<6hex> cell every invocation (always fresh). -c walks the " +
-			"identity state machine of a daemon-stored CellConfig: at most one live " +
-			"cell per Config, with a deterministic name (the Config's metadata.name), " +
-			"materialising from the referenced Blueprint with the Config's scalar " +
-			"values plus repo / secret slot fills the first time and attaching to the " +
-			"existing cell on subsequent runs (idempotent). When the live cell's spec " +
-			"differs from the materialisation of the current Config + Blueprint, -c " +
-			"refuses to attach and points the operator at `kuke apply -c <config>` to " +
-			"reconcile (stops, updates, starts). -b with --name applies the same " +
-			"discipline against the pinned cell name, pointing at " +
-			"`kuke apply -b <bp> --name <cell>`. -c -g/--generate-name materializes " +
-			"a fresh <config-name>-<6hex> cell on every invocation instead — opt-in " +
-			"fire-and-forget sandboxes from a Config, preserving the kukeon.io/config " +
-			"lineage label. -f is create-or-attach by metadata.name: a missing cell " +
-			"is created and attached; a Ready cell is attached as a no-op; a Stopped " +
-			"cell is started then attached; a divergent on-disk spec is refused " +
-			"(use `kuke apply -f` to update); a cell in an error or partial state " +
-			"is refused with a `kuke delete cell <name>` pointer. To re-attach to an " +
-			"existing cell use `kuke attach <cell>`.",
-		Args:          cobra.NoArgs,
-		SilenceUsage:  true,
-		SilenceErrors: false,
-		RunE:          runRun,
+		Use:   "run [<config> | -f <file> | -p <profile> | -b <blueprint>]",
+		Short: "Create and start a single cell from a daemon-stored CellConfig (positional), a YAML file, a profile, or a daemon-stored blueprint",
+		Long: "Create and start a single cell from a daemon-stored CellConfig " +
+			"(positional `<config>` name), from a YAML file or stdin (-f), from a " +
+			"per-user profile under $HOME/.kuke/profiles.d/<name>.yaml (-p), or from " +
+			"a daemon-stored CellBlueprint (-b), resolved from the scope named by " +
+			"--realm/--space/--stack. The positional `<config>` is the highest-frequency " +
+			"path (daily dev-cell spawn-and-attach); the other sources stay flag-driven " +
+			"so the positional case is unambiguous. -b substitutes scalar --param values " +
+			"and materializes a fresh <prefix>-<6hex> cell every invocation (always " +
+			"fresh). The positional config path walks the identity state machine of " +
+			"the named CellConfig: at most one live cell per Config, with a " +
+			"deterministic name (the Config's metadata.name), materialising from the " +
+			"referenced Blueprint with the Config's scalar values plus repo / secret " +
+			"slot fills the first time and attaching to the existing cell on " +
+			"subsequent runs (idempotent). When the live cell's spec differs from the " +
+			"materialisation of the current Config + Blueprint, the positional config " +
+			"path refuses to attach and points the operator at " +
+			"`kuke apply -c <config>` to reconcile (stops, updates, starts). -b with " +
+			"--name applies the same discipline against the pinned cell name, pointing " +
+			"at `kuke apply -b <bp> --name <cell>`. -g/--generate-name on the " +
+			"positional config path materializes a fresh <config-name>-<6hex> cell on " +
+			"every invocation instead — opt-in fire-and-forget sandboxes from a " +
+			"Config, preserving the kukeon.io/config lineage label. -f is " +
+			"create-or-attach by metadata.name: a missing cell is created and " +
+			"attached; a Ready cell is attached as a no-op; a Stopped cell is started " +
+			"then attached; a divergent on-disk spec is refused (use `kuke apply -f` " +
+			"to update); a cell in an error or partial state is refused with a " +
+			"`kuke delete cell <name>` pointer. To re-attach to an existing cell use " +
+			"`kuke attach <cell>`.",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: config.CompleteConfigNames,
+		SilenceUsage:      true,
+		SilenceErrors:     false,
+		RunE:              runRun,
 	}
 
-	cmd.Flags().StringP("file", "f", "", "File to read YAML from (use - for stdin); mutually exclusive with -p")
+	cmd.Flags().
+		StringP("file", "f", "", "File to read YAML from (use - for stdin); mutually exclusive with the <config> positional and -p/-b")
 	_ = viper.BindPFlag(config.KUKE_RUN_FILE.ViperKey, cmd.Flags().Lookup("file"))
 
 	cmd.Flags().StringP("profile", "p", "",
-		"Cell profile name to load from $HOME/.kuke/profiles.d (or $KUKE_PROFILES_DIR); mutually exclusive with -f/-b/-c. "+
-			"Deprecated: apply a kind: CellBlueprint and use -b/-c instead.")
+		"Cell profile name to load from $HOME/.kuke/profiles.d (or $KUKE_PROFILES_DIR); mutually exclusive with -f/-b and the <config> positional. "+
+			"Deprecated: apply a kind: CellBlueprint and use -b (or pass the <config> positional for a CellConfig) instead.")
 	_ = viper.BindPFlag(config.KUKE_RUN_PROFILE.ViperKey, cmd.Flags().Lookup("profile"))
 
 	cmd.Flags().StringP("blueprint", "b", "",
 		"Daemon-stored CellBlueprint name to run, resolved from the scope named by "+
-			"--realm/--space/--stack; mutually exclusive with -f/-p/-c. Substitutes scalar --param "+
+			"--realm/--space/--stack; mutually exclusive with -f/-p and the <config> positional. Substitutes scalar --param "+
 			"values and materializes a fresh <prefix>-<6hex> cell.")
 	_ = viper.BindPFlag(config.KUKE_RUN_BLUEPRINT.ViperKey, cmd.Flags().Lookup("blueprint"))
-
-	cmd.Flags().StringP("config", "c", "",
-		"Daemon-stored CellConfig name to run, resolved from the scope named by "+
-			"--realm/--space/--stack; mutually exclusive with -f/-p/-b. The Config "+
-			"carries its own scalar values and structural slot fills (repos, secrets), "+
-			"so --param/--param-file/--name are rejected with -c. Idempotent: walks "+
-			"the identity state machine and attaches to the at-most-one live cell the "+
-			"Config owns by stable name. Pass -g/--generate-name to opt out of the "+
-			"stable name and materialize a fresh <config-name>-<6hex> cell per invocation.")
-	_ = viper.BindPFlag(config.KUKE_RUN_CONFIG.ViperKey, cmd.Flags().Lookup("config"))
 
 	cmd.Flags().String("name", "",
 		"Override the materialized cell name (default: <metadata.name>-<6hex>). "+
 			"Valid with -p/-b; rejected with -f, where metadata.name is the cell name "+
-			"verbatim, and with -c, whose name is the Config's deterministic stable name "+
-			"(use -g/--generate-name on -c to opt into a generated <config-name>-<6hex>).")
+			"verbatim, and with the <config> positional, whose name is the Config's deterministic stable name "+
+			"(use -g/--generate-name with the <config> positional to opt into a generated <config-name>-<6hex>).")
 	_ = viper.BindPFlag(config.KUKE_RUN_NAME.ViperKey, cmd.Flags().Lookup("name"))
 
 	cmd.Flags().BoolP("generate-name", "g", false,
-		"Materialize a fresh `<config-name>-<6hex>` cell on every -c invocation instead "+
-			"of the Config's deterministic stable name. Each invocation produces a distinct "+
+		"Materialize a fresh `<config-name>-<6hex>` cell on every invocation of the <config> "+
+			"positional instead of the Config's deterministic stable name. Each invocation produces a distinct "+
 			"cell; the kukeon.io/config=<name> lineage label is preserved (operator can list "+
 			"all spawns: `kuke get cells -l kukeon.io/config=<name>`). Mutually exclusive "+
-			"with --name. Only valid with -c — rejected with -f (where metadata.name is the "+
+			"with --name. Only valid with the <config> positional — rejected with -f (where metadata.name is the "+
 			"cell name verbatim) and redundant for -p/-b (which already generate a fresh name).")
 	_ = viper.BindPFlag(config.KUKE_RUN_GENERATE_NAME.ViperKey, cmd.Flags().Lookup("generate-name"))
 
 	cmd.Flags().StringArray("param", nil,
 		"Scalar parameter override as KEY=VALUE; repeatable. Valid with -p/-b. "+
 			"Each KEY must be declared in spec.parameters[]. Wins over the parameter's "+
-			"default and over --param-file when both set the same key. Rejected with -c: "+
-			"a CellConfig carries its own spec.values, edit the Config instead.")
+			"default and over --param-file when both set the same key. Rejected with the "+
+			"<config> positional: a CellConfig carries its own spec.values, edit the Config instead.")
 
 	cmd.Flags().String("param-file", "",
 		"File of KEY=VALUE lines whose values seed scalar parameters; one per line, "+
 			"`#` starts a comment. Same declaration rules as --param. CLI --param wins on "+
-			"duplicate keys. Rejected with -c (same reason as --param).")
+			"duplicate keys. Rejected with the <config> positional (same reason as --param).")
 	_ = viper.BindPFlag(config.KUKE_RUN_PARAM_FILE.ViperKey, cmd.Flags().Lookup("param-file"))
 
-	cmd.MarkFlagsMutuallyExclusive("file", "profile", "blueprint", "config")
-	cmd.MarkFlagsOneRequired("file", "profile", "blueprint", "config")
+	// `config` is now a positional (see Args / ValidArgsFunction above), so the
+	// cobra-side mutex/required-one machinery covers only the remaining flag
+	// sources; parseRunFlags hand-rolls the positional-vs-flag mutex and the
+	// "exactly one source required" check (cobra has no MarkFlagsOneRequired
+	// equivalent that spans flags + positionals).
+	cmd.MarkFlagsMutuallyExclusive("file", "profile", "blueprint")
 	cmd.MarkFlagsMutuallyExclusive("name", "generate-name")
 
 	cmd.Flags().StringP("output", "o", "", "Output format: json, yaml (default: human-readable)")
@@ -180,7 +181,8 @@ func NewRunCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
 	_ = cmd.RegisterFlagCompletionFunc("profile", config.CompleteProfileNames)
 	_ = cmd.RegisterFlagCompletionFunc("blueprint", config.CompleteBlueprintNames)
-	_ = cmd.RegisterFlagCompletionFunc("config", config.CompleteConfigNames)
+	// The positional <config> is wired via ValidArgsFunction on the cobra
+	// command above (where `-c` previously routed flag completion).
 
 	return cmd
 }
@@ -203,18 +205,56 @@ type runFlags struct {
 	paramFile     string
 }
 
-func parseRunFlags(cmd *cobra.Command, _ []string) (runFlags, error) {
+// validateSourceMutex enforces the "exactly one source" contract across the
+// four `kuke run` inputs after issue #813 moved CellConfig from `-c/--config`
+// to the positional `<config>` argument. Cobra's MarkFlagsMutuallyExclusive
+// / MarkFlagsOneRequired only span flags, so this check hand-rolls the
+// positional-vs-flag mutex and the at-least-one-source guard; the
+// flag-vs-flag mutex among `-f`/`-p`/`-b` stays cobra-side in NewRunCmd.
+// Pulling the branches out of parseRunFlags keeps gocyclo within its
+// budget for the larger validator.
+func validateSourceMutex(flags runFlags) error {
+	if flags.configName != "" {
+		switch {
+		case flags.file != "":
+			return errors.New(
+				"the <config> positional is mutually exclusive with -f/--file " +
+					"(pick one source: <config>, -f, -p, or -b)")
+		case flags.profileName != "":
+			return errors.New(
+				"the <config> positional is mutually exclusive with -p/--profile " +
+					"(pick one source: <config>, -f, -p, or -b)")
+		case flags.blueprintName != "":
+			return errors.New(
+				"the <config> positional is mutually exclusive with -b/--blueprint " +
+					"(pick one source: <config>, -f, -p, or -b)")
+		}
+	}
+	if flags.configName == "" && flags.file == "" && flags.profileName == "" && flags.blueprintName == "" {
+		return errors.New(
+			"at least one of <config> (positional), -f/--file, -p/--profile, or -b/--blueprint is required")
+	}
+	return nil
+}
+
+func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 	flags := runFlags{
 		file:          strings.TrimSpace(viper.GetString(config.KUKE_RUN_FILE.ViperKey)),
 		profileName:   strings.TrimSpace(viper.GetString(config.KUKE_RUN_PROFILE.ViperKey)),
 		blueprintName: strings.TrimSpace(viper.GetString(config.KUKE_RUN_BLUEPRINT.ViperKey)),
-		configName:    strings.TrimSpace(viper.GetString(config.KUKE_RUN_CONFIG.ViperKey)),
 		detach:        viper.GetBool(config.KUKE_RUN_DETACH.ViperKey),
 		containerFlag: strings.TrimSpace(viper.GetString(config.KUKE_RUN_CONTAINER.ViperKey)),
 		autoDelete:    viper.GetBool(config.KUKE_RUN_RM.ViperKey),
 		nameOverride:  strings.TrimSpace(viper.GetString(config.KUKE_RUN_NAME.ViperKey)),
 		generateName:  viper.GetBool(config.KUKE_RUN_GENERATE_NAME.ViperKey),
 		paramFile:     strings.TrimSpace(viper.GetString(config.KUKE_RUN_PARAM_FILE.ViperKey)),
+	}
+
+	if len(args) == 1 {
+		flags.configName = strings.TrimSpace(args[0])
+	}
+	if err := validateSourceMutex(flags); err != nil {
+		return runFlags{}, err
 	}
 
 	paramArgs, err := cmd.Flags().GetStringArray("param")
@@ -258,35 +298,36 @@ func parseRunFlags(cmd *cobra.Command, _ []string) (runFlags, error) {
 		}
 		if flags.generateName {
 			return runFlags{}, errors.New(
-				"--generate-name is only valid with -c/--config; -f uses metadata.name verbatim")
+				"--generate-name is only valid with the <config> positional; -f uses metadata.name verbatim")
 		}
 	}
-	// -g/--generate-name is a -c-only knob. With -p/-b the default already
+	// -g/--generate-name is a CellConfig-only knob (only the <config> positional
+	// reaches the daemon-stored CellConfig path). With -p/-b the default already
 	// generates a fresh <prefix>-<6hex> per invocation, so accepting -g there
 	// would silently no-op and seed the mental model that -g toggles a default
 	// that isn't actually flipped — reject so the operator notices.
 	if flags.generateName && flags.configName == "" && flags.file == "" {
 		return runFlags{}, errors.New(
-			"--generate-name is only valid with -c/--config; -p and -b already materialize a " +
+			"--generate-name is only valid with the <config> positional; -p and -b already materialize a " +
 				"fresh <prefix>-<6hex> cell per invocation")
 	}
 	if flags.configName != "" {
 		// A CellConfig carries its own scalar values and a deterministic
 		// stable name (cellconfig.StableName). The template knobs would
 		// either silently shadow the Config's values or break the
-		// idempotent-identity contract that the -c verb exists to provide,
-		// so reject them rather than silently apply.
+		// idempotent-identity contract the positional <config> path exists to
+		// provide, so reject them rather than silently apply.
 		if flags.nameOverride != "" {
 			return runFlags{}, errors.New(
-				"--name is not valid with -c/--config; the cell name is the Config's stable name")
+				"--name is not valid with the <config> positional; the cell name is the Config's stable name")
 		}
 		if len(flags.paramArgs) > 0 {
 			return runFlags{}, errors.New(
-				"--param is not valid with -c/--config; edit the Config's spec.values instead")
+				"--param is not valid with the <config> positional; edit the Config's spec.values instead")
 		}
 		if flags.paramFile != "" {
 			return runFlags{}, errors.New(
-				"--param-file is not valid with -c/--config; edit the Config's spec.values instead")
+				"--param-file is not valid with the <config> positional; edit the Config's spec.values instead")
 		}
 	}
 	return flags, nil
@@ -569,7 +610,7 @@ func loadCellDoc(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (v1
 	case flags.profileName != "":
 		fmt.Fprintln(cmd.ErrOrStderr(),
 			"kuke run: -p/--profile is deprecated and will be removed (#626); "+
-				"apply a kind: CellBlueprint and use `kuke run -b` (or `kuke run -c` for a CellConfig).")
+				"apply a kind: CellBlueprint and use `kuke run -b` (or `kuke run <config>` for a CellConfig).")
 		return loadFromProfile(flags)
 	default:
 		return loadFromFile(flags.file)
