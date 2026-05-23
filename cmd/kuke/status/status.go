@@ -204,12 +204,9 @@ func NewStatusCmd() *cobra.Command {
 }
 
 // errFailingChecks is the sentinel returned by RunE when the report carries
-// a FAIL — cobra's non-zero exit comes from the returned error. The error
-// is silenced via the manual rendering above (renderText / renderJSON
-// already wrote the structured report to stdout) by SilenceErrors at the
-// root level? No — we deliberately let cobra print the brief sentinel on
-// stderr so operators piping `kuke status` to a downstream tool still see
-// "failing checks" as the explicit failure marker.
+// a FAIL, producing cobra's non-zero exit. SilenceErrors on the command
+// suppresses cobra's "Error:" line on stderr — the structured report
+// already on stdout (text or JSON) is the operator-visible failure marker.
 var errFailingChecks = errors.New("kuke status: one or more checks reported FAIL")
 
 // buildRunCtx assembles the runCtx from viper + flags, or returns the
