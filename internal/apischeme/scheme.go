@@ -689,7 +689,58 @@ func validateContainerTty(spec ext.ContainerSpec) error {
 			return fmt.Errorf("container %q: onInit[%d]: %w", spec.ID, i, err)
 		}
 	}
+	if err := validateContainerCreateStagePersistence(spec); err != nil {
+		return err
+	}
 	return nil
+}
+
+// validateContainerCreateStagePersistence enforces that a container declaring
+// runOn: create stages has at least one persistent writable mount. Without one,
+// the side effects of create stages (npm ci, DB seed, bootstrap) evaporate when
+// the container's writable layer is dropped on the next recreate while
+// ContainerStatus.Stages still reports State == "done" — the run-once gate
+// (phase C2, #737) would then silently skip a stage whose effect no longer
+// exists. TtyStage has no per-stage target field, so the reasoning is
+// container-scoped: any runOn: create stage on a container with no persistent
+// writable mount is at risk. Issue #738.
+//
+// A mount is treated as a persistent writable target when it is a VolumeMount
+// whose Kind is anything other than tmpfs (so VolumeKindBind, including the
+// empty back-compat default, plus any future persistent kind like a future
+// pvc:) and is not declared ReadOnly. ReadOnlyRootFilesystem alone does not
+// affect the decision — the test is solely the presence of at least one
+// persistent writable VolumeMount. ContainerSpec.Tmpfs entries are explicitly
+// ephemeral and never count.
+func validateContainerCreateStagePersistence(spec ext.ContainerSpec) error {
+	if spec.Tty == nil {
+		return nil
+	}
+	hasCreate := false
+	for _, s := range spec.Tty.OnInit {
+		if s.RunOn == ext.RunOnCreate {
+			hasCreate = true
+			break
+		}
+	}
+	if !hasCreate {
+		return nil
+	}
+	for _, v := range spec.Volumes {
+		if v.Kind == ext.VolumeKindTmpfs {
+			continue
+		}
+		if v.ReadOnly {
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf(
+		"container %q: tty.onInit has runOn: %q stages but the container has no persistent writable mount; "+
+			"declare a volumes: entry of kind bind covering the stage's write target so its side effects "+
+			"survive container recreate, or move the work into a runOn: %q stage",
+		spec.ID, ext.RunOnCreate, ext.RunOnStart,
+	)
 }
 
 // validateTtyLogLevel accepts the empty string (the daemon defaults to
