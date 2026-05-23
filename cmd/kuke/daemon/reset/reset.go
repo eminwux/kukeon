@@ -88,6 +88,11 @@ func NewResetCmd() *cobra.Command {
 	)
 	_ = viper.BindPFlag(config.KUKE_DAEMON_RESET_PURGE_SYSTEM.ViperKey, cmd.Flags().Lookup("purge-system"))
 
+	// --server-configuration targets a specific kukeond instance, via the
+	// shared precedence chain (flag > KUKEOND_CONFIGURATION env > default
+	// file > hardcoded defaults). Issue #284.
+	kukshared.RegisterServerConfigurationFlag(cmd)
+
 	return cmd
 }
 
@@ -98,6 +103,10 @@ func runReset(cmd *cobra.Command, _ []string) error {
 	}
 
 	if err := kukshared.RequireRoot("kuke daemon reset"); err != nil {
+		return err
+	}
+
+	if _, _, err := kukshared.LoadServerConfigurationFromFlag(cmd); err != nil {
 		return err
 	}
 

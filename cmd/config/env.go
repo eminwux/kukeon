@@ -162,10 +162,6 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_INIT_KUKEOND_IMAGE = DefineKV("KUKE_INIT_KUKEOND_IMAGE", "kuke/init/kukeondImage")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_INIT_SERVER_CONFIGURATION = DefineKV(
-		"KUKE_INIT_SERVER_CONFIGURATION", "kuke/init/serverConfiguration", "/etc/kukeon/kukeond.yaml",
-	)
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_INIT_NO_WAIT = DefineKV("KUKE_INIT_NO_WAIT", "kuke/init/noWait", "false")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_INIT_FORCE_REGENERATE_CNI = DefineKV(

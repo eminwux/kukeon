@@ -169,7 +169,7 @@ e2e: test-e2e
 # unconditional because the e2e suite's daemon-bringing tests rely on the
 # per-test --run-path → socket derivation in either mode.
 #
-# `KUKE_INIT_SERVER_CONFIGURATION=/dev/null` short-circuits cross-test
+# `KUKEOND_CONFIGURATION=/dev/null` short-circuits cross-test
 # contamination via `/etc/kukeon/kukeond.yaml`: the first test's `kuke init`
 # brings up kukeond, which writes the auto-generated default YAML on first
 # start (internal/serverconfig.WriteDefault, O_EXCL — first writer wins). That
@@ -183,6 +183,9 @@ e2e: test-e2e
 # directory". Pointing init at `/dev/null` (serverconfig.Load handles the
 # zero-byte read as an absent-doc fall-through, returning a zero-value
 # document with no error) keeps the contamination out of the init read path.
+#
+# Issue #284 collapsed KUKE_INIT_SERVER_CONFIGURATION into KUKEOND_CONFIGURATION
+# — one env var, one source of truth, the same path the daemon honours.
 test-e2e: kuke kukeond kuketty
 	@echo "Building local kukeond image $(KUKEON_E2E_IMAGE_DOCKER_NAME) for e2e"
 	docker build --build-arg VERSION=v0.0.0-e2e -t $(KUKEON_E2E_IMAGE_DOCKER_NAME) .
@@ -194,7 +197,7 @@ test-e2e: kuke kukeond kuketty
 		E2E_BIN_DIR=$(CURDIR) \
 		KUKEON_E2E_IMAGE=$(KUKEON_E2E_IMAGE) \
 		KUKEON_E2E_IMAGE_DOCKER_NAME=$(KUKEON_E2E_IMAGE_DOCKER_NAME) \
-		KUKE_INIT_SERVER_CONFIGURATION=/dev/null \
+		KUKEOND_CONFIGURATION=/dev/null \
 		env -u KUKEOND_SOCKET go test -v ./e2e
 
 tag:

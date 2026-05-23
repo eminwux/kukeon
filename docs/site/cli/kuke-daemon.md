@@ -21,6 +21,17 @@ These commands act on the `kukeond` cell provisioned by `kuke init` (`kuke-syste
 
 All subcommands are idempotent: they succeed with a clear message when the daemon is already in the requested state.
 
+## Targeting a specific instance
+
+Every `kuke daemon …` subcommand accepts `--server-configuration <path>` (default `/etc/kukeon/kukeond.yaml`) to point at a non-default kukeond instance. The precedence chain matches `kuke init` and `kuke uninstall`:
+
+1. `--server-configuration <path>` (flag)
+2. `KUKEOND_CONFIGURATION` environment variable
+3. `/etc/kukeon/kukeond.yaml` (default file)
+4. Hardcoded defaults (absent file)
+
+The same chain `kukeond` itself uses, so a `--server-configuration ./kukeond-dev.yaml` on any admin command points at the same document the daemon honors. Running `sudo kuke daemon stop --server-configuration ./kukeond-dev.yaml` signals the dev instance only; the prod kukeond (under the default `/etc/kukeon/kukeond.yaml`) is untouched.
+
 ## kuke daemon start
 
 Bring up the existing `kukeond` cell provisioned by `kuke init`. Returns success when the daemon is already running. Errors when the host has not been initialized — run `kuke init` first.
