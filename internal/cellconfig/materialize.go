@@ -17,6 +17,8 @@
 package cellconfig
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -24,6 +26,12 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
+
+// nameSuffixBytes is the entropy width for the `<config-name>-<6hex>` suffix
+// used by `kuke run -c --generate-name` (#754) — 3 bytes → 6 lowercase hex
+// chars, matching cellblueprint's `<prefix>-<6hex>` shape so the generated
+// `-c` cells are visually indistinguishable from `-b`/`-p` generated cells.
+const nameSuffixBytes = 3
 
 // Materialize converts a CellConfig + its referenced CellBlueprint into a
 // runtime CellDoc (issue #625). It is the config analog of
@@ -45,6 +53,20 @@ import (
 // Config in one realm may instantiate a Blueprint in another (cross-realm
 // references are explicitly supported by CellConfigBlueprintRef).
 func Materialize(cfg v1beta1.CellConfigDoc, bp v1beta1.CellBlueprintDoc) (v1beta1.CellDoc, error) {
+	return MaterializeWithName(cfg, bp, "")
+}
+
+// MaterializeWithName is the Materialize variant that lets the caller pin a
+// non-stable cell name — the substrate for `kuke run -c --generate-name` (#754).
+// When nameOverride is empty the cell uses StableName(cfg.Metadata.Name) and the
+// idempotent-attach identity contract from #742 holds; when non-empty the name
+// is used verbatim and the caller owns identity (the kuke run -c -g path supplies
+// `<cfg.Metadata.Name>-<6hex>` to materialize a fresh ephemeral cell, leaving the
+// kukeon.io/config back-reference label intact so `kuke get cells -l
+// kukeon.io/config=<name>` still enumerates every spawn).
+func MaterializeWithName(
+	cfg v1beta1.CellConfigDoc, bp v1beta1.CellBlueprintDoc, nameOverride string,
+) (v1beta1.CellDoc, error) {
 	if err := ValidateSlotFill(cfg, bp); err != nil {
 		return v1beta1.CellDoc{}, err
 	}
@@ -66,7 +88,10 @@ func Materialize(cfg v1beta1.CellConfigDoc, bp v1beta1.CellBlueprintDoc) (v1beta
 		containers = append(containers, cs)
 	}
 
-	cellName := StableName(cfg.Metadata.Name)
+	cellName := strings.TrimSpace(nameOverride)
+	if cellName == "" {
+		cellName = StableName(cfg.Metadata.Name)
+	}
 	return v1beta1.CellDoc{
 		APIVersion: v1beta1.APIVersionV1Beta1,
 		Kind:       v1beta1.KindCell,
@@ -249,4 +274,17 @@ func cloneCellTty(in *v1beta1.CellTty) *v1beta1.CellTty {
 	}
 	out := *in
 	return &out
+}
+
+// GenerateName returns `<configName>-<6hex>`, the cell-name shape `kuke run
+// -c --generate-name` produces (#754). The 6-hex suffix matches cellblueprint's
+// `<prefix>-<6hex>` shape used by `-b`/`-p`, so generated `-c` cells are
+// visually indistinguishable from generated-cell-per-invocation spawns of the
+// other run verbs while preserving the kukeon.io/config back-reference label.
+func GenerateName(configName string) (string, error) {
+	b := make([]byte, nameSuffixBytes)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("config %q: generate cell name suffix: %w", configName, err)
+	}
+	return strings.TrimSpace(configName) + "-" + hex.EncodeToString(b), nil
 }
