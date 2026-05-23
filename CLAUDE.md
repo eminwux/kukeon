@@ -60,6 +60,27 @@ Both `kuke get realms` and `kuke get realms --no-daemon` must produce that outpu
 
 **If your change touches anything the daemon reads, this check must be in the PR's test plan.** Reviewer agent will flag PRs that miss it.
 
+### Post-init: `kuke status`
+
+`kuke status` is the canonical equivalent of the manual diff ritual above —
+one command that runs daemon liveness (with round-trip ms and version),
+host pre-flight (containerd, cgroup-v2, CNI plugins under `/opt/cni/bin/`),
+state consistency (orphan run-dir entries, residual containerd namespaces),
+and the same daemon-parity walk above across **every** resource kind
+(realm, space, stack, cell, container, secret, blueprint, config), not just
+realms.
+
+Exit code is 0 when every check is OK / WARN, non-zero when any line is
+FAIL. `--json` is the machine-readable form for CI integration; `--verbose`
+surfaces the remediation hint on OK rows too.
+
+The two-line `kuke get realms` diff above stays the minimal pinned
+regression guard the `make dev-init` tail prints; `kuke status` is the
+broader smoke an operator runs after `kuke init` to surface anything the
+two-realm tail won't catch (cgroup delegation gone, CNI binaries gone,
+divergent secrets/blueprints/configs, residual containerd namespaces from
+a half-cleaned `kuke uninstall`).
+
 ### Manual phases (fallback)
 
 To run individual phases by hand — e.g. while debugging a single phase — invoke them in order:
