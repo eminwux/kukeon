@@ -3148,7 +3148,7 @@
 <li><code>-f &lt;file&gt;</code> — a single-cell YAML doc (or <code>-</code> for stdin).</li>
 <li><code>-p &lt;profile&gt;</code> — a per-user profile under <code>$HOME/.kuke/profiles.d/&lt;name&gt;.yaml</code>. <strong>Deprecated; will be removed in #626</strong> — author new templates as <code>kind: CellBlueprint</code> and run them via <code>-b</code>/<code>-c</code> instead.</li>
 <li><code>-b &lt;blueprint&gt;</code> — a daemon-stored CellBlueprint, resolved from the scope named by <code>--realm</code>/<code>--space</code>/<code>--stack</code>. Substitutes scalar <code>--param</code> values and materializes a fresh <code>&lt;prefix&gt;-&lt;6hex&gt;</code> cell every invocation.</li>
-<li><code>-c &lt;config&gt;</code> — a daemon-stored CellConfig, resolved from the same scope. Stable-named and idempotent: walks the identity state machine and attaches to the at-most-one live cell the Config owns.</li>
+<li><code>-c &lt;config&gt;</code> — a daemon-stored CellConfig, resolved from the same scope. Stable-named and idempotent: walks the identity state machine and attaches to the at-most-one live cell the Config owns. Pass <code>-g</code>/<code>--generate-name</code> to opt into a generated <code>&lt;config-name&gt;-&lt;6hex&gt;</code> cell per invocation instead (fire-and-forget sandboxes from one Config; lineage label preserved).</li>
 </ul>
 <p>Conceptually <code>kuke apply -f</code> (single-cell) plus <code>kuke start cell</code>, but refuses to update a divergent on-disk spec.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke run (-f &lt;file&gt; | -p &lt;profile&gt; | -b &lt;blueprint&gt; | -c &lt;config&gt;) [flags]
@@ -3187,7 +3187,12 @@
 <tr>
 <td><code>--name</code></td>
 <td><code>&lt;metadata.name&gt;-&lt;6hex&gt;</code></td>
-<td>Override the materialized cell name. Valid with <code>-p</code>/<code>-b</code>; rejected with <code>-f</code> (where <code>metadata.name</code> is the cell name verbatim) and with <code>-c</code> (where the cell name is the Config's stable name)</td>
+<td>Override the materialized cell name. Valid with <code>-p</code>/<code>-b</code>; rejected with <code>-f</code> (where <code>metadata.name</code> is the cell name verbatim) and with <code>-c</code> (where the cell name is the Config's stable name — pass <code>-g</code> to opt into <code>&lt;config-name&gt;-&lt;6hex&gt;</code> instead)</td>
+</tr>
+<tr>
+<td><code>--generate-name</code>, <code>-g</code></td>
+<td><code>false</code></td>
+<td>With <code>-c</code> only: materialize a fresh <code>&lt;config-name&gt;-&lt;6hex&gt;</code> cell per invocation, preserving the <code>kukeon.io/config=&lt;name&gt;</code> lineage label. Mutually exclusive with <code>--name</code>; rejected with <code>-f</code>/<code>-p</code>/<code>-b</code></td>
 </tr>
 <tr>
 <td><code>--param</code></td>
@@ -3264,6 +3269,7 @@
 <ul>
 <li><strong><code>-b &lt;blueprint&gt;</code> — fresh cell per invocation.</strong> A CellBlueprint is a template with declared <code>spec.parameters[]</code>. Each <code>kuke run -b</code> materializes a new cell with a <code>&lt;prefix&gt;-&lt;6hex&gt;</code> name; scalar <code>--param KEY=VALUE</code> (or <code>--param-file</code>) overrides the Blueprint's defaults. Behaves like <code>-p</code> did, but the template lives in the daemon's store rather than <code>$HOME/.kuke/profiles.d</code>.</li>
 <li><strong><code>-c &lt;config&gt;</code> — stable-named, idempotent.</strong> A CellConfig binds a CellBlueprint reference to concrete scalar values plus structural slot fills (repo bindings, secret references). The cell name is the Config's <code>metadata.name</code>. <code>--param</code>/<code>--param-file</code>/<code>--name</code> are rejected with <code>-c</code> because the Config already owns its values — edit the Config instead.</li>
+<li><strong><code>-c &lt;config&gt; -g</code> — generated-name spawns from one Config.</strong> Pass <code>-g</code>/<code>--generate-name</code> to opt out of the stable-name identity and materialize a fresh <code>&lt;config-name&gt;-&lt;6hex&gt;</code> cell per invocation. Each invocation produces a distinct cell; the <code>kukeon.io/config=&lt;name&gt;</code> lineage label is preserved so <code>kuke get cells -l kukeon.io/config=&lt;name&gt;</code> enumerates every spawn. Compatible with <code>--rm</code> (ephemeral generated sandboxes from one Config); mutually exclusive with <code>--name</code>.</li>
 </ul>
 <h3 id="identity-state-machine-for-c">Identity state machine for <code>-c</code><a class="headerlink" href="#identity-state-machine-for-c" title="Permanent link">&para;</a></h3>
 <p>Each <code>kuke run -c &lt;config&gt;</code> walks the Config's identity state and converges:</p>
@@ -3293,7 +3299,7 @@
 </tr>
 </tbody>
 </table>
-<p>If the live cell's spec differs from the materialisation of the <em>current</em> Config + Blueprint (someone edited the Config or the underlying Blueprint after the cell was last materialised), <code>-c</code> emits a divergence warning to stderr and attaches to the live state — it does <strong>not</strong> reconcile the cell to the new spec. Use <code>kuke delete cell &lt;name&gt;</code> followed by <code>kuke run -c &lt;name&gt;</code> to pick up the new spec.</p>
+<p>If the live cell's spec differs from the materialisation of the <em>current</em> Config + Blueprint (someone edited the Config or the underlying Blueprint after the cell was last materialised), <code>-c</code> refuses to attach with a <code>kuke apply -c &lt;config&gt;</code> pointer — <code>run</code> stays a pure read/materialize verb, and destructive updates route through <a href="../kuke-apply/"><code>kuke apply -c</code></a> which stops, updates, and starts the cell. <code>-b --name &lt;cell&gt;</code> against a divergent live cell applies the same discipline with a <code>kuke apply -b &lt;bp&gt; --name &lt;cell&gt;</code> pointer. The generated-name <code>kuke run -b &lt;bp&gt;</code> (no <code>--name</code>) materialises a fresh <code>&lt;prefix&gt;-&lt;6hex&gt;</code> cell on every invocation, so no divergent-spec check applies. The generated-name <code>kuke run -c &lt;config&gt; -g</code> path is similarly fresh-per-invocation, so it also has no divergent-spec check (and the lineage label still ties spawns back to the Config).</p>
 <p>See <a href="../../manifests/blueprint/"><code>kind: CellBlueprint</code></a> and <a href="../../manifests/config/"><code>kind: CellConfig</code></a> for the full manifest reference.</p>
 <h2 id="cleanup-with-rm">Cleanup with <code>--rm</code><a class="headerlink" href="#cleanup-with-rm" title="Permanent link">&para;</a></h2>
 <p><code>--rm</code> best-effort deletes the cell after it's no longer needed (any return code). <code>kuke run</code> is daemon-only after #566 — <code>KUKEON_NO_DAEMON=true</code> and <code>--run-path</code> promotion are inert for workload verbs and no longer reach an in-process branch for <code>run</code>, so <code>--rm</code> is always available. Cleanup runs from <code>kukeond</code>'s reconcile loop, so latency is bounded by the reconcile interval rather than firing the instant the trigger fires.</p>
@@ -3330,6 +3336,9 @@
 <a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>
 <a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="c1"># Same Config, but detach instead of attaching after start</span>
 <a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>-c<span class="w"> </span>kukeon-dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>-d
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="c1"># Generated-name spawn from the same Config — fire-and-forget sandbox</span>
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>-c<span class="w"> </span>kukeon-dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>-g<span class="w"> </span>--rm
 </code></pre></div>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
@@ -3359,7 +3368,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 23, 2026 10:55:41 UTC">May 23, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 23, 2026 16:35:20 UTC">May 23, 2026</span>
   </span>
 
     
