@@ -1557,7 +1557,12 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				cell.Spec.Containers[i] = containerSpec
 			}
 
-			attachOpts, attachErr := r.attachableBuildOpts(namespace, containerSpec, creds)
+			// priorStages threads the controller-side ContainerStatus.Stages
+			// snapshot into the renderer so the phase-C2 (#737) gate can omit
+			// already-done runOn: create stages from the rendered ContainerDoc
+			// on this boot.
+			priorStages := priorStagesForContainer(*cell, containerSpec.ID)
+			attachOpts, attachErr := r.attachableBuildOpts(namespace, containerSpec, creds, priorStages)
 			if attachErr != nil {
 				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
 			}
@@ -2021,7 +2026,12 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				createSpecFields...,
 			)
 
-			attachOpts, attachErr := r.attachableBuildOpts(internalRealm.Spec.Namespace, containerSpec, creds)
+			// priorStages threads the controller-side ContainerStatus.Stages
+			// snapshot into the renderer so the phase-C2 (#737) gate can omit
+			// already-done runOn: create stages from the rendered ContainerDoc
+			// on this boot.
+			priorStages := priorStagesForContainer(*cell, containerSpec.ID)
+			attachOpts, attachErr := r.attachableBuildOpts(internalRealm.Spec.Namespace, containerSpec, creds, priorStages)
 			if attachErr != nil {
 				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
 			}
