@@ -72,6 +72,14 @@ func NewLogsCmd() *cobra.Command {
 		"Tail the file until SIGINT instead of printing current contents and exiting")
 	_ = viper.BindPFlag(config.KUKE_DAEMON_LOGS_FOLLOW.ViperKey, cmd.Flags().Lookup("follow"))
 
+	// --server-configuration targets a specific kukeond instance, via the
+	// shared precedence chain (flag > KUKEOND_CONFIGURATION env > default
+	// file > hardcoded defaults). The loaded containerdNamespaceSuffix
+	// scopes consts.KukeSystemRealmName's namespace resolution so
+	// `kuke daemon logs` tails the kukeond cell of the targeted instance.
+	// Issue #284.
+	kukshared.RegisterServerConfigurationFlag(cmd)
+
 	return cmd
 }
 
@@ -82,6 +90,10 @@ func runLogs(cmd *cobra.Command, _ []string) error {
 	}
 
 	if err := kukshared.RequireRoot("kuke daemon logs"); err != nil {
+		return err
+	}
+
+	if _, _, err := kukshared.LoadServerConfigurationFromFlag(cmd); err != nil {
 		return err
 	}
 
