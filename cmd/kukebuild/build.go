@@ -295,7 +295,7 @@ func newSolveOpt(cfg *buildConfig, authProvider session.Attachable) (*client.Sol
 	// --push: the image exporter both writes the image into the containerd
 	// namespace (the name/unpack attrs above) and pushes it to the tag's
 	// registry. push is therefore additive, not substitutive — the local image
-	// remains inspectable via `kuke image get`. The auth provider rides in on
+	// remains inspectable via `kuke get image`. The auth provider rides in on
 	// the session so BuildKit resolves registry credentials during the push.
 	if cfg.push {
 		solveOpt.Exports[0].Attrs["push"] = "true"

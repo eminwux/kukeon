@@ -23,6 +23,7 @@ import (
 	cellcmd "github.com/eminwux/kukeon/cmd/kuke/get/cell"
 	configcmd "github.com/eminwux/kukeon/cmd/kuke/get/config"
 	containercmd "github.com/eminwux/kukeon/cmd/kuke/get/container"
+	imagecmd "github.com/eminwux/kukeon/cmd/kuke/get/image"
 	realmcmd "github.com/eminwux/kukeon/cmd/kuke/get/realm"
 	secretcmd "github.com/eminwux/kukeon/cmd/kuke/get/secret"
 	spacecmd "github.com/eminwux/kukeon/cmd/kuke/get/space"
@@ -38,7 +39,7 @@ func NewGetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "get [name]",
 		Aliases: []string{"g"},
-		Short:   "Get or list Kukeon resources (realm, space, stack, cell, container, secret, blueprint, config)",
+		Short:   "Get or list Kukeon resources (realm, space, stack, cell, container, image, secret, blueprint, config)",
 		Run: func(cmd *cobra.Command, _ []string) {
 			_ = cmd.Help()
 		},
@@ -60,6 +61,7 @@ func NewGetCmd() *cobra.Command {
 		stackcmd.NewStackCmd(),
 		cellcmd.NewCellCmd(),
 		containercmd.NewContainerCmd(),
+		imagecmd.NewImageCmd(),
 		secretcmd.NewSecretCmd(),
 		blueprintcmd.NewBlueprintCmd(),
 		configcmd.NewConfigCmd(),
@@ -70,7 +72,7 @@ func NewGetCmd() *cobra.Command {
 
 // completeGetSubcommands provides shell completion for get subcommand names.
 func completeGetSubcommands(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	subcommands := []string{"realm", "space", "stack", "cell", "container", "secret", "blueprint", "config"}
+	subcommands := []string{"realm", "space", "stack", "cell", "container", "image", "secret", "blueprint", "config"}
 
 	if toComplete == "" {
 		return subcommands, cobra.ShellCompDirectiveNoFileComp

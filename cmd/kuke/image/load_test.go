@@ -232,14 +232,6 @@ func (f *fakeClient) LoadImage(_ context.Context, realm string, tarball []byte) 
 	return f.loadImageFn(realm, tarball)
 }
 
-func (f *fakeClient) ListImages(context.Context, string) (kukeonv1.ListImagesResult, error) {
-	return kukeonv1.ListImagesResult{}, errors.New("unexpected ListImages call")
-}
-
-func (f *fakeClient) GetImage(context.Context, string, string) (kukeonv1.GetImageResult, error) {
-	return kukeonv1.GetImageResult{}, errors.New("unexpected GetImage call")
-}
-
 func (f *fakeClient) DeleteImage(context.Context, string, string) (kukeonv1.DeleteImageResult, error) {
 	return kukeonv1.DeleteImageResult{}, errors.New("unexpected DeleteImage call")
 }
