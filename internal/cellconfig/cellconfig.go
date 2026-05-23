@@ -45,8 +45,9 @@ const LabelConfig = "kukeon.io/config"
 // Decision (issue #624 AC): the derivation is the config name *verbatim*, not
 // `<name>-<hash-of-values>`. The CellConfig contract is "one Config → at most
 // one live cell within scope" with a stable identity that survives edits to the
-// config's values; #625's divergent-spec warning explicitly attaches to the
-// existing live cell when the Config diverged since materialization. A
+// config's values; #753's refuse-on-divergence behavior relies on the stable
+// name so `-c` finds the same live cell across invocations whether it attaches
+// (clean spec match) or refuses with a `kuke apply -c <config>` pointer. A
 // value-hashed suffix would change the derived name on every value edit,
 // spawning a fresh cell and orphaning the old one — defeating the idempotent
 // identity that distinguishes a Config (`run -c`) from a Blueprint's
