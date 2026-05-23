@@ -1266,6 +1266,11 @@ func TestContainerTtyRoundTripV1Beta1(t *testing.T) {
 			RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
 			Image:      "alpine:latest",
 			Attachable: true,
+			// Bind mount satisfies the persistence guard for the
+			// runOn: create stage below (issue #738).
+			Volumes: []ext.VolumeMount{
+				{Kind: ext.VolumeKindBind, Source: "/srv/cache", Target: "/cache"},
+			},
 			Tty: &ext.ContainerTty{
 				Prompt: `"\[\e[1;36m\]claude \u@\h\[\e[0m\]:\w\$ "`,
 				OnInit: []ext.TtyStage{
@@ -1514,17 +1519,26 @@ func TestContainerTtyStageRunOnEnumValidation(t *testing.T) {
 	accepted := []string{"", ext.RunOnStart, ext.RunOnCreate}
 	for _, runOn := range accepted {
 		t.Run("accepted/"+runOn, func(t *testing.T) {
+			spec := ext.ContainerSpec{
+				ID:      "c",
+				RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
+				Image:      "alpine:latest",
+				Attachable: true,
+				Tty:        &ext.ContainerTty{OnInit: []ext.TtyStage{{Script: "echo hi", RunOn: runOn}}},
+			}
+			// runOn: create requires a persistent writable mount per the
+			// phase-C3 validation guard (issue #738); add one so this
+			// subtest exercises only the enum check.
+			if runOn == ext.RunOnCreate {
+				spec.Volumes = []ext.VolumeMount{
+					{Kind: ext.VolumeKindBind, Source: "/srv/cache", Target: "/cache"},
+				}
+			}
 			input := ext.ContainerDoc{
 				APIVersion: ext.APIVersionV1Beta1,
 				Kind:       ext.KindContainer,
 				Metadata:   ext.ContainerMetadata{Name: "c"},
-				Spec: ext.ContainerSpec{
-					ID:      "c",
-					RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
-					Image:      "alpine:latest",
-					Attachable: true,
-					Tty:        &ext.ContainerTty{OnInit: []ext.TtyStage{{Script: "echo hi", RunOn: runOn}}},
-				},
+				Spec:       spec,
 			}
 			if _, _, err := apischeme.NormalizeContainer(input); err != nil {
 				t.Fatalf("NormalizeContainer rejected runOn %q: %v", runOn, err)
@@ -2288,4 +2302,173 @@ func TestNormalizeSecret_UnsupportedVersion(t *testing.T) {
 	if !strings.Contains(err.Error(), "unsupported apiVersion for Secret") {
 		t.Errorf("unexpected error: %v", err)
 	}
+}
+
+// TestContainerCreateStagePersistenceValidation covers the AC for #738
+// (phase C3): a container declaring runOn: create stages must carry at least
+// one persistent writable mount, otherwise the side effects evaporate on the
+// next recreate while the run-once gate continues to report State == "done".
+//
+// The matrix mirrors the AC checkboxes: all-tmpfs, readonly-rootfs without a
+// persistent mount, readonly-rootfs *with* a persistent mount, a mixed-mount
+// container (tmpfs + bind), and a persistent-only container.
+func TestContainerCreateStagePersistenceValidation(t *testing.T) {
+	createStage := []ext.TtyStage{{Script: "npm ci", RunOn: ext.RunOnCreate}}
+
+	cases := []struct {
+		name       string
+		volumes    []ext.VolumeMount
+		readOnly   bool
+		wantReject bool
+	}{
+		{
+			// AC: runOn: create on an all-tmpfs container is rejected.
+			name: "all-tmpfs/rejected",
+			volumes: []ext.VolumeMount{
+				{Kind: ext.VolumeKindTmpfs, Target: "/scratch"},
+				{Kind: ext.VolumeKindTmpfs, Target: "/cache"},
+			},
+			wantReject: true,
+		},
+		{
+			// AC: runOn: create on a readonly-rootfs container with no
+			// persistent volume mount is rejected.
+			name:       "readonly-rootfs-no-volumes/rejected",
+			volumes:    nil,
+			readOnly:   true,
+			wantReject: true,
+		},
+		{
+			// Sibling of the all-tmpfs case: a writable rootfs with no
+			// volume declarations is also ephemeral under kukeon's recreate
+			// model and must be rejected.
+			name:       "no-volumes-writable-rootfs/rejected",
+			volumes:    nil,
+			wantReject: true,
+		},
+		{
+			// AC complement: readonly-rootfs paired with a persistent bind
+			// is accepted — the bind covers the stage's write target.
+			name: "readonly-rootfs-with-bind/accepted",
+			volumes: []ext.VolumeMount{
+				{Kind: ext.VolumeKindBind, Source: "/srv/cache", Target: "/cache"},
+			},
+			readOnly: true,
+		},
+		{
+			// AC: at least one persistent writable mount (bind here) is
+			// accepted unchanged, even alongside tmpfs siblings.
+			name: "mixed-mounts/accepted",
+			volumes: []ext.VolumeMount{
+				{Kind: ext.VolumeKindTmpfs, Target: "/scratch"},
+				{Kind: ext.VolumeKindBind, Source: "/srv/data", Target: "/data"},
+			},
+		},
+		{
+			// AC: persistent-only is accepted unchanged.
+			name: "persistent-only/accepted",
+			volumes: []ext.VolumeMount{
+				{Kind: ext.VolumeKindBind, Source: "/srv/data", Target: "/data"},
+			},
+		},
+		{
+			// Empty Kind back-compat (defaults to bind) is treated as
+			// persistent, mirroring VolumeMount's documented default.
+			name: "empty-kind-default-bind/accepted",
+			volumes: []ext.VolumeMount{
+				{Source: "/srv/data", Target: "/data"},
+			},
+		},
+		{
+			// A bind volume marked ReadOnly is not a writable persistent
+			// target — the stage would fail at runtime instead of just
+			// silently evaporating, but the validation guards against it
+			// the same way.
+			name: "readonly-bind-only/rejected",
+			volumes: []ext.VolumeMount{
+				{Kind: ext.VolumeKindBind, Source: "/srv/cache", Target: "/cache", ReadOnly: true},
+			},
+			wantReject: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := ext.ContainerDoc{
+				APIVersion: ext.APIVersionV1Beta1,
+				Kind:       ext.KindContainer,
+				Metadata:   ext.ContainerMetadata{Name: "c"},
+				Spec: ext.ContainerSpec{
+					ID:      "c",
+					RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
+					Image:                  "alpine:latest",
+					Attachable:             true,
+					ReadOnlyRootFilesystem: tc.readOnly,
+					Volumes:                tc.volumes,
+					Tty:                    &ext.ContainerTty{OnInit: createStage},
+				},
+			}
+			_, _, err := apischeme.NormalizeContainer(input)
+			if tc.wantReject {
+				if err == nil {
+					t.Fatalf("NormalizeContainer accepted %s; want validation error", tc.name)
+				}
+				if !strings.Contains(err.Error(), "persistent writable mount") {
+					t.Errorf("error %q does not mention persistent writable mount", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NormalizeContainer rejected %s: %v", tc.name, err)
+			}
+		})
+	}
+
+	t.Run("no-create-stage/start-only-accepted-on-ephemeral", func(t *testing.T) {
+		// A container with only runOn: start (or empty) stages is
+		// unaffected by the persistence guard, even with no mounts at all.
+		input := ext.ContainerDoc{
+			APIVersion: ext.APIVersionV1Beta1,
+			Kind:       ext.KindContainer,
+			Metadata:   ext.ContainerMetadata{Name: "c"},
+			Spec: ext.ContainerSpec{
+				ID:      "c",
+				RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
+				Image:      "alpine:latest",
+				Attachable: true,
+				Tty: &ext.ContainerTty{OnInit: []ext.TtyStage{
+					{Script: "echo boot"},
+					{Script: "echo boot2", RunOn: ext.RunOnStart},
+				}},
+			},
+		}
+		if _, _, err := apischeme.NormalizeContainer(input); err != nil {
+			t.Fatalf("NormalizeContainer rejected ephemeral container with no create stage: %v", err)
+		}
+	})
+
+	t.Run("cell-doc-path/rejected", func(t *testing.T) {
+		// The same guard fires for ContainerSpecs embedded in a CellDoc.
+		cell := ext.CellDoc{
+			APIVersion: ext.APIVersionV1Beta1,
+			Kind:       ext.KindCell,
+			Metadata:   ext.CellMetadata{Name: "cl"},
+			Spec: ext.CellSpec{
+				ID:      "cl",
+				RealmID: "r", SpaceID: "s", StackID: "st",
+				Containers: []ext.ContainerSpec{
+					{
+						ID:      "c",
+						RealmID: "r", SpaceID: "s", StackID: "st", CellID: "cl",
+						Image:      "alpine:latest",
+						Attachable: true,
+						Tty:        &ext.ContainerTty{OnInit: createStage},
+					},
+				},
+			},
+		}
+		if _, _, err := apischeme.NormalizeCell(cell); err == nil {
+			t.Fatal("NormalizeCell accepted ephemeral runOn: create container; want validation error")
+		}
+	})
 }
