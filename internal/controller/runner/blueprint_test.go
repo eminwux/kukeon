@@ -259,21 +259,27 @@ func TestListBlueprints_SubtreeFilterSemantics(t *testing.T) {
 }
 
 // TestListBlueprints_IgnoresReservedSubdirs confirms the walk never mistakes a
-// sibling secrets/ or blueprints/ reserved subdirectory for a child space or
-// stack, and that an in-flight temp file is skipped.
+// sibling secrets/, blueprints/, or configs/ reserved subdirectory for a child
+// space or stack, and that an in-flight temp file is skipped. The configs/
+// exclusion is the case the old blueprintChildScopeNames missed (it predated
+// #624's configs/ subdir) — issue #734 unified all three walkers on the same
+// reserved-subdir set, so listing blueprints across the realm subtree must not
+// recurse into the realm's own configs/ dir as a phantom space.
 func TestListBlueprints_IgnoresReservedSubdirs(t *testing.T) {
 	runPath := t.TempDir()
 	r := newMetadataTestExec(t, runPath, time.Now())
 
 	seedBlueprint(t, r, "realm-bp", "default", "", "")
-	// A realm-scoped secret creates default/secrets/; a realm-scoped blueprint
-	// already created default/blueprints/. Neither must surface as a space.
+	// A realm-scoped secret creates default/secrets/; a realm-scoped config
+	// creates default/configs/; a realm-scoped blueprint already created
+	// default/blueprints/. None must surface as a child space.
 	if _, err := r.WriteSecret(intmodel.Secret{
 		Metadata: intmodel.SecretMetadata{Name: "tok", Realm: "default"},
 		Spec:     intmodel.SecretSpec{Data: "v"},
 	}); err != nil {
 		t.Fatalf("seed WriteSecret error = %v", err)
 	}
+	seedConfig(t, r, "cfg", "default", "", "")
 	// Drop an in-flight temp file alongside the realm blueprint; it must be
 	// skipped, not surfaced as a blueprint named ".blueprint-xyz.tmp".
 	tmpPath := fs.BlueprintPath(runPath, "default", "", "", ".blueprint-xyz.tmp")

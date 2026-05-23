@@ -23,7 +23,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
@@ -145,7 +144,7 @@ func (r *Exec) collectConfigSubtree(out *[]intmodel.CellConfig, realm, space, st
 		}
 	}
 
-	spaces, err := r.configChildScopeNames(fs.RealmMetadataDir(r.opts.RunPath, realm), space)
+	spaces, err := r.childScopeNames(fs.RealmMetadataDir(r.opts.RunPath, realm), space)
 	if err != nil {
 		return err
 	}
@@ -156,7 +155,7 @@ func (r *Exec) collectConfigSubtree(out *[]intmodel.CellConfig, realm, space, st
 			}
 		}
 
-		stacks, stErr := r.configChildScopeNames(fs.SpaceMetadataDir(r.opts.RunPath, realm, sp), stack)
+		stacks, stErr := r.childScopeNames(fs.SpaceMetadataDir(r.opts.RunPath, realm, sp), stack)
 		if stErr != nil {
 			return stErr
 		}
@@ -167,50 +166,6 @@ func (r *Exec) collectConfigSubtree(out *[]intmodel.CellConfig, realm, space, st
 		}
 	}
 	return nil
-}
-
-// configChildScopeNames returns the child-scope subdirectory names directly
-// under dir, excluding all three reserved resource subdirectories (secrets/,
-// blueprints/, configs/) so none is mistaken for a child space or stack. When
-// want is non-empty it filters to that single child (returned only if it
-// exists). A missing dir yields no children, matching the list verbs' "no match
-// ⇒ empty". Note this excludes configs/ as well as secrets/blueprints — a
-// reserved subdir at any scope level is never a child scope.
-func (r *Exec) configChildScopeNames(dir, want string) ([]string, error) {
-	if strings.TrimSpace(want) != "" {
-		child := filepath.Join(dir, want)
-		info, err := os.Stat(child)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil, nil
-			}
-			return nil, fmt.Errorf("failed to stat scope dir %q: %w", child, err)
-		}
-		if !info.IsDir() {
-			return nil, nil
-		}
-		return []string{want}, nil
-	}
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to read scope dir %q: %w", dir, err)
-	}
-	var names []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		switch entry.Name() {
-		case consts.KukeonSecretsSubdir, consts.KukeonBlueprintsSubdir, consts.KukeonConfigsSubdir:
-			continue
-		}
-		names = append(names, entry.Name())
-	}
-	return names, nil
 }
 
 // collectConfigsInScope appends the metadata of every CellConfig stored

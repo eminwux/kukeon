@@ -298,6 +298,50 @@ func TestListSecrets_SkipsTempFiles(t *testing.T) {
 	}
 }
 
+// TestListSecrets_IgnoresReservedSubdirs confirms the walk never mistakes a
+// sibling secrets/, blueprints/, or configs/ reserved subdirectory for a child
+// space, stack, or cell. The blueprints/ and configs/ exclusions are the cases
+// the old secret childScopeNames missed (it only skipped secrets/); issue #734
+// unified all three walkers on the same reserved-subdir set, so a phantom
+// "blueprints" or "configs" space must never surface from the realm subtree
+// walk.
+func TestListSecrets_IgnoresReservedSubdirs(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	// A realm-scoped secret creates default/secrets/; a realm-scoped blueprint
+	// creates default/blueprints/; a realm-scoped config creates
+	// default/configs/. None must surface as a child space.
+	if _, err := r.WriteSecret(intmodel.Secret{
+		Metadata: intmodel.SecretMetadata{Name: "realm-tok", Realm: "default"},
+		Spec:     intmodel.SecretSpec{Data: "v"},
+	}); err != nil {
+		t.Fatalf("seed WriteSecret error = %v", err)
+	}
+	seedBlueprint(t, r, "bp", "default", "", "")
+	seedConfig(t, r, "cfg", "default", "", "")
+	// Drop an in-flight temp file alongside the realm secret; it must be
+	// skipped, not surfaced as a secret named ".secret-xyz.tmp".
+	dir := fs.SecretsDir(runPath, "default", "", "", "")
+	if err := os.WriteFile(dir+"/.secret-xyz.tmp", []byte("partial"), 0o600); err != nil {
+		t.Fatalf("seed temp file error = %v", err)
+	}
+
+	out, err := r.ListSecrets("", "", "", "")
+	if err != nil {
+		t.Fatalf("ListSecrets() error = %v", err)
+	}
+	got := make([]string, 0, len(out))
+	for _, s := range out {
+		got = append(got, s.Metadata.Realm+"/"+s.Metadata.Space+"/"+s.Metadata.Stack+"/"+s.Metadata.Cell+"/"+s.Metadata.Name)
+	}
+	sort.Strings(got)
+	want := []string{"default////realm-tok"}
+	if !equalStrings(got, want) {
+		t.Errorf("ListSecrets(all) = %v, want %v (reserved subdirs + temp file must be ignored)", got, want)
+	}
+}
+
 // TestDeleteSecret removes the bytes file and reports ErrSecretNotFound on a
 // second delete of the same name (issue #622).
 func TestDeleteSecret(t *testing.T) {
