@@ -41,7 +41,7 @@ func TestNewCreateCmdMetadata(t *testing.T) {
 		{
 			name: "short description",
 			check: func(t *testing.T, cmd *cobra.Command) {
-				expected := "Create Kukeon resources (realm, space, stack, cell, container)"
+				expected := "Create Kukeon resources (realm, space, stack, cell, container, config)"
 				if cmd.Short != expected {
 					t.Fatalf("expected Short to be %q, got %q", expected, cmd.Short)
 				}
@@ -81,6 +81,7 @@ func TestNewCreateCmdRegistersSubcommands(t *testing.T) {
 		{name: "stack"},
 		{name: "cell"},
 		{name: "container"},
+		{name: "config"},
 	}
 
 	for _, tt := range tests {
@@ -103,7 +104,7 @@ func TestNewCreateCmd_AutocompleteRegistration(t *testing.T) {
 
 	// Test the completion function directly
 	completions, _ := cmd.ValidArgsFunction(cmd, []string{}, "")
-	expected := []string{"realm", "space", "stack", "cell", "container"}
+	expected := []string{"realm", "space", "stack", "cell", "container", "config"}
 	if len(completions) != len(expected) {
 		t.Fatalf("expected %d completions, got %d", len(expected), len(completions))
 	}
@@ -123,7 +124,7 @@ func TestNewCreateCmd_AutocompleteRegistration(t *testing.T) {
 
 	// Test prefix filtering
 	filtered, _ := cmd.ValidArgsFunction(cmd, []string{}, "c")
-	expectedFiltered := []string{"cell", "container"}
+	expectedFiltered := []string{"cell", "container", "config"}
 	if len(filtered) != len(expectedFiltered) {
 		t.Fatalf("expected %d filtered completions, got %d", len(expectedFiltered), len(filtered))
 	}
