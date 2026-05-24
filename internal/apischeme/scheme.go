@@ -1355,6 +1355,11 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 				Tty:                 convertCellTtyToInternal(in.Spec.Tty),
 				AutoDelete:          in.Spec.AutoDelete,
 				NestedCgroupRuntime: in.Spec.NestedCgroupRuntime,
+				// RuntimeEnv is transport-only (v1beta1 carries yaml:"-"), so
+				// the round-trip thread runs through here on the inbound RPC
+				// path and is dropped at persistence time by
+				// BuildCellExternalFromInternal → yaml.Marshal. Issue #834.
+				RuntimeEnv: cloneStringSlice(in.Spec.RuntimeEnv),
 			},
 			Status: intmodel.CellStatus{
 				State:              intmodel.CellState(in.Status.State),
@@ -1423,6 +1428,18 @@ func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ex
 				Tty:                 buildCellTtyExternalFromInternal(in.Spec.Tty),
 				AutoDelete:          in.Spec.AutoDelete,
 				NestedCgroupRuntime: in.Spec.NestedCgroupRuntime,
+				// RuntimeEnv is deliberately NOT copied on the
+				// internal → external direction (issue #834). The
+				// v1beta1 metadata.json on disk is JSON-marshaled from
+				// this doc — persisting RuntimeEnv would pollute the
+				// stored spec across restarts, defeating the
+				// per-invocation contract that the divergent-spec check
+				// must not trip on `--env`-injected keys. RPC reply
+				// paths (GetCell, ListCells, …) likewise drop it since
+				// no client reads RuntimeEnv off a response; the
+				// operator always re-supplies --env on every invocation.
+				// The CLI → daemon direction in ConvertCellDocToInternal
+				// preserves it so the runner's OCI build sees the entries.
 			},
 			Status: ext.CellStatus{
 				State:              ext.CellState(in.Status.State),

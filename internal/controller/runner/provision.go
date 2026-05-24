@@ -1456,6 +1456,13 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 	// Track root container for return value
 	var rootContainer containerd.Container
 
+	// Resolve the attachable container so the non-root OCI build below can
+	// merge `kuke run --env` runtime entries into the right container's env
+	// (issue #834). Empty string means "no attachable container declared" —
+	// mergeRuntimeEnvForContainer treats that as a no-op so unrelated
+	// containers keep their authored env verbatim.
+	attachableID := resolveAttachableContainerID(*cell)
+
 	// Create all containers defined in the cell (including root container)
 	for i := range cell.Spec.Containers {
 		containerSpec := cell.Spec.Containers[i]
@@ -1567,9 +1574,16 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
 			}
 			buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
+			// Merge `kuke run --env` runtime env into the attachable
+			// container's spec env (issue #834). Returns containerSpec
+			// unchanged for non-attachable containers or when
+			// cell.Spec.RuntimeEnv is empty; the merged copy never writes
+			// back to cell.Spec.Containers[i] (the OCI build sees the
+			// runtime entries, on-disk metadata stays clean).
+			ociSpec := mergeRuntimeEnvForContainer(containerSpec, attachableID, cell.Spec.RuntimeEnv)
 			_, createErr = r.ctrClient.CreateContainerFromSpec(
 				namespace,
-				containerSpec,
+				ociSpec,
 				creds,
 				buildOpts...,
 			)

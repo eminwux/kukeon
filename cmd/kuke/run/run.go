@@ -88,7 +88,12 @@ func NewRunCmd() *cobra.Command {
 			"then attached; a divergent on-disk spec is refused (use `kuke apply -f` " +
 			"to update); a cell in an error or partial state is refused with a " +
 			"`kuke delete cell <name>` pointer. To re-attach to an existing cell use " +
-			"`kuke attach <cell>`.",
+			"`kuke attach <cell>`. --env KEY=VALUE is the orthogonal runtime knob " +
+			"(repeatable; per-invocation injection into the attachable container's env at " +
+			"start time). It works with every source (positional, -f, -p, -b) and every " +
+			"identity flag (--new, --clone, --reuse); the entries do not change the cell " +
+			"spec and do not persist, so the divergent-spec check above does not trip on " +
+			"prior --env-injected keys.",
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: config.CompleteConfigNames,
 		SilenceUsage:      true,
@@ -167,6 +172,25 @@ func NewRunCmd() *cobra.Command {
 			"per pool member rather than once per tick. Only valid with the <config> "+
 			"positional; mutually exclusive with --new, --clone, --name, and --rm.")
 	_ = viper.BindPFlag(config.KUKE_RUN_REUSE.ViperKey, cmd.Flags().Lookup("reuse"))
+
+	cmd.Flags().StringArray("env", nil,
+		"Runtime container env entry as KEY=VALUE; repeatable. Injects extra env into "+
+			"the cell's attachable container at start time, in addition to "+
+			"spec.cell.containers[<attachable>].env. Empty value (KEY=) is allowed; missing "+
+			"`=` is rejected. A key that collides with an existing entry in the attachable "+
+			"container's spec env OVERRIDES the spec value. --env is the per-invocation knob "+
+			"(runtime; does not change the cell spec); for render-time spec substitution use "+
+			"--param (blueprint path only). Valid with all source paths (the <config> "+
+			"positional, -f, -p, -b) and all identity flags (--new, --clone, --reuse). The "+
+			"injected entries do NOT persist into the cell metadata, so the divergent-spec "+
+			"check on a subsequent `kuke run <config>` (without --env) does not trip on the "+
+			"prior injection. With --reuse, each invocation re-injects against the restarted "+
+			"cell; the cell's stored spec env is unchanged across restarts.")
+	// --env is read via cmd.Flags().GetStringArray("env") in parseRunFlags;
+	// viper.BindPFlag is intentionally omitted because StringArray flags do
+	// not round-trip cleanly through viper's GetStringSlice (issue #834).
+	// KUKE_RUN_ENV stays declared in cmd/config/env.go for parity but is
+	// not bound here.
 
 	cmd.Flags().StringArray("param", nil,
 		"Scalar parameter override as KEY=VALUE; repeatable. Valid with -p/-b. "+
@@ -277,6 +301,13 @@ type runFlags struct {
 	reuse         bool
 	paramArgs     []string
 	paramFile     string
+	// envArgs are the validated `KEY=VALUE` entries supplied via repeatable
+	// --env flags (issue #834). Empty value (`KEY=`) is preserved as-is;
+	// missing `=` is rejected by parseEnvArgs before runRun observes them.
+	// Threaded to the daemon via cellDoc.Spec.RuntimeEnv (yaml:"-" — never
+	// persisted) where the runner merges them into the attachable
+	// container's OCI process env at start time.
+	envArgs []string
 }
 
 // validateSourceMutex enforces the "exactly one source" contract across the
@@ -338,6 +369,16 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 		return runFlags{}, err
 	}
 	flags.paramArgs = paramArgs
+
+	envRaw, err := cmd.Flags().GetStringArray("env")
+	if err != nil {
+		return runFlags{}, err
+	}
+	envArgs, err := parseEnvArgs(envRaw)
+	if err != nil {
+		return runFlags{}, err
+	}
+	flags.envArgs = envArgs
 
 	output, err := cmd.Flags().GetString("output")
 	if err != nil {
@@ -466,6 +507,17 @@ func runRun(cmd *cobra.Command, args []string) error {
 		// in the YAML even without --rm — that's a declarative intent the
 		// operator wrote and the daemon should honor.
 		cellDoc.Spec.AutoDelete = true
+	}
+
+	// --env (#834): thread the CLI-supplied runtime env entries onto the
+	// transport-only Spec.RuntimeEnv field. The v1beta1 type carries
+	// yaml:"-" on this field so the daemon's writeDocWithGeneration never
+	// persists it; the runner reads it at OCI build time and merges into
+	// the attachable container's process env. Set after autoDelete so the
+	// two CLI knobs sit together; the merge semantics (override-on-key,
+	// last-wins across collisions) are owned by the runner-side mergeRuntimeEnv.
+	if len(flags.envArgs) > 0 {
+		cellDoc.Spec.RuntimeEnv = flags.envArgs
 	}
 
 	if validateErr := validateResolvedCell(cellDoc); validateErr != nil {
@@ -916,7 +968,9 @@ func loadFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) 
 	// --clone's allocation path below — the operator never sees a "pool
 	// empty" error on the first tick or after a host reboot.
 	if flags.reuse {
-		clone, startRes, reuseErr := pickAndStartReusableClone(cmd.Context(), client, cfgRes.Config)
+		clone, startRes, reuseErr := pickAndStartReusableClone(
+			cmd.Context(), client, cfgRes.Config, flags.envArgs,
+		)
 		switch {
 		case reuseErr == nil:
 			cfgRes.Config = clone

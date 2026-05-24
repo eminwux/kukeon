@@ -61,6 +61,27 @@ type CellSpec struct {
 	// delegate any controller it wants to its workloads. Default false
 	// keeps the existing cell-as-leaf semantics (issue #312) untouched.
 	NestedCgroupRuntime bool `json:"nestedCgroupRuntime,omitempty" yaml:"nestedCgroupRuntime,omitempty"`
+	// RuntimeEnv carries CLI-injected env entries (KUKE_RUN's --env
+	// KEY=VALUE) for the cell's attachable container, merged into the
+	// container's OCI process env at cell start time. Entries collide-and-
+	// replace against spec.containers[<attachable>].env (--env wins on
+	// matching KEY). Set by `kuke run --env` from the CLI; never authored
+	// in a YAML manifest, never read back off a daemon RPC response.
+	//
+	// Transport-only field with two boundary contracts:
+	//
+	//  1. The `yaml:"-"` tag keeps it out of any YAML-author surface.
+	//  2. JSON-RPC carries it CLI → daemon (where the daemon's StartCell /
+	//     CreateCell handler copies it onto the internalCell before the
+	//     runner uses it for OCI build). The daemon → CLI direction in
+	//     apischeme.BuildCellExternalFromInternal deliberately drops it,
+	//     which simultaneously keeps metadata.json clean (the same builder
+	//     produces the disk-write doc) and keeps the divergent-spec check
+	//     on a subsequent `kuke run <config>` from tripping on the prior
+	//     --env injection. Each invocation re-supplies its own RuntimeEnv.
+	//
+	// Issue #834.
+	RuntimeEnv []string `json:"runtimeEnv,omitempty"          yaml:"-"`
 }
 
 // CellTty is cell-level tty/attach config. Kept intentionally minimal: only

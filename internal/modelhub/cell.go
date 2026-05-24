@@ -50,6 +50,17 @@ type CellSpec struct {
 	// metadata so the daemon can re-toggle the full subtree controller set
 	// on the ensure-pass after a restart.
 	NestedCgroupRuntime bool
+	// RuntimeEnv mirrors v1beta1.CellSpec.RuntimeEnv. The wire side carries
+	// `kuke run --env KEY=VALUE` from the CLI; the daemon merges these
+	// entries into the attachable container's OCI process env at create /
+	// start time. NOT persisted (v1beta1 has yaml:"-") — the runtime cell
+	// metadata.yaml never carries it, so the disk-read paths
+	// (validateAndGetCell, runner.GetCell) return cells with an empty
+	// RuntimeEnv. Callers that drive a fresh start/recreate from a CLI
+	// request preserve the field by copying cell.Spec.RuntimeEnv from the
+	// inbound RPC cell onto the disk-read cell before the OCI build. See
+	// runner.startCellLocked and Exec.createCellInternal. Issue #834.
+	RuntimeEnv []string
 }
 
 // CellTty mirrors the v1beta1 CellTty payload. See the v1beta1 type for

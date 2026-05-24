@@ -4816,3 +4816,436 @@ func TestRun_Reuse_OnlyValidWithConfig(t *testing.T) {
 		})
 	}
 }
+
+// --- #834 (--env KEY=VALUE runtime env injection) tests ------------------
+
+// TestRun_EnvFlag_FromFile_ThreadsRuntimeEnvOntoCreateDoc covers the -f
+// source path: a single `--env LABEL=bug` round-trips onto the CellDoc
+// handed to CreateCell as Spec.RuntimeEnv. The per-container Env on the
+// authored spec is untouched (the merge fires server-side inside the
+// runner against the OCI build, not against the persisted spec).
+func TestRun_EnvFlag_FromFile_ThreadsRuntimeEnvOntoCreateDoc(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "--env", "LABEL=bug", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.createCalls != 1 {
+		t.Fatalf("CreateCell calls=%d want 1", fc.createCalls)
+	}
+	wantRE := []string{"LABEL=bug"}
+	if !reflect.DeepEqual(fc.createDoc.Spec.RuntimeEnv, wantRE) {
+		t.Errorf("CreateCell doc RuntimeEnv=%v, want %v", fc.createDoc.Spec.RuntimeEnv, wantRE)
+	}
+	// The persisted spec's per-container Env stays the YAML author's value
+	// (validCellYAML declares no env on `work`), proving --env routes through
+	// the transport-only RuntimeEnv field, not the authored Containers[].Env.
+	for _, c := range fc.createDoc.Spec.Containers {
+		if c.ID == "work" && len(c.Env) != 0 {
+			t.Errorf("containers[work].Env=%v want nil (--env must not pollute the persisted spec)", c.Env)
+		}
+	}
+}
+
+// TestRun_EnvFlag_Repeated_AllThreaded pins the StringArray-repeatable
+// shape of the flag: every `--env` instance lands on RuntimeEnv in
+// declaration order, deduplicated where identical, preserving the order
+// the user invoked them.
+func TestRun_EnvFlag_Repeated_AllThreaded(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{
+		"-f", writeTempYAML(t, validCellYAML),
+		"--env", "LABEL=bug",
+		"--env", "PRIORITY=A",
+		"--env", "REGION=us-east-1",
+		"-d",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	want := []string{"LABEL=bug", "PRIORITY=A", "REGION=us-east-1"}
+	if !reflect.DeepEqual(fc.createDoc.Spec.RuntimeEnv, want) {
+		t.Errorf("RuntimeEnv=%v, want %v (declaration order preserved)", fc.createDoc.Spec.RuntimeEnv, want)
+	}
+}
+
+// TestRun_EnvFlag_MissingEquals_RejectedAtCLI covers the parseEnvArgs
+// surface from the cobra side: `--env LABELbug` (no `=`) exits with the
+// AC-specified format error before any wire call fires. The cell create
+// must not happen.
+func TestRun_EnvFlag_MissingEquals_RejectedAtCLI(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "--env", "LABELbug", "-d"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute returned nil, want format error")
+	}
+	if !strings.Contains(err.Error(), "--env requires KEY=VALUE") {
+		t.Errorf("err=%q, want '--env requires KEY=VALUE' substring", err)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d, want 0 (reject before wire call)", fc.createCalls)
+	}
+}
+
+// TestRun_EnvFlag_DuplicateKeyDifferentValue_RejectedAtCLI covers the
+// "no silent last-wins" half of the AC: two --env entries with the same
+// KEY but different VALUEs exit with a 'pick one' hint before CreateCell.
+func TestRun_EnvFlag_DuplicateKeyDifferentValue_RejectedAtCLI(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{
+		"-f", writeTempYAML(t, validCellYAML),
+		"--env", "LABEL=bug",
+		"--env", "LABEL=enh",
+		"-d",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute returned nil, want duplicate-key error")
+	}
+	if !strings.Contains(err.Error(), "pick one") {
+		t.Errorf("err=%q, want 'pick one' resolution hint", err)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d, want 0 (reject before wire call)", fc.createCalls)
+	}
+}
+
+// TestRun_EnvFlag_FromBlueprint_ThreadsRuntimeEnvOntoCreateDoc covers the
+// `-b` source path: `--env` lands on the CellDoc materialized from the
+// blueprint. Combines with --param to confirm the two knobs are
+// orthogonal (--param does render-time spec substitution into the
+// container image; --env injects at start-time into the OCI process env).
+func TestRun_EnvFlag_FromBlueprint_ThreadsRuntimeEnvOntoCreateDoc(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return kukeonv1.CreateCellResult{
+				Cell: doc, Created: true, MetadataExistsPost: true,
+				CgroupCreated: true, CgroupExistsPost: true,
+				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
+				Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
+			}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{
+		"-b", "web",
+		"--param", "TAG=v2",
+		"--env", "LABEL=bug",
+		"--realm", "my-realm",
+		"-d",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	want := []string{"LABEL=bug"}
+	if !reflect.DeepEqual(fc.createDoc.Spec.RuntimeEnv, want) {
+		t.Errorf("RuntimeEnv=%v, want %v", fc.createDoc.Spec.RuntimeEnv, want)
+	}
+	// --param still applied to the spec (orthogonal to --env).
+	if got := fc.createDoc.Spec.Containers[0].Image; got != "registry.example.com/web:v2" {
+		t.Errorf("image=%q want ${TAG} substituted to v2 (--param + --env are independent)", got)
+	}
+}
+
+// TestRun_EnvFlag_FromConfig_Bare_ThreadsRuntimeEnvOntoCreateDoc covers
+// the bare-positional `<config>` create path with --env: a brand-new cell
+// from a CellConfig receives RuntimeEnv on its CreateCell doc. The
+// `--new`-or-deterministic identity branch picks the deterministic name
+// here (Config's stable name); both branches thread RuntimeEnv identically
+// because the assignment is before the identity-flag branching.
+func TestRun_EnvFlag_FromConfig_Bare_ThreadsRuntimeEnvOntoCreateDoc(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
+		},
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
+		},
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return kukeonv1.CreateCellResult{
+				Cell: doc, Created: true, MetadataExistsPost: true,
+				CgroupCreated: true, CgroupExistsPost: true,
+				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
+				Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
+			}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "--env", "LABEL=bug", "--realm", "cfg-realm", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	want := []string{"LABEL=bug"}
+	if !reflect.DeepEqual(fc.createDoc.Spec.RuntimeEnv, want) {
+		t.Errorf("RuntimeEnv=%v, want %v (<cfg> positional source)", fc.createDoc.Spec.RuntimeEnv, want)
+	}
+}
+
+// TestRun_EnvFlag_New_ThreadsRuntimeEnvOntoCreateDoc covers the --new
+// identity branch on the <config> path: a fresh `<config-name>-<6hex>`
+// cell still carries RuntimeEnv on its CreateCell doc.
+func TestRun_EnvFlag_New_ThreadsRuntimeEnvOntoCreateDoc(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
+		},
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
+		},
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return kukeonv1.CreateCellResult{
+				Cell: doc, Created: true, MetadataExistsPost: true,
+				CgroupCreated: true, CgroupExistsPost: true,
+				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
+				Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
+			}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "--new", "--env", "LABEL=bug", "--realm", "cfg-realm", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	want := []string{"LABEL=bug"}
+	if !reflect.DeepEqual(fc.createDoc.Spec.RuntimeEnv, want) {
+		t.Errorf("RuntimeEnv=%v, want %v (--new identity branch)", fc.createDoc.Spec.RuntimeEnv, want)
+	}
+	if !regexp.MustCompile(`^prod-[0-9a-f]{6}$`).MatchString(fc.createDoc.Metadata.Name) {
+		t.Errorf("cell name=%q want prod-<6hex> (--new identity)", fc.createDoc.Metadata.Name)
+	}
+}
+
+// TestRun_EnvFlag_Clone_ThreadsRuntimeEnvOntoCreateDoc covers --clone:
+// the new cell created from the freshly-forked clone Config carries
+// RuntimeEnv. The forked CellConfigDoc itself does NOT carry RuntimeEnv
+// (the field is yaml:"-" and lives on CellSpec, not CellConfigSpec — the
+// clone is a deep copy of the source's CellConfigSpec, which has no env-
+// injection concept), so the clone Config remains a clean fork.
+func TestRun_EnvFlag_Clone_ThreadsRuntimeEnvOntoCreateDoc(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := cloneFakeBuilder()
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "--clone", "--env", "LABEL=bug", "--realm", "cfg-realm", "-d"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if fc.createConfigCalls != 1 {
+		t.Fatalf("CreateConfig calls=%d, want 1", fc.createConfigCalls)
+	}
+	if fc.createCalls != 1 {
+		t.Fatalf("CreateCell calls=%d, want 1", fc.createCalls)
+	}
+	want := []string{"LABEL=bug"}
+	if !reflect.DeepEqual(fc.createDoc.Spec.RuntimeEnv, want) {
+		t.Errorf("CreateCell doc RuntimeEnv=%v, want %v", fc.createDoc.Spec.RuntimeEnv, want)
+	}
+	// The forked CellConfig is a clean lineage marker; RuntimeEnv has no
+	// concept there. The clone's spec is the source's, deep-copied.
+	clone := fc.createConfigDocs[0]
+	if clone.Metadata.Name != "prod-0" {
+		t.Errorf("clone name=%q, want prod-0", clone.Metadata.Name)
+	}
+}
+
+// TestRun_EnvFlag_Reuse_ThreadsRuntimeEnvOntoStartDoc covers the --reuse
+// path: when --reuse picks a Stopped clone from the pool and calls
+// StartCell on its existing cell, RuntimeEnv rides on the StartCell doc
+// — not CreateCell, since the cell is started in place (overlay
+// preserved). This is the cron-driver use case from issue #840: each
+// tick re-injects its --env against the same restarted cell.
+func TestRun_EnvFlag_Reuse_ThreadsRuntimeEnvOntoStartDoc(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc, _, _ := reuseFakeBuilder(t, []reuseClone{
+		{name: "prod-0", annotation: "prod", cellState: v1beta1.CellStateStopped},
+	})
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "--reuse", "--env", "LABEL=bug", "--realm", "cfg-realm", "-d"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if fc.startCalls != 1 {
+		t.Fatalf("StartCell calls=%d, want 1 (claimed Stopped clone)", fc.startCalls)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d, want 0 (--reuse starts in place)", fc.createCalls)
+	}
+	want := []string{"LABEL=bug"}
+	if !reflect.DeepEqual(fc.startDoc.Spec.RuntimeEnv, want) {
+		t.Errorf("StartCell doc RuntimeEnv=%v, want %v (--reuse path)", fc.startDoc.Spec.RuntimeEnv, want)
+	}
+}
+
+// TestRun_EnvFlag_Reuse_EmptyPoolFallback_ThreadsRuntimeEnv covers the
+// fallback half of --reuse: with no clones in the pool the path falls
+// through to --clone's code, which creates a fresh clone Config and
+// CreateCells the new cell. RuntimeEnv must ride on that CreateCell
+// doc — same field, different wire call relative to the picked-clone
+// happy path above.
+func TestRun_EnvFlag_Reuse_EmptyPoolFallback_ThreadsRuntimeEnv(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc, _, _ := reuseFakeBuilder(t, nil)
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "--reuse", "--env", "LABEL=bug", "--realm", "cfg-realm", "-d"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if fc.createConfigCalls != 1 {
+		t.Fatalf("CreateConfig calls=%d, want 1 (empty pool → fork)", fc.createConfigCalls)
+	}
+	if fc.createCalls != 1 {
+		t.Fatalf("CreateCell calls=%d, want 1 (fresh cell from forked clone)", fc.createCalls)
+	}
+	want := []string{"LABEL=bug"}
+	if !reflect.DeepEqual(fc.createDoc.Spec.RuntimeEnv, want) {
+		t.Errorf("CreateCell doc RuntimeEnv=%v, want %v (--reuse empty-pool fallback)",
+			fc.createDoc.Spec.RuntimeEnv, want)
+	}
+}
+
+// TestRun_EnvFlag_DivergentCheckIgnoresRuntimeEnv is the AC-named
+// scenario: a Ready cell already exists from a prior `kuke run prod`
+// invocation; a second `kuke run prod --env LABEL=bug` against the same
+// Config must NOT trip the divergent-spec refusal — RuntimeEnv is
+// yaml:"-", so the persisted Containers[].Env on disk never carries the
+// injection, divergedFields compares only Containers[].Env, and both
+// sides come from the same Materialize(cfg, bp) pipeline. The
+// short-circuit on Ready then skips CreateCell/StartCell.
+func TestRun_EnvFlag_DivergentCheckIgnoresRuntimeEnv(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	cfg := configDoc()
+	bp := configBlueprintDoc()
+	fc := &fakeClient{
+		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			return kukeonv1.GetConfigResult{Config: cfg, MetadataExists: true}, nil
+		},
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: bp, MetadataExists: true}, nil
+		},
+		getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			// Echo the desired spec back so divergedFields reports no drift
+			// — same shape as TestRun_FromConfig_LiveReadyCell_AttachesWithoutCreate
+			// but with --env on the second invocation. The on-disk persisted
+			// spec is `doc` itself (modulo RuntimeEnv, which yaml:"-" strips on
+			// the daemon's marshal-to-disk path).
+			live := doc
+			live.Spec.RuntimeEnv = nil // simulate the disk-strip — prior run's --env didn't persist
+			live.Status.State = v1beta1.CellStateReady
+			return kukeonv1.GetCellResult{
+				Cell: live, MetadataExists: true, CgroupExists: true,
+				RootContainerExists: true, RootContainerTaskRunning: true,
+			}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "--env", "LABEL=bug", "--realm", "cfg-realm", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v (divergent check tripped on --env — RuntimeEnv must be ignored)", err)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d, want 0 (Ready short-circuit)", fc.createCalls)
+	}
+	if fc.startCalls != 0 {
+		t.Errorf("StartCell calls=%d, want 0 (Ready short-circuit; nothing to start)", fc.startCalls)
+	}
+}
+
+// TestRun_EnvFlag_StoppedCell_StartsWithRuntimeEnv covers the Stopped
+// → Started transition with --env: a prior `kuke run prod` created and
+// then stopped the cell; a follow-up `kuke run prod --env LABEL=bug`
+// reaches StartCell and the doc carries the per-invocation RuntimeEnv.
+// Mirrors TestRun_ExistingCell_MatchingSpec_Stopped_StartsAndAttaches
+// but exercises the --env wiring on the StartCell path.
+func TestRun_EnvFlag_StoppedCell_StartsWithRuntimeEnv(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	existing := v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
+		Spec: v1beta1.CellSpec{
+			RealmID: "my-realm", SpaceID: "my-space", StackID: "my-stack",
+			Containers: []v1beta1.ContainerSpec{
+				{
+					ID:      "root",
+					Root:    true,
+					Image:   "registry.eminwux.com/busybox:latest",
+					Command: "sleep",
+					Args:    []string{"3600"},
+				},
+				{ID: "work", Image: "registry.eminwux.com/busybox:latest", Command: "sleep", Args: []string{"3600"}},
+			},
+		},
+		Status: v1beta1.CellStatus{State: v1beta1.CellStateStopped},
+	}
+	fc := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell: existing, MetadataExists: true, CgroupExists: true, RootContainerExists: true,
+			}, nil
+		},
+		startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+			return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{
+		"-f", writeTempYAML(t, validCellYAML),
+		"--env", "LABEL=bug",
+		"-d",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.startCalls != 1 {
+		t.Fatalf("StartCell calls=%d, want 1", fc.startCalls)
+	}
+	want := []string{"LABEL=bug"}
+	if !reflect.DeepEqual(fc.startDoc.Spec.RuntimeEnv, want) {
+		t.Errorf("StartCell doc RuntimeEnv=%v, want %v (-f Stopped restart path)",
+			fc.startDoc.Spec.RuntimeEnv, want)
+	}
+}

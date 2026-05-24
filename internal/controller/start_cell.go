@@ -37,6 +37,15 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 		return res, err
 	}
 
+	// Carry `kuke run --env` runtime entries from the inbound RPC cell onto
+	// the disk-read internalCell so the runner's OCI build path sees them
+	// (issue #834). v1beta1.CellSpec.RuntimeEnv is yaml:"-", so the disk
+	// read above strips the field — without this copy the --reuse +
+	// --env cron driver use case from #840 silently drops the per-tick
+	// env. Empty input is a no-op (the bare `kuke run <cfg>` path through
+	// existing-Stopped → StartCell never sets RuntimeEnv).
+	internalCell.Spec.RuntimeEnv = cell.Spec.RuntimeEnv
+
 	// Check if containers are actually running by examining Status.Containers
 	// which is freshly populated from containerd by validateAndGetCell -> GetCell -> populateCellContainerStatuses
 	// This prevents blocking starts when containers have crashed externally but metadata still shows Ready state

@@ -243,6 +243,14 @@ func (b *Exec) createCellInternal(cell intmodel.Cell, startAfterCreate bool) (Cr
 	// (#818) skips this step so the cell record is left in a stopped state for
 	// the operator to start explicitly with `kuke start <name>`.
 	if startAfterCreate {
+		// Carry `kuke run --env` runtime entries onto the cell handed to the
+		// runner. acquireOrCreateCell returns either the freshly-created cell
+		// (provisionNewCell already saw RuntimeEnv on the input `cell` and
+		// applied it during createCellContainers) or the existing cell from
+		// disk (RuntimeEnv stripped at persistence). Either way, the
+		// downstream runner.StartCell rebuilds the non-root container OCI
+		// specs, so it needs the runtime env from the inbound RPC. Issue #834.
+		resultCell.Spec.RuntimeEnv = cell.Spec.RuntimeEnv
 		resultCell, err = b.runner.StartCell(resultCell)
 		if err != nil {
 			return res, fmt.Errorf("failed to start cell containers: %w", err)

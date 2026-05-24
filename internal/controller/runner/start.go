@@ -349,6 +349,13 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 	if err != nil {
 		return intmodel.Cell{}, fmt.Errorf("%w: %w", internalerrdefs.ErrGetCell, err)
 	}
+	// RuntimeEnv (kuke run --env) is transport-only — the on-disk metadata.yaml
+	// never persists it (v1beta1.CellSpec.RuntimeEnv carries yaml:"-"), so the
+	// GetCell read above returns RuntimeEnv=nil. The inbound `cell` argument
+	// still carries whatever the caller (controller.Exec.StartCell after its
+	// own preservation hop) threaded in, so copy it forward before the OCI
+	// build path observes internalCell. Issue #834.
+	internalCell.Spec.RuntimeEnv = cell.Spec.RuntimeEnv
 	cellForCleanup = internalCell
 
 	cellSpec := internalCell.Spec
@@ -789,6 +796,13 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 	stampCellProfileNameOnContainers(&internalCell)
 	cellSpec = internalCell.Spec
 
+	// Resolve the attachable container so the non-root recreate loop below
+	// can merge `kuke run --env` runtime entries into its OCI env — issue
+	// #834. Empty when no attachable container is declared;
+	// mergeRuntimeEnvForContainer treats that as a no-op so unrelated
+	// containers keep their authored env.
+	attachableID := resolveAttachableContainerID(internalCell)
+
 	// Start all containers defined in the CellDoc
 	for _, containerSpec := range cellSpec.Containers {
 		// Skip root container - it's already created and started above
@@ -862,7 +876,15 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 			return intmodel.Cell{}, fmt.Errorf("failed to prepare attachable container %s: %w", ctrContainerID, attachErr)
 		}
 		buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
-		_, err = r.ctrClient.CreateContainerFromSpec(namespace, containerSpec, creds, buildOpts...)
+		// `kuke run --env` runtime-env merge (issue #834). Same shape as the
+		// CreateCell-side merge in provision.go: returns containerSpec
+		// unchanged for non-attachable containers or when RuntimeEnv is
+		// empty, otherwise emits a copy whose Env carries the override-on-
+		// key merge. internalCell.Spec.RuntimeEnv is repopulated above (after
+		// r.GetCell) from the inbound RPC cell so this path sees the
+		// per-invocation env even after the disk read stripped it.
+		ociSpec := mergeRuntimeEnvForContainer(containerSpec, attachableID, internalCell.Spec.RuntimeEnv)
+		_, err = r.ctrClient.CreateContainerFromSpec(namespace, ociSpec, creds, buildOpts...)
 		if err != nil {
 			fields = appendCellLogFields([]any{"id", ctrContainerID}, cellID, cellName)
 			fields = append(
