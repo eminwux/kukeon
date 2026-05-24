@@ -24,6 +24,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/internal/cellconfig"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -31,14 +32,40 @@ import (
 	"github.com/spf13/viper"
 )
 
+const (
+	// syncStateSynced / syncStateOutOfSync are the SYNC column verdicts for
+	// Config-lineage cells. syncStateNone is the third state for cells that
+	// carry no kukeon.io/config lineage label (the bulk of the host —
+	// hand-built and `-b`-lineage cells are deliberately out of scope of the
+	// reconciler's OutOfSync detection per #819's umbrella) and follows the
+	// established `-` convention used by CgroupPath when empty.
+	syncStateSynced    = "Synced"
+	syncStateOutOfSync = "OutOfSync"
+	syncStateNone      = "-"
+)
+
 // MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
 func NewCellCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:           "cell [name]",
-		Aliases:       []string{"cells", "ce"},
-		Short:         "Get or list cell information",
+		Use:     "cell [name]",
+		Aliases: []string{"cells", "ce"},
+		Short:   "Get or list cell information",
+		Long: `Get or list cell information.
+
+The default table includes a SYNC column showing the reconciler-detected
+sync state of each cell relative to its lineage Config:
+
+  Synced     - the live spec matches what the lineage Config materializes
+  OutOfSync  - divergence detected (or the lineage Config was deleted)
+  -          - the cell carries no kukeon.io/config lineage label, so the
+               Config reconciler does not track sync state for it
+
+Use ` + "`-o wide`" + ` to add a DIVERGENCE column with the short divergence
+summary (or the error message when the reconciler could not compute
+divergence). ` + "`-o yaml` / `-o json`" + ` surface the full
+outOfSync / outOfSyncReason / outOfSyncError status fields.`,
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -49,7 +76,7 @@ func NewCellCmd() *cobra.Command {
 			}
 			defer func() { _ = client.Close() }()
 
-			outputFormat, err := shared.ParseOutputFormat(cmd)
+			wide, outputFormat, err := resolveOutput(cmd)
 			if err != nil {
 				return err
 			}
@@ -110,7 +137,7 @@ func NewCellCmd() *cobra.Command {
 				return err
 			}
 			showControllers, _ := cmd.Flags().GetBool("show-controllers")
-			return printCells(cmd, cells, outputFormat, showControllers)
+			return printCells(cmd, cells, outputFormat, wide, showControllers)
 		},
 	}
 
@@ -121,7 +148,7 @@ func NewCellCmd() *cobra.Command {
 	cmd.Flags().String("stack", "", "Filter cells by stack name")
 	_ = viper.BindPFlag(config.KUKE_GET_CELL_STACK.ViperKey, cmd.Flags().Lookup("stack"))
 	cmd.Flags().
-		StringP("output", "o", "", "Output format (yaml, json, table). Default: table for list, yaml for single resource")
+		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
 	cmd.Flags().Bool(
@@ -146,6 +173,65 @@ func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
 	return kukeshared.ClientFromCmd(cmd)
 }
 
+// resolveOutput sits between the cobra flag and ParseOutputFormat so the
+// `wide` value is normalised to `table` plus a bool, leaving the shared
+// yaml/json/table parser untouched. Mirrors the helper in cmd/kuke/get/image.
+func resolveOutput(cmd *cobra.Command) (bool, shared.OutputFormat, error) {
+	raw := strings.TrimSpace(cmd.Flag("output").Value.String())
+	if strings.EqualFold(raw, "wide") {
+		_ = cmd.Flags().Set("output", "table")
+		format, err := shared.ParseOutputFormat(cmd)
+		return true, format, err
+	}
+	format, err := shared.ParseOutputFormat(cmd)
+	return false, format, err
+}
+
+// cellSyncState renders the SYNC column for a cell. The three values are
+// driven by the cell's lineage label and the reconciler-written OutOfSync
+// status fields (issue #820, populated by #830's detection loop). Cells
+// where OutOfSyncError is non-empty (divergence undecidable — Blueprint
+// missing or materialization failure) render as OutOfSync so the operator
+// gets one actionable "look at this cell" signal in the SYNC column; the
+// distinct error message surfaces in the DIVERGENCE column under -o wide
+// and in the outOfSyncError field under -o yaml/json.
+func cellSyncState(c *v1beta1.CellDoc) string {
+	if !hasConfigLineage(c) {
+		return syncStateNone
+	}
+	if c.Status.OutOfSync || c.Status.OutOfSyncError != "" {
+		return syncStateOutOfSync
+	}
+	return syncStateSynced
+}
+
+// cellDivergence renders the DIVERGENCE column under -o wide. Synced or
+// no-lineage cells render `-` (matching the established CgroupPath empty
+// convention) so the column stays width-aligned. Reason takes precedence
+// over Error when both are set (the reconciler never sets both, but the
+// order is defensive).
+func cellDivergence(c *v1beta1.CellDoc) string {
+	if !hasConfigLineage(c) {
+		return syncStateNone
+	}
+	if c.Status.OutOfSyncReason != "" {
+		return c.Status.OutOfSyncReason
+	}
+	if c.Status.OutOfSyncError != "" {
+		return "error: " + c.Status.OutOfSyncError
+	}
+	return syncStateNone
+}
+
+// hasConfigLineage matches the configLineage helper in
+// internal/controller/reconcile_outofsync.go: a cell is Config-lineage iff
+// it carries a non-empty kukeon.io/config label. Replicated inline rather
+// than imported to keep the CLI leaf free of an internal/controller
+// dependency.
+func hasConfigLineage(c *v1beta1.CellDoc) bool {
+	return strings.TrimSpace(c.Metadata.Labels[cellconfig.LabelConfig]) != ""
+}
+
 func printCell(cell *v1beta1.CellDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatJSON:
@@ -155,7 +241,13 @@ func printCell(cell *v1beta1.CellDoc, format shared.OutputFormat) error {
 	}
 }
 
-func printCells(cmd *cobra.Command, cells []v1beta1.CellDoc, format shared.OutputFormat, showControllers bool) error {
+func printCells(
+	cmd *cobra.Command,
+	cells []v1beta1.CellDoc,
+	format shared.OutputFormat,
+	wide bool,
+	showControllers bool,
+) error {
 	switch format {
 	case shared.OutputFormatYAML:
 		return shared.PrintYAML(cells)
@@ -166,7 +258,10 @@ func printCells(cmd *cobra.Command, cells []v1beta1.CellDoc, format shared.Outpu
 			cmd.Println("No cells found.")
 			return nil
 		}
-		headers := []string{"NAME", "REALM", "SPACE", "STACK", "STATE", "CGROUP"}
+		headers := []string{"NAME", "REALM", "SPACE", "STACK", "STATE", "SYNC", "CGROUP"}
+		if wide {
+			headers = append(headers, "DIVERGENCE")
+		}
 		if showControllers {
 			headers = append(headers, "CONTROLLERS")
 		}
@@ -178,7 +273,18 @@ func printCells(cmd *cobra.Command, cells []v1beta1.CellDoc, format shared.Outpu
 			if cgroup == "" {
 				cgroup = "-"
 			}
-			row := []string{c.Metadata.Name, c.Spec.RealmID, c.Spec.SpaceID, c.Spec.StackID, state, cgroup}
+			row := []string{
+				c.Metadata.Name,
+				c.Spec.RealmID,
+				c.Spec.SpaceID,
+				c.Spec.StackID,
+				state,
+				cellSyncState(c),
+				cgroup,
+			}
+			if wide {
+				row = append(row, cellDivergence(c))
+			}
 			if showControllers {
 				row = append(row, shared.FormatControllers(c.Status.SubtreeControllers))
 			}

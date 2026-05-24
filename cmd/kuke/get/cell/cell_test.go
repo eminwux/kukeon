@@ -22,11 +22,13 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 
 	cell "github.com/eminwux/kukeon/cmd/kuke/get/cell"
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/cellconfig"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -133,6 +135,194 @@ func TestNewCellCmd(t *testing.T) {
 			}
 			if tt.wantOutput != "" && !strings.Contains(buf.String(), tt.wantOutput) {
 				t.Errorf("output missing %q\nGot:\n%s", tt.wantOutput, buf.String())
+			}
+		})
+	}
+}
+
+// TestNewCellCmd_SyncColumn covers the SYNC column the `kuke get cell`
+// default table acquired alongside #830's OutOfSync detection (issue #822).
+// Each subtest pins a single mock cell and asserts the rendered SYNC value
+// and (in -o wide) the DIVERGENCE value, plus that the SYNC header is
+// always present in the default table. The fourth case asserts the full
+// status fields land in -o yaml without an extra projection step — the
+// strict-omitempty serialization in pkg/api/model/v1beta1/cell.go means
+// non-default values surface automatically.
+func TestNewCellCmd_SyncColumn(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	configLineageLabels := map[string]string{cellconfig.LabelConfig: "prod"}
+
+	tests := []struct {
+		name        string
+		cells       []v1beta1.CellDoc
+		extraFlags  map[string]string
+		wantHeaders []string
+		wantRow     []string // substrings that must all appear on the cell's row
+		wantStatus  []string // substrings that must all appear in yaml output
+	}{
+		{
+			name: "synced cell renders Synced in default table",
+			cells: []v1beta1.CellDoc{{
+				Metadata: v1beta1.CellMetadata{Name: "ce1", Labels: configLineageLabels},
+				Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+				Status:   v1beta1.CellStatus{State: v1beta1.CellStateReady},
+			}},
+			wantHeaders: []string{"SYNC"},
+			wantRow:     []string{"ce1", "Synced"},
+		},
+		{
+			name: "out-of-sync cell renders OutOfSync in default table",
+			cells: []v1beta1.CellDoc{{
+				Metadata: v1beta1.CellMetadata{Name: "ce2", Labels: configLineageLabels},
+				Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+				Status: v1beta1.CellStatus{
+					State:           v1beta1.CellStateReady,
+					OutOfSync:       true,
+					OutOfSyncReason: "spec differs: image",
+				},
+			}},
+			wantHeaders: []string{"SYNC"},
+			wantRow:     []string{"ce2", "OutOfSync"},
+		},
+		{
+			name: "no-lineage cell renders dash in SYNC column",
+			cells: []v1beta1.CellDoc{{
+				Metadata: v1beta1.CellMetadata{Name: "ce3"},
+				Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+				Status:   v1beta1.CellStatus{State: v1beta1.CellStateReady},
+			}},
+			wantHeaders: []string{"SYNC"},
+			// "ce3 ... - ... -" — the SYNC dash is between STATE and CGROUP.
+			// PrintTable separates columns with two spaces, so the column
+			// reads as a standalone "-" token.
+			wantRow: []string{"ce3", " - "},
+		},
+		{
+			name: "-o wide adds DIVERGENCE column with reason for out-of-sync cells",
+			cells: []v1beta1.CellDoc{{
+				Metadata: v1beta1.CellMetadata{Name: "ce4", Labels: configLineageLabels},
+				Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+				Status: v1beta1.CellStatus{
+					State:           v1beta1.CellStateReady,
+					OutOfSync:       true,
+					OutOfSyncReason: "spec differs: image, env",
+				},
+			}},
+			extraFlags:  map[string]string{"output": "wide"},
+			wantHeaders: []string{"SYNC", "DIVERGENCE"},
+			wantRow:     []string{"ce4", "OutOfSync", "spec differs: image, env"},
+		},
+		{
+			name: "-o wide surfaces OutOfSyncError as error: <msg>",
+			cells: []v1beta1.CellDoc{{
+				Metadata: v1beta1.CellMetadata{Name: "ce5", Labels: configLineageLabels},
+				Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+				Status: v1beta1.CellStatus{
+					State:          v1beta1.CellStateReady,
+					OutOfSyncError: `blueprint "web" not found`,
+				},
+			}},
+			extraFlags:  map[string]string{"output": "wide"},
+			wantHeaders: []string{"SYNC", "DIVERGENCE"},
+			// OutOfSyncError folds into the OutOfSync SYNC verdict; the
+			// distinct surface lives in DIVERGENCE so the operator sees
+			// the actionable signal in the column they're filtering on.
+			wantRow: []string{"ce5", "OutOfSync", `error: blueprint "web" not found`},
+		},
+		{
+			name: "-o yaml passes through outOfSync and outOfSyncReason fields",
+			cells: []v1beta1.CellDoc{{
+				Metadata: v1beta1.CellMetadata{Name: "ce6", Labels: configLineageLabels},
+				Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+				Status: v1beta1.CellStatus{
+					State:           v1beta1.CellStateReady,
+					OutOfSync:       true,
+					OutOfSyncReason: "lineage Config deleted",
+				},
+			}},
+			extraFlags: map[string]string{"output": "yaml"},
+			wantStatus: []string{"outOfSync: true", "outOfSyncReason: lineage Config deleted"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+
+			cmd := cell.NewCellCmd()
+			buf := &bytes.Buffer{}
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+			fake := &fakeClient{
+				listCellsFn: func(_, _, _ string) ([]v1beta1.CellDoc, error) {
+					return tt.cells, nil
+				},
+			}
+			ctx = context.WithValue(ctx, cell.MockControllerKey{}, kukeonv1.Client(fake))
+			cmd.SetContext(ctx)
+
+			for flag, val := range tt.extraFlags {
+				if err := cmd.Flags().Set(flag, val); err != nil {
+					t.Fatalf("set flag %s=%s: %v", flag, val, err)
+				}
+			}
+
+			var stdoutBuf *bytes.Buffer
+			if len(tt.wantStatus) > 0 {
+				// shared.PrintYAML / PrintJSON write directly to os.Stdout
+				// (the printer is shared across get subcommands and ignores
+				// cmd's stdout redirection). Capture via os.Pipe — same
+				// pattern the shared tests in cmd/kuke/get/shared use.
+				oldStdout := os.Stdout
+				r, w, pipeErr := os.Pipe()
+				if pipeErr != nil {
+					t.Fatalf("os.Pipe: %v", pipeErr)
+				}
+				os.Stdout = w
+				t.Cleanup(func() {
+					os.Stdout = oldStdout
+				})
+				stdoutBuf = &bytes.Buffer{}
+				done := make(chan struct{})
+				go func() {
+					_, _ = stdoutBuf.ReadFrom(r)
+					close(done)
+				}()
+				if err := cmd.Execute(); err != nil {
+					_ = w.Close()
+					<-done
+					t.Fatalf("unexpected error: %v", err)
+				}
+				_ = w.Close()
+				<-done
+			} else {
+				if err := cmd.Execute(); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+
+			out := buf.String()
+			for _, h := range tt.wantHeaders {
+				if !strings.Contains(out, h) {
+					t.Errorf("table missing header %q\nGot:\n%s", h, out)
+				}
+			}
+			for _, sub := range tt.wantRow {
+				if !strings.Contains(out, sub) {
+					t.Errorf("row missing %q\nGot:\n%s", sub, out)
+				}
+			}
+			if stdoutBuf != nil {
+				yamlOut := stdoutBuf.String()
+				for _, sub := range tt.wantStatus {
+					if !strings.Contains(yamlOut, sub) {
+						t.Errorf("yaml output missing %q\nGot:\n%s", sub, yamlOut)
+					}
+				}
 			}
 		})
 	}
