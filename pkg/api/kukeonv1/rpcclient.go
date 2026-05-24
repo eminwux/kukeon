@@ -319,6 +319,21 @@ func (c *UnixClient) GetConfig(
 	return reply.Result, nil
 }
 
+// CreateConfig implements Client (#839).
+func (c *UnixClient) CreateConfig(
+	ctx context.Context, doc v1beta1.CellConfigDoc,
+) (CreateConfigResult, error) {
+	args := &CreateConfigArgs{Doc: doc}
+	reply := &CreateConfigReply{}
+	if err := c.call(ctx, MethodCreateConfig, args, reply); err != nil {
+		return CreateConfigResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // ListRealms implements Client.
 func (c *UnixClient) ListRealms(ctx context.Context) ([]v1beta1.RealmDoc, error) {
 	args := &ListRealmsArgs{}

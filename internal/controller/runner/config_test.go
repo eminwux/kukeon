@@ -78,6 +78,86 @@ func TestWriteConfig_CreatesWorldReadableFile(t *testing.T) {
 	}
 }
 
+// TestWriteConfigIfAbsent_CreatesAndRejectsCollision pins the issue #839
+// atomic-create-only contract: the first WriteConfigIfAbsent persists the
+// document under the same path layout as WriteConfig, and a second call to
+// the same name returns errdefs.ErrConfigExists without overwriting the
+// stored body. The `kuke run <src> --clone` gap-fill counter loop relies on
+// the EEXIST sentinel to retry on the next free N.
+func TestWriteConfigIfAbsent_CreatesAndRejectsCollision(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	first := intmodel.CellConfig{
+		Metadata: intmodel.CellConfigMetadata{Name: "kukeon-dev-0", Realm: "kuke-system"},
+		Document: []byte("first"),
+	}
+	if err := r.WriteConfigIfAbsent(first); err != nil {
+		t.Fatalf("first WriteConfigIfAbsent() error = %v", err)
+	}
+
+	path := fs.ConfigPath(runPath, "kuke-system", "", "", "kukeon-dev-0")
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading written config: %v", err)
+	}
+	if string(got) != "first" {
+		t.Errorf("config bytes = %q, want first", got)
+	}
+
+	// A second WriteConfigIfAbsent must NOT overwrite — the AC's concurrency
+	// guarantee depends on this.
+	second := intmodel.CellConfig{
+		Metadata: intmodel.CellConfigMetadata{Name: "kukeon-dev-0", Realm: "kuke-system"},
+		Document: []byte("second"),
+	}
+	err = r.WriteConfigIfAbsent(second)
+	if !errors.Is(err, errdefs.ErrConfigExists) {
+		t.Fatalf("second WriteConfigIfAbsent() error = %v, want ErrConfigExists", err)
+	}
+
+	// Stored bytes must be unchanged.
+	got, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading config after collision: %v", err)
+	}
+	if string(got) != "first" {
+		t.Errorf("config bytes after collision = %q, want first (must not overwrite)", got)
+	}
+}
+
+// TestWriteConfigIfAbsent_LeavesNoTempFiles confirms the temp file written
+// inside ConfigsDir is cleaned up on both success and EEXIST paths — a leak
+// would surface as a `.config-*.tmp` entry that ListConfigs already skips
+// but is still a sign of broken hygiene.
+func TestWriteConfigIfAbsent_LeavesNoTempFiles(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	cfg := intmodel.CellConfig{
+		Metadata: intmodel.CellConfigMetadata{Name: "alpha", Realm: "kuke-system"},
+		Document: []byte("x"),
+	}
+	if err := r.WriteConfigIfAbsent(cfg); err != nil {
+		t.Fatalf("WriteConfigIfAbsent (success) error = %v", err)
+	}
+	if err := r.WriteConfigIfAbsent(cfg); !errors.Is(err, errdefs.ErrConfigExists) {
+		t.Fatalf("WriteConfigIfAbsent (collision) error = %v, want ErrConfigExists", err)
+	}
+
+	dir := fs.ConfigsDir(runPath, "kuke-system", "", "")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read configs dir: %v", err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if len(name) > len(".config-") && name[:len(".config-")] == ".config-" {
+			t.Errorf("temp file leaked: %s", name)
+		}
+	}
+}
+
 // TestWriteConfig_OverwriteReportsUpdated confirms a re-apply overwrites the
 // document and reports created=false.
 func TestWriteConfig_OverwriteReportsUpdated(t *testing.T) {

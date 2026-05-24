@@ -149,6 +149,16 @@ type Runner interface {
 	// verified the config's scope exists and the referenced blueprint resolves.
 	WriteConfig(config intmodel.CellConfig) (created bool, err error)
 
+	// WriteConfigIfAbsent atomically persists a CellConfig document only when
+	// no file at the target path exists yet (issue #839). It is the
+	// create-only sibling of WriteConfig used by `kuke run <src> --clone`:
+	// the gap-fill counter allocator retries on errdefs.ErrConfigExists to
+	// race-safely claim the next-free N. The implementation writes to a
+	// same-directory temp file, then uses `os.Link` to atomically claim the
+	// destination — link returns EEXIST when the path is taken, so two
+	// concurrent invocations never silently overwrite each other.
+	WriteConfigIfAbsent(config intmodel.CellConfig) error
+
 	// GetConfig reads a single named, scoped CellConfig's document off disk
 	// (issue #644). Like GetBlueprint the full document is returned — a Config
 	// carries only a blueprint ref, scalar values, and slot fills, no credential

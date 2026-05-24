@@ -426,6 +426,17 @@ var (
 	ErrGetConfig      = errors.New("failed to get config")
 	ErrListConfigs    = errors.New("failed to list configs")
 	ErrDeleteConfig   = errors.New("failed to delete config document")
+	// ErrConfigExists is the atomic-create-only contract for CellConfig
+	// writes (issue #839, `kuke run <src> --clone`). The clone path's
+	// counter allocator retries on this sentinel; the named create-or-fail
+	// path (`--clone --name X`) surfaces it as a hard collision error.
+	ErrConfigExists = errors.New("config already exists")
+	// ErrCreateConfig wraps a failure on the controller-level atomic
+	// create-only CellConfig endpoint. Scope/blueprint/slot validation
+	// failures propagate their own sentinels (ErrConfigScopeNotFound,
+	// ErrConfigBlueprintNotFound, …); this sentinel wraps everything else
+	// the create path can surface.
+	ErrCreateConfig = errors.New("failed to create config document")
 
 	// ErrMustRunAsRoot is returned by direct-write subcommands (kuke init,
 	// kuke daemon reset, kuke image load, kuke doctor cgroups --probe)

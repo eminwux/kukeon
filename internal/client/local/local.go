@@ -387,6 +387,27 @@ func (c *Client) GetBlueprint(
 	}, nil
 }
 
+func (c *Client) CreateConfig(
+	_ context.Context, doc v1beta1.CellConfigDoc,
+) (kukeonv1.CreateConfigResult, error) {
+	internal, _, err := apischeme.NormalizeCellConfig(doc)
+	if err != nil {
+		return kukeonv1.CreateConfigResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	res, err := c.ctrl.CreateConfig(internal)
+	if err != nil {
+		return kukeonv1.CreateConfigResult{}, err
+	}
+	ext, err := apischeme.ConvertCellConfigToExternal(res.Config)
+	if err != nil {
+		return kukeonv1.CreateConfigResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	return kukeonv1.CreateConfigResult{
+		Config:  ext,
+		Created: res.Created,
+	}, nil
+}
+
 func (c *Client) GetConfig(
 	_ context.Context, doc v1beta1.CellConfigDoc,
 ) (kukeonv1.GetConfigResult, error) {

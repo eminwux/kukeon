@@ -128,8 +128,26 @@ func NewRunCmd() *cobra.Command {
 			"to pin a specific cell name (create-or-fail: `--new --name X` fails if cell X "+
 			"already exists in the realm) and with --rm (one-shot ephemeral cell). Only "+
 			"valid with the <config> positional — rejected with -f (where metadata.name is the "+
-			"cell name verbatim) and redundant for -p/-b (which already generate a fresh name).")
+			"cell name verbatim) and redundant for -p/-b (which already generate a fresh name). "+
+			"Mutually exclusive with --clone (which forks a persistent clone Config) "+
+			"and --reuse (#835, planned). For multi-instance from one Config use --clone instead.")
 	_ = viper.BindPFlag(config.KUKE_RUN_NEW.ViperKey, cmd.Flags().Lookup("new"))
+
+	cmd.Flags().Bool("clone", false,
+		"Fork the <config> Config into a new persistent clone Config, then run "+
+			"the cell from the clone (#839). The clone's metadata.name is `<src>-<N>` "+
+			"with N the lowest unused integer >= 0 among clones of <src> in the target "+
+			"realm (gap-fill counter, atomic under concurrent invocations). Combine with "+
+			"--name X for an explicit-name create-or-fail clone (fails if a CellConfig X "+
+			"already exists). The clone carries metadata.annotations."+
+			"kukeon.io/source-config=<src> as the lineage marker, and its spec is a deep "+
+			"copy of the source's — independently editable via `kuke apply -f`. The cell "+
+			"started from the clone uses the clone's stable name, so subsequent "+
+			"`kuke run <clone-name>` is idempotent. Use cases: interactive multi-instance "+
+			"(kukeon-dev-0, kukeon-dev-1, ...) and cron pool seeding for --reuse (#835, "+
+			"planned). Only valid with the <config> positional; mutually exclusive with "+
+			"--new and --rm.")
+	_ = viper.BindPFlag(config.KUKE_RUN_CLONE.ViperKey, cmd.Flags().Lookup("clone"))
 
 	cmd.Flags().StringArray("param", nil,
 		"Scalar parameter override as KEY=VALUE; repeatable. Valid with -p/-b. "+
@@ -149,6 +167,10 @@ func NewRunCmd() *cobra.Command {
 	// "exactly one source required" check (cobra has no MarkFlagsOneRequired
 	// equivalent that spans flags + positionals).
 	cmd.MarkFlagsMutuallyExclusive("file", "profile", "blueprint")
+	// Identity-flag mutex on the <config> path (#839): --new and --clone are
+	// distinct operations (ephemeral cell vs. fork the Config). The
+	// `--clone ↔ --rm` mutex lands below after the --rm flag itself is
+	// declared (MarkFlagsMutuallyExclusive panics on an unknown flag name).
 
 	cmd.Flags().StringP("output", "o", "", "Output format: json, yaml (default: human-readable)")
 	_ = viper.BindPFlag(config.KUKE_RUN_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
@@ -182,6 +204,15 @@ func NewRunCmd() *cobra.Command {
 			"than firing the instant the trigger fires.")
 	_ = viper.BindPFlag(config.KUKE_RUN_RM.ViperKey, cmd.Flags().Lookup("rm"))
 
+	// `--clone ↔ --rm` mutex (#839): a persistent clone Config whose cell is
+	// removed on exit is operationally messy; `kuke apply -f <clone-spec>`
+	// is the right path if you want the slot without an attached cell. Must
+	// land here (after --rm and --clone are declared) — MarkFlagsMutuallyExclusive
+	// panics on an unknown flag name. `--new ↔ --clone` is declared with the
+	// other source-mutex block above where both flags are already present.
+	cmd.MarkFlagsMutuallyExclusive("new", "clone")
+	cmd.MarkFlagsMutuallyExclusive("clone", "rm")
+
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
 	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
@@ -207,6 +238,7 @@ type runFlags struct {
 	autoDelete    bool
 	nameOverride  string
 	newCell       bool
+	clone         bool
 	paramArgs     []string
 	paramFile     string
 }
@@ -253,6 +285,7 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 		autoDelete:    viper.GetBool(config.KUKE_RUN_RM.ViperKey),
 		nameOverride:  strings.TrimSpace(viper.GetString(config.KUKE_RUN_NAME.ViperKey)),
 		newCell:       viper.GetBool(config.KUKE_RUN_NEW.ViperKey),
+		clone:         viper.GetBool(config.KUKE_RUN_CLONE.ViperKey),
 		paramFile:     strings.TrimSpace(viper.GetString(config.KUKE_RUN_PARAM_FILE.ViperKey)),
 	}
 
@@ -306,6 +339,10 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 			return runFlags{}, errors.New(
 				"--new is only valid with the <config> positional; -f uses metadata.name verbatim")
 		}
+		if flags.clone {
+			return runFlags{}, errors.New(
+				"--clone is only valid with the <config> positional; -f does not fork a Config")
+		}
 	}
 	// --new is a CellConfig-only knob (only the <config> positional reaches the
 	// daemon-stored CellConfig path). With -p/-b the default already generates
@@ -316,6 +353,13 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 		return runFlags{}, errors.New(
 			"--new is only valid with the <config> positional; -p and -b already materialize a " +
 				"fresh <prefix>-<6hex> cell per invocation")
+	}
+	// --clone is a CellConfig-only knob; it forks a daemon-stored CellConfig
+	// and only the <config> positional reaches that artifact. Reject with
+	// -p/-b for the same "no silent no-op" reason as --new.
+	if flags.clone && flags.configName == "" && flags.file == "" {
+		return runFlags{}, errors.New(
+			"--clone is only valid with the <config> positional; -p and -b have no Config to fork")
 	}
 	if flags.configName != "" {
 		// A CellConfig carries its own scalar values, so --param / --param-file
@@ -747,6 +791,20 @@ func loadFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) 
 			errdefs.ErrConfigNotFound, lookup.Metadata.Name,
 			lookup.Metadata.Realm, lookup.Metadata.Space, lookup.Metadata.Stack,
 		)
+	}
+
+	// --clone: fork the source CellConfig into a new persistent clone and
+	// drive the cell create from the clone's stable identity (#839). The
+	// gap-fill counter (or explicit --name) lives in cloneCellConfig; the
+	// cell-side flow downstream walks the standard stable-name path against
+	// the clone's name, so re-running `kuke run <clone-name>` later is the
+	// idempotent attach the AC's "first-class CellConfig" line guarantees.
+	if flags.clone {
+		clone, cloneErr := cloneCellConfig(cmd.Context(), client, cfgRes.Config, flags.nameOverride)
+		if cloneErr != nil {
+			return v1beta1.CellDoc{}, cloneErr
+		}
+		cfgRes.Config = clone
 	}
 
 	bpRef := cfgRes.Config.Spec.Blueprint

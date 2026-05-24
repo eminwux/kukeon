@@ -753,6 +753,61 @@ func ReconcileConfig(r runner.Runner, desired intmodel.CellConfig) (ReconcileRes
 	return result, nil
 }
 
+// CreateConfig is the atomic create-only sibling of ReconcileConfig used by
+// `kuke run <src> --clone` (issue #839). It runs the same scope-existence,
+// blueprint-resolution, and slot-fill validation as ReconcileConfig, but
+// persists via runner.WriteConfigIfAbsent — so two concurrent invocations of
+// the gap-fill counter loop can race on the same N without silently
+// overwriting each other. Returns errdefs.ErrConfigExists when a Config with
+// the same name already lives in scope; the CLI's counter allocator retries
+// on that sentinel, and `--clone --name X` surfaces it as a hard collision.
+func CreateConfig(r runner.Runner, desired intmodel.CellConfig) (ReconcileResult, error) {
+	result := ReconcileResult{
+		Action: "unchanged",
+		Kind:   "CellConfig",
+		Name:   desired.Metadata.Name,
+	}
+
+	if err := ensureConfigScopeExists(r, desired.Metadata); err != nil {
+		return result, err
+	}
+
+	cfgDoc, err := apischeme.ConvertCellConfigToExternal(desired)
+	if err != nil {
+		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+
+	ref := cfgDoc.Spec.Blueprint
+	bpCarrier, getErr := r.GetBlueprint(intmodel.CellBlueprint{
+		Metadata: intmodel.CellBlueprintMetadata{
+			Name:  ref.Name,
+			Realm: ref.Realm,
+			Space: ref.Space,
+			Stack: ref.Stack,
+		},
+	})
+	if getErr != nil {
+		if errors.Is(getErr, errdefs.ErrBlueprintNotFound) {
+			return result, fmt.Errorf("%w: %q (realm %q)", errdefs.ErrConfigBlueprintNotFound, ref.Name, ref.Realm)
+		}
+		return result, fmt.Errorf("failed to read referenced blueprint %q: %w", ref.Name, getErr)
+	}
+	bpDoc, bpErr := apischeme.ConvertCellBlueprintToExternal(bpCarrier)
+	if bpErr != nil {
+		return result, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, bpErr)
+	}
+
+	if slotErr := cellconfig.ValidateSlotFill(cfgDoc, bpDoc); slotErr != nil {
+		return result, slotErr
+	}
+
+	if writeErr := r.WriteConfigIfAbsent(desired); writeErr != nil {
+		return result, writeErr
+	}
+	result.Action = actionCreated
+	return result, nil
+}
+
 // ensureConfigScopeExists verifies every scope coordinate the config names is
 // reachable, deepest-first. A Config is scopable at realm/space/stack only
 // (never cell), so the walk stops at the stack. A NotFound is translated to
