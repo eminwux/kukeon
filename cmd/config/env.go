@@ -278,6 +278,16 @@ var (
 		"KUKE_CREATE_CONTAINER_PIDS_LIMIT",
 		"kuke/create/container/resources/pidsLimit",
 	)
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONFIG_NAME = DefineKV("KUKE_CREATE_CONFIG_NAME", "kuke/create/config/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONFIG_REALM = DefineKV("KUKE_CREATE_CONFIG_REALM", "kuke/create/config/realm", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONFIG_SPACE = DefineKV("KUKE_CREATE_CONFIG_SPACE", "kuke/create/config/space", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONFIG_STACK = DefineKV("KUKE_CREATE_CONFIG_STACK", "kuke/create/config/stack", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CONFIG_BLUEPRINT = DefineKV("KUKE_CREATE_CONFIG_BLUEPRINT", "kuke/create/config/blueprint")
 
 	// Get command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
