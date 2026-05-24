@@ -461,7 +461,7 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_NAME = DefineKV("KUKE_RUN_NAME", "kuke/run/name")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_RUN_GENERATE_NAME = DefineKV("KUKE_RUN_GENERATE_NAME", "kuke/run/generate-name")
+	KUKE_RUN_NEW = DefineKV("KUKE_RUN_NEW", "kuke/run/new")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_PARAM_FILE = DefineKV("KUKE_RUN_PARAM_FILE", "kuke/run/param-file")
 
