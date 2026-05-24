@@ -65,8 +65,13 @@ func TestRestartCell(t *testing.T) {
 						MetadataExists: true,
 						Cell: v1beta1.CellDoc{
 							Metadata: v1beta1.CellMetadata{Name: doc.Metadata.Name},
-							Spec:     v1beta1.CellSpec{ID: doc.Metadata.Name, RealmID: "r1", SpaceID: "s1", StackID: "st1"},
-							Status:   v1beta1.CellStatus{State: v1beta1.CellStateReady, OutOfSync: false},
+							Spec: v1beta1.CellSpec{
+								ID:      doc.Metadata.Name,
+								RealmID: "r1",
+								SpaceID: "s1",
+								StackID: "st1",
+							},
+							Status: v1beta1.CellStatus{State: v1beta1.CellStateReady, OutOfSync: false},
 						},
 					}, nil
 				},
@@ -89,7 +94,7 @@ func TestRestartCell(t *testing.T) {
 			},
 		},
 		{
-			name: "outofsync ready cell: reconciles via ApplyDocuments",
+			name: "outofsync ready cell: reconciles via ApplyDocuments then explicitly bounces",
 			args: []string{"prod"},
 			setup: func() {
 				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
@@ -105,8 +110,12 @@ func TestRestartCell(t *testing.T) {
 								Name:   "prod",
 								Labels: map[string]string{cellconfig.LabelConfig: "prod"},
 							},
-							Spec:   v1beta1.CellSpec{ID: "prod", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
-							Status: v1beta1.CellStatus{State: v1beta1.CellStateReady, OutOfSync: true, OutOfSyncReason: "spec differs"},
+							Spec: v1beta1.CellSpec{ID: "prod", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+							Status: v1beta1.CellStatus{
+								State:           v1beta1.CellStateReady,
+								OutOfSync:       true,
+								OutOfSyncReason: "spec differs",
+							},
 						},
 					}, nil
 				},
@@ -120,9 +129,19 @@ func TestRestartCell(t *testing.T) {
 						Config: v1beta1.CellConfigDoc{
 							APIVersion: v1beta1.APIVersionV1Beta1,
 							Kind:       v1beta1.KindCellConfig,
-							Metadata:   v1beta1.CellConfigMetadata{Name: "prod", Realm: "r1", Space: "s1", Stack: "st1"},
+							Metadata: v1beta1.CellConfigMetadata{
+								Name:  "prod",
+								Realm: "r1",
+								Space: "s1",
+								Stack: "st1",
+							},
 							Spec: v1beta1.CellConfigSpec{
-								Blueprint: v1beta1.CellConfigBlueprintRef{Name: "web", Realm: "r1", Space: "s1", Stack: "st1"},
+								Blueprint: v1beta1.CellConfigBlueprintRef{
+									Name:  "web",
+									Realm: "r1",
+									Space: "s1",
+									Stack: "st1",
+								},
 							},
 						},
 					}, nil
@@ -136,7 +155,12 @@ func TestRestartCell(t *testing.T) {
 						Blueprint: v1beta1.CellBlueprintDoc{
 							APIVersion: v1beta1.APIVersionV1Beta1,
 							Kind:       v1beta1.KindCellBlueprint,
-							Metadata:   v1beta1.CellBlueprintMetadata{Name: "web", Realm: "r1", Space: "s1", Stack: "st1"},
+							Metadata: v1beta1.CellBlueprintMetadata{
+								Name:  "web",
+								Realm: "r1",
+								Space: "s1",
+								Stack: "st1",
+							},
 							Spec: v1beta1.CellBlueprintSpec{
 								Cell: v1beta1.BlueprintCellSpec{
 									Containers: []v1beta1.BlueprintContainer{
@@ -161,6 +185,222 @@ func TestRestartCell(t *testing.T) {
 						},
 					}, nil
 				},
+				stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) { return kukeonv1.StopCellResult{}, nil },
+				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+					return kukeonv1.StartCellResult{Cell: doc}, nil
+				},
+			},
+			wantOutput: `Restarted cell "prod" from stack "st1" (reconciled from config "prod")`,
+			validate: func(t *testing.T, f *fakeClient) {
+				if f.applyCalls != 1 {
+					t.Fatalf("want exactly 1 ApplyDocuments call, got %d", f.applyCalls)
+				}
+				// Apply alone does not guarantee a bounce — the daemon's
+				// reconcile only stops+starts containers on image/cmd/args
+				// changes. The CLI explicitly StopCell+StartCells afterwards
+				// to honor the "restart" verb's contract.
+				if f.stopCalls != 1 || f.startCalls != 1 {
+					t.Fatalf("OutOfSync restart must follow Apply with StopCell+StartCell, got stop=%d start=%d",
+						f.stopCalls, f.startCalls)
+				}
+			},
+		},
+		{
+			// Reviewer-requested coverage of the reconcile-no-bounce gap: a
+			// pure env-var divergence routes through UpdateCell's metadata
+			// path (containerSpecChanged returns false for non-image/cmd/args
+			// fields), so the daemon does NOT bounce containers. The CLI's
+			// follow-up StopCell+StartCell is what makes "kuke restart" on
+			// this divergence class actually bounce the running containers.
+			name: "outofsync env-var-only divergence: reconciles then explicitly bounces",
+			args: []string{"prod"},
+			setup: func() {
+				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
+				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
+			},
+			fake: &fakeClient{
+				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{
+						MetadataExists: true,
+						Cell: v1beta1.CellDoc{
+							Metadata: v1beta1.CellMetadata{
+								Name:   "prod",
+								Labels: map[string]string{cellconfig.LabelConfig: "prod"},
+							},
+							Spec: v1beta1.CellSpec{ID: "prod", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+							Status: v1beta1.CellStatus{
+								State:           v1beta1.CellStateReady,
+								OutOfSync:       true,
+								OutOfSyncReason: "env vars differ",
+							},
+						},
+					}, nil
+				},
+				getConfigFn: func(_ v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+					return kukeonv1.GetConfigResult{
+						MetadataExists: true,
+						Config: v1beta1.CellConfigDoc{
+							APIVersion: v1beta1.APIVersionV1Beta1,
+							Kind:       v1beta1.KindCellConfig,
+							Metadata: v1beta1.CellConfigMetadata{
+								Name:  "prod",
+								Realm: "r1",
+								Space: "s1",
+								Stack: "st1",
+							},
+							Spec: v1beta1.CellConfigSpec{
+								Blueprint: v1beta1.CellConfigBlueprintRef{
+									Name:  "web",
+									Realm: "r1",
+									Space: "s1",
+									Stack: "st1",
+								},
+							},
+						},
+					}, nil
+				},
+				getBlueprintFn: func(_ v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+					return kukeonv1.GetBlueprintResult{
+						MetadataExists: true,
+						Blueprint: v1beta1.CellBlueprintDoc{
+							APIVersion: v1beta1.APIVersionV1Beta1,
+							Kind:       v1beta1.KindCellBlueprint,
+							Metadata: v1beta1.CellBlueprintMetadata{
+								Name:  "web",
+								Realm: "r1",
+								Space: "s1",
+								Stack: "st1",
+							},
+							Spec: v1beta1.CellBlueprintSpec{
+								Cell: v1beta1.BlueprintCellSpec{
+									Containers: []v1beta1.BlueprintContainer{{ID: "main", Image: "nginx:latest"}},
+								},
+							},
+						},
+					}, nil
+				},
+				applyDocsFn: func(_ []byte) (kukeonv1.ApplyDocumentsResult, error) {
+					// Mirrors what reconcile.go emits when only env vars
+					// changed: the container is "updated" with field list,
+					// but no "image|command|args" entries are present, so
+					// UpdateCell patched in place without bouncing.
+					return kukeonv1.ApplyDocumentsResult{
+						Resources: []kukeonv1.ApplyResourceResult{
+							{
+								Kind:    "Cell",
+								Name:    "prod",
+								Action:  "updated",
+								Changes: []string{`container "main" updated: env`},
+							},
+						},
+					}, nil
+				},
+				stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) { return kukeonv1.StopCellResult{}, nil },
+				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+					return kukeonv1.StartCellResult{Cell: doc}, nil
+				},
+			},
+			wantOutput: `Restarted cell "prod" from stack "st1" (reconciled from config "prod")`,
+			validate: func(t *testing.T, f *fakeClient) {
+				if f.applyCalls != 1 {
+					t.Fatalf("want exactly 1 ApplyDocuments call, got %d", f.applyCalls)
+				}
+				if f.stopCalls != 1 || f.startCalls != 1 {
+					t.Fatalf(
+						"env-var-only OutOfSync restart MUST follow Apply with StopCell+StartCell, got stop=%d start=%d",
+						f.stopCalls,
+						f.startCalls,
+					)
+				}
+			},
+		},
+		{
+			// The other half of the env-var-only test's contract: when the
+			// daemon's reconcile already bounced every container (full root
+			// recreate), the CLI must NOT add a redundant StopCell+StartCell.
+			// reconcileBouncedAll's signal "root container recreated" gates
+			// this branch.
+			name: "outofsync ready cell with root-container recreate: skips redundant bounce",
+			args: []string{"prod"},
+			setup: func() {
+				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
+				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
+			},
+			fake: &fakeClient{
+				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{
+						MetadataExists: true,
+						Cell: v1beta1.CellDoc{
+							Metadata: v1beta1.CellMetadata{
+								Name:   "prod",
+								Labels: map[string]string{cellconfig.LabelConfig: "prod"},
+							},
+							Spec: v1beta1.CellSpec{ID: "prod", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+							Status: v1beta1.CellStatus{
+								State:           v1beta1.CellStateReady,
+								OutOfSync:       true,
+								OutOfSyncReason: "root image bumped",
+							},
+						},
+					}, nil
+				},
+				getConfigFn: func(_ v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+					return kukeonv1.GetConfigResult{
+						MetadataExists: true,
+						Config: v1beta1.CellConfigDoc{
+							APIVersion: v1beta1.APIVersionV1Beta1,
+							Kind:       v1beta1.KindCellConfig,
+							Metadata: v1beta1.CellConfigMetadata{
+								Name:  "prod",
+								Realm: "r1",
+								Space: "s1",
+								Stack: "st1",
+							},
+							Spec: v1beta1.CellConfigSpec{
+								Blueprint: v1beta1.CellConfigBlueprintRef{
+									Name:  "web",
+									Realm: "r1",
+									Space: "s1",
+									Stack: "st1",
+								},
+							},
+						},
+					}, nil
+				},
+				getBlueprintFn: func(_ v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+					return kukeonv1.GetBlueprintResult{
+						MetadataExists: true,
+						Blueprint: v1beta1.CellBlueprintDoc{
+							APIVersion: v1beta1.APIVersionV1Beta1,
+							Kind:       v1beta1.KindCellBlueprint,
+							Metadata: v1beta1.CellBlueprintMetadata{
+								Name:  "web",
+								Realm: "r1",
+								Space: "s1",
+								Stack: "st1",
+							},
+							Spec: v1beta1.CellBlueprintSpec{
+								Cell: v1beta1.BlueprintCellSpec{
+									Containers: []v1beta1.BlueprintContainer{{ID: "main", Image: "nginx:latest"}},
+								},
+							},
+						},
+					}, nil
+				},
+				applyDocsFn: func(_ []byte) (kukeonv1.ApplyDocumentsResult, error) {
+					return kukeonv1.ApplyDocumentsResult{
+						Resources: []kukeonv1.ApplyResourceResult{
+							{
+								Kind:    "Cell",
+								Name:    "prod",
+								Action:  "updated",
+								Changes: []string{"root container recreated"},
+							},
+						},
+					}, nil
+				},
 			},
 			wantOutput: `Restarted cell "prod" from stack "st1" (reconciled from config "prod")`,
 			validate: func(t *testing.T, f *fakeClient) {
@@ -168,8 +408,11 @@ func TestRestartCell(t *testing.T) {
 					t.Fatalf("want exactly 1 ApplyDocuments call, got %d", f.applyCalls)
 				}
 				if f.stopCalls != 0 || f.startCalls != 0 {
-					t.Fatalf("OutOfSync restart must not call StopCell/StartCell directly, got stop=%d start=%d",
-						f.stopCalls, f.startCalls)
+					t.Fatalf(
+						"root-container recreate already bounced everything; CLI must NOT add a redundant StopCell+StartCell, got stop=%d start=%d",
+						f.stopCalls,
+						f.startCalls,
+					)
 				}
 			},
 		},
@@ -285,8 +528,10 @@ func TestRestartCell(t *testing.T) {
 						},
 					}, nil
 				},
-				stopCellFn:  func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) { return kukeonv1.StopCellResult{}, nil },
-				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) { return kukeonv1.StartCellResult{Cell: doc}, nil },
+				stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) { return kukeonv1.StopCellResult{}, nil },
+				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+					return kukeonv1.StartCellResult{Cell: doc}, nil
+				},
 			},
 			wantOutput: `Restarted cell "orphan" from stack "st1"`,
 			wantStderr: `notice: cell "orphan" is OutOfSync but carries no kukeon.io/config label`,
@@ -316,8 +561,10 @@ func TestRestartCell(t *testing.T) {
 						},
 					}, nil
 				},
-				stopCellFn:  func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) { return kukeonv1.StopCellResult{}, nil },
-				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) { return kukeonv1.StartCellResult{Cell: doc}, nil },
+				stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) { return kukeonv1.StopCellResult{}, nil },
+				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+					return kukeonv1.StartCellResult{Cell: doc}, nil
+				},
 			},
 			wantOutput: `Restarted cell "degraded" from stack "st1"`,
 			wantStderr: `OutOfSync detection failed (referenced blueprint missing)`,
@@ -339,16 +586,22 @@ func TestRestartCell(t *testing.T) {
 								Name:   "orphan",
 								Labels: map[string]string{cellconfig.LabelConfig: "deleted-cfg"},
 							},
-							Spec:   v1beta1.CellSpec{ID: "orphan", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
-							Status: v1beta1.CellStatus{State: v1beta1.CellStateReady, OutOfSync: true, OutOfSyncReason: "lineage Config deleted"},
+							Spec: v1beta1.CellSpec{ID: "orphan", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+							Status: v1beta1.CellStatus{
+								State:           v1beta1.CellStateReady,
+								OutOfSync:       true,
+								OutOfSyncReason: "lineage Config deleted",
+							},
 						},
 					}, nil
 				},
 				getConfigFn: func(_ v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
 					return kukeonv1.GetConfigResult{MetadataExists: false}, nil
 				},
-				stopCellFn:  func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) { return kukeonv1.StopCellResult{}, nil },
-				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) { return kukeonv1.StartCellResult{Cell: doc}, nil },
+				stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) { return kukeonv1.StopCellResult{}, nil },
+				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+					return kukeonv1.StartCellResult{Cell: doc}, nil
+				},
 			},
 			wantOutput: `Restarted cell "orphan" from stack "st1"`,
 			wantStderr: `reconcile materialisation failed`,
@@ -381,9 +634,19 @@ func TestRestartCell(t *testing.T) {
 						Config: v1beta1.CellConfigDoc{
 							APIVersion: v1beta1.APIVersionV1Beta1,
 							Kind:       v1beta1.KindCellConfig,
-							Metadata:   v1beta1.CellConfigMetadata{Name: "prod", Realm: "r1", Space: "s1", Stack: "st1"},
+							Metadata: v1beta1.CellConfigMetadata{
+								Name:  "prod",
+								Realm: "r1",
+								Space: "s1",
+								Stack: "st1",
+							},
 							Spec: v1beta1.CellConfigSpec{
-								Blueprint: v1beta1.CellConfigBlueprintRef{Name: "web", Realm: "r1", Space: "s1", Stack: "st1"},
+								Blueprint: v1beta1.CellConfigBlueprintRef{
+									Name:  "web",
+									Realm: "r1",
+									Space: "s1",
+									Stack: "st1",
+								},
 							},
 						},
 					}, nil
@@ -394,9 +657,16 @@ func TestRestartCell(t *testing.T) {
 						Blueprint: v1beta1.CellBlueprintDoc{
 							APIVersion: v1beta1.APIVersionV1Beta1,
 							Kind:       v1beta1.KindCellBlueprint,
-							Metadata:   v1beta1.CellBlueprintMetadata{Name: "web", Realm: "r1", Space: "s1", Stack: "st1"},
+							Metadata: v1beta1.CellBlueprintMetadata{
+								Name:  "web",
+								Realm: "r1",
+								Space: "s1",
+								Stack: "st1",
+							},
 							Spec: v1beta1.CellBlueprintSpec{
-								Cell: v1beta1.BlueprintCellSpec{Containers: []v1beta1.BlueprintContainer{{ID: "main", Image: "nginx:latest"}}},
+								Cell: v1beta1.BlueprintCellSpec{
+									Containers: []v1beta1.BlueprintContainer{{ID: "main", Image: "nginx:latest"}},
+								},
 							},
 						},
 					}, nil
@@ -519,12 +789,12 @@ type fakeClient struct {
 	startCellFn    func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error)
 	applyDocsFn    func(rawYAML []byte) (kukeonv1.ApplyDocumentsResult, error)
 
-	getCellCalls  int
-	stopCalls     int
-	startCalls    int
-	getConfigCnt  int
-	getBpCalls    int
-	applyCalls    int
+	getCellCalls int
+	stopCalls    int
+	startCalls   int
+	getConfigCnt int
+	getBpCalls   int
+	applyCalls   int
 }
 
 func (f *fakeClient) GetCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
@@ -543,7 +813,10 @@ func (f *fakeClient) GetConfig(_ context.Context, doc v1beta1.CellConfigDoc) (ku
 	return f.getConfigFn(doc)
 }
 
-func (f *fakeClient) GetBlueprint(_ context.Context, doc v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+func (f *fakeClient) GetBlueprint(
+	_ context.Context,
+	doc v1beta1.CellBlueprintDoc,
+) (kukeonv1.GetBlueprintResult, error) {
 	f.getBpCalls++
 	if f.getBlueprintFn == nil {
 		return kukeonv1.GetBlueprintResult{}, errors.New("unexpected GetBlueprint call")

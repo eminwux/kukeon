@@ -42,11 +42,17 @@ type MockControllerKey struct{}
 // error/partial-state cell is refused with a `kuke delete cell` pointer.
 //
 // The reconcile branch composes at CLI level over GetConfig + GetBlueprint +
-// ApplyDocuments (which the daemon already wires to stop+update+start on a
-// divergent live cell) rather than introducing a new daemon-side RPC — keeps
-// this change scoped to one CLI verb and avoids a wire-format addition. The
-// AC's user-facing contract holds either way (per the issue's open-question
-// note).
+// ApplyDocuments rather than introducing a new daemon-side RPC — keeps this
+// change scoped to one CLI verb and avoids a wire-format addition. The daemon's
+// ApplyDocuments only bounces containers when image/command/args change (see
+// internal/controller/runner/update_cell.go:containerSpecChanged) — pure
+// env-var or metadata-only divergence is patched in place. To preserve the
+// "restart" verb's contract ("all running containers bounce"), the CLI follows
+// the ApplyDocuments call with an explicit StopCell + StartCell whenever the
+// reconcile did not itself bounce everything (root-container recreate or
+// from-Stopped rematerialize are the only paths that already bounce all
+// containers — see reconcileBouncedAll). The AC's user-facing contract holds
+// either way (per the issue's open-question note).
 func NewCellCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "cell [name]",
@@ -194,9 +200,70 @@ func restartReady(
 	if applyErr != nil {
 		return applyErr
 	}
+	if failErr := reportApplyFailures(result); failErr != nil {
+		return failErr
+	}
+	// Honor the restart contract: the daemon's reconcile only bounces
+	// containers when image/command/args change (update_cell.go
+	// containerSpecChanged), so pure env-var or metadata-only divergence
+	// leaves running containers untouched. Add an explicit StopCell +
+	// StartCell unless the reconcile already bounced every container (full
+	// root-container recreate or from-Stopped rematerialize), so the user's
+	// `kuke restart` invariant — running containers always bounce — holds
+	// across every divergence class. The double-bounce in the rare
+	// reconcile-already-bounced-everything case is acceptable: bouncing twice
+	// is still a restart; under-bouncing silently breaks the contract.
+	if !reconcileBouncedAll(result) {
+		if _, stopErr := client.StopCell(cmd.Context(), doc); stopErr != nil {
+			return stopErr
+		}
+		if _, startErr := client.StartCell(cmd.Context(), doc); startErr != nil {
+			return startErr
+		}
+	}
 	cmd.Printf("Restarted cell %q from stack %q (reconciled from config %q)\n",
 		doc.Metadata.Name, doc.Spec.StackID, configName)
-	return reportApplyFailures(result)
+	return nil
+}
+
+// reconcileBouncedAll reports whether the daemon-side ApplyDocuments already
+// bounced every running container in the cell. The signals are intentionally
+// narrow: only full-cell paths qualify. A non-root container's image bump in
+// internal/controller/runner/update_cell.go does stop+delete+create+start on
+// that one container, but leaves the root and other containers running — that
+// is NOT "bounced all". The conservative default (anything not on this list)
+// triggers the follow-up StopCell + StartCell in restartReady so the restart
+// contract is preserved.
+func reconcileBouncedAll(result kukeonv1.ApplyDocumentsResult) bool {
+	for _, r := range result.Resources {
+		if r.Kind != string(v1beta1.KindCell) {
+			continue
+		}
+		// Action "created" cannot fire in the restart path (the cell already
+		// exists or we would have refused at the cell-not-found gate) but is
+		// listed for defensive parity — a fresh create starts every container.
+		if r.Action == "created" {
+			return true
+		}
+		for _, change := range r.Changes {
+			// "root container recreated" comes from reconcile.go's
+			// RecreateCell branch (diff.RootContainerChanged). RecreateCell
+			// tears down and rebuilds the entire cell, so every container is
+			// freshly started.
+			//
+			// "runtime stopped: containers re-materialized" comes from
+			// reconcile.go's rematerializeChanges, fired when the apply runs
+			// against a Stopped cell with no spec diff — StartCell brings
+			// every container up. This branch cannot fire in the restart
+			// path either (we route Stopped through restartStopped), but
+			// is listed for the same defensive parity.
+			if change == "root container recreated" ||
+				change == "runtime stopped: containers re-materialized" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // restartInPlace bounces the cell with the same stored spec: stop then start.
