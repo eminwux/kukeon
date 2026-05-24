@@ -76,10 +76,13 @@ func NewRunCmd() *cobra.Command {
 			"path refuses to attach and points the operator at " +
 			"`kuke apply -c <config>` to reconcile (stops, updates, starts). -b with " +
 			"--name applies the same discipline against the pinned cell name, pointing " +
-			"at `kuke apply -b <bp> --name <cell>`. -g/--generate-name on the " +
-			"positional config path materializes a fresh <config-name>-<6hex> cell on " +
+			"at `kuke apply -b <bp> --name <cell>`. --new on the " +
+			"positional config path materializes a fresh `<config-name>-<6hex>` cell on " +
 			"every invocation instead — opt-in fire-and-forget sandboxes from a " +
-			"Config, preserving the kukeon.io/config lineage label. -f is " +
+			"Config, preserving the kukeon.io/config lineage label. `--new --name X` " +
+			"creates a cell named X from the Config and fails if X is already in the " +
+			"target realm (create-or-fail; unlike `--name X` alone, which idempotently " +
+			"attaches on collision). -f is " +
 			"create-or-attach by metadata.name: a missing cell is created and " +
 			"attached; a Ready cell is attached as a no-op; a Stopped cell is started " +
 			"then attached; a divergent on-disk spec is refused (use `kuke apply -f` " +
@@ -111,18 +114,22 @@ func NewRunCmd() *cobra.Command {
 	cmd.Flags().String("name", "",
 		"Override the materialized cell name (default: <metadata.name>-<6hex>). "+
 			"Valid with -p/-b; rejected with -f, where metadata.name is the cell name "+
-			"verbatim, and with the <config> positional, whose name is the Config's deterministic stable name "+
-			"(use -g/--generate-name with the <config> positional to opt into a generated <config-name>-<6hex>).")
+			"verbatim. Valid with the <config> positional: `<config> --name X` does "+
+			"idempotent attach to cell X using the Config's spec; `<config> --new "+
+			"--name X` is the create-or-fail variant (fail if X exists). Without "+
+			"--name on the <config> path the cell uses the Config's stable name.")
 	_ = viper.BindPFlag(config.KUKE_RUN_NAME.ViperKey, cmd.Flags().Lookup("name"))
 
-	cmd.Flags().BoolP("generate-name", "g", false,
+	cmd.Flags().Bool("new", false,
 		"Materialize a fresh `<config-name>-<6hex>` cell on every invocation of the <config> "+
 			"positional instead of the Config's deterministic stable name. Each invocation produces a distinct "+
 			"cell; the kukeon.io/config=<name> lineage label is preserved (operator can list "+
-			"all spawns: `kuke get cells -l kukeon.io/config=<name>`). Mutually exclusive "+
-			"with --name. Only valid with the <config> positional — rejected with -f (where metadata.name is the "+
+			"all spawns: `kuke get cells -l kukeon.io/config=<name>`). Combinable with --name "+
+			"to pin a specific cell name (create-or-fail: `--new --name X` fails if cell X "+
+			"already exists in the realm) and with --rm (one-shot ephemeral cell). Only "+
+			"valid with the <config> positional — rejected with -f (where metadata.name is the "+
 			"cell name verbatim) and redundant for -p/-b (which already generate a fresh name).")
-	_ = viper.BindPFlag(config.KUKE_RUN_GENERATE_NAME.ViperKey, cmd.Flags().Lookup("generate-name"))
+	_ = viper.BindPFlag(config.KUKE_RUN_NEW.ViperKey, cmd.Flags().Lookup("new"))
 
 	cmd.Flags().StringArray("param", nil,
 		"Scalar parameter override as KEY=VALUE; repeatable. Valid with -p/-b. "+
@@ -142,7 +149,6 @@ func NewRunCmd() *cobra.Command {
 	// "exactly one source required" check (cobra has no MarkFlagsOneRequired
 	// equivalent that spans flags + positionals).
 	cmd.MarkFlagsMutuallyExclusive("file", "profile", "blueprint")
-	cmd.MarkFlagsMutuallyExclusive("name", "generate-name")
 
 	cmd.Flags().StringP("output", "o", "", "Output format: json, yaml (default: human-readable)")
 	_ = viper.BindPFlag(config.KUKE_RUN_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
@@ -200,7 +206,7 @@ type runFlags struct {
 	containerFlag string
 	autoDelete    bool
 	nameOverride  string
-	generateName  bool
+	newCell       bool
 	paramArgs     []string
 	paramFile     string
 }
@@ -246,7 +252,7 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 		containerFlag: strings.TrimSpace(viper.GetString(config.KUKE_RUN_CONTAINER.ViperKey)),
 		autoDelete:    viper.GetBool(config.KUKE_RUN_RM.ViperKey),
 		nameOverride:  strings.TrimSpace(viper.GetString(config.KUKE_RUN_NAME.ViperKey)),
-		generateName:  viper.GetBool(config.KUKE_RUN_GENERATE_NAME.ViperKey),
+		newCell:       viper.GetBool(config.KUKE_RUN_NEW.ViperKey),
 		paramFile:     strings.TrimSpace(viper.GetString(config.KUKE_RUN_PARAM_FILE.ViperKey)),
 	}
 
@@ -296,31 +302,37 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 		if flags.paramFile != "" {
 			return runFlags{}, errors.New("--param-file is only valid with -p/--profile or -b/--blueprint")
 		}
-		if flags.generateName {
+		if flags.newCell {
 			return runFlags{}, errors.New(
-				"--generate-name is only valid with the <config> positional; -f uses metadata.name verbatim")
+				"--new is only valid with the <config> positional; -f uses metadata.name verbatim")
 		}
 	}
-	// -g/--generate-name is a CellConfig-only knob (only the <config> positional
-	// reaches the daemon-stored CellConfig path). With -p/-b the default already
-	// generates a fresh <prefix>-<6hex> per invocation, so accepting -g there
-	// would silently no-op and seed the mental model that -g toggles a default
+	// --new is a CellConfig-only knob (only the <config> positional reaches the
+	// daemon-stored CellConfig path). With -p/-b the default already generates
+	// a fresh <prefix>-<6hex> per invocation, so accepting --new there would
+	// silently no-op and seed the mental model that --new toggles a default
 	// that isn't actually flipped — reject so the operator notices.
-	if flags.generateName && flags.configName == "" && flags.file == "" {
+	if flags.newCell && flags.configName == "" && flags.file == "" {
 		return runFlags{}, errors.New(
-			"--generate-name is only valid with the <config> positional; -p and -b already materialize a " +
+			"--new is only valid with the <config> positional; -p and -b already materialize a " +
 				"fresh <prefix>-<6hex> cell per invocation")
 	}
 	if flags.configName != "" {
-		// A CellConfig carries its own scalar values and a deterministic
-		// stable name (cellconfig.StableName). The template knobs would
-		// either silently shadow the Config's values or break the
-		// idempotent-identity contract the positional <config> path exists to
-		// provide, so reject them rather than silently apply.
-		if flags.nameOverride != "" {
-			return runFlags{}, errors.New(
-				"--name is not valid with the <config> positional; the cell name is the Config's stable name")
-		}
+		// A CellConfig carries its own scalar values, so --param / --param-file
+		// would silently shadow the Config's values; reject them rather than
+		// silently apply.
+		//
+		// --name is accepted on the <config> path (#833 relaxed the old
+		// MarkFlagsMutuallyExclusive("name", "generate-name") and broadened
+		// --name's reach onto the CellConfig positional). The four reachable
+		// shapes:
+		//   - `<cfg>`: cell name = StableName(<cfg>); idempotent attach.
+		//   - `<cfg> --name X`: cell name = X; idempotent attach (the AC's
+		//     attach-if-exists escape valve referenced by the --new --name
+		//     collision error).
+		//   - `<cfg> --new`: cell name = <cfg>-<6hex>; create-or-fail (hex
+		//     collisions are statistically negligible but surfaced).
+		//   - `<cfg> --new --name X`: cell name = X; create-or-fail.
 		if len(flags.paramArgs) > 0 {
 			return runFlags{}, errors.New(
 				"--param is not valid with the <config> positional; edit the Config's spec.values instead")
@@ -368,18 +380,48 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	pre, getErr := client.GetCell(cmd.Context(), cellDoc)
-	switch {
-	case getErr == nil && pre.MetadataExists:
-		if changed := divergedFields(pre.Cell.Spec, cellDoc.Spec); len(changed) > 0 {
-			if rejectErr := rejectDivergentNamedCell(cellDoc, changed, flags); rejectErr != nil {
-				return rejectErr
+	if flags.newCell {
+		// --new is a strict "create new" intent: a live cell at the chosen
+		// name is a fail rather than an attach. The two reachable shapes:
+		//   - `--new --name X`: the operator pinned the name. The error
+		//     directs them at `--name X` alone (idempotent attach) so the
+		//     escape valve is explicit.
+		//   - `--new` alone: the cell name is `<config>-<6hex>` from
+		//     cellconfig.GenerateName. A collision here is statistically
+		//     negligible (24 bits of entropy) but real — surface it with a
+		//     rerun pointer rather than silently attaching to an unrelated
+		//     spawn that happens to carry the same hex suffix.
+		switch {
+		case getErr == nil && pre.MetadataExists:
+			if flags.nameOverride != "" {
+				return fmt.Errorf(
+					"cell %q already exists; --new --name requires the name to be free "+
+						"(use `--name %s` alone for attach-if-exists semantics)",
+					cellDoc.Metadata.Name, cellDoc.Metadata.Name,
+				)
 			}
+			return fmt.Errorf(
+				"cell %q already exists in realm %q (hex collision against a prior "+
+					"`kuke run %s --new` spawn); rerun --new to allocate a fresh suffix",
+				cellDoc.Metadata.Name, cellDoc.Spec.RealmID, flags.configName,
+			)
+		case getErr != nil && !errors.Is(getErr, errdefs.ErrCellNotFound):
+			return getErr
 		}
-		// A live cell whose on-disk spec matches the file: drive the
-		// create-or-attach state machine instead of re-entering CreateCell.
-		return runExistingCell(cmd, client, cellDoc, pre, flags)
-	case getErr != nil && !errors.Is(getErr, errdefs.ErrCellNotFound):
-		return getErr
+	} else {
+		switch {
+		case getErr == nil && pre.MetadataExists:
+			if changed := divergedFields(pre.Cell.Spec, cellDoc.Spec); len(changed) > 0 {
+				if rejectErr := rejectDivergentNamedCell(cellDoc, changed, flags); rejectErr != nil {
+					return rejectErr
+				}
+			}
+			// A live cell whose on-disk spec matches the file: drive the
+			// create-or-attach state machine instead of re-entering CreateCell.
+			return runExistingCell(cmd, client, cellDoc, pre, flags)
+		case getErr != nil && !errors.Is(getErr, errdefs.ErrCellNotFound):
+			return getErr
+		}
 	}
 
 	// No live cell (ErrCellNotFound, or a nil read with no metadata): create
@@ -400,25 +442,24 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 // rejectDivergentNamedCell refuses to attach when a named live cell's spec
 // diverges from the materialization the operator just asked us to run. Every
-// `kuke run` source that pins a deterministic cell name (`-f`, `-c`, and
-// `-b --name`) routes destructive updates through `kuke apply` instead — `run`
-// is a pure read-and-materialize verb, so a divergent target is the operator's
-// signal to either reconcile via `apply` or delete and re-run. The error
-// pointer is shaped to match the source: `-c` → `kuke apply -c <config>`
-// (cell name is the Config's stable name, `apply -c` recomputes it),
-// `-b --name <cell>` → `kuke apply -b <bp> --name <cell>` (the operator pinned
-// the name, so `apply` needs the same pin), and the bare `-f` / `-p` fallback
-// keeps the original `kuke apply -f` pointer because those paths carry the
-// spec on disk. `-b` without `--name` and `-c -g` both materialize a fresh
-// `<prefix>-<6hex>` cell every invocation, so a name collision against an
-// existing cell with the same generated suffix is statistically negligible
-// and not handled here (the `-c` branch below is gated on `!generateName`
-// for that reason — the `apply -c` pointer would reconcile to the stable
-// name, not to the colliding generated one).
+// `kuke run` source that pins a deterministic cell name (`-f`, `<config>`
+// without `--new`, and `-b --name`) routes destructive updates through
+// `kuke apply` instead — `run` is a pure read-and-materialize verb, so a
+// divergent target is the operator's signal to either reconcile via `apply` or
+// delete and re-run. The error pointer is shaped to match the source:
+// `<config>` → `kuke apply -c <config>` (cell name is the Config's stable
+// name, `apply -c` recomputes it), `-b --name <cell>` →
+// `kuke apply -b <bp> --name <cell>` (the operator pinned the name, so
+// `apply` needs the same pin), and the bare `-f` / `-p` fallback keeps the
+// original `kuke apply -f` pointer because those paths carry the spec on
+// disk. The `--new` path never reaches this function: it takes a separate
+// branch in runRun that treats any existing cell as a hard collision (no
+// divergence reconcile pointer makes sense — `apply -c` would reconcile to
+// the Config's stable name, not to the `--new` cell's generated/pinned name).
 func rejectDivergentNamedCell(cellDoc v1beta1.CellDoc, changed []string, flags runFlags) error {
 	fields := strings.Join(changed, ", ")
 	switch {
-	case flags.configName != "" && !flags.generateName:
+	case flags.configName != "" && !flags.newCell:
 		return fmt.Errorf(
 			"live cell %q spec differs from CellConfig %q (%s) — refusing to attach; "+
 				"use `kuke apply -c %s` to reconcile (stops, updates, starts)",
@@ -730,11 +771,22 @@ func loadFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) 
 	}
 
 	nameOverride := ""
-	if flags.generateName {
-		// `<config-name>-<6hex>` — fresh cell per invocation, kukeon.io/config
-		// label preserved by Materialize so operators can still enumerate spawns
-		// with `kuke get cells -l kukeon.io/config=<name>` (#754). The Config's
-		// idempotent-attach contract from #742 still owns the no-override path.
+	switch {
+	case flags.nameOverride != "":
+		// `<config> --name X` (with or without --new): cell name = X. The
+		// `--new --name X` collision check lives in runRun (which knows about
+		// the daemon's GetCell view); the bare `--name X` form falls through
+		// to runRun's idempotent-attach path. Either way, threading the
+		// pinned name through Materialize keeps the kukeon.io/config lineage
+		// label on the cell so `kuke get cells -l kukeon.io/config=<name>`
+		// still enumerates it.
+		nameOverride = flags.nameOverride
+	case flags.newCell:
+		// `--new` alone: `<config-name>-<6hex>` — fresh cell per invocation,
+		// kukeon.io/config label preserved by Materialize so operators can
+		// still enumerate spawns with `kuke get cells -l
+		// kukeon.io/config=<name>` (#833). The Config's idempotent-attach
+		// contract from #742 still owns the bare `<config>` path.
 		generated, genErr := cellconfig.GenerateName(cfgRes.Config.Metadata.Name)
 		if genErr != nil {
 			return v1beta1.CellDoc{}, genErr

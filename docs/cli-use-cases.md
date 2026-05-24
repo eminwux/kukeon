@@ -259,6 +259,10 @@ sudo kuke run -f docs/examples/hello-world.yaml -d          # detach: start and 
 sudo kuke run -p <profile> --param KEY=VAL --name custom    # from $HOME/.kuke/profiles.d
 sudo kuke run -f - < spec.yaml                              # stdin
 sudo kuke run -f spec.yaml --rm                             # auto-delete after exit
+sudo kuke run <config>                                      # daemon-stored CellConfig (stable-named, idempotent)
+sudo kuke run <config> --name X                             # pin cell name X from the Config (idempotent attach)
+sudo kuke run <config> --new                                # spawn a fresh <config>-<6hex> cell from the Config
+sudo kuke run <config> --new --name X                       # named create-or-fail spawn from the Config
 ```
 
 **Invariants.**
@@ -275,6 +279,9 @@ sudo kuke run -f spec.yaml --rm                             # auto-delete after 
 - `--container` is only valid in attach mode; passing both `--container` and `-d/--detach` exits non-zero.
 - `--rm` is processed by `kukeond`'s reconcile loop. `kuke run` is daemon-only after #566 — `KUKEON_NO_DAEMON=true` and `--run-path` promotion no longer reach an in-process branch for workload verbs, so `--rm` and `--run-path` are not mutually exclusive on `kuke run`. Cleanup latency is bounded by the daemon's reconcile interval (default 30s), not real-time.
 - A clean `^]^]` detach in attach mode does **not** trigger `--rm` cleanup; the cell stays alive for re-attach. Only workload termination, peer hangup, or an unrecoverable controller error fires cleanup.
+- `kuke run <config>` (the daemon-stored CellConfig positional, post-#825) is **stable-named and idempotent**: the cell name is the Config's `metadata.name`, and re-invocation attaches to the at-most-one live cell the Config owns. A divergent live cell is refused with a `kuke apply -c <config>` pointer; `--param`/`--param-file` are rejected (the Config carries its own values — edit it instead).
+- `kuke run <config> --new` (post-#833) opts out of the stable-name identity: each invocation spawns a fresh cell named `<config-name>-<6hex>` (hex matches `-b`/`-p`'s naming; 24 bits of entropy makes in-realm collisions statistically negligible). The `kukeon.io/config=<name>` lineage label is preserved so `kuke get cells -l kukeon.io/config=<name>` enumerates every spawn — stable-name, pinned-name, and hex-suffix cells alike.
+- `kuke run <config> --name X` (post-#833) is the third identity shape: it pins the materialized cell name to `X` and walks the same idempotent state machine as the bare `<config>` form (attach on collision, refuse on divergence with the same `kuke apply -c <config>` pointer). `kuke run <config> --new --name X` is the create-or-fail companion: it pins the name to `X` and **fails** if a cell `X` already exists in the realm (error: `cell "X" already exists; --new --name requires the name to be free (use --name "X" alone for attach-if-exists semantics)`). Each form is rejected outside the `<config>` path: `--new` with `-f`/`-p`/`-b` exits non-zero with `--new is only valid with the <config> positional`.
 - `kuke run -f /missing.yaml` exits non-zero with a `failed to open file` error.
 - A reference to an unavailable image surfaces the containerd resolver error verbatim (e.g. `pull access denied, repository does not exist or may require authorization`) and exits non-zero; the half-created cell may need `kuke purge cell` to clean up.
 

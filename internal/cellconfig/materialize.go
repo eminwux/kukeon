@@ -50,13 +50,15 @@ func Materialize(cfg v1beta1.CellConfigDoc, bp v1beta1.CellBlueprintDoc) (v1beta
 }
 
 // MaterializeWithName is the Materialize variant that lets the caller pin a
-// non-stable cell name — the substrate for `kuke run -c --generate-name` (#754).
+// non-stable cell name — the substrate for `kuke run <config> --new` (#833;
+// originally shipped as `-c --generate-name` in #754, renamed in #833).
 // When nameOverride is empty the cell uses StableName(cfg.Metadata.Name) and the
 // idempotent-attach identity contract from #742 holds; when non-empty the name
-// is used verbatim and the caller owns identity (the kuke run -c -g path supplies
-// `<cfg.Metadata.Name>-<6hex>` to materialize a fresh ephemeral cell, leaving the
-// kukeon.io/config back-reference label intact so `kuke get cells -l
-// kukeon.io/config=<name>` still enumerates every spawn).
+// is used verbatim and the caller owns identity (the `kuke run <config> --new`
+// path supplies `<cfg.Metadata.Name>-<6hex>` for the bare --new form, or the
+// operator's `--name X` value for the `--new --name X` create-or-fail form,
+// leaving the kukeon.io/config back-reference label intact so `kuke get cells
+// -l kukeon.io/config=<name>` still enumerates every spawn).
 func MaterializeWithName(
 	cfg v1beta1.CellConfigDoc, bp v1beta1.CellBlueprintDoc, nameOverride string,
 ) (v1beta1.CellDoc, error) {
@@ -269,11 +271,13 @@ func cloneCellTty(in *v1beta1.CellTty) *v1beta1.CellTty {
 	return &out
 }
 
-// GenerateName returns `<configName>-<6hex>`, the cell-name shape `kuke run
-// -c --generate-name` produces (#754). The 6-hex suffix matches cellblueprint's
-// `<prefix>-<6hex>` shape used by `-b`/`-p`, so generated `-c` cells are
-// visually indistinguishable from generated-cell-per-invocation spawns of the
-// other run verbs while preserving the kukeon.io/config back-reference label.
+// GenerateName returns `<configName>-<6hex>`, the cell-name shape
+// `kuke run <config> --new` produces (#833; originally shipped as `-c
+// --generate-name` in #754, renamed in #833). The 6-hex suffix matches
+// cellblueprint's `<prefix>-<6hex>` shape used by `-b`/`-p`, so generated
+// `--new` cells are visually indistinguishable from generated-cell-per-
+// invocation spawns of the other run verbs while preserving the
+// kukeon.io/config back-reference label.
 func GenerateName(configName string) (string, error) {
 	suffix, err := naming.RandomHexSuffix(naming.DefaultCellNameSuffixBytes)
 	if err != nil {
