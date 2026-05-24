@@ -484,6 +484,13 @@ var (
 	KUKE_RUN_REUSE = DefineKV("KUKE_RUN_REUSE", "kuke/run/reuse")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_PARAM_FILE = DefineKV("KUKE_RUN_PARAM_FILE", "kuke/run/param-file")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	// KUKE_RUN_ENV is the env-var twin of `kuke run --env KEY=VALUE` (issue
+	// #834). The CLI reads --env via cobra's StringArray so multiple
+	// occurrences merge; this Var exists for env-driven defaults parity with
+	// the other KUKE_RUN_* keys but the flag itself is the operator-facing
+	// surface.
+	KUKE_RUN_ENV = DefineKV("KUKE_RUN_ENV", "kuke/run/env")
 
 	// Attach command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable

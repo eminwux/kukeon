@@ -65,10 +65,18 @@ var errReusePoolEmpty = errors.New("reuse: no claimable clone in pool")
 //
 // Returns errReusePoolEmpty when no candidate could be claimed and the
 // caller should fall back to cloneCellConfig (the --clone path).
+//
+// runtimeEnv carries the CLI-injected `--env KEY=VALUE` entries (issue
+// #834). They ride on the StartCell lookup doc's Spec.RuntimeEnv field so
+// the daemon's start path forwards them to the runner's OCI build for the
+// claimed cell's attachable container. Per-invocation knob: each --reuse
+// tick supplies its own --env set; nothing persists into the cell's stored
+// spec.
 func pickAndStartReusableClone(
 	ctx context.Context,
 	client kukeonv1.Client,
 	source v1beta1.CellConfigDoc,
+	runtimeEnv []string,
 ) (v1beta1.CellConfigDoc, kukeonv1.StartCellResult, error) {
 	pool, err := listReuseCandidates(ctx, client, source)
 	if err != nil {
@@ -77,6 +85,11 @@ func pickAndStartReusableClone(
 
 	for _, cand := range pool {
 		cellLookup := cloneCellLookup(cand.cfg)
+		// Thread --env onto the StartCell lookup doc only (never onto the
+		// GetCell probe: the daemon's GetCell path doesn't consume
+		// RuntimeEnv and we want the probe to look identical to a no-env
+		// invocation). The StartCell daemon-side then forwards it to the
+		// runner; see internal/controller/start_cell.go.
 		cellRes, getErr := client.GetCell(ctx, cellLookup)
 		if getErr != nil {
 			if errors.Is(getErr, errdefs.ErrCellNotFound) {
@@ -96,7 +109,13 @@ func pickAndStartReusableClone(
 			// the AC's "Error-state cells skipped" invariant).
 			continue
 		}
-		startRes, startErr := client.StartCell(ctx, cellLookup)
+		// Attach --env to the StartCell doc just before the wire call. The
+		// runtimeEnv slice is the operator's per-invocation injection; the
+		// daemon ferries it onto the runner's OCI build for the attachable
+		// container without persisting it back to the cell's stored spec.
+		startLookup := cellLookup
+		startLookup.Spec.RuntimeEnv = runtimeEnv
+		startRes, startErr := client.StartCell(ctx, startLookup)
 		if startErr != nil {
 			if isStartCellRace(startErr) {
 				// A concurrent --reuse won this slot between our state-read

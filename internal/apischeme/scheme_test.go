@@ -2084,6 +2084,58 @@ func TestBuildCellExternalRejectsMultipleRootTrue(t *testing.T) {
 	}
 }
 
+// TestRuntimeEnv_InboundPreserved_OutboundDropped pins the asymmetric
+// transport contract on CellSpec.RuntimeEnv (issue #834): the CLI →
+// daemon direction in ConvertCellDocToInternal preserves the operator's
+// --env entries (the runner reads them off the internal spec for OCI
+// build), while the daemon → external direction in
+// BuildCellExternalFromInternal deliberately drops them. Symmetric on
+// the operator's intent (each invocation re-supplies its own --env), but
+// the outbound strip is what keeps metadata.json clean across restarts
+// AND keeps the divergent-spec check from tripping on prior --env
+// injections — both metadata persistence and RPC reply paths share the
+// same external doc builder.
+func TestRuntimeEnv_InboundPreserved_OutboundDropped(t *testing.T) {
+	t.Run("inbound (CLI → daemon) preserves RuntimeEnv", func(t *testing.T) {
+		doc := ext.CellDoc{
+			APIVersion: ext.APIVersionV1Beta1,
+			Kind:       ext.KindCell,
+			Metadata:   ext.CellMetadata{Name: "c"},
+			Spec: ext.CellSpec{
+				ID: "c", RealmID: "r", SpaceID: "s", StackID: "k",
+				Containers: []ext.ContainerSpec{{ID: "root", Root: true, Image: "img"}},
+				RuntimeEnv: []string{"LABEL=bug", "PRIORITY=A"},
+			},
+		}
+		internal, err := apischeme.ConvertCellDocToInternal(doc)
+		if err != nil {
+			t.Fatalf("ConvertCellDocToInternal: %v", err)
+		}
+		want := []string{"LABEL=bug", "PRIORITY=A"}
+		if got := internal.Spec.RuntimeEnv; !reflect.DeepEqual(got, want) {
+			t.Errorf("internal.Spec.RuntimeEnv = %v, want %v (operator's --env must reach the runner)", got, want)
+		}
+	})
+
+	t.Run("outbound (daemon → external) drops RuntimeEnv", func(t *testing.T) {
+		internal := intmodel.Cell{
+			Metadata: intmodel.CellMetadata{Name: "c"},
+			Spec: intmodel.CellSpec{
+				ID: "c", RealmName: "r", SpaceName: "s", StackName: "k",
+				Containers: []intmodel.ContainerSpec{{ID: "root", Root: true, Image: "img"}},
+				RuntimeEnv: []string{"LABEL=bug"},
+			},
+		}
+		out, err := apischeme.BuildCellExternalFromInternal(internal, ext.APIVersionV1Beta1)
+		if err != nil {
+			t.Fatalf("BuildCellExternalFromInternal: %v", err)
+		}
+		if got := out.Spec.RuntimeEnv; len(got) != 0 {
+			t.Errorf("external.Spec.RuntimeEnv = %v, want empty (RuntimeEnv must not persist to disk or echo to clients)", got)
+		}
+	})
+}
+
 // TestStatusLifecycleFieldsRoundTripV1Beta1 pins the issue #166 plumbing:
 // every kind's new Status lifecycle/probe fields must round-trip in both
 // directions. Realm additionally carries ContainerdNamespaceReady; the
