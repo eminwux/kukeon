@@ -150,14 +150,34 @@ func (c *Client) CreateStack(_ context.Context, doc v1beta1.StackDoc) (kukeonv1.
 }
 
 // CreateCell normalizes the external doc, delegates to the controller, and
-// reshapes the result back into external v1beta1 types.
+// reshapes the result back into external v1beta1 types. Starts the cell's
+// containers after creation; see MaterializeCell for the don't-start variant.
 func (c *Client) CreateCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+	return c.createCell(doc, c.ctrl.CreateCell)
+}
+
+// MaterializeCell normalizes the external doc, delegates to the controller's
+// MaterializeCell (which skips the StartCell step), and reshapes the result
+// back into external v1beta1 types. See kukeonv1.Client.MaterializeCell for
+// the contract.
+func (c *Client) MaterializeCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+	return c.createCell(doc, c.ctrl.MaterializeCell)
+}
+
+// createCell is the shared body for CreateCell and MaterializeCell. The
+// controllerFn argument picks between the start-after-create variant
+// (CreateCell) and the don't-start variant (MaterializeCell); the doc
+// normalisation and result reshape are identical for both.
+func (c *Client) createCell(
+	doc v1beta1.CellDoc,
+	controllerFn func(intmodel.Cell) (controller.CreateCellResult, error),
+) (kukeonv1.CreateCellResult, error) {
 	internal, version, err := apischeme.NormalizeCell(doc)
 	if err != nil {
 		return kukeonv1.CreateCellResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 
-	res, err := c.ctrl.CreateCell(internal)
+	res, err := controllerFn(internal)
 	if err != nil {
 		return kukeonv1.CreateCellResult{}, err
 	}

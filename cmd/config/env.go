@@ -190,6 +190,12 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_CREATE_CELL_STACK = DefineKV("KUKE_CREATE_CELL_STACK", "kuke/create/cell/stack", "default")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CELL_FROM_BLUEPRINT = DefineKV("KUKE_CREATE_CELL_FROM_BLUEPRINT", "kuke/create/cell/from-blueprint")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CELL_FROM_CONFIG = DefineKV("KUKE_CREATE_CELL_FROM_CONFIG", "kuke/create/cell/from-config")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_CELL_PARAM_FILE = DefineKV("KUKE_CREATE_CELL_PARAM_FILE", "kuke/create/cell/param-file")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_CREATE_CONTAINER_NAME = DefineKV("KUKE_CREATE_CONTAINER_NAME", "kuke/create/container/name")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_CREATE_CONTAINER_REALM = DefineKV("KUKE_CREATE_CONTAINER_REALM", "kuke/create/container/realm", "default")

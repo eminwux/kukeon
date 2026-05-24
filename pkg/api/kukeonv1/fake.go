@@ -53,6 +53,10 @@ func (FakeClient) CreateCell(context.Context, v1beta1.CellDoc) (CreateCellResult
 	return CreateCellResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) MaterializeCell(context.Context, v1beta1.CellDoc) (CreateCellResult, error) {
+	return CreateCellResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) CreateContainer(context.Context, v1beta1.ContainerDoc) (CreateContainerResult, error) {
 	return CreateContainerResult{}, ErrUnexpectedCall
 }

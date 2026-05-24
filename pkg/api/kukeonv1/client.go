@@ -36,6 +36,15 @@ type Client interface {
 	CreateSpace(ctx context.Context, doc v1beta1.SpaceDoc) (CreateSpaceResult, error)
 	CreateStack(ctx context.Context, doc v1beta1.StackDoc) (CreateStackResult, error)
 	CreateCell(ctx context.Context, doc v1beta1.CellDoc) (CreateCellResult, error)
+	// MaterializeCell creates a cell record (or ensures an existing cell's
+	// resources exist) without starting any container tasks (#818). The
+	// resulting cell is left stopped; the operator runs `kuke start <name>`
+	// to start it. Distinct from CreateCell (which always starts) — used by
+	// `kuke create cell --from-blueprint` / `--from-config` for the
+	// materialise-but-don't-start scaffolding modes. Result shape matches
+	// CreateCell so the same printer renders the outcome (Started will be
+	// false because the start step was skipped).
+	MaterializeCell(ctx context.Context, doc v1beta1.CellDoc) (CreateCellResult, error)
 	CreateContainer(ctx context.Context, doc v1beta1.ContainerDoc) (CreateContainerResult, error)
 
 	GetRealm(ctx context.Context, doc v1beta1.RealmDoc) (GetRealmResult, error)
@@ -161,6 +170,22 @@ type CreateCellReply struct {
 	Err    *APIError
 }
 
+// MaterializeCellArgs is the wire request for MaterializeCell. The same
+// CellDoc shape as CreateCellArgs — the difference is purely server-side
+// (the daemon skips the StartCell step). Kept as a distinct type so the
+// wire-method dispatch stays unambiguous and the JSON-RPC server's
+// reflection-based registration picks it up alongside the other methods.
+type MaterializeCellArgs struct {
+	Doc v1beta1.CellDoc
+}
+
+// MaterializeCellReply is the wire response for MaterializeCell. Mirrors
+// CreateCellReply so the same printer renders the outcome.
+type MaterializeCellReply struct {
+	Result CreateCellResult
+	Err    *APIError
+}
+
 // CreateCellResult mirrors internal/controller.CreateCellResult using
 // external v1beta1 types, so it is safe to serialize and return to
 // non-privileged callers.
@@ -200,6 +225,7 @@ const (
 	MethodCreateSpace     = ServiceName + ".CreateSpace"
 	MethodCreateStack     = ServiceName + ".CreateStack"
 	MethodCreateCell      = ServiceName + ".CreateCell"
+	MethodMaterializeCell = ServiceName + ".MaterializeCell"
 	MethodCreateContainer = ServiceName + ".CreateContainer"
 
 	MethodGetRealm     = ServiceName + ".GetRealm"
