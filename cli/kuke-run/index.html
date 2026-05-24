@@ -3271,6 +3271,11 @@
 <td>File of <code>KEY=VALUE</code> lines whose values seed scalar parameters; one per line, <code>#</code> starts a comment. Same declaration rules as <code>--param</code>. CLI <code>--param</code> wins on dups. Rejected with <code>&lt;config&gt;</code> (same reason as <code>--param</code>)</td>
 </tr>
 <tr>
+<td><code>--env</code></td>
+<td>(empty, repeatable)</td>
+<td>Runtime container env entry as <code>KEY=VALUE</code>; repeatable. Injects extra env into the cell's <strong>attachable container</strong> at start time, in addition to <code>spec.cell.containers[&lt;attachable&gt;].env</code>. Empty value (<code>KEY=</code>) is allowed; missing <code>=</code> is rejected. A KEY that collides with an existing entry in the attachable container's spec env <strong>overrides</strong> the spec value. Valid with all source paths (<code>&lt;config&gt;</code>/<code>-f</code>/<code>-p</code>/<code>-b</code>) and all identity flags (<code>--new</code>/<code>--clone</code>/<code>--reuse</code>). The injected entries do <strong>not</strong> persist into the cell metadata — the divergent-spec check on a subsequent <code>kuke run &lt;config&gt;</code> without <code>--env</code> does not trip on the prior injection; the cell's stored spec env is unchanged across restarts. With <code>--reuse</code>, each invocation re-injects against the restarted cell. Per-invocation runtime knob; for render-time spec substitution use <code>--param</code> instead</td>
+</tr>
+<tr>
 <td><code>--detach</code>, <code>-d</code></td>
 <td><code>false</code></td>
 <td>Return immediately after start without attaching</td>
@@ -3551,7 +3556,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 24, 2026 09:03:10 UTC">May 24, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 24, 2026 13:56:33 UTC">May 24, 2026</span>
   </span>
 
     
