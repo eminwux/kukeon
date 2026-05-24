@@ -481,6 +481,8 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_CLONE = DefineKV("KUKE_RUN_CLONE", "kuke/run/clone")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_RUN_REUSE = DefineKV("KUKE_RUN_REUSE", "kuke/run/reuse")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_PARAM_FILE = DefineKV("KUKE_RUN_PARAM_FILE", "kuke/run/param-file")
 
 	// Attach command variables

@@ -130,7 +130,7 @@ func NewRunCmd() *cobra.Command {
 			"valid with the <config> positional — rejected with -f (where metadata.name is the "+
 			"cell name verbatim) and redundant for -p/-b (which already generate a fresh name). "+
 			"Mutually exclusive with --clone (which forks a persistent clone Config) "+
-			"and --reuse (#835, planned). For multi-instance from one Config use --clone instead.")
+			"and --reuse (which restarts an existing clone). For multi-instance from one Config use --clone instead.")
 	_ = viper.BindPFlag(config.KUKE_RUN_NEW.ViperKey, cmd.Flags().Lookup("new"))
 
 	cmd.Flags().Bool("clone", false,
@@ -144,10 +144,29 @@ func NewRunCmd() *cobra.Command {
 			"copy of the source's — independently editable via `kuke apply -f`. The cell "+
 			"started from the clone uses the clone's stable name, so subsequent "+
 			"`kuke run <clone-name>` is idempotent. Use cases: interactive multi-instance "+
-			"(kukeon-dev-0, kukeon-dev-1, ...) and cron pool seeding for --reuse (#835, "+
-			"planned). Only valid with the <config> positional; mutually exclusive with "+
-			"--new and --rm.")
+			"(kukeon-dev-0, kukeon-dev-1, ...) and cron pool seeding for --reuse (#835). "+
+			"Only valid with the <config> positional; mutually exclusive with --new, "+
+			"--reuse, and --rm.")
 	_ = viper.BindPFlag(config.KUKE_RUN_CLONE.ViperKey, cmd.Flags().Lookup("clone"))
+
+	cmd.Flags().Bool("reuse", false,
+		"Pick a healthy-Stopped clone of the <config> Config (lowest counter N "+
+			"first, ascending), start its cell in-place via StartCell — preserving "+
+			"the containerd overlay filesystem (project repo clone, `.claude.json`, "+
+			"any per-cell state) across the stop/start transition — and attach (#835). "+
+			"On an empty pool, falls back to --clone's code path (atomic gap-fill "+
+			"counter allocation, new clone CellConfig, fresh cell), so the operator "+
+			"never sees a 'pool empty' error on the first tick or after a host "+
+			"reboot. Running clones are invisible to the pool query — concurrent "+
+			"--reuse invocations against the same source pick distinct cells via "+
+			"StartCell's daemon-side atomic claim, and an all-Running pool falls "+
+			"back to --clone (forks the next-N). Never deletes a clone's cell. "+
+			"Cells in Pending/Failed/Unknown sub-states are excluded from the pick "+
+			"set. Driver use case: cron-driven skill execution (`kuke run <cfg> "+
+			"--reuse --env KEY=val -d`) where the project repo clone happens once "+
+			"per pool member rather than once per tick. Only valid with the <config> "+
+			"positional; mutually exclusive with --new, --clone, --name, and --rm.")
+	_ = viper.BindPFlag(config.KUKE_RUN_REUSE.ViperKey, cmd.Flags().Lookup("reuse"))
 
 	cmd.Flags().StringArray("param", nil,
 		"Scalar parameter override as KEY=VALUE; repeatable. Valid with -p/-b. "+
@@ -212,6 +231,22 @@ func NewRunCmd() *cobra.Command {
 	// other source-mutex block above where both flags are already present.
 	cmd.MarkFlagsMutuallyExclusive("new", "clone")
 	cmd.MarkFlagsMutuallyExclusive("clone", "rm")
+	// `--reuse` mutex set (#835):
+	//   - `--reuse ↔ --new`: different operations (start an existing clone vs.
+	//     materialize a fresh ephemeral cell).
+	//   - `--reuse ↔ --clone`: different operations — `--reuse` *falls back*
+	//     to `--clone`'s code path internally on empty pool, but the flags
+	//     themselves don't combine.
+	//   - `--reuse ↔ --name`: `--reuse` picks from the pool, can't dictate
+	//     which slot to pick by name (use `kuke run <clone-name>` for that).
+	//   - `--reuse ↔ --rm`: `--rm` would remove the cell on exit, leaving a
+	//     clone Config whose cell is gone — next `--reuse` would see the
+	//     clone in the pool but skip it (cell-less), forcing fork. Pool
+	//     fills with cell-less clone-Config carcasses.
+	cmd.MarkFlagsMutuallyExclusive("new", "reuse")
+	cmd.MarkFlagsMutuallyExclusive("clone", "reuse")
+	cmd.MarkFlagsMutuallyExclusive("name", "reuse")
+	cmd.MarkFlagsMutuallyExclusive("reuse", "rm")
 
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
@@ -239,6 +274,7 @@ type runFlags struct {
 	nameOverride  string
 	newCell       bool
 	clone         bool
+	reuse         bool
 	paramArgs     []string
 	paramFile     string
 }
@@ -286,6 +322,7 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 		nameOverride:  strings.TrimSpace(viper.GetString(config.KUKE_RUN_NAME.ViperKey)),
 		newCell:       viper.GetBool(config.KUKE_RUN_NEW.ViperKey),
 		clone:         viper.GetBool(config.KUKE_RUN_CLONE.ViperKey),
+		reuse:         viper.GetBool(config.KUKE_RUN_REUSE.ViperKey),
 		paramFile:     strings.TrimSpace(viper.GetString(config.KUKE_RUN_PARAM_FILE.ViperKey)),
 	}
 
@@ -343,6 +380,10 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 			return runFlags{}, errors.New(
 				"--clone is only valid with the <config> positional; -f does not fork a Config")
 		}
+		if flags.reuse {
+			return runFlags{}, errors.New(
+				"--reuse is only valid with the <config> positional; -f does not draw from a clone pool")
+		}
 	}
 	// --new is a CellConfig-only knob (only the <config> positional reaches the
 	// daemon-stored CellConfig path). With -p/-b the default already generates
@@ -360,6 +401,13 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 	if flags.clone && flags.configName == "" && flags.file == "" {
 		return runFlags{}, errors.New(
 			"--clone is only valid with the <config> positional; -p and -b have no Config to fork")
+	}
+	// --reuse is a CellConfig-only knob; it pulls from the clone pool of a
+	// daemon-stored CellConfig and only the <config> positional reaches the
+	// pool. Reject with -p/-b for the same "no silent no-op" reason as --new.
+	if flags.reuse && flags.configName == "" && flags.file == "" {
+		return runFlags{}, errors.New(
+			"--reuse is only valid with the <config> positional; -p and -b have no clone pool to draw from")
 	}
 	if flags.configName != "" {
 		// A CellConfig carries its own scalar values, so --param / --param-file
@@ -404,10 +452,11 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = client.Close() }()
 
-	cellDoc, err := loadCellDoc(cmd, client, flags)
+	loaded, err := loadCellDoc(cmd, client, flags)
 	if err != nil {
 		return err
 	}
+	cellDoc := loaded.Doc
 
 	resolveCellLocation(&cellDoc)
 
@@ -421,6 +470,16 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	if validateErr := validateResolvedCell(cellDoc); validateErr != nil {
 		return validateErr
+	}
+
+	if loaded.PreStarted {
+		// --reuse claimed a healthy-Stopped clone via StartCell during load
+		// (#835). The cell is already Ready and its containerd overlay
+		// filesystem was preserved across the stop/start transition (project
+		// repo clone, `.claude.json`, any per-cell state). Skip the
+		// GetCell → existing-cell branch and emit the "started" rollup
+		// directly, then attach (or detach per -d).
+		return runAfterReuseClaim(cmd, client, cellDoc, loaded.StartResult, flags)
 	}
 
 	pre, getErr := client.GetCell(cmd.Context(), cellDoc)
@@ -476,6 +535,46 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	if printErr := printRunResult(cmd, result, flags.output); printErr != nil {
+		return printErr
+	}
+	if !flags.detach {
+		return attachAndMaybeAutoDelete(cmd, client, cellDoc, flags)
+	}
+	return nil
+}
+
+// runAfterReuseClaim drives the post-StartCell flow for the --reuse path
+// (issue #835). The cell was already Stopped → Ready'd by
+// pickAndStartReusableClone during load, so the standard runRun branches
+// would either misclassify the cell (the Ready branch prints "already
+// existed" — true of the metadata, but the operator's mental model is
+// "I just told kuke to bring this clone back up") or fall through to
+// CreateCell (an unsafe re-entry against a live cell).
+//
+// We re-read the cell here so the printer sees the post-start container
+// statuses, and we emit the matching-spec + Started rollup that
+// `<config>` Stopped → Started already uses. Auto-delete is rejected
+// upstream (--reuse ↔ --rm mutex), so attach is the only follow-up.
+func runAfterReuseClaim(
+	cmd *cobra.Command,
+	client kukeonv1.Client,
+	cellDoc v1beta1.CellDoc,
+	startRes kukeonv1.StartCellResult,
+	flags runFlags,
+) error {
+	pre, getErr := client.GetCell(cmd.Context(), cellDoc)
+	if getErr != nil {
+		return getErr
+	}
+	if !pre.MetadataExists {
+		// Shouldn't happen: we just StartCell'd it. Fail loudly rather
+		// than silently fall through to a CreateCell on a phantom.
+		return fmt.Errorf(
+			"--reuse: cell %q vanished after StartCell — daemon state inconsistent",
+			cellDoc.Metadata.Name,
+		)
+	}
+	if printErr := printRunResult(cmd, startedResultFromGet(pre, startRes.Started), flags.output); printErr != nil {
 		return printErr
 	}
 	if !flags.detach {
@@ -680,25 +779,41 @@ func attachAfterRun(
 	return runAttachLoop(cmd, client, doc, target)
 }
 
+// loadResult bundles the resolved CellDoc with the bookkeeping a follow-up
+// step needs to drive the post-load flow. PreStarted is true exactly when
+// the load path itself called StartCell against the resolved cell — today
+// that means --reuse claimed a healthy-Stopped clone (#835); on that path
+// runRun skips its own GetCell → existing-cell branch and emits the
+// "started" rollup directly. Every other source returns
+// PreStarted=false; runRun walks the standard create-or-attach flow.
+type loadResult struct {
+	Doc         v1beta1.CellDoc
+	PreStarted  bool
+	StartResult kukeonv1.StartCellResult
+}
+
 // loadCellDoc dispatches to the file, profile, blueprint, or config loader.
 // Exactly one of flags.file / flags.profileName / flags.blueprintName /
 // flags.configName is non-empty (the cobra mutex enforces this before the
 // handler runs); --name and --param* are template knobs already rejected
 // against -f and -c in parseRunFlags. The blueprint and config paths resolve
 // over client; the file/profile paths ignore it.
-func loadCellDoc(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (v1beta1.CellDoc, error) {
+func loadCellDoc(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (loadResult, error) {
 	switch {
 	case flags.configName != "":
 		return loadFromConfig(cmd, client, flags)
 	case flags.blueprintName != "":
-		return loadFromBlueprint(cmd, client, flags)
+		doc, err := loadFromBlueprint(cmd, client, flags)
+		return loadResult{Doc: doc}, err
 	case flags.profileName != "":
 		fmt.Fprintln(cmd.ErrOrStderr(),
 			"kuke run: -p/--profile is deprecated and will be removed (#626); "+
 				"apply a kind: CellBlueprint and use `kuke run -b` (or `kuke run <config>` for a CellConfig).")
-		return loadFromProfile(flags)
+		doc, err := loadFromProfile(flags)
+		return loadResult{Doc: doc}, err
 	default:
-		return loadFromFile(flags.file)
+		doc, err := loadFromFile(flags.file)
+		return loadResult{Doc: doc}, err
 	}
 }
 
@@ -769,7 +884,7 @@ func loadFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags runFlag
 // KUKE_RUN_SPACE / KUKE_RUN_STACK env). The session-default values in viper
 // would wrongly narrow every lookup to default/default and hide
 // realm-scoped Configs.
-func loadFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (v1beta1.CellDoc, error) {
+func loadFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (loadResult, error) {
 	lookup := v1beta1.CellConfigDoc{
 		APIVersion: v1beta1.APIVersionV1Beta1,
 		Kind:       v1beta1.KindCellConfig,
@@ -783,26 +898,52 @@ func loadFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) 
 
 	cfgRes, err := client.GetConfig(cmd.Context(), lookup)
 	if err != nil {
-		return v1beta1.CellDoc{}, err
+		return loadResult{}, err
 	}
 	if !cfgRes.MetadataExists {
-		return v1beta1.CellDoc{}, fmt.Errorf(
+		return loadResult{}, fmt.Errorf(
 			"%w (config %q in scope realm=%q space=%q stack=%q)",
 			errdefs.ErrConfigNotFound, lookup.Metadata.Name,
 			lookup.Metadata.Realm, lookup.Metadata.Space, lookup.Metadata.Stack,
 		)
 	}
 
-	// --clone: fork the source CellConfig into a new persistent clone and
-	// drive the cell create from the clone's stable identity (#839). The
-	// gap-fill counter (or explicit --name) lives in cloneCellConfig; the
-	// cell-side flow downstream walks the standard stable-name path against
-	// the clone's name, so re-running `kuke run <clone-name>` later is the
-	// idempotent attach the AC's "first-class CellConfig" line guarantees.
-	if flags.clone {
+	preStarted := false
+	var startResult kukeonv1.StartCellResult
+
+	// --reuse: pick a healthy-Stopped clone of the source CellConfig and
+	// claim it via StartCell (#835). On an empty pool, fall through to
+	// --clone's allocation path below — the operator never sees a "pool
+	// empty" error on the first tick or after a host reboot.
+	if flags.reuse {
+		clone, startRes, reuseErr := pickAndStartReusableClone(cmd.Context(), client, cfgRes.Config)
+		switch {
+		case reuseErr == nil:
+			cfgRes.Config = clone
+			startResult = startRes
+			preStarted = true
+		case errors.Is(reuseErr, errReusePoolEmpty):
+			// Empty pool: fork a new clone Config as --clone would. The
+			// gap-fill counter loop in cloneCellConfig is itself atomic, so
+			// concurrent --reuse → fallback invocations pick distinct N's.
+			fresh, cloneErr := cloneCellConfig(cmd.Context(), client, cfgRes.Config, "")
+			if cloneErr != nil {
+				return loadResult{}, cloneErr
+			}
+			cfgRes.Config = fresh
+		default:
+			return loadResult{}, reuseErr
+		}
+	} else if flags.clone {
+		// --clone: fork the source CellConfig into a new persistent clone and
+		// drive the cell create from the clone's stable identity (#839). The
+		// gap-fill counter (or explicit --name) lives in cloneCellConfig; the
+		// cell-side flow downstream walks the standard stable-name path against
+		// the clone's name, so re-running `kuke run <clone-name>` later is the
+		// idempotent attach the AC's "first-class CellConfig" line guarantees.
 		clone, cloneErr := cloneCellConfig(cmd.Context(), client, cfgRes.Config, flags.nameOverride)
 		if cloneErr != nil {
-			return v1beta1.CellDoc{}, cloneErr
+			return loadResult{}, cloneErr
 		}
 		cfgRes.Config = clone
 	}
@@ -818,10 +959,10 @@ func loadFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) 
 	}
 	bpRes, err := client.GetBlueprint(cmd.Context(), bpLookup)
 	if err != nil {
-		return v1beta1.CellDoc{}, err
+		return loadResult{}, err
 	}
 	if !bpRes.MetadataExists {
-		return v1beta1.CellDoc{}, fmt.Errorf(
+		return loadResult{}, fmt.Errorf(
 			"%w (blueprint %q referenced by config %q in scope realm=%q space=%q stack=%q)",
 			errdefs.ErrBlueprintNotFound, bpRef.Name, cfgRes.Config.Metadata.Name,
 			bpRef.Realm, bpRef.Space, bpRef.Stack,
@@ -847,11 +988,15 @@ func loadFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) 
 		// contract from #742 still owns the bare `<config>` path.
 		generated, genErr := cellconfig.GenerateName(cfgRes.Config.Metadata.Name)
 		if genErr != nil {
-			return v1beta1.CellDoc{}, genErr
+			return loadResult{}, genErr
 		}
 		nameOverride = generated
 	}
-	return cellconfig.MaterializeWithName(cfgRes.Config, bpRes.Blueprint, nameOverride)
+	doc, materializeErr := cellconfig.MaterializeWithName(cfgRes.Config, bpRes.Blueprint, nameOverride)
+	if materializeErr != nil {
+		return loadResult{}, materializeErr
+	}
+	return loadResult{Doc: doc, PreStarted: preStarted, StartResult: startResult}, nil
 }
 
 // loadFromFile preserves the phase-1c -f path: read the file (or stdin),

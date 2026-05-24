@@ -4248,3 +4248,571 @@ func TestRun_Clone_OnlyValidWithConfig(t *testing.T) {
 		})
 	}
 }
+
+// --- #835 (--reuse) tests ------------------------------------------------
+
+// reuseClone is one entry in a fake pool for a --reuse test: the persistent
+// clone CellConfig plus the cell-state to report from GetCell. cellMissing
+// lets a test simulate a clone Config whose cell was deleted (skip it).
+type reuseClone struct {
+	name        string
+	annotation  string // metadata.annotations[kukeon.io/source-config]; empty = unannotated
+	cellState   v1beta1.CellState
+	cellMissing bool
+}
+
+// reuseFakeBuilder returns a fakeClient pre-wired for `kuke run <src> --reuse`
+// flows. The pool argument seeds the daemon's view: each entry becomes a
+// CellConfigDoc returned from GetConfig and a CellDoc returned from GetCell
+// (cellMissing makes GetCell return ErrCellNotFound for that clone, even
+// though the Config itself still exists in the pool listing). The source
+// CellConfig is always present at "prod" in cfg-realm.
+//
+// State tracking is split across two maps so the wire-level distinctions
+// the production daemon makes survive into the fake:
+//
+//   - configExists tracks clone CellConfigs (set by seed + CreateConfig).
+//   - cellExists / cellStates tracks clone *cells* (set by CreateCell;
+//     pre-seeded for pool entries; never set on a fresh fork until its
+//     CreateCell fires, so GetCell returns ErrCellNotFound and runRun
+//     takes the create branch).
+//
+// StartCell is wired to advance cellStates to Ready (matching the
+// daemon-side state machine), so concurrent --reuse invocations race
+// realistically: the second StartCell against the same slot returns the
+// "must first be stopped" error pickAndStartReusableClone treats as a
+// claim-race signal.
+func reuseFakeBuilder(t *testing.T, pool []reuseClone) (*fakeClient, *sync.Mutex, map[string]v1beta1.CellState) {
+	t.Helper()
+	src := configDoc()
+	cellStates := make(map[string]v1beta1.CellState, len(pool))
+	cellExists := make(map[string]bool, len(pool))
+	configExists := make(map[string]bool, len(pool))
+	annotations := make(map[string]string, len(pool))
+	for _, c := range pool {
+		configExists[c.name] = true
+		annotations[c.name] = c.annotation
+		if !c.cellMissing {
+			cellStates[c.name] = c.cellState
+			cellExists[c.name] = true
+		}
+	}
+	var mu sync.Mutex
+
+	fc := &fakeClient{
+		getConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			if doc.Metadata.Name == src.Metadata.Name {
+				return kukeonv1.GetConfigResult{Config: src, MetadataExists: true}, nil
+			}
+			mu.Lock()
+			ok := configExists[doc.Metadata.Name]
+			ann := annotations[doc.Metadata.Name]
+			mu.Unlock()
+			if !ok {
+				return kukeonv1.GetConfigResult{MetadataExists: false}, nil
+			}
+			cfg := v1beta1.CellConfigDoc{
+				APIVersion: v1beta1.APIVersionV1Beta1,
+				Kind:       v1beta1.KindCellConfig,
+				Metadata: v1beta1.CellConfigMetadata{
+					Name:  doc.Metadata.Name,
+					Realm: src.Metadata.Realm,
+				},
+				Spec: src.Spec,
+			}
+			if ann != "" {
+				cfg.Metadata.Annotations = map[string]string{cellconfig.AnnotationSourceConfig: ann}
+			}
+			return kukeonv1.GetConfigResult{Config: cfg, MetadataExists: true}, nil
+		},
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
+		},
+		listConfigsFn: func(_, _, _ string) ([]v1beta1.CellConfigDoc, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			out := []v1beta1.CellConfigDoc{
+				{Metadata: v1beta1.CellConfigMetadata{Name: src.Metadata.Name, Realm: src.Metadata.Realm}},
+			}
+			for name := range configExists {
+				out = append(out, v1beta1.CellConfigDoc{
+					Metadata: v1beta1.CellConfigMetadata{Name: name, Realm: src.Metadata.Realm},
+				})
+			}
+			return out, nil
+		},
+		getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if !cellExists[doc.Metadata.Name] {
+				return kukeonv1.GetCellResult{}, errdefs.ErrCellNotFound
+			}
+			state := cellStates[doc.Metadata.Name]
+			cellDoc := doc
+			cellDoc.Status.State = state
+			return kukeonv1.GetCellResult{
+				Cell:                cellDoc,
+				MetadataExists:      true,
+				CgroupExists:        true,
+				RootContainerExists: true,
+			}, nil
+		},
+		startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if !cellExists[doc.Metadata.Name] {
+				return kukeonv1.StartCellResult{}, errdefs.ErrCellNotFound
+			}
+			state := cellStates[doc.Metadata.Name]
+			if state != v1beta1.CellStateStopped {
+				// Mimic the daemon's startCell guard: a non-Stopped cell
+				// surfaces the race that pickAndStartReusableClone detects
+				// via the "must first be stopped" substring.
+				return kukeonv1.StartCellResult{},
+					fmt.Errorf("cell %q is already in Ready state and must first be stopped", doc.Metadata.Name)
+			}
+			cellStates[doc.Metadata.Name] = v1beta1.CellStateReady
+			started := doc
+			started.Status.State = v1beta1.CellStateReady
+			return kukeonv1.StartCellResult{Cell: started, Started: true}, nil
+		},
+		createConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.CreateConfigResult, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if configExists[doc.Metadata.Name] {
+				return kukeonv1.CreateConfigResult{}, errdefs.ErrConfigExists
+			}
+			configExists[doc.Metadata.Name] = true
+			if doc.Metadata.Annotations != nil {
+				annotations[doc.Metadata.Name] = doc.Metadata.Annotations[cellconfig.AnnotationSourceConfig]
+			}
+			// Cell intentionally not yet created: the fork's CreateCell
+			// step (down in runRun) is what brings the cell into existence.
+			return kukeonv1.CreateConfigResult{Config: doc, Created: true}, nil
+		},
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			cellExists[doc.Metadata.Name] = true
+			cellStates[doc.Metadata.Name] = v1beta1.CellStateReady
+			return kukeonv1.CreateCellResult{
+				Cell: doc, Created: true, MetadataExistsPost: true,
+				CgroupCreated: true, CgroupExistsPost: true,
+				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
+				Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
+			}, nil
+		},
+	}
+	return fc, &mu, cellStates
+}
+
+// TestRun_FromConfig_Reuse_PicksLowestStopped covers AC #3 (ascending-N sort,
+// lowest-N selection). The pool has prod-0 (Ready) and prod-1 (Stopped); the
+// only valid claim is prod-1.
+func TestRun_FromConfig_Reuse_PicksLowestStopped(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc, _, _ := reuseFakeBuilder(t, []reuseClone{
+		{name: "prod-0", annotation: "prod", cellState: v1beta1.CellStateReady},
+		{name: "prod-1", annotation: "prod", cellState: v1beta1.CellStateStopped},
+		{name: "prod-2", annotation: "prod", cellState: v1beta1.CellStateStopped},
+	})
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "--reuse", "--realm", "cfg-realm", "-d"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if fc.startCalls != 1 {
+		t.Errorf("StartCell calls=%d, want 1 (the lowest-N Stopped clone)", fc.startCalls)
+	}
+	if fc.startDoc.Metadata.Name != "prod-1" {
+		t.Errorf("StartCell name=%q, want prod-1 (lowest-N Stopped; prod-0 is Ready)", fc.startDoc.Metadata.Name)
+	}
+	if fc.createConfigCalls != 0 {
+		t.Errorf("CreateConfig calls=%d, want 0 (--reuse hit the pool; no fork)", fc.createConfigCalls)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d, want 0 (started in place via StartCell)", fc.createCalls)
+	}
+	if fc.killCalls != 0 {
+		t.Errorf("KillCell calls=%d, want 0 (overlay preserved — no delete-then-create)", fc.killCalls)
+	}
+}
+
+// TestRun_FromConfig_Reuse_FiltersAnnotation covers the annotation half of
+// AC #3: a manually-named CellConfig `prod-3` (no source-config annotation)
+// is in the same scope as a real clone `prod-0`. Only the annotated one
+// counts toward the pool, so --reuse picks prod-0 rather than prod-3.
+func TestRun_FromConfig_Reuse_FiltersAnnotation(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc, _, _ := reuseFakeBuilder(t, []reuseClone{
+		{name: "prod-3", annotation: "", cellState: v1beta1.CellStateStopped},
+		{name: "prod-0", annotation: "prod", cellState: v1beta1.CellStateStopped},
+	})
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "--reuse", "--realm", "cfg-realm", "-d"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if fc.startDoc.Metadata.Name != "prod-0" {
+		t.Errorf("StartCell name=%q, want prod-0 (annotated clone; prod-3 is unannotated)", fc.startDoc.Metadata.Name)
+	}
+}
+
+// TestRun_FromConfig_Reuse_StartsInPlaceNoCreateOrDelete covers AC #4 and
+// AC #7 at the wire-call level: --reuse calls StartCell on the picked
+// clone's existing cell, never CreateCell and never KillCell. The
+// containerd snapshot is preserved across the stop/start transition by
+// construction — the daemon's StartCell creates a new task in the existing
+// snapshot, so the overlay (project repo clone, .claude.json, any per-cell
+// state) survives. The sentinel-file e2e the AC describes is the operator-
+// facing equivalent of this in-process attestation.
+func TestRun_FromConfig_Reuse_StartsInPlaceNoCreateOrDelete(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc, _, _ := reuseFakeBuilder(t, []reuseClone{
+		{name: "prod-0", annotation: "prod", cellState: v1beta1.CellStateStopped},
+	})
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "--reuse", "--realm", "cfg-realm", "-d"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if fc.startCalls != 1 {
+		t.Errorf("StartCell calls=%d, want exactly 1 (claimed clone's existing cell)", fc.startCalls)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d, want 0 (never delete-and-recreate; overlay must be preserved)", fc.createCalls)
+	}
+	if fc.createConfigCalls != 0 {
+		t.Errorf("CreateConfig calls=%d, want 0 (pool was non-empty; no fork)", fc.createConfigCalls)
+	}
+	if fc.killCalls != 0 {
+		t.Errorf(
+			"KillCell calls=%d, want 0 (never stop the cell to restart it; the overlay must survive)",
+			fc.killCalls,
+		)
+	}
+}
+
+// TestRun_FromConfig_Reuse_EmptyPoolFallback covers AC #5: with no clones in
+// scope, --reuse falls through to --clone's code path — atomic gap-fill
+// counter allocation, new clone Config with the source-config annotation, new
+// cell created with the standard CreateCell + Started rollup.
+func TestRun_FromConfig_Reuse_EmptyPoolFallback(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc, _, _ := reuseFakeBuilder(t, nil)
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "--reuse", "--realm", "cfg-realm", "-d"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if fc.createConfigCalls != 1 {
+		t.Fatalf("CreateConfig calls=%d, want 1 (empty pool → fork via --clone path)", fc.createConfigCalls)
+	}
+	clone := fc.createConfigDocs[0]
+	if clone.Metadata.Name != "prod-0" {
+		t.Errorf("clone name=%q, want prod-0 (gap-fill from empty pool)", clone.Metadata.Name)
+	}
+	if got := clone.Metadata.Annotations[cellconfig.AnnotationSourceConfig]; got != "prod" {
+		t.Errorf("clone annotation %s=%q, want prod (lineage marker)", cellconfig.AnnotationSourceConfig, got)
+	}
+	if fc.createCalls != 1 {
+		t.Errorf("CreateCell calls=%d, want 1 (fresh cell from the forked clone)", fc.createCalls)
+	}
+	if fc.startCalls != 0 {
+		t.Errorf("StartCell calls=%d, want 0 (no pool entry to start in place)", fc.startCalls)
+	}
+}
+
+// TestRun_FromConfig_Reuse_AllRunningFallback covers AC #6 + the
+// Running-cells half of AC #9: when every clone has a Running cell, the
+// pool is functionally empty and --reuse falls back to --clone, forking
+// the next available N.
+func TestRun_FromConfig_Reuse_AllRunningFallback(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc, _, _ := reuseFakeBuilder(t, []reuseClone{
+		{name: "prod-0", annotation: "prod", cellState: v1beta1.CellStateReady},
+		{name: "prod-1", annotation: "prod", cellState: v1beta1.CellStateReady},
+		{name: "prod-2", annotation: "prod", cellState: v1beta1.CellStateReady},
+	})
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "--reuse", "--realm", "cfg-realm", "-d"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if fc.startCalls != 0 {
+		t.Errorf("StartCell calls=%d, want 0 (every clone Running → no in-place start)", fc.startCalls)
+	}
+	if fc.createConfigCalls != 1 {
+		t.Fatalf("CreateConfig calls=%d, want 1 (fork via fallback to --clone)", fc.createConfigCalls)
+	}
+	if got := fc.createConfigDocs[0].Metadata.Name; got != "prod-3" {
+		t.Errorf("clone name=%q, want prod-3 (next gap-fill after prod-0/-1/-2)", got)
+	}
+}
+
+// TestRun_FromConfig_Reuse_SkipsErrorStateCells covers AC #8: clones whose
+// cells live in Pending / Failed / Unknown sub-states are excluded from
+// the pick set. With every clone in an error state, --reuse falls back to
+// --clone rather than try to claim a half-broken slot.
+func TestRun_FromConfig_Reuse_SkipsErrorStateCells(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc, _, _ := reuseFakeBuilder(t, []reuseClone{
+		{name: "prod-0", annotation: "prod", cellState: v1beta1.CellStatePending},
+		{name: "prod-1", annotation: "prod", cellState: v1beta1.CellStateFailed},
+		{name: "prod-2", annotation: "prod", cellState: v1beta1.CellStateUnknown},
+	})
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "--reuse", "--realm", "cfg-realm", "-d"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if fc.startCalls != 0 {
+		t.Errorf("StartCell calls=%d, want 0 (error-state clones must be skipped)", fc.startCalls)
+	}
+	if fc.createConfigCalls != 1 {
+		t.Fatalf("CreateConfig calls=%d, want 1 (all error → fork via fallback)", fc.createConfigCalls)
+	}
+	if got := fc.createConfigDocs[0].Metadata.Name; got != "prod-3" {
+		t.Errorf("clone name=%q, want prod-3 (next gap-fill after error-state -0/-1/-2)", got)
+	}
+}
+
+// TestRun_FromConfig_Reuse_MixedRunningAndStopped covers AC #9 explicitly:
+// pool has prod-0 (Ready), prod-1 (Stopped), prod-2 (Ready). --reuse picks
+// prod-1 (the lowest-N Stopped) and ignores the Running slots.
+func TestRun_FromConfig_Reuse_MixedRunningAndStopped(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc, _, _ := reuseFakeBuilder(t, []reuseClone{
+		{name: "prod-0", annotation: "prod", cellState: v1beta1.CellStateReady},
+		{name: "prod-1", annotation: "prod", cellState: v1beta1.CellStateStopped},
+		{name: "prod-2", annotation: "prod", cellState: v1beta1.CellStateReady},
+	})
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "--reuse", "--realm", "cfg-realm", "-d"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if fc.startDoc.Metadata.Name != "prod-1" {
+		t.Errorf(
+			"StartCell name=%q, want prod-1 (lowest-N Stopped between Running -0 and -2)",
+			fc.startDoc.Metadata.Name,
+		)
+	}
+	if fc.createConfigCalls != 0 {
+		t.Errorf("CreateConfig calls=%d, want 0 (pool had a Stopped candidate)", fc.createConfigCalls)
+	}
+}
+
+// TestRun_FromConfig_Reuse_RaceAdvancesToNextCandidate exercises the
+// atomic-claim half of AC #3: pool has prod-0 (Stopped) and prod-1
+// (Stopped); a racer flips prod-0 to Ready between our state-read and our
+// StartCell call. The first StartCell returns "must first be stopped";
+// --reuse advances to prod-1 transparently.
+func TestRun_FromConfig_Reuse_RaceAdvancesToNextCandidate(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc, mu, cellStates := reuseFakeBuilder(t, []reuseClone{
+		{name: "prod-0", annotation: "prod", cellState: v1beta1.CellStateStopped},
+		{name: "prod-1", annotation: "prod", cellState: v1beta1.CellStateStopped},
+	})
+	// Override StartCell to inject the race: the first StartCell against
+	// prod-0 sees a flipped state (a racer already claimed it). Subsequent
+	// StartCell on prod-1 uses the default Stopped → Ready transition the
+	// fake's base implementation does.
+	prevStart := fc.startCellFn
+	fc.startCellFn = func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+		if doc.Metadata.Name == "prod-0" {
+			mu.Lock()
+			cellStates["prod-0"] = v1beta1.CellStateReady
+			mu.Unlock()
+			return kukeonv1.StartCellResult{},
+				fmt.Errorf("cell %q has running containers and must first be stopped", doc.Metadata.Name)
+		}
+		return prevStart(doc)
+	}
+
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "--reuse", "--realm", "cfg-realm", "-d"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if fc.startCalls != 2 {
+		t.Errorf("StartCell calls=%d, want 2 (first prod-0 raced, second prod-1 won)", fc.startCalls)
+	}
+	if fc.startDoc.Metadata.Name != "prod-1" {
+		t.Errorf("final StartCell name=%q, want prod-1 (advanced past raced prod-0)", fc.startDoc.Metadata.Name)
+	}
+	if fc.createConfigCalls != 0 {
+		t.Errorf("CreateConfig calls=%d, want 0 (race resolved within the pool)", fc.createConfigCalls)
+	}
+}
+
+// TestRun_FromConfig_Reuse_ConcurrentDistinctOutcomes covers AC #10: 5
+// invocations against a pool of 3 Stopped (room for 2 fresh forks). The
+// first three claim prod-0, prod-1, prod-2 in turn (advancing as each
+// slot moves to Ready). The fourth and fifth see an all-Running pool and
+// fall back to --clone, allocating prod-3 and prod-4.
+//
+// viper is module-global so cobra Execute() calls would race on parsed
+// flag state if run from goroutines. Run sequentially through 5
+// invocations against shared in-memory state — the AC requires distinct
+// outcomes, not literal goroutine parallelism (the daemon's StartCell
+// state guard is what enforces atomicity in production; this test pins
+// that the client loop composes the right candidates given a shared,
+// advancing "taken" view).
+func TestRun_FromConfig_Reuse_ConcurrentDistinctOutcomes(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc, _, _ := reuseFakeBuilder(t, []reuseClone{
+		{name: "prod-0", annotation: "prod", cellState: v1beta1.CellStateStopped},
+		{name: "prod-1", annotation: "prod", cellState: v1beta1.CellStateStopped},
+		{name: "prod-2", annotation: "prod", cellState: v1beta1.CellStateStopped},
+	})
+
+	const ticks = 5
+	startedNames := make([]string, 0, ticks)
+	forkedNames := make([]string, 0)
+
+	for i := range ticks {
+		viper.Reset()
+		startsBefore := fc.startCalls
+		forksBefore := fc.createConfigCalls
+		cmd, _ := newCmd(t, fc)
+		cmd.SetArgs([]string{"prod", "--reuse", "--realm", "cfg-realm", "-d"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute (tick %d): %v", i, err)
+		}
+		// Each tick either calls StartCell once (claim) or CreateConfig
+		// once (fork). Cross-walk fc's counters into the per-tick log.
+		if fc.startCalls > startsBefore {
+			startedNames = append(startedNames, fc.startDoc.Metadata.Name)
+		}
+		if fc.createConfigCalls > forksBefore {
+			forkedNames = append(forkedNames, fc.createConfigDocs[len(fc.createConfigDocs)-1].Metadata.Name)
+		}
+	}
+
+	// The three pool-hit claims walk -0/-1/-2 in order.
+	wantStarted := []string{"prod-0", "prod-1", "prod-2"}
+	if !reflect.DeepEqual(startedNames, wantStarted) {
+		t.Errorf("started clones=%v, want %v", startedNames, wantStarted)
+	}
+	// Ticks 4 and 5 fork next-N from the all-Ready pool.
+	wantForked := []string{"prod-3", "prod-4"}
+	if !reflect.DeepEqual(forkedNames, wantForked) {
+		t.Errorf("forked clones=%v, want %v", forkedNames, wantForked)
+	}
+}
+
+// TestRun_FromConfig_Reuse_SkipsCloneWithMissingCell covers a corner of the
+// pick algorithm: a clone CellConfig exists in scope but its cell was
+// deleted (e.g., operator ran `kuke delete cell prod-0`). GetCell returns
+// ErrCellNotFound; --reuse skips the cell-less Config and advances. With no
+// other pool entries, it falls back to --clone.
+func TestRun_FromConfig_Reuse_SkipsCloneWithMissingCell(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc, _, _ := reuseFakeBuilder(t, []reuseClone{
+		{name: "prod-0", annotation: "prod", cellMissing: true},
+	})
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "--reuse", "--realm", "cfg-realm", "-d"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if fc.startCalls != 0 {
+		t.Errorf("StartCell calls=%d, want 0 (the only clone has no cell)", fc.startCalls)
+	}
+	if fc.createConfigCalls != 1 {
+		t.Fatalf("CreateConfig calls=%d, want 1 (cell-less pool → fork)", fc.createConfigCalls)
+	}
+	// Gap-fill must skip past the existing prod-0 Config slot even though
+	// its cell is gone — the name is still taken in the Config list.
+	if got := fc.createConfigDocs[0].Metadata.Name; got != "prod-1" {
+		t.Errorf("forked clone name=%q, want prod-1 (prod-0 Config name still occupied)", got)
+	}
+}
+
+// TestRun_FromConfig_Reuse_MutexWith covers AC #2: --reuse mutex with each of
+// --new, --clone, --name, --rm. Cobra's MarkFlagsMutuallyExclusive surfaces
+// the standard "mutually exclusive" / "none of the others can be" phrasing.
+func TestRun_FromConfig_Reuse_MutexWith(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"new", []string{"prod", "--reuse", "--new", "--realm", "cfg-realm", "-d"}},
+		{"clone", []string{"prod", "--reuse", "--clone", "--realm", "cfg-realm", "-d"}},
+		{"name", []string{"prod", "--reuse", "--name", "X", "--realm", "cfg-realm", "-d"}},
+		{"rm", []string{"prod", "--reuse", "--rm", "--realm", "cfg-realm", "-d"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			fc := &fakeClient{}
+			cmd, _ := newCmd(t, fc)
+			cmd.SetArgs(tc.args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatalf("Execute err=nil, want mutex rejection for --reuse + --%s", tc.name)
+			}
+			if !strings.Contains(err.Error(), "mutually exclusive") &&
+				!strings.Contains(err.Error(), "none of the others can be") {
+				t.Errorf("err=%v, want mutex rejection wording", err)
+			}
+		})
+	}
+}
+
+// TestRun_Reuse_OnlyValidWithConfig mirrors TestRun_Clone_OnlyValidWithConfig:
+// --reuse is a CellConfig-only knob, rejected on -f/-p/-b. The per-source
+// error wording pins the operator's mental model.
+func TestRun_Reuse_OnlyValidWithConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			"-f rejects --reuse",
+			[]string{"-f", "/tmp/never-read.yaml", "--reuse", "-d"},
+			"--reuse is only valid with the <config> positional",
+		},
+		{
+			"-p rejects --reuse",
+			[]string{"-p", "shell", "--reuse", "-d"},
+			"--reuse is only valid with the <config> positional",
+		},
+		{
+			"-b rejects --reuse",
+			[]string{"-b", "web", "--reuse", "-d"},
+			"--reuse is only valid with the <config> positional",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			fc := &fakeClient{}
+			cmd, _ := newCmd(t, fc)
+			cmd.SetArgs(tc.args)
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err=%v want substring %q", err, tc.want)
+			}
+		})
+	}
+}
