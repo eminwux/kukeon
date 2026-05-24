@@ -188,6 +188,13 @@ func (s *KukeonV1Service) GetConfig(args *kukeonv1.GetConfigArgs, reply *kukeonv
 	return nil
 }
 
+func (s *KukeonV1Service) CreateConfig(args *kukeonv1.CreateConfigArgs, reply *kukeonv1.CreateConfigReply) error {
+	result, err := s.core.CreateConfig(s.ctx, args.Doc)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	return nil
+}
+
 // ---- List ----
 
 func (s *KukeonV1Service) ListRealms(_ *kukeonv1.ListRealmsArgs, reply *kukeonv1.ListRealmsReply) error {

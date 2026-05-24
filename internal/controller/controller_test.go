@@ -72,10 +72,11 @@ type fakeRunner struct {
 	DeleteBlueprintFn func(bp intmodel.CellBlueprint) error
 
 	// Config methods
-	WriteConfigFn  func(config intmodel.CellConfig) (bool, error)
-	GetConfigFn    func(config intmodel.CellConfig) (intmodel.CellConfig, error)
-	ListConfigsFn  func(realmName, spaceName, stackName string) ([]intmodel.CellConfig, error)
-	DeleteConfigFn func(config intmodel.CellConfig) error
+	WriteConfigFn         func(config intmodel.CellConfig) (bool, error)
+	WriteConfigIfAbsentFn func(config intmodel.CellConfig) error
+	GetConfigFn           func(config intmodel.CellConfig) (intmodel.CellConfig, error)
+	ListConfigsFn         func(realmName, spaceName, stackName string) ([]intmodel.CellConfig, error)
+	DeleteConfigFn        func(config intmodel.CellConfig) error
 
 	// Cell methods
 	GetCellFn                 func(cell intmodel.Cell) (intmodel.Cell, error)
@@ -339,6 +340,13 @@ func (f *fakeRunner) WriteConfig(config intmodel.CellConfig) (bool, error) {
 		return f.WriteConfigFn(config)
 	}
 	return false, errors.New("unexpected call to WriteConfig")
+}
+
+func (f *fakeRunner) WriteConfigIfAbsent(config intmodel.CellConfig) error {
+	if f.WriteConfigIfAbsentFn != nil {
+		return f.WriteConfigIfAbsentFn(config)
+	}
+	return errors.New("unexpected call to WriteConfigIfAbsent")
 }
 
 func (f *fakeRunner) GetConfig(config intmodel.CellConfig) (intmodel.CellConfig, error) {

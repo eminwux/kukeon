@@ -254,6 +254,29 @@ type GetConfigResult struct {
 	MetadataExists bool
 }
 
+// CreateConfigArgs is the wire request for CreateConfig (issue #839). The
+// document carries the candidate CellConfig the daemon writes atomically.
+type CreateConfigArgs struct {
+	Doc v1beta1.CellConfigDoc
+}
+
+// CreateConfigReply is the wire response for CreateConfig. Err is non-nil on
+// failure so the errdefs.ErrConfigExists sentinel survives the wire
+// roundtrip — the CLI's gap-fill counter loop reads it to retry.
+type CreateConfigReply struct {
+	Result CreateConfigResult
+	Err    *APIError
+}
+
+// CreateConfigResult reports the outcome of an atomic create-only CellConfig
+// write (issue #839). Created mirrors the daemon-side flag; Config is the
+// persisted document echoed back so the CLI can chain into the cell-start
+// path without re-issuing GetConfig.
+type CreateConfigResult struct {
+	Config  v1beta1.CellConfigDoc
+	Created bool
+}
+
 // ---- List ----
 
 type ListRealmsArgs struct{}

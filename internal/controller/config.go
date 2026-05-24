@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/cellconfig"
+	applypkg "github.com/eminwux/kukeon/internal/controller/apply"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
@@ -33,6 +34,37 @@ import (
 type GetConfigResult struct {
 	Config         intmodel.CellConfig
 	MetadataExists bool
+}
+
+// CreateConfigResult reports the outcome of an atomic create-only CellConfig
+// write (issue #839). `Created` is true on success; the carrier always
+// surfaces back the desired document so callers can echo the persisted name
+// without re-issuing GetConfig.
+type CreateConfigResult struct {
+	Config  intmodel.CellConfig
+	Created bool
+}
+
+// CreateConfig persists a new CellConfig document under atomic create-only
+// semantics — the same scope / blueprint / slot-fill validation as
+// ApplyDocuments-driven create, but the runner write is gated on the file
+// not existing (issue #839). `kuke run <src> --clone` is the only caller:
+// the gap-fill counter loop retries on errdefs.ErrConfigExists, and the
+// `--clone --name X` path surfaces it as a hard collision.
+func (b *Exec) CreateConfig(config intmodel.CellConfig) (CreateConfigResult, error) {
+	var res CreateConfigResult
+
+	if err := validateConfigLookup(config.Metadata); err != nil {
+		return res, err
+	}
+
+	reconcile, err := applypkg.CreateConfig(b.runner, config)
+	if err != nil {
+		return res, err
+	}
+	res.Created = reconcile.Action == "created"
+	res.Config = config
+	return res, nil
 }
 
 // DeleteConfigResult reports the outcome of removing a single CellConfig's

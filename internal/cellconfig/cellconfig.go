@@ -39,6 +39,15 @@ import (
 // (`kuke get cells -l kukeon.io/config=<name>`).
 const LabelConfig = "kukeon.io/config"
 
+// AnnotationSourceConfig is the metadata.annotations key a `kuke run <src>
+// --clone` (#839) sets on the clone Config it forks from <src>. It is the
+// lineage marker for the counter allocator (which scans clones of a given
+// source to pick the lowest-unused N) and the filter key for
+// `kuke get cellconfigs --annotation kukeon.io/source-config=<src>` (a future
+// list filter — the bare `kuke get cellconfigs` already surfaces the
+// annotations on the wire).
+const AnnotationSourceConfig = "kukeon.io/source-config"
+
 // StableName derives the deterministic name of the cell a CellConfig
 // materializes from the config's metadata.name.
 //

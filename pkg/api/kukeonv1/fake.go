@@ -61,6 +61,10 @@ func (FakeClient) CreateContainer(context.Context, v1beta1.ContainerDoc) (Create
 	return CreateContainerResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) CreateConfig(context.Context, v1beta1.CellConfigDoc) (CreateConfigResult, error) {
+	return CreateConfigResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) GetRealm(context.Context, v1beta1.RealmDoc) (GetRealmResult, error) {
 	return GetRealmResult{}, ErrUnexpectedCall
 }

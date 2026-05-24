@@ -55,7 +55,13 @@ type CellConfigMetadata struct {
 	Stack string `json:"stack,omitempty"  yaml:"stack,omitempty"`
 	// Labels are copied onto the cell materialized from this config, in
 	// addition to the kukeon.io/config back-reference label.
-	Labels map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
+	Labels map[string]string `json:"labels,omitempty"      yaml:"labels,omitempty"`
+	// Annotations carry non-identifying metadata about the config. Unlike
+	// Labels they are not copied onto the materialized cell. `kuke run
+	// <src> --clone` (#839) sets `kukeon.io/source-config: <src>` on the
+	// clone so the gap-fill counter and `kuke get cellconfigs` filters can
+	// find clones of a source.
+	Annotations map[string]string `json:"annotations,omitempty" yaml:"annotations,omitempty"`
 }
 
 // CellConfigSpec binds a referenced Blueprint to a concrete instance: the

@@ -153,6 +153,90 @@ func TestReconcileConfig_RejectsMissingBlueprint(t *testing.T) {
 	}
 }
 
+// TestCreateConfig_HappyPathWritesAtomicCreateOnly is the issue #839 happy
+// path: scope reachable, blueprint resolves, slots valid → the runner's
+// WriteConfigIfAbsent is called (not WriteConfig) and the action reports
+// "created". Pinning WriteConfigIfAbsent specifically guards against a
+// regression where CreateConfig falls back to the write-through path used by
+// `kuke apply -f` — which would silently overwrite a colliding clone and
+// defeat the concurrent-allocation AC.
+func TestCreateConfig_HappyPathWritesAtomicCreateOnly(t *testing.T) {
+	var atomicWrite, plainWrite int
+	f := &fakeRunner{
+		GetRealmFn: func(realm intmodel.Realm) (intmodel.Realm, error) { return realm, nil },
+		GetBlueprintFn: func(intmodel.CellBlueprint) (intmodel.CellBlueprint, error) {
+			return blueprintCarrier(t, sampleReferencedBlueprint()), nil
+		},
+		WriteConfigIfAbsentFn: func(intmodel.CellConfig) error {
+			atomicWrite++
+			return nil
+		},
+		WriteConfigFn: func(intmodel.CellConfig) (bool, error) {
+			plainWrite++
+			return true, nil
+		},
+	}
+
+	result, err := applypkg.CreateConfig(f, configCarrier(t, sampleConfig()))
+	if err != nil {
+		t.Fatalf("CreateConfig() error = %v", err)
+	}
+	if result.Action != "created" {
+		t.Errorf("action = %q, want created", result.Action)
+	}
+	if atomicWrite != 1 {
+		t.Errorf("WriteConfigIfAbsent calls = %d, want 1", atomicWrite)
+	}
+	if plainWrite != 0 {
+		t.Errorf("WriteConfig calls = %d, want 0 (CreateConfig must use the atomic path)", plainWrite)
+	}
+}
+
+// TestCreateConfig_CollisionPropagatesErrConfigExists confirms the runner's
+// EEXIST sentinel travels through CreateConfig unmodified. The CLI's
+// gap-fill counter loop reads errdefs.ErrConfigExists to know it lost the
+// race and should retry; wrapping or re-mapping the error would break that.
+func TestCreateConfig_CollisionPropagatesErrConfigExists(t *testing.T) {
+	f := &fakeRunner{
+		GetRealmFn: func(realm intmodel.Realm) (intmodel.Realm, error) { return realm, nil },
+		GetBlueprintFn: func(intmodel.CellBlueprint) (intmodel.CellBlueprint, error) {
+			return blueprintCarrier(t, sampleReferencedBlueprint()), nil
+		},
+		WriteConfigIfAbsentFn: func(intmodel.CellConfig) error {
+			return errdefs.ErrConfigExists
+		},
+	}
+
+	_, err := applypkg.CreateConfig(f, configCarrier(t, sampleConfig()))
+	if !errors.Is(err, errdefs.ErrConfigExists) {
+		t.Fatalf("err = %v, want ErrConfigExists", err)
+	}
+}
+
+// TestCreateConfig_RejectsMissingScope confirms scope-reachability gates
+// CreateConfig the same way it gates ReconcileConfig — no clone can be
+// allocated into a realm/space/stack that doesn't exist.
+func TestCreateConfig_RejectsMissingScope(t *testing.T) {
+	var wrote bool
+	f := &fakeRunner{
+		GetRealmFn: func(intmodel.Realm) (intmodel.Realm, error) {
+			return intmodel.Realm{}, errdefs.ErrRealmNotFound
+		},
+		WriteConfigIfAbsentFn: func(intmodel.CellConfig) error {
+			wrote = true
+			return nil
+		},
+	}
+
+	_, err := applypkg.CreateConfig(f, configCarrier(t, sampleConfig()))
+	if !errors.Is(err, errdefs.ErrConfigScopeNotFound) {
+		t.Fatalf("err = %v, want ErrConfigScopeNotFound", err)
+	}
+	if wrote {
+		t.Error("WriteConfigIfAbsent was called despite a missing scope")
+	}
+}
+
 // TestReconcileConfig_RejectsUnfilledRequiredSlot confirms slot-fill validation
 // runs against the referenced blueprint: a required slot the config leaves
 // unfilled surfaces ErrConfigRequiredSlotUnfilled, before any write.
