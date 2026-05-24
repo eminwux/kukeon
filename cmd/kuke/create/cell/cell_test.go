@@ -501,7 +501,11 @@ func TestNewCellCmdRunE(t *testing.T) {
 type fakeClient struct {
 	kukeonv1.FakeClient
 
-	createCellFn func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error)
+	createCellFn      func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error)
+	materializeCellFn func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error)
+	getCellFn         func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error)
+	getBlueprintFn    func(doc v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error)
+	getConfigFn       func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error)
 }
 
 func (f *fakeClient) CreateCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
@@ -509,6 +513,40 @@ func (f *fakeClient) CreateCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv
 		return kukeonv1.CreateCellResult{}, errors.New("unexpected CreateCell call")
 	}
 	return f.createCellFn(doc)
+}
+
+func (f *fakeClient) MaterializeCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+	if f.materializeCellFn == nil {
+		return kukeonv1.CreateCellResult{}, errors.New("unexpected MaterializeCell call")
+	}
+	return f.materializeCellFn(doc)
+}
+
+func (f *fakeClient) GetCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+	if f.getCellFn == nil {
+		// Default to "not found" so the existence pre-check sees a clean slate
+		// when a test doesn't care about it.
+		return kukeonv1.GetCellResult{MetadataExists: false}, errdefs.ErrCellNotFound
+	}
+	return f.getCellFn(doc)
+}
+
+func (f *fakeClient) GetBlueprint(
+	_ context.Context, doc v1beta1.CellBlueprintDoc,
+) (kukeonv1.GetBlueprintResult, error) {
+	if f.getBlueprintFn == nil {
+		return kukeonv1.GetBlueprintResult{}, errors.New("unexpected GetBlueprint call")
+	}
+	return f.getBlueprintFn(doc)
+}
+
+func (f *fakeClient) GetConfig(
+	_ context.Context, doc v1beta1.CellConfigDoc,
+) (kukeonv1.GetConfigResult, error) {
+	if f.getConfigFn == nil {
+		return kukeonv1.GetConfigResult{}, errors.New("unexpected GetConfig call")
+	}
+	return f.getConfigFn(doc)
 }
 
 func newTestCommand() (*cobra.Command, *bytes.Buffer) {
@@ -551,5 +589,342 @@ func TestNewCellCmd_AutocompleteRegistration(t *testing.T) {
 	}
 	if stackFlag.Usage != "Stack that owns the cell" {
 		t.Errorf("unexpected stack flag usage: %q", stackFlag.Usage)
+	}
+
+	for _, name := range []string{"from-blueprint", "from-config", "param", "param-file"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("expected %q flag to exist", name)
+		}
+	}
+}
+
+// blueprintDoc returns a minimal CellBlueprintDoc the fake daemon can hand
+// back from GetBlueprint. One TAG parameter substitutes into the container
+// image so --param coverage has something to verify.
+func blueprintDoc() v1beta1.CellBlueprintDoc {
+	def := "latest"
+	return v1beta1.CellBlueprintDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindCellBlueprint,
+		Metadata: v1beta1.CellBlueprintMetadata{
+			Name:  "web",
+			Realm: "bp-realm",
+			Space: "bp-space",
+			Stack: "bp-stack",
+		},
+		Spec: v1beta1.CellBlueprintSpec{
+			Prefix:     "web",
+			Parameters: []v1beta1.CellProfileParameter{{Name: "TAG", Default: &def}},
+			Cell: v1beta1.BlueprintCellSpec{
+				Containers: []v1beta1.BlueprintContainer{
+					{ID: "main", Image: "registry.example.com/web:${TAG}", Attachable: true},
+				},
+			},
+		},
+	}
+}
+
+// configDoc returns a CellConfigDoc that references the blueprint above with
+// one spec.values override. Same minimal shape used by cmd/kuke/run tests.
+func configDoc() v1beta1.CellConfigDoc {
+	return v1beta1.CellConfigDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindCellConfig,
+		Metadata: v1beta1.CellConfigMetadata{
+			Name:  "prod",
+			Realm: "cfg-realm",
+			Space: "cfg-space",
+			Stack: "cfg-stack",
+		},
+		Spec: v1beta1.CellConfigSpec{
+			Blueprint: v1beta1.CellConfigBlueprintRef{
+				Name:  "web",
+				Realm: "bp-realm",
+				Space: "bp-space",
+				Stack: "bp-stack",
+			},
+			Values: map[string]string{"TAG": "stable"},
+		},
+	}
+}
+
+// successResultFromDoc echoes the input doc back as a "successfully created
+// stopped cell" result for the MaterializeCell fake. Started=false mirrors
+// what the daemon-side controller.MaterializeCell produces.
+func successResultFromDoc(doc v1beta1.CellDoc) kukeonv1.CreateCellResult {
+	return kukeonv1.CreateCellResult{
+		Cell: doc, Created: true, MetadataExistsPost: true,
+		CgroupCreated: true, CgroupExistsPost: true,
+		RootContainerCreated: true, RootContainerExistsPost: true,
+		Started: false,
+		Containers: []kukeonv1.ContainerCreationOutcome{
+			{Name: "main", ExistsPost: true, Created: true},
+		},
+	}
+}
+
+func newTestExecCmd(t *testing.T, fc *fakeClient) (*cobra.Command, *bytes.Buffer) {
+	t.Helper()
+	cmd := cell.NewCellCmd()
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(&bytes.Buffer{})
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, cell.MockControllerKey{}, kukeonv1.Client(fc))
+	cmd.SetContext(ctx)
+	return cmd, out
+}
+
+func TestCreateCell_FromBlueprint_HappyPath(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	var materializeCalled bool
+	var materializeDoc v1beta1.CellDoc
+	fc := &fakeClient{
+		getBlueprintFn: func(doc v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			if doc.Metadata.Name != "web" {
+				t.Errorf("GetBlueprint name=%q want web", doc.Metadata.Name)
+			}
+			if doc.Metadata.Realm != "bp-realm" {
+				t.Errorf("GetBlueprint realm=%q want bp-realm", doc.Metadata.Realm)
+			}
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		materializeCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			materializeCalled = true
+			materializeDoc = doc
+			return successResultFromDoc(doc), nil
+		},
+	}
+
+	cmd, out := newTestExecCmd(t, fc)
+	setFlag(t, cmd, "realm", "bp-realm")
+	setFlag(t, cmd, "from-blueprint", "web")
+	setFlag(t, cmd, "param", "TAG=v9")
+	cmd.SetArgs([]string{"web-1"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !materializeCalled {
+		t.Fatal("MaterializeCell was not called")
+	}
+	if materializeDoc.Metadata.Name != "web-1" {
+		t.Errorf("materialised name=%q want web-1 (cell name pinned to positional arg)", materializeDoc.Metadata.Name)
+	}
+	if materializeDoc.Spec.RealmID != "bp-realm" {
+		t.Errorf("RealmID=%q want bp-realm (blueprint metadata wins)", materializeDoc.Spec.RealmID)
+	}
+	if got := materializeDoc.Spec.Containers[0].Image; got != "registry.example.com/web:v9" {
+		t.Errorf("image=%q want ${TAG} substituted to v9", got)
+	}
+	if !strings.Contains(out.String(), "containers: not started") {
+		t.Errorf("expected 'containers: not started' in output (materialise-but-don't-start); got:\n%s", out.String())
+	}
+}
+
+func TestCreateCell_FromBlueprint_NotFound_Errors(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{MetadataExists: false}, nil
+		},
+	}
+	cmd, _ := newTestExecCmd(t, fc)
+	setFlag(t, cmd, "realm", "bp-realm")
+	setFlag(t, cmd, "from-blueprint", "ghost")
+	cmd.SetArgs([]string{"missing-cell"})
+
+	err := cmd.Execute()
+	if err == nil || !errors.Is(err, errdefs.ErrBlueprintNotFound) {
+		t.Fatalf("err=%v want ErrBlueprintNotFound", err)
+	}
+}
+
+func TestCreateCell_FromConfig_HappyPath(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	var materializeCalled bool
+	var materializeDoc v1beta1.CellDoc
+	fc := &fakeClient{
+		getConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			if doc.Metadata.Name != "prod" {
+				t.Errorf("GetConfig name=%q want prod", doc.Metadata.Name)
+			}
+			if doc.Metadata.Realm != "cfg-realm" {
+				t.Errorf("GetConfig realm=%q want cfg-realm", doc.Metadata.Realm)
+			}
+			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
+		},
+		getBlueprintFn: func(doc v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			if doc.Metadata.Name != "web" || doc.Metadata.Realm != "bp-realm" {
+				t.Errorf("GetBlueprint=%+v want web@bp-realm", doc.Metadata)
+			}
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		materializeCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			materializeCalled = true
+			materializeDoc = doc
+			return successResultFromDoc(doc), nil
+		},
+	}
+
+	cmd, out := newTestExecCmd(t, fc)
+	setFlag(t, cmd, "realm", "cfg-realm")
+	setFlag(t, cmd, "from-config", "prod")
+	cmd.SetArgs([]string{"prod-1"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !materializeCalled {
+		t.Fatal("MaterializeCell was not called")
+	}
+	if materializeDoc.Metadata.Name != "prod-1" {
+		t.Errorf("materialised name=%q want prod-1", materializeDoc.Metadata.Name)
+	}
+	if materializeDoc.Spec.RealmID != "cfg-realm" {
+		t.Errorf("RealmID=%q want cfg-realm (Config metadata wins)", materializeDoc.Spec.RealmID)
+	}
+	if got := materializeDoc.Spec.Containers[0].Image; got != "registry.example.com/web:stable" {
+		t.Errorf("image=%q want ${TAG} substituted to stable from Config values", got)
+	}
+	if !strings.Contains(out.String(), "containers: not started") {
+		t.Errorf("expected 'containers: not started' in output; got:\n%s", out.String())
+	}
+}
+
+func TestCreateCell_FromConfig_NotFound_Errors(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			return kukeonv1.GetConfigResult{MetadataExists: false}, nil
+		},
+	}
+	cmd, _ := newTestExecCmd(t, fc)
+	setFlag(t, cmd, "realm", "cfg-realm")
+	setFlag(t, cmd, "from-config", "ghost")
+	cmd.SetArgs([]string{"missing-cell"})
+
+	err := cmd.Execute()
+	if err == nil || !errors.Is(err, errdefs.ErrConfigNotFound) {
+		t.Fatalf("err=%v want ErrConfigNotFound", err)
+	}
+}
+
+func TestCreateCell_MutualExclusion_FromBlueprintAndFromConfig(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	cmd, _ := newTestExecCmd(t, &fakeClient{})
+	setFlag(t, cmd, "from-blueprint", "web")
+	setFlag(t, cmd, "from-config", "prod")
+	cmd.SetArgs([]string{"x"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for --from-blueprint + --from-config combination")
+	}
+	// Cobra's MarkFlagsMutuallyExclusive emits "if any flags in the group ...
+	// none of the others can be" — anchor on the stable substring rather than
+	// the verbatim message so a cobra wording tweak doesn't false-flag this.
+	if !strings.Contains(err.Error(), "from-blueprint") || !strings.Contains(err.Error(), "from-config") {
+		t.Errorf("err=%v should name both --from-blueprint and --from-config", err)
+	}
+}
+
+func TestCreateCell_ParamRejectedWithFromConfig(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			t.Fatal("GetConfig must not be called when --param + --from-config is rejected")
+			return kukeonv1.GetConfigResult{}, nil
+		},
+	}
+	cmd, _ := newTestExecCmd(t, fc)
+	setFlag(t, cmd, "from-config", "prod")
+	setFlag(t, cmd, "param", "K=V")
+	cmd.SetArgs([]string{"x"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for --param + --from-config combination")
+	}
+	if !strings.Contains(err.Error(), "--param is not valid with --from-config") {
+		t.Errorf("err=%v want '--param is not valid with --from-config'", err)
+	}
+}
+
+func TestCreateCell_NameCollision_Errors(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		getCellFn: func(v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{MetadataExists: true}, nil
+		},
+		materializeCellFn: func(v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			t.Fatal("MaterializeCell must not be called when cell already exists")
+			return kukeonv1.CreateCellResult{}, nil
+		},
+	}
+	cmd, _ := newTestExecCmd(t, fc)
+	setFlag(t, cmd, "realm", "bp-realm")
+	setFlag(t, cmd, "from-blueprint", "web")
+	cmd.SetArgs([]string{"taken-name"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when cell name collides with existing cell")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("err=%v should mention the cell already exists", err)
+	}
+	if !strings.Contains(err.Error(), "kuke delete cell taken-name") {
+		t.Errorf("err=%v should point at `kuke delete cell taken-name`", err)
+	}
+}
+
+func TestCreateCell_EmptyShell_StillUsesCreateCell(t *testing.T) {
+	// Regression guard for AC #1: the empty-shell path (no --from-* flag)
+	// must continue to call CreateCell — *not* MaterializeCell — so the
+	// daemon's idempotent start step still runs for the pre-#818 workflow C
+	// (create cell → create container → start).
+	t.Cleanup(viper.Reset)
+
+	var createCalled bool
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			createCalled = true
+			if doc.Metadata.Name != "empty-1" {
+				t.Errorf("CreateCell name=%q want empty-1", doc.Metadata.Name)
+			}
+			return kukeonv1.CreateCellResult{
+				Cell: doc, Created: true, MetadataExistsPost: true,
+				CgroupCreated: true, CgroupExistsPost: true,
+				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
+			}, nil
+		},
+		materializeCellFn: func(v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			t.Fatal("empty-shell path must not call MaterializeCell")
+			return kukeonv1.CreateCellResult{}, nil
+		},
+	}
+	cmd, _ := newTestExecCmd(t, fc)
+	setFlag(t, cmd, "realm", "r")
+	setFlag(t, cmd, "space", "s")
+	setFlag(t, cmd, "stack", "k")
+	cmd.SetArgs([]string{"empty-1"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !createCalled {
+		t.Fatal("CreateCell was not called on the empty-shell path")
 	}
 }

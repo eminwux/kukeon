@@ -185,6 +185,19 @@ func (c *UnixClient) CreateCell(ctx context.Context, doc v1beta1.CellDoc) (Creat
 	return reply.Result, nil
 }
 
+// MaterializeCell implements Client.
+func (c *UnixClient) MaterializeCell(ctx context.Context, doc v1beta1.CellDoc) (CreateCellResult, error) {
+	args := &MaterializeCellArgs{Doc: doc}
+	reply := &MaterializeCellReply{}
+	if err := c.call(ctx, MethodMaterializeCell, args, reply); err != nil {
+		return CreateCellResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // CreateContainer implements Client.
 func (c *UnixClient) CreateContainer(ctx context.Context, doc v1beta1.ContainerDoc) (CreateContainerResult, error) {
 	args := &CreateContainerArgs{Doc: doc}

@@ -54,35 +54,53 @@ type ContainerCreationOutcome struct {
 	Created    bool
 }
 
-// CreateCell creates a new cell or ensures an existing cell's resources exist.
-// It returns a CreateCellResult and an error.
-// The CreateCellResult reports the state of cell resources before and after the operation,
-// indicating what was created vs what already existed, including container-level outcomes.
-// The error is returned if the cell name is required, the realm name is required,
-// the space name is required, the stack name is required, the cell cgroup does not exist,
-// the root container does not exist, or the cell creation fails.
+// CreateCell creates a new cell or ensures an existing cell's resources exist,
+// then starts the cell's containers. See createCellInternal for the full
+// contract.
 func (b *Exec) CreateCell(cell intmodel.Cell) (CreateCellResult, error) {
-	var res CreateCellResult
+	return b.createCellInternal(cell, true)
+}
 
+// MaterializeCell creates a new cell record (or ensures an existing cell's
+// resources exist) without starting any container tasks. The resulting cell
+// is left in a stopped/created state; the operator runs `kuke start <name>`
+// to start it. Used by the CLI's `kuke create cell --from-blueprint` and
+// `--from-config` scaffolding modes (#818) — distinct from `kuke run -b/-c`
+// (materialise + start + attach) and `kuke apply -b/-c` (reconcile + start).
+func (b *Exec) MaterializeCell(cell intmodel.Cell) (CreateCellResult, error) {
+	return b.createCellInternal(cell, false)
+}
+
+// normalizeCellInputs validates the cell's required identity fields (name,
+// realm, space, stack, container IDs), trims them in place, applies the
+// default scope/cell labels when unset, and ensures Spec.ID + per-container
+// ownership are filled. The returned name/realm/space/stack are the trimmed
+// values used by the caller; the cell argument is mutated to carry the
+// normalised body.
+//
+// Extracted from createCellInternal to keep the latter's cyclomatic
+// complexity under the gocyclo budget after #818's startAfterCreate branch
+// was added.
+func normalizeCellInputs(cell *intmodel.Cell) (string, string, string, string, error) {
 	name := strings.TrimSpace(cell.Metadata.Name)
 	if name == "" {
-		return res, errdefs.ErrCellNameRequired
+		return "", "", "", "", errdefs.ErrCellNameRequired
 	}
 	if err := naming.ValidateHierarchyName("cell", name); err != nil {
-		return res, err
+		return "", "", "", "", err
 	}
 	cell.Metadata.Name = name
 	realm := strings.TrimSpace(cell.Spec.RealmName)
 	if realm == "" {
-		return res, errdefs.ErrRealmNameRequired
+		return "", "", "", "", errdefs.ErrRealmNameRequired
 	}
 	space := strings.TrimSpace(cell.Spec.SpaceName)
 	if space == "" {
-		return res, errdefs.ErrSpaceNameRequired
+		return "", "", "", "", errdefs.ErrSpaceNameRequired
 	}
 	stack := strings.TrimSpace(cell.Spec.StackName)
 	if stack == "" {
-		return res, errdefs.ErrStackNameRequired
+		return "", "", "", "", errdefs.ErrStackNameRequired
 	}
 
 	// Validate container names embedded in the cell spec so a malformed
@@ -91,30 +109,15 @@ func (b *Exec) CreateCell(cell intmodel.Cell) (CreateCellResult, error) {
 	for i := range cell.Spec.Containers {
 		id := strings.TrimSpace(cell.Spec.Containers[i].ID)
 		if id == "" {
-			return res, errdefs.ErrContainerNameRequired
+			return "", "", "", "", errdefs.ErrContainerNameRequired
 		}
 		if err := naming.ValidateHierarchyName("container", id); err != nil {
-			return res, err
+			return "", "", "", "", err
 		}
 		cell.Spec.Containers[i].ID = id
 	}
 
-	// Ensure default labels are set
-	if cell.Metadata.Labels == nil {
-		cell.Metadata.Labels = make(map[string]string)
-	}
-	if _, exists := cell.Metadata.Labels[consts.KukeonRealmLabelKey]; !exists {
-		cell.Metadata.Labels[consts.KukeonRealmLabelKey] = realm
-	}
-	if _, exists := cell.Metadata.Labels[consts.KukeonSpaceLabelKey]; !exists {
-		cell.Metadata.Labels[consts.KukeonSpaceLabelKey] = space
-	}
-	if _, exists := cell.Metadata.Labels[consts.KukeonStackLabelKey]; !exists {
-		cell.Metadata.Labels[consts.KukeonStackLabelKey] = stack
-	}
-	if _, exists := cell.Metadata.Labels[consts.KukeonCellLabelKey]; !exists {
-		cell.Metadata.Labels[consts.KukeonCellLabelKey] = name
-	}
+	applyDefaultCellLabels(cell, realm, space, stack, name)
 
 	// Ensure Spec.ID is set
 	if cell.Spec.ID == "" {
@@ -123,6 +126,99 @@ func (b *Exec) CreateCell(cell intmodel.Cell) (CreateCellResult, error) {
 
 	// Ensure container ownership (work with internal types)
 	cell.Spec.Containers = ensureContainerOwnershipInternal(cell.Spec.Containers, realm, space, stack, name)
+
+	return name, realm, space, stack, nil
+}
+
+// applyDefaultCellLabels sets the four scope/cell labels on the cell when
+// the operator did not author them explicitly. Extracted from
+// normalizeCellInputs to keep that function under the funlen budget.
+func applyDefaultCellLabels(cell *intmodel.Cell, realm, space, stack, name string) {
+	if cell.Metadata.Labels == nil {
+		cell.Metadata.Labels = make(map[string]string)
+	}
+	for key, value := range map[string]string{
+		consts.KukeonRealmLabelKey: realm,
+		consts.KukeonSpaceLabelKey: space,
+		consts.KukeonStackLabelKey: stack,
+		consts.KukeonCellLabelKey:  name,
+	} {
+		if _, exists := cell.Metadata.Labels[key]; !exists {
+			cell.Metadata.Labels[key] = value
+		}
+	}
+}
+
+// acquireOrCreateCell branches on whether the cell record already exists.
+// On the "not found" path, runner.CreateCell creates a fresh record. On the
+// "found" path, the cell's pre-state (cgroup/root-container existence,
+// container ID set) is recorded into res and preContainerExists, then
+// runner.EnsureCell reconciles any missing resources. The bool return is
+// wasCreated — true for the fresh-record path, false for the existing path.
+//
+// Extracted from createCellInternal to keep that function under the funlen
+// budget after #818's startAfterCreate branch was added.
+func (b *Exec) acquireOrCreateCell(
+	cell, lookupCell intmodel.Cell,
+	res *CreateCellResult,
+	preContainerExists map[string]bool,
+) (intmodel.Cell, bool, error) {
+	internalCellPre, getErr := b.runner.GetCell(lookupCell)
+	if getErr != nil {
+		if !errors.Is(getErr, errdefs.ErrCellNotFound) {
+			return intmodel.Cell{}, false, fmt.Errorf("%w: %w", errdefs.ErrGetCell, getErr)
+		}
+		res.MetadataExistsPre = false
+		resultCell, createErr := b.runner.CreateCell(cell)
+		if createErr != nil {
+			return intmodel.Cell{}, false, fmt.Errorf("%w: %w", errdefs.ErrCreateCell, createErr)
+		}
+		return resultCell, true, nil
+	}
+
+	res.MetadataExistsPre = true
+	cgroupExists, cgErr := b.runner.ExistsCgroup(internalCellPre)
+	if cgErr != nil {
+		return intmodel.Cell{}, false, fmt.Errorf("failed to check if cell cgroup exists: %w", cgErr)
+	}
+	res.CgroupExistsPre = cgroupExists
+	rootExists, rcErr := b.runner.ExistsCellRootContainer(internalCellPre)
+	if rcErr != nil {
+		return intmodel.Cell{}, false, fmt.Errorf("failed to check root container: %w", rcErr)
+	}
+	res.RootContainerExistsPre = rootExists
+	for _, container := range internalCellPre.Spec.Containers {
+		id := strings.TrimSpace(container.ID)
+		if id != "" {
+			preContainerExists[id] = true
+		}
+	}
+	res.StartedPre = false
+
+	resultCell, ensureErr := b.runner.EnsureCell(internalCellPre)
+	if ensureErr != nil {
+		return intmodel.Cell{}, false, fmt.Errorf("%w: %w", errdefs.ErrCreateCell, ensureErr)
+	}
+	return resultCell, false, nil
+}
+
+// createCellInternal is the shared implementation behind CreateCell and
+// MaterializeCell. When startAfterCreate is true, the cell's containers are
+// started before the result is built; when false, the cell is left stopped.
+//
+// The CreateCellResult reports the state of cell resources before and after
+// the operation, indicating what was created vs what already existed,
+// including container-level outcomes. An error is returned if the cell name
+// is required, the realm name is required, the space name is required, the
+// stack name is required, the cell cgroup does not exist, the root container
+// does not exist, or the cell creation fails.
+func (b *Exec) createCellInternal(cell intmodel.Cell, startAfterCreate bool) (CreateCellResult, error) {
+	var res CreateCellResult
+
+	name, realm, space, stack, err := normalizeCellInputs(&cell)
+	if err != nil {
+		return res, err
+	}
 
 	preContainerExists := make(map[string]bool)
 
@@ -138,58 +234,19 @@ func (b *Exec) CreateCell(cell intmodel.Cell) (CreateCellResult, error) {
 		},
 	}
 
-	// Check if cell already exists
-	internalCellPre, err := b.runner.GetCell(lookupCell)
-	var resultCell intmodel.Cell
-	var wasCreated bool
-
+	resultCell, wasCreated, err := b.acquireOrCreateCell(cell, lookupCell, &res, preContainerExists)
 	if err != nil {
-		// Cell not found, create new cell
-		if errors.Is(err, errdefs.ErrCellNotFound) {
-			res.MetadataExistsPre = false
-		} else {
-			return res, fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
-		}
-
-		// Create new cell
-		resultCell, err = b.runner.CreateCell(cell)
-		if err != nil {
-			return res, fmt.Errorf("%w: %w", errdefs.ErrCreateCell, err)
-		}
-
-		wasCreated = true
-	} else {
-		// Cell found, check pre-state for result reporting (EnsureCell will also check internally)
-		res.MetadataExistsPre = true
-		res.CgroupExistsPre, err = b.runner.ExistsCgroup(internalCellPre)
-		if err != nil {
-			return res, fmt.Errorf("failed to check if cell cgroup exists: %w", err)
-		}
-		res.RootContainerExistsPre, err = b.runner.ExistsCellRootContainer(internalCellPre)
-		if err != nil {
-			return res, fmt.Errorf("failed to check root container: %w", err)
-		}
-		for _, container := range internalCellPre.Spec.Containers {
-			id := strings.TrimSpace(container.ID)
-			if id != "" {
-				preContainerExists[id] = true
-			}
-		}
-		res.StartedPre = false
-
-		// Ensure resources exist (EnsureCell checks/ensures internally)
-		resultCell, err = b.runner.EnsureCell(internalCellPre)
-		if err != nil {
-			return res, fmt.Errorf("%w: %w", errdefs.ErrCreateCell, err)
-		}
-
-		wasCreated = false
+		return res, err
 	}
 
-	// Start cell containers (both new and existing cells need to be started)
-	resultCell, err = b.runner.StartCell(resultCell)
-	if err != nil {
-		return res, fmt.Errorf("failed to start cell containers: %w", err)
+	// Start cell containers when the caller asked for it. MaterializeCell
+	// (#818) skips this step so the cell record is left in a stopped state for
+	// the operator to start explicitly with `kuke start <name>`.
+	if startAfterCreate {
+		resultCell, err = b.runner.StartCell(resultCell)
+		if err != nil {
+			return res, fmt.Errorf("failed to start cell containers: %w", err)
+		}
 	}
 
 	// Build post-container existence map from resultCell directly
@@ -207,18 +264,18 @@ func (b *Exec) CreateCell(cell intmodel.Cell) (CreateCellResult, error) {
 	// After CreateCell/EnsureCell, cgroup and root container are guaranteed to exist
 	res.CgroupExistsPost = true
 	res.RootContainerExistsPost = true
-	res.StartedPost = true
+	res.StartedPost = startAfterCreate
 	res.Created = wasCreated
 	if wasCreated {
 		// New cell: all resources were created
 		res.CgroupCreated = true
 		res.RootContainerCreated = true
-		res.Started = true
+		res.Started = startAfterCreate
 	} else {
 		// Existing cell: resources were created only if they didn't exist before
 		res.CgroupCreated = !res.CgroupExistsPre
 		res.RootContainerCreated = !res.RootContainerExistsPre
-		res.Started = !res.StartedPre
+		res.Started = startAfterCreate && !res.StartedPre
 	}
 
 	// Build container creation outcomes

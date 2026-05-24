@@ -99,6 +99,23 @@ func (s *KukeonV1Service) CreateCell(args *kukeonv1.CreateCellArgs, reply *kukeo
 	return nil
 }
 
+// MaterializeCell is the net/rpc method for KukeonV1.MaterializeCell (#818).
+// Mirrors CreateCell, but the daemon-side controller skips the StartCell
+// step so the resulting cell is left in a stopped state — the substrate for
+// `kuke create cell --from-blueprint` / `--from-config` scaffolding.
+func (s *KukeonV1Service) MaterializeCell(
+	args *kukeonv1.MaterializeCellArgs,
+	reply *kukeonv1.MaterializeCellReply,
+) error {
+	result, err := s.core.MaterializeCell(s.ctx, args.Doc)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "MaterializeCell returned error", "error", err)
+	}
+	return nil
+}
+
 // CreateContainer is the net/rpc method for KukeonV1.CreateContainer.
 func (s *KukeonV1Service) CreateContainer(
 	args *kukeonv1.CreateContainerArgs,
