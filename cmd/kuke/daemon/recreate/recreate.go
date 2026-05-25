@@ -99,8 +99,7 @@ func resolveProvisionKukeondCell(
 	})
 	defer ctrl.Close()
 
-	cellSection, err := ctrl.ProvisionKukeondCell()
-	_ = cellSection
+	_, err := ctrl.ProvisionKukeondCell()
 	return err
 }
 
