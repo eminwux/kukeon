@@ -45,14 +45,19 @@ import (
 // adding a new code path through ctr.Client doesn't require revisiting this
 // fake — the controller-level error assertions catch unintended behavior.
 // Also reused by container_state / reconcile tests that need ExistsContainer
-// + TaskStatus hooks (the post-reboot reproduction in #543).
+// + TaskStatus hooks (the post-reboot reproduction in #543), and by the
+// reconcile-heal tests (#855) that need NewCgroup +
+// EnsureSubtreeControllers hooks to observe the re-ensure pass.
 type deleteCellFakeClient struct {
-	deleteContainerFn func(namespace, id string, opts ctr.ContainerDeleteOptions) error
-	stopContainerFn   func(namespace, id string, opts ctr.StopContainerOptions) (*containerd.ExitStatus, error)
-	listContainersFn  func(namespace string, filters ...string) ([]containerd.Container, error)
-	existsContainerFn func(namespace, id string) (bool, error)
-	taskStatusFn      func(namespace, id string) (containerd.Status, error)
-	loadCgroupFn      func(group, mountpoint string) (*cgroup2.Manager, error)
+	deleteContainerFn          func(namespace, id string, opts ctr.ContainerDeleteOptions) error
+	stopContainerFn            func(namespace, id string, opts ctr.StopContainerOptions) (*containerd.ExitStatus, error)
+	listContainersFn           func(namespace string, filters ...string) ([]containerd.Container, error)
+	existsContainerFn          func(namespace, id string) (bool, error)
+	taskStatusFn               func(namespace, id string) (containerd.Status, error)
+	loadCgroupFn               func(group, mountpoint string) (*cgroup2.Manager, error)
+	newCgroupFn                func(spec ctr.CgroupSpec) (*cgroup2.Manager, error)
+	ensureSubtreeControllersFn func(group, mountpoint string, controllers []string) ([]string, error)
+	enableCellSubtreeFn        func(group, mountpoint string, controllers []string) ([]string, error)
 }
 
 func (c *deleteCellFakeClient) Connect() error { return nil }
@@ -72,7 +77,10 @@ func (c *deleteCellFakeClient) CleanupNamespaceResources(string, string) error {
 func (c *deleteCellFakeClient) GetCgroupMountpoint() string               { return "" }
 func (c *deleteCellFakeClient) GetCurrentCgroupPath() (string, error)     { return "", nil }
 func (c *deleteCellFakeClient) CgroupPath(string, string) (string, error) { return "", nil }
-func (c *deleteCellFakeClient) NewCgroup(ctr.CgroupSpec) (*cgroup2.Manager, error) {
+func (c *deleteCellFakeClient) NewCgroup(spec ctr.CgroupSpec) (*cgroup2.Manager, error) {
+	if c.newCgroupFn != nil {
+		return c.newCgroupFn(spec)
+	}
 	//nolint:nilnil // cgroup2.Manager has unexported fields; the test path discards the value
 	return nil, nil
 }
@@ -85,11 +93,21 @@ func (c *deleteCellFakeClient) LoadCgroup(group, mountpoint string) (*cgroup2.Ma
 	return nil, nil
 }
 func (c *deleteCellFakeClient) DeleteCgroup(string, string) error { return nil }
-func (c *deleteCellFakeClient) EnsureSubtreeControllers(string, string, []string) ([]string, error) {
+func (c *deleteCellFakeClient) EnsureSubtreeControllers(
+	group, mountpoint string, controllers []string,
+) ([]string, error) {
+	if c.ensureSubtreeControllersFn != nil {
+		return c.ensureSubtreeControllersFn(group, mountpoint, controllers)
+	}
 	return nil, nil
 }
 
-func (c *deleteCellFakeClient) EnableCellSubtreeControllers(string, string, []string) ([]string, error) {
+func (c *deleteCellFakeClient) EnableCellSubtreeControllers(
+	group, mountpoint string, controllers []string,
+) ([]string, error) {
+	if c.enableCellSubtreeFn != nil {
+		return c.enableCellSubtreeFn(group, mountpoint, controllers)
+	}
 	return nil, nil
 }
 
