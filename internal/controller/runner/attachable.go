@@ -664,3 +664,40 @@ func removeAttachableSocketSymlink(runPath string, spec intmodel.ContainerSpec) 
 	}
 	return nil
 }
+
+// removeAttachableSocketRuntimeArtifacts unlinks both the SUN_PATH-safe
+// symlink (under <RunPath>/s/) and the host-side socket inode (the deep
+// bind-mount source path kuketty binds inside the container) for an
+// Attachable container. Called on every clean teardown of a cell —
+// `kuke stop cell`, `kuke kill cell`, and the reconciler's wind-down
+// (#852). Defense-in-depth complement to the client- and server-side
+// task-liveness guards: when a kuketty exits and never restarts (cell
+// wound down, daemon restart, host reboot), the inode it bound persists
+// across the host, so the next `kuke attach` that slips past the guards
+// dials a dead socket and surfaces `connection refused`. Unlinking on
+// the way down means the next `connect(2)` sees ENOENT instead — a
+// cleaner error class regardless of which guard race surfaced it.
+//
+// Both deletions are best-effort: a missing path (idempotent under
+// repeated stops or a delete that already RemoveAll'd the metadata
+// tree) is not an error, and a non-NotExist failure on one path does
+// not abort the other — the goal is to leave the host with no orphan
+// inode for the next `kuke attach` to dial. Skips non-Attachable specs
+// so cell-level teardown can call it unconditionally per container.
+func removeAttachableSocketRuntimeArtifacts(runPath string, spec intmodel.ContainerSpec) error {
+	if !spec.Attachable {
+		return nil
+	}
+	var errs []error
+	if err := removeAttachableSocketSymlink(runPath, spec); err != nil {
+		errs = append(errs, err)
+	}
+	socketPath := fs.ContainerSocketPath(
+		runPath,
+		spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
+	)
+	if err := os.Remove(socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		errs = append(errs, fmt.Errorf("remove socket inode %q: %w", socketPath, err))
+	}
+	return errors.Join(errs...)
+}

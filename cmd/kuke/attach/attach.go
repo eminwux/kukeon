@@ -110,6 +110,20 @@ func runAttach(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = client.Close() }()
 
+	// Cell-level liveness guard (#683, #852): refuse to attach to a cell
+	// whose state is anything other than Ready+task-live. Runs before the
+	// container picker so a missing cell surfaces a "create it first"
+	// pointer instead of falling out of ListContainers with
+	// ErrAttachNoCandidate, and so a Stopped / Failed cell short-circuits
+	// before the attach loop dials a now-orphan socket inode.
+	cellGet, err := client.GetCell(cmd.Context(), buildCellDoc(cell, realm, space, stack))
+	if err != nil {
+		return err
+	}
+	if err := kukeshared.GuardCellTaskLiveness(cellGet, cell); err != nil {
+		return err
+	}
+
 	if container == "" {
 		container, err = kukeshared.PickContainer(cmd.Context(), client, realm, space, stack, cell,
 			func(spec v1beta1.ContainerSpec) bool {
@@ -118,19 +132,6 @@ func runAttach(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-	}
-
-	// Divergence guard (#683): refuse to attach to a cell whose metadata records
-	// it Ready but whose root-container task is gone from containerd (post-reboot
-	// divergence). Without this, attach hands back a socket backed by a dead task
-	// and the sbsh loop fails with `connection refused`. Shares the run path's
-	// guard so both entry points refuse identically.
-	cellGet, err := client.GetCell(cmd.Context(), buildCellDoc(cell, realm, space, stack))
-	if err != nil {
-		return err
-	}
-	if err := kukeshared.GuardCellTaskLiveness(cellGet, cell); err != nil {
-		return err
 	}
 
 	doc := buildContainerDoc(container, realm, space, stack, cell)

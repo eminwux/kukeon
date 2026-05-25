@@ -1185,10 +1185,10 @@ func controllerImageToWire(img controller.ImageInfo) kukeonv1.ImageInfo {
 
 // ---- Attach ----
 
-// AttachContainer enforces the Attachable gate and resolves the host-side
-// sbsh control-socket path. Bytes never traverse this RPC — the caller
-// (`kuke attach`) opens HostSocketPath directly and runs the sbsh client
-// loop against it.
+// AttachContainer enforces the Attachable gate, the server-side task-
+// liveness gate, and resolves the host-side sbsh control-socket path.
+// Bytes never traverse this RPC — the caller (`kuke attach`) opens
+// HostSocketPath directly and runs the sbsh client loop against it.
 //
 // Returns the SUN_PATH-safe symlink path (fs.ContainerSocketSymlinkPath)
 // rather than the deep socket inode path so `connect(2)` never sees a
@@ -1196,17 +1196,52 @@ func controllerImageToWire(img controller.ImageInfo) kukeonv1.ImageInfo {
 // metadata layout is (issue #521). The runner stages the symlink at
 // provision time so a re-derived path on a freshly-spawned `kuke attach`
 // is always pre-materialised.
+//
+// Task-liveness gate (#852): the in-CLI cmd/kuke/shared.GuardCellTaskLiveness
+// catches the common case, but any consumer that bypasses the CLI (raw
+// RPC clients, scripts, in-process callers in alternative branches) would
+// otherwise receive a socket path backed by nothing whenever the target
+// container's task is not Running. Refuse with ErrAttachTaskNotRunning
+// instead, mirroring the client-side guard's predicate at the server
+// boundary so every caller — CLI or not — gets the same typed refusal.
 func (c *Client) AttachContainer(_ context.Context, doc v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
-	spec, err := c.resolveAttachable(doc)
+	container, err := c.resolveAttachable(doc)
 	if err != nil {
 		return kukeonv1.AttachContainerResult{}, err
 	}
+	if err := guardAttachableTaskLiveness(container); err != nil {
+		return kukeonv1.AttachContainerResult{}, err
+	}
+	spec := container.Spec
 	return kukeonv1.AttachContainerResult{
 		HostSocketPath: fs.ContainerSocketSymlinkPath(
 			c.ctrl.RunPath(),
 			spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
 		),
 	}, nil
+}
+
+// guardAttachableTaskLiveness is the server-side task-liveness gate for
+// AttachContainer (#852): refuses to hand back a socket path when the
+// target container's task is not Running. Extracted so the predicate is
+// unit-testable without a controller.Exec round-trip. Mirrors the
+// client-side cmd/kuke/shared.GuardCellTaskLiveness predicate at the
+// per-attachable-container granularity that's natural at the server
+// boundary (the container's own task is what binds the kuketty socket).
+func guardAttachableTaskLiveness(container intmodel.Container) error {
+	if container.Status.State == intmodel.ContainerStateReady {
+		return nil
+	}
+	// ContainerState ordinals are kept in lockstep with the v1beta1 enum
+	// (see modelhub.ContainerState's doc); cast for the String() method.
+	state := v1beta1.ContainerState(container.Status.State)
+	return fmt.Errorf(
+		"%w: container %q in cell %q has state %s",
+		errdefs.ErrAttachTaskNotRunning,
+		container.Spec.ID,
+		container.Spec.CellName,
+		state.String(),
+	)
 }
 
 // ---- Log ----
@@ -1252,28 +1287,31 @@ func (c *Client) LogContainer(_ context.Context, doc v1beta1.ContainerDoc) (kuke
 	}, nil
 }
 
-// resolveAttachable normalizes doc, looks up the container, and returns its
-// internal spec only when Attachable=true. It surfaces ErrConversionFailed
-// for malformed docs, ErrContainerNotFound when the container does not
-// exist, and ErrAttachNotSupported for non-Attachable targets — the
-// invariants both AttachContainer and LogContainer require before handing a
-// host path back to the caller.
-func (c *Client) resolveAttachable(doc v1beta1.ContainerDoc) (intmodel.ContainerSpec, error) {
+// resolveAttachable normalizes doc, looks up the container, and returns
+// the full intmodel.Container (spec + freshly-queried status) only when
+// Attachable=true. It surfaces ErrConversionFailed for malformed docs,
+// ErrContainerNotFound when the container does not exist, and
+// ErrAttachNotSupported for non-Attachable targets — the invariants both
+// AttachContainer and LogContainer require before handing a host path
+// back to the caller. AttachContainer also inspects Status.State to gate
+// on task liveness (#852); LogContainer ignores Status since reading a
+// per-container log file does not require a live task.
+func (c *Client) resolveAttachable(doc v1beta1.ContainerDoc) (intmodel.Container, error) {
 	internal, _, err := apischeme.NormalizeContainer(doc)
 	if err != nil {
-		return intmodel.ContainerSpec{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+		return intmodel.Container{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 	res, err := c.ctrl.GetContainer(internal)
 	if err != nil {
-		return intmodel.ContainerSpec{}, err
+		return intmodel.Container{}, err
 	}
 	if !res.ContainerExists {
-		return intmodel.ContainerSpec{}, errdefs.ErrContainerNotFound
+		return intmodel.Container{}, errdefs.ErrContainerNotFound
 	}
 	if !res.Container.Spec.Attachable {
-		return intmodel.ContainerSpec{}, errdefs.ErrAttachNotSupported
+		return intmodel.Container{}, errdefs.ErrAttachNotSupported
 	}
-	return res.Container.Spec, nil
+	return res.Container, nil
 }
 
 // ---- Ping ----

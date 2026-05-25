@@ -314,6 +314,26 @@ func (r *Exec) stopCellLocked(cell intmodel.Cell) (intmodel.Cell, error) {
 	// Update cell state in internal model
 	internalCell.Status.State = intmodel.CellStateStopped
 
+	// Unlink each Attachable container's host-side socket artifacts (the
+	// SUN_PATH-safe symlink under <RunPath>/s/ and the deep socket inode
+	// kuketty bound). Defense-in-depth for #852: without this the next
+	// `kuke attach` that slips past the cell-state liveness guard would
+	// dial a now-orphan inode and surface `connection refused`. Removing
+	// here means the next connect(2) sees ENOENT instead. Best-effort —
+	// errors are logged and we continue, matching the rest of this
+	// function's "log warning but don't fail" cleanup discipline.
+	for _, containerSpec := range internalCell.Spec.Containers {
+		if symlinkErr := removeAttachableSocketRuntimeArtifacts(r.opts.RunPath, containerSpec); symlinkErr != nil {
+			r.logger.WarnContext(
+				r.ctx,
+				"failed to remove attach socket runtime artifacts",
+				"container", containerSpec.ID,
+				"cell", cellName,
+				"error", symlinkErr,
+			)
+		}
+	}
+
 	// Populate container statuses after stopping cell and persist them
 	if err = r.PopulateAndPersistCellContainerStatuses(&internalCell); err != nil {
 		r.logger.WarnContext(r.ctx, "failed to populate container statuses",

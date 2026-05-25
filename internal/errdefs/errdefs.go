@@ -244,6 +244,16 @@ var (
 	// non-root attachable containers.
 	ErrAttachNoCandidate = errors.New("no attachable container in cell")
 
+	// ErrAttachTaskNotRunning is returned by the daemon's AttachContainer
+	// endpoint when the target attachable container exists in the cell spec
+	// and is Attachable but its containerd task is not Running. Server-side
+	// complement to cmd/kuke/shared.GuardCellTaskLiveness: any consumer that
+	// bypasses the CLI guard (RPC clients, scripts, future API consumers,
+	// in-process callers in alternative run-path branches) still gets a
+	// typed refusal instead of an unbacked socket path that would surface
+	// as `connection refused` at `connect(2)` time (#852).
+	ErrAttachTaskNotRunning = errors.New("container task is not running; cannot attach to a dead socket")
+
 	// ErrSocketPathTooLong fires when the resolved host-side path of a
 	// per-container kuketty control socket would overflow Linux's
 	// sockaddr_un.sun_path buffer (consts.KukeonMaxSocketPath bytes plus
