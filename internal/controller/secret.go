@@ -21,10 +21,17 @@ import (
 	"fmt"
 	"strings"
 
+	applypkg "github.com/eminwux/kukeon/internal/controller/apply"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
 )
+
+// CreateSecretResult reports the outcome of a Secret write.
+type CreateSecretResult struct {
+	Secret  intmodel.Secret
+	Created bool
+}
 
 // GetSecretResult reports the metadata-only view of a single `kind: Secret`
 // (issue #622). The bytes are never carried — Secret.Spec is left zero so the
@@ -39,6 +46,26 @@ type GetSecretResult struct {
 type DeleteSecretResult struct {
 	Secret  intmodel.Secret
 	Deleted bool
+}
+
+// CreateSecret persists a Secret's bytes to daemon storage via the runner's
+// WriteSecret (write-through, create-or-overwrite). The data is provided at
+// create time from CLI --from-literal or --from-file flags. The spec is never
+// echoed back — the result carries only metadata (issue #619).
+func (b *Exec) CreateSecret(secret intmodel.Secret) (CreateSecretResult, error) {
+	var res CreateSecretResult
+
+	if err := validateSecretLookup(secret.Metadata); err != nil {
+		return res, err
+	}
+
+	reconcile, err := applypkg.ReconcileSecret(b.runner, secret)
+	if err != nil {
+		return res, err
+	}
+	res.Created = reconcile.Action == "created"
+	res.Secret = secret
+	return res, nil
 }
 
 // GetSecret retrieves the metadata-only view of one named, scoped Secret. The

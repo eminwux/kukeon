@@ -195,6 +195,16 @@ func (s *KukeonV1Service) CreateConfig(args *kukeonv1.CreateConfigArgs, reply *k
 	return nil
 }
 
+func (s *KukeonV1Service) CreateSecret(args *kukeonv1.CreateSecretArgs, reply *kukeonv1.CreateSecretReply) error {
+	result, err := s.core.CreateSecret(s.ctx, args.Doc)
+	reply.Result = result
+	reply.Err = kukeonv1.ToAPIError(err)
+	if err != nil {
+		s.logger.DebugContext(s.ctx, "CreateSecret returned error", "error", err)
+	}
+	return nil
+}
+
 // ---- List ----
 
 func (s *KukeonV1Service) ListRealms(_ *kukeonv1.ListRealmsArgs, reply *kukeonv1.ListRealmsReply) error {

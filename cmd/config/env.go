@@ -297,6 +297,15 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_CREATE_BLUEPRINT_STACK = DefineKV("KUKE_CREATE_BLUEPRINT_STACK", "kuke/create/blueprint/stack", "default")
 
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_SECRET_NAME = DefineKV("KUKE_CREATE_SECRET_NAME", "kuke/create/secret/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_SECRET_REALM = DefineKV("KUKE_CREATE_SECRET_REALM", "kuke/create/secret/realm", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_SECRET_SPACE = DefineKV("KUKE_CREATE_SECRET_SPACE", "kuke/create/secret/space")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_SECRET_STACK = DefineKV("KUKE_CREATE_SECRET_STACK", "kuke/create/secret/stack")
+
 	// Get command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_GET_REALM_NAME = DefineKV("KUKE_GET_REALM_NAME", "kuke/get/realm/name")

@@ -408,6 +408,24 @@ func (c *Client) CreateConfig(
 	}, nil
 }
 
+func (c *Client) CreateSecret(
+	_ context.Context, doc v1beta1.SecretDoc,
+) (kukeonv1.CreateSecretResult, error) {
+	internal, _, err := apischeme.NormalizeSecret(doc)
+	if err != nil {
+		return kukeonv1.CreateSecretResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
+	}
+	res, err := c.ctrl.CreateSecret(internal)
+	if err != nil {
+		return kukeonv1.CreateSecretResult{}, err
+	}
+	ext := apischeme.ConvertSecretToExternal(res.Secret)
+	return kukeonv1.CreateSecretResult{
+		Secret:  ext,
+		Created: res.Created,
+	}, nil
+}
+
 func (c *Client) GetConfig(
 	_ context.Context, doc v1beta1.CellConfigDoc,
 ) (kukeonv1.GetConfigResult, error) {

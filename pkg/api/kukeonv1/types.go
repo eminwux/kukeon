@@ -548,6 +548,23 @@ type DeleteSecretResult struct {
 	Deleted bool
 }
 
+// CreateSecretArgs is the wire request for CreateSecret.
+type CreateSecretArgs struct {
+	Doc v1beta1.SecretDoc
+}
+
+// CreateSecretReply is the wire response for CreateSecret.
+type CreateSecretReply struct {
+	Result CreateSecretResult
+	Err    *APIError
+}
+
+// CreateSecretResult reports the outcome of a Secret write.
+type CreateSecretResult struct {
+	Secret  v1beta1.SecretDoc
+	Created bool
+}
+
 type DeleteBlueprintArgs struct {
 	Doc v1beta1.CellBlueprintDoc
 }
