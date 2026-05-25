@@ -27,6 +27,7 @@ import (
 	"time"
 
 	stack "github.com/eminwux/kukeon/cmd/kuke/get/stack"
+	"github.com/eminwux/kukeon/cmd/kuke/get/testutil"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
@@ -180,7 +181,7 @@ func TestNewStackCmd_Columns(t *testing.T) {
 			t.Fatalf("args=%v: unexpected error: %v", args, err)
 		}
 		out := buf.String()
-		header := firstLine(out)
+		header := testutil.FirstLine(out)
 		for _, want := range []string{"NAME", "REALM", "SPACE", "STATE", "AGE"} {
 			if !strings.Contains(header, want) {
 				t.Errorf("args=%v: header missing %q; got: %q", args, want, header)
@@ -198,13 +199,6 @@ func TestNewStackCmd_Columns(t *testing.T) {
 			t.Errorf("args=%v: expected AGE column to render \"2h\" for a 2h-old stack; got:\n%s", args, out)
 		}
 	}
-}
-
-func firstLine(s string) string {
-	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
-		return s[:idx]
-	}
-	return s
 }
 
 type fakeClient struct {
