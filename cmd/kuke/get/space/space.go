@@ -84,7 +84,7 @@ func NewSpaceCmd() *cobra.Command {
 				if !result.MetadataExists {
 					return fmt.Errorf("space %q not found in realm %q", name, realm)
 				}
-				return printSpace(&result.Space, outputFormat)
+				return printSpace(cmd, &result.Space, outputFormat)
 			}
 
 			spaces, err := client.ListSpaces(cmd.Context(), realm)
@@ -123,12 +123,12 @@ func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
 	return kukeshared.ClientFromCmd(cmd)
 }
 
-func printSpace(space *v1beta1.SpaceDoc, format shared.OutputFormat) error {
+func printSpace(cmd *cobra.Command, space *v1beta1.SpaceDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(space)
+		return shared.PrintJSON(cmd, space)
 	default:
-		return shared.PrintYAML(space)
+		return shared.PrintYAML(cmd, space)
 	}
 }
 
@@ -140,9 +140,9 @@ func printSpaces(
 ) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return shared.PrintYAML(spaces)
+		return shared.PrintYAML(cmd, spaces)
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(spaces)
+		return shared.PrintJSON(cmd, spaces)
 	case shared.OutputFormatTable:
 		if len(spaces) == 0 {
 			cmd.Println("No spaces found.")
@@ -169,6 +169,6 @@ func printSpaces(
 		shared.PrintTable(cmd, headers, rows)
 		return nil
 	default:
-		return shared.PrintYAML(spaces)
+		return shared.PrintYAML(cmd, spaces)
 	}
 }

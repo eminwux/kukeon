@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
@@ -84,17 +83,20 @@ func ParseOutputFormat(cmd *cobra.Command) (OutputFormat, error) {
 	}
 }
 
-// PrintYAML prints the resource as YAML.
-func PrintYAML(doc interface{}) error {
-	encoder := yaml.NewEncoder(os.Stdout)
+// PrintYAML prints the resource as YAML to cmd.OutOrStdout() so callers
+// can capture output via cobra's cmd.SetOut(buf) in tests. Matches the
+// shape PrintTable already takes.
+func PrintYAML(cmd *cobra.Command, doc any) error {
+	encoder := yaml.NewEncoder(cmd.OutOrStdout())
 	encoder.SetIndent(2)
-	defer encoder.Close()
+	defer func() { _ = encoder.Close() }()
 	return encoder.Encode(doc)
 }
 
-// PrintJSON prints the resource as JSON.
-func PrintJSON(doc interface{}) error {
-	encoder := json.NewEncoder(os.Stdout)
+// PrintJSON prints the resource as JSON to cmd.OutOrStdout() so callers
+// can capture output via cobra's cmd.SetOut(buf) in tests.
+func PrintJSON(cmd *cobra.Command, doc any) error {
+	encoder := json.NewEncoder(cmd.OutOrStdout())
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(doc)
 }

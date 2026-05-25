@@ -103,7 +103,7 @@ func NewConfigCmd() *cobra.Command {
 				if !result.MetadataExists {
 					return fmt.Errorf("config %q not found", name)
 				}
-				return printConfig(&result.Config, outputFormat)
+				return printConfig(cmd, &result.Config, outputFormat)
 			}
 
 			configs, err := client.ListConfigs(cmd.Context(), realm, space, stack)
@@ -142,23 +142,23 @@ func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
 	return kukeshared.ClientFromCmd(cmd)
 }
 
-func printConfig(cfg *v1beta1.CellConfigDoc, format shared.OutputFormat) error {
+func printConfig(cmd *cobra.Command, cfg *v1beta1.CellConfigDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(cfg)
+		return shared.PrintJSON(cmd, cfg)
 	case shared.OutputFormatYAML, shared.OutputFormatTable:
-		return shared.PrintYAML(cfg)
+		return shared.PrintYAML(cmd, cfg)
 	default:
-		return shared.PrintYAML(cfg)
+		return shared.PrintYAML(cmd, cfg)
 	}
 }
 
 func printConfigs(cmd *cobra.Command, configs []v1beta1.CellConfigDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return shared.PrintYAML(configs)
+		return shared.PrintYAML(cmd, configs)
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(configs)
+		return shared.PrintJSON(cmd, configs)
 	case shared.OutputFormatTable:
 		if len(configs) == 0 {
 			cmd.Println("No configs found.")
@@ -178,7 +178,7 @@ func printConfigs(cmd *cobra.Command, configs []v1beta1.CellConfigDoc, format sh
 		shared.PrintTable(cmd, headers, rows)
 		return nil
 	default:
-		return shared.PrintYAML(configs)
+		return shared.PrintYAML(cmd, configs)
 	}
 }
 
