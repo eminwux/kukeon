@@ -104,7 +104,7 @@ func NewSecretCmd() *cobra.Command {
 				if !result.MetadataExists {
 					return fmt.Errorf("secret %q not found", name)
 				}
-				return printSecret(&result.Secret, outputFormat)
+				return printSecret(cmd, &result.Secret, outputFormat)
 			}
 
 			secrets, err := client.ListSecrets(cmd.Context(), realm, space, stack, cell)
@@ -146,23 +146,23 @@ func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
 	return kukeshared.ClientFromCmd(cmd)
 }
 
-func printSecret(secret *v1beta1.SecretDoc, format shared.OutputFormat) error {
+func printSecret(cmd *cobra.Command, secret *v1beta1.SecretDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(secret)
+		return shared.PrintJSON(cmd, secret)
 	case shared.OutputFormatYAML, shared.OutputFormatTable:
-		return shared.PrintYAML(secret)
+		return shared.PrintYAML(cmd, secret)
 	default:
-		return shared.PrintYAML(secret)
+		return shared.PrintYAML(cmd, secret)
 	}
 }
 
 func printSecrets(cmd *cobra.Command, secrets []v1beta1.SecretDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return shared.PrintYAML(secrets)
+		return shared.PrintYAML(cmd, secrets)
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(secrets)
+		return shared.PrintJSON(cmd, secrets)
 	case shared.OutputFormatTable:
 		if len(secrets) == 0 {
 			cmd.Println("No secrets found.")
@@ -183,7 +183,7 @@ func printSecrets(cmd *cobra.Command, secrets []v1beta1.SecretDoc, format shared
 		shared.PrintTable(cmd, headers, rows)
 		return nil
 	default:
-		return shared.PrintYAML(secrets)
+		return shared.PrintYAML(cmd, secrets)
 	}
 }
 

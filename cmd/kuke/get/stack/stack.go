@@ -94,7 +94,7 @@ func NewStackCmd() *cobra.Command {
 				if !result.MetadataExists {
 					return fmt.Errorf("stack %q not found in realm %q, space %q", name, realm, space)
 				}
-				return printStack(&result.Stack, outputFormat)
+				return printStack(cmd, &result.Stack, outputFormat)
 			}
 
 			stacks, err := client.ListStacks(cmd.Context(), realm, space)
@@ -135,12 +135,12 @@ func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
 	return kukeshared.ClientFromCmd(cmd)
 }
 
-func printStack(stack *v1beta1.StackDoc, format shared.OutputFormat) error {
+func printStack(cmd *cobra.Command, stack *v1beta1.StackDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(stack)
+		return shared.PrintJSON(cmd, stack)
 	default:
-		return shared.PrintYAML(stack)
+		return shared.PrintYAML(cmd, stack)
 	}
 }
 
@@ -152,9 +152,9 @@ func printStacks(
 ) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return shared.PrintYAML(stacks)
+		return shared.PrintYAML(cmd, stacks)
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(stacks)
+		return shared.PrintJSON(cmd, stacks)
 	case shared.OutputFormatTable:
 		if len(stacks) == 0 {
 			cmd.Println("No stacks found.")
@@ -181,6 +181,6 @@ func printStacks(
 		shared.PrintTable(cmd, headers, rows)
 		return nil
 	default:
-		return shared.PrintYAML(stacks)
+		return shared.PrintYAML(cmd, stacks)
 	}
 }

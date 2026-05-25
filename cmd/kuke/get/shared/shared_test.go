@@ -19,7 +19,6 @@ package shared_test
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"os"
 	"strings"
 	"testing"
@@ -220,26 +219,8 @@ func TestPrintYAML(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldStdout := os.Stdout
-			r, w, err := os.Pipe()
-			if err != nil {
-				t.Fatalf("failed to create pipe: %v", err)
-			}
-			os.Stdout = w
-
-			errChan := make(chan error, 1)
-			go func() {
-				printErr := shared.PrintYAML(tt.doc)
-				w.Close()
-				errChan <- printErr
-			}()
-
-			var buf bytes.Buffer
-			io.Copy(&buf, r)
-			os.Stdout = oldStdout
-			r.Close()
-
-			err = <-errChan
+			cmd, buf := newOutputCommand()
+			err := shared.PrintYAML(cmd, tt.doc)
 			output := buf.String()
 
 			if tt.wantErr != "" {
@@ -315,26 +296,8 @@ func TestPrintJSON(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldStdout := os.Stdout
-			r, w, err := os.Pipe()
-			if err != nil {
-				t.Fatalf("failed to create pipe: %v", err)
-			}
-			os.Stdout = w
-
-			errChan := make(chan error, 1)
-			go func() {
-				printErr := shared.PrintJSON(tt.doc)
-				w.Close()
-				errChan <- printErr
-			}()
-
-			var buf bytes.Buffer
-			io.Copy(&buf, r)
-			os.Stdout = oldStdout
-			r.Close()
-
-			err = <-errChan
+			cmd, buf := newOutputCommand()
+			err := shared.PrintJSON(cmd, tt.doc)
 			output := strings.TrimSpace(buf.String())
 
 			if tt.wantErr != "" {

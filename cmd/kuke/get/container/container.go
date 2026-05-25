@@ -39,20 +39,6 @@ type MockControllerKey struct{}
 
 const noContainersFoundMsg = "No containers found."
 
-type (
-	printObjectFunc  func(interface{}) error
-	tablePrinterFunc func(*cobra.Command, []string, [][]string)
-)
-
-var (
-	// YAMLPrinter is exported for testing.
-	YAMLPrinter printObjectFunc = shared.PrintYAML
-	// JSONPrinter is exported for testing.
-	JSONPrinter printObjectFunc = shared.PrintJSON
-	// TablePrinter is exported for testing.
-	TablePrinter tablePrinterFunc = shared.PrintTable
-)
-
 func NewContainerCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "container [name]",
@@ -89,16 +75,6 @@ func NewContainerCmd() *cobra.Command {
 }
 
 func runContainerCmd(cmd *cobra.Command, args []string) error {
-	return runContainerCmdWithDeps(cmd, args, YAMLPrinter, JSONPrinter, TablePrinter)
-}
-
-func runContainerCmdWithDeps(
-	cmd *cobra.Command,
-	args []string,
-	printYAML printObjectFunc,
-	printJSON printObjectFunc,
-	printTable tablePrinterFunc,
-) error {
 	client, err := resolveClient(cmd)
 	if err != nil {
 		return err
@@ -172,7 +148,7 @@ func runContainerCmdWithDeps(
 			return fmt.Errorf("container %q not found", name)
 		}
 
-		return printContainer(&result.Container, outputFormat, printYAML, printJSON)
+		return printContainer(cmd, &result.Container, outputFormat)
 	}
 
 	// List path — query each container's state by calling GetContainer.
@@ -223,9 +199,6 @@ func runContainerCmdWithDeps(
 		containerStates,
 		outputFormat,
 		emptyMsg,
-		printYAML,
-		printJSON,
-		printTable,
 	)
 }
 
@@ -335,17 +308,12 @@ func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
 	return kukeshared.ClientFromCmd(cmd)
 }
 
-func printContainer(
-	container interface{},
-	format shared.OutputFormat,
-	printYAML printObjectFunc,
-	printJSON printObjectFunc,
-) error {
+func printContainer(cmd *cobra.Command, container interface{}, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatJSON:
-		return printJSON(container)
+		return shared.PrintJSON(cmd, container)
 	default:
-		return printYAML(container)
+		return shared.PrintYAML(cmd, container)
 	}
 }
 
@@ -355,15 +323,12 @@ func printContainersWithState(
 	containerStates map[string]string,
 	format shared.OutputFormat,
 	emptyMsg string,
-	printYAML printObjectFunc,
-	printJSON printObjectFunc,
-	printTable tablePrinterFunc,
 ) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return printYAML(containers)
+		return shared.PrintYAML(cmd, containers)
 	case shared.OutputFormatJSON:
-		return printJSON(containers)
+		return shared.PrintJSON(cmd, containers)
 	case shared.OutputFormatTable:
 		if len(containers) == 0 {
 			if emptyMsg == "" {
@@ -393,10 +358,10 @@ func printContainersWithState(
 				state,
 			})
 		}
-		printTable(cmd, headers, rows)
+		shared.PrintTable(cmd, headers, rows)
 		return nil
 	default:
-		return printYAML(containers)
+		return shared.PrintYAML(cmd, containers)
 	}
 }
 

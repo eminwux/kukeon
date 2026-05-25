@@ -27,7 +27,6 @@ package image
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -46,7 +45,6 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"gopkg.in/yaml.v3"
 )
 
 // MockControllerKey injects a fake Client via context for tests, mirroring
@@ -174,32 +172,14 @@ func resolveClient(cmd *cobra.Command) Client {
 	})
 }
 
-// encodeYAML / encodeJSON write structured output to the command's stdout
-// rather than os.Stdout so tests that wire `cmd.SetOut(buf)` can capture it.
-// The shared get printers in `cmd/kuke/get/shared` always target os.Stdout
-// — fine in production, opaque in tests — so this leaf opts out of them.
-func encodeYAML(cmd *cobra.Command, doc any) error {
-	const yamlIndent = 2
-	encoder := yaml.NewEncoder(cmd.OutOrStdout())
-	encoder.SetIndent(yamlIndent)
-	defer func() { _ = encoder.Close() }()
-	return encoder.Encode(doc)
-}
-
-func encodeJSON(cmd *cobra.Command, doc any) error {
-	encoder := json.NewEncoder(cmd.OutOrStdout())
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(doc)
-}
-
 func printImage(cmd *cobra.Command, img kukeonv1.ImageInfo, format getshared.OutputFormat) error {
 	switch format {
 	case getshared.OutputFormatJSON:
-		return encodeJSON(cmd, img)
+		return getshared.PrintJSON(cmd, img)
 	case getshared.OutputFormatYAML, getshared.OutputFormatTable:
-		return encodeYAML(cmd, img)
+		return getshared.PrintYAML(cmd, img)
 	default:
-		return encodeYAML(cmd, img)
+		return getshared.PrintYAML(cmd, img)
 	}
 }
 
@@ -211,9 +191,9 @@ func printImages(
 ) error {
 	switch format {
 	case getshared.OutputFormatYAML:
-		return encodeYAML(cmd, results)
+		return getshared.PrintYAML(cmd, results)
 	case getshared.OutputFormatJSON:
-		return encodeJSON(cmd, results)
+		return getshared.PrintJSON(cmd, results)
 	case getshared.OutputFormatTable:
 		total := 0
 		for _, r := range results {
@@ -241,7 +221,7 @@ func printImages(
 		getshared.PrintTable(cmd, headers, rows)
 		return nil
 	default:
-		return encodeYAML(cmd, results)
+		return getshared.PrintYAML(cmd, results)
 	}
 }
 

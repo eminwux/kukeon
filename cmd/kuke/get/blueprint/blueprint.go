@@ -103,7 +103,7 @@ func NewBlueprintCmd() *cobra.Command {
 				if !result.MetadataExists {
 					return fmt.Errorf("blueprint %q not found", name)
 				}
-				return printBlueprint(&result.Blueprint, outputFormat)
+				return printBlueprint(cmd, &result.Blueprint, outputFormat)
 			}
 
 			blueprints, err := client.ListBlueprints(cmd.Context(), realm, space, stack)
@@ -142,23 +142,23 @@ func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
 	return kukeshared.ClientFromCmd(cmd)
 }
 
-func printBlueprint(blueprint *v1beta1.CellBlueprintDoc, format shared.OutputFormat) error {
+func printBlueprint(cmd *cobra.Command, blueprint *v1beta1.CellBlueprintDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(blueprint)
+		return shared.PrintJSON(cmd, blueprint)
 	case shared.OutputFormatYAML, shared.OutputFormatTable:
-		return shared.PrintYAML(blueprint)
+		return shared.PrintYAML(cmd, blueprint)
 	default:
-		return shared.PrintYAML(blueprint)
+		return shared.PrintYAML(cmd, blueprint)
 	}
 }
 
 func printBlueprints(cmd *cobra.Command, blueprints []v1beta1.CellBlueprintDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return shared.PrintYAML(blueprints)
+		return shared.PrintYAML(cmd, blueprints)
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(blueprints)
+		return shared.PrintJSON(cmd, blueprints)
 	case shared.OutputFormatTable:
 		if len(blueprints) == 0 {
 			cmd.Println("No blueprints found.")
@@ -178,7 +178,7 @@ func printBlueprints(cmd *cobra.Command, blueprints []v1beta1.CellBlueprintDoc, 
 		shared.PrintTable(cmd, headers, rows)
 		return nil
 	default:
-		return shared.PrintYAML(blueprints)
+		return shared.PrintYAML(cmd, blueprints)
 	}
 }
 

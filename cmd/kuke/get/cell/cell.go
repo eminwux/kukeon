@@ -129,7 +129,7 @@ outOfSync / outOfSyncReason / outOfSyncError status fields.`,
 				if !result.MetadataExists {
 					return fmt.Errorf("cell %q not found in stack %q/%q/%q", name, realm, space, stack)
 				}
-				return printCell(&result.Cell, outputFormat)
+				return printCell(cmd, &result.Cell, outputFormat)
 			}
 
 			cells, err := client.ListCells(cmd.Context(), realm, space, stack)
@@ -232,12 +232,12 @@ func hasConfigLineage(c *v1beta1.CellDoc) bool {
 	return strings.TrimSpace(c.Metadata.Labels[cellconfig.LabelConfig]) != ""
 }
 
-func printCell(cell *v1beta1.CellDoc, format shared.OutputFormat) error {
+func printCell(cmd *cobra.Command, cell *v1beta1.CellDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(cell)
+		return shared.PrintJSON(cmd, cell)
 	default:
-		return shared.PrintYAML(cell)
+		return shared.PrintYAML(cmd, cell)
 	}
 }
 
@@ -250,9 +250,9 @@ func printCells(
 ) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return shared.PrintYAML(cells)
+		return shared.PrintYAML(cmd, cells)
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(cells)
+		return shared.PrintJSON(cmd, cells)
 	case shared.OutputFormatTable:
 		if len(cells) == 0 {
 			cmd.Println("No cells found.")
@@ -293,6 +293,6 @@ func printCells(
 		shared.PrintTable(cmd, headers, rows)
 		return nil
 	default:
-		return shared.PrintYAML(cells)
+		return shared.PrintYAML(cmd, cells)
 	}
 }

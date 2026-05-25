@@ -75,7 +75,7 @@ func NewRealmCmd() *cobra.Command {
 				if !result.MetadataExists {
 					return fmt.Errorf("realm %q not found", name)
 				}
-				return printRealm(&result.Realm, outputFormat)
+				return printRealm(cmd, &result.Realm, outputFormat)
 			}
 
 			realms, err := client.ListRealms(cmd.Context())
@@ -116,12 +116,12 @@ func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
 	return kukeshared.ClientFromCmd(cmd)
 }
 
-func printRealm(realm *v1beta1.RealmDoc, format shared.OutputFormat) error {
+func printRealm(cmd *cobra.Command, realm *v1beta1.RealmDoc, format shared.OutputFormat) error {
 	switch format {
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(realm)
+		return shared.PrintJSON(cmd, realm)
 	default:
-		return shared.PrintYAML(realm)
+		return shared.PrintYAML(cmd, realm)
 	}
 }
 
@@ -133,9 +133,9 @@ func printRealms(
 ) error {
 	switch format {
 	case shared.OutputFormatYAML:
-		return shared.PrintYAML(realms)
+		return shared.PrintYAML(cmd, realms)
 	case shared.OutputFormatJSON:
-		return shared.PrintJSON(realms)
+		return shared.PrintJSON(cmd, realms)
 	case shared.OutputFormatTable:
 		if len(realms) == 0 {
 			cmd.Println("No realms found.")
@@ -162,6 +162,6 @@ func printRealms(
 		shared.PrintTable(cmd, headers, rows)
 		return nil
 	default:
-		return shared.PrintYAML(realms)
+		return shared.PrintYAML(cmd, realms)
 	}
 }

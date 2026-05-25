@@ -22,7 +22,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"testing"
 
@@ -271,38 +270,8 @@ func TestNewCellCmd_SyncColumn(t *testing.T) {
 				}
 			}
 
-			var stdoutBuf *bytes.Buffer
-			if len(tt.wantStatus) > 0 {
-				// shared.PrintYAML / PrintJSON write directly to os.Stdout
-				// (the printer is shared across get subcommands and ignores
-				// cmd's stdout redirection). Capture via os.Pipe — same
-				// pattern the shared tests in cmd/kuke/get/shared use.
-				oldStdout := os.Stdout
-				r, w, pipeErr := os.Pipe()
-				if pipeErr != nil {
-					t.Fatalf("os.Pipe: %v", pipeErr)
-				}
-				os.Stdout = w
-				t.Cleanup(func() {
-					os.Stdout = oldStdout
-				})
-				stdoutBuf = &bytes.Buffer{}
-				done := make(chan struct{})
-				go func() {
-					_, _ = stdoutBuf.ReadFrom(r)
-					close(done)
-				}()
-				if err := cmd.Execute(); err != nil {
-					_ = w.Close()
-					<-done
-					t.Fatalf("unexpected error: %v", err)
-				}
-				_ = w.Close()
-				<-done
-			} else {
-				if err := cmd.Execute(); err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
 			}
 
 			out := buf.String()
@@ -316,12 +285,9 @@ func TestNewCellCmd_SyncColumn(t *testing.T) {
 					t.Errorf("row missing %q\nGot:\n%s", sub, out)
 				}
 			}
-			if stdoutBuf != nil {
-				yamlOut := stdoutBuf.String()
-				for _, sub := range tt.wantStatus {
-					if !strings.Contains(yamlOut, sub) {
-						t.Errorf("yaml output missing %q\nGot:\n%s", sub, yamlOut)
-					}
+			for _, sub := range tt.wantStatus {
+				if !strings.Contains(out, sub) {
+					t.Errorf("yaml output missing %q\nGot:\n%s", sub, out)
 				}
 			}
 		})
