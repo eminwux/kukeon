@@ -597,3 +597,151 @@ func TestAttach_MissingCellArg(t *testing.T) {
 		t.Errorf("error %q does not mention arg-count requirement", err.Error())
 	}
 }
+
+// TestAttach_NotCreated_PointsAtRun covers #852: the cell-level liveness
+// guard fires before ListContainers, so a cell that has never been
+// created surfaces the operator-actionable "create it first" pointer
+// instead of falling out of the container picker with the unhelpful
+// ErrAttachNoCandidate. Also verifies the guard short-circuits before
+// reaching AttachContainer.
+func TestAttach_NotCreated_PointsAtRun(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	listCalls := 0
+	attachCalls := 0
+	fc := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{MetadataExists: false}, nil
+		},
+		listContainersFn: func(_, _, _, _ string) ([]v1beta1.ContainerSpec, error) {
+			listCalls++
+			return nil, nil
+		},
+		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
+			attachCalls++
+			return kukeonv1.AttachContainerResult{}, nil
+		},
+	}
+	run := &runCapture{}
+	cmd := newCmdWithCtx(t, fc, run)
+	cmd.SetArgs([]string{
+		"--realm", "r1", "--space", "s1", "--stack", "st1", "kukeon-pm-0",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute returned nil on missing cell, want NotCreated error")
+	}
+	if got := err.Error(); !strings.Contains(got, "does not exist") {
+		t.Errorf("error %q missing %q wording", got, "does not exist")
+	}
+	if got := err.Error(); !strings.Contains(got, "kuke run") {
+		t.Errorf("error %q missing `kuke run` recovery pointer", got)
+	}
+	if listCalls != 0 {
+		t.Errorf("ListContainers called %d times, want 0 (guard must fire first)", listCalls)
+	}
+	if attachCalls != 0 {
+		t.Errorf("AttachContainer called %d times, want 0", attachCalls)
+	}
+	if run.calls != 0 {
+		t.Errorf("attach.Run called %d times, want 0", run.calls)
+	}
+}
+
+// TestAttach_Stopped_PointsAtStart covers #852's repro signature: the
+// wind-down flow leaves the cell at Stopped with an orphan socket
+// inode, and the previous guard short-circuited on any non-Ready state.
+// Attach must now refuse with the start-it-first pointer instead of
+// dialing through to `connection refused`.
+func TestAttach_Stopped_PointsAtStart(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	attachCalls := 0
+	fc := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell:                v1beta1.CellDoc{Status: v1beta1.CellStatus{State: v1beta1.CellStateStopped}},
+				MetadataExists:      true,
+				RootContainerExists: true,
+				// Wind-down may leave the root task still alive (long-lived
+				// `sleep infinity`); the workload task is gone and that is
+				// what makes the cell unattachable.
+				RootContainerTaskRunning: true,
+			}, nil
+		},
+		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
+			attachCalls++
+			return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
+		},
+	}
+	run := &runCapture{}
+	cmd := newCmdWithCtx(t, fc, run)
+	cmd.SetArgs([]string{
+		"--realm", "r1", "--space", "s1", "--stack", "st1",
+		"--container", "work", "kukeon-pm-0",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute returned nil on Stopped cell, want start-it-first error")
+	}
+	if got := err.Error(); !strings.Contains(got, "Stopped") {
+		t.Errorf("error %q missing %q state name", got, "Stopped")
+	}
+	if got := err.Error(); !strings.Contains(got, "kuke start cell kukeon-pm-0") {
+		t.Errorf("error %q missing `kuke start cell kukeon-pm-0` recovery pointer", got)
+	}
+	if attachCalls != 0 {
+		t.Errorf("AttachContainer called %d times, want 0 (must not dial dead socket)", attachCalls)
+	}
+	if run.calls != 0 {
+		t.Errorf("attach.Run called %d times, want 0", run.calls)
+	}
+}
+
+// TestAttach_Failed_PointsAtDelete covers the Failed branch of the
+// generalized guard. A Failed cell is sticky per the reconciler, so the
+// only recovery is delete-then-rerun — same pointer as the
+// Ready+task-dead divergence path.
+func TestAttach_Failed_PointsAtDelete(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	attachCalls := 0
+	fc := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell:                v1beta1.CellDoc{Status: v1beta1.CellStatus{State: v1beta1.CellStateFailed}},
+				MetadataExists:      true,
+				RootContainerExists: true,
+			}, nil
+		},
+		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
+			attachCalls++
+			return kukeonv1.AttachContainerResult{HostSocketPath: testHostSocket}, nil
+		},
+	}
+	run := &runCapture{}
+	cmd := newCmdWithCtx(t, fc, run)
+	cmd.SetArgs([]string{
+		"--realm", "r1", "--space", "s1", "--stack", "st1",
+		"--container", "work", "c1",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute returned nil on Failed cell, want delete-it-first error")
+	}
+	if got := err.Error(); !strings.Contains(got, "Failed") {
+		t.Errorf("error %q missing %q state name", got, "Failed")
+	}
+	if got := err.Error(); !strings.Contains(got, "kuke delete cell c1") {
+		t.Errorf("error %q missing `kuke delete cell c1` recovery pointer", got)
+	}
+	if attachCalls != 0 {
+		t.Errorf("AttachContainer called %d times, want 0", attachCalls)
+	}
+	if run.calls != 0 {
+		t.Errorf("attach.Run called %d times, want 0", run.calls)
+	}
+}

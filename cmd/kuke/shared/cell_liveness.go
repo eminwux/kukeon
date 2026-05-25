@@ -23,34 +23,70 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
-// GuardCellTaskLiveness refuses to attach to a cell whose on-disk metadata
-// records it Ready but whose root-container task is gone from containerd. This
-// is the post-reboot divergence (#654, #683): containerd container *records*
-// survive a host/daemon restart while the backing tasks do not, so a
-// record-existence check passes even though attaching would land on a dead
-// socket. The guard keys on task liveness (the root task is Running) rather
-// than record existence.
+// GuardCellTaskLiveness refuses to attach to a cell whose persisted state
+// is anything other than "Ready with a live root-container task". It is
+// the single shared guard backing `kuke run`'s Ready short-circuit and
+// `kuke attach` — both entry points hand a host socket path to the
+// in-process sbsh attach loop, and both must refuse the same divergence
+// classes.
 //
-// It is scoped to Ready: a legitimately Stopped cell has no live task by
-// design, and the run path's Stopped branch starts it before attaching.
-// Returns nil when the cell is not Ready or its root task is live; otherwise
-// the diverged-state error with a delete-then-rerun pointer.
+// Five terminal answers, each with a state-appropriate operator pointer:
 //
-// Both `kuke run` (Ready short-circuit) and `kuke attach` call this before
-// handing a host socket path to the in-process sbsh attach loop — the single
-// shared guard backing both entry points.
+//   - !MetadataExists → the cell has never been created (or has already
+//     been deleted). Direct the operator at `kuke run` with the standard
+//     profile + name flags so attach is preceded by a creation, not by
+//     a confusing ListContainers empty.
+//   - Ready + RootContainerTaskRunning → nil (attach proceeds).
+//   - Ready + !RootContainerTaskRunning → the post-reboot divergence
+//     #683 was originally written for: the on-disk metadata records
+//     Ready but containerd has lost the backing task. Recovery is a
+//     delete-then-rerun so the next CreateCell starts from a clean
+//     containerd slate.
+//   - Stopped → the reconciler's wind-down (`refresh.go windDownCell`)
+//     has reaped the work container after its kuketty exited, so the
+//     attach socket inode is orphaned. Recovery is `kuke start cell` —
+//     the cell metadata is intact, so a restart re-binds kuketty
+//     against a fresh inode.
+//   - Pending / Failed / Unknown → no clean attach path. Same recovery
+//     as Ready+task-dead (delete-then-rerun); a Failed cell is sticky
+//     per the reconciler so only a delete clears it.
+//
+// `kuke run`'s switch in runExistingCell calls this from the Ready
+// branch only — its Stopped / Failed / Unknown branches route the
+// operator through their own verbs (StartCell, or the
+// delete-then-rerun pointer) — so the broader switch here is a
+// strict superset that only `kuke attach` exercises in full.
 func GuardCellTaskLiveness(get kukeonv1.GetCellResult, cellName string) error {
-	if get.Cell.Status.State != v1beta1.CellStateReady {
-		return nil
+	if !get.MetadataExists {
+		return fmt.Errorf(
+			"cell %q does not exist; create it first with "+
+				"`kuke run -p <profile> --name %s`",
+			cellName, cellName,
+		)
 	}
-	if get.RootContainerTaskRunning {
-		return nil
+	switch get.Cell.Status.State {
+	case v1beta1.CellStateReady:
+		if get.RootContainerTaskRunning {
+			return nil
+		}
+		return fmt.Errorf(
+			"cell %q is recorded Ready but its containers are gone from containerd "+
+				"(kukeon metadata and containerd have diverged); "+
+				"delete it with `kuke delete cell %s` before re-running",
+			cellName,
+			cellName,
+		)
+	case v1beta1.CellStateStopped:
+		return fmt.Errorf(
+			"cell %q is in state Stopped (no work container is running); "+
+				"start it first with `kuke start cell %s`",
+			cellName, cellName,
+		)
+	default:
+		return fmt.Errorf(
+			"cell %q is in state %s; "+
+				"delete it with `kuke delete cell %s` before re-running",
+			cellName, get.Cell.Status.State.String(), cellName,
+		)
 	}
-	return fmt.Errorf(
-		"cell %q is recorded Ready but its containers are gone from containerd "+
-			"(kukeon metadata and containerd have diverged); "+
-			"delete it with `kuke delete cell %s` before re-running",
-		cellName,
-		cellName,
-	)
 }

@@ -760,6 +760,137 @@ func newTestRunner(t *testing.T) *Exec {
 	}
 }
 
+// TestRemoveAttachableSocketRuntimeArtifacts_RemovesBothInodes covers
+// the #852 teardown hook: on every clean stop / kill / wind-down, both
+// the SUN_PATH-safe symlink at <RunPath>/s/<hash> and the deep socket
+// inode at <ContainerTTYDir>/socket must be unlinked so the next
+// `kuke attach` that slips past the cell-state liveness guard gets
+// ENOENT instead of `connection refused` from a dead inode.
+func TestRemoveAttachableSocketRuntimeArtifacts_RemovesBothInodes(t *testing.T) {
+	runPath := t.TempDir()
+	spec := intmodel.ContainerSpec{
+		ID:         "work",
+		RealmName:  "r1",
+		SpaceName:  "s1",
+		StackName:  "st1",
+		CellName:   "c1",
+		Attachable: true,
+	}
+
+	// Stage the symlink the way ensureAttachableSocketSymlink would on
+	// provision: the helper this test exercises is the symmetric
+	// teardown counterpart, so the seed must mirror what's actually on
+	// disk after a healthy boot.
+	if err := ensureAttachableSocketSymlink(runPath, spec); err != nil {
+		t.Fatalf("ensureAttachableSocketSymlink: %v", err)
+	}
+
+	// Stage the deep socket inode kuketty would bind inside the
+	// container. A plain file is fine for the unlink test — the kernel
+	// distinguishes socket inodes at connect(2) time, not at unlink(2)
+	// time, so a regular file standing in for the bound socket is
+	// indistinguishable to os.Remove.
+	socketPath := fs.ContainerSocketPath(
+		runPath, spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
+	)
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
+		t.Fatalf("mkdir socket parent: %v", err)
+	}
+	if err := os.WriteFile(socketPath, nil, 0o600); err != nil {
+		t.Fatalf("seed socket inode: %v", err)
+	}
+
+	if err := removeAttachableSocketRuntimeArtifacts(runPath, spec); err != nil {
+		t.Fatalf("removeAttachableSocketRuntimeArtifacts: %v", err)
+	}
+
+	symlinkPath := fs.ContainerSocketSymlinkPath(
+		runPath, spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
+	)
+	if _, err := os.Lstat(symlinkPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("symlink %q still exists (lstat err = %v), want ErrNotExist", symlinkPath, err)
+	}
+	if _, err := os.Lstat(socketPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("socket inode %q still exists (lstat err = %v), want ErrNotExist", socketPath, err)
+	}
+}
+
+// TestRemoveAttachableSocketRuntimeArtifacts_Idempotent locks the
+// best-effort contract: a second call against the same spec (or a
+// first call against a never-provisioned spec) must succeed silently.
+// killCellLocked / stopCellLocked call this on every workload
+// container per teardown, and the wind-down path can race them — a
+// non-NotExist error on a missing path would otherwise spam warnings
+// and obscure real failures.
+func TestRemoveAttachableSocketRuntimeArtifacts_Idempotent(t *testing.T) {
+	runPath := t.TempDir()
+	spec := intmodel.ContainerSpec{
+		ID:         "work",
+		RealmName:  "r1",
+		SpaceName:  "s1",
+		StackName:  "st1",
+		CellName:   "c1",
+		Attachable: true,
+	}
+
+	// First call against a never-provisioned spec: both paths absent →
+	// must return nil.
+	if err := removeAttachableSocketRuntimeArtifacts(runPath, spec); err != nil {
+		t.Fatalf("first call against absent paths returned %v, want nil", err)
+	}
+
+	if err := ensureAttachableSocketSymlink(runPath, spec); err != nil {
+		t.Fatalf("ensureAttachableSocketSymlink: %v", err)
+	}
+	if err := removeAttachableSocketRuntimeArtifacts(runPath, spec); err != nil {
+		t.Fatalf("call after symlink-only seed returned %v, want nil", err)
+	}
+	// Repeat: nothing on disk now, still must return nil.
+	if err := removeAttachableSocketRuntimeArtifacts(runPath, spec); err != nil {
+		t.Fatalf("second call against absent paths returned %v, want nil", err)
+	}
+}
+
+// TestRemoveAttachableSocketRuntimeArtifacts_SkipsNonAttachable
+// locks the !Attachable short-circuit: kill/stopCellLocked iterate
+// over every container in the cell spec and call this unconditionally,
+// so the helper must no-op for root and non-Attachable workloads.
+// Otherwise it would surface confusing remove-errors on cells whose
+// containers were never sbsh-wrapped.
+func TestRemoveAttachableSocketRuntimeArtifacts_SkipsNonAttachable(t *testing.T) {
+	runPath := t.TempDir()
+	spec := intmodel.ContainerSpec{
+		ID:         "root",
+		RealmName:  "r1",
+		SpaceName:  "s1",
+		StackName:  "st1",
+		CellName:   "c1",
+		Root:       true,
+		Attachable: false,
+	}
+
+	// Seed a file at the deep socket path even though !Attachable: a
+	// future refactor that drops the short-circuit must not unlink
+	// state that doesn't belong to it.
+	socketPath := fs.ContainerSocketPath(
+		runPath, spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
+	)
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
+		t.Fatalf("mkdir socket parent: %v", err)
+	}
+	if err := os.WriteFile(socketPath, nil, 0o600); err != nil {
+		t.Fatalf("seed socket inode: %v", err)
+	}
+
+	if err := removeAttachableSocketRuntimeArtifacts(runPath, spec); err != nil {
+		t.Fatalf("removeAttachableSocketRuntimeArtifacts returned %v, want nil", err)
+	}
+	if _, err := os.Stat(socketPath); err != nil {
+		t.Errorf("unrelated socket inode %q was removed (stat err = %v); helper must short-circuit on !Attachable",
+			socketPath, err)
+	}
+}
+
 func readDoc(t *testing.T, path string) extmodel.ContainerDoc {
 	t.Helper()
 	data, err := os.ReadFile(path)
