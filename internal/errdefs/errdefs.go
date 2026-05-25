@@ -135,6 +135,20 @@ var (
 	ErrTaskNotFound      = errors.New("task not found")
 	ErrTaskNotRunning    = errors.New("task is not running")
 
+	// ErrCellWindDownImmediate fires when StartCell / StartContainer's
+	// post-start liveness check observes a just-started container task in a
+	// non-Running state within the startup grace window — i.e. the task
+	// failed (or exited cleanly) between containerd accepting task creation
+	// and the controller stamping the cell Ready. Without this sentinel the
+	// cell would briefly persist Ready, the next reconciler tick would
+	// derive Stopped from the dead workload, shouldWindDownCell would fire
+	// KillCell, and the operator's in-flight `kuke run --attach` would race
+	// the teardown — printing `containers: started` and then dialing a
+	// socket that no longer exists. Routed through markCellFailed via the
+	// existing provisionStarted defer so the cell lands at Failed instead
+	// of the misleading Ready→Stopped→reaped cycle. Issue #851.
+	ErrCellWindDownImmediate = errors.New("cell wound down immediately after start")
+
 	// Volume-related errors.
 
 	ErrVolumeSourceRequired    = errors.New("volume source is required")

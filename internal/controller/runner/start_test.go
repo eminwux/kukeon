@@ -377,6 +377,466 @@ func TestPurgeStaleRootContainerCNI_CreateFreshSafetyNet(t *testing.T) {
 	})
 }
 
+// TestFirstNonLiveContainer is the per-probe decision the post-start
+// liveness guard relies on (issue #851). Verifies the per-AC expansion:
+//
+//   - root running + every non-root running: AllRunning (no offender).
+//   - any non-root in a non-Running state: that container is the offender
+//     (AC item (a) — work container exits with non-zero code immediately).
+//   - root in a non-Running state: root is the offender (AC item (c) —
+//     `deriveCellStateFromNonRootContainerStatuses` only checks non-root,
+//     so without this branch a dead root would slip through to
+//     markCellReady).
+//   - statusFn error on either probe counts the same as a non-Running
+//     result — a freshly-started task whose record vanished mid-check is
+//     exactly the wind-down-then-race condition we're guarding against.
+//   - empty ContainerdID on a non-root spec is defensive: matches the
+//     cellTasksAllRunningFn idempotency-guard treatment of the same case.
+//   - Root: true entries inside cell.Spec.Containers are skipped — the
+//     auto-default-root branch never stamps such an entry, but the
+//     explicit-root branch does, and probing it via the non-root
+//     ContainerdID would double-count the root.
+func TestFirstNonLiveContainer(t *testing.T) {
+	const rootID = "space_stack_cell_root"
+
+	statusOf := func(states map[string]containerd.ProcessStatus) func(string) (containerd.Status, error) {
+		return func(id string) (containerd.Status, error) {
+			s, ok := states[id]
+			if !ok {
+				return containerd.Status{}, fmt.Errorf("no task for %q", id)
+			}
+			return containerd.Status{Status: s}, nil
+		}
+	}
+
+	tests := []struct {
+		name           string
+		nonRoot        []intmodel.ContainerSpec
+		fn             func(string) (containerd.Status, error)
+		wantAllRunning bool
+		wantOffender   string // empty when wantAllRunning=true; matches ContainerdID for root, ContainerID for non-root
+	}{
+		{
+			name:           "root running, no non-root containers — all live",
+			nonRoot:        nil,
+			fn:             statusOf(map[string]containerd.ProcessStatus{rootID: containerd.Running}),
+			wantAllRunning: true,
+		},
+		{
+			name: "root running, all non-root running — all live",
+			nonRoot: []intmodel.ContainerSpec{
+				{ID: "a", ContainerdID: "cid_a"},
+				{ID: "b", ContainerdID: "cid_b"},
+			},
+			fn: statusOf(map[string]containerd.ProcessStatus{
+				rootID:  containerd.Running,
+				"cid_a": containerd.Running,
+				"cid_b": containerd.Running,
+			}),
+			wantAllRunning: true,
+		},
+		{
+			name: "non-root exits with stopped — flagged (AC (a))",
+			nonRoot: []intmodel.ContainerSpec{
+				{ID: "work", ContainerdID: "cid_work"},
+			},
+			fn: statusOf(map[string]containerd.ProcessStatus{
+				rootID:     containerd.Running,
+				"cid_work": containerd.Stopped,
+			}),
+			wantAllRunning: false,
+			wantOffender:   "work",
+		},
+		{
+			name:    "root stopped immediately — flagged (AC (c))",
+			nonRoot: nil,
+			fn: statusOf(map[string]containerd.ProcessStatus{
+				rootID: containerd.Stopped,
+			}),
+			wantAllRunning: false,
+			wantOffender:   rootID,
+		},
+		{
+			name: "root stopped wins even when non-root would also fail",
+			nonRoot: []intmodel.ContainerSpec{
+				{ID: "work", ContainerdID: "cid_work"},
+			},
+			fn: statusOf(map[string]containerd.ProcessStatus{
+				rootID:     containerd.Stopped,
+				"cid_work": containerd.Stopped,
+			}),
+			wantAllRunning: false,
+			wantOffender:   rootID,
+		},
+		{
+			name:           "root status probe errors — flagged",
+			nonRoot:        nil,
+			fn:             statusOf(map[string]containerd.ProcessStatus{}), // no entry => err
+			wantAllRunning: false,
+			wantOffender:   rootID,
+		},
+		{
+			name: "non-root status probe errors — flagged",
+			nonRoot: []intmodel.ContainerSpec{
+				{ID: "work", ContainerdID: "cid_work"},
+			},
+			fn: statusOf(map[string]containerd.ProcessStatus{
+				rootID: containerd.Running,
+				// cid_work intentionally missing — statusFn errors
+			}),
+			wantAllRunning: false,
+			wantOffender:   "work",
+		},
+		{
+			name: "non-root with empty ContainerdID is flagged (defensive)",
+			nonRoot: []intmodel.ContainerSpec{
+				{ID: "work", ContainerdID: ""},
+			},
+			fn:             statusOf(map[string]containerd.ProcessStatus{rootID: containerd.Running}),
+			wantAllRunning: false,
+			wantOffender:   "work",
+		},
+		{
+			name: "Root:true entry inside nonRoot slice is skipped",
+			nonRoot: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, ContainerdID: "ignored"},
+				{ID: "work", ContainerdID: "cid_work"},
+			},
+			fn: statusOf(map[string]containerd.ProcessStatus{
+				rootID:     containerd.Running,
+				"cid_work": containerd.Running,
+			}),
+			wantAllRunning: true,
+		},
+		{
+			name: "first stopped non-root wins; second one is not probed",
+			nonRoot: []intmodel.ContainerSpec{
+				{ID: "a", ContainerdID: "cid_a"},
+				{ID: "b", ContainerdID: "cid_b"},
+			},
+			fn: statusOf(map[string]containerd.ProcessStatus{
+				rootID:  containerd.Running,
+				"cid_a": containerd.Stopped,
+				// cid_b deliberately missing — must not be probed (a wins first)
+			}),
+			wantAllRunning: false,
+			wantOffender:   "a",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := firstNonLiveContainer(rootID, tt.nonRoot, tt.fn)
+			gotAllRunning := got.ContainerdID == "" && got.ContainerID == ""
+			if gotAllRunning != tt.wantAllRunning {
+				t.Errorf(
+					"firstNonLiveContainer() AllRunning = %v, want %v; result=%+v",
+					gotAllRunning,
+					tt.wantAllRunning,
+					got,
+				)
+			}
+			if tt.wantAllRunning {
+				return
+			}
+			// Match offender by whichever field is populated for that spec shape.
+			gotOffender := got.ContainerdID
+			if got.ContainerID != "" {
+				gotOffender = got.ContainerID
+			}
+			if gotOffender != tt.wantOffender {
+				t.Errorf(
+					"firstNonLiveContainer() offender = %q, want %q (result=%+v)",
+					gotOffender,
+					tt.wantOffender,
+					got,
+				)
+			}
+		})
+	}
+}
+
+// TestVerifyCellTasksLiveAfterStart wraps the per-probe decision with
+// the time-bounded poll loop the StartCell / StartContainer call sites
+// invoke. Covers the three AC branches that depend on the loop, not the
+// pure check:
+//
+//   - (b) healthy start: every probe across the grace window observes
+//     all-Running, so the loop returns nil and StartCell's markCellReady
+//     stamp lands as today (no behavior change on the happy path).
+//   - (a) fast-exit: a probe within the window observes a Stopped task;
+//     the loop returns immediately (fail-fast) with a wrapped
+//     ErrCellWindDownImmediate so the existing provisionStarted defer in
+//     StartCell routes through markCellFailed.
+//   - bypass: graceWindow=0 disables the guard (useful for the no-real-
+//     containerd test fixtures elsewhere in the package).
+func TestVerifyCellTasksLiveAfterStart(t *testing.T) {
+	const (
+		cellName = "kukeon-pm-0"
+		rootID   = "space_stack_cell_root"
+		workID   = "cid_work"
+	)
+	nonRoot := []intmodel.ContainerSpec{{ID: "work", ContainerdID: workID}}
+
+	t.Run("all_running_through_window_returns_nil_AC_b", func(t *testing.T) {
+		probeCount := 0
+		statusFn := func(_ string) (containerd.Status, error) {
+			probeCount++
+			return containerd.Status{Status: containerd.Running}, nil
+		}
+		var elapsed time.Duration
+		now := func() time.Time { return time.Unix(0, 0).Add(elapsed) }
+		sleep := func(d time.Duration) { elapsed += d }
+
+		err := verifyCellTasksLiveAfterStart(
+			cellName, rootID, nonRoot,
+			statusFn,
+			100*time.Millisecond, // graceWindow
+			20*time.Millisecond,  // pollInterval
+			now, sleep,
+		)
+		if err != nil {
+			t.Fatalf("verifyCellTasksLiveAfterStart returned %v on all-Running, want nil (AC item (b))", err)
+		}
+		// At minimum we must probe twice: once at t=0 and once after the
+		// final sleep crosses the deadline. Anything less means the loop
+		// returned without paying the grace window.
+		if probeCount < 2 {
+			t.Errorf("probeCount = %d, want ≥ 2 (loop must probe across the grace window)", probeCount)
+		}
+	})
+
+	t.Run("fast_exit_caught_inside_window_AC_a", func(t *testing.T) {
+		// Flip the work container to Stopped on the 2nd probe — the loop
+		// must return immediately with a wrapped ErrCellWindDownImmediate.
+		probeCount := 0
+		statusFn := func(id string) (containerd.Status, error) {
+			if id == rootID {
+				return containerd.Status{Status: containerd.Running}, nil
+			}
+			probeCount++
+			if probeCount >= 2 {
+				return containerd.Status{Status: containerd.Stopped}, nil
+			}
+			return containerd.Status{Status: containerd.Running}, nil
+		}
+		var elapsed time.Duration
+		now := func() time.Time { return time.Unix(0, 0).Add(elapsed) }
+		sleep := func(d time.Duration) { elapsed += d }
+
+		err := verifyCellTasksLiveAfterStart(
+			cellName, rootID, nonRoot,
+			statusFn,
+			500*time.Millisecond,
+			20*time.Millisecond,
+			now, sleep,
+		)
+		if err == nil {
+			t.Fatal(
+				"verifyCellTasksLiveAfterStart returned nil on Stopped task, want wrapped ErrCellWindDownImmediate (AC item (a))",
+			)
+		}
+		if !errors.Is(err, internalerrdefs.ErrCellWindDownImmediate) {
+			t.Errorf("err = %v, want errors.Is(_, ErrCellWindDownImmediate)", err)
+		}
+		// Surface text must name the cell, the container, and the kuke log pointer.
+		msg := err.Error()
+		for _, want := range []string{cellName, `"work"`, "kuke log " + cellName, "--container work"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("error %q missing fragment %q", msg, want)
+			}
+		}
+		// Elapsed must be < graceWindow — fail-fast contract.
+		if elapsed >= 500*time.Millisecond {
+			t.Errorf("elapsed = %v, want < 500ms (fail-fast must not wait out the grace window)", elapsed)
+		}
+	})
+
+	t.Run("zero_grace_window_disables_guard", func(t *testing.T) {
+		probeCount := 0
+		statusFn := func(_ string) (containerd.Status, error) {
+			probeCount++
+			// Even a Stopped result must not surface when the guard is disabled.
+			return containerd.Status{Status: containerd.Stopped}, nil
+		}
+		now := func() time.Time { return time.Unix(0, 0) }
+		sleep := func(time.Duration) { t.Fatal("sleep must not be called when graceWindow=0") }
+
+		err := verifyCellTasksLiveAfterStart(
+			cellName, rootID, nonRoot,
+			statusFn,
+			0, 0, // graceWindow + pollInterval both zero
+			now, sleep,
+		)
+		if err != nil {
+			t.Errorf("verifyCellTasksLiveAfterStart returned %v with graceWindow=0, want nil", err)
+		}
+		if probeCount != 0 {
+			t.Errorf("probeCount = %d, want 0 (no probe should run when guard is disabled)", probeCount)
+		}
+	})
+
+	t.Run("root_dies_inside_window_AC_c", func(t *testing.T) {
+		// Root container exits after the first probe — exercises the
+		// "root container exits immediately (currently unhandled — the
+		// derivation loop only checks non-root)" path called out in AC (c).
+		probeCount := 0
+		statusFn := func(id string) (containerd.Status, error) {
+			if id != rootID {
+				return containerd.Status{Status: containerd.Running}, nil
+			}
+			probeCount++
+			if probeCount >= 2 {
+				return containerd.Status{Status: containerd.Stopped}, nil
+			}
+			return containerd.Status{Status: containerd.Running}, nil
+		}
+		var elapsed time.Duration
+		now := func() time.Time { return time.Unix(0, 0).Add(elapsed) }
+		sleep := func(d time.Duration) { elapsed += d }
+
+		err := verifyCellTasksLiveAfterStart(
+			cellName, rootID, nonRoot,
+			statusFn,
+			500*time.Millisecond,
+			20*time.Millisecond,
+			now, sleep,
+		)
+		if err == nil {
+			t.Fatal(
+				"verifyCellTasksLiveAfterStart returned nil on root Stopped, want wrapped ErrCellWindDownImmediate (AC item (c))",
+			)
+		}
+		if !errors.Is(err, internalerrdefs.ErrCellWindDownImmediate) {
+			t.Errorf("err = %v, want errors.Is(_, ErrCellWindDownImmediate)", err)
+		}
+		// Root-offender message variant must name the cell and reference
+		// the root containerd ID (no `--container` flag — operator looks
+		// at cell logs).
+		msg := err.Error()
+		for _, want := range []string{cellName, "root container", rootID, "kuke log " + cellName} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("error %q missing fragment %q", msg, want)
+			}
+		}
+	})
+}
+
+// TestVerifyCellTasksLiveAfterStart_SingleContainerVariant pins AC item
+// (d): the same liveness check covers `(*Exec).StartContainer` (single-
+// container variant at runner/start.go:968). The StartContainer wiring
+// builds its livenessSpec from the single just-started container plus
+// the root; this test exercises that shape so a regression that wires
+// only the cell-level path is caught.
+func TestVerifyCellTasksLiveAfterStart_SingleContainerVariant(t *testing.T) {
+	const (
+		cellName = "kukeon-pm-0"
+		rootID   = "space_stack_cell_root"
+		workID   = "cid_work"
+	)
+	// StartContainer's spec slice carries one entry: the container just
+	// brought up. Root is probed separately via rootContainerdID.
+	livenessSpec := []intmodel.ContainerSpec{{ID: "work", ContainerdID: workID}}
+
+	t.Run("single_container_running_returns_nil", func(t *testing.T) {
+		statusFn := func(_ string) (containerd.Status, error) {
+			return containerd.Status{Status: containerd.Running}, nil
+		}
+		var elapsed time.Duration
+		now := func() time.Time { return time.Unix(0, 0).Add(elapsed) }
+		sleep := func(d time.Duration) { elapsed += d }
+
+		err := verifyCellTasksLiveAfterStart(
+			cellName, rootID, livenessSpec,
+			statusFn,
+			60*time.Millisecond,
+			20*time.Millisecond,
+			now, sleep,
+		)
+		if err != nil {
+			t.Errorf("verifyCellTasksLiveAfterStart returned %v on healthy single-container start, want nil", err)
+		}
+	})
+
+	t.Run("single_container_exits_immediately_caught", func(t *testing.T) {
+		statusFn := func(id string) (containerd.Status, error) {
+			if id == rootID {
+				return containerd.Status{Status: containerd.Running}, nil
+			}
+			return containerd.Status{Status: containerd.Stopped}, nil
+		}
+		now := func() time.Time { return time.Unix(0, 0) }
+		sleep := func(time.Duration) {}
+
+		err := verifyCellTasksLiveAfterStart(
+			cellName, rootID, livenessSpec,
+			statusFn,
+			60*time.Millisecond,
+			20*time.Millisecond,
+			now, sleep,
+		)
+		if err == nil {
+			t.Fatal("verifyCellTasksLiveAfterStart returned nil on Stopped single-container task")
+		}
+		if !errors.Is(err, internalerrdefs.ErrCellWindDownImmediate) {
+			t.Errorf("err = %v, want errors.Is(_, ErrCellWindDownImmediate)", err)
+		}
+		if !strings.Contains(err.Error(), `"work"`) {
+			t.Errorf("err = %q, want it to name the offending container", err)
+		}
+	})
+}
+
+// TestNonRootContainerSpecsFromCell verifies the StartCell-side adapter
+// that flattens cell.Spec.Containers to the non-root subset the liveness
+// probe iterates. Two shapes matter: cells with no non-root entries
+// (kukeond-style — root *is* the workload) and cells with a mix of root
+// + non-root containers (the explicit-root branch stamps a Root: true
+// entry into Containers, which must be filtered out so the probe doesn't
+// double-count the root).
+func TestNonRootContainerSpecsFromCell(t *testing.T) {
+	tests := []struct {
+		name string
+		cell intmodel.Cell
+		want []string // IDs in expected order
+	}{
+		{
+			name: "no containers — empty",
+			cell: intmodel.Cell{},
+			want: nil,
+		},
+		{
+			name: "only root entries — empty",
+			cell: intmodel.Cell{Spec: intmodel.CellSpec{Containers: []intmodel.ContainerSpec{
+				{ID: "root1", Root: true},
+				{ID: "root2", Root: true},
+			}}},
+			want: nil,
+		},
+		{
+			name: "mix preserves declaration order",
+			cell: intmodel.Cell{Spec: intmodel.CellSpec{Containers: []intmodel.ContainerSpec{
+				{ID: "a"},
+				{ID: "root", Root: true},
+				{ID: "b"},
+			}}},
+			want: []string{"a", "b"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := nonRootContainerSpecsFromCell(tt.cell)
+			gotIDs := make([]string, 0, len(got))
+			for _, c := range got {
+				gotIDs = append(gotIDs, c.ID)
+			}
+			if strings.Join(gotIDs, ",") != strings.Join(tt.want, ",") {
+				t.Errorf("nonRootContainerSpecsFromCell() = %v, want %v", gotIDs, tt.want)
+			}
+		})
+	}
+}
+
 // TestTruncateFailureMessage pins the single-line + length-bounded contract
 // markCellFailed relies on for Status.Message: long, multi-line wrapped
 // `fmt.Errorf("%w: %w", …)` chains must end up as a single, capped string
