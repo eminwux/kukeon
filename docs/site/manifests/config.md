@@ -97,7 +97,7 @@ A `CellConfig` materializes **at most one** live cell within its scope. The cell
 The matching contract:
 
 - Every cell `kuke run -c` materializes carries the `kukeon.io/config=<name>` back-reference label. The runtime locates the at-most-one live cell a Config owns by listing cells in the Config's scope with that label.
-- When the in-cluster cell's spec diverges from the Config's current spec (after re-resolving scalar values and slot fills), `kuke run -c` refuses to attach and points at [`kuke apply -c <config>`](../cli/kuke-apply.md) to reconcile — `run` stays a pure read/materialize verb, and destructive updates (stop, update, start) route through `kuke apply -c`. The full identity state machine (no cell → materialize, running → attach, stopped → start-then-attach, divergent → refuse with `apply -c` pointer, error state → refuse with `kuke delete cell` pointer) lives in [`kuke run -c`](../cli/kuke-run.md).
+- When the in-cluster cell's spec diverges from the Config's current spec (after re-resolving scalar values and slot fills), `kuke run -c` refuses to attach and points at `kuke restart cell <name>` to reconcile — `run` stays a pure read/materialize verb, and destructive updates (stop, update, start) route through `kuke restart cell <name>`. The full identity state machine (no cell → materialize, running → attach, stopped → start-then-attach, divergent → refuse with `kuke restart cell <name>` pointer, error state → refuse with `kuke delete cell` pointer) lives in [`kuke run -c`](../cli/kuke-run.md).
 
 This is the structural contrast with a [`CellBlueprint`](blueprint.md): a blueprint is always-fresh (`<prefix>-<6hex>` per invocation), a config is always-named (`<configName>` per binding).
 
