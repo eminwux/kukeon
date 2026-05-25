@@ -3406,7 +3406,7 @@
 </tr>
 </tbody>
 </table>
-<p>The source Config is never mutated — <code>kuke run</code> is a read-and-materialize verb (with the exception of <code>--clone</code> and <code>--reuse</code>'s empty-pool fallback, which write a <em>new</em> Config alongside but never edit the source). To update the source Config's spec, use <code>kuke apply -c &lt;config&gt;</code> (which reconciles the at-most-one stable-named cell) or edit the Config manifest and re-apply.</p>
+<p>The source Config is never mutated — <code>kuke run</code> is a read-and-materialize verb (with the exception of <code>--clone</code> and <code>--reuse</code>'s empty-pool fallback, which write a <em>new</em> Config alongside but never edit the source). To update the source Config's spec, use <code>kuke restart cell &lt;name&gt;</code> (which reconciles the at-most-one stable-named cell via the daemon's OutOfSync detector) or edit the Config manifest and re-apply.</p>
 <h4 id="identity-flag-mutex-matrix">Identity-flag mutex matrix<a class="headerlink" href="#identity-flag-mutex-matrix" title="Permanent link">&para;</a></h4>
 <table>
 <thead>
@@ -3470,7 +3470,7 @@
 </tr>
 </tbody>
 </table>
-<p>If the live cell's spec differs from the materialisation of the <em>current</em> Config + Blueprint (someone edited the Config or the underlying Blueprint after the cell was last materialised), the idempotent shapes refuse to attach with a <code>kuke apply -c &lt;config&gt;</code> pointer — <code>run</code> stays a pure read/materialize verb, and destructive updates route through <a href="../kuke-apply/"><code>kuke apply -c</code></a> which stops, updates, and starts the cell. <code>-b --name &lt;cell&gt;</code> against a divergent live cell applies the same discipline with a <code>kuke apply -b &lt;bp&gt; --name &lt;cell&gt;</code> pointer. The fresh-cell-per-invocation <code>kuke run -b &lt;bp&gt;</code> (no <code>--name</code>) materialises a fresh <code>&lt;prefix&gt;-&lt;6hex&gt;</code> cell on every invocation, so no divergent-spec check applies. The <code>kuke run &lt;config&gt; --new</code> path is similarly fresh-per-invocation, so it also has no divergent-spec check (and the lineage label still ties spawns back to the Config).</p>
+<p>If the live cell's spec differs from the materialisation of the <em>current</em> Config + Blueprint (someone edited the Config or the underlying Blueprint after the cell was last materialised), the idempotent shapes refuse to attach with a <code>kuke restart cell &lt;name&gt;</code> pointer — <code>run</code> stays a pure read/materialize verb, and destructive updates route through <code>kuke restart cell &lt;name&gt;</code> which stops, updates, and starts the cell. <code>-b --name &lt;cell&gt;</code> against a divergent live cell applies the same discipline with a <code>kuke delete cell &lt;cell&gt;</code> + re-run pointer (Blueprint-lineage cells have no implicit reconcile; promote to a CellConfig for <code>kuke restart cell</code> reconcile workflows). The fresh-cell-per-invocation <code>kuke run -b &lt;bp&gt;</code> (no <code>--name</code>) materialises a fresh <code>&lt;prefix&gt;-&lt;6hex&gt;</code> cell on every invocation, so no divergent-spec check applies. The <code>kuke run &lt;config&gt; --new</code> path is similarly fresh-per-invocation, so it also has no divergent-spec check (and the lineage label still ties spawns back to the Config).</p>
 <p>See <a href="../../manifests/blueprint/"><code>kind: CellBlueprint</code></a> and <a href="../../manifests/config/"><code>kind: CellConfig</code></a> for the full manifest reference.</p>
 <h2 id="cleanup-with-rm">Cleanup with <code>--rm</code><a class="headerlink" href="#cleanup-with-rm" title="Permanent link">&para;</a></h2>
 <p><code>--rm</code> best-effort deletes the cell after it's no longer needed (any return code). <code>kuke run</code> is daemon-only after #566 — <code>KUKEON_NO_DAEMON=true</code> and <code>--run-path</code> promotion are inert for workload verbs and no longer reach an in-process branch for <code>run</code>, so <code>--rm</code> is always available. Cleanup runs from <code>kukeond</code>'s reconcile loop, so latency is bounded by the reconcile interval rather than firing the instant the trigger fires.</p>
@@ -3556,7 +3556,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 24, 2026 13:56:33 UTC">May 24, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 25, 2026 14:43:54 UTC">May 25, 2026</span>
   </span>
 
     
