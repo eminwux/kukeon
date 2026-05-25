@@ -1,3 +1,19 @@
+// Copyright 2025 Emiliano Spinella (eminwux)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 package secret_test
 
 import (
@@ -8,6 +24,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/eminwux/kukeon/cmd/kuke/create/secret"
@@ -168,7 +185,7 @@ func TestNewSecretCmdRunE(t *testing.T) {
 
 			if tt.wantOut != "" {
 				output := out.String()
-				if !contains(output, tt.wantOut) {
+				if !strings.Contains(output, tt.wantOut) {
 					t.Errorf("expected output to contain %q, got %q", tt.wantOut, output)
 				}
 			}
@@ -203,19 +220,6 @@ func TestNewSecretCmd_AutocompleteRegistration(t *testing.T) {
 	if fromFileFlag == nil {
 		t.Fatal("expected 'from-file' flag to exist")
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && containsStr(s, substr)
-}
-
-func containsStr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func TestMain(m *testing.M) {
