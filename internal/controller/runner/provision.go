@@ -1510,7 +1510,7 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				cell.Spec.Containers[i] = containerSpec
 			}
 
-			rootLabels := buildRootContainerLabels(*cell)
+			rootLabels := stampSpecHashOnLabels(buildRootContainerLabels(*cell), containerSpec)
 			ctrContainerSpec := ctr.BuildRootContainerSpec(containerSpec, rootLabels, r.daemonDefaultBuildOpts()...)
 
 			createdContainer, createErr = r.ctrClient.CreateContainer(namespace, ctrContainerSpec, creds)
@@ -1574,6 +1574,9 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
 			}
 			buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
+			buildOpts = append(buildOpts, ctr.WithExtraLabels(map[string]string{
+				SpecHashLabelKey: ComputeContainerSpecHash(containerSpec),
+			}))
 			// Merge `kuke run --env` runtime env into the attachable
 			// container's spec env (issue #834). Returns containerSpec
 			// unchanged for non-attachable containers or when
@@ -1804,7 +1807,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		}
 		r.stampContainerRecreateRuntimeFields(&rootContainerSpec, cell)
 
-		rootLabels := buildRootContainerLabels(*cell)
+		rootLabels := stampSpecHashOnLabels(buildRootContainerLabels(*cell), rootContainerSpec)
 		containerSpec := ctr.BuildRootContainerSpec(rootContainerSpec, rootLabels, r.daemonDefaultBuildOpts()...)
 
 		var createErr error
@@ -2050,6 +2053,9 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
 			}
 			buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
+			buildOpts = append(buildOpts, ctr.WithExtraLabels(map[string]string{
+				SpecHashLabelKey: ComputeContainerSpecHash(containerSpec),
+			}))
 			createdContainer, containerCreateErr := r.ctrClient.CreateContainerFromSpec(
 				internalRealm.Spec.Namespace,
 				containerSpec,

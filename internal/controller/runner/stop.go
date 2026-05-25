@@ -175,28 +175,12 @@ func (r *Exec) stopCellLocked(cell intmodel.Cell) (intmodel.Cell, error) {
 			fields...,
 		)
 
-		// Delete container after stopping
-		err = r.ctrClient.DeleteContainer(namespace, containerID, ctr.ContainerDeleteOptions{
-			SnapshotCleanup: true,
-		})
-		if err != nil {
-			// Log warning but don't fail - container might already be deleted
-			fields = appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-			fields = append(fields, "space", spaceName, "realm", realmName, "err", fmt.Sprintf("%v", err))
-			r.logger.WarnContext(
-				r.ctx,
-				"failed to delete container, continuing",
-				fields...,
-			)
-		} else {
-			fields = appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-			fields = append(fields, "space", spaceName, "realm", realmName)
-			r.logger.InfoContext(
-				r.ctx,
-				"deleted container",
-				fields...,
-			)
-		}
+		// Issue #867: leave the containerd container record (and snapshot)
+		// in place. The documented stop/kill/delete split (docs/cli-use-
+		// cases.md) has stop tear down the task only; delete owns the
+		// record + snapshot teardown. The old DeleteContainer{Snapshot
+		// Cleanup: true} call here violated that split and silently broke
+		// the `--reuse` overlay-preservation contract from #835 / #848.
 	}
 
 	// Stop root container last (after all workload containers are stopped)
@@ -246,28 +230,10 @@ func (r *Exec) stopCellLocked(cell intmodel.Cell) (intmodel.Cell, error) {
 		)
 	}
 
-	// Delete root container after stopping
-	err = r.ctrClient.DeleteContainer(namespace, rootContainerID, ctr.ContainerDeleteOptions{
-		SnapshotCleanup: true,
-	})
-	if err != nil {
-		// Log warning but don't fail - container might already be deleted
-		fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
-		fields = append(fields, "space", spaceName, "realm", realmName, "err", fmt.Sprintf("%v", err))
-		r.logger.WarnContext(
-			r.ctx,
-			"failed to delete root container, continuing",
-			fields...,
-		)
-	} else {
-		fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
-		fields = append(fields, "space", spaceName, "realm", realmName)
-		r.logger.InfoContext(
-			r.ctx,
-			"deleted root container",
-			fields...,
-		)
-	}
+	// Issue #867: leave the root container record + snapshot in place — see
+	// the matching comment in the workload-container loop above. CNI cleanup
+	// below still runs so the IPAM reservation is released; without that, the
+	// next StartCell's CNI ADD would be rejected as a duplicate allocation.
 
 	// Always run comprehensive CNI cleanup after container deletion as a safety net
 	// This ensures IPAM allocations are cleaned up even if CNI DEL succeeded or failed
@@ -460,38 +426,9 @@ func (r *Exec) StopContainer(cell intmodel.Cell, containerID string) error {
 		fields...,
 	)
 
-	// Delete container after stopping
-	err = r.ctrClient.DeleteContainer(namespace, containerdID, ctr.ContainerDeleteOptions{
-		SnapshotCleanup: true,
-	})
-	if err != nil {
-		// Log warning but don't fail - container might already be deleted
-		fields = appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
-		fields = append(
-			fields,
-			"space",
-			spaceName,
-			"realm",
-			realmName,
-			"containerName",
-			containerID,
-			"err",
-			fmt.Sprintf("%v", err),
-		)
-		r.logger.WarnContext(
-			r.ctx,
-			"failed to delete container, continuing",
-			fields...,
-		)
-	} else {
-		fields = appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
-		fields = append(fields, "space", spaceName, "realm", realmName, "containerName", containerID)
-		r.logger.InfoContext(
-			r.ctx,
-			"deleted container",
-			fields...,
-		)
-	}
-
+	// Issue #867: leave the containerd container record (and snapshot) in
+	// place. The cell-wide cleanup comments in stopCellLocked above carry
+	// the full rationale; the single-container `kuke stop container` verb
+	// mirrors the cell-wide stop verb's contract.
 	return nil
 }
