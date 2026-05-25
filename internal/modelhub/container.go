@@ -263,8 +263,13 @@ type ContainerResources struct {
 }
 
 type ContainerStatus struct {
-	Name         string // Container name/ID
-	ID           string // Container ID (same as Name)
+	Name string // Container name/ID
+	ID   string // Container ID (same as Name)
+	// CreatedAt is the wall-clock time of the first time the controller
+	// observed this container in cell.Spec.Containers. Stamped on the
+	// first populateCellContainerStatuses pass and preserved across
+	// reconciliations. Sources the AGE column on `kuke get container`.
+	CreatedAt    time.Time
 	State        ContainerState
 	RestartCount int
 	RestartTime  time.Time

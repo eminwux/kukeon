@@ -702,11 +702,17 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 	// otherwise drop them whenever the live pull returns nil (container not
 	// Ready, or pull failed) and strand phase C2's render gate.
 	priorStages := make(map[string][]intmodel.StageStatus, len(cell.Status.Containers))
+	// Snapshot prior CreatedAt by container ID so the AGE column on
+	// `kuke get container` survives the unconditional overwrite below.
+	// Issue #605.
+	priorCreatedAt := make(map[string]time.Time, len(cell.Status.Containers))
 	for _, prev := range cell.Status.Containers {
 		priorStages[prev.ID] = prev.Stages
+		priorCreatedAt[prev.ID] = prev.CreatedAt
 	}
 
 	statuses := make([]intmodel.ContainerStatus, 0, len(cell.Spec.Containers))
+	now := r.nowUTC()
 
 	for _, containerSpec := range cell.Spec.Containers {
 		// Get container state from containerd
@@ -719,11 +725,20 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 			state = intmodel.ContainerStateUnknown
 		}
 
+		// CreatedAt: stamp on the first observation, preserve thereafter.
+		// Mirrors the realm/space/stack/cell lifecycle-stamp pattern in
+		// metadata.go's stamp*Lifecycle helpers. Issue #605.
+		createdAt := priorCreatedAt[containerSpec.ID]
+		if createdAt.IsZero() {
+			createdAt = now
+		}
+
 		// TODO: Get additional status fields (RestartCount, StartTime, etc.) from containerd
 		// For now, populate with basic state
 		status := intmodel.ContainerStatus{
 			Name:         containerSpec.ID,
 			ID:           containerSpec.ID,
+			CreatedAt:    createdAt,
 			State:        state,
 			RestartCount: 0,           // TODO: retrieve from containerd
 			RestartTime:  time.Time{}, // TODO: retrieve from containerd

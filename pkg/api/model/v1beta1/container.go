@@ -160,11 +160,11 @@ type ContainerTty struct {
 	// Prompt is the literal prompt expression sbsh stamps onto
 	// TerminalSpec.Prompt and flips SetPrompt on for. Empty leaves
 	// SetPrompt off (sbsh's wrapper skips PS1 injection).
-	Prompt string `json:"prompt,omitempty"  yaml:"prompt,omitempty"`
+	Prompt string `json:"prompt,omitempty"   yaml:"prompt,omitempty"`
 	// OnInit are scripts run once when the wrapped shell starts, in
 	// order. Forwarded to TerminalSpec.Stages.OnInit via sbsh's
 	// WithOnInit; an empty slice leaves Stages.OnInit zero.
-	OnInit []TtyStage `json:"onInit,omitempty"  yaml:"onInit,omitempty"`
+	OnInit []TtyStage `json:"onInit,omitempty"   yaml:"onInit,omitempty"`
 	// LogFile is an optional operator override for the in-container path
 	// the kuketty wrapper writes its slog output to. Empty (the default)
 	// makes the daemon stamp ctr.AttachableKukettyLogPath
@@ -176,7 +176,7 @@ type ContainerTty struct {
 	// AttachableLogFileMode and the kukeon-group GID, gated on the
 	// kukeon group being configured (matches socket/capture treatment).
 	// Issue #599.
-	LogFile string `json:"logFile,omitempty" yaml:"logFile,omitempty"`
+	LogFile string `json:"logFile,omitempty"  yaml:"logFile,omitempty"`
 	// LogLevel controls the verbosity of the kuketty wrapper's own slog
 	// output. Accepted values: "debug", "info", "warn", "error". Empty
 	// falls through to the daemon-wide kuketty.logLevel set on
@@ -202,7 +202,7 @@ type TtyStage struct {
 	// run-once-per-cell-instance setup (the run-once render gate itself lands
 	// in phase C, #690; this phase adds the field + routing + executor). Any
 	// other value is rejected at apply time by validateContainerTty. Issue #635.
-	RunOn string `json:"runOn,omitempty" yaml:"runOn,omitempty"`
+	RunOn string `json:"runOn,omitempty"  yaml:"runOn,omitempty"`
 }
 
 // TtyStage.RunOn values. Empty deserializes as RunOnStart.
@@ -402,27 +402,33 @@ type ContainerResources struct {
 }
 
 type ContainerStatus struct {
-	Name         string         `json:"name"            yaml:"name"`
-	ID           string         `json:"id"              yaml:"id"`
-	State        ContainerState `json:"state"           yaml:"state"`
-	RestartCount int            `json:"restartCount"    yaml:"restartCount"`
-	RestartTime  time.Time      `json:"restartTime"     yaml:"restartTime"`
-	StartTime    time.Time      `json:"startTime"       yaml:"startTime"`
-	FinishTime   time.Time      `json:"finishTime"      yaml:"finishTime"`
-	ExitCode     int            `json:"exitCode"        yaml:"exitCode"`
-	ExitSignal   string         `json:"exitSignal"      yaml:"exitSignal"`
+	Name  string         `json:"name"                yaml:"name"`
+	ID    string         `json:"id"                  yaml:"id"`
+	State ContainerState `json:"state"               yaml:"state"`
+	// CreatedAt is the wall-clock time of the first time the controller
+	// observed this container in cell.Spec.Containers. Stamped on the
+	// first populateCellContainerStatuses pass and preserved across
+	// reconciliations (mirrors realm/space/stack/cell.Status.CreatedAt).
+	// Sources the AGE column on `kuke get container`. Issue #605.
+	CreatedAt    time.Time `json:"createdAt,omitempty" yaml:"createdAt,omitempty"`
+	RestartCount int       `json:"restartCount"        yaml:"restartCount"`
+	RestartTime  time.Time `json:"restartTime"         yaml:"restartTime"`
+	StartTime    time.Time `json:"startTime"           yaml:"startTime"`
+	FinishTime   time.Time `json:"finishTime"          yaml:"finishTime"`
+	ExitCode     int       `json:"exitCode"            yaml:"exitCode"`
+	ExitSignal   string    `json:"exitSignal"          yaml:"exitSignal"`
 	// Repos reports the per-repo outcome of kuketty's pre-Serve clone/fetch
 	// step for an Attachable container's Spec.Repos. Empty for containers
 	// with no repos[] or that have not yet been provisioned. Populated over
 	// the GetSetupStatus RPC in phase 1b (#642); phase 1a lands the schema
 	// only. Issue #617.
-	Repos []RepoStatus `json:"repos,omitempty" yaml:"repos,omitempty"`
+	Repos []RepoStatus `json:"repos,omitempty"     yaml:"repos,omitempty"`
 	// Stages reports the per-stage outcome of kuketty's pre-Serve execution of
 	// the container's runOn: create TtyStages, in declaration order. Empty for
 	// containers with no create stages or that have not yet been provisioned.
 	// Populated over the GetSetupStatus RPC in phase B (#689); this phase (#635)
 	// lands the schema only. Issue #635.
-	Stages []StageStatus `json:"stages,omitempty" yaml:"stages,omitempty"`
+	Stages []StageStatus `json:"stages,omitempty"    yaml:"stages,omitempty"`
 }
 
 // RepoStatus is the resolved state of a single ContainerRepo after kuketty's
