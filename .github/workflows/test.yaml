@@ -69,7 +69,7 @@ jobs:
   # containerd at /run/containerd/containerd.sock (the bootstrap target for
   # `kuke image load` + `kuke init`, distinct from the docker-private
   # containerd socket at /var/run/docker/containerd/containerd.toml). Mirrors
-  # the local-dev contract documented in CLAUDE.md and
+  # the local-dev contract documented in AGENTS.md and
   # docs/site/install/build-from-source.md. Runs in parallel with the unit
   # job above (no shared resources).
   e2e:

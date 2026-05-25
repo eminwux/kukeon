@@ -6,7 +6,7 @@
 #
 # Composes existing primitives end-to-end so a `kuke init` runs against the
 # locally built kukeond image instead of the registry-resolved default. Lifts
-# the manual "Local smoke test" sequence from CLAUDE.md into a runnable artifact.
+# the manual "Local smoke test" sequence from AGENTS.md into a runnable artifact.
 #
 # Idempotent: re-running on a healthy host produces a clean re-bootstrap.
 # On a fresh host (no /opt/kukeon/data/kuke-system) the script first runs

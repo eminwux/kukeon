@@ -92,7 +92,7 @@ func TestRunChecks_AllHealthy(t *testing.T) {
 // TestCheckParity_DivergenceIsFAIL pins the regression-guard contract —
 // when the daemon and in-process branches disagree on a realm's
 // existence, the parity row is FAIL and Detail names the divergent side
-// and resource. This is the exact replacement for CLAUDE.md's
+// and resource. This is the exact replacement for AGENTS.md's
 // dev-init.sh manual `kuke get realms` vs `--no-daemon` diff.
 func TestCheckParity_DivergenceIsFAIL(t *testing.T) {
 	daemon := newFakeClient().withRealms("default", "kuke-system", "extra")

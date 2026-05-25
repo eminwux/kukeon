@@ -115,7 +115,7 @@ func checkHostContainerd(rc *runCtx) Result {
 	if err := rc.ctrClient.Connect(); err != nil {
 		r.Status = StatusFAIL
 		r.Detail = fmt.Sprintf("%s (dial failed: %v)", rc.containerdSocket, err)
-		r.Remediation = "start containerd: `service containerd start` (see project CLAUDE.md)"
+		r.Remediation = "start containerd: `service containerd start` (see project AGENTS.md)"
 		return r
 	}
 

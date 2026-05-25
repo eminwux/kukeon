@@ -4,7 +4,7 @@ What the `kuke` CLI should do, organized by **operator workflow** rather than al
 
 Every invariant in this document was verified against the actual CLI on a `make dev-init` host before the doc landed. Speculative behavior is not documented; workflows that depend on unmerged issues are explicitly marked **TODO** with the issue number.
 
-The companion `<project>/CLAUDE.md` has the build, smoke-test, and daemon-parity recipe operators run before opening a PR. This file documents what each command does in isolation; CLAUDE.md documents the end-to-end loop.
+The companion `<project>/AGENTS.md` has the build, smoke-test, and daemon-parity recipe operators run before opening a PR. This file documents what each command does in isolation; AGENTS.md documents the end-to-end loop.
 
 ## Conventions used in this doc
 
@@ -30,7 +30,7 @@ sudo kuke init --kukeond-image docker.io/library/<img>:<tag>
 
 - Exit code 0 on success; non-zero with a message naming the failed phase otherwise.
 - Side effect: `/opt/kukeon/{default,kuke-system}/...` populated; `/run/kukeon/{kukeond.sock,kukeond.pid}` created; containerd namespaces `default.kukeon.io` and `kuke-system.kukeon.io` exist; cgroup subtree `/kukeon/...` populated.
-- After success, `kuke get realms` and `kuke get realms --no-daemon` both list **at least** `default` and `kuke-system` in `Ready` state with their canonical namespaces. The two outputs must agree — divergence indicates the daemon's view of `/opt/kukeon` is stale (the bind-mount regression CLAUDE.md guards against).
+- After success, `kuke get realms` and `kuke get realms --no-daemon` both list **at least** `default` and `kuke-system` in `Ready` state with their canonical namespaces. The two outputs must agree — divergence indicates the daemon's view of `/opt/kukeon` is stale (the bind-mount regression AGENTS.md guards against).
 - Second invocation on a healthy host is idempotent: every phase reports "already existed", exit code 0, the daemon stays up.
 - `kuke doctor cgroups` on the same host exits 0 once cgroup controllers are delegated; non-zero output names which controller is missing and whether the kernel lacks support or the parent didn't delegate.
 
@@ -167,7 +167,7 @@ kuke get realms -o wide                          # default cols + NAMESPACE
 
 - Exit code 0 even when the result set is empty; the CLI prints a brief "no resources found" line rather than failing.
 - Table output is the default for **lists**; YAML is the default for a **single named resource**. Both behaviors are overridable via `-o {yaml,json,table,wide}`.
-- After `kuke init`, `kuke get realms` lists at least `default` and `kuke-system`. `kuke get realms --no-daemon` must produce the same row set — divergence is a regression (see CLAUDE.md daemon-parity guard).
+- After `kuke init`, `kuke get realms` lists at least `default` and `kuke-system`. `kuke get realms --no-daemon` must produce the same row set — divergence is a regression (see AGENTS.md daemon-parity guard).
 - The realm default table is `NAME STATE AGE`; `-o wide` appends `NAMESPACE`. The retired `--show-controllers` flag and the `CGROUP` / `CONTROLLERS` columns are gone (epic:get) — surface `cgroupPath` / `subtreeControllers` via `-o yaml` or `-o json` when investigating.
 - `kuke get realms --no-daemon` works without `sudo` when `/opt/kukeon` is readable by the `kukeon` group; this is the supported escape hatch when the daemon is down.
 - `kuke get image[s]` lists across **every realm** by default; columns are `NAME REALM SIZE AGE`. `--realm <r>` narrows to one realm but keeps the `REALM` column for grep-ability. `-o wide` appends `CREATED` and `DIGEST`. `-o yaml` / `-o json` emit one `kukeonv1.ListImagesResult` per realm. With a positional `<ref>` the command describes a single image (yaml by default, `-o json` switches to json); `--realm` defaults to `default` on this path.
@@ -501,7 +501,7 @@ These are the negative paths most likely to surface a UX regression. Each is ver
 
 ## See also
 
-- `<project>/CLAUDE.md` — build, smoke-test, and daemon-parity recipe; the end-to-end loop a contributor runs before opening a PR.
+- `<project>/AGENTS.md` — build, smoke-test, and daemon-parity recipe; the end-to-end loop a contributor runs before opening a PR.
 - `docs/examples/hello-world.yaml` — minimal Cell spec consumed by `kuke run -f`.
 - `internal/consts/consts.go` — source of truth for the `default` / `kuke-system` realm names and namespace suffix.
 - Issues that gate future use cases documented here as TODO:

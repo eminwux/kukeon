@@ -120,7 +120,7 @@ func TestCgroupsCmdHostProbesBothMissingWarnsBoth(t *testing.T) {
 // TestCgroupsCmdHostProbesAllGreen: when both host probes return empty
 // (swap present + OOM guard active), the unscoped pre-flight stays
 // silent on stderr — preserves the dev-init.sh tail-clean rule the
-// project CLAUDE.md regression guard depends on.
+// project AGENTS.md regression guard depends on.
 func TestCgroupsCmdHostProbesAllGreen(t *testing.T) {
 	root := writeFakeCgroup(t,
 		"cpuset cpu io memory hugetlb pids rdma misc",

@@ -195,7 +195,7 @@ func deepSocketPathFits(runPath string) bool {
 // level, so they cannot use the in-process helper at all.
 //
 // Legitimate survivors of this in-process helper:
-//   - `get realms --no-daemon`: the daemon-parity smoke (CLAUDE.md's
+//   - `get realms --no-daemon`: the daemon-parity smoke (AGENTS.md's
 //     regression guard contrasts the in-process realm view with the daemon's
 //     view; routing both sides through the daemon would defeat the check).
 //   - `purge` (any kind): purge is a host-mutating verb that must work
