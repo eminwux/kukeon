@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
@@ -32,6 +33,182 @@ import (
 	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
 )
+
+// cellStartLivenessGraceWindow caps the post-start liveness check at
+// 300ms — long enough to catch a container whose process exits within
+// milliseconds (kuketty fails to open its log file, an onInit script
+// returns non-zero, runc returns success but the workload immediately
+// faults), short enough that a healthy start sees no operator-visible
+// latency. cellStartLivenessPollInterval picks the cadence inside the
+// window; 50ms gives ~6 polls per healthy start and keeps the per-poll
+// containerd round-trip cost cheap. Issue #851.
+const (
+	cellStartLivenessGraceWindow  = 300 * time.Millisecond
+	cellStartLivenessPollInterval = 50 * time.Millisecond
+)
+
+// liveCheckResult is the per-probe outcome of firstNonLiveContainer.
+// ContainerdID == "" means every probed task reported containerd.Running;
+// otherwise ContainerdID names the first task that was not Running and
+// Status / Err capture what was observed (Status is zero-valued when
+// statusFn itself errored). ContainerID is the cell-spec ID — used to
+// quote the operator-facing name in the wrapped failure message; empty
+// when the offender is the root container (whose cell-spec entry is
+// optional under the auto-default-root path).
+type liveCheckResult struct {
+	ContainerdID string
+	ContainerID  string
+	Status       containerd.ProcessStatus
+	Err          error
+}
+
+// firstNonLiveContainer probes statusFn once per container — root first,
+// then each non-root entry in nonRootSpecs — and returns the first task
+// observed to not be containerd.Running. A statusFn error counts the
+// same as a non-Running status: a freshly-started task whose record
+// vanished mid-check is exactly the wind-down-then-race condition the
+// caller is guarding against. An empty ContainerdID is reported back so
+// a misconfigured spec (no ContainerdID stamped) trips the guard rather
+// than silently passing — matches the cellTasksAllRunningFn idempotency
+// guard's defensive treatment of the same case. Pure (modulo statusFn)
+// so the per-AC cases land as table-driven unit tests with no live
+// containerd. Issue #851.
+func firstNonLiveContainer(
+	rootContainerdID string,
+	nonRootSpecs []intmodel.ContainerSpec,
+	statusFn func(id string) (containerd.Status, error),
+) liveCheckResult {
+	rs, rerr := statusFn(rootContainerdID)
+	if rerr != nil || rs.Status != containerd.Running {
+		return liveCheckResult{
+			ContainerdID: rootContainerdID,
+			ContainerID:  "",
+			Status:       rs.Status,
+			Err:          rerr,
+		}
+	}
+	for _, c := range nonRootSpecs {
+		if c.Root {
+			continue
+		}
+		cid := strings.TrimSpace(c.ContainerdID)
+		if cid == "" {
+			return liveCheckResult{ContainerdID: "", ContainerID: c.ID}
+		}
+		s, err := statusFn(cid)
+		if err != nil || s.Status != containerd.Running {
+			return liveCheckResult{
+				ContainerdID: cid,
+				ContainerID:  c.ID,
+				Status:       s.Status,
+				Err:          err,
+			}
+		}
+	}
+	return liveCheckResult{}
+}
+
+// formatLivenessFailure wraps result into an operator-facing error that
+// the existing markCellFailed("StartCellFailed", retErr) path picks up
+// via the provisionStarted defer. cellName is included so the surface
+// text reads cleanly in `kuke run` output even when the offender is the
+// auto-default root (whose ContainerID is empty); rootContainerdID is
+// quoted in that case so the operator can still cross-reference
+// containerd state. The "kuke log <cell>" pointer is the actionable
+// next step — the per-container log file already carries the process
+// stdout/stderr that explains the immediate exit (kuketty errors, onInit
+// failures, image entrypoint segfaults). Issue #851.
+func formatLivenessFailure(cellName string, result liveCheckResult) error {
+	if result.ContainerdID == "" && result.ContainerID == "" {
+		// Defensive: caller invoked this with an "all Running" result.
+		// Returning a nil-equivalent error would mask the bug — surface a
+		// clear sentinel instead so the test catches it.
+		return fmt.Errorf("%w: %s: liveness check reported success",
+			internalerrdefs.ErrCellWindDownImmediate, cellName)
+	}
+	var label string
+	switch {
+	case result.ContainerID != "":
+		label = fmt.Sprintf("container %q", result.ContainerID)
+	default:
+		label = fmt.Sprintf("root container %q", result.ContainerdID)
+	}
+	var statusFragment string
+	if result.Err != nil {
+		statusFragment = fmt.Sprintf("status probe failed: %v", result.Err)
+	} else {
+		statusFragment = fmt.Sprintf("task status=%s", string(result.Status))
+	}
+	suffix := "; run `kuke log " + cellName + "` for details"
+	if result.ContainerID != "" {
+		suffix = "; run `kuke log " + cellName + " --container " + result.ContainerID + "` for details"
+	}
+	return fmt.Errorf("%w: cell %q: %s exited within startup grace window (%s)%s",
+		internalerrdefs.ErrCellWindDownImmediate, cellName, label, statusFragment, suffix)
+}
+
+// nonRootContainerSpecsFromCell returns the cell's non-root container
+// specs in declaration order — the slice firstNonLiveContainer iterates.
+// Cells with no non-root entries (kukeond-style: the root *is* the
+// workload) return an empty slice and the caller only probes the root.
+func nonRootContainerSpecsFromCell(cell intmodel.Cell) []intmodel.ContainerSpec {
+	if len(cell.Spec.Containers) == 0 {
+		return nil
+	}
+	out := make([]intmodel.ContainerSpec, 0, len(cell.Spec.Containers))
+	for _, c := range cell.Spec.Containers {
+		if c.Root {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// verifyCellTasksLiveAfterStart polls statusFn over graceWindow and
+// returns a wrapped internalerrdefs.ErrCellWindDownImmediate the first
+// time a probed task is observed not-Running, or nil after the window
+// elapses with every probe confirming all-Running. cellName threads into
+// the wrapped failure message so the operator-facing error names the
+// affected cell.
+//
+// Fail-fast: the first probe that returns a non-live result wins —
+// continuing to poll a dead task only burns latency. The healthy path
+// pays graceWindow worth of polls; this is deliberate (we have to wait
+// the window to know the task survived it) and bounded by the
+// implementer-chosen constants above. Issue #851.
+//
+// Decoupled from *Exec's concrete containerd client (statusFn closure)
+// and from real time (nowFn/sleepFn) so the integration tests can drive
+// arbitrary status sequences and verify both the fail-fast and
+// observe-through-window branches without a live runtime — same shape
+// as cellTasksAllRunningFn / teardownRootContainerCNI (issue #149).
+func verifyCellTasksLiveAfterStart(
+	cellName, rootContainerdID string,
+	nonRootSpecs []intmodel.ContainerSpec,
+	statusFn func(id string) (containerd.Status, error),
+	graceWindow, pollInterval time.Duration,
+	nowFn func() time.Time,
+	sleepFn func(time.Duration),
+) error {
+	if graceWindow <= 0 {
+		// Caller disabled the guard — preserve the prior behavior so
+		// tests that don't care about the post-start probe can pass
+		// graceWindow=0 and skip the wait.
+		return nil
+	}
+	deadline := nowFn().Add(graceWindow)
+	for {
+		result := firstNonLiveContainer(rootContainerdID, nonRootSpecs, statusFn)
+		if result.ContainerdID != "" || result.ContainerID != "" {
+			return formatLivenessFailure(cellName, result)
+		}
+		if !nowFn().Before(deadline) {
+			return nil
+		}
+		sleepFn(pollInterval)
+	}
+}
 
 // containerLogTaskSpec returns a TaskSpec with cio.LogFile IO pointed at the
 // per-container log path for a non-Attachable container. Returns the zero
@@ -611,7 +788,17 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 	// dance for them.
 	if !rootContainerWantsCNI(rootContainerSpec) {
 		skipFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-		skipFields = append(skipFields, "space", spaceID, "realm", realmID, "pid", rootPID, "hostNetwork", rootContainerSpec.HostNetwork)
+		skipFields = append(
+			skipFields,
+			"space",
+			spaceID,
+			"realm",
+			realmID,
+			"pid",
+			rootPID,
+			"hostNetwork",
+			rootContainerSpec.HostNetwork,
+		)
 		r.logger.InfoContext(
 			r.ctx,
 			"skipping CNI attach for host-network root container",
@@ -873,7 +1060,11 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 		priorStages := priorStagesForContainer(internalCell, containerSpec.ID)
 		attachOpts, attachErr := r.attachableBuildOpts(namespace, containerSpec, creds, priorStages)
 		if attachErr != nil {
-			return intmodel.Cell{}, fmt.Errorf("failed to prepare attachable container %s: %w", ctrContainerID, attachErr)
+			return intmodel.Cell{}, fmt.Errorf(
+				"failed to prepare attachable container %s: %w",
+				ctrContainerID,
+				attachErr,
+			)
 		}
 		buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
 		// `kuke run --env` runtime-env merge (issue #834). Same shape as the
@@ -945,6 +1136,41 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 			"started container",
 			fields...,
 		)
+	}
+
+	// Post-start liveness probe (issue #851). containerd accepting task
+	// creation is not the same signal as "the task survived its startup".
+	// A workload that exits within milliseconds (kuketty failing to open
+	// its log file, an onInit script returning non-zero, runc returning
+	// success but the entrypoint immediately faulting) would otherwise
+	// land on disk as cell state=Ready, then the next reconciler tick
+	// derives Stopped from the dead workload, shouldWindDownCell fires
+	// KillCell, and the operator's in-flight `kuke run --attach` races
+	// the teardown. Polling here over a bounded grace window catches the
+	// fast-exit before the Ready stamp; the existing provisionStarted
+	// defer routes the wrapped ErrCellWindDownImmediate through
+	// markCellFailed("StartCellFailed", retErr), keeping the failure on
+	// the same code path runc-level startup failures already use.
+	if liveErr := verifyCellTasksLiveAfterStart(
+		cellName,
+		containerID,
+		nonRootContainerSpecsFromCell(internalCell),
+		func(id string) (containerd.Status, error) {
+			return r.ctrClient.TaskStatus(namespace, id)
+		},
+		cellStartLivenessGraceWindow,
+		cellStartLivenessPollInterval,
+		time.Now,
+		time.Sleep,
+	); liveErr != nil {
+		liveFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		liveFields = append(liveFields, "space", spaceID, "realm", realmID, "err", liveErr.Error())
+		r.logger.ErrorContext(
+			r.ctx,
+			"post-start liveness check failed; cell will transition to Failed",
+			liveFields...,
+		)
+		return intmodel.Cell{}, liveErr
 	}
 
 	markCellReady(&internalCell)
@@ -1240,6 +1466,46 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 	updatedCell, err := r.GetCell(lookupCell)
 	if err != nil {
 		return intmodel.Cell{}, fmt.Errorf("failed to retrieve cell after starting container: %w", err)
+	}
+
+	// Post-start liveness probe (issue #851) — same shape as StartCell's
+	// guard. Probes the just-started container *and* the root, so a root
+	// container that died between this StartContainer call and the
+	// markCellReady stamp below also surfaces as Failed instead of the
+	// misleading Ready→Stopped→reaped cycle. The single-container variant
+	// (`kuke start container`) is operator-reachable just like `kuke start
+	// cell`, and the underlying silent-success failure mode is identical.
+	livenessSpec := []intmodel.ContainerSpec{{ID: containerID, ContainerdID: containerdID}}
+	if liveErr := verifyCellTasksLiveAfterStart(
+		cellName,
+		rootContainerID,
+		livenessSpec,
+		func(id string) (containerd.Status, error) {
+			return r.ctrClient.TaskStatus(namespace, id)
+		},
+		cellStartLivenessGraceWindow,
+		cellStartLivenessPollInterval,
+		time.Now,
+		time.Sleep,
+	); liveErr != nil {
+		liveFields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
+		liveFields = append(
+			liveFields,
+			"space",
+			spaceName,
+			"realm",
+			realmName,
+			"containerName",
+			containerID,
+			"err",
+			liveErr.Error(),
+		)
+		r.logger.ErrorContext(
+			r.ctx,
+			"post-start liveness check failed; cell will transition to Failed",
+			liveFields...,
+		)
+		return intmodel.Cell{}, liveErr
 	}
 
 	markCellReady(&updatedCell)

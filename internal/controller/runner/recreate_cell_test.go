@@ -151,10 +151,28 @@ func TestRecreateCell_StartsTasksBeforeReady(t *testing.T) {
 	)
 
 	var startContainerCalls int
+	started := map[string]bool{}
 	fake := &recreateCellFakeClient{
-		deleteCellFakeClient: &deleteCellFakeClient{},
-		startContainerFn: func(_ string, _ ctr.ContainerSpec, _ ctr.TaskSpec) (containerd.Task, error) {
+		deleteCellFakeClient: &deleteCellFakeClient{
+			// Track per-container task liveness across two StartCell guards:
+			// (1) cellTasksAllRunningFn's idempotency skip (issue #149) — must
+			// NOT short-circuit here, because the existing cell's root has
+			// never been "started" in this fake, so its TaskStatus returns
+			// zero-value (not Running); the test then exercises the
+			// destructive teardown-and-recreate path the AC pins.
+			// (2) verifyCellTasksLiveAfterStart's post-start liveness probe
+			// (issue #851) — once startContainerFn runs, the new root task
+			// should observe as Running so the probe lets markCellReady stamp.
+			taskStatusFn: func(_, id string) (containerd.Status, error) {
+				if started[id] {
+					return containerd.Status{Status: containerd.Running}, nil
+				}
+				return containerd.Status{}, nil
+			},
+		},
+		startContainerFn: func(_ string, spec ctr.ContainerSpec, _ ctr.TaskSpec) (containerd.Task, error) {
 			startContainerCalls++
+			started[spec.ID] = true
 			return recreateCellTask{pid: 4242}, nil
 		},
 	}
