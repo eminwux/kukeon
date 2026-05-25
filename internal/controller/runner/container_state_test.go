@@ -280,6 +280,7 @@ func seedPostRebootCell(
 		Status: v1beta1.CellStatus{
 			State:         v1beta1.CellStateReady,
 			ReadyObserved: true,
+			CgroupReady:   true,
 		},
 	}
 	path := fs.CellMetadataPath(r.opts.RunPath, realm, space, stack, cellName)
@@ -288,5 +289,96 @@ func seedPostRebootCell(
 	}
 	if err := metadata.WriteMetadata(r.ctx, r.logger, doc, path); err != nil {
 		t.Fatalf("write cell metadata: %v", err)
+	}
+}
+
+// TestReconcileCell_PostReboot_FalsifiesCgroupReady is the headline #853
+// guard: the background reconcile loop must close the same loop the
+// on-demand `kuke refresh` path already does — when a host reboot wipes
+// the tmpfs-backed cgroup tree, a single reconcile tick must flip
+// Status.CgroupReady from true to false on every previously-Ready cell.
+// Without this, `cgroupReady: true` stays stamped post-reboot and
+// `kuke status`'s state-consistency check is silently bypassed.
+//
+// The complement (re-set to true once the cgroup re-materializes) is
+// already covered by TestReconcileCell_PostReboot_TransitionsToStopped
+// taking the cgroup-present branch elsewhere; here we exercise the
+// true → false direction the bug allowed to leak.
+func TestReconcileCell_PostReboot_FalsifiesCgroupReady(t *testing.T) {
+	realm, space, stack, cellName := "default", "kukeon", "kukeon", "web"
+	rootID := "root"
+	workloadID := "workload"
+	rootContainerdID := space + "_" + stack + "_" + cellName + "_" + rootID
+	workloadContainerdID := space + "_" + stack + "_" + cellName + "_" + workloadID
+
+	fake := &deleteCellFakeClient{
+		// Cgroup absent: the tmpfs-backed /sys/fs/cgroup/kukeon/... tree
+		// is wiped on reboot. ExistsCgroup translates this to (false, nil).
+		loadCgroupFn: func(string, string) (*cgroup2.Manager, error) {
+			return nil, errors.New("cgroup path does not exist")
+		},
+		// Containerd container records survive the reboot.
+		existsContainerFn: func(_, _ string) (bool, error) { return true, nil },
+		taskStatusFn: func(_, _ string) (containerd.Status, error) {
+			return containerd.Status{}, fmt.Errorf("%w: %w", errdefs.ErrTaskNotFound, errors.New("task: not found"))
+		},
+	}
+	r := newDeleteCellTestExec(t, fake)
+	seedDeleteCellRealm(t, r, realm)
+	seedPostRebootCell(t, r, realm, space, stack, cellName, rootID, workloadID, rootContainerdID, workloadContainerdID)
+
+	cell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: cellName},
+		Spec: intmodel.CellSpec{
+			ID:        cellName,
+			RealmName: realm,
+			SpaceName: space,
+			StackName: stack,
+			Containers: []intmodel.ContainerSpec{
+				{ID: rootID, ContainerdID: rootContainerdID, Root: true},
+				{ID: workloadID, ContainerdID: workloadContainerdID, Root: false},
+			},
+		},
+		Status: intmodel.CellStatus{
+			State:         intmodel.CellStateReady,
+			ReadyObserved: true,
+			CgroupReady:   true,
+		},
+	}
+
+	updatedCell, outcome, err := r.ReconcileCell(cell)
+	if err != nil {
+		t.Fatalf("ReconcileCell: unexpected error: %v", err)
+	}
+	if !outcome.Updated {
+		t.Errorf(
+			"ReconcileCell outcome.Updated = false; want true (cgroupReady true → false flip must be reported as an update so the metadata write fires)",
+		)
+	}
+	if updatedCell.Status.CgroupReady {
+		t.Errorf(
+			"ReconcileCell cell.Status.CgroupReady = true; want false (#853: background reconciler must falsify cgroupReady once /sys/fs/cgroup/.../<cell> is gone)",
+		)
+	}
+
+	// Round-trip: read the persisted metadata back to confirm the diff
+	// predicate actually triggered the on-disk write — an in-memory flip
+	// that doesn't reach the metadata file leaves `kuke get cell -o yaml`
+	// reporting the stale value, which is exactly the user-visible bug.
+	persisted, err := r.GetCell(intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: cellName},
+		Spec: intmodel.CellSpec{
+			RealmName: realm,
+			SpaceName: space,
+			StackName: stack,
+		},
+	})
+	if err != nil {
+		t.Fatalf("GetCell after ReconcileCell: %v", err)
+	}
+	if persisted.Status.CgroupReady {
+		t.Errorf(
+			"persisted Status.CgroupReady = true; want false (the diff predicate at refresh.go:706-718 must include CgroupReady so the metadata write fires)",
+		)
 	}
 }

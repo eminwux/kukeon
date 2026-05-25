@@ -660,11 +660,19 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 		return cell, ReconcileOutcome{Updated: updated}, nil
 	}
 
-	_, cgroupErr := r.ExistsCgroup(cell)
+	cgroupExists, cgroupErr := r.ExistsCgroup(cell)
 	if cgroupErr != nil {
 		r.logger.DebugContext(r.ctx, "failed to check cell cgroup",
 			"cell", cell.Metadata.Name, "error", cgroupErr)
 	}
+	// Mirror RefreshCell (refresh.go:369-374): the background reconcile
+	// loop must close the same loop the on-demand `kuke refresh` path
+	// already does, so cgroupReady falsifies on every cell whose
+	// /sys/fs/cgroup/.../<cell> tree is gone (the post-reboot signature
+	// for tmpfs-backed cgroups). Without this, `cgroupReady: true` stays
+	// stamped after a host reboot wipes the cgroup, and `kuke status`'s
+	// state-consistency check is silently bypassed (#853).
+	cell.Status.CgroupReady = cgroupErr == nil && cgroupExists
 
 	// Populate container statuses up front so the non-root-driven
 	// derivation can read them from the snapshot. The root container
@@ -708,6 +716,9 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 		updated = true
 	}
 	if originalStatus.ReadyObserved != cell.Status.ReadyObserved {
+		updated = true
+	}
+	if originalStatus.CgroupReady != cell.Status.CgroupReady {
 		updated = true
 	}
 	if !containerStatusesEqual(originalStatus.Containers, cell.Status.Containers) {
