@@ -629,6 +629,14 @@ func (r *Exec) refreshContainerStatus(cell intmodel.Cell, containerSpec *intmode
 // Errors during kill/delete are returned to the caller so the loop's
 // per-pass `Errors` slice records them and the cell is preserved for
 // retry on the next tick (best-effort, like the watcher it replaces).
+//
+// Post-reboot cgroup healing (#855): when the cgroup check returns
+// absent and the cell's persisted ReadyObserved latch is true (the cell
+// was ever Ready), the reconciler re-runs ensureCellCgroup to
+// re-create the cgroup directory and re-assert subtree controllers.
+// Cells that never reached Ready (a half-CreateCell that crashed
+// mid-way, gated by the same latch the wind-down path uses) are not
+// promoted by the re-ensure.
 func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcome, error) {
 	defer r.lockCell(cell)()
 
@@ -673,6 +681,29 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 	// stamped after a host reboot wipes the cgroup, and `kuke status`'s
 	// state-consistency check is silently bypassed (#853).
 	cell.Status.CgroupReady = cgroupErr == nil && cgroupExists
+
+	// Heal a wiped cell cgroup on the reconcile path so cells whose cgroup
+	// the host reboot wiped (#854) recover without an operator running
+	// `kuke start cell <name>` per cell. Gated on the persisted
+	// ReadyObserved latch so a half-CreateCell that crashed before the
+	// cell ever reached Ready is not promoted by the re-ensure — that
+	// in-flight CreateCell will finish its own ensureCellCgroup path under
+	// the per-cell lock. ensureCellCgroup is idempotent and already
+	// re-asserts subtree controllers via enableCellControllers, covering
+	// the second half of the post-#314/#328 contract. Heal failure is
+	// logged and the tick continues so the next pass retries (#855).
+	if cgroupErr == nil && !cgroupExists && originalStatus.ReadyObserved {
+		healedCell, healErr := r.ensureCellCgroup(cell)
+		if healErr != nil {
+			r.logger.WarnContext(r.ctx, "reconcile: failed to heal missing cell cgroup",
+				"cell", cell.Metadata.Name, "error", healErr)
+		} else {
+			cell = healedCell
+			r.logger.InfoContext(r.ctx, "reconcile: healed missing cell cgroup",
+				"cell", cell.Metadata.Name,
+				"path", cell.Status.CgroupPath)
+		}
+	}
 
 	// Populate container statuses up front so the non-root-driven
 	// derivation can read them from the snapshot. The root container
