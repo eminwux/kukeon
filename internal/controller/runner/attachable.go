@@ -527,7 +527,63 @@ func (r *Exec) attachablePostCreateChown(namespace string, spec intmodel.Contain
 	default:
 		return fmt.Errorf("chown %q to (uid=%d, gid=%d): %w", metadataPath, uid, gid, chownErr)
 	}
+	// Restart-path complement to the ttyDir chown above (#850). The leaf
+	// dir chown covers a fresh provision (MkdirAll just made the dir
+	// empty), but on a restart the dir already holds stale files from the
+	// prior run — kuketty.log (#599), sbsh's capture/metadata.json/.meta-
+	// *.tmp anchored to attachableTTYDir (#672), and any pre-#672
+	// terminals/<id>/ subtree — all root-owned because the daemon wrote
+	// them. When the work image's resolved USER is non-root (e.g. claude:
+	// latest → 1000), kuketty inside the container then hits EACCES at
+	// openTerminalLogger trying to O_RDWR-reopen the stale root-owned
+	// kuketty.log and exits with code 70 before claiming the socket
+	// listener; `kuke attach` later dials the freshly-bound but
+	// listenerless socket and gets "connection refused". Walking and
+	// chowning every leaf child to the resolved container uid covers the
+	// full set of kuketty/sbsh-written inodes without enumerating
+	// basenames, so a future addition under tty/ inherits the same
+	// restart-safety automatically.
+	if err = chownAttachableStaleChildren(ttyDir, int(uid), gid); err != nil {
+		return fmt.Errorf("chown stale children under %q: %w", ttyDir, err)
+	}
 	return nil
+}
+
+// chownAttachableStaleChildren resets the owner of every pre-existing
+// file and directory under root to (uid, gid). It is the restart-path
+// complement to the top-level ttyDir chown in attachablePostCreateChown:
+// on a fresh provision the dir is empty (MkdirAll just produced it) and
+// the walk is a no-op; on a restart it covers every kuketty/sbsh-written
+// leaf inherited from the prior run (#850).
+//
+// The walk uses Lchown so a stray symlink (none today, defense-in-depth)
+// is chowned at the link, never its target. Per-entry ENOENT is tolerated
+// (a concurrent unlink during the walk is a benign race — the inode is
+// already gone, the chown is moot). Subdirectories are walked too: any
+// pre-#672 terminals/<id>/ subtree left over from an older daemon gets
+// covered in the same pass.
+//
+// The root dir itself is intentionally skipped — the caller chowned it
+// explicitly with its own error surface, and re-chowning is wasteful.
+func chownAttachableStaleChildren(root string, uid, gid int) error {
+	return filepath.Walk(root, func(path string, _ os.FileInfo, err error) error {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if path == root {
+			return nil
+		}
+		if chownErr := os.Lchown(path, uid, gid); chownErr != nil {
+			if errors.Is(chownErr, os.ErrNotExist) {
+				return nil
+			}
+			return fmt.Errorf("chown %q to (uid=%d, gid=%d): %w", path, uid, gid, chownErr)
+		}
+		return nil
+	})
 }
 
 // attachableSocketSymlinkDirMode is the mode applied to <RunPath>/s when

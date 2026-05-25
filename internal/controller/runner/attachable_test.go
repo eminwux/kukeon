@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/consts"
@@ -375,6 +376,145 @@ func TestEnsureAttachableSocketSymlink_RefusesOverflow(t *testing.T) {
 	}
 	if _, statErr := os.Lstat(symlinkPath); !errors.Is(statErr, os.ErrNotExist) {
 		t.Errorf("symlink %q exists (lstat err = %v), want ErrNotExist", symlinkPath, statErr)
+	}
+}
+
+// TestChownAttachableStaleChildren_CoversRestartLayout locks the #850 fix:
+// the post-create chown sweep visits every kuketty/sbsh-written leaf under
+// the tty bind-mount source so a non-root image USER (e.g. claude:latest →
+// 1000) can re-open them on a restart. Without the sweep, kuketty's
+// openTerminalLogger hit EACCES on the prior run's root-owned kuketty.log
+// and exited before claiming the socket listener.
+//
+// The test seeds the tty dir with the inode set the issue enumerates —
+// kuketty.log, capture, capture.001.gz (sbsh's rotated transcript),
+// metadata.json (sbsh's atomic doc after #672), .meta-*.tmp (the
+// create-temp half of that atomic write), plus a stale pre-#672
+// terminals/<id>/ subtree to lock the recursion contract. When the test
+// runs as root the sweep retargets every inode to a non-root uid and the
+// assertion is end-to-end (syscall.Stat_t.Uid); when the test runs unpriv
+// the sweep is a self-chown no-op and we assert the walk completes without
+// error and leaves every inode in place. Either way regressing the walk
+// (dropping recursion, raising an error on a stale file, skipping a known
+// basename) fails the test.
+func TestChownAttachableStaleChildren_CoversRestartLayout(t *testing.T) {
+	ttyDir := t.TempDir()
+
+	seedFiles := []string{
+		consts.KukeonContainerKukettyLogFile, // kuketty.log
+		consts.KukeonContainerCaptureFile,    // capture
+		"capture.001.gz",                     // sbsh rotated transcript
+		"metadata.json",                      // sbsh's atomic doc (#672)
+		".meta-12345.tmp",                    // sbsh's atomic write tmp
+	}
+	for _, name := range seedFiles {
+		path := filepath.Join(ttyDir, name)
+		if err := os.WriteFile(path, []byte("stale\n"), 0o640); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+	// Pre-#672 terminals/<id>/ subtree — the sweep must recurse into it
+	// even though #672 moved sbsh's MetadataDir up to attachableTTYDir, so
+	// a daemon upgraded across that boundary doesn't leak a root-owned
+	// subdir into the restart path.
+	legacyDir := filepath.Join(ttyDir, "terminals", "abc123")
+	if err := os.MkdirAll(legacyDir, 0o700); err != nil {
+		t.Fatalf("mkdir legacy: %v", err)
+	}
+	legacyFile := filepath.Join(legacyDir, "metadata.json")
+	if err := os.WriteFile(legacyFile, []byte("stale legacy\n"), 0o640); err != nil {
+		t.Fatalf("seed legacy: %v", err)
+	}
+
+	targetUID, targetGID := os.Geteuid(), os.Getegid()
+	if targetUID == 0 {
+		// Root path: pick a non-root target so the chown is observable in
+		// Stat_t.Uid. 1000 is the canonical non-root container UID the
+		// issue's claude:latest repro hits.
+		targetUID = 1000
+	}
+
+	if err := chownAttachableStaleChildren(ttyDir, targetUID, targetGID); err != nil {
+		t.Fatalf("chownAttachableStaleChildren: %v", err)
+	}
+
+	// All seeded files (and the recursed-into legacy subtree's file and
+	// directory) must end up owned by targetUID. Skip the per-inode Uid
+	// assertion when not root — the self-chown is a no-op and the
+	// pre-chown owner already equals targetUID, so it would tautologically
+	// pass.
+	wantAssertUID := os.Geteuid() == 0
+	walkPaths := append([]string{}, seedFiles...)
+	for _, name := range walkPaths {
+		assertOwnedBy(t, filepath.Join(ttyDir, name), targetUID, wantAssertUID)
+	}
+	assertOwnedBy(t, legacyDir, targetUID, wantAssertUID)
+	assertOwnedBy(t, legacyFile, targetUID, wantAssertUID)
+
+	// The root dir is intentionally skipped — caller chowned it
+	// explicitly. Regressing the skip would re-chown it, which is harmless
+	// today but would change the function's contract; the doc-comment
+	// names it explicitly so lock that here.
+	if !wantAssertUID {
+		return
+	}
+	rootStat := statSys(t, ttyDir)
+	if int(rootStat.Uid) == targetUID {
+		t.Errorf("ttyDir uid = %d (want unchanged, function is children-only)", rootStat.Uid)
+	}
+}
+
+// TestChownAttachableStaleChildren_FreshProvision_NoOp pins the no-op
+// contract on the fresh-create path: MkdirAll just produced an empty
+// ttyDir, the sweep visits zero children, returns nil. Regressing this
+// (e.g. requiring at least one seeded file) would surface as a noisy
+// error on every first provision.
+func TestChownAttachableStaleChildren_FreshProvision_NoOp(t *testing.T) {
+	ttyDir := t.TempDir()
+	if err := chownAttachableStaleChildren(ttyDir, os.Geteuid(), os.Getegid()); err != nil {
+		t.Fatalf("chownAttachableStaleChildren on empty dir: %v", err)
+	}
+}
+
+// TestChownAttachableStaleChildren_TolerantENOENT covers the
+// concurrent-unlink race the doc comment promises: an entry that
+// disappears between Walk's readdir and our per-entry Lchown is not an
+// error. The simplest synthesis is a nonexistent root — filepath.Walk
+// surfaces the initial Lstat ENOENT through the callback, which our
+// errors.Is(_, os.ErrNotExist) branch swallows. Same code path that
+// guards a real mid-walk unlink, exercised without a separate goroutine.
+func TestChownAttachableStaleChildren_TolerantENOENT(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	if err := chownAttachableStaleChildren(missing, os.Geteuid(), os.Getegid()); err != nil {
+		t.Fatalf("chownAttachableStaleChildren on missing root: %v", err)
+	}
+}
+
+// statSys returns the syscall.Stat_t for path or fails the test. Wrapper
+// around os.Stat + the platform-specific Sys() type assertion so the
+// per-test ownership assertions stay readable.
+func statSys(t *testing.T, path string) *syscall.Stat_t {
+	t.Helper()
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("lstat %s: %v", path, err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Skipf("syscall.Stat_t not available on this platform (path=%s)", path)
+	}
+	return stat
+}
+
+// assertOwnedBy verifies path's uid equals wantUID when assertUID is set.
+// The two-mode shape lets the same call site cover both the privileged
+// (real chown observable) and unprivileged (self-chown no-op, presence-
+// only) test runs without forking the assertion list.
+func assertOwnedBy(t *testing.T, path string, wantUID int, assertUID bool) {
+	t.Helper()
+	stat := statSys(t, path)
+	if assertUID && int(stat.Uid) != wantUID {
+		t.Errorf("%s uid = %d, want %d", path, stat.Uid, wantUID)
 	}
 }
 
