@@ -47,17 +47,16 @@ import (
 // Also reused by container_state / reconcile tests that need ExistsContainer
 // + TaskStatus hooks (the post-reboot reproduction in #543), and by the
 // reconcile-heal tests (#855) that need NewCgroup +
-// EnsureSubtreeControllers hooks to observe the re-ensure pass.
+// EnableCellSubtreeControllers hooks to observe the re-assert pass.
 type deleteCellFakeClient struct {
-	deleteContainerFn          func(namespace, id string, opts ctr.ContainerDeleteOptions) error
-	stopContainerFn            func(namespace, id string, opts ctr.StopContainerOptions) (*containerd.ExitStatus, error)
-	listContainersFn           func(namespace string, filters ...string) ([]containerd.Container, error)
-	existsContainerFn          func(namespace, id string) (bool, error)
-	taskStatusFn               func(namespace, id string) (containerd.Status, error)
-	loadCgroupFn               func(group, mountpoint string) (*cgroup2.Manager, error)
-	newCgroupFn                func(spec ctr.CgroupSpec) (*cgroup2.Manager, error)
-	ensureSubtreeControllersFn func(group, mountpoint string, controllers []string) ([]string, error)
-	enableCellSubtreeFn        func(group, mountpoint string, controllers []string) ([]string, error)
+	deleteContainerFn   func(namespace, id string, opts ctr.ContainerDeleteOptions) error
+	stopContainerFn     func(namespace, id string, opts ctr.StopContainerOptions) (*containerd.ExitStatus, error)
+	listContainersFn    func(namespace string, filters ...string) ([]containerd.Container, error)
+	existsContainerFn   func(namespace, id string) (bool, error)
+	taskStatusFn        func(namespace, id string) (containerd.Status, error)
+	loadCgroupFn        func(group, mountpoint string) (*cgroup2.Manager, error)
+	newCgroupFn         func(spec ctr.CgroupSpec) (*cgroup2.Manager, error)
+	enableCellSubtreeFn func(group, mountpoint string, controllers []string) ([]string, error)
 }
 
 func (c *deleteCellFakeClient) Connect() error { return nil }
@@ -93,12 +92,7 @@ func (c *deleteCellFakeClient) LoadCgroup(group, mountpoint string) (*cgroup2.Ma
 	return nil, nil
 }
 func (c *deleteCellFakeClient) DeleteCgroup(string, string) error { return nil }
-func (c *deleteCellFakeClient) EnsureSubtreeControllers(
-	group, mountpoint string, controllers []string,
-) ([]string, error) {
-	if c.ensureSubtreeControllersFn != nil {
-		return c.ensureSubtreeControllersFn(group, mountpoint, controllers)
-	}
+func (c *deleteCellFakeClient) EnsureSubtreeControllers(string, string, []string) ([]string, error) {
 	return nil, nil
 }
 
