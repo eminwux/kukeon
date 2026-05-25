@@ -121,7 +121,7 @@ func NewBlueprintCmd() *cobra.Command {
 	cmd.Flags().String("stack", "", "Filter blueprints by stack name")
 	_ = viper.BindPFlag(config.KUKE_GET_BLUEPRINT_STACK.ViperKey, cmd.Flags().Lookup("stack"))
 	cmd.Flags().
-		StringP("output", "o", "", "Output format (yaml, json, table). Default: table for list, yaml for single resource")
+		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
 
@@ -159,7 +159,7 @@ func printBlueprints(cmd *cobra.Command, blueprints []v1beta1.CellBlueprintDoc, 
 		return shared.PrintYAML(cmd, blueprints)
 	case shared.OutputFormatJSON:
 		return shared.PrintJSON(cmd, blueprints)
-	case shared.OutputFormatTable:
+	case shared.OutputFormatTable, shared.OutputFormatWide:
 		if len(blueprints) == 0 {
 			cmd.Println("No blueprints found.")
 			return nil
