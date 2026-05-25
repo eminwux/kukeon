@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
@@ -142,20 +143,47 @@ func printSpaces(
 			cmd.Println("No spaces found.")
 			return nil
 		}
-		// Per-entity wide columns (EGRESS, NET-DEFAULTS) land in #602; this
-		// step only retires CGROUP/CONTROLLERS so the wide table currently
-		// renders the same shape as the default. The shared OutputFormatWide
-		// enum value is still accepted for symmetry across kinds.
-		headers := []string{"NAME", "REALM", "STATE"}
+		wide := format == shared.OutputFormatWide
+		headers := []string{"NAME", "REALM", "STATE", "AGE"}
+		if wide {
+			headers = append(headers, "EGRESS", "NET-DEFAULTS")
+		}
+		now := time.Now()
 		rows := make([][]string, 0, len(spaces))
 		for i := range spaces {
 			s := &spaces[i]
 			state := (&s.Status.State).String()
-			rows = append(rows, []string{s.Metadata.Name, s.Spec.RealmID, state})
+			row := []string{s.Metadata.Name, s.Spec.RealmID, state, shared.RenderAge(s.Status.CreatedAt, now)}
+			if wide {
+				row = append(row, egressDefault(s.Spec.Network), netDefaults(s.Spec.Defaults))
+			}
+			rows = append(rows, row)
 		}
 		shared.PrintTable(cmd, headers, rows)
 		return nil
 	default:
 		return shared.PrintYAML(cmd, spaces)
 	}
+}
+
+// egressDefault renders the EGRESS column for `-o wide`. Returns "-" when
+// the space has no egress policy declared (Spec.Network or
+// Spec.Network.Egress nil); otherwise renders the policy default ("allow"
+// or "deny") as-is. An empty Default string also renders as "-" so a
+// half-populated EgressPolicy doesn't print a blank cell.
+func egressDefault(n *v1beta1.SpaceNetwork) string {
+	if n == nil || n.Egress == nil || n.Egress.Default == "" {
+		return "-"
+	}
+	return string(n.Egress.Default)
+}
+
+// netDefaults renders the NET-DEFAULTS column for `-o wide`. "yes" when
+// Spec.Defaults is non-nil (the space carries container-level defaults
+// that get inherited by containers in it); "-" otherwise.
+func netDefaults(d *v1beta1.SpaceDefaults) string {
+	if d == nil {
+		return "-"
+	}
+	return "yes"
 }

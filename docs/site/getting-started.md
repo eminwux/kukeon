@@ -82,8 +82,8 @@ Spaces and stacks are only auto-created under `kuke-system` — the user-facing 
 
 ```bash
 $ kuke get spaces --realm kuke-system
-NAME    REALM        STATE
-kukeon  kuke-system  Ready
+NAME    REALM        STATE  AGE
+kukeon  kuke-system  Ready  <age>
 
 $ kuke get stacks --realm kuke-system --space kukeon
 NAME    REALM        SPACE   STATE
