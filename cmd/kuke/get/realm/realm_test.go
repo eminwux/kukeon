@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	realm "github.com/eminwux/kukeon/cmd/kuke/get/realm"
+	"github.com/eminwux/kukeon/cmd/kuke/get/testutil"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
@@ -196,7 +197,7 @@ func TestNewRealmCmd_Columns(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		out := buf.String()
-		header := firstLine(out)
+		header := testutil.FirstLine(out)
 		// The header is rendered before any data row; check it directly so
 		// row data can't accidentally satisfy the column-presence assertion.
 		for _, want := range []string{"NAME", "STATE", "AGE"} {
@@ -227,7 +228,7 @@ func TestNewRealmCmd_Columns(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		out := buf.String()
-		header := firstLine(out)
+		header := testutil.FirstLine(out)
 		for _, want := range []string{"NAME", "STATE", "AGE", "NAMESPACE"} {
 			if !strings.Contains(header, want) {
 				t.Errorf("wide header missing %q; got: %q", want, header)
@@ -263,13 +264,6 @@ func TestNewRealmCmd_Columns(t *testing.T) {
 			t.Errorf("-o yaml should still surface cgroupPath; got:\n%s", out)
 		}
 	})
-}
-
-func firstLine(s string) string {
-	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
-		return s[:idx]
-	}
-	return s
 }
 
 type fakeClient struct {

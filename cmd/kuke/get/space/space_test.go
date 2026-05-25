@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	space "github.com/eminwux/kukeon/cmd/kuke/get/space"
+	"github.com/eminwux/kukeon/cmd/kuke/get/testutil"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
@@ -201,7 +202,7 @@ func TestNewSpaceCmd_Columns(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		out := buf.String()
-		header := firstLine(out)
+		header := testutil.FirstLine(out)
 		for _, want := range []string{"NAME", "REALM", "STATE", "AGE"} {
 			if !strings.Contains(header, want) {
 				t.Errorf("default header missing %q; got: %q", want, header)
@@ -231,7 +232,7 @@ func TestNewSpaceCmd_Columns(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		out := buf.String()
-		header := firstLine(out)
+		header := testutil.FirstLine(out)
 		for _, want := range []string{"NAME", "REALM", "STATE", "AGE", "EGRESS", "NET-DEFAULTS"} {
 			if !strings.Contains(header, want) {
 				t.Errorf("wide header missing %q; got: %q", want, header)
@@ -275,16 +276,6 @@ func TestNewSpaceCmd_Columns(t *testing.T) {
 			}
 		}
 	})
-}
-
-// firstLine returns the first newline-terminated line of s, or s itself
-// if it contains no newline. Used so column-presence assertions check the
-// header row only — data cells can't satisfy them by accident.
-func firstLine(s string) string {
-	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
-		return s[:idx]
-	}
-	return s
 }
 
 // dataRows returns the non-header rows of a PrintTable output. Lines 1
