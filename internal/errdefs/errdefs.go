@@ -149,6 +149,19 @@ var (
 	// of the misleading Ready→Stopped→reaped cycle. Issue #851.
 	ErrCellWindDownImmediate = errors.New("cell wound down immediately after start")
 
+	// ErrCellSpecHashDrift is the StartCell sentinel raised when the
+	// existing containerd container record carries a `kukeon.io/spec-hash`
+	// label whose value disagrees with the SHA-256 over the on-disk
+	// CellSpec's "requires containerd recreate" field set (image, command,
+	// args). Mismatch is only reachable via crash-mid-apply or an
+	// unsupported hand-edit of `metadata.yaml` — the supported `kuke apply
+	// -f` flow re-stamps the label inside the same RecreateCell /
+	// UpdateCell transaction that rewrites containerd state. The sentinel
+	// keeps the operator-facing error parseable while the wrapping
+	// message names the diverged hash pair and points at `kuke apply -f`.
+	// Issue #867.
+	ErrCellSpecHashDrift = errors.New("cell spec hash diverges from containerd record")
+
 	// Volume-related errors.
 
 	ErrVolumeSourceRequired    = errors.New("volume source is required")

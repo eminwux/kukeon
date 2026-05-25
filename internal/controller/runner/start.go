@@ -608,10 +608,33 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 		return internalCell, nil
 	}
 
+	// Resolve rootContainerSpec early so we can compute the spec-hash and
+	// decide whether to reuse the existing containerd record (overlay
+	// preserved) or create a fresh one — issue #867.
+	rootContainerSpec, err := r.ensureCellRootContainerSpec(internalCell)
+	if err != nil {
+		return intmodel.Cell{}, fmt.Errorf("failed to get root container spec: %w", err)
+	}
+	desiredRootSpecHash := ComputeContainerSpecHash(rootContainerSpec)
+
 	// Past the idempotent-skip path: any subsequent error means we crashed
 	// mid-provisioning. Arm the defer above so the cell flips to Failed and
 	// any siblings already started get killed (issue #407).
 	provisionStarted = true
+
+	// reuseExistingRoot, when true, instructs the create block further down
+	// to skip ctr.BuildRootContainerSpec + CreateContainer and start a fresh
+	// task on the existing containerd record — preserving the snapshot
+	// across the stop/start transition. Issue #867.
+	var reuseExistingRoot bool
+
+	// fields is the per-call log-field accumulator threaded through the
+	// post-create CNI / non-root recreate blocks below. Pre-declared at
+	// function scope so the reuse-existing-root branch (which skips the
+	// originally-unconditional `fields := appendCellLogFields(...)` site
+	// at the CreateContainer log line) does not leave downstream uses
+	// undefined. Issue #867.
+	var fields []any
 
 	// Check if container exists and clean it up
 	container, err := r.ctrClient.GetContainer(namespace, containerID)
@@ -649,66 +672,57 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 			)
 		}
 	} else {
-		// Container exists: release its CNI/IPAM reservation, then delete it.
-		// The root is recreated below under the same deterministic containerd
-		// ID and re-attached via CNI ADD; without the release-before-delete
-		// ordering here, host-local IPAM rejects that re-ADD as a duplicate
-		// allocation (issue #630). releaseCNI must run while the task's netns
-		// is still valid, so it is sequenced before the task delete; purgeCNI
-		// scrubs the residual allocation file afterward as a safety net.
-		// Resolve the purge's network name deterministically from realm+space so
-		// the scrub runs even when space metadata is gone or corrupt (issue #685),
-		// matching the stop/kill/delete teardown paths.
+		// Container exists. Compare the `kukeon.io/spec-hash` label on the
+		// containerd record against the freshly-computed hash. Match (or
+		// legacy record with no label) → reuse the snapshot; mismatch →
+		// refuse with an actionable error pointing the operator at
+		// `kuke apply -f`. The supported mutation surface (`kuke apply -f`
+		// → RecreateCell / UpdateCell) re-stamps the label inside the same
+		// transaction that rewrites containerd state, so steady-state
+		// restarts always match and the snapshot survives stop/start.
+		// Issue #867 ACs #1, #4, #5, #6.
+		nsCtx := namespaces.WithNamespace(r.ctx, namespace)
+		existingLabels, labelErr := container.Labels(nsCtx)
+		if labelErr != nil {
+			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+			fields = append(fields, "space", spaceID, "realm", realmID, "err", labelErr.Error())
+			r.logger.WarnContext(r.ctx,
+				"failed to read existing root container labels, treating as match for reuse",
+				fields...)
+		}
+		onDiskRootHash := existingLabels[SpecHashLabelKey]
+		if onDiskRootHash != "" && onDiskRootHash != desiredRootSpecHash {
+			return intmodel.Cell{}, fmt.Errorf(
+				"%w: cell %q: containerd record carries spec-hash %q but cell spec hashes to %q — "+
+					"run `kuke apply -f` to reconcile",
+				internalerrdefs.ErrCellSpecHashDrift, cellName, onDiskRootHash, desiredRootSpecHash,
+			)
+		}
+		reuseExistingRoot = true
+		// Drop any stale task on the existing record. Reaching this branch
+		// implies the idempotent-skip path above already determined the
+		// task is not Running; a leftover Created/Stopped task would
+		// otherwise refuse the StartContainer below.
+		if task, taskErr := container.Task(nsCtx, nil); taskErr == nil {
+			if _, deleteTaskErr := task.Delete(nsCtx, containerd.WithProcessKill); deleteTaskErr != nil {
+				fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+				fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", deleteTaskErr))
+				r.logger.WarnContext(r.ctx, "failed to delete stale task on existing root container, continuing", fields...)
+			}
+		}
+		// Defense-in-depth CNI scrub. stop.go/kill.go already release the
+		// IPAM reservation pre-snapshot-preservation; a daemon crash
+		// mid-stop could leave a stale host-local file keyed to this
+		// deterministic root containerd ID. Scrub it so the CNI ADD below
+		// isn't rejected as a duplicate allocation (issue #630 / #649
+		// mirror for the reuse path).
 		networkName := r.buildRootCNINetworkName(realmID, spaceID)
-		_ = teardownRootContainerCNI(
-			func() {
-				r.detachRootContainerFromNetwork(
-					containerID, cniConfigPath, namespace, cellID, cellName, spaceID, realmID,
-				)
-			},
-			func() error {
-				// Delete the task (if any) then the container to remove stale spec.
-				nsCtx := namespaces.WithNamespace(r.ctx, namespace)
-				if task, taskErr := container.Task(nsCtx, nil); taskErr == nil {
-					if _, deleteTaskErr := task.Delete(nsCtx, containerd.WithProcessKill); deleteTaskErr != nil {
-						fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-						fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", deleteTaskErr))
-						r.logger.WarnContext(r.ctx, "failed to delete existing task, continuing", fields...)
-					}
-				}
-
-				delErr := r.ctrClient.DeleteContainer(namespace, containerID, ctr.ContainerDeleteOptions{
-					SnapshotCleanup: true,
-				})
-				switch {
-				case delErr == nil:
-					fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-					fields = append(fields, "space", spaceID, "realm", realmID)
-					r.logger.InfoContext(r.ctx, "deleted existing root container for recreation", fields...)
-				case errors.Is(delErr, internalerrdefs.ErrContainerNotFound):
-					// Might have been deleted between check and delete.
-					fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-					fields = append(fields, "space", spaceID, "realm", realmID)
-					r.logger.DebugContext(r.ctx, "root container already deleted, will create fresh", fields...)
-				default:
-					fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-					fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", delErr))
-					r.logger.WarnContext(r.ctx, "failed to delete existing container, continuing", fields...)
-				}
-				return delErr
-			},
-			func() {
-				if networkName != "" {
-					_ = r.purgeCNIForContainer(containerID, "", networkName)
-				}
-			},
-		)
-	}
-
-	// Recreate root container fresh
-	rootContainerSpec, err := r.ensureCellRootContainerSpec(internalCell)
-	if err != nil {
-		return intmodel.Cell{}, fmt.Errorf("failed to get root container spec: %w", err)
+		if networkName != "" {
+			_ = r.purgeCNIForContainer(containerID, "", networkName)
+		}
+		reuseFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		reuseFields = append(reuseFields, "space", spaceID, "realm", realmID, "spec-hash", desiredRootSpecHash)
+		r.logger.InfoContext(r.ctx, "reusing existing root container (spec-hash matched)", reuseFields...)
 	}
 
 	// CellCgroupPath: runtime-only injection — see setCellCgroupPath docs.
@@ -729,38 +743,46 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 	}
 	r.stampContainerRecreateRuntimeFields(&rootContainerSpec, &internalCell)
 
-	rootLabels := buildRootContainerLabels(internalCell)
-	ctrContainerSpec := ctr.BuildRootContainerSpec(rootContainerSpec, rootLabels, r.daemonDefaultBuildOpts()...)
+	// Build the OCI spec + CreateContainer only when we're not reusing an
+	// existing record. The reuse path keeps the on-disk OCI spec — its
+	// bind-mounts still point at the cell's /etc files this routine just
+	// re-rendered, and any runtime-only fields (CellCgroupPath, etc.) are
+	// already baked into the existing record from the prior create. Issue
+	// #867 AC #4.
+	if !reuseExistingRoot {
+		rootLabels := stampSpecHashOnLabels(buildRootContainerLabels(internalCell), rootContainerSpec)
+		ctrContainerSpec := ctr.BuildRootContainerSpec(rootContainerSpec, rootLabels, r.daemonDefaultBuildOpts()...)
 
-	_, err = r.ctrClient.CreateContainer(namespace, ctrContainerSpec, creds)
-	if err != nil {
+		_, err = r.ctrClient.CreateContainer(namespace, ctrContainerSpec, creds)
+		if err != nil {
+			fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+			fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
+			r.logger.ErrorContext(
+				r.ctx,
+				"failed to create root container",
+				fields...,
+			)
+			return intmodel.Cell{}, fmt.Errorf("failed to create root container %s: %w", containerID, err)
+		}
+
 		fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
-		r.logger.ErrorContext(
+		fields = append(fields, "space", spaceID, "realm", realmID)
+		r.logger.InfoContext(
 			r.ctx,
-			"failed to create root container",
+			"created root container",
 			fields...,
 		)
-		return intmodel.Cell{}, fmt.Errorf("failed to create root container %s: %w", containerID, err)
 	}
-
-	fields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-	fields = append(fields, "space", spaceID, "realm", realmID)
-	r.logger.InfoContext(
-		r.ctx,
-		"created root container",
-		fields...,
-	)
 
 	// Start root container
 	rootTask, err := r.ctrClient.StartContainer(namespace, ctr.ContainerSpec{ID: containerID}, ctr.TaskSpec{})
 	if err != nil {
-		fields = appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
+		startErrFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
+		startErrFields = append(startErrFields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
 		r.logger.ErrorContext(
 			r.ctx,
 			"failed to start root container",
-			fields...,
+			startErrFields...,
 		)
 		return intmodel.Cell{}, fmt.Errorf("failed to start root container %s: %w", containerID, err)
 	}
@@ -1012,30 +1034,17 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 			startFields...,
 		)
 
-		// Delete container if it exists (idempotent - DeleteContainer handles non-existent containers gracefully)
-		// This ensures any stale container specs and tasks are cleaned up before recreation
-		err = r.ctrClient.DeleteContainer(namespace, ctrContainerID, ctr.ContainerDeleteOptions{
-			SnapshotCleanup: true,
-		})
-		if err != nil {
-			// Log warning but continue - DeleteContainer is idempotent, so errors here are unexpected
-			fields = appendCellLogFields([]any{"id", ctrContainerID}, cellID, cellName)
-			fields = append(
-				fields,
-				"space",
-				spaceID,
-				"realm",
-				realmID,
-				"containerName",
-				containerSpec.ID,
-				"err",
-				fmt.Sprintf("%v", err),
-			)
-			r.logger.WarnContext(
-				r.ctx,
-				"failed to delete existing container, continuing with recreation",
-				fields...,
-			)
+		// Issue #867: same spec-hash guard as the root container above. If
+		// the existing record's `kukeon.io/spec-hash` label matches the
+		// freshly-computed hash, drop any stale task and reuse the snapshot;
+		// if it diverges, refuse with the operator-actionable
+		// ErrCellSpecHashDrift; if the record is absent, fall through to
+		// the create path.
+		reuseExistingChild, reuseErr := r.reuseOrRefuseExistingChildContainer(
+			namespace, ctrContainerID, cellName, containerSpec,
+		)
+		if reuseErr != nil {
+			return intmodel.Cell{}, reuseErr
 		}
 
 		// CellCgroupPath: runtime-only injection — see the comment at the
@@ -1066,50 +1075,60 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 				attachErr,
 			)
 		}
-		buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
-		// `kuke run --env` runtime-env merge (issue #834). Same shape as the
-		// CreateCell-side merge in provision.go: returns containerSpec
-		// unchanged for non-attachable containers or when RuntimeEnv is
-		// empty, otherwise emits a copy whose Env carries the override-on-
-		// key merge. internalCell.Spec.RuntimeEnv is repopulated above (after
-		// r.GetCell) from the inbound RPC cell so this path sees the
-		// per-invocation env even after the disk read stripped it.
-		ociSpec := mergeRuntimeEnvForContainer(containerSpec, attachableID, internalCell.Spec.RuntimeEnv)
-		_, err = r.ctrClient.CreateContainerFromSpec(namespace, ociSpec, creds, buildOpts...)
-		if err != nil {
+		if !reuseExistingChild {
+			buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
+			buildOpts = append(buildOpts, ctr.WithExtraLabels(map[string]string{
+				SpecHashLabelKey: ComputeContainerSpecHash(containerSpec),
+			}))
+			// `kuke run --env` runtime-env merge (issue #834). Same shape as the
+			// CreateCell-side merge in provision.go: returns containerSpec
+			// unchanged for non-attachable containers or when RuntimeEnv is
+			// empty, otherwise emits a copy whose Env carries the override-on-
+			// key merge. internalCell.Spec.RuntimeEnv is repopulated above (after
+			// r.GetCell) from the inbound RPC cell so this path sees the
+			// per-invocation env even after the disk read stripped it.
+			ociSpec := mergeRuntimeEnvForContainer(containerSpec, attachableID, internalCell.Spec.RuntimeEnv)
+			_, err = r.ctrClient.CreateContainerFromSpec(namespace, ociSpec, creds, buildOpts...)
+			if err != nil {
+				fields = appendCellLogFields([]any{"id", ctrContainerID}, cellID, cellName)
+				fields = append(
+					fields,
+					"space",
+					spaceID,
+					"realm",
+					realmID,
+					"containerName",
+					containerSpec.ID,
+					"err",
+					fmt.Sprintf("%v", err),
+				)
+				r.logger.ErrorContext(
+					r.ctx,
+					"failed to create container",
+					fields...,
+				)
+				return intmodel.Cell{}, fmt.Errorf("failed to create container %s: %w", ctrContainerID, err)
+			}
+
 			fields = appendCellLogFields([]any{"id", ctrContainerID}, cellID, cellName)
-			fields = append(
-				fields,
-				"space",
-				spaceID,
-				"realm",
-				realmID,
-				"containerName",
-				containerSpec.ID,
-				"err",
-				fmt.Sprintf("%v", err),
-			)
-			r.logger.ErrorContext(
+			fields = append(fields, "space", spaceID, "realm", realmID, "containerName", containerSpec.ID)
+			r.logger.InfoContext(
 				r.ctx,
-				"failed to create container",
+				"created container",
 				fields...,
 			)
-			return intmodel.Cell{}, fmt.Errorf("failed to create container %s: %w", ctrContainerID, err)
-		}
 
-		fields = appendCellLogFields([]any{"id", ctrContainerID}, cellID, cellName)
-		fields = append(fields, "space", spaceID, "realm", realmID, "containerName", containerSpec.ID)
-		r.logger.InfoContext(
-			r.ctx,
-			"created container",
-			fields...,
-		)
-
-		if err = r.attachablePostCreateChown(namespace, containerSpec); err != nil {
-			return intmodel.Cell{}, fmt.Errorf(
-				"failed to chown attachable tty dir for %s: %w", ctrContainerID, err,
-			)
+			if err = r.attachablePostCreateChown(namespace, containerSpec); err != nil {
+				return intmodel.Cell{}, fmt.Errorf(
+					"failed to chown attachable tty dir for %s: %w", ctrContainerID, err,
+				)
+			}
 		}
+		// On the reuse path the BuildOptions attachOpts returned aren't
+		// applied (the existing OCI spec already carries the attachable
+		// wrapping); the call is still made above for its side effects —
+		// kuketty binary staging, per-container metadata render, ttyDir
+		// chmod — which must run before the task starts.
 
 		// Use container name with UUID for containerd operations
 		specWithNamespaces := ctr.JoinContainerNamespaces(
@@ -1319,30 +1338,15 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 		UTS: fmt.Sprintf("/proc/%d/ns/uts", rootPID),
 	}
 
-	// Delete container if it exists (idempotent - DeleteContainer handles non-existent containers gracefully)
-	// This ensures any stale container specs and tasks are cleaned up before recreation
-	err = r.ctrClient.DeleteContainer(namespace, containerdID, ctr.ContainerDeleteOptions{
-		SnapshotCleanup: true,
-	})
-	if err != nil {
-		// Log warning but continue - DeleteContainer is idempotent, so errors here are unexpected
-		fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
-		fields = append(
-			fields,
-			"space",
-			spaceName,
-			"realm",
-			realmName,
-			"containerName",
-			containerID,
-			"err",
-			fmt.Sprintf("%v", err),
-		)
-		r.logger.WarnContext(
-			r.ctx,
-			"failed to delete existing container, continuing with recreation",
-			fields...,
-		)
+	// Issue #867: spec-hash guard instead of an unconditional destructive
+	// recreate. Match → reuse the snapshot, mismatch → refuse with
+	// ErrCellSpecHashDrift pointing the operator at `kuke apply -f`,
+	// absent → fall through to create.
+	reuseExistingChild, reuseErr := r.reuseOrRefuseExistingChildContainer(
+		namespace, containerdID, cellName, *foundContainerSpec,
+	)
+	if reuseErr != nil {
+		return intmodel.Cell{}, reuseErr
 	}
 
 	// CellCgroupPath: runtime-only injection — fill from cell.Status.CgroupPath
@@ -1379,42 +1383,52 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 	if attachErr != nil {
 		return intmodel.Cell{}, fmt.Errorf("failed to prepare attachable container %s: %w", containerID, attachErr)
 	}
-	buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
-	_, err = r.ctrClient.CreateContainerFromSpec(namespace, *foundContainerSpec, creds, buildOpts...)
-	if err != nil {
+	if !reuseExistingChild {
+		buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
+		buildOpts = append(buildOpts, ctr.WithExtraLabels(map[string]string{
+			SpecHashLabelKey: ComputeContainerSpecHash(*foundContainerSpec),
+		}))
+		_, err = r.ctrClient.CreateContainerFromSpec(namespace, *foundContainerSpec, creds, buildOpts...)
+		if err != nil {
+			fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
+			fields = append(
+				fields,
+				"space",
+				spaceName,
+				"realm",
+				realmName,
+				"containerName",
+				containerID,
+				"err",
+				fmt.Sprintf("%v", err),
+			)
+			r.logger.ErrorContext(
+				r.ctx,
+				"failed to create container",
+				fields...,
+			)
+			return intmodel.Cell{}, fmt.Errorf("failed to create container %s: %w", containerID, err)
+		}
+
 		fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
-		fields = append(
-			fields,
-			"space",
-			spaceName,
-			"realm",
-			realmName,
-			"containerName",
-			containerID,
-			"err",
-			fmt.Sprintf("%v", err),
-		)
-		r.logger.ErrorContext(
+		fields = append(fields, "space", spaceName, "realm", realmName, "containerName", containerID)
+		r.logger.InfoContext(
 			r.ctx,
-			"failed to create container",
+			"created container",
 			fields...,
 		)
-		return intmodel.Cell{}, fmt.Errorf("failed to create container %s: %w", containerID, err)
-	}
 
-	fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
-	fields = append(fields, "space", spaceName, "realm", realmName, "containerName", containerID)
-	r.logger.InfoContext(
-		r.ctx,
-		"created container",
-		fields...,
-	)
-
-	if err = r.attachablePostCreateChown(namespace, *foundContainerSpec); err != nil {
-		return intmodel.Cell{}, fmt.Errorf(
-			"failed to chown attachable tty dir for %s: %w", containerdID, err,
-		)
+		if err = r.attachablePostCreateChown(namespace, *foundContainerSpec); err != nil {
+			return intmodel.Cell{}, fmt.Errorf(
+				"failed to chown attachable tty dir for %s: %w", containerdID, err,
+			)
+		}
 	}
+	// On the reuse path the BuildOptions attachOpts returned aren't applied
+	// (the existing OCI spec already carries the attachable wrapping); the
+	// call above is still made for its side effects (kuketty binary staging,
+	// per-container metadata render, ttyDir chmod) which must run before the
+	// task starts.
 
 	// Start container with namespace paths
 	specWithNamespaces := ctr.JoinContainerNamespaces(
@@ -1424,9 +1438,9 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 
 	_, err = r.ctrClient.StartContainer(namespace, specWithNamespaces, r.containerLogTaskSpec(*foundContainerSpec))
 	if err != nil {
-		fields = appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
-		fields = append(
-			fields,
+		startErrFields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
+		startErrFields = append(
+			startErrFields,
 			"space",
 			spaceName,
 			"realm",
@@ -1439,17 +1453,17 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 		r.logger.ErrorContext(
 			r.ctx,
 			"failed to start container",
-			fields...,
+			startErrFields...,
 		)
 		return intmodel.Cell{}, fmt.Errorf("failed to start container %s: %w", containerID, err)
 	}
 
-	fields = appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
-	fields = append(fields, "space", spaceName, "realm", realmName, "containerName", containerID)
+	startedFields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
+	startedFields = append(startedFields, "space", spaceName, "realm", realmName, "containerName", containerID)
 	r.logger.InfoContext(
 		r.ctx,
 		"started container",
-		fields...,
+		startedFields...,
 	)
 
 	// Get the cell again to ensure we have the latest state

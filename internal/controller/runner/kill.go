@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
@@ -157,28 +156,11 @@ func (r *Exec) killCellLocked(cell intmodel.Cell) (intmodel.Cell, error) {
 			fields...,
 		)
 
-		// Delete container after killing
-		err = r.ctrClient.DeleteContainer(internalRealm.Spec.Namespace, containerID, ctr.ContainerDeleteOptions{
-			SnapshotCleanup: true,
-		})
-		if err != nil {
-			// Log warning but don't fail - container might already be deleted
-			fields = appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-			fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
-			r.logger.WarnContext(
-				r.ctx,
-				"failed to delete container, continuing",
-				fields...,
-			)
-		} else {
-			fields = appendCellLogFields([]any{"id", containerID}, cellID, cellName)
-			fields = append(fields, "space", spaceID, "realm", realmID)
-			r.logger.InfoContext(
-				r.ctx,
-				"deleted container",
-				fields...,
-			)
-		}
+		// Issue #867: leave the containerd container record (and snapshot)
+		// in place. kill is the SIGKILL-escalated cousin of stop; the
+		// documented stop/kill/delete split (docs/cli-use-cases.md) only
+		// distinguishes the two on signal escalation, not on snapshot
+		// teardown. delete still owns record + snapshot teardown.
 	}
 
 	// Kill root container last and detach from CNI
@@ -224,28 +206,10 @@ func (r *Exec) killCellLocked(cell intmodel.Cell) (intmodel.Cell, error) {
 		)
 	}
 
-	// Delete root container after killing
-	err = r.ctrClient.DeleteContainer(internalRealm.Spec.Namespace, rootContainerID, ctr.ContainerDeleteOptions{
-		SnapshotCleanup: true,
-	})
-	if err != nil {
-		// Log warning but don't fail - container might already be deleted
-		fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
-		fields = append(fields, "space", spaceID, "realm", realmID, "err", fmt.Sprintf("%v", err))
-		r.logger.WarnContext(
-			r.ctx,
-			"failed to delete root container, continuing",
-			fields...,
-		)
-	} else {
-		fields := appendCellLogFields([]any{"id", rootContainerID}, cellID, cellName)
-		fields = append(fields, "space", spaceID, "realm", realmID)
-		r.logger.InfoContext(
-			r.ctx,
-			"deleted root container",
-			fields...,
-		)
-	}
+	// Issue #867: leave the root container record + snapshot in place — see
+	// the matching comment in the workload-container loop above. CNI cleanup
+	// below still runs so the IPAM reservation is released; without that, the
+	// next StartCell's CNI ADD would be rejected as a duplicate allocation.
 
 	// Always run comprehensive CNI cleanup after container deletion as a safety net
 	// This ensures IPAM allocations are cleaned up even if CNI DEL succeeded or failed
@@ -429,38 +393,9 @@ func (r *Exec) KillContainer(cell intmodel.Cell, containerID string) error {
 		fields...,
 	)
 
-	// Delete container after killing
-	err = r.ctrClient.DeleteContainer(internalRealm.Spec.Namespace, containerdID, ctr.ContainerDeleteOptions{
-		SnapshotCleanup: true,
-	})
-	if err != nil {
-		// Log warning but don't fail - container might already be deleted
-		fields = appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
-		fields = append(
-			fields,
-			"space",
-			spaceName,
-			"realm",
-			realmName,
-			"containerName",
-			containerID,
-			"err",
-			fmt.Sprintf("%v", err),
-		)
-		r.logger.WarnContext(
-			r.ctx,
-			"failed to delete container, continuing",
-			fields...,
-		)
-	} else {
-		fields = appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
-		fields = append(fields, "space", spaceName, "realm", realmName, "containerName", containerID)
-		r.logger.InfoContext(
-			r.ctx,
-			"deleted container",
-			fields...,
-		)
-	}
-
+	// Issue #867: leave the containerd container record (and snapshot) in
+	// place. The cell-wide cleanup comments in killCellLocked above carry
+	// the full rationale; the single-container `kuke kill container` verb
+	// mirrors the cell-wide kill verb's contract.
 	return nil
 }

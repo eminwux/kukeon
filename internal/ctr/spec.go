@@ -180,6 +180,7 @@ type buildOpts struct {
 	attachable              AttachableInjection
 	defaultMemoryLimitBytes int64
 	secretRunPath           string
+	extraLabels             map[string]string
 }
 
 // WithAttachableInjection configures the host-side paths used when wrapping
@@ -201,6 +202,27 @@ func WithDefaultMemoryLimit(bytes int64) BuildOption {
 	return func(o *buildOpts) {
 		if bytes > 0 {
 			o.defaultMemoryLimitBytes = bytes
+		}
+	}
+}
+
+// WithExtraLabels merges additional containerd container labels into the
+// built spec's label map (existing keys overwritten on collision). Used by
+// the runner to stamp `kukeon.io/spec-hash` at container-create time without
+// threading the value through every Build option; root containers receive
+// the same label via the labels argument BuildRootContainerSpec already
+// accepts. Empty input is a no-op so callers can pass it unconditionally.
+// Issue #867.
+func WithExtraLabels(labels map[string]string) BuildOption {
+	return func(o *buildOpts) {
+		if len(labels) == 0 {
+			return
+		}
+		if o.extraLabels == nil {
+			o.extraLabels = make(map[string]string, len(labels))
+		}
+		for k, v := range labels {
+			o.extraLabels[k] = v
 		}
 	}
 }
@@ -259,6 +281,12 @@ func BuildContainerSpec(
 	labels["kukeon.io/space"] = spaceID
 	labels["kukeon.io/realm"] = realmID
 	labels["kukeon.io/stack"] = stackID
+	// Merge caller-supplied extras last so a runner-injected
+	// `kukeon.io/spec-hash` (issue #867) and any future extras win over the
+	// canonical block on intentional key collisions.
+	for k, v := range opts.extraLabels {
+		labels[k] = v
+	}
 
 	// Build OCI spec options
 	specOpts := []oci.SpecOpts{
