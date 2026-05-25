@@ -288,6 +288,14 @@ var (
 	KUKE_CREATE_CONFIG_STACK = DefineKV("KUKE_CREATE_CONFIG_STACK", "kuke/create/config/stack", "default")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_CREATE_CONFIG_BLUEPRINT = DefineKV("KUKE_CREATE_CONFIG_BLUEPRINT", "kuke/create/config/blueprint")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_BLUEPRINT_NAME = DefineKV("KUKE_CREATE_BLUEPRINT_NAME", "kuke/create/blueprint/name")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_BLUEPRINT_REALM = DefineKV("KUKE_CREATE_BLUEPRINT_REALM", "kuke/create/blueprint/realm", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_BLUEPRINT_SPACE = DefineKV("KUKE_CREATE_BLUEPRINT_SPACE", "kuke/create/blueprint/space", "default")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_CREATE_BLUEPRINT_STACK = DefineKV("KUKE_CREATE_BLUEPRINT_STACK", "kuke/create/blueprint/stack", "default")
 
 	// Get command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
