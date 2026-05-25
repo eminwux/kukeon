@@ -127,6 +127,7 @@ sudo kuke daemon restart               # stop+start composed
 sudo kuke daemon kill                  # immediate SIGKILL escape hatch
 sudo kuke daemon logs                  # one-shot
 sudo kuke daemon logs -f               # follow until SIGINT
+sudo kuke daemon recreate --kukeond-image docker.io/library/kukeon-local:dev    # teardown + re-provision
 ```
 
 **Invariants.**
@@ -138,6 +139,7 @@ sudo kuke daemon logs -f               # follow until SIGINT
 - `daemon start` errors when the host has not been `kuke init`-ed yet (no cell to start). Exit code non-zero with a message pointing the operator at `kuke init`.
 - `daemon kill` has no grace period; this is the escape hatch for a hung daemon. Use `stop` for the graceful path.
 - `daemon reset` is destructive (cell deletion + socket removal) and described in the Bootstrap & teardown section.
+- `daemon recreate --kukeond-image <ref>` is the composed dev-loop rebuild verb: it tears down the existing kukeond cell (stop, delete, clear socket/pid), re-provisions it from scratch using the same cell-creation path `kuke init` exercises, and waits for the daemon to become ready. The verb does **not** bootstrap the host — it errors with `ErrHostNotInitialized` when the cell metadata is missing — and image management is out of scope (the desired image must already be in the `kuke-system` realm). Contrast with `daemon reset`, which is teardown-only; `daemon recreate` is the single-step "make kukeond fresh from the current local image" for the dev loop.
 - After `daemon stop`, daemon-routed commands (anything **not** explicitly in in-process mode) fail with `dial unix /run/kukeon/kukeond.sock: connect: no such file or directory` and exit non-zero. In-process commands (the `--no-daemon`-accepting commands listed above, plus anything with `KUKEON_NO_DAEMON=true` or an explicit `--run-path`) still work for the subset of operations the in-process controller supports.
 - `daemon logs` is a typed shortcut for `kuke log --realm kuke-system --space kukeon --stack kukeon kukeond`; the coordinates are wired in. Exit code 0 even when the file is empty.
 

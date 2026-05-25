@@ -587,4 +587,8 @@ var (
 	)
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_DAEMON_LOGS_FOLLOW = DefineKV("KUKE_DAEMON_LOGS_FOLLOW", "kuke/daemon/logs/follow", "false")
+	//nolint:revive,gochecknoglobals,staticcheck // daemon recreate command variables
+	KUKE_DAEMON_RECREATE_TIMEOUT = DefineKV("KUKE_DAEMON_RECREATE_TIMEOUT", "kuke/daemon/recreate/timeout", "10s")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_DAEMON_RECREATE_KUKEOND_IMAGE = DefineKV("KUKE_DAEMON_RECREATE_KUKEOND_IMAGE", "kuke/daemon/recreate/kukeondImage", "")
 )

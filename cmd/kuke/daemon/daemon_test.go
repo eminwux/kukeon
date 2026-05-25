@@ -99,6 +99,21 @@ func TestDaemonCmd_HasResetSubcommand(t *testing.T) {
 	}
 }
 
+func TestDaemonCmd_HasRecreateSubcommand(t *testing.T) {
+	cmd := daemon.NewDaemonCmd()
+
+	var found bool
+	for _, sub := range cmd.Commands() {
+		if sub.Name() == "recreate" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected `kuke daemon` to register a `recreate` subcommand")
+	}
+}
+
 func TestDaemonCmd_HelpRunsWithoutArgs(t *testing.T) {
 	cmd := daemon.NewDaemonCmd()
 	buf := &bytes.Buffer{}
