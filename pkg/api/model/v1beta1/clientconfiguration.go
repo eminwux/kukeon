@@ -41,14 +41,29 @@ type ClientConfigurationMetadata struct {
 type ClientConfigurationSpec struct {
 	// Host is the kukeond endpoint kuke dials by default
 	// (`unix:///run/kukeon/kukeond.sock` or `ssh://user@host`).
-	Host string `json:"host,omitempty"             yaml:"host,omitempty"`
+	Host string `json:"host,omitempty"                      yaml:"host,omitempty"`
 	// RunPath is the kukeon runtime root used by `--no-daemon` operations
 	// that read /opt/kukeon directly instead of going through kukeond.
-	RunPath string `json:"runPath,omitempty"          yaml:"runPath,omitempty"`
+	RunPath string `json:"runPath,omitempty"                   yaml:"runPath,omitempty"`
 	// ContainerdSocket is the containerd unix socket `--no-daemon`
 	// operations connect to.
-	ContainerdSocket string `json:"containerdSocket,omitempty" yaml:"containerdSocket,omitempty"`
+	ContainerdSocket string `json:"containerdSocket,omitempty"          yaml:"containerdSocket,omitempty"`
 	// LogLevel is the client log level when `--verbose` is on
 	// (debug, info, warn, error).
-	LogLevel string `json:"logLevel,omitempty"         yaml:"logLevel,omitempty"`
+	LogLevel string `json:"logLevel,omitempty"                  yaml:"logLevel,omitempty"`
+	// ContainerdNamespaceSuffix is the suffix appended to every realm name
+	// to form its containerd namespace. Realm "default" + suffix
+	// "kukeon.io" -> namespace "default.kukeon.io". `--no-daemon` workload
+	// paths run the controller in-process and read this field to address
+	// the correct kukeon instance's containerd namespaces — the parallel
+	// of ServerConfiguration.spec.containerdNamespaceSuffix on the daemon
+	// side. Default: kukeon.io.
+	ContainerdNamespaceSuffix string `json:"containerdNamespaceSuffix,omitempty" yaml:"containerdNamespaceSuffix,omitempty"`
+	// CgroupRoot is the cgroup root under which all realms / spaces /
+	// stacks / cells live (e.g. /kukeon-dev for a parallel dev instance on
+	// the same host). `--no-daemon` workload paths consult this field for
+	// the in-process cgroup hierarchy; the parallel of
+	// ServerConfiguration.spec.cgroupRoot on the daemon side.
+	// Default: /kukeon.
+	CgroupRoot string `json:"cgroupRoot,omitempty"                yaml:"cgroupRoot,omitempty"`
 }

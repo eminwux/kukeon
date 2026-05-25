@@ -706,6 +706,31 @@ func getRealmNamespace(t *testing.T, host, realmName string) (string, error) {
 	return realm.Spec.Namespace, nil
 }
 
+// getCgroupRoot returns the cgroup root the daemon is using, derived from
+// realmName's reported Status.CgroupPath. Mirrors the getRealmNamespace
+// pattern: ask the daemon for state rather than importing
+// consts.KukeonCgroupRoot, so the e2e helpers run unmodified against a
+// non-default ClientConfiguration / ServerConfiguration profile (e.g. the
+// dev-init dev profile under /kukeon-dev) — the daemon's response is the
+// authoritative source. The returned root retains any host
+// cgroup-hierarchy prefix kukeon's mount may sit under, so callers can
+// compare against a nested object's Status.CgroupPath via
+// strings.HasSuffix or by joining with the realm/space/stack/cell names.
+func getCgroupRoot(t *testing.T, host, realmName string) (string, error) {
+	t.Helper()
+
+	args := append(
+		buildKukeDaemonArgs(host),
+		"get", "realm", realmName, "--output", "json",
+	)
+	output := runReturningBinary(t, nil, kuke, args...)
+	realm, err := parseRealmJSON(t, output)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse realm JSON: %w", err)
+	}
+	return strings.TrimSuffix(realm.Status.CgroupPath, "/"+realm.Metadata.Name), nil
+}
+
 // verifyRootContainerExists verifies root container exists in containerd namespace.
 func verifyRootContainerExists(t *testing.T, namespace, containerID string) bool {
 	t.Helper()

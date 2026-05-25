@@ -48,6 +48,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/version"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/clientconfig"
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/logging"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -294,6 +295,23 @@ func loadClientConfiguration(cmd *cobra.Command) error {
 		return fmt.Errorf("load client configuration: %w", err)
 	}
 	applyClientConfiguration(cmd, doc.Spec)
+	// Mirror the daemon-side LoadServerConfigurationFromFlag: drive
+	// consts.ConfigureRuntime from the configured (or default) suffix and
+	// cgroup root so --no-daemon workload paths read the same realm
+	// namespaces and cgroup tree the daemon side does. Admin verbs run
+	// LoadServerConfigurationFromFlag in their RunE; their later
+	// ConfigureRuntime call wins for those paths.
+	suffix := viper.GetString(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey)
+	if suffix == "" {
+		suffix = config.KUKEON_ROOT_NAMESPACE_SUFFIX.Default
+	}
+	cgroupRoot := viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey)
+	if cgroupRoot == "" {
+		cgroupRoot = config.KUKEON_ROOT_CGROUP_ROOT.Default
+	}
+	if cfgErr := consts.ConfigureRuntime(suffix, cgroupRoot); cfgErr != nil {
+		return fmt.Errorf("configure runtime: %w", cfgErr)
+	}
 	return nil
 }
 
@@ -332,6 +350,16 @@ func applyClientConfiguration(cmd *cobra.Command, spec v1beta1.ClientConfigurati
 	}
 	if spec.LogLevel != "" && !flagChanged(cmd, "log-level") && !envSet(config.KUKEON_ROOT_LOG_LEVEL) {
 		viper.Set(config.KUKEON_ROOT_LOG_LEVEL.ViperKey, spec.LogLevel)
+	}
+	if spec.ContainerdNamespaceSuffix != "" &&
+		!flagChanged(cmd, "containerd-namespace-suffix") &&
+		!envSet(config.KUKEON_ROOT_NAMESPACE_SUFFIX) {
+		viper.Set(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey, spec.ContainerdNamespaceSuffix)
+	}
+	if spec.CgroupRoot != "" &&
+		!flagChanged(cmd, "cgroup-root") &&
+		!envSet(config.KUKEON_ROOT_CGROUP_ROOT) {
+		viper.Set(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey, spec.CgroupRoot)
 	}
 }
 

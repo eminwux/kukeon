@@ -21,7 +21,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eminwux/kukeon/internal/consts"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -149,10 +148,18 @@ func TestKuke_CreateStack_VerifyState(t *testing.T) {
 		t.Fatalf("cgroup path %q does not exist in filesystem", stack.Status.CgroupPath)
 	}
 
-	// Also verify expected cgroup path structure: /kukeon/{realmName}/{spaceName}/{stackName}
-	// The actual path may include the current process's cgroup hierarchy before the kukeon path,
-	// so we check if the path ends with the expected pattern.
-	expectedCgroupPath := consts.KukeonCgroupRoot + "/" + realmName + "/" + spaceName + "/" + stackName
+	// Also verify expected cgroup path structure:
+	// <configured-root>/{realmName}/{spaceName}/{stackName}. The actual path may
+	// include the current process's cgroup hierarchy before the kukeon path,
+	// so we check if the path ends with the expected pattern. Read the
+	// configured cgroup root from the daemon's realm response rather than from
+	// consts.KukeonCgroupRoot so the test passes against a non-default
+	// ClientConfiguration / ServerConfiguration profile (e.g. /kukeon-dev).
+	cgroupRoot, err := getCgroupRoot(t, host, realmName)
+	if err != nil {
+		t.Fatalf("getCgroupRoot: %v", err)
+	}
+	expectedCgroupPath := cgroupRoot + "/" + realmName + "/" + spaceName + "/" + stackName
 	if !strings.HasSuffix(stack.Status.CgroupPath, expectedCgroupPath) {
 		t.Logf(
 			"cgroup path %q does not end with expected pattern %q, but verifying it exists anyway",

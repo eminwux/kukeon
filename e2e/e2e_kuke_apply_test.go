@@ -300,8 +300,15 @@ func TestKukeApply_Realm_VerifyState(t *testing.T) {
 		t.Fatalf("cgroup path %q (full path: %q) does not exist in filesystem", realm.Status.CgroupPath, fullPath)
 	}
 
-	// Verify expected cgroup path structure
-	expectedCgroupPath := consts.KukeonCgroupRoot + "/" + realmName
+	// Verify expected cgroup path structure: <configured-root>/{realmName}.
+	// Read the configured cgroup root from the daemon's realm response rather
+	// than from consts.KukeonCgroupRoot so the test passes against a non-default
+	// ClientConfiguration / ServerConfiguration profile (e.g. /kukeon-dev).
+	cgroupRoot, err := getCgroupRoot(t, host, realmName)
+	if err != nil {
+		t.Fatalf("getCgroupRoot: %v", err)
+	}
+	expectedCgroupPath := cgroupRoot + "/" + realmName
 	if !strings.HasSuffix(realm.Status.CgroupPath, expectedCgroupPath) {
 		t.Logf(
 			"cgroup path %q does not end with expected pattern %q, but verifying it exists anyway",
@@ -380,8 +387,15 @@ func TestKukeApply_Space_VerifyState(t *testing.T) {
 		t.Fatalf("cgroup path %q does not exist in filesystem", space.Status.CgroupPath)
 	}
 
-	// Verify expected cgroup path structure
-	expectedCgroupPath := consts.KukeonCgroupRoot + "/" + realmName + "/" + spaceName
+	// Verify expected cgroup path structure: <configured-root>/{realmName}/{spaceName}.
+	// Read the configured cgroup root from the daemon's realm response rather
+	// than from consts.KukeonCgroupRoot so the test passes against a non-default
+	// ClientConfiguration / ServerConfiguration profile (e.g. /kukeon-dev).
+	cgroupRoot, err := getCgroupRoot(t, host, realmName)
+	if err != nil {
+		t.Fatalf("getCgroupRoot: %v", err)
+	}
+	expectedCgroupPath := cgroupRoot + "/" + realmName + "/" + spaceName
 	if !strings.HasSuffix(space.Status.CgroupPath, expectedCgroupPath) {
 		t.Logf(
 			"cgroup path %q does not end with expected pattern %q, but verifying it exists anyway",
@@ -473,8 +487,15 @@ func TestKukeApply_Stack_VerifyState(t *testing.T) {
 		t.Fatalf("cgroup path %q does not exist in filesystem", stack.Status.CgroupPath)
 	}
 
-	// Verify expected cgroup path structure
-	expectedCgroupPath := consts.KukeonCgroupRoot + "/" + realmName + "/" + spaceName + "/" + stackName
+	// Verify expected cgroup path structure: <configured-root>/{realmName}/{spaceName}/{stackName}.
+	// Read the configured cgroup root from the daemon's realm response rather
+	// than from consts.KukeonCgroupRoot so the test passes against a non-default
+	// ClientConfiguration / ServerConfiguration profile (e.g. /kukeon-dev).
+	cgroupRoot, err := getCgroupRoot(t, host, realmName)
+	if err != nil {
+		t.Fatalf("getCgroupRoot: %v", err)
+	}
+	expectedCgroupPath := cgroupRoot + "/" + realmName + "/" + spaceName + "/" + stackName
 	if !strings.HasSuffix(stack.Status.CgroupPath, expectedCgroupPath) {
 		t.Logf(
 			"cgroup path %q does not end with expected pattern %q, but verifying it exists anyway",
@@ -584,8 +605,16 @@ func TestKukeApply_Cell_VerifyState(t *testing.T) {
 		t.Fatalf("cgroup path %q does not exist in filesystem", cell.Status.CgroupPath)
 	}
 
-	// Verify expected cgroup path structure
-	expectedCgroupPath := consts.KukeonCgroupRoot + "/" + realmName + "/" + spaceName + "/" + stackName + "/" + cellName
+	// Verify expected cgroup path structure:
+	// <configured-root>/{realmName}/{spaceName}/{stackName}/{cellName}. Read
+	// the configured cgroup root from the daemon's realm response rather than
+	// from consts.KukeonCgroupRoot so the test passes against a non-default
+	// ClientConfiguration / ServerConfiguration profile (e.g. /kukeon-dev).
+	cgroupRoot, err := getCgroupRoot(t, host, realmName)
+	if err != nil {
+		t.Fatalf("getCgroupRoot: %v", err)
+	}
+	expectedCgroupPath := cgroupRoot + "/" + realmName + "/" + spaceName + "/" + stackName + "/" + cellName
 	if !strings.HasSuffix(cell.Status.CgroupPath, expectedCgroupPath) {
 		t.Logf(
 			"cgroup path %q does not end with expected pattern %q, but verifying it exists anyway",

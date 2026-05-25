@@ -29,6 +29,17 @@ METADATA_ROOT="/opt/kukeon/data"
 SYSTEM_REALM_DIR="${METADATA_ROOT}/kuke-system"
 KUKEOND_CELL_DIR="${SYSTEM_REALM_DIR}/kukeon/kukeon/kukeond"
 
+# Dev profile (phase 3, #285). dev-init exercises the multi-instance path
+# wired by phases 1 (#262, server-side suffix/cgroupRoot) and 2 (#284,
+# --server-configuration plumbed through admin commands). Phase 3 mirrors
+# the same two knobs on ClientConfigurationSpec so --no-daemon workload
+# paths read them through KUKE_CONFIGURATION instead of the package
+# constants. The two YAML files below are kept under .gitignore's /kuke*
+# rule so an operator's local edits are never overwritten — the write is
+# guarded by `[ ! -e ]` so re-running on a configured host is a no-op.
+DEV_PROFILE_SERVER_CONFIG="${REPO_ROOT}/kukeond-dev.yaml"
+DEV_PROFILE_CLIENT_CONFIG="${REPO_ROOT}/kuke-dev.yaml"
+
 step() {
     printf '\n==> %s\n' "$*"
 }
@@ -139,6 +150,60 @@ verify_parent_attach_intact() {
 # holds at every exit point in the script.
 trap 'verify_parent_attach_intact || exit 1' EXIT
 
+# Write the dev-profile config files idempotently before any kuke invocation
+# (#285 phase 3). `-e` instead of `-f` so a broken symlink to a missing
+# operator-curated config is detected; a regular file matches too. The
+# server-side config is consumed by `kuke init --server-configuration` and
+# `kuke daemon reset --server-configuration`; the client-side config is
+# consumed by every `kuke` subcommand below via the exported
+# KUKE_CONFIGURATION (the env name viper binds to `kuke/configuration` —
+# cmd/config/env.go's KUKE_CONFIGURATION).
+if [ ! -e "${DEV_PROFILE_SERVER_CONFIG}" ]; then
+    step "Write dev-profile server config to ${DEV_PROFILE_SERVER_CONFIG}"
+    cat > "${DEV_PROFILE_SERVER_CONFIG}" <<'EOF'
+# kukeond ServerConfiguration — dev profile (#285 phase 3).
+# Switches containerdNamespaceSuffix and cgroupRoot off the defaults so a
+# parallel kukeon instance can coexist with the canonical kukeon.io / /kukeon
+# tree. socket / runPath are left at defaults — dev-init runs the only
+# kukeon instance on the host, so disjoint storage is unnecessary; the
+# multi-instance two-host-smoke is exercised by the issue's manual test
+# plan, not this script.
+apiVersion: v1beta1
+kind: ServerConfiguration
+metadata:
+  name: dev
+spec:
+  containerdNamespaceSuffix: dev.kukeon.io
+  cgroupRoot: /kukeon-dev
+EOF
+fi
+
+if [ ! -e "${DEV_PROFILE_CLIENT_CONFIG}" ]; then
+    step "Write dev-profile client config to ${DEV_PROFILE_CLIENT_CONFIG}"
+    cat > "${DEV_PROFILE_CLIENT_CONFIG}" <<'EOF'
+# kuke ClientConfiguration — dev profile (#285 phase 3).
+# Read by every `kuke` invocation below via KUKE_CONFIGURATION. The
+# --no-daemon parity check below depends on this file to address the dev
+# instance's containerd namespaces (dev.kukeon.io) and cgroup tree
+# (/kukeon-dev) without a per-command --containerd-namespace-suffix /
+# --cgroup-root flag.
+apiVersion: v1beta1
+kind: ClientConfiguration
+metadata:
+  name: dev
+spec:
+  containerdNamespaceSuffix: dev.kukeon.io
+  cgroupRoot: /kukeon-dev
+EOF
+fi
+
+# KUKE_CONFIGURATION is bound to viper for every `kuke` subcommand
+# (KUKE_CONFIGURATION.BindEnv in cmd/kuke/kuke.go's loadConfig), so
+# exporting it here routes every client invocation below through the
+# dev-profile client config. sudo invocations must add KUKE_CONFIGURATION
+# to --preserve-env=... or the value is stripped at the sudo boundary.
+export KUKE_CONFIGURATION="${DEV_PROFILE_CLIENT_CONFIG}"
+
 step "Build kuke, kukebuild (and the kukeond symlink)"
 make kuke kukebuild
 ln -sf kuke kukeond
@@ -183,13 +248,16 @@ if [ ! -d "${SYSTEM_REALM_DIR}" ]; then
     # provisioning at the end of that pass may fail because the local image
     # is not yet built into containerd. Tolerate that — the second init
     # below recreates the cell after the build succeeds.
-    sudo --preserve-env=KUKEON_HOST,KUKEOND_SOCKET ./kuke init --kukeond-image "${KUKEOND_IMAGE_REF}" \
+    sudo --preserve-env=KUKEON_HOST,KUKEOND_SOCKET,KUKE_CONFIGURATION ./kuke init \
+        --kukeond-image "${KUKEOND_IMAGE_REF}" \
+        --server-configuration "${DEV_PROFILE_SERVER_CONFIG}" \
         || echo "first-pass init returned non-zero (expected before image is staged); continuing"
 fi
 
 if [ -d "${KUKEOND_CELL_DIR}" ]; then
     step "Reset prior kukeond cell"
-    sudo --preserve-env=KUKEON_HOST,KUKEOND_SOCKET ./kuke daemon reset
+    sudo --preserve-env=KUKEON_HOST,KUKEOND_SOCKET,KUKE_CONFIGURATION ./kuke daemon reset \
+        --server-configuration "${DEV_PROFILE_SERVER_CONFIG}"
 else
     step "No prior kukeond cell at ${KUKEOND_CELL_DIR}; skipping reset"
 fi
@@ -200,12 +268,14 @@ step "Build ${LOCAL_TAG} into the kuke-system realm"
 # daemon, no docker-private containerd, no `--from-docker` loader hop. The -t
 # short tag normalizes to docker.io/library/kukeon-local:dev (kukebuild's
 # normalizeImageName), the exact ref `kuke init --kukeond-image` resolves below.
-sudo --preserve-env=KUKEON_HOST ./kuke build --build-arg VERSION=v0.0.0-dev \
+sudo --preserve-env=KUKEON_HOST,KUKE_CONFIGURATION ./kuke build --build-arg VERSION=v0.0.0-dev \
     -t "${LOCAL_TAG}" \
     --realm kuke-system .
 
 step "Run kuke init with --kukeond-image ${KUKEOND_IMAGE_REF}"
-sudo --preserve-env=KUKEON_HOST,KUKEOND_SOCKET ./kuke init --kukeond-image "${KUKEOND_IMAGE_REF}"
+sudo --preserve-env=KUKEON_HOST,KUKEOND_SOCKET,KUKE_CONFIGURATION ./kuke init \
+    --kukeond-image "${KUKEOND_IMAGE_REF}" \
+    --server-configuration "${DEV_PROFILE_SERVER_CONFIG}"
 
 # Fail-loud when the running kukeond container is anchored on a stale
 # image (issue #857). The bug captured there is that `kuke daemon reset`
@@ -231,7 +301,11 @@ sudo --preserve-env=KUKEON_HOST,KUKEOND_SOCKET ./kuke init --kukeond-image "${KU
 # Stay grep/sed-only — scripts in this repo intentionally avoid a jq
 # dependency (see scripts/install.sh's "no jq dependency" guarantee).
 step "Verify running kukeond container is anchored on the just-built image"
-KUKEOND_NS="kuke-system.kukeon.io"
+# Dev-profile suffix is `dev.kukeon.io` (#285 phase 3), so the kuke-system
+# realm's containerd namespace is `kuke-system.dev.kukeon.io` rather than
+# the default `kuke-system.kukeon.io`. A reviewer toggling the dev profile
+# back to defaults would need to revisit this literal.
+KUKEOND_NS="kuke-system.dev.kukeon.io"
 KUKEOND_CTR_ID="kukeon_kukeon_kukeond_kukeond"
 
 ctr_chain="$(sudo ctr -n "${KUKEOND_NS}" snapshots info "${KUKEOND_CTR_ID}" 2>/dev/null \
@@ -282,8 +356,22 @@ fi
 echo "running kukeond container chain ${ctr_chain} matches just-built ${KUKEOND_IMAGE_REF}"
 
 step "Daemon parity check (both must show identical output)"
-sudo --preserve-env=KUKEON_HOST ./kuke get realms
-sudo ./kuke get realms --no-daemon
+# `-o wide` appends NAMESPACE — the column epic:get retired from the
+# default table — so the dev profile's suffix is visible in the parity
+# tail (e.g. default.dev.kukeon.io, kuke-system.dev.kukeon.io). The
+# daemon-routed call is gated by KUKEON_HOST + the daemon's server
+# config; the --no-daemon call routes through KUKE_CONFIGURATION to read
+# the same suffix/cgroupRoot in-process. Both must show identical output.
+sudo --preserve-env=KUKEON_HOST,KUKE_CONFIGURATION ./kuke get realms -o wide
+sudo --preserve-env=KUKE_CONFIGURATION ./kuke get realms -o wide --no-daemon
+
+# CGROUP no longer surfaces in the default or wide table (epic:get also
+# retired CGROUP); `-o yaml` is the supported way to read cgroupPath.
+# Surface the dev profile's cgroup root here so an operator skimming
+# `make dev-init` output sees /kukeon-dev anchored on the realms.
+step "Daemon parity: cgroupPath surfacing (dev profile expects /kukeon-dev/...)"
+sudo --preserve-env=KUKEON_HOST,KUKE_CONFIGURATION ./kuke get realms -o yaml \
+    | grep -E 'cgroupPath:' || true
 
 # Phase 1b smoke (#410): the daemon's metadata-rendering path emits the
 # bind-mounted kuketty config consumed by kuketty's sbsh-backed RPC server.
@@ -309,13 +397,13 @@ ATTACH_SMOKE_METADATA="${ATTACH_SMOKE_BASE}/kuketty-metadata.json"
 ATTACH_SMOKE_TMP="$(mktemp -d)"
 
 teardown_attach_smoke_state() {
-    sudo --preserve-env=KUKEON_HOST ./kuke purge cell "${ATTACH_SMOKE_CELL}" \
+    sudo --preserve-env=KUKEON_HOST,KUKE_CONFIGURATION ./kuke purge cell "${ATTACH_SMOKE_CELL}" \
         --realm "${ATTACH_SMOKE_REALM}" --space "${ATTACH_SMOKE_SPACE}" --stack "${ATTACH_SMOKE_STACK}" \
         --cascade 2>/dev/null || true
-    sudo --preserve-env=KUKEON_HOST ./kuke purge stack "${ATTACH_SMOKE_STACK}" \
+    sudo --preserve-env=KUKEON_HOST,KUKE_CONFIGURATION ./kuke purge stack "${ATTACH_SMOKE_STACK}" \
         --realm "${ATTACH_SMOKE_REALM}" --space "${ATTACH_SMOKE_SPACE}" 2>/dev/null || true
-    sudo --preserve-env=KUKEON_HOST ./kuke purge space "${ATTACH_SMOKE_SPACE}" --realm "${ATTACH_SMOKE_REALM}" 2>/dev/null || true
-    sudo --preserve-env=KUKEON_HOST ./kuke purge realm "${ATTACH_SMOKE_REALM}" 2>/dev/null || true
+    sudo --preserve-env=KUKEON_HOST,KUKE_CONFIGURATION ./kuke purge space "${ATTACH_SMOKE_SPACE}" --realm "${ATTACH_SMOKE_REALM}" 2>/dev/null || true
+    sudo --preserve-env=KUKEON_HOST,KUKE_CONFIGURATION ./kuke purge realm "${ATTACH_SMOKE_REALM}" 2>/dev/null || true
 }
 
 cleanup_attach_smoke() {
@@ -336,9 +424,9 @@ trap cleanup_attach_smoke EXIT
 # left intact — only the on-disk realm/space/stack/cell state is wiped.
 teardown_attach_smoke_state
 
-sudo --preserve-env=KUKEON_HOST ./kuke create realm "${ATTACH_SMOKE_REALM}"
-sudo --preserve-env=KUKEON_HOST ./kuke create space "${ATTACH_SMOKE_SPACE}" --realm "${ATTACH_SMOKE_REALM}"
-sudo --preserve-env=KUKEON_HOST ./kuke create stack "${ATTACH_SMOKE_STACK}" --realm "${ATTACH_SMOKE_REALM}" --space "${ATTACH_SMOKE_SPACE}"
+sudo --preserve-env=KUKEON_HOST,KUKE_CONFIGURATION ./kuke create realm "${ATTACH_SMOKE_REALM}"
+sudo --preserve-env=KUKEON_HOST,KUKE_CONFIGURATION ./kuke create space "${ATTACH_SMOKE_SPACE}" --realm "${ATTACH_SMOKE_REALM}"
+sudo --preserve-env=KUKEON_HOST,KUKE_CONFIGURATION ./kuke create stack "${ATTACH_SMOKE_STACK}" --realm "${ATTACH_SMOKE_REALM}" --space "${ATTACH_SMOKE_SPACE}"
 
 cat > "${ATTACH_SMOKE_TMP}/cell.yaml" <<EOF
 apiVersion: v1beta1
@@ -363,7 +451,7 @@ spec:
       attachable: true
 EOF
 
-sudo --preserve-env=KUKEON_HOST ./kuke apply -f "${ATTACH_SMOKE_TMP}/cell.yaml"
+sudo --preserve-env=KUKEON_HOST,KUKE_CONFIGURATION ./kuke apply -f "${ATTACH_SMOKE_TMP}/cell.yaml"
 
 # Wait for kuketty to bind the per-container socket. The window covers
 # image pull + container start + sbsh server bring-up; a regression that
@@ -395,7 +483,7 @@ sudo grep -q '"kind": "Container"' "${ATTACH_SMOKE_METADATA}" \
 # pkg/attach speaks.
 ATTACH_LOG="${ATTACH_SMOKE_TMP}/attach.log"
 go run ./hack/attach-smoke --log "${ATTACH_LOG}" -- \
-    sudo --preserve-env=KUKEON_HOST ./kuke attach "${ATTACH_SMOKE_CELL}" \
+    sudo --preserve-env=KUKEON_HOST,KUKE_CONFIGURATION ./kuke attach "${ATTACH_SMOKE_CELL}" \
         --realm "${ATTACH_SMOKE_REALM}" --space "${ATTACH_SMOKE_SPACE}" \
         --stack "${ATTACH_SMOKE_STACK}" --container "${ATTACH_SMOKE_CONTAINER}"
 echo "kuke attach exited cleanly (see ${ATTACH_LOG} for the full transcript)"
