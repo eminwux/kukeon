@@ -207,6 +207,80 @@ sudo --preserve-env=KUKEON_HOST ./kuke build --build-arg VERSION=v0.0.0-dev \
 step "Run kuke init with --kukeond-image ${KUKEOND_IMAGE_REF}"
 sudo --preserve-env=KUKEON_HOST,KUKEOND_SOCKET ./kuke init --kukeond-image "${KUKEOND_IMAGE_REF}"
 
+# Fail-loud when the running kukeond container is anchored on a stale
+# image (issue #857). The bug captured there is that `kuke daemon reset`
+# + `kuke init --kukeond-image` does not refresh the kukeond cell when
+# the image tag is reused (init's bootstrapCell takes the existing-cell
+# path on a leftover record and never compares the desired image
+# against the running container). The user-visible failure surfaces
+# downstream as an opaque pre-#641 schema mismatch in the attach smoke;
+# this check turns that into a fail-loud at the place the divergence
+# was introduced.
+#
+# Compare the *snapshot chain digest*, not the image ref name: a
+# container's `.Image` field is the ref string set at create time
+# (e.g. `docker.io/library/kukeon-local:dev`) and is unchanged when
+# `kuke build` overwrites the same tag with a new manifest. The
+# canonical drift signal is the chain digest stored on the container's
+# snapshot at unpack time, derived from the image config blob's
+# `containerd.io/gc.ref.snapshot.overlayfs` label. The two should be
+# byte-identical on a healthy `make dev-init`; a mismatch means the
+# running container is anchored on an older image than the one we just
+# built.
+#
+# Stay grep/sed-only — scripts in this repo intentionally avoid a jq
+# dependency (see scripts/install.sh's "no jq dependency" guarantee).
+step "Verify running kukeond container is anchored on the just-built image"
+KUKEOND_NS="kuke-system.kukeon.io"
+KUKEOND_CTR_ID="kukeon_kukeon_kukeond_kukeond"
+
+ctr_chain="$(sudo ctr -n "${KUKEOND_NS}" snapshots info "${KUKEOND_CTR_ID}" 2>/dev/null \
+    | grep -oE '"Parent":[[:space:]]*"sha256:[a-f0-9]+"' \
+    | sed -E 's/.*"(sha256:[a-f0-9]+)"/\1/')"
+if [ -z "${ctr_chain}" ]; then
+    printf 'unable to resolve snapshot chain for running kukeond container %s/%s\n' \
+        "${KUKEOND_NS}" "${KUKEOND_CTR_ID}" >&2
+    exit 1
+fi
+
+manifest_digest="$(sudo ctr -n "${KUKEOND_NS}" images ls 2>/dev/null \
+    | awk -v r="${KUKEOND_IMAGE_REF}" 'NR>1 && $1==r {print $3; exit}')"
+if [ -z "${manifest_digest}" ]; then
+    printf 'image %s not found in containerd namespace %s after kuke build\n' \
+        "${KUKEOND_IMAGE_REF}" "${KUKEOND_NS}" >&2
+    exit 1
+fi
+
+config_digest="$(sudo ctr -n "${KUKEOND_NS}" content get "${manifest_digest}" 2>/dev/null \
+    | grep -oE '"digest":[[:space:]]*"sha256:[a-f0-9]+"' \
+    | head -1 \
+    | sed -E 's/.*"(sha256:[a-f0-9]+)"/\1/')"
+if [ -z "${config_digest}" ]; then
+    printf 'unable to resolve config digest from manifest %s\n' "${manifest_digest}" >&2
+    exit 1
+fi
+
+img_chain="$(sudo ctr -n "${KUKEOND_NS}" content ls 2>/dev/null \
+    | awk -v d="${config_digest}" '$1==d' \
+    | grep -oE 'containerd\.io/gc\.ref\.snapshot\.overlayfs=sha256:[a-f0-9]+' \
+    | head -1 \
+    | cut -d= -f2)"
+if [ -z "${img_chain}" ]; then
+    printf 'unable to resolve image chain digest from config blob %s\n' "${config_digest}" >&2
+    exit 1
+fi
+
+if [ "${ctr_chain}" != "${img_chain}" ]; then
+    printf 'running kukeond container is anchored on a stale image (#857)\n' >&2
+    printf '  running container snapshot chain: %s\n' "${ctr_chain}" >&2
+    printf '  just-built image chain:           %s\n' "${img_chain}" >&2
+    printf '  manifest %s did not propagate to the kukeond cell —\n' "${manifest_digest}" >&2
+    printf '  `kuke daemon reset` + `kuke init --kukeond-image` did not refresh the container.\n' >&2
+    printf '  Try `sudo ./kuke daemon reset --purge-system` then re-run `make dev-init`.\n' >&2
+    exit 1
+fi
+echo "running kukeond container chain ${ctr_chain} matches just-built ${KUKEOND_IMAGE_REF}"
+
 step "Daemon parity check (both must show identical output)"
 sudo --preserve-env=KUKEON_HOST ./kuke get realms
 sudo ./kuke get realms --no-daemon
