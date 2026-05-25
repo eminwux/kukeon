@@ -201,6 +201,69 @@ func TestNewStackCmd_Columns(t *testing.T) {
 	}
 }
 
+// TestNewStackCmd_Selector verifies the `-l`/`--selector` filter wiring on
+// `kuke get stack` (issue #614). Grammar coverage lives in the shared
+// selector_test.go; this test pins the per-verb wiring.
+func TestNewStackCmd_Selector(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	listFn := func(_, _ string) ([]v1beta1.StackDoc, error) {
+		return []v1beta1.StackDoc{
+			{
+				Metadata: v1beta1.StackMetadata{
+					Name:   "frontend",
+					Labels: map[string]string{"app": "frontend"},
+				},
+				Spec: v1beta1.StackSpec{RealmID: "r1", SpaceID: "s1"},
+			},
+			{
+				Metadata: v1beta1.StackMetadata{
+					Name:   "backend",
+					Labels: map[string]string{"app": "backend"},
+				},
+				Spec: v1beta1.StackSpec{RealmID: "r1", SpaceID: "s1"},
+			},
+		}, nil
+	}
+
+	t.Run("equality filters by label", func(t *testing.T) {
+		t.Cleanup(viper.Reset)
+		cmd := stack.NewStackCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		ctx := context.WithValue(context.Background(), stack.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{listStacksFn: listFn}))
+		cmd.SetContext(ctx)
+		cmd.SetArgs([]string{"-l", "app=frontend"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "frontend") {
+			t.Errorf("expected 'frontend' in output, got:\n%s", out)
+		}
+		if strings.Contains(out, "backend") {
+			t.Errorf("expected 'backend' filtered out, got:\n%s", out)
+		}
+	})
+
+	t.Run("selector + name is rejected", func(t *testing.T) {
+		t.Cleanup(viper.Reset)
+		cmd := stack.NewStackCmd()
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+		ctx := context.WithValue(context.Background(), stack.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{}))
+		cmd.SetContext(ctx)
+		cmd.SetArgs([]string{"backend", "-l", "app=frontend"})
+		err := cmd.Execute()
+		if err == nil || !strings.Contains(err.Error(), "--selector cannot be combined") {
+			t.Fatalf("expected --selector + name rejection, got: %v", err)
+		}
+	})
+}
+
 type fakeClient struct {
 	kukeonv1.FakeClient
 

@@ -76,6 +76,8 @@ full container spec.`,
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
 
+	shared.RegisterLabelSelectorFlag(cmd)
+
 	cmd.ValidArgsFunction = config.CompleteContainerNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
@@ -88,13 +90,12 @@ full container spec.`,
 }
 
 func runContainerCmd(cmd *cobra.Command, args []string) error {
-	client, err := resolveClient(cmd)
+	wide, outputFormat, err := resolveOutput(cmd)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = client.Close() }()
 
-	wide, outputFormat, err := resolveOutput(cmd)
+	selector, err := shared.ParseLabelSelectorFlag(cmd)
 	if err != nil {
 		return err
 	}
@@ -110,6 +111,16 @@ func runContainerCmd(cmd *cobra.Command, args []string) error {
 	} else {
 		name = strings.TrimSpace(viper.GetString(config.KUKE_GET_CONTAINER_NAME.ViperKey))
 	}
+
+	if name != "" && !selector.Empty() {
+		return errors.New("--selector cannot be combined with a resource name")
+	}
+
+	client, err := resolveClient(cmd)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = client.Close() }()
 
 	if name != "" {
 		if realm == "" {
@@ -178,6 +189,13 @@ func runContainerCmd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// containerProbes carries per-container Metadata.Labels alongside state
+	// for the post-loop selector filter: ListContainers returns
+	// ContainerSpec (which carries no labels), so the filter has to wait
+	// until each container's ContainerDoc is in hand. When the GetContainer
+	// probe fails the labels stay nil — the selector then treats that
+	// container as "no labels", which is the same conservative call
+	// ContainerStateUnknown already makes for state.
 	containerProbes := make(map[string]containerProbe, len(specs))
 	for i := range specs {
 		spec := specs[i]
@@ -210,7 +228,18 @@ func runContainerCmd(cmd *cobra.Command, args []string) error {
 			createdAt:    st.CreatedAt,
 			exitCode:     st.ExitCode,
 			exitSignal:   st.ExitSignal,
+			labels:       probeResult.Container.Metadata.Labels,
 		}
+	}
+
+	if !selector.Empty() {
+		filtered := make([]v1beta1.ContainerSpec, 0, len(specs))
+		for i := range specs {
+			if selector.Matches(containerProbes[specs[i].ID].labels) {
+				filtered = append(filtered, specs[i])
+			}
+		}
+		specs = filtered
 	}
 
 	return printContainersWithState(
@@ -225,13 +254,15 @@ func runContainerCmd(cmd *cobra.Command, args []string) error {
 
 // containerProbe carries the per-container fields a list-path probe pulls
 // from GetContainer for the table renderer. State is the human-readable
-// label; the rest source the RESTARTS / AGE / EXIT columns.
+// label; the rest source the RESTARTS / AGE / EXIT columns. labels feeds
+// the post-loop selector filter — see runContainerCmd's probe loop.
 type containerProbe struct {
 	state        string
 	restartCount int
 	createdAt    time.Time
 	exitCode     int
 	exitSignal   string
+	labels       map[string]string
 }
 
 // buildEmptyResultMessage describes the queried filter set when zero rows

@@ -378,6 +378,94 @@ func TestNewCellCmd_YamlSurfacesStatus(t *testing.T) {
 	}
 }
 
+// TestNewCellCmd_Selector verifies the `-l`/`--selector` filter wiring on
+// `kuke get cell` (issue #614). Grammar coverage lives in the shared
+// selector_test.go; this test pins the per-verb wiring.
+func TestNewCellCmd_Selector(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	listFn := func(_, _, _ string) ([]v1beta1.CellDoc, error) {
+		return []v1beta1.CellDoc{
+			{
+				Metadata: v1beta1.CellMetadata{
+					Name:   "prod-web",
+					Labels: map[string]string{"env": "prod", "role": "web"},
+				},
+				Spec: v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+			},
+			{
+				Metadata: v1beta1.CellMetadata{
+					Name:   "prod-db",
+					Labels: map[string]string{"env": "prod", "role": "db"},
+				},
+				Spec: v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+			},
+			{
+				Metadata: v1beta1.CellMetadata{
+					Name:   "dev-web",
+					Labels: map[string]string{"env": "dev", "role": "web"},
+				},
+				Spec: v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+			},
+		}, nil
+	}
+
+	t.Run("AND-combination filters by both labels", func(t *testing.T) {
+		t.Cleanup(viper.Reset)
+		cmd := cell.NewCellCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		ctx := context.WithValue(context.Background(), cell.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{listCellsFn: listFn}))
+		cmd.SetContext(ctx)
+		cmd.SetArgs([]string{"-l", "env=prod,role=web"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "prod-web") {
+			t.Errorf("expected 'prod-web' in output, got:\n%s", out)
+		}
+		for _, deny := range []string{"prod-db", "dev-web"} {
+			if strings.Contains(out, deny) {
+				t.Errorf("expected %q filtered out, got:\n%s", deny, out)
+			}
+		}
+	})
+
+	t.Run("malformed selector fails before listing", func(t *testing.T) {
+		t.Cleanup(viper.Reset)
+		cmd := cell.NewCellCmd()
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+		// No ListCells expected — selector parse fails first.
+		ctx := context.WithValue(context.Background(), cell.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{}))
+		cmd.SetContext(ctx)
+		cmd.SetArgs([]string{"-l", "env="})
+		err := cmd.Execute()
+		if err == nil || !strings.Contains(err.Error(), "empty value") {
+			t.Fatalf("expected malformed-selector error, got: %v", err)
+		}
+	})
+
+	t.Run("selector + name is rejected", func(t *testing.T) {
+		t.Cleanup(viper.Reset)
+		cmd := cell.NewCellCmd()
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+		ctx := context.WithValue(context.Background(), cell.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{}))
+		cmd.SetContext(ctx)
+		cmd.SetArgs([]string{"prod-web", "-l", "env=prod"})
+		err := cmd.Execute()
+		if err == nil || !strings.Contains(err.Error(), "--selector cannot be combined") {
+			t.Fatalf("expected --selector + name rejection, got: %v", err)
+		}
+	})
+}
+
 type fakeClient struct {
 	kukeonv1.FakeClient
 

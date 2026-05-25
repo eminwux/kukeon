@@ -44,13 +44,12 @@ func NewSpaceCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := resolveClient(cmd)
+			outputFormat, err := shared.ParseOutputFormat(cmd)
 			if err != nil {
 				return err
 			}
-			defer func() { _ = client.Close() }()
 
-			outputFormat, err := shared.ParseOutputFormat(cmd)
+			selector, err := shared.ParseLabelSelectorFlag(cmd)
 			if err != nil {
 				return err
 			}
@@ -63,6 +62,16 @@ func NewSpaceCmd() *cobra.Command {
 			} else {
 				name = strings.TrimSpace(viper.GetString(config.KUKE_GET_SPACE_NAME.ViperKey))
 			}
+
+			if name != "" && !selector.Empty() {
+				return errors.New("--selector cannot be combined with a resource name")
+			}
+
+			client, err := resolveClient(cmd)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = client.Close() }()
 
 			if name != "" {
 				if realm == "" {
@@ -92,6 +101,7 @@ func NewSpaceCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			spaces = filterSpacesBySelector(spaces, selector)
 			return printSpaces(cmd, spaces, outputFormat)
 		},
 	}
@@ -103,6 +113,8 @@ func NewSpaceCmd() *cobra.Command {
 		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
+
+	shared.RegisterLabelSelectorFlag(cmd)
 
 	cmd.ValidArgsFunction = config.CompleteSpaceNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
@@ -117,6 +129,22 @@ func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
 		return mockClient, nil
 	}
 	return kukeshared.ClientFromCmd(cmd)
+}
+
+// filterSpacesBySelector returns the subset of spaces whose
+// Metadata.Labels satisfy selector. A nil or empty selector returns the
+// input slice unmodified so the common no-flag path skips the allocation.
+func filterSpacesBySelector(spaces []v1beta1.SpaceDoc, selector *shared.LabelSelector) []v1beta1.SpaceDoc {
+	if selector.Empty() {
+		return spaces
+	}
+	out := make([]v1beta1.SpaceDoc, 0, len(spaces))
+	for i := range spaces {
+		if selector.Matches(spaces[i].Metadata.Labels) {
+			out = append(out, spaces[i])
+		}
+	}
+	return out
 }
 
 func printSpace(cmd *cobra.Command, space *v1beta1.SpaceDoc, format shared.OutputFormat) error {
