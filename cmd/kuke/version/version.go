@@ -25,7 +25,6 @@ import (
 	"github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 // daemonClient is the subset of kukeonv1.Client needed by the version command.
@@ -54,11 +53,7 @@ func NewVersionCmd() *cobra.Command {
 			if mockClient, ok := cmd.Context().Value(MockDaemonClientKey{}).(daemonClient); ok {
 				client = mockClient
 			} else {
-				host := viper.GetString(config.KUKEON_ROOT_HOST.ViperKey)
-				if host == "" {
-					host = config.KUKEON_ROOT_HOST.Default
-				}
-				c, err := kukeonv1.Dial(cmd.Context(), host)
+				c, err := shared.DaemonClientFromCmd(cmd)
 				if err != nil {
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: daemon unreachable: %v\n", err)
 					return nil
