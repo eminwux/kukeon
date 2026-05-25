@@ -103,8 +103,16 @@ var (
 	ErrRootContainerMismatch = errors.New(
 		"rootContainerId disagrees with container marked root: true",
 	)
-	ErrCellNameRequired        = errors.New("cell name is required")
-	ErrContainerNameRequired   = errors.New("container name is required")
+	ErrCellNameRequired      = errors.New("cell name is required")
+	ErrContainerNameRequired = errors.New("container name is required")
+	// ErrSelectorWithName fires from every `kuke get <kind>` verb when the
+	// caller supplies both a positional resource name and -l/--selector.
+	// The two paths are mutually exclusive (a name targets exactly one
+	// resource; a selector filters a list), so the verb refuses up front
+	// instead of silently honouring one and dropping the other. Shared so
+	// future selector-aware verbs (`kuke describe`, `kuke delete`) reuse
+	// the same surface text and errors.Is identity.
+	ErrSelectorWithName        = errors.New("--selector cannot be combined with a resource name")
 	ErrInvalidName             = errors.New("name is invalid")
 	ErrInvalidImage            = errors.New("invalid image reference")
 	ErrDeleteRealm             = errors.New("failed to delete realm")

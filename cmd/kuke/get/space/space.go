@@ -64,7 +64,7 @@ func NewSpaceCmd() *cobra.Command {
 			}
 
 			if name != "" && !selector.Empty() {
-				return errors.New("--selector cannot be combined with a resource name")
+				return errdefs.ErrSelectorWithName
 			}
 
 			client, err := resolveClient(cmd)
