@@ -197,7 +197,7 @@ type cacheSpec struct {
 
 // defaultContainerdSocket is the standalone host containerd socket the
 // containerd worker connects to. Matches the socket the project smoke test
-// (CLAUDE.md "Local smoke test") and `kuke image load` operate against — not
+// (AGENTS.md "Local smoke test") and `kuke image load` operate against — not
 // the docker-private containerd.
 const defaultContainerdSocket = "/run/containerd/containerd.sock"
 

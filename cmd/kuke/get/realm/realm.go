@@ -106,7 +106,7 @@ func NewRealmCmd() *cobra.Command {
 
 	// `--no-daemon` is inherited as a persistent flag from the parent `get`
 	// command (registered in cmd/kuke/get/get.go) — every `get <kind>`
-	// keeps the flag per the user override on #222. The CLAUDE.md
+	// keeps the flag per the user override on #222. The AGENTS.md
 	// `make dev-init` regression guard runs `kuke get realms` vs
 	// `kuke get realms --no-daemon` against that inherited flag.
 

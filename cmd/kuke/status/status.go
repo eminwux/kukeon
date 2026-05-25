@@ -20,7 +20,7 @@
 // (daemon liveness), and `kuke selftest` (parity + state consistency) —
 // into one post-init smoke command. Replaces the manual
 // `kuke get realms` vs `kuke get realms --no-daemon` diff ritual the
-// project CLAUDE.md spells out (issue #202).
+// project AGENTS.md spells out (issue #202).
 package status
 
 import (

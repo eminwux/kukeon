@@ -26,7 +26,7 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
-// checkParity is the regression-guard the CLAUDE.md daemon-parity ritual
+// checkParity is the regression-guard the AGENTS.md daemon-parity ritual
 // has been doing by hand: every `kuke get <kind>` must return the same
 // set of names when run against the daemon and in-process. The walk
 // covers each kind in turn — realm, then space (per realm), then stack

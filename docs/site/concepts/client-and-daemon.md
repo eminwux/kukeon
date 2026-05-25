@@ -71,7 +71,7 @@ Other transports are on the roadmap (`ssh://user@host` is the intended future sh
 
 ## Parity between daemon and in-process
 
-`kuke get realms` and `kuke get realms --no-daemon` should return identical output on a healthy host. Divergence between them is a regression — if you see it, please file a bug. The two paths share the same reconciler and data store; the only difference is who holds the process. The explicit-flag check survives on every `kuke get <kind>` after #222 (`get realm` is the one the CLAUDE.md dev-init regression guard exercises; the others are available as the same shape of escape hatch); #223 retires `get realm`'s parity-check role once `kuke status` (#202) absorbs the parity contract.
+`kuke get realms` and `kuke get realms --no-daemon` should return identical output on a healthy host. Divergence between them is a regression — if you see it, please file a bug. The two paths share the same reconciler and data store; the only difference is who holds the process. The explicit-flag check survives on every `kuke get <kind>` after #222 (`get realm` is the one the AGENTS.md dev-init regression guard exercises; the others are available as the same shape of escape hatch); #223 retires `get realm`'s parity-check role once `kuke status` (#202) absorbs the parity contract.
 
 ## Related concepts
 
