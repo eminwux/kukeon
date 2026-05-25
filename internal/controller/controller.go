@@ -32,6 +32,7 @@ type Controller interface {
 	CreateStack(stack intmodel.Stack) (CreateStackResult, error)
 	CreateCell(cell intmodel.Cell) (CreateCellResult, error)
 	CreateContainer(container intmodel.Container) (CreateContainerResult, error)
+	CreateSecret(secret intmodel.Secret) (CreateSecretResult, error)
 	DeleteRealm(realm intmodel.Realm, force, cascade bool) (DeleteRealmResult, error)
 	DeleteSpace(space intmodel.Space, force, cascade bool) (DeleteSpaceResult, error)
 	DeleteStack(stack intmodel.Stack, force, cascade bool) (DeleteStackResult, error)

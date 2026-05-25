@@ -73,6 +73,10 @@ func (s *stubController) CreateContainer(intmodel.Container) (controller.CreateC
 	panic("not used")
 }
 
+func (s *stubController) CreateSecret(intmodel.Secret) (controller.CreateSecretResult, error) {
+	panic("not used")
+}
+
 func (s *stubController) DeleteRealm(intmodel.Realm, bool, bool) (controller.DeleteRealmResult, error) {
 	panic("not used")
 }

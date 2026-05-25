@@ -65,6 +65,10 @@ func (FakeClient) CreateConfig(context.Context, v1beta1.CellConfigDoc) (CreateCo
 	return CreateConfigResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) CreateSecret(context.Context, v1beta1.SecretDoc) (CreateSecretResult, error) {
+	return CreateSecretResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) GetRealm(context.Context, v1beta1.RealmDoc) (GetRealmResult, error) {
 	return GetRealmResult{}, ErrUnexpectedCall
 }

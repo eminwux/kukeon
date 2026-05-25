@@ -334,6 +334,21 @@ func (c *UnixClient) CreateConfig(
 	return reply.Result, nil
 }
 
+// CreateSecret implements Client (#815).
+func (c *UnixClient) CreateSecret(
+	ctx context.Context, doc v1beta1.SecretDoc,
+) (CreateSecretResult, error) {
+	args := &CreateSecretArgs{Doc: doc}
+	reply := &CreateSecretReply{}
+	if err := c.call(ctx, MethodCreateSecret, args, reply); err != nil {
+		return CreateSecretResult{}, err
+	}
+	if reply.Err != nil {
+		return reply.Result, FromAPIError(reply.Err)
+	}
+	return reply.Result, nil
+}
+
 // ListRealms implements Client.
 func (c *UnixClient) ListRealms(ctx context.Context) ([]v1beta1.RealmDoc, error) {
 	args := &ListRealmsArgs{}

@@ -56,6 +56,11 @@ type Client interface {
 	// (which ApplyDocuments doesn't need, since apply is intentionally
 	// write-through).
 	CreateConfig(ctx context.Context, doc v1beta1.CellConfigDoc) (CreateConfigResult, error)
+	// CreateSecret persists a new Secret document to daemon storage. The
+	// write is create-or-overwrite (the daemon's runner.WriteSecret is
+	// write-through). The resulting SecretDoc is metadata-only (Spec.Data
+	// is never echoed back).
+	CreateSecret(ctx context.Context, doc v1beta1.SecretDoc) (CreateSecretResult, error)
 
 	GetRealm(ctx context.Context, doc v1beta1.RealmDoc) (GetRealmResult, error)
 	GetSpace(ctx context.Context, doc v1beta1.SpaceDoc) (GetSpaceResult, error)
@@ -238,6 +243,7 @@ const (
 	MethodMaterializeCell = ServiceName + ".MaterializeCell"
 	MethodCreateContainer = ServiceName + ".CreateContainer"
 	MethodCreateConfig    = ServiceName + ".CreateConfig"
+	MethodCreateSecret    = ServiceName + ".CreateSecret"
 
 	MethodGetRealm     = ServiceName + ".GetRealm"
 	MethodGetSpace     = ServiceName + ".GetSpace"
