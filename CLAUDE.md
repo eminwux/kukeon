@@ -81,6 +81,14 @@ two-realm tail won't catch (cgroup delegation gone, CNI binaries gone,
 divergent secrets/blueprints/configs, residual containerd namespaces from
 a half-cleaned `kuke uninstall`).
 
+### Post-reboot cgroup recovery
+
+A host reboot wipes the cgroup tmpfs while cell metadata under `/opt/kukeon/data/...` survives. The background reconciler (`(*Exec).ReconcileCell`) re-runs `ensureCellCgroup` on the next tick for any cell whose cgroup is absent AND whose persisted `Status.ReadyObserved` is true — re-creating the cgroup directory and re-asserting subtree controllers in the same pass.
+
+Half-CreateCell cells (a `kuke create cell` that crashed before `markCellReady` could close the `ReadyObserved` latch) are deliberately excluded from the heal: the in-flight CreateCell will finish its own `ensureCellCgroup` path under the per-cell lock, and the reconciler stepping in would race that flow.
+
+Consequence: after a reboot, `kuke status` for every previously-Ready cell converges to a passing cell-cgroup row within one reconcile tick — no operator-driven `kuke start cell <name>` is required per cell. The `make dev-init` smoke does not exercise this path; reboot recovery is covered by the unit tests under `internal/controller/runner/reconcile_heal_test.go`.
+
 ### Manual phases (fallback)
 
 To run individual phases by hand — e.g. while debugging a single phase — invoke them in order:
