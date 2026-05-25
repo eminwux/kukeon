@@ -699,6 +699,12 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 				"cell", cell.Metadata.Name, "error", healErr)
 		} else {
 			cell = healedCell
+			// ensureCellCgroup writes CgroupPath / SubtreeControllers but
+			// not CgroupReady — pair the heal with the same truth the
+			// probe above stamps so a healed cell ships cgroupReady:true
+			// in the same tick instead of the false-then-true flip the
+			// next pass would otherwise correct (#861's invariant).
+			cell.Status.CgroupReady = true
 			r.logger.InfoContext(r.ctx, "reconcile: healed missing cell cgroup",
 				"cell", cell.Metadata.Name,
 				"path", cell.Status.CgroupPath)

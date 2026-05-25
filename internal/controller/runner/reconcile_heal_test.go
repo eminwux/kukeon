@@ -126,6 +126,14 @@ func TestReconcileCell_HealsWipedCgroupWhenReadyObserved(t *testing.T) {
 	if !updatedCell.Status.ReadyObserved {
 		t.Errorf("Status.ReadyObserved = false, want true (the latch must survive the heal)")
 	}
+	// Pair with the #861 probe: the heal must ship cgroupReady:true in
+	// the same tick. Pre-fix the probe stamped false (cgroup absent)
+	// and ensureCellCgroup never touched the field, so the persisted
+	// snapshot carried cgroupReady:false for a cell whose cgroup is in
+	// fact present — exactly the stale-state surface #861 just closed.
+	if !updatedCell.Status.CgroupReady {
+		t.Errorf("Status.CgroupReady = false, want true after heal (heal must pair with the #861 probe so cgroupReady:true ships in the same tick, not next-pass)")
+	}
 }
 
 // TestReconcileCell_DoesNotHealHalfCreateCell is the regression guard for
