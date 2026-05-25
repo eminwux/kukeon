@@ -86,6 +86,19 @@ type CellSection struct {
 	CellStartedPre              bool
 	CellStartedPost             bool
 	CellStarted                 bool
+	// CellRecreatedDueToImageDrift is true when bootstrapCell observed a
+	// persisted cell whose root container image diverged from the desired
+	// image and dropped into a stop+delete+recreate branch instead of the
+	// idempotent EnsureCell+StartCell path. Issue #868: without this branch,
+	// `kuke init --kukeond-image <new>` would silently keep starting the
+	// stale container record left behind by a prior reset, and the running
+	// daemon binary would never refresh across a `make dev-init` re-bootstrap.
+	CellRecreatedDueToImageDrift bool
+	// CellPriorImage carries the persisted root container image observed at
+	// drift detection time, so the init report can render
+	// "recreated (image drift: <old> → <new>)" instead of the misleading
+	// "already existed" line on the recreate branch.
+	CellPriorImage string
 }
 
 type BootstrapReport struct {
@@ -658,21 +671,54 @@ func (b *Exec) bootstrapCell(section *CellSection, cellDoc *v1beta1.CellDoc) err
 		section.CellStartedPre = false
 	}
 
-	var ensuredCell intmodel.Cell
+	// When the cell record survives from a prior `kuke init` (or a
+	// `kuke daemon reset` that didn't actually purge it) and the operator
+	// re-runs init against a freshly built image, the persisted root
+	// container spec must be reconciled against the desired one — otherwise
+	// EnsureCell+StartCell below would happily restart the stale image and
+	// leave the running daemon binary frozen on the previous build. Issue
+	// #868. The drift comparison is keyed on the canonical kukeond container
+	// ID; a missing match on either side counts as drift so a corrupted /
+	// partial cell record forces a recreate rather than a half-baked ensure.
+	imageDrift := false
 	if section.CellMetadataExistsPre {
+		section.CellPriorImage = lookupContainerImage(internalCellPre, consts.KukeSystemContainerName)
+		desiredImage := lookupContainerImage(cell, consts.KukeSystemContainerName)
+		if section.CellPriorImage != desiredImage {
+			imageDrift = true
+		}
+	}
+
+	var ensuredCell intmodel.Cell
+	startCellAfterEnsure := true
+	switch {
+	case imageDrift:
+		// RecreateCell stops + deletes the stale root container, rebuilds it
+		// against the desired spec, and runs StartCell internally — so the
+		// post-switch StartCell below is suppressed to avoid a redundant
+		// start cycle.
+		ensuredCell, err = b.runner.RecreateCell(cell)
+		if err != nil {
+			return fmt.Errorf("recreate kukeond cell on image drift: %w", err)
+		}
+		section.CellRecreatedDueToImageDrift = true
+		startCellAfterEnsure = false
+	case section.CellMetadataExistsPre:
 		ensuredCell, err = b.runner.EnsureCell(internalCellPre)
 		if err != nil {
 			return fmt.Errorf("%w: %w", errdefs.ErrCreateCell, err)
 		}
-	} else {
+	default:
 		ensuredCell, err = b.runner.CreateCell(cell)
 		if err != nil {
 			return fmt.Errorf("%w: %w", errdefs.ErrCreateCell, err)
 		}
 	}
 
-	if _, err = b.runner.StartCell(ensuredCell); err != nil {
-		return fmt.Errorf("failed to start cell containers: %w", err)
+	if startCellAfterEnsure {
+		if _, err = b.runner.StartCell(ensuredCell); err != nil {
+			return fmt.Errorf("failed to start cell containers: %w", err)
+		}
 	}
 
 	lookupCellPost := intmodel.Cell{
@@ -709,10 +755,34 @@ func (b *Exec) bootstrapCell(section *CellSection, cellDoc *v1beta1.CellDoc) err
 
 	section.CellCreated = !section.CellMetadataExistsPre && section.CellMetadataExistsPost
 	section.CellCgroupCreated = !section.CellCgroupExistsPre && section.CellCgroupExistsPost
-	section.CellRootContainerCreated = !section.CellRootContainerExistsPre && section.CellRootContainerExistsPost
+	// On the image-drift recreate branch the persisted record survived
+	// (CellMetadataExistsPre stays true) but the root container itself was
+	// torn down and rebuilt under the new image — surface that as "created"
+	// rather than "already existed" so printContainerAction renders the
+	// rebuild instead of misleading the operator into thinking the stale
+	// container was re-used.
+	if section.CellRecreatedDueToImageDrift {
+		section.CellRootContainerCreated = true
+	} else {
+		section.CellRootContainerCreated = !section.CellRootContainerExistsPre &&
+			section.CellRootContainerExistsPost
+	}
 	section.CellStarted = !section.CellStartedPre && section.CellStartedPost
 
 	return nil
+}
+
+// lookupContainerImage returns the Image of the container in cell whose ID
+// matches containerID. An empty string signals either "container not present"
+// or "container present but image empty" — both count as drift against any
+// non-empty desired image in bootstrapCell's comparison.
+func lookupContainerImage(cell intmodel.Cell, containerID string) string {
+	for _, c := range cell.Spec.Containers {
+		if c.ID == containerID {
+			return c.Image
+		}
+	}
+	return ""
 }
 
 func (b *Exec) bootstrapCNI(report BootstrapReport) (BootstrapReport, error) {

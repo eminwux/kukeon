@@ -165,7 +165,18 @@ func StopPhase(
 			"kukeond stopped (cell %q in realm %q)\n",
 			consts.KukeSystemCellName, consts.KukeSystemRealmName,
 		)
-		return nil
+		// StopCell can return Stopped=true while a container task survives —
+		// the runner's per-container StopContainer errors are logged-and-
+		// continue rather than aggregated into the StopCell result (see
+		// internal/controller/runner/stop.go), so a containerd shim that
+		// rejects SIGTERM or a stop call that returns before the task exits
+		// surfaces here as "successful stop" with a still-Ready container.
+		// `kuke daemon reset` would then proceed to DeleteCell against a
+		// surviving kukeond task, leaving the operator's daemon binary
+		// frozen on the prior build across a re-bootstrap. Issue #868.
+		// Verify the post-stop state and escalate to KillCell if a task
+		// remains.
+		return verifyStoppedOrEscalate(cmd, client, doc)
 	case <-time.After(timeout):
 		cancel()
 		killRes, killErr := client.KillCell(cmd.Context(), doc)
@@ -184,4 +195,54 @@ func StopPhase(
 		)
 		return nil
 	}
+}
+
+// verifyStoppedOrEscalate re-reads the cell after a successful StopCell, and
+// if a container task is still Ready, drives the SIGKILL escalation that
+// would otherwise have fired on grace-period timeout. The post-kill GetCell
+// is the second gate: if the task remains Ready even after KillCell claimed
+// to terminate it, the caller must surface a hard error rather than allow
+// the subsequent DeleteCell to race against a live shim.
+func verifyStoppedOrEscalate(
+	cmd *cobra.Command,
+	client kukeonv1.Client,
+	doc v1beta1.CellDoc,
+) error {
+	getRes, getErr := client.GetCell(cmd.Context(), doc)
+	if getErr != nil {
+		return fmt.Errorf("re-inspect kukeond cell after stop: %w", getErr)
+	}
+	if !getRes.MetadataExists || !IsCellRunning(getRes.Cell) {
+		return nil
+	}
+
+	killRes, killErr := client.KillCell(cmd.Context(), doc)
+	if killErr != nil {
+		return fmt.Errorf(
+			"escalate to kill kukeond cell after stop returned success but task survived: %w",
+			killErr,
+		)
+	}
+	if !killRes.Killed {
+		return fmt.Errorf(
+			"escalate to kill kukeond cell after stop returned success but task survived: %w",
+			errdefs.ErrControllerNoChange,
+		)
+	}
+
+	verifyRes, verifyErr := client.GetCell(cmd.Context(), doc)
+	if verifyErr != nil {
+		return fmt.Errorf("re-inspect kukeond cell after escalated kill: %w", verifyErr)
+	}
+	if verifyRes.MetadataExists && IsCellRunning(verifyRes.Cell) {
+		return fmt.Errorf(
+			"kukeond cell %q in realm %q still reports a running container after stop and escalated kill",
+			consts.KukeSystemCellName, consts.KukeSystemRealmName,
+		)
+	}
+	cmd.Printf(
+		"kukeond force-killed after stop returned success but task survived (cell %q in realm %q)\n",
+		consts.KukeSystemCellName, consts.KukeSystemRealmName,
+	)
+	return nil
 }

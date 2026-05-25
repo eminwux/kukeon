@@ -71,34 +71,49 @@ func TestDaemonRestart(t *testing.T) {
 	}{
 		{
 			name: "running cell is gracefully stopped then started",
-			fake: &fakeClient{
-				getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-					assertKukeondTarget(t, doc)
-					return kukeonv1.GetCellResult{
-						Cell: v1beta1.CellDoc{
-							Status: v1beta1.CellStatus{
-								State: v1beta1.CellStateReady,
-								Containers: []v1beta1.ContainerStatus{
-									{State: v1beta1.ContainerStateReady},
+			fake: func() *fakeClient {
+				// GetCell #1: runRestart sees Ready and picks StopPhase.
+				// GetCell #2: StopPhase's post-stop verification (issue
+				// #868) returns Stopped so the escalation path is not taken.
+				var getCalls int
+				return &fakeClient{
+					getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+						assertKukeondTarget(t, doc)
+						getCalls++
+						if getCalls == 1 {
+							return kukeonv1.GetCellResult{
+								Cell: v1beta1.CellDoc{
+									Status: v1beta1.CellStatus{
+										State: v1beta1.CellStateReady,
+										Containers: []v1beta1.ContainerStatus{
+											{State: v1beta1.ContainerStateReady},
+										},
+									},
 								},
+								MetadataExists: true,
+							}, nil
+						}
+						return kukeonv1.GetCellResult{
+							Cell: v1beta1.CellDoc{
+								Status: v1beta1.CellStatus{State: v1beta1.CellStateStopped},
 							},
-						},
-						MetadataExists: true,
-					}, nil
-				},
-				stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
-					assertKukeondTarget(t, doc)
-					return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
-				},
-				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
-					assertKukeondTarget(t, doc)
-					return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
-				},
-				killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
-					t.Fatalf("KillCell must not be called when graceful stop succeeds")
-					return kukeonv1.KillCellResult{}, nil
-				},
-			},
+							MetadataExists: true,
+						}, nil
+					},
+					stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+						assertKukeondTarget(t, doc)
+						return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
+					},
+					startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+						assertKukeondTarget(t, doc)
+						return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
+					},
+					killCellFn: func(_ v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+						t.Fatalf("KillCell must not be called when graceful stop succeeds")
+						return kukeonv1.KillCellResult{}, nil
+					},
+				}
+			}(),
 			wantOutputs: []string{
 				`kukeond stopped (cell "kukeond" in realm "kuke-system")`,
 				`kukeond started (cell "kukeond" in realm "kuke-system")`,
@@ -235,27 +250,42 @@ func TestDaemonRestart(t *testing.T) {
 		},
 		{
 			name: "StartCell error after successful stop is wrapped",
-			fake: &fakeClient{
-				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-					return kukeonv1.GetCellResult{
-						Cell: v1beta1.CellDoc{
-							Status: v1beta1.CellStatus{
-								State: v1beta1.CellStateReady,
-								Containers: []v1beta1.ContainerStatus{
-									{State: v1beta1.ContainerStateReady},
+			fake: func() *fakeClient {
+				// GetCell #1: runRestart sees Ready → StopPhase.
+				// GetCell #2: StopPhase post-stop verification sees Stopped
+				// so StartCell is reached and its error is what surfaces.
+				var getCalls int
+				return &fakeClient{
+					getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+						getCalls++
+						if getCalls == 1 {
+							return kukeonv1.GetCellResult{
+								Cell: v1beta1.CellDoc{
+									Status: v1beta1.CellStatus{
+										State: v1beta1.CellStateReady,
+										Containers: []v1beta1.ContainerStatus{
+											{State: v1beta1.ContainerStateReady},
+										},
+									},
 								},
+								MetadataExists: true,
+							}, nil
+						}
+						return kukeonv1.GetCellResult{
+							Cell: v1beta1.CellDoc{
+								Status: v1beta1.CellStatus{State: v1beta1.CellStateStopped},
 							},
-						},
-						MetadataExists: true,
-					}, nil
-				},
-				stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
-					return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
-				},
-				startCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
-					return kukeonv1.StartCellResult{}, errors.New("runner blew up")
-				},
-			},
+							MetadataExists: true,
+						}, nil
+					},
+					stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+						return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
+					},
+					startCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+						return kukeonv1.StartCellResult{}, errors.New("runner blew up")
+					},
+				}
+			}(),
 			wantErr: "start kukeond cell:",
 		},
 		{
