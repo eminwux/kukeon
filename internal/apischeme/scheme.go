@@ -431,6 +431,7 @@ func ConvertContainerDocToInternal(in ext.ContainerDoc) (intmodel.Container, err
 			Status: intmodel.ContainerStatus{
 				Name:         in.Status.Name,
 				ID:           in.Status.ID,
+				CreatedAt:    in.Status.CreatedAt,
 				State:        intmodel.ContainerState(in.Status.State),
 				RestartCount: in.Status.RestartCount,
 				RestartTime:  in.Status.RestartTime,
@@ -495,6 +496,7 @@ func BuildContainerExternalFromInternal(in intmodel.Container, apiVersion ext.Ve
 			Status: ext.ContainerStatus{
 				Name:         in.Status.Name,
 				ID:           in.Status.ID,
+				CreatedAt:    in.Status.CreatedAt,
 				State:        ext.ContainerState(in.Status.State),
 				RestartCount: in.Status.RestartCount,
 				RestartTime:  in.Status.RestartTime,
@@ -1291,6 +1293,7 @@ func convertContainerStatusesToInternal(in []ext.ContainerStatus) []intmodel.Con
 		result[i] = intmodel.ContainerStatus{
 			Name:         status.Name,
 			ID:           status.ID,
+			CreatedAt:    status.CreatedAt,
 			State:        intmodel.ContainerState(status.State),
 			RestartCount: status.RestartCount,
 			RestartTime:  status.RestartTime,
@@ -1313,6 +1316,7 @@ func buildContainerStatusesExternalFromInternal(in []intmodel.ContainerStatus) [
 		result[i] = ext.ContainerStatus{
 			Name:         status.Name,
 			ID:           status.ID,
+			CreatedAt:    status.CreatedAt,
 			State:        ext.ContainerState(status.State),
 			RestartCount: status.RestartCount,
 			RestartTime:  status.RestartTime,

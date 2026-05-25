@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
@@ -41,9 +42,21 @@ const noContainersFoundMsg = "No containers found."
 
 func NewContainerCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:           "container [name]",
-		Aliases:       []string{"containers", "co"},
-		Short:         "Get or list container information",
+		Use:     "container [name]",
+		Aliases: []string{"containers", "co"},
+		Short:   "Get or list container information",
+		Long: `Get or list container information.
+
+The default table is ` + "`NAME REALM SPACE STACK CELL STATE RESTARTS AGE`" + `.
+` + "`-o wide`" + ` appends two container-only signals:
+
+  IMAGE  spec.image (the resolved container image reference)
+  EXIT   ` + "`<exitCode>/<exitSignal>`" + ` when either field is non-zero/
+         non-empty; "-" otherwise — most meaningful on Stopped/Failed.
+
+CGROUP, ROOT (as a column), and IMAGE (as a default column) no longer
+appear in the default table — use ` + "`-o yaml` / `-o json`" + ` for the
+full container spec.`,
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -81,7 +94,7 @@ func runContainerCmd(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = client.Close() }()
 
-	outputFormat, err := shared.ParseOutputFormat(cmd)
+	wide, outputFormat, err := resolveOutput(cmd)
 	if err != nil {
 		return err
 	}
@@ -165,7 +178,7 @@ func runContainerCmd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	containerStates := make(map[string]string, len(specs))
+	containerProbes := make(map[string]containerProbe, len(specs))
 	for i := range specs {
 		spec := specs[i]
 		if spec.RealmID == "" {
@@ -187,19 +200,38 @@ func runContainerCmd(cmd *cobra.Command, args []string) error {
 		probeResult, err := client.GetContainer(cmd.Context(), probe)
 		if err != nil {
 			cmd.PrintErrln("Warning: failed to get container state for", spec.ID, ":", err)
-			containerStates[spec.ID] = "Unknown"
+			containerProbes[spec.ID] = containerProbe{state: "Unknown"}
 			continue
 		}
-		containerStates[spec.ID] = containerStateToString(probeResult.Container.Status.State)
+		st := probeResult.Container.Status
+		containerProbes[spec.ID] = containerProbe{
+			state:        containerStateToString(st.State),
+			restartCount: st.RestartCount,
+			createdAt:    st.CreatedAt,
+			exitCode:     st.ExitCode,
+			exitSignal:   st.ExitSignal,
+		}
 	}
 
 	return printContainersWithState(
 		cmd,
 		specs,
-		containerStates,
+		containerProbes,
 		outputFormat,
+		wide,
 		emptyMsg,
 	)
+}
+
+// containerProbe carries the per-container fields a list-path probe pulls
+// from GetContainer for the table renderer. State is the human-readable
+// label; the rest source the RESTARTS / AGE / EXIT columns.
+type containerProbe struct {
+	state        string
+	restartCount int
+	createdAt    time.Time
+	exitCode     int
+	exitSignal   string
 }
 
 // buildEmptyResultMessage describes the queried filter set when zero rows
@@ -320,8 +352,9 @@ func printContainer(cmd *cobra.Command, container interface{}, format shared.Out
 func printContainersWithState(
 	cmd *cobra.Command,
 	containers []v1beta1.ContainerSpec,
-	containerStates map[string]string,
+	probes map[string]containerProbe,
 	format shared.OutputFormat,
+	wide bool,
 	emptyMsg string,
 ) error {
 	switch format {
@@ -329,7 +362,7 @@ func printContainersWithState(
 		return shared.PrintYAML(cmd, containers)
 	case shared.OutputFormatJSON:
 		return shared.PrintJSON(cmd, containers)
-	case shared.OutputFormatTable, shared.OutputFormatWide:
+	case shared.OutputFormatTable:
 		if len(containers) == 0 {
 			if emptyMsg == "" {
 				emptyMsg = noContainersFoundMsg
@@ -337,32 +370,62 @@ func printContainersWithState(
 			cmd.Println(emptyMsg)
 			return nil
 		}
-		headers := []string{"NAME", "REALM", "SPACE", "STACK", "CELL", "ROOT", "IMAGE", "STATE"}
+		headers := []string{"NAME", "REALM", "SPACE", "STACK", "CELL", "STATE", "RESTARTS", "AGE"}
+		if wide {
+			headers = append(headers, "IMAGE", "EXIT")
+		}
+		now := time.Now()
 		rows := make([][]string, 0, len(containers))
 		for i := range containers {
 			c := &containers[i]
-			state := "Unknown"
-			if containerStates != nil {
-				if s, ok := containerStates[c.ID]; ok {
-					state = s
-				}
+			p, ok := probes[c.ID]
+			if !ok {
+				p = containerProbe{state: "Unknown"}
 			}
-			rows = append(rows, []string{
+			row := []string{
 				containerDisplayName(c),
 				c.RealmID,
 				c.SpaceID,
 				c.StackID,
 				c.CellID,
-				strconv.FormatBool(c.Root),
-				c.Image,
-				state,
-			})
+				p.state,
+				strconv.Itoa(p.restartCount),
+				shared.RenderAge(p.createdAt, now),
+			}
+			if wide {
+				row = append(row, c.Image, renderExit(p.exitCode, p.exitSignal))
+			}
+			rows = append(rows, row)
 		}
 		shared.PrintTable(cmd, headers, rows)
 		return nil
 	default:
 		return shared.PrintYAML(cmd, containers)
 	}
+}
+
+// resolveOutput sits between the cobra flag and ParseOutputFormat so the
+// `wide` value is normalised to `table` plus a bool, leaving the shared
+// yaml/json/table parser untouched. Mirrors the helper in cmd/kuke/get/cell.
+func resolveOutput(cmd *cobra.Command) (bool, shared.OutputFormat, error) {
+	raw := strings.TrimSpace(cmd.Flag("output").Value.String())
+	if strings.EqualFold(raw, "wide") {
+		_ = cmd.Flags().Set("output", "table")
+		format, err := shared.ParseOutputFormat(cmd)
+		return true, format, err
+	}
+	format, err := shared.ParseOutputFormat(cmd)
+	return false, format, err
+}
+
+// renderExit returns the EXIT column value — `<code>/<signal>` when either
+// field is non-zero/non-empty, "-" when both are at their zero values.
+// Most meaningful on Stopped/Failed states. Issue #605.
+func renderExit(code int, signal string) string {
+	if code == 0 && signal == "" {
+		return "-"
+	}
+	return fmt.Sprintf("%d/%s", code, signal)
 }
 
 func containerStateToString(state v1beta1.ContainerState) string {

@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
@@ -135,9 +136,13 @@ func (b *Exec) GetContainer(container intmodel.Container) (GetContainerResult, e
 				// the Repos / Stages slices through so
 				// `kuke get container <name> -o yaml/json` surfaces them; the
 				// rest of the status is rebuilt inline from the freshly-queried
-				// containerd state above.
-				Repos:  repoStatusesForContainer(internalCell, name),
-				Stages: stageStatusesForContainer(internalCell, name),
+				// containerd state above. CreatedAt likewise rides through from
+				// the cell's per-container status so the AGE column on
+				// `kuke get container` lists picks up the controller-stamped
+				// observation time (issue #605).
+				CreatedAt: containerCreatedAtForContainer(internalCell, name),
+				Repos:     repoStatusesForContainer(internalCell, name),
+				Stages:    stageStatusesForContainer(internalCell, name),
 			},
 		}
 	} else {
@@ -149,6 +154,20 @@ func (b *Exec) GetContainer(container intmodel.Container) (GetContainerResult, e
 	}
 
 	return res, nil
+}
+
+// containerCreatedAtForContainer returns the controller-stamped CreatedAt
+// for the named container from the cell's persisted per-container statuses
+// (populated and preserved by populateCellContainerStatuses). Returns the
+// zero time when the cell has no status entry for the name yet, which
+// renders as "-" via shared.RenderAge. Issue #605.
+func containerCreatedAtForContainer(cell intmodel.Cell, name string) time.Time {
+	for i := range cell.Status.Containers {
+		if cell.Status.Containers[i].ID == name {
+			return cell.Status.Containers[i].CreatedAt
+		}
+	}
+	return time.Time{}
 }
 
 // repoStatusesForContainer returns the per-repo clone/fetch outcome that
