@@ -44,13 +44,12 @@ func NewRealmCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := resolveClient(cmd)
+			outputFormat, err := shared.ParseOutputFormat(cmd)
 			if err != nil {
 				return err
 			}
-			defer func() { _ = client.Close() }()
 
-			outputFormat, err := shared.ParseOutputFormat(cmd)
+			selector, err := shared.ParseLabelSelectorFlag(cmd)
 			if err != nil {
 				return err
 			}
@@ -61,6 +60,16 @@ func NewRealmCmd() *cobra.Command {
 			} else {
 				name = strings.TrimSpace(viper.GetString(config.KUKE_GET_REALM_NAME.ViperKey))
 			}
+
+			if name != "" && !selector.Empty() {
+				return errors.New("--selector cannot be combined with a resource name")
+			}
+
+			client, err := resolveClient(cmd)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = client.Close() }()
 
 			if name != "" {
 				doc := v1beta1.RealmDoc{
@@ -83,6 +92,7 @@ func NewRealmCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			realms = filterRealmsBySelector(realms, selector)
 			return printRealms(cmd, realms, outputFormat)
 		},
 	}
@@ -91,6 +101,8 @@ func NewRealmCmd() *cobra.Command {
 		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
+
+	shared.RegisterLabelSelectorFlag(cmd)
 
 	// `--no-daemon` is inherited as a persistent flag from the parent `get`
 	// command (registered in cmd/kuke/get/get.go) — every `get <kind>`
@@ -110,6 +122,22 @@ func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
 		return mockClient, nil
 	}
 	return kukeshared.ClientFromCmd(cmd)
+}
+
+// filterRealmsBySelector returns the subset of realms whose
+// Metadata.Labels satisfy selector. A nil or empty selector returns the
+// input slice unmodified so the common no-flag path skips the allocation.
+func filterRealmsBySelector(realms []v1beta1.RealmDoc, selector *shared.LabelSelector) []v1beta1.RealmDoc {
+	if selector.Empty() {
+		return realms
+	}
+	out := make([]v1beta1.RealmDoc, 0, len(realms))
+	for i := range realms {
+		if selector.Matches(realms[i].Metadata.Labels) {
+			out = append(out, realms[i])
+		}
+	}
+	return out
 }
 
 func printRealm(cmd *cobra.Command, realm *v1beta1.RealmDoc, format shared.OutputFormat) error {

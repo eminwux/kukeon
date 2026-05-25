@@ -597,6 +597,112 @@ func TestNewContainerCmd_AgeZeroRendersDash(t *testing.T) {
 	}
 }
 
+// TestNewContainerCmd_Selector verifies the `-l`/`--selector` filter
+// wiring on `kuke get container` (issue #614). ListContainers returns
+// ContainerSpec (no labels), so the per-container Metadata.Labels arrives
+// via the per-spec GetContainer probe that already populates state;
+// filtering happens after that loop. Grammar coverage lives in the
+// shared selector_test.go; this test pins the per-verb wiring.
+func TestNewContainerCmd_Selector(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	listFn := func(_, _, _, _ string) ([]v1beta1.ContainerSpec, error) {
+		return []v1beta1.ContainerSpec{
+			{ID: "alpha", RealmID: "r1", SpaceID: "s1", StackID: "st1", CellID: "c1"},
+			{ID: "beta", RealmID: "r1", SpaceID: "s1", StackID: "st1", CellID: "c1"},
+			{ID: "gamma", RealmID: "r1", SpaceID: "s1", StackID: "st1", CellID: "c1"},
+		}, nil
+	}
+	// Labels live on ContainerDoc.Metadata, which arrives from GetContainer.
+	labelsByID := map[string]map[string]string{
+		"alpha": {"app": "web"},
+		"beta":  {"app": "db"},
+		"gamma": {"app": "web", "edge": "true"},
+	}
+	getFn := func(doc v1beta1.ContainerDoc) (kukeonv1.GetContainerResult, error) {
+		labels, ok := labelsByID[doc.Metadata.Name]
+		if !ok {
+			return kukeonv1.GetContainerResult{}, errdefs.ErrContainerNotFound
+		}
+		return kukeonv1.GetContainerResult{
+			Container: v1beta1.ContainerDoc{
+				Metadata: v1beta1.ContainerMetadata{
+					Name:   doc.Metadata.Name,
+					Labels: labels,
+				},
+				Spec: doc.Spec,
+				Status: v1beta1.ContainerStatus{
+					State: v1beta1.ContainerStateReady,
+				},
+			},
+			ContainerExists: true,
+		}, nil
+	}
+
+	t.Run("equality filters by label", func(t *testing.T) {
+		t.Cleanup(viper.Reset)
+		cmd := container.NewContainerCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		ctx := context.WithValue(context.Background(), container.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{listContainersFn: listFn, getContainerFn: getFn}))
+		cmd.SetContext(ctx)
+		cmd.SetArgs([]string{"-l", "app=web"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		for _, want := range []string{"alpha", "gamma"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("expected %q in output, got:\n%s", want, out)
+			}
+		}
+		if strings.Contains(out, "beta") {
+			t.Errorf("expected 'beta' filtered out, got:\n%s", out)
+		}
+	})
+
+	t.Run("AND-combination filters further", func(t *testing.T) {
+		t.Cleanup(viper.Reset)
+		cmd := container.NewContainerCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		ctx := context.WithValue(context.Background(), container.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{listContainersFn: listFn, getContainerFn: getFn}))
+		cmd.SetContext(ctx)
+		cmd.SetArgs([]string{"-l", "app=web,edge"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "gamma") {
+			t.Errorf("expected 'gamma' in output, got:\n%s", out)
+		}
+		for _, deny := range []string{"alpha", "beta"} {
+			if strings.Contains(out, deny) {
+				t.Errorf("expected %q filtered out, got:\n%s", deny, out)
+			}
+		}
+	})
+
+	t.Run("selector + name is rejected", func(t *testing.T) {
+		t.Cleanup(viper.Reset)
+		cmd := container.NewContainerCmd()
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+		ctx := context.WithValue(context.Background(), container.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{}))
+		cmd.SetContext(ctx)
+		cmd.SetArgs([]string{"alpha", "-l", "app=web"})
+		err := cmd.Execute()
+		if err == nil || !strings.Contains(err.Error(), "--selector cannot be combined") {
+			t.Fatalf("expected --selector + name rejection, got: %v", err)
+		}
+	})
+}
+
 type fakeClient struct {
 	kukeonv1.FakeClient
 

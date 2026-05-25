@@ -266,6 +266,134 @@ func TestNewRealmCmd_Columns(t *testing.T) {
 	})
 }
 
+// TestNewRealmCmd_Selector pins the issue #614 contract for `kuke get
+// realm`: `-l <selector>` filters the listed realms against
+// Metadata.Labels using the kubectl-style grammar, malformed selectors
+// fail before any controller call, and combining `-l` with a positional
+// name argument is rejected up front.
+func TestNewRealmCmd_Selector(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	listFn := func() ([]v1beta1.RealmDoc, error) {
+		return []v1beta1.RealmDoc{
+			{
+				Metadata: v1beta1.RealmMetadata{
+					Name:   "prod",
+					Labels: map[string]string{"env": "prod", "tier": "web"},
+				},
+			},
+			{
+				Metadata: v1beta1.RealmMetadata{
+					Name:   "staging",
+					Labels: map[string]string{"env": "staging", "tier": "web"},
+				},
+			},
+			{
+				Metadata: v1beta1.RealmMetadata{
+					Name:   "legacy",
+					Labels: map[string]string{"env": "prod", "debug": "yes"},
+				},
+			},
+		}, nil
+	}
+
+	type sub struct {
+		name        string
+		args        []string
+		wantInclude []string
+		wantExclude []string
+		wantErr     string
+	}
+	subs := []sub{
+		{
+			name:        "equality filters by label value",
+			args:        []string{"-l", "env=prod"},
+			wantInclude: []string{"prod", "legacy"},
+			wantExclude: []string{"staging"},
+		},
+		{
+			name:        "inequality matches absent and differing keys",
+			args:        []string{"-l", "env!=prod"},
+			wantInclude: []string{"staging"},
+			wantExclude: []string{"prod", "legacy"},
+		},
+		{
+			name:        "existence matches key presence",
+			args:        []string{"-l", "debug"},
+			wantInclude: []string{"legacy"},
+			wantExclude: []string{"prod", "staging"},
+		},
+		{
+			name:        "absence matches when key missing",
+			args:        []string{"-l", "!debug"},
+			wantInclude: []string{"prod", "staging"},
+			wantExclude: []string{"legacy"},
+		},
+		{
+			name:        "comma is logical AND",
+			args:        []string{"-l", "env=prod,tier=web"},
+			wantInclude: []string{"prod"},
+			wantExclude: []string{"staging", "legacy"},
+		},
+		{
+			name:        "no matches still exits 0 with header",
+			args:        []string{"-l", "env=nowhere"},
+			wantInclude: []string{"No realms found."},
+		},
+		{
+			name:    "malformed selector fails fast",
+			args:    []string{"-l", "env="},
+			wantErr: "empty value",
+		},
+		{
+			name:    "selector with positional name is rejected",
+			args:    []string{"prod", "-l", "env=prod"},
+			wantErr: "--selector cannot be combined with a resource name",
+		},
+	}
+
+	for _, s := range subs {
+		t.Run(s.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+
+			cmd := realm.NewRealmCmd()
+			buf := &bytes.Buffer{}
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+			ctx := context.WithValue(context.Background(),
+				realm.MockControllerKey{},
+				kukeonv1.Client(&fakeClient{listRealmsFn: listFn}))
+			cmd.SetContext(ctx)
+			cmd.SetArgs(s.args)
+
+			err := cmd.Execute()
+			if s.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", s.wantErr)
+				}
+				if !strings.Contains(err.Error(), s.wantErr) {
+					t.Fatalf("expected error containing %q, got %v", s.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			out := buf.String()
+			for _, want := range s.wantInclude {
+				if !strings.Contains(out, want) {
+					t.Errorf("output missing %q\nGot:\n%s", want, out)
+				}
+			}
+			for _, deny := range s.wantExclude {
+				if strings.Contains(out, deny) {
+					t.Errorf("output unexpectedly contains %q\nGot:\n%s", deny, out)
+				}
+			}
+		})
+	}
+}
+
 type fakeClient struct {
 	kukeonv1.FakeClient
 

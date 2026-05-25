@@ -58,13 +58,12 @@ when needed.`,
 		SilenceUsage:  true,
 		SilenceErrors: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := resolveClient(cmd)
+			wide, outputFormat, err := resolveOutput(cmd)
 			if err != nil {
 				return err
 			}
-			defer func() { _ = client.Close() }()
 
-			wide, outputFormat, err := resolveOutput(cmd)
+			selector, err := shared.ParseLabelSelectorFlag(cmd)
 			if err != nil {
 				return err
 			}
@@ -79,6 +78,16 @@ when needed.`,
 			} else {
 				name = strings.TrimSpace(viper.GetString(config.KUKE_GET_CELL_NAME.ViperKey))
 			}
+
+			if name != "" && !selector.Empty() {
+				return errors.New("--selector cannot be combined with a resource name")
+			}
+
+			client, err := resolveClient(cmd)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = client.Close() }()
 
 			if name != "" {
 				if realm == "" {
@@ -124,6 +133,7 @@ when needed.`,
 			if err != nil {
 				return err
 			}
+			cells = filterCellsBySelector(cells, selector)
 			return printCells(cmd, cells, outputFormat, wide)
 		},
 	}
@@ -138,6 +148,8 @@ when needed.`,
 		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
+
+	shared.RegisterLabelSelectorFlag(cmd)
 
 	cmd.ValidArgsFunction = config.CompleteCellNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
@@ -192,6 +204,22 @@ func renderBridge(c *v1beta1.CellDoc) string {
 		return name
 	}
 	return "-"
+}
+
+// filterCellsBySelector returns the subset of cells whose
+// Metadata.Labels satisfy selector. A nil or empty selector returns the
+// input slice unmodified so the common no-flag path skips the allocation.
+func filterCellsBySelector(cells []v1beta1.CellDoc, selector *shared.LabelSelector) []v1beta1.CellDoc {
+	if selector.Empty() {
+		return cells
+	}
+	out := make([]v1beta1.CellDoc, 0, len(cells))
+	for i := range cells {
+		if selector.Matches(cells[i].Metadata.Labels) {
+			out = append(out, cells[i])
+		}
+	}
+	return out
 }
 
 func printCell(cmd *cobra.Command, cell *v1beta1.CellDoc, format shared.OutputFormat) error {

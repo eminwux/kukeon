@@ -347,6 +347,71 @@ func TestNewSpaceCmd_NoCgroupOrControllers(t *testing.T) {
 	}
 }
 
+// TestNewSpaceCmd_Selector verifies the `-l`/`--selector` filter wiring on
+// `kuke get space` (issue #614). Grammar coverage lives in the shared
+// selector_test.go; this test pins the per-verb wiring: the flag exists,
+// is parsed, applied against Metadata.Labels post-list, and combining it
+// with a positional name fails fast.
+func TestNewSpaceCmd_Selector(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	listFn := func(_ string) ([]v1beta1.SpaceDoc, error) {
+		return []v1beta1.SpaceDoc{
+			{
+				Metadata: v1beta1.SpaceMetadata{
+					Name:   "web",
+					Labels: map[string]string{"tier": "web"},
+				},
+				Spec: v1beta1.SpaceSpec{RealmID: "r1"},
+			},
+			{
+				Metadata: v1beta1.SpaceMetadata{
+					Name:   "db",
+					Labels: map[string]string{"tier": "db"},
+				},
+				Spec: v1beta1.SpaceSpec{RealmID: "r1"},
+			},
+		}, nil
+	}
+
+	t.Run("equality filters by label", func(t *testing.T) {
+		t.Cleanup(viper.Reset)
+		cmd := space.NewSpaceCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		ctx := context.WithValue(context.Background(), space.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{listSpacesFn: listFn}))
+		cmd.SetContext(ctx)
+		cmd.SetArgs([]string{"-l", "tier=web"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "web") {
+			t.Errorf("expected 'web' in output, got:\n%s", out)
+		}
+		if strings.Contains(out, "db") {
+			t.Errorf("expected 'db' filtered out, got:\n%s", out)
+		}
+	})
+
+	t.Run("selector + name is rejected", func(t *testing.T) {
+		t.Cleanup(viper.Reset)
+		cmd := space.NewSpaceCmd()
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+		ctx := context.WithValue(context.Background(), space.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{}))
+		cmd.SetContext(ctx)
+		cmd.SetArgs([]string{"web", "-l", "tier=web"})
+		err := cmd.Execute()
+		if err == nil || !strings.Contains(err.Error(), "--selector cannot be combined") {
+			t.Fatalf("expected --selector + name rejection, got: %v", err)
+		}
+	})
+}
+
 type fakeClient struct {
 	kukeonv1.FakeClient
 
