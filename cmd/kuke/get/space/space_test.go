@@ -137,6 +137,178 @@ func TestNewSpaceCmd(t *testing.T) {
 	}
 }
 
+// TestNewSpaceCmd_Columns pins the epic:get step-2 column contract for
+// `kuke get space` (issue #602): default emits `NAME REALM STATE AGE`
+// (4 cols); `-o wide` appends `EGRESS NET-DEFAULTS` (6 cols). EGRESS
+// renders `allow`/`deny`/`-` across the nil-cases for Spec.Network and
+// Spec.Network.Egress; NET-DEFAULTS renders `yes`/`-` boolean of whether
+// Spec.Defaults != nil. CGROUP/CONTROLLERS never appear in any table.
+func TestNewSpaceCmd_Columns(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	listFn := func(_ string) ([]v1beta1.SpaceDoc, error) {
+		return []v1beta1.SpaceDoc{
+			{
+				// No network policy, no defaults — both wide cols render "-".
+				Metadata: v1beta1.SpaceMetadata{Name: "plain"},
+				Spec:     v1beta1.SpaceSpec{RealmID: "r1"},
+			},
+			{
+				// Explicit allow + defaults set.
+				Metadata: v1beta1.SpaceMetadata{Name: "open"},
+				Spec: v1beta1.SpaceSpec{
+					RealmID: "r1",
+					Network: &v1beta1.SpaceNetwork{
+						Egress: &v1beta1.EgressPolicy{Default: v1beta1.EgressDefaultAllow},
+					},
+					Defaults: &v1beta1.SpaceDefaults{},
+				},
+			},
+			{
+				// Explicit deny, no defaults.
+				Metadata: v1beta1.SpaceMetadata{Name: "locked"},
+				Spec: v1beta1.SpaceSpec{
+					RealmID: "r1",
+					Network: &v1beta1.SpaceNetwork{
+						Egress: &v1beta1.EgressPolicy{Default: v1beta1.EgressDefaultDeny},
+					},
+				},
+			},
+			{
+				// Spec.Network set but Egress nil — EGRESS renders "-".
+				Metadata: v1beta1.SpaceMetadata{Name: "netonly"},
+				Spec: v1beta1.SpaceSpec{
+					RealmID: "r1",
+					Network: &v1beta1.SpaceNetwork{},
+				},
+			},
+		}, nil
+	}
+
+	t.Run("default table is NAME REALM STATE AGE", func(t *testing.T) {
+		t.Cleanup(viper.Reset)
+
+		cmd := space.NewSpaceCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+		ctx = context.WithValue(ctx, space.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{listSpacesFn: listFn}))
+		cmd.SetContext(ctx)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		header := firstLine(out)
+		for _, want := range []string{"NAME", "REALM", "STATE", "AGE"} {
+			if !strings.Contains(header, want) {
+				t.Errorf("default header missing %q; got: %q", want, header)
+			}
+		}
+		for _, denied := range []string{"EGRESS", "NET-DEFAULTS", "CGROUP", "CONTROLLERS"} {
+			if strings.Contains(out, denied) {
+				t.Errorf("default output must NOT contain %q; got:\n%s", denied, out)
+			}
+		}
+	})
+
+	t.Run("-o wide appends EGRESS NET-DEFAULTS", func(t *testing.T) {
+		t.Cleanup(viper.Reset)
+
+		cmd := space.NewSpaceCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+		ctx = context.WithValue(ctx, space.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{listSpacesFn: listFn}))
+		cmd.SetContext(ctx)
+		cmd.SetArgs([]string{"-o", "wide"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		header := firstLine(out)
+		for _, want := range []string{"NAME", "REALM", "STATE", "AGE", "EGRESS", "NET-DEFAULTS"} {
+			if !strings.Contains(header, want) {
+				t.Errorf("wide header missing %q; got: %q", want, header)
+			}
+		}
+		for _, denied := range []string{"CGROUP", "CONTROLLERS"} {
+			if strings.Contains(out, denied) {
+				t.Errorf("-o wide output must NOT contain %q; got:\n%s", denied, out)
+			}
+		}
+
+		// Per-row EGRESS / NET-DEFAULTS rendering. Each row is identified
+		// by its NAME prefix; the assertion checks the row's cell values.
+		rows := dataRows(out)
+		cases := map[string]struct {
+			egress   string
+			defaults string
+		}{
+			"plain":   {egress: "-", defaults: "-"},
+			"open":    {egress: "allow", defaults: "yes"},
+			"locked":  {egress: "deny", defaults: "-"},
+			"netonly": {egress: "-", defaults: "-"},
+		}
+		for name, want := range cases {
+			row := findRow(rows, name)
+			if row == "" {
+				t.Errorf("row for %q not found in:\n%s", name, out)
+				continue
+			}
+			fields := strings.Fields(row)
+			// Columns: NAME REALM STATE AGE EGRESS NET-DEFAULTS = 6 fields.
+			if len(fields) != 6 {
+				t.Errorf("row %q: expected 6 fields, got %d (%q)", name, len(fields), row)
+				continue
+			}
+			if fields[4] != want.egress {
+				t.Errorf("row %q: EGRESS = %q, want %q", name, fields[4], want.egress)
+			}
+			if fields[5] != want.defaults {
+				t.Errorf("row %q: NET-DEFAULTS = %q, want %q", name, fields[5], want.defaults)
+			}
+		}
+	})
+}
+
+// firstLine returns the first newline-terminated line of s, or s itself
+// if it contains no newline. Used so column-presence assertions check the
+// header row only — data cells can't satisfy them by accident.
+func firstLine(s string) string {
+	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+		return s[:idx]
+	}
+	return s
+}
+
+// dataRows returns the non-header rows of a PrintTable output. Lines 1
+// (header) and 2 (separator "---") are skipped; the remainder are data.
+func dataRows(s string) []string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) < 3 {
+		return nil
+	}
+	return lines[2:]
+}
+
+// findRow returns the first row whose first whitespace-delimited field
+// equals name, or "" when no row matches.
+func findRow(rows []string, name string) string {
+	for _, r := range rows {
+		fields := strings.Fields(r)
+		if len(fields) > 0 && fields[0] == name {
+			return r
+		}
+	}
+	return ""
+}
+
 // TestNewSpaceCmd_NoCgroupOrControllers pins the epic:get step-1
 // cross-cutting cleanup for spaces: the CGROUP column and the
 // --show-controllers flag must be gone, and -o wide must not resurrect
