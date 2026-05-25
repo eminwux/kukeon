@@ -74,9 +74,13 @@ func NewRunCmd() *cobra.Command {
 			"subsequent runs (idempotent). When the live cell's spec differs from the " +
 			"materialisation of the current Config + Blueprint, the positional config " +
 			"path refuses to attach and points the operator at " +
-			"`kuke apply -c <config>` to reconcile (stops, updates, starts). -b with " +
-			"--name applies the same discipline against the pinned cell name, pointing " +
-			"at `kuke apply -b <bp> --name <cell>`. --new on the " +
+			"`kuke restart cell <cell>` to reconcile (the daemon's OutOfSync detector " +
+			"picks up the Config divergence and the restart reconciles implicitly: " +
+			"stops, updates, starts). -b with --name applies the same divergence " +
+			"discipline against the pinned cell name, but -b-lineage cells have no " +
+			"implicit reconcile — the pointer is `kuke delete cell <cell>` + re-run " +
+			"(or promote to a CellConfig for `kuke restart cell` reconcile workflows). " +
+			"--new on the " +
 			"positional config path materializes a fresh `<config-name>-<6hex>` cell on " +
 			"every invocation instead — opt-in fire-and-forget sandboxes from a " +
 			"Config, preserving the kukeon.io/config lineage label. `--new --name X` " +
@@ -638,34 +642,38 @@ func runAfterReuseClaim(
 // rejectDivergentNamedCell refuses to attach when a named live cell's spec
 // diverges from the materialization the operator just asked us to run. Every
 // `kuke run` source that pins a deterministic cell name (`-f`, `<config>`
-// without `--new`, and `-b --name`) routes destructive updates through
-// `kuke apply` instead — `run` is a pure read-and-materialize verb, so a
-// divergent target is the operator's signal to either reconcile via `apply` or
-// delete and re-run. The error pointer is shaped to match the source:
-// `<config>` → `kuke apply -c <config>` (cell name is the Config's stable
-// name, `apply -c` recomputes it), `-b --name <cell>` →
-// `kuke apply -b <bp> --name <cell>` (the operator pinned the name, so
-// `apply` needs the same pin), and the bare `-f` / `-p` fallback keeps the
-// original `kuke apply -f` pointer because those paths carry the spec on
-// disk. The `--new` path never reaches this function: it takes a separate
-// branch in runRun that treats any existing cell as a hard collision (no
-// divergence reconcile pointer makes sense — `apply -c` would reconcile to
-// the Config's stable name, not to the `--new` cell's generated/pinned name).
+// without `--new`, and `-b --name`) routes destructive updates away from
+// `run` — `run` is a pure read-and-materialize verb, so a divergent target is
+// the operator's signal to either reconcile (Config-lineage cells) or delete
+// and re-run (Blueprint-lineage and bare `-f`/`-p` cells). The error pointer
+// is shaped to match the source: `<config>` → `kuke restart cell <name>`
+// (#821's restart picks up the daemon-side OutOfSync detection #820 wires and
+// reconciles implicitly; the cell name is the Config's StableName), `-b
+// --name <cell>` → `kuke delete cell <cell>` + re-run (Blueprint-lineage cells
+// have no implicit reconcile per #819's umbrella; the operator promotes to a
+// CellConfig for restart-driven reconcile workflows), and the bare `-f` / `-p`
+// fallback keeps the `kuke apply -f` pointer because those paths carry the
+// spec on disk. The `--new` path never reaches this function: it takes a
+// separate branch in runRun that treats any existing cell as a hard collision
+// (no divergence reconcile pointer makes sense — `restart cell` would
+// reconcile against the Config's stable name, not the `--new` cell's
+// generated/pinned name).
 func rejectDivergentNamedCell(cellDoc v1beta1.CellDoc, changed []string, flags runFlags) error {
 	fields := strings.Join(changed, ", ")
 	switch {
 	case flags.configName != "" && !flags.newCell:
 		return fmt.Errorf(
 			"live cell %q spec differs from CellConfig %q (%s) — refusing to attach; "+
-				"use `kuke apply -c %s` to reconcile (stops, updates, starts)",
-			cellDoc.Metadata.Name, flags.configName, fields, flags.configName,
+				"use `kuke restart cell %s` to reconcile (stops, updates, starts)",
+			cellDoc.Metadata.Name, flags.configName, fields, cellDoc.Metadata.Name,
 		)
 	case flags.blueprintName != "" && flags.nameOverride != "":
 		return fmt.Errorf(
 			"live cell %q spec differs from CellBlueprint %q (%s) — refusing to attach; "+
-				"use `kuke apply -b %s --name %s` to reconcile (stops, updates, starts)",
-			cellDoc.Metadata.Name, flags.blueprintName, fields,
-			flags.blueprintName, cellDoc.Metadata.Name,
+				"-b cells have no in-place reconcile; delete it with "+
+				"`kuke delete cell %s` and re-run (or promote to a CellConfig for "+
+				"`kuke restart cell` reconcile workflows)",
+			cellDoc.Metadata.Name, flags.blueprintName, fields, cellDoc.Metadata.Name,
 		)
 	default:
 		return fmt.Errorf(
@@ -881,11 +889,10 @@ func loadCellDoc(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (lo
 // the KUKE_RUN_SPACE/STACK env var. The session default for those keys is
 // "default" (DefineKV calls viper.SetDefault), so reading them through viper
 // would wrongly narrow every lookup to default/default and hide realm-scoped
-// blueprints; cmd/kuke/shared.ExplicitScope reads the raw flag/env instead,
-// and `kuke apply -b/-c` consumes the same helper for symmetric scope
-// resolution. A blueprint that declares structural slots the inline path
-// cannot fill (secret slots, required repo slots with no url) is refused by
-// Materialize with a pointer to `kuke run -c`.
+// blueprints; cmd/kuke/shared.ExplicitScope reads the raw flag/env instead.
+// A blueprint that declares structural slots the inline path cannot fill
+// (secret slots, required repo slots with no url) is refused by Materialize
+// with a pointer to the CellConfig workflow.
 func loadFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (v1beta1.CellDoc, error) {
 	cliParams, err := buildParamMap(flags)
 	if err != nil {

@@ -147,12 +147,12 @@ func runRestartCell(cmd *cobra.Command, args []string) error {
 }
 
 // restartReady handles the Ready cell path: vanilla stop+start for Synced
-// cells, or an apply -c-style reconcile (stop + re-materialise + start)
-// driven by the daemon for OutOfSync cells. OutOfSyncError (divergence
-// undecidable — referenced Blueprint missing) and the "lineage Config
-// deleted" reason cannot drive a reconcile, so they fall through to vanilla
-// restart with a one-line stderr notice. Active attach sessions are severed
-// by the daemon's stop step in both branches.
+// cells, or a Config-driven reconcile (stop + re-materialise + start) driven
+// by the daemon for OutOfSync cells. OutOfSyncError (divergence undecidable
+// — referenced Blueprint missing) and the "lineage Config deleted" reason
+// cannot drive a reconcile, so they fall through to vanilla restart with a
+// one-line stderr notice. Active attach sessions are severed by the daemon's
+// stop step in both branches.
 func restartReady(
 	cmd *cobra.Command, client kukeonv1.Client,
 	doc v1beta1.CellDoc, pre kukeonv1.GetCellResult,
@@ -294,7 +294,8 @@ func restartInPlace(cmd *cobra.Command, client kukeonv1.Client, doc v1beta1.Cell
 // restartStopped is the already-stopped path: equivalent to
 // `kuke start cell <name>`. AC pins this even for OutOfSync stopped cells —
 // reconcile happens only on the Ready+OutOfSync path; an operator wanting to
-// reconcile from Stopped uses `kuke apply -c` directly.
+// reconcile from Stopped starts the cell first and then re-runs
+// `kuke restart cell <name>` to trip the Ready+OutOfSync reconcile.
 func restartStopped(
 	cmd *cobra.Command, client kukeonv1.Client,
 	doc v1beta1.CellDoc, _ kukeonv1.GetCellResult,
@@ -316,7 +317,7 @@ func restartStopped(
 	return nil
 }
 
-// materialiseFromConfig re-runs the `kuke apply -c` materialisation pipeline
+// materialiseFromConfig re-runs the CellConfig materialisation pipeline
 // against the cell's lineage Config: GetConfig + GetBlueprint +
 // cellconfig.Materialize. The cell's stored realm/space/stack supply the
 // lookup scope — a Config materialises a cell into the scope it lives in,

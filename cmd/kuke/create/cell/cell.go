@@ -52,15 +52,18 @@ func NewCellCmd() *cobra.Command {
 			"materialises the full Cell record (containers and all), and " +
 			"persists it in a **stopped** state. Run `kuke start <name>` to " +
 			"start it. Differs from `kuke run -b` (materialise + start + attach) " +
-			"and `kuke apply -b` (reconcile + start) by leaving the cell stopped " +
-			"for later inspection or hand-off.\n" +
+			"by leaving the cell stopped for later inspection or hand-off; " +
+			"-b-lineage cells have no in-place reconcile, so updates flow through " +
+			"delete-and-re-run (or promotion to a CellConfig).\n" +
 			"  - `kuke create cell <name> --from-config <cfg>` — resolves the " +
 			"daemon-stored CellConfig and its referenced Blueprint, applies the " +
 			"Config's spec.values + repo/secret slot fills, materialises the " +
 			"Cell record, and persists it in a **stopped** state. Run " +
 			"`kuke start <name>` to start it. Differs from `kuke run <cfg>` " +
-			"(materialise + start + attach) and `kuke apply -c <cfg>` (reconcile " +
-			"+ start) by leaving the cell stopped.\n\n" +
+			"(materialise + start + attach) by leaving the cell stopped; later " +
+			"reconcile against the lineage Config flows through " +
+			"`kuke restart cell <name>` (OutOfSync-driven, #821) once the cell is " +
+			"started.\n\n" +
 			"--from-blueprint and --from-config are mutually exclusive. --param " +
 			"and --param-file are valid with --from-blueprint (mirroring " +
 			"`kuke run -b`); they are rejected with --from-config because a " +
@@ -349,10 +352,11 @@ func materialiseAndPersist(cmd *cobra.Command, client kukeonv1.Client, cellDoc v
 	case err == nil && pre.MetadataExists:
 		return fmt.Errorf(
 			"cell %q already exists in realm=%q space=%q stack=%q; "+
-				"delete it with `kuke delete cell %s` (or update with `kuke apply -b/-c`) before re-materialising",
+				"delete it with `kuke delete cell %s` (or, for Config-lineage cells, "+
+				"reconcile via `kuke start cell %s` + `kuke restart cell %s`) before re-materialising",
 			cellDoc.Metadata.Name,
 			cellDoc.Spec.RealmID, cellDoc.Spec.SpaceID, cellDoc.Spec.StackID,
-			cellDoc.Metadata.Name,
+			cellDoc.Metadata.Name, cellDoc.Metadata.Name, cellDoc.Metadata.Name,
 		)
 	case err != nil && !errors.Is(err, errdefs.ErrCellNotFound):
 		return err

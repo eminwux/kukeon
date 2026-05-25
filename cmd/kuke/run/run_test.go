@@ -3033,8 +3033,10 @@ func TestRun_FromConfig_DivergentSpec_RefusesAndPointsToApply(t *testing.T) {
 
 	// Simulate divergence by returning a Ready cell whose container image
 	// disagrees with what Materialize(cfg, bp) would build. Per #753 the -c
-	// contract on divergence is to refuse with a `kuke apply -c` pointer, not
-	// warn-and-attach — CreateCell/StartCell must not fire.
+	// contract on divergence is to refuse with a `kuke restart cell <name>`
+	// pointer (#844 retargeted the pointer onto the post-#823 surface; the
+	// removed apply-side reconcile-by-ref form lived behind a single short
+	// flag), not warn-and-attach — CreateCell/StartCell must not fire.
 	fc := &fakeClient{
 		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
 			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
@@ -3080,7 +3082,7 @@ func TestRun_FromConfig_DivergentSpec_RefusesAndPointsToApply(t *testing.T) {
 		`live cell "prod" spec differs from CellConfig "prod"`,
 		`spec.containers["main"].image`,
 		"refusing to attach",
-		"kuke apply -c prod",
+		"kuke restart cell prod",
 		"reconcile",
 	} {
 		if !strings.Contains(err.Error(), want) {
@@ -3095,11 +3097,13 @@ func TestRun_FromConfig_DivergentSpec_RefusesAndPointsToApply(t *testing.T) {
 // TestRun_FromBlueprint_NamedDivergent_RefusesAndPointsToApply covers #753's
 // -b --name addition: a pinned-name `kuke run -b <bp> --name <cell>` against a
 // live cell whose spec has diverged from the materialisation must refuse with
-// a `kuke apply -b <bp> --name <cell>` pointer (mirroring the -c reject), not
-// silently attach to the diverged state. The generated-name path
-// (`kuke run -b <bp>` without --name) is unaffected because each invocation
-// materialises a fresh `<prefix>-<6hex>` cell, so a collision against an
-// existing cell is statistically negligible.
+// a `kuke delete cell <cell>` + re-run pointer (#844 retargeted the pointer
+// onto the post-#823 surface — Blueprint-lineage cells have no implicit
+// reconcile per #819's umbrella, so the message routes to delete-and-re-run
+// rather than a reconcile verb), not silently attach to the diverged state.
+// The generated-name path (`kuke run -b <bp>` without --name) is unaffected
+// because each invocation materialises a fresh `<prefix>-<6hex>` cell, so a
+// collision against an existing cell is statistically negligible.
 func TestRun_FromBlueprint_NamedDivergent_RefusesAndPointsToApply(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
@@ -3138,8 +3142,9 @@ func TestRun_FromBlueprint_NamedDivergent_RefusesAndPointsToApply(t *testing.T) 
 		`live cell "pinned" spec differs from CellBlueprint "web"`,
 		`spec.containers["main"].image`,
 		"refusing to attach",
-		"kuke apply -b web --name pinned",
-		"reconcile",
+		"kuke delete cell pinned",
+		"-b cells have no in-place reconcile",
+		"CellConfig",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("err=%q missing substring %q", err, want)

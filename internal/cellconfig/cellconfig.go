@@ -55,9 +55,10 @@ const AnnotationSourceConfig = "kukeon.io/source-config"
 // `<name>-<hash-of-values>`. The CellConfig contract is "one Config → at most
 // one live cell within scope" with a stable identity that survives edits to the
 // config's values; #753's refuse-on-divergence behavior relies on the stable
-// name so `-c` finds the same live cell across invocations whether it attaches
-// (clean spec match) or refuses with a `kuke apply -c <config>` pointer. A
-// value-hashed suffix would change the derived name on every value edit,
+// name so `kuke run <config>` finds the same live cell across invocations
+// whether it attaches (clean spec match) or refuses with a
+// `kuke restart cell <name>` pointer. A value-hashed suffix would change the
+// derived name on every value edit,
 // spawning a fresh cell and orphaning the old one — defeating the idempotent
 // identity that distinguishes a Config (`run -c`) from a Blueprint's
 // always-fresh `<prefix>-<6hex>` (`run -b`). So the name is value-independent.

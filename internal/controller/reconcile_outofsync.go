@@ -42,7 +42,7 @@ const (
 // `-b`-lineage and hand-built cases are deliberately out of scope per the
 // umbrella). For a Config-lineage cell, the pass re-derives the would-be
 // CellDoc from the daemon-stored Config + its referenced Blueprint via the
-// same `cellconfig.Materialize` call `kuke apply -c`'s CLI-side check
+// same `cellconfig.Materialize` call the CellConfig materialisation path
 // uses, then compares the materialized spec against the live cell with
 // `apply.DiffCell`. The outcome lands on three status fields:
 //
@@ -151,12 +151,11 @@ func lookupLineageConfig(
 	return cfg, true, nil
 }
 
-// materializeCellFromConfig re-runs the `kuke apply -c` materialization
-// pipeline against a daemon-stored Config: decode the Config's body,
-// resolve the referenced Blueprint, then `cellconfig.Materialize` the two.
-// Returns the materialized cell in the same internal-model shape the
-// reconciler's live cell uses, so apply.DiffCell can compare them
-// directly.
+// materializeCellFromConfig re-runs the CellConfig materialization pipeline
+// against a daemon-stored Config: decode the Config's body, resolve the
+// referenced Blueprint, then `cellconfig.Materialize` the two. Returns the
+// materialized cell in the same internal-model shape the reconciler's live
+// cell uses, so apply.DiffCell can compare them directly.
 func materializeCellFromConfig(
 	r runner.Runner, cfg intmodel.CellConfig,
 ) (intmodel.Cell, error) {
