@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	createshared "github.com/eminwux/kukeon/cmd/kuke/create/shared"
@@ -47,6 +48,7 @@ const (
 	OutputFormatYAML  OutputFormat = "yaml"
 	OutputFormatJSON  OutputFormat = "json"
 	OutputFormatTable OutputFormat = "table"
+	OutputFormatWide  OutputFormat = "wide"
 )
 
 // ParseOutputFormat resolves the output format using kuke's standard
@@ -76,10 +78,10 @@ func ParseOutputFormat(cmd *cobra.Command) (OutputFormat, error) {
 	}
 	format := OutputFormat(strings.ToLower(trimmed))
 	switch format {
-	case OutputFormatYAML, OutputFormatJSON, OutputFormatTable:
+	case OutputFormatYAML, OutputFormatJSON, OutputFormatTable, OutputFormatWide:
 		return format, nil
 	default:
-		return OutputFormatTable, fmt.Errorf("invalid output format: %s (supported: yaml, json, table)", output)
+		return OutputFormatTable, fmt.Errorf("invalid output format: %s (supported: yaml, json, table, wide)", output)
 	}
 }
 
@@ -162,15 +164,32 @@ func PrintTable(cmd *cobra.Command, headers []string, rows [][]string) {
 	}
 }
 
-// FormatControllers renders a Status.SubtreeControllers slice for the
-// CONTROLLERS table column emitted by `kuke get <kind> --show-controllers`
-// (issue #328). Empty input renders as "-" so the column never collapses
-// to an unaligned blank cell.
-func FormatControllers(controllers []string) string {
-	if len(controllers) == 0 {
+// RenderAge formats a CreatedAt timestamp as a kubectl-style coarse
+// duration ("5d", "2h", "30s") for the AGE column shared across every
+// `kuke get <kind>` table. The zero time renders as "-" so the column
+// stays width-aligned for resources that have not recorded a creation
+// timestamp yet. Granularity drops a unit at each step (>=1d shows days
+// only, >=1h shows hours only, etc.); sub-second values render as "0s".
+// `now` is injected so tests can pin the reference time.
+func RenderAge(t time.Time, now time.Time) string {
+	if t.IsZero() {
 		return "-"
 	}
-	return strings.Join(controllers, ",")
+	d := now.Sub(t)
+	if d < 0 {
+		d = 0
+	}
+	const day = 24 * time.Hour
+	switch {
+	case d >= day:
+		return fmt.Sprintf("%dd", int(d/day))
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh", int(d/time.Hour))
+	case d >= time.Minute:
+		return fmt.Sprintf("%dm", int(d/time.Minute))
+	default:
+		return fmt.Sprintf("%ds", int(d/time.Second))
+	}
 }
 
 // ControllerFromCmd reuses the controller helper from create/shared.

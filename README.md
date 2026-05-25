@@ -139,16 +139,16 @@ Common workflows for working with realms, spaces, stacks, and cells.
 
 ```bash
 $ sudo kuke get realms
-NAME           NAMESPACE         STATE    CGROUP
-default        kukeon-default    Running  /kukeon/default
-kukeon-system  kukeon-system     Running  /kukeon/kukeon-system
+NAME           STATE    AGE
+default        Ready    <age>
+kukeon-system  Ready    <age>
 
 $ sudo kuke get spaces
-NAME     REALM    STATE    CGROUP
-default  default  Running  /kukeon/default/default
+NAME     REALM    STATE
+default  default  Ready
 ```
 
-Add `-o yaml` or `-o json` for full resource details.
+Add `-o wide` for the per-kind extra columns (realm's wide appends `NAMESPACE`), or `-o yaml` / `-o json` for full resource details (including `cgroupPath`).
 
 ### Run a hello-world cell
 

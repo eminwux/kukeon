@@ -50,13 +50,13 @@ make dev-init
 The daemon-parity tail of the output (the regression guard) must read:
 
 ```
-NAME         NAMESPACE              STATE  CGROUP
------------  ---------------------  -----  -------------------
-default      default.kukeon.io      Ready  /kukeon/default
-kuke-system  kuke-system.kukeon.io  Ready  /kukeon/kuke-system
+NAME         STATE  AGE
+-----------  -----  ---
+default      Ready  <age>
+kuke-system  Ready  <age>
 ```
 
-Both `kuke get realms` and `kuke get realms --no-daemon` must produce that output. If only the `--no-daemon` list is populated, the daemon's view of `/opt/kukeon` diverged from the in-process controller — that's the bind-mount regression this check catches.
+Both `kuke get realms` and `kuke get realms --no-daemon` must produce the same shape (same columns, same rows, same `STATE`); `AGE` may differ by ms between the two invocations but renders at second granularity, so a single re-run normally produces byte-identical output. `NAMESPACE` and `CGROUP` no longer appear in the default table (epic:get retires them); use `kuke get realms -o wide` to append `NAMESPACE`, or `-o yaml`/`-o json` to surface `cgroupPath`. If only the `--no-daemon` list is populated, the daemon's view of `/opt/kukeon` diverged from the in-process controller — that's the bind-mount regression this check catches.
 
 **If your change touches anything the daemon reads, this check must be in the PR's test plan.** Reviewer agent will flag PRs that miss it.
 

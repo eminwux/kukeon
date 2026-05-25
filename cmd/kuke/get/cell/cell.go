@@ -136,8 +136,7 @@ outOfSync / outOfSyncReason / outOfSyncError status fields.`,
 			if err != nil {
 				return err
 			}
-			showControllers, _ := cmd.Flags().GetBool("show-controllers")
-			return printCells(cmd, cells, outputFormat, wide, showControllers)
+			return printCells(cmd, cells, outputFormat, wide)
 		},
 	}
 
@@ -151,10 +150,6 @@ outOfSync / outOfSyncReason / outOfSyncError status fields.`,
 		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
-	cmd.Flags().Bool(
-		"show-controllers", false,
-		"Append a CONTROLLERS column listing the cgroup-v2 controllers delegated on each cell's subtree (issue #328).",
-	)
 
 	cmd.ValidArgsFunction = config.CompleteCellNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
@@ -246,7 +241,6 @@ func printCells(
 	cells []v1beta1.CellDoc,
 	format shared.OutputFormat,
 	wide bool,
-	showControllers bool,
 ) error {
 	switch format {
 	case shared.OutputFormatYAML:
@@ -258,21 +252,14 @@ func printCells(
 			cmd.Println("No cells found.")
 			return nil
 		}
-		headers := []string{"NAME", "REALM", "SPACE", "STACK", "STATE", "SYNC", "CGROUP"}
+		headers := []string{"NAME", "REALM", "SPACE", "STACK", "STATE", "SYNC"}
 		if wide {
 			headers = append(headers, "DIVERGENCE")
-		}
-		if showControllers {
-			headers = append(headers, "CONTROLLERS")
 		}
 		rows := make([][]string, 0, len(cells))
 		for i := range cells {
 			c := &cells[i]
 			state := (&c.Status.State).String()
-			cgroup := c.Status.CgroupPath
-			if cgroup == "" {
-				cgroup = "-"
-			}
 			row := []string{
 				c.Metadata.Name,
 				c.Spec.RealmID,
@@ -280,13 +267,9 @@ func printCells(
 				c.Spec.StackID,
 				state,
 				cellSyncState(c),
-				cgroup,
 			}
 			if wide {
 				row = append(row, cellDivergence(c))
-			}
-			if showControllers {
-				row = append(row, shared.FormatControllers(c.Status.SubtreeControllers))
 			}
 			rows = append(rows, row)
 		}

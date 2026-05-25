@@ -11,10 +11,9 @@ Resources: `realm`, `space`, `stack`, `cell`, `container`, `image`, `blueprint`,
 
 ## Common flags
 
-| Flag                 | Description                                                                                                                                                  |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--output`, `-o`     | Output format: `yaml`, `json`, `table`. Default: `table` for list, `yaml` for a single resource.                                                             |
-| `--show-controllers` | Append a `CONTROLLERS` column listing the cgroup-v2 controllers delegated on the subject's subtree. Off by default to keep the dev-init parity check stable. |
+| Flag             | Description                                                                                                                                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--output`, `-o` | Output format: `yaml`, `json`, `table`, `wide`. Default: `table` for list, `yaml` for a single resource. `wide` accepted by every `kuke get <kind>` for symmetry; per-kind wide columns vary (see each kind). |
 
 Plus all [global flags](kuke.md). Every `kuke get <kind>` accepts the explicit `--no-daemon` flag to bypass the daemon (inherited as a persistent flag from the parent `get` command); `KUKEON_NO_DAEMON=true` and `--run-path /opt/kukeon` (which auto-promotes the command into in-process mode) work as well.
 
@@ -41,12 +40,19 @@ All scope flags default to `default`. See the [realm default note](commands.md#c
 - **Single** (positional arg): returns the one matching resource. Default output is YAML.
 
 ```bash
-# Table of realms — the dev-init parity check expects this exact shape
+# Table of realms — the dev-init parity check expects this column shape
 sudo kuke get realms
-NAME         NAMESPACE              STATE  CGROUP
------------  ---------------------  -----  -------------------
-default      default.kukeon.io      Ready  /kukeon/default
-kuke-system  kuke-system.kukeon.io  Ready  /kukeon/kuke-system
+NAME         STATE  AGE
+-----------  -----  ---
+default      Ready  <age>
+kuke-system  Ready  <age>
+
+# Same data with the namespace surfaced
+sudo kuke get realms -o wide
+NAME         STATE  AGE  NAMESPACE
+-----------  -----  ---  ---------------------
+default      Ready  <a>  default.kukeon.io
+kuke-system  Ready  <a>  kuke-system.kukeon.io
 
 # Single realm as YAML
 sudo kuke get realm default -o yaml
@@ -71,9 +77,6 @@ sudo kuke get image --realm kuke-system -o wide
 
 # Describe a single image as YAML (defaults --realm to `default` on this path)
 sudo kuke get image docker.io/library/nginx:alpine -o yaml
-
-# Show which cgroup controllers are delegated to every realm
-sudo kuke get realms --show-controllers
 
 # List every daemon-stored CellBlueprint bound to the kuke-system realm
 sudo kuke get blueprints --realm kuke-system

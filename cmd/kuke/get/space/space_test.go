@@ -137,6 +137,53 @@ func TestNewSpaceCmd(t *testing.T) {
 	}
 }
 
+// TestNewSpaceCmd_NoCgroupOrControllers pins the epic:get step-1
+// cross-cutting cleanup for spaces: the CGROUP column and the
+// --show-controllers flag must be gone, and -o wide must not resurrect
+// either (sibling #602 owns the per-entity wide columns).
+func TestNewSpaceCmd_NoCgroupOrControllers(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	if space.NewSpaceCmd().Flags().Lookup("show-controllers") != nil {
+		t.Error("show-controllers flag must be removed (issue #827)")
+	}
+
+	listFn := func(_ string) ([]v1beta1.SpaceDoc, error) {
+		return []v1beta1.SpaceDoc{
+			{
+				Metadata: v1beta1.SpaceMetadata{Name: "s1"},
+				Spec:     v1beta1.SpaceSpec{RealmID: "r1"},
+				Status: v1beta1.SpaceStatus{
+					CgroupPath:         "/kukeon/r1/s1",
+					SubtreeControllers: []string{"cpu", "memory"},
+				},
+			},
+		}, nil
+	}
+
+	for _, args := range [][]string{nil, {"-o", "wide"}} {
+		buf := &bytes.Buffer{}
+		cmd := space.NewSpaceCmd()
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+		ctx = context.WithValue(ctx, space.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{listSpacesFn: listFn}))
+		cmd.SetContext(ctx)
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("args=%v: unexpected error: %v", args, err)
+		}
+		out := buf.String()
+		for _, denied := range []string{"CGROUP", "CONTROLLERS"} {
+			if strings.Contains(out, denied) {
+				t.Errorf("args=%v: output must NOT contain %q; got:\n%s", args, denied, out)
+			}
+		}
+	}
+}
+
 type fakeClient struct {
 	kukeonv1.FakeClient
 

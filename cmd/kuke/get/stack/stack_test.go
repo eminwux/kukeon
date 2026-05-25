@@ -136,6 +136,53 @@ func TestNewStackCmd(t *testing.T) {
 	}
 }
 
+// TestNewStackCmd_NoCgroupOrControllers pins the epic:get step-1
+// cross-cutting cleanup for stacks: the CGROUP column and the
+// --show-controllers flag must be gone, and -o wide is accepted as a
+// valid output value (no error) while currently rendering the same
+// shape as default (sibling #603 leaves wide deliberately equal to
+// default for stacks).
+func TestNewStackCmd_NoCgroupOrControllers(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	if stack.NewStackCmd().Flags().Lookup("show-controllers") != nil {
+		t.Error("show-controllers flag must be removed (issue #827)")
+	}
+
+	listFn := func(_, _ string) ([]v1beta1.StackDoc, error) {
+		return []v1beta1.StackDoc{{
+			Metadata: v1beta1.StackMetadata{Name: "st1"},
+			Spec:     v1beta1.StackSpec{RealmID: "r1", SpaceID: "s1"},
+			Status: v1beta1.StackStatus{
+				CgroupPath:         "/kukeon/r1/s1/st1",
+				SubtreeControllers: []string{"cpu", "memory"},
+			},
+		}}, nil
+	}
+
+	for _, args := range [][]string{nil, {"-o", "wide"}} {
+		buf := &bytes.Buffer{}
+		cmd := stack.NewStackCmd()
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+		ctx = context.WithValue(ctx, stack.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{listStacksFn: listFn}))
+		cmd.SetContext(ctx)
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("args=%v: unexpected error: %v", args, err)
+		}
+		out := buf.String()
+		for _, denied := range []string{"CGROUP", "CONTROLLERS"} {
+			if strings.Contains(out, denied) {
+				t.Errorf("args=%v: output must NOT contain %q; got:\n%s", args, denied, out)
+			}
+		}
+	}
+}
+
 type fakeClient struct {
 	kukeonv1.FakeClient
 

@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
@@ -82,19 +83,14 @@ func NewRealmCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			showControllers, _ := cmd.Flags().GetBool("show-controllers")
-			return printRealms(cmd, realms, outputFormat, showControllers)
+			return printRealms(cmd, realms, outputFormat)
 		},
 	}
 
 	cmd.Flags().
-		StringP("output", "o", "", "Output format (yaml, json, table). Default: table for list, yaml for single resource")
+		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
-	cmd.Flags().Bool(
-		"show-controllers", false,
-		"Append a CONTROLLERS column listing the cgroup-v2 controllers delegated on each realm's subtree (issue #328). Off by default to keep the default table the daemon-parity dev-init regression guard expects.",
-	)
 
 	// `--no-daemon` is inherited as a persistent flag from the parent `get`
 	// command (registered in cmd/kuke/get/get.go) — every `get <kind>`
@@ -129,33 +125,30 @@ func printRealms(
 	cmd *cobra.Command,
 	realms []v1beta1.RealmDoc,
 	format shared.OutputFormat,
-	showControllers bool,
 ) error {
 	switch format {
 	case shared.OutputFormatYAML:
 		return shared.PrintYAML(cmd, realms)
 	case shared.OutputFormatJSON:
 		return shared.PrintJSON(cmd, realms)
-	case shared.OutputFormatTable:
+	case shared.OutputFormatTable, shared.OutputFormatWide:
 		if len(realms) == 0 {
 			cmd.Println("No realms found.")
 			return nil
 		}
-		headers := []string{"NAME", "NAMESPACE", "STATE", "CGROUP"}
-		if showControllers {
-			headers = append(headers, "CONTROLLERS")
+		wide := format == shared.OutputFormatWide
+		headers := []string{"NAME", "STATE", "AGE"}
+		if wide {
+			headers = append(headers, "NAMESPACE")
 		}
+		now := time.Now()
 		rows := make([][]string, 0, len(realms))
 		for i := range realms {
 			r := &realms[i]
 			state := (&r.Status.State).String()
-			cgroup := r.Status.CgroupPath
-			if cgroup == "" {
-				cgroup = "-"
-			}
-			row := []string{r.Metadata.Name, r.Spec.Namespace, state, cgroup}
-			if showControllers {
-				row = append(row, shared.FormatControllers(r.Status.SubtreeControllers))
+			row := []string{r.Metadata.Name, state, shared.RenderAge(r.Status.CreatedAt, now)}
+			if wide {
+				row = append(row, r.Spec.Namespace)
 			}
 			rows = append(rows, row)
 		}
