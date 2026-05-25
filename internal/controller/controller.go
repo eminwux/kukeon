@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/eminwux/kukeon/internal/consts"
@@ -210,29 +211,47 @@ func (b *Exec) Bootstrap() (BootstrapReport, error) {
 	// System cell: kukeond. Provisioned only when an image is configured (lets
 	// callers opt out in tests / non-daemon setups).
 	if b.opts.KukeondImage != "" {
-		if err = ensureSocketDir(b.opts.KukeondSocket); err != nil {
+		cellSection, err := b.ProvisionKukeondCell()
+		if err != nil {
 			return report, err
 		}
-		if err = ensureCNIStateDir(); err != nil {
-			return report, err
-		}
-		if err = ensureServerConfigurationDir(b.opts.KukeondConfiguration); err != nil {
-			return report, err
-		}
-		cellDoc := kukeondCellDoc(
-			b.opts.KukeondImage,
-			b.opts.KukeondSocket,
-			b.opts.RunPath,
-			b.opts.ContainerdSocket,
-			b.opts.KukeondSocketGID,
-			b.opts.KukeondConfiguration,
-		)
-		if err = b.bootstrapCell(&report.SystemCell, cellDoc); err != nil {
-			return report, err
-		}
+		report.SystemCell = cellSection
 	}
 
 	return report, nil
+}
+
+// ProvisionKukeondCell creates the kukeond daemon cell using the same
+// cell-creation path that `kuke init`'s Bootstrap exercises. Factored out so
+// `kuke daemon recreate` cannot drift from `kuke init` on the kukeond
+// provisioning logic — both verbs call this single helper.
+func (b *Exec) ProvisionKukeondCell() (CellSection, error) {
+	var section CellSection
+
+	if b.opts.KukeondImage == "" {
+		return section, fmt.Errorf("kukeond image is required for cell provisioning")
+	}
+	if err := ensureSocketDir(b.opts.KukeondSocket); err != nil {
+		return section, err
+	}
+	if err := ensureCNIStateDir(); err != nil {
+		return section, err
+	}
+	if err := ensureServerConfigurationDir(b.opts.KukeondConfiguration); err != nil {
+		return section, err
+	}
+	cellDoc := kukeondCellDoc(
+		b.opts.KukeondImage,
+		b.opts.KukeondSocket,
+		b.opts.RunPath,
+		b.opts.ContainerdSocket,
+		b.opts.KukeondSocketGID,
+		b.opts.KukeondConfiguration,
+	)
+	if err := b.bootstrapCell(&section, cellDoc); err != nil {
+		return section, err
+	}
+	return section, nil
 }
 
 // Close closes the controller and releases all resources, including the containerd connection.
