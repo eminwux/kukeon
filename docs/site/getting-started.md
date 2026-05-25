@@ -86,8 +86,8 @@ NAME    REALM        STATE  AGE
 kukeon  kuke-system  Ready  <age>
 
 $ kuke get stacks --realm kuke-system --space kukeon
-NAME    REALM        SPACE   STATE
-kukeon  kuke-system  kukeon  Ready
+NAME    REALM        SPACE   STATE  AGE
+kukeon  kuke-system  kukeon  Ready  <age>
 ```
 
 Add `-o wide` for per-kind extra columns (e.g. realm gains `NAMESPACE`), or `-o yaml` / `-o json` for full resource details (including `cgroupPath`).

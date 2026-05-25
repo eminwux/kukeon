@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	stack "github.com/eminwux/kukeon/cmd/kuke/get/stack"
 	"github.com/eminwux/kukeon/cmd/types"
@@ -136,26 +137,30 @@ func TestNewStackCmd(t *testing.T) {
 	}
 }
 
-// TestNewStackCmd_NoCgroupOrControllers pins the epic:get step-1
-// cross-cutting cleanup for stacks: the CGROUP column and the
-// --show-controllers flag must be gone, and -o wide is accepted as a
-// valid output value (no error) while currently rendering the same
-// shape as default (sibling #603 leaves wide deliberately equal to
-// default for stacks).
-func TestNewStackCmd_NoCgroupOrControllers(t *testing.T) {
+// TestNewStackCmd_Columns pins the epic:get step-3 (#603) column
+// contract for `kuke get stack`: default and `-o wide` both emit
+// `NAME REALM SPACE STATE AGE` — stack carries no per-entity wide
+// columns beyond hierarchy pointers, so wide deliberately renders
+// the same shape as default. Also re-pins the cross-cutting epic
+// invariants from #827: the `CGROUP`/`CONTROLLERS` columns and the
+// `--show-controllers` flag stay gone.
+func TestNewStackCmd_Columns(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	if stack.NewStackCmd().Flags().Lookup("show-controllers") != nil {
 		t.Error("show-controllers flag must be removed (issue #827)")
 	}
 
+	created := time.Now().Add(-2 * time.Hour)
 	listFn := func(_, _ string) ([]v1beta1.StackDoc, error) {
 		return []v1beta1.StackDoc{{
 			Metadata: v1beta1.StackMetadata{Name: "st1"},
 			Spec:     v1beta1.StackSpec{RealmID: "r1", SpaceID: "s1"},
 			Status: v1beta1.StackStatus{
+				State:              v1beta1.StackStateReady,
 				CgroupPath:         "/kukeon/r1/s1/st1",
 				SubtreeControllers: []string{"cpu", "memory"},
+				CreatedAt:          created,
 			},
 		}}, nil
 	}
@@ -175,12 +180,31 @@ func TestNewStackCmd_NoCgroupOrControllers(t *testing.T) {
 			t.Fatalf("args=%v: unexpected error: %v", args, err)
 		}
 		out := buf.String()
+		header := firstLine(out)
+		for _, want := range []string{"NAME", "REALM", "SPACE", "STATE", "AGE"} {
+			if !strings.Contains(header, want) {
+				t.Errorf("args=%v: header missing %q; got: %q", args, want, header)
+			}
+		}
 		for _, denied := range []string{"CGROUP", "CONTROLLERS"} {
 			if strings.Contains(out, denied) {
 				t.Errorf("args=%v: output must NOT contain %q; got:\n%s", args, denied, out)
 			}
 		}
+		// AGE value rendered against a 2h-old timestamp must surface
+		// the kubectl-style coarse duration (RenderAge floors to the
+		// largest unit), not the raw RFC3339 timestamp.
+		if !strings.Contains(out, "2h") {
+			t.Errorf("args=%v: expected AGE column to render \"2h\" for a 2h-old stack; got:\n%s", args, out)
+		}
 	}
+}
+
+func firstLine(s string) string {
+	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+		return s[:idx]
+	}
+	return s
 }
 
 type fakeClient struct {

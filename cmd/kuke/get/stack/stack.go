@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
@@ -154,15 +155,21 @@ func printStacks(
 			cmd.Println("No stacks found.")
 			return nil
 		}
-		// Stack has no per-entity wide columns (#603 deliberately leaves
-		// -o wide rendering the same shape as default); this step only
-		// retires CGROUP/CONTROLLERS.
-		headers := []string{"NAME", "REALM", "SPACE", "STATE"}
+		// Stack has no per-entity wide columns — `-o wide` renders the
+		// same shape as default (#603). Investigation drops to -o yaml.
+		headers := []string{"NAME", "REALM", "SPACE", "STATE", "AGE"}
+		now := time.Now()
 		rows := make([][]string, 0, len(stacks))
 		for i := range stacks {
 			s := &stacks[i]
 			state := (&s.Status.State).String()
-			rows = append(rows, []string{s.Metadata.Name, s.Spec.RealmID, s.Spec.SpaceID, state})
+			rows = append(rows, []string{
+				s.Metadata.Name,
+				s.Spec.RealmID,
+				s.Spec.SpaceID,
+				state,
+				shared.RenderAge(s.Status.CreatedAt, now),
+			})
 		}
 		shared.PrintTable(cmd, headers, rows)
 		return nil
