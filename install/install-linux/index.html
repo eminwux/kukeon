@@ -3183,10 +3183,11 @@
 </code></pre></div>
 <p><code>kuke init</code> should have left the daemon listening on <code>/run/kukeon/kukeond.sock</code> and the canonical two-realm hierarchy provisioned:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>$<span class="w"> </span>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realms
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>NAME<span class="w">         </span>NAMESPACE<span class="w">              </span>STATE<span class="w">  </span>CGROUP
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>default<span class="w">      </span>default.kukeon.io<span class="w">      </span>Ready<span class="w">  </span>/kukeon/default
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>kuke-system<span class="w">  </span>kuke-system.kukeon.io<span class="w">  </span>Ready<span class="w">  </span>/kukeon/kuke-system
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>NAME<span class="w">         </span>STATE<span class="w">  </span>AGE
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>default<span class="w">      </span>Ready<span class="w">  </span>&lt;age&gt;
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>kuke-system<span class="w">  </span>Ready<span class="w">  </span>&lt;age&gt;
 </code></pre></div>
+<p><code>kuke get realms -o wide</code> appends the containerd <code>NAMESPACE</code> column; <code>-o yaml</code> / <code>-o json</code> surface <code>cgroupPath</code> for the operator who wants to walk the cgroup-v2 hierarchy by hand.</p>
 <p><code>default</code> is the user-workload realm — <code>kuke create …</code> lands here by default. <code>kuke-system</code> is owned by Kukeon itself and hosts the <code>kukeond</code> daemon cell.</p>
 <h2 id="daily-use-without-sudo">Daily use without sudo<a class="headerlink" href="#daily-use-without-sudo" title="Permanent link">&para;</a></h2>
 <p><code>kuke init</code> provisions a system <code>kukeon</code> group and sets the kukeond socket to mode <code>0660 root:kukeon</code>. Add yourself to the group so daemon-routed commands (<code>kuke get</code>, <code>kuke create</code>, <code>kuke apply</code>, <code>kuke delete</code>, <code>kuke log</code>, <code>kuke attach</code>) don't need <code>sudo</code>:</p>
@@ -3233,7 +3234,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 17, 2026 17:44:44 UTC">May 17, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 25, 2026 18:07:31 UTC">May 25, 2026</span>
   </span>
 
     
