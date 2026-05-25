@@ -722,8 +722,9 @@ type AttachContainerResult struct {
 	// HostSocketPath is the host path of the per-container sbsh terminal
 	// socket. Inside the container the same inode is reachable at
 	// /run/kukeon/tty/socket via the tty directory bind mount. Returned only
-	// when the target container has Attachable=true; otherwise the daemon
-	// errors with ErrAttachNotSupported.
+	// when the target container has Attachable=true and its task is Running;
+	// the daemon errors with ErrAttachNotSupported when the target is not
+	// Attachable, or ErrAttachTaskNotRunning when the task is not Running.
 	HostSocketPath string
 }
 
