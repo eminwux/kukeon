@@ -1841,34 +1841,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#blueprints-and-configs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Blueprints and Configs
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Blueprints and Configs">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#lineage-check-refusing-silent-takeover" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Lineage check (refusing silent takeover)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#exit-codes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3084,34 +3056,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#blueprints-and-configs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Blueprints and Configs
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Blueprints and Configs">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#lineage-check-refusing-silent-takeover" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Lineage check (refusing silent takeover)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#exit-codes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3165,15 +3109,10 @@
 
 
 <h1 id="kuke-apply">kuke apply<a class="headerlink" href="#kuke-apply" title="Permanent link">&para;</a></h1>
-<p>Reconcile the host to one of three source types:</p>
-<ul>
-<li><code>-f &lt;file&gt;</code> — a YAML manifest (or <code>-</code> for stdin), possibly multi-document. Kukeon reconciles each resource in the file.</li>
-<li><code>-b &lt;blueprint&gt;</code> — a daemon-stored CellBlueprint, resolved by name in the scope named by <code>--realm</code>/<code>--space</code>/<code>--stack</code>. Substitutes scalar <code>--param</code> values, materializes a cell spec, and reconciles it against the live cell.</li>
-<li><code>-c &lt;config&gt;</code> — a daemon-stored CellConfig, resolved from the same scope. Materializes the Config's cell spec (stable-named) and reconciles it against the live cell.</li>
-</ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke apply (-f &lt;file&gt; | -b &lt;blueprint&gt; | -c &lt;config&gt;) [flags]
+<p>Reconcile the host from a YAML manifest:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke apply -f &lt;file&gt; [flags]
 </code></pre></div>
-<p>The <code>-b</code>/<code>-c</code> forms route the materialised cell through the same daemon-side reconcile path as <code>-f</code>: a missing cell is created and started; an identical live cell is a no-op; a divergent live cell is stopped, updated, and started (no attach). Equivalent specs from <code>-f</code>, <code>-b</code>, or <code>-c</code> all converge on the same diff. To create-and-attach instead of reconcile, use <a href="../kuke-run/"><code>kuke run</code></a>.</p>
+<p><code>kuke apply</code> reads a YAML manifest (possibly multi-document), reconciles each resource against the live cluster, and reports what changed. To create-and-attach instead of reconcile, use <a href="../kuke-run/"><code>kuke run</code></a>.</p>
 <h2 id="flags">Flags<a class="headerlink" href="#flags" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -3186,48 +3125,8 @@
 <tbody>
 <tr>
 <td><code>--file</code>, <code>-f</code></td>
-<td><em>(one of <code>-f</code>/<code>-b</code>/<code>-c</code>)</em></td>
-<td>Path to a YAML file, or <code>-</code> for stdin; mutually exclusive with <code>-b</code>/<code>-c</code></td>
-</tr>
-<tr>
-<td><code>--blueprint</code>, <code>-b</code></td>
-<td><em>(one of <code>-f</code>/<code>-b</code>/<code>-c</code>)</em></td>
-<td>Daemon-stored CellBlueprint name to reconcile, resolved from the scope named by <code>--realm</code>/<code>--space</code>/<code>--stack</code>; mutually exclusive with <code>-f</code>/<code>-c</code>. Substitutes scalar <code>--param</code> values; without <code>--name</code>, materializes a fresh <code>&lt;prefix&gt;-&lt;6hex&gt;</code> cell name</td>
-</tr>
-<tr>
-<td><code>--config</code>, <code>-c</code></td>
-<td><em>(one of <code>-f</code>/<code>-b</code>/<code>-c</code>)</em></td>
-<td>Daemon-stored CellConfig name to reconcile, resolved from the same scope; mutually exclusive with <code>-f</code>/<code>-b</code>. The cell name is the Config's deterministic stable name unless <code>--name</code> overrides it. Rejects <code>--param</code>/<code>--param-file</code> (edit the Config's <code>spec.values</code> instead)</td>
-</tr>
-<tr>
-<td><code>--name</code></td>
-<td><code>&lt;prefix&gt;-&lt;6hex&gt;</code> (<code>-b</code>) / Config's stable name (<code>-c</code>)</td>
-<td>Override the materialized cell name. Valid with <code>-b</code>/<code>-c</code>; rejected with <code>-f</code> (where <code>metadata.name</code> is the cell name verbatim)</td>
-</tr>
-<tr>
-<td><code>--param</code></td>
-<td>(empty, repeatable)</td>
-<td>Scalar parameter override as <code>KEY=VALUE</code>. Valid with <code>-b</code> only. Each <code>KEY</code> must be declared in <code>spec.parameters[]</code>. Wins over the parameter's default and over <code>--param-file</code> on the same key. Rejected with <code>-c</code> — a CellConfig carries its own <code>spec.values</code>; edit the Config instead. Rejected with <code>-f</code></td>
-</tr>
-<tr>
-<td><code>--param-file</code></td>
-<td>(empty)</td>
-<td>File of <code>KEY=VALUE</code> lines whose values seed scalar parameters; one per line, <code>#</code> starts a comment. Valid with <code>-b</code> only. CLI <code>--param</code> wins on duplicate keys. Rejected with <code>-c</code> (same reason as <code>--param</code>) and with <code>-f</code></td>
-</tr>
-<tr>
-<td><code>--realm</code></td>
-<td><code>default</code></td>
-<td>Realm to resolve the Blueprint/Config from</td>
-</tr>
-<tr>
-<td><code>--space</code></td>
-<td>(unset)</td>
-<td>Space to resolve the Blueprint/Config from</td>
-</tr>
-<tr>
-<td><code>--stack</code></td>
-<td>(unset)</td>
-<td>Stack to resolve the Blueprint/Config from</td>
+<td><em>(required)</em></td>
+<td>Path to a YAML file, or <code>-</code> for stdin</td>
 </tr>
 <tr>
 <td><code>--output</code>, <code>-o</code></td>
@@ -3237,20 +3136,16 @@
 </tbody>
 </table>
 <p>Plus all <a href="../kuke/">global flags</a>.</p>
-<p><code>-f</code>, <code>-b</code>, and <code>-c</code> are mutually exclusive; exactly one is required.</p>
 <h2 id="input">Input<a class="headerlink" href="#input" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Single document</strong> (<code>-f</code>): one resource.</li>
-<li><strong>Multi-document</strong> (<code>-f</code>): any number of resources separated by <code>---</code>. Kukeon applies them in dependency order (realm → space → stack → cell → container), regardless of the order in the file.</li>
+<li><strong>Single document</strong>: one resource.</li>
+<li><strong>Multi-document</strong>: any number of resources separated by <code>---</code>. Kukeon applies them in dependency order (realm → space → stack → cell → container), regardless of the order in the file.</li>
 <li><strong>Stdin</strong> (<code>-f -</code>): reads the manifest from stdin, so piping works:</li>
 </ul>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cat<span class="w"> </span>cell.yaml<span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>-
 </code></pre></div>
-<ul>
-<li><strong>Daemon-stored ref</strong> (<code>-b</code>/<code>-c</code>): the daemon reads the named Blueprint or Config from its own store, materializes one Cell spec, and reconciles it. Equivalent to writing the materialized YAML to a file and running <code>kuke apply -f</code>, with the lineage check below applied on top.</li>
-</ul>
 <h2 id="per-resource-outcome">Per-resource outcome<a class="headerlink" href="#per-resource-outcome" title="Permanent link">&para;</a></h2>
-<p>For each resource in the manifest (or for the single materialised cell on <code>-b</code>/<code>-c</code>), <code>apply</code> emits one of:</p>
+<p>For each resource in the manifest, <code>apply</code> emits one of:</p>
 <ul>
 <li><code>created</code> — resource didn't exist; created.</li>
 <li><code>updated</code> — resource existed with a different spec; reconciled. The printed diff follows.</li>
@@ -3264,49 +3159,11 @@
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>Cell<span class="w"> </span><span class="s2">&quot;wp&quot;</span>:<span class="w"> </span>created
 </code></pre></div>
 <h2 id="idempotence">Idempotence<a class="headerlink" href="#idempotence" title="Permanent link">&para;</a></h2>
-<p>Applying the same manifest twice is safe. The second run should report <code>unchanged</code> for every resource. The same holds for <code>-b</code> (with <code>--name</code> pinned) and for <code>-c</code> (whose stable name pins the cell identity automatically).</p>
-<h2 id="blueprints-and-configs">Blueprints and Configs<a class="headerlink" href="#blueprints-and-configs" title="Permanent link">&para;</a></h2>
-<p><code>-b</code>/<code>--blueprint</code> and <code>-c</code>/<code>--config</code> reconcile a single Cell materialised from a daemon-stored template instead of from an on-disk file. They are resolved by name in the scope named by <code>--realm</code>/<code>--space</code>/<code>--stack</code> — the same lookup <code>kuke get blueprint &lt;name&gt;</code> / <code>kuke get config &lt;name&gt;</code> performs. <code>--realm</code> defaults to <code>default</code>; <code>--space</code> and <code>--stack</code> are unset by default, so a realm-scoped Blueprint/Config (no space or stack coordinate) is findable without flags.</p>
-<p>The two verbs cover different operator workflows:</p>
-<ul>
-<li><strong><code>-b &lt;blueprint&gt;</code> — reconcile from a template + params.</strong> A CellBlueprint is a template with declared <code>spec.parameters[]</code>. <code>kuke apply -b</code> resolves the Blueprint, layers <code>--param-file</code> then <code>--param KEY=VALUE</code> over the parameter defaults, materializes a Cell, and reconciles it. Without <code>--name</code>, the materialized cell name is a fresh <code>&lt;prefix&gt;-&lt;6hex&gt;</code> — pin it with <code>--name</code> for idempotent re-apply.</li>
-<li><strong><code>-c &lt;config&gt;</code> — reconcile from a Config.</strong> A CellConfig binds a CellBlueprint reference to concrete scalar values plus structural slot fills (repo bindings, secret references). The cell name is the Config's stable name. <code>--param</code>/<code>--param-file</code> are rejected with <code>-c</code> because the Config already owns its values — edit the Config instead. <code>--name</code> is permitted but the Config's stable name is the safe default.</li>
-</ul>
-<p>Unlike <a href="../kuke-run/#identity-state-machine-for--c"><code>kuke run -c</code></a>, <code>kuke apply -c</code> does <strong>not</strong> attach to the live cell after reconciling, does <strong>not</strong> distinguish stopped from running (it converges spec, not lifecycle), and <strong>does</strong> rewrite a live cell whose spec differs from the current materialisation. To attach to the materialised cell after <code>apply</code>, use <a href="../kuke-attach/"><code>kuke attach &lt;cell&gt;</code></a>.</p>
-<h3 id="lineage-check-refusing-silent-takeover">Lineage check (refusing silent takeover)<a class="headerlink" href="#lineage-check-refusing-silent-takeover" title="Permanent link">&para;</a></h3>
-<p>Before reconciling on <code>-b</code>/<code>-c</code>, <code>apply</code> reads the live cell at the materialised name and refuses to proceed unless its lineage matches the source the operator named:</p>
-<table>
-<thead>
-<tr>
-<th>Live cell</th>
-<th>Behavior</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>No cell with that name</td>
-<td>Nothing to overwrite — reconcile proceeds (create-and-start).</td>
-</tr>
-<tr>
-<td>Carries the matching label (<code>kukeon.io/blueprint=&lt;name&gt;</code> for <code>-b</code>, or <code>kukeon.io/config=&lt;name&gt;</code> for <code>-c</code>)</td>
-<td>Reconcile proceeds.</td>
-</tr>
-<tr>
-<td>Carries a different lineage label (a sibling Blueprint or Config)</td>
-<td>Refused: <code>cell "&lt;name&gt;" exists with lineage kukeon.io/{blueprint,config}=&lt;other&gt;; refusing to reconcile against &lt;wantKey&gt;=&lt;wantValue&gt;</code>.</td>
-</tr>
-<tr>
-<td>Carries no lineage label (hand-built cell)</td>
-<td>Refused: <code>cell "&lt;name&gt;" exists with lineage no lineage label; refusing to reconcile against &lt;wantKey&gt;=&lt;wantValue&gt;</code>.</td>
-</tr>
-</tbody>
-</table>
-<p>So <code>kuke apply -b/-c</code> never silently takes over an unrelated cell. To intentionally overwrite, delete the existing cell first (<code>kuke delete cell &lt;name&gt;</code>) and re-run <code>apply</code>.</p>
-<p>See <a href="../../manifests/blueprint/"><code>kind: CellBlueprint</code></a> and <a href="../../manifests/config/"><code>kind: CellConfig</code></a> for the full manifest reference.</p>
+<p>Applying the same manifest twice is safe. The second run should report <code>unchanged</code> for every resource.</p>
 <h2 id="exit-codes">Exit codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>0</code> — every resource succeeded.</li>
-<li>non-zero — at least one resource failed (or the lineage check refused). Other resources may have succeeded; check the output.</li>
+<li>non-zero — at least one resource failed. Other resources may have succeeded; check the output.</li>
 </ul>
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Single file</span>
@@ -3333,12 +3190,6 @@
 <a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>
 <a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a><span class="c1"># JSON output for scripting</span>
 <a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>cell.yaml<span class="w"> </span>-o<span class="w"> </span>json
-<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>
-<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a><span class="c1"># Reconcile from a daemon-stored CellBlueprint with a scalar param override and a pinned name (idempotent)</span>
-<a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-b<span class="w"> </span>dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>--name<span class="w"> </span>dev-shell<span class="w"> </span>--param<span class="w"> </span><span class="nv">PROJECT_DIR</span><span class="o">=</span>kukeon
-<a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a>
-<a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a><span class="c1"># Reconcile from a daemon-stored CellConfig (stable-named; safe to re-run)</span>
-<a id="__codelineno-3-30" name="__codelineno-3-30" href="#__codelineno-3-30"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-c<span class="w"> </span>kukeon-dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system
 </code></pre></div>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
@@ -3369,7 +3220,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 23, 2026 15:31:27 UTC">May 23, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 25, 2026 15:25:50 UTC">May 25, 2026</span>
   </span>
 
     
