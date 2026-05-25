@@ -67,30 +67,46 @@ func TestDaemonReset(t *testing.T) {
 	}{
 		{
 			name: "running cell is gracefully stopped, deleted, sock+pid cleared",
-			fake: &fakeClient{
-				getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-					assertKukeondTarget(t, doc)
-					return kukeonv1.GetCellResult{
-						Cell: v1beta1.CellDoc{
-							Status: v1beta1.CellStatus{
-								State: v1beta1.CellStateReady,
-								Containers: []v1beta1.ContainerStatus{
-									{State: v1beta1.ContainerStateReady},
+			fake: func() *fakeClient {
+				// GetCell is called twice on this path: once by runReset to
+				// pick the stop branch (returns Ready), and once by
+				// lifecycle.StopPhase's post-stop verification (issue #868)
+				// to confirm the task is actually gone (returns Stopped).
+				var getCalls int
+				return &fakeClient{
+					getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+						assertKukeondTarget(t, doc)
+						getCalls++
+						if getCalls == 1 {
+							return kukeonv1.GetCellResult{
+								Cell: v1beta1.CellDoc{
+									Status: v1beta1.CellStatus{
+										State: v1beta1.CellStateReady,
+										Containers: []v1beta1.ContainerStatus{
+											{State: v1beta1.ContainerStateReady},
+										},
+									},
 								},
+								MetadataExists: true,
+							}, nil
+						}
+						return kukeonv1.GetCellResult{
+							Cell: v1beta1.CellDoc{
+								Status: v1beta1.CellStatus{State: v1beta1.CellStateStopped},
 							},
-						},
-						MetadataExists: true,
-					}, nil
-				},
-				stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
-					assertKukeondTarget(t, doc)
-					return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
-				},
-				deleteCellFn: func(doc v1beta1.CellDoc) (kukeonv1.DeleteCellResult, error) {
-					assertKukeondTarget(t, doc)
-					return kukeonv1.DeleteCellResult{Cell: doc, MetadataDeleted: true}, nil
-				},
-			},
+							MetadataExists: true,
+						}, nil
+					},
+					stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+						assertKukeondTarget(t, doc)
+						return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
+					},
+					deleteCellFn: func(doc v1beta1.CellDoc) (kukeonv1.DeleteCellResult, error) {
+						assertKukeondTarget(t, doc)
+						return kukeonv1.DeleteCellResult{Cell: doc, MetadataDeleted: true}, nil
+					},
+				}
+			}(),
 			wantOutputs: []string{
 				`kukeond stopped (cell "kukeond" in realm "kuke-system")`,
 				`kukeond cell deleted (cell "kukeond" in realm "kuke-system")`,
@@ -660,6 +676,146 @@ func TestDaemonReset_GracefulTimeoutEscalatesToKill(t *testing.T) {
 	}
 	if !strings.Contains(out, "kukeond cell deleted") {
 		t.Errorf("output missing delete-phase notice; got:\n%s", out)
+	}
+}
+
+// TestDaemonReset_StopSucceedsButTaskSurvivesEscalatesToKill covers issue
+// #868's reset-path AC: when StopCell returns Stopped=true but a container
+// task remains Ready (the soft-fail mode where the runner's per-container
+// StopContainer errors are logged-and-continue rather than aggregated into
+// the StopCell result), the verb must escalate to KillCell before
+// DeleteCell — otherwise the subsequent `kuke init --kukeond-image <new>`
+// races a surviving daemon task and silently restarts the stale binary.
+func TestDaemonReset_StopSucceedsButTaskSurvivesEscalatesToKill(t *testing.T) {
+	withFreshViper(t)
+
+	var (
+		killCalled   atomicBool
+		deleteCalled atomicBool
+		getCalls     int
+	)
+
+	fake := &fakeClient{
+		// Pre-stop GetCell #1 returns Ready (drives the StopPhase branch).
+		// Post-stop GetCell #2 still returns Ready — the StopCell call
+		// "succeeded" but the task never went away. Post-kill GetCell #3
+		// returns Stopped so the verification gate clears.
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			getCalls++
+			if getCalls < 3 {
+				return kukeonv1.GetCellResult{
+					Cell: v1beta1.CellDoc{
+						Status: v1beta1.CellStatus{
+							State: v1beta1.CellStateReady,
+							Containers: []v1beta1.ContainerStatus{
+								{State: v1beta1.ContainerStateReady},
+							},
+						},
+					},
+					MetadataExists: true,
+				}, nil
+			}
+			return kukeonv1.GetCellResult{
+				Cell: v1beta1.CellDoc{
+					Status: v1beta1.CellStatus{State: v1beta1.CellStateStopped},
+				},
+				MetadataExists: true,
+			}, nil
+		},
+		stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+			return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
+		},
+		killCellFn: func(doc v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+			killCalled.Store(true)
+			return kukeonv1.KillCellResult{Cell: doc, Killed: true}, nil
+		},
+		deleteCellFn: func(doc v1beta1.CellDoc) (kukeonv1.DeleteCellResult, error) {
+			deleteCalled.Store(true)
+			return kukeonv1.DeleteCellResult{Cell: doc, MetadataDeleted: true}, nil
+		},
+	}
+
+	cmd := reset.NewResetCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, reset.MockSocketDirKey{}, t.TempDir())
+	ctx = context.WithValue(ctx, reset.MockRunPathKey{}, t.TempDir())
+	cmd.SetContext(ctx)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !killCalled.Load() {
+		t.Fatal("KillCell must be escalated when post-stop verification still sees a Ready container")
+	}
+	if !deleteCalled.Load() {
+		t.Fatal("DeleteCell must run after the escalation clears the surviving task")
+	}
+	out := buf.String()
+	if !strings.Contains(out, "force-killed after stop returned success but task survived") {
+		t.Errorf("output missing escalation notice; got:\n%s", out)
+	}
+	if !strings.Contains(out, "kukeond cell deleted") {
+		t.Errorf("output missing delete-phase notice; got:\n%s", out)
+	}
+}
+
+// TestDaemonReset_StopSucceedsAndKillCannotClearSurvivor covers the hard
+// failure path of the post-stop verification: if even KillCell cannot kill
+// the surviving task, the verb must surface a clear error so the operator
+// is told that DeleteCell would race a live shim instead of proceeding
+// blind to it. Issue #868.
+func TestDaemonReset_StopSucceedsAndKillCannotClearSurvivor(t *testing.T) {
+	withFreshViper(t)
+
+	fake := &fakeClient{
+		// Every GetCell returns Ready — the survivor refuses to die.
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell: v1beta1.CellDoc{
+					Status: v1beta1.CellStatus{
+						State: v1beta1.CellStateReady,
+						Containers: []v1beta1.ContainerStatus{
+							{State: v1beta1.ContainerStateReady},
+						},
+					},
+				},
+				MetadataExists: true,
+			}, nil
+		},
+		stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+			return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
+		},
+		killCellFn: func(doc v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+			return kukeonv1.KillCellResult{Cell: doc, Killed: true}, nil
+		},
+		deleteCellFn: func(_ v1beta1.CellDoc) (kukeonv1.DeleteCellResult, error) {
+			t.Fatal("DeleteCell must not be reached when post-kill verification still sees a Ready container")
+			return kukeonv1.DeleteCellResult{}, nil
+		},
+	}
+
+	cmd := reset.NewResetCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, reset.MockSocketDirKey{}, t.TempDir())
+	ctx = context.WithValue(ctx, reset.MockRunPathKey{}, t.TempDir())
+	cmd.SetContext(ctx)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("reset must error when post-kill verification still sees a Ready container")
+	}
+	if !strings.Contains(err.Error(), "still reports a running container after stop and escalated kill") {
+		t.Errorf("error does not surface the survivor; got %v", err)
 	}
 }
 

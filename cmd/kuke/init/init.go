@@ -735,9 +735,19 @@ func printCellActions(cmd *cobra.Command, section controller.CellSection, image 
 		cmd.Println("    - cell: not provisioned")
 		return
 	}
-	if section.CellCreated {
+	switch {
+	case section.CellRecreatedDueToImageDrift:
+		// Image drift on a surviving cell record (issue #868). Surfacing the
+		// prior → desired transition is what tells the operator the rebuild
+		// actually picked up their `kuke build` output instead of silently
+		// restarting the stale container.
+		cmd.Println(fmt.Sprintf(
+			"    - cell %q: recreated (image drift: %s → %s)",
+			section.CellName, section.CellPriorImage, image,
+		))
+	case section.CellCreated:
 		cmd.Println(fmt.Sprintf("    - cell %q: created (image %s)", section.CellName, image))
-	} else {
+	default:
 		cmd.Println(fmt.Sprintf("    - cell %q: already existed", section.CellName))
 	}
 	printCgroupAction(

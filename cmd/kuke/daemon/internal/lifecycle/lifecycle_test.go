@@ -92,10 +92,108 @@ func TestStopPhase_GracefulSuccess(t *testing.T) {
 			t.Fatal("KillCell must not run when StopCell succeeds within the grace period")
 			return kukeonv1.KillCellResult{}, nil
 		},
+		// Post-stop verification (issue #868) re-reads the cell to confirm
+		// the task is actually gone; returning Stopped clears the gate so
+		// the escalation path is not taken.
+		getCellFn: func(_ context.Context, _ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell: v1beta1.CellDoc{
+					Status: v1beta1.CellStatus{State: v1beta1.CellStateStopped},
+				},
+				MetadataExists: true,
+			}, nil
+		},
 	}
 	cmd := newCmdWithContext(context.Background(), t)
 	if err := lifecycle.StopPhase(cmd, fc, v1beta1.CellDoc{}, time.Second); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestStopPhase_GracefulSuccessButTaskSurvivesEscalates covers issue #868:
+// when StopCell returns Stopped=true but the post-stop GetCell still
+// reports a Ready container, StopPhase must escalate to KillCell rather
+// than declare the stop successful and let the caller race a live task.
+func TestStopPhase_GracefulSuccessButTaskSurvivesEscalates(t *testing.T) {
+	killCalled := atomicBool{}
+	var getCalls int
+	fc := &fakeClient{
+		stopCellFn: func(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+			return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
+		},
+		killCellFn: func(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+			killCalled.Store(true)
+			return kukeonv1.KillCellResult{Cell: doc, Killed: true}, nil
+		},
+		getCellFn: func(_ context.Context, _ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			getCalls++
+			// First call: post-stop verification sees survivor.
+			// Second call: post-kill verification confirms it's gone.
+			if getCalls == 1 {
+				return kukeonv1.GetCellResult{
+					Cell: v1beta1.CellDoc{
+						Status: v1beta1.CellStatus{
+							State: v1beta1.CellStateReady,
+							Containers: []v1beta1.ContainerStatus{
+								{State: v1beta1.ContainerStateReady},
+							},
+						},
+					},
+					MetadataExists: true,
+				}, nil
+			}
+			return kukeonv1.GetCellResult{
+				Cell: v1beta1.CellDoc{
+					Status: v1beta1.CellStatus{State: v1beta1.CellStateStopped},
+				},
+				MetadataExists: true,
+			}, nil
+		},
+	}
+	cmd := newCmdWithContext(context.Background(), t)
+	if err := lifecycle.StopPhase(cmd, fc, v1beta1.CellDoc{}, time.Second); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !killCalled.Load() {
+		t.Fatal("KillCell must run when post-stop verification still sees a Ready container")
+	}
+}
+
+// TestStopPhase_PostKillVerificationStillRunningErrors covers the hard
+// failure surface of issue #868's verification: when even KillCell cannot
+// remove the surviving task, StopPhase must surface a clear error so the
+// caller can refuse the subsequent DeleteCell rather than race a live shim.
+func TestStopPhase_PostKillVerificationStillRunningErrors(t *testing.T) {
+	fc := &fakeClient{
+		stopCellFn: func(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+			return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
+		},
+		killCellFn: func(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
+			return kukeonv1.KillCellResult{Cell: doc, Killed: true}, nil
+		},
+		// Both post-stop and post-kill GetCell return Ready — the task
+		// refuses to die.
+		getCellFn: func(_ context.Context, _ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell: v1beta1.CellDoc{
+					Status: v1beta1.CellStatus{
+						State: v1beta1.CellStateReady,
+						Containers: []v1beta1.ContainerStatus{
+							{State: v1beta1.ContainerStateReady},
+						},
+					},
+				},
+				MetadataExists: true,
+			}, nil
+		},
+	}
+	cmd := newCmdWithContext(context.Background(), t)
+	err := lifecycle.StopPhase(cmd, fc, v1beta1.CellDoc{}, time.Second)
+	if err == nil {
+		t.Fatal("StopPhase must error when post-kill verification still sees a Ready container")
+	}
+	if !strings.Contains(err.Error(), "still reports a running container") {
+		t.Errorf("error must surface the survivor; got %v", err)
 	}
 }
 
@@ -327,6 +425,7 @@ type fakeClient struct {
 
 	stopCellFn func(context.Context, v1beta1.CellDoc) (kukeonv1.StopCellResult, error)
 	killCellFn func(context.Context, v1beta1.CellDoc) (kukeonv1.KillCellResult, error)
+	getCellFn  func(context.Context, v1beta1.CellDoc) (kukeonv1.GetCellResult, error)
 }
 
 func (f *fakeClient) StopCell(ctx context.Context, doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
@@ -341,4 +440,11 @@ func (f *fakeClient) KillCell(ctx context.Context, doc v1beta1.CellDoc) (kukeonv
 		return kukeonv1.KillCellResult{}, errors.New("unexpected KillCell call")
 	}
 	return f.killCellFn(ctx, doc)
+}
+
+func (f *fakeClient) GetCell(ctx context.Context, doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+	if f.getCellFn == nil {
+		return kukeonv1.GetCellResult{}, errors.New("unexpected GetCell call")
+	}
+	return f.getCellFn(ctx, doc)
 }
