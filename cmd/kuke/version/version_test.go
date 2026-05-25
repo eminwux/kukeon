@@ -19,7 +19,7 @@ package version_test
 import (
 	"bytes"
 	"context"
-	"os"
+	"errors"
 	"strings"
 	"testing"
 
@@ -38,124 +38,188 @@ func TestNewVersionCmd(t *testing.T) {
 		t.Errorf("Short mismatch: got %q, want %q", cmd.Short, "Print the version number")
 	}
 
-	// Verify command has no flags (simple command)
-	if cmd.Flags().HasFlags() {
-		t.Error("version command should not have any flags")
+	// Should have RunE (not Run)
+	if cmd.RunE == nil {
+		t.Error("expected RunE to be set")
+	}
+
+	// Verify flags exist
+	for _, flag := range []string{"no-daemon", "strict"} {
+		if cmd.Flags().Lookup(flag) == nil {
+			t.Errorf("expected %q flag", flag)
+		}
 	}
 }
 
-type fakeVersionProvider struct {
-	versionFn func() string
+func TestNewVersionCmd_AutocompleteRegistration(t *testing.T) {
+	cmd := version.NewVersionCmd()
+
+	// version command takes no positional args, so ValidArgsFunction should be nil
+	if cmd.ValidArgsFunction != nil {
+		t.Fatal("expected ValidArgsFunction to be nil for version command (no positional args)")
+	}
 }
 
-func (f *fakeVersionProvider) Version() string {
-	if f.versionFn == nil {
-		return "test-version"
+type fakeDaemonClient struct {
+	pingVersionFn func(ctx context.Context) (string, error)
+}
+
+func (f *fakeDaemonClient) PingVersion(ctx context.Context) (string, error) {
+	if f.pingVersionFn == nil {
+		return "", errors.New("unexpected PingVersion call")
 	}
-	return f.versionFn()
+	return f.pingVersionFn(ctx)
+}
+
+func (f *fakeDaemonClient) Close() error {
+	return nil
 }
 
 func TestVersionCmdRun(t *testing.T) {
 	tests := []struct {
-		name         string
-		args         []string
-		provider     version.VersionProvider
-		wantOutput   string
-		wantContains string
+		name      string
+		args      []string
+		mock      *fakeDaemonClient
+		wantOut   string
+		wantErr   string
+		wantErrFn func(err error) bool
 	}{
 		{
-			name:         "prints version from config",
-			args:         []string{},
-			provider:     nil, // Use default config version provider
-			wantOutput:   config.Version + "\n",
-			wantContains: config.Version,
+			name:    "--no-daemon prints client version only",
+			args:    []string{"--no-daemon"},
+			wantOut: "Client: " + config.Version + "\n",
 		},
 		{
-			name:         "ignores arguments",
-			args:         []string{"arg1", "arg2"},
-			provider:     nil, // Use default config version provider
-			wantOutput:   config.Version + "\n",
-			wantContains: config.Version,
-		},
-		{
-			name: "prints mock version",
-			args: []string{},
-			provider: &fakeVersionProvider{
-				versionFn: func() string {
-					return "v1.2.3"
+			name: "daemon up, matching versions",
+			mock: &fakeDaemonClient{
+				pingVersionFn: func(_ context.Context) (string, error) {
+					return config.Version, nil
 				},
 			},
-			wantOutput:   "v1.2.3\n",
-			wantContains: "v1.2.3",
+			wantOut: "Client: " + config.Version + "\nDaemon: " + config.Version + "\n",
 		},
 		{
-			name: "prints custom mock version",
-			args: []string{},
-			provider: &fakeVersionProvider{
-				versionFn: func() string {
-					return "custom-version-123"
+			name: "daemon up, mismatch warns to stderr, exit 0",
+			mock: &fakeDaemonClient{
+				pingVersionFn: func(_ context.Context) (string, error) {
+					return "dummy-version", nil
 				},
 			},
-			wantOutput:   "custom-version-123\n",
-			wantContains: "custom-version-123",
+			wantOut: "Client: " + config.Version + "\nDaemon: dummy-version\n",
+		},
+		{
+			name: "daemon up, mismatch with --strict returns error",
+			args: []string{"--strict"},
+			mock: &fakeDaemonClient{
+				pingVersionFn: func(_ context.Context) (string, error) {
+					return "dummy-version", nil
+				},
+			},
+			wantErr: "version mismatch: client=" + config.Version + " daemon=dummy-version",
+		},
+		{
+			name: "daemon unreachable, warns to stderr, exit 0",
+			mock: &fakeDaemonClient{
+				pingVersionFn: func(_ context.Context) (string, error) {
+					return "", errors.New("connection refused")
+				},
+			},
+			wantOut: "Client: " + config.Version + "\n",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save original stdout
-			oldStdout := os.Stdout
-			defer func() {
-				os.Stdout = oldStdout
-			}()
-
-			// Create pipe to capture stdout
-			r, w, pipeErr := os.Pipe()
-			if pipeErr != nil {
-				t.Fatalf("failed to create pipe: %v", pipeErr)
-			}
-			os.Stdout = w
-
-			// Set up context with mock provider if provided
-			ctx := context.Background()
-			if tt.provider != nil {
-				ctx = context.WithValue(ctx, version.MockVersionProviderKey{}, tt.provider)
-			}
-
-			// Execute command in goroutine
 			cmd := version.NewVersionCmd()
+			outBuf := &bytes.Buffer{}
+			errBuf := &bytes.Buffer{}
+			cmd.SetOut(outBuf)
+			cmd.SetErr(errBuf)
+
+			ctx := context.Background()
+			if tt.mock != nil {
+				ctx = context.WithValue(ctx, version.MockDaemonClientKey{}, tt.mock)
+			}
 			cmd.SetContext(ctx)
 			cmd.SetArgs(tt.args)
-			errChan := make(chan error, 1)
-			go func() {
-				execErr := cmd.Execute()
-				w.Close()
-				errChan <- execErr
-			}()
 
-			// Read output from pipe
-			var got bytes.Buffer
-			_, readErr := got.ReadFrom(r)
-			if readErr != nil {
-				t.Fatalf("failed to read from pipe: %v", readErr)
-			}
-			r.Close()
+			err := cmd.Execute()
 
-			// Wait for command to complete
-			execErr := <-errChan
-			if execErr != nil {
-				t.Fatalf("Execute() error = %v, want nil", execErr)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tt.wantErr)
+				}
+				return
 			}
 
-			output := got.String()
-			if output != tt.wantOutput {
-				t.Errorf("output mismatch: got %q, want %q", output, tt.wantOutput)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
 			}
 
-			// Verify it contains the expected version string
-			if !strings.Contains(output, tt.wantContains) {
-				t.Errorf("output %q does not contain version %q", output, tt.wantContains)
+			if tt.wantOut != "" && outBuf.String() != tt.wantOut {
+				t.Errorf("stdout mismatch:\n  got:  %q\n  want: %q", outBuf.String(), tt.wantOut)
 			}
 		})
+	}
+}
+
+// TestVersionCmdRun_DaemonUnreachableNoMock tests the path where no mock is
+// injected and the real daemon dial creates a UnixClient but PingVersion
+// fails (no daemon running). This exercises the real code path.
+func TestVersionCmdRun_DaemonUnreachableNoMock(t *testing.T) {
+	cmd := version.NewVersionCmd()
+	outBuf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	cmd.SetOut(outBuf)
+	cmd.SetErr(errBuf)
+	cmd.SetContext(context.Background())
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("expected nil error (daemon down is non-fatal), got: %v", err)
+	}
+
+	expectedOut := "Client: " + config.Version + "\n"
+	if outBuf.String() != expectedOut {
+		t.Errorf("stdout mismatch:\n  got:  %q\n  want: %q", outBuf.String(), expectedOut)
+	}
+
+	// Should contain a warning on stderr that the daemon is unreachable
+	if !strings.Contains(errBuf.String(), "Warning: daemon unreachable") {
+		t.Errorf("expected daemon unreachable warning on stderr; got: %q", errBuf.String())
+	}
+}
+
+// TestVersionCmdRun_MismatchStderr verifies that a version mismatch prints a
+// warning to stderr (even when exit code is 0).
+func TestVersionCmdRun_MismatchStderr(t *testing.T) {
+	cmd := version.NewVersionCmd()
+	outBuf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	cmd.SetOut(outBuf)
+	cmd.SetErr(errBuf)
+	ctx := context.WithValue(context.Background(), version.MockDaemonClientKey{}, &fakeDaemonClient{
+		pingVersionFn: func(_ context.Context) (string, error) {
+			return "dummy", nil
+		},
+	})
+	cmd.SetContext(ctx)
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("expected nil error (mismatch without --strict), got: %v", err)
+	}
+
+	if !strings.Contains(errBuf.String(), "Warning: version mismatch") {
+		t.Errorf("expected version mismatch warning on stderr; got: %q", errBuf.String())
+	}
+	if !strings.Contains(errBuf.String(), config.Version) {
+		t.Errorf("stderr should contain client version; got: %q", errBuf.String())
+	}
+	if !strings.Contains(errBuf.String(), "dummy") {
+		t.Errorf("stderr should contain daemon version; got: %q", errBuf.String())
 	}
 }

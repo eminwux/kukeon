@@ -17,40 +17,99 @@
 package version
 
 import (
+	"context"
 	"fmt"
-	"os"
+	"io"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	"github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
-type VersionProvider interface {
-	Version() string
+// daemonClient is the subset of kukeonv1.Client needed by the version command.
+type daemonClient interface {
+	PingVersion(ctx context.Context) (string, error)
+	Close() error
 }
 
-// MockVersionProviderKey is used to inject mock version providers in tests via context.
-type MockVersionProviderKey struct{}
-
-type configVersionProvider struct{}
-
-func (p *configVersionProvider) Version() string {
-	return config.Version
-}
+// MockDaemonClientKey is used to inject mock daemon clients in tests via context.
+type MockDaemonClientKey struct{}
 
 func NewVersionCmd() *cobra.Command {
 	versionCmd := &cobra.Command{
 		Use:   "version",
 		Short: "Print the version number",
-		Run: func(cmd *cobra.Command, _ []string) {
-			var provider VersionProvider
-			if mockProvider, ok := cmd.Context().Value(MockVersionProviderKey{}).(VersionProvider); ok {
-				provider = mockProvider
-			} else {
-				provider = &configVersionProvider{}
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			clientVersion := config.Version
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Client: %s\n", clientVersion)
+
+			noDaemon, _ := cmd.Flags().GetBool("no-daemon")
+			if noDaemon {
+				return nil
 			}
 
-			fmt.Fprintln(os.Stdout, provider.Version())
+			var client daemonClient
+			if mockClient, ok := cmd.Context().Value(MockDaemonClientKey{}).(daemonClient); ok {
+				client = mockClient
+			} else {
+				host := viper.GetString(config.KUKEON_ROOT_HOST.ViperKey)
+				if host == "" {
+					host = config.KUKEON_ROOT_HOST.Default
+				}
+				c, err := kukeonv1.Dial(cmd.Context(), host)
+				if err != nil {
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: daemon unreachable: %v\n", err)
+					return nil
+				}
+				client = &realDaemonClient{client: c}
+			}
+			defer func() {
+				if client != nil {
+					_ = client.Close()
+				}
+			}()
+
+			daemonVersion, err := client.PingVersion(cmd.Context())
+			if err != nil {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: daemon unreachable: %v\n", err)
+				return nil
+			}
+
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Daemon: %s\n", daemonVersion)
+
+			if clientVersion != daemonVersion {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: version mismatch (client: %s, daemon: %s)\n", clientVersion, daemonVersion)
+				strict, _ := cmd.Flags().GetBool("strict")
+				if strict {
+					return fmt.Errorf("version mismatch: client=%s daemon=%s", clientVersion, daemonVersion)
+				}
+			}
+
+			return nil
 		},
 	}
+
+	shared.RegisterNoDaemonFlag(versionCmd)
+	versionCmd.Flags().Bool("strict", false, "exit with non-zero status on version mismatch")
+
 	return versionCmd
 }
+
+// realDaemonClient wraps a kukeonv1.Client to satisfy the daemonClient interface.
+type realDaemonClient struct {
+	client kukeonv1.Client
+}
+
+func (r *realDaemonClient) PingVersion(ctx context.Context) (string, error) {
+	return r.client.PingVersion(ctx)
+}
+
+func (r *realDaemonClient) Close() error {
+	return r.client.Close()
+}
+
+// compile-time interface check
+var _ daemonClient = (*realDaemonClient)(nil)
+var _ io.Closer = (*realDaemonClient)(nil)
