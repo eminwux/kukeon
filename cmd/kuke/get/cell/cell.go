@@ -20,28 +20,16 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
-	"github.com/eminwux/kukeon/internal/cellconfig"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-)
-
-const (
-	// syncStateSynced / syncStateOutOfSync are the SYNC column verdicts for
-	// Config-lineage cells. syncStateNone is the third state for cells that
-	// carry no kukeon.io/config lineage label (the bulk of the host —
-	// hand-built and `-b`-lineage cells are deliberately out of scope of the
-	// reconciler's OutOfSync detection per #819's umbrella) and follows the
-	// established `-` convention used by CgroupPath when empty.
-	syncStateSynced    = "Synced"
-	syncStateOutOfSync = "OutOfSync"
-	syncStateNone      = "-"
 )
 
 // MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
@@ -54,18 +42,18 @@ func NewCellCmd() *cobra.Command {
 		Short:   "Get or list cell information",
 		Long: `Get or list cell information.
 
-The default table includes a SYNC column showing the reconciler-detected
-sync state of each cell relative to its lineage Config:
+The default table is ` + "`NAME REALM SPACE STACK STATE AGE`" + `.
+` + "`-o wide`" + ` appends two cell-only signals:
 
-  Synced     - the live spec matches what the lineage Config materializes
-  OutOfSync  - divergence detected (or the lineage Config was deleted)
-  -          - the cell carries no kukeon.io/config lineage label, so the
-               Config reconciler does not track sync state for it
+  CONTAINERS  ready/total — entries in status.containers whose
+              state == Ready over the total length
+  BRIDGE      status.network.bridgeName (the canonical k-{8hex}
+              form) or "-" when empty
 
-Use ` + "`-o wide`" + ` to add a DIVERGENCE column with the short divergence
-summary (or the error message when the reconciler could not compute
-divergence). ` + "`-o yaml` / `-o json`" + ` surface the full
-outOfSync / outOfSyncReason / outOfSyncError status fields.`,
+Reconciler-detected sync state (outOfSync / outOfSyncReason /
+outOfSyncError) and the cgroup path no longer appear in any
+` + "`kuke get cell`" + ` table — surface them with ` + "`-o yaml` / `-o json`" + `
+when needed.`,
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -182,49 +170,28 @@ func resolveOutput(cmd *cobra.Command) (bool, shared.OutputFormat, error) {
 	return false, format, err
 }
 
-// cellSyncState renders the SYNC column for a cell. The three values are
-// driven by the cell's lineage label and the reconciler-written OutOfSync
-// status fields (issue #820, populated by #830's detection loop). Cells
-// where OutOfSyncError is non-empty (divergence undecidable — Blueprint
-// missing or materialization failure) render as OutOfSync so the operator
-// gets one actionable "look at this cell" signal in the SYNC column; the
-// distinct error message surfaces in the DIVERGENCE column under -o wide
-// and in the outOfSyncError field under -o yaml/json.
-func cellSyncState(c *v1beta1.CellDoc) string {
-	if !hasConfigLineage(c) {
-		return syncStateNone
+// renderContainers returns the CONTAINERS column value (`ready/total`)
+// for a cell's status.containers slice — ready counts entries whose State
+// is ContainerStateReady, total is the slice length. Empty renders as "0/0".
+func renderContainers(c *v1beta1.CellDoc) string {
+	total := len(c.Status.Containers)
+	ready := 0
+	for i := range c.Status.Containers {
+		if c.Status.Containers[i].State == v1beta1.ContainerStateReady {
+			ready++
+		}
 	}
-	if c.Status.OutOfSync || c.Status.OutOfSyncError != "" {
-		return syncStateOutOfSync
-	}
-	return syncStateSynced
+	return fmt.Sprintf("%d/%d", ready, total)
 }
 
-// cellDivergence renders the DIVERGENCE column under -o wide. Synced or
-// no-lineage cells render `-` (matching the established CgroupPath empty
-// convention) so the column stays width-aligned. Reason takes precedence
-// over Error when both are set (the reconciler never sets both, but the
-// order is defensive).
-func cellDivergence(c *v1beta1.CellDoc) string {
-	if !hasConfigLineage(c) {
-		return syncStateNone
+// renderBridge returns the BRIDGE column value — the canonical k-{8hex}
+// bridge name from status.network.bridgeName, or "-" when empty (matching
+// the dash convention used elsewhere for unset table cells).
+func renderBridge(c *v1beta1.CellDoc) string {
+	if name := strings.TrimSpace(c.Status.Network.BridgeName); name != "" {
+		return name
 	}
-	if c.Status.OutOfSyncReason != "" {
-		return c.Status.OutOfSyncReason
-	}
-	if c.Status.OutOfSyncError != "" {
-		return "error: " + c.Status.OutOfSyncError
-	}
-	return syncStateNone
-}
-
-// hasConfigLineage matches the configLineage helper in
-// internal/controller/reconcile_outofsync.go: a cell is Config-lineage iff
-// it carries a non-empty kukeon.io/config label. Replicated inline rather
-// than imported to keep the CLI leaf free of an internal/controller
-// dependency.
-func hasConfigLineage(c *v1beta1.CellDoc) bool {
-	return strings.TrimSpace(c.Metadata.Labels[cellconfig.LabelConfig]) != ""
+	return "-"
 }
 
 func printCell(cmd *cobra.Command, cell *v1beta1.CellDoc, format shared.OutputFormat) error {
@@ -252,10 +219,11 @@ func printCells(
 			cmd.Println("No cells found.")
 			return nil
 		}
-		headers := []string{"NAME", "REALM", "SPACE", "STACK", "STATE", "SYNC"}
+		headers := []string{"NAME", "REALM", "SPACE", "STACK", "STATE", "AGE"}
 		if wide {
-			headers = append(headers, "DIVERGENCE")
+			headers = append(headers, "CONTAINERS", "BRIDGE")
 		}
+		now := time.Now()
 		rows := make([][]string, 0, len(cells))
 		for i := range cells {
 			c := &cells[i]
@@ -266,10 +234,10 @@ func printCells(
 				c.Spec.SpaceID,
 				c.Spec.StackID,
 				state,
-				cellSyncState(c),
+				shared.RenderAge(c.Status.CreatedAt, now),
 			}
 			if wide {
-				row = append(row, cellDivergence(c))
+				row = append(row, renderContainers(c), renderBridge(c))
 			}
 			rows = append(rows, row)
 		}

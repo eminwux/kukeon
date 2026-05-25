@@ -27,7 +27,6 @@ import (
 
 	cell "github.com/eminwux/kukeon/cmd/kuke/get/cell"
 	"github.com/eminwux/kukeon/cmd/types"
-	"github.com/eminwux/kukeon/internal/cellconfig"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -139,110 +138,147 @@ func TestNewCellCmd(t *testing.T) {
 	}
 }
 
-// TestNewCellCmd_SyncColumn covers the SYNC column the `kuke get cell`
-// default table acquired alongside #830's OutOfSync detection (issue #822).
-// Each subtest pins a single mock cell and asserts the rendered SYNC value
-// and (in -o wide) the DIVERGENCE value, plus that the SYNC header is
-// always present in the default table. The fourth case asserts the full
-// status fields land in -o yaml without an extra projection step — the
-// strict-omitempty serialization in pkg/api/model/v1beta1/cell.go means
-// non-default values surface automatically.
-func TestNewCellCmd_SyncColumn(t *testing.T) {
+// TestNewCellCmd_DefaultColumns pins the default `kuke get cell` column set
+// after the epic:get redefinition (issue #604): NAME REALM SPACE STACK STATE
+// AGE — six columns, no SYNC / CGROUP / CONTAINERS / BRIDGE / DIVERGENCE.
+func TestNewCellCmd_DefaultColumns(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
-	configLineageLabels := map[string]string{cellconfig.LabelConfig: "prod"}
+	listFn := func(_, _, _ string) ([]v1beta1.CellDoc, error) {
+		return []v1beta1.CellDoc{{
+			Metadata: v1beta1.CellMetadata{Name: "ce1"},
+			Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+			Status: v1beta1.CellStatus{
+				State:      v1beta1.CellStateReady,
+				CgroupPath: "/kukeon/r1/s1/st1/ce1",
+				Network:    v1beta1.CellNetworkStatus{BridgeName: "k-1a2b3c4d"},
+				Containers: []v1beta1.ContainerStatus{
+					{Name: "root", State: v1beta1.ContainerStateReady},
+				},
+			},
+		}}, nil
+	}
+
+	buf := &bytes.Buffer{}
+	cmd := cell.NewCellCmd()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, cell.MockControllerKey{},
+		kukeonv1.Client(&fakeClient{listCellsFn: listFn}))
+	cmd.SetContext(ctx)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	for _, h := range []string{"NAME", "REALM", "SPACE", "STACK", "STATE", "AGE"} {
+		if !strings.Contains(out, h) {
+			t.Errorf("default table missing header %q\nGot:\n%s", h, out)
+		}
+	}
+	for _, denied := range []string{"CGROUP", "CONTROLLERS", "SYNC", "DIVERGENCE", "CONTAINERS", "BRIDGE"} {
+		if strings.Contains(out, denied) {
+			t.Errorf("default table must NOT contain %q; got:\n%s", denied, out)
+		}
+	}
+}
+
+// TestNewCellCmd_WideColumns pins the `-o wide` column set after the
+// epic:get redefinition: NAME REALM SPACE STACK STATE AGE CONTAINERS BRIDGE
+// (8 cols). CGROUP, SYNC, DIVERGENCE must not appear.
+func TestNewCellCmd_WideColumns(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	listFn := func(_, _, _ string) ([]v1beta1.CellDoc, error) {
+		return []v1beta1.CellDoc{{
+			Metadata: v1beta1.CellMetadata{Name: "ce1"},
+			Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+			Status: v1beta1.CellStatus{
+				State:   v1beta1.CellStateReady,
+				Network: v1beta1.CellNetworkStatus{BridgeName: "k-1a2b3c4d"},
+				Containers: []v1beta1.ContainerStatus{
+					{Name: "root", State: v1beta1.ContainerStateReady},
+					{Name: "side", State: v1beta1.ContainerStatePending},
+				},
+			},
+		}}, nil
+	}
+
+	buf := &bytes.Buffer{}
+	cmd := cell.NewCellCmd()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, cell.MockControllerKey{},
+		kukeonv1.Client(&fakeClient{listCellsFn: listFn}))
+	cmd.SetContext(ctx)
+	cmd.SetArgs([]string{"-o", "wide"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	for _, h := range []string{"NAME", "REALM", "SPACE", "STACK", "STATE", "AGE", "CONTAINERS", "BRIDGE"} {
+		if !strings.Contains(out, h) {
+			t.Errorf("-o wide table missing header %q\nGot:\n%s", h, out)
+		}
+	}
+	for _, denied := range []string{"CGROUP", "CONTROLLERS", "SYNC", "DIVERGENCE"} {
+		if strings.Contains(out, denied) {
+			t.Errorf("-o wide table must NOT contain %q; got:\n%s", denied, out)
+		}
+	}
+	for _, sub := range []string{"ce1", "1/2", "k-1a2b3c4d"} {
+		if !strings.Contains(out, sub) {
+			t.Errorf("-o wide row missing %q\nGot:\n%s", sub, out)
+		}
+	}
+}
+
+// TestNewCellCmd_ContainersReadyTotal pins the ready/total rendering edge
+// cases enumerated in #604's AC: 0/0 (no containers), 0/1 (one pending),
+// 1/1 (one ready), and 2/3 (two of three ready). BRIDGE empty renders as
+// "-" — checked under the 0/0 case so a single subtest covers both
+// no-runtime fallbacks.
+func TestNewCellCmd_ContainersReadyTotal(t *testing.T) {
+	t.Cleanup(viper.Reset)
 
 	tests := []struct {
-		name        string
-		cells       []v1beta1.CellDoc
-		extraFlags  map[string]string
-		wantHeaders []string
-		wantRow     []string // substrings that must all appear on the cell's row
-		wantStatus  []string // substrings that must all appear in yaml output
+		name       string
+		containers []v1beta1.ContainerStatus
+		bridge     string
+		wantRow    []string
 	}{
 		{
-			name: "synced cell renders Synced in default table",
-			cells: []v1beta1.CellDoc{{
-				Metadata: v1beta1.CellMetadata{Name: "ce1", Labels: configLineageLabels},
-				Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
-				Status:   v1beta1.CellStatus{State: v1beta1.CellStateReady},
-			}},
-			wantHeaders: []string{"SYNC"},
-			wantRow:     []string{"ce1", "Synced"},
+			name:       "empty list renders 0/0 and bridge dash",
+			containers: nil,
+			bridge:     "",
+			wantRow:    []string{"0/0", " - "},
 		},
 		{
-			name: "out-of-sync cell renders OutOfSync in default table",
-			cells: []v1beta1.CellDoc{{
-				Metadata: v1beta1.CellMetadata{Name: "ce2", Labels: configLineageLabels},
-				Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
-				Status: v1beta1.CellStatus{
-					State:           v1beta1.CellStateReady,
-					OutOfSync:       true,
-					OutOfSyncReason: "spec differs: image",
-				},
-			}},
-			wantHeaders: []string{"SYNC"},
-			wantRow:     []string{"ce2", "OutOfSync"},
+			name:       "single pending renders 0/1",
+			containers: []v1beta1.ContainerStatus{{Name: "root", State: v1beta1.ContainerStatePending}},
+			bridge:     "k-aaaaaaaa",
+			wantRow:    []string{"0/1", "k-aaaaaaaa"},
 		},
 		{
-			name: "no-lineage cell renders dash in SYNC column",
-			cells: []v1beta1.CellDoc{{
-				Metadata: v1beta1.CellMetadata{Name: "ce3"},
-				Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
-				Status:   v1beta1.CellStatus{State: v1beta1.CellStateReady},
-			}},
-			wantHeaders: []string{"SYNC"},
-			// CGROUP retired in #827, so SYNC is now the last default column;
-			// the no-lineage row ends in "-" preceded by the col separator,
-			// which PrintTable's width-padded last column still surrounds
-			// with spaces — " - " stays a stable substring.
-			wantRow: []string{"ce3", " - "},
+			name:       "single ready renders 1/1",
+			containers: []v1beta1.ContainerStatus{{Name: "root", State: v1beta1.ContainerStateReady}},
+			bridge:     "k-bbbbbbbb",
+			wantRow:    []string{"1/1", "k-bbbbbbbb"},
 		},
 		{
-			name: "-o wide adds DIVERGENCE column with reason for out-of-sync cells",
-			cells: []v1beta1.CellDoc{{
-				Metadata: v1beta1.CellMetadata{Name: "ce4", Labels: configLineageLabels},
-				Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
-				Status: v1beta1.CellStatus{
-					State:           v1beta1.CellStateReady,
-					OutOfSync:       true,
-					OutOfSyncReason: "spec differs: image, env",
-				},
-			}},
-			extraFlags:  map[string]string{"output": "wide"},
-			wantHeaders: []string{"SYNC", "DIVERGENCE"},
-			wantRow:     []string{"ce4", "OutOfSync", "spec differs: image, env"},
-		},
-		{
-			name: "-o wide surfaces OutOfSyncError as error: <msg>",
-			cells: []v1beta1.CellDoc{{
-				Metadata: v1beta1.CellMetadata{Name: "ce5", Labels: configLineageLabels},
-				Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
-				Status: v1beta1.CellStatus{
-					State:          v1beta1.CellStateReady,
-					OutOfSyncError: `blueprint "web" not found`,
-				},
-			}},
-			extraFlags:  map[string]string{"output": "wide"},
-			wantHeaders: []string{"SYNC", "DIVERGENCE"},
-			// OutOfSyncError folds into the OutOfSync SYNC verdict; the
-			// distinct surface lives in DIVERGENCE so the operator sees
-			// the actionable signal in the column they're filtering on.
-			wantRow: []string{"ce5", "OutOfSync", `error: blueprint "web" not found`},
-		},
-		{
-			name: "-o yaml passes through outOfSync and outOfSyncReason fields",
-			cells: []v1beta1.CellDoc{{
-				Metadata: v1beta1.CellMetadata{Name: "ce6", Labels: configLineageLabels},
-				Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
-				Status: v1beta1.CellStatus{
-					State:           v1beta1.CellStateReady,
-					OutOfSync:       true,
-					OutOfSyncReason: "lineage Config deleted",
-				},
-			}},
-			extraFlags: map[string]string{"output": "yaml"},
-			wantStatus: []string{"outOfSync: true", "outOfSyncReason: lineage Config deleted"},
+			name: "two of three ready renders 2/3",
+			containers: []v1beta1.ContainerStatus{
+				{Name: "root", State: v1beta1.ContainerStateReady},
+				{Name: "side", State: v1beta1.ContainerStateReady},
+				{Name: "boot", State: v1beta1.ContainerStateFailed},
+			},
+			bridge:  "k-cccccccc",
+			wantRow: []string{"2/3", "k-cccccccc"},
 		},
 	}
 
@@ -250,94 +286,94 @@ func TestNewCellCmd_SyncColumn(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Cleanup(viper.Reset)
 
-			cmd := cell.NewCellCmd()
+			listFn := func(_, _, _ string) ([]v1beta1.CellDoc, error) {
+				return []v1beta1.CellDoc{{
+					Metadata: v1beta1.CellMetadata{Name: "ce1"},
+					Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+					Status: v1beta1.CellStatus{
+						State:      v1beta1.CellStateReady,
+						Network:    v1beta1.CellNetworkStatus{BridgeName: tt.bridge},
+						Containers: tt.containers,
+					},
+				}}, nil
+			}
+
 			buf := &bytes.Buffer{}
+			cmd := cell.NewCellCmd()
 			cmd.SetOut(buf)
 			cmd.SetErr(buf)
-
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-			fake := &fakeClient{
-				listCellsFn: func(_, _, _ string) ([]v1beta1.CellDoc, error) {
-					return tt.cells, nil
-				},
-			}
-			ctx = context.WithValue(ctx, cell.MockControllerKey{}, kukeonv1.Client(fake))
+			ctx = context.WithValue(ctx, cell.MockControllerKey{},
+				kukeonv1.Client(&fakeClient{listCellsFn: listFn}))
 			cmd.SetContext(ctx)
-
-			for flag, val := range tt.extraFlags {
-				if err := cmd.Flags().Set(flag, val); err != nil {
-					t.Fatalf("set flag %s=%s: %v", flag, val, err)
-				}
-			}
-
+			cmd.SetArgs([]string{"-o", "wide"})
 			if err := cmd.Execute(); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
 			out := buf.String()
-			for _, h := range tt.wantHeaders {
-				if !strings.Contains(out, h) {
-					t.Errorf("table missing header %q\nGot:\n%s", h, out)
-				}
-			}
 			for _, sub := range tt.wantRow {
 				if !strings.Contains(out, sub) {
-					t.Errorf("row missing %q\nGot:\n%s", sub, out)
-				}
-			}
-			for _, sub := range tt.wantStatus {
-				if !strings.Contains(out, sub) {
-					t.Errorf("yaml output missing %q\nGot:\n%s", sub, out)
+					t.Errorf("-o wide row missing %q\nGot:\n%s", sub, out)
 				}
 			}
 		})
 	}
 }
 
-// TestNewCellCmd_NoCgroupOrControllers pins the epic:get step-1
-// cross-cutting cleanup for cells: the CGROUP column and the
-// --show-controllers flag must be gone in both default and -o wide
-// output (the SYNC and DIVERGENCE columns added by earlier work are
-// unaffected; -o wide still appends DIVERGENCE).
-func TestNewCellCmd_NoCgroupOrControllers(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
+// TestNewCellCmd_NoShowControllersFlag pins the epic:get step-1 retirement
+// of `--show-controllers`: the flag must not be registered on the cell
+// command after #881 (issue #827).
+func TestNewCellCmd_NoShowControllersFlag(t *testing.T) {
 	if cell.NewCellCmd().Flags().Lookup("show-controllers") != nil {
 		t.Error("show-controllers flag must be removed (issue #827)")
 	}
+}
+
+// TestNewCellCmd_YamlSurfacesStatus pins the contract that the cell table
+// no longer surfaces sync state or cgroup info, but `-o yaml` still does —
+// operators who need those fields read them from the structured output.
+func TestNewCellCmd_YamlSurfacesStatus(t *testing.T) {
+	t.Cleanup(viper.Reset)
 
 	listFn := func(_, _, _ string) ([]v1beta1.CellDoc, error) {
 		return []v1beta1.CellDoc{{
 			Metadata: v1beta1.CellMetadata{Name: "ce1"},
 			Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
 			Status: v1beta1.CellStatus{
-				State:              v1beta1.CellStateReady,
-				CgroupPath:         "/kukeon/r1/s1/st1/ce1",
-				SubtreeControllers: []string{"cpu", "memory"},
+				State:           v1beta1.CellStateReady,
+				CgroupPath:      "/kukeon/r1/s1/st1/ce1",
+				OutOfSync:       true,
+				OutOfSyncReason: "lineage Config deleted",
 			},
 		}}, nil
 	}
 
-	for _, args := range [][]string{nil, {"-o", "wide"}} {
-		buf := &bytes.Buffer{}
-		cmd := cell.NewCellCmd()
-		cmd.SetOut(buf)
-		cmd.SetErr(buf)
-		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-		ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-		ctx = context.WithValue(ctx, cell.MockControllerKey{},
-			kukeonv1.Client(&fakeClient{listCellsFn: listFn}))
-		cmd.SetContext(ctx)
-		cmd.SetArgs(args)
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("args=%v: unexpected error: %v", args, err)
-		}
-		out := buf.String()
-		for _, denied := range []string{"CGROUP", "CONTROLLERS"} {
-			if strings.Contains(out, denied) {
-				t.Errorf("args=%v: output must NOT contain %q; got:\n%s", args, denied, out)
-			}
+	buf := &bytes.Buffer{}
+	cmd := cell.NewCellCmd()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, cell.MockControllerKey{},
+		kukeonv1.Client(&fakeClient{listCellsFn: listFn}))
+	cmd.SetContext(ctx)
+	if err := cmd.Flags().Set("output", "yaml"); err != nil {
+		t.Fatalf("set output=yaml: %v", err)
+	}
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	for _, sub := range []string{
+		"cgroupPath: /kukeon/r1/s1/st1/ce1",
+		"outOfSync: true",
+		"outOfSyncReason: lineage Config deleted",
+	} {
+		if !strings.Contains(out, sub) {
+			t.Errorf("yaml output missing %q\nGot:\n%s", sub, out)
 		}
 	}
 }
