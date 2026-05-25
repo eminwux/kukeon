@@ -24,11 +24,13 @@ make dev-init
 The parity tail must read:
 
 ```
-NAME         NAMESPACE              STATE  CGROUP
------------  ---------------------  -----  -------------------
-default      default.kukeon.io      Ready  /kukeon/default
-kuke-system  kuke-system.kukeon.io  Ready  /kukeon/kuke-system
+NAME         STATE  AGE
+-----------  -----  ---
+default      Ready  <age>
+kuke-system  Ready  <age>
 ```
+
+`NAMESPACE` is now in `-o wide` and `CGROUP` is now in `-o yaml`/`-o json` only.
 
 If only `kuke get realms --no-daemon` returns that table but `kuke get realms` (daemon-routed) does not, the daemon's view of `/opt/kukeon` diverged from the in-process controller — usually a missing bind-mount in the `kukeond` cell spec. (Every `kuke get <kind>` keeps the `--no-daemon` flag; `KUKEON_NO_DAEMON=true` and `--run-path /opt/kukeon` work too.) See [Troubleshooting → `kuke get` and `kuke get --no-daemon` disagree](troubleshooting.md#kuke-get-and-kuke-get---no-daemon-disagree).
 
@@ -36,15 +38,15 @@ User data under `/opt/kukeon/default/**` is untouched across iterations; only th
 
 ## Make targets
 
-| Target               | What it does                                                                                                                  |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `make kuke`          | Build the `kuke` binary (same binary is dispatched as `kukeond` via `argv[0]`)                                                |
-| `make install-dev`   | Symlink the in-tree `kuke` and `kukeond` binaries into `$(INSTALL_PREFIX)` (default `/usr/local/bin`). Idempotent (`ln -sf`). |
-| `make uninstall-dev` | Remove both symlinks from `$(INSTALL_PREFIX)`.                                                                                |
-| `make dev-init`      | The full canonical loop above. Auto-invokes `install-dev` so `sudo kuke …` works from any directory.                          |
-| `make test`          | Run the Go unit test suite                                                                                                    |
+| Target               | What it does                                                                                                                                                                                                                                                                  |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `make kuke`          | Build the `kuke` binary (same binary is dispatched as `kukeond` via `argv[0]`)                                                                                                                                                                                                |
+| `make install-dev`   | Symlink the in-tree `kuke` and `kukeond` binaries into `$(INSTALL_PREFIX)` (default `/usr/local/bin`). Idempotent (`ln -sf`).                                                                                                                                                 |
+| `make uninstall-dev` | Remove both symlinks from `$(INSTALL_PREFIX)`.                                                                                                                                                                                                                                |
+| `make dev-init`      | The full canonical loop above. Auto-invokes `install-dev` so `sudo kuke …` works from any directory.                                                                                                                                                                          |
+| `make test`          | Run the Go unit test suite                                                                                                                                                                                                                                                    |
 | `make e2e`           | Run end-to-end tests against a real containerd (requires root). Supports both a clean host and a nested run inside a `kukeon-dev-root` cell — each test derives its socket from its own `--run-path <tempdir>` so the parent dev cell's `/run/kukeon/` plumbing is untouched. |
-| `make lint`          | Run `golangci-lint` with the repo's config                                                                                    |
+| `make lint`          | Run `golangci-lint` with the repo's config                                                                                                                                                                                                                                    |
 
 Override `INSTALL_PREFIX` for non-standard PATH layouts: `make install-dev INSTALL_PREFIX=$HOME/.local/bin`.
 

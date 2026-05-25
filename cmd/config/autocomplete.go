@@ -726,10 +726,10 @@ func CompleteProfileNames(_ *cobra.Command, _ []string, toComplete string) ([]st
 	return names, cobra.ShellCompDirectiveNoFileComp
 }
 
-// CompleteOutputFormat provides shell completion for output format values (yaml, json, table).
+// CompleteOutputFormat provides shell completion for output format values (yaml, json, table, wide).
 // This function can be used for flag completion in commands that accept output format flags.
 func CompleteOutputFormat(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	formats := []string{"yaml", "json", "table"}
+	formats := []string{"yaml", "json", "table", "wide"}
 
 	names := make([]string, 0, len(formats))
 	for _, format := range formats {

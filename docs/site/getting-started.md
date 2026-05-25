@@ -71,9 +71,9 @@ List the realms `kuke init` just created:
 
 ```bash
 $ kuke get realms
-NAME         NAMESPACE              STATE  CGROUP
-default      default.kukeon.io      Ready  /kukeon/default
-kuke-system  kuke-system.kukeon.io  Ready  /kukeon/kuke-system
+NAME         STATE  AGE
+default      Ready  <age>
+kuke-system  Ready  <age>
 ```
 
 `default` is your user-workload realm — `kuke create`, `kuke apply`, etc. land here when no `--realm` flag is given. `kuke-system` is reserved for Kukeon itself; the `kukeond` daemon runs as a cell inside `kuke-system / kukeon / kukeon / kukeond` (realm / space / stack / cell).
@@ -82,15 +82,15 @@ Spaces and stacks are only auto-created under `kuke-system` — the user-facing 
 
 ```bash
 $ kuke get spaces --realm kuke-system
-NAME    REALM        STATE  CGROUP
-kukeon  kuke-system  Ready  /kukeon/kuke-system/kukeon
+NAME    REALM        STATE
+kukeon  kuke-system  Ready
 
 $ kuke get stacks --realm kuke-system --space kukeon
-NAME    REALM        SPACE   STATE  CGROUP
-kukeon  kuke-system  kukeon  Ready  /kukeon/kuke-system/kukeon/kukeon
+NAME    REALM        SPACE   STATE
+kukeon  kuke-system  kukeon  Ready
 ```
 
-Add `-o yaml` or `-o json` for full resource details.
+Add `-o wide` for per-kind extra columns (e.g. realm gains `NAMESPACE`), or `-o yaml` / `-o json` for full resource details (including `cgroupPath`).
 
 ## 6. Run a hello-world cell
 

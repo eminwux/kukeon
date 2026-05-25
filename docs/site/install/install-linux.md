@@ -71,10 +71,12 @@ Kukeon daemon: hosts the kukeonv1 API over a unix socket
 
 ```bash
 $ sudo kuke get realms
-NAME         NAMESPACE              STATE  CGROUP
-default      default.kukeon.io      Ready  /kukeon/default
-kuke-system  kuke-system.kukeon.io  Ready  /kukeon/kuke-system
+NAME         STATE  AGE
+default      Ready  <age>
+kuke-system  Ready  <age>
 ```
+
+`kuke get realms -o wide` appends the containerd `NAMESPACE` column; `-o yaml` / `-o json` surface `cgroupPath` for the operator who wants to walk the cgroup-v2 hierarchy by hand.
 
 `default` is the user-workload realm — `kuke create …` lands here by default. `kuke-system` is owned by Kukeon itself and hosts the `kukeond` daemon cell.
 

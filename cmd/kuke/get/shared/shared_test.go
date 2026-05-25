@@ -22,6 +22,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
@@ -50,6 +51,11 @@ func TestParseOutputFormat(t *testing.T) {
 			name:       "table format",
 			flags:      map[string]string{"output": "table"},
 			wantFormat: shared.OutputFormatTable,
+		},
+		{
+			name:       "wide format",
+			flags:      map[string]string{"output": "wide"},
+			wantFormat: shared.OutputFormatWide,
 		},
 		{
 			name:       "default format when no flag",
@@ -454,6 +460,45 @@ func TestPrintTable(t *testing.T) {
 				if !foundSeparator {
 					t.Error("expected separator line with dashes, but not found")
 				}
+			}
+		})
+	}
+}
+
+// TestRenderAge pins the AGE helper at every kubectl-style coarse-unit
+// boundary the column reader cares about (days → hours → minutes →
+// seconds), plus the zero-value "-" rendering and the defensive clamp
+// for clocks reporting a CreatedAt slightly in the future. Sibling per-
+// kind issues (#602–#605) consume this helper directly; the contract is
+// fixed here.
+func TestRenderAge(t *testing.T) {
+	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name string
+		t    time.Time
+		want string
+	}{
+		{name: "zero time renders dash", t: time.Time{}, want: "-"},
+		{name: "negative duration clamps to 0s", t: now.Add(1 * time.Hour), want: "0s"},
+		{name: "0s for sub-second age", t: now.Add(-500 * time.Millisecond), want: "0s"},
+		{name: "30s", t: now.Add(-30 * time.Second), want: "30s"},
+		{name: "boundary: 59s stays in seconds", t: now.Add(-59 * time.Second), want: "59s"},
+		{name: "boundary: 1m promotes to minutes", t: now.Add(-1 * time.Minute), want: "1m"},
+		{name: "5m", t: now.Add(-5 * time.Minute), want: "5m"},
+		{name: "boundary: 59m stays in minutes", t: now.Add(-59 * time.Minute), want: "59m"},
+		{name: "boundary: 1h promotes to hours", t: now.Add(-1 * time.Hour), want: "1h"},
+		{name: "2h", t: now.Add(-2 * time.Hour), want: "2h"},
+		{name: "boundary: 23h59m stays in hours", t: now.Add(-23*time.Hour - 59*time.Minute), want: "23h"},
+		{name: "boundary: 24h promotes to days", t: now.Add(-24 * time.Hour), want: "1d"},
+		{name: "5d", t: now.Add(-5 * 24 * time.Hour), want: "5d"},
+		{name: "120d", t: now.Add(-120 * 24 * time.Hour), want: "120d"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shared.RenderAge(tt.t, now); got != tt.want {
+				t.Errorf("RenderAge(%v, %v) = %q, want %q", tt.t, now, got, tt.want)
 			}
 		})
 	}

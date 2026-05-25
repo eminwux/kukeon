@@ -936,7 +936,7 @@ func TestCompleteOutputFormat(t *testing.T) {
 		{
 			name:       "success with all formats",
 			toComplete: "",
-			wantNames:  []string{"yaml", "json", "table"},
+			wantNames:  []string{"yaml", "json", "table", "wide"},
 		},
 		{
 			name:       "success with prefix filter 'y'",
@@ -954,6 +954,11 @@ func TestCompleteOutputFormat(t *testing.T) {
 			wantNames:  []string{"table"},
 		},
 		{
+			name:       "success with prefix filter 'w'",
+			toComplete: "w",
+			wantNames:  []string{"wide"},
+		},
+		{
 			name:       "success with prefix filter 'ya'",
 			toComplete: "ya",
 			wantNames:  []string{"yaml"},
@@ -964,6 +969,11 @@ func TestCompleteOutputFormat(t *testing.T) {
 			wantNames:  []string{"table"},
 		},
 		{
+			name:       "success with prefix filter 'wi'",
+			toComplete: "wi",
+			wantNames:  []string{"wide"},
+		},
+		{
 			name:       "success with no matches",
 			toComplete: "x",
 			wantNames:  []string{},
@@ -971,7 +981,7 @@ func TestCompleteOutputFormat(t *testing.T) {
 		{
 			name:       "works without logger in context",
 			toComplete: "",
-			wantNames:  []string{"yaml", "json", "table"},
+			wantNames:  []string{"yaml", "json", "table", "wide"},
 			noLogger:   true,
 		},
 	}

@@ -59,7 +59,7 @@ func NewContainerCmd() *cobra.Command {
 	cmd.Flags().String("cell", "", "Filter containers by cell name")
 	_ = viper.BindPFlag(config.KUKE_GET_CONTAINER_CELL.ViperKey, cmd.Flags().Lookup("cell"))
 	cmd.Flags().
-		StringP("output", "o", "", "Output format (yaml, json, table). Default: table for list, yaml for single resource")
+		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
 
@@ -329,7 +329,7 @@ func printContainersWithState(
 		return shared.PrintYAML(cmd, containers)
 	case shared.OutputFormatJSON:
 		return shared.PrintJSON(cmd, containers)
-	case shared.OutputFormatTable:
+	case shared.OutputFormatTable, shared.OutputFormatWide:
 		if len(containers) == 0 {
 			if emptyMsg == "" {
 				emptyMsg = noContainersFoundMsg

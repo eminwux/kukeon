@@ -192,9 +192,10 @@ func TestNewCellCmd_SyncColumn(t *testing.T) {
 				Status:   v1beta1.CellStatus{State: v1beta1.CellStateReady},
 			}},
 			wantHeaders: []string{"SYNC"},
-			// "ce3 ... - ... -" — the SYNC dash is between STATE and CGROUP.
-			// PrintTable separates columns with two spaces, so the column
-			// reads as a standalone "-" token.
+			// CGROUP retired in #827, so SYNC is now the last default column;
+			// the no-lineage row ends in "-" preceded by the col separator,
+			// which PrintTable's width-padded last column still surrounds
+			// with spaces — " - " stays a stable substring.
 			wantRow: []string{"ce3", " - "},
 		},
 		{
@@ -291,6 +292,53 @@ func TestNewCellCmd_SyncColumn(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestNewCellCmd_NoCgroupOrControllers pins the epic:get step-1
+// cross-cutting cleanup for cells: the CGROUP column and the
+// --show-controllers flag must be gone in both default and -o wide
+// output (the SYNC and DIVERGENCE columns added by earlier work are
+// unaffected; -o wide still appends DIVERGENCE).
+func TestNewCellCmd_NoCgroupOrControllers(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	if cell.NewCellCmd().Flags().Lookup("show-controllers") != nil {
+		t.Error("show-controllers flag must be removed (issue #827)")
+	}
+
+	listFn := func(_, _, _ string) ([]v1beta1.CellDoc, error) {
+		return []v1beta1.CellDoc{{
+			Metadata: v1beta1.CellMetadata{Name: "ce1"},
+			Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+			Status: v1beta1.CellStatus{
+				State:              v1beta1.CellStateReady,
+				CgroupPath:         "/kukeon/r1/s1/st1/ce1",
+				SubtreeControllers: []string{"cpu", "memory"},
+			},
+		}}, nil
+	}
+
+	for _, args := range [][]string{nil, {"-o", "wide"}} {
+		buf := &bytes.Buffer{}
+		cmd := cell.NewCellCmd()
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+		ctx = context.WithValue(ctx, cell.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{listCellsFn: listFn}))
+		cmd.SetContext(ctx)
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("args=%v: unexpected error: %v", args, err)
+		}
+		out := buf.String()
+		for _, denied := range []string{"CGROUP", "CONTROLLERS"} {
+			if strings.Contains(out, denied) {
+				t.Errorf("args=%v: output must NOT contain %q; got:\n%s", args, denied, out)
+			}
+		}
 	}
 }
 

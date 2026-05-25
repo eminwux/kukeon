@@ -121,7 +121,7 @@ func NewConfigCmd() *cobra.Command {
 	cmd.Flags().String("stack", "", "Filter configs by stack name")
 	_ = viper.BindPFlag(config.KUKE_GET_CONFIG_STACK.ViperKey, cmd.Flags().Lookup("stack"))
 	cmd.Flags().
-		StringP("output", "o", "", "Output format (yaml, json, table). Default: table for list, yaml for single resource")
+		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
 
@@ -159,7 +159,7 @@ func printConfigs(cmd *cobra.Command, configs []v1beta1.CellConfigDoc, format sh
 		return shared.PrintYAML(cmd, configs)
 	case shared.OutputFormatJSON:
 		return shared.PrintJSON(cmd, configs)
-	case shared.OutputFormatTable:
+	case shared.OutputFormatTable, shared.OutputFormatWide:
 		if len(configs) == 0 {
 			cmd.Println("No configs found.")
 			return nil

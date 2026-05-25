@@ -147,19 +147,16 @@ func TestNewRealmCmd_Structure(t *testing.T) {
 	if cmd.Flags().Lookup("output") == nil {
 		t.Fatal("expected output flag")
 	}
-	if cmd.Flags().Lookup("show-controllers") == nil {
-		t.Fatal("expected show-controllers flag (issue #328)")
+	if cmd.Flags().Lookup("show-controllers") != nil {
+		t.Error("show-controllers flag must be removed (issue #827)")
 	}
 }
 
-// TestNewRealmCmd_ShowControllers pins the issue #328 surfacing rule:
-//
-//   - default `kuke get realms` MUST omit the CONTROLLERS column so the
-//     dev-init daemon-parity tail (NAME NAMESPACE STATE CGROUP) stays
-//     byte-identical to what kukeon's CLAUDE.md regression guard expects.
-//   - `--show-controllers` adds the column with the comma-joined effective
-//     set, falling back to "-" when SubtreeControllers is empty.
-func TestNewRealmCmd_ShowControllers(t *testing.T) {
+// TestNewRealmCmd_Columns pins the epic:get step-1 column contract for
+// `kuke get realm`: default emits `NAME STATE AGE`, `-o wide` appends
+// `NAMESPACE`, and neither `CGROUP` nor `CONTROLLERS` ever appear in
+// any table output (they live in `-o yaml`/`-o json` only).
+func TestNewRealmCmd_Columns(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	listFn := func() ([]v1beta1.RealmDoc, error) {
@@ -168,6 +165,7 @@ func TestNewRealmCmd_ShowControllers(t *testing.T) {
 				Metadata: v1beta1.RealmMetadata{Name: "default"},
 				Spec:     v1beta1.RealmSpec{Namespace: "default.kukeon.io"},
 				Status: v1beta1.RealmStatus{
+					State:              v1beta1.RealmStateReady,
 					CgroupPath:         "/kukeon/default",
 					SubtreeControllers: []string{"cpu", "memory", "io", "pids"},
 				},
@@ -176,13 +174,14 @@ func TestNewRealmCmd_ShowControllers(t *testing.T) {
 				Metadata: v1beta1.RealmMetadata{Name: "kuke-system"},
 				Spec:     v1beta1.RealmSpec{Namespace: "kuke-system.kukeon.io"},
 				Status: v1beta1.RealmStatus{
+					State:      v1beta1.RealmStateReady,
 					CgroupPath: "/kukeon/kuke-system",
 				},
 			},
 		}, nil
 	}
 
-	t.Run("default omits controllers column", func(t *testing.T) {
+	t.Run("default table is NAME STATE AGE", func(t *testing.T) {
 		t.Cleanup(viper.Reset)
 
 		cmd := realm.NewRealmCmd()
@@ -193,42 +192,84 @@ func TestNewRealmCmd_ShowControllers(t *testing.T) {
 			realm.MockControllerKey{},
 			kukeonv1.Client(&fakeClient{listRealmsFn: listFn}))
 		cmd.SetContext(ctx)
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if strings.Contains(buf.String(), "CONTROLLERS") {
-			t.Errorf("default output must NOT include CONTROLLERS column "+
-				"(issue #328 dev-init regression guard); got:\n%s", buf.String())
-		}
-	})
-
-	t.Run("flag appends controllers column", func(t *testing.T) {
-		t.Cleanup(viper.Reset)
-
-		cmd := realm.NewRealmCmd()
-		buf := &bytes.Buffer{}
-		cmd.SetOut(buf)
-		cmd.SetErr(buf)
-		ctx := context.WithValue(context.Background(),
-			realm.MockControllerKey{},
-			kukeonv1.Client(&fakeClient{listRealmsFn: listFn}))
-		cmd.SetContext(ctx)
-		cmd.SetArgs([]string{"--show-controllers"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		out := buf.String()
-		if !strings.Contains(out, "CONTROLLERS") {
-			t.Errorf("expected CONTROLLERS column with --show-controllers; got:\n%s", out)
+		header := firstLine(out)
+		// The header is rendered before any data row; check it directly so
+		// row data can't accidentally satisfy the column-presence assertion.
+		for _, want := range []string{"NAME", "STATE", "AGE"} {
+			if !strings.Contains(header, want) {
+				t.Errorf("default header missing %q; got: %q", want, header)
+			}
 		}
-		if !strings.Contains(out, "cpu,memory,io,pids") {
-			t.Errorf("expected joined controller list; got:\n%s", out)
-		}
-		// The empty-controllers row renders "-".
-		if !strings.Contains(out, "kuke-system") || !strings.Contains(out, " -") {
-			t.Errorf("expected empty controllers to render as '-'; got:\n%s", out)
+		for _, denied := range []string{"NAMESPACE", "CGROUP", "CONTROLLERS"} {
+			if strings.Contains(out, denied) {
+				t.Errorf("default output must NOT contain %q; got:\n%s", denied, out)
+			}
 		}
 	})
+
+	t.Run("-o wide appends NAMESPACE without resurrecting CGROUP/CONTROLLERS", func(t *testing.T) {
+		t.Cleanup(viper.Reset)
+
+		cmd := realm.NewRealmCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		ctx := context.WithValue(context.Background(),
+			realm.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{listRealmsFn: listFn}))
+		cmd.SetContext(ctx)
+		cmd.SetArgs([]string{"-o", "wide"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		header := firstLine(out)
+		for _, want := range []string{"NAME", "STATE", "AGE", "NAMESPACE"} {
+			if !strings.Contains(header, want) {
+				t.Errorf("wide header missing %q; got: %q", want, header)
+			}
+		}
+		for _, denied := range []string{"CGROUP", "CONTROLLERS"} {
+			if strings.Contains(out, denied) {
+				t.Errorf("-o wide output must NOT contain %q; got:\n%s", denied, out)
+			}
+		}
+		if !strings.Contains(out, "default.kukeon.io") {
+			t.Errorf("expected NAMESPACE value in -o wide rows; got:\n%s", out)
+		}
+	})
+
+	t.Run("-o yaml surfaces cgroupPath", func(t *testing.T) {
+		t.Cleanup(viper.Reset)
+
+		cmd := realm.NewRealmCmd()
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+		ctx := context.WithValue(context.Background(),
+			realm.MockControllerKey{},
+			kukeonv1.Client(&fakeClient{listRealmsFn: listFn}))
+		cmd.SetContext(ctx)
+		cmd.SetArgs([]string{"-o", "yaml"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "cgroupPath: /kukeon/default") {
+			t.Errorf("-o yaml should still surface cgroupPath; got:\n%s", out)
+		}
+	})
+}
+
+func firstLine(s string) string {
+	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+		return s[:idx]
+	}
+	return s
 }
 
 type fakeClient struct {

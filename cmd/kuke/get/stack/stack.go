@@ -101,8 +101,7 @@ func NewStackCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			showControllers, _ := cmd.Flags().GetBool("show-controllers")
-			return printStacks(cmd, stacks, outputFormat, showControllers)
+			return printStacks(cmd, stacks, outputFormat)
 		},
 	}
 
@@ -111,13 +110,9 @@ func NewStackCmd() *cobra.Command {
 	cmd.Flags().String("space", "", "Filter stacks by space name")
 	_ = viper.BindPFlag(config.KUKE_GET_STACK_SPACE.ViperKey, cmd.Flags().Lookup("space"))
 	cmd.Flags().
-		StringP("output", "o", "", "Output format (yaml, json, table). Default: table for list, yaml for single resource")
+		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
-	cmd.Flags().Bool(
-		"show-controllers", false,
-		"Append a CONTROLLERS column listing the cgroup-v2 controllers delegated on each stack's subtree (issue #328).",
-	)
 
 	cmd.ValidArgsFunction = config.CompleteStackNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
@@ -148,35 +143,26 @@ func printStacks(
 	cmd *cobra.Command,
 	stacks []v1beta1.StackDoc,
 	format shared.OutputFormat,
-	showControllers bool,
 ) error {
 	switch format {
 	case shared.OutputFormatYAML:
 		return shared.PrintYAML(cmd, stacks)
 	case shared.OutputFormatJSON:
 		return shared.PrintJSON(cmd, stacks)
-	case shared.OutputFormatTable:
+	case shared.OutputFormatTable, shared.OutputFormatWide:
 		if len(stacks) == 0 {
 			cmd.Println("No stacks found.")
 			return nil
 		}
-		headers := []string{"NAME", "REALM", "SPACE", "STATE", "CGROUP"}
-		if showControllers {
-			headers = append(headers, "CONTROLLERS")
-		}
+		// Stack has no per-entity wide columns (#603 deliberately leaves
+		// -o wide rendering the same shape as default); this step only
+		// retires CGROUP/CONTROLLERS.
+		headers := []string{"NAME", "REALM", "SPACE", "STATE"}
 		rows := make([][]string, 0, len(stacks))
 		for i := range stacks {
 			s := &stacks[i]
 			state := (&s.Status.State).String()
-			cgroup := s.Status.CgroupPath
-			if cgroup == "" {
-				cgroup = "-"
-			}
-			row := []string{s.Metadata.Name, s.Spec.RealmID, s.Spec.SpaceID, state, cgroup}
-			if showControllers {
-				row = append(row, shared.FormatControllers(s.Status.SubtreeControllers))
-			}
-			rows = append(rows, row)
+			rows = append(rows, []string{s.Metadata.Name, s.Spec.RealmID, s.Spec.SpaceID, state})
 		}
 		shared.PrintTable(cmd, headers, rows)
 		return nil

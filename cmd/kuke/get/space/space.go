@@ -91,8 +91,7 @@ func NewSpaceCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			showControllers, _ := cmd.Flags().GetBool("show-controllers")
-			return printSpaces(cmd, spaces, outputFormat, showControllers)
+			return printSpaces(cmd, spaces, outputFormat)
 		},
 	}
 
@@ -100,13 +99,9 @@ func NewSpaceCmd() *cobra.Command {
 	_ = viper.BindPFlag(config.KUKE_GET_SPACE_REALM.ViperKey, cmd.Flags().Lookup("realm"))
 
 	cmd.Flags().
-		StringP("output", "o", "", "Output format (yaml, json, table). Default: table for list, yaml for single resource")
+		StringP("output", "o", "", "Output format (yaml, json, table, wide). Default: table for list, yaml for single resource")
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
 	_ = viper.BindPFlag(config.KUKE_GET_OUTPUT.ViperKey, cmd.Flags().Lookup("o"))
-	cmd.Flags().Bool(
-		"show-controllers", false,
-		"Append a CONTROLLERS column listing the cgroup-v2 controllers delegated on each space's subtree (issue #328).",
-	)
 
 	cmd.ValidArgsFunction = config.CompleteSpaceNames
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
@@ -136,35 +131,27 @@ func printSpaces(
 	cmd *cobra.Command,
 	spaces []v1beta1.SpaceDoc,
 	format shared.OutputFormat,
-	showControllers bool,
 ) error {
 	switch format {
 	case shared.OutputFormatYAML:
 		return shared.PrintYAML(cmd, spaces)
 	case shared.OutputFormatJSON:
 		return shared.PrintJSON(cmd, spaces)
-	case shared.OutputFormatTable:
+	case shared.OutputFormatTable, shared.OutputFormatWide:
 		if len(spaces) == 0 {
 			cmd.Println("No spaces found.")
 			return nil
 		}
-		headers := []string{"NAME", "REALM", "STATE", "CGROUP"}
-		if showControllers {
-			headers = append(headers, "CONTROLLERS")
-		}
+		// Per-entity wide columns (EGRESS, NET-DEFAULTS) land in #602; this
+		// step only retires CGROUP/CONTROLLERS so the wide table currently
+		// renders the same shape as the default. The shared OutputFormatWide
+		// enum value is still accepted for symmetry across kinds.
+		headers := []string{"NAME", "REALM", "STATE"}
 		rows := make([][]string, 0, len(spaces))
 		for i := range spaces {
 			s := &spaces[i]
 			state := (&s.Status.State).String()
-			cgroup := s.Status.CgroupPath
-			if cgroup == "" {
-				cgroup = "-"
-			}
-			row := []string{s.Metadata.Name, s.Spec.RealmID, state, cgroup}
-			if showControllers {
-				row = append(row, shared.FormatControllers(s.Status.SubtreeControllers))
-			}
-			rows = append(rows, row)
+			rows = append(rows, []string{s.Metadata.Name, s.Spec.RealmID, state})
 		}
 		shared.PrintTable(cmd, headers, rows)
 		return nil
