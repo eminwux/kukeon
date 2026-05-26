@@ -151,7 +151,7 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 
 	// Remove the now-residue-free stack metadata directory. metadata.DeleteMetadata
 	// above removes the dir when empty, so this typically no-ops; surface any
-	// error so the half-deleted state (kukeon.yaml gone, dir surviving)
+	// error so the half-deleted state (metadata.json gone, dir surviving)
 	// reported in issue #905 can never again be silently swallowed.
 	if err = os.RemoveAll(metadataRunPath); err != nil {
 		return fmt.Errorf("%w: failed to remove stack directory %s: %w", errdefs.ErrDeleteStack, metadataRunPath, err)
