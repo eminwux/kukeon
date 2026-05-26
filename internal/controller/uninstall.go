@@ -18,11 +18,13 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"syscall"
 	"time"
 
 	"github.com/eminwux/kukeon/internal/consts"
@@ -75,6 +77,11 @@ type UninstallOptions struct {
 	// reading /proc/self/mounts + syscall.Unmount); tests inject a stub so
 	// they do not have to provision real mounts.
 	MountReleaser MountReleaser
+	// BuildCacheBaseDir overrides the directory under which `kukebuild`
+	// keeps its per-namespace BuildKit state (issue #904). Empty falls
+	// back to consts.KukebuildBaseDir; tests pin t.TempDir() so they do
+	// not have to write under /var/lib.
+	BuildCacheBaseDir string
 }
 
 // RealmPurgeOutcome reports the result of purging a single realm.
@@ -90,6 +97,24 @@ type RealmPurgeOutcome struct {
 	Purged           bool
 	NamespaceRemoved bool
 	Err              error
+}
+
+// BuildCachePurgeOutcome reports the result of reclaiming one realm's
+// per-namespace BuildKit state directory at <BuildCacheBaseDir>/<namespace>
+// (issue #904). The reclaim only runs for realms whose containerd namespace
+// was actually removed (NamespaceRemoved=true); a residual namespace's cache
+// is intentionally left in place so a follow-up `kuke uninstall` still has
+// the BuildKit metadata to drive its own teardown.
+//
+// Existed is "did we find the per-namespace dir before removal" — the
+// renderer's analog of the dirOutcome existed/removed pair used for the
+// socket and run-path rows.
+type BuildCachePurgeOutcome struct {
+	Namespace string
+	Path      string
+	Existed   bool
+	Removed   bool
+	Err       error
 }
 
 // UninstallReport summarizes what Uninstall did.
@@ -127,6 +152,27 @@ type UninstallReport struct {
 	GroupName     string
 	GroupExisted  bool
 	GroupRemoved  bool
+	// BuildCaches records the per-namespace BuildKit state directories the
+	// uninstall pass reclaimed (issue #904). One entry per realm whose
+	// containerd namespace was successfully removed; ordered to match
+	// Realms. A realm whose namespace survived contributes no entry —
+	// leaving its cache in place is intentional, see BuildCachePurgeOutcome.
+	BuildCaches []BuildCachePurgeOutcome
+	// BuildCacheBaseDir is the directory the renderer attempted to rmdir
+	// after the per-namespace sweep. Empty when no BuildKit cache was
+	// touched (no realm purged with NamespaceRemoved=true).
+	BuildCacheBaseDir string
+	// BuildCacheBaseExisted reports whether BuildCacheBaseDir existed at
+	// the start of the rmdir step (after the per-namespace sweep). Lets the
+	// renderer distinguish "absent" from "kept".
+	BuildCacheBaseExisted bool
+	// BuildCacheBaseRemoved reports whether BuildCacheBaseDir was rmdir'd.
+	// Only true when the base directory was empty after the per-namespace
+	// sweep — a scoped uninstall (`--server-configuration` narrowing the
+	// realm set) leaves cousin-instance caches untouched and the base dir
+	// stays. Plain `os.Remove`, not `RemoveAll`: stomping on another
+	// instance's cache would be a regression of the scoping invariant.
+	BuildCacheBaseRemoved bool
 }
 
 // Uninstall performs a comprehensive teardown of all kukeon runtime state.
@@ -145,6 +191,14 @@ type UninstallReport struct {
 //     path) still get their namespaces cleaned up. The two well-known
 //     realms (`default`, `kuke-system`) are kept as a safety floor so a
 //     containerd-list failure cannot strand them.
+//
+//     For every realm whose containerd namespace was actually removed, also
+//     reclaim the matching per-namespace BuildKit cache directory at
+//     <BuildCacheBaseDir>/<namespace> (default consts.KukebuildBaseDir). The
+//     cache references containerd by snapshot ID and content digest; a
+//     surviving cache after a successful namespace drop strands the next
+//     `kuke build` with "parent snapshot does not exist" or "content digest
+//     ... not found" — issue #904.
 //  2. Release live kukeon-owned bind mounts under SocketDir, then RemoveAll
 //     on SocketDir (typically /run/kukeon). The unmount step is what makes a
 //     post-attach uninstall succeed: kuketty leaves a /run/kukeon/tty bind
@@ -154,12 +208,19 @@ type UninstallReport struct {
 //     stragglers holding it open.
 //  3. The same release + RemoveAll for the run path (typically /opt/kukeon).
 //  4. Remove the kukeon system user and group (no-op if absent).
+//  5. After the per-namespace cache sweep, try a plain rmdir on
+//     BuildCacheBaseDir — only succeeds when it is empty so a scoped
+//     uninstall (`--server-configuration` narrowing realm enumeration to one
+//     suffix) leaves cousin instances' caches under sibling subdirs intact.
 //
 // Steps 2–4 are gated on every realm reporting NamespaceRemoved=true. When at
 // least one realm fails to drop its containerd namespace, the report's
 // CleanupSkipped flag is set and the filesystem + user/group teardown is left
 // for a follow-up run — see issue #287 for the half-cleaned-host failure
-// mode this prevents.
+// mode this prevents. The per-namespace BuildKit cache sweep (the cache
+// reclaim half of step 1) is **not** gated on that flag: a namespace that
+// was actually removed should have its cache reclaimed even when a sibling
+// realm's purge failed.
 //
 // Any step's error is recorded in the report. The first non-nil step error
 // is returned so callers can surface "uninstall failed at step X" without
@@ -242,6 +303,11 @@ func (b *Exec) Uninstall(opts UninstallOptions) (UninstallReport, error) {
 		)
 	}
 
+	buildCacheBase := opts.BuildCacheBaseDir
+	if buildCacheBase == "" {
+		buildCacheBase = consts.KukebuildBaseDir
+	}
+
 	allNamespacesRemoved := true
 	for _, realm := range realms {
 		outcome := RealmPurgeOutcome{
@@ -260,6 +326,39 @@ func (b *Exec) Uninstall(opts UninstallOptions) (UninstallReport, error) {
 			allNamespacesRemoved = false
 		}
 		report.Realms = append(report.Realms, outcome)
+
+		// Reclaim the per-namespace BuildKit cache directory only when the
+		// containerd namespace was actually removed. Pairing the cache wipe
+		// with the namespace wipe keeps the BuildKit cache from referencing
+		// snapshots or content blobs that no longer exist in the (now empty
+		// or absent) namespace — issue #904. A realm whose namespace
+		// survived is intentionally skipped so the operator's follow-up
+		// recovery has the same cache metadata available that the previous
+		// builds saw.
+		if outcome.NamespaceRemoved && realm.Spec.Namespace != "" {
+			cacheOutcome := reclaimNamespaceBuildCache(buildCacheBase, realm.Spec.Namespace)
+			report.BuildCaches = append(report.BuildCaches, cacheOutcome)
+			if cacheOutcome.Err != nil {
+				recordErr(fmt.Errorf(
+					"remove build cache %q: %w", cacheOutcome.Path, cacheOutcome.Err,
+				))
+			}
+		}
+	}
+
+	// Step 5 (early): try to rmdir the BuildKit cache base directory. A plain
+	// os.Remove fails with ENOTEMPTY when a cousin instance's cache is still
+	// under it, which is the right behavior for a scoped uninstall — the
+	// renderer prints "kept (not empty)" instead of "removed" and the operator
+	// sees the base dir survived for a reason. Done before the half-cleaned-
+	// host gate returns so the BuildKit cache rows surface in the report even
+	// when the SocketDir/RunPath teardown is suppressed.
+	report.BuildCacheBaseDir = buildCacheBase
+	rmBaseExisted, rmBaseRemoved, rmBaseErr := rmdirIfEmpty(buildCacheBase)
+	report.BuildCacheBaseExisted = rmBaseExisted
+	report.BuildCacheBaseRemoved = rmBaseRemoved
+	if rmBaseErr != nil {
+		recordErr(fmt.Errorf("remove build cache base %q: %w", buildCacheBase, rmBaseErr))
 	}
 
 	// Half-cleaned-host gate (issue #287): if any realm failed to drop its
@@ -460,6 +559,59 @@ func releaseAndRecord(
 		}
 	}
 	return attempts, firstResidual
+}
+
+// reclaimNamespaceBuildCache removes the per-namespace BuildKit state
+// directory at <baseDir>/<namespace>. Returns a BuildCachePurgeOutcome
+// populated with Existed / Removed / Err so the renderer can surface what
+// happened. A missing directory is the absent-on-clean-host case and is
+// reported as Existed=false, Removed=false, Err=nil. Issue #904.
+func reclaimNamespaceBuildCache(baseDir, namespace string) BuildCachePurgeOutcome {
+	path := filepath.Join(baseDir, namespace)
+	outcome := BuildCachePurgeOutcome{
+		Namespace: namespace,
+		Path:      path,
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		if os.IsNotExist(statErr) {
+			return outcome
+		}
+		outcome.Err = statErr
+		return outcome
+	}
+	outcome.Existed = true
+	if rmErr := os.RemoveAll(path); rmErr != nil {
+		outcome.Err = rmErr
+		return outcome
+	}
+	outcome.Removed = true
+	return outcome
+}
+
+// rmdirIfEmpty attempts a plain rmdir (not RemoveAll) on path and reports
+// whether it existed and whether it was removed. ENOTEMPTY is the expected
+// no-op when a scoped uninstall has left cousin-instance caches under the
+// base dir — it returns (existed=true, removed=false, err=nil) so the
+// renderer can print "kept (not empty)" instead of misreporting a failure.
+// All other errors (permission, missing parent on the way to a nested rmdir,
+// etc.) propagate as err.
+func rmdirIfEmpty(path string) (bool, bool, error) {
+	if _, statErr := os.Stat(path); statErr != nil {
+		if os.IsNotExist(statErr) {
+			return false, false, nil
+		}
+		return false, false, statErr
+	}
+	if rmErr := os.Remove(path); rmErr != nil {
+		// ENOTEMPTY (and the BSD-aliased ENOTEMPTY=EEXIST on some systems)
+		// is the "other instance's cache is still here" case; it is not an
+		// error from the caller's perspective. Anything else is real.
+		if errors.Is(rmErr, syscall.ENOTEMPTY) || errors.Is(rmErr, syscall.EEXIST) {
+			return true, false, nil
+		}
+		return true, false, rmErr
+	}
+	return true, true, nil
 }
 
 // removePathIfExists is a thin wrapper around os.RemoveAll that reports

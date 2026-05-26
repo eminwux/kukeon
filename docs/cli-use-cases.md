@@ -67,7 +67,7 @@ sudo kuke uninstall -y       # non-interactive (scripts)
 **Invariants.**
 
 - Without `-y`, the command prints a destructive-action prompt naming every artifact it will remove and waits on stdin. EOF or a non-`yes` answer aborts with non-zero exit and no destructive side effect.
-- With `-y`, exit code 0 on success. Side effect: the `kukeond` systemd unit (if installed) is stopped, disabled, and removed; every realm purged with `--cascade`; `/run/kukeon` and the configured run path (default `/opt/kukeon`) removed; the `kukeon` system user/group removed if present.
+- With `-y`, exit code 0 on success. Side effect: the `kukeond` systemd unit (if installed) is stopped, disabled, and removed; every realm purged with `--cascade`; for every realm whose containerd namespace was actually removed, the matching `kukebuild` cache at `/var/lib/kukebuild/<namespace>/` is reclaimed in the same pass (issue #904 — the cache holds layer→snapshot and layer→content mappings into the now-gone namespace, so leaving it strands the next `kuke build` with "parent snapshot does not exist" or "content digest ... not found"); `/run/kukeon` and the configured run path (default `/opt/kukeon`) removed; the `kukeon` system user/group removed if present. `/var/lib/kukebuild/` itself is rmdir'd only when empty after the per-namespace sweep — cousin instances' caches under sibling subdirs (a scoped uninstall via `--server-configuration`) are left intact.
 - `kuke uninstall` accepts `--server-configuration <path>` (default `/etc/kukeon/kukeond.yaml`) to target a specific kukeond instance. Precedence: `--flag > KUKEOND_CONFIGURATION env > /etc/kukeon/kukeond.yaml > hardcoded defaults`. The loaded `containerdNamespaceSuffix` scopes the realm enumeration — `sudo kuke uninstall --server-configuration ./kukeond-dev.yaml` enumerates and purges only `*.dev.kukeon.io` namespaces and never touches the default-instance ones. Same flag on `kuke init` and `kuke daemon …`.
 - The binary at `/usr/local/bin/kuke` and the `kukeond` symlink are **never** removed — uninstalling runtime state is not the same as uninstalling the binary.
 - The systemd-unit teardown is a no-op (silent, no row in the report) on hosts where `systemctl` is absent or `/etc/systemd/system/kukeond.service` was never installed (e.g. `make dev-init` hosts).
@@ -86,7 +86,8 @@ This is the half-cleaned-host guard added in #287: tearing out `/opt/kukeon` whi
 To recover:
 
 1. Inspect the residual namespace — e.g. `ctr -n <namespace> snapshots ls`, `ctr -n <namespace> containers ls` — and clean it up by hand or via `ctr namespace remove <namespace>` once the namespace is empty.
-2. Re-run `kuke uninstall --yes`. The realm-purge step will now succeed and the gated cleanup steps (2–4) will run normally.
+2. Wipe the matching per-namespace BuildKit state directory — `sudo rm -rf /var/lib/kukebuild/<namespace>/` — so a follow-up `kuke build` into the recreated namespace does not hit a stale `cache.db` referencing snapshots/content that the manual cleanup just removed. Skipping this step is the issue #904 trap: the namespace looks fresh in `ctr` but the next build fails with "parent snapshot does not exist" or "content digest ... not found". The follow-up `kuke uninstall --yes` only sweeps caches for realms it successfully purges in *its* pass — caches stranded by a previous half-cleaned uninstall are the operator's to wipe.
+3. Re-run `kuke uninstall --yes`. The realm-purge step will now succeed and the gated cleanup steps (2–4) will run normally.
 
 A successful re-run produces the familiar tail (`/opt/kukeon: removed`, `user 'kukeon': removed`, etc.) with no `skipped` lines.
 

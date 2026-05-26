@@ -74,8 +74,9 @@ func TestUninstall_PurgesWellKnownRealmsAndCleansFilesystem(t *testing.T) {
 
 	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
 	report, uninstallErr := ctrl.Uninstall(controller.UninstallOptions{
-		SocketDir:     tmpSocketDir,
-		SkipUserGroup: true,
+		SocketDir:         tmpSocketDir,
+		SkipUserGroup:     true,
+		BuildCacheBaseDir: t.TempDir(),
 	})
 	if uninstallErr != nil {
 		t.Fatalf("Uninstall returned error: %v", uninstallErr)
@@ -117,8 +118,9 @@ func TestUninstall_IsIdempotent(t *testing.T) {
 	// First run on a never-existed install: must not error, nothing exists
 	// to clean up but the realms still get a defensive purge call.
 	report, err := ctrl.Uninstall(controller.UninstallOptions{
-		SocketDir:     tmpSocketDir,
-		SkipUserGroup: true,
+		SocketDir:         tmpSocketDir,
+		SkipUserGroup:     true,
+		BuildCacheBaseDir: t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("first Uninstall errored: %v", err)
@@ -134,8 +136,9 @@ func TestUninstall_IsIdempotent(t *testing.T) {
 
 	// Re-run: still no error.
 	if _, repeatErr := ctrl.Uninstall(controller.UninstallOptions{
-		SocketDir:     tmpSocketDir,
-		SkipUserGroup: true,
+		SocketDir:         tmpSocketDir,
+		SkipUserGroup:     true,
+		BuildCacheBaseDir: t.TempDir(),
 	}); repeatErr != nil {
 		t.Fatalf("repeat Uninstall errored: %v", repeatErr)
 	}
@@ -154,7 +157,8 @@ func TestUninstall_MergesListedRealmsWithWellKnown(t *testing.T) {
 
 	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
 	if _, err := ctrl.Uninstall(controller.UninstallOptions{
-		SkipUserGroup: true,
+		SkipUserGroup:     true,
+		BuildCacheBaseDir: t.TempDir(),
 	}); err != nil {
 		t.Fatalf("Uninstall errored: %v", err)
 	}
@@ -201,8 +205,9 @@ func TestUninstall_PurgeFailureGatesFilesystemCleanup(t *testing.T) {
 
 	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
 	report, err := ctrl.Uninstall(controller.UninstallOptions{
-		SocketDir:     tmpSocketDir,
-		SkipUserGroup: true,
+		SocketDir:         tmpSocketDir,
+		SkipUserGroup:     true,
+		BuildCacheBaseDir: t.TempDir(),
 	})
 	if err == nil {
 		t.Fatalf("expected error from failing realm purge, got nil")
@@ -269,6 +274,237 @@ func TestUninstall_PurgeFailureGatesFilesystemCleanup(t *testing.T) {
 	}
 	if !foundOK {
 		t.Errorf("expected successful default realm in report; got %+v", report.Realms)
+	}
+}
+
+// TestUninstall_ReclaimsBuildCachePerNamespace pins the issue #904 fix: for
+// every realm whose containerd namespace was actually removed, Uninstall
+// reclaims the matching per-namespace BuildKit state directory at
+// <BuildCacheBaseDir>/<namespace>. Leaving the cache behind strands the next
+// `kuke build` with "parent snapshot does not exist" or "content digest ...
+// not found" because cache.db references containerd by snapshot ID and
+// content digest into a namespace that no longer exists.
+func TestUninstall_ReclaimsBuildCachePerNamespace(t *testing.T) {
+	tmpRunPath := t.TempDir()
+	tmpSocketDir := t.TempDir()
+	cacheBase := t.TempDir()
+
+	// Seed a populated per-namespace cache dir for each well-known realm so
+	// we can prove RemoveAll fired (not just os.Remove of an empty dir).
+	for _, ns := range []string{
+		consts.RealmNamespace(consts.KukeonDefaultRealmName),
+		consts.RealmNamespace(consts.KukeSystemRealmName),
+	} {
+		nsDir := filepath.Join(cacheBase, ns)
+		if err := os.MkdirAll(filepath.Join(nsDir, "buildkit"), 0o700); err != nil {
+			t.Fatalf("seed cache %q: %v", nsDir, err)
+		}
+		if err := os.WriteFile(
+			filepath.Join(nsDir, "cache.db"), []byte("seeded"), 0o600,
+		); err != nil {
+			t.Fatalf("seed cache.db under %q: %v", nsDir, err)
+		}
+	}
+
+	f := uninstallNoopRunner(nil)
+	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
+	report, err := ctrl.Uninstall(controller.UninstallOptions{
+		SocketDir:         tmpSocketDir,
+		SkipUserGroup:     true,
+		BuildCacheBaseDir: cacheBase,
+	})
+	if err != nil {
+		t.Fatalf("Uninstall returned error: %v", err)
+	}
+
+	// One BuildCachePurgeOutcome per well-known realm, each with Existed +
+	// Removed true and no error. Ordering must match Realms.
+	if len(report.BuildCaches) != 2 {
+		t.Fatalf("BuildCaches len=%d, want 2 (one per well-known realm); got %+v",
+			len(report.BuildCaches), report.BuildCaches)
+	}
+	wantNamespaces := map[string]bool{
+		consts.RealmNamespace(consts.KukeonDefaultRealmName): false,
+		consts.RealmNamespace(consts.KukeSystemRealmName):    false,
+	}
+	for _, c := range report.BuildCaches {
+		if !c.Existed || !c.Removed || c.Err != nil {
+			t.Errorf("cache outcome for %q = %+v; want Existed:true Removed:true Err:nil",
+				c.Namespace, c)
+		}
+		wantPath := filepath.Join(cacheBase, c.Namespace)
+		if c.Path != wantPath {
+			t.Errorf("cache outcome Path=%q, want %q", c.Path, wantPath)
+		}
+		if _, ok := wantNamespaces[c.Namespace]; !ok {
+			t.Errorf("unexpected namespace in BuildCaches: %q", c.Namespace)
+			continue
+		}
+		wantNamespaces[c.Namespace] = true
+	}
+	for ns, seen := range wantNamespaces {
+		if !seen {
+			t.Errorf("expected BuildCache row for namespace %q; got %+v",
+				ns, report.BuildCaches)
+		}
+	}
+
+	// The per-namespace dirs must actually be gone from disk.
+	for ns := range wantNamespaces {
+		nsDir := filepath.Join(cacheBase, ns)
+		if _, statErr := os.Stat(nsDir); !os.IsNotExist(statErr) {
+			t.Errorf("cache dir %q survived uninstall: %v", nsDir, statErr)
+		}
+	}
+
+	// Base dir was emptied by the per-namespace sweep, so the rmdir must
+	// have succeeded — issue #904's "rmdir base if empty" branch.
+	if !report.BuildCacheBaseExisted {
+		t.Errorf("BuildCacheBaseExisted=false; seeded base was not seen")
+	}
+	if !report.BuildCacheBaseRemoved {
+		t.Errorf("BuildCacheBaseRemoved=false; empty base must be rmdir'd")
+	}
+	if _, statErr := os.Stat(cacheBase); !os.IsNotExist(statErr) {
+		t.Errorf("base cache dir %q survived after rmdir-when-empty: %v", cacheBase, statErr)
+	}
+}
+
+// TestUninstall_BuildCacheSkippedOnNamespaceFailure pins the gate: a realm
+// whose containerd namespace was NOT removed (the issue #193 partial-state
+// path) must keep its BuildKit cache on disk. Wiping it would prevent the
+// follow-up `kuke uninstall` from having the same cache metadata to reason
+// about — and the cache references are still meaningful while the namespace
+// survives.
+func TestUninstall_BuildCacheSkippedOnNamespaceFailure(t *testing.T) {
+	tmpRunPath := t.TempDir()
+	tmpSocketDir := t.TempDir()
+	cacheBase := t.TempDir()
+
+	// Seed caches for both well-known realms.
+	defaultNs := consts.RealmNamespace(consts.KukeonDefaultRealmName)
+	systemNs := consts.RealmNamespace(consts.KukeSystemRealmName)
+	for _, ns := range []string{defaultNs, systemNs} {
+		if err := os.MkdirAll(filepath.Join(cacheBase, ns), 0o700); err != nil {
+			t.Fatalf("seed cache %q: %v", ns, err)
+		}
+		if err := os.WriteFile(
+			filepath.Join(cacheBase, ns, "cache.db"), []byte("x"), 0o600,
+		); err != nil {
+			t.Fatalf("seed cache.db: %v", err)
+		}
+	}
+
+	f := uninstallNoopRunner(nil)
+	failure := errors.New("synthetic purge failure")
+	f.PurgeRealmFn = func(r intmodel.Realm) (bool, error) {
+		// kuke-system reports NamespaceRemoved=false (PurgeRealm returns
+		// false + err); default reports NamespaceRemoved=true.
+		if r.Metadata.Name == consts.KukeSystemRealmName {
+			return false, failure
+		}
+		return true, nil
+	}
+
+	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
+	report, _ := ctrl.Uninstall(controller.UninstallOptions{
+		SocketDir:         tmpSocketDir,
+		SkipUserGroup:     true,
+		BuildCacheBaseDir: cacheBase,
+	})
+
+	// Exactly one cache row: the realm that successfully dropped its
+	// namespace. The realm whose namespace survived contributes no row.
+	if len(report.BuildCaches) != 1 {
+		t.Fatalf("BuildCaches len=%d, want 1 (only the successfully purged realm); got %+v",
+			len(report.BuildCaches), report.BuildCaches)
+	}
+	got := report.BuildCaches[0]
+	if got.Namespace != defaultNs {
+		t.Errorf("BuildCaches[0].Namespace=%q, want %q", got.Namespace, defaultNs)
+	}
+	if !got.Removed {
+		t.Errorf("default-realm cache should be Removed=true; got %+v", got)
+	}
+
+	// kuke-system's cache must survive on disk so the operator's follow-up
+	// recovery has the same metadata available.
+	if _, statErr := os.Stat(filepath.Join(cacheBase, systemNs)); statErr != nil {
+		t.Errorf("kuke-system cache dir wiped despite namespace survival: %v", statErr)
+	}
+
+	// Base dir must NOT be rmdir'd — kuke-system's subdir keeps it non-empty.
+	if report.BuildCacheBaseRemoved {
+		t.Errorf("BuildCacheBaseRemoved=true with surviving cousin subdir; rmdir must have stayed a no-op")
+	}
+	if _, statErr := os.Stat(cacheBase); statErr != nil {
+		t.Errorf("base cache dir wiped despite non-empty rmdir: %v", statErr)
+	}
+}
+
+// TestUninstall_BuildCacheBaseAbsent pins the "host never built" path: a
+// clean install where /var/lib/kukebuild was never created must still
+// produce a no-op exit (no error, no spurious rows) — uninstall idempotency
+// extends to the cache reclaim half.
+func TestUninstall_BuildCacheBaseAbsent(t *testing.T) {
+	tmpRunPath := t.TempDir()
+	tmpSocketDir := t.TempDir()
+	// Point at a never-created path under a tmp dir so the test cannot
+	// accidentally touch /var/lib/kukebuild on the dev host.
+	cacheBase := filepath.Join(t.TempDir(), "never-built")
+
+	f := uninstallNoopRunner(nil)
+	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
+	report, err := ctrl.Uninstall(controller.UninstallOptions{
+		SocketDir:         tmpSocketDir,
+		SkipUserGroup:     true,
+		BuildCacheBaseDir: cacheBase,
+	})
+	if err != nil {
+		t.Fatalf("Uninstall on host with no BuildKit cache errored: %v", err)
+	}
+
+	// Every cache outcome should be Existed=false / Removed=false / no err.
+	for _, c := range report.BuildCaches {
+		if c.Existed || c.Removed || c.Err != nil {
+			t.Errorf("cache outcome on absent base should be all-false: %+v", c)
+		}
+	}
+
+	if report.BuildCacheBaseExisted {
+		t.Errorf("BuildCacheBaseExisted=true for never-created dir %q", cacheBase)
+	}
+	if report.BuildCacheBaseRemoved {
+		t.Errorf("BuildCacheBaseRemoved=true for never-created dir %q", cacheBase)
+	}
+}
+
+// TestUninstall_BuildCacheBaseDefaultsToConst pins the production-code path:
+// when UninstallOptions leaves BuildCacheBaseDir empty (the CLI's default),
+// the controller falls back to consts.KukebuildBaseDir rather than a silent
+// no-op. The fallback is reported on the UninstallReport so the renderer can
+// label the row. Pointing at a host path is undesirable in tests, so this
+// guard only asserts the BuildCacheBaseDir field gets surfaced — verifying
+// the constant flows through.
+func TestUninstall_BuildCacheBaseDefaultsToConst(t *testing.T) {
+	tmpRunPath := t.TempDir()
+	tmpSocketDir := t.TempDir()
+
+	// Stand in a fakeRunner that always returns NamespaceRemoved=false so
+	// no per-namespace cache reclaim fires — the test is about the base-dir
+	// default surfacing only, not about touching /var/lib/kukebuild.
+	f := uninstallNoopRunner(nil)
+	f.PurgeRealmFn = func(_ intmodel.Realm) (bool, error) { return false, nil }
+
+	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
+	report, _ := ctrl.Uninstall(controller.UninstallOptions{
+		SocketDir:     tmpSocketDir,
+		SkipUserGroup: true,
+		// BuildCacheBaseDir deliberately empty — exercise the default.
+	})
+	if report.BuildCacheBaseDir != consts.KukebuildBaseDir {
+		t.Errorf("BuildCacheBaseDir=%q, want default %q",
+			report.BuildCacheBaseDir, consts.KukebuildBaseDir)
 	}
 }
 
@@ -345,6 +581,7 @@ func TestUninstall_DaemonStopStep_PIDPresent(t *testing.T) {
 		DaemonStopper:         stopper,
 		DaemonStopGracePeriod: 250 * time.Millisecond,
 		SkipUserGroup:         true,
+		BuildCacheBaseDir:     t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("Uninstall returned error: %v", err)
@@ -407,9 +644,10 @@ func TestUninstall_DaemonStopStep_PIDAbsent(t *testing.T) {
 
 	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
 	report, err := ctrl.Uninstall(controller.UninstallOptions{
-		SocketDir:     tmpSocketDir,
-		DaemonStopper: stopper,
-		SkipUserGroup: true,
+		SocketDir:         tmpSocketDir,
+		DaemonStopper:     stopper,
+		SkipUserGroup:     true,
+		BuildCacheBaseDir: t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("Uninstall returned error: %v", err)
@@ -463,7 +701,8 @@ func TestUninstall_SuffixEnumeratorPurgesKukeonNamespacesOnly(t *testing.T) {
 
 	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
 	if _, err := ctrl.Uninstall(controller.UninstallOptions{
-		SkipUserGroup: true,
+		SkipUserGroup:     true,
+		BuildCacheBaseDir: t.TempDir(),
 	}); err != nil {
 		t.Fatalf("Uninstall returned error: %v", err)
 	}
@@ -553,7 +792,8 @@ func TestUninstall_SuffixIsolationAcrossInstances(t *testing.T) {
 
 	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
 	if _, err := ctrl.Uninstall(controller.UninstallOptions{
-		SkipUserGroup: true,
+		SkipUserGroup:     true,
+		BuildCacheBaseDir: t.TempDir(),
 	}); err != nil {
 		t.Fatalf("Uninstall returned error: %v", err)
 	}
@@ -635,9 +875,10 @@ func TestUninstall_ReleasesBindMountsBeforeRmdir(t *testing.T) {
 	f := uninstallNoopRunner(nil)
 	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
 	report, err := ctrl.Uninstall(controller.UninstallOptions{
-		SocketDir:     tmpSocketDir,
-		MountReleaser: releaser,
-		SkipUserGroup: true,
+		SocketDir:         tmpSocketDir,
+		MountReleaser:     releaser,
+		SkipUserGroup:     true,
+		BuildCacheBaseDir: t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("Uninstall returned err=%v", err)
@@ -687,9 +928,10 @@ func TestUninstall_ResidualMountSurfacesInReportAndError(t *testing.T) {
 	f := uninstallNoopRunner(nil)
 	ctrl := setupTestControllerWithRunPath(t, f, tmpRunPath)
 	report, err := ctrl.Uninstall(controller.UninstallOptions{
-		SocketDir:     tmpSocketDir,
-		MountReleaser: releaser,
-		SkipUserGroup: true,
+		SocketDir:         tmpSocketDir,
+		MountReleaser:     releaser,
+		SkipUserGroup:     true,
+		BuildCacheBaseDir: t.TempDir(),
 	})
 
 	if err == nil {
@@ -748,7 +990,8 @@ func TestUninstall_DefaultPIDFileResolvesToSocketDir(t *testing.T) {
 		DaemonStopper: stopper,
 		// KukeondPIDFile deliberately empty — the whole point is to exercise
 		// the controller's default-resolution path.
-		SkipUserGroup: true,
+		SkipUserGroup:     true,
+		BuildCacheBaseDir: t.TempDir(),
 	}); err != nil {
 		t.Fatalf("Uninstall returned error: %v", err)
 	}
