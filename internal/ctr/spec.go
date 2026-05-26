@@ -181,6 +181,7 @@ type buildOpts struct {
 	defaultMemoryLimitBytes int64
 	secretRunPath           string
 	extraLabels             map[string]string
+	kukeonGroupGID          uint32
 }
 
 // WithAttachableInjection configures the host-side paths used when wrapping
@@ -224,6 +225,52 @@ func WithExtraLabels(labels map[string]string) BuildOption {
 		for k, v := range labels {
 			o.extraLabels[k] = v
 		}
+	}
+}
+
+// WithKukeonGroupGID injects the host's `kukeon` group GID into the container
+// process's OCI Process.User.AdditionalGids. The kukeon-owned per-container
+// directories (the attachable tty bind-mount, secrets, etc.) are group-owned
+// on the host by this GID with mode 02750 — without world access, an in-
+// container process that does not belong to this numeric group cannot
+// read/write them. Without this hop, additionalGids are resolved by
+// containerd from the image's /etc/group; an image that happens to define
+// "kukeon" at a different numeric GID (or omits it entirely) silently
+// produces an unstartable cell because kuketty's listen / log open fails
+// with EACCES on the bind-mounted tty dir.
+//
+// Zero is a no-op so callers can pass r.opts.KukeonGroupGID unconditionally.
+// The opt appends to whatever AdditionalGids containerd's WithUser already
+// populated from the rootfs (it runs after securitySpecOpts), and dedupes so
+// a coincidentally-matching image GID is not duplicated.
+func WithKukeonGroupGID(gid uint32) BuildOption {
+	return func(o *buildOpts) {
+		if gid > 0 {
+			o.kukeonGroupGID = gid
+		}
+	}
+}
+
+// withKukeonGroupGIDSpecOpt returns the SpecOpts that appends the host's
+// kukeon GID to Process.User.AdditionalGids. Must run after any
+// oci.WithUser populated the slice from the rootfs — BuildContainerSpec /
+// BuildRootContainerSpec append it after securitySpecOpts to enforce that
+// order.
+func withKukeonGroupGIDSpecOpt(gid uint32) oci.SpecOpts {
+	return func(_ context.Context, _ oci.Client, _ *containers.Container, s *runtimespec.Spec) error {
+		if gid == 0 {
+			return nil
+		}
+		if s.Process == nil {
+			return nil
+		}
+		for _, existing := range s.Process.User.AdditionalGids {
+			if existing == gid {
+				return nil
+			}
+		}
+		s.Process.User.AdditionalGids = append(s.Process.User.AdditionalGids, gid)
+		return nil
 	}
 }
 
@@ -394,6 +441,15 @@ func BuildContainerSpec(
 	}
 
 	specOpts = append(specOpts, securitySpecOpts(containerSpec)...)
+
+	// Host kukeon-group GID into Process.User.AdditionalGids. Runs after
+	// securitySpecOpts so it appends to whatever containerd's WithUser
+	// populated from the image's /etc/group, ensuring the in-container
+	// process can reach kukeon-group-owned bind-mounts regardless of how the
+	// image numbered its own kukeon group. Zero-GID is a no-op.
+	if opts.kukeonGroupGID > 0 {
+		specOpts = append(specOpts, withKukeonGroupGIDSpecOpt(opts.kukeonGroupGID))
+	}
 
 	// Daemon-default memory cap: applies only when the spec does not already
 	// carry a positive Resources.MemoryLimitBytes, so an explicit per-
