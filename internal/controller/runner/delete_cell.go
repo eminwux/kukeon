@@ -216,11 +216,11 @@ func (r *Exec) deleteCellLocked(cell intmodel.Cell) error {
 	}
 
 	// Remove metadata directory completely. metadata.DeleteMetadata above
-	// removes the dir when empty (only the stack's own metadata.json + lock
+	// removes the dir when empty (only the cell's own metadata.json + lock
 	// were there), but the cell dir also owns peer artifacts — etc-hosts,
 	// etc-hostname, attachable socket directories — that the metadata
 	// sweeper doesn't reach. Surface any failure so the half-deleted state
-	// (kukeon.yaml gone, cell dir surviving) reported in issue #905 cannot
+	// (metadata.json gone, cell dir surviving) reported in issue #905 cannot
 	// be silently swallowed.
 	metadataRunPath := fs.CellMetadataDir(
 		r.opts.RunPath,
