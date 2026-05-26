@@ -172,6 +172,22 @@ const (
 	// under which all realms / spaces / stacks / cells live. Operators
 	// override it via ServerConfiguration.spec.cgroupRoot.
 	DefaultKukeonCgroupRoot = "/kukeon"
+
+	// KukebuildBaseDir is the directory under which `kukebuild` keeps its
+	// per-namespace BuildKit state (`cache.db`, `history.db`, snapshot
+	// metadata) — one subdirectory per containerd namespace it has built
+	// into, at <KukebuildBaseDir>/<namespace>. `kuke uninstall` removes the
+	// matching subdir for every realm it successfully purges; the BuildKit
+	// cache references containerd by snapshot ID and content digest, so a
+	// purged namespace whose cache survives strands the next `kuke build`
+	// with "parent snapshot does not exist" or "content digest ... not
+	// found" (issue #904).
+	//
+	// Must mirror the `defaultBuildRoot` constant in cmd/kukebuild/main.go;
+	// the two cannot be a single source of truth because cmd/kukebuild is a
+	// separate Go module (its go-1.25 BuildKit closure is deliberately
+	// disjoint from the root module's graph). On change, update both.
+	KukebuildBaseDir = "/var/lib/kukebuild"
 )
 
 // RealmNamespaceSuffix is the suffix appended to every realm name to form

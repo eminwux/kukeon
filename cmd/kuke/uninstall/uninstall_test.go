@@ -598,5 +598,124 @@ func TestUninstall_SystemdFailureShortCircuits(t *testing.T) {
 	}
 }
 
+// TestUninstall_RendersBuildCacheRows pins the issue #904 renderer half:
+// every BuildCachePurgeOutcome on the report renders as a "build cache <path>:
+// <outcome>" row, and a removable base dir gets its own trailing row. Without
+// these rows, an operator running uninstall on a host with stale BuildKit
+// state would see no signal that the cache was reclaimed and would have to
+// shell-grep `/var/lib/kukebuild/` to confirm.
+func TestUninstall_RendersBuildCacheRows(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	stub := &stubController{
+		uninstallFn: func(opts controller.UninstallOptions) (controller.UninstallReport, error) {
+			return controller.UninstallReport{
+				Realms: []controller.RealmPurgeOutcome{
+					{Name: "default", Namespace: "default.kukeon.io", Purged: true, NamespaceRemoved: true},
+					{Name: "kuke-system", Namespace: "kuke-system.kukeon.io", Purged: true, NamespaceRemoved: true},
+				},
+				BuildCaches: []controller.BuildCachePurgeOutcome{
+					{Namespace: "default.kukeon.io", Path: "/var/lib/kukebuild/default.kukeon.io", Existed: true, Removed: true},
+					{Namespace: "kuke-system.kukeon.io", Path: "/var/lib/kukebuild/kuke-system.kukeon.io", Existed: true, Removed: true},
+				},
+				BuildCacheBaseDir:     "/var/lib/kukebuild",
+				BuildCacheBaseExisted: true,
+				BuildCacheBaseRemoved: true,
+				SocketDir:             opts.SocketDir,
+				RunPath:               "/opt/kukeon",
+				UserName:              "kukeon",
+				GroupName:             "kukeon",
+			}, nil
+		},
+	}
+	out, err := runCmd(t, stub, "", "--yes")
+	if err != nil {
+		t.Fatalf("Execute returned: %v\noutput:\n%s", err, out)
+	}
+	wantRows := []string{
+		"build cache /var/lib/kukebuild/default.kukeon.io: removed",
+		"build cache /var/lib/kukebuild/kuke-system.kukeon.io: removed",
+		"build cache /var/lib/kukebuild: removed",
+	}
+	for _, want := range wantRows {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected output to contain %q; got:\n%s", want, out)
+		}
+	}
+}
+
+// TestUninstall_RendersBuildCacheKeptOnScopedUninstall pins the "base dir
+// survives because a cousin instance's cache is still under it" branch — the
+// scoped-uninstall invariant where `--server-configuration` narrowed the
+// realm enumeration to one suffix. The operator must see why the base dir
+// stayed so the report is not misread as a partial failure.
+func TestUninstall_RendersBuildCacheKeptOnScopedUninstall(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	stub := &stubController{
+		uninstallFn: func(opts controller.UninstallOptions) (controller.UninstallReport, error) {
+			return controller.UninstallReport{
+				Realms: []controller.RealmPurgeOutcome{
+					{Name: "default", Namespace: "default.dev.kukeon.io", Purged: true, NamespaceRemoved: true},
+				},
+				BuildCaches: []controller.BuildCachePurgeOutcome{
+					{Namespace: "default.dev.kukeon.io", Path: "/var/lib/kukebuild/default.dev.kukeon.io", Existed: true, Removed: true},
+				},
+				BuildCacheBaseDir:     "/var/lib/kukebuild",
+				BuildCacheBaseExisted: true,
+				// Removed=false: prod instance's caches under /var/lib/kukebuild/*.kukeon.io
+				// kept the base non-empty so the rmdir was a no-op.
+				BuildCacheBaseRemoved: false,
+				SocketDir:             opts.SocketDir,
+				RunPath:               "/opt/kukeon",
+				UserName:              "kukeon",
+				GroupName:             "kukeon",
+			}, nil
+		},
+	}
+	out, err := runCmd(t, stub, "", "--yes")
+	if err != nil {
+		t.Fatalf("Execute returned: %v\noutput:\n%s", err, out)
+	}
+	wantSubstr := "build cache /var/lib/kukebuild: kept (cousin instance caches present)"
+	if !strings.Contains(out, wantSubstr) {
+		t.Errorf("expected output to contain %q; got:\n%s", wantSubstr, out)
+	}
+}
+
+// TestUninstall_RendersBuildCacheAbsentRowsQuietly pins the clean-host case:
+// a report with no BuildCaches and an absent base dir must produce no build-
+// cache rows at all (no "absent" spam, no trailing base-dir row). Matches the
+// renderer's quiet style for systemd units that were never installed.
+func TestUninstall_RendersBuildCacheAbsentRowsQuietly(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	stub := &stubController{
+		uninstallFn: func(opts controller.UninstallOptions) (controller.UninstallReport, error) {
+			return controller.UninstallReport{
+				Realms: []controller.RealmPurgeOutcome{
+					{Name: "default", Namespace: "default.kukeon.io", Purged: true, NamespaceRemoved: true},
+				},
+				// BuildCaches empty (host never built into this namespace);
+				// BuildCacheBaseDir set but Existed=false (the base dir was
+				// never created either).
+				BuildCacheBaseDir:     "/var/lib/kukebuild",
+				BuildCacheBaseExisted: false,
+				SocketDir:             opts.SocketDir,
+				RunPath:               "/opt/kukeon",
+				UserName:              "kukeon",
+				GroupName:             "kukeon",
+			}, nil
+		},
+	}
+	out, err := runCmd(t, stub, "", "--yes")
+	if err != nil {
+		t.Fatalf("Execute returned: %v\noutput:\n%s", err, out)
+	}
+	if strings.Contains(out, "build cache") {
+		t.Errorf("clean-host report unexpectedly rendered a build-cache row:\n%s", out)
+	}
+}
+
 // Compile-time assertion: stubController must satisfy controller.Controller.
 var _ controller.Controller = (*stubController)(nil)

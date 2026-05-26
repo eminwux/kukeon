@@ -208,6 +208,11 @@ const defaultContainerdSocket = "/run/containerd/containerd.sock"
 // effective default root is scoped per target namespace beneath this base
 // (<defaultBuildRoot>/<namespace>, see resolveBuildRoot) so each namespace's
 // cache stays isolated (issue #663).
+//
+// Must mirror `KukebuildBaseDir` in internal/consts/consts.go (the constant
+// `kuke uninstall` walks to reclaim per-namespace BuildKit caches — issue
+// #904). The two cannot be a single source of truth because cmd/kukebuild
+// is a separate Go module from the root module; on change, update both.
 const defaultBuildRoot = "/var/lib/kukebuild"
 
 // defaultRealm matches the convention in cmd/kuke/image: the user-owned

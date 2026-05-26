@@ -70,7 +70,14 @@ This is the global counterpart to "kuke purge" (which is per-resource). It:
      a Restart=on-failure unit cannot respawn kukeond mid-uninstall.
   2. Purges every realm with --cascade (drains spaces, stacks, cells,
      containers and their containerd tasks/containers, and deletes the
-     containerd namespaces created by kukeon).
+     containerd namespaces created by kukeon). For every realm whose
+     namespace was actually removed, also reclaims the matching per-
+     namespace BuildKit cache directory at /var/lib/kukebuild/<namespace>/
+     (the cache references containerd by snapshot ID and content digest, so
+     leaving it behind strands the next "kuke build" with "parent snapshot
+     does not exist" or "content digest ... not found"). After the sweep,
+     /var/lib/kukebuild/ itself is rmdir'd if empty — cousin instances'
+     caches under sibling subdirs are left in place.
   3. Removes /run/kukeon/ recursively.
   4. Removes the configured run path (default /opt/kukeon) recursively.
   5. Removes the kukeon system user and group (no-op if absent).
@@ -81,7 +88,9 @@ mounts on disk would strand the next "kuke init" with stale containerd state.
 The report flags every dir/account row as "skipped (realm purge failed)" so
 the half-cleaned host is visible without scrolling to the trailing error.
 Resolve the realm-purge failure (often: stop the live daemon, remove the
-residual containerd namespace by hand) and re-run the command.
+residual containerd namespace by hand, wipe the matching
+/var/lib/kukebuild/<namespace>/ left behind by the partial pass) and re-run
+the command.
 
 The /usr/local/bin/kuke binary and the kukeond symlink are NOT removed —
 uninstalling runtime state is not the same as uninstalling the binary.
@@ -268,6 +277,7 @@ func printReport(cmd *cobra.Command, report controller.UninstallReport) {
 			fmt.Fprintf(out, "  - realm %q (namespace %q): purged\n", r.Name, r.Namespace)
 		}
 	}
+	renderBuildCaches(out, report)
 	if report.CleanupSkipped {
 		fmt.Fprintf(out, "  - %s: %s\n", report.SocketDir, outcomeSkipped)
 		fmt.Fprintf(out, "  - %s: %s\n", report.RunPath, outcomeSkipped)
@@ -282,6 +292,49 @@ func printReport(cmd *cobra.Command, report controller.UninstallReport) {
 	fmt.Fprintf(out, "  - %s: %s\n", report.RunPath, dirOutcome(report.RunPathExists, report.RunPathRemove))
 	fmt.Fprintf(out, "  - user %q: %s\n", report.UserName, accountOutcome(report.UserExisted, report.UserRemoved))
 	fmt.Fprintf(out, "  - group %q: %s\n", report.GroupName, accountOutcome(report.GroupExisted, report.GroupRemoved))
+}
+
+// renderBuildCaches prints one row per per-namespace BuildKit cache the
+// uninstall pass reclaimed plus a trailing row for the base directory's
+// fate. Surfacing both lets the operator confirm the issue #904 follow-up
+// fired (the next `kuke build` into a freshly-reinstalled namespace will
+// no longer hit "parent snapshot does not exist" or "content digest ...
+// not found"). Quiet on hosts that never built into the namespace — an
+// absent per-namespace cache contributes no row, matching the report's
+// terse style on the no-daemon path.
+func renderBuildCaches(out io.Writer, report controller.UninstallReport) {
+	for _, c := range report.BuildCaches {
+		switch {
+		case c.Err != nil:
+			fmt.Fprintf(out, "  - build cache %s: FAILED: %v\n", c.Path, c.Err)
+		case c.Removed:
+			fmt.Fprintf(out, "  - build cache %s: removed\n", c.Path)
+		case c.Existed:
+			// Present-but-not-removed should never happen on the success path
+			// (RemoveAll either succeeds or returns an error captured above);
+			// rendered defensively so a regression surfaces instead of being
+			// silently dropped.
+			fmt.Fprintf(out, "  - build cache %s: remove failed\n", c.Path)
+		default:
+			fmt.Fprintf(out, "  - build cache %s: %s\n", c.Path, outcomeAbsent)
+		}
+	}
+	if report.BuildCacheBaseDir == "" {
+		return
+	}
+	switch {
+	case report.BuildCacheBaseRemoved:
+		fmt.Fprintf(out, "  - build cache %s: removed\n", report.BuildCacheBaseDir)
+	case report.BuildCacheBaseExisted:
+		// The base dir survived the rmdir because a cousin instance's cache
+		// is still under it — the scoped-uninstall invariant we wanted. Name
+		// the path so an operator who did want it gone knows what to wipe.
+		fmt.Fprintf(out, "  - build cache %s: kept (cousin instance caches present)\n", report.BuildCacheBaseDir)
+	default:
+		// Absent base directory on a host that never built — quiet skip
+		// rather than a noisy "absent" row, matching how the renderer treats
+		// a never-installed systemd unit.
+	}
 }
 
 // renderMountReleases prints one indented row per kukeon-owned bind mount
