@@ -22,7 +22,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eminwux/kukeon/internal/consts"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -171,8 +170,16 @@ func TestKuke_CreateCell_VerifyState(t *testing.T) {
 		t.Fatalf("cgroup path %q does not exist in filesystem", cell.Status.CgroupPath)
 	}
 
-	// Also verify expected cgroup path structure: /kukeon/{realmName}/{spaceName}/{stackName}/{cellName}
-	expectedCgroupPath := consts.KukeonCgroupRoot + "/" + realmName + "/" + spaceName + "/" + stackName + "/" + cellName
+	// Also verify expected cgroup path structure:
+	// <configured-root>/{realmName}/{spaceName}/{stackName}/{cellName}. Read
+	// the configured cgroup root from the daemon's realm response rather than
+	// from consts.KukeonCgroupRoot so the test passes against a non-default
+	// ClientConfiguration / ServerConfiguration profile (e.g. /kukeon-dev).
+	cgroupRoot, err := getCgroupRoot(t, host, realmName)
+	if err != nil {
+		t.Fatalf("getCgroupRoot: %v", err)
+	}
+	expectedCgroupPath := cgroupRoot + "/" + realmName + "/" + spaceName + "/" + stackName + "/" + cellName
 	if !strings.HasSuffix(cell.Status.CgroupPath, expectedCgroupPath) {
 		t.Logf(
 			"cgroup path %q does not end with expected pattern %q, but verifying it exists anyway",

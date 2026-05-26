@@ -95,6 +95,20 @@ spec:
   # Client log level when --verbose is on (debug, info, warn, error).
   # Default: info
   logLevel: info
+
+  # Suffix appended to every realm name to form its containerd namespace.
+  # Realm "default" + suffix "kukeon.io" -> namespace "default.kukeon.io".
+  # --no-daemon workload paths read this to address the right kukeon
+  # instance's containerd namespaces (e.g. "dev.kukeon.io" for a parallel
+  # dev instance on the same host).
+  # Default: kukeon.io
+  containerdNamespaceSuffix: kukeon.io
+
+  # Cgroup root under which all realms / spaces / stacks / cells live.
+  # --no-daemon workload paths use this for the in-process cgroup
+  # hierarchy (e.g. "/kukeon-dev" for a parallel dev instance).
+  # Default: /kukeon
+  cgroupRoot: /kukeon
 `
 
 // WriteDefault writes the commented default ClientConfiguration to path when

@@ -22,9 +22,24 @@ import (
 	"testing"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	"github.com/eminwux/kukeon/internal/consts"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/viper"
 )
+
+// restoreRuntimeGlobals snapshots the consts package runtime globals and
+// returns a cleanup that restores them. loadClientConfiguration calls
+// consts.ConfigureRuntime, which mutates these — tests that exercise it
+// must roll back so the next test starts on the in-binary defaults.
+func restoreRuntimeGlobals(t *testing.T) {
+	t.Helper()
+	prevSuffix := consts.RealmNamespaceSuffix
+	prevRoot := consts.KukeonCgroupRoot
+	t.Cleanup(func() {
+		consts.RealmNamespaceSuffix = prevSuffix //nolint:reassign // restore runtime-overridable global
+		consts.KukeonCgroupRoot = prevRoot       //nolint:reassign // restore runtime-overridable global
+	})
+}
 
 func bindKukeEnv(t *testing.T) {
 	t.Helper()
@@ -33,6 +48,8 @@ func bindKukeEnv(t *testing.T) {
 		config.KUKEON_ROOT_RUN_PATH,
 		config.KUKEON_ROOT_CONTAINERD_SOCKET,
 		config.KUKEON_ROOT_LOG_LEVEL,
+		config.KUKEON_ROOT_NAMESPACE_SUFFIX,
+		config.KUKEON_ROOT_CGROUP_ROOT,
 	} {
 		if err := v.BindEnv(); err != nil {
 			t.Fatalf("BindEnv %s: %v", v.EnvVar(), err)
@@ -62,10 +79,12 @@ func TestApplyClientConfigurationDefaultsLayered(t *testing.T) {
 	}
 
 	spec := v1beta1.ClientConfigurationSpec{
-		Host:             "unix:///tmp/from-config.sock",
-		RunPath:          "/opt/kukeon-from-config",
-		ContainerdSocket: "/run/containerd/from-config.sock",
-		LogLevel:         "warn",
+		Host:                      "unix:///tmp/from-config.sock",
+		RunPath:                   "/opt/kukeon-from-config",
+		ContainerdSocket:          "/run/containerd/from-config.sock",
+		LogLevel:                  "warn",
+		ContainerdNamespaceSuffix: "dev.kukeon.io",
+		CgroupRoot:                "/kukeon-dev",
 	}
 	applyClientConfiguration(cmd, spec)
 
@@ -80,6 +99,13 @@ func TestApplyClientConfigurationDefaultsLayered(t *testing.T) {
 	}
 	if got := viper.GetString(config.KUKEON_ROOT_LOG_LEVEL.ViperKey); got != spec.LogLevel {
 		t.Errorf("LogLevel: got %q, want %q", got, spec.LogLevel)
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey); got != spec.ContainerdNamespaceSuffix {
+		t.Errorf("ContainerdNamespaceSuffix: got %q, want %q",
+			got, spec.ContainerdNamespaceSuffix)
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey); got != spec.CgroupRoot {
+		t.Errorf("CgroupRoot: got %q, want %q", got, spec.CgroupRoot)
 	}
 }
 
@@ -163,6 +189,7 @@ func TestApplyClientConfigurationEmptyFieldsLeaveViperUntouched(t *testing.T) {
 
 func TestLoadClientConfigurationAbsentFileNoError(t *testing.T) {
 	t.Cleanup(viper.Reset)
+	restoreRuntimeGlobals(t)
 
 	viper.Reset()
 	cmd, err := NewKukeCmd()
@@ -182,6 +209,7 @@ func TestLoadClientConfigurationAbsentFileNoError(t *testing.T) {
 
 func TestLoadClientConfigurationSeedsViper(t *testing.T) {
 	t.Cleanup(viper.Reset)
+	restoreRuntimeGlobals(t)
 
 	viper.Reset()
 	cmd, err := NewKukeCmd()
@@ -198,6 +226,8 @@ metadata:
 spec:
   host: unix:///tmp/from-config.sock
   logLevel: warn
+  containerdNamespaceSuffix: dev.kukeon.io
+  cgroupRoot: /kukeon-dev
 `
 	if writeErr := os.WriteFile(path, []byte(content), 0o644); writeErr != nil {
 		t.Fatalf("WriteFile: %v", writeErr)
@@ -212,6 +242,23 @@ spec:
 	}
 	if got := viper.GetString(config.KUKEON_ROOT_LOG_LEVEL.ViperKey); got != "warn" {
 		t.Errorf("LogLevel: got %q, want %q", got, "warn")
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey); got != "dev.kukeon.io" {
+		t.Errorf("ContainerdNamespaceSuffix: got %q, want %q", got, "dev.kukeon.io")
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey); got != "/kukeon-dev" {
+		t.Errorf("CgroupRoot: got %q, want %q", got, "/kukeon-dev")
+	}
+	// consts.ConfigureRuntime must observe the configured values so
+	// downstream RealmNamespace / KukeonCgroupRoot reads (in --no-daemon
+	// workload paths) follow the loaded client configuration.
+	if got, want := consts.RealmNamespaceSuffix, ".dev.kukeon.io"; got != want {
+		t.Errorf("consts.RealmNamespaceSuffix: got %q, want %q "+
+			"(loadClientConfiguration must call ConfigureRuntime)", got, want)
+	}
+	if got, want := consts.KukeonCgroupRoot, "/kukeon-dev"; got != want {
+		t.Errorf("consts.KukeonCgroupRoot: got %q, want %q "+
+			"(loadClientConfiguration must call ConfigureRuntime)", got, want)
 	}
 }
 

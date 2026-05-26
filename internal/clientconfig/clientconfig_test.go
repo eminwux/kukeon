@@ -52,6 +52,8 @@ spec:
   runPath: /opt/kukeon-test
   containerdSocket: /run/containerd/test.sock
   logLevel: debug
+  containerdNamespaceSuffix: dev.kukeon.io
+  cgroupRoot: /kukeon-dev
 `
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -75,6 +77,12 @@ spec:
 	}
 	if doc.Spec.LogLevel != "debug" {
 		t.Errorf("LogLevel: got %q", doc.Spec.LogLevel)
+	}
+	if doc.Spec.ContainerdNamespaceSuffix != "dev.kukeon.io" {
+		t.Errorf("ContainerdNamespaceSuffix: got %q", doc.Spec.ContainerdNamespaceSuffix)
+	}
+	if doc.Spec.CgroupRoot != "/kukeon-dev" {
+		t.Errorf("CgroupRoot: got %q", doc.Spec.CgroupRoot)
 	}
 }
 
@@ -179,6 +187,12 @@ func TestWriteDefaultCreatesFileWithDefaults(t *testing.T) {
 	if doc.Spec.LogLevel != "info" {
 		t.Errorf("Spec.LogLevel: got %q", doc.Spec.LogLevel)
 	}
+	if doc.Spec.ContainerdNamespaceSuffix != "kukeon.io" {
+		t.Errorf("Spec.ContainerdNamespaceSuffix: got %q", doc.Spec.ContainerdNamespaceSuffix)
+	}
+	if doc.Spec.CgroupRoot != "/kukeon" {
+		t.Errorf("Spec.CgroupRoot: got %q", doc.Spec.CgroupRoot)
+	}
 
 	// AC: "Header comment explains each field's purpose and default."
 	raw, err := os.ReadFile(path)
@@ -194,6 +208,8 @@ func TestWriteDefaultCreatesFileWithDefaults(t *testing.T) {
 		"# Default: /opt/kukeon",
 		"# Default: /run/containerd/containerd.sock",
 		"# Default: info",
+		"# Default: kukeon.io",
+		"# Default: /kukeon",
 	} {
 		if !strings.Contains(rawStr, marker) {
 			t.Errorf("missing per-field default marker %q in dumped YAML", marker)
