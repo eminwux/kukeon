@@ -1117,18 +1117,26 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 				"created container",
 				fields...,
 			)
-
-			if err = r.attachablePostCreateChown(namespace, containerSpec); err != nil {
-				return intmodel.Cell{}, fmt.Errorf(
-					"failed to chown attachable tty dir for %s: %w", ctrContainerID, err,
-				)
-			}
 		}
 		// On the reuse path the BuildOptions attachOpts returned aren't
 		// applied (the existing OCI spec already carries the attachable
 		// wrapping); the call is still made above for its side effects —
 		// kuketty binary staging, per-container metadata render, ttyDir
 		// chmod — which must run before the task starts.
+		//
+		// The post-create chown also runs on both paths: attachableBuildOpts
+		// resets ttyDir to root:kukeon mode 02750 every call, so without a
+		// matching chown-to-container-uid here the in-container process
+		// (claude:1000) cannot create the kuketty socket/log inside the
+		// bind-mounted tty dir on a reuse-path start. kuketty fails listen
+		// with EACCES and the work container exits within the startup grace
+		// window — caught by the post-start liveness check as
+		// StartCellFailed (#258 / #850 restart-path complement).
+		if attachErr = r.attachablePostCreateChown(namespace, containerSpec); attachErr != nil {
+			return intmodel.Cell{}, fmt.Errorf(
+				"failed to chown attachable tty dir for %s: %w", ctrContainerID, attachErr,
+			)
+		}
 
 		// Use container name with UUID for containerd operations
 		specWithNamespaces := ctr.JoinContainerNamespaces(
@@ -1417,18 +1425,23 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 			"created container",
 			fields...,
 		)
-
-		if err = r.attachablePostCreateChown(namespace, *foundContainerSpec); err != nil {
-			return intmodel.Cell{}, fmt.Errorf(
-				"failed to chown attachable tty dir for %s: %w", containerdID, err,
-			)
-		}
 	}
 	// On the reuse path the BuildOptions attachOpts returned aren't applied
 	// (the existing OCI spec already carries the attachable wrapping); the
 	// call above is still made for its side effects (kuketty binary staging,
 	// per-container metadata render, ttyDir chmod) which must run before the
 	// task starts.
+	//
+	// The post-create chown also runs on both paths so the in-container
+	// process (resolved uid from the OCI spec) can write into the tty
+	// bind-mount that attachableBuildOpts just reset to root:kukeon. See the
+	// matching StartCell hop above for the EACCES failure mode this closes
+	// (#258 / #850).
+	if attachErr = r.attachablePostCreateChown(namespace, *foundContainerSpec); attachErr != nil {
+		return intmodel.Cell{}, fmt.Errorf(
+			"failed to chown attachable tty dir for %s: %w", containerdID, attachErr,
+		)
+	}
 
 	// Start container with namespace paths
 	specWithNamespaces := ctr.JoinContainerNamespaces(

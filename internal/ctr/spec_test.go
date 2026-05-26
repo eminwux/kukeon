@@ -1290,6 +1290,96 @@ func assertEtcBindMounts(
 	}
 }
 
+// TestBuildContainerSpec_KukeonGroupGID asserts that WithKukeonGroupGID
+// appends the host's kukeon group GID to Process.User.AdditionalGids, dedupes
+// against an image-resolved entry of the same numeric value, and is a no-op
+// at zero. Pins the contract that closes the "image kukeon GID ≠ host kukeon
+// GID → kuketty EACCES on the tty bind-mount" startup failure.
+func TestBuildContainerSpec_KukeonGroupGID(t *testing.T) {
+	tests := []struct {
+		name       string
+		gid        uint32
+		seedAddGid []uint32
+		want       []uint32
+	}{
+		{name: "zero is no-op", gid: 0, seedAddGid: []uint32{1000}, want: []uint32{1000}},
+		{
+			name:       "appended when image had no kukeon entry",
+			gid:        989,
+			seedAddGid: []uint32{1000, 988},
+			want:       []uint32{1000, 988, 989},
+		},
+		{
+			name:       "deduped against pre-existing matching gid",
+			gid:        989,
+			seedAddGid: []uint32{1000, 989},
+			want:       []uint32{1000, 989},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := ctr.BuildContainerSpec(intmodel.ContainerSpec{
+				ID:       "test-id",
+				Image:    "registry.eminwux.com/busybox:latest",
+				CellName: "c", SpaceName: "s", RealmName: "r", StackName: "st",
+			}, ctr.WithKukeonGroupGID(tt.gid))
+
+			ociSpec := &runtimespec.Spec{
+				Process: &runtimespec.Process{
+					User: runtimespec.User{
+						UID:            1000,
+						GID:            1000,
+						AdditionalGids: append([]uint32(nil), tt.seedAddGid...),
+					},
+				},
+			}
+			for _, opt := range spec.SpecOpts {
+				if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+					t.Fatalf("apply SpecOpts: %v", err)
+				}
+			}
+
+			if !reflect.DeepEqual(ociSpec.Process.User.AdditionalGids, tt.want) {
+				t.Errorf("AdditionalGids = %v, want %v",
+					ociSpec.Process.User.AdditionalGids, tt.want)
+			}
+		})
+	}
+}
+
+// TestBuildRootContainerSpec_KukeonGroupGID mirrors the user-container test
+// for the root-container builder so a non-default root that runs as a non-
+// root user gets the same hop.
+func TestBuildRootContainerSpec_KukeonGroupGID(t *testing.T) {
+	spec := ctr.BuildRootContainerSpec(intmodel.ContainerSpec{
+		ID:           "root",
+		ContainerdID: "root-id",
+		Image:        "registry.eminwux.com/busybox:latest",
+	}, nil, ctr.WithKukeonGroupGID(989))
+
+	ociSpec := &runtimespec.Spec{
+		Process: &runtimespec.Process{
+			User: runtimespec.User{
+				UID:            1000,
+				GID:            1000,
+				AdditionalGids: []uint32{1000, 988},
+			},
+		},
+	}
+	for _, opt := range spec.SpecOpts {
+		if err := opt(context.Background(), nil, nil, ociSpec); err != nil {
+			t.Fatalf("apply SpecOpts: %v", err)
+		}
+	}
+
+	want := []uint32{1000, 988, 989}
+	if !reflect.DeepEqual(ociSpec.Process.User.AdditionalGids, want) {
+		t.Errorf("AdditionalGids = %v, want %v",
+			ociSpec.Process.User.AdditionalGids, want)
+	}
+}
+
 // TestBuildRootContainerSpec_HostNetwork is the same assertion as
 // TestBuildContainerSpec_HostNetwork but for the root-container builder used
 // by the runner for the kukeond cell.

@@ -329,6 +329,11 @@ func (r *Exec) daemonDefaultBuildOpts() []ctr.BuildOption {
 	if r.opts.RunPath != "" {
 		opts = append(opts, ctr.WithSecretRunPath(r.opts.RunPath))
 	}
+	if r.opts.KukeonGroupGID > 0 {
+		//nolint:gosec // KukeonGroupGID is a real GID (uint16 territory); the
+		// runtime-spec field is uint32 so the conversion is widening.
+		opts = append(opts, ctr.WithKukeonGroupGID(uint32(r.opts.KukeonGroupGID)))
+	}
 	return opts
 }
 

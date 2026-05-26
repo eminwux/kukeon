@@ -187,6 +187,13 @@ func BuildRootContainerSpec(
 
 	specOpts = append(specOpts, securitySpecOpts(rootSpec)...)
 
+	// Mirror BuildContainerSpec's kukeon-group-GID hop so a non-default root
+	// container that runs as a non-root user (a user-supplied RootContainerID
+	// image) can still reach kukeon-group-owned bind-mounts. Zero is a no-op.
+	if opts.kukeonGroupGID > 0 {
+		specOpts = append(specOpts, withKukeonGroupGIDSpecOpt(opts.kukeonGroupGID))
+	}
+
 	// Daemon-default memory cap: mirrors BuildContainerSpec so the same fallback
 	// reaches root containers when the daemon is configured with one (#531).
 	// The spec wins when it already carries a positive limit.
