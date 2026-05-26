@@ -215,7 +215,13 @@ func (r *Exec) deleteCellLocked(cell intmodel.Cell) error {
 		return fmt.Errorf("%w: failed to delete cell metadata: %w", errdefs.ErrDeleteCell, err)
 	}
 
-	// Remove metadata directory completely
+	// Remove metadata directory completely. metadata.DeleteMetadata above
+	// removes the dir when empty (only the stack's own metadata.json + lock
+	// were there), but the cell dir also owns peer artifacts — etc-hosts,
+	// etc-hostname, attachable socket directories — that the metadata
+	// sweeper doesn't reach. Surface any failure so the half-deleted state
+	// (kukeon.yaml gone, cell dir surviving) reported in issue #905 cannot
+	// be silently swallowed.
 	metadataRunPath := fs.CellMetadataDir(
 		r.opts.RunPath,
 		internalCell.Spec.RealmName,
@@ -223,7 +229,9 @@ func (r *Exec) deleteCellLocked(cell intmodel.Cell) error {
 		cellStackName,
 		internalCell.Metadata.Name,
 	)
-	_ = os.RemoveAll(metadataRunPath)
+	if err = os.RemoveAll(metadataRunPath); err != nil {
+		return fmt.Errorf("%w: failed to remove cell directory %s: %w", errdefs.ErrDeleteCell, metadataRunPath, err)
+	}
 
 	return nil
 }

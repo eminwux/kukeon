@@ -20,8 +20,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/metadata"
@@ -110,6 +112,32 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 		// Continue with metadata deletion
 	}
 
+	// Refuse to remove the stack while cell subdirectories survive under the
+	// stack metadata dir. ListCells silently skips a cell whose metadata.json
+	// is missing or unreadable (controller/runner/get.go), so the cascade
+	// loop in controller.deleteStackCascade can complete with zero handled
+	// cells while a partial cell subdir remains on disk. Removing the
+	// stack's own metadata here would orphan that subdir behind a stack the
+	// operator can no longer list — the failure surfaced as residue under
+	// /opt/kukeon/data/<realm>/<space>/<stack>/ after `kuke del stack
+	// --cascade` exited 0. Issue #905.
+	metadataRunPath := fs.StackMetadataDir(
+		r.opts.RunPath,
+		internalStack.Spec.RealmName,
+		internalStack.Spec.SpaceName,
+		internalStack.Metadata.Name,
+	)
+	residue, residueErr := scanStackDirCellResidue(metadataRunPath)
+	if residueErr != nil {
+		return fmt.Errorf("%w: scan stack dir %q: %w", errdefs.ErrDeleteStack, metadataRunPath, residueErr)
+	}
+	if len(residue) > 0 {
+		return fmt.Errorf(
+			"%w: cell subdirectory residue under %s — cascade did not remove %s; inspect and remove by hand before re-running",
+			errdefs.ErrDeleteStack, metadataRunPath, strings.Join(residue, ", "),
+		)
+	}
+
 	// Delete stack metadata file
 	metadataFilePath := fs.StackMetadataPath(
 		r.opts.RunPath,
@@ -121,14 +149,44 @@ func (r *Exec) DeleteStack(stack intmodel.Stack) error {
 		return fmt.Errorf("%w: failed to delete stack metadata: %w", errdefs.ErrDeleteStack, err)
 	}
 
-	// Remove metadata directory completely
-	metadataRunPath := fs.StackMetadataDir(
-		r.opts.RunPath,
-		internalStack.Spec.RealmName,
-		internalStack.Spec.SpaceName,
-		internalStack.Metadata.Name,
-	)
-	_ = os.RemoveAll(metadataRunPath)
+	// Remove the now-residue-free stack metadata directory. metadata.DeleteMetadata
+	// above removes the dir when empty, so this typically no-ops; surface any
+	// error so the half-deleted state (kukeon.yaml gone, dir surviving)
+	// reported in issue #905 can never again be silently swallowed.
+	if err = os.RemoveAll(metadataRunPath); err != nil {
+		return fmt.Errorf("%w: failed to remove stack directory %s: %w", errdefs.ErrDeleteStack, metadataRunPath, err)
+	}
 
 	return nil
+}
+
+// scanStackDirCellResidue returns the names of any subdirectories under
+// stackDir that look like surviving cell directories — anything that isn't
+// one of the known scope-bound subdirs (secrets/blueprints/configs) and
+// isn't the stack's own metadata.json or its lock sidecar. The names are
+// sorted for stable error messages. A missing stackDir returns nil, nil.
+func scanStackDirCellResidue(stackDir string) ([]string, error) {
+	entries, err := os.ReadDir(stackDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	metaFile := consts.KukeonMetadataFile
+	metaLock := metaFile + metadata.LockFileSuffix
+	var residue []string
+	for _, entry := range entries {
+		name := entry.Name()
+		switch name {
+		case metaFile, metaLock,
+			consts.KukeonSecretsSubdir,
+			consts.KukeonBlueprintsSubdir,
+			consts.KukeonConfigsSubdir:
+			continue
+		}
+		residue = append(residue, name)
+	}
+	sort.Strings(residue)
+	return residue, nil
 }
