@@ -139,6 +139,23 @@ type Client interface {
 	// the ref is absent.
 	GetImage(namespace, ref string) (ImageInfo, error)
 
+	// ImageChainID returns the chainID the image at ref would unpack to
+	// today, computed from the current rootfs DiffIDs in the namespace's
+	// content store. Pair with ContainerRootChainID to detect that an
+	// image tag has been re-pointed since a container was created (the
+	// digest-drift signal missing from bootstrapCell's image comparison
+	// in issue #915 defect 2). Returns errdefs.ErrImageNotFound if the
+	// ref is absent.
+	ImageChainID(namespace, ref string) (string, error)
+
+	// ContainerRootChainID returns the chainID of the parent layer stack
+	// the container's root snapshot was committed against — i.e. the
+	// image content the container is anchored on at the moment of the
+	// call, regardless of what the image ref by the same name resolves
+	// to today. Returns errdefs.ErrContainerNotFound if the container is
+	// absent.
+	ContainerRootChainID(namespace, containerID string) (string, error)
+
 	// DeleteImage removes the named image ref from the specified
 	// containerd namespace. Returns errdefs.ErrImageNotFound if the ref
 	// is absent so callers can distinguish missing from operational

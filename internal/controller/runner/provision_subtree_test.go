@@ -186,6 +186,14 @@ func (c *subtreeRecorderClient) GetImage(string, string) (ctr.ImageInfo, error) 
 	panic("unexpected")
 }
 
+func (c *subtreeRecorderClient) ImageChainID(string, string) (string, error) {
+	panic("unexpected")
+}
+
+func (c *subtreeRecorderClient) ContainerRootChainID(string, string) (string, error) {
+	panic("unexpected")
+}
+
 func (c *subtreeRecorderClient) DeleteImage(string, string) error {
 	panic("unexpected")
 }

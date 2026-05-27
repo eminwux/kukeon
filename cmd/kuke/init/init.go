@@ -740,11 +740,24 @@ func printCellActions(cmd *cobra.Command, section controller.CellSection, image 
 		// Image drift on a surviving cell record (issue #868). Surfacing the
 		// prior → desired transition is what tells the operator the rebuild
 		// actually picked up their `kuke build` output instead of silently
-		// restarting the stale container.
-		cmd.Println(fmt.Sprintf(
-			"    - cell %q: recreated (image drift: %s → %s)",
-			section.CellName, section.CellPriorImage, image,
-		))
+		// restarting the stale container. When the prior and desired refs
+		// match byte-for-byte but bootstrapCell still routed through
+		// RecreateCell, the trigger is a content digest swap on the same
+		// ref (issue #915 defect 2: `kuke build` re-pointed the same tag
+		// at fresh layers). The ref-string transition would render as
+		// "kukeon-local:dev → kukeon-local:dev" which says nothing; the
+		// digest-drift label is the readable form.
+		if section.CellPriorImage == image {
+			cmd.Println(fmt.Sprintf(
+				"    - cell %q: recreated (image digest drift on %s)",
+				section.CellName, image,
+			))
+		} else {
+			cmd.Println(fmt.Sprintf(
+				"    - cell %q: recreated (image drift: %s → %s)",
+				section.CellName, section.CellPriorImage, image,
+			))
+		}
 	case section.CellCreated:
 		cmd.Println(fmt.Sprintf("    - cell %q: created (image %s)", section.CellName, image))
 	default:

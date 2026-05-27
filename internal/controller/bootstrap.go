@@ -680,12 +680,38 @@ func (b *Exec) bootstrapCell(section *CellSection, cellDoc *v1beta1.CellDoc) err
 	// #868. The drift comparison is keyed on the canonical kukeond container
 	// ID; a missing match on either side counts as drift so a corrupted /
 	// partial cell record forces a recreate rather than a half-baked ensure.
+	//
+	// Layer 1 (#868): ref-string comparison — catches `kuke init` with a
+	// different --kukeond-image value against the persisted cell.
+	// Layer 2 (#915 defect 2): chainID comparison — catches the common
+	// `make dev-init` re-run case where the ref string is unchanged but
+	// `kuke build` re-pointed the same tag at fresh content. The ref-string
+	// match would otherwise mask the swap, and EnsureCell+StartCell would
+	// restart the same anchored snapshot.
 	imageDrift := false
 	if section.CellMetadataExistsPre {
 		section.CellPriorImage = lookupContainerImage(internalCellPre, consts.KukeSystemContainerName)
 		desiredImage := lookupContainerImage(cell, consts.KukeSystemContainerName)
-		if section.CellPriorImage != desiredImage {
+		switch {
+		case section.CellPriorImage != desiredImage:
 			imageDrift = true
+		case section.CellRootContainerExistsPre && desiredImage != "":
+			drifted, dErr := b.kukeondContainerImageDigestDrifted(cell, desiredImage)
+			if dErr != nil {
+				// A probe failure (containerd unreachable, image absent,
+				// snapshot key missing) is not fatal — fall through to
+				// the EnsureCell+StartCell path so init can still bring
+				// the daemon up. Surface the reason so an operator can
+				// diagnose if the next iteration also reports drift.
+				b.logger.WarnContext(b.ctx,
+					"image digest drift probe failed; falling through to existing-cell path",
+					"cell", cell.Metadata.Name,
+					"image", desiredImage,
+					"error", dErr,
+				)
+			} else if drifted {
+				imageDrift = true
+			}
 		}
 	}
 
@@ -783,6 +809,49 @@ func lookupContainerImage(cell intmodel.Cell, containerID string) string {
 		}
 	}
 	return ""
+}
+
+// kukeondContainerImageDigestDrifted reports whether the running kukeond
+// container's anchored snapshot chain differs from the chain the image at
+// the desired ref would unpack to today. The probe is only meaningful
+// after the ref-string comparison has returned equal — equal ref + diverging
+// chainID is exactly the shape `kuke build` re-pointing the same tag at
+// fresh content produces (issue #915 defect 2), and the verifier at
+// scripts/dev-init.sh:332-384 already encodes the equivalent shell-level
+// check post-init.
+//
+// A probe error (containerd unreachable, image absent, snapshot key
+// missing) returns drifted=false plus the wrapped error so the caller can
+// log and fall through — init must still be able to bring the daemon up
+// from a degraded inspect path; the ref-string-equal path was the
+// pre-issue-#915 default and is the safe fallback.
+func (b *Exec) kukeondContainerImageDigestDrifted(
+	cell intmodel.Cell, desiredImage string,
+) (bool, error) {
+	namespace := consts.RealmNamespace(cell.Spec.RealmName)
+	containerdID, err := naming.BuildContainerdID(
+		cell.Spec.SpaceName, cell.Spec.StackName, cell.Metadata.Name, consts.KukeSystemContainerName,
+	)
+	if err != nil {
+		return false, fmt.Errorf("build kukeond containerd id: %w", err)
+	}
+	containerChainID, err := b.runner.ContainerRootChainID(namespace, containerdID)
+	if err != nil {
+		return false, fmt.Errorf("read kukeond snapshot chain (%s/%s): %w", namespace, containerdID, err)
+	}
+	imageChainID, err := b.runner.ImageChainID(namespace, desiredImage)
+	if err != nil {
+		return false, fmt.Errorf("read image chain (%s/%s): %w", namespace, desiredImage, err)
+	}
+	// An empty chainID on either side means "no comparable identity" —
+	// e.g. an image with zero layers, or a snapshot the snapshotter
+	// reports with no parent. Treat as no drift so the existing-cell
+	// path still runs; the alternative would be perpetual recreate
+	// loops on edge-case content.
+	if containerChainID == "" || imageChainID == "" {
+		return false, nil
+	}
+	return containerChainID != imageChainID, nil
 }
 
 func (b *Exec) bootstrapCNI(report BootstrapReport) (BootstrapReport, error) {

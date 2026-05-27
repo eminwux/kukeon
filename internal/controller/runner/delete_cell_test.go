@@ -193,6 +193,15 @@ func (c *deleteCellFakeClient) ListImages(string) ([]ctr.ImageInfo, error) {
 func (c *deleteCellFakeClient) GetImage(string, string) (ctr.ImageInfo, error) {
 	return ctr.ImageInfo{}, nil
 }
+
+func (c *deleteCellFakeClient) ImageChainID(string, string) (string, error) {
+	return "", nil
+}
+
+func (c *deleteCellFakeClient) ContainerRootChainID(string, string) (string, error) {
+	return "", nil
+}
+
 func (c *deleteCellFakeClient) DeleteImage(string, string) error { return nil }
 
 var _ ctr.Client = (*deleteCellFakeClient)(nil)

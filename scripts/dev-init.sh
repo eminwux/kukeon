@@ -283,7 +283,16 @@ if [ ! -d "${SYSTEM_REALM_DIR}" ]; then
         || echo "first-pass init returned non-zero (expected before image is staged); continuing"
 fi
 
-if [ -d "${KUKEOND_CELL_DIR}" ]; then
+# sudo the directory test: after the post-init permission fix sets
+# /opt/kukeon to root:kukeon 0o2750, an invoking user not in the
+# kukeon group cannot traverse the tree and the unprivileged `[ -d ]`
+# test returns false even when the cell dir exists — silently skipping
+# reset on every re-run (issue #915 defect 1). Every other access to
+# KUKEOND_CELL_DIR in this script is already sudo'd; the gate must be
+# too. The matching `[ ! -d "${SYSTEM_REALM_DIR}" ]` probe at line 272
+# is the same anti-pattern but doesn't bite today — its first-pass init
+# is idempotent on a pre-bootstrapped host.
+if sudo test -d "${KUKEOND_CELL_DIR}"; then
     step "Reset prior kukeond cell"
     sudo --preserve-env="${PRESERVE_ENV_ADMIN}" ./kuke daemon reset \
         "${SERVER_CONFIG_FLAGS[@]}"

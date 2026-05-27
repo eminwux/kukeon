@@ -500,6 +500,58 @@ func TestPrintCellActions(t *testing.T) {
 			section:  controller.CellSection{},
 			expected: []string{"- cell: not provisioned"},
 		},
+		{
+			// Ref-string drift renders "prior → desired" — the existing
+			// #868 path. The transition is informative because the two
+			// strings differ.
+			name: "recreated-image-ref-drift",
+			section: controller.CellSection{
+				CellName:                     "kukeond",
+				CellMetadataExistsPre:        true,
+				CellMetadataExistsPost:       true,
+				CellCgroupExistsPre:          true,
+				CellCgroupExistsPost:         true,
+				CellRootContainerExistsPre:   true,
+				CellRootContainerExistsPost:  true,
+				CellRootContainerCreated:     true,
+				CellStartedPre:               true,
+				CellStartedPost:              true,
+				CellRecreatedDueToImageDrift: true,
+				CellPriorImage:               "ghcr.io/eminwux/kukeon:v0.9.0",
+			},
+			image: "ghcr.io/eminwux/kukeon:v1.0.0",
+			expected: []string{
+				"- cell \"kukeond\": recreated (image drift: ghcr.io/eminwux/kukeon:v0.9.0 → ghcr.io/eminwux/kukeon:v1.0.0)",
+				"- cell root container: created",
+			},
+		},
+		{
+			// Digest drift on the same ref: prior image string equals
+			// desired so "prior → desired" would render the same string
+			// twice — useless to the operator. The dedicated "image
+			// digest drift on <ref>" message is the readable form for
+			// the #915 defect-2 path.
+			name: "recreated-image-digest-drift",
+			section: controller.CellSection{
+				CellName:                     "kukeond",
+				CellMetadataExistsPre:        true,
+				CellMetadataExistsPost:       true,
+				CellCgroupExistsPre:          true,
+				CellCgroupExistsPost:         true,
+				CellRootContainerExistsPre:   true,
+				CellRootContainerExistsPost:  true,
+				CellRootContainerCreated:     true,
+				CellStartedPre:               true,
+				CellStartedPost:              true,
+				CellRecreatedDueToImageDrift: true,
+				CellPriorImage:               "docker.io/library/kukeon-local:dev",
+			},
+			image: "docker.io/library/kukeon-local:dev",
+			expected: []string{
+				"- cell \"kukeond\": recreated (image digest drift on docker.io/library/kukeon-local:dev)",
+				"- cell root container: created",
+			},
+		},
 	}
 
 	for _, tc := range testCases {
