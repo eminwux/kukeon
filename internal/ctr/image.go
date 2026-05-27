@@ -23,9 +23,11 @@ import (
 
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/core/leases"
+	"github.com/containerd/containerd/v2/defaults"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/platforms"
 	internalerrdefs "github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/opencontainers/image-spec/identity"
 )
 
 // ImageInfo is the ctr-layer view of a containerd image. The fields are the
@@ -266,6 +268,78 @@ func (c *client) DeleteImage(namespace, ref string) error {
 		return fmt.Errorf("%w: %w", internalerrdefs.ErrDeleteImage, err)
 	}
 	return nil
+}
+
+// ImageChainID returns the chainID the image at ref would unpack to today,
+// computed from its current rootfs DiffIDs in the namespace's content store.
+// The chainID is the canonical content-addressed identity of the layer
+// stack a fresh container would be anchored on, so a difference between
+// this value and a container's existing snapshot Parent is a precise
+// signal that the image at ref has been re-pointed since the container
+// was created (the digest-drift signal #915 defect 2 was missing).
+//
+// Returns internalerrdefs.ErrImageNotFound when ref is absent in
+// namespace (matches GetImage's not-found mapping so upper layers stay
+// uniform); operational failures wrap internalerrdefs.ErrGetImage.
+func (c *client) ImageChainID(namespace, ref string) (string, error) {
+	nsCtx := c.namespaceCtx(namespace)
+
+	img, err := c.conn().GetImage(nsCtx, ref)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return "", fmt.Errorf("%w: %s", internalerrdefs.ErrImageNotFound, ref)
+		}
+		return "", fmt.Errorf("%w: %w", internalerrdefs.ErrGetImage, err)
+	}
+
+	diffIDs, err := img.RootFS(nsCtx)
+	if err != nil {
+		return "", fmt.Errorf("%w: rootfs for %s: %w", internalerrdefs.ErrGetImage, ref, err)
+	}
+	if len(diffIDs) == 0 {
+		return "", nil
+	}
+	return identity.ChainID(diffIDs).String(), nil
+}
+
+// ContainerRootChainID returns the chainID of the parent layer stack the
+// container's root snapshot was committed against — i.e. the image content
+// the container is anchored on at the moment of the call, regardless of
+// what the image ref by the same name resolves to today. Returned as a
+// string so callers comparing it against ImageChainID (issue #915 defect
+// 2) need no third-party type.
+//
+// The snapshotter key defaults to the container's ID (see container.go
+// CreateContainerFromSpec, which falls back to spec.ID when SnapshotKey is
+// unset); we honor the explicit field too in case a future caller customizes
+// it. Returns internalerrdefs.ErrContainerNotFound when the container is
+// absent in namespace.
+func (c *client) ContainerRootChainID(namespace, containerID string) (string, error) {
+	container, err := c.loadContainer(namespace, containerID)
+	if err != nil {
+		return "", err
+	}
+
+	nsCtx := c.namespaceCtx(namespace)
+	info, err := container.Info(nsCtx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get container info for %s: %w", containerID, err)
+	}
+
+	snapshotKey := info.SnapshotKey
+	if snapshotKey == "" {
+		snapshotKey = containerID
+	}
+	snapshotter := info.Snapshotter
+	if snapshotter == "" {
+		snapshotter = defaults.DefaultSnapshotter
+	}
+
+	snapInfo, err := c.conn().SnapshotService(snapshotter).Stat(nsCtx, snapshotKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to stat snapshot %s/%s: %w", snapshotter, snapshotKey, err)
+	}
+	return snapInfo.Parent, nil
 }
 
 // imageToInfo extracts the ImageInfo subset from a containerd Image. Size is

@@ -213,6 +213,18 @@ type Runner interface {
 	// ref is absent.
 	GetImage(namespace, ref string) (ctr.ImageInfo, error)
 
+	// ImageChainID returns the chainID the image at ref would unpack to
+	// today in the given containerd namespace. bootstrapCell pairs it
+	// with ContainerRootChainID to catch the case where the
+	// persisted ContainerSpec.Image ref matches the desired image but
+	// the underlying content has been re-pointed (issue #915 defect 2).
+	ImageChainID(namespace, ref string) (string, error)
+
+	// ContainerRootChainID returns the chainID the container's root
+	// snapshot is anchored on, regardless of what the image ref by the
+	// same name resolves to today (issue #915 defect 2).
+	ContainerRootChainID(namespace, containerID string) (string, error)
+
 	// DeleteImage removes the named image ref from the given containerd
 	// namespace. Returns errdefs.ErrImageNotFound when the ref is absent.
 	DeleteImage(namespace, ref string) error

@@ -56,11 +56,11 @@ type stopKillFakeClient struct {
 func (c *stopKillFakeClient) Connect() error { return nil }
 func (c *stopKillFakeClient) Close() error   { return nil }
 
-func (c *stopKillFakeClient) CreateNamespace(string) error             { return nil }
-func (c *stopKillFakeClient) DeleteNamespace(string) error             { return nil }
-func (c *stopKillFakeClient) ListNamespaces() ([]string, error)        { return nil, nil }
-func (c *stopKillFakeClient) GetNamespace(string) (string, error)      { return "", nil }
-func (c *stopKillFakeClient) ExistsNamespace(string) (bool, error)     { return false, nil }
+func (c *stopKillFakeClient) CreateNamespace(string) error         { return nil }
+func (c *stopKillFakeClient) DeleteNamespace(string) error         { return nil }
+func (c *stopKillFakeClient) ListNamespaces() ([]string, error)    { return nil, nil }
+func (c *stopKillFakeClient) GetNamespace(string) (string, error)  { return "", nil }
+func (c *stopKillFakeClient) ExistsNamespace(string) (bool, error) { return false, nil }
 func (c *stopKillFakeClient) CleanupNamespaceResources(string, string) error {
 	return nil
 }
@@ -158,6 +158,15 @@ func (c *stopKillFakeClient) ListImages(string) ([]ctr.ImageInfo, error) {
 func (c *stopKillFakeClient) GetImage(string, string) (ctr.ImageInfo, error) {
 	return ctr.ImageInfo{}, nil
 }
+
+func (c *stopKillFakeClient) ImageChainID(string, string) (string, error) {
+	return "", nil
+}
+
+func (c *stopKillFakeClient) ContainerRootChainID(string, string) (string, error) {
+	return "", nil
+}
+
 func (c *stopKillFakeClient) DeleteImage(string, string) error { return nil }
 
 var _ ctr.Client = (*stopKillFakeClient)(nil)

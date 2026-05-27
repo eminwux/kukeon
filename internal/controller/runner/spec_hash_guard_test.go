@@ -71,27 +71,45 @@ type specHashFakeClient struct {
 func (c *specHashFakeClient) Connect() error { return nil }
 func (c *specHashFakeClient) Close() error   { return nil }
 
-func (c *specHashFakeClient) CreateNamespace(string) error             { return nil }
-func (c *specHashFakeClient) DeleteNamespace(string) error             { return nil }
-func (c *specHashFakeClient) ListNamespaces() ([]string, error)        { return nil, nil }
-func (c *specHashFakeClient) GetNamespace(string) (string, error)      { return "", nil }
-func (c *specHashFakeClient) ExistsNamespace(string) (bool, error)     { return false, nil }
+func (c *specHashFakeClient) CreateNamespace(string) error         { return nil }
+func (c *specHashFakeClient) DeleteNamespace(string) error         { return nil }
+func (c *specHashFakeClient) ListNamespaces() ([]string, error)    { return nil, nil }
+func (c *specHashFakeClient) GetNamespace(string) (string, error)  { return "", nil }
+func (c *specHashFakeClient) ExistsNamespace(string) (bool, error) { return false, nil }
 func (c *specHashFakeClient) CleanupNamespaceResources(string, string) error {
 	return nil
 }
 
-func (c *specHashFakeClient) GetCgroupMountpoint() string                                { return "" }
-func (c *specHashFakeClient) GetCurrentCgroupPath() (string, error)                      { return "", nil }
-func (c *specHashFakeClient) CgroupPath(string, string) (string, error)                  { return "", nil }
-func (c *specHashFakeClient) NewCgroup(ctr.CgroupSpec) (*cgroup2.Manager, error)         { return nil, nil } //nolint:nilnil
-func (c *specHashFakeClient) LoadCgroup(string, string) (*cgroup2.Manager, error)        { return nil, nil } //nolint:nilnil
-func (c *specHashFakeClient) DeleteCgroup(string, string) error                          { return nil }
+func (c *specHashFakeClient) GetCgroupMountpoint() string               { return "" }
+func (c *specHashFakeClient) GetCurrentCgroupPath() (string, error)     { return "", nil }
+func (c *specHashFakeClient) CgroupPath(string, string) (string, error) { return "", nil }
+
+// NewCgroup / LoadCgroup return nil, nil — cgroup2.Manager has unexported
+// fields so a zero value satisfies *Exec call sites the spec-hash guard
+// path never exercises. The //nolint:nilnil mute is required because
+// nolintlint is configured with require-explanation in .golangci.yml.
+func (c *specHashFakeClient) NewCgroup(
+	ctr.CgroupSpec,
+) (*cgroup2.Manager, error) {
+	return nil, nil //nolint:nilnil // unused stub satisfying ctr.Client
+}
+
+func (c *specHashFakeClient) LoadCgroup(
+	string,
+	string,
+) (*cgroup2.Manager, error) {
+	return nil, nil //nolint:nilnil // unused stub satisfying ctr.Client
+}
+func (c *specHashFakeClient) DeleteCgroup(string, string) error { return nil }
+
 func (c *specHashFakeClient) EnsureSubtreeControllers(string, string, []string) ([]string, error) {
 	return nil, nil
 }
+
 func (c *specHashFakeClient) EnableCellSubtreeControllers(string, string, []string) ([]string, error) {
 	return nil, nil
 }
+
 func (c *specHashFakeClient) EnableCellAllSubtreeControllers(string, string) ([]string, error) {
 	return nil, nil
 }
@@ -102,6 +120,7 @@ func (c *specHashFakeClient) CreateContainerFromSpec(
 ) (containerd.Container, error) {
 	return nil, nil //nolint:nilnil
 }
+
 func (c *specHashFakeClient) CreateContainer(
 	string, ctr.ContainerSpec, []ctr.RegistryCredentials,
 ) (containerd.Container, error) {
@@ -122,20 +141,25 @@ func (c *specHashFakeClient) ExistsContainer(string, string) (bool, error) { ret
 func (c *specHashFakeClient) DeleteContainer(string, string, ctr.ContainerDeleteOptions) error {
 	return nil
 }
+
 func (c *specHashFakeClient) StartContainer(string, ctr.ContainerSpec, ctr.TaskSpec) (containerd.Task, error) {
 	return nil, nil //nolint:nilnil
 }
+
 func (c *specHashFakeClient) StopContainer(
 	string, string, ctr.StopContainerOptions,
 ) (*containerd.ExitStatus, error) {
 	return nil, nil //nolint:nilnil
 }
+
 func (c *specHashFakeClient) TaskStatus(string, string) (containerd.Status, error) {
 	return containerd.Status{}, nil
 }
+
 func (c *specHashFakeClient) TaskMetrics(string, string) (*apitypes.Metric, error) {
 	return nil, nil //nolint:nilnil
 }
+
 func (c *specHashFakeClient) ContainerProcessUID(string, containerd.Container) (uint32, error) {
 	return 0, nil
 }
@@ -144,7 +168,9 @@ func (c *specHashFakeClient) ListImages(string) ([]ctr.ImageInfo, error)    { re
 func (c *specHashFakeClient) GetImage(string, string) (ctr.ImageInfo, error) {
 	return ctr.ImageInfo{}, nil
 }
-func (c *specHashFakeClient) DeleteImage(string, string) error { return nil }
+func (c *specHashFakeClient) ImageChainID(string, string) (string, error)         { return "", nil }
+func (c *specHashFakeClient) ContainerRootChainID(string, string) (string, error) { return "", nil }
+func (c *specHashFakeClient) DeleteImage(string, string) error                    { return nil }
 
 var _ ctr.Client = (*specHashFakeClient)(nil)
 
@@ -229,7 +255,9 @@ func TestReuseOrRefuseExistingChildContainer_LegacyRecordReuses(t *testing.T) {
 		t.Fatalf("legacy record must not error; got %v", err)
 	}
 	if !reuse {
-		t.Errorf("legacy record (no kukeon.io/spec-hash label) must be treated as match (safe default for first post-upgrade restart); got reuse=false")
+		t.Errorf(
+			"legacy record (no kukeon.io/spec-hash label) must be treated as match (safe default for first post-upgrade restart); got reuse=false",
+		)
 	}
 }
 

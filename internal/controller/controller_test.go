@@ -133,10 +133,12 @@ type fakeRunner struct {
 	ReconcileCellFn func(cell intmodel.Cell) (intmodel.Cell, runner.ReconcileOutcome, error)
 
 	// Image methods
-	LoadImageFn   func(namespace string, reader io.Reader) ([]string, error)
-	ListImagesFn  func(namespace string) ([]ctr.ImageInfo, error)
-	GetImageFn    func(namespace, ref string) (ctr.ImageInfo, error)
-	DeleteImageFn func(namespace, ref string) error
+	LoadImageFn            func(namespace string, reader io.Reader) ([]string, error)
+	ListImagesFn           func(namespace string) ([]ctr.ImageInfo, error)
+	GetImageFn             func(namespace, ref string) (ctr.ImageInfo, error)
+	ImageChainIDFn         func(namespace, ref string) (string, error)
+	ContainerRootChainIDFn func(namespace, containerID string) (string, error)
+	DeleteImageFn          func(namespace, ref string) error
 }
 
 // Realm methods
@@ -673,6 +675,24 @@ func (f *fakeRunner) GetImage(namespace, ref string) (ctr.ImageInfo, error) {
 		return f.GetImageFn(namespace, ref)
 	}
 	return ctr.ImageInfo{}, errors.New("unexpected call to GetImage")
+}
+
+func (f *fakeRunner) ImageChainID(namespace, ref string) (string, error) {
+	if f.ImageChainIDFn != nil {
+		return f.ImageChainIDFn(namespace, ref)
+	}
+	// Default to empty chainID + nil so bootstrapCell tests that don't
+	// exercise the digest-drift branch keep working with no extra stub.
+	return "", nil
+}
+
+func (f *fakeRunner) ContainerRootChainID(namespace, containerID string) (string, error) {
+	if f.ContainerRootChainIDFn != nil {
+		return f.ContainerRootChainIDFn(namespace, containerID)
+	}
+	// Default to empty chainID + nil for the same reason as ImageChainID:
+	// the drift comparison treats "both empty" as "no drift".
+	return "", nil
 }
 
 func (f *fakeRunner) DeleteImage(namespace, ref string) error {

@@ -19,6 +19,7 @@
 package controller_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/consts"
@@ -292,5 +293,326 @@ func TestBootstrapCell_NoPriorMetadataCreatesFresh(t *testing.T) {
 	}
 	if section.CellRecreatedDueToImageDrift {
 		t.Errorf("CellSection.CellRecreatedDueToImageDrift = true; want false (no prior metadata)")
+	}
+}
+
+// TestBootstrapCell_DigestDriftRecreatesCell covers issue #915 defect 2:
+// a persisted kukeond cell whose root container's anchored snapshot chain
+// has diverged from what the same image ref would unpack to today (because
+// `kuke build` re-pointed the tag at fresh layers between init runs) must
+// be torn down and rebuilt — the ref-string match alone is the trap the
+// pre-issue path fell into, and EnsureCell+StartCell would restart the
+// stale anchored snapshot.
+func TestBootstrapCell_DigestDriftRecreatesCell(t *testing.T) {
+	const image = "docker.io/library/kukeon-local:dev"
+	// containerd chainID for the kukeond container's existing snapshot.
+	const priorChain = "sha256:700a21b4fa4c2000000000000000000000000000000000000000000000000000"
+	// containerd chainID the freshly built image would unpack to today.
+	const freshChain = "sha256:23bbde593a4b0000000000000000000000000000000000000000000000000000"
+	// The exact containerd ID the runner would derive for the kukeond
+	// container (BuildContainerdID(space, stack, cell, container)). Asserted
+	// against the runner-call args so a future rename in
+	// internal/util/naming surfaces here instead of silently breaking the
+	// digest-drift probe.
+	const wantContainerdID = "kukeon_kukeon_kukeond_kukeond"
+	const wantNamespace = "kuke-system.kukeon.io"
+
+	var (
+		recreateCalled        bool
+		recreateImage         string
+		ensureCalled          bool
+		gotContainerNamespace string
+		gotContainerdID       string
+		gotImageNamespace     string
+		gotImageRef           string
+		startCallCount        int
+		containerChainCalled  int
+		imageChainCalled      int
+	)
+	mockRunner := &fakeRunner{
+		GetCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
+			return persistedKukeondCell(image), nil
+		},
+		ExistsCgroupFn: func(_ any) (bool, error) {
+			return true, nil
+		},
+		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) {
+			return true, nil
+		},
+		ContainerRootChainIDFn: func(ns, id string) (string, error) {
+			containerChainCalled++
+			gotContainerNamespace = ns
+			gotContainerdID = id
+			return priorChain, nil
+		},
+		ImageChainIDFn: func(ns, ref string) (string, error) {
+			imageChainCalled++
+			gotImageNamespace = ns
+			gotImageRef = ref
+			return freshChain, nil
+		},
+		EnsureCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
+			ensureCalled = true
+			return intmodel.Cell{}, nil
+		},
+		RecreateCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			recreateCalled = true
+			if len(c.Spec.Containers) > 0 {
+				recreateImage = c.Spec.Containers[0].Image
+			}
+			return c, nil
+		},
+		StartCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			startCallCount++
+			return c, nil
+		},
+	}
+
+	ctrl := setupTestController(t, mockRunner)
+	var section controller.CellSection
+	if err := ctrl.BootstrapCellForTest(&section, kukeondCellDocForTest(image)); err != nil {
+		t.Fatalf("BootstrapCellForTest: %v", err)
+	}
+
+	if containerChainCalled != 1 {
+		t.Errorf("ContainerRootChainID call count = %d; want 1", containerChainCalled)
+	}
+	if imageChainCalled != 1 {
+		t.Errorf("ImageChainID call count = %d; want 1", imageChainCalled)
+	}
+	if gotContainerNamespace != wantNamespace {
+		t.Errorf("ContainerRootChainID namespace = %q; want %q", gotContainerNamespace, wantNamespace)
+	}
+	if gotContainerdID != wantContainerdID {
+		t.Errorf("ContainerRootChainID containerd id = %q; want %q", gotContainerdID, wantContainerdID)
+	}
+	if gotImageNamespace != wantNamespace {
+		t.Errorf("ImageChainID namespace = %q; want %q", gotImageNamespace, wantNamespace)
+	}
+	if gotImageRef != image {
+		t.Errorf("ImageChainID ref = %q; want %q", gotImageRef, image)
+	}
+	if !recreateCalled {
+		t.Fatalf("RecreateCell must be called on digest drift; got Ensure=%v", ensureCalled)
+	}
+	if ensureCalled {
+		t.Errorf("EnsureCell must not be called on the digest-drift branch (would restart the stale snapshot)")
+	}
+	if recreateImage != image {
+		t.Errorf("RecreateCell received image %q; want %q (the desired --kukeond-image)", recreateImage, image)
+	}
+	if startCallCount != 0 {
+		t.Errorf(
+			"StartCell must not be called on the drift branch (RecreateCell runs it internally); got %d calls",
+			startCallCount,
+		)
+	}
+	if !section.CellRecreatedDueToImageDrift {
+		t.Errorf("CellSection.CellRecreatedDueToImageDrift = false; want true")
+	}
+	if section.CellPriorImage != image {
+		t.Errorf(
+			"CellSection.CellPriorImage = %q; want %q (refs match on the digest-drift path)",
+			section.CellPriorImage,
+			image,
+		)
+	}
+	if !section.CellRootContainerCreated {
+		t.Errorf("CellSection.CellRootContainerCreated = false; want true (drift recreate is a rebuild)")
+	}
+}
+
+// TestBootstrapCell_MatchingDigestEnsuresInPlace confirms that when the
+// chainIDs match (the only-cell-stale path is genuinely not in play), the
+// idempotent EnsureCell+StartCell branch still runs. This pins the
+// digest-drift probe down so a false-positive recreate never replaces a
+// healthy daemon container.
+func TestBootstrapCell_MatchingDigestEnsuresInPlace(t *testing.T) {
+	const image = "docker.io/library/kukeon-local:dev"
+	const chain = "sha256:aaaaaaaa00000000000000000000000000000000000000000000000000000000"
+
+	var (
+		recreateCalled bool
+		ensureCalled   bool
+		startCalled    bool
+	)
+	mockRunner := &fakeRunner{
+		GetCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
+			return persistedKukeondCell(image), nil
+		},
+		ExistsCgroupFn: func(_ any) (bool, error) {
+			return true, nil
+		},
+		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) {
+			return true, nil
+		},
+		ContainerRootChainIDFn: func(string, string) (string, error) {
+			return chain, nil
+		},
+		ImageChainIDFn: func(string, string) (string, error) {
+			return chain, nil
+		},
+		EnsureCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			ensureCalled = true
+			return c, nil
+		},
+		RecreateCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			recreateCalled = true
+			return c, nil
+		},
+		StartCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			startCalled = true
+			return c, nil
+		},
+	}
+
+	ctrl := setupTestController(t, mockRunner)
+	var section controller.CellSection
+	if err := ctrl.BootstrapCellForTest(&section, kukeondCellDocForTest(image)); err != nil {
+		t.Fatalf("BootstrapCellForTest: %v", err)
+	}
+
+	if recreateCalled {
+		t.Errorf("RecreateCell must not be called when chainIDs match")
+	}
+	if !ensureCalled {
+		t.Errorf("EnsureCell must be called on the idempotent path")
+	}
+	if !startCalled {
+		t.Errorf("StartCell must be called on the idempotent path")
+	}
+	if section.CellRecreatedDueToImageDrift {
+		t.Errorf("CellSection.CellRecreatedDueToImageDrift = true; want false (chainIDs match)")
+	}
+}
+
+// TestBootstrapCell_DigestProbeFailureFallsThrough confirms that a probe
+// error (containerd hiccup, image missing, snapshotter unreachable) does
+// not abort the init — the fallback is the existing-cell EnsureCell path
+// so the daemon can still come up. The probe error is a soft signal, not
+// a hard fail; the daemon's reconciler will re-derive on the next tick.
+func TestBootstrapCell_DigestProbeFailureFallsThrough(t *testing.T) {
+	const image = "docker.io/library/kukeon-local:dev"
+
+	var (
+		recreateCalled bool
+		ensureCalled   bool
+		startCalled    bool
+	)
+	probeErr := errors.New("snapshotter unreachable")
+	mockRunner := &fakeRunner{
+		GetCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
+			return persistedKukeondCell(image), nil
+		},
+		ExistsCgroupFn: func(_ any) (bool, error) {
+			return true, nil
+		},
+		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) {
+			return true, nil
+		},
+		ContainerRootChainIDFn: func(string, string) (string, error) {
+			return "", probeErr
+		},
+		// ImageChainIDFn is not set: the ContainerRootChainID error path
+		// short-circuits and never reaches the image probe. A second stub
+		// would be unreachable — leave it unset so the default "no stub"
+		// path on fakeRunner.ImageChainID returns "" + nil. Either way the
+		// drift branch never fires.
+		EnsureCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			ensureCalled = true
+			return c, nil
+		},
+		RecreateCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			recreateCalled = true
+			return c, nil
+		},
+		StartCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			startCalled = true
+			return c, nil
+		},
+	}
+
+	ctrl := setupTestController(t, mockRunner)
+	var section controller.CellSection
+	if err := ctrl.BootstrapCellForTest(&section, kukeondCellDocForTest(image)); err != nil {
+		t.Fatalf("BootstrapCellForTest: %v", err)
+	}
+
+	if recreateCalled {
+		t.Errorf("RecreateCell must not be called when the probe errored")
+	}
+	if !ensureCalled {
+		t.Errorf("EnsureCell must be called on probe-failure fallback")
+	}
+	if !startCalled {
+		t.Errorf("StartCell must be called on probe-failure fallback")
+	}
+	if section.CellRecreatedDueToImageDrift {
+		t.Errorf("CellSection.CellRecreatedDueToImageDrift = true; want false (probe failed, drift undecided)")
+	}
+}
+
+// TestBootstrapCell_DigestProbeSkippedWhenRootAbsent confirms the digest
+// probe never runs when the root container record is missing — the
+// CellMetadataExistsPre branch in bootstrapCell already routes through
+// EnsureCell+StartCell (which provisions a fresh container against the
+// desired image), so a chainID comparison would be against a non-existent
+// snapshot. The guard also keeps the runner calls off the hot path when
+// they cannot return a meaningful answer.
+func TestBootstrapCell_DigestProbeSkippedWhenRootAbsent(t *testing.T) {
+	const image = "docker.io/library/kukeon-local:dev"
+
+	var (
+		containerChainCalled int
+		imageChainCalled     int
+		ensureCalled         bool
+	)
+	mockRunner := &fakeRunner{
+		GetCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
+			return persistedKukeondCell(image), nil
+		},
+		ExistsCgroupFn: func(_ any) (bool, error) {
+			return true, nil
+		},
+		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) {
+			return false, nil
+		},
+		ContainerRootChainIDFn: func(string, string) (string, error) {
+			containerChainCalled++
+			return "", nil
+		},
+		ImageChainIDFn: func(string, string) (string, error) {
+			imageChainCalled++
+			return "", nil
+		},
+		EnsureCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			ensureCalled = true
+			return c, nil
+		},
+		StartCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			return c, nil
+		},
+	}
+
+	ctrl := setupTestController(t, mockRunner)
+	var section controller.CellSection
+	if err := ctrl.BootstrapCellForTest(&section, kukeondCellDocForTest(image)); err != nil {
+		t.Fatalf("BootstrapCellForTest: %v", err)
+	}
+
+	if containerChainCalled != 0 {
+		t.Errorf(
+			"ContainerRootChainID must not be called when the root container is absent; got %d",
+			containerChainCalled,
+		)
+	}
+	if imageChainCalled != 0 {
+		t.Errorf("ImageChainID must not be called when the root container is absent; got %d", imageChainCalled)
+	}
+	if !ensureCalled {
+		t.Errorf("EnsureCell must run when the metadata exists but the root container does not")
+	}
+	if section.CellRecreatedDueToImageDrift {
+		t.Errorf("CellSection.CellRecreatedDueToImageDrift = true; want false (probe skipped)")
 	}
 }

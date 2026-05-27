@@ -57,6 +57,52 @@ func (r *Exec) GetImage(namespace, ref string) (ctr.ImageInfo, error) {
 	return r.ctrClient.GetImage(namespace, ref)
 }
 
+// ImageChainID returns the chainID the image at ref would unpack to today
+// in the given containerd namespace. Issue #915 defect 2: bootstrapCell
+// uses this to detect that an image tag has been re-pointed since the
+// kukeond cell was created (so the persisted ContainerSpec.Image ref
+// matches the desired one but the underlying content has changed) and
+// route through RecreateCell instead of EnsureCell+StartCell, which would
+// otherwise re-start the stale image.
+//
+// errdefs.ErrImageNotFound is propagated unchanged so callers can use
+// errors.Is for not-found detection.
+func (r *Exec) ImageChainID(namespace, ref string) (string, error) {
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return "", errdefs.ErrCheckNamespaceExists
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", errdefs.ErrImageNotFound
+	}
+	if err := r.ensureClientConnected(); err != nil {
+		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	return r.ctrClient.ImageChainID(namespace, ref)
+}
+
+// ContainerRootChainID returns the chainID the container's root snapshot
+// is anchored on at the moment of the call, paired with ImageChainID by
+// bootstrapCell to detect image digest drift (issue #915 defect 2).
+//
+// errdefs.ErrContainerNotFound is propagated unchanged so callers can use
+// errors.Is for not-found detection.
+func (r *Exec) ContainerRootChainID(namespace, containerID string) (string, error) {
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return "", errdefs.ErrCheckNamespaceExists
+	}
+	containerID = strings.TrimSpace(containerID)
+	if containerID == "" {
+		return "", errdefs.ErrContainerNotFound
+	}
+	if err := r.ensureClientConnected(); err != nil {
+		return "", fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	return r.ctrClient.ContainerRootChainID(namespace, containerID)
+}
+
 // DeleteImage removes the named image ref from the given containerd
 // namespace. errdefs.ErrImageNotFound is propagated unchanged so callers
 // can use errors.Is for not-found detection.
