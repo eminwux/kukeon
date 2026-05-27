@@ -1,0 +1,33 @@
+apiVersion: v1beta1
+kind: Cell
+metadata:
+  name: test-cell
+spec:
+  id: test-cell
+  realmId: test-realm
+  spaceId: test-space
+  stackId: test-stack
+  containers:
+    - id: root
+      root: true
+      image: registry.eminwux.com/busybox:latest
+      command: sleep
+      args:
+        - "3600"
+    - id: work
+      image: registry.eminwux.com/busybox:latest
+      command: sleep
+      args:
+        - "3600"
+      attachable: true
+      # Required repo with an unresolvable hostname (RFC 6761 reserves
+      # .invalid for tests). kuketty's processRepos will fail and the
+      # workload task will go to Failed — but the per-container kuketty
+      # control socket is born inside claimSocketListener *before*
+      # processRepos runs. Issue #916 locks that the socket lands at
+      # 0o660 :kukeon at bind time, not deferred to sbshserver.Serve.
+      repos:
+        - name: unresolvable
+          target: /tmp/never-cloned
+          url: http://kukeon-test.invalid/never-exists.git
+          required: true

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -184,7 +185,7 @@ func TestClaimSocketListener_BindsAndUnlinksStale(t *testing.T) {
 	if err := os.WriteFile(sock, nil, 0o600); err != nil {
 		t.Fatalf("pre-create stale: %v", err)
 	}
-	l, err := claimSocketListener(sock)
+	l, err := claimSocketListener(context.Background(), sock, 0, nil)
 	if err != nil {
 		t.Fatalf("claimSocketListener: %v", err)
 	}
@@ -196,6 +197,75 @@ func TestClaimSocketListener_BindsAndUnlinksStale(t *testing.T) {
 	}
 	if info.Mode()&os.ModeSocket == 0 {
 		t.Errorf("path %s is not a socket: mode=%v", sock, info.Mode())
+	}
+}
+
+// TestClaimSocketListener_AppliesModeAndGID locks the bug fix for issue
+// #916: the on-disk socket mode and group must reflect the configured
+// SocketMode + SocketGID immediately after the helper returns —
+// *before* any sbsh involvement. Pre-fix, the inode was born at
+// 0o777 & ~umask (typically 0o755 under the container's 0o022 umask)
+// and stayed there for the duration of processRepos + processStages,
+// reopening the EACCES window for any group-member client that dialed
+// after the daemon reported "containers: started" but before
+// sbshserver.Serve ran applySocketPerms. The fix binds under a
+// temporary umask matching the spec mode and follows with
+// belt-and-braces chmod + chown so the socket is dial-ready by
+// matching peers the instant Listen returns.
+//
+// The test runs against the process's own primary GID so it does not
+// need elevated privileges. The umask path normally gets us there;
+// the explicit chmod is the belt that backs it up.
+func TestClaimSocketListener_AppliesModeAndGID(t *testing.T) {
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "socket")
+	gid := os.Getgid()
+	mode := os.FileMode(0o660)
+
+	l, err := claimSocketListener(context.Background(), sock, mode, &gid)
+	if err != nil {
+		t.Fatalf("claimSocketListener: %v", err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+
+	info, err := os.Stat(sock)
+	if err != nil {
+		t.Fatalf("stat socket: %v", err)
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		t.Fatalf("path %s is not a socket: mode=%v", sock, info.Mode())
+	}
+	if got := info.Mode().Perm(); got != mode {
+		t.Errorf("socket mode = %#o, want %#o", got, mode)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Fatalf("stat.Sys() not *syscall.Stat_t: %T", info.Sys())
+	}
+	if int(stat.Gid) != gid {
+		t.Errorf("socket gid = %d, want %d", stat.Gid, gid)
+	}
+}
+
+// TestClaimSocketListener_NilGIDLeavesGroupUnchanged exercises the
+// no-kukeon-group path: when SocketGID is nil (the cell has no
+// kukeon group configured, mirroring buildTerminalSpec's gate on a
+// non-zero GID), the helper must not chown. mode still applies — the
+// owner-only 0o600 default lands when the caller passes a zero mode.
+func TestClaimSocketListener_NilGIDLeavesGroupUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "socket")
+	l, err := claimSocketListener(context.Background(), sock, 0, nil)
+	if err != nil {
+		t.Fatalf("claimSocketListener: %v", err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	info, err := os.Stat(sock)
+	if err != nil {
+		t.Fatalf("stat socket: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("socket mode = %#o, want 0o600 (defaultSocketMode)", got)
 	}
 }
 

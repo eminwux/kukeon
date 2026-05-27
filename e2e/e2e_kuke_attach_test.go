@@ -666,6 +666,118 @@ func TestKuke_RunFromStopped_NonRootKukeonGroup_NoEACCES(t *testing.T) {
 	}
 }
 
+// TestKuke_RunFromStopped_RequiredRepoUnresolvable_NoEACCES locks issue
+// #916: kuketty's claimSocketListener must apply the configured mode +
+// GID at bind time, *before* sbshserver.Serve runs applySocketPerms.
+// sbsh v0.12.1 (issue #912 / sbsh#361) closed the bind→chmod window
+// inside its own OpenSocketCtrl, but kuketty pre-binds via
+// claimSocketListener and hands the listener to sbsh through
+// UseListener — sbsh's UseListener → bringUp → applySocketPerms only
+// fires inside sbshserver.Serve, after kuketty's pre-Serve work
+// (processRepos #617, processStages #635) has already run. Pre-fix,
+// the socket lived at 0o777 & ~umask (typically 0o755 under the
+// container's 0o022 umask) for the entire pre-Serve window, so a
+// kukeon-group operator dialing the socket after the daemon reported
+// "containers: started" — exactly what `kuke run` does against a
+// Stopped cell — saw EACCES.
+//
+// The cell fixture declares a required=true repo with an unresolvable
+// hostname (RFC 6761 reserves .invalid). DNS yields NXDOMAIN, git
+// clone fails, kuketty exits non-zero in processRepos — but the
+// socket inode is born inside claimSocketListener *before*
+// processRepos runs. The test polls for the socket to appear (the
+// bind happens) and stats it immediately. With the fix, mode is
+// 0o660 and group is kukeon — the on-disk shape that admits a
+// kukeon-group dial during the pre-Serve window. Pre-fix, this stat
+// would show 0o755 group=kukeon (group ownership came from the SGID
+// parent dir, mode was wrong).
+//
+// Preconditions mirror TestKuke_RunFromStopped_NonRootKukeonGroup_NoEACCES
+// (euid 0, kukeon system group present). The test does not need a
+// privilege-dropped client because asserting the inode mode/gid
+// directly is a stronger and more deterministic signal than racing a
+// dial against the brief pre-Serve window.
+func TestKuke_RunFromStopped_RequiredRepoUnresolvable_NoEACCES(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("requires root for kukeon-group --socket-gid daemon mode")
+	}
+
+	kukeonGrp, err := user.LookupGroup(consts.KukeonSystemGroup)
+	if err != nil {
+		t.Skipf("kukeon system group %q not present on host (run `kuke init` first): %v",
+			consts.KukeonSystemGroup, err)
+	}
+	kukeonGID64, err := strconv.ParseUint(kukeonGrp.Gid, 10, 32)
+	if err != nil {
+		t.Fatalf("parse kukeon GID %q: %v", kukeonGrp.Gid, err)
+	}
+	kukeonGID := uint32(kukeonGID64)
+
+	runPath := getRandomRunPath(t)
+	if chmodErr := os.Chmod(runPath, 0o755); chmodErr != nil {
+		t.Fatalf("chmod runPath %s: %v", runPath, chmodErr)
+	}
+
+	host := startKukeondDaemonWithSocketGID(t, runPath, int(kukeonGID))
+
+	realmName := generateUniqueRealmName(t)
+	spaceName := generateUniqueSpaceName(t)
+	stackName := generateUniqueStackName(t)
+	cellName := generateUniqueCellName(t)
+
+	t.Cleanup(func() {
+		cleanupCellNoDaemon(t, runPath, realmName, spaceName, stackName, cellName)
+		cleanupStackNoDaemon(t, runPath, realmName, spaceName, stackName)
+		cleanupSpaceNoDaemon(t, runPath, realmName, spaceName)
+		cleanupRealmNoDaemon(t, runPath, realmName)
+	})
+
+	runReturningBinary(t, nil, kuke,
+		append(buildKukeDaemonArgs(host), "create", "realm", realmName)...)
+	runReturningBinary(t, nil, kuke,
+		append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)...)
+	runReturningBinary(t, nil, kuke,
+		append(buildKukeDaemonArgs(host), "create", "stack", stackName,
+			"--realm", realmName, "--space", spaceName)...)
+
+	applyAttachableCell(t, host, "attachable-cell-required-repo-unresolvable.yaml",
+		realmName, spaceName, stackName, cellName)
+
+	socketPath := fs.ContainerSocketSymlinkPath(runPath,
+		realmName, spaceName, stackName, cellName, "work")
+
+	// Poll for the socket to appear. kuketty binds it inside
+	// claimSocketListener — the moment the post-#916 bind site applies
+	// mode + gid — *before* entering processRepos. The unresolvable
+	// .invalid host yields NXDOMAIN quickly, so kuketty exits within a
+	// second or two; the wait+stat loop succeeds the first iteration
+	// the bind completes, which is well before that exit.
+	waitForSocket(t, socketPath, 15*time.Second)
+
+	info, err := os.Stat(socketPath)
+	if err != nil {
+		t.Fatalf("stat work socket %s during pre-Serve window: %v", socketPath, err)
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		t.Fatalf("path %s is not a socket: mode=%v", socketPath, info.Mode())
+	}
+	if got := info.Mode().Perm(); got != 0o660 {
+		t.Errorf("pre-Serve work socket mode: got %#o want 0o660 — #916 race re-opened",
+			got)
+	}
+	sysStat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Fatalf("work socket stat: unexpected Sys() type %T", info.Sys())
+	}
+	if sysStat.Gid != kukeonGID {
+		t.Errorf("pre-Serve work socket gid: got %d want %d (kukeon) — #916 race re-opened",
+			sysStat.Gid, kukeonGID)
+	}
+	if sysStat.Uid != 0 {
+		t.Errorf("pre-Serve work socket uid: got %d want 0 (root)", sysStat.Uid)
+	}
+}
+
 // startKukeondDaemonWithSocketGID is the kukeon-group-aware variant of
 // startKukeondDaemon. It passes `--socket-gid <gid>` so the daemon
 // applies socketModeGroupReadable (0o660 :kukeon) to its listener
