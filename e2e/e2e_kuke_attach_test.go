@@ -17,13 +17,19 @@
 package e2e_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/creack/pty"
 
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/util/fs"
@@ -425,4 +431,424 @@ func getCellIDNoDaemon(t *testing.T, runPath, realmName, spaceName, stackName, c
 		return "", fmt.Errorf("cell %q has empty Spec.ID", cellName)
 	}
 	return cell.Spec.ID, nil
+}
+
+// runFromStoppedRaceIterations is how many Stopped → kuke run cycles
+// TestKuke_RunFromStopped_NonRootKukeonGroup_NoEACCES drives. The issue
+// (#912) calls for ≥20 to catch the bind-then-chmod EACCES window even
+// after the upstream sbsh fix closed it — a future regression that
+// re-opens the window would surface on at least one of these dial
+// attempts in normal CI load. Per iteration cost is ~1 stop + ~1 start
+// + a short attach grace, so 20 iterations stay inside the e2e test's
+// 60s budget on a healthy runner.
+const runFromStoppedRaceIterations = 20
+
+// runFromStoppedAttachGrace is the wait between launching `kuke run`
+// (which races StartCell → attach internally) and sending the detach
+// keystroke. The attach phase enters the in-process pkg/attach loop
+// within tens of milliseconds on a healthy host; this grace is set so
+// the EACCES window, if it re-opens, is consumed by the dial before the
+// detach byte arrives. A v0.12.0 race would surface as a non-zero exit
+// with `permission denied` on stderr inside this window; a v0.12.1
+// healthy attach loop swallows the keystroke and exits cleanly.
+const runFromStoppedAttachGrace = 1 * time.Second
+
+// runFromStoppedExitTimeout caps the wait for a single `kuke run`
+// invocation to return after its detach keystroke. The healthy path
+// (post-v0.12.1) returns within a second; the cap is generous so a
+// genuinely stuck attach loop fails loudly instead of hanging the suite.
+const runFromStoppedExitTimeout = 20 * time.Second
+
+// TestKuke_RunFromStopped_NonRootKukeonGroup_NoEACCES is the e2e
+// regression test that locks down eminwux/sbsh#361 (closed in sbsh
+// v0.12.1) from the kukeon side. The race lived inside sbsh's
+// OpenSocketCtrl: net.ListenConfig.Listen bound the unix socket at
+// mode 0o666 & ~umask (effectively 0o600 under kukeond's 0o077 umask),
+// then applySocketPerms chowned :kukeon and chmod'd 0o660 *after*
+// Listen returned. A non-root operator in the kukeon group that
+// dialed inside that window — which is exactly what `kuke run`
+// against a Stopped cell does, since StartCell returns once the work
+// task is Running and the client immediately attaches — saw EACCES.
+//
+// The test drives the original failure path verbatim: a kukeon-group
+// non-root caller launching `kuke run <Stopped cell>` 20 times in
+// succession. With sbsh ≥ v0.12.1 each iteration's dial sees the
+// socket at 0o660 :kukeon (the bind itself lands at the configured
+// mode now), the in-process pkg/attach loop enters normally, and the
+// PTY detach keystroke walks the loop back out with exit 0. A
+// regression that re-opens the bind/chmod window would resurface as
+// `permission denied` on stderr and a non-zero exit on at least one
+// of the iterations.
+//
+// Preconditions the test skips on (so the suite stays portable):
+//   - euid != 0 (the test must drop privilege to a non-root caller)
+//   - host has no `kukeon` system group (kuke init has not run, or the
+//     group was removed)
+//   - host has no `nobody` user (rare; only some minimal containers)
+//
+// Divergence from the issue body: #912 claimed the harness "has the
+// group plumbed — see harness_daemon_test.go". It did not at the time
+// — startKukeondDaemon dropped to socketModeRootOnly because no
+// --socket-gid was passed. This test ships its own daemon variant
+// (startKukeondDaemonWithSocketGID) and PTY launcher
+// (startPTYWithCredential) for the privilege drop, so the harness
+// gains the plumbing as part of this fix rather than depending on a
+// separately landed change.
+func TestKuke_RunFromStopped_NonRootKukeonGroup_NoEACCES(t *testing.T) {
+	// Serial: the test drops privilege and chmods the runPath; it does
+	// not parallelise meaningfully and any t.Parallel sibling running
+	// as root inside the same runPath would muddy the EACCES signal.
+	if os.Geteuid() != 0 {
+		t.Skip("requires root to drop privilege to a non-root caller")
+	}
+
+	kukeonGrp, err := user.LookupGroup(consts.KukeonSystemGroup)
+	if err != nil {
+		t.Skipf("kukeon system group %q not present on host (run `kuke init` first): %v",
+			consts.KukeonSystemGroup, err)
+	}
+	kukeonGID64, err := strconv.ParseUint(kukeonGrp.Gid, 10, 32)
+	if err != nil {
+		t.Fatalf("parse kukeon GID %q: %v", kukeonGrp.Gid, err)
+	}
+	kukeonGID := uint32(kukeonGID64)
+
+	unpriv, err := user.Lookup("nobody")
+	if err != nil {
+		t.Skipf("nobody user not present on host: %v", err)
+	}
+	unprivUID64, err := strconv.ParseUint(unpriv.Uid, 10, 32)
+	if err != nil {
+		t.Fatalf("parse nobody UID %q: %v", unpriv.Uid, err)
+	}
+	unprivGID64, err := strconv.ParseUint(unpriv.Gid, 10, 32)
+	if err != nil {
+		t.Fatalf("parse nobody GID %q: %v", unpriv.Gid, err)
+	}
+	unprivCred := &syscall.Credential{
+		Uid:    uint32(unprivUID64),
+		Gid:    uint32(unprivGID64),
+		Groups: []uint32{kukeonGID},
+	}
+
+	runPath := getRandomRunPath(t)
+	// Make the runPath traversable for the unprivileged caller. The
+	// per-container TTY inode already lands at 0o660 root:kukeon (via
+	// the chown plumbing in #911), but every parent dir on the path
+	// from / down to the socket symlink must grant search to the
+	// caller or connect(2) ENOENTs out before the EACCES race could
+	// surface. The kukeon-group operator on a real host reaches the
+	// symlink via `/opt/kukeon/s/<id>` which is created by the daemon
+	// at 0o755; per-test runPaths under /tmp inherit 0o700 from
+	// MkdirTemp, so an explicit relax is needed here.
+	if chmodErr := os.Chmod(runPath, 0o755); chmodErr != nil {
+		t.Fatalf("chmod runPath %s: %v", runPath, chmodErr)
+	}
+
+	host := startKukeondDaemonWithSocketGID(t, runPath, int(kukeonGID))
+
+	realmName := generateUniqueRealmName(t)
+	spaceName := generateUniqueSpaceName(t)
+	stackName := generateUniqueStackName(t)
+	cellName := generateUniqueCellName(t)
+
+	t.Cleanup(func() {
+		cleanupCellNoDaemon(t, runPath, realmName, spaceName, stackName, cellName)
+		cleanupStackNoDaemon(t, runPath, realmName, spaceName, stackName)
+		cleanupSpaceNoDaemon(t, runPath, realmName, spaceName)
+		cleanupRealmNoDaemon(t, runPath, realmName)
+	})
+
+	runReturningBinary(t, nil, kuke,
+		append(buildKukeDaemonArgs(host), "create", "realm", realmName)...)
+	runReturningBinary(t, nil, kuke,
+		append(buildKukeDaemonArgs(host), "create", "space", spaceName, "--realm", realmName)...)
+	runReturningBinary(t, nil, kuke,
+		append(buildKukeDaemonArgs(host), "create", "stack", stackName,
+			"--realm", realmName, "--space", spaceName)...)
+
+	// Apply the attachable cell (sleep workload) to drive it to Ready.
+	applyAttachableCell(t, host, "attachable-cell.yaml", realmName, spaceName, stackName, cellName)
+
+	socketPath := fs.ContainerSocketSymlinkPath(runPath,
+		realmName, spaceName, stackName, cellName, "work")
+	waitForSocket(t, socketPath, 10*time.Second)
+
+	// Relax search bits on `<runPath>/s/` after the runner has created
+	// the symlink dir — the daemon creates it as root with the default
+	// umask, which is too restrictive for `nobody` to traverse.
+	symlinkDir := fs.ContainerSocketSymlinkDir(runPath)
+	if chmodErr := os.Chmod(symlinkDir, 0o755); chmodErr != nil {
+		t.Fatalf("chmod symlink dir %s: %v", symlinkDir, chmodErr)
+	}
+
+	stopArgs := append(buildKukeDaemonArgs(host),
+		"stop", "cell", cellName,
+		"--realm", realmName,
+		"--space", spaceName,
+		"--stack", stackName,
+	)
+	runArgs := append(buildKukeDaemonArgs(host),
+		"run", cellName,
+		"--realm", realmName,
+		"--space", spaceName,
+		"--stack", stackName,
+		"--container", "work",
+	)
+
+	for iter := 0; iter < runFromStoppedRaceIterations; iter++ {
+		// Drop the cell into Stopped so the next `kuke run` re-enters
+		// the StartCell → attach branch (the path that races).
+		runReturningBinary(t, nil, kuke, stopArgs...)
+
+		session := startPTYWithCredential(t, nil, unprivCred, kuke, runArgs...)
+
+		// Wait long enough for `kuke run`'s in-process pkg/attach loop
+		// to either succeed (sbsh ≥ v0.12.1) or surface EACCES (sbsh
+		// ≤ v0.12.0). A v0.12.0 race returns the error immediately;
+		// a v0.12.1 healthy attach blocks on stdin until the detach
+		// keystroke arrives.
+		time.Sleep(runFromStoppedAttachGrace)
+		if writeErr := session.Write(sbshDetachSequence); writeErr != nil {
+			// Best-effort: a session that has already exited (race
+			// fired) closes the PTY master and returns an error here.
+			// Don't fail the test on the write — let Wait surface the
+			// real failure mode below.
+			t.Logf("iter %d: write detach sequence: %v (proceeding to Wait)", iter, writeErr)
+		}
+
+		exitCode, output, waitErr := session.Wait(runFromStoppedExitTimeout)
+		if waitErr != nil && exitCode == -1 {
+			session.Close()
+			t.Fatalf("iter %d: kuke run did not exit within %s: %v\noutput:\n%s",
+				iter, runFromStoppedExitTimeout, waitErr, output)
+		}
+		if exitCode != 0 {
+			session.Close()
+			t.Fatalf("iter %d: kuke run exited %d (want 0); sbsh#361 race may have re-opened\noutput:\n%s",
+				iter, exitCode, output)
+		}
+		if strings.Contains(strings.ToLower(string(output)), "permission denied") {
+			session.Close()
+			t.Fatalf("iter %d: kuke run output contains 'permission denied'; sbsh#361 race re-opened\noutput:\n%s",
+				iter, output)
+		}
+		if !strings.Contains(string(output), "containers: started") {
+			session.Close()
+			t.Fatalf("iter %d: kuke run output missing 'containers: started'\noutput:\n%s",
+				iter, output)
+		}
+		session.Close()
+	}
+
+	// Final assertion: the per-container kuketty socket inode lands
+	// at mode 0o660 with gid=kukeon. This is the steady-state
+	// post-chmod shape; if a regression silently dropped the chown
+	// or the chmod, the iterations above might still pass if they
+	// raced just right (root-owned 0o600 succeeds for the root
+	// daemon), but this stat would catch it.
+	info, err := os.Stat(socketPath)
+	if err != nil {
+		t.Fatalf("stat work socket %s: %v", socketPath, err)
+	}
+	if got := info.Mode().Perm(); got != 0o660 {
+		t.Errorf("work socket mode: got %#o want 0o660", got)
+	}
+	sysStat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Fatalf("work socket stat: unexpected Sys() type %T", info.Sys())
+	}
+	if sysStat.Gid != kukeonGID {
+		t.Errorf("work socket gid: got %d want %d (kukeon)", sysStat.Gid, kukeonGID)
+	}
+	if sysStat.Uid != 0 {
+		t.Errorf("work socket uid: got %d want 0 (root)", sysStat.Uid)
+	}
+}
+
+// startKukeondDaemonWithSocketGID is the kukeon-group-aware variant of
+// startKukeondDaemon. It passes `--socket-gid <gid>` so the daemon
+// applies socketModeGroupReadable (0o660 :kukeon) to its listener
+// inode, making the socket dial-able by a non-root caller in the
+// kukeon group — required for the privilege-dropped client side of
+// TestKuke_RunFromStopped_NonRootKukeonGroup_NoEACCES. The rest of the
+// startup (SUN_PATH-safe sockDir, sync wait on the socket file,
+// SIGTERM-then-SIGKILL cleanup) mirrors startKukeondDaemon; this
+// helper exists rather than threading a variadic arg through the
+// default startKukeondDaemon because the kukeon-group path is the only
+// caller and a single-purpose helper is easier to read at the test
+// site.
+func startKukeondDaemonWithSocketGID(t *testing.T, runPath string, socketGID int) string {
+	t.Helper()
+
+	binDir := os.Getenv("E2E_BIN_DIR")
+	if binDir == "" {
+		binDir = ".."
+	}
+	bin := filepath.Join(binDir, "kukeond")
+	if _, err := os.Stat(bin); os.IsNotExist(err) {
+		t.Skipf("kukeond binary %s not found, skipping daemon-mode test", bin)
+	}
+
+	sockDir, err := os.MkdirTemp("/tmp", "kd-") //nolint:usetesting // intentional shorter prefix; see startKukeondDaemon
+	if err != nil {
+		t.Fatalf("MkdirTemp(/tmp, kd-): %v", err)
+	}
+	// The sockDir parent must grant search to the unprivileged caller
+	// so connect(2) can resolve the socket basename. The default
+	// MkdirTemp mode (0o700) blocks `nobody`.
+	if chmodErr := os.Chmod(sockDir, 0o755); chmodErr != nil {
+		_ = os.RemoveAll(sockDir)
+		t.Fatalf("chmod sockDir %s: %v", sockDir, chmodErr)
+	}
+	sockPath := filepath.Join(sockDir, "k.sock")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(ctx, bin,
+		"serve",
+		"--socket", sockPath,
+		"--socket-gid", strconv.Itoa(socketGID),
+		"--run-path", runPath,
+		"--reconcile-interval", "0",
+		"--configuration", filepath.Join(runPath, "kukeond.yaml"),
+	)
+	logFile, logErr := os.CreateTemp("", "kukeond-*.log")
+	if logErr != nil {
+		cancel()
+		t.Fatalf("CreateTemp kukeond log: %v", logErr)
+	}
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
+	if startErr := cmd.Start(); startErr != nil {
+		cancel()
+		_ = logFile.Close()
+		_ = os.RemoveAll(sockDir)
+		t.Fatalf("start kukeond serve: %v", startErr)
+	}
+
+	exit := make(chan error, 1)
+	go func() { exit <- cmd.Wait() }()
+
+	deadline := time.NewTimer(daemonStartupTimeout)
+	defer deadline.Stop()
+	poll := time.NewTicker(50 * time.Millisecond)
+	defer poll.Stop()
+
+	started := false
+	for !started {
+		if _, statErr := os.Stat(sockPath); statErr == nil {
+			started = true
+			continue
+		}
+		select {
+		case waitErr := <-exit:
+			cancel()
+			logBytes, _ := os.ReadFile(logFile.Name())
+			_ = logFile.Close()
+			_ = os.Remove(logFile.Name())
+			_ = os.RemoveAll(sockDir)
+			t.Fatalf(
+				"kukeond exited before socket %s appeared (wait=%v); daemon log:\n%s",
+				sockPath, waitErr, string(logBytes),
+			)
+		case <-deadline.C:
+			_ = cmd.Process.Signal(syscall.SIGKILL)
+			<-exit
+			cancel()
+			logBytes, _ := os.ReadFile(logFile.Name())
+			_ = logFile.Close()
+			_ = os.Remove(logFile.Name())
+			_ = os.RemoveAll(sockDir)
+			t.Fatalf(
+				"kukeond did not create socket %s within %s; daemon log:\n%s",
+				sockPath, daemonStartupTimeout, string(logBytes),
+			)
+		case <-poll.C:
+		}
+	}
+
+	t.Cleanup(func() {
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		select {
+		case <-exit:
+		case <-time.After(daemonShutdownTimeout):
+			_ = cmd.Process.Signal(syscall.SIGKILL)
+			<-exit
+		}
+		cancel()
+		_ = logFile.Close()
+		_ = os.Remove(logFile.Name())
+		_ = os.RemoveAll(sockDir)
+	})
+
+	return fmt.Sprintf("unix://%s", sockPath)
+}
+
+// startPTYWithCredential is the privilege-dropping variant of startPTY.
+// The child process is exec'd inside a fresh PTY with the given
+// SysProcAttr.Credential applied — used by
+// TestKuke_RunFromStopped_NonRootKukeonGroup_NoEACCES to launch `kuke
+// run` as a kukeon-group non-root caller. creack/pty's StartWithSize
+// preserves any pre-set SysProcAttr fields and only adds Setsid /
+// Setctty, so the Credential survives the fork; the PTY master/slave
+// pair is opened by the test (root) and inherited as the child's
+// stdio, which side-steps the slave-open DAC check.
+func startPTYWithCredential(
+	t *testing.T,
+	env []string,
+	cred *syscall.Credential,
+	command string,
+	args ...string,
+) *ptySession {
+	t.Helper()
+
+	dir := os.Getenv("E2E_BIN_DIR")
+	if dir == "" {
+		dir = ".."
+	}
+	bin := filepath.Join(dir, command)
+	if _, err := os.Stat(bin); os.IsNotExist(err) {
+		t.Skipf("binary %s not found, skipping", bin)
+	}
+
+	cmd := exec.Command(bin, args...)
+	if env != nil {
+		cmd.Env = env
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: cred}
+
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatalf("pty.Start %s as uid=%d gid=%d groups=%v: %v",
+			bin, cred.Uid, cred.Gid, cred.Groups, err)
+	}
+
+	s := &ptySession{
+		t:        t,
+		cmd:      cmd,
+		pty:      ptmx,
+		waitDone: make(chan error, 1),
+	}
+
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := ptmx.Read(buf)
+			if n > 0 {
+				s.mu.Lock()
+				s.out.Write(buf[:n])
+				s.mu.Unlock()
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+
+	go func() {
+		s.waitDone <- cmd.Wait()
+	}()
+
+	return s
 }
