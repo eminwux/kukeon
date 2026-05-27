@@ -40,11 +40,14 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
+	"sync"
 	"syscall"
 
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	sbshlogging "github.com/eminwux/sbsh/pkg/logging"
 	sbshserver "github.com/eminwux/sbsh/pkg/terminal/server"
+	"golang.org/x/sys/unix"
 )
 
 // defaultConfigPath is the fixed in-container path of the kukeond-rendered
@@ -124,7 +127,7 @@ func run(args []string) error {
 		return err
 	}
 
-	listener, err := claimSocketListener(spec.SocketFile)
+	listener, err := claimSocketListener(ctx, spec.SocketFile, spec.SocketMode, spec.SocketGID)
 	if err != nil {
 		return err
 	}
@@ -251,20 +254,93 @@ func openTerminalLogger(logfile, loglevel string) (*slog.Logger, func(), error) 
 	return fl.Logger, func() { _ = fl.File.Close() }, nil
 }
 
+// defaultSocketMode is the legacy owner-only mode applied when the spec
+// leaves SocketMode at its zero value. Mirrors sbsh's terminalrunner
+// defaultSocketMode so the two paths land at the same on-disk perms.
+const defaultSocketMode os.FileMode = 0o600
+
+// listenerUmaskMu serializes the umask save/set/Listen/restore sequence
+// in claimSocketListener against in-process concurrent callers. umask(2)
+// is process-wide (it lives in the kernel's shared fs_struct on Linux),
+// so two concurrent claims without this mutex could observe each other's
+// temporary umask. The mutex does not isolate the brief Listen window
+// from file creations in *other* packages that share this process —
+// that's an inherent cost of using umask to plug the bind-then-chmod
+// EACCES window. Mirrors sbsh's listenerUmaskMu rationale.
+//
+//nolint:gochecknoglobals // process-wide invariant guard, like the umask it serializes
+var listenerUmaskMu sync.Mutex
+
 // claimSocketListener removes any stale inode at the spec'd socket path
 // (a previous crash on the same in-container path would otherwise hit
-// EADDRINUSE on the first Listen) and binds a fresh listener. The
-// returned listener is owned by the caller — sbsh's server facade closes
-// it during shutdown via its underlying runner.
-func claimSocketListener(socketPath string) (net.Listener, error) {
+// EADDRINUSE on the first Listen) and binds a fresh listener at the
+// configured mode + group.
+//
+// The bind runs under a temporary umask of ^mode & 0o777 (with
+// runtime.LockOSThread) so the inode is born at mode and there is no
+// window during which a group-member client dialing the socket hits
+// EACCES because the daemon's umask masked off group access. A belt-
+// and-braces os.Chmod + os.Chown follow immediately so the on-disk
+// perms are correct even on the unlikely path where Listen returned
+// before the umask took effect. Mirrors sbsh's listenUnixWithMode +
+// applySocketPerms recipe (sbsh@v0.12.1/internal/terminal/terminalrunner/
+// sockets.go), which the sbsh-side facade only applies later inside
+// UseListener → bringUp — i.e. after kuketty's pre-Serve work
+// (processRepos, processStages) has already run, reopening the same
+// EACCES window for the duration of that work and indefinitely if
+// either pre-Serve step fails. Issue #916.
+//
+// mode == 0 falls back to defaultSocketMode so callers can pass the
+// raw spec field through without a guard. gid == nil leaves the
+// group unchanged (typical when no kukeon group is configured;
+// buildTerminalSpec already gates WithSocketGID on a non-zero GID).
+// The chown form is Chown(path, -1, gid) so the listener's uid stays
+// the owner; only the group is rewritten.
+//
+// The returned listener is owned by the caller — sbsh's server facade
+// closes it during shutdown via its underlying runner.
+func claimSocketListener(ctx context.Context, socketPath string, mode os.FileMode, gid *int) (net.Listener, error) {
 	if err := os.Remove(socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("remove stale socket %s: %w", socketPath, err)
 	}
-	l, err := net.Listen("unix", socketPath)
+	if mode == 0 {
+		mode = defaultSocketMode
+	}
+	l, err := listenUnixWithMode(ctx, socketPath, mode)
 	if err != nil {
 		return nil, fmt.Errorf("listen on %s: %w", socketPath, err)
 	}
+	if chmodErr := os.Chmod(socketPath, mode); chmodErr != nil {
+		_ = l.Close()
+		return nil, fmt.Errorf("chmod socket %s: %w", socketPath, chmodErr)
+	}
+	if gid != nil {
+		if chownErr := os.Chown(socketPath, -1, *gid); chownErr != nil {
+			_ = l.Close()
+			return nil, fmt.Errorf("chown socket %s: %w", socketPath, chownErr)
+		}
+	}
 	return l, nil
+}
+
+// listenUnixWithMode binds an AF_UNIX listener with the process umask
+// temporarily set so the socket inode is born at the configured mode,
+// not at (0o666 & ~processUmask). Mirrors sbsh's listenUnixWithMode
+// (sbsh@v0.12.1/internal/terminal/terminalrunner/sockets.go).
+//
+// runtime.LockOSThread pins the goroutine so the save/restore sequence
+// runs on a single OS thread; listenerUmaskMu serializes the temporary
+// umask against in-process concurrent callers.
+func listenUnixWithMode(ctx context.Context, socketPath string, mode os.FileMode) (net.Listener, error) {
+	listenerUmaskMu.Lock()
+	defer listenerUmaskMu.Unlock()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	//nolint:mnd // 0o777 is the standard permission-bit mask for umask(2)
+	prev := unix.Umask(int(^mode & 0o777))
+	defer unix.Umask(prev)
+	var lc net.ListenConfig
+	return lc.Listen(ctx, "unix", socketPath)
 }
 
 // isCleanShutdown reports whether the server.Serve terminating cause
