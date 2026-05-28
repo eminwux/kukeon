@@ -1100,6 +1100,106 @@ func TestRun_ExistingCell_DivergingContainerSecrets_RefusesAndPointsToApply(t *t
 	}
 }
 
+// TestRun_ExistingCell_EqualSecretRefByValue_DoesNotRefuse pins the
+// regression from #920: containerSecretsEqual used to compare
+// []ContainerSecret element-by-element with struct ==, which on a struct
+// holding a *ContainerSecretRef pointer field compares the pointer by
+// identity. The apischeme round-trip allocates a fresh *ContainerSecretRef
+// on each conversion, so the YAML-decoded side and the daemon-persisted
+// side are always address-distinct even when value-equal — every
+// re-`kuke run` of a secretRef:-using cell tripped the divergence guard
+// and printed the `kuke restart cell ...` pointer.
+//
+// The sibling Diverging... test above only exercises FromFile (pointer-free
+// fields), so the pointer-identity bug escaped review. This test puts a
+// SecretRef equal by value on both sides and asserts `kuke run` does not
+// refuse.
+func TestRun_ExistingCell_EqualSecretRefByValue_DoesNotRefuse(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	const yamlWithSecretRef = `apiVersion: v1beta1
+kind: Cell
+metadata:
+  name: my-cell
+spec:
+  id: my-cell
+  realmId: my-realm
+  spaceId: my-space
+  stackId: my-stack
+  containers:
+    - id: root
+      root: true
+      image: registry.eminwux.com/busybox:latest
+      command: sleep
+      args:
+        - "3600"
+    - id: work
+      image: registry.eminwux.com/busybox:latest
+      command: sleep
+      args:
+        - "3600"
+      secrets:
+        - name: claude-code-oauth-token
+          secretRef:
+            name: claude-code-oauth-token
+            realm: default
+`
+
+	existing := v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
+		Spec: v1beta1.CellSpec{
+			RealmID: "my-realm",
+			SpaceID: "my-space",
+			StackID: "my-stack",
+			Containers: []v1beta1.ContainerSpec{
+				{
+					ID:      "root",
+					Root:    true,
+					Image:   "registry.eminwux.com/busybox:latest",
+					Command: "sleep",
+					Args:    []string{"3600"},
+				},
+				{
+					ID:      "work",
+					Image:   "registry.eminwux.com/busybox:latest",
+					Command: "sleep",
+					Args:    []string{"3600"},
+					Secrets: []v1beta1.ContainerSecret{
+						{
+							Name: "claude-code-oauth-token",
+							SecretRef: &v1beta1.ContainerSecretRef{
+								Name:  "claude-code-oauth-token",
+								Realm: "default",
+							},
+						},
+					},
+				},
+			},
+		},
+		Status: v1beta1.CellStatus{State: v1beta1.CellStateReady},
+	}
+	fc := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell:                     existing,
+				MetadataExists:           true,
+				CgroupExists:             true,
+				RootContainerExists:      true,
+				RootContainerTaskRunning: true,
+			}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, yamlWithSecretRef), "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute returned %v, want nil (equal-by-value SecretRef must not register as drift)", err)
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d want 0 (Ready cell with matching spec is a no-op)", fc.createCalls)
+	}
+}
+
 // TestRun_ExistingCell_DivergingContainerTty_RefusesAndPointsToApply
 // exercises the tty branch of divergedContainerFields. ContainerTty is
 // user-authored shell-UX config the daemon persists verbatim and never

@@ -1353,18 +1353,35 @@ func divergedContainerFields(actual, desired v1beta1.ContainerSpec) []string {
 // containerSecretsEqual compares two ContainerSecret slices field-by-field.
 // nil and empty are treated as equal so YAML that omits secrets does not
 // register as drift against on-disk metadata that persisted it as nil.
-// ContainerSecret carries only scalar string fields, so a direct == on each
-// element is enough.
+// ContainerSecret carries a *ContainerSecretRef pointer; struct == on it
+// would compare that pointer by identity, and the apischeme round-trip
+// allocates a fresh *ContainerSecretRef on each conversion, so YAML-decoded
+// and daemon-persisted sides are always address-distinct even when
+// value-equal. Issue #920.
 func containerSecretsEqual(a, b []v1beta1.ContainerSecret) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
-		if a[i] != b[i] {
+		if a[i].Name != b[i].Name ||
+			a[i].FromFile != b[i].FromFile ||
+			a[i].FromEnv != b[i].FromEnv ||
+			a[i].MountPath != b[i].MountPath ||
+			!secretRefEqual(a[i].SecretRef, b[i].SecretRef) {
 			return false
 		}
 	}
 	return true
+}
+
+// secretRefEqual compares two *ContainerSecretRef by deref'd value, treating
+// matching nil-ness as equal. ContainerSecretRef is all scalar strings, so a
+// direct == on the dereferenced struct is safe.
+func secretRefEqual(a, b *v1beta1.ContainerSecretRef) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // containerTtysEqual compares two ContainerTty pointers. Empty values on
