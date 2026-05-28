@@ -439,6 +439,11 @@ ATTACH_SMOKE_CONTAINER="work"
 ATTACH_SMOKE_BASE="${METADATA_ROOT}/${ATTACH_SMOKE_REALM}/${ATTACH_SMOKE_SPACE}/${ATTACH_SMOKE_STACK}/${ATTACH_SMOKE_CELL}/${ATTACH_SMOKE_CONTAINER}"
 ATTACH_SMOKE_SOCKET="${ATTACH_SMOKE_BASE}/tty/socket"
 ATTACH_SMOKE_METADATA="${ATTACH_SMOKE_BASE}/kuketty-metadata.json"
+# Pin to the same suffix the daemon resolves for the dev-init-attach realm
+# (defaults: kukeon.io; KUKEON_PROFILE=dev: dev.kukeon.io). KUKEOND_NS
+# encodes the active suffix as `kuke-system.<suffix>`; strip the
+# `kuke-system.` prefix to derive the attach-smoke realm's namespace.
+ATTACH_SMOKE_NS="${ATTACH_SMOKE_REALM}.${KUKEOND_NS#kuke-system.}"
 ATTACH_SMOKE_TMP="$(mktemp -d)"
 
 teardown_attach_smoke_state() {
@@ -449,6 +454,17 @@ teardown_attach_smoke_state() {
         --realm "${ATTACH_SMOKE_REALM}" --space "${ATTACH_SMOKE_SPACE}" 2>/dev/null || true
     sudo --preserve-env="${PRESERVE_ENV_WORKLOAD}" ./kuke purge space "${ATTACH_SMOKE_SPACE}" --realm "${ATTACH_SMOKE_REALM}" 2>/dev/null || true
     sudo --preserve-env="${PRESERVE_ENV_WORKLOAD}" ./kuke purge realm "${ATTACH_SMOKE_REALM}" 2>/dev/null || true
+    # Backstop the kuke purge chain: `kuke purge realm` does call
+    # DeleteNamespace, but issue #919 surfaces a cross-run trap where the
+    # `dev-init-attach.kukeon.io` containerd namespace lingers empty after
+    # the purge and strands the next run's `kuke apply` image-pull→
+    # snapshot-unpack with "parent snapshot ... does not exist". Removing
+    # the namespace by hand makes the teardown idempotent across N runs.
+    # The attach smoke never targets this realm with `kuke build`, so no
+    # `/var/lib/kukebuild/<ns>/` cache exists to wipe alongside it
+    # (the #904 lane only applies to realms that have been a `kuke build`
+    # target).
+    sudo ctr namespaces remove "${ATTACH_SMOKE_NS}" 2>/dev/null || true
 }
 
 cleanup_attach_smoke() {
