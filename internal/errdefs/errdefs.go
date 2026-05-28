@@ -300,6 +300,19 @@ var (
 	// wrap (#926).
 	ErrAttachPingTimeout = errors.New("attach ping timed out: kuketty control socket bound but not yet serving")
 
+	// ErrAttachStaleSocket is returned by the post-StartCell attach loop
+	// in cmd/kuke/run when dial(2) keeps failing with EACCES (or ENOENT)
+	// past the retry budget because a stale tty socket from a kuketty
+	// binary predating sbsh#361 still occupies the path with mode 0o640
+	// (or has been unlinked but not yet re-bound). New kuketty's
+	// listenUnixWithMode landed in v0.12.1 and closes the *new-socket*
+	// EACCES race, but the *stale-socket* race remains until the new
+	// kuketty inside the cell finishes its os.Remove + listenUnixWithMode
+	// init path. Promoted from raw syscall.EACCES / syscall.ENOENT at the
+	// kukeon boundary so callers can errors.Is the readiness-race class
+	// without sniffing for raw errno values (#933).
+	ErrAttachStaleSocket = errors.New("attach stale socket: kuketty has not yet unlinked the pre-fix tty socket")
+
 	// ErrSocketPathTooLong fires when the resolved host-side path of a
 	// per-container kuketty control socket would overflow Linux's
 	// sockaddr_un.sun_path buffer (consts.KukeonMaxSocketPath bytes plus

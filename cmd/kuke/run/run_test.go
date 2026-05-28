@@ -29,6 +29,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -5706,5 +5707,162 @@ func TestRun_Attach_NonPingError_DoesNotRetry(t *testing.T) {
 	defer mu.Unlock()
 	if calls != 1 {
 		t.Errorf("attach loop calls=%d, want 1 (non-ping errors must not retry)", calls)
+	}
+}
+
+// staleSocketErr returns an error chain that mirrors the surface
+// `kuke run` sees when sbsh's pkg/attach dial(2) hits a stale pre-fix
+// kuketty tty socket — `ping failed: dial unix /opt/kukeon/s/<hash>:
+// connect: permission denied`. The chain carries syscall.EACCES so
+// the runWithPingRetry classifier sees the same surface real sbsh
+// returns through net.OpError → os.SyscallError → syscall.Errno
+// (#933).
+func staleSocketErr() error {
+	return fmt.Errorf("ping failed: dial unix /opt/kukeon/s/abc: connect: %w", syscall.EACCES)
+}
+
+// staleSocketENOENTErr returns an error chain that mirrors the
+// sub-millisecond Remove→Listen gap inside new kuketty's init path —
+// the stale inode has been unlinked but the replacement bind(2) has
+// not landed, so dial(2) returns ENOENT. Defense-in-depth path
+// alongside the dominant EACCES window (#933).
+func staleSocketENOENTErr() error {
+	return fmt.Errorf("ping failed: dial unix /opt/kukeon/s/abc: connect: %w", syscall.ENOENT)
+}
+
+// TestRun_Attach_StaleSocket_EACCES_RetriesWithinBudget pins the
+// stale-socket guarantee from #933: when the first call into the
+// in-process attach loop fails with EACCES against a stale pre-fix
+// kuketty tty socket (mode 0o640, group-read only), runWithPingRetry
+// must retry instead of surfacing `connect: permission denied` to the
+// operator. Pre-fix this test fails: the original classifier matched
+// only context.DeadlineExceeded, so EACCES propagated straight through.
+func TestRun_Attach_StaleSocket_EACCES_RetriesWithinBudget(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	restore := runcmd.SetAttachPingRetryForTest(500*time.Millisecond, 10*time.Millisecond)
+	t.Cleanup(restore)
+
+	var calls int
+	var mu sync.Mutex
+	runFn := runcmd.RunFn(func(_ context.Context, _ sbshattach.Options) error {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if calls == 1 {
+			return staleSocketErr()
+		}
+		return nil
+	})
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: attachSuccessFn(),
+	}
+	cmd, _ := newCmdWithRunFn(t, fc, runFn)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v (want nil — retry must absorb the stale-socket EACCES)", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 2 {
+		t.Errorf("attach loop calls=%d, want 2 (one EACCES, one success)", calls)
+	}
+}
+
+// TestRun_Attach_StaleSocket_EACCES_BudgetExhausted_WrapsSentinel pins
+// the budget-exhausted surface for the stale-socket class: when dial(2)
+// keeps firing EACCES past the budget, runWithPingRetry must surface
+// the readiness-race class via errdefs.ErrAttachStaleSocket so callers
+// can errors.Is the stale-socket failure without sniffing for raw
+// syscall.EACCES (#933).
+func TestRun_Attach_StaleSocket_EACCES_BudgetExhausted_WrapsSentinel(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	restore := runcmd.SetAttachPingRetryForTest(50*time.Millisecond, 10*time.Millisecond)
+	t.Cleanup(restore)
+
+	var calls int
+	var mu sync.Mutex
+	runFn := runcmd.RunFn(func(_ context.Context, _ sbshattach.Options) error {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		return staleSocketErr()
+	})
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: attachSuccessFn(),
+	}
+	cmd, _ := newCmdWithRunFn(t, fc, runFn)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
+
+	err := cmd.Execute()
+	if !errors.Is(err, errdefs.ErrAttachStaleSocket) {
+		t.Fatalf("err=%v, want chain to include errdefs.ErrAttachStaleSocket", err)
+	}
+	if !errors.Is(err, syscall.EACCES) {
+		t.Errorf(
+			"err=%v, want chain to preserve syscall.EACCES so operators can still see the underlying cause",
+			err,
+		)
+	}
+	if errors.Is(err, errdefs.ErrAttachPingTimeout) {
+		t.Errorf("err=%v, must NOT be wrapped with ErrAttachPingTimeout — EACCES is the stale-socket class, not ping-timeout", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls < 2 {
+		t.Errorf("attach loop calls=%d, want >= 2 (at least one retry before budget exhaustion)", calls)
+	}
+}
+
+// TestRun_Attach_StaleSocket_ENOENT_RetriesWithinBudget pins the
+// defense-in-depth ENOENT retry: the sub-millisecond gap between
+// kuketty's os.Remove of the stale inode and its listenUnixWithMode
+// bind(2) on the replacement surfaces as ENOENT from dial(2), and
+// runWithPingRetry must absorb that window the same way it absorbs
+// the dominant EACCES one (#933).
+func TestRun_Attach_StaleSocket_ENOENT_RetriesWithinBudget(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	restore := runcmd.SetAttachPingRetryForTest(500*time.Millisecond, 10*time.Millisecond)
+	t.Cleanup(restore)
+
+	var calls int
+	var mu sync.Mutex
+	runFn := runcmd.RunFn(func(_ context.Context, _ sbshattach.Options) error {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if calls == 1 {
+			return staleSocketENOENTErr()
+		}
+		return nil
+	})
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: attachSuccessFn(),
+	}
+	cmd, _ := newCmdWithRunFn(t, fc, runFn)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v (want nil — retry must absorb the stale-socket ENOENT)", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 2 {
+		t.Errorf("attach loop calls=%d, want 2 (one ENOENT, one success)", calls)
 	}
 }
