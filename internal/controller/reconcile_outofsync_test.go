@@ -380,3 +380,101 @@ func TestReconcileCells_OutOfSync_NoChangeNoRewrite(t *testing.T) {
 		t.Errorf("CellsUpdated: got %d, want 0", res.CellsUpdated)
 	}
 }
+
+// TestReconcileCells_OutOfSync_RealmScopedConfigFoundForStackPlacedCell
+// pins the issue #921 fix: a cell at full scope (realm/space/stack) whose
+// `kukeon.io/config` lineage label names a Config bound only at realm
+// scope must not surface as "lineage Config deleted". The lookup probes
+// full → space-only → realm-only and uses the first hit, so the realm-
+// scoped Config is found even though the live cell sits two scope levels
+// below it. Without the fix, GetConfig is called once at the cell's full
+// scope, ErrConfigNotFound surfaces, and the cell sticks permanently on
+// the deleted-Config OutOfSync verdict.
+func TestReconcileCells_OutOfSync_RealmScopedConfigFoundForStackPlacedCell(t *testing.T) {
+	live := buildTestCell("kukeon-dev-root-0", "kuke-system", "default", "default")
+	live.Metadata.Labels[cellconfig.LabelConfig] = "kukeon-dev"
+
+	var probes []intmodel.CellConfigMetadata
+	mock := stubLineageRunner(
+		func(c intmodel.CellConfig) (intmodel.CellConfig, error) {
+			probes = append(probes, c.Metadata)
+			// Realm scope is the only hit; intermediate scopes miss.
+			if c.Metadata.Space == "" && c.Metadata.Stack == "" {
+				return configCarrier(t, sampleConfig()), nil
+			}
+			return intmodel.CellConfig{}, errdefs.ErrConfigNotFound
+		},
+		func(intmodel.CellBlueprint) (intmodel.CellBlueprint, error) {
+			return blueprintCarrier(t, sampleReferencedBlueprint()), nil
+		},
+		nil,
+	)
+	// Walk the realm/space/stack the live cell sits in so the harness reaches it.
+	mock.ListSpacesFn = func(string) ([]intmodel.Space, error) {
+		return []intmodel.Space{buildTestSpace("default", "kuke-system")}, nil
+	}
+	mock.ListStacksFn = func(string, string) ([]intmodel.Stack, error) {
+		return []intmodel.Stack{buildTestStack("default", "kuke-system", "default")}, nil
+	}
+
+	_, captured := runOutOfSyncHarness(t, live, mock)
+
+	// Probe ordering is deepest → shallowest, with no duplicates.
+	wantProbes := []intmodel.CellConfigMetadata{
+		{Name: "kukeon-dev", Realm: "kuke-system", Space: "default", Stack: "default"},
+		{Name: "kukeon-dev", Realm: "kuke-system", Space: "default", Stack: ""},
+		{Name: "kukeon-dev", Realm: "kuke-system", Space: "", Stack: ""},
+	}
+	if len(probes) != len(wantProbes) {
+		t.Fatalf("GetConfig probe count: got %d want %d (probes=%+v)", len(probes), len(wantProbes), probes)
+	}
+	for i, p := range probes {
+		if p != wantProbes[i] {
+			t.Errorf("probe[%d] = %+v, want %+v", i, p, wantProbes[i])
+		}
+	}
+	// The Config was found at realm scope, so the verdict must NOT be
+	// "lineage Config deleted". A scope-divergence reason or a Synced
+	// verdict are both acceptable — the bug being pinned is the lookup
+	// missing entirely.
+	if captured != nil && captured.Status.OutOfSyncReason == outOfSyncReasonConfigDeletedTest {
+		t.Errorf("OutOfSyncReason = %q, want anything but %q (Config found at realm scope)",
+			captured.Status.OutOfSyncReason, outOfSyncReasonConfigDeletedTest)
+	}
+}
+
+// TestReconcileCells_OutOfSync_RealmScopedCellSkipsRedundantProbes
+// confirms the dedupe rule: when the live cell sits at realm scope (no
+// space, no stack), only one GetConfig probe fires — the full and
+// narrowed scopes collapse to the same realm-only lookup.
+func TestReconcileCells_OutOfSync_RealmScopedCellSkipsRedundantProbes(t *testing.T) {
+	live := materializeSampleCell(t) // realm=kuke-system, space="", stack=""
+	live.Metadata.Labels[cellconfig.LabelConfig] = "kukeon-dev"
+
+	var probeCount int
+	mock := stubLineageRunner(
+		func(intmodel.CellConfig) (intmodel.CellConfig, error) {
+			probeCount++
+			return configCarrier(t, sampleConfig()), nil
+		},
+		func(intmodel.CellBlueprint) (intmodel.CellBlueprint, error) {
+			return blueprintCarrier(t, sampleReferencedBlueprint()), nil
+		},
+		nil,
+	)
+
+	runOutOfSyncHarness(t, live, mock)
+
+	if probeCount != 1 {
+		t.Errorf("GetConfig probe count: got %d want 1 (realm-only cell needs no narrowing)", probeCount)
+	}
+}
+
+// outOfSyncReasonConfigDeletedTest is a string-literal duplicate of the
+// production constant the controller package keeps unexported. Copied
+// here so the external test package can assert against the expected
+// value without exporting the constant — the assertion intent is
+// "anything but this", so a drift between this literal and the
+// production constant would soften the test (would still flag a true
+// regression as long as the production constant remains stable).
+const outOfSyncReasonConfigDeletedTest = "lineage Config deleted"

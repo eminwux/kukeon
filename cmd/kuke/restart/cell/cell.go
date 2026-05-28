@@ -319,23 +319,19 @@ func restartStopped(
 
 // materialiseFromConfig re-runs the CellConfig materialisation pipeline
 // against the cell's lineage Config: GetConfig + GetBlueprint +
-// cellconfig.Materialize. The cell's stored realm/space/stack supply the
-// lookup scope — a Config materialises a cell into the scope it lives in,
-// matching the daemon's reconciler (internal/controller/reconcile_outofsync.go).
+// cellconfig.Materialize. The cell's stored realm/space/stack name the
+// lookup's deepest scope, but the `kukeon.io/config` lineage label records
+// only the Config name — a `kuke run <config>` against a realm-scoped
+// Config materializes a cell at realm=default / space=default /
+// stack=default (resolveCellLocation fills the session defaults), so the
+// lookup must probe progressively shallower scopes (full → space-only →
+// realm-only) and use the first hit. Mirrors the daemon's reconciler
+// (internal/controller/reconcile_outofsync.go lookupLineageConfig).
 func materialiseFromConfig(
 	ctx context.Context, client kukeonv1.Client,
 	cellDoc v1beta1.CellDoc, configName string,
 ) (v1beta1.CellDoc, error) {
-	cfgRes, err := client.GetConfig(ctx, v1beta1.CellConfigDoc{
-		APIVersion: v1beta1.APIVersionV1Beta1,
-		Kind:       v1beta1.KindCellConfig,
-		Metadata: v1beta1.CellConfigMetadata{
-			Name:  configName,
-			Realm: cellDoc.Spec.RealmID,
-			Space: cellDoc.Spec.SpaceID,
-			Stack: cellDoc.Spec.StackID,
-		},
-	})
+	cfgRes, err := lookupLineageConfigCLI(ctx, client, cellDoc, configName)
 	if err != nil {
 		return v1beta1.CellDoc{}, err
 	}
@@ -367,6 +363,56 @@ func materialiseFromConfig(
 	}
 
 	return cellconfig.Materialize(cfgRes.Config, bpRes.Blueprint)
+}
+
+// lookupLineageConfigCLI probes for the cell's lineage Config from the
+// cell's full scope (realm/space/stack) down to space-only and then
+// realm-only, returning the first hit. Mirrors the daemon-side
+// scope-narrowing rule (internal/controller/reconcile_outofsync.go
+// lookupLineageConfig) so the CLI and reconciler resolve the same Config
+// regardless of which scope it was originally bound at.
+//
+// Probes are deduplicated when the cell's space or stack is already
+// empty. A real RPC error (anything other than a MetadataExists==false
+// hit) short-circuits the walk so the operator sees the underlying
+// failure instead of a misleading "not found" at realm scope.
+func lookupLineageConfigCLI(
+	ctx context.Context, client kukeonv1.Client,
+	cellDoc v1beta1.CellDoc, configName string,
+) (kukeonv1.GetConfigResult, error) {
+	realm := cellDoc.Spec.RealmID
+	space, stack := cellDoc.Spec.SpaceID, cellDoc.Spec.StackID
+
+	type probe struct{ space, stack string }
+	probes := []probe{{space, stack}}
+	if stack != "" {
+		probes = append(probes, probe{space, ""})
+	}
+	if space != "" {
+		probes = append(probes, probe{"", ""})
+	}
+
+	var lastMiss kukeonv1.GetConfigResult
+	for _, p := range probes {
+		res, err := client.GetConfig(ctx, v1beta1.CellConfigDoc{
+			APIVersion: v1beta1.APIVersionV1Beta1,
+			Kind:       v1beta1.KindCellConfig,
+			Metadata: v1beta1.CellConfigMetadata{
+				Name:  configName,
+				Realm: realm,
+				Space: p.space,
+				Stack: p.stack,
+			},
+		})
+		if err != nil {
+			return kukeonv1.GetConfigResult{}, err
+		}
+		if res.MetadataExists {
+			return res, nil
+		}
+		lastMiss = res
+	}
+	return lastMiss, nil
 }
 
 // reportApplyFailures inspects an ApplyDocumentsResult for "failed" rows and

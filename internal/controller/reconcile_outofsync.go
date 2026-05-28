@@ -128,27 +128,55 @@ func configLineage(cell intmodel.Cell) (string, bool) {
 // lookupLineageConfig fetches the daemon-stored Config the cell's lineage
 // label points to, returning (cfg, true, nil) on hit, (zero, false, nil)
 // when the operator deleted the Config (the canonical OutOfSync trigger
-// the umbrella documents), or (zero, false, err) on any other error. The
-// scope coordinates come straight from the cell — a Config materializes a
-// cell into the same realm/space/stack it lives in.
+// the umbrella documents), or (zero, false, err) on any other error.
+//
+// The `kukeon.io/config` lineage label records only the Config name, not
+// the scope it was bound at, so the lookup must probe progressively
+// shallower scopes: full (realm/space/stack) → space-only (realm/space) →
+// realm-only (realm). `kuke run <config>` resolves Config lookups via
+// cmd/kuke/shared.ExplicitScope (empty space/stack unless the operator
+// passed --space/--stack), so a `kuke run kukeon-dev-root-0` against a
+// realm-scoped Config materializes a cell at realm=default /
+// space=default / stack=default (resolveCellLocation fills the session
+// defaults). Without the widening here, that cell's reconciler tick
+// resolves to `/opt/kukeon/data/default/default/default/configs/<name>`
+// (which does not exist) and persists a permanent "lineage Config
+// deleted" OutOfSync verdict.
+//
+// Probes are deduplicated when the cell's space or stack is already empty
+// (a realm-scoped cell or a space-scoped cell only takes the one probe
+// its own scope names).
 func lookupLineageConfig(
 	r runner.Runner, cell intmodel.Cell, configName string,
 ) (intmodel.CellConfig, bool, error) {
-	cfg, err := r.GetConfig(intmodel.CellConfig{
-		Metadata: intmodel.CellConfigMetadata{
-			Name:  configName,
-			Realm: cell.Spec.RealmName,
-			Space: cell.Spec.SpaceName,
-			Stack: cell.Spec.StackName,
-		},
-	})
-	if err != nil {
-		if errors.Is(err, errdefs.ErrConfigNotFound) {
-			return intmodel.CellConfig{}, false, nil
-		}
-		return intmodel.CellConfig{}, false, err
+	realm, space, stack := cell.Spec.RealmName, cell.Spec.SpaceName, cell.Spec.StackName
+
+	type probe struct{ space, stack string }
+	probes := []probe{{space, stack}}
+	if stack != "" {
+		probes = append(probes, probe{space, ""})
 	}
-	return cfg, true, nil
+	if space != "" {
+		probes = append(probes, probe{"", ""})
+	}
+
+	for _, p := range probes {
+		cfg, err := r.GetConfig(intmodel.CellConfig{
+			Metadata: intmodel.CellConfigMetadata{
+				Name:  configName,
+				Realm: realm,
+				Space: p.space,
+				Stack: p.stack,
+			},
+		})
+		if err == nil {
+			return cfg, true, nil
+		}
+		if !errors.Is(err, errdefs.ErrConfigNotFound) {
+			return intmodel.CellConfig{}, false, err
+		}
+	}
+	return intmodel.CellConfig{}, false, nil
 }
 
 // materializeCellFromConfig re-runs the CellConfig materialization pipeline
