@@ -139,8 +139,8 @@ func TestNewCellCmd(t *testing.T) {
 }
 
 // TestNewCellCmd_DefaultColumns pins the default `kuke get cell` column set
-// after the epic:get redefinition (issue #604): NAME REALM SPACE STACK STATE
-// AGE — six columns, no SYNC / CGROUP / CONTAINERS / BRIDGE / DIVERGENCE.
+// after #929 restored SYNC: NAME REALM SPACE STACK STATE SYNC AGE — seven
+// columns, no CGROUP / CONTROLLERS / CONTAINERS / BRIDGE / DIVERGENCE.
 func TestNewCellCmd_DefaultColumns(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
@@ -173,21 +173,22 @@ func TestNewCellCmd_DefaultColumns(t *testing.T) {
 	}
 
 	out := buf.String()
-	for _, h := range []string{"NAME", "REALM", "SPACE", "STACK", "STATE", "AGE"} {
+	for _, h := range []string{"NAME", "REALM", "SPACE", "STACK", "STATE", "SYNC", "AGE"} {
 		if !strings.Contains(out, h) {
 			t.Errorf("default table missing header %q\nGot:\n%s", h, out)
 		}
 	}
-	for _, denied := range []string{"CGROUP", "CONTROLLERS", "SYNC", "DIVERGENCE", "CONTAINERS", "BRIDGE"} {
+	for _, denied := range []string{"CGROUP", "CONTROLLERS", "DIVERGENCE", "CONTAINERS", "BRIDGE"} {
 		if strings.Contains(out, denied) {
 			t.Errorf("default table must NOT contain %q; got:\n%s", denied, out)
 		}
 	}
 }
 
-// TestNewCellCmd_WideColumns pins the `-o wide` column set after the
-// epic:get redefinition: NAME REALM SPACE STACK STATE AGE CONTAINERS BRIDGE
-// (8 cols). CGROUP, SYNC, DIVERGENCE must not appear.
+// TestNewCellCmd_WideColumns pins the `-o wide` column set after #929
+// restored SYNC + DIVERGENCE: NAME REALM SPACE STACK STATE SYNC AGE
+// CONTAINERS BRIDGE DIVERGENCE (10 cols). CGROUP / CONTROLLERS must not
+// appear.
 func TestNewCellCmd_WideColumns(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
@@ -221,12 +222,15 @@ func TestNewCellCmd_WideColumns(t *testing.T) {
 	}
 
 	out := buf.String()
-	for _, h := range []string{"NAME", "REALM", "SPACE", "STACK", "STATE", "AGE", "CONTAINERS", "BRIDGE"} {
+	for _, h := range []string{
+		"NAME", "REALM", "SPACE", "STACK", "STATE", "SYNC", "AGE",
+		"CONTAINERS", "BRIDGE", "DIVERGENCE",
+	} {
 		if !strings.Contains(out, h) {
 			t.Errorf("-o wide table missing header %q\nGot:\n%s", h, out)
 		}
 	}
-	for _, denied := range []string{"CGROUP", "CONTROLLERS", "SYNC", "DIVERGENCE"} {
+	for _, denied := range []string{"CGROUP", "CONTROLLERS"} {
 		if strings.Contains(out, denied) {
 			t.Errorf("-o wide table must NOT contain %q; got:\n%s", denied, out)
 		}
@@ -235,6 +239,108 @@ func TestNewCellCmd_WideColumns(t *testing.T) {
 		if !strings.Contains(out, sub) {
 			t.Errorf("-o wide row missing %q\nGot:\n%s", sub, out)
 		}
+	}
+}
+
+// TestNewCellCmd_SyncColumn pins the three SYNC verdicts (issue #929):
+// no-lineage → `-`; Config-lineage + OutOfSync=false → `Synced`;
+// Config-lineage + OutOfSync=true → `OutOfSync`. Also covers the
+// DIVERGENCE column under `-o wide`: the reason string appears for
+// OutOfSync rows and is absent for Synced / no-lineage rows.
+func TestNewCellCmd_SyncColumn(t *testing.T) {
+	const reason = "image pin drift"
+
+	tests := []struct {
+		name         string
+		labels       map[string]string
+		outOfSync    bool
+		reason       string
+		wantSync     string
+		wantInWide   []string // substrings that must appear in -o wide output
+		denyFromWide []string // substrings that must NOT appear in -o wide output
+	}{
+		{
+			name:         "no lineage renders dash",
+			labels:       nil,
+			wantSync:     "-",
+			denyFromWide: []string{reason},
+		},
+		{
+			name:         "lineage + synced renders Synced",
+			labels:       map[string]string{"kukeon.io/config": "prod"},
+			outOfSync:    false,
+			wantSync:     "Synced",
+			denyFromWide: []string{reason},
+		},
+		{
+			name:       "lineage + out of sync renders OutOfSync and surfaces DIVERGENCE",
+			labels:     map[string]string{"kukeon.io/config": "prod"},
+			outOfSync:  true,
+			reason:     reason,
+			wantSync:   "OutOfSync",
+			wantInWide: []string{reason},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+
+			listFn := func(_, _, _ string) ([]v1beta1.CellDoc, error) {
+				return []v1beta1.CellDoc{{
+					Metadata: v1beta1.CellMetadata{Name: "ce1", Labels: tt.labels},
+					Spec:     v1beta1.CellSpec{RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+					Status: v1beta1.CellStatus{
+						State:           v1beta1.CellStateReady,
+						OutOfSync:       tt.outOfSync,
+						OutOfSyncReason: tt.reason,
+					},
+				}}, nil
+			}
+
+			// Default table: SYNC verdict must render.
+			buf := &bytes.Buffer{}
+			cmd := cell.NewCellCmd()
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+			ctx = context.WithValue(ctx, cell.MockControllerKey{},
+				kukeonv1.Client(&fakeClient{listCellsFn: listFn}))
+			cmd.SetContext(ctx)
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("default table: unexpected error: %v", err)
+			}
+			out := buf.String()
+			if !strings.Contains(out, tt.wantSync) {
+				t.Errorf("default table missing SYNC verdict %q\nGot:\n%s", tt.wantSync, out)
+			}
+
+			// -o wide: SYNC + DIVERGENCE behavior.
+			buf.Reset()
+			cmd = cell.NewCellCmd()
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+			cmd.SetContext(ctx)
+			cmd.SetArgs([]string{"-o", "wide"})
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("-o wide: unexpected error: %v", err)
+			}
+			wide := buf.String()
+			if !strings.Contains(wide, "DIVERGENCE") {
+				t.Errorf("-o wide missing DIVERGENCE header\nGot:\n%s", wide)
+			}
+			for _, sub := range tt.wantInWide {
+				if !strings.Contains(wide, sub) {
+					t.Errorf("-o wide missing %q\nGot:\n%s", sub, wide)
+				}
+			}
+			for _, sub := range tt.denyFromWide {
+				if strings.Contains(wide, sub) {
+					t.Errorf("-o wide must NOT contain %q\nGot:\n%s", sub, wide)
+				}
+			}
+		})
 	}
 }
 
@@ -331,9 +437,11 @@ func TestNewCellCmd_NoShowControllersFlag(t *testing.T) {
 	}
 }
 
-// TestNewCellCmd_YamlSurfacesStatus pins the contract that the cell table
-// no longer surfaces sync state or cgroup info, but `-o yaml` still does —
-// operators who need those fields read them from the structured output.
+// TestNewCellCmd_YamlSurfacesStatus pins the contract that `-o yaml`
+// continues to surface the full sync state and cgroup info — the table's
+// SYNC column carries the verdict, but operators who need the underlying
+// fields (CgroupPath, OutOfSyncReason, OutOfSyncError) read them from
+// the structured output.
 func TestNewCellCmd_YamlSurfacesStatus(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
