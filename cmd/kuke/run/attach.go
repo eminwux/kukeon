@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
@@ -33,11 +34,14 @@ import (
 )
 
 // attachPingRetryBudget bounds the total wall-clock time runWithPingRetry
-// will spend re-invoking attach.Run when sbsh's per-attempt 3 s ping
-// window keeps firing before kuketty's Serve() accept loop has come
-// up. Each attempt re-pays the 3 s window inside sbsh, so a 10 s budget
-// covers two retries past the initial attempt on the slow-host race
-// that #926 documents.
+// will spend re-invoking attach.Run while the failure looks like a
+// kuketty boot-race class — either sbsh's per-attempt 3 s ping window
+// firing (#926) or dial(2) returning EACCES/ENOENT against a stale
+// pre-fix tty socket (#933). Each ping-deadline attempt re-pays the
+// 3 s window inside sbsh, so a 10 s budget covers two retries past
+// the initial attempt on the slow-host race. The stale-socket window
+// is sub-second once kuketty is up, so the same budget comfortably
+// absorbs it.
 //
 //nolint:gochecknoglobals // test seam for the production retry budget
 var attachPingRetryBudget = 10 * time.Second
@@ -46,7 +50,8 @@ var attachPingRetryBudget = 10 * time.Second
 // short on purpose: the dominant wait is sbsh's per-attempt 3 s ping
 // window, not this gap. The backoff exists only to avoid a tight loop
 // on the chance the prior attempt failed for a reason that resolves
-// in microseconds.
+// in microseconds — including the stale-socket Remove→Listen gap
+// (#933), which is sub-millisecond in practice.
 //
 //nolint:gochecknoglobals // test seam for the production retry backoff
 var attachPingRetryBackoff = 200 * time.Millisecond
@@ -203,33 +208,39 @@ func resolveRun(cmd *cobra.Command) runFn {
 	return attach.Run
 }
 
-// runWithPingRetry retries run() while the failure looks like sbsh's
-// per-attempt 3 s control-socket ping deadline firing before kuketty
-// has entered Serve()'s Accept loop. The dial(2) succeeds as soon as
-// kuketty's bind(2) lands (the kernel queues the connect into the
-// listening socket's backlog), so the post-StartCell attach can race
-// kuketty's Serve() boot — a window distinct from the EACCES one
-// #918 closed (#926).
+// runWithPingRetry retries run() while the failure looks like a
+// kuketty boot-race class — either sbsh's per-attempt 3 s ping
+// deadline firing before kuketty has entered Serve()'s Accept loop
+// (#926), or dial(2) returning EACCES/ENOENT against a stale pre-fix
+// tty socket that the new kuketty has not yet unlinked and re-bound
+// (#933). Both classes share the same retry budget and backoff: the
+// post-StartCell attach can race either window, and a kuketty whose
+// stale socket has been replaced does not re-enter the EACCES window
+// on subsequent runs (the race window collapses to the sub-millisecond
+// Remove→Listen gap inside kuketty's init path).
 //
 // Behaviour:
-//   - non-ping-timeout errors propagate immediately; the existing
+//   - non-boot-race errors propagate immediately; the existing
 //     ClassifyAttachExit branch handles them.
-//   - ping-timeout errors are retried with attachPingRetryBackoff
+//   - boot-race errors are retried with attachPingRetryBackoff
 //     between attempts until either run() succeeds, the outer ctx
 //     is cancelled (returns ctx.Err), or attachPingRetryBudget is
-//     exhausted (returns the last runErr wrapped with
-//     errdefs.ErrAttachPingTimeout so callers can errors.Is the
-//     timeout class without string-matching sbsh's wrap).
+//     exhausted (returns the last runErr wrapped with the matching
+//     sentinel — errdefs.ErrAttachPingTimeout for the ping-deadline
+//     class, errdefs.ErrAttachStaleSocket for the EACCES/ENOENT
+//     class — so callers can errors.Is either class without
+//     string-matching sbsh's wrap or sniffing for raw errno values).
 func runWithPingRetry(ctx context.Context, run runFn, opts attach.Options) error {
 	deadline := time.Now().Add(attachPingRetryBudget)
 	var lastErr error
 	for {
 		lastErr = run(ctx, opts)
-		if !isAttachPingTimeout(ctx, lastErr) {
+		sentinel := attachBootRaceSentinel(ctx, lastErr)
+		if sentinel == nil {
 			return lastErr
 		}
 		if !time.Now().Before(deadline) {
-			return fmt.Errorf("%w: %w", errdefs.ErrAttachPingTimeout, lastErr)
+			return fmt.Errorf("%w: %w", sentinel, lastErr)
 		}
 		select {
 		case <-ctx.Done():
@@ -239,24 +250,34 @@ func runWithPingRetry(ctx context.Context, run runFn, opts attach.Options) error
 	}
 }
 
-// isAttachPingTimeout reports whether err is the sbsh "ping failed:
-// context deadline exceeded" class that runWithPingRetry treats as a
-// readiness-handshake race rather than a hard failure. The classifier
-// is conservative on purpose:
+// attachBootRaceSentinel classifies err as one of the kuketty boot-race
+// classes runWithPingRetry treats as a readiness handshake rather than
+// a hard failure, returning the matching errdefs sentinel — or nil
+// when err is not retryable. The classifier is conservative on purpose:
 //
 //   - err must be non-nil (a clean detach is not a retry condition);
 //   - ctx must not be done (a cancelled outer ctx surfaces as
 //     DeadlineExceeded on the inner WithTimeout child, but is the
 //     operator's ^C not kuketty's boot race — don't retry);
-//   - context.DeadlineExceeded must appear in the chain (the only
-//     bounded-timeout in sbsh's attach.Run setup is the 3 s ping
-//     window in clientrunner/io.go dialTerminalCtrlSocket).
-func isAttachPingTimeout(ctx context.Context, err error) bool {
+//   - context.DeadlineExceeded in the chain maps to ErrAttachPingTimeout
+//     (the only bounded-timeout in sbsh's attach.Run setup is the 3 s
+//     ping window in clientrunner/io.go dialTerminalCtrlSocket);
+//   - syscall.EACCES / syscall.ENOENT in the chain map to
+//     ErrAttachStaleSocket (the stale pre-fix tty socket window —
+//     EACCES against a 0o640 stale inode, or ENOENT against the
+//     Remove→Listen gap inside kuketty's init path; #933).
+func attachBootRaceSentinel(ctx context.Context, err error) error {
 	if err == nil {
-		return false
+		return nil
 	}
 	if ctx.Err() != nil {
-		return false
+		return nil
 	}
-	return errors.Is(err, context.DeadlineExceeded)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return errdefs.ErrAttachPingTimeout
+	}
+	if errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.ENOENT) {
+		return errdefs.ErrAttachStaleSocket
+	}
+	return nil
 }
