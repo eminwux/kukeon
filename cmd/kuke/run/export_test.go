@@ -17,6 +17,8 @@
 package run
 
 import (
+	"time"
+
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -30,4 +32,19 @@ type RunFn = runFn
 // Production code reaches the same path through runRun → attachAfterRun.
 func PickAttachTarget(spec v1beta1.CellSpec, cellName, explicit string) (string, error) {
 	return pickAttachTarget(spec, cellName, explicit)
+}
+
+// SetAttachPingRetryForTest overrides the package-level retry budget
+// and backoff used by runWithPingRetry so tests don't pay the
+// production 10 s wall-clock on the budget-exhausted path. Returns a
+// restore func the test must defer.
+func SetAttachPingRetryForTest(budget, backoff time.Duration) func() {
+	prevBudget := attachPingRetryBudget
+	prevBackoff := attachPingRetryBackoff
+	attachPingRetryBudget = budget
+	attachPingRetryBackoff = backoff
+	return func() {
+		attachPingRetryBudget = prevBudget
+		attachPingRetryBackoff = prevBackoff
+	}
 }

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -30,6 +31,25 @@ import (
 	"github.com/eminwux/sbsh/pkg/attach"
 	"github.com/spf13/cobra"
 )
+
+// attachPingRetryBudget bounds the total wall-clock time runWithPingRetry
+// will spend re-invoking attach.Run when sbsh's per-attempt 3 s ping
+// window keeps firing before kuketty's Serve() accept loop has come
+// up. Each attempt re-pays the 3 s window inside sbsh, so a 10 s budget
+// covers two retries past the initial attempt on the slow-host race
+// that #926 documents.
+//
+//nolint:gochecknoglobals // test seam for the production retry budget
+var attachPingRetryBudget = 10 * time.Second
+
+// attachPingRetryBackoff is the sleep between retry attempts. Kept
+// short on purpose: the dominant wait is sbsh's per-attempt 3 s ping
+// window, not this gap. The backoff exists only to avoid a tight loop
+// on the chance the prior attempt failed for a reason that resolves
+// in microseconds.
+//
+//nolint:gochecknoglobals // test seam for the production retry backoff
+var attachPingRetryBackoff = 200 * time.Millisecond
 
 // MockRunKey is used to inject a mock runFn via context in tests, so the
 // real pkg/attach.Run (which would open a TTY and connect to a real
@@ -158,7 +178,7 @@ func runAttachLoop(
 	}
 
 	run := resolveRun(cmd)
-	runErr := run(cmd.Context(), attach.Options{
+	runErr := runWithPingRetry(cmd.Context(), run, attach.Options{
 		SocketPath: result.HostSocketPath,
 		Stdin:      os.Stdin,
 		Stdout:     os.Stdout,
@@ -181,4 +201,62 @@ func resolveRun(cmd *cobra.Command) runFn {
 		return mock
 	}
 	return attach.Run
+}
+
+// runWithPingRetry retries run() while the failure looks like sbsh's
+// per-attempt 3 s control-socket ping deadline firing before kuketty
+// has entered Serve()'s Accept loop. The dial(2) succeeds as soon as
+// kuketty's bind(2) lands (the kernel queues the connect into the
+// listening socket's backlog), so the post-StartCell attach can race
+// kuketty's Serve() boot — a window distinct from the EACCES one
+// #918 closed (#926).
+//
+// Behaviour:
+//   - non-ping-timeout errors propagate immediately; the existing
+//     ClassifyAttachExit branch handles them.
+//   - ping-timeout errors are retried with attachPingRetryBackoff
+//     between attempts until either run() succeeds, the outer ctx
+//     is cancelled (returns ctx.Err), or attachPingRetryBudget is
+//     exhausted (returns the last runErr wrapped with
+//     errdefs.ErrAttachPingTimeout so callers can errors.Is the
+//     timeout class without string-matching sbsh's wrap).
+func runWithPingRetry(ctx context.Context, run runFn, opts attach.Options) error {
+	deadline := time.Now().Add(attachPingRetryBudget)
+	var lastErr error
+	for {
+		lastErr = run(ctx, opts)
+		if !isAttachPingTimeout(ctx, lastErr) {
+			return lastErr
+		}
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("%w: %w", errdefs.ErrAttachPingTimeout, lastErr)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(attachPingRetryBackoff):
+		}
+	}
+}
+
+// isAttachPingTimeout reports whether err is the sbsh "ping failed:
+// context deadline exceeded" class that runWithPingRetry treats as a
+// readiness-handshake race rather than a hard failure. The classifier
+// is conservative on purpose:
+//
+//   - err must be non-nil (a clean detach is not a retry condition);
+//   - ctx must not be done (a cancelled outer ctx surfaces as
+//     DeadlineExceeded on the inner WithTimeout child, but is the
+//     operator's ^C not kuketty's boot race — don't retry);
+//   - context.DeadlineExceeded must appear in the chain (the only
+//     bounded-timeout in sbsh's attach.Run setup is the 3 s ping
+//     window in clientrunner/io.go dialTerminalCtrlSocket).
+func isAttachPingTimeout(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if ctx.Err() != nil {
+		return false
+	}
+	return errors.Is(err, context.DeadlineExceeded)
 }
