@@ -26,6 +26,7 @@ package run
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -927,43 +928,38 @@ func loadFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags runFlag
 	return cellblueprint.MaterializeWithName(resolved, flags.nameOverride)
 }
 
-// loadFromConfig resolves the named CellConfig from daemon storage at the
-// scope named by --realm/--space/--stack, looks up the referenced Blueprint
-// from daemon storage (which may live in a different realm — cross-scope
-// references are explicitly allowed), and materializes the CellDoc via
-// cellconfig.Materialize: scalar values from the Config's spec, structural
-// slot fills (repo URLs, secret sources) applied, deterministic stable name
-// + kukeon.io/config back-ref label set. The resulting CellDoc carries the
-// Config's scope coordinates (not the blueprint's), so the cell is created
-// where the Config is bound.
+// loadFromConfig resolves the named CellConfig from daemon storage, looks up
+// the referenced Blueprint from daemon storage (which may live in a different
+// realm — cross-scope references are explicitly allowed), and materializes the
+// CellDoc via cellconfig.Materialize: scalar values from the Config's spec,
+// structural slot fills (repo URLs, secret sources) applied, deterministic
+// stable name + kukeon.io/config back-ref label set. The resulting CellDoc
+// carries the Config's scope coordinates (not the blueprint's), so the cell
+// is created where the Config is bound.
 //
-// The lookup scope follows the same explicit-coordinate rule as
-// loadFromBlueprint: --realm defaults to "default" if unset, but --space and
-// --stack stay empty unless the operator set them explicitly (via flag or
-// KUKE_RUN_SPACE / KUKE_RUN_STACK env). The session-default values in viper
-// would wrongly narrow every lookup to default/default and hide
-// realm-scoped Configs.
+// The lookup walks progressively shallower scopes (full → space-only →
+// realm-only) using pickLocation as the starting scope so the probe matches
+// where resolveCellLocation would place the materialised cell. A Config
+// stored at default/default/default would otherwise be invisible to a bare
+// `kuke run <config>` lookup that used ExplicitScope (empty space/stack
+// unless --space/--stack are set). Mirrors the daemon-side reconciler
+// (internal/controller/reconcile_outofsync.go lookupLineageConfig) and
+// the CLI-side restart path (cmd/kuke/restart/cell/cell.go
+// lookupLineageConfigCLI) so all three resolve the same Config regardless
+// of which scope it was originally bound at.
 func loadFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (loadResult, error) {
-	lookup := v1beta1.CellConfigDoc{
-		APIVersion: v1beta1.APIVersionV1Beta1,
-		Kind:       v1beta1.KindCellConfig,
-		Metadata: v1beta1.CellConfigMetadata{
-			Name:  flags.configName,
-			Realm: kukshared.PickLookupRealm(cmd, &config.KUKE_RUN_REALM),
-			Space: kukshared.ExplicitScope(cmd, "space", &config.KUKE_RUN_SPACE),
-			Stack: kukshared.ExplicitScope(cmd, "stack", &config.KUKE_RUN_STACK),
-		},
-	}
+	realm := kukshared.PickLookupRealm(cmd, &config.KUKE_RUN_REALM)
+	space := pickLocation("", &config.KUKE_RUN_SPACE)
+	stack := pickLocation("", &config.KUKE_RUN_STACK)
 
-	cfgRes, err := client.GetConfig(cmd.Context(), lookup)
+	cfgRes, err := lookupConfigWithFallback(cmd.Context(), client, flags.configName, realm, space, stack)
 	if err != nil {
 		return loadResult{}, err
 	}
 	if !cfgRes.MetadataExists {
 		return loadResult{}, fmt.Errorf(
 			"%w (config %q in scope realm=%q space=%q stack=%q)",
-			errdefs.ErrConfigNotFound, lookup.Metadata.Name,
-			lookup.Metadata.Realm, lookup.Metadata.Space, lookup.Metadata.Stack,
+			errdefs.ErrConfigNotFound, flags.configName, realm, space, stack,
 		)
 	}
 
@@ -1058,6 +1054,54 @@ func loadFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) 
 		return loadResult{}, materializeErr
 	}
 	return loadResult{Doc: doc, PreStarted: preStarted, StartResult: startResult}, nil
+}
+
+// lookupConfigWithFallback probes for the named Config from the operator's
+// effective scope (realm/space/stack) down to space-only and then realm-only,
+// returning the first hit. The starting scope comes from pickLocation (which
+// falls back to viper / env / "default") so a `kuke run <config>` against a
+// Config bound at default/default/default resolves without forcing the
+// operator to repeat --space default --stack default. Probes are deduplicated
+// when the space or stack is already empty (a realm-scoped lookup only takes
+// the one probe its own scope names). A real RPC error short-circuits the
+// walk so the operator sees the underlying failure instead of a misleading
+// "not found" at realm scope. The last miss is returned when every probe
+// reports MetadataExists=false so the caller can surface a single
+// ErrConfigNotFound with the full-scope coordinates.
+func lookupConfigWithFallback(
+	ctx context.Context, client kukeonv1.Client,
+	name, realm, space, stack string,
+) (kukeonv1.GetConfigResult, error) {
+	type probe struct{ space, stack string }
+	probes := []probe{{space, stack}}
+	if stack != "" {
+		probes = append(probes, probe{space, ""})
+	}
+	if space != "" {
+		probes = append(probes, probe{"", ""})
+	}
+
+	var lastMiss kukeonv1.GetConfigResult
+	for _, p := range probes {
+		res, err := client.GetConfig(ctx, v1beta1.CellConfigDoc{
+			APIVersion: v1beta1.APIVersionV1Beta1,
+			Kind:       v1beta1.KindCellConfig,
+			Metadata: v1beta1.CellConfigMetadata{
+				Name:  name,
+				Realm: realm,
+				Space: p.space,
+				Stack: p.stack,
+			},
+		})
+		if err != nil {
+			return kukeonv1.GetConfigResult{}, err
+		}
+		if res.MetadataExists {
+			return res, nil
+		}
+		lastMiss = res
+	}
+	return lastMiss, nil
 }
 
 // loadFromFile preserves the phase-1c -f path: read the file (or stdin),
