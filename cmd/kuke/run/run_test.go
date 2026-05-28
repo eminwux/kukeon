@@ -3175,6 +3175,204 @@ func TestRun_FromConfig_NotFound_Errors(t *testing.T) {
 	}
 }
 
+// TestRun_FromConfig_NotFound_ProbeWalk pins the three-probe scope walk on
+// the bare `kuke run <config>` form (no --space/--stack). The probes go full
+// → space-only → realm-only with realm = "default" from the session default;
+// the not-found error reports the full-scope coordinates the operator's
+// effective scope started at (issue #923).
+func TestRun_FromConfig_NotFound_ProbeWalk(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	var seen []v1beta1.CellConfigMetadata
+	fc := &fakeClient{
+		getConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			seen = append(seen, doc.Metadata)
+			return kukeonv1.GetConfigResult{MetadataExists: false}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"ghost", "-d"})
+
+	err := cmd.Execute()
+	if err == nil || !errors.Is(err, errdefs.ErrConfigNotFound) {
+		t.Fatalf("err=%v want ErrConfigNotFound", err)
+	}
+	if !strings.Contains(err.Error(), `realm="default" space="default" stack="default"`) {
+		t.Errorf("err message should report full-scope coords, got: %v", err)
+	}
+	wantProbes := []v1beta1.CellConfigMetadata{
+		{Name: "ghost", Realm: "default", Space: "default", Stack: "default"},
+		{Name: "ghost", Realm: "default", Space: "default", Stack: ""},
+		{Name: "ghost", Realm: "default", Space: "", Stack: ""},
+	}
+	if len(seen) != len(wantProbes) {
+		t.Fatalf("GetConfig probes=%d want %d (seen=%+v)", len(seen), len(wantProbes), seen)
+	}
+	for i, want := range wantProbes {
+		if seen[i].Name != want.Name || seen[i].Realm != want.Realm ||
+			seen[i].Space != want.Space || seen[i].Stack != want.Stack {
+			t.Errorf("probe[%d]={name=%q realm=%q space=%q stack=%q} want %+v",
+				i, seen[i].Name, seen[i].Realm, seen[i].Space, seen[i].Stack, want)
+		}
+	}
+}
+
+// TestRun_FromConfig_FullScopeProbe_Hits pins probe-1 of the walk: a Config
+// stored at default/default/default is found by a bare `kuke run <config>`
+// without --space/--stack. Reproduces the issue #923 bug.
+func TestRun_FromConfig_FullScopeProbe_Hits(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	stored := configDoc()
+	stored.Metadata.Realm = "default"
+	stored.Metadata.Space = "default"
+	stored.Metadata.Stack = "default"
+
+	var probes int
+	fc := &fakeClient{
+		getConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			probes++
+			if doc.Metadata.Realm == "default" &&
+				doc.Metadata.Space == "default" &&
+				doc.Metadata.Stack == "default" {
+				return kukeonv1.GetConfigResult{Config: stored, MetadataExists: true}, nil
+			}
+			return kukeonv1.GetConfigResult{MetadataExists: false}, nil
+		},
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
+		},
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if probes != 1 {
+		t.Errorf("GetConfig probes=%d want 1 (first probe should hit at full scope)", probes)
+	}
+	if fc.createCalls != 1 {
+		t.Errorf("CreateCell calls=%d want 1", fc.createCalls)
+	}
+}
+
+// TestRun_FromConfig_SpaceOnlyProbe_Hits pins probe-2: a Config stored at
+// realm=default / space=default / stack="" is found by a bare lookup after
+// the full-scope probe misses.
+func TestRun_FromConfig_SpaceOnlyProbe_Hits(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	stored := configDoc()
+	stored.Metadata.Realm = "default"
+	stored.Metadata.Space = "default"
+	stored.Metadata.Stack = ""
+
+	var seen []v1beta1.CellConfigMetadata
+	fc := &fakeClient{
+		getConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			seen = append(seen, doc.Metadata)
+			if doc.Metadata.Realm == "default" &&
+				doc.Metadata.Space == "default" &&
+				doc.Metadata.Stack == "" {
+				return kukeonv1.GetConfigResult{Config: stored, MetadataExists: true}, nil
+			}
+			return kukeonv1.GetConfigResult{MetadataExists: false}, nil
+		},
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
+		},
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(seen) != 2 {
+		t.Fatalf("GetConfig probes=%d want 2 (full miss then space-only hit), seen=%+v", len(seen), seen)
+	}
+	if seen[1].Space != "default" || seen[1].Stack != "" {
+		t.Errorf("probe[1]=%+v want space=default stack=\"\"", seen[1])
+	}
+}
+
+// TestRun_FromConfig_RealmOnlyProbe_Hits pins probe-3: a Config stored at
+// realm=default / space="" / stack="" is found by a bare lookup only after
+// the two narrower probes miss.
+func TestRun_FromConfig_RealmOnlyProbe_Hits(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	stored := configDoc()
+	stored.Metadata.Realm = "default"
+	stored.Metadata.Space = ""
+	stored.Metadata.Stack = ""
+
+	var seen []v1beta1.CellConfigMetadata
+	fc := &fakeClient{
+		getConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			seen = append(seen, doc.Metadata)
+			if doc.Metadata.Realm == "default" &&
+				doc.Metadata.Space == "" &&
+				doc.Metadata.Stack == "" {
+				return kukeonv1.GetConfigResult{Config: stored, MetadataExists: true}, nil
+			}
+			return kukeonv1.GetConfigResult{MetadataExists: false}, nil
+		},
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
+		},
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(seen) != 3 {
+		t.Fatalf("GetConfig probes=%d want 3 (walk down to realm-only), seen=%+v", len(seen), seen)
+	}
+	if seen[2].Space != "" || seen[2].Stack != "" {
+		t.Errorf("probe[2]=%+v want realm-only", seen[2])
+	}
+}
+
+// TestRun_FromConfig_RPCError_ShortCircuits pins that a real RPC error
+// (anything other than MetadataExists=false) aborts the probe walk so the
+// operator sees the underlying failure instead of a misleading not-found at
+// realm scope.
+func TestRun_FromConfig_RPCError_ShortCircuits(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	wantErr := errors.New("transport boom")
+	var probes int
+	fc := &fakeClient{
+		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			probes++
+			return kukeonv1.GetConfigResult{}, wantErr
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "-d"})
+
+	err := cmd.Execute()
+	if err == nil || !errors.Is(err, wantErr) {
+		t.Fatalf("err=%v want %v", err, wantErr)
+	}
+	if probes != 1 {
+		t.Errorf("GetConfig probes=%d want 1 (RPC error must short-circuit)", probes)
+	}
+}
+
 func TestRun_FromConfig_BlueprintMissing_Errors(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
