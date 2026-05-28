@@ -443,16 +443,6 @@ func getCellIDNoDaemon(t *testing.T, runPath, realmName, spaceName, stackName, c
 // 60s budget on a healthy runner.
 const runFromStoppedRaceIterations = 20
 
-// runFromStoppedAttachGrace is the wait between launching `kuke run`
-// (which races StartCell → attach internally) and sending the detach
-// keystroke. The attach phase enters the in-process pkg/attach loop
-// within tens of milliseconds on a healthy host; this grace is set so
-// the EACCES window, if it re-opens, is consumed by the dial before the
-// detach byte arrives. A v0.12.0 race would surface as a non-zero exit
-// with `permission denied` on stderr inside this window; a v0.12.1
-// healthy attach loop swallows the keystroke and exits cleanly.
-const runFromStoppedAttachGrace = 1 * time.Second
-
 // runFromStoppedExitTimeout caps the wait for a single `kuke run`
 // invocation to return after its detach keystroke. The healthy path
 // (post-v0.12.1) returns within a second; the cap is generous so a
@@ -607,8 +597,13 @@ func TestKuke_RunFromStopped_NonRootKukeonGroup_NoEACCES(t *testing.T) {
 		// to either succeed (sbsh ≥ v0.12.1) or surface EACCES (sbsh
 		// ≤ v0.12.0). A v0.12.0 race returns the error immediately;
 		// a v0.12.1 healthy attach blocks on stdin until the detach
-		// keystroke arrives.
-		time.Sleep(runFromStoppedAttachGrace)
+		// keystroke arrives. Reuses attachConnectGrace (the peer
+		// attach scenarios' grace): the 2s span covers both the dial
+		// (EACCES window) and the raw-mode + filter-wire setup that
+		// must complete before the detach keystroke is forwarded so
+		// the in-process pkg/attach filter triggers — both apply
+		// here since the loop dials AND consumes a detach byte.
+		time.Sleep(attachConnectGrace)
 		if writeErr := session.Write(sbshDetachSequence); writeErr != nil {
 			// Best-effort: a session that has already exited (race
 			// fired) closes the PTY master and returns an error here.
