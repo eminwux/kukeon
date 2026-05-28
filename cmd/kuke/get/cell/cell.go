@@ -25,11 +25,22 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/get/shared"
 	kukeshared "github.com/eminwux/kukeon/cmd/kuke/shared"
+	"github.com/eminwux/kukeon/internal/cellconfig"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+)
+
+const (
+	// syncStateSynced / syncStateOutOfSync / syncStateNone are the SYNC
+	// column verdicts. syncStateNone follows the established `-` convention
+	// for cells without kukeon.io/config lineage — the reconciler does not
+	// track sync state for hand-built or -b-lineage cells.
+	syncStateSynced    = "Synced"
+	syncStateOutOfSync = "OutOfSync"
+	syncStateNone      = "-"
 )
 
 // MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
@@ -42,18 +53,27 @@ func NewCellCmd() *cobra.Command {
 		Short:   "Get or list cell information",
 		Long: `Get or list cell information.
 
-The default table is ` + "`NAME REALM SPACE STACK STATE AGE`" + `.
-` + "`-o wide`" + ` appends two cell-only signals:
+The default table is ` + "`NAME REALM SPACE STACK STATE SYNC AGE`" + `.
+The SYNC column carries the reconciler-detected sync verdict for each
+cell relative to its lineage Config:
+
+  Synced     - the live spec matches what the lineage Config materializes
+  OutOfSync  - divergence detected (or the lineage Config was deleted)
+  -          - the cell carries no kukeon.io/config lineage label, so the
+               Config reconciler does not track sync state for it
+
+` + "`-o wide`" + ` appends three cell-only signals:
 
   CONTAINERS  ready/total — entries in status.containers whose
               state == Ready over the total length
   BRIDGE      status.network.bridgeName (the canonical k-{8hex}
               form) or "-" when empty
+  DIVERGENCE  short divergence summary from status.outOfSyncReason
+              (blank for Synced or no-lineage rows)
 
-Reconciler-detected sync state (outOfSync / outOfSyncReason /
-outOfSyncError) and the cgroup path no longer appear in any
-` + "`kuke get cell`" + ` table — surface them with ` + "`-o yaml` / `-o json`" + `
-when needed.`,
+The full outOfSync / outOfSyncReason / outOfSyncError status fields
+remain on ` + "`-o yaml` / `-o json`" + ` and the cgroup path stays out of the
+table — surface it with ` + "`-o yaml` / `-o json`" + ` when needed.`,
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -206,6 +226,40 @@ func renderBridge(c *v1beta1.CellDoc) string {
 	return "-"
 }
 
+// renderSync returns the SYNC column verdict. Cells without
+// kukeon.io/config lineage render `-` (the reconciler does not track sync
+// state for them); Config-lineage cells render `Synced` or `OutOfSync`
+// from Status.OutOfSync. OutOfSyncError details surface separately under
+// `-o yaml` / `-o json`.
+func renderSync(c *v1beta1.CellDoc) string {
+	if !hasConfigLineage(c) {
+		return syncStateNone
+	}
+	if c.Status.OutOfSync {
+		return syncStateOutOfSync
+	}
+	return syncStateSynced
+}
+
+// renderDivergence returns the DIVERGENCE column value for `-o wide`.
+// Returns Status.OutOfSyncReason for OutOfSync rows, empty string for
+// Synced or no-lineage rows (the column stays width-aligned via the
+// header label).
+func renderDivergence(c *v1beta1.CellDoc) string {
+	if hasConfigLineage(c) && c.Status.OutOfSync {
+		return c.Status.OutOfSyncReason
+	}
+	return ""
+}
+
+// hasConfigLineage reports whether a cell carries the kukeon.io/config
+// back-reference label (mirroring the configLineage helper in
+// internal/controller/reconcile_outofsync.go). Replicated inline rather
+// than imported to keep the CLI leaf off internal/controller.
+func hasConfigLineage(c *v1beta1.CellDoc) bool {
+	return strings.TrimSpace(c.Metadata.Labels[cellconfig.LabelConfig]) != ""
+}
+
 // filterCellsBySelector returns the subset of cells whose
 // Metadata.Labels satisfy selector. A nil or empty selector returns the
 // input slice unmodified so the common no-flag path skips the allocation.
@@ -247,9 +301,9 @@ func printCells(
 			cmd.Println("No cells found.")
 			return nil
 		}
-		headers := []string{"NAME", "REALM", "SPACE", "STACK", "STATE", "AGE"}
+		headers := []string{"NAME", "REALM", "SPACE", "STACK", "STATE", "SYNC", "AGE"}
 		if wide {
-			headers = append(headers, "CONTAINERS", "BRIDGE")
+			headers = append(headers, "CONTAINERS", "BRIDGE", "DIVERGENCE")
 		}
 		now := time.Now()
 		rows := make([][]string, 0, len(cells))
@@ -262,10 +316,11 @@ func printCells(
 				c.Spec.SpaceID,
 				c.Spec.StackID,
 				state,
+				renderSync(c),
 				shared.RenderAge(c.Status.CreatedAt, now),
 			}
 			if wide {
-				row = append(row, renderContainers(c), renderBridge(c))
+				row = append(row, renderContainers(c), renderBridge(c), renderDivergence(c))
 			}
 			rows = append(rows, row)
 		}
