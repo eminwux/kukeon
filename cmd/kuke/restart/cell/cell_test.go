@@ -775,6 +775,144 @@ func TestRestartCell_CmdSurface(t *testing.T) {
 	}
 }
 
+// TestRestartCell_RealmScopedConfigFoundForStackPlacedCell pins the issue
+// #921 fix on the CLI side: an OutOfSync cell at realm/space/stack whose
+// `kukeon.io/config` lineage label names a Config bound only at realm
+// scope must still drive a reconcile via ApplyDocuments. Without the
+// scope-narrowing walk, materialiseFromConfig calls GetConfig once at the
+// cell's full scope, sees MetadataExists==false, and falls through to a
+// vanilla restart with the "reconcile materialisation failed (config not
+// found …)" notice — never reconciling from the realm-scoped Config.
+func TestRestartCell_RealmScopedConfigFoundForStackPlacedCell(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	viper.Reset()
+	viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "default")
+	viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "default")
+	viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "default")
+
+	type probeScope struct{ name, realm, space, stack string }
+	var probes []probeScope
+	fake := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				MetadataExists: true,
+				Cell: v1beta1.CellDoc{
+					Metadata: v1beta1.CellMetadata{
+						Name:   "kukeon-dev-root-0",
+						Labels: map[string]string{cellconfig.LabelConfig: "kukeon-dev-root-0"},
+					},
+					Spec: v1beta1.CellSpec{
+						ID:      "kukeon-dev-root-0",
+						RealmID: "default",
+						SpaceID: "default",
+						StackID: "default",
+					},
+					Status: v1beta1.CellStatus{
+						State:           v1beta1.CellStateReady,
+						OutOfSync:       true,
+						OutOfSyncReason: "lineage Config deleted",
+					},
+				},
+			}, nil
+		},
+		getConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			probes = append(probes, probeScope{
+				name:  doc.Metadata.Name,
+				realm: doc.Metadata.Realm,
+				space: doc.Metadata.Space,
+				stack: doc.Metadata.Stack,
+			})
+			if doc.Metadata.Space == "" && doc.Metadata.Stack == "" {
+				return kukeonv1.GetConfigResult{
+					MetadataExists: true,
+					Config: v1beta1.CellConfigDoc{
+						APIVersion: v1beta1.APIVersionV1Beta1,
+						Kind:       v1beta1.KindCellConfig,
+						Metadata: v1beta1.CellConfigMetadata{
+							Name:  "kukeon-dev-root-0",
+							Realm: "default",
+						},
+						Spec: v1beta1.CellConfigSpec{
+							Blueprint: v1beta1.CellConfigBlueprintRef{Name: "dev", Realm: "default"},
+						},
+					},
+				}, nil
+			}
+			return kukeonv1.GetConfigResult{MetadataExists: false}, nil
+		},
+		getBlueprintFn: func(_ v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{
+				MetadataExists: true,
+				Blueprint: v1beta1.CellBlueprintDoc{
+					APIVersion: v1beta1.APIVersionV1Beta1,
+					Kind:       v1beta1.KindCellBlueprint,
+					Metadata:   v1beta1.CellBlueprintMetadata{Name: "dev", Realm: "default"},
+					Spec: v1beta1.CellBlueprintSpec{
+						Cell: v1beta1.BlueprintCellSpec{
+							Containers: []v1beta1.BlueprintContainer{{ID: "main", Image: "nginx:latest"}},
+						},
+					},
+				},
+			}, nil
+		},
+		applyDocsFn: func(_ []byte) (kukeonv1.ApplyDocumentsResult, error) {
+			return kukeonv1.ApplyDocumentsResult{
+				Resources: []kukeonv1.ApplyResourceResult{
+					{Kind: "Cell", Name: "kukeon-dev-root-0", Action: "updated"},
+				},
+			}, nil
+		},
+		stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) { return kukeonv1.StopCellResult{}, nil },
+		startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+			return kukeonv1.StartCellResult{Cell: doc}, nil
+		},
+	}
+
+	cmd := cell.NewCellCmd()
+	outBuf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	cmd.SetOut(outBuf)
+	cmd.SetErr(errBuf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, cell.MockControllerKey{}, kukeonv1.Client(fake))
+	cmd.SetContext(ctx)
+	cmd.SetArgs([]string{"kukeon-dev-root-0"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantProbes := []probeScope{
+		{name: "kukeon-dev-root-0", realm: "default", space: "default", stack: "default"},
+		{name: "kukeon-dev-root-0", realm: "default", space: "default", stack: ""},
+		{name: "kukeon-dev-root-0", realm: "default", space: "", stack: ""},
+	}
+	if len(probes) != len(wantProbes) {
+		t.Fatalf("GetConfig probe count: got %d want %d (probes=%+v)", len(probes), len(wantProbes), probes)
+	}
+	for i, p := range probes {
+		if p != wantProbes[i] {
+			t.Errorf("probe[%d] = %+v, want %+v", i, p, wantProbes[i])
+		}
+	}
+	if fake.applyCalls != 1 {
+		t.Errorf(
+			"ApplyDocuments calls: got %d, want 1 (reconcile must run once the realm-scoped Config is found)",
+			fake.applyCalls,
+		)
+	}
+	if strings.Contains(errBuf.String(), "reconcile materialisation failed") {
+		t.Errorf(
+			"stderr surfaced 'reconcile materialisation failed' despite the realm-scoped Config being reachable: %s",
+			errBuf.String(),
+		)
+	}
+	if !strings.Contains(outBuf.String(), `reconciled from config "kukeon-dev-root-0"`) {
+		t.Errorf("stdout did not confirm reconcile path: %s", outBuf.String())
+	}
+}
+
 // fakeClient is a per-test stub kukeonv1.Client. Each RPC is dispatched
 // through an optional Fn field; nil means "fail the test if called". Call
 // counts let tests assert "Synced restart did not invoke ApplyDocuments" and
