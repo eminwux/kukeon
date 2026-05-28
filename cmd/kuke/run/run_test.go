@@ -30,6 +30,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	runcmd "github.com/eminwux/kukeon/cmd/kuke/run"
@@ -5550,5 +5551,160 @@ func TestRun_EnvFlag_StoppedCell_StartsWithRuntimeEnv(t *testing.T) {
 	if !reflect.DeepEqual(fc.startDoc.Spec.RuntimeEnv, want) {
 		t.Errorf("StartCell doc RuntimeEnv=%v, want %v (-f Stopped restart path)",
 			fc.startDoc.Spec.RuntimeEnv, want)
+	}
+}
+
+// pingTimeoutErr returns an error chain that mirrors sbsh's wrap shape
+// from clientrunner/io.go's dialTerminalCtrlSocket — `fmt.Errorf("ping
+// failed: %w", err)` with context.DeadlineExceeded in the chain — so
+// the runWithPingRetry classifier sees the same surface real sbsh
+// returns when its 3 s ping window fires before kuketty's Serve()
+// accept loop has come up (#926).
+func pingTimeoutErr() error {
+	return fmt.Errorf("ping failed: %w", context.DeadlineExceeded)
+}
+
+// TestRun_Attach_PingDeadline_RetriesWithinBudget pins the
+// readiness-handshake guarantee from #926: when the first call into
+// the in-process attach loop fails with sbsh's "ping failed: context
+// deadline exceeded" (i.e. kuketty has bound the control socket but
+// not yet entered Serve()'s Accept loop), runWithPingRetry must retry
+// instead of surfacing the timeout to the operator. Pre-fix this test
+// fails: the original runAttachLoop called run() exactly once and
+// returned the ping-timeout straight through to ClassifyAttachExit.
+func TestRun_Attach_PingDeadline_RetriesWithinBudget(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	// Tight budget keeps the test cheap on the budget-exhausted negative
+	// path covered by the sibling test below; the retry path here only
+	// needs one retry inside the budget so the production 10s default
+	// would also pass — overridden for symmetry with the negative test.
+	restore := runcmd.SetAttachPingRetryForTest(500*time.Millisecond, 10*time.Millisecond)
+	t.Cleanup(restore)
+
+	var calls int
+	var mu sync.Mutex
+	runFn := runcmd.RunFn(func(_ context.Context, _ sbshattach.Options) error {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if calls == 1 {
+			return pingTimeoutErr()
+		}
+		return nil
+	})
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: attachSuccessFn(),
+	}
+	cmd, _ := newCmdWithRunFn(t, fc, runFn)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v (want nil — retry must absorb the ping-timeout)", err)
+	}
+	if fc.attachCalls != 1 {
+		t.Errorf(
+			"AttachContainer calls=%d, want 1 (HostSocketPath resolved once; retries are on the dial side)",
+			fc.attachCalls,
+		)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 2 {
+		t.Errorf("attach loop calls=%d, want 2 (one ping-timeout, one success)", calls)
+	}
+}
+
+// TestRun_Attach_PingDeadline_BudgetExhausted_WrapsSentinel pins the
+// budget-exhausted surface: when sbsh keeps firing ping-deadline past
+// the configured budget, runWithPingRetry must surface the timeout
+// class via errdefs.ErrAttachPingTimeout so callers can errors.Is the
+// readiness-handshake failure without string-matching sbsh's wrap.
+func TestRun_Attach_PingDeadline_BudgetExhausted_WrapsSentinel(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	restore := runcmd.SetAttachPingRetryForTest(50*time.Millisecond, 10*time.Millisecond)
+	t.Cleanup(restore)
+
+	var calls int
+	var mu sync.Mutex
+	runFn := runcmd.RunFn(func(_ context.Context, _ sbshattach.Options) error {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		return pingTimeoutErr()
+	})
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: attachSuccessFn(),
+	}
+	cmd, _ := newCmdWithRunFn(t, fc, runFn)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
+
+	err := cmd.Execute()
+	if !errors.Is(err, errdefs.ErrAttachPingTimeout) {
+		t.Fatalf("err=%v, want chain to include errdefs.ErrAttachPingTimeout", err)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf(
+			"err=%v, want chain to preserve context.DeadlineExceeded so operators can still see the underlying cause",
+			err,
+		)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls < 2 {
+		t.Errorf("attach loop calls=%d, want >= 2 (at least one retry before budget exhaustion)", calls)
+	}
+}
+
+// TestRun_Attach_NonPingError_DoesNotRetry pins the negative side of
+// the classifier: an error that is not a context-deadline-exceeded
+// class (e.g. a generic controller failure) must NOT trigger retry,
+// otherwise the retry loop would mask real failures behind a 10 s
+// budget on every kuke run.
+func TestRun_Attach_NonPingError_DoesNotRetry(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	restore := runcmd.SetAttachPingRetryForTest(500*time.Millisecond, 10*time.Millisecond)
+	t.Cleanup(restore)
+
+	sentinel := errors.New("controller-level failure (not a ping timeout)")
+	var calls int
+	var mu sync.Mutex
+	runFn := runcmd.RunFn(func(_ context.Context, _ sbshattach.Options) error {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		return sentinel
+	})
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: attachSuccessFn(),
+	}
+	cmd, _ := newCmdWithRunFn(t, fc, runFn)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
+
+	err := cmd.Execute()
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("err=%v, want chain to include the injected non-ping sentinel", err)
+	}
+	if errors.Is(err, errdefs.ErrAttachPingTimeout) {
+		t.Errorf("err=%v, must NOT be wrapped with ErrAttachPingTimeout — non-ping errors are not the retry class", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Errorf("attach loop calls=%d, want 1 (non-ping errors must not retry)", calls)
 	}
 }

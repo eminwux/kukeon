@@ -289,6 +289,17 @@ var (
 	// as `connection refused` at `connect(2)` time (#852).
 	ErrAttachTaskNotRunning = errors.New("container task is not running; cannot attach to a dead socket")
 
+	// ErrAttachPingTimeout is returned by the post-StartCell attach loop
+	// in cmd/kuke/run when sbsh's 3 s control-socket ping deadline keeps
+	// firing because kuketty has bound the control socket but not yet
+	// entered Serve()'s Accept loop — a "socket present, accept loop not
+	// yet running" race distinct from the EACCES window #918 closed.
+	// Promoted from sbsh's untyped `ping failed: context deadline
+	// exceeded` (clientrunner/io.go) at the kukeon boundary so callers
+	// can errors.Is the timeout class without string-matching the sbsh
+	// wrap (#926).
+	ErrAttachPingTimeout = errors.New("attach ping timed out: kuketty control socket bound but not yet serving")
+
 	// ErrSocketPathTooLong fires when the resolved host-side path of a
 	// per-container kuketty control socket would overflow Linux's
 	// sockaddr_un.sun_path buffer (consts.KukeonMaxSocketPath bytes plus
