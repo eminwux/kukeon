@@ -27,15 +27,13 @@
 package recreate
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
-	"github.com/eminwux/kukeon/cmd/kuke/daemon/internal/lifecycle"
+	"github.com/eminwux/kukeon/cmd/kuke/internal/lifecycle"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/client/local"
@@ -46,11 +44,6 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-)
-
-const (
-	kukeondReadyTimeout = 30 * time.Second
-	kukeondReadyTick    = 200 * time.Millisecond
 )
 
 // MockSocketDirKey overrides the directory containing kukeond.{sock,pid}.
@@ -109,7 +102,7 @@ func resolveWaitForReady(cmd *cobra.Command, socketPath string) error {
 	if stub, ok := cmd.Context().Value(MockWaitForReadyKey{}).(func() error); ok && stub != nil {
 		return stub()
 	}
-	return waitForKukeondReady(cmd.Context(), socketPath, kukeondReadyTimeout)
+	return lifecycle.WaitForKukeondReady(cmd.Context(), socketPath, lifecycle.KukeondReadyTimeout)
 }
 
 // NewRecreateCmd builds the `kuke daemon recreate` cobra command.
@@ -258,41 +251,6 @@ func runRecreate(cmd *cobra.Command, _ []string) error {
 	}
 	cmd.Printf("kukeond is ready (unix://%s)\n", socketPath)
 	return nil
-}
-
-// waitForKukeondReady polls the kukeond socket until it responds or the
-// timeout expires. Mirrors the same function in cmd/kuke/init/init.go.
-func waitForKukeondReady(ctx context.Context, socketPath string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastErr error
-	for {
-		if time.Now().After(deadline) {
-			if lastErr != nil {
-				return fmt.Errorf("timed out after %s: %w", timeout, lastErr)
-			}
-			return fmt.Errorf("timed out after %s", timeout)
-		}
-
-		attemptCtx, cancel := context.WithTimeout(ctx, kukeondReadyTick)
-		err := pingKukeond(attemptCtx, socketPath)
-		cancel()
-		if err == nil {
-			return nil
-		}
-		lastErr = err
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(kukeondReadyTick):
-		}
-	}
-}
-
-func pingKukeond(ctx context.Context, socketPath string) error {
-	client := kukeonv1.NewUnixClient(socketPath, kukeonv1.WithDialTimeout(kukeondReadyTick))
-	defer func() { _ = client.Close() }()
-	return client.Ping(ctx)
 }
 
 // kukeondCellDoc builds the lookup CellDoc for the system kukeond cell. The
