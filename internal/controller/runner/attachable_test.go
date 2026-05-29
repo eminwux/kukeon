@@ -891,6 +891,137 @@ func TestRemoveAttachableSocketRuntimeArtifacts_SkipsNonAttachable(t *testing.T)
 	}
 }
 
+// seedAttachableSocket stages a plain file standing in for the bound
+// kuketty socket inode at the deep ContainerSocketPath, created with mode.
+// A regular file is sufficient: os.Chmod / os.Stat are inode-mode
+// operations and do not distinguish a socket from a file, the same way the
+// teardown tests above stand in a regular file for the bound socket.
+func seedAttachableSocket(t *testing.T, runPath string, spec intmodel.ContainerSpec, mode os.FileMode) string {
+	t.Helper()
+	socketPath := fs.ContainerSocketPath(
+		runPath, spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
+	)
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
+		t.Fatalf("mkdir socket parent: %v", err)
+	}
+	if err := os.WriteFile(socketPath, nil, mode); err != nil {
+		t.Fatalf("seed socket inode: %v", err)
+	}
+	// WriteFile honours the umask; force the exact bits the test asserts on.
+	if err := os.Chmod(socketPath, mode); err != nil {
+		t.Fatalf("chmod seed socket: %v", err)
+	}
+	return socketPath
+}
+
+// TestReapplyAttachableSocketPerms_CorrectsWrongMode locks the #935 fix:
+// the StartCell idempotent no-op path must re-chmod a live attach socket an
+// old kuketty bound with the pre-sbsh#361 group-read-only mode (0o640) up to
+// the connect(2)-able 0o660, without which a kukeon-group member on the host
+// dials the live listener with EACCES forever (the #933 retry never helps —
+// the inode's mode never changes during the retry window).
+func TestReapplyAttachableSocketPerms_CorrectsWrongMode(t *testing.T) {
+	r := newTestRunner(t)
+	runPath := t.TempDir()
+	r.opts.RunPath = runPath
+
+	spec := intmodel.ContainerSpec{
+		ID:         "work",
+		RealmName:  "r1",
+		SpaceName:  "s1",
+		StackName:  "st1",
+		CellName:   "c1",
+		Attachable: true,
+	}
+	socketPath := seedAttachableSocket(t, runPath, spec, 0o640)
+
+	cell := intmodel.Cell{Spec: intmodel.CellSpec{Containers: []intmodel.ContainerSpec{spec}}}
+	r.reapplyAttachableSocketPerms(cell)
+
+	info, err := os.Stat(socketPath)
+	if err != nil {
+		t.Fatalf("stat socket after reapply: %v", err)
+	}
+	if got := info.Mode().Perm(); got != attachableSocketReapplyMode {
+		t.Errorf("socket mode = %o, want %o (no-op StartCell path must correct the pre-#361 0o640 socket)",
+			got, attachableSocketReapplyMode)
+	}
+}
+
+// TestReapplyAttachableSocketPerms_IdempotentOnCorrectMode locks the
+// idempotency contract: a socket a post-sbsh#361 kuketty already bound at
+// 0o660 is left at 0o660. The re-chmod is a safe no-op on every healthy
+// StartCell skip.
+func TestReapplyAttachableSocketPerms_IdempotentOnCorrectMode(t *testing.T) {
+	r := newTestRunner(t)
+	runPath := t.TempDir()
+	r.opts.RunPath = runPath
+
+	spec := intmodel.ContainerSpec{
+		ID: "work", RealmName: "r1", SpaceName: "s1", StackName: "st1", CellName: "c1",
+		Attachable: true,
+	}
+	socketPath := seedAttachableSocket(t, runPath, spec, 0o660)
+
+	cell := intmodel.Cell{Spec: intmodel.CellSpec{Containers: []intmodel.ContainerSpec{spec}}}
+	r.reapplyAttachableSocketPerms(cell)
+
+	info, err := os.Stat(socketPath)
+	if err != nil {
+		t.Fatalf("stat socket after reapply: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o660 {
+		t.Errorf("socket mode = %o, want 0660 (already-correct socket must be left untouched)", got)
+	}
+}
+
+// TestReapplyAttachableSocketPerms_SkipsNonAttachable locks the
+// !Attachable short-circuit: the helper iterates every container in the
+// cell spec, so a root or non-sbsh-wrapped workload's inode at the deep
+// socket path must be left untouched.
+func TestReapplyAttachableSocketPerms_SkipsNonAttachable(t *testing.T) {
+	r := newTestRunner(t)
+	runPath := t.TempDir()
+	r.opts.RunPath = runPath
+
+	spec := intmodel.ContainerSpec{
+		ID: "root", RealmName: "r1", SpaceName: "s1", StackName: "st1", CellName: "c1",
+		Root:       true,
+		Attachable: false,
+	}
+	socketPath := seedAttachableSocket(t, runPath, spec, 0o640)
+
+	cell := intmodel.Cell{Spec: intmodel.CellSpec{Containers: []intmodel.ContainerSpec{spec}}}
+	r.reapplyAttachableSocketPerms(cell)
+
+	info, err := os.Stat(socketPath)
+	if err != nil {
+		t.Fatalf("stat socket after reapply: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o640 {
+		t.Errorf("non-attachable socket mode = %o, want 0640 (helper must short-circuit on !Attachable)", got)
+	}
+}
+
+// TestReapplyAttachableSocketPerms_TolerantMissingSocket locks the
+// best-effort contract: an Attachable container whose kuketty has not yet
+// bound the socket (ENOENT at the deep path) must be a silent no-op, not a
+// panic or a failed StartCell skip.
+func TestReapplyAttachableSocketPerms_TolerantMissingSocket(t *testing.T) {
+	r := newTestRunner(t)
+	r.opts.RunPath = t.TempDir()
+
+	spec := intmodel.ContainerSpec{
+		ID: "work", RealmName: "r1", SpaceName: "s1", StackName: "st1", CellName: "c1",
+		Attachable: true,
+	}
+	cell := intmodel.Cell{Spec: intmodel.CellSpec{Containers: []intmodel.ContainerSpec{spec}}}
+
+	// No socket inode seeded — the deep path resolves to ENOENT. The call
+	// must complete without panicking; there is nothing on disk to assert.
+	r.reapplyAttachableSocketPerms(cell)
+}
+
 func readDoc(t *testing.T, path string) extmodel.ContainerDoc {
 	t.Helper()
 	data, err := os.ReadFile(path)

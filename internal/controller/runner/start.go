@@ -598,6 +598,14 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 				"error", err)
 			// best-effort, fall through with the Ready state we already set
 		}
+		// #935: this idempotent-skip path bypasses the destructive recreate
+		// below and with it attachableBuildOpts + attachablePostCreateChown,
+		// so a per-container attach socket an old kuketty bound with the wrong
+		// mode (pre-sbsh#361, 0o640 group-read only) is never corrected and
+		// `kuke run` dials the live listener with EACCES forever. Re-assert the
+		// socket mode/group on the live inode — idempotent when already correct
+		// and safe because it never restarts the running workload.
+		r.reapplyAttachableSocketPerms(internalCell)
 		skipFields := appendCellLogFields([]any{"id", containerID}, cellID, cellName)
 		skipFields = append(skipFields, "space", spaceID, "realm", realmID)
 		r.logger.InfoContext(
