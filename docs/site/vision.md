@@ -1,441 +1,189 @@
-# Kukeon for AI Agents: A Proposal for Agent-Native Orchestration
+# Building a Goal Compiler: The Design of Kukeon
 
-**Status:** Proposal / discussion draft
-**Target:** `kukeon` project, post-`v0.1.0`
-**Audience:** project maintainer, contributors, early adopters running agentic workloads
+*How to run a self-improving software-building organization on a Raspberry Pi — and why every part of it is a diff you can read.*
 
 ---
 
-## Summary
+There's a particular feeling you get running coding agents seriously. You have Claude Code in one terminal, a dev server in another, a couple more agents working different tasks, and somewhere in the pile a process died twenty minutes ago and nobody told you. The agents can't see each other. The work lives in your head. And the moment you want any of this to be *trustworthy* — auditable, reproducible, runnable somewhere that isn't your laptop — none of the existing tools help, because they were built to run an agent, not to run an *organization* of them accountably.
 
-Kukeon's current primitives — Realm, Space, Stack, Cell, Container — are an unusually good substrate for running AI coding agents under real isolation. The containerd-namespace boundary at the Realm level, the CNI+cgroup boundary at the Space level, and the declarative `kuke apply` workflow together already give agentic workloads more structural isolation than `docker compose` can express, and do so without the operational weight of Kubernetes.
+Kukeon is an attempt to build that organization properly. It's a self-hosted system where a team of AI agents — a planner, developers, a reviewer, and a meta-agent that improves the others — takes a goal, builds it, reviews it, ships it, operates it, and refines both the product and itself. It runs on a single Linux host you own, from a cloud VM down to a Raspberry Pi. And the organizing idea, which I'll build up to, is that the whole thing behaves like a **bootstrapping compiler**: a system that ultimately builds and improves itself, with the first thing it compiles being itself.
 
-What the current `v1beta1` schema does not yet cover are the fields and primitives needed to turn that substrate into a full solution for running untrusted, autonomous, session-scoped workloads — which is what AI agents are. This document lays out what those needs are, in priority order, so that the project can decide which of them to adopt.
-
-The position this document takes: **kukeon does not need to become an agent framework**. It needs to expose a small number of additional orchestrator-level primitives that make agent workloads safe to run by default. The agent runtime (Claude Code, Codex CLI, aider, MCP servers, etc.) stays outside kukeon's scope.
+This is a design doc. I'm going to walk through the decisions, including the ones where the obvious approach is wrong, because the decisions are the interesting part.
 
 ---
 
-## 1. Why kukeon is the right substrate
+## The first decision: agents are workloads
 
-Three properties of the current design make kukeon unusually well-suited to agent workloads:
+The starting observation is almost boring once you say it out loud. An AI coding agent is a process that needs a filesystem, scoped credentials, network isolation, and a bounded lifetime. That's a *container workload*. So agents should run on a real container runtime, with real isolation — not in ad-hoc shells where they can see each other's secrets and step on each other's state.
 
-**The Realm as a containerd namespace is a real administrative boundary.** A `kuke delete` run against the wrong Realm cannot accidentally touch containers in another Realm, because containerd itself enforces the split. Compare to `docker compose down` run in the wrong project directory, which can and does nuke unrelated containers when names collide. For agent work — where you specifically want the "oops" failure mode to be impossible — this matters.
+So Kukeon is, at its base, a containerd-native runtime. It defines an explicit hierarchy, and the important thing is that every level maps to a real Linux primitive, not an invented abstraction:
 
-**The Space as CNI network plus cgroup subtree collapses the isolation envelope into one reviewable object.** In compose, cap drops, read-only roots, resource limits, and network policy are scattered across every service block. Agent workloads typically want every container inside the same security posture; kukeon's Space is the natural place to declare that posture once.
-
-**Declarative `kuke apply` with round-trip safety turns the environment into a reviewable artifact.** You can check the manifest into a repo, diff it in a pull request, apply it in CI, and `kuke get -o yaml` the result to confirm drift. That lifecycle contract is the piece that makes compose worth using; kukeon has it already.
-
-What's missing is not in the bones. It's in the fields.
-
----
-
-## 2. The agent threat model, briefly
-
-Traditional container workloads are _adversarial on the outside, trusted on the inside_. The orchestrator defends a trusted service from hostile network traffic.
-
-Agent workloads invert this. The API endpoint is trusted (you deployed the key). The code running inside the container is not — not because the model is malicious, but because:
-
-- Agents run code and make network requests you did not specifically authorize, often in response to content they just read.
-- Prompt injection in third-party inputs (documentation pages, GitHub issues, files the agent fetched) can steer the agent toward actions its operator never intended.
-- `--dangerously-skip-permissions` and equivalent flags, used to make agents practically useful, remove the per-action approval that would otherwise catch mistakes.
-- Agent loops are long-running and unattended; a silent miscalibration of scope can do a lot of damage before anyone notices.
-
-The job of the orchestrator is not to prevent the agent from being wrong. It is to ensure that when the agent is wrong, the blast radius is exactly what was declared, and no larger.
-
----
-
-## 3. What the current `v1beta1` does and does not cover
-
-Measured against that threat model:
-
-**Covered today**
-
-- Hard tenant boundary via Realm (containerd namespace).
-- Network isolation via Space (dedicated CNI bridge per space).
-- Cgroup subtree per Space, reported in `status.cgroupPath`.
-- Declarative manifests with `kuke apply -f`, round-trip safe.
-- Non-privileged containers by default (`privileged: false`).
-- Structured lifecycle (`start` / `stop` / `kill` / `purge`).
-
-**Not covered today**
-
-- Volume mounts are schema-reserved but not enforced by the controller. An agent container cannot yet be given a workspace directory.
-- No per-container `user`, `readOnlyRootfs`, `capabilities`, `securityOpt`, `tmpfs`, or resource limits on Container spec. The only security toggle is `privileged: true/false`.
-- No Space-level network policy or egress allowlist. CNI plugin choice and egress filtering are not expressible in the manifest.
-- No Session concept: nothing ties a set of resources to a task with a bounded lifetime and budget.
-- No outbound proxy or traffic measurement layer.
-- No scoped credential minting; secrets are passed as plain env strings.
-- No causal audit trail surviving resource destruction.
-
-The rest of this document proposes how to close those gaps in a way that stays consistent with kukeon's design philosophy.
-
----
-
-## 4. Proposed needs, in priority order
-
-Each need is labelled `P0` (blocks the agent use case entirely), `P1` (needed for the use case to be recommendable over docker-compose), or `P2` (needed to make kukeon genuinely agent-native rather than agent-compatible).
-
-### 4.1 `P0` — Volume mounts on Container
-
-**Problem.** The reserved `volumes` field on the Container spec is accepted but not acted on. Without it, an agent container has no way to receive a host directory as its workspace. The Claude Code sandbox use case — "run the agent against this repo on my machine" — is unworkable until volumes land.
-
-**Proposal.** Promote `volumes` from reserved to active. Minimum viable shape:
-
-```yaml
-volumes:
-  - source: /home/alice/src/my-project
-    target: /workspace
-    readOnly: false
-  - source: /etc/ssl/certs
-    target: /etc/ssl/certs
-    readOnly: true
+```
+Realm → Space → Stack → Cell → Container
 ```
 
-Bind mounts are the base case. Named volumes can wait. What matters is that `source` is a host path (explicitly; no implicit host access), `target` is a container path, and `readOnly` is honored.
+A **Realm** is a containerd namespace. A **Space** is one CNI network plus one cgroup subtree — this is where default-deny networking lives. A **Stack** groups related cells. A **Cell** is pod-like: one root container owns the network namespace, others join it. A **Container** is just an OCI container inside the cell.
 
-**Why this is P0.** Nothing else in this document matters if you can't give the agent a workspace. This is the table-stakes field whose absence currently blocks the entire use case.
+Why the insistence on real primitives? Because the entire value proposition is that you can *trust* the isolation, and you can only trust what you can inspect. Every layer corresponds to something you can examine with tools you already know — `ctr` for the namespace, `ip link` for the network, `ls /sys/fs/cgroup` for the cgroups. There's no proprietary control plane you have to take on faith. The daemon (`kukeond`) is a thin layer over containerd, CNI, and cgroups; `kuke` is the CLI. You declare resources in YAML and the daemon reconciles them.
 
-### 4.2 `P0` — Security fields on Container
+This is also why it's containerd directly and not Docker. Docker's daemon model and flat networking abstract away exactly the primitives I want precise control over. And keeping the substrate this lean is what lets it run on hardware modest enough to make the sovereignty claim *credible* — more on that later, but the short version is: if it runs on a Raspberry Pi, it can't be hiding a cloud dependency.
 
-**Problem.** The Container spec has only `privileged: true/false`. For untrusted in-container code, orchestrators need finer control.
+---
 
-**Proposal.** Add the following fields to Container `spec`, each with safe defaults:
+## How you describe a cell (and why this took three tries)
 
-| Field                        | Type                           | Default                                  | Purpose                                               |
-| ---------------------------- | ------------------------------ | ---------------------------------------- | ----------------------------------------------------- |
-| `user`                       | `"uid:gid"`                    | image default                            | Run as non-root                                       |
-| `readOnlyRootFilesystem`     | bool                           | `false` (for compat), `true` recommended | Lock rootfs                                           |
-| `capabilities.drop`          | `[]string`                     | `[]`                                     | Drop Linux capabilities                               |
-| `capabilities.add`           | `[]string`                     | `[]`                                     | Add Linux capabilities (rarely needed)                |
-| `securityOpts`               | `[]string`                     | `[]`                                     | Passthrough for `no-new-privileges`, seccomp profiles |
-| `tmpfs`                      | `[]{path, sizeBytes, options}` | `[]`                                     | tmpfs mounts for ephemeral scratch                    |
-| `resources.memoryLimitBytes` | int                            | unset                                    | Hard memory ceiling                                   |
-| `resources.cpuShares`        | int                            | unset                                    | CPU weight                                            |
-| `resources.pidsLimit`        | int                            | unset                                    | Prevent fork bombs                                    |
+The runtime runs cells. But how do you *describe* one? This evolved through three generations, and the path is instructive.
 
-This is the minimum to express what `docker run --user X --read-only --cap-drop=ALL --security-opt=no-new-privileges --tmpfs=/tmp --memory=4g --pids-limit=512` expresses today. Without these, kukeon is strictly less expressive than compose for untrusted workloads.
+The first version, `CellProfile`, was client-side only — the CLI expanded a profile into a cell locally and ran it. It worked, but it duplicated the same machinery into every profile: cloning the repo, setting up git identity, injecting secrets. The lifecycle was invisible to the daemon.
 
-**Why this is P0.** These are the knobs every isolation guide tells agent operators to set. Their absence means kukeon can't match the sbsh+docker baseline the community is already using.
+The current model splits the concern in two, and both are daemon-stored:
 
-### 4.3 `P1` — Isolation-envelope inheritance from Space
+- A **`CellBlueprint`** is a parametrized *template* — the structure, containers, and setup work, with slots.
+- A **`CellConfig`** fills those slots with concrete values and an identity. Blueprint + Config = a runnable cell.
 
-**Problem.** If every Container in a Space needs the same cap drops, the same user, the same resource ceilings, repeating that per-container in YAML is error-prone. More importantly, it misses the point of the Space-as-envelope design — the Space exists _because_ isolation should be declared once.
+If you've used container orchestration this is a familiar shape — template versus instance, *how to build a thing* versus *this specific thing*. The reason it matters here is that it becomes the substrate for the agent organization: **each agent role is a Blueprint, and each dispatched agent is a Config instantiating it.** The planner role is a template; "the planner working on project X right now" is an instance.
 
-**Proposal.** Add a `spec.defaults` block on Space that is inherited by every Container in the Space unless overridden:
+One principle worth pulling out: the setup work a cell does at boot — cloning, git identity, mounting credentials — runs *inside the container*, with the container's own UID and scoped credentials, never on the daemon's host context. The daemon orchestrates; it never touches your SSH keys. That clean trust boundary matters more and more as the system gets more autonomous.
 
-```yaml
-apiVersion: v1beta1
-kind: Space
-metadata:
-  name: agent-sandbox
-spec:
-  realmId: agents
-  defaults:
-    container:
-      user: "1000:1000"
-      readOnlyRootFilesystem: true
-      capabilities:
-        drop: ["ALL"]
-      securityOpts: ["no-new-privileges"]
-      resources:
-        memoryLimitBytes: 4294967296 # 4 GiB
-        pidsLimit: 512
-      tmpfs:
-        - { path: /tmp, sizeBytes: 268435456 }
+---
+
+## The organization: roles with separation of powers
+
+On top of the runtime sits the team. The design rule is one role per cell, autonomous within a narrow mandate, with hard boundaries on what each *won't* do:
+
+- **PM** decomposes a goal into a plan, grooms the backlog, prioritizes. Never touches code, never merges.
+- **Dev** picks a ready task, implements, tests, opens a PR, addresses feedback. Never merges, never manages the backlog.
+- **Reviewer** reviews PRs and signals a verdict. Never authors code, never merges.
+- **Meta** creates and refines *the other roles' playbooks*, via PRs. Never merges, never touches product code.
+- **Orchestrator** is the conductor between you and the agents — dispatches roles to cells, reads their logs. Never authors or merges.
+
+The `will not` column is the actual design. **The author of work is never its approver, and a human does the merging.** This separation of powers is what makes the audit trail mean something. It's also the thing a single "do-everything" self-improving agent structurally cannot give you — a lone agent grading its own work is not an audit. An organization with enforced role boundaries is.
+
+Each recurring task is a small playbook file (a "skill"). These playbooks are, in a real sense, the agents' *source code* — and that turns out to be the key to how the system improves itself. The judgment-heavy skills — how the PM decomposes a goal, how a dev picks which task is actually ready, what the reviewer considers blocking — are where the real intelligence lives, and where self-improvement pays off most.
+
+### The plan is a graph, and that's load-bearing
+
+The PM doesn't write a to-do list; it writes a graph. A goal becomes an initiative (an epic) and a set of nodes (sub-issues) with dependency edges, all expressed as issues in the project's Git forge. Because it's a graph and not a list, independent nodes can be worked *in parallel* by multiple dev cells.
+
+The PM's hardest skill is making that graph *honest* — right-sized nodes, real dependencies, and an accurate read of which nodes are genuinely independent. Everything downstream trusts this structure, so a wrong graph is expensive. Re-partitioning a node that turned out too big or too coupled is a first-class operation. Get the decomposition right and the rest of the system flows; get it wrong and no amount of downstream cleverness saves you.
+
+---
+
+## Concurrency: where the obvious approach is wrong
+
+Now the parallelism bites, and this is my favorite decision in the system because the intuitive answer is a trap.
+
+You're running two dev cells. Both look for work the same way: list the issues, find one without an "in-progress" label, claim it by adding the label, start working. The bug is immediate — both cells read "no label," both decide to claim, both add it, both build the same thing. It's a textbook check-then-act race.
+
+The temptation is to fix it with *better labels* or more careful polling. That's the trap. **A label is not a concurrency primitive.** It's a piece of mutable shared state with no atomic compare-and-swap and no ownership semantics. You're implementing a lock with a sticky note. A per-process guard like `flock` stops two instances on one host, but it does nothing for two cells racing across the system.
+
+The right fix is to separate two things that labels had conflated: *where the work is described* and *who is allowed to work it right now*. The description stays in the forge. The claim moves into the daemon, as a **lease**:
+
+```
+key:    <repo>#<node-id>      ← note: forge-agnostic
+holder: <cell-id>
+acquired_at, expires_at
 ```
 
-Per-container values override Space defaults; Space defaults override kukeon built-ins. Inheritance is shallow (no deep-merge surprises).
+The claim is the one operation labels can't do: an **atomic compare-and-swap** — create the lease if and only if no live lease exists for that key. Exactly one cell wins; the other moves on. Clean.
 
-**Why this is P1.** This is the move that turns kukeon from "compose with a hierarchy" into "compose where the hierarchy means something." Isolation posture becomes a property of _where_ a container lives, not a property every author has to remember to set.
+Two things make this *correct*, not just convenient:
 
-### 4.4 `P1` — Network policy on Space
+1. **The daemon already knows liveness.** It owns cell lifecycle, so when a cell dies, its lease is released — not on a hopeful timeout, but on the actual death signal. This is the deep reason the lease belongs in the runtime and nowhere else: only the daemon has *both* the claim and the liveness information. Put the lease in the forge and you've separated them, and you're back to guessing.
+2. **Heartbeat plus a TTL backstop.** A working cell renews its lease; silence lets it expire. That covers the cases the death signal might miss — a hang, a partition.
 
-**Problem.** The current Space creates a CNI bridge but does not constrain what the bridge can reach. For agent workloads, uncontrolled egress is the main way a small mistake becomes a big one (data exfiltration, calls to paid APIs, command-and-control via prompt injection).
+Labels don't disappear — but they get demoted to what they're good at: a *human-visible reflection* of state, written *after* a lease transition, never the claim mechanism itself.
 
-**Proposal.** Add `spec.network` to Space with an egress-policy shape:
+And notice the bonus in that lease key: it's forge-agnostic. The concurrency logic doesn't know or care whether the work item is a GitHub issue or a Forgejo one. Which leads to the next decision.
 
-```yaml
-spec:
-  realmId: agents
-  network:
-    egress:
-      default: deny # or allow
-      allow:
-        - host: api.anthropic.com
-          ports: [443]
-        - host: registry.npmjs.org
-          ports: [443]
-        - cidr: 10.0.0.0/8
-          ports: [5432]
+---
+
+## Where the truth lives: not in Kukeon
+
+Here's a decision that looks like a limitation and is actually the whole point. Kukeon does *not* store the issues, the plan, or the audit trail in its own database. The Git forge is the system of record — GitHub for convenience, or self-hosted Forgejo/GitLab for air-gapped use. Kukeon keeps only references and a derived operational view: the plan-graph as a typed projection, the lease table, a cache so agents can read without hammering the forge's rate limits.
+
+Why give up owning your own data model? Because of what you're building. This is a system that acts autonomously and *rewrites its own behavior*. The record of what such a system did, and how it changed itself, should live **outside the system being audited** — in infrastructure you already trust, with signed, attributed history. "The audit log is in our daemon's database, trust us" is a weak story to tell a security reviewer. "Every action is a commit and a PR in your own Git, signed and attributed" is a strong one.
+
+And it's not a sacrifice of sovereignty, because the answer to "but then you depend on GitHub" is: self-host the forge. A self-hosted Forgejo gives you Git's content-addressed, append-mostly history — the strongest audit substrate that exists — on your own hardware, air-gapped if you need it. You'd be foolish to rebuild that badly in a native store. The right move isn't to escape the forge; it's to *own* the forge.
+
+This is why the forge-agnostic lease key matters. The coordination logic is already independent of the forge. Put a thin adapter behind the forge calls and "works only with GitHub" stops being true at the layer that counts — swap in Forgejo for air-gap and the loops don't change a line.
+
+---
+
+## The loops: what Kukeon actually is
+
+Everything so far is scaffolding. The thing that makes Kukeon *Kukeon* is that it closes loops. There are three, and the discipline is that they have separate intakes and separate destinations.
+
+### The work loop
+
+The core cycle, every artifact a Git object:
+
+```
+goal → PM builds the plan-graph → dev claims a ready, unleased node →
+implements → opens PR → reviewer gates → (changes? → dev fixes) →
+human merges → release when the graph completes → next goal
 ```
 
-Enforcement can be iptables/nftables on the bridge for IP+port rules, or a transparent egress proxy for hostname rules (the proxy is the honest option for HTTPS since SNI can be inspected but IP allowlists are too coarse).
+You, the human, are in exactly two places: stating the goal, and merging. Everything in between runs on its own. That merge gate is not friction to be optimized away — it's the feature. It's what makes the autonomy *accountable*.
 
-For the minimum viable version, accept `default: deny` plus an allowlist of `(host, port)` pairs, and document that hostname enforcement requires the proxy path.
+### Loop A — the system improves its own agents
 
-**Why this is P1.** "Network isolation" without egress control is security theatre for agent workloads. The Space is the correct object to put this on; it already owns the network.
+Every agent runs a reflection step when it finishes a task (on an ending hook, so it's structural, not something an agent might forget). If the task surfaced a durable lesson — "this kind of node keeps getting sized wrong," "this rule slowed me down" — the agent files a `learn-feedback` issue in the *agents* repo. The meta-agent picks it up, implements the playbook change as a PR, and a human merges it.
 
-### 4.5 `P1` — A `Session` kind (or equivalent lifetime primitive)
+This is the answer to every vague claim about "self-improving agents." The unit of learning is a playbook file. The mutation is a pull request. A human approves it. **Improvement is a diff you can read** — not a weight update you can't, not a memory mutation you can't see. The system gets better the way a good team does: through reflected lessons and reviewed changes.
 
-**Problem.** Kukeon's lifecycle verbs operate on persistent resources. An agent run is not persistent — it has a task, a start, an end, and should leave nothing behind except declared outputs. Today you simulate this with `kuke apply` followed by `kuke delete`, but there's no single object representing "this run" and no automatic enforcement of its end.
+### Loop B — the system improves the product
 
-**Proposal.** Introduce a new kind:
+The same reflection step asks a *second, independent* question: did this task surface a verified bug in the *product* (not the process)? If so, it files an issue in the *project* repo, and that re-enters the work loop.
 
-```yaml
-apiVersion: v1beta1
-kind: Session
-metadata:
-  name: claude-2026-04-21-14-32
-spec:
-  stackId: claude-code
-  owner: alice@example.com
-  task: "refactor the auth module"
-  lifetime:
-    wallClock: 30m
-    idleTimeout: 5m
-  onEnd:
-    # What survives. Everything else is destroyed.
-    persist:
-      - volume: /workspace/out
-status:
-  state: Running
-  startedAt: 2026-04-21T14:32:10Z
-  deadline: 2026-04-21T15:02:10Z
+The independence is the point. Loop A refines the builders; Loop B refines the thing being built. They write to different repos and they cannot cross: a process lesson can never edit product code, a product bug can never edit an agent's playbook. That firewall is what keeps "it improves itself" from becoming an unaccountable tangle.
+
+### Loop C — the product reports its own failures
+
+Once something is built and running, it emits errors. Loop C closes that:
+
+```
+running product → error sink (groups & counts; plain code, no LLM) →
+a threshold or schedule wakes a live-debugger agent →
+agent triages the grouped batch, dedups, files a project-repo issue → work loop
 ```
 
-When the deadline passes, or the Session is explicitly closed, kukeon destroys the Stack and everything under it — cells, containers, tmpfs, ephemeral volumes — except paths listed in `onEnd.persist`. The Session object itself survives (for audit) with `status.state: Completed` or `Terminated`.
-
-This primitive is what makes "ephemeral by default" the easy path. It also gives the orchestrator the hook it needs to enforce timeouts and budgets (see 4.7).
-
-**Why this is P1.** Without it, every agent operator has to reimplement "automatic cleanup after 30 minutes" themselves, which is exactly the kind of footgun a good primitive removes.
-
-### 4.6 `P1` — Scoped credential injection
-
-**Problem.** Today, credentials are passed via `env: ["ANTHROPIC_API_KEY=..."]`, which puts the secret in the manifest, in logs, and in `kuke get -o yaml` output. For agents, this is the wrong ergonomics _and_ the wrong security posture.
-
-**Proposal.** Add a `secrets` field on Container (or inherited from Space/Session) that references credentials by source, not by value:
-
-```yaml
-secrets:
-  - name: ANTHROPIC_API_KEY
-    fromFile: /etc/kukeon/secrets/anthropic.key
-  - name: GITHUB_TOKEN
-    fromEnv: GITHUB_TOKEN_SCOPED # on the host, set by a wrapper
-```
-
-Values are mounted into the container's environment or as files, never written into status or persisted in audit logs. The manifest is safe to commit.
-
-An extended version — probably `P2` — would integrate with an external broker (Vault, systemd credentials, cloud KMS) so that credentials are minted fresh per Session and revoked on Session end.
-
-**Why this is P1.** The absence of this feature pushes agent operators toward the two worst options: committing secrets into manifests, or passing them through shell env vars where they leak into audit trails. Kukeon should make the right path the easy path.
-
-### 4.7 `P2` — Capability budgets on Session
-
-**Problem.** Resource limits today (CPU, RAM, pids) don't cover the dimensions that actually get agents into trouble: dollars spent on API calls, number of tool invocations, number of writes to disk.
-
-**Proposal.** Extend Session spec with budgets the orchestrator enforces:
-
-```yaml
-spec:
-  budgets:
-    spend:
-      - endpoint: api.anthropic.com
-        maxUSD: 5.00
-    toolCalls: 500
-    fileWrites: 200
-    networkRequests: 1000
-```
-
-Spend and network-request enforcement require the egress proxy from 4.4 (that's where bytes and endpoints are observable). Tool calls and file writes require either cooperation from the agent runtime (it reports each tool invocation) or a process-exec/file-write auditor at the orchestrator level. Either is a real piece of work.
-
-When a budget is exceeded, the Session is terminated (not warned). The enforcement point is the orchestrator, not the agent runtime — the agent tracking its own spend is telemetry, not a boundary.
-
-**Why this is P2.** This is the feature that makes kukeon distinctively agent-native rather than agent-compatible. It's also the hardest to implement well. P2 is honest: nice to have, not blocking, but the piece that would give kukeon something no other orchestrator has.
-
-### 4.8 `P2` — Causal audit trail
-
-**Problem.** "The blast radius is controlled" is a verifiable claim only if, after the Session ends, you can answer _exactly_ what the agent did: what it read, what it wrote, where it connected, what commands it ran. Container logs don't cut it — they're unstructured and disappear with the container.
-
-**Proposal.** The daemon writes a per-Session append-only audit log to a location the Session itself cannot write to:
-
-- Every process exec inside the Session (argv, exit code, duration).
-- Every file write to a declared workspace volume (path, size, hash).
-- Every outbound connection (destination, port, bytes, status) — source is the egress proxy again.
-- Every credential use.
-- Session lifecycle events (start, budget hits, termination cause).
-
-Retention is configurable on the Session (`spec.audit.retain: 7d`). A `kuke audit session <id>` command surfaces it.
-
-Causally linking file writes back to the tool call that caused them requires runtime cooperation and is an advanced feature; the orchestrator-level pieces above (exec, file write, network, creds) are all observable without runtime help.
-
-**Why this is P2.** Without audit, "blast radius" is marketing copy. With it, it's an operable property.
-
-### 4.9 `P2` — Approval gates
-
-**Problem.** `--dangerously-skip-permissions` is the flag that makes agents practical. It's also the flag that removes the per-action stop point that used to catch mistakes. Some actions need the stop point back, at an orchestrator level where the agent can't skip it.
-
-**Proposal.** Session spec declares gated action classes; the orchestrator blocks those actions until out-of-band approval arrives.
-
-```yaml
-spec:
-  gates:
-    - class: egressUnallowlistedHost
-    - class: writeOutsideWorkspace
-    - class: spendPerCallAbove
-      thresholdUSD: 0.50
-  approvals:
-    channel: local-socket:/run/kukeon/approvals.sock
-    timeout: 2m
-```
-
-Approval channel implementations can vary — a local Unix socket, a webhook, a desktop notification daemon, a chat bot. What matters is the primitive: the orchestrator halts the agent's action until a human responds or the timeout fires.
-
-**Why this is P2.** This is the feature that makes unsupervised agent runs safe enough that operators will actually leave them unattended. It's valuable, but it requires the auditing and egress-proxy pieces to be in place first.
+The design subtlety: no agent sits *tailing* logs — that would burn tokens constantly deciding "nothing happened." The cheap deterministic sink does the high-volume collecting and grouping; an agent is dispatched only when there's a batch worth a judgment call. And like Loop B, it files only to the project repo — a runtime error is a fact about the product, never a lesson about the process. The daemon might route the error stream, but it never files issues itself: filing needs triage judgment and bot attribution, and those belong to an agent. **Infrastructure never files; agents file.** That single rule is what keeps the three loops' write-targets clean.
 
 ---
 
-## 5. Non-goals
+## The frame: a bootstrapping compiler
 
-To keep the proposal tight, some things are explicitly out of scope for kukeon even under an agent-native framing:
+Step back and the shape of the whole thing snaps into focus, and it's a precise analogy rather than a loose one.
 
-- **Agent runtime management.** MCP server lifecycles, tool routing, prompt templating, model selection. These belong in the runtime (Claude Code, Codex, custom clients), not the orchestrator.
-- **Multi-agent coordination.** Agent A spawning agent B, handoffs, shared scratchpads. Interesting, but premature; nail single-Session isolation first.
-- **Distributed scheduling.** Kukeon is local-first by design, and that's an asset for the agent use case (no cross-node complexity). Keep it that way.
-- **A Kubernetes-compatible API.** Kukeon's value is that it isn't Kubernetes. Don't spend complexity budget chasing kubectl compatibility.
+A compiler *bootstraps* when you use it to compile itself. You write a minimal seed compiler — *stage-0* — in some *other* language, because nothing exists yet to compile the real one. You use stage-0 to compile a better compiler written in the target language. Then that compiles the next. Improvements compound, because each better compiler builds the next one. The thing builds the thing that builds the thing.
 
----
+Kukeon maps onto this exactly:
 
-## 6. What success looks like
+- **Stage-0 is you.** Right now the human authors the playbooks and approves every merge. The system can't yet produce itself without you — just as a language can't compile its first compiler in itself. The seed is, by necessity, foreign.
+- **The source language is the agent playbooks.** Loop A is the system *recompiling its own source*. The meta-agent is literally the part of the compiler that compiles the compiler.
+- **Self-hosting is the loop closing without you in the critical path** — and the way you prove it is a *fixpoint*: the system builds a version of itself, that version builds the next, and the builds *converge* instead of drifting. "Kukeon built Kukeon, and successive self-builds are stable" is a far stronger claim than any list of features.
 
-A concrete test for whether the above proposals succeed: **a five-document manifest that gives a Claude Code agent strictly more isolation than a carefully-written 100-line `docker-compose.yml`.** If that manifest exists and works, kukeon has moved the floor. If it doesn't, the proposals have added concepts without moving the floor.
+The analogy comes with two famous warnings, and the architecture is built around both:
 
-A rough shape of that manifest, assuming P0 + P1 are adopted:
+**Trusting-trust.** Ken Thompson's classic result: a self-hosting compiler can carry a flaw that reproduces into every version it compiles, *invisibly*, because the corruption lives in the compiling compiler, not in the clean-looking source. Kukeon's version of this is sharp — it's the meta-agent evaluating changes to its *own* judgment. A bad refinement to how the system evaluates refinements would propagate into all future evaluations, and every diff would still look clean. The defense is exactly the human merge gate: a trusted stage-0 that a corrupted stage-N cannot certify away. This is *why* the human stays in the loop on purpose, not as a temporary limitation.
 
-```yaml
----
-apiVersion: v1beta1
-kind: Realm
-metadata: { name: agents }
----
-apiVersion: v1beta1
-kind: Space
-metadata: { name: claude-sandbox }
-spec:
-  realmId: agents
-  network:
-    egress:
-      default: deny
-      allow:
-        - { host: api.anthropic.com, ports: [443] }
-  defaults:
-    container:
-      user: "1000:1000"
-      readOnlyRootFilesystem: true
-      capabilities: { drop: ["ALL"] }
-      securityOpts: ["no-new-privileges"]
-      resources: { memoryLimitBytes: 4294967296, pidsLimit: 512 }
-      tmpfs:
-        - { path: /tmp, sizeBytes: 268435456 }
-        - { path: /home/agent, sizeBytes: 134217728 }
----
-apiVersion: v1beta1
-kind: Stack
-metadata: { name: claude-code }
-spec: { realmId: agents, spaceId: claude-sandbox }
----
-apiVersion: v1beta1
-kind: Session
-metadata: { name: claude-run }
-spec:
-  stackId: claude-code
-  lifetime: { wallClock: 30m, idleTimeout: 5m }
-  onEnd:
-    persist: [{ volume: /workspace/out }]
----
-apiVersion: v1beta1
-kind: Cell
-metadata: { name: agent }
-spec:
-  realmId: agents
-  spaceId: claude-sandbox
-  stackId: claude-code
-  containers:
-    - id: claude
-      image: claude-sandbox:latest
-      command: claude
-      args: ["--dangerously-skip-permissions"]
-      volumes:
-        - {
-            source: /home/alice/src/my-project,
-            target: /workspace,
-            readOnly: false,
-          }
-      secrets:
-        - {
-            name: ANTHROPIC_API_KEY,
-            fromFile: /etc/kukeon/secrets/anthropic.key,
-          }
-```
+**Divergence.** A miscompiled compiler can produce a compiler that produces garbage, and if you've dropped the seed, you can't get back. The mitigations are the compiler-builder's: keep the seed (stay stage-0 longer than feels necessary), keep every intermediate stage reproducible (the Git trail *is* the reproducible build log), and test the fixpoint before trusting it.
 
-One file, one `kuke apply`, one Session, one `kuke delete` when done. The agent has a workspace, an egress-restricted network, a scoped credential, a hard deadline, and no access to anything on the host outside the declared workspace. That's the bar.
+This is the test the whole design is pointed at — and it's why the most-requested feature, an agent that merges autonomously and removes the human, is *deliberately deferred*. Even the most aggressive teams in this space keep a human on the merge. You don't drop the seed until self-hosting is proven stable. The drink separates if you stop stirring too early.
+
+Which, finally, is why the name is what it is. Heraclitus wrote that the *kykeon* — a barley drink — separates if it isn't stirred. He meant it as an image of the *logos*: order isn't a static state, it's a process held together by motion. A bootstrapping compiler has exactly that nature. It isn't an artifact; it's a process that stays itself only by continuously running on itself. Kukeon is order through motion — it becomes what it is only while it keeps building and refining itself.
 
 ---
 
-## 7. Sequencing
+## Where it stands
 
-A reasonable order of operations for the project:
+Kukeon is beta. The runtime, daemon, and hierarchy are stable for single-host use. The agent organization and Loops A and B run today, through human-merged PRs. The Blueprint/Config model is actively replacing CellProfile. Leases, the projection/cache layer, the typed plan-graph, and Loop C are the active frontier. The autonomous approver — the one that would remove the human merge gate — is deliberately on the far side of "prove the fixpoint first."
 
-1. **Land `P0` first** (volumes, container security fields). This unblocks the compose-parity story and makes kukeon usable for any untrusted workload, agent or otherwise.
-2. **Then `P1`** (Space defaults, network policy, Session kind, scoped credentials). This is the stretch that makes kukeon _better than_ compose for the agent case specifically.
-3. **Finally `P2`** (budgets, audit, approval gates). This is where the agent-native category bet is made — opt-in, ambitious, and optional for the project's homelab/VPS user base.
+Built so far: the runtime and hierarchy; daemon lifecycle; the agent roles and skills; reflection-on-hook; process learning (Loop A) and product-defect feedback (Loop B). In flight: Blueprint/Config, leases, the projection layer, the plan-graph as a typed object, runtime feedback (Loop C). Deliberately not built yet: anything that takes the human off the merge.
 
-`P0` is a few weeks of well-scoped work against an existing schema. `P1` is a quarter of design-heavy work but introduces no new architecture. `P2` is a project of its own and can wait until there's demand to justify it.
+If the design has a single thesis, it's this: **autonomy and accountability aren't in tension if every action the system takes — including the actions it takes to improve itself — is an owned, inspectable, human-approved diff.** The agents do the work. The forge holds the truth. The human holds the seed. And the whole thing is itself only while it's being stirred.
 
 ---
 
-## 8. Closing
-
-Kukeon did not set out to be an agent orchestrator, and it doesn't need to rebrand as one. But the primitives it happens to have — namespace-per-Realm, CNI-plus-cgroup-per-Space, declarative `apply`, local-first — are the right shape for a gap that is not well served today. Docker's surface is too flat, Kubernetes' surface is too heavy, and purpose-built agent sandboxes are one-off shell scripts dressed up as products.
-
-The proposal above is a path to take the gap without abandoning the project's stated direction. Most of what's needed is field additions to an existing schema. A few of the items are new kinds. None of them require kukeon to stop being what it already is.
-
-Whether to take the bet is the maintainer's call. This document is written to make the bet legible.
-
----
-
-## 9. Status as of v0.5.0
-
-The proposal above was written before v0.4.0. Most of P0 and P1 has since shipped; P2 has not been started. This section reconciles each section-4 promise with what's in the tree today so the proposal can be read as a status document rather than a forecast.
-
-| §   | Item                                              | Priority | Status                                    |
-| --- | ------------------------------------------------- | -------- | ----------------------------------------- |
-| 4.1 | Volume mounts on Container                        | P0       | **Shipped** — `v0.4.0`                    |
-| 4.2 | Security fields on Container                      | P0       | **Shipped** — `v0.4.0`                    |
-| 4.3 | Isolation-envelope inheritance from Space         | P1       | **Shipped** — `v0.4.0`                    |
-| 4.4 | Network policy on Space                           | P1       | **Shipped** — `v0.4.0`                    |
-| 4.5 | `Session` kind                                    | P1       | **Deferred** — closed wontfix             |
-| 4.6 | Scoped credential injection                       | P1       | **Shipped** — `v0.4.0`                    |
-| 4.7 | Capability budgets on Session                     | P2       | **Not started**                           |
-| 4.8 | Causal audit trail                                | P2       | **Not started**                           |
-| 4.9 | Approval gates                                    | P2       | **Not started**                           |
-
-### Per-item detail
-
-**4.1 — Volume mounts (P0).** Promoted from reserved to active. The Container spec honors `volumes: [{source, target, readOnly}]` for host bind mounts and `volumes: [{kind: tmpfs, target, sizeBytes, mode}]` for ephemeral scratch. Wired through to the OCI runtime spec at cell-creation time.
-
-**4.2 — Security fields on Container (P0).** All fields proposed in the priority-order table are present and honored: `user`, `readOnlyRootFilesystem`, `capabilities.{add,drop}`, `securityOpts`, `tmpfs`, and `resources.{memoryLimitBytes, cpuShares, pidsLimit}`. Defaults remain backwards-compatible (`readOnlyRootFilesystem: false`); operators opt into tighter posture per-container or per-Space (see 4.3).
-
-**4.3 — Space defaults inheritance (P1).** Space spec exposes `spec.defaults.container` covering the same security/resource/tmpfs surface as 4.2. Inheritance is shallow; per-container values override Space defaults. This is the field that turns Space from "a CNI network" into "the isolation envelope."
-
-**4.4 — Network policy on Space (P1).** Space spec exposes `spec.network.egress` with `default: deny|allow` plus an allowlist of `(host, ports)` or `(cidr, ports)` pairs. Enforcement is iptables/nftables on the space bridge for IP+port rules; hostname-targeted rules are resolved at policy-apply time. The transparent egress proxy mode the proposal outlined as the "honest" path for SNI inspection is not built — HTTPS allowlisting today is by destination IP after DNS resolution, with the proxy path left for a future P2 cycle.
-
-**4.5 — `Session` kind (P1).** [Issue #46](https://github.com/eminwux/kukeon/issues/46) closed as `wontfix`. The original proposal had `Session` carry lifetime, `onEnd.persist`, and budget enforcement in one kind. In practice, lifetime and persist semantics ended up better served by `kuke apply` + explicit teardown plus parameterized cell profiles ([#358](https://github.com/eminwux/kukeon/issues/358), shipped), and the budget/audit/approval pieces (4.7–4.9) are large enough to deserve their own kinds rather than overloading one. A dedicated lifetime/budget primitive may return in a later milestone if demand justifies it.
-
-**4.6 — Scoped credential injection (P1).** Container spec has `secrets: [{name, fromFile|fromEnv, mountPath?}]`. Values are mounted as env vars or files at runtime and never written into status or audit logs. The external-broker integration outlined as the extended (P2-ish) variant is not built; secrets are sourced from the host filesystem or host env today.
-
-**4.7–4.9 — P2 items.** Capability budgets, causal audit trail, and approval gates have no tracking issues open and no code on disk. They were deferred at proposal time as "the agent-native category bet" — opt-in, ambitious, and explicitly optional for kukeon's homelab/VPS user base. Reopening this work is gated on demand from real agent operators using the v0.5.0 substrate.
-
-### What this means for v1.0
-
-The agent-native gate — "give an agent a workspace, an egress-restricted network, a scoped credential, and a non-root sandbox by declaration" — is redeemed in v0.5.0 by the P0+P1-minus-Session set, and the [Section 6 success manifest](#6-what-success-looks-like) shape works today (substituting explicit `kuke apply` + `kuke delete` for the deferred `Session` kind). The remaining gaps to v1.0 are schema/runtime tracks not covered by this proposal — see the [FAQ on v1.0](faq.md#when-is-v10) for the gating issues.
+*Kukeon is open-source (Apache 2.0), built in the open at github.com/eminwux/kukeon.*

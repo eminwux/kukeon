@@ -126,6 +126,8 @@ nav:
       - tutorials/first-stack.md
   - Blog:
       - blog/index.md
+  - Proposals:
+      - proposals/agent-native-orchestration.md
   - FAQ: faq.md
 
 extra:
