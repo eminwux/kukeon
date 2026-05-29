@@ -3152,9 +3152,11 @@ func TestRun_FromConfig_RejectsParamFlags(t *testing.T) {
 }
 
 // TestRun_PositionalConfig_MutexWithFlagSources covers issue #813's AC: the
-// <config> positional is rejected when combined with -b/-f/-p; the rejection
-// message names all four sources so the operator sees the full set without
-// re-running with --help.
+// <config> positional is rejected when combined with -b/-f; the rejection
+// message names the remaining sources so the operator sees the full set
+// without re-running with --help. The legacy `-p`/`--profile` form was
+// removed in #626 and is now intercepted at flag-parse time with a
+// migration pointer before the positional-mutex check runs.
 func TestRun_PositionalConfig_MutexWithFlagSources(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -3170,11 +3172,6 @@ func TestRun_PositionalConfig_MutexWithFlagSources(t *testing.T) {
 			"-f conflicts with positional",
 			[]string{"prod", "-f", "/tmp/never-read.yaml", "-d"},
 			"the <config> positional is mutually exclusive with -f/--file",
-		},
-		{
-			"-p conflicts with positional",
-			[]string{"prod", "-p", "shell", "-d"},
-			"the <config> positional is mutually exclusive with -p/--profile",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3535,7 +3532,7 @@ func TestRun_FromConfig_NewWithRm_SetsAutoDelete(t *testing.T) {
 // TestRun_New_OnlyValidWithConfig covers the defensive UX guard: --new is a
 // CellConfig-only knob (only the <config> positional reaches the daemon-
 // stored CellConfig path). Allowing it silently on -f (where metadata.name is
-// authoritative) or -p/-b (which already generate <prefix>-<6hex>) would seed
+// authoritative) or -b (which already generates <prefix>-<6hex>) would seed
 // a wrong mental model that --new toggles a default that isn't actually
 // flipped.
 func TestRun_New_OnlyValidWithConfig(t *testing.T) {
@@ -3547,11 +3544,6 @@ func TestRun_New_OnlyValidWithConfig(t *testing.T) {
 		{
 			"-f rejects --new",
 			[]string{"-f", "/tmp/never-read.yaml", "--new", "-d"},
-			"--new is only valid with the <config> positional",
-		},
-		{
-			"-p rejects --new",
-			[]string{"-p", "shell", "--new", "-d"},
 			"--new is only valid with the <config> positional",
 		},
 		{
@@ -4131,7 +4123,7 @@ func TestRun_FromConfig_Clone_MutexWithRm(t *testing.T) {
 }
 
 // TestRun_Clone_OnlyValidWithConfig mirrors TestRun_New_OnlyValidWithConfig:
-// --clone is a CellConfig-only knob, rejected on -f/-p/-b. The error wording
+// --clone is a CellConfig-only knob, rejected on -f/-b. The error wording
 // pins the per-source phrasing so the operator's mental model isn't muddled.
 func TestRun_Clone_OnlyValidWithConfig(t *testing.T) {
 	for _, tc := range []struct {
@@ -4142,11 +4134,6 @@ func TestRun_Clone_OnlyValidWithConfig(t *testing.T) {
 		{
 			"-f rejects --clone",
 			[]string{"-f", "/tmp/never-read.yaml", "--clone", "-d"},
-			"--clone is only valid with the <config> positional",
-		},
-		{
-			"-p rejects --clone",
-			[]string{"-p", "shell", "--clone", "-d"},
 			"--clone is only valid with the <config> positional",
 		},
 		{
@@ -4699,7 +4686,7 @@ func TestRun_FromConfig_Reuse_MutexWith(t *testing.T) {
 }
 
 // TestRun_Reuse_OnlyValidWithConfig mirrors TestRun_Clone_OnlyValidWithConfig:
-// --reuse is a CellConfig-only knob, rejected on -f/-p/-b. The per-source
+// --reuse is a CellConfig-only knob, rejected on -f/-b. The per-source
 // error wording pins the operator's mental model.
 func TestRun_Reuse_OnlyValidWithConfig(t *testing.T) {
 	for _, tc := range []struct {
@@ -4710,11 +4697,6 @@ func TestRun_Reuse_OnlyValidWithConfig(t *testing.T) {
 		{
 			"-f rejects --reuse",
 			[]string{"-f", "/tmp/never-read.yaml", "--reuse", "-d"},
-			"--reuse is only valid with the <config> positional",
-		},
-		{
-			"-p rejects --reuse",
-			[]string{"-p", "shell", "--reuse", "-d"},
 			"--reuse is only valid with the <config> positional",
 		},
 		{
