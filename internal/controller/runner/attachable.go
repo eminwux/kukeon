@@ -586,6 +586,69 @@ func chownAttachableStaleChildren(root string, uid, gid int) error {
 	})
 }
 
+// attachableSocketReapplyMode is the mode the idempotent StartCell no-op
+// path (#935) re-asserts on a live per-container attach socket inode. It
+// mirrors ctr.AttachableSocketMode ("0660"): rw for the owning container
+// uid + rw for the kukeon group, no world. connect(2) on a Unix socket
+// requires write permission on the inode, so a socket an old kuketty
+// (pre-sbsh#361) bound with mode 0o640 (group-read only) is permanently
+// undialable by a kukeon-group member on the host. Re-chmod'ing the live
+// inode closes that window without bouncing the workload.
+const attachableSocketReapplyMode os.FileMode = 0o660
+
+// reapplyAttachableSocketPerms re-asserts the mode and group of every live
+// per-container attach socket on the StartCell idempotent no-op path (#935).
+//
+// When StartCell short-circuits because all container tasks are already
+// running, it skips the destructive recreate loop and with it
+// attachableBuildOpts + attachablePostCreateChown — so a socket an old
+// kuketty bound with the wrong mode (0o640 group-read only, the pre-sbsh#361
+// mode) is never corrected. A kukeon-group member on the host then dials
+// that live, listening socket and gets EACCES forever: the inode's mode
+// never changes during the attach retry window because nothing rewrites it
+// (the EACCES-retry fix from #933 only helps a socket about to be replaced
+// by a starting kuketty, not the permanent listener of a still-running one).
+//
+// The fix is a root-owned os.Chmod + os.Chown on the live socket inode:
+// idempotent when the mode is already correct (a post-#361 kuketty already
+// bound 0o660), and safe because it never restarts the workload. It is
+// best-effort — a per-container failure is logged and skipped rather than
+// failing the no-op StartCell, because the cell is already healthy and
+// running and a chmod miss must not regress the idempotent-skip contract.
+// A socket kuketty has not bound yet (ENOENT) is a benign no-op: the normal
+// startup chown path will set the mode when the listener appears.
+func (r *Exec) reapplyAttachableSocketPerms(cell intmodel.Cell) {
+	for i := range cell.Spec.Containers {
+		spec := cell.Spec.Containers[i]
+		if !spec.Attachable {
+			continue
+		}
+		socketPath := fs.ContainerSocketPath(
+			r.opts.RunPath,
+			spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
+		)
+		if chmodErr := os.Chmod(socketPath, attachableSocketReapplyMode); chmodErr != nil {
+			if errors.Is(chmodErr, os.ErrNotExist) {
+				continue
+			}
+			r.logger.WarnContext(r.ctx,
+				"failed to re-chmod attachable socket on idempotent StartCell skip",
+				"socket", socketPath, "error", chmodErr)
+			continue
+		}
+		// Leave the owning uid untouched (-1); only re-assert the kukeon
+		// group when one is configured, mirroring attachablePostCreateChown.
+		if gid := r.opts.KukeonGroupGID; gid > 0 {
+			if chownErr := os.Chown(socketPath, -1, gid); chownErr != nil &&
+				!errors.Is(chownErr, os.ErrNotExist) {
+				r.logger.WarnContext(r.ctx,
+					"failed to re-chown attachable socket group on idempotent StartCell skip",
+					"socket", socketPath, "gid", gid, "error", chownErr)
+			}
+		}
+	}
+}
+
 // attachableSocketSymlinkDirMode is the mode applied to <RunPath>/s when
 // the runner stages it on first Attachable provision. 0o755 mirrors the
 // /opt/kukeon root layout: world-traversable so any process can resolve a
