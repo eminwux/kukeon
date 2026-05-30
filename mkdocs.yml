@@ -96,6 +96,7 @@ nav:
       - cli/kuke-init.md
       - cli/kuke-doctor.md
       - cli/kuke-get.md
+      - cli/kuke-build.md
       - cli/kuke-create.md
       - cli/kuke-apply.md
       - cli/kuke-run.md
