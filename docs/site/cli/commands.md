@@ -25,6 +25,7 @@ Both are hard-linked to the same binary on install. Running `kuke` enters the cl
 | `kuke refresh`                 | Reconcile `.status` from live state without touching `.spec`          |
 | `kuke log`                     | Print a container's stdout/stderr (use `-f` to follow)                |
 | `kuke attach`                  | Attach to an Attachable container's `sbsh` terminal                   |
+| `kuke build`                   | Build an OCI image from a Dockerfile into a realm's containerd namespace |
 | `kuke image`                   | Manage container images in a realm's containerd namespace             |
 | `kuke daemon`                  | Manage the `kukeond` daemon cell lifecycle                            |
 | `kuke uninstall`               | Remove all kukeon runtime state from this host                        |
@@ -82,6 +83,7 @@ The positional argument is the resource's own name; the flags specify where in t
 - [kuke refresh](kuke-refresh.md)
 - [kuke log](kuke-log.md)
 - [kuke attach](kuke-attach.md)
+- [kuke build](kuke-build.md)
 - [kuke image](kuke-image.md)
 - [kuke daemon](kuke-daemon.md)
 - [kuke uninstall](kuke-uninstall.md)

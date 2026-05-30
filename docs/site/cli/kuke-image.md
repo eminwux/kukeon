@@ -8,6 +8,8 @@ kuke image [command]
 
 Every realm maps to its own containerd namespace (`<realm>.kukeon.io`). `kuke image` loads and deletes images inside that namespace. The default realm is `default` (containerd namespace `default.kukeon.io`); pass `--realm kuke-system` to operate on the system realm where the `kukeond` image lives.
 
+Images land in a realm via one of two producers: [`kuke build`](kuke-build.md) builds an OCI image from a Dockerfile straight into the realm's containerd namespace, and `kuke image load` imports a pre-built OCI/docker tarball into the same namespace.
+
 Listing and describing images moved to the `kuke get` family in #824 — use [`kuke get image[s]`](kuke-get.md) for both the cross-realm default and the single-image describe form. The old `kuke image get` / `kuke image ls` / `kuke image list` aliases are gone (no deprecation window).
 
 ## Subcommands
