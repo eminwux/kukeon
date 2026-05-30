@@ -77,7 +77,7 @@ Same shape as [ContainerRepo](container.md). Unlike a hand-written `Cell` / `Con
 
 #### `spec.cell.containers[].secrets[]` (list, optional)
 
-Slot-only channel: the blueprint declares the **consumption side** (where the resolved bytes land inside the container), and a `CellConfig` supplies the **source side** (which `kind: Secret` provides the bytes). Because a blueprint never carries the source, a blueprint that declares secret slots cannot run inline with `-b` — it requires `kuke run -c` with a `CellConfig` that fills the slots.
+Slot-only channel: the blueprint declares the **consumption side** (where the resolved bytes land inside the container), and a `CellConfig` supplies the **source side** (which `kind: Secret` provides the bytes). Because a blueprint never carries the source, a blueprint that declares secret slots cannot run inline with `-b` — it requires `kuke run <config>` (positional) with a `CellConfig` that fills the slots.
 
 | Field       | Type   | Required           | Description                                                                                                              |
 | ----------- | ------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------ |
@@ -101,10 +101,10 @@ The `blueprints/` directory is `0755` and each blueprint document is `0644`, bot
 
 ## Invariants
 
-- **Always fresh.** Every `kuke run -b` materializes a cell named `<prefix>-<6hex>`, where the suffix is 3 bytes of entropy. A blueprint never identifies a singleton cell — that contract belongs to [`CellConfig`](config.md). For singleton workloads use `CellConfig` (and `kuke run -c`) rather than a blueprint plus an external pinning convention.
+- **Always fresh.** Every `kuke run -b` materializes a cell named `<prefix>-<6hex>`, where the suffix is 3 bytes of entropy. A blueprint never identifies a singleton cell — that contract belongs to [`CellConfig`](config.md). For singleton workloads use `CellConfig` (and the `kuke run <config>` positional) rather than a blueprint plus an external pinning convention.
 - **Back-reference.** Every materialized cell carries the `kukeon.io/blueprint=<name>` label, so an operator can list all instances of a blueprint with `kuke get cells -l kukeon.io/blueprint=<name>`.
 - **Scalar parameters declared.** A `${KEY}` in the body must appear in `spec.parameters[]`; otherwise the blueprint fails to load. Typos surface at apply time, not as a runtime mystery.
-- **Structural slots block inline.** A required repo slot (no inline `url`) or any required secret slot makes the blueprint un-runnable with `-b`; the run path refuses with a message naming the offenders and recommending `kuke run -c` with a `CellConfig` that fills them. Optional unfilled slots are dropped silently from the materialized container.
+- **Structural slots block inline.** A required repo slot (no inline `url`) or any required secret slot makes the blueprint un-runnable with `-b`; the run path refuses with a message naming the offenders and recommending `kuke run <config>` (positional) with a `CellConfig` that fills them. Optional unfilled slots are dropped silently from the materialized container.
 
 ## Minimal
 
@@ -127,4 +127,4 @@ spec:
           - MODEL=${MODEL}
 ```
 
-A realm-scoped blueprint named `claude-code` with one scalar parameter and one container. Run a fresh instance with `kuke run -b claude-code --realm kuke-system` (each invocation produces a new `claude-code-<6hex>` cell). For an idempotent, named instance, bind it via a [`CellConfig`](config.md) and run with `kuke run -c`.
+A realm-scoped blueprint named `claude-code` with one scalar parameter and one container. Run a fresh instance with `kuke run -b claude-code --realm kuke-system` (each invocation produces a new `claude-code-<6hex>` cell). For an idempotent, named instance, bind it via a [`CellConfig`](config.md) and run with `kuke run <config>` (positional).
