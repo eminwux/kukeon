@@ -153,15 +153,15 @@ func (s *Server) Serve() error {
 	}
 
 	s.logger.InfoContext(s.ctx, "kukeond listening", "socket", s.opts.SocketPath)
-	if s.forwardAdmissionFn != nil {
-		if err := s.forwardAdmissionFn(); err != nil {
-			// Best-effort: a flushed/unavailable FORWARD admission chain must
-			// not block the daemon from serving. The next reboot self-heals
-			// here; durable per-space egress + Docker-churn handling is #953.
-			s.logger.WarnContext(s.ctx,
-				"forward admission re-assert failed on startup; continuing",
-				"error", err)
-		}
+	// NewServer always wires forwardAdmissionFn; call it unguarded to match the
+	// reconcileFn pattern (runReconcileOnce dereferences s.reconcileFn directly).
+	if err := s.forwardAdmissionFn(); err != nil {
+		// Best-effort: a flushed/unavailable FORWARD admission chain must
+		// not block the daemon from serving. The next reboot self-heals
+		// here; durable per-space egress + Docker-churn handling is #953.
+		s.logger.WarnContext(s.ctx,
+			"forward admission re-assert failed on startup; continuing",
+			"error", err)
 	}
 	s.startReconcileLoop()
 	s.acceptLoop(listener)
