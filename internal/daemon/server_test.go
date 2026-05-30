@@ -129,3 +129,56 @@ func TestServeWithoutSocketGIDLeavesGroupUnchanged(t *testing.T) {
 		t.Errorf("socket mode: got %#o want 0o600", got)
 	}
 }
+
+// TestServeReassertsForwardAdmissionOnStartup guards the reboot regression: a
+// host reboot flushes the kernel's iptables, stripping the KUKEON-FORWARD
+// admission chain that `kuke init` installed. The daemon, which restarts on
+// its own, must re-assert that chain on Serve so kukeon-bridge cells regain
+// egress without a re-run of init. A failure of that step is best-effort and
+// must never block the daemon from serving.
+func TestServeReassertsForwardAdmissionOnStartup(t *testing.T) {
+	dir := t.TempDir()
+	socketPath := filepath.Join(dir, "kukeond.sock")
+
+	srv := NewServer(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)), Options{
+		SocketPath: socketPath,
+		SocketMode: 0o600,
+	})
+
+	called := make(chan struct{}, 1)
+	srv.forwardAdmissionFn = func() error {
+		called <- struct{}{}
+		// Best-effort contract: even when the re-assert fails, Serve must
+		// still bring the socket up rather than aborting.
+		return errors.New("iptables unavailable")
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve() }()
+	t.Cleanup(func() {
+		_ = srv.Stop()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Serve did not return after Stop")
+		}
+	})
+
+	select {
+	case <-called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not re-assert forward admission on startup")
+	}
+
+	// Despite the hook returning an error, the daemon must still come up.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(socketPath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("socket did not appear after forward-admission error (Serve aborted?)")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

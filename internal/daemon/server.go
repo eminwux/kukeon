@@ -34,6 +34,7 @@ import (
 
 	"github.com/eminwux/kukeon/internal/client/local"
 	"github.com/eminwux/kukeon/internal/controller"
+	"github.com/eminwux/kukeon/internal/firewall"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 )
 
@@ -72,6 +73,11 @@ type Server struct {
 	// it before Serve so they exercise the ticker without a real controller.
 	reconcileFn func() (controller.ReconcileResult, error)
 
+	// forwardAdmissionFn re-asserts the host FORWARD admission chain once on
+	// Serve startup. Defaults to reassertForwardAdmission; tests overwrite it
+	// before Serve so they exercise the startup hook without touching iptables.
+	forwardAdmissionFn func() error
+
 	// stopCh is closed by Stop to terminate the reconcile loop independently
 	// of s.ctx; loopWG lets Stop block until the loop exits, so core.Close
 	// never races an in-flight reconcile pass.
@@ -97,6 +103,7 @@ func NewServer(ctx context.Context, logger *slog.Logger, opts Options) *Server {
 		stopCh: make(chan struct{}),
 	}
 	srv.reconcileFn = srv.core.ReconcileCells
+	srv.forwardAdmissionFn = srv.reassertForwardAdmission
 	return srv
 }
 
@@ -146,8 +153,48 @@ func (s *Server) Serve() error {
 	}
 
 	s.logger.InfoContext(s.ctx, "kukeond listening", "socket", s.opts.SocketPath)
+	// NewServer always wires forwardAdmissionFn; call it unguarded to match the
+	// reconcileFn pattern (runReconcileOnce dereferences s.reconcileFn directly).
+	if err := s.forwardAdmissionFn(); err != nil {
+		// Best-effort: a flushed/unavailable FORWARD admission chain must
+		// not block the daemon from serving. The next reboot self-heals
+		// here; durable per-space egress + Docker-churn handling is #953.
+		s.logger.WarnContext(s.ctx,
+			"forward admission re-assert failed on startup; continuing",
+			"error", err)
+	}
 	s.startReconcileLoop()
 	s.acceptLoop(listener)
+	return nil
+}
+
+// reassertForwardAdmission re-installs the KUKEON-FORWARD admission chain and
+// its FORWARD jump on daemon startup so a host reboot — which flushes the
+// kernel's iptables and strips the chain installed by `kuke init` — self-heals
+// without a re-run of init. Without it, cells on a host whose FORWARD default
+// policy is DROP (e.g. when Docker is installed) lose egress after a reboot:
+// in-cell DNS times out, kuketty's boot stalls past the attach deadline, and
+// `kuke run` fails with "attach ping timed out".
+//
+// Idempotent — every install step does -C before -I/-A, so on a healthy host
+// this produces no rule churn. Best-effort: a missing iptables binary is a
+// WARN-and-skip (the host owner opted out of kukeon-managed admission), and a
+// transient iptables error is surfaced to the caller, which logs and continues
+// rather than aborting Serve. Per-space egress re-assertion and Docker-churn
+// ordering are out of scope here and tracked in #953.
+func (s *Server) reassertForwardAdmission() error {
+	if !firewall.IsIptablesAvailable() {
+		s.logger.WarnContext(s.ctx,
+			"iptables not found on PATH; skipping forward admission re-assert — "+
+				"kukeon-bridge traffic may be blocked if FORWARD default policy is DROP",
+			"chain", firewall.ForwardChainName)
+		return nil
+	}
+	if err := firewall.NewInstaller(s.logger).Install(s.ctx); err != nil {
+		return fmt.Errorf("re-assert forward admission chain: %w", err)
+	}
+	s.logger.InfoContext(s.ctx, "re-asserted forward admission chain on startup",
+		"chain", firewall.ForwardChainName)
 	return nil
 }
 
