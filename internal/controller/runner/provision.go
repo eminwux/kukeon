@@ -2192,7 +2192,10 @@ func (r *Exec) ensureCellRootContainerSpec(cell intmodel.Cell) (intmodel.Contain
 		}
 	} else {
 		// Create default root container spec
-		// Pass containerdID to set ContainerdID field, ID will be set to "root"
+		// Pass containerdID to set ContainerdID field, ID will be set to "root".
+		// The kukepause host path (<RunPath>/bin/kukepause, staged by
+		// `kuke init`) is bind-mounted at /pause as the root container's PID 1
+		// (issue #931).
 		rootSpec = ctr.DefaultRootContainerSpec(
 			containerdID,
 			cellID,
@@ -2200,6 +2203,7 @@ func (r *Exec) ensureCellRootContainerSpec(cell intmodel.Cell) (intmodel.Contain
 			spaceName,
 			stackName,
 			cniConfigPath,
+			filepath.Join(r.opts.RunPath, "bin", ctr.RootContainerPauseBinaryName),
 		)
 		// Propagate HostNetwork from any cell container to the default root
 		// container. Non-root containers join the root container's netns

@@ -233,17 +233,19 @@ EOF
     PRESERVE_ENV_ADMIN="KUKEON_HOST,KUKEOND_SOCKET,KUKE_CONFIGURATION"
 fi
 
-step "Build kuke, kukebuild (and the kukeond symlink)"
-make kuke kukebuild
+step "Build kuke, kukepause, kukebuild (and the kukeond symlink)"
+make kuke kukepause kukebuild
 ln -sf kuke kukeond
 
 step "Install dev symlinks on PATH (make install-dev)"
-# install-dev symlinks kuke/kukeond and — because `make kuke kukebuild` above
-# has built it — kukebuild into INSTALL_PREFIX (/usr/local/bin by default). The
-# `kuke build` step below runs as `sudo ./kuke build`, a thin shim that resolves
-# `kukebuild` via PATH and exec's it, so kukebuild must sit on root's
-# secure_path; routing it through install-dev keeps a single PATH-placement
-# mechanism.
+# install-dev symlinks kuke/kukeond and — because `make kuke kukepause kukebuild`
+# above has built them — kukepause and kukebuild into INSTALL_PREFIX
+# (/usr/local/bin by default). The `kuke build` step below runs as
+# `sudo ./kuke build`, a thin shim that resolves `kukebuild` via PATH and exec's
+# it; the `kuke init` step resolves `kukepause` the same way to pre-stage it
+# under <RunPath>/bin before any root container is created (issue #931). Both
+# must sit on root's secure_path; routing them through install-dev keeps a
+# single PATH-placement mechanism.
 make install-dev
 
 # Pre-flight: catch missing host cgroup-v2 controller delegation BEFORE the

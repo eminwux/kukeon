@@ -25,10 +25,26 @@ import (
 )
 
 const (
-	// DefaultRootContainerImage is the image used when none is provided.
+	// DefaultRootContainerImage is the image used when none is provided. It is
+	// retained only as the root container's filesystem base — the pause process
+	// is the bind-mounted kukepause binary, not anything from busybox (#931).
 	DefaultRootContainerImage = "docker.io/library/busybox:latest"
-	defaultRootContainerCmd   = "sleep"
-	defaultRootContainerArg   = "infinity"
+
+	// RootContainerPauseBinaryTarget is the in-container path the host's
+	// kukepause binary is bind-mounted to and exec'd as PID 1 in every default
+	// root container. kukepause installs SIGTERM/SIGINT handlers (so cell
+	// teardown does not burn StopContainer's 10s graceful timeout) and a SIGCHLD
+	// zombie reaper, then blocks on pause(2) — replacing the previous
+	// `sleep infinity`, which ignored SIGTERM as PID 1 and reaped nothing
+	// (issue #931).
+	RootContainerPauseBinaryTarget = "/pause"
+
+	// RootContainerPauseBinaryName is the basename of the kukepause binary as
+	// staged under <RunPath>/bin by `kuke init`. It is the single source of
+	// truth shared by the init-time stager (the writer) and the root-container
+	// builder (which reads <RunPath>/bin/<name> as the /pause bind source) so
+	// the two never drift (issue #931).
+	RootContainerPauseBinaryName = "kukepause"
 
 	rootContainerLabelKey   = "kukeon.io/container-type"
 	rootContainerLabelValue = "root"
@@ -38,14 +54,32 @@ const (
 // the root container alive while other workload containers are managed.
 // containerdID is the hierarchical ID used for containerd operations.
 // The ID field will be set to "root" (base name).
+//
+// kukepauseHostPath is the host path of the staged kukepause binary
+// (<RunPath>/bin/kukepause, placed by `kuke init`). It is bind-mounted
+// read-only at /pause and exec'd as the root container's PID 1 in place of the
+// previous `sleep infinity` from busybox (issue #931). An empty path yields no
+// bind mount — the caller is responsible for staging the binary first.
 func DefaultRootContainerSpec(
 	containerdID,
 	cellID,
 	realmID,
 	spaceID,
 	stackID,
-	cniConfigPath string,
+	cniConfigPath,
+	kukepauseHostPath string,
 ) intmodel.ContainerSpec {
+	var volumes []intmodel.VolumeMount
+	if kukepauseHostPath != "" {
+		volumes = []intmodel.VolumeMount{
+			{
+				Kind:     intmodel.VolumeKindBind,
+				Source:   kukepauseHostPath,
+				Target:   RootContainerPauseBinaryTarget,
+				ReadOnly: true,
+			},
+		}
+	}
 	return intmodel.ContainerSpec{
 		ID:            "root",
 		ContainerdID:  containerdID,
@@ -55,8 +89,9 @@ func DefaultRootContainerSpec(
 		StackName:     stackID,
 		Root:          true,
 		Image:         DefaultRootContainerImage,
-		Command:       defaultRootContainerCmd,
-		Args:          []string{defaultRootContainerArg},
+		Command:       RootContainerPauseBinaryTarget,
+		Args:          nil,
+		Volumes:       volumes,
 		CNIConfigPath: cniConfigPath,
 	}
 }
@@ -227,7 +262,13 @@ func buildRootProcessArgs(rootSpec intmodel.ContainerSpec) []string {
 		copy(args, rootSpec.Args)
 		return args
 	default:
-		return []string{defaultRootContainerCmd, defaultRootContainerArg}
+		// No command and no args: a user-supplied root container spec with
+		// neither falls through to its image's own entrypoint (empty process
+		// args means WithProcessArgs is not applied). The default root spec
+		// from DefaultRootContainerSpec always carries Command=/pause, so it
+		// never reaches this branch (issue #931 retired the busybox
+		// sleep-infinity fallback that previously lived here).
+		return nil
 	}
 }
 

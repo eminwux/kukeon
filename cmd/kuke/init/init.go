@@ -19,8 +19,10 @@ package init
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -30,6 +32,7 @@ import (
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller"
+	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/firewall"
 	"github.com/eminwux/kukeon/internal/instance"
@@ -60,6 +63,22 @@ const (
 	kukeonRunPathDirMode  os.FileMode = os.ModeSetgid | 0o750
 	kukeonRunPathFileMode os.FileMode = 0o640
 	kukeonSocketMode      os.FileMode = 0o660
+
+	// kukepauseBinaryName is the binary `kuke init` stages under <RunPath>/bin
+	// so every cell's root container — including kukeond's own — can bind-mount
+	// it at /pause as PID 1 (issue #931). It is pre-staged on the host because
+	// root containers are created before kukeond is up, so it cannot be copied
+	// out of the daemon image the way kuketty is. Sourced from the ctr package
+	// so the staged name matches the root-container builder's bind source.
+	kukepauseBinaryName = ctr.RootContainerPauseBinaryName
+
+	// kukepauseStagedMode is the on-disk mode kukepause is staged with. It must
+	// carry an execute bit so the kernel can exec /pause through the root
+	// container's read-only bind mount. The recursive RunPath chown in
+	// applyKukeonOwnership otherwise drops every file to kukeonRunPathFileMode
+	// (0o640, no exec), so runInit re-asserts this mode on the staged binary
+	// afterward.
+	kukepauseStagedMode os.FileMode = 0o750
 )
 
 func NewInitCmd() *cobra.Command {
@@ -353,6 +372,86 @@ func applyKukeonOwnership(
 	return r, nil
 }
 
+// stageKukepause copies the kukepause binary into <runPath>/bin/kukepause and
+// returns the staged path. The staged copy is what every cell's root container
+// bind-mounts at /pause (issue #931). Mirrors the runner's stageKukettyBinary
+// contract: <RunPath>/bin destination, atomic tmp+rename copy, executable mode.
+func stageKukepause(runPath string) (string, error) {
+	src, err := resolveKukepauseSource()
+	if err != nil {
+		return "", err
+	}
+	binDir := filepath.Join(runPath, "bin")
+	if err = os.MkdirAll(binDir, 0o750); err != nil {
+		return "", fmt.Errorf("create kukepause stage dir %q: %w", binDir, err)
+	}
+	dst := filepath.Join(binDir, kukepauseBinaryName)
+	if err = copyKukepauseAtomic(src, dst); err != nil {
+		return "", err
+	}
+	return dst, nil
+}
+
+// resolveKukepauseSource locates a kukepause binary on the host. Lookup order:
+// $PATH first (the installed / `make install-dev` layout, kukepause alongside
+// kuke), then a sibling of the running executable (dev runs of `./kuke` from the
+// repo root next to a freshly built `./kukepause`, and the e2e harness which
+// execs the repo-root kuke). The error names the install path so a "not found"
+// is actionable.
+func resolveKukepauseSource() (string, error) {
+	if p, err := exec.LookPath(kukepauseBinaryName); err == nil {
+		return p, nil
+	}
+	if self, err := os.Executable(); err == nil {
+		sibling := filepath.Join(filepath.Dir(self), kukepauseBinaryName)
+		if info, statErr := os.Stat(sibling); statErr == nil && !info.IsDir() {
+			return sibling, nil
+		}
+	}
+	return "", fmt.Errorf(
+		"%s not found on $PATH or alongside kuke; build it with `make kukepause` and install it (`make install-dev`)",
+		kukepauseBinaryName,
+	)
+}
+
+// copyKukepauseAtomic copies src over dst via a sibling tmp file + rename so a
+// concurrent reader never observes a partial binary. Mode carries the execute
+// bit through the root container's bind mount.
+func copyKukepauseAtomic(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open kukepause source %q: %w", src, err)
+	}
+	defer func() { _ = in.Close() }()
+
+	tmp := dst + ".tmp"
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, kukepauseStagedMode)
+	if err != nil {
+		return fmt.Errorf("create kukepause staged tmp %q: %w", tmp, err)
+	}
+	if _, err = io.Copy(out, in); err != nil {
+		_ = out.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("copy kukepause %q -> %q: %w", src, tmp, err)
+	}
+	if err = out.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("close kukepause staged tmp %q: %w", tmp, err)
+	}
+	// O_CREATE applies the mode only on creation and is subject to umask; chmod
+	// guarantees the execute bit regardless of the caller's umask or a
+	// pre-existing tmp file.
+	if err = os.Chmod(tmp, kukepauseStagedMode); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("chmod kukepause staged tmp %q: %w", tmp, err)
+	}
+	if err = os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename kukepause staged %q -> %q: %w", tmp, dst, err)
+	}
+	return nil
+}
+
 func runInit(cmd *cobra.Command, _ []string) error {
 	logger, ok := cmd.Context().Value(types.CtxLogger).(*slog.Logger)
 	if !ok || logger == nil {
@@ -420,6 +519,15 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return fwErr
 	}
 
+	// Pre-stage kukepause under <RunPath>/bin before Bootstrap creates the
+	// kukeond cell: that cell's root container bind-mounts the staged binary at
+	// /pause and execs it as PID 1, so it must exist on the host first (issue
+	// #931). All later user cells reuse the same staged copy.
+	kukepausePath, stageErr := stageKukepause(runPath)
+	if stageErr != nil {
+		return fmt.Errorf("stage kukepause: %w", stageErr)
+	}
+
 	opts := controller.Options{
 		RunPath:              runPath,
 		ContainerdSocket:     containerdSocket,
@@ -443,7 +551,17 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return ownErr
 	}
 
+	// applyKukeonOwnership's recursive RunPath chown drops every file to 0o640,
+	// stripping kukepause's execute bit. Re-assert it root:kukeon 0o750 so root
+	// containers created after init can exec the bind-mounted /pause (issue
+	// #931). The kukeond cell created during Bootstrap already exec'd the
+	// pre-chown copy, so this only matters for subsequent cells.
+	if chmodErr := sysuser.ChownAndChmod(kukepausePath, 0, ensure.GID, kukepauseStagedMode); chmodErr != nil {
+		return fmt.Errorf("restore kukepause exec bit %q: %w", kukepausePath, chmodErr)
+	}
+
 	printBootstrapReport(cmd, report, permsReport)
+	cmd.Println(fmt.Sprintf("  - kukepause staged: %s", kukepausePath))
 
 	if viper.GetBool(config.KUKE_INIT_NO_WAIT.ViperKey) {
 		return nil
