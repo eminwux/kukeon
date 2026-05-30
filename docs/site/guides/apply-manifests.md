@@ -165,9 +165,9 @@ kuke run -b shell --param IMAGE=alpine:edge --param CMD="/bin/sh"
 kuke run -b shell --param-file ./shell.env --param IMAGE=alpine:edge
 ```
 
-`--param`, `--param-file`, and `--name` are rejected when combined with `-f` (file mode is not a blueprint and has no parameter declarations) or `-c` (a CellConfig already binds its own values). The substituted body is what reaches the daemon — there is no parameter layer in the manifest API itself.
+`--param`, `--param-file`, and `--name` are rejected when combined with `-f` (file mode is not a blueprint and has no parameter declarations) or the `<config>` positional (a CellConfig already binds its own values). The substituted body is what reaches the daemon — there is no parameter layer in the manifest API itself.
 
-For an idempotent, name-stable identity (one live cell per binding, attaches on re-run), wrap the blueprint in a `kind: CellConfig` and use `kuke run -c <config>`; see [`kind: CellConfig`](../manifests/config.md).
+For an idempotent, name-stable identity (one live cell per binding, attaches on re-run), wrap the blueprint in a `kind: CellConfig` and use `kuke run <config>`; see [`kind: CellConfig`](../manifests/config.md).
 
 See [kuke run](../cli/kuke-run.md) for the full flag surface.
 
@@ -175,6 +175,6 @@ See [kuke run](../cli/kuke-run.md) for the full flag surface.
 
 - [Manifest Reference](../manifests/overview.md) — the full schema of every resource
 - [CLI Reference → apply](../cli/kuke-apply.md) — every flag on `kuke apply`
-- [CLI Reference → run](../cli/kuke-run.md) — `-f` (file), `-b` (blueprint), and `-c` (config) modes, including parameter handling
+- [CLI Reference → run](../cli/kuke-run.md) — `-f` (file), `-b` (blueprint), and `<config>` (positional config) modes, including parameter handling
 - [Migrate from `CellProfile` to `CellBlueprint`](migrate-cellprofile-to-blueprint.md) — the #626 cutover recipe
 - [Tutorials → Hello-world cell](../tutorials/hello-world.md) — a worked example end-to-end

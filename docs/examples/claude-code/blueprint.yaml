@@ -17,9 +17,9 @@
 #
 # For an idempotent, name-stable variant (at most one live cell per
 # invocation, attaches to the existing cell on re-run), wrap this blueprint
-# in a kind: CellConfig and use `kuke run -c <config>` instead. See
+# in a kind: CellConfig and use `kuke run <config>` instead. See
 # docs/site/guides/migrate-cellprofile-to-blueprint.md for the cutover
-# guidance and the -b vs. -c decision.
+# guidance and the -b vs. <config> decision.
 apiVersion: v1beta1
 kind: CellBlueprint
 metadata:

@@ -26,10 +26,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// These helpers used to live in internal/cellprofile/params.go and were shared
-// between the CellProfile and CellBlueprint resolution paths. With CellProfile
-// removed in #626, only the blueprint path remains, so the helpers move here
-// (alongside their only consumer, Resolve).
+// Moved from internal/cellprofile in #626 (CellProfile removed; Resolve is the
+// sole remaining consumer).
 
 // paramRefRE matches `${KEY}` substitution references in blueprint scalars.
 // KEY must start with a letter or underscore and contain only letters,

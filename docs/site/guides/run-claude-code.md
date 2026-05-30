@@ -123,7 +123,7 @@ sudo kuke run -b claude-code \
     --param PROMPT="…"
 ```
 
-See [`kuke run`](../cli/kuke-run.md) for the full flag surface, including `--name`, `--param-file`, and the `-d`/`--detach` mode. For an idempotent, name-stable identity (one live cell per invocation, attaches on re-run instead of spawning a new clone), wrap the blueprint in a `kind: CellConfig` and use `kuke run -c <config>`.
+See [`kuke run`](../cli/kuke-run.md) for the full flag surface, including `--name`, `--param-file`, and the `-d`/`--detach` mode. For an idempotent, name-stable identity (one live cell per invocation, attaches on re-run instead of spawning a new clone), wrap the blueprint in a `kind: CellConfig` and use `kuke run <config>`.
 
 ## Where to go next
 

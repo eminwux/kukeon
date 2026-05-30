@@ -86,7 +86,7 @@ This is the half-cleaned-host guard added in #287: tearing out `/opt/kukeon` whi
 To recover:
 
 1. Inspect the residual namespace — e.g. `ctr -n <namespace> snapshots ls`, `ctr -n <namespace> containers ls` — and clean it up by hand or via `ctr namespace remove <namespace>` once the namespace is empty.
-2. Wipe the matching per-namespace BuildKit state directory — `sudo rm -rf /var/lib/kukebuild/<namespace>/` — so a follow-up `kuke build` into the recreated namespace does not hit a stale `cache.db` referencing snapshots/content that the manual cleanup just removed. Skipping this step is the issue #904 trap: the namespace looks fresh in `ctr` but the next build fails with "parent snapshot does not exist" or "content digest ... not found". The follow-up `kuke uninstall --yes` only sweeps caches for realms it successfully purges in *its* pass — caches stranded by a previous half-cleaned uninstall are the operator's to wipe.
+2. Wipe the matching per-namespace BuildKit state directory — `sudo rm -rf /var/lib/kukebuild/<namespace>/` — so a follow-up `kuke build` into the recreated namespace does not hit a stale `cache.db` referencing snapshots/content that the manual cleanup just removed. Skipping this step is the issue #904 trap: the namespace looks fresh in `ctr` but the next build fails with "parent snapshot does not exist" or "content digest ... not found". The follow-up `kuke uninstall --yes` only sweeps caches for realms it successfully purges in _its_ pass — caches stranded by a previous half-cleaned uninstall are the operator's to wipe.
 3. Re-run `kuke uninstall --yes`. The realm-purge step will now succeed and the gated cleanup steps (2–4) will run normally.
 
 A successful re-run produces the familiar tail (`/opt/kukeon: removed`, `user 'kukeon': removed`, etc.) with no `skipped` lines.
@@ -260,7 +260,6 @@ A **cell** is the smallest scheduled unit. `kuke run` (single-cell, blueprint- a
 sudo kuke run -f docs/examples/hello-world.yaml             # attaches by default
 sudo kuke run -f docs/examples/hello-world.yaml -d          # detach: start and return
 sudo kuke run -b <blueprint> --param KEY=VAL --name custom  # from daemon-stored CellBlueprint
-sudo kuke run -c <config>                                   # from daemon-stored CellConfig (idempotent)
 sudo kuke run -f - < spec.yaml                              # stdin
 sudo kuke run -f spec.yaml --rm                             # auto-delete after exit
 sudo kuke run -b <blueprint> --param KEY=VAL                # daemon-stored CellBlueprint, fresh <prefix>-<6hex> cell per invocation
@@ -286,7 +285,7 @@ sudo kuke run <config> --reuse -d                           # restart a healthy-
   - **Stopped** → `StartCell`, then attach (no re-create). The prior fall-through to create was an unsafe re-entry; the live start+attach converges once the CNI duplicate-allocation fix (#630) lands.
   - **Error / partial** (`Pending`, `Failed`, `Unknown`) → refused with `cell "<name>" exists in <state> state; delete it with \`kuke delete cell <name>\` before re-running`. Exit code non-zero. `run` does not reconcile a degraded cell in place.
 - Re-running `kuke run -f` against an existing cell whose on-disk spec **diverges** from the file is **refused**, not silently updated. The error message points the operator at `kuke apply -f` for the update path. Exit code non-zero.
-- `-f`, `-b`, and `-c` are mutually exclusive; `--name` is rejected with `-f` (the YAML's `metadata.name` is the cell name verbatim) and with `-c` (the cell name is the Config's deterministic stable name).
+- `-f` and `-b` are mutually exclusive; the `<config>` positional, `-f`, and `-b` are the three sources and are mutually exclusive (exactly one is required). `--name` is rejected with `-f` (the YAML's `metadata.name` is the cell name verbatim) and with the `<config>` positional (the cell name is the Config's deterministic stable name).
 - `--container` is only valid in attach mode; passing both `--container` and `-d/--detach` exits non-zero.
 - `--rm` is processed by `kukeond`'s reconcile loop. `kuke run` is daemon-only after #566 — `KUKEON_NO_DAEMON=true` and `--run-path` promotion no longer reach an in-process branch for workload verbs, so `--rm` and `--run-path` are not mutually exclusive on `kuke run`. Cleanup latency is bounded by the daemon's reconcile interval (default 30s), not real-time.
 - A clean `^]^]` detach in attach mode does **not** trigger `--rm` cleanup; the cell stays alive for re-attach. Only workload termination, peer hangup, or an unrecoverable controller error fires cleanup.

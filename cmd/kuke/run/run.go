@@ -53,7 +53,7 @@ import (
 // flag. Defined once so tests can match on it via errors.Is.
 var errRemovedProfileFlag = errors.New(
 	"kuke run: -p/--profile (CellProfile) was removed in #626 — apply a " +
-		"kind: CellBlueprint and use `kuke run -b <name>` (or `kuke run -c <config>` " +
+		"kind: CellBlueprint and use `kuke run -b <name>` (or `kuke run <config>` " +
 		"for a daemon-stored CellConfig); see docs/site/guides/migrate-cellprofile-to-blueprint.md",
 )
 

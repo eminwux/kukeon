@@ -3,7 +3,7 @@
 Issue [#626](https://github.com/eminwux/kukeon/issues/626) removed the
 client-side `CellProfile` kind, the `kuke run -p` flag, and the per-user
 `$HOME/.kuke/profiles.d/<name>.yaml` loader. Daemon-stored
-`CellBlueprint` (`kuke run -b`) and `CellConfig` (`kuke run -c`) cover
+`CellBlueprint` (`kuke run -b`) and `CellConfig` (`kuke run <config>`) cover
 the same use cases with stronger guarantees (server-side storage,
 scoping, structural slot fills). This page is the cutover recipe.
 
@@ -11,7 +11,7 @@ If you typed `kuke run -p` after upgrading, you saw:
 
 ```text
 kuke run: -p/--profile (CellProfile) was removed in #626 — apply a
-kind: CellBlueprint and use `kuke run -b <name>` (or `kuke run -c <config>`
+kind: CellBlueprint and use `kuke run -b <name>` (or `kuke run <config>`
 for a daemon-stored CellConfig); see
 docs/site/guides/migrate-cellprofile-to-blueprint.md
 ```
@@ -20,13 +20,13 @@ That's the prompt that pointed you here.
 
 ## TL;DR
 
-| Before (removed)                                       | After                                                                                                         |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `~/.kuke/profiles.d/<name>.yaml` (`kind: CellProfile`) | `<name>.yaml` (`kind: CellBlueprint`) applied via `kuke apply -f`                                             |
-| `kuke run -p <name> --param K=V`                       | `kuke run -b <name> --param K=V`                                                                              |
-| `kuke run -p <name> --param-file ./<name>.env`         | `kuke run -b <name> --param-file ./<name>.env`                                                                |
-| `kuke run -p <name> --name <pin>`                      | `kuke run -b <name> --name <pin>` (one-off pin)                                                               |
-| (no equivalent)                                        | `kuke run -c <config>` for an idempotent, name-stable identity (one live cell per Config, attaches on re-run) |
+| Before (removed)                                       | After                                                                                                      |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `~/.kuke/profiles.d/<name>.yaml` (`kind: CellProfile`) | `<name>.yaml` (`kind: CellBlueprint`) applied via `kuke apply -f`                                          |
+| `kuke run -p <name> --param K=V`                       | `kuke run -b <name> --param K=V`                                                                           |
+| `kuke run -p <name> --param-file ./<name>.env`         | `kuke run -b <name> --param-file ./<name>.env`                                                             |
+| `kuke run -p <name> --name <pin>`                      | `kuke run -b <name> --name <pin>` (one-off pin)                                                            |
+| (no equivalent)                                        | `kuke run <config>` for an idempotent, name-stable identity (one live cell per Config, attaches on re-run) |
 
 ## Step 1 — Convert the YAML
 
@@ -94,7 +94,7 @@ sudo kuke apply -f ./claude-code.blueprint.yaml
 `kuke apply` writes the blueprint under the named scope's metadata tree.
 List and inspect with `kuke get blueprint -A` and `kuke get blueprint <name>`.
 
-## Step 3 — Pick `-b` or `-c` per invocation
+## Step 3 — Pick `-b` or `<config>` per invocation
 
 The two run verbs map to different identity contracts:
 
@@ -105,7 +105,7 @@ The two run verbs map to different identity contracts:
   scratchpads, `--rm` jobs). Inline `-b` cannot fill structural slots
   (repo URLs, secret sources) — those require a CellConfig.
 
-- **`kuke run -c <config>` — at-most-one live cell, idempotent.** Wrap the
+- **`kuke run <config>` — at-most-one live cell, idempotent.** Wrap the
   blueprint in a `kind: CellConfig` that fills the scalar values and any
   structural slots once. The Config owns a deterministic cell name, so a
   re-run attaches to the existing cell instead of spawning a new one.
@@ -122,7 +122,7 @@ as its own CellConfig binding the same blueprint with different values.
 sudo kuke run -b claude-code --param PROMPT="explain kukeon" --rm
 ```
 
-### Worked example — `-c` idempotent identity
+### Worked example — `<config>` idempotent identity
 
 ```yaml
 # claude-code-explain.config.yaml
@@ -143,7 +143,7 @@ spec:
 
 ```sh
 sudo kuke apply -f ./claude-code-explain.config.yaml
-sudo kuke run -c claude-code-explain
+sudo kuke run claude-code-explain
 # Re-run attaches to the same cell; no fresh hex-suffixed clone.
 ```
 
@@ -162,5 +162,5 @@ unset KUKE_PROFILES_DIR     # if you had it exported
 
 - [`docs/site/manifests/blueprint.md`](../manifests/blueprint.md) — full `kind: CellBlueprint` schema reference.
 - [`docs/site/manifests/config.md`](../manifests/config.md) — full `kind: CellConfig` schema reference, including slot-fill semantics.
-- [`docs/site/cli/kuke-run.md`](../cli/kuke-run.md) — `kuke run -b` / `kuke run -c` flag reference.
+- [`docs/site/cli/kuke-run.md`](../cli/kuke-run.md) — `kuke run -b` / `kuke run <config>` flag reference.
 - [`docs/site/guides/apply-manifests.md`](apply-manifests.md) — parameterised blueprint guide.
