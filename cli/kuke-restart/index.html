@@ -12,13 +12,13 @@
         <meta name="author" content="Emiliano Spinella (eminwux)">
       
       
-        <link rel="canonical" href="https://kukeon.io/concepts/networking/">
+        <link rel="canonical" href="https://kukeon.io/cli/kuke-restart/">
       
       
-        <link rel="prev" href="../containerd-namespaces/">
+        <link rel="prev" href="../kuke-refresh/">
       
       
-        <link rel="next" href="../cgroups/">
+        <link rel="next" href="../kuke-log/">
       
       
         
@@ -29,7 +29,7 @@
     
     
       
-        <title>Networking (CNI) - kukeon</title>
+        <title>kuke restart - kukeon</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#networking-cni" class="md-skip">
+        <a href="#kuke-restart" class="md-skip">
           Skip to content
         </a>
       
@@ -118,7 +118,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Networking (CNI)
+              kuke restart
             
           </span>
         </div>
@@ -306,13 +306,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../overview/" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../../concepts/overview/" class="md-tabs__link">
           
   
   
@@ -368,11 +366,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../cli/commands/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../commands/" class="md-tabs__link">
           
   
   
@@ -758,31 +758,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
             
   
   
@@ -800,7 +797,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -818,7 +815,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../overview/" class="md-nav__link">
+      <a href="../../concepts/overview/" class="md-nav__link">
         
   
   
@@ -846,7 +843,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../realm/" class="md-nav__link">
+      <a href="../../concepts/realm/" class="md-nav__link">
         
   
   
@@ -874,7 +871,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../space/" class="md-nav__link">
+      <a href="../../concepts/space/" class="md-nav__link">
         
   
   
@@ -902,7 +899,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../stack/" class="md-nav__link">
+      <a href="../../concepts/stack/" class="md-nav__link">
         
   
   
@@ -930,7 +927,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cell/" class="md-nav__link">
+      <a href="../../concepts/cell/" class="md-nav__link">
         
   
   
@@ -958,7 +955,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../container/" class="md-nav__link">
+      <a href="../../concepts/container/" class="md-nav__link">
         
   
   
@@ -986,7 +983,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../containerd-namespaces/" class="md-nav__link">
+      <a href="../../concepts/containerd-namespaces/" class="md-nav__link">
         
   
   
@@ -1011,37 +1008,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Networking (CNI)
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../concepts/networking/" class="md-nav__link">
         
   
   
@@ -1057,98 +1027,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#the-shape-of-a-space-network" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The shape of a space network
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#bridge-names-and-the-15-character-limit" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Bridge names and the 15-character limit
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Bridge names and the 15-character limit">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#recovering-from-a-stale-conflist" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Recovering from a stale conflist
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cell-level-networking" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cell-level networking
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#inspecting-network-state" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Inspecting network state
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#related-concepts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Related concepts
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1161,7 +1039,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cgroups/" class="md-nav__link">
+      <a href="../../concepts/cgroups/" class="md-nav__link">
         
   
   
@@ -1189,7 +1067,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../system-realm/" class="md-nav__link">
+      <a href="../../concepts/system-realm/" class="md-nav__link">
         
   
   
@@ -1217,7 +1095,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../client-and-daemon/" class="md-nav__link">
+      <a href="../../concepts/client-and-daemon/" class="md-nav__link">
         
   
   
@@ -1651,28 +1529,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
-        
-          
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
             
   
   
@@ -1690,7 +1571,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_8">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1708,7 +1589,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/commands/" class="md-nav__link">
+      <a href="../commands/" class="md-nav__link">
         
   
   
@@ -1736,7 +1617,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke/" class="md-nav__link">
+      <a href="../kuke/" class="md-nav__link">
         
   
   
@@ -1764,7 +1645,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-init/" class="md-nav__link">
+      <a href="../kuke-init/" class="md-nav__link">
         
   
   
@@ -1792,7 +1673,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-doctor/" class="md-nav__link">
+      <a href="../kuke-doctor/" class="md-nav__link">
         
   
   
@@ -1820,7 +1701,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-status/" class="md-nav__link">
+      <a href="../kuke-status/" class="md-nav__link">
         
   
   
@@ -1848,7 +1729,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-get/" class="md-nav__link">
+      <a href="../kuke-get/" class="md-nav__link">
         
   
   
@@ -1876,7 +1757,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-build/" class="md-nav__link">
+      <a href="../kuke-build/" class="md-nav__link">
         
   
   
@@ -1904,7 +1785,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-create/" class="md-nav__link">
+      <a href="../kuke-create/" class="md-nav__link">
         
   
   
@@ -1932,7 +1813,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-apply/" class="md-nav__link">
+      <a href="../kuke-apply/" class="md-nav__link">
         
   
   
@@ -1960,7 +1841,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-run/" class="md-nav__link">
+      <a href="../kuke-run/" class="md-nav__link">
         
   
   
@@ -1988,7 +1869,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-delete/" class="md-nav__link">
+      <a href="../kuke-delete/" class="md-nav__link">
         
   
   
@@ -2016,7 +1897,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-lifecycle/" class="md-nav__link">
+      <a href="../kuke-lifecycle/" class="md-nav__link">
         
   
   
@@ -2044,7 +1925,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-purge/" class="md-nav__link">
+      <a href="../kuke-purge/" class="md-nav__link">
         
   
   
@@ -2072,7 +1953,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-refresh/" class="md-nav__link">
+      <a href="../kuke-refresh/" class="md-nav__link">
         
   
   
@@ -2097,10 +1978,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../cli/kuke-restart/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke restart
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -2116,6 +2024,109 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#kuke-restart-cell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        kuke restart cell
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="kuke restart cell">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#flags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Flags
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#behavior-by-cell-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Behavior by cell state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outofsync-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OutOfSync detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#side-effects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Side effects
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example session
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2128,7 +2139,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-log/" class="md-nav__link">
+      <a href="../kuke-log/" class="md-nav__link">
         
   
   
@@ -2156,7 +2167,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-attach/" class="md-nav__link">
+      <a href="../kuke-attach/" class="md-nav__link">
         
   
   
@@ -2184,7 +2195,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-image/" class="md-nav__link">
+      <a href="../kuke-image/" class="md-nav__link">
         
   
   
@@ -2212,7 +2223,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-daemon/" class="md-nav__link">
+      <a href="../kuke-daemon/" class="md-nav__link">
         
   
   
@@ -2240,7 +2251,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-uninstall/" class="md-nav__link">
+      <a href="../kuke-uninstall/" class="md-nav__link">
         
   
   
@@ -2268,7 +2279,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-autocomplete/" class="md-nav__link">
+      <a href="../kuke-autocomplete/" class="md-nav__link">
         
   
   
@@ -2296,7 +2307,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kuke-version/" class="md-nav__link">
+      <a href="../kuke-version/" class="md-nav__link">
         
   
   
@@ -2324,7 +2335,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../cli/kukeond/" class="md-nav__link">
+      <a href="../kukeond/" class="md-nav__link">
         
   
   
@@ -3200,33 +3211,66 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#the-shape-of-a-space-network" class="md-nav__link">
+  <a href="#kuke-restart-cell" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The shape of a space network
+        kuke restart cell
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="kuke restart cell">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#flags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Flags
       
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#bridge-names-and-the-15-character-limit" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#behavior-by-cell-state" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Bridge names and the 15-character limit
+        Behavior by cell state
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Bridge names and the 15-character limit">
-      <ul class="md-nav__list">
+</li>
         
           <li class="md-nav__item">
-  <a href="#recovering-from-a-stale-conflist" class="md-nav__link">
+  <a href="#outofsync-detection" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Recovering from a stale conflist
+        OutOfSync detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#side-effects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Side effects
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example session
       
     </span>
   </a>
@@ -3239,32 +3283,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#cell-level-networking" class="md-nav__link">
+  <a href="#related" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Cell-level networking
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#inspecting-network-state" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Inspecting network state
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#related-concepts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Related concepts
+        Related
       
     </span>
   </a>
@@ -3291,58 +3313,107 @@
   
 
 
-<h1 id="networking-cni">Networking (CNI)<a class="headerlink" href="#networking-cni" title="Permanent link">&para;</a></h1>
-<p>Kukeon uses the reference <a href="https://github.com/containernetworking/cni">CNI</a> plugins to give each space a network. There is nothing magic happening; Kukeon writes a conflist to disk and then invokes the CNI plugins the normal way when a cell's network namespace is set up.</p>
-<h2 id="the-shape-of-a-space-network">The shape of a space network<a class="headerlink" href="#the-shape-of-a-space-network" title="Permanent link">&para;</a></h2>
-<p>One space → one CNI network → one Linux bridge → one IP range.</p>
-<p>Concretely, when you create a space:</p>
+<h1 id="kuke-restart">kuke restart<a class="headerlink" href="#kuke-restart" title="Permanent link">&para;</a></h1>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke restart cell &lt;name&gt; [--realm &lt;name&gt;] [--space &lt;name&gt;] [--stack &lt;name&gt;]
+</code></pre></div>
+<p>Restart Kukeon resources (cell).</p>
+<p>Restart a Kukeon resource: bounces the running process by default and, on a Config-lineage cell whose live spec has diverged from the daemon-stored Config (OutOfSync), uses the freshly-materialised spec on start so the restart is also a reconcile.</p>
+<h2 id="kuke-restart-cell">kuke restart cell<a class="headerlink" href="#kuke-restart-cell" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke restart cell &lt;name&gt; [--realm &lt;name&gt;] [--space &lt;name&gt;] [--stack &lt;name&gt;]
+</code></pre></div>
+<p>Restart a cell (bounces the process; on OutOfSync also reconciles from Config).</p>
+<p>Restart a cell. By default bounces the cell's containers (stop + start with the same spec). When the cell carries a <code>kukeon.io/config=&lt;name&gt;</code> lineage label and the daemon has marked it OutOfSync, the start step uses the freshly materialised spec from the Config so the restart is also a reconcile. Severs any active attach session as a side effect of the stop step.</p>
+<h3 id="flags">Flags<a class="headerlink" href="#flags" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;name&gt;</code> (positional)</td>
+<td><em>(required)</em></td>
+<td>The cell to restart</td>
+</tr>
+<tr>
+<td><code>--realm</code></td>
+<td><code>""</code></td>
+<td>Realm that owns the cell</td>
+</tr>
+<tr>
+<td><code>--space</code></td>
+<td><code>""</code></td>
+<td>Space that owns the cell</td>
+</tr>
+<tr>
+<td><code>--stack</code></td>
+<td><code>""</code></td>
+<td>Stack that owns the cell</td>
+</tr>
+</tbody>
+</table>
+<p>Plus all <a href="../kuke/">global flags</a>. Realm/space/stack are required (no default fall-through); a missing one returns the matching <code>errdefs.ErrRealmNameRequired</code> / <code>ErrSpaceNameRequired</code> / <code>ErrStackNameRequired</code> sentinel.</p>
+<h3 id="behavior-by-cell-state">Behavior by cell state<a class="headerlink" href="#behavior-by-cell-state" title="Permanent link">&para;</a></h3>
+<p><code>kuke restart cell</code> dispatches on the cell's <code>Status.State</code> at the moment the command runs:</p>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ready</code> + in-sync</td>
+<td>Pure bounce: <code>StopCell</code> then <code>StartCell</code> with the spec already on disk. No reconcile.</td>
+</tr>
+<tr>
+<td><code>Ready</code> + OutOfSync (lineage)</td>
+<td>Re-materialise the spec from the cell's lineage Config (<code>GetConfig</code> + <code>GetBlueprint</code> + <code>Materialize</code>), <code>ApplyDocuments</code> to write the new spec, then <code>StopCell</code> + <code>StartCell</code> unless <code>ApplyDocuments</code> already bounced every container (root-container recreate).</td>
+</tr>
+<tr>
+<td><code>Stopped</code></td>
+<td>Equivalent to <code>kuke start cell &lt;name&gt;</code>. Honours OutOfSync only on the <code>Ready</code>-path; an OutOfSync <code>Stopped</code> cell starts with its on-disk spec, then a follow-up <code>kuke restart cell</code> from <code>Ready</code> reconciles.</td>
+</tr>
+<tr>
+<td><code>Pending</code> / <code>Failed</code> / <code>Unknown</code></td>
+<td>Refused with <code>cell "&lt;name&gt;" exists in &lt;state&gt; state; delete it with \</code>kuke delete cell <name>` before restarting`. Exit code non-zero. Restart does not reconcile a degraded cell in place.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="outofsync-detection">OutOfSync detection<a class="headerlink" href="#outofsync-detection" title="Permanent link">&para;</a></h3>
+<p>The OutOfSync flag on a cell is set by the daemon's reconciler loop when a cell carrying a <code>kukeon.io/config=&lt;name&gt;</code> lineage label has a live spec that no longer matches the materialisation of its source Config (someone edited the Config, or the underlying Blueprint, after the cell was last materialised). Surface it ahead of <code>kuke restart cell</code> with <a href="../kuke-get/"><code>kuke get cell &lt;name&gt;</code></a> — the <code>SYNC</code> column reports <code>InSync</code> / <code>OutOfSync</code> / <code>Unknown</code>. A cell without the lineage label is never marked OutOfSync, so <code>kuke restart cell</code> on such cells is always a pure bounce.</p>
+<h3 id="side-effects">Side effects<a class="headerlink" href="#side-effects" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Kukeon writes a CNI conflist at <code>/etc/cni/net.d/&lt;realm&gt;-&lt;space&gt;.conflist</code> (path configurable via <code>spec.cniConfigPath</code>).</li>
-<li>The conflist references the <code>bridge</code> plugin with a bridge name derived from the space (see below).</li>
-<li>The <code>host-local</code> plugin is used for IPAM.</li>
-<li>On first cell creation, the kernel bridge appears on the host as a regular <code>ip link show</code> interface.</li>
+<li>Active attach sessions are severed by the stop step in both the pure-bounce and reconcile branches.</li>
+<li>The reconcile branch issues an explicit <code>StopCell</code> + <code>StartCell</code> after <code>ApplyDocuments</code> unless <code>ApplyDocuments</code> already bounced every container (root-container recreate). The daemon's reconcile path only bounces containers on image / command / args divergence (env-only or metadata-only changes patch in place), so the explicit stop + start preserves the <code>kuke restart</code> contract that every running container in the cell bounces — across every divergence class. The double-bounce in the rare full-recreate case is acceptable; under-bouncing would silently break the contract.</li>
+<li>The CLI composes <code>GetConfig</code> + <code>GetBlueprint</code> + <code>ApplyDocuments</code> against the cell's lineage Config at CLI level rather than issuing a new daemon RPC. Lineage Config resolution probes progressively shallower scopes (full → space-only → realm-only) to mirror the daemon's reconciler and find the Config regardless of which scope it was originally bound at.</li>
+<li>A reconcile that fails to materialise (lineage Config deleted, referenced Blueprint missing, OutOfSync detection itself failed) prints a one-line <code>notice:</code> to stderr and falls through to a vanilla in-place restart — the runtime still bounces as the operator asked.</li>
+<li>Running clones of the source Config are unaffected by a <code>kuke restart cell</code> on one cell; each clone needs its own <code>kuke restart cell &lt;clone-name&gt;</code> to pick up the new spec.</li>
 </ul>
-<p>For the out-of-the-box <code>main/default</code> space, the bridge sits on <code>10.88.0.0/16</code>.</p>
-<h2 id="bridge-names-and-the-15-character-limit">Bridge names and the 15-character limit<a class="headerlink" href="#bridge-names-and-the-15-character-limit" title="Permanent link">&para;</a></h2>
-<p>Linux interface names have a hard 15-character limit (<code>IFNAMSIZ - 1 = 15</code>). Kukeon's default bridge naming scheme — <code>kuke-&lt;realm&gt;-&lt;space&gt;</code> — can blow past that on long names:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke-main-default        # 16 chars, too long
+<h3 id="example-session">Example session<a class="headerlink" href="#example-session" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>$ kuke get cell foo --realm default --space default --stack default -o wide
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>NAME  STATE  SYNC        AGE  ...
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>foo   Ready  OutOfSync   12m  ...
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>$ kuke restart cell foo --realm default --space default --stack default
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>Restarted cell &quot;foo&quot; from stack &quot;default&quot; (reconciled from config &quot;foo&quot;)
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>$ kuke get cell foo --realm default --space default --stack default -o wide
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>NAME  STATE  SYNC    AGE  ...
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>foo   Ready  InSync  3s   ...
 </code></pre></div>
-<p>Kukeon <strong>truncates safely</strong> before creating the bridge, using a stable hashing scheme so the same <code>(realm, space)</code> pair always produces the same bridge name. The CNI conflist records the actual bridge name that was used, and the daemon reads it back rather than recomputing.</p>
-<h3 id="recovering-from-a-stale-conflist">Recovering from a stale conflist<a class="headerlink" href="#recovering-from-a-stale-conflist" title="Permanent link">&para;</a></h3>
-<p>Older Kukeon versions computed bridge names without the safe-truncation rule. If you upgrade with a stale conflist on disk, the next <code>kuke init</code> or cell creation can fail with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>failed to attach ... to network: plugin type=&quot;bridge&quot; failed (add):
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>failed to create bridge &quot;kuke-...-...&quot;: could not add &quot;...&quot;:
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>numerical result out of range
-</code></pre></div>
-<p><code>numerical result out of range</code> is the kernel's <code>ERANGE</code> for "this interface name is too long." Fix:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>init<span class="w"> </span>--force-regenerate-cni
-</code></pre></div>
-<p>That flag rewrites every space's conflist with the current naming scheme.</p>
-<p>See <a href="../../guides/troubleshooting/#kuke-init-fails-with-numerical-result-out-of-range">Troubleshooting</a>.</p>
-<h2 id="cell-level-networking">Cell-level networking<a class="headerlink" href="#cell-level-networking" title="Permanent link">&para;</a></h2>
-<p>Inside a cell, only the root container has a network namespace — every other container joins it. So:</p>
+<p>For a cell with no lineage label or with <code>SYNC=InSync</code>, the same invocation reports <code>Restarted cell "&lt;name&gt;" from stack "&lt;stack&gt;"</code> (no reconcile suffix) and the <code>SYNC</code> column is unchanged.</p>
+<h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Each cell has exactly one IP on the space's bridge.</li>
-<li><code>localhost</code> inside any container in the cell reaches every port bound by any container in the cell.</li>
-<li>Two cells in the same space can reach each other at the IP layer.</li>
-<li>Two cells in different spaces cannot reach each other unless a container explicitly joins both networks.</li>
-</ul>
-<h2 id="inspecting-network-state">Inspecting network state<a class="headerlink" href="#inspecting-network-state" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># List bridges</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>ip<span class="w"> </span>link<span class="w"> </span>show<span class="w"> </span><span class="nb">type</span><span class="w"> </span>bridge<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>kuke
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># Show the conflist for a space</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>cat<span class="w"> </span>/etc/cni/net.d/main-default.conflist
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># Find the pid of a cell&#39;s root container (from containerd) and peek into its netns</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="nv">ROOT_PID</span><span class="o">=</span><span class="k">$(</span>sudo<span class="w"> </span>ctr<span class="w"> </span>-n<span class="w"> </span>kukeon-main<span class="w"> </span>tasks<span class="w"> </span>ls<span class="w"> </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span><span class="s1">&#39;/&lt;cell&gt;_root/ {print $2}&#39;</span><span class="k">)</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>sudo<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">ROOT_PID</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span>-n<span class="w"> </span>ip<span class="w"> </span>-4<span class="w"> </span>addr
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>sudo<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">ROOT_PID</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span>-n<span class="w"> </span>ip<span class="w"> </span>route
-</code></pre></div>
-<h2 id="related-concepts">Related concepts<a class="headerlink" href="#related-concepts" title="Permanent link">&para;</a></h2>
-<ul>
-<li><a href="../space/">Space</a> — owns the network</li>
-<li><a href="../cell/">Cell</a> — gets one IP on the bridge</li>
+<li><a href="../kuke-lifecycle/">kuke start / stop / kill</a> — primitive lifecycle verbs <code>kuke restart cell</code> composes.</li>
+<li><a href="../kuke-get/">kuke get</a> — read the <code>SYNC</code> column on <code>kuke get cell -o wide</code> to spot OutOfSync ahead of <code>restart</code>.</li>
+<li><a href="../kuke-run/">kuke run</a> — divergent-spec refusal on the <code>&lt;config&gt;</code> and <code>-b --name</code> paths points at <code>kuke restart cell &lt;name&gt;</code> as the reconcile pointer.</li>
+<li><a href="../../manifests/config/"><code>kind: CellConfig</code></a> — the lineage source the OutOfSync reconcile re-materialises from.</li>
+<li><a href="../../manifests/blueprint/"><code>kind: CellBlueprint</code></a> — referenced by the Config, looked up via <code>GetBlueprint</code> on the reconcile path.</li>
 </ul>
 
 
@@ -3366,7 +3437,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 21, 2026 12:22:34 UTC">April 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 30, 2026 16:07:02 UTC">May 30, 2026</span>
   </span>
 
     
@@ -3376,7 +3447,7 @@
     <span class="md-icon" title="Created">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14.47 15.08 11 13V7h1.5v5.25l3.08 1.83c-.41.28-.79.62-1.11 1m-1.39 4.84c-.36.05-.71.08-1.08.08-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8c0 .37-.03.72-.08 1.08.69.1 1.33.32 1.92.64.1-.56.16-1.13.16-1.72 0-5.5-4.5-10-10-10S2 6.5 2 12s4.47 10 10 10c.59 0 1.16-.06 1.72-.16-.32-.59-.54-1.23-.64-1.92M18 15v3h-3v2h3v3h2v-3h3v-2h-3v-3z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 21, 2026 12:22:34 UTC">April 21, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 30, 2026 16:07:02 UTC">May 30, 2026</span>
   </span>
 
     

@@ -2138,6 +2138,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../kuke-restart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    kuke restart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../kuke-log/" class="md-nav__link">
         
   
@@ -3423,7 +3451,7 @@
 <ul>
 <li><code>kuke create cell &lt;name&gt;</code> (no source flag) — creates an empty Cell shell (name + scope only, no containers). Workflow C: follow with <code>kuke create container -c &lt;name&gt; --image ...</code> then <code>kuke start cell &lt;name&gt;</code>.</li>
 <li><code>kuke create cell &lt;name&gt; --from-blueprint &lt;bp&gt; [--param K=V]... [--param-file &lt;path&gt;]</code> — resolves the daemon-stored CellBlueprint, applies scalar params, materialises the full Cell record (containers and all), and persists it in a <strong>stopped</strong> state. Pair with <code>kuke start cell &lt;name&gt;</code>. Differs from <a href="../kuke-run/"><code>kuke run -b</code></a> (materialise + start + attach) by leaving the cell stopped for inspection or hand-off; <code>-b</code>-lineage cells have no in-place reconcile, so updates flow through delete-and-re-run (or promotion to a CellConfig).</li>
-<li><code>kuke create cell &lt;name&gt; --from-config &lt;cfg&gt;</code> — resolves the daemon-stored CellConfig and its referenced Blueprint, applies the Config's <code>spec.values</code> + repo/secret slot fills, materialises the Cell record, persists in <strong>stopped</strong> state. Pair with <code>kuke start cell &lt;name&gt;</code>. Differs from <a href="../kuke-run/"><code>kuke run &lt;config&gt;</code></a> (materialise + start + attach) by leaving the cell stopped; later reconcile against the lineage Config flows through <a href="kuke-restart.md"><code>kuke restart cell &lt;name&gt;</code></a> (OutOfSync-driven, #821) once the cell is started.</li>
+<li><code>kuke create cell &lt;name&gt; --from-config &lt;cfg&gt;</code> — resolves the daemon-stored CellConfig and its referenced Blueprint, applies the Config's <code>spec.values</code> + repo/secret slot fills, materialises the Cell record, persists in <strong>stopped</strong> state. Pair with <code>kuke start cell &lt;name&gt;</code>. Differs from <a href="../kuke-run/"><code>kuke run &lt;config&gt;</code></a> (materialise + start + attach) by leaving the cell stopped; later reconcile against the lineage Config flows through <a href="../kuke-restart/"><code>kuke restart cell &lt;name&gt;</code></a> (OutOfSync-driven, #821) once the cell is started.</li>
 </ul>
 <table>
 <thead>
