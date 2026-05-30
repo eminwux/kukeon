@@ -37,7 +37,8 @@ jobs:
       - name: Generate sha256 checksums for release assets
         run: |
           for f in kuke-linux-amd64 kuke-linux-arm64 \
-                   kukeond-linux-amd64 kukeond-linux-arm64; do
+                   kukeond-linux-amd64 kukeond-linux-arm64 \
+                   kukepause-linux-amd64 kukepause-linux-arm64; do
             sha256sum "$f" > "$f.sha256"
           done
 
@@ -48,8 +49,10 @@ jobs:
           gh release create "${GITHUB_REF#refs/tags/}" \
           ./kuke-linux-amd64 ./kuke-linux-arm64 \
           ./kukeond-linux-amd64 ./kukeond-linux-arm64 \
+          ./kukepause-linux-amd64 ./kukepause-linux-arm64 \
           ./kuke-linux-amd64.sha256 ./kuke-linux-arm64.sha256 \
           ./kukeond-linux-amd64.sha256 ./kukeond-linux-arm64.sha256 \
+          ./kukepause-linux-amd64.sha256 ./kukepause-linux-arm64.sha256 \
           --title "${GITHUB_REF#refs/tags/}" \
           --generate-notes \
           --notes "Container images (multi-arch: linux/amd64, linux/arm64):

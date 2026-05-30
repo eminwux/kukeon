@@ -18,6 +18,7 @@ package ctr_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	ctr "github.com/eminwux/kukeon/internal/ctr"
@@ -49,43 +50,46 @@ func applyRootBuiltSpec(
 
 func TestDefaultRootContainerSpec(t *testing.T) {
 	tests := []struct {
-		name          string
-		containerdID  string
-		cellID        string
-		realmID       string
-		spaceID       string
-		stackID       string
-		cniConfigPath string
-		wantID        string
-		wantImage     string
-		wantCommand   string
-		wantRoot      bool
+		name              string
+		containerdID      string
+		cellID            string
+		realmID           string
+		spaceID           string
+		stackID           string
+		cniConfigPath     string
+		kukepauseHostPath string
+		wantID            string
+		wantImage         string
+		wantRoot          bool
+		wantVolume        bool
 	}{
 		{
-			name:          "all parameters provided",
-			containerdID:  "containerd-123",
-			cellID:        "cell-1",
-			realmID:       "realm-1",
-			spaceID:       "space-1",
-			stackID:       "stack-1",
-			cniConfigPath: "/path/to/cni/config",
-			wantID:        "root",
-			wantImage:     ctr.DefaultRootContainerImage,
-			wantCommand:   "sleep",
-			wantRoot:      true,
+			name:              "all parameters provided",
+			containerdID:      "containerd-123",
+			cellID:            "cell-1",
+			realmID:           "realm-1",
+			spaceID:           "space-1",
+			stackID:           "stack-1",
+			cniConfigPath:     "/path/to/cni/config",
+			kukepauseHostPath: "/opt/kukeon/bin/kukepause",
+			wantID:            "root",
+			wantImage:         ctr.DefaultRootContainerImage,
+			wantRoot:          true,
+			wantVolume:        true,
 		},
 		{
-			name:          "empty parameters",
-			containerdID:  "",
-			cellID:        "",
-			realmID:       "",
-			spaceID:       "",
-			stackID:       "",
-			cniConfigPath: "",
-			wantID:        "root",
-			wantImage:     ctr.DefaultRootContainerImage,
-			wantCommand:   "sleep",
-			wantRoot:      true,
+			name:              "empty parameters",
+			containerdID:      "",
+			cellID:            "",
+			realmID:           "",
+			spaceID:           "",
+			stackID:           "",
+			cniConfigPath:     "",
+			kukepauseHostPath: "",
+			wantID:            "root",
+			wantImage:         ctr.DefaultRootContainerImage,
+			wantRoot:          true,
+			wantVolume:        false,
 		},
 	}
 
@@ -98,6 +102,7 @@ func TestDefaultRootContainerSpec(t *testing.T) {
 				tt.spaceID,
 				tt.stackID,
 				tt.cniConfigPath,
+				tt.kukepauseHostPath,
 			)
 
 			if spec.ID != tt.wantID {
@@ -115,19 +120,72 @@ func TestDefaultRootContainerSpec(t *testing.T) {
 			if spec.Image != tt.wantImage {
 				t.Errorf("Image = %q, want %q", spec.Image, tt.wantImage)
 			}
-			if spec.Command != tt.wantCommand {
-				t.Errorf("Command = %q, want %q", spec.Command, tt.wantCommand)
+			// kukepause replaces the busybox `sleep infinity`: Command is the
+			// in-container /pause target and Args is cleared (issue #931).
+			if spec.Command != ctr.RootContainerPauseBinaryTarget {
+				t.Errorf("Command = %q, want %q", spec.Command, ctr.RootContainerPauseBinaryTarget)
+			}
+			if len(spec.Args) != 0 {
+				t.Errorf("Args = %v, want empty", spec.Args)
 			}
 			if spec.Root != tt.wantRoot {
 				t.Errorf("Root = %v, want %v", spec.Root, tt.wantRoot)
 			}
-			if len(spec.Args) != 1 || spec.Args[0] != "infinity" {
-				t.Errorf("Args = %v, want [infinity]", spec.Args)
-			}
 			if spec.CNIConfigPath != tt.cniConfigPath {
 				t.Errorf("CNIConfigPath = %q, want %q", spec.CNIConfigPath, tt.cniConfigPath)
 			}
+			// A non-empty kukepause host path yields one read-only bind mount of
+			// that path at /pause; an empty path yields none.
+			if tt.wantVolume {
+				if len(spec.Volumes) != 1 {
+					t.Fatalf("Volumes = %v, want one /pause bind mount", spec.Volumes)
+				}
+				v := spec.Volumes[0]
+				if v.Kind != intmodel.VolumeKindBind ||
+					v.Source != tt.kukepauseHostPath ||
+					v.Target != ctr.RootContainerPauseBinaryTarget ||
+					!v.ReadOnly {
+					t.Errorf("Volumes[0] = %+v, want read-only bind %q -> %q",
+						v, tt.kukepauseHostPath, ctr.RootContainerPauseBinaryTarget)
+				}
+			} else if len(spec.Volumes) != 0 {
+				t.Errorf("Volumes = %v, want none for empty kukepause path", spec.Volumes)
+			}
 		})
+	}
+}
+
+// TestBuildRootContainerSpec_PauseBindMount verifies the default root container
+// produced by DefaultRootContainerSpec flows the kukepause binary through to the
+// OCI spec as a read-only /pause bind mount and execs it as PID 1 (issue #931).
+func TestBuildRootContainerSpec_PauseBindMount(t *testing.T) {
+	const kukepauseHostPath = "/opt/kukeon/bin/kukepause"
+	in := ctr.DefaultRootContainerSpec(
+		"containerd-root", "cell", "realm", "space", "stack", "", kukepauseHostPath,
+	)
+	spec := applyRootBuiltSpec(t, in, nil)
+
+	var found bool
+	for _, m := range spec.Mounts {
+		if m.Destination != ctr.RootContainerPauseBinaryTarget {
+			continue
+		}
+		found = true
+		if m.Type != "bind" || m.Source != kukepauseHostPath {
+			t.Errorf("/pause mount = %+v, want bind from %q", m, kukepauseHostPath)
+		}
+		if !slices.Contains(m.Options, "ro") {
+			t.Errorf("/pause mount options = %v, want read-only (ro)", m.Options)
+		}
+	}
+	if !found {
+		t.Fatalf("no %q bind mount in spec.Mounts = %+v",
+			ctr.RootContainerPauseBinaryTarget, spec.Mounts)
+	}
+
+	if spec.Process == nil || len(spec.Process.Args) == 0 ||
+		spec.Process.Args[0] != ctr.RootContainerPauseBinaryTarget {
+		t.Errorf("process args = %+v, want [%q]", spec.Process, ctr.RootContainerPauseBinaryTarget)
 	}
 }
 
@@ -539,12 +597,16 @@ func TestBuildRootContainerSpec_Resources(t *testing.T) {
 // root container path (no Volumes, no security fields) keeps its existing
 // minimal SpecOpts shape after the parity fix.
 func TestBuildRootContainerSpec_DefaultsUnaffected(t *testing.T) {
+	// Empty kukepause host path so this guard stays focused on the minimal
+	// SpecOpts shape: the /pause bind mount is exercised separately in
+	// TestDefaultRootContainerSpec / TestBuildRootContainerSpec_PauseBindMount.
 	spec := applyRootBuiltSpec(t, ctr.DefaultRootContainerSpec(
 		"containerd-root",
 		"cell",
 		"realm",
 		"space",
 		"stack",
+		"",
 		"",
 	), nil)
 

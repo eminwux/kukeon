@@ -180,7 +180,7 @@ func TestBuildContainerSpec_DefaultMemoryLimit_ZeroIsNoop(t *testing.T) {
 // spec with no Resources gets the daemon default written (#531).
 func TestBuildRootContainerSpec_DefaultMemoryLimit_AppliedWhenSpecHasNone(t *testing.T) {
 	const defaultBytes int64 = 2 * 1024 * 1024 * 1024
-	in := ctr.DefaultRootContainerSpec("containerd-root", "cell", "realm", "space", "stack", "")
+	in := ctr.DefaultRootContainerSpec("containerd-root", "cell", "realm", "space", "stack", "", "")
 
 	spec := applyRootWithBuildOpts(t, in, ctr.WithDefaultMemoryLimit(defaultBytes))
 
@@ -199,7 +199,7 @@ func TestBuildRootContainerSpec_DefaultMemoryLimit_AppliedWhenSpecHasNone(t *tes
 func TestBuildRootContainerSpec_DefaultMemoryLimit_ExplicitWins(t *testing.T) {
 	const defaultBytes int64 = 2 * 1024 * 1024 * 1024
 	explicit := int64(8 * 1024 * 1024 * 1024)
-	in := ctr.DefaultRootContainerSpec("containerd-root", "cell", "realm", "space", "stack", "")
+	in := ctr.DefaultRootContainerSpec("containerd-root", "cell", "realm", "space", "stack", "", "")
 	in.Resources = &intmodel.ContainerResources{MemoryLimitBytes: &explicit}
 
 	spec := applyRootWithBuildOpts(t, in, ctr.WithDefaultMemoryLimit(defaultBytes))
@@ -216,7 +216,7 @@ func TestBuildRootContainerSpec_DefaultMemoryLimit_ExplicitWins(t *testing.T) {
 // behavior preserving contract for root containers — no option, zero, or
 // negative value all leave memory.max unwritten.
 func TestBuildRootContainerSpec_DefaultMemoryLimit_ZeroIsNoop(t *testing.T) {
-	in := ctr.DefaultRootContainerSpec("containerd-root", "cell", "realm", "space", "stack", "")
+	in := ctr.DefaultRootContainerSpec("containerd-root", "cell", "realm", "space", "stack", "", "")
 	for _, tc := range []struct {
 		name string
 		opts []ctr.BuildOption

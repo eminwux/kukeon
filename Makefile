@@ -38,7 +38,7 @@ LDFLAGS := -s -w \
 	-X $(MODULE)/cmd/config.KukeondImageRepo=$(KUKEON_IMAGE_REPO)
 
 # ----- Build matrix -----
-BINS = kuke kukeond kuketty kukebuild
+BINS = kuke kukeond kuketty kukepause kukebuild
 OS = linux
 ARCHS = amd64 arm64
 
@@ -48,7 +48,7 @@ all: clean kill $(BINS)
 .PHONY: release
 release: release-build
 
-.PHONY: kuke kukeond kuketty kukebuild
+.PHONY: kuke kukeond kuketty kukepause kukebuild
 kuke:
 	go build \
 	-o kuke \
@@ -69,6 +69,19 @@ kuketty:
 	-o kuketty \
 	-ldflags="$(LDFLAGS)" \
 	./cmd/kuketty/
+
+# kukepause is the minimal PID 1 for every cell's root (pause) container
+# (issue #931). It is built static (CGO_ENABLED=0, no libc) and pre-staged on
+# the host by `kuke init` to /opt/kukeon/bin/kukepause, then bind-mounted into
+# each root container at /pause — it cannot ship inside the kukeond image like
+# kuketty because root containers (including kukeond's own) exist before the
+# daemon is up. The version ldflags don't apply (it imports no cmd/config), so
+# it links with -s -w only.
+kukepause:
+	CGO_ENABLED=0 go build \
+	-o kukepause \
+	-ldflags="-s -w" \
+	./cmd/kukepause/
 
 # kukebuild is the native image builder that embeds BuildKit as a library
 # (issue #522). It lives in its own Go module (cmd/kukebuild/go.mod, issue #655)
@@ -103,6 +116,12 @@ release-build:
 			-o kuketty-$$OS-$$ARCH \
 			-ldflags="$(LDFLAGS)" \
 			./cmd/kuketty; \
+			GO111MODULE=on CGO_ENABLED=0 GOOS=$$OS GOARCH=$$ARCH \
+			go build -a \
+			-trimpath \
+			-o kukepause-$$OS-$$ARCH \
+			-ldflags="-s -w" \
+			./cmd/kukepause; \
 		done \
 	done
 
@@ -129,7 +148,7 @@ release-build-kukebuild:
 
 clean:
 	rm -rf $(HOME)/.kukeon/run/*
-	rm -rf kuke kukeond kuketty kukebuild
+	rm -rf kuke kukeond kuketty kukepause kukebuild
 
 kill:
 	(killall kukeond || true )
@@ -186,7 +205,7 @@ e2e: test-e2e
 #
 # Issue #284 collapsed KUKE_INIT_SERVER_CONFIGURATION into KUKEOND_CONFIGURATION
 # — one env var, one source of truth, the same path the daemon honours.
-test-e2e: kuke kukeond kuketty
+test-e2e: kuke kukeond kuketty kukepause
 	@echo "Building local kukeond image $(KUKEON_E2E_IMAGE_DOCKER_NAME) for e2e"
 	docker build --build-arg VERSION=v0.0.0-e2e -t $(KUKEON_E2E_IMAGE_DOCKER_NAME) .
 	@echo "Running e2e tests using binaries in project root"
@@ -215,20 +234,22 @@ dev-init:
 # dev workflow can't afford. argv[0] dispatch resolves `kukeond` to the
 # daemon entrypoint because the basename of the exec path is `kukeond`.
 #
-# kukebuild is symlinked only when it has been built (the `[ -f ]` guard), so
-# `kuke build` resolves it on PATH after `make dev-init` (which runs `make kuke
-# kukebuild` before this target) without imposing kukebuild's separate-module
-# build on a plain `make install-dev`. Routing it through INSTALL_PREFIX here
-# keeps a single PATH-placement mechanism instead of a second one in dev-init.sh.
+# kukebuild and kukepause are symlinked only when they have been built (the
+# `[ -f ]` guards), so `kuke build` resolves kukebuild on PATH and `kuke init`
+# resolves kukepause on PATH after `make dev-init` (which runs `make kuke
+# kukepause kukebuild` before this target) without imposing their builds on a
+# plain `make install-dev`. Routing them through INSTALL_PREFIX here keeps a
+# single PATH-placement mechanism instead of a second one in dev-init.sh.
 .PHONY: install-dev uninstall-dev
 install-dev: kuke
 	ln -sf kuke kukeond
 	sudo ln -sf $(CURDIR)/kuke $(INSTALL_PREFIX)/kuke
 	sudo ln -sf $(CURDIR)/kuke $(INSTALL_PREFIX)/kukeond
 	@[ -f $(CURDIR)/kukebuild ] && sudo ln -sf $(CURDIR)/kukebuild $(INSTALL_PREFIX)/kukebuild || true
+	@[ -f $(CURDIR)/kukepause ] && sudo ln -sf $(CURDIR)/kukepause $(INSTALL_PREFIX)/kukepause || true
 
 uninstall-dev:
-	sudo rm -f $(INSTALL_PREFIX)/kuke $(INSTALL_PREFIX)/kukeond $(INSTALL_PREFIX)/kukebuild
+	sudo rm -f $(INSTALL_PREFIX)/kuke $(INSTALL_PREFIX)/kukeond $(INSTALL_PREFIX)/kukebuild $(INSTALL_PREFIX)/kukepause
 
 # Publish the one-line installer through the mkdocs site: copy
 # `scripts/install.sh` (canonical source) into `docs/site/install.sh` so
