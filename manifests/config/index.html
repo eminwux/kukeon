@@ -3465,7 +3465,7 @@
 <a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="w">        </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
 </code></pre></div>
 <p>A <code>CellConfig</code> binds a <a href="../blueprint/"><code>CellBlueprint</code></a> to a concrete, idempotent cell <strong>identity</strong>. Where a Blueprint answers <em>"what does this cell look like?"</em>, a Config answers <em>"which instance?"</em>: a name with a deterministic derivation, the scalar <code>values</code> filled into the blueprint's parameters, and the structural repo/secret slot fills keyed by the blueprint's slot names. A Config materializes at most one live cell per scope.</p>
-<p>See <a href="../../cli/kuke-run/"><code>kuke run -c</code></a> for the identity state machine that decides whether <code>kuke run -c &lt;config&gt;</code> materializes a fresh cell, attaches to an existing one, or refuses because the in-cluster cell diverged from the Config's current spec.</p>
+<p>See <a href="../../cli/kuke-run/"><code>kuke run &lt;config&gt;</code></a> for the identity state machine that decides whether <code>kuke run &lt;config&gt;</code> materializes a fresh cell, attaches to an existing one, or refuses because the in-cluster cell diverged from the Config's current spec.</p>
 <h2 id="metadata">metadata<a class="headerlink" href="#metadata" title="Permanent link">&para;</a></h2>
 <p>A Config is scopable at realm, space, or stack — never cell. A Config materializes a cell; scoping it to a single cell is nonsensical. The scope is the deepest non-empty coordinate, and a deeper coordinate may only be set when every shallower one is.</p>
 <table>
@@ -3609,11 +3609,11 @@
 </ul>
 <p>The two channels are independent: scalar <code>values</code> are blueprint-side parameters resolved at run time (see the blueprint's <a href="../blueprint/"><code>spec.parameters[]</code></a>), while <code>repos:</code> and <code>secrets:</code> are structural slot fills validated at apply time. A <code>${KEY}</code> parameter is not a slot, and a slot is not a <code>${KEY}</code> parameter.</p>
 <h2 id="identity-and-stable-name">Identity and stable name<a class="headerlink" href="#identity-and-stable-name" title="Permanent link">&para;</a></h2>
-<p>A <code>CellConfig</code> materializes <strong>at most one</strong> live cell within its scope. The cell's deterministic name is <code>metadata.name</code> verbatim — not <code>&lt;name&gt;-&lt;hash-of-values&gt;</code> and not <code>&lt;name&gt;-&lt;6hex&gt;</code>. The derivation is value-independent on purpose: editing <code>spec.values</code> keeps the same cell identity so subsequent <code>kuke run -c</code> invocations attach to the existing cell rather than spawning a fresh one and orphaning the old.</p>
+<p>A <code>CellConfig</code> materializes <strong>at most one</strong> live cell within its scope. The cell's deterministic name is <code>metadata.name</code> verbatim — not <code>&lt;name&gt;-&lt;hash-of-values&gt;</code> and not <code>&lt;name&gt;-&lt;6hex&gt;</code>. The derivation is value-independent on purpose: editing <code>spec.values</code> keeps the same cell identity so subsequent <code>kuke run &lt;config&gt;</code> invocations attach to the existing cell rather than spawning a fresh one and orphaning the old.</p>
 <p>The matching contract:</p>
 <ul>
-<li>Every cell <code>kuke run -c</code> materializes carries the <code>kukeon.io/config=&lt;name&gt;</code> back-reference label. The runtime locates the at-most-one live cell a Config owns by listing cells in the Config's scope with that label.</li>
-<li>When the in-cluster cell's spec diverges from the Config's current spec (after re-resolving scalar values and slot fills), <code>kuke run -c</code> refuses to attach and points at <code>kuke restart cell &lt;name&gt;</code> to reconcile — <code>run</code> stays a pure read/materialize verb, and destructive updates (stop, update, start) route through <code>kuke restart cell &lt;name&gt;</code>. The full identity state machine (no cell → materialize, running → attach, stopped → start-then-attach, divergent → refuse with <code>kuke restart cell &lt;name&gt;</code> pointer, error state → refuse with <code>kuke delete cell</code> pointer) lives in <a href="../../cli/kuke-run/"><code>kuke run -c</code></a>.</li>
+<li>Every cell <code>kuke run &lt;config&gt;</code> materializes carries the <code>kukeon.io/config=&lt;name&gt;</code> back-reference label. The runtime locates the at-most-one live cell a Config owns by listing cells in the Config's scope with that label.</li>
+<li>When the in-cluster cell's spec diverges from the Config's current spec (after re-resolving scalar values and slot fills), <code>kuke run &lt;config&gt;</code> refuses to attach and points at <code>kuke restart cell &lt;name&gt;</code> to reconcile — <code>run</code> stays a pure read/materialize verb, and destructive updates (stop, update, start) route through <code>kuke restart cell &lt;name&gt;</code>. The full identity state machine (no cell → materialize, running → attach, stopped → start-then-attach, divergent → refuse with <code>kuke restart cell &lt;name&gt;</code> pointer, error state → refuse with <code>kuke delete cell</code> pointer) lives in <a href="../../cli/kuke-run/"><code>kuke run &lt;config&gt;</code></a>.</li>
 </ul>
 <p>This is the structural contrast with a <a href="../blueprint/"><code>CellBlueprint</code></a>: a blueprint is always-fresh (<code>&lt;prefix&gt;-&lt;6hex&gt;</code> per invocation), a config is always-named (<code>&lt;configName&gt;</code> per binding).</p>
 <h2 id="storage-layout">Storage layout<a class="headerlink" href="#storage-layout" title="Permanent link">&para;</a></h2>
@@ -3625,7 +3625,7 @@
 <p>The <code>configs/</code> directory is <code>0755</code> and each config document is <code>0644</code>, both owned by root. A config carries only references (a blueprint name, repo URLs, secretRefs) — no credential bytes — so the directory is world-readable, unlike <code>secrets/</code>. Because <code>configs/</code> nests inside the scope's metadata directory, the same teardown that reclaims a scope (<code>kuke purge</code> / <code>kuke delete</code>) reclaims its configs.</p>
 <h2 id="invariants">Invariants<a class="headerlink" href="#invariants" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>One Config → at most one live cell within scope.</strong> The deterministic stable name is <code>metadata.name</code> verbatim; subsequent <code>kuke run -c</code> invocations attach to the existing cell or refuse on divergence rather than spawning a duplicate.</li>
+<li><strong>One Config → at most one live cell within scope.</strong> The deterministic stable name is <code>metadata.name</code> verbatim; subsequent <code>kuke run &lt;config&gt;</code> invocations attach to the existing cell or refuse on divergence rather than spawning a duplicate.</li>
 <li><strong>Back-reference.</strong> Every materialized cell carries the <code>kukeon.io/config=&lt;name&gt;</code> label, so an operator can find a Config's live cell with <code>kuke get cells -l kukeon.io/config=&lt;name&gt;</code>.</li>
 <li><strong>Apply-time slot validation.</strong> A Config that fills an undeclared slot, or that leaves a required slot unfilled, errors at apply time against the referenced blueprint's current shape — not at run time.</li>
 <li><strong>Cross-scope references.</strong> A Config may reference a Blueprint in a different scope; the same is true of the <code>secretRef</code> inside each secret slot fill.</li>
@@ -3651,7 +3651,7 @@
 <a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">anthropic-token</span>
 <a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">        </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kuke-system</span>
 </code></pre></div>
-<p>A realm-scoped Config named <code>prod</code> that instantiates the <code>claude-code</code> blueprint (also realm-scoped), overrides the <code>MODEL</code> scalar parameter, fills the <code>workspace</code> repo slot, and fills the <code>anthropic-token</code> secret slot from the existing <code>kind: Secret</code> of the same name. Run with <code>sudo kuke run -c prod --realm kuke-system</code>; re-running attaches to the same cell.</p>
+<p>A realm-scoped Config named <code>prod</code> that instantiates the <code>claude-code</code> blueprint (also realm-scoped), overrides the <code>MODEL</code> scalar parameter, fills the <code>workspace</code> repo slot, and fills the <code>anthropic-token</code> secret slot from the existing <code>kind: Secret</code> of the same name. Run with <code>sudo kuke run prod --realm kuke-system</code>; re-running attaches to the same cell.</p>
 
 
 
@@ -3674,7 +3674,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 25, 2026 15:25:50 UTC">May 25, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 30, 2026 13:45:09 UTC">May 30, 2026</span>
   </span>
 
     
