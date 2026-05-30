@@ -60,6 +60,8 @@ Both `kuke get realms` and `kuke get realms --no-daemon` must produce the same s
 
 **If your change touches anything the daemon reads, this check must be in the PR's test plan.** Reviewer agent will flag PRs that miss it.
 
+After the daemon-parity tail, `scripts/dev-init.sh` also runs a PTY-driven `kuke attach` smoke against a kuketty-wrapped cell (`dev-init-attach/ds/dks/cattach`) — this exercises the attachable + kuketty socket pipeline end-to-end (post-create chown, `0o660 root:kukeon` socket mode, JSON-RPC + SCM_RIGHTS handshake, clean `^]^]` detach). Changes touching `internal/controller/runner/attachable.go` or any attach/kuketty socket path are validated by this phase; the no-op-StartCell wrong-mode reapply branch (#935/#936) is unreachable from CLI verbs (the higher-level `controller.StartCell` rejects already-running cells), so its specific correction behavior is covered exclusively by the unit tests in `internal/controller/runner/attachable_test.go`.
+
 ### Post-init: `kuke status`
 
 `kuke status` is the canonical equivalent of the manual diff ritual above —
