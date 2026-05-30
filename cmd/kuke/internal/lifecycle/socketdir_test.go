@@ -22,7 +22,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/eminwux/kukeon/cmd/kuke/daemon/internal/lifecycle"
+	"github.com/eminwux/kukeon/cmd/kuke/internal/lifecycle"
 )
 
 // stubOwnership swaps the root-requiring ownership step for one that records

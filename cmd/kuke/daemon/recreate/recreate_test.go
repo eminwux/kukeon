@@ -29,7 +29,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eminwux/kukeon/cmd/kuke/daemon/internal/lifecycle"
+	"github.com/eminwux/kukeon/cmd/kuke/internal/lifecycle"
 	recreate "github.com/eminwux/kukeon/cmd/kuke/daemon/recreate"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"

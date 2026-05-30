@@ -20,13 +20,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	"github.com/eminwux/kukeon/cmd/kuke/internal/lifecycle"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/consts"
@@ -35,16 +34,12 @@ import (
 	"github.com/eminwux/kukeon/internal/firewall"
 	"github.com/eminwux/kukeon/internal/instance"
 	"github.com/eminwux/kukeon/internal/sysuser"
-	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 const (
-	kukeondReadyTimeout = 30 * time.Second
-	kukeondReadyTick    = 200 * time.Millisecond
-
 	// defaultContainerdSocket is the conventional path of a standalone
 	// containerd's gRPC socket. Used as the fallback when no socket is
 	// configured (matches the containerd library's own default and the
@@ -454,7 +449,7 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	if waitErr := waitForKukeondReady(cmd.Context(), socketPath, kukeondReadyTimeout); waitErr != nil {
+	if waitErr := lifecycle.WaitForKukeondReady(cmd.Context(), socketPath, lifecycle.KukeondReadyTimeout); waitErr != nil {
 		return fmt.Errorf("kukeond did not become ready: %w", waitErr)
 	}
 
@@ -471,53 +466,6 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	))
 
 	cmd.Println(fmt.Sprintf("kukeond is ready (unix://%s)", socketPath))
-	return nil
-}
-
-// waitForKukeondReady polls the kukeond socket with Ping until it responds or
-// the timeout expires. The socket file may appear before the RPC handler is
-// actually serving, so we dial AND ping.
-func waitForKukeondReady(ctx context.Context, socketPath string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastErr error
-	for {
-		if time.Now().After(deadline) {
-			if lastErr != nil {
-				return fmt.Errorf("timed out after %s: %w", timeout, lastErr)
-			}
-			return fmt.Errorf("timed out after %s", timeout)
-		}
-
-		attemptCtx, cancel := context.WithTimeout(ctx, kukeondReadyTick)
-		err := pingKukeond(attemptCtx, socketPath)
-		cancel()
-		if err == nil {
-			return nil
-		}
-		lastErr = err
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(kukeondReadyTick):
-		}
-	}
-}
-
-func pingKukeond(ctx context.Context, socketPath string) error {
-	d := net.Dialer{Timeout: kukeondReadyTick}
-	conn, err := d.DialContext(ctx, "unix", socketPath)
-	if err != nil {
-		return fmt.Errorf("dial: %w", err)
-	}
-	_ = conn.Close()
-
-	client := kukeonv1.NewUnixClient(socketPath, kukeonv1.WithDialTimeout(kukeondReadyTick))
-	defer func() { _ = client.Close() }()
-
-	if err = client.Ping(ctx); err != nil {
-		return fmt.Errorf("ping: %w", err)
-	}
 	return nil
 }
 

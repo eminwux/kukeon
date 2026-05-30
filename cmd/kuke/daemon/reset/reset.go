@@ -31,7 +31,7 @@ import (
 	"path/filepath"
 
 	"github.com/eminwux/kukeon/cmd/config"
-	"github.com/eminwux/kukeon/cmd/kuke/daemon/internal/lifecycle"
+	"github.com/eminwux/kukeon/cmd/kuke/internal/lifecycle"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"
 	"github.com/eminwux/kukeon/internal/client/local"

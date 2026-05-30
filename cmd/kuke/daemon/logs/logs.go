@@ -33,7 +33,7 @@ import (
 	"os"
 
 	"github.com/eminwux/kukeon/cmd/config"
-	"github.com/eminwux/kukeon/cmd/kuke/daemon/internal/lifecycle"
+	"github.com/eminwux/kukeon/cmd/kuke/internal/lifecycle"
 	logcmd "github.com/eminwux/kukeon/cmd/kuke/log"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/cmd/types"

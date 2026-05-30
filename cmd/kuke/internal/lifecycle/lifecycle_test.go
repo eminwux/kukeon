@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/eminwux/kukeon/cmd/config"
-	"github.com/eminwux/kukeon/cmd/kuke/daemon/internal/lifecycle"
+	"github.com/eminwux/kukeon/cmd/kuke/internal/lifecycle"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
