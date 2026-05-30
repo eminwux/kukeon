@@ -273,8 +273,6 @@ sudo kuke run <config> --clone --name Y                     # named create-or-fa
 sudo kuke run <config> --reuse -d                           # restart a healthy-Stopped clone in place (overlay preserved); fall back to --clone on empty pool
 ```
 
-> The legacy `kuke run -p <profile>` form (client-side `CellProfile` loader from `$HOME/.kuke/profiles.d`) was removed in [#626](https://github.com/eminwux/kukeon/issues/626). Typing it now exits non-zero with a migration pointer to [`docs/site/guides/migrate-cellprofile-to-blueprint.md`](site/guides/migrate-cellprofile-to-blueprint.md).
-
 **Invariants.**
 
 - Exit code 0 once the cell is materialized and its containers started.

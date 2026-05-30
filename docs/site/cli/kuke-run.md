@@ -6,11 +6,6 @@ Create and start a single cell from one of three sources:
 - `-b <blueprint>` — a daemon-stored CellBlueprint, resolved from the scope named by `--realm`/`--space`/`--stack`. Substitutes scalar `--param` values and materializes a fresh `<prefix>-<6hex>` cell every invocation.
 - `<config>` — a daemon-stored CellConfig (positional, after #825), resolved from the same scope. Stable-named and idempotent: walks the identity state machine and attaches to the at-most-one live cell the Config owns. Pass `--new` (after #833) to opt into a generated `<config-name>-<6hex>` cell per invocation instead (fire-and-forget sandboxes from one Config; lineage label preserved); combine `--new --name X` for a create-or-fail named cell from the Config, or `--name X` alone to idempotently attach to a pinned name. Pass `--clone` (after #839) to fork the Config into a new persistent clone Config with a gap-fill counter name (`<source>-<N>`) and start a cell from the clone — the path for interactive multi-instance and cron pool seeding. Pass `--reuse` (after #835) to pick a healthy-Stopped clone of the Config (lowest-N first) and start its cell in-place, preserving the containerd overlay across the stop/start transition (project repo clone, `.claude.json`, any per-cell state); falls back to `--clone` on an empty pool — the path for cron-driven skill execution where the project clone happens once per pool member.
 
-> **Removed in #626:** the per-user `-p <profile>` form (client-side
-> `kind: CellProfile` loader under `$HOME/.kuke/profiles.d`). `kuke run -p`
-> now surfaces a migration pointer at flag-parse time and exits non-zero;
-> see [Migrate from `CellProfile` to `CellBlueprint`](../guides/migrate-cellprofile-to-blueprint.md).
-
 Conceptually `kuke apply -f` (single-cell) plus `kuke start cell`, but refuses to update a divergent on-disk spec.
 
 ```
