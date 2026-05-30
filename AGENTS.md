@@ -45,18 +45,18 @@ When run from inside a `kukeon-dev-root` cell (the canonical agent workflow), `m
 make dev-init
 ```
 
-`scripts/dev-init.sh` composes the full re-bootstrap loop: `make kuke kukebuild` + `kukeond` symlink, `kuke daemon reset` of the prior cell, `kuke build -t kukeon-local:dev --realm kuke-system .` building the image straight into the `kuke-system` realm's containerd namespace, `kuke init --kukeond-image docker.io/library/kukeon-local:dev`, and the daemon-parity check below. The script is idempotent — re-running on a healthy host produces a clean re-bootstrap.
+`scripts/dev-init.sh` composes the full re-bootstrap loop: `make kuke kukebuild` + `kukeond` symlink, writes `./kukeond-dev.yaml` + `./kuke-dev.yaml` idempotently (guarded by `[ ! -e ]`) and threads `--server-configuration` (admin commands) + `KUKE_CONFIGURATION` (client + parity commands) through every invocation, `kuke daemon reset` of the prior cell, `kuke build -t kukeon-local:dev --realm kuke-system .` building the image straight into the `kuke-system` realm's containerd namespace, `kuke init --kukeond-image docker.io/library/kukeon-local:dev`, and the daemon-parity check below. The script is idempotent — re-running on a healthy host produces a clean re-bootstrap.
 
 The daemon-parity tail of the output (the regression guard) must read:
 
 ```
-NAME         STATE  AGE
------------  -----  ---
-default      Ready  <age>
-kuke-system  Ready  <age>
+NAME         STATE  AGE  NAMESPACE
+-----------  -----  ---  -------------------------
+default      Ready  <age>  default.dev.kukeon.io
+kuke-system  Ready  <age>  kuke-system.dev.kukeon.io
 ```
 
-Both `kuke get realms` and `kuke get realms --no-daemon` must produce the same shape (same columns, same rows, same `STATE`); `AGE` may differ by ms between the two invocations but renders at second granularity, so a single re-run normally produces byte-identical output. `NAMESPACE` and `CGROUP` no longer appear in the default table (epic:get retires them); use `kuke get realms -o wide` to append `NAMESPACE`, or `-o yaml`/`-o json` to surface `cgroupPath`. If only the `--no-daemon` list is populated, the daemon's view of `/opt/kukeon` diverged from the in-process controller — that's the bind-mount regression this check catches.
+Both `kuke get realms -o wide` and `kuke get realms -o wide --no-daemon` must produce the same shape (same columns, same rows, same `STATE`, same `NAMESPACE`); `AGE` may differ by ms between the two invocations but renders at second granularity, so a single re-run normally produces byte-identical output. `dev.kukeon.io` is the suffix carried by `./kukeond-dev.yaml` (server side) and `./kuke-dev.yaml` (client side); a non-default profile is the canonical dev-init smoke since #285 phase 3. `CGROUP` no longer surfaces in either the default or wide table (epic:get retires it from both); the script's follow-up `kuke get realms -o yaml | grep cgroupPath` step prints `cgroupPath: /kukeon-dev/default` and `cgroupPath: /kukeon-dev/kuke-system` so the dev cgroup-root flip is visible too. If only the `--no-daemon` list is populated, the daemon's view of `/opt/kukeon` diverged from the in-process controller — that's the bind-mount regression this check catches.
 
 **If your change touches anything the daemon reads, this check must be in the PR's test plan.** Reviewer agent will flag PRs that miss it.
 
