@@ -68,28 +68,25 @@ func envKeyOccurrences(env []string, key string) int {
 
 // TestBuildContainerSpec_KukeonEnv asserts that BuildContainerSpec emits the
 // KUKEON_* identity entries for every populated cell-context field on
-// ContainerSpec, with KUKEON_CELL_PROFILE_NAME tracking the runner-stamped
-// CellProfileName. Issue #351.
+// ContainerSpec. Issue #351.
 func TestBuildContainerSpec_KukeonEnv(t *testing.T) {
 	spec := applyBuiltSpec(t, intmodel.ContainerSpec{
-		ID:              "work",
-		Image:           "registry.eminwux.com/busybox:latest",
-		CellName:        "kukeon-pr-a4aaab",
-		RealmName:       "default",
-		SpaceName:       "default",
-		StackName:       "default",
-		CellCgroupPath:  "/kukeon/default/default/default/kukeon-pr-a4aaab",
-		CellProfileName: "kukeon-pr",
+		ID:             "work",
+		Image:          "registry.eminwux.com/busybox:latest",
+		CellName:       "kukeon-pr-a4aaab",
+		RealmName:      "default",
+		SpaceName:      "default",
+		StackName:      "default",
+		CellCgroupPath: "/kukeon/default/default/default/kukeon-pr-a4aaab",
 	})
 
 	want := map[string]string{
-		"KUKEON_CELL_PROFILE_NAME": "kukeon-pr",
-		"KUKEON_CELL_NAME":         "kukeon-pr-a4aaab",
-		"KUKEON_CONTAINER_ID":      "work",
-		"KUKEON_REALM":             "default",
-		"KUKEON_SPACE":             "default",
-		"KUKEON_STACK":             "default",
-		"KUKEON_CGROUP_PATH":       "/kukeon/default/default/default/kukeon-pr-a4aaab",
+		"KUKEON_CELL_NAME":    "kukeon-pr-a4aaab",
+		"KUKEON_CONTAINER_ID": "work",
+		"KUKEON_REALM":        "default",
+		"KUKEON_SPACE":        "default",
+		"KUKEON_STACK":        "default",
+		"KUKEON_CGROUP_PATH":  "/kukeon/default/default/default/kukeon-pr-a4aaab",
 	}
 	got := envMap(spec.Process.Env)
 	for k, v := range want {
@@ -101,8 +98,8 @@ func TestBuildContainerSpec_KukeonEnv(t *testing.T) {
 
 // TestBuildContainerSpec_KukeonEnv_SkipsEmptyFields locks in that an empty
 // cell-context field produces no corresponding KUKEON_* entry — so test specs
-// and edge cases that omit, say, CellProfileName or CellCgroupPath don't
-// leak `KUKEON_CELL_PROFILE_NAME=` empty-value entries into the container.
+// and edge cases that omit CellCgroupPath don't leak
+// `KUKEON_CGROUP_PATH=` empty-value entries into the container.
 func TestBuildContainerSpec_KukeonEnv_SkipsEmptyFields(t *testing.T) {
 	spec := applyBuiltSpec(t, intmodel.ContainerSpec{
 		ID:        "work",
@@ -111,19 +108,16 @@ func TestBuildContainerSpec_KukeonEnv_SkipsEmptyFields(t *testing.T) {
 		RealmName: "realm-1",
 		SpaceName: "space-1",
 		StackName: "stack-1",
-		// CellProfileName and CellCgroupPath intentionally empty.
+		// CellCgroupPath intentionally empty.
 	})
 
 	got := envMap(spec.Process.Env)
-	if _, ok := got["KUKEON_CELL_PROFILE_NAME"]; ok {
-		t.Errorf("KUKEON_CELL_PROFILE_NAME present with empty CellProfileName: %q", got["KUKEON_CELL_PROFILE_NAME"])
-	}
 	if _, ok := got["KUKEON_CGROUP_PATH"]; ok {
 		t.Errorf("KUKEON_CGROUP_PATH present with empty CellCgroupPath: %q", got["KUKEON_CGROUP_PATH"])
 	}
 	// The other vars must still be present so the partial-population case
-	// is useful (a cell created without a profile still surfaces its own
-	// realm/space/stack/cell name to the workload).
+	// is useful (a cell created without a cgroup path still surfaces its
+	// own realm/space/stack/cell name to the workload).
 	for _, k := range []string{"KUKEON_CELL_NAME", "KUKEON_CONTAINER_ID", "KUKEON_REALM", "KUKEON_SPACE", "KUKEON_STACK"} {
 		if _, ok := got[k]; !ok {
 			t.Errorf("Process.Env missing %q (full env: %v)", k, spec.Process.Env)
@@ -138,13 +132,12 @@ func TestBuildContainerSpec_KukeonEnv_SkipsEmptyFields(t *testing.T) {
 // behind. Issue #351.
 func TestBuildContainerSpec_KukeonEnv_UserEnvWinsOnCollision(t *testing.T) {
 	spec := applyBuiltSpec(t, intmodel.ContainerSpec{
-		ID:              "work",
-		Image:           "registry.eminwux.com/busybox:latest",
-		CellName:        "cell-1",
-		RealmName:       "realm-1",
-		SpaceName:       "space-1",
-		StackName:       "stack-1",
-		CellProfileName: "profile-1",
+		ID:        "work",
+		Image:     "registry.eminwux.com/busybox:latest",
+		CellName:  "cell-1",
+		RealmName: "realm-1",
+		SpaceName: "space-1",
+		StackName: "stack-1",
 		// User explicitly overrides one of the KUKEON_* defaults plus
 		// declares an unrelated AGENT_NAME var.
 		Env: []string{
@@ -159,13 +152,6 @@ func TestBuildContainerSpec_KukeonEnv_UserEnvWinsOnCollision(t *testing.T) {
 	}
 	if got["AGENT_NAME"] != "kukeon-pr" {
 		t.Errorf("AGENT_NAME = %q, want %q", got["AGENT_NAME"], "kukeon-pr")
-	}
-	if got["KUKEON_CELL_PROFILE_NAME"] != "profile-1" {
-		t.Errorf(
-			"KUKEON_CELL_PROFILE_NAME = %q, want %q (untouched default)",
-			got["KUKEON_CELL_PROFILE_NAME"],
-			"profile-1",
-		)
 	}
 	// No duplicate entries — the merge happens before oci.WithEnv so two
 	// entries with the same key never reach replaceOrAppendEnvValues.
@@ -197,7 +183,6 @@ func TestBuildContainerSpec_KukeonEnv_NoFieldsNoEntries(t *testing.T) {
 		t.Errorf("KUKEON_CONTAINER_ID = %q, want %q", got["KUKEON_CONTAINER_ID"], "c1")
 	}
 	for _, k := range []string{
-		"KUKEON_CELL_PROFILE_NAME",
 		"KUKEON_CELL_NAME",
 		"KUKEON_REALM",
 		"KUKEON_SPACE",
@@ -216,25 +201,23 @@ func TestBuildContainerSpec_KukeonEnv_NoFieldsNoEntries(t *testing.T) {
 // Issue #351.
 func TestBuildRootContainerSpec_KukeonEnv(t *testing.T) {
 	spec := applyBuiltRootSpec(t, intmodel.ContainerSpec{
-		ID:              "root",
-		Root:            true,
-		Image:           "registry.eminwux.com/busybox:latest",
-		CellName:        "kukeon-pr-a4aaab",
-		RealmName:       "default",
-		SpaceName:       "default",
-		StackName:       "default",
-		CellCgroupPath:  "/kukeon/default/default/default/kukeon-pr-a4aaab",
-		CellProfileName: "kukeon-pr",
+		ID:             "root",
+		Root:           true,
+		Image:          "registry.eminwux.com/busybox:latest",
+		CellName:       "kukeon-pr-a4aaab",
+		RealmName:      "default",
+		SpaceName:      "default",
+		StackName:      "default",
+		CellCgroupPath: "/kukeon/default/default/default/kukeon-pr-a4aaab",
 	})
 
 	want := map[string]string{
-		"KUKEON_CELL_PROFILE_NAME": "kukeon-pr",
-		"KUKEON_CELL_NAME":         "kukeon-pr-a4aaab",
-		"KUKEON_CONTAINER_ID":      "root",
-		"KUKEON_REALM":             "default",
-		"KUKEON_SPACE":             "default",
-		"KUKEON_STACK":             "default",
-		"KUKEON_CGROUP_PATH":       "/kukeon/default/default/default/kukeon-pr-a4aaab",
+		"KUKEON_CELL_NAME":    "kukeon-pr-a4aaab",
+		"KUKEON_CONTAINER_ID": "root",
+		"KUKEON_REALM":        "default",
+		"KUKEON_SPACE":        "default",
+		"KUKEON_STACK":        "default",
+		"KUKEON_CGROUP_PATH":  "/kukeon/default/default/default/kukeon-pr-a4aaab",
 	}
 	got := envMap(spec.Process.Env)
 	for k, v := range want {

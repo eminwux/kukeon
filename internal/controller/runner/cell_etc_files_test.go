@@ -142,17 +142,14 @@ func TestEnsureCellEtcFilesExistPreCNI_FillsInMissingFiles(t *testing.T) {
 // TestStampContainerRecreateRuntimeFields is the regression guard for
 // issue #354: the StartContainer single-container recreate path was the
 // only BuildContainerSpec call site that did not apply the per-cell
-// /etc/hosts + /etc/hostname bind-mount stamps or the CellProfileName
-// runtime stamp. The helper bundles both per-spec stamps so the recreate
-// path produces a spec consistent with every other recreate path.
+// /etc/hosts + /etc/hostname bind-mount stamps. The helper applies the
+// per-spec stamps so the recreate path produces a spec consistent with
+// every other recreate path.
 func TestStampContainerRecreateRuntimeFields(t *testing.T) {
 	runPath := t.TempDir()
 	r := newProvisionTestExec(t, runPath, false)
 	cell := &intmodel.Cell{
-		Metadata: intmodel.CellMetadata{
-			Name:   "work-cell",
-			Labels: map[string]string{labelCellProfileLegacy: "kukeon-pr"},
-		},
+		Metadata: intmodel.CellMetadata{Name: "work-cell"},
 		Spec: intmodel.CellSpec{
 			RealmName:       "default",
 			SpaceName:       "team-a",
@@ -187,9 +184,6 @@ func TestStampContainerRecreateRuntimeFields(t *testing.T) {
 	}
 	if work.EtcHostsPath != wantHosts {
 		t.Errorf("EtcHostsPath = %q, want %q", work.EtcHostsPath, wantHosts)
-	}
-	if work.CellProfileName != "kukeon-pr" {
-		t.Errorf("CellProfileName = %q, want %q", work.CellProfileName, "kukeon-pr")
 	}
 }
 
@@ -229,38 +223,6 @@ func TestStampContainerRecreateRuntimeFields_HostNetworkSuppressesHosts(t *testi
 	}
 	if side.EtcHostsPath != "" {
 		t.Errorf("EtcHostsPath = %q, want empty (host-network suppresses /etc/hosts)", side.EtcHostsPath)
-	}
-}
-
-// TestStampContainerRecreateRuntimeFields_NoProfileLabel covers a plain
-// CellDoc-sourced cell: no profile label means CellProfileName stays empty
-// so kukeonDefaultEnv emits no KUKEON_CELL_PROFILE_NAME entry — the
-// downstream BuildContainerSpec test in ctr already pins that env mapping.
-func TestStampContainerRecreateRuntimeFields_NoProfileLabel(t *testing.T) {
-	runPath := t.TempDir()
-	r := newProvisionTestExec(t, runPath, false)
-	cell := &intmodel.Cell{
-		Metadata: intmodel.CellMetadata{Name: "plain"},
-		Spec: intmodel.CellSpec{
-			RealmName:       "default",
-			SpaceName:       "team-a",
-			StackName:       "web",
-			RootContainerID: "root",
-			Containers: []intmodel.ContainerSpec{
-				{ID: "root", Root: true},
-				{ID: "work"},
-			},
-		},
-	}
-	work := &cell.Spec.Containers[1]
-
-	r.stampContainerRecreateRuntimeFields(work, cell)
-
-	if work.CellProfileName != "" {
-		t.Errorf("CellProfileName = %q, want empty (no profile label on cell)", work.CellProfileName)
-	}
-	if work.EtcHostnamePath == "" {
-		t.Errorf("EtcHostnamePath empty; etc-files stamp should still apply when no profile label")
 	}
 }
 
