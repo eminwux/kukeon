@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#kukeon-for-ai-agents-a-proposal-for-agent-native-orchestration" class="md-skip">
+        <a href="#building-a-goal-compiler-the-design-of-kukeon" class="md-skip">
           Skip to content
         </a>
       
@@ -449,6 +449,26 @@
   
   
   
+    
+    
+      <li class="md-tabs__item">
+        <a href="../proposals/agent-native-orchestration/" class="md-tabs__link">
+          
+  
+  
+  Proposals
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
     <li class="md-tabs__item">
       <a href="../faq/" class="md-tabs__link">
         
@@ -602,10 +622,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#summary" class="md-nav__link">
+  <a href="#the-first-decision-agents-are-workloads" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Summary
+        The first decision: agents are workloads
       
     </span>
   </a>
@@ -613,10 +633,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#1-why-kukeon-is-the-right-substrate" class="md-nav__link">
+  <a href="#how-you-describe-a-cell-and-why-this-took-three-tries" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Why kukeon is the right substrate
+        How you describe a cell (and why this took three tries)
       
     </span>
   </a>
@@ -624,132 +644,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-the-agent-threat-model-briefly" class="md-nav__link">
+  <a href="#the-organization-roles-with-separation-of-powers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. The agent threat model, briefly
+        The organization: roles with separation of powers
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#3-what-the-current-v1beta1-does-and-does-not-cover" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. What the current v1beta1 does and does not cover
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#4-proposed-needs-in-priority-order" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. Proposed needs, in priority order
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="4. Proposed needs, in priority order">
+    <nav class="md-nav" aria-label="The organization: roles with separation of powers">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#41-p0-volume-mounts-on-container" class="md-nav__link">
+  <a href="#the-plan-is-a-graph-and-thats-load-bearing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4.1 P0 — Volume mounts on Container
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#42-p0-security-fields-on-container" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4.2 P0 — Security fields on Container
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#43-p1-isolation-envelope-inheritance-from-space" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4.3 P1 — Isolation-envelope inheritance from Space
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#44-p1-network-policy-on-space" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4.4 P1 — Network policy on Space
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#45-p1-a-session-kind-or-equivalent-lifetime-primitive" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4.5 P1 — A Session kind (or equivalent lifetime primitive)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#46-p1-scoped-credential-injection" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4.6 P1 — Scoped credential injection
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#47-p2-capability-budgets-on-session" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4.7 P2 — Capability budgets on Session
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#48-p2-causal-audit-trail" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4.8 P2 — Causal audit trail
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#49-p2-approval-gates" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4.9 P2 — Approval gates
+        The plan is a graph, and that's load-bearing
       
     </span>
   </a>
@@ -762,10 +672,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-non-goals" class="md-nav__link">
+  <a href="#concurrency-where-the-obvious-approach-is-wrong" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. Non-goals
+        Concurrency: where the obvious approach is wrong
       
     </span>
   </a>
@@ -773,10 +683,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#6-what-success-looks-like" class="md-nav__link">
+  <a href="#where-the-truth-lives-not-in-kukeon" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6. What success looks like
+        Where the truth lives: not in Kukeon
       
     </span>
   </a>
@@ -784,44 +694,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#7-sequencing" class="md-nav__link">
+  <a href="#the-loops-what-kukeon-actually-is" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7. Sequencing
+        The loops: what Kukeon actually is
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#8-closing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        8. Closing
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#9-status-as-of-v050" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        9. Status as of v0.5.0
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="9. Status as of v0.5.0">
+    <nav class="md-nav" aria-label="The loops: what Kukeon actually is">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#per-item-detail" class="md-nav__link">
+  <a href="#the-work-loop" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Per-item detail
+        The work loop
       
     </span>
   </a>
@@ -829,10 +717,32 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#what-this-means-for-v10" class="md-nav__link">
+  <a href="#loop-a-the-system-improves-its-own-agents" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What this means for v1.0
+        Loop A — the system improves its own agents
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loop-b-the-system-improves-the-product" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loop B — the system improves the product
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loop-c-the-product-reports-its-own-failures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loop C — the product reports its own failures
       
     </span>
   </a>
@@ -841,6 +751,28 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-frame-a-bootstrapping-compiler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The frame: a bootstrapping compiler
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-it-stands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where it stands
+      
+    </span>
+  </a>
   
 </li>
       
@@ -3127,6 +3059,95 @@
   
   
   
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_12" >
+        
+          
+          <label class="md-nav__link" for="__nav_12" id="__nav_12_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proposals
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_12">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Proposals
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../proposals/agent-native-orchestration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kukeon for AI Agents: A Proposal for Agent-Native Orchestration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
     <li class="md-nav__item">
       <a href="../faq/" class="md-nav__link">
         
@@ -3175,10 +3196,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#summary" class="md-nav__link">
+  <a href="#the-first-decision-agents-are-workloads" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Summary
+        The first decision: agents are workloads
       
     </span>
   </a>
@@ -3186,10 +3207,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#1-why-kukeon-is-the-right-substrate" class="md-nav__link">
+  <a href="#how-you-describe-a-cell-and-why-this-took-three-tries" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Why kukeon is the right substrate
+        How you describe a cell (and why this took three tries)
       
     </span>
   </a>
@@ -3197,132 +3218,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-the-agent-threat-model-briefly" class="md-nav__link">
+  <a href="#the-organization-roles-with-separation-of-powers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. The agent threat model, briefly
+        The organization: roles with separation of powers
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#3-what-the-current-v1beta1-does-and-does-not-cover" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. What the current v1beta1 does and does not cover
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#4-proposed-needs-in-priority-order" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. Proposed needs, in priority order
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="4. Proposed needs, in priority order">
+    <nav class="md-nav" aria-label="The organization: roles with separation of powers">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#41-p0-volume-mounts-on-container" class="md-nav__link">
+  <a href="#the-plan-is-a-graph-and-thats-load-bearing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4.1 P0 — Volume mounts on Container
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#42-p0-security-fields-on-container" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4.2 P0 — Security fields on Container
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#43-p1-isolation-envelope-inheritance-from-space" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4.3 P1 — Isolation-envelope inheritance from Space
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#44-p1-network-policy-on-space" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4.4 P1 — Network policy on Space
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#45-p1-a-session-kind-or-equivalent-lifetime-primitive" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4.5 P1 — A Session kind (or equivalent lifetime primitive)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#46-p1-scoped-credential-injection" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4.6 P1 — Scoped credential injection
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#47-p2-capability-budgets-on-session" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4.7 P2 — Capability budgets on Session
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#48-p2-causal-audit-trail" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4.8 P2 — Causal audit trail
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#49-p2-approval-gates" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4.9 P2 — Approval gates
+        The plan is a graph, and that's load-bearing
       
     </span>
   </a>
@@ -3335,10 +3246,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-non-goals" class="md-nav__link">
+  <a href="#concurrency-where-the-obvious-approach-is-wrong" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. Non-goals
+        Concurrency: where the obvious approach is wrong
       
     </span>
   </a>
@@ -3346,10 +3257,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#6-what-success-looks-like" class="md-nav__link">
+  <a href="#where-the-truth-lives-not-in-kukeon" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6. What success looks like
+        Where the truth lives: not in Kukeon
       
     </span>
   </a>
@@ -3357,44 +3268,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#7-sequencing" class="md-nav__link">
+  <a href="#the-loops-what-kukeon-actually-is" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7. Sequencing
+        The loops: what Kukeon actually is
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#8-closing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        8. Closing
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#9-status-as-of-v050" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        9. Status as of v0.5.0
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="9. Status as of v0.5.0">
+    <nav class="md-nav" aria-label="The loops: what Kukeon actually is">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#per-item-detail" class="md-nav__link">
+  <a href="#the-work-loop" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Per-item detail
+        The work loop
       
     </span>
   </a>
@@ -3402,10 +3291,32 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#what-this-means-for-v10" class="md-nav__link">
+  <a href="#loop-a-the-system-improves-its-own-agents" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What this means for v1.0
+        Loop A — the system improves its own agents
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loop-b-the-system-improves-the-product" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loop B — the system improves the product
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loop-c-the-product-reports-its-own-failures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loop C — the product reports its own failures
       
     </span>
   </a>
@@ -3414,6 +3325,28 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-frame-a-bootstrapping-compiler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The frame: a bootstrapping compiler
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-it-stands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where it stands
+      
+    </span>
+  </a>
   
 </li>
       
@@ -3437,438 +3370,116 @@
   
 
 
-<h1 id="kukeon-for-ai-agents-a-proposal-for-agent-native-orchestration">Kukeon for AI Agents: A Proposal for Agent-Native Orchestration<a class="headerlink" href="#kukeon-for-ai-agents-a-proposal-for-agent-native-orchestration" title="Permanent link">&para;</a></h1>
-<p><strong>Status:</strong> Proposal / discussion draft
-<strong>Target:</strong> <code>kukeon</code> project, post-<code>v0.1.0</code>
-<strong>Audience:</strong> project maintainer, contributors, early adopters running agentic workloads</p>
+<h1 id="building-a-goal-compiler-the-design-of-kukeon">Building a Goal Compiler: The Design of Kukeon<a class="headerlink" href="#building-a-goal-compiler-the-design-of-kukeon" title="Permanent link">&para;</a></h1>
+<p><em>How to run a self-improving software-building organization on a Raspberry Pi — and why every part of it is a diff you can read.</em></p>
 <hr />
-<h2 id="summary">Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h2>
-<p>Kukeon's current primitives — Realm, Space, Stack, Cell, Container — are an unusually good substrate for running AI coding agents under real isolation. The containerd-namespace boundary at the Realm level, the CNI+cgroup boundary at the Space level, and the declarative <code>kuke apply</code> workflow together already give agentic workloads more structural isolation than <code>docker compose</code> can express, and do so without the operational weight of Kubernetes.</p>
-<p>What the current <code>v1beta1</code> schema does not yet cover are the fields and primitives needed to turn that substrate into a full solution for running untrusted, autonomous, session-scoped workloads — which is what AI agents are. This document lays out what those needs are, in priority order, so that the project can decide which of them to adopt.</p>
-<p>The position this document takes: <strong>kukeon does not need to become an agent framework</strong>. It needs to expose a small number of additional orchestrator-level primitives that make agent workloads safe to run by default. The agent runtime (Claude Code, Codex CLI, aider, MCP servers, etc.) stays outside kukeon's scope.</p>
+<p>There's a particular feeling you get running coding agents seriously. You have Claude Code in one terminal, a dev server in another, a couple more agents working different tasks, and somewhere in the pile a process died twenty minutes ago and nobody told you. The agents can't see each other. The work lives in your head. And the moment you want any of this to be <em>trustworthy</em> — auditable, reproducible, runnable somewhere that isn't your laptop — none of the existing tools help, because they were built to run an agent, not to run an <em>organization</em> of them accountably.</p>
+<p>Kukeon is an attempt to build that organization properly. It's a self-hosted system where a team of AI agents — a planner, developers, a reviewer, and a meta-agent that improves the others — takes a goal, builds it, reviews it, ships it, operates it, and refines both the product and itself. It runs on a single Linux host you own, from a cloud VM down to a Raspberry Pi. And the organizing idea, which I'll build up to, is that the whole thing behaves like a <strong>bootstrapping compiler</strong>: a system that ultimately builds and improves itself, with the first thing it compiles being itself.</p>
+<p>This is a design doc. I'm going to walk through the decisions, including the ones where the obvious approach is wrong, because the decisions are the interesting part.</p>
 <hr />
-<h2 id="1-why-kukeon-is-the-right-substrate">1. Why kukeon is the right substrate<a class="headerlink" href="#1-why-kukeon-is-the-right-substrate" title="Permanent link">&para;</a></h2>
-<p>Three properties of the current design make kukeon unusually well-suited to agent workloads:</p>
-<p><strong>The Realm as a containerd namespace is a real administrative boundary.</strong> A <code>kuke delete</code> run against the wrong Realm cannot accidentally touch containers in another Realm, because containerd itself enforces the split. Compare to <code>docker compose down</code> run in the wrong project directory, which can and does nuke unrelated containers when names collide. For agent work — where you specifically want the "oops" failure mode to be impossible — this matters.</p>
-<p><strong>The Space as CNI network plus cgroup subtree collapses the isolation envelope into one reviewable object.</strong> In compose, cap drops, read-only roots, resource limits, and network policy are scattered across every service block. Agent workloads typically want every container inside the same security posture; kukeon's Space is the natural place to declare that posture once.</p>
-<p><strong>Declarative <code>kuke apply</code> with round-trip safety turns the environment into a reviewable artifact.</strong> You can check the manifest into a repo, diff it in a pull request, apply it in CI, and <code>kuke get -o yaml</code> the result to confirm drift. That lifecycle contract is the piece that makes compose worth using; kukeon has it already.</p>
-<p>What's missing is not in the bones. It's in the fields.</p>
+<h2 id="the-first-decision-agents-are-workloads">The first decision: agents are workloads<a class="headerlink" href="#the-first-decision-agents-are-workloads" title="Permanent link">&para;</a></h2>
+<p>The starting observation is almost boring once you say it out loud. An AI coding agent is a process that needs a filesystem, scoped credentials, network isolation, and a bounded lifetime. That's a <em>container workload</em>. So agents should run on a real container runtime, with real isolation — not in ad-hoc shells where they can see each other's secrets and step on each other's state.</p>
+<p>So Kukeon is, at its base, a containerd-native runtime. It defines an explicit hierarchy, and the important thing is that every level maps to a real Linux primitive, not an invented abstraction:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Realm → Space → Stack → Cell → Container
+</code></pre></div>
+<p>A <strong>Realm</strong> is a containerd namespace. A <strong>Space</strong> is one CNI network plus one cgroup subtree — this is where default-deny networking lives. A <strong>Stack</strong> groups related cells. A <strong>Cell</strong> is pod-like: one root container owns the network namespace, others join it. A <strong>Container</strong> is just an OCI container inside the cell.</p>
+<p>Why the insistence on real primitives? Because the entire value proposition is that you can <em>trust</em> the isolation, and you can only trust what you can inspect. Every layer corresponds to something you can examine with tools you already know — <code>ctr</code> for the namespace, <code>ip link</code> for the network, <code>ls /sys/fs/cgroup</code> for the cgroups. There's no proprietary control plane you have to take on faith. The daemon (<code>kukeond</code>) is a thin layer over containerd, CNI, and cgroups; <code>kuke</code> is the CLI. You declare resources in YAML and the daemon reconciles them.</p>
+<p>This is also why it's containerd directly and not Docker. Docker's daemon model and flat networking abstract away exactly the primitives I want precise control over. And keeping the substrate this lean is what lets it run on hardware modest enough to make the sovereignty claim <em>credible</em> — more on that later, but the short version is: if it runs on a Raspberry Pi, it can't be hiding a cloud dependency.</p>
 <hr />
-<h2 id="2-the-agent-threat-model-briefly">2. The agent threat model, briefly<a class="headerlink" href="#2-the-agent-threat-model-briefly" title="Permanent link">&para;</a></h2>
-<p>Traditional container workloads are <em>adversarial on the outside, trusted on the inside</em>. The orchestrator defends a trusted service from hostile network traffic.</p>
-<p>Agent workloads invert this. The API endpoint is trusted (you deployed the key). The code running inside the container is not — not because the model is malicious, but because:</p>
+<h2 id="how-you-describe-a-cell-and-why-this-took-three-tries">How you describe a cell (and why this took three tries)<a class="headerlink" href="#how-you-describe-a-cell-and-why-this-took-three-tries" title="Permanent link">&para;</a></h2>
+<p>The runtime runs cells. But how do you <em>describe</em> one? This evolved through three generations, and the path is instructive.</p>
+<p>The first version, <code>CellProfile</code>, was client-side only — the CLI expanded a profile into a cell locally and ran it. It worked, but it duplicated the same machinery into every profile: cloning the repo, setting up git identity, injecting secrets. The lifecycle was invisible to the daemon.</p>
+<p>The current model splits the concern in two, and both are daemon-stored:</p>
 <ul>
-<li>Agents run code and make network requests you did not specifically authorize, often in response to content they just read.</li>
-<li>Prompt injection in third-party inputs (documentation pages, GitHub issues, files the agent fetched) can steer the agent toward actions its operator never intended.</li>
-<li><code>--dangerously-skip-permissions</code> and equivalent flags, used to make agents practically useful, remove the per-action approval that would otherwise catch mistakes.</li>
-<li>Agent loops are long-running and unattended; a silent miscalibration of scope can do a lot of damage before anyone notices.</li>
+<li>A <strong><code>CellBlueprint</code></strong> is a parametrized <em>template</em> — the structure, containers, and setup work, with slots.</li>
+<li>A <strong><code>CellConfig</code></strong> fills those slots with concrete values and an identity. Blueprint + Config = a runnable cell.</li>
 </ul>
-<p>The job of the orchestrator is not to prevent the agent from being wrong. It is to ensure that when the agent is wrong, the blast radius is exactly what was declared, and no larger.</p>
+<p>If you've used container orchestration this is a familiar shape — template versus instance, <em>how to build a thing</em> versus <em>this specific thing</em>. The reason it matters here is that it becomes the substrate for the agent organization: <strong>each agent role is a Blueprint, and each dispatched agent is a Config instantiating it.</strong> The planner role is a template; "the planner working on project X right now" is an instance.</p>
+<p>One principle worth pulling out: the setup work a cell does at boot — cloning, git identity, mounting credentials — runs <em>inside the container</em>, with the container's own UID and scoped credentials, never on the daemon's host context. The daemon orchestrates; it never touches your SSH keys. That clean trust boundary matters more and more as the system gets more autonomous.</p>
 <hr />
-<h2 id="3-what-the-current-v1beta1-does-and-does-not-cover">3. What the current <code>v1beta1</code> does and does not cover<a class="headerlink" href="#3-what-the-current-v1beta1-does-and-does-not-cover" title="Permanent link">&para;</a></h2>
-<p>Measured against that threat model:</p>
-<p><strong>Covered today</strong></p>
+<h2 id="the-organization-roles-with-separation-of-powers">The organization: roles with separation of powers<a class="headerlink" href="#the-organization-roles-with-separation-of-powers" title="Permanent link">&para;</a></h2>
+<p>On top of the runtime sits the team. The design rule is one role per cell, autonomous within a narrow mandate, with hard boundaries on what each <em>won't</em> do:</p>
 <ul>
-<li>Hard tenant boundary via Realm (containerd namespace).</li>
-<li>Network isolation via Space (dedicated CNI bridge per space).</li>
-<li>Cgroup subtree per Space, reported in <code>status.cgroupPath</code>.</li>
-<li>Declarative manifests with <code>kuke apply -f</code>, round-trip safe.</li>
-<li>Non-privileged containers by default (<code>privileged: false</code>).</li>
-<li>Structured lifecycle (<code>start</code> / <code>stop</code> / <code>kill</code> / <code>purge</code>).</li>
+<li><strong>PM</strong> decomposes a goal into a plan, grooms the backlog, prioritizes. Never touches code, never merges.</li>
+<li><strong>Dev</strong> picks a ready task, implements, tests, opens a PR, addresses feedback. Never merges, never manages the backlog.</li>
+<li><strong>Reviewer</strong> reviews PRs and signals a verdict. Never authors code, never merges.</li>
+<li><strong>Meta</strong> creates and refines <em>the other roles' playbooks</em>, via PRs. Never merges, never touches product code.</li>
+<li><strong>Orchestrator</strong> is the conductor between you and the agents — dispatches roles to cells, reads their logs. Never authors or merges.</li>
 </ul>
-<p><strong>Not covered today</strong></p>
-<ul>
-<li>Volume mounts are schema-reserved but not enforced by the controller. An agent container cannot yet be given a workspace directory.</li>
-<li>No per-container <code>user</code>, <code>readOnlyRootfs</code>, <code>capabilities</code>, <code>securityOpt</code>, <code>tmpfs</code>, or resource limits on Container spec. The only security toggle is <code>privileged: true/false</code>.</li>
-<li>No Space-level network policy or egress allowlist. CNI plugin choice and egress filtering are not expressible in the manifest.</li>
-<li>No Session concept: nothing ties a set of resources to a task with a bounded lifetime and budget.</li>
-<li>No outbound proxy or traffic measurement layer.</li>
-<li>No scoped credential minting; secrets are passed as plain env strings.</li>
-<li>No causal audit trail surviving resource destruction.</li>
-</ul>
-<p>The rest of this document proposes how to close those gaps in a way that stays consistent with kukeon's design philosophy.</p>
+<p>The <code>will not</code> column is the actual design. <strong>The author of work is never its approver, and a human does the merging.</strong> This separation of powers is what makes the audit trail mean something. It's also the thing a single "do-everything" self-improving agent structurally cannot give you — a lone agent grading its own work is not an audit. An organization with enforced role boundaries is.</p>
+<p>Each recurring task is a small playbook file (a "skill"). These playbooks are, in a real sense, the agents' <em>source code</em> — and that turns out to be the key to how the system improves itself. The judgment-heavy skills — how the PM decomposes a goal, how a dev picks which task is actually ready, what the reviewer considers blocking — are where the real intelligence lives, and where self-improvement pays off most.</p>
+<h3 id="the-plan-is-a-graph-and-thats-load-bearing">The plan is a graph, and that's load-bearing<a class="headerlink" href="#the-plan-is-a-graph-and-thats-load-bearing" title="Permanent link">&para;</a></h3>
+<p>The PM doesn't write a to-do list; it writes a graph. A goal becomes an initiative (an epic) and a set of nodes (sub-issues) with dependency edges, all expressed as issues in the project's Git forge. Because it's a graph and not a list, independent nodes can be worked <em>in parallel</em> by multiple dev cells.</p>
+<p>The PM's hardest skill is making that graph <em>honest</em> — right-sized nodes, real dependencies, and an accurate read of which nodes are genuinely independent. Everything downstream trusts this structure, so a wrong graph is expensive. Re-partitioning a node that turned out too big or too coupled is a first-class operation. Get the decomposition right and the rest of the system flows; get it wrong and no amount of downstream cleverness saves you.</p>
 <hr />
-<h2 id="4-proposed-needs-in-priority-order">4. Proposed needs, in priority order<a class="headerlink" href="#4-proposed-needs-in-priority-order" title="Permanent link">&para;</a></h2>
-<p>Each need is labelled <code>P0</code> (blocks the agent use case entirely), <code>P1</code> (needed for the use case to be recommendable over docker-compose), or <code>P2</code> (needed to make kukeon genuinely agent-native rather than agent-compatible).</p>
-<h3 id="41-p0-volume-mounts-on-container">4.1 <code>P0</code> — Volume mounts on Container<a class="headerlink" href="#41-p0-volume-mounts-on-container" title="Permanent link">&para;</a></h3>
-<p><strong>Problem.</strong> The reserved <code>volumes</code> field on the Container spec is accepted but not acted on. Without it, an agent container has no way to receive a host directory as its workspace. The Claude Code sandbox use case — "run the agent against this repo on my machine" — is unworkable until volumes land.</p>
-<p><strong>Proposal.</strong> Promote <code>volumes</code> from reserved to active. Minimum viable shape:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">volumes</span><span class="p">:</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/alice/src/my-project</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/workspace</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/etc/ssl/certs</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/etc/ssl/certs</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<h2 id="concurrency-where-the-obvious-approach-is-wrong">Concurrency: where the obvious approach is wrong<a class="headerlink" href="#concurrency-where-the-obvious-approach-is-wrong" title="Permanent link">&para;</a></h2>
+<p>Now the parallelism bites, and this is my favorite decision in the system because the intuitive answer is a trap.</p>
+<p>You're running two dev cells. Both look for work the same way: list the issues, find one without an "in-progress" label, claim it by adding the label, start working. The bug is immediate — both cells read "no label," both decide to claim, both add it, both build the same thing. It's a textbook check-then-act race.</p>
+<p>The temptation is to fix it with <em>better labels</em> or more careful polling. That's the trap. <strong>A label is not a concurrency primitive.</strong> It's a piece of mutable shared state with no atomic compare-and-swap and no ownership semantics. You're implementing a lock with a sticky note. A per-process guard like <code>flock</code> stops two instances on one host, but it does nothing for two cells racing across the system.</p>
+<p>The right fix is to separate two things that labels had conflated: <em>where the work is described</em> and <em>who is allowed to work it right now</em>. The description stays in the forge. The claim moves into the daemon, as a <strong>lease</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>key:    &lt;repo&gt;#&lt;node-id&gt;      ← note: forge-agnostic
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>holder: &lt;cell-id&gt;
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>acquired_at, expires_at
 </code></pre></div>
-<p>Bind mounts are the base case. Named volumes can wait. What matters is that <code>source</code> is a host path (explicitly; no implicit host access), <code>target</code> is a container path, and <code>readOnly</code> is honored.</p>
-<p><strong>Why this is P0.</strong> Nothing else in this document matters if you can't give the agent a workspace. This is the table-stakes field whose absence currently blocks the entire use case.</p>
-<h3 id="42-p0-security-fields-on-container">4.2 <code>P0</code> — Security fields on Container<a class="headerlink" href="#42-p0-security-fields-on-container" title="Permanent link">&para;</a></h3>
-<p><strong>Problem.</strong> The Container spec has only <code>privileged: true/false</code>. For untrusted in-container code, orchestrators need finer control.</p>
-<p><strong>Proposal.</strong> Add the following fields to Container <code>spec</code>, each with safe defaults:</p>
-<table>
-<thead>
-<tr>
-<th>Field</th>
-<th>Type</th>
-<th>Default</th>
-<th>Purpose</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>user</code></td>
-<td><code>"uid:gid"</code></td>
-<td>image default</td>
-<td>Run as non-root</td>
-</tr>
-<tr>
-<td><code>readOnlyRootFilesystem</code></td>
-<td>bool</td>
-<td><code>false</code> (for compat), <code>true</code> recommended</td>
-<td>Lock rootfs</td>
-</tr>
-<tr>
-<td><code>capabilities.drop</code></td>
-<td><code>[]string</code></td>
-<td><code>[]</code></td>
-<td>Drop Linux capabilities</td>
-</tr>
-<tr>
-<td><code>capabilities.add</code></td>
-<td><code>[]string</code></td>
-<td><code>[]</code></td>
-<td>Add Linux capabilities (rarely needed)</td>
-</tr>
-<tr>
-<td><code>securityOpts</code></td>
-<td><code>[]string</code></td>
-<td><code>[]</code></td>
-<td>Passthrough for <code>no-new-privileges</code>, seccomp profiles</td>
-</tr>
-<tr>
-<td><code>tmpfs</code></td>
-<td><code>[]{path, sizeBytes, options}</code></td>
-<td><code>[]</code></td>
-<td>tmpfs mounts for ephemeral scratch</td>
-</tr>
-<tr>
-<td><code>resources.memoryLimitBytes</code></td>
-<td>int</td>
-<td>unset</td>
-<td>Hard memory ceiling</td>
-</tr>
-<tr>
-<td><code>resources.cpuShares</code></td>
-<td>int</td>
-<td>unset</td>
-<td>CPU weight</td>
-</tr>
-<tr>
-<td><code>resources.pidsLimit</code></td>
-<td>int</td>
-<td>unset</td>
-<td>Prevent fork bombs</td>
-</tr>
-</tbody>
-</table>
-<p>This is the minimum to express what <code>docker run --user X --read-only --cap-drop=ALL --security-opt=no-new-privileges --tmpfs=/tmp --memory=4g --pids-limit=512</code> expresses today. Without these, kukeon is strictly less expressive than compose for untrusted workloads.</p>
-<p><strong>Why this is P0.</strong> These are the knobs every isolation guide tells agent operators to set. Their absence means kukeon can't match the sbsh+docker baseline the community is already using.</p>
-<h3 id="43-p1-isolation-envelope-inheritance-from-space">4.3 <code>P1</code> — Isolation-envelope inheritance from Space<a class="headerlink" href="#43-p1-isolation-envelope-inheritance-from-space" title="Permanent link">&para;</a></h3>
-<p><strong>Problem.</strong> If every Container in a Space needs the same cap drops, the same user, the same resource ceilings, repeating that per-container in YAML is error-prone. More importantly, it misses the point of the Space-as-envelope design — the Space exists <em>because</em> isolation should be declared once.</p>
-<p><strong>Proposal.</strong> Add a <code>spec.defaults</code> block on Space that is inherited by every Container in the Space unless overridden:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Space</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nt">metadata</span><span class="p">:</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">agent-sandbox</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">realmId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">agents</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="nt">defaults</span><span class="p">:</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="nt">container</span><span class="p">:</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">      </span><span class="nt">user</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1000:1000&quot;</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">      </span><span class="nt">readOnlyRootFilesystem</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">      </span><span class="nt">capabilities</span><span class="p">:</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">        </span><span class="nt">drop</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;ALL&quot;</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">      </span><span class="nt">securityOpts</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;no-new-privileges&quot;</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">      </span><span class="nt">resources</span><span class="p">:</span>
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">        </span><span class="nt">memoryLimitBytes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4294967296</span><span class="w"> </span><span class="c1"># 4 GiB</span>
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">        </span><span class="nt">pidsLimit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">512</span>
-<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">      </span><span class="nt">tmpfs</span><span class="p">:</span>
-<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> path</span><span class="p">:</span><span class="w"> </span><span class="nv">/tmp</span><span class="p p-Indicator">,</span><span class="nt"> sizeBytes</span><span class="p">:</span><span class="w"> </span><span class="nv">268435456</span><span class="w"> </span><span class="p p-Indicator">}</span>
-</code></pre></div>
-<p>Per-container values override Space defaults; Space defaults override kukeon built-ins. Inheritance is shallow (no deep-merge surprises).</p>
-<p><strong>Why this is P1.</strong> This is the move that turns kukeon from "compose with a hierarchy" into "compose where the hierarchy means something." Isolation posture becomes a property of <em>where</em> a container lives, not a property every author has to remember to set.</p>
-<h3 id="44-p1-network-policy-on-space">4.4 <code>P1</code> — Network policy on Space<a class="headerlink" href="#44-p1-network-policy-on-space" title="Permanent link">&para;</a></h3>
-<p><strong>Problem.</strong> The current Space creates a CNI bridge but does not constrain what the bridge can reach. For agent workloads, uncontrolled egress is the main way a small mistake becomes a big one (data exfiltration, calls to paid APIs, command-and-control via prompt injection).</p>
-<p><strong>Proposal.</strong> Add <code>spec.network</code> to Space with an egress-policy shape:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">realmId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">agents</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">network</span><span class="p">:</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="nt">egress</span><span class="p">:</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">      </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">deny</span><span class="w"> </span><span class="c1"># or allow</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">      </span><span class="nt">allow</span><span class="p">:</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api.anthropic.com</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">          </span><span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">443</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">registry.npmjs.org</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">          </span><span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">443</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">cidr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.0.0.0/8</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">          </span><span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">5432</span><span class="p p-Indicator">]</span>
-</code></pre></div>
-<p>Enforcement can be iptables/nftables on the bridge for IP+port rules, or a transparent egress proxy for hostname rules (the proxy is the honest option for HTTPS since SNI can be inspected but IP allowlists are too coarse).</p>
-<p>For the minimum viable version, accept <code>default: deny</code> plus an allowlist of <code>(host, port)</code> pairs, and document that hostname enforcement requires the proxy path.</p>
-<p><strong>Why this is P1.</strong> "Network isolation" without egress control is security theatre for agent workloads. The Space is the correct object to put this on; it already owns the network.</p>
-<h3 id="45-p1-a-session-kind-or-equivalent-lifetime-primitive">4.5 <code>P1</code> — A <code>Session</code> kind (or equivalent lifetime primitive)<a class="headerlink" href="#45-p1-a-session-kind-or-equivalent-lifetime-primitive" title="Permanent link">&para;</a></h3>
-<p><strong>Problem.</strong> Kukeon's lifecycle verbs operate on persistent resources. An agent run is not persistent — it has a task, a start, an end, and should leave nothing behind except declared outputs. Today you simulate this with <code>kuke apply</code> followed by <code>kuke delete</code>, but there's no single object representing "this run" and no automatic enforcement of its end.</p>
-<p><strong>Proposal.</strong> Introduce a new kind:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Session</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nt">metadata</span><span class="p">:</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-2026-04-21-14-32</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span><span class="nt">stackId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-code</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span><span class="nt">owner</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">alice@example.com</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">  </span><span class="nt">task</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;refactor</span><span class="nv"> </span><span class="s">the</span><span class="nv"> </span><span class="s">auth</span><span class="nv"> </span><span class="s">module&quot;</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">  </span><span class="nt">lifetime</span><span class="p">:</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">    </span><span class="nt">wallClock</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30m</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">    </span><span class="nt">idleTimeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5m</span>
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="w">  </span><span class="nt">onEnd</span><span class="p">:</span>
-<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="w">    </span><span class="c1"># What survives. Everything else is destroyed.</span>
-<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="w">    </span><span class="nt">persist</span><span class="p">:</span>
-<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">volume</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/workspace/out</span>
-<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="nt">status</span><span class="p">:</span>
-<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="w">  </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Running</span>
-<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="w">  </span><span class="nt">startedAt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2026-04-21T14:32:10Z</span>
-<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="w">  </span><span class="nt">deadline</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2026-04-21T15:02:10Z</span>
-</code></pre></div>
-<p>When the deadline passes, or the Session is explicitly closed, kukeon destroys the Stack and everything under it — cells, containers, tmpfs, ephemeral volumes — except paths listed in <code>onEnd.persist</code>. The Session object itself survives (for audit) with <code>status.state: Completed</code> or <code>Terminated</code>.</p>
-<p>This primitive is what makes "ephemeral by default" the easy path. It also gives the orchestrator the hook it needs to enforce timeouts and budgets (see 4.7).</p>
-<p><strong>Why this is P1.</strong> Without it, every agent operator has to reimplement "automatic cleanup after 30 minutes" themselves, which is exactly the kind of footgun a good primitive removes.</p>
-<h3 id="46-p1-scoped-credential-injection">4.6 <code>P1</code> — Scoped credential injection<a class="headerlink" href="#46-p1-scoped-credential-injection" title="Permanent link">&para;</a></h3>
-<p><strong>Problem.</strong> Today, credentials are passed via <code>env: ["ANTHROPIC_API_KEY=..."]</code>, which puts the secret in the manifest, in logs, and in <code>kuke get -o yaml</code> output. For agents, this is the wrong ergonomics <em>and</em> the wrong security posture.</p>
-<p><strong>Proposal.</strong> Add a <code>secrets</code> field on Container (or inherited from Space/Session) that references credentials by source, not by value:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">secrets</span><span class="p">:</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ANTHROPIC_API_KEY</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="nt">fromFile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/etc/kukeon/secrets/anthropic.key</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GITHUB_TOKEN</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">    </span><span class="nt">fromEnv</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GITHUB_TOKEN_SCOPED</span><span class="w"> </span><span class="c1"># on the host, set by a wrapper</span>
-</code></pre></div>
-<p>Values are mounted into the container's environment or as files, never written into status or persisted in audit logs. The manifest is safe to commit.</p>
-<p>An extended version — probably <code>P2</code> — would integrate with an external broker (Vault, systemd credentials, cloud KMS) so that credentials are minted fresh per Session and revoked on Session end.</p>
-<p><strong>Why this is P1.</strong> The absence of this feature pushes agent operators toward the two worst options: committing secrets into manifests, or passing them through shell env vars where they leak into audit trails. Kukeon should make the right path the easy path.</p>
-<h3 id="47-p2-capability-budgets-on-session">4.7 <code>P2</code> — Capability budgets on Session<a class="headerlink" href="#47-p2-capability-budgets-on-session" title="Permanent link">&para;</a></h3>
-<p><strong>Problem.</strong> Resource limits today (CPU, RAM, pids) don't cover the dimensions that actually get agents into trouble: dollars spent on API calls, number of tool invocations, number of writes to disk.</p>
-<p><strong>Proposal.</strong> Extend Session spec with budgets the orchestrator enforces:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">budgets</span><span class="p">:</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">spend</span><span class="p">:</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">endpoint</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api.anthropic.com</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">        </span><span class="nt">maxUSD</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5.00</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">    </span><span class="nt">toolCalls</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">500</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">    </span><span class="nt">fileWrites</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">200</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">    </span><span class="nt">networkRequests</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span>
-</code></pre></div>
-<p>Spend and network-request enforcement require the egress proxy from 4.4 (that's where bytes and endpoints are observable). Tool calls and file writes require either cooperation from the agent runtime (it reports each tool invocation) or a process-exec/file-write auditor at the orchestrator level. Either is a real piece of work.</p>
-<p>When a budget is exceeded, the Session is terminated (not warned). The enforcement point is the orchestrator, not the agent runtime — the agent tracking its own spend is telemetry, not a boundary.</p>
-<p><strong>Why this is P2.</strong> This is the feature that makes kukeon distinctively agent-native rather than agent-compatible. It's also the hardest to implement well. P2 is honest: nice to have, not blocking, but the piece that would give kukeon something no other orchestrator has.</p>
-<h3 id="48-p2-causal-audit-trail">4.8 <code>P2</code> — Causal audit trail<a class="headerlink" href="#48-p2-causal-audit-trail" title="Permanent link">&para;</a></h3>
-<p><strong>Problem.</strong> "The blast radius is controlled" is a verifiable claim only if, after the Session ends, you can answer <em>exactly</em> what the agent did: what it read, what it wrote, where it connected, what commands it ran. Container logs don't cut it — they're unstructured and disappear with the container.</p>
-<p><strong>Proposal.</strong> The daemon writes a per-Session append-only audit log to a location the Session itself cannot write to:</p>
-<ul>
-<li>Every process exec inside the Session (argv, exit code, duration).</li>
-<li>Every file write to a declared workspace volume (path, size, hash).</li>
-<li>Every outbound connection (destination, port, bytes, status) — source is the egress proxy again.</li>
-<li>Every credential use.</li>
-<li>Session lifecycle events (start, budget hits, termination cause).</li>
-</ul>
-<p>Retention is configurable on the Session (<code>spec.audit.retain: 7d</code>). A <code>kuke audit session &lt;id&gt;</code> command surfaces it.</p>
-<p>Causally linking file writes back to the tool call that caused them requires runtime cooperation and is an advanced feature; the orchestrator-level pieces above (exec, file write, network, creds) are all observable without runtime help.</p>
-<p><strong>Why this is P2.</strong> Without audit, "blast radius" is marketing copy. With it, it's an operable property.</p>
-<h3 id="49-p2-approval-gates">4.9 <code>P2</code> — Approval gates<a class="headerlink" href="#49-p2-approval-gates" title="Permanent link">&para;</a></h3>
-<p><strong>Problem.</strong> <code>--dangerously-skip-permissions</code> is the flag that makes agents practical. It's also the flag that removes the per-action stop point that used to catch mistakes. Some actions need the stop point back, at an orchestrator level where the agent can't skip it.</p>
-<p><strong>Proposal.</strong> Session spec declares gated action classes; the orchestrator blocks those actions until out-of-band approval arrives.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">gates</span><span class="p">:</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">egressUnallowlistedHost</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">writeOutsideWorkspace</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">spendPerCallAbove</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">      </span><span class="nt">thresholdUSD</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.50</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">  </span><span class="nt">approvals</span><span class="p">:</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="w">    </span><span class="nt">channel</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local-socket:/run/kukeon/approvals.sock</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="w">    </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2m</span>
-</code></pre></div>
-<p>Approval channel implementations can vary — a local Unix socket, a webhook, a desktop notification daemon, a chat bot. What matters is the primitive: the orchestrator halts the agent's action until a human responds or the timeout fires.</p>
-<p><strong>Why this is P2.</strong> This is the feature that makes unsupervised agent runs safe enough that operators will actually leave them unattended. It's valuable, but it requires the auditing and egress-proxy pieces to be in place first.</p>
-<hr />
-<h2 id="5-non-goals">5. Non-goals<a class="headerlink" href="#5-non-goals" title="Permanent link">&para;</a></h2>
-<p>To keep the proposal tight, some things are explicitly out of scope for kukeon even under an agent-native framing:</p>
-<ul>
-<li><strong>Agent runtime management.</strong> MCP server lifecycles, tool routing, prompt templating, model selection. These belong in the runtime (Claude Code, Codex, custom clients), not the orchestrator.</li>
-<li><strong>Multi-agent coordination.</strong> Agent A spawning agent B, handoffs, shared scratchpads. Interesting, but premature; nail single-Session isolation first.</li>
-<li><strong>Distributed scheduling.</strong> Kukeon is local-first by design, and that's an asset for the agent use case (no cross-node complexity). Keep it that way.</li>
-<li><strong>A Kubernetes-compatible API.</strong> Kukeon's value is that it isn't Kubernetes. Don't spend complexity budget chasing kubectl compatibility.</li>
-</ul>
-<hr />
-<h2 id="6-what-success-looks-like">6. What success looks like<a class="headerlink" href="#6-what-success-looks-like" title="Permanent link">&para;</a></h2>
-<p>A concrete test for whether the above proposals succeed: <strong>a five-document manifest that gives a Claude Code agent strictly more isolation than a carefully-written 100-line <code>docker-compose.yml</code>.</strong> If that manifest exists and works, kukeon has moved the floor. If it doesn't, the proposals have added concepts without moving the floor.</p>
-<p>A rough shape of that manifest, assuming P0 + P1 are adopted:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nn">---</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Realm</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="nt">metadata</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">agents</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="nn">---</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Space</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="nt">metadata</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">claude-sandbox</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="w">  </span><span class="nt">realmId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">agents</span>
-<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">  </span><span class="nt">network</span><span class="p">:</span>
-<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="w">    </span><span class="nt">egress</span><span class="p">:</span>
-<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="w">      </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">deny</span>
-<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="w">      </span><span class="nt">allow</span><span class="p">:</span>
-<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> host</span><span class="p">:</span><span class="w"> </span><span class="nv">api.anthropic.com</span><span class="p p-Indicator">,</span><span class="nt"> ports</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">443</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="w">  </span><span class="nt">defaults</span><span class="p">:</span>
-<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="w">    </span><span class="nt">container</span><span class="p">:</span>
-<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="w">      </span><span class="nt">user</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1000:1000&quot;</span>
-<a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a><span class="w">      </span><span class="nt">readOnlyRootFilesystem</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a><span class="w">      </span><span class="nt">capabilities</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> drop</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;ALL&quot;</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a><span class="w">      </span><span class="nt">securityOpts</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;no-new-privileges&quot;</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> memoryLimitBytes</span><span class="p">:</span><span class="w"> </span><span class="nv">4294967296</span><span class="p p-Indicator">,</span><span class="nt"> pidsLimit</span><span class="p">:</span><span class="w"> </span><span class="nv">512</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a><span class="w">      </span><span class="nt">tmpfs</span><span class="p">:</span>
-<a id="__codelineno-7-24" name="__codelineno-7-24" href="#__codelineno-7-24"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> path</span><span class="p">:</span><span class="w"> </span><span class="nv">/tmp</span><span class="p p-Indicator">,</span><span class="nt"> sizeBytes</span><span class="p">:</span><span class="w"> </span><span class="nv">268435456</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-7-25" name="__codelineno-7-25" href="#__codelineno-7-25"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> path</span><span class="p">:</span><span class="w"> </span><span class="nv">/home/agent</span><span class="p p-Indicator">,</span><span class="nt"> sizeBytes</span><span class="p">:</span><span class="w"> </span><span class="nv">134217728</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-7-26" name="__codelineno-7-26" href="#__codelineno-7-26"></a><span class="nn">---</span>
-<a id="__codelineno-7-27" name="__codelineno-7-27" href="#__codelineno-7-27"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
-<a id="__codelineno-7-28" name="__codelineno-7-28" href="#__codelineno-7-28"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Stack</span>
-<a id="__codelineno-7-29" name="__codelineno-7-29" href="#__codelineno-7-29"></a><span class="nt">metadata</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">claude-code</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-7-30" name="__codelineno-7-30" href="#__codelineno-7-30"></a><span class="nt">spec</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> realmId</span><span class="p">:</span><span class="w"> </span><span class="nv">agents</span><span class="p p-Indicator">,</span><span class="nt"> spaceId</span><span class="p">:</span><span class="w"> </span><span class="nv">claude-sandbox</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-7-31" name="__codelineno-7-31" href="#__codelineno-7-31"></a><span class="nn">---</span>
-<a id="__codelineno-7-32" name="__codelineno-7-32" href="#__codelineno-7-32"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
-<a id="__codelineno-7-33" name="__codelineno-7-33" href="#__codelineno-7-33"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Session</span>
-<a id="__codelineno-7-34" name="__codelineno-7-34" href="#__codelineno-7-34"></a><span class="nt">metadata</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">claude-run</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-7-35" name="__codelineno-7-35" href="#__codelineno-7-35"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-7-36" name="__codelineno-7-36" href="#__codelineno-7-36"></a><span class="w">  </span><span class="nt">stackId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-code</span>
-<a id="__codelineno-7-37" name="__codelineno-7-37" href="#__codelineno-7-37"></a><span class="w">  </span><span class="nt">lifetime</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> wallClock</span><span class="p">:</span><span class="w"> </span><span class="nv">30m</span><span class="p p-Indicator">,</span><span class="nt"> idleTimeout</span><span class="p">:</span><span class="w"> </span><span class="nv">5m</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-7-38" name="__codelineno-7-38" href="#__codelineno-7-38"></a><span class="w">  </span><span class="nt">onEnd</span><span class="p">:</span>
-<a id="__codelineno-7-39" name="__codelineno-7-39" href="#__codelineno-7-39"></a><span class="w">    </span><span class="nt">persist</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[{</span><span class="nt"> volume</span><span class="p">:</span><span class="w"> </span><span class="nv">/workspace/out</span><span class="w"> </span><span class="p p-Indicator">}]</span>
-<a id="__codelineno-7-40" name="__codelineno-7-40" href="#__codelineno-7-40"></a><span class="nn">---</span>
-<a id="__codelineno-7-41" name="__codelineno-7-41" href="#__codelineno-7-41"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
-<a id="__codelineno-7-42" name="__codelineno-7-42" href="#__codelineno-7-42"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Cell</span>
-<a id="__codelineno-7-43" name="__codelineno-7-43" href="#__codelineno-7-43"></a><span class="nt">metadata</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">agent</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-7-44" name="__codelineno-7-44" href="#__codelineno-7-44"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-7-45" name="__codelineno-7-45" href="#__codelineno-7-45"></a><span class="w">  </span><span class="nt">realmId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">agents</span>
-<a id="__codelineno-7-46" name="__codelineno-7-46" href="#__codelineno-7-46"></a><span class="w">  </span><span class="nt">spaceId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-sandbox</span>
-<a id="__codelineno-7-47" name="__codelineno-7-47" href="#__codelineno-7-47"></a><span class="w">  </span><span class="nt">stackId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-code</span>
-<a id="__codelineno-7-48" name="__codelineno-7-48" href="#__codelineno-7-48"></a><span class="w">  </span><span class="nt">containers</span><span class="p">:</span>
-<a id="__codelineno-7-49" name="__codelineno-7-49" href="#__codelineno-7-49"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude</span>
-<a id="__codelineno-7-50" name="__codelineno-7-50" href="#__codelineno-7-50"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-sandbox:latest</span>
-<a id="__codelineno-7-51" name="__codelineno-7-51" href="#__codelineno-7-51"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude</span>
-<a id="__codelineno-7-52" name="__codelineno-7-52" href="#__codelineno-7-52"></a><span class="w">      </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;--dangerously-skip-permissions&quot;</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-7-53" name="__codelineno-7-53" href="#__codelineno-7-53"></a><span class="w">      </span><span class="nt">volumes</span><span class="p">:</span>
-<a id="__codelineno-7-54" name="__codelineno-7-54" href="#__codelineno-7-54"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span>
-<a id="__codelineno-7-55" name="__codelineno-7-55" href="#__codelineno-7-55"></a><span class="nt">            source</span><span class="p">:</span><span class="w"> </span><span class="nv">/home/alice/src/my-project</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-7-56" name="__codelineno-7-56" href="#__codelineno-7-56"></a><span class="nt">            target</span><span class="p">:</span><span class="w"> </span><span class="nv">/workspace</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-7-57" name="__codelineno-7-57" href="#__codelineno-7-57"></a><span class="nt">            readOnly</span><span class="p">:</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-7-58" name="__codelineno-7-58" href="#__codelineno-7-58"></a><span class="w">          </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-7-59" name="__codelineno-7-59" href="#__codelineno-7-59"></a><span class="w">      </span><span class="nt">secrets</span><span class="p">:</span>
-<a id="__codelineno-7-60" name="__codelineno-7-60" href="#__codelineno-7-60"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span>
-<a id="__codelineno-7-61" name="__codelineno-7-61" href="#__codelineno-7-61"></a><span class="nt">            name</span><span class="p">:</span><span class="w"> </span><span class="nv">ANTHROPIC_API_KEY</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-7-62" name="__codelineno-7-62" href="#__codelineno-7-62"></a><span class="nt">            fromFile</span><span class="p">:</span><span class="w"> </span><span class="nv">/etc/kukeon/secrets/anthropic.key</span><span class="p p-Indicator">,</span>
-<a id="__codelineno-7-63" name="__codelineno-7-63" href="#__codelineno-7-63"></a><span class="w">          </span><span class="p p-Indicator">}</span>
-</code></pre></div>
-<p>One file, one <code>kuke apply</code>, one Session, one <code>kuke delete</code> when done. The agent has a workspace, an egress-restricted network, a scoped credential, a hard deadline, and no access to anything on the host outside the declared workspace. That's the bar.</p>
-<hr />
-<h2 id="7-sequencing">7. Sequencing<a class="headerlink" href="#7-sequencing" title="Permanent link">&para;</a></h2>
-<p>A reasonable order of operations for the project:</p>
+<p>The claim is the one operation labels can't do: an <strong>atomic compare-and-swap</strong> — create the lease if and only if no live lease exists for that key. Exactly one cell wins; the other moves on. Clean.</p>
+<p>Two things make this <em>correct</em>, not just convenient:</p>
 <ol>
-<li><strong>Land <code>P0</code> first</strong> (volumes, container security fields). This unblocks the compose-parity story and makes kukeon usable for any untrusted workload, agent or otherwise.</li>
-<li><strong>Then <code>P1</code></strong> (Space defaults, network policy, Session kind, scoped credentials). This is the stretch that makes kukeon <em>better than</em> compose for the agent case specifically.</li>
-<li><strong>Finally <code>P2</code></strong> (budgets, audit, approval gates). This is where the agent-native category bet is made — opt-in, ambitious, and optional for the project's homelab/VPS user base.</li>
+<li><strong>The daemon already knows liveness.</strong> It owns cell lifecycle, so when a cell dies, its lease is released — not on a hopeful timeout, but on the actual death signal. This is the deep reason the lease belongs in the runtime and nowhere else: only the daemon has <em>both</em> the claim and the liveness information. Put the lease in the forge and you've separated them, and you're back to guessing.</li>
+<li><strong>Heartbeat plus a TTL backstop.</strong> A working cell renews its lease; silence lets it expire. That covers the cases the death signal might miss — a hang, a partition.</li>
 </ol>
-<p><code>P0</code> is a few weeks of well-scoped work against an existing schema. <code>P1</code> is a quarter of design-heavy work but introduces no new architecture. <code>P2</code> is a project of its own and can wait until there's demand to justify it.</p>
+<p>Labels don't disappear — but they get demoted to what they're good at: a <em>human-visible reflection</em> of state, written <em>after</em> a lease transition, never the claim mechanism itself.</p>
+<p>And notice the bonus in that lease key: it's forge-agnostic. The concurrency logic doesn't know or care whether the work item is a GitHub issue or a Forgejo one. Which leads to the next decision.</p>
 <hr />
-<h2 id="8-closing">8. Closing<a class="headerlink" href="#8-closing" title="Permanent link">&para;</a></h2>
-<p>Kukeon did not set out to be an agent orchestrator, and it doesn't need to rebrand as one. But the primitives it happens to have — namespace-per-Realm, CNI-plus-cgroup-per-Space, declarative <code>apply</code>, local-first — are the right shape for a gap that is not well served today. Docker's surface is too flat, Kubernetes' surface is too heavy, and purpose-built agent sandboxes are one-off shell scripts dressed up as products.</p>
-<p>The proposal above is a path to take the gap without abandoning the project's stated direction. Most of what's needed is field additions to an existing schema. A few of the items are new kinds. None of them require kukeon to stop being what it already is.</p>
-<p>Whether to take the bet is the maintainer's call. This document is written to make the bet legible.</p>
+<h2 id="where-the-truth-lives-not-in-kukeon">Where the truth lives: not in Kukeon<a class="headerlink" href="#where-the-truth-lives-not-in-kukeon" title="Permanent link">&para;</a></h2>
+<p>Here's a decision that looks like a limitation and is actually the whole point. Kukeon does <em>not</em> store the issues, the plan, or the audit trail in its own database. The Git forge is the system of record — GitHub for convenience, or self-hosted Forgejo/GitLab for air-gapped use. Kukeon keeps only references and a derived operational view: the plan-graph as a typed projection, the lease table, a cache so agents can read without hammering the forge's rate limits.</p>
+<p>Why give up owning your own data model? Because of what you're building. This is a system that acts autonomously and <em>rewrites its own behavior</em>. The record of what such a system did, and how it changed itself, should live <strong>outside the system being audited</strong> — in infrastructure you already trust, with signed, attributed history. "The audit log is in our daemon's database, trust us" is a weak story to tell a security reviewer. "Every action is a commit and a PR in your own Git, signed and attributed" is a strong one.</p>
+<p>And it's not a sacrifice of sovereignty, because the answer to "but then you depend on GitHub" is: self-host the forge. A self-hosted Forgejo gives you Git's content-addressed, append-mostly history — the strongest audit substrate that exists — on your own hardware, air-gapped if you need it. You'd be foolish to rebuild that badly in a native store. The right move isn't to escape the forge; it's to <em>own</em> the forge.</p>
+<p>This is why the forge-agnostic lease key matters. The coordination logic is already independent of the forge. Put a thin adapter behind the forge calls and "works only with GitHub" stops being true at the layer that counts — swap in Forgejo for air-gap and the loops don't change a line.</p>
 <hr />
-<h2 id="9-status-as-of-v050">9. Status as of v0.5.0<a class="headerlink" href="#9-status-as-of-v050" title="Permanent link">&para;</a></h2>
-<p>The proposal above was written before v0.4.0. Most of P0 and P1 has since shipped; P2 has not been started. This section reconciles each section-4 promise with what's in the tree today so the proposal can be read as a status document rather than a forecast.</p>
-<table>
-<thead>
-<tr>
-<th>§</th>
-<th>Item</th>
-<th>Priority</th>
-<th>Status</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>4.1</td>
-<td>Volume mounts on Container</td>
-<td>P0</td>
-<td><strong>Shipped</strong> — <code>v0.4.0</code></td>
-</tr>
-<tr>
-<td>4.2</td>
-<td>Security fields on Container</td>
-<td>P0</td>
-<td><strong>Shipped</strong> — <code>v0.4.0</code></td>
-</tr>
-<tr>
-<td>4.3</td>
-<td>Isolation-envelope inheritance from Space</td>
-<td>P1</td>
-<td><strong>Shipped</strong> — <code>v0.4.0</code></td>
-</tr>
-<tr>
-<td>4.4</td>
-<td>Network policy on Space</td>
-<td>P1</td>
-<td><strong>Shipped</strong> — <code>v0.4.0</code></td>
-</tr>
-<tr>
-<td>4.5</td>
-<td><code>Session</code> kind</td>
-<td>P1</td>
-<td><strong>Deferred</strong> — closed wontfix</td>
-</tr>
-<tr>
-<td>4.6</td>
-<td>Scoped credential injection</td>
-<td>P1</td>
-<td><strong>Shipped</strong> — <code>v0.4.0</code></td>
-</tr>
-<tr>
-<td>4.7</td>
-<td>Capability budgets on Session</td>
-<td>P2</td>
-<td><strong>Not started</strong></td>
-</tr>
-<tr>
-<td>4.8</td>
-<td>Causal audit trail</td>
-<td>P2</td>
-<td><strong>Not started</strong></td>
-</tr>
-<tr>
-<td>4.9</td>
-<td>Approval gates</td>
-<td>P2</td>
-<td><strong>Not started</strong></td>
-</tr>
-</tbody>
-</table>
-<h3 id="per-item-detail">Per-item detail<a class="headerlink" href="#per-item-detail" title="Permanent link">&para;</a></h3>
-<p><strong>4.1 — Volume mounts (P0).</strong> Promoted from reserved to active. The Container spec honors <code>volumes: [{source, target, readOnly}]</code> for host bind mounts and <code>volumes: [{kind: tmpfs, target, sizeBytes, mode}]</code> for ephemeral scratch. Wired through to the OCI runtime spec at cell-creation time.</p>
-<p><strong>4.2 — Security fields on Container (P0).</strong> All fields proposed in the priority-order table are present and honored: <code>user</code>, <code>readOnlyRootFilesystem</code>, <code>capabilities.{add,drop}</code>, <code>securityOpts</code>, <code>tmpfs</code>, and <code>resources.{memoryLimitBytes, cpuShares, pidsLimit}</code>. Defaults remain backwards-compatible (<code>readOnlyRootFilesystem: false</code>); operators opt into tighter posture per-container or per-Space (see 4.3).</p>
-<p><strong>4.3 — Space defaults inheritance (P1).</strong> Space spec exposes <code>spec.defaults.container</code> covering the same security/resource/tmpfs surface as 4.2. Inheritance is shallow; per-container values override Space defaults. This is the field that turns Space from "a CNI network" into "the isolation envelope."</p>
-<p><strong>4.4 — Network policy on Space (P1).</strong> Space spec exposes <code>spec.network.egress</code> with <code>default: deny|allow</code> plus an allowlist of <code>(host, ports)</code> or <code>(cidr, ports)</code> pairs. Enforcement is iptables/nftables on the space bridge for IP+port rules; hostname-targeted rules are resolved at policy-apply time. The transparent egress proxy mode the proposal outlined as the "honest" path for SNI inspection is not built — HTTPS allowlisting today is by destination IP after DNS resolution, with the proxy path left for a future P2 cycle.</p>
-<p><strong>4.5 — <code>Session</code> kind (P1).</strong> <a href="https://github.com/eminwux/kukeon/issues/46">Issue #46</a> closed as <code>wontfix</code>. The original proposal had <code>Session</code> carry lifetime, <code>onEnd.persist</code>, and budget enforcement in one kind. In practice, lifetime and persist semantics ended up better served by <code>kuke apply</code> + explicit teardown plus parameterized cell profiles (<a href="https://github.com/eminwux/kukeon/issues/358">#358</a>, shipped), and the budget/audit/approval pieces (4.7–4.9) are large enough to deserve their own kinds rather than overloading one. A dedicated lifetime/budget primitive may return in a later milestone if demand justifies it.</p>
-<p><strong>4.6 — Scoped credential injection (P1).</strong> Container spec has <code>secrets: [{name, fromFile|fromEnv, mountPath?}]</code>. Values are mounted as env vars or files at runtime and never written into status or audit logs. The external-broker integration outlined as the extended (P2-ish) variant is not built; secrets are sourced from the host filesystem or host env today.</p>
-<p><strong>4.7–4.9 — P2 items.</strong> Capability budgets, causal audit trail, and approval gates have no tracking issues open and no code on disk. They were deferred at proposal time as "the agent-native category bet" — opt-in, ambitious, and explicitly optional for kukeon's homelab/VPS user base. Reopening this work is gated on demand from real agent operators using the v0.5.0 substrate.</p>
-<h3 id="what-this-means-for-v10">What this means for v1.0<a class="headerlink" href="#what-this-means-for-v10" title="Permanent link">&para;</a></h3>
-<p>The agent-native gate — "give an agent a workspace, an egress-restricted network, a scoped credential, and a non-root sandbox by declaration" — is redeemed in v0.5.0 by the P0+P1-minus-Session set, and the <a href="#6-what-success-looks-like">Section 6 success manifest</a> shape works today (substituting explicit <code>kuke apply</code> + <code>kuke delete</code> for the deferred <code>Session</code> kind). The remaining gaps to v1.0 are schema/runtime tracks not covered by this proposal — see the <a href="../faq/#when-is-v10">FAQ on v1.0</a> for the gating issues.</p>
+<h2 id="the-loops-what-kukeon-actually-is">The loops: what Kukeon actually is<a class="headerlink" href="#the-loops-what-kukeon-actually-is" title="Permanent link">&para;</a></h2>
+<p>Everything so far is scaffolding. The thing that makes Kukeon <em>Kukeon</em> is that it closes loops. There are three, and the discipline is that they have separate intakes and separate destinations.</p>
+<h3 id="the-work-loop">The work loop<a class="headerlink" href="#the-work-loop" title="Permanent link">&para;</a></h3>
+<p>The core cycle, every artifact a Git object:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>goal → PM builds the plan-graph → dev claims a ready, unleased node →
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>implements → opens PR → reviewer gates → (changes? → dev fixes) →
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>human merges → release when the graph completes → next goal
+</code></pre></div>
+<p>You, the human, are in exactly two places: stating the goal, and merging. Everything in between runs on its own. That merge gate is not friction to be optimized away — it's the feature. It's what makes the autonomy <em>accountable</em>.</p>
+<h3 id="loop-a-the-system-improves-its-own-agents">Loop A — the system improves its own agents<a class="headerlink" href="#loop-a-the-system-improves-its-own-agents" title="Permanent link">&para;</a></h3>
+<p>Every agent runs a reflection step when it finishes a task (on an ending hook, so it's structural, not something an agent might forget). If the task surfaced a durable lesson — "this kind of node keeps getting sized wrong," "this rule slowed me down" — the agent files a <code>learn-feedback</code> issue in the <em>agents</em> repo. The meta-agent picks it up, implements the playbook change as a PR, and a human merges it.</p>
+<p>This is the answer to every vague claim about "self-improving agents." The unit of learning is a playbook file. The mutation is a pull request. A human approves it. <strong>Improvement is a diff you can read</strong> — not a weight update you can't, not a memory mutation you can't see. The system gets better the way a good team does: through reflected lessons and reviewed changes.</p>
+<h3 id="loop-b-the-system-improves-the-product">Loop B — the system improves the product<a class="headerlink" href="#loop-b-the-system-improves-the-product" title="Permanent link">&para;</a></h3>
+<p>The same reflection step asks a <em>second, independent</em> question: did this task surface a verified bug in the <em>product</em> (not the process)? If so, it files an issue in the <em>project</em> repo, and that re-enters the work loop.</p>
+<p>The independence is the point. Loop A refines the builders; Loop B refines the thing being built. They write to different repos and they cannot cross: a process lesson can never edit product code, a product bug can never edit an agent's playbook. That firewall is what keeps "it improves itself" from becoming an unaccountable tangle.</p>
+<h3 id="loop-c-the-product-reports-its-own-failures">Loop C — the product reports its own failures<a class="headerlink" href="#loop-c-the-product-reports-its-own-failures" title="Permanent link">&para;</a></h3>
+<p>Once something is built and running, it emits errors. Loop C closes that:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>running product → error sink (groups &amp; counts; plain code, no LLM) →
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>a threshold or schedule wakes a live-debugger agent →
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>agent triages the grouped batch, dedups, files a project-repo issue → work loop
+</code></pre></div>
+<p>The design subtlety: no agent sits <em>tailing</em> logs — that would burn tokens constantly deciding "nothing happened." The cheap deterministic sink does the high-volume collecting and grouping; an agent is dispatched only when there's a batch worth a judgment call. And like Loop B, it files only to the project repo — a runtime error is a fact about the product, never a lesson about the process. The daemon might route the error stream, but it never files issues itself: filing needs triage judgment and bot attribution, and those belong to an agent. <strong>Infrastructure never files; agents file.</strong> That single rule is what keeps the three loops' write-targets clean.</p>
+<hr />
+<h2 id="the-frame-a-bootstrapping-compiler">The frame: a bootstrapping compiler<a class="headerlink" href="#the-frame-a-bootstrapping-compiler" title="Permanent link">&para;</a></h2>
+<p>Step back and the shape of the whole thing snaps into focus, and it's a precise analogy rather than a loose one.</p>
+<p>A compiler <em>bootstraps</em> when you use it to compile itself. You write a minimal seed compiler — <em>stage-0</em> — in some <em>other</em> language, because nothing exists yet to compile the real one. You use stage-0 to compile a better compiler written in the target language. Then that compiles the next. Improvements compound, because each better compiler builds the next one. The thing builds the thing that builds the thing.</p>
+<p>Kukeon maps onto this exactly:</p>
+<ul>
+<li><strong>Stage-0 is you.</strong> Right now the human authors the playbooks and approves every merge. The system can't yet produce itself without you — just as a language can't compile its first compiler in itself. The seed is, by necessity, foreign.</li>
+<li><strong>The source language is the agent playbooks.</strong> Loop A is the system <em>recompiling its own source</em>. The meta-agent is literally the part of the compiler that compiles the compiler.</li>
+<li><strong>Self-hosting is the loop closing without you in the critical path</strong> — and the way you prove it is a <em>fixpoint</em>: the system builds a version of itself, that version builds the next, and the builds <em>converge</em> instead of drifting. "Kukeon built Kukeon, and successive self-builds are stable" is a far stronger claim than any list of features.</li>
+</ul>
+<p>The analogy comes with two famous warnings, and the architecture is built around both:</p>
+<p><strong>Trusting-trust.</strong> Ken Thompson's classic result: a self-hosting compiler can carry a flaw that reproduces into every version it compiles, <em>invisibly</em>, because the corruption lives in the compiling compiler, not in the clean-looking source. Kukeon's version of this is sharp — it's the meta-agent evaluating changes to its <em>own</em> judgment. A bad refinement to how the system evaluates refinements would propagate into all future evaluations, and every diff would still look clean. The defense is exactly the human merge gate: a trusted stage-0 that a corrupted stage-N cannot certify away. This is <em>why</em> the human stays in the loop on purpose, not as a temporary limitation.</p>
+<p><strong>Divergence.</strong> A miscompiled compiler can produce a compiler that produces garbage, and if you've dropped the seed, you can't get back. The mitigations are the compiler-builder's: keep the seed (stay stage-0 longer than feels necessary), keep every intermediate stage reproducible (the Git trail <em>is</em> the reproducible build log), and test the fixpoint before trusting it.</p>
+<p>This is the test the whole design is pointed at — and it's why the most-requested feature, an agent that merges autonomously and removes the human, is <em>deliberately deferred</em>. Even the most aggressive teams in this space keep a human on the merge. You don't drop the seed until self-hosting is proven stable. The drink separates if you stop stirring too early.</p>
+<p>Which, finally, is why the name is what it is. Heraclitus wrote that the <em>kykeon</em> — a barley drink — separates if it isn't stirred. He meant it as an image of the <em>logos</em>: order isn't a static state, it's a process held together by motion. A bootstrapping compiler has exactly that nature. It isn't an artifact; it's a process that stays itself only by continuously running on itself. Kukeon is order through motion — it becomes what it is only while it keeps building and refining itself.</p>
+<hr />
+<h2 id="where-it-stands">Where it stands<a class="headerlink" href="#where-it-stands" title="Permanent link">&para;</a></h2>
+<p>Kukeon is beta. The runtime, daemon, and hierarchy are stable for single-host use. The agent organization and Loops A and B run today, through human-merged PRs. The Blueprint/Config model is actively replacing CellProfile. Leases, the projection/cache layer, the typed plan-graph, and Loop C are the active frontier. The autonomous approver — the one that would remove the human merge gate — is deliberately on the far side of "prove the fixpoint first."</p>
+<p>Built so far: the runtime and hierarchy; daemon lifecycle; the agent roles and skills; reflection-on-hook; process learning (Loop A) and product-defect feedback (Loop B). In flight: Blueprint/Config, leases, the projection layer, the plan-graph as a typed object, runtime feedback (Loop C). Deliberately not built yet: anything that takes the human off the merge.</p>
+<p>If the design has a single thesis, it's this: <strong>autonomy and accountability aren't in tension if every action the system takes — including the actions it takes to improve itself — is an owned, inspectable, human-approved diff.</strong> The agents do the work. The forge holds the truth. The human holds the seed. And the whole thing is itself only while it's being stirred.</p>
+<hr />
+<p><em>Kukeon is open-source (Apache 2.0), built in the open at github.com/eminwux/kukeon.</em></p>
 
 
 
@@ -3891,7 +3502,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 21:02:55 UTC">May 13, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 30, 2026 01:14:14 UTC">May 30, 2026</span>
   </span>
 
     
