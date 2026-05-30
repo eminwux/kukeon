@@ -15,6 +15,7 @@ Both are hard-linked to the same binary on install. Running `kuke` enters the cl
 | ------------------------------ | --------------------------------------------------------------------- |
 | `kuke init`                    | Bootstrap or reconcile a host                                         |
 | `kuke doctor`                  | Host pre-flight checks (cgroup-v2 delegation) before `kuke init`      |
+| `kuke status`                  | Consolidated post-`kuke init` daemon/host/state/parity health report  |
 | `kuke apply`                   | Apply resource definitions from YAML (multi-document supported)       |
 | `kuke run`                     | Create and start a single cell from a file or per-user profile        |
 | `kuke get`                     | List or describe resources (realm, space, stack, cell, container)     |
@@ -73,6 +74,7 @@ The positional argument is the resource's own name; the flags specify where in t
 - [kuke (root)](kuke.md)
 - [kuke init](kuke-init.md)
 - [kuke doctor](kuke-doctor.md)
+- [kuke status](kuke-status.md)
 - [kuke get](kuke-get.md)
 - [kuke create](kuke-create.md)
 - [kuke apply](kuke-apply.md)

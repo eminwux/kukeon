@@ -65,16 +65,10 @@ After the daemon-parity tail, `scripts/dev-init.sh` also runs a PTY-driven `kuke
 ### Post-init: `kuke status`
 
 `kuke status` is the canonical equivalent of the manual diff ritual above —
-one command that runs daemon liveness (with round-trip ms and version),
-host pre-flight (containerd, cgroup-v2, CNI plugins under `/opt/cni/bin/`),
-state consistency (orphan run-dir entries, residual containerd namespaces),
-and the same daemon-parity walk above across **every** resource kind
-(realm, space, stack, cell, container, secret, blueprint, config), not just
-realms.
-
-Exit code is 0 when every check is OK / WARN, non-zero when any line is
-FAIL. `--json` is the machine-readable form for CI integration; `--verbose`
-surfaces the remediation hint on OK rows too.
+one command covering daemon liveness, host pre-flight, state consistency,
+and the daemon-parity walk across every resource kind. See
+[`docs/site/cli/kuke-status.md`](docs/site/cli/kuke-status.md) for the full
+reference (sections, flag table, exit codes, JSON shape).
 
 The two-line `kuke get realms` diff above stays the minimal pinned
 regression guard the `make dev-init` tail prints; `kuke status` is the
