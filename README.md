@@ -1,17 +1,37 @@
-# 🌪️ kukeon: Run AI agents on your own Linux.
+# 🌪️ kukeon: Run a team of AI agents on your own Linux.
 
 ![status: active](https://img.shields.io/badge/status-active-blue)
-![state: alpha](https://img.shields.io/badge/state-alpha-orange)
+![state: beta](https://img.shields.io/badge/state-beta-yellow)
 ![license: apache2](https://img.shields.io/badge/license-Apache%202.0-green)
 [![Test](https://github.com/eminwux/kukeon/actions/workflows/test.yaml/badge.svg?branch=main)](https://github.com/eminwux/kukeon/actions/workflows/test.yaml)
 
-_Agent-native orchestration. Self-hosted. No walled garden._
+_A goal compiler for AI-built software. Self-hosted. Every diff inspectable._
 
-Your agent's context, state, and workspace live on **your** machines — not behind a SaaS login. Kukeon is a containerd-native runtime for AI agents on any Linux host: your cloud VM, your homelab, your laptop. Declarative sessions with bounded lifetime, PTY-attached workloads, and clean teardown — all on infrastructure you control.
+Kukeon is a self-hosted system where a team of AI agents — a planner, developers, a reviewer, and a meta-agent that improves the others — takes a goal, builds it, reviews it, ships it, and refines both the product and itself. It runs on a single Linux host you own, from a cloud VM down to a Raspberry Pi. A human states the goal and merges the PRs; everything in between runs on its own.
 
-`kukeond` is a small daemon over containerd + CNI + cgroups. `kuke` is the CLI. Agent-native primitives — `Session`, `Interactive` containers, scoped secrets, default-deny networking — are declared in YAML and reconciled on a single host.
+Under the hood: a containerd-native runtime (`kukeond` + `kuke`) gives each agent real isolation with primitives you can inspect (`ctr`, `ip link`, `ls /sys/fs/cgroup`). A `CellBlueprint` + `CellConfig` model describes agent roles as templates and instantiates them as concrete cells. A daemon-owned **lease** mechanism makes work-claims atomic across concurrent cells. The Git forge is the system of record — every plan, PR, and audit-trail entry lives in infrastructure you already trust.
 
-See **[docs/site/vision.md](docs/site/vision.md)** for the full "Kukeon for AI Agents" proposal.
+Three feedback loops close the system back on itself: a **work loop** that ships PRs; **Loop A** that refines the agents' own playbooks through reflected lessons; **Loop B** that surfaces verified product defects from running operation back into the work queue. The whole shape is a **bootstrapping compiler** — the system that ultimately builds and improves itself, with the human as the trusted stage-0 on the merge gate.
+
+See **[docs/site/vision.md](docs/site/vision.md)** — *Building a Goal Compiler: The Design of Kukeon* — for the full design essay.
+
+## Philosophy
+
+«καὶ ὁ κυκεὼν διίσταται μὴ κινούμενος»
+"The barley-drink separates if it isn't stirred"
+
+Fragment DK 22B125
+Heraclitus, circa 500 BC
+
+Heraclitus used the kykeon, a simple barley drink, as an analogy for the logos, the hidden principle of order in the cosmos. The drink becomes itself only when its ingredients are mixed and kept in motion. Without movement, it separates and loses its identity.
+
+Kukeon applies the same metaphor to computing:
+
+- containers, networks, and cgroups are the ingredients
+- `kukeond` is the stirring motion that brings them together
+- the running system is the order that emerges through interaction
+
+Kukeon brings coherence and structure to low-level Linux primitives that normally remain scattered and disconnected. It unifies them into a living, dynamic system.
 
 ## Status
 
@@ -112,24 +132,13 @@ Complete documentation is available at [https://kukeon.io](https://kukeon.io), i
 
 **Your agents, your machines, your rules.** SaaS agent sandboxes (E2B, Daytona, Modal) force your agents to run on their cloud. Kukeon runs them on yours — a cloud VM, a homelab, a single Linux box with containerd. No vendor lock-in, no data leaving your infrastructure, no credit card.
 
+The agents — planner, devs, reviewer, meta — run as cells under `kukeond`, with separation-of-powers enforced by the runtime: no agent merges its own work, and the merge gate stays with the human.
+
 - **Sovereign** — every byte of agent state lives on hosts you own
 - **Declarative** — Session + Interactive + onEnd.persist as first-class YAML
 - **Isolated** — realm/space/cell backed by real Linux primitives (containerd namespaces, CNI networks, cgroups)
 - **Self-hosted** — no cluster, no etcd, no scheduler, no SaaS
 - **Transparent** — inspect what the daemon did with `ctr`, `ip link`, `ls /sys/fs/cgroup`
-
-### Also a great container orchestrator for single Linux hosts
-
-The same primitives that make kukeon suitable for agent sessions also make it a good fit for anyone who has outgrown `docker compose` but doesn't want to stand up a Kubernetes cluster. Docker is simple but unstructured: everything lives in a flat list. Kubernetes is structured but heavy: you pay for a control plane whether you need one or not. Kukeon sits in between — an explicit `Realm → Space → Stack → Cell → Container` hierarchy, one CNI network per space, one cgroup subtree per layer, and no distributed scheduler, etcd, or API server on port 6443.
-
-That makes it a natural fit for:
-
-- Homelab and VPS users who want structured container environments
-- Systems engineers who prefer containerd directly over Docker
-- Developers who find Docker too flat and Kubernetes too heavy
-- Operators who want isolation declared in terms of namespaces, CNI, and cgroups
-
-You can think of it as _Proxmox for containers_ — or a small Heroku that runs locally.
 
 ## Usage Examples
 
@@ -337,43 +346,25 @@ Kukeon sits between containerd and the user, translating declarative YAML into t
 4. State is persisted to `/opt/kukeon` for durability across daemon restarts
 5. `kuke get` and `kuke refresh` read live state back from containerd/CNI/cgroups
 
-## Philosophy
-
-«καὶ ὁ κυκεὼν διίσταται μὴ κινούμενος»
-"The barley-drink separates if it isn't stirred"
-
-Fragment DK 22B125
-Heraclitus, circa 500 BC
-
-Heraclitus used the kykeon, a simple barley drink, as an analogy for the logos, the hidden principle of order in the cosmos. The drink becomes itself only when its ingredients are mixed and kept in motion. Without movement, it separates and loses its identity.
-
-Kukeon applies the same metaphor to computing:
-
-- containers, networks, and cgroups are the ingredients
-- `kukeond` is the stirring motion that brings them together
-- the running system is the order that emerges through interaction
-
-Kukeon brings coherence and structure to low-level Linux primitives that normally remain scattered and disconnected. It unifies them into a living, dynamic system.
-
 ## Goals
 
 Kukeon aims to be:
 
-- simpler than Kubernetes
-- more structured than Docker
-- homelab-friendly
-- VPS-friendly
-- local-first with no cluster required
-- integrated directly with containerd
-- safe and isolated using namespaces, CNI, and cgroups
-- easy to understand and reason about
+- a substrate for running a team of AI agents on a single Linux host you own
+- structured around separation-of-powers across agent roles (planner / dev / reviewer / meta), enforced by the runtime rather than by convention
+- a **work loop** that closes on human-merged PRs as the accountability gate — no agent merges its own work
+- self-improving through **Loop A**: the agents' own playbooks and skills are diffable artifacts, refined by reflected lessons from each completed task
+- self-correcting through **Loop B**: verified product defects observed in running operation feed back into the work queue
+- grounded in real Linux primitives (containerd namespaces, CNI, cgroups) — sovereignty you can inspect, not a control plane you have to trust
+- fully self-hosted, with no SaaS, no cluster, no etcd, and no API server on port 6443
 
 ### Non-Goals
 
-- Being a full replacement for Kubernetes in large multi-node clusters
-- Managing multi-cluster or cross-region orchestration
-- Reimplementing every Kubernetes feature or API
-- Hiding low-level primitives behind opaque abstractions
+- Not a hosted SaaS — kukeon does not run a control plane you don't own
+- Not an autonomous-merger system today — the human merge gate is the deliberate stage-0 of the bootstrapping compiler (see [vision.md](docs/site/vision.md) "Trusting-trust")
+- Not its own audit-trail database — every action is a Git object in your forge
+- Not a Kubernetes replacement for multi-node clusters or cross-region orchestration
+- Not a layer that hides low-level primitives behind opaque abstractions
 
 ## Roadmap
 
