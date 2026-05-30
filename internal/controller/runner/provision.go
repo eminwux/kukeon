@@ -2193,9 +2193,17 @@ func (r *Exec) ensureCellRootContainerSpec(cell intmodel.Cell) (intmodel.Contain
 	} else {
 		// Create default root container spec
 		// Pass containerdID to set ContainerdID field, ID will be set to "root".
-		// The kukepause host path (<RunPath>/bin/kukepause, staged by
-		// `kuke init`) is bind-mounted at /pause as the root container's PID 1
-		// (issue #931).
+		// The kukepause host path (<RunPath>/bin/kukepause) is bind-mounted at
+		// /pause as the root container's PID 1 (issue #931). Stage it now so
+		// daemon-only bootstrap paths (e2e `startKukeondDaemon`, and any future
+		// caller that runs `kukeond serve --run-path X` without a prior
+		// `kuke init`) self-heal — `kuke init` also stages it, but its copy is
+		// not the *only* writer the daemon can rely on. Idempotent: returns the
+		// existing path without re-copying when one is already there.
+		kukepauseHostPath, stageErr := stageKukepauseBinary(r.opts.RunPath)
+		if stageErr != nil {
+			return intmodel.ContainerSpec{}, fmt.Errorf("stage kukepause: %w", stageErr)
+		}
 		rootSpec = ctr.DefaultRootContainerSpec(
 			containerdID,
 			cellID,
@@ -2203,7 +2211,7 @@ func (r *Exec) ensureCellRootContainerSpec(cell intmodel.Cell) (intmodel.Contain
 			spaceName,
 			stackName,
 			cniConfigPath,
-			filepath.Join(r.opts.RunPath, "bin", ctr.RootContainerPauseBinaryName),
+			kukepauseHostPath,
 		)
 		// Propagate HostNetwork from any cell container to the default root
 		// container. Non-root containers join the root container's netns

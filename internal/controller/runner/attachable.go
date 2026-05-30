@@ -363,7 +363,7 @@ func stageKukettyBinary(runPath string) (string, error) {
 		return "", fmt.Errorf("mkdir %q: %w", dstDir, err)
 	}
 
-	if err = copyBinaryAtomic(src, dst); err != nil {
+	if err = copyBinaryAtomic(src, dst, "kuketty"); err != nil {
 		return "", err
 	}
 	return dst, nil
@@ -432,31 +432,33 @@ func resolveKukettyBinary() (string, error) {
 // copyBinaryAtomic copies src to dst via a sibling tmp file, then renames
 // the tmp file over dst. Mode is 0o755 — the binary must be exec'able by
 // the workload's uid through the bind mount, which carries through unix
-// owner-x bits but not setgid-style elevations.
-func copyBinaryAtomic(src, dst string) error {
+// owner-x bits but not setgid-style elevations. The label string is woven
+// into every error so callers (kuketty, kukepause) get attributable
+// diagnostics when a stage trip fails.
+func copyBinaryAtomic(src, dst, label string) error {
 	in, err := os.Open(src)
 	if err != nil {
-		return fmt.Errorf("open kuketty source %q: %w", src, err)
+		return fmt.Errorf("open %s source %q: %w", label, src, err)
 	}
 	defer func() { _ = in.Close() }()
 
 	tmp := dst + ".tmp"
 	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 	if err != nil {
-		return fmt.Errorf("create kuketty staged tmp %q: %w", tmp, err)
+		return fmt.Errorf("create %s staged tmp %q: %w", label, tmp, err)
 	}
 	if _, err = io.Copy(out, in); err != nil {
 		_ = out.Close()
 		_ = os.Remove(tmp)
-		return fmt.Errorf("copy kuketty %q -> %q: %w", src, tmp, err)
+		return fmt.Errorf("copy %s %q -> %q: %w", label, src, tmp, err)
 	}
 	if err = out.Close(); err != nil {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("close kuketty staged tmp %q: %w", tmp, err)
+		return fmt.Errorf("close %s staged tmp %q: %w", label, tmp, err)
 	}
 	if err = os.Rename(tmp, dst); err != nil {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("rename kuketty staged %q -> %q: %w", tmp, dst, err)
+		return fmt.Errorf("rename %s staged %q -> %q: %w", label, tmp, dst, err)
 	}
 	return nil
 }
