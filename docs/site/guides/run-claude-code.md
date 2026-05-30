@@ -130,4 +130,4 @@ See [`kuke run`](../cli/kuke-run.md) for the full flag surface, including `--nam
 - **The full crew agent-runner shape.** [`eminwux/crew`](https://github.com/eminwux/crew) — SSH bind, GPG-signed commits, agents-repo clone, project-repo clone, the orchestrator that dispatches per-call cells. Two layers up from this guide.
 - **Cell teardown verbs.** [`docs/cli-use-cases.md`](https://github.com/eminwux/kukeon/blob/main/docs/cli-use-cases.md) — the full operator workflow reference, including `stop` / `kill` / `delete` / `purge --cascade` for cells.
 - **Manifest reference.** [Applying manifests](apply-manifests.md) — multi-doc manifests, the in-process escape hatch, blueprint parameter resolution order.
-- **CellProfile → CellBlueprint migration.** [The cutover recipe](migrate-cellprofile-to-blueprint.md) — for hosts that used to drive workloads via `kuke run -p`.
+- **CellProfile → CellBlueprint migration.** [The cutover recipe](migrate-cellprofile-to-blueprint.md) — for hosts that used to drive workloads via the legacy client-side `CellProfile` loader.

@@ -115,8 +115,6 @@ The `--no-daemon` flag itself was retired from workload commands by #222; see [C
 
 `kuke apply -f` consumes a **fixed** manifest — the file you ship is the spec the daemon reconciles to, with no substitution layer in between. When you need the same cell shape with different values per invocation (image tag, command, mount paths), apply a **CellBlueprint** to the daemon and run it with `kuke run -b` instead of editing the YAML each time.
 
-> Until issue [#626](https://github.com/eminwux/kukeon/issues/626) landed, the same use case was served by a client-side `CellProfile` loaded with `kuke run -p` from `$HOME/.kuke/profiles.d`. Both have been removed; the cutover recipe lives in [Migrate from `CellProfile` to `CellBlueprint`](migrate-cellprofile-to-blueprint.md).
-
 A blueprint is a daemon-stored, scoped resource. It declares its variable inputs alongside the cell template:
 
 ```yaml
