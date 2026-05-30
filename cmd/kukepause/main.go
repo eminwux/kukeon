@@ -26,8 +26,8 @@
 //
 // kukepause fixes both: it installs SIGTERM/SIGINT handlers that exit 0 (so cell
 // teardown completes in well under a second) and a SIGCHLD reaper that harvests
-// every re-parented child via wait4(2), then blocks on pause(2) so it consumes
-// no CPU while idle.
+// every re-parented child via wait4(2), then blocks on a Go select over those
+// signal channels so it consumes no CPU while idle.
 //
 // It is built CGO_ENABLED=0 (no libc dependency) and bind-mounted into each root
 // container at /pause; it cannot be staged from the kukeond image the way

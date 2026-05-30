@@ -34,9 +34,9 @@ const (
 	// kukepause binary is bind-mounted to and exec'd as PID 1 in every default
 	// root container. kukepause installs SIGTERM/SIGINT handlers (so cell
 	// teardown does not burn StopContainer's 10s graceful timeout) and a SIGCHLD
-	// zombie reaper, then blocks on pause(2) — replacing the previous
-	// `sleep infinity`, which ignored SIGTERM as PID 1 and reaped nothing
-	// (issue #931).
+	// zombie reaper, then blocks on a Go select over those signal channels —
+	// replacing the previous `sleep infinity`, which ignored SIGTERM as PID 1
+	// and reaped nothing (issue #931).
 	RootContainerPauseBinaryTarget = "/pause"
 
 	// RootContainerPauseBinaryName is the basename of the kukepause binary as
