@@ -24,7 +24,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eminwux/kukeon/internal/cellprofile"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	utilfs "github.com/eminwux/kukeon/internal/util/fs"
 )
@@ -152,7 +151,7 @@ func TestStampContainerRecreateRuntimeFields(t *testing.T) {
 	cell := &intmodel.Cell{
 		Metadata: intmodel.CellMetadata{
 			Name:   "work-cell",
-			Labels: map[string]string{cellprofile.LabelProfile: "kukeon-pr"},
+			Labels: map[string]string{labelCellProfileLegacy: "kukeon-pr"},
 		},
 		Spec: intmodel.CellSpec{
 			RealmName:       "default",

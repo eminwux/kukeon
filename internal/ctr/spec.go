@@ -374,7 +374,8 @@ func BuildContainerSpec(
 	// Set environment variables. KUKEON_* identity vars (issue #351) are
 	// merged with the user-supplied containerSpec.Env, with user entries
 	// taking precedence on key collisions so an explicit override in a
-	// CellProfile still wins.
+	// CellBlueprint / CellConfig spec still wins. (The same rule applied
+	// to the legacy CellProfile path that #626 removed.)
 	if env := kukeonContainerEnv(containerSpec); len(env) > 0 {
 		specOpts = append(specOpts, oci.WithEnv(env))
 	}

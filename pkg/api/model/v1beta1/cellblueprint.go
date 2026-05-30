@@ -17,17 +17,16 @@
 package v1beta1
 
 // CellBlueprintDoc is a daemon-stored, scopable parametrized cell template
-// (kind: CellBlueprint, issue #620, phase 4a-i of #423). It is a *new* kind
-// introduced alongside the client-side CellProfile — not a rename. Where a
-// CellProfile is materialized client-side by `kuke run -p`, a CellBlueprint
-// is written to daemon storage by `kuke apply` and run with `kuke run -b`,
-// which lets blueprints be applied, scoped, and (in later phases) listed and
-// referenced by a CellConfig server-side.
+// (kind: CellBlueprint, issue #620, phase 4a-i of #423). The client-side
+// CellProfile kind that originally co-existed with it was removed in #626 —
+// `kuke apply` is now the single entry point and `kuke run -b` / `kuke run -c`
+// are the run-time consumers.
 //
 // A Blueprint declares two fill channels (see #423 "L1↔L2 interface"):
 //
-//  1. Scalar parameters — today's `${KEY}` substitution, reusing the
-//     CellProfileParameter shape. Filled inline by `kuke run -b --param K=V`.
+//  1. Scalar parameters — `${KEY}` substitution using the CellProfileParameter
+//     shape (the name predates #626's CellProfile removal; the struct is now
+//     blueprint-only). Filled inline by `kuke run -b --param K=V`.
 //  2. Structural slots — named repo/secret slots on each container that a
 //     CellConfig fills with structured values (repo URLs, secret sources).
 //     This kind ships the slot *declarations* only; the Config-side fill
@@ -63,11 +62,28 @@ type CellBlueprintMetadata struct {
 // template body. Prefix overrides the cell-name prefix used when generating
 // the `<prefix>-<6hex>` name on each `kuke run -b`; when unset it defaults to
 // metadata.name. Every run produces a fresh hex-suffixed cell — the
-// "Blueprint = always fresh" invariant carried over from CellProfile.
+// "Blueprint = always fresh" invariant.
 type CellBlueprintSpec struct {
 	Prefix     string                 `json:"prefix,omitempty"     yaml:"prefix,omitempty"`
 	Parameters []CellProfileParameter `json:"parameters,omitempty" yaml:"parameters,omitempty"`
 	Cell       BlueprintCellSpec      `json:"cell"                 yaml:"cell"`
+}
+
+// CellProfileParameter declares one `${KEY}` substitution variable used by a
+// CellBlueprint's body. Default is a pointer so YAML/JSON can distinguish "no
+// default" (nil) from an explicit empty default (""). The substitution engine
+// treats them differently: a missing default falls through to the env-var
+// lookup, while an explicit empty default short-circuits there.
+//
+// The name keeps its "CellProfile" prefix from before #626 removed the
+// CellProfile kind — the struct is now blueprint-only but renaming it would
+// break sibling projects (sbsh, sbcrew, …) that import this package. The
+// type's role moved; the wire identifier stayed put.
+type CellProfileParameter struct {
+	Name        string  `json:"name"                  yaml:"name"`
+	Description string  `json:"description,omitempty" yaml:"description,omitempty"`
+	Default     *string `json:"default,omitempty"     yaml:"default,omitempty"`
+	Required    bool    `json:"required,omitempty"    yaml:"required,omitempty"`
 }
 
 // BlueprintCellSpec is the cell template body of a CellBlueprint. It mirrors

@@ -209,6 +209,32 @@ metadata:
 	}
 }
 
+// TestParseDocument_CellProfile_MigrationPointer asserts the parser surfaces
+// the #626 migration pointer when a YAML carries the removed `kind:
+// CellProfile`, rather than the generic unknown-kind error. The kind is a
+// common stumble during the cutover, so the explicit pointer is worth the
+// extra branch.
+func TestParseDocument_CellProfile_MigrationPointer(t *testing.T) {
+	yaml := `apiVersion: v1beta1
+kind: CellProfile
+metadata:
+  name: test
+`
+	_, err := parser.ParseDocument(0, []byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for removed CellProfile kind, got nil")
+	}
+	if !errors.Is(err, errdefs.ErrUnknownKind) {
+		t.Errorf("expected error to wrap ErrUnknownKind, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "CellBlueprint") {
+		t.Errorf("expected error to point at CellBlueprint, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "#626") {
+		t.Errorf("expected error to cite the removal issue, got: %v", err)
+	}
+}
+
 func TestValidateDocument_Realm_Valid(t *testing.T) {
 	yaml := `apiVersion: v1beta1
 kind: Realm

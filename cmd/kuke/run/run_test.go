@@ -1347,7 +1347,7 @@ func TestRun_InvalidOutput_Errors(t *testing.T) {
 	}
 }
 
-func TestRun_MissingFileAndProfile_Errors(t *testing.T) {
+func TestRun_MissingAllSources_Errors(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{}
@@ -1358,13 +1358,12 @@ func TestRun_MissingFileAndProfile_Errors(t *testing.T) {
 	// Issue #813: the cobra MarkFlagsOneRequired group no longer spans the
 	// CellConfig source (now positional), so parseRunFlags hand-rolls the
 	// at-least-one check. Match on the stable phrasing it emits — naming all
-	// four sources — rather than the prior cobra group listing.
+	// three remaining sources — rather than the prior cobra group listing.
 	if err == nil ||
 		!strings.Contains(err.Error(), "<config>") ||
 		!strings.Contains(err.Error(), "-f/--file") ||
-		!strings.Contains(err.Error(), "-p/--profile") ||
 		!strings.Contains(err.Error(), "-b/--blueprint") {
-		t.Fatalf("err=%v want one-of error naming the <config>/-f/-p/-b sources", err)
+		t.Fatalf("err=%v want one-of error naming the <config>/-f/-b sources", err)
 	}
 }
 
@@ -1379,9 +1378,8 @@ func TestNewRunCmd_AutocompleteRegistration(t *testing.T) {
 	if fileFlag == nil || fileFlag.Shorthand != "f" {
 		t.Errorf("expected -f/--file flag, got %+v", fileFlag)
 	}
-	profileFlag := cmd.Flags().Lookup("profile")
-	if profileFlag == nil || profileFlag.Shorthand != "p" {
-		t.Errorf("expected -p/--profile flag, got %+v", profileFlag)
+	if cmd.Flags().Lookup("profile") != nil {
+		t.Errorf("profile flag must not exist after #626 removal")
 	}
 	outputFlag := cmd.Flags().Lookup("output")
 	if outputFlag == nil || outputFlag.Shorthand != "o" {
@@ -1396,6 +1394,40 @@ func TestNewRunCmd_AutocompleteRegistration(t *testing.T) {
 	}
 	if cmd.ValidArgsFunction == nil {
 		t.Error("ValidArgsFunction must be wired to CompleteConfigNames for the positional <config> arg")
+	}
+}
+
+// TestRun_ProfileFlag_RemovedWithMigrationPointer asserts both spellings of
+// the removed -p / --profile flag surface the migration error #626 added,
+// rather than cobra's generic "unknown flag" message. The flag-error
+// interceptor in NewRunCmd is what makes this work.
+func TestRun_ProfileFlag_RemovedWithMigrationPointer(t *testing.T) {
+	cases := [][]string{
+		{"-p", "claude-cell"},
+		{"--profile", "claude-cell"},
+		{"--profile=claude-cell"},
+	}
+	for _, args := range cases {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			fc := &fakeClient{}
+			cmd, _ := newCmd(t, fc)
+			cmd.SetArgs(args)
+
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatal("Execute returned nil; want migration error")
+			}
+			if !strings.Contains(err.Error(), "-p/--profile (CellProfile) was removed") {
+				t.Errorf("err %q must name the removed flag", err)
+			}
+			if !strings.Contains(err.Error(), "kuke run -b") {
+				t.Errorf("err %q must point at the -b replacement", err)
+			}
+			if fc.createCalls != 0 {
+				t.Errorf("CreateCell called; flag removal must reject before RPC")
+			}
+		})
 	}
 }
 
@@ -1864,197 +1896,11 @@ func TestNewRunCmd_DetachFlagRegistered(t *testing.T) {
 	}
 }
 
-// claudeProfileYAML is the headline -p example from issue #142: a per-user
-// profile that opts a `work` container into attach + tty.default. Drives the
-// `-p -a` round-trip tests below.
-const claudeProfileYAML = `apiVersion: v1beta1
-kind: CellProfile
-metadata:
-  name: claude-cell
-spec:
-  realm: default
-  space: agents
-  stack: claude
-  cell:
-    tty:
-      default: work
-    containers:
-      - id: root
-        root: true
-        image: registry.eminwux.com/busybox:latest
-        command: sleep
-        args:
-          - "3600"
-      - id: work
-        attachable: true
-        image: registry.eminwux.com/busybox:latest
-        command: /bin/sh
-`
-
-// writeTempProfile drops the headline claudeProfileYAML in a t.TempDir as
-// `claude-cell.yaml` and points KUKE_PROFILES_DIR at it. The filename + content
-// are hard-coded because every -p test in this file targets the same headline
-// profile from issue #142; tests that exercise the metadata.name fallback or
-// alternative shapes live in the cellprofile package itself.
-func writeTempProfile(t *testing.T) {
-	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "claude-cell.yaml")
-	if err := os.WriteFile(path, []byte(claudeProfileYAML), 0o600); err != nil {
-		t.Fatalf("write profile: %v", err)
-	}
-	t.Setenv("KUKE_PROFILES_DIR", dir)
-}
-
-func TestRun_FromProfile_CreatesAndStarts(t *testing.T) {
-	t.Cleanup(viper.Reset)
-	writeTempProfile(t)
-
-	fc := &fakeClient{
-		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-			return successCreateResult(doc), nil
-		},
-	}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-p", "claude-cell", "-d"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if fc.createCalls != 1 {
-		t.Fatalf("CreateCell calls=%d want 1", fc.createCalls)
-	}
-	if got := fc.createDoc.Metadata.Name; !strings.HasPrefix(got, "claude-cell-") || len(got) != len("claude-cell-")+6 {
-		t.Errorf("cell name=%q want claude-cell-<6hex> (default prefix from metadata.name)", got)
-	}
-	if got := fc.createDoc.Spec.RealmID; got != "default" {
-		t.Errorf("RealmID=%q want default", got)
-	}
-	if got := fc.createDoc.Spec.SpaceID; got != "agents" {
-		t.Errorf("SpaceID=%q want agents", got)
-	}
-	if got := fc.createDoc.Spec.StackID; got != "claude" {
-		t.Errorf("StackID=%q want claude", got)
-	}
-	if got := fc.createDoc.Metadata.Labels["kukeon.io/profile"]; got != "claude-cell" {
-		t.Errorf("labels[kukeon.io/profile]=%q want claude-cell", got)
-	}
-}
-
-func TestRun_FromProfile_PrefixOverride_GeneratesFreshCell(t *testing.T) {
-	// spec.prefix overrides the default prefix (metadata.name). Every
-	// invocation must produce a distinct cell name shaped `<prefix>-<6hex>`.
-	t.Cleanup(viper.Reset)
-	dir := t.TempDir()
-	const profileYAML = `apiVersion: v1beta1
-kind: CellProfile
-metadata:
-  name: claude
-spec:
-  realm: default
-  space: agents
-  stack: claude
-  prefix: agent
-  cell:
-    containers:
-      - id: work
-        attachable: true
-        image: registry.eminwux.com/busybox:latest
-        command: /bin/sh
-`
-	if err := os.WriteFile(filepath.Join(dir, "claude.yaml"), []byte(profileYAML), 0o600); err != nil {
-		t.Fatalf("write profile: %v", err)
-	}
-	t.Setenv("KUKE_PROFILES_DIR", dir)
-
-	names := make(map[string]struct{}, 2)
-	for i := range 2 {
-		fc := &fakeClient{
-			createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-				return successCreateResult(doc), nil
-			},
-		}
-		cmd, _ := newCmd(t, fc)
-		cmd.SetArgs([]string{"-p", "claude", "-d"})
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("Execute #%d: %v", i, err)
-		}
-		name := fc.createDoc.Metadata.Name
-		if !strings.HasPrefix(name, "agent-") || len(name) != len("agent-")+6 {
-			t.Fatalf("cell name=%q want agent-<6hex>", name)
-		}
-		if _, dup := names[name]; dup {
-			t.Errorf("name=%q repeated across invocations", name)
-		}
-		names[name] = struct{}{}
-		if got := fc.createDoc.Metadata.Labels["kukeon.io/profile"]; got != "claude" {
-			t.Errorf("labels[kukeon.io/profile]=%q want claude (label tracks metadata.name)", got)
-		}
-	}
-}
-
-func TestRun_FromProfile_LocationFlagsOverride(t *testing.T) {
-	t.Cleanup(viper.Reset)
-	writeTempProfile(t)
-
-	fc := &fakeClient{
-		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-			return successCreateResult(doc), nil
-		},
-	}
-	cmd, _ := newCmd(t, fc)
-	// The materialized profile sets realm/space/stack already; --realm/--space/--stack
-	// flags must NOT override values the profile already provides — the same
-	// "doc wins over flag" rule that -f obeys.
-	cmd.SetArgs([]string{"-p", "claude-cell", "-d", "--realm", "x", "--space", "y", "--stack", "z"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if got := fc.createDoc.Spec.RealmID; got != "default" {
-		t.Errorf("RealmID=%q want default (profile must beat --realm)", got)
-	}
-}
-
-func TestRun_FromProfile_UnknownProfile_Errors(t *testing.T) {
-	t.Cleanup(viper.Reset)
-	writeTempProfile(t)
-
-	fc := &fakeClient{}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-p", "ghost", "-d"})
-
-	err := cmd.Execute()
-	if !errors.Is(err, errdefs.ErrProfileNotFound) {
-		t.Fatalf("err=%v want ErrProfileNotFound", err)
-	}
-	if !strings.Contains(err.Error(), "ghost") {
-		t.Errorf("err %q must name the profile", err)
-	}
-	if fc.createCalls != 0 {
-		t.Errorf("CreateCell calls=%d want 0", fc.createCalls)
-	}
-}
-
-func TestRun_FromProfile_FileAndProfile_MutuallyExclusive(t *testing.T) {
-	t.Cleanup(viper.Reset)
-	writeTempProfile(t)
-
-	fc := &fakeClient{}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-p", "claude-cell", "-d"})
-
-	err := cmd.Execute()
-	// MarkFlagsMutuallyExclusive emits "if any flags in the group [file profile]
-	// are set none of the others can be" — match on the [file profile] phrase
-	// rather than wording so cobra rephrasing doesn't break the test.
-	if err == nil || !strings.Contains(err.Error(), "[file profile]") {
-		t.Fatalf("err=%v want mutually-exclusive guard naming both flags", err)
-	}
-	if fc.createCalls != 0 {
-		t.Errorf("CreateCell calls=%d want 0", fc.createCalls)
-	}
-}
+// CellProfile / -p tests removed in #626 — the kind, the loader, and the
+// flag were deleted in this PR. The blueprint equivalents
+// (TestRun_FromBlueprint_*) cover the surviving template path;
+// TestRun_ProfileFlag_RemovedWithMigrationPointer above attests the
+// removal surface.
 
 func TestRun_RejectsPositionalArgs(t *testing.T) {
 	// `kuke run` is for creating cells; re-attaching to a known cell is
@@ -2071,40 +1917,6 @@ func TestRun_RejectsPositionalArgs(t *testing.T) {
 	}
 	if fc.createCalls != 0 {
 		t.Errorf("CreateCell calls=%d want 0 on rejected args", fc.createCalls)
-	}
-}
-
-func TestRun_FromProfile_Attach_HeadlineFlow(t *testing.T) {
-	t.Cleanup(viper.Reset)
-	writeTempProfile(t)
-
-	// Headline flow from the issue: `kuke run -p claude-cell` materializes
-	// the profile, creates+starts the cell, then attaches to cell.tty.default
-	// (the `work` container) by default.
-	fc := &fakeClient{
-		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-			return successCreateResult(doc), nil
-		},
-		attachContainerFn: attachSuccessFn(),
-	}
-	run := &runCapture{}
-	cmd, _ := newCmdWithRun(t, fc, run)
-	cmd.SetArgs([]string{"-p", "claude-cell"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if fc.createCalls != 1 {
-		t.Fatalf("CreateCell calls=%d want 1", fc.createCalls)
-	}
-	if fc.attachCalls != 1 {
-		t.Fatalf("AttachContainer calls=%d want 1", fc.attachCalls)
-	}
-	if got := fc.attachDoc.Metadata.Name; got != "work" {
-		t.Errorf("attach target=%q want work (cell.tty.default)", got)
-	}
-	if run.calls != 1 {
-		t.Errorf("attach loop calls=%d want 1", run.calls)
 	}
 }
 
@@ -2510,201 +2322,18 @@ func TestNewRunCmd_RmFlagRegistered(t *testing.T) {
 	}
 }
 
-// paramProfileYAML is the issue #355 example with three required parameters
-// and two defaults. Used to exercise the --param / --param-file / --name
-// path end-to-end through `kuke run`.
-const paramProfileYAML = `apiVersion: v1beta1
-kind: CellProfile
-metadata:
-  name: dev
-spec:
-  realm: default
-  space: agents
-  stack: claude
-  parameters:
-    - name: PROMPT
-      required: true
-    - name: PROJECT_REPO
-      required: true
-    - name: PROJECT_DIR
-      required: true
-    - name: AGENTS_REPO
-      default: "eminwux/agents"
-    - name: CLAUDE_IMAGE
-      default: "registry.eminwux.com/claude:latest"
-  cell:
-    containers:
-      - id: work
-        attachable: true
-        image: ${CLAUDE_IMAGE}
-        env:
-          - PROMPT=${PROMPT}
-          - PROJECT_REPO=${PROJECT_REPO}
-          - PROJECT_DIR=${PROJECT_DIR}
-          - AGENTS_REPO=${AGENTS_REPO}
-`
-
-func writeParamProfile(t *testing.T) {
-	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "dev.yaml")
-	if err := os.WriteFile(path, []byte(paramProfileYAML), 0o600); err != nil {
-		t.Fatalf("write profile: %v", err)
-	}
-	t.Setenv("KUKE_PROFILES_DIR", dir)
-}
-
-func TestRun_FromProfile_WithParams_Substitutes(t *testing.T) {
-	t.Cleanup(viper.Reset)
-	writeParamProfile(t)
-
-	fc := &fakeClient{
-		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-			return successCreateResult(doc), nil
-		},
-	}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{
-		"-p", "dev", "-d",
-		"--name", "crew-dev-354",
-		"--param", "PROMPT=/pick-issue 354",
-		"--param", "PROJECT_REPO=https://github.com/eminwux/crew",
-		"--param", "PROJECT_DIR=crew",
-	})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-
-	if got := fc.createDoc.Metadata.Name; got != "crew-dev-354" {
-		t.Errorf("cell name=%q want crew-dev-354 (--name override)", got)
-	}
-	if got := fc.createDoc.Spec.ID; got != "crew-dev-354" {
-		t.Errorf("spec.id=%q want crew-dev-354", got)
-	}
-
-	c := fc.createDoc.Spec.Containers[0]
-	if c.Image != "registry.eminwux.com/claude:latest" {
-		t.Errorf("image=%q want registry.eminwux.com/claude:latest (default substituted)", c.Image)
-	}
-	wantEnv := []string{
-		"PROMPT=/pick-issue 354",
-		"PROJECT_REPO=https://github.com/eminwux/crew",
-		"PROJECT_DIR=crew",
-		"AGENTS_REPO=eminwux/agents",
-	}
-	if !reflect.DeepEqual(c.Env, wantEnv) {
-		t.Errorf("env=%v\nwant %v", c.Env, wantEnv)
-	}
-}
-
-func TestRun_FromProfile_WithParamFile(t *testing.T) {
-	t.Cleanup(viper.Reset)
-	writeParamProfile(t)
-
-	paramFile := filepath.Join(t.TempDir(), "dev.params")
-	body := "# issue 355 example\n" +
-		"PROMPT=/pick-issue 354\n" +
-		"PROJECT_REPO=https://github.com/eminwux/crew\n" +
-		"PROJECT_DIR=crew\n"
-	if err := os.WriteFile(paramFile, []byte(body), 0o600); err != nil {
-		t.Fatalf("write param file: %v", err)
-	}
-
-	fc := &fakeClient{
-		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-			return successCreateResult(doc), nil
-		},
-	}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-p", "dev", "-d", "--param-file", paramFile})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if got := fc.createDoc.Spec.Containers[0].Env[0]; got != "PROMPT=/pick-issue 354" {
-		t.Errorf("env[0]=%q want PROMPT=/pick-issue 354", got)
-	}
-}
-
-func TestRun_FromProfile_ParamFlagBeatsParamFile(t *testing.T) {
-	t.Cleanup(viper.Reset)
-	writeParamProfile(t)
-
-	paramFile := filepath.Join(t.TempDir(), "dev.params")
-	body := "PROMPT=from-file\nPROJECT_REPO=x\nPROJECT_DIR=x\n"
-	if err := os.WriteFile(paramFile, []byte(body), 0o600); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
-	fc := &fakeClient{
-		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-			return successCreateResult(doc), nil
-		},
-	}
-	cmd, _ := newCmd(t, fc)
-	// CLI --param targets the same key the file sets — flag wins (later-binding).
-	cmd.SetArgs([]string{
-		"-p", "dev", "-d",
-		"--param-file", paramFile,
-		"--param", "PROMPT=from-flag",
-	})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if got := fc.createDoc.Spec.Containers[0].Env[0]; got != "PROMPT=from-flag" {
-		t.Errorf("env[0]=%q want PROMPT=from-flag (CLI --param wins over file)", got)
-	}
-}
-
-func TestRun_FromProfile_RequiredMissing_Errors(t *testing.T) {
-	t.Cleanup(viper.Reset)
-	writeParamProfile(t)
-
-	fc := &fakeClient{}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-p", "dev", "-d"})
-
-	err := cmd.Execute()
-	if !errors.Is(err, errdefs.ErrProfileInvalid) {
-		t.Fatalf("err=%v want ErrProfileInvalid", err)
-	}
-	if !strings.Contains(err.Error(), "PROMPT") {
-		t.Errorf("err %q must name a missing required parameter", err)
-	}
-	if fc.createCalls != 0 {
-		t.Errorf("CreateCell called %d times; want 0 (substitution must error before RPC)", fc.createCalls)
-	}
-}
-
-func TestRun_FromProfile_UndeclaredParam_Errors(t *testing.T) {
-	t.Cleanup(viper.Reset)
-	writeParamProfile(t)
-
-	fc := &fakeClient{}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{
-		"-p", "dev", "-d",
-		"--param", "PROMPT=x",
-		"--param", "PROJECT_REPO=x",
-		"--param", "PROJECT_DIR=x",
-		"--param", "TYPO=oops",
-	})
-
-	err := cmd.Execute()
-	if !errors.Is(err, errdefs.ErrProfileInvalid) {
-		t.Fatalf("err=%v want ErrProfileInvalid", err)
-	}
-	if !strings.Contains(err.Error(), "TYPO") {
-		t.Errorf("err %q must name the undeclared --param key", err)
-	}
-}
+// Profile param-resolution tests (paramProfileYAML + writeParamProfile +
+// TestRun_FromProfile_With*) were removed in #626 alongside the CellProfile
+// kind. The blueprint path's --param / --param-file / --name behavior is
+// covered by TestRun_FromBlueprint_* below; the underlying parameter
+// helpers (ParseParamArgs / ParseParamFile / MergeParams) are exercised in
+// internal/cellblueprint/params_test.go.
 
 func TestRun_FileMode_RejectsParamFlags(t *testing.T) {
-	// --name, --param, --param-file are profile-only knobs. With -f the file's
-	// metadata.name is authoritative and substitution doesn't apply, so the
-	// CLI rejects the combination rather than silently dropping the flag.
+	// --name, --param, --param-file are blueprint-only knobs. With -f the
+	// file's metadata.name is authoritative and substitution doesn't apply,
+	// so the CLI rejects the combination rather than silently dropping the
+	// flag.
 	cases := []struct {
 		name string
 		flag []string
@@ -2865,21 +2494,6 @@ func TestRun_FromBlueprint_NameOverride(t *testing.T) {
 	}
 	if got := fc.createDoc.Metadata.Name; got != "pinned" {
 		t.Errorf("cell name=%q want pinned (--name override)", got)
-	}
-}
-
-func TestRun_Profile_EmitsDeprecationNotice(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	fc := &fakeClient{}
-	cmd, out := newCmd(t, fc)
-	// A bogus profile dir so the load fails fast after the notice prints; we
-	// assert only that the deprecation notice reached stderr (shared buffer).
-	cmd.SetArgs([]string{"-p", "nonexistent-profile", "-d"})
-	_ = cmd.Execute()
-
-	if !strings.Contains(out.String(), "-p/--profile is deprecated") {
-		t.Errorf("expected -p deprecation notice, got:\n%s", out.String())
 	}
 }
 
@@ -3538,9 +3152,11 @@ func TestRun_FromConfig_RejectsParamFlags(t *testing.T) {
 }
 
 // TestRun_PositionalConfig_MutexWithFlagSources covers issue #813's AC: the
-// <config> positional is rejected when combined with -b/-f/-p; the rejection
-// message names all four sources so the operator sees the full set without
-// re-running with --help.
+// <config> positional is rejected when combined with -b/-f; the rejection
+// message names the remaining sources so the operator sees the full set
+// without re-running with --help. The legacy `-p`/`--profile` form was
+// removed in #626 and is now intercepted at flag-parse time with a
+// migration pointer before the positional-mutex check runs.
 func TestRun_PositionalConfig_MutexWithFlagSources(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -3556,11 +3172,6 @@ func TestRun_PositionalConfig_MutexWithFlagSources(t *testing.T) {
 			"-f conflicts with positional",
 			[]string{"prod", "-f", "/tmp/never-read.yaml", "-d"},
 			"the <config> positional is mutually exclusive with -f/--file",
-		},
-		{
-			"-p conflicts with positional",
-			[]string{"prod", "-p", "shell", "-d"},
-			"the <config> positional is mutually exclusive with -p/--profile",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3921,7 +3532,7 @@ func TestRun_FromConfig_NewWithRm_SetsAutoDelete(t *testing.T) {
 // TestRun_New_OnlyValidWithConfig covers the defensive UX guard: --new is a
 // CellConfig-only knob (only the <config> positional reaches the daemon-
 // stored CellConfig path). Allowing it silently on -f (where metadata.name is
-// authoritative) or -p/-b (which already generate <prefix>-<6hex>) would seed
+// authoritative) or -b (which already generates <prefix>-<6hex>) would seed
 // a wrong mental model that --new toggles a default that isn't actually
 // flipped.
 func TestRun_New_OnlyValidWithConfig(t *testing.T) {
@@ -3933,11 +3544,6 @@ func TestRun_New_OnlyValidWithConfig(t *testing.T) {
 		{
 			"-f rejects --new",
 			[]string{"-f", "/tmp/never-read.yaml", "--new", "-d"},
-			"--new is only valid with the <config> positional",
-		},
-		{
-			"-p rejects --new",
-			[]string{"-p", "shell", "--new", "-d"},
 			"--new is only valid with the <config> positional",
 		},
 		{
@@ -4517,7 +4123,7 @@ func TestRun_FromConfig_Clone_MutexWithRm(t *testing.T) {
 }
 
 // TestRun_Clone_OnlyValidWithConfig mirrors TestRun_New_OnlyValidWithConfig:
-// --clone is a CellConfig-only knob, rejected on -f/-p/-b. The error wording
+// --clone is a CellConfig-only knob, rejected on -f/-b. The error wording
 // pins the per-source phrasing so the operator's mental model isn't muddled.
 func TestRun_Clone_OnlyValidWithConfig(t *testing.T) {
 	for _, tc := range []struct {
@@ -4528,11 +4134,6 @@ func TestRun_Clone_OnlyValidWithConfig(t *testing.T) {
 		{
 			"-f rejects --clone",
 			[]string{"-f", "/tmp/never-read.yaml", "--clone", "-d"},
-			"--clone is only valid with the <config> positional",
-		},
-		{
-			"-p rejects --clone",
-			[]string{"-p", "shell", "--clone", "-d"},
 			"--clone is only valid with the <config> positional",
 		},
 		{
@@ -5085,7 +4686,7 @@ func TestRun_FromConfig_Reuse_MutexWith(t *testing.T) {
 }
 
 // TestRun_Reuse_OnlyValidWithConfig mirrors TestRun_Clone_OnlyValidWithConfig:
-// --reuse is a CellConfig-only knob, rejected on -f/-p/-b. The per-source
+// --reuse is a CellConfig-only knob, rejected on -f/-b. The per-source
 // error wording pins the operator's mental model.
 func TestRun_Reuse_OnlyValidWithConfig(t *testing.T) {
 	for _, tc := range []struct {
@@ -5096,11 +4697,6 @@ func TestRun_Reuse_OnlyValidWithConfig(t *testing.T) {
 		{
 			"-f rejects --reuse",
 			[]string{"-f", "/tmp/never-read.yaml", "--reuse", "-d"},
-			"--reuse is only valid with the <config> positional",
-		},
-		{
-			"-p rejects --reuse",
-			[]string{"-p", "shell", "--reuse", "-d"},
 			"--reuse is only valid with the <config> positional",
 		},
 		{

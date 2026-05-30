@@ -1,0 +1,58 @@
+# CellBlueprint for one-shot Claude Code prompts (replaces the legacy
+# CellProfile of the same shape; #626 removed the CellProfile kind).
+#
+# Apply once into the daemon:
+#
+#   sudo kuke apply -f docs/examples/claude-code/blueprint.yaml
+#
+# Then materialize a fresh cell each time:
+#
+#   sudo kuke run -b claude-code \
+#       --param PROMPT="explain the kukeon architecture in one sentence" --rm
+#
+# Each `kuke run -b` produces a cell named `claude-code-<6hex>`, substitutes
+# ${IMAGE} / ${PROMPT}, and attaches to the `work` container. The onInit
+# script runs `claude --print "${PROMPT}"` once and exits, so the attach loop
+# closes and `--rm` reclaims the cell.
+#
+# For an idempotent, name-stable variant (at most one live cell per
+# invocation, attaches to the existing cell on re-run), wrap this blueprint
+# in a kind: CellConfig and use `kuke run <config>` instead. See
+# docs/site/guides/migrate-cellprofile-to-blueprint.md for the cutover
+# guidance and the -b vs. <config> decision.
+apiVersion: v1beta1
+kind: CellBlueprint
+metadata:
+  name: claude-code
+  realm: default
+  space: default
+  stack: default
+spec:
+  parameters:
+    - name: IMAGE
+      description: "Claude Code image reference"
+      default: docker.io/library/claude-code:latest
+    - name: PROMPT
+      description: "Prompt passed to `claude --print`"
+      required: true
+  cell:
+    autoDelete: true
+    tty:
+      default: work
+    containers:
+      - id: root
+        root: true
+        image: docker.io/library/busybox:latest
+        command: sleep
+        args:
+          - "infinity"
+      - id: work
+        attachable: true
+        image: ${IMAGE}
+        command: /bin/bash
+        workingDir: /home/claude
+        tty:
+          prompt: "claude> "
+          onInit:
+            - script: |
+                claude --print "${PROMPT}" && exit

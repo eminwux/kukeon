@@ -46,9 +46,9 @@ kuke autocomplete fish > ~/.config/fish/completions/kuke.fish
 - **Subcommand names** — `kuke <TAB>` completes against the current command set (`init`, `get`, `create`, `apply`, `run`, `delete`, `start`, `stop`, `kill`, `purge`, `refresh`, `attach`, `log`, `image`, `daemon`, `doctor`, `uninstall`, `autocomplete`, `version`, …). The dispatcher pulls this from the live binary, so a freshly added subcommand shows up the next tab.
 - **Resource names** — `kuke get realm <TAB>`, `kuke delete space <TAB>`, etc. pull live names from the running daemon.
 - **`--realm`, `--space`, `--stack`, `--cell` flags** — complete against the set of resources that match the other flags you've already typed.
-- **Profile names for `kuke run -p`** — `kuke run -p <TAB>` lists `.yaml` files under `$HOME/.kuke/profiles.d` (or `$KUKE_PROFILES_DIR`). Adding or removing a profile reflects on the next tab without re-sourcing.
+- **Blueprint names for `kuke run -b` and Config names for the `<config>` positional** — `kuke run -b <TAB>` lists daemon-stored CellBlueprints; `kuke run <TAB>` (the positional arg) lists daemon-stored CellConfigs — both scoped by `--realm`/`--space`/`--stack`. These replace the legacy `-p`/`--profile` filename completion that was removed alongside the `CellProfile` kind in [#626](https://github.com/eminwux/kukeon/issues/626).
 
-Completion functions that need realm / space / stack / cell data reach out to the daemon, so autocomplete on a host where `kukeond` isn't running will return no suggestions (silently) for those flags. That's expected. Static completions (subcommands, profile filenames) keep working without the daemon.
+Completion functions that need realm / space / stack / cell / blueprint / config data reach out to the daemon, so autocomplete on a host where `kukeond` isn't running will return no suggestions (silently) for those flags. That's expected. Static completions (subcommands) keep working without the daemon.
 
 ## One exception
 

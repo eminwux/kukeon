@@ -18,9 +18,9 @@ The first time you run a dev container with Docker, it's easy:
 docker run -it --name workspace ubuntu:24.04 bash
 ```
 
-You land at a shell. You install your tools, edit some files, and exit. The container stops. The next time you want to come back, you reach for `docker start -ai workspace`, then wonder whether you wanted `docker exec -it workspace bash` instead because you forgot whether you'd stopped it. Want to add a volume mount? You `docker rm` the container and rebuild the invocation from scratch, because there's no spec to edit — the flags *are* the spec, and they live in your terminal scrollback.
+You land at a shell. You install your tools, edit some files, and exit. The container stops. The next time you want to come back, you reach for `docker start -ai workspace`, then wonder whether you wanted `docker exec -it workspace bash` instead because you forgot whether you'd stopped it. Want to add a volume mount? You `docker rm` the container and rebuild the invocation from scratch, because there's no spec to edit — the flags _are_ the spec, and they live in your terminal scrollback.
 
-That's the friction. The container is real and persistent on disk, but its *definition* isn't.
+That's the friction. The container is real and persistent on disk, but its _definition_ isn't.
 
 "What about `docker compose`?" is the natural next thought, and for stacks of related services it's the right answer — the spec lives in a file you can commit, edit, and re-apply. The trade is structure: compose projects are flat and directory-scoped, so `docker compose down` run from the wrong directory can take out unrelated containers when names collide. For a single reattachable dev workspace you don't need a whole stack; you need one cell. `kuke run -f` is the verb that runs one, and the `Realm → Space → Stack → Cell` hierarchy you'd reach for when you outgrow compose-shaped flatness stays out of the way for the single-cell case here.
 
@@ -86,7 +86,7 @@ sudo kuke run -f workspace.yaml
 ^]^]    # press Ctrl-] twice to detach
 ```
 
-This is the part that surprises operators coming from `docker run -it`. There, exiting the foreground process kills the container — you have to remember `-d` up-front, then add `docker exec -it workspace bash` afterward to come back. With `kuke run -f`, the cell keeps running once you detach; only workload termination or a peer hangup tears it down. The same command does both jobs: first-time creation *and* attach. There's no "did I want detached mode or not?" decision to make at start time.
+This is the part that surprises operators coming from `docker run -it`. There, exiting the foreground process kills the container — you have to remember `-d` up-front, then add `docker exec -it workspace bash` afterward to come back. With `kuke run -f`, the cell keeps running once you detach; only workload termination or a peer hangup tears it down. The same command does both jobs: first-time creation _and_ attach. There's no "did I want detached mode or not?" decision to make at start time.
 
 Confirm the cell is still alive:
 
@@ -118,7 +118,7 @@ sudo kuke delete -f workspace.yaml
 
 The same file that `run` and `apply` consumed also drives teardown — `kuke delete -f` removes every resource the manifest declares, so the spec stays the single source of truth across the cell's whole lifecycle. (`kuke delete cell workspace` is the by-name equivalent if you don't have the file handy.)
 
-`kuke purge cell` exists too, but it's the recovery verb for *broken* state — for example, if an image-pull failure leaves the cell half-created and a subsequent `kuke kill cell` errors out with `no RootContainerID set`. For routine teardown of a healthy workspace, `kuke delete` is the right verb; `purge` is the heavier hammer you reach for when something in kukeon's state is wedged.
+`kuke purge cell` exists too, but it's the recovery verb for _broken_ state — for example, if an image-pull failure leaves the cell half-created and a subsequent `kuke kill cell` errors out with `no RootContainerID set`. For routine teardown of a healthy workspace, `kuke delete` is the right verb; `purge` is the heavier hammer you reach for when something in kukeon's state is wedged.
 
 ## What you get: spec as source of truth
 
@@ -133,6 +133,6 @@ The trade is honest: you write more YAML up-front than you write `docker run` fl
 
 ## Where to go next
 
-- For the full agent-runner shape — building a custom image, the Attachable cell pattern, and the parametrized `CellProfile` for one-shot prompts — see [Run Claude Code in a kukeon cell](../../guides/run-claude-code.md). The cell-spec pattern this post uses is the same one that guide walks through end-to-end.
-- For the full surface of `kuke run -f` (including `-p` profile mode, `--rm` auto-delete, and the `-d/--detach` flag), see the [`kuke run` reference](../../cli/kuke-run.md).
+- For the full agent-runner shape — building a custom image, the Attachable cell pattern, and the parametrized `CellBlueprint` for one-shot prompts — see [Run Claude Code in a kukeon cell](../../guides/run-claude-code.md). The cell-spec pattern this post uses is the same one that guide walks through end-to-end.
+- For the full surface of `kuke run -f` (including `-b` blueprint mode, `-c` config mode, `--rm` auto-delete, and the `-d/--detach` flag), see the [`kuke run` reference](../../cli/kuke-run.md).
 - For everything `kuke apply`, `kuke attach`, `kuke delete`, and `kuke purge` will and won't do — exit codes, side effects, error paths — `docs/cli-use-cases.md` in the repo is the workflow-oriented source of truth.
