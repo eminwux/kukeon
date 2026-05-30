@@ -2135,6 +2135,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#kuke-daemon-recreate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        kuke daemon recreate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#kuke-daemon-reset" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3220,6 +3231,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#kuke-daemon-recreate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        kuke daemon recreate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#kuke-daemon-reset" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3318,6 +3340,10 @@
 <td>Stop, delete metadata + cgroups, clear <code>/run/kukeon/kukeond.{sock,pid}</code></td>
 </tr>
 <tr>
+<td><code>kuke daemon recreate</code></td>
+<td>Recreate the kukeond daemon cell (tear down, re-provision, start)</td>
+</tr>
+<tr>
 <td><code>kuke daemon logs</code></td>
 <td>Print the kukeond daemon's stdout/stderr (use <code>-f</code> to follow)</td>
 </tr>
@@ -3373,6 +3399,40 @@
 </tr>
 </tbody>
 </table>
+<h2 id="kuke-daemon-recreate">kuke daemon recreate<a class="headerlink" href="#kuke-daemon-recreate" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sudo kuke daemon recreate --kukeond-image &lt;image&gt; [--timeout &lt;duration&gt;] [--server-configuration &lt;path&gt;]
+</code></pre></div>
+<p>Recreate the kukeond daemon cell (tear down, re-provision, start).</p>
+<p>Compose <code>kuke daemon reset</code> and <code>kuke init</code>'s kukeond cell provisioning into a single verb.</p>
+<p>Tears down the existing kukeond cell (stop, delete, clear socket+pid) and re-provisions it from scratch using the specified <code>--kukeond-image</code>. The cell-creation path is shared with <code>kuke init</code>, so the two cannot drift.</p>
+<p>Requires <code>--kukeond-image</code> and errors with <code>ErrHostNotInitialized</code> when the host has not been bootstrapped by <code>kuke init</code> yet.</p>
+<p>Image-load is out of scope: the desired image must already be present in the <code>kuke-system</code> realm (via <code>kuke build</code> or <code>kuke image load</code>) before invoking this command.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--kukeond-image</code></td>
+<td><em>(required)</em></td>
+<td>Container image for kukeond. May be omitted if <code>kukeondImage</code> is set in <code>/etc/kukeon/kukeond.yaml</code>; otherwise required.</td>
+</tr>
+<tr>
+<td><code>--timeout</code></td>
+<td><code>10s</code> (<code>lifecycle.DefaultTimeout</code>)</td>
+<td>Grace period for the stop phase before escalating from SIGTERM to SIGKILL</td>
+</tr>
+<tr>
+<td><code>--server-configuration</code></td>
+<td><code>/etc/kukeon/kukeond.yaml</code></td>
+<td>Path to the kukeond server-configuration YAML (precedence chain: flag &gt; <code>KUKEOND_CONFIGURATION</code> env &gt; default file &gt; hardcoded defaults)</td>
+</tr>
+</tbody>
+</table>
 <h2 id="kuke-daemon-reset">kuke daemon reset<a class="headerlink" href="#kuke-daemon-reset" title="Permanent link">&para;</a></h2>
 <p>Lightweight dev-loop teardown of the kukeond daemon. Stops the cell (with the same SIGTERM → SIGKILL escalation as <code>daemon stop</code>), deletes the cell metadata + cgroups, and clears the transient files <code>/run/kukeon/kukeond.{sock,pid}</code>. User-realm data under <code>/opt/kukeon/default/**</code> is left intact, so re-running <code>kuke init</code> after <code>kuke daemon reset</code> produces a clean re-bootstrap.</p>
 <p>Always runs as root: it touches <code>/sys/fs/cgroup</code>, containerd namespaces, and <code>/opt/kukeon</code>. Fails fast with a clear remediation if you forget <code>sudo</code>.</p>
@@ -3400,8 +3460,8 @@
 </table>
 <h2 id="kuke-daemon-logs">kuke daemon logs<a class="headerlink" href="#kuke-daemon-logs" title="Permanent link">&para;</a></h2>
 <p>Print the <code>kukeond</code> container's stdout/stderr stream. Shortcut for <code>kuke log --realm kuke-system --space kukeon --stack kukeon kukeond</code> — the coordinates are static and filled in for you.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke daemon logs [-f]
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>kuke daemon log  [-f]      # alias
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>kuke daemon logs [-f]
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>kuke daemon log  [-f]      # alias
 </code></pre></div>
 <p>By default the current contents are printed and the command exits; pass <code>-f</code>/<code>--follow</code> to tail until SIGINT.</p>
 <table>
@@ -3421,24 +3481,27 @@
 </tbody>
 </table>
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Bring the daemon back after a host reboot</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>start
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Graceful restart after editing /etc/kukeon/kukeond.yaml</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>restart
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># Force-kill an unresponsive daemon</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span><span class="nb">kill</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="c1"># Dev loop: blow away the daemon cell and re-init</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>reset
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>init<span class="w"> </span>--kukeond-image<span class="w"> </span>docker.io/library/kukeon-local:dev
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="c1"># Wipe /opt/kukeon/kuke-system too (user-realm data stays)</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>reset<span class="w"> </span>--purge-system
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="c1"># Tail the daemon log live</span>
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>logs<span class="w"> </span>-f
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Bring the daemon back after a host reboot</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>start
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># Graceful restart after editing /etc/kukeon/kukeond.yaml</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>restart
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># Force-kill an unresponsive daemon</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span><span class="nb">kill</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="c1"># Dev loop: blow away the daemon cell and re-init</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>reset
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>init<span class="w"> </span>--kukeond-image<span class="w"> </span>docker.io/library/kukeon-local:dev
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="c1"># Pick up a new kukeond image without a full kuke init</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>recreate<span class="w"> </span>--kukeond-image<span class="w"> </span>docker.io/library/kukeon-local:dev
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="c1"># Wipe /opt/kukeon/kuke-system too (user-realm data stays)</span>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>reset<span class="w"> </span>--purge-system
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a><span class="c1"># Tail the daemon log live</span>
+<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>daemon<span class="w"> </span>logs<span class="w"> </span>-f
 </code></pre></div>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
@@ -3468,7 +3531,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 23, 2026 15:44:22 UTC">May 23, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 30, 2026 11:03:12 UTC">May 30, 2026</span>
   </span>
 
     
