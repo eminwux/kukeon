@@ -561,7 +561,7 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	}
 
 	printBootstrapReport(cmd, report, permsReport)
-	cmd.Println(fmt.Sprintf("  - kukepause staged: %s", kukepausePath))
+	cmd.Printf("  - kukepause staged: %s\n", kukepausePath)
 
 	if viper.GetBool(config.KUKE_INIT_NO_WAIT.ViperKey) {
 		return nil
