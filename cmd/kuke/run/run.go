@@ -16,8 +16,9 @@
 
 // Package run implements the `kuke run` verb. The `-f <file>` form parses a
 // single-cell YAML doc and idempotently create-and-starts the cell; the `-b`
-// and `-c` forms resolve a daemon-stored CellBlueprint or CellConfig and walk
-// the same create-or-attach state machine. The legacy `-p/--profile` form
+// form resolves a daemon-stored CellBlueprint, and the positional `<config>`
+// form resolves a daemon-stored CellConfig — both walk the same
+// create-or-attach state machine. The legacy `-p/--profile` form
 // (client-side CellProfile loader under $HOME/.kuke/profiles.d) was removed
 // in #626 — it is intercepted at flag-parse time and replaced with a
 // migration pointer.
@@ -124,7 +125,11 @@ func NewRunCmd() *cobra.Command {
 			return nil
 		}
 		msg := err.Error()
-		if strings.Contains(msg, "shorthand flag: 'p'") || strings.Contains(msg, "flag: --profile") {
+		// pflag emits "unknown shorthand flag: 'p' in -p" for -p and the exact
+		// "unknown flag: --profile" for both --profile and --profile=<v> (the
+		// value is stripped before the message is built). Match the long form
+		// exactly so a future flag with a "profile" prefix can't be swallowed.
+		if strings.Contains(msg, "shorthand flag: 'p'") || msg == "unknown flag: --profile" {
 			return errRemovedProfileFlag
 		}
 		return err
