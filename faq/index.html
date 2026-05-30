@@ -3390,7 +3390,7 @@
 <h2 id="when-is-v10">When is v1.0?<a class="headerlink" href="#when-is-v10" title="Permanent link">&para;</a></h2>
 <p>There is no calendar date. v1.0 is gated on closing the in-flight tracks that would otherwise force a breaking v2 a few months later:</p>
 <ul>
-<li><strong><a href="https://github.com/eminwux/kukeon/issues/423">#423</a></strong> — crew-layers absorption (<code>CellBlueprint</code> / <code>CellConfig</code> / <code>Secret</code> replace today's <code>CellProfile</code>). Schema reshape; cannot be SemVer-stable until it lands.</li>
+<li><strong><a href="https://github.com/eminwux/kukeon/issues/423">#423</a></strong> — crew-layers absorption: daemon-stored <code>CellBlueprint</code>, <code>CellConfig</code>, and <code>Secret</code> (the client-side <code>CellProfile</code> they replaced was removed in <a href="https://github.com/eminwux/kukeon/issues/626">#626</a>). Schema reshape; cannot be SemVer-stable until the remaining phases land.</li>
 <li><strong><a href="https://github.com/eminwux/kukeon/issues/217">#217</a></strong> — <code>kuke daemon</code> subcommand group and <code>--no-daemon</code> retirement. CLI surface is still moving; the persistent flag exits the user-facing API at v1.0.</li>
 <li><strong><a href="https://github.com/eminwux/kukeon/issues/224">#224</a></strong> — reconciler-driven <code>create</code>/<code>delete</code> convergence. Changes runtime semantics for create/delete to a desired-state model.</li>
 </ul>
@@ -3419,7 +3419,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 17, 2026 17:44:44 UTC">May 17, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 30, 2026 02:11:15 UTC">May 30, 2026</span>
   </span>
 
     

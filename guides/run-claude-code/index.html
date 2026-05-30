@@ -1565,10 +1565,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-4-one-shot-prompts-via-a-cellprofile" class="md-nav__link">
+  <a href="#step-4-one-shot-prompts-via-a-cellblueprint" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 4 — One-shot prompts via a CellProfile
+        Step 4 — One-shot prompts via a CellBlueprint
       
     </span>
   </a>
@@ -3244,10 +3244,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-4-one-shot-prompts-via-a-cellprofile" class="md-nav__link">
+  <a href="#step-4-one-shot-prompts-via-a-cellblueprint" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 4 — One-shot prompts via a CellProfile
+        Step 4 — One-shot prompts via a CellBlueprint
       
     </span>
   </a>
@@ -3286,8 +3286,8 @@
 
 
 <h1 id="run-claude-code-in-a-kukeon-cell">Run Claude Code in a kukeon cell<a class="headerlink" href="#run-claude-code-in-a-kukeon-cell" title="Permanent link">&para;</a></h1>
-<p>This guide walks a freshly-<code>kuke init</code>-ed host from zero to a live Claude Code prompt running inside a kukeon cell — first as a long-lived Attachable <code>Cell</code>, then as a parametrized <code>CellProfile</code> you can drive with <code>kuke run -p</code> for one-shot prompts.</p>
-<p><a href="https://docs.claude.com/en/docs/claude-code/overview">Claude Code</a> is named in the <a href="../../vision/">Vision</a> as the canonical agent workload kukeon's isolation primitives are measured against. The companion artifacts under <a href="https://github.com/eminwux/kukeon/tree/main/docs/examples/claude-code"><code>docs/examples/claude-code/</code></a> are the smallest end-to-end shape: an image, a Cell, and a CellProfile.</p>
+<p>This guide walks a freshly-<code>kuke init</code>-ed host from zero to a live Claude Code prompt running inside a kukeon cell — first as a long-lived Attachable <code>Cell</code>, then as a parametrized <code>CellBlueprint</code> you can drive with <code>kuke run -b</code> for one-shot prompts.</p>
+<p><a href="https://docs.claude.com/en/docs/claude-code/overview">Claude Code</a> is named in the <a href="../../vision/">Vision</a> as the canonical agent workload kukeon's isolation primitives are measured against. The companion artifacts under <a href="https://github.com/eminwux/kukeon/tree/main/docs/examples/claude-code"><code>docs/examples/claude-code/</code></a> are the smallest end-to-end shape: an image, a Cell, and a CellBlueprint.</p>
 <p>The example does <strong>not</strong> bake API keys into the image and does not configure auth — bring your own per the upstream <a href="https://docs.claude.com/en/docs/claude-code/setup">setup docs</a>. For the full agent-runner shape (SSH bind, signed commits, agents/project-repo clones), see <a href="https://github.com/eminwux/crew"><code>eminwux/crew</code></a> — this guide is derived from <code>crew/images/claude/Dockerfile</code> and <code>crew/agents/pm/profiles/pm.yaml</code> with that plumbing stripped out.</p>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <ul>
@@ -3296,7 +3296,7 @@
 <li>A copy of the three files under <code>docs/examples/claude-code/</code>:</li>
 <li><a href="https://github.com/eminwux/kukeon/blob/main/docs/examples/claude-code/Dockerfile"><code>Dockerfile</code></a></li>
 <li><a href="https://github.com/eminwux/kukeon/blob/main/docs/examples/claude-code/cell.yaml"><code>cell.yaml</code></a></li>
-<li><a href="https://github.com/eminwux/kukeon/blob/main/docs/examples/claude-code/profile.yaml"><code>profile.yaml</code></a></li>
+<li><a href="https://github.com/eminwux/kukeon/blob/main/docs/examples/claude-code/blueprint.yaml"><code>blueprint.yaml</code></a> (the daemon-stored replacement for the pre-#626 <code>profile.yaml</code>)</li>
 </ul>
 <h2 id="step-1-build-the-image">Step 1 — Build the image<a class="headerlink" href="#step-1-build-the-image" title="Permanent link">&para;</a></h2>
 <p>The example <code>Dockerfile</code> is the upstream <code>crew</code> image verbatim. It installs <code>nodejs</code> + <code>npm</code> + the <code>@anthropic-ai/claude-code</code> package as a non-root <code>claude</code> user on <code>debian:trixie-slim</code>:</p>
@@ -3347,27 +3347,27 @@
 <a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="w">    </span><span class="nt">prompt</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;claude&gt;</span><span class="nv"> </span><span class="s">&quot;</span>
 </code></pre></div>
 <p>This is optional — the smoke flow above does not need it.</p>
-<h2 id="step-4-one-shot-prompts-via-a-cellprofile">Step 4 — One-shot prompts via a <code>CellProfile</code><a class="headerlink" href="#step-4-one-shot-prompts-via-a-cellprofile" title="Permanent link">&para;</a></h2>
-<p>For "fire one prompt, tear the cell down on exit" jobs, install the example profile and drive it with <code>kuke run -p</code>. A <a href="../apply-manifests/#parameterized-cell-profiles">CellProfile</a> is a per-user reusable cell template loaded from <code>$HOME/.kuke/profiles.d/&lt;name&gt;.yaml</code> (or <code>$KUKE_PROFILES_DIR</code>).</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>~/.kuke/profiles.d
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>cp<span class="w"> </span>docs/examples/claude-code/profile.yaml<span class="w"> </span>~/.kuke/profiles.d/claude-code.yaml
+<h2 id="step-4-one-shot-prompts-via-a-cellblueprint">Step 4 — One-shot prompts via a <code>CellBlueprint</code><a class="headerlink" href="#step-4-one-shot-prompts-via-a-cellblueprint" title="Permanent link">&para;</a></h2>
+<p>For "fire one prompt, tear the cell down on exit" jobs, apply the example blueprint to the daemon and drive it with <code>kuke run -b</code>. A <a href="../../manifests/blueprint/">CellBlueprint</a> is a daemon-stored, scoped cell template — the replacement for the legacy client-side <code>CellProfile</code> removed in <a href="https://github.com/eminwux/kukeon/issues/626">#626</a> (see the <a href="../migrate-cellprofile-to-blueprint/">migration guide</a>).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>docs/examples/claude-code/blueprint.yaml
 </code></pre></div>
-<p>The profile declares two parameters: <code>IMAGE</code> (defaults to <code>docker.io/library/claude-code:latest</code>) and <code>PROMPT</code> (required). Its <code>tty.onInit</code> runs <code>claude --print "${PROMPT}" &amp;&amp; exit</code>, so the attach loop closes after the prompt's reply prints. <code>spec.cell.autoDelete: true</code> then deletes the materialized cell — no <code>--rm</code> flag required.</p>
+<p>The blueprint declares two parameters: <code>IMAGE</code> (defaults to <code>docker.io/library/claude-code:latest</code>) and <code>PROMPT</code> (required). Its <code>tty.onInit</code> runs <code>claude --print "${PROMPT}" &amp;&amp; exit</code>, so the attach loop closes after the prompt's reply prints. <code>spec.cell.autoDelete: true</code> then deletes the materialized cell — no <code>--rm</code> flag required.</p>
 <p>Run it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>claude-code<span class="w"> </span><span class="se">\</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>-b<span class="w"> </span>claude-code<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">    </span>--param<span class="w"> </span><span class="nv">PROMPT</span><span class="o">=</span><span class="s2">&quot;explain the kukeon architecture in one sentence&quot;</span>
 </code></pre></div>
-<p><code>kuke run -p</code> materializes a cell named <code>claude-code-&lt;6hex&gt;</code>, attaches to the <code>work</code> container, runs the onInit script, prints Claude Code's reply, and exits. Override <code>IMAGE</code> to pin a tag:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>claude-code<span class="w"> </span><span class="se">\</span>
+<p><code>kuke run -b</code> materializes a cell named <code>claude-code-&lt;6hex&gt;</code>, attaches to the <code>work</code> container, runs the onInit script, prints Claude Code's reply, and exits. Override <code>IMAGE</code> to pin a tag:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>-b<span class="w"> </span>claude-code<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">    </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>docker.io/library/claude-code:2026-05-14<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span>--param<span class="w"> </span><span class="nv">PROMPT</span><span class="o">=</span><span class="s2">&quot;…&quot;</span>
 </code></pre></div>
-<p>See <a href="../../cli/kuke-run/"><code>kuke run</code></a> for the full flag surface, including <code>--name</code>, <code>--param-file</code>, and the <code>-d</code>/<code>--detach</code> mode.</p>
+<p>See <a href="../../cli/kuke-run/"><code>kuke run</code></a> for the full flag surface, including <code>--name</code>, <code>--param-file</code>, and the <code>-d</code>/<code>--detach</code> mode. For an idempotent, name-stable identity (one live cell per invocation, attaches on re-run instead of spawning a new clone), wrap the blueprint in a <code>kind: CellConfig</code> and use <code>kuke run &lt;config&gt;</code>.</p>
 <h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>The full crew agent-runner shape.</strong> <a href="https://github.com/eminwux/crew"><code>eminwux/crew</code></a> — SSH bind, GPG-signed commits, agents-repo clone, project-repo clone, the orchestrator that dispatches per-call cells. Two layers up from this guide.</li>
 <li><strong>Cell teardown verbs.</strong> <a href="https://github.com/eminwux/kukeon/blob/main/docs/cli-use-cases.md"><code>docs/cli-use-cases.md</code></a> — the full operator workflow reference, including <code>stop</code> / <code>kill</code> / <code>delete</code> / <code>purge --cascade</code> for cells.</li>
-<li><strong>Manifest reference.</strong> <a href="../apply-manifests/">Applying manifests</a> — multi-doc manifests, the in-process escape hatch, profile parameter resolution order.</li>
+<li><strong>Manifest reference.</strong> <a href="../apply-manifests/">Applying manifests</a> — multi-doc manifests, the in-process escape hatch, blueprint parameter resolution order.</li>
+<li><strong>CellProfile → CellBlueprint migration.</strong> <a href="../migrate-cellprofile-to-blueprint/">The cutover recipe</a> — for hosts that used to drive workloads via <code>kuke run -p</code>.</li>
 </ul>
 
 
@@ -3391,7 +3391,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 23, 2026 21:35:03 UTC">May 23, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 30, 2026 02:11:15 UTC">May 30, 2026</span>
   </span>
 
     
