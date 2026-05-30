@@ -438,4 +438,4 @@ The proposal above was written before v0.4.0. Most of P0 and P1 has since shippe
 
 ### What this means for v1.0
 
-The agent-native gate — "give an agent a workspace, an egress-restricted network, a scoped credential, and a non-root sandbox by declaration" — is redeemed in v0.5.0 by the P0+P1-minus-Session set, and the [Section 6 success manifest](#6-what-success-looks-like) shape works today (substituting explicit `kuke apply` + `kuke delete` for the deferred `Session` kind). The remaining gaps to v1.0 are schema/runtime tracks not covered by this proposal — see the [FAQ on v1.0](faq.md#when-is-v10) for the gating issues.
+The agent-native gate — "give an agent a workspace, an egress-restricted network, a scoped credential, and a non-root sandbox by declaration" — is redeemed in v0.5.0 by the P0+P1-minus-Session set, and the [Section 6 success manifest](#6-what-success-looks-like) shape works today (substituting explicit `kuke apply` + `kuke delete` for the deferred `Session` kind). The remaining gaps to v1.0 are schema/runtime tracks not covered by this proposal — see the [FAQ on v1.0](../faq.md#when-is-v10) for the gating issues.
