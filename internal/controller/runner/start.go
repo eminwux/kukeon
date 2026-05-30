@@ -1010,7 +1010,6 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 		}
 	}
 	r.stampCellEtcFilePathsOnContainers(&internalCell)
-	stampCellProfileNameOnContainers(&internalCell)
 	cellSpec = internalCell.Spec
 
 	// Resolve the attachable container so the non-root recreate loop below
@@ -1376,13 +1375,12 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 	// before BuildContainerSpec runs in the destructive recreate below.
 	foundContainerSpec.NestedCgroupRuntime = cell.Spec.NestedCgroupRuntime
 
-	// EtcHostsPath / EtcHostnamePath and CellProfileName: runtime-only
-	// stamps the cell-wide StartCell / ensureCellContainers paths apply via
-	// stampCellEtcFilePathsOnContainers + stampCellProfileNameOnContainers.
-	// The single-container StartContainer recreate path holds a local spec
-	// pointer instead, so use the per-spec variants to match. Without these,
-	// the recreated container drops its /etc/hosts + /etc/hostname
-	// bind-mounts and the KUKEON_CELL_PROFILE_NAME env var. Issue #354.
+	// EtcHostsPath / EtcHostnamePath: runtime-only stamps the cell-wide
+	// StartCell / ensureCellContainers paths apply via
+	// stampCellEtcFilePathsOnContainers. The single-container StartContainer
+	// recreate path holds a local spec pointer instead, so use the per-spec
+	// variant to match. Without this, the recreated container drops its
+	// /etc/hosts + /etc/hostname bind-mounts. Issue #354.
 	r.stampContainerRecreateRuntimeFields(foundContainerSpec, &cell)
 
 	// Past the idempotent recreate-prep: any subsequent error means we

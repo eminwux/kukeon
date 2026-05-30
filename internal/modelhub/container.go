@@ -99,17 +99,6 @@ type ContainerSpec struct {
 	// Empty disables the bind-mount. Same lifecycle and storage location as
 	// EtcHostsPath; not part of the persisted document.
 	EtcHostnamePath string
-	// CellProfileName is the legacy metadata.name of the CellProfile this
-	// container's cell was materialized from (mirrors cell.Metadata.Labels
-	// ["kukeon.io/profile"], stamped by the runner from the cell label). When
-	// non-empty, BuildContainerSpec / BuildRootContainerSpec emit it as
-	// KUKEON_CELL_PROFILE_NAME on the container's OCI Process.Env. The
-	// CellProfile kind itself was removed in #626, so no fresh cell sets this
-	// field; cells persisted before the cleanup still carry the label and have
-	// it propagated for the duration of their lifetime. Populated by the
-	// runner at container-create time; not part of the persisted document.
-	// Issue #351.
-	CellProfileName string
 }
 
 // ContainerTty mirrors the v1beta1 ContainerTty payload. See the v1beta1

@@ -259,15 +259,14 @@ Host-network cells (cells whose root container is declared with `hostNetwork: tr
 
 Kukeon exports the container's location in the realm/space/stack/cell hierarchy as environment variables visible to the process at startup:
 
-| Variable                   | Value                                                                |
-| -------------------------- | -------------------------------------------------------------------- |
-| `KUKEON_REALM`             | The container's realm name                                           |
-| `KUKEON_SPACE`             | The container's space name                                           |
-| `KUKEON_STACK`             | The container's stack name                                           |
-| `KUKEON_CELL_NAME`         | The container's cell name                                            |
-| `KUKEON_CONTAINER_ID`      | The container's `spec.id`                                            |
-| `KUKEON_CGROUP_PATH`       | Absolute cgroup path of the cell                                     |
-| `KUKEON_CELL_PROFILE_NAME` | Name of the cell profile that materialized the cell, when applicable |
+| Variable              | Value                            |
+| --------------------- | -------------------------------- |
+| `KUKEON_REALM`        | The container's realm name       |
+| `KUKEON_SPACE`        | The container's space name       |
+| `KUKEON_STACK`        | The container's stack name       |
+| `KUKEON_CELL_NAME`    | The container's cell name        |
+| `KUKEON_CONTAINER_ID` | The container's `spec.id`        |
+| `KUKEON_CGROUP_PATH`  | Absolute cgroup path of the cell |
 
 These pairs are appended to the container's effective environment so user-declared `spec.env` entries still take precedence on collision.
 

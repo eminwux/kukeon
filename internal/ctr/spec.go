@@ -563,12 +563,11 @@ func kukeonContainerEnv(spec intmodel.ContainerSpec) []string {
 
 // kukeonDefaultEnv returns the KUKEON_* identity entries that describe the
 // container's cell context. Each field contributes one entry only when set;
-// the order is profile → cell → container ID → realm/space/stack →
-// cgroup-path so `env | grep KUKEON_` reads top-down from the broadest
-// identity to the narrowest. Issue #351.
+// the order is cell → container ID → realm/space/stack → cgroup-path so
+// `env | grep KUKEON_` reads top-down from the broadest identity to the
+// narrowest. Issue #351.
 func kukeonDefaultEnv(spec intmodel.ContainerSpec) []string {
 	pairs := []struct{ key, value string }{
-		{"KUKEON_CELL_PROFILE_NAME", spec.CellProfileName},
 		{"KUKEON_CELL_NAME", spec.CellName},
 		{"KUKEON_CONTAINER_ID", spec.ID},
 		{"KUKEON_REALM", spec.RealmName},
