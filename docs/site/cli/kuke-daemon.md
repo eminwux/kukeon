@@ -10,14 +10,15 @@ These commands act on the `kukeond` cell provisioned by `kuke init` (`kuke-syste
 
 ## Subcommands
 
-| Command               | What it does                                                            |
-| --------------------- | ----------------------------------------------------------------------- |
-| `kuke daemon start`   | Start the kukeond daemon cell                                           |
-| `kuke daemon stop`    | Gracefully stop the kukeond cell (SIGTERM, escalating to SIGKILL)       |
-| `kuke daemon kill`    | Immediately SIGKILL the kukeond daemon cell                             |
-| `kuke daemon restart` | Stop then start the kukeond daemon cell                                 |
-| `kuke daemon reset`   | Stop, delete metadata + cgroups, clear `/run/kukeon/kukeond.{sock,pid}` |
-| `kuke daemon logs`    | Print the kukeond daemon's stdout/stderr (use `-f` to follow)           |
+| Command                | What it does                                                            |
+| ---------------------- | ----------------------------------------------------------------------- |
+| `kuke daemon start`    | Start the kukeond daemon cell                                           |
+| `kuke daemon stop`     | Gracefully stop the kukeond cell (SIGTERM, escalating to SIGKILL)       |
+| `kuke daemon kill`     | Immediately SIGKILL the kukeond daemon cell                             |
+| `kuke daemon restart`  | Stop then start the kukeond daemon cell                                 |
+| `kuke daemon reset`    | Stop, delete metadata + cgroups, clear `/run/kukeon/kukeond.{sock,pid}` |
+| `kuke daemon recreate` | Recreate the kukeond daemon cell (tear down, re-provision, start)       |
+| `kuke daemon logs`     | Print the kukeond daemon's stdout/stderr (use `-f` to follow)           |
 
 All subcommands are idempotent: they succeed with a clear message when the daemon is already in the requested state.
 
@@ -55,6 +56,28 @@ Compose `kuke daemon stop` and `kuke daemon start` into a single verb. When the 
 | Flag        | Default | Description                                                               |
 | ----------- | ------- | ------------------------------------------------------------------------- |
 | `--timeout` | `10s`   | Grace period for the stop phase before escalating from SIGTERM to SIGKILL |
+
+## kuke daemon recreate
+
+```
+sudo kuke daemon recreate --kukeond-image <image> [--timeout <duration>] [--server-configuration <path>]
+```
+
+Recreate the kukeond daemon cell (tear down, re-provision, start).
+
+Compose `kuke daemon reset` and `kuke init`'s kukeond cell provisioning into a single verb.
+
+Tears down the existing kukeond cell (stop, delete, clear socket+pid) and re-provisions it from scratch using the specified `--kukeond-image`. The cell-creation path is shared with `kuke init`, so the two cannot drift.
+
+Requires `--kukeond-image` and errors with `ErrHostNotInitialized` when the host has not been bootstrapped by `kuke init` yet.
+
+Image-load is out of scope: the desired image must already be present in the `kuke-system` realm (via `kuke build` or `kuke image load`) before invoking this command.
+
+| Flag                     | Default                              | Description                                                                                                                                              |
+| ------------------------ | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--kukeond-image`        | _(required)_                         | Container image for kukeond. May be omitted if `kukeondImage` is set in `/etc/kukeon/kukeond.yaml`; otherwise required.                                  |
+| `--timeout`              | `10s` (`lifecycle.DefaultTimeout`)   | Grace period for the stop phase before escalating from SIGTERM to SIGKILL                                                                                |
+| `--server-configuration` | `/etc/kukeon/kukeond.yaml`           | Path to the kukeond server-configuration YAML (precedence chain: flag > `KUKEOND_CONFIGURATION` env > default file > hardcoded defaults)                 |
 
 ## kuke daemon reset
 
@@ -99,6 +122,9 @@ sudo kuke daemon kill
 # Dev loop: blow away the daemon cell and re-init
 sudo kuke daemon reset
 sudo kuke init --kukeond-image docker.io/library/kukeon-local:dev
+
+# Pick up a new kukeond image without a full kuke init
+sudo kuke daemon recreate --kukeond-image docker.io/library/kukeon-local:dev
 
 # Wipe /opt/kukeon/kuke-system too (user-realm data stays)
 sudo kuke daemon reset --purge-system
