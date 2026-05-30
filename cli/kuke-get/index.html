@@ -1794,10 +1794,43 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#default-tables-and-o-wide-columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Default tables and -o wide columns
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#label-selector-l-selector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Label selector (-l/--selector)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#get-vs-refresh" class="md-nav__link">
     <span class="md-ellipsis">
       
         get vs refresh
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#retired-in-v060" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retired in v0.6.0
       
     </span>
   </a>
@@ -3160,10 +3193,43 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#default-tables-and-o-wide-columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Default tables and -o wide columns
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#label-selector-l-selector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Label selector (-l/--selector)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#get-vs-refresh" class="md-nav__link">
     <span class="md-ellipsis">
       
         get vs refresh
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#retired-in-v060" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retired in v0.6.0
       
     </span>
   </a>
@@ -3220,6 +3286,10 @@
 <td><code>--output</code>, <code>-o</code></td>
 <td>Output format: <code>yaml</code>, <code>json</code>, <code>table</code>, <code>wide</code>. Default: <code>table</code> for list, <code>yaml</code> for a single resource. <code>wide</code> accepted by every <code>kuke get &lt;kind&gt;</code> for symmetry; per-kind wide columns vary (see each kind).</td>
 </tr>
+<tr>
+<td><code>--selector</code>, <code>-l</code></td>
+<td>Label selector (kubectl-style) to filter list results. Supports <code>=</code>, <code>==</code>, <code>!=</code>, existence (<code>key</code>), absence (<code>!key</code>), and comma-separated AND (e.g. <code>env=prod,tier!=db</code> or <code>env,!debug</code>). Rejected with a positional <code>NAME</code>.</td>
+</tr>
 </tbody>
 </table>
 <p>Plus all <a href="../kuke/">global flags</a>. Every <code>kuke get &lt;kind&gt;</code> accepts the explicit <code>--no-daemon</code> flag to bypass the daemon (inherited as a persistent flag from the parent <code>get</code> command); <code>KUKEON_NO_DAEMON=true</code> and <code>--run-path /opt/kukeon</code> (which auto-promotes the command into in-process mode) work as well.</p>
@@ -3273,6 +3343,62 @@
 <li><strong>List</strong> (no positional arg): returns every resource matching the scope flags. Default output is a table.</li>
 <li><strong>Single</strong> (positional arg): returns the one matching resource. Default output is YAML.</li>
 </ul>
+<h2 id="default-tables-and-o-wide-columns">Default tables and <code>-o wide</code> columns<a class="headerlink" href="#default-tables-and-o-wide-columns" title="Permanent link">&para;</a></h2>
+<p>Per-kind column contracts. The default table is what <code>kuke get &lt;kind&gt;</code> (no <code>-o wide</code>) emits; <code>-o wide</code> appends the listed extras.</p>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Default columns</th>
+<th><code>-o wide</code> appends</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>realm</code></td>
+<td><code>NAME STATE AGE</code></td>
+<td><code>NAMESPACE</code></td>
+</tr>
+<tr>
+<td><code>space</code></td>
+<td><code>NAME REALM STATE AGE</code></td>
+<td><code>EGRESS NET-DEFAULTS</code></td>
+</tr>
+<tr>
+<td><code>stack</code></td>
+<td><code>NAME REALM SPACE STATE AGE</code></td>
+<td><em>(none — stack carries no wide-only signals)</em></td>
+</tr>
+<tr>
+<td><code>cell</code></td>
+<td><code>NAME REALM SPACE STACK STATE SYNC AGE</code></td>
+<td><code>CONTAINERS BRIDGE DIVERGENCE</code></td>
+</tr>
+<tr>
+<td><code>container</code></td>
+<td><code>NAME REALM SPACE STACK CELL STATE RESTARTS AGE</code></td>
+<td><code>IMAGE EXIT</code></td>
+</tr>
+<tr>
+<td><code>image</code></td>
+<td><code>NAME REALM CREATED</code> (cross-realm default)</td>
+<td><code>DIGEST</code></td>
+</tr>
+<tr>
+<td><code>blueprint</code></td>
+<td><code>NAME REALM SPACE STACK AGE</code></td>
+<td><em>(none)</em></td>
+</tr>
+<tr>
+<td><code>config</code></td>
+<td><code>NAME REALM SPACE STACK AGE</code></td>
+<td><em>(none)</em></td>
+</tr>
+</tbody>
+</table>
+<p><code>SYNC</code> (<code>InSync</code>/<code>OutOfSync</code>/<code>-</code>) is computed for cells that carry a <code>kukeon.io/config=&lt;name&gt;</code> lineage label; non-lineage cells render <code>-</code>. The <code>-o wide</code> <code>DIVERGENCE</code> column expands an <code>OutOfSync</code> cell with a one-line summary of what diverged (image, env, mounts, …). See <code>kuke restart cell</code> for the reconcile verb.</p>
+<p><code>-o wide</code> on <code>space</code> surfaces the egress allowlist (<code>EGRESS</code>) and the cell-default-deny posture (<code>NET-DEFAULTS yes/no</code>).</p>
+<p><code>-o wide</code> on <code>container</code> surfaces the resolved container image reference (<code>IMAGE</code>) and the <code>&lt;exitCode&gt;/&lt;exitSignal&gt;</code> pair (<code>EXIT</code>) when either field is non-zero. The <code>RESTARTS</code> column lives in the default table; <code>CGROUP</code>, <code>ROOT</code>, and <code>IMAGE</code> (as defaults) were retired in v0.6.0 — see "Retired in v0.6.0" below.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Table of realms — the dev-init parity check expects this column shape</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>realms
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>NAME<span class="w">         </span>STATE<span class="w">  </span>AGE
@@ -3296,29 +3422,56 @@
 <a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="c1"># Spaces in the default realm</span>
 <a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>spaces<span class="w"> </span>--realm<span class="w"> </span>default
 <a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>
-<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="c1"># Cells in a specific stack</span>
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="c1"># Cells in a stack — SYNC column flags Config-lineage drift; OutOfSync points at `kuke restart cell`</span>
 <a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>cells<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>default<span class="w"> </span>--stack<span class="w"> </span>default
-<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>
-<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="c1"># All containers in a cell</span>
-<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>containers<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>default<span class="w"> </span>--stack<span class="w"> </span>default<span class="w"> </span>--cell<span class="w"> </span>hello-world
-<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>
-<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a><span class="c1"># Images across every realm (cross-realm by default)</span>
-<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>images
-<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a>
-<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a><span class="c1"># Narrow to one realm; -o wide adds CREATED and DIGEST columns</span>
-<a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>image<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>-o<span class="w"> </span>wide
-<a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a>
-<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a><span class="c1"># Describe a single image as YAML (defaults --realm to `default` on this path)</span>
-<a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>image<span class="w"> </span>docker.io/library/nginx:alpine<span class="w"> </span>-o<span class="w"> </span>yaml
-<a id="__codelineno-1-38" name="__codelineno-1-38" href="#__codelineno-1-38"></a>
-<a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a><span class="c1"># List every daemon-stored CellBlueprint bound to the kuke-system realm</span>
-<a id="__codelineno-1-40" name="__codelineno-1-40" href="#__codelineno-1-40"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>blueprints<span class="w"> </span>--realm<span class="w"> </span>kuke-system
-<a id="__codelineno-1-41" name="__codelineno-1-41" href="#__codelineno-1-41"></a>
-<a id="__codelineno-1-42" name="__codelineno-1-42" href="#__codelineno-1-42"></a><span class="c1"># Show one CellConfig as YAML</span>
-<a id="__codelineno-1-43" name="__codelineno-1-43" href="#__codelineno-1-43"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>config<span class="w"> </span>kukeon-dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>-o<span class="w"> </span>yaml
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>NAME<span class="w">           </span>REALM<span class="w">    </span>SPACE<span class="w">    </span>STACK<span class="w">    </span>STATE<span class="w">  </span>SYNC<span class="w">       </span>AGE
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>-------------<span class="w">  </span>-------<span class="w">  </span>-------<span class="w">  </span>-------<span class="w">  </span>-----<span class="w">  </span>---------<span class="w">  </span>---
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>work-001<span class="w">       </span>default<span class="w">  </span>default<span class="w">  </span>default<span class="w">  </span>Ready<span class="w">  </span>InSync<span class="w">     </span>12m
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>work-002<span class="w">       </span>default<span class="w">  </span>default<span class="w">  </span>default<span class="w">  </span>Ready<span class="w">  </span>OutOfSync<span class="w">  </span>3m
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a>shell<span class="w">          </span>default<span class="w">  </span>default<span class="w">  </span>default<span class="w">  </span>Ready<span class="w">  </span>-<span class="w">          </span>1h
+<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a>
+<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a><span class="c1"># Containers — RESTARTS column (process bounces since cell start); -o wide adds IMAGE EXIT</span>
+<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>containers<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>default<span class="w"> </span>--stack<span class="w"> </span>default<span class="w"> </span>--cell<span class="w"> </span>work-001<span class="w"> </span>-o<span class="w"> </span>wide
+<a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a>
+<a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a><span class="c1"># All containers in a cell</span>
+<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>containers<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>default<span class="w"> </span>--stack<span class="w"> </span>default<span class="w"> </span>--cell<span class="w"> </span>hello-world
+<a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a>
+<a id="__codelineno-1-38" name="__codelineno-1-38" href="#__codelineno-1-38"></a><span class="c1"># Images across every realm (cross-realm by default)</span>
+<a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>images
+<a id="__codelineno-1-40" name="__codelineno-1-40" href="#__codelineno-1-40"></a>
+<a id="__codelineno-1-41" name="__codelineno-1-41" href="#__codelineno-1-41"></a><span class="c1"># Narrow to one realm; -o wide adds CREATED and DIGEST columns</span>
+<a id="__codelineno-1-42" name="__codelineno-1-42" href="#__codelineno-1-42"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>image<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>-o<span class="w"> </span>wide
+<a id="__codelineno-1-43" name="__codelineno-1-43" href="#__codelineno-1-43"></a>
+<a id="__codelineno-1-44" name="__codelineno-1-44" href="#__codelineno-1-44"></a><span class="c1"># Describe a single image as YAML (defaults --realm to `default` on this path)</span>
+<a id="__codelineno-1-45" name="__codelineno-1-45" href="#__codelineno-1-45"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>image<span class="w"> </span>docker.io/library/nginx:alpine<span class="w"> </span>-o<span class="w"> </span>yaml
+<a id="__codelineno-1-46" name="__codelineno-1-46" href="#__codelineno-1-46"></a>
+<a id="__codelineno-1-47" name="__codelineno-1-47" href="#__codelineno-1-47"></a><span class="c1"># List every daemon-stored CellBlueprint bound to the kuke-system realm</span>
+<a id="__codelineno-1-48" name="__codelineno-1-48" href="#__codelineno-1-48"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>blueprints<span class="w"> </span>--realm<span class="w"> </span>kuke-system
+<a id="__codelineno-1-49" name="__codelineno-1-49" href="#__codelineno-1-49"></a>
+<a id="__codelineno-1-50" name="__codelineno-1-50" href="#__codelineno-1-50"></a><span class="c1"># Show one CellConfig as YAML</span>
+<a id="__codelineno-1-51" name="__codelineno-1-51" href="#__codelineno-1-51"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>config<span class="w"> </span>kukeon-dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>-o<span class="w"> </span>yaml
 </code></pre></div>
+<h2 id="label-selector-l-selector">Label selector (<code>-l</code>/<code>--selector</code>)<a class="headerlink" href="#label-selector-l-selector" title="Permanent link">&para;</a></h2>
+<p>Filter list results by label query. The flag is wired on every <code>kuke get &lt;kind&gt;</code> verb (realm, space, stack, cell, container).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Cells labeled env=prod</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>cell<span class="w"> </span>-l<span class="w"> </span><span class="nv">env</span><span class="o">=</span>prod
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Cells with the `debug` label absent</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>cell<span class="w"> </span>-l<span class="w"> </span><span class="s1">&#39;!debug&#39;</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># Comma-separated AND</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>get<span class="w"> </span>cell<span class="w"> </span>-l<span class="w"> </span><span class="s1">&#39;env=prod,tier!=db&#39;</span>
+</code></pre></div>
+<p>A positional <code>NAME</code> plus <code>-l</code> is rejected — a selector queries the list path, a name queries the single-resource path; mixing them is ambiguous. Malformed selectors fail before any controller call.</p>
 <h2 id="get-vs-refresh"><code>get</code> vs <code>refresh</code><a class="headerlink" href="#get-vs-refresh" title="Permanent link">&para;</a></h2>
 <p><code>get</code> reads metadata. It does not reconcile or update <code>.status</code>. If you want the status to reflect the live runtime state (after a crash, or after containerd reported a change), run <a href="../kuke-refresh/"><code>kuke refresh</code></a> first.</p>
+<h2 id="retired-in-v060">Retired in v0.6.0<a class="headerlink" href="#retired-in-v060" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong><code>--show-controllers</code> / <code>CGROUP</code> column</strong> — the cgroup-controllers signal on <code>-o wide</code> cell/container tables is gone. The state-of-cgroup-controllers check moved into <code>kuke status</code>'s host section and <a href="../kuke-doctor/"><code>kuke doctor cgroups</code></a>.</li>
+<li><strong><code>IMAGE</code> as a default container column</strong> — <code>IMAGE</code> is now an <code>-o wide</code> extension only. Use <code>kuke get container -o wide</code> or <code>-o yaml</code> to surface it.</li>
+<li><strong><code>ROOT</code> column</strong> — retired entirely.</li>
+<li><strong><code>kuke image get</code> / <code>kuke image ls</code> / <code>kuke image list</code></strong> — folded into <code>kuke get image[s]</code> with no alias window. See the <code>kuke get image</code> examples below.</li>
+</ul>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../kuke-refresh/">kuke refresh</a> — rehydrate <code>.status</code> from containerd/CNI</li>
@@ -3346,7 +3499,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 25, 2026 18:07:31 UTC">May 25, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 30, 2026 11:44:55 UTC">May 30, 2026</span>
   </span>
 
     
