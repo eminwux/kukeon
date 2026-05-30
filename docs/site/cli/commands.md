@@ -24,6 +24,7 @@ Both are hard-linked to the same binary on install. Running `kuke` enters the cl
 | `kuke start` / `stop` / `kill` | Lifecycle operations on cells and containers                          |
 | `kuke purge`                   | Delete with aggressive cleanup of residual state                      |
 | `kuke refresh`                 | Reconcile `.status` from live state without touching `.spec`          |
+| `kuke restart`                 | Restart a cell (bounces the process; on OutOfSync also reconciles)    |
 | `kuke log`                     | Print a container's stdout/stderr (use `-f` to follow)                |
 | `kuke attach`                  | Attach to an Attachable container's `sbsh` terminal                   |
 | `kuke build`                   | Build an OCI image from a Dockerfile into a realm's containerd namespace |
@@ -83,6 +84,7 @@ The positional argument is the resource's own name; the flags specify where in t
 - [kuke start / stop / kill](kuke-lifecycle.md)
 - [kuke purge](kuke-purge.md)
 - [kuke refresh](kuke-refresh.md)
+- [kuke restart](kuke-restart.md)
 - [kuke log](kuke-log.md)
 - [kuke attach](kuke-attach.md)
 - [kuke build](kuke-build.md)
