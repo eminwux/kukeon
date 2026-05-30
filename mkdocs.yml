@@ -105,6 +105,7 @@ nav:
       - cli/kuke-lifecycle.md
       - cli/kuke-purge.md
       - cli/kuke-refresh.md
+      - cli/kuke-restart.md
       - cli/kuke-log.md
       - cli/kuke-attach.md
       - cli/kuke-image.md
