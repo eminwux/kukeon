@@ -121,7 +121,7 @@ func TestDefaultRootContainerSpec(t *testing.T) {
 				t.Errorf("Image = %q, want %q", spec.Image, tt.wantImage)
 			}
 			// kukepause replaces the busybox `sleep infinity`: Command is the
-			// in-container /pause target and Args is cleared (issue #931).
+			// in-container kukepause target and Args is cleared (issue #931).
 			if spec.Command != ctr.RootContainerPauseBinaryTarget {
 				t.Errorf("Command = %q, want %q", spec.Command, ctr.RootContainerPauseBinaryTarget)
 			}
@@ -135,10 +135,10 @@ func TestDefaultRootContainerSpec(t *testing.T) {
 				t.Errorf("CNIConfigPath = %q, want %q", spec.CNIConfigPath, tt.cniConfigPath)
 			}
 			// A non-empty kukepause host path yields one read-only bind mount of
-			// that path at /pause; an empty path yields none.
+			// that path at the kukepause target; an empty path yields none.
 			if tt.wantVolume {
 				if len(spec.Volumes) != 1 {
-					t.Fatalf("Volumes = %v, want one /pause bind mount", spec.Volumes)
+					t.Fatalf("Volumes = %v, want one kukepause bind mount", spec.Volumes)
 				}
 				v := spec.Volumes[0]
 				if v.Kind != intmodel.VolumeKindBind ||
@@ -157,7 +157,7 @@ func TestDefaultRootContainerSpec(t *testing.T) {
 
 // TestBuildRootContainerSpec_PauseBindMount verifies the default root container
 // produced by DefaultRootContainerSpec flows the kukepause binary through to the
-// OCI spec as a read-only /pause bind mount and execs it as PID 1 (issue #931).
+// OCI spec as a read-only kukepause bind mount and execs it as PID 1 (issue #931).
 func TestBuildRootContainerSpec_PauseBindMount(t *testing.T) {
 	const kukepauseHostPath = "/opt/kukeon/bin/kukepause"
 	in := ctr.DefaultRootContainerSpec(
@@ -172,10 +172,10 @@ func TestBuildRootContainerSpec_PauseBindMount(t *testing.T) {
 		}
 		found = true
 		if m.Type != "bind" || m.Source != kukepauseHostPath {
-			t.Errorf("/pause mount = %+v, want bind from %q", m, kukepauseHostPath)
+			t.Errorf("kukepause mount = %+v, want bind from %q", m, kukepauseHostPath)
 		}
 		if !slices.Contains(m.Options, "ro") {
-			t.Errorf("/pause mount options = %v, want read-only (ro)", m.Options)
+			t.Errorf("kukepause mount options = %v, want read-only (ro)", m.Options)
 		}
 	}
 	if !found {
@@ -598,7 +598,7 @@ func TestBuildRootContainerSpec_Resources(t *testing.T) {
 // minimal SpecOpts shape after the parity fix.
 func TestBuildRootContainerSpec_DefaultsUnaffected(t *testing.T) {
 	// Empty kukepause host path so this guard stays focused on the minimal
-	// SpecOpts shape: the /pause bind mount is exercised separately in
+	// SpecOpts shape: the kukepause bind mount is exercised separately in
 	// TestDefaultRootContainerSpec / TestBuildRootContainerSpec_PauseBindMount.
 	spec := applyRootBuiltSpec(t, ctr.DefaultRootContainerSpec(
 		"containerd-root",

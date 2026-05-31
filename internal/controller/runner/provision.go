@@ -2194,7 +2194,7 @@ func (r *Exec) ensureCellRootContainerSpec(cell intmodel.Cell) (intmodel.Contain
 		// Create default root container spec
 		// Pass containerdID to set ContainerdID field, ID will be set to "root".
 		// The kukepause host path (<RunPath>/bin/kukepause) is bind-mounted at
-		// /pause as the root container's PID 1 (issue #931). Stage it now so
+		// /.kukeon/bin/kukepause as the root container's PID 1 (issue #931). Stage it now so
 		// daemon-only bootstrap paths (e2e `startKukeondDaemon`, and any future
 		// caller that runs `kukeond serve --run-path X` without a prior
 		// `kuke init`) self-heal — `kuke init` also stages it, but its copy is

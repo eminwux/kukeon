@@ -38,7 +38,7 @@ const kukepauseSourcePathInsideDaemon = "/bin/" + ctr.RootContainerPauseBinaryNa
 // stageKukepauseBinary ensures a host-visible copy of the kukepause binary
 // exists at <RunPath>/bin/kukepause and returns that path. Mirrors
 // stageKukettyBinary's contract for the same reason: every default root
-// container bind-mounts the staged binary at /pause, so the daemon must
+// container bind-mounts the staged binary at /.kukeon/bin/kukepause, so the daemon must
 // self-heal when it provisions a cell whose RunPath was not previously
 // touched by `kuke init` — exactly the e2e suite's startKukeondDaemon path,
 // which boots `kukeond serve --run-path <tempdir>` without an `init` pass.

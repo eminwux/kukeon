@@ -30,7 +30,7 @@
 // signal channels so it consumes no CPU while idle.
 //
 // It is built CGO_ENABLED=0 (no libc dependency) and bind-mounted into each root
-// container at /pause; it cannot be staged from the kukeond image the way
+// container at /.kukeon/bin/kukepause; it cannot be staged from the kukeond image the way
 // kuketty is, because root containers — including kukeond's own — must exist
 // before kukeond is running, so `kuke init` pre-stages it on the host instead.
 package main
