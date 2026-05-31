@@ -28,12 +28,10 @@ import (
 	"github.com/eminwux/kukeon/cmd/config"
 	cell "github.com/eminwux/kukeon/cmd/kuke/restart/cell"
 	"github.com/eminwux/kukeon/cmd/types"
-	"github.com/eminwux/kukeon/internal/cellconfig"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/viper"
-	"gopkg.in/yaml.v3"
 )
 
 func TestRestartCell(t *testing.T) {
@@ -46,13 +44,17 @@ func TestRestartCell(t *testing.T) {
 		fake       *fakeClient
 		wantErr    string
 		wantOutput string
-		wantStderr string
 		// validate is run after a successful command for additional
 		// post-conditions the assertion knobs above don't cover.
 		validate func(t *testing.T, f *fakeClient)
 	}{
 		{
-			name: "synced ready cell: stop then start with same spec",
+			// Per #983, restart on a Ready cell is unconditionally stop+start.
+			// The daemon's controller.StartCell handles the OutOfSync reapply
+			// daemon-side, so the CLI no longer branches on OutOfSync — the
+			// same stop+start sequence works whether the cell is Synced or
+			// OutOfSync.
+			name: "ready cell: stop then start",
 			args: []string{"c1"},
 			setup: func() {
 				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
@@ -89,12 +91,22 @@ func TestRestartCell(t *testing.T) {
 						f.stopCalls, f.startCalls)
 				}
 				if f.applyCalls != 0 {
-					t.Fatalf("Synced restart must not call ApplyDocuments, got %d calls", f.applyCalls)
+					t.Fatalf("restart must not call ApplyDocuments, got %d calls", f.applyCalls)
+				}
+				if f.getConfigCnt != 0 || f.getBpCalls != 0 {
+					t.Fatalf(
+						"restart must not call GetConfig or GetBlueprint (daemon-side reapply owns it now), "+
+							"got getConfig=%d getBlueprint=%d",
+						f.getConfigCnt, f.getBpCalls,
+					)
 				}
 			},
 		},
 		{
-			name: "outofsync ready cell: reconciles via ApplyDocuments then explicitly bounces",
+			// Sanity check: the OutOfSync flag is transparent to the CLI now —
+			// stop+start runs unconditionally, and the daemon's StartCell is
+			// what re-materialises from the lineage Config.
+			name: "outofsync ready cell: stop then start (daemon-side reapply)",
 			args: []string{"prod"},
 			setup: func() {
 				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
@@ -106,11 +118,8 @@ func TestRestartCell(t *testing.T) {
 					return kukeonv1.GetCellResult{
 						MetadataExists: true,
 						Cell: v1beta1.CellDoc{
-							Metadata: v1beta1.CellMetadata{
-								Name:   "prod",
-								Labels: map[string]string{cellconfig.LabelConfig: "prod"},
-							},
-							Spec: v1beta1.CellSpec{ID: "prod", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+							Metadata: v1beta1.CellMetadata{Name: "prod"},
+							Spec:     v1beta1.CellSpec{ID: "prod", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
 							Status: v1beta1.CellStatus{
 								State:           v1beta1.CellStateReady,
 								OutOfSync:       true,
@@ -119,299 +128,24 @@ func TestRestartCell(t *testing.T) {
 						},
 					}, nil
 				},
-				getConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-					if doc.Metadata.Name != "prod" || doc.Metadata.Realm != "r1" {
-						t.Errorf("GetConfig saw unexpected lookup: name=%q realm=%q",
-							doc.Metadata.Name, doc.Metadata.Realm)
-					}
-					return kukeonv1.GetConfigResult{
-						MetadataExists: true,
-						Config: v1beta1.CellConfigDoc{
-							APIVersion: v1beta1.APIVersionV1Beta1,
-							Kind:       v1beta1.KindCellConfig,
-							Metadata: v1beta1.CellConfigMetadata{
-								Name:  "prod",
-								Realm: "r1",
-								Space: "s1",
-								Stack: "st1",
-							},
-							Spec: v1beta1.CellConfigSpec{
-								Blueprint: v1beta1.CellConfigBlueprintRef{
-									Name:  "web",
-									Realm: "r1",
-									Space: "s1",
-									Stack: "st1",
-								},
-							},
-						},
-					}, nil
+				stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+					return kukeonv1.StopCellResult{}, nil
 				},
-				getBlueprintFn: func(doc v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-					if doc.Metadata.Name != "web" {
-						t.Errorf("GetBlueprint saw unexpected name=%q", doc.Metadata.Name)
-					}
-					return kukeonv1.GetBlueprintResult{
-						MetadataExists: true,
-						Blueprint: v1beta1.CellBlueprintDoc{
-							APIVersion: v1beta1.APIVersionV1Beta1,
-							Kind:       v1beta1.KindCellBlueprint,
-							Metadata: v1beta1.CellBlueprintMetadata{
-								Name:  "web",
-								Realm: "r1",
-								Space: "s1",
-								Stack: "st1",
-							},
-							Spec: v1beta1.CellBlueprintSpec{
-								Cell: v1beta1.BlueprintCellSpec{
-									Containers: []v1beta1.BlueprintContainer{
-										{ID: "main", Image: "nginx:latest"},
-									},
-								},
-							},
-						},
-					}, nil
-				},
-				applyDocsFn: func(rawYAML []byte) (kukeonv1.ApplyDocumentsResult, error) {
-					var sent v1beta1.CellDoc
-					if err := yaml.Unmarshal(rawYAML, &sent); err != nil {
-						t.Errorf("ApplyDocuments received un-unmarshalable YAML: %v", err)
-					}
-					if sent.Metadata.Name != "prod" {
-						t.Errorf("ApplyDocuments cell name=%q want %q", sent.Metadata.Name, "prod")
-					}
-					return kukeonv1.ApplyDocumentsResult{
-						Resources: []kukeonv1.ApplyResourceResult{
-							{Kind: "Cell", Name: "prod", Action: "updated"},
-						},
-					}, nil
-				},
-				stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) { return kukeonv1.StopCellResult{}, nil },
 				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
-					return kukeonv1.StartCellResult{Cell: doc}, nil
+					return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
 				},
 			},
-			wantOutput: `Restarted cell "prod" from stack "st1" (reconciled from config "prod")`,
+			wantOutput: `Restarted cell "prod" from stack "st1"`,
 			validate: func(t *testing.T, f *fakeClient) {
-				if f.applyCalls != 1 {
-					t.Fatalf("want exactly 1 ApplyDocuments call, got %d", f.applyCalls)
-				}
-				// Apply alone does not guarantee a bounce — the daemon's
-				// reconcile only stops+starts containers on image/cmd/args
-				// changes. The CLI explicitly StopCell+StartCells afterwards
-				// to honor the "restart" verb's contract.
 				if f.stopCalls != 1 || f.startCalls != 1 {
-					t.Fatalf("OutOfSync restart must follow Apply with StopCell+StartCell, got stop=%d start=%d",
+					t.Fatalf("want exactly 1 StopCell + 1 StartCell, got stop=%d start=%d",
 						f.stopCalls, f.startCalls)
 				}
-			},
-		},
-		{
-			// Reviewer-requested coverage of the reconcile-no-bounce gap: a
-			// pure env-var divergence routes through UpdateCell's metadata
-			// path (containerSpecChanged returns false for non-image/cmd/args
-			// fields), so the daemon does NOT bounce containers. The CLI's
-			// follow-up StopCell+StartCell is what makes "kuke restart" on
-			// this divergence class actually bounce the running containers.
-			name: "outofsync env-var-only divergence: reconciles then explicitly bounces",
-			args: []string{"prod"},
-			setup: func() {
-				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
-				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
-				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
-			},
-			fake: &fakeClient{
-				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-					return kukeonv1.GetCellResult{
-						MetadataExists: true,
-						Cell: v1beta1.CellDoc{
-							Metadata: v1beta1.CellMetadata{
-								Name:   "prod",
-								Labels: map[string]string{cellconfig.LabelConfig: "prod"},
-							},
-							Spec: v1beta1.CellSpec{ID: "prod", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
-							Status: v1beta1.CellStatus{
-								State:           v1beta1.CellStateReady,
-								OutOfSync:       true,
-								OutOfSyncReason: "env vars differ",
-							},
-						},
-					}, nil
-				},
-				getConfigFn: func(_ v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-					return kukeonv1.GetConfigResult{
-						MetadataExists: true,
-						Config: v1beta1.CellConfigDoc{
-							APIVersion: v1beta1.APIVersionV1Beta1,
-							Kind:       v1beta1.KindCellConfig,
-							Metadata: v1beta1.CellConfigMetadata{
-								Name:  "prod",
-								Realm: "r1",
-								Space: "s1",
-								Stack: "st1",
-							},
-							Spec: v1beta1.CellConfigSpec{
-								Blueprint: v1beta1.CellConfigBlueprintRef{
-									Name:  "web",
-									Realm: "r1",
-									Space: "s1",
-									Stack: "st1",
-								},
-							},
-						},
-					}, nil
-				},
-				getBlueprintFn: func(_ v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-					return kukeonv1.GetBlueprintResult{
-						MetadataExists: true,
-						Blueprint: v1beta1.CellBlueprintDoc{
-							APIVersion: v1beta1.APIVersionV1Beta1,
-							Kind:       v1beta1.KindCellBlueprint,
-							Metadata: v1beta1.CellBlueprintMetadata{
-								Name:  "web",
-								Realm: "r1",
-								Space: "s1",
-								Stack: "st1",
-							},
-							Spec: v1beta1.CellBlueprintSpec{
-								Cell: v1beta1.BlueprintCellSpec{
-									Containers: []v1beta1.BlueprintContainer{{ID: "main", Image: "nginx:latest"}},
-								},
-							},
-						},
-					}, nil
-				},
-				applyDocsFn: func(_ []byte) (kukeonv1.ApplyDocumentsResult, error) {
-					// Mirrors what reconcile.go emits when only env vars
-					// changed: the container is "updated" with field list,
-					// but no "image|command|args" entries are present, so
-					// UpdateCell patched in place without bouncing.
-					return kukeonv1.ApplyDocumentsResult{
-						Resources: []kukeonv1.ApplyResourceResult{
-							{
-								Kind:    "Cell",
-								Name:    "prod",
-								Action:  "updated",
-								Changes: []string{`container "main" updated: env`},
-							},
-						},
-					}, nil
-				},
-				stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) { return kukeonv1.StopCellResult{}, nil },
-				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
-					return kukeonv1.StartCellResult{Cell: doc}, nil
-				},
-			},
-			wantOutput: `Restarted cell "prod" from stack "st1" (reconciled from config "prod")`,
-			validate: func(t *testing.T, f *fakeClient) {
-				if f.applyCalls != 1 {
-					t.Fatalf("want exactly 1 ApplyDocuments call, got %d", f.applyCalls)
-				}
-				if f.stopCalls != 1 || f.startCalls != 1 {
+				if f.applyCalls != 0 || f.getConfigCnt != 0 || f.getBpCalls != 0 {
 					t.Fatalf(
-						"env-var-only OutOfSync restart MUST follow Apply with StopCell+StartCell, got stop=%d start=%d",
-						f.stopCalls,
-						f.startCalls,
-					)
-				}
-			},
-		},
-		{
-			// The other half of the env-var-only test's contract: when the
-			// daemon's reconcile already bounced every container (full root
-			// recreate), the CLI must NOT add a redundant StopCell+StartCell.
-			// reconcileBouncedAll's signal "root container recreated" gates
-			// this branch.
-			name: "outofsync ready cell with root-container recreate: skips redundant bounce",
-			args: []string{"prod"},
-			setup: func() {
-				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
-				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
-				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
-			},
-			fake: &fakeClient{
-				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-					return kukeonv1.GetCellResult{
-						MetadataExists: true,
-						Cell: v1beta1.CellDoc{
-							Metadata: v1beta1.CellMetadata{
-								Name:   "prod",
-								Labels: map[string]string{cellconfig.LabelConfig: "prod"},
-							},
-							Spec: v1beta1.CellSpec{ID: "prod", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
-							Status: v1beta1.CellStatus{
-								State:           v1beta1.CellStateReady,
-								OutOfSync:       true,
-								OutOfSyncReason: "root image bumped",
-							},
-						},
-					}, nil
-				},
-				getConfigFn: func(_ v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-					return kukeonv1.GetConfigResult{
-						MetadataExists: true,
-						Config: v1beta1.CellConfigDoc{
-							APIVersion: v1beta1.APIVersionV1Beta1,
-							Kind:       v1beta1.KindCellConfig,
-							Metadata: v1beta1.CellConfigMetadata{
-								Name:  "prod",
-								Realm: "r1",
-								Space: "s1",
-								Stack: "st1",
-							},
-							Spec: v1beta1.CellConfigSpec{
-								Blueprint: v1beta1.CellConfigBlueprintRef{
-									Name:  "web",
-									Realm: "r1",
-									Space: "s1",
-									Stack: "st1",
-								},
-							},
-						},
-					}, nil
-				},
-				getBlueprintFn: func(_ v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-					return kukeonv1.GetBlueprintResult{
-						MetadataExists: true,
-						Blueprint: v1beta1.CellBlueprintDoc{
-							APIVersion: v1beta1.APIVersionV1Beta1,
-							Kind:       v1beta1.KindCellBlueprint,
-							Metadata: v1beta1.CellBlueprintMetadata{
-								Name:  "web",
-								Realm: "r1",
-								Space: "s1",
-								Stack: "st1",
-							},
-							Spec: v1beta1.CellBlueprintSpec{
-								Cell: v1beta1.BlueprintCellSpec{
-									Containers: []v1beta1.BlueprintContainer{{ID: "main", Image: "nginx:latest"}},
-								},
-							},
-						},
-					}, nil
-				},
-				applyDocsFn: func(_ []byte) (kukeonv1.ApplyDocumentsResult, error) {
-					return kukeonv1.ApplyDocumentsResult{
-						Resources: []kukeonv1.ApplyResourceResult{
-							{
-								Kind:    "Cell",
-								Name:    "prod",
-								Action:  "updated",
-								Changes: []string{"root container recreated"},
-							},
-						},
-					}, nil
-				},
-			},
-			wantOutput: `Restarted cell "prod" from stack "st1" (reconciled from config "prod")`,
-			validate: func(t *testing.T, f *fakeClient) {
-				if f.applyCalls != 1 {
-					t.Fatalf("want exactly 1 ApplyDocuments call, got %d", f.applyCalls)
-				}
-				if f.stopCalls != 0 || f.startCalls != 0 {
-					t.Fatalf(
-						"root-container recreate already bounced everything; CLI must NOT add a redundant StopCell+StartCell, got stop=%d start=%d",
-						f.stopCalls,
-						f.startCalls,
+						"OutOfSync reapply lives daemon-side; restart CLI must not call ApplyDocuments/GetConfig/GetBlueprint, "+
+							"got apply=%d getConfig=%d getBlueprint=%d",
+						f.applyCalls, f.getConfigCnt, f.getBpCalls,
 					)
 				}
 			},
@@ -510,178 +244,6 @@ func TestRestartCell(t *testing.T) {
 			wantErr: "realm name is required",
 		},
 		{
-			name: "outofsync cell with no lineage label: vanilla restart with notice",
-			args: []string{"orphan"},
-			setup: func() {
-				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
-				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
-				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
-			},
-			fake: &fakeClient{
-				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-					return kukeonv1.GetCellResult{
-						MetadataExists: true,
-						Cell: v1beta1.CellDoc{
-							Metadata: v1beta1.CellMetadata{Name: "orphan", Labels: map[string]string{}},
-							Spec:     v1beta1.CellSpec{ID: "orphan", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
-							Status:   v1beta1.CellStatus{State: v1beta1.CellStateReady, OutOfSync: true},
-						},
-					}, nil
-				},
-				stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) { return kukeonv1.StopCellResult{}, nil },
-				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
-					return kukeonv1.StartCellResult{Cell: doc}, nil
-				},
-			},
-			wantOutput: `Restarted cell "orphan" from stack "st1"`,
-			wantStderr: `notice: cell "orphan" is OutOfSync but carries no kukeon.io/config label`,
-		},
-		{
-			name: "outofsync ready cell with OutOfSyncError: vanilla restart with notice",
-			args: []string{"degraded"},
-			setup: func() {
-				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
-				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
-				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
-			},
-			fake: &fakeClient{
-				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-					return kukeonv1.GetCellResult{
-						MetadataExists: true,
-						Cell: v1beta1.CellDoc{
-							Metadata: v1beta1.CellMetadata{
-								Name:   "degraded",
-								Labels: map[string]string{cellconfig.LabelConfig: "degraded"},
-							},
-							Spec: v1beta1.CellSpec{ID: "degraded", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
-							Status: v1beta1.CellStatus{
-								State:          v1beta1.CellStateReady,
-								OutOfSyncError: "referenced blueprint missing",
-							},
-						},
-					}, nil
-				},
-				stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) { return kukeonv1.StopCellResult{}, nil },
-				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
-					return kukeonv1.StartCellResult{Cell: doc}, nil
-				},
-			},
-			wantOutput: `Restarted cell "degraded" from stack "st1"`,
-			wantStderr: `OutOfSync detection failed (referenced blueprint missing)`,
-		},
-		{
-			name: "outofsync cell whose lineage Config was deleted: falls back to vanilla restart",
-			args: []string{"orphan"},
-			setup: func() {
-				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
-				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
-				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
-			},
-			fake: &fakeClient{
-				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-					return kukeonv1.GetCellResult{
-						MetadataExists: true,
-						Cell: v1beta1.CellDoc{
-							Metadata: v1beta1.CellMetadata{
-								Name:   "orphan",
-								Labels: map[string]string{cellconfig.LabelConfig: "deleted-cfg"},
-							},
-							Spec: v1beta1.CellSpec{ID: "orphan", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
-							Status: v1beta1.CellStatus{
-								State:           v1beta1.CellStateReady,
-								OutOfSync:       true,
-								OutOfSyncReason: "lineage Config deleted",
-							},
-						},
-					}, nil
-				},
-				getConfigFn: func(_ v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-					return kukeonv1.GetConfigResult{MetadataExists: false}, nil
-				},
-				stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) { return kukeonv1.StopCellResult{}, nil },
-				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
-					return kukeonv1.StartCellResult{Cell: doc}, nil
-				},
-			},
-			wantOutput: `Restarted cell "orphan" from stack "st1"`,
-			wantStderr: `reconcile materialisation failed`,
-		},
-		{
-			name: "ApplyDocuments returns a failed row: surfaces as error",
-			args: []string{"prod"},
-			setup: func() {
-				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
-				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
-				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
-			},
-			fake: &fakeClient{
-				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-					return kukeonv1.GetCellResult{
-						MetadataExists: true,
-						Cell: v1beta1.CellDoc{
-							Metadata: v1beta1.CellMetadata{
-								Name:   "prod",
-								Labels: map[string]string{cellconfig.LabelConfig: "prod"},
-							},
-							Spec:   v1beta1.CellSpec{ID: "prod", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
-							Status: v1beta1.CellStatus{State: v1beta1.CellStateReady, OutOfSync: true},
-						},
-					}, nil
-				},
-				getConfigFn: func(_ v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-					return kukeonv1.GetConfigResult{
-						MetadataExists: true,
-						Config: v1beta1.CellConfigDoc{
-							APIVersion: v1beta1.APIVersionV1Beta1,
-							Kind:       v1beta1.KindCellConfig,
-							Metadata: v1beta1.CellConfigMetadata{
-								Name:  "prod",
-								Realm: "r1",
-								Space: "s1",
-								Stack: "st1",
-							},
-							Spec: v1beta1.CellConfigSpec{
-								Blueprint: v1beta1.CellConfigBlueprintRef{
-									Name:  "web",
-									Realm: "r1",
-									Space: "s1",
-									Stack: "st1",
-								},
-							},
-						},
-					}, nil
-				},
-				getBlueprintFn: func(_ v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-					return kukeonv1.GetBlueprintResult{
-						MetadataExists: true,
-						Blueprint: v1beta1.CellBlueprintDoc{
-							APIVersion: v1beta1.APIVersionV1Beta1,
-							Kind:       v1beta1.KindCellBlueprint,
-							Metadata: v1beta1.CellBlueprintMetadata{
-								Name:  "web",
-								Realm: "r1",
-								Space: "s1",
-								Stack: "st1",
-							},
-							Spec: v1beta1.CellBlueprintSpec{
-								Cell: v1beta1.BlueprintCellSpec{
-									Containers: []v1beta1.BlueprintContainer{{ID: "main", Image: "nginx:latest"}},
-								},
-							},
-						},
-					}, nil
-				},
-				applyDocsFn: func(_ []byte) (kukeonv1.ApplyDocumentsResult, error) {
-					return kukeonv1.ApplyDocumentsResult{
-						Resources: []kukeonv1.ApplyResourceResult{
-							{Kind: "Cell", Name: "prod", Action: "failed", Error: "containerd update rejected"},
-						},
-					}, nil
-				},
-			},
-			wantErr: "reconcile failed for Cell \"prod\"",
-		},
-		{
 			name: "stop step errors: surfaces and skips start",
 			args: []string{"c1"},
 			setup: func() {
@@ -742,9 +304,6 @@ func TestRestartCell(t *testing.T) {
 			if tt.wantOutput != "" && !strings.Contains(outBuf.String(), tt.wantOutput) {
 				t.Errorf("stdout missing %q\nGot:\n%s", tt.wantOutput, outBuf.String())
 			}
-			if tt.wantStderr != "" && !strings.Contains(errBuf.String(), tt.wantStderr) {
-				t.Errorf("stderr missing %q\nGot:\n%s", tt.wantStderr, errBuf.String())
-			}
 			if tt.validate != nil {
 				tt.validate(t, tt.fake)
 			}
@@ -768,155 +327,19 @@ func TestRestartCell_CmdSurface(t *testing.T) {
 	if cmd.ValidArgsFunction == nil {
 		t.Error("expected ValidArgsFunction to be set for cell-name completion")
 	}
-	// The help text must surface the dual-mode behaviour (vanilla restart +
-	// implicit reconcile) so operators see the contract without reading code.
+	// The help text must still describe the OutOfSync reconcile contract so
+	// operators know `kuke restart` doubles as a reconcile on OutOfSync cells
+	// (now via the daemon-side reapply in controller.StartCell — #983).
 	if !strings.Contains(cmd.Long, "reconcile") || !strings.Contains(cmd.Long, "OutOfSync") {
-		t.Errorf("expected Long help to describe dual mode (reconcile + OutOfSync), got: %s", cmd.Long)
-	}
-}
-
-// TestRestartCell_RealmScopedConfigFoundForStackPlacedCell pins the issue
-// #921 fix on the CLI side: an OutOfSync cell at realm/space/stack whose
-// `kukeon.io/config` lineage label names a Config bound only at realm
-// scope must still drive a reconcile via ApplyDocuments. Without the
-// scope-narrowing walk, materialiseFromConfig calls GetConfig once at the
-// cell's full scope, sees MetadataExists==false, and falls through to a
-// vanilla restart with the "reconcile materialisation failed (config not
-// found …)" notice — never reconciling from the realm-scoped Config.
-func TestRestartCell_RealmScopedConfigFoundForStackPlacedCell(t *testing.T) {
-	t.Cleanup(viper.Reset)
-	viper.Reset()
-	viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "default")
-	viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "default")
-	viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "default")
-
-	type probeScope struct{ name, realm, space, stack string }
-	var probes []probeScope
-	fake := &fakeClient{
-		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-			return kukeonv1.GetCellResult{
-				MetadataExists: true,
-				Cell: v1beta1.CellDoc{
-					Metadata: v1beta1.CellMetadata{
-						Name:   "kukeon-dev-root-0",
-						Labels: map[string]string{cellconfig.LabelConfig: "kukeon-dev-root-0"},
-					},
-					Spec: v1beta1.CellSpec{
-						ID:      "kukeon-dev-root-0",
-						RealmID: "default",
-						SpaceID: "default",
-						StackID: "default",
-					},
-					Status: v1beta1.CellStatus{
-						State:           v1beta1.CellStateReady,
-						OutOfSync:       true,
-						OutOfSyncReason: "lineage Config deleted",
-					},
-				},
-			}, nil
-		},
-		getConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-			probes = append(probes, probeScope{
-				name:  doc.Metadata.Name,
-				realm: doc.Metadata.Realm,
-				space: doc.Metadata.Space,
-				stack: doc.Metadata.Stack,
-			})
-			if doc.Metadata.Space == "" && doc.Metadata.Stack == "" {
-				return kukeonv1.GetConfigResult{
-					MetadataExists: true,
-					Config: v1beta1.CellConfigDoc{
-						APIVersion: v1beta1.APIVersionV1Beta1,
-						Kind:       v1beta1.KindCellConfig,
-						Metadata: v1beta1.CellConfigMetadata{
-							Name:  "kukeon-dev-root-0",
-							Realm: "default",
-						},
-						Spec: v1beta1.CellConfigSpec{
-							Blueprint: v1beta1.CellConfigBlueprintRef{Name: "dev", Realm: "default"},
-						},
-					},
-				}, nil
-			}
-			return kukeonv1.GetConfigResult{MetadataExists: false}, nil
-		},
-		getBlueprintFn: func(_ v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-			return kukeonv1.GetBlueprintResult{
-				MetadataExists: true,
-				Blueprint: v1beta1.CellBlueprintDoc{
-					APIVersion: v1beta1.APIVersionV1Beta1,
-					Kind:       v1beta1.KindCellBlueprint,
-					Metadata:   v1beta1.CellBlueprintMetadata{Name: "dev", Realm: "default"},
-					Spec: v1beta1.CellBlueprintSpec{
-						Cell: v1beta1.BlueprintCellSpec{
-							Containers: []v1beta1.BlueprintContainer{{ID: "main", Image: "nginx:latest"}},
-						},
-					},
-				},
-			}, nil
-		},
-		applyDocsFn: func(_ []byte) (kukeonv1.ApplyDocumentsResult, error) {
-			return kukeonv1.ApplyDocumentsResult{
-				Resources: []kukeonv1.ApplyResourceResult{
-					{Kind: "Cell", Name: "kukeon-dev-root-0", Action: "updated"},
-				},
-			}, nil
-		},
-		stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) { return kukeonv1.StopCellResult{}, nil },
-		startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
-			return kukeonv1.StartCellResult{Cell: doc}, nil
-		},
-	}
-
-	cmd := cell.NewCellCmd()
-	outBuf := &bytes.Buffer{}
-	errBuf := &bytes.Buffer{}
-	cmd.SetOut(outBuf)
-	cmd.SetErr(errBuf)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-	ctx = context.WithValue(ctx, cell.MockControllerKey{}, kukeonv1.Client(fake))
-	cmd.SetContext(ctx)
-	cmd.SetArgs([]string{"kukeon-dev-root-0"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	wantProbes := []probeScope{
-		{name: "kukeon-dev-root-0", realm: "default", space: "default", stack: "default"},
-		{name: "kukeon-dev-root-0", realm: "default", space: "default", stack: ""},
-		{name: "kukeon-dev-root-0", realm: "default", space: "", stack: ""},
-	}
-	if len(probes) != len(wantProbes) {
-		t.Fatalf("GetConfig probe count: got %d want %d (probes=%+v)", len(probes), len(wantProbes), probes)
-	}
-	for i, p := range probes {
-		if p != wantProbes[i] {
-			t.Errorf("probe[%d] = %+v, want %+v", i, p, wantProbes[i])
-		}
-	}
-	if fake.applyCalls != 1 {
-		t.Errorf(
-			"ApplyDocuments calls: got %d, want 1 (reconcile must run once the realm-scoped Config is found)",
-			fake.applyCalls,
-		)
-	}
-	if strings.Contains(errBuf.String(), "reconcile materialisation failed") {
-		t.Errorf(
-			"stderr surfaced 'reconcile materialisation failed' despite the realm-scoped Config being reachable: %s",
-			errBuf.String(),
-		)
-	}
-	if !strings.Contains(outBuf.String(), `reconciled from config "kukeon-dev-root-0"`) {
-		t.Errorf("stdout did not confirm reconcile path: %s", outBuf.String())
+		t.Errorf("expected Long help to describe reconcile-on-OutOfSync, got: %s", cmd.Long)
 	}
 }
 
 // fakeClient is a per-test stub kukeonv1.Client. Each RPC is dispatched
 // through an optional Fn field; nil means "fail the test if called". Call
-// counts let tests assert "Synced restart did not invoke ApplyDocuments" and
-// the equivalent path-specific assertions.
+// counts let tests assert "restart did not invoke ApplyDocuments / GetConfig
+// / GetBlueprint" — the OutOfSync reapply lives daemon-side now (#983), so
+// none of those RPCs should fire from the restart CLI.
 type fakeClient struct {
 	kukeonv1.FakeClient
 
