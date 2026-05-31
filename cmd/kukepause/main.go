@@ -36,6 +36,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -52,6 +53,14 @@ func main() {
 	// drains every exited child per wake, so a single slot is sufficient.
 	chld := make(chan os.Signal, 1)
 	signal.Notify(chld, syscall.SIGCHLD)
+
+	// Positive startup signal on stderr. With both handlers now armed, this line
+	// doubles as proof main() was reached: an operator debugging a root container
+	// that won't stay up can distinguish "kukepause started and parked" from
+	// "the bind-mounted binary never executed" (wrong path, ENOENT, exec format
+	// error), which silence alone cannot. stderr keeps stdout empty; the stable
+	// "kukepause: ready" substring is the grep anchor.
+	fmt.Fprintf(os.Stderr, "kukepause: ready (pid %d); SIGTERM→exit, SIGCHLD→reap; parking\n", os.Getpid())
 
 	for {
 		select {
