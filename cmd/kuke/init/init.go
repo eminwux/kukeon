@@ -66,14 +66,14 @@ const (
 
 	// kukepauseBinaryName is the binary `kuke init` stages under <RunPath>/bin
 	// so every cell's root container — including kukeond's own — can bind-mount
-	// it at /pause as PID 1 (issue #931). It is pre-staged on the host because
+	// it at /.kukeon/bin/kukepause as PID 1 (issue #931). It is pre-staged on the host because
 	// root containers are created before kukeond is up, so it cannot be copied
 	// out of the daemon image the way kuketty is. Sourced from the ctr package
 	// so the staged name matches the root-container builder's bind source.
 	kukepauseBinaryName = ctr.RootContainerPauseBinaryName
 
 	// kukepauseStagedMode is the on-disk mode kukepause is staged with. It must
-	// carry an execute bit so the kernel can exec /pause through the root
+	// carry an execute bit so the kernel can exec the bind-mounted kukepause through the root
 	// container's read-only bind mount. The recursive RunPath chown in
 	// applyKukeonOwnership otherwise drops every file to kukeonRunPathFileMode
 	// (0o640, no exec), so runInit re-asserts this mode on the staged binary
@@ -374,7 +374,7 @@ func applyKukeonOwnership(
 
 // stageKukepause copies the kukepause binary into <runPath>/bin/kukepause and
 // returns the staged path. The staged copy is what every cell's root container
-// bind-mounts at /pause (issue #931). Mirrors the runner's stageKukettyBinary
+// bind-mounts at /.kukeon/bin/kukepause (issue #931). Mirrors the runner's stageKukettyBinary
 // contract: <RunPath>/bin destination, atomic tmp+rename copy, executable mode.
 func stageKukepause(runPath string) (string, error) {
 	src, err := resolveKukepauseSource()
@@ -521,7 +521,7 @@ func runInit(cmd *cobra.Command, _ []string) error {
 
 	// Pre-stage kukepause under <RunPath>/bin before Bootstrap creates the
 	// kukeond cell: that cell's root container bind-mounts the staged binary at
-	// /pause and execs it as PID 1, so it must exist on the host first (issue
+	// /.kukeon/bin/kukepause and execs it as PID 1, so it must exist on the host first (issue
 	// #931). All later user cells reuse the same staged copy.
 	kukepausePath, stageErr := stageKukepause(runPath)
 	if stageErr != nil {
@@ -553,7 +553,7 @@ func runInit(cmd *cobra.Command, _ []string) error {
 
 	// applyKukeonOwnership's recursive RunPath chown drops every file to 0o640,
 	// stripping kukepause's execute bit. Re-assert it root:kukeon 0o750 so root
-	// containers created after init can exec the bind-mounted /pause (issue
+	// containers created after init can exec the bind-mounted kukepause (issue
 	// #931). The kukeond cell created during Bootstrap already exec'd the
 	// pre-chown copy, so this only matters for subsequent cells.
 	if chmodErr := sysuser.ChownAndChmod(kukepausePath, 0, ensure.GID, kukepauseStagedMode); chmodErr != nil {

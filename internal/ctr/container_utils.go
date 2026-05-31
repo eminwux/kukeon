@@ -37,12 +37,12 @@ const (
 	// zombie reaper, then blocks on a Go select over those signal channels —
 	// replacing the previous `sleep infinity`, which ignored SIGTERM as PID 1
 	// and reaped nothing (issue #931).
-	RootContainerPauseBinaryTarget = "/pause"
+	RootContainerPauseBinaryTarget = "/.kukeon/bin/kukepause"
 
 	// RootContainerPauseBinaryName is the basename of the kukepause binary as
 	// staged under <RunPath>/bin by `kuke init`. It is the single source of
 	// truth shared by the init-time stager (the writer) and the root-container
-	// builder (which reads <RunPath>/bin/<name> as the /pause bind source) so
+	// builder (which reads <RunPath>/bin/<name> as the kukepause bind source) so
 	// the two never drift (issue #931).
 	RootContainerPauseBinaryName = "kukepause"
 
@@ -57,7 +57,8 @@ const (
 //
 // kukepauseHostPath is the host path of the staged kukepause binary
 // (<RunPath>/bin/kukepause, placed by `kuke init`). It is bind-mounted
-// read-only at /pause and exec'd as the root container's PID 1 in place of the
+// read-only at RootContainerPauseBinaryTarget (/.kukeon/bin/kukepause) and
+// exec'd as the root container's PID 1 in place of the
 // previous `sleep infinity` from busybox (issue #931). An empty path yields no
 // bind mount — the caller is responsible for staging the binary first.
 func DefaultRootContainerSpec(
@@ -265,7 +266,8 @@ func buildRootProcessArgs(rootSpec intmodel.ContainerSpec) []string {
 		// No command and no args: a user-supplied root container spec with
 		// neither falls through to its image's own entrypoint (empty process
 		// args means WithProcessArgs is not applied). The default root spec
-		// from DefaultRootContainerSpec always carries Command=/pause, so it
+		// from DefaultRootContainerSpec always carries
+		// Command=RootContainerPauseBinaryTarget, so it
 		// never reaches this branch (issue #931 retired the busybox
 		// sleep-infinity fallback that previously lived here).
 		return nil

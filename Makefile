@@ -73,7 +73,7 @@ kuketty:
 # kukepause is the minimal PID 1 for every cell's root (pause) container
 # (issue #931). It is built static (CGO_ENABLED=0, no libc) and pre-staged on
 # the host by `kuke init` to /opt/kukeon/bin/kukepause, then bind-mounted into
-# each root container at /pause — it cannot ship inside the kukeond image like
+# each root container at /.kukeon/bin/kukepause — it cannot ship inside the kukeond image like
 # kuketty because root containers (including kukeond's own) exist before the
 # daemon is up. The version ldflags don't apply (it imports no cmd/config), so
 # it links with -s -w only.
