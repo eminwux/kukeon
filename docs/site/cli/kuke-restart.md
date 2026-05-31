@@ -73,6 +73,6 @@ For a cell with no lineage label or with `SYNC=InSync`, the same invocation repo
 
 - [kuke start / stop / kill](kuke-lifecycle.md) — primitive lifecycle verbs `kuke restart cell` composes.
 - [kuke get](kuke-get.md) — read the `SYNC` column on `kuke get cell -o wide` to spot OutOfSync ahead of `restart`.
-- [kuke run](kuke-run.md) — divergent-spec refusal on the `<config>` and `-b --name` paths points at `kuke restart cell <name>` as the reconcile pointer.
+- [kuke run](kuke-run.md) — divergent-spec warn-and-attach on the `<config>` and `-b --name` paths (`--require-synced` for the opt-in refusal) cites `kuke restart cell <name>` as the reconcile pointer.
 - [`kind: CellConfig`](../manifests/config.md) — the lineage source the OutOfSync reconcile re-materialises from.
 - [`kind: CellBlueprint`](../manifests/blueprint.md) — referenced by the Config, looked up via `GetBlueprint` on the reconcile path.
