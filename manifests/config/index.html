@@ -3641,7 +3641,7 @@
 <p>The matching contract:</p>
 <ul>
 <li>Every cell <code>kuke run &lt;config&gt;</code> materializes carries the <code>kukeon.io/config=&lt;name&gt;</code> back-reference label. The runtime locates the at-most-one live cell a Config owns by listing cells in the Config's scope with that label.</li>
-<li>When the in-cluster cell's spec diverges from the Config's current spec (after re-resolving scalar values and slot fills), <code>kuke run &lt;config&gt;</code> refuses to attach and points at <code>kuke restart cell &lt;name&gt;</code> to reconcile — <code>run</code> stays a pure read/materialize verb, and destructive updates (stop, update, start) route through <code>kuke restart cell &lt;name&gt;</code>. The full identity state machine (no cell → materialize, running → attach, stopped → start-then-attach, divergent → refuse with <code>kuke restart cell &lt;name&gt;</code> pointer, error state → refuse with <code>kuke delete cell</code> pointer) lives in <a href="../../cli/kuke-run/"><code>kuke run &lt;config&gt;</code></a>.</li>
+<li>When the in-cluster cell's spec diverges from the Config's current spec (after re-resolving scalar values and slot fills), <code>kuke run &lt;config&gt;</code> defaults to <strong>warn-and-attach</strong> (post-#986): a one-line <code>notice:</code> cites the diverging fields and the <code>kuke restart cell &lt;name&gt;</code> reconcile pointer, then the operator is dropped into the live cell. <code>run</code> itself never mutates the cell; destructive updates (stop, update, start) route through <code>kuke restart cell &lt;name&gt;</code>. <code>--require-synced</code> opts into the pre-#986 refuse-on-divergence behaviour for CI/scripted callers. The full identity state machine (no cell → materialize, running → attach, stopped → start-then-attach, divergent → warn-and-attach by default / refuse with <code>--require-synced</code>, both citing <code>kuke restart cell &lt;name&gt;</code>, error state → refuse with <code>kuke delete cell</code> pointer) lives in <a href="../../cli/kuke-run/"><code>kuke run &lt;config&gt;</code></a>.</li>
 </ul>
 <p>This is the structural contrast with a <a href="../blueprint/"><code>CellBlueprint</code></a>: a blueprint is always-fresh (<code>&lt;prefix&gt;-&lt;6hex&gt;</code> per invocation), a config is always-named (<code>&lt;configName&gt;</code> per binding).</p>
 <h2 id="storage-layout">Storage layout<a class="headerlink" href="#storage-layout" title="Permanent link">&para;</a></h2>
@@ -3702,7 +3702,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 30, 2026 13:45:09 UTC">May 30, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 1, 2026 07:55:09 UTC">June 1, 2026</span>
   </span>
 
     
