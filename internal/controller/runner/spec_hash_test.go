@@ -72,11 +72,13 @@ func TestComputeContainerSpecHash_NilEmptyArgsEqual(t *testing.T) {
 	}
 }
 
-// TestComputeContainerSpecHash_ImageCmdArgsChangeHash locks that each
-// breaking-domain field independently changes the hash. A field accidentally
+// TestComputeContainerSpecHash_BreakingFieldsChangeHash locks that each
+// Breaking-on-root field independently changes the hash. A field accidentally
 // dropped from containerSpecHashPayload would silently let a drifted CellSpec
-// pass the StartCell guard.
-func TestComputeContainerSpecHash_ImageCmdArgsChangeHash(t *testing.T) {
+// pass the StartCell guard. The set mirrors `apply.DiffCell`'s Breaking-on-root
+// classification — see `diffContainerSpec` in
+// `internal/controller/apply/diff.go`. Issues #867, #990.
+func TestComputeContainerSpecHash_BreakingFieldsChangeHash(t *testing.T) {
 	base := intmodel.ContainerSpec{
 		Image:   "alpine:1.0",
 		Command: "sleep",
@@ -91,6 +93,19 @@ func TestComputeContainerSpecHash_ImageCmdArgsChangeHash(t *testing.T) {
 		{"image", func(s *intmodel.ContainerSpec) { s.Image = "alpine:2.0" }},
 		{"command", func(s *intmodel.ContainerSpec) { s.Command = "echo" }},
 		{"args", func(s *intmodel.ContainerSpec) { s.Args = []string{"120"} }},
+		{"privileged", func(s *intmodel.ContainerSpec) { s.Privileged = true }},
+		{"user", func(s *intmodel.ContainerSpec) { s.User = "nobody" }},
+		{"readOnlyRootFilesystem", func(s *intmodel.ContainerSpec) { s.ReadOnlyRootFilesystem = true }},
+		{"capabilities", func(s *intmodel.ContainerSpec) {
+			s.Capabilities = &intmodel.ContainerCapabilities{Add: []string{"CAP_NET_ADMIN"}}
+		}},
+		{"tmpfs", func(s *intmodel.ContainerSpec) {
+			s.Tmpfs = []intmodel.ContainerTmpfsMount{{Path: "/tmp", SizeBytes: 1 << 20}}
+		}},
+		{"resources", func(s *intmodel.ContainerSpec) {
+			limit := int64(64 << 20)
+			s.Resources = &intmodel.ContainerResources{MemoryLimitBytes: &limit}
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -105,9 +120,9 @@ func TestComputeContainerSpecHash_ImageCmdArgsChangeHash(t *testing.T) {
 
 // TestComputeContainerSpecHash_CompatibleFieldsDoNotChangeHash locks that
 // fields `apply.DiffCell` classifies as Compatible (env, ports, volumes,
-// privileged, user, capabilities, resources, ...) are *not* part of the hash.
-// Hashing them would force a recreate-or-refuse on every `kuke apply -f` that
-// only tweaked a compatible field, defeating the in-place UpdateCell path the
+// securityOpts, secrets, repos) are *not* part of the hash. Hashing them
+// would force a recreate-or-refuse on every `kuke apply -f` that only
+// tweaked a compatible field, defeating the in-place UpdateCell path the
 // apply layer already exercises for those fields.
 func TestComputeContainerSpecHash_CompatibleFieldsDoNotChangeHash(t *testing.T) {
 	base := intmodel.ContainerSpec{
@@ -126,9 +141,15 @@ func TestComputeContainerSpecHash_CompatibleFieldsDoNotChangeHash(t *testing.T) 
 		{"volumes", func(s *intmodel.ContainerSpec) {
 			s.Volumes = []intmodel.VolumeMount{{Source: "/host", Target: "/cell"}}
 		}},
-		{"privileged", func(s *intmodel.ContainerSpec) { s.Privileged = true }},
-		{"user", func(s *intmodel.ContainerSpec) { s.User = "nobody" }},
-		{"readonly", func(s *intmodel.ContainerSpec) { s.ReadOnlyRootFilesystem = true }},
+		{"securityOpts", func(s *intmodel.ContainerSpec) {
+			s.SecurityOpts = []string{"no-new-privileges"}
+		}},
+		{"secrets", func(s *intmodel.ContainerSpec) {
+			s.Secrets = []intmodel.ContainerSecret{{Name: "db", FromEnv: "DB_PASS"}}
+		}},
+		{"repos", func(s *intmodel.ContainerSpec) {
+			s.Repos = []intmodel.ContainerRepo{{Name: "app", URL: "https://example.com/app.git", Target: "/src"}}
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -155,8 +176,9 @@ func TestComputeContainerSpecHash_CompatibleFieldsDoNotChangeHash(t *testing.T) 
 // container, ComputeContainerSpecHash on the two root specs must differ. If
 // DiffCell reports Compatible or no change, ComputeContainerSpecHash must
 // match (the apply layer handles it in place, so the hash must not force a
-// refuse). Mirrors `apply.DiffCell`'s root-side `rootContainerSpecChanged`
-// branch in `internal/controller/apply/diff.go`.
+// refuse). Mirrors `apply.DiffCell`'s root-side classification — see
+// `diffContainerSpec`'s per-field Breaking-vs-Compatible calls in
+// `internal/controller/apply/diff.go`. Issues #867, #990.
 func TestSpecHashDomainPinsToDiffCellBreakingFields(t *testing.T) {
 	makeCell := func(root intmodel.ContainerSpec) intmodel.Cell {
 		root.Root = true
@@ -188,16 +210,32 @@ func TestSpecHashDomainPinsToDiffCellBreakingFields(t *testing.T) {
 		{"image", func(s *intmodel.ContainerSpec) { s.Image = "alpine:2.0" }, true},
 		{"command", func(s *intmodel.ContainerSpec) { s.Command = "echo" }, true},
 		{"args", func(s *intmodel.ContainerSpec) { s.Args = []string{"120"} }, true},
+		{"privileged", func(s *intmodel.ContainerSpec) { s.Privileged = true }, true},
+		{"user", func(s *intmodel.ContainerSpec) { s.User = "nobody" }, true},
+		{"readOnlyRootFilesystem", func(s *intmodel.ContainerSpec) { s.ReadOnlyRootFilesystem = true }, true},
+		{"capabilities", func(s *intmodel.ContainerSpec) {
+			s.Capabilities = &intmodel.ContainerCapabilities{Add: []string{"CAP_NET_ADMIN"}}
+		}, true},
+		{"tmpfs", func(s *intmodel.ContainerSpec) {
+			s.Tmpfs = []intmodel.ContainerTmpfsMount{{Path: "/tmp", SizeBytes: 1 << 20}}
+		}, true},
+		{"resources", func(s *intmodel.ContainerSpec) {
+			limit := int64(64 << 20)
+			s.Resources = &intmodel.ContainerResources{MemoryLimitBytes: &limit}
+		}, true},
 		// Compatible domain — must NOT change the hash.
 		{"env", func(s *intmodel.ContainerSpec) { s.Env = []string{"FOO=bar"} }, false},
 		{"ports", func(s *intmodel.ContainerSpec) { s.Ports = []string{"8080:80"} }, false},
 		{"volumes", func(s *intmodel.ContainerSpec) {
 			s.Volumes = []intmodel.VolumeMount{{Source: "/host", Target: "/cell"}}
 		}, false},
-		{"privileged", func(s *intmodel.ContainerSpec) { s.Privileged = true }, false},
-		{"user", func(s *intmodel.ContainerSpec) { s.User = "nobody" }, false},
-		{"readOnlyRootFilesystem", func(s *intmodel.ContainerSpec) { s.ReadOnlyRootFilesystem = true }, false},
 		{"securityOpts", func(s *intmodel.ContainerSpec) { s.SecurityOpts = []string{"no-new-privileges"} }, false},
+		{"secrets", func(s *intmodel.ContainerSpec) {
+			s.Secrets = []intmodel.ContainerSecret{{Name: "db", FromEnv: "DB_PASS"}}
+		}, false},
+		{"repos", func(s *intmodel.ContainerSpec) {
+			s.Repos = []intmodel.ContainerRepo{{Name: "app", URL: "https://example.com/app.git", Target: "/src"}}
+		}, false},
 	}
 
 	for _, tc := range cases {
