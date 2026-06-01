@@ -428,7 +428,7 @@ func (r *Exec) StopContainer(cell intmodel.Cell, containerID string) error {
 
 	// Issue #867: leave the containerd container record (and snapshot) in
 	// place. The cell-wide cleanup comments in stopCellLocked above carry
-	// the full rationale; the single-container `kuke stop container` verb
-	// mirrors the cell-wide stop verb's contract.
+	// the full rationale; this single-container path mirrors the cell-wide
+	// stop's contract.
 	return nil
 }

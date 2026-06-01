@@ -1505,9 +1505,9 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 	// guard. Probes the just-started container *and* the root, so a root
 	// container that died between this StartContainer call and the
 	// markCellReady stamp below also surfaces as Failed instead of the
-	// misleading Ready→Stopped→reaped cycle. The single-container variant
-	// (`kuke start container`) is operator-reachable just like `kuke start
-	// cell`, and the underlying silent-success failure mode is identical.
+	// misleading Ready→Stopped→reaped cycle. The single-container path
+	// still runs from cell-level start internals, and the underlying
+	// silent-success failure mode is identical to the cell-wide case.
 	livenessSpec := []intmodel.ContainerSpec{{ID: containerID, ContainerdID: containerdID}}
 	if liveErr := verifyCellTasksLiveAfterStart(
 		cellName,

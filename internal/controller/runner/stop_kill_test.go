@@ -343,8 +343,8 @@ func TestKillCell_PreservesContainerRecord(t *testing.T) {
 }
 
 // TestStopContainer_PreservesContainerRecord is the per-container counterpart
-// of TestStopCell_PreservesContainerRecord. `kuke stop container` is the
-// single-container verb the issue's AC also covers; pre-fix StopContainer
+// of TestStopCell_PreservesContainerRecord. StopContainer is the
+// single-container path the issue's AC also covers; pre-fix StopContainer
 // matched stopCellLocked's destructive teardown.
 func TestStopContainer_PreservesContainerRecord(t *testing.T) {
 	realm, space, stack, cellName := "kuke-system", "kukeon", "kukeon", "demo"
