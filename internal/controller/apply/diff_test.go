@@ -452,6 +452,158 @@ func TestDiffCell_RootContainerImage_StillBreaking(t *testing.T) {
 	}
 }
 
+// TestDiffCell_RootContainerPrivileged_Breaking pins AC1/AC2/AC3/AC5 of
+// issue #990: a Privileged drift on the root container must classify as
+// Breaking (the OCI Process cap-set is baked at StartCell), surface the
+// qualified `rootContainer.privileged` field path on the cell-level
+// BreakingChanges, and toggle `RootContainerChanged`. Prior to #990, the
+// root-container diff only checked image/command/args and silently
+// dropped every other edit including security-posture changes.
+func TestDiffCell_RootContainerPrivileged_Breaking(t *testing.T) {
+	desired := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest", Privileged: true},
+			},
+		},
+	}
+	actual := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest", Privileged: false},
+			},
+		},
+	}
+
+	diff := apply.DiffCell(desired, actual)
+	if !diff.HasChanges {
+		t.Fatal("expected changes for root privileged toggle")
+	}
+	if !diff.RootContainerChanged {
+		t.Error("expected RootContainerChanged=true for root privileged toggle")
+	}
+	if diff.ChangeType != apply.ChangeTypeBreaking {
+		t.Errorf("expected breaking change for root privileged toggle, got %v", diff.ChangeType)
+	}
+	foundBreaking := false
+	for _, f := range diff.BreakingChanges {
+		if f == "rootContainer.privileged" {
+			foundBreaking = true
+			break
+		}
+	}
+	if !foundBreaking {
+		t.Errorf("expected BreakingChanges to include %q, got %v", "rootContainer.privileged", diff.BreakingChanges)
+	}
+	if got := diff.RootContainerDetails["privileged"]; got == "" {
+		t.Errorf("expected RootContainerDetails[\"privileged\"] populated, got empty")
+	}
+}
+
+// TestDiffCell_RootContainerEnv_Compatible pins AC1/AC2/AC3/AC5 of issue
+// #990 on the Compatible-on-root branch: an Env edit on the root
+// container must surface as a Compatible change (not silently dropped,
+// not forced through RecreateCell) and qualify under
+// `rootContainer.env`. Env injection on the root is rebuilt at every
+// start, so a recreate is not warranted.
+func TestDiffCell_RootContainerEnv_Compatible(t *testing.T) {
+	desired := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest", Env: []string{"FOO=new"}},
+			},
+		},
+	}
+	actual := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest", Env: []string{"FOO=old"}},
+			},
+		},
+	}
+
+	diff := apply.DiffCell(desired, actual)
+	if !diff.HasChanges {
+		t.Fatal("expected changes for root env edit")
+	}
+	if !diff.RootContainerChanged {
+		t.Error("expected RootContainerChanged=true for root env edit")
+	}
+	if diff.ChangeType != apply.ChangeTypeCompatible {
+		t.Errorf("expected compatible change for root env edit, got %v", diff.ChangeType)
+	}
+	if len(diff.BreakingChanges) != 0 {
+		t.Errorf("root env edit must not populate BreakingChanges, got %v", diff.BreakingChanges)
+	}
+	foundChanged := false
+	for _, f := range diff.ChangedFields {
+		if f == "rootContainer.env" {
+			foundChanged = true
+			break
+		}
+	}
+	if !foundChanged {
+		t.Errorf("expected ChangedFields to include %q, got %v", "rootContainer.env", diff.ChangedFields)
+	}
+}
+
+// TestDiffCell_RootContainer_NoDriftOnEqualSpec guards against false
+// positives on the widened root-container diff: a same-spec re-apply on
+// every field diffContainerSpec now reads from the root container must
+// still produce zero changes. Issue #990.
+func TestDiffCell_RootContainer_NoDriftOnEqualSpec(t *testing.T) {
+	limit := int64(128 << 20)
+	root := intmodel.ContainerSpec{
+		ID:                     "root",
+		Root:                   true,
+		Image:                  "busybox:latest",
+		Command:                "/bin/sleep",
+		Args:                   []string{"60"},
+		Env:                    []string{"FOO=bar"},
+		Volumes:                []intmodel.VolumeMount{{Source: "/host", Target: "/cell"}},
+		Privileged:             true,
+		User:                   "nobody",
+		ReadOnlyRootFilesystem: true,
+		Capabilities:           &intmodel.ContainerCapabilities{Add: []string{"CAP_NET_ADMIN"}},
+		SecurityOpts:           []string{"no-new-privileges"},
+		Tmpfs:                  []intmodel.ContainerTmpfsMount{{Path: "/tmp", SizeBytes: 1 << 20}},
+		Resources:              &intmodel.ContainerResources{MemoryLimitBytes: &limit},
+	}
+	cell := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName:  "default",
+			SpaceName:  "default",
+			StackName:  "default",
+			Containers: []intmodel.ContainerSpec{root},
+		},
+	}
+
+	diff := apply.DiffCell(cell, cell)
+	if diff.HasChanges {
+		t.Errorf("expected no changes for identical root container spec, got: %+v", diff)
+	}
+	if diff.RootContainerChanged {
+		t.Errorf("expected RootContainerChanged=false for identical root, got true")
+	}
+}
+
 // TestDiffContainer_RootStillBreaking ensures the single-container
 // reconcile path (ReconcileContainer) keeps the breaking-change
 // classification for root containers — the rootContainer flag flows

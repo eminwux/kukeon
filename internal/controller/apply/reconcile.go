@@ -369,8 +369,17 @@ func ReconcileCell(r runner.Runner, desired intmodel.Cell) (ReconcileResult, err
 		return result, nil
 	}
 
-	// Check for breaking changes (root container spec change)
-	if diff.RootContainerChanged {
+	// Check for breaking changes (root container spec change). Only
+	// Breaking-on-root edits route through RecreateCell — Compatible-on-root
+	// fields (env, ports, volumes, securityOpts, secrets, repos) toggle
+	// `RootContainerChanged` so the diff surfaces them under
+	// `rootContainer.<field>`, but they can be re-evaluated at start or
+	// rebuilt from spec by UpdateCell and must not force a kill-and-recreate.
+	// The companion gate at internal/controller/runner/spec_hash_test.go's
+	// `TestSpecHashDomainPinsToDiffCellBreakingFields` keeps this AND in
+	// lockstep with the spec-hash domain so the apply layer and StartCell
+	// agree on which root edits are destructive.
+	if diff.RootContainerChanged && diff.ChangeType == ChangeTypeBreaking {
 		// Recreate cell with new root container spec
 		recreated, recreateErr := r.RecreateCell(desired)
 		if recreateErr != nil {

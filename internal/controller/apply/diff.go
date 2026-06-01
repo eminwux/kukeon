@@ -388,15 +388,45 @@ func DiffCell(desired, actual intmodel.Cell) CellDiffResult {
 	desiredRoot := findRootContainer(desired.Spec.Containers)
 	actualRoot := findRootContainer(actual.Spec.Containers)
 
-	// Check if root container spec changed (breaking)
+	// Diff the root container spec field-by-field. Routing through
+	// `diffContainerSpec(rootContainer=true)` closes issue #990: prior to
+	// this, the root path checked only image/command/args via a dedicated
+	// 3-field comparator and silently dropped every other user-authored
+	// edit (Env, Volumes, Privileged, User, ReadOnlyRootFilesystem,
+	// Capabilities, SecurityOpts, Tmpfs, Resources, Secrets, Repos).
+	// `diffContainerSpec` carries per-field Breaking-vs-Compatible
+	// classification keyed off the `rootContainer` flag — see the inline
+	// classification comments at each field call site.
 	switch {
 	case desiredRoot != nil && actualRoot != nil:
-		if rootContainerSpecChanged(desiredRoot, actualRoot) {
+		rootDiff := diffContainerSpec(desiredRoot, actualRoot, true)
+		if rootDiff.HasChanges {
 			result.HasChanges = true
-			result.ChangeType = ChangeTypeBreaking
 			result.RootContainerChanged = true
-			result.BreakingChanges = append(result.BreakingChanges, "spec.rootContainer")
-			result.RootContainerDetails["rootContainer"] = "root container spec changed (image, command, or args)"
+			if rootDiff.ChangeType == ChangeTypeBreaking {
+				result.ChangeType = ChangeTypeBreaking
+			} else if result.ChangeType == ChangeTypeNone {
+				result.ChangeType = rootDiff.ChangeType
+			}
+			// Qualify each diverged field with the `rootContainer.` prefix
+			// so the cell-level readout and `OutOfSyncReason` distinguish
+			// root-container drift from same-named drift on a child
+			// container (the child path uses `containers[<id>].<field>`).
+			for _, field := range rootDiff.BreakingChanges {
+				result.BreakingChanges = append(
+					result.BreakingChanges,
+					"rootContainer."+field,
+				)
+			}
+			for _, field := range rootDiff.ChangedFields {
+				result.ChangedFields = append(
+					result.ChangedFields,
+					"rootContainer."+field,
+				)
+			}
+			for k, v := range rootDiff.Details {
+				result.RootContainerDetails[k] = v
+			}
 		}
 	case desiredRoot != nil && actualRoot == nil:
 		// Root container added
@@ -453,8 +483,9 @@ func DiffCell(desired, actual intmodel.Cell) CellDiffResult {
 			// are classified as in-place updateable (Compatible) here so
 			// UpdateCell stops, removes, recreates, and starts the affected
 			// child container instead of refusing the diff. The root
-			// container's image/command/args bypass diffContainerSpec via
-			// rootContainerSpecChanged above and stay on the recreate path.
+			// container's image/command/args are classified as Breaking by
+			// the same comparator (called from the root branch above with
+			// `rootContainer=true`) and stay on the RecreateCell path.
 			containerDiff := diffContainerSpec(desiredContainer, actualContainer, false)
 			if containerDiff.HasChanges {
 				result.HasChanges = true
@@ -562,157 +593,133 @@ func DiffContainer(desired, actual intmodel.Container) DiffResult {
 
 // diffContainerSpec compares two container specs.
 //
-// `rootContainer` controls whether image/command/args changes are
-// classified as breaking. Root containers cannot be updated in place — the
-// runner's StartCell path bakes the root spec into namespace setup, so any
-// change to image/command/args has to flow through RecreateCell. Non-root
-// containers can be stopped, removed, recreated, and started under the
-// existing cell namespaces; UpdateCell already implements that recreate
-// dance (the apply layer just needs to stop refusing the diff). Issue
-// #485.
+// `rootContainer` selects the per-field Breaking-vs-Compatible
+// classification for the diff. Root containers cannot be updated in place
+// — the runner's StartCell path bakes the root spec into cell-namespace
+// setup, so each field whose value is baked into the OCI runtime spec at
+// create time has to flow through RecreateCell. Non-root containers can
+// be stopped, removed, recreated, and started under the existing cell
+// namespaces; UpdateCell already implements that recreate dance.
+//
+// The classification call per field lives inline at each call site (the
+// `breakingOnRoot` argument to recordSpecFieldChange) so a reader landing
+// on any field knows immediately whether changing it on a root container
+// forces a cell recreate. Issues #485, #990.
 //
 // which needs a per-field diff branch. Splitting into smaller helpers per
 // field group (env/ports/volumes, privileged/user/readonly,
 // capabilities/securityOpts/tmpfs/resources) would obscure the spec-vs-spec
-// shape readers reach for when adding a new field. The image/command/args
-// trio already lives in recordImageCmdArgsChange because those three share
-// the only non-trivial classification branch (root vs. non-root).
+// shape readers reach for when adding a new field.
 //
-//nolint:funlen // The container spec is a flat list of ~12 fields, each of
+
 func diffContainerSpec(desired, actual *intmodel.ContainerSpec, rootContainer bool) DiffResult {
 	result := DiffResult{
 		Details: make(map[string]string),
 	}
 
+	// image/command/args — Breaking on root (baked into containerd
+	// snapshot + OCI Process at create), Compatible on non-root
+	// (UpdateCell stops, removes, recreates, and starts the child).
 	if desired.Image != actual.Image {
-		recordImageCmdArgsChange(&result, rootContainer, "image",
+		recordSpecFieldChange(&result, rootContainer, true, "image",
 			fmt.Sprintf("image changed from %q to %q", actual.Image, desired.Image))
 	}
-
 	if desired.Command != actual.Command {
-		recordImageCmdArgsChange(&result, rootContainer, "command",
+		recordSpecFieldChange(&result, rootContainer, true, "command",
 			fmt.Sprintf("command changed from %q to %q", actual.Command, desired.Command))
 	}
-
 	if !slicesEqual(desired.Args, actual.Args) {
-		recordImageCmdArgsChange(&result, rootContainer, "args", "args changed")
+		recordSpecFieldChange(&result, rootContainer, true, "args", "args changed")
 	}
 
-	// Compatible changes: env, ports, volumes, etc.
+	// env — Compatible on root and non-root. Env injection on the root
+	// container is rebuilt from spec at every start; an `env` edit can
+	// land on the next cell start without a recreate.
 	if !slicesEqual(desired.Env, actual.Env) {
-		result.HasChanges = true
-		if result.ChangeType == ChangeTypeNone {
-			result.ChangeType = ChangeTypeCompatible
-		}
-		result.ChangedFields = append(result.ChangedFields, "env")
-		result.Details["env"] = "environment variables changed"
+		recordSpecFieldChange(&result, rootContainer, false, "env", "environment variables changed")
 	}
 
+	// ports — Compatible on root and non-root. Ports are documentary
+	// metadata in kukeon (no port-publishing layer); no OCI spec field
+	// is baked from them at create time.
 	if !slicesEqual(desired.Ports, actual.Ports) {
-		result.HasChanges = true
-		if result.ChangeType == ChangeTypeNone {
-			result.ChangeType = ChangeTypeCompatible
-		}
-		result.ChangedFields = append(result.ChangedFields, "ports")
-		result.Details["ports"] = "ports changed"
+		recordSpecFieldChange(&result, rootContainer, false, "ports", "ports changed")
 	}
 
+	// volumes — Compatible on root and non-root. Root-container volume
+	// edits are treated as in-place updateable for now (the apply layer
+	// reports drift so the operator sees it; the runner's UpdateCell
+	// path applies the change on the next reconcile). If runner-side
+	// gaps surface, file a follow-up to widen the Breaking domain.
 	if !volumeMountsEqual(desired.Volumes, actual.Volumes) {
-		result.HasChanges = true
-		if result.ChangeType == ChangeTypeNone {
-			result.ChangeType = ChangeTypeCompatible
-		}
-		result.ChangedFields = append(result.ChangedFields, "volumes")
-		result.Details["volumes"] = "volumes changed"
+		recordSpecFieldChange(&result, rootContainer, false, "volumes", "volumes changed")
 	}
 
+	// privileged — Breaking on root (the cap-set is baked into the cell
+	// root's OCI Process spec at StartCell; flipping it requires a
+	// recreate). Compatible on non-root.
 	if desired.Privileged != actual.Privileged {
-		result.HasChanges = true
-		if result.ChangeType == ChangeTypeNone {
-			result.ChangeType = ChangeTypeCompatible
-		}
-		result.ChangedFields = append(result.ChangedFields, "privileged")
-		result.Details["privileged"] = fmt.Sprintf(
-			"privileged changed from %v to %v",
-			actual.Privileged,
-			desired.Privileged,
-		)
+		recordSpecFieldChange(&result, rootContainer, true, "privileged",
+			fmt.Sprintf("privileged changed from %v to %v", actual.Privileged, desired.Privileged))
 	}
 
+	// user — Breaking on root (OCI Process.user is fixed at create).
+	// Compatible on non-root.
 	if desired.User != actual.User {
-		result.HasChanges = true
-		if result.ChangeType == ChangeTypeNone {
-			result.ChangeType = ChangeTypeCompatible
-		}
-		result.ChangedFields = append(result.ChangedFields, "user")
-		result.Details["user"] = fmt.Sprintf("user changed from %q to %q", actual.User, desired.User)
+		recordSpecFieldChange(&result, rootContainer, true, "user",
+			fmt.Sprintf("user changed from %q to %q", actual.User, desired.User))
 	}
 
+	// readOnlyRootFilesystem — Breaking on root (OCI Root.readonly is
+	// fixed at create). Compatible on non-root.
 	if desired.ReadOnlyRootFilesystem != actual.ReadOnlyRootFilesystem {
-		result.HasChanges = true
-		if result.ChangeType == ChangeTypeNone {
-			result.ChangeType = ChangeTypeCompatible
-		}
-		result.ChangedFields = append(result.ChangedFields, "readOnlyRootFilesystem")
-		result.Details["readOnlyRootFilesystem"] = fmt.Sprintf(
-			"readOnlyRootFilesystem changed from %v to %v",
-			actual.ReadOnlyRootFilesystem,
-			desired.ReadOnlyRootFilesystem,
-		)
+		recordSpecFieldChange(&result, rootContainer, true, "readOnlyRootFilesystem",
+			fmt.Sprintf("readOnlyRootFilesystem changed from %v to %v",
+				actual.ReadOnlyRootFilesystem, desired.ReadOnlyRootFilesystem))
 	}
 
+	// capabilities — Breaking on root (OCI Process.capabilities bounding
+	// set is fixed at create). Compatible on non-root.
 	if !capabilitiesEqual(desired.Capabilities, actual.Capabilities) {
-		result.HasChanges = true
-		if result.ChangeType == ChangeTypeNone {
-			result.ChangeType = ChangeTypeCompatible
-		}
-		result.ChangedFields = append(result.ChangedFields, "capabilities")
-		result.Details["capabilities"] = "capabilities changed"
+		recordSpecFieldChange(&result, rootContainer, true, "capabilities", "capabilities changed")
 	}
 
+	// securityOpts — Compatible on root and non-root. Most security-opt
+	// values (selinux/apparmor/seccomp profile names) round-trip through
+	// the runner without a baked OCI field that demands a fresh
+	// container; a stricter classification can land in a follow-up if
+	// runner gaps surface.
 	if !slicesEqual(desired.SecurityOpts, actual.SecurityOpts) {
-		result.HasChanges = true
-		if result.ChangeType == ChangeTypeNone {
-			result.ChangeType = ChangeTypeCompatible
-		}
-		result.ChangedFields = append(result.ChangedFields, "securityOpts")
-		result.Details["securityOpts"] = "securityOpts changed"
+		recordSpecFieldChange(&result, rootContainer, false, "securityOpts", "securityOpts changed")
 	}
 
+	// tmpfs — Breaking on root (OCI Mounts table is fixed at create).
+	// Compatible on non-root.
 	if !tmpfsEqual(desired.Tmpfs, actual.Tmpfs) {
-		result.HasChanges = true
-		if result.ChangeType == ChangeTypeNone {
-			result.ChangeType = ChangeTypeCompatible
-		}
-		result.ChangedFields = append(result.ChangedFields, "tmpfs")
-		result.Details["tmpfs"] = "tmpfs mounts changed"
+		recordSpecFieldChange(&result, rootContainer, true, "tmpfs", "tmpfs mounts changed")
 	}
 
+	// resources — Breaking on root (cgroup v2 limits are applied at the
+	// cell cgroup level when the root container creates the cell
+	// namespace; the cgroup-shape change requires a recreate).
+	// Compatible on non-root.
 	if !resourcesEqual(desired.Resources, actual.Resources) {
-		result.HasChanges = true
-		if result.ChangeType == ChangeTypeNone {
-			result.ChangeType = ChangeTypeCompatible
-		}
-		result.ChangedFields = append(result.ChangedFields, "resources")
-		result.Details["resources"] = "resource limits changed"
+		recordSpecFieldChange(&result, rootContainer, true, "resources", "resource limits changed")
 	}
 
+	// secrets — Compatible on root and non-root. Secrets either flow as
+	// env (re-evaluated at start) or as bind-mounted files (the
+	// staged-file path can be re-staged before restart); no OCI field
+	// is permanently baked.
 	if !secretsEqual(desired.Secrets, actual.Secrets) {
-		result.HasChanges = true
-		if result.ChangeType == ChangeTypeNone {
-			result.ChangeType = ChangeTypeCompatible
-		}
-		result.ChangedFields = append(result.ChangedFields, "secrets")
-		result.Details["secrets"] = "secrets changed"
+		recordSpecFieldChange(&result, rootContainer, false, "secrets", "secrets changed")
 	}
 
+	// repos — Compatible on root and non-root. Repos are handled by
+	// kuketty's pre-Serve clone/fetch step at start time, not at OCI
+	// spec creation; an edit takes effect on the next start.
 	if !reposEqual(desired.Repos, actual.Repos) {
-		result.HasChanges = true
-		if result.ChangeType == ChangeTypeNone {
-			result.ChangeType = ChangeTypeCompatible
-		}
-		result.ChangedFields = append(result.ChangedFields, "repos")
-		result.Details["repos"] = "repos changed"
+		recordSpecFieldChange(&result, rootContainer, false, "repos", "repos changed")
 	}
 
 	if desired.WorkingDir != actual.WorkingDir {
@@ -846,13 +853,17 @@ func diffContainerSpec(desired, actual *intmodel.ContainerSpec, rootContainer bo
 	return result
 }
 
-// recordImageCmdArgsChange routes an image/command/args diff into either
-// BreakingChanges (root container) or ChangedFields (non-root, in-place
-// updateable). Lives outside diffContainerSpec so the latter stays within
-// funlen's statement budget. Issue #485.
-func recordImageCmdArgsChange(result *DiffResult, rootContainer bool, field, detail string) {
+// recordSpecFieldChange records a per-field divergence on the diff
+// result. Routes to BreakingChanges when `rootContainer && breakingOnRoot`
+// — those fields are baked into the cell's OCI runtime spec at
+// StartCell, so the apply layer must surface a recreate rather than an
+// in-place update — and to ChangedFields (Compatible) otherwise. Lives
+// outside diffContainerSpec so the latter stays within funlen's
+// statement budget. Generalizes the prior image/command/args-only
+// helper. Issues #485, #990.
+func recordSpecFieldChange(result *DiffResult, rootContainer, breakingOnRoot bool, field, detail string) {
 	result.HasChanges = true
-	if rootContainer {
+	if rootContainer && breakingOnRoot {
 		result.ChangeType = ChangeTypeBreaking
 		result.BreakingChanges = append(result.BreakingChanges, field)
 	} else {
@@ -1197,12 +1208,6 @@ func findRootContainer(containers []intmodel.ContainerSpec) *intmodel.ContainerS
 		}
 	}
 	return nil
-}
-
-func rootContainerSpecChanged(desired, actual *intmodel.ContainerSpec) bool {
-	return desired.Image != actual.Image ||
-		desired.Command != actual.Command ||
-		!slicesEqual(desired.Args, actual.Args)
 }
 
 // isBreakingChange returns true if the change type is breaking.

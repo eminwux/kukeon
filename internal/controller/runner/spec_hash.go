@@ -41,19 +41,45 @@ const SpecHashLabelKey = "kukeon.io/spec-hash"
 // containerSpecHashPayload is the deterministic projection of an
 // intmodel.ContainerSpec that ComputeContainerSpecHash hashes. The field set
 // must match exactly what `apply.DiffCell` classifies as "requires containerd
-// recreate" — today that is image/command/args (the domain
-// `rootContainerSpecChanged` and `containerSpecChanged` both branch on). The
+// recreate" — the Breaking-on-root domain of `diffContainerSpec`. The
 // `TestSpecHashDomainPinsToDiffCellBreakingFields` test pins the two
-// definitions together so they cannot silently drift apart. Issue #867
-// AC #5 / #6.
+// definitions together so they cannot silently drift apart. Issues #867,
+// #990.
 //
 // Args is normalized to a non-nil empty slice on the in-payload side so a
 // nil-vs-empty distinction in the source spec does not change the hash —
-// containerd treats both as "no args".
+// containerd treats both as "no args". The Capabilities, Tmpfs, and
+// Resources projections normalize nil pointers / slices to zero values so
+// "field unset" and "field set to its zero value" hash identically
+// (matches the equality semantics in `internal/controller/apply/diff.go`'s
+// `capabilitiesEqual`, `tmpfsEqual`, and `resourcesEqual`).
 type containerSpecHashPayload struct {
-	Image   string   `json:"image"`
-	Command string   `json:"command"`
-	Args    []string `json:"args"`
+	Image                  string                  `json:"image"`
+	Command                string                  `json:"command"`
+	Args                   []string                `json:"args"`
+	Privileged             bool                    `json:"privileged"`
+	User                   string                  `json:"user"`
+	ReadOnlyRootFilesystem bool                    `json:"readOnlyRootFilesystem"`
+	Capabilities           capabilitiesHashPayload `json:"capabilities"`
+	Tmpfs                  []tmpfsHashPayload      `json:"tmpfs"`
+	Resources              resourcesHashPayload    `json:"resources"`
+}
+
+type capabilitiesHashPayload struct {
+	Add  []string `json:"add"`
+	Drop []string `json:"drop"`
+}
+
+type tmpfsHashPayload struct {
+	Path      string   `json:"path"`
+	SizeBytes int64    `json:"sizeBytes"`
+	Options   []string `json:"options"`
+}
+
+type resourcesHashPayload struct {
+	MemoryLimitBytes int64 `json:"memoryLimitBytes"`
+	CPUShares        int64 `json:"cpuShares"`
+	PidsLimit        int64 `json:"pidsLimit"`
 }
 
 // ComputeContainerSpecHash returns a hex-encoded SHA-256 over the
@@ -61,20 +87,72 @@ type containerSpecHashPayload struct {
 // containerd access. Same hash for root and non-root containers — the
 // domain is identical (see containerSpecHashPayload).
 func ComputeContainerSpecHash(spec intmodel.ContainerSpec) string {
-	args := spec.Args
-	if args == nil {
-		args = []string{}
-	}
 	payload := containerSpecHashPayload{
-		Image:   spec.Image,
-		Command: spec.Command,
-		Args:    args,
+		Image:                  spec.Image,
+		Command:                spec.Command,
+		Args:                   normalizeStrings(spec.Args),
+		Privileged:             spec.Privileged,
+		User:                   spec.User,
+		ReadOnlyRootFilesystem: spec.ReadOnlyRootFilesystem,
+		Capabilities:           projectCapabilities(spec.Capabilities),
+		Tmpfs:                  projectTmpfs(spec.Tmpfs),
+		Resources:              projectResources(spec.Resources),
 	}
 	// json.Marshal on a struct with a fixed field order is deterministic.
-	// Errors are not possible here (payload is plain strings + []string).
+	// Errors are not possible here (payload is plain comparable types).
 	buf, _ := json.Marshal(payload)
 	sum := sha256.Sum256(buf)
 	return hex.EncodeToString(sum[:])
+}
+
+// normalizeStrings replaces a nil slice with a non-nil empty slice so the
+// JSON projection produces `[]` rather than `null` regardless of source
+// nilness.
+func normalizeStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
+func projectCapabilities(c *intmodel.ContainerCapabilities) capabilitiesHashPayload {
+	if c == nil {
+		return capabilitiesHashPayload{Add: []string{}, Drop: []string{}}
+	}
+	return capabilitiesHashPayload{
+		Add:  normalizeStrings(c.Add),
+		Drop: normalizeStrings(c.Drop),
+	}
+}
+
+func projectTmpfs(t []intmodel.ContainerTmpfsMount) []tmpfsHashPayload {
+	out := make([]tmpfsHashPayload, len(t))
+	for i := range t {
+		out[i] = tmpfsHashPayload{
+			Path:      t[i].Path,
+			SizeBytes: t[i].SizeBytes,
+			Options:   normalizeStrings(t[i].Options),
+		}
+	}
+	return out
+}
+
+func projectResources(r *intmodel.ContainerResources) resourcesHashPayload {
+	if r == nil {
+		return resourcesHashPayload{}
+	}
+	return resourcesHashPayload{
+		MemoryLimitBytes: derefInt64(r.MemoryLimitBytes),
+		CPUShares:        derefInt64(r.CPUShares),
+		PidsLimit:        derefInt64(r.PidsLimit),
+	}
+}
+
+func derefInt64(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 // stampSpecHashOnLabels writes the SpecHashLabelKey into labels (allocating
