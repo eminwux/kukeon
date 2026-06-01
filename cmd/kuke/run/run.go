@@ -1003,10 +1003,10 @@ func loadFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags runFlag
 // stored at default/default/default would otherwise be invisible to a bare
 // `kuke run <config>` lookup that used ExplicitScope (empty space/stack
 // unless --space/--stack are set). Mirrors the daemon-side reconciler
-// (internal/controller/reconcile_outofsync.go lookupLineageConfig) and
-// the CLI-side restart path (cmd/kuke/restart/cell/cell.go
-// lookupLineageConfigCLI) so all three resolve the same Config regardless
-// of which scope it was originally bound at.
+// (internal/controller/reconcile_outofsync.go lookupLineageConfig), which
+// is also re-used by controller.StartCell's OutOfSync reapply (#983), so
+// all paths resolve the same Config regardless of which scope it was
+// originally bound at.
 func loadFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (loadResult, error) {
 	realm := kukshared.PickLookupRealm(cmd, &config.KUKE_RUN_REALM)
 	space := pickLocation("", &config.KUKE_RUN_SPACE)

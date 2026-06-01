@@ -411,22 +411,26 @@ sudo kuke purge cell <name> --realm <r> --space <s> --stack <st>
 
 **Intent.** Pick up a Config-lineage cell whose stored spec has diverged from the daemon-stored CellConfig (someone edited the Config — or the underlying Blueprint — after the cell was last materialised) and bring it back in sync, bouncing the running containers as a side effect. This is the operator pair to the daemon's reconciler-driven `SYNC` column on `kuke get cell`.
 
-**Sequence.**
+**Sequence.** Any of these produce the same end state — the reapply lives daemon-side in `controller.StartCell`, so every CLI start path inherits it:
 
 ```bash
 sudo kuke get cell <name> --realm <r> --space <s> --stack <st> -o wide   # SYNC=OutOfSync?
-sudo kuke restart cell <name> --realm <r> --space <s> --stack <st>       # re-materialise + bounce
+sudo kuke restart cell <name> --realm <r> --space <s> --stack <st>       # stop + start (reapply on start)
+# or, equivalently:
+sudo kuke stop cell <name> --realm <r> --space <s> --stack <st>
+sudo kuke start cell <name> --realm <r> --space <s> --stack <st>         # reapply on start
 sudo kuke get cell <name> --realm <r> --space <s> --stack <st> -o wide   # SYNC=InSync
 ```
 
 **Invariants.**
 
-- Reconcile fires only on the `Ready` + OutOfSync + `kukeon.io/config=<name>` label combination. A `Stopped` cell is started in place (no reconcile); a `Ready` + InSync cell is a pure bounce (`StopCell` + `StartCell` with the on-disk spec); a `Ready` + OutOfSync cell with no lineage label is a pure bounce with a `notice:` to stderr — there is nothing to reconcile against.
-- On the reconcile branch, the CLI composes `GetConfig` + `GetBlueprint` + `ApplyDocuments` (at CLI level — no new daemon RPC), then issues an explicit `StopCell` + `StartCell` unless `ApplyDocuments` already bounced every container (root-container recreate). The daemon's reconcile path only bounces containers on image / command / args divergence, so the explicit stop + start preserves the `kuke restart` contract that every container in the cell bounces — even on env-only or metadata-only divergence classes. The double-bounce in the rare full-recreate case is acceptable; under-bouncing would silently break the contract.
+- Reconcile fires on any `StartCell` against an OutOfSync + `kukeon.io/config=<name>` cell — `kuke restart cell`'s start step, `kuke start cell` directly, and `kuke run <config>` on an existing Stopped cell all trigger the reapply. `kuke stop cell` + `kuke start cell` therefore produces the same end state as `kuke restart cell` (#983).
+- A Synced cell is a pure bounce: stop + start with the on-disk spec. A cell with no lineage label, with `Status.OutOfSyncError` set (divergence undecidable — referenced Blueprint missing), or whose lineage Config has been deleted starts with the on-disk spec — the runtime still bounces as the operator asked.
+- On the reapply branch the daemon re-materialises from `GetConfig` + `GetBlueprint`, computes the diff, and rebuilds via `RecreateCell` (tears down stale containerd records, recreates fresh containers with the materialised spec, ends in Ready). The CLI restart path is just `StopCell` + `StartCell` — no `GetConfig` / `GetBlueprint` / `ApplyDocuments` RPCs from the client.
 - A degraded cell (`Pending` / `Failed` / `Unknown`) refuses with a `kuke delete cell <name>` pointer; restart does not reconcile a degraded cell in place.
-- Lineage Config resolution probes the cell's full scope (realm/space/stack) → space-only → realm-only and uses the first hit — mirrors the daemon's reconciler so the CLI and reconciler resolve the same Config regardless of which scope it was bound at. A missing Config or Blueprint surfaces a `notice:` and falls through to a vanilla in-place bounce — the runtime still bounces as the operator asked.
-- Active attach sessions on the target cell are severed by the stop step in both branches.
-- Running clones of the source Config (`kuke run <config> --clone` or `--reuse` siblings, identified by `metadata.annotations.kukeon.io/source-config: <source>`) are unaffected by this command — each clone is its own cell and needs its own `kuke restart cell <clone-name>` to reconcile. The reconcile is per-cell, not per-Config.
+- Lineage Config resolution probes the cell's full scope (realm/space/stack) → space-only → realm-only and uses the first hit — mirrors the daemon's reconciler so the resolution matches across all three call sites (reconciler tick, start-time reapply, `kuke run <config>` on existing Stopped). If RecreateCell itself fails, the start falls back to the on-disk spec so the runtime still bounces.
+- Active attach sessions on the target cell are severed by the stop step in the restart flow (and by the explicit `kuke stop cell` in the stop+start flow).
+- Running clones of the source Config (`kuke run <config> --clone` or `--reuse` siblings, identified by `metadata.annotations.kukeon.io/source-config: <source>`) are unaffected by this command — each clone is its own cell and needs its own `kuke restart cell <clone-name>` (or stop+start) to reconcile. The reconcile is per-cell, not per-Config.
 
 ### Refresh runtime status
 
