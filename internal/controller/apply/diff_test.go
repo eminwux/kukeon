@@ -723,6 +723,128 @@ func TestDiffContainer_SecretsChange(t *testing.T) {
 	}
 }
 
+// TestDiffContainer_WorkingDirChange covers a Compatible-class field added by
+// issue #991: a non-root container `workingDir` edit must register as drift on
+// the in-place updateable path so the apply layer drives the spec change into
+// UpdateCell instead of returning "no changes" while the running container
+// keeps its prior process.cwd.
+func TestDiffContainer_WorkingDirChange(t *testing.T) {
+	desired := intmodel.Container{
+		Metadata: intmodel.ContainerMetadata{Name: "web"},
+		Spec: intmodel.ContainerSpec{
+			ID:        "web",
+			RealmName: "default", SpaceName: "default", StackName: "default", CellName: "hello-world",
+			Image:      "nginx:1.27",
+			WorkingDir: "/opt/app",
+		},
+	}
+	actual := desired
+	actual.Spec.WorkingDir = "/srv"
+
+	diff := apply.DiffContainer(desired, actual)
+	if diff.ChangeType != apply.ChangeTypeCompatible {
+		t.Fatalf("expected compatible change for workingDir edit, got %v", diff.ChangeType)
+	}
+	if !hasChangedField(diff, "workingDir") {
+		t.Errorf("expected ChangedFields to include workingDir, got %v", diff.ChangedFields)
+	}
+	if len(diff.BreakingChanges) != 0 {
+		t.Errorf("workingDir is in-place updateable; BreakingChanges must be empty, got %v", diff.BreakingChanges)
+	}
+}
+
+// TestDiffContainer_HostNetworkChange covers a Breaking-class field added by
+// issue #991: host-namespace toggles change the cell's OCI namespace shape
+// (the root container sets up netns at cell-start, child containers join via
+// JoinContainerNamespaces) so flipping `hostNetwork` cannot be applied in
+// place — the diff must classify as breaking to route through RecreateCell.
+func TestDiffContainer_HostNetworkChange(t *testing.T) {
+	desired := intmodel.Container{
+		Metadata: intmodel.ContainerMetadata{Name: "web"},
+		Spec: intmodel.ContainerSpec{
+			ID:        "web",
+			RealmName: "default", SpaceName: "default", StackName: "default", CellName: "hello-world",
+			Image:       "nginx:1.27",
+			HostNetwork: true,
+		},
+	}
+	actual := desired
+	actual.Spec.HostNetwork = false
+
+	diff := apply.DiffContainer(desired, actual)
+	if diff.ChangeType != apply.ChangeTypeBreaking {
+		t.Fatalf("expected breaking change for hostNetwork flip, got %v", diff.ChangeType)
+	}
+	found := false
+	for _, f := range diff.BreakingChanges {
+		if f == "hostNetwork" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected BreakingChanges to include hostNetwork, got %v", diff.BreakingChanges)
+	}
+}
+
+// TestDiffContainer_TtyChange exercises the *ContainerTty pointer-field
+// equality helper added by issue #991: a tty edit on the pointer-backed
+// stage list must register as drift, and an identical block (including a
+// populated OnInit slice) must not.
+func TestDiffContainer_TtyChange(t *testing.T) {
+	desired := intmodel.Container{
+		Metadata: intmodel.ContainerMetadata{Name: "web"},
+		Spec: intmodel.ContainerSpec{
+			ID:        "web",
+			RealmName: "default", SpaceName: "default", StackName: "default", CellName: "hello-world",
+			Image: "nginx:1.27",
+			Tty: &intmodel.ContainerTty{
+				Prompt: "[web] ",
+				OnInit: []intmodel.TtyStage{{Script: "echo hello", RunOn: "create"}},
+			},
+		},
+	}
+	actual := desired
+	// Same fields, different OnInit script — must register drift.
+	actual.Spec.Tty = &intmodel.ContainerTty{
+		Prompt: "[web] ",
+		OnInit: []intmodel.TtyStage{{Script: "echo bye", RunOn: "create"}},
+	}
+
+	diff := apply.DiffContainer(desired, actual)
+	if diff.ChangeType != apply.ChangeTypeCompatible {
+		t.Fatalf("expected compatible change for tty edit, got %v", diff.ChangeType)
+	}
+	if !hasChangedField(diff, "tty") {
+		t.Errorf("expected ChangedFields to include tty, got %v", diff.ChangedFields)
+	}
+
+	// Identical Tty blocks (same pointer-shape, same content) must not drift.
+	sameDesired := desired
+	sameActual := desired
+	sameActual.Spec.Tty = &intmodel.ContainerTty{
+		Prompt: "[web] ",
+		OnInit: []intmodel.TtyStage{{Script: "echo hello", RunOn: "create"}},
+	}
+	noDiff := apply.DiffContainer(sameDesired, sameActual)
+	if noDiff.HasChanges {
+		t.Errorf("expected no drift on identical tty blocks, got %v", noDiff.ChangedFields)
+	}
+
+	// Nil vs. zero-valued *ContainerTty must compare equal (same treatment
+	// resourcesEqual gives an empty resources block).
+	nilSide := desired
+	nilSide.Spec.Tty = nil
+	zeroSide := desired
+	zeroSide.Spec.Tty = &intmodel.ContainerTty{}
+	nilDiff := apply.DiffContainer(nilSide, zeroSide)
+	for _, f := range nilDiff.ChangedFields {
+		if f == "tty" {
+			t.Errorf("nil and zero-valued tty must compare equal; got tty drift %v", nilDiff.Details["tty"])
+		}
+	}
+}
+
 // TestDiffContainer_ReposSecretsNoChange guards the equality helpers: identical
 // repos/secrets (including a populated SecretRef) must not register drift on a
 // same-spec re-apply.

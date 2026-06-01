@@ -715,6 +715,134 @@ func diffContainerSpec(desired, actual *intmodel.ContainerSpec, rootContainer bo
 		result.Details["repos"] = "repos changed"
 	}
 
+	if desired.WorkingDir != actual.WorkingDir {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "workingDir")
+		result.Details["workingDir"] = fmt.Sprintf(
+			"workingDir changed from %q to %q",
+			actual.WorkingDir,
+			desired.WorkingDir,
+		)
+	}
+
+	if !slicesEqual(desired.Networks, actual.Networks) {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "networks")
+		result.Details["networks"] = "networks changed"
+	}
+
+	if !slicesEqual(desired.NetworksAliases, actual.NetworksAliases) {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "networksAliases")
+		result.Details["networksAliases"] = "networksAliases changed"
+	}
+
+	// Host-namespace toggles change the parent cell's OCI namespace shape —
+	// the netns / pidns / cgroupns the root container sets up at cell-start
+	// time is inherited by child containers via JoinContainerNamespaces, so
+	// flipping any of these on an existing container cannot be applied
+	// in-place. Route through ChangeTypeBreaking so the apply layer drives
+	// RecreateCell instead of UpdateCell's child stop-remove-recreate-start
+	// path (which only re-enters the existing namespaces).
+	if desired.HostNetwork != actual.HostNetwork {
+		result.HasChanges = true
+		result.ChangeType = ChangeTypeBreaking
+		result.BreakingChanges = append(result.BreakingChanges, "hostNetwork")
+		result.Details["hostNetwork"] = fmt.Sprintf(
+			"hostNetwork changed from %v to %v (breaking)",
+			actual.HostNetwork,
+			desired.HostNetwork,
+		)
+	}
+
+	if desired.HostPID != actual.HostPID {
+		result.HasChanges = true
+		result.ChangeType = ChangeTypeBreaking
+		result.BreakingChanges = append(result.BreakingChanges, "hostPID")
+		result.Details["hostPID"] = fmt.Sprintf(
+			"hostPID changed from %v to %v (breaking)",
+			actual.HostPID,
+			desired.HostPID,
+		)
+	}
+
+	if desired.HostCgroup != actual.HostCgroup {
+		result.HasChanges = true
+		result.ChangeType = ChangeTypeBreaking
+		result.BreakingChanges = append(result.BreakingChanges, "hostCgroup")
+		result.Details["hostCgroup"] = fmt.Sprintf(
+			"hostCgroup changed from %v to %v (breaking)",
+			actual.HostCgroup,
+			desired.HostCgroup,
+		)
+	}
+
+	if desired.CNIConfigPath != actual.CNIConfigPath {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "cniConfigPath")
+		result.Details["cniConfigPath"] = fmt.Sprintf(
+			"cniConfigPath changed from %q to %q",
+			actual.CNIConfigPath,
+			desired.CNIConfigPath,
+		)
+	}
+
+	if desired.RestartPolicy != actual.RestartPolicy {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "restartPolicy")
+		result.Details["restartPolicy"] = fmt.Sprintf(
+			"restartPolicy changed from %q to %q",
+			actual.RestartPolicy,
+			desired.RestartPolicy,
+		)
+	}
+
+	if desired.Attachable != actual.Attachable {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "attachable")
+		result.Details["attachable"] = fmt.Sprintf(
+			"attachable changed from %v to %v",
+			actual.Attachable,
+			desired.Attachable,
+		)
+	}
+
+	if !ttyEqual(desired.Tty, actual.Tty) {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "tty")
+		result.Details["tty"] = "tty changed"
+	}
+
+	if !gitEqual(desired.Git, actual.Git) {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "git")
+		result.Details["git"] = "git identity changed"
+	}
+
 	return result
 }
 
@@ -822,6 +950,77 @@ func int64PtrEqual(a, b *int64) bool {
 		return false
 	}
 	return *a == *b
+}
+
+// ttyEqual reports whether two *ContainerTty describe the same kuketty
+// pre-Serve config. Nil and a zero-valued block compare equal so allocating
+// or clearing an explicitly-empty `tty:` does not register as drift — same
+// treatment resourcesEqual gives an empty resources block.
+func ttyEqual(a, b *intmodel.ContainerTty) bool {
+	if a.IsEmpty() && b.IsEmpty() {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if a.Prompt != b.Prompt || a.LogFile != b.LogFile || a.LogLevel != b.LogLevel {
+		return false
+	}
+	if len(a.OnInit) != len(b.OnInit) {
+		return false
+	}
+	for i := range a.OnInit {
+		if a.OnInit[i] != b.OnInit[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// gitEqual reports whether two *ContainerGit describe the same declarative
+// git identity/signing block. Nil and a zero-valued block compare equal so
+// allocating or clearing an explicitly-empty `git:` does not register as
+// drift.
+func gitEqual(a, b *intmodel.ContainerGit) bool {
+	if gitIsZero(a) && gitIsZero(b) {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return gitIdentityEqual(a.Author, b.Author) &&
+		gitIdentityEqual(a.Committer, b.Committer) &&
+		a.SigningKey == b.SigningKey &&
+		a.AllowedSigners == b.AllowedSigners &&
+		slicesEqual(a.Sign, b.Sign)
+}
+
+func gitIsZero(g *intmodel.ContainerGit) bool {
+	if g == nil {
+		return true
+	}
+	return gitIdentityIsZero(g.Author) &&
+		gitIdentityIsZero(g.Committer) &&
+		g.SigningKey == "" &&
+		g.AllowedSigners == "" &&
+		len(g.Sign) == 0
+}
+
+func gitIdentityEqual(a, b *intmodel.GitIdentity) bool {
+	if gitIdentityIsZero(a) && gitIdentityIsZero(b) {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+func gitIdentityIsZero(id *intmodel.GitIdentity) bool {
+	if id == nil {
+		return true
+	}
+	return id.Name == "" && id.Email == ""
 }
 
 // spaceDefaultsEqual reports whether two *SpaceDefaults describe the same
