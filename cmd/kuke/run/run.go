@@ -1286,6 +1286,15 @@ func pickLocation(fromDoc string, kv *config.Var) string {
 // rewrite — including an image swap — must route through `kuke apply -f`
 // instead of silently no-opping under `kuke run -f`.
 //
+// Each entry is shaped `<path> (actual=<v>, desired=<v>)` so the reject error
+// surfaces both sides verbatim — without this, an operator hitting a false
+// positive (e.g. issue #984 — `kuke run <config>` rejecting immediately after
+// a successful `kuke restart cell` per the OutOfSync reconcile path) has no
+// way to tell which side of the comparison normalised differently from the
+// other. Test assertions on the field path itself (e.g.
+// `spec.containers["main"].image`) still match because the path prefix is
+// preserved verbatim before the `(actual=…)` suffix.
+//
 // Root containers are filtered out of the count/id-set comparison on both
 // sides. The runner synthesizes a root container during create if the YAML
 // omitted one (`docs/examples/hello-world.yaml` is the canonical case), so a
@@ -1307,13 +1316,16 @@ func divergedFields(actual, desired v1beta1.CellSpec) []string {
 	var diffs []string
 
 	if actual.RealmID != "" && actual.RealmID != desired.RealmID {
-		diffs = append(diffs, "spec.realmId")
+		diffs = append(diffs, fmt.Sprintf(
+			"spec.realmId (actual=%q, desired=%q)", actual.RealmID, desired.RealmID))
 	}
 	if actual.SpaceID != "" && actual.SpaceID != desired.SpaceID {
-		diffs = append(diffs, "spec.spaceId")
+		diffs = append(diffs, fmt.Sprintf(
+			"spec.spaceId (actual=%q, desired=%q)", actual.SpaceID, desired.SpaceID))
 	}
 	if actual.StackID != "" && actual.StackID != desired.StackID {
-		diffs = append(diffs, "spec.stackId")
+		diffs = append(diffs, fmt.Sprintf(
+			"spec.stackId (actual=%q, desired=%q)", actual.StackID, desired.StackID))
 	}
 
 	if len(actual.Containers) == 0 {
@@ -1342,7 +1354,8 @@ func divergedFields(actual, desired v1beta1.CellSpec) []string {
 			continue
 		}
 		if ac.Root != dc.Root {
-			diffs = append(diffs, fmt.Sprintf("spec.containers[%q].root", ac.ID))
+			diffs = append(diffs, fmt.Sprintf(
+				"spec.containers[%q].root (actual=%v, desired=%v)", ac.ID, ac.Root, dc.Root))
 		}
 		for _, field := range divergedContainerFields(ac, dc) {
 			diffs = append(diffs, fmt.Sprintf("spec.containers[%q].%s", ac.ID, field))
@@ -1365,57 +1378,84 @@ func divergedFields(actual, desired v1beta1.CellSpec) []string {
 func divergedContainerFields(actual, desired v1beta1.ContainerSpec) []string {
 	var fields []string
 	if actual.Image != desired.Image {
-		fields = append(fields, "image")
+		fields = append(fields, scalarDiff("image", actual.Image, desired.Image))
 	}
 	if actual.Command != desired.Command {
-		fields = append(fields, "command")
+		fields = append(fields, scalarDiff("command", actual.Command, desired.Command))
 	}
 	if !stringSlicesEqual(actual.Args, desired.Args) {
-		fields = append(fields, "args")
+		fields = append(fields, sliceDiff("args", actual.Args, desired.Args))
 	}
 	if actual.WorkingDir != desired.WorkingDir {
-		fields = append(fields, "workingDir")
+		fields = append(fields, scalarDiff("workingDir", actual.WorkingDir, desired.WorkingDir))
 	}
 	if !stringSlicesEqual(actual.Env, desired.Env) {
-		fields = append(fields, "env")
+		fields = append(fields, sliceDiff("env", actual.Env, desired.Env))
 	}
 	if !stringSlicesEqual(actual.Ports, desired.Ports) {
-		fields = append(fields, "ports")
+		fields = append(fields, sliceDiff("ports", actual.Ports, desired.Ports))
 	}
 	if !volumeMountsEqual(actual.Volumes, desired.Volumes) {
-		fields = append(fields, "volumes")
+		fields = append(fields, valueDiff("volumes", actual.Volumes, desired.Volumes))
 	}
 	if !stringSlicesEqual(actual.Networks, desired.Networks) {
-		fields = append(fields, "networks")
+		fields = append(fields, sliceDiff("networks", actual.Networks, desired.Networks))
 	}
 	if !stringSlicesEqual(actual.NetworksAliases, desired.NetworksAliases) {
-		fields = append(fields, "networksAliases")
+		fields = append(fields, sliceDiff("networksAliases", actual.NetworksAliases, desired.NetworksAliases))
 	}
 	if actual.Privileged != desired.Privileged {
-		fields = append(fields, "privileged")
+		fields = append(fields, boolDiff("privileged", actual.Privileged, desired.Privileged))
 	}
 	if actual.HostNetwork != desired.HostNetwork {
-		fields = append(fields, "hostNetwork")
+		fields = append(fields, boolDiff("hostNetwork", actual.HostNetwork, desired.HostNetwork))
 	}
 	if actual.HostPID != desired.HostPID {
-		fields = append(fields, "hostPID")
+		fields = append(fields, boolDiff("hostPID", actual.HostPID, desired.HostPID))
 	}
 	if actual.HostCgroup != desired.HostCgroup {
-		fields = append(fields, "hostCgroup")
+		fields = append(fields, boolDiff("hostCgroup", actual.HostCgroup, desired.HostCgroup))
 	}
 	if actual.Attachable != desired.Attachable {
-		fields = append(fields, "attachable")
+		fields = append(fields, boolDiff("attachable", actual.Attachable, desired.Attachable))
 	}
 	if actual.RestartPolicy != desired.RestartPolicy {
-		fields = append(fields, "restartPolicy")
+		fields = append(fields, scalarDiff("restartPolicy", actual.RestartPolicy, desired.RestartPolicy))
 	}
 	if !containerSecretsEqual(actual.Secrets, desired.Secrets) {
-		fields = append(fields, "secrets")
+		fields = append(fields, valueDiff("secrets", actual.Secrets, desired.Secrets))
 	}
 	if !containerTtysEqual(actual.Tty, desired.Tty) {
-		fields = append(fields, "tty")
+		fields = append(fields, valueDiff("tty", actual.Tty, desired.Tty))
 	}
 	return fields
+}
+
+// scalarDiff formats a single string field's actual/desired pair as
+// `<name> (actual=%q, desired=%q)`. Used by divergedContainerFields so the
+// reject error names both sides — see divergedFields' rationale.
+func scalarDiff(name, actual, desired string) string {
+	return fmt.Sprintf("%s (actual=%q, desired=%q)", name, actual, desired)
+}
+
+// boolDiff is scalarDiff's bool sibling — prints `actual=true desired=false`
+// rather than quoting the values.
+func boolDiff(name string, actual, desired bool) string {
+	return fmt.Sprintf("%s (actual=%v, desired=%v)", name, actual, desired)
+}
+
+// sliceDiff formats a string-slice's actual/desired pair via `%q` so each
+// entry stays quoted (`["a" "b"]`) and an embedded space is unambiguous.
+func sliceDiff(name string, actual, desired []string) string {
+	return fmt.Sprintf("%s (actual=%q, desired=%q)", name, actual, desired)
+}
+
+// valueDiff is the fallback formatter for non-string-slice composite fields
+// (Volumes, Secrets, Tty). Uses `%+v` so struct field names render alongside
+// their values — the reader needs to see e.g. `{Source:/host …}` to diagnose
+// the divergence, not a bare positional `{[…] …}`.
+func valueDiff(name string, actual, desired interface{}) string {
+	return fmt.Sprintf("%s (actual=%+v, desired=%+v)", name, actual, desired)
 }
 
 // containerSecretsEqual compares two ContainerSecret slices field-by-field.
