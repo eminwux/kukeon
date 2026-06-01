@@ -85,11 +85,24 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 | `repos`           | array of `ContainerRepo`   | no       | Git repos the kuketty wrapper clones before the workload starts — requires `attachable: true` (see [ContainerRepo](#containerrepo))                    |
 | `git`             | `ContainerGit`             | no       | Declarative git identity + signing, expanded into `GIT_AUTHOR_*`/`GIT_COMMITTER_*`/`GIT_CONFIG_*` env before start (see [ContainerGit](#containergit)) |
 | `cniConfigPath`   | string                     | no       | Override the CNI config directory for this container                                                                                                   |
-| `restartPolicy`   | string                     | no       | Restart policy. Reserved — restart semantics are not finalized.                                                                                        |
+| `restartPolicy`   | string                     | no       | Per-container reap policy at the cell wind-down / auto-delete gate. One of `always`, `on-failure`, `never`. Empty defaults to `always` for back-compat (see [Restart policy](#restart-policy)). |
 | `tty`             | `ContainerTty`             | no       | Shell-UX config for the kuketty wrapper (prompt, init scripts, logging) — requires `attachable: true` (see [ContainerTty](#containertty))              |
 
 !!! warning "Fields marked reserved"
-`ports` and `restartPolicy` are accepted by the schema today but their semantics are still being designed. Values round-trip (you can read back what you applied), but the controller does not act on them. See [GitHub Issues](https://github.com/eminwux/kukeon/issues) for the backlog.
+`ports` is accepted by the schema today but its semantics are still being designed. Values round-trip (you can read back what you applied), but the controller does not act on them. See [GitHub Issues](https://github.com/eminwux/kukeon/issues) for the backlog.
+
+### Restart policy
+
+`spec.restartPolicy` selects whether the cell wind-down / auto-delete reconciler reaps a cell after one of its non-root containers exits. The runner evaluates the policy per container at the wind-down gate; the cell-level decision is the intersection across every terminally-exited non-root container, so a single `never` blocks the wind-down.
+
+| Value        | Behavior at wind-down                                                                                                                              |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| empty/unset  | Treated as `always` for back-compat. Pre-#1003 wind-down behavior — every non-root container exit can trigger a cell-level wind-down.              |
+| `always`     | Wind-down / auto-delete proceeds whenever the container terminally exits, regardless of exit code.                                                 |
+| `on-failure` | Wind-down / auto-delete proceeds only when the container's last exit code is non-zero. A zero-exit (clean shutdown) keeps the cell in place.       |
+| `never`      | Wind-down / auto-delete is skipped — the cell stays in `Stopped` until an operator tears it down explicitly (`kuke delete` / `kuke purge`).        |
+
+Only the root container is exempt: the root's exit drives cell-level lifecycle decisions independently and is not subject to this gate.
 
 ### VolumeMount
 
