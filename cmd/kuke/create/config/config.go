@@ -206,7 +206,7 @@ func emitConfigYAML(out io.Writer, configName, realm, space, stack string, bp *v
 	return err
 }
 
-func writeValues(b *strings.Builder, params []v1beta1.CellProfileParameter) {
+func writeValues(b *strings.Builder, params []v1beta1.CellBlueprintParameter) {
 	if len(params) == 0 {
 		b.WriteString("  values: {}\n")
 		return

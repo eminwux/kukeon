@@ -24,9 +24,8 @@ package v1beta1
 //
 // A Blueprint declares two fill channels (see #423 "L1↔L2 interface"):
 //
-//  1. Scalar parameters — `${KEY}` substitution using the CellProfileParameter
-//     shape (the name predates #626's CellProfile removal; the struct is now
-//     blueprint-only). Filled inline by `kuke run -b --param K=V`.
+//  1. Scalar parameters — `${KEY}` substitution using the CellBlueprintParameter
+//     shape. Filled inline by `kuke run -b --param K=V`.
 //  2. Structural slots — named repo/secret slots on each container that a
 //     CellConfig fills with structured values (repo URLs, secret sources).
 //     This kind ships the slot *declarations* only; the Config-side fill
@@ -64,27 +63,29 @@ type CellBlueprintMetadata struct {
 // metadata.name. Every run produces a fresh hex-suffixed cell — the
 // "Blueprint = always fresh" invariant.
 type CellBlueprintSpec struct {
-	Prefix     string                 `json:"prefix,omitempty"     yaml:"prefix,omitempty"`
-	Parameters []CellProfileParameter `json:"parameters,omitempty" yaml:"parameters,omitempty"`
-	Cell       BlueprintCellSpec      `json:"cell"                 yaml:"cell"`
+	Prefix     string                   `json:"prefix,omitempty"     yaml:"prefix,omitempty"`
+	Parameters []CellBlueprintParameter `json:"parameters,omitempty" yaml:"parameters,omitempty"`
+	Cell       BlueprintCellSpec        `json:"cell"                 yaml:"cell"`
 }
 
-// CellProfileParameter declares one `${KEY}` substitution variable used by a
+// CellBlueprintParameter declares one `${KEY}` substitution variable used by a
 // CellBlueprint's body. Default is a pointer so YAML/JSON can distinguish "no
 // default" (nil) from an explicit empty default (""). The substitution engine
 // treats them differently: a missing default falls through to the env-var
 // lookup, while an explicit empty default short-circuits there.
-//
-// The name keeps its "CellProfile" prefix from before #626 removed the
-// CellProfile kind — the struct is now blueprint-only but renaming it would
-// break sibling projects (sbsh, sbcrew, …) that import this package. The
-// type's role moved; the wire identifier stayed put.
-type CellProfileParameter struct {
+type CellBlueprintParameter struct {
 	Name        string  `json:"name"                  yaml:"name"`
 	Description string  `json:"description,omitempty" yaml:"description,omitempty"`
 	Default     *string `json:"default,omitempty"     yaml:"default,omitempty"`
 	Required    bool    `json:"required,omitempty"    yaml:"required,omitempty"`
 }
+
+// CellProfileParameter is the pre-#986 name for CellBlueprintParameter, kept as
+// a deprecated alias for one release so sibling projects (sbsh, sbcrew, …) can
+// rename on their own cadence. The on-wire YAML/JSON shape is unchanged.
+//
+// Deprecated: use CellBlueprintParameter. Scheduled for removal in v0.7.0.
+type CellProfileParameter = CellBlueprintParameter
 
 // BlueprintCellSpec is the cell template body of a CellBlueprint. It mirrors
 // the runtime CellSpec's user-authorable surface but is a deliberately
