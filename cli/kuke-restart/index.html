@@ -3317,12 +3317,12 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke restart cell &lt;name&gt; [--realm &lt;name&gt;] [--space &lt;name&gt;] [--stack &lt;name&gt;]
 </code></pre></div>
 <p>Restart Kukeon resources (cell).</p>
-<p>Restart a Kukeon resource: bounces the running process by default and, on a Config-lineage cell whose live spec has diverged from the daemon-stored Config (OutOfSync), uses the freshly-materialised spec on start so the restart is also a reconcile.</p>
+<p>Restart a Kukeon resource: bounces the running process. When the cell is a Config-lineage cell that the daemon has marked OutOfSync, the start step automatically re-materialises the spec from the Config (daemon-side, in <code>controller.StartCell</code> — issue #983), so the restart is also a reconcile.</p>
 <h2 id="kuke-restart-cell">kuke restart cell<a class="headerlink" href="#kuke-restart-cell" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke restart cell &lt;name&gt; [--realm &lt;name&gt;] [--space &lt;name&gt;] [--stack &lt;name&gt;]
 </code></pre></div>
 <p>Restart a cell (bounces the process; on OutOfSync also reconciles from Config).</p>
-<p>Restart a cell. By default bounces the cell's containers (stop + start with the same spec). When the cell carries a <code>kukeon.io/config=&lt;name&gt;</code> lineage label and the daemon has marked it OutOfSync, the start step uses the freshly materialised spec from the Config so the restart is also a reconcile. Severs any active attach session as a side effect of the stop step.</p>
+<p>Restart a cell. Bounces the cell's containers (stop + start). When the cell carries a <code>kukeon.io/config=&lt;name&gt;</code> lineage label and the daemon has marked it OutOfSync, the daemon's <code>StartCell</code> reapplies the freshly materialised spec from the lineage Config before bringing the cell back up — equivalent to <code>kuke stop cell &lt;name&gt;</code> + <code>kuke start cell &lt;name&gt;</code>. Severs any active attach session as a side effect of the stop step.</p>
 <h3 id="flags">Flags<a class="headerlink" href="#flags" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -3367,16 +3367,12 @@
 </thead>
 <tbody>
 <tr>
-<td><code>Ready</code> + in-sync</td>
-<td>Pure bounce: <code>StopCell</code> then <code>StartCell</code> with the spec already on disk. No reconcile.</td>
-</tr>
-<tr>
-<td><code>Ready</code> + OutOfSync (lineage)</td>
-<td>Re-materialise the spec from the cell's lineage Config (<code>GetConfig</code> + <code>GetBlueprint</code> + <code>Materialize</code>), <code>ApplyDocuments</code> to write the new spec, then <code>StopCell</code> + <code>StartCell</code> unless <code>ApplyDocuments</code> already bounced every container (root-container recreate).</td>
+<td><code>Ready</code></td>
+<td>Pure bounce: <code>StopCell</code> then <code>StartCell</code>. The daemon's <code>StartCell</code> re-materialises and rebuilds the cell from the lineage Config when <code>Status.OutOfSync</code> is set on a Config-lineage cell — otherwise it just starts the on-disk spec.</td>
 </tr>
 <tr>
 <td><code>Stopped</code></td>
-<td>Equivalent to <code>kuke start cell &lt;name&gt;</code>. Honours OutOfSync only on the <code>Ready</code>-path; an OutOfSync <code>Stopped</code> cell starts with its on-disk spec, then a follow-up <code>kuke restart cell</code> from <code>Ready</code> reconciles.</td>
+<td>Equivalent to <code>kuke start cell &lt;name&gt;</code>. The daemon-side OutOfSync reapply also fires here, so <code>kuke stop cell</code> + <code>kuke start cell</code> produces the same end state as <code>kuke restart cell</code> on the same cell (#983).</td>
 </tr>
 <tr>
 <td><code>Pending</code> / <code>Failed</code> / <code>Unknown</code></td>
@@ -3388,11 +3384,11 @@
 <p>The OutOfSync flag on a cell is set by the daemon's reconciler loop when a cell carrying a <code>kukeon.io/config=&lt;name&gt;</code> lineage label has a live spec that no longer matches the materialisation of its source Config (someone edited the Config, or the underlying Blueprint, after the cell was last materialised). Surface it ahead of <code>kuke restart cell</code> with <a href="../kuke-get/"><code>kuke get cell &lt;name&gt;</code></a> — the <code>SYNC</code> column reports <code>InSync</code> / <code>OutOfSync</code> / <code>Unknown</code>. A cell without the lineage label is never marked OutOfSync, so <code>kuke restart cell</code> on such cells is always a pure bounce.</p>
 <h3 id="side-effects">Side effects<a class="headerlink" href="#side-effects" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Active attach sessions are severed by the stop step in both the pure-bounce and reconcile branches.</li>
-<li>The reconcile branch issues an explicit <code>StopCell</code> + <code>StartCell</code> after <code>ApplyDocuments</code> unless <code>ApplyDocuments</code> already bounced every container (root-container recreate). The daemon's reconcile path only bounces containers on image / command / args divergence (env-only or metadata-only changes patch in place), so the explicit stop + start preserves the <code>kuke restart</code> contract that every running container in the cell bounces — across every divergence class. The double-bounce in the rare full-recreate case is acceptable; under-bouncing would silently break the contract.</li>
-<li>The CLI composes <code>GetConfig</code> + <code>GetBlueprint</code> + <code>ApplyDocuments</code> against the cell's lineage Config at CLI level rather than issuing a new daemon RPC. Lineage Config resolution probes progressively shallower scopes (full → space-only → realm-only) to mirror the daemon's reconciler and find the Config regardless of which scope it was originally bound at.</li>
-<li>A reconcile that fails to materialise (lineage Config deleted, referenced Blueprint missing, OutOfSync detection itself failed) prints a one-line <code>notice:</code> to stderr and falls through to a vanilla in-place restart — the runtime still bounces as the operator asked.</li>
-<li>Running clones of the source Config are unaffected by a <code>kuke restart cell</code> on one cell; each clone needs its own <code>kuke restart cell &lt;clone-name&gt;</code> to pick up the new spec.</li>
+<li>Active attach sessions are severed by the stop step.</li>
+<li>The reapply lives in the daemon's <code>controller.StartCell</code> (<code>internal/controller/start_cell.go</code>), so every code path that issues <code>StartCell</code> — <code>kuke restart cell</code>'s start step, <code>kuke start cell</code> directly, and <code>kuke run &lt;config&gt;</code> on an existing Stopped cell — inherits the reconcile-on-start behaviour. The CLI restart command itself no longer composes <code>GetConfig</code> + <code>GetBlueprint</code> + <code>ApplyDocuments</code>; those calls happen daemon-side.</li>
+<li>On the reapply branch the daemon resolves the lineage Config (probing the cell's full scope → space-only → realm-only, mirroring the reconciler), materialises the cell from Config + Blueprint, and rebuilds via <code>RecreateCell</code> — tearing down the stale containerd records (post-#867 stop leaves them in place with the old spec-hash) and starting fresh containers with the new spec.</li>
+<li>A reapply that fails to materialise (lineage Config deleted, referenced Blueprint missing, OutOfSync detection itself errored, <code>RecreateCell</code> failure) falls back to starting the cell with the on-disk spec — the runtime still bounces as the operator asked. Diagnostics are logged daemon-side (<code>kukeond</code> slog stream) rather than printed to the CLI.</li>
+<li>Running clones of the source Config are unaffected by a <code>kuke restart cell</code> on one cell; each clone needs its own <code>kuke restart cell &lt;clone-name&gt;</code> (or stop+start) to pick up the new spec.</li>
 </ul>
 <h3 id="example-session">Example session<a class="headerlink" href="#example-session" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>$ kuke get cell foo --realm default --space default --stack default -o wide
@@ -3400,20 +3396,26 @@
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>foo   Ready  OutOfSync   12m  ...
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>$ kuke restart cell foo --realm default --space default --stack default
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>Restarted cell &quot;foo&quot; from stack &quot;default&quot; (reconciled from config &quot;foo&quot;)
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>Restarted cell &quot;foo&quot; from stack &quot;default&quot;
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
 <a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>$ kuke get cell foo --realm default --space default --stack default -o wide
 <a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>NAME  STATE  SYNC    AGE  ...
 <a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>foo   Ready  InSync  3s   ...
 </code></pre></div>
-<p>For a cell with no lineage label or with <code>SYNC=InSync</code>, the same invocation reports <code>Restarted cell "&lt;name&gt;" from stack "&lt;stack&gt;"</code> (no reconcile suffix) and the <code>SYNC</code> column is unchanged.</p>
+<p>The same end state is reachable via the explicit stop+start pair:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>$ kuke stop cell foo --realm default --space default --stack default
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Stopped cell &quot;foo&quot; from stack &quot;default&quot;
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>$ kuke start cell foo --realm default --space default --stack default
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>Started cell &quot;foo&quot; from stack &quot;default&quot;
+</code></pre></div>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../kuke-lifecycle/">kuke start / stop / kill</a> — primitive lifecycle verbs <code>kuke restart cell</code> composes.</li>
+<li><a href="../kuke-lifecycle/">kuke start / stop / kill</a> — primitive lifecycle verbs <code>kuke restart cell</code> composes; the OutOfSync reapply also fires from <code>kuke start cell</code> directly.</li>
 <li><a href="../kuke-get/">kuke get</a> — read the <code>SYNC</code> column on <code>kuke get cell -o wide</code> to spot OutOfSync ahead of <code>restart</code>.</li>
-<li><a href="../kuke-run/">kuke run</a> — divergent-spec warn-and-attach on the <code>&lt;config&gt;</code> and <code>-b --name</code> paths (<code>--require-synced</code> for the opt-in refusal) cites <code>kuke restart cell &lt;name&gt;</code> as the reconcile pointer.</li>
-<li><a href="../../manifests/config/"><code>kind: CellConfig</code></a> — the lineage source the OutOfSync reconcile re-materialises from.</li>
-<li><a href="../../manifests/blueprint/"><code>kind: CellBlueprint</code></a> — referenced by the Config, looked up via <code>GetBlueprint</code> on the reconcile path.</li>
+<li><a href="../kuke-run/">kuke run</a> — divergent-spec warn-and-attach on the <code>&lt;config&gt;</code> and <code>-b --name</code> paths (<code>--require-synced</code> for the opt-in refusal) cites <code>kuke restart cell &lt;name&gt;</code> as the reconcile pointer; the <code>&lt;config&gt;</code> path on an existing Stopped cell also triggers the daemon-side reapply.</li>
+<li><a href="../../manifests/config/"><code>kind: CellConfig</code></a> — the lineage source the OutOfSync reapply re-materialises from.</li>
+<li><a href="../../manifests/blueprint/"><code>kind: CellBlueprint</code></a> — referenced by the Config, looked up via <code>GetBlueprint</code> on the reapply path.</li>
 </ul>
 
 
@@ -3437,7 +3439,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 1, 2026 07:55:09 UTC">June 1, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 1, 2026 09:10:25 UTC">June 1, 2026</span>
   </span>
 
     
