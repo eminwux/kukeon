@@ -509,6 +509,155 @@ func TestDiffContainer_NonRootInPlace(t *testing.T) {
 	}
 }
 
+// TestDiffCell_Tty_CompatibleChange pins AC #1+#3 of issue #992: a change to
+// the cell-default TTY pointer (`Spec.Tty.Default`) must surface as a
+// Compatible diff with `spec.tty` in ChangedFields and a populated Details
+// entry — so `kuke apply` re-stamps the attach target instead of silently
+// dropping the edit.
+func TestDiffCell_Tty_CompatibleChange(t *testing.T) {
+	desired := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Tty:       &intmodel.CellTty{Default: "web"},
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest"},
+				{ID: "web", Image: "busybox:latest"},
+			},
+		},
+	}
+
+	actual := desired
+	actual.Spec.Tty = &intmodel.CellTty{Default: "root"}
+
+	diff := apply.DiffCell(desired, actual)
+	if !diff.HasChanges {
+		t.Fatal("expected changes for tty default edit")
+	}
+	if diff.ChangeType != apply.ChangeTypeCompatible {
+		t.Fatalf("expected compatible change, got %v", diff.ChangeType)
+	}
+	if !hasChangedField(diff.DiffResult, "spec.tty") {
+		t.Errorf("expected ChangedFields to include spec.tty, got %v", diff.ChangedFields)
+	}
+	if diff.Details["spec.tty"] == "" {
+		t.Errorf("expected Details[spec.tty] to be populated, got empty")
+	}
+	if len(diff.BreakingChanges) != 0 {
+		t.Errorf("tty edit must not populate BreakingChanges, got %v", diff.BreakingChanges)
+	}
+}
+
+// TestDiffCell_Tty_NilEqualsZero exercises the cellTtyEqual helper's
+// nil-versus-zero-value contract: a same-file re-apply where one side carries
+// nil and the other an explicitly-empty CellTty must not register drift.
+func TestDiffCell_Tty_NilEqualsZero(t *testing.T) {
+	desired := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Tty:       nil,
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest"},
+			},
+		},
+	}
+
+	actual := desired
+	actual.Spec.Tty = &intmodel.CellTty{Default: ""}
+
+	diff := apply.DiffCell(desired, actual)
+	if diff.HasChanges {
+		t.Errorf("nil vs empty CellTty must not register drift, got changes: %+v", diff)
+	}
+}
+
+// TestDiffCell_AutoDelete_CompatibleChange pins AC #1+#3 of issue #992: a
+// toggle of `Spec.AutoDelete` must surface as a Compatible diff with
+// `spec.autoDelete` in ChangedFields and a populated Details entry.
+func TestDiffCell_AutoDelete_CompatibleChange(t *testing.T) {
+	desired := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName:  "default",
+			SpaceName:  "default",
+			StackName:  "default",
+			AutoDelete: true,
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest"},
+			},
+		},
+	}
+
+	actual := desired
+	actual.Spec.AutoDelete = false
+
+	diff := apply.DiffCell(desired, actual)
+	if !diff.HasChanges {
+		t.Fatal("expected changes for autoDelete toggle")
+	}
+	if diff.ChangeType != apply.ChangeTypeCompatible {
+		t.Fatalf("expected compatible change, got %v", diff.ChangeType)
+	}
+	if !hasChangedField(diff.DiffResult, "spec.autoDelete") {
+		t.Errorf("expected ChangedFields to include spec.autoDelete, got %v", diff.ChangedFields)
+	}
+	if diff.Details["spec.autoDelete"] == "" {
+		t.Errorf("expected Details[spec.autoDelete] to be populated, got empty")
+	}
+	if len(diff.BreakingChanges) != 0 {
+		t.Errorf("autoDelete edit must not populate BreakingChanges, got %v", diff.BreakingChanges)
+	}
+}
+
+// TestDiffCell_NestedCgroupRuntime_BreakingChange pins AC #1+#2 of issue
+// #992: a toggle of `Spec.NestedCgroupRuntime` must classify as Breaking and
+// surface in BreakingChanges as `spec.nestedCgroupRuntime` — the runner's
+// cgroup-delegation and in-container /sys/fs/cgroup mount cannot be
+// re-stamped in place, so RecreateCell is the only safe path.
+func TestDiffCell_NestedCgroupRuntime_BreakingChange(t *testing.T) {
+	desired := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName:           "default",
+			SpaceName:           "default",
+			StackName:           "default",
+			NestedCgroupRuntime: true,
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest"},
+			},
+		},
+	}
+
+	actual := desired
+	actual.Spec.NestedCgroupRuntime = false
+
+	diff := apply.DiffCell(desired, actual)
+	if !diff.HasChanges {
+		t.Fatal("expected changes for nestedCgroupRuntime toggle")
+	}
+	if diff.ChangeType != apply.ChangeTypeBreaking {
+		t.Fatalf("expected breaking change, got %v", diff.ChangeType)
+	}
+	found := false
+	for _, f := range diff.BreakingChanges {
+		if f == "spec.nestedCgroupRuntime" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected BreakingChanges to include spec.nestedCgroupRuntime, got %v", diff.BreakingChanges)
+	}
+	if diff.Details["spec.nestedCgroupRuntime"] == "" {
+		t.Errorf("expected Details[spec.nestedCgroupRuntime] to be populated, got empty")
+	}
+}
+
 func hasChangedField(diff apply.DiffResult, field string) bool {
 	for _, f := range diff.ChangedFields {
 		if f == field {
