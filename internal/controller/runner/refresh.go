@@ -740,11 +740,19 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 	cell.Status.ReadyObserved = latchReadyObserved(
 		originalStatus.ReadyObserved, originalStatus.State, newState)
 
-	if shouldAutoDeleteCell(cell.Spec.AutoDelete, newState, cell.Status.ReadyObserved) {
+	// RestartPolicy gate (#1003): per-container restartPolicy can veto both
+	// the auto-delete and the wind-down kill so a workload authored with
+	// `restartPolicy: never` (or `on-failure` that exited cleanly) is left
+	// in Stopped state instead of disappearing under the next tick.
+	// Permissive default (empty/Always) preserves the pre-#1003 behavior
+	// for cells that never set the field. See restartPolicyPermitsCellReap.
+	restartReap := restartPolicyPermitsCellReap(cell)
+
+	if restartReap && shouldAutoDeleteCell(cell.Spec.AutoDelete, newState, cell.Status.ReadyObserved) {
 		return r.autoDeleteCell(cell)
 	}
 
-	if shouldWindDownCell(cell, newState) {
+	if restartReap && shouldWindDownCell(cell, newState) {
 		return r.windDownCell(cell)
 	}
 
@@ -911,6 +919,88 @@ func shouldWindDownCell(cell intmodel.Cell, newState intmodel.CellState) bool {
 		return false
 	}
 	return rootContainerStillRunning(rootSpec.ID, cell.Status.Containers)
+}
+
+// restartPolicyPermitsCellReap reports whether every terminally-exited
+// non-root container in the cell carries a RestartPolicy that permits
+// the cell-level wind-down / auto-delete to fire (#1003). The reconciler
+// asks this gate before both shouldAutoDeleteCell and shouldWindDownCell —
+// a single container's `never` (or `on-failure` with a clean exit) blocks
+// the cell-level reap, preserving the workload in Stopped state so the
+// operator can decide explicitly.
+//
+// Decision per terminally-exited non-root container, keyed on its
+// ContainerStatus.ExitCode (populated by GetContainerObservation):
+//
+//   - "" or "always"  → permit reap. Empty is the back-compat default so
+//     cells that pre-date #1003 keep the wind-down behavior they have today.
+//   - "on-failure"    → permit reap only when ExitCode != 0; a clean exit
+//     (0) means the workload completed successfully and the cell stays.
+//   - "never"         → never permit reap.
+//
+// Unknown values fall through to the permissive default to mirror the
+// pre-#1003 behavior — typos and future-spec values do not silently
+// strand cells in Stopped.
+//
+// Containers in non-terminal states (Ready/Pending/Paused/Unknown) are
+// ignored: the cell-state derivation already gates on "every non-root
+// terminal" before this function runs, so a non-terminal container being
+// "permitted to reap" is meaningless.
+func restartPolicyPermitsCellReap(cell intmodel.Cell) bool {
+	statusByID := make(map[string]intmodel.ContainerStatus, len(cell.Status.Containers))
+	for i := range cell.Status.Containers {
+		statusByID[cell.Status.Containers[i].ID] = cell.Status.Containers[i]
+	}
+	for i := range cell.Spec.Containers {
+		spec := cell.Spec.Containers[i]
+		if spec.Root {
+			continue
+		}
+		status, ok := statusByID[spec.ID]
+		if !ok {
+			continue
+		}
+		if !containerStateIsTerminal(status.State) {
+			continue
+		}
+		if !restartPolicyPermitsContainerReap(spec.RestartPolicy, status.ExitCode) {
+			return false
+		}
+	}
+	return true
+}
+
+// restartPolicyPermitsContainerReap is the per-container half of
+// restartPolicyPermitsCellReap. Pulled out so it can be exercised
+// directly without building a full cell snapshot. See
+// restartPolicyPermitsCellReap for the policy table.
+func restartPolicyPermitsContainerReap(policy string, exitCode int) bool {
+	switch policy {
+	case "", intmodel.RestartPolicyAlways:
+		return true
+	case intmodel.RestartPolicyOnFailure:
+		return exitCode != 0
+	case intmodel.RestartPolicyNever:
+		return false
+	default:
+		return true
+	}
+}
+
+// containerStateIsTerminal reports whether the state means "the task
+// is no longer running and will not run again on its own". Used by
+// restartPolicyPermitsCellReap to scope its policy check to containers
+// the reconciler is about to reap. Stopped, Failed, and NotCreated all
+// count — the cell-state derivation already treats them equivalently
+// (see deriveCellStateFromNonRootContainerStatuses).
+func containerStateIsTerminal(s intmodel.ContainerState) bool {
+	switch s {
+	case intmodel.ContainerStateStopped,
+		intmodel.ContainerStateFailed,
+		intmodel.ContainerStateNotCreated:
+		return true
+	}
+	return false
 }
 
 // rootContainerStillRunning answers the "is the root task still

@@ -77,6 +77,13 @@ type ContainerSpec struct {
 	// See the v1beta1 type for field semantics. Issue #618.
 	Git           *ContainerGit
 	CNIConfigPath string
+	// RestartPolicy is the user-authored restart policy applied to the
+	// container when its task exits. See the RestartPolicy* constants
+	// below for the canonical values; the runner's wind-down/auto-delete
+	// gate (refresh.go:restartPolicyPermitsCellReap) is the only consumer
+	// today. Empty/unset is treated as RestartPolicyAlways for
+	// back-compat — the pre-#1003 wind-down behavior, where every
+	// non-root container exit can trigger a cell-level wind-down.
 	RestartPolicy string
 	Attachable    bool
 	Tty           *ContainerTty
@@ -313,4 +320,13 @@ const (
 	// gone). Appended last to keep the ordinals in lockstep with the v1beta1
 	// ContainerState enum, which scheme.go converts by direct int cast.
 	ContainerStateNotCreated
+)
+
+// RestartPolicy values for ContainerSpec.RestartPolicy. Empty/unset is
+// treated as RestartPolicyAlways at the runner gate — see ContainerSpec
+// for the back-compat contract.
+const (
+	RestartPolicyAlways    = "always"
+	RestartPolicyOnFailure = "on-failure"
+	RestartPolicyNever     = "never"
 )

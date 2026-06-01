@@ -715,14 +715,18 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 	now := r.nowUTC()
 
 	for _, containerSpec := range cell.Spec.Containers {
-		// Get container state from containerd
-		state, err := r.GetContainerState(*cell, containerSpec.ID)
+		// Get container observation (state + exit code) from containerd.
+		// ExitCode flows into ContainerStatus so the RestartPolicy gate in
+		// refresh.go can distinguish clean exits (0) from failures on
+		// `on-failure` policy. The state-only failure mode is preserved —
+		// any error here zeros both fields and we log + continue, same as
+		// the pre-#1003 behavior.
+		obs, err := r.GetContainerObservation(*cell, containerSpec.ID)
 		if err != nil {
-			// Log error but continue with other containers
-			r.logger.DebugContext(r.ctx, "failed to get container state",
+			r.logger.DebugContext(r.ctx, "failed to get container observation",
 				"container", containerSpec.ID,
 				"error", err)
-			state = intmodel.ContainerStateUnknown
+			obs = ContainerObservation{State: intmodel.ContainerStateUnknown}
 		}
 
 		// CreatedAt: stamp on the first observation, preserve thereafter.
@@ -734,18 +738,18 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 		}
 
 		// TODO: Get additional status fields (RestartCount, StartTime, etc.) from containerd
-		// For now, populate with basic state
+		// For now, populate with basic state + exit code
 		status := intmodel.ContainerStatus{
 			Name:         containerSpec.ID,
 			ID:           containerSpec.ID,
 			CreatedAt:    createdAt,
-			State:        state,
+			State:        obs.State,
 			RestartCount: 0,           // TODO: retrieve from containerd
 			RestartTime:  time.Time{}, // TODO: retrieve from containerd
 			StartTime:    time.Time{}, // TODO: retrieve from containerd
 			FinishTime:   time.Time{}, // TODO: retrieve from containerd
-			ExitCode:     0,           // TODO: retrieve from containerd
-			ExitSignal:   "",          // TODO: retrieve from containerd
+			ExitCode:     obs.ExitCode,
+			ExitSignal:   "", // TODO: retrieve from containerd
 		}
 		// Pull per-repo clone/fetch and per-create-stage outcomes over the
 		// kuketty control socket (issues #642, #689) in a single dial.
@@ -753,7 +757,7 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 		// create stages and are Ready can serve the verb, and any failure leaves
 		// Repos/Stages empty rather than blocking the status read.
 		var liveStages []intmodel.StageStatus
-		status.Repos, liveStages = r.setupStatuses(cell, containerSpec, state)
+		status.Repos, liveStages = r.setupStatuses(cell, containerSpec, obs.State)
 		// Merge live + prior stages against the current spec so done
 		// records survive stop/start and edited stages drop their prior
 		// done. See mergeStageStatuses for the Index + Hash contract.

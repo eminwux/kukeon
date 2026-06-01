@@ -28,39 +28,62 @@ import (
 	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
+// ContainerObservation bundles the slice of containerd task state the runner
+// needs to surface in ContainerStatus and drive lifecycle decisions: the
+// internal-state mapping plus the exit code reported by the task. ExitCode is
+// only meaningful on the TaskStatus-success branch — on every other branch
+// (NotCreated, ErrTaskNotFound, transient error, fallback Unknown) it stays
+// zero.
+type ContainerObservation struct {
+	State    intmodel.ContainerState
+	ExitCode int
+}
+
 // GetContainerState queries containerd for the actual task status of a container
-// and converts it to the internal ContainerState.
+// and converts it to the internal ContainerState. Thin wrapper around
+// GetContainerObservation for callers that only need the state column.
 func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmodel.ContainerState, error) {
+	obs, err := r.GetContainerObservation(cell, containerID)
+	return obs.State, err
+}
+
+// GetContainerObservation is GetContainerState plus the task's exit code.
+// Behaves identically on the existence/namespace/task-not-found edges so
+// callers can swap from GetContainerState without observability gaps; the
+// ExitCode field is only populated on the TaskStatus-success branch (every
+// other return path leaves it zero).
+func (r *Exec) GetContainerObservation(cell intmodel.Cell, containerID string) (ContainerObservation, error) {
 	containerID = strings.TrimSpace(containerID)
 	if containerID == "" {
-		return intmodel.ContainerStateUnknown, errors.New("container ID is required")
+		return ContainerObservation{State: intmodel.ContainerStateUnknown}, errors.New("container ID is required")
 	}
 
 	cellName := strings.TrimSpace(cell.Metadata.Name)
 	if cellName == "" {
-		return intmodel.ContainerStateUnknown, errdefs.ErrCellNotFound
+		return ContainerObservation{State: intmodel.ContainerStateUnknown}, errdefs.ErrCellNotFound
 	}
 
 	realmName := strings.TrimSpace(cell.Spec.RealmName)
 	if realmName == "" {
-		return intmodel.ContainerStateUnknown, errdefs.ErrRealmNameRequired
+		return ContainerObservation{State: intmodel.ContainerStateUnknown}, errdefs.ErrRealmNameRequired
 	}
 
 	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
 	if spaceName == "" {
-		return intmodel.ContainerStateUnknown, errdefs.ErrSpaceNameRequired
+		return ContainerObservation{State: intmodel.ContainerStateUnknown}, errdefs.ErrSpaceNameRequired
 	}
 
 	stackName := strings.TrimSpace(cell.Spec.StackName)
 	if stackName == "" {
-		return intmodel.ContainerStateUnknown, errdefs.ErrStackNameRequired
+		return ContainerObservation{State: intmodel.ContainerStateUnknown}, errdefs.ErrStackNameRequired
 	}
 
 	if err := r.ensureClientConnected(); err != nil {
 		r.logger.InfoContext(r.ctx, "failed to connect to containerd",
 			"container", containerID,
 			"error", err)
-		return intmodel.ContainerStateUnknown, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+		return ContainerObservation{State: intmodel.ContainerStateUnknown},
+			fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
 	}
 
 	// Get realm to access namespace
@@ -75,7 +98,8 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 			"container", containerID,
 			"realm", realmName,
 			"error", err)
-		return intmodel.ContainerStateUnknown, fmt.Errorf("failed to get realm: %w", err)
+		return ContainerObservation{State: intmodel.ContainerStateUnknown},
+			fmt.Errorf("failed to get realm: %w", err)
 	}
 
 	namespace := internalRealm.Spec.Namespace
@@ -101,7 +125,7 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 			"container", containerID,
 			"cell", cellName,
 			"containersInCell", len(cell.Spec.Containers))
-		return intmodel.ContainerStateUnknown, nil
+		return ContainerObservation{State: intmodel.ContainerStateUnknown}, nil
 	}
 
 	// Get cell ID (use Spec.ID if available, otherwise fall back to Metadata.Name)
@@ -110,7 +134,7 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 		cellID = strings.TrimSpace(cell.Metadata.Name)
 	}
 	if cellID == "" {
-		return intmodel.ContainerStateUnknown, errdefs.ErrCellIDRequired
+		return ContainerObservation{State: intmodel.ContainerStateUnknown}, errdefs.ErrCellIDRequired
 	}
 
 	// Get containerd ID
@@ -132,7 +156,8 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 			)
 		}
 		if err != nil {
-			return intmodel.ContainerStateUnknown, fmt.Errorf("failed to build containerd ID: %w", err)
+			return ContainerObservation{State: intmodel.ContainerStateUnknown},
+				fmt.Errorf("failed to build containerd ID: %w", err)
 		}
 	}
 
@@ -148,7 +173,7 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 			"container", containerID,
 			"containerdID", containerdID,
 			"error", err)
-		return intmodel.ContainerStateUnknown, nil
+		return ContainerObservation{State: intmodel.ContainerStateUnknown}, nil
 	}
 
 	if !containerExists {
@@ -162,21 +187,27 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 			"container", containerID,
 			"containerdID", containerdID,
 			"namespace", namespace)
-		return intmodel.ContainerStateNotCreated, nil
+		return ContainerObservation{State: intmodel.ContainerStateNotCreated}, nil
 	}
 
 	// Get container state using TaskStatus from ctr package
 	taskStatus, taskStatusErr := r.ctrClient.TaskStatus(namespace, containerdID)
 	if taskStatusErr == nil {
-		// TaskStatus succeeded - convert and return
+		// TaskStatus succeeded - convert and return. ExitStatus is the
+		// uint32 exit code containerd records for the task; it is only
+		// meaningful on Stopped tasks (Running/Created/Paused leave the
+		// field unobserved) but the value is safe to surface unconditionally
+		// — non-terminal callers read the State column and ignore ExitCode.
 		state := ctr.ConvertContainerdStatusToContainerState(taskStatus)
+		exitCode := int(taskStatus.ExitStatus)
 		r.logger.InfoContext(r.ctx, "container state determined via TaskStatus",
 			"container", containerID,
 			"containerdID", containerdID,
 			"namespace", namespace,
 			"taskStatus", taskStatus.Status,
-			"internalState", state)
-		return state, nil
+			"internalState", state,
+			"exitCode", exitCode)
+		return ContainerObservation{State: state, ExitCode: exitCode}, nil
 	}
 
 	// TaskStatus failed against an existing container: the container record
@@ -194,7 +225,7 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 			"containerdID", containerdID,
 			"namespace", namespace,
 			"error", taskStatusErr)
-		return intmodel.ContainerStateStopped, nil
+		return ContainerObservation{State: intmodel.ContainerStateStopped}, nil
 	}
 
 	// TaskStatus failed - return Unknown since we can't determine the state
@@ -203,5 +234,5 @@ func (r *Exec) GetContainerState(cell intmodel.Cell, containerID string) (intmod
 		"containerdID", containerdID,
 		"namespace", namespace,
 		"error", taskStatusErr)
-	return intmodel.ContainerStateUnknown, nil
+	return ContainerObservation{State: intmodel.ContainerStateUnknown}, nil
 }
