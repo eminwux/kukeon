@@ -38,7 +38,7 @@ func minimalBlueprint() v1beta1.CellBlueprintDoc {
 			Realm: "bp-realm",
 		},
 		Spec: v1beta1.CellBlueprintSpec{
-			Parameters: []v1beta1.CellProfileParameter{{Name: "TAG", Default: &def}},
+			Parameters: []v1beta1.CellBlueprintParameter{{Name: "TAG", Default: &def}},
 			Cell: v1beta1.BlueprintCellSpec{
 				Containers: []v1beta1.BlueprintContainer{{
 					ID:    "main",
@@ -287,7 +287,7 @@ func TestMaterialize_PropagatesResolveError(t *testing.T) {
 		Kind:       v1beta1.KindCellBlueprint,
 		Metadata:   v1beta1.CellBlueprintMetadata{Name: "web", Realm: "bp-realm"},
 		Spec: v1beta1.CellBlueprintSpec{
-			Parameters: []v1beta1.CellProfileParameter{{Name: "TAG", Required: true}},
+			Parameters: []v1beta1.CellBlueprintParameter{{Name: "TAG", Required: true}},
 			Cell: v1beta1.BlueprintCellSpec{
 				Containers: []v1beta1.BlueprintContainer{{ID: "main", Image: "${TAG}"}},
 			},

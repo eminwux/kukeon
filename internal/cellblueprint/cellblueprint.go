@@ -90,7 +90,7 @@ func resolveValues(
 	cliParams map[string]string,
 	lookupEnv func(string) (string, bool),
 ) (map[string]string, error) {
-	declared := make(map[string]v1beta1.CellProfileParameter, len(doc.Spec.Parameters))
+	declared := make(map[string]v1beta1.CellBlueprintParameter, len(doc.Spec.Parameters))
 	for _, p := range doc.Spec.Parameters {
 		declared[p.Name] = p
 	}

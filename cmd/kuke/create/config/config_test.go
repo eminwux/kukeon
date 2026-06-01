@@ -177,7 +177,7 @@ func TestNewConfigCmd_EmitsParsableYAML(t *testing.T) {
 			blueprint: v1beta1.CellBlueprintDoc{
 				Metadata: v1beta1.CellBlueprintMetadata{Name: "bp", Realm: "r1"},
 				Spec: v1beta1.CellBlueprintSpec{
-					Parameters: []v1beta1.CellProfileParameter{
+					Parameters: []v1beta1.CellBlueprintParameter{
 						{Name: "TOKEN", Required: true},
 					},
 					Cell: v1beta1.BlueprintCellSpec{
@@ -192,7 +192,7 @@ func TestNewConfigCmd_EmitsParsableYAML(t *testing.T) {
 			blueprint: v1beta1.CellBlueprintDoc{
 				Metadata: v1beta1.CellBlueprintMetadata{Name: "bp", Realm: "r1"},
 				Spec: v1beta1.CellBlueprintSpec{
-					Parameters: []v1beta1.CellProfileParameter{
+					Parameters: []v1beta1.CellBlueprintParameter{
 						{Name: "PORT", Default: ptr("5432")},
 						{Name: "ENV", Default: ptr("production")},
 						{Name: "TAGS", Default: ptr("a,b c")},
@@ -209,7 +209,7 @@ func TestNewConfigCmd_EmitsParsableYAML(t *testing.T) {
 			blueprint: v1beta1.CellBlueprintDoc{
 				Metadata: v1beta1.CellBlueprintMetadata{Name: "bp", Realm: "r1"},
 				Spec: v1beta1.CellBlueprintSpec{
-					Parameters: []v1beta1.CellProfileParameter{
+					Parameters: []v1beta1.CellBlueprintParameter{
 						{Name: "EXTRA"},
 					},
 					Cell: v1beta1.BlueprintCellSpec{

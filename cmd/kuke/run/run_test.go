@@ -2417,7 +2417,7 @@ func blueprintDoc() v1beta1.CellBlueprintDoc {
 		},
 		Spec: v1beta1.CellBlueprintSpec{
 			Prefix:     "web",
-			Parameters: []v1beta1.CellProfileParameter{{Name: "TAG", Default: &def}},
+			Parameters: []v1beta1.CellBlueprintParameter{{Name: "TAG", Default: &def}},
 			Cell: v1beta1.BlueprintCellSpec{
 				Containers: []v1beta1.BlueprintContainer{
 					{ID: "main", Image: "registry.example.com/web:${TAG}", Attachable: true},
@@ -2531,7 +2531,7 @@ func configBlueprintDoc() v1beta1.CellBlueprintDoc {
 			Realm: "bp-realm",
 		},
 		Spec: v1beta1.CellBlueprintSpec{
-			Parameters: []v1beta1.CellProfileParameter{{Name: "TAG", Default: &def}},
+			Parameters: []v1beta1.CellBlueprintParameter{{Name: "TAG", Default: &def}},
 			Cell: v1beta1.BlueprintCellSpec{
 				Containers: []v1beta1.BlueprintContainer{
 					{

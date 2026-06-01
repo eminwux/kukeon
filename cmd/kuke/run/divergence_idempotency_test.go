@@ -198,7 +198,7 @@ func minimalBlueprintForDivergence() v1beta1.CellBlueprintDoc {
 		Kind:       v1beta1.KindCellBlueprint,
 		Metadata:   v1beta1.CellBlueprintMetadata{Name: "web", Realm: "bp-realm"},
 		Spec: v1beta1.CellBlueprintSpec{
-			Parameters: []v1beta1.CellProfileParameter{{Name: "TAG", Default: &def}},
+			Parameters: []v1beta1.CellBlueprintParameter{{Name: "TAG", Default: &def}},
 			Cell: v1beta1.BlueprintCellSpec{
 				Containers: []v1beta1.BlueprintContainer{
 					{ID: "root", Root: true, Image: "registry.example.com/root:latest"},
@@ -228,7 +228,7 @@ func richBlueprintForDivergence() v1beta1.CellBlueprintDoc {
 		Kind:       v1beta1.KindCellBlueprint,
 		Metadata:   v1beta1.CellBlueprintMetadata{Name: "web", Realm: "bp-realm"},
 		Spec: v1beta1.CellBlueprintSpec{
-			Parameters: []v1beta1.CellProfileParameter{{Name: "TAG", Default: &def}},
+			Parameters: []v1beta1.CellBlueprintParameter{{Name: "TAG", Default: &def}},
 			Cell: v1beta1.BlueprintCellSpec{
 				Containers: []v1beta1.BlueprintContainer{
 					{ID: "root", Root: true, Image: "registry.example.com/root:latest"},

@@ -44,7 +44,7 @@ func baseDoc() v1beta1.CellBlueprintDoc {
 		},
 		Spec: v1beta1.CellBlueprintSpec{
 			Prefix: "web",
-			Parameters: []v1beta1.CellProfileParameter{
+			Parameters: []v1beta1.CellBlueprintParameter{
 				{Name: "TAG", Default: strptr("latest")},
 			},
 			Cell: v1beta1.BlueprintCellSpec{
@@ -82,7 +82,7 @@ func TestResolve_CliParamWins(t *testing.T) {
 
 func TestResolve_EnvFallback(t *testing.T) {
 	doc := baseDoc()
-	doc.Spec.Parameters = []v1beta1.CellProfileParameter{{Name: "TAG"}} // no default
+	doc.Spec.Parameters = []v1beta1.CellBlueprintParameter{{Name: "TAG"}} // no default
 	lookup := func(k string) (string, bool) {
 		if k == "TAG" {
 			return "from-env", true
@@ -107,7 +107,7 @@ func TestResolve_UndeclaredParamErrors(t *testing.T) {
 
 func TestResolve_RequiredUnsetErrors(t *testing.T) {
 	doc := baseDoc()
-	doc.Spec.Parameters = []v1beta1.CellProfileParameter{{Name: "TAG", Required: true}}
+	doc.Spec.Parameters = []v1beta1.CellBlueprintParameter{{Name: "TAG", Required: true}}
 	_, err := cellblueprint.Resolve(doc, nil, nil)
 	if !errors.Is(err, errdefs.ErrBlueprintInvalid) {
 		t.Fatalf("err = %v, want ErrBlueprintInvalid for required-unset param", err)
