@@ -871,9 +871,10 @@ func TestRun_ExistingCell_SynthesizedRoot_DoesNotDiverge(t *testing.T) {
 
 // TestRun_ExistingCell_SynthesizedRoot_RealDivergenceStillCaught makes sure
 // the issue #437 fix did not over-narrow: when the user adds a new container
-// to the YAML between runs, the refusal must still fire and name the
-// diverging field (count delta among user containers, not the synthesized
-// root).
+// to the YAML between runs, the divergence detection must still fire and
+// name the diverging field (count delta among user containers, not the
+// synthesized root). Under --require-synced the refusal is the same shape
+// the pre-#986 default emitted.
 func TestRun_ExistingCell_SynthesizedRoot_RealDivergenceStillCaught(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
@@ -899,7 +900,7 @@ func TestRun_ExistingCell_SynthesizedRoot_RealDivergenceStillCaught(t *testing.T
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, cellYAMLUserContainersOnly), "-d"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, cellYAMLUserContainersOnly), "-d", "--require-synced"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -913,12 +914,14 @@ func TestRun_ExistingCell_SynthesizedRoot_RealDivergenceStillCaught(t *testing.T
 	}
 }
 
-func TestRun_ExistingCell_DivergingContainerSet_RefusesAndPointsToApply(t *testing.T) {
+func TestRun_ExistingCell_DivergingContainerSet_RequireSynced_RefusesAndPointsToApply(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	// On-disk cell has an extra container the file does not declare. This is
 	// the structural drift (container set / count) the AC routes through
-	// `kuke apply -f`.
+	// `kuke apply -f`. With --require-synced (#986) the behaviour matches the
+	// pre-#986 default: the divergence guard refuses and points the operator
+	// at `kuke apply -f`.
 	existing := v1beta1.CellDoc{
 		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
 		Spec: v1beta1.CellSpec{
@@ -954,7 +957,7 @@ func TestRun_ExistingCell_DivergingContainerSet_RefusesAndPointsToApply(t *testi
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d", "--require-synced"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -966,19 +969,22 @@ func TestRun_ExistingCell_DivergingContainerSet_RefusesAndPointsToApply(t *testi
 	if !strings.Contains(err.Error(), "spec.containers (count:") {
 		t.Errorf("err=%q does not name the diverging field", err)
 	}
+	if !strings.Contains(err.Error(), "--require-synced") {
+		t.Errorf("err=%q should mention --require-synced as the strict-mode trigger", err)
+	}
 	if fc.createCalls != 0 {
 		t.Errorf("CreateCell calls=%d want 0 (must not mutate on divergence)", fc.createCalls)
 	}
 }
 
-// TestRun_ExistingCell_DivergingContainerImage_RefusesAndPointsToApply covers
-// the issue #468 case: on-disk cell has the same container set as the file
-// but the user-supplied container's image differs (busybox:latest on disk
-// vs busybox:musl in the file). `kuke run -f` must refuse with the
-// diverging-spec error and not mutate the cell, matching the
-// `docs/cli-use-cases.md` invariant for `kuke run -f` against a divergent
-// on-disk spec.
-func TestRun_ExistingCell_DivergingContainerImage_RefusesAndPointsToApply(t *testing.T) {
+// TestRun_ExistingCell_DivergingContainerImage_RequireSynced_RefusesAndPointsToApply
+// covers the issue #468 case: on-disk cell has the same container set as the
+// file but the user-supplied container's image differs (busybox:latest on
+// disk vs busybox:musl in the file). With --require-synced (#986),
+// `kuke run -f` refuses with the diverging-spec error and does not mutate
+// the cell, matching the pre-#986 default behaviour and the
+// `docs/cli-use-cases.md` invariant for opt-in strict mode.
+func TestRun_ExistingCell_DivergingContainerImage_RequireSynced_RefusesAndPointsToApply(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	existing := v1beta1.CellDoc{
@@ -1016,14 +1022,14 @@ func TestRun_ExistingCell_DivergingContainerImage_RefusesAndPointsToApply(t *tes
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d", "--require-synced"})
 
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("Execute returned nil, want divergence error for image change")
 	}
-	if !strings.Contains(err.Error(), `cell "my-cell" exists with diverging spec`) {
-		t.Errorf("err=%q does not contain the diverging-spec phrase naming the cell", err)
+	if !strings.Contains(err.Error(), `live cell "my-cell" spec differs from on-disk spec`) {
+		t.Errorf("err=%q does not contain the diverging-spec phrase naming the cell + on-disk source", err)
 	}
 	if !strings.Contains(err.Error(), "kuke apply -f") {
 		t.Errorf("err=%q does not refer the operator to `kuke apply -f`", err)
@@ -1031,17 +1037,22 @@ func TestRun_ExistingCell_DivergingContainerImage_RefusesAndPointsToApply(t *tes
 	if !strings.Contains(err.Error(), `spec.containers["work"].image`) {
 		t.Errorf("err=%q does not name the diverging image field on the user container", err)
 	}
+	if !strings.Contains(err.Error(), "--require-synced") {
+		t.Errorf("err=%q should mention --require-synced as the strict-mode trigger", err)
+	}
 	if fc.createCalls != 0 {
 		t.Errorf("CreateCell calls=%d want 0 (must not mutate on divergence)", fc.createCalls)
 	}
 }
 
-// TestRun_ExistingCell_DivergingContainerSecrets_RefusesAndPointsToApply
-// exercises the secrets branch of divergedContainerFields. Secrets is
-// user-authored, persisted to disk unchanged (apischeme round-trips it
-// verbatim), and not filled in from `space.spec.defaults.container` — so
-// the same no-op-on-drift failure mode that #468 closes for image applies.
-func TestRun_ExistingCell_DivergingContainerSecrets_RefusesAndPointsToApply(t *testing.T) {
+// TestRun_ExistingCell_DivergingContainerSecrets_RequireSynced_RefusesAndPointsToApply
+// exercises the secrets branch of divergedContainerFields under
+// --require-synced (#986). Secrets is user-authored, persisted to disk
+// unchanged (apischeme round-trips it verbatim), and not filled in from
+// `space.spec.defaults.container` — so the same no-op-on-drift failure mode
+// that #468 closes for image applies; the opt-in strict mode preserves the
+// pre-#986 refusal.
+func TestRun_ExistingCell_DivergingContainerSecrets_RequireSynced_RefusesAndPointsToApply(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	existing := v1beta1.CellDoc{
@@ -1082,20 +1093,23 @@ func TestRun_ExistingCell_DivergingContainerSecrets_RefusesAndPointsToApply(t *t
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d", "--require-synced"})
 
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("Execute returned nil, want divergence error for secrets change")
 	}
-	if !strings.Contains(err.Error(), `cell "my-cell" exists with diverging spec`) {
-		t.Errorf("err=%q does not contain the diverging-spec phrase naming the cell", err)
+	if !strings.Contains(err.Error(), `live cell "my-cell" spec differs from on-disk spec`) {
+		t.Errorf("err=%q does not contain the diverging-spec phrase naming the cell + on-disk source", err)
 	}
 	if !strings.Contains(err.Error(), "kuke apply -f") {
 		t.Errorf("err=%q does not refer the operator to `kuke apply -f`", err)
 	}
 	if !strings.Contains(err.Error(), `spec.containers["work"].secrets`) {
 		t.Errorf("err=%q does not name the diverging secrets field on the user container", err)
+	}
+	if !strings.Contains(err.Error(), "--require-synced") {
+		t.Errorf("err=%q should mention --require-synced as the strict-mode trigger", err)
 	}
 	if fc.createCalls != 0 {
 		t.Errorf("CreateCell calls=%d want 0 (must not mutate on divergence)", fc.createCalls)
@@ -1202,12 +1216,13 @@ spec:
 	}
 }
 
-// TestRun_ExistingCell_DivergingContainerTty_RefusesAndPointsToApply
-// exercises the tty branch of divergedContainerFields. ContainerTty is
-// user-authored shell-UX config the daemon persists verbatim and never
-// fills in from space defaults, so a drift here would silently skip the
-// configured prompt/profile/onInit on `kuke run -f` re-runs.
-func TestRun_ExistingCell_DivergingContainerTty_RefusesAndPointsToApply(t *testing.T) {
+// TestRun_ExistingCell_DivergingContainerTty_RequireSynced_RefusesAndPointsToApply
+// exercises the tty branch of divergedContainerFields under --require-synced
+// (#986). ContainerTty is user-authored shell-UX config the daemon persists
+// verbatim and never fills in from space defaults, so a drift here would
+// silently skip the configured prompt/profile/onInit on `kuke run -f`
+// re-runs. The opt-in strict mode preserves the pre-#986 refusal.
+func TestRun_ExistingCell_DivergingContainerTty_RequireSynced_RefusesAndPointsToApply(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	existing := v1beta1.CellDoc{
@@ -1257,20 +1272,23 @@ func TestRun_ExistingCell_DivergingContainerTty_RefusesAndPointsToApply(t *testi
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-d"})
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML), "-d", "--require-synced"})
 
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("Execute returned nil, want divergence error for tty change")
 	}
-	if !strings.Contains(err.Error(), `cell "my-cell" exists with diverging spec`) {
-		t.Errorf("err=%q does not contain the diverging-spec phrase naming the cell", err)
+	if !strings.Contains(err.Error(), `live cell "my-cell" spec differs from on-disk spec`) {
+		t.Errorf("err=%q does not contain the diverging-spec phrase naming the cell + on-disk source", err)
 	}
 	if !strings.Contains(err.Error(), "kuke apply -f") {
 		t.Errorf("err=%q does not refer the operator to `kuke apply -f`", err)
 	}
 	if !strings.Contains(err.Error(), `spec.containers["claude"].tty`) {
 		t.Errorf("err=%q does not name the diverging tty field on the user container", err)
+	}
+	if !strings.Contains(err.Error(), "--require-synced") {
+		t.Errorf("err=%q should mention --require-synced as the strict-mode trigger", err)
 	}
 	if fc.createCalls != 0 {
 		t.Errorf("CreateCell calls=%d want 0 (must not mutate on divergence)", fc.createCalls)
@@ -2744,15 +2762,16 @@ func TestRun_FromConfig_LiveFailedCell_RefusesWithDeletePointer(t *testing.T) {
 	}
 }
 
-func TestRun_FromConfig_DivergentSpec_RefusesAndPointsToApply(t *testing.T) {
+func TestRun_FromConfig_DivergentSpec_RequireSynced_RefusesAndPointsToApply(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	// Simulate divergence by returning a Ready cell whose container image
-	// disagrees with what Materialize(cfg, bp) would build. Per #753 the -c
-	// contract on divergence is to refuse with a `kuke restart cell <name>`
-	// pointer (#844 retargeted the pointer onto the post-#823 surface; the
-	// removed apply-side reconcile-by-ref form lived behind a single short
-	// flag), not warn-and-attach — CreateCell/StartCell must not fire.
+	// disagrees with what Materialize(cfg, bp) would build. With
+	// --require-synced (#986) the -c contract reverts to the pre-#986
+	// default: refuse with a `kuke restart cell <name>` pointer (#844
+	// retargeted the pointer onto the post-#823 surface), not warn-and-attach
+	// — CreateCell/StartCell must not fire. The default warn-and-attach
+	// behaviour is covered by TestRun_FromConfig_DivergentSpec_Default_WarnsAndAttaches.
 	fc := &fakeClient{
 		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
 			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
@@ -2784,7 +2803,7 @@ func TestRun_FromConfig_DivergentSpec_RefusesAndPointsToApply(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"prod", "--realm", "cfg-realm", "-d"})
+	cmd.SetArgs([]string{"prod", "--realm", "cfg-realm", "-d", "--require-synced"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -2797,7 +2816,7 @@ func TestRun_FromConfig_DivergentSpec_RefusesAndPointsToApply(t *testing.T) {
 	for _, want := range []string{
 		`live cell "prod" spec differs from CellConfig "prod"`,
 		`spec.containers["main"].image`,
-		"refusing to attach",
+		"refusing to attach (--require-synced)",
 		"kuke restart cell prod",
 		"reconcile",
 	} {
@@ -2810,17 +2829,20 @@ func TestRun_FromConfig_DivergentSpec_RefusesAndPointsToApply(t *testing.T) {
 	}
 }
 
-// TestRun_FromBlueprint_NamedDivergent_RefusesAndPointsToApply covers #753's
-// -b --name addition: a pinned-name `kuke run -b <bp> --name <cell>` against a
-// live cell whose spec has diverged from the materialisation must refuse with
-// a `kuke delete cell <cell>` + re-run pointer (#844 retargeted the pointer
+// TestRun_FromBlueprint_NamedDivergent_RequireSynced_RefusesAndPointsToApply
+// covers #753's -b --name addition under --require-synced (#986): a
+// pinned-name `kuke run -b <bp> --name <cell>` against a live cell whose
+// spec has diverged from the materialisation refuses with a
+// `kuke delete cell <cell>` + re-run pointer (#844 retargeted the pointer
 // onto the post-#823 surface — Blueprint-lineage cells have no implicit
 // reconcile per #819's umbrella, so the message routes to delete-and-re-run
-// rather than a reconcile verb), not silently attach to the diverged state.
-// The generated-name path (`kuke run -b <bp>` without --name) is unaffected
+// rather than a reconcile verb). The default warn-and-attach behaviour
+// (without --require-synced) is covered by
+// TestRun_FromBlueprint_NamedDivergent_Default_WarnsAndAttaches. The
+// generated-name path (`kuke run -b <bp>` without --name) is unaffected
 // because each invocation materialises a fresh `<prefix>-<6hex>` cell, so a
 // collision against an existing cell is statistically negligible.
-func TestRun_FromBlueprint_NamedDivergent_RefusesAndPointsToApply(t *testing.T) {
+func TestRun_FromBlueprint_NamedDivergent_RequireSynced_RefusesAndPointsToApply(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{
@@ -2848,7 +2870,10 @@ func TestRun_FromBlueprint_NamedDivergent_RefusesAndPointsToApply(t *testing.T) 
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-b", "web", "--name", "pinned", "--param", "TAG=v2", "--realm", "my-realm", "-d"})
+	cmd.SetArgs([]string{
+		"-b", "web", "--name", "pinned", "--param", "TAG=v2",
+		"--realm", "my-realm", "-d", "--require-synced",
+	})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -2857,7 +2882,7 @@ func TestRun_FromBlueprint_NamedDivergent_RefusesAndPointsToApply(t *testing.T) 
 	for _, want := range []string{
 		`live cell "pinned" spec differs from CellBlueprint "web"`,
 		`spec.containers["main"].image`,
-		"refusing to attach",
+		"refusing to attach (--require-synced)",
 		"kuke delete cell pinned",
 		"-b cells have no in-place reconcile",
 		"CellConfig",
@@ -2868,6 +2893,182 @@ func TestRun_FromBlueprint_NamedDivergent_RefusesAndPointsToApply(t *testing.T) 
 	}
 	if fc.createCalls != 0 || fc.startCalls != 0 {
 		t.Errorf("CreateCell=%d StartCell=%d want both 0 (refuse on divergence)", fc.createCalls, fc.startCalls)
+	}
+}
+
+// TestRun_FromConfig_DivergentSpec_Default_WarnsAndAttaches pins the #986
+// default: without --require-synced, the divergent-spec branch of the
+// `<config>` path emits a `notice:` naming the diverging fields and the
+// reconcile pointer, then falls through into the Ready short-circuit and
+// drops the operator into the live cell. CreateCell/StartCell must not fire
+// — warn-and-attach is a pure read-and-attach against the live state.
+func TestRun_FromConfig_DivergentSpec_Default_WarnsAndAttaches(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
+		},
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
+		},
+		getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			live := doc
+			live.Spec.Containers = append([]v1beta1.ContainerSpec(nil), doc.Spec.Containers...)
+			for i := range live.Spec.Containers {
+				if live.Spec.Containers[i].ID == "main" {
+					live.Spec.Containers[i].Image = "registry.example.com/web:v1"
+					break
+				}
+			}
+			live.Status.State = v1beta1.CellStateReady
+			return kukeonv1.GetCellResult{
+				Cell: live, MetadataExists: true,
+				RootContainerExists: true, RootContainerTaskRunning: true,
+			}, nil
+		},
+	}
+	cmd, buf := newCmd(t, fc)
+	cmd.SetArgs([]string{"prod", "--realm", "cfg-realm", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute err=%v want nil (warn-and-attach is the default)", err)
+	}
+	output := buf.String()
+	for _, want := range []string{
+		`notice: cell "prod" is OutOfSync with CellConfig "prod"`,
+		`spec.containers["main"].image`,
+		"attaching to current live state",
+		"kuke restart cell prod",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("output missing substring %q:\n%s", want, output)
+		}
+	}
+	if fc.createCalls != 0 || fc.startCalls != 0 {
+		t.Errorf("CreateCell=%d StartCell=%d want both 0 (warn-and-attach is a no-op against the live cell)",
+			fc.createCalls, fc.startCalls)
+	}
+}
+
+// TestRun_FromBlueprint_NamedDivergent_Default_WarnsAndAttaches is the
+// `-b --name` half of the #986 warn-and-attach default. The notice cites
+// the CellBlueprint source and the delete-then-rerun pointer (Blueprint-
+// lineage cells have no in-place reconcile) instead of the `kuke restart
+// cell` pointer the `<config>` branch uses, but the fall-through behaviour
+// is identical: CreateCell/StartCell stay at 0 and the operator lands in
+// the live cell.
+func TestRun_FromBlueprint_NamedDivergent_Default_WarnsAndAttaches(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			live := doc
+			live.Spec.Containers = append([]v1beta1.ContainerSpec(nil), doc.Spec.Containers...)
+			for i := range live.Spec.Containers {
+				if live.Spec.Containers[i].ID == "main" {
+					live.Spec.Containers[i].Image = "registry.example.com/web:stale"
+					break
+				}
+			}
+			live.Status.State = v1beta1.CellStateReady
+			return kukeonv1.GetCellResult{
+				Cell: live, MetadataExists: true,
+				RootContainerExists: true, RootContainerTaskRunning: true,
+			}, nil
+		},
+	}
+	cmd, buf := newCmd(t, fc)
+	cmd.SetArgs([]string{"-b", "web", "--name", "pinned", "--param", "TAG=v2", "--realm", "my-realm", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute err=%v want nil (warn-and-attach is the default)", err)
+	}
+	output := buf.String()
+	for _, want := range []string{
+		`notice: cell "pinned" is OutOfSync with CellBlueprint "web"`,
+		`spec.containers["main"].image`,
+		"attaching to current live state",
+		"kuke delete cell pinned",
+		"-b cells have no in-place reconcile",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("output missing substring %q:\n%s", want, output)
+		}
+	}
+	if fc.createCalls != 0 || fc.startCalls != 0 {
+		t.Errorf("CreateCell=%d StartCell=%d want both 0 (warn-and-attach is a no-op against the live cell)",
+			fc.createCalls, fc.startCalls)
+	}
+}
+
+// TestRun_ExistingCell_DivergingContainerImage_Default_WarnsAndAttaches is
+// the `-f` half of the #986 warn-and-attach default. The notice cites the
+// on-disk spec source and the `kuke apply -f` pointer (no Config/Blueprint
+// lineage on a bare -f cell) and the flow falls through into the Ready
+// short-circuit. Pins the same divergence shape as the require-synced test
+// above but asserts the opposite contract.
+func TestRun_ExistingCell_DivergingContainerImage_Default_WarnsAndAttaches(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	existing := v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: "my-cell"},
+		Spec: v1beta1.CellSpec{
+			RealmID: "my-realm",
+			SpaceID: "my-space",
+			StackID: "my-stack",
+			Containers: []v1beta1.ContainerSpec{
+				{
+					ID:      "root",
+					Root:    true,
+					Image:   "registry.eminwux.com/busybox:latest",
+					Command: "sleep",
+					Args:    []string{"3600"},
+				},
+				{
+					ID:      "work",
+					Image:   "registry.eminwux.com/busybox:musl",
+					Command: "sleep",
+					Args:    []string{"3600"},
+				},
+			},
+		},
+		Status: v1beta1.CellStatus{State: v1beta1.CellStateReady},
+	}
+	fc := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell:                     existing,
+				MetadataExists:           true,
+				CgroupExists:             true,
+				RootContainerExists:      true,
+				RootContainerTaskRunning: true,
+			}, nil
+		},
+	}
+	cmd, buf := newCmd(t, fc)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, validCellYAML), "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute err=%v want nil (warn-and-attach is the default)", err)
+	}
+	output := buf.String()
+	for _, want := range []string{
+		`notice: cell "my-cell" is OutOfSync with on-disk spec`,
+		`spec.containers["work"].image`,
+		"attaching to current live state",
+		"kuke apply -f",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("output missing substring %q:\n%s", want, output)
+		}
+	}
+	if fc.createCalls != 0 || fc.startCalls != 0 {
+		t.Errorf("CreateCell=%d StartCell=%d want both 0 (warn-and-attach is a no-op against the live cell)",
+			fc.createCalls, fc.startCalls)
 	}
 }
 

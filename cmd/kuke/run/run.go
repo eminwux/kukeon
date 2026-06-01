@@ -261,6 +261,17 @@ func NewRunCmd() *cobra.Command {
 	cmd.Flags().String("container", "",
 		"Container to attach to (only valid in attach mode; rejected with -d/--detach; must be attachable)")
 	_ = viper.BindPFlag(config.KUKE_RUN_CONTAINER.ViperKey, cmd.Flags().Lookup("container"))
+	cmd.Flags().Bool("require-synced", false,
+		"Refuse to attach when the live cell's spec diverges from the materialisation "+
+			"of the requested source (CellConfig + Blueprint, CellBlueprint + --param, or "+
+			"`-f` file). Default behavior is warn-and-attach: print a one-line `notice:` "+
+			"naming the diverging fields and the reconcile pointer, then drop the operator "+
+			"into the live state — `kuke run` is the interactive escape hatch for live cells, "+
+			"and obstruction on drift defeats the workflow. Use --require-synced for "+
+			"CI/scripted callers that need a hard fail on divergence; the error message "+
+			"matches the pre-#986 refuse-on-divergence behaviour.")
+	_ = viper.BindPFlag(config.KUKE_RUN_REQUIRE_SYNCED.ViperKey, cmd.Flags().Lookup("require-synced"))
+
 	cmd.Flags().Bool("rm", false,
 		"Best-effort delete the cell after it is no longer needed "+
 			"(any rc). With -d/--detach, the trigger is the root "+
@@ -335,6 +346,12 @@ type runFlags struct {
 	// persisted) where the runner merges them into the attachable
 	// container's OCI process env at start time.
 	envArgs []string
+	// requireSynced flips warnDivergentNamedCell from warn-and-attach
+	// (default, #986) to fail-fast: when set the diverging-spec branch
+	// returns the same error shape the pre-#986 rejectDivergentNamedCell
+	// produced so CI/scripted callers that opt in retain the exit-non-zero
+	// drift signal. See the flag commentary in NewRunCmd.
+	requireSynced bool
 }
 
 // validateSourceMutex enforces the "exactly one source" contract across the
@@ -377,6 +394,7 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 		clone:         viper.GetBool(config.KUKE_RUN_CLONE.ViperKey),
 		reuse:         viper.GetBool(config.KUKE_RUN_REUSE.ViperKey),
 		paramFile:     strings.TrimSpace(viper.GetString(config.KUKE_RUN_PARAM_FILE.ViperKey)),
+		requireSynced: viper.GetBool(config.KUKE_RUN_REQUIRE_SYNCED.ViperKey),
 	}
 
 	if len(args) == 1 {
@@ -589,11 +607,17 @@ func runRun(cmd *cobra.Command, args []string) error {
 		switch {
 		case getErr == nil && pre.MetadataExists:
 			if changed := divergedFields(pre.Cell.Spec, cellDoc.Spec); len(changed) > 0 {
-				if rejectErr := rejectDivergentNamedCell(cellDoc, changed, flags); rejectErr != nil {
-					return rejectErr
+				// Default (#986) is warn-and-attach: warnDivergentNamedCell
+				// emits the `notice:` and returns nil so the flow falls
+				// through into runExistingCell against the live spec. Under
+				// --require-synced it instead returns the refusal error and
+				// CreateCell/StartCell never fire.
+				if warnErr := warnDivergentNamedCell(cmd.ErrOrStderr(), cellDoc, changed, flags); warnErr != nil {
+					return warnErr
 				}
 			}
-			// A live cell whose on-disk spec matches the file: drive the
+			// Either the on-disk spec matches the materialisation, or the
+			// caller accepted the warn-and-attach default — drive the
 			// create-or-attach state machine instead of re-entering CreateCell.
 			return runExistingCell(cmd, client, cellDoc, pre, flags)
 		case getErr != nil && !errors.Is(getErr, errdefs.ErrCellNotFound):
@@ -657,18 +681,29 @@ func runAfterReuseClaim(
 	return nil
 }
 
-// rejectDivergentNamedCell refuses to attach when a named live cell's spec
-// diverges from the materialization the operator just asked us to run. Every
-// `kuke run` source that pins a deterministic cell name (`-f`, `<config>`
-// without `--new`, and `-b --name`) routes destructive updates away from
-// `run` — `run` is a pure read-and-materialize verb, so a divergent target is
-// the operator's signal to either reconcile (Config-lineage cells) or delete
-// and re-run (Blueprint-lineage and bare `-f` cells). The error pointer
-// is shaped to match the source: `<config>` → `kuke restart cell <name>`
-// (#821's restart picks up the daemon-side OutOfSync detection #820 wires and
-// reconciles implicitly; the cell name is the Config's StableName), `-b
-// --name <cell>` → `kuke delete cell <cell>` + re-run (Blueprint-lineage cells
-// have no implicit reconcile per #819's umbrella; the operator promotes to a
+// warnDivergentNamedCell reacts to a named live cell whose spec diverges from
+// the materialization the operator just asked us to run. Every `kuke run`
+// source that pins a deterministic cell name (`-f`, `<config>` without `--new`,
+// and `-b --name`) reaches this branch — `run` is otherwise a pure
+// read-and-materialize verb, so divergence is the operator's signal to either
+// reconcile (Config-lineage cells) or delete and re-run (Blueprint-lineage and
+// bare `-f` cells).
+//
+// The default behaviour (#986) is warn-and-attach: print a one-line `notice:`
+// naming the diverging fields and the per-source reconcile pointer, then
+// return nil so runRun falls through to runExistingCell and attaches to the
+// live state. `kuke run` is the operator's interactive escape hatch into a
+// live cell and obstruction on drift defeats the workflow — the notice
+// conveys the OutOfSync state plus the recovery path without blocking the
+// immediate task. CI/scripted callers that need a hard fail opt in via
+// --require-synced; the function then returns the pre-#986 refusal error
+// shape (same per-source pointer the notice cites).
+//
+// The pointer per source: `<config>` → `kuke restart cell <name>` (#821's
+// restart picks up the daemon-side OutOfSync detection #820 wires and
+// reconciles implicitly; the cell name is the Config's StableName), `-b --name
+// <cell>` → `kuke delete cell <cell>` + re-run (Blueprint-lineage cells have
+// no implicit reconcile per #819's umbrella; the operator promotes to a
 // CellConfig for restart-driven reconcile workflows), and the bare `-f`
 // fallback keeps the `kuke apply -f` pointer because that path carries the
 // spec on disk. The `--new` path never reaches this function: it takes a
@@ -676,34 +711,48 @@ func runAfterReuseClaim(
 // (no divergence reconcile pointer makes sense — `restart cell` would
 // reconcile against the Config's stable name, not the `--new` cell's
 // generated/pinned name).
-func rejectDivergentNamedCell(cellDoc v1beta1.CellDoc, changed []string, flags runFlags) error {
+func warnDivergentNamedCell(w io.Writer, cellDoc v1beta1.CellDoc, changed []string, flags runFlags) error {
 	fields := strings.Join(changed, ", ")
+	source, pointer := divergentSourcePointer(cellDoc, flags)
+	if flags.requireSynced {
+		return fmt.Errorf(
+			"live cell %q spec differs from %s (%s) — refusing to attach (--require-synced); %s",
+			cellDoc.Metadata.Name, source, fields, pointer,
+		)
+	}
+	fmt.Fprintf(w,
+		"notice: cell %q is OutOfSync with %s (diverging: %s); attaching to current live state — %s\n",
+		cellDoc.Metadata.Name, source, fields, pointer,
+	)
+	return nil
+}
+
+// divergentSourcePointer returns the source descriptor and the per-source
+// recovery pointer for the divergence notice/error. Shared between the
+// warn-and-attach default and the --require-synced refusal so both surface
+// the same operator-facing wording per source path.
+func divergentSourcePointer(cellDoc v1beta1.CellDoc, flags runFlags) (source, pointer string) {
 	switch {
 	case flags.configName != "" && !flags.newCell:
-		return fmt.Errorf(
-			"live cell %q spec differs from CellConfig %q (%s) — refusing to attach; "+
-				"use `kuke restart cell %s` to reconcile (stops, updates, starts)",
-			cellDoc.Metadata.Name, flags.configName, fields, cellDoc.Metadata.Name,
-		)
+		return fmt.Sprintf("CellConfig %q", flags.configName),
+			fmt.Sprintf("run `kuke restart cell %s` to reconcile (stops, updates, starts)",
+				cellDoc.Metadata.Name)
 	case flags.blueprintName != "" && flags.nameOverride != "":
-		return fmt.Errorf(
-			"live cell %q spec differs from CellBlueprint %q (%s) — refusing to attach; "+
-				"-b cells have no in-place reconcile; delete it with "+
+		return fmt.Sprintf("CellBlueprint %q", flags.blueprintName),
+			fmt.Sprintf("-b cells have no in-place reconcile; delete it with "+
 				"`kuke delete cell %s` and re-run (or promote to a CellConfig for "+
-				"`kuke restart cell` reconcile workflows)",
-			cellDoc.Metadata.Name, flags.blueprintName, fields, cellDoc.Metadata.Name,
-		)
+				"`kuke restart cell` reconcile workflows)", cellDoc.Metadata.Name)
 	default:
-		return fmt.Errorf(
-			"cell %q exists with diverging spec (%s); use `kuke apply -f` to update",
-			cellDoc.Metadata.Name, fields,
-		)
+		return "on-disk spec",
+			"use `kuke apply -f` to update"
 	}
 }
 
 // runExistingCell drives the create-or-attach state machine for a live cell
-// whose on-disk spec already matches the file (the caller rejected divergence
-// before delegating here). The four terminal states:
+// whose on-disk spec either matches the file or whose divergence the caller
+// already chose to warn-and-attach past (the #986 default; the
+// `--require-synced` opt-in still refuses upstream and never reaches here).
+// The four terminal states:
 //
 //   - Ready   → reconcile against containerd first. The recorded state asserts
 //     a live root container; if containerd has lost it (a daemon/host restart

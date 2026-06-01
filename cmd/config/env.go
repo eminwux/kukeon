@@ -506,6 +506,8 @@ var (
 	// the other KUKE_RUN_* keys but the flag itself is the operator-facing
 	// surface.
 	KUKE_RUN_ENV = DefineKV("KUKE_RUN_ENV", "kuke/run/env")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	KUKE_RUN_REQUIRE_SYNCED = DefineKV("KUKE_RUN_REQUIRE_SYNCED", "kuke/run/require-synced")
 
 	// Attach command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
