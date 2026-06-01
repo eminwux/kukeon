@@ -383,20 +383,6 @@ type StartCellResult struct {
 	Started bool
 }
 
-type StartContainerArgs struct {
-	Doc v1beta1.ContainerDoc
-}
-
-type StartContainerReply struct {
-	Result StartContainerResult
-	Err    *APIError
-}
-
-type StartContainerResult struct {
-	Container v1beta1.ContainerDoc
-	Started   bool
-}
-
 type StopCellArgs struct {
 	Doc v1beta1.CellDoc
 }
@@ -411,20 +397,6 @@ type StopCellResult struct {
 	Stopped bool
 }
 
-type StopContainerArgs struct {
-	Doc v1beta1.ContainerDoc
-}
-
-type StopContainerReply struct {
-	Result StopContainerResult
-	Err    *APIError
-}
-
-type StopContainerResult struct {
-	Container v1beta1.ContainerDoc
-	Stopped   bool
-}
-
 type KillCellArgs struct {
 	Doc v1beta1.CellDoc
 }
@@ -437,20 +409,6 @@ type KillCellReply struct {
 type KillCellResult struct {
 	Cell   v1beta1.CellDoc
 	Killed bool
-}
-
-type KillContainerArgs struct {
-	Doc v1beta1.ContainerDoc
-}
-
-type KillContainerReply struct {
-	Result KillContainerResult
-	Err    *APIError
-}
-
-type KillContainerResult struct {
-	Container v1beta1.ContainerDoc
-	Killed    bool
 }
 
 // ---- Delete ----

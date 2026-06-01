@@ -580,22 +580,6 @@ func (c *Client) StartCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.Sta
 	return kukeonv1.StartCellResult{Cell: ext, Started: res.Started}, nil
 }
 
-func (c *Client) StartContainer(_ context.Context, doc v1beta1.ContainerDoc) (kukeonv1.StartContainerResult, error) {
-	internal, version, err := apischeme.NormalizeContainer(doc)
-	if err != nil {
-		return kukeonv1.StartContainerResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-	res, err := c.ctrl.StartContainer(internal)
-	if err != nil {
-		return kukeonv1.StartContainerResult{}, err
-	}
-	ext, err := apischeme.BuildContainerExternalFromInternal(res.Container, version)
-	if err != nil {
-		return kukeonv1.StartContainerResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-	return kukeonv1.StartContainerResult{Container: ext, Started: res.Started}, nil
-}
-
 func (c *Client) StopCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
 	internal, version, err := apischeme.NormalizeCell(doc)
 	if err != nil {
@@ -612,22 +596,6 @@ func (c *Client) StopCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.Stop
 	return kukeonv1.StopCellResult{Cell: ext, Stopped: res.Stopped}, nil
 }
 
-func (c *Client) StopContainer(_ context.Context, doc v1beta1.ContainerDoc) (kukeonv1.StopContainerResult, error) {
-	internal, version, err := apischeme.NormalizeContainer(doc)
-	if err != nil {
-		return kukeonv1.StopContainerResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-	res, err := c.ctrl.StopContainer(internal)
-	if err != nil {
-		return kukeonv1.StopContainerResult{}, err
-	}
-	ext, err := apischeme.BuildContainerExternalFromInternal(res.Container, version)
-	if err != nil {
-		return kukeonv1.StopContainerResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-	return kukeonv1.StopContainerResult{Container: ext, Stopped: res.Stopped}, nil
-}
-
 func (c *Client) KillCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.KillCellResult, error) {
 	internal, version, err := apischeme.NormalizeCell(doc)
 	if err != nil {
@@ -642,22 +610,6 @@ func (c *Client) KillCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.Kill
 		return kukeonv1.KillCellResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
 	}
 	return kukeonv1.KillCellResult{Cell: ext, Killed: res.Killed}, nil
-}
-
-func (c *Client) KillContainer(_ context.Context, doc v1beta1.ContainerDoc) (kukeonv1.KillContainerResult, error) {
-	internal, version, err := apischeme.NormalizeContainer(doc)
-	if err != nil {
-		return kukeonv1.KillContainerResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-	res, err := c.ctrl.KillContainer(internal)
-	if err != nil {
-		return kukeonv1.KillContainerResult{}, err
-	}
-	ext, err := apischeme.BuildContainerExternalFromInternal(res.Container, version)
-	if err != nil {
-		return kukeonv1.KillContainerResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-	return kukeonv1.KillContainerResult{Container: ext, Killed: res.Killed}, nil
 }
 
 // ---- Delete ----

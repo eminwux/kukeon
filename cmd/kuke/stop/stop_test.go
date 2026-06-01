@@ -41,7 +41,7 @@ func TestNewStopCmdMetadata(t *testing.T) {
 		{
 			name: "short description",
 			check: func(t *testing.T, cmd *cobra.Command) {
-				expected := "Stop Kukeon resources (cell, container)"
+				expected := "Stop Kukeon resources (cell)"
 				if cmd.Short != expected {
 					t.Fatalf("expected Short to be %q, got %q", expected, cmd.Short)
 				}
@@ -77,7 +77,6 @@ func TestNewStopCmdRegistersSubcommands(t *testing.T) {
 		name string
 	}{
 		{name: "cell"},
-		{name: "container"},
 	}
 
 	for _, tt := range tests {

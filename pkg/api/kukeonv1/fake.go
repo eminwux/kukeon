@@ -137,10 +137,6 @@ func (FakeClient) StartCell(context.Context, v1beta1.CellDoc) (StartCellResult, 
 	return StartCellResult{}, ErrUnexpectedCall
 }
 
-func (FakeClient) StartContainer(context.Context, v1beta1.ContainerDoc) (StartContainerResult, error) {
-	return StartContainerResult{}, ErrUnexpectedCall
-}
-
 func (FakeClient) AttachContainer(context.Context, v1beta1.ContainerDoc) (AttachContainerResult, error) {
 	return AttachContainerResult{}, ErrUnexpectedCall
 }
@@ -153,16 +149,8 @@ func (FakeClient) StopCell(context.Context, v1beta1.CellDoc) (StopCellResult, er
 	return StopCellResult{}, ErrUnexpectedCall
 }
 
-func (FakeClient) StopContainer(context.Context, v1beta1.ContainerDoc) (StopContainerResult, error) {
-	return StopContainerResult{}, ErrUnexpectedCall
-}
-
 func (FakeClient) KillCell(context.Context, v1beta1.CellDoc) (KillCellResult, error) {
 	return KillCellResult{}, ErrUnexpectedCall
-}
-
-func (FakeClient) KillContainer(context.Context, v1beta1.ContainerDoc) (KillContainerResult, error) {
-	return KillContainerResult{}, ErrUnexpectedCall
 }
 
 func (FakeClient) DeleteRealm(context.Context, v1beta1.RealmDoc, bool, bool) (DeleteRealmResult, error) {

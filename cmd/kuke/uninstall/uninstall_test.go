@@ -129,23 +129,11 @@ func (s *stubController) StartCell(intmodel.Cell) (controller.StartCellResult, e
 	panic("not used")
 }
 
-func (s *stubController) StartContainer(intmodel.Container) (controller.StartContainerResult, error) {
-	panic("not used")
-}
-
 func (s *stubController) StopCell(intmodel.Cell) (controller.StopCellResult, error) {
 	panic("not used")
 }
 
-func (s *stubController) StopContainer(intmodel.Container) (controller.StopContainerResult, error) {
-	panic("not used")
-}
-
 func (s *stubController) KillCell(intmodel.Cell) (controller.KillCellResult, error) {
-	panic("not used")
-}
-
-func (s *stubController) KillContainer(intmodel.Container) (controller.KillContainerResult, error) {
 	panic("not used")
 }
 
