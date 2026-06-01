@@ -336,6 +336,54 @@ func DiffCell(desired, actual intmodel.Cell) CellDiffResult {
 		result.Details["metadata.labels"] = labelsChangedMsg
 	}
 
+	// Compatible: cell-default TTY pointer. The runner re-resolves which
+	// container's TTY `kuke attach` lands on lazily from cell.Spec.Tty.Default,
+	// so an operator edit just needs to flow into UpdateCell rather than
+	// trigger a recreate. Without this branch the edit is persisted to cell
+	// metadata but apply reports "no changes" and never re-stamps. Issue #992.
+	if !cellTtyEqual(desired.Spec.Tty, actual.Spec.Tty) {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "spec.tty")
+		result.Details["spec.tty"] = "tty default changed"
+	}
+
+	// Compatible: AutoDelete. The reaper consults cell.Spec.AutoDelete on the
+	// next reconcile pass, so toggling the flag does not require a recreate —
+	// but the apply layer must still surface the change so the operator does
+	// not see a misleading "no changes" verdict on a YAML that flipped it.
+	// Issue #992.
+	if desired.Spec.AutoDelete != actual.Spec.AutoDelete {
+		result.HasChanges = true
+		if result.ChangeType == ChangeTypeNone {
+			result.ChangeType = ChangeTypeCompatible
+		}
+		result.ChangedFields = append(result.ChangedFields, "spec.autoDelete")
+		result.Details["spec.autoDelete"] = fmt.Sprintf(
+			"autoDelete changed from %v to %v",
+			actual.Spec.AutoDelete,
+			desired.Spec.AutoDelete,
+		)
+	}
+
+	// Breaking: NestedCgroupRuntime. Flipping the flag re-runs the
+	// EnableCellAllSubtreeControllers delegation (#318) and recomputes the
+	// in-container /sys/fs/cgroup mount per BuildContainerSpec; the namespace
+	// setup baked into the existing cell cannot be re-stamped in place, so
+	// RecreateCell is the safe path. Issue #992.
+	if desired.Spec.NestedCgroupRuntime != actual.Spec.NestedCgroupRuntime {
+		result.HasChanges = true
+		result.ChangeType = ChangeTypeBreaking
+		result.BreakingChanges = append(result.BreakingChanges, "spec.nestedCgroupRuntime")
+		result.Details["spec.nestedCgroupRuntime"] = fmt.Sprintf(
+			"nestedCgroupRuntime changed from %v to %v (breaking)",
+			actual.Spec.NestedCgroupRuntime,
+			desired.Spec.NestedCgroupRuntime,
+		)
+	}
+
 	// Find root container in desired and actual
 	desiredRoot := findRootContainer(desired.Spec.Containers)
 	actualRoot := findRootContainer(actual.Spec.Containers)
@@ -686,6 +734,23 @@ func recordImageCmdArgsChange(result *DiffResult, rootContainer bool, field, det
 		result.ChangedFields = append(result.ChangedFields, field)
 	}
 	result.Details[field] = detail
+}
+
+// cellTtyEqual reports whether two *CellTty pointers describe the same
+// default-TTY pointer. A nil pointer is treated as equal to a zero-value
+// CellTty so adding or clearing an explicitly-empty `spec.tty` block does not
+// register as drift on a same-file re-apply.
+func cellTtyEqual(a, b *intmodel.CellTty) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil {
+		return b.Default == ""
+	}
+	if b == nil {
+		return a.Default == ""
+	}
+	return a.Default == b.Default
 }
 
 func capabilitiesEqual(a, b *intmodel.ContainerCapabilities) bool {
