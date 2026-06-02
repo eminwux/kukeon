@@ -213,6 +213,12 @@ func (FakeClient) ApplyDocuments(context.Context, []byte) (ApplyDocumentsResult,
 	return ApplyDocumentsResult{}, ErrUnexpectedCall
 }
 
+func (FakeClient) ApplyDocumentsForTeam(
+	context.Context, []byte, string,
+) (ApplyDocumentsResult, error) {
+	return ApplyDocumentsResult{}, ErrUnexpectedCall
+}
+
 func (FakeClient) DeleteDocuments(context.Context, []byte, bool, bool) (DeleteDocumentsResult, error) {
 	return DeleteDocumentsResult{}, ErrUnexpectedCall
 }

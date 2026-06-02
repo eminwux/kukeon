@@ -779,8 +779,17 @@ type PingReply struct {
 
 // ApplyDocumentsArgs carries a raw multi-document YAML blob. The server
 // parses and validates; validation errors are returned in the Reply.Err.
+//
+// Team, when non-empty, switches the apply into per-team prune mode
+// (issue #1027): every applied CellBlueprint / CellConfig has its
+// `metadata.labels[kukeon.io/team]` set to Team before persistence, and
+// after the apply loop the daemon enumerates daemon-stored Blueprint /
+// Config objects carrying `kukeon.io/team=<Team>` and deletes those not
+// in the applied set. The empty-string default preserves the historical
+// no-team, no-prune `kuke apply -f` behavior.
 type ApplyDocumentsArgs struct {
 	RawYAML []byte
+	Team    string
 }
 
 type ApplyDocumentsReply struct {

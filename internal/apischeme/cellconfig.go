@@ -42,10 +42,11 @@ func ConvertCellConfigDocToInternal(in ext.CellConfigDoc) (intmodel.CellConfig, 
 		}
 		return intmodel.CellConfig{
 			Metadata: intmodel.CellConfigMetadata{
-				Name:  in.Metadata.Name,
-				Realm: in.Metadata.Realm,
-				Space: in.Metadata.Space,
-				Stack: in.Metadata.Stack,
+				Name:   in.Metadata.Name,
+				Realm:  in.Metadata.Realm,
+				Space:  in.Metadata.Space,
+				Stack:  in.Metadata.Stack,
+				Labels: copyLabels(in.Metadata.Labels),
 			},
 			Document: document,
 		}, nil
@@ -87,10 +88,11 @@ func ConvertCellConfigMetadataToExternal(in intmodel.CellConfig) ext.CellConfigD
 		APIVersion: ext.APIVersionV1Beta1,
 		Kind:       ext.KindCellConfig,
 		Metadata: ext.CellConfigMetadata{
-			Name:  in.Metadata.Name,
-			Realm: in.Metadata.Realm,
-			Space: in.Metadata.Space,
-			Stack: in.Metadata.Stack,
+			Name:   in.Metadata.Name,
+			Realm:  in.Metadata.Realm,
+			Space:  in.Metadata.Space,
+			Stack:  in.Metadata.Stack,
+			Labels: copyLabels(in.Metadata.Labels),
 		},
 	}
 }

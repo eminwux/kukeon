@@ -38,4 +38,11 @@ type CellConfigMetadata struct {
 	Realm string
 	Space string
 	Stack string
+	// Labels lifts the config document's metadata.labels onto the carrier
+	// so daemon-side code can filter (`kukeon.io/team=<team>` for per-team
+	// prune apply, #1027) without re-parsing the Document on every access.
+	// ListConfigs populates it; WriteConfig preserves it via the Document
+	// round-trip — the labels travel inside the canonical serialized doc,
+	// the carrier just lifts a typed view.
+	Labels map[string]string
 }

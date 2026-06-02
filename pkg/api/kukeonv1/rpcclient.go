@@ -748,7 +748,23 @@ func (c *UnixClient) RefreshAll(ctx context.Context) (RefreshAllResult, error) {
 
 // ApplyDocuments implements Client.
 func (c *UnixClient) ApplyDocuments(ctx context.Context, rawYAML []byte) (ApplyDocumentsResult, error) {
-	args := &ApplyDocumentsArgs{RawYAML: rawYAML}
+	return c.applyDocuments(ctx, rawYAML, "")
+}
+
+// ApplyDocumentsForTeam implements Client.
+func (c *UnixClient) ApplyDocumentsForTeam(
+	ctx context.Context, rawYAML []byte, team string,
+) (ApplyDocumentsResult, error) {
+	if team == "" {
+		return ApplyDocumentsResult{}, errors.New("apply for team: team is required")
+	}
+	return c.applyDocuments(ctx, rawYAML, team)
+}
+
+func (c *UnixClient) applyDocuments(
+	ctx context.Context, rawYAML []byte, team string,
+) (ApplyDocumentsResult, error) {
+	args := &ApplyDocumentsArgs{RawYAML: rawYAML, Team: team}
 	reply := &ApplyDocumentsReply{}
 	if err := c.call(ctx, MethodApplyDocuments, args, reply); err != nil {
 		return ApplyDocumentsResult{}, err
