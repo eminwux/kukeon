@@ -108,7 +108,6 @@ type Client interface {
 	ListConfigs(ctx context.Context, realmName, spaceName, stackName string) ([]v1beta1.CellConfigDoc, error)
 
 	StartCell(ctx context.Context, doc v1beta1.CellDoc) (StartCellResult, error)
-	StartContainer(ctx context.Context, doc v1beta1.ContainerDoc) (StartContainerResult, error)
 	// AttachContainer is the placeholder endpoint shipped in #57. It only
 	// validates that the target container has Attachable=true; the
 	// terminal-bridge client lands in #66.
@@ -120,9 +119,7 @@ type Client interface {
 	// containers wrapped by sbsh have a capture file to surface.
 	LogContainer(ctx context.Context, doc v1beta1.ContainerDoc) (LogContainerResult, error)
 	StopCell(ctx context.Context, doc v1beta1.CellDoc) (StopCellResult, error)
-	StopContainer(ctx context.Context, doc v1beta1.ContainerDoc) (StopContainerResult, error)
 	KillCell(ctx context.Context, doc v1beta1.CellDoc) (KillCellResult, error)
-	KillContainer(ctx context.Context, doc v1beta1.ContainerDoc) (KillContainerResult, error)
 
 	DeleteRealm(ctx context.Context, doc v1beta1.RealmDoc, force, cascade bool) (DeleteRealmResult, error)
 	DeleteSpace(ctx context.Context, doc v1beta1.SpaceDoc, force, cascade bool) (DeleteSpaceResult, error)
@@ -264,13 +261,10 @@ const (
 	MethodListConfigs    = ServiceName + ".ListConfigs"
 
 	MethodStartCell       = ServiceName + ".StartCell"
-	MethodStartContainer  = ServiceName + ".StartContainer"
 	MethodAttachContainer = ServiceName + ".AttachContainer"
 	MethodLogContainer    = ServiceName + ".LogContainer"
 	MethodStopCell        = ServiceName + ".StopCell"
-	MethodStopContainer   = ServiceName + ".StopContainer"
 	MethodKillCell        = ServiceName + ".KillCell"
-	MethodKillContainer   = ServiceName + ".KillContainer"
 
 	MethodDeleteRealm     = ServiceName + ".DeleteRealm"
 	MethodDeleteSpace     = ServiceName + ".DeleteSpace"

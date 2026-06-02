@@ -20,7 +20,6 @@ import (
 	"strings"
 
 	cellcmd "github.com/eminwux/kukeon/cmd/kuke/start/cell"
-	containercmd "github.com/eminwux/kukeon/cmd/kuke/start/container"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +30,7 @@ func NewStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "start [name]",
 		Aliases: []string{"sta"},
-		Short:   "Start Kukeon resources (cell, container)",
+		Short:   "Start Kukeon resources (cell)",
 		Run: func(cmd *cobra.Command, _ []string) {
 			_ = cmd.Help()
 		},
@@ -41,7 +40,6 @@ func NewStartCmd() *cobra.Command {
 
 	cmd.AddCommand(
 		cellcmd.NewCellCmd(),
-		containercmd.NewContainerCmd(),
 	)
 
 	return cmd
@@ -49,7 +47,7 @@ func NewStartCmd() *cobra.Command {
 
 // completeStartSubcommands provides shell completion for start subcommand names.
 func completeStartSubcommands(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	subcommands := []string{"cell", "container"}
+	subcommands := []string{"cell"}
 
 	if toComplete == "" {
 		return subcommands, cobra.ShellCompDirectiveNoFileComp

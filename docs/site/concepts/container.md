@@ -79,11 +79,7 @@ sudo kuke create container side --cell hello-world \
     --image docker.io/library/busybox:latest \
     --command /bin/sh --args "-c" --args "sleep 3600"
 
-# Start / stop / kill
-sudo kuke start container side --cell hello-world \
-    --realm main --space default --stack default
-sudo kuke stop container side --cell hello-world ...
-sudo kuke kill container side --cell hello-world ...
+# Start / stop / kill — operate at the cell level; see [kuke start / stop / kill](../cli/kuke-lifecycle.md).
 
 # Delete
 sudo kuke delete container side --cell hello-world \

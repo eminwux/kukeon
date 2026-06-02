@@ -478,19 +478,6 @@ func (c *UnixClient) StartCell(ctx context.Context, doc v1beta1.CellDoc) (StartC
 	return reply.Result, nil
 }
 
-// StartContainer implements Client.
-func (c *UnixClient) StartContainer(ctx context.Context, doc v1beta1.ContainerDoc) (StartContainerResult, error) {
-	args := &StartContainerArgs{Doc: doc}
-	reply := &StartContainerReply{}
-	if err := c.call(ctx, MethodStartContainer, args, reply); err != nil {
-		return StartContainerResult{}, err
-	}
-	if reply.Err != nil {
-		return reply.Result, FromAPIError(reply.Err)
-	}
-	return reply.Result, nil
-}
-
 // AttachContainer implements Client.
 func (c *UnixClient) AttachContainer(
 	ctx context.Context,
@@ -536,38 +523,12 @@ func (c *UnixClient) StopCell(ctx context.Context, doc v1beta1.CellDoc) (StopCel
 	return reply.Result, nil
 }
 
-// StopContainer implements Client.
-func (c *UnixClient) StopContainer(ctx context.Context, doc v1beta1.ContainerDoc) (StopContainerResult, error) {
-	args := &StopContainerArgs{Doc: doc}
-	reply := &StopContainerReply{}
-	if err := c.call(ctx, MethodStopContainer, args, reply); err != nil {
-		return StopContainerResult{}, err
-	}
-	if reply.Err != nil {
-		return reply.Result, FromAPIError(reply.Err)
-	}
-	return reply.Result, nil
-}
-
 // KillCell implements Client.
 func (c *UnixClient) KillCell(ctx context.Context, doc v1beta1.CellDoc) (KillCellResult, error) {
 	args := &KillCellArgs{Doc: doc}
 	reply := &KillCellReply{}
 	if err := c.call(ctx, MethodKillCell, args, reply); err != nil {
 		return KillCellResult{}, err
-	}
-	if reply.Err != nil {
-		return reply.Result, FromAPIError(reply.Err)
-	}
-	return reply.Result, nil
-}
-
-// KillContainer implements Client.
-func (c *UnixClient) KillContainer(ctx context.Context, doc v1beta1.ContainerDoc) (KillContainerResult, error) {
-	args := &KillContainerArgs{Doc: doc}
-	reply := &KillContainerReply{}
-	if err := c.call(ctx, MethodKillContainer, args, reply); err != nil {
-		return KillContainerResult{}, err
 	}
 	if reply.Err != nil {
 		return reply.Result, FromAPIError(reply.Err)

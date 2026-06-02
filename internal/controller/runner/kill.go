@@ -395,7 +395,7 @@ func (r *Exec) KillContainer(cell intmodel.Cell, containerID string) error {
 
 	// Issue #867: leave the containerd container record (and snapshot) in
 	// place. The cell-wide cleanup comments in killCellLocked above carry
-	// the full rationale; the single-container `kuke kill container` verb
-	// mirrors the cell-wide kill verb's contract.
+	// the full rationale; this single-container path mirrors the cell-wide
+	// kill's contract.
 	return nil
 }

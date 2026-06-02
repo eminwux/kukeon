@@ -20,7 +20,6 @@ import (
 	"strings"
 
 	cellcmd "github.com/eminwux/kukeon/cmd/kuke/kill/cell"
-	containercmd "github.com/eminwux/kukeon/cmd/kuke/kill/container"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +30,7 @@ func NewKillCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "kill [name]",
 		Aliases: []string{"k"},
-		Short:   "Kill Kukeon resources (cell, container)",
+		Short:   "Kill Kukeon resources (cell)",
 		Run: func(cmd *cobra.Command, _ []string) {
 			_ = cmd.Help()
 		},
@@ -41,7 +40,6 @@ func NewKillCmd() *cobra.Command {
 
 	cmd.AddCommand(
 		cellcmd.NewCellCmd(),
-		containercmd.NewContainerCmd(),
 	)
 
 	return cmd
@@ -49,7 +47,7 @@ func NewKillCmd() *cobra.Command {
 
 // completeKillSubcommands provides shell completion for kill subcommand names.
 func completeKillSubcommands(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	subcommands := []string{"cell", "container"}
+	subcommands := []string{"cell"}
 
 	if toComplete == "" {
 		return subcommands, cobra.ShellCompDirectiveNoFileComp

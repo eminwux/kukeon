@@ -276,13 +276,6 @@ func (s *KukeonV1Service) StartCell(args *kukeonv1.StartCellArgs, reply *kukeonv
 	return nil
 }
 
-func (s *KukeonV1Service) StartContainer(args *kukeonv1.StartContainerArgs, reply *kukeonv1.StartContainerReply) error {
-	result, err := s.core.StartContainer(s.ctx, args.Doc)
-	reply.Result = result
-	reply.Err = kukeonv1.ToAPIError(err)
-	return nil
-}
-
 // AttachContainer is the placeholder endpoint shipped in #57. It enforces
 // the Attachable gate at the API boundary; the full client lands in #66.
 func (s *KukeonV1Service) AttachContainer(
@@ -321,22 +314,8 @@ func (s *KukeonV1Service) StopCell(args *kukeonv1.StopCellArgs, reply *kukeonv1.
 	return nil
 }
 
-func (s *KukeonV1Service) StopContainer(args *kukeonv1.StopContainerArgs, reply *kukeonv1.StopContainerReply) error {
-	result, err := s.core.StopContainer(s.ctx, args.Doc)
-	reply.Result = result
-	reply.Err = kukeonv1.ToAPIError(err)
-	return nil
-}
-
 func (s *KukeonV1Service) KillCell(args *kukeonv1.KillCellArgs, reply *kukeonv1.KillCellReply) error {
 	result, err := s.core.KillCell(s.ctx, args.Doc)
-	reply.Result = result
-	reply.Err = kukeonv1.ToAPIError(err)
-	return nil
-}
-
-func (s *KukeonV1Service) KillContainer(args *kukeonv1.KillContainerArgs, reply *kukeonv1.KillContainerReply) error {
-	result, err := s.core.KillContainer(s.ctx, args.Doc)
 	reply.Result = result
 	reply.Err = kukeonv1.ToAPIError(err)
 	return nil

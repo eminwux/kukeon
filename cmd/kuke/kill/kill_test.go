@@ -31,8 +31,8 @@ func TestNewKillCmdMetadata(t *testing.T) {
 		t.Fatalf("unexpected Use: got %q want %q", cmd.Use, "kill [name]")
 	}
 
-	if cmd.Short != "Kill Kukeon resources (cell, container)" {
-		t.Fatalf("unexpected Short: got %q want %q", cmd.Short, "Kill Kukeon resources (cell, container)")
+	if cmd.Short != "Kill Kukeon resources (cell)" {
+		t.Fatalf("unexpected Short: got %q want %q", cmd.Short, "Kill Kukeon resources (cell)")
 	}
 
 	if cmd.ValidArgsFunction == nil {
@@ -44,8 +44,8 @@ func TestNewKillCmdRegistersSubcommands(t *testing.T) {
 	cmd := killcmd.NewKillCmd()
 
 	subcommands := cmd.Commands()
-	if len(subcommands) != 2 {
-		t.Fatalf("expected 2 subcommands, got %d", len(subcommands))
+	if len(subcommands) != 1 {
+		t.Fatalf("expected 1 subcommand, got %d", len(subcommands))
 	}
 
 	found := map[string]bool{}
@@ -53,7 +53,7 @@ func TestNewKillCmdRegistersSubcommands(t *testing.T) {
 		found[sub.Name()] = true
 	}
 
-	for _, name := range []string{"cell", "container"} {
+	for _, name := range []string{"cell"} {
 		if !found[name] {
 			t.Fatalf("expected %q subcommand to be registered", name)
 		}
@@ -68,8 +68,8 @@ func TestCompleteKillSubcommands(t *testing.T) {
 		if directive != cobra.ShellCompDirectiveNoFileComp {
 			t.Fatalf("unexpected directive %v", directive)
 		}
-		if len(results) != 2 {
-			t.Fatalf("expected 2 results, got %d", len(results))
+		if len(results) != 1 {
+			t.Fatalf("expected 1 result, got %d", len(results))
 		}
 	})
 

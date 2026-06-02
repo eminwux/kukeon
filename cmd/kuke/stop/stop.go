@@ -20,7 +20,6 @@ import (
 	"strings"
 
 	cellcmd "github.com/eminwux/kukeon/cmd/kuke/stop/cell"
-	containercmd "github.com/eminwux/kukeon/cmd/kuke/stop/container"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +30,7 @@ func NewStopCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "stop [name]",
 		Aliases: []string{"sto"},
-		Short:   "Stop Kukeon resources (cell, container)",
+		Short:   "Stop Kukeon resources (cell)",
 		Run: func(cmd *cobra.Command, _ []string) {
 			_ = cmd.Help()
 		},
@@ -41,7 +40,6 @@ func NewStopCmd() *cobra.Command {
 
 	cmd.AddCommand(
 		cellcmd.NewCellCmd(),
-		containercmd.NewContainerCmd(),
 	)
 
 	return cmd
@@ -49,7 +47,7 @@ func NewStopCmd() *cobra.Command {
 
 // completeStopSubcommands provides shell completion for stop subcommand names.
 func completeStopSubcommands(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	subcommands := []string{"cell", "container"}
+	subcommands := []string{"cell"}
 
 	if toComplete == "" {
 		return subcommands, cobra.ShellCompDirectiveNoFileComp
