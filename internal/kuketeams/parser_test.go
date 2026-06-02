@@ -345,6 +345,11 @@ func TestParseFailureModes(t *testing.T) {
 			"apiVersion: kuketeams.io/v1\nkind: ImageCatalog\nspec: { images: [{ ref: x, harness: claude, image: r.io/c:1, build: {context: c, dockerfile: D}, capabilities: [] }] }\n",
 			errdefs.ErrTeamImageCapabilitiesRequired,
 		},
+		{
+			"ImageCatalog capability looks like image tag",
+			"apiVersion: kuketeams.io/v1\nkind: ImageCatalog\nspec: { images: [{ ref: x, harness: claude, image: r.io/c:1, build: {context: c, dockerfile: D}, capabilities: [\"go:1.21\"] }] }\n",
+			errdefs.ErrTeamImageCapabilityInvalid,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

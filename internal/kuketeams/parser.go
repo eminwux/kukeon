@@ -318,6 +318,9 @@ func validateImageCatalog(ic *model.ImageCatalog) error {
 		if len(entry.Capabilities) == 0 {
 			return fmt.Errorf("%w (images[%d] %q)", errdefs.ErrTeamImageCapabilitiesRequired, i, entry.Ref)
 		}
+		if err := validateCapabilityNames(entry.Capabilities, fmt.Sprintf("images[%d].capabilities", i)); err != nil {
+			return err
+		}
 	}
 	return nil
 }
