@@ -78,6 +78,7 @@ nav:
       - concepts/cgroups.md
       - concepts/system-realm.md
       - concepts/client-and-daemon.md
+      - concepts/team.md
   - Architecture:
       - architecture/overview.md
       - architecture/process-model.md

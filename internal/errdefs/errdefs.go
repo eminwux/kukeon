@@ -525,4 +525,67 @@ var (
 	// errdefs.ErrControllerNoChange)` so `errors.Is` works across the
 	// boundary without diverging the surface text.
 	ErrControllerNoChange = errors.New("controller reported no change")
+
+	// Team-distribution parse/validation errors (kuketeams.io/v1 kinds —
+	// ProjectTeam, TeamsConfig, Role, Harness, ImageCatalog). Issue #793,
+	// epic #792.
+
+	// ErrTeamMetadataNameRequired fires when a ProjectTeam/Role/Harness omits
+	// metadata.name.
+	ErrTeamMetadataNameRequired = errors.New("metadata.name is required")
+	// ErrTeamSourceInvalid fires when a `source` field is not a pinned-exact
+	// `<owner>/<repo>@vX.Y.Z` reference (floating ref or bare tag rejected).
+	ErrTeamSourceInvalid = errors.New(
+		"source must be <owner>/<repo>@<version> pinned to an exact version (e.g. eminwux/agents@v1.4.0)",
+	)
+	// ErrTeamRoleRefRequired fires when a ProjectTeam roles[] entry omits ref.
+	ErrTeamRoleRefRequired = errors.New("roles[].ref is required")
+	// ErrTeamImageCapabilityInvalid fires when an image capability entry looks
+	// like an image tag/digest instead of a bare capability name.
+	ErrTeamImageCapabilityInvalid = errors.New(
+		"image capability must be a bare capability name, not an image tag or digest",
+	)
+	// ErrTeamHarnessUnknown fires when a harness name is outside the known set.
+	ErrTeamHarnessUnknown = errors.New("unknown harness")
+	// ErrTeamGitIdentityIncomplete fires when a git author/committer identity is
+	// missing name or email.
+	ErrTeamGitIdentityIncomplete = errors.New("git identity requires both name and email")
+	// ErrTeamGitSignInvalid fires when a git.sign entry is not commits/tags.
+	ErrTeamGitSignInvalid = errors.New("git.sign entries must be one of: commits, tags")
+	// ErrTeamGitSignNeedsKey fires when git.sign is set without git.signingKey.
+	ErrTeamGitSignNeedsKey = errors.New("git.sign requires git.signingKey")
+	// ErrTeamSecretSourceInvalid fires when a TeamsConfig secret omits a valid
+	// source (from: env|file) or its key.
+	ErrTeamSecretSourceInvalid = errors.New(
+		"secret must declare a source (from: env|file) and a key, never an inline value",
+	)
+	// ErrTeamSourceKeyInvalid fires when a TeamsConfig sources[] key is not in
+	// `<owner>/<repo>` form.
+	ErrTeamSourceKeyInvalid = errors.New("sources key must be in <owner>/<repo> form")
+	// ErrTeamTeamNameRequired fires when a TeamsConfig teams[] entry omits name.
+	ErrTeamTeamNameRequired = errors.New("teams[].name is required")
+	// ErrTeamTeamNameDuplicate fires when two TeamsConfig teams[] share a name.
+	ErrTeamTeamNameDuplicate = errors.New("teams[].name must be unique")
+	// ErrTeamHarnessFieldRequired fires when a Harness omits skillPath,
+	// makeTarget, or template.
+	ErrTeamHarnessFieldRequired = errors.New(
+		"harness skillPath, makeTarget, and template are required",
+	)
+	// ErrTeamImageRefRequired fires when an ImageCatalog entry omits ref.
+	ErrTeamImageRefRequired = errors.New("imageCatalog images[].ref is required")
+	// ErrTeamImageImageRequired fires when an ImageCatalog entry's image is not
+	// registry-qualified.
+	ErrTeamImageImageRequired = errors.New(
+		"imageCatalog images[].image must be a registry-qualified reference",
+	)
+	// ErrTeamImageBuildRequired fires when an ImageCatalog entry omits
+	// build.context or build.dockerfile.
+	ErrTeamImageBuildRequired = errors.New(
+		"imageCatalog images[].build requires non-empty context and dockerfile",
+	)
+	// ErrTeamImageCapabilitiesRequired fires when an ImageCatalog entry has no
+	// capabilities.
+	ErrTeamImageCapabilitiesRequired = errors.New(
+		"imageCatalog images[].capabilities must be non-empty",
+	)
 )
