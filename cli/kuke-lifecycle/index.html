@@ -3302,7 +3302,7 @@
 
 
 <h1 id="kuke-start-stop-kill">kuke start / stop / kill<a class="headerlink" href="#kuke-start-stop-kill" title="Permanent link">&para;</a></h1>
-<p>Runtime lifecycle for cells and containers. These commands don't touch metadata — they operate on the containerd task under the resource.</p>
+<p>Runtime lifecycle for cells. These commands don't touch metadata — they operate on the containerd task under the resource.</p>
 <table>
 <thead>
 <tr>
@@ -3329,28 +3329,22 @@
 </tr>
 </tbody>
 </table>
-<p>All three take the same shape: <code>&lt;verb&gt; cell|container &lt;name&gt; &lt;scope flags&gt;</code>.</p>
+<p>All three take the same shape: <code>&lt;verb&gt; cell &lt;name&gt; &lt;scope flags&gt;</code>.</p>
 <h2 id="kuke-start">kuke start<a class="headerlink" href="#kuke-start" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke start cell       &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt;
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>kuke start container  &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt; --cell &lt;c&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke start cell &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt;
 </code></pre></div>
 <p>Aliases: <code>kuke start</code> → <code>kuke sta</code>.</p>
-<ul>
-<li><code>start cell</code> starts the root container first, then every non-root container in the cell.</li>
-<li><code>start container</code> starts a single container. If the parent cell's network namespace isn't up, the command fails — you usually want <code>start cell</code> for the whole unit.</li>
-</ul>
+<p><code>start cell</code> starts the root container first, then every non-root container in the cell.</p>
 <h2 id="kuke-stop">kuke stop<a class="headerlink" href="#kuke-stop" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke stop cell       &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt;
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>kuke stop container  &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt; --cell &lt;c&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke stop cell &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt;
 </code></pre></div>
 <p>Aliases: <code>kuke stop</code> → <code>kuke sto</code>.</p>
 <p>Sends SIGTERM to the task. If the container has a shutdown handler, it gets a chance to run. There is no explicit grace period flag today — whatever the task does before exiting, it does.</p>
 <h2 id="kuke-kill">kuke kill<a class="headerlink" href="#kuke-kill" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>kuke kill cell       &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt;
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>kuke kill container  &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt; --cell &lt;c&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>kuke kill cell &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt;
 </code></pre></div>
 <p>Aliases: <code>kuke kill</code> → <code>kuke k</code>.</p>
-<p>Sends SIGKILL. Useful when a container is unresponsive. For the daemon itself, prefer the dedicated <a href="../kuke-daemon/"><code>kuke daemon kill</code></a> shortcut — it knows the daemon's static coordinates.</p>
+<p>Sends SIGKILL. Useful when a cell is unresponsive. For the daemon itself, prefer the dedicated <a href="../kuke-daemon/"><code>kuke daemon kill</code></a> shortcut — it knows the daemon's static coordinates.</p>
 <h2 id="common-flags">Common flags<a class="headerlink" href="#common-flags" title="Permanent link">&para;</a></h2>
 <p>All three verbs share the same scope flags:</p>
 <table>
@@ -3365,22 +3359,17 @@
 <tr>
 <td><code>--realm</code></td>
 <td><code>default</code></td>
-<td>Required for cell/container</td>
+<td>Required for cell</td>
 </tr>
 <tr>
 <td><code>--space</code></td>
 <td><code>default</code></td>
-<td>Required for cell/container</td>
+<td>Required for cell</td>
 </tr>
 <tr>
 <td><code>--stack</code></td>
 <td><code>default</code></td>
-<td>Required for cell/container</td>
-</tr>
-<tr>
-<td><code>--cell</code></td>
-<td><em>(required for <code>container</code>)</em></td>
-<td>Parent cell</td>
+<td>Required for cell</td>
 </tr>
 </tbody>
 </table>
@@ -3392,15 +3381,15 @@
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># Graceful stop</span>
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>stop<span class="w"> </span>cell<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
 <a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># Force-kill an unresponsive container</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>sudo<span class="w"> </span>kuke<span class="w"> </span><span class="nb">kill</span><span class="w"> </span>container<span class="w"> </span>stuck<span class="w"> </span>--cell<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># Force-kill an unresponsive cell</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>sudo<span class="w"> </span>kuke<span class="w"> </span><span class="nb">kill</span><span class="w"> </span>cell<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
 </code></pre></div>
 <h2 id="exit-semantics">Exit semantics<a class="headerlink" href="#exit-semantics" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Exit 0: signal delivered (or cell already in desired state for <code>start</code>).</li>
 <li>Exit non-zero: the daemon couldn't find the resource, the resource is in a state that doesn't allow the transition, or the underlying containerd/runtime call failed.</li>
 </ul>
-<p>After <code>stop</code>/<code>kill</code>, the resource is in <code>Stopped</code> state. <code>start</code> moves it to <code>Ready</code>. See <a href="../../concepts/cell/#lifecycle">Cell</a> and <a href="../../concepts/container/#lifecycle">Container</a> for the full state tables.</p>
+<p>After <code>stop</code>/<code>kill</code>, the cell is in <code>Stopped</code> state. <code>start</code> moves it to <code>Ready</code>. See <a href="../../concepts/cell/#lifecycle">Cell</a> and <a href="../../concepts/container/#lifecycle">Container</a> for the full state tables.</p>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../kuke-run/">kuke run</a> — create + start a cell from a file or profile</li>
@@ -3428,7 +3417,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 13, 2026 20:07:10 UTC">May 13, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 2, 2026 22:35:38 UTC">June 2, 2026</span>
   </span>
 
     
