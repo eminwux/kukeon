@@ -96,10 +96,23 @@ func (r ResourceResult) MarshalYAML() (interface{}, error) {
 // ApplyDocuments applies a set of resource documents in dependency order.
 // Documents are sorted: Realm → Space → Stack → Cell → Container.
 // Returns a summary of actions taken for each resource.
-func (b *Exec) ApplyDocuments(docs []parser.Document) (ApplyResult, error) {
+//
+// When team is non-empty (issue #1027 per-team prune apply), the daemon
+// stamps `kukeon.io/team=<team>` on every applied CellBlueprint / CellConfig
+// before persistence, and after the apply loop enumerates daemon-stored
+// Blueprint / Config objects carrying the same team label, deleting those
+// not in the applied set. The empty-string team preserves the historical
+// no-stamp, no-prune behavior of `kuke apply -f`.
+func (b *Exec) ApplyDocuments(docs []parser.Document, team string) (ApplyResult, error) {
 	result := ApplyResult{
 		Resources: make([]ResourceResult, 0, len(docs)),
 	}
+
+	// applied{Blueprint,Config}s collect (realm,space,stack,name) tuples
+	// for every successfully-persisted Blueprint / Config in this apply,
+	// so the post-loop prune step (team != "") can delete the same-team
+	// daemon objects that fell out of the applied set.
+	var appliedBlueprints, appliedConfigs []scopedRef
 
 	// Sort documents by dependency order
 	sortedDocs := SortDocumentsByKind(docs, false)
@@ -226,7 +239,11 @@ func (b *Exec) ApplyDocuments(docs []parser.Document) (ApplyResult, error) {
 				result.Resources = append(result.Resources, resourceResult)
 				continue
 			}
-			blueprint, _, err := apischeme.NormalizeCellBlueprint(*doc.CellBlueprintDoc)
+			bpDoc := *doc.CellBlueprintDoc
+			if team != "" {
+				bpDoc.Metadata.Labels = stampTeamLabel(bpDoc.Metadata.Labels, team)
+			}
+			blueprint, _, err := apischeme.NormalizeCellBlueprint(bpDoc)
 			if err != nil {
 				resourceResult.Action = actionFailed
 				resourceResult.Error = fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
@@ -235,6 +252,14 @@ func (b *Exec) ApplyDocuments(docs []parser.Document) (ApplyResult, error) {
 			}
 			resourceResult.Name = blueprint.Metadata.Name
 			reconcileResult, reconcileErr = applypkg.ReconcileBlueprint(b.runner, blueprint)
+			if reconcileErr == nil {
+				appliedBlueprints = append(appliedBlueprints, scopedRefFromMetadata(
+					blueprint.Metadata.Name,
+					blueprint.Metadata.Realm,
+					blueprint.Metadata.Space,
+					blueprint.Metadata.Stack,
+				))
+			}
 
 		case v1beta1.KindCellConfig:
 			if doc.CellConfigDoc == nil {
@@ -243,7 +268,11 @@ func (b *Exec) ApplyDocuments(docs []parser.Document) (ApplyResult, error) {
 				result.Resources = append(result.Resources, resourceResult)
 				continue
 			}
-			config, _, err := apischeme.NormalizeCellConfig(*doc.CellConfigDoc)
+			cfgDoc := *doc.CellConfigDoc
+			if team != "" {
+				cfgDoc.Metadata.Labels = stampTeamLabel(cfgDoc.Metadata.Labels, team)
+			}
+			config, _, err := apischeme.NormalizeCellConfig(cfgDoc)
 			if err != nil {
 				resourceResult.Action = actionFailed
 				resourceResult.Error = fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
@@ -252,6 +281,14 @@ func (b *Exec) ApplyDocuments(docs []parser.Document) (ApplyResult, error) {
 			}
 			resourceResult.Name = config.Metadata.Name
 			reconcileResult, reconcileErr = applypkg.ReconcileConfig(b.runner, config)
+			if reconcileErr == nil {
+				appliedConfigs = append(appliedConfigs, scopedRefFromMetadata(
+					config.Metadata.Name,
+					config.Metadata.Realm,
+					config.Metadata.Space,
+					config.Metadata.Stack,
+				))
+			}
 
 		default:
 			resourceResult.Action = actionFailed
@@ -272,5 +309,132 @@ func (b *Exec) ApplyDocuments(docs []parser.Document) (ApplyResult, error) {
 		result.Resources = append(result.Resources, resourceResult)
 	}
 
+	if team != "" {
+		pruneResults, pruneErr := b.pruneTeamObjects(team, appliedBlueprints, appliedConfigs)
+		if pruneErr != nil {
+			return result, pruneErr
+		}
+		result.Resources = append(result.Resources, pruneResults...)
+	}
+
 	return result, nil
+}
+
+// scopedRef identifies one Blueprint or Config by its scope-coordinate tuple
+// plus name. Two refs are equal under == when every field matches, so a
+// `map[scopedRef]struct{}` is a cheap set for the prune-difference scan.
+type scopedRef struct {
+	Realm string
+	Space string
+	Stack string
+	Name  string
+}
+
+func scopedRefFromMetadata(name, realm, space, stack string) scopedRef {
+	return scopedRef{Realm: realm, Space: space, Stack: stack, Name: name}
+}
+
+// stampTeamLabel returns labels with `kukeon.io/team` set to team. A nil
+// input is upgraded to a single-key map so the daemon never persists nil
+// labels alongside a team stamp. The input is not mutated — apply iterates
+// over caller-owned parser documents.
+func stampTeamLabel(labels map[string]string, team string) map[string]string {
+	out := make(map[string]string, len(labels)+1)
+	for k, v := range labels {
+		out[k] = v
+	}
+	out[v1beta1.LabelTeam] = team
+	return out
+}
+
+// pruneTeamObjects deletes daemon-stored CellBlueprint / CellConfig objects
+// carrying `kukeon.io/team=<team>` that the just-completed apply set did
+// not include (issue #1027). The two enumeration calls walk every realm
+// (an empty realm filter is the "all realms" subtree prefix in
+// runner.{ListBlueprints,ListConfigs}); a label-mismatch entry is skipped
+// silently. Each successful delete becomes a ResourceResult with
+// Action="pruned" so callers can render the prune count without re-querying
+// the daemon.
+//
+// Prune order is Config-then-Blueprint: a Config references a Blueprint at
+// apply time, so removing the Config first cannot orphan a reference. (Both
+// kinds independently support DeleteWithoutLiveCellTeardown, so the order
+// is purely consistency-with-apply, not safety.)
+func (b *Exec) pruneTeamObjects(team string, appliedBlueprints, appliedConfigs []scopedRef) ([]ResourceResult, error) {
+	appliedBP := refsToSet(appliedBlueprints)
+	appliedCfg := refsToSet(appliedConfigs)
+
+	configs, err := b.runner.ListConfigs("", "", "")
+	if err != nil {
+		return nil, fmt.Errorf("prune team %q: list configs: %w", team, err)
+	}
+	blueprints, err := b.runner.ListBlueprints("", "", "")
+	if err != nil {
+		return nil, fmt.Errorf("prune team %q: list blueprints: %w", team, err)
+	}
+
+	var out []ResourceResult
+
+	for _, cfg := range configs {
+		if cfg.Metadata.Labels[v1beta1.LabelTeam] != team {
+			continue
+		}
+		ref := scopedRefFromMetadata(cfg.Metadata.Name, cfg.Metadata.Realm, cfg.Metadata.Space, cfg.Metadata.Stack)
+		if _, kept := appliedCfg[ref]; kept {
+			continue
+		}
+		pruneResult := ResourceResult{
+			Kind:    "CellConfig",
+			Name:    cfg.Metadata.Name,
+			Action:  "pruned",
+			Details: scopeDetails(cfg.Metadata.Realm, cfg.Metadata.Space, cfg.Metadata.Stack),
+		}
+		if delErr := b.runner.DeleteConfig(cfg); delErr != nil {
+			pruneResult.Action = actionFailed
+			pruneResult.Error = fmt.Errorf("prune team %q: delete config %q: %w", team, cfg.Metadata.Name, delErr)
+		}
+		out = append(out, pruneResult)
+	}
+
+	for _, bp := range blueprints {
+		if bp.Metadata.Labels[v1beta1.LabelTeam] != team {
+			continue
+		}
+		ref := scopedRefFromMetadata(bp.Metadata.Name, bp.Metadata.Realm, bp.Metadata.Space, bp.Metadata.Stack)
+		if _, kept := appliedBP[ref]; kept {
+			continue
+		}
+		pruneResult := ResourceResult{
+			Kind:    "CellBlueprint",
+			Name:    bp.Metadata.Name,
+			Action:  "pruned",
+			Details: scopeDetails(bp.Metadata.Realm, bp.Metadata.Space, bp.Metadata.Stack),
+		}
+		if delErr := b.runner.DeleteBlueprint(bp); delErr != nil {
+			pruneResult.Action = actionFailed
+			pruneResult.Error = fmt.Errorf("prune team %q: delete blueprint %q: %w", team, bp.Metadata.Name, delErr)
+		}
+		out = append(out, pruneResult)
+	}
+
+	return out, nil
+}
+
+func refsToSet(refs []scopedRef) map[scopedRef]struct{} {
+	out := make(map[scopedRef]struct{}, len(refs))
+	for _, r := range refs {
+		out[r] = struct{}{}
+	}
+	return out
+}
+
+func scopeDetails(realm, space, stack string) map[string]string {
+	d := map[string]string{"realm": realm}
+	if space != "" {
+		d["space"] = space
+	}
+	if stack != "" {
+		d["stack"] = stack
+	}
+	return d
 }

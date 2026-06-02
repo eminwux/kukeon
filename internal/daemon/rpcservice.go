@@ -445,7 +445,15 @@ func (s *KukeonV1Service) Ping(_ *kukeonv1.PingArgs, reply *kukeonv1.PingReply) 
 // ---- Apply ----
 
 func (s *KukeonV1Service) ApplyDocuments(args *kukeonv1.ApplyDocumentsArgs, reply *kukeonv1.ApplyDocumentsReply) error {
-	result, err := s.core.ApplyDocuments(s.ctx, args.RawYAML)
+	var (
+		result kukeonv1.ApplyDocumentsResult
+		err    error
+	)
+	if args.Team != "" {
+		result, err = s.core.ApplyDocumentsForTeam(s.ctx, args.RawYAML, args.Team)
+	} else {
+		result, err = s.core.ApplyDocuments(s.ctx, args.RawYAML)
+	}
 	reply.Result = result
 	reply.Err = kukeonv1.ToAPIError(err)
 	return nil

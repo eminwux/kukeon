@@ -26,6 +26,7 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/fs"
+	"gopkg.in/yaml.v3"
 )
 
 // blueprintsDirMode is the mode of the per-scope blueprints/ directory. Unlike
@@ -168,7 +169,12 @@ func (r *Exec) collectBlueprintSubtree(out *[]intmodel.CellBlueprint, realm, spa
 // collectBlueprintsInScope appends the metadata of every CellBlueprint stored
 // directly at the given scope (realm, space, stack). The in-flight
 // ".blueprint-*.tmp" temp files WriteBlueprint creates are skipped so a
-// concurrent apply never surfaces a half-written name.
+// concurrent apply never surfaces a half-written name. Each carrier's
+// Metadata.Labels is populated by parsing the document's `metadata.labels`
+// (issue #1027) — `kukeon.io/team=<team>` is the prune-apply discriminator,
+// so callers can filter without re-reading every document themselves. A
+// document that fails to parse contributes an entry with nil Labels and is
+// logged at debug — the list call is best-effort metadata, not strict.
 func (r *Exec) collectBlueprintsInScope(out *[]intmodel.CellBlueprint, realm, space, stack string) error {
 	dir := fs.BlueprintsDir(r.opts.RunPath, realm, space, stack)
 	entries, err := os.ReadDir(dir)
@@ -186,16 +192,48 @@ func (r *Exec) collectBlueprintsInScope(out *[]intmodel.CellBlueprint, realm, sp
 		if strings.HasPrefix(name, ".blueprint-") && strings.HasSuffix(name, ".tmp") {
 			continue
 		}
+		labels := r.readLabelsFromDoc(fs.BlueprintPath(r.opts.RunPath, realm, space, stack, name))
 		*out = append(*out, intmodel.CellBlueprint{
 			Metadata: intmodel.CellBlueprintMetadata{
-				Name:  name,
-				Realm: realm,
-				Space: space,
-				Stack: stack,
+				Name:   name,
+				Realm:  realm,
+				Space:  space,
+				Stack:  stack,
+				Labels: labels,
 			},
 		})
 	}
 	return nil
+}
+
+// labelsOnlyDoc is the minimum YAML structure needed to extract a daemon-
+// stored document's labels without parsing the full spec. Shared between
+// blueprint and config list paths (issue #1027).
+type labelsOnlyDoc struct {
+	Metadata struct {
+		Labels map[string]string `yaml:"labels"`
+	} `yaml:"metadata"`
+}
+
+// readLabelsFromDoc reads path and returns the parsed metadata.labels map,
+// or nil on any failure. Errors are logged at debug rather than propagated —
+// the list call's contract is best-effort metadata: a half-written or
+// corrupt document should not fail the whole list (issue #1027).
+func (r *Exec) readLabelsFromDoc(path string) map[string]string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		r.logger.DebugContext(r.ctx, "read labels: read file", "path", path, "error", err)
+		return nil
+	}
+	var doc labelsOnlyDoc
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		r.logger.DebugContext(r.ctx, "read labels: parse yaml", "path", path, "error", err)
+		return nil
+	}
+	if len(doc.Metadata.Labels) == 0 {
+		return nil
+	}
+	return doc.Metadata.Labels
 }
 
 // DeleteBlueprint removes the daemon-stored document file for a single named,

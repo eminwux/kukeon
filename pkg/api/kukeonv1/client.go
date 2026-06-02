@@ -147,6 +147,17 @@ type Client interface {
 
 	RefreshAll(ctx context.Context) (RefreshAllResult, error)
 	ApplyDocuments(ctx context.Context, rawYAML []byte) (ApplyDocumentsResult, error)
+	// ApplyDocumentsForTeam is the per-team prune-apply sibling of
+	// ApplyDocuments (issue #1027). It stamps every applied CellBlueprint /
+	// CellConfig with `kukeon.io/team=<team>` and, after the apply loop,
+	// deletes daemon-stored Blueprint / Config objects carrying the same
+	// team label that the applied set did not include. Used by `kuke team
+	// init` (#796) to make project rosters converge: re-running on a
+	// shrunken roster prunes the orphans without touching other teams or
+	// running cells (deleting a Blueprint or Config never deletes the cell
+	// materialized from it). Empty team is rejected — use ApplyDocuments
+	// for the no-team path.
+	ApplyDocumentsForTeam(ctx context.Context, rawYAML []byte, team string) (ApplyDocumentsResult, error)
 	// DeleteDocuments is the file-driven counterpart to ApplyDocuments —
 	// `kuke delete -f` sends the raw YAML over the wire so deletes honor
 	// `--host` routing the same way applies do. Per-resource cascade/force

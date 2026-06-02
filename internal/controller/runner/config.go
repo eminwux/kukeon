@@ -230,7 +230,12 @@ func (r *Exec) collectConfigSubtree(out *[]intmodel.CellConfig, realm, space, st
 // collectConfigsInScope appends the metadata of every CellConfig stored
 // directly at the given scope (realm, space, stack). The in-flight
 // ".config-*.tmp" temp files WriteConfig creates are skipped so a concurrent
-// apply never surfaces a half-written name.
+// apply never surfaces a half-written name. Each carrier's Metadata.Labels
+// is populated by parsing the document's `metadata.labels` (issue #1027) —
+// `kukeon.io/team=<team>` is the prune-apply discriminator, so callers can
+// filter without re-reading every document themselves. A document that fails
+// to parse contributes an entry with nil Labels and is logged at debug — the
+// list call is best-effort metadata, not strict.
 func (r *Exec) collectConfigsInScope(out *[]intmodel.CellConfig, realm, space, stack string) error {
 	dir := fs.ConfigsDir(r.opts.RunPath, realm, space, stack)
 	entries, err := os.ReadDir(dir)
@@ -248,12 +253,14 @@ func (r *Exec) collectConfigsInScope(out *[]intmodel.CellConfig, realm, space, s
 		if strings.HasPrefix(name, ".config-") && strings.HasSuffix(name, ".tmp") {
 			continue
 		}
+		labels := r.readLabelsFromDoc(fs.ConfigPath(r.opts.RunPath, realm, space, stack, name))
 		*out = append(*out, intmodel.CellConfig{
 			Metadata: intmodel.CellConfigMetadata{
-				Name:  name,
-				Realm: realm,
-				Space: space,
-				Stack: stack,
+				Name:   name,
+				Realm:  realm,
+				Space:  space,
+				Stack:  stack,
+				Labels: labels,
 			},
 		})
 	}

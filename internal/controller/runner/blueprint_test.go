@@ -294,6 +294,71 @@ func TestListBlueprints_IgnoresReservedSubdirs(t *testing.T) {
 	}
 }
 
+// TestListBlueprints_PopulatesLabelsFromDocument confirms ListBlueprints
+// lifts `metadata.labels` out of each blueprint's persisted YAML body
+// (issue #1027): the prune-apply path keys on `kukeon.io/team=<team>` to
+// pick its prune set, so labels must round-trip via the list, not require
+// a per-blueprint GetBlueprint follow-up.
+func TestListBlueprints_PopulatesLabelsFromDocument(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	bp := intmodel.CellBlueprint{
+		Metadata: intmodel.CellBlueprintMetadata{Name: "web", Realm: "default"},
+		Document: []byte("apiVersion: v1beta1\n" +
+			"kind: CellBlueprint\n" +
+			"metadata:\n" +
+			"  name: web\n" +
+			"  realm: default\n" +
+			"  labels:\n" +
+			"    kukeon.io/team: sbsh\n" +
+			"    foo: bar\n"),
+	}
+	if _, err := r.WriteBlueprint(bp); err != nil {
+		t.Fatalf("WriteBlueprint() error = %v", err)
+	}
+
+	got, err := r.ListBlueprints("default", "", "")
+	if err != nil {
+		t.Fatalf("ListBlueprints() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d blueprints, want 1", len(got))
+	}
+	if got[0].Metadata.Labels["kukeon.io/team"] != "sbsh" {
+		t.Errorf("Labels[kukeon.io/team] = %q, want sbsh (labels must round-trip via list)", got[0].Metadata.Labels["kukeon.io/team"])
+	}
+	if got[0].Metadata.Labels["foo"] != "bar" {
+		t.Errorf("Labels[foo] = %q, want bar (all labels must round-trip)", got[0].Metadata.Labels["foo"])
+	}
+}
+
+// TestListBlueprints_UnreadableDocSkipsLabelsWithoutFailingList confirms
+// the list is best-effort metadata: a corrupt or unreadable document body
+// surfaces the blueprint with nil Labels rather than failing the whole
+// list (issue #1027). Pruning a corrupted entry by team label is still
+// safe — a missing team label simply excludes it from the prune set.
+func TestListBlueprints_UnreadableDocSkipsLabelsWithoutFailingList(t *testing.T) {
+	runPath := t.TempDir()
+	r := newMetadataTestExec(t, runPath, time.Now())
+
+	seedBlueprint(t, r, "good", "default", "", "")
+	// Drop an unparseable file alongside the good one — same dir, doc
+	// body that yaml can't unmarshal into the labelsOnly struct.
+	bad := fs.BlueprintPath(runPath, "default", "", "", "bad")
+	if err := os.WriteFile(bad, []byte("\x00\x01\x02 not yaml"), 0o644); err != nil {
+		t.Fatalf("write bad blueprint: %v", err)
+	}
+
+	got, err := r.ListBlueprints("default", "", "")
+	if err != nil {
+		t.Fatalf("ListBlueprints() error = %v (must surface corrupt entries, not fail)", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d blueprints, want 2 (both good and corrupt must surface)", len(got))
+	}
+}
+
 func TestDeleteBlueprint_RemovesFile(t *testing.T) {
 	runPath := t.TempDir()
 	r := newMetadataTestExec(t, runPath, time.Now())

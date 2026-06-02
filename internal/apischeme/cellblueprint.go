@@ -42,10 +42,11 @@ func ConvertCellBlueprintDocToInternal(in ext.CellBlueprintDoc) (intmodel.CellBl
 		}
 		return intmodel.CellBlueprint{
 			Metadata: intmodel.CellBlueprintMetadata{
-				Name:  in.Metadata.Name,
-				Realm: in.Metadata.Realm,
-				Space: in.Metadata.Space,
-				Stack: in.Metadata.Stack,
+				Name:   in.Metadata.Name,
+				Realm:  in.Metadata.Realm,
+				Space:  in.Metadata.Space,
+				Stack:  in.Metadata.Stack,
+				Labels: copyLabels(in.Metadata.Labels),
 			},
 			Document: document,
 		}, nil
@@ -87,12 +88,29 @@ func ConvertCellBlueprintMetadataToExternal(in intmodel.CellBlueprint) ext.CellB
 		APIVersion: ext.APIVersionV1Beta1,
 		Kind:       ext.KindCellBlueprint,
 		Metadata: ext.CellBlueprintMetadata{
-			Name:  in.Metadata.Name,
-			Realm: in.Metadata.Realm,
-			Space: in.Metadata.Space,
-			Stack: in.Metadata.Stack,
+			Name:   in.Metadata.Name,
+			Realm:  in.Metadata.Realm,
+			Space:  in.Metadata.Space,
+			Stack:  in.Metadata.Stack,
+			Labels: copyLabels(in.Metadata.Labels),
 		},
 	}
+}
+
+// copyLabels returns an independent copy of labels so the internal carrier
+// and the external doc do not alias the same map (a later mutation on one
+// must not leak into the other). A nil or empty input returns nil so the
+// canonical YAML-marshalled shape omits `labels:` rather than emitting an
+// empty map.
+func copyLabels(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // ConvertCellBlueprintListToExternal maps a slice of internal CellBlueprints to

@@ -957,7 +957,26 @@ func (c *Client) RefreshAll(_ context.Context) (kukeonv1.RefreshAllResult, error
 
 // ---- Apply ----
 
-func (c *Client) ApplyDocuments(_ context.Context, rawYAML []byte) (kukeonv1.ApplyDocumentsResult, error) {
+func (c *Client) ApplyDocuments(ctx context.Context, rawYAML []byte) (kukeonv1.ApplyDocumentsResult, error) {
+	return c.applyDocuments(ctx, rawYAML, "")
+}
+
+// ApplyDocumentsForTeam runs the in-process equivalent of the wire RPC
+// per-team prune-apply path (issue #1027). Empty team rejected at the
+// boundary so a caller cannot accidentally degrade into the historical
+// no-prune apply by passing "".
+func (c *Client) ApplyDocumentsForTeam(
+	ctx context.Context, rawYAML []byte, team string,
+) (kukeonv1.ApplyDocumentsResult, error) {
+	if team == "" {
+		return kukeonv1.ApplyDocumentsResult{}, errors.New("apply for team: team is required")
+	}
+	return c.applyDocuments(ctx, rawYAML, team)
+}
+
+func (c *Client) applyDocuments(
+	_ context.Context, rawYAML []byte, team string,
+) (kukeonv1.ApplyDocumentsResult, error) {
 	docs, validationErrors, err := parseAndValidate(rawYAML)
 	if err != nil {
 		return kukeonv1.ApplyDocumentsResult{}, err
@@ -969,7 +988,7 @@ func (c *Client) ApplyDocuments(_ context.Context, rawYAML []byte) (kukeonv1.App
 		return kukeonv1.ApplyDocumentsResult{}, errors.New("no valid documents found in input")
 	}
 
-	res, err := c.ctrl.ApplyDocuments(docs)
+	res, err := c.ctrl.ApplyDocuments(docs, team)
 	if err != nil {
 		return kukeonv1.ApplyDocumentsResult{}, err
 	}

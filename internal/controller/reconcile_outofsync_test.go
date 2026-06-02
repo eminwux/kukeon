@@ -429,8 +429,13 @@ func TestReconcileCells_OutOfSync_RealmScopedConfigFoundForStackPlacedCell(t *te
 		t.Fatalf("GetConfig probe count: got %d want %d (probes=%+v)", len(probes), len(wantProbes), probes)
 	}
 	for i, p := range probes {
-		if p != wantProbes[i] {
-			t.Errorf("probe[%d] = %+v, want %+v", i, p, wantProbes[i])
+		// CellConfigMetadata carries a Labels map (issue #1027) so the
+		// struct is no longer comparable with !=; compare scope-coordinate
+		// fields explicitly since that is what this probe-ordering test
+		// asserts.
+		w := wantProbes[i]
+		if p.Name != w.Name || p.Realm != w.Realm || p.Space != w.Space || p.Stack != w.Stack {
+			t.Errorf("probe[%d] = %+v, want %+v", i, p, w)
 		}
 	}
 	// The Config was found at realm scope, so the verdict must NOT be

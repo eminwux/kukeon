@@ -69,6 +69,17 @@ const (
 	KindClientConfiguration Kind = "ClientConfiguration"
 )
 
+// Label keys with reserved kukeon.io semantics. Other label keys on a
+// resource's metadata.labels are user-controlled and carry no daemon meaning.
+const (
+	// LabelTeam scopes an applied CellBlueprint / CellConfig to a project
+	// (issue #1027). `kuke team init` (#796) stamps it on every object it
+	// applies for one project so a repeat init can prune the team's prior
+	// objects that the new roster no longer declares — converging the
+	// project's slice without touching other teams' objects.
+	LabelTeam = "kukeon.io/team"
+)
+
 // Common printable state strings.
 const (
 	StatePendingStr  = "Pending"
