@@ -965,13 +965,9 @@ func TestKuke_Uninstall_VerifyState(t *testing.T) {
 			exit, string(out), string(errOut))
 	}
 
-	args = append(buildKukeDaemonArgs(host),
-		"create", "cell", cellName,
-		"--realm", defaultRealm, "--space", defaultSpace, "--stack", stackName)
-	if exit, out, errOut := runBinary(t, nil, kuke, args...); exit != 0 {
-		t.Fatalf("create cell failed: code=%d stdout=%s stderr=%s",
-			exit, string(out), string(errOut))
-	}
+	// Apply cell.yaml via the e2e helper; the no-source-flag `kuke create cell`
+	// path was retired in epic:bye-container step 3 (#996).
+	applyTestCell(t, host, defaultRealm, defaultSpace, stackName, cellName)
 
 	// Step 3: uninstall. Tears down systemd unit (no-op on dev hosts),
 	// every realm cascade, /run/kukeon, /opt/kukeon, kukeon user/group.

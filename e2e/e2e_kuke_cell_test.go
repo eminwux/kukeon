@@ -25,6 +25,20 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
+// applyTestCell materialises a cell via `kuke apply -f cell.yaml`. The
+// no-source-flag `kuke create cell` path was retired in epic:bye-container
+// step 3 (#996), so lifecycle tests that previously created an empty cell
+// shell via the CLI now apply the standard cell.yaml fixture instead.
+func applyTestCell(t *testing.T, host, realmName, spaceName, stackName, cellName string) {
+	t.Helper()
+	applyYAMLFile(t, host, "cell.yaml", map[string]string{
+		"test-cell":  cellName,
+		"test-realm": realmName,
+		"test-space": spaceName,
+		"test-stack": stackName,
+	})
+}
+
 // cleanupCell deletes a cell with cascade through the per-test daemon.
 // Register after startKukeondDaemon so t.Cleanup's LIFO order runs delete
 // before the daemon is signaled.
@@ -108,20 +122,8 @@ func TestKuke_CreateCell_VerifyState(t *testing.T) {
 	)
 	runReturningBinary(t, nil, kuke, args...)
 
-	// Step 4: Create cell
-	args = append(
-		buildKukeDaemonArgs(host),
-		"create",
-		"cell",
-		cellName,
-		"--realm",
-		realmName,
-		"--space",
-		spaceName,
-		"--stack",
-		stackName,
-	)
-	runReturningBinary(t, nil, kuke, args...)
+	// Step 4: Apply cell.yaml to materialise the cell
+	applyTestCell(t, host, realmName, spaceName, stackName, cellName)
 
 	// Step 5: Verify cell metadata file exists
 	if !verifyCellMetadataExists(t, runPath, realmName, spaceName, stackName, cellName) {
@@ -270,20 +272,8 @@ func TestKuke_DeleteCell_VerifyState(t *testing.T) {
 	)
 	runReturningBinary(t, nil, kuke, args...)
 
-	// Step 4: Create cell (prerequisite for deletion test)
-	args = append(
-		buildKukeDaemonArgs(host),
-		"create",
-		"cell",
-		cellName,
-		"--realm",
-		realmName,
-		"--space",
-		spaceName,
-		"--stack",
-		stackName,
-	)
-	runReturningBinary(t, nil, kuke, args...)
+	// Step 4: Apply cell.yaml to materialise the cell (prerequisite for deletion test)
+	applyTestCell(t, host, realmName, spaceName, stackName, cellName)
 
 	// Step 5: Verify cell exists initially (establish baseline)
 	if !verifyCellMetadataExists(t, runPath, realmName, spaceName, stackName, cellName) {
@@ -463,20 +453,9 @@ func TestKuke_StartCell_VerifyState(t *testing.T) {
 	)
 	runReturningBinary(t, nil, kuke, args...)
 
-	// Step 4: Create cell (cell should be in Pending state after creation)
-	args = append(
-		buildKukeDaemonArgs(host),
-		"create",
-		"cell",
-		cellName,
-		"--realm",
-		realmName,
-		"--space",
-		spaceName,
-		"--stack",
-		stackName,
-	)
-	runReturningBinary(t, nil, kuke, args...)
+	// Step 4: Apply cell.yaml to materialise the cell (cell may already be Ready
+	// after apply; the Step-8 conditional handles either Pending or Ready)
+	applyTestCell(t, host, realmName, spaceName, stackName, cellName)
 
 	// Step 5: Get realm namespace and cell ID for container verification
 	realmNamespace, err := getRealmNamespace(t, host, realmName)
@@ -618,20 +597,8 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 	)
 	runReturningBinary(t, nil, kuke, args...)
 
-	// Step 4: Create cell (containers auto-start on creation, so cell is Ready)
-	args = append(
-		buildKukeDaemonArgs(host),
-		"create",
-		"cell",
-		cellName,
-		"--realm",
-		realmName,
-		"--space",
-		spaceName,
-		"--stack",
-		stackName,
-	)
-	runReturningBinary(t, nil, kuke, args...)
+	// Step 4: Apply cell.yaml to materialise the cell (containers auto-start, so cell is Ready)
+	applyTestCell(t, host, realmName, spaceName, stackName, cellName)
 
 	// Step 5: Get realm namespace and cell ID for container verification
 	realmNamespace, err := getRealmNamespace(t, host, realmName)
@@ -785,20 +752,8 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 	)
 	runReturningBinary(t, nil, kuke, args...)
 
-	// Step 4: Create cell (containers auto-start on creation, so cell is Ready)
-	args = append(
-		buildKukeDaemonArgs(host),
-		"create",
-		"cell",
-		cellName,
-		"--realm",
-		realmName,
-		"--space",
-		spaceName,
-		"--stack",
-		stackName,
-	)
-	runReturningBinary(t, nil, kuke, args...)
+	// Step 4: Apply cell.yaml to materialise the cell (containers auto-start, so cell is Ready)
+	applyTestCell(t, host, realmName, spaceName, stackName, cellName)
 
 	// Step 5: Get realm namespace and cell ID for container verification
 	realmNamespace, err := getRealmNamespace(t, host, realmName)
@@ -952,20 +907,8 @@ func TestKuke_PurgeCell_VerifyState(t *testing.T) {
 	)
 	runReturningBinary(t, nil, kuke, args...)
 
-	// Step 4: Create cell (prerequisite for purge test)
-	args = append(
-		buildKukeDaemonArgs(host),
-		"create",
-		"cell",
-		cellName,
-		"--realm",
-		realmName,
-		"--space",
-		spaceName,
-		"--stack",
-		stackName,
-	)
-	runReturningBinary(t, nil, kuke, args...)
+	// Step 4: Apply cell.yaml to materialise the cell (prerequisite for purge test)
+	applyTestCell(t, host, realmName, spaceName, stackName, cellName)
 
 	// Step 5: Verify cell exists initially (establish baseline)
 	if !verifyCellMetadataExists(t, runPath, realmName, spaceName, stackName, cellName) {
