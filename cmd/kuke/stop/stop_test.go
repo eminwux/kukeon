@@ -18,95 +18,167 @@ package stop_test
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 
-	"github.com/eminwux/kukeon/cmd/kuke/stop"
-	"github.com/spf13/cobra"
+	"github.com/eminwux/kukeon/cmd/config"
+	stoppkg "github.com/eminwux/kukeon/cmd/kuke/stop"
+	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/spf13/viper"
 )
 
 func TestNewStopCmdMetadata(t *testing.T) {
-	tests := []struct {
-		name  string
-		check func(t *testing.T, cmd *cobra.Command)
-	}{
-		{
-			name: "use statement",
-			check: func(t *testing.T, cmd *cobra.Command) {
-				if cmd.Use != "stop [name]" {
-					t.Fatalf("expected Use to be %q, got %q", "stop [name]", cmd.Use)
-				}
-			},
-		},
-		{
-			name: "short description",
-			check: func(t *testing.T, cmd *cobra.Command) {
-				expected := "Stop Kukeon resources (cell)"
-				if cmd.Short != expected {
-					t.Fatalf("expected Short to be %q, got %q", expected, cmd.Short)
-				}
-			},
-		},
-		{
-			name: "run invokes help",
-			check: func(t *testing.T, cmd *cobra.Command) {
-				buf := &bytes.Buffer{}
-				cmd.SetOut(buf)
-				cmd.SetErr(buf)
+	cmd := stoppkg.NewStopCmd()
 
-				cmd.Run(cmd, nil)
-
-				output := buf.String()
-				if !strings.Contains(output, "Usage:") {
-					t.Fatalf("expected help output to contain %q, got %q", "Usage:", output)
-				}
-			},
-		},
+	if cmd.Use != "stop <name>" {
+		t.Errorf("Use mismatch: got %q want %q", cmd.Use, "stop <name>")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cmd := stop.NewStopCmd()
-			tt.check(t, cmd)
-		})
+	if cmd.Short != "Stop a cell" {
+		t.Errorf("Short mismatch: got %q", cmd.Short)
+	}
+	if !cmd.HasAlias("sto") {
+		t.Errorf("expected alias %q to be registered", "sto")
+	}
+	if cmd.Args == nil {
+		t.Errorf("expected Args validator on positional leaf, got nil")
+	}
+	for _, f := range []string{"realm", "space", "stack"} {
+		if cmd.Flag(f) == nil {
+			t.Errorf("expected flag --%s to be registered", f)
+		}
+	}
+	if cmd.ValidArgsFunction == nil {
+		t.Error("expected ValidArgsFunction to be set for cell-name completion")
+	}
+	if len(cmd.Commands()) != 0 {
+		t.Errorf("expected no subcommands on collapsed leaf, got %d", len(cmd.Commands()))
 	}
 }
 
-func TestNewStopCmdRegistersSubcommands(t *testing.T) {
-	tests := []struct {
-		name string
-	}{
-		{name: "cell"},
-	}
+func TestStopCmd(t *testing.T) {
+	t.Cleanup(viper.Reset)
 
+	tests := []struct {
+		name       string
+		args       []string
+		setup      func()
+		fake       *fakeClient
+		wantErr    string
+		wantOutput string
+	}{
+		{
+			name: "success",
+			args: []string{"c1"},
+			setup: func() {
+				viper.Set(config.KUKE_STOP_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_STOP_CELL_SPACE.ViperKey, "s1")
+				viper.Set(config.KUKE_STOP_CELL_STACK.ViperKey, "st1")
+			},
+			fake: &fakeClient{
+				stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+					return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
+				},
+			},
+			wantOutput: `Stopped cell "c1" from stack "st1"`,
+		},
+		{
+			name: "missing stack",
+			args: []string{"c1"},
+			setup: func() {
+				viper.Set(config.KUKE_STOP_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_STOP_CELL_SPACE.ViperKey, "s1")
+			},
+			wantErr: "stack name is required",
+		},
+		{
+			name: "client error",
+			args: []string{"c1"},
+			setup: func() {
+				viper.Set(config.KUKE_STOP_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_STOP_CELL_SPACE.ViperKey, "s1")
+				viper.Set(config.KUKE_STOP_CELL_STACK.ViperKey, "st1")
+			},
+			fake: &fakeClient{
+				stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+					return kukeonv1.StopCellResult{}, errdefs.ErrCellNotFound
+				},
+			},
+			wantErr: "cell not found",
+		},
+		{
+			name:    "missing positional",
+			args:    []string{},
+			wantErr: "accepts 1 arg",
+		},
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := stop.NewStopCmd()
-			if findSubCommand(cmd, tt.name) == nil {
-				t.Fatalf("expected %q subcommand to be registered", tt.name)
+			t.Cleanup(viper.Reset)
+			viper.Reset()
+			if tt.setup != nil {
+				tt.setup()
+			}
+
+			cmd := stoppkg.NewStopCmd()
+			buf := &bytes.Buffer{}
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+			if tt.fake != nil {
+				ctx = context.WithValue(ctx, stoppkg.MockControllerKey{}, kukeonv1.Client(tt.fake))
+			}
+			cmd.SetContext(ctx)
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("want err %q, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantOutput != "" && !strings.Contains(buf.String(), tt.wantOutput) {
+				t.Errorf("output missing %q\nGot:\n%s", tt.wantOutput, buf.String())
 			}
 		})
 	}
 }
 
-func TestNewStopCmd_AutocompleteRegistration(t *testing.T) {
-	cmd := stop.NewStopCmd()
+// TestStopCmd_RejectsCellSubcommand pins the hard CLI break: `kuke stop cell <name>`
+// must fail with cobra's unknown-command error after the collapse.
+func TestStopCmd_RejectsCellSubcommand(t *testing.T) {
+	cmd := stoppkg.NewStopCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"cell", "c1"})
 
-	// Test that ValidArgsFunction is set for subcommand completion
-	if cmd.ValidArgsFunction == nil {
-		t.Fatal("expected ValidArgsFunction to be set for subcommand completion")
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error invoking removed `stop cell` subcommand, got nil")
 	}
-
-	// Note: Completion function registration is verified by Cobra internally.
-	// We can't directly access the registered function, but the fact that
-	// ValidArgsFunction is set confirms the structure is correct.
 }
 
-func findSubCommand(cmd *cobra.Command, name string) *cobra.Command {
-	for _, sc := range cmd.Commands() {
-		if sc.Name() == name || sc.HasAlias(name) {
-			return sc
-		}
+type fakeClient struct {
+	kukeonv1.FakeClient
+
+	stopCellFn func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error)
+}
+
+func (f *fakeClient) StopCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+	if f.stopCellFn == nil {
+		return kukeonv1.StopCellResult{}, errors.New("unexpected StopCell call")
 	}
-	return nil
+	return f.stopCellFn(doc)
 }

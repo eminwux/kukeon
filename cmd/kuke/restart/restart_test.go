@@ -18,59 +18,428 @@ package restart_test
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 
+	"github.com/eminwux/kukeon/cmd/config"
 	restartpkg "github.com/eminwux/kukeon/cmd/kuke/restart"
-	"github.com/spf13/cobra"
+	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/errdefs"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
+	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
+	"github.com/spf13/viper"
 )
 
 func TestNewRestartCmdMetadata(t *testing.T) {
 	cmd := restartpkg.NewRestartCmd()
 
-	if cmd.Use != "restart [name]" {
-		t.Errorf("Use mismatch: got %q want %q", cmd.Use, "restart [name]")
+	if cmd.Use != "restart <name>" {
+		t.Errorf("Use mismatch: got %q want %q", cmd.Use, "restart <name>")
 	}
-	if cmd.Short != "Restart Kukeon resources (cell)" {
+	if !strings.HasPrefix(cmd.Short, "Restart a cell") {
 		t.Errorf("Short mismatch: got %q", cmd.Short)
 	}
 	if !cmd.HasAlias("res") {
 		t.Errorf("expected alias %q to be registered", "res")
 	}
-}
-
-func TestNewRestartCmdRegistersCellSubcommand(t *testing.T) {
-	cmd := restartpkg.NewRestartCmd()
-	if findSubCommand(cmd, "cell") == nil {
-		t.Fatalf("expected %q subcommand to be registered", "cell")
+	if cmd.Args == nil {
+		t.Errorf("expected Args validator on positional leaf, got nil")
+	}
+	for _, f := range []string{"realm", "space", "stack"} {
+		if cmd.Flag(f) == nil {
+			t.Errorf("expected flag --%s to be registered", f)
+		}
+	}
+	if cmd.ValidArgsFunction == nil {
+		t.Error("expected ValidArgsFunction to be set for cell-name completion")
+	}
+	if len(cmd.Commands()) != 0 {
+		t.Errorf("expected no subcommands on collapsed leaf, got %d", len(cmd.Commands()))
+	}
+	// The help text must still describe the OutOfSync reconcile contract so
+	// operators know `kuke restart` doubles as a reconcile on OutOfSync cells
+	// (now via the daemon-side reapply in controller.StartCell — #983).
+	if !strings.Contains(cmd.Long, "reconcile") || !strings.Contains(cmd.Long, "OutOfSync") {
+		t.Errorf("expected Long help to describe reconcile-on-OutOfSync, got: %s", cmd.Long)
 	}
 }
 
-func TestNewRestartCmdHelp(t *testing.T) {
+func TestRestartCmd(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	tests := []struct {
+		name       string
+		args       []string
+		setup      func()
+		fake       *fakeClient
+		wantErr    string
+		wantOutput string
+		// validate is run after a successful command for additional
+		// post-conditions the assertion knobs above don't cover.
+		validate func(t *testing.T, f *fakeClient)
+	}{
+		{
+			// Per #983, restart on a Ready cell is unconditionally stop+start.
+			// The daemon's controller.StartCell handles the OutOfSync reapply
+			// daemon-side, so the CLI no longer branches on OutOfSync — the
+			// same stop+start sequence works whether the cell is Synced or
+			// OutOfSync.
+			name: "ready cell: stop then start",
+			args: []string{"c1"},
+			setup: func() {
+				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
+				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
+			},
+			fake: &fakeClient{
+				getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{
+						MetadataExists: true,
+						Cell: v1beta1.CellDoc{
+							Metadata: v1beta1.CellMetadata{Name: doc.Metadata.Name},
+							Spec: v1beta1.CellSpec{
+								ID:      doc.Metadata.Name,
+								RealmID: "r1",
+								SpaceID: "s1",
+								StackID: "st1",
+							},
+							Status: v1beta1.CellStatus{State: v1beta1.CellStateReady, OutOfSync: false},
+						},
+					}, nil
+				},
+				stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+					return kukeonv1.StopCellResult{}, nil
+				},
+				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+					return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
+				},
+			},
+			wantOutput: `Restarted cell "c1" from stack "st1"`,
+			validate: func(t *testing.T, f *fakeClient) {
+				if f.stopCalls != 1 || f.startCalls != 1 {
+					t.Fatalf("want exactly 1 StopCell + 1 StartCell, got stop=%d start=%d",
+						f.stopCalls, f.startCalls)
+				}
+				if f.applyCalls != 0 {
+					t.Fatalf("restart must not call ApplyDocuments, got %d calls", f.applyCalls)
+				}
+				if f.getConfigCnt != 0 || f.getBpCalls != 0 {
+					t.Fatalf(
+						"restart must not call GetConfig or GetBlueprint (daemon-side reapply owns it now), "+
+							"got getConfig=%d getBlueprint=%d",
+						f.getConfigCnt, f.getBpCalls,
+					)
+				}
+			},
+		},
+		{
+			// Sanity check: the OutOfSync flag is transparent to the CLI now —
+			// stop+start runs unconditionally, and the daemon's StartCell is
+			// what re-materialises from the lineage Config.
+			name: "outofsync ready cell: stop then start (daemon-side reapply)",
+			args: []string{"prod"},
+			setup: func() {
+				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
+				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
+			},
+			fake: &fakeClient{
+				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{
+						MetadataExists: true,
+						Cell: v1beta1.CellDoc{
+							Metadata: v1beta1.CellMetadata{Name: "prod"},
+							Spec:     v1beta1.CellSpec{ID: "prod", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+							Status: v1beta1.CellStatus{
+								State:           v1beta1.CellStateReady,
+								OutOfSync:       true,
+								OutOfSyncReason: "spec differs",
+							},
+						},
+					}, nil
+				},
+				stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+					return kukeonv1.StopCellResult{}, nil
+				},
+				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+					return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
+				},
+			},
+			wantOutput: `Restarted cell "prod" from stack "st1"`,
+			validate: func(t *testing.T, f *fakeClient) {
+				if f.stopCalls != 1 || f.startCalls != 1 {
+					t.Fatalf("want exactly 1 StopCell + 1 StartCell, got stop=%d start=%d",
+						f.stopCalls, f.startCalls)
+				}
+				if f.applyCalls != 0 || f.getConfigCnt != 0 || f.getBpCalls != 0 {
+					t.Fatalf(
+						"OutOfSync reapply lives daemon-side; restart CLI must not call ApplyDocuments/GetConfig/GetBlueprint, "+
+							"got apply=%d getConfig=%d getBlueprint=%d",
+						f.applyCalls, f.getConfigCnt, f.getBpCalls,
+					)
+				}
+			},
+		},
+		{
+			name: "stopped cell: equivalent to kuke start",
+			args: []string{"c1"},
+			setup: func() {
+				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
+				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
+			},
+			fake: &fakeClient{
+				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{
+						MetadataExists: true,
+						Cell: v1beta1.CellDoc{
+							Metadata: v1beta1.CellMetadata{Name: "c1"},
+							Spec:     v1beta1.CellSpec{ID: "c1", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+							Status:   v1beta1.CellStatus{State: v1beta1.CellStateStopped},
+						},
+					}, nil
+				},
+				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+					return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
+				},
+			},
+			wantOutput: `Started cell "c1" from stack "st1"`,
+			validate: func(t *testing.T, f *fakeClient) {
+				if f.stopCalls != 0 || f.startCalls != 1 {
+					t.Fatalf("Stopped restart must call StartCell only, got stop=%d start=%d",
+						f.stopCalls, f.startCalls)
+				}
+			},
+		},
+		{
+			name: "failed cell: refused with kuke delete pointer",
+			args: []string{"broken"},
+			setup: func() {
+				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
+				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
+			},
+			fake: &fakeClient{
+				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{
+						MetadataExists: true,
+						Cell: v1beta1.CellDoc{
+							Metadata: v1beta1.CellMetadata{Name: "broken"},
+							Status:   v1beta1.CellStatus{State: v1beta1.CellStateFailed},
+						},
+					}, nil
+				},
+			},
+			wantErr: "kuke delete cell broken",
+		},
+		{
+			name: "pending cell: refused with kuke delete pointer",
+			args: []string{"halfborn"},
+			setup: func() {
+				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
+				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
+			},
+			fake: &fakeClient{
+				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{
+						MetadataExists: true,
+						Cell: v1beta1.CellDoc{
+							Metadata: v1beta1.CellMetadata{Name: "halfborn"},
+							Status:   v1beta1.CellStatus{State: v1beta1.CellStatePending},
+						},
+					}, nil
+				},
+			},
+			wantErr: "kuke delete cell halfborn",
+		},
+		{
+			name: "missing cell: returns ErrCellNotFound",
+			args: []string{"nope"},
+			setup: func() {
+				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
+				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
+			},
+			fake: &fakeClient{
+				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{MetadataExists: false}, nil
+				},
+			},
+			wantErr: "cell not found",
+		},
+		{
+			name:    "missing realm",
+			args:    []string{"c1"},
+			wantErr: "realm name is required",
+		},
+		{
+			name: "stop step errors: surfaces and skips start",
+			args: []string{"c1"},
+			setup: func() {
+				viper.Set(config.KUKE_RESTART_CELL_REALM.ViperKey, "r1")
+				viper.Set(config.KUKE_RESTART_CELL_SPACE.ViperKey, "s1")
+				viper.Set(config.KUKE_RESTART_CELL_STACK.ViperKey, "st1")
+			},
+			fake: &fakeClient{
+				getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+					return kukeonv1.GetCellResult{
+						MetadataExists: true,
+						Cell: v1beta1.CellDoc{
+							Metadata: v1beta1.CellMetadata{Name: "c1"},
+							Spec:     v1beta1.CellSpec{ID: "c1", RealmID: "r1", SpaceID: "s1", StackID: "st1"},
+							Status:   v1beta1.CellStatus{State: v1beta1.CellStateReady},
+						},
+					}, nil
+				},
+				stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+					return kukeonv1.StopCellResult{}, errors.New("boom")
+				},
+			},
+			wantErr: "boom",
+		},
+		{
+			name:    "missing positional",
+			args:    []string{},
+			wantErr: "accepts 1 arg",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			viper.Reset()
+			if tt.setup != nil {
+				tt.setup()
+			}
+
+			cmd := restartpkg.NewRestartCmd()
+			outBuf := &bytes.Buffer{}
+			errBuf := &bytes.Buffer{}
+			cmd.SetOut(outBuf)
+			cmd.SetErr(errBuf)
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+			if tt.fake != nil {
+				ctx = context.WithValue(ctx, restartpkg.MockControllerKey{}, kukeonv1.Client(tt.fake))
+			}
+			cmd.SetContext(ctx)
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("want err containing %q, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantOutput != "" && !strings.Contains(outBuf.String(), tt.wantOutput) {
+				t.Errorf("stdout missing %q\nGot:\n%s", tt.wantOutput, outBuf.String())
+			}
+			if tt.validate != nil {
+				tt.validate(t, tt.fake)
+			}
+		})
+	}
+}
+
+// TestRestartCmd_RejectsCellSubcommand pins the hard CLI break: `kuke restart cell <name>`
+// must fail with cobra's unknown-command error after the collapse.
+func TestRestartCmd_RejectsCellSubcommand(t *testing.T) {
 	cmd := restartpkg.NewRestartCmd()
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"cell", "c1"})
 
-	cmd.Run(cmd, nil)
-
-	if !strings.Contains(buf.String(), "Usage:") {
-		t.Fatalf("expected help output to include %q, got:\n%s", "Usage:", buf.String())
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error invoking removed `restart cell` subcommand, got nil")
 	}
 }
 
-func TestNewRestartCmd_AutocompleteRegistration(t *testing.T) {
-	cmd := restartpkg.NewRestartCmd()
-	if cmd.ValidArgsFunction == nil {
-		t.Fatal("expected ValidArgsFunction to be set for subcommand completion")
-	}
+// fakeClient is a per-test stub kukeonv1.Client. Each RPC is dispatched
+// through an optional Fn field; nil means "fail the test if called". Call
+// counts let tests assert "restart did not invoke ApplyDocuments / GetConfig
+// / GetBlueprint" — the OutOfSync reapply lives daemon-side now (#983), so
+// none of those RPCs should fire from the restart CLI.
+type fakeClient struct {
+	kukeonv1.FakeClient
+
+	getCellFn      func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error)
+	getConfigFn    func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error)
+	getBlueprintFn func(doc v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error)
+	stopCellFn     func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error)
+	startCellFn    func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error)
+	applyDocsFn    func(rawYAML []byte) (kukeonv1.ApplyDocumentsResult, error)
+
+	getCellCalls int
+	stopCalls    int
+	startCalls   int
+	getConfigCnt int
+	getBpCalls   int
+	applyCalls   int
 }
 
-func findSubCommand(cmd *cobra.Command, name string) *cobra.Command {
-	for _, sc := range cmd.Commands() {
-		if sc.Name() == name || sc.HasAlias(name) {
-			return sc
-		}
+func (f *fakeClient) GetCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+	f.getCellCalls++
+	if f.getCellFn == nil {
+		return kukeonv1.GetCellResult{}, errors.New("unexpected GetCell call")
 	}
-	return nil
+	return f.getCellFn(doc)
 }
+
+func (f *fakeClient) GetConfig(_ context.Context, doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+	f.getConfigCnt++
+	if f.getConfigFn == nil {
+		return kukeonv1.GetConfigResult{}, errors.New("unexpected GetConfig call")
+	}
+	return f.getConfigFn(doc)
+}
+
+func (f *fakeClient) GetBlueprint(
+	_ context.Context,
+	doc v1beta1.CellBlueprintDoc,
+) (kukeonv1.GetBlueprintResult, error) {
+	f.getBpCalls++
+	if f.getBlueprintFn == nil {
+		return kukeonv1.GetBlueprintResult{}, errors.New("unexpected GetBlueprint call")
+	}
+	return f.getBlueprintFn(doc)
+}
+
+func (f *fakeClient) StopCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+	f.stopCalls++
+	if f.stopCellFn == nil {
+		return kukeonv1.StopCellResult{}, errors.New("unexpected StopCell call")
+	}
+	return f.stopCellFn(doc)
+}
+
+func (f *fakeClient) StartCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+	f.startCalls++
+	if f.startCellFn == nil {
+		return kukeonv1.StartCellResult{}, errors.New("unexpected StartCell call")
+	}
+	return f.startCellFn(doc)
+}
+
+func (f *fakeClient) ApplyDocuments(_ context.Context, rawYAML []byte) (kukeonv1.ApplyDocumentsResult, error) {
+	f.applyCalls++
+	if f.applyDocsFn == nil {
+		return kukeonv1.ApplyDocumentsResult{}, errors.New("unexpected ApplyDocuments call")
+	}
+	return f.applyDocsFn(rawYAML)
+}
+
+// Sanity guard that the sentinel error in errdefs is still the one we
+// reference — if it gets renamed, this fails at compile time rather than
+// silently slipping into a string-match assertion.
+var _ = errdefs.ErrCellNotFound
