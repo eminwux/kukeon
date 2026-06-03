@@ -126,38 +126,3 @@ func TestKuke_CreateCell_RejectsInvalidNames(t *testing.T) {
 	}
 }
 
-// TestKuke_CreateContainer_RejectsInvalidNames covers the AC for #180:
-// invalid container names must be rejected end-to-end.
-func TestKuke_CreateContainer_RejectsInvalidNames(t *testing.T) {
-	t.Parallel()
-
-	runPath := getRandomRunPath(t)
-	host := startKukeondDaemon(t, runPath)
-
-	tests := []struct {
-		name          string
-		containerName string
-	}{
-		{name: "underscore in container name", containerName: "bad_container"},
-		{name: "slash in container name", containerName: "bad/container"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			args := append(buildKukeDaemonArgs(host),
-				"create", "container", tt.containerName,
-				"--realm", "default", "--space", "default",
-				"--stack", "default", "--cell", "default",
-				"--image", "registry.eminwux.com/library/alpine:3.19")
-			exitCode, _, stderr := runBinary(t, nil, kuke, args...)
-			if exitCode == 0 {
-				t.Fatalf("expected non-zero exit rejecting container name %q", tt.containerName)
-			}
-			combined := string(stderr)
-			if !strings.Contains(combined, "container") || !strings.Contains(combined, tt.containerName) {
-				t.Errorf("expected error mentioning kind=container and name %q, got:\n%s", tt.containerName, combined)
-			}
-		})
-	}
-}

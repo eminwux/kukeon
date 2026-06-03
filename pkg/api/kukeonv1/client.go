@@ -45,7 +45,6 @@ type Client interface {
 	// CreateCell so the same printer renders the outcome (Started will be
 	// false because the start step was skipped).
 	MaterializeCell(ctx context.Context, doc v1beta1.CellDoc) (CreateCellResult, error)
-	CreateContainer(ctx context.Context, doc v1beta1.ContainerDoc) (CreateContainerResult, error)
 	// CreateConfig atomically persists a new CellConfig document under
 	// create-only semantics (issue #839): the daemon-side write fails with
 	// errdefs.ErrConfigExists if a Config of the same name already lives in
@@ -125,7 +124,6 @@ type Client interface {
 	DeleteSpace(ctx context.Context, doc v1beta1.SpaceDoc, force, cascade bool) (DeleteSpaceResult, error)
 	DeleteStack(ctx context.Context, doc v1beta1.StackDoc, force, cascade bool) (DeleteStackResult, error)
 	DeleteCell(ctx context.Context, doc v1beta1.CellDoc) (DeleteCellResult, error)
-	DeleteContainer(ctx context.Context, doc v1beta1.ContainerDoc) (DeleteContainerResult, error)
 	// DeleteSecret removes a single named, scoped Secret's daemon-stored
 	// file (issue #622). The live-reference safety gate ships in phase 3c.
 	DeleteSecret(ctx context.Context, doc v1beta1.SecretDoc) (DeleteSecretResult, error)
@@ -143,7 +141,6 @@ type Client interface {
 	PurgeSpace(ctx context.Context, doc v1beta1.SpaceDoc, force, cascade bool) (PurgeSpaceResult, error)
 	PurgeStack(ctx context.Context, doc v1beta1.StackDoc, force, cascade bool) (PurgeStackResult, error)
 	PurgeCell(ctx context.Context, doc v1beta1.CellDoc, force, cascade bool) (PurgeCellResult, error)
-	PurgeContainer(ctx context.Context, doc v1beta1.ContainerDoc) (PurgeContainerResult, error)
 
 	RefreshAll(ctx context.Context) (RefreshAllResult, error)
 	ApplyDocuments(ctx context.Context, rawYAML []byte) (ApplyDocumentsResult, error)
@@ -249,7 +246,6 @@ const (
 	MethodCreateStack     = ServiceName + ".CreateStack"
 	MethodCreateCell      = ServiceName + ".CreateCell"
 	MethodMaterializeCell = ServiceName + ".MaterializeCell"
-	MethodCreateContainer = ServiceName + ".CreateContainer"
 	MethodCreateConfig    = ServiceName + ".CreateConfig"
 	MethodCreateSecret    = ServiceName + ".CreateSecret"
 
@@ -281,7 +277,6 @@ const (
 	MethodDeleteSpace     = ServiceName + ".DeleteSpace"
 	MethodDeleteStack     = ServiceName + ".DeleteStack"
 	MethodDeleteCell      = ServiceName + ".DeleteCell"
-	MethodDeleteContainer = ServiceName + ".DeleteContainer"
 	MethodDeleteSecret    = ServiceName + ".DeleteSecret"
 	MethodDeleteBlueprint = ServiceName + ".DeleteBlueprint"
 	MethodDeleteConfig    = ServiceName + ".DeleteConfig"
@@ -290,7 +285,6 @@ const (
 	MethodPurgeSpace     = ServiceName + ".PurgeSpace"
 	MethodPurgeStack     = ServiceName + ".PurgeStack"
 	MethodPurgeCell      = ServiceName + ".PurgeCell"
-	MethodPurgeContainer = ServiceName + ".PurgeContainer"
 
 	MethodRefreshAll      = ServiceName + ".RefreshAll"
 	MethodApplyDocuments  = ServiceName + ".ApplyDocuments"

@@ -216,32 +216,6 @@ func (c *Client) createCell(
 	return out, nil
 }
 
-// CreateContainer normalizes the external doc, delegates to the controller,
-// and reshapes the result back into external v1beta1 types.
-func (c *Client) CreateContainer(_ context.Context, doc v1beta1.ContainerDoc) (kukeonv1.CreateContainerResult, error) {
-	internal, version, err := apischeme.NormalizeContainer(doc)
-	if err != nil {
-		return kukeonv1.CreateContainerResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-	res, err := c.ctrl.CreateContainer(internal)
-	if err != nil {
-		return kukeonv1.CreateContainerResult{}, err
-	}
-	extContainer, err := apischeme.BuildContainerExternalFromInternal(res.Container, version)
-	if err != nil {
-		return kukeonv1.CreateContainerResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-	return kukeonv1.CreateContainerResult{
-		Container:              extContainer,
-		CellMetadataExistsPre:  res.CellMetadataExistsPre,
-		CellMetadataExistsPost: res.CellMetadataExistsPost,
-		ContainerExistsPre:     res.ContainerExistsPre,
-		ContainerExistsPost:    res.ContainerExistsPost,
-		ContainerCreated:       res.ContainerCreated,
-		Started:                res.Started,
-	}, nil
-}
-
 // ---- Get ----
 
 func (c *Client) GetRealm(_ context.Context, doc v1beta1.RealmDoc) (kukeonv1.GetRealmResult, error) {
@@ -717,27 +691,6 @@ func (c *Client) DeleteCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.De
 	}, nil
 }
 
-func (c *Client) DeleteContainer(_ context.Context, doc v1beta1.ContainerDoc) (kukeonv1.DeleteContainerResult, error) {
-	internal, version, err := apischeme.NormalizeContainer(doc)
-	if err != nil {
-		return kukeonv1.DeleteContainerResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-	res, err := c.ctrl.DeleteContainer(internal)
-	if err != nil {
-		return kukeonv1.DeleteContainerResult{}, err
-	}
-	ext, err := apischeme.BuildContainerExternalFromInternal(res.Container, version)
-	if err != nil {
-		return kukeonv1.DeleteContainerResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-	return kukeonv1.DeleteContainerResult{
-		Container:          ext,
-		CellMetadataExists: res.CellMetadataExists,
-		ContainerExists:    res.ContainerExists,
-		Deleted:            res.Deleted,
-	}, nil
-}
-
 func (c *Client) DeleteSecret(_ context.Context, doc v1beta1.SecretDoc) (kukeonv1.DeleteSecretResult, error) {
 	internal, _, err := apischeme.NormalizeSecret(doc)
 	if err != nil {
@@ -899,28 +852,6 @@ func (c *Client) PurgeCell(
 		Cascade:           res.Cascade,
 		Deleted:           res.Deleted,
 		Purged:            res.Purged,
-	}, nil
-}
-
-func (c *Client) PurgeContainer(_ context.Context, doc v1beta1.ContainerDoc) (kukeonv1.PurgeContainerResult, error) {
-	internal, version, err := apischeme.NormalizeContainer(doc)
-	if err != nil {
-		return kukeonv1.PurgeContainerResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-	res, err := c.ctrl.PurgeContainer(internal)
-	if err != nil {
-		return kukeonv1.PurgeContainerResult{}, err
-	}
-	ext, err := apischeme.BuildContainerExternalFromInternal(res.Container, version)
-	if err != nil {
-		return kukeonv1.PurgeContainerResult{}, fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-	}
-	return kukeonv1.PurgeContainerResult{
-		Container:          ext,
-		CellMetadataExists: res.CellMetadataExists,
-		ContainerExists:    res.ContainerExists,
-		Deleted:            res.Deleted,
-		Purged:             res.Purged,
 	}, nil
 }
 

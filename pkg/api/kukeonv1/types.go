@@ -94,28 +94,6 @@ type CreateStackResult struct {
 	Created            bool
 }
 
-// ---- Container ----
-
-type CreateContainerArgs struct {
-	Doc v1beta1.ContainerDoc
-}
-
-type CreateContainerReply struct {
-	Result CreateContainerResult
-	Err    *APIError
-}
-
-type CreateContainerResult struct {
-	Container v1beta1.ContainerDoc
-
-	CellMetadataExistsPre  bool
-	CellMetadataExistsPost bool
-	ContainerExistsPre     bool
-	ContainerExistsPost    bool
-	ContainerCreated       bool
-	Started                bool
-}
-
 // ---- Get ----
 
 type GetRealmArgs struct {
@@ -559,22 +537,6 @@ type DeleteConfigResult struct {
 	BackRefCells []string
 }
 
-type DeleteContainerArgs struct {
-	Doc v1beta1.ContainerDoc
-}
-
-type DeleteContainerReply struct {
-	Result DeleteContainerResult
-	Err    *APIError
-}
-
-type DeleteContainerResult struct {
-	Container          v1beta1.ContainerDoc
-	CellMetadataExists bool
-	ContainerExists    bool
-	Deleted            []string
-}
-
 // ---- Purge ----
 
 type PurgeRealmArgs struct {
@@ -659,23 +621,6 @@ type PurgeCellResult struct {
 	Cascade           bool
 	Deleted           []string
 	Purged            []string
-}
-
-type PurgeContainerArgs struct {
-	Doc v1beta1.ContainerDoc
-}
-
-type PurgeContainerReply struct {
-	Result PurgeContainerResult
-	Err    *APIError
-}
-
-type PurgeContainerResult struct {
-	Container          v1beta1.ContainerDoc
-	CellMetadataExists bool
-	ContainerExists    bool
-	Deleted            []string
-	Purged             []string
 }
 
 // ---- Attach ----

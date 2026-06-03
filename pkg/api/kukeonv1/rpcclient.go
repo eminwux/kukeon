@@ -198,19 +198,6 @@ func (c *UnixClient) MaterializeCell(ctx context.Context, doc v1beta1.CellDoc) (
 	return reply.Result, nil
 }
 
-// CreateContainer implements Client.
-func (c *UnixClient) CreateContainer(ctx context.Context, doc v1beta1.ContainerDoc) (CreateContainerResult, error) {
-	args := &CreateContainerArgs{Doc: doc}
-	reply := &CreateContainerReply{}
-	if err := c.call(ctx, MethodCreateContainer, args, reply); err != nil {
-		return CreateContainerResult{}, err
-	}
-	if reply.Err != nil {
-		return reply.Result, FromAPIError(reply.Err)
-	}
-	return reply.Result, nil
-}
-
 // GetRealm implements Client.
 func (c *UnixClient) GetRealm(ctx context.Context, doc v1beta1.RealmDoc) (GetRealmResult, error) {
 	args := &GetRealmArgs{Doc: doc}
@@ -600,19 +587,6 @@ func (c *UnixClient) DeleteCell(ctx context.Context, doc v1beta1.CellDoc) (Delet
 	return reply.Result, nil
 }
 
-// DeleteContainer implements Client.
-func (c *UnixClient) DeleteContainer(ctx context.Context, doc v1beta1.ContainerDoc) (DeleteContainerResult, error) {
-	args := &DeleteContainerArgs{Doc: doc}
-	reply := &DeleteContainerReply{}
-	if err := c.call(ctx, MethodDeleteContainer, args, reply); err != nil {
-		return DeleteContainerResult{}, err
-	}
-	if reply.Err != nil {
-		return reply.Result, FromAPIError(reply.Err)
-	}
-	return reply.Result, nil
-}
-
 // DeleteSecret implements Client.
 func (c *UnixClient) DeleteSecret(ctx context.Context, doc v1beta1.SecretDoc) (DeleteSecretResult, error) {
 	args := &DeleteSecretArgs{Doc: doc}
@@ -713,19 +687,6 @@ func (c *UnixClient) PurgeCell(ctx context.Context, doc v1beta1.CellDoc, force, 
 	reply := &PurgeCellReply{}
 	if err := c.call(ctx, MethodPurgeCell, args, reply); err != nil {
 		return PurgeCellResult{}, err
-	}
-	if reply.Err != nil {
-		return reply.Result, FromAPIError(reply.Err)
-	}
-	return reply.Result, nil
-}
-
-// PurgeContainer implements Client.
-func (c *UnixClient) PurgeContainer(ctx context.Context, doc v1beta1.ContainerDoc) (PurgeContainerResult, error) {
-	args := &PurgeContainerArgs{Doc: doc}
-	reply := &PurgeContainerReply{}
-	if err := c.call(ctx, MethodPurgeContainer, args, reply); err != nil {
-		return PurgeContainerResult{}, err
 	}
 	if reply.Err != nil {
 		return reply.Result, FromAPIError(reply.Err)

@@ -116,20 +116,6 @@ func (s *KukeonV1Service) MaterializeCell(
 	return nil
 }
 
-// CreateContainer is the net/rpc method for KukeonV1.CreateContainer.
-func (s *KukeonV1Service) CreateContainer(
-	args *kukeonv1.CreateContainerArgs,
-	reply *kukeonv1.CreateContainerReply,
-) error {
-	result, err := s.core.CreateContainer(s.ctx, args.Doc)
-	reply.Result = result
-	reply.Err = kukeonv1.ToAPIError(err)
-	if err != nil {
-		s.logger.DebugContext(s.ctx, "CreateContainer returned error", "error", err)
-	}
-	return nil
-}
-
 // ---- Get ----
 
 func (s *KukeonV1Service) GetRealm(args *kukeonv1.GetRealmArgs, reply *kukeonv1.GetRealmReply) error {
@@ -351,16 +337,6 @@ func (s *KukeonV1Service) DeleteCell(args *kukeonv1.DeleteCellArgs, reply *kukeo
 	return nil
 }
 
-func (s *KukeonV1Service) DeleteContainer(
-	args *kukeonv1.DeleteContainerArgs,
-	reply *kukeonv1.DeleteContainerReply,
-) error {
-	result, err := s.core.DeleteContainer(s.ctx, args.Doc)
-	reply.Result = result
-	reply.Err = kukeonv1.ToAPIError(err)
-	return nil
-}
-
 func (s *KukeonV1Service) DeleteSecret(args *kukeonv1.DeleteSecretArgs, reply *kukeonv1.DeleteSecretReply) error {
 	result, err := s.core.DeleteSecret(s.ctx, args.Doc)
 	reply.Result = result
@@ -411,13 +387,6 @@ func (s *KukeonV1Service) PurgeStack(args *kukeonv1.PurgeStackArgs, reply *kukeo
 
 func (s *KukeonV1Service) PurgeCell(args *kukeonv1.PurgeCellArgs, reply *kukeonv1.PurgeCellReply) error {
 	result, err := s.core.PurgeCell(s.ctx, args.Doc, args.Force, args.Cascade)
-	reply.Result = result
-	reply.Err = kukeonv1.ToAPIError(err)
-	return nil
-}
-
-func (s *KukeonV1Service) PurgeContainer(args *kukeonv1.PurgeContainerArgs, reply *kukeonv1.PurgeContainerReply) error {
-	result, err := s.core.PurgeContainer(s.ctx, args.Doc)
 	reply.Result = result
 	reply.Err = kukeonv1.ToAPIError(err)
 	return nil

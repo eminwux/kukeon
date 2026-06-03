@@ -235,34 +235,6 @@ func (b *Exec) DeleteDocuments(docs []parser.Document, cascade, force bool) (Del
 				}
 			}
 
-		case v1beta1.KindContainer:
-			if doc.ContainerDoc == nil {
-				resourceResult.Action = actionFailed
-				resourceResult.Error = errors.New("container document is nil")
-				result.Resources = append(result.Resources, resourceResult)
-				continue
-			}
-			container, _, err := apischeme.NormalizeContainer(*doc.ContainerDoc)
-			if err != nil {
-				resourceResult.Action = actionFailed
-				resourceResult.Error = fmt.Errorf("%w: %w", errdefs.ErrConversionFailed, err)
-				result.Resources = append(result.Resources, resourceResult)
-				continue
-			}
-			resourceResult.Name = container.Metadata.Name
-			_, deleteErr := b.DeleteContainer(container)
-			if deleteErr != nil {
-				if isNotFoundError(deleteErr) {
-					resourceResult.Action = actionNotFound
-				} else {
-					resourceResult.Action = actionFailed
-					resourceResult.Error = deleteErr
-				}
-			} else {
-				resourceResult.Action = actionDeleted
-				resourceResult.Details["containers"] = "1 deleted"
-			}
-
 		default:
 			resourceResult.Action = actionFailed
 			resourceResult.Error = fmt.Errorf("%w: %s", errdefs.ErrUnknownKind, doc.Kind)

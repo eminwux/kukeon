@@ -35,7 +35,7 @@ func TestNewPurgeCmd(t *testing.T) {
 		t.Errorf("Use mismatch: got %q, want %q", cmd.Use, "purge [name]")
 	}
 
-	expectedShort := "Purge Kukeon resources with comprehensive cleanup (realm, space, stack, cell, container)"
+	expectedShort := "Purge Kukeon resources with comprehensive cleanup (realm, space, stack, cell)"
 	if cmd.Short != expectedShort {
 		t.Errorf("Short mismatch: got %q, want %q", cmd.Short, expectedShort)
 	}
@@ -87,7 +87,7 @@ func TestNewPurgeCmd(t *testing.T) {
 	}
 
 	// Test subcommands are registered
-	expectedSubcommands := []string{"realm", "space", "stack", "cell", "container"}
+	expectedSubcommands := []string{"realm", "space", "stack", "cell"}
 	if len(cmd.Commands()) != len(expectedSubcommands) {
 		t.Errorf("subcommand count mismatch: got %d, want %d", len(cmd.Commands()), len(expectedSubcommands))
 	}
@@ -132,7 +132,7 @@ func TestNewPurgeCmdRun(t *testing.T) {
 	}
 
 	// Verify subcommands are listed in help
-	expectedSubcommands := []string{"realm", "space", "stack", "cell", "container"}
+	expectedSubcommands := []string{"realm", "space", "stack", "cell"}
 	for _, subcmd := range expectedSubcommands {
 		if !strings.Contains(output, subcmd) {
 			t.Errorf("help output missing subcommand %q. Got output: %q", subcmd, output)
@@ -150,7 +150,7 @@ func TestNewPurgeCmd_AutocompleteRegistration(t *testing.T) {
 
 	// Test the completion function directly
 	completions, _ := cmd.ValidArgsFunction(cmd, []string{}, "")
-	expected := []string{"realm", "space", "stack", "cell", "container"}
+	expected := []string{"realm", "space", "stack", "cell"}
 	if len(completions) != len(expected) {
 		t.Fatalf("expected %d completions, got %d", len(expected), len(completions))
 	}
@@ -170,7 +170,7 @@ func TestNewPurgeCmd_AutocompleteRegistration(t *testing.T) {
 
 	// Test prefix filtering
 	filtered, _ := cmd.ValidArgsFunction(cmd, []string{}, "c")
-	expectedFiltered := []string{"cell", "container"}
+	expectedFiltered := []string{"cell"}
 	if len(filtered) != len(expectedFiltered) {
 		t.Fatalf("expected %d filtered completions, got %d", len(expectedFiltered), len(filtered))
 	}
@@ -203,7 +203,7 @@ func TestNewPurgeCmdPersistentFlags(t *testing.T) {
 			name:        "cascade flag",
 			flagName:    "cascade",
 			defaultVal:  false,
-			description: "Automatically purge child resources recursively (does not apply to containers)",
+			description: "Automatically purge child resources recursively",
 			viperKey:    config.KUKE_PURGE_CASCADE.ViperKey,
 		},
 		{
