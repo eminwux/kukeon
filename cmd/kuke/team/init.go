@@ -30,6 +30,8 @@ import (
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/kuketeams"
 	"github.com/eminwux/kukeon/internal/teamhost"
+	"github.com/eminwux/kukeon/internal/teamrender"
+	"github.com/eminwux/kukeon/internal/teamsource"
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
@@ -50,12 +52,38 @@ type GitConfigFunc func(ctx context.Context, key string) (string, bool)
 // MockGitConfigKey injects a GitConfigFunc via context for tests.
 type MockGitConfigKey struct{}
 
+// ProjectRepoURLFunc resolves the clone URL of the project repo whose
+// kuketeam.yaml is at projectDir. The default implementation runs
+// `git -C <projectDir> remote get-url origin`; tests inject a stub via
+// MockProjectRepoURLKey so the render path stays hermetic. A missing
+// remote returns ok=false; the render pipeline then leaves the project
+// repo slot unfilled rather than failing the whole `kuke team init`
+// (the operator may be init-ing a project that has not yet been pushed).
+type ProjectRepoURLFunc func(ctx context.Context, projectDir string) (string, bool)
+
+// MockProjectRepoURLKey injects a ProjectRepoURLFunc via context for tests.
+type MockProjectRepoURLKey struct{}
+
+// ResolveFunc materializes the agents source and loads the role/harness/image
+// documents the project's roster references. The default implementation
+// delegates to teamsource.Resolve against a real on-disk cache; tests inject
+// a stub via MockResolveKey so the render path can run without cloning git.
+type ResolveFunc func(
+	ctx context.Context,
+	cache teamsource.Cache,
+	tc *model.TeamsConfig,
+	pt *model.ProjectTeam,
+) (*teamsource.Bundle, error)
+
+// MockResolveKey injects a ResolveFunc via context for tests.
+type MockResolveKey struct{}
+
 // NewInitCmd builds the `kuke team init` subcommand. It reads the current
 // project's kuketeam.yaml roster, scaffolds the operator-global facts file on
-// first run, and writes the per-project drop-in entry. Source resolution,
-// render, and apply land in steps 2–4 — `--dry-run` is reserved for step 3's
-// render output; in step 1 it prints the per-project entry that would be
-// written and touches no files on disk.
+// first run, writes the per-project drop-in entry, materializes the pinned
+// agents source, and renders the per-(role × harness) CellBlueprint/CellConfig
+// pairs. `--dry-run` stops after render, prints the rendered objects to
+// stdout, and touches no files on disk (apply lands in step 4 #1043).
 func NewInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "init",
@@ -74,15 +102,15 @@ func NewInitCmd() *cobra.Command {
 
 	cmd.Flags().Bool(
 		"dry-run", false,
-		"Print the per-project entry that would be written without touching disk (full render lands in a later step)",
+		"Render the project's blueprints/configs to stdout without writing the drop-in entry or applying to kukeond",
 	)
 
 	return cmd
 }
 
 // runInit gathers the cobra-coupled inputs (current directory, ~/.kuke layout,
-// git-config reader) and hands them to composeTeam, which holds the testable
-// lifecycle.
+// git-config reader, project-repo-URL reader) and hands them to composeTeam,
+// which holds the testable lifecycle.
 func runInit(cmd *cobra.Command, dryRun bool) error {
 	projectDir, err := os.Getwd()
 	if err != nil {
@@ -90,22 +118,34 @@ func runInit(cmd *cobra.Command, dryRun bool) error {
 	}
 	layout := teamhost.NewLayout(config.DefaultKukeDir())
 	return composeTeam(
-		cmd.Context(), cmd.OutOrStdout(), projectDir, layout, gitConfigFromCmd(cmd), dryRun,
+		cmd.Context(), cmd.OutOrStdout(), projectDir, layout,
+		gitConfigFromCmd(cmd), projectRepoURLFromCmd(cmd), resolveFromCmd(cmd),
+		dryRun,
 	)
 }
 
-// composeTeam runs the team-init lifecycle against explicit inputs: read the
-// project roster, scaffold the operator-global facts on first run, and write
-// the per-project drop-in entry. `--dry-run` prints the entry that would be
-// written and touches no files (full render lands in step 3). It takes no
-// cobra dependency so it is unit-testable with a temp layout and a stub
-// git-config reader, no live kukeond required.
+// composeTeam runs the team-init lifecycle against explicit inputs:
+//
+//  1. Read the project roster from <projectDir>/kuketeam.yaml.
+//  2. Load (or scaffold-and-load) the operator-global facts file.
+//  3. Resolve the pinned agents source into the on-disk cache and load every
+//     Role / Harness / ImageCatalog the roster references.
+//  4. Render the per-(role × harness) CellBlueprint/CellConfig pairs.
+//  5. Either print the rendered objects to stdout (--dry-run) or write the
+//     per-project drop-in entry (step 4 in #1043 will apply the rendered
+//     objects to kukeond after this point).
+//
+// composeTeam takes no cobra dependency so it is unit-testable with a temp
+// layout, stub git-config / project-repo-URL readers, and a stub resolver, no
+// live kukeond required.
 func composeTeam(
 	ctx context.Context,
 	out io.Writer,
 	projectDir string,
 	layout teamhost.Layout,
 	getGit GitConfigFunc,
+	getProjectURL ProjectRepoURLFunc,
+	resolve ResolveFunc,
 	dryRun bool,
 ) error {
 	pt, err := readProjectTeam(projectDir)
@@ -120,6 +160,23 @@ func composeTeam(
 		return errdefs.ErrTeamMetadataNameRequired
 	}
 
+	tc, scaffolded, err := loadOrScaffoldGlobalConfig(ctx, layout, getGit, dryRun)
+	if err != nil {
+		return err
+	}
+	if scaffolded {
+		fmt.Fprintf(out, "scaffolded operator-global facts at %s\n", layout.GlobalConfigPath())
+	}
+
+	res, err := renderTeam(ctx, layout, projectDir, pt, tc, project, getProjectURL, resolve)
+	if err != nil {
+		return err
+	}
+
+	if dryRun {
+		return emitDryRun(out, project, layout, res)
+	}
+
 	entry := &model.TeamEntry{
 		APIVersion: model.APIVersionV1,
 		Kind:       model.KindTeamEntry,
@@ -129,29 +186,122 @@ func composeTeam(
 			Source: strings.TrimSpace(pt.Spec.Source),
 		},
 	}
-
-	if dryRun {
-		raw, marshalErr := yaml.Marshal(entry)
-		if marshalErr != nil {
-			return fmt.Errorf("marshal team entry: %w", marshalErr)
-		}
-		fmt.Fprintf(out, "# dry-run: would write %s\n%s",
-			filepath.Join("~/.kuke/kuketeam.d", project+".yaml"), raw)
-		return nil
-	}
-
-	created, err := teamhost.EnsureGlobalConfig(layout, buildGlobalConfig(ctx, getGit))
-	if err != nil {
-		return fmt.Errorf("ensure global config: %w", err)
-	}
-	if created {
-		fmt.Fprintf(out, "scaffolded operator-global facts at %s\n", layout.GlobalConfigPath())
-	}
-
 	if writeErr := teamhost.WriteEntry(layout, entry); writeErr != nil {
 		return fmt.Errorf("write team entry: %w", writeErr)
 	}
 	fmt.Fprintf(out, "wrote team %q to %s\n", project, layout.EntryPath(project))
+	fmt.Fprintf(out, "rendered %d blueprint/%d config object(s) (apply lands in step 4)\n",
+		len(res.Blueprints), len(res.Configs))
+	return nil
+}
+
+// loadOrScaffoldGlobalConfig returns the TeamsConfig the render pipeline
+// consumes. When the file already exists, it is parsed off disk and
+// returned with scaffolded=false. When it is absent, a scaffold is
+// composed from the operator's git config + KUKEON_REGISTRY; in non-dry-run
+// mode it is written to disk (scaffolded=true), in dry-run mode it is held
+// only in memory (scaffolded=false) so dry-run honors the AC's "neither
+// applies nor writes" contract.
+func loadOrScaffoldGlobalConfig(
+	ctx context.Context,
+	layout teamhost.Layout,
+	getGit GitConfigFunc,
+	dryRun bool,
+) (*model.TeamsConfig, bool, error) {
+	path := layout.GlobalConfigPath()
+	raw, readErr := os.ReadFile(path)
+	if readErr == nil {
+		doc, parseErr := kuketeams.Parse(raw)
+		if parseErr != nil {
+			return nil, false, fmt.Errorf("parse %q: %w", path, parseErr)
+		}
+		if doc.TeamsConfig == nil {
+			return nil, false, fmt.Errorf("%s: expected TeamsConfig, got kind %q", path, doc.Kind)
+		}
+		return doc.TeamsConfig, false, nil
+	}
+	if !errors.Is(readErr, os.ErrNotExist) {
+		return nil, false, fmt.Errorf("read %q: %w", path, readErr)
+	}
+
+	cfg := buildGlobalConfig(ctx, getGit)
+	if dryRun {
+		return cfg, false, nil
+	}
+	created, err := teamhost.EnsureGlobalConfig(layout, cfg)
+	if err != nil {
+		return nil, false, fmt.Errorf("ensure global config: %w", err)
+	}
+	return cfg, created, nil
+}
+
+// renderTeam resolves the bundle and runs the per-(role × harness) render.
+// When the project declares no harness defaults there is nothing to render
+// and the bundle is not resolved — keeping `kuke team init` against a
+// harness-less roster fast and offline.
+func renderTeam(
+	ctx context.Context,
+	layout teamhost.Layout,
+	projectDir string,
+	pt *model.ProjectTeam,
+	tc *model.TeamsConfig,
+	project string,
+	getProjectURL ProjectRepoURLFunc,
+	resolve ResolveFunc,
+) (*teamrender.Result, error) {
+	if len(pt.Spec.Defaults.Harnesses) == 0 || len(pt.Spec.Roles) == 0 {
+		return &teamrender.Result{}, nil
+	}
+
+	cache := teamsource.NewCache(layout.CacheDir())
+	bundle, err := resolve(ctx, cache, tc, pt)
+	if err != nil {
+		return nil, fmt.Errorf("resolve agents source: %w", err)
+	}
+
+	projectURL, _ := getProjectURL(ctx, projectDir)
+	in := teamrender.Inputs{
+		Project:        project,
+		ProjectRepoURL: strings.TrimSpace(projectURL),
+	}
+	res, err := teamrender.Render(bundle, pt, tc, in)
+	if err != nil {
+		return nil, fmt.Errorf("render team: %w", err)
+	}
+	return res, nil
+}
+
+// emitDryRun prints the rendered objects to out as a multi-document YAML
+// stream prefixed by a dry-run header. It writes nothing to disk.
+func emitDryRun(out io.Writer, project string, layout teamhost.Layout, res *teamrender.Result) error {
+	entry := &model.TeamEntry{
+		APIVersion: model.APIVersionV1,
+		Kind:       model.KindTeamEntry,
+		Metadata:   model.Metadata{Name: project},
+		Spec:       model.TeamEntrySpec{},
+	}
+	rawEntry, err := yaml.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("marshal team entry: %w", err)
+	}
+	fmt.Fprintf(out, "# dry-run: would write %s\n%s",
+		filepath.Join("~/.kuke/kuketeam.d", project+".yaml"), rawEntry)
+
+	if res == nil || (len(res.Blueprints) == 0 && len(res.Configs) == 0) {
+		fmt.Fprintf(out, "# dry-run: no (role × harness) pairs to render\n")
+		_ = layout // reserved for future cache-dir reporting
+		return nil
+	}
+
+	rawRender, err := teamrender.MarshalYAML(res)
+	if err != nil {
+		return fmt.Errorf("marshal rendered objects: %w", err)
+	}
+	fmt.Fprintf(out, "---\n# dry-run: rendered %d blueprint/%d config object(s) (apply lands in step 4)\n",
+		len(res.Blueprints), len(res.Configs))
+	if _, writeErr := out.Write(rawRender); writeErr != nil {
+		return writeErr
+	}
 	return nil
 }
 
@@ -254,6 +404,26 @@ func gitConfigFromCmd(cmd *cobra.Command) GitConfigFunc {
 	return realGitConfig
 }
 
+// projectRepoURLFromCmd returns the ProjectRepoURLFunc the init flow uses
+// — the test mock from context when present, otherwise the real
+// `git -C <projectDir> remote get-url origin` reader.
+func projectRepoURLFromCmd(cmd *cobra.Command) ProjectRepoURLFunc {
+	if mock, ok := cmd.Context().Value(MockProjectRepoURLKey{}).(ProjectRepoURLFunc); ok && mock != nil {
+		return mock
+	}
+	return realProjectRepoURL
+}
+
+// resolveFromCmd returns the ResolveFunc the init flow uses — the test
+// mock from context when present, otherwise teamsource.Resolve against the
+// real layout's cache.
+func resolveFromCmd(cmd *cobra.Command) ResolveFunc {
+	if mock, ok := cmd.Context().Value(MockResolveKey{}).(ResolveFunc); ok && mock != nil {
+		return mock
+	}
+	return realResolve
+}
+
 // realGitConfig reads a single `git config --global <key>` value. A non-zero
 // exit (key unset) reports ok=false; the value is whitespace-trimmed.
 func realGitConfig(ctx context.Context, key string) (string, bool) {
@@ -262,4 +432,28 @@ func realGitConfig(ctx context.Context, key string) (string, bool) {
 		return "", false
 	}
 	return strings.TrimSpace(string(out)), true
+}
+
+// realProjectRepoURL reads the project's clone URL via
+// `git -C <projectDir> remote get-url origin`. A non-zero exit (no remote
+// configured, not a git repo) reports ok=false; the value is
+// whitespace-trimmed.
+func realProjectRepoURL(ctx context.Context, projectDir string) (string, bool) {
+	out, err := exec.CommandContext(ctx, "git", "-C", projectDir, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(out)), true
+}
+
+// realResolve materializes the agents source via teamsource.Resolve against
+// the given cache, mirroring the production path step 4's apply phase will
+// consume.
+func realResolve(
+	ctx context.Context,
+	cache teamsource.Cache,
+	tc *model.TeamsConfig,
+	pt *model.ProjectTeam,
+) (*teamsource.Bundle, error) {
+	return teamsource.Resolve(ctx, cache, tc, pt)
 }

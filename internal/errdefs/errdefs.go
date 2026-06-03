@@ -621,4 +621,22 @@ var (
 	ErrTeamImageCatalogFileKind = errors.New(
 		"image catalog file must be an ImageCatalog document",
 	)
+	// ErrTeamImageNoMatch fires when no ImageCatalog entry's capabilities
+	// superset a (role × harness)'s merged needs. The error message names the
+	// first unmet capability + the operator-actionable "build/label an image"
+	// hint, per #1042's hard-error contract.
+	ErrTeamImageNoMatch = errors.New(
+		"no image in ImageCatalog satisfies the role's merged needs",
+	)
+	// ErrTeamRoleNotLoaded fires when the render pipeline references a role
+	// the resolved Bundle did not load (resolve/render contract drift).
+	ErrTeamRoleNotLoaded = errors.New("role not loaded in bundle")
+	// ErrTeamHarnessNotLoaded fires when the render pipeline references a
+	// harness the resolved Bundle did not load.
+	ErrTeamHarnessNotLoaded = errors.New("harness not loaded in bundle")
+	// ErrTeamBlueprintTemplateMissing fires when a harness's spec.template path
+	// does not resolve under the materialized cache directory.
+	ErrTeamBlueprintTemplateMissing = errors.New(
+		"harness blueprint template not found under cache dir",
+	)
 )
