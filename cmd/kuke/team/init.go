@@ -27,11 +27,13 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/kuketeams"
 	"github.com/eminwux/kukeon/internal/teamhost"
 	"github.com/eminwux/kukeon/internal/teamrender"
 	"github.com/eminwux/kukeon/internal/teamsource"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
@@ -78,16 +80,29 @@ type ResolveFunc func(
 // MockResolveKey injects a ResolveFunc via context for tests.
 type MockResolveKey struct{}
 
+// ApplyForTeamFunc applies a per-(role × harness) rendered set to kukeond
+// under the project's team label, pruning that team's stale objects in the
+// same call (the per-team prune-apply contract from #1029). The default
+// implementation dials kukeond and invokes ApplyDocumentsForTeam; tests
+// inject a stub via MockApplyForTeamKey so the apply path can run hermetically.
+type ApplyForTeamFunc func(
+	ctx context.Context, rawYAML []byte, team string,
+) (kukeonv1.ApplyDocumentsResult, error)
+
+// MockApplyForTeamKey injects an ApplyForTeamFunc via context for tests.
+type MockApplyForTeamKey struct{}
+
 // NewInitCmd builds the `kuke team init` subcommand. It reads the current
 // project's kuketeam.yaml roster, scaffolds the operator-global facts file on
-// first run, writes the per-project drop-in entry, materializes the pinned
-// agents source, and renders the per-(role × harness) CellBlueprint/CellConfig
-// pairs. `--dry-run` stops after render, prints the rendered objects to
-// stdout, and touches no files on disk (apply lands in step 4 #1043).
+// first run, materializes the pinned agents source, renders the per-(role ×
+// harness) CellBlueprint/CellConfig pairs, applies them to kukeond under the
+// project's team label (per-team prune via #1029), and writes the per-project
+// drop-in entry. `--dry-run` stops after render, prints the rendered objects
+// to stdout, applies nothing, and touches no files on disk.
 func NewInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "init",
-		Short:         "Compose this project's team into the host ~/.kuke drop-in",
+		Short:         "Compose this project's team into the host ~/.kuke drop-in and apply to kukeond",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -109,8 +124,8 @@ func NewInitCmd() *cobra.Command {
 }
 
 // runInit gathers the cobra-coupled inputs (current directory, ~/.kuke layout,
-// git-config reader, project-repo-URL reader) and hands them to composeTeam,
-// which holds the testable lifecycle.
+// git-config reader, project-repo-URL reader, daemon apply reader) and hands
+// them to composeTeam, which holds the testable lifecycle.
 func runInit(cmd *cobra.Command, dryRun bool) error {
 	projectDir, err := os.Getwd()
 	if err != nil {
@@ -120,6 +135,7 @@ func runInit(cmd *cobra.Command, dryRun bool) error {
 	return composeTeam(
 		cmd.Context(), cmd.OutOrStdout(), projectDir, layout,
 		gitConfigFromCmd(cmd), projectRepoURLFromCmd(cmd), resolveFromCmd(cmd),
+		applyForTeamFromCmd(cmd),
 		dryRun,
 	)
 }
@@ -131,13 +147,16 @@ func runInit(cmd *cobra.Command, dryRun bool) error {
 //  3. Resolve the pinned agents source into the on-disk cache and load every
 //     Role / Harness / ImageCatalog the roster references.
 //  4. Render the per-(role × harness) CellBlueprint/CellConfig pairs.
-//  5. Either print the rendered objects to stdout (--dry-run) or write the
-//     per-project drop-in entry (step 4 in #1043 will apply the rendered
-//     objects to kukeond after this point).
+//  5. Either print the rendered objects to stdout (--dry-run, nothing is
+//     applied and no files are written) or apply the labeled set to kukeond
+//     via ApplyDocumentsForTeam (per-team prune via #1029) and then write
+//     the per-project drop-in entry. Nothing is written under
+//     ~/.kuke/rendered/ — the on-disk record of an applied team is the
+//     drop-in entry alone; the daemon owns the persisted blueprints/configs.
 //
 // composeTeam takes no cobra dependency so it is unit-testable with a temp
-// layout, stub git-config / project-repo-URL readers, and a stub resolver, no
-// live kukeond required.
+// layout, stub git-config / project-repo-URL readers, a stub resolver, and a
+// stub apply, no live kukeond required.
 func composeTeam(
 	ctx context.Context,
 	out io.Writer,
@@ -146,6 +165,7 @@ func composeTeam(
 	getGit GitConfigFunc,
 	getProjectURL ProjectRepoURLFunc,
 	resolve ResolveFunc,
+	apply ApplyForTeamFunc,
 	dryRun bool,
 ) error {
 	pt, err := readProjectTeam(projectDir)
@@ -177,6 +197,11 @@ func composeTeam(
 		return emitDryRun(out, project, layout, res)
 	}
 
+	applyResult, applied, err := applyTeam(ctx, project, res, apply)
+	if err != nil {
+		return err
+	}
+
 	entry := &model.TeamEntry{
 		APIVersion: model.APIVersionV1,
 		Kind:       model.KindTeamEntry,
@@ -190,9 +215,63 @@ func composeTeam(
 		return fmt.Errorf("write team entry: %w", writeErr)
 	}
 	fmt.Fprintf(out, "wrote team %q to %s\n", project, layout.EntryPath(project))
-	fmt.Fprintf(out, "rendered %d blueprint/%d config object(s) (apply lands in step 4)\n",
-		len(res.Blueprints), len(res.Configs))
+	if applied {
+		emitApplySummary(out, project, applyResult, len(res.Blueprints), len(res.Configs))
+	} else {
+		fmt.Fprintf(out, "rendered %d blueprint/%d config object(s) (no apply: no (role × harness) pairs)\n",
+			len(res.Blueprints), len(res.Configs))
+	}
 	return nil
+}
+
+// applyTeam marshals the rendered set and hands it to apply with the project
+// as the team label. Returns applied=false (with a zero result) when there is
+// nothing to render — harness-less rosters skip the apply hop. A non-nil
+// error from apply propagates verbatim so the drop-in entry write upstream
+// only fires on a successful apply.
+func applyTeam(
+	ctx context.Context, project string, res *teamrender.Result, apply ApplyForTeamFunc,
+) (kukeonv1.ApplyDocumentsResult, bool, error) {
+	if res == nil || (len(res.Blueprints) == 0 && len(res.Configs) == 0) {
+		return kukeonv1.ApplyDocumentsResult{}, false, nil
+	}
+	rawYAML, err := teamrender.MarshalYAML(res)
+	if err != nil {
+		return kukeonv1.ApplyDocumentsResult{}, false, fmt.Errorf("marshal rendered objects: %w", err)
+	}
+	applyResult, err := apply(ctx, rawYAML, project)
+	if err != nil {
+		return kukeonv1.ApplyDocumentsResult{}, false, fmt.Errorf("apply team %q to kukeond: %w", project, err)
+	}
+	return applyResult, true, nil
+}
+
+// emitApplySummary prints one line per applied resource, mirroring the
+// `kuke apply -f` human-readable output, then a one-line aggregate so the
+// operator sees both the per-object outcome and the overall counts.
+func emitApplySummary(
+	out io.Writer, project string, result kukeonv1.ApplyDocumentsResult, blueprints, configs int,
+) {
+	for _, r := range result.Resources {
+		switch r.Action {
+		case "created":
+			fmt.Fprintf(out, "  %s %q: created\n", r.Kind, r.Name)
+		case "updated":
+			fmt.Fprintf(out, "  %s %q: updated\n", r.Kind, r.Name)
+		case "unchanged":
+			fmt.Fprintf(out, "  %s %q: unchanged\n", r.Kind, r.Name)
+		case "pruned":
+			fmt.Fprintf(out, "  %s %q: pruned\n", r.Kind, r.Name)
+		case "failed":
+			fmt.Fprintf(out, "  %s %q: failed", r.Kind, r.Name)
+			if r.Error != "" {
+				fmt.Fprintf(out, " (%s)", r.Error)
+			}
+			fmt.Fprintln(out)
+		}
+	}
+	fmt.Fprintf(out, "applied %d blueprint/%d config object(s) to kukeond under team %q\n",
+		blueprints, configs, project)
 }
 
 // loadOrScaffoldGlobalConfig returns the TeamsConfig the render pipeline
@@ -297,7 +376,7 @@ func emitDryRun(out io.Writer, project string, layout teamhost.Layout, res *team
 	if err != nil {
 		return fmt.Errorf("marshal rendered objects: %w", err)
 	}
-	fmt.Fprintf(out, "---\n# dry-run: rendered %d blueprint/%d config object(s) (apply lands in step 4)\n",
+	fmt.Fprintf(out, "---\n# dry-run: rendered %d blueprint/%d config object(s) (not applied to kukeond)\n",
 		len(res.Blueprints), len(res.Configs))
 	if _, writeErr := out.Write(rawRender); writeErr != nil {
 		return writeErr
@@ -422,6 +501,25 @@ func resolveFromCmd(cmd *cobra.Command) ResolveFunc {
 		return mock
 	}
 	return realResolve
+}
+
+// applyForTeamFromCmd returns the ApplyForTeamFunc the init flow uses — the
+// test mock from context when present, otherwise a function that dials
+// kukeond per invocation and forwards to ApplyDocumentsForTeam. The dial
+// happens on call (rather than eagerly at command-setup time) so a roster
+// with no (role × harness) pairs never opens the daemon connection.
+func applyForTeamFromCmd(cmd *cobra.Command) ApplyForTeamFunc {
+	if mock, ok := cmd.Context().Value(MockApplyForTeamKey{}).(ApplyForTeamFunc); ok && mock != nil {
+		return mock
+	}
+	return func(ctx context.Context, rawYAML []byte, team string) (kukeonv1.ApplyDocumentsResult, error) {
+		client, err := kukshared.DaemonClientFromCmd(cmd)
+		if err != nil {
+			return kukeonv1.ApplyDocumentsResult{}, err
+		}
+		defer func() { _ = client.Close() }()
+		return client.ApplyDocumentsForTeam(ctx, rawYAML, team)
+	}
 }
 
 // realGitConfig reads a single `git config --global <key>` value. A non-zero

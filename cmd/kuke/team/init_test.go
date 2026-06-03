@@ -20,14 +20,17 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/teamhost"
 	"github.com/eminwux/kukeon/internal/teamsource"
+	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"gopkg.in/yaml.v3"
@@ -78,6 +81,41 @@ func stubProjectURL(url string) ProjectRepoURLFunc {
 func stubResolveErr() ResolveFunc {
 	return func(_ context.Context, _ teamsource.Cache, _ *model.TeamsConfig, _ *model.ProjectTeam) (*teamsource.Bundle, error) {
 		return nil, errors.New("resolve must not be called")
+	}
+}
+
+// stubApplyErr returns an ApplyForTeamFunc that fails on any call — used by
+// tests that should never reach the apply step (dry-run, harness-less roster,
+// pre-render failure paths).
+func stubApplyErr() ApplyForTeamFunc {
+	return func(_ context.Context, _ []byte, _ string) (kukeonv1.ApplyDocumentsResult, error) {
+		return kukeonv1.ApplyDocumentsResult{}, errors.New("apply must not be called")
+	}
+}
+
+// applyCall captures one composeTeam → apply invocation so a test can
+// assert which team each project's apply targeted and what YAML it sent.
+type applyCall struct {
+	Team    string
+	RawYAML []byte
+}
+
+// recordingApply returns an ApplyForTeamFunc that appends every invocation
+// to *calls under a mutex (composeTeam itself is single-goroutine, but the
+// recorder is shared across composeTeam calls in two-project tests) and
+// returns the given result. Use nil result for an "ack with no per-resource
+// detail" reply — composeTeam treats the empty Resources slice as a clean
+// apply with zero individual lines to print.
+func recordingApply(
+	mu *sync.Mutex, calls *[]applyCall, result kukeonv1.ApplyDocumentsResult,
+) ApplyForTeamFunc {
+	return func(_ context.Context, rawYAML []byte, team string) (kukeonv1.ApplyDocumentsResult, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		buf := make([]byte, len(rawYAML))
+		copy(buf, rawYAML)
+		*calls = append(*calls, applyCall{Team: team, RawYAML: buf})
+		return result, nil
 	}
 }
 
@@ -190,7 +228,7 @@ func TestComposeTeamNoProjectFile(t *testing.T) {
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	err := composeTeam(
 		context.Background(), &bytes.Buffer{}, emptyDir, layout,
-		stubGit(nil), stubProjectURL(""), stubResolveErr(), false,
+		stubGit(nil), stubProjectURL(""), stubResolveErr(), stubApplyErr(), false,
 	)
 	if !errors.Is(err, errdefs.ErrTeamProjectFileNotFound) {
 		t.Fatalf("err = %v, want ErrTeamProjectFileNotFound", err)
@@ -203,7 +241,7 @@ func TestComposeTeamWrongKind(t *testing.T) {
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	err := composeTeam(
 		context.Background(), &bytes.Buffer{}, dir, layout,
-		stubGit(nil), stubProjectURL(""), stubResolveErr(), false,
+		stubGit(nil), stubProjectURL(""), stubResolveErr(), stubApplyErr(), false,
 	)
 	if !errors.Is(err, errdefs.ErrTeamProjectFileKind) {
 		t.Fatalf("err = %v, want ErrTeamProjectFileKind", err)
@@ -226,7 +264,7 @@ func TestComposeTeamScaffoldsAndWrites(t *testing.T) {
 	var out bytes.Buffer
 	if err := composeTeam(
 		context.Background(), &out, projectDir, layout,
-		git, stubProjectURL(""), stubResolveErr(), false,
+		git, stubProjectURL(""), stubResolveErr(), stubApplyErr(), false,
 	); err != nil {
 		t.Fatalf("composeTeam: %v", err)
 	}
@@ -278,7 +316,7 @@ func TestComposeTeamReRunDoesNotRescaffold(t *testing.T) {
 
 	if err := composeTeam(
 		context.Background(), &bytes.Buffer{}, projectDir, layout,
-		git, stubProjectURL(""), stubResolveErr(), false,
+		git, stubProjectURL(""), stubResolveErr(), stubApplyErr(), false,
 	); err != nil {
 		t.Fatalf("first composeTeam: %v", err)
 	}
@@ -291,7 +329,7 @@ func TestComposeTeamReRunDoesNotRescaffold(t *testing.T) {
 	var out bytes.Buffer
 	if err := composeTeam(
 		context.Background(), &out, projectDir, layout,
-		git, stubProjectURL(""), stubResolveErr(), false,
+		git, stubProjectURL(""), stubResolveErr(), stubApplyErr(), false,
 	); err != nil {
 		t.Fatalf("second composeTeam: %v", err)
 	}
@@ -314,7 +352,7 @@ func TestComposeTeamNoGitIdentityOmitsGitBlock(t *testing.T) {
 
 	if err := composeTeam(
 		context.Background(), &bytes.Buffer{}, projectDir, layout,
-		stubGit(nil), stubProjectURL(""), stubResolveErr(), false,
+		stubGit(nil), stubProjectURL(""), stubResolveErr(), stubApplyErr(), false,
 	); err != nil {
 		t.Fatalf("composeTeam: %v", err)
 	}
@@ -339,7 +377,7 @@ func TestComposeTeamDryRunWritesNothing(t *testing.T) {
 	var out bytes.Buffer
 	if err := composeTeam(
 		context.Background(), &out, projectDir, layout,
-		stubGit(nil), stubProjectURL(""), stubResolveErr(), true,
+		stubGit(nil), stubProjectURL(""), stubResolveErr(), stubApplyErr(), true,
 	); err != nil {
 		t.Fatalf("composeTeam dry-run: %v", err)
 	}
@@ -367,7 +405,7 @@ func TestComposeTeamDryRunRendersToStdout(t *testing.T) {
 		context.Background(), &out, projectDir, layout,
 		stubGit(map[string]string{"user.name": "Op", "user.email": "op@example.com"}),
 		stubProjectURL("git@github.com:eminwux/sbsh.git"),
-		stubBundle(bundle), true,
+		stubBundle(bundle), stubApplyErr(), true,
 	)
 	if err != nil {
 		t.Fatalf("composeTeam dry-run: %v", err)
@@ -405,12 +443,18 @@ func TestComposeTeamRendersOnNonDryRun(t *testing.T) {
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	bundle := buildClaudeBundle(t)
 
+	var (
+		mu    sync.Mutex
+		calls []applyCall
+	)
 	var out bytes.Buffer
 	err := composeTeam(
 		context.Background(), &out, projectDir, layout,
 		stubGit(nil),
 		stubProjectURL("git@github.com:eminwux/sbsh.git"),
-		stubBundle(bundle), false,
+		stubBundle(bundle),
+		recordingApply(&mu, &calls, kukeonv1.ApplyDocumentsResult{}),
+		false,
 	)
 	if err != nil {
 		t.Fatalf("composeTeam: %v", err)
@@ -419,8 +463,8 @@ func TestComposeTeamRendersOnNonDryRun(t *testing.T) {
 	if _, statErr := os.Stat(layout.EntryPath("sbsh")); statErr != nil {
 		t.Errorf("entry should have been written on non-dry-run: %v", statErr)
 	}
-	if !strings.Contains(out.String(), "rendered 1 blueprint/1 config") {
-		t.Errorf("render-count summary missing: %q", out.String())
+	if !strings.Contains(out.String(), "applied 1 blueprint/1 config") {
+		t.Errorf("apply-count summary missing: %q", out.String())
 	}
 }
 
@@ -438,7 +482,7 @@ func TestComposeTeamImageSelectHardError(t *testing.T) {
 	err := composeTeam(
 		context.Background(), &bytes.Buffer{}, projectDir, layout,
 		stubGit(nil), stubProjectURL(""),
-		stubBundle(bundle), false,
+		stubBundle(bundle), stubApplyErr(), false,
 	)
 	if !errors.Is(err, errdefs.ErrTeamImageNoMatch) {
 		t.Fatalf("err = %v, want ErrTeamImageNoMatch", err)
@@ -464,13 +508,265 @@ func TestComposeTeamProjectRepoURLFilledIntoConfig(t *testing.T) {
 	err := composeTeam(
 		context.Background(), &out, projectDir, layout,
 		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
-		stubBundle(bundle), true,
+		stubBundle(bundle), stubApplyErr(), true,
 	)
 	if err != nil {
 		t.Fatalf("composeTeam: %v", err)
 	}
 	if !strings.Contains(out.String(), "git@github.com:eminwux/sbsh.git") {
 		t.Errorf("project clone URL not stamped into rendered config: %q", out.String())
+	}
+}
+
+// TestComposeTeamAppliesRenderedSetToDaemon pins the AC: the project's
+// labeled set is handed to ApplyDocumentsForTeam with the project as the
+// team. The YAML the stub captures carries both kinds and the team label
+// teamrender stamped onto every object — the same payload the daemon
+// prunes against in #1029.
+func TestComposeTeamAppliesRenderedSetToDaemon(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+
+	var (
+		mu    sync.Mutex
+		calls []applyCall
+	)
+	result := kukeonv1.ApplyDocumentsResult{
+		Resources: []kukeonv1.ApplyResourceResult{
+			{Kind: "CellBlueprint", Name: "dev-claude", Action: "created"},
+			{Kind: "CellConfig", Name: "dev-claude", Action: "created"},
+		},
+	}
+	var out bytes.Buffer
+	if err := composeTeam(
+		context.Background(), &out, projectDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
+		stubBundle(bundle), recordingApply(&mu, &calls, result), false,
+	); err != nil {
+		t.Fatalf("composeTeam: %v", err)
+	}
+
+	if len(calls) != 1 {
+		t.Fatalf("apply call count = %d, want 1", len(calls))
+	}
+	call := calls[0]
+	if call.Team != "sbsh" {
+		t.Errorf("apply team = %q, want %q", call.Team, "sbsh")
+	}
+	body := string(call.RawYAML)
+	if !strings.Contains(body, "kind: CellBlueprint") || !strings.Contains(body, "kind: CellConfig") {
+		t.Errorf("applied YAML missing kinds: %q", body)
+	}
+	if !strings.Contains(body, v1beta1.LabelTeam+": sbsh") {
+		t.Errorf("applied YAML missing team label %q: %q", v1beta1.LabelTeam, body)
+	}
+	// The daemon's per-resource report flows through to the human output.
+	if !strings.Contains(out.String(), `CellBlueprint "dev-claude": created`) {
+		t.Errorf("per-resource summary missing CellBlueprint line: %q", out.String())
+	}
+	if !strings.Contains(out.String(), `applied 1 blueprint/1 config object(s) to kukeond under team "sbsh"`) {
+		t.Errorf("aggregate summary missing: %q", out.String())
+	}
+}
+
+// TestComposeTeamDryRunSkipsApply covers the AC inversion: --dry-run prints
+// rendered objects to stdout but does not call into the daemon.
+func TestComposeTeamDryRunSkipsApply(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+
+	// stubApplyErr would error if invoked — composeTeam must not reach it.
+	var out bytes.Buffer
+	if err := composeTeam(
+		context.Background(), &out, projectDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
+		stubBundle(bundle), stubApplyErr(), true,
+	); err != nil {
+		t.Fatalf("composeTeam dry-run: %v", err)
+	}
+	if !strings.Contains(out.String(), "not applied to kukeond") {
+		t.Errorf("dry-run output missing skip-apply marker: %q", out.String())
+	}
+}
+
+// TestComposeTeamHarnessLessRosterSkipsApply covers the harness-less branch:
+// no (role × harness) pairs → nothing to apply, no daemon hop.
+func TestComposeTeamHarnessLessRosterSkipsApply(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+
+	var out bytes.Buffer
+	if err := composeTeam(
+		context.Background(), &out, projectDir, layout,
+		stubGit(nil), stubProjectURL(""), stubResolveErr(), stubApplyErr(), false,
+	); err != nil {
+		t.Fatalf("composeTeam: %v", err)
+	}
+	if !strings.Contains(out.String(), "no apply: no (role × harness) pairs") {
+		t.Errorf("harness-less output missing skip-apply marker: %q", out.String())
+	}
+	// Drop-in entry still written so future re-runs (and future verbs like
+	// `kuke team list`) see the project — apply-skip is not entry-skip.
+	if _, statErr := os.Stat(layout.EntryPath("sbsh")); statErr != nil {
+		t.Errorf("entry should still be written even with no apply: %v", statErr)
+	}
+}
+
+// TestComposeTeamApplyFailureBlocksDropInWrite covers the failure ordering:
+// apply runs before the drop-in entry write, so a daemon-side failure does
+// not leave a half-recorded team behind. The next re-run sees a clean tree.
+func TestComposeTeamApplyFailureBlocksDropInWrite(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+
+	wantErr := errors.New("daemon refused: kukeond not running")
+	apply := func(_ context.Context, _ []byte, _ string) (kukeonv1.ApplyDocumentsResult, error) {
+		return kukeonv1.ApplyDocumentsResult{}, wantErr
+	}
+
+	err := composeTeam(
+		context.Background(), &bytes.Buffer{}, projectDir, layout,
+		stubGit(nil), stubProjectURL(""), stubBundle(bundle), apply, false,
+	)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("err = %v, want it to wrap %v", err, wantErr)
+	}
+	if _, statErr := os.Stat(layout.EntryPath("sbsh")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("drop-in entry written despite apply failure: err=%v", statErr)
+	}
+}
+
+// TestComposeTeamWritesNothingUnderRendered covers the explicit AC: nothing
+// is written under ~/.kuke/rendered/. After a full init the layout base
+// holds only kuketeams.yaml + kuketeam.d/, never a rendered/ sibling.
+func TestComposeTeamWritesNothingUnderRendered(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+
+	var (
+		mu    sync.Mutex
+		calls []applyCall
+	)
+	if err := composeTeam(
+		context.Background(), &bytes.Buffer{}, projectDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
+		stubBundle(bundle), recordingApply(&mu, &calls, kukeonv1.ApplyDocumentsResult{}), false,
+	); err != nil {
+		t.Fatalf("composeTeam: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(layout.Base, "rendered")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("rendered/ directory should not exist after init: stat err=%v", statErr)
+	}
+}
+
+// TestComposeTeamTwoProjectsIndependent covers the AC's e2e check at the
+// composition layer: `kuke team init` in two project directories sharing
+// one ~/.kuke applies each labeled set under its own team, and re-running
+// one project re-applies only that project's set — the second project's
+// apply is not re-invoked, its drop-in file is untouched, and removing one
+// project's drop-in file leaves the other readable.
+func TestComposeTeamTwoProjectsIndependent(t *testing.T) {
+	t.Parallel()
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+
+	mkProject := func(name string) string {
+		body := fmt.Sprintf(`apiVersion: kuketeams.io/v1
+kind: ProjectTeam
+metadata: { name: %s }
+spec:
+  source: eminwux/agents@v1.4.0
+  defaults:
+    harnesses: [claude]
+  roles:
+    - { ref: dev }
+`, name)
+		return writeProject(t, body)
+	}
+	alphaDir := mkProject("alpha")
+	betaDir := mkProject("beta")
+
+	var (
+		mu    sync.Mutex
+		calls []applyCall
+	)
+	apply := recordingApply(&mu, &calls, kukeonv1.ApplyDocumentsResult{})
+
+	// Init alpha.
+	if err := composeTeam(
+		context.Background(), &bytes.Buffer{}, alphaDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/alpha.git"),
+		stubBundle(bundle), apply, false,
+	); err != nil {
+		t.Fatalf("alpha init: %v", err)
+	}
+	// Init beta.
+	if err := composeTeam(
+		context.Background(), &bytes.Buffer{}, betaDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/beta.git"),
+		stubBundle(bundle), apply, false,
+	); err != nil {
+		t.Fatalf("beta init: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("apply call count after two-project init = %d, want 2", len(calls))
+	}
+	if calls[0].Team != "alpha" || calls[1].Team != "beta" {
+		t.Errorf("apply teams = %q,%q, want alpha,beta", calls[0].Team, calls[1].Team)
+	}
+
+	// Per-project drop-in files written, independent of each other.
+	for _, project := range []string{"alpha", "beta"} {
+		if _, statErr := os.Stat(layout.EntryPath(project)); statErr != nil {
+			t.Errorf("entry %q not written: %v", project, statErr)
+		}
+	}
+
+	// Re-init alpha → one more apply for alpha; beta's apply is not
+	// re-invoked, beta's drop-in stays put.
+	betaEntryBefore, readErr := os.ReadFile(layout.EntryPath("beta"))
+	if readErr != nil {
+		t.Fatalf("read beta entry: %v", readErr)
+	}
+	if reErr := composeTeam(
+		context.Background(), &bytes.Buffer{}, alphaDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/alpha.git"),
+		stubBundle(bundle), apply, false,
+	); reErr != nil {
+		t.Fatalf("alpha re-init: %v", reErr)
+	}
+	if len(calls) != 3 {
+		t.Fatalf("apply call count after re-init alpha = %d, want 3", len(calls))
+	}
+	if calls[2].Team != "alpha" {
+		t.Errorf("re-init apply team = %q, want alpha", calls[2].Team)
+	}
+	betaEntryAfter, readErr2 := os.ReadFile(layout.EntryPath("beta"))
+	if readErr2 != nil {
+		t.Fatalf("read beta entry after alpha re-init: %v", readErr2)
+	}
+	if !bytes.Equal(betaEntryBefore, betaEntryAfter) {
+		t.Errorf("beta drop-in entry changed by alpha re-init:\n--- before ---\n%s\n--- after ---\n%s",
+			betaEntryBefore, betaEntryAfter)
+	}
+
+	// Removing one project's drop-in does not disturb the other — the
+	// per-project file layout (the resized step-1 "kuketeam.d/" decision)
+	// makes this trivially true; the test pins the invariant.
+	if rmErr := os.Remove(layout.EntryPath("alpha")); rmErr != nil {
+		t.Fatalf("remove alpha drop-in: %v", rmErr)
+	}
+	if _, statErr := os.Stat(layout.EntryPath("beta")); statErr != nil {
+		t.Errorf("beta drop-in disturbed by alpha removal: %v", statErr)
 	}
 }
 

@@ -14,14 +14,20 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package team hosts the `kuke team` parent command and its subcommands. Step 1
-// (#796, epic team-distribution #792) lands `init`: it reads the project's
-// committed kuketeam.yaml roster, scaffolds the operator-global facts file
-// (~/.kuke/kuketeams.yaml) on first run, and writes a per-project drop-in entry
-// (~/.kuke/kuketeam.d/<project>.yaml). Source resolution, render, and apply land
-// in steps 2–4 (#1041/#1042/#1043). Every `kuke team *` verb is host-local and
-// daemon-independent — they manipulate ~/.kuke files, not /opt/kukeon state — so
-// none require a live kukeond.
+// Package team hosts the `kuke team` parent command and its subcommands. The
+// team-distribution epic (#792) lands `init` across four steps: skeleton +
+// drop-in lifecycle (#796), pinned-source resolve + cache + role/harness/image
+// load (#1041), render pipeline (needs-merge / image-select / bind) (#1042),
+// and apply-with-prune to kukeond (#1043). After step 4, `kuke team init`
+// reads the project's committed kuketeam.yaml roster, scaffolds the operator-
+// global facts file (~/.kuke/kuketeams.yaml) on first run, renders the per-
+// (role × harness) CellBlueprint/CellConfig pairs labeled with the project,
+// applies that labeled set to kukeond (per-team prune via #1029 — re-running
+// in one project prunes only that project's stale objects and leaves every
+// other project untouched), and writes a per-project drop-in entry
+// (~/.kuke/kuketeam.d/<project>.yaml). Nothing is written under
+// ~/.kuke/rendered/ — the daemon owns the persisted blueprints/configs and
+// the drop-in entry is the only host-side record of an applied team.
 package team
 
 import (
