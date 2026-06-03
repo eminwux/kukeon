@@ -69,10 +69,6 @@ func (s *stubController) CreateCell(intmodel.Cell) (controller.CreateCellResult,
 	panic("not used")
 }
 
-func (s *stubController) CreateContainer(intmodel.Container) (controller.CreateContainerResult, error) {
-	panic("not used")
-}
-
 func (s *stubController) CreateSecret(intmodel.Secret) (controller.CreateSecretResult, error) {
 	panic("not used")
 }
@@ -90,10 +86,6 @@ func (s *stubController) DeleteStack(intmodel.Stack, bool, bool) (controller.Del
 }
 
 func (s *stubController) DeleteCell(intmodel.Cell) (controller.DeleteCellResult, error) {
-	panic("not used")
-}
-
-func (s *stubController) DeleteContainer(intmodel.Container) (controller.DeleteContainerResult, error) {
 	panic("not used")
 }
 
@@ -150,10 +142,6 @@ func (s *stubController) PurgeStack(intmodel.Stack, bool, bool) (controller.Purg
 }
 
 func (s *stubController) PurgeCell(intmodel.Cell, bool, bool) (controller.PurgeCellResult, error) {
-	panic("not used")
-}
-
-func (s *stubController) PurgeContainer(intmodel.Container) (controller.PurgeContainerResult, error) {
 	panic("not used")
 }
 func (s *stubController) RefreshAll() (controller.RefreshResult, error) { panic("not used") }

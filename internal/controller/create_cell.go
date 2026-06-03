@@ -126,7 +126,12 @@ func normalizeCellInputs(cell *intmodel.Cell) (string, string, string, string, e
 	}
 
 	// Ensure container ownership (work with internal types)
-	cell.Spec.Containers = ensureContainerOwnershipInternal(cell.Spec.Containers, realm, space, stack, name)
+	for i := range cell.Spec.Containers {
+		cell.Spec.Containers[i].RealmName = realm
+		cell.Spec.Containers[i].SpaceName = space
+		cell.Spec.Containers[i].StackName = stack
+		cell.Spec.Containers[i].CellName = name
+	}
 
 	return name, realm, space, stack, nil
 }

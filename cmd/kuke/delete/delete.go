@@ -25,7 +25,6 @@ import (
 	blueprintdelete "github.com/eminwux/kukeon/cmd/kuke/delete/blueprint"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/cell"
 	configdelete "github.com/eminwux/kukeon/cmd/kuke/delete/config"
-	"github.com/eminwux/kukeon/cmd/kuke/delete/container"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/realm"
 	secretdelete "github.com/eminwux/kukeon/cmd/kuke/delete/secret"
 	"github.com/eminwux/kukeon/cmd/kuke/delete/shared"
@@ -50,7 +49,7 @@ func NewDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete [name]",
 		Aliases: []string{"d"},
-		Short:   "Delete Kukeon resources (realm, space, stack, cell, container, secret, blueprint, config)",
+		Short:   "Delete Kukeon resources (realm, space, stack, cell, secret, blueprint, config)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// Check if -f flag is provided
 			file, err := cmd.Flags().GetString("file")
@@ -79,7 +78,7 @@ func NewDeleteCmd() *cobra.Command {
 
 	// Add persistent --cascade flag
 	cmd.PersistentFlags().
-		Bool("cascade", false, "Automatically delete child resources recursively (does not apply to containers)")
+		Bool("cascade", false, "Automatically delete child resources recursively")
 	_ = viper.BindPFlag(config.KUKE_DELETE_CASCADE.ViperKey, cmd.PersistentFlags().Lookup("cascade"))
 
 	// Add persistent --force flag
@@ -91,7 +90,6 @@ func NewDeleteCmd() *cobra.Command {
 		space.NewSpaceCmd(),
 		stack.NewStackCmd(),
 		cell.NewCellCmd(),
-		container.NewContainerCmd(),
 		secretdelete.NewSecretCmd(),
 		blueprintdelete.NewBlueprintCmd(),
 		configdelete.NewConfigCmd(),
@@ -102,7 +100,7 @@ func NewDeleteCmd() *cobra.Command {
 
 // completeDeleteSubcommands provides shell completion for delete subcommand names.
 func completeDeleteSubcommands(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	subcommands := []string{"realm", "space", "stack", "cell", "container", "secret", "blueprint", "config"}
+	subcommands := []string{"realm", "space", "stack", "cell", "secret", "blueprint", "config"}
 
 	if toComplete == "" {
 		return subcommands, cobra.ShellCompDirectiveNoFileComp

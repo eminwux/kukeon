@@ -57,10 +57,6 @@ func (FakeClient) MaterializeCell(context.Context, v1beta1.CellDoc) (CreateCellR
 	return CreateCellResult{}, ErrUnexpectedCall
 }
 
-func (FakeClient) CreateContainer(context.Context, v1beta1.ContainerDoc) (CreateContainerResult, error) {
-	return CreateContainerResult{}, ErrUnexpectedCall
-}
-
 func (FakeClient) CreateConfig(context.Context, v1beta1.CellConfigDoc) (CreateConfigResult, error) {
 	return CreateConfigResult{}, ErrUnexpectedCall
 }
@@ -169,10 +165,6 @@ func (FakeClient) DeleteCell(context.Context, v1beta1.CellDoc) (DeleteCellResult
 	return DeleteCellResult{}, ErrUnexpectedCall
 }
 
-func (FakeClient) DeleteContainer(context.Context, v1beta1.ContainerDoc) (DeleteContainerResult, error) {
-	return DeleteContainerResult{}, ErrUnexpectedCall
-}
-
 func (FakeClient) DeleteSecret(context.Context, v1beta1.SecretDoc) (DeleteSecretResult, error) {
 	return DeleteSecretResult{}, ErrUnexpectedCall
 }
@@ -199,10 +191,6 @@ func (FakeClient) PurgeStack(context.Context, v1beta1.StackDoc, bool, bool) (Pur
 
 func (FakeClient) PurgeCell(context.Context, v1beta1.CellDoc, bool, bool) (PurgeCellResult, error) {
 	return PurgeCellResult{}, ErrUnexpectedCall
-}
-
-func (FakeClient) PurgeContainer(context.Context, v1beta1.ContainerDoc) (PurgeContainerResult, error) {
-	return PurgeContainerResult{}, ErrUnexpectedCall
 }
 
 func (FakeClient) RefreshAll(context.Context) (RefreshAllResult, error) {

@@ -51,23 +51,17 @@ func TestDeleteDocuments_ReverseDependencyOrder(t *testing.T) {
 		},
 		{
 			Index: 1,
-			Kind:  v1beta1.KindContainer,
-			ContainerDoc: &v1beta1.ContainerDoc{
+			Kind:  v1beta1.KindCell,
+			CellDoc: &v1beta1.CellDoc{
 				APIVersion: v1beta1.APIVersionV1Beta1,
-				Kind:       v1beta1.KindContainer,
-				Metadata: v1beta1.ContainerMetadata{
-					Name: "test-container",
+				Kind:       v1beta1.KindCell,
+				Metadata: v1beta1.CellMetadata{
+					Name: "test-cell",
 				},
-				Spec: v1beta1.ContainerSpec{
-					ID:      "test-container",
+				Spec: v1beta1.CellSpec{
 					RealmID: "test-realm",
 					SpaceID: "test-space",
 					StackID: "test-stack",
-					CellID:  "test-cell",
-					Image:   "test-image",
-					Root:    false,
-					Command: "echo",
-					Args:    []string{"test"},
 				},
 			},
 		},
@@ -87,16 +81,16 @@ func TestDeleteDocuments_ReverseDependencyOrder(t *testing.T) {
 					RealmName: "test-realm",
 					SpaceName: "test-space",
 					StackName: "test-stack",
-					Containers: []intmodel.ContainerSpec{
-						{ID: "test-container"},
-					},
 				},
 			}, nil
 		},
-		DeleteContainerFn: func(_ intmodel.Cell, _ string) error {
-			return nil
+		ExistsCgroupFn: func(_ any) (bool, error) {
+			return true, nil
 		},
-		UpdateCellMetadataFn: func(_ intmodel.Cell) error {
+		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) {
+			return true, nil
+		},
+		DeleteCellFn: func(_ intmodel.Cell) error {
 			return nil
 		},
 	}
@@ -111,9 +105,10 @@ func TestDeleteDocuments_ReverseDependencyOrder(t *testing.T) {
 		t.Fatalf("expected 2 resources, got %d", len(result.Resources))
 	}
 
-	// Container should be deleted first (index 1, but processed first)
-	if result.Resources[0].Kind != "Container" {
-		t.Errorf("expected first resource to be Container, got %s", result.Resources[0].Kind)
+	// Cell should be deleted first (index 1, but processed first because
+	// reverse dependency order puts the leaf kind ahead of its parent).
+	if result.Resources[0].Kind != "Cell" {
+		t.Errorf("expected first resource to be Cell, got %s", result.Resources[0].Kind)
 	}
 	if result.Resources[0].Index != 1 {
 		t.Errorf("expected first resource index to be 1, got %d", result.Resources[0].Index)
@@ -425,73 +420,6 @@ func TestDeleteDocuments_Cell_ContainersDeleted(t *testing.T) {
 
 	if result.Resources[0].Details["containers"] != "2 deleted" {
 		t.Errorf("expected 2 containers deleted, got %q", result.Resources[0].Details["containers"])
-	}
-}
-
-func TestDeleteDocuments_Container_Deleted(t *testing.T) {
-	docs := []parser.Document{
-		{
-			Index: 0,
-			Kind:  v1beta1.KindContainer,
-			ContainerDoc: &v1beta1.ContainerDoc{
-				APIVersion: v1beta1.APIVersionV1Beta1,
-				Kind:       v1beta1.KindContainer,
-				Metadata: v1beta1.ContainerMetadata{
-					Name: "test-container",
-				},
-				Spec: v1beta1.ContainerSpec{
-					ID:      "test-container",
-					RealmID: "test-realm",
-					SpaceID: "test-space",
-					StackID: "test-stack",
-					CellID:  "test-cell",
-					Image:   "test-image",
-					Root:    false,
-					Command: "echo",
-					Args:    []string{"test"},
-				},
-			},
-		},
-	}
-
-	fake := &fakeRunner{
-		GetCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
-			return intmodel.Cell{
-				Metadata: intmodel.CellMetadata{Name: "test-cell"},
-				Spec: intmodel.CellSpec{
-					RealmName: "test-realm",
-					SpaceName: "test-space",
-					StackName: "test-stack",
-					Containers: []intmodel.ContainerSpec{
-						{ID: "test-container"},
-					},
-				},
-			}, nil
-		},
-		DeleteContainerFn: func(_ intmodel.Cell, _ string) error {
-			return nil
-		},
-		UpdateCellMetadataFn: func(_ intmodel.Cell) error {
-			return nil
-		},
-	}
-
-	exec := setupTestController(t, fake)
-	result, err := exec.DeleteDocuments(docs, false, false)
-	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
-	}
-
-	if len(result.Resources) != 1 {
-		t.Fatalf("expected 1 resource, got %d", len(result.Resources))
-	}
-
-	if result.Resources[0].Action != "deleted" {
-		t.Errorf("expected action to be 'deleted', got %q", result.Resources[0].Action)
-	}
-
-	if result.Resources[0].Details["containers"] != "1 deleted" {
-		t.Errorf("expected 1 container deleted, got %q", result.Resources[0].Details["containers"])
 	}
 }
 

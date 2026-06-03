@@ -21,7 +21,6 @@ import (
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/cmd/kuke/purge/cell"
-	"github.com/eminwux/kukeon/cmd/kuke/purge/container"
 	"github.com/eminwux/kukeon/cmd/kuke/purge/realm"
 	"github.com/eminwux/kukeon/cmd/kuke/purge/space"
 	"github.com/eminwux/kukeon/cmd/kuke/purge/stack"
@@ -37,7 +36,7 @@ func NewPurgeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "purge [name]",
 		Aliases: []string{"p"},
-		Short:   "Purge Kukeon resources with comprehensive cleanup (realm, space, stack, cell, container)",
+		Short:   "Purge Kukeon resources with comprehensive cleanup (realm, space, stack, cell)",
 		Run: func(cmd *cobra.Command, _ []string) {
 			_ = cmd.Help()
 		},
@@ -47,7 +46,7 @@ func NewPurgeCmd() *cobra.Command {
 
 	// Add persistent --cascade flag
 	cmd.PersistentFlags().
-		Bool("cascade", false, "Automatically purge child resources recursively (does not apply to containers)")
+		Bool("cascade", false, "Automatically purge child resources recursively")
 	_ = viper.BindPFlag(config.KUKE_PURGE_CASCADE.ViperKey, cmd.PersistentFlags().Lookup("cascade"))
 
 	// Add persistent --force flag
@@ -58,7 +57,7 @@ func NewPurgeCmd() *cobra.Command {
 	// subcommand calls ClientFromCmd, and the in-process branch is the
 	// only path that works when the daemon is down (the canonical
 	// disaster-recovery scenario for purge). Registered as a persistent
-	// flag so realm/space/stack/cell/container all inherit it.
+	// flag so realm/space/stack/cell all inherit it.
 	kukshared.RegisterNoDaemonPersistentFlag(cmd)
 
 	cmd.AddCommand(
@@ -66,7 +65,6 @@ func NewPurgeCmd() *cobra.Command {
 		space.NewSpaceCmd(),
 		stack.NewStackCmd(),
 		cell.NewCellCmd(),
-		container.NewContainerCmd(),
 	)
 
 	return cmd
@@ -74,7 +72,7 @@ func NewPurgeCmd() *cobra.Command {
 
 // completePurgeSubcommands provides shell completion for purge subcommand names.
 func completePurgeSubcommands(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	subcommands := []string{"realm", "space", "stack", "cell", "container"}
+	subcommands := []string{"realm", "space", "stack", "cell"}
 
 	if toComplete == "" {
 		return subcommands, cobra.ShellCompDirectiveNoFileComp
