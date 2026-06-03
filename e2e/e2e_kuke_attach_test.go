@@ -573,7 +573,7 @@ func TestKuke_RunFromStopped_NonRootKukeonGroup_NoEACCES(t *testing.T) {
 	}
 
 	stopArgs := append(buildKukeDaemonArgs(host),
-		"stop", "cell", cellName,
+		"stop", cellName,
 		"--realm", realmName,
 		"--space", spaceName,
 		"--stack", stackName,
