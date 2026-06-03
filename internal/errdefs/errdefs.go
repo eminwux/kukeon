@@ -603,4 +603,22 @@ var (
 	ErrTeamImageCapabilitiesRequired = errors.New(
 		"imageCatalog images[].capabilities must be non-empty",
 	)
+	// ErrTeamSourceURLNotMapped fires when a project's `source` <owner>/<repo>
+	// key has no entry in TeamsConfig.spec.sources. The operator must add a
+	// clone URL mapping in ~/.kuke/kuketeams.yaml before init can materialize
+	// the agents source.
+	ErrTeamSourceURLNotMapped = errors.New(
+		"source key is not mapped in TeamsConfig.spec.sources",
+	)
+	// ErrTeamRoleFileKind fires when a per-role role.yaml parses to a kind
+	// other than Role.
+	ErrTeamRoleFileKind = errors.New("role file must be a Role document")
+	// ErrTeamHarnessFileKind fires when a per-harness harness.yaml parses to a
+	// kind other than Harness.
+	ErrTeamHarnessFileKind = errors.New("harness file must be a Harness document")
+	// ErrTeamImageCatalogFileKind fires when harnesses/images.yaml parses to a
+	// kind other than ImageCatalog.
+	ErrTeamImageCatalogFileKind = errors.New(
+		"image catalog file must be an ImageCatalog document",
+	)
 )

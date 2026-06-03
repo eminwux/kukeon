@@ -44,6 +44,9 @@ const (
 	globalConfigName = "kuketeams.yaml"
 	// dropInDirName is the per-project drop-in directory under Base.
 	dropInDirName = "kuketeam.d"
+	// cacheDirName is the materialized-source cache under Base — each pinned
+	// `<owner>/<repo>@vX.Y.Z` agents reference clones into its own subdirectory.
+	cacheDirName = "cache"
 
 	// dropInDirPerm is the drop-in directory mode: operator-only (the files
 	// reference secret sources and signing keys).
@@ -78,6 +81,11 @@ func (l Layout) DropInDir() string {
 // EntryPath is the per-project file (<base>/kuketeam.d/<project>.yaml).
 func (l Layout) EntryPath(project string) string {
 	return filepath.Join(l.DropInDir(), project+".yaml")
+}
+
+// CacheDir is the materialized-source cache root (<base>/cache).
+func (l Layout) CacheDir() string {
+	return filepath.Join(l.Base, cacheDirName)
 }
 
 // EnsureGlobalConfig writes cfg to the global facts path only when no file is
