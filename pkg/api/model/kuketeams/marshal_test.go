@@ -82,6 +82,16 @@ func TestRoundTripAllKinds(t *testing.T) {
 			len(got.Spec.Roles) == 1 && got.Spec.Roles[0].Needs.Image[0] == "go"
 	})
 
+	te := model.TeamEntry{
+		APIVersion: model.APIVersionV1, Kind: model.KindTeamEntry,
+		Metadata: model.Metadata{Name: "sbsh"},
+		Spec:     model.TeamEntrySpec{Path: "/home/op/src/sbsh", Source: "eminwux/agents@v1.4.0"},
+	}
+	assertJSONYAML(t, "TeamEntry", te, func(got model.TeamEntry) bool {
+		return got.Metadata.Name == "sbsh" && got.Spec.Path == "/home/op/src/sbsh" &&
+			got.Spec.Source == "eminwux/agents@v1.4.0"
+	})
+
 	role := model.Role{
 		APIVersion: model.APIVersionV1, Kind: model.KindRole,
 		Metadata: model.Metadata{Name: "dev"},

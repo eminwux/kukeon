@@ -71,14 +71,23 @@ func DefaultServerConfigurationFile() string {
 	return filepath.Join("/", "etc", "kukeon", "kukeond.yaml")
 }
 
-// DefaultClientConfigurationFile is the on-disk path the `kuke` client reads
-// when the user does not pass `--configuration`. An absent file is not an
-// error — the client falls back to its hardcoded defaults.
-func DefaultClientConfigurationFile() string {
+// DefaultKukeDir is the per-operator kuke state directory (~/.kuke) holding
+// the client configuration, the team-distribution global-facts file
+// (kuketeams.yaml), and the per-project drop-in directory (kuketeam.d/). Falls
+// back to "tmp" when the home directory cannot be determined, matching the
+// other default-path helpers.
+func DefaultKukeDir() string {
 	base, err := os.UserHomeDir()
 	if err != nil {
 		// fallback to tmp if home dir cannot be determined
 		base = "tmp"
 	}
-	return filepath.Join(base, ".kuke", "kuke.yaml")
+	return filepath.Join(base, ".kuke")
+}
+
+// DefaultClientConfigurationFile is the on-disk path the `kuke` client reads
+// when the user does not pass `--configuration`. An absent file is not an
+// error — the client falls back to its hardcoded defaults.
+func DefaultClientConfigurationFile() string {
+	return filepath.Join(DefaultKukeDir(), "kuke.yaml")
 }

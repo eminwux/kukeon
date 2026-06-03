@@ -20,10 +20,13 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
-// TeamsConfig is the host-side, operator-owned composition document, stored at
+// TeamsConfig is the host-side, operator-owned global-facts document, stored at
 // ~/.kuke/kuketeams.yaml and maintained by `kuke team init`. It carries the
-// operator facts (git identity/signing, registry, source clone URLs, secret
-// sources) and the list of composed teams.
+// operator facts only — git identity/signing, registry, source clone URLs, and
+// secret sources. Per-project composition lives in its own TeamEntry document
+// under the ~/.kuke/kuketeam.d/ drop-in directory (one file per project), so a
+// corrupt or partial write touches a single project rather than the shared
+// roster.
 type TeamsConfig struct {
 	APIVersion string          `json:"apiVersion" yaml:"apiVersion"`
 	Kind       string          `json:"kind"       yaml:"kind"`
@@ -43,10 +46,6 @@ type TeamsConfigSpec struct {
 	// Secrets maps a secret name to its source declaration. A secret never
 	// carries an inline value — only where to read it from.
 	Secrets map[string]TeamsConfigSecret `json:"secrets,omitempty"  yaml:"secrets,omitempty"`
-	// Teams lists the composed teams. Each entry's path is an init-time
-	// LOCATOR (where to read kuketeam.yaml and resolve the project's clone URL
-	// from `git remote`), not a bind-mount source.
-	Teams []TeamsConfigTeam `json:"teams,omitempty"    yaml:"teams,omitempty"`
 }
 
 // TeamsConfigGit is a strict superset of v1beta1.ContainerGit — the embedded
@@ -69,13 +68,4 @@ type TeamsConfigGit struct {
 type TeamsConfigSecret struct {
 	From string `json:"from" yaml:"from"`
 	Key  string `json:"key"  yaml:"key"`
-}
-
-// TeamsConfigTeam is one composed team. Path is an init-time locator, not a
-// bind-mount source — the cell clones the project fresh from the URL resolved
-// from the project's `git remote` at init time.
-type TeamsConfigTeam struct {
-	Name   string `json:"name"   yaml:"name"`
-	Path   string `json:"path"   yaml:"path"`
-	Source string `json:"source" yaml:"source"`
 }
