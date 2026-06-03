@@ -126,7 +126,7 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 //     Blueprint missing, materialise error). Caller
 //     continues with the on-disk spec — the runtime is
 //     still bounced as the operator asked, matching the
-//     CLI restart fall-through (cmd/kuke/restart/cell).
+//     CLI restart fall-through (cmd/kuke/restart).
 func (b *Exec) reapplyOutOfSyncFromConfig(cell intmodel.Cell) (intmodel.Cell, bool, bool) {
 	if !cell.Status.OutOfSync || cell.Status.OutOfSyncError != "" {
 		return intmodel.Cell{}, false, false

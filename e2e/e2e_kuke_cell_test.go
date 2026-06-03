@@ -525,7 +525,6 @@ func TestKuke_StartCell_VerifyState(t *testing.T) {
 		args = append(
 			buildKukeDaemonArgs(host),
 			"start",
-			"cell",
 			cellName,
 			"--realm",
 			realmName,
@@ -693,7 +692,6 @@ func TestKuke_StopCell_VerifyState(t *testing.T) {
 	args = append(
 		buildKukeDaemonArgs(host),
 		"stop",
-		"cell",
 		cellName,
 		"--realm",
 		realmName,
@@ -860,7 +858,6 @@ func TestKuke_KillCell_VerifyState(t *testing.T) {
 	args = append(
 		buildKukeDaemonArgs(host),
 		"kill",
-		"cell",
 		cellName,
 		"--realm",
 		realmName,
