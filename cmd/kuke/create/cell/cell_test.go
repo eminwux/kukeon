@@ -205,219 +205,36 @@ func TestPrintCellResult(t *testing.T) {
 	}
 }
 
-func TestNewCellCmdRunE(t *testing.T) {
+func TestNewCellCmdRunE_RequiresSourceFlag(t *testing.T) {
+	// Parse-time rejection: with no --from-blueprint and no --from-config,
+	// the command must error before any client call. Empty-shell mode retired
+	// with epic:bye-container step 3 (#996).
 	t.Cleanup(viper.Reset)
 
 	tests := []struct {
-		name           string
-		args           []string
-		setup          func(t *testing.T, cmd *cobra.Command)
-		clientFn       func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error)
-		wantErr        string
-		wantCallCreate bool
-		wantDoc        v1beta1.CellDoc
-		wantOutput     []string
+		name  string
+		args  []string
+		setup func(t *testing.T, cmd *cobra.Command)
 	}{
 		{
-			name: "success: name from args with flags",
+			name: "name from positional, scope flags set",
 			args: []string{"test-cell"},
 			setup: func(t *testing.T, cmd *cobra.Command) {
 				setFlag(t, cmd, "realm", "realm-a")
 				setFlag(t, cmd, "space", "space-a")
 				setFlag(t, cmd, "stack", "stack-a")
 			},
-			clientFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-				return kukeonv1.CreateCellResult{
-					Cell:                    doc,
-					Created:                 true,
-					MetadataExistsPost:      true,
-					CgroupCreated:           true,
-					CgroupExistsPost:        true,
-					RootContainerCreated:    true,
-					RootContainerExistsPost: true,
-					Started:                 true,
-				}, nil
-			},
-			wantCallCreate: true,
-			wantDoc:        newCellDoc("test-cell", "realm-a", "space-a", "stack-a"),
-			wantOutput: []string{
-				`Cell "test-cell" (realm "realm-a", space "space-a", stack "stack-a")`,
-			},
 		},
 		{
-			name: "success: name from viper with flags",
+			name: "name from viper, scope flags set",
 			setup: func(t *testing.T, cmd *cobra.Command) {
 				viper.Set(config.KUKE_CREATE_CELL_NAME.ViperKey, "viper-cell")
 				setFlag(t, cmd, "realm", "realm-b")
-				setFlag(t, cmd, "space", "space-b")
-				setFlag(t, cmd, "stack", "stack-b")
-			},
-			clientFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-				return kukeonv1.CreateCellResult{
-					Cell:                    doc,
-					Created:                 true,
-					MetadataExistsPost:      true,
-					CgroupCreated:           true,
-					CgroupExistsPost:        true,
-					RootContainerCreated:    true,
-					RootContainerExistsPost: true,
-					Started:                 true,
-				}, nil
-			},
-			wantCallCreate: true,
-			wantDoc:        newCellDoc("viper-cell", "realm-b", "space-b", "stack-b"),
-			wantOutput: []string{
-				`Cell "viper-cell" (realm "realm-b", space "space-b", stack "stack-b")`,
 			},
 		},
 		{
-			name: "success: all from viper",
-			setup: func(_ *testing.T, _ *cobra.Command) {
-				viper.Set(config.KUKE_CREATE_CELL_NAME.ViperKey, "all-viper-cell")
-				viper.Set(config.KUKE_CREATE_CELL_REALM.ViperKey, "realm-c")
-				viper.Set(config.KUKE_CREATE_CELL_SPACE.ViperKey, "space-c")
-				viper.Set(config.KUKE_CREATE_CELL_STACK.ViperKey, "stack-c")
-			},
-			clientFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-				return kukeonv1.CreateCellResult{
-					Cell:                    doc,
-					Created:                 false,
-					MetadataExistsPost:      true,
-					CgroupExistsPost:        true,
-					RootContainerExistsPost: true,
-					Started:                 false,
-				}, nil
-			},
-			wantCallCreate: true,
-			wantDoc:        newCellDoc("all-viper-cell", "realm-c", "space-c", "stack-c"),
-			wantOutput: []string{
-				`Cell "all-viper-cell" (realm "realm-c", space "space-c", stack "stack-c")`,
-			},
-		},
-		{
-			name:           "error: missing name",
-			setup:          func(_ *testing.T, _ *cobra.Command) {},
-			wantErr:        "cell name is required",
-			wantCallCreate: false,
-		},
-		{
-			name: "uses default realm when realm flag not set",
-			args: []string{"test-cell"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				setFlag(t, cmd, "space", "space-a")
-				setFlag(t, cmd, "stack", "stack-a")
-			},
-			clientFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-				return kukeonv1.CreateCellResult{
-					Cell:                    doc,
-					Created:                 true,
-					MetadataExistsPost:      true,
-					CgroupCreated:           true,
-					CgroupExistsPost:        true,
-					RootContainerCreated:    true,
-					RootContainerExistsPost: true,
-				}, nil
-			},
-			wantCallCreate: true,
-			wantDoc:        newCellDoc("test-cell", "default", "space-a", "stack-a"),
-		},
-		{
-			name: "uses default space when space flag not set",
-			args: []string{"test-cell"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				setFlag(t, cmd, "realm", "realm-a")
-				setFlag(t, cmd, "stack", "stack-a")
-			},
-			clientFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-				return kukeonv1.CreateCellResult{
-					Cell:                    doc,
-					Created:                 true,
-					MetadataExistsPost:      true,
-					CgroupCreated:           true,
-					CgroupExistsPost:        true,
-					RootContainerCreated:    true,
-					RootContainerExistsPost: true,
-				}, nil
-			},
-			wantCallCreate: true,
-			wantDoc:        newCellDoc("test-cell", "realm-a", "default", "stack-a"),
-		},
-		{
-			name: "uses default stack when stack flag not set",
-			args: []string{"test-cell"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				setFlag(t, cmd, "realm", "realm-a")
-				setFlag(t, cmd, "space", "space-a")
-			},
-			clientFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-				return kukeonv1.CreateCellResult{
-					Cell:                    doc,
-					Created:                 true,
-					MetadataExistsPost:      true,
-					CgroupCreated:           true,
-					CgroupExistsPost:        true,
-					RootContainerCreated:    true,
-					RootContainerExistsPost: true,
-				}, nil
-			},
-			wantCallCreate: true,
-			wantDoc:        newCellDoc("test-cell", "realm-a", "space-a", "default"),
-		},
-		{
-			name: "error: CreateCell fails",
-			args: []string{"test-cell"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				setFlag(t, cmd, "realm", "realm-a")
-				setFlag(t, cmd, "space", "space-a")
-				setFlag(t, cmd, "stack", "stack-a")
-			},
-			clientFn: func(_ v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-				return kukeonv1.CreateCellResult{}, errdefs.ErrCreateCell
-			},
-			wantErr:        "failed to create cell",
-			wantCallCreate: true,
-			wantDoc:        newCellDoc("test-cell", "realm-a", "space-a", "stack-a"),
-		},
-		{
-			name: "error: realm with whitespace trimmed",
-			args: []string{"test-cell"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				setFlag(t, cmd, "realm", "  ")
-				setFlag(t, cmd, "space", "space-a")
-				setFlag(t, cmd, "stack", "stack-a")
-			},
-			clientFn: func(_ v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-				return kukeonv1.CreateCellResult{}, errors.New("unexpected call")
-			},
-			// With blank realm, local path short-circuits in the controller;
-			// but through the mock client we also see the empty RealmID get through
-			// since normalization runs server-side. Assert call path + empty realm.
-			wantCallCreate: true,
-			wantDoc:        newCellDoc("test-cell", "", "space-a", "stack-a"),
-			wantErr:        "unexpected call",
-		},
-		{
-			name: "success: realm with whitespace trimmed",
-			args: []string{"test-cell"},
-			setup: func(t *testing.T, cmd *cobra.Command) {
-				setFlag(t, cmd, "realm", "  realm-a  ")
-				setFlag(t, cmd, "space", "  space-a  ")
-				setFlag(t, cmd, "stack", "  stack-a  ")
-			},
-			clientFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-				return kukeonv1.CreateCellResult{
-					Cell:                    doc,
-					Created:                 true,
-					MetadataExistsPost:      true,
-					CgroupCreated:           true,
-					CgroupExistsPost:        true,
-					RootContainerCreated:    true,
-					RootContainerExistsPost: true,
-					Started:                 true,
-				}, nil
-			},
-			wantCallCreate: true,
-			wantDoc:        newCellDoc("test-cell", "realm-a", "space-a", "stack-a"),
+			name:  "no name, no scope flags",
+			setup: func(_ *testing.T, _ *cobra.Command) {},
 		},
 	}
 
@@ -425,33 +242,167 @@ func TestNewCellCmdRunE(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Cleanup(viper.Reset)
 
-			var createCalled bool
-			var createDoc v1beta1.CellDoc
-
-			cmd := cell.NewCellCmd()
-			cmd.SetOut(&bytes.Buffer{})
-			cmd.SetErr(&bytes.Buffer{})
-
-			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
-
-			if tt.clientFn != nil {
-				fake := &fakeClient{
-					createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-						createCalled = true
-						createDoc = doc
-						return tt.clientFn(doc)
-					},
-				}
-				ctx = context.WithValue(ctx, cell.MockControllerKey{}, kukeonv1.Client(fake))
+			fc := &fakeClient{
+				createCellFn: func(v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+					t.Fatal("CreateCell must not be called when source flag is missing")
+					return kukeonv1.CreateCellResult{}, nil
+				},
+				materializeCellFn: func(v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+					t.Fatal("MaterializeCell must not be called when source flag is missing")
+					return kukeonv1.CreateCellResult{}, nil
+				},
 			}
+			cmd, _ := newTestExecCmd(t, fc)
 
-			cmd.SetContext(ctx)
+			tt.setup(t, cmd)
+			cmd.SetArgs(tt.args)
 
-			if tt.setup != nil {
-				tt.setup(t, cmd)
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatal("expected error when neither --from-blueprint nor --from-config is set")
 			}
+			if !strings.Contains(err.Error(), "requires --from-blueprint or --from-config") {
+				t.Errorf("err=%v want 'requires --from-blueprint or --from-config'", err)
+			}
+			if !strings.Contains(err.Error(), "kuke apply -f") {
+				t.Errorf("err=%v should point at `kuke apply -f <file>`", err)
+			}
+		})
+	}
+}
 
+func TestNewCellCmdRunE_FromBlueprint_ScopeHandling(t *testing.T) {
+	// Scope-flag handling on the from-blueprint path: positional + viper name
+	// resolution, default realm/space/stack fill-in, and whitespace trimming.
+	// These behaviours used to live on the empty-shell path; after step 3
+	// (#996) they're shared with the from-blueprint flow via parseCreateCellFlags.
+	t.Cleanup(viper.Reset)
+
+	tests := []struct {
+		name       string
+		args       []string
+		setup      func(t *testing.T, cmd *cobra.Command)
+		wantErr    string
+		wantDoc    v1beta1.CellDoc
+		wantOutput []string
+	}{
+		{
+			name: "name from args with scope flags",
+			args: []string{"test-cell"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				setFlag(t, cmd, "realm", "realm-a")
+				setFlag(t, cmd, "space", "space-a")
+				setFlag(t, cmd, "stack", "stack-a")
+				setFlag(t, cmd, "from-blueprint", "web")
+			},
+			wantDoc: newCellDoc("test-cell", "realm-a", "space-a", "stack-a"),
+			wantOutput: []string{
+				`Cell "test-cell" (realm "realm-a", space "space-a", stack "stack-a")`,
+			},
+		},
+		{
+			name: "name from viper with scope flags",
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				viper.Set(config.KUKE_CREATE_CELL_NAME.ViperKey, "viper-cell")
+				setFlag(t, cmd, "realm", "realm-b")
+				setFlag(t, cmd, "space", "space-b")
+				setFlag(t, cmd, "stack", "stack-b")
+				setFlag(t, cmd, "from-blueprint", "web")
+			},
+			wantDoc: newCellDoc("viper-cell", "realm-b", "space-b", "stack-b"),
+			wantOutput: []string{
+				`Cell "viper-cell" (realm "realm-b", space "space-b", stack "stack-b")`,
+			},
+		},
+		{
+			name: "name and scope all from viper",
+			setup: func(_ *testing.T, cmd *cobra.Command) {
+				viper.Set(config.KUKE_CREATE_CELL_NAME.ViperKey, "all-viper-cell")
+				viper.Set(config.KUKE_CREATE_CELL_REALM.ViperKey, "realm-c")
+				viper.Set(config.KUKE_CREATE_CELL_SPACE.ViperKey, "space-c")
+				viper.Set(config.KUKE_CREATE_CELL_STACK.ViperKey, "stack-c")
+				setFlag(t, cmd, "from-blueprint", "web")
+			},
+			wantDoc: newCellDoc("all-viper-cell", "realm-c", "space-c", "stack-c"),
+		},
+		{
+			name: "missing name with source flag set",
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				setFlag(t, cmd, "from-blueprint", "web")
+			},
+			wantErr: "cell name is required",
+		},
+		{
+			name: "default realm when realm flag not set",
+			args: []string{"test-cell"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				setFlag(t, cmd, "space", "space-a")
+				setFlag(t, cmd, "stack", "stack-a")
+				setFlag(t, cmd, "from-blueprint", "web")
+			},
+			wantDoc: newCellDoc("test-cell", "default", "space-a", "stack-a"),
+		},
+		{
+			name: "default space when space flag not set",
+			args: []string{"test-cell"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				setFlag(t, cmd, "realm", "realm-a")
+				setFlag(t, cmd, "stack", "stack-a")
+				setFlag(t, cmd, "from-blueprint", "web")
+			},
+			wantDoc: newCellDoc("test-cell", "realm-a", "default", "stack-a"),
+		},
+		{
+			name: "default stack when stack flag not set",
+			args: []string{"test-cell"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				setFlag(t, cmd, "realm", "realm-a")
+				setFlag(t, cmd, "space", "space-a")
+				setFlag(t, cmd, "from-blueprint", "web")
+			},
+			wantDoc: newCellDoc("test-cell", "realm-a", "space-a", "default"),
+		},
+		{
+			name: "scope flags trimmed of whitespace",
+			args: []string{"test-cell"},
+			setup: func(t *testing.T, cmd *cobra.Command) {
+				setFlag(t, cmd, "realm", "  realm-a  ")
+				setFlag(t, cmd, "space", "  space-a  ")
+				setFlag(t, cmd, "stack", "  stack-a  ")
+				setFlag(t, cmd, "from-blueprint", "web")
+			},
+			wantDoc: newCellDoc("test-cell", "realm-a", "space-a", "stack-a"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+
+			var materializeCalled bool
+			var materializeDoc v1beta1.CellDoc
+
+			// Blueprint resolves under the operator-supplied scope; the
+			// materialised cell carries the scope from --realm/--space/--stack
+			// because the blueprint metadata leaves those fields empty here.
+			bp := blueprintDoc()
+			bp.Metadata.Realm = ""
+			bp.Metadata.Space = ""
+			bp.Metadata.Stack = ""
+
+			fc := &fakeClient{
+				getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+					return kukeonv1.GetBlueprintResult{Blueprint: bp, MetadataExists: true}, nil
+				},
+				materializeCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+					materializeCalled = true
+					materializeDoc = doc
+					return successResultFromDoc(doc), nil
+				},
+			}
+			cmd, out := newTestExecCmd(t, fc)
+
+			tt.setup(t, cmd)
 			cmd.SetArgs(tt.args)
 
 			err := cmd.Execute()
@@ -463,31 +414,32 @@ func TestNewCellCmdRunE(t *testing.T) {
 				if !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
 				}
-			} else if err != nil {
+				if materializeCalled {
+					t.Error("MaterializeCell must not be called on parse-time error")
+				}
+				return
+			}
+			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-
-			if createCalled != tt.wantCallCreate {
-				t.Errorf("CreateCell called=%v want=%v", createCalled, tt.wantCallCreate)
+			if !materializeCalled {
+				t.Fatal("MaterializeCell was not called")
 			}
-
-			if tt.wantCallCreate {
-				if createDoc.Metadata.Name != tt.wantDoc.Metadata.Name {
-					t.Errorf("CreateCell Name=%q want=%q", createDoc.Metadata.Name, tt.wantDoc.Metadata.Name)
-				}
-				if createDoc.Spec.RealmID != tt.wantDoc.Spec.RealmID {
-					t.Errorf("CreateCell RealmID=%q want=%q", createDoc.Spec.RealmID, tt.wantDoc.Spec.RealmID)
-				}
-				if createDoc.Spec.SpaceID != tt.wantDoc.Spec.SpaceID {
-					t.Errorf("CreateCell SpaceID=%q want=%q", createDoc.Spec.SpaceID, tt.wantDoc.Spec.SpaceID)
-				}
-				if createDoc.Spec.StackID != tt.wantDoc.Spec.StackID {
-					t.Errorf("CreateCell StackID=%q want=%q", createDoc.Spec.StackID, tt.wantDoc.Spec.StackID)
-				}
+			if materializeDoc.Metadata.Name != tt.wantDoc.Metadata.Name {
+				t.Errorf("Name=%q want=%q", materializeDoc.Metadata.Name, tt.wantDoc.Metadata.Name)
+			}
+			if materializeDoc.Spec.RealmID != tt.wantDoc.Spec.RealmID {
+				t.Errorf("RealmID=%q want=%q", materializeDoc.Spec.RealmID, tt.wantDoc.Spec.RealmID)
+			}
+			if materializeDoc.Spec.SpaceID != tt.wantDoc.Spec.SpaceID {
+				t.Errorf("SpaceID=%q want=%q", materializeDoc.Spec.SpaceID, tt.wantDoc.Spec.SpaceID)
+			}
+			if materializeDoc.Spec.StackID != tt.wantDoc.Spec.StackID {
+				t.Errorf("StackID=%q want=%q", materializeDoc.Spec.StackID, tt.wantDoc.Spec.StackID)
 			}
 
 			if tt.wantOutput != nil {
-				output := cmd.OutOrStdout().(*bytes.Buffer).String()
+				output := out.String()
 				for _, expected := range tt.wantOutput {
 					if !strings.Contains(output, expected) {
 						t.Errorf("output missing expected string %q\nGot output:\n%s", expected, output)
@@ -887,44 +839,5 @@ func TestCreateCell_NameCollision_Errors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "kuke delete cell taken-name") {
 		t.Errorf("err=%v should point at `kuke delete cell taken-name`", err)
-	}
-}
-
-func TestCreateCell_EmptyShell_StillUsesCreateCell(t *testing.T) {
-	// Regression guard for AC #1: the empty-shell path (no --from-* flag)
-	// must continue to call CreateCell — *not* MaterializeCell — so the
-	// daemon's idempotent start step still runs for the pre-#818 workflow C
-	// (create cell → create container → start).
-	t.Cleanup(viper.Reset)
-
-	var createCalled bool
-	fc := &fakeClient{
-		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-			createCalled = true
-			if doc.Metadata.Name != "empty-1" {
-				t.Errorf("CreateCell name=%q want empty-1", doc.Metadata.Name)
-			}
-			return kukeonv1.CreateCellResult{
-				Cell: doc, Created: true, MetadataExistsPost: true,
-				CgroupCreated: true, CgroupExistsPost: true,
-				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
-			}, nil
-		},
-		materializeCellFn: func(v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-			t.Fatal("empty-shell path must not call MaterializeCell")
-			return kukeonv1.CreateCellResult{}, nil
-		},
-	}
-	cmd, _ := newTestExecCmd(t, fc)
-	setFlag(t, cmd, "realm", "r")
-	setFlag(t, cmd, "space", "s")
-	setFlag(t, cmd, "stack", "k")
-	cmd.SetArgs([]string{"empty-1"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if !createCalled {
-		t.Fatal("CreateCell was not called on the empty-shell path")
 	}
 }
