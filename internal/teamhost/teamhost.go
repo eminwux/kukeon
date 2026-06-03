@@ -104,11 +104,19 @@ func EnsureGlobalConfig(l Layout, cfg *model.TeamsConfig) (bool, error) {
 // WriteEntry persists entry to its per-project path, creating the drop-in
 // directory (0o700) if absent. Only the named project's file is touched, so
 // rewriting one project's entry never disturbs another's. The write is atomic
-// (temp file + rename) and the resulting file is 0o600.
+// (temp file + rename) and the resulting file is 0o600. The name is also
+// re-checked for path-traversal characters as defense-in-depth — the parser
+// already rejects unsafe names, but callers that build a TeamEntry directly
+// (without going through the parser) must not be able to escape the drop-in
+// directory.
 func WriteEntry(l Layout, entry *model.TeamEntry) error {
 	project := strings.TrimSpace(entry.Metadata.Name)
 	if project == "" {
 		return errdefs.ErrTeamEntryNameRequired
+	}
+	if strings.ContainsAny(project, "/\\") || strings.ContainsRune(project, 0) ||
+		strings.Contains(project, "..") || strings.HasPrefix(project, ".") {
+		return fmt.Errorf("%w (got %q)", errdefs.ErrTeamMetadataNameUnsafe, entry.Metadata.Name)
 	}
 	dir := l.DropInDir()
 	if err := os.MkdirAll(dir, dropInDirPerm); err != nil {

@@ -166,6 +166,42 @@ func TestWriteEntryEmptyNameErrors(t *testing.T) {
 	}
 }
 
+// TestWriteEntryUnsafeNameRefused is the defense-in-depth guard against path
+// traversal: the parser already rejects unsafe metadata.name values, but a
+// caller building a TeamEntry directly (no parser hop) must not be able to
+// escape the drop-in directory and clobber the operator's global facts file.
+func TestWriteEntryUnsafeNameRefused(t *testing.T) {
+	t.Parallel()
+	base := filepath.Join(t.TempDir(), ".kuke")
+	l := teamhost.NewLayout(base)
+
+	// Pre-seed the global facts file so the traversal target would clobber a
+	// real, distinguishable byte sequence on a successful escape.
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		t.Fatalf("mkdir base: %v", err)
+	}
+	const sentinel = "sentinel: kept\n"
+	if err := os.WriteFile(l.GlobalConfigPath(), []byte(sentinel), 0o600); err != nil {
+		t.Fatalf("seed global: %v", err)
+	}
+
+	cases := []string{"../kuketeams", "a/b", "a\\b", ".hidden", ".."}
+	for _, name := range cases {
+		err := teamhost.WriteEntry(l, teamEntry(name))
+		if !errors.Is(err, errdefs.ErrTeamMetadataNameUnsafe) {
+			t.Errorf("WriteEntry(%q) err = %v, want ErrTeamMetadataNameUnsafe", name, err)
+		}
+	}
+
+	got, err := os.ReadFile(l.GlobalConfigPath())
+	if err != nil {
+		t.Fatalf("read global after refusal: %v", err)
+	}
+	if string(got) != sentinel {
+		t.Errorf("global facts file was clobbered: %q", got)
+	}
+}
+
 func TestLayoutPaths(t *testing.T) {
 	t.Parallel()
 	l := teamhost.NewLayout("/base/.kuke")

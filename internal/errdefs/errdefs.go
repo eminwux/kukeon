@@ -565,6 +565,16 @@ var (
 	// ErrTeamEntryNameRequired fires when a TeamEntry omits metadata.name (the
 	// per-project drop-in filename key).
 	ErrTeamEntryNameRequired = errors.New("teamEntry metadata.name is required")
+	// ErrTeamMetadataNameUnsafe guards every ProjectTeam/TeamEntry metadata.name
+	// that flows into Layout.EntryPath against path traversal: a "/" or "\"
+	// separator, a NUL byte, a ".." substring, or a leading "." would let
+	// filepath.Join escape the drop-in directory and overwrite the operator's
+	// own global facts file (e.g. metadata.name "../kuketeams" resolves to
+	// ~/.kuke/kuketeams.yaml). Enforced at the parser layer and as
+	// defense-in-depth in teamhost.WriteEntry.
+	ErrTeamMetadataNameUnsafe = errors.New(
+		"metadata.name must not contain path separators, NUL, '..', or a leading '.'",
+	)
 	// ErrTeamProjectFileNotFound fires when `kuke team init` finds no
 	// kuketeam.yaml in the current project directory.
 	ErrTeamProjectFileNotFound = errors.New("no kuketeam.yaml found in the current directory")

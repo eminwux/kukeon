@@ -214,9 +214,11 @@ func seedGit(ctx context.Context, getGit GitConfigFunc) *model.TeamsConfigGit {
 	populated := false
 
 	if hasName && hasEmail && strings.TrimSpace(name) != "" && strings.TrimSpace(email) != "" {
-		id := &v1beta1.GitIdentity{Name: strings.TrimSpace(name), Email: strings.TrimSpace(email)}
-		git.Author = id
-		git.Committer = id
+		// Construct two distinct values: a future load → mutate → write path in
+		// step 2/3/4 must not silently couple author and committer through a
+		// shared pointer.
+		git.Author = &v1beta1.GitIdentity{Name: strings.TrimSpace(name), Email: strings.TrimSpace(email)}
+		git.Committer = &v1beta1.GitIdentity{Name: strings.TrimSpace(name), Email: strings.TrimSpace(email)}
 		populated = true
 	}
 	if s := strings.TrimSpace(signingKey); s != "" {

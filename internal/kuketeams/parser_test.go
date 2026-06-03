@@ -310,6 +310,39 @@ func TestParseFailureModes(t *testing.T) {
 			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: a }\nspec: { path: /x, source: eminwux/agents@main }\n",
 			errdefs.ErrTeamSourceInvalid,
 		},
+		{
+			// Path-traversal: an unbounded metadata.name flows into
+			// teamhost.Layout.EntryPath via filepath.Join, so a name like
+			// "../kuketeams" would clobber ~/.kuke/kuketeams.yaml. The parser
+			// must refuse before that name reaches host code.
+			"TeamEntry name traverses parent",
+			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: \"../kuketeams\" }\nspec: { path: /x }\n",
+			errdefs.ErrTeamMetadataNameUnsafe,
+		},
+		{
+			"TeamEntry name has path separator",
+			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: \"a/b\" }\nspec: { path: /x }\n",
+			errdefs.ErrTeamMetadataNameUnsafe,
+		},
+		{
+			"TeamEntry name has backslash",
+			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: \"a\\\\b\" }\nspec: { path: /x }\n",
+			errdefs.ErrTeamMetadataNameUnsafe,
+		},
+		{
+			"TeamEntry name is leading dot",
+			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: \".kuke\" }\nspec: { path: /x }\n",
+			errdefs.ErrTeamMetadataNameUnsafe,
+		},
+		{
+			// Same guard applies on the ProjectTeam side — the per-project
+			// roster is itself untrusted input (parsed from each project's
+			// committed kuketeam.yaml), and metadata.name from that file
+			// becomes the TeamEntry's metadata.name verbatim in `kuke team init`.
+			"ProjectTeam name traverses parent",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: { name: \"../kuketeams\" }\nspec: { source: eminwux/agents@v1.4.0, roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamMetadataNameUnsafe,
+		},
 		// Role.
 		{
 			"Role missing name",
