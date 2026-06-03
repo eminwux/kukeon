@@ -527,8 +527,8 @@ var (
 	ErrControllerNoChange = errors.New("controller reported no change")
 
 	// Team-distribution parse/validation errors (kuketeams.io/v1 kinds —
-	// ProjectTeam, TeamsConfig, Role, Harness, ImageCatalog). Issue #793,
-	// epic #792.
+	// ProjectTeam, TeamsConfig, TeamEntry, Role, Harness, ImageCatalog).
+	// Issue #793, epic #792.
 
 	// ErrTeamMetadataNameRequired fires when a ProjectTeam/Role/Harness omits
 	// metadata.name.
@@ -562,10 +562,25 @@ var (
 	// ErrTeamSourceKeyInvalid fires when a TeamsConfig sources[] key is not in
 	// `<owner>/<repo>` form.
 	ErrTeamSourceKeyInvalid = errors.New("sources key must be in <owner>/<repo> form")
-	// ErrTeamTeamNameRequired fires when a TeamsConfig teams[] entry omits name.
-	ErrTeamTeamNameRequired = errors.New("teams[].name is required")
-	// ErrTeamTeamNameDuplicate fires when two TeamsConfig teams[] share a name.
-	ErrTeamTeamNameDuplicate = errors.New("teams[].name must be unique")
+	// ErrTeamEntryNameRequired fires when a TeamEntry omits metadata.name (the
+	// per-project drop-in filename key).
+	ErrTeamEntryNameRequired = errors.New("teamEntry metadata.name is required")
+	// ErrTeamMetadataNameUnsafe guards every ProjectTeam/TeamEntry metadata.name
+	// that flows into Layout.EntryPath against path traversal: a "/" or "\"
+	// separator, a NUL byte, a ".." substring, or a leading "." would let
+	// filepath.Join escape the drop-in directory and overwrite the operator's
+	// own global facts file (e.g. metadata.name "../kuketeams" resolves to
+	// ~/.kuke/kuketeams.yaml). Enforced at the parser layer and as
+	// defense-in-depth in teamhost.WriteEntry.
+	ErrTeamMetadataNameUnsafe = errors.New(
+		"metadata.name must not contain path separators, NUL, '..', or a leading '.'",
+	)
+	// ErrTeamProjectFileNotFound fires when `kuke team init` finds no
+	// kuketeam.yaml in the current project directory.
+	ErrTeamProjectFileNotFound = errors.New("no kuketeam.yaml found in the current directory")
+	// ErrTeamProjectFileKind fires when the project file parses but is not a
+	// ProjectTeam document.
+	ErrTeamProjectFileKind = errors.New("project file must be a ProjectTeam document")
 	// ErrTeamHarnessFieldRequired fires when a Harness omits skillPath,
 	// makeTarget, or template.
 	ErrTeamHarnessFieldRequired = errors.New(

@@ -53,8 +53,13 @@ spec:
   sources:  { eminwux/agents: git@github.com:eminwux/agents.git }
   secrets:
     claude-code-oauth-token: { from: env, key: CLAUDE_CODE_OAUTH_TOKEN }
-  teams:
-    - { name: sbsh, path: ~/src/sbsh, source: eminwux/agents@v1.4.0 }
+`
+
+const teamEntryHappy = `
+apiVersion: kuketeams.io/v1
+kind: TeamEntry
+metadata: { name: sbsh }
+spec: { path: /home/op/src/sbsh, source: eminwux/agents@v1.4.0 }
 `
 
 const roleHappy = `
@@ -114,6 +119,12 @@ func TestParseHappyPaths(t *testing.T) {
 			model.KindTeamsConfig,
 			func(d *Document) bool { return d.TeamsConfig != nil },
 		},
+		{
+			"TeamEntry",
+			teamEntryHappy,
+			model.KindTeamEntry,
+			func(d *Document) bool { return d.TeamEntry != nil },
+		},
 		{"Role", roleHappy, model.KindRole, func(d *Document) bool { return d.Role != nil }},
 		{"Harness", harnessHappy, model.KindHarness, func(d *Document) bool { return d.Harness != nil }},
 		{
@@ -171,6 +182,17 @@ func TestParseHappyPathFields(t *testing.T) {
 	}
 	if len(tc.TeamsConfig.Spec.Git.Sign) != 2 {
 		t.Errorf("git.sign len = %d, want 2", len(tc.TeamsConfig.Spec.Git.Sign))
+	}
+
+	te, err := Parse([]byte(teamEntryHappy))
+	if err != nil {
+		t.Fatalf("TeamEntry: %v", err)
+	}
+	if te.TeamEntry.Metadata.Name != "sbsh" {
+		t.Errorf("teamEntry name = %q, want sbsh", te.TeamEntry.Metadata.Name)
+	}
+	if te.TeamEntry.Spec.Path != "/home/op/src/sbsh" || te.TeamEntry.Spec.Source != "eminwux/agents@v1.4.0" {
+		t.Errorf("teamEntry spec = %+v", te.TeamEntry.Spec)
 	}
 
 	role, err := Parse([]byte(roleHappy))
@@ -277,15 +299,49 @@ func TestParseFailureModes(t *testing.T) {
 			"apiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec: { sources: { agents: git@x } }\n",
 			errdefs.ErrTeamSourceKeyInvalid,
 		},
+		// TeamEntry.
 		{
-			"TeamsConfig duplicate team name",
-			"apiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec: { teams: [{name: a}, {name: a}] }\n",
-			errdefs.ErrTeamTeamNameDuplicate,
+			"TeamEntry missing name",
+			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nspec: { path: /x }\n",
+			errdefs.ErrTeamEntryNameRequired,
 		},
 		{
-			"TeamsConfig missing team name",
-			"apiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec: { teams: [{path: /x}] }\n",
-			errdefs.ErrTeamTeamNameRequired,
+			"TeamEntry non-pinned source",
+			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: a }\nspec: { path: /x, source: eminwux/agents@main }\n",
+			errdefs.ErrTeamSourceInvalid,
+		},
+		{
+			// Path-traversal: an unbounded metadata.name flows into
+			// teamhost.Layout.EntryPath via filepath.Join, so a name like
+			// "../kuketeams" would clobber ~/.kuke/kuketeams.yaml. The parser
+			// must refuse before that name reaches host code.
+			"TeamEntry name traverses parent",
+			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: \"../kuketeams\" }\nspec: { path: /x }\n",
+			errdefs.ErrTeamMetadataNameUnsafe,
+		},
+		{
+			"TeamEntry name has path separator",
+			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: \"a/b\" }\nspec: { path: /x }\n",
+			errdefs.ErrTeamMetadataNameUnsafe,
+		},
+		{
+			"TeamEntry name has backslash",
+			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: \"a\\\\b\" }\nspec: { path: /x }\n",
+			errdefs.ErrTeamMetadataNameUnsafe,
+		},
+		{
+			"TeamEntry name is leading dot",
+			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: \".kuke\" }\nspec: { path: /x }\n",
+			errdefs.ErrTeamMetadataNameUnsafe,
+		},
+		{
+			// Same guard applies on the ProjectTeam side — the per-project
+			// roster is itself untrusted input (parsed from each project's
+			// committed kuketeam.yaml), and metadata.name from that file
+			// becomes the TeamEntry's metadata.name verbatim in `kuke team init`.
+			"ProjectTeam name traverses parent",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: { name: \"../kuketeams\" }\nspec: { source: eminwux/agents@v1.4.0, roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamMetadataNameUnsafe,
 		},
 		// Role.
 		{

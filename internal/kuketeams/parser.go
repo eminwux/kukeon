@@ -43,6 +43,7 @@ type Document struct {
 	Kind         string
 	ProjectTeam  *model.ProjectTeam
 	TeamsConfig  *model.TeamsConfig
+	TeamEntry    *model.TeamEntry
 	Role         *model.Role
 	Harness      *model.Harness
 	ImageCatalog *model.ImageCatalog
@@ -130,6 +131,15 @@ func Parse(raw []byte) (*Document, error) {
 			return nil, err
 		}
 		doc.TeamsConfig = &v
+	case model.KindTeamEntry:
+		var v model.TeamEntry
+		if err := yaml.Unmarshal(raw, &v); err != nil {
+			return nil, fmt.Errorf("parse TeamEntry: %w", err)
+		}
+		if err := validateTeamEntry(&v); err != nil {
+			return nil, err
+		}
+		doc.TeamEntry = &v
 	case model.KindRole:
 		var v model.Role
 		if err := yaml.Unmarshal(raw, &v); err != nil {
@@ -163,12 +173,16 @@ func Parse(raw []byte) (*Document, error) {
 	return doc, nil
 }
 
-// validateProjectTeam enforces the ProjectTeam contract: metadata.name present;
-// source pinned-exact; every roles[].ref non-empty; defaults/role harness names
-// known; project role image needs are capability names.
+// validateProjectTeam enforces the ProjectTeam contract: metadata.name present
+// and safe as a drop-in filename key; source pinned-exact; every roles[].ref
+// non-empty; defaults/role harness names known; project role image needs are
+// capability names.
 func validateProjectTeam(pt *model.ProjectTeam) error {
 	if strings.TrimSpace(pt.Metadata.Name) == "" {
 		return errdefs.ErrTeamMetadataNameRequired
+	}
+	if err := validateMetadataNameSafe(pt.Metadata.Name); err != nil {
+		return err
 	}
 	if !sourceRefPattern.MatchString(strings.TrimSpace(pt.Spec.Source)) {
 		return fmt.Errorf("%w (got %q)", errdefs.ErrTeamSourceInvalid, pt.Spec.Source)
@@ -193,7 +207,8 @@ func validateProjectTeam(pt *model.ProjectTeam) error {
 
 // validateTeamsConfig enforces the TeamsConfig contract: git identities
 // complete; git.sign entries valid and key-backed; secrets declare a source;
-// sources keys well-formed; teams names present and unique.
+// sources keys well-formed. Per-project composition is no longer carried here —
+// it moved to the TeamEntry drop-in (validateTeamEntry).
 func validateTeamsConfig(tc *model.TeamsConfig) error {
 	if tc.Spec.Git != nil {
 		if err := validateGit(tc.Spec.Git); err != nil {
@@ -215,20 +230,39 @@ func validateTeamsConfig(tc *model.TeamsConfig) error {
 			return fmt.Errorf("%w (got %q)", errdefs.ErrTeamSourceKeyInvalid, key)
 		}
 	}
-	seen := make(map[string]bool, len(tc.Spec.Teams))
-	for i, team := range tc.Spec.Teams {
-		name := strings.TrimSpace(team.Name)
-		if name == "" {
-			return fmt.Errorf("%w (teams[%d])", errdefs.ErrTeamTeamNameRequired, i)
-		}
-		if seen[name] {
-			return fmt.Errorf("%w (got %q)", errdefs.ErrTeamTeamNameDuplicate, name)
-		}
-		seen[name] = true
-		if strings.TrimSpace(team.Source) != "" &&
-			!sourceRefPattern.MatchString(strings.TrimSpace(team.Source)) {
-			return fmt.Errorf("%w (teams[%d] %q source %q)", errdefs.ErrTeamSourceInvalid, i, name, team.Source)
-		}
+	return nil
+}
+
+// validateTeamEntry enforces the per-project drop-in contract: metadata.name
+// present and safe (it is the <project>.yaml filename key, so traversal
+// characters would let an attacker escape the drop-in directory), and source —
+// when set — pinned-exact to a `<owner>/<repo>@vX.Y.Z` agents reference.
+func validateTeamEntry(te *model.TeamEntry) error {
+	if strings.TrimSpace(te.Metadata.Name) == "" {
+		return errdefs.ErrTeamEntryNameRequired
+	}
+	if err := validateMetadataNameSafe(te.Metadata.Name); err != nil {
+		return err
+	}
+	if strings.TrimSpace(te.Spec.Source) != "" &&
+		!sourceRefPattern.MatchString(strings.TrimSpace(te.Spec.Source)) {
+		return fmt.Errorf("%w (got %q)", errdefs.ErrTeamSourceInvalid, te.Spec.Source)
+	}
+	return nil
+}
+
+// validateMetadataNameSafe rejects any ProjectTeam/TeamEntry metadata.name that
+// would let teamhost.Layout.EntryPath escape the drop-in directory: path
+// separators ('/' or '\'), a NUL byte, a ".." substring, or a leading '.'.
+// The classic escape is metadata.name "../kuketeams", which makes the rename
+// target resolve to ~/.kuke/kuketeams.yaml — the operator's own global facts
+// file. Callers must check for empty-name first so their kind-specific
+// "required" sentinel surfaces rather than the unsafe-name one.
+func validateMetadataNameSafe(name string) error {
+	trimmed := strings.TrimSpace(name)
+	if strings.ContainsAny(trimmed, "/\\") || strings.ContainsRune(trimmed, 0) ||
+		strings.Contains(trimmed, "..") || strings.HasPrefix(trimmed, ".") {
+		return fmt.Errorf("%w (got %q)", errdefs.ErrTeamMetadataNameUnsafe, name)
 	}
 	return nil
 }
