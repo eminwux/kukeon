@@ -17,6 +17,8 @@
 package e2e_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -111,14 +113,33 @@ func TestKuke_CreateCell_RejectsInvalidNames(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			args := append(buildKukeDaemonArgs(host),
-				"create", "cell", tt.cellName,
-				"--realm", "default", "--space", "default", "--stack", "default")
-			exitCode, _, stderr := runBinary(t, nil, kuke, args...)
+
+			// The no-source-flag `kuke create cell` path was retired in
+			// epic:bye-container step 3 (#996); exercise the cell-name
+			// validation via `kuke apply -f` against a substituted cell.yaml
+			// so the daemon's normalizeCellInputs check still fires.
+			yamlContent := readTestdataYAML(t, "cell.yaml")
+			yamlContent = strings.ReplaceAll(yamlContent, "test-cell", tt.cellName)
+			yamlContent = strings.ReplaceAll(yamlContent, "test-realm", "default")
+			yamlContent = strings.ReplaceAll(yamlContent, "test-space", "default")
+			yamlContent = strings.ReplaceAll(yamlContent, "test-stack", "default")
+
+			tmpDir := t.TempDir()
+			tmpFile := filepath.Join(tmpDir, "cell.yaml")
+			if err := os.WriteFile(tmpFile, []byte(yamlContent), 0o644); err != nil {
+				t.Fatalf("failed to write temporary YAML file: %v", err)
+			}
+
+			args := append(buildKukeDaemonArgs(host), "apply", "-f", tmpFile)
+			exitCode, stdout, stderr := runBinary(t, nil, kuke, args...)
 			if exitCode == 0 {
 				t.Fatalf("expected non-zero exit rejecting cell name %q", tt.cellName)
 			}
-			combined := string(stderr)
+			// `kuke apply` writes the daemon's per-resource error to stdout
+			// (printApplyResult's "  Error: ..." line) and returns a generic
+			// "config error: some resources failed to apply" on stderr; check
+			// both streams so the assertion sees the name-validation message.
+			combined := string(stdout) + string(stderr)
 			if !strings.Contains(combined, "cell") || !strings.Contains(combined, tt.cellName) {
 				t.Errorf("expected error mentioning kind=cell and name %q, got:\n%s", tt.cellName, combined)
 			}

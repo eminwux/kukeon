@@ -41,11 +41,10 @@ func NewCellCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "cell [name]",
 		Aliases: []string{"ce"},
-		Short:   "Create a cell within a stack (empty shell, --from-blueprint, or --from-config)",
-		Long: "Create a cell within a stack. Three modes:\n\n" +
-			"  - `kuke create cell <name>` (no source flag) — creates an empty Cell " +
-			"shell (name + scope only, no containers). Workflow C: follow with " +
-			"`kuke create container -c <name> --image ...` and `kuke start <name>`.\n" +
+		Short:   "Create a cell within a stack from a Blueprint or Config",
+		Long: "Create a cell within a stack. Exactly one of --from-blueprint or " +
+			"--from-config is required; use `kuke apply -f <file>` to materialise " +
+			"a cell from a full manifest. Two modes:\n\n" +
 			"  - `kuke create cell <name> --from-blueprint <bp> [--param k=v] [--param-file path]` — " +
 			"resolves the daemon-stored CellBlueprint, applies scalar params, " +
 			"materialises the full Cell record (containers and all), and " +
@@ -134,13 +133,21 @@ type createCellFlags struct {
 
 // parseCreateCellFlags validates the flag combinations and trims values. The
 // cobra-side mutex enforces --from-blueprint vs --from-config; this routine
-// also rejects --param/--param-file when --from-config is set (a CellConfig
-// carries its own spec.values, parity with `kuke run -c`).
+// also requires exactly one of those flags (the empty-shell mode retired with
+// epic:bye-container step 3) and rejects --param/--param-file when
+// --from-config is set (a CellConfig carries its own spec.values, parity with
+// `kuke run -c`).
 func parseCreateCellFlags(cmd *cobra.Command, args []string) (createCellFlags, error) {
 	flags := createCellFlags{
 		blueprintName: strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_FROM_BLUEPRINT.ViperKey)),
 		configName:    strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_FROM_CONFIG.ViperKey)),
 		paramFile:     strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_PARAM_FILE.ViperKey)),
+	}
+
+	if flags.blueprintName == "" && flags.configName == "" {
+		return createCellFlags{}, errors.New(
+			"kuke create cell requires --from-blueprint or --from-config (use 'kuke apply -f <file>' for a full manifest)",
+		)
 	}
 
 	name, err := shared.RequireNameArgOrDefault(
@@ -202,36 +209,10 @@ func runCreateCell(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = client.Close() }()
 
-	switch {
-	case flags.blueprintName != "":
+	if flags.blueprintName != "" {
 		return runFromBlueprint(cmd, client, flags)
-	case flags.configName != "":
-		return runFromConfig(cmd, client, flags)
-	default:
-		return runEmptyShell(cmd, client, flags)
 	}
-}
-
-// runEmptyShell preserves the pre-#818 behavior: create an empty Cell
-// shell (name + scope only, no containers). The daemon's CreateCell is
-// idempotent on an existing empty cell, so no pre-check is needed.
-func runEmptyShell(cmd *cobra.Command, client kukeonv1.Client, flags createCellFlags) error {
-	doc := v1beta1.NewCellDoc(&v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{Name: flags.name},
-		Spec: v1beta1.CellSpec{
-			RealmID: flags.realm,
-			SpaceID: flags.space,
-			StackID: flags.stack,
-		},
-	})
-
-	result, err := client.CreateCell(cmd.Context(), *doc)
-	if err != nil {
-		return err
-	}
-
-	printCellResult(cmd, result)
-	return nil
+	return runFromConfig(cmd, client, flags)
 }
 
 // runFromBlueprint resolves the named Blueprint, applies --param/--param-file,
