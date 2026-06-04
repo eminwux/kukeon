@@ -351,7 +351,9 @@ func TestRestartCmd(t *testing.T) {
 }
 
 // TestRestartCmd_RejectsCellSubcommand pins the hard CLI break: `kuke restart cell <name>`
-// must fail with cobra's unknown-command error after the collapse.
+// must fail with cobra's Args-validation error (`accepts 1 arg(s), received 2`)
+// after the collapse — the verb is now a leaf with `cobra.ExactArgs(1)` and no
+// subcommand list, so cobra's unknown-command path no longer fires.
 func TestRestartCmd_RejectsCellSubcommand(t *testing.T) {
 	cmd := restartpkg.NewRestartCmd()
 	buf := &bytes.Buffer{}
