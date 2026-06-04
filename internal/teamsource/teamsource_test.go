@@ -437,6 +437,63 @@ func TestLoadImageCatalog_WrongKindNamesPath(t *testing.T) {
 	}
 }
 
+func TestScrubURLCredentials(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "basic-auth-token",
+			in:   "https://x-token:ghp_xxx@github.com/owner/agents.git",
+			want: "https://github.com/owner/agents.git",
+		},
+		{
+			name: "user-only",
+			in:   "https://bob@github.com/owner/agents.git",
+			want: "https://github.com/owner/agents.git",
+		},
+		{
+			name: "ssh-with-password",
+			in:   "ssh://git:secret@github.com/owner/agents.git",
+			want: "ssh://github.com/owner/agents.git",
+		},
+		{
+			name: "https-no-userinfo-unchanged",
+			in:   "https://github.com/owner/agents.git",
+			want: "https://github.com/owner/agents.git",
+		},
+		{
+			name: "scp-style-unchanged",
+			in:   "git@github.com:owner/agents.git",
+			want: "git@github.com:owner/agents.git",
+		},
+		{
+			name: "flag-unchanged",
+			in:   "--depth=1",
+			want: "--depth=1",
+		},
+		{
+			name: "branch-name-unchanged",
+			in:   "v1.4.0",
+			want: "v1.4.0",
+		},
+		{
+			name: "file-url-unchanged",
+			in:   "file:///tmp/agents-fixture",
+			want: "file:///tmp/agents-fixture",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := scrubURLCredentials(tc.in); got != tc.want {
+				t.Errorf("scrubURLCredentials(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLoadRole_MissingFileNamesPath(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
