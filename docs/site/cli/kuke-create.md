@@ -7,7 +7,7 @@ kuke create <resource> [NAME] [flags]
 kuke c      <resource> [NAME] [flags]      # alias
 ```
 
-Resources: `realm`, `space`, `stack`, `cell`, `container`, `blueprint`, `config`, `secret`. Each subcommand also has a short alias (`r`, `sp`, `st`, `ce`, `co`, `bp`, `cfg`, and `secret` has none).
+Resources: `realm`, `space`, `stack`, `cell`, `blueprint`, `config`, `secret`. Each subcommand also has a short alias (`r`, `sp`, `st`, `ce`, `bp`, `cfg`, and `secret` has none).
 
 ## kuke create realm
 
@@ -57,15 +57,14 @@ sudo kuke create stack wordpress --realm default --space blog
 
 ```
 kuke create cell [NAME] --realm <r> --space <s> --stack <t>
-                       [--from-blueprint <bp> [--param K=V]... [--param-file <path>]]
-                       [--from-config <cfg>]
+                       ( --from-blueprint <bp> [--param K=V]... [--param-file <path>]
+                       | --from-config <cfg> )
 ```
 
-Three modes:
+Two modes (exactly one of `--from-blueprint` or `--from-config` is required):
 
-- `kuke create cell <name>` (no source flag) — creates an empty Cell shell (name + scope only, no containers). Workflow C: follow with `kuke create container -c <name> --image ...` then `kuke start cell <name>`.
-- `kuke create cell <name> --from-blueprint <bp> [--param K=V]... [--param-file <path>]` — resolves the daemon-stored CellBlueprint, applies scalar params, materialises the full Cell record (containers and all), and persists it in a **stopped** state. Pair with `kuke start cell <name>`. Differs from [`kuke run -b`](kuke-run.md) (materialise + start + attach) by leaving the cell stopped for inspection or hand-off; `-b`-lineage cells have no in-place reconcile, so updates flow through delete-and-re-run (or promotion to a CellConfig).
-- `kuke create cell <name> --from-config <cfg>` — resolves the daemon-stored CellConfig and its referenced Blueprint, applies the Config's `spec.values` + repo/secret slot fills, materialises the Cell record, persists in **stopped** state. Pair with `kuke start cell <name>`. Differs from [`kuke run <config>`](kuke-run.md) (materialise + start + attach) by leaving the cell stopped; later reconcile against the lineage Config flows through [`kuke restart cell <name>`](kuke-restart.md) (OutOfSync-driven, #821) once the cell is started.
+- `kuke create cell <name> --from-blueprint <bp> [--param K=V]... [--param-file <path>]` — resolves the daemon-stored CellBlueprint, applies scalar params, materialises the full Cell record (containers and all), and persists it in a **stopped** state. Pair with `kuke start <name>`. Differs from [`kuke run -b`](kuke-run.md) (materialise + start + attach) by leaving the cell stopped for inspection or hand-off; `-b`-lineage cells have no in-place reconcile, so updates flow through delete-and-re-run (or promotion to a CellConfig).
+- `kuke create cell <name> --from-config <cfg>` — resolves the daemon-stored CellConfig and its referenced Blueprint, applies the Config's `spec.values` + repo/secret slot fills, materialises the Cell record, persists in **stopped** state. Pair with `kuke start <name>`. Differs from [`kuke run <config>`](kuke-run.md) (materialise + start + attach) by leaving the cell stopped; later reconcile against the lineage Config flows through [`kuke restart <name>`](kuke-restart.md) (OutOfSync-driven, #821) once the cell is started.
 
 | Flag | Default | Description |
 | --- | --- | --- |
@@ -73,72 +72,22 @@ Three modes:
 | `--realm` | `default` | Realm that owns the cell |
 | `--space` | `default` | Space that owns the cell |
 | `--stack` | `default` | Stack that owns the cell |
-| `--from-blueprint` | `""` | Daemon-stored CellBlueprint name. Mutually exclusive with `--from-config` |
-| `--from-config` | `""` | Daemon-stored CellConfig name. Mutually exclusive with `--from-blueprint` |
+| `--from-blueprint` | `""` | Daemon-stored CellBlueprint name. Exactly one of `--from-blueprint` or `--from-config` is required; the two are mutually exclusive |
+| `--from-config` | `""` | Daemon-stored CellConfig name. Exactly one of `--from-blueprint` or `--from-config` is required; the two are mutually exclusive |
 | `--param` | (empty, repeatable) | Scalar parameter override `KEY=VALUE`. Valid with `--from-blueprint`; rejected with `--from-config` (a Config carries its own `spec.values`) |
 | `--param-file` | `""` | File of `KEY=VALUE` lines seeding scalar parameters. Same declaration rules as `--param`; `--param` wins on dups. Rejected with `--from-config` |
 
 ```bash
-# Empty shell
-sudo kuke create cell web --realm default --space blog --stack wordpress
-
 # Materialise from Blueprint, stopped
 sudo kuke create cell web --from-blueprint web-template --param IMAGE=nginx:1.27 \
     --realm default --space blog --stack wordpress
-sudo kuke start cell web --realm default --space blog --stack wordpress
+sudo kuke start web --realm default --space blog --stack wordpress
 
 # Materialise from Config, stopped
 sudo kuke create cell prod --from-config prod-config \
     --realm default --space blog --stack wordpress
-sudo kuke start cell prod --realm default --space blog --stack wordpress
+sudo kuke start prod --realm default --space blog --stack wordpress
 ```
-
-## kuke create container
-
-Adds a container to an existing cell.
-
-```
-kuke create container [NAME] --cell <cell> [--realm <r> --space <s> --stack <t>] [container flags]
-```
-
-| Flag                 | Default                           | Description                                                  |
-| -------------------- | --------------------------------- | ------------------------------------------------------------ |
-| `--realm`            | `default`                         | Realm of the parent cell                                     |
-| `--space`            | `default`                         | Space of the parent cell                                     |
-| `--stack`            | `default`                         | Stack of the parent cell                                     |
-| `--cell`             | _(required)_                      | Cell that owns the container                                 |
-| `--image`            | `docker.io/library/debian:latest` | Container image                                              |
-| `--command`          | (empty)                           | Command to run                                               |
-| `--args`             | (empty, repeatable)               | Arguments                                                    |
-| `--env`              | (empty, repeatable)               | `KEY=VALUE` env var                                          |
-| `--port`             | (empty, repeatable)               | Port mapping                                                 |
-| `--volume`           | (empty, repeatable)               | Volume mount                                                 |
-| `--tmpfs`            | (empty, repeatable)               | Tmpfs mount, `path[:opts]` (e.g. `/tmp:size=64m`)            |
-| `--network`          | (empty, repeatable)               | Network to join                                              |
-| `--network-alias`    | (empty, repeatable)               | Network alias                                                |
-| `--user`             | (empty)                           | Run as `UID[:GID]` (e.g. `1000:1000`)                        |
-| `--privileged`       | `false`                           | Run privileged                                               |
-| `--read-only`        | `false`                           | Mount the root filesystem read-only                          |
-| `--root`             | `false`                           | Mark this container as the cell's root container             |
-| `--cap-add`          | (empty, repeatable)               | Linux capability to add (e.g. `NET_ADMIN`)                   |
-| `--cap-drop`         | (empty, repeatable)               | Linux capability to drop (e.g. `ALL` or `NET_ADMIN`)         |
-| `--security-opt`     | (empty, repeatable)               | Security option (e.g. `no-new-privileges`, `seccomp=unconfined`) |
-| `--cpu-shares`       | `0`                               | Relative CPU weight (cgroup `cpu.shares`)                    |
-| `--memory`           | (empty)                           | Hard memory limit (bytes, or with suffix `k`/`m`/`g`)        |
-| `--pids-limit`       | `0`                               | Maximum number of PIDs (0 leaves unset)                      |
-| `--cni-config-path`  | (empty)                           | Override CNI config dir for this container                   |
-| `--restart-policy`   | (empty)                           | Restart policy for the container                             |
-| `--label`            | (empty, repeatable)               | `KEY=VALUE` label                                            |
-
-```bash
-sudo kuke create container nginx \
-    --cell web --realm default --space blog --stack wordpress \
-    --image docker.io/library/nginx:alpine \
-    --root
-```
-
-!!! warning "The `--image` default"
-    If you don't pass `--image`, Kukeon uses `docker.io/library/debian:latest`. Always pass `--image` explicitly when you care what runs.
 
 ## kuke create blueprint
 

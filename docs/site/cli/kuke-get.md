@@ -55,7 +55,7 @@ Per-kind column contracts. The default table is what `kuke get <kind>` (no `-o w
 | `blueprint` | `NAME REALM SPACE STACK AGE` | _(none)_ |
 | `config` | `NAME REALM SPACE STACK AGE` | _(none)_ |
 
-`SYNC` (`InSync`/`OutOfSync`/`-`) is computed for cells that carry a `kukeon.io/config=<name>` lineage label; non-lineage cells render `-`. The `-o wide` `DIVERGENCE` column expands an `OutOfSync` cell with a one-line summary of what diverged (image, env, mounts, …). See `kuke restart cell` for the reconcile verb.
+`SYNC` (`InSync`/`OutOfSync`/`-`) is computed for cells that carry a `kukeon.io/config=<name>` lineage label; non-lineage cells render `-`. The `-o wide` `DIVERGENCE` column expands an `OutOfSync` cell with a one-line summary of what diverged (image, env, mounts, …). See `kuke restart` for the reconcile verb.
 
 `-o wide` on `space` surfaces the egress allowlist (`EGRESS`) and the cell-default-deny posture (`NET-DEFAULTS yes/no`).
 
@@ -85,7 +85,7 @@ sudo kuke get realm default -o json
 # Spaces in the default realm
 sudo kuke get spaces --realm default
 
-# Cells in a stack — SYNC column flags Config-lineage drift; OutOfSync points at `kuke restart cell`
+# Cells in a stack — SYNC column flags Config-lineage drift; OutOfSync points at `kuke restart`
 sudo kuke get cells --realm default --space default --stack default
 NAME           REALM    SPACE    STACK    STATE  SYNC       AGE
 -------------  -------  -------  -------  -----  ---------  ---

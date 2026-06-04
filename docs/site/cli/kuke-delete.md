@@ -12,7 +12,7 @@ kuke d      <resource> <name> ...                                # alias
 
 | Flag             | Default | Description                                                                          |
 | ---------------- | ------- | ------------------------------------------------------------------------------------ |
-| `--cascade`      | `false` | Recursively delete child resources (realm → spaces → stacks → cells; not containers) |
+| `--cascade`      | `false` | Recursively delete child resources (realm → spaces → stacks → cells)                 |
 | `--force`        | `false` | Skip validation; attempt deletion anyway                                             |
 | `--file`, `-f`   | (empty) | Delete the resources listed in a YAML file                                           |
 | `--output`, `-o` | (empty) | Output format: `json`, `yaml`                                                        |
@@ -45,14 +45,6 @@ kuke delete stack <name> --realm <r> --space <s> [--cascade] [--force]
 kuke delete cell <name> --realm <r> --space <s> --stack <t> [--cascade] [--force]
 ```
 
-### kuke delete container
-
-```
-kuke delete container <name> --realm <r> --space <s> --stack <t> --cell <c>
-```
-
-`--cascade` does not apply to containers — they're already leaves.
-
 ### kuke delete blueprint
 
 ```
@@ -81,11 +73,8 @@ Removes the daemon-stored CellConfig document bound to the named scope. The at-m
 # Delete an empty cell
 sudo kuke delete cell web --realm default --space blog --stack wordpress
 
-# Cascade-delete an entire user realm (all spaces, stacks, cells, containers)
+# Cascade-delete an entire user realm (all spaces, stacks, cells)
 sudo kuke delete realm mytenant --cascade
-
-# Force-delete a container that's stuck in an unknown state
-sudo kuke delete container stuck --cell web --realm default --space blog --stack wordpress --force
 
 # Delete every resource listed in a manifest
 sudo kuke delete -f site.yaml

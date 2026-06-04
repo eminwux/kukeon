@@ -64,7 +64,7 @@ sudo ./kuke init --kukeond-image docker.io/library/kukeon-local:dev
 To iterate after a code change, tear down the kukeond cell (user data under `/opt/kukeon/default/**` is left intact) and rebuild:
 
 ```bash
-sudo kuke kill cell kukeond \
+sudo kuke kill kukeond \
     --realm kuke-system --space kukeon --stack kukeon --run-path /opt/kukeon
 sudo kuke delete cell kukeond \
     --realm kuke-system --space kukeon --stack kukeon --run-path /opt/kukeon

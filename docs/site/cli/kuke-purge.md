@@ -7,13 +7,13 @@ kuke purge <resource> <name> [--cascade] [--force] [scope flags]
 kuke p     <resource> <name> ...                                # alias
 ```
 
-Resources: `realm`, `space`, `stack`, `cell`, `container`.
+Resources: `realm`, `space`, `stack`, `cell`.
 
 ## Persistent flags
 
 | Flag        | Default | Description                                                |
 | ----------- | ------- | ---------------------------------------------------------- |
-| `--cascade` | `false` | Recursively purge children (does not apply to containers)  |
+| `--cascade` | `false` | Recursively purge children                                 |
 | `--force`   | `false` | Skip validation; attempt purge regardless of current state |
 
 Plus all [global flags](kuke.md).
@@ -23,11 +23,10 @@ Plus all [global flags](kuke.md).
 Shape and flags are identical to the equivalent `delete` subcommands:
 
 ```
-kuke purge realm     <name>                                              [--cascade] [--force]
-kuke purge space     <name> --realm <r>                                  [--cascade] [--force]
-kuke purge stack     <name> --realm <r> --space <s>                      [--cascade] [--force]
-kuke purge cell      <name> --realm <r> --space <s> --stack <t>          [--cascade] [--force]
-kuke purge container <name> --realm <r> --space <s> --stack <t> --cell <c>           [--force]
+kuke purge realm <name>                                         [--cascade] [--force]
+kuke purge space <name> --realm <r>                             [--cascade] [--force]
+kuke purge stack <name> --realm <r> --space <s>                 [--cascade] [--force]
+kuke purge cell  <name> --realm <r> --space <s> --stack <t>     [--cascade] [--force]
 ```
 
 ## When to use purge vs. delete
@@ -63,9 +62,6 @@ sudo kuke purge realm mytenant --cascade --force
 
 # Nuke a broken cell
 sudo kuke purge cell stuck --realm default --space default --stack default --cascade --force
-
-# Clean up a container that's been orphaned
-sudo kuke purge container ghost --cell web --realm default --space blog --stack wordpress --force
 ```
 
 ## Caution

@@ -118,7 +118,7 @@ sudo kuke delete -f workspace.yaml
 
 The same file that `run` and `apply` consumed also drives teardown — `kuke delete -f` removes every resource the manifest declares, so the spec stays the single source of truth across the cell's whole lifecycle. (`kuke delete cell workspace` is the by-name equivalent if you don't have the file handy.)
 
-`kuke purge cell` exists too, but it's the recovery verb for _broken_ state — for example, if an image-pull failure leaves the cell half-created and a subsequent `kuke kill cell` errors out with `no RootContainerID set`. For routine teardown of a healthy workspace, `kuke delete` is the right verb; `purge` is the heavier hammer you reach for when something in kukeon's state is wedged.
+`kuke purge cell` exists too, but it's the recovery verb for _broken_ state — for example, if an image-pull failure leaves the cell half-created and a subsequent `kuke kill <name>` errors out with `no RootContainerID set`. For routine teardown of a healthy workspace, `kuke delete` is the right verb; `purge` is the heavier hammer you reach for when something in kukeon's state is wedged.
 
 ## What you get: spec as source of truth
 
