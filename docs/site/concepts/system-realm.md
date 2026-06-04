@@ -44,7 +44,7 @@ kukeond  kukeon-system    kukeon   kukeon   Ready
 Stopping or restarting the daemon:
 
 ```bash
-sudo kuke kill cell kukeond   --realm kukeon-system --space kukeon --stack kukeon --run-path /opt/kukeon
+sudo kuke kill kukeond        --realm kukeon-system --space kukeon --stack kukeon --run-path /opt/kukeon
 sudo kuke delete cell kukeond --realm kukeon-system --space kukeon --stack kukeon --run-path /opt/kukeon
 sudo rm -f /run/kukeon/kukeond.sock /run/kukeon/kukeond.pid
 ```

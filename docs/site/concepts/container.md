@@ -72,22 +72,12 @@ See [Manifest Reference → Container](../manifests/container.md) for the comple
 
 ## Operations
 
-```bash
-# Create a standalone container inside an existing cell
-sudo kuke create container side --cell hello-world \
-    --realm main --space default --stack default \
-    --image docker.io/library/busybox:latest \
-    --command /bin/sh --args "-c" --args "sleep 3600"
+Containers are not CLI-managed subjects on their own — they are not addressable by the CRUD or lifecycle verbs (`create`, `delete`, `purge`, `start`, `stop`, `kill`, `restart`); those operate on cells. Containers are declared inside a cell manifest and materialised as a side effect of the cell's lifecycle:
 
-# Start / stop / kill — operate at the cell level; see [kuke start / stop / kill](../cli/kuke-lifecycle.md).
-
-# Delete
-sudo kuke delete container side --cell hello-world \
-    --realm main --space default --stack default
-```
-
-!!! note "`--image` default"
-`kuke create container` defaults `--image` to `docker.io/library/debian:latest` when none is provided. Always pass `--image` explicitly if you care which image runs.
+- **Declare** containers inline under `spec.cell.containers[]` in a [`kind: Cell`](../manifests/cell.md), [`kind: CellBlueprint`](../manifests/blueprint.md), or [`kind: CellConfig`](../manifests/config.md) manifest. Apply with [`kuke apply -f cell.yaml`](../cli/kuke-apply.md) or run with [`kuke run -f cell.yaml`](../cli/kuke-run.md) / [`kuke run <config>`](../cli/kuke-run.md).
+- **Inspect** the resulting runtime containers with [`kuke get container`](../cli/kuke-get.md), tail logs with [`kuke log --container <name>`](../cli/kuke-log.md), and open a session with [`kuke attach --container <name>`](../cli/kuke-attach.md).
+- **Lifecycle** is cell-level: [`kuke start <cell>`](../cli/kuke-lifecycle.md), `kuke stop <cell>`, `kuke kill <cell>`, and [`kuke restart <cell>`](../cli/kuke-restart.md) bounce every container in the cell as a single unit. There is no per-container start/stop/kill verb.
+- **Removal** of a single container is done by editing the manifest and re-applying (or re-running) the cell — `kuke apply -f` reconciles container sets, and the cell-level [`kuke delete cell`](../cli/kuke-delete.md) tears down the whole cell including its containers.
 
 ## Related concepts
 

@@ -64,8 +64,8 @@ See [Manifest Reference → Cell](../manifests/cell.md) for the full schema.
 ## Operations
 
 ```bash
-# Create a cell imperatively (without containers)
-sudo kuke create cell mycell --realm main --space default --stack default
+# Materialise a cell from a daemon-stored CellBlueprint (containers declared in the Blueprint)
+sudo kuke create cell mycell --from-blueprint web --realm main --space default --stack default
 
 # Or apply a full cell manifest (preferred)
 sudo kuke apply -f cell.yaml
@@ -73,10 +73,10 @@ sudo kuke apply -f cell.yaml
 # List cells
 sudo kuke get cells --realm main --space default --stack default
 
-# Start / stop / kill
-sudo kuke start cell mycell --realm main --space default --stack default
-sudo kuke stop  cell mycell --realm main --space default --stack default
-sudo kuke kill  cell mycell --realm main --space default --stack default
+# Start / stop / kill (positional — no `cell` subcommand)
+sudo kuke start mycell --realm main --space default --stack default
+sudo kuke stop  mycell --realm main --space default --stack default
+sudo kuke kill  mycell --realm main --space default --stack default
 
 # Delete (with cascade to remove child containers)
 sudo kuke delete cell mycell --realm main --space default --stack default --cascade

@@ -8,22 +8,22 @@ Runtime lifecycle for cells. These commands don't touch metadata — they operat
 | `kuke stop`  | `SIGTERM`           | Request graceful shutdown; container exits on its own terms |
 | `kuke kill`  | `SIGKILL`           | Immediate termination; no graceful shutdown window          |
 
-All three take the same shape: `<verb> cell <name> <scope flags>`.
+All three take the same shape: `<verb> <name> <scope flags>`. The `<name>` positional resolves to a cell within the named realm/space/stack — cells are the only lifecycle subject.
 
 ## kuke start
 
 ```
-kuke start cell <name> --realm <r> --space <s> --stack <t>
+kuke start <name> --realm <r> --space <s> --stack <t>
 ```
 
 Aliases: `kuke start` → `kuke sta`.
 
-`start cell` starts the root container first, then every non-root container in the cell.
+`start` starts the cell's root container first, then every non-root container in the cell.
 
 ## kuke stop
 
 ```
-kuke stop cell <name> --realm <r> --space <s> --stack <t>
+kuke stop <name> --realm <r> --space <s> --stack <t>
 ```
 
 Aliases: `kuke stop` → `kuke sto`.
@@ -33,7 +33,7 @@ Sends SIGTERM to the task. If the container has a shutdown handler, it gets a ch
 ## kuke kill
 
 ```
-kuke kill cell <name> --realm <r> --space <s> --stack <t>
+kuke kill <name> --realm <r> --space <s> --stack <t>
 ```
 
 Aliases: `kuke kill` → `kuke k`.
@@ -56,13 +56,13 @@ Plus all [global flags](kuke.md).
 
 ```bash
 # Start a cell
-sudo kuke start cell web --realm default --space blog --stack wordpress
+sudo kuke start web --realm default --space blog --stack wordpress
 
 # Graceful stop
-sudo kuke stop cell web --realm default --space blog --stack wordpress
+sudo kuke stop web --realm default --space blog --stack wordpress
 
 # Force-kill an unresponsive cell
-sudo kuke kill cell web --realm default --space blog --stack wordpress
+sudo kuke kill web --realm default --space blog --stack wordpress
 ```
 
 ## Exit semantics
