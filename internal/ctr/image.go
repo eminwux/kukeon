@@ -17,11 +17,13 @@
 package ctr
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"time"
 
 	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/core/leases"
 	"github.com/containerd/containerd/v2/defaults"
 	"github.com/containerd/errdefs"
@@ -244,14 +246,45 @@ func (c *client) GetImage(namespace, ref string) (ImageInfo, error) {
 	return c.imageToInfo(namespace, img), nil
 }
 
-// DeleteImage removes the named image ref from the specified
-// containerd namespace. The kukeon ErrImageNotFound sentinel is returned
-// when containerd reports the ref absent so upper layers can map to a
-// clean error message; other errors are wrapped with ErrDeleteImage.
+// DeleteImage removes the named image ref from the specified containerd
+// namespace and triggers a synchronous content/snapshot GC sweep so layers
+// exclusive to the deleted image are reclaimed before the call returns
+// (#1037). Without the sweep, ImageService().Delete only unlinks the
+// metadata image bucket entry — exclusive layers stay pinned by GC
+// references the deleted image was their last root for, so the operator
+// sees no disk freed.
+//
+// images.SynchronousDelete() flips the image-service RPC's Sync flag,
+// which the containerd-side handler honors by calling ScheduleAndWait on
+// the GC scheduler after the metadata removal (containerd v2
+// plugins/services/images/local.go Delete). The sweep walks every GC root
+// (live images, leases, container snapshots) and reclaims content and
+// snapshots no surviving root references — so layers shared with another
+// tagged image or a running container survive on their own refcount,
+// satisfying the AC's "shared layers preserved" guarantee without any
+// per-layer accounting on our side.
+//
+// Mirrors the leases.SynchronousDelete pattern in drainLeases (see
+// CleanupNamespaceResources's GC-sweep rationale). The pull-time lease
+// pullImage creates is dropped by its own defer, so the regular pull
+// path leaves no orphaned lease for this sweep to step around;
+// kukebuild's build-time orphaned leases are tracked separately in
+// #1038 and would survive this sweep regardless.
+//
+// The kukeon ErrImageNotFound sentinel is returned when containerd
+// reports the ref absent so upper layers can map to a clean error
+// message; other errors are wrapped with ErrDeleteImage.
 func (c *client) DeleteImage(namespace, ref string) error {
 	nsCtx := c.namespaceCtx(namespace)
+	return c.deleteImage(nsCtx, namespace, ref, c.conn().ImageService())
+}
 
-	if err := c.conn().ImageService().Delete(nsCtx, ref); err != nil {
+// deleteImage is the body of DeleteImage split out so unit tests can drive
+// the image-delete path with a fake images.Store that captures the
+// DeleteOpt set — the SynchronousDelete opt is load-bearing for layer
+// reclaim and is therefore asserted in TestDeleteImagePassesSynchronousDelete.
+func (c *client) deleteImage(nsCtx context.Context, namespace, ref string, store images.Store) error {
+	if err := store.Delete(nsCtx, ref, images.SynchronousDelete()); err != nil {
 		if errdefs.IsNotFound(err) {
 			return fmt.Errorf("%w: %s", internalerrdefs.ErrImageNotFound, ref)
 		}
