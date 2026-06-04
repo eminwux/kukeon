@@ -196,89 +196,6 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_CREATE_CELL_PARAM_FILE = DefineKV("KUKE_CREATE_CELL_PARAM_FILE", "kuke/create/cell/param-file")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_NAME = DefineKV("KUKE_CREATE_CONTAINER_NAME", "kuke/create/container/name")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_REALM = DefineKV("KUKE_CREATE_CONTAINER_REALM", "kuke/create/container/realm", "default")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_SPACE = DefineKV("KUKE_CREATE_CONTAINER_SPACE", "kuke/create/container/space", "default")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_STACK = DefineKV("KUKE_CREATE_CONTAINER_STACK", "kuke/create/container/stack", "default")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_CELL = DefineKV("KUKE_CREATE_CONTAINER_CELL", "kuke/create/container/cell")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_IMAGE = DefineKV(
-		"KUKE_CREATE_CONTAINER_IMAGE",
-		"kuke/create/container/image",
-		"docker.io/library/debian:latest",
-	)
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_ENV = DefineKV("KUKE_CREATE_CONTAINER_ENV", "kuke/create/container/env")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_PORTS = DefineKV("KUKE_CREATE_CONTAINER_PORTS", "kuke/create/container/ports")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_VOLUMES = DefineKV("KUKE_CREATE_CONTAINER_VOLUMES", "kuke/create/container/volumes")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_NETWORKS = DefineKV("KUKE_CREATE_CONTAINER_NETWORKS", "kuke/create/container/networks")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_NETWORK_ALIASES = DefineKV(
-		"KUKE_CREATE_CONTAINER_NETWORK_ALIASES",
-		"kuke/create/container/networkAliases",
-	)
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_PRIVILEGED = DefineKV(
-		"KUKE_CREATE_CONTAINER_PRIVILEGED",
-		"kuke/create/container/privileged",
-		"false",
-	)
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_ROOT = DefineKV("KUKE_CREATE_CONTAINER_ROOT", "kuke/create/container/root", "false")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_CNI_CONFIG_PATH = DefineKV(
-		"KUKE_CREATE_CONTAINER_CNI_CONFIG_PATH",
-		"kuke/create/container/cniConfigPath",
-	)
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_RESTART_POLICY = DefineKV(
-		"KUKE_CREATE_CONTAINER_RESTART_POLICY",
-		"kuke/create/container/restartPolicy",
-	)
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_LABELS = DefineKV("KUKE_CREATE_CONTAINER_LABELS", "kuke/create/container/labels")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_USER = DefineKV("KUKE_CREATE_CONTAINER_USER", "kuke/create/container/user")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_READ_ONLY = DefineKV(
-		"KUKE_CREATE_CONTAINER_READ_ONLY",
-		"kuke/create/container/readOnlyRootFilesystem",
-		"false",
-	)
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_CAP_DROP = DefineKV("KUKE_CREATE_CONTAINER_CAP_DROP", "kuke/create/container/capabilities/drop")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_CAP_ADD = DefineKV("KUKE_CREATE_CONTAINER_CAP_ADD", "kuke/create/container/capabilities/add")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_SECURITY_OPTS = DefineKV(
-		"KUKE_CREATE_CONTAINER_SECURITY_OPTS",
-		"kuke/create/container/securityOpts",
-	)
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_TMPFS = DefineKV("KUKE_CREATE_CONTAINER_TMPFS", "kuke/create/container/tmpfs")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_MEMORY = DefineKV(
-		"KUKE_CREATE_CONTAINER_MEMORY",
-		"kuke/create/container/resources/memoryLimitBytes",
-	)
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_CPU_SHARES = DefineKV(
-		"KUKE_CREATE_CONTAINER_CPU_SHARES",
-		"kuke/create/container/resources/cpuShares",
-	)
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_CREATE_CONTAINER_PIDS_LIMIT = DefineKV(
-		"KUKE_CREATE_CONTAINER_PIDS_LIMIT",
-		"kuke/create/container/resources/pidsLimit",
-	)
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_CREATE_CONFIG_NAME = DefineKV("KUKE_CREATE_CONFIG_NAME", "kuke/create/config/name")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_CREATE_CONFIG_REALM = DefineKV("KUKE_CREATE_CONFIG_REALM", "kuke/create/config/realm", "default")
@@ -388,16 +305,6 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_DELETE_CELL_STACK = DefineKV("KUKE_DELETE_CELL_STACK", "kuke/delete/cell/stack", "default")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_DELETE_CONTAINER_NAME = DefineKV("KUKE_DELETE_CONTAINER_NAME", "kuke/delete/container/name")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_DELETE_CONTAINER_REALM = DefineKV("KUKE_DELETE_CONTAINER_REALM", "kuke/delete/container/realm", "default")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_DELETE_CONTAINER_SPACE = DefineKV("KUKE_DELETE_CONTAINER_SPACE", "kuke/delete/container/space", "default")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_DELETE_CONTAINER_STACK = DefineKV("KUKE_DELETE_CONTAINER_STACK", "kuke/delete/container/stack", "default")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_DELETE_CONTAINER_CELL = DefineKV("KUKE_DELETE_CONTAINER_CELL", "kuke/delete/container/cell")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_DELETE_SECRET_NAME = DefineKV("KUKE_DELETE_SECRET_NAME", "kuke/delete/secret/name")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_DELETE_SECRET_REALM = DefineKV("KUKE_DELETE_SECRET_REALM", "kuke/delete/secret/realm", "default")
@@ -441,14 +348,6 @@ var (
 	KUKE_PURGE_CELL_SPACE = DefineKV("KUKE_PURGE_CELL_SPACE", "kuke/purge/cell/space", "default")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_PURGE_CELL_STACK = DefineKV("KUKE_PURGE_CELL_STACK", "kuke/purge/cell/stack", "default")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_PURGE_CONTAINER_REALM = DefineKV("KUKE_PURGE_CONTAINER_REALM", "kuke/purge/container/realm", "default")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_PURGE_CONTAINER_SPACE = DefineKV("KUKE_PURGE_CONTAINER_SPACE", "kuke/purge/container/space", "default")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_PURGE_CONTAINER_STACK = DefineKV("KUKE_PURGE_CONTAINER_STACK", "kuke/purge/container/stack", "default")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_PURGE_CONTAINER_CELL = DefineKV("KUKE_PURGE_CONTAINER_CELL", "kuke/purge/container/cell")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_PURGE_FORCE = DefineKV("KUKE_PURGE_FORCE", "kuke/purge/force")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
