@@ -128,6 +128,12 @@ type fakeServices struct {
 	imageList []images.Image
 	blobs     map[string]bool
 	callLog   []string
+
+	// imageDeleteSync records the DeleteOptions.Synchronous flag observed
+	// on each images.Store Delete call (one entry per call, in order).
+	// Load-bearing for TestDeleteImagePassesSynchronousDelete (#1037), which
+	// asserts the single-image delete path triggers a synchronous GC sweep.
+	imageDeleteSync []bool
 }
 
 type fakeSnapshot struct {
@@ -230,8 +236,15 @@ func (s *fakeImageStore) List(_ context.Context, _ ...string) ([]images.Image, e
 	return append([]images.Image(nil), s.f.imageList...), nil
 }
 
-func (s *fakeImageStore) Delete(_ context.Context, name string, _ ...images.DeleteOpt) error {
+func (s *fakeImageStore) Delete(ctx context.Context, name string, opts ...images.DeleteOpt) error {
 	s.f.callLog = append(s.f.callLog, "images.Delete("+name+")")
+	var do images.DeleteOptions
+	for _, opt := range opts {
+		if err := opt(ctx, &do); err != nil {
+			return err
+		}
+	}
+	s.f.imageDeleteSync = append(s.f.imageDeleteSync, do.Synchronous)
 	for i, img := range s.f.imageList {
 		if img.Name == name {
 			s.f.imageList = append(s.f.imageList[:i], s.f.imageList[i+1:]...)
