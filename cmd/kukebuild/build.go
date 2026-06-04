@@ -27,6 +27,7 @@ import (
 	"time"
 
 	ctd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/core/leases"
 	ctddefaults "github.com/containerd/containerd/v2/defaults"
 	"github.com/distribution/reference"
 	"github.com/moby/buildkit/cache/remotecache"
@@ -399,10 +400,35 @@ func newController(ctx context.Context, cfg *buildConfig, namespace string) (*co
 	}
 
 	cleanup := func() {
+		drainBuildkitTemporaryLeases(ctx, w.LeaseManager())
 		_ = historyDB.Close()
 		_ = wc.Close()
 	}
 	return ctrl, cleanup, nil
+}
+
+// drainBuildkitTemporaryLeases drops every `buildkit/lease.temporary` lease
+// from the worker's namespace. BuildKit's solver tags transient solve-time
+// leases with this label and relies on the next worker startup to sweep them
+// — `base.NewWorker` runs the exact List+Delete pass on every boot. Kukebuild
+// embeds BuildKit in a one-build-per-process model (#522), so the worker dies
+// after Solve returns and the next-startup sweep never runs, leaving the
+// temporary leases as GC roots that pin dangling content + snapshots against
+// containerd GC indefinitely (#1038). Mirrors the startup sweep at shutdown
+// so each kukebuild invocation cleans up after itself, on both success and
+// failure paths via the newController cleanup defer. ctx may already be
+// cancelled (SIGINT/SIGTERM through runBuild's signal handler) when cleanup
+// runs, so the drain uses a non-cancelable context to ensure the deletes
+// reach containerd.
+func drainBuildkitTemporaryLeases(ctx context.Context, lm leases.Manager) {
+	ctx = context.WithoutCancel(ctx)
+	existing, err := lm.List(ctx, `labels."buildkit/lease.temporary"`)
+	if err != nil {
+		return
+	}
+	for _, l := range existing {
+		_ = lm.Delete(ctx, l, leases.SynchronousDelete)
+	}
 }
 
 // newWorkerController builds a single-worker controller using BuildKit's

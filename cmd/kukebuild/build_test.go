@@ -17,9 +17,13 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/containerd/containerd/v2/core/leases"
 )
 
 // newSolveOptFixture writes a minimal build context (an empty Dockerfile) into
@@ -233,5 +237,154 @@ func TestResolveBuildRootIsolatesNamespaces(t *testing.T) {
 	second := resolveBuildRoot(defaultBuildRoot, false, "kuke-system.kukeon.io")
 	if first == second {
 		t.Errorf("default roots for distinct namespaces collide: %q == %q", first, second)
+	}
+}
+
+// fakeLeaseManager satisfies leases.Manager with an in-memory store, capturing
+// the filter strings List was called with and the lease IDs Delete touched —
+// enough to drive drainBuildkitTemporaryLeases and assert it issued the same
+// filter base.NewWorker does at startup (worker/base/worker.go:214) and
+// synchronously deleted only the matching leases.
+type fakeLeaseManager struct {
+	leases       []leases.Lease
+	listFilters  []string
+	deletedIDs   []string
+	deleteSynced []bool
+	listErr      error
+}
+
+func (f *fakeLeaseManager) Create(_ context.Context, _ ...leases.Opt) (leases.Lease, error) {
+	return leases.Lease{}, errors.New("not implemented")
+}
+
+func (f *fakeLeaseManager) Delete(_ context.Context, l leases.Lease, opts ...leases.DeleteOpt) error {
+	do := &leases.DeleteOptions{}
+	for _, o := range opts {
+		_ = o(context.Background(), do)
+	}
+	f.deletedIDs = append(f.deletedIDs, l.ID)
+	f.deleteSynced = append(f.deleteSynced, do.Synchronous)
+	remaining := f.leases[:0]
+	for _, kept := range f.leases {
+		if kept.ID != l.ID {
+			remaining = append(remaining, kept)
+		}
+	}
+	f.leases = remaining
+	return nil
+}
+
+func (f *fakeLeaseManager) List(_ context.Context, filters ...string) ([]leases.Lease, error) {
+	f.listFilters = append(f.listFilters, filters...)
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	if len(filters) == 0 {
+		out := append([]leases.Lease(nil), f.leases...)
+		return out, nil
+	}
+	// The drain only ever passes the single buildkit/lease.temporary label
+	// filter; the fake mirrors a `labels."X"` predicate so a wrong filter
+	// string yields zero results and fails the assertion below.
+	const want = `labels."buildkit/lease.temporary"`
+	var out []leases.Lease
+	for _, l := range f.leases {
+		match := false
+		for _, fl := range filters {
+			if fl != want {
+				continue
+			}
+			if _, ok := l.Labels["buildkit/lease.temporary"]; ok {
+				match = true
+				break
+			}
+		}
+		if match {
+			out = append(out, l)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeLeaseManager) AddResource(_ context.Context, _ leases.Lease, _ leases.Resource) error {
+	return nil
+}
+
+func (f *fakeLeaseManager) DeleteResource(_ context.Context, _ leases.Lease, _ leases.Resource) error {
+	return nil
+}
+
+func (f *fakeLeaseManager) ListResources(_ context.Context, _ leases.Lease) ([]leases.Resource, error) {
+	return nil, nil
+}
+
+// drainBuildkitTemporaryLeases mirrors base.NewWorker's startup sweep
+// (worker/base/worker.go:214-220) at shutdown so kukebuild's one-build-per-
+// process model (#522) doesn't leak temp leases across builds (#1038). The
+// fake covers four invariants: the exact label filter is used, only matching
+// leases are deleted, gc.flat (a legit BuildKit cache pin) is preserved, and
+// SynchronousDelete is passed so containerd's GC scheduler runs the sweep
+// before Delete returns — matching internal/ctr/namespaces.go drainLeases.
+func TestDrainBuildkitTemporaryLeasesScopesToLabelAndSynchronous(t *testing.T) {
+	fake := &fakeLeaseManager{
+		leases: []leases.Lease{
+			{ID: "tmp-1", Labels: map[string]string{"buildkit/lease.temporary": "2026-06-04"}},
+			{ID: "tmp-2", Labels: map[string]string{"buildkit/lease.temporary": "2026-06-04"}},
+			{ID: "cache-1", Labels: map[string]string{"containerd.io/gc.flat": "2026-06-04"}},
+			{ID: "unrelated", Labels: nil},
+		},
+	}
+
+	drainBuildkitTemporaryLeases(context.Background(), fake)
+
+	if len(fake.listFilters) != 1 || fake.listFilters[0] != `labels."buildkit/lease.temporary"` {
+		t.Fatalf("listFilters = %q, want a single `labels.\"buildkit/lease.temporary\"`", fake.listFilters)
+	}
+	wantDeleted := map[string]bool{"tmp-1": true, "tmp-2": true}
+	if len(fake.deletedIDs) != len(wantDeleted) {
+		t.Fatalf("deletedIDs = %v, want exactly %v", fake.deletedIDs, wantDeleted)
+	}
+	for i, id := range fake.deletedIDs {
+		if !wantDeleted[id] {
+			t.Errorf("deleted unexpected lease %q", id)
+		}
+		if !fake.deleteSynced[i] {
+			t.Errorf("delete %q was async, want SynchronousDelete so containerd's GC sweep runs before return", id)
+		}
+	}
+	for _, l := range fake.leases {
+		if l.ID == "cache-1" || l.ID == "unrelated" {
+			continue
+		}
+		t.Errorf("leftover lease %q after drain", l.ID)
+	}
+}
+
+// A failed List must not panic and must not delete anything — the cleanup runs
+// best-effort. The session-survival rationale is the same as
+// internal/ctr/namespaces.go drainLeases's warn-and-return path.
+func TestDrainBuildkitTemporaryLeasesIgnoresListError(t *testing.T) {
+	fake := &fakeLeaseManager{listErr: errors.New("transient")}
+	drainBuildkitTemporaryLeases(context.Background(), fake)
+	if len(fake.deletedIDs) != 0 {
+		t.Errorf("deletedIDs = %v on list failure, want none", fake.deletedIDs)
+	}
+}
+
+// The cleanup defer in newController may fire with a cancelled ctx (SIGINT /
+// SIGTERM through runBuild's signal handler) — the drain must still reach
+// containerd. context.WithoutCancel decouples the request from the parent
+// cancellation chain.
+func TestDrainBuildkitTemporaryLeasesSurvivesCancelledCtx(t *testing.T) {
+	fake := &fakeLeaseManager{
+		leases: []leases.Lease{
+			{ID: "tmp-1", Labels: map[string]string{"buildkit/lease.temporary": "2026-06-04"}},
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	drainBuildkitTemporaryLeases(ctx, fake)
+	if len(fake.deletedIDs) != 1 || fake.deletedIDs[0] != "tmp-1" {
+		t.Errorf("deletedIDs = %v, want [tmp-1] (drain must survive cancellation)", fake.deletedIDs)
 	}
 }
