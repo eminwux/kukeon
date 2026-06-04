@@ -30,6 +30,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -323,12 +324,41 @@ func runGit(ctx context.Context, dir string, args ...string) error {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		trimmed := strings.TrimSpace(string(out))
+		// Scrub URL userinfo from args before joining into the wrapper — an
+		// operator may embed basic-auth credentials in a TeamsConfig source URL
+		// (e.g. https://x-token:ghp_xxx@host/repo.git) and a raw join would
+		// leak the token through any surface that prints this error.
+		scrubbed := strings.Join(scrubArgs(args), " ")
 		if trimmed != "" {
-			return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, trimmed)
+			return fmt.Errorf("git %s: %w: %s", scrubbed, err, trimmed)
 		}
-		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		return fmt.Errorf("git %s: %w", scrubbed, err)
 	}
 	return nil
+}
+
+// scrubArgs returns a copy of args with URL userinfo (basic-auth user:password
+// and bare tokens) redacted from any arg that parses as an absolute URL.
+// Non-URL args (flags, version refs, paths) pass through unchanged.
+func scrubArgs(args []string) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		out[i] = scrubURLCredentials(a)
+	}
+	return out
+}
+
+// scrubURLCredentials strips the userinfo component from arg when it parses as
+// an absolute URL carrying one. Args that aren't URL-shaped (no scheme) or
+// carry no userinfo are returned verbatim — the goal is targeted redaction of
+// the http(s)/ssh credential-bearing surface, not aggressive rewriting.
+func scrubURLCredentials(arg string) string {
+	u, err := url.Parse(arg)
+	if err != nil || u.Scheme == "" || u.User == nil {
+		return arg
+	}
+	u.User = nil
+	return u.String()
 }
 
 // gitEnv returns the operator's environment augmented with non-interactive
