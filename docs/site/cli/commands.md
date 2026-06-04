@@ -21,7 +21,7 @@ Both are hard-linked to the same binary on install. Running `kuke` enters the cl
 | `kuke get`                     | List or describe resources (realm, space, stack, cell, container)     |
 | `kuke create`                  | Create a single resource imperatively                                 |
 | `kuke delete`                  | Delete a resource                                                     |
-| `kuke start` / `stop` / `kill` | Lifecycle operations on cells and containers                          |
+| `kuke start` / `stop` / `kill` | Lifecycle operations on cells                                         |
 | `kuke purge`                   | Delete with aggressive cleanup of residual state                      |
 | `kuke refresh`                 | Reconcile `.status` from live state without touching `.spec`          |
 | `kuke restart`                 | Restart a cell (bounces the process; on OutOfSync also reconciles)    |
