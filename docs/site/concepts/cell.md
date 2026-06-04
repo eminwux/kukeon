@@ -78,8 +78,8 @@ sudo kuke start mycell --realm main --space default --stack default
 sudo kuke stop  mycell --realm main --space default --stack default
 sudo kuke kill  mycell --realm main --space default --stack default
 
-# Delete (with cascade to remove child containers)
-sudo kuke delete cell mycell --realm main --space default --stack default --cascade
+# Delete (removes the cell and its materialised containers as a single unit)
+sudo kuke delete cell mycell --realm main --space default --stack default
 ```
 
 ## Related concepts
