@@ -1124,7 +1124,7 @@ func TestRun_ExistingCell_DivergingContainerSecrets_RequireSynced_RefusesAndPoin
 // on each conversion, so the YAML-decoded side and the daemon-persisted
 // side are always address-distinct even when value-equal — every
 // re-`kuke run` of a secretRef:-using cell tripped the divergence guard
-// and printed the `kuke restart cell ...` pointer.
+// and printed the `kuke restart ...` pointer.
 //
 // The sibling Diverging... test above only exercises FromFile (pointer-free
 // fields), so the pointer-identity bug escaped review. This test puts a
@@ -2768,7 +2768,7 @@ func TestRun_FromConfig_DivergentSpec_RequireSynced_RefusesAndPointsToApply(t *t
 	// Simulate divergence by returning a Ready cell whose container image
 	// disagrees with what Materialize(cfg, bp) would build. With
 	// --require-synced (#986) the -c contract reverts to the pre-#986
-	// default: refuse with a `kuke restart cell <name>` pointer (#844
+	// default: refuse with a `kuke restart <name>` pointer (#844
 	// retargeted the pointer onto the post-#823 surface), not warn-and-attach
 	// — CreateCell/StartCell must not fire. The default warn-and-attach
 	// behaviour is covered by TestRun_FromConfig_DivergentSpec_Default_WarnsAndAttaches.
@@ -2817,7 +2817,7 @@ func TestRun_FromConfig_DivergentSpec_RequireSynced_RefusesAndPointsToApply(t *t
 		`live cell "prod" spec differs from CellConfig "prod"`,
 		`spec.containers["main"].image`,
 		"refusing to attach (--require-synced)",
-		"kuke restart cell prod",
+		"kuke restart prod",
 		"reconcile",
 	} {
 		if !strings.Contains(err.Error(), want) {
@@ -2939,7 +2939,7 @@ func TestRun_FromConfig_DivergentSpec_Default_WarnsAndAttaches(t *testing.T) {
 		`notice: cell "prod" is OutOfSync with CellConfig "prod"`,
 		`spec.containers["main"].image`,
 		"attaching to current live state",
-		"kuke restart cell prod",
+		"kuke restart prod",
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("output missing substring %q:\n%s", want, output)
@@ -2954,8 +2954,8 @@ func TestRun_FromConfig_DivergentSpec_Default_WarnsAndAttaches(t *testing.T) {
 // TestRun_FromBlueprint_NamedDivergent_Default_WarnsAndAttaches is the
 // `-b --name` half of the #986 warn-and-attach default. The notice cites
 // the CellBlueprint source and the delete-then-rerun pointer (Blueprint-
-// lineage cells have no in-place reconcile) instead of the `kuke restart
-// cell` pointer the `<config>` branch uses, but the fall-through behaviour
+// lineage cells have no in-place reconcile) instead of the `kuke restart`
+// pointer the `<config>` branch uses, but the fall-through behaviour
 // is identical: CreateCell/StartCell stay at 0 and the operator lands in
 // the live cell.
 func TestRun_FromBlueprint_NamedDivergent_Default_WarnsAndAttaches(t *testing.T) {

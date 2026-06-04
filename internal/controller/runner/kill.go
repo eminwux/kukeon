@@ -345,7 +345,7 @@ func (r *Exec) KillContainer(cell intmodel.Cell, containerID string) error {
 	// Root container cannot be killed directly - it must be killed by killing the cell
 	if foundContainerSpec.Root {
 		return fmt.Errorf(
-			"root container cannot be killed directly, kill the cell instead using 'kuke kill cell %s'",
+			"root container cannot be killed directly, kill the cell instead using 'kuke kill %s'",
 			cellName,
 		)
 	}

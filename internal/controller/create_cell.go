@@ -67,7 +67,7 @@ func (b *Exec) CreateCell(cell intmodel.Cell) (CreateCellResult, error) {
 // to start it. Used by the CLI's `kuke create cell --from-blueprint` and
 // `--from-config` scaffolding modes (#818) — distinct from `kuke run -b` /
 // `kuke run <cfg>` (materialise + start + attach) and (for Config-lineage
-// cells) `kuke restart cell <name>` (reconcile + start on OutOfSync).
+// cells) `kuke restart <name>` (reconcile + start on OutOfSync).
 func (b *Exec) MaterializeCell(cell intmodel.Cell) (CreateCellResult, error) {
 	return b.createCellInternal(cell, false)
 }

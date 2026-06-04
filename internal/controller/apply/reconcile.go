@@ -349,7 +349,7 @@ func ReconcileCell(r runner.Runner, desired intmodel.Cell) (ReconcileResult, err
 	diff := DiffCell(desired, actual)
 	if !diff.HasChanges {
 		// Spec is in sync, but the cell's runtime may have been torn down
-		// out of band — typically by `kuke kill cell`, which leaves the
+		// out of band — typically by `kuke kill`, which leaves the
 		// cell document intact and flips Status.State to Stopped. Without
 		// this branch, apply walks away reporting "unchanged" and the cell
 		// stays Stopped forever (issue #486 — docs/cli-use-cases.md's
@@ -892,7 +892,7 @@ type ReconcileResult struct {
 // cellNeedsRematerialize reports whether a spec-equal cell still needs
 // runtime work because its containers were torn down out of band. Today
 // this fires for CellStateStopped — the state runner.KillCell persists
-// after `kuke kill cell` removes the cell's containers. Failed, Pending,
+// after `kuke kill` removes the cell's containers. Failed, Pending,
 // and Unknown intentionally do not trigger re-materialize: Failed is
 // sticky and signals a startup problem the user should investigate;
 // Pending and Unknown are mid-lifecycle states the daemon reconciler

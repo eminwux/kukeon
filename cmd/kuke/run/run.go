@@ -85,12 +85,12 @@ func NewRunCmd() *cobra.Command {
 			"subsequent runs (idempotent). When the live cell's spec differs from the " +
 			"materialisation of the current Config + Blueprint, the positional config " +
 			"path refuses to attach and points the operator at " +
-			"`kuke restart cell <cell>` to reconcile (the daemon's OutOfSync detector " +
+			"`kuke restart <cell>` to reconcile (the daemon's OutOfSync detector " +
 			"picks up the Config divergence and the restart reconciles implicitly: " +
 			"stops, updates, starts). -b with --name applies the same divergence " +
 			"discipline against the pinned cell name, but -b-lineage cells have no " +
 			"implicit reconcile — the pointer is `kuke delete cell <cell>` + re-run " +
-			"(or promote to a CellConfig for `kuke restart cell` reconcile workflows). " +
+			"(or promote to a CellConfig for `kuke restart` reconcile workflows). " +
 			"--new on the " +
 			"positional config path materializes a fresh `<config-name>-<6hex>` cell on " +
 			"every invocation instead — opt-in fire-and-forget sandboxes from a " +
@@ -699,7 +699,7 @@ func runAfterReuseClaim(
 // --require-synced; the function then returns the pre-#986 refusal error
 // shape (same per-source pointer the notice cites).
 //
-// The pointer per source: `<config>` → `kuke restart cell <name>` (#821's
+// The pointer per source: `<config>` → `kuke restart <name>` (#821's
 // restart picks up the daemon-side OutOfSync detection #820 wires and
 // reconciles implicitly; the cell name is the Config's StableName), `-b --name
 // <cell>` → `kuke delete cell <cell>` + re-run (Blueprint-lineage cells have
@@ -735,13 +735,13 @@ func divergentSourcePointer(cellDoc v1beta1.CellDoc, flags runFlags) (source, po
 	switch {
 	case flags.configName != "" && !flags.newCell:
 		return fmt.Sprintf("CellConfig %q", flags.configName),
-			fmt.Sprintf("run `kuke restart cell %s` to reconcile (stops, updates, starts)",
+			fmt.Sprintf("run `kuke restart %s` to reconcile (stops, updates, starts)",
 				cellDoc.Metadata.Name)
 	case flags.blueprintName != "" && flags.nameOverride != "":
 		return fmt.Sprintf("CellBlueprint %q", flags.blueprintName),
 			fmt.Sprintf("-b cells have no in-place reconcile; delete it with "+
 				"`kuke delete cell %s` and re-run (or promote to a CellConfig for "+
-				"`kuke restart cell` reconcile workflows)", cellDoc.Metadata.Name)
+				"`kuke restart` reconcile workflows)", cellDoc.Metadata.Name)
 	default:
 		return "on-disk spec",
 			"use `kuke apply -f` to update"
@@ -1289,7 +1289,7 @@ func pickLocation(fromDoc string, kv *config.Var) string {
 // Each entry is shaped `<path> (actual=<v>, desired=<v>)` so the reject error
 // surfaces both sides verbatim — without this, an operator hitting a false
 // positive (e.g. issue #984 — `kuke run <config>` rejecting immediately after
-// a successful `kuke restart cell` per the OutOfSync reconcile path) has no
+// a successful `kuke restart` per the OutOfSync reconcile path) has no
 // way to tell which side of the comparison normalised differently from the
 // other. Test assertions on the field path itself (e.g.
 // `spec.containers["main"].image`) still match because the path prefix is

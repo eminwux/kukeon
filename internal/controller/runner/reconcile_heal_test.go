@@ -41,9 +41,9 @@ import (
 // guard: a cell whose cgroup the host reboot wiped — metadata survives, the
 // ReadyObserved latch is still true — must have its cgroup re-created and
 // its subtree controllers re-asserted by the reconcile loop within one
-// tick, without an operator running `kuke start cell <name>` per cell.
-// Pre-fix the loop's ExistsCgroup result was discarded; only `kuke start
-// cell` could heal the missing cgroup.
+// tick, without an operator running `kuke start <name>` per cell.
+// Pre-fix the loop's ExistsCgroup result was discarded; only `kuke start`
+// could heal the missing cgroup.
 func TestReconcileCell_HealsWipedCgroupWhenReadyObserved(t *testing.T) {
 	realm, space, stack, cellName := "default", "kukeon", "kukeon", "web"
 	rootID := "root"

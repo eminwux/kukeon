@@ -60,7 +60,7 @@ func NewCellCmd() *cobra.Command {
 			"`kuke start <name>` to start it. Differs from `kuke run <cfg>` " +
 			"(materialise + start + attach) by leaving the cell stopped; later " +
 			"reconcile against the lineage Config flows through " +
-			"`kuke restart cell <name>` (OutOfSync-driven, #821) once the cell is " +
+			"`kuke restart <name>` (OutOfSync-driven, #821) once the cell is " +
 			"started.\n\n" +
 			"--from-blueprint and --from-config are mutually exclusive. --param " +
 			"and --param-file are valid with --from-blueprint (mirroring " +
@@ -333,7 +333,7 @@ func materialiseAndPersist(cmd *cobra.Command, client kukeonv1.Client, cellDoc v
 		return fmt.Errorf(
 			"cell %q already exists in realm=%q space=%q stack=%q; "+
 				"delete it with `kuke delete cell %s` (or, for Config-lineage cells, "+
-				"reconcile via `kuke start cell %s` + `kuke restart cell %s`) before re-materialising",
+				"reconcile via `kuke start %s` + `kuke restart %s`) before re-materialising",
 			cellDoc.Metadata.Name,
 			cellDoc.Spec.RealmID, cellDoc.Spec.SpaceID, cellDoc.Spec.StackID,
 			cellDoc.Metadata.Name, cellDoc.Metadata.Name, cellDoc.Metadata.Name,

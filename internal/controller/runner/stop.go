@@ -374,7 +374,7 @@ func (r *Exec) StopContainer(cell intmodel.Cell, containerID string) error {
 	// Root container cannot be stopped directly - it must be stopped by stopping the cell
 	if foundContainerSpec.Root {
 		return fmt.Errorf(
-			"root container cannot be stopped directly, stop the cell instead using 'kuke stop cell %s'",
+			"root container cannot be stopped directly, stop the cell instead using 'kuke stop %s'",
 			cellName,
 		)
 	}

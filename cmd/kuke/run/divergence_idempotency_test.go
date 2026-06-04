@@ -28,7 +28,7 @@ import (
 )
 
 // TestDivergedFields_MaterializePersistMaterializeIsIdempotent guards the
-// invariant that `kuke restart cell` writes a spec to disk that — when
+// invariant that `kuke restart` writes a spec to disk that — when
 // re-materialised by the next `kuke run <config>` — compares clean against
 // the persisted version (issue #984). The flow being asserted:
 //
@@ -68,7 +68,7 @@ func TestDivergedFields_MaterializePersistMaterializeIsIdempotent(t *testing.T) 
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Step 1: Materialize what `kuke restart cell` would push through
+			// Step 1: Materialize what `kuke restart` would push through
 			// ApplyDocuments.
 			cell1, err := cellconfig.Materialize(tc.cfg, tc.bp)
 			if err != nil {

@@ -33,8 +33,8 @@ type StartCellResult struct {
 //
 // For a Config-lineage cell whose persisted Status.OutOfSync is true, StartCell
 // first re-materialises the cell's spec from its lineage Config + Blueprint and
-// rebuilds the containerd records, so `kuke stop cell` followed by `kuke start
-// cell` produces the same end state as `kuke restart cell` on an OutOfSync
+// rebuilds the containerd records, so `kuke stop` followed by `kuke start`
+// produces the same end state as `kuke restart` on an OutOfSync
 // cell — issue #983. The reapply is daemon-side so every client that issues
 // StartCell (CLI, future API consumers) gets the reconcile-on-start behaviour.
 func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {

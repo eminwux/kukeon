@@ -38,7 +38,7 @@ const (
 // NewApplyCmd builds the `kuke apply` cobra command. `-f` reads a multi-document
 // YAML stream from disk or stdin — the sole shape `apply` supports. The
 // daemon-side reconcile-by-ref forms (`-b`/`-c`) were retired under #819; the
-// equivalent operator workflow is `kuke restart cell <name>` (which sees
+// equivalent operator workflow is `kuke restart <name>` (which sees
 // OutOfSync on Config-lineage cells and reconciles implicitly).
 func NewApplyCmd() *cobra.Command {
 	cmd := &cobra.Command{

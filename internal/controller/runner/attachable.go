@@ -734,7 +734,7 @@ func removeAttachableSocketSymlink(runPath string, spec intmodel.ContainerSpec) 
 // symlink (under <RunPath>/s/) and the host-side socket inode (the deep
 // bind-mount source path kuketty binds inside the container) for an
 // Attachable container. Called on every clean teardown of a cell —
-// `kuke stop cell`, `kuke kill cell`, and the reconciler's wind-down
+// `kuke stop`, `kuke kill`, and the reconciler's wind-down
 // (#852). Defense-in-depth complement to the client- and server-side
 // task-liveness guards: when a kuketty exits and never restarts (cell
 // wound down, daemon restart, host reboot), the inode it bound persists
