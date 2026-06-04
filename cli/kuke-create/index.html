@@ -1917,17 +1917,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#kuke-create-container" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke create container
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#kuke-create-blueprint" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3310,17 +3299,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#kuke-create-container" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke create container
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#kuke-create-blueprint" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3400,7 +3378,7 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke create &lt;resource&gt; [NAME] [flags]
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>kuke c      &lt;resource&gt; [NAME] [flags]      # alias
 </code></pre></div>
-<p>Resources: <code>realm</code>, <code>space</code>, <code>stack</code>, <code>cell</code>, <code>container</code>, <code>blueprint</code>, <code>config</code>, <code>secret</code>. Each subcommand also has a short alias (<code>r</code>, <code>sp</code>, <code>st</code>, <code>ce</code>, <code>co</code>, <code>bp</code>, <code>cfg</code>, and <code>secret</code> has none).</p>
+<p>Resources: <code>realm</code>, <code>space</code>, <code>stack</code>, <code>cell</code>, <code>blueprint</code>, <code>config</code>, <code>secret</code>. Each subcommand also has a short alias (<code>r</code>, <code>sp</code>, <code>st</code>, <code>ce</code>, <code>bp</code>, <code>cfg</code>, and <code>secret</code> has none).</p>
 <h2 id="kuke-create-realm">kuke create realm<a class="headerlink" href="#kuke-create-realm" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke create realm [NAME] [--namespace &lt;ns&gt;]
 </code></pre></div>
@@ -3472,14 +3450,13 @@
 </code></pre></div>
 <h2 id="kuke-create-cell">kuke create cell<a class="headerlink" href="#kuke-create-cell" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>kuke create cell [NAME] --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt;
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>                       [--from-blueprint &lt;bp&gt; [--param K=V]... [--param-file &lt;path&gt;]]
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>                       [--from-config &lt;cfg&gt;]
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>                       ( --from-blueprint &lt;bp&gt; [--param K=V]... [--param-file &lt;path&gt;]
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>                       | --from-config &lt;cfg&gt; )
 </code></pre></div>
-<p>Three modes:</p>
+<p>Two modes (exactly one of <code>--from-blueprint</code> or <code>--from-config</code> is required):</p>
 <ul>
-<li><code>kuke create cell &lt;name&gt;</code> (no source flag) — creates an empty Cell shell (name + scope only, no containers). Workflow C: follow with <code>kuke create container -c &lt;name&gt; --image ...</code> then <code>kuke start cell &lt;name&gt;</code>.</li>
-<li><code>kuke create cell &lt;name&gt; --from-blueprint &lt;bp&gt; [--param K=V]... [--param-file &lt;path&gt;]</code> — resolves the daemon-stored CellBlueprint, applies scalar params, materialises the full Cell record (containers and all), and persists it in a <strong>stopped</strong> state. Pair with <code>kuke start cell &lt;name&gt;</code>. Differs from <a href="../kuke-run/"><code>kuke run -b</code></a> (materialise + start + attach) by leaving the cell stopped for inspection or hand-off; <code>-b</code>-lineage cells have no in-place reconcile, so updates flow through delete-and-re-run (or promotion to a CellConfig).</li>
-<li><code>kuke create cell &lt;name&gt; --from-config &lt;cfg&gt;</code> — resolves the daemon-stored CellConfig and its referenced Blueprint, applies the Config's <code>spec.values</code> + repo/secret slot fills, materialises the Cell record, persists in <strong>stopped</strong> state. Pair with <code>kuke start cell &lt;name&gt;</code>. Differs from <a href="../kuke-run/"><code>kuke run &lt;config&gt;</code></a> (materialise + start + attach) by leaving the cell stopped; later reconcile against the lineage Config flows through <a href="../kuke-restart/"><code>kuke restart cell &lt;name&gt;</code></a> (OutOfSync-driven, #821) once the cell is started.</li>
+<li><code>kuke create cell &lt;name&gt; --from-blueprint &lt;bp&gt; [--param K=V]... [--param-file &lt;path&gt;]</code> — resolves the daemon-stored CellBlueprint, applies scalar params, materialises the full Cell record (containers and all), and persists it in a <strong>stopped</strong> state. Pair with <code>kuke start &lt;name&gt;</code>. Differs from <a href="../kuke-run/"><code>kuke run -b</code></a> (materialise + start + attach) by leaving the cell stopped for inspection or hand-off; <code>-b</code>-lineage cells have no in-place reconcile, so updates flow through delete-and-re-run (or promotion to a CellConfig).</li>
+<li><code>kuke create cell &lt;name&gt; --from-config &lt;cfg&gt;</code> — resolves the daemon-stored CellConfig and its referenced Blueprint, applies the Config's <code>spec.values</code> + repo/secret slot fills, materialises the Cell record, persists in <strong>stopped</strong> state. Pair with <code>kuke start &lt;name&gt;</code>. Differs from <a href="../kuke-run/"><code>kuke run &lt;config&gt;</code></a> (materialise + start + attach) by leaving the cell stopped; later reconcile against the lineage Config flows through <a href="../kuke-restart/"><code>kuke restart &lt;name&gt;</code></a> (OutOfSync-driven, #821) once the cell is started.</li>
 </ul>
 <table>
 <thead>
@@ -3513,12 +3490,12 @@
 <tr>
 <td><code>--from-blueprint</code></td>
 <td><code>""</code></td>
-<td>Daemon-stored CellBlueprint name. Mutually exclusive with <code>--from-config</code></td>
+<td>Daemon-stored CellBlueprint name. Exactly one of <code>--from-blueprint</code> or <code>--from-config</code> is required; the two are mutually exclusive</td>
 </tr>
 <tr>
 <td><code>--from-config</code></td>
 <td><code>""</code></td>
-<td>Daemon-stored CellConfig name. Mutually exclusive with <code>--from-blueprint</code></td>
+<td>Daemon-stored CellConfig name. Exactly one of <code>--from-blueprint</code> or <code>--from-config</code> is required; the two are mutually exclusive</td>
 </tr>
 <tr>
 <td><code>--param</code></td>
@@ -3532,175 +3509,18 @@
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Empty shell</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># Materialise from Blueprint, stopped</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>web<span class="w"> </span>--from-blueprint<span class="w"> </span>web-template<span class="w"> </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>nginx:1.27<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">    </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>start<span class="w"> </span>cell<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="c1"># Materialise from Config, stopped</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>prod<span class="w"> </span>--from-config<span class="w"> </span>prod-config<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="w">    </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>start<span class="w"> </span>cell<span class="w"> </span>prod<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Materialise from Blueprint, stopped</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>web<span class="w"> </span>--from-blueprint<span class="w"> </span>web-template<span class="w"> </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>nginx:1.27<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>start<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="c1"># Materialise from Config, stopped</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>cell<span class="w"> </span>prod<span class="w"> </span>--from-config<span class="w"> </span>prod-config<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">    </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>start<span class="w"> </span>prod<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
 </code></pre></div>
-<h2 id="kuke-create-container">kuke create container<a class="headerlink" href="#kuke-create-container" title="Permanent link">&para;</a></h2>
-<p>Adds a container to an existing cell.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>kuke create container [NAME] --cell &lt;cell&gt; [--realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt;] [container flags]
-</code></pre></div>
-<table>
-<thead>
-<tr>
-<th>Flag</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>--realm</code></td>
-<td><code>default</code></td>
-<td>Realm of the parent cell</td>
-</tr>
-<tr>
-<td><code>--space</code></td>
-<td><code>default</code></td>
-<td>Space of the parent cell</td>
-</tr>
-<tr>
-<td><code>--stack</code></td>
-<td><code>default</code></td>
-<td>Stack of the parent cell</td>
-</tr>
-<tr>
-<td><code>--cell</code></td>
-<td><em>(required)</em></td>
-<td>Cell that owns the container</td>
-</tr>
-<tr>
-<td><code>--image</code></td>
-<td><code>docker.io/library/debian:latest</code></td>
-<td>Container image</td>
-</tr>
-<tr>
-<td><code>--command</code></td>
-<td>(empty)</td>
-<td>Command to run</td>
-</tr>
-<tr>
-<td><code>--args</code></td>
-<td>(empty, repeatable)</td>
-<td>Arguments</td>
-</tr>
-<tr>
-<td><code>--env</code></td>
-<td>(empty, repeatable)</td>
-<td><code>KEY=VALUE</code> env var</td>
-</tr>
-<tr>
-<td><code>--port</code></td>
-<td>(empty, repeatable)</td>
-<td>Port mapping</td>
-</tr>
-<tr>
-<td><code>--volume</code></td>
-<td>(empty, repeatable)</td>
-<td>Volume mount</td>
-</tr>
-<tr>
-<td><code>--tmpfs</code></td>
-<td>(empty, repeatable)</td>
-<td>Tmpfs mount, <code>path[:opts]</code> (e.g. <code>/tmp:size=64m</code>)</td>
-</tr>
-<tr>
-<td><code>--network</code></td>
-<td>(empty, repeatable)</td>
-<td>Network to join</td>
-</tr>
-<tr>
-<td><code>--network-alias</code></td>
-<td>(empty, repeatable)</td>
-<td>Network alias</td>
-</tr>
-<tr>
-<td><code>--user</code></td>
-<td>(empty)</td>
-<td>Run as <code>UID[:GID]</code> (e.g. <code>1000:1000</code>)</td>
-</tr>
-<tr>
-<td><code>--privileged</code></td>
-<td><code>false</code></td>
-<td>Run privileged</td>
-</tr>
-<tr>
-<td><code>--read-only</code></td>
-<td><code>false</code></td>
-<td>Mount the root filesystem read-only</td>
-</tr>
-<tr>
-<td><code>--root</code></td>
-<td><code>false</code></td>
-<td>Mark this container as the cell's root container</td>
-</tr>
-<tr>
-<td><code>--cap-add</code></td>
-<td>(empty, repeatable)</td>
-<td>Linux capability to add (e.g. <code>NET_ADMIN</code>)</td>
-</tr>
-<tr>
-<td><code>--cap-drop</code></td>
-<td>(empty, repeatable)</td>
-<td>Linux capability to drop (e.g. <code>ALL</code> or <code>NET_ADMIN</code>)</td>
-</tr>
-<tr>
-<td><code>--security-opt</code></td>
-<td>(empty, repeatable)</td>
-<td>Security option (e.g. <code>no-new-privileges</code>, <code>seccomp=unconfined</code>)</td>
-</tr>
-<tr>
-<td><code>--cpu-shares</code></td>
-<td><code>0</code></td>
-<td>Relative CPU weight (cgroup <code>cpu.shares</code>)</td>
-</tr>
-<tr>
-<td><code>--memory</code></td>
-<td>(empty)</td>
-<td>Hard memory limit (bytes, or with suffix <code>k</code>/<code>m</code>/<code>g</code>)</td>
-</tr>
-<tr>
-<td><code>--pids-limit</code></td>
-<td><code>0</code></td>
-<td>Maximum number of PIDs (0 leaves unset)</td>
-</tr>
-<tr>
-<td><code>--cni-config-path</code></td>
-<td>(empty)</td>
-<td>Override CNI config dir for this container</td>
-</tr>
-<tr>
-<td><code>--restart-policy</code></td>
-<td>(empty)</td>
-<td>Restart policy for the container</td>
-</tr>
-<tr>
-<td><code>--label</code></td>
-<td>(empty, repeatable)</td>
-<td><code>KEY=VALUE</code> label</td>
-</tr>
-</tbody>
-</table>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>container<span class="w"> </span>nginx<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">    </span>--cell<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span>--image<span class="w"> </span>docker.io/library/nginx:alpine<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span>--root
-</code></pre></div>
-<div class="admonition warning">
-<p class="admonition-title">The <code>--image</code> default</p>
-<p>If you don't pass <code>--image</code>, Kukeon uses <code>docker.io/library/debian:latest</code>. Always pass <code>--image</code> explicitly when you care what runs.</p>
-</div>
 <h2 id="kuke-create-blueprint">kuke create blueprint<a class="headerlink" href="#kuke-create-blueprint" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>kuke create blueprint [NAME] [--realm &lt;r&gt;] [--space &lt;s&gt;] [--stack &lt;t&gt;]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>kuke create blueprint [NAME] [--realm &lt;r&gt;] [--space &lt;s&gt;] [--stack &lt;t&gt;]
 </code></pre></div>
 <p>Scaffold a <code>kind: CellBlueprint</code> starter YAML to stdout. Emits a syntactically-valid Blueprint document with a single placeholder container, the operator's <code>--realm</code>/<code>--space</code>/<code>--stack</code> as scope, and inline <code># TODO</code> markers on the required <code>image:</code> field plus comment markers for optional sections (parameters, ports, volumes, repos, secrets) so operators know what they can add.</p>
 <p>No daemon call — pure stdout emission.</p>
@@ -3735,12 +3555,12 @@
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>kuke<span class="w"> </span>create<span class="w"> </span>blueprint<span class="w"> </span>web<span class="w"> </span>&gt;<span class="w"> </span>web.yaml
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="nv">$EDITOR</span><span class="w"> </span>web.yaml<span class="w">          </span><span class="c1"># fill image, add parameters/repos/secrets/...</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>web.yaml
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>kuke<span class="w"> </span>create<span class="w"> </span>blueprint<span class="w"> </span>web<span class="w"> </span>&gt;<span class="w"> </span>web.yaml
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nv">$EDITOR</span><span class="w"> </span>web.yaml<span class="w">          </span><span class="c1"># fill image, add parameters/repos/secrets/...</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>web.yaml
 </code></pre></div>
 <h2 id="kuke-create-config">kuke create config<a class="headerlink" href="#kuke-create-config" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>kuke create config [NAME] --from-blueprint &lt;bp&gt; [--realm &lt;r&gt;] [--space &lt;s&gt;] [--stack &lt;t&gt;]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>kuke create config [NAME] --from-blueprint &lt;bp&gt; [--realm &lt;r&gt;] [--space &lt;s&gt;] [--stack &lt;t&gt;]
 </code></pre></div>
 <p>Scaffold a <code>kind: CellConfig</code> YAML from a CellBlueprint. Reads the referenced Blueprint from the daemon, introspects its declared scalar parameters and structural repo/secret slots, and emits a starter Config YAML to stdout with defaults pre-filled and <code># TODO</code> markers where the operator must fill required-no-default parameters and slot sources. The output is not written to the daemon — pipe it to <code>kuke apply -f -</code> after editing.</p>
 <table>
@@ -3779,14 +3599,14 @@
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>kuke<span class="w"> </span>create<span class="w"> </span>config<span class="w"> </span>prod<span class="w"> </span>--from-blueprint<span class="w"> </span>web<span class="w"> </span>&gt;<span class="w"> </span>prod-config.yaml
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="nv">$EDITOR</span><span class="w"> </span>prod-config.yaml<span class="w">  </span><span class="c1"># fill required slot sources, override defaults</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>prod-config.yaml
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>prod<span class="w">        </span><span class="c1"># idempotent attach to the at-most-one cell prod owns</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>kuke<span class="w"> </span>create<span class="w"> </span>config<span class="w"> </span>prod<span class="w"> </span>--from-blueprint<span class="w"> </span>web<span class="w"> </span>&gt;<span class="w"> </span>prod-config.yaml
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="nv">$EDITOR</span><span class="w"> </span>prod-config.yaml<span class="w">  </span><span class="c1"># fill required slot sources, override defaults</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>prod-config.yaml
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>prod<span class="w">        </span><span class="c1"># idempotent attach to the at-most-one cell prod owns</span>
 </code></pre></div>
 <h2 id="kuke-create-secret">kuke create secret<a class="headerlink" href="#kuke-create-secret" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>kuke create secret [NAME] (--from-literal=KEY=VAL... | --from-file=&lt;path&gt;)
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>                          [--realm &lt;r&gt;] [--space &lt;s&gt;] [--stack &lt;t&gt;]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>kuke create secret [NAME] (--from-literal=KEY=VAL... | --from-file=&lt;path&gt;)
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>                          [--realm &lt;r&gt;] [--space &lt;s&gt;] [--stack &lt;t&gt;]
 </code></pre></div>
 <p>Create a <code>kind: Secret</code> within a scope. Two source modes:</p>
 <ul>
@@ -3835,11 +3655,11 @@
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Inline value</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>api-key<span class="w"> </span>--from-literal<span class="o">=</span><span class="nv">API_KEY</span><span class="o">=</span>sk-...<span class="w"> </span>--realm<span class="w"> </span>default
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="c1"># From file</span>
-<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>tls-cert<span class="w"> </span>--from-file<span class="o">=</span>./tls.crt<span class="w"> </span>--realm<span class="w"> </span>default
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Inline value</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>api-key<span class="w"> </span>--from-literal<span class="o">=</span><span class="nv">API_KEY</span><span class="o">=</span>sk-...<span class="w"> </span>--realm<span class="w"> </span>default
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="c1"># From file</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>tls-cert<span class="w"> </span>--from-file<span class="o">=</span>./tls.crt<span class="w"> </span>--realm<span class="w"> </span>default
 </code></pre></div>
 <h2 id="imperative-vs-declarative">Imperative vs. declarative<a class="headerlink" href="#imperative-vs-declarative" title="Permanent link">&para;</a></h2>
 <p><code>kuke create</code> is useful for quick experiments and one-off resources. For anything you want to commit, diff, or apply repeatedly, write a YAML manifest and use <a href="../kuke-apply/"><code>kuke apply</code></a>. Manifests are the unit of version control; imperative commands are not.</p>
@@ -3871,7 +3691,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 30, 2026 12:11:46 UTC">May 30, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 4, 2026 09:40:01 UTC">June 4, 2026</span>
   </span>
 
     

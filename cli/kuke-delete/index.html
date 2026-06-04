@@ -2024,17 +2024,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#kuke-delete-container" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke delete container
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#kuke-delete-blueprint" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3372,17 +3361,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#kuke-delete-container" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        kuke delete container
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#kuke-delete-blueprint" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3492,7 +3470,7 @@
 <tr>
 <td><code>--cascade</code></td>
 <td><code>false</code></td>
-<td>Recursively delete child resources (realm → spaces → stacks → cells; not containers)</td>
+<td>Recursively delete child resources (realm → spaces → stacks → cells)</td>
 </tr>
 <tr>
 <td><code>--force</code></td>
@@ -3525,16 +3503,12 @@
 <h3 id="kuke-delete-cell">kuke delete cell<a class="headerlink" href="#kuke-delete-cell" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>kuke delete cell &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt; [--cascade] [--force]
 </code></pre></div>
-<h3 id="kuke-delete-container">kuke delete container<a class="headerlink" href="#kuke-delete-container" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>kuke delete container &lt;name&gt; --realm &lt;r&gt; --space &lt;s&gt; --stack &lt;t&gt; --cell &lt;c&gt;
-</code></pre></div>
-<p><code>--cascade</code> does not apply to containers — they're already leaves.</p>
 <h3 id="kuke-delete-blueprint">kuke delete blueprint<a class="headerlink" href="#kuke-delete-blueprint" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>kuke delete blueprint &lt;name&gt; --realm &lt;r&gt; [--space &lt;s&gt;] [--stack &lt;t&gt;] [--force]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>kuke delete blueprint &lt;name&gt; --realm &lt;r&gt; [--space &lt;s&gt;] [--stack &lt;t&gt;] [--force]
 </code></pre></div>
 <p>Removes the daemon-stored CellBlueprint document bound to the named scope. Cells previously materialised from this blueprint are independent copies and are <strong>not</strong> affected. <code>--cascade</code> does not apply — a Blueprint has no children in the resource hierarchy.</p>
 <h3 id="kuke-delete-config">kuke delete config<a class="headerlink" href="#kuke-delete-config" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>kuke delete config &lt;name&gt; --realm &lt;r&gt; [--space &lt;s&gt;] [--stack &lt;t&gt;] [--force]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>kuke delete config &lt;name&gt; --realm &lt;r&gt; [--space &lt;s&gt;] [--stack &lt;t&gt;] [--force]
 </code></pre></div>
 <p>Removes the daemon-stored CellConfig document bound to the named scope. The at-most-one live cell the Config materialised is <strong>not</strong> torn down — delete it separately with <code>kuke delete cell &lt;name&gt;</code>. When a live cell still carries the back-reference label to this Config, <code>kuke delete config</code> emits a one-line notice pointing at the cell to delete (never a refusal). <code>--cascade</code> does not apply — a Config has no children in the resource hierarchy.</p>
 <h2 id="behavior">Behavior<a class="headerlink" href="#behavior" title="Permanent link">&para;</a></h2>
@@ -3544,23 +3518,20 @@
 <li><strong>With <code>--force</code></strong>, validation is skipped — Kukeon will attempt to delete the metadata and tear down runtime state even when the host is in an unexpected state. Use it to recover from half-deleted resources.</li>
 </ol>
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Delete an empty cell</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>cell<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># Cascade-delete an entire user realm (all spaces, stacks, cells, containers)</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>realm<span class="w"> </span>mytenant<span class="w"> </span>--cascade
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="c1"># Force-delete a container that&#39;s stuck in an unknown state</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>container<span class="w"> </span>stuck<span class="w"> </span>--cell<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress<span class="w"> </span>--force
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="c1"># Delete every resource listed in a manifest</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>-f<span class="w"> </span>site.yaml
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="c1"># Remove a daemon-stored CellBlueprint (materialised cells are untouched)</span>
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>blueprint<span class="w"> </span>dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system
-<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>
-<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="c1"># Remove a daemon-stored CellConfig (the live cell it owns is not torn down)</span>
-<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>config<span class="w"> </span>kukeon-dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Delete an empty cell</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>cell<span class="w"> </span>web<span class="w"> </span>--realm<span class="w"> </span>default<span class="w"> </span>--space<span class="w"> </span>blog<span class="w"> </span>--stack<span class="w"> </span>wordpress
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># Cascade-delete an entire user realm (all spaces, stacks, cells)</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>realm<span class="w"> </span>mytenant<span class="w"> </span>--cascade
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># Delete every resource listed in a manifest</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>-f<span class="w"> </span>site.yaml
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="c1"># Remove a daemon-stored CellBlueprint (materialised cells are untouched)</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>blueprint<span class="w"> </span>dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="c1"># Remove a daemon-stored CellConfig (the live cell it owns is not torn down)</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>delete<span class="w"> </span>config<span class="w"> </span>kukeon-dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system
 </code></pre></div>
 <h2 id="delete-vs-purge">delete vs. purge<a class="headerlink" href="#delete-vs-purge" title="Permanent link">&para;</a></h2>
 <ul>
@@ -3595,7 +3566,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 23, 2026 10:55:41 UTC">May 23, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 4, 2026 09:40:01 UTC">June 4, 2026</span>
   </span>
 
     
