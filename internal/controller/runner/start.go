@@ -1296,7 +1296,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 	// Root container cannot be started directly - it must be started by starting the cell
 	if foundContainerSpec.Root {
 		return intmodel.Cell{}, fmt.Errorf(
-			"root container cannot be started directly, start the cell instead using 'kuke start cell %s'",
+			"root container cannot be started directly, start the cell instead using 'kuke start %s'",
 			cellName,
 		)
 	}
@@ -1318,7 +1318,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 	if err != nil {
 		if errors.Is(err, internalerrdefs.ErrContainerNotFound) {
 			return intmodel.Cell{}, fmt.Errorf(
-				"root container %q does not exist, start the cell first using 'kuke start cell %s': %w",
+				"root container %q does not exist, start the cell first using 'kuke start %s': %w",
 				rootContainerID,
 				cellName,
 				err,
@@ -1333,7 +1333,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 		// Check if task doesn't exist
 		if errdefs.IsNotFound(err) {
 			return intmodel.Cell{}, fmt.Errorf(
-				"root container %q exists but has no task, start the cell first using 'kuke start cell %s': %w",
+				"root container %q exists but has no task, start the cell first using 'kuke start %s': %w",
 				rootContainerID,
 				cellName,
 				err,

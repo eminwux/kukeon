@@ -34,7 +34,7 @@ import (
 // the diff returns no changes and apply walks away with `unchanged` while
 // the cell stays Stopped forever — the divergent-state regression the
 // docs/cli-use-cases.md "apply (declarative, multi-document)" section
-// names by example (`kuke kill cell` then `kuke apply`).
+// names by example (`kuke kill` then `kuke apply`).
 func TestReconcileCell_RematerializesStoppedCell(t *testing.T) {
 	desired := buildTestCell("test-cell", "test-realm", "test-space", "test-stack")
 	desired.Spec.Containers = []intmodel.ContainerSpec{

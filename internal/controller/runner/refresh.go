@@ -684,7 +684,7 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 
 	// Heal a wiped cell cgroup on the reconcile path so cells whose cgroup
 	// the host reboot wiped (#854) recover without an operator running
-	// `kuke start cell <name>` per cell. Gated on the persisted
+	// `kuke start <name>` per cell. Gated on the persisted
 	// ReadyObserved latch so a half-CreateCell that crashed before the
 	// cell ever reached Ready is not promoted by the re-ensure — that
 	// in-flight CreateCell will finish its own ensureCellCgroup path under

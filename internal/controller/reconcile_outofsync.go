@@ -55,7 +55,7 @@ const (
 //   - OutOfSync = false with OutOfSyncError set when divergence is
 //     undecidable — referenced Blueprint missing, slot-fill validation
 //     failure, or any other materialization error. Distinct from OutOfSync
-//     so downstream verbs (`kuke get cell` SYNC column, `kuke restart cell
+//     so downstream verbs (`kuke get cell` SYNC column, `kuke restart
 //     <name>`) can route the error case separately from a routine drift.
 //
 // Persists via runner.UpdateCellMetadata only when any of the three fields
@@ -227,7 +227,7 @@ func materializeCellFromConfig(
 // outOfSyncSpecDifferReason renders the DiffCell verdict as a stable,
 // human-readable one-line summary suitable for the OutOfSyncReason status
 // field. Always starts with "spec differs" so downstream parsers (a
-// future `kuke get cell` SYNC column, the `kuke restart cell` verb) can
+// future `kuke get cell` SYNC column, the `kuke restart` verb) can
 // recognize the divergence class without parsing the full diff payload.
 // Field paths are sorted so the same diff produces the same reason
 // across ticks, keeping the persisted status stable.

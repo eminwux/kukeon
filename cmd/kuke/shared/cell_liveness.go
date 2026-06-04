@@ -44,7 +44,7 @@ import (
 //     containerd slate.
 //   - Stopped → the reconciler's wind-down (`refresh.go windDownCell`)
 //     has reaped the work container after its kuketty exited, so the
-//     attach socket inode is orphaned. Recovery is `kuke start cell` —
+//     attach socket inode is orphaned. Recovery is `kuke start` —
 //     the cell metadata is intact, so a restart re-binds kuketty
 //     against a fresh inode.
 //   - Pending / Failed / Unknown → no clean attach path. Same recovery
@@ -79,7 +79,7 @@ func GuardCellTaskLiveness(get kukeonv1.GetCellResult, cellName string) error {
 	case v1beta1.CellStateStopped:
 		return fmt.Errorf(
 			"cell %q is in state Stopped (no work container is running); "+
-				"start it first with `kuke start cell %s`",
+				"start it first with `kuke start %s`",
 			cellName, cellName,
 		)
 	default:

@@ -689,8 +689,8 @@ func TestAttach_Stopped_PointsAtStart(t *testing.T) {
 	if got := err.Error(); !strings.Contains(got, "Stopped") {
 		t.Errorf("error %q missing %q state name", got, "Stopped")
 	}
-	if got := err.Error(); !strings.Contains(got, "kuke start cell kukeon-pm-0") {
-		t.Errorf("error %q missing `kuke start cell kukeon-pm-0` recovery pointer", got)
+	if got := err.Error(); !strings.Contains(got, "kuke start kukeon-pm-0") {
+		t.Errorf("error %q missing `kuke start kukeon-pm-0` recovery pointer", got)
 	}
 	if attachCalls != 0 {
 		t.Errorf("AttachContainer called %d times, want 0 (must not dial dead socket)", attachCalls)

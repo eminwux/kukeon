@@ -17,10 +17,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Tests for the daemon-side OutOfSync reapply on StartCell — issue #983.
-// `kuke stop cell` + `kuke start cell` on a Config-lineage OutOfSync cell must
-// produce the same end state as `kuke restart cell` on the same cell. The
+// `kuke stop` + `kuke start` on a Config-lineage OutOfSync cell must
+// produce the same end state as `kuke restart` on the same cell. The
 // reapply lives in controller.StartCell so every client that issues StartCell
-// (CLI `kuke start cell`, `kuke run` on existing-Stopped, future API
+// (CLI `kuke start`, `kuke run` on existing-Stopped, future API
 // consumers) inherits the reconcile-on-start behaviour.
 
 package controller_test
@@ -328,7 +328,7 @@ func TestStartCell_OutOfSyncReapply_LineageConfigDeletedFallsThrough(t *testing.
 // TestStartCell_OutOfSyncReapply_RecreateErrorFallsThrough covers the
 // graceful degradation: if RecreateCell fails (e.g. containerd unreachable),
 // reapply logs and falls back to the on-disk spec via runner.StartCell so the
-// operator's `kuke start cell` request is honored.
+// operator's `kuke start` request is honored.
 func TestStartCell_OutOfSyncReapply_RecreateErrorFallsThrough(t *testing.T) {
 	live := reapplyLineageCell("test-realm", "test-space", "test-stack")
 
