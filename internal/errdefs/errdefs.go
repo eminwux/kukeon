@@ -78,6 +78,7 @@ var (
 	ErrCellIDRequired         = errors.New("cell id is required")
 	ErrGetCell                = errors.New("failed to get cell")
 	ErrCreateCell             = errors.New("failed to create cell")
+	ErrDiskPressure           = errors.New("data volume is under disk pressure")
 	ErrCreateRootContainer    = errors.New("failed to create root container")
 	ErrNetworkConfigNotLoaded = errors.New("network config not loaded")
 	// ErrExplicitRootHostNetworkMismatch fires when a cell pins its root via

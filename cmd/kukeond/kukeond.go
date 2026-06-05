@@ -21,6 +21,7 @@ package kukeond
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/eminwux/kukeon/cmd/config"
 	"github.com/eminwux/kukeon/internal/consts"
@@ -192,6 +193,34 @@ func NewKukeondCmd() (*cobra.Command, error) {
 		return nil, err
 	}
 
+	diskPressureWarnDefault, _ := strconv.Atoi(config.KUKEOND_DISK_PRESSURE_WARN_PCT.Default)
+	cmd.PersistentFlags().Int(
+		"disk-pressure-warn-percent", diskPressureWarnDefault,
+		"Data-volume usage percentage above which the reconcile loop emits a "+
+			"rate-limited WARN naming the realm and usage (nothing is deleted). "+
+			"0 disables. (issue #1035)",
+	)
+	if err := viper.BindPFlag(
+		config.KUKEOND_DISK_PRESSURE_WARN_PCT.ViperKey,
+		cmd.PersistentFlags().Lookup("disk-pressure-warn-percent"),
+	); err != nil {
+		return nil, err
+	}
+
+	diskPressureBlockDefault, _ := strconv.Atoi(config.KUKEOND_DISK_PRESSURE_BLOCK_PCT.Default)
+	cmd.PersistentFlags().Int(
+		"disk-pressure-block-percent", diskPressureBlockDefault,
+		"Data-volume usage percentage at or above which a new cell's creation "+
+			"is refused (no deletion); `--ignore-disk-pressure` bypasses it. "+
+			"0 disables. (issue #1035)",
+	)
+	if err := viper.BindPFlag(
+		config.KUKEOND_DISK_PRESSURE_BLOCK_PCT.ViperKey,
+		cmd.PersistentFlags().Lookup("disk-pressure-block-percent"),
+	); err != nil {
+		return nil, err
+	}
+
 	bindEnvVars()
 
 	cmd.AddCommand(newServeCmd())
@@ -215,6 +244,8 @@ func bindEnvVars() {
 		config.KUKEOND_RECONCILE_INTERVAL,
 		config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES,
 		config.KUKEOND_KUKETTY_LOG_LEVEL,
+		config.KUKEOND_DISK_PRESSURE_WARN_PCT,
+		config.KUKEOND_DISK_PRESSURE_BLOCK_PCT,
 	} {
 		_ = v.BindEnv()
 	}

@@ -16,7 +16,13 @@
 
 package controller
 
-import "fmt"
+import (
+	"fmt"
+
+	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/diskpressure"
+	"github.com/eminwux/kukeon/internal/util/fs"
+)
 
 // ReconcileResult summarizes a single pass of the daemon's background
 // cell-reconciliation loop. Counts are scoped to cells (v1 of #161 is
@@ -45,6 +51,12 @@ func (b *Exec) ReconcileCells() (ReconcileResult, error) {
 		result.Errors = append(result.Errors, fmt.Sprintf("list realms: %v", err))
 		return result, nil
 	}
+
+	// Make disk pressure visible before doing per-cell work. Observation-only:
+	// this never deletes, reaps, or mutates anything — it only logs a
+	// rate-limited WARN when a realm's data volume crosses the high-water mark
+	// (issue #1035).
+	b.checkDiskPressure(realms)
 
 	for _, realm := range realms {
 		realmName := realm.Metadata.Name
@@ -118,4 +130,44 @@ func (b *Exec) ReconcileCells() (ReconcileResult, error) {
 	}
 
 	return result, nil
+}
+
+// checkDiskPressure samples the data volume backing each realm's metadata tree
+// and emits a rate-limited WARN for any realm whose usage is at or above the
+// configured warn threshold. It deletes nothing — the WARN is the entire
+// action. Disabled when DiskPressureWarnPercent <= 0. Realms that share one
+// filesystem each warn under their own rate-limit key; a statfs failure is
+// logged at debug and skipped so a monitoring hiccup never disrupts the
+// reconcile pass. Issue #1035.
+func (b *Exec) checkDiskPressure(realms []intmodel.Realm) {
+	if b.opts.DiskPressureWarnPercent <= 0 {
+		return
+	}
+	sample := b.diskSampler
+	if sample == nil {
+		sample = diskpressure.Sample
+	}
+	for _, realm := range realms {
+		realmName := realm.Metadata.Name
+		dir := fs.RealmMetadataDir(b.opts.RunPath, realmName)
+		usage, err := sample(dir)
+		if err != nil {
+			b.logger.DebugContext(b.ctx, "disk-pressure sample failed",
+				"realm", realmName, "path", dir, "error", err)
+			continue
+		}
+		if usage.UsedPercent < float64(b.opts.DiskPressureWarnPercent) {
+			continue
+		}
+		if b.diskWarner != nil && !b.diskWarner.ShouldWarn(realmName) {
+			continue
+		}
+		b.logger.WarnContext(b.ctx, "data volume under disk pressure",
+			"realm", realmName,
+			"path", dir,
+			"usedPercent", fmt.Sprintf("%.1f", usage.UsedPercent),
+			"warnPercent", b.opts.DiskPressureWarnPercent,
+			"totalBytes", usage.TotalBytes,
+			"availBytes", usage.AvailBytes)
+	}
 }

@@ -109,6 +109,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		kukettyLogLevel = config.KUKEOND_KUKETTY_LOG_LEVEL.Default
 	}
 
+	diskPressureWarnPct := viper.GetInt(config.KUKEOND_DISK_PRESSURE_WARN_PCT.ViperKey)
+	diskPressureBlockPct := viper.GetInt(config.KUKEOND_DISK_PRESSURE_BLOCK_PCT.ViperKey)
+
 	opts := daemon.Options{
 		SocketPath:        socketPath,
 		SocketMode:        socketMode,
@@ -131,6 +134,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			// trip sbsh's NewFileLogger inside the container at attach time
 			// (issue #599), so the empty-resolved case above pins "info".
 			KukettyLogLevel: kukettyLogLevel,
+			// Data-volume disk-pressure observability (reconcile-loop WARN) and
+			// the CreateCell guard (issue #1035). Both are observation-only —
+			// the guard refuses new cell creation but never deletes data.
+			DiskPressureWarnPercent:  diskPressureWarnPct,
+			DiskPressureBlockPercent: diskPressureBlockPct,
 		},
 	}
 

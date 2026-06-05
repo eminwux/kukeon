@@ -20,11 +20,19 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/controller/runner"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/diskpressure"
 )
+
+// diskPressureWarnInterval bounds how often the reconcile loop re-emits the
+// data-volume disk-pressure WARN for a given realm. Chosen well above the
+// default 30s reconcile interval so a host that sits over the high-water mark
+// logs once every few minutes rather than every tick. Issue #1035.
+const diskPressureWarnInterval = 5 * time.Minute
 
 type Controller interface {
 	Bootstrap() (BootstrapReport, error)
@@ -65,6 +73,15 @@ type Exec struct {
 	logger *slog.Logger
 	opts   Options
 	runner runner.Runner
+	// diskWarner rate-limits the per-realm data-volume disk-pressure WARN the
+	// reconcile loop emits so a short reconcile interval does not log every
+	// tick while a volume stays over the high-water mark. Issue #1035.
+	diskWarner *diskpressure.Warner
+	// diskSampler samples filesystem usage for the reconcile-loop WARN. nil
+	// falls through to diskpressure.Sample; tests override it to exercise the
+	// warn/threshold/rate-limit branches without a real full volume. Issue
+	// #1035.
+	diskSampler func(string) (diskpressure.Usage, error)
 }
 
 type Options struct {
@@ -105,6 +122,17 @@ type Options struct {
 	// Empty falls through to the hardcoded "info" default inside the renderer.
 	// Issue #599.
 	KukettyLogLevel string
+	// DiskPressureWarnPercent, when > 0, is the data-volume usage percentage
+	// above which the reconcile loop emits a rate-limited WARN naming the realm
+	// and current usage (no deletion). Surfaces via
+	// `kukeond serve --disk-pressure-warn-percent` / KUKEOND_DISK_PRESSURE_WARN_PCT.
+	// Zero disables the warning. Issue #1035.
+	DiskPressureWarnPercent int
+	// DiskPressureBlockPercent, when > 0, is the data-volume usage percentage
+	// at or above which CreateCell refuses to provision a new cell. Surfaces
+	// via `kukeond serve --disk-pressure-block-percent` /
+	// KUKEOND_DISK_PRESSURE_BLOCK_PCT. Zero disables the guard. Issue #1035.
+	DiskPressureBlockPercent int
 }
 
 func NewControllerExec(ctx context.Context, logger *slog.Logger, opts Options) *Exec {
@@ -113,13 +141,15 @@ func NewControllerExec(ctx context.Context, logger *slog.Logger, opts Options) *
 		logger: logger,
 		opts:   opts,
 		runner: runner.NewRunner(ctx, logger, runner.Options{
-			ContainerdSocket:        opts.ContainerdSocket,
-			RunPath:                 opts.RunPath,
-			ForceRegenerateCNI:      opts.ForceRegenerateCNI,
-			KukeonGroupGID:          opts.KukeondSocketGID,
-			DefaultMemoryLimitBytes: opts.DefaultMemoryLimitBytes,
-			KukettyLogLevel:         opts.KukettyLogLevel,
+			ContainerdSocket:         opts.ContainerdSocket,
+			RunPath:                  opts.RunPath,
+			ForceRegenerateCNI:       opts.ForceRegenerateCNI,
+			KukeonGroupGID:           opts.KukeondSocketGID,
+			DefaultMemoryLimitBytes:  opts.DefaultMemoryLimitBytes,
+			KukettyLogLevel:          opts.KukettyLogLevel,
+			DiskPressureBlockPercent: opts.DiskPressureBlockPercent,
 		}),
+		diskWarner: diskpressure.NewWarner(diskPressureWarnInterval),
 	}
 }
 
@@ -127,10 +157,11 @@ func NewControllerExec(ctx context.Context, logger *slog.Logger, opts Options) *
 // This function is exported for testing purposes only.
 func NewControllerExecForTesting(ctx context.Context, logger *slog.Logger, opts Options, r runner.Runner) *Exec {
 	return &Exec{
-		ctx:    ctx,
-		logger: logger,
-		opts:   opts,
-		runner: r,
+		ctx:        ctx,
+		logger:     logger,
+		opts:       opts,
+		runner:     r,
+		diskWarner: diskpressure.NewWarner(diskPressureWarnInterval),
 	}
 }
 

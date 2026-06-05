@@ -68,6 +68,13 @@ type CellSpec struct {
 	// a restart. Nil for hand-built cells. DiffCell ignores it (lineage data,
 	// not a runtime spec field). Issue #1021.
 	Provenance *CellProvenance
+	// IgnoreDiskPressure mirrors v1beta1.CellSpec.IgnoreDiskPressure. The wire
+	// side carries `kuke create cell`/`kuke run --ignore-disk-pressure` from
+	// the CLI; the runner's CreateCell guard reads it to bypass the data-volume
+	// disk-pressure block. NOT persisted (v1beta1 has yaml:"-") — the override
+	// is per-invocation, so the disk-read paths return cells with it false.
+	// Issue #1035.
+	IgnoreDiskPressure bool
 }
 
 // CellProvenance mirrors v1beta1.CellProvenance. See that type for the
