@@ -109,6 +109,46 @@ spec:
 	}
 }
 
+// reapplyBreakingBlueprint materialises the "main" container with
+// hostNetwork:true — a host-namespace toggle apply.DiffCell classifies as
+// Breaking even on a non-root child (the netns shape is baked into the cell at
+// start). The live cell's main carries hostNetwork:false, so this is the sole
+// diff and it drives the RecreateCell (overlay-wiping) path. Image stays
+// nginx:1.0 so hostNetwork is the only divergence.
+func reapplyBreakingBlueprint(realm string) intmodel.CellBlueprint {
+	doc := `apiVersion: v1beta1
+kind: CellBlueprint
+metadata:
+  name: web
+  realm: ` + realm + `
+spec:
+  cell:
+    containers:
+      - id: main
+        image: nginx:1.0
+        hostNetwork: true
+`
+	return intmodel.CellBlueprint{
+		Metadata: intmodel.CellBlueprintMetadata{
+			Name:  "web",
+			Realm: realm,
+		},
+		Document: []byte(doc),
+	}
+}
+
+// reapplyContainerImage returns the image of the container with the given ID in
+// the cell, or "" when absent. Used by the in-place reapply tests to assert
+// which spec (on-disk vs materialised) each runner method receives.
+func reapplyContainerImage(cell intmodel.Cell, id string) string {
+	for _, c := range cell.Spec.Containers {
+		if c.ID == id {
+			return c.Image
+		}
+	}
+	return ""
+}
+
 // reapplyLineageCell builds a stopped, OutOfSync, Config-lineage cell with the
 // given realm/space/stack scope. The cell's on-disk container image is
 // "nginx:1.0" — diverged from the Config's "nginx:2.0" — so the reapply path
@@ -136,11 +176,15 @@ func reapplyLineageCell(realm, space, stack string) intmodel.Cell {
 	}
 }
 
-func TestStartCell_OutOfSyncReapply_RecreatesFromConfig(t *testing.T) {
+// TestStartCell_OutOfSyncReapply_CompatibleAppliesInPlace pins AC1 of
+// epic:cell-identity P7 (#1095): a Compatible diff (here a non-root child image
+// bump nginx:1.0 → nginx:2.0) is applied in place — StartCell restarts the cell
+// on its existing snapshot so the overlay survives, then UpdateCell applies the
+// materialised drift. RecreateCell (which would wipe the overlay) must not run.
+func TestStartCell_OutOfSyncReapply_CompatibleAppliesInPlace(t *testing.T) {
 	live := reapplyLineageCell("test-realm", "test-space", "test-stack")
 
-	var recreateCalled bool
-	var startCellCalled bool
+	var recreateCalled, startCellCalled, updateCellCalled bool
 	f := &fakeRunner{
 		GetCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
 			return live, nil
@@ -159,32 +203,110 @@ func TestStartCell_OutOfSyncReapply_RecreatesFromConfig(t *testing.T) {
 			}
 			return reapplySampleBlueprint("test-realm"), nil
 		},
+		RecreateCellFn: func(intmodel.Cell) (intmodel.Cell, error) {
+			recreateCalled = true
+			return intmodel.Cell{}, errors.New(
+				"RecreateCell must not run for a Compatible diff — the overlay would be wiped",
+			)
+		},
+		StartCellFn: func(cell intmodel.Cell) (intmodel.Cell, error) {
+			startCellCalled = true
+			// The in-place path starts on the live (on-disk) spec so the root
+			// snapshot is reused; the materialised image bump is applied by
+			// UpdateCell, not here. Starting from the materialised spec would
+			// trip ErrCellSpecHashDrift on the changed child.
+			if got := reapplyContainerImage(cell, "main"); got != "nginx:1.0" {
+				t.Errorf("StartCell main image = %q, want nginx:1.0 (on-disk spec, snapshot reuse)", got)
+			}
+			cell.Status.State = intmodel.CellStateReady
+			return cell, nil
+		},
+		UpdateCellFn: func(cell intmodel.Cell) (intmodel.Cell, error) {
+			updateCellCalled = true
+			// UpdateCell receives the materialised spec — image bumped to
+			// nginx:2.0 — and the live cell's identity.
+			if cell.Metadata.Name != "prod" {
+				t.Errorf("UpdateCell name = %q, want prod", cell.Metadata.Name)
+			}
+			if cell.Spec.RealmName != "test-realm" {
+				t.Errorf("UpdateCell realm = %q, want test-realm", cell.Spec.RealmName)
+			}
+			if got := reapplyContainerImage(cell, "main"); got != "nginx:2.0" {
+				t.Errorf("UpdateCell main image = %q, want nginx:2.0 (materialised from Blueprint)", got)
+			}
+			cell.Status.State = intmodel.CellStateReady
+			return cell, nil
+		},
+		UpdateCellMetadataFn: func(intmodel.Cell) error { return nil },
+	}
+
+	ctrl := setupTestController(t, f)
+	res, err := ctrl.StartCell(buildTestCell("prod", "test-realm", "test-space", "test-stack"))
+	if err != nil {
+		t.Fatalf("StartCell returned error: %v", err)
+	}
+	if recreateCalled {
+		t.Error("RecreateCell was called for a Compatible diff; the in-place path must be used")
+	}
+	if !startCellCalled {
+		t.Error("runner.StartCell was not called; the in-place reapply was skipped")
+	}
+	if !updateCellCalled {
+		t.Error("runner.UpdateCell was not called; the Compatible drift was not applied in place")
+	}
+	if !res.Started {
+		t.Error("Started = false, want true after successful in-place reapply")
+	}
+	if res.Cell.Status.State != intmodel.CellStateReady {
+		t.Errorf("cell state = %v, want Ready after in-place reapply", res.Cell.Status.State)
+	}
+}
+
+// TestStartCell_OutOfSyncReapply_BreakingRecreates pins AC2 of
+// epic:cell-identity P7 (#1095): a Breaking diff (here a hostNetwork toggle on
+// the child, baked into the cell's netns at start) drives RecreateCell — the
+// overlay-wiping path — not the in-place StartCell/UpdateCell pair.
+func TestStartCell_OutOfSyncReapply_BreakingRecreates(t *testing.T) {
+	live := reapplyLineageCell("test-realm", "test-space", "test-stack")
+
+	var recreateCalled, startCellCalled, updateCellCalled bool
+	f := &fakeRunner{
+		GetCellFn:                 func(_ intmodel.Cell) (intmodel.Cell, error) { return live, nil },
+		ExistsCgroupFn:            func(_ any) (bool, error) { return true, nil },
+		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) { return true, nil },
+		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
+			return reapplySampleCellConfig("test-realm", "test-space", "test-stack"), nil
+		},
+		GetBlueprintFn: func(intmodel.CellBlueprint) (intmodel.CellBlueprint, error) {
+			return reapplyBreakingBlueprint("test-realm"), nil
+		},
 		RecreateCellFn: func(cell intmodel.Cell) (intmodel.Cell, error) {
 			recreateCalled = true
-			// The desired cell must carry the materialised spec — image bumped
-			// to nginx:2.0 from the Blueprint — and the live cell's identity.
 			if cell.Metadata.Name != "prod" {
 				t.Errorf("RecreateCell name = %q, want prod", cell.Metadata.Name)
 			}
-			if cell.Spec.RealmName != "test-realm" {
-				t.Errorf("RecreateCell realm = %q, want test-realm", cell.Spec.RealmName)
-			}
-			gotImage := ""
+			var hostNet bool
 			for _, c := range cell.Spec.Containers {
 				if c.ID == "main" {
-					gotImage = c.Image
+					hostNet = c.HostNetwork
 					break
 				}
 			}
-			if gotImage != "nginx:2.0" {
-				t.Errorf("RecreateCell main image = %q, want nginx:2.0 (materialised from Blueprint)", gotImage)
+			if !hostNet {
+				t.Error("RecreateCell main hostNetwork = false, want true (materialised from Blueprint)")
 			}
 			cell.Status.State = intmodel.CellStateReady
 			return cell, nil
 		},
 		StartCellFn: func(intmodel.Cell) (intmodel.Cell, error) {
 			startCellCalled = true
-			return intmodel.Cell{}, errors.New("runner.StartCell must not be called after RecreateCell already brought the cell to Ready")
+			return intmodel.Cell{}, errors.New(
+				"runner.StartCell must not run for a Breaking diff — RecreateCell owns the start",
+			)
+		},
+		UpdateCellFn: func(intmodel.Cell) (intmodel.Cell, error) {
+			updateCellCalled = true
+			return intmodel.Cell{}, errors.New("runner.UpdateCell must not run for a Breaking diff")
 		},
 		UpdateCellMetadataFn: func(intmodel.Cell) error { return nil },
 	}
@@ -195,27 +317,32 @@ func TestStartCell_OutOfSyncReapply_RecreatesFromConfig(t *testing.T) {
 		t.Fatalf("StartCell returned error: %v", err)
 	}
 	if !recreateCalled {
-		t.Error("RecreateCell was not called; reapply path was skipped")
+		t.Error("RecreateCell was not called for a Breaking diff; reapply routed in-place instead")
 	}
 	if startCellCalled {
-		t.Error("runner.StartCell was called after RecreateCell — double-start")
+		t.Error("runner.StartCell was called for a Breaking diff — double-start")
+	}
+	if updateCellCalled {
+		t.Error("runner.UpdateCell was called for a Breaking diff")
 	}
 	if !res.Started {
-		t.Error("Started = false, want true after successful reapply")
+		t.Error("Started = false, want true after successful Breaking reapply")
 	}
 	if res.Cell.Status.State != intmodel.CellStateReady {
 		t.Errorf("cell state = %v, want Ready after RecreateCell", res.Cell.Status.State)
 	}
 }
 
-// TestStartCell_OutOfSyncReapply_EnvOverridePreserved pins the AC3 reapply
-// half of epic:cell-identity P5 (#1024): a Config-lineage cell created
+// TestStartCell_OutOfSyncReapply_EnvOverridePreserved pins the reapply half of
+// epic:cell-identity P5 (#1024): a Config-lineage cell created
 // `--from-config --env K=V` records the override in Spec.Provenance.EnvOverrides
 // (P3 #1023). The reapply path re-materialises from the Config — which has no
 // knowledge of the per-cell override — so without re-applying provenance the
-// override is silently stripped on RecreateCell. With the fix, the desired cell
-// handed to RecreateCell carries the materialised Blueprint image *and* the
-// re-baked override (re-applied last, P3 precedence).
+// override is silently stripped. This is a Compatible diff (a non-root child
+// image bump + env), so post-P7 (#1095) it flows through the in-place
+// UpdateCell path; the desired cell handed to UpdateCell must carry the
+// materialised Blueprint image *and* the re-baked override (re-applied last,
+// P3 precedence).
 func TestStartCell_OutOfSyncReapply_EnvOverridePreserved(t *testing.T) {
 	live := reapplyLineageCell("test-realm", "test-space", "test-stack")
 	// Simulate a cell created `--from-config --env APP_ENV=prod`: the override
@@ -226,7 +353,7 @@ func TestStartCell_OutOfSyncReapply_EnvOverridePreserved(t *testing.T) {
 		EnvOverrides: []string{"APP_ENV=prod"},
 	}
 
-	var recreateCalled bool
+	var updateCellCalled bool
 	f := &fakeRunner{
 		GetCellFn:                 func(_ intmodel.Cell) (intmodel.Cell, error) { return live, nil },
 		ExistsCgroupFn:            func(_ any) (bool, error) { return true, nil },
@@ -237,8 +364,15 @@ func TestStartCell_OutOfSyncReapply_EnvOverridePreserved(t *testing.T) {
 		GetBlueprintFn: func(intmodel.CellBlueprint) (intmodel.CellBlueprint, error) {
 			return reapplyAttachableBlueprint("test-realm"), nil
 		},
-		RecreateCellFn: func(cell intmodel.Cell) (intmodel.Cell, error) {
-			recreateCalled = true
+		RecreateCellFn: func(intmodel.Cell) (intmodel.Cell, error) {
+			return intmodel.Cell{}, errors.New("RecreateCell must not run for a Compatible diff")
+		},
+		StartCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			c.Status.State = intmodel.CellStateReady
+			return c, nil
+		},
+		UpdateCellFn: func(cell intmodel.Cell) (intmodel.Cell, error) {
+			updateCellCalled = true
 			var main intmodel.ContainerSpec
 			for _, c := range cell.Spec.Containers {
 				if c.ID == "main" {
@@ -247,7 +381,7 @@ func TestStartCell_OutOfSyncReapply_EnvOverridePreserved(t *testing.T) {
 				}
 			}
 			if main.Image != "nginx:2.0" {
-				t.Errorf("RecreateCell main image = %q, want nginx:2.0 (materialised from Blueprint)", main.Image)
+				t.Errorf("UpdateCell main image = %q, want nginx:2.0 (materialised from Blueprint)", main.Image)
 			}
 			// The recorded override must survive re-resolve, not be stripped.
 			found := false
@@ -258,13 +392,13 @@ func TestStartCell_OutOfSyncReapply_EnvOverridePreserved(t *testing.T) {
 				}
 			}
 			if !found {
-				t.Errorf("RecreateCell main Env = %v, want it to retain APP_ENV=prod (provenance override stripped)", main.Env)
+				t.Errorf(
+					"UpdateCell main Env = %v, want it to retain APP_ENV=prod (provenance override stripped)",
+					main.Env,
+				)
 			}
 			cell.Status.State = intmodel.CellStateReady
 			return cell, nil
-		},
-		StartCellFn: func(intmodel.Cell) (intmodel.Cell, error) {
-			return intmodel.Cell{}, errors.New("StartCell must not run after RecreateCell brought the cell Ready")
 		},
 		UpdateCellMetadataFn: func(intmodel.Cell) error { return nil },
 	}
@@ -273,8 +407,58 @@ func TestStartCell_OutOfSyncReapply_EnvOverridePreserved(t *testing.T) {
 	if _, err := ctrl.StartCell(buildTestCell("prod", "test-realm", "test-space", "test-stack")); err != nil {
 		t.Fatalf("StartCell returned error: %v", err)
 	}
-	if !recreateCalled {
-		t.Error("RecreateCell was not called; reapply path was skipped")
+	if !updateCellCalled {
+		t.Error("UpdateCell was not called; the in-place reapply path was skipped")
+	}
+}
+
+// TestStartCell_OutOfSyncReapply_CompatibleUpdateErrorStillReady covers the
+// in-place degradation path: StartCell brought the cell to Ready on its
+// existing snapshot, but UpdateCell failed (e.g. an image pull error). The
+// operator's start request is still honoured with the running cell, and the
+// persisted OutOfSync flag stays set so the next start retries the apply.
+func TestStartCell_OutOfSyncReapply_CompatibleUpdateErrorStillReady(t *testing.T) {
+	live := reapplyLineageCell("test-realm", "test-space", "test-stack")
+
+	var startCellCalled, updateCellCalled bool
+	f := &fakeRunner{
+		GetCellFn:                 func(_ intmodel.Cell) (intmodel.Cell, error) { return live, nil },
+		ExistsCgroupFn:            func(_ any) (bool, error) { return true, nil },
+		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) { return true, nil },
+		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
+			return reapplySampleCellConfig("test-realm", "test-space", "test-stack"), nil
+		},
+		GetBlueprintFn: func(intmodel.CellBlueprint) (intmodel.CellBlueprint, error) {
+			return reapplySampleBlueprint("test-realm"), nil
+		},
+		StartCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			startCellCalled = true
+			c.Status.State = intmodel.CellStateReady
+			return c, nil
+		},
+		UpdateCellFn: func(intmodel.Cell) (intmodel.Cell, error) {
+			updateCellCalled = true
+			return intmodel.Cell{}, errors.New("image pull failed")
+		},
+		UpdateCellMetadataFn: func(intmodel.Cell) error { return nil },
+	}
+
+	ctrl := setupTestController(t, f)
+	res, err := ctrl.StartCell(buildTestCell("prod", "test-realm", "test-space", "test-stack"))
+	if err != nil {
+		t.Fatalf("StartCell returned error: %v", err)
+	}
+	if !startCellCalled {
+		t.Error("runner.StartCell was not called; the in-place reapply was skipped")
+	}
+	if !updateCellCalled {
+		t.Error("runner.UpdateCell was not called; the Compatible drift was not attempted")
+	}
+	if !res.Started {
+		t.Error("Started = false, want true — the cell is Ready from StartCell even though UpdateCell failed")
+	}
+	if res.Cell.Status.State != intmodel.CellStateReady {
+		t.Errorf("cell state = %v, want Ready (degraded: started but not reconciled)", res.Cell.Status.State)
 	}
 }
 
@@ -423,9 +607,11 @@ func TestStartCell_OutOfSyncReapply_LineageConfigDeletedFallsThrough(t *testing.
 }
 
 // TestStartCell_OutOfSyncReapply_RecreateErrorFallsThrough covers the
-// graceful degradation: if RecreateCell fails (e.g. containerd unreachable),
-// reapply logs and falls back to the on-disk spec via runner.StartCell so the
-// operator's `kuke start` request is honored.
+// graceful degradation on the Breaking path: if RecreateCell fails (e.g.
+// containerd unreachable), reapply logs and falls back to the on-disk spec via
+// the caller's runner.StartCell so the operator's `kuke start` request is
+// honored. Uses a Breaking blueprint (hostNetwork toggle) so RecreateCell is
+// the path under test.
 func TestStartCell_OutOfSyncReapply_RecreateErrorFallsThrough(t *testing.T) {
 	live := reapplyLineageCell("test-realm", "test-space", "test-stack")
 
@@ -438,7 +624,7 @@ func TestStartCell_OutOfSyncReapply_RecreateErrorFallsThrough(t *testing.T) {
 			return reapplySampleCellConfig("test-realm", "test-space", "test-stack"), nil
 		},
 		GetBlueprintFn: func(intmodel.CellBlueprint) (intmodel.CellBlueprint, error) {
-			return reapplySampleBlueprint("test-realm"), nil
+			return reapplyBreakingBlueprint("test-realm"), nil
 		},
 		RecreateCellFn: func(intmodel.Cell) (intmodel.Cell, error) {
 			return intmodel.Cell{}, errors.New("containerd unreachable")

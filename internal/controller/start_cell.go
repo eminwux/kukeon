@@ -84,9 +84,11 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 	}
 
 	// Reapply the lineage Config when the persisted OutOfSync flag is set, so
-	// the start runs against the freshly materialised spec — see #983. If the
-	// reapply already brought the cell back to Ready (RecreateCell path), the
-	// caller is done; otherwise fall through to the regular runner.StartCell.
+	// the start runs against the freshly materialised spec — see #983. A
+	// Breaking diff recreates the cell; a Compatible diff is applied in place
+	// with the container overlay preserved (epic:cell-identity P7, #1095). If
+	// the reapply already brought the cell back to Ready, the caller is done;
+	// otherwise fall through to the regular runner.StartCell.
 	if reapplied, started, ok := b.reapplyOutOfSyncFromConfig(internalCell); ok {
 		internalCell = reapplied
 		if started {
@@ -113,21 +115,36 @@ func (b *Exec) StartCell(cell intmodel.Cell) (StartCellResult, error) {
 }
 
 // reapplyOutOfSyncFromConfig re-materialises the cell from its lineage Config
-// and rebuilds the on-disk + containerd state when the persisted OutOfSync
-// flag is set on a Config-lineage cell. Returns:
+// and reconciles the on-disk + containerd state when the persisted OutOfSync
+// flag is set on a Config-lineage cell. The materialised diff is routed by
+// change class (epic:cell-identity P7, #1095):
 //
-//   - (cell, true,  true)  : reapply rebuilt the cell; runner.RecreateCell
-//     already brought it to Ready, the caller should
-//     skip its runner.StartCell pass.
-//   - (cell, false, true)  : reapply ran, but the materialised spec matched
-//     the on-disk spec or only metadata diverged — the
-//     caller continues with the regular start pass.
-//   - (zero, false, false) : reapply did not run (no lineage label, OutOfSync
-//     flag clear, OutOfSyncError set, lineage Config /
-//     Blueprint missing, materialise error). Caller
-//     continues with the on-disk spec — the runtime is
-//     still bounced as the operator asked, matching the
-//     CLI restart fall-through (cmd/kuke/restart).
+//   - Breaking diff → runner.RecreateCell. The diverged field is baked into
+//     the cell's OCI runtime spec at create (root image/command/args, a
+//     host-namespace toggle, …), so the cell must be torn down and rebuilt;
+//     the container overlay is wiped (volume-backed memory survives once
+//     #1015 lands).
+//   - Compatible / Additive diff → in-place apply with the root overlay
+//     preserved: runner.StartCell restarts the cell on its existing
+//     containerd snapshot (issue #867), then runner.UpdateCell re-persists the
+//     compatible metadata (env/ports/volumes) and stop-remove-recreate-starts
+//     any non-root child whose image/command/args changed. UpdateCell cannot
+//     run on a stopped cell — non-root children join the root's pid/net/ipc
+//     namespaces — so the StartCell-then-UpdateCell ordering is load-bearing.
+//
+// Returns:
+//
+//   - (cell, true,  true)  : reapply rebuilt or in-place-reconciled the cell
+//     and brought it to Ready; the caller should skip
+//     its runner.StartCell pass.
+//   - (zero, false, false) : reapply did not run or could not complete its
+//     runtime step (no lineage label, OutOfSync flag
+//     clear, OutOfSyncError set, lineage Config /
+//     Blueprint missing, materialise error, no diff, or
+//     a RecreateCell/StartCell failure). Caller continues
+//     with the on-disk spec — the runtime is still bounced
+//     as the operator asked, matching the CLI restart
+//     fall-through (cmd/kuke/restart).
 func (b *Exec) reapplyOutOfSyncFromConfig(cell intmodel.Cell) (intmodel.Cell, bool, bool) {
 	if !cell.Status.OutOfSync || cell.Status.OutOfSyncError != "" {
 		return intmodel.Cell{}, false, false
@@ -187,12 +204,24 @@ func (b *Exec) reapplyOutOfSyncFromConfig(cell intmodel.Cell) (intmodel.Cell, bo
 		return intmodel.Cell{}, false, false
 	}
 
-	// Rebuild the cell from the materialised spec. RecreateCell tears down the
-	// containerd records (post-#867 stop leaves them in place with the old
-	// spec-hash, which would otherwise make startCellLocked refuse the new
-	// spec), recreates fresh containers, and ends by calling startCellLocked
-	// so the cell lands in Ready. Mirrors the restart CLI's
-	// ApplyDocuments+StopCell+StartCell sequence for a Stopped cell.
+	// Route by change class. A Breaking diff (the RecreateCell domain
+	// apply.ReconcileCell uses — root-container baked fields, host-namespace
+	// toggles) sets diff.ChangeType to Breaking; anything else (Compatible or
+	// Additive) is applied in place with the overlay preserved.
+	if diff.ChangeType == apply.ChangeTypeBreaking {
+		return b.reapplyBreaking(cell, desired, configName)
+	}
+	return b.reapplyCompatibleInPlace(cell, desired, configName)
+}
+
+// reapplyBreaking rebuilds the cell from the materialised spec via
+// RecreateCell. RecreateCell tears down the containerd records (post-#867 stop
+// leaves them in place with the old spec-hash, which would otherwise make
+// startCellLocked refuse the new spec), recreates fresh containers — wiping the
+// container overlay — and ends by calling startCellLocked so the cell lands in
+// Ready. Mirrors the restart CLI's ApplyDocuments+StopCell+StartCell sequence
+// for a Stopped cell. On failure the caller falls back to the on-disk spec.
+func (b *Exec) reapplyBreaking(cell, desired intmodel.Cell, configName string) (intmodel.Cell, bool, bool) {
 	recreated, err := b.runner.RecreateCell(desired)
 	if err != nil {
 		b.logger.WarnContext(b.ctx,
@@ -205,9 +234,57 @@ func (b *Exec) reapplyOutOfSyncFromConfig(cell intmodel.Cell) (intmodel.Cell, bo
 	}
 
 	b.logger.InfoContext(b.ctx,
-		"reapplied OutOfSync cell from lineage config on start",
+		"reapplied OutOfSync cell from lineage config on start (breaking diff; recreated)",
 		"cell", cell.Metadata.Name,
 		"config", configName,
 	)
 	return recreated, true, true
+}
+
+// reapplyCompatibleInPlace applies a Compatible/Additive diff without wiping
+// the container overlay. The cell is started on its existing (on-disk) spec
+// first — StartCell's spec-hash reuse path (issue #867) restarts the root
+// container on its existing containerd snapshot, so the workload's writable
+// overlay survives. Starting from `desired` instead would trip
+// ErrCellSpecHashDrift the moment a non-root child's image/command/args
+// changed; that change is applied by UpdateCell afterwards, which stops,
+// removes, recreates, and starts only the affected child (the root container —
+// and its overlay — is never touched). UpdateCell needs the root running
+// because non-root children join its namespaces, so the ordering is
+// load-bearing.
+func (b *Exec) reapplyCompatibleInPlace(
+	cell, desired intmodel.Cell, configName string,
+) (intmodel.Cell, bool, bool) {
+	started, err := b.runner.StartCell(cell)
+	if err != nil {
+		b.logger.WarnContext(b.ctx,
+			"OutOfSync reapply StartCell failed; falling back to on-disk spec",
+			"cell", cell.Metadata.Name,
+			"config", configName,
+			"error", err,
+		)
+		return intmodel.Cell{}, false, false
+	}
+
+	updated, err := b.runner.UpdateCell(desired)
+	if err != nil {
+		// The cell is already Ready from StartCell above; the persisted
+		// OutOfSync flag stays set so the next start retries the in-place
+		// apply. Honour the operator's start request with the running,
+		// not-yet-reconciled cell rather than failing.
+		b.logger.WarnContext(b.ctx,
+			"OutOfSync reapply UpdateCell failed; cell started on the on-disk spec but not reconciled",
+			"cell", cell.Metadata.Name,
+			"config", configName,
+			"error", err,
+		)
+		return started, true, true
+	}
+
+	b.logger.InfoContext(b.ctx,
+		"reapplied OutOfSync cell from lineage config on start (compatible diff; in-place, overlay preserved)",
+		"cell", cell.Metadata.Name,
+		"config", configName,
+	)
+	return updated, true, true
 }
