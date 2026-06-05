@@ -604,6 +604,54 @@ func TestDiffCell_RootContainer_NoDriftOnEqualSpec(t *testing.T) {
 	}
 }
 
+// TestDiffCell_ProvenanceIgnored pins issue #1021 AC3: the Spec.Provenance
+// block is lineage/identity data, not a runtime spec field, so a cell that
+// differs from its would-be-materialized twin *only* in provenance must not
+// report any change. Were DiffCell to compare it, the reconciler would stamp a
+// permanent false OutOfSync on every Config-lineage cell.
+func TestDiffCell_ProvenanceIgnored(t *testing.T) {
+	root := intmodel.ContainerSpec{
+		ID:    "root",
+		Root:  true,
+		Image: "busybox:latest",
+	}
+	base := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName:  "default",
+			SpaceName:  "default",
+			StackName:  "default",
+			Containers: []intmodel.ContainerSpec{root},
+			Provenance: &intmodel.CellProvenance{
+				BindingKind: "config",
+				BindingRef:  intmodel.CellBindingRef{Name: "web", Realm: "default"},
+				Params:      map[string]string{"TAG": "v1"},
+			},
+		},
+	}
+
+	// actual carries a divergent provenance block (different params, a
+	// different binding ref) but an identical runtime spec.
+	actual := base
+	actual.Spec.Provenance = &intmodel.CellProvenance{
+		BindingKind:  "config",
+		BindingRef:   intmodel.CellBindingRef{Name: "web", Realm: "default", Space: "team-b"},
+		Params:       map[string]string{"TAG": "v2"},
+		EnvOverrides: []string{"DEBUG=1"},
+	}
+
+	if diff := apply.DiffCell(base, actual); diff.HasChanges {
+		t.Errorf("provenance-only difference reported changes: %+v", diff)
+	}
+
+	// A nil-vs-set provenance must likewise be a no-op.
+	noProv := base
+	noProv.Spec.Provenance = nil
+	if diff := apply.DiffCell(base, noProv); diff.HasChanges {
+		t.Errorf("nil-vs-set provenance reported changes: %+v", diff)
+	}
+}
+
 // TestDiffContainer_RootStillBreaking ensures the single-container
 // reconcile path (ReconcileContainer) keeps the breaking-change
 // classification for root containers — the rootContainer flag flows

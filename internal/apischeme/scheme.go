@@ -1249,6 +1249,60 @@ func copyBoolPtr(in *bool) *bool {
 	return &out
 }
 
+// convertCellProvenanceToInternal copies the external cell provenance block
+// (issue #1021) into its internal mirror, deep-cloning the params map and
+// env-override slice so the two model copies never alias. Returns nil for a
+// nil input (hand-built cells carry no provenance).
+func convertCellProvenanceToInternal(in *ext.CellProvenance) *intmodel.CellProvenance {
+	if in == nil {
+		return nil
+	}
+	out := &intmodel.CellProvenance{
+		BindingKind: in.BindingKind,
+		BindingRef: intmodel.CellBindingRef{
+			Name:  in.BindingRef.Name,
+			Realm: in.BindingRef.Realm,
+			Space: in.BindingRef.Space,
+			Stack: in.BindingRef.Stack,
+		},
+		EnvOverrides: cloneStringSlice(in.EnvOverrides),
+	}
+	if in.Params != nil {
+		params := make(map[string]string, len(in.Params))
+		for k, v := range in.Params {
+			params[k] = v
+		}
+		out.Params = params
+	}
+	return out
+}
+
+// buildCellProvenanceExternalFromInternal is the internal → external inverse
+// of convertCellProvenanceToInternal. Issue #1021.
+func buildCellProvenanceExternalFromInternal(in *intmodel.CellProvenance) *ext.CellProvenance {
+	if in == nil {
+		return nil
+	}
+	out := &ext.CellProvenance{
+		BindingKind: in.BindingKind,
+		BindingRef: ext.CellBindingRef{
+			Name:  in.BindingRef.Name,
+			Realm: in.BindingRef.Realm,
+			Space: in.BindingRef.Space,
+			Stack: in.BindingRef.Stack,
+		},
+		EnvOverrides: cloneStringSlice(in.EnvOverrides),
+	}
+	if in.Params != nil {
+		params := make(map[string]string, len(in.Params))
+		for k, v := range in.Params {
+			params[k] = v
+		}
+		out.Params = params
+	}
+	return out
+}
+
 func volumeMountsToInternal(in []ext.VolumeMount) []intmodel.VolumeMount {
 	if in == nil {
 		return nil
@@ -1366,6 +1420,10 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 				// path and is dropped at persistence time by
 				// BuildCellExternalFromInternal → yaml.Marshal. Issue #834.
 				RuntimeEnv: cloneStringSlice(in.Spec.RuntimeEnv),
+				// Provenance is persisted lineage data (issue #1021), so it
+				// round-trips in both conversion directions — unlike
+				// RuntimeEnv, which the outbound builder drops.
+				Provenance: convertCellProvenanceToInternal(in.Spec.Provenance),
 			},
 			Status: intmodel.CellStatus{
 				State:              intmodel.CellState(in.Status.State),
@@ -1446,6 +1504,11 @@ func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ex
 				// operator always re-supplies --env on every invocation.
 				// The CLI → daemon direction in ConvertCellDocToInternal
 				// preserves it so the runner's OCI build sees the entries.
+				//
+				// Provenance, by contrast, IS copied here (issue #1021): it
+				// is persisted lineage data, so the disk-write doc and the RPC
+				// reply both carry it.
+				Provenance: buildCellProvenanceExternalFromInternal(in.Spec.Provenance),
 			},
 			Status: ext.CellStatus{
 				State:              ext.CellState(in.Status.State),

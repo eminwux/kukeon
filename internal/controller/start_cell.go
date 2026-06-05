@@ -157,7 +157,7 @@ func (b *Exec) reapplyOutOfSyncFromConfig(cell intmodel.Cell) (intmodel.Cell, bo
 		return intmodel.Cell{}, false, false
 	}
 
-	desired, err := materializeCellFromConfig(b.runner, cfg)
+	desired, err := materializeCellFromConfig(b.runner, cfg, cell.Metadata.Name)
 	if err != nil {
 		b.logger.WarnContext(b.ctx,
 			"OutOfSync reapply materialise failed; starting cell with on-disk spec",

@@ -26,9 +26,10 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
-// Materialize converts a CellConfig + its referenced CellBlueprint into a
-// runtime CellDoc (issue #625). It is the config analog of
-// cellblueprint.Materialize, but the two channels differ:
+// MaterializeWithName converts a CellConfig + its referenced CellBlueprint into
+// a runtime CellDoc (issue #625), naming the cell `name` verbatim. It is the
+// config analog of cellblueprint.MaterializeWithName, but the two channels
+// differ:
 //
 //   - Scalar values come from cfg.Spec.Values (not --param CLI args); the env
 //     fallback is intentionally absent because a Config's values are the
@@ -38,29 +39,25 @@ import (
 //     required slots are rejected via ValidateSlotFill; optional unfilled slots
 //     are dropped from the materialized container.
 //
-// The materialized cell carries the cellconfig.LabelConfig back-reference (AC
-// of #625) plus every label the operator set on cfg.Metadata.Labels, and uses
-// the deterministic StableName(cfg.Metadata.Name) — the affordance that makes
-// `kuke run -c` idempotent (at most one live cell per Config). The cell's
-// scope coordinates come from the Config's metadata, not the blueprint's, so a
-// Config in one realm may instantiate a Blueprint in another (cross-realm
-// references are explicitly supported by CellConfigBlueprintRef).
-func Materialize(cfg v1beta1.CellConfigDoc, bp v1beta1.CellBlueprintDoc) (v1beta1.CellDoc, error) {
-	return MaterializeWithName(cfg, bp, "")
-}
-
-// MaterializeWithName is the Materialize variant that lets the caller pin a
-// non-stable cell name — the substrate for `kuke run <config> --new` (#833;
-// originally shipped as `-c --generate-name` in #754, renamed in #833).
-// When nameOverride is empty the cell uses StableName(cfg.Metadata.Name) and the
-// idempotent-attach identity contract from #742 holds; when non-empty the name
-// is used verbatim and the caller owns identity (the `kuke run <config> --new`
-// path supplies `<cfg.Metadata.Name>-<6hex>` for the bare --new form, or the
-// operator's `--name X` value for the `--new --name X` create-or-fail form,
-// leaving the kukeon.io/config back-reference label intact so `kuke get cells
-// -l kukeon.io/config=<name>` still enumerates every spawn).
+// The materialized cell carries the cellconfig.LabelConfig lineage label (AC
+// of #625) plus every label the operator set on cfg.Metadata.Labels, and a
+// Spec.Provenance block recording the Config binding it was stamped from
+// (issue #1021). The cell's scope coordinates come from the Config's metadata,
+// not the blueprint's, so a Config in one realm may instantiate a Blueprint in
+// another (cross-realm references are explicitly supported by
+// CellConfigBlueprintRef).
+//
+// The cell name is supplied by the caller — materialization no longer derives
+// it from cfg.Metadata.Name (epic:cell-identity #1021 severs that assumption;
+// the cell's identity is the CellDoc, and the Config name is demoted to
+// lineage). Callers that want the historical stable-name identity pass
+// StableName(cfg.Metadata.Name); `kuke run <config> --new` passes a generated
+// `<config>-<6hex>`; P2 will supply a dedicated name generator. An empty name
+// is the caller's responsibility (it yields an empty-named cell that fails
+// downstream validation) — materialization intentionally does not paper over
+// it by reaching back to the Config name.
 func MaterializeWithName(
-	cfg v1beta1.CellConfigDoc, bp v1beta1.CellBlueprintDoc, nameOverride string,
+	cfg v1beta1.CellConfigDoc, bp v1beta1.CellBlueprintDoc, name string,
 ) (v1beta1.CellDoc, error) {
 	if err := ValidateSlotFill(cfg, bp); err != nil {
 		return v1beta1.CellDoc{}, err
@@ -83,10 +80,7 @@ func MaterializeWithName(
 		containers = append(containers, cs)
 	}
 
-	cellName := strings.TrimSpace(nameOverride)
-	if cellName == "" {
-		cellName = StableName(cfg.Metadata.Name)
-	}
+	cellName := strings.TrimSpace(name)
 	return v1beta1.CellDoc{
 		APIVersion: v1beta1.APIVersionV1Beta1,
 		Kind:       v1beta1.KindCell,
@@ -103,8 +97,34 @@ func MaterializeWithName(
 			Containers:          containers,
 			AutoDelete:          resolved.Spec.Cell.AutoDelete,
 			NestedCgroupRuntime: resolved.Spec.Cell.NestedCgroupRuntime,
+			Provenance:          configProvenance(cfg),
 		},
 	}, nil
+}
+
+// configProvenance builds the Spec.Provenance block for a Config-materialized
+// cell: bindingKind=config, the Config's scoped name as the binding ref, and
+// the Config's spec.values as the recorded params. EnvOverrides is left for
+// the run-time caller to populate from `--env` (the Config path's materialize
+// has no CLI env). Issue #1021.
+func configProvenance(cfg v1beta1.CellConfigDoc) *v1beta1.CellProvenance {
+	prov := &v1beta1.CellProvenance{
+		BindingKind: v1beta1.BindingKindConfig,
+		BindingRef: v1beta1.CellBindingRef{
+			Name:  strings.TrimSpace(cfg.Metadata.Name),
+			Realm: strings.TrimSpace(cfg.Metadata.Realm),
+			Space: strings.TrimSpace(cfg.Metadata.Space),
+			Stack: strings.TrimSpace(cfg.Metadata.Stack),
+		},
+	}
+	if len(cfg.Spec.Values) > 0 {
+		params := make(map[string]string, len(cfg.Spec.Values))
+		for k, v := range cfg.Spec.Values {
+			params[k] = v
+		}
+		prov.Params = params
+	}
+	return prov
 }
 
 // materializeContainer maps a (resolved) BlueprintContainer to a runtime
@@ -251,9 +271,12 @@ func materializeSecretSlot(
 }
 
 // mergeConfigLabel returns a label map combining the operator-authored labels
-// from the Config's metadata with the kukeon.io/config back-reference pointing
-// at the Config that materialized the cell. The back-reference wins on a
-// collision so a Config cannot accidentally shadow its own identity label.
+// from the Config's metadata with the kukeon.io/config lineage label pointing
+// at the Config that materialized the cell. The lineage label wins on a
+// collision so a Config cannot accidentally shadow its own provenance. The
+// relationship is 1:N — a single Config may stamp many cells (epic:cell-
+// identity #1021 demotes this label from identity to lineage); the cell's
+// identity is its own name, recorded on the CellDoc, not this label.
 func mergeConfigLabel(in map[string]string, configName string) map[string]string {
 	out := make(map[string]string, len(in)+1)
 	for k, v := range in {

@@ -253,7 +253,7 @@ func runFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags createCe
 	if err != nil {
 		return err
 	}
-	cellDoc, err := cellblueprint.MaterializeWithName(resolved, flags.name)
+	cellDoc, err := cellblueprint.MaterializeWithName(resolved, flags.name, cliParams)
 	if err != nil {
 		return err
 	}
@@ -312,7 +312,15 @@ func runFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags createCellF
 		)
 	}
 
-	cellDoc, err := cellconfig.MaterializeWithName(cfgRes.Config, bpRes.Blueprint, flags.name)
+	// The cell name is supplied here, not derived inside Materialize
+	// (epic:cell-identity #1021). Fall back to StableName when --name is
+	// absent so the create-cell config path keeps its historical stable
+	// identity; P2 replaces this with a dedicated name generator.
+	cellName := flags.name
+	if strings.TrimSpace(cellName) == "" {
+		cellName = cellconfig.StableName(cfgRes.Config.Metadata.Name)
+	}
+	cellDoc, err := cellconfig.MaterializeWithName(cfgRes.Config, bpRes.Blueprint, cellName)
 	if err != nil {
 		return err
 	}

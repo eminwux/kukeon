@@ -32,11 +32,17 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
-// LabelConfig is the cell label recording the CellConfig a cell was
+// LabelConfig is the cell *lineage* label recording the CellConfig a cell was
 // materialized from, the config analog of cellprofile.LabelProfile and
-// cellblueprint.LabelBlueprint. Set on the cell that `kuke run -c` materializes
-// (#625) so the state machine can find the at-most-one live cell a Config owns
-// (`kuke get cells -l kukeon.io/config=<name>`).
+// cellblueprint.LabelBlueprint. Set on every cell that `kuke run <config>`
+// materializes (#625) so operators can enumerate all of a Config's spawns with
+// `kuke get cells -l kukeon.io/config=<name>`.
+//
+// The relationship is 1:N, not identity (epic:cell-identity #1021): a single
+// Config may stamp many cells, and the cell's identity is its own name on the
+// CellDoc — not this label. The persisted Spec.Provenance block carries the
+// same binding reference in a typed, machine-readable form for re-resolution;
+// this label is the operator-facing, `-l`-selectable projection of it.
 const LabelConfig = "kukeon.io/config"
 
 // AnnotationSourceConfig is the metadata.annotations key a `kuke run <src>

@@ -82,6 +82,83 @@ type CellSpec struct {
 	//
 	// Issue #834.
 	RuntimeEnv []string `json:"runtimeEnv,omitempty"          yaml:"-"`
+	// Provenance records the materialization inputs this cell was stamped
+	// from — the binding it was instantiated against (a Blueprint or a
+	// Config), the scoped reference to that binding, and the scalar params /
+	// env overrides supplied at materialization time. It is the persisted
+	// record P4 re-runs to recompute the would-be desired spec for the
+	// OutOfSync diff, and the binding reference P2's name generator reads for
+	// the cell-name prefix (epic:cell-identity, umbrella #1020).
+	//
+	// Unlike RuntimeEnv (transport-only, yaml:"-"), Provenance IS persisted:
+	// it carries no yaml:"-" so it survives both the JSON metadata.json write
+	// and a `kuke get cell -o yaml` round-trip. It is identity/lineage data,
+	// not a runtime spec field, so DiffCell deliberately does not compare it
+	// (a provenance-only difference must never report a cell OutOfSync). A
+	// hand-built cell that was never materialized from a binding carries a
+	// nil Provenance. Issue #1021.
+	Provenance *CellProvenance `json:"provenance,omitempty"          yaml:"provenance,omitempty"`
+}
+
+// Binding-kind discriminants for CellProvenance.BindingKind. A cell is
+// materialized either from a Config (`kuke run <config>`) or directly from a
+// Blueprint (`kuke run -b`); the kind tells P4 which binding channel to
+// re-resolve against.
+const (
+	BindingKindConfig    = "config"
+	BindingKindBlueprint = "blueprint"
+)
+
+// CellProvenance is the typed record of the inputs a cell was materialized
+// from. See CellSpec.Provenance for the lifecycle contract. Issue #1021.
+type CellProvenance struct {
+	// BindingKind is "config" or "blueprint" (see BindingKind* constants).
+	BindingKind string `json:"bindingKind"            yaml:"bindingKind"`
+	// BindingRef is the scoped name of the Config or Blueprint this cell was
+	// materialized from — the lineage back-reference P4 re-resolves against.
+	BindingRef CellBindingRef `json:"bindingRef"            yaml:"bindingRef"`
+	// Params are the scalar values resolved into the binding at
+	// materialization time (a Config's spec.values, or a Blueprint's
+	// resolved --param map). Persisted verbatim so re-resolution does not
+	// depend on re-reading transient CLI state.
+	Params map[string]string `json:"params,omitempty"      yaml:"params,omitempty"`
+	// EnvOverrides are the `--env KEY=VALUE` entries supplied at run time.
+	// Mirrors the values RuntimeEnv carries transiently, but persisted here
+	// so a later re-resolution sees the same overrides the operator chose.
+	EnvOverrides []string `json:"envOverrides,omitempty" yaml:"envOverrides,omitempty"`
+}
+
+// CellBindingRef is a scoped reference to the Config or Blueprint a cell was
+// materialized from. The scope coordinates follow the same realm/space/stack
+// contract every scoped kind uses (realm always set; a deeper coordinate
+// requires every shallower one). Issue #1021.
+type CellBindingRef struct {
+	Name  string `json:"name"            yaml:"name"`
+	Realm string `json:"realm"           yaml:"realm"`
+	Space string `json:"space,omitempty" yaml:"space,omitempty"`
+	Stack string `json:"stack,omitempty" yaml:"stack,omitempty"`
+}
+
+// CloneCellProvenance deep-copies a *CellProvenance so mutations on a
+// materialized cell (or a converted copy) cannot leak back into a shared
+// source. Returns nil for a nil input. Issue #1021.
+func CloneCellProvenance(in *CellProvenance) *CellProvenance {
+	if in == nil {
+		return nil
+	}
+	out := &CellProvenance{
+		BindingKind:  in.BindingKind,
+		BindingRef:   in.BindingRef,
+		EnvOverrides: cloneSlice(in.EnvOverrides),
+	}
+	if in.Params != nil {
+		params := make(map[string]string, len(in.Params))
+		for k, v := range in.Params {
+			params[k] = v
+		}
+		out.Params = params
+	}
+	return out
 }
 
 // CellTty is cell-level tty/attach config. Kept intentionally minimal: only
@@ -225,6 +302,8 @@ func NewCellDoc(from *CellDoc) *CellDoc {
 		}
 		out.Spec.Containers = containers
 	}
+
+	out.Spec.Provenance = CloneCellProvenance(out.Spec.Provenance)
 
 	return &out
 }
