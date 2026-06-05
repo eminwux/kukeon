@@ -167,6 +167,17 @@ type Client interface {
 	// images and the snapshots backing live containers untouched. Returns
 	// the count of leases released vs. retained.
 	PruneImages(namespace string) (PruneResult, error)
+
+	// NamespaceStorage returns the per-namespace storage footprint —
+	// snapshot count (across every registered snapshotter in
+	// KukeonKnownSnapshotters), lease count, and content-blob count plus
+	// summed byte size. Used by `kuke status` to surface accumulation
+	// before the data volume fills (issue #1039); the figures come from
+	// containerd's metadata stores (boltdb iterators), not an on-disk
+	// du, so the call stays cheap enough for the status command's
+	// budget. Per-snapshot disk usage is intentionally omitted — it
+	// would require walking the snapshotter's filesystem.
+	NamespaceStorage(namespace string) (StorageStats, error)
 }
 
 func NewClient(ctx context.Context, logger *slog.Logger, socket string) Client {

@@ -83,6 +83,23 @@ type Result struct {
 	Status      Status `json:"status"`
 	Detail      string `json:"detail,omitempty"`
 	Remediation string `json:"remediation,omitempty"`
+	// Storage carries the structured per-realm counts the storage
+	// section surfaces — populated only on storage rows. CI tooling
+	// parses these to alert on accumulation before the data volume
+	// fills (issue #1039); the human Detail string carries the same
+	// figures pre-formatted.
+	Storage *StorageStats `json:"storage,omitempty"`
+}
+
+// StorageStats mirrors ctr.StorageStats on the wire — the per-realm
+// snapshot/lease/blob figures `kuke status` exposes for parsing. The
+// status package owns the JSON tags so a future internal/ctr struct
+// rename doesn't ripple into the public CLI contract.
+type StorageStats struct {
+	Snapshots  int   `json:"snapshots"`
+	Leases     int   `json:"leases"`
+	Blobs      int   `json:"blobs"`
+	BlobsBytes int64 `json:"blobsBytes"`
 }
 
 // Report is the full top-level payload — what --json marshals, and what the
@@ -122,14 +139,16 @@ type runCtx struct {
 }
 
 // ctrConn is the minimal ctr.Client subset status calls — the host's
-// containerd reachability check (Connect) and the state section's
-// residual-namespace probe (ListNamespaces). Close releases the dial.
-// internal/ctr's concrete *client satisfies this trivially; the test
-// mock implements only these three methods.
+// containerd reachability check (Connect), the state section's
+// residual-namespace probe (ListNamespaces), and the storage section's
+// per-namespace footprint probe (NamespaceStorage). Close releases the
+// dial. internal/ctr's concrete *client satisfies this trivially; the
+// test mock implements only these four methods.
 type ctrConn interface {
 	Connect() error
 	Close() error
 	ListNamespaces() ([]string, error)
+	NamespaceStorage(namespace string) (ctr.StorageStats, error)
 }
 
 // MockRunCtxKey is the context key tests use to inject a pre-built runCtx
@@ -302,6 +321,7 @@ func runChecks(ctx context.Context, rc *runCtx) Report {
 	results = append(results, checkDaemon(ctx, rc)...)
 	results = append(results, checkHost(rc)...)
 	results = append(results, checkState(ctx, rc)...)
+	results = append(results, checkStorage(ctx, rc)...)
 	results = append(results, checkParity(ctx, rc)...)
 
 	ok := true

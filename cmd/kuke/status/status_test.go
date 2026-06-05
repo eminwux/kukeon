@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/eminwux/kukeon/cmd/types"
+	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -82,7 +83,7 @@ func TestRunChecks_AllHealthy(t *testing.T) {
 			t.Errorf("unexpected FAIL row: %+v", c)
 		}
 	}
-	for _, want := range []string{sectionDaemon, sectionHost, sectionState, sectionParity} {
+	for _, want := range []string{sectionDaemon, sectionHost, sectionState, sectionStorage, sectionParity} {
 		if !seenSections[want] {
 			t.Errorf("section %q not represented in report", want)
 		}
@@ -651,6 +652,15 @@ func (f *fakeClient) ListConfigs(_ context.Context, _, _, _ string) ([]v1beta1.C
 type fakeCtrClient struct {
 	connectErr error
 	namespaces []string
+	// storage seeds NamespaceStorage's response keyed by containerd
+	// namespace (e.g. "default.kukeon.io"). A missing key means
+	// NamespaceStorage returns a zero StorageStats for that namespace
+	// — the no-leak case the storage section reads as OK.
+	storage map[string]ctr.StorageStats
+	// storageErr seeds NamespaceStorage's error path; a non-nil value
+	// fails every call, mirroring the metadata-store-unreachable
+	// branch the storage check demotes to WARN.
+	storageErr error
 }
 
 func (f *fakeCtrClient) Connect() error { return f.connectErr }
@@ -660,4 +670,10 @@ func (f *fakeCtrClient) ListNamespaces() ([]string, error) {
 		return nil, f.connectErr
 	}
 	return f.namespaces, nil
+}
+func (f *fakeCtrClient) NamespaceStorage(ns string) (ctr.StorageStats, error) {
+	if f.storageErr != nil {
+		return ctr.StorageStats{}, f.storageErr
+	}
+	return f.storage[ns], nil
 }
