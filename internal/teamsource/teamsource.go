@@ -318,9 +318,14 @@ func sshKeyOf(tc *model.TeamsConfig) string {
 	return strings.TrimSpace(tc.Spec.Git.SSHKey)
 }
 
-// RolePath is the on-disk role.yaml location for ref under cacheDir.
+// RolePath is the on-disk role.yaml location for ref under cacheDir. Roles
+// live at the agents source's top level (<cacheDir>/<ref>/role.yaml) — the
+// asymmetry vs the `harnesses/`-nested HarnessPath / ImageCatalogPath layout
+// matches the canonical agents repo (github.com/eminwux/agents), which keeps
+// each role under its own top-level directory and groups harnesses (plus the
+// shared images.yaml) under a `harnesses/` umbrella.
 func RolePath(cacheDir, ref string) string {
-	return filepath.Join(cacheDir, "roles", ref, "role.yaml")
+	return filepath.Join(cacheDir, ref, "role.yaml")
 }
 
 // HarnessPath is the on-disk harness.yaml location for name under cacheDir.
@@ -333,9 +338,9 @@ func ImageCatalogPath(cacheDir string) string {
 	return filepath.Join(cacheDir, "harnesses", "images.yaml")
 }
 
-// LoadRole reads <cacheDir>/roles/<ref>/role.yaml, parses it via the
-// kuketeams parser, and returns the typed Role. A document of the wrong kind
-// surfaces ErrTeamRoleFileKind; parse errors carry the file path verbatim.
+// LoadRole reads <cacheDir>/<ref>/role.yaml, parses it via the kuketeams
+// parser, and returns the typed Role. A document of the wrong kind surfaces
+// ErrTeamRoleFileKind; parse errors carry the file path verbatim.
 func LoadRole(cacheDir, ref string) (*model.Role, error) {
 	path := RolePath(cacheDir, ref)
 	doc, err := parseFile(path)
