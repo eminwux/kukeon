@@ -45,31 +45,20 @@ import (
 // this label is the operator-facing, `-l`-selectable projection of it.
 const LabelConfig = "kukeon.io/config"
 
-// AnnotationSourceConfig is the metadata.annotations key a `kuke run <src>
-// --clone` (#839) sets on the clone Config it forks from <src>. It is the
-// lineage marker for the counter allocator (which scans clones of a given
-// source to pick the lowest-unused N) and the filter key for
-// `kuke get cellconfigs --annotation kukeon.io/source-config=<src>` (a future
-// list filter — the bare `kuke get cellconfigs` already surfaces the
-// annotations on the wire).
-const AnnotationSourceConfig = "kukeon.io/source-config"
-
-// StableName derives the deterministic name of the cell a CellConfig
-// materializes from the config's metadata.name.
+// Prefix resolves the cell-name prefix the unified generator uses for a cell
+// materialized from this Config (epic:cell-identity #1022): Spec.Prefix when
+// set, else the config's metadata.name. It mirrors cellblueprint.Prefix.
 //
-// Decision (issue #624 AC): the derivation is the config name *verbatim*, not
-// `<name>-<hash-of-values>`. The CellConfig contract is "one Config → at most
-// one live cell within scope" with a stable identity that survives edits to the
-// config's values; #753's refuse-on-divergence behavior relies on the stable
-// name so `kuke run <config>` finds the same live cell across invocations
-// whether it attaches (clean spec match) or refuses with a
-// `kuke restart <name>` pointer. A value-hashed suffix would change the
-// derived name on every value edit,
-// spawning a fresh cell and orphaning the old one — defeating the idempotent
-// identity that distinguishes a Config (`run -c`) from a Blueprint's
-// always-fresh `<prefix>-<6hex>` (`run -b`). So the name is value-independent.
-func StableName(configName string) string {
-	return strings.TrimSpace(configName)
+// This is the prefix-default helper that replaces the retired StableName
+// identity pin. A Config is no longer a 1:1 identity (#1020 moves identity onto
+// the CellDoc): a `create cell --from-config` with no explicit name yields a
+// fresh `<prefix>-<6hex>` cell, so Prefix supplies only the leading segment,
+// never the whole deterministic name.
+func Prefix(cfg v1beta1.CellConfigDoc) string {
+	if p := strings.TrimSpace(cfg.Spec.Prefix); p != "" {
+		return p
+	}
+	return strings.TrimSpace(cfg.Metadata.Name)
 }
 
 // ValidateSlotFill checks a CellConfig's structural slot fills against the slots

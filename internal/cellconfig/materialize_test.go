@@ -82,14 +82,14 @@ func TestMaterialize_HappyPath_FillsRepoAndSecretSlots(t *testing.T) {
 		},
 	}
 
-	cell, err := MaterializeWithName(cfg, bp, StableName(cfg.Metadata.Name))
+	cell, err := MaterializeWithName(cfg, bp, Prefix(cfg))
 	if err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
 
 	// Deterministic name + back-ref label.
 	if got := cell.Metadata.Name; got != "prod" {
-		t.Errorf("cell name=%q want prod (StableName(config.Name))", got)
+		t.Errorf("cell name=%q want prod (Prefix(config))", got)
 	}
 	if got := cell.Metadata.Labels[LabelConfig]; got != "prod" {
 		t.Errorf("LabelConfig=%q want prod", got)
@@ -181,7 +181,7 @@ func TestMaterialize_RequiredRepoSlotUnfilled_Errors(t *testing.T) {
 		},
 	}
 
-	_, err := MaterializeWithName(cfg, bp, StableName(cfg.Metadata.Name))
+	_, err := MaterializeWithName(cfg, bp, Prefix(cfg))
 	if err == nil || !errors.Is(err, errdefs.ErrConfigRequiredSlotUnfilled) {
 		t.Fatalf("err=%v want ErrConfigRequiredSlotUnfilled", err)
 	}
@@ -205,7 +205,7 @@ func TestMaterialize_UnknownSlotFill_Errors(t *testing.T) {
 		},
 	}
 
-	_, err := MaterializeWithName(cfg, bp, StableName(cfg.Metadata.Name))
+	_, err := MaterializeWithName(cfg, bp, Prefix(cfg))
 	if err == nil || !errors.Is(err, errdefs.ErrConfigUnknownRepoSlot) {
 		t.Fatalf("err=%v want ErrConfigUnknownRepoSlot", err)
 	}
@@ -229,7 +229,7 @@ func TestMaterialize_OptionalSlotUnfilled_Drops(t *testing.T) {
 		},
 	}
 
-	cell, err := MaterializeWithName(cfg, bp, StableName(cfg.Metadata.Name))
+	cell, err := MaterializeWithName(cfg, bp, Prefix(cfg))
 	if err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestMaterialize_RepoFillRefCarriesThrough(t *testing.T) {
 			},
 		},
 	}
-	cell, err := MaterializeWithName(cfg, bp, StableName(cfg.Metadata.Name))
+	cell, err := MaterializeWithName(cfg, bp, Prefix(cfg))
 	if err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestMaterialize_ScalarRepoPassesThrough(t *testing.T) {
 		Metadata:   v1beta1.CellConfigMetadata{Name: "prod", Realm: "cfg-realm"},
 		Spec:       v1beta1.CellConfigSpec{Blueprint: v1beta1.CellConfigBlueprintRef{Name: "lib", Realm: "bp-realm"}},
 	}
-	cell, err := MaterializeWithName(cfg, bp, StableName(cfg.Metadata.Name))
+	cell, err := MaterializeWithName(cfg, bp, Prefix(cfg))
 	if err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestMaterialize_PropagatesResolveError(t *testing.T) {
 		},
 	}
 
-	_, err := MaterializeWithName(cfg, bp, StableName(cfg.Metadata.Name))
+	_, err := MaterializeWithName(cfg, bp, Prefix(cfg))
 	if err == nil || !errors.Is(err, errdefs.ErrBlueprintInvalid) {
 		t.Fatalf("err=%v want ErrBlueprintInvalid (required param TAG unset)", err)
 	}
@@ -388,7 +388,7 @@ func TestMaterializeWithName_UsesNameVerbatim(t *testing.T) {
 // assumption (epic:cell-identity #1021): materialization no longer reaches back
 // to cfg.Metadata.Name when the caller passes an empty name. The empty name is
 // the caller's responsibility — materialize must NOT silently substitute
-// StableName(cfg.Metadata.Name) the way the pre-#1021 path did. The lineage
+// Prefix(cfg) the way the pre-#1021 path did. The lineage
 // label is still stamped regardless of the name.
 func TestMaterializeWithName_EmptyNameNotDerivedFromConfig(t *testing.T) {
 	bp := minimalBlueprint()
@@ -459,35 +459,5 @@ func TestMaterializeWithName_StampsConfigProvenance(t *testing.T) {
 	}
 	if got := prov.Params["TAG"]; got != "v2" {
 		t.Errorf("params[TAG]=%q want v2", got)
-	}
-}
-
-// TestGenerateName_ShapeAndUniqueness pins the `<config-name>-<6hex>` shape
-// and verifies independent calls return distinct suffixes.
-func TestGenerateName_ShapeAndUniqueness(t *testing.T) {
-	const cfgName = "prod"
-	seen := make(map[string]struct{}, 16)
-	for range 16 {
-		got, err := GenerateName(cfgName)
-		if err != nil {
-			t.Fatalf("GenerateName: %v", err)
-		}
-		prefix := cfgName + "-"
-		if len(got) != len(prefix)+6 {
-			t.Errorf("GenerateName len=%d (%q) want %d (`<config-name>-<6hex>`)", len(got), got, len(prefix)+6)
-		}
-		if got[:len(prefix)] != prefix {
-			t.Errorf("GenerateName prefix=%q want %q", got[:len(prefix)], prefix)
-		}
-		for _, r := range got[len(prefix):] {
-			if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
-				t.Errorf("GenerateName suffix rune %q in %q not lowercase hex", r, got)
-				break
-			}
-		}
-		if _, dup := seen[got]; dup {
-			t.Errorf("GenerateName produced duplicate name %q across 16 calls", got)
-		}
-		seen[got] = struct{}{}
 	}
 }

@@ -70,7 +70,7 @@ func TestDivergedFields_MaterializePersistMaterializeIsIdempotent(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			// Step 1: Materialize what `kuke restart` would push through
 			// ApplyDocuments.
-			cell1, err := cellconfig.MaterializeWithName(tc.cfg, tc.bp, cellconfig.StableName(tc.cfg.Metadata.Name))
+			cell1, err := cellconfig.MaterializeWithName(tc.cfg, tc.bp, cellconfig.Prefix(tc.cfg))
 			if err != nil {
 				t.Fatalf("Materialize (restart side): %v", err)
 			}
@@ -123,7 +123,7 @@ func TestDivergedFields_MaterializePersistMaterializeIsIdempotent(t *testing.T) 
 			}
 
 			// Step 4: Re-Materialize as the next `kuke run <config>` would.
-			cell2, err := cellconfig.MaterializeWithName(tc.cfg, tc.bp, cellconfig.StableName(tc.cfg.Metadata.Name))
+			cell2, err := cellconfig.MaterializeWithName(tc.cfg, tc.bp, cellconfig.Prefix(tc.cfg))
 			if err != nil {
 				t.Fatalf("Materialize (run side): %v", err)
 			}

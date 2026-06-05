@@ -189,8 +189,8 @@ func lookupLineageConfig(
 // diff never trips on metadata.name — materialization no longer derives the
 // name from the Config name (epic:cell-identity #1021), and the OutOfSync
 // detector compares *spec drift*, not identity. This keeps the detector
-// correct once P2 lands generated cell names that no longer match
-// StableName(configName).
+// correct now that P2 (#1022) lands generated cell names that no longer match
+// the Config name (the legacy StableName pin, retired in P2).
 func materializeCellFromConfig(
 	r runner.Runner, cfg intmodel.CellConfig, cellName string,
 ) (intmodel.Cell, error) {
