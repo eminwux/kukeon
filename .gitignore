@@ -1,5 +1,6 @@
 /zold/
 /kuke*
+!/kuketeam.yaml
 /kukeond
 # go.work is committed (wires the cmd/kukebuild module for editor / gopls
 # navigation, issue #655) but go.work.sum is not: builds run per-module
