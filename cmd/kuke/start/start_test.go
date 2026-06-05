@@ -37,10 +37,10 @@ import (
 func TestNewStartCmdMetadata(t *testing.T) {
 	cmd := startpkg.NewStartCmd()
 
-	if cmd.Use != "start <name>" {
-		t.Errorf("Use mismatch: got %q want %q", cmd.Use, "start <name>")
+	if cmd.Use != "start [name]" {
+		t.Errorf("Use mismatch: got %q want %q", cmd.Use, "start [name]")
 	}
-	if cmd.Short != "Start a cell" {
+	if cmd.Short != "Start a cell (or a fleet via -l <selector>)" {
 		t.Errorf("Short mismatch: got %q", cmd.Short)
 	}
 	if !cmd.HasAlias("sta") {
@@ -49,10 +49,13 @@ func TestNewStartCmdMetadata(t *testing.T) {
 	if cmd.Args == nil {
 		t.Errorf("expected Args validator on positional leaf, got nil")
 	}
-	for _, f := range []string{"realm", "space", "stack"} {
+	for _, f := range []string{"realm", "space", "stack", "selector"} {
 		if cmd.Flag(f) == nil {
 			t.Errorf("expected flag --%s to be registered", f)
 		}
+	}
+	if cmd.Flag("selector").Shorthand != "l" {
+		t.Errorf("expected --selector shorthand -l, got %q", cmd.Flag("selector").Shorthand)
 	}
 	if cmd.ValidArgsFunction == nil {
 		t.Error("expected ValidArgsFunction to be set for cell-name completion")
@@ -109,9 +112,43 @@ func TestStartCmd(t *testing.T) {
 			wantErr: "cell not found",
 		},
 		{
-			name:    "missing positional",
+			name:    "no name and no selector",
 			args:    []string{},
-			wantErr: "accepts 1 arg",
+			wantErr: "cell name is required",
+		},
+		{
+			name:    "name and selector are mutually exclusive",
+			args:    []string{"c1", "-l", "env=prod"},
+			wantErr: "--selector cannot be combined with a resource name",
+		},
+		{
+			name: "selector fan-out starts every matched cell",
+			args: []string{"-l", "env=prod"},
+			fake: &fakeClient{
+				listCellsFn: func() ([]v1beta1.CellDoc, error) {
+					return []v1beta1.CellDoc{
+						cellWithLabels("c1", "r1", "s1", "st1", map[string]string{"env": "prod"}),
+						cellWithLabels("c2", "r1", "s1", "st1", map[string]string{"env": "dev"}),
+						cellWithLabels("c3", "r2", "s2", "st2", map[string]string{"env": "prod"}),
+					}, nil
+				},
+				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+					return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
+				},
+			},
+			wantOutput: `Started cell "c1" from stack "st1"`,
+		},
+		{
+			name: "selector matching nothing reports no match",
+			args: []string{"-l", "env=staging"},
+			fake: &fakeClient{
+				listCellsFn: func() ([]v1beta1.CellDoc, error) {
+					return []v1beta1.CellDoc{
+						cellWithLabels("c1", "r1", "s1", "st1", map[string]string{"env": "prod"}),
+					}, nil
+				},
+			},
+			wantOutput: "No cells matched the selector.",
 		},
 	}
 	for _, tt := range tests {
@@ -152,9 +189,10 @@ func TestStartCmd(t *testing.T) {
 }
 
 // TestStartCmd_RejectsCellSubcommand pins the hard CLI break: the `start cell <name>` subcommand form
-// must fail with cobra's Args-validation error (`accepts 1 arg(s), received 2`)
-// after the collapse — the verb is now a leaf with `cobra.ExactArgs(1)` and no
-// subcommand list, so cobra's unknown-command path no longer fires.
+// must fail with cobra's Args-validation error (`accepts at most 1 arg(s), received 2`)
+// after the collapse — the verb is now a leaf with `cobra.MaximumNArgs(1)` (a bare
+// name or a bare `-l` selector, never two positionals) and no subcommand list, so
+// cobra's unknown-command path no longer fires.
 func TestStartCmd_RejectsCellSubcommand(t *testing.T) {
 	cmd := startpkg.NewStartCmd()
 	buf := &bytes.Buffer{}
@@ -172,11 +210,84 @@ type fakeClient struct {
 	kukeonv1.FakeClient
 
 	startCellFn func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error)
+	listCellsFn func() ([]v1beta1.CellDoc, error)
+	started     []string
 }
 
 func (f *fakeClient) StartCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
 	if f.startCellFn == nil {
 		return kukeonv1.StartCellResult{}, errors.New("unexpected StartCell call")
 	}
+	f.started = append(f.started, doc.Metadata.Name)
 	return f.startCellFn(doc)
+}
+
+func (f *fakeClient) ListCells(_ context.Context, _, _, _ string) ([]v1beta1.CellDoc, error) {
+	if f.listCellsFn == nil {
+		return nil, errors.New("unexpected ListCells call")
+	}
+	return f.listCellsFn()
+}
+
+// cellWithLabels builds a minimal CellDoc carrying the given scope and labels
+// for selector fan-out tests.
+func cellWithLabels(name, realm, space, stack string, labels map[string]string) v1beta1.CellDoc {
+	return v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: name, Labels: labels},
+		Spec: v1beta1.CellSpec{
+			ID:      name,
+			RealmID: realm,
+			SpaceID: space,
+			StackID: stack,
+		},
+	}
+}
+
+// TestStartCmd_SelectorFanOutIndividual pins AC #1: `-l` re-resolves every
+// matched cell individually and leaves unmatched cells untouched.
+func TestStartCmd_SelectorFanOutIndividual(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	viper.Reset()
+
+	fake := &fakeClient{
+		listCellsFn: func() ([]v1beta1.CellDoc, error) {
+			return []v1beta1.CellDoc{
+				cellWithLabels("c1", "r1", "s1", "st1", map[string]string{"env": "prod"}),
+				cellWithLabels("c2", "r1", "s1", "st1", map[string]string{"env": "dev"}),
+				cellWithLabels("c3", "r2", "s2", "st2", map[string]string{"env": "prod"}),
+			}, nil
+		},
+		startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+			return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
+		},
+	}
+
+	cmd := startpkg.NewStartCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, startpkg.MockControllerKey{}, kukeonv1.Client(fake))
+	cmd.SetContext(ctx)
+	cmd.SetArgs([]string{"-l", "env=prod"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := []string{"c1", "c3"}
+	if len(fake.started) != len(want) {
+		t.Fatalf("started %v, want %v", fake.started, want)
+	}
+	for i, name := range want {
+		if fake.started[i] != name {
+			t.Errorf("started[%d] = %q, want %q (started=%v)", i, fake.started[i], name, fake.started)
+		}
+	}
+	for _, name := range fake.started {
+		if name == "c2" {
+			t.Errorf("unmatched cell c2 was started; fan-out must leave it untouched")
+		}
+	}
 }
