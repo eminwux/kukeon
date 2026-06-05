@@ -31,10 +31,11 @@ import (
 // Section names — kept as constants so the renderer's section grouping and
 // the JSON `section` field are spelled the same way everywhere.
 const (
-	sectionDaemon = "daemon"
-	sectionHost   = "host"
-	sectionState  = "state"
-	sectionParity = "parity"
+	sectionDaemon  = "daemon"
+	sectionHost    = "host"
+	sectionState   = "state"
+	sectionStorage = "storage"
+	sectionParity  = "parity"
 )
 
 // checkDaemon reports the daemon's reachability. The single row carries the

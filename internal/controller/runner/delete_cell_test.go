@@ -207,6 +207,10 @@ func (c *deleteCellFakeClient) PruneImages(string) (ctr.PruneResult, error) {
 	return ctr.PruneResult{}, nil
 }
 
+func (c *deleteCellFakeClient) NamespaceStorage(string) (ctr.StorageStats, error) {
+	return ctr.StorageStats{}, nil
+}
+
 var _ ctr.Client = (*deleteCellFakeClient)(nil)
 
 // newDeleteCellTestExec builds a *Exec wired to the fake ctr.Client and an

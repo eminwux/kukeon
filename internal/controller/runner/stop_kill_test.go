@@ -172,6 +172,10 @@ func (c *stopKillFakeClient) PruneImages(string) (ctr.PruneResult, error) {
 	return ctr.PruneResult{}, nil
 }
 
+func (c *stopKillFakeClient) NamespaceStorage(string) (ctr.StorageStats, error) {
+	return ctr.StorageStats{}, nil
+}
+
 var _ ctr.Client = (*stopKillFakeClient)(nil)
 
 func newStopKillTestExec(t *testing.T, fake *stopKillFakeClient) *Exec {

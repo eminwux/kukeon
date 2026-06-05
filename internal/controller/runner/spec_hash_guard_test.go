@@ -174,6 +174,9 @@ func (c *specHashFakeClient) DeleteImage(string, string) error                  
 func (c *specHashFakeClient) PruneImages(string) (ctr.PruneResult, error) {
 	return ctr.PruneResult{}, nil
 }
+func (c *specHashFakeClient) NamespaceStorage(string) (ctr.StorageStats, error) {
+	return ctr.StorageStats{}, nil
+}
 
 var _ ctr.Client = (*specHashFakeClient)(nil)
 

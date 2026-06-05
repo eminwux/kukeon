@@ -8,15 +8,15 @@ Report kukeon daemon, host, state, and parity health.
 
 Run the consolidated health report that replaces the manual `kuke get realms` vs `kuke get realms --no-daemon` diff ritual.
 
-Sections: daemon (socket dialable, round-trip, version), host (containerd, cgroup-v2, CNI plugins), state (orphan sockets, residual containerd namespaces), parity (every `kuke get <kind>` agrees daemon-side vs in-process). Each line is OK / WARN / FAIL with a one-line remediation hint when the status is not OK.
+Sections: daemon (socket dialable, round-trip, version), host (containerd, cgroup-v2, CNI plugins), state (orphan sockets, residual containerd namespaces), storage (per-realm snapshot / lease / content-blob footprint), parity (every `kuke get <kind>` agrees daemon-side vs in-process). Each line is OK / WARN / FAIL with a one-line remediation hint when the status is not OK.
 
 Exit code 0 when every check is OK or WARN; non-zero when any line is FAIL. The `--json` form is the machine-readable shape for CI integration; `--verbose` surfaces the remediation hint on OK rows too.
 
 ## Flags
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--json` | `false` | emit a JSON document instead of the human-readable table |
+| Flag        | Default | Description                                                 |
+| ----------- | ------- | ----------------------------------------------------------- |
+| `--json`    | `false` | emit a JSON document instead of the human-readable table    |
 | `--verbose` | `false` | print the remediation hint on every row, not just WARN/FAIL |
 
 Plus all [global flags](kuke.md).
@@ -48,6 +48,10 @@ STATE
   run-dir     OK    /run/kukeon (no orphan sockets)
   namespaces  OK    no residual containerd namespaces
 
+STORAGE
+  default      OK    default.kukeon.io (12 snapshots, 49 leases, 24 blobs, 5.0 MiB)
+  kuke-system  OK    kuke-system.kukeon.io (157 snapshots, 266 leases, 180 blobs, 700.0 MiB)
+
 PARITY
   realms      OK    daemon view matches in-process view
   spaces      OK    daemon view matches in-process view
@@ -63,7 +67,7 @@ Status: OK
 
 ### JSON (`--json`)
 
-`--json` emits the same report as a 2-space-indented JSON document. The `status` field renders the human label (`"OK"` / `"WARN"` / `"FAIL"`) rather than an integer so the wire shape doesn't depend on enum order. The shape is the `Report` struct in [`cmd/kuke/status/status.go`](https://github.com/eminwux/kukeon/blob/main/cmd/kuke/status/status.go) — a top-level `ok` bool plus a flat `checks` array, with each row carrying `section`, `name`, `status`, `detail`, and an optional `remediation`.
+`--json` emits the same report as a 2-space-indented JSON document. The `status` field renders the human label (`"OK"` / `"WARN"` / `"FAIL"`) rather than an integer so the wire shape doesn't depend on enum order. The shape is the `Report` struct in [`cmd/kuke/status/status.go`](https://github.com/eminwux/kukeon/blob/main/cmd/kuke/status/status.go) — a top-level `ok` bool plus a flat `checks` array, with each row carrying `section`, `name`, `status`, `detail`, an optional `remediation`, and (on storage rows) an optional `storage` payload (`snapshots`, `leases`, `blobs`, `blobsBytes`) so CI tooling can alert on accumulation without parsing the human Detail string.
 
 ```json
 {
@@ -80,6 +84,18 @@ Status: OK
       "name": "containerd",
       "status": "OK",
       "detail": "/run/containerd/containerd.sock (reachable)"
+    },
+    {
+      "section": "storage",
+      "name": "default",
+      "status": "OK",
+      "detail": "default.kukeon.io (12 snapshots, 49 leases, 24 blobs, 5.0 MiB)",
+      "storage": {
+        "snapshots": 12,
+        "leases": 49,
+        "blobs": 24,
+        "blobsBytes": 5242880
+      }
     }
   ]
 }
@@ -89,12 +105,13 @@ A failing daemon dial yields `"status": "FAIL"` plus a populated `remediation` f
 
 ## What each section checks
 
-| Section | What it asserts |
-| ------- | --------------- |
-| `daemon` | The `kukeond` socket dials, an RPC round-trip returns the daemon's build version, and the round-trip latency is recorded. Replaces the original `kuke ping` proposal. |
-| `host` | `containerd` is reachable on the configured socket; cgroup-v2 is mounted on `/sys/fs/cgroup` with the controllers kukeon requires delegated (the same controller-set check as `kuke doctor cgroups`); the CNI binaries `kuke init` installs are present under `/opt/cni/bin`. |
-| `state` | The run-dir under `/run/kukeon` has no orphan sockets, and no residual containerd namespaces survive from a half-cleaned `kuke uninstall`. |
-| `parity` | For every resource kind (`realm`, `space`, `stack`, `cell`, `container`, `secret`, `blueprint`, `config`), the daemon's view and the in-process controller's view agree. This is the cross-kind generalization of the two-line `kuke get realms` diff the `make dev-init` smoke pins. |
+| Section   | What it asserts                                                                                                                                                                                                                                                                                                                                                                           |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `daemon`  | The `kukeond` socket dials, an RPC round-trip returns the daemon's build version, and the round-trip latency is recorded. Replaces the original `kuke ping` proposal.                                                                                                                                                                                                                     |
+| `host`    | `containerd` is reachable on the configured socket; cgroup-v2 is mounted on `/sys/fs/cgroup` with the controllers kukeon requires delegated (the same controller-set check as `kuke doctor cgroups`); the CNI binaries `kuke init` installs are present under `/opt/cni/bin`.                                                                                                             |
+| `state`   | The run-dir under `/run/kukeon` has no orphan sockets, and no residual containerd namespaces survive from a half-cleaned `kuke uninstall`.                                                                                                                                                                                                                                                |
+| `storage` | For every realm, the containerd namespace's snapshot count, lease count, and content-blob count plus summed byte size. Surfaces snapshot/lease/content accumulation early so a leak is visible before the data volume hits ENOSPC. Per-snapshot disk usage is intentionally omitted — the figures come from containerd metadata-store iterators (cheap), not an on-disk `du` (expensive). |
+| `parity`  | For every resource kind (`realm`, `space`, `stack`, `cell`, `container`, `secret`, `blueprint`, `config`), the daemon's view and the in-process controller's view agree. This is the cross-kind generalization of the two-line `kuke get realms` diff the `make dev-init` smoke pins.                                                                                                     |
 
 See [`CLAUDE.md` §"Post-init: `kuke status`"](https://github.com/eminwux/kukeon/blob/main/CLAUDE.md) for the operator narrative that positions this command inside the dev-init smoke loop; this page is the reference.
 
