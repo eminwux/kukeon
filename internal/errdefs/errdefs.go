@@ -407,6 +407,12 @@ var (
 	ErrRepoTargetRequired    = errors.New("repo target is required")
 	ErrRepoTargetNotAbsolute = errors.New("repo target must be an absolute container path")
 	ErrRepoURLRequired       = errors.New("repo url is required")
+	// ErrRepoBranchRefMutex fires when a ContainerRepo declares both
+	// `branch` (moving target) and `ref` (immutable tag or commit SHA).
+	// The two have different fetch-path semantics — `ref` skips the
+	// fast-forward step that breaks on a detached HEAD — so the spec must
+	// pick one (#1034).
+	ErrRepoBranchRefMutex = errors.New("repo cannot set both branch and ref")
 
 	// CellBlueprint kind (kind: CellBlueprint) storage-primitive errors
 	// (issue #620, phase 4a-i of #423).

@@ -567,6 +567,9 @@ func validateBlueprintRepos(repos []v1beta1.ContainerRepo) error {
 		if !filepath.IsAbs(target) {
 			return fmt.Errorf("%w (repos[%d] %q target %q)", errdefs.ErrRepoTargetNotAbsolute, i, name, target)
 		}
+		if strings.TrimSpace(r.Branch) != "" && strings.TrimSpace(r.Ref) != "" {
+			return fmt.Errorf("%w (repos[%d] %q)", errdefs.ErrRepoBranchRefMutex, i, name)
+		}
 	}
 	return nil
 }
@@ -624,6 +627,12 @@ func validateConfig(doc *Document) *ValidationError {
 			return &ValidationError{
 				Index: doc.Index, Kind: doc.Kind, Name: cfg.Metadata.Name,
 				Err: fmt.Errorf("%w (repos[%q])", errdefs.ErrConfigRepoFillURLRequired, name),
+			}
+		}
+		if strings.TrimSpace(fill.Branch) != "" && strings.TrimSpace(fill.Ref) != "" {
+			return &ValidationError{
+				Index: doc.Index, Kind: doc.Kind, Name: cfg.Metadata.Name,
+				Err: fmt.Errorf("%w (repos[%q])", errdefs.ErrRepoBranchRefMutex, name),
 			}
 		}
 	}
@@ -735,6 +744,9 @@ func validateRepos(repos []v1beta1.ContainerRepo) error {
 		}
 		if strings.TrimSpace(r.URL) == "" {
 			return fmt.Errorf("%w (repos[%d] %q)", errdefs.ErrRepoURLRequired, i, name)
+		}
+		if strings.TrimSpace(r.Branch) != "" && strings.TrimSpace(r.Ref) != "" {
+			return fmt.Errorf("%w (repos[%d] %q)", errdefs.ErrRepoBranchRefMutex, i, name)
 		}
 	}
 	return nil

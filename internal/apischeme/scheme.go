@@ -998,6 +998,7 @@ func reposToInternal(in []ext.ContainerRepo) []intmodel.ContainerRepo {
 			Name:     r.Name,
 			Target:   r.Target,
 			Branch:   r.Branch,
+			Ref:      r.Ref,
 			URL:      r.URL,
 			Required: r.Required,
 		}
@@ -1016,6 +1017,7 @@ func reposToExternal(in []intmodel.ContainerRepo) []ext.ContainerRepo {
 			Name:     r.Name,
 			Target:   r.Target,
 			Branch:   r.Branch,
+			Ref:      r.Ref,
 			URL:      r.URL,
 			Required: r.Required,
 		}

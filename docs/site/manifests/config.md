@@ -65,10 +65,11 @@ Structural repo slot fills, keyed by the blueprint's repo slot `name`. Each entr
 
 #### CellConfigRepoFill
 
-| Field    | Type   | Required | Description                                                 |
-| -------- | ------ | -------- | ----------------------------------------------------------- |
-| `url`    | string | yes      | The clone URL filling the slot.                             |
-| `branch` | string | no       | The branch to check out. Empty clones the remote's default. |
+| Field    | Type   | Required | Description                                                                                                                                                        |
+| -------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `url`    | string | yes      | The clone URL filling the slot.                                                                                                                                    |
+| `branch` | string | no       | The branch to check out (moving target). Empty clones the remote's default. Mutually exclusive with `ref`.                                                         |
+| `ref`    | string | no       | Immutable pin — tag name or full commit SHA. Survives in-place restarts (see [ContainerRepo `ref`](container.md#containerrepo)). Mutually exclusive with `branch`. |
 
 ### `spec.secrets` (map[string][SecretFill](#cellconfigsecretfill), optional)
 

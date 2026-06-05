@@ -116,8 +116,17 @@ func resolveRepo(ctx context.Context, repo v1beta1.ContainerRepo, logger *slog.L
 	return status
 }
 
-// cloneRepo clones repo.URL into repo.Target, optionally pinned to repo.Branch.
+// cloneRepo clones repo.URL into repo.Target. When repo.Ref is set the clone
+// fetches the default branch (plus all refs/tags) and then detaches HEAD at
+// the pinned ref — supports both a tag name and a full commit SHA. Otherwise
+// repo.Branch (if set) is forwarded to `git clone --branch`.
 func cloneRepo(ctx context.Context, repo v1beta1.ContainerRepo) error {
+	if repo.Ref != "" {
+		if err := runGit(ctx, "", "clone", repo.URL, repo.Target); err != nil {
+			return err
+		}
+		return runGit(ctx, repo.Target, "checkout", "--detach", repo.Ref)
+	}
 	args := []string{"clone"}
 	if repo.Branch != "" {
 		args = append(args, "--branch", repo.Branch)
@@ -126,10 +135,19 @@ func cloneRepo(ctx context.Context, repo v1beta1.ContainerRepo) error {
 	return runGit(ctx, "", args...)
 }
 
-// fetchRepo updates an existing checkout: fetch the remote, then (when a branch
-// is requested) check it out and fast-forward. A non-fast-forwardable local
-// state surfaces as an error rather than a silent divergence.
+// fetchRepo updates an existing checkout. For a Ref-pinned repo (immutable tag
+// or commit SHA) the path is fetch-tags + checkout --detach, with no
+// fast-forward — `git pull --ff-only` on a detached HEAD has no upstream and
+// would error, so a tag pin only survived a fresh clone before this branch
+// (#1034). For a branch-tracking repo the prior fetch + checkout + ff-only
+// path is preserved.
 func fetchRepo(ctx context.Context, repo v1beta1.ContainerRepo) error {
+	if repo.Ref != "" {
+		if err := runGit(ctx, repo.Target, "fetch", "--prune", "--tags", "origin"); err != nil {
+			return err
+		}
+		return runGit(ctx, repo.Target, "checkout", "--detach", repo.Ref)
+	}
 	if err := runGit(ctx, repo.Target, "fetch", "--prune", "origin"); err != nil {
 		return err
 	}

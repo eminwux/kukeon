@@ -242,6 +242,44 @@ func TestMaterialize_OptionalSlotUnfilled_Drops(t *testing.T) {
 	}
 }
 
+func TestMaterialize_RepoFillRefCarriesThrough(t *testing.T) {
+	// A CellConfig repo fill with `ref` (immutable pin) must carry the ref
+	// into the materialized ContainerRepo so kuketty's clone path detaches
+	// HEAD at the pinned tag/SHA (#1034).
+	bp := minimalBlueprint()
+	cfg := v1beta1.CellConfigDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindCellConfig,
+		Metadata:   v1beta1.CellConfigMetadata{Name: "prod", Realm: "cfg-realm"},
+		Spec: v1beta1.CellConfigSpec{
+			Blueprint: v1beta1.CellConfigBlueprintRef{Name: "web", Realm: "bp-realm"},
+			Repos: map[string]v1beta1.CellConfigRepoFill{
+				"src": {URL: "https://example.com/src.git", Ref: "v0.1.0"},
+			},
+			Secrets: map[string]v1beta1.CellConfigSecretFill{
+				"token": {SecretRef: &v1beta1.ContainerSecretRef{Name: "t", Realm: "cfg-realm"}},
+			},
+		},
+	}
+	cell, err := Materialize(cfg, bp)
+	if err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	c := cell.Spec.Containers[0]
+	var src v1beta1.ContainerRepo
+	for _, r := range c.Repos {
+		if r.Name == "src" {
+			src = r
+		}
+	}
+	if src.Ref != "v0.1.0" {
+		t.Errorf("src repo Ref=%q want v0.1.0 (fill ref must carry through)", src.Ref)
+	}
+	if src.Branch != "" {
+		t.Errorf("src repo Branch=%q want empty (only ref was filled)", src.Branch)
+	}
+}
+
 func TestMaterialize_ScalarRepoPassesThrough(t *testing.T) {
 	// A blueprint repo with an inline URL is scalar-mode (not a fillable slot);
 	// the Config must not be required to mention it, and Materialize must keep

@@ -210,6 +210,7 @@ type ContainerRepo struct {
 	Name     string
 	Target   string
 	Branch   string
+	Ref      string
 	URL      string
 	Required bool
 }

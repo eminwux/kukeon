@@ -62,31 +62,31 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 
 ## spec
 
-| Field             | Type                       | Required | Description                                                                                                                                            |
-| ----------------- | -------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `id`              | string                     | yes      | Container identifier (matches `metadata.name`)                                                                                                         |
-| `containerdId`    | string                     | no       | Populated by Kukeon with the containerd-level container id                                                                                             |
-| `realmId`         | string                     | yes      | Realm that owns the container                                                                                                                          |
-| `spaceId`         | string                     | yes      | Space that owns the container                                                                                                                          |
-| `stackId`         | string                     | yes      | Stack that owns the container                                                                                                                          |
-| `cellId`          | string                     | yes      | Cell that owns the container                                                                                                                           |
-| `root`            | bool                       | no       | Mark this as the cell's root container (owns the network namespace)                                                                                    |
-| `image`           | string                     | yes      | OCI image reference. Kukeon passes this to containerd's image pull.                                                                                    |
-| `command`         | string                     | no       | Command to run. If omitted, the image's `ENTRYPOINT` is used.                                                                                          |
-| `args`            | array of string            | no       | Arguments. Combined with `command`.                                                                                                                    |
-| `env`             | array of string            | no       | `KEY=VALUE` environment variables                                                                                                                      |
-| `ports`           | array of string            | no       | Reserved — port mapping semantics are not finalized                                                                                                    |
-| `volumes`         | array of `VolumeMount`     | no       | Bind-mount host paths into the container (see [VolumeMount](#volumemount))                                                                             |
-| `networks`        | array of string            | no       | Additional CNI networks to join beyond the cell's default                                                                                              |
-| `networksAliases` | array of string            | no       | DNS aliases for the container within its CNI networks                                                                                                  |
-| `privileged`      | bool                       | no       | Run privileged (full capabilities, access to `/dev`, etc.)                                                                                             |
-| `hostCgroup`      | bool                       | no       | Opt the container into its parent's cgroup namespace (see [Host cgroup mode](#host-cgroup-mode))                                                       |
-| `secrets`         | array of `ContainerSecret` | no       | Inject credentials resolved by the daemon — never written to status or YAML (see [ContainerSecret](#containersecret))                                  |
-| `repos`           | array of `ContainerRepo`   | no       | Git repos the kuketty wrapper clones before the workload starts — requires `attachable: true` (see [ContainerRepo](#containerrepo))                    |
-| `git`             | `ContainerGit`             | no       | Declarative git identity + signing, expanded into `GIT_AUTHOR_*`/`GIT_COMMITTER_*`/`GIT_CONFIG_*` env before start (see [ContainerGit](#containergit)) |
-| `cniConfigPath`   | string                     | no       | Override the CNI config directory for this container                                                                                                   |
+| Field             | Type                       | Required | Description                                                                                                                                                                                     |
+| ----------------- | -------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`              | string                     | yes      | Container identifier (matches `metadata.name`)                                                                                                                                                  |
+| `containerdId`    | string                     | no       | Populated by Kukeon with the containerd-level container id                                                                                                                                      |
+| `realmId`         | string                     | yes      | Realm that owns the container                                                                                                                                                                   |
+| `spaceId`         | string                     | yes      | Space that owns the container                                                                                                                                                                   |
+| `stackId`         | string                     | yes      | Stack that owns the container                                                                                                                                                                   |
+| `cellId`          | string                     | yes      | Cell that owns the container                                                                                                                                                                    |
+| `root`            | bool                       | no       | Mark this as the cell's root container (owns the network namespace)                                                                                                                             |
+| `image`           | string                     | yes      | OCI image reference. Kukeon passes this to containerd's image pull.                                                                                                                             |
+| `command`         | string                     | no       | Command to run. If omitted, the image's `ENTRYPOINT` is used.                                                                                                                                   |
+| `args`            | array of string            | no       | Arguments. Combined with `command`.                                                                                                                                                             |
+| `env`             | array of string            | no       | `KEY=VALUE` environment variables                                                                                                                                                               |
+| `ports`           | array of string            | no       | Reserved — port mapping semantics are not finalized                                                                                                                                             |
+| `volumes`         | array of `VolumeMount`     | no       | Bind-mount host paths into the container (see [VolumeMount](#volumemount))                                                                                                                      |
+| `networks`        | array of string            | no       | Additional CNI networks to join beyond the cell's default                                                                                                                                       |
+| `networksAliases` | array of string            | no       | DNS aliases for the container within its CNI networks                                                                                                                                           |
+| `privileged`      | bool                       | no       | Run privileged (full capabilities, access to `/dev`, etc.)                                                                                                                                      |
+| `hostCgroup`      | bool                       | no       | Opt the container into its parent's cgroup namespace (see [Host cgroup mode](#host-cgroup-mode))                                                                                                |
+| `secrets`         | array of `ContainerSecret` | no       | Inject credentials resolved by the daemon — never written to status or YAML (see [ContainerSecret](#containersecret))                                                                           |
+| `repos`           | array of `ContainerRepo`   | no       | Git repos the kuketty wrapper clones before the workload starts — requires `attachable: true` (see [ContainerRepo](#containerrepo))                                                             |
+| `git`             | `ContainerGit`             | no       | Declarative git identity + signing, expanded into `GIT_AUTHOR_*`/`GIT_COMMITTER_*`/`GIT_CONFIG_*` env before start (see [ContainerGit](#containergit))                                          |
+| `cniConfigPath`   | string                     | no       | Override the CNI config directory for this container                                                                                                                                            |
 | `restartPolicy`   | string                     | no       | Per-container reap policy at the cell wind-down / auto-delete gate. One of `always`, `on-failure`, `never`. Empty defaults to `always` for back-compat (see [Restart policy](#restart-policy)). |
-| `tty`             | `ContainerTty`             | no       | Shell-UX config for the kuketty wrapper (prompt, init scripts, logging) — requires `attachable: true` (see [ContainerTty](#containertty))              |
+| `tty`             | `ContainerTty`             | no       | Shell-UX config for the kuketty wrapper (prompt, init scripts, logging) — requires `attachable: true` (see [ContainerTty](#containertty))                                                       |
 
 !!! warning "Fields marked reserved"
 `ports` is accepted by the schema today but its semantics are still being designed. Values round-trip (you can read back what you applied), but the controller does not act on them. See [GitHub Issues](https://github.com/eminwux/kukeon/issues) for the backlog.
@@ -95,12 +95,12 @@ See [Concepts → Container](../concepts/container.md) for what a container is.
 
 `spec.restartPolicy` selects whether the cell wind-down / auto-delete reconciler reaps a cell after one of its non-root containers exits. The runner evaluates the policy per container at the wind-down gate; the cell-level decision is the intersection across every terminally-exited non-root container, so a single `never` blocks the wind-down.
 
-| Value        | Behavior at wind-down                                                                                                                              |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| empty/unset  | Treated as `always` for back-compat. Pre-#1003 wind-down behavior — every non-root container exit can trigger a cell-level wind-down.              |
-| `always`     | Wind-down / auto-delete proceeds whenever the container terminally exits, regardless of exit code.                                                 |
-| `on-failure` | Wind-down / auto-delete proceeds only when the container's last exit code is non-zero. A zero-exit (clean shutdown) keeps the cell in place.       |
-| `never`      | Wind-down / auto-delete is skipped — the cell stays in `Stopped` until an operator tears it down explicitly (`kuke delete` / `kuke purge`).        |
+| Value        | Behavior at wind-down                                                                                                                        |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| empty/unset  | Treated as `always` for back-compat. Pre-#1003 wind-down behavior — every non-root container exit can trigger a cell-level wind-down.        |
+| `always`     | Wind-down / auto-delete proceeds whenever the container terminally exits, regardless of exit code.                                           |
+| `on-failure` | Wind-down / auto-delete proceeds only when the container's last exit code is non-zero. A zero-exit (clean shutdown) keeps the cell in place. |
+| `never`      | Wind-down / auto-delete is skipped — the cell stays in `Stopped` until an operator tears it down explicitly (`kuke delete` / `kuke purge`).  |
 
 Only the root container is exempt: the root's exit drives cell-level lifecycle decisions independently and is not subject to this gate.
 
@@ -173,13 +173,16 @@ File-mount mode stages secrets under `/run/kukeon/secrets/<containerdId>/<name>`
 
 Each entry in `spec.repos` declares a git repository the kuketty wrapper clones (or fetches) into `target` before the workload starts, replacing hand-rolled `git clone` blocks in `onInit` scripts. Has no effect unless `spec.attachable` is `true`. Per-repo clone outcome surfaces in `status.repos`.
 
-| Field      | Type   | Required | Description                                                                                                                                         |
-| ---------- | ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`     | string | yes      | Operator-facing identifier for the repo, echoed back in per-repo status                                                                             |
-| `target`   | string | yes      | Absolute in-container path the repo is cloned into                                                                                                  |
-| `url`      | string | yes      | Clone URL                                                                                                                                           |
-| `branch`   | string | no       | Branch to check out. Empty clones the remote's default branch.                                                                                      |
-| `required` | bool   | no       | When `true`, a clone/fetch failure makes the container fail before start. When `false` (default), the failure is logged and the container proceeds. |
+| Field      | Type   | Required | Description                                                                                                                                                                                                            |
+| ---------- | ------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`     | string | yes      | Operator-facing identifier for the repo, echoed back in per-repo status                                                                                                                                                |
+| `target`   | string | yes      | Absolute in-container path the repo is cloned into                                                                                                                                                                     |
+| `url`      | string | yes      | Clone URL                                                                                                                                                                                                              |
+| `branch`   | string | no       | Branch to check out (moving target). Empty clones the remote's default branch. Mutually exclusive with `ref`.                                                                                                          |
+| `ref`      | string | no       | Immutable pin — tag name or full commit SHA. Clones at detached HEAD; on restart fetches `--tags` and re-detaches without `pull --ff-only`, so an in-place restart stays idempotent. Mutually exclusive with `branch`. |
+| `required` | bool   | no       | When `true`, a clone/fetch failure makes the container fail before start. When `false` (default), the failure is logged and the container proceeds.                                                                    |
+
+Pick `branch` for "track the latest commit on this branch" (fetch + fast-forward on restart) or `ref` for "pin to this exact tag/commit forever" (no fast-forward, no divergence). Both keep the on-disk checkout across `kuke stop`/`kuke start`; setting both is rejected at apply time.
 
 ```yaml
 repos:
@@ -187,6 +190,11 @@ repos:
     url: https://github.com/example/app.git
     target: /workspace/app
     branch: main
+    required: true
+  - name: vendored
+    url: https://github.com/example/vendored.git
+    target: /workspace/vendored
+    ref: v1.4.2 # tag — or a full commit SHA
     required: true
 ```
 
@@ -238,9 +246,9 @@ git:
 
 Each entry in `tty.onInit` is a single init-script stage.
 
-| Field    | Type   | Required | Description                                                                                                                                                                                                                                                                                      |
-| -------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `script` | string | no       | Shell script body for the stage.                                                                                                                                                                                                                                                                 |
+| Field    | Type   | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------- | ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `script` | string | no       | Shell script body for the stage.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `runOn`  | string | no       | When the stage runs. Empty or `start` forwards the script to sbsh's onInit, so it runs in the wrapped shell on every boot. `create` routes the script into kuketty's pre-Serve executor, where it runs once to completion before the workload starts. A stage with `runOn: create` requires the container to declare at least one persistent writable mount (a `spec.volumes` entry of `kind: bind` that is not `readOnly`); otherwise the stage's side effects evaporate on the next recreate while the run-once gate would silently report `done`, and apischeme rejects the spec at apply time. Any other value is rejected at apply time. |
 
 ```yaml

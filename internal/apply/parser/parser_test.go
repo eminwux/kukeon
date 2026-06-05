@@ -661,6 +661,16 @@ spec:
 			repoYAML: "    - name: project\n      target: /home/claude/project\n      branch: main\n      url: https://example.com/p.git\n      required: true\n",
 			wantErr:  nil,
 		},
+		{
+			name:     "valid ref pin",
+			repoYAML: "    - name: pinned\n      target: /home/claude/pinned\n      ref: v0.1.0\n      url: https://example.com/p.git\n      required: true\n",
+			wantErr:  nil,
+		},
+		{
+			name:     "branch and ref both set",
+			repoYAML: "    - name: pinned\n      target: /home/claude/pinned\n      branch: main\n      ref: v0.1.0\n      url: https://example.com/p.git\n",
+			wantErr:  errdefs.ErrRepoBranchRefMutex,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
