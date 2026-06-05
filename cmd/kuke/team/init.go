@@ -217,7 +217,7 @@ func composeTeam(
 		fmt.Fprintf(out, "scaffolded operator-global facts at %s\n", layout.GlobalConfigPath())
 	}
 
-	res, bundle, err := renderTeam(ctx, layout, projectDir, pt, tc, project, getProjectURL, resolve)
+	res, bundle, err := renderTeam(ctx, layout, projectDir, pt, tc, project, getProjectURL, resolve, doBuild)
 	if err != nil {
 		return err
 	}
@@ -381,6 +381,12 @@ func loadOrScaffoldGlobalConfig(
 // harness-less roster fast and offline. The resolved bundle is returned to
 // the caller so `--build` can drive teambuild from the same materialized
 // agents source.
+//
+// doBuild flips the render's image bind: in `--build` mode the rendered
+// blueprints bind the locally-built `kukeon.internal/<ref>:<version>` refs
+// (version = the agents source's pinned ref, matching the tag teambuild lands
+// each image under) rather than the catalog's published images, so the bound
+// ref and the just-built tag agree.
 func renderTeam(
 	ctx context.Context,
 	layout teamhost.Layout,
@@ -390,6 +396,7 @@ func renderTeam(
 	project string,
 	getProjectURL ProjectRepoURLFunc,
 	resolve ResolveFunc,
+	doBuild bool,
 ) (*teamrender.Result, *teamsource.Bundle, error) {
 	if len(pt.Spec.Defaults.Harnesses) == 0 || len(pt.Spec.Roles) == 0 {
 		return &teamrender.Result{}, nil, nil
@@ -405,6 +412,8 @@ func renderTeam(
 	in := teamrender.Inputs{
 		Project:        project,
 		ProjectRepoURL: strings.TrimSpace(projectURL),
+		Build:          doBuild,
+		SourceRef:      bundle.Source.Ref,
 	}
 	res, err := teamrender.Render(bundle, pt, tc, in)
 	if err != nil {

@@ -52,6 +52,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
 )
@@ -62,7 +63,11 @@ import (
 // `FROM ${REGISTRY}/base-user:latest` are threaded with this value via
 // `--build-arg REGISTRY=kukeon.internal` so the FROM resolves to the in-realm
 // base just built, rather than the agents source's published default.
-const InternalRegistry = "kukeon.internal"
+//
+// Defined as a single source of truth in internal/consts so the build path
+// here, the bind path (internal/teamrender), and the runtime local-only
+// resolver (internal/ctr) cannot drift on the reserved host.
+const InternalRegistry = consts.InternalImageRegistry
 
 // baseImageDefaultTag is the tag a base image is built with when its leaf's
 // FROM line did not supply one. The agents convention is `:latest` for the
@@ -336,9 +341,11 @@ func resolveInternalDep(rawFrom string) (name, tag string, internal bool) {
 	return repo, t, true
 }
 
-// formatTag composes the full image reference for a build step.
+// formatTag composes the full image reference for a build step. Delegates to
+// consts.InternalImageRef so the tag a build lands under is byte-identical to
+// the ref the bind path (internal/teamrender) binds into the CellBlueprint.
 func formatTag(name, version string) string {
-	return InternalRegistry + "/" + name + ":" + version
+	return consts.InternalImageRef(name, version)
 }
 
 // defaultBuildArgs returns the build-arg map every step is seeded with — the

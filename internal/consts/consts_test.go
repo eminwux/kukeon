@@ -197,3 +197,33 @@ func TestConfigureRuntimeAccepted(t *testing.T) {
 		}
 	})
 }
+
+func TestInternalImageRef(t *testing.T) {
+	if got, want := consts.InternalImageRef("claude", "v1.4.0"), "kukeon.internal/claude:v1.4.0"; got != want {
+		t.Errorf("InternalImageRef = %q, want %q", got, want)
+	}
+	if got, want := consts.InternalImageRef("base-user", "latest"), "kukeon.internal/base-user:latest"; got != want {
+		t.Errorf("InternalImageRef = %q, want %q", got, want)
+	}
+}
+
+func TestIsInternalImageRef(t *testing.T) {
+	cases := []struct {
+		ref  string
+		want bool
+	}{
+		{"kukeon.internal/claude:v1.4.0", true},
+		{"kukeon.internal/base-user:latest", true},
+		{"  kukeon.internal/claude:v1  ", true}, // surrounding whitespace tolerated
+		{"ghcr.io/eminwux/claude:v1.4.0", false},
+		{"registry.local/claude:latest", false},
+		{"kukeon.internal", false},      // bare host, no repo path
+		{"kukeon.internalish/x", false}, // prefix must be the host plus a slash
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := consts.IsInternalImageRef(tc.ref); got != tc.want {
+			t.Errorf("IsInternalImageRef(%q) = %v, want %v", tc.ref, got, tc.want)
+		}
+	}
+}
