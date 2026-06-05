@@ -543,7 +543,7 @@ func TestNewCellCmd_AutocompleteRegistration(t *testing.T) {
 		t.Errorf("unexpected stack flag usage: %q", stackFlag.Usage)
 	}
 
-	for _, name := range []string{"from-blueprint", "from-config", "param", "param-file"} {
+	for _, name := range []string{"from-blueprint", "from-config", "param", "param-file", "env"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("expected %q flag to exist", name)
 		}
@@ -552,7 +552,9 @@ func TestNewCellCmd_AutocompleteRegistration(t *testing.T) {
 
 // blueprintDoc returns a minimal CellBlueprintDoc the fake daemon can hand
 // back from GetBlueprint. One TAG parameter substitutes into the container
-// image so --param coverage has something to verify.
+// image (so --param coverage has something to verify) and into a FOO env entry
+// (so --env precedence — override wins over the resolved binding value — has a
+// baked value to override).
 func blueprintDoc() v1beta1.CellBlueprintDoc {
 	def := "latest"
 	return v1beta1.CellBlueprintDoc{
@@ -569,7 +571,12 @@ func blueprintDoc() v1beta1.CellBlueprintDoc {
 			Parameters: []v1beta1.CellBlueprintParameter{{Name: "TAG", Default: &def}},
 			Cell: v1beta1.BlueprintCellSpec{
 				Containers: []v1beta1.BlueprintContainer{
-					{ID: "main", Image: "registry.example.com/web:${TAG}", Attachable: true},
+					{
+						ID:         "main",
+						Image:      "registry.example.com/web:${TAG}",
+						Env:        []string{"FOO=${TAG}"},
+						Attachable: true,
+					},
 				},
 			},
 		},
@@ -840,4 +847,213 @@ func TestCreateCell_NameCollision_Errors(t *testing.T) {
 	if !strings.Contains(err.Error(), "kuke delete cell taken-name") {
 		t.Errorf("err=%v should point at `kuke delete cell taken-name`", err)
 	}
+}
+
+// TestCreateCell_FromBlueprint_ParamBakedAndRecorded pins AC item 1: a --param
+// override is both baked into the materialised CellDoc (image/env substitution)
+// and recorded in the Spec.Provenance.Params block.
+func TestCreateCell_FromBlueprint_ParamBakedAndRecorded(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	var materializeDoc v1beta1.CellDoc
+	fc := &fakeClient{
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		materializeCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			materializeDoc = doc
+			return successResultFromDoc(doc), nil
+		},
+	}
+
+	cmd, _ := newTestExecCmd(t, fc)
+	setFlag(t, cmd, "realm", "bp-realm")
+	setFlag(t, cmd, "from-blueprint", "web")
+	setFlag(t, cmd, "param", "TAG=v9")
+	cmd.SetArgs([]string{"web-1"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// Baked: ${TAG} substituted into both image and env.
+	if got := materializeDoc.Spec.Containers[0].Image; got != "registry.example.com/web:v9" {
+		t.Errorf("image=%q want ${TAG} substituted to v9", got)
+	}
+	if !containsEnv(materializeDoc.Spec.Containers[0].Env, "FOO=v9") {
+		t.Errorf("env=%v want FOO=v9 (${TAG} baked)", materializeDoc.Spec.Containers[0].Env)
+	}
+	// Recorded: provenance carries the resolved param.
+	prov := materializeDoc.Spec.Provenance
+	if prov == nil {
+		t.Fatal("Spec.Provenance = nil; want a blueprint provenance block")
+	}
+	if got := prov.Params["TAG"]; got != "v9" {
+		t.Errorf("Provenance.Params[TAG]=%q want v9", got)
+	}
+}
+
+// TestCreateCell_FromConfig_EnvBakedAndRecorded pins AC items 2 and 4: --env on
+// the --from-config path is accepted (the old refusal is gone), baked into the
+// attachable container's env, and recorded in Spec.Provenance.EnvOverrides.
+func TestCreateCell_FromConfig_EnvBakedAndRecorded(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	var materializeDoc v1beta1.CellDoc
+	fc := &fakeClient{
+		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
+		},
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		materializeCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			materializeDoc = doc
+			return successResultFromDoc(doc), nil
+		},
+	}
+
+	cmd, _ := newTestExecCmd(t, fc)
+	setFlag(t, cmd, "realm", "cfg-realm")
+	setFlag(t, cmd, "from-config", "prod")
+	setFlag(t, cmd, "env", "BAR=baz")
+	cmd.SetArgs([]string{"prod-1"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// Baked: BAR=baz appended to the attachable container's env.
+	if !containsEnv(materializeDoc.Spec.Containers[0].Env, "BAR=baz") {
+		t.Errorf("env=%v want BAR=baz baked into the attachable container", materializeDoc.Spec.Containers[0].Env)
+	}
+	// Recorded: provenance carries the env override (distinct from the
+	// non-persisted Spec.RuntimeEnv path — RuntimeEnv stays empty).
+	prov := materializeDoc.Spec.Provenance
+	if prov == nil {
+		t.Fatal("Spec.Provenance = nil; want a config provenance block")
+	}
+	if len(prov.EnvOverrides) != 1 || prov.EnvOverrides[0] != "BAR=baz" {
+		t.Errorf("Provenance.EnvOverrides=%v want [BAR=baz]", prov.EnvOverrides)
+	}
+	if len(materializeDoc.Spec.RuntimeEnv) != 0 {
+		t.Errorf("Spec.RuntimeEnv=%v want empty (override persists, not the runtime form)", materializeDoc.Spec.RuntimeEnv)
+	}
+}
+
+// TestCreateCell_FromConfig_EnvOverridePrecedence pins AC item 3: the merge
+// order is binding values → blueprint params → per-cell --env (override wins).
+// The Config's spec.values resolve FOO=stable into the container env; --env
+// FOO=override then wins for the same key, with no duplicate FOO entry left.
+func TestCreateCell_FromConfig_EnvOverridePrecedence(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	var materializeDoc v1beta1.CellDoc
+	fc := &fakeClient{
+		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
+		},
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		materializeCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			materializeDoc = doc
+			return successResultFromDoc(doc), nil
+		},
+	}
+
+	cmd, _ := newTestExecCmd(t, fc)
+	setFlag(t, cmd, "realm", "cfg-realm")
+	setFlag(t, cmd, "from-config", "prod")
+	setFlag(t, cmd, "env", "FOO=override")
+	cmd.SetArgs([]string{"prod-1"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	env := materializeDoc.Spec.Containers[0].Env
+	if !containsEnv(env, "FOO=override") {
+		t.Errorf("env=%v want FOO=override (per-cell --env wins over the resolved binding value)", env)
+	}
+	if containsEnv(env, "FOO=stable") {
+		t.Errorf("env=%v still carries the pre-override FOO=stable; the override must replace it", env)
+	}
+	if n := countEnvKey(env, "FOO"); n != 1 {
+		t.Errorf("env=%v has %d FOO entries; want exactly 1 (override-on-key, not append)", env, n)
+	}
+}
+
+// TestCreateCell_EnvRejectedWithFromBlueprint pins the symmetry counterpart of
+// TestCreateCell_ParamRejectedWithFromConfig: --env is invalid with
+// --from-blueprint and must fail before any client call.
+func TestCreateCell_EnvRejectedWithFromBlueprint(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			t.Fatal("GetBlueprint must not be called when --env + --from-blueprint is rejected")
+			return kukeonv1.GetBlueprintResult{}, nil
+		},
+	}
+	cmd, _ := newTestExecCmd(t, fc)
+	setFlag(t, cmd, "from-blueprint", "web")
+	setFlag(t, cmd, "env", "K=V")
+	cmd.SetArgs([]string{"x"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for --env + --from-blueprint combination")
+	}
+	if !strings.Contains(err.Error(), "--env is not valid with --from-blueprint") {
+		t.Errorf("err=%v want '--env is not valid with --from-blueprint'", err)
+	}
+}
+
+// TestCreateCell_EnvMalformed_Errors pins parse-time --env validation: a
+// missing `=` is rejected before any daemon round-trip.
+func TestCreateCell_EnvMalformed_Errors(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			t.Fatal("GetConfig must not be called when --env is malformed")
+			return kukeonv1.GetConfigResult{}, nil
+		},
+	}
+	cmd, _ := newTestExecCmd(t, fc)
+	setFlag(t, cmd, "from-config", "prod")
+	setFlag(t, cmd, "env", "NOEQUALS")
+	cmd.SetArgs([]string{"x"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for malformed --env entry")
+	}
+	if !strings.Contains(err.Error(), "--env requires KEY=VALUE") {
+		t.Errorf("err=%v want '--env requires KEY=VALUE'", err)
+	}
+}
+
+// containsEnv reports whether entry appears verbatim in env.
+func containsEnv(env []string, entry string) bool {
+	for _, e := range env {
+		if e == entry {
+			return true
+		}
+	}
+	return false
+}
+
+// countEnvKey counts how many entries in env have the given KEY (substring
+// before the first `=`).
+func countEnvKey(env []string, key string) int {
+	n := 0
+	for _, e := range env {
+		k, _, _ := strings.Cut(e, "=")
+		if k == key {
+			n++
+		}
+	}
+	return n
 }

@@ -65,7 +65,15 @@ func NewCellCmd() *cobra.Command {
 			"--from-blueprint and --from-config are mutually exclusive. --param " +
 			"and --param-file are valid with --from-blueprint (mirroring " +
 			"`kuke run -b`); they are rejected with --from-config because a " +
-			"CellConfig carries its own values (edit the Config instead).",
+			"CellConfig carries its own values (edit the Config instead). " +
+			"Symmetrically, --env KEY=VALUE is valid with --from-config (a " +
+			"per-cell override layered on top of the Config's resolved values) " +
+			"and rejected with --from-blueprint. Override precedence on the " +
+			"--from-config path is binding values (the Config's spec.values) → " +
+			"blueprint parameter defaults → per-cell --env (overrides win); on " +
+			"the --from-blueprint path it is parameter defaults → per-cell " +
+			"--param (overrides win). Both override sets are baked into the " +
+			"materialised CellDoc and recorded in its Spec.Provenance block.",
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -106,6 +114,14 @@ func NewCellCmd() *cobra.Command {
 			"duplicate keys. Rejected with --from-config (same reason as --param).")
 	_ = viper.BindPFlag(config.KUKE_CREATE_CELL_PARAM_FILE.ViperKey, cmd.Flags().Lookup("param-file"))
 
+	cmd.Flags().StringArray("env", nil,
+		"Per-cell environment override as KEY=VALUE; repeatable. Valid with --from-config "+
+			"only (the symmetric counterpart of --param on --from-blueprint). Each entry is "+
+			"baked into the attachable container's env in the materialised CellDoc and recorded "+
+			"in Spec.Provenance.envOverrides, winning over any value the Config's spec.values "+
+			"resolved for the same key. Rejected with --from-blueprint: materialise from a "+
+			"Config (or edit the Blueprint) to layer env overrides.")
+
 	cmd.Flags().Bool("ignore-disk-pressure", false,
 		"Bypass kukeond's data-volume disk-pressure guard for this cell's "+
 			"creation. The daemon normally refuses to provision a new cell once "+
@@ -138,6 +154,11 @@ type createCellFlags struct {
 	configName    string
 	paramArgs     []string
 	paramFile     string
+	// envArgs holds the validated `--env KEY=VALUE` per-cell overrides. Valid
+	// with --from-config only (parity with --param on --from-blueprint); baked
+	// into the attachable container's env and recorded in
+	// Spec.Provenance.EnvOverrides. Issue #1023.
+	envArgs []string
 	// ignoreDiskPressure threads `kuke create cell --ignore-disk-pressure`
 	// onto the transport-only Spec.IgnoreDiskPressure field so the daemon's
 	// CreateCell guard is bypassed for this invocation. Issue #1035.
@@ -147,9 +168,16 @@ type createCellFlags struct {
 // parseCreateCellFlags validates the flag combinations and trims values. The
 // cobra-side mutex enforces --from-blueprint vs --from-config; this routine
 // also requires exactly one of those flags (the empty-shell mode retired with
-// epic:bye-container step 3) and rejects --param/--param-file when
-// --from-config is set (a CellConfig carries its own spec.values, parity with
-// `kuke run -c`).
+// epic:bye-container step 3) and enforces the per-path override symmetry
+// (issue #1023):
+//
+//   - --param/--param-file are rejected with --from-config (a CellConfig
+//     carries its own spec.values, parity with `kuke run -c`);
+//   - --env is rejected with --from-blueprint (its symmetric counterpart —
+//     materialise from a Config to layer env overrides).
+//
+// --env entries are validated here (parseEnvArgs) so a malformed override
+// fails before any daemon round-trip.
 func parseCreateCellFlags(cmd *cobra.Command, args []string) (createCellFlags, error) {
 	flags := createCellFlags{
 		blueprintName: strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_FROM_BLUEPRINT.ViperKey)),
@@ -195,6 +223,16 @@ func parseCreateCellFlags(cmd *cobra.Command, args []string) (createCellFlags, e
 	}
 	flags.paramArgs = paramArgs
 
+	rawEnv, err := cmd.Flags().GetStringArray("env")
+	if err != nil {
+		return createCellFlags{}, err
+	}
+	envArgs, err := parseEnvArgs(rawEnv)
+	if err != nil {
+		return createCellFlags{}, err
+	}
+	flags.envArgs = envArgs
+
 	flags.ignoreDiskPressure = viper.GetBool(config.KUKE_CREATE_CELL_IGNORE_DISK_PRESSURE.ViperKey)
 
 	if flags.configName != "" {
@@ -208,6 +246,11 @@ func parseCreateCellFlags(cmd *cobra.Command, args []string) (createCellFlags, e
 				"--param-file is not valid with --from-config; a CellConfig carries its own spec.values (edit the Config instead)",
 			)
 		}
+	}
+	if flags.blueprintName != "" && len(flags.envArgs) > 0 {
+		return createCellFlags{}, errors.New(
+			"--env is not valid with --from-blueprint; materialise from a Config (kuke create cell --from-config) to layer env overrides",
+		)
 	}
 	return flags, nil
 }
@@ -340,6 +383,7 @@ func runFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags createCellF
 	if err := finalizeCellName(cmd, client, &cellDoc, flags.name, cellconfig.Prefix(cfgRes.Config)); err != nil {
 		return err
 	}
+	applyEnvOverrides(&cellDoc, flags.envArgs)
 	applyIgnoreDiskPressure(&cellDoc, flags)
 
 	return materialiseAndPersist(cmd, client, cellDoc)
@@ -422,6 +466,124 @@ func overlayScope(doc *v1beta1.CellDoc, flags createCellFlags) {
 	if strings.TrimSpace(doc.Spec.StackID) == "" {
 		doc.Spec.StackID = flags.stack
 	}
+}
+
+// applyEnvOverrides bakes the validated `--env KEY=VALUE` per-cell overrides
+// into the materialised CellDoc (issue #1023). Two effects, mirroring the
+// `kuke run --env` provenance contract (#1021) but persisting rather than
+// riding the transport-only Spec.RuntimeEnv:
+//
+//   - the overrides are merged into the attachable container's persisted Env
+//     (resolveAttachableContainerIndex picks the target the same way
+//     `kuke run` would attach), winning over any value the Config's
+//     spec.values resolved for the same key — so the override survives the
+//     stopped-cell persist and takes effect on the later `kuke start`;
+//   - the same entries are recorded verbatim in Spec.Provenance.EnvOverrides,
+//     the P1 materialization-input record P4 re-resolves against.
+//
+// A nil/empty envArgs is a no-op. When no container is attachable the
+// overrides are still recorded in provenance (the operator's intent is
+// preserved) but have nowhere to bake, mirroring the runtime path's
+// silent no-op on a non-attachable cell.
+func applyEnvOverrides(doc *v1beta1.CellDoc, envArgs []string) {
+	if len(envArgs) == 0 {
+		return
+	}
+	if idx := resolveAttachableContainerIndex(doc.Spec); idx >= 0 {
+		doc.Spec.Containers[idx].Env = mergeEnv(doc.Spec.Containers[idx].Env, envArgs)
+	}
+	if doc.Spec.Provenance != nil {
+		doc.Spec.Provenance.EnvOverrides = append([]string(nil), envArgs...)
+	}
+}
+
+// resolveAttachableContainerIndex returns the index of the container `kuke run`
+// would attach to (issue #834's runtime-env target), or -1 when none qualifies.
+// Precedence mirrors the daemon-side resolveAttachableContainerID and the
+// CLI-side pickAttachTarget:
+//
+//  1. Spec.Tty.Default, when it names an existing non-root container;
+//  2. the first non-root container with Attachable=true, in declaration order;
+//  3. -1 when no container qualifies.
+func resolveAttachableContainerIndex(spec v1beta1.CellSpec) int {
+	if spec.Tty != nil {
+		if pref := strings.TrimSpace(spec.Tty.Default); pref != "" {
+			for i, c := range spec.Containers {
+				if !c.Root && c.ID == pref {
+					return i
+				}
+			}
+		}
+	}
+	for i, c := range spec.Containers {
+		if !c.Root && c.Attachable {
+			return i
+		}
+	}
+	return -1
+}
+
+// mergeEnv layers the validated env overrides on top of a container's existing
+// Env. For each KEY in envArgs, any specEnv entry with the same KEY is dropped
+// (the override wins); surviving spec entries keep their order, then the
+// override entries follow in their input order. Mirrors the runner-side
+// mergeRuntimeEnv merge semantics so a `create cell --env` override and a
+// `run --env` override resolve identically. Never mutates the input slices.
+func mergeEnv(specEnv, envArgs []string) []string {
+	if len(envArgs) == 0 {
+		return specEnv
+	}
+	overrideKeys := make(map[string]struct{}, len(envArgs))
+	for _, entry := range envArgs {
+		key, _, _ := strings.Cut(entry, "=")
+		overrideKeys[key] = struct{}{}
+	}
+	merged := make([]string, 0, len(specEnv)+len(envArgs))
+	for _, entry := range specEnv {
+		key, _, _ := strings.Cut(entry, "=")
+		if _, override := overrideKeys[key]; override {
+			continue
+		}
+		merged = append(merged, entry)
+	}
+	return append(merged, envArgs...)
+}
+
+// parseEnvArgs validates the repeatable `--env KEY=VALUE` flag and returns the
+// normalized entries. Mirrors cmd/kuke/run.parseEnvArgs (issue #834); kept
+// local to avoid a cross-package import (parity with buildParamMap below).
+// Rules: each entry needs a `=`; the KEY (before the first `=`) must be
+// non-empty after trimming; the VALUE (after the first `=`) is preserved
+// verbatim including empty; a duplicate KEY with the same VALUE is collapsed,
+// a duplicate KEY with a different VALUE is rejected (no silent last-wins).
+func parseEnvArgs(args []string) ([]string, error) {
+	if len(args) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]string, len(args))
+	out := make([]string, 0, len(args))
+	for _, raw := range args {
+		key, value, ok := strings.Cut(raw, "=")
+		if !ok {
+			return nil, fmt.Errorf("--env requires KEY=VALUE (got: %q)", raw)
+		}
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return nil, fmt.Errorf("--env KEY must be non-empty (got: %q)", raw)
+		}
+		if prior, dup := seen[key]; dup {
+			if prior != value {
+				return nil, fmt.Errorf(
+					"--env %s supplied twice with different values (%q vs %q); pick one",
+					key, prior, value,
+				)
+			}
+			continue
+		}
+		seen[key] = value
+		out = append(out, key+"="+value)
+	}
+	return out, nil
 }
 
 // buildParamMap layers --param flags on top of --param-file contents.
