@@ -273,11 +273,39 @@ func ValidateSource(s model.TeamSource) error {
 	if err := validateRepo(repo); err != nil {
 		return err
 	}
-	if _, kind := s.Ref(); kind == "" {
+	value, kind := s.Ref()
+	if kind == "" {
 		return fmt.Errorf(
 			"%w (got tag=%q branch=%q commit=%q)",
 			errdefs.ErrTeamSourceInvalid, s.Tag, s.Branch, s.Commit,
 		)
+	}
+	if err := validateRef(value, kind); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateRef rejects ref values that would escape the cache subtree when
+// concatenated into the leaf directory name (`<host>/<owner>/<repo>@<ref>`):
+// a leading "/" or a "." / ".." path segment. Symmetric with validateRepo's
+// segment check — both halves of the cache key flow into the on-disk path.
+// Git's own refname rules reject most of these at clone time, but the cache's
+// MkdirAll(parent) runs before git ever does.
+func validateRef(value, kind string) error {
+	if strings.HasPrefix(value, "/") {
+		return fmt.Errorf("%w (%s %q has an invalid path segment)", errdefs.ErrTeamSourceInvalid, kind, value)
+	}
+	for _, seg := range strings.Split(value, "/") {
+		if seg == "." || seg == ".." {
+			return fmt.Errorf(
+				"%w (%s %q has an invalid path segment %q)",
+				errdefs.ErrTeamSourceInvalid,
+				kind,
+				value,
+				seg,
+			)
+		}
 	}
 	return nil
 }

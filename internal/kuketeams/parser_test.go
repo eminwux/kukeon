@@ -515,6 +515,23 @@ func TestValidateSourceRejectsTraversalRepo(t *testing.T) {
 	}
 }
 
+func TestValidateSourceRejectsTraversalRef(t *testing.T) {
+	t.Parallel()
+	cases := []model.TeamSource{
+		{Repo: "eminwux/agents", Branch: "../../etc"},
+		{Repo: "eminwux/agents", Tag: ".."},
+		{Repo: "eminwux/agents", Tag: "/abs"},
+		{Repo: "eminwux/agents", Branch: "foo/../bar"},
+		{Repo: "eminwux/agents", Commit: "."},
+	}
+	for _, s := range cases {
+		err := ValidateSource(s)
+		if !errors.Is(err, errdefs.ErrTeamSourceInvalid) {
+			t.Errorf("ValidateSource(%+v) err = %v, want ErrTeamSourceInvalid", s, err)
+		}
+	}
+}
+
 func TestParseTeamsConfigAcceptsHostQualifiedSourceKey(t *testing.T) {
 	t.Parallel()
 	raw := "apiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec: { sources: { \"github.com/eminwux/agents\": https://github.com/eminwux/agents.git } }\n"

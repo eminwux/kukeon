@@ -84,15 +84,6 @@ type Source struct {
 // init). Pinned tag/commit sources return false.
 func (s Source) Floating() bool { return s.Kind == RefBranch }
 
-// KindLabel returns "floating" for a branch and "pinned" for a tag/commit —
-// the operator-facing pinned-vs-floating signal `kuke team init` prints.
-func (s Source) KindLabel() string {
-	if s.Floating() {
-		return "floating"
-	}
-	return "pinned"
-}
-
 // FromModel validates and normalizes a model.TeamSource into a resolved
 // Source: the repo host is defaulted to github.com when bare, and the single
 // tag/branch/commit ref is extracted. A malformed source surfaces

@@ -289,12 +289,8 @@ func emitSourceKind(out io.Writer, src model.TeamSource) {
 		return
 	}
 	host, ownerRepo := src.Normalized()
-	classification := "pinned"
-	if src.Floating() {
-		classification = "floating"
-	}
 	fmt.Fprintf(out, "agents source: %s/%s @ %s=%s (%s)\n",
-		host, ownerRepo, kind, value, classification)
+		host, ownerRepo, kind, value, src.KindLabel())
 }
 
 // loadOrScaffoldGlobalConfig returns the TeamsConfig the render pipeline

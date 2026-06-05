@@ -76,6 +76,15 @@ func (s TeamSource) Floating() bool {
 	return kind == "branch"
 }
 
+// KindLabel returns "floating" for a branch and "pinned" for a tag/commit —
+// the operator-facing pinned-vs-floating signal `kuke team init` prints.
+func (s TeamSource) KindLabel() string {
+	if s.Floating() {
+		return "floating"
+	}
+	return "pinned"
+}
+
 // Normalized splits Repo into its host and `<owner>/<repo>` halves, applying
 // the DefaultSourceHost default for a bare `<owner>/<repo>`. A segment is
 // treated as a host when it carries a "." or ":" (port) — so `github.com/...`
