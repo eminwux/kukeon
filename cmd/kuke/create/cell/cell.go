@@ -106,6 +106,15 @@ func NewCellCmd() *cobra.Command {
 			"duplicate keys. Rejected with --from-config (same reason as --param).")
 	_ = viper.BindPFlag(config.KUKE_CREATE_CELL_PARAM_FILE.ViperKey, cmd.Flags().Lookup("param-file"))
 
+	cmd.Flags().Bool("ignore-disk-pressure", false,
+		"Bypass kukeond's data-volume disk-pressure guard for this cell's "+
+			"creation. The daemon normally refuses to provision a new cell once "+
+			"the data volume crosses the hard threshold. (issue #1035)")
+	_ = viper.BindPFlag(
+		config.KUKE_CREATE_CELL_IGNORE_DISK_PRESSURE.ViperKey,
+		cmd.Flags().Lookup("ignore-disk-pressure"),
+	)
+
 	cmd.MarkFlagsMutuallyExclusive("from-blueprint", "from-config")
 
 	// Register autocomplete functions for flags
@@ -129,6 +138,10 @@ type createCellFlags struct {
 	configName    string
 	paramArgs     []string
 	paramFile     string
+	// ignoreDiskPressure threads `kuke create cell --ignore-disk-pressure`
+	// onto the transport-only Spec.IgnoreDiskPressure field so the daemon's
+	// CreateCell guard is bypassed for this invocation. Issue #1035.
+	ignoreDiskPressure bool
 }
 
 // parseCreateCellFlags validates the flag combinations and trims values. The
@@ -181,6 +194,8 @@ func parseCreateCellFlags(cmd *cobra.Command, args []string) (createCellFlags, e
 		return createCellFlags{}, err
 	}
 	flags.paramArgs = paramArgs
+
+	flags.ignoreDiskPressure = viper.GetBool(config.KUKE_CREATE_CELL_IGNORE_DISK_PRESSURE.ViperKey)
 
 	if flags.configName != "" {
 		if len(flags.paramArgs) > 0 {
@@ -258,6 +273,7 @@ func runFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags createCe
 		return err
 	}
 	overlayScope(&cellDoc, flags)
+	applyIgnoreDiskPressure(&cellDoc, flags)
 
 	return materialiseAndPersist(cmd, client, cellDoc)
 }
@@ -325,6 +341,7 @@ func runFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags createCellF
 		return err
 	}
 	overlayScope(&cellDoc, flags)
+	applyIgnoreDiskPressure(&cellDoc, flags)
 
 	return materialiseAndPersist(cmd, client, cellDoc)
 }
@@ -356,6 +373,16 @@ func materialiseAndPersist(cmd *cobra.Command, client kukeonv1.Client, cellDoc v
 	}
 	printCellResult(cmd, result)
 	return nil
+}
+
+// applyIgnoreDiskPressure threads `--ignore-disk-pressure` onto the
+// transport-only Spec.IgnoreDiskPressure field (yaml:"-" — never persisted) so
+// the daemon's CreateCell guard is bypassed for this invocation. The flag only
+// ever sets the override true. Issue #1035.
+func applyIgnoreDiskPressure(doc *v1beta1.CellDoc, flags createCellFlags) {
+	if flags.ignoreDiskPressure {
+		doc.Spec.IgnoreDiskPressure = true
+	}
 }
 
 // overlayScope fills realm/space/stack coordinates on the materialised cell

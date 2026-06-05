@@ -154,6 +154,23 @@ var (
 	KUKEOND_KUKETTY_LOG_LEVEL = DefineKV(
 		"KUKEOND_KUKETTY_LOG_LEVEL", "kukeond/kukettyLogLevel", "info",
 	)
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	// KUKEOND_DISK_PRESSURE_WARN_PCT is the data-volume usage percentage above
+	// which kukeond's reconcile loop emits a rate-limited WARN naming the realm
+	// and current usage. Nothing is deleted. 0 (or negative) disables the
+	// warning. Issue #1035.
+	KUKEOND_DISK_PRESSURE_WARN_PCT = DefineKV(
+		"KUKEOND_DISK_PRESSURE_WARN_PCT", "kukeond/diskPressureWarnPct", "85",
+	)
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	// KUKEOND_DISK_PRESSURE_BLOCK_PCT is the data-volume usage percentage at or
+	// above which kukeond refuses to provision a new cell (CreateCell fails
+	// fast) so a snapshot does not push the volume to 100%. `kuke create cell`
+	// / `kuke run --ignore-disk-pressure` bypasses the guard. 0 (or negative)
+	// disables the guard. Issue #1035.
+	KUKEOND_DISK_PRESSURE_BLOCK_PCT = DefineKV(
+		"KUKEOND_DISK_PRESSURE_BLOCK_PCT", "kukeond/diskPressureBlockPct", "95",
+	)
 
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_INIT_REALM = DefineKV("KUKE_INIT_REALM", "kuke/init/realm")
@@ -195,6 +212,13 @@ var (
 	KUKE_CREATE_CELL_FROM_CONFIG = DefineKV("KUKE_CREATE_CELL_FROM_CONFIG", "kuke/create/cell/from-config")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_CREATE_CELL_PARAM_FILE = DefineKV("KUKE_CREATE_CELL_PARAM_FILE", "kuke/create/cell/param-file")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	// KUKE_CREATE_CELL_IGNORE_DISK_PRESSURE is the env-var twin of
+	// `kuke create cell --ignore-disk-pressure` (issue #1035): bypasses
+	// kukeond's data-volume disk-pressure creation guard for this invocation.
+	KUKE_CREATE_CELL_IGNORE_DISK_PRESSURE = DefineKV(
+		"KUKE_CREATE_CELL_IGNORE_DISK_PRESSURE", "kuke/create/cell/ignore-disk-pressure", "false",
+	)
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_CREATE_CONFIG_NAME = DefineKV("KUKE_CREATE_CONFIG_NAME", "kuke/create/config/name")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
@@ -407,6 +431,13 @@ var (
 	KUKE_RUN_ENV = DefineKV("KUKE_RUN_ENV", "kuke/run/env")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_REQUIRE_SYNCED = DefineKV("KUKE_RUN_REQUIRE_SYNCED", "kuke/run/require-synced")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	// KUKE_RUN_IGNORE_DISK_PRESSURE is the env-var twin of
+	// `kuke run --ignore-disk-pressure` (issue #1035): bypasses kukeond's
+	// data-volume disk-pressure creation guard for this invocation.
+	KUKE_RUN_IGNORE_DISK_PRESSURE = DefineKV(
+		"KUKE_RUN_IGNORE_DISK_PRESSURE", "kuke/run/ignore-disk-pressure", "false",
+	)
 
 	// Attach command variables
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable

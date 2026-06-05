@@ -27,6 +27,7 @@ import (
 	"github.com/eminwux/kukeon/internal/ctr"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/netpolicy"
+	"github.com/eminwux/kukeon/internal/util/diskpressure"
 )
 
 // ReconcileOutcome describes the per-cell effect of a single reconcile pass.
@@ -280,6 +281,12 @@ type Exec struct {
 	// (not via NewRunner) share the same lock semantics.
 	cellLocks     *cellLockManager
 	cellLocksOnce sync.Once
+
+	// diskSampler samples filesystem usage for the CreateCell disk-pressure
+	// guard (issue #1035). nil falls through to diskpressure.Sample; tests
+	// override it to exercise the guard's block/allow branches without a real
+	// full volume.
+	diskSampler func(string) (diskpressure.Usage, error)
 }
 
 type Options struct {
@@ -310,6 +317,13 @@ type Options struct {
 	// fixtures that build the runner directly with zero-value Options).
 	// Issue #599.
 	KukettyLogLevel string
+	// DiskPressureBlockPercent, when > 0, is the data-volume usage percentage
+	// at or above which CreateCell refuses to provision a new cell — failing
+	// fast with errdefs.ErrDiskPressure instead of creating a snapshot that
+	// pushes the volume toward 100%. A cell whose Spec.IgnoreDiskPressure is
+	// set bypasses the guard. Zero (the default) disables it. Plumbed from
+	// controller.Options of the same name. Issue #1035.
+	DiskPressureBlockPercent int
 }
 
 func NewRunner(ctx context.Context, logger *slog.Logger, opts Options) Runner {

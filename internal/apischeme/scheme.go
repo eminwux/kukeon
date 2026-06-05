@@ -1424,6 +1424,12 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 				// round-trips in both conversion directions — unlike
 				// RuntimeEnv, which the outbound builder drops.
 				Provenance: convertCellProvenanceToInternal(in.Spec.Provenance),
+				// IgnoreDiskPressure is transport-only (v1beta1 carries
+				// yaml:"-") on the same inbound RPC path as RuntimeEnv; the
+				// CreateCell guard reads it and BuildCellExternalFromInternal
+				// drops it so the per-invocation override never persists.
+				// Issue #1035.
+				IgnoreDiskPressure: in.Spec.IgnoreDiskPressure,
 			},
 			Status: intmodel.CellStatus{
 				State:              intmodel.CellState(in.Status.State),
@@ -1509,6 +1515,12 @@ func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ex
 				// is persisted lineage data, so the disk-write doc and the RPC
 				// reply both carry it.
 				Provenance: buildCellProvenanceExternalFromInternal(in.Spec.Provenance),
+				// IgnoreDiskPressure is likewise NOT copied here (issue
+				// #1035): it is a per-invocation creation override, not cell
+				// state. Persisting it would silently exempt the cell's future
+				// rematerializations from the disk-pressure guard. The CLI →
+				// daemon direction in ConvertCellDocToInternal preserves it so
+				// the CreateCell guard sees the override.
 			},
 			Status: ext.CellStatus{
 				State:              ext.CellState(in.Status.State),

@@ -23,6 +23,8 @@ import (
 
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	"github.com/eminwux/kukeon/internal/util/diskpressure"
+	"github.com/eminwux/kukeon/internal/util/fs"
 	"github.com/eminwux/kukeon/internal/util/naming"
 )
 
@@ -123,6 +125,17 @@ func (r *Exec) CreateCell(cell intmodel.Cell) (intmodel.Cell, error) {
 		return ensuredCell, nil
 	}
 
+	// Cell not found — this is a genuinely new cell. Guard against creating it
+	// when the realm's data volume is already under hard disk pressure, so a
+	// fresh snapshot does not push the volume to 100% (issue #1035). The guard
+	// is observation-only: it never deletes anything, and `--ignore-disk-pressure`
+	// (cell.Spec.IgnoreDiskPressure) bypasses it. The existing-cell branch above
+	// (EnsureCell) is deliberately not guarded — ensuring resources for a cell
+	// that already exists is not "digging the hole deeper".
+	if err = r.guardDiskPressure(cell); err != nil {
+		return intmodel.Cell{}, err
+	}
+
 	// Cell not found, create new cell
 	resultCell, err := r.provisionNewCell(cell)
 	if err != nil {
@@ -142,6 +155,43 @@ func (r *Exec) CreateCell(cell intmodel.Cell) (intmodel.Cell, error) {
 	}
 
 	return resultCell, nil
+}
+
+// guardDiskPressure fails fast with errdefs.ErrDiskPressure when the data
+// volume backing the cell's realm is at or above the configured block
+// threshold, unless the threshold is disabled (<= 0) or the cell carries the
+// IgnoreDiskPressure override (`--ignore-disk-pressure`). It never deletes
+// anything. A statfs failure is logged and treated as "allow" — a monitoring
+// hiccup must never wedge all cell creation. Issue #1035.
+func (r *Exec) guardDiskPressure(cell intmodel.Cell) error {
+	if r.opts.DiskPressureBlockPercent <= 0 {
+		return nil
+	}
+	if cell.Spec.IgnoreDiskPressure {
+		r.logger.DebugContext(r.ctx, "disk-pressure guard bypassed via --ignore-disk-pressure",
+			"cell", cell.Metadata.Name, "realm", cell.Spec.RealmName)
+		return nil
+	}
+
+	sample := r.diskSampler
+	if sample == nil {
+		sample = diskpressure.Sample
+	}
+	dir := fs.RealmMetadataDir(r.opts.RunPath, cell.Spec.RealmName)
+	usage, err := sample(dir)
+	if err != nil {
+		r.logger.WarnContext(r.ctx, "disk-pressure guard: statfs failed; allowing creation",
+			"cell", cell.Metadata.Name, "realm", cell.Spec.RealmName, "path", dir, "error", err)
+		return nil
+	}
+
+	if usage.UsedPercent >= float64(r.opts.DiskPressureBlockPercent) {
+		return fmt.Errorf(
+			"%w: data volume %s is at %.1f%% (block threshold %d%%); "+
+				"free space or pass --ignore-disk-pressure",
+			errdefs.ErrDiskPressure, dir, usage.UsedPercent, r.opts.DiskPressureBlockPercent)
+	}
+	return nil
 }
 
 // EnsureCell ensures that all required resources for a cell exist.

@@ -98,6 +98,16 @@ type CellSpec struct {
 	// hand-built cell that was never materialized from a binding carries a
 	// nil Provenance. Issue #1021.
 	Provenance *CellProvenance `json:"provenance,omitempty"          yaml:"provenance,omitempty"`
+	// IgnoreDiskPressure bypasses kukeond's data-volume disk-pressure guard for
+	// this cell's creation (issue #1035). Set by `kuke create cell` /
+	// `kuke run --ignore-disk-pressure`. Transport-only with the same two
+	// boundary contracts as RuntimeEnv: the `yaml:"-"` tag keeps it out of any
+	// YAML-author surface, and JSON-RPC carries it CLI → daemon where the
+	// CreateCell guard reads it. The daemon → CLI direction in
+	// apischeme.BuildCellExternalFromInternal deliberately drops it so the
+	// per-invocation override never persists into the stored cell spec; each
+	// `kuke create`/`kuke run` re-supplies its own.
+	IgnoreDiskPressure bool `json:"ignoreDiskPressure,omitempty"  yaml:"-"`
 }
 
 // Binding-kind discriminants for CellProvenance.BindingKind. A cell is

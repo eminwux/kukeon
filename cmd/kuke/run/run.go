@@ -287,6 +287,16 @@ func NewRunCmd() *cobra.Command {
 			"than firing the instant the trigger fires.")
 	_ = viper.BindPFlag(config.KUKE_RUN_RM.ViperKey, cmd.Flags().Lookup("rm"))
 
+	cmd.Flags().Bool("ignore-disk-pressure", false,
+		"Bypass kukeond's data-volume disk-pressure guard for this run. The "+
+			"daemon normally refuses to provision a new cell once the data "+
+			"volume crosses the hard threshold; pass this when you know there "+
+			"is enough headroom. (issue #1035)")
+	_ = viper.BindPFlag(
+		config.KUKE_RUN_IGNORE_DISK_PRESSURE.ViperKey,
+		cmd.Flags().Lookup("ignore-disk-pressure"),
+	)
+
 	// `--clone ↔ --rm` mutex (#839): a persistent clone Config whose cell is
 	// removed on exit is operationally messy; `kuke apply -f <clone-spec>`
 	// is the right path if you want the slot without an attached cell. Must
@@ -352,6 +362,10 @@ type runFlags struct {
 	// produced so CI/scripted callers that opt in retain the exit-non-zero
 	// drift signal. See the flag commentary in NewRunCmd.
 	requireSynced bool
+	// ignoreDiskPressure threads `kuke run --ignore-disk-pressure` onto the
+	// transport-only Spec.IgnoreDiskPressure field so the daemon's CreateCell
+	// guard is bypassed for this invocation. Issue #1035.
+	ignoreDiskPressure bool
 }
 
 // validateSourceMutex enforces the "exactly one source" contract across the
@@ -384,17 +398,18 @@ func validateSourceMutex(flags runFlags) error {
 
 func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 	flags := runFlags{
-		file:          strings.TrimSpace(viper.GetString(config.KUKE_RUN_FILE.ViperKey)),
-		blueprintName: strings.TrimSpace(viper.GetString(config.KUKE_RUN_BLUEPRINT.ViperKey)),
-		detach:        viper.GetBool(config.KUKE_RUN_DETACH.ViperKey),
-		containerFlag: strings.TrimSpace(viper.GetString(config.KUKE_RUN_CONTAINER.ViperKey)),
-		autoDelete:    viper.GetBool(config.KUKE_RUN_RM.ViperKey),
-		nameOverride:  strings.TrimSpace(viper.GetString(config.KUKE_RUN_NAME.ViperKey)),
-		newCell:       viper.GetBool(config.KUKE_RUN_NEW.ViperKey),
-		clone:         viper.GetBool(config.KUKE_RUN_CLONE.ViperKey),
-		reuse:         viper.GetBool(config.KUKE_RUN_REUSE.ViperKey),
-		paramFile:     strings.TrimSpace(viper.GetString(config.KUKE_RUN_PARAM_FILE.ViperKey)),
-		requireSynced: viper.GetBool(config.KUKE_RUN_REQUIRE_SYNCED.ViperKey),
+		file:               strings.TrimSpace(viper.GetString(config.KUKE_RUN_FILE.ViperKey)),
+		blueprintName:      strings.TrimSpace(viper.GetString(config.KUKE_RUN_BLUEPRINT.ViperKey)),
+		detach:             viper.GetBool(config.KUKE_RUN_DETACH.ViperKey),
+		containerFlag:      strings.TrimSpace(viper.GetString(config.KUKE_RUN_CONTAINER.ViperKey)),
+		autoDelete:         viper.GetBool(config.KUKE_RUN_RM.ViperKey),
+		nameOverride:       strings.TrimSpace(viper.GetString(config.KUKE_RUN_NAME.ViperKey)),
+		newCell:            viper.GetBool(config.KUKE_RUN_NEW.ViperKey),
+		clone:              viper.GetBool(config.KUKE_RUN_CLONE.ViperKey),
+		reuse:              viper.GetBool(config.KUKE_RUN_REUSE.ViperKey),
+		paramFile:          strings.TrimSpace(viper.GetString(config.KUKE_RUN_PARAM_FILE.ViperKey)),
+		requireSynced:      viper.GetBool(config.KUKE_RUN_REQUIRE_SYNCED.ViperKey),
+		ignoreDiskPressure: viper.GetBool(config.KUKE_RUN_IGNORE_DISK_PRESSURE.ViperKey),
 	}
 
 	if len(args) == 1 {
@@ -568,6 +583,14 @@ func runRun(cmd *cobra.Command, args []string) error {
 		if cellDoc.Spec.Provenance != nil {
 			cellDoc.Spec.Provenance.EnvOverrides = append([]string(nil), flags.envArgs...)
 		}
+	}
+
+	// --ignore-disk-pressure (#1035): thread the override onto the
+	// transport-only Spec.IgnoreDiskPressure field (yaml:"-" — never
+	// persisted). The flag is the imperative knob; it only ever sets the
+	// override true, never clears a value loaded from a manifest.
+	if flags.ignoreDiskPressure {
+		cellDoc.Spec.IgnoreDiskPressure = true
 	}
 
 	if validateErr := validateResolvedCell(cellDoc); validateErr != nil {
