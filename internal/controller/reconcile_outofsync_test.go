@@ -37,6 +37,7 @@ import (
 	"github.com/eminwux/kukeon/internal/controller/runner"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
+	ext "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
 // materializeSampleCell runs the production materialize+convert pipeline
@@ -135,6 +136,79 @@ type controllerResult struct {
 	CellsErrored int
 	CellsDeleted int
 	Errors       []string
+}
+
+// sampleAttachableBlueprint mirrors sampleReferencedBlueprint but marks the
+// "main" container attachable, so the re-resolve path's ApplyEnvOverrides has a
+// container to bake the recorded per-cell --env override into
+// (epic:cell-identity P5, #1024).
+func sampleAttachableBlueprint() ext.CellBlueprintDoc {
+	bp := sampleReferencedBlueprint()
+	bp.Spec.Cell.Containers[0].Attachable = true
+	return bp
+}
+
+// TestReconcileCells_OutOfSync_EnvOverrideSurvivesNoSpuriousDrift pins AC2/AC3
+// of epic:cell-identity P5 (#1024): a Config-lineage cell created
+// `--from-config --env K=V` records the override in Spec.Provenance.EnvOverrides
+// (P3 #1023) and bakes it into the attachable container's Env. The re-resolve
+// path re-applies the recorded override last (P3 precedence), so the
+// materialized `desired` spec matches the live cell — no spurious OutOfSync and
+// no metadata write. Without the fix the materialized spec lacks the override,
+// the diff flags the env field, and the cell sticks on a spurious OutOfSync.
+func TestReconcileCells_OutOfSync_EnvOverrideSurvivesNoSpuriousDrift(t *testing.T) {
+	cellDoc, err := cellconfig.MaterializeWithName(
+		sampleConfig(), sampleAttachableBlueprint(), cellconfig.Prefix(sampleConfig()),
+	)
+	if err != nil {
+		t.Fatalf("cellconfig.MaterializeWithName: %v", err)
+	}
+	live, err := apischeme.ConvertCellDocToInternal(cellDoc)
+	if err != nil {
+		t.Fatalf("ConvertCellDocToInternal: %v", err)
+	}
+
+	// Simulate `--from-config --env APP_ENV=prod`: bake the override into the
+	// attachable container's Env and record it in provenance, as the create
+	// path (applyEnvOverrides, #1023) does.
+	idx := -1
+	for i, c := range live.Spec.Containers {
+		if !c.Root && c.Attachable {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatalf("test fixture has no attachable container — sampleAttachableBlueprint changed?")
+	}
+	live.Spec.Containers[idx].Env = append(live.Spec.Containers[idx].Env, "APP_ENV=prod")
+	live.Spec.Provenance = &intmodel.CellProvenance{EnvOverrides: []string{"APP_ENV=prod"}}
+
+	var updateCalls atomic.Int32
+	mock := stubLineageRunner(
+		func(intmodel.CellConfig) (intmodel.CellConfig, error) {
+			return configCarrier(t, sampleConfig()), nil
+		},
+		func(intmodel.CellBlueprint) (intmodel.CellBlueprint, error) {
+			return blueprintCarrier(t, sampleAttachableBlueprint()), nil
+		},
+		func(intmodel.Cell) error {
+			updateCalls.Add(1)
+			return nil
+		},
+	)
+
+	res, _ := runOutOfSyncHarness(t, live, mock)
+
+	if got := updateCalls.Load(); got != 0 {
+		t.Errorf("UpdateCellMetadata calls: got %d, want 0 (recorded --env override must not produce spurious OutOfSync)", got)
+	}
+	if res.CellsUpdated != 0 {
+		t.Errorf("CellsUpdated: got %d, want 0", res.CellsUpdated)
+	}
+	if res.CellsErrored != 0 || len(res.Errors) != 0 {
+		t.Errorf("override-survival pass surfaced errors: %+v", res)
+	}
 }
 
 // TestReconcileCells_OutOfSync_MatchingCellStaysSynced is AC case 1: a

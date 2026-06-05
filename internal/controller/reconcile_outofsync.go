@@ -98,7 +98,7 @@ func desiredCellOutOfSync(r runner.Runner, cell intmodel.Cell, configName string
 		return cellOutOfSync{OutOfSync: true, Reason: outOfSyncReasonConfigDeleted}
 	}
 
-	desiredCell, materializeErr := materializeCellFromConfig(r, cfg, cell.Metadata.Name)
+	desiredCell, materializeErr := materializeCellFromConfig(r, cfg, cell.Metadata.Name, provenanceEnvOverrides(cell))
 	if materializeErr != nil {
 		return cellOutOfSync{Err: materializeErr.Error()}
 	}
@@ -111,6 +111,18 @@ func desiredCellOutOfSync(r runner.Runner, cell intmodel.Cell, configName string
 		OutOfSync: true,
 		Reason:    outOfSyncSpecDifferReason(diff),
 	}
+}
+
+// provenanceEnvOverrides returns the per-cell `--env` overrides recorded in the
+// cell's materialization provenance (P3 #1023), or nil for a cell with no
+// provenance (hand-built, or a pre-#1021 cell). Threaded into
+// materializeCellFromConfig so the re-resolve path re-applies the overrides the
+// live cell baked at create time (epic:cell-identity P5, #1024).
+func provenanceEnvOverrides(cell intmodel.Cell) []string {
+	if cell.Spec.Provenance == nil {
+		return nil
+	}
+	return cell.Spec.Provenance.EnvOverrides
 }
 
 // configLineage returns the lineage Config name carried on the cell's
@@ -191,8 +203,18 @@ func lookupLineageConfig(
 // detector compares *spec drift*, not identity. This keeps the detector
 // correct now that P2 (#1022) lands generated cell names that no longer match
 // the Config name (the legacy StableName pin, retired in P2).
+//
+// envOverrides carries the cell's recorded `Spec.Provenance.EnvOverrides` (the
+// per-cell `--env KEY=VALUE` baked at create time, P3 #1023). Re-resolving from
+// the Config alone re-runs `MaterializeWithName`, which never re-applies those
+// overrides — so without re-applying them here a cell created
+// `--from-config --env K=V` reports a spurious OutOfSync (the override is in the
+// live spec but not the freshly materialized one) and has it stripped on
+// reapply. ApplyEnvOverrides re-bakes them last (P3 precedence) through the same
+// helper the create and clone paths use (epic:cell-identity P5, #1024), so the
+// re-materialized spec matches the live cell's attachable-container Env.
 func materializeCellFromConfig(
-	r runner.Runner, cfg intmodel.CellConfig, cellName string,
+	r runner.Runner, cfg intmodel.CellConfig, cellName string, envOverrides []string,
 ) (intmodel.Cell, error) {
 	cfgDoc, err := apischeme.ConvertCellConfigToExternal(cfg)
 	if err != nil {
@@ -223,6 +245,11 @@ func materializeCellFromConfig(
 	if mErr != nil {
 		return intmodel.Cell{}, fmt.Errorf("materialize cell: %w", mErr)
 	}
+
+	// Re-apply the cell's recorded per-cell --env overrides last (P3 precedence,
+	// #1023) so the re-materialized spec carries the same attachable-container
+	// Env the live cell baked at create time. A nil/empty slice is a no-op.
+	cellconfig.ApplyEnvOverrides(&cellDoc, envOverrides)
 
 	desired, convErr := apischeme.ConvertCellDocToInternal(cellDoc)
 	if convErr != nil {
