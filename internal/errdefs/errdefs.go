@@ -641,4 +641,21 @@ var (
 	ErrTeamBlueprintTemplateMissing = errors.New(
 		"harness blueprint template not found under cache dir",
 	)
+	// ErrTeamBuildContextMissing fires when an ImageCatalog entry's resolved
+	// build.context dir or Dockerfile path does not exist in the materialized
+	// agents source — `kuke team init --build` cannot build the image.
+	ErrTeamBuildContextMissing = errors.New(
+		"build context or dockerfile missing under materialized agents source",
+	)
+	// ErrTeamBuildBaseMissing fires when a leaf Dockerfile's FROM references an
+	// in-repo (kukeon.internal/...) base whose Dockerfile is not present at
+	// `harnesses/<name>/Dockerfile` in the materialized agents source.
+	ErrTeamBuildBaseMissing = errors.New(
+		"in-repo base Dockerfile referenced by FROM is missing",
+	)
+	// ErrTeamBuildCycle fires when the FROM-walk's topo sort cannot place every
+	// build target — i.e. the cloned source's Dockerfile graph contains a cycle.
+	ErrTeamBuildCycle = errors.New(
+		"Dockerfile FROM-graph cycle prevents base-before-leaves build ordering",
+	)
 )

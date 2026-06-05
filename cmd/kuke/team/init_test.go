@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,6 +91,47 @@ func stubResolveErr() ResolveFunc {
 func stubApplyErr() ApplyForTeamFunc {
 	return func(_ context.Context, _ []byte, _ string) (kukeonv1.ApplyDocumentsResult, error) {
 		return kukeonv1.ApplyDocumentsResult{}, errors.New("apply must not be called")
+	}
+}
+
+// stubBuildErr returns a BuildAllFunc that fails on any call — used by tests
+// where --build is not set, so the build path must never fire.
+func stubBuildErr() BuildAllFunc {
+	return func(
+		_ context.Context, _, _, _ string,
+		_ []*model.ImageCatalogEntry, _, _, _ io.Writer,
+	) error {
+		return errors.New("build must not be called")
+	}
+}
+
+// buildCall captures one composeTeam → BuildAllFunc invocation so tests can
+// assert which catalog leaves were handed to kukebuild and against which
+// cache dir / source ref / realm.
+type buildCall struct {
+	CacheDir, SourceRef, Realm string
+	Leaves                     []*model.ImageCatalogEntry
+}
+
+// recordingBuild returns a BuildAllFunc that appends every invocation to
+// *calls under a mutex (so two-project tests can share one recorder) and
+// returns nil. The recorder copies the leaves slice so the caller's mutations
+// to the catalog do not race with later assertions.
+func recordingBuild(mu *sync.Mutex, calls *[]buildCall) BuildAllFunc {
+	return func(
+		_ context.Context,
+		cacheDir, sourceRef, realm string,
+		leaves []*model.ImageCatalogEntry,
+		_, _, _ io.Writer,
+	) error {
+		mu.Lock()
+		defer mu.Unlock()
+		cp := make([]*model.ImageCatalogEntry, len(leaves))
+		copy(cp, leaves)
+		*calls = append(*calls, buildCall{
+			CacheDir: cacheDir, SourceRef: sourceRef, Realm: realm, Leaves: cp,
+		})
+		return nil
 	}
 }
 
@@ -229,8 +271,8 @@ func TestComposeTeamNoProjectFile(t *testing.T) {
 	emptyDir := t.TempDir()
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	err := composeTeam(
-		context.Background(), &bytes.Buffer{}, emptyDir, layout,
-		stubGit(nil), stubProjectURL(""), stubResolveErr(), stubApplyErr(), false,
+		context.Background(), &bytes.Buffer{}, io.Discard, emptyDir, layout,
+		stubGit(nil), stubProjectURL(""), stubResolveErr(), stubApplyErr(), stubBuildErr(), false, false,
 	)
 	if !errors.Is(err, errdefs.ErrTeamProjectFileNotFound) {
 		t.Fatalf("err = %v, want ErrTeamProjectFileNotFound", err)
@@ -242,8 +284,8 @@ func TestComposeTeamWrongKind(t *testing.T) {
 	dir := writeProject(t, "apiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec: {}\n")
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 	err := composeTeam(
-		context.Background(), &bytes.Buffer{}, dir, layout,
-		stubGit(nil), stubProjectURL(""), stubResolveErr(), stubApplyErr(), false,
+		context.Background(), &bytes.Buffer{}, io.Discard, dir, layout,
+		stubGit(nil), stubProjectURL(""), stubResolveErr(), stubApplyErr(), stubBuildErr(), false, false,
 	)
 	if !errors.Is(err, errdefs.ErrTeamProjectFileKind) {
 		t.Fatalf("err = %v, want ErrTeamProjectFileKind", err)
@@ -265,8 +307,8 @@ func TestComposeTeamScaffoldsAndWrites(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := composeTeam(
-		context.Background(), &out, projectDir, layout,
-		git, stubProjectURL(""), stubResolveErr(), stubApplyErr(), false,
+		context.Background(), &out, io.Discard, projectDir, layout,
+		git, stubProjectURL(""), stubResolveErr(), stubApplyErr(), stubBuildErr(), false, false,
 	); err != nil {
 		t.Fatalf("composeTeam: %v", err)
 	}
@@ -323,8 +365,8 @@ func TestComposeTeamReRunDoesNotRescaffold(t *testing.T) {
 	git := stubGit(map[string]string{"user.name": "A", "user.email": "a@example.com"})
 
 	if err := composeTeam(
-		context.Background(), &bytes.Buffer{}, projectDir, layout,
-		git, stubProjectURL(""), stubResolveErr(), stubApplyErr(), false,
+		context.Background(), &bytes.Buffer{}, io.Discard, projectDir, layout,
+		git, stubProjectURL(""), stubResolveErr(), stubApplyErr(), stubBuildErr(), false, false,
 	); err != nil {
 		t.Fatalf("first composeTeam: %v", err)
 	}
@@ -336,8 +378,8 @@ func TestComposeTeamReRunDoesNotRescaffold(t *testing.T) {
 	}
 	var out bytes.Buffer
 	if err := composeTeam(
-		context.Background(), &out, projectDir, layout,
-		git, stubProjectURL(""), stubResolveErr(), stubApplyErr(), false,
+		context.Background(), &out, io.Discard, projectDir, layout,
+		git, stubProjectURL(""), stubResolveErr(), stubApplyErr(), stubBuildErr(), false, false,
 	); err != nil {
 		t.Fatalf("second composeTeam: %v", err)
 	}
@@ -359,8 +401,8 @@ func TestComposeTeamNoGitIdentityOmitsGitBlock(t *testing.T) {
 	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
 
 	if err := composeTeam(
-		context.Background(), &bytes.Buffer{}, projectDir, layout,
-		stubGit(nil), stubProjectURL(""), stubResolveErr(), stubApplyErr(), false,
+		context.Background(), &bytes.Buffer{}, io.Discard, projectDir, layout,
+		stubGit(nil), stubProjectURL(""), stubResolveErr(), stubApplyErr(), stubBuildErr(), false, false,
 	); err != nil {
 		t.Fatalf("composeTeam: %v", err)
 	}
@@ -384,8 +426,8 @@ func TestComposeTeamDryRunWritesNothing(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := composeTeam(
-		context.Background(), &out, projectDir, layout,
-		stubGit(nil), stubProjectURL(""), stubResolveErr(), stubApplyErr(), true,
+		context.Background(), &out, io.Discard, projectDir, layout,
+		stubGit(nil), stubProjectURL(""), stubResolveErr(), stubApplyErr(), stubBuildErr(), true, false,
 	); err != nil {
 		t.Fatalf("composeTeam dry-run: %v", err)
 	}
@@ -410,10 +452,10 @@ func TestComposeTeamDryRunRendersToStdout(t *testing.T) {
 
 	var out bytes.Buffer
 	err := composeTeam(
-		context.Background(), &out, projectDir, layout,
+		context.Background(), &out, io.Discard, projectDir, layout,
 		stubGit(map[string]string{"user.name": "Op", "user.email": "op@example.com"}),
 		stubProjectURL("git@github.com:eminwux/sbsh.git"),
-		stubBundle(bundle), stubApplyErr(), true,
+		stubBundle(bundle), stubApplyErr(), stubBuildErr(), true, false,
 	)
 	if err != nil {
 		t.Fatalf("composeTeam dry-run: %v", err)
@@ -457,12 +499,11 @@ func TestComposeTeamRendersOnNonDryRun(t *testing.T) {
 	)
 	var out bytes.Buffer
 	err := composeTeam(
-		context.Background(), &out, projectDir, layout,
+		context.Background(), &out, io.Discard, projectDir, layout,
 		stubGit(nil),
 		stubProjectURL("git@github.com:eminwux/sbsh.git"),
 		stubBundle(bundle),
-		recordingApply(&mu, &calls, kukeonv1.ApplyDocumentsResult{}),
-		false,
+		recordingApply(&mu, &calls, kukeonv1.ApplyDocumentsResult{}), stubBuildErr(), false, false,
 	)
 	if err != nil {
 		t.Fatalf("composeTeam: %v", err)
@@ -488,9 +529,9 @@ func TestComposeTeamImageSelectHardError(t *testing.T) {
 	bundle.ImageCatalog.Spec.Images[0].Capabilities = []string{"go"}
 
 	err := composeTeam(
-		context.Background(), &bytes.Buffer{}, projectDir, layout,
+		context.Background(), &bytes.Buffer{}, io.Discard, projectDir, layout,
 		stubGit(nil), stubProjectURL(""),
-		stubBundle(bundle), stubApplyErr(), false,
+		stubBundle(bundle), stubApplyErr(), stubBuildErr(), false, false,
 	)
 	if !errors.Is(err, errdefs.ErrTeamImageNoMatch) {
 		t.Fatalf("err = %v, want ErrTeamImageNoMatch", err)
@@ -514,9 +555,9 @@ func TestComposeTeamProjectRepoURLFilledIntoConfig(t *testing.T) {
 
 	var out bytes.Buffer
 	err := composeTeam(
-		context.Background(), &out, projectDir, layout,
+		context.Background(), &out, io.Discard, projectDir, layout,
 		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
-		stubBundle(bundle), stubApplyErr(), true,
+		stubBundle(bundle), stubApplyErr(), stubBuildErr(), true, false,
 	)
 	if err != nil {
 		t.Fatalf("composeTeam: %v", err)
@@ -549,9 +590,9 @@ func TestComposeTeamAppliesRenderedSetToDaemon(t *testing.T) {
 	}
 	var out bytes.Buffer
 	if err := composeTeam(
-		context.Background(), &out, projectDir, layout,
+		context.Background(), &out, io.Discard, projectDir, layout,
 		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
-		stubBundle(bundle), recordingApply(&mu, &calls, result), false,
+		stubBundle(bundle), recordingApply(&mu, &calls, result), stubBuildErr(), false, false,
 	); err != nil {
 		t.Fatalf("composeTeam: %v", err)
 	}
@@ -590,9 +631,9 @@ func TestComposeTeamDryRunSkipsApply(t *testing.T) {
 	// stubApplyErr would error if invoked — composeTeam must not reach it.
 	var out bytes.Buffer
 	if err := composeTeam(
-		context.Background(), &out, projectDir, layout,
+		context.Background(), &out, io.Discard, projectDir, layout,
 		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
-		stubBundle(bundle), stubApplyErr(), true,
+		stubBundle(bundle), stubApplyErr(), stubBuildErr(), true, false,
 	); err != nil {
 		t.Fatalf("composeTeam dry-run: %v", err)
 	}
@@ -610,8 +651,8 @@ func TestComposeTeamHarnessLessRosterSkipsApply(t *testing.T) {
 
 	var out bytes.Buffer
 	if err := composeTeam(
-		context.Background(), &out, projectDir, layout,
-		stubGit(nil), stubProjectURL(""), stubResolveErr(), stubApplyErr(), false,
+		context.Background(), &out, io.Discard, projectDir, layout,
+		stubGit(nil), stubProjectURL(""), stubResolveErr(), stubApplyErr(), stubBuildErr(), false, false,
 	); err != nil {
 		t.Fatalf("composeTeam: %v", err)
 	}
@@ -640,8 +681,8 @@ func TestComposeTeamApplyFailureBlocksDropInWrite(t *testing.T) {
 	}
 
 	err := composeTeam(
-		context.Background(), &bytes.Buffer{}, projectDir, layout,
-		stubGit(nil), stubProjectURL(""), stubBundle(bundle), apply, false,
+		context.Background(), &bytes.Buffer{}, io.Discard, projectDir, layout,
+		stubGit(nil), stubProjectURL(""), stubBundle(bundle), apply, stubBuildErr(), false, false,
 	)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("err = %v, want it to wrap %v", err, wantErr)
@@ -665,9 +706,9 @@ func TestComposeTeamWritesNothingUnderRendered(t *testing.T) {
 		calls []applyCall
 	)
 	if err := composeTeam(
-		context.Background(), &bytes.Buffer{}, projectDir, layout,
+		context.Background(), &bytes.Buffer{}, io.Discard, projectDir, layout,
 		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
-		stubBundle(bundle), recordingApply(&mu, &calls, kukeonv1.ApplyDocumentsResult{}), false,
+		stubBundle(bundle), recordingApply(&mu, &calls, kukeonv1.ApplyDocumentsResult{}), stubBuildErr(), false, false,
 	); err != nil {
 		t.Fatalf("composeTeam: %v", err)
 	}
@@ -711,17 +752,17 @@ spec:
 
 	// Init alpha.
 	if err := composeTeam(
-		context.Background(), &bytes.Buffer{}, alphaDir, layout,
+		context.Background(), &bytes.Buffer{}, io.Discard, alphaDir, layout,
 		stubGit(nil), stubProjectURL("git@github.com:eminwux/alpha.git"),
-		stubBundle(bundle), apply, false,
+		stubBundle(bundle), apply, stubBuildErr(), false, false,
 	); err != nil {
 		t.Fatalf("alpha init: %v", err)
 	}
 	// Init beta.
 	if err := composeTeam(
-		context.Background(), &bytes.Buffer{}, betaDir, layout,
+		context.Background(), &bytes.Buffer{}, io.Discard, betaDir, layout,
 		stubGit(nil), stubProjectURL("git@github.com:eminwux/beta.git"),
-		stubBundle(bundle), apply, false,
+		stubBundle(bundle), apply, stubBuildErr(), false, false,
 	); err != nil {
 		t.Fatalf("beta init: %v", err)
 	}
@@ -746,9 +787,9 @@ spec:
 		t.Fatalf("read beta entry: %v", readErr)
 	}
 	if reErr := composeTeam(
-		context.Background(), &bytes.Buffer{}, alphaDir, layout,
+		context.Background(), &bytes.Buffer{}, io.Discard, alphaDir, layout,
 		stubGit(nil), stubProjectURL("git@github.com:eminwux/alpha.git"),
-		stubBundle(bundle), apply, false,
+		stubBundle(bundle), apply, stubBuildErr(), false, false,
 	); reErr != nil {
 		t.Fatalf("alpha re-init: %v", reErr)
 	}
@@ -784,8 +825,114 @@ func TestNewInitCmdParsesDryRunFlag(t *testing.T) {
 	if cmd.Flags().Lookup("dry-run") == nil {
 		t.Fatalf("--dry-run flag not registered")
 	}
+	if cmd.Flags().Lookup("build") == nil {
+		t.Fatalf("--build flag not registered")
+	}
 	if cmd.Name() != "init" {
 		t.Errorf("init cmd name = %q", cmd.Name())
+	}
+}
+
+// TestComposeTeamBuildInvokesBuildAll pins AC 2: `kuke team init --build`
+// invokes the build-set runner against the bundle's cache dir, the source's
+// pinned ref, the default realm, and the catalog leaves teamrender selected
+// for the (role × harness) pairs.
+func TestComposeTeamBuildInvokesBuildAll(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+
+	var (
+		mu         sync.Mutex
+		buildCalls []buildCall
+	)
+	build := recordingBuild(&mu, &buildCalls)
+
+	var (
+		applyMu    sync.Mutex
+		applyCalls []applyCall
+	)
+	apply := recordingApply(&applyMu, &applyCalls, kukeonv1.ApplyDocumentsResult{})
+
+	var out bytes.Buffer
+	if err := composeTeam(
+		context.Background(), &out, io.Discard, projectDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
+		stubBundle(bundle), apply, build, false, true,
+	); err != nil {
+		t.Fatalf("composeTeam: %v", err)
+	}
+
+	if len(buildCalls) != 1 {
+		t.Fatalf("build call count = %d, want 1", len(buildCalls))
+	}
+	call := buildCalls[0]
+	if call.CacheDir != bundle.CacheDir {
+		t.Errorf("build cacheDir = %q, want %q", call.CacheDir, bundle.CacheDir)
+	}
+	if call.SourceRef != bundle.Source.Ref {
+		t.Errorf("build sourceRef = %q, want %q", call.SourceRef, bundle.Source.Ref)
+	}
+	if call.Realm != "default" {
+		t.Errorf("build realm = %q, want %q", call.Realm, "default")
+	}
+	if len(call.Leaves) != 1 || call.Leaves[0].Ref != "claude-go" {
+		t.Errorf("build leaves = %+v, want one entry ref=claude-go", call.Leaves)
+	}
+
+	// Build runs alongside the apply path — both fire.
+	if len(applyCalls) != 1 {
+		t.Errorf("apply call count = %d, want 1 (build does not gate apply)", len(applyCalls))
+	}
+}
+
+// TestComposeTeamBuildSkippedOnDryRun pins the dry-run semantics: --build
+// with --dry-run announces what would build but invokes neither kukebuild
+// nor the daemon apply.
+func TestComposeTeamBuildSkippedOnDryRun(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+
+	var out bytes.Buffer
+	if err := composeTeam(
+		context.Background(), &out, io.Discard, projectDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
+		stubBundle(bundle), stubApplyErr(), stubBuildErr(), true, true,
+	); err != nil {
+		t.Fatalf("composeTeam: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "--build skipped") {
+		t.Errorf("dry-run output missing --build skip marker: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "1 catalog leaf(s) selected") {
+		t.Errorf("dry-run output missing selection count: %q", out.String())
+	}
+}
+
+// TestComposeTeamBuildNotInvokedByDefault pins the inversion: --build off
+// (default) → BuildAllFunc never called. The stubBuildErr would error if it
+// were.
+func TestComposeTeamBuildNotInvokedByDefault(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+
+	var (
+		applyMu    sync.Mutex
+		applyCalls []applyCall
+	)
+	if err := composeTeam(
+		context.Background(), &bytes.Buffer{}, io.Discard, projectDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
+		stubBundle(bundle), recordingApply(&applyMu, &applyCalls, kukeonv1.ApplyDocumentsResult{}),
+		stubBuildErr(), false, false,
+	); err != nil {
+		t.Fatalf("composeTeam: %v", err)
 	}
 }
 

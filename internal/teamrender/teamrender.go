@@ -102,9 +102,15 @@ type Inputs struct {
 // Result carries the rendered objects from one project's roster. Each
 // CellBlueprint at index i has its companion CellConfig at the same
 // index in Configs, simplifying the apply loop in step 4 (#1043).
+// Selections carries the ImageCatalog entry that satisfied each
+// (role × harness) pair at the same index — `kuke team init --build`
+// hands this slice to teambuild.BuildAll to drive the local build path
+// (#1064). The slice is deduplicated by entry.Ref so a catalog entry
+// reused across multiple (role × harness) pairs builds once.
 type Result struct {
 	Blueprints []*v1beta1.CellBlueprintDoc
 	Configs    []*v1beta1.CellConfigDoc
+	Selections []*model.ImageCatalogEntry
 }
 
 // Render runs the full per-(role × harness) pipeline against a loaded
@@ -134,6 +140,7 @@ func Render(
 	}
 
 	res := &Result{}
+	seenSelections := map[string]struct{}{}
 	for _, ptRole := range pt.Spec.Roles {
 		role, ok := bundle.Roles[ptRole.Ref]
 		if !ok {
@@ -166,6 +173,12 @@ func Render(
 
 			res.Blueprints = append(res.Blueprints, bp)
 			res.Configs = append(res.Configs, cfg)
+			if entry != nil {
+				if _, seen := seenSelections[entry.Ref]; !seen {
+					seenSelections[entry.Ref] = struct{}{}
+					res.Selections = append(res.Selections, entry)
+				}
+			}
 		}
 	}
 	return res, nil
