@@ -113,7 +113,7 @@ spec:
 // fixture-remote tag unless it overrides.
 func defaultFixtureFiles() []agentsFile {
 	return []agentsFile{
-		{path: "roles/dev/role.yaml", body: validRoleDevYAML},
+		{path: "dev/role.yaml", body: validRoleDevYAML},
 		{path: "harnesses/claude/harness.yaml", body: validHarnessClaudeYAML},
 		{path: "harnesses/images.yaml", body: validImageCatalogYAML},
 	}
@@ -288,7 +288,7 @@ func TestCache_MaterializeClones(t *testing.T) {
 	if dir != want {
 		t.Errorf("dir = %q, want %q", dir, want)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "roles", "dev", "role.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "dev", "role.yaml")); err != nil {
 		t.Errorf("role.yaml not present in cache: %v", err)
 	}
 }
@@ -331,7 +331,7 @@ func TestCache_MaterializeRefetchesFloatingBranch(t *testing.T) {
 	// materialize — blind reuse would silently run a stale roster.
 	remote := t.TempDir()
 	gitRun(t, remote, "init")
-	rolePath := filepath.Join(remote, "roles", "dev", "role.yaml")
+	rolePath := filepath.Join(remote, "dev", "role.yaml")
 	if err := os.MkdirAll(filepath.Dir(rolePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +367,7 @@ func TestCache_MaterializeRefetchesFloatingBranch(t *testing.T) {
 	if dir2 != dir {
 		t.Errorf("floating refetch path = %q, want %q", dir2, dir)
 	}
-	got, err := os.ReadFile(filepath.Join(dir, "roles", "dev", "role.yaml"))
+	got, err := os.ReadFile(filepath.Join(dir, "dev", "role.yaml"))
 	if err != nil {
 		t.Fatalf("read role.yaml: %v", err)
 	}
@@ -384,7 +384,7 @@ func TestCache_MaterializePinsToVersion(t *testing.T) {
 	// v1.5.0 body.
 	src := t.TempDir()
 	gitRun(t, src, "init")
-	rolePath := filepath.Join(src, "roles", "dev", "role.yaml")
+	rolePath := filepath.Join(src, "dev", "role.yaml")
 	if err := os.MkdirAll(filepath.Dir(rolePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +412,7 @@ func TestCache_MaterializePinsToVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
-	got, err := os.ReadFile(filepath.Join(dir, "roles", "dev", "role.yaml"))
+	got, err := os.ReadFile(filepath.Join(dir, "dev", "role.yaml"))
 	if err != nil {
 		t.Fatalf("read role.yaml: %v", err)
 	}
@@ -427,7 +427,7 @@ func TestCache_MaterializePinsToCommit(t *testing.T) {
 	// land that commit's body, not the branch tip's.
 	remote := t.TempDir()
 	gitRun(t, remote, "init")
-	rolePath := filepath.Join(remote, "roles", "dev", "role.yaml")
+	rolePath := filepath.Join(remote, "dev", "role.yaml")
 	if err := os.MkdirAll(filepath.Dir(rolePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +455,7 @@ func TestCache_MaterializePinsToCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Materialize commit: %v", err)
 	}
-	got, err := os.ReadFile(filepath.Join(dir, "roles", "dev", "role.yaml"))
+	got, err := os.ReadFile(filepath.Join(dir, "dev", "role.yaml"))
 	if err != nil {
 		t.Fatalf("read role.yaml: %v", err)
 	}
@@ -537,7 +537,7 @@ func TestLoadRole_WrongKindNamesPath(t *testing.T) {
 	// — the parser dispatched on `kind:`, validated cleanly, but the loader
 	// expected a Role document.
 	dir := t.TempDir()
-	rolePath := filepath.Join(dir, "roles", "dev", "role.yaml")
+	rolePath := filepath.Join(dir, "dev", "role.yaml")
 	if err := os.MkdirAll(filepath.Dir(rolePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -659,7 +659,7 @@ func TestLoadRole_MissingFileNamesPath(t *testing.T) {
 	if err == nil {
 		t.Fatalf("want read error, got nil")
 	}
-	wantSub := filepath.Join(dir, "roles", "dev", "role.yaml")
+	wantSub := filepath.Join(dir, "dev", "role.yaml")
 	if !strings.Contains(err.Error(), wantSub) {
 		t.Errorf("err %q does not name role path %q", err, wantSub)
 	}
