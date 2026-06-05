@@ -161,6 +161,12 @@ type Client interface {
 	// is absent so callers can distinguish missing from operational
 	// failures.
 	DeleteImage(namespace, ref string) error
+
+	// PruneImages reclaims dangling image layers and the orphaned leases
+	// pinning them in the specified containerd namespace, leaving tagged
+	// images and the snapshots backing live containers untouched. Returns
+	// the count of leases released vs. retained.
+	PruneImages(namespace string) (PruneResult, error)
 }
 
 func NewClient(ctx context.Context, logger *slog.Logger, socket string) Client {

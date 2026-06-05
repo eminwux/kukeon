@@ -62,6 +62,15 @@ type DeleteImageResult struct {
 	Ref       string
 }
 
+// PruneImagesResult reports the outcome of a `kuke image prune`: the realm /
+// namespace it ran against and the count of leases released vs. retained.
+type PruneImagesResult struct {
+	Realm          string
+	Namespace      string
+	LeasesDeleted  int
+	LeasesRetained int
+}
+
 // ListImages enumerates images in the realm's containerd namespace. The
 // realm is validated up-front so callers see ErrRealmNotFound before any
 // containerd round-trip; the namespace mapping mirrors LoadImage.
@@ -174,6 +183,42 @@ func (b *Exec) DeleteImage(realm, ref string) (DeleteImageResult, error) {
 	res.Realm = realmName
 	res.Namespace = namespace
 	res.Ref = imageRef
+	return res, nil
+}
+
+// PruneImages reclaims dangling image layers and the orphaned leases pinning
+// them in the realm's containerd namespace. The realm is validated up-front
+// so callers see ErrRealmNotFound before any containerd round-trip; the
+// namespace mapping mirrors DeleteImage. Tagged images and the snapshots
+// backing live cells are left untouched (see ctr.PruneImages).
+func (b *Exec) PruneImages(realm string) (PruneImagesResult, error) {
+	var res PruneImagesResult
+
+	realmName := strings.TrimSpace(realm)
+	if realmName == "" {
+		return res, errdefs.ErrRealmNameRequired
+	}
+
+	lookup := intmodel.Realm{
+		Metadata: intmodel.RealmMetadata{Name: realmName},
+	}
+	if _, err := b.runner.GetRealm(lookup); err != nil {
+		if errors.Is(err, errdefs.ErrRealmNotFound) {
+			return res, fmt.Errorf("%w: %s", errdefs.ErrRealmNotFound, realmName)
+		}
+		return res, fmt.Errorf("%w: %w", errdefs.ErrGetRealm, err)
+	}
+
+	namespace := consts.RealmNamespace(realmName)
+	pruned, err := b.runner.PruneImages(namespace)
+	if err != nil {
+		return res, fmt.Errorf("%w: %w", errdefs.ErrPruneImages, err)
+	}
+
+	res.Realm = realmName
+	res.Namespace = namespace
+	res.LeasesDeleted = pruned.LeasesDeleted
+	res.LeasesRetained = pruned.LeasesRetained
 	return res, nil
 }
 

@@ -198,6 +198,10 @@ func (c *subtreeRecorderClient) DeleteImage(string, string) error {
 	panic("unexpected")
 }
 
+func (c *subtreeRecorderClient) PruneImages(string) (ctr.PruneResult, error) {
+	panic("unexpected")
+}
+
 // Compile-time: the stub satisfies the full Client surface.
 var _ ctr.Client = (*subtreeRecorderClient)(nil)
 

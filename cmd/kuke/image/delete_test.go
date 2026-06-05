@@ -157,3 +157,7 @@ func (f *fakeDeleteClient) DeleteImage(_ context.Context, realm, ref string) (ku
 	}
 	return f.deleteImageFn(realm, ref)
 }
+
+func (f *fakeDeleteClient) PruneImages(context.Context, string) (kukeonv1.PruneImagesResult, error) {
+	return kukeonv1.PruneImagesResult{}, errors.New("unexpected PruneImages call")
+}

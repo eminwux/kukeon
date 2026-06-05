@@ -171,6 +171,9 @@ func (c *specHashFakeClient) GetImage(string, string) (ctr.ImageInfo, error) {
 func (c *specHashFakeClient) ImageChainID(string, string) (string, error)         { return "", nil }
 func (c *specHashFakeClient) ContainerRootChainID(string, string) (string, error) { return "", nil }
 func (c *specHashFakeClient) DeleteImage(string, string) error                    { return nil }
+func (c *specHashFakeClient) PruneImages(string) (ctr.PruneResult, error) {
+	return ctr.PruneResult{}, nil
+}
 
 var _ ctr.Client = (*specHashFakeClient)(nil)
 

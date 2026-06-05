@@ -844,3 +844,12 @@ type DeleteImageResult struct {
 	Namespace string
 	Ref       string
 }
+
+// PruneImagesResult reports the outcome of a `kuke image prune`: the realm /
+// namespace it ran against and the count of leases released vs. retained.
+type PruneImagesResult struct {
+	Realm          string
+	Namespace      string
+	LeasesDeleted  int
+	LeasesRetained int
+}
