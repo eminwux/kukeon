@@ -45,7 +45,7 @@ When run from inside a `kukeon-dev-root` cell (the canonical agent workflow), `m
 make dev-init
 ```
 
-`scripts/dev-init.sh` composes the full re-bootstrap loop: `make kuke kukebuild` + `kukeond` symlink, writes `./kukeond-dev.yaml` + `./kuke-dev.yaml` idempotently (guarded by `[ ! -e ]`) and threads `--server-configuration` (admin commands) + `KUKE_CONFIGURATION` (client + parity commands) through every invocation, `kuke daemon reset` of the prior cell, `kuke build -t kukeon-local:dev --realm kuke-system .` building the image straight into the `kuke-system` realm's containerd namespace, `kuke init --kukeond-image docker.io/library/kukeon-local:dev`, and the daemon-parity check below. The script is idempotent — re-running on a healthy host produces a clean re-bootstrap.
+`scripts/dev-init.sh` composes the full re-bootstrap loop: `make kuke kukebuild` + `kukeond` symlink, writes `./kukeond-dev.yaml` + `./kuke-dev.yaml` idempotently (guarded by `[ ! -e ]`) and threads `--server-configuration` (admin commands) + `KUKE_CONFIGURATION` (client + parity commands) through every invocation, `kuke daemon reset` of the prior cell, `kuke build -t kukeon.internal/kukeond:v0.0.0-dev --realm kuke-system .` building the image straight into the `kuke-system` realm's containerd namespace, `kuke init --kukeond-image kukeon.internal/kukeond:v0.0.0-dev`, and the daemon-parity check below. `kukeon.internal` is the ICANN-reserved, non-routable internal host the epic (#1063) adopts for every locally-built kukeon image — a stray pull of one fails fast against the reserved TLD instead of silently hitting Docker Hub. The published default (`KukeondImageRepo = ghcr.io/eminwux/kukeon` in `cmd/config/version.go`) is unchanged; only the local dev-loop ref moves. The script is idempotent — re-running on a healthy host produces a clean re-bootstrap.
 
 The daemon-parity tail of the output (the regression guard) must read:
 
@@ -108,20 +108,20 @@ To run individual phases by hand — e.g. while debugging a single phase — inv
    (created by an earlier `kuke init` pass).
 
    ```bash
-   sudo ./kuke build --build-arg VERSION=v0.0.0-dev -t kukeon-local:dev --realm kuke-system .
-   sudo ctr -n kuke-system.kukeon.io images ls | grep kukeon-local
+   sudo ./kuke build --build-arg VERSION=v0.0.0-dev -t kukeon.internal/kukeond:v0.0.0-dev --realm kuke-system .
+   sudo ctr -n kuke-system.kukeon.io images ls | grep kukeon.internal/kukeond
    ```
 
 4. **Run `kuke init`.**
 
    ```bash
-   sudo ./kuke init --kukeond-image docker.io/library/kukeon-local:dev
+   sudo ./kuke init --kukeond-image kukeon.internal/kukeond:v0.0.0-dev
    ```
 
    Expected tail:
 
    ```
-       - cell "kukeond": created (image docker.io/library/kukeon-local:dev)
+       - cell "kukeond": created (image kukeon.internal/kukeond:v0.0.0-dev)
        - cell cgroup: created
        - cell root container: created
        - cell containers: started
