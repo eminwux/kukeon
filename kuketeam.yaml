@@ -1,0 +1,10 @@
+apiVersion: kuketeams.io/v1
+kind: ProjectTeam
+metadata: { name: kukeon }
+spec:
+  source: { repo: github.com/eminwux/agents, branch: main }
+  defaults: { harnesses: [claude, opencode] }
+  roles:
+    - { ref: dev, needs: { image: [go] } }
+    - { ref: pm }
+    - { ref: pr-reviewer }
