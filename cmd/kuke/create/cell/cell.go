@@ -538,7 +538,13 @@ func mergeEnv(specEnv, envArgs []string) []string {
 		key, _, _ := strings.Cut(entry, "=")
 		overrideKeys[key] = struct{}{}
 	}
-	merged := make([]string, 0, len(specEnv)+len(envArgs))
+	// Cap on len(specEnv) alone — not len(specEnv)+len(envArgs) — to
+	// keep CodeQL's go/allocation-size-overflow analysis silent on
+	// operator-tainted inputs. The envArgs tail is appended below and
+	// Go's append handles the tiny extra growth fine for typical kuke
+	// cells (<50 entries on either side). Mirrors the runner-side
+	// mergeRuntimeEnv cap in internal/controller/runner/cell_runtime_env.go.
+	merged := make([]string, 0, len(specEnv))
 	for _, entry := range specEnv {
 		key, _, _ := strings.Cut(entry, "=")
 		if _, override := overrideKeys[key]; override {
