@@ -57,6 +57,7 @@ func TestApplyServerConfigurationDefaultsLayered(t *testing.T) {
 		ReconcileInterval:         "45s",
 		ContainerdNamespaceSuffix: "dev.kukeon.io",
 		CgroupRoot:                "/kukeon-dev",
+		PodSubnetCIDR:             "10.89.0.0/16",
 		DefaultMemoryLimitBytes:   2 * 1024 * 1024 * 1024,
 	}
 	applyServerConfiguration(cmd, spec)
@@ -85,6 +86,9 @@ func TestApplyServerConfigurationDefaultsLayered(t *testing.T) {
 	}
 	if got := viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey); got != spec.CgroupRoot {
 		t.Errorf("CgroupRoot: got %q, want %q", got, spec.CgroupRoot)
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_POD_SUBNET_CIDR.ViperKey); got != spec.PodSubnetCIDR {
+		t.Errorf("PodSubnetCIDR: got %q, want %q", got, spec.PodSubnetCIDR)
 	}
 	if got := viper.GetInt64(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey); got != spec.DefaultMemoryLimitBytes {
 		t.Errorf("DefaultMemoryLimitBytes: got %d, want %d", got, spec.DefaultMemoryLimitBytes)
@@ -336,6 +340,7 @@ func TestCurrentResolvedSpecReflectsViper(t *testing.T) {
 	viper.Set(config.KUKEOND_RECONCILE_INTERVAL.ViperKey, "45s")
 	viper.Set(config.KUKEON_ROOT_NAMESPACE_SUFFIX.ViperKey, "dev.kukeon.io")
 	viper.Set(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey, "/kukeon-dev")
+	viper.Set(config.KUKEON_ROOT_POD_SUBNET_CIDR.ViperKey, "10.89.0.0/16")
 	viper.Set(config.KUKEOND_DEFAULT_MEMORY_LIMIT_BYTES.ViperKey, int64(2*1024*1024*1024))
 
 	spec := currentResolvedSpec()
@@ -363,6 +368,9 @@ func TestCurrentResolvedSpecReflectsViper(t *testing.T) {
 	}
 	if spec.CgroupRoot != "/kukeon-dev" {
 		t.Errorf("CgroupRoot: got %q", spec.CgroupRoot)
+	}
+	if spec.PodSubnetCIDR != "10.89.0.0/16" {
+		t.Errorf("PodSubnetCIDR: got %q", spec.PodSubnetCIDR)
 	}
 	if spec.DefaultMemoryLimitBytes != int64(2*1024*1024*1024) {
 		t.Errorf("DefaultMemoryLimitBytes: got %d", spec.DefaultMemoryLimitBytes)

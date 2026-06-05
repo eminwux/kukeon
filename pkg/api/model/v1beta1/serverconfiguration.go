@@ -74,6 +74,14 @@ type ServerConfigurationSpec struct {
 	// stacks / cells live (e.g. /kukeon-dev for a parallel dev instance on
 	// the same host). Default: /kukeon.
 	CgroupRoot string `json:"cgroupRoot,omitempty"                yaml:"cgroupRoot,omitempty"`
+	// PodSubnetCIDR is the parent block the per-space CNI subnet allocator
+	// subdivides into /24 chunks. Set it to a non-overlapping block (e.g.
+	// 10.89.0.0/16) when running a parallel or nested kukeon instance so its
+	// allocator never lands on another instance's subnet — in particular a
+	// nested `make dev-init` must avoid the parent host's 10.88.0.0/16 + .1
+	// gateway, which is the dev-root cell's own default gateway (issue
+	// #1079). Default: 10.88.0.0/16.
+	PodSubnetCIDR string `json:"podSubnetCIDR,omitempty"             yaml:"podSubnetCIDR,omitempty"`
 	// DefaultMemoryLimitBytes is the daemon-wide fallback memory limit
 	// applied to every admitted container whose
 	// ContainerSpec.Resources.MemoryLimitBytes is unset or zero. Closes the

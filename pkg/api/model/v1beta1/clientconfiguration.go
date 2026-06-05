@@ -66,4 +66,11 @@ type ClientConfigurationSpec struct {
 	// ServerConfiguration.spec.cgroupRoot on the daemon side.
 	// Default: /kukeon.
 	CgroupRoot string `json:"cgroupRoot,omitempty"                yaml:"cgroupRoot,omitempty"`
+	// PodSubnetCIDR is the parent block the per-space CNI subnet allocator
+	// subdivides into /24 chunks. `--no-daemon` workload paths that create
+	// spaces in-process read this field so a parallel or nested kukeon
+	// instance never lands on another instance's subnet; the parallel of
+	// ServerConfiguration.spec.podSubnetCIDR on the daemon side (issue
+	// #1079). Default: 10.88.0.0/16.
+	PodSubnetCIDR string `json:"podSubnetCIDR,omitempty"             yaml:"podSubnetCIDR,omitempty"`
 }
