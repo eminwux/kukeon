@@ -176,7 +176,7 @@ verify_parent_attach_intact() {
 trap 'verify_parent_attach_intact || exit 1' EXIT
 
 if [ "${KUKEON_PROFILE}" = "dev" ]; then
-    step "KUKEON_PROFILE=dev: enabling dev-profile (suffix dev.kukeon.io, cgroup /kukeon-dev)"
+    step "KUKEON_PROFILE=dev: enabling dev-profile (suffix dev.kukeon.io, cgroup /kukeon-dev, pod CIDR 10.89.0.0/16)"
 
     # Write the dev-profile config files idempotently before any kuke
     # invocation. `-e` instead of `-f` so a broken symlink to a missing
@@ -190,12 +190,17 @@ if [ "${KUKEON_PROFILE}" = "dev" ]; then
         step "Write dev-profile server config to ${DEV_PROFILE_SERVER_CONFIG}"
         cat > "${DEV_PROFILE_SERVER_CONFIG}" <<'EOF'
 # kukeond ServerConfiguration — dev profile (#285 phase 3).
-# Switches containerdNamespaceSuffix and cgroupRoot off the defaults so a
-# parallel kukeon instance can coexist with the canonical kukeon.io / /kukeon
-# tree. socket / runPath are left at defaults — dev-init runs the only
-# kukeon instance on the host, so disjoint storage is unnecessary; the
-# multi-instance two-host-smoke is exercised by the issue's manual test
-# plan, not this script.
+# Switches containerdNamespaceSuffix, cgroupRoot, and podSubnetCIDR off the
+# defaults so a parallel or nested kukeon instance can coexist with the
+# canonical kukeon.io / /kukeon / 10.88.0.0/16 tree. socket / runPath are left
+# at defaults — dev-init runs the only kukeon instance on the host, so disjoint
+# storage is unnecessary; the multi-instance two-host-smoke is exercised by the
+# issue's manual test plan, not this script.
+#
+# podSubnetCIDR is the nested-mode egress fix (#1079): running `make dev-init`
+# inside a kukeon-dev-root cell, the nested allocator must not reuse the parent
+# host's 10.88.0.0/16 + .1 gateway — that .1 is the cell's own default gateway,
+# and claiming it inside the cell shadows the gateway and blackholes egress.
 apiVersion: v1beta1
 kind: ServerConfiguration
 metadata:
@@ -203,6 +208,7 @@ metadata:
 spec:
   containerdNamespaceSuffix: dev.kukeon.io
   cgroupRoot: /kukeon-dev
+  podSubnetCIDR: 10.89.0.0/16
 EOF
     fi
 
@@ -212,9 +218,11 @@ EOF
 # kuke ClientConfiguration — dev profile (#285 phase 3).
 # Read by every `kuke` invocation below via KUKE_CONFIGURATION. The
 # --no-daemon parity check below depends on this file to address the dev
-# instance's containerd namespaces (dev.kukeon.io) and cgroup tree
-# (/kukeon-dev) without a per-command --containerd-namespace-suffix /
-# --cgroup-root flag.
+# instance's containerd namespaces (dev.kukeon.io), cgroup tree (/kukeon-dev),
+# and pod subnet (10.89.0.0/16) without a per-command
+# --containerd-namespace-suffix / --cgroup-root / --pod-subnet-cidr flag.
+# podSubnetCIDR mirrors the server-side nested-mode egress fix (#1079) so
+# in-process `--no-daemon` space creation never lands on the parent's subnet.
 apiVersion: v1beta1
 kind: ClientConfiguration
 metadata:
@@ -222,6 +230,7 @@ metadata:
 spec:
   containerdNamespaceSuffix: dev.kukeon.io
   cgroupRoot: /kukeon-dev
+  podSubnetCIDR: 10.89.0.0/16
 EOF
     fi
 

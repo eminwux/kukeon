@@ -109,6 +109,14 @@ spec:
   # hierarchy (e.g. "/kukeon-dev" for a parallel dev instance).
   # Default: /kukeon
   cgroupRoot: /kukeon
+
+  # Parent CIDR the per-space CNI subnet allocator subdivides into /24 chunks.
+  # --no-daemon workload paths that create spaces in-process read this so a
+  # parallel or nested kukeon instance never lands on another instance's
+  # subnet (e.g. "10.89.0.0/16" for a nested dev instance avoiding the parent
+  # host's 10.88.0.0/16).
+  # Default: 10.88.0.0/16
+  podSubnetCIDR: 10.88.0.0/16
 `
 
 // WriteDefault writes the commented default ClientConfiguration to path when

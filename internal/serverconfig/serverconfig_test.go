@@ -186,6 +186,7 @@ func canonicalDefaultsSpec() v1beta1.ServerConfigurationSpec {
 		KukeondImage:              "",
 		ContainerdNamespaceSuffix: "kukeon.io",
 		CgroupRoot:                "/kukeon",
+		PodSubnetCIDR:             "10.88.0.0/16",
 		DefaultMemoryLimitBytes:   0,
 	}
 }
@@ -244,6 +245,9 @@ func TestWriteDefaultCreatesFileWithDefaults(t *testing.T) {
 	if doc.Spec.CgroupRoot != "/kukeon" {
 		t.Errorf("Spec.CgroupRoot: got %q, want %q", doc.Spec.CgroupRoot, "/kukeon")
 	}
+	if doc.Spec.PodSubnetCIDR != "10.88.0.0/16" {
+		t.Errorf("Spec.PodSubnetCIDR: got %q, want %q", doc.Spec.PodSubnetCIDR, "10.88.0.0/16")
+	}
 
 	// AC: "Header comment explains each field's purpose and default."
 	raw, err := os.ReadFile(path)
@@ -264,6 +268,7 @@ func TestWriteDefaultCreatesFileWithDefaults(t *testing.T) {
 		`# Default: ""`,
 		"# Default: kukeon.io",
 		"# Default: /kukeon",
+		"# Default: 10.88.0.0/16",
 	} {
 		if !strings.Contains(rawStr, marker) {
 			t.Errorf("missing per-field default marker %q in dumped YAML", marker)
@@ -318,6 +323,7 @@ func TestWriteDefaultRendersResolvedSpec(t *testing.T) {
 		KukeondImage:              "docker.io/library/kukeon:test",
 		ContainerdNamespaceSuffix: "dev.kukeon.io",
 		CgroupRoot:                "/kukeon-dev",
+		PodSubnetCIDR:             "10.89.0.0/16",
 		DefaultMemoryLimitBytes:   2 * 1024 * 1024 * 1024,
 	}
 
@@ -363,6 +369,9 @@ func TestWriteDefaultRendersResolvedSpec(t *testing.T) {
 	}
 	if doc.Spec.CgroupRoot != spec.CgroupRoot {
 		t.Errorf("Spec.CgroupRoot: got %q, want %q", doc.Spec.CgroupRoot, spec.CgroupRoot)
+	}
+	if doc.Spec.PodSubnetCIDR != spec.PodSubnetCIDR {
+		t.Errorf("Spec.PodSubnetCIDR: got %q, want %q", doc.Spec.PodSubnetCIDR, spec.PodSubnetCIDR)
 	}
 	if doc.Spec.DefaultMemoryLimitBytes != spec.DefaultMemoryLimitBytes {
 		t.Errorf("Spec.DefaultMemoryLimitBytes: got %d, want %d",

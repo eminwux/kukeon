@@ -313,3 +313,60 @@ func TestNewDefaultSubnetAllocator_UsesDefault10880016(t *testing.T) {
 		t.Errorf("default PrefixLen = %d, want 24", got)
 	}
 }
+
+// TestConfigureSubnetParentCIDR_OverridesDefault is the issue #1079 regression
+// guard: after ConfigureSubnetParentCIDR redirects the parent block, the
+// default allocator carves /24s from the configured /16 instead of the
+// hardcoded 10.88.0.0/16. The override is process-global, so the test restores
+// the default in cleanup to avoid leaking into sibling tests.
+func TestConfigureSubnetParentCIDR_OverridesDefault(t *testing.T) {
+	t.Cleanup(func() { _ = cni.ConfigureSubnetParentCIDR(cni.DefaultSubnetParentCIDR) })
+
+	if err := cni.ConfigureSubnetParentCIDR("10.89.0.0/16"); err != nil {
+		t.Fatalf("ConfigureSubnetParentCIDR(10.89.0.0/16): %v", err)
+	}
+	if got := cni.NewDefaultSubnetAllocator(t.TempDir()).ParentCIDR(); got != "10.89.0.0/16" {
+		t.Errorf("ParentCIDR after override = %q, want 10.89.0.0/16", got)
+	}
+
+	// A redirected allocator hands out its first /24 from the new block, so the
+	// nested gateway lands clear of the parent host's 10.88.0.1 (the collision
+	// that blackholed egress).
+	got, err := cni.NewDefaultSubnetAllocator(t.TempDir()).Allocate("default", "first")
+	if err != nil {
+		t.Fatalf("Allocate: %v", err)
+	}
+	if got != "10.89.0.0/24" {
+		t.Errorf("first allocation = %q, want 10.89.0.0/24", got)
+	}
+}
+
+// TestConfigureSubnetParentCIDR_EmptyIsNoop confirms an empty cidr keeps the
+// default, so callers can pass a resolved-or-empty config value unconditionally.
+func TestConfigureSubnetParentCIDR_EmptyIsNoop(t *testing.T) {
+	t.Cleanup(func() { _ = cni.ConfigureSubnetParentCIDR(cni.DefaultSubnetParentCIDR) })
+
+	if err := cni.ConfigureSubnetParentCIDR(""); err != nil {
+		t.Fatalf("ConfigureSubnetParentCIDR(\"\"): %v", err)
+	}
+	if got := cni.NewDefaultSubnetAllocator(t.TempDir()).ParentCIDR(); got != "10.88.0.0/16" {
+		t.Errorf("ParentCIDR after empty override = %q, want 10.88.0.0/16 (no-op)", got)
+	}
+}
+
+// TestConfigureSubnetParentCIDR_RejectsInvalid confirms a malformed or
+// too-narrow CIDR is rejected with ErrInvalidSubnetCIDR and leaves the default
+// untouched, so the caller can refuse to start rather than panic later inside
+// NewDefaultSubnetAllocator.
+func TestConfigureSubnetParentCIDR_RejectsInvalid(t *testing.T) {
+	t.Cleanup(func() { _ = cni.ConfigureSubnetParentCIDR(cni.DefaultSubnetParentCIDR) })
+
+	for _, bad := range []string{"not-a-cidr", "10.89.0.0/24", "::1/64"} {
+		if err := cni.ConfigureSubnetParentCIDR(bad); !errors.Is(err, errdefs.ErrInvalidSubnetCIDR) {
+			t.Errorf("ConfigureSubnetParentCIDR(%q): expected ErrInvalidSubnetCIDR, got %v", bad, err)
+		}
+		if got := cni.NewDefaultSubnetAllocator(t.TempDir()).ParentCIDR(); got != "10.88.0.0/16" {
+			t.Errorf("ParentCIDR after rejected %q = %q, want unchanged 10.88.0.0/16", bad, got)
+		}
+	}
+}

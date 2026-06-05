@@ -139,6 +139,14 @@ spec:
   # Default: /kukeon
   cgroupRoot: {{printf "%q" .CgroupRoot}}
 
+  # Parent CIDR the per-space CNI subnet allocator subdivides into /24 chunks.
+  # Set to a non-overlapping block (e.g. "10.89.0.0/16") for a parallel or
+  # nested kukeon instance so its allocator never lands on another instance's
+  # subnet — a nested ` + "`make dev-init`" + ` must avoid the parent host's
+  # 10.88.0.0/16 + .1 gateway, which is the dev-root cell's own default gateway.
+  # Default: 10.88.0.0/16
+  podSubnetCIDR: {{printf "%q" .PodSubnetCIDR}}
+
   # Daemon-wide fallback memory limit (in bytes) applied to every admitted
   # container whose Resources.MemoryLimitBytes is unset or zero. An explicit
   # per-container limit always wins. Recommended on hosts without swap and

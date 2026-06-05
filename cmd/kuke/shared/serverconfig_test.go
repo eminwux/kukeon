@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/consts"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/cobra"
@@ -141,6 +142,9 @@ func TestLoadServerConfigurationFromFlag_NonDefaultSuffixIsAppliedRuntime(t *tes
 	t.Cleanup(func() {
 		consts.RealmNamespaceSuffix = prevSuffix //nolint:reassign // restore runtime-overridable global
 		consts.KukeonCgroupRoot = prevRoot       //nolint:reassign // restore runtime-overridable global
+		// Restore the cni allocator's process-global parent CIDR the loader
+		// mutated via cni.ConfigureSubnetParentCIDR.
+		_ = cni.ConfigureSubnetParentCIDR(cni.DefaultSubnetParentCIDR)
 		viper.Reset()
 	})
 	viper.Reset()
@@ -152,7 +156,8 @@ func TestLoadServerConfigurationFromFlag_NonDefaultSuffixIsAppliedRuntime(t *tes
 			"kind: ServerConfiguration\n" +
 			"spec:\n" +
 			"  containerdNamespaceSuffix: dev.kukeon.io\n" +
-			"  cgroupRoot: /kukeon-dev\n",
+			"  cgroupRoot: /kukeon-dev\n" +
+			"  podSubnetCIDR: 10.89.0.0/16\n",
 	)
 	if err := os.WriteFile(yamlPath, yaml, 0o600); err != nil {
 		t.Fatalf("write yaml: %v", err)
@@ -173,6 +178,12 @@ func TestLoadServerConfigurationFromFlag_NonDefaultSuffixIsAppliedRuntime(t *tes
 	}
 	if got, want := consts.KukeonCgroupRoot, "/kukeon-dev"; got != want {
 		t.Errorf("KukeonCgroupRoot = %q, want %q (loader must call ConfigureRuntime)", got, want)
+	}
+	// The loader must also drive cni.ConfigureSubnetParentCIDR so a parallel
+	// or nested instance's allocator carves the configured /16, not the
+	// default 10.88.0.0/16 (issue #1079). ParentCIDR() surfaces the global.
+	if got, want := cni.NewDefaultSubnetAllocator("").ParentCIDR(), "10.89.0.0/16"; got != want {
+		t.Errorf("subnet allocator ParentCIDR = %q, want %q (loader must call ConfigureSubnetParentCIDR)", got, want)
 	}
 
 	// IsKukeonNamespace now refuses default-suffix namespaces; this is the

@@ -126,15 +126,58 @@ func NewSubnetAllocator(runPath, parentCIDR string, prefixLen int) (*SubnetAlloc
 	}, nil
 }
 
+// configuredSubnetParentCIDR is the parent block NewDefaultSubnetAllocator
+// subdivides. It defaults to DefaultSubnetParentCIDR (10.88.0.0/16) and is
+// overridden once at process start by ConfigureSubnetParentCIDR when the
+// operator configures a non-default pod CIDR. The canonical use is nested
+// `make dev-init` (running inside a kukeon-dev-root cell): the nested kukeon
+// must not reuse the parent host's 10.88.0.0/16 + .1 gateway, which is the
+// cell's own default gateway — claiming .1 inside the cell shadows the
+// gateway and blackholes the cell's egress (issue #1079). Process-global,
+// mirroring consts.KukeonCgroupRoot / consts.RealmNamespaceSuffix, the
+// sibling per-instance redirect knobs. Set once before any runner is built,
+// then read-only — no lock needed.
+//
+//nolint:gochecknoglobals // process-wide runtime config, see godoc above.
+var configuredSubnetParentCIDR = DefaultSubnetParentCIDR
+
+// ConfigureSubnetParentCIDR overrides the parent CIDR NewDefaultSubnetAllocator
+// subdivides for this process. An empty cidr is a no-op that keeps the
+// default, so callers can pass a resolved-or-empty config value unconditionally.
+// A non-empty cidr is validated the same way NewSubnetAllocator validates its
+// parent (IPv4 CIDR wide enough for a /DefaultSubnetPrefixLen carve); an invalid
+// value returns an ErrInvalidSubnetCIDR-wrapped error so the caller can refuse
+// to start rather than panic later inside NewDefaultSubnetAllocator. The kukeond
+// daemon and `kuke init` call it once after loading their configuration,
+// alongside consts.ConfigureRuntime.
+func ConfigureSubnetParentCIDR(cidr string) error {
+	cidr = strings.TrimSpace(cidr)
+	if cidr == "" {
+		return nil
+	}
+	// Reuse NewSubnetAllocator as the validator — its constructor parses the
+	// CIDR and rejects a parent too narrow for the per-space prefix without
+	// touching disk, so a probe build with an empty runPath is side-effect
+	// free.
+	if _, err := NewSubnetAllocator("", cidr, DefaultSubnetPrefixLen); err != nil {
+		return err
+	}
+	configuredSubnetParentCIDR = cidr
+	return nil
+}
+
 // NewDefaultSubnetAllocator constructs the standard allocator: /24 chunks of
-// 10.88.0.0/16 persisted under runPath.
+// configuredSubnetParentCIDR (10.88.0.0/16 unless ConfigureSubnetParentCIDR
+// redirected it at process start) persisted under runPath.
 func NewDefaultSubnetAllocator(runPath string) *SubnetAllocator {
-	a, err := NewSubnetAllocator(runPath, DefaultSubnetParentCIDR, DefaultSubnetPrefixLen)
+	a, err := NewSubnetAllocator(runPath, configuredSubnetParentCIDR, DefaultSubnetPrefixLen)
 	if err != nil {
-		// The default arguments are constants, so this can never fail at
-		// runtime. Constructor returns *SubnetAllocator for ergonomic use at
-		// daemon startup; if the constants ever drift apart, a panic here
-		// surfaces the bug immediately rather than at first space-create.
+		// configuredSubnetParentCIDR is either the compile-time default
+		// constant or a value ConfigureSubnetParentCIDR already validated, so
+		// this can never fail at runtime. Constructor returns *SubnetAllocator
+		// for ergonomic use at daemon startup; if the constants ever drift
+		// apart, a panic here surfaces the bug immediately rather than at
+		// first space-create.
 		panic(fmt.Sprintf("kukeon: default subnet allocator misconfigured: %v", err))
 	}
 	return a

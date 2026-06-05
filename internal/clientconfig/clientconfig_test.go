@@ -54,6 +54,7 @@ spec:
   logLevel: debug
   containerdNamespaceSuffix: dev.kukeon.io
   cgroupRoot: /kukeon-dev
+  podSubnetCIDR: 10.89.0.0/16
 `
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -83,6 +84,9 @@ spec:
 	}
 	if doc.Spec.CgroupRoot != "/kukeon-dev" {
 		t.Errorf("CgroupRoot: got %q", doc.Spec.CgroupRoot)
+	}
+	if doc.Spec.PodSubnetCIDR != "10.89.0.0/16" {
+		t.Errorf("PodSubnetCIDR: got %q", doc.Spec.PodSubnetCIDR)
 	}
 }
 
@@ -193,6 +197,9 @@ func TestWriteDefaultCreatesFileWithDefaults(t *testing.T) {
 	if doc.Spec.CgroupRoot != "/kukeon" {
 		t.Errorf("Spec.CgroupRoot: got %q", doc.Spec.CgroupRoot)
 	}
+	if doc.Spec.PodSubnetCIDR != "10.88.0.0/16" {
+		t.Errorf("Spec.PodSubnetCIDR: got %q", doc.Spec.PodSubnetCIDR)
+	}
 
 	// AC: "Header comment explains each field's purpose and default."
 	raw, err := os.ReadFile(path)
@@ -210,6 +217,7 @@ func TestWriteDefaultCreatesFileWithDefaults(t *testing.T) {
 		"# Default: info",
 		"# Default: kukeon.io",
 		"# Default: /kukeon",
+		"# Default: 10.88.0.0/16",
 	} {
 		if !strings.Contains(rawStr, marker) {
 			t.Errorf("missing per-field default marker %q in dumped YAML", marker)

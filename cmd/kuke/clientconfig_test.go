@@ -22,15 +22,17 @@ import (
 	"testing"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	"github.com/eminwux/kukeon/internal/cni"
 	"github.com/eminwux/kukeon/internal/consts"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 	"github.com/spf13/viper"
 )
 
-// restoreRuntimeGlobals snapshots the consts package runtime globals and
-// returns a cleanup that restores them. loadClientConfiguration calls
-// consts.ConfigureRuntime, which mutates these — tests that exercise it
-// must roll back so the next test starts on the in-binary defaults.
+// restoreRuntimeGlobals snapshots the consts package runtime globals and the
+// cni subnet allocator's process-global parent CIDR, and returns a cleanup
+// that restores them. loadClientConfiguration calls consts.ConfigureRuntime
+// and cni.ConfigureSubnetParentCIDR, which mutate these — tests that exercise
+// it must roll back so the next test starts on the in-binary defaults.
 func restoreRuntimeGlobals(t *testing.T) {
 	t.Helper()
 	prevSuffix := consts.RealmNamespaceSuffix
@@ -38,6 +40,7 @@ func restoreRuntimeGlobals(t *testing.T) {
 	t.Cleanup(func() {
 		consts.RealmNamespaceSuffix = prevSuffix //nolint:reassign // restore runtime-overridable global
 		consts.KukeonCgroupRoot = prevRoot       //nolint:reassign // restore runtime-overridable global
+		_ = cni.ConfigureSubnetParentCIDR(cni.DefaultSubnetParentCIDR)
 	})
 }
 
@@ -50,6 +53,7 @@ func bindKukeEnv(t *testing.T) {
 		config.KUKEON_ROOT_LOG_LEVEL,
 		config.KUKEON_ROOT_NAMESPACE_SUFFIX,
 		config.KUKEON_ROOT_CGROUP_ROOT,
+		config.KUKEON_ROOT_POD_SUBNET_CIDR,
 	} {
 		if err := v.BindEnv(); err != nil {
 			t.Fatalf("BindEnv %s: %v", v.EnvVar(), err)
@@ -85,6 +89,7 @@ func TestApplyClientConfigurationDefaultsLayered(t *testing.T) {
 		LogLevel:                  "warn",
 		ContainerdNamespaceSuffix: "dev.kukeon.io",
 		CgroupRoot:                "/kukeon-dev",
+		PodSubnetCIDR:             "10.89.0.0/16",
 	}
 	applyClientConfiguration(cmd, spec)
 
@@ -106,6 +111,9 @@ func TestApplyClientConfigurationDefaultsLayered(t *testing.T) {
 	}
 	if got := viper.GetString(config.KUKEON_ROOT_CGROUP_ROOT.ViperKey); got != spec.CgroupRoot {
 		t.Errorf("CgroupRoot: got %q, want %q", got, spec.CgroupRoot)
+	}
+	if got := viper.GetString(config.KUKEON_ROOT_POD_SUBNET_CIDR.ViperKey); got != spec.PodSubnetCIDR {
+		t.Errorf("PodSubnetCIDR: got %q, want %q", got, spec.PodSubnetCIDR)
 	}
 }
 
@@ -228,6 +236,7 @@ spec:
   logLevel: warn
   containerdNamespaceSuffix: dev.kukeon.io
   cgroupRoot: /kukeon-dev
+  podSubnetCIDR: 10.89.0.0/16
 `
 	if writeErr := os.WriteFile(path, []byte(content), 0o644); writeErr != nil {
 		t.Fatalf("WriteFile: %v", writeErr)
@@ -259,6 +268,12 @@ spec:
 	if got, want := consts.KukeonCgroupRoot, "/kukeon-dev"; got != want {
 		t.Errorf("consts.KukeonCgroupRoot: got %q, want %q "+
 			"(loadClientConfiguration must call ConfigureRuntime)", got, want)
+	}
+	// loadClientConfiguration must also call cni.ConfigureSubnetParentCIDR so
+	// --no-daemon in-process space creation carves the configured /16 (#1079).
+	if got, want := cni.NewDefaultSubnetAllocator("").ParentCIDR(), "10.89.0.0/16"; got != want {
+		t.Errorf("subnet allocator ParentCIDR: got %q, want %q "+
+			"(loadClientConfiguration must call ConfigureSubnetParentCIDR)", got, want)
 	}
 }
 
