@@ -82,6 +82,33 @@ spec:
 	}
 }
 
+// reapplyAttachableBlueprint mirrors reapplySampleBlueprint but marks the
+// "main" container attachable, so the re-resolve path's ApplyEnvOverrides has a
+// container to bake the recorded per-cell --env override into (epic:cell-identity
+// P5, #1024). Image bumps to nginx:2.0 from the live cell's nginx:1.0 so a real
+// drift still drives RecreateCell.
+func reapplyAttachableBlueprint(realm string) intmodel.CellBlueprint {
+	doc := `apiVersion: v1beta1
+kind: CellBlueprint
+metadata:
+  name: web
+  realm: ` + realm + `
+spec:
+  cell:
+    containers:
+      - id: main
+        image: nginx:2.0
+        attachable: true
+`
+	return intmodel.CellBlueprint{
+		Metadata: intmodel.CellBlueprintMetadata{
+			Name:  "web",
+			Realm: realm,
+		},
+		Document: []byte(doc),
+	}
+}
+
 // reapplyLineageCell builds a stopped, OutOfSync, Config-lineage cell with the
 // given realm/space/stack scope. The cell's on-disk container image is
 // "nginx:1.0" — diverged from the Config's "nginx:2.0" — so the reapply path
@@ -178,6 +205,76 @@ func TestStartCell_OutOfSyncReapply_RecreatesFromConfig(t *testing.T) {
 	}
 	if res.Cell.Status.State != intmodel.CellStateReady {
 		t.Errorf("cell state = %v, want Ready after RecreateCell", res.Cell.Status.State)
+	}
+}
+
+// TestStartCell_OutOfSyncReapply_EnvOverridePreserved pins the AC3 reapply
+// half of epic:cell-identity P5 (#1024): a Config-lineage cell created
+// `--from-config --env K=V` records the override in Spec.Provenance.EnvOverrides
+// (P3 #1023). The reapply path re-materialises from the Config — which has no
+// knowledge of the per-cell override — so without re-applying provenance the
+// override is silently stripped on RecreateCell. With the fix, the desired cell
+// handed to RecreateCell carries the materialised Blueprint image *and* the
+// re-baked override (re-applied last, P3 precedence).
+func TestStartCell_OutOfSyncReapply_EnvOverridePreserved(t *testing.T) {
+	live := reapplyLineageCell("test-realm", "test-space", "test-stack")
+	// Simulate a cell created `--from-config --env APP_ENV=prod`: the override
+	// is baked into the attachable container's Env and recorded in provenance.
+	live.Spec.Containers[0].Attachable = true
+	live.Spec.Containers[0].Env = []string{"APP_ENV=prod"}
+	live.Spec.Provenance = &intmodel.CellProvenance{
+		EnvOverrides: []string{"APP_ENV=prod"},
+	}
+
+	var recreateCalled bool
+	f := &fakeRunner{
+		GetCellFn:                 func(_ intmodel.Cell) (intmodel.Cell, error) { return live, nil },
+		ExistsCgroupFn:            func(_ any) (bool, error) { return true, nil },
+		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) { return true, nil },
+		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
+			return reapplySampleCellConfig("test-realm", "test-space", "test-stack"), nil
+		},
+		GetBlueprintFn: func(intmodel.CellBlueprint) (intmodel.CellBlueprint, error) {
+			return reapplyAttachableBlueprint("test-realm"), nil
+		},
+		RecreateCellFn: func(cell intmodel.Cell) (intmodel.Cell, error) {
+			recreateCalled = true
+			var main intmodel.ContainerSpec
+			for _, c := range cell.Spec.Containers {
+				if c.ID == "main" {
+					main = c
+					break
+				}
+			}
+			if main.Image != "nginx:2.0" {
+				t.Errorf("RecreateCell main image = %q, want nginx:2.0 (materialised from Blueprint)", main.Image)
+			}
+			// The recorded override must survive re-resolve, not be stripped.
+			found := false
+			for _, e := range main.Env {
+				if e == "APP_ENV=prod" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("RecreateCell main Env = %v, want it to retain APP_ENV=prod (provenance override stripped)", main.Env)
+			}
+			cell.Status.State = intmodel.CellStateReady
+			return cell, nil
+		},
+		StartCellFn: func(intmodel.Cell) (intmodel.Cell, error) {
+			return intmodel.Cell{}, errors.New("StartCell must not run after RecreateCell brought the cell Ready")
+		},
+		UpdateCellMetadataFn: func(intmodel.Cell) error { return nil },
+	}
+
+	ctrl := setupTestController(t, f)
+	if _, err := ctrl.StartCell(buildTestCell("prod", "test-realm", "test-space", "test-stack")); err != nil {
+		t.Fatalf("StartCell returned error: %v", err)
+	}
+	if !recreateCalled {
+		t.Error("RecreateCell was not called; reapply path was skipped")
 	}
 }
 

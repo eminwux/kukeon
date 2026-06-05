@@ -233,11 +233,11 @@ func cloneFromConfig(
 	}
 
 	// Copy the source's provenance verbatim (AC#1), then re-bake its env
-	// overrides plus any additional --env (AC#6). applyEnvOverrides reads
+	// overrides plus any additional --env (AC#6). ApplyEnvOverrides reads
 	// Spec.Provenance.EnvOverrides as the merged set, so set provenance first.
 	cellDoc.Spec.Provenance = v1beta1.CloneCellProvenance(srcProv)
-	mergedEnv := mergeEnv(srcProv.EnvOverrides, flags.envArgs)
-	applyEnvOverrides(&cellDoc, mergedEnv)
+	mergedEnv := cellconfig.MergeEnv(srcProv.EnvOverrides, flags.envArgs)
+	cellconfig.ApplyEnvOverrides(&cellDoc, mergedEnv)
 	return cellDoc, nil
 }
 
