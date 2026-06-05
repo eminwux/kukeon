@@ -120,3 +120,18 @@ func (r *Exec) DeleteImage(namespace, ref string) error {
 	}
 	return r.ctrClient.DeleteImage(namespace, ref)
 }
+
+// PruneImages reclaims dangling image layers and the orphaned leases pinning
+// them in the given containerd namespace. The caller (controller) resolves
+// the realm to a namespace and ensures the realm exists; this method only
+// routes the call onto a connected containerd client.
+func (r *Exec) PruneImages(namespace string) (ctr.PruneResult, error) {
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return ctr.PruneResult{}, errdefs.ErrCheckNamespaceExists
+	}
+	if err := r.ensureClientConnected(); err != nil {
+		return ctr.PruneResult{}, fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+	return r.ctrClient.PruneImages(namespace)
+}

@@ -235,3 +235,7 @@ func (f *fakeClient) LoadImage(_ context.Context, realm string, tarball []byte) 
 func (f *fakeClient) DeleteImage(context.Context, string, string) (kukeonv1.DeleteImageResult, error) {
 	return kukeonv1.DeleteImageResult{}, errors.New("unexpected DeleteImage call")
 }
+
+func (f *fakeClient) PruneImages(context.Context, string) (kukeonv1.PruneImagesResult, error) {
+	return kukeonv1.PruneImagesResult{}, errors.New("unexpected PruneImages call")
+}

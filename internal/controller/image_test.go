@@ -312,3 +312,83 @@ func TestDeleteImage_RunnerErrorIsWrapped(t *testing.T) {
 		t.Errorf("inner error should be preserved; got %q", err.Error())
 	}
 }
+
+func TestPruneImages_Success(t *testing.T) {
+	wantNS := consts.RealmNamespace("kuke-system")
+
+	var gotNS string
+	mock := &fakeRunner{
+		GetRealmFn: func(_ intmodel.Realm) (intmodel.Realm, error) {
+			return buildTestRealm("kuke-system", wantNS), nil
+		},
+		PruneImagesFn: func(ns string) (ctr.PruneResult, error) {
+			gotNS = ns
+			return ctr.PruneResult{LeasesDeleted: 264, LeasesRetained: 2}, nil
+		},
+	}
+
+	ctrl := setupTestController(t, mock)
+	res, err := ctrl.PruneImages("kuke-system")
+	if err != nil {
+		t.Fatalf("PruneImages returned error: %v", err)
+	}
+	if gotNS != wantNS {
+		t.Errorf("runner saw namespace %q, want %q", gotNS, wantNS)
+	}
+	if res.Realm != "kuke-system" {
+		t.Errorf("Realm = %q, want kuke-system", res.Realm)
+	}
+	if res.Namespace != wantNS {
+		t.Errorf("Namespace = %q, want %q", res.Namespace, wantNS)
+	}
+	if res.LeasesDeleted != 264 {
+		t.Errorf("LeasesDeleted = %d, want 264", res.LeasesDeleted)
+	}
+	if res.LeasesRetained != 2 {
+		t.Errorf("LeasesRetained = %d, want 2", res.LeasesRetained)
+	}
+}
+
+func TestPruneImages_RealmNotFound(t *testing.T) {
+	mock := &fakeRunner{
+		GetRealmFn: func(_ intmodel.Realm) (intmodel.Realm, error) {
+			return intmodel.Realm{}, errdefs.ErrRealmNotFound
+		},
+	}
+	ctrl := setupTestController(t, mock)
+	_, err := ctrl.PruneImages("ghost")
+	if !errors.Is(err, errdefs.ErrRealmNotFound) {
+		t.Fatalf("expected ErrRealmNotFound, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "ghost") {
+		t.Errorf("error should name the missing realm; got %q", err.Error())
+	}
+}
+
+func TestPruneImages_EmptyRealm(t *testing.T) {
+	mock := &fakeRunner{}
+	ctrl := setupTestController(t, mock)
+	_, err := ctrl.PruneImages("   ")
+	if !errors.Is(err, errdefs.ErrRealmNameRequired) {
+		t.Fatalf("expected ErrRealmNameRequired, got %v", err)
+	}
+}
+
+func TestPruneImages_RunnerErrorIsWrapped(t *testing.T) {
+	mock := &fakeRunner{
+		GetRealmFn: func(_ intmodel.Realm) (intmodel.Realm, error) {
+			return buildTestRealm("default", ""), nil
+		},
+		PruneImagesFn: func(string) (ctr.PruneResult, error) {
+			return ctr.PruneResult{}, errors.New("containerd unreachable")
+		},
+	}
+	ctrl := setupTestController(t, mock)
+	_, err := ctrl.PruneImages("default")
+	if !errors.Is(err, errdefs.ErrPruneImages) {
+		t.Fatalf("expected ErrPruneImages wrapper, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "containerd unreachable") {
+		t.Errorf("inner error should be preserved; got %q", err.Error())
+	}
+}

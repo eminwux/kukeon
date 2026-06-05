@@ -1092,6 +1092,23 @@ func (c *Client) DeleteImage(_ context.Context, realm, ref string) (kukeonv1.Del
 	}, nil
 }
 
+// PruneImages reclaims dangling image layers and the orphaned leases pinning
+// them in the realm's containerd namespace. The realm is validated by the
+// controller layer; this wrapper only re-encodes the controller result onto
+// the wire type.
+func (c *Client) PruneImages(_ context.Context, realm string) (kukeonv1.PruneImagesResult, error) {
+	res, err := c.ctrl.PruneImages(realm)
+	if err != nil {
+		return kukeonv1.PruneImagesResult{}, err
+	}
+	return kukeonv1.PruneImagesResult{
+		Realm:          res.Realm,
+		Namespace:      res.Namespace,
+		LeasesDeleted:  res.LeasesDeleted,
+		LeasesRetained: res.LeasesRetained,
+	}, nil
+}
+
 func controllerImageToWire(img controller.ImageInfo) kukeonv1.ImageInfo {
 	return kukeonv1.ImageInfo{
 		Name:      img.Name,

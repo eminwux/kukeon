@@ -260,6 +260,11 @@ var (
 	// not-found. Not-found is reported via ErrImageNotFound.
 	ErrDeleteImage = errors.New("failed to delete image")
 
+	// ErrPruneImages wraps the underlying containerd error when reclaiming
+	// dangling image layers and the orphaned leases pinning them in a
+	// realm's namespace fails (`kuke image prune`).
+	ErrPruneImages = errors.New("failed to prune images")
+
 	// ErrImageTagRequired is returned when `kuke build` is invoked without a
 	// -t/--tag — the built image needs a name to land under in the realm's
 	// containerd namespace.

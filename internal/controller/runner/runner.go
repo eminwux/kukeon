@@ -229,6 +229,11 @@ type Runner interface {
 	// namespace. Returns errdefs.ErrImageNotFound when the ref is absent.
 	DeleteImage(namespace, ref string) error
 
+	// PruneImages reclaims dangling image layers and the orphaned leases
+	// pinning them in the given containerd namespace, leaving tagged
+	// images and snapshots backing live containers untouched.
+	PruneImages(namespace string) (ctr.PruneResult, error)
+
 	Close() error
 }
 

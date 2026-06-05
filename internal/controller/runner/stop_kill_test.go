@@ -168,6 +168,9 @@ func (c *stopKillFakeClient) ContainerRootChainID(string, string) (string, error
 }
 
 func (c *stopKillFakeClient) DeleteImage(string, string) error { return nil }
+func (c *stopKillFakeClient) PruneImages(string) (ctr.PruneResult, error) {
+	return ctr.PruneResult{}, nil
+}
 
 var _ ctr.Client = (*stopKillFakeClient)(nil)
 

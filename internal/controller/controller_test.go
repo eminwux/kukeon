@@ -139,6 +139,7 @@ type fakeRunner struct {
 	ImageChainIDFn         func(namespace, ref string) (string, error)
 	ContainerRootChainIDFn func(namespace, containerID string) (string, error)
 	DeleteImageFn          func(namespace, ref string) error
+	PruneImagesFn          func(namespace string) (ctr.PruneResult, error)
 }
 
 // Realm methods
@@ -700,6 +701,13 @@ func (f *fakeRunner) DeleteImage(namespace, ref string) error {
 		return f.DeleteImageFn(namespace, ref)
 	}
 	return errors.New("unexpected call to DeleteImage")
+}
+
+func (f *fakeRunner) PruneImages(namespace string) (ctr.PruneResult, error) {
+	if f.PruneImagesFn != nil {
+		return f.PruneImagesFn(namespace)
+	}
+	return ctr.PruneResult{}, errors.New("unexpected call to PruneImages")
 }
 
 // Test helper functions

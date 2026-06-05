@@ -225,6 +225,15 @@ func (m *fakeLeaseManager) Delete(_ context.Context, l leases.Lease, _ ...leases
 	return nil
 }
 
+func (m *fakeLeaseManager) ListResources(_ context.Context, l leases.Lease) ([]leases.Resource, error) {
+	m.f.callLog = append(m.f.callLog, "lease.ListResources("+l.ID+")")
+	fl, ok := m.f.leases[l.ID]
+	if !ok {
+		return nil, nil
+	}
+	return append([]leases.Resource(nil), fl.resources...), nil
+}
+
 type fakeImageStore struct {
 	images.Store
 
