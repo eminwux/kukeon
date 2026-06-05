@@ -1402,9 +1402,10 @@ func ConvertCellDocToInternal(in ext.CellDoc) (intmodel.Cell, error) {
 		}
 		cell := intmodel.Cell{
 			Metadata: intmodel.CellMetadata{
-				Name:       in.Metadata.Name,
-				Labels:     in.Metadata.Labels,
-				Generation: in.Metadata.Generation,
+				Name:        in.Metadata.Name,
+				Labels:      in.Metadata.Labels,
+				Annotations: in.Metadata.Annotations,
+				Generation:  in.Metadata.Generation,
 			},
 			Spec: intmodel.CellSpec{
 				ID:                  in.Spec.ID,
@@ -1485,9 +1486,10 @@ func BuildCellExternalFromInternal(in intmodel.Cell, apiVersion ext.Version) (ex
 			APIVersion: VersionV1Beta1,
 			Kind:       ext.KindCell,
 			Metadata: ext.CellMetadata{
-				Name:       in.Metadata.Name,
-				Labels:     in.Metadata.Labels,
-				Generation: in.Metadata.Generation,
+				Name:        in.Metadata.Name,
+				Labels:      in.Metadata.Labels,
+				Annotations: in.Metadata.Annotations,
+				Generation:  in.Metadata.Generation,
 			},
 			Spec: ext.CellSpec{
 				ID:                  in.Spec.ID,

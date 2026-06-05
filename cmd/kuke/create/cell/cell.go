@@ -102,6 +102,16 @@ func NewCellCmd() *cobra.Command {
 			"Mutually exclusive with --from-blueprint.")
 	_ = viper.BindPFlag(config.KUKE_CREATE_CELL_FROM_CONFIG.ViperKey, cmd.Flags().Lookup("from-config"))
 
+	cmd.Flags().String("clone", "",
+		"Fork an existing cell's recipe into a new cell: read the source cell's "+
+			"Spec.Provenance (the binding it was materialised from plus any per-cell "+
+			"--param/--env overrides), re-materialise from that same binding, and persist a "+
+			"new stopped cell. The clone copies the source's Spec.Provenance verbatim, inherits "+
+			"its kukeon.io/config or kukeon.io/blueprint lineage label, and carries a "+
+			"kukeon.io/source-cell=<src> annotation. Omitted name → <source-name>-<6hex>; "+
+			"explicit name used verbatim. Mutually exclusive with --from-blueprint/--from-config.")
+	_ = viper.BindPFlag(config.KUKE_CREATE_CELL_CLONE.ViperKey, cmd.Flags().Lookup("clone"))
+
 	cmd.Flags().StringArray("param", nil,
 		"Scalar parameter override as KEY=VALUE; repeatable. Valid with --from-blueprint. "+
 			"Each KEY must be declared in spec.parameters[]. Wins over the parameter's default "+
@@ -131,7 +141,7 @@ func NewCellCmd() *cobra.Command {
 		cmd.Flags().Lookup("ignore-disk-pressure"),
 	)
 
-	cmd.MarkFlagsMutuallyExclusive("from-blueprint", "from-config")
+	cmd.MarkFlagsMutuallyExclusive("from-blueprint", "from-config", "clone")
 
 	// Register autocomplete functions for flags
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
@@ -139,6 +149,7 @@ func NewCellCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
 	_ = cmd.RegisterFlagCompletionFunc("from-blueprint", config.CompleteBlueprintNames)
 	_ = cmd.RegisterFlagCompletionFunc("from-config", config.CompleteConfigNames)
+	_ = cmd.RegisterFlagCompletionFunc("clone", config.CompleteCellNames)
 
 	return cmd
 }
@@ -152,8 +163,13 @@ type createCellFlags struct {
 	stack         string
 	blueprintName string
 	configName    string
-	paramArgs     []string
-	paramFile     string
+	// cloneSource is the source cell name passed via `--clone <src>` (the
+	// third source kind, epic:cell-identity #1073). When set, the cell is
+	// forked from the source cell's Spec.Provenance rather than resolved from a
+	// Blueprint/Config named on the CLI.
+	cloneSource string
+	paramArgs   []string
+	paramFile   string
 	// envArgs holds the validated `--env KEY=VALUE` per-cell overrides. Valid
 	// with --from-config only (parity with --param on --from-blueprint); baked
 	// into the attachable container's env and recorded in
@@ -182,25 +198,37 @@ func parseCreateCellFlags(cmd *cobra.Command, args []string) (createCellFlags, e
 	flags := createCellFlags{
 		blueprintName: strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_FROM_BLUEPRINT.ViperKey)),
 		configName:    strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_FROM_CONFIG.ViperKey)),
+		cloneSource:   strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_CLONE.ViperKey)),
 		paramFile:     strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_PARAM_FILE.ViperKey)),
 	}
 
-	if flags.blueprintName == "" && flags.configName == "" {
+	if flags.blueprintName == "" && flags.configName == "" && flags.cloneSource == "" {
 		return createCellFlags{}, errors.New(
-			"kuke create cell requires --from-blueprint or --from-config (use 'kuke apply -f <file>' for a full manifest)",
+			"kuke create cell requires --from-blueprint, --from-config, or --clone " +
+				"(use 'kuke apply -f <file>' for a full manifest)",
 		)
 	}
 
-	name, err := shared.RequireNameArgOrDefault(
-		cmd,
-		args,
-		"cell",
-		viper.GetString(config.KUKE_CREATE_CELL_NAME.ViperKey),
-	)
-	if err != nil {
-		return createCellFlags{}, err
+	// The clone source kind supports an omitted name (auto-generated
+	// `<source-name>-<6hex>`, AC#2 of #1073), so it does not require the
+	// positional/viper name the --from-blueprint / --from-config paths demand.
+	// finalizeCellName resolves the empty name to a generated one.
+	if flags.cloneSource != "" {
+		flags.name = optionalNameArgOrDefault(
+			args, viper.GetString(config.KUKE_CREATE_CELL_NAME.ViperKey),
+		)
+	} else {
+		name, err := shared.RequireNameArgOrDefault(
+			cmd,
+			args,
+			"cell",
+			viper.GetString(config.KUKE_CREATE_CELL_NAME.ViperKey),
+		)
+		if err != nil {
+			return createCellFlags{}, err
+		}
+		flags.name = name
 	}
-	flags.name = name
 
 	flags.realm = strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_REALM.ViperKey))
 	if flags.realm == "" {
@@ -267,10 +295,14 @@ func runCreateCell(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = client.Close() }()
 
-	if flags.blueprintName != "" {
+	switch {
+	case flags.cloneSource != "":
+		return runClone(cmd, client, flags)
+	case flags.blueprintName != "":
 		return runFromBlueprint(cmd, client, flags)
+	default:
+		return runFromConfig(cmd, client, flags)
 	}
-	return runFromConfig(cmd, client, flags)
 }
 
 // runFromBlueprint resolves the named Blueprint, applies --param/--param-file,

@@ -29,6 +29,13 @@ type CellDoc struct {
 type CellMetadata struct {
 	Name   string            `json:"name"                 yaml:"name"`
 	Labels map[string]string `json:"labels"               yaml:"labels"`
+	// Annotations carry non-identifying metadata about the cell. Unlike
+	// Labels, no reconcile or selector path keys off them, and DiffCell
+	// deliberately does not compare them — a clone's
+	// `kukeon.io/source-cell: <src>` provenance annotation must never trip a
+	// false OutOfSync (epic:cell-identity #1073). Mirrors the Annotations map
+	// CellConfig/CellBlueprint already carry.
+	Annotations map[string]string `json:"annotations,omitempty" yaml:"annotations,omitempty"`
 	// Generation is a monotonic counter bumped by a writer on each
 	// spec-changing update. Defaults to zero; phase 3 wires the writers to
 	// populate it. See ObservedGeneration on the status.
@@ -295,6 +302,14 @@ func NewCellDoc(from *CellDoc) *CellDoc {
 			labels[k] = v
 		}
 		out.Metadata.Labels = labels
+	}
+
+	if out.Metadata.Annotations != nil {
+		annotations := make(map[string]string, len(out.Metadata.Annotations))
+		for k, v := range out.Metadata.Annotations {
+			annotations[k] = v
+		}
+		out.Metadata.Annotations = annotations
 	}
 
 	if out.Spec.Containers == nil {

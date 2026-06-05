@@ -213,6 +213,13 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_CREATE_CELL_FROM_CONFIG = DefineKV("KUKE_CREATE_CELL_FROM_CONFIG", "kuke/create/cell/from-config")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	// KUKE_CREATE_CELL_CLONE is the env-var twin of `kuke create cell --clone
+	// <src>` (epic:cell-identity #1073): the third source kind alongside
+	// --from-blueprint / --from-config. Forks the named source cell's recipe
+	// (its Spec.Provenance, with any per-cell --env/--param overrides) into a
+	// new cell.
+	KUKE_CREATE_CELL_CLONE = DefineKV("KUKE_CREATE_CELL_CLONE", "kuke/create/cell/clone")
+	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_CREATE_CELL_PARAM_FILE = DefineKV("KUKE_CREATE_CELL_PARAM_FILE", "kuke/create/cell/param-file")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	// KUKE_CREATE_CELL_IGNORE_DISK_PRESSURE is the env-var twin of
