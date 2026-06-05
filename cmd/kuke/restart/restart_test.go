@@ -37,8 +37,8 @@ import (
 func TestNewRestartCmdMetadata(t *testing.T) {
 	cmd := restartpkg.NewRestartCmd()
 
-	if cmd.Use != "restart <name>" {
-		t.Errorf("Use mismatch: got %q want %q", cmd.Use, "restart <name>")
+	if cmd.Use != "restart [name]" {
+		t.Errorf("Use mismatch: got %q want %q", cmd.Use, "restart [name]")
 	}
 	if !strings.HasPrefix(cmd.Short, "Restart a cell") {
 		t.Errorf("Short mismatch: got %q", cmd.Short)
@@ -49,10 +49,13 @@ func TestNewRestartCmdMetadata(t *testing.T) {
 	if cmd.Args == nil {
 		t.Errorf("expected Args validator on positional leaf, got nil")
 	}
-	for _, f := range []string{"realm", "space", "stack"} {
+	for _, f := range []string{"realm", "space", "stack", "selector"} {
 		if cmd.Flag(f) == nil {
 			t.Errorf("expected flag --%s to be registered", f)
 		}
+	}
+	if cmd.Flag("selector").Shorthand != "l" {
+		t.Errorf("expected --selector shorthand -l, got %q", cmd.Flag("selector").Shorthand)
 	}
 	if cmd.ValidArgsFunction == nil {
 		t.Error("expected ValidArgsFunction to be set for cell-name completion")
@@ -303,9 +306,26 @@ func TestRestartCmd(t *testing.T) {
 			wantErr: "boom",
 		},
 		{
-			name:    "missing positional",
+			name:    "no name and no selector",
 			args:    []string{},
-			wantErr: "accepts 1 arg",
+			wantErr: "cell name is required",
+		},
+		{
+			name:    "name and selector are mutually exclusive",
+			args:    []string{"c1", "-l", "env=prod"},
+			wantErr: "--selector cannot be combined with a resource name",
+		},
+		{
+			name: "selector matching nothing reports no match",
+			args: []string{"-l", "env=staging"},
+			fake: &fakeClient{
+				listCellsFn: func() ([]v1beta1.CellDoc, error) {
+					return []v1beta1.CellDoc{
+						cellWithLabels("c1", "r1", "s1", "st1", map[string]string{"env": "prod"}),
+					}, nil
+				},
+			},
+			wantOutput: "No cells matched the selector.",
 		},
 	}
 
@@ -351,9 +371,10 @@ func TestRestartCmd(t *testing.T) {
 }
 
 // TestRestartCmd_RejectsCellSubcommand pins the hard CLI break: the `restart cell <name>` subcommand form
-// must fail with cobra's Args-validation error (`accepts 1 arg(s), received 2`)
-// after the collapse — the verb is now a leaf with `cobra.ExactArgs(1)` and no
-// subcommand list, so cobra's unknown-command path no longer fires.
+// must fail with cobra's Args-validation error (`accepts at most 1 arg(s), received 2`)
+// after the collapse — the verb is now a leaf with `cobra.MaximumNArgs(1)` (a bare
+// name or a bare `-l` selector, never two positionals) and no subcommand list, so
+// cobra's unknown-command path no longer fires.
 func TestRestartCmd_RejectsCellSubcommand(t *testing.T) {
 	cmd := restartpkg.NewRestartCmd()
 	buf := &bytes.Buffer{}
@@ -364,6 +385,66 @@ func TestRestartCmd_RejectsCellSubcommand(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected error invoking removed `restart cell` subcommand, got nil")
+	}
+}
+
+// TestRestartCmd_SelectorFanOutIndividual pins AC #1: `-l` re-resolves every
+// matched cell individually (running the per-cell state machine on each) and
+// leaves unmatched cells untouched — only matched cells reach GetCell/StartCell.
+func TestRestartCmd_SelectorFanOutIndividual(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	viper.Reset()
+
+	fake := &fakeClient{
+		listCellsFn: func() ([]v1beta1.CellDoc, error) {
+			return []v1beta1.CellDoc{
+				cellWithLabels("c1", "r1", "s1", "st1", map[string]string{"env": "prod"}),
+				cellWithLabels("c2", "r1", "s1", "st1", map[string]string{"env": "dev"}),
+				cellWithLabels("c3", "r2", "s2", "st2", map[string]string{"env": "prod"}),
+			}, nil
+		},
+		// Matched cells are Stopped, so the per-cell path is GetCell → StartCell
+		// (the restartStopped branch) — no StopCell needed.
+		getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			cell := doc
+			cell.Status.State = v1beta1.CellStateStopped
+			return kukeonv1.GetCellResult{MetadataExists: true, Cell: cell}, nil
+		},
+		startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+			return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
+		},
+	}
+
+	cmd := restartpkg.NewRestartCmd()
+	outBuf := &bytes.Buffer{}
+	cmd.SetOut(outBuf)
+	cmd.SetErr(outBuf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, restartpkg.MockControllerKey{}, kukeonv1.Client(fake))
+	cmd.SetContext(ctx)
+	cmd.SetArgs([]string{"-l", "env=prod"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := []string{"c1", "c3"}
+	if len(fake.getCellNames) != len(want) {
+		t.Fatalf("GetCell called on %v, want %v", fake.getCellNames, want)
+	}
+	for i, name := range want {
+		if fake.getCellNames[i] != name {
+			t.Errorf("getCellNames[%d] = %q, want %q (%v)", i, fake.getCellNames[i], name, fake.getCellNames)
+		}
+	}
+	for _, name := range fake.getCellNames {
+		if name == "c2" {
+			t.Errorf("unmatched cell c2 was reconciled; fan-out must leave it untouched")
+		}
+	}
+	if fake.startCalls != 2 {
+		t.Errorf("StartCell called %d times, want 2 (one per matched cell)", fake.startCalls)
 	}
 }
 
@@ -381,6 +462,7 @@ type fakeClient struct {
 	stopCellFn     func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error)
 	startCellFn    func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error)
 	applyDocsFn    func(rawYAML []byte) (kukeonv1.ApplyDocumentsResult, error)
+	listCellsFn    func() ([]v1beta1.CellDoc, error)
 
 	getCellCalls int
 	stopCalls    int
@@ -388,14 +470,37 @@ type fakeClient struct {
 	getConfigCnt int
 	getBpCalls   int
 	applyCalls   int
+	getCellNames []string
 }
 
 func (f *fakeClient) GetCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
 	f.getCellCalls++
+	f.getCellNames = append(f.getCellNames, doc.Metadata.Name)
 	if f.getCellFn == nil {
 		return kukeonv1.GetCellResult{}, errors.New("unexpected GetCell call")
 	}
 	return f.getCellFn(doc)
+}
+
+func (f *fakeClient) ListCells(_ context.Context, _, _, _ string) ([]v1beta1.CellDoc, error) {
+	if f.listCellsFn == nil {
+		return nil, errors.New("unexpected ListCells call")
+	}
+	return f.listCellsFn()
+}
+
+// cellWithLabels builds a minimal CellDoc carrying the given scope and labels
+// for selector fan-out tests.
+func cellWithLabels(name, realm, space, stack string, labels map[string]string) v1beta1.CellDoc {
+	return v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: name, Labels: labels},
+		Spec: v1beta1.CellSpec{
+			ID:      name,
+			RealmID: realm,
+			SpaceID: space,
+			StackID: stack,
+		},
+	}
 }
 
 func (f *fakeClient) GetConfig(_ context.Context, doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
