@@ -362,7 +362,13 @@ func TestBindConfigStampsTeamLabelAndProjectRepoFill(t *testing.T) {
 			"ANTHROPIC_API_KEY": {From: model.SecretFromEnv, Key: "ANTHROPIC_API_KEY"},
 		},
 	}}
-	src := teamsource.Source{Raw: "eminwux/agents@v1.4.0", OwnerRepo: "eminwux/agents", Version: "v1.4.0"}
+	src := teamsource.Source{
+		Repo:      "github.com/eminwux/agents",
+		Host:      "github.com",
+		OwnerRepo: "eminwux/agents",
+		Ref:       "v1.4.0",
+		Kind:      teamsource.RefTag,
+	}
 	in := Inputs{Project: "sbsh", ProjectRepoURL: "git@github.com:eminwux/sbsh.git"}
 
 	cfg := BindConfig(bp, role, "dev", "claude", tc, src, in, "sbsh", "default")
@@ -430,7 +436,13 @@ func TestBindConfigFillsAgentsSlotFromTeamsConfigSources(t *testing.T) {
 	tc := &model.TeamsConfig{Spec: model.TeamsConfigSpec{
 		Sources: map[string]string{"eminwux/agents": "git@github.com:eminwux/agents.git"},
 	}}
-	src := teamsource.Source{Raw: "eminwux/agents@v1.4.0", OwnerRepo: "eminwux/agents", Version: "v1.4.0"}
+	src := teamsource.Source{
+		Repo:      "github.com/eminwux/agents",
+		Host:      "github.com",
+		OwnerRepo: "eminwux/agents",
+		Ref:       "v1.4.0",
+		Kind:      teamsource.RefTag,
+	}
 	cfg := BindConfig(bp, minimalRole(), "dev", "claude", tc, src, Inputs{Project: "sbsh"}, "sbsh", "default")
 	if got := cfg.Spec.Repos["agents"].URL; got != "git@github.com:eminwux/agents.git" {
 		t.Errorf("agents slot fill URL = %q, want agents.git", got)
@@ -455,7 +467,13 @@ func TestRenderEndToEnd(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	bundle := &teamsource.Bundle{
-		Source:   teamsource.Source{OwnerRepo: "eminwux/agents", Version: "v1.4.0"},
+		Source: teamsource.Source{
+			Repo:      "github.com/eminwux/agents",
+			Host:      "github.com",
+			OwnerRepo: "eminwux/agents",
+			Ref:       "v1.4.0",
+			Kind:      teamsource.RefTag,
+		},
 		CacheDir: cacheDir,
 		Roles:    map[string]*model.Role{"dev": minimalRole()},
 		Harnesses: map[string]*model.Harness{
@@ -484,7 +502,7 @@ func TestRenderEndToEnd(t *testing.T) {
 	pt := &model.ProjectTeam{
 		Metadata: model.Metadata{Name: "sbsh"},
 		Spec: model.ProjectTeamSpec{
-			Source:   "eminwux/agents@v1.4.0",
+			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
 			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude", "codex"}},
 			Roles:    []model.ProjectTeamRole{{Ref: "dev"}},
 		},
@@ -519,7 +537,13 @@ func TestRenderProjectPerRoleNeedsOverrideUnions(t *testing.T) {
 	buildClaudeTemplate(t, cacheDir)
 	role := minimalRole() // image needs: go, git
 	bundle := &teamsource.Bundle{
-		Source:   teamsource.Source{OwnerRepo: "eminwux/agents", Version: "v1.4.0"},
+		Source: teamsource.Source{
+			Repo:      "github.com/eminwux/agents",
+			Host:      "github.com",
+			OwnerRepo: "eminwux/agents",
+			Ref:       "v1.4.0",
+			Kind:      teamsource.RefTag,
+		},
 		CacheDir: cacheDir,
 		Roles:    map[string]*model.Role{"dev": role},
 		Harnesses: map[string]*model.Harness{
@@ -545,7 +569,7 @@ func TestRenderProjectPerRoleNeedsOverrideUnions(t *testing.T) {
 	pt := &model.ProjectTeam{
 		Metadata: model.Metadata{Name: "sbsh"},
 		Spec: model.ProjectTeamSpec{
-			Source:   "eminwux/agents@v1.4.0",
+			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
 			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
 			Roles: []model.ProjectTeamRole{{
 				Ref:   "dev",

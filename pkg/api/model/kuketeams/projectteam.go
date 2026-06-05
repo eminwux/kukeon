@@ -19,8 +19,8 @@ package kuketeams
 // ProjectTeam is the per-project roster, committed as kuketeam.yaml in each
 // project repo. It pins the agents source, declares harness defaults, and lists
 // the roles the project runs. It travels with the project — so its agents
-// `source` is pinned exact while the project repo itself is checked out at
-// floating `main` (the operator's own repo) when materialized.
+// `source` carries an explicit ref intent (a pinned tag/commit for a
+// reproducible roster, or a floating branch tracked across inits).
 type ProjectTeam struct {
 	APIVersion string          `json:"apiVersion" yaml:"apiVersion"`
 	Kind       string          `json:"kind"       yaml:"kind"`
@@ -30,10 +30,11 @@ type ProjectTeam struct {
 
 // ProjectTeamSpec carries the roster.
 type ProjectTeamSpec struct {
-	// Source pins the agents repository as `<owner>/<repo>@<version>` with a
-	// pinned-exact version (e.g. eminwux/agents@v1.4.0). Floating refs and bare
-	// tags without a full version are rejected at parse time.
-	Source string `json:"source"             yaml:"source"`
+	// Source is the structured agents-repository reference (host-explicit repo
+	// plus exactly one of tag/branch/commit). See TeamSource. The legacy
+	// `<owner>/<repo>@vX.Y.Z` string form is rejected at parse time with a
+	// migration error.
+	Source TeamSource `json:"source"             yaml:"source"`
 	// Defaults supplies project-wide harness defaults applied to every role
 	// that does not pin its own.
 	Defaults ProjectTeamDefaults `json:"defaults,omitempty" yaml:"defaults,omitempty"`

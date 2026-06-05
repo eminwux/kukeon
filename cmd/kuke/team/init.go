@@ -180,6 +180,8 @@ func composeTeam(
 		return errdefs.ErrTeamMetadataNameRequired
 	}
 
+	emitSourceKind(out, pt.Spec.Source)
+
 	tc, scaffolded, err := loadOrScaffoldGlobalConfig(ctx, layout, getGit, dryRun)
 	if err != nil {
 		return err
@@ -202,13 +204,14 @@ func composeTeam(
 		return err
 	}
 
+	source := pt.Spec.Source
 	entry := &model.TeamEntry{
 		APIVersion: model.APIVersionV1,
 		Kind:       model.KindTeamEntry,
 		Metadata:   model.Metadata{Name: project},
 		Spec: model.TeamEntrySpec{
 			Path:   projectDir,
-			Source: strings.TrimSpace(pt.Spec.Source),
+			Source: &source,
 		},
 	}
 	if writeErr := teamhost.WriteEntry(layout, entry); writeErr != nil {
@@ -272,6 +275,22 @@ func emitApplySummary(
 	}
 	fmt.Fprintf(out, "applied %d blueprint/%d config object(s) to kukeond under team %q\n",
 		blueprints, configs, project)
+}
+
+// emitSourceKind prints the resolved agents source's pinned-vs-floating
+// classification, so a non-reproducible (floating-branch) roster is visible at
+// init time. The key name carries the intent — a tag/commit is pinned, a
+// branch floats — so this is derivable without interrogating git. A malformed
+// source (exactly-one-ref violated) prints nothing; the parser has already
+// rejected it upstream by the time render runs.
+func emitSourceKind(out io.Writer, src model.TeamSource) {
+	value, kind := src.Ref()
+	if kind == "" {
+		return
+	}
+	host, ownerRepo := src.Normalized()
+	fmt.Fprintf(out, "agents source: %s/%s @ %s=%s (%s)\n",
+		host, ownerRepo, kind, value, src.KindLabel())
 }
 
 // loadOrScaffoldGlobalConfig returns the TeamsConfig the render pipeline

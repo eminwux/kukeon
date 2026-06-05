@@ -72,24 +72,27 @@ func TestRoundTripAllKinds(t *testing.T) {
 		APIVersion: model.APIVersionV1, Kind: model.KindProjectTeam,
 		Metadata: model.Metadata{Name: "sbsh"},
 		Spec: model.ProjectTeamSpec{
-			Source:   "eminwux/agents@v1.4.0",
+			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
 			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
 			Roles:    []model.ProjectTeamRole{{Ref: "dev", Needs: &model.ProjectRoleNeeds{Image: []string{"go"}}}},
 		},
 	}
 	assertJSONYAML(t, "ProjectTeam", pt, func(got model.ProjectTeam) bool {
-		return got.Spec.Source == "eminwux/agents@v1.4.0" &&
+		return got.Spec.Source.Repo == "github.com/eminwux/agents" && got.Spec.Source.Tag == "v1.4.0" &&
 			len(got.Spec.Roles) == 1 && got.Spec.Roles[0].Needs.Image[0] == "go"
 	})
 
 	te := model.TeamEntry{
 		APIVersion: model.APIVersionV1, Kind: model.KindTeamEntry,
 		Metadata: model.Metadata{Name: "sbsh"},
-		Spec:     model.TeamEntrySpec{Path: "/home/op/src/sbsh", Source: "eminwux/agents@v1.4.0"},
+		Spec: model.TeamEntrySpec{
+			Path:   "/home/op/src/sbsh",
+			Source: &model.TeamSource{Repo: "github.com/eminwux/agents", Branch: "main"},
+		},
 	}
 	assertJSONYAML(t, "TeamEntry", te, func(got model.TeamEntry) bool {
 		return got.Metadata.Name == "sbsh" && got.Spec.Path == "/home/op/src/sbsh" &&
-			got.Spec.Source == "eminwux/agents@v1.4.0"
+			got.Spec.Source != nil && got.Spec.Source.Branch == "main" && got.Spec.Source.Floating()
 	})
 
 	role := model.Role{

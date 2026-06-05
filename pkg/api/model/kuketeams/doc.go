@@ -34,9 +34,10 @@
 // All five kinds are GVK objects sharing one API group, kuketeams.io/v1. The
 // agents-side kinds (Role / Harness / ImageCatalog) are authored in the agents
 // repo but deserialized here — kukeon's parser owns the schema shape of all
-// five. Content versioning is carried solely by the `source: <owner>/<repo>@vX.Y.Z`
-// git-tag pin in ProjectTeam/TeamsConfig; the agents kinds carry no in-file
-// version field (it would be redundant with the pin and drift-prone).
+// five. Content versioning is carried solely by the structured `source`
+// reference (TeamSource: repo + one of tag/branch/commit) in
+// ProjectTeam/TeamEntry; the agents kinds carry no in-file version field (it
+// would be redundant with the ref and drift-prone).
 //
 // The team-layer types are declarative sugar that render onto the existing
 // v1beta1 runtime: TeamsConfig.git is a strict superset of v1beta1.ContainerGit,
@@ -92,8 +93,8 @@ const (
 )
 
 // Metadata is the name-only metadata block carried by ProjectTeam, Role, and
-// Harness. The team kinds intentionally omit a version field — the source pin
-// (`<owner>/<repo>@vX.Y.Z`) is the version authority.
+// Harness. The team kinds intentionally omit a version field — the structured
+// source ref (repo + one of tag/branch/commit) is the version authority.
 type Metadata struct {
 	Name string `json:"name" yaml:"name"`
 }

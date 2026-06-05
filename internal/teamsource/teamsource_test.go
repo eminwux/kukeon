@@ -50,6 +50,25 @@ func gitRun(t *testing.T, dir string, args ...string) {
 	}
 }
 
+// gitOutput runs git in dir with the same hermetic identity as gitRun and
+// returns its stdout — used to read a fixture commit's SHA.
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	full := append([]string{
+		"-c", "user.email=test@kukeon.invalid",
+		"-c", "user.name=kukeon test",
+		"-c", "init.defaultBranch=main",
+	}, args...)
+	cmd := exec.Command("git", full...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %v in %q: %v", args, dir, err)
+	}
+	return string(out)
+}
+
 // agentsFile is one document the fixture remote should carry. Path is relative
 // to the agents repo root.
 type agentsFile struct {
@@ -121,83 +140,137 @@ func makeFixtureRemote(t *testing.T, version string, files []agentsFile) string 
 	return "file://" + src
 }
 
-func TestParseSource_Valid(t *testing.T) {
-	t.Parallel()
-	src, err := ParseSource("  eminwux/agents@v1.4.0  ")
+// tagSrc is the resolved test source for the fixture remote's v1.4.0 tag.
+func tagSrc(t *testing.T) Source {
+	t.Helper()
+	s, err := FromModel(model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"})
 	if err != nil {
-		t.Fatalf("ParseSource: %v", err)
+		t.Fatalf("FromModel: %v", err)
 	}
-	if src.OwnerRepo != "eminwux/agents" || src.Version != "v1.4.0" || src.Raw != "eminwux/agents@v1.4.0" {
-		t.Errorf("parsed src = %+v", src)
+	return s
+}
+
+func TestFromModel_Forms(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name          string
+		in            model.TeamSource
+		wantOwnerRepo string
+		wantHost      string
+		wantRef       string
+		wantKind      RefKind
+	}{
+		{
+			"host tag",
+			model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
+			"eminwux/agents",
+			"github.com",
+			"v1.4.0",
+			RefTag,
+		},
+		{
+			"bare defaults host",
+			model.TeamSource{Repo: "eminwux/agents", Tag: "v1.4.0"},
+			"eminwux/agents",
+			"github.com",
+			"v1.4.0",
+			RefTag,
+		},
+		{
+			"floating branch",
+			model.TeamSource{Repo: "github.com/eminwux/agents", Branch: "main"},
+			"eminwux/agents",
+			"github.com",
+			"main",
+			RefBranch,
+		},
+		{
+			"pinned commit",
+			model.TeamSource{Repo: "github.com/eminwux/agents", Commit: "9ae9606"},
+			"eminwux/agents",
+			"github.com",
+			"9ae9606",
+			RefCommit,
+		},
+		{
+			"nested host path",
+			model.TeamSource{Repo: "gitlab.com/grp/sub/repo", Branch: "trunk"},
+			"grp/sub/repo",
+			"gitlab.com",
+			"trunk",
+			RefBranch,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s, err := FromModel(tc.in)
+			if err != nil {
+				t.Fatalf("FromModel: %v", err)
+			}
+			if s.OwnerRepo != tc.wantOwnerRepo || s.Host != tc.wantHost || s.Ref != tc.wantRef ||
+				s.Kind != tc.wantKind {
+				t.Errorf("FromModel = %+v", s)
+			}
+			if s.Floating() != (tc.wantKind == RefBranch) {
+				t.Errorf("Floating() = %v, kind = %v", s.Floating(), tc.wantKind)
+			}
+		})
 	}
 }
 
-func TestParseSource_Rejects(t *testing.T) {
+func TestFromModel_Rejects(t *testing.T) {
 	t.Parallel()
-	for _, raw := range []string{
-		"eminwux/agents@main",        // floating ref
-		"eminwux/agents@v1",          // bare tag
-		"eminwux/agents",             // missing version
-		"eminwux@v1.4.0",             // missing repo
-		"eminwux/agents@1.4.0",       // missing v prefix
-		"eminwux/agents@v1.4",        // not pinned-exact
-		"",                           // empty
-		"eminwux/agents@v1.4.0/path", // extra path
+	for _, in := range []model.TeamSource{
+		{Repo: "github.com/eminwux/agents"},                            // no ref
+		{Repo: "github.com/eminwux/agents", Tag: "v1", Branch: "main"}, // two refs
+		{Repo: "agents", Tag: "v1.4.0"},                                // missing owner
+		{Tag: "v1.4.0"},                                                // missing repo
 	} {
-		if _, err := ParseSource(raw); !errors.Is(err, errdefs.ErrTeamSourceInvalid) {
-			t.Errorf("ParseSource(%q) err = %v, want ErrTeamSourceInvalid", raw, err)
+		if _, err := FromModel(in); !errors.Is(err, errdefs.ErrTeamSourceInvalid) {
+			t.Errorf("FromModel(%+v) err = %v, want ErrTeamSourceInvalid", in, err)
 		}
 	}
 }
 
-func TestCloneURL_Mapped(t *testing.T) {
+func TestCloneURL_SSHDefault(t *testing.T) {
 	t.Parallel()
-	tc := &model.TeamsConfig{
-		Spec: model.TeamsConfigSpec{
-			Sources: map[string]string{
-				"eminwux/agents": "  git@github.com:eminwux/agents.git  ",
-			},
-		},
+	src := tagSrc(t)
+	if got := CloneURL(nil, src); got != "git@github.com:eminwux/agents.git" {
+		t.Errorf("CloneURL(nil) = %q, want SSH default", got)
 	}
-	url, err := CloneURL(tc, Source{OwnerRepo: "eminwux/agents"})
-	if err != nil {
-		t.Fatalf("CloneURL: %v", err)
-	}
-	if url != "git@github.com:eminwux/agents.git" {
-		t.Errorf("CloneURL = %q", url)
+	if got := CloneURL(&model.TeamsConfig{}, src); got != "git@github.com:eminwux/agents.git" {
+		t.Errorf("CloneURL(empty) = %q, want SSH default", got)
 	}
 }
 
-func TestCloneURL_Unmapped(t *testing.T) {
+func TestCloneURL_OverrideByOwnerRepo(t *testing.T) {
 	t.Parallel()
-	tc := &model.TeamsConfig{Spec: model.TeamsConfigSpec{Sources: map[string]string{}}}
-	_, err := CloneURL(tc, Source{OwnerRepo: "eminwux/agents"})
-	if !errors.Is(err, errdefs.ErrTeamSourceURLNotMapped) {
-		t.Fatalf("err = %v, want ErrTeamSourceURLNotMapped", err)
-	}
-	if !strings.Contains(err.Error(), "eminwux/agents") {
-		t.Errorf("err %q does not name the missing key", err)
+	tc := &model.TeamsConfig{Spec: model.TeamsConfigSpec{
+		Sources: map[string]string{"eminwux/agents": "  https://internal.mirror/eminwux/agents.git  "},
+	}}
+	if got := CloneURL(tc, tagSrc(t)); got != "https://internal.mirror/eminwux/agents.git" {
+		t.Errorf("CloneURL = %q, want trimmed override", got)
 	}
 }
 
-func TestCloneURL_BlankValueIsUnmapped(t *testing.T) {
+func TestCloneURL_OverrideByHostQualifiedRepo(t *testing.T) {
 	t.Parallel()
-	tc := &model.TeamsConfig{
-		Spec: model.TeamsConfigSpec{
-			Sources: map[string]string{"eminwux/agents": "   "},
-		},
-	}
-	_, err := CloneURL(tc, Source{OwnerRepo: "eminwux/agents"})
-	if !errors.Is(err, errdefs.ErrTeamSourceURLNotMapped) {
-		t.Fatalf("err = %v, want ErrTeamSourceURLNotMapped on blank value", err)
+	tc := &model.TeamsConfig{Spec: model.TeamsConfigSpec{
+		Sources: map[string]string{"github.com/eminwux/agents": "https://internal.mirror/agents.git"},
+	}}
+	if got := CloneURL(tc, tagSrc(t)); got != "https://internal.mirror/agents.git" {
+		t.Errorf("CloneURL = %q, want host-qualified override", got)
 	}
 }
 
-func TestCloneURL_NilTeamsConfig(t *testing.T) {
+func TestCloneURL_BlankOverrideFallsBackToSSH(t *testing.T) {
 	t.Parallel()
-	_, err := CloneURL(nil, Source{OwnerRepo: "eminwux/agents"})
-	if !errors.Is(err, errdefs.ErrTeamSourceURLNotMapped) {
-		t.Fatalf("err = %v, want ErrTeamSourceURLNotMapped on nil TeamsConfig", err)
+	tc := &model.TeamsConfig{Spec: model.TeamsConfigSpec{
+		Sources: map[string]string{"eminwux/agents": "   "},
+	}}
+	if got := CloneURL(tc, tagSrc(t)); got != "git@github.com:eminwux/agents.git" {
+		t.Errorf("CloneURL = %q, want SSH default on blank override", got)
 	}
 }
 
@@ -205,13 +278,13 @@ func TestCache_MaterializeClones(t *testing.T) {
 	t.Parallel()
 	url := makeFixtureRemote(t, "v1.4.0", defaultFixtureFiles())
 	cache := NewCache(filepath.Join(t.TempDir(), "cache"))
-	src, _ := ParseSource("eminwux/agents@v1.4.0")
+	src := tagSrc(t)
 
-	dir, err := cache.Materialize(context.Background(), src, url)
+	dir, err := cache.Materialize(context.Background(), src, url, "")
 	if err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
-	want := filepath.Join(cache.Base, "eminwux/agents@v1.4.0")
+	want := filepath.Join(cache.Base, "github.com/eminwux/agents@v1.4.0")
 	if dir != want {
 		t.Errorf("dir = %q, want %q", dir, want)
 	}
@@ -220,26 +293,26 @@ func TestCache_MaterializeClones(t *testing.T) {
 	}
 }
 
-func TestCache_MaterializeReusesExisting(t *testing.T) {
+func TestCache_MaterializeReusesPinned(t *testing.T) {
 	t.Parallel()
 	url := makeFixtureRemote(t, "v1.4.0", defaultFixtureFiles())
 	cache := NewCache(filepath.Join(t.TempDir(), "cache"))
-	src, _ := ParseSource("eminwux/agents@v1.4.0")
+	src := tagSrc(t)
 
-	dir, err := cache.Materialize(context.Background(), src, url)
+	dir, err := cache.Materialize(context.Background(), src, url, "")
 	if err != nil {
 		t.Fatalf("first Materialize: %v", err)
 	}
-	// Plant a sentinel inside the cache dir. A re-Materialize must not re-clone
-	// (which would wipe the sentinel) — the AC's "existing cache dir at the
-	// pinned version is reused (no re-clone)" contract.
+	// Plant a sentinel inside the cache dir. A re-Materialize of a pinned tag
+	// must not re-clone (which would wipe the sentinel) — the AC's "pinned
+	// refs are reused as-is" contract.
 	sentinel := filepath.Join(dir, ".reuse-sentinel")
 	if err := os.WriteFile(sentinel, []byte("kept"), 0o600); err != nil {
 		t.Fatalf("plant sentinel: %v", err)
 	}
 	// Point the second call at a bogus URL — if Materialize tried to clone, it
 	// would fail loudly, proving reuse is broken.
-	dir2, err := cache.Materialize(context.Background(), src, "file:///nonexistent")
+	dir2, err := cache.Materialize(context.Background(), src, "file:///nonexistent", "")
 	if err != nil {
 		t.Fatalf("second Materialize: %v", err)
 	}
@@ -249,6 +322,57 @@ func TestCache_MaterializeReusesExisting(t *testing.T) {
 	got, err := os.ReadFile(sentinel)
 	if err != nil || string(got) != "kept" {
 		t.Errorf("sentinel lost on reuse: data=%q err=%v", got, err)
+	}
+}
+
+func TestCache_MaterializeRefetchesFloatingBranch(t *testing.T) {
+	t.Parallel()
+	// A floating branch must refetch + reset to the branch tip on every
+	// materialize — blind reuse would silently run a stale roster.
+	remote := t.TempDir()
+	gitRun(t, remote, "init")
+	rolePath := filepath.Join(remote, "roles", "dev", "role.yaml")
+	if err := os.MkdirAll(filepath.Dir(rolePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rolePath, []byte(validRoleDevYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, remote, "add", ".")
+	gitRun(t, remote, "commit", "-m", "v1")
+	url := "file://" + remote
+
+	cache := NewCache(filepath.Join(t.TempDir(), "cache"))
+	src, err := FromModel(model.TeamSource{Repo: "github.com/eminwux/agents", Branch: "main"})
+	if err != nil {
+		t.Fatalf("FromModel: %v", err)
+	}
+
+	dir, err := cache.Materialize(context.Background(), src, url, "")
+	if err != nil {
+		t.Fatalf("first Materialize: %v", err)
+	}
+	// Advance the branch tip with a new commit changing the role body.
+	v2Role := strings.Replace(validRoleDevYAML, "image: [base]", "image: [base, go]", 1)
+	if werr := os.WriteFile(rolePath, []byte(v2Role), 0o644); werr != nil {
+		t.Fatal(werr)
+	}
+	gitRun(t, remote, "add", ".")
+	gitRun(t, remote, "commit", "-m", "v2")
+
+	dir2, err := cache.Materialize(context.Background(), src, url, "")
+	if err != nil {
+		t.Fatalf("second Materialize: %v", err)
+	}
+	if dir2 != dir {
+		t.Errorf("floating refetch path = %q, want %q", dir2, dir)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "roles", "dev", "role.yaml"))
+	if err != nil {
+		t.Fatalf("read role.yaml: %v", err)
+	}
+	if !strings.Contains(string(got), "go") {
+		t.Errorf("floating branch not refetched to tip; body=%q", got)
 	}
 }
 
@@ -283,8 +407,8 @@ func TestCache_MaterializePinsToVersion(t *testing.T) {
 	url := "file://" + src
 
 	cache := NewCache(filepath.Join(t.TempDir(), "cache"))
-	srcRef, _ := ParseSource("eminwux/agents@v1.4.0")
-	dir, err := cache.Materialize(context.Background(), srcRef, url)
+	srcRef := tagSrc(t)
+	dir, err := cache.Materialize(context.Background(), srcRef, url, "")
 	if err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
@@ -297,14 +421,60 @@ func TestCache_MaterializePinsToVersion(t *testing.T) {
 	}
 }
 
+func TestCache_MaterializePinsToCommit(t *testing.T) {
+	t.Parallel()
+	// Two commits on the default branch; pinning the first commit's SHA must
+	// land that commit's body, not the branch tip's.
+	remote := t.TempDir()
+	gitRun(t, remote, "init")
+	rolePath := filepath.Join(remote, "roles", "dev", "role.yaml")
+	if err := os.MkdirAll(filepath.Dir(rolePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rolePath, []byte(validRoleDevYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, remote, "add", ".")
+	gitRun(t, remote, "commit", "-m", "c1")
+	sha := strings.TrimSpace(gitOutput(t, remote, "rev-parse", "HEAD"))
+	// Advance the tip so the pinned SHA is no longer HEAD.
+	v2Role := strings.Replace(validRoleDevYAML, "image: [base]", "image: [base, go]", 1)
+	if werr := os.WriteFile(rolePath, []byte(v2Role), 0o644); werr != nil {
+		t.Fatal(werr)
+	}
+	gitRun(t, remote, "add", ".")
+	gitRun(t, remote, "commit", "-m", "c2")
+	url := "file://" + remote
+
+	cache := NewCache(filepath.Join(t.TempDir(), "cache"))
+	src, err := FromModel(model.TeamSource{Repo: "github.com/eminwux/agents", Commit: sha})
+	if err != nil {
+		t.Fatalf("FromModel: %v", err)
+	}
+	dir, err := cache.Materialize(context.Background(), src, url, "")
+	if err != nil {
+		t.Fatalf("Materialize commit: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "roles", "dev", "role.yaml"))
+	if err != nil {
+		t.Fatalf("read role.yaml: %v", err)
+	}
+	if strings.Contains(string(got), "go") {
+		t.Errorf("commit pin landed on tip, not c1; body=%q", got)
+	}
+}
+
 func TestCache_MaterializeMissingTagSurfaces(t *testing.T) {
 	t.Parallel()
 	url := makeFixtureRemote(t, "v1.4.0", defaultFixtureFiles())
 	cache := NewCache(filepath.Join(t.TempDir(), "cache"))
-	src, _ := ParseSource("eminwux/agents@v9.9.9") // tag does not exist
+	src, err := FromModel(model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v9.9.9"})
+	if err != nil {
+		t.Fatalf("FromModel: %v", err)
+	}
 
 	dir := cache.Path(src)
-	if _, err := cache.Materialize(context.Background(), src, url); err == nil {
+	if _, merr := cache.Materialize(context.Background(), src, url, ""); merr == nil {
 		t.Fatalf("Materialize: want clone error for missing tag, got nil")
 	}
 	// Atomic-rename guarantee: a failed clone leaves no half-materialized dir.
@@ -317,6 +487,8 @@ func TestResolve_LoadsAllReferenced(t *testing.T) {
 	t.Parallel()
 	url := makeFixtureRemote(t, "v1.4.0", defaultFixtureFiles())
 	cache := NewCache(filepath.Join(t.TempDir(), "cache"))
+	// Default transport is SSH; an override points the resolver at the local
+	// fixture remote without a live SSH host.
 	tc := &model.TeamsConfig{
 		Spec: model.TeamsConfigSpec{
 			Sources: map[string]string{"eminwux/agents": url},
@@ -324,7 +496,7 @@ func TestResolve_LoadsAllReferenced(t *testing.T) {
 	}
 	pt := &model.ProjectTeam{
 		Spec: model.ProjectTeamSpec{
-			Source:   "eminwux/agents@v1.4.0",
+			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
 			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
 			Roles:    []model.ProjectTeamRole{{Ref: "dev"}},
 		},
@@ -344,26 +516,12 @@ func TestResolve_LoadsAllReferenced(t *testing.T) {
 	}
 }
 
-func TestResolve_UnmappedSourceErrors(t *testing.T) {
-	t.Parallel()
-	tc := &model.TeamsConfig{Spec: model.TeamsConfigSpec{}}
-	pt := &model.ProjectTeam{
-		Spec: model.ProjectTeamSpec{
-			Source: "eminwux/agents@v1.4.0",
-		},
-	}
-	cache := NewCache(filepath.Join(t.TempDir(), "cache"))
-	_, err := Resolve(context.Background(), cache, tc, pt)
-	if !errors.Is(err, errdefs.ErrTeamSourceURLNotMapped) {
-		t.Fatalf("Resolve err = %v, want ErrTeamSourceURLNotMapped", err)
-	}
-}
-
 func TestResolve_InvalidSourceErrors(t *testing.T) {
 	t.Parallel()
 	tc := &model.TeamsConfig{Spec: model.TeamsConfigSpec{}}
 	pt := &model.ProjectTeam{
-		Spec: model.ProjectTeamSpec{Source: "eminwux/agents@main"},
+		// No ref set — exactly-one-of violated.
+		Spec: model.ProjectTeamSpec{Source: model.TeamSource{Repo: "github.com/eminwux/agents"}},
 	}
 	cache := NewCache(filepath.Join(t.TempDir(), "cache"))
 	_, err := Resolve(context.Background(), cache, tc, pt)

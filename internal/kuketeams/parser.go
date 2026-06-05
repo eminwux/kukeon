@@ -49,16 +49,17 @@ type Document struct {
 	ImageCatalog *model.ImageCatalog
 }
 
-// sourceRefPattern matches a pinned-exact `<owner>/<repo>@vX.Y.Z` reference.
-// The version must be a full vMAJOR.MINOR.PATCH, optionally with a
-// prerelease/build suffix — floating refs (`@main`) and bare tags (`@v1`) are
-// rejected. Owner/repo allow the GitHub-name character class.
-var sourceRefPattern = regexp.MustCompile(
-	`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+@v\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$`,
-)
+// nameSegPattern matches a single owner/repo path segment (the GitHub-name
+// character class). The "." or ".." traversal segments are rejected separately
+// since they also match this class.
+var nameSegPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
-// ownerRepoPattern matches a bare `<owner>/<repo>` key (no version).
-var ownerRepoPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`)
+// hostSegPattern matches a leading host segment (`github.com`, `git.example:22`).
+// A host is distinguished from an owner segment by carrying a "." or ":".
+var hostSegPattern = regexp.MustCompile(`^[A-Za-z0-9.:_-]+$`)
+
+// ownerRepoSegments is the minimum owner/repo path-segment count (`<owner>/<repo>`).
+const ownerRepoSegments = 2
 
 // docSeparator splits a multi-document YAML stream on `---` lines.
 var docSeparator = regexp.MustCompile(`(?m)^\s*---\s*$`)
@@ -114,6 +115,9 @@ func Parse(raw []byte) (*Document, error) {
 	doc := &Document{APIVersion: h.APIVersion, Kind: h.Kind}
 	switch h.Kind {
 	case model.KindProjectTeam:
+		if err := rejectStringFormSource(raw); err != nil {
+			return nil, err
+		}
 		var v model.ProjectTeam
 		if err := yaml.Unmarshal(raw, &v); err != nil {
 			return nil, fmt.Errorf("parse ProjectTeam: %w", err)
@@ -132,6 +136,9 @@ func Parse(raw []byte) (*Document, error) {
 		}
 		doc.TeamsConfig = &v
 	case model.KindTeamEntry:
+		if err := rejectStringFormSource(raw); err != nil {
+			return nil, err
+		}
 		var v model.TeamEntry
 		if err := yaml.Unmarshal(raw, &v); err != nil {
 			return nil, fmt.Errorf("parse TeamEntry: %w", err)
@@ -184,8 +191,8 @@ func validateProjectTeam(pt *model.ProjectTeam) error {
 	if err := validateMetadataNameSafe(pt.Metadata.Name); err != nil {
 		return err
 	}
-	if !sourceRefPattern.MatchString(strings.TrimSpace(pt.Spec.Source)) {
-		return fmt.Errorf("%w (got %q)", errdefs.ErrTeamSourceInvalid, pt.Spec.Source)
+	if err := ValidateSource(pt.Spec.Source); err != nil {
+		return err
 	}
 	for _, h := range pt.Spec.Defaults.Harnesses {
 		if !model.IsKnownHarness(h) {
@@ -226,7 +233,7 @@ func validateTeamsConfig(tc *model.TeamsConfig) error {
 		}
 	}
 	for key := range tc.Spec.Sources {
-		if !ownerRepoPattern.MatchString(key) {
+		if validateRepo(strings.TrimSpace(key)) != nil {
 			return fmt.Errorf("%w (got %q)", errdefs.ErrTeamSourceKeyInvalid, key)
 		}
 	}
@@ -236,7 +243,7 @@ func validateTeamsConfig(tc *model.TeamsConfig) error {
 // validateTeamEntry enforces the per-project drop-in contract: metadata.name
 // present and safe (it is the <project>.yaml filename key, so traversal
 // characters would let an attacker escape the drop-in directory), and source —
-// when set — pinned-exact to a `<owner>/<repo>@vX.Y.Z` agents reference.
+// when set — a well-formed structured agents reference.
 func validateTeamEntry(te *model.TeamEntry) error {
 	if strings.TrimSpace(te.Metadata.Name) == "" {
 		return errdefs.ErrTeamEntryNameRequired
@@ -244,9 +251,111 @@ func validateTeamEntry(te *model.TeamEntry) error {
 	if err := validateMetadataNameSafe(te.Metadata.Name); err != nil {
 		return err
 	}
-	if strings.TrimSpace(te.Spec.Source) != "" &&
-		!sourceRefPattern.MatchString(strings.TrimSpace(te.Spec.Source)) {
-		return fmt.Errorf("%w (got %q)", errdefs.ErrTeamSourceInvalid, te.Spec.Source)
+	if te.Spec.Source != nil {
+		if err := ValidateSource(*te.Spec.Source); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateSource enforces the structured-source contract shared by ProjectTeam
+// and TeamEntry: repo is host-qualifiable (`<host>/<owner>/<repo>` or a bare
+// `<owner>/<repo>` defaulting to github.com), and exactly one of
+// tag/branch/commit carries the ref intent. Zero or multiple refs is a parse
+// error — the key name is the pinned-vs-floating signal, so ambiguity is not
+// tolerated.
+func ValidateSource(s model.TeamSource) error {
+	repo := strings.TrimSpace(s.Repo)
+	if repo == "" {
+		return fmt.Errorf("%w (repo is required)", errdefs.ErrTeamSourceInvalid)
+	}
+	if err := validateRepo(repo); err != nil {
+		return err
+	}
+	value, kind := s.Ref()
+	if kind == "" {
+		return fmt.Errorf(
+			"%w (got tag=%q branch=%q commit=%q)",
+			errdefs.ErrTeamSourceInvalid, s.Tag, s.Branch, s.Commit,
+		)
+	}
+	if err := validateRef(value, kind); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateRef rejects ref values that would escape the cache subtree when
+// concatenated into the leaf directory name (`<host>/<owner>/<repo>@<ref>`):
+// a leading "/" or a "." / ".." path segment. Symmetric with validateRepo's
+// segment check — both halves of the cache key flow into the on-disk path.
+// Git's own refname rules reject most of these at clone time, but the cache's
+// MkdirAll(parent) runs before git ever does.
+func validateRef(value, kind string) error {
+	if strings.HasPrefix(value, "/") {
+		return fmt.Errorf("%w (%s %q has an invalid path segment)", errdefs.ErrTeamSourceInvalid, kind, value)
+	}
+	for _, seg := range strings.Split(value, "/") {
+		if seg == "." || seg == ".." {
+			return fmt.Errorf(
+				"%w (%s %q has an invalid path segment %q)",
+				errdefs.ErrTeamSourceInvalid,
+				kind,
+				value,
+				seg,
+			)
+		}
+	}
+	return nil
+}
+
+// validateRepo accepts a bare `<owner>/<repo>` (host defaults to github.com) or
+// a host-qualified `<host>/<owner>/<repo>[/...]` (first segment carrying a "."
+// or ":" is the host). Every owner/repo segment matches the GitHub-name class
+// and may not be a "." or ".." traversal segment — repo flows into the cache
+// directory name, so a traversal segment would escape the cache root.
+func validateRepo(repo string) error {
+	segs := strings.Split(repo, "/")
+	first := segs[0]
+	var ownerSegs []string
+	if first != "." && first != ".." && strings.ContainsAny(first, ".:") {
+		if !hostSegPattern.MatchString(first) {
+			return fmt.Errorf("%w (repo host %q is malformed)", errdefs.ErrTeamSourceInvalid, first)
+		}
+		ownerSegs = segs[1:]
+	} else {
+		ownerSegs = segs
+	}
+	if len(ownerSegs) < ownerRepoSegments {
+		return fmt.Errorf("%w (repo %q must include <owner>/<repo>)", errdefs.ErrTeamSourceInvalid, repo)
+	}
+	for _, seg := range ownerSegs {
+		if seg == "." || seg == ".." || !nameSegPattern.MatchString(seg) {
+			return fmt.Errorf("%w (repo %q has an invalid path segment %q)", errdefs.ErrTeamSourceInvalid, repo, seg)
+		}
+	}
+	return nil
+}
+
+// rejectStringFormSource probes raw for a scalar `spec.source` — the legacy
+// `<owner>/<repo>@vX.Y.Z` string form — and returns the migration error before
+// the typed unmarshal attempts (and fails cryptically) to decode a scalar into
+// the TeamSource struct. A mapping (object) source, an absent source, or an
+// empty scalar falls through to the normal parse + ValidateSource path, so
+// there is no silent dual-parse.
+func rejectStringFormSource(raw []byte) error {
+	var probe struct {
+		Spec struct {
+			Source yaml.Node `yaml:"source"`
+		} `yaml:"spec"`
+	}
+	// A failed probe-unmarshal leaves Source.Kind zero; the typed unmarshal
+	// downstream surfaces the structural error verbatim, so the probe error is
+	// deliberately ignored here.
+	_ = yaml.Unmarshal(raw, &probe)
+	if probe.Spec.Source.Kind == yaml.ScalarNode && strings.TrimSpace(probe.Spec.Source.Value) != "" {
+		return fmt.Errorf("%w (got %q)", errdefs.ErrTeamSourceStringForm, probe.Spec.Source.Value)
 	}
 	return nil
 }

@@ -584,20 +584,17 @@ func operatorValues(tc *model.TeamsConfig, roleRef, harness, project string) map
 	return vals
 }
 
-// agentsCloneURL returns the clone URL of the materialized agents source
-// when tc.spec.sources carries an entry for src.OwnerRepo, or the empty
-// string otherwise. The render pipeline already used the same lookup in
-// teamsource.CloneURL to clone the cache; reusing it here keeps the
-// agents-side slot fill consistent with the bundle that produced it.
+// agentsCloneURL returns the clone URL of the materialized agents source —
+// the SSH default expanded from src.Host/src.OwnerRepo, or a tc.spec.sources
+// transport override when one is present. It reuses teamsource.CloneURL so the
+// agents-side slot fill stays consistent with the bundle that produced it. A
+// zero Source (no resolved agents repo) yields the empty string so an
+// undeclared slot is never filled with a garbage URL.
 func agentsCloneURL(tc *model.TeamsConfig, src teamsource.Source) string {
-	if tc == nil || src.OwnerRepo == "" {
+	if src.OwnerRepo == "" || src.Host == "" {
 		return ""
 	}
-	url, ok := tc.Spec.Sources[src.OwnerRepo]
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(url)
+	return teamsource.CloneURL(tc, src)
 }
 
 // collectRepoSlots returns the set of repo slot names declared by bp's

@@ -30,7 +30,7 @@ apiVersion: kuketeams.io/v1
 kind: ProjectTeam
 metadata: { name: sbsh }
 spec:
-  source: eminwux/agents@v1.4.0
+  source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
   defaults: { harnesses: [claude, opencode] }
   roles:
     - { ref: dev, needs: { image: [go] } }
@@ -59,7 +59,7 @@ const teamEntryHappy = `
 apiVersion: kuketeams.io/v1
 kind: TeamEntry
 metadata: { name: sbsh }
-spec: { path: /home/op/src/sbsh, source: eminwux/agents@v1.4.0 }
+spec: { path: /home/op/src/sbsh, source: { repo: github.com/eminwux/agents, tag: v1.4.0 } }
 `
 
 const roleHappy = `
@@ -158,8 +158,11 @@ func TestParseHappyPathFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProjectTeam: %v", err)
 	}
-	if got := pt.ProjectTeam.Spec.Source; got != "eminwux/agents@v1.4.0" {
-		t.Errorf("source = %q", got)
+	if got := pt.ProjectTeam.Spec.Source; got.Repo != "github.com/eminwux/agents" || got.Tag != "v1.4.0" {
+		t.Errorf("source = %+v", got)
+	}
+	if pt.ProjectTeam.Spec.Source.Floating() {
+		t.Errorf("tag source should be pinned, not floating")
 	}
 	if len(pt.ProjectTeam.Spec.Roles) != 3 {
 		t.Errorf("roles len = %d, want 3", len(pt.ProjectTeam.Spec.Roles))
@@ -191,7 +194,9 @@ func TestParseHappyPathFields(t *testing.T) {
 	if te.TeamEntry.Metadata.Name != "sbsh" {
 		t.Errorf("teamEntry name = %q, want sbsh", te.TeamEntry.Metadata.Name)
 	}
-	if te.TeamEntry.Spec.Path != "/home/op/src/sbsh" || te.TeamEntry.Spec.Source != "eminwux/agents@v1.4.0" {
+	if te.TeamEntry.Spec.Path != "/home/op/src/sbsh" || te.TeamEntry.Spec.Source == nil ||
+		te.TeamEntry.Spec.Source.Repo != "github.com/eminwux/agents" ||
+		te.TeamEntry.Spec.Source.Tag != "v1.4.0" {
 		t.Errorf("teamEntry spec = %+v", te.TeamEntry.Spec)
 	}
 
@@ -240,32 +245,42 @@ func TestParseFailureModes(t *testing.T) {
 		// ProjectTeam.
 		{
 			"ProjectTeam missing name",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nspec: { source: eminwux/agents@v1.4.0, roles: [{ref: dev}] }\n",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: dev}] }\n",
 			errdefs.ErrTeamMetadataNameRequired,
 		},
 		{
-			"ProjectTeam floating source",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: eminwux/agents@main, roles: [{ref: dev}] }\n",
+			"ProjectTeam legacy string source",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: eminwux/agents@v1.4.0, roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamSourceStringForm,
+		},
+		{
+			"ProjectTeam source no ref",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents}, roles: [{ref: dev}] }\n",
 			errdefs.ErrTeamSourceInvalid,
 		},
 		{
-			"ProjectTeam bare-tag source",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: eminwux/agents@v1, roles: [{ref: dev}] }\n",
+			"ProjectTeam source two refs",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0, branch: main}, roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamSourceInvalid,
+		},
+		{
+			"ProjectTeam source missing owner",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: agents, tag: v1.4.0}, roles: [{ref: dev}] }\n",
 			errdefs.ErrTeamSourceInvalid,
 		},
 		{
 			"ProjectTeam empty role ref",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: eminwux/agents@v1.4.0, roles: [{ref: \"\"}] }\n",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: \"\"}] }\n",
 			errdefs.ErrTeamRoleRefRequired,
 		},
 		{
 			"ProjectTeam unknown default harness",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: eminwux/agents@v1.4.0, defaults: {harnesses: [bogus]}, roles: [{ref: dev}] }\n",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, defaults: {harnesses: [bogus]}, roles: [{ref: dev}] }\n",
 			errdefs.ErrTeamHarnessUnknown,
 		},
 		{
 			"ProjectTeam role image is a tag",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: eminwux/agents@v1.4.0, roles: [{ref: dev, needs: {image: [\"go:1.21\"]}}] }\n",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: dev, needs: {image: [\"go:1.21\"]}}] }\n",
 			errdefs.ErrTeamImageCapabilityInvalid,
 		},
 		// TeamsConfig.
@@ -306,8 +321,13 @@ func TestParseFailureModes(t *testing.T) {
 			errdefs.ErrTeamEntryNameRequired,
 		},
 		{
-			"TeamEntry non-pinned source",
-			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: a }\nspec: { path: /x, source: eminwux/agents@main }\n",
+			"TeamEntry legacy string source",
+			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: a }\nspec: { path: /x, source: eminwux/agents@v1.4.0 }\n",
+			errdefs.ErrTeamSourceStringForm,
+		},
+		{
+			"TeamEntry malformed source",
+			"apiVersion: kuketeams.io/v1\nkind: TeamEntry\nmetadata: { name: a }\nspec: { path: /x, source: {repo: eminwux/agents} }\n",
 			errdefs.ErrTeamSourceInvalid,
 		},
 		{
@@ -340,7 +360,7 @@ func TestParseFailureModes(t *testing.T) {
 			// committed kuketeam.yaml), and metadata.name from that file
 			// becomes the TeamEntry's metadata.name verbatim in `kuke team init`.
 			"ProjectTeam name traverses parent",
-			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: { name: \"../kuketeams\" }\nspec: { source: eminwux/agents@v1.4.0, roles: [{ref: dev}] }\n",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: { name: \"../kuketeams\" }\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: dev}] }\n",
 			errdefs.ErrTeamMetadataNameUnsafe,
 		},
 		// Role.
@@ -449,5 +469,73 @@ func TestParseDocumentsPropagatesValidation(t *testing.T) {
 	_, err := ParseDocuments(strings.NewReader(roleHappy + "\n---\n" + bad))
 	if !errors.Is(err, errdefs.ErrTeamMetadataNameRequired) {
 		t.Fatalf("error = %v, want ErrTeamMetadataNameRequired", err)
+	}
+}
+
+func TestParseProjectTeamAcceptsSourceForms(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name         string
+		source       string
+		wantFloating bool
+	}{
+		{"host-qualified tag", "{repo: github.com/eminwux/agents, tag: v1.4.0}", false},
+		{"bare owner/repo defaults host", "{repo: eminwux/agents, tag: v1.4.0}", false},
+		{"floating branch", "{repo: github.com/eminwux/agents, branch: main}", true},
+		{"pinned commit", "{repo: github.com/eminwux/agents, commit: 9ae9606}", false},
+		{"non-github host", "{repo: gitlab.com/group/sub/repo, branch: trunk}", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			raw := "apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: " +
+				tc.source + ", roles: [{ref: dev}] }\n"
+			doc, err := Parse([]byte(raw))
+			if err != nil {
+				t.Fatalf("Parse(%s): %v", tc.name, err)
+			}
+			if got := doc.ProjectTeam.Spec.Source.Floating(); got != tc.wantFloating {
+				t.Errorf("Floating() = %v, want %v", got, tc.wantFloating)
+			}
+		})
+	}
+}
+
+func TestValidateSourceRejectsTraversalRepo(t *testing.T) {
+	t.Parallel()
+	for _, repo := range []string{
+		"../etc/passwd",
+		"github.com/../../etc",
+		"eminwux/..",
+	} {
+		err := ValidateSource(model.TeamSource{Repo: repo, Tag: "v1.4.0"})
+		if !errors.Is(err, errdefs.ErrTeamSourceInvalid) {
+			t.Errorf("ValidateSource(repo=%q) err = %v, want ErrTeamSourceInvalid", repo, err)
+		}
+	}
+}
+
+func TestValidateSourceRejectsTraversalRef(t *testing.T) {
+	t.Parallel()
+	cases := []model.TeamSource{
+		{Repo: "eminwux/agents", Branch: "../../etc"},
+		{Repo: "eminwux/agents", Tag: ".."},
+		{Repo: "eminwux/agents", Tag: "/abs"},
+		{Repo: "eminwux/agents", Branch: "foo/../bar"},
+		{Repo: "eminwux/agents", Commit: "."},
+	}
+	for _, s := range cases {
+		err := ValidateSource(s)
+		if !errors.Is(err, errdefs.ErrTeamSourceInvalid) {
+			t.Errorf("ValidateSource(%+v) err = %v, want ErrTeamSourceInvalid", s, err)
+		}
+	}
+}
+
+func TestParseTeamsConfigAcceptsHostQualifiedSourceKey(t *testing.T) {
+	t.Parallel()
+	raw := "apiVersion: kuketeams.io/v1\nkind: TeamsConfig\nspec: { sources: { \"github.com/eminwux/agents\": https://github.com/eminwux/agents.git } }\n"
+	if _, err := Parse([]byte(raw)); err != nil {
+		t.Fatalf("Parse host-qualified sources key: %v", err)
 	}
 }

@@ -71,14 +71,31 @@ A `TeamsConfig.secrets` entry declares **where** its value is read from
 (`from: env` or `from: file`, plus a `key`), never an inline value. Secret bytes
 never live in a committed or operator file.
 
-### The version is the git pin, nothing else
+### The source ref is the version, nothing else
 
-Content versioning is carried **solely** by the `source: <owner>/<repo>@vX.Y.Z`
-git-tag pin. The `source` must be pinned to an exact version — a floating ref
-(`@main`) or a bare tag without a full version (`@v1`) is rejected. The agents
-kinds (`Role`, `Harness`, `ImageCatalog`) carry **no** in-file version field: it
-would be redundant with the pin, drift-prone, and per-release toil to bump
-across every role.
+Content versioning is carried **solely** by the structured `source` object: a
+host-explicit `repo` plus exactly one of `tag` / `branch` / `commit`. The key
+name **is** the intent — `tag` and `commit` pin to a reproducible ref, `branch`
+floats (it is refetched and reset to the branch tip on every `init`) — so
+pinned-vs-floating is unambiguous without interrogating git (a string `@ref`
+cannot tell a branch from a same-named tag). Exactly one of the three must be
+set; zero or multiple is a parse error, and the legacy
+`<owner>/<repo>@vX.Y.Z` **string** form is rejected with a migration error (no
+silent dual-parse). The agents kinds (`Role`, `Harness`, `ImageCatalog`) carry
+**no** in-file version field: it would be redundant with the ref, drift-prone,
+and per-release toil to bump across every role.
+
+`init` prints whether the resolved source is **pinned** or **floating**, so a
+non-reproducible roster is visible.
+
+### Transport: SSH by default, `sources` as an override
+
+The default clone transport is **SSH**: `repo: <host>/<owner>/<repo>` expands to
+`git@<host>:<owner>/<repo>.git`, cloned under `TeamsConfig.spec.git.sshKey` as
+the identity. A bare `<owner>/<repo>` defaults its host to `github.com`, but any
+host is expressible. `TeamsConfig.spec.sources` is **optional** — consult it only
+to override the transport (HTTPS/token, an internal mirror, a non-standard port);
+the common case needs no `sources` entry.
 
 ## The project is cloned, not mounted
 
@@ -90,8 +107,9 @@ clones the project fresh as a `ContainerRepo`. Consequences:
 - The project's clone URL is **not** declared in `kuketeam.yaml` — it is
   resolved from the local `git remote` at init time.
 - The project checks out **floating `main`** (it is the operator's own repo).
-  This is intentionally asymmetric with the **pinned-exact** agents `source`:
-  the roster travels with the project, the agents source is pinned.
+  The agents `source`, by contrast, declares its ref intent explicitly: a
+  pinned `tag`/`commit` for a reproducible roster, or a floating `branch` when
+  the project deliberately tracks a moving agents branch.
 - The operator's working tree is **not** mounted — uncommitted local work is
   invisible in the cell.
 
@@ -103,7 +121,7 @@ apiVersion: kuketeams.io/v1
 kind: ProjectTeam
 metadata: { name: sbsh }
 spec:
-  source: eminwux/agents@v1.4.0 # pinned exact
+  source: { repo: github.com/eminwux/agents, tag: v1.4.0 } # pinned (tag)
   defaults: { harnesses: [claude, opencode] }
   roles:
     - { ref: dev, needs: { image: [go] } }
@@ -121,11 +139,17 @@ spec:
     allowedSigners: ~/.ssh/allowed_signers
     sshKey: ~/.ssh/id_ed25519
   registry: registry.eminwux.com
+  # sources is an optional transport override (HTTPS mirror, token, custom port);
+  # the SSH default (git@github.com:eminwux/agents.git via git.sshKey) needs no entry.
   sources: { eminwux/agents: git@github.com:eminwux/agents.git }
   secrets:
     claude-code-oauth-token: { from: env, key: CLAUDE_CODE_OAUTH_TOKEN }
   teams:
-    - { name: sbsh, path: ~/src/sbsh, source: eminwux/agents@v1.4.0 }
+    - {
+        name: sbsh,
+        path: ~/src/sbsh,
+        source: { repo: github.com/eminwux/agents, tag: v1.4.0 },
+      }
 ---
 # role.yaml — in agents, per role
 apiVersion: kuketeams.io/v1

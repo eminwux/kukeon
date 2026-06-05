@@ -44,8 +44,8 @@ const (
 	globalConfigName = "kuketeams.yaml"
 	// dropInDirName is the per-project drop-in directory under Base.
 	dropInDirName = "kuketeam.d"
-	// cacheDirName is the materialized-source cache under Base — each pinned
-	// `<owner>/<repo>@vX.Y.Z` agents reference clones into its own subdirectory.
+	// cacheDirName is the materialized-source cache under Base — each agents
+	// reference clones into its own `<host>/<owner>/<repo>@<ref>` subdirectory.
 	cacheDirName = "cache"
 
 	// dropInDirPerm is the drop-in directory mode: operator-only (the files

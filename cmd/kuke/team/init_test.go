@@ -40,7 +40,7 @@ const projectTeamYAML = `apiVersion: kuketeams.io/v1
 kind: ProjectTeam
 metadata: { name: sbsh }
 spec:
-  source: eminwux/agents@v1.4.0
+  source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
   roles:
     - { ref: dev }
 `
@@ -51,7 +51,7 @@ const projectTeamWithHarnessYAML = `apiVersion: kuketeams.io/v1
 kind: ProjectTeam
 metadata: { name: sbsh }
 spec:
-  source: eminwux/agents@v1.4.0
+  source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
   defaults:
     harnesses: [claude]
   roles:
@@ -171,9 +171,11 @@ spec:
 	}
 	return &teamsource.Bundle{
 		Source: teamsource.Source{
-			Raw:       "eminwux/agents@v1.4.0",
+			Repo:      "github.com/eminwux/agents",
+			Host:      "github.com",
 			OwnerRepo: "eminwux/agents",
-			Version:   "v1.4.0",
+			Ref:       "v1.4.0",
+			Kind:      teamsource.RefTag,
 		},
 		CacheDir: cacheDir,
 		Roles: map[string]*model.Role{
@@ -300,11 +302,17 @@ func TestComposeTeamScaffoldsAndWrites(t *testing.T) {
 	if unmarshalErr := yaml.Unmarshal(rawEntry, &te); unmarshalErr != nil {
 		t.Fatalf("entry parse: %v", unmarshalErr)
 	}
-	if te.Metadata.Name != "sbsh" || te.Spec.Path != projectDir || te.Spec.Source != "eminwux/agents@v1.4.0" {
+	if te.Metadata.Name != "sbsh" || te.Spec.Path != projectDir || te.Spec.Source == nil ||
+		te.Spec.Source.Repo != "github.com/eminwux/agents" || te.Spec.Source.Tag != "v1.4.0" {
 		t.Errorf("entry content wrong: %+v", te)
 	}
 	if !strings.Contains(out.String(), "wrote team \"sbsh\"") {
 		t.Errorf("missing write confirmation in output: %q", out.String())
+	}
+	// The tag source is pinned — init must surface that so a non-reproducible
+	// (floating) roster would be visible.
+	if !strings.Contains(out.String(), "agents source: github.com/eminwux/agents @ tag=v1.4.0 (pinned)") {
+		t.Errorf("missing pinned-source line in output: %q", out.String())
 	}
 }
 
@@ -684,7 +692,7 @@ func TestComposeTeamTwoProjectsIndependent(t *testing.T) {
 kind: ProjectTeam
 metadata: { name: %s }
 spec:
-  source: eminwux/agents@v1.4.0
+  source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
   defaults:
     harnesses: [claude]
   roles:
@@ -801,3 +809,39 @@ func TestNewTeamCmdRegistersInit(t *testing.T) {
 // silence the unused-import linter when v1beta1 is referenced only through
 // the rendered output bytes.
 var _ = v1beta1.LabelTeam
+
+func TestEmitSourceKind(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		src  model.TeamSource
+		want string
+	}{
+		{
+			"tag pinned",
+			model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
+			"agents source: github.com/eminwux/agents @ tag=v1.4.0 (pinned)\n",
+		},
+		{
+			"branch floating",
+			model.TeamSource{Repo: "eminwux/agents", Branch: "main"},
+			"agents source: github.com/eminwux/agents @ branch=main (floating)\n",
+		},
+		{
+			"commit pinned",
+			model.TeamSource{Repo: "gitlab.com/grp/repo", Commit: "9ae9606"},
+			"agents source: gitlab.com/grp/repo @ commit=9ae9606 (pinned)\n",
+		},
+		{"malformed prints nothing", model.TeamSource{Repo: "github.com/eminwux/agents"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var out bytes.Buffer
+			emitSourceKind(&out, tc.src)
+			if out.String() != tc.want {
+				t.Errorf("emitSourceKind = %q, want %q", out.String(), tc.want)
+			}
+		})
+	}
+}
