@@ -187,6 +187,49 @@ func TestDiffCell_ManagedLabels_NoChange(t *testing.T) {
 	}
 }
 
+// TestDiffCell_Annotations_NoChange pins the AC#4 guarantee of epic:cell-identity
+// #1073: a `kukeon.io/source-cell` annotation on a clone must never register as
+// drift. DiffCell does not compare metadata.Annotations at all, so a clone that
+// carries the inert provenance annotation (while its re-materialised desired
+// twin does not) stays Synced — no false OutOfSync for Config-lineage clones.
+func TestDiffCell_Annotations_NoChange(t *testing.T) {
+	desired := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name:   "prod-d4e5f6",
+			Labels: map[string]string{"kukeon.io/config": "prod"},
+		},
+		Spec: intmodel.CellSpec{
+			RealmName:  "default",
+			SpaceName:  "default",
+			StackName:  "default",
+			Containers: []intmodel.ContainerSpec{{ID: "web", Image: "busybox:latest"}},
+		},
+	}
+
+	actual := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{
+			Name:   "prod-d4e5f6",
+			Labels: map[string]string{"kukeon.io/config": "prod", "cell.kukeon.io": "prod-d4e5f6"},
+			// The clone-only provenance annotation the desired twin lacks.
+			Annotations: map[string]string{"kukeon.io/source-cell": "prod-a1b2c3"},
+		},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest"},
+				{ID: "web", Image: "busybox:latest"},
+			},
+		},
+	}
+
+	diff := apply.DiffCell(desired, actual)
+	if diff.HasChanges {
+		t.Errorf("expected no drift from a source-cell annotation difference, got: %+v", diff)
+	}
+}
+
 // TestDiffCell_UserLabels_StillDetectsDrift makes sure the managed-label
 // filter does not over-narrow: a real user-authored label change must still
 // register as drift.

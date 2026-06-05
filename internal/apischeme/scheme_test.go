@@ -384,6 +384,46 @@ func TestCellRoundTripV1Beta1(t *testing.T) {
 	}
 }
 
+// TestCellRoundTripV1Beta1_Annotations covers epic:cell-identity #1073: the
+// cell metadata.Annotations map (carrying a clone's kukeon.io/source-cell
+// provenance annotation) survives the external→internal→external round-trip so
+// it persists to metadata.json and back.
+func TestCellRoundTripV1Beta1_Annotations(t *testing.T) {
+	input := ext.CellDoc{
+		APIVersion: ext.APIVersionV1Beta1,
+		Kind:       ext.KindCell,
+		Metadata: ext.CellMetadata{
+			Name:        "prod-d4e5f6",
+			Labels:      map[string]string{"kukeon.io/config": "prod"},
+			Annotations: map[string]string{"kukeon.io/source-cell": "prod-a1b2c3"},
+		},
+		Spec: ext.CellSpec{
+			ID:         "prod-d4e5f6",
+			RealmID:    "realm0",
+			SpaceID:    "space0",
+			StackID:    "stack0",
+			Containers: []ext.ContainerSpec{},
+		},
+		Status: ext.CellStatus{State: ext.CellStatePending},
+	}
+
+	internal, version, err := apischeme.NormalizeCell(input)
+	if err != nil {
+		t.Fatalf("NormalizeCell failed: %v", err)
+	}
+	if internal.Metadata.Annotations["kukeon.io/source-cell"] != "prod-a1b2c3" {
+		t.Fatalf("annotation lost on external→internal: %+v", internal.Metadata.Annotations)
+	}
+
+	output, err := apischeme.BuildCellExternalFromInternal(internal, version)
+	if err != nil {
+		t.Fatalf("BuildCellExternalFromInternal failed: %v", err)
+	}
+	if output.Metadata.Annotations["kukeon.io/source-cell"] != "prod-a1b2c3" {
+		t.Fatalf("annotation lost on internal→external: %+v", output.Metadata.Annotations)
+	}
+}
+
 // TestCellRoundTripV1Beta1_NetworkBridgeName covers AC for #168: the cell
 // status persists Network.BridgeName through the external→internal→external
 // round-trip so daemon restarts can recover the iface mapping from the

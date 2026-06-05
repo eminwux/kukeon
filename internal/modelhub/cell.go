@@ -27,6 +27,11 @@ type Cell struct {
 type CellMetadata struct {
 	Name   string
 	Labels map[string]string
+	// Annotations mirror v1beta1.CellMetadata.Annotations: non-identifying
+	// metadata that round-trips through cell metadata but that no reconcile or
+	// selector path keys off, and that DiffCell does not compare. Carries a
+	// clone's `kukeon.io/source-cell` provenance annotation (#1073).
+	Annotations map[string]string
 	// Generation is a monotonic counter bumped by a writer on each
 	// spec-changing update. Defaults to zero; phase 3 wires the writers to
 	// populate it. See ObservedGeneration on the status.

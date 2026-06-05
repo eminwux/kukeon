@@ -259,10 +259,10 @@ func TestNewCellCmdRunE_RequiresSourceFlag(t *testing.T) {
 
 			err := cmd.Execute()
 			if err == nil {
-				t.Fatal("expected error when neither --from-blueprint nor --from-config is set")
+				t.Fatal("expected error when no source flag (--from-blueprint/--from-config/--clone) is set")
 			}
-			if !strings.Contains(err.Error(), "requires --from-blueprint or --from-config") {
-				t.Errorf("err=%v want 'requires --from-blueprint or --from-config'", err)
+			if !strings.Contains(err.Error(), "requires --from-blueprint, --from-config, or --clone") {
+				t.Errorf("err=%v want 'requires --from-blueprint, --from-config, or --clone'", err)
 			}
 			if !strings.Contains(err.Error(), "kuke apply -f") {
 				t.Errorf("err=%v should point at `kuke apply -f <file>`", err)
@@ -543,7 +543,7 @@ func TestNewCellCmd_AutocompleteRegistration(t *testing.T) {
 		t.Errorf("unexpected stack flag usage: %q", stackFlag.Usage)
 	}
 
-	for _, name := range []string{"from-blueprint", "from-config", "param", "param-file", "env"} {
+	for _, name := range []string{"from-blueprint", "from-config", "clone", "param", "param-file", "env"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("expected %q flag to exist", name)
 		}
