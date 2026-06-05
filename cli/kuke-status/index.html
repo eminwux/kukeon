@@ -3368,7 +3368,7 @@
 </code></pre></div>
 <p>Report kukeon daemon, host, state, and parity health.</p>
 <p>Run the consolidated health report that replaces the manual <code>kuke get realms</code> vs <code>kuke get realms --no-daemon</code> diff ritual.</p>
-<p>Sections: daemon (socket dialable, round-trip, version), host (containerd, cgroup-v2, CNI plugins), state (orphan sockets, residual containerd namespaces), parity (every <code>kuke get &lt;kind&gt;</code> agrees daemon-side vs in-process). Each line is OK / WARN / FAIL with a one-line remediation hint when the status is not OK.</p>
+<p>Sections: daemon (socket dialable, round-trip, version), host (containerd, cgroup-v2, CNI plugins), state (orphan sockets, residual containerd namespaces), storage (per-realm snapshot / lease / content-blob footprint), parity (every <code>kuke get &lt;kind&gt;</code> agrees daemon-side vs in-process). Each line is OK / WARN / FAIL with a one-line remediation hint when the status is not OK.</p>
 <p>Exit code 0 when every check is OK or WARN; non-zero when any line is FAIL. The <code>--json</code> form is the machine-readable shape for CI integration; <code>--verbose</code> surfaces the remediation hint on OK rows too.</p>
 <h2 id="flags">Flags<a class="headerlink" href="#flags" title="Permanent link">&para;</a></h2>
 <table>
@@ -3415,20 +3415,24 @@
 <a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>  run-dir     OK    /run/kukeon (no orphan sockets)
 <a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>  namespaces  OK    no residual containerd namespaces
 <a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>PARITY
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>  realms      OK    daemon view matches in-process view
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>  spaces      OK    daemon view matches in-process view
-<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>  stacks      OK    daemon view matches in-process view
-<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>  cells       OK    daemon view matches in-process view
-<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>  containers  OK    daemon view matches in-process view
-<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>  secrets     OK    daemon view matches in-process view
-<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>  blueprints  OK    daemon view matches in-process view
-<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>  configs     OK    daemon view matches in-process view
-<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>
-<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>Status: OK
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>STORAGE
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>  default      OK    default.kukeon.io (12 snapshots, 49 leases, 24 blobs, 5.0 MiB)
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>  kuke-system  OK    kuke-system.kukeon.io (157 snapshots, 266 leases, 180 blobs, 700.0 MiB)
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>PARITY
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>  realms      OK    daemon view matches in-process view
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>  spaces      OK    daemon view matches in-process view
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>  stacks      OK    daemon view matches in-process view
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>  cells       OK    daemon view matches in-process view
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>  containers  OK    daemon view matches in-process view
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>  secrets     OK    daemon view matches in-process view
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>  blueprints  OK    daemon view matches in-process view
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>  configs     OK    daemon view matches in-process view
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>Status: OK
 </code></pre></div>
 <h3 id="json-json">JSON (<code>--json</code>)<a class="headerlink" href="#json-json" title="Permanent link">&para;</a></h3>
-<p><code>--json</code> emits the same report as a 2-space-indented JSON document. The <code>status</code> field renders the human label (<code>"OK"</code> / <code>"WARN"</code> / <code>"FAIL"</code>) rather than an integer so the wire shape doesn't depend on enum order. The shape is the <code>Report</code> struct in <a href="https://github.com/eminwux/kukeon/blob/main/cmd/kuke/status/status.go"><code>cmd/kuke/status/status.go</code></a> — a top-level <code>ok</code> bool plus a flat <code>checks</code> array, with each row carrying <code>section</code>, <code>name</code>, <code>status</code>, <code>detail</code>, and an optional <code>remediation</code>.</p>
+<p><code>--json</code> emits the same report as a 2-space-indented JSON document. The <code>status</code> field renders the human label (<code>"OK"</code> / <code>"WARN"</code> / <code>"FAIL"</code>) rather than an integer so the wire shape doesn't depend on enum order. The shape is the <code>Report</code> struct in <a href="https://github.com/eminwux/kukeon/blob/main/cmd/kuke/status/status.go"><code>cmd/kuke/status/status.go</code></a> — a top-level <code>ok</code> bool plus a flat <code>checks</code> array, with each row carrying <code>section</code>, <code>name</code>, <code>status</code>, <code>detail</code>, an optional <code>remediation</code>, and (on storage rows) an optional <code>storage</code> payload (<code>snapshots</code>, <code>leases</code>, <code>blobs</code>, <code>blobsBytes</code>) so CI tooling can alert on accumulation without parsing the human Detail string.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">&quot;ok&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">&quot;checks&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
@@ -3443,9 +3447,21 @@
 <a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">      </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;containerd&quot;</span><span class="p">,</span>
 <a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">      </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;OK&quot;</span><span class="p">,</span>
 <a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">      </span><span class="nt">&quot;detail&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/run/containerd/containerd.sock (reachable)&quot;</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">    </span><span class="p">}</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">  </span><span class="p">]</span>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="p">}</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">    </span><span class="p">},</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">      </span><span class="nt">&quot;section&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;storage&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="w">      </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;default&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">      </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;OK&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="w">      </span><span class="nt">&quot;detail&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;default.kukeon.io (12 snapshots, 49 leases, 24 blobs, 5.0 MiB)&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="w">      </span><span class="nt">&quot;storage&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="w">        </span><span class="nt">&quot;snapshots&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a><span class="w">        </span><span class="nt">&quot;leases&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">49</span><span class="p">,</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a><span class="w">        </span><span class="nt">&quot;blobs&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">24</span><span class="p">,</span>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a><span class="w">        </span><span class="nt">&quot;blobsBytes&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5242880</span>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a><span class="w">      </span><span class="p">}</span>
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a><span class="p">}</span>
 </code></pre></div>
 <p>A failing daemon dial yields <code>"status": "FAIL"</code> plus a populated <code>remediation</code> field on the affected row, and <code>"ok": false</code> at the top level.</p>
 <h2 id="what-each-section-checks">What each section checks<a class="headerlink" href="#what-each-section-checks" title="Permanent link">&para;</a></h2>
@@ -3468,6 +3484,10 @@
 <tr>
 <td><code>state</code></td>
 <td>The run-dir under <code>/run/kukeon</code> has no orphan sockets, and no residual containerd namespaces survive from a half-cleaned <code>kuke uninstall</code>.</td>
+</tr>
+<tr>
+<td><code>storage</code></td>
+<td>For every realm, the containerd namespace's snapshot count, lease count, and content-blob count plus summed byte size. Surfaces snapshot/lease/content accumulation early so a leak is visible before the data volume hits ENOSPC. Per-snapshot disk usage is intentionally omitted — the figures come from containerd metadata-store iterators (cheap), not an on-disk <code>du</code> (expensive).</td>
 </tr>
 <tr>
 <td><code>parity</code></td>
@@ -3506,7 +3526,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 30, 2026 13:22:20 UTC">May 30, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 5, 2026 17:00:13 UTC">June 5, 2026</span>
   </span>
 
     
