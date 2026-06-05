@@ -149,6 +149,27 @@ spec:
 	requireValidationErr(t, parser.ValidateDocument(doc), errdefs.ErrRepoTargetNotAbsolute)
 }
 
+func TestValidateDocument_Blueprint_RepoSlotBranchAndRefMutuallyExclusive(t *testing.T) {
+	yaml := `apiVersion: v1beta1
+kind: CellBlueprint
+metadata:
+  name: web
+  realm: default
+spec:
+  cell:
+    containers:
+      - id: main
+        image: alpine:latest
+        repos:
+          - name: app
+            target: /workspace/app
+            branch: main
+            ref: v0.1.0
+`
+	doc := parseBlueprint(t, yaml)
+	requireValidationErr(t, parser.ValidateDocument(doc), errdefs.ErrRepoBranchRefMutex)
+}
+
 func TestValidateDocument_Blueprint_SecretSlotEnvMissingEnvName(t *testing.T) {
 	yaml := `apiVersion: v1beta1
 kind: CellBlueprint

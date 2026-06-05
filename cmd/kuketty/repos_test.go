@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/kuketty/setupstatus"
@@ -45,6 +46,7 @@ func gitRun(t *testing.T, dir string, args ...string) {
 		"-c", "user.name=kukeon test",
 		"-c", "init.defaultBranch=main",
 		"-c", "commit.gpgsign=false",
+		"-c", "tag.gpgsign=false",
 	}, args...)
 	cmd := exec.Command("git", full...)
 	cmd.Dir = dir
@@ -191,6 +193,108 @@ func TestProcessRepos_NonRequiredFailureDoesNotPropagate(t *testing.T) {
 	}
 	if len(statuses) != 1 || statuses[0].State != setupstatus.StateFailed {
 		t.Fatalf("a non-required failure should still be reported as a failed status, got %+v", statuses)
+	}
+}
+
+// gitCapture runs git in dir with the hermetic identity and returns trimmed
+// stdout. Used to read out commit SHAs without polluting host config.
+func gitCapture(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	full := append([]string{
+		"-c", "user.email=test@kukeon.invalid",
+		"-c", "user.name=kukeon test",
+		"-c", "init.defaultBranch=main",
+		"-c", "commit.gpgsign=false",
+		"-c", "tag.gpgsign=false",
+	}, args...)
+	cmd := exec.Command("git", full...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %v in %q: %v", args, dir, err)
+	}
+	return string(out)
+}
+
+// TestProcessRepos_RefPinsCloneAndSurvivesRestart exercises the AC for #1034:
+// a Ref-pinned repo clones at a detached HEAD on first boot, and a fetch path
+// re-run (existing .git → in-place restart) stays idempotent — the prior
+// `git pull --ff-only` on a detached HEAD aborted required-repo container
+// start.
+func TestProcessRepos_RefPinsCloneAndSurvivesRestart(t *testing.T) {
+	src := makeSourceRepo(t, "README.md")
+	gitRun(t, src, "tag", "v0.1.0")
+	tagSHA := strings.TrimSpace(gitCapture(t, src, "rev-parse", "v0.1.0^{commit}"))
+
+	target := filepath.Join(t.TempDir(), "checkout")
+	repos := []v1beta1.ContainerRepo{
+		{Name: "pinned", Target: target, Ref: "v0.1.0", URL: src, Required: true},
+	}
+
+	// First pass: clone at the tag (detached HEAD).
+	statuses, err := processRepos(context.Background(), repos, discardLogger())
+	if err != nil {
+		t.Fatalf("first processRepos (clone): %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].State != setupstatus.StateCloned {
+		t.Fatalf("want a single cloned status, got %+v", statuses)
+	}
+	if statuses[0].Commit != tagSHA {
+		t.Errorf("clone HEAD = %q, want tag commit %q", statuses[0].Commit, tagSHA)
+	}
+
+	// Push a new commit on main upstream so a branch-tracking pull would
+	// advance HEAD — a Ref pin must ignore it.
+	if writeErr := os.WriteFile(filepath.Join(src, "second.txt"), []byte("more\n"), 0o644); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	gitRun(t, src, "add", ".")
+	gitRun(t, src, "commit", "-m", "second")
+
+	// Second pass: fetch path — must NOT error on detached HEAD (the
+	// pre-fix `git pull --ff-only` did), and must stay on the tag.
+	statuses, err = processRepos(context.Background(), repos, discardLogger())
+	if err != nil {
+		t.Fatalf("second processRepos (fetch on detached HEAD): %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].State != setupstatus.StateFetched {
+		t.Fatalf("want a single fetched status, got %+v", statuses)
+	}
+	if statuses[0].Commit != tagSHA {
+		t.Errorf("fetch HEAD = %q, want tag commit %q (Ref pin should not advance)", statuses[0].Commit, tagSHA)
+	}
+	if _, statErr := os.Stat(filepath.Join(target, "second.txt")); statErr == nil {
+		t.Errorf("Ref-pinned repo should not pull the upstream second commit")
+	}
+}
+
+// TestProcessRepos_RefPinAcceptsCommitSHA verifies that Ref also accepts a
+// full commit SHA (not just tag names) — the AC's "tag or full SHA" wording.
+func TestProcessRepos_RefPinAcceptsCommitSHA(t *testing.T) {
+	src := makeSourceRepo(t, "README.md")
+	firstSHA := strings.TrimSpace(gitCapture(t, src, "rev-parse", "HEAD"))
+	// Add a second commit so HEAD ≠ pinned SHA: if the clone did not detach,
+	// HEAD would land on the newer commit.
+	if err := os.WriteFile(filepath.Join(src, "second.txt"), []byte("more\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, src, "add", ".")
+	gitRun(t, src, "commit", "-m", "second")
+
+	target := filepath.Join(t.TempDir(), "checkout")
+	repos := []v1beta1.ContainerRepo{
+		{Name: "pinned", Target: target, Ref: firstSHA, URL: src, Required: true},
+	}
+	statuses, err := processRepos(context.Background(), repos, discardLogger())
+	if err != nil {
+		t.Fatalf("processRepos: %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].Commit != firstSHA {
+		t.Fatalf("want clone pinned at %q, got %+v", firstSHA, statuses)
+	}
+	if _, statErr := os.Stat(filepath.Join(target, "second.txt")); statErr == nil {
+		t.Errorf("commit-SHA pin should not contain files from later commits")
 	}
 }
 

@@ -319,9 +319,15 @@ type ContainerRepo struct {
 	// Target is the absolute in-container path the repo is cloned into.
 	// Required.
 	Target string `json:"target"             yaml:"target"`
-	// Branch is the branch to check out. Empty clones the remote's default
-	// branch.
+	// Branch is the branch to check out (moving target). Empty clones the
+	// remote's default branch. Mutually exclusive with Ref.
 	Branch string `json:"branch,omitempty"   yaml:"branch,omitempty"`
+	// Ref is an immutable pin — a tag name or full commit SHA. When set,
+	// kuketty checks out a detached HEAD at the resolved ref and skips the
+	// fast-forward step on subsequent restarts, so an in-place restart of
+	// an already-cloned cell stays idempotent instead of failing on
+	// `git pull` against a detached HEAD. Mutually exclusive with Branch.
+	Ref string `json:"ref,omitempty"      yaml:"ref,omitempty"`
 	// URL is the clone URL. In phases 1–3 it is supplied via scalar
 	// ${PARAM} substitution; phase 4 (#423) enables structural slot fill
 	// from a CellConfig. Required.

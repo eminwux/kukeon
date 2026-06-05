@@ -105,7 +105,11 @@ type CellConfigRepoFill struct {
 	// URL is the clone URL filling the slot. Required.
 	URL string `json:"url"              yaml:"url"`
 	// Branch is the branch to check out. Empty clones the remote's default.
+	// Mutually exclusive with Ref.
 	Branch string `json:"branch,omitempty" yaml:"branch,omitempty"`
+	// Ref is an immutable pin (tag or full commit SHA) — see
+	// ContainerRepo.Ref. Mutually exclusive with Branch.
+	Ref string `json:"ref,omitempty"    yaml:"ref,omitempty"`
 }
 
 // CellConfigSecretFill fills a structural secret slot the referenced blueprint

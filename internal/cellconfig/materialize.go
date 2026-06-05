@@ -143,6 +143,9 @@ func materializeContainer(
 		if branch := strings.TrimSpace(fill.Branch); branch != "" {
 			filled.Branch = branch
 		}
+		if ref := strings.TrimSpace(fill.Ref); ref != "" {
+			filled.Ref = ref
+		}
 		repos = append(repos, filled)
 	}
 
