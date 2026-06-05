@@ -42,8 +42,8 @@ const (
 // `-b`-lineage and hand-built cases are deliberately out of scope per the
 // umbrella). For a Config-lineage cell, the pass re-derives the would-be
 // CellDoc from the daemon-stored Config + its referenced Blueprint via the
-// same `cellconfig.Materialize` call the CellConfig materialisation path
-// uses, then compares the materialized spec against the live cell with
+// same `cellconfig.MaterializeWithName` call the CellConfig materialisation
+// path uses, then compares the materialized spec against the live cell with
 // `apply.DiffCell`. The outcome lands on three status fields:
 //
 //   - OutOfSync = true with OutOfSyncReason describing the divergence when
@@ -98,7 +98,7 @@ func desiredCellOutOfSync(r runner.Runner, cell intmodel.Cell, configName string
 		return cellOutOfSync{OutOfSync: true, Reason: outOfSyncReasonConfigDeleted}
 	}
 
-	desiredCell, materializeErr := materializeCellFromConfig(r, cfg)
+	desiredCell, materializeErr := materializeCellFromConfig(r, cfg, cell.Metadata.Name)
 	if materializeErr != nil {
 		return cellOutOfSync{Err: materializeErr.Error()}
 	}
@@ -181,11 +181,18 @@ func lookupLineageConfig(
 
 // materializeCellFromConfig re-runs the CellConfig materialization pipeline
 // against a daemon-stored Config: decode the Config's body, resolve the
-// referenced Blueprint, then `cellconfig.Materialize` the two. Returns the
-// materialized cell in the same internal-model shape the reconciler's live
+// referenced Blueprint, then `cellconfig.MaterializeWithName` the two. Returns
+// the materialized cell in the same internal-model shape the reconciler's live
 // cell uses, so apply.DiffCell can compare them directly.
+//
+// The live cell's own name is threaded through as the materialized name so the
+// diff never trips on metadata.name — materialization no longer derives the
+// name from the Config name (epic:cell-identity #1021), and the OutOfSync
+// detector compares *spec drift*, not identity. This keeps the detector
+// correct once P2 lands generated cell names that no longer match
+// StableName(configName).
 func materializeCellFromConfig(
-	r runner.Runner, cfg intmodel.CellConfig,
+	r runner.Runner, cfg intmodel.CellConfig, cellName string,
 ) (intmodel.Cell, error) {
 	cfgDoc, err := apischeme.ConvertCellConfigToExternal(cfg)
 	if err != nil {
@@ -212,7 +219,7 @@ func materializeCellFromConfig(
 		return intmodel.Cell{}, fmt.Errorf("decode referenced blueprint: %w", bpErr)
 	}
 
-	cellDoc, mErr := cellconfig.Materialize(cfgDoc, bpDoc)
+	cellDoc, mErr := cellconfig.MaterializeWithName(cfgDoc, bpDoc, cellName)
 	if mErr != nil {
 		return intmodel.Cell{}, fmt.Errorf("materialize cell: %w", mErr)
 	}

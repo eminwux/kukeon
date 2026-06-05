@@ -558,6 +558,16 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// last-wins across collisions) are owned by the runner-side mergeRuntimeEnv.
 	if len(flags.envArgs) > 0 {
 		cellDoc.Spec.RuntimeEnv = flags.envArgs
+		// Persist the same `--env` entries onto the provenance block
+		// (issue #1021). RuntimeEnv is transport-only (yaml:"-") and is
+		// dropped at write time; Spec.Provenance.EnvOverrides is the
+		// persisted record a later re-resolution reads. Provenance is set
+		// by the materialize path for `-b`/`-c`/`-p` runs; a manifest run
+		// (`kuke run -f`) carries no binding and so no provenance — guard
+		// for nil rather than fabricate one.
+		if cellDoc.Spec.Provenance != nil {
+			cellDoc.Spec.Provenance.EnvOverrides = append([]string(nil), flags.envArgs...)
+		}
 	}
 
 	if validateErr := validateResolvedCell(cellDoc); validateErr != nil {
@@ -985,7 +995,7 @@ func loadFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags runFlag
 	if err != nil {
 		return v1beta1.CellDoc{}, err
 	}
-	return cellblueprint.MaterializeWithName(resolved, flags.nameOverride)
+	return cellblueprint.MaterializeWithName(resolved, flags.nameOverride, cliParams)
 }
 
 // loadFromConfig resolves the named CellConfig from daemon storage, looks up
@@ -1109,7 +1119,16 @@ func loadFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) 
 		}
 		nameOverride = generated
 	}
-	doc, materializeErr := cellconfig.MaterializeWithName(cfgRes.Config, bpRes.Blueprint, nameOverride)
+	// The cell name is supplied here, not derived inside Materialize
+	// (epic:cell-identity #1021 severed that assumption). The bare
+	// `<config>` form keeps its historical idempotent-attach identity via
+	// StableName; --name / --new supply their own name above. P2 replaces
+	// this derivation with a dedicated name generator.
+	cellName := nameOverride
+	if cellName == "" {
+		cellName = cellconfig.StableName(cfgRes.Config.Metadata.Name)
+	}
+	doc, materializeErr := cellconfig.MaterializeWithName(cfgRes.Config, bpRes.Blueprint, cellName)
 	if materializeErr != nil {
 		return loadResult{}, materializeErr
 	}

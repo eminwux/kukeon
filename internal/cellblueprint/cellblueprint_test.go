@@ -153,12 +153,52 @@ func TestMaterialize_FreshNameEachCall(t *testing.T) {
 
 func TestMaterialize_NameOverride(t *testing.T) {
 	resolved, _ := cellblueprint.Resolve(baseDoc(), nil, nil)
-	cell, err := cellblueprint.MaterializeWithName(resolved, "pinned")
+	cell, err := cellblueprint.MaterializeWithName(resolved, "pinned", nil)
 	if err != nil {
 		t.Fatalf("MaterializeWithName: %v", err)
 	}
 	if cell.Metadata.Name != "pinned" || cell.Spec.ID != "pinned" {
 		t.Fatalf("override not honored: name=%q id=%q", cell.Metadata.Name, cell.Spec.ID)
+	}
+}
+
+// TestMaterialize_StampsBlueprintProvenance pins issue #1021: a Blueprint-
+// materialized cell carries a Spec.Provenance block with bindingKind=blueprint,
+// the Blueprint's scoped name as the binding ref, and the resolved --param map
+// recorded verbatim so a later re-resolution does not depend on the transient
+// CLI invocation.
+func TestMaterialize_StampsBlueprintProvenance(t *testing.T) {
+	resolved, err := cellblueprint.Resolve(baseDoc(), map[string]string{"TAG": "v9"}, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	cell, err := cellblueprint.MaterializeWithName(resolved, "pinned", map[string]string{"TAG": "v9"})
+	if err != nil {
+		t.Fatalf("MaterializeWithName: %v", err)
+	}
+	prov := cell.Spec.Provenance
+	if prov == nil {
+		t.Fatalf("cell.Spec.Provenance = nil; want a blueprint provenance block")
+	}
+	if prov.BindingKind != v1beta1.BindingKindBlueprint {
+		t.Errorf("bindingKind=%q want %q", prov.BindingKind, v1beta1.BindingKindBlueprint)
+	}
+	wantRef := v1beta1.CellBindingRef{Name: "web", Realm: "default", Space: "agents", Stack: "claude"}
+	if prov.BindingRef != wantRef {
+		t.Errorf("bindingRef=%+v want %+v", prov.BindingRef, wantRef)
+	}
+	if got := prov.Params["TAG"]; got != "v9" {
+		t.Errorf("params[TAG]=%q want v9", got)
+	}
+	// Mutating the source param map must not leak into the stamped provenance.
+	src := map[string]string{"TAG": "orig"}
+	cell2, err := cellblueprint.MaterializeWithName(resolved, "pinned", src)
+	if err != nil {
+		t.Fatalf("MaterializeWithName: %v", err)
+	}
+	src["TAG"] = "mutated"
+	if got := cell2.Spec.Provenance.Params["TAG"]; got != "orig" {
+		t.Errorf("provenance params aliased source map: got %q want orig", got)
 	}
 }
 

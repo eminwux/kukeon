@@ -82,7 +82,7 @@ func TestMaterialize_HappyPath_FillsRepoAndSecretSlots(t *testing.T) {
 		},
 	}
 
-	cell, err := Materialize(cfg, bp)
+	cell, err := MaterializeWithName(cfg, bp, StableName(cfg.Metadata.Name))
 	if err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestMaterialize_RequiredRepoSlotUnfilled_Errors(t *testing.T) {
 		},
 	}
 
-	_, err := Materialize(cfg, bp)
+	_, err := MaterializeWithName(cfg, bp, StableName(cfg.Metadata.Name))
 	if err == nil || !errors.Is(err, errdefs.ErrConfigRequiredSlotUnfilled) {
 		t.Fatalf("err=%v want ErrConfigRequiredSlotUnfilled", err)
 	}
@@ -205,7 +205,7 @@ func TestMaterialize_UnknownSlotFill_Errors(t *testing.T) {
 		},
 	}
 
-	_, err := Materialize(cfg, bp)
+	_, err := MaterializeWithName(cfg, bp, StableName(cfg.Metadata.Name))
 	if err == nil || !errors.Is(err, errdefs.ErrConfigUnknownRepoSlot) {
 		t.Fatalf("err=%v want ErrConfigUnknownRepoSlot", err)
 	}
@@ -229,7 +229,7 @@ func TestMaterialize_OptionalSlotUnfilled_Drops(t *testing.T) {
 		},
 	}
 
-	cell, err := Materialize(cfg, bp)
+	cell, err := MaterializeWithName(cfg, bp, StableName(cfg.Metadata.Name))
 	if err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestMaterialize_RepoFillRefCarriesThrough(t *testing.T) {
 			},
 		},
 	}
-	cell, err := Materialize(cfg, bp)
+	cell, err := MaterializeWithName(cfg, bp, StableName(cfg.Metadata.Name))
 	if err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestMaterialize_ScalarRepoPassesThrough(t *testing.T) {
 		Metadata:   v1beta1.CellConfigMetadata{Name: "prod", Realm: "cfg-realm"},
 		Spec:       v1beta1.CellConfigSpec{Blueprint: v1beta1.CellConfigBlueprintRef{Name: "lib", Realm: "bp-realm"}},
 	}
-	cell, err := Materialize(cfg, bp)
+	cell, err := MaterializeWithName(cfg, bp, StableName(cfg.Metadata.Name))
 	if err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
@@ -341,18 +341,17 @@ func TestMaterialize_PropagatesResolveError(t *testing.T) {
 		},
 	}
 
-	_, err := Materialize(cfg, bp)
+	_, err := MaterializeWithName(cfg, bp, StableName(cfg.Metadata.Name))
 	if err == nil || !errors.Is(err, errdefs.ErrBlueprintInvalid) {
 		t.Fatalf("err=%v want ErrBlueprintInvalid (required param TAG unset)", err)
 	}
 }
 
-// TestMaterializeWithName_OverrideWinsOverStableName pins the #754 escape hatch:
-// when the caller pins a name, the materialized cell uses it verbatim instead of
-// the StableName(cfg.Metadata.Name) used on the empty-override path. The
-// kukeon.io/config back-reference label still points at the Config (lineage
-// preserved across generated-name spawns).
-func TestMaterializeWithName_OverrideWinsOverStableName(t *testing.T) {
+// TestMaterializeWithName_UsesNameVerbatim pins that the caller-supplied name
+// is used verbatim for both metadata.name and spec.ID, and that the
+// kukeon.io/config lineage label still points at the Config (lineage preserved
+// independently of the cell name).
+func TestMaterializeWithName_UsesNameVerbatim(t *testing.T) {
 	bp := minimalBlueprint()
 	cfg := v1beta1.CellConfigDoc{
 		APIVersion: v1beta1.APIVersionV1Beta1,
@@ -385,10 +384,13 @@ func TestMaterializeWithName_OverrideWinsOverStableName(t *testing.T) {
 	}
 }
 
-// TestMaterializeWithName_EmptyOverrideUsesStableName guards the no-regression
-// path: callers that pass "" still get the deterministic stable-name behavior
-// the #742 idempotent-attach contract depends on.
-func TestMaterializeWithName_EmptyOverrideUsesStableName(t *testing.T) {
+// TestMaterializeWithName_EmptyNameNotDerivedFromConfig pins the severed
+// assumption (epic:cell-identity #1021): materialization no longer reaches back
+// to cfg.Metadata.Name when the caller passes an empty name. The empty name is
+// the caller's responsibility — materialize must NOT silently substitute
+// StableName(cfg.Metadata.Name) the way the pre-#1021 path did. The lineage
+// label is still stamped regardless of the name.
+func TestMaterializeWithName_EmptyNameNotDerivedFromConfig(t *testing.T) {
 	bp := minimalBlueprint()
 	cfg := v1beta1.CellConfigDoc{
 		APIVersion: v1beta1.APIVersionV1Beta1,
@@ -410,8 +412,53 @@ func TestMaterializeWithName_EmptyOverrideUsesStableName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MaterializeWithName: %v", err)
 	}
-	if got := cell.Metadata.Name; got != "prod" {
-		t.Errorf("cell name=%q want prod (StableName fallback on empty override)", got)
+	if got := cell.Metadata.Name; got != "" {
+		t.Errorf("cell name=%q want \"\" (name not derived from config name post-#1021)", got)
+	}
+	if got := cell.Metadata.Labels[LabelConfig]; got != "prod" {
+		t.Errorf("LabelConfig=%q want prod (lineage stamped regardless of cell name)", got)
+	}
+}
+
+// TestMaterializeWithName_StampsConfigProvenance pins the provenance block a
+// Config-materialized cell carries (issue #1021): bindingKind=config, the
+// Config's scoped name as the binding ref, and the Config's spec.values as the
+// recorded params.
+func TestMaterializeWithName_StampsConfigProvenance(t *testing.T) {
+	bp := minimalBlueprint()
+	cfg := v1beta1.CellConfigDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindCellConfig,
+		Metadata:   v1beta1.CellConfigMetadata{Name: "prod", Realm: "cfg-realm", Space: "team-a"},
+		Spec: v1beta1.CellConfigSpec{
+			Blueprint: v1beta1.CellConfigBlueprintRef{Name: "web", Realm: "bp-realm"},
+			Values:    map[string]string{"TAG": "v2"},
+			Repos: map[string]v1beta1.CellConfigRepoFill{
+				"src": {URL: "https://example.com/src.git"},
+			},
+			Secrets: map[string]v1beta1.CellConfigSecretFill{
+				"token": {SecretRef: &v1beta1.ContainerSecretRef{Name: "api-token", Realm: "cfg-realm"}},
+			},
+		},
+	}
+
+	cell, err := MaterializeWithName(cfg, bp, "prod")
+	if err != nil {
+		t.Fatalf("MaterializeWithName: %v", err)
+	}
+	prov := cell.Spec.Provenance
+	if prov == nil {
+		t.Fatalf("cell.Spec.Provenance = nil; want a config provenance block")
+	}
+	if prov.BindingKind != v1beta1.BindingKindConfig {
+		t.Errorf("bindingKind=%q want %q", prov.BindingKind, v1beta1.BindingKindConfig)
+	}
+	wantRef := v1beta1.CellBindingRef{Name: "prod", Realm: "cfg-realm", Space: "team-a"}
+	if prov.BindingRef != wantRef {
+		t.Errorf("bindingRef=%+v want %+v", prov.BindingRef, wantRef)
+	}
+	if got := prov.Params["TAG"]; got != "v2" {
+		t.Errorf("params[TAG]=%q want v2", got)
 	}
 }
 

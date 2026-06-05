@@ -61,6 +61,53 @@ type CellSpec struct {
 	// inbound RPC cell onto the disk-read cell before the OCI build. See
 	// runner.startCellLocked and Exec.createCellInternal. Issue #834.
 	RuntimeEnv []string
+	// Provenance mirrors v1beta1.CellSpec.Provenance: the persisted record of
+	// the binding (Config or Blueprint) and the scalar params / env overrides
+	// this cell was materialized from. Unlike RuntimeEnv it round-trips
+	// through cell metadata so the reconciler can re-resolve the binding after
+	// a restart. Nil for hand-built cells. DiffCell ignores it (lineage data,
+	// not a runtime spec field). Issue #1021.
+	Provenance *CellProvenance
+}
+
+// CellProvenance mirrors v1beta1.CellProvenance. See that type for the
+// field-by-field contract. Issue #1021.
+type CellProvenance struct {
+	BindingKind  string
+	BindingRef   CellBindingRef
+	Params       map[string]string
+	EnvOverrides []string
+}
+
+// CellBindingRef mirrors v1beta1.CellBindingRef. Issue #1021.
+type CellBindingRef struct {
+	Name  string
+	Realm string
+	Space string
+	Stack string
+}
+
+// CloneCellProvenance deep-copies a *CellProvenance, returning nil for a nil
+// input. Issue #1021.
+func CloneCellProvenance(in *CellProvenance) *CellProvenance {
+	if in == nil {
+		return nil
+	}
+	out := &CellProvenance{
+		BindingKind: in.BindingKind,
+		BindingRef:  in.BindingRef,
+	}
+	if in.Params != nil {
+		params := make(map[string]string, len(in.Params))
+		for k, v := range in.Params {
+			params[k] = v
+		}
+		out.Params = params
+	}
+	if in.EnvOverrides != nil {
+		out.EnvOverrides = append([]string(nil), in.EnvOverrides...)
+	}
+	return out
 }
 
 // CellTty mirrors the v1beta1 CellTty payload. See the v1beta1 type for

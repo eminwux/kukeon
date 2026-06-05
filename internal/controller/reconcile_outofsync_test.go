@@ -47,9 +47,12 @@ import (
 // targeted, well-known field difference.
 func materializeSampleCell(t *testing.T) intmodel.Cell {
 	t.Helper()
-	cellDoc, err := cellconfig.Materialize(sampleConfig(), sampleReferencedBlueprint())
+	cellDoc, err := cellconfig.MaterializeWithName(
+		sampleConfig(), sampleReferencedBlueprint(),
+		cellconfig.StableName(sampleConfig().Metadata.Name),
+	)
 	if err != nil {
-		t.Fatalf("cellconfig.Materialize: %v", err)
+		t.Fatalf("cellconfig.MaterializeWithName: %v", err)
 	}
 	cell, err := apischeme.ConvertCellDocToInternal(cellDoc)
 	if err != nil {

@@ -132,16 +132,22 @@ func resolveValues(
 	return values, nil
 }
 
-// Materialize converts a resolved blueprint into a CellDoc. See
-// MaterializeWithName for the override-aware form.
+// Materialize converts a resolved blueprint into a CellDoc with a generated
+// name and no recorded params. See MaterializeWithName for the override- and
+// provenance-aware form.
 func Materialize(doc v1beta1.CellBlueprintDoc) (v1beta1.CellDoc, error) {
-	return MaterializeWithName(doc, "")
+	return MaterializeWithName(doc, "", nil)
 }
 
 // MaterializeWithName converts a (resolved) blueprint into a CellDoc named
 // `<prefix>-<6hex>` (prefix = spec.prefix or metadata.name), or nameOverride
 // verbatim when non-empty. The realm/space/stack triple comes from the
-// blueprint metadata. Every cell carries the kukeon.io/blueprint=<name> label.
+// blueprint metadata. Every cell carries the kukeon.io/blueprint=<name>
+// lineage label and a Spec.Provenance block recording the Blueprint binding it
+// was stamped from (issue #1021); params are the resolved `--param` map the
+// caller substituted into the blueprint (pass the same map handed to Resolve),
+// recorded verbatim so a later re-resolution does not depend on re-reading the
+// transient CLI invocation.
 //
 // Structural slots are resolved against the "scalar-only inline" contract:
 // a repo whose url is still empty after substitution, and every secret slot
@@ -149,7 +155,9 @@ func Materialize(doc v1beta1.CellBlueprintDoc) (v1beta1.CellDoc, error) {
 // unfilled. An unfilled *required* slot makes the blueprint un-runnable inline
 // and returns ErrBlueprintStructuralSlots naming the offenders; an unfilled
 // *optional* slot is dropped from the materialized container.
-func MaterializeWithName(doc v1beta1.CellBlueprintDoc, nameOverride string) (v1beta1.CellDoc, error) {
+func MaterializeWithName(
+	doc v1beta1.CellBlueprintDoc, nameOverride string, params map[string]string,
+) (v1beta1.CellDoc, error) {
 	cellName, err := resolveCellName(doc, nameOverride)
 	if err != nil {
 		return v1beta1.CellDoc{}, err
@@ -185,8 +193,34 @@ func MaterializeWithName(doc v1beta1.CellBlueprintDoc, nameOverride string) (v1b
 			Containers:          containers,
 			AutoDelete:          doc.Spec.Cell.AutoDelete,
 			NestedCgroupRuntime: doc.Spec.Cell.NestedCgroupRuntime,
+			Provenance:          blueprintProvenance(doc, params),
 		},
 	}, nil
+}
+
+// blueprintProvenance builds the Spec.Provenance block for a Blueprint-
+// materialized cell: bindingKind=blueprint, the Blueprint's scoped name as the
+// binding ref, and the resolved `--param` map as the recorded params.
+// EnvOverrides is left for the run-time caller to populate from `--env`.
+// Issue #1021.
+func blueprintProvenance(doc v1beta1.CellBlueprintDoc, params map[string]string) *v1beta1.CellProvenance {
+	prov := &v1beta1.CellProvenance{
+		BindingKind: v1beta1.BindingKindBlueprint,
+		BindingRef: v1beta1.CellBindingRef{
+			Name:  strings.TrimSpace(doc.Metadata.Name),
+			Realm: strings.TrimSpace(doc.Metadata.Realm),
+			Space: strings.TrimSpace(doc.Metadata.Space),
+			Stack: strings.TrimSpace(doc.Metadata.Stack),
+		},
+	}
+	if len(params) > 0 {
+		p := make(map[string]string, len(params))
+		for k, v := range params {
+			p[k] = v
+		}
+		prov.Params = p
+	}
+	return prov
 }
 
 // materializeContainer maps a BlueprintContainer to a runtime ContainerSpec and
