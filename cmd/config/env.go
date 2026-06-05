@@ -419,10 +419,6 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_NEW = DefineKV("KUKE_RUN_NEW", "kuke/run/new")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_RUN_CLONE = DefineKV("KUKE_RUN_CLONE", "kuke/run/clone")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_RUN_REUSE = DefineKV("KUKE_RUN_REUSE", "kuke/run/reuse")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_PARAM_FILE = DefineKV("KUKE_RUN_PARAM_FILE", "kuke/run/param-file")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	// KUKE_RUN_ENV is the env-var twin of `kuke run --env KEY=VALUE` (issue

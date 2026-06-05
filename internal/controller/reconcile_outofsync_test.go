@@ -49,7 +49,7 @@ func materializeSampleCell(t *testing.T) intmodel.Cell {
 	t.Helper()
 	cellDoc, err := cellconfig.MaterializeWithName(
 		sampleConfig(), sampleReferencedBlueprint(),
-		cellconfig.StableName(sampleConfig().Metadata.Name),
+		cellconfig.Prefix(sampleConfig()),
 	)
 	if err != nil {
 		t.Fatalf("cellconfig.MaterializeWithName: %v", err)

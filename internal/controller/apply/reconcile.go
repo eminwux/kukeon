@@ -763,13 +763,12 @@ func ReconcileConfig(r runner.Runner, desired intmodel.CellConfig) (ReconcileRes
 }
 
 // CreateConfig is the atomic create-only sibling of ReconcileConfig used by
-// `kuke run <src> --clone` (issue #839). It runs the same scope-existence,
+// `kuke create config` (issue #839). It runs the same scope-existence,
 // blueprint-resolution, and slot-fill validation as ReconcileConfig, but
-// persists via runner.WriteConfigIfAbsent — so two concurrent invocations of
-// the gap-fill counter loop can race on the same N without silently
-// overwriting each other. Returns errdefs.ErrConfigExists when a Config with
-// the same name already lives in scope; the CLI's counter allocator retries
-// on that sentinel, and `--clone --name X` surfaces it as a hard collision.
+// persists via runner.WriteConfigIfAbsent — so two concurrent create
+// attempts on the same name can never silently overwrite each other.
+// Returns errdefs.ErrConfigExists when a Config with the same name already
+// lives in scope (the caller surfaces it as a hard collision).
 func CreateConfig(r runner.Runner, desired intmodel.CellConfig) (ReconcileResult, error) {
 	result := ReconcileResult{
 		Action: "unchanged",

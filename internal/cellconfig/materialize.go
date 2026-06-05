@@ -22,7 +22,6 @@ import (
 
 	"github.com/eminwux/kukeon/internal/cellblueprint"
 	"github.com/eminwux/kukeon/internal/errdefs"
-	"github.com/eminwux/kukeon/internal/util/naming"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
@@ -50,10 +49,10 @@ import (
 // The cell name is supplied by the caller — materialization no longer derives
 // it from cfg.Metadata.Name (epic:cell-identity #1021 severs that assumption;
 // the cell's identity is the CellDoc, and the Config name is demoted to
-// lineage). Callers that want the historical stable-name identity pass
-// StableName(cfg.Metadata.Name); `kuke run <config> --new` passes a generated
-// `<config>-<6hex>`; P2 will supply a dedicated name generator. An empty name
-// is the caller's responsibility (it yields an empty-named cell that fails
+// lineage). Callers resolve the name via the unified generator
+// (naming.AllocCellName over cellconfig.Prefix, #1022): an explicit name is
+// used verbatim, an omitted one becomes a generated `<prefix>-<6hex>`. An empty
+// name is the caller's responsibility (it yields an empty-named cell that fails
 // downstream validation) — materialization intentionally does not paper over
 // it by reaching back to the Config name.
 func MaterializeWithName(
@@ -297,17 +296,3 @@ func cloneCellTty(in *v1beta1.CellTty) *v1beta1.CellTty {
 	return &out
 }
 
-// GenerateName returns `<configName>-<6hex>`, the cell-name shape
-// `kuke run <config> --new` produces (#833; originally shipped as `-c
-// --generate-name` in #754, renamed in #833). The 6-hex suffix matches
-// cellblueprint's `<prefix>-<6hex>` shape used by `-b`/`-p`, so generated
-// `--new` cells are visually indistinguishable from generated-cell-per-
-// invocation spawns of the other run verbs while preserving the
-// kukeon.io/config back-reference label.
-func GenerateName(configName string) (string, error) {
-	suffix, err := naming.RandomHexSuffix(naming.DefaultCellNameSuffixBytes)
-	if err != nil {
-		return "", fmt.Errorf("config %q: generate cell name suffix: %w", configName, err)
-	}
-	return strings.TrimSpace(configName) + "-" + suffix, nil
-}

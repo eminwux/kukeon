@@ -48,9 +48,10 @@ type CreateConfigResult struct {
 // CreateConfig persists a new CellConfig document under atomic create-only
 // semantics — the same scope / blueprint / slot-fill validation as
 // ApplyDocuments-driven create, but the runner write is gated on the file
-// not existing (issue #839). `kuke run <src> --clone` is the only caller:
-// the gap-fill counter loop retries on errdefs.ErrConfigExists, and the
-// `--clone --name X` path surfaces it as a hard collision.
+// not existing (issue #839). The caller is `kuke create config`; the path
+// returns errdefs.ErrConfigExists on collision, which the CLI surfaces as
+// a hard error rather than the write-through overwrite ApplyDocuments
+// would perform.
 func (b *Exec) CreateConfig(config intmodel.CellConfig) (CreateConfigResult, error) {
 	var res CreateConfigResult
 
@@ -157,10 +158,11 @@ func (b *Exec) DeleteConfig(config intmodel.CellConfig) (DeleteConfigResult, err
 
 // configBackRefCells returns the scope paths of every persisted cell that
 // carries the kukeon.io/config back-reference label (cellconfig.LabelConfig)
-// pointing at this config, within the config's own scope. A Config materializes
-// at most one live cell within scope (see internal/cellconfig.StableName), so
-// this is normally zero or one entry; it stays a slice to surface every match
-// without guessing. The match is by label value == config name plus a scope
+// pointing at this config, within the config's own scope. Historically a Config
+// materialized at most one live cell within scope (the legacy 1:1 StableName
+// identity pin, retired in epic:cell-identity P2 #1022; the 1:N binding is wired
+// in a later phase), so this is normally zero or one entry today; it stays a
+// slice to surface every match without guessing. The match is by label value == config name plus a scope
 // prefix (the cell's realm always matches; space/stack match only when the
 // config sets them) so a same-named config in a sibling scope never produces a
 // false positive. The label is set by `kuke run -c` (#625); until that lands no

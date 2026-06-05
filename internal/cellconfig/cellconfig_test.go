@@ -27,19 +27,32 @@ import (
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
 
-// TestStableName_Verbatim pins the issue #624 decision: the materialized cell
-// name is the config name verbatim (trimmed), value-independent so the identity
-// survives value edits.
-func TestStableName_Verbatim(t *testing.T) {
+// TestPrefix_DefaultsToName pins the epic:cell-identity #1022 prefix-default
+// helper: with no Spec.Prefix, the cell-name prefix is the config's
+// metadata.name (trimmed).
+func TestPrefix_DefaultsToName(t *testing.T) {
 	cases := map[string]string{
 		"kukeon-dev":   "kukeon-dev",
 		"  spaced  ":   "spaced",
 		"team-a-build": "team-a-build",
 	}
 	for in, want := range cases {
-		if got := cellconfig.StableName(in); got != want {
-			t.Errorf("StableName(%q) = %q, want %q", in, got, want)
+		cfg := v1beta1.CellConfigDoc{Metadata: v1beta1.CellConfigMetadata{Name: in}}
+		if got := cellconfig.Prefix(cfg); got != want {
+			t.Errorf("Prefix(name=%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestPrefix_SpecPrefixWins pins that an explicit Spec.Prefix overrides the
+// metadata.name fallback (and is trimmed).
+func TestPrefix_SpecPrefixWins(t *testing.T) {
+	cfg := v1beta1.CellConfigDoc{
+		Metadata: v1beta1.CellConfigMetadata{Name: "team-a-build"},
+		Spec:     v1beta1.CellConfigSpec{Prefix: "  agent  "},
+	}
+	if got, want := cellconfig.Prefix(cfg), "agent"; got != want {
+		t.Errorf("Prefix(Spec.Prefix=%q) = %q, want %q", "agent", got, want)
 	}
 }
 

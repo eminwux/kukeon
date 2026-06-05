@@ -273,6 +273,9 @@ func runFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags createCe
 		return err
 	}
 	overlayScope(&cellDoc, flags)
+	if err := finalizeCellName(cmd, client, &cellDoc, flags.name, cellblueprint.Prefix(resolved)); err != nil {
+		return err
+	}
 	applyIgnoreDiskPressure(&cellDoc, flags)
 
 	return materialiseAndPersist(cmd, client, cellDoc)
@@ -280,8 +283,9 @@ func runFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags createCe
 
 // runFromConfig resolves the named Config and its referenced Blueprint,
 // materialises the Cell record via cellconfig.Materialize (which applies
-// spec.values, repo/secret slot fills, the kukeon.io/config back-reference
-// label, and the StableName), refuses on name collision, then persists via
+// spec.values, repo/secret slot fills, and the kukeon.io/config back-reference
+// label), finalizes the cell name (explicit or generated <prefix>-<6hex> per
+// epic:cell-identity #1022), refuses on name collision, then persists via
 // MaterializeCell (no start). Mirrors runFromBlueprint's scope-resolution
 // strategy.
 func runFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags createCellFlags) error {
@@ -328,22 +332,40 @@ func runFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags createCellF
 		)
 	}
 
-	// The cell name is supplied here, not derived inside Materialize
-	// (epic:cell-identity #1021). Fall back to StableName when --name is
-	// absent so the create-cell config path keeps its historical stable
-	// identity; P2 replaces this with a dedicated name generator.
-	cellName := flags.name
-	if strings.TrimSpace(cellName) == "" {
-		cellName = cellconfig.StableName(cfgRes.Config.Metadata.Name)
-	}
-	cellDoc, err := cellconfig.MaterializeWithName(cfgRes.Config, bpRes.Blueprint, cellName)
+	cellDoc, err := cellconfig.MaterializeWithName(cfgRes.Config, bpRes.Blueprint, flags.name)
 	if err != nil {
 		return err
 	}
 	overlayScope(&cellDoc, flags)
+	if err := finalizeCellName(cmd, client, &cellDoc, flags.name, cellconfig.Prefix(cfgRes.Config)); err != nil {
+		return err
+	}
 	applyIgnoreDiskPressure(&cellDoc, flags)
 
 	return materialiseAndPersist(cmd, client, cellDoc)
+}
+
+// finalizeCellName resolves the cell's final name via the unified generator
+// (epic:cell-identity #1022) once its scope is settled by overlayScope, then
+// stamps it onto both metadata.name and Spec.ID. An explicit --name is used
+// verbatim (materialiseAndPersist rejects an in-scope collision); an omitted
+// name becomes a generated `<prefix>-<6hex>` probed free against the daemon at
+// the cell's scope. Materialize is called with the explicit name (or "") up
+// front so the rest of the cell — labels, provenance, scope — is built before
+// the name is settled; finalizeCellName overwrites the placeholder name last.
+func finalizeCellName(
+	cmd *cobra.Command, client kukeonv1.Client, cellDoc *v1beta1.CellDoc, explicit, prefix string,
+) error {
+	name, err := kukeshared.ResolveCellName(
+		cmd.Context(), client, explicit, prefix,
+		cellDoc.Spec.RealmID, cellDoc.Spec.SpaceID, cellDoc.Spec.StackID,
+	)
+	if err != nil {
+		return err
+	}
+	cellDoc.Metadata.Name = name
+	cellDoc.Spec.ID = name
+	return nil
 }
 
 // materialiseAndPersist runs the existence pre-check and persists the

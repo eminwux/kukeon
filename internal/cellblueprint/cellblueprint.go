@@ -286,19 +286,25 @@ func materializeContainer(bc v1beta1.BlueprintContainer) (v1beta1.ContainerSpec,
 	return cs, blockers
 }
 
+// Prefix resolves the cell-name prefix the unified generator uses for a cell
+// materialized from this Blueprint (epic:cell-identity #1022): Spec.Prefix when
+// set, else the blueprint's metadata.name. Mirrors cellconfig.Prefix.
+func Prefix(doc v1beta1.CellBlueprintDoc) string {
+	if p := strings.TrimSpace(doc.Spec.Prefix); p != "" {
+		return p
+	}
+	return strings.TrimSpace(doc.Metadata.Name)
+}
+
 func resolveCellName(doc v1beta1.CellBlueprintDoc, nameOverride string) (string, error) {
 	if override := strings.TrimSpace(nameOverride); override != "" {
 		return override, nil
 	}
-	prefix := strings.TrimSpace(doc.Spec.Prefix)
-	if prefix == "" {
-		prefix = doc.Metadata.Name
-	}
-	suffix, err := naming.RandomHexSuffix(naming.DefaultCellNameSuffixBytes)
+	name, err := naming.GenerateCellName(Prefix(doc))
 	if err != nil {
-		return "", fmt.Errorf("generate name suffix for blueprint %q: %w", doc.Metadata.Name, err)
+		return "", fmt.Errorf("blueprint %q: %w", doc.Metadata.Name, err)
 	}
-	return prefix + "-" + suffix, nil
+	return name, nil
 }
 
 func cloneCellTty(in *v1beta1.CellTty) *v1beta1.CellTty {

@@ -77,12 +77,14 @@ func NewRunCmd() *cobra.Command {
 			"path (daily dev-cell spawn-and-attach); the other sources stay flag-driven " +
 			"so the positional case is unambiguous. -b substitutes scalar --param values " +
 			"and materializes a fresh <prefix>-<6hex> cell every invocation (always " +
-			"fresh). The positional config path walks the identity state machine of " +
-			"the named CellConfig: at most one live cell per Config, with a " +
-			"deterministic name (the Config's metadata.name), materialising from the " +
-			"referenced Blueprint with the Config's scalar values plus repo / secret " +
-			"slot fills the first time and attaching to the existing cell on " +
-			"subsequent runs (idempotent). When the live cell's spec differs from the " +
+			"fresh). The positional config path is a 1:N binding: every invocation " +
+			"materialises a fresh `<prefix>-<6hex>` cell (prefix = Spec.Prefix ?? " +
+			"metadata.name) from the referenced Blueprint with the Config's scalar " +
+			"values plus repo / secret slot fills, preserving the kukeon.io/config " +
+			"lineage label. The idempotent-attach escape valve is " +
+			"`<config> --name X`: a verbatim name that attaches to the existing cell " +
+			"if X is already live in scope, or materialises and creates if X is free. " +
+			"When `--name X` matches a live cell whose spec differs from the " +
 			"materialisation of the current Config + Blueprint, the positional config " +
 			"path refuses to attach and points the operator at " +
 			"`kuke restart <cell>` to reconcile (the daemon's OutOfSync detector " +
@@ -92,9 +94,10 @@ func NewRunCmd() *cobra.Command {
 			"implicit reconcile — the pointer is `kuke delete cell <cell>` + re-run " +
 			"(or promote to a CellConfig for `kuke restart` reconcile workflows). " +
 			"--new on the " +
-			"positional config path materializes a fresh `<config-name>-<6hex>` cell on " +
-			"every invocation instead — opt-in fire-and-forget sandboxes from a " +
-			"Config, preserving the kukeon.io/config lineage label. `--new --name X` " +
+			"positional config path is the explicit form of the bare-`<config>` " +
+			"behaviour — materialise a fresh `<prefix>-<6hex>` cell on every " +
+			"invocation — kept for callers that want the fresh-per-invocation intent " +
+			"to be unambiguous on the command line. `--new --name X` " +
 			"creates a cell named X from the Config and fails if X is already in the " +
 			"target realm (create-or-fail; unlike `--name X` alone, which idempotently " +
 			"attaches on collision). -f is " +
@@ -106,7 +109,7 @@ func NewRunCmd() *cobra.Command {
 			"`kuke attach <cell>`. --env KEY=VALUE is the orthogonal runtime knob " +
 			"(repeatable; per-invocation injection into the attachable container's env at " +
 			"start time). It works with every source (positional, -f, -b) and every " +
-			"identity flag (--new, --clone, --reuse); the entries do not change the cell " +
+			"identity flag (--new, --name); the entries do not change the cell " +
 			"spec and do not persist, so the divergent-spec check above does not trip on " +
 			"prior --env-injected keys.",
 		Args:              cobra.MaximumNArgs(1),
@@ -146,61 +149,28 @@ func NewRunCmd() *cobra.Command {
 	_ = viper.BindPFlag(config.KUKE_RUN_BLUEPRINT.ViperKey, cmd.Flags().Lookup("blueprint"))
 
 	cmd.Flags().String("name", "",
-		"Override the materialized cell name (default: <metadata.name>-<6hex>). "+
-			"Valid with -b; rejected with -f, where metadata.name is the cell name "+
-			"verbatim. Valid with the <config> positional: `<config> --name X` does "+
-			"idempotent attach to cell X using the Config's spec; `<config> --new "+
-			"--name X` is the create-or-fail variant (fail if X exists). Without "+
-			"--name on the <config> path the cell uses the Config's stable name.")
+		"Override the materialized cell name (default: <prefix>-<6hex>, prefix = "+
+			"Spec.Prefix ?? metadata.name). Valid with -b; rejected with -f, where "+
+			"metadata.name is the cell name verbatim. Valid with the <config> "+
+			"positional: `<config> --name X` does idempotent attach to cell X using "+
+			"the Config's spec; `<config> --new --name X` is the create-or-fail "+
+			"variant (fail if X exists). Without --name on the <config> path the cell "+
+			"is a fresh `<prefix>-<6hex>` per invocation (a Config is a 1:N binding; "+
+			"use --name X for idempotent attach).")
 	_ = viper.BindPFlag(config.KUKE_RUN_NAME.ViperKey, cmd.Flags().Lookup("name"))
 
 	cmd.Flags().Bool("new", false,
-		"Materialize a fresh `<config-name>-<6hex>` cell on every invocation of the <config> "+
-			"positional instead of the Config's deterministic stable name. Each invocation produces a distinct "+
+		"Materialize a fresh `<prefix>-<6hex>` cell on every invocation of the <config> "+
+			"positional (prefix = Spec.Prefix ?? metadata.name). Each invocation produces a distinct "+
 			"cell; the kukeon.io/config=<name> lineage label is preserved (operator can list "+
 			"all spawns: `kuke get cells -l kukeon.io/config=<name>`). Combinable with --name "+
 			"to pin a specific cell name (create-or-fail: `--new --name X` fails if cell X "+
 			"already exists in the realm) and with --rm (one-shot ephemeral cell). Only "+
 			"valid with the <config> positional — rejected with -f (where metadata.name is the "+
 			"cell name verbatim) and redundant for -b (which already generates a fresh name). "+
-			"Mutually exclusive with --clone (which forks a persistent clone Config) "+
-			"and --reuse (which restarts an existing clone). For multi-instance from one Config use --clone instead.")
+			"A Config is a 1:N binding, so a bare `<config>` already stamps a fresh cell; "+
+			"--new is retained for explicit intent and `--new --name X` create-or-fail.")
 	_ = viper.BindPFlag(config.KUKE_RUN_NEW.ViperKey, cmd.Flags().Lookup("new"))
-
-	cmd.Flags().Bool("clone", false,
-		"Fork the <config> Config into a new persistent clone Config, then run "+
-			"the cell from the clone (#839). The clone's metadata.name is `<src>-<N>` "+
-			"with N the lowest unused integer >= 0 among clones of <src> in the target "+
-			"realm (gap-fill counter, atomic under concurrent invocations). Combine with "+
-			"--name X for an explicit-name create-or-fail clone (fails if a CellConfig X "+
-			"already exists). The clone carries metadata.annotations."+
-			"kukeon.io/source-config=<src> as the lineage marker, and its spec is a deep "+
-			"copy of the source's — independently editable via `kuke apply -f`. The cell "+
-			"started from the clone uses the clone's stable name, so subsequent "+
-			"`kuke run <clone-name>` is idempotent. Use cases: interactive multi-instance "+
-			"(kukeon-dev-0, kukeon-dev-1, ...) and cron pool seeding for --reuse (#835). "+
-			"Only valid with the <config> positional; mutually exclusive with --new, "+
-			"--reuse, and --rm.")
-	_ = viper.BindPFlag(config.KUKE_RUN_CLONE.ViperKey, cmd.Flags().Lookup("clone"))
-
-	cmd.Flags().Bool("reuse", false,
-		"Pick a healthy-Stopped clone of the <config> Config (lowest counter N "+
-			"first, ascending), start its cell in-place via StartCell — preserving "+
-			"the containerd overlay filesystem (project repo clone, `.claude.json`, "+
-			"any per-cell state) across the stop/start transition — and attach (#835). "+
-			"On an empty pool, falls back to --clone's code path (atomic gap-fill "+
-			"counter allocation, new clone CellConfig, fresh cell), so the operator "+
-			"never sees a 'pool empty' error on the first tick or after a host "+
-			"reboot. Running clones are invisible to the pool query — concurrent "+
-			"--reuse invocations against the same source pick distinct cells via "+
-			"StartCell's daemon-side atomic claim, and an all-Running pool falls "+
-			"back to --clone (forks the next-N). Never deletes a clone's cell. "+
-			"Cells in Pending/Failed/Unknown sub-states are excluded from the pick "+
-			"set. Driver use case: cron-driven skill execution (`kuke run <cfg> "+
-			"--reuse --env KEY=val -d`) where the project repo clone happens once "+
-			"per pool member rather than once per tick. Only valid with the <config> "+
-			"positional; mutually exclusive with --new, --clone, --name, and --rm.")
-	_ = viper.BindPFlag(config.KUKE_RUN_REUSE.ViperKey, cmd.Flags().Lookup("reuse"))
 
 	cmd.Flags().StringArray("env", nil,
 		"Runtime container env entry as KEY=VALUE; repeatable. Injects extra env into "+
@@ -210,11 +180,10 @@ func NewRunCmd() *cobra.Command {
 			"container's spec env OVERRIDES the spec value. --env is the per-invocation knob "+
 			"(runtime; does not change the cell spec); for render-time spec substitution use "+
 			"--param (blueprint path only). Valid with all source paths (the <config> "+
-			"positional, -f, -b) and all identity flags (--new, --clone, --reuse). The "+
+			"positional, -f, -b) and the --new identity flag. The "+
 			"injected entries do NOT persist into the cell metadata, so the divergent-spec "+
-			"check on a subsequent `kuke run <config>` (without --env) does not trip on the "+
-			"prior injection. With --reuse, each invocation re-injects against the restarted "+
-			"cell; the cell's stored spec env is unchanged across restarts.")
+			"check on a subsequent `kuke run <config> --name X` (without --env) does not trip "+
+			"on the prior injection.")
 	// --env is read via cmd.Flags().GetStringArray("env") in parseRunFlags;
 	// viper.BindPFlag is intentionally omitted because StringArray flags do
 	// not round-trip cleanly through viper's GetStringSlice (issue #834).
@@ -239,10 +208,6 @@ func NewRunCmd() *cobra.Command {
 	// "exactly one source required" check (cobra has no MarkFlagsOneRequired
 	// equivalent that spans flags + positionals).
 	cmd.MarkFlagsMutuallyExclusive("file", "blueprint")
-	// Identity-flag mutex on the <config> path (#839): --new and --clone are
-	// distinct operations (ephemeral cell vs. fork the Config). The
-	// `--clone ↔ --rm` mutex lands below after the --rm flag itself is
-	// declared (MarkFlagsMutuallyExclusive panics on an unknown flag name).
 
 	cmd.Flags().StringP("output", "o", "", "Output format: json, yaml (default: human-readable)")
 	_ = viper.BindPFlag(config.KUKE_RUN_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
@@ -297,31 +262,6 @@ func NewRunCmd() *cobra.Command {
 		cmd.Flags().Lookup("ignore-disk-pressure"),
 	)
 
-	// `--clone ↔ --rm` mutex (#839): a persistent clone Config whose cell is
-	// removed on exit is operationally messy; `kuke apply -f <clone-spec>`
-	// is the right path if you want the slot without an attached cell. Must
-	// land here (after --rm and --clone are declared) — MarkFlagsMutuallyExclusive
-	// panics on an unknown flag name. `--new ↔ --clone` is declared with the
-	// other source-mutex block above where both flags are already present.
-	cmd.MarkFlagsMutuallyExclusive("new", "clone")
-	cmd.MarkFlagsMutuallyExclusive("clone", "rm")
-	// `--reuse` mutex set (#835):
-	//   - `--reuse ↔ --new`: different operations (start an existing clone vs.
-	//     materialize a fresh ephemeral cell).
-	//   - `--reuse ↔ --clone`: different operations — `--reuse` *falls back*
-	//     to `--clone`'s code path internally on empty pool, but the flags
-	//     themselves don't combine.
-	//   - `--reuse ↔ --name`: `--reuse` picks from the pool, can't dictate
-	//     which slot to pick by name (use `kuke run <clone-name>` for that).
-	//   - `--reuse ↔ --rm`: `--rm` would remove the cell on exit, leaving a
-	//     clone Config whose cell is gone — next `--reuse` would see the
-	//     clone in the pool but skip it (cell-less), forcing fork. Pool
-	//     fills with cell-less clone-Config carcasses.
-	cmd.MarkFlagsMutuallyExclusive("new", "reuse")
-	cmd.MarkFlagsMutuallyExclusive("clone", "reuse")
-	cmd.MarkFlagsMutuallyExclusive("name", "reuse")
-	cmd.MarkFlagsMutuallyExclusive("reuse", "rm")
-
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
 	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
@@ -345,8 +285,6 @@ type runFlags struct {
 	autoDelete    bool
 	nameOverride  string
 	newCell       bool
-	clone         bool
-	reuse         bool
 	paramArgs     []string
 	paramFile     string
 	// envArgs are the validated `KEY=VALUE` entries supplied via repeatable
@@ -405,8 +343,6 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 		autoDelete:         viper.GetBool(config.KUKE_RUN_RM.ViperKey),
 		nameOverride:       strings.TrimSpace(viper.GetString(config.KUKE_RUN_NAME.ViperKey)),
 		newCell:            viper.GetBool(config.KUKE_RUN_NEW.ViperKey),
-		clone:              viper.GetBool(config.KUKE_RUN_CLONE.ViperKey),
-		reuse:              viper.GetBool(config.KUKE_RUN_REUSE.ViperKey),
 		paramFile:          strings.TrimSpace(viper.GetString(config.KUKE_RUN_PARAM_FILE.ViperKey)),
 		requireSynced:      viper.GetBool(config.KUKE_RUN_REQUIRE_SYNCED.ViperKey),
 		ignoreDiskPressure: viper.GetBool(config.KUKE_RUN_IGNORE_DISK_PRESSURE.ViperKey),
@@ -472,14 +408,6 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 			return runFlags{}, errors.New(
 				"--new is only valid with the <config> positional; -f uses metadata.name verbatim")
 		}
-		if flags.clone {
-			return runFlags{}, errors.New(
-				"--clone is only valid with the <config> positional; -f does not fork a Config")
-		}
-		if flags.reuse {
-			return runFlags{}, errors.New(
-				"--reuse is only valid with the <config> positional; -f does not draw from a clone pool")
-		}
 	}
 	// --new is a CellConfig-only knob (only the <config> positional reaches the
 	// daemon-stored CellConfig path). With -b the default already generates
@@ -491,20 +419,6 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 			"--new is only valid with the <config> positional; -b already materializes a " +
 				"fresh <prefix>-<6hex> cell per invocation")
 	}
-	// --clone is a CellConfig-only knob; it forks a daemon-stored CellConfig
-	// and only the <config> positional reaches that artifact. Reject with
-	// -b for the same "no silent no-op" reason as --new.
-	if flags.clone && flags.configName == "" && flags.file == "" {
-		return runFlags{}, errors.New(
-			"--clone is only valid with the <config> positional; -b has no Config to fork")
-	}
-	// --reuse is a CellConfig-only knob; it pulls from the clone pool of a
-	// daemon-stored CellConfig and only the <config> positional reaches the
-	// pool. Reject with -b for the same "no silent no-op" reason as --new.
-	if flags.reuse && flags.configName == "" && flags.file == "" {
-		return runFlags{}, errors.New(
-			"--reuse is only valid with the <config> positional; -b has no clone pool to draw from")
-	}
 	if flags.configName != "" {
 		// A CellConfig carries its own scalar values, so --param / --param-file
 		// would silently shadow the Config's values; reject them rather than
@@ -513,13 +427,14 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 		// --name is accepted on the <config> path (#833 relaxed the old
 		// MarkFlagsMutuallyExclusive("name", "generate-name") and broadened
 		// --name's reach onto the CellConfig positional). The four reachable
-		// shapes:
-		//   - `<cfg>`: cell name = StableName(<cfg>); idempotent attach.
-		//   - `<cfg> --name X`: cell name = X; idempotent attach (the AC's
+		// shapes (epic:cell-identity #1022 — a Config is a 1:N binding):
+		//   - `<cfg>`: cell name = generated <prefix>-<6hex>; fresh cell per
+		//     invocation (suffix retried on collision).
+		//   - `<cfg> --name X`: cell name = X; idempotent attach (the
 		//     attach-if-exists escape valve referenced by the --new --name
 		//     collision error).
-		//   - `<cfg> --new`: cell name = <cfg>-<6hex>; create-or-fail (hex
-		//     collisions are statistically negligible but surfaced).
+		//   - `<cfg> --new`: cell name = generated <prefix>-<6hex>; same as the
+		//     bare positional, kept for explicit intent.
 		//   - `<cfg> --new --name X`: cell name = X; create-or-fail.
 		if len(flags.paramArgs) > 0 {
 			return runFlags{}, errors.New(
@@ -555,6 +470,24 @@ func runRun(cmd *cobra.Command, args []string) error {
 	cellDoc := loaded.Doc
 
 	resolveCellLocation(&cellDoc)
+
+	// Finalize a generated cell name now that scope is resolved
+	// (epic:cell-identity #1022). loaded.GenPrefix is non-empty only when the
+	// source path omitted an explicit name (bare `<config>`, `<config> --new`,
+	// or bare `-b`); the unified generator then allocates a `<prefix>-<6hex>`
+	// probed free against the daemon at the cell's scope. An explicit --name
+	// (GenPrefix == "") is left verbatim for the create-or-attach branches below.
+	if loaded.GenPrefix != "" {
+		name, nameErr := kukshared.ResolveCellName(
+			cmd.Context(), client, "", loaded.GenPrefix,
+			cellDoc.Spec.RealmID, cellDoc.Spec.SpaceID, cellDoc.Spec.StackID,
+		)
+		if nameErr != nil {
+			return nameErr
+		}
+		cellDoc.Metadata.Name = name
+		cellDoc.Spec.ID = name
+	}
 
 	if flags.autoDelete {
 		// The flag is the imperative knob; it always wins over a missing/false
@@ -597,16 +530,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return validateErr
 	}
 
-	if loaded.PreStarted {
-		// --reuse claimed a healthy-Stopped clone via StartCell during load
-		// (#835). The cell is already Ready and its containerd overlay
-		// filesystem was preserved across the stop/start transition (project
-		// repo clone, `.claude.json`, any per-cell state). Skip the
-		// GetCell → existing-cell branch and emit the "started" rollup
-		// directly, then attach (or detach per -d).
-		return runAfterReuseClaim(cmd, client, cellDoc, loaded.StartResult, flags)
-	}
-
 	pre, getErr := client.GetCell(cmd.Context(), cellDoc)
 	if flags.newCell {
 		// --new is a strict "create new" intent: a live cell at the chosen
@@ -614,11 +537,10 @@ func runRun(cmd *cobra.Command, args []string) error {
 		//   - `--new --name X`: the operator pinned the name. The error
 		//     directs them at `--name X` alone (idempotent attach) so the
 		//     escape valve is explicit.
-		//   - `--new` alone: the cell name is `<config>-<6hex>` from
-		//     cellconfig.GenerateName. A collision here is statistically
-		//     negligible (24 bits of entropy) but real — surface it with a
-		//     rerun pointer rather than silently attaching to an unrelated
-		//     spawn that happens to carry the same hex suffix.
+		//   - `--new` alone: the cell name is a generated `<prefix>-<6hex>`
+		//     already allocated collision-free above (epic:cell-identity
+		//     #1022), so this branch is unreachable in practice; the defensive
+		//     error stays in case the daemon view raced the allocation.
 		switch {
 		case getErr == nil && pre.MetadataExists:
 			if flags.nameOverride != "" {
@@ -629,8 +551,8 @@ func runRun(cmd *cobra.Command, args []string) error {
 				)
 			}
 			return fmt.Errorf(
-				"cell %q already exists in realm %q (hex collision against a prior "+
-					"`kuke run %s --new` spawn); rerun --new to allocate a fresh suffix",
+				"cell %q already exists in realm %q (raced the generated-suffix "+
+					"allocation); rerun `kuke run %s --new` to allocate a fresh suffix",
 				cellDoc.Metadata.Name, cellDoc.Spec.RealmID, flags.configName,
 			)
 		case getErr != nil && !errors.Is(getErr, errdefs.ErrCellNotFound):
@@ -674,46 +596,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runAfterReuseClaim drives the post-StartCell flow for the --reuse path
-// (issue #835). The cell was already Stopped → Ready'd by
-// pickAndStartReusableClone during load, so the standard runRun branches
-// would either misclassify the cell (the Ready branch prints "already
-// existed" — true of the metadata, but the operator's mental model is
-// "I just told kuke to bring this clone back up") or fall through to
-// CreateCell (an unsafe re-entry against a live cell).
-//
-// We re-read the cell here so the printer sees the post-start container
-// statuses, and we emit the matching-spec + Started rollup that
-// `<config>` Stopped → Started already uses. Auto-delete is rejected
-// upstream (--reuse ↔ --rm mutex), so attach is the only follow-up.
-func runAfterReuseClaim(
-	cmd *cobra.Command,
-	client kukeonv1.Client,
-	cellDoc v1beta1.CellDoc,
-	startRes kukeonv1.StartCellResult,
-	flags runFlags,
-) error {
-	pre, getErr := client.GetCell(cmd.Context(), cellDoc)
-	if getErr != nil {
-		return getErr
-	}
-	if !pre.MetadataExists {
-		// Shouldn't happen: we just StartCell'd it. Fail loudly rather
-		// than silently fall through to a CreateCell on a phantom.
-		return fmt.Errorf(
-			"--reuse: cell %q vanished after StartCell — daemon state inconsistent",
-			cellDoc.Metadata.Name,
-		)
-	}
-	if printErr := printRunResult(cmd, startedResultFromGet(pre, startRes.Started), flags.output); printErr != nil {
-		return printErr
-	}
-	if !flags.detach {
-		return attachAndMaybeAutoDelete(cmd, client, cellDoc, flags)
-	}
-	return nil
-}
-
 // warnDivergentNamedCell reacts to a named live cell whose spec diverges from
 // the materialization the operator just asked us to run. Every `kuke run`
 // source that pins a deterministic cell name (`-f`, `<config>` without `--new`,
@@ -734,7 +616,7 @@ func runAfterReuseClaim(
 //
 // The pointer per source: `<config>` → `kuke restart <name>` (#821's
 // restart picks up the daemon-side OutOfSync detection #820 wires and
-// reconciles implicitly; the cell name is the Config's StableName), `-b --name
+// reconciles implicitly; the cell name is the live cell's own name), `-b --name
 // <cell>` → `kuke delete cell <cell>` + re-run (Blueprint-lineage cells have
 // no implicit reconcile per #819's umbrella; the operator promotes to a
 // CellConfig for restart-driven reconcile workflows), and the bare `-f`
@@ -940,16 +822,16 @@ func attachAfterRun(
 }
 
 // loadResult bundles the resolved CellDoc with the bookkeeping a follow-up
-// step needs to drive the post-load flow. PreStarted is true exactly when
-// the load path itself called StartCell against the resolved cell — today
-// that means --reuse claimed a healthy-Stopped clone (#835); on that path
-// runRun skips its own GetCell → existing-cell branch and emits the
-// "started" rollup directly. Every other source returns
-// PreStarted=false; runRun walks the standard create-or-attach flow.
+// step needs to drive the post-load flow. GenPrefix is non-empty exactly when
+// the source path omitted an explicit name and the cell name must be generated
+// (epic:cell-identity #1022): bare `<config>`, `<config> --new`, or bare `-b`
+// all set it to the source's `<prefix>` so runRun can allocate a
+// collision-free `<prefix>-<6hex>` once scope is resolved. An explicit --name
+// (or the verbatim `-f` metadata.name) leaves GenPrefix empty, so runRun uses
+// the loaded name as-is.
 type loadResult struct {
-	Doc         v1beta1.CellDoc
-	PreStarted  bool
-	StartResult kukeonv1.StartCellResult
+	Doc       v1beta1.CellDoc
+	GenPrefix string
 }
 
 // loadCellDoc dispatches to the file, blueprint, or config loader. Exactly
@@ -963,8 +845,8 @@ func loadCellDoc(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (lo
 	case flags.configName != "":
 		return loadFromConfig(cmd, client, flags)
 	case flags.blueprintName != "":
-		doc, err := loadFromBlueprint(cmd, client, flags)
-		return loadResult{Doc: doc}, err
+		doc, genPrefix, err := loadFromBlueprint(cmd, client, flags)
+		return loadResult{Doc: doc, GenPrefix: genPrefix}, err
 	default:
 		doc, err := loadFromFile(flags.file)
 		return loadResult{Doc: doc}, err
@@ -987,10 +869,10 @@ func loadCellDoc(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (lo
 // A blueprint that declares structural slots the inline path cannot fill
 // (secret slots, required repo slots with no url) is refused by Materialize
 // with a pointer to the CellConfig workflow.
-func loadFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (v1beta1.CellDoc, error) {
+func loadFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (v1beta1.CellDoc, string, error) {
 	cliParams, err := buildParamMap(flags)
 	if err != nil {
-		return v1beta1.CellDoc{}, err
+		return v1beta1.CellDoc{}, "", err
 	}
 
 	lookup := v1beta1.CellBlueprintDoc{
@@ -1004,10 +886,10 @@ func loadFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags runFlag
 
 	res, err := client.GetBlueprint(cmd.Context(), lookup)
 	if err != nil {
-		return v1beta1.CellDoc{}, err
+		return v1beta1.CellDoc{}, "", err
 	}
 	if !res.MetadataExists {
-		return v1beta1.CellDoc{}, fmt.Errorf(
+		return v1beta1.CellDoc{}, "", fmt.Errorf(
 			"%w (blueprint %q in scope realm=%q space=%q stack=%q)",
 			errdefs.ErrBlueprintNotFound, lookup.Metadata.Name,
 			lookup.Metadata.Realm, lookup.Metadata.Space, lookup.Metadata.Stack,
@@ -1016,9 +898,21 @@ func loadFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags runFlag
 
 	resolved, err := cellblueprint.Resolve(res.Blueprint, cliParams, os.LookupEnv)
 	if err != nil {
-		return v1beta1.CellDoc{}, err
+		return v1beta1.CellDoc{}, "", err
 	}
-	return cellblueprint.MaterializeWithName(resolved, flags.nameOverride, cliParams)
+	doc, err := cellblueprint.MaterializeWithName(resolved, flags.nameOverride, cliParams)
+	if err != nil {
+		return v1beta1.CellDoc{}, "", err
+	}
+	// An omitted --name signals the unified generator (epic:cell-identity
+	// #1022): return the blueprint's prefix so runRun reallocates a
+	// collision-free `<prefix>-<6hex>` against the resolved scope. With an
+	// explicit name MaterializeWithName already used it verbatim — no prefix.
+	genPrefix := ""
+	if flags.nameOverride == "" {
+		genPrefix = cellblueprint.Prefix(resolved)
+	}
+	return doc, genPrefix, nil
 }
 
 // loadFromConfig resolves the named CellConfig from daemon storage, looks up
@@ -1056,48 +950,6 @@ func loadFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) 
 		)
 	}
 
-	preStarted := false
-	var startResult kukeonv1.StartCellResult
-
-	// --reuse: pick a healthy-Stopped clone of the source CellConfig and
-	// claim it via StartCell (#835). On an empty pool, fall through to
-	// --clone's allocation path below — the operator never sees a "pool
-	// empty" error on the first tick or after a host reboot.
-	if flags.reuse {
-		clone, startRes, reuseErr := pickAndStartReusableClone(
-			cmd.Context(), client, cfgRes.Config, flags.envArgs,
-		)
-		switch {
-		case reuseErr == nil:
-			cfgRes.Config = clone
-			startResult = startRes
-			preStarted = true
-		case errors.Is(reuseErr, errReusePoolEmpty):
-			// Empty pool: fork a new clone Config as --clone would. The
-			// gap-fill counter loop in cloneCellConfig is itself atomic, so
-			// concurrent --reuse → fallback invocations pick distinct N's.
-			fresh, cloneErr := cloneCellConfig(cmd.Context(), client, cfgRes.Config, "")
-			if cloneErr != nil {
-				return loadResult{}, cloneErr
-			}
-			cfgRes.Config = fresh
-		default:
-			return loadResult{}, reuseErr
-		}
-	} else if flags.clone {
-		// --clone: fork the source CellConfig into a new persistent clone and
-		// drive the cell create from the clone's stable identity (#839). The
-		// gap-fill counter (or explicit --name) lives in cloneCellConfig; the
-		// cell-side flow downstream walks the standard stable-name path against
-		// the clone's name, so re-running `kuke run <clone-name>` later is the
-		// idempotent attach the AC's "first-class CellConfig" line guarantees.
-		clone, cloneErr := cloneCellConfig(cmd.Context(), client, cfgRes.Config, flags.nameOverride)
-		if cloneErr != nil {
-			return loadResult{}, cloneErr
-		}
-		cfgRes.Config = clone
-	}
-
 	bpRef := cfgRes.Config.Spec.Blueprint
 	bpLookup := v1beta1.CellBlueprintDoc{
 		Metadata: v1beta1.CellBlueprintMetadata{
@@ -1119,43 +971,24 @@ func loadFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) 
 		)
 	}
 
-	nameOverride := ""
-	switch {
-	case flags.nameOverride != "":
-		// `<config> --name X` (with or without --new): cell name = X. The
-		// `--new --name X` collision check lives in runRun (which knows about
-		// the daemon's GetCell view); the bare `--name X` form falls through
-		// to runRun's idempotent-attach path. Either way, threading the
-		// pinned name through Materialize keeps the kukeon.io/config lineage
-		// label on the cell so `kuke get cells -l kukeon.io/config=<name>`
-		// still enumerates it.
-		nameOverride = flags.nameOverride
-	case flags.newCell:
-		// `--new` alone: `<config-name>-<6hex>` — fresh cell per invocation,
-		// kukeon.io/config label preserved by Materialize so operators can
-		// still enumerate spawns with `kuke get cells -l
-		// kukeon.io/config=<name>` (#833). The Config's idempotent-attach
-		// contract from #742 still owns the bare `<config>` path.
-		generated, genErr := cellconfig.GenerateName(cfgRes.Config.Metadata.Name)
-		if genErr != nil {
-			return loadResult{}, genErr
-		}
-		nameOverride = generated
+	// Cell-name derivation (epic:cell-identity #1022 — a Config is a 1:N
+	// binding). An explicit `--name X` (with or without `--new`) is used
+	// verbatim; threading it through Materialize keeps the kukeon.io/config
+	// lineage label on the cell so `kuke get cells -l kukeon.io/config=<name>`
+	// still enumerates it. An omitted name (bare `<config>` or `<config>
+	// --new`) is generated `<prefix>-<6hex>` via the unified generator —
+	// runRun reallocates a collision-free name against the resolved scope, so
+	// each invocation stamps a fresh cell (use `--name X` for idempotent
+	// attach). genPrefix carries the Config's prefix for that path.
+	genPrefix := ""
+	if flags.nameOverride == "" {
+		genPrefix = cellconfig.Prefix(cfgRes.Config)
 	}
-	// The cell name is supplied here, not derived inside Materialize
-	// (epic:cell-identity #1021 severed that assumption). The bare
-	// `<config>` form keeps its historical idempotent-attach identity via
-	// StableName; --name / --new supply their own name above. P2 replaces
-	// this derivation with a dedicated name generator.
-	cellName := nameOverride
-	if cellName == "" {
-		cellName = cellconfig.StableName(cfgRes.Config.Metadata.Name)
-	}
-	doc, materializeErr := cellconfig.MaterializeWithName(cfgRes.Config, bpRes.Blueprint, cellName)
+	doc, materializeErr := cellconfig.MaterializeWithName(cfgRes.Config, bpRes.Blueprint, flags.nameOverride)
 	if materializeErr != nil {
 		return loadResult{}, materializeErr
 	}
-	return loadResult{Doc: doc, PreStarted: preStarted, StartResult: startResult}, nil
+	return loadResult{Doc: doc, GenPrefix: genPrefix}, nil
 }
 
 // lookupConfigWithFallback probes for the named Config from the operator's

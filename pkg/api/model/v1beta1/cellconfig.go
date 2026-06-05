@@ -43,9 +43,11 @@ type CellConfigDoc struct {
 // required. Labels are copied onto the materialized cell in addition to the
 // kukeon.io/config back-reference label.
 type CellConfigMetadata struct {
-	// Name is the config's name, unique within its scope. It is also the
-	// deterministic name of the cell this config materializes (see #625) — see
-	// internal/cellconfig.StableName for the derivation.
+	// Name is the config's name, unique within its scope. A Config is a 1:N
+	// binding (epic:cell-identity #1020): it may stamp many cells, each owning
+	// its own identity on the CellDoc. When Spec.Prefix is unset, Name is also
+	// the default cell-name prefix the unified generator uses (see
+	// internal/cellconfig.Prefix).
 	Name string `json:"name"             yaml:"name"`
 	// Realm is the always-required top-level scope coordinate.
 	Realm string `json:"realm"            yaml:"realm"`
@@ -57,10 +59,7 @@ type CellConfigMetadata struct {
 	// addition to the kukeon.io/config back-reference label.
 	Labels map[string]string `json:"labels,omitempty"      yaml:"labels,omitempty"`
 	// Annotations carry non-identifying metadata about the config. Unlike
-	// Labels they are not copied onto the materialized cell. `kuke run
-	// <src> --clone` (#839) sets `kukeon.io/source-config: <src>` on the
-	// clone so the gap-fill counter and `kuke get cellconfigs` filters can
-	// find clones of a source.
+	// Labels they are not copied onto the materialized cell.
 	Annotations map[string]string `json:"annotations,omitempty" yaml:"annotations,omitempty"`
 }
 
@@ -70,6 +69,13 @@ type CellConfigMetadata struct {
 // are stored verbatim and resolved at run time (#625); the repo/secret maps are
 // validated against the referenced blueprint's declared slots at apply time.
 type CellConfigSpec struct {
+	// Prefix overrides the cell-name prefix used when the unified generator
+	// derives a `<prefix>-<6hex>` name for a cell materialized from this Config
+	// with no explicit name (epic:cell-identity #1022); when unset it defaults
+	// to metadata.name. Mirrors CellBlueprintSpec.Prefix — a Config is a 1:N
+	// binding, so each `create cell --from-config` (no name) stamps a fresh
+	// hex-suffixed cell.
+	Prefix string `json:"prefix,omitempty"  yaml:"prefix,omitempty"`
 	// Blueprint references the CellBlueprint this config instantiates.
 	Blueprint CellConfigBlueprintRef `json:"blueprint"         yaml:"blueprint"`
 	// Values fill the referenced blueprint's `${KEY}` scalar parameters. Stored

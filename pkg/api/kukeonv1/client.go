@@ -48,12 +48,12 @@ type Client interface {
 	// CreateConfig atomically persists a new CellConfig document under
 	// create-only semantics (issue #839): the daemon-side write fails with
 	// errdefs.ErrConfigExists if a Config of the same name already lives in
-	// scope. `kuke run <src> --clone`'s gap-fill counter loop retries on
-	// that sentinel; the `--clone --name X` path surfaces it as a hard
-	// collision. The same scope / blueprint / slot-fill validation as
-	// ApplyDocuments runs first — the only difference is the atomic gate
-	// (which ApplyDocuments doesn't need, since apply is intentionally
-	// write-through).
+	// scope. This is the create-or-fail sibling of ApplyDocuments — used by
+	// `kuke create config` and any future client that needs "first writer
+	// wins" rather than the write-through apply path. The same scope /
+	// blueprint / slot-fill validation as ApplyDocuments runs first — the
+	// only difference is the atomic gate (which ApplyDocuments doesn't need,
+	// since apply is intentionally write-through).
 	CreateConfig(ctx context.Context, doc v1beta1.CellConfigDoc) (CreateConfigResult, error)
 	// CreateSecret persists a new Secret document to daemon storage. The
 	// write is create-or-overwrite (the daemon's runner.WriteSecret is
