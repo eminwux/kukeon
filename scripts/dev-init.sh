@@ -19,8 +19,16 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
-LOCAL_TAG="kukeon-local:dev"
-KUKEOND_IMAGE_REF="docker.io/library/${LOCAL_TAG}"
+# Local-only kukeond image ref. `kukeon.internal` is the ICANN-reserved,
+# non-routable internal host the epic (#1063) adopts for every locally-built
+# kukeon image — `kuke build` writes it into the realm's containerd namespace
+# before `kuke init` consumes it, and a stray pull attempt against the
+# reserved TLD fails fast instead of silently hitting Docker Hub (the failure
+# mode `docker.io/library/kukeon-local:dev` left open). The published default
+# `KukeondImageRepo = ghcr.io/eminwux/kukeon` (cmd/config/version.go) is
+# unchanged — only the local dev-loop ref moves.
+KUKEOND_VERSION="v0.0.0-dev"
+KUKEOND_IMAGE_REF="kukeon.internal/kukeond:${KUKEOND_VERSION}"
 # The on-disk metadata layout lives under /opt/kukeon/data/ — see
 # internal/consts.KukeonMetadataSubdir. Siblings of the data root (e.g.
 # /opt/kukeon/bin/kuketty staged by `kuke init`) intentionally fall outside
@@ -302,14 +310,15 @@ else
     step "No prior kukeond cell at ${KUKEOND_CELL_DIR}; skipping reset"
 fi
 
-step "Build ${LOCAL_TAG} into the kuke-system realm"
+step "Build ${KUKEOND_IMAGE_REF} into the kuke-system realm"
 # `kuke build` shells out to `kukebuild`, which embeds BuildKit and writes the
 # image straight into the kuke-system realm's containerd namespace — no docker
 # daemon, no docker-private containerd, no `--from-docker` loader hop. The -t
-# short tag normalizes to docker.io/library/kukeon-local:dev (kukebuild's
-# normalizeImageName), the exact ref `kuke init --kukeond-image` resolves below.
-sudo --preserve-env="${PRESERVE_ENV_WORKLOAD}" ./kuke build --build-arg VERSION=v0.0.0-dev \
-    -t "${LOCAL_TAG}" \
+# tag is fully qualified (`kukeon.internal/kukeond:<version>`), so kukebuild's
+# normalizeImageName preserves it verbatim — no docker.io/library/ rewrite —
+# matching the exact ref `kuke init --kukeond-image` resolves below.
+sudo --preserve-env="${PRESERVE_ENV_WORKLOAD}" ./kuke build --build-arg VERSION="${KUKEOND_VERSION}" \
+    -t "${KUKEOND_IMAGE_REF}" \
     --realm kuke-system .
 
 step "Run kuke init with --kukeond-image ${KUKEOND_IMAGE_REF}"
@@ -329,7 +338,7 @@ sudo --preserve-env="${PRESERVE_ENV_ADMIN}" ./kuke init \
 #
 # Compare the *snapshot chain digest*, not the image ref name: a
 # container's `.Image` field is the ref string set at create time
-# (e.g. `docker.io/library/kukeon-local:dev`) and is unchanged when
+# (e.g. `kukeon.internal/kukeond:v0.0.0-dev`) and is unchanged when
 # `kuke build` overwrites the same tag with a new manifest. The
 # canonical drift signal is the chain digest stored on the container's
 # snapshot at unpack time, derived from the image config blob's
