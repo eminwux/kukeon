@@ -30,6 +30,7 @@ import (
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/kuketeams"
+	"github.com/eminwux/kukeon/internal/teambuild"
 	"github.com/eminwux/kukeon/internal/teamhost"
 	"github.com/eminwux/kukeon/internal/teamrender"
 	"github.com/eminwux/kukeon/internal/teamsource"
@@ -92,6 +93,23 @@ type ApplyForTeamFunc func(
 // MockApplyForTeamKey injects an ApplyForTeamFunc via context for tests.
 type MockApplyForTeamKey struct{}
 
+// BuildAllFunc runs the local-build path for `kuke team init --build`: it
+// walks the FROM directives of the selected catalog leaves under cacheDir,
+// derives the base-before-leaves order, and invokes kukebuild once per
+// image into the target realm's containerd namespace (no registry push).
+// The default implementation delegates to teambuild.BuildAll; tests inject a
+// stub via MockBuildAllKey so the build path can run without a kukebuild
+// binary on PATH.
+type BuildAllFunc func(
+	ctx context.Context,
+	cacheDir, sourceRef, realm string,
+	leaves []*model.ImageCatalogEntry,
+	progressW, stdout, stderr io.Writer,
+) error
+
+// MockBuildAllKey injects a BuildAllFunc via context for tests.
+type MockBuildAllKey struct{}
+
 // NewInitCmd builds the `kuke team init` subcommand. It reads the current
 // project's kuketeam.yaml roster, scaffolds the operator-global facts file on
 // first run, materializes the pinned agents source, renders the per-(role ×
@@ -111,13 +129,21 @@ func NewInitCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runInit(cmd, dryRun)
+			build, err := cmd.Flags().GetBool("build")
+			if err != nil {
+				return err
+			}
+			return runInit(cmd, dryRun, build)
 		},
 	}
 
 	cmd.Flags().Bool(
 		"dry-run", false,
 		"Render the project's blueprints/configs to stdout without writing the drop-in entry or applying to kukeond",
+	)
+	cmd.Flags().Bool(
+		"build", false,
+		"Locally build the selected catalog images (kukebuild) into the target realm's containerd namespace; no registry push",
 	)
 
 	return cmd
@@ -126,17 +152,17 @@ func NewInitCmd() *cobra.Command {
 // runInit gathers the cobra-coupled inputs (current directory, ~/.kuke layout,
 // git-config reader, project-repo-URL reader, daemon apply reader) and hands
 // them to composeTeam, which holds the testable lifecycle.
-func runInit(cmd *cobra.Command, dryRun bool) error {
+func runInit(cmd *cobra.Command, dryRun, build bool) error {
 	projectDir, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("resolve current directory: %w", err)
 	}
 	layout := teamhost.NewLayout(config.DefaultKukeDir())
 	return composeTeam(
-		cmd.Context(), cmd.OutOrStdout(), projectDir, layout,
+		cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), projectDir, layout,
 		gitConfigFromCmd(cmd), projectRepoURLFromCmd(cmd), resolveFromCmd(cmd),
-		applyForTeamFromCmd(cmd),
-		dryRun,
+		applyForTeamFromCmd(cmd), buildAllFromCmd(cmd),
+		dryRun, build,
 	)
 }
 
@@ -159,14 +185,15 @@ func runInit(cmd *cobra.Command, dryRun bool) error {
 // stub apply, no live kukeond required.
 func composeTeam(
 	ctx context.Context,
-	out io.Writer,
+	out, errOut io.Writer,
 	projectDir string,
 	layout teamhost.Layout,
 	getGit GitConfigFunc,
 	getProjectURL ProjectRepoURLFunc,
 	resolve ResolveFunc,
 	apply ApplyForTeamFunc,
-	dryRun bool,
+	build BuildAllFunc,
+	dryRun, doBuild bool,
 ) error {
 	pt, err := readProjectTeam(projectDir)
 	if err != nil {
@@ -190,9 +217,24 @@ func composeTeam(
 		fmt.Fprintf(out, "scaffolded operator-global facts at %s\n", layout.GlobalConfigPath())
 	}
 
-	res, err := renderTeam(ctx, layout, projectDir, pt, tc, project, getProjectURL, resolve)
+	res, bundle, err := renderTeam(ctx, layout, projectDir, pt, tc, project, getProjectURL, resolve)
 	if err != nil {
 		return err
+	}
+
+	if doBuild {
+		if dryRun {
+			fmt.Fprintf(out, "# dry-run: --build skipped (no kukebuild invocation); %d catalog leaf(s) selected\n",
+				len(res.Selections))
+		} else if bundle != nil && len(res.Selections) > 0 {
+			realm := teamrender.DefaultRealm
+			if buildErr := build(
+				ctx, bundle.CacheDir, bundle.Source.Ref, realm,
+				res.Selections, out, out, errOut,
+			); buildErr != nil {
+				return fmt.Errorf("build team images: %w", buildErr)
+			}
+		}
 	}
 
 	if dryRun {
@@ -336,7 +378,9 @@ func loadOrScaffoldGlobalConfig(
 // renderTeam resolves the bundle and runs the per-(role × harness) render.
 // When the project declares no harness defaults there is nothing to render
 // and the bundle is not resolved — keeping `kuke team init` against a
-// harness-less roster fast and offline.
+// harness-less roster fast and offline. The resolved bundle is returned to
+// the caller so `--build` can drive teambuild from the same materialized
+// agents source.
 func renderTeam(
 	ctx context.Context,
 	layout teamhost.Layout,
@@ -346,15 +390,15 @@ func renderTeam(
 	project string,
 	getProjectURL ProjectRepoURLFunc,
 	resolve ResolveFunc,
-) (*teamrender.Result, error) {
+) (*teamrender.Result, *teamsource.Bundle, error) {
 	if len(pt.Spec.Defaults.Harnesses) == 0 || len(pt.Spec.Roles) == 0 {
-		return &teamrender.Result{}, nil
+		return &teamrender.Result{}, nil, nil
 	}
 
 	cache := teamsource.NewCache(layout.CacheDir())
 	bundle, err := resolve(ctx, cache, tc, pt)
 	if err != nil {
-		return nil, fmt.Errorf("resolve agents source: %w", err)
+		return nil, nil, fmt.Errorf("resolve agents source: %w", err)
 	}
 
 	projectURL, _ := getProjectURL(ctx, projectDir)
@@ -364,9 +408,9 @@ func renderTeam(
 	}
 	res, err := teamrender.Render(bundle, pt, tc, in)
 	if err != nil {
-		return nil, fmt.Errorf("render team: %w", err)
+		return nil, nil, fmt.Errorf("render team: %w", err)
 	}
-	return res, nil
+	return res, bundle, nil
 }
 
 // emitDryRun prints the rendered objects to out as a multi-document YAML
@@ -539,6 +583,15 @@ func applyForTeamFromCmd(cmd *cobra.Command) ApplyForTeamFunc {
 		defer func() { _ = client.Close() }()
 		return client.ApplyDocumentsForTeam(ctx, rawYAML, team)
 	}
+}
+
+// buildAllFromCmd returns the BuildAllFunc the init flow uses — the test
+// mock from context when present, otherwise teambuild.BuildAll.
+func buildAllFromCmd(cmd *cobra.Command) BuildAllFunc {
+	if mock, ok := cmd.Context().Value(MockBuildAllKey{}).(BuildAllFunc); ok && mock != nil {
+		return mock
+	}
+	return teambuild.BuildAll
 }
 
 // realGitConfig reads a single `git config --global <key>` value. A non-zero
