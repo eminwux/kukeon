@@ -456,6 +456,28 @@ func TestParseDocumentsMultiDoc(t *testing.T) {
 	}
 }
 
+// TestParseImageCatalogAcceptsInternalRef pins the AC's "no unqualified-ref
+// relaxation" contract for `kuke team init --build`: a kukeon.internal/... image
+// is itself registry-qualified (the host carries a "."), so validateImageCatalog
+// accepts it unchanged — the build scheme needs no relaxation of the
+// registry-qualified requirement. (In practice the catalog authors a published
+// ghcr.io/... ref; the kukeon.internal/... ref is synthesized by the bind path,
+// not authored here. This case documents that the validator would accept it
+// either way.)
+func TestParseImageCatalogAcceptsInternalRef(t *testing.T) {
+	t.Parallel()
+	raw := "apiVersion: kuketeams.io/v1\nkind: ImageCatalog\n" +
+		"spec: { images: [{ ref: x, harness: claude, image: kukeon.internal/claude:v1, " +
+		"build: {context: c, dockerfile: D}, capabilities: [git] }] }\n"
+	doc, err := Parse([]byte(raw))
+	if err != nil {
+		t.Fatalf("Parse(kukeon.internal image) = %v, want accepted (registry-qualified)", err)
+	}
+	if doc.ImageCatalog == nil {
+		t.Fatalf("parsed doc is not an ImageCatalog: %+v", doc)
+	}
+}
+
 func TestParseDocumentsEmpty(t *testing.T) {
 	t.Parallel()
 	if _, err := ParseDocuments(strings.NewReader("   \n")); err == nil {

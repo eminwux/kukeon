@@ -887,6 +887,105 @@ func TestComposeTeamBuildInvokesBuildAll(t *testing.T) {
 	}
 }
 
+// TestComposeTeamBuildBindsInternalImageRefTwoProjects pins the bind half of
+// AC step 3 at the compose tier: a `--build` compose run renders each project's
+// blueprint binding the locally-built kukeon.internal/<ref>:<version> image
+// (matching the tag teambuild produces), not the catalog's published image. Two
+// distinct projects share one agents bundle — the two-project compose shape —
+// and both must bind the internal ref. (The full containerd + kukebuild
+// stand-up that turns those refs into running cells is the deferred e2e; this
+// asserts the deterministic bind wiring the e2e would run on top of.)
+func TestComposeTeamBuildBindsInternalImageRefTwoProjects(t *testing.T) {
+	t.Parallel()
+	const otherProjectYAML = `apiVersion: kuketeams.io/v1
+kind: ProjectTeam
+metadata: { name: kuke }
+spec:
+  source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
+  defaults:
+    harnesses: [claude]
+  roles:
+    - { ref: dev }
+`
+	const wantInternal = "kukeon.internal/claude-go:v1.4.0"
+	const publishedRef = "registry.local/claude-go:latest"
+
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"sbsh", projectTeamWithHarnessYAML},
+		{"kuke", otherProjectYAML},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			projectDir := writeProject(t, tc.body)
+			layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+			bundle := buildClaudeBundle(t)
+
+			var (
+				mu         sync.Mutex
+				buildCalls []buildCall
+			)
+			var (
+				applyMu    sync.Mutex
+				applyCalls []applyCall
+			)
+			if err := composeTeam(
+				context.Background(), &bytes.Buffer{}, io.Discard, projectDir, layout,
+				stubGit(nil), stubProjectURL("git@github.com:eminwux/"+tc.name+".git"),
+				stubBundle(bundle), recordingApply(&applyMu, &applyCalls, kukeonv1.ApplyDocumentsResult{}),
+				recordingBuild(&mu, &buildCalls), false, true,
+			); err != nil {
+				t.Fatalf("composeTeam: %v", err)
+			}
+
+			if len(applyCalls) != 1 {
+				t.Fatalf("apply call count = %d, want 1", len(applyCalls))
+			}
+			applied := string(applyCalls[0].RawYAML)
+			if !strings.Contains(applied, wantInternal) {
+				t.Errorf("rendered blueprint does not bind internal ref %q:\n%s", wantInternal, applied)
+			}
+			if strings.Contains(applied, publishedRef) {
+				t.Errorf("rendered blueprint still binds published ref %q in build mode:\n%s", publishedRef, applied)
+			}
+		})
+	}
+}
+
+// TestComposeTeamBindsPublishedImageRefWithoutBuild is the no-flag counterpart:
+// the catalog's published image is bound and no kukeon.internal ref appears.
+func TestComposeTeamBindsPublishedImageRefWithoutBuild(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+
+	var (
+		applyMu    sync.Mutex
+		applyCalls []applyCall
+	)
+	if err := composeTeam(
+		context.Background(), &bytes.Buffer{}, io.Discard, projectDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
+		stubBundle(bundle), recordingApply(&applyMu, &applyCalls, kukeonv1.ApplyDocumentsResult{}),
+		stubBuildErr(), false, false,
+	); err != nil {
+		t.Fatalf("composeTeam: %v", err)
+	}
+	if len(applyCalls) != 1 {
+		t.Fatalf("apply call count = %d, want 1", len(applyCalls))
+	}
+	applied := string(applyCalls[0].RawYAML)
+	if !strings.Contains(applied, "registry.local/claude-go:latest") {
+		t.Errorf("no-flag mode should bind the published image:\n%s", applied)
+	}
+	if strings.Contains(applied, "kukeon.internal/") {
+		t.Errorf("no-flag mode must not bind a kukeon.internal ref:\n%s", applied)
+	}
+}
+
 // TestComposeTeamBuildSkippedOnDryRun pins the dry-run semantics: --build
 // with --dry-run announces what would build but invokes neither kukebuild
 // nor the daemon apply.

@@ -243,7 +243,19 @@ func TestRenderBlueprintSubstitutesAndStampsTeamLabel(t *testing.T) {
 		Image:        "registry.local/claude:latest",
 		Capabilities: []string{"go", "git"},
 	}
-	bp, err := RenderBlueprint(cacheDir, h, r, "claude", "dev", []string{"git", "go"}, image, "sbsh", "default")
+	bp, err := RenderBlueprint(
+		cacheDir,
+		h,
+		r,
+		"claude",
+		"dev",
+		[]string{"git", "go"},
+		image,
+		"sbsh",
+		"default",
+		false,
+		"",
+	)
 	if err != nil {
 		t.Fatalf("RenderBlueprint: %v", err)
 	}
@@ -272,12 +284,103 @@ func TestRenderBlueprintSubstitutesAndStampsTeamLabel(t *testing.T) {
 	}
 }
 
+// TestRenderBlueprintBindsInternalRefInBuildMode covers AC: build mode binds
+// the locally-built kukeon.internal/<ref>:<version> ref (the tag teambuild
+// produces), while ${IMAGE_REF} keeps the catalog selector key unchanged.
+func TestRenderBlueprintBindsInternalRefInBuildMode(t *testing.T) {
+	t.Parallel()
+	cacheDir := t.TempDir()
+	buildClaudeTemplate(t, cacheDir)
+	r := minimalRole()
+	h := &model.Harness{
+		APIVersion: model.APIVersionV1,
+		Kind:       model.KindHarness,
+		Metadata:   model.Metadata{Name: "claude"},
+		Spec:       model.HarnessSpec{Template: "harnesses/claude/blueprint.tmpl.yaml"},
+	}
+	image := &model.ImageCatalogEntry{
+		Ref:          "claude-base",
+		Harness:      "claude",
+		Image:        "registry.local/claude:latest",
+		Capabilities: []string{"go", "git"},
+	}
+	bp, err := RenderBlueprint(
+		cacheDir,
+		h,
+		r,
+		"claude",
+		"dev",
+		[]string{"git", "go"},
+		image,
+		"sbsh",
+		"default",
+		true,
+		"v1.4.0",
+	)
+	if err != nil {
+		t.Fatalf("RenderBlueprint: %v", err)
+	}
+	c := bp.Spec.Cell.Containers[0]
+	if want := "kukeon.internal/claude-base:v1.4.0"; c.Image != want {
+		t.Errorf("build-mode image = %q, want %q", c.Image, want)
+	}
+}
+
+// TestRenderBlueprintBindsPublishedRefWithoutBuild is the no-flag counterpart:
+// the catalog entry's published Image is bound verbatim.
+func TestRenderBlueprintBindsPublishedRefWithoutBuild(t *testing.T) {
+	t.Parallel()
+	cacheDir := t.TempDir()
+	buildClaudeTemplate(t, cacheDir)
+	r := minimalRole()
+	h := &model.Harness{Spec: model.HarnessSpec{Template: "harnesses/claude/blueprint.tmpl.yaml"}}
+	image := &model.ImageCatalogEntry{
+		Ref:          "claude-base",
+		Harness:      "claude",
+		Image:        "ghcr.io/eminwux/claude:v1.4.0",
+		Capabilities: []string{"go", "git"},
+	}
+	// build=true but an empty sourceRef must fall back to the published ref
+	// rather than emit a floating kukeon.internal/<ref>: ref with no version.
+	for _, tc := range []struct {
+		name      string
+		build     bool
+		sourceRef string
+	}{
+		{"no-build", false, "v1.4.0"},
+		{"build-empty-sourceRef", true, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			bp, err := RenderBlueprint(
+				cacheDir,
+				h,
+				r,
+				"claude",
+				"dev",
+				[]string{"git", "go"},
+				image,
+				"sbsh",
+				"default",
+				tc.build,
+				tc.sourceRef,
+			)
+			if err != nil {
+				t.Fatalf("RenderBlueprint: %v", err)
+			}
+			if want := "ghcr.io/eminwux/claude:v1.4.0"; bp.Spec.Cell.Containers[0].Image != want {
+				t.Errorf("image = %q, want published %q", bp.Spec.Cell.Containers[0].Image, want)
+			}
+		})
+	}
+}
+
 func TestRenderBlueprintMissingTemplate(t *testing.T) {
 	t.Parallel()
 	cacheDir := t.TempDir()
 	r := minimalRole()
 	h := &model.Harness{Spec: model.HarnessSpec{Template: "harnesses/missing/blueprint.tmpl.yaml"}}
-	_, err := RenderBlueprint(cacheDir, h, r, "claude", "dev", nil, nil, "sbsh", "default")
+	_, err := RenderBlueprint(cacheDir, h, r, "claude", "dev", nil, nil, "sbsh", "default", false, "")
 	if !errors.Is(err, errdefs.ErrTeamBlueprintTemplateMissing) {
 		t.Fatalf("err = %v, want ErrTeamBlueprintTemplateMissing", err)
 	}
@@ -288,7 +391,7 @@ func TestRenderBlueprintEmptyTemplatePathRejected(t *testing.T) {
 	cacheDir := t.TempDir()
 	r := minimalRole()
 	h := &model.Harness{Spec: model.HarnessSpec{}}
-	_, err := RenderBlueprint(cacheDir, h, r, "claude", "dev", nil, nil, "sbsh", "default")
+	_, err := RenderBlueprint(cacheDir, h, r, "claude", "dev", nil, nil, "sbsh", "default", false, "")
 	if !errors.Is(err, errdefs.ErrTeamBlueprintTemplateMissing) {
 		t.Fatalf("err = %v, want ErrTeamBlueprintTemplateMissing", err)
 	}
@@ -323,7 +426,7 @@ spec:
 	r := minimalRole()
 	h := &model.Harness{Spec: model.HarnessSpec{Template: "harnesses/codex/blueprint.tmpl.yaml"}}
 	image := &model.ImageCatalogEntry{Image: "registry.local/codex:latest"}
-	bp, err := RenderBlueprint(cacheDir, h, r, "codex", "dev", nil, image, "sbsh", "default")
+	bp, err := RenderBlueprint(cacheDir, h, r, "codex", "dev", nil, image, "sbsh", "default", false, "")
 	if err != nil {
 		t.Fatalf("RenderBlueprint: %v", err)
 	}

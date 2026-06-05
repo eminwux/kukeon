@@ -236,6 +236,17 @@ var (
 	// from `kuke get image <ref>`.
 	ErrImageNotFound = errors.New("image not found")
 
+	// ErrInternalImageNotBuilt is returned when a cell references an image
+	// hosted under the local-only kukeon.internal registry (a
+	// `kuke team init --build` image) that is absent from the target realm's
+	// containerd namespace. The resolver never pulls kukeon.internal/... refs
+	// — they are built locally, not published — so the fix is to build the
+	// image, not to retry a doomed network pull against the non-routable host.
+	ErrInternalImageNotBuilt = errors.New(
+		"local-only kukeon.internal image is not present in the realm; " +
+			"build it with `kuke team init --build`",
+	)
+
 	// ErrGetImage wraps the underlying containerd error when fetching
 	// one image's metadata fails for reasons other than not-found.
 	ErrGetImage = errors.New("failed to get image")

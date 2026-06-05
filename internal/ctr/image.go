@@ -28,6 +28,7 @@ import (
 	"github.com/containerd/containerd/v2/defaults"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/platforms"
+	"github.com/eminwux/kukeon/internal/consts"
 	internalerrdefs "github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/opencontainers/image-spec/identity"
 )
@@ -92,6 +93,16 @@ func (c *client) ensureImageUnpacked(namespace string, image containerd.Image, s
 
 // pullImage pulls an image from a registry if it's not found locally.
 // Returns the image and any error encountered.
+//
+// Refs hosted under the local-only kukeon.internal registry (see
+// consts.InternalImageRegistry) are never pulled: they are built into this
+// realm's namespace by `kuke team init --build` (internal/teambuild), not
+// published anywhere a pull could reach. A local miss on such a ref is an
+// operator error — the image was never built — so pullImage short-circuits
+// with ErrInternalImageNotBuilt ("build it") instead of attempting a doomed
+// network pull against the non-routable host. The full build→bind→run path is
+// exercised by the `kuke team init --build` two-project compose e2e and the
+// dev-init smoke; this layer's contract is the no-pull short-circuit itself.
 func (c *client) pullImage(namespace string, imageRef string, creds []RegistryCredentials) (containerd.Image, error) {
 	nsCtx := c.namespaceCtx(namespace)
 	cc := c.conn()
@@ -100,6 +111,17 @@ func (c *client) pullImage(namespace string, imageRef string, creds []RegistryCr
 	image, err := cc.GetImage(nsCtx, imageRef)
 	if err == nil {
 		return image, nil
+	}
+
+	// Local-only kukeon.internal refs are never pulled — a miss means the
+	// image was supposed to be built locally and was not.
+	if consts.IsInternalImageRef(imageRef) {
+		c.logger.WarnContext(
+			c.ctx,
+			"local-only image not present in realm; not pulling",
+			"image", imageRef,
+		)
+		return nil, fmt.Errorf("%w: %s", internalerrdefs.ErrInternalImageNotBuilt, imageRef)
 	}
 
 	// Image not found locally, pull it

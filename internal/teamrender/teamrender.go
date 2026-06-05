@@ -62,6 +62,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/internal/teamsource"
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
@@ -97,6 +98,14 @@ type Inputs struct {
 	Project        string
 	ProjectRepoURL string
 	Realm          string
+	// Build is true under `kuke team init --build`: the rendered blueprint
+	// binds the locally-built `kukeon.internal/<ref>:<version>` image (the tag
+	// teambuild produces) instead of the catalog entry's published `Image`.
+	// SourceRef supplies the `<version>` tag suffix — the agents source's
+	// pinned ref — so the bound ref matches the built tag byte-for-byte. When
+	// Build is false (the default), the catalog's published Image is bound.
+	Build     bool
+	SourceRef string
 }
 
 // Result carries the rendered objects from one project's roster. Each
@@ -162,7 +171,7 @@ func Render(
 
 			bp, renderErr := RenderBlueprint(
 				bundle.CacheDir, harness, role, hname, ptRole.Ref,
-				merged, entry, project, realm,
+				merged, entry, project, realm, in.Build, in.SourceRef,
 			)
 			if renderErr != nil {
 				return nil, fmt.Errorf(
@@ -265,6 +274,10 @@ func SelectImage(
 // template need not pre-fill it). If the template did not supply
 // metadata.name, the default `<role>-<harness>` is stamped so the
 // blueprint and its companion config share a deterministic identity.
+//
+// build + sourceRef drive the `${IMAGE}` bind decision (see blueprintVars):
+// in build mode the locally-built `kukeon.internal/<ref>:<sourceRef>` image is
+// bound; otherwise the catalog entry's published Image is.
 func RenderBlueprint(
 	cacheDir string,
 	h *model.Harness,
@@ -273,6 +286,8 @@ func RenderBlueprint(
 	needs []string,
 	image *model.ImageCatalogEntry,
 	project, realm string,
+	build bool,
+	sourceRef string,
 ) (*v1beta1.CellBlueprintDoc, error) {
 	if h == nil || strings.TrimSpace(h.Spec.Template) == "" {
 		return nil, fmt.Errorf(
@@ -288,7 +303,7 @@ func RenderBlueprint(
 		)
 	}
 
-	vars := blueprintVars(roleRef, harness, image, needs, r)
+	vars := blueprintVars(roleRef, harness, image, needs, r, build, sourceRef)
 	rendered := substitute(string(raw), vars)
 
 	var bp v1beta1.CellBlueprintDoc
@@ -518,11 +533,21 @@ func substitute(in string, vars map[string]string) string {
 // `harness` still gets the per-harness keys, just bound to empty strings,
 // so a template that always references `${SETTINGS}` does not break for
 // roles that omit it.
+//
+// The `${IMAGE}` bind is mode-dependent: in `--build` mode (build && a
+// non-empty sourceRef) it is the locally-built `kukeon.internal/<ref>:
+// <sourceRef>` ref — byte-identical to the tag teambuild produces, so the
+// runtime resolves the in-realm image without a network pull — otherwise it
+// is the catalog entry's published, registry-qualified `Image`. `${IMAGE_REF}`
+// always carries the catalog-local selector key (`image.Ref`) regardless of
+// mode; only the bound image reference flips.
 func blueprintVars(
 	roleRef, harness string,
 	image *model.ImageCatalogEntry,
 	needs []string,
 	r *model.Role,
+	build bool,
+	sourceRef string,
 ) map[string]string {
 	vars := map[string]string{
 		"ROLE":    roleRef,
@@ -530,7 +555,11 @@ func blueprintVars(
 		"NEEDS":   strings.Join(needs, ","),
 	}
 	if image != nil {
-		vars["IMAGE"] = image.Image
+		img := image.Image
+		if build && strings.TrimSpace(sourceRef) != "" {
+			img = consts.InternalImageRef(image.Ref, sourceRef)
+		}
+		vars["IMAGE"] = img
 		vars["IMAGE_REF"] = image.Ref
 	}
 	if r != nil {
