@@ -36,9 +36,9 @@ import (
 //
 // Server-side rather than CLI-passed because the CLI may invoke `kuke run`
 // with -d/--detach where pickAttachTarget never runs, and because the
-// `kuke run <cfg> --env --reuse` path threads a cell-lookup doc with no
-// containers populated — the daemon must rediscover the attachable
-// container against the persisted spec it reads from disk.
+// `kuke run <cfg> --name X --env` idempotent-attach path threads a cell-
+// lookup doc with no containers populated — the daemon must rediscover
+// the attachable container against the persisted spec it reads from disk.
 func resolveAttachableContainerID(cell intmodel.Cell) string {
 	if cell.Spec.Tty != nil {
 		if pref := strings.TrimSpace(cell.Spec.Tty.Default); pref != "" {

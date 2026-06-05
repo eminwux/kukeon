@@ -292,7 +292,7 @@ func buildStopKillCellRequest(realm, space, stack, cellName string) intmodel.Cel
 // teardown delete is supposed to own exclusively. The fix removes those
 // calls, leaving the record + snapshot in place so the next StartCell can
 // resume the task on the preserved overlay (the marker-file invariant the
-// issue's `--reuse` AC depends on).
+// resume-stopped-cell paths from #835 / #848 depend on).
 func TestStopCell_PreservesContainerRecord(t *testing.T) {
 	realm, space, stack, cellName := "kuke-system", "kukeon", "kukeon", "demo"
 	fake := &stopKillFakeClient{}

@@ -82,8 +82,9 @@ func TestWriteConfig_CreatesWorldReadableFile(t *testing.T) {
 // atomic-create-only contract: the first WriteConfigIfAbsent persists the
 // document under the same path layout as WriteConfig, and a second call to
 // the same name returns errdefs.ErrConfigExists without overwriting the
-// stored body. The `kuke run <src> --clone` gap-fill counter loop relies on
-// the EEXIST sentinel to retry on the next free N.
+// stored body. The daemon's create-only CreateConfig path (caller:
+// `kuke create config`) relies on the EEXIST sentinel to surface the
+// collision.
 func TestWriteConfigIfAbsent_CreatesAndRejectsCollision(t *testing.T) {
 	runPath := t.TempDir()
 	r := newMetadataTestExec(t, runPath, time.Now())

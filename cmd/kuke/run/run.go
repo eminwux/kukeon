@@ -77,12 +77,14 @@ func NewRunCmd() *cobra.Command {
 			"path (daily dev-cell spawn-and-attach); the other sources stay flag-driven " +
 			"so the positional case is unambiguous. -b substitutes scalar --param values " +
 			"and materializes a fresh <prefix>-<6hex> cell every invocation (always " +
-			"fresh). The positional config path walks the identity state machine of " +
-			"the named CellConfig: at most one live cell per Config, with a " +
-			"deterministic name (the Config's metadata.name), materialising from the " +
-			"referenced Blueprint with the Config's scalar values plus repo / secret " +
-			"slot fills the first time and attaching to the existing cell on " +
-			"subsequent runs (idempotent). When the live cell's spec differs from the " +
+			"fresh). The positional config path is a 1:N binding: every invocation " +
+			"materialises a fresh `<prefix>-<6hex>` cell (prefix = Spec.Prefix ?? " +
+			"metadata.name) from the referenced Blueprint with the Config's scalar " +
+			"values plus repo / secret slot fills, preserving the kukeon.io/config " +
+			"lineage label. The idempotent-attach escape valve is " +
+			"`<config> --name X`: a verbatim name that attaches to the existing cell " +
+			"if X is already live in scope, or materialises and creates if X is free. " +
+			"When `--name X` matches a live cell whose spec differs from the " +
 			"materialisation of the current Config + Blueprint, the positional config " +
 			"path refuses to attach and points the operator at " +
 			"`kuke restart <cell>` to reconcile (the daemon's OutOfSync detector " +
@@ -92,9 +94,10 @@ func NewRunCmd() *cobra.Command {
 			"implicit reconcile — the pointer is `kuke delete cell <cell>` + re-run " +
 			"(or promote to a CellConfig for `kuke restart` reconcile workflows). " +
 			"--new on the " +
-			"positional config path materializes a fresh `<config-name>-<6hex>` cell on " +
-			"every invocation instead — opt-in fire-and-forget sandboxes from a " +
-			"Config, preserving the kukeon.io/config lineage label. `--new --name X` " +
+			"positional config path is the explicit form of the bare-`<config>` " +
+			"behaviour — materialise a fresh `<prefix>-<6hex>` cell on every " +
+			"invocation — kept for callers that want the fresh-per-invocation intent " +
+			"to be unambiguous on the command line. `--new --name X` " +
 			"creates a cell named X from the Config and fails if X is already in the " +
 			"target realm (create-or-fail; unlike `--name X` alone, which idempotently " +
 			"attaches on collision). -f is " +
@@ -106,7 +109,7 @@ func NewRunCmd() *cobra.Command {
 			"`kuke attach <cell>`. --env KEY=VALUE is the orthogonal runtime knob " +
 			"(repeatable; per-invocation injection into the attachable container's env at " +
 			"start time). It works with every source (positional, -f, -b) and every " +
-			"identity flag (--new, --clone, --reuse); the entries do not change the cell " +
+			"identity flag (--new, --name); the entries do not change the cell " +
 			"spec and do not persist, so the divergent-spec check above does not trip on " +
 			"prior --env-injected keys.",
 		Args:              cobra.MaximumNArgs(1),

@@ -152,12 +152,13 @@ type Runner interface {
 
 	// WriteConfigIfAbsent atomically persists a CellConfig document only when
 	// no file at the target path exists yet (issue #839). It is the
-	// create-only sibling of WriteConfig used by `kuke run <src> --clone`:
-	// the gap-fill counter allocator retries on errdefs.ErrConfigExists to
-	// race-safely claim the next-free N. The implementation writes to a
-	// same-directory temp file, then uses `os.Link` to atomically claim the
-	// destination — link returns EEXIST when the path is taken, so two
-	// concurrent invocations never silently overwrite each other.
+	// create-only sibling of WriteConfig used by the daemon's create-only
+	// CreateConfig path (caller: `kuke create config`); returns
+	// errdefs.ErrConfigExists when the path is already taken. The
+	// implementation writes to a same-directory temp file, then uses
+	// `os.Link` to atomically claim the destination — link returns EEXIST
+	// when the path is taken, so two concurrent invocations never silently
+	// overwrite each other.
 	WriteConfigIfAbsent(config intmodel.CellConfig) error
 
 	// GetConfig reads a single named, scoped CellConfig's document off disk

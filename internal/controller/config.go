@@ -48,9 +48,10 @@ type CreateConfigResult struct {
 // CreateConfig persists a new CellConfig document under atomic create-only
 // semantics — the same scope / blueprint / slot-fill validation as
 // ApplyDocuments-driven create, but the runner write is gated on the file
-// not existing (issue #839). `kuke run <src> --clone` is the only caller:
-// the gap-fill counter loop retries on errdefs.ErrConfigExists, and the
-// `--clone --name X` path surfaces it as a hard collision.
+// not existing (issue #839). The caller is `kuke create config`; the path
+// returns errdefs.ErrConfigExists on collision, which the CLI surfaces as
+// a hard error rather than the write-through overwrite ApplyDocuments
+// would perform.
 func (b *Exec) CreateConfig(config intmodel.CellConfig) (CreateConfigResult, error) {
 	var res CreateConfigResult
 

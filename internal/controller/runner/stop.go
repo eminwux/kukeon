@@ -180,7 +180,9 @@ func (r *Exec) stopCellLocked(cell intmodel.Cell) (intmodel.Cell, error) {
 		// cases.md) has stop tear down the task only; delete owns the
 		// record + snapshot teardown. The old DeleteContainer{Snapshot
 		// Cleanup: true} call here violated that split and silently broke
-		// the `--reuse` overlay-preservation contract from #835 / #848.
+		// the overlay-preservation contract from #835 / #848 that the
+		// resume-stopped-cell paths (`kuke start <cell>` and the
+		// idempotent-attach branch of `kuke run <cfg> --name X`) depend on.
 	}
 
 	// Stop root container last (after all workload containers are stopped)

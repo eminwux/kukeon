@@ -39,14 +39,14 @@ const configsDirMode os.FileMode = 0o755
 const configFileMode os.FileMode = 0o644
 
 // WriteConfigIfAbsent atomically persists a CellConfig document only when no
-// file at the target path exists yet (issue #839). Used by `kuke run <src>
-// --clone`'s gap-fill counter allocator: the loop tries each candidate name
-// and retries on errdefs.ErrConfigExists so two concurrent invocations cannot
-// race onto the same slot. The implementation writes to a same-directory
-// temp file, then uses `os.Link` to claim the destination — link is the
-// portable atomic "create-or-fail" primitive on POSIX, returning EEXIST when
-// the target already exists. On any failure the temp file is best-effort
-// removed.
+// file at the target path exists yet (issue #839). Used by the daemon's
+// create-only CreateConfig path (caller: `kuke create config`): returns
+// errdefs.ErrConfigExists when the target path is already taken, so two
+// concurrent invocations cannot race onto the same slot. The implementation
+// writes to a same-directory temp file, then uses `os.Link` to claim the
+// destination — link is the portable atomic "create-or-fail" primitive on
+// POSIX, returning EEXIST when the target already exists. On any failure
+// the temp file is best-effort removed.
 func (r *Exec) WriteConfigIfAbsent(config intmodel.CellConfig) error {
 	md := config.Metadata
 	dir := fs.ConfigsDir(r.opts.RunPath, md.Realm, md.Space, md.Stack)
@@ -79,7 +79,7 @@ func (r *Exec) WriteConfigIfAbsent(config intmodel.CellConfig) error {
 
 	// os.Link is the portable atomic "create destination, fail if exists"
 	// primitive on POSIX (rename overwrites silently and so cannot serve the
-	// concurrent-clone AC). On success the temp file is the same inode as
+	// concurrent-create AC). On success the temp file is the same inode as
 	// the destination; the deferred Remove unlinks the temp name only.
 	if linkErr := os.Link(tmpName, path); linkErr != nil {
 		if errors.Is(linkErr, os.ErrExist) {
