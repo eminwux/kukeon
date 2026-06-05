@@ -533,10 +533,17 @@ var (
 	// ErrTeamMetadataNameRequired fires when a ProjectTeam/Role/Harness omits
 	// metadata.name.
 	ErrTeamMetadataNameRequired = errors.New("metadata.name is required")
-	// ErrTeamSourceInvalid fires when a `source` field is not a pinned-exact
-	// `<owner>/<repo>@vX.Y.Z` reference (floating ref or bare tag rejected).
+	// ErrTeamSourceInvalid fires when a structured `source` object is malformed:
+	// a missing or non-host-qualifiable repo, or other than exactly one of
+	// tag/branch/commit.
 	ErrTeamSourceInvalid = errors.New(
-		"source must be <owner>/<repo>@<version> pinned to an exact version (e.g. eminwux/agents@v1.4.0)",
+		"source must carry a repo (<host>/<owner>/<repo> or <owner>/<repo>) and exactly one of tag/branch/commit",
+	)
+	// ErrTeamSourceStringForm fires when a `source` field is the legacy
+	// `<owner>/<repo>@vX.Y.Z` string instead of the structured object. The
+	// string form is no longer supported — there is no silent dual-parse.
+	ErrTeamSourceStringForm = errors.New(
+		"source is now a structured object (repo + one of tag/branch/commit); the `<owner>/<repo>@<version>` string form is no longer supported — migrate to e.g. `source:\n  repo: github.com/eminwux/agents\n  tag: v1.4.0`",
 	)
 	// ErrTeamRoleRefRequired fires when a ProjectTeam roles[] entry omits ref.
 	ErrTeamRoleRefRequired = errors.New("roles[].ref is required")
@@ -559,9 +566,11 @@ var (
 	ErrTeamSecretSourceInvalid = errors.New(
 		"secret must declare a source (from: env|file) and a key, never an inline value",
 	)
-	// ErrTeamSourceKeyInvalid fires when a TeamsConfig sources[] key is not in
-	// `<owner>/<repo>` form.
-	ErrTeamSourceKeyInvalid = errors.New("sources key must be in <owner>/<repo> form")
+	// ErrTeamSourceKeyInvalid fires when a TeamsConfig sources[] override key is
+	// not in `<owner>/<repo>` or host-qualified `<host>/<owner>/<repo>` form.
+	ErrTeamSourceKeyInvalid = errors.New(
+		"sources key must be in <owner>/<repo> or <host>/<owner>/<repo> form",
+	)
 	// ErrTeamEntryNameRequired fires when a TeamEntry omits metadata.name (the
 	// per-project drop-in filename key).
 	ErrTeamEntryNameRequired = errors.New("teamEntry metadata.name is required")
@@ -602,13 +611,6 @@ var (
 	// capabilities.
 	ErrTeamImageCapabilitiesRequired = errors.New(
 		"imageCatalog images[].capabilities must be non-empty",
-	)
-	// ErrTeamSourceURLNotMapped fires when a project's `source` <owner>/<repo>
-	// key has no entry in TeamsConfig.spec.sources. The operator must add a
-	// clone URL mapping in ~/.kuke/kuketeams.yaml before init can materialize
-	// the agents source.
-	ErrTeamSourceURLNotMapped = errors.New(
-		"source key is not mapped in TeamsConfig.spec.sources",
 	)
 	// ErrTeamRoleFileKind fires when a per-role role.yaml parses to a kind
 	// other than Role.

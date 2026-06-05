@@ -32,9 +32,9 @@ type TeamEntry struct {
 // TeamEntrySpec carries the per-project locator + agents pin. Path is an
 // init-time LOCATOR (where the project's kuketeam.yaml was read and from where
 // its clone URL is resolved via `git remote`), not a bind-mount source. Source
-// pins the agents repository as `<owner>/<repo>@vX.Y.Z`, copied from the
-// project's kuketeam.yaml at init time.
+// is the structured agents-repository reference (the same TeamSource struct
+// ProjectTeam carries), copied from the project's kuketeam.yaml at init time.
 type TeamEntrySpec struct {
-	Path   string `json:"path"             yaml:"path"`
-	Source string `json:"source,omitempty" yaml:"source,omitempty"`
+	Path   string      `json:"path"             yaml:"path"`
+	Source *TeamSource `json:"source,omitempty" yaml:"source,omitempty"`
 }

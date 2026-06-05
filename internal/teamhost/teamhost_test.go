@@ -41,7 +41,10 @@ func teamEntry(name string) *model.TeamEntry {
 		APIVersion: model.APIVersionV1,
 		Kind:       model.KindTeamEntry,
 		Metadata:   model.Metadata{Name: name},
-		Spec:       model.TeamEntrySpec{Path: "/home/op/src/" + name, Source: "eminwux/agents@v1.4.0"},
+		Spec: model.TeamEntrySpec{
+			Path:   "/home/op/src/" + name,
+			Source: &model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
+		},
 	}
 }
 
@@ -113,7 +116,8 @@ func TestWriteEntryCreatesDirAndFileWithPerms(t *testing.T) {
 		t.Fatalf("entry does not round-trip: %v", unmarshalErr)
 	}
 	if got.Kind != model.KindTeamEntry || got.Metadata.Name != "sbsh" ||
-		got.Spec.Source != "eminwux/agents@v1.4.0" {
+		got.Spec.Source == nil || got.Spec.Source.Repo != "github.com/eminwux/agents" ||
+		got.Spec.Source.Tag != "v1.4.0" {
 		t.Errorf("entry content lost on disk: %+v", got)
 	}
 }
