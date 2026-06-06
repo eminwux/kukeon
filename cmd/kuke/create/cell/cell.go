@@ -49,22 +49,23 @@ func NewCellCmd() *cobra.Command {
 			"resolves the daemon-stored CellBlueprint, applies scalar params, " +
 			"materialises the full Cell record (containers and all), and " +
 			"persists it in a **stopped** state. Run `kuke start <name>` to " +
-			"start it. Differs from `kuke run -b` (materialise + start + attach) " +
-			"by leaving the cell stopped for later inspection or hand-off; " +
-			"-b-lineage cells have no in-place reconcile, so updates flow through " +
-			"delete-and-re-run (or promotion to a CellConfig).\n" +
+			"start it. Differs from `kuke run --from-blueprint` (materialise + " +
+			"start + attach) by leaving the cell stopped for later inspection or " +
+			"hand-off; blueprint-lineage cells have no in-place reconcile, so " +
+			"updates flow through delete-and-re-run (or promotion to a " +
+			"CellConfig).\n" +
 			"  - `kuke create cell <name> --from-config <cfg>` — resolves the " +
 			"daemon-stored CellConfig and its referenced Blueprint, applies the " +
 			"Config's spec.values + repo/secret slot fills, materialises the " +
 			"Cell record, and persists it in a **stopped** state. Run " +
-			"`kuke start <name>` to start it. Differs from `kuke run <cfg>` " +
+			"`kuke start <name>` to start it. Differs from `kuke run --from-config` " +
 			"(materialise + start + attach) by leaving the cell stopped; later " +
 			"reconcile against the lineage Config flows through " +
 			"`kuke restart <name>` (OutOfSync-driven, #821) once the cell is " +
 			"started.\n\n" +
 			"--from-blueprint and --from-config are mutually exclusive. --param " +
 			"and --param-file are valid with --from-blueprint (mirroring " +
-			"`kuke run -b`); they are rejected with --from-config because a " +
+			"`kuke run --from-blueprint`); they are rejected with --from-config because a " +
 			"CellConfig carries its own values (edit the Config instead). " +
 			"Symmetrically, --env KEY=VALUE is valid with --from-config (a " +
 			"per-cell override layered on top of the Config's resolved values) " +

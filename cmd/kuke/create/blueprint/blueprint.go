@@ -137,7 +137,7 @@ func emitBlueprintYAML(out io.Writer, name, realm, space, stack string) error {
 	b.WriteString(
 		"  # prefix: " + yamlScalar(
 			name,
-		) + "  # optional: cell-name prefix used by `kuke run -b` (defaults to metadata.name)\n",
+		) + "  # optional: cell-name prefix used by `kuke run --from-blueprint` (defaults to metadata.name)\n",
 	)
 	b.WriteString("  # parameters:\n")
 	b.WriteString("  #   - name: KEY\n")
