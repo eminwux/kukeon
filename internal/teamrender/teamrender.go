@@ -107,7 +107,17 @@ const partialGlob = "*.tmpl.yaml"
 type Inputs struct {
 	Project        string
 	ProjectRepoURL string
-	Realm          string
+	// ProjectDir is the on-host directory the project's kuketeam.yaml was read
+	// from (composeTeam's os.Getwd()). Exposed to blueprint templates as
+	// `.project.PROJECT_DIR` so the operator can reference the source-tree
+	// path without bouncing it through a CellConfig parameter.
+	ProjectDir string
+	// TeamDir is the per-team host-state root resolved by composeTeam
+	// (TeamEntry.spec.teamDir override, else Layout.TeamDir(team)). Exposed to
+	// blueprint templates as `.operator.TEAM_ROOT`. Per-team-scoped: two teams
+	// running on the same operator host see two different TEAM_ROOT values.
+	TeamDir string
+	Realm   string
 	// Build is true under `kuke team init --build`: the rendered blueprint
 	// binds the locally-built `kukeon.internal/<ref>:<version>` image (the tag
 	// teambuild produces) instead of the catalog entry's published `Image`.
@@ -189,7 +199,7 @@ func Render(
 
 			bp, renderErr := RenderBlueprint(
 				bundle.CacheDir, harness, role, hname, ptRole.Ref,
-				merged, entry, tc, project, realm, in.Build, in.SourceRef,
+				merged, entry, tc, bundle.Source, in, project, realm,
 			)
 			if renderErr != nil {
 				return nil, fmt.Errorf(
@@ -304,14 +314,18 @@ func SelectImage(
 // owning a partials directory of its own.
 //
 // Dot-context: see renderContextValues for the full shape. The
-// `.operator.*` and `.project.*` leaves are partially bound here and
-// completed in #1115. The metadata.labels are populated with
-// `kukeon.io/team = project`. metadata.realm is forced to realm (the
+// `.operator.*` and `.project.*` leaves are bound from tc, src, and in:
+// the agents source's owner/repo path drives `.operator.REPO_OWNER` (when
+// no tc.spec.repoOwner override is set) and `.project.AGENTS_REPO`;
+// in.ProjectDir and in.TeamDir surface as `.project.PROJECT_DIR` and
+// `.operator.TEAM_ROOT` respectively; tc.spec.homeDir (or `$HOME` when
+// unset) fills `.operator.HOME_DIR`. The metadata.labels are populated
+// with `kukeon.io/team = project`. metadata.realm is forced to realm (the
 // template need not pre-fill it). If the template did not supply
 // metadata.name, the default `<role>-<harness>` is stamped so the
 // blueprint and its companion config share a deterministic identity.
 //
-// build + sourceRef drive the `.image` bind decision (see
+// in.Build + in.SourceRef drive the `.image` bind decision (see
 // renderContextValues): in build mode the locally-built
 // `kukeon.internal/<ref>:<sourceRef>` image is bound; otherwise the
 // catalog entry's published Image is.
@@ -323,9 +337,9 @@ func RenderBlueprint(
 	needs []string,
 	image *model.ImageCatalogEntry,
 	tc *model.TeamsConfig,
+	src teamsource.Source,
+	in Inputs,
 	project, realm string,
-	build bool,
-	sourceRef string,
 ) (*v1beta1.CellBlueprintDoc, error) {
 	if h == nil || strings.TrimSpace(h.Spec.Template) == "" {
 		return nil, fmt.Errorf(
@@ -347,7 +361,7 @@ func RenderBlueprint(
 		return nil, err
 	}
 
-	ctx := renderContextValues(roleRef, harness, image, needs, r, tc, project, realm, build, sourceRef)
+	ctx := renderContextValues(roleRef, harness, image, needs, r, tc, src, in, project, realm)
 	var buf bytes.Buffer
 	if execErr := tpl.ExecuteTemplate(&buf, filepath.Base(tplPath), ctx); execErr != nil {
 		return nil, fmt.Errorf("execute blueprint template %q: %w", tplPath, execErr)
@@ -624,37 +638,41 @@ func parseBlueprintTemplate(tplPath string, raw []byte) (*template.Template, err
 // `.Needs.Repos` instead of the lowercase `.needs.repos` the agents repo
 // templates are authored with.
 //
-// The `.image` bind is mode-dependent: in `--build` mode (build && a
-// non-empty sourceRef) it is the locally-built
+// The `.image` bind is mode-dependent: in `--build` mode (in.Build && a
+// non-empty in.SourceRef) it is the locally-built
 // `kukeon.internal/<ref>:<sourceRef>` ref — byte-identical to the tag
 // teambuild produces, so the runtime resolves the in-realm image without a
 // network pull — otherwise it is the catalog entry's published,
 // registry-qualified Image. `.image_ref` always carries the catalog-local
 // selector key (`image.Ref`) regardless of mode.
 //
-// The `.operator.*` and `.project.*` leaves are partially bound here and
-// completed in #1115 — the keys already backed by the operator's
-// TeamsConfig (GIT_USER_NAME, GIT_USER_EMAIL, REGISTRY) are populated;
-// the not-yet-bound keys (TEAM_ROOT, HOME_DIR, REPO_OWNER, PROJECT_DIR,
-// AGENTS_REPO) wait for that follow-up. A blueprint referencing an
-// unbound key gets an empty string at render time (Go template's default
-// for a missing map key), not an error.
+// The `.operator.*` and `.project.*` leaves are the full fact contract the
+// published blueprints reference. Operator-side: GIT_USER_NAME /
+// GIT_USER_EMAIL / REGISTRY come from tc; TEAM_ROOT is per-team
+// (in.TeamDir, resolved from TeamEntry.spec.teamDir or the Layout default
+// for this render call); HOME_DIR is tc.spec.homeDir or `$HOME` when
+// unset; REPO_OWNER is tc.spec.repoOwner or the owner segment of the
+// agents source's `<owner>/<repo>` when unset. Project-side: NAME is the
+// team label; PROJECT_DIR is in.ProjectDir (composeTeam's os.Getwd());
+// AGENTS_REPO is the agents source's `<owner>/<repo>` path. A blueprint
+// referencing an unbound key gets an empty string at render time (Go
+// template's default for a missing map key), not an error.
 func renderContextValues(
 	roleRef, harness string,
 	image *model.ImageCatalogEntry,
 	needs []string,
 	r *model.Role,
 	tc *model.TeamsConfig,
+	src teamsource.Source,
+	in Inputs,
 	project, realm string,
-	build bool,
-	sourceRef string,
 ) map[string]any {
 	img := ""
 	imgRef := ""
 	if image != nil {
 		img = image.Image
-		if build && strings.TrimSpace(sourceRef) != "" {
-			img = consts.InternalImageRef(image.Ref, sourceRef)
+		if in.Build && strings.TrimSpace(in.SourceRef) != "" {
+			img = consts.InternalImageRef(image.Ref, in.SourceRef)
 		}
 		imgRef = image.Ref
 	}
@@ -701,9 +719,24 @@ func renderContextValues(
 			}
 		}
 	}
+	if v := strings.TrimSpace(in.TeamDir); v != "" {
+		operatorView["TEAM_ROOT"] = v
+	}
+	if v := resolveHomeDir(tc); v != "" {
+		operatorView["HOME_DIR"] = v
+	}
+	if v := resolveRepoOwner(tc, src); v != "" {
+		operatorView["REPO_OWNER"] = v
+	}
 
 	projectView := map[string]string{
 		"NAME": project,
+	}
+	if v := strings.TrimSpace(in.ProjectDir); v != "" {
+		projectView["PROJECT_DIR"] = v
+	}
+	if v := strings.TrimSpace(src.OwnerRepo); v != "" {
+		projectView["AGENTS_REPO"] = v
 	}
 
 	roleView := map[string]any{
@@ -724,6 +757,36 @@ func renderContextValues(
 		"space":     "",
 		"stack":     "",
 	}
+}
+
+// resolveHomeDir returns the `.operator.HOME_DIR` fact: tc.spec.homeDir
+// when the operator set it, else the process's `$HOME` env var. Empty when
+// both are unset (a blueprint that references HOME_DIR then renders the
+// empty string — Go template's default for a missing map key).
+func resolveHomeDir(tc *model.TeamsConfig) string {
+	if tc != nil {
+		if v := strings.TrimSpace(tc.Spec.HomeDir); v != "" {
+			return v
+		}
+	}
+	return strings.TrimSpace(os.Getenv("HOME"))
+}
+
+// resolveRepoOwner returns the `.operator.REPO_OWNER` fact: tc.spec.repoOwner
+// when the operator set it, else the owner segment of the agents source's
+// `<owner>/<repo>` path (the segment before the first `/`). The common
+// single-owner case (operator owns both the agents source and their
+// projects) needs no override.
+func resolveRepoOwner(tc *model.TeamsConfig, src teamsource.Source) string {
+	if tc != nil {
+		if v := strings.TrimSpace(tc.Spec.RepoOwner); v != "" {
+			return v
+		}
+	}
+	if owner, _, ok := strings.Cut(strings.TrimSpace(src.OwnerRepo), "/"); ok {
+		return owner
+	}
+	return ""
 }
 
 // roleNeedsRepos, roleNeedsMounts, roleNeedsParams, roleNeedsSecrets

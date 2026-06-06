@@ -264,10 +264,10 @@ func TestRenderBlueprintSubstitutesAndStampsTeamLabel(t *testing.T) {
 		[]string{"git", "go"},
 		image,
 		nil,
+		teamsource.Source{},
+		Inputs{},
 		"sbsh",
 		"default",
-		false,
-		"",
 	)
 	if err != nil {
 		t.Fatalf("RenderBlueprint: %v", err)
@@ -326,10 +326,10 @@ func TestRenderBlueprintBindsInternalRefInBuildMode(t *testing.T) {
 		[]string{"git", "go"},
 		image,
 		nil,
+		teamsource.Source{},
+		Inputs{Build: true, SourceRef: "v1.4.0"},
 		"sbsh",
 		"default",
-		true,
-		"v1.4.0",
 	)
 	if err != nil {
 		t.Fatalf("RenderBlueprint: %v", err)
@@ -375,10 +375,10 @@ func TestRenderBlueprintBindsPublishedRefWithoutBuild(t *testing.T) {
 				[]string{"git", "go"},
 				image,
 				nil,
+				teamsource.Source{},
+				Inputs{Build: tc.build, SourceRef: tc.sourceRef},
 				"sbsh",
 				"default",
-				tc.build,
-				tc.sourceRef,
 			)
 			if err != nil {
 				t.Fatalf("RenderBlueprint: %v", err)
@@ -395,7 +395,20 @@ func TestRenderBlueprintMissingTemplate(t *testing.T) {
 	cacheDir := t.TempDir()
 	r := minimalRole()
 	h := &model.Harness{Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}}
-	_, err := RenderBlueprint(cacheDir, h, r, "missing", "dev", nil, nil, nil, "sbsh", "default", false, "")
+	_, err := RenderBlueprint(
+		cacheDir,
+		h,
+		r,
+		"missing",
+		"dev",
+		nil,
+		nil,
+		nil,
+		teamsource.Source{},
+		Inputs{},
+		"sbsh",
+		"default",
+	)
 	if !errors.Is(err, errdefs.ErrTeamBlueprintTemplateMissing) {
 		t.Fatalf("err = %v, want ErrTeamBlueprintTemplateMissing", err)
 	}
@@ -406,7 +419,20 @@ func TestRenderBlueprintEmptyTemplatePathRejected(t *testing.T) {
 	cacheDir := t.TempDir()
 	r := minimalRole()
 	h := &model.Harness{Spec: model.HarnessSpec{}}
-	_, err := RenderBlueprint(cacheDir, h, r, "claude", "dev", nil, nil, nil, "sbsh", "default", false, "")
+	_, err := RenderBlueprint(
+		cacheDir,
+		h,
+		r,
+		"claude",
+		"dev",
+		nil,
+		nil,
+		nil,
+		teamsource.Source{},
+		Inputs{},
+		"sbsh",
+		"default",
+	)
 	if !errors.Is(err, errdefs.ErrTeamBlueprintTemplateMissing) {
 		t.Fatalf("err = %v, want ErrTeamBlueprintTemplateMissing", err)
 	}
@@ -434,7 +460,7 @@ func TestRenderBlueprintResolvesTemplateRelativeToHarnessDir(t *testing.T) {
 	}
 	bp, err := RenderBlueprint(
 		cacheDir, h, minimalRole(), "claude", "dev",
-		[]string{"git", "go"}, image, nil, "sbsh", "default", false, "",
+		[]string{"git", "go"}, image, nil, teamsource.Source{}, Inputs{}, "sbsh", "default",
 	)
 	if err != nil {
 		t.Fatalf("RenderBlueprint with bare-filename template: %v", err)
@@ -475,7 +501,7 @@ spec:
 	image := &model.ImageCatalogEntry{Image: "registry.local/claude:latest"}
 	bp, err := RenderBlueprint(
 		cacheDir, h, minimalRole(), "claude", "my-dev",
-		[]string{"go"}, image, nil, "sbsh", "default", false, "",
+		[]string{"go"}, image, nil, teamsource.Source{}, Inputs{}, "sbsh", "default",
 	)
 	if err != nil {
 		t.Fatalf("RenderBlueprint with sibling partials: %v", err)
@@ -524,7 +550,7 @@ spec:
 	}}
 	bp, err := RenderBlueprint(
 		cacheDir, h, minimalRole(), "claude", "dev",
-		[]string{"go"}, image, tc, "sbsh", "default", false, "",
+		[]string{"go"}, image, tc, teamsource.Source{}, Inputs{}, "sbsh", "default",
 	)
 	if err != nil {
 		t.Fatalf("RenderBlueprint: %v", err)
@@ -573,7 +599,7 @@ spec:
 	image := &model.ImageCatalogEntry{Image: "x"}
 	bp, err := RenderBlueprint(
 		cacheDir, h, minimalRole(), "claude", "pr-reviewer",
-		nil, image, nil, "sbsh", "default", false, "",
+		nil, image, nil, teamsource.Source{}, Inputs{}, "sbsh", "default",
 	)
 	if err != nil {
 		t.Fatalf("RenderBlueprint: %v", err)
@@ -607,7 +633,20 @@ spec:
 	r := minimalRole()
 	h := &model.Harness{Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}}
 	image := &model.ImageCatalogEntry{Image: "registry.local/codex:latest"}
-	bp, err := RenderBlueprint(cacheDir, h, r, "codex", "dev", nil, image, nil, "sbsh", "default", false, "")
+	bp, err := RenderBlueprint(
+		cacheDir,
+		h,
+		r,
+		"codex",
+		"dev",
+		nil,
+		image,
+		nil,
+		teamsource.Source{},
+		Inputs{},
+		"sbsh",
+		"default",
+	)
 	if err != nil {
 		t.Fatalf("RenderBlueprint: %v", err)
 	}
@@ -937,6 +976,202 @@ func TestMarshalYAMLProducesMultiDocStream(t *testing.T) {
 	}
 	if !strings.Contains(body, "---") {
 		t.Errorf("missing multi-doc separator: %q", body)
+	}
+}
+
+// TestRenderBlueprintBindsOperatorAndProjectFacts confirms a blueprint
+// that references every new fact key (TEAM_ROOT / HOME_DIR / REPO_OWNER
+// under .operator; PROJECT_DIR / AGENTS_REPO under .project) renders to
+// the expected concrete values. Covers AC: "Unit tests verify a blueprint
+// that references each of the new keys renders to the expected concrete
+// value.".
+func TestRenderBlueprintBindsOperatorAndProjectFacts(t *testing.T) {
+	t.Parallel()
+	cacheDir := t.TempDir()
+	body := `apiVersion: v1beta1
+kind: CellBlueprint
+metadata:
+  name: {{ .role.name }}-{{ .harness }}
+spec:
+  cell:
+    containers:
+      - id: {{ .role.name }}
+        image: {{ .image }}
+        env:
+          - "TEAM_ROOT={{ .operator.TEAM_ROOT }}"
+          - "HOME_DIR={{ .operator.HOME_DIR }}"
+          - "REPO_OWNER={{ .operator.REPO_OWNER }}"
+          - "PROJECT_DIR={{ .project.PROJECT_DIR }}"
+          - "AGENTS_REPO={{ .project.AGENTS_REPO }}"
+`
+	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml", body)
+	h := &model.Harness{Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}}
+	image := &model.ImageCatalogEntry{Image: "registry.local/claude:latest"}
+	tc := &model.TeamsConfig{Spec: model.TeamsConfigSpec{
+		HomeDir:   "/home/op",
+		RepoOwner: "ovr-owner",
+	}}
+	src := teamsource.Source{
+		Repo:      "github.com/eminwux/agents",
+		Host:      "github.com",
+		OwnerRepo: "eminwux/agents",
+		Ref:       "v1.4.0",
+		Kind:      teamsource.RefTag,
+	}
+	in := Inputs{
+		Project:    "sbsh",
+		ProjectDir: "/srv/sbsh",
+		TeamDir:    "/var/kuke/teams/sbsh",
+	}
+	bp, err := RenderBlueprint(
+		cacheDir, h, minimalRole(), "claude", "dev",
+		[]string{"go"}, image, tc, src, in, "sbsh", "default",
+	)
+	if err != nil {
+		t.Fatalf("RenderBlueprint: %v", err)
+	}
+	wantEnv := []string{
+		"TEAM_ROOT=/var/kuke/teams/sbsh",
+		"HOME_DIR=/home/op",
+		"REPO_OWNER=ovr-owner",
+		"PROJECT_DIR=/srv/sbsh",
+		"AGENTS_REPO=eminwux/agents",
+	}
+	if !reflect.DeepEqual(bp.Spec.Cell.Containers[0].Env, wantEnv) {
+		t.Errorf("env = %v, want %v", bp.Spec.Cell.Containers[0].Env, wantEnv)
+	}
+}
+
+// TestRenderBlueprintRepoOwnerDerivesFromAgentsSource confirms the
+// REPO_OWNER fallback: when tc.spec.repoOwner is empty, the renderer
+// derives the owner segment from the agents source's `<owner>/<repo>`
+// path. The common single-owner case needs no override.
+func TestRenderBlueprintRepoOwnerDerivesFromAgentsSource(t *testing.T) {
+	t.Parallel()
+	cacheDir := t.TempDir()
+	body := `apiVersion: v1beta1
+kind: CellBlueprint
+metadata:
+  name: {{ .role.name }}-{{ .harness }}
+spec:
+  cell:
+    containers:
+      - id: {{ .role.name }}
+        image: {{ .image }}
+        env:
+          - "REPO_OWNER={{ .operator.REPO_OWNER }}"
+`
+	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml", body)
+	h := &model.Harness{Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}}
+	image := &model.ImageCatalogEntry{Image: "registry.local/claude:latest"}
+	tc := &model.TeamsConfig{} // no RepoOwner override
+	src := teamsource.Source{OwnerRepo: "eminwux/agents", Host: "github.com"}
+	bp, err := RenderBlueprint(
+		cacheDir, h, minimalRole(), "claude", "dev",
+		[]string{"go"}, image, tc, src, Inputs{Project: "sbsh"}, "sbsh", "default",
+	)
+	if err != nil {
+		t.Fatalf("RenderBlueprint: %v", err)
+	}
+	wantEnv := []string{"REPO_OWNER=eminwux"}
+	if !reflect.DeepEqual(bp.Spec.Cell.Containers[0].Env, wantEnv) {
+		t.Errorf("env = %v, want %v (derived owner from src.OwnerRepo)",
+			bp.Spec.Cell.Containers[0].Env, wantEnv)
+	}
+}
+
+// TestRenderBlueprintHomeDirFallsBackToEnv confirms the HOME_DIR fallback:
+// when tc.spec.homeDir is empty, the renderer reads `$HOME` from the
+// process environment (the scaffolded global config stays minimal).
+func TestRenderBlueprintHomeDirFallsBackToEnv(t *testing.T) {
+	cacheDir := t.TempDir()
+	body := `apiVersion: v1beta1
+kind: CellBlueprint
+metadata:
+  name: {{ .role.name }}-{{ .harness }}
+spec:
+  cell:
+    containers:
+      - id: {{ .role.name }}
+        image: {{ .image }}
+        env:
+          - "HOME_DIR={{ .operator.HOME_DIR }}"
+`
+	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml", body)
+	h := &model.Harness{Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}}
+	image := &model.ImageCatalogEntry{Image: "registry.local/claude:latest"}
+	// Pin HOME to a known value; t.Setenv restores after the test (cannot run
+	// in parallel — env mutation is process-wide).
+	t.Setenv("HOME", "/home/sentinel")
+	bp, err := RenderBlueprint(
+		cacheDir, h, minimalRole(), "claude", "dev",
+		[]string{"go"}, image, &model.TeamsConfig{}, teamsource.Source{},
+		Inputs{Project: "sbsh"}, "sbsh", "default",
+	)
+	if err != nil {
+		t.Fatalf("RenderBlueprint: %v", err)
+	}
+	wantEnv := []string{"HOME_DIR=/home/sentinel"}
+	if !reflect.DeepEqual(bp.Spec.Cell.Containers[0].Env, wantEnv) {
+		t.Errorf("env = %v, want %v ($HOME fallback)", bp.Spec.Cell.Containers[0].Env, wantEnv)
+	}
+}
+
+// TestRenderTwoTeamsDistinctTeamRoot covers the AC's per-team TEAM_ROOT
+// scope: two teams with different TeamDir Inputs render to two different
+// `.operator.TEAM_ROOT` values, confirming TEAM_ROOT is per-team-context
+// rather than a host-wide TeamsConfig field.
+func TestRenderTwoTeamsDistinctTeamRoot(t *testing.T) {
+	t.Parallel()
+	cacheDir := t.TempDir()
+	body := `apiVersion: v1beta1
+kind: CellBlueprint
+metadata:
+  name: {{ .role.name }}-{{ .harness }}
+spec:
+  cell:
+    containers:
+      - id: {{ .role.name }}
+        image: {{ .image }}
+        env:
+          - "TEAM_ROOT={{ .operator.TEAM_ROOT }}"
+`
+	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml", body)
+	bundle := &teamsource.Bundle{
+		Source: teamsource.Source{
+			Repo: "github.com/eminwux/agents", Host: "github.com",
+			OwnerRepo: "eminwux/agents", Ref: "v1.4.0", Kind: teamsource.RefTag,
+		},
+		CacheDir: cacheDir,
+		Roles:    map[string]*model.Role{"dev": minimalRole()},
+		Harnesses: map[string]*model.Harness{
+			"claude": {Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}},
+		},
+		ImageCatalog: minimalClaudeCatalog("go", "git"),
+	}
+	pt := &model.ProjectTeam{
+		Metadata: model.Metadata{Name: "team"},
+		Spec: model.ProjectTeamSpec{
+			Source:   model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
+			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
+			Roles:    []model.ProjectTeamRole{{Ref: "dev"}},
+		},
+	}
+	tc := &model.TeamsConfig{}
+
+	alpha, err := Render(bundle, pt, tc, Inputs{Project: "alpha", TeamDir: "/var/kuke/teams/alpha"})
+	if err != nil {
+		t.Fatalf("Render alpha: %v", err)
+	}
+	beta, err := Render(bundle, pt, tc, Inputs{Project: "beta", TeamDir: "/var/kuke/teams/beta"})
+	if err != nil {
+		t.Fatalf("Render beta: %v", err)
+	}
+	if got := alpha.Blueprints[0].Spec.Cell.Containers[0].Env[0]; got != "TEAM_ROOT=/var/kuke/teams/alpha" {
+		t.Errorf("alpha TEAM_ROOT = %q, want /var/kuke/teams/alpha", got)
+	}
+	if got := beta.Blueprints[0].Spec.Cell.Containers[0].Env[0]; got != "TEAM_ROOT=/var/kuke/teams/beta" {
+		t.Errorf("beta TEAM_ROOT = %q, want /var/kuke/teams/beta", got)
 	}
 }
 

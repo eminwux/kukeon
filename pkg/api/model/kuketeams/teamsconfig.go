@@ -37,15 +37,26 @@ type TeamsConfig struct {
 type TeamsConfigSpec struct {
 	// Git is the operator's git identity + signing config rendered into every
 	// team cell. It is a strict superset of v1beta1.ContainerGit.
-	Git *TeamsConfigGit `json:"git,omitempty"      yaml:"git,omitempty"`
+	Git *TeamsConfigGit `json:"git,omitempty"       yaml:"git,omitempty"`
 	// Registry is the default container registry for resolving images.
-	Registry string `json:"registry,omitempty" yaml:"registry,omitempty"`
+	Registry string `json:"registry,omitempty"  yaml:"registry,omitempty"`
+	// HomeDir is an explicit override for the `.operator.HOME_DIR` blueprint
+	// fact. Optional; when unset the renderer falls back to `$HOME` at render
+	// time so the scaffolded global config stays minimal. Distinct from the
+	// per-team Layout root (which is per-team and carried on TeamEntry).
+	HomeDir string `json:"homeDir,omitempty"   yaml:"homeDir,omitempty"`
+	// RepoOwner is an explicit override for the `.operator.REPO_OWNER`
+	// blueprint fact (the owner segment of `<owner>/<repo>`). Optional; when
+	// unset the renderer derives it from the agents source's owner segment so
+	// the common single-owner case needs no entry. Set this when the operator's
+	// identity differs from the agents source owner (e.g., forked agents).
+	RepoOwner string `json:"repoOwner,omitempty" yaml:"repoOwner,omitempty"`
 	// Sources maps `<owner>/<repo>` keys to clone URLs (e.g.
 	// eminwux/agents -> git@github.com:eminwux/agents.git).
-	Sources map[string]string `json:"sources,omitempty"  yaml:"sources,omitempty"`
+	Sources map[string]string `json:"sources,omitempty"   yaml:"sources,omitempty"`
 	// Secrets maps a secret name to its source declaration. A secret never
 	// carries an inline value — only where to read it from.
-	Secrets map[string]TeamsConfigSecret `json:"secrets,omitempty"  yaml:"secrets,omitempty"`
+	Secrets map[string]TeamsConfigSecret `json:"secrets,omitempty"   yaml:"secrets,omitempty"`
 }
 
 // TeamsConfigGit is a strict superset of v1beta1.ContainerGit — the embedded
