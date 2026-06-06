@@ -33,6 +33,7 @@ import (
 	"github.com/eminwux/kukeon/internal/teambuild"
 	"github.com/eminwux/kukeon/internal/teamhost"
 	"github.com/eminwux/kukeon/internal/teamrender"
+	"github.com/eminwux/kukeon/internal/teamsecrets"
 	"github.com/eminwux/kukeon/internal/teamsource"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	model "github.com/eminwux/kukeon/pkg/api/model/kuketeams"
@@ -248,6 +249,10 @@ func composeTeam(
 		return provisionErr
 	}
 
+	if secretsErr := composeSecrets(out, errOut, layout, teamDir, pt, bundle, res, dryRun); secretsErr != nil {
+		return secretsErr
+	}
+
 	if dryRun {
 		return emitDryRun(out, project, layout, res)
 	}
@@ -273,10 +278,10 @@ func composeTeam(
 	}
 	fmt.Fprintf(out, "wrote team %q to %s\n", project, layout.EntryPath(project))
 	if applied {
-		emitApplySummary(out, project, applyResult, len(res.Blueprints), len(res.Configs))
+		emitApplySummary(out, project, applyResult, len(res.Secrets), len(res.Blueprints), len(res.Configs))
 	} else {
-		fmt.Fprintf(out, "rendered %d blueprint/%d config object(s) (no apply: no (role × harness) pairs)\n",
-			len(res.Blueprints), len(res.Configs))
+		fmt.Fprintf(out, "rendered %d secret/%d blueprint/%d config object(s) (no apply: no (role × harness) pairs)\n",
+			len(res.Secrets), len(res.Blueprints), len(res.Configs))
 	}
 	return nil
 }
@@ -332,6 +337,55 @@ func provisionHost(
 	return nil
 }
 
+// composeSecrets runs the secrets pipeline: scaffold the two-layer
+// secrets.env files (skipped under dry-run), load both layers, merge with
+// per-team precedence, render every non-empty entry as a `kind: Secret`
+// the apply bundle carries before Blueprints/Configs. Empty merged values
+// produce one warning per key on errOut (key name only — values are
+// never echoed). The rendered Secrets land on res.Secrets so the
+// downstream marshal includes them at the head of the apply payload.
+//
+// A nil bundle (the harness-less roster branch) skips the pipeline
+// entirely: there are no role definitions to discover needs.secrets from,
+// and a harness-less roster has no cells to bind secrets to.
+func composeSecrets(
+	out, errOut io.Writer,
+	layout teamhost.Layout, teamDir string,
+	pt *model.ProjectTeam, bundle *teamsource.Bundle,
+	res *teamrender.Result, dryRun bool,
+) error {
+	if bundle == nil || res == nil {
+		return nil
+	}
+	needs := teamsecrets.UnionNeedsSecrets(bundle.Roles, pt.Spec.Roles)
+	if len(needs) == 0 {
+		return nil
+	}
+	sharedPath := layout.SharedSecretsEnvPath()
+	teamPath := filepath.Join(teamDir, teamsecrets.FileName)
+	composed, err := teamsecrets.Compose(teamsecrets.ComposeInputs{
+		SharedPath: sharedPath,
+		TeamPath:   teamPath,
+		Needs:      needs,
+		Realm:      teamrender.DefaultRealm,
+		DryRun:     dryRun,
+	})
+	if err != nil {
+		return fmt.Errorf("compose team secrets: %w", err)
+	}
+	if composed.SharedScaffolded {
+		fmt.Fprintf(out, "scaffolded shared secrets.env at %s (fill in values before apply)\n", sharedPath)
+	}
+	if composed.TeamScaffolded {
+		fmt.Fprintf(out, "scaffolded per-team secrets.env at %s (fill in overrides before apply)\n", teamPath)
+	}
+	for _, k := range composed.EmptyKeys {
+		fmt.Fprintf(errOut, "warning: secrets.env key %q is empty; cells referencing it will fail to start\n", k)
+	}
+	res.Secrets = composed.Secrets
+	return nil
+}
+
 // rosterPairs flattens pt.Spec.Roles × pt.Spec.Defaults.Harnesses into the
 // concrete (role × harness) pairs the provisioning pass materializes state
 // dirs for. A role-less or harness-less project produces an empty list.
@@ -372,7 +426,7 @@ func hostUserConfigDir() string {
 func applyTeam(
 	ctx context.Context, project string, res *teamrender.Result, apply ApplyForTeamFunc,
 ) (kukeonv1.ApplyDocumentsResult, bool, error) {
-	if res == nil || (len(res.Blueprints) == 0 && len(res.Configs) == 0) {
+	if res == nil || (len(res.Secrets) == 0 && len(res.Blueprints) == 0 && len(res.Configs) == 0) {
 		return kukeonv1.ApplyDocumentsResult{}, false, nil
 	}
 	rawYAML, err := teamrender.MarshalYAML(res)
@@ -390,7 +444,7 @@ func applyTeam(
 // `kuke apply -f` human-readable output, then a one-line aggregate so the
 // operator sees both the per-object outcome and the overall counts.
 func emitApplySummary(
-	out io.Writer, project string, result kukeonv1.ApplyDocumentsResult, blueprints, configs int,
+	out io.Writer, project string, result kukeonv1.ApplyDocumentsResult, secrets, blueprints, configs int,
 ) {
 	for _, r := range result.Resources {
 		switch r.Action {
@@ -410,8 +464,8 @@ func emitApplySummary(
 			fmt.Fprintln(out)
 		}
 	}
-	fmt.Fprintf(out, "applied %d blueprint/%d config object(s) to kukeond under team %q\n",
-		blueprints, configs, project)
+	fmt.Fprintf(out, "applied %d secret/%d blueprint/%d config object(s) to kukeond under team %q\n",
+		secrets, blueprints, configs, project)
 }
 
 // emitSourceKind prints the resolved agents source's pinned-vs-floating
@@ -533,7 +587,7 @@ func emitDryRun(out io.Writer, project string, layout teamhost.Layout, res *team
 	fmt.Fprintf(out, "# dry-run: would write %s\n%s",
 		filepath.Join("~/.kuke/kuketeam.d", project+".yaml"), rawEntry)
 
-	if res == nil || (len(res.Blueprints) == 0 && len(res.Configs) == 0) {
+	if res == nil || (len(res.Secrets) == 0 && len(res.Blueprints) == 0 && len(res.Configs) == 0) {
 		fmt.Fprintf(out, "# dry-run: no (role × harness) pairs to render\n")
 		_ = layout // reserved for future cache-dir reporting
 		return nil
@@ -543,8 +597,8 @@ func emitDryRun(out io.Writer, project string, layout teamhost.Layout, res *team
 	if err != nil {
 		return fmt.Errorf("marshal rendered objects: %w", err)
 	}
-	fmt.Fprintf(out, "---\n# dry-run: rendered %d blueprint/%d config object(s) (not applied to kukeond)\n",
-		len(res.Blueprints), len(res.Configs))
+	fmt.Fprintf(out, "---\n# dry-run: rendered %d secret/%d blueprint/%d config object(s) (not applied to kukeond)\n",
+		len(res.Secrets), len(res.Blueprints), len(res.Configs))
 	if _, writeErr := out.Write(rawRender); writeErr != nil {
 		return writeErr
 	}
