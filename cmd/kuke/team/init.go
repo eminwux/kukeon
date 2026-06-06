@@ -218,7 +218,15 @@ func composeTeam(
 		fmt.Fprintf(out, "scaffolded operator-global facts at %s\n", layout.GlobalConfigPath())
 	}
 
-	res, bundle, err := renderTeam(ctx, layout, projectDir, pt, tc, project, getProjectURL, resolve, doBuild)
+	// Resolve the per-team root before rendering: an operator-supplied
+	// spec.teamDir on the existing drop-in entry overrides the default
+	// <base>/teams/<team>; an absent override falls back to the layout
+	// default. The resolved path is used by Render to populate
+	// `.operator.TEAM_ROOT`, by the provisioning pass below, and by the
+	// entry write so all three see the same path.
+	teamDir := resolveTeamDir(layout, project)
+
+	res, bundle, err := renderTeam(ctx, layout, projectDir, teamDir, pt, tc, project, getProjectURL, resolve, doBuild)
 	if err != nil {
 		return err
 	}
@@ -237,13 +245,6 @@ func composeTeam(
 			}
 		}
 	}
-
-	// Resolve the per-team root: an operator-supplied spec.teamDir on the
-	// existing drop-in entry overrides the default <base>/teams/<team>; an
-	// absent override falls back to the layout default. The resolved path
-	// is used for both the provisioning pass and the entry write below so
-	// the persisted record matches what was actually provisioned.
-	teamDir := resolveTeamDir(layout, project)
 
 	if provisionErr := provisionHost(out, teamDir, pt, bundle, dryRun); provisionErr != nil {
 		return provisionErr
@@ -539,7 +540,7 @@ func loadOrScaffoldGlobalConfig(
 func renderTeam(
 	ctx context.Context,
 	layout teamhost.Layout,
-	projectDir string,
+	projectDir, teamDir string,
 	pt *model.ProjectTeam,
 	tc *model.TeamsConfig,
 	project string,
@@ -561,6 +562,8 @@ func renderTeam(
 	in := teamrender.Inputs{
 		Project:        project,
 		ProjectRepoURL: strings.TrimSpace(projectURL),
+		ProjectDir:     projectDir,
+		TeamDir:        teamDir,
 		Build:          doBuild,
 		SourceRef:      bundle.Source.Ref,
 	}

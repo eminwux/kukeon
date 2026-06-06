@@ -143,6 +143,27 @@ func TestRoundTripAllKinds(t *testing.T) {
 	})
 }
 
+// TestTeamsConfigSpecRoundTripsHomeDirAndRepoOwner asserts the
+// .spec.homeDir / .spec.repoOwner override fields (added with the
+// .operator.HOME_DIR / .operator.REPO_OWNER blueprint facts) survive a
+// JSON/YAML round-trip — both default to derived values at render time,
+// but the explicit override must marshal in both encodings.
+func TestTeamsConfigSpecRoundTripsHomeDirAndRepoOwner(t *testing.T) {
+	t.Parallel()
+	tc := model.TeamsConfig{
+		APIVersion: model.APIVersionV1, Kind: model.KindTeamsConfig,
+		Spec: model.TeamsConfigSpec{
+			Registry:  "registry.local",
+			HomeDir:   "/home/op",
+			RepoOwner: "eminwux",
+		},
+	}
+	assertJSONYAML(t, "TeamsConfig+HomeDir+RepoOwner", tc, func(got model.TeamsConfig) bool {
+		return got.Spec.HomeDir == "/home/op" && got.Spec.RepoOwner == "eminwux" &&
+			got.Spec.Registry == "registry.local"
+	})
+}
+
 func assertJSONYAML[T any](t *testing.T, name string, in T, ok func(T) bool) {
 	t.Helper()
 	jb, err := json.Marshal(in)

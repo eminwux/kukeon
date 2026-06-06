@@ -23,9 +23,10 @@ import (
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
-// fullGitSpec mirrors crew's git block: author + committer identity, an SSH
-// signing key, commit + tag signing, and an allowed-signers file. This is the
-// 15-var rendering (GIT_CONFIG_COUNT=5) the live crew templates emit today.
+// fullGitSpec mirrors the canonical team blueprint git block: author +
+// committer identity, an SSH signing key, commit + tag signing, and an
+// allowed-signers file. This is the 15-var rendering (GIT_CONFIG_COUNT=5)
+// the live team blueprint templates emit today.
 func fullGitSpec() *intmodel.ContainerGit {
 	return &intmodel.ContainerGit{
 		Author:         &intmodel.GitIdentity{Name: "Emiliano Spinella", Email: "dev@eminwux.com"},
@@ -37,8 +38,9 @@ func fullGitSpec() *intmodel.ContainerGit {
 }
 
 // TestBuildContainerSpec_GitEnv asserts the full git block expands to the
-// exact GIT_AUTHOR_* / GIT_COMMITTER_* / GIT_CONFIG_* env-var set crew emits
-// by hand today, including gpg.format=ssh implied by signingKey. Issue #618.
+// exact GIT_AUTHOR_* / GIT_COMMITTER_* / GIT_CONFIG_* env-var set the team
+// blueprint templates emit by hand today, including gpg.format=ssh implied
+// by signingKey. Issue #618.
 func TestBuildContainerSpec_GitEnv(t *testing.T) {
 	spec := applyBuiltSpec(t, intmodel.ContainerSpec{
 		ID:    "work",

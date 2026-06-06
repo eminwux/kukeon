@@ -587,10 +587,10 @@ func kukeonDefaultEnv(spec intmodel.ContainerSpec) []string {
 
 // gitEnv expands a container's git identity/signing sugar (ContainerSpec.Git)
 // into the GIT_AUTHOR_* / GIT_COMMITTER_* / GIT_CONFIG_* env-var block git
-// reads natively, replacing the hand-rolled block crew templates duplicate
-// per cell today. Returns nil when git is unset. The GIT_CONFIG_* signing
-// pairs are emitted in crew's canonical order — user.signingkey, gpg.format,
-// commit.gpgsign, tag.gpgsign, gpg.ssh.allowedSignersFile — with
+// reads natively, replacing the hand-rolled block team blueprint templates
+// duplicate per cell today. Returns nil when git is unset. The GIT_CONFIG_*
+// signing pairs are emitted in the canonical order — user.signingkey,
+// gpg.format, commit.gpgsign, tag.gpgsign, gpg.ssh.allowedSignersFile — with
 // GIT_CONFIG_COUNT tracking the live pair count, so a block that omits signing
 // renders no GIT_CONFIG_* entries at all. gpg.format=ssh is implied by a
 // non-empty signingKey (kukeon signs with SSH keys). The returned entries are

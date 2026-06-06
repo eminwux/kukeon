@@ -308,10 +308,11 @@ type VolumeMount struct {
 
 // ContainerRepo declares a git repository the container depends on. kuketty
 // clones (or fetches) it into Target before the workload starts, replacing the
-// hand-rolled `if [ ! -d $DIR/.git ]; then git clone …; fi` blocks that crew
-// templates duplicate in onInit scripts today. The clone state becomes daemon-
-// observable via ContainerStatus.Repos (reported over RPC in phase 1b, #642)
-// rather than buried in attach stderr. Issue #617, phase 1a of #423.
+// hand-rolled `if [ ! -d $DIR/.git ]; then git clone …; fi` blocks that team
+// blueprint templates duplicate in onInit scripts today. The clone state
+// becomes daemon-observable via ContainerStatus.Repos (reported over RPC in
+// phase 1b, #642) rather than buried in attach stderr. Issue #617, phase 1a of
+// #423.
 type ContainerRepo struct {
 	// Name is the operator-facing identifier for the repo, echoed back in
 	// per-repo status. Required.
@@ -374,8 +375,9 @@ type ContainerGit struct {
 	Sign []string `json:"sign,omitempty"           yaml:"sign,omitempty"`
 	// AllowedSigners is the absolute in-container path to git's SSH
 	// allowed-signers file (gpg.ssh.allowedSignersFile), used to verify
-	// signatures. Optional; rendered only when set. Crew sets this today, so
-	// the field exists for the env block to be a strict superset of crew's.
+	// signatures. Optional; rendered only when set. Team blueprint templates
+	// set this today, so the field exists for the env block to be a strict
+	// superset of what those templates render.
 	AllowedSigners string `json:"allowedSigners,omitempty" yaml:"allowedSigners,omitempty"`
 }
 
