@@ -21,9 +21,9 @@ spec:
         # ... full container template ...
 ```
 
-A `CellBlueprint` is a daemon-stored, parametrized cell template. It is written to daemon storage by `kuke apply` and run with `kuke run -b`, so it can be applied, scoped, listed, and referenced by a [`CellConfig`](config.md). A blueprint declares the cell template plus two fill channels — scalar `${KEY}` parameters resolved at run time and structural repo/secret slots a Config fills. (Until [#626](https://github.com/eminwux/kukeon/issues/626) the user-local `CellProfile` kind covered the scalar-only slice client-side; CellBlueprint and CellConfig replaced it — see the [migration guide](../guides/migrate-cellprofile-to-blueprint.md) for the cutover recipe.)
+A `CellBlueprint` is a daemon-stored, parametrized cell template. It is written to daemon storage by `kuke apply` and run with `kuke run --from-blueprint`, so it can be applied, scoped, listed, and referenced by a [`CellConfig`](config.md). A blueprint declares the cell template plus two fill channels — scalar `${KEY}` parameters resolved at run time and structural repo/secret slots a Config fills. (Until [#626](https://github.com/eminwux/kukeon/issues/626) the user-local `CellProfile` kind covered the scalar-only slice client-side; CellBlueprint and CellConfig replaced it — see the [migration guide](../guides/migrate-cellprofile-to-blueprint.md) for the cutover recipe.)
 
-See [`kuke run -b`](../cli/kuke-run.md) for the run-side verb and [`CellConfig`](config.md) for the identity binding that lets a blueprint stand up an idempotent, named cell rather than a fresh `<prefix>-<6hex>` one each invocation.
+See [`kuke run --from-blueprint`](../cli/kuke-run.md) for the run-side verb and [`CellConfig`](config.md) for the binding that additionally fills a blueprint's structural repo/secret slots. Both stamp a fresh `<prefix>-<6hex>` cell per invocation — a blueprint with **required** slots can only run through a Config.
 
 ## metadata
 
@@ -35,17 +35,17 @@ A Blueprint is scopable at realm, space, or stack — never cell. A template sco
 | `realm`  | string            | yes      | The always-required top-level scope coordinate.                                                                         |
 | `space`  | string            | no       | When set, scopes the blueprint to a space within `realm`.                                                               |
 | `stack`  | string            | no       | When set, scopes the blueprint to a stack within `space` (requires space).                                              |
-| `labels` | map[string]string | no       | Copied onto every cell materialized from this blueprint, in addition to the `kukeon.io/blueprint` back-reference label. |
+| `labels` | map[string]string | no       | Copied onto every cell materialized from this blueprint, in addition to the `kukeon.io/blueprint` lineage label.        |
 
 ## spec
 
 ### `spec.prefix` (string, optional)
 
-Cell-name prefix used when generating the `<prefix>-<6hex>` name on each `kuke run -b`. Defaults to `metadata.name` when unset.
+Cell-name prefix used when generating the `<prefix>-<6hex>` name on each `kuke run --from-blueprint`. Defaults to `metadata.name` when unset.
 
 ### `spec.parameters[]` (list, optional)
 
-Declared `${KEY}` substitution variables the cell body references. `kuke run -b` resolves each parameter against `--param K=V`, the parameter's `default`, and (when permitted) the caller's environment, in that order. An undeclared `--param` errors at call time so typos surface immediately. A `required: true` parameter that resolves to no value errors.
+Declared `${KEY}` substitution variables the cell body references. `kuke run --from-blueprint` resolves each parameter against `--param K=V`, the parameter's `default`, and (when permitted) the caller's environment, in that order. An undeclared `--param` errors at call time so typos surface immediately. A `required: true` parameter that resolves to no value errors.
 
 | Field         | Type   | Required | Description                                                                                                        |
 | ------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------ |
@@ -73,11 +73,11 @@ In addition to the regular container fields, a blueprint container declares two 
 
 #### `spec.cell.containers[].repos[]` (list, optional)
 
-Same shape as [ContainerRepo](container.md). Unlike a hand-written `Cell` / `Container`, `url` is **not** required at apply time. A repo with no `url` is a structural slot a `CellConfig` fills; a repo whose `url` is supplied inline (directly or via a `${KEY}` parameter) runs as-is under `kuke run -b`. The slot's `name` is the identity a `CellConfig` matches on.
+Same shape as [ContainerRepo](container.md). Unlike a hand-written `Cell` / `Container`, `url` is **not** required at apply time. A repo with no `url` is a structural slot a `CellConfig` fills; a repo whose `url` is supplied inline (directly or via a `${KEY}` parameter) runs as-is under `kuke run --from-blueprint`. The slot's `name` is the identity a `CellConfig` matches on.
 
 #### `spec.cell.containers[].secrets[]` (list, optional)
 
-Slot-only channel: the blueprint declares the **consumption side** (where the resolved bytes land inside the container), and a `CellConfig` supplies the **source side** (which `kind: Secret` provides the bytes). Because a blueprint never carries the source, a blueprint that declares secret slots cannot run inline with `-b` — it requires `kuke run <config>` (positional) with a `CellConfig` that fills the slots.
+Slot-only channel: the blueprint declares the **consumption side** (where the resolved bytes land inside the container), and a `CellConfig` supplies the **source side** (which `kind: Secret` provides the bytes). Because a blueprint never carries the source, a blueprint that declares secret slots cannot run inline with `--from-blueprint` — it requires `kuke run --from-config <cfg>` with a `CellConfig` that fills the slots.
 
 | Field       | Type   | Required           | Description                                                                                                              |
 | ----------- | ------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------ |
@@ -85,7 +85,7 @@ Slot-only channel: the blueprint declares the **consumption side** (where the re
 | `mode`      | string | no (default `env`) | `env` injects an environment variable named `envName`; `file` stages a read-only mount at `mountPath`.                   |
 | `envName`   | string | when `mode: env`   | Environment variable name. Independent of the slot `name`, so the consumption side can change without renaming the slot. |
 | `mountPath` | string | when `mode: file`  | Absolute in-container path for the read-only file mount.                                                                 |
-| `required`  | bool   | no                 | When `true`, a `CellConfig` must fill the slot. Required slots also block inline `-b`.                                   |
+| `required`  | bool   | no                 | When `true`, a `CellConfig` must fill the slot. Required slots also block inline `--from-blueprint`.                     |
 
 ## Storage layout
 
@@ -101,10 +101,10 @@ The `blueprints/` directory is `0755` and each blueprint document is `0644`, bot
 
 ## Invariants
 
-- **Always fresh.** Every `kuke run -b` materializes a cell named `<prefix>-<6hex>`, where the suffix is 3 bytes of entropy. A blueprint never identifies a singleton cell — that contract belongs to [`CellConfig`](config.md). For singleton workloads use `CellConfig` (and the `kuke run <config>` positional) rather than a blueprint plus an external pinning convention.
-- **Back-reference.** Every materialized cell carries the `kukeon.io/blueprint=<name>` label, so an operator can list all instances of a blueprint with `kuke get cells -l kukeon.io/blueprint=<name>`.
+- **Always fresh.** Every `kuke run --from-blueprint` materializes a cell named `<prefix>-<6hex>`, where the suffix is 3 bytes of entropy. A blueprint binds only scalar parameters; pin a name per invocation with `--name`. A [`CellConfig`](config.md) is also a 1:N binding (a fresh cell per stamp) — its added value over a bare blueprint is filling the blueprint's structural repo/secret slots, not pinning a singleton.
+- **Lineage label.** Every materialized cell carries the `kukeon.io/blueprint=<name>` label, so an operator can list all cells stamped from a blueprint with `kuke get cells -l kukeon.io/blueprint=<name>`.
 - **Scalar parameters declared.** A `${KEY}` in the body must appear in `spec.parameters[]`; otherwise the blueprint fails to load. Typos surface at apply time, not as a runtime mystery.
-- **Structural slots block inline.** A required repo slot (no inline `url`) or any required secret slot makes the blueprint un-runnable with `-b`; the run path refuses with a message naming the offenders and recommending `kuke run <config>` (positional) with a `CellConfig` that fills them. Optional unfilled slots are dropped silently from the materialized container.
+- **Structural slots block inline.** A required repo slot (no inline `url`) or any required secret slot makes the blueprint un-runnable with `--from-blueprint`; the run path refuses with a message naming the offenders and recommending `kuke run --from-config <cfg>` with a `CellConfig` that fills them. Optional unfilled slots are dropped silently from the materialized container.
 
 ## Minimal
 
@@ -127,4 +127,4 @@ spec:
           - MODEL=${MODEL}
 ```
 
-A realm-scoped blueprint named `claude-code` with one scalar parameter and one container. Run a fresh instance with `kuke run -b claude-code --realm kuke-system` (each invocation produces a new `claude-code-<6hex>` cell). For an idempotent, named instance, bind it via a [`CellConfig`](config.md) and run with `kuke run <config>` (positional).
+A realm-scoped blueprint named `claude-code` with one scalar parameter and one container. Run a fresh instance with `kuke run --from-blueprint claude-code --realm kuke-system` (each invocation produces a new `claude-code-<6hex>` cell). To additionally fill structural repo/secret slots, bind it via a [`CellConfig`](config.md) and run with `kuke run --from-config <cfg>`.

@@ -4,7 +4,7 @@
 apiVersion: v1beta1
 kind: CellConfig
 metadata:
-  name: prod # also the deterministic name of the materialized cell
+  name: prod # the binding's name; stamped cells carry it as the kukeon.io/config lineage label
   realm: kuke-system # scope coordinates; deepest non-empty wins
   # space: team-a           # optional — space-scoped
   # stack: agents           # optional — stack-scoped (requires space)
@@ -24,9 +24,9 @@ spec:
         realm: kuke-system
 ```
 
-A `CellConfig` binds a [`CellBlueprint`](blueprint.md) to a concrete, idempotent cell **identity**. Where a Blueprint answers _"what does this cell look like?"_, a Config answers _"which instance?"_: a name with a deterministic derivation, the scalar `values` filled into the blueprint's parameters, and the structural repo/secret slot fills keyed by the blueprint's slot names. A Config materializes at most one live cell per scope.
+A `CellConfig` is a reusable **binding**: a [`CellBlueprint`](blueprint.md) reference plus the concrete scalar `values` filled into the blueprint's parameters and the structural repo/secret slot fills keyed by the blueprint's slot names. Where a Blueprint answers _"what does this cell look like?"_, a Config answers _"with which values and slot sources?"_. A Config is a **1:N** binding — each `kuke run --from-config <cfg>` (or `kuke create cell --from-config <cfg>`) stamps a **fresh** cell, not a singleton. The cell's identity is its own [`CellDoc`](../concepts/cell.md): it owns its name, spec, and status. The Config name is demoted to the `kukeon.io/config` lineage label every stamped cell carries (epic:cell-identity).
 
-See [`kuke run <config>`](../cli/kuke-run.md) for the identity state machine that decides whether `kuke run <config>` materializes a fresh cell, attaches to an existing one, or refuses because the in-cluster cell diverged from the Config's current spec.
+See [`kuke run --from-config`](../cli/kuke-run.md) for the fused create + start + attach verb, and [`kuke create cell --from-config`](../cli/kuke-create.md) for the un-fused create-only primitive. Stamping always produces a fresh cell — a `--name X` collision against a live cell is refused, never attached. To pull a stamped cell back in line with an edited Config, re-resolve it explicitly with [`kuke restart <cell>`](../cli/kuke-restart.md) (or `kuke restart -l <selector>` to roll a fleet); drift surfaces as an informational `OutOfSync` until you do.
 
 ## metadata
 
@@ -34,11 +34,11 @@ A Config is scopable at realm, space, or stack — never cell. A Config material
 
 | Field    | Type              | Required | Description                                                                                                                                                   |
 | -------- | ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`   | string            | yes      | The config's name, unique within its scope. Also the deterministic name of the materialized cell — see [Identity and stable name](#identity-and-stable-name). |
+| `name`   | string            | yes      | The config's name, unique within its scope. Stamped cells carry it as the `kukeon.io/config` lineage label, **not** as their name — see [Lineage, not identity](#lineage-not-identity).             |
 | `realm`  | string            | yes      | The always-required top-level scope coordinate.                                                                                                               |
 | `space`  | string            | no       | When set, scopes the config to a space within `realm`.                                                                                                        |
 | `stack`  | string            | no       | When set, scopes the config to a stack within `space` (requires space).                                                                                       |
-| `labels` | map[string]string | no       | Copied onto the materialized cell, in addition to the `kukeon.io/config` back-reference label.                                                                |
+| `labels` | map[string]string | no       | Copied onto every stamped cell, in addition to the `kukeon.io/config` lineage label.                                                                          |
 
 ## spec
 
@@ -91,16 +91,17 @@ A `CellConfig` fills the structural slots a [`CellBlueprint`](blueprint.md) decl
 
 The two channels are independent: scalar `values` are blueprint-side parameters resolved at run time (see the blueprint's [`spec.parameters[]`](blueprint.md)), while `repos:` and `secrets:` are structural slot fills validated at apply time. A `${KEY}` parameter is not a slot, and a slot is not a `${KEY}` parameter.
 
-## Identity and stable name
+## Lineage, not identity
 
-A `CellConfig` materializes **at most one** live cell within its scope. The cell's deterministic name is `metadata.name` verbatim — not `<name>-<hash-of-values>` and not `<name>-<6hex>`. The derivation is value-independent on purpose: editing `spec.values` keeps the same cell identity so subsequent `kuke run <config>` invocations attach to the existing cell rather than spawning a fresh one and orphaning the old.
+A `CellConfig` is a **1:N** binding: it stamps as many cells as you run it, each its own [`CellDoc`](../concepts/cell.md) identity. The stamped cell's name is the unified `<prefix>-<6hex>` generated per invocation (prefix = the referenced blueprint's `spec.prefix`, defaulting to its `metadata.name`), or the verbatim `--name X` when you pin one. The Config name is **not** the cell name — it survives only as lineage metadata.
 
-The matching contract:
+The lineage contract:
 
-- Every cell `kuke run <config>` materializes carries the `kukeon.io/config=<name>` back-reference label. The runtime locates the at-most-one live cell a Config owns by listing cells in the Config's scope with that label.
-- When the in-cluster cell's spec diverges from the Config's current spec (after re-resolving scalar values and slot fills), `kuke run <config>` defaults to **warn-and-attach** (post-#986): a one-line `notice:` cites the diverging fields and the `kuke restart <name>` reconcile pointer, then the operator is dropped into the live cell. `run` itself never mutates the cell; destructive updates (stop, update, start) route through `kuke restart <name>`. `--require-synced` opts into the pre-#986 refuse-on-divergence behaviour for CI/scripted callers. The full identity state machine (no cell → materialize, running → attach, stopped → start-then-attach, divergent → warn-and-attach by default / refuse with `--require-synced`, both citing `kuke restart <name>`, error state → refuse with `kuke delete cell` pointer) lives in [`kuke run <config>`](../cli/kuke-run.md).
+- Every cell stamped from a Config carries the `kukeon.io/config=<name>` **lineage label** (a back-reference, not an identity constraint). List a Config's stamped cells with `kuke get cells -l kukeon.io/config=<name>`.
+- Every stamped cell also persists a `Spec.Provenance` block recording the binding it came from (kind, scoped ref, resolved params, and any `--env` per-cell overrides), so a later re-resolve rebuilds the cell from the same Config without re-supplying values.
+- Editing the Config does **not** push to live cells. A stamped cell whose spec has drifted from the current Config surfaces as informational `OutOfSync` in the `SYNC` column of `kuke get cell -o wide`; an operator pulls it back in line explicitly with [`kuke restart <cell>`](../cli/kuke-restart.md) (or `kuke restart -l <selector>` to roll a fleet). `kuke run` / `kuke create cell` never mutate a live cell.
 
-This is the structural contrast with a [`CellBlueprint`](blueprint.md): a blueprint is always-fresh (`<prefix>-<6hex>` per invocation), a config is always-named (`<configName>` per binding).
+This is the structural parallel with a [`CellBlueprint`](blueprint.md): both are always-fresh templates (`<prefix>-<6hex>` per invocation). A Blueprint binds only scalar `${KEY}` parameters; a Config additionally binds structural repo/secret slot sources, so a blueprint with required slots can only run through a Config.
 
 ## Storage layout
 
@@ -116,8 +117,9 @@ The `configs/` directory is `0755` and each config document is `0644`, both owne
 
 ## Invariants
 
-- **One Config → at most one live cell within scope.** The deterministic stable name is `metadata.name` verbatim; subsequent `kuke run <config>` invocations attach to the existing cell or refuse on divergence rather than spawning a duplicate.
-- **Back-reference.** Every materialized cell carries the `kukeon.io/config=<name>` label, so an operator can find a Config's live cell with `kuke get cells -l kukeon.io/config=<name>`.
+- **One Config → N cells (1:N binding).** Each `kuke run --from-config` / `kuke create cell --from-config` stamps a fresh `<prefix>-<6hex>` cell (or a `--name`-pinned one); the cell's identity is its [`CellDoc`](../concepts/cell.md), and the Config name lives on only as the `kukeon.io/config` lineage label.
+- **Lineage label.** Every stamped cell carries the `kukeon.io/config=<name>` label, so an operator can list all of a Config's cells with `kuke get cells -l kukeon.io/config=<name>`.
+- **Persisted provenance.** Every stamped cell records its binding in `Spec.Provenance` (kind, scoped ref, resolved params, `--env` overrides), so `kuke restart <cell>` can re-resolve it from the Config without re-supplying values.
 - **Apply-time slot validation.** A Config that fills an undeclared slot, or that leaves a required slot unfilled, errors at apply time against the referenced blueprint's current shape — not at run time.
 - **Cross-scope references.** A Config may reference a Blueprint in a different scope; the same is true of the `secretRef` inside each secret slot fill.
 
@@ -145,4 +147,4 @@ spec:
         realm: kuke-system
 ```
 
-A realm-scoped Config named `prod` that instantiates the `claude-code` blueprint (also realm-scoped), overrides the `MODEL` scalar parameter, fills the `workspace` repo slot, and fills the `anthropic-token` secret slot from the existing `kind: Secret` of the same name. Run with `sudo kuke run prod --realm kuke-system`; re-running attaches to the same cell.
+A realm-scoped Config named `prod` that instantiates the `claude-code` blueprint (also realm-scoped), overrides the `MODEL` scalar parameter, fills the `workspace` repo slot, and fills the `anthropic-token` secret slot from the existing `kind: Secret` of the same name. Stamp a cell with `sudo kuke run --from-config prod --realm kuke-system`; each invocation stamps a fresh `<prefix>-<6hex>` cell (pin one with `--name`).

@@ -59,7 +59,7 @@ Removes the daemon-stored CellBlueprint document bound to the named scope. Cells
 kuke delete config <name> --realm <r> [--space <s>] [--stack <t>] [--force]
 ```
 
-Removes the daemon-stored CellConfig document bound to the named scope. The at-most-one live cell the Config materialised is **not** torn down — delete it separately with `kuke delete cell <name>`. When a live cell still carries the back-reference label to this Config, `kuke delete config` emits a one-line notice pointing at the cell to delete (never a refusal). `--cascade` does not apply — a Config has no children in the resource hierarchy.
+Removes the daemon-stored CellConfig document bound to the named scope. The cells the Config stamped are **not** torn down — a Config is a 1:N binding, so it may have many live cells, each its own identity; delete them separately with `kuke delete cell <name>`. For every live cell still carrying this Config's `kukeon.io/config` lineage label, `kuke delete config` emits a one-line notice pointing at that cell to delete (never a refusal). `--cascade` does not apply — a Config has no children in the resource hierarchy.
 
 ## Behavior
 
