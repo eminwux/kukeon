@@ -1951,58 +1951,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#blueprints-and-configs" class="md-nav__link">
+  <a href="#materialising-from-a-blueprint-config-or-sibling-cell" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Blueprints and Configs
+        Materialising from a Blueprint, Config, or sibling cell
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Blueprints and Configs">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#identity-shapes-for-config" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Identity shapes for &lt;config&gt;
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Identity shapes for &lt;config&gt;">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#identity-flag-mutex-matrix" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Identity-flag mutex matrix
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#identity-state-machine-for-config-idempotent-path" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Identity state machine for &lt;config&gt; (idempotent path)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -3289,58 +3244,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#blueprints-and-configs" class="md-nav__link">
+  <a href="#materialising-from-a-blueprint-config-or-sibling-cell" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Blueprints and Configs
+        Materialising from a Blueprint, Config, or sibling cell
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Blueprints and Configs">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#identity-shapes-for-config" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Identity shapes for &lt;config&gt;
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Identity shapes for &lt;config&gt;">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#identity-flag-mutex-matrix" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Identity-flag mutex matrix
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#identity-state-machine-for-config-idempotent-path" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Identity state machine for &lt;config&gt; (idempotent path)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -3398,16 +3308,20 @@
 
 
 <h1 id="kuke-run">kuke run<a class="headerlink" href="#kuke-run" title="Permanent link">&para;</a></h1>
-<p>Create and start a single cell from one of three sources:</p>
+<p><code>kuke run</code> is the fused docker-model verb: <code>docker create</code> → <code>kuke create cell</code>, <code>docker start</code> → <code>kuke start</code>, <code>docker run</code> → <code>kuke run</code> (create? + start + attach).</p>
+<p>Four source paths:</p>
 <ul>
-<li><code>-f &lt;file&gt;</code> — a single-cell YAML doc (or <code>-</code> for stdin).</li>
-<li><code>-b &lt;blueprint&gt;</code> — a daemon-stored CellBlueprint, resolved from the scope named by <code>--realm</code>/<code>--space</code>/<code>--stack</code>. Substitutes scalar <code>--param</code> values and materializes a fresh <code>&lt;prefix&gt;-&lt;6hex&gt;</code> cell every invocation.</li>
-<li><code>&lt;config&gt;</code> — a daemon-stored CellConfig (positional, after #825), resolved from the same scope. Stable-named and idempotent: walks the identity state machine and attaches to the at-most-one live cell the Config owns. Pass <code>--new</code> (after #833) to opt into a generated <code>&lt;config-name&gt;-&lt;6hex&gt;</code> cell per invocation instead (fire-and-forget sandboxes from one Config; lineage label preserved); combine <code>--new --name X</code> for a create-or-fail named cell from the Config, or <code>--name X</code> alone to idempotently attach to a pinned name. Pass <code>--clone</code> (after #839) to fork the Config into a new persistent clone Config with a gap-fill counter name (<code>&lt;source&gt;-&lt;N&gt;</code>) and start a cell from the clone — the path for interactive multi-instance and cron pool seeding. Pass <code>--reuse</code> (after #835) to pick a healthy-Stopped clone of the Config (lowest-N first) and start its cell in-place, preserving the containerd overlay across the stop/start transition (project repo clone, <code>.claude.json</code>, any per-cell state); falls back to <code>--clone</code> on an empty pool — the path for cron-driven skill execution where the project clone happens once per pool member.</li>
+<li><code>kuke run &lt;cell&gt;</code> — start + attach an <strong>existing</strong> cell (≈ <code>kuke start &lt;cell&gt;</code> + <code>kuke attach &lt;cell&gt;</code>). The cell must already exist; a missing name errors with a pointer at the create paths.</li>
+<li><code>kuke run -f &lt;file&gt;</code> — a single-cell YAML doc (or <code>-</code> for stdin). Create-or-attach by <code>metadata.name</code>.</li>
+<li><code>kuke run --from-blueprint &lt;bp&gt; [--param K=V]...</code> — create + start + attach a fresh cell from a daemon-stored CellBlueprint.</li>
+<li><code>kuke run --from-config &lt;cfg&gt; [--env K=V]...</code> — create + start + attach a fresh cell from a daemon-stored CellConfig.</li>
+<li><code>kuke run --clone &lt;cell&gt;</code> — fork an existing cell's recipe (its materialised <code>CellDoc</code>) into a fresh cell. Lineage and provenance binding are preserved; the source cell's runtime overlay is <strong>not</strong> copied.</li>
 </ul>
-<p>Conceptually <code>kuke apply -f</code> (single-cell) plus <code>kuke start</code>. Drift between the live cell's spec and the materialisation of the requested source (CellConfig + Blueprint, CellBlueprint + <code>--param</code>, or <code>-f</code> file) defaults to <strong>warn-and-attach</strong> (post-#986): a one-line <code>notice:</code> cites the diverging fields and the reconcile pointer, then the operator is dropped into the live cell. Pass <code>--require-synced</code> for the opt-in strict mode that CI/scripted callers want — drift then refuses to attach with the same error shape the pre-#986 default emitted. <code>kuke run</code> itself never updates the live cell on either path.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke run (&lt;config&gt; | -f &lt;file&gt; | -b &lt;blueprint&gt;) [flags]
+<p>The fused <code>--from-*</code>/<code>--clone</code> form delegates its create half to the same <code>cell.Materialize</code> function <code>kuke create cell</code> runs (shared FlagSet, no drift): the produced <code>CellDoc</code> is identical to <code>kuke create cell --from-...</code> followed by <code>kuke start</code>. The cell name is <code>--name X</code> when given, else a generated <code>&lt;prefix&gt;-&lt;6hex&gt;</code> probed free against the daemon at the cell's scope.</p>
+<p>Drift between the live cell's spec and the materialisation of the requested source — for the <code>-f</code> path only — defaults to <strong>warn-and-attach</strong> (post-#986): a one-line <code>notice:</code> cites the diverging fields and the <code>kuke apply -f</code> pointer, then the operator is dropped into the live cell. Pass <code>--require-synced</code> for the opt-in strict mode that CI/scripted callers want — drift then refuses to attach with the same error shape the pre-#986 default emitted. The fused <code>--from-*</code>/<code>--clone</code> paths always materialise a fresh cell (refuse on <code>--name</code> collision rather than diverge), and the <code>&lt;cell&gt;</code> positional has no source to compare against, so <code>--require-synced</code> is a <code>-f</code>-only knob.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke run (&lt;cell&gt; | -f &lt;file&gt; | --from-blueprint &lt;bp&gt; | --from-config &lt;cfg&gt; | --clone &lt;cell&gt;) [flags]
 </code></pre></div>
-<p>To re-attach to an existing cell, use <a href="../kuke-attach/"><code>kuke attach &lt;cell&gt;</code></a>.</p>
+<p>To re-attach to an already-running cell without bouncing it, use <a href="../kuke-attach/"><code>kuke attach &lt;cell&gt;</code></a>.</p>
 <h2 id="flags">Flags<a class="headerlink" href="#flags" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -3419,54 +3333,49 @@
 </thead>
 <tbody>
 <tr>
-<td><code>&lt;config&gt;</code> (positional)</td>
-<td><em>(one of <code>&lt;config&gt;</code>/<code>-f</code>/<code>-b</code>)</em></td>
-<td>Daemon-stored CellConfig name to run, resolved from the scope named by <code>--realm</code>/<code>--space</code>/<code>--stack</code>; mutually exclusive with <code>-f</code>/<code>-b</code>. The Config carries its own scalar values and structural slot fills (repos, secrets), so <code>--param</code>/<code>--param-file</code> are rejected. <code>--name</code> and <code>--new</code> are accepted — see the <a href="#identity-shapes-for-config">identity table</a>. Idempotent by default: walks the identity state machine and attaches to the at-most-one live cell the Config owns by stable name</td>
+<td><code>&lt;cell&gt;</code> (positional)</td>
+<td><em>(one of <code>&lt;cell&gt;</code> / <code>-f</code> / <code>--from-*</code>/<code>--clone</code>)</em></td>
+<td>Existing cell to start + attach, resolved in the scope named by <code>--realm</code>/<code>--space</code>/<code>--stack</code>. A missing cell errors with a pointer at <code>kuke create cell</code> / <code>kuke run --from-...</code></td>
 </tr>
 <tr>
 <td><code>--file</code>, <code>-f</code></td>
-<td><em>(one of <code>&lt;config&gt;</code>/<code>-f</code>/<code>-b</code>)</em></td>
-<td>YAML to read (path or <code>-</code> for stdin); mutually exclusive with <code>&lt;config&gt;</code>/<code>-b</code></td>
+<td><em>(one source)</em></td>
+<td>YAML to read (path or <code>-</code> for stdin); mutually exclusive with the <code>&lt;cell&gt;</code> positional and <code>--from-blueprint</code>/<code>--from-config</code>/<code>--clone</code></td>
 </tr>
 <tr>
-<td><code>--blueprint</code>, <code>-b</code></td>
-<td><em>(one of <code>&lt;config&gt;</code>/<code>-f</code>/<code>-b</code>)</em></td>
-<td>Daemon-stored CellBlueprint name to run, resolved from the scope named by <code>--realm</code>/<code>--space</code>/<code>--stack</code>; mutually exclusive with <code>&lt;config&gt;</code>/<code>-f</code>. Substitutes scalar <code>--param</code> values and materializes a fresh <code>&lt;prefix&gt;-&lt;6hex&gt;</code> cell</td>
+<td><code>--from-blueprint</code></td>
+<td><em>(one source)</em></td>
+<td>Daemon-stored CellBlueprint name to materialise from, resolved from the scope named by <code>--realm</code>/<code>--space</code>/<code>--stack</code>. Substitutes scalar <code>--param</code>/<code>--param-file</code> values. The fused path: creates + starts + attaches a fresh cell</td>
 </tr>
 <tr>
-<td><code>--name</code></td>
-<td><code>&lt;metadata.name&gt;-&lt;6hex&gt;</code></td>
-<td>Override the materialized cell name. Valid with <code>-b</code>; rejected with <code>-f</code> (where <code>metadata.name</code> is the cell name verbatim). Valid with the <code>&lt;config&gt;</code> positional: <code>&lt;config&gt; --name X</code> does idempotent attach to cell <code>X</code> using the Config's spec; <code>&lt;config&gt; --new --name X</code> is the create-or-fail variant (fail if X exists). Without <code>--name</code> on the <code>&lt;config&gt;</code> path the cell uses the Config's stable name</td>
-</tr>
-<tr>
-<td><code>--new</code></td>
-<td><code>false</code></td>
-<td>With the <code>&lt;config&gt;</code> positional only: materialize a fresh <code>&lt;config-name&gt;-&lt;6hex&gt;</code> cell per invocation, preserving the <code>kukeon.io/config=&lt;name&gt;</code> lineage label. Combinable with <code>--name X</code> (create-or-fail at pinned <code>X</code>) and <code>--rm</code> (one-shot ephemeral cell). Mutex with <code>--clone</code> (different intent — ephemeral cell vs. persistent clone Config). Rejected with <code>-f</code>/<code>-b</code></td>
+<td><code>--from-config</code></td>
+<td><em>(one source)</em></td>
+<td>Daemon-stored CellConfig name to materialise from, resolved from the same scope. The Config carries its own scalar values + structural slot fills, so <code>--param</code>/<code>--param-file</code> are rejected; persisted per-cell env overrides are supplied via <code>--env KEY=VALUE</code></td>
 </tr>
 <tr>
 <td><code>--clone</code></td>
-<td><code>false</code></td>
-<td>With the <code>&lt;config&gt;</code> positional only: fork the Config into a new persistent clone Config and start a cell from the clone. Default name is <code>&lt;source&gt;-&lt;N&gt;</code> (gap-fill counter, lowest unused N ≥ 0 among clones of the source in the target realm; atomic under concurrent invocations). Combinable with <code>--name X</code> for explicit-name create-or-fail (<code>cellconfig "X" already exists</code> on collision). Clone carries <code>metadata.annotations.kukeon.io/source-config: &lt;source&gt;</code>. Mutex with <code>--new</code>, <code>--reuse</code>, and <code>--rm</code></td>
+<td><em>(one source)</em></td>
+<td>Existing cell to fork. Materialises a fresh cell from the source's <code>CellDoc</code> (container spec, scope, provenance binding); the runtime overlay is not copied</td>
 </tr>
 <tr>
-<td><code>--reuse</code></td>
-<td><code>false</code></td>
-<td>With the <code>&lt;config&gt;</code> positional only: pick a healthy-Stopped clone of the Config (lowest counter N first, ascending) and start its cell in-place via <code>StartCell</code> — preserving the containerd overlay across the stop/start transition (project repo clone, <code>.claude.json</code>, any per-cell state). Falls back to <code>--clone</code>'s code path on an empty pool (atomic gap-fill allocation, new clone Config + cell), so the operator never sees a "pool empty" error on the first tick or after a host reboot. Running clones are invisible to the pool query; concurrent <code>--reuse</code> invocations against the same source pick distinct cells via the daemon-side atomic claim, and an all-Running pool falls back to <code>--clone</code>. Cells in Pending/Failed/Unknown sub-states are excluded. Mutex with <code>--new</code>, <code>--clone</code>, <code>--name</code>, and <code>--rm</code></td>
+<td><code>--name</code></td>
+<td><em>(generated <code>&lt;prefix&gt;-&lt;6hex&gt;</code>)</em></td>
+<td>Name the cell materialised by <code>--from-blueprint</code>/<code>--from-config</code>/<code>--clone</code>. Rejected with the <code>&lt;cell&gt;</code> positional (the positional IS the cell name) and with <code>-f</code> (where <code>metadata.name</code> is authoritative). A <code>--name X</code> collision against a live cell exits non-zero with a <code>kuke run X</code> pointer for the start+attach-existing path</td>
 </tr>
 <tr>
 <td><code>--param</code></td>
 <td>(empty, repeatable)</td>
-<td>Scalar parameter override as <code>KEY=VALUE</code>. Valid with <code>-b</code>. Each <code>KEY</code> must be declared in <code>spec.parameters[]</code>. Wins over the default and over <code>--param-file</code>. Rejected with <code>&lt;config&gt;</code> — a CellConfig carries its own <code>spec.values</code>; edit the Config instead</td>
+<td>Scalar parameter override as <code>KEY=VALUE</code>. Valid with <code>--from-blueprint</code>. Each <code>KEY</code> must be declared in <code>spec.parameters[]</code>. Wins over the default and over <code>--param-file</code>. Rejected on every other source path</td>
 </tr>
 <tr>
 <td><code>--param-file</code></td>
 <td>(empty)</td>
-<td>File of <code>KEY=VALUE</code> lines whose values seed scalar parameters; one per line, <code>#</code> starts a comment. Same declaration rules as <code>--param</code>. CLI <code>--param</code> wins on dups. Rejected with <code>&lt;config&gt;</code> (same reason as <code>--param</code>)</td>
+<td>File of <code>KEY=VALUE</code> lines whose values seed scalar parameters; one per line, <code>#</code> starts a comment. Same declaration rules as <code>--param</code>. CLI <code>--param</code> wins on dups. Rejected on every non-<code>--from-blueprint</code> source path</td>
 </tr>
 <tr>
 <td><code>--env</code></td>
 <td>(empty, repeatable)</td>
-<td>Runtime container env entry as <code>KEY=VALUE</code>; repeatable. Injects extra env into the cell's <strong>attachable container</strong> at start time, in addition to <code>spec.cell.containers[&lt;attachable&gt;].env</code>. Empty value (<code>KEY=</code>) is allowed; missing <code>=</code> is rejected. A KEY that collides with an existing entry in the attachable container's spec env <strong>overrides</strong> the spec value. Valid with all source paths (<code>&lt;config&gt;</code>/<code>-f</code>/<code>-b</code>) and all identity flags (<code>--new</code>/<code>--clone</code>/<code>--reuse</code>). The injected entries do <strong>not</strong> persist into the cell metadata — the divergent-spec check on a subsequent <code>kuke run &lt;config&gt;</code> without <code>--env</code> does not trip on the prior injection; the cell's stored spec env is unchanged across restarts. With <code>--reuse</code>, each invocation re-injects against the restarted cell. Per-invocation runtime knob; for render-time spec substitution use <code>--param</code> instead</td>
+<td><code>KEY=VALUE</code> env entry; repeatable. <strong>Dual semantics by source path:</strong> on the <code>&lt;cell&gt;</code> positional and <code>-f</code> paths it is transport-only runtime injection (<code>Spec.RuntimeEnv</code>, #834) into the attachable container's OCI process env at start time; on the <code>--from-config</code>/<code>--clone</code> paths it is the <strong>persisted per-cell override</strong> baked into the materialised <code>CellDoc</code> (<code>Spec.Provenance.EnvOverrides</code>, #1023). Rejected with <code>--from-blueprint</code> (use <code>--param</code> for render-time overrides)</td>
 </tr>
 <tr>
 <td><code>--detach</code>, <code>-d</code></td>
@@ -3486,7 +3395,12 @@
 <tr>
 <td><code>--require-synced</code></td>
 <td><code>false</code></td>
-<td>Refuse to attach when the live cell's spec diverges from the materialisation of the requested source. Default (post-#986) is <strong>warn-and-attach</strong>: print a one-line <code>notice:</code> naming the diverging fields and the reconcile pointer, then attach to the live state. <code>--require-synced</code> opt-in restores the pre-#986 refuse-on-divergence behaviour for CI/scripted callers that want a hard fail on drift</td>
+<td>With <code>-f</code>: refuse to attach when the live cell's spec diverges from the on-disk manifest. Default (post-#986) is <strong>warn-and-attach</strong>: print a one-line <code>notice:</code> naming the diverging fields and the <code>kuke apply -f</code> pointer, then attach to the live state. <code>--require-synced</code> opt-in restores the pre-#986 refuse-on-divergence behaviour for CI/scripted callers that want a hard fail on drift</td>
+</tr>
+<tr>
+<td><code>--ignore-disk-pressure</code></td>
+<td><code>false</code></td>
+<td>Bypass kukeond's data-volume disk-pressure guard for this run. Threads transport-only onto <code>Spec.IgnoreDiskPressure</code> (issue #1035). Read off <code>cmd.Flags()</code> (the flag is registered by <code>cell.RegisterSourceFlags</code>, shared with <code>kuke create cell</code>; no viper bind on the <code>run</code> side)</td>
 </tr>
 <tr>
 <td><code>--realm</code></td>
@@ -3520,143 +3434,15 @@
 </ol>
 <p>Pass <code>-d</code>/<code>--detach</code> to return immediately without attaching. <code>--container</code> is rejected together with <code>-d</code>.</p>
 <p>A clean <code>^]^]</code> detach exits the CLI but leaves the cell running so you can re-attach later with <a href="../kuke-attach/"><code>kuke attach</code></a>.</p>
-<h2 id="blueprints-and-configs">Blueprints and Configs<a class="headerlink" href="#blueprints-and-configs" title="Permanent link">&para;</a></h2>
-<p>The <code>-b</code>/<code>--blueprint</code> flag and the <code>&lt;config&gt;</code> positional both run daemon-stored templates instead of an on-disk file. They are resolved by name in the scope named by <code>--realm</code>/<code>--space</code>/<code>--stack</code> — the same lookup <code>kuke get blueprint &lt;name&gt;</code> / <code>kuke get config &lt;name&gt;</code> performs.</p>
-<p>The two cover different operator workflows:</p>
+<h2 id="materialising-from-a-blueprint-config-or-sibling-cell">Materialising from a Blueprint, Config, or sibling cell<a class="headerlink" href="#materialising-from-a-blueprint-config-or-sibling-cell" title="Permanent link">&para;</a></h2>
+<p>The <code>--from-blueprint</code>/<code>--from-config</code>/<code>--clone</code> flags run daemon-stored templates (or fork an existing cell's recipe) instead of an on-disk file. They share their definitions with <a href="../kuke-create/#kuke-create-cell"><code>kuke create cell</code></a> (<code>cell.RegisterSourceFlags</code>) so the un-fused <code>kuke create cell --from-...</code> + <code>kuke start &lt;name&gt;</code> and the fused <code>kuke run --from-...</code> produce identical CellDocs.</p>
 <ul>
-<li><strong><code>-b &lt;blueprint&gt;</code> — fresh cell per invocation.</strong> A CellBlueprint is a template with declared <code>spec.parameters[]</code>. Each <code>kuke run -b</code> materializes a new cell with a <code>&lt;prefix&gt;-&lt;6hex&gt;</code> name; scalar <code>--param KEY=VALUE</code> (or <code>--param-file</code>) overrides the Blueprint's defaults. This is the direct replacement for the removed <code>-p</code> form — apply the blueprint once and run it many times.</li>
-<li><strong><code>&lt;config&gt;</code> — stable-named, idempotent.</strong> A CellConfig binds a CellBlueprint reference to concrete scalar values plus structural slot fills (repo bindings, secret references). The default cell name is the Config's <code>metadata.name</code>. <code>--param</code>/<code>--param-file</code> are rejected because the Config already owns its values — edit the Config instead.</li>
-<li><strong><code>&lt;config&gt; --new</code> — fresh-cell-per-invocation spawns from one Config.</strong> <code>--new</code> opts out of the stable-name identity and materializes a fresh <code>&lt;config-name&gt;-&lt;6hex&gt;</code> cell per invocation. Each invocation produces a distinct cell; the <code>kukeon.io/config=&lt;name&gt;</code> lineage label is preserved so <code>kuke get cells -l kukeon.io/config=&lt;name&gt;</code> enumerates every spawn. Compatible with <code>--rm</code> (ephemeral generated sandboxes from one Config) and with <code>--name X</code> (pin the cell name to <code>X</code> and fail on collision instead of letting hex carry uniqueness — the create-or-fail companion to <code>--name X</code> alone). No Config artifact is created — the lineage lives entirely in the cell's label.</li>
-<li><strong><code>&lt;config&gt; --clone</code> — fork the Config into a persistent clone Config + cell.</strong> <code>--clone</code> creates a new daemon-stored CellConfig named <code>&lt;source&gt;-&lt;N&gt;</code> (lowest unused integer ≥ 0 among clones of <code>&lt;source&gt;</code> in the target realm — gap-fill counter) and starts a cell from it. The clone is a first-class Config that subsequent <code>kuke run &lt;source&gt;-N</code> invocations resolve directly (idempotent attach via the stable-name path). It carries <code>metadata.annotations.kukeon.io/source-config: &lt;source&gt;</code> as the lineage marker; its <code>spec</code> is a deep copy of the source's so editing the source post-clone never propagates to existing clones. Allocation is atomic — two concurrent <code>--clone</code> invocations against the same source pick distinct <code>N</code>'s, never racing on the same slot. Combine with <code>--name X</code> for an explicit-name create-or-fail clone (<code>cellconfig "X" already exists</code> on collision). Use cases: interactive multi-instance (<code>kukeon-dev-0</code>, <code>kukeon-dev-1</code>, …) and cron pool seeding (consumed by <code>--reuse</code>).</li>
-<li><strong><code>&lt;config&gt; --reuse</code> — restart a healthy-Stopped clone, preserving the overlay.</strong> <code>--reuse</code> picks the lowest-N clone of <code>&lt;source&gt;</code> whose cell is in the Stopped state, starts that cell in-place via <code>StartCell</code> (the daemon creates a new task in the existing containerd snapshot — the overlay filesystem persists), and attaches. The headline win is state preservation: without <code>--reuse</code>, every invocation re-clones the project repo into a fresh cell (tens of MB + several seconds per tick for a repo like <code>kukeon</code>); with <code>--reuse</code>, the clone happens once per pool member. On an empty pool — first tick, post-reboot, or every clone already Running — <code>--reuse</code> falls through to <code>--clone</code>'s code path and forks a new clone Config + cell (atomic gap-fill counter), so the operator never sees a "pool empty" error. Concurrent <code>--reuse</code> invocations against the same source pick distinct cells: the daemon's <code>StartCell</code> rejects a duplicate Start on a Ready cell, and the loser advances to the next pool candidate. Running clones are invisible to the pool query; an all-Running pool of N members falls back to allocating <code>&lt;source&gt;-&lt;N+1&gt;</code>. Cells in Pending / Failed / Unknown sub-states are excluded. Never deletes the picked clone's cell — the overlay must survive the stop/start transition. Driver use case: cron-driven skill execution (<code>kuke run kukeon-dev-pick-issue --reuse --env LABEL=bug -d</code>) where each tick reuses the same per-pool-member project clone rather than re-cloning per tick.</li>
+<li><strong><code>--from-blueprint &lt;bp&gt;</code></strong> — a CellBlueprint is a template with declared <code>spec.parameters[]</code>. Scalar <code>--param KEY=VALUE</code> (or <code>--param-file</code>) overrides the Blueprint's defaults. <code>--env</code> is rejected here (Blueprints take render-time <code>--param</code>, not runtime env overrides — <code>cell.ValidateOverrideSymmetry</code> enforces the rejection).</li>
+<li><strong><code>--from-config &lt;cfg&gt;</code></strong> — a CellConfig binds a CellBlueprint reference to concrete scalar values plus structural slot fills (repo bindings, secret references). <code>--param</code>/<code>--param-file</code> are rejected (the Config owns its values — edit it instead). <code>--env KEY=VALUE</code> is the <strong>persisted per-cell override</strong> baked into the materialised CellDoc (<code>Spec.Provenance.EnvOverrides</code>, #1023) — symmetric with <code>kuke create cell --from-config --env</code>. The override survives re-resolution from provenance (P5) and <code>kuke restart</code>'s daemon-side reconcile (P7).</li>
+<li><strong><code>--clone &lt;cell&gt;</code></strong> — forks an existing cell's <code>CellDoc</code> into a fresh cell. The clone copies the source's container spec, scope, and provenance binding (the new cell stays tied to its original Blueprint/Config for re-resolution); it does <strong>not</strong> copy the source's runtime overlay. Use when you want a sibling of an existing dev cell that drifts independently from this point on.</li>
 </ul>
-<h3 id="identity-shapes-for-config">Identity shapes for <code>&lt;config&gt;</code><a class="headerlink" href="#identity-shapes-for-config" title="Permanent link">&para;</a></h3>
-<p><code>kuke run &lt;config&gt;</code> accepts <code>--name</code>, <code>--new</code>, <code>--clone</code>, and <code>--reuse</code> in the following combinations. The cell name, the Config side-effect, and the collision behavior together pick the identity shape. <code>--new</code>, <code>--clone</code>, and <code>--reuse</code> are pairwise mutex (different operations); <code>--clone</code> and <code>--reuse</code> are also mutex with <code>--rm</code> (a persistent clone Config whose cell is removed on exit is operationally messy — use <code>kuke apply -f &lt;clone-spec&gt;</code> if you want the slot without an attached cell, or omit <code>--rm</code> for the pool-friendly cron-tick path).</p>
-<table>
-<thead>
-<tr>
-<th>Invocation</th>
-<th>Cell name</th>
-<th>If name exists</th>
-<th>Config side-effect</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>kuke run &lt;cfg&gt;</code></td>
-<td><code>&lt;cfg&gt;</code> (stable)</td>
-<td>Attach (idempotent identity, walks the state machine below)</td>
-<td>None</td>
-</tr>
-<tr>
-<td><code>kuke run &lt;cfg&gt; --name X</code></td>
-<td><code>X</code></td>
-<td>Attach (idempotent attach to pinned name)</td>
-<td>None</td>
-</tr>
-<tr>
-<td><code>kuke run &lt;cfg&gt; --new</code></td>
-<td><code>&lt;cfg&gt;-&lt;6hex&gt;</code></td>
-<td>N/A (hex collision-free in practice)</td>
-<td>None</td>
-</tr>
-<tr>
-<td><code>kuke run &lt;cfg&gt; --new --name X</code></td>
-<td><code>X</code></td>
-<td><strong>Fail</strong> with attach-if-exists pointer</td>
-<td>None</td>
-</tr>
-<tr>
-<td><code>kuke run &lt;cfg&gt; --new --rm</code></td>
-<td><code>&lt;cfg&gt;-&lt;6hex&gt;</code></td>
-<td>N/A</td>
-<td>None (cell removed on exit)</td>
-</tr>
-<tr>
-<td><code>kuke run &lt;cfg&gt; --clone</code></td>
-<td><code>&lt;cfg&gt;-&lt;N&gt;</code> (clone)</td>
-<td>(new clone Config + cell)</td>
-<td><strong>Creates</strong> clone CellConfig <code>&lt;cfg&gt;-&lt;N&gt;</code> (gap-fill counter)</td>
-</tr>
-<tr>
-<td><code>kuke run &lt;cfg&gt; --clone --name X</code></td>
-<td><code>X</code> (clone)</td>
-<td><strong>Fail</strong> (<code>cellconfig "X" already exists</code>)</td>
-<td><strong>Creates</strong> clone CellConfig <code>X</code> (create-or-fail)</td>
-</tr>
-<tr>
-<td><code>kuke run &lt;cfg&gt; --reuse</code></td>
-<td><code>&lt;cfg&gt;-&lt;N&gt;</code> (claimed)</td>
-<td>(start an existing Stopped clone in place)</td>
-<td>None on hit; <strong>falls back</strong> to <code>--clone</code> on empty pool</td>
-</tr>
-</tbody>
-</table>
-<p>The source Config is never mutated — <code>kuke run</code> is a read-and-materialize verb (with the exception of <code>--clone</code> and <code>--reuse</code>'s empty-pool fallback, which write a <em>new</em> Config alongside but never edit the source). To update the source Config's spec, use <code>kuke restart &lt;name&gt;</code> (which reconciles the at-most-one stable-named cell via the daemon's OutOfSync detector) or edit the Config manifest and re-apply.</p>
-<h4 id="identity-flag-mutex-matrix">Identity-flag mutex matrix<a class="headerlink" href="#identity-flag-mutex-matrix" title="Permanent link">&para;</a></h4>
-<table>
-<thead>
-<tr>
-<th><code>--new</code></th>
-<th><code>--clone</code></th>
-<th><code>--reuse</code></th>
-<th><code>--name</code></th>
-<th><code>--rm</code></th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>—</td>
-<td><strong>mutex</strong> (different op)</td>
-<td><strong>mutex</strong> (different op)</td>
-<td>combinable</td>
-<td>combinable</td>
-</tr>
-<tr>
-<td><strong>mutex</strong> (different op)</td>
-<td>—</td>
-<td><strong>mutex</strong> (different op)</td>
-<td>combinable (named CoF)</td>
-<td><strong>mutex</strong> (orphans clone)</td>
-</tr>
-<tr>
-<td><strong>mutex</strong></td>
-<td><strong>mutex</strong></td>
-<td>—</td>
-<td><strong>mutex</strong> (pool pick)</td>
-<td><strong>mutex</strong> (orphans clone)</td>
-</tr>
-</tbody>
-</table>
-<h3 id="identity-state-machine-for-config-idempotent-path">Identity state machine for <code>&lt;config&gt;</code> (idempotent path)<a class="headerlink" href="#identity-state-machine-for-config-idempotent-path" title="Permanent link">&para;</a></h3>
-<p>The two idempotent shapes — <code>&lt;config&gt;</code> alone and <code>&lt;config&gt; --name X</code> — walk the same identity state and converge:</p>
-<table>
-<thead>
-<tr>
-<th>Live cell state</th>
-<th>Behavior</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>No cell with the chosen name</td>
-<td>Materialize from the referenced Blueprint with the Config's values + slot fills, create the cell, attach.</td>
-</tr>
-<tr>
-<td>Live and running</td>
-<td>Attach to the existing cell (no-op create).</td>
-</tr>
-<tr>
-<td>Live but stopped</td>
-<td>Start the existing cell, then attach.</td>
-</tr>
-<tr>
-<td>Live but in an error / partial state</td>
-<td>Refuse with a <code>kuke delete cell &lt;name&gt;</code> pointer; do not attempt to recover by recreating.</td>
-</tr>
-</tbody>
-</table>
-<p>If the live cell's spec differs from the materialisation of the <em>current</em> Config + Blueprint (someone edited the Config or the underlying Blueprint after the cell was last materialised), the idempotent shapes default to <strong>warn-and-attach</strong> (post-#986): a one-line <code>notice:</code> cites the diverging fields and the <code>kuke restart &lt;name&gt;</code> reconcile pointer, then the operator is dropped into the live cell so the interactive debugging task isn't blocked on a drift signal. <code>kuke run</code> itself never updates the live cell — destructive updates still route through <code>kuke restart &lt;name&gt;</code> (which stops, updates, and starts the cell) or <code>kuke apply -f</code>. Pass <code>--require-synced</code> to opt into the pre-#986 refuse-on-divergence behaviour for CI/scripted callers that need a hard fail on drift. <code>-b --name &lt;cell&gt;</code> against a divergent live cell applies the same warn-and-attach default with a <code>kuke delete cell &lt;cell&gt;</code> + re-run pointer in the notice (Blueprint-lineage cells have no implicit reconcile; promote to a CellConfig for <code>kuke restart</code> reconcile workflows); <code>--require-synced</code> flips that to the matching refusal. The fresh-cell-per-invocation <code>kuke run -b &lt;bp&gt;</code> (no <code>--name</code>) materialises a fresh <code>&lt;prefix&gt;-&lt;6hex&gt;</code> cell on every invocation, so no divergent-spec check applies. The <code>kuke run &lt;config&gt; --new</code> path is similarly fresh-per-invocation, so it also has no divergent-spec check (and the lineage label still ties spawns back to the Config).</p>
+<p>The fused form is always create + start + attach: a <code>--name X</code> collision against a live cell exits non-zero with a <code>kuke run X</code> pointer for the start+attach-existing path. Without <code>--name</code>, the generated <code>&lt;prefix&gt;-&lt;6hex&gt;</code> is probed free against the daemon at the cell's scope, so the generated path can't collide.</p>
+<p>To reconcile a live cell against its lineage Config/Blueprint after the source has changed, run <a href="../kuke-restart/"><code>kuke restart &lt;name&gt;</code></a> (#983); the daemon's reconcile (P7) applies Compatible OutOfSync diffs in place and recreates on Breaking diffs. <code>kuke run</code> itself never mutates a live cell on any source path.</p>
 <p>See <a href="../../manifests/blueprint/"><code>kind: CellBlueprint</code></a> and <a href="../../manifests/config/"><code>kind: CellConfig</code></a> for the full manifest reference, and the <a href="../../guides/migrate-cellprofile-to-blueprint/">profile → blueprint migration guide</a> for the cutover recipe.</p>
 <h2 id="cleanup-with-rm">Cleanup with <code>--rm</code><a class="headerlink" href="#cleanup-with-rm" title="Permanent link">&para;</a></h2>
 <p><code>--rm</code> best-effort deletes the cell after it's no longer needed (any return code). <code>kuke run</code> is daemon-only after #566 — <code>KUKEON_NO_DAEMON=true</code> and <code>--run-path</code> promotion are inert for workload verbs and no longer reach an in-process branch for <code>run</code>, so <code>--rm</code> is always available. Cleanup runs from <code>kukeond</code>'s reconcile loop, so latency is bounded by the reconcile interval rather than firing the instant the trigger fires.</p>
@@ -3667,58 +3453,42 @@
 <li>A clean <code>^]^]</code> detach is <strong>not</strong> a trigger: the cell stays alive so the operator can re-attach later (parity with <code>kuke attach</code>).</li>
 </ul>
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Run a one-shot cell from a file, attached</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>-f<span class="w"> </span>hello.yaml
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Start + attach an existing cell</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>my-shell
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Run detached from a daemon-stored blueprint</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>kuke<span class="w"> </span>run<span class="w"> </span>-b<span class="w"> </span>shell<span class="w"> </span>--detach
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Same, detach instead of attaching</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>my-shell<span class="w"> </span>-d
 <a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Materialize a blueprint with overridden parameters</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>kuke<span class="w"> </span>run<span class="w"> </span>-b<span class="w"> </span>shell<span class="w"> </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>alpine:latest<span class="w"> </span>--param<span class="w"> </span><span class="nv">CMD</span><span class="o">=</span><span class="s2">&quot;/bin/sh&quot;</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Create-or-attach a one-shot cell from a file</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>-f<span class="w"> </span>hello.yaml
 <a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># Use a parameter file, with one CLI override winning on the same key</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>kuke<span class="w"> </span>run<span class="w"> </span>-b<span class="w"> </span>shell<span class="w"> </span>--param-file<span class="w"> </span>./shell.env<span class="w"> </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>alpine:edge
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># Create + start + attach a fresh cell from a Blueprint</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--from-blueprint<span class="w"> </span>shell<span class="w"> </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>alpine:latest<span class="w"> </span>--param<span class="w"> </span><span class="nv">CMD</span><span class="o">=</span><span class="s2">&quot;/bin/sh&quot;</span>
 <a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="c1"># Pin the materialized cell name</span>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>kuke<span class="w"> </span>run<span class="w"> </span>-b<span class="w"> </span>shell<span class="w"> </span>--name<span class="w"> </span>my-shell<span class="w"> </span>--detach
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="c1"># Same Blueprint, pin a specific cell name</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--from-blueprint<span class="w"> </span>shell<span class="w"> </span>--name<span class="w"> </span>my-shell<span class="w"> </span>-d
 <a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="c1"># One-shot job that cleans itself up after the workload exits</span>
-<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>kuke<span class="w"> </span>run<span class="w"> </span>-b<span class="w"> </span>batch<span class="w"> </span>--rm
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="c1"># Use a parameter file, with one CLI override winning on the same key</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--from-blueprint<span class="w"> </span>shell<span class="w"> </span>--param-file<span class="w"> </span>./shell.env<span class="w"> </span>--param<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>alpine:edge
 <a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>
-<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="c1"># Run a daemon-stored CellBlueprint with a scalar param override (fresh cell)</span>
-<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>-b<span class="w"> </span>dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>--param<span class="w"> </span><span class="nv">PROJECT_DIR</span><span class="o">=</span>kukeon
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="c1"># Create + start + attach a fresh cell from a daemon-stored CellConfig</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--from-config<span class="w"> </span>kukeon-dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system
 <a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>
-<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="c1"># Run a daemon-stored CellConfig (stable-named; attaches if the cell already exists)</span>
-<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>kukeon-dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="c1"># Same Config, with a persisted per-cell env override baked into the CellDoc</span>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--from-config<span class="w"> </span>kukeon-dev-pick-issue<span class="w"> </span>--env<span class="w"> </span><span class="nv">LABEL</span><span class="o">=</span>bug<span class="w"> </span>-d
 <a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>
-<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="c1"># Same Config, but detach instead of attaching after start</span>
-<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>kukeon-dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>-d
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="c1"># Fork an existing cell&#39;s recipe into a sibling</span>
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--clone<span class="w"> </span>kukeon-dev<span class="w"> </span>--name<span class="w"> </span>kukeon-dev-debug
 <a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>
-<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="c1"># Fresh-cell-per-invocation spawn from the same Config — fire-and-forget sandbox</span>
-<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>kukeon-dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>--new<span class="w"> </span>--rm
-<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a>
-<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a><span class="c1"># Pin a specific cell name from the Config (idempotent attach if it exists)</span>
-<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>kukeon-dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>--name<span class="w"> </span>kukeon-dev-prober
-<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a>
-<a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a><span class="c1"># Same, but fail-on-collision (create-or-fail at the pinned name)</span>
-<a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>kukeon-dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>--new<span class="w"> </span>--name<span class="w"> </span>kukeon-dev-prober
-<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a>
-<a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a><span class="c1"># Fork the Config into a persistent clone (kukeon-dev-0, then kukeon-dev-1, ...)</span>
-<a id="__codelineno-1-38" name="__codelineno-1-38" href="#__codelineno-1-38"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>kukeon-dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>--clone
-<a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a>
-<a id="__codelineno-1-40" name="__codelineno-1-40" href="#__codelineno-1-40"></a><span class="c1"># Same fork pattern, explicit clone name (create-or-fail)</span>
-<a id="__codelineno-1-41" name="__codelineno-1-41" href="#__codelineno-1-41"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>kukeon-dev<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>--clone<span class="w"> </span>--name<span class="w"> </span>kukeon-dev-debug
-<a id="__codelineno-1-42" name="__codelineno-1-42" href="#__codelineno-1-42"></a>
-<a id="__codelineno-1-43" name="__codelineno-1-43" href="#__codelineno-1-43"></a><span class="c1"># Restart a healthy-Stopped clone in place, preserving the cell&#39;s overlay</span>
-<a id="__codelineno-1-44" name="__codelineno-1-44" href="#__codelineno-1-44"></a><span class="c1"># (project repo clone, .claude.json, any per-cell state). Empty pool → forks</span>
-<a id="__codelineno-1-45" name="__codelineno-1-45" href="#__codelineno-1-45"></a><span class="c1"># via --clone. Typical cron line:</span>
-<a id="__codelineno-1-46" name="__codelineno-1-46" href="#__codelineno-1-46"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>kukeon-dev-pick-issue<span class="w"> </span>--realm<span class="w"> </span>kuke-system<span class="w"> </span>--reuse<span class="w"> </span>-d
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="c1"># One-shot job that cleans itself up after the workload exits</span>
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--from-blueprint<span class="w"> </span>batch<span class="w"> </span>--rm
 </code></pre></div>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../kuke-apply/">kuke apply</a> — declarative path; supports multi-document manifests</li>
 <li><a href="../kuke-attach/">kuke attach</a> — attach to an already-running cell</li>
-<li><a href="../kuke-create/#kuke-create-cell">kuke create cell</a> — imperative cell creation without a manifest</li>
+<li><a href="../kuke-create/#kuke-create-cell">kuke create cell</a> — un-fused create-only primitive (Blueprint/Config/Clone sources)</li>
+<li><a href="../kuke-restart/">kuke restart</a> — reconcile a live cell against its lineage Config/Blueprint</li>
 <li><a href="../../guides/migrate-cellprofile-to-blueprint/">Migrate from <code>CellProfile</code> to <code>CellBlueprint</code></a> — the #626 cutover recipe</li>
 </ul>
 
@@ -3743,7 +3513,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 4, 2026 09:40:01 UTC">June 4, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 6, 2026 01:41:51 UTC">June 6, 2026</span>
   </span>
 
     
