@@ -1,7 +1,7 @@
 # kuke restart
 
 ```
-kuke restart <name> [--realm <name>] [--space <name>] [--stack <name>]
+kuke restart (<name> | -l <selector>) [--realm <name>] [--space <name>] [--stack <name>]
 ```
 
 Restart a cell (cells are the only lifecycle subject). Bounces the running process. When the cell is a Config-lineage cell that the daemon has marked OutOfSync, the start step automatically re-materialises the spec from the Config (daemon-side, in `controller.StartCell` — issue #983), so the restart is also a reconcile.
@@ -9,19 +9,22 @@ Restart a cell (cells are the only lifecycle subject). Bounces the running proce
 ## Synopsis
 
 ```
-kuke restart <name> [--realm <name>] [--space <name>] [--stack <name>]
+kuke restart (<name> | -l <selector>) [--realm <name>] [--space <name>] [--stack <name>]
 ```
 
 Bounces the cell's containers (stop + start). When the cell carries a `kukeon.io/config=<name>` lineage label and the daemon has marked it OutOfSync, the daemon's `StartCell` reapplies the freshly materialised spec from the lineage Config before bringing the cell back up — equivalent to `kuke stop <name>` + `kuke start <name>`. Severs any active attach session as a side effect of the stop step.
 
+With `-l <selector>` (mutually exclusive with the positional `<name>`) the restart fans out across **every** cell in scope whose labels match, reconciling each matched cell individually — the fleet-rollout path for a Config whose stamped cells share the `kukeon.io/config=<name>` lineage label. Unmatched cells are untouched.
+
 ### Flags
 
-| Flag                  | Default      | Description              |
-| --------------------- | ------------ | ------------------------ |
-| `<name>` (positional) | _(required)_ | The cell to restart      |
-| `--realm`             | `""`         | Realm that owns the cell |
-| `--space`             | `""`         | Space that owns the cell |
-| `--stack`             | `""`         | Stack that owns the cell |
+| Flag                  | Default      | Description                                                                                              |
+| --------------------- | ------------ | ------------------------------------------------------------------------------------------------------- |
+| `<name>` (positional) | _(one of)_   | The cell to restart. Mutually exclusive with `-l`; exactly one of `<name>` / `-l` is required           |
+| `-l`, `--selector`    | `""`         | Label selector (e.g. `kukeon.io/config=<name>`); restarts every matched cell in scope. Mutually exclusive with `<name>` |
+| `--realm`             | `""`         | Realm that owns the cell                                                                                 |
+| `--space`             | `""`         | Space that owns the cell                                                                                 |
+| `--stack`             | `""`         | Stack that owns the cell                                                                                 |
 
 Plus all [global flags](kuke.md). Realm/space/stack are required (no default fall-through); a missing one returns the matching `errdefs.ErrRealmNameRequired` / `ErrSpaceNameRequired` / `ErrStackNameRequired` sentinel.
 
@@ -42,7 +45,7 @@ The OutOfSync flag on a cell is set by the daemon's reconciler loop when a cell 
 ### Side effects
 
 - Active attach sessions are severed by the stop step.
-- The reapply lives in the daemon's `controller.StartCell` (`internal/controller/start_cell.go`), so every code path that issues `StartCell` — `kuke restart`'s start step, `kuke start` directly, and `kuke run <config>` on an existing Stopped cell — inherits the reconcile-on-start behaviour. The CLI restart command itself no longer composes `GetConfig` + `GetBlueprint` + `ApplyDocuments`; those calls happen daemon-side.
+- The reapply lives in the daemon's `controller.StartCell` (`internal/controller/start_cell.go`), so every code path that issues `StartCell` — `kuke restart`'s start step, `kuke start` directly, and `kuke run <cell>` on an existing Stopped cell — inherits the reconcile-on-start behaviour. The CLI restart command itself no longer composes `GetConfig` + `GetBlueprint` + `ApplyDocuments`; those calls happen daemon-side.
 - On the reapply branch the daemon resolves the lineage Config (probing the cell's full scope → space-only → realm-only, mirroring the reconciler), materialises the cell from Config + Blueprint, and rebuilds via `RecreateCell` — tearing down the stale containerd records (post-#867 stop leaves them in place with the old spec-hash) and starting fresh containers with the new spec.
 - A reapply that fails to materialise (lineage Config deleted, referenced Blueprint missing, OutOfSync detection itself errored, `RecreateCell` failure) falls back to starting the cell with the on-disk spec — the runtime still bounces as the operator asked. Diagnostics are logged daemon-side (`kukeond` slog stream) rather than printed to the CLI.
 - Running clones of the source Config are unaffected by a `kuke restart` on one cell; each clone needs its own `kuke restart <clone-name>` (or stop+start) to pick up the new spec.
@@ -76,6 +79,6 @@ Started cell "foo" from stack "default"
 
 - [kuke start / stop / kill](kuke-lifecycle.md) — primitive lifecycle verbs `kuke restart` composes; the OutOfSync reapply also fires from `kuke start` directly.
 - [kuke get](kuke-get.md) — read the `SYNC` column on `kuke get cell -o wide` to spot OutOfSync ahead of `restart`.
-- [kuke run](kuke-run.md) — divergent-spec warn-and-attach on the `<config>` and `-b --name` paths (`--require-synced` for the opt-in refusal) cites `kuke restart <name>` as the reconcile pointer; the `<config>` path on an existing Stopped cell also triggers the daemon-side reapply.
+- [kuke run](kuke-run.md) — divergent-spec warn-and-attach on the `-f` path (`--require-synced` for the opt-in refusal) cites `kuke restart <name>` as the reconcile pointer; `kuke run <cell>` on an existing Stopped cell also triggers the daemon-side reapply.
 - [`kind: CellConfig`](../manifests/config.md) — the lineage source the OutOfSync reapply re-materialises from.
 - [`kind: CellBlueprint`](../manifests/blueprint.md) — referenced by the Config, looked up via `GetBlueprint` on the reapply path.

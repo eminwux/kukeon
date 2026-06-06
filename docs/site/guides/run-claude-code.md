@@ -1,6 +1,6 @@
 # Run Claude Code in a kukeon cell
 
-This guide walks a freshly-`kuke init`-ed host from zero to a live Claude Code prompt running inside a kukeon cell — first as a long-lived Attachable `Cell`, then as a parametrized `CellBlueprint` you can drive with `kuke run -b` for one-shot prompts.
+This guide walks a freshly-`kuke init`-ed host from zero to a live Claude Code prompt running inside a kukeon cell — first as a long-lived Attachable `Cell`, then as a parametrized `CellBlueprint` you can drive with `kuke run --from-blueprint` for one-shot prompts.
 
 [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) is named in the [Vision](../vision.md) as the canonical agent workload kukeon's isolation primitives are measured against. The companion artifacts under [`docs/examples/claude-code/`](https://github.com/eminwux/kukeon/tree/main/docs/examples/claude-code) are the smallest end-to-end shape: an image, a Cell, and a CellBlueprint.
 
@@ -100,7 +100,7 @@ This is optional — the smoke flow above does not need it.
 
 ## Step 4 — One-shot prompts via a `CellBlueprint`
 
-For "fire one prompt, tear the cell down on exit" jobs, apply the example blueprint to the daemon and drive it with `kuke run -b`. A [CellBlueprint](../manifests/blueprint.md) is a daemon-stored, scoped cell template — the replacement for the legacy client-side `CellProfile` removed in [#626](https://github.com/eminwux/kukeon/issues/626) (see the [migration guide](migrate-cellprofile-to-blueprint.md)).
+For "fire one prompt, tear the cell down on exit" jobs, apply the example blueprint to the daemon and drive it with `kuke run --from-blueprint`. A [CellBlueprint](../manifests/blueprint.md) is a daemon-stored, scoped cell template — the replacement for the legacy client-side `CellProfile` removed in [#626](https://github.com/eminwux/kukeon/issues/626) (see the [migration guide](migrate-cellprofile-to-blueprint.md)).
 
 ```bash
 sudo kuke apply -f docs/examples/claude-code/blueprint.yaml
@@ -111,19 +111,19 @@ The blueprint declares two parameters: `IMAGE` (defaults to `docker.io/library/c
 Run it:
 
 ```bash
-sudo kuke run -b claude-code \
+sudo kuke run --from-blueprint claude-code \
     --param PROMPT="explain the kukeon architecture in one sentence"
 ```
 
-`kuke run -b` materializes a cell named `claude-code-<6hex>`, attaches to the `work` container, runs the onInit script, prints Claude Code's reply, and exits. Override `IMAGE` to pin a tag:
+`kuke run --from-blueprint` materializes a cell named `claude-code-<6hex>`, attaches to the `work` container, runs the onInit script, prints Claude Code's reply, and exits. Override `IMAGE` to pin a tag:
 
 ```bash
-sudo kuke run -b claude-code \
+sudo kuke run --from-blueprint claude-code \
     --param IMAGE=docker.io/library/claude-code:2026-05-14 \
     --param PROMPT="…"
 ```
 
-See [`kuke run`](../cli/kuke-run.md) for the full flag surface, including `--name`, `--param-file`, and the `-d`/`--detach` mode. For an idempotent, name-stable identity (one live cell per invocation, attaches on re-run instead of spawning a new clone), wrap the blueprint in a `kind: CellConfig` and use `kuke run <config>`.
+See [`kuke run`](../cli/kuke-run.md) for the full flag surface, including `--name`, `--param-file`, and the `-d`/`--detach` mode. To additionally fill structural repo/secret slots, wrap the blueprint in a `kind: CellConfig` and use `kuke run --from-config <cfg>`.
 
 ## Where to go next
 

@@ -289,7 +289,7 @@ sudo kuke run --clone <cell> --name custom                               # same,
 - `--name` is **only** valid with `--from-blueprint`/`--from-config`/`--clone`. Rejected with the `<cell>` positional (the positional IS the cell name) and with `-f` (where `metadata.name` is authoritative). `--param`/`--param-file` are **only** valid with `--from-blueprint`; rejected with `--from-config` (the Config carries its own `spec.values` — edit the Config instead) and with the `<cell>` positional / `-f`.
 - `--env` carries **dual semantics by source path** (the same flag, different effects):
   - On the `<cell>` positional and `-f` paths it is **transport-only runtime injection** (`Spec.RuntimeEnv`, #834): repeatable `KEY=VALUE` entries are merged into the OCI process env of the cell's attachable container at start time (picked by the same precedence as `kuke attach`: `tty.default` > first `attachable: true` non-root). The injected entries do **not** persist into the cell metadata, so a later `kuke run <cell>` without `--env` does not trip the divergent-spec check on the prior injection. Empty value (`KEY=`) is allowed; missing `=` is rejected; a KEY supplied twice with different values is rejected rather than silently last-wins. A KEY that collides with an entry in the attachable container's spec env overrides the spec value.
-  - On the `--from-config` and `--clone` paths it is the **persisted per-cell override** (`Spec.Provenance.EnvOverrides`, #1023) baked into the materialised CellDoc — symmetric with `kuke create cell --from-config --env`. The override survives re-resolution from provenance (P5) and a later `kuke reconcile` (P7). Rejected with `--from-blueprint` (`--param` is the render-time knob for Blueprints; `--env` rejection enforces source/knob symmetry — see `cell.ValidateOverrideSymmetry`).
+  - On the `--from-config` and `--clone` paths it is the **persisted per-cell override** (`Spec.Provenance.EnvOverrides`, #1023) baked into the materialised CellDoc — symmetric with `kuke create cell --from-config --env`. The override survives re-resolution from provenance (P5) and `kuke restart`'s daemon-side reconcile (P7). Rejected with `--from-blueprint` (`--param` is the render-time knob for Blueprints; `--env` rejection enforces source/knob symmetry — see `cell.ValidateOverrideSymmetry`).
 - `kuke run --clone <cell>` (P4 / #1092) forks an existing cell's _recipe_ — the materialised `CellDoc` — into a fresh `<prefix>-<6hex>` cell. The clone copies the source's container spec, scope, and provenance binding (the cell stays tied to its original Blueprint/Config for re-resolution); it does **not** copy the source's runtime overlay filesystem.
 - The bare-positional `<config>` source kind, `-b/--blueprint`, `--new`, the old boolean `--clone`, and `--reuse` have all been retired (epic:cell-identity #1025). Invoking any of `-b`/`--blueprint`/`--new` now errors with cobra's `unknown flag` message. The fused path's value-bearing `--clone <cell>` is a distinct operation and the only `--clone` shape that exists.
 - `--container` is only valid in attach mode; passing both `--container` and `-d/--detach` exits non-zero.
@@ -408,24 +408,29 @@ sudo kuke purge cell <name> --realm <r> --space <s> --stack <st>
 - `delete cell <missing>` exits non-zero with a `not found` message scoped to the realm/space/stack.
 - `delete --cascade` and `delete --force` apply to parent resources (realm/space/stack), not to containers.
 
-### Reconcile an OutOfSync cell to its Config
+### Reconcile an OutOfSync cell to its Config (Model B — explicit pull)
 
-**Intent.** Pick up a Config-lineage cell whose stored spec has diverged from the daemon-stored CellConfig (someone edited the Config — or the underlying Blueprint — after the cell was last materialised) and bring it back in sync, bouncing the running containers as a side effect. This is the operator pair to the daemon's reconciler-driven `SYNC` column on `kuke get cell`.
+**Intent.** Pick up a Config-lineage cell whose stored spec has diverged from the daemon-stored CellConfig (someone edited the Config — or the underlying Blueprint — after the cell was last materialised) and bring it back in sync, bouncing the running containers as a side effect. This is **Model B**: the daemon's reconciler only *marks* divergence (the informational `SYNC=OutOfSync` column on `kuke get cell -o wide`) — it never auto-applies. Reconcile is an explicit, operator-driven pull via `kuke restart` (per-cell, or `-l <selector>` for a fleet). A 1:N Config can have many stamped cells flagged OutOfSync at once; each is reconciled independently.
 
 **Sequence.** Any of these produce the same end state — the reapply lives daemon-side in `controller.StartCell`, so every CLI start path inherits it:
 
 ```bash
-sudo kuke get cell <name> --realm <r> --space <s> --stack <st> -o wide   # SYNC=OutOfSync?
+sudo kuke get cell <name> --realm <r> --space <s> --stack <st> -o wide   # SYNC=OutOfSync? (informational only)
 sudo kuke restart <name> --realm <r> --space <s> --stack <st>            # stop + start (reapply on start)
 # or, equivalently:
 sudo kuke stop <name> --realm <r> --space <s> --stack <st>
 sudo kuke start <name> --realm <r> --space <s> --stack <st>              # reapply on start
 sudo kuke get cell <name> --realm <r> --space <s> --stack <st> -o wide   # SYNC=InSync
+
+# Fleet rollout: re-resolve every cell stamped from the same Config in one pass
+sudo kuke restart -l kukeon.io/config=<cfg> --realm <r> --space <s> --stack <st>
 ```
 
 **Invariants.**
 
+- The daemon never auto-applies a Config edit to a live cell. `SYNC=OutOfSync` is informational — it surfaces the drift so an operator can decide when to pull it in. The cell keeps running its prior spec until an explicit `kuke restart` / `kuke start` reconciles it.
 - Reconcile fires on any `StartCell` against an OutOfSync + `kukeon.io/config=<name>` cell — `kuke restart`'s start step, `kuke start` directly, and `kuke run <cell>` on an existing Stopped cell all trigger the reapply. `kuke stop` + `kuke start` therefore produces the same end state as `kuke restart` (#983).
+- `kuke restart -l <selector>` (mutually exclusive with a positional name) fans out across every cell in scope whose labels match, reconciling each individually — the fleet-rollout path for a Config whose stamped cells share the `kukeon.io/config=<name>` lineage label (#1097). Unmatched cells are untouched. `kuke start -l <selector>` has the same fan-out for the start-only path.
 - A Synced cell is a pure bounce: stop + start with the on-disk spec. A cell with no lineage label, with `Status.OutOfSyncError` set (divergence undecidable — referenced Blueprint missing), or whose lineage Config has been deleted starts with the on-disk spec — the runtime still bounces as the operator asked.
 - On the reapply branch the daemon re-materialises from `GetConfig` + `GetBlueprint`, computes the diff, and rebuilds via `RecreateCell` (tears down stale containerd records, recreates fresh containers with the materialised spec, ends in Ready). The CLI restart path is just `StopCell` + `StartCell` — no `GetConfig` / `GetBlueprint` / `ApplyDocuments` RPCs from the client.
 - A degraded cell (`Pending` / `Failed` / `Unknown`) refuses with a `kuke delete cell <name>` pointer; restart does not reconcile a degraded cell in place.

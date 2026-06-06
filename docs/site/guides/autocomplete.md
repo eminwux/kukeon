@@ -46,7 +46,7 @@ kuke autocomplete fish > ~/.config/fish/completions/kuke.fish
 - **Subcommand names** — `kuke <TAB>` completes against the current command set (`init`, `get`, `create`, `apply`, `run`, `delete`, `start`, `stop`, `kill`, `purge`, `refresh`, `attach`, `log`, `image`, `daemon`, `doctor`, `uninstall`, `autocomplete`, `version`, …). The dispatcher pulls this from the live binary, so a freshly added subcommand shows up the next tab.
 - **Resource names** — `kuke get realm <TAB>`, `kuke delete space <TAB>`, etc. pull live names from the running daemon.
 - **`--realm`, `--space`, `--stack`, `--cell` flags** — complete against the set of resources that match the other flags you've already typed.
-- **Blueprint names for `kuke run -b` and Config names for the `<config>` positional** — `kuke run -b <TAB>` lists daemon-stored CellBlueprints; `kuke run <TAB>` (the positional arg) lists daemon-stored CellConfigs — both scoped by `--realm`/`--space`/`--stack`.
+- **Cell, Blueprint, and Config names on the source flags** — `kuke run <TAB>` (the positional arg) lists existing cells to start + attach. `kuke create cell --from-blueprint <TAB>` and `--clone <TAB>` list daemon-stored CellBlueprints and existing cells respectively; `kuke create cell --from-config <TAB>` lists daemon-stored CellConfigs. All are scoped by `--realm`/`--space`/`--stack`.
 
 Completion functions that need realm / space / stack / cell / blueprint / config data reach out to the daemon, so autocomplete on a host where `kukeond` isn't running will return no suggestions (silently) for those flags. That's expected. Static completions (subcommands) keep working without the daemon.
 

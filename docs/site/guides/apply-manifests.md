@@ -113,7 +113,7 @@ The `--no-daemon` flag itself was retired from workload commands by #222; see [C
 
 ## Parameterized cell blueprints
 
-`kuke apply -f` consumes a **fixed** manifest — the file you ship is the spec the daemon reconciles to, with no substitution layer in between. When you need the same cell shape with different values per invocation (image tag, command, mount paths), apply a **CellBlueprint** to the daemon and run it with `kuke run -b` instead of editing the YAML each time.
+`kuke apply -f` consumes a **fixed** manifest — the file you ship is the spec the daemon reconciles to, with no substitution layer in between. When you need the same cell shape with different values per invocation (image tag, command, mount paths), apply a **CellBlueprint** to the daemon and run it with `kuke run --from-blueprint` instead of editing the YAML each time.
 
 A blueprint is a daemon-stored, scoped resource. It declares its variable inputs alongside the cell template:
 
@@ -144,7 +144,7 @@ Apply it once:
 sudo kuke apply -f shell.blueprint.yaml
 ```
 
-Then `kuke run -b shell` materializes one cell with a unique name (`<metadata.name>-<6hex>` by default; override with `--name`) and resolves each `${KEY}` reference in the body. Resolution order, highest first:
+Then `kuke run --from-blueprint shell` materializes one cell with a unique name (`<prefix>-<6hex>` by default, prefix = `spec.prefix` or `metadata.name`; override with `--name`) and resolves each `${KEY}` reference in the body. Resolution order, highest first:
 
 1. `--param KEY=VALUE` on the CLI (repeatable)
 2. Values from `--param-file <path>` (one `KEY=VALUE` per line, `#` starts a comment)
@@ -154,18 +154,18 @@ Then `kuke run -b shell` materializes one cell with a unique name (`<metadata.na
 
 ```bash
 # Use defaults / env / required errors
-kuke run -b shell --param CMD="echo hi"
+kuke run --from-blueprint shell --param CMD="echo hi"
 
 # Override the image too
-kuke run -b shell --param IMAGE=alpine:edge --param CMD="/bin/sh"
+kuke run --from-blueprint shell --param IMAGE=alpine:edge --param CMD="/bin/sh"
 
 # Load a batch of values from a file, with a CLI override on top
-kuke run -b shell --param-file ./shell.env --param IMAGE=alpine:edge
+kuke run --from-blueprint shell --param-file ./shell.env --param IMAGE=alpine:edge
 ```
 
-`--param`, `--param-file`, and `--name` are rejected when combined with `-f` (file mode is not a blueprint and has no parameter declarations) or the `<config>` positional (a CellConfig already binds its own values). The substituted body is what reaches the daemon — there is no parameter layer in the manifest API itself.
+`--param`, `--param-file`, and `--name` are rejected when combined with `-f` (file mode is not a blueprint and has no parameter declarations); `--param`/`--param-file` are also rejected with `--from-config` (a CellConfig already binds its own values — use `--env` for a per-cell override there). The substituted body is what reaches the daemon — there is no parameter layer in the manifest API itself.
 
-For an idempotent, name-stable identity (one live cell per binding, attaches on re-run), wrap the blueprint in a `kind: CellConfig` and use `kuke run <config>`; see [`kind: CellConfig`](../manifests/config.md).
+To additionally fill a blueprint's structural repo/secret slots, wrap it in a `kind: CellConfig` and use `kuke run --from-config <cfg>`; see [`kind: CellConfig`](../manifests/config.md). Both `--from-blueprint` and `--from-config` stamp a fresh `<prefix>-<6hex>` cell per invocation (pin one with `--name`).
 
 See [kuke run](../cli/kuke-run.md) for the full flag surface.
 
@@ -173,6 +173,6 @@ See [kuke run](../cli/kuke-run.md) for the full flag surface.
 
 - [Manifest Reference](../manifests/overview.md) — the full schema of every resource
 - [CLI Reference → apply](../cli/kuke-apply.md) — every flag on `kuke apply`
-- [CLI Reference → run](../cli/kuke-run.md) — `-f` (file), `-b` (blueprint), and `<config>` (positional config) modes, including parameter handling
+- [CLI Reference → run](../cli/kuke-run.md) — `-f` (file), `--from-blueprint`, and `--from-config` modes, including parameter handling
 - [Migrate from `CellProfile` to `CellBlueprint`](migrate-cellprofile-to-blueprint.md) — the #626 cutover recipe
 - [Tutorials → Hello-world cell](../tutorials/hello-world.md) — a worked example end-to-end

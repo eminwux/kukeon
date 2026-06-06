@@ -37,6 +37,14 @@ spec:
 
 See [Manifest Reference → Cell](../manifests/cell.md) for the full schema.
 
+## Identity, lineage, and provenance
+
+A cell's **identity is its own document** — the `CellDoc`. The CellDoc owns the cell's `metadata.name`, its `spec` (containers, scope, volumes, …), and its `status`. Nothing outside the cell owns its name: a cell materialized from a [`CellBlueprint`](../manifests/blueprint.md) or [`CellConfig`](../manifests/config.md) gets a fresh `<prefix>-<6hex>` name (or a `--name`-pinned one), and the binding it came from is recorded as **lineage**, not identity.
+
+- **Lineage labels.** A cell stamped from a binding carries a back-reference label — `kukeon.io/config=<name>` for a Config-lineage cell, `kukeon.io/blueprint=<name>` for a Blueprint-lineage one. These are 1:N back-references (a binding stamps N cells), used to list a binding's cells (`kuke get cells -l kukeon.io/config=<name>`) and to drive the daemon's OutOfSync reconcile — not to pin a singleton.
+- **Materialization provenance.** Each stamped cell also persists a `Spec.Provenance` block — the binding kind, its scoped ref, the resolved params, and any per-cell `--env` overrides — so [`kuke restart <cell>`](../cli/kuke-restart.md) can re-resolve the cell from its binding without re-supplying values.
+- **Clone provenance.** A cell forked with [`kuke run --clone <cell>`](../cli/kuke-run.md) / `kuke create cell --clone <cell>` carries the `kukeon.io/source-cell=<name>` annotation recording the cell it was forked from. Unlike the lineage labels it is **inert** debug/grooming metadata: no reconcile or selector path keys off it, and it pins no identity. The clone keeps the source's lineage label and provenance binding, so it re-resolves against the same Blueprint/Config the source did.
+
 ## The root container
 
 - One container in a cell must be the root. If none is set explicitly, the first container declared is chosen.

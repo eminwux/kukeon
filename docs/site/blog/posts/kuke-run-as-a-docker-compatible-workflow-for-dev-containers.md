@@ -134,5 +134,5 @@ The trade is honest: you write more YAML up-front than you write `docker run` fl
 ## Where to go next
 
 - For the full agent-runner shape — building a custom image, the Attachable cell pattern, and the parametrized `CellBlueprint` for one-shot prompts — see [Run Claude Code in a kukeon cell](../../guides/run-claude-code.md). The cell-spec pattern this post uses is the same one that guide walks through end-to-end.
-- For the full surface of `kuke run -f` (including `-b` blueprint mode, `<config>` positional for CellConfig, `--rm` auto-delete, and the `-d/--detach` flag), see the [`kuke run` reference](../../cli/kuke-run.md).
+- For the full surface of `kuke run -f` (including `--from-blueprint` mode, `--from-config` for a CellConfig, `--rm` auto-delete, and the `-d/--detach` flag), see the [`kuke run` reference](../../cli/kuke-run.md).
 - For everything `kuke apply`, `kuke attach`, `kuke delete`, and `kuke purge` will and won't do — exit codes, side effects, error paths — `docs/cli-use-cases.md` in the repo is the workflow-oriented source of truth.
