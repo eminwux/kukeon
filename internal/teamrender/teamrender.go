@@ -126,7 +126,15 @@ type Inputs struct {
 // hands this slice to teambuild.BuildAll to drive the local build path
 // (#1064). The slice is deduplicated by entry.Ref so a catalog entry
 // reused across multiple (role × harness) pairs builds once.
+//
+// Secrets is the merged shared+per-team secret set composed by the
+// teamsecrets package (#1113) and is included in the apply payload by
+// MarshalYAML before Blueprints and Configs — the apply bundle order is
+// Secrets → Blueprints → Configs so a Blueprint that references a Secret
+// via ContainerSecret.secretRef sees a daemon-side record present at
+// reconcile time.
 type Result struct {
+	Secrets    []*v1beta1.SecretDoc
 	Blueprints []*v1beta1.CellBlueprintDoc
 	Configs    []*v1beta1.CellConfigDoc
 	Selections []*model.ImageCatalogEntry
@@ -451,10 +459,13 @@ func BindConfig(
 	return cfg
 }
 
-// MarshalYAML returns the Result as a single multi-document YAML stream —
-// every blueprint followed by its companion config. The order matches the
-// per-(role × harness) iteration order so the dry-run output is
-// deterministic.
+// MarshalYAML returns the Result as a single multi-document YAML stream.
+// Bundle order: every Secret, then every Blueprint, then every Config —
+// the "Secrets → Blueprints → Configs" ordering called out in #1113. The
+// per-section order matches the slice order on Result (Secrets sorted by
+// metadata.name by teamsecrets.Render; Blueprints/Configs in
+// (role × harness) iteration order) so the dry-run output and the
+// apply-bundle payload are both deterministic.
 func MarshalYAML(res *Result) ([]byte, error) {
 	if res == nil {
 		return nil, nil
@@ -473,14 +484,19 @@ func MarshalYAML(res *Result) ([]byte, error) {
 		buf.Write(raw)
 		return nil
 	}
+	for i, s := range res.Secrets {
+		if err := emit(s); err != nil {
+			return nil, fmt.Errorf("marshal secret %d: %w", i, err)
+		}
+	}
 	for i, bp := range res.Blueprints {
 		if err := emit(bp); err != nil {
 			return nil, fmt.Errorf("marshal blueprint %d: %w", i, err)
 		}
-		if i < len(res.Configs) {
-			if err := emit(res.Configs[i]); err != nil {
-				return nil, fmt.Errorf("marshal config %d: %w", i, err)
-			}
+	}
+	for i, cfg := range res.Configs {
+		if err := emit(cfg); err != nil {
+			return nil, fmt.Errorf("marshal config %d: %w", i, err)
 		}
 	}
 	return []byte(buf.String()), nil

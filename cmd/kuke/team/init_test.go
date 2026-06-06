@@ -515,7 +515,7 @@ func TestComposeTeamRendersOnNonDryRun(t *testing.T) {
 	if _, statErr := os.Stat(layout.EntryPath("sbsh")); statErr != nil {
 		t.Errorf("entry should have been written on non-dry-run: %v", statErr)
 	}
-	if !strings.Contains(out.String(), "applied 1 blueprint/1 config") {
+	if !strings.Contains(out.String(), "applied 0 secret/1 blueprint/1 config") {
 		t.Errorf("apply-count summary missing: %q", out.String())
 	}
 }
@@ -618,7 +618,7 @@ func TestComposeTeamAppliesRenderedSetToDaemon(t *testing.T) {
 	if !strings.Contains(out.String(), `CellBlueprint "dev-claude": created`) {
 		t.Errorf("per-resource summary missing CellBlueprint line: %q", out.String())
 	}
-	if !strings.Contains(out.String(), `applied 1 blueprint/1 config object(s) to kukeond under team "sbsh"`) {
+	if !strings.Contains(out.String(), `applied 0 secret/1 blueprint/1 config object(s) to kukeond under team "sbsh"`) {
 		t.Errorf("aggregate summary missing: %q", out.String())
 	}
 }
@@ -1279,6 +1279,230 @@ func TestNewTeamCmdRegistersInit(t *testing.T) {
 // silence the unused-import linter when v1beta1 is referenced only through
 // the rendered output bytes.
 var _ = v1beta1.LabelTeam
+
+// TestComposeTeamScaffoldsSecretsEnvFilesOnFirstInit confirms AC: a fresh
+// `~/.kuke/teams/` gets a templated shared `secrets.env`; the team's dir
+// gets a per-team `secrets.env`; both 0o600; both seeded with one `KEY=`
+// line per secret name the team's roles need.
+func TestComposeTeamScaffoldsSecretsEnvFilesOnFirstInit(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+	// Add a second secret to the role's needs so the scaffold body has more
+	// than one line — the sort-and-emit invariant is then visible.
+	bundle.Roles["dev"].Spec.Needs.Secrets = []string{"OPENROUTER_API_KEY", "ANTHROPIC_AUTH_TOKEN"}
+
+	var (
+		mu      sync.Mutex
+		applies []applyCall
+	)
+	var errOut bytes.Buffer
+	err := composeTeam(
+		context.Background(), &bytes.Buffer{}, &errOut, projectDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
+		stubBundle(bundle), recordingApply(&mu, &applies, kukeonv1.ApplyDocumentsResult{}),
+		stubBuildErr(), false, false,
+	)
+	if err != nil {
+		t.Fatalf("composeTeam: %v", err)
+	}
+
+	sharedPath := layout.SharedSecretsEnvPath()
+	teamPath := filepath.Join(layout.TeamDir("sbsh"), "secrets.env")
+	for _, p := range []string{sharedPath, teamPath} {
+		info, statErr := os.Stat(p)
+		if statErr != nil {
+			t.Fatalf("expected scaffolded file %q: %v", p, statErr)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Errorf("file %q mode = %o, want 0600", p, info.Mode().Perm())
+		}
+		raw, readErr := os.ReadFile(p)
+		if readErr != nil {
+			t.Fatalf("read %q: %v", p, readErr)
+		}
+		want := "ANTHROPIC_AUTH_TOKEN=\nOPENROUTER_API_KEY=\n"
+		if string(raw) != want {
+			t.Errorf("file %q body = %q, want %q", p, raw, want)
+		}
+	}
+
+	// One warning per empty key fires on errOut. Values would never appear
+	// in the warning anyway — the lines were KEY= with no value — but pin
+	// the AC: warning fires once per empty key.
+	body := errOut.String()
+	for _, k := range []string{"ANTHROPIC_AUTH_TOKEN", "OPENROUTER_API_KEY"} {
+		if !strings.Contains(body, k) {
+			t.Errorf("missing warning for empty key %q: %q", k, body)
+		}
+	}
+}
+
+// TestComposeTeamRespectsPopulatedSecretsEnv covers the AC: re-running
+// `kuke team init` against a populated shared or per-team secrets.env
+// never overwrites it, and the populated values land on the rendered
+// Secret docs (per-team value wins for shared keys).
+func TestComposeTeamRespectsPopulatedSecretsEnv(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+	bundle.Roles["dev"].Spec.Needs.Secrets = []string{"ANTHROPIC_AUTH_TOKEN", "OPENROUTER_API_KEY"}
+
+	// First init: scaffolds both files (empty).
+	var (
+		mu      sync.Mutex
+		applies []applyCall
+	)
+	apply := recordingApply(&mu, &applies, kukeonv1.ApplyDocumentsResult{})
+	if err := composeTeam(
+		context.Background(), &bytes.Buffer{}, io.Discard, projectDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
+		stubBundle(bundle), apply, stubBuildErr(), false, false,
+	); err != nil {
+		t.Fatalf("first init: %v", err)
+	}
+
+	// Operator fills shared (both keys) and per-team (one override).
+	sharedPath := layout.SharedSecretsEnvPath()
+	teamPath := filepath.Join(layout.TeamDir("sbsh"), "secrets.env")
+	if err := os.WriteFile(sharedPath, []byte(
+		"ANTHROPIC_AUTH_TOKEN=shared-anth\nOPENROUTER_API_KEY=shared-or\n"), 0o600); err != nil {
+		t.Fatalf("populate shared: %v", err)
+	}
+	if err := os.WriteFile(teamPath, []byte(
+		"OPENROUTER_API_KEY=team-or\n"), 0o600); err != nil {
+		t.Fatalf("populate team: %v", err)
+	}
+
+	// Re-init: shared + per-team carry through to the apply payload.
+	if err := composeTeam(
+		context.Background(), &bytes.Buffer{}, io.Discard, projectDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
+		stubBundle(bundle), apply, stubBuildErr(), false, false,
+	); err != nil {
+		t.Fatalf("re-init: %v", err)
+	}
+	if len(applies) != 2 {
+		t.Fatalf("apply call count = %d, want 2", len(applies))
+	}
+	body := string(applies[1].RawYAML)
+	if !strings.Contains(body, "shared-anth") {
+		t.Errorf("re-init apply missing shared-only value carry-through:\n%s", body)
+	}
+	if !strings.Contains(body, "team-or") {
+		t.Errorf("re-init apply missing per-team override:\n%s", body)
+	}
+	if strings.Contains(body, "shared-or") {
+		t.Errorf("re-init apply leaked shared value overridden per-team:\n%s", body)
+	}
+
+	// Files untouched by the re-init.
+	rawShared, _ := os.ReadFile(sharedPath)
+	if !strings.Contains(string(rawShared), "shared-anth") || !strings.Contains(string(rawShared), "shared-or") {
+		t.Errorf("re-init overwrote populated shared file: %q", rawShared)
+	}
+	rawTeam, _ := os.ReadFile(teamPath)
+	if !strings.Contains(string(rawTeam), "team-or") {
+		t.Errorf("re-init overwrote populated team file: %q", rawTeam)
+	}
+}
+
+// TestComposeTeamBundlesSecretsBeforeBlueprintsAndConfigs pins AC:
+// bundle order is Secrets → Blueprints → Configs in the applied YAML.
+// The renderer's MarshalYAML emits the three sections in that order; a
+// reader can verify by the byte-offset of each section's "kind:" line.
+func TestComposeTeamBundlesSecretsBeforeBlueprintsAndConfigs(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+	bundle.Roles["dev"].Spec.Needs.Secrets = []string{"ANTHROPIC_AUTH_TOKEN"}
+	// Scaffold a populated shared so the rendered set carries one Secret.
+	if err := os.MkdirAll(filepath.Join(layout.Base, "teams"), 0o700); err != nil {
+		t.Fatalf("mkdir teams: %v", err)
+	}
+	if err := os.WriteFile(layout.SharedSecretsEnvPath(),
+		[]byte("ANTHROPIC_AUTH_TOKEN=populated\n"), 0o600); err != nil {
+		t.Fatalf("seed shared: %v", err)
+	}
+
+	var (
+		mu      sync.Mutex
+		applies []applyCall
+	)
+	if err := composeTeam(
+		context.Background(), &bytes.Buffer{}, io.Discard, projectDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
+		stubBundle(bundle), recordingApply(&mu, &applies, kukeonv1.ApplyDocumentsResult{}),
+		stubBuildErr(), false, false,
+	); err != nil {
+		t.Fatalf("composeTeam: %v", err)
+	}
+	if len(applies) != 1 {
+		t.Fatalf("apply call count = %d, want 1", len(applies))
+	}
+	body := string(applies[0].RawYAML)
+	secretIdx := strings.Index(body, "kind: Secret")
+	bpIdx := strings.Index(body, "kind: CellBlueprint")
+	cfgIdx := strings.Index(body, "kind: CellConfig")
+	if secretIdx < 0 || bpIdx < 0 || cfgIdx < 0 {
+		t.Fatalf("missing one of Secret/CellBlueprint/CellConfig in bundle:\n%s", body)
+	}
+	if secretIdx >= bpIdx || bpIdx >= cfgIdx {
+		t.Errorf("bundle order wrong: secret=%d blueprint=%d config=%d\n%s",
+			secretIdx, bpIdx, cfgIdx, body)
+	}
+	// Rendered Secret carries the default realm.
+	if !strings.Contains(body, "realm: default") {
+		t.Errorf("rendered Secret missing realm: default\n%s", body)
+	}
+	// Kebab-case name landed.
+	if !strings.Contains(body, "name: anthropic-auth-token") {
+		t.Errorf("rendered Secret missing kebab-cased name\n%s", body)
+	}
+	if !strings.Contains(body, "data: populated") {
+		t.Errorf("rendered Secret missing spec.data\n%s", body)
+	}
+}
+
+// TestComposeTeamDryRunDoesNotScaffoldSecretsEnv pins AC: --dry-run
+// touches no files on disk — including the secrets.env scaffold path.
+// Render still announces what would have rendered; on a clean host with
+// no populated values, no Secret docs surface (empty values are skipped).
+func TestComposeTeamDryRunDoesNotScaffoldSecretsEnv(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+	bundle.Roles["dev"].Spec.Needs.Secrets = []string{"ANTHROPIC_AUTH_TOKEN"}
+
+	var (
+		out    bytes.Buffer
+		errOut bytes.Buffer
+	)
+	if err := composeTeam(
+		context.Background(), &out, &errOut, projectDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
+		stubBundle(bundle), stubApplyErr(), stubBuildErr(), true, false,
+	); err != nil {
+		t.Fatalf("composeTeam dry-run: %v", err)
+	}
+	sharedPath := layout.SharedSecretsEnvPath()
+	teamPath := filepath.Join(layout.TeamDir("sbsh"), "secrets.env")
+	if _, statErr := os.Stat(sharedPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("dry-run wrote shared secrets.env: %v", statErr)
+	}
+	if _, statErr := os.Stat(teamPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("dry-run wrote team secrets.env: %v", statErr)
+	}
+	// Warning still fires on empty key — the AC's "Empty-value warning fires
+	// once per empty key" applies regardless of dry-run mode.
+	if !strings.Contains(errOut.String(), "ANTHROPIC_AUTH_TOKEN") {
+		t.Errorf("dry-run missing empty-key warning: %q", errOut.String())
+	}
+}
 
 func TestEmitSourceKind(t *testing.T) {
 	t.Parallel()
