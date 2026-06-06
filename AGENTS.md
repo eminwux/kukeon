@@ -83,7 +83,7 @@ A host reboot wipes the cgroup tmpfs while cell metadata under `/opt/kukeon/data
 
 Half-CreateCell cells (a `kuke create cell` that crashed before `markCellReady` could close the `ReadyObserved` latch) are deliberately excluded from the heal: the in-flight CreateCell will finish its own `ensureCellCgroup` path under the per-cell lock, and the reconciler stepping in would race that flow.
 
-Consequence: after a reboot, no operator-driven `kuke start cell <name>` is required per cell — the next reconcile tick re-creates each previously-Ready cell's cgroup automatically. The `make dev-init` smoke does not exercise this path; reboot recovery is covered by the unit tests under `internal/controller/runner/reconcile_heal_test.go`.
+Consequence: after a reboot, no operator-driven `kuke start <name>` is required per cell — the next reconcile tick re-creates each previously-Ready cell's cgroup automatically. The `make dev-init` smoke does not exercise this path; reboot recovery is covered by the unit tests under `internal/controller/runner/reconcile_heal_test.go`.
 
 ### Manual phases (fallback)
 
