@@ -330,7 +330,15 @@ func RolePath(cacheDir, ref string) string {
 
 // HarnessPath is the on-disk harness.yaml location for name under cacheDir.
 func HarnessPath(cacheDir, name string) string {
-	return filepath.Join(cacheDir, "harnesses", name, "harness.yaml")
+	return filepath.Join(HarnessDir(cacheDir, name), "harness.yaml")
+}
+
+// HarnessDir is the on-disk directory the named harness's harness.yaml lives
+// in. teamrender resolves harness.Spec.Template relative to this directory
+// and scans it for sibling *.tmpl.yaml partials, so the renderer and the
+// loader agree on the layout without each open-coding the path.
+func HarnessDir(cacheDir, name string) string {
+	return filepath.Join(cacheDir, "harnesses", name)
 }
 
 // ImageCatalogPath is the on-disk harnesses/images.yaml location under cacheDir.
