@@ -2534,6 +2534,48 @@ func TestRun_FromBlueprint_NoIgnoreDiskPressure_LeavesSpecFalse(t *testing.T) {
 	}
 }
 
+// TestRun_RequireSynced_RejectedOutsideFile pins that --require-synced rejects
+// at parse time on the positional and the fused source paths rather than
+// silently no-op'ing. The flag compares the live cell against the source
+// manifest, which only -f supplies (the fused paths refuse on --name collision
+// rather than diverge, and the existing-cell positional has no source).
+func TestRun_RequireSynced_RejectedOutsideFile(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "positional",
+			args: []string{"my-cell", "--require-synced", "-d"},
+		},
+		{
+			name: "from-blueprint",
+			args: []string{"--from-blueprint", "web", "--require-synced", "-d"},
+		},
+		{
+			name: "from-config",
+			args: []string{"--from-config", "prod", "--require-synced", "-d"},
+		},
+		{
+			name: "clone",
+			args: []string{"--clone", "src", "--require-synced", "-d"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			cmd, _ := newCmd(t, &fakeClient{})
+			cmd.SetArgs(tc.args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatalf("Execute returned nil, want --require-synced rejection")
+			}
+			if !strings.Contains(err.Error(), "--require-synced is only valid with -f/--file") {
+				t.Errorf("err=%q should reject --require-synced as -f-only", err)
+			}
+		})
+	}
+}
+
 func TestRun_FromBlueprint_NotFound_Errors(t *testing.T) {
 	t.Cleanup(viper.Reset)
 

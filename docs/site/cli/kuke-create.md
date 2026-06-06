@@ -63,19 +63,19 @@ kuke create cell [NAME] --realm <r> --space <s> --stack <t>
 
 Two modes (exactly one of `--from-blueprint` or `--from-config` is required):
 
-- `kuke create cell <name> --from-blueprint <bp> [--param K=V]... [--param-file <path>]` — resolves the daemon-stored CellBlueprint, applies scalar params, materialises the full Cell record (containers and all), and persists it in a **stopped** state. Pair with `kuke start <name>`. Differs from [`kuke run -b`](kuke-run.md) (materialise + start + attach) by leaving the cell stopped for inspection or hand-off; `-b`-lineage cells have no in-place reconcile, so updates flow through delete-and-re-run (or promotion to a CellConfig).
-- `kuke create cell <name> --from-config <cfg>` — resolves the daemon-stored CellConfig and its referenced Blueprint, applies the Config's `spec.values` + repo/secret slot fills, materialises the Cell record, persists in **stopped** state. Pair with `kuke start <name>`. Differs from [`kuke run <config>`](kuke-run.md) (materialise + start + attach) by leaving the cell stopped; later reconcile against the lineage Config flows through [`kuke restart <name>`](kuke-restart.md) (OutOfSync-driven, #821) once the cell is started.
+- `kuke create cell <name> --from-blueprint <bp> [--param K=V]... [--param-file <path>]` — resolves the daemon-stored CellBlueprint, applies scalar params, materialises the full Cell record (containers and all), and persists it in a **stopped** state. Pair with `kuke start <name>`. Differs from [`kuke run --from-blueprint`](kuke-run.md) (materialise + start + attach) by leaving the cell stopped for inspection or hand-off; Blueprint-lineage cells reach the recreate branch of `kuke restart`'s daemon-side reconcile (P7) — updates flow through restart, not in-place mutation.
+- `kuke create cell <name> --from-config <cfg>` — resolves the daemon-stored CellConfig and its referenced Blueprint, applies the Config's `spec.values` + repo/secret slot fills, materialises the Cell record, persists in **stopped** state. Pair with `kuke start <name>`. Differs from [`kuke run --from-config`](kuke-run.md) (materialise + start + attach) by leaving the cell stopped; later reconcile against the lineage Config flows through [`kuke restart <name>`](kuke-restart.md) (OutOfSync-driven, #821) once the cell is started.
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `<NAME>` (positional) | _(required)_ | The cell name |
-| `--realm` | `default` | Realm that owns the cell |
-| `--space` | `default` | Space that owns the cell |
-| `--stack` | `default` | Stack that owns the cell |
-| `--from-blueprint` | `""` | Daemon-stored CellBlueprint name. Exactly one of `--from-blueprint` or `--from-config` is required; the two are mutually exclusive |
-| `--from-config` | `""` | Daemon-stored CellConfig name. Exactly one of `--from-blueprint` or `--from-config` is required; the two are mutually exclusive |
-| `--param` | (empty, repeatable) | Scalar parameter override `KEY=VALUE`. Valid with `--from-blueprint`; rejected with `--from-config` (a Config carries its own `spec.values`) |
-| `--param-file` | `""` | File of `KEY=VALUE` lines seeding scalar parameters. Same declaration rules as `--param`; `--param` wins on dups. Rejected with `--from-config` |
+| Flag                  | Default             | Description                                                                                                                                     |
+| --------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<NAME>` (positional) | _(required)_        | The cell name                                                                                                                                   |
+| `--realm`             | `default`           | Realm that owns the cell                                                                                                                        |
+| `--space`             | `default`           | Space that owns the cell                                                                                                                        |
+| `--stack`             | `default`           | Stack that owns the cell                                                                                                                        |
+| `--from-blueprint`    | `""`                | Daemon-stored CellBlueprint name. Exactly one of `--from-blueprint` or `--from-config` is required; the two are mutually exclusive              |
+| `--from-config`       | `""`                | Daemon-stored CellConfig name. Exactly one of `--from-blueprint` or `--from-config` is required; the two are mutually exclusive                 |
+| `--param`             | (empty, repeatable) | Scalar parameter override `KEY=VALUE`. Valid with `--from-blueprint`; rejected with `--from-config` (a Config carries its own `spec.values`)    |
+| `--param-file`        | `""`                | File of `KEY=VALUE` lines seeding scalar parameters. Same declaration rules as `--param`; `--param` wins on dups. Rejected with `--from-config` |
 
 ```bash
 # Materialise from Blueprint, stopped
@@ -99,12 +99,12 @@ Scaffold a `kind: CellBlueprint` starter YAML to stdout. Emits a syntactically-v
 
 No daemon call — pure stdout emission.
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `<NAME>` (positional) | _(required)_ | The blueprint name |
-| `--realm` | `default` | Realm that owns the blueprint |
-| `--space` | `default` | Space that owns the blueprint |
-| `--stack` | `default` | Stack that owns the blueprint |
+| Flag                  | Default      | Description                   |
+| --------------------- | ------------ | ----------------------------- |
+| `<NAME>` (positional) | _(required)_ | The blueprint name            |
+| `--realm`             | `default`    | Realm that owns the blueprint |
+| `--space`             | `default`    | Space that owns the blueprint |
+| `--stack`             | `default`    | Stack that owns the blueprint |
 
 ```bash
 kuke create blueprint web > web.yaml
@@ -120,13 +120,13 @@ kuke create config [NAME] --from-blueprint <bp> [--realm <r>] [--space <s>] [--s
 
 Scaffold a `kind: CellConfig` YAML from a CellBlueprint. Reads the referenced Blueprint from the daemon, introspects its declared scalar parameters and structural repo/secret slots, and emits a starter Config YAML to stdout with defaults pre-filled and `# TODO` markers where the operator must fill required-no-default parameters and slot sources. The output is not written to the daemon — pipe it to `kuke apply -f -` after editing.
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `<NAME>` (positional) | _(required)_ | The config name |
-| `--from-blueprint` | _(required)_ | Source CellBlueprint name |
-| `--realm` | `default` | Realm that owns the config (also the default Blueprint lookup scope) |
-| `--space` | `default` | Space that owns the config (also the default Blueprint lookup scope) |
-| `--stack` | `default` | Stack that owns the config (also the default Blueprint lookup scope) |
+| Flag                  | Default      | Description                                                          |
+| --------------------- | ------------ | -------------------------------------------------------------------- |
+| `<NAME>` (positional) | _(required)_ | The config name                                                      |
+| `--from-blueprint`    | _(required)_ | Source CellBlueprint name                                            |
+| `--realm`             | `default`    | Realm that owns the config (also the default Blueprint lookup scope) |
+| `--space`             | `default`    | Space that owns the config (also the default Blueprint lookup scope) |
+| `--stack`             | `default`    | Stack that owns the config (also the default Blueprint lookup scope) |
 
 ```bash
 kuke create config prod --from-blueprint web > prod-config.yaml
@@ -149,14 +149,14 @@ Create a `kind: Secret` within a scope. Two source modes:
 
 At least one of `--from-literal` or `--from-file` is required. The Secret is written to daemon storage and is referenceable via `ContainerSecret.secretRef` from a `CellConfig`'s slot fill.
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `<NAME>` (positional) | _(required)_ | The secret name |
-| `--realm` | `default` | Realm that owns the secret |
-| `--space` | `default` | Space that owns the secret |
-| `--stack` | `default` | Stack that owns the secret |
-| `--from-literal` | (empty, repeatable) | Specify a key-value pair as `KEY=VAL` |
-| `--from-file` | `""` | Read the secret value from a file |
+| Flag                  | Default             | Description                           |
+| --------------------- | ------------------- | ------------------------------------- |
+| `<NAME>` (positional) | _(required)_        | The secret name                       |
+| `--realm`             | `default`           | Realm that owns the secret            |
+| `--space`             | `default`           | Space that owns the secret            |
+| `--stack`             | `default`           | Stack that owns the secret            |
+| `--from-literal`      | (empty, repeatable) | Specify a key-value pair as `KEY=VAL` |
+| `--from-file`         | `""`                | Read the secret value from a file     |
 
 ```bash
 # Inline value

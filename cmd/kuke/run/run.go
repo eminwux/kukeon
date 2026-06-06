@@ -353,10 +353,20 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 // validateSourceFlagCompat rejects flag/source combinations the dispatch can't
 // honor. --name names the cell only on the fused create path; --param/--param-file
 // are render-time knobs only on the fused path (and only --from-blueprint, where
-// cell.ValidateOverrideSymmetry enforces the --from-config rejection). The
-// existing-cell and -f paths take neither: the positional IS the name, and -f's
-// metadata.name is authoritative.
+// cell.ValidateOverrideSymmetry enforces the --from-config rejection); and
+// --require-synced compares the live cell against the source manifest, which
+// only -f supplies (the fused paths refuse on --name collision rather than
+// diverge, and the existing-cell positional has no source). The existing-cell
+// and -f paths take neither --name nor --param/--param-file: the positional IS
+// the name, and -f's metadata.name is authoritative.
 func validateSourceFlagCompat(flags runFlags) error {
+	// --require-synced is -f-only on every source path; reject explicitly on
+	// the positional and the fused paths rather than silently no-op'ing it.
+	if flags.requireSynced && flags.file == "" {
+		return errors.New(
+			"--require-synced is only valid with -f/--file (the only path that " +
+				"compares the live cell against a source manifest)")
+	}
 	if flags.fused() {
 		return nil
 	}
