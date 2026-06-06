@@ -76,14 +76,14 @@ func optionalNameArgOrDefault(args []string, fallback string) string {
 //     kukeon.io/source-cell annotation, target the source cell's scope, and
 //     finalise the name (<source-name>-<6hex> when omitted; verbatim when
 //     explicit) before the collision-checked persist.
-func runClone(cmd *cobra.Command, client kukeonv1.Client, flags createCellFlags) error {
+func materializeClone(cmd *cobra.Command, client kukeonv1.Client, flags SourceFlags) (v1beta1.CellDoc, error) {
 	src, err := resolveSourceCell(cmd, client, flags)
 	if err != nil {
-		return err
+		return v1beta1.CellDoc{}, err
 	}
 	srcProv := src.Spec.Provenance
 	if srcProv == nil {
-		return fmt.Errorf(
+		return v1beta1.CellDoc{}, fmt.Errorf(
 			"cannot clone cell %q: it carries no materialization provenance "+
 				"(only cells created from a Blueprint or Config can be cloned)",
 			src.Metadata.Name,
@@ -97,13 +97,13 @@ func runClone(cmd *cobra.Command, client kukeonv1.Client, flags createCellFlags)
 	case v1beta1.BindingKindBlueprint:
 		cellDoc, err = cloneFromBlueprint(cmd, client, flags, srcProv)
 	default:
-		return fmt.Errorf(
+		return v1beta1.CellDoc{}, fmt.Errorf(
 			"cannot clone cell %q: unrecognized provenance bindingKind %q",
 			src.Metadata.Name, srcProv.BindingKind,
 		)
 	}
 	if err != nil {
-		return err
+		return v1beta1.CellDoc{}, err
 	}
 
 	// The clone targets the source cell's scope (realm/space/stack), not the
@@ -117,12 +117,11 @@ func runClone(cmd *cobra.Command, client kukeonv1.Client, flags createCellFlags)
 	// Prefix derives from the source cell's metadata.name: a materialized cell
 	// carries no Spec.Prefix field (only the Blueprint/Config bindings do), so
 	// the proposal's `Spec.Prefix ?? metadata.name` collapses to metadata.name.
-	if err = finalizeCellName(cmd, client, &cellDoc, flags.name, src.Metadata.Name); err != nil {
-		return err
+	if err = finalizeCellName(cmd, client, &cellDoc, flags.Name, src.Metadata.Name); err != nil {
+		return v1beta1.CellDoc{}, err
 	}
 	applyIgnoreDiskPressure(&cellDoc, flags)
-
-	return materialiseAndPersist(cmd, client, cellDoc)
+	return cellDoc, nil
 }
 
 // resolveSourceCell fetches the cell named by --clone at the operator's
@@ -133,14 +132,14 @@ func runClone(cmd *cobra.Command, client kukeonv1.Client, flags createCellFlags)
 // (default/default/default when the operator passes no coordinate). A missing
 // source cell is a clear ErrCellNotFound.
 func resolveSourceCell(
-	cmd *cobra.Command, client kukeonv1.Client, flags createCellFlags,
+	cmd *cobra.Command, client kukeonv1.Client, flags SourceFlags,
 ) (v1beta1.CellDoc, error) {
 	lookup := v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{Name: flags.cloneSource},
+		Metadata: v1beta1.CellMetadata{Name: flags.CloneSource},
 		Spec: v1beta1.CellSpec{
-			RealmID: flags.realm,
-			SpaceID: flags.space,
-			StackID: flags.stack,
+			RealmID: flags.Realm,
+			SpaceID: flags.Space,
+			StackID: flags.Stack,
 		},
 	}
 	res, err := client.GetCell(cmd.Context(), lookup)
@@ -171,15 +170,15 @@ func resolveSourceCell(
 // Spec.Provenance is the source's copied verbatim, with the merged env
 // overrides recorded — byte-equal to the source when no extra --env is given.
 func cloneFromConfig(
-	cmd *cobra.Command, client kukeonv1.Client, flags createCellFlags, srcProv *v1beta1.CellProvenance,
+	cmd *cobra.Command, client kukeonv1.Client, flags SourceFlags, srcProv *v1beta1.CellProvenance,
 ) (v1beta1.CellDoc, error) {
-	if len(flags.paramArgs) > 0 {
+	if len(flags.ParamArgs) > 0 {
 		return v1beta1.CellDoc{}, errors.New(
 			"--param is not valid when cloning a Config-lineage cell; the lineage Config carries " +
 				"its own spec.values (edit the Config instead)",
 		)
 	}
-	if flags.paramFile != "" {
+	if flags.ParamFile != "" {
 		return v1beta1.CellDoc{}, errors.New(
 			"--param-file is not valid when cloning a Config-lineage cell; the lineage Config " +
 				"carries its own spec.values (edit the Config instead)",
@@ -227,7 +226,7 @@ func cloneFromConfig(
 		)
 	}
 
-	cellDoc, err := cellconfig.MaterializeWithName(cfgRes.Config, bpRes.Blueprint, flags.name)
+	cellDoc, err := cellconfig.MaterializeWithName(cfgRes.Config, bpRes.Blueprint, flags.Name)
 	if err != nil {
 		return v1beta1.CellDoc{}, err
 	}
@@ -236,7 +235,7 @@ func cloneFromConfig(
 	// overrides plus any additional --env (AC#6). ApplyEnvOverrides reads
 	// Spec.Provenance.EnvOverrides as the merged set, so set provenance first.
 	cellDoc.Spec.Provenance = v1beta1.CloneCellProvenance(srcProv)
-	mergedEnv := cellconfig.MergeEnv(srcProv.EnvOverrides, flags.envArgs)
+	mergedEnv := cellconfig.MergeEnv(srcProv.EnvOverrides, flags.EnvArgs)
 	cellconfig.ApplyEnvOverrides(&cellDoc, mergedEnv)
 	return cellDoc, nil
 }
@@ -248,9 +247,9 @@ func cloneFromConfig(
 // Spec.Provenance is the source's copied verbatim, with the merged params
 // recorded — byte-equal to the source when no extra --param is given.
 func cloneFromBlueprint(
-	cmd *cobra.Command, client kukeonv1.Client, flags createCellFlags, srcProv *v1beta1.CellProvenance,
+	cmd *cobra.Command, client kukeonv1.Client, flags SourceFlags, srcProv *v1beta1.CellProvenance,
 ) (v1beta1.CellDoc, error) {
-	if len(flags.envArgs) > 0 {
+	if len(flags.EnvArgs) > 0 {
 		return v1beta1.CellDoc{}, errors.New(
 			"--env is not valid when cloning a Blueprint-lineage cell; clone a Config-lineage cell " +
 				"(or edit the Blueprint) to layer env overrides",
@@ -288,7 +287,7 @@ func cloneFromBlueprint(
 	if err != nil {
 		return v1beta1.CellDoc{}, err
 	}
-	cellDoc, err := cellblueprint.MaterializeWithName(resolved, flags.name, mergedParams)
+	cellDoc, err := cellblueprint.MaterializeWithName(resolved, flags.Name, mergedParams)
 	if err != nil {
 		return v1beta1.CellDoc{}, err
 	}

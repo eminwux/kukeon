@@ -30,18 +30,15 @@ package run
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/eminwux/kukeon/cmd/config"
+	"github.com/eminwux/kukeon/cmd/kuke/create/cell"
 	kukshared "github.com/eminwux/kukeon/cmd/kuke/shared"
 	"github.com/eminwux/kukeon/internal/apply/parser"
-	"github.com/eminwux/kukeon/internal/cellblueprint"
-	"github.com/eminwux/kukeon/internal/cellconfig"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	"github.com/eminwux/kukeon/pkg/api/kukeonv1"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
@@ -61,59 +58,43 @@ var errRemovedProfileFlag = errors.New(
 // MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
 type MockControllerKey struct{}
 
-// NewRunCmd builds the `kuke run` cobra command. The optional positional arg
-// names a daemon-stored CellConfig; `-f` reads a single-cell YAML doc; `-b`
-// names a daemon-stored CellBlueprint. Exactly one of the three is required.
-// By default, after the cell starts the CLI drops the operator into the
-// cell's attachable terminal; `-d/--detach` opts out of the post-start attach.
+// NewRunCmd builds the `kuke run` cobra command — the docker-model fused verb
+// (epic:cell-identity #1025). The optional positional names an existing cell to
+// start + attach; `--from-blueprint` / `--from-config` / `--clone` create + start
+// + attach a fresh cell, delegating the create half to the same materialization
+// the un-fused `kuke create cell` runs; `-f` create-or-attaches a cell from a
+// YAML manifest. Exactly one source is required. By default the CLI drops the
+// operator into the cell's attachable terminal after start; `-d/--detach` opts
+// out of the post-start attach.
 func NewRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "run [<config> | -f <file> | -b <blueprint>]",
-		Short: "Create and start a single cell from a daemon-stored CellConfig (positional), a YAML file, or a daemon-stored blueprint",
-		Long: "Create and start a single cell from a daemon-stored CellConfig " +
-			"(positional `<config>` name), from a YAML file or stdin (-f), or from " +
-			"a daemon-stored CellBlueprint (-b), resolved from the scope named by " +
-			"--realm/--space/--stack. The positional `<config>` is the highest-frequency " +
-			"path (daily dev-cell spawn-and-attach); the other sources stay flag-driven " +
-			"so the positional case is unambiguous. -b substitutes scalar --param values " +
-			"and materializes a fresh <prefix>-<6hex> cell every invocation (always " +
-			"fresh). The positional config path is a 1:N binding: every invocation " +
-			"materialises a fresh `<prefix>-<6hex>` cell (prefix = Spec.Prefix ?? " +
-			"metadata.name) from the referenced Blueprint with the Config's scalar " +
-			"values plus repo / secret slot fills, preserving the kukeon.io/config " +
-			"lineage label. The idempotent-attach escape valve is " +
-			"`<config> --name X`: a verbatim name that attaches to the existing cell " +
-			"if X is already live in scope, or materialises and creates if X is free. " +
-			"When `--name X` matches a live cell whose spec differs from the " +
-			"materialisation of the current Config + Blueprint, the positional config " +
-			"path refuses to attach and points the operator at " +
-			"`kuke restart <cell>` to reconcile (the daemon's OutOfSync detector " +
-			"picks up the Config divergence and the restart reconciles implicitly: " +
-			"stops, updates, starts). -b with --name applies the same divergence " +
-			"discipline against the pinned cell name, but -b-lineage cells have no " +
-			"implicit reconcile — the pointer is `kuke delete cell <cell>` + re-run " +
-			"(or promote to a CellConfig for `kuke restart` reconcile workflows). " +
-			"--new on the " +
-			"positional config path is the explicit form of the bare-`<config>` " +
-			"behaviour — materialise a fresh `<prefix>-<6hex>` cell on every " +
-			"invocation — kept for callers that want the fresh-per-invocation intent " +
-			"to be unambiguous on the command line. `--new --name X` " +
-			"creates a cell named X from the Config and fails if X is already in the " +
-			"target realm (create-or-fail; unlike `--name X` alone, which idempotently " +
-			"attaches on collision). -f is " +
-			"create-or-attach by metadata.name: a missing cell is created and " +
-			"attached; a Ready cell is attached as a no-op; a Stopped cell is started " +
-			"then attached; a divergent on-disk spec is refused (use `kuke apply -f` " +
-			"to update); a cell in an error or partial state is refused with a " +
-			"`kuke delete cell <name>` pointer. To re-attach to an existing cell use " +
-			"`kuke attach <cell>`. --env KEY=VALUE is the orthogonal runtime knob " +
-			"(repeatable; per-invocation injection into the attachable container's env at " +
-			"start time). It works with every source (positional, -f, -b) and every " +
-			"identity flag (--new, --name); the entries do not change the cell " +
-			"spec and do not persist, so the divergent-spec check above does not trip on " +
-			"prior --env-injected keys.",
+		Use:   "run [<cell>]",
+		Short: "Start and attach an existing cell, or create+start+attach a new one (--from-blueprint/--from-config/--clone/-f)",
+		Long: "Start and attach a cell. `kuke run` is the fused docker-model verb: " +
+			"`docker create` -> `kuke create cell`, `docker start` -> `kuke start`, " +
+			"`docker run` -> `kuke run` (create? + start + attach).\n\n" +
+			"  - `kuke run <cell>` starts + attaches an existing cell (~ `kuke start " +
+			"<cell>` + `kuke attach <cell>`). `-d/--detach` starts without attaching. " +
+			"The cell must already exist; a missing cell is an error pointing at " +
+			"`kuke create cell` / `kuke run --from-...`.\n" +
+			"  - `kuke run --from-blueprint <bp> [--param K=V]`, `kuke run --from-config " +
+			"<cfg> [--env K=V]`, and `kuke run --clone <cell>` create + start + attach a " +
+			"fresh cell. The create half delegates to the same materialization function " +
+			"`kuke create cell` runs (shared FlagSet, no drift): the produced CellDoc is " +
+			"identical to `kuke create cell --from-...` followed by `kuke start`. The cell " +
+			"name is `--name X` when given, else a generated `<prefix>-<6hex>`.\n" +
+			"  - `kuke run -f <file>` create-or-attaches by metadata.name: a missing cell " +
+			"is created and attached; a Ready cell is attached as a no-op; a Stopped cell " +
+			"is started then attached; a divergent on-disk spec is refused (use `kuke " +
+			"apply -f` to update, or --require-synced to hard-fail); a cell in an error or " +
+			"partial state is refused with a `kuke delete cell <name>` pointer.\n\n" +
+			"--rm best-effort deletes the cell once the workload exits (a clean ^]^] " +
+			"detach keeps it alive). --env KEY=VALUE on the existing-cell and -f paths " +
+			"injects runtime env into the attachable container at start time (does not " +
+			"persist); on the --from-config / --clone paths it is the persisted per-cell " +
+			"override baked into the materialised CellDoc.",
 		Args:              cobra.MaximumNArgs(1),
-		ValidArgsFunction: config.CompleteConfigNames,
+		ValidArgsFunction: config.CompleteCellNames,
 		SilenceUsage:      true,
 		SilenceErrors:     false,
 		RunE:              runRun,
@@ -138,76 +119,22 @@ func NewRunCmd() *cobra.Command {
 		return err
 	})
 
+	// Shared cell-source flags (--from-blueprint/--from-config/--clone/--param/
+	// --param-file/--env/--ignore-disk-pressure). One definition set shared with
+	// `kuke create cell` (cell.RegisterSourceFlags) so the fused create+start+attach
+	// form cannot drift from the un-fused `create cell` + `start` (#1025, AC#4).
+	// run reads these via cmd.Flags() (not viper) — see parseRunFlags.
+	cell.RegisterSourceFlags(cmd)
+
 	cmd.Flags().
-		StringP("file", "f", "", "File to read YAML from (use - for stdin); mutually exclusive with the <config> positional and -b")
+		StringP("file", "f", "", "File to read a single-cell YAML manifest from (use - for stdin); mutually exclusive with the <cell> positional and --from-blueprint/--from-config/--clone")
 	_ = viper.BindPFlag(config.KUKE_RUN_FILE.ViperKey, cmd.Flags().Lookup("file"))
 
-	cmd.Flags().StringP("blueprint", "b", "",
-		"Daemon-stored CellBlueprint name to run, resolved from the scope named by "+
-			"--realm/--space/--stack; mutually exclusive with -f and the <config> positional. Substitutes scalar --param "+
-			"values and materializes a fresh <prefix>-<6hex> cell.")
-	_ = viper.BindPFlag(config.KUKE_RUN_BLUEPRINT.ViperKey, cmd.Flags().Lookup("blueprint"))
-
 	cmd.Flags().String("name", "",
-		"Override the materialized cell name (default: <prefix>-<6hex>, prefix = "+
-			"Spec.Prefix ?? metadata.name). Valid with -b; rejected with -f, where "+
-			"metadata.name is the cell name verbatim. Valid with the <config> "+
-			"positional: `<config> --name X` does idempotent attach to cell X using "+
-			"the Config's spec; `<config> --new --name X` is the create-or-fail "+
-			"variant (fail if X exists). Without --name on the <config> path the cell "+
-			"is a fresh `<prefix>-<6hex>` per invocation (a Config is a 1:N binding; "+
-			"use --name X for idempotent attach).")
+		"Name the cell materialised by --from-blueprint/--from-config/--clone "+
+			"(default: a generated <prefix>-<6hex>). Rejected with the <cell> positional "+
+			"(the positional IS the cell name) and with -f (metadata.name is authoritative).")
 	_ = viper.BindPFlag(config.KUKE_RUN_NAME.ViperKey, cmd.Flags().Lookup("name"))
-
-	cmd.Flags().Bool("new", false,
-		"Materialize a fresh `<prefix>-<6hex>` cell on every invocation of the <config> "+
-			"positional (prefix = Spec.Prefix ?? metadata.name). Each invocation produces a distinct "+
-			"cell; the kukeon.io/config=<name> lineage label is preserved (operator can list "+
-			"all spawns: `kuke get cells -l kukeon.io/config=<name>`). Combinable with --name "+
-			"to pin a specific cell name (create-or-fail: `--new --name X` fails if cell X "+
-			"already exists in the realm) and with --rm (one-shot ephemeral cell). Only "+
-			"valid with the <config> positional — rejected with -f (where metadata.name is the "+
-			"cell name verbatim) and redundant for -b (which already generates a fresh name). "+
-			"A Config is a 1:N binding, so a bare `<config>` already stamps a fresh cell; "+
-			"--new is retained for explicit intent and `--new --name X` create-or-fail.")
-	_ = viper.BindPFlag(config.KUKE_RUN_NEW.ViperKey, cmd.Flags().Lookup("new"))
-
-	cmd.Flags().StringArray("env", nil,
-		"Runtime container env entry as KEY=VALUE; repeatable. Injects extra env into "+
-			"the cell's attachable container at start time, in addition to "+
-			"spec.cell.containers[<attachable>].env. Empty value (KEY=) is allowed; missing "+
-			"`=` is rejected. A key that collides with an existing entry in the attachable "+
-			"container's spec env OVERRIDES the spec value. --env is the per-invocation knob "+
-			"(runtime; does not change the cell spec); for render-time spec substitution use "+
-			"--param (blueprint path only). Valid with all source paths (the <config> "+
-			"positional, -f, -b) and the --new identity flag. The "+
-			"injected entries do NOT persist into the cell metadata, so the divergent-spec "+
-			"check on a subsequent `kuke run <config> --name X` (without --env) does not trip "+
-			"on the prior injection.")
-	// --env is read via cmd.Flags().GetStringArray("env") in parseRunFlags;
-	// viper.BindPFlag is intentionally omitted because StringArray flags do
-	// not round-trip cleanly through viper's GetStringSlice (issue #834).
-	// KUKE_RUN_ENV stays declared in cmd/config/env.go for parity but is
-	// not bound here.
-
-	cmd.Flags().StringArray("param", nil,
-		"Scalar parameter override as KEY=VALUE; repeatable. Valid with -b. "+
-			"Each KEY must be declared in spec.parameters[]. Wins over the parameter's "+
-			"default and over --param-file when both set the same key. Rejected with the "+
-			"<config> positional: a CellConfig carries its own spec.values, edit the Config instead.")
-
-	cmd.Flags().String("param-file", "",
-		"File of KEY=VALUE lines whose values seed scalar parameters; one per line, "+
-			"`#` starts a comment. Same declaration rules as --param. CLI --param wins on "+
-			"duplicate keys. Rejected with the <config> positional (same reason as --param).")
-	_ = viper.BindPFlag(config.KUKE_RUN_PARAM_FILE.ViperKey, cmd.Flags().Lookup("param-file"))
-
-	// `config` is now a positional (see Args / ValidArgsFunction above), so the
-	// cobra-side mutex/required-one machinery covers only the remaining flag
-	// sources; parseRunFlags hand-rolls the positional-vs-flag mutex and the
-	// "exactly one source required" check (cobra has no MarkFlagsOneRequired
-	// equivalent that spans flags + positionals).
-	cmd.MarkFlagsMutuallyExclusive("file", "blueprint")
 
 	cmd.Flags().StringP("output", "o", "", "Output format: json, yaml (default: human-readable)")
 	_ = viper.BindPFlag(config.KUKE_RUN_OUTPUT.ViperKey, cmd.Flags().Lookup("output"))
@@ -227,14 +154,11 @@ func NewRunCmd() *cobra.Command {
 		"Container to attach to (only valid in attach mode; rejected with -d/--detach; must be attachable)")
 	_ = viper.BindPFlag(config.KUKE_RUN_CONTAINER.ViperKey, cmd.Flags().Lookup("container"))
 	cmd.Flags().Bool("require-synced", false,
-		"Refuse to attach when the live cell's spec diverges from the materialisation "+
-			"of the requested source (CellConfig + Blueprint, CellBlueprint + --param, or "+
-			"`-f` file). Default behavior is warn-and-attach: print a one-line `notice:` "+
-			"naming the diverging fields and the reconcile pointer, then drop the operator "+
-			"into the live state — `kuke run` is the interactive escape hatch for live cells, "+
-			"and obstruction on drift defeats the workflow. Use --require-synced for "+
-			"CI/scripted callers that need a hard fail on divergence; the error message "+
-			"matches the pre-#986 refuse-on-divergence behaviour.")
+		"With -f: refuse to attach when the live cell's spec diverges from the on-disk "+
+			"manifest. Default behavior is warn-and-attach: print a one-line `notice:` "+
+			"naming the diverging fields and the `kuke apply -f` pointer, then drop the "+
+			"operator into the live state. Use --require-synced for CI/scripted callers "+
+			"that need a hard fail on divergence.")
 	_ = viper.BindPFlag(config.KUKE_RUN_REQUIRE_SYNCED.ViperKey, cmd.Flags().Lookup("require-synced"))
 
 	cmd.Flags().Bool("rm", false,
@@ -252,84 +176,91 @@ func NewRunCmd() *cobra.Command {
 			"than firing the instant the trigger fires.")
 	_ = viper.BindPFlag(config.KUKE_RUN_RM.ViperKey, cmd.Flags().Lookup("rm"))
 
-	cmd.Flags().Bool("ignore-disk-pressure", false,
-		"Bypass kukeond's data-volume disk-pressure guard for this run. The "+
-			"daemon normally refuses to provision a new cell once the data "+
-			"volume crosses the hard threshold; pass this when you know there "+
-			"is enough headroom. (issue #1035)")
-	_ = viper.BindPFlag(
-		config.KUKE_RUN_IGNORE_DISK_PRESSURE.ViperKey,
-		cmd.Flags().Lookup("ignore-disk-pressure"),
-	)
+	// --file is mutually exclusive with each fused source; the from-* sources are
+	// already mutually exclusive among themselves (cell.RegisterSourceFlags). The
+	// positional-vs-flag mutex is hand-rolled in parseRunFlags (cobra's mutex
+	// machinery spans flags only).
+	cmd.MarkFlagsMutuallyExclusive("file", "from-blueprint")
+	cmd.MarkFlagsMutuallyExclusive("file", "from-config")
+	cmd.MarkFlagsMutuallyExclusive("file", "clone")
 
 	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
 	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
 	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
-	_ = cmd.RegisterFlagCompletionFunc("blueprint", config.CompleteBlueprintNames)
-	// The positional <config> is wired via ValidArgsFunction on the cobra
-	// command above (where `-c` previously routed flag completion).
 
 	return cmd
 }
 
 // runFlags is the validated bundle of flag values runRun consumes after
-// argument validation. Splitting it out keeps runRun under the funlen limit
-// while preserving the original control flow.
+// argument validation. Exactly one source is non-empty: cellName (the
+// positional, an existing cell to start+attach), file (-f manifest), or one of
+// blueprintName/configName/cloneSource (the fused create+start+attach sources
+// delegated to cmd/kuke/create/cell.Materialize).
 type runFlags struct {
-	file          string
+	// cellName is the positional `<cell>` — an existing cell to start+attach.
+	cellName string
+	// file is the -f manifest path (create-or-attach by metadata.name).
+	file string
+	// blueprintName/configName/cloneSource are the fused create+start+attach
+	// sources (--from-blueprint/--from-config/--clone). Reading them via
+	// cmd.Flags() (not viper) is deliberate: the same flag definitions are
+	// shared with `kuke create cell` (cell.RegisterSourceFlags), and viper-binding
+	// them in both commands would race on the global key.
 	blueprintName string
 	configName    string
+	cloneSource   string
+
 	output        string
 	detach        bool
 	containerFlag string
 	autoDelete    bool
-	nameOverride  string
-	newCell       bool
-	paramArgs     []string
-	paramFile     string
-	// envArgs are the validated `KEY=VALUE` entries supplied via repeatable
-	// --env flags (issue #834). Empty value (`KEY=`) is preserved as-is;
-	// missing `=` is rejected by parseEnvArgs before runRun observes them.
-	// Threaded to the daemon via cellDoc.Spec.RuntimeEnv (yaml:"-" — never
-	// persisted) where the runner merges them into the attachable
-	// container's OCI process env at start time.
+	// name is --name: the cell name for the fused create+start+attach sources
+	// (default a generated <prefix>-<6hex>). Rejected with the positional and -f.
+	name      string
+	paramArgs []string
+	paramFile string
+	// envArgs are the validated `KEY=VALUE` --env entries. On the existing-cell
+	// and -f paths they thread onto Spec.RuntimeEnv (transport-only runtime
+	// injection, #834); on the --from-config/--clone paths they are the persisted
+	// per-cell override baked into the materialised CellDoc (#1023).
 	envArgs []string
-	// requireSynced flips warnDivergentNamedCell from warn-and-attach
-	// (default, #986) to fail-fast: when set the diverging-spec branch
-	// returns the same error shape the pre-#986 rejectDivergentNamedCell
-	// produced so CI/scripted callers that opt in retain the exit-non-zero
-	// drift signal. See the flag commentary in NewRunCmd.
+	// requireSynced flips the -f divergence handling from warn-and-attach
+	// (default, #986) to fail-fast. Only the -f path compares against a source.
 	requireSynced bool
-	// ignoreDiskPressure threads `kuke run --ignore-disk-pressure` onto the
-	// transport-only Spec.IgnoreDiskPressure field so the daemon's CreateCell
-	// guard is bypassed for this invocation. Issue #1035.
+	// ignoreDiskPressure threads `--ignore-disk-pressure` onto the transport-only
+	// Spec.IgnoreDiskPressure field so the daemon's CreateCell guard is bypassed.
 	ignoreDiskPressure bool
 }
 
+// fused reports whether the invocation is a fused create+start+attach
+// (--from-blueprint / --from-config / --clone), the path that delegates its
+// create half to cell.Materialize.
+func (f runFlags) fused() bool {
+	return f.blueprintName != "" || f.configName != "" || f.cloneSource != ""
+}
+
 // validateSourceMutex enforces the "exactly one source" contract across the
-// three `kuke run` inputs after issue #813 moved CellConfig from `-c/--config`
-// to the positional `<config>` argument. Cobra's MarkFlagsMutuallyExclusive
-// / MarkFlagsOneRequired only span flags, so this check hand-rolls the
-// positional-vs-flag mutex and the at-least-one-source guard; the
-// flag-vs-flag mutex among `-f`/`-b` stays cobra-side in NewRunCmd.
-// Pulling the branches out of parseRunFlags keeps gocyclo within its
-// budget for the larger validator.
+// `kuke run` inputs. Cobra's MarkFlagsMutuallyExclusive spans flags only, and
+// already covers -f vs the from-* sources and the from-* sources among
+// themselves (NewRunCmd / cell.RegisterSourceFlags); this hand-rolls the
+// positional-vs-flag mutex and the at-least-one-source guard.
 func validateSourceMutex(flags runFlags) error {
-	if flags.configName != "" {
+	if flags.cellName != "" {
 		switch {
 		case flags.file != "":
 			return errors.New(
-				"the <config> positional is mutually exclusive with -f/--file " +
-					"(pick one source: <config>, -f, or -b)")
-		case flags.blueprintName != "":
+				"the <cell> positional is mutually exclusive with -f/--file " +
+					"(start an existing cell, or create one from -f / --from-...)")
+		case flags.fused():
 			return errors.New(
-				"the <config> positional is mutually exclusive with -b/--blueprint " +
-					"(pick one source: <config>, -f, or -b)")
+				"the <cell> positional (start an existing cell) is mutually exclusive with " +
+					"--from-blueprint/--from-config/--clone (create a new one)")
 		}
 	}
-	if flags.configName == "" && flags.file == "" && flags.blueprintName == "" {
+	if flags.cellName == "" && flags.file == "" && !flags.fused() {
 		return errors.New(
-			"at least one of <config> (positional), -f/--file, or -b/--blueprint is required")
+			"a source is required: <cell> (start an existing cell), -f/--file, or " +
+				"--from-blueprint/--from-config/--clone (create+start+attach a new one)")
 	}
 	return nil
 }
@@ -337,19 +268,32 @@ func validateSourceMutex(flags runFlags) error {
 func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 	flags := runFlags{
 		file:               strings.TrimSpace(viper.GetString(config.KUKE_RUN_FILE.ViperKey)),
-		blueprintName:      strings.TrimSpace(viper.GetString(config.KUKE_RUN_BLUEPRINT.ViperKey)),
 		detach:             viper.GetBool(config.KUKE_RUN_DETACH.ViperKey),
 		containerFlag:      strings.TrimSpace(viper.GetString(config.KUKE_RUN_CONTAINER.ViperKey)),
 		autoDelete:         viper.GetBool(config.KUKE_RUN_RM.ViperKey),
-		nameOverride:       strings.TrimSpace(viper.GetString(config.KUKE_RUN_NAME.ViperKey)),
-		newCell:            viper.GetBool(config.KUKE_RUN_NEW.ViperKey),
-		paramFile:          strings.TrimSpace(viper.GetString(config.KUKE_RUN_PARAM_FILE.ViperKey)),
+		name:               strings.TrimSpace(viper.GetString(config.KUKE_RUN_NAME.ViperKey)),
 		requireSynced:      viper.GetBool(config.KUKE_RUN_REQUIRE_SYNCED.ViperKey),
 		ignoreDiskPressure: viper.GetBool(config.KUKE_RUN_IGNORE_DISK_PRESSURE.ViperKey),
 	}
 
+	// The fused-source flags share their definitions with `kuke create cell`
+	// (cell.RegisterSourceFlags) and are read directly off cmd.Flags() — never
+	// via viper — so the two commands don't collide on a global viper key.
+	for dst, name := range map[*string]string{
+		&flags.blueprintName: "from-blueprint",
+		&flags.configName:    "from-config",
+		&flags.cloneSource:   "clone",
+		&flags.paramFile:     "param-file",
+	} {
+		v, err := cmd.Flags().GetString(name)
+		if err != nil {
+			return runFlags{}, err
+		}
+		*dst = strings.TrimSpace(v)
+	}
+
 	if len(args) == 1 {
-		flags.configName = strings.TrimSpace(args[0])
+		flags.cellName = strings.TrimSpace(args[0])
 	}
 	if err := validateSourceMutex(flags); err != nil {
 		return runFlags{}, err
@@ -390,62 +334,38 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 		// so callers pick one mode.
 		return runFlags{}, errors.New("--output is incompatible with attach mode (pass -d/--detach)")
 	}
-	if flags.file != "" {
-		// --name, --param, --param-file are template knobs (per issue #355)
-		// for the -b path. With -f the file's metadata.name is authoritative
-		// and the substitution surface doesn't apply, so reject the
-		// combination rather than silently dropping the flag.
-		if flags.nameOverride != "" {
-			return runFlags{}, errors.New("--name is only valid with -b/--blueprint")
-		}
-		if len(flags.paramArgs) > 0 {
-			return runFlags{}, errors.New("--param is only valid with -b/--blueprint")
-		}
-		if flags.paramFile != "" {
-			return runFlags{}, errors.New("--param-file is only valid with -b/--blueprint")
-		}
-		if flags.newCell {
-			return runFlags{}, errors.New(
-				"--new is only valid with the <config> positional; -f uses metadata.name verbatim")
-		}
-	}
-	// --new is a CellConfig-only knob (only the <config> positional reaches the
-	// daemon-stored CellConfig path). With -b the default already generates
-	// a fresh <prefix>-<6hex> per invocation, so accepting --new there would
-	// silently no-op and seed the mental model that --new toggles a default
-	// that isn't actually flipped — reject so the operator notices.
-	if flags.newCell && flags.configName == "" && flags.file == "" {
-		return runFlags{}, errors.New(
-			"--new is only valid with the <config> positional; -b already materializes a " +
-				"fresh <prefix>-<6hex> cell per invocation")
-	}
-	if flags.configName != "" {
-		// A CellConfig carries its own scalar values, so --param / --param-file
-		// would silently shadow the Config's values; reject them rather than
-		// silently apply.
-		//
-		// --name is accepted on the <config> path (#833 relaxed the old
-		// MarkFlagsMutuallyExclusive("name", "generate-name") and broadened
-		// --name's reach onto the CellConfig positional). The four reachable
-		// shapes (epic:cell-identity #1022 — a Config is a 1:N binding):
-		//   - `<cfg>`: cell name = generated <prefix>-<6hex>; fresh cell per
-		//     invocation (suffix retried on collision).
-		//   - `<cfg> --name X`: cell name = X; idempotent attach (the
-		//     attach-if-exists escape valve referenced by the --new --name
-		//     collision error).
-		//   - `<cfg> --new`: cell name = generated <prefix>-<6hex>; same as the
-		//     bare positional, kept for explicit intent.
-		//   - `<cfg> --new --name X`: cell name = X; create-or-fail.
-		if len(flags.paramArgs) > 0 {
-			return runFlags{}, errors.New(
-				"--param is not valid with the <config> positional; edit the Config's spec.values instead")
-		}
-		if flags.paramFile != "" {
-			return runFlags{}, errors.New(
-				"--param-file is not valid with the <config> positional; edit the Config's spec.values instead")
-		}
+
+	if err = validateSourceFlagCompat(flags); err != nil {
+		return runFlags{}, err
 	}
 	return flags, nil
+}
+
+// validateSourceFlagCompat rejects flag/source combinations the dispatch can't
+// honor. --name names the cell only on the fused create path; --param/--param-file
+// are render-time knobs only on the fused path (and only --from-blueprint, where
+// cell.ValidateOverrideSymmetry enforces the --from-config rejection). The
+// existing-cell and -f paths take neither: the positional IS the name, and -f's
+// metadata.name is authoritative.
+func validateSourceFlagCompat(flags runFlags) error {
+	if flags.fused() {
+		return nil
+	}
+	// Non-fused sources: the <cell> positional or -f.
+	target := "the <cell> positional"
+	if flags.file != "" {
+		target = "-f/--file"
+	}
+	if flags.name != "" {
+		return fmt.Errorf("--name is only valid with --from-blueprint/--from-config/--clone, not %s", target)
+	}
+	if len(flags.paramArgs) > 0 {
+		return fmt.Errorf("--param is only valid with --from-blueprint, not %s", target)
+	}
+	if flags.paramFile != "" {
+		return fmt.Errorf("--param-file is only valid with --from-blueprint, not %s", target)
+	}
+	return nil
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
@@ -454,139 +374,100 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Resolve the client first: the -b path resolves its blueprint from daemon
-	// storage over this client, so it must be live before loadCellDoc runs. The
-	// -f path ignores it during load.
 	client, err := resolveClient(cmd)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = client.Close() }()
 
-	loaded, err := loadCellDoc(cmd, client, flags)
-	if err != nil {
-		return err
+	switch {
+	case flags.fused():
+		return runFused(cmd, client, flags)
+	case flags.file != "":
+		return runFromFile(cmd, client, flags)
+	default:
+		return runExisting(cmd, client, flags)
 	}
-	cellDoc := loaded.Doc
+}
 
-	resolveCellLocation(&cellDoc)
-
-	// Finalize a generated cell name now that scope is resolved
-	// (epic:cell-identity #1022). loaded.GenPrefix is non-empty only when the
-	// source path omitted an explicit name (bare `<config>`, `<config> --new`,
-	// or bare `-b`); the unified generator then allocates a `<prefix>-<6hex>`
-	// probed free against the daemon at the cell's scope. An explicit --name
-	// (GenPrefix == "") is left verbatim for the create-or-attach branches below.
-	if loaded.GenPrefix != "" {
-		name, nameErr := kukshared.ResolveCellName(
-			cmd.Context(), client, "", loaded.GenPrefix,
-			cellDoc.Spec.RealmID, cellDoc.Spec.SpaceID, cellDoc.Spec.StackID,
-		)
-		if nameErr != nil {
-			return nameErr
-		}
-		cellDoc.Metadata.Name = name
-		cellDoc.Spec.ID = name
-	}
-
+// applyRuntimeKnobs threads the imperative run flags onto the cell doc handed to
+// CreateCell / StartCell: --rm (auto-delete on workload exit), --env (runtime
+// env injection into the attachable container, transport-only Spec.RuntimeEnv
+// per #834), and --ignore-disk-pressure (transport-only guard bypass, #1035).
+// All three are transport-only fields the daemon does not persist. The
+// --from-config / --clone per-cell *override* env (the persisted kind) is
+// applied earlier by cell.Materialize, not here.
+func applyRuntimeKnobs(cellDoc *v1beta1.CellDoc, flags runFlags) {
 	if flags.autoDelete {
-		// The flag is the imperative knob; it always wins over a missing/false
-		// spec.autoDelete in the manifest. We never clear an explicit `true`
-		// in the YAML even without --rm — that's a declarative intent the
-		// operator wrote and the daemon should honor.
 		cellDoc.Spec.AutoDelete = true
 	}
-
-	// --env (#834): thread the CLI-supplied runtime env entries onto the
-	// transport-only Spec.RuntimeEnv field. The v1beta1 type carries
-	// yaml:"-" on this field so the daemon's writeDocWithGeneration never
-	// persists it; the runner reads it at OCI build time and merges into
-	// the attachable container's process env. Set after autoDelete so the
-	// two CLI knobs sit together; the merge semantics (override-on-key,
-	// last-wins across collisions) are owned by the runner-side mergeRuntimeEnv.
 	if len(flags.envArgs) > 0 {
 		cellDoc.Spec.RuntimeEnv = flags.envArgs
-		// Persist the same `--env` entries onto the provenance block
-		// (issue #1021). RuntimeEnv is transport-only (yaml:"-") and is
-		// dropped at write time; Spec.Provenance.EnvOverrides is the
-		// persisted record a later re-resolution reads. Provenance is set
-		// by the materialize path for `-b`/`-c`/`-p` runs; a manifest run
-		// (`kuke run -f`) carries no binding and so no provenance — guard
-		// for nil rather than fabricate one.
-		if cellDoc.Spec.Provenance != nil {
-			cellDoc.Spec.Provenance.EnvOverrides = append([]string(nil), flags.envArgs...)
-		}
 	}
-
-	// --ignore-disk-pressure (#1035): thread the override onto the
-	// transport-only Spec.IgnoreDiskPressure field (yaml:"-" — never
-	// persisted). The flag is the imperative knob; it only ever sets the
-	// override true, never clears a value loaded from a manifest.
 	if flags.ignoreDiskPressure {
 		cellDoc.Spec.IgnoreDiskPressure = true
 	}
+}
 
-	if validateErr := validateResolvedCell(cellDoc); validateErr != nil {
-		return validateErr
+// runFused implements the create+start+attach form (--from-blueprint /
+// --from-config / --clone). The create half delegates to cell.Materialize — the
+// same function `kuke create cell` runs — so the produced CellDoc is identical
+// to `kuke create cell --from-...` followed by `kuke start` (epic:cell-identity
+// #1025, AC#2/#4). run then create+starts it via CreateCell (where create cell
+// would call MaterializeCell and leave it stopped) and attaches.
+func runFused(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) error {
+	src := cell.SourceFlags{
+		Name:               flags.name,
+		Realm:              pickLocation("", &config.KUKE_RUN_REALM),
+		Space:              pickLocation("", &config.KUKE_RUN_SPACE),
+		Stack:              pickLocation("", &config.KUKE_RUN_STACK),
+		BlueprintName:      flags.blueprintName,
+		ConfigName:         flags.configName,
+		CloneSource:        flags.cloneSource,
+		ParamArgs:          flags.paramArgs,
+		ParamFile:          flags.paramFile,
+		EnvArgs:            flags.envArgs,
+		IgnoreDiskPressure: flags.ignoreDiskPressure,
+	}
+	// The scope-Var bundle `kuke run` feeds cell.Materialize for binding-lookup
+	// scope (built inline rather than as a package global per gochecknoglobals).
+	cellDoc, err := cell.Materialize(cmd, client, src, cell.ScopeVars{
+		Realm: &config.KUKE_RUN_REALM,
+		Space: &config.KUKE_RUN_SPACE,
+		Stack: &config.KUKE_RUN_STACK,
+	})
+	if err != nil {
+		return err
+	}
+	// --rm is a run-only knob (not part of the shared SourceFlags); apply it
+	// after materialisation. --env on this path is the persisted per-cell
+	// override already baked in by Materialize, so applyRuntimeKnobs is not used.
+	if flags.autoDelete {
+		cellDoc.Spec.AutoDelete = true
 	}
 
+	// The fused form is a create: refuse if a cell already lives at the
+	// materialised name (parity with `kuke create cell`'s collision refusal; the
+	// generated <prefix>-<6hex> name is probed free, so this only fires for an
+	// explicit --name collision). Point the operator at `kuke run <cell>` for the
+	// start+attach-existing path.
 	pre, getErr := client.GetCell(cmd.Context(), cellDoc)
-	if flags.newCell {
-		// --new is a strict "create new" intent: a live cell at the chosen
-		// name is a fail rather than an attach. The two reachable shapes:
-		//   - `--new --name X`: the operator pinned the name. The error
-		//     directs them at `--name X` alone (idempotent attach) so the
-		//     escape valve is explicit.
-		//   - `--new` alone: the cell name is a generated `<prefix>-<6hex>`
-		//     already allocated collision-free above (epic:cell-identity
-		//     #1022), so this branch is unreachable in practice; the defensive
-		//     error stays in case the daemon view raced the allocation.
-		switch {
-		case getErr == nil && pre.MetadataExists:
-			if flags.nameOverride != "" {
-				return fmt.Errorf(
-					"cell %q already exists; --new --name requires the name to be free "+
-						"(use `--name %s` alone for attach-if-exists semantics)",
-					cellDoc.Metadata.Name, cellDoc.Metadata.Name,
-				)
-			}
-			return fmt.Errorf(
-				"cell %q already exists in realm %q (raced the generated-suffix "+
-					"allocation); rerun `kuke run %s --new` to allocate a fresh suffix",
-				cellDoc.Metadata.Name, cellDoc.Spec.RealmID, flags.configName,
-			)
-		case getErr != nil && !errors.Is(getErr, errdefs.ErrCellNotFound):
-			return getErr
-		}
-	} else {
-		switch {
-		case getErr == nil && pre.MetadataExists:
-			if changed := divergedFields(pre.Cell.Spec, cellDoc.Spec); len(changed) > 0 {
-				// Default (#986) is warn-and-attach: warnDivergentNamedCell
-				// emits the `notice:` and returns nil so the flow falls
-				// through into runExistingCell against the live spec. Under
-				// --require-synced it instead returns the refusal error and
-				// CreateCell/StartCell never fire.
-				if warnErr := warnDivergentNamedCell(cmd.ErrOrStderr(), cellDoc, changed, flags); warnErr != nil {
-					return warnErr
-				}
-			}
-			// Either the on-disk spec matches the materialisation, or the
-			// caller accepted the warn-and-attach default — drive the
-			// create-or-attach state machine instead of re-entering CreateCell.
-			return runExistingCell(cmd, client, cellDoc, pre, flags)
-		case getErr != nil && !errors.Is(getErr, errdefs.ErrCellNotFound):
-			return getErr
-		}
+	switch {
+	case getErr == nil && pre.MetadataExists:
+		return fmt.Errorf(
+			"cell %q already exists in realm=%q space=%q stack=%q; run `kuke run %s` to "+
+				"start+attach it, or `kuke delete cell %s` before re-creating",
+			cellDoc.Metadata.Name, cellDoc.Spec.RealmID, cellDoc.Spec.SpaceID,
+			cellDoc.Spec.StackID, cellDoc.Metadata.Name, cellDoc.Metadata.Name,
+		)
+	case getErr != nil && !errors.Is(getErr, errdefs.ErrCellNotFound):
+		return getErr
 	}
 
-	// No live cell (ErrCellNotFound, or a nil read with no metadata): create
-	// the cell and attach.
 	result, err := client.CreateCell(cmd.Context(), cellDoc)
 	if err != nil {
 		return err
 	}
-
 	if printErr := printRunResult(cmd, result, flags.output); printErr != nil {
 		return printErr
 	}
@@ -596,39 +477,95 @@ func runRun(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// warnDivergentNamedCell reacts to a named live cell whose spec diverges from
-// the materialization the operator just asked us to run. Every `kuke run`
-// source that pins a deterministic cell name (`-f`, `<config>` without `--new`,
-// and `-b --name`) reaches this branch — `run` is otherwise a pure
-// read-and-materialize verb, so divergence is the operator's signal to either
-// reconcile (Config-lineage cells) or delete and re-run (Blueprint-lineage and
-// bare `-f` cells).
+// runFromFile implements the -f manifest path: parse the single-cell YAML,
+// resolve scope, apply the imperative runtime knobs, then create-or-attach by
+// metadata.name. A divergent on-disk spec warns-and-attaches by default
+// (#986) or hard-fails under --require-synced.
+func runFromFile(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) error {
+	cellDoc, err := loadFromFile(flags.file)
+	if err != nil {
+		return err
+	}
+	resolveCellLocation(&cellDoc)
+	applyRuntimeKnobs(&cellDoc, flags)
+
+	if validateErr := validateResolvedCell(cellDoc); validateErr != nil {
+		return validateErr
+	}
+
+	pre, getErr := client.GetCell(cmd.Context(), cellDoc)
+	switch {
+	case getErr == nil && pre.MetadataExists:
+		if changed := divergedFields(pre.Cell.Spec, cellDoc.Spec); len(changed) > 0 {
+			if warnErr := warnDivergentNamedCell(cmd.ErrOrStderr(), cellDoc, changed, flags); warnErr != nil {
+				return warnErr
+			}
+		}
+		return runExistingCell(cmd, client, cellDoc, pre, flags)
+	case getErr != nil && !errors.Is(getErr, errdefs.ErrCellNotFound):
+		return getErr
+	}
+
+	// No live cell: create and attach.
+	result, err := client.CreateCell(cmd.Context(), cellDoc)
+	if err != nil {
+		return err
+	}
+	if printErr := printRunResult(cmd, result, flags.output); printErr != nil {
+		return printErr
+	}
+	if !flags.detach {
+		return attachAndMaybeAutoDelete(cmd, client, cellDoc, flags)
+	}
+	return nil
+}
+
+// runExisting implements `kuke run <cell>`: start + attach an existing cell (the
+// docker `start -a` analogue). There is no source to materialise from — the cell
+// must already exist; a miss is an error pointing at the create paths. --env
+// injects runtime env at start time; --rm deletes on workload exit.
+func runExisting(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) error {
+	lookup := v1beta1.CellDoc{
+		Metadata: v1beta1.CellMetadata{Name: flags.cellName},
+	}
+	resolveCellLocation(&lookup)
+
+	pre, getErr := client.GetCell(cmd.Context(), lookup)
+	switch {
+	case errors.Is(getErr, errdefs.ErrCellNotFound) || (getErr == nil && !pre.MetadataExists):
+		return fmt.Errorf(
+			"%w (cell %q in realm=%q space=%q stack=%q); create it first with "+
+				"`kuke create cell` / `kuke run --from-...` or `kuke run -f <file>`",
+			errdefs.ErrCellNotFound, flags.cellName,
+			lookup.Spec.RealmID, lookup.Spec.SpaceID, lookup.Spec.StackID,
+		)
+	case getErr != nil:
+		return getErr
+	}
+
+	// Drive start+attach against the live cell's spec (its containers), threading
+	// the runtime knobs onto the doc StartCell receives.
+	cellDoc := pre.Cell
+	applyRuntimeKnobs(&cellDoc, flags)
+	return runExistingCell(cmd, client, cellDoc, pre, flags)
+}
+
+// warnDivergentNamedCell reacts to a live cell whose spec diverges from the -f
+// manifest the operator asked to run. Only the -f path materialises a cell from
+// an authoritative on-disk spec and so reaches this branch; the fused
+// create+start+attach sources always create a fresh cell (or refuse on name
+// collision), and the `kuke run <cell>` path has no source to compare against.
 //
 // The default behaviour (#986) is warn-and-attach: print a one-line `notice:`
-// naming the diverging fields and the per-source reconcile pointer, then
-// return nil so runRun falls through to runExistingCell and attaches to the
-// live state. `kuke run` is the operator's interactive escape hatch into a
-// live cell and obstruction on drift defeats the workflow — the notice
-// conveys the OutOfSync state plus the recovery path without blocking the
-// immediate task. CI/scripted callers that need a hard fail opt in via
-// --require-synced; the function then returns the pre-#986 refusal error
-// shape (same per-source pointer the notice cites).
-//
-// The pointer per source: `<config>` → `kuke restart <name>` (#821's
-// restart picks up the daemon-side OutOfSync detection #820 wires and
-// reconciles implicitly; the cell name is the live cell's own name), `-b --name
-// <cell>` → `kuke delete cell <cell>` + re-run (Blueprint-lineage cells have
-// no implicit reconcile per #819's umbrella; the operator promotes to a
-// CellConfig for restart-driven reconcile workflows), and the bare `-f`
-// fallback keeps the `kuke apply -f` pointer because that path carries the
-// spec on disk. The `--new` path never reaches this function: it takes a
-// separate branch in runRun that treats any existing cell as a hard collision
-// (no divergence reconcile pointer makes sense — `restart cell` would
-// reconcile against the Config's stable name, not the `--new` cell's
-// generated/pinned name).
+// naming the diverging fields and the `kuke apply -f` pointer, then return nil
+// so runFromFile falls through to runExistingCell and attaches to the live
+// state — `kuke run` is the operator's interactive escape hatch and obstruction
+// on drift defeats the workflow. CI/scripted callers that need a hard fail opt
+// in via --require-synced, which returns the pre-#986 refusal error shape.
 func warnDivergentNamedCell(w io.Writer, cellDoc v1beta1.CellDoc, changed []string, flags runFlags) error {
 	fields := strings.Join(changed, ", ")
-	source, pointer := divergentSourcePointer(cellDoc, flags)
+	const source = "on-disk spec"
+	const pointer = "use `kuke apply -f` to update"
 	if flags.requireSynced {
 		return fmt.Errorf(
 			"live cell %q spec differs from %s (%s) — refusing to attach (--require-synced); %s",
@@ -640,27 +577,6 @@ func warnDivergentNamedCell(w io.Writer, cellDoc v1beta1.CellDoc, changed []stri
 		cellDoc.Metadata.Name, source, fields, pointer,
 	)
 	return nil
-}
-
-// divergentSourcePointer returns the source descriptor and the per-source
-// recovery pointer for the divergence notice/error. Shared between the
-// warn-and-attach default and the --require-synced refusal so both surface
-// the same operator-facing wording per source path.
-func divergentSourcePointer(cellDoc v1beta1.CellDoc, flags runFlags) (source, pointer string) {
-	switch {
-	case flags.configName != "" && !flags.newCell:
-		return fmt.Sprintf("CellConfig %q", flags.configName),
-			fmt.Sprintf("run `kuke restart %s` to reconcile (stops, updates, starts)",
-				cellDoc.Metadata.Name)
-	case flags.blueprintName != "" && flags.nameOverride != "":
-		return fmt.Sprintf("CellBlueprint %q", flags.blueprintName),
-			fmt.Sprintf("-b cells have no in-place reconcile; delete it with "+
-				"`kuke delete cell %s` and re-run (or promote to a CellConfig for "+
-				"`kuke restart` reconcile workflows)", cellDoc.Metadata.Name)
-	default:
-		return "on-disk spec",
-			"use `kuke apply -f` to update"
-	}
 }
 
 // runExistingCell drives the create-or-attach state machine for a live cell
@@ -821,224 +737,6 @@ func attachAfterRun(
 	return runAttachLoop(cmd, client, doc, target)
 }
 
-// loadResult bundles the resolved CellDoc with the bookkeeping a follow-up
-// step needs to drive the post-load flow. GenPrefix is non-empty exactly when
-// the source path omitted an explicit name and the cell name must be generated
-// (epic:cell-identity #1022): bare `<config>`, `<config> --new`, or bare `-b`
-// all set it to the source's `<prefix>` so runRun can allocate a
-// collision-free `<prefix>-<6hex>` once scope is resolved. An explicit --name
-// (or the verbatim `-f` metadata.name) leaves GenPrefix empty, so runRun uses
-// the loaded name as-is.
-type loadResult struct {
-	Doc       v1beta1.CellDoc
-	GenPrefix string
-}
-
-// loadCellDoc dispatches to the file, blueprint, or config loader. Exactly
-// one of flags.file / flags.blueprintName / flags.configName is non-empty
-// (the cobra mutex enforces this before the handler runs); --name and --param*
-// are template knobs already rejected against -f and the <config> positional
-// in parseRunFlags. The blueprint and config paths resolve over client; the
-// file path ignores it.
-func loadCellDoc(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (loadResult, error) {
-	switch {
-	case flags.configName != "":
-		return loadFromConfig(cmd, client, flags)
-	case flags.blueprintName != "":
-		doc, genPrefix, err := loadFromBlueprint(cmd, client, flags)
-		return loadResult{Doc: doc, GenPrefix: genPrefix}, err
-	default:
-		doc, err := loadFromFile(flags.file)
-		return loadResult{Doc: doc}, err
-	}
-}
-
-// loadFromBlueprint resolves the named CellBlueprint from daemon storage at the
-// scope named by --realm/--space/--stack, substitutes scalar --param values,
-// and materializes a fresh `<prefix>-<6hex>` CellDoc (--name overrides the name
-// verbatim). The blueprint's metadata scope drives the materialized cell's
-// realm/space/stack; resolveCellLocation later fills any coordinate the
-// blueprint left empty from the run flags / session defaults.
-//
-// The lookup scope takes realm from --realm (defaulted to "default") and
-// space/stack only when the operator set them *explicitly* — via the flag or
-// the KUKE_RUN_SPACE/STACK env var. The session default for those keys is
-// "default" (DefineKV calls viper.SetDefault), so reading them through viper
-// would wrongly narrow every lookup to default/default and hide realm-scoped
-// blueprints; cmd/kuke/shared.ExplicitScope reads the raw flag/env instead.
-// A blueprint that declares structural slots the inline path cannot fill
-// (secret slots, required repo slots with no url) is refused by Materialize
-// with a pointer to the CellConfig workflow.
-func loadFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (v1beta1.CellDoc, string, error) {
-	cliParams, err := buildParamMap(flags)
-	if err != nil {
-		return v1beta1.CellDoc{}, "", err
-	}
-
-	lookup := v1beta1.CellBlueprintDoc{
-		Metadata: v1beta1.CellBlueprintMetadata{
-			Name:  flags.blueprintName,
-			Realm: kukshared.PickLookupRealm(cmd, &config.KUKE_RUN_REALM),
-			Space: kukshared.ExplicitScope(cmd, "space", &config.KUKE_RUN_SPACE),
-			Stack: kukshared.ExplicitScope(cmd, "stack", &config.KUKE_RUN_STACK),
-		},
-	}
-
-	res, err := client.GetBlueprint(cmd.Context(), lookup)
-	if err != nil {
-		return v1beta1.CellDoc{}, "", err
-	}
-	if !res.MetadataExists {
-		return v1beta1.CellDoc{}, "", fmt.Errorf(
-			"%w (blueprint %q in scope realm=%q space=%q stack=%q)",
-			errdefs.ErrBlueprintNotFound, lookup.Metadata.Name,
-			lookup.Metadata.Realm, lookup.Metadata.Space, lookup.Metadata.Stack,
-		)
-	}
-
-	resolved, err := cellblueprint.Resolve(res.Blueprint, cliParams, os.LookupEnv)
-	if err != nil {
-		return v1beta1.CellDoc{}, "", err
-	}
-	doc, err := cellblueprint.MaterializeWithName(resolved, flags.nameOverride, cliParams)
-	if err != nil {
-		return v1beta1.CellDoc{}, "", err
-	}
-	// An omitted --name signals the unified generator (epic:cell-identity
-	// #1022): return the blueprint's prefix so runRun reallocates a
-	// collision-free `<prefix>-<6hex>` against the resolved scope. With an
-	// explicit name MaterializeWithName already used it verbatim — no prefix.
-	genPrefix := ""
-	if flags.nameOverride == "" {
-		genPrefix = cellblueprint.Prefix(resolved)
-	}
-	return doc, genPrefix, nil
-}
-
-// loadFromConfig resolves the named CellConfig from daemon storage, looks up
-// the referenced Blueprint from daemon storage (which may live in a different
-// realm — cross-scope references are explicitly allowed), and materializes the
-// CellDoc via cellconfig.Materialize: scalar values from the Config's spec,
-// structural slot fills (repo URLs, secret sources) applied, deterministic
-// stable name + kukeon.io/config back-ref label set. The resulting CellDoc
-// carries the Config's scope coordinates (not the blueprint's), so the cell
-// is created where the Config is bound.
-//
-// The lookup walks progressively shallower scopes (full → space-only →
-// realm-only) using pickLocation as the starting scope so the probe matches
-// where resolveCellLocation would place the materialised cell. A Config
-// stored at default/default/default would otherwise be invisible to a bare
-// `kuke run <config>` lookup that used ExplicitScope (empty space/stack
-// unless --space/--stack are set). Mirrors the daemon-side reconciler
-// (internal/controller/reconcile_outofsync.go lookupLineageConfig), which
-// is also re-used by controller.StartCell's OutOfSync reapply (#983), so
-// all paths resolve the same Config regardless of which scope it was
-// originally bound at.
-func loadFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags runFlags) (loadResult, error) {
-	realm := kukshared.PickLookupRealm(cmd, &config.KUKE_RUN_REALM)
-	space := pickLocation("", &config.KUKE_RUN_SPACE)
-	stack := pickLocation("", &config.KUKE_RUN_STACK)
-
-	cfgRes, err := lookupConfigWithFallback(cmd.Context(), client, flags.configName, realm, space, stack)
-	if err != nil {
-		return loadResult{}, err
-	}
-	if !cfgRes.MetadataExists {
-		return loadResult{}, fmt.Errorf(
-			"%w (config %q in scope realm=%q space=%q stack=%q)",
-			errdefs.ErrConfigNotFound, flags.configName, realm, space, stack,
-		)
-	}
-
-	bpRef := cfgRes.Config.Spec.Blueprint
-	bpLookup := v1beta1.CellBlueprintDoc{
-		Metadata: v1beta1.CellBlueprintMetadata{
-			Name:  bpRef.Name,
-			Realm: bpRef.Realm,
-			Space: bpRef.Space,
-			Stack: bpRef.Stack,
-		},
-	}
-	bpRes, err := client.GetBlueprint(cmd.Context(), bpLookup)
-	if err != nil {
-		return loadResult{}, err
-	}
-	if !bpRes.MetadataExists {
-		return loadResult{}, fmt.Errorf(
-			"%w (blueprint %q referenced by config %q in scope realm=%q space=%q stack=%q)",
-			errdefs.ErrBlueprintNotFound, bpRef.Name, cfgRes.Config.Metadata.Name,
-			bpRef.Realm, bpRef.Space, bpRef.Stack,
-		)
-	}
-
-	// Cell-name derivation (epic:cell-identity #1022 — a Config is a 1:N
-	// binding). An explicit `--name X` (with or without `--new`) is used
-	// verbatim; threading it through Materialize keeps the kukeon.io/config
-	// lineage label on the cell so `kuke get cells -l kukeon.io/config=<name>`
-	// still enumerates it. An omitted name (bare `<config>` or `<config>
-	// --new`) is generated `<prefix>-<6hex>` via the unified generator —
-	// runRun reallocates a collision-free name against the resolved scope, so
-	// each invocation stamps a fresh cell (use `--name X` for idempotent
-	// attach). genPrefix carries the Config's prefix for that path.
-	genPrefix := ""
-	if flags.nameOverride == "" {
-		genPrefix = cellconfig.Prefix(cfgRes.Config)
-	}
-	doc, materializeErr := cellconfig.MaterializeWithName(cfgRes.Config, bpRes.Blueprint, flags.nameOverride)
-	if materializeErr != nil {
-		return loadResult{}, materializeErr
-	}
-	return loadResult{Doc: doc, GenPrefix: genPrefix}, nil
-}
-
-// lookupConfigWithFallback probes for the named Config from the operator's
-// effective scope (realm/space/stack) down to space-only and then realm-only,
-// returning the first hit. The starting scope comes from pickLocation (which
-// falls back to viper / env / "default") so a `kuke run <config>` against a
-// Config bound at default/default/default resolves without forcing the
-// operator to repeat --space default --stack default. Probes are deduplicated
-// when the space or stack is already empty (a realm-scoped lookup only takes
-// the one probe its own scope names). A real RPC error short-circuits the
-// walk so the operator sees the underlying failure instead of a misleading
-// "not found" at realm scope. The last miss is returned when every probe
-// reports MetadataExists=false so the caller can surface a single
-// ErrConfigNotFound with the full-scope coordinates.
-func lookupConfigWithFallback(
-	ctx context.Context, client kukeonv1.Client,
-	name, realm, space, stack string,
-) (kukeonv1.GetConfigResult, error) {
-	type probe struct{ space, stack string }
-	probes := []probe{{space, stack}}
-	if stack != "" {
-		probes = append(probes, probe{space, ""})
-	}
-	if space != "" {
-		probes = append(probes, probe{"", ""})
-	}
-
-	var lastMiss kukeonv1.GetConfigResult
-	for _, p := range probes {
-		res, err := client.GetConfig(ctx, v1beta1.CellConfigDoc{
-			APIVersion: v1beta1.APIVersionV1Beta1,
-			Kind:       v1beta1.KindCellConfig,
-			Metadata: v1beta1.CellConfigMetadata{
-				Name:  name,
-				Realm: realm,
-				Space: p.space,
-				Stack: p.stack,
-			},
-		})
-		if err != nil {
-			return kukeonv1.GetConfigResult{}, err
-		}
-		if res.MetadataExists {
-			return res, nil
-		}
-		lastMiss = res
-	}
-	return lastMiss, nil
-}
-
 // loadFromFile preserves the phase-1c -f path: read the file (or stdin),
 // parse the single Cell document, and return it.
 func loadFromFile(file string) (v1beta1.CellDoc, error) {
@@ -1053,26 +751,6 @@ func loadFromFile(file string) (v1beta1.CellDoc, error) {
 		return v1beta1.CellDoc{}, fmt.Errorf("failed to read input: %w", err)
 	}
 	return parseSingleCellDoc(rawYAML)
-}
-
-// buildParamMap layers --param flags on top of --param-file contents.
-// Empty result is a valid input for cellblueprint.Resolve (the blueprint may
-// have all defaults). The function is split out so the run-time errors for
-// malformed files / KEY=VALUE strings stay close to the call site.
-func buildParamMap(flags runFlags) (map[string]string, error) {
-	var fileParams map[string]string
-	if flags.paramFile != "" {
-		fp, err := cellblueprint.ParseParamFile(flags.paramFile)
-		if err != nil {
-			return nil, err
-		}
-		fileParams = fp
-	}
-	cliParams, err := cellblueprint.ParseParamArgs(flags.paramArgs)
-	if err != nil {
-		return nil, err
-	}
-	return cellblueprint.MergeParams(fileParams, cliParams), nil
 }
 
 // parseSingleCellDoc parses raw YAML and returns the single-doc Cell. It errors

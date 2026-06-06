@@ -418,14 +418,14 @@ var (
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_CONTAINER = DefineKV("KUKE_RUN_CONTAINER", "kuke/run/container")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_RUN_BLUEPRINT = DefineKV("KUKE_RUN_BLUEPRINT", "kuke/run/blueprint")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_RM = DefineKV("KUKE_RUN_RM", "kuke/run/rm")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	KUKE_RUN_NAME = DefineKV("KUKE_RUN_NAME", "kuke/run/name")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
-	KUKE_RUN_NEW = DefineKV("KUKE_RUN_NEW", "kuke/run/new")
-	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
+	// KUKE_RUN_PARAM_FILE is the env-var twin of `kuke run --param-file`. The
+	// flag is registered via cell.RegisterSourceFlags (shared with `kuke create
+	// cell`) and read off cmd.Flags() rather than viper, so this Var is not bound;
+	// it stays declared for env-driven defaults parity with the other keys.
 	KUKE_RUN_PARAM_FILE = DefineKV("KUKE_RUN_PARAM_FILE", "kuke/run/param-file")
 	//nolint:revive,gochecknoglobals,staticcheck // ignore linter warning about this variable
 	// KUKE_RUN_ENV is the env-var twin of `kuke run --env KEY=VALUE` (issue
