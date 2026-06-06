@@ -172,7 +172,7 @@ func MaterializeWithName(
 	}
 	if len(blockers) > 0 {
 		return v1beta1.CellDoc{}, fmt.Errorf(
-			"%w (blueprint %q: %s); use `kuke run <config>` with a CellConfig that fills the slots",
+			"%w (blueprint %q: %s); use `kuke run --from-config` with a CellConfig that fills the slots",
 			errdefs.ErrBlueprintStructuralSlots, doc.Metadata.Name, strings.Join(blockers, ", "),
 		)
 	}
