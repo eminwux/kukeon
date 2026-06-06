@@ -281,7 +281,7 @@ func cloneFromBlueprint(
 	if err != nil {
 		return v1beta1.CellDoc{}, err
 	}
-	mergedParams := mergeParamMaps(srcProv.Params, cliParams)
+	mergedParams := cellblueprint.MergeParams(srcProv.Params, cliParams)
 
 	resolved, err := cellblueprint.Resolve(bpRes.Blueprint, mergedParams, os.LookupEnv)
 	if err != nil {
@@ -299,24 +299,6 @@ func cloneFromBlueprint(
 		cellDoc.Spec.Provenance.Params = mergedParams
 	}
 	return cellDoc, nil
-}
-
-// mergeParamMaps layers override params on top of base params (override wins on
-// a key collision, last-write-wins per AC#6). Returns a fresh map; never
-// mutates either input. A nil/empty result stays nil so a no-override clone's
-// provenance is byte-equal to the source's.
-func mergeParamMaps(base, override map[string]string) map[string]string {
-	if len(base) == 0 && len(override) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(base)+len(override))
-	for k, v := range base {
-		out[k] = v
-	}
-	for k, v := range override {
-		out[k] = v
-	}
-	return out
 }
 
 // setSourceCellAnnotation stamps the inert kukeon.io/source-cell provenance
