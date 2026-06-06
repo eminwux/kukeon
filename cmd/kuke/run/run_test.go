@@ -1438,8 +1438,8 @@ func TestRun_ProfileFlag_RemovedWithMigrationPointer(t *testing.T) {
 			if !strings.Contains(err.Error(), "-p/--profile (CellProfile) was removed") {
 				t.Errorf("err %q must name the removed flag", err)
 			}
-			if !strings.Contains(err.Error(), "kuke run -b") {
-				t.Errorf("err %q must point at the -b replacement", err)
+			if !strings.Contains(err.Error(), "kuke run --from-blueprint") {
+				t.Errorf("err %q must point at the --from-blueprint replacement", err)
 			}
 			if fc.createCalls != 0 {
 				t.Errorf("CreateCell called; flag removal must reject before RPC")

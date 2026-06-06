@@ -29,7 +29,7 @@ import (
 
 // TestDivergedFields_MaterializePersistMaterializeIsIdempotent guards the
 // invariant that `kuke restart` writes a spec to disk that — when
-// re-materialised by the next `kuke run <config>` — compares clean against
+// re-materialised by the next `kuke run --from-config <cfg>` — compares clean against
 // the persisted version (issue #984). The flow being asserted:
 //
 //	Materialize(cfg, bp) → ApplyDocuments(persist) → GetCell → Materialize(cfg, bp)
@@ -122,7 +122,7 @@ func TestDivergedFields_MaterializePersistMaterializeIsIdempotent(t *testing.T) 
 				t.Fatalf("BuildCellExternalFromInternal (readback): %v", err)
 			}
 
-			// Step 4: Re-Materialize as the next `kuke run <config>` would.
+			// Step 4: Re-Materialize as the next `kuke run --from-config <cfg>` would.
 			cell2, err := cellconfig.MaterializeWithName(tc.cfg, tc.bp, cellconfig.Prefix(tc.cfg))
 			if err != nil {
 				t.Fatalf("Materialize (run side): %v", err)

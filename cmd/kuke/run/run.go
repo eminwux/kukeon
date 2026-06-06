@@ -51,8 +51,9 @@ import (
 // flag. Defined once so tests can match on it via errors.Is.
 var errRemovedProfileFlag = errors.New(
 	"kuke run: -p/--profile (CellProfile) was removed in #626 — apply a " +
-		"kind: CellBlueprint and use `kuke run -b <name>` (or `kuke run <config>` " +
-		"for a daemon-stored CellConfig); see docs/site/guides/migrate-cellprofile-to-blueprint.md",
+		"kind: CellBlueprint and use `kuke run --from-blueprint <name>` (or " +
+		"`kuke run --from-config <cfg>` for a daemon-stored CellConfig); " +
+		"see docs/site/guides/migrate-cellprofile-to-blueprint.md",
 )
 
 // MockControllerKey is used to inject a mock kukeonv1.Client via context in tests.
@@ -860,7 +861,7 @@ func pickLocation(fromDoc string, kv *config.Var) string {
 //
 // Each entry is shaped `<path> (actual=<v>, desired=<v>)` so the reject error
 // surfaces both sides verbatim — without this, an operator hitting a false
-// positive (e.g. issue #984 — `kuke run <config>` rejecting immediately after
+// positive (e.g. issue #984 — `kuke run --from-config <cfg>` rejecting immediately after
 // a successful `kuke restart` per the OutOfSync reconcile path) has no
 // way to tell which side of the comparison normalised differently from the
 // other. Test assertions on the field path itself (e.g.

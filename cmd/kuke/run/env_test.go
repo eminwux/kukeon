@@ -38,7 +38,7 @@ func TestParseEnvArgs_HappyPath(t *testing.T) {
 	}
 }
 
-// TestParseEnvArgs_EmptyInput is the no-flag case — `kuke run <cfg>` with
+// TestParseEnvArgs_EmptyInput is the no-flag case — `kuke run --from-config <cfg>` with
 // no --env flags must produce nil so cellDoc.Spec.RuntimeEnv stays its
 // zero value and the divergent-spec check sees an unchanged spec.
 func TestParseEnvArgs_EmptyInput(t *testing.T) {
