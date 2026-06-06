@@ -237,6 +237,17 @@ func composeTeam(
 		}
 	}
 
+	// Resolve the per-team root: an operator-supplied spec.teamDir on the
+	// existing drop-in entry overrides the default <base>/teams/<team>; an
+	// absent override falls back to the layout default. The resolved path
+	// is used for both the provisioning pass and the entry write below so
+	// the persisted record matches what was actually provisioned.
+	teamDir := resolveTeamDir(layout, project)
+
+	if provisionErr := provisionHost(out, teamDir, pt, bundle, dryRun); provisionErr != nil {
+		return provisionErr
+	}
+
 	if dryRun {
 		return emitDryRun(out, project, layout, res)
 	}
@@ -252,8 +263,9 @@ func composeTeam(
 		Kind:       model.KindTeamEntry,
 		Metadata:   model.Metadata{Name: project},
 		Spec: model.TeamEntrySpec{
-			Path:   projectDir,
-			Source: &source,
+			Path:    projectDir,
+			TeamDir: teamDir,
+			Source:  &source,
 		},
 	}
 	if writeErr := teamhost.WriteEntry(layout, entry); writeErr != nil {
@@ -267,6 +279,89 @@ func composeTeam(
 			len(res.Blueprints), len(res.Configs))
 	}
 	return nil
+}
+
+// resolveTeamDir returns the per-team host-state root for `project`. The
+// default is `Layout.TeamDir(project)`, but an existing drop-in entry's
+// `spec.teamDir` (set by the operator to relocate the team's state tree)
+// overrides the default so a re-init preserves the operator's relocation.
+// A missing or malformed entry — and an entry with an empty teamDir — both
+// fall back to the default so first-init keeps the well-known shape.
+func resolveTeamDir(layout teamhost.Layout, project string) string {
+	defaultDir := layout.TeamDir(project)
+	raw, err := os.ReadFile(layout.EntryPath(project))
+	if err != nil {
+		return defaultDir
+	}
+	var existing model.TeamEntry
+	if unmarshalErr := yaml.Unmarshal(raw, &existing); unmarshalErr != nil {
+		return defaultDir
+	}
+	if override := strings.TrimSpace(existing.Spec.TeamDir); override != "" {
+		return override
+	}
+	return defaultDir
+}
+
+// provisionHost runs the per-team host-state provisioning pass: per-(role
+// × harness) state dirs, harness seeds, and the one-shot host-config copy.
+// A harness-less roster (no harness defaults, no pairs) still flows through
+// teamhost.ProvisionTeam so the team root + a one-shot config seed are
+// materialized — `kuke team init` is the addressable point of contact for
+// every team, not just teams with rendered cells.
+func provisionHost(
+	out io.Writer, teamDir string,
+	pt *model.ProjectTeam, bundle *teamsource.Bundle, dryRun bool,
+) error {
+	pairs := rosterPairs(pt)
+	harnesses := map[string]*model.Harness{}
+	if bundle != nil {
+		harnesses = bundle.Harnesses
+	}
+	in := teamhost.ProvisionInputs{
+		TeamRoot:      teamDir,
+		Pairs:         pairs,
+		Harnesses:     harnesses,
+		HomeConfigDir: hostUserConfigDir(),
+		DryRun:        dryRun,
+		Out:           out,
+	}
+	if err := teamhost.ProvisionTeam(in); err != nil {
+		return fmt.Errorf("provision team host state: %w", err)
+	}
+	return nil
+}
+
+// rosterPairs flattens pt.Spec.Roles × pt.Spec.Defaults.Harnesses into the
+// concrete (role × harness) pairs the provisioning pass materializes state
+// dirs for. A role-less or harness-less project produces an empty list.
+func rosterPairs(pt *model.ProjectTeam) []teamhost.SeedPair {
+	if pt == nil {
+		return nil
+	}
+	if len(pt.Spec.Roles) == 0 || len(pt.Spec.Defaults.Harnesses) == 0 {
+		return nil
+	}
+	pairs := make([]teamhost.SeedPair, 0, len(pt.Spec.Roles)*len(pt.Spec.Defaults.Harnesses))
+	for _, role := range pt.Spec.Roles {
+		for _, harness := range pt.Spec.Defaults.Harnesses {
+			pairs = append(pairs, teamhost.SeedPair{Role: role.Ref, Harness: harness})
+		}
+	}
+	return pairs
+}
+
+// hostUserConfigDir resolves the source of the one-shot config copy
+// (`$HOME/.config`) per the XDG-on-Linux convention. An unresolvable HOME
+// disables the copy by returning the empty string — ProvisionTeam treats
+// that as "no copy", which is the right behavior for a CI host that has no
+// operator config to seed.
+func hostUserConfigDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.Join(home, ".config")
 }
 
 // applyTeam marshals the rendered set and hands it to apply with the project

@@ -1038,6 +1038,227 @@ func TestComposeTeamBuildNotInvokedByDefault(t *testing.T) {
 	}
 }
 
+// TestComposeTeamAutoFillsTeamDir confirms the AC: a clean init writes the
+// drop-in entry with spec.teamDir auto-populated from Layout.TeamDir(project).
+func TestComposeTeamAutoFillsTeamDir(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+
+	if err := composeTeam(
+		context.Background(), &bytes.Buffer{}, io.Discard, projectDir, layout,
+		stubGit(nil), stubProjectURL(""), stubResolveErr(), stubApplyErr(), stubBuildErr(), false, false,
+	); err != nil {
+		t.Fatalf("composeTeam: %v", err)
+	}
+	raw, err := os.ReadFile(layout.EntryPath("sbsh"))
+	if err != nil {
+		t.Fatalf("entry not written: %v", err)
+	}
+	var te model.TeamEntry
+	if unmarshalErr := yaml.Unmarshal(raw, &te); unmarshalErr != nil {
+		t.Fatalf("entry parse: %v", unmarshalErr)
+	}
+	if want := layout.TeamDir("sbsh"); te.Spec.TeamDir != want {
+		t.Errorf("entry.spec.teamDir = %q, want auto-filled %q", te.Spec.TeamDir, want)
+	}
+}
+
+// TestComposeTeamPreservesTeamDirOverride covers the AC: a hand-edited
+// spec.teamDir survives re-init. The test seeds an existing drop-in entry
+// with an override and asserts the re-write keeps it.
+func TestComposeTeamPreservesTeamDirOverride(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+
+	// Seed an existing drop-in entry with an operator-relocated teamDir.
+	override := filepath.Join(t.TempDir(), "nfs-mounted", "sbsh")
+	prior := &model.TeamEntry{
+		APIVersion: model.APIVersionV1,
+		Kind:       model.KindTeamEntry,
+		Metadata:   model.Metadata{Name: "sbsh"},
+		Spec: model.TeamEntrySpec{
+			Path:    projectDir,
+			TeamDir: override,
+			Source:  &model.TeamSource{Repo: "github.com/eminwux/agents", Tag: "v1.4.0"},
+		},
+	}
+	if err := teamhost.WriteEntry(layout, prior); err != nil {
+		t.Fatalf("seed prior entry: %v", err)
+	}
+
+	if err := composeTeam(
+		context.Background(), &bytes.Buffer{}, io.Discard, projectDir, layout,
+		stubGit(nil), stubProjectURL(""), stubResolveErr(), stubApplyErr(), stubBuildErr(), false, false,
+	); err != nil {
+		t.Fatalf("composeTeam re-init: %v", err)
+	}
+
+	raw, err := os.ReadFile(layout.EntryPath("sbsh"))
+	if err != nil {
+		t.Fatalf("entry not written: %v", err)
+	}
+	var te model.TeamEntry
+	if unmarshalErr := yaml.Unmarshal(raw, &te); unmarshalErr != nil {
+		t.Fatalf("entry parse: %v", unmarshalErr)
+	}
+	if te.Spec.TeamDir != override {
+		t.Errorf("entry.spec.teamDir = %q, want preserved override %q", te.Spec.TeamDir, override)
+	}
+
+	// State dir + per-team root land under the override path, not the
+	// layout default — the override governs provisioning too.
+	if _, statErr := os.Stat(override); statErr != nil {
+		t.Errorf("override teamDir not provisioned: %v", statErr)
+	}
+	if _, statErr := os.Stat(layout.TeamDir("sbsh")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("default teamDir leaked alongside override: err=%v", statErr)
+	}
+}
+
+// TestComposeTeamProvisionsRosterStateDirs covers the AC: every roster
+// (role × harness) pair gets a state dir under `~/.kuke/teams/<team>/`.
+func TestComposeTeamProvisionsRosterStateDirs(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+	// Add a seed to the claude harness so the AC's "seeds applied" branch
+	// also fires alongside the state-dir mkdir.
+	bundle.Harnesses["claude"].Spec.Seeds = []model.HarnessSeed{
+		{Path: "${HARNESS}.json", Mode: 0o644, Content: "{}\n"},
+	}
+
+	var (
+		mu    sync.Mutex
+		calls []applyCall
+	)
+	if err := composeTeam(
+		context.Background(), &bytes.Buffer{}, io.Discard, projectDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
+		stubBundle(bundle), recordingApply(&mu, &calls, kukeonv1.ApplyDocumentsResult{}),
+		stubBuildErr(), false, false,
+	); err != nil {
+		t.Fatalf("composeTeam: %v", err)
+	}
+
+	stateDir := layout.RoleHarnessStateDir("sbsh", "dev", "claude")
+	if info, err := os.Stat(stateDir); err != nil {
+		t.Errorf("state dir not created: %v", err)
+	} else if !info.IsDir() {
+		t.Errorf("%q is not a dir", stateDir)
+	}
+
+	seedPath := layout.HarnessSeedPath("sbsh", "claude", "")
+	if _, err := os.Stat(seedPath); err != nil {
+		t.Errorf("seed not written: %v", err)
+	}
+}
+
+// TestComposeTeamProvisionsTwoProjectsIsolated checks the AC's e2e
+// invariant at the composition layer: dezot and kukeon get isolated
+// state trees under one shared `~/.kuke/teams/` root.
+func TestComposeTeamProvisionsTwoProjectsIsolated(t *testing.T) {
+	t.Parallel()
+	const otherProjectYAML = `apiVersion: kuketeams.io/v1
+kind: ProjectTeam
+metadata: { name: kukeon }
+spec:
+  source: { repo: github.com/eminwux/agents, tag: v1.4.0 }
+  defaults:
+    harnesses: [claude]
+  roles:
+    - { ref: dev }
+`
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+	bundle.Harnesses["claude"].Spec.Seeds = []model.HarnessSeed{
+		{Path: "${HARNESS}.json", Mode: 0o644, Content: "{}\n"},
+	}
+
+	var (
+		mu    sync.Mutex
+		calls []applyCall
+	)
+	apply := recordingApply(&mu, &calls, kukeonv1.ApplyDocumentsResult{})
+
+	for _, tc := range []struct{ name, body string }{
+		{"dezot", strings.ReplaceAll(otherProjectYAML, "kukeon", "dezot")},
+		{"kukeon", otherProjectYAML},
+	} {
+		dir := writeProject(t, tc.body)
+		if err := composeTeam(
+			context.Background(), &bytes.Buffer{}, io.Discard, dir, layout,
+			stubGit(nil), stubProjectURL("git@github.com:eminwux/"+tc.name+".git"),
+			stubBundle(bundle), apply, stubBuildErr(), false, false,
+		); err != nil {
+			t.Fatalf("composeTeam(%q): %v", tc.name, err)
+		}
+	}
+
+	for _, team := range []string{"dezot", "kukeon"} {
+		if _, err := os.Stat(layout.RoleHarnessStateDir(team, "dev", "claude")); err != nil {
+			t.Errorf("team %q state dir missing: %v", team, err)
+		}
+		if _, err := os.Stat(layout.HarnessSeedPath(team, "claude", "")); err != nil {
+			t.Errorf("team %q seed missing: %v", team, err)
+		}
+	}
+
+	// Tampering dezot's seed must not affect kukeon's.
+	dezotSeed := layout.HarnessSeedPath("dezot", "claude", "")
+	kukeonSeed := layout.HarnessSeedPath("kukeon", "claude", "")
+	kukeonBefore, err := os.ReadFile(kukeonSeed)
+	if err != nil {
+		t.Fatalf("read kukeon seed: %v", err)
+	}
+	if writeErr := os.WriteFile(dezotSeed, []byte("tampered\n"), 0o644); writeErr != nil {
+		t.Fatalf("tamper dezot: %v", writeErr)
+	}
+	kukeonAfter, err := os.ReadFile(kukeonSeed)
+	if err != nil {
+		t.Fatalf("read kukeon seed after tamper: %v", err)
+	}
+	if !bytes.Equal(kukeonBefore, kukeonAfter) {
+		t.Errorf("kukeon seed disturbed by dezot edit:\nbefore=%q\nafter=%q",
+			kukeonBefore, kukeonAfter)
+	}
+}
+
+// TestComposeTeamProvisionDryRunWritesNothing extends the existing
+// dry-run AC to the host-state provisioning pass: the announcements
+// land on stdout, but no per-team root materializes.
+func TestComposeTeamProvisionDryRunWritesNothing(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+	bundle.Harnesses["claude"].Spec.Seeds = []model.HarnessSeed{
+		{Path: "${HARNESS}.json", Mode: 0o644, Content: "{}\n"},
+	}
+
+	var out bytes.Buffer
+	if err := composeTeam(
+		context.Background(), &out, io.Discard, projectDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
+		stubBundle(bundle), stubApplyErr(), stubBuildErr(), true, false,
+	); err != nil {
+		t.Fatalf("composeTeam dry-run: %v", err)
+	}
+	if _, err := os.Stat(layout.TeamDir("sbsh")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("dry-run created team dir: stat err=%v", err)
+	}
+	body := out.String()
+	stateDir := layout.RoleHarnessStateDir("sbsh", "dev", "claude")
+	if !strings.Contains(body, stateDir) {
+		t.Errorf("dry-run output missing state dir %q:\n%s", stateDir, body)
+	}
+	if !strings.Contains(body, layout.HarnessSeedPath("sbsh", "claude", "")) {
+		t.Errorf("dry-run output missing seed path:\n%s", body)
+	}
+}
+
 func TestNewTeamCmdRegistersInit(t *testing.T) {
 	t.Parallel()
 	cmd := NewTeamCmd()

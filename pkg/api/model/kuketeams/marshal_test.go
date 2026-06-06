@@ -86,12 +86,14 @@ func TestRoundTripAllKinds(t *testing.T) {
 		APIVersion: model.APIVersionV1, Kind: model.KindTeamEntry,
 		Metadata: model.Metadata{Name: "sbsh"},
 		Spec: model.TeamEntrySpec{
-			Path:   "/home/op/src/sbsh",
-			Source: &model.TeamSource{Repo: "github.com/eminwux/agents", Branch: "main"},
+			Path:    "/home/op/src/sbsh",
+			TeamDir: "/home/op/.kuke/teams/sbsh",
+			Source:  &model.TeamSource{Repo: "github.com/eminwux/agents", Branch: "main"},
 		},
 	}
 	assertJSONYAML(t, "TeamEntry", te, func(got model.TeamEntry) bool {
 		return got.Metadata.Name == "sbsh" && got.Spec.Path == "/home/op/src/sbsh" &&
+			got.Spec.TeamDir == "/home/op/.kuke/teams/sbsh" &&
 			got.Spec.Source != nil && got.Spec.Source.Branch == "main" && got.Spec.Source.Floating()
 	})
 
@@ -111,10 +113,21 @@ func TestRoundTripAllKinds(t *testing.T) {
 	h := model.Harness{
 		APIVersion: model.APIVersionV1, Kind: model.KindHarness,
 		Metadata: model.Metadata{Name: "claude"},
-		Spec:     model.HarnessSpec{SkillPath: "/s", MakeTarget: "claude", Template: "t.yaml"},
+		Spec: model.HarnessSpec{
+			SkillPath:  "/s",
+			MakeTarget: "claude",
+			Template:   "t.yaml",
+			Seeds: []model.HarnessSeed{
+				{Path: "${TEAM_ROOT}/${HARNESS}.json", Mode: 0o644, Content: "{}"},
+			},
+		},
 	}
 	assertJSONYAML(t, "Harness", h, func(got model.Harness) bool {
-		return got.Spec.SkillPath == "/s" && got.Spec.MakeTarget == "claude"
+		return got.Spec.SkillPath == "/s" && got.Spec.MakeTarget == "claude" &&
+			len(got.Spec.Seeds) == 1 &&
+			got.Spec.Seeds[0].Path == "${TEAM_ROOT}/${HARNESS}.json" &&
+			got.Spec.Seeds[0].Mode == 0o644 &&
+			got.Spec.Seeds[0].Content == "{}"
 	})
 
 	ic := model.ImageCatalog{

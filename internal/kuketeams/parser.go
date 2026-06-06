@@ -422,7 +422,8 @@ func validateRole(r *model.Role) error {
 }
 
 // validateHarness enforces the Harness contract: name known; skillPath,
-// makeTarget, template non-empty.
+// makeTarget, template non-empty; each declared seed has a non-empty path and
+// a permission-bit mode (0..0o777).
 func validateHarness(h *model.Harness) error {
 	if !model.IsKnownHarness(h.Metadata.Name) {
 		return fmt.Errorf("%w: %q (metadata.name)", errdefs.ErrTeamHarnessUnknown, h.Metadata.Name)
@@ -431,6 +432,14 @@ func validateHarness(h *model.Harness) error {
 		strings.TrimSpace(h.Spec.MakeTarget) == "" ||
 		strings.TrimSpace(h.Spec.Template) == "" {
 		return errdefs.ErrTeamHarnessFieldRequired
+	}
+	for i, s := range h.Spec.Seeds {
+		if strings.TrimSpace(s.Path) == "" {
+			return fmt.Errorf("%w (seeds[%d])", errdefs.ErrTeamHarnessSeedPathRequired, i)
+		}
+		if s.Mode < 0 || s.Mode > 0o777 {
+			return fmt.Errorf("%w (seeds[%d] mode=%#o)", errdefs.ErrTeamHarnessSeedModeInvalid, i, s.Mode)
+		}
 	}
 	return nil
 }
