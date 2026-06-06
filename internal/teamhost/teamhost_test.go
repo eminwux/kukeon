@@ -20,6 +20,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -217,5 +218,68 @@ func TestLayoutPaths(t *testing.T) {
 	}
 	if got, want := l.EntryPath("sbsh"), "/base/.kuke/kuketeam.d/sbsh.yaml"; got != want {
 		t.Errorf("EntryPath = %q, want %q", got, want)
+	}
+}
+
+func TestLayoutTeamsPaths(t *testing.T) {
+	t.Parallel()
+	l := teamhost.NewLayout("/base/.kuke")
+	cases := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"TeamsRoot", l.TeamsRoot(), "/base/.kuke/teams"},
+		{"TeamDir", l.TeamDir("dezot"), "/base/.kuke/teams/dezot"},
+		{
+			"RoleHarnessStateDir",
+			l.RoleHarnessStateDir("dezot", "dev", "claude"),
+			"/base/.kuke/teams/dezot/dev-claude",
+		},
+		{
+			"HarnessSeedPath bare",
+			l.HarnessSeedPath("dezot", "claude", ""),
+			"/base/.kuke/teams/dezot/claude.json",
+		},
+		{
+			"HarnessSeedPath variant",
+			l.HarnessSeedPath("dezot", "claude", "root"),
+			"/base/.kuke/teams/dezot/claude.json-root",
+		},
+		{"HostConfigDir", l.HostConfigDir("dezot"), "/base/.kuke/teams/dezot/config"},
+		{"SharedSecretsEnvPath", l.SharedSecretsEnvPath(), "/base/.kuke/teams/secrets.env"},
+		{"TeamSecretsEnvPath", l.TeamSecretsEnvPath("dezot"), "/base/.kuke/teams/dezot/secrets.env"},
+	}
+	for _, tc := range cases {
+		if tc.got != tc.want {
+			t.Errorf("%s = %q, want %q", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+// TestLayoutTeamsPathsRootedUnderTempBase exercises the AC's "rooted under a
+// temp <base>" testability check: every team path must be reachable from a
+// temp base so unit tests can run hermetically without touching the
+// operator's real ~/.kuke.
+func TestLayoutTeamsPathsRootedUnderTempBase(t *testing.T) {
+	t.Parallel()
+	base := filepath.Join(t.TempDir(), ".kuke")
+	l := teamhost.NewLayout(base)
+
+	paths := []string{
+		l.TeamsRoot(),
+		l.TeamDir("alpha"),
+		l.RoleHarnessStateDir("alpha", "dev", "claude"),
+		l.HarnessSeedPath("alpha", "claude", ""),
+		l.HarnessSeedPath("alpha", "claude", "root"),
+		l.HostConfigDir("alpha"),
+		l.SharedSecretsEnvPath(),
+		l.TeamSecretsEnvPath("alpha"),
+	}
+	prefix := base + string(filepath.Separator) + "teams"
+	for _, p := range paths {
+		if !strings.HasPrefix(p, prefix) {
+			t.Errorf("path %q not rooted under %q", p, prefix)
+		}
 	}
 }

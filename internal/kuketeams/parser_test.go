@@ -84,7 +84,18 @@ const harnessHappy = `
 apiVersion: kuketeams.io/v1
 kind: Harness
 metadata: { name: claude }
-spec: { baseImage: claude, skillPath: /home/claude/.claude/skills, makeTarget: claude, template: blueprint.tmpl.yaml }
+spec:
+  baseImage:  claude
+  skillPath:  /home/claude/.claude/skills
+  makeTarget: claude
+  template:   blueprint.tmpl.yaml
+  seeds:
+    - path: ${TEAM_ROOT}/${HARNESS}.json
+      mode: 0o644
+      content: "{}\n"
+    - path: ${HARNESS}.json-root
+      mode: 0o600
+      content: "{}\n"
 `
 
 const imageCatalogHappy = `
@@ -208,6 +219,22 @@ func TestParseHappyPathFields(t *testing.T) {
 	if len(role.Role.Spec.Needs.Repos) != 2 || len(role.Role.Spec.Needs.Mounts) != 1 {
 		t.Errorf("needs repos/mounts split wrong: repos=%v mounts=%v",
 			role.Role.Spec.Needs.Repos, role.Role.Spec.Needs.Mounts)
+	}
+
+	h, err := Parse([]byte(harnessHappy))
+	if err != nil {
+		t.Fatalf("Harness: %v", err)
+	}
+	seeds := h.Harness.Spec.Seeds
+	if len(seeds) != 2 {
+		t.Fatalf("harness seeds len = %d, want 2", len(seeds))
+	}
+	if seeds[0].Path != "${TEAM_ROOT}/${HARNESS}.json" || seeds[0].Mode != 0o644 ||
+		seeds[0].Content != "{}\n" {
+		t.Errorf("harness seeds[0] = %+v", seeds[0])
+	}
+	if seeds[1].Path != "${HARNESS}.json-root" || seeds[1].Mode != 0o600 {
+		t.Errorf("harness seeds[1] = %+v", seeds[1])
 	}
 
 	ic, err := Parse([]byte(imageCatalogHappy))
@@ -389,6 +416,16 @@ func TestParseFailureModes(t *testing.T) {
 			"Harness missing skillPath",
 			"apiVersion: kuketeams.io/v1\nkind: Harness\nmetadata: {name: claude}\nspec: { makeTarget: m, template: t }\n",
 			errdefs.ErrTeamHarnessFieldRequired,
+		},
+		{
+			"Harness seed missing path",
+			"apiVersion: kuketeams.io/v1\nkind: Harness\nmetadata: {name: claude}\nspec: { skillPath: /s, makeTarget: m, template: t, seeds: [{ mode: 0o644, content: \"{}\" }] }\n",
+			errdefs.ErrTeamHarnessSeedPathRequired,
+		},
+		{
+			"Harness seed invalid mode",
+			"apiVersion: kuketeams.io/v1\nkind: Harness\nmetadata: {name: claude}\nspec: { skillPath: /s, makeTarget: m, template: t, seeds: [{ path: a.json, mode: 0o1234 }] }\n",
+			errdefs.ErrTeamHarnessSeedModeInvalid,
 		},
 		// ImageCatalog.
 		{

@@ -682,4 +682,17 @@ var (
 	ErrTeamBuildCycle = errors.New(
 		"Dockerfile FROM-graph cycle prevents base-before-leaves build ordering",
 	)
+	// ErrTeamHarnessSeedPathRequired fires when a Harness seed entry omits path.
+	ErrTeamHarnessSeedPathRequired = errors.New("harness seeds[].path is required")
+	// ErrTeamHarnessSeedModeInvalid fires when a Harness seed mode is outside
+	// the permitted 0..0o777 file-permission range.
+	ErrTeamHarnessSeedModeInvalid = errors.New(
+		"harness seeds[].mode must be a file-permission bit set (0..0o777)",
+	)
+	// ErrTeamHarnessSeedPathEscapes fires when a Harness seed path, after
+	// ${TEAM_ROOT}/${HARNESS} expansion, would write outside the per-team
+	// root.
+	ErrTeamHarnessSeedPathEscapes = errors.New(
+		"harness seeds[].path escapes the per-team root after expansion",
+	)
 )

@@ -34,7 +34,14 @@ type TeamEntry struct {
 // its clone URL is resolved via `git remote`), not a bind-mount source. Source
 // is the structured agents-repository reference (the same TeamSource struct
 // ProjectTeam carries), copied from the project's kuketeam.yaml at init time.
+//
+// TeamDir is the per-team host-state root (typically
+// `<base>/teams/<team>/`). `kuke team init` auto-populates it from
+// Layout.TeamDir(metadata.name) when omitted, and preserves an
+// operator-supplied override across re-init so the operator can relocate
+// the team's state tree (e.g. to a shared NFS dev environment).
 type TeamEntrySpec struct {
-	Path   string      `json:"path"             yaml:"path"`
-	Source *TeamSource `json:"source,omitempty" yaml:"source,omitempty"`
+	Path    string      `json:"path"              yaml:"path"`
+	TeamDir string      `json:"teamDir,omitempty" yaml:"teamDir,omitempty"`
+	Source  *TeamSource `json:"source,omitempty"  yaml:"source,omitempty"`
 }

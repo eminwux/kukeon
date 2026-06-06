@@ -38,4 +38,20 @@ type HarnessSpec struct {
 	// Template is the blueprint template file the harness renders cells from.
 	// Required.
 	Template string `json:"template"            yaml:"template"`
+	// Seeds declares per-(team,harness) state files the provisioning pass
+	// writes when absent. Hand-edited files are never overwritten — a seed
+	// that already exists is left untouched. Optional.
+	Seeds []HarnessSeed `json:"seeds,omitempty"     yaml:"seeds,omitempty"`
+}
+
+// HarnessSeed declares one state file the provisioning pass writes when
+// absent. Path supports `${TEAM_ROOT}` and `${HARNESS}` substitution
+// (relative paths are anchored under the per-team root). A bare `${HARNESS}`
+// expands to the harness's metadata.name. Mode is the on-disk file mode
+// (octal in YAML — `0o644`); the zero value defaults to 0o644. Content is
+// written verbatim.
+type HarnessSeed struct {
+	Path    string `json:"path"              yaml:"path"`
+	Mode    int    `json:"mode,omitempty"    yaml:"mode,omitempty"`
+	Content string `json:"content,omitempty" yaml:"content,omitempty"`
 }

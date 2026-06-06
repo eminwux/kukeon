@@ -47,6 +47,13 @@ const (
 	// cacheDirName is the materialized-source cache under Base — each agents
 	// reference clones into its own `<host>/<owner>/<repo>@<ref>` subdirectory.
 	cacheDirName = "cache"
+	// teamsRootName is the shared root under Base that holds per-team
+	// host-state subtrees and the host-wide secrets.env default.
+	teamsRootName = "teams"
+	// hostConfigDirName is the per-team config dir name under TeamDir(team).
+	hostConfigDirName = "config"
+	// secretsEnvFileName is the shared/team secrets-env filename.
+	secretsEnvFileName = "secrets.env"
 
 	// dropInDirPerm is the drop-in directory mode: operator-only (the files
 	// reference secret sources and signing keys).
@@ -54,6 +61,9 @@ const (
 	// configFilePerm is the mode for the global facts file and each per-project
 	// entry — operator read/write only.
 	configFilePerm = 0o600
+	// TeamsRootPerm is the shared mode used for the teams/ root, each
+	// TeamDir(team), and the per-(role × harness) state subdirs.
+	TeamsRootPerm = 0o700
 )
 
 // Layout resolves the team-distribution file paths under a base directory
@@ -86,6 +96,63 @@ func (l Layout) EntryPath(project string) string {
 // CacheDir is the materialized-source cache root (<base>/cache).
 func (l Layout) CacheDir() string {
 	return filepath.Join(l.Base, cacheDirName)
+}
+
+// TeamsRoot is the shared root under Base that holds per-team host-state
+// subtrees and the host-wide secrets.env default (<base>/teams). The
+// directory is operator-only (mode 0o700) when materialized.
+func (l Layout) TeamsRoot() string {
+	return filepath.Join(l.Base, teamsRootName)
+}
+
+// TeamDir is the per-team host-state root (<base>/teams/<team>). The
+// operator may relocate this via TeamEntry.spec.teamDir; callers that need
+// the override path should consult the persisted entry, not this method.
+func (l Layout) TeamDir(team string) string {
+	return filepath.Join(l.TeamsRoot(), team)
+}
+
+// RoleHarnessStateDir is the per-(role × harness) state directory under
+// TeamDir(team): `<base>/teams/<team>/<role>-<harness>/`. The provisioning
+// pass mkdir -p's this for every roster pair.
+func (l Layout) RoleHarnessStateDir(team, role, harness string) string {
+	return filepath.Join(l.TeamDir(team), role+"-"+harness)
+}
+
+// HarnessSeedPath is the canonical seed-file path for a harness under
+// TeamDir(team): `<base>/teams/<team>/<harness>.json` when variant is
+// empty, or `<base>/teams/<team>/<harness>.json-<variant>` when set
+// (e.g. variant="root" → "<harness>.json-root"). The provisioning pass
+// resolves a harness seed's spec.path template against this canonical
+// shape — this method exists so callers (tests, future verbs) can
+// address the path without re-deriving the layout.
+func (l Layout) HarnessSeedPath(team, harness, variant string) string {
+	name := harness + ".json"
+	if v := strings.TrimSpace(variant); v != "" {
+		name += "-" + v
+	}
+	return filepath.Join(l.TeamDir(team), name)
+}
+
+// HostConfigDir is the per-team host config dir (<base>/teams/<team>/config),
+// the destination of the one-shot `$HOME/.config/. → HostConfigDir(team)`
+// copy the provisioning pass performs on first init.
+func (l Layout) HostConfigDir(team string) string {
+	return filepath.Join(l.TeamDir(team), hostConfigDirName)
+}
+
+// SharedSecretsEnvPath is the host-wide secrets.env default
+// (<base>/teams/secrets.env). It carries operator-global defaults shared
+// across every team and is operator-only (mode 0o600).
+func (l Layout) SharedSecretsEnvPath() string {
+	return filepath.Join(l.TeamsRoot(), secretsEnvFileName)
+}
+
+// TeamSecretsEnvPath is the per-team secrets.env override
+// (<base>/teams/<team>/secrets.env). Per-team values override the shared
+// defaults and the file is operator-only (mode 0o600).
+func (l Layout) TeamSecretsEnvPath(team string) string {
+	return filepath.Join(l.TeamDir(team), secretsEnvFileName)
 }
 
 // EnsureGlobalConfig writes cfg to the global facts path only when no file is
