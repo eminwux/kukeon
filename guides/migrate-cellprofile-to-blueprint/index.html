@@ -3133,22 +3133,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-3-pick-b-or-config-per-invocation" class="md-nav__link">
+  <a href="#step-3-pick-from-blueprint-or-from-config-per-invocation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 3 — Pick -b or &lt;config&gt; per invocation
+        Step 3 — Pick --from-blueprint or --from-config per invocation
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Step 3 — Pick -b or &lt;config&gt; per invocation">
+    <nav class="md-nav" aria-label="Step 3 — Pick --from-blueprint or --from-config per invocation">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#worked-example-b-direct-replacement" class="md-nav__link">
+  <a href="#worked-example-from-blueprint-direct-replacement" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Worked example — -b direct replacement
+        Worked example — --from-blueprint direct replacement
       
     </span>
   </a>
@@ -3156,10 +3156,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#worked-example-config-idempotent-identity" class="md-nav__link">
+  <a href="#worked-example-from-config-with-structural-fills" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Worked example — &lt;config&gt; idempotent identity
+        Worked example — --from-config with structural fills
       
     </span>
   </a>
@@ -3217,16 +3217,12 @@
 <p>Issue <a href="https://github.com/eminwux/kukeon/issues/626">#626</a> removed the
 client-side <code>CellProfile</code> kind, the <code>kuke run -p</code> flag, and the per-user
 <code>$HOME/.kuke/profiles.d/&lt;name&gt;.yaml</code> loader. Daemon-stored
-<code>CellBlueprint</code> (<code>kuke run -b</code>) and <code>CellConfig</code> (<code>kuke run &lt;config&gt;</code>) cover
-the same use cases with stronger guarantees (server-side storage,
-scoping, structural slot fills). This page is the cutover recipe.</p>
-<p>If you typed <code>kuke run -p</code> after upgrading, you saw:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke run: -p/--profile (CellProfile) was removed in #626 — apply a
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>kind: CellBlueprint and use `kuke run -b &lt;name&gt;` (or `kuke run &lt;config&gt;`
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>for a daemon-stored CellConfig); see
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>docs/site/guides/migrate-cellprofile-to-blueprint.md
-</code></pre></div>
-<p>That's the prompt that pointed you here.</p>
+<code>CellBlueprint</code> (<code>kuke run --from-blueprint</code>) and <code>CellConfig</code> (<code>kuke run
+--from-config</code>) cover the same use cases with stronger guarantees
+(server-side storage, scoping, structural slot fills). This page is the
+cutover recipe.</p>
+<p>If you typed <code>kuke run -p</code> after upgrading, the CLI prints a removal
+notice that links to this guide. Follow the cutover below.</p>
 <h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -3242,19 +3238,19 @@ scoping, structural slot fills). This page is the cutover recipe.</p>
 </tr>
 <tr>
 <td><code>kuke run -p &lt;name&gt; --param K=V</code></td>
-<td><code>kuke run -b &lt;name&gt; --param K=V</code></td>
+<td><code>kuke run --from-blueprint &lt;name&gt; --param K=V</code></td>
 </tr>
 <tr>
 <td><code>kuke run -p &lt;name&gt; --param-file ./&lt;name&gt;.env</code></td>
-<td><code>kuke run -b &lt;name&gt; --param-file ./&lt;name&gt;.env</code></td>
+<td><code>kuke run --from-blueprint &lt;name&gt; --param-file ./&lt;name&gt;.env</code></td>
 </tr>
 <tr>
 <td><code>kuke run -p &lt;name&gt; --name &lt;pin&gt;</code></td>
-<td><code>kuke run -b &lt;name&gt; --name &lt;pin&gt;</code> (one-off pin)</td>
+<td><code>kuke run --from-blueprint &lt;name&gt; --name &lt;pin&gt;</code> (pin the cell name)</td>
 </tr>
 <tr>
 <td>(no equivalent)</td>
-<td><code>kuke run &lt;config&gt;</code> for an idempotent, name-stable identity (one live cell per Config, attaches on re-run)</td>
+<td><code>kuke run --from-config &lt;cfg&gt;</code> to additionally fill a blueprint's structural repo/secret slots from a Config</td>
 </tr>
 </tbody>
 </table>
@@ -3263,14 +3259,34 @@ scoping, structural slot fills). This page is the cutover recipe.</p>
 triple moves from <code>spec.realm/space/stack</code> to <code>metadata.realm/space/stack</code>,
 and <code>kind</code> flips.</p>
 <p><strong>Before (legacy <code>~/.kuke/profiles.d/claude-code.yaml</code>):</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellProfile</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-code</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="nt">space</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">  </span><span class="nt">stack</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">  </span><span class="nt">parameters</span><span class="p">:</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PROMPT</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">      </span><span class="nt">required</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">  </span><span class="nt">cell</span><span class="p">:</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">    </span><span class="nt">autoDelete</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">    </span><span class="nt">containers</span><span class="p">:</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">work</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">        </span><span class="nt">attachable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker.io/library/claude-code:latest</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">        </span><span class="c1"># ...</span>
+</code></pre></div>
+<p><strong>After (<code>./claude-code.blueprint.yaml</code>):</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellProfile</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellBlueprint</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nt">metadata</span><span class="p">:</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-code</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="nt">space</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">  </span><span class="nt">stack</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">space</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="nt">stack</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="nt">spec</span><span class="p">:</span>
 <a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">  </span><span class="nt">parameters</span><span class="p">:</span>
 <a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PROMPT</span>
 <a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">      </span><span class="nt">required</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
@@ -3282,93 +3298,79 @@ and <code>kind</code> flips.</p>
 <a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker.io/library/claude-code:latest</span>
 <a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="w">        </span><span class="c1"># ...</span>
 </code></pre></div>
-<p><strong>After (<code>./claude-code.blueprint.yaml</code>):</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellBlueprint</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">metadata</span><span class="p">:</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-code</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="nt">space</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">stack</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span><span class="nt">parameters</span><span class="p">:</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PROMPT</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">      </span><span class="nt">required</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">  </span><span class="nt">cell</span><span class="p">:</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">    </span><span class="nt">autoDelete</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">    </span><span class="nt">containers</span><span class="p">:</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">work</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">        </span><span class="nt">attachable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker.io/library/claude-code:latest</span>
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="w">        </span><span class="c1"># ...</span>
-</code></pre></div>
 <p>The <code>spec.parameters[]</code> / <code>${KEY}</code> substitution shape is unchanged; CLI
-<code>--param</code> / <code>--param-file</code> / <code>--name</code> work identically on <code>-b</code> as they did
-on <code>-p</code>. The full reference example lives at
+<code>--param</code> / <code>--param-file</code> / <code>--name</code> work identically on <code>--from-blueprint</code>
+as they did on <code>-p</code>. The full reference example lives at
 <a href="https://github.com/eminwux/kukeon/blob/main/docs/examples/claude-code/blueprint.yaml"><code>docs/examples/claude-code/blueprint.yaml</code></a>.</p>
 <h2 id="step-2-apply-the-blueprint-to-the-daemon">Step 2 — Apply the blueprint to the daemon<a class="headerlink" href="#step-2-apply-the-blueprint-to-the-daemon" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>./claude-code.blueprint.yaml
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>./claude-code.blueprint.yaml
 </code></pre></div>
 <p><code>kuke apply</code> writes the blueprint under the named scope's metadata tree.
 List and inspect with <code>kuke get blueprint -A</code> and <code>kuke get blueprint &lt;name&gt;</code>.</p>
-<h2 id="step-3-pick-b-or-config-per-invocation">Step 3 — Pick <code>-b</code> or <code>&lt;config&gt;</code> per invocation<a class="headerlink" href="#step-3-pick-b-or-config-per-invocation" title="Permanent link">&para;</a></h2>
-<p>The two run verbs map to different identity contracts:</p>
+<h2 id="step-3-pick-from-blueprint-or-from-config-per-invocation">Step 3 — Pick <code>--from-blueprint</code> or <code>--from-config</code> per invocation<a class="headerlink" href="#step-3-pick-from-blueprint-or-from-config-per-invocation" title="Permanent link">&para;</a></h2>
+<p>Both run forms stamp a <strong>fresh</strong> <code>&lt;prefix&gt;-&lt;6hex&gt;</code> cell per invocation; they
+differ in what they bind:</p>
 <ul>
 <li>
-<p><strong><code>kuke run -b &lt;blueprint&gt;</code> — fresh cell per invocation.</strong> Direct
+<p><strong><code>kuke run --from-blueprint &lt;blueprint&gt;</code> — scalar params only.</strong> Direct
   replacement for the legacy <code>-p</code> semantics: each invocation generates a
   new <code>&lt;prefix&gt;-&lt;6hex&gt;</code> cell, substitutes scalar <code>--param</code> values, and
   attaches. Use when every run is independent (one-shot prompts, dev
-  scratchpads, <code>--rm</code> jobs). Inline <code>-b</code> cannot fill structural slots
-  (repo URLs, secret sources) — those require a CellConfig.</p>
+  scratchpads, <code>--rm</code> jobs). Inline <code>--from-blueprint</code> cannot fill structural
+  slots (repo URLs, secret sources) — those require a CellConfig. Pin a
+  cell name with <code>--name</code>.</p>
 </li>
 <li>
-<p><strong><code>kuke run &lt;config&gt;</code> — at-most-one live cell, idempotent.</strong> Wrap the
-  blueprint in a <code>kind: CellConfig</code> that fills the scalar values and any
-  structural slots once. The Config owns a deterministic cell name, so a
-  re-run attaches to the existing cell instead of spawning a new one.
-  Use when you want a long-lived, stable identity for the workload
-  (a named agent runner, a service-style cell).</p>
+<p><strong><code>kuke run --from-config &lt;config&gt;</code> — scalar values + structural slots.</strong>
+  Wrap the blueprint in a <code>kind: CellConfig</code> that fills the scalar values
+  and any structural repo/secret slots once. A Config is a <strong>1:N</strong> binding:
+  each run stamps a fresh cell carrying the <code>kukeon.io/config=&lt;name&gt;</code>
+  lineage label (it is not a singleton — <code>--from-config</code> never attaches to a
+  prior cell). Use it when the workload needs structural slot fills, or when
+  you want a fleet of like-configured cells you can roll together with
+  <code>kuke restart -l kukeon.io/config=&lt;name&gt;</code>. Layer a per-cell override with
+  <code>--env KEY=VALUE</code>.</p>
 </li>
 </ul>
 <p>If you had multiple parameter combinations for the same profile, file each
 as its own CellConfig binding the same blueprint with different values.</p>
-<h3 id="worked-example-b-direct-replacement">Worked example — <code>-b</code> direct replacement<a class="headerlink" href="#worked-example-b-direct-replacement" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># was: kuke run -p claude-code --param PROMPT=&quot;…&quot; --rm</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>-b<span class="w"> </span>claude-code<span class="w"> </span>--param<span class="w"> </span><span class="nv">PROMPT</span><span class="o">=</span><span class="s2">&quot;explain kukeon&quot;</span><span class="w"> </span>--rm
+<h3 id="worked-example-from-blueprint-direct-replacement">Worked example — <code>--from-blueprint</code> direct replacement<a class="headerlink" href="#worked-example-from-blueprint-direct-replacement" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># was: kuke run -p claude-code --param PROMPT=&quot;…&quot; --rm</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--from-blueprint<span class="w"> </span>claude-code<span class="w"> </span>--param<span class="w"> </span><span class="nv">PROMPT</span><span class="o">=</span><span class="s2">&quot;explain kukeon&quot;</span><span class="w"> </span>--rm
 </code></pre></div>
-<h3 id="worked-example-config-idempotent-identity">Worked example — <code>&lt;config&gt;</code> idempotent identity<a class="headerlink" href="#worked-example-config-idempotent-identity" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># claude-code-explain.config.yaml</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellConfig</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="nt">metadata</span><span class="p">:</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-code-explain</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">  </span><span class="nt">space</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">  </span><span class="nt">stack</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">  </span><span class="nt">blueprint</span><span class="p">:</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-code</span>
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">    </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">  </span><span class="nt">values</span><span class="p">:</span>
-<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="w">    </span><span class="nt">PROMPT</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;explain</span><span class="nv"> </span><span class="s">kukeon&quot;</span>
+<h3 id="worked-example-from-config-with-structural-fills">Worked example — <code>--from-config</code> with structural fills<a class="headerlink" href="#worked-example-from-config-with-structural-fills" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># claude-code-explain.config.yaml</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CellConfig</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-code-explain</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">  </span><span class="nt">space</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">  </span><span class="nt">stack</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">  </span><span class="nt">blueprint</span><span class="p">:</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-code</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="w">    </span><span class="nt">realm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="w">  </span><span class="nt">values</span><span class="p">:</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="w">    </span><span class="nt">PROMPT</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;explain</span><span class="nv"> </span><span class="s">kukeon&quot;</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>./claude-code-explain.config.yaml
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>claude-code-explain
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># Re-run attaches to the same cell; no fresh hex-suffixed clone.</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>./claude-code-explain.config.yaml
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>run<span class="w"> </span>--from-config<span class="w"> </span>claude-code-explain
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># Each run stamps a fresh cell; list them with</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1">#   kuke get cells -l kukeon.io/config=claude-code-explain</span>
 </code></pre></div>
 <h2 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h2>
 <p>After every blueprint is applied and the workloads run as expected, drop
 the legacy profile files. They are inert (the loader is gone) but the
 clutter masks the new path on the next operator's eye:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>rm<span class="w"> </span>-rf<span class="w"> </span>~/.kuke/profiles.d<span class="w">   </span><span class="c1"># or just the migrated files</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nb">unset</span><span class="w"> </span>KUKE_PROFILES_DIR<span class="w">     </span><span class="c1"># if you had it exported</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>rm<span class="w"> </span>-rf<span class="w"> </span>~/.kuke/profiles.d<span class="w">   </span><span class="c1"># or just the migrated files</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nb">unset</span><span class="w"> </span>KUKE_PROFILES_DIR<span class="w">     </span><span class="c1"># if you had it exported</span>
 </code></pre></div>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../../manifests/blueprint/"><code>docs/site/manifests/blueprint.md</code></a> — full <code>kind: CellBlueprint</code> schema reference.</li>
 <li><a href="../../manifests/config/"><code>docs/site/manifests/config.md</code></a> — full <code>kind: CellConfig</code> schema reference, including slot-fill semantics.</li>
-<li><a href="../../cli/kuke-run/"><code>docs/site/cli/kuke-run.md</code></a> — <code>kuke run -b</code> / <code>kuke run &lt;config&gt;</code> flag reference.</li>
+<li><a href="../../cli/kuke-run/"><code>docs/site/cli/kuke-run.md</code></a> — <code>kuke run --from-blueprint</code> / <code>kuke run --from-config</code> flag reference.</li>
 <li><a href="../apply-manifests/"><code>docs/site/guides/apply-manifests.md</code></a> — parameterised blueprint guide.</li>
 </ul>
 
@@ -3393,7 +3395,7 @@ clutter masks the new path on the next operator's eye:</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 30, 2026 02:11:15 UTC">May 30, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 6, 2026 02:13:32 UTC">June 6, 2026</span>
   </span>
 
     

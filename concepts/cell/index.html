@@ -1012,6 +1012,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#identity-lineage-and-provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Identity, lineage, and provenance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-root-container" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3255,6 +3266,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#identity-lineage-and-provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Identity, lineage, and provenance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-root-container" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3360,6 +3382,13 @@
 <a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">      </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;-c&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;while</span><span class="nv"> </span><span class="s">true;</span><span class="nv"> </span><span class="s">do</span><span class="nv"> </span><span class="s">date;</span><span class="nv"> </span><span class="s">sleep</span><span class="nv"> </span><span class="s">5;</span><span class="nv"> </span><span class="s">done&quot;</span><span class="p p-Indicator">]</span>
 </code></pre></div>
 <p>See <a href="../../manifests/cell/">Manifest Reference → Cell</a> for the full schema.</p>
+<h2 id="identity-lineage-and-provenance">Identity, lineage, and provenance<a class="headerlink" href="#identity-lineage-and-provenance" title="Permanent link">&para;</a></h2>
+<p>A cell's <strong>identity is its own document</strong> — the <code>CellDoc</code>. The CellDoc owns the cell's <code>metadata.name</code>, its <code>spec</code> (containers, scope, volumes, …), and its <code>status</code>. Nothing outside the cell owns its name: a cell materialized from a <a href="../../manifests/blueprint/"><code>CellBlueprint</code></a> or <a href="../../manifests/config/"><code>CellConfig</code></a> gets a fresh <code>&lt;prefix&gt;-&lt;6hex&gt;</code> name (or a <code>--name</code>-pinned one), and the binding it came from is recorded as <strong>lineage</strong>, not identity.</p>
+<ul>
+<li><strong>Lineage labels.</strong> A cell stamped from a binding carries a back-reference label — <code>kukeon.io/config=&lt;name&gt;</code> for a Config-lineage cell, <code>kukeon.io/blueprint=&lt;name&gt;</code> for a Blueprint-lineage one. These are 1:N back-references (a binding stamps N cells), used to list a binding's cells (<code>kuke get cells -l kukeon.io/config=&lt;name&gt;</code>) and to drive the daemon's OutOfSync reconcile — not to pin a singleton.</li>
+<li><strong>Materialization provenance.</strong> Each stamped cell also persists a <code>Spec.Provenance</code> block — the binding kind, its scoped ref, the resolved params, and any per-cell <code>--env</code> overrides — so <a href="../../cli/kuke-restart/"><code>kuke restart &lt;cell&gt;</code></a> can re-resolve the cell from its binding without re-supplying values.</li>
+<li><strong>Clone provenance.</strong> A cell forked with <a href="../../cli/kuke-run/"><code>kuke run --clone &lt;cell&gt;</code></a> / <code>kuke create cell --clone &lt;cell&gt;</code> carries the <code>kukeon.io/source-cell=&lt;name&gt;</code> annotation recording the cell it was forked from. Unlike the lineage labels it is <strong>inert</strong> debug/grooming metadata: no reconcile or selector path keys off it, and it pins no identity. The clone keeps the source's lineage label and provenance binding, so it re-resolves against the same Blueprint/Config the source did.</li>
+</ul>
 <h2 id="the-root-container">The root container<a class="headerlink" href="#the-root-container" title="Permanent link">&para;</a></h2>
 <ul>
 <li>One container in a cell must be the root. If none is set explicitly, the first container declared is chosen.</li>
@@ -3451,7 +3480,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 4, 2026 11:51:26 UTC">June 4, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 6, 2026 02:13:32 UTC">June 6, 2026</span>
   </span>
 
     

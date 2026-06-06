@@ -3461,8 +3461,8 @@
 <a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ghcr.io/example/agent:latest</span>
 <a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">        </span><span class="c1"># ... full container template ...</span>
 </code></pre></div>
-<p>A <code>CellBlueprint</code> is a daemon-stored, parametrized cell template. It is written to daemon storage by <code>kuke apply</code> and run with <code>kuke run -b</code>, so it can be applied, scoped, listed, and referenced by a <a href="../config/"><code>CellConfig</code></a>. A blueprint declares the cell template plus two fill channels — scalar <code>${KEY}</code> parameters resolved at run time and structural repo/secret slots a Config fills. (Until <a href="https://github.com/eminwux/kukeon/issues/626">#626</a> the user-local <code>CellProfile</code> kind covered the scalar-only slice client-side; CellBlueprint and CellConfig replaced it — see the <a href="../../guides/migrate-cellprofile-to-blueprint/">migration guide</a> for the cutover recipe.)</p>
-<p>See <a href="../../cli/kuke-run/"><code>kuke run -b</code></a> for the run-side verb and <a href="../config/"><code>CellConfig</code></a> for the identity binding that lets a blueprint stand up an idempotent, named cell rather than a fresh <code>&lt;prefix&gt;-&lt;6hex&gt;</code> one each invocation.</p>
+<p>A <code>CellBlueprint</code> is a daemon-stored, parametrized cell template. It is written to daemon storage by <code>kuke apply</code> and run with <code>kuke run --from-blueprint</code>, so it can be applied, scoped, listed, and referenced by a <a href="../config/"><code>CellConfig</code></a>. A blueprint declares the cell template plus two fill channels — scalar <code>${KEY}</code> parameters resolved at run time and structural repo/secret slots a Config fills. (Until <a href="https://github.com/eminwux/kukeon/issues/626">#626</a> the user-local <code>CellProfile</code> kind covered the scalar-only slice client-side; CellBlueprint and CellConfig replaced it — see the <a href="../../guides/migrate-cellprofile-to-blueprint/">migration guide</a> for the cutover recipe.)</p>
+<p>See <a href="../../cli/kuke-run/"><code>kuke run --from-blueprint</code></a> for the run-side verb and <a href="../config/"><code>CellConfig</code></a> for the binding that additionally fills a blueprint's structural repo/secret slots. Both stamp a fresh <code>&lt;prefix&gt;-&lt;6hex&gt;</code> cell per invocation — a blueprint with <strong>required</strong> slots can only run through a Config.</p>
 <h2 id="metadata">metadata<a class="headerlink" href="#metadata" title="Permanent link">&para;</a></h2>
 <p>A Blueprint is scopable at realm, space, or stack — never cell. A template scoped to a single cell is nonsensical: the blueprint exists to materialize cells, not to live inside one. The scope is the deepest non-empty coordinate, and a deeper coordinate may only be set when every shallower one is.</p>
 <table>
@@ -3503,15 +3503,15 @@
 <td><code>labels</code></td>
 <td>map[string]string</td>
 <td>no</td>
-<td>Copied onto every cell materialized from this blueprint, in addition to the <code>kukeon.io/blueprint</code> back-reference label.</td>
+<td>Copied onto every cell materialized from this blueprint, in addition to the <code>kukeon.io/blueprint</code> lineage label.</td>
 </tr>
 </tbody>
 </table>
 <h2 id="spec">spec<a class="headerlink" href="#spec" title="Permanent link">&para;</a></h2>
 <h3 id="specprefix-string-optional"><code>spec.prefix</code> (string, optional)<a class="headerlink" href="#specprefix-string-optional" title="Permanent link">&para;</a></h3>
-<p>Cell-name prefix used when generating the <code>&lt;prefix&gt;-&lt;6hex&gt;</code> name on each <code>kuke run -b</code>. Defaults to <code>metadata.name</code> when unset.</p>
+<p>Cell-name prefix used when generating the <code>&lt;prefix&gt;-&lt;6hex&gt;</code> name on each <code>kuke run --from-blueprint</code>. Defaults to <code>metadata.name</code> when unset.</p>
 <h3 id="specparameters-list-optional"><code>spec.parameters[]</code> (list, optional)<a class="headerlink" href="#specparameters-list-optional" title="Permanent link">&para;</a></h3>
-<p>Declared <code>${KEY}</code> substitution variables the cell body references. <code>kuke run -b</code> resolves each parameter against <code>--param K=V</code>, the parameter's <code>default</code>, and (when permitted) the caller's environment, in that order. An undeclared <code>--param</code> errors at call time so typos surface immediately. A <code>required: true</code> parameter that resolves to no value errors.</p>
+<p>Declared <code>${KEY}</code> substitution variables the cell body references. <code>kuke run --from-blueprint</code> resolves each parameter against <code>--param K=V</code>, the parameter's <code>default</code>, and (when permitted) the caller's environment, in that order. An undeclared <code>--param</code> errors at call time so typos surface immediately. A <code>required: true</code> parameter that resolves to no value errors.</p>
 <table>
 <thead>
 <tr>
@@ -3590,9 +3590,9 @@
 <p>Each container carries the user-authorable subset of <a href="../container/">ContainerSpec</a> — <code>id</code>, <code>image</code>, <code>command</code>, <code>args</code>, <code>env</code>, <code>volumes</code>, <code>networks</code>, <code>ports</code>, <code>resources</code>, <code>git</code>, <code>tty</code>, the host-namespace toggles, capability sets, and <code>restartPolicy</code>. Daemon-stamped identity fields (<code>containerdId</code>, <code>realmId</code>, <code>spaceId</code>, <code>stackId</code>, <code>cellId</code>) are intentionally absent: materialization fills them from the blueprint's metadata and the generated cell name.</p>
 <p>In addition to the regular container fields, a blueprint container declares two slot channels:</p>
 <h4 id="speccellcontainersrepos-list-optional"><code>spec.cell.containers[].repos[]</code> (list, optional)<a class="headerlink" href="#speccellcontainersrepos-list-optional" title="Permanent link">&para;</a></h4>
-<p>Same shape as <a href="../container/">ContainerRepo</a>. Unlike a hand-written <code>Cell</code> / <code>Container</code>, <code>url</code> is <strong>not</strong> required at apply time. A repo with no <code>url</code> is a structural slot a <code>CellConfig</code> fills; a repo whose <code>url</code> is supplied inline (directly or via a <code>${KEY}</code> parameter) runs as-is under <code>kuke run -b</code>. The slot's <code>name</code> is the identity a <code>CellConfig</code> matches on.</p>
+<p>Same shape as <a href="../container/">ContainerRepo</a>. Unlike a hand-written <code>Cell</code> / <code>Container</code>, <code>url</code> is <strong>not</strong> required at apply time. A repo with no <code>url</code> is a structural slot a <code>CellConfig</code> fills; a repo whose <code>url</code> is supplied inline (directly or via a <code>${KEY}</code> parameter) runs as-is under <code>kuke run --from-blueprint</code>. The slot's <code>name</code> is the identity a <code>CellConfig</code> matches on.</p>
 <h4 id="speccellcontainerssecrets-list-optional"><code>spec.cell.containers[].secrets[]</code> (list, optional)<a class="headerlink" href="#speccellcontainerssecrets-list-optional" title="Permanent link">&para;</a></h4>
-<p>Slot-only channel: the blueprint declares the <strong>consumption side</strong> (where the resolved bytes land inside the container), and a <code>CellConfig</code> supplies the <strong>source side</strong> (which <code>kind: Secret</code> provides the bytes). Because a blueprint never carries the source, a blueprint that declares secret slots cannot run inline with <code>-b</code> — it requires <code>kuke run &lt;config&gt;</code> (positional) with a <code>CellConfig</code> that fills the slots.</p>
+<p>Slot-only channel: the blueprint declares the <strong>consumption side</strong> (where the resolved bytes land inside the container), and a <code>CellConfig</code> supplies the <strong>source side</strong> (which <code>kind: Secret</code> provides the bytes). Because a blueprint never carries the source, a blueprint that declares secret slots cannot run inline with <code>--from-blueprint</code> — it requires <code>kuke run --from-config &lt;cfg&gt;</code> with a <code>CellConfig</code> that fills the slots.</p>
 <table>
 <thead>
 <tr>
@@ -3631,7 +3631,7 @@
 <td><code>required</code></td>
 <td>bool</td>
 <td>no</td>
-<td>When <code>true</code>, a <code>CellConfig</code> must fill the slot. Required slots also block inline <code>-b</code>.</td>
+<td>When <code>true</code>, a <code>CellConfig</code> must fill the slot. Required slots also block inline <code>--from-blueprint</code>.</td>
 </tr>
 </tbody>
 </table>
@@ -3644,10 +3644,10 @@
 <p>The <code>blueprints/</code> directory is <code>0755</code> and each blueprint document is <code>0644</code>, both owned by root. A blueprint carries only template references — no credential bytes — so the directory is world-readable, unlike <code>secrets/</code>. Because <code>blueprints/</code> nests inside the scope's metadata directory, the same teardown that reclaims a scope (<code>kuke purge</code> / <code>kuke delete</code>) reclaims its blueprints.</p>
 <h2 id="invariants">Invariants<a class="headerlink" href="#invariants" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Always fresh.</strong> Every <code>kuke run -b</code> materializes a cell named <code>&lt;prefix&gt;-&lt;6hex&gt;</code>, where the suffix is 3 bytes of entropy. A blueprint never identifies a singleton cell — that contract belongs to <a href="../config/"><code>CellConfig</code></a>. For singleton workloads use <code>CellConfig</code> (and the <code>kuke run &lt;config&gt;</code> positional) rather than a blueprint plus an external pinning convention.</li>
-<li><strong>Back-reference.</strong> Every materialized cell carries the <code>kukeon.io/blueprint=&lt;name&gt;</code> label, so an operator can list all instances of a blueprint with <code>kuke get cells -l kukeon.io/blueprint=&lt;name&gt;</code>.</li>
+<li><strong>Always fresh.</strong> Every <code>kuke run --from-blueprint</code> materializes a cell named <code>&lt;prefix&gt;-&lt;6hex&gt;</code>, where the suffix is 3 bytes of entropy. A blueprint binds only scalar parameters; pin a name per invocation with <code>--name</code>. A <a href="../config/"><code>CellConfig</code></a> is also a 1:N binding (a fresh cell per stamp) — its added value over a bare blueprint is filling the blueprint's structural repo/secret slots, not pinning a singleton.</li>
+<li><strong>Lineage label.</strong> Every materialized cell carries the <code>kukeon.io/blueprint=&lt;name&gt;</code> label, so an operator can list all cells stamped from a blueprint with <code>kuke get cells -l kukeon.io/blueprint=&lt;name&gt;</code>.</li>
 <li><strong>Scalar parameters declared.</strong> A <code>${KEY}</code> in the body must appear in <code>spec.parameters[]</code>; otherwise the blueprint fails to load. Typos surface at apply time, not as a runtime mystery.</li>
-<li><strong>Structural slots block inline.</strong> A required repo slot (no inline <code>url</code>) or any required secret slot makes the blueprint un-runnable with <code>-b</code>; the run path refuses with a message naming the offenders and recommending <code>kuke run &lt;config&gt;</code> (positional) with a <code>CellConfig</code> that fills them. Optional unfilled slots are dropped silently from the materialized container.</li>
+<li><strong>Structural slots block inline.</strong> A required repo slot (no inline <code>url</code>) or any required secret slot makes the blueprint un-runnable with <code>--from-blueprint</code>; the run path refuses with a message naming the offenders and recommending <code>kuke run --from-config &lt;cfg&gt;</code> with a <code>CellConfig</code> that fills them. Optional unfilled slots are dropped silently from the materialized container.</li>
 </ul>
 <h2 id="minimal">Minimal<a class="headerlink" href="#minimal" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1beta1</span>
@@ -3667,7 +3667,7 @@
 <a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">        </span><span class="nt">env</span><span class="p">:</span>
 <a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MODEL=${MODEL}</span>
 </code></pre></div>
-<p>A realm-scoped blueprint named <code>claude-code</code> with one scalar parameter and one container. Run a fresh instance with <code>kuke run -b claude-code --realm kuke-system</code> (each invocation produces a new <code>claude-code-&lt;6hex&gt;</code> cell). For an idempotent, named instance, bind it via a <a href="../config/"><code>CellConfig</code></a> and run with <code>kuke run &lt;config&gt;</code> (positional).</p>
+<p>A realm-scoped blueprint named <code>claude-code</code> with one scalar parameter and one container. Run a fresh instance with <code>kuke run --from-blueprint claude-code --realm kuke-system</code> (each invocation produces a new <code>claude-code-&lt;6hex&gt;</code> cell). To additionally fill structural repo/secret slots, bind it via a <a href="../config/"><code>CellConfig</code></a> and run with <code>kuke run --from-config &lt;cfg&gt;</code>.</p>
 
 
 
@@ -3690,7 +3690,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 30, 2026 13:45:09 UTC">May 30, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 6, 2026 02:13:32 UTC">June 6, 2026</span>
   </span>
 
     

@@ -3322,7 +3322,7 @@
 <li><strong>Subcommand names</strong> — <code>kuke &lt;TAB&gt;</code> completes against the current command set (<code>init</code>, <code>get</code>, <code>create</code>, <code>apply</code>, <code>run</code>, <code>delete</code>, <code>start</code>, <code>stop</code>, <code>kill</code>, <code>purge</code>, <code>refresh</code>, <code>attach</code>, <code>log</code>, <code>image</code>, <code>daemon</code>, <code>doctor</code>, <code>uninstall</code>, <code>autocomplete</code>, <code>version</code>, …). The dispatcher pulls this from the live binary, so a freshly added subcommand shows up the next tab.</li>
 <li><strong>Resource names</strong> — <code>kuke get realm &lt;TAB&gt;</code>, <code>kuke delete space &lt;TAB&gt;</code>, etc. pull live names from the running daemon.</li>
 <li><strong><code>--realm</code>, <code>--space</code>, <code>--stack</code>, <code>--cell</code> flags</strong> — complete against the set of resources that match the other flags you've already typed.</li>
-<li><strong>Blueprint names for <code>kuke run -b</code> and Config names for the <code>&lt;config&gt;</code> positional</strong> — <code>kuke run -b &lt;TAB&gt;</code> lists daemon-stored CellBlueprints; <code>kuke run &lt;TAB&gt;</code> (the positional arg) lists daemon-stored CellConfigs — both scoped by <code>--realm</code>/<code>--space</code>/<code>--stack</code>.</li>
+<li><strong>Cell, Blueprint, and Config names on the source flags</strong> — <code>kuke run &lt;TAB&gt;</code> (the positional arg) lists existing cells to start + attach. <code>kuke create cell --from-blueprint &lt;TAB&gt;</code> and <code>--clone &lt;TAB&gt;</code> list daemon-stored CellBlueprints and existing cells respectively; <code>kuke create cell --from-config &lt;TAB&gt;</code> lists daemon-stored CellConfigs. All are scoped by <code>--realm</code>/<code>--space</code>/<code>--stack</code>.</li>
 </ul>
 <p>Completion functions that need realm / space / stack / cell / blueprint / config data reach out to the daemon, so autocomplete on a host where <code>kukeond</code> isn't running will return no suggestions (silently) for those flags. That's expected. Static completions (subcommands) keep working without the daemon.</p>
 <h2 id="one-exception">One exception<a class="headerlink" href="#one-exception" title="Permanent link">&para;</a></h2>
@@ -3349,7 +3349,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 30, 2026 11:44:25 UTC">May 30, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 6, 2026 02:13:32 UTC">June 6, 2026</span>
   </span>
 
     
