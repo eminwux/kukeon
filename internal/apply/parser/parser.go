@@ -196,7 +196,7 @@ func ParseDocument(index int, raw []byte) (*Document, error) {
 		if kind == "CellProfile" {
 			return nil, fmt.Errorf(
 				"document %d: %w: %s (the CellProfile kind was removed in #626 — "+
-					"convert to kind: CellBlueprint and use `kuke run -b` / `kuke run <config>`; "+
+					"convert to kind: CellBlueprint and use `kuke run --from-blueprint` / `kuke run --from-config`; "+
 					"see docs/site/guides/migrate-cellprofile-to-blueprint.md)",
 				index, errdefs.ErrUnknownKind, kind,
 			)

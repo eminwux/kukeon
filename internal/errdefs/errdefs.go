@@ -443,7 +443,7 @@ var (
 	// with no url) the inline scalar-param path cannot fill. Such blueprints
 	// require a CellConfig and `kuke run -c` (#625).
 	ErrBlueprintStructuralSlots = errors.New(
-		"blueprint declares structural slots that require a CellConfig: inline `kuke run -b` fills scalar parameters only",
+		"blueprint declares structural slots that require a CellConfig: inline `kuke run --from-blueprint` fills scalar parameters only",
 	)
 	// ErrBlueprintInvalid is returned when `kuke run -b` / `kuke apply -b`
 	// cannot resolve a blueprint's scalar parameters (an undeclared --param
