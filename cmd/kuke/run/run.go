@@ -267,18 +267,21 @@ func validateSourceMutex(flags runFlags) error {
 
 func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 	flags := runFlags{
-		file:               strings.TrimSpace(viper.GetString(config.KUKE_RUN_FILE.ViperKey)),
-		detach:             viper.GetBool(config.KUKE_RUN_DETACH.ViperKey),
-		containerFlag:      strings.TrimSpace(viper.GetString(config.KUKE_RUN_CONTAINER.ViperKey)),
-		autoDelete:         viper.GetBool(config.KUKE_RUN_RM.ViperKey),
-		name:               strings.TrimSpace(viper.GetString(config.KUKE_RUN_NAME.ViperKey)),
-		requireSynced:      viper.GetBool(config.KUKE_RUN_REQUIRE_SYNCED.ViperKey),
-		ignoreDiskPressure: viper.GetBool(config.KUKE_RUN_IGNORE_DISK_PRESSURE.ViperKey),
+		file:          strings.TrimSpace(viper.GetString(config.KUKE_RUN_FILE.ViperKey)),
+		detach:        viper.GetBool(config.KUKE_RUN_DETACH.ViperKey),
+		containerFlag: strings.TrimSpace(viper.GetString(config.KUKE_RUN_CONTAINER.ViperKey)),
+		autoDelete:    viper.GetBool(config.KUKE_RUN_RM.ViperKey),
+		name:          strings.TrimSpace(viper.GetString(config.KUKE_RUN_NAME.ViperKey)),
+		requireSynced: viper.GetBool(config.KUKE_RUN_REQUIRE_SYNCED.ViperKey),
 	}
 
 	// The fused-source flags share their definitions with `kuke create cell`
 	// (cell.RegisterSourceFlags) and are read directly off cmd.Flags() — never
 	// via viper — so the two commands don't collide on a global viper key.
+	// --ignore-disk-pressure is in the same shared FlagSet and reads off
+	// cmd.Flags() for the same reason; reading it via viper would always see
+	// the zero value (no Bind on the run side) and silently drop the operator's
+	// opt-in past the daemon's disk-pressure guard.
 	for dst, name := range map[*string]string{
 		&flags.blueprintName: "from-blueprint",
 		&flags.configName:    "from-config",
@@ -291,6 +294,12 @@ func parseRunFlags(cmd *cobra.Command, args []string) (runFlags, error) {
 		}
 		*dst = strings.TrimSpace(v)
 	}
+
+	idp, err := cmd.Flags().GetBool("ignore-disk-pressure")
+	if err != nil {
+		return runFlags{}, err
+	}
+	flags.ignoreDiskPressure = idp
 
 	if len(args) == 1 {
 		flags.cellName = strings.TrimSpace(args[0])

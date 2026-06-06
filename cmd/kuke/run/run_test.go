@@ -2467,6 +2467,73 @@ func TestRun_FromBlueprint_ResolvesAndCreates(t *testing.T) {
 	}
 }
 
+// TestRun_FromBlueprint_IgnoreDiskPressure_ThreadsToSpec pins that the
+// `--ignore-disk-pressure` flag on `kuke run` reaches Spec.IgnoreDiskPressure
+// on the fused create+start+attach path. The flag is registered by
+// cell.RegisterSourceFlags (shared with `kuke create cell`) and is read off
+// cmd.Flags() rather than viper — the run side has no viper bind for the key,
+// so a `viper.GetBool` read would silently see false and drop the operator's
+// opt-in past the daemon's disk-pressure guard.
+func TestRun_FromBlueprint_IgnoreDiskPressure_ThreadsToSpec(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return kukeonv1.CreateCellResult{
+				Cell: doc, Created: true, MetadataExistsPost: true,
+				CgroupCreated: true, CgroupExistsPost: true,
+				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
+				Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
+			}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{
+		"--from-blueprint", "web", "--param", "TAG=v2",
+		"--realm", "my-realm", "--ignore-disk-pressure", "-d",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !fc.createDoc.Spec.IgnoreDiskPressure {
+		t.Errorf("Spec.IgnoreDiskPressure=false, want true (--ignore-disk-pressure was set)")
+	}
+}
+
+// TestRun_FromBlueprint_NoIgnoreDiskPressure_LeavesSpecFalse is the negative
+// counterpart: omitting `--ignore-disk-pressure` leaves Spec.IgnoreDiskPressure
+// at its zero value, so the daemon's CreateCell guard still applies.
+func TestRun_FromBlueprint_NoIgnoreDiskPressure_LeavesSpecFalse(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return kukeonv1.CreateCellResult{
+				Cell: doc, Created: true, MetadataExistsPost: true,
+				CgroupCreated: true, CgroupExistsPost: true,
+				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
+				Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
+			}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"--from-blueprint", "web", "--param", "TAG=v2", "--realm", "my-realm", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.createDoc.Spec.IgnoreDiskPressure {
+		t.Errorf("Spec.IgnoreDiskPressure=true, want false (flag omitted)")
+	}
+}
+
 func TestRun_FromBlueprint_NotFound_Errors(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
