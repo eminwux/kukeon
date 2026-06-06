@@ -7,19 +7,21 @@
 #
 # Then materialize a fresh cell each time:
 #
-#   sudo kuke run -b claude-code \
+#   sudo kuke run --from-blueprint claude-code \
 #       --param PROMPT="explain the kukeon architecture in one sentence" --rm
 #
-# Each `kuke run -b` produces a cell named `claude-code-<6hex>`, substitutes
-# ${IMAGE} / ${PROMPT}, and attaches to the `work` container. The onInit
-# script runs `claude --print "${PROMPT}"` once and exits, so the attach loop
-# closes and `--rm` reclaims the cell.
+# Each `kuke run --from-blueprint` produces a cell named `claude-code-<6hex>`,
+# substitutes ${IMAGE} / ${PROMPT}, and attaches to the `work` container. The
+# onInit script runs `claude --print "${PROMPT}"` once and exits, so the
+# attach loop closes and `--rm` reclaims the cell.
 #
-# For an idempotent, name-stable variant (at most one live cell per
-# invocation, attaches to the existing cell on re-run), wrap this blueprint
-# in a kind: CellConfig and use `kuke run <config>` instead. See
+# For a name-stable variant pinned to a particular cell name, pass --name X
+# to the same fused form (`kuke run --from-blueprint claude-code --name X`).
+# For a recurring workflow whose values + slot fills live in the daemon, wrap
+# this Blueprint in a kind: CellConfig and use
+# `kuke run --from-config <name>` instead. See
 # docs/site/guides/migrate-cellprofile-to-blueprint.md for the cutover
-# guidance and the -b vs. <config> decision.
+# guidance and the Blueprint-vs-Config decision.
 apiVersion: v1beta1
 kind: CellBlueprint
 metadata:

@@ -1372,15 +1372,15 @@ func TestRun_MissingAllSources_Errors(t *testing.T) {
 	cmd.SetArgs([]string{})
 
 	err := cmd.Execute()
-	// Issue #813: the cobra MarkFlagsOneRequired group no longer spans the
-	// CellConfig source (now positional), so parseRunFlags hand-rolls the
-	// at-least-one check. Match on the stable phrasing it emits — naming all
-	// three remaining sources — rather than the prior cobra group listing.
+	// epic:cell-identity #1025: cobra's mutex spans flags only, so parseRunFlags
+	// hand-rolls the at-least-one-source check. Match on the stable phrasing it
+	// emits — naming the existing-cell positional, -f, and the fused --from-*
+	// sources.
 	if err == nil ||
-		!strings.Contains(err.Error(), "<config>") ||
+		!strings.Contains(err.Error(), "<cell>") ||
 		!strings.Contains(err.Error(), "-f/--file") ||
-		!strings.Contains(err.Error(), "-b/--blueprint") {
-		t.Fatalf("err=%v want one-of error naming the <config>/-f/-b sources", err)
+		!strings.Contains(err.Error(), "--from-blueprint/--from-config/--clone") {
+		t.Fatalf("err=%v want a source-required error naming <cell>/-f/--from-* sources", err)
 	}
 }
 
@@ -2447,7 +2447,7 @@ func TestRun_FromBlueprint_ResolvesAndCreates(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-b", "web", "--param", "TAG=v2", "--realm", "my-realm", "-d"})
+	cmd.SetArgs([]string{"--from-blueprint", "web", "--param", "TAG=v2", "--realm", "my-realm", "-d"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -2467,6 +2467,115 @@ func TestRun_FromBlueprint_ResolvesAndCreates(t *testing.T) {
 	}
 }
 
+// TestRun_FromBlueprint_IgnoreDiskPressure_ThreadsToSpec pins that the
+// `--ignore-disk-pressure` flag on `kuke run` reaches Spec.IgnoreDiskPressure
+// on the fused create+start+attach path. The flag is registered by
+// cell.RegisterSourceFlags (shared with `kuke create cell`) and is read off
+// cmd.Flags() rather than viper — the run side has no viper bind for the key,
+// so a `viper.GetBool` read would silently see false and drop the operator's
+// opt-in past the daemon's disk-pressure guard.
+func TestRun_FromBlueprint_IgnoreDiskPressure_ThreadsToSpec(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return kukeonv1.CreateCellResult{
+				Cell: doc, Created: true, MetadataExistsPost: true,
+				CgroupCreated: true, CgroupExistsPost: true,
+				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
+				Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
+			}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{
+		"--from-blueprint", "web", "--param", "TAG=v2",
+		"--realm", "my-realm", "--ignore-disk-pressure", "-d",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !fc.createDoc.Spec.IgnoreDiskPressure {
+		t.Errorf("Spec.IgnoreDiskPressure=false, want true (--ignore-disk-pressure was set)")
+	}
+}
+
+// TestRun_FromBlueprint_NoIgnoreDiskPressure_LeavesSpecFalse is the negative
+// counterpart: omitting `--ignore-disk-pressure` leaves Spec.IgnoreDiskPressure
+// at its zero value, so the daemon's CreateCell guard still applies.
+func TestRun_FromBlueprint_NoIgnoreDiskPressure_LeavesSpecFalse(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return kukeonv1.CreateCellResult{
+				Cell: doc, Created: true, MetadataExistsPost: true,
+				CgroupCreated: true, CgroupExistsPost: true,
+				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
+				Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
+			}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"--from-blueprint", "web", "--param", "TAG=v2", "--realm", "my-realm", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.createDoc.Spec.IgnoreDiskPressure {
+		t.Errorf("Spec.IgnoreDiskPressure=true, want false (flag omitted)")
+	}
+}
+
+// TestRun_RequireSynced_RejectedOutsideFile pins that --require-synced rejects
+// at parse time on the positional and the fused source paths rather than
+// silently no-op'ing. The flag compares the live cell against the source
+// manifest, which only -f supplies (the fused paths refuse on --name collision
+// rather than diverge, and the existing-cell positional has no source).
+func TestRun_RequireSynced_RejectedOutsideFile(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "positional",
+			args: []string{"my-cell", "--require-synced", "-d"},
+		},
+		{
+			name: "from-blueprint",
+			args: []string{"--from-blueprint", "web", "--require-synced", "-d"},
+		},
+		{
+			name: "from-config",
+			args: []string{"--from-config", "prod", "--require-synced", "-d"},
+		},
+		{
+			name: "clone",
+			args: []string{"--clone", "src", "--require-synced", "-d"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			cmd, _ := newCmd(t, &fakeClient{})
+			cmd.SetArgs(tc.args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatalf("Execute returned nil, want --require-synced rejection")
+			}
+			if !strings.Contains(err.Error(), "--require-synced is only valid with -f/--file") {
+				t.Errorf("err=%q should reject --require-synced as -f-only", err)
+			}
+		})
+	}
+}
+
 func TestRun_FromBlueprint_NotFound_Errors(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
@@ -2476,7 +2585,7 @@ func TestRun_FromBlueprint_NotFound_Errors(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-b", "ghost", "--realm", "my-realm", "-d"})
+	cmd.SetArgs([]string{"--from-blueprint", "ghost", "--realm", "my-realm", "-d"})
 
 	err := cmd.Execute()
 	if err == nil || !errors.Is(err, errdefs.ErrBlueprintNotFound) {
@@ -2504,7 +2613,7 @@ func TestRun_FromBlueprint_NameOverride(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"-b", "web", "--name", "pinned", "--realm", "my-realm", "-d"})
+	cmd.SetArgs([]string{"--from-blueprint", "web", "--name", "pinned", "--realm", "my-realm", "-d"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -2606,7 +2715,7 @@ func TestRun_FromConfig_BareGeneratesNameAndBackRef(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"prod", "--realm", "cfg-realm", "-d"})
+	cmd.SetArgs([]string{"--from-config", "prod", "--realm", "cfg-realm", "-d"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -2682,7 +2791,7 @@ func TestRun_FromConfig_LiveReadyCell_AttachesWithoutCreate(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"prod", "--name", "prod", "--realm", "cfg-realm", "-d"})
+	cmd.SetArgs([]string{"prod", "--realm", "cfg-realm", "-d"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -2715,7 +2824,7 @@ func TestRun_FromConfig_LiveStoppedCell_StartsThenAttaches(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"prod", "--name", "prod", "--realm", "cfg-realm", "-d"})
+	cmd.SetArgs([]string{"prod", "--realm", "cfg-realm", "-d"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -2748,7 +2857,7 @@ func TestRun_FromConfig_LiveFailedCell_RefusesWithDeletePointer(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"prod", "--name", "prod", "--realm", "cfg-realm", "-d"})
+	cmd.SetArgs([]string{"prod", "--realm", "cfg-realm", "-d"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -2759,249 +2868,6 @@ func TestRun_FromConfig_LiveFailedCell_RefusesWithDeletePointer(t *testing.T) {
 	}
 	if fc.createCalls != 0 || fc.startCalls != 0 {
 		t.Errorf("CreateCell=%d StartCell=%d want both 0", fc.createCalls, fc.startCalls)
-	}
-}
-
-func TestRun_FromConfig_DivergentSpec_RequireSynced_RefusesAndPointsToApply(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	// Simulate divergence by returning a Ready cell whose container image
-	// disagrees with what Materialize(cfg, bp) would build. With
-	// --require-synced (#986) the -c contract reverts to the pre-#986
-	// default: refuse with a `kuke restart <name>` pointer (#844
-	// retargeted the pointer onto the post-#823 surface), not warn-and-attach
-	// — CreateCell/StartCell must not fire. The default warn-and-attach
-	// behaviour is covered by TestRun_FromConfig_DivergentSpec_Default_WarnsAndAttaches.
-	fc := &fakeClient{
-		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
-		},
-		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
-		},
-		getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-			// Deep-copy the containers so the test mutation does not also
-			// rewrite the desired CellDoc that runRun is about to compare
-			// against — both sides share the same backing slice when we
-			// shallow-copy `doc`.
-			live := doc
-			live.Spec.Containers = append([]v1beta1.ContainerSpec(nil), doc.Spec.Containers...)
-			// Diverge on the user container's image (divergedFields excludes
-			// the runner-synthesised root). Match by ID rather than index so
-			// the test stays resilient to container ordering.
-			for i := range live.Spec.Containers {
-				if live.Spec.Containers[i].ID == "main" {
-					live.Spec.Containers[i].Image = "registry.example.com/web:v1"
-					break
-				}
-			}
-			live.Status.State = v1beta1.CellStateReady
-			return kukeonv1.GetCellResult{
-				Cell: live, MetadataExists: true,
-				RootContainerExists: true, RootContainerTaskRunning: true,
-			}, nil
-		},
-	}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"prod", "--name", "prod", "--realm", "cfg-realm", "-d", "--require-synced"})
-
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatalf("Execute err=nil want refusal on divergent spec")
-	}
-	// Mirrors the existing -f rejection: names the cell, names the source
-	// (CellConfig "prod"), enumerates the diverging field(s), and hands the
-	// operator the exact reconcile invocation. The stable name == config name
-	// for the -c path, so the pointer omits --name.
-	for _, want := range []string{
-		`live cell "prod" spec differs from CellConfig "prod"`,
-		`spec.containers["main"].image`,
-		"refusing to attach (--require-synced)",
-		"kuke restart prod",
-		"reconcile",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("err=%q missing substring %q", err, want)
-		}
-	}
-	if fc.createCalls != 0 || fc.startCalls != 0 {
-		t.Errorf("CreateCell=%d StartCell=%d want both 0 (refuse on divergence)", fc.createCalls, fc.startCalls)
-	}
-}
-
-// TestRun_FromBlueprint_NamedDivergent_RequireSynced_RefusesAndPointsToApply
-// covers #753's -b --name addition under --require-synced (#986): a
-// pinned-name `kuke run -b <bp> --name <cell>` against a live cell whose
-// spec has diverged from the materialisation refuses with a
-// `kuke delete cell <cell>` + re-run pointer (#844 retargeted the pointer
-// onto the post-#823 surface — Blueprint-lineage cells have no implicit
-// reconcile per #819's umbrella, so the message routes to delete-and-re-run
-// rather than a reconcile verb). The default warn-and-attach behaviour
-// (without --require-synced) is covered by
-// TestRun_FromBlueprint_NamedDivergent_Default_WarnsAndAttaches. The
-// generated-name path (`kuke run -b <bp>` without --name) is unaffected
-// because each invocation materialises a fresh `<prefix>-<6hex>` cell, so a
-// collision against an existing cell is statistically negligible.
-func TestRun_FromBlueprint_NamedDivergent_RequireSynced_RefusesAndPointsToApply(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	fc := &fakeClient{
-		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
-		},
-		getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-			// Same divergence shape as the -c test: deep-copy then mutate the
-			// user container's image. blueprintDoc() declares only the "main"
-			// user container (the runner-synthesised root is filtered out of
-			// divergedFields).
-			live := doc
-			live.Spec.Containers = append([]v1beta1.ContainerSpec(nil), doc.Spec.Containers...)
-			for i := range live.Spec.Containers {
-				if live.Spec.Containers[i].ID == "main" {
-					live.Spec.Containers[i].Image = "registry.example.com/web:stale"
-					break
-				}
-			}
-			live.Status.State = v1beta1.CellStateReady
-			return kukeonv1.GetCellResult{
-				Cell: live, MetadataExists: true,
-				RootContainerExists: true, RootContainerTaskRunning: true,
-			}, nil
-		},
-	}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{
-		"-b", "web", "--name", "pinned", "--param", "TAG=v2",
-		"--realm", "my-realm", "-d", "--require-synced",
-	})
-
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatalf("Execute err=nil want refusal on divergent spec")
-	}
-	for _, want := range []string{
-		`live cell "pinned" spec differs from CellBlueprint "web"`,
-		`spec.containers["main"].image`,
-		"refusing to attach (--require-synced)",
-		"kuke delete cell pinned",
-		"-b cells have no in-place reconcile",
-		"CellConfig",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("err=%q missing substring %q", err, want)
-		}
-	}
-	if fc.createCalls != 0 || fc.startCalls != 0 {
-		t.Errorf("CreateCell=%d StartCell=%d want both 0 (refuse on divergence)", fc.createCalls, fc.startCalls)
-	}
-}
-
-// TestRun_FromConfig_DivergentSpec_Default_WarnsAndAttaches pins the #986
-// default: without --require-synced, the divergent-spec branch of the
-// `<config>` path emits a `notice:` naming the diverging fields and the
-// reconcile pointer, then falls through into the Ready short-circuit and
-// drops the operator into the live cell. CreateCell/StartCell must not fire
-// — warn-and-attach is a pure read-and-attach against the live state.
-func TestRun_FromConfig_DivergentSpec_Default_WarnsAndAttaches(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	fc := &fakeClient{
-		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
-		},
-		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
-		},
-		getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-			live := doc
-			live.Spec.Containers = append([]v1beta1.ContainerSpec(nil), doc.Spec.Containers...)
-			for i := range live.Spec.Containers {
-				if live.Spec.Containers[i].ID == "main" {
-					live.Spec.Containers[i].Image = "registry.example.com/web:v1"
-					break
-				}
-			}
-			live.Status.State = v1beta1.CellStateReady
-			return kukeonv1.GetCellResult{
-				Cell: live, MetadataExists: true,
-				RootContainerExists: true, RootContainerTaskRunning: true,
-			}, nil
-		},
-	}
-	cmd, buf := newCmd(t, fc)
-	cmd.SetArgs([]string{"prod", "--name", "prod", "--realm", "cfg-realm", "-d"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute err=%v want nil (warn-and-attach is the default)", err)
-	}
-	output := buf.String()
-	for _, want := range []string{
-		`notice: cell "prod" is OutOfSync with CellConfig "prod"`,
-		`spec.containers["main"].image`,
-		"attaching to current live state",
-		"kuke restart prod",
-	} {
-		if !strings.Contains(output, want) {
-			t.Errorf("output missing substring %q:\n%s", want, output)
-		}
-	}
-	if fc.createCalls != 0 || fc.startCalls != 0 {
-		t.Errorf("CreateCell=%d StartCell=%d want both 0 (warn-and-attach is a no-op against the live cell)",
-			fc.createCalls, fc.startCalls)
-	}
-}
-
-// TestRun_FromBlueprint_NamedDivergent_Default_WarnsAndAttaches is the
-// `-b --name` half of the #986 warn-and-attach default. The notice cites
-// the CellBlueprint source and the delete-then-rerun pointer (Blueprint-
-// lineage cells have no in-place reconcile) instead of the `kuke restart`
-// pointer the `<config>` branch uses, but the fall-through behaviour
-// is identical: CreateCell/StartCell stay at 0 and the operator lands in
-// the live cell.
-func TestRun_FromBlueprint_NamedDivergent_Default_WarnsAndAttaches(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	fc := &fakeClient{
-		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
-		},
-		getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-			live := doc
-			live.Spec.Containers = append([]v1beta1.ContainerSpec(nil), doc.Spec.Containers...)
-			for i := range live.Spec.Containers {
-				if live.Spec.Containers[i].ID == "main" {
-					live.Spec.Containers[i].Image = "registry.example.com/web:stale"
-					break
-				}
-			}
-			live.Status.State = v1beta1.CellStateReady
-			return kukeonv1.GetCellResult{
-				Cell: live, MetadataExists: true,
-				RootContainerExists: true, RootContainerTaskRunning: true,
-			}, nil
-		},
-	}
-	cmd, buf := newCmd(t, fc)
-	cmd.SetArgs([]string{"-b", "web", "--name", "pinned", "--param", "TAG=v2", "--realm", "my-realm", "-d"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute err=%v want nil (warn-and-attach is the default)", err)
-	}
-	output := buf.String()
-	for _, want := range []string{
-		`notice: cell "pinned" is OutOfSync with CellBlueprint "web"`,
-		`spec.containers["main"].image`,
-		"attaching to current live state",
-		"kuke delete cell pinned",
-		"-b cells have no in-place reconcile",
-	} {
-		if !strings.Contains(output, want) {
-			t.Errorf("output missing substring %q:\n%s", want, output)
-		}
-	}
-	if fc.createCalls != 0 || fc.startCalls != 0 {
-		t.Errorf("CreateCell=%d StartCell=%d want both 0 (warn-and-attach is a no-op against the live cell)",
-			fc.createCalls, fc.startCalls)
 	}
 }
 
@@ -3081,7 +2947,7 @@ func TestRun_FromConfig_NotFound_Errors(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"ghost", "--realm", "cfg-realm", "-d"})
+	cmd.SetArgs([]string{"--from-config", "ghost", "--realm", "cfg-realm", "-d"})
 
 	err := cmd.Execute()
 	if err == nil || !errors.Is(err, errdefs.ErrConfigNotFound) {
@@ -3089,204 +2955,6 @@ func TestRun_FromConfig_NotFound_Errors(t *testing.T) {
 	}
 	if fc.createCalls != 0 {
 		t.Errorf("CreateCell calls=%d want 0 on config-not-found", fc.createCalls)
-	}
-}
-
-// TestRun_FromConfig_NotFound_ProbeWalk pins the three-probe scope walk on
-// the bare `kuke run <config>` form (no --space/--stack). The probes go full
-// → space-only → realm-only with realm = "default" from the session default;
-// the not-found error reports the full-scope coordinates the operator's
-// effective scope started at (issue #923).
-func TestRun_FromConfig_NotFound_ProbeWalk(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	var seen []v1beta1.CellConfigMetadata
-	fc := &fakeClient{
-		getConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-			seen = append(seen, doc.Metadata)
-			return kukeonv1.GetConfigResult{MetadataExists: false}, nil
-		},
-	}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"ghost", "-d"})
-
-	err := cmd.Execute()
-	if err == nil || !errors.Is(err, errdefs.ErrConfigNotFound) {
-		t.Fatalf("err=%v want ErrConfigNotFound", err)
-	}
-	if !strings.Contains(err.Error(), `realm="default" space="default" stack="default"`) {
-		t.Errorf("err message should report full-scope coords, got: %v", err)
-	}
-	wantProbes := []v1beta1.CellConfigMetadata{
-		{Name: "ghost", Realm: "default", Space: "default", Stack: "default"},
-		{Name: "ghost", Realm: "default", Space: "default", Stack: ""},
-		{Name: "ghost", Realm: "default", Space: "", Stack: ""},
-	}
-	if len(seen) != len(wantProbes) {
-		t.Fatalf("GetConfig probes=%d want %d (seen=%+v)", len(seen), len(wantProbes), seen)
-	}
-	for i, want := range wantProbes {
-		if seen[i].Name != want.Name || seen[i].Realm != want.Realm ||
-			seen[i].Space != want.Space || seen[i].Stack != want.Stack {
-			t.Errorf("probe[%d]={name=%q realm=%q space=%q stack=%q} want %+v",
-				i, seen[i].Name, seen[i].Realm, seen[i].Space, seen[i].Stack, want)
-		}
-	}
-}
-
-// TestRun_FromConfig_FullScopeProbe_Hits pins probe-1 of the walk: a Config
-// stored at default/default/default is found by a bare `kuke run <config>`
-// without --space/--stack. Reproduces the issue #923 bug.
-func TestRun_FromConfig_FullScopeProbe_Hits(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	stored := configDoc()
-	stored.Metadata.Realm = "default"
-	stored.Metadata.Space = "default"
-	stored.Metadata.Stack = "default"
-
-	var probes int
-	fc := &fakeClient{
-		getConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-			probes++
-			if doc.Metadata.Realm == "default" &&
-				doc.Metadata.Space == "default" &&
-				doc.Metadata.Stack == "default" {
-				return kukeonv1.GetConfigResult{Config: stored, MetadataExists: true}, nil
-			}
-			return kukeonv1.GetConfigResult{MetadataExists: false}, nil
-		},
-		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
-		},
-		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-			return successCreateResult(doc), nil
-		},
-	}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"prod", "-d"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if probes != 1 {
-		t.Errorf("GetConfig probes=%d want 1 (first probe should hit at full scope)", probes)
-	}
-	if fc.createCalls != 1 {
-		t.Errorf("CreateCell calls=%d want 1", fc.createCalls)
-	}
-}
-
-// TestRun_FromConfig_SpaceOnlyProbe_Hits pins probe-2: a Config stored at
-// realm=default / space=default / stack="" is found by a bare lookup after
-// the full-scope probe misses.
-func TestRun_FromConfig_SpaceOnlyProbe_Hits(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	stored := configDoc()
-	stored.Metadata.Realm = "default"
-	stored.Metadata.Space = "default"
-	stored.Metadata.Stack = ""
-
-	var seen []v1beta1.CellConfigMetadata
-	fc := &fakeClient{
-		getConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-			seen = append(seen, doc.Metadata)
-			if doc.Metadata.Realm == "default" &&
-				doc.Metadata.Space == "default" &&
-				doc.Metadata.Stack == "" {
-				return kukeonv1.GetConfigResult{Config: stored, MetadataExists: true}, nil
-			}
-			return kukeonv1.GetConfigResult{MetadataExists: false}, nil
-		},
-		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
-		},
-		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-			return successCreateResult(doc), nil
-		},
-	}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"prod", "-d"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if len(seen) != 2 {
-		t.Fatalf("GetConfig probes=%d want 2 (full miss then space-only hit), seen=%+v", len(seen), seen)
-	}
-	if seen[1].Space != "default" || seen[1].Stack != "" {
-		t.Errorf("probe[1]=%+v want space=default stack=\"\"", seen[1])
-	}
-}
-
-// TestRun_FromConfig_RealmOnlyProbe_Hits pins probe-3: a Config stored at
-// realm=default / space="" / stack="" is found by a bare lookup only after
-// the two narrower probes miss.
-func TestRun_FromConfig_RealmOnlyProbe_Hits(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	stored := configDoc()
-	stored.Metadata.Realm = "default"
-	stored.Metadata.Space = ""
-	stored.Metadata.Stack = ""
-
-	var seen []v1beta1.CellConfigMetadata
-	fc := &fakeClient{
-		getConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-			seen = append(seen, doc.Metadata)
-			if doc.Metadata.Realm == "default" &&
-				doc.Metadata.Space == "" &&
-				doc.Metadata.Stack == "" {
-				return kukeonv1.GetConfigResult{Config: stored, MetadataExists: true}, nil
-			}
-			return kukeonv1.GetConfigResult{MetadataExists: false}, nil
-		},
-		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
-		},
-		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-			return successCreateResult(doc), nil
-		},
-	}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"prod", "-d"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if len(seen) != 3 {
-		t.Fatalf("GetConfig probes=%d want 3 (walk down to realm-only), seen=%+v", len(seen), seen)
-	}
-	if seen[2].Space != "" || seen[2].Stack != "" {
-		t.Errorf("probe[2]=%+v want realm-only", seen[2])
-	}
-}
-
-// TestRun_FromConfig_RPCError_ShortCircuits pins that a real RPC error
-// (anything other than MetadataExists=false) aborts the probe walk so the
-// operator sees the underlying failure instead of a misleading not-found at
-// realm scope.
-func TestRun_FromConfig_RPCError_ShortCircuits(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	wantErr := errors.New("transport boom")
-	var probes int
-	fc := &fakeClient{
-		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-			probes++
-			return kukeonv1.GetConfigResult{}, wantErr
-		},
-	}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"prod", "-d"})
-
-	err := cmd.Execute()
-	if err == nil || !errors.Is(err, wantErr) {
-		t.Fatalf("err=%v want %v", err, wantErr)
-	}
-	if probes != 1 {
-		t.Errorf("GetConfig probes=%d want 1 (RPC error must short-circuit)", probes)
 	}
 }
 
@@ -3302,7 +2970,7 @@ func TestRun_FromConfig_BlueprintMissing_Errors(t *testing.T) {
 		},
 	}
 	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"prod", "--realm", "cfg-realm", "-d"})
+	cmd.SetArgs([]string{"--from-config", "prod", "--realm", "cfg-realm", "-d"})
 
 	err := cmd.Execute()
 	if err == nil || !errors.Is(err, errdefs.ErrBlueprintNotFound) {
@@ -3330,13 +2998,13 @@ func TestRun_FromConfig_RejectsParamFlags(t *testing.T) {
 	}{
 		{
 			"--param",
-			[]string{"prod", "--param", "K=V", "-d"},
-			"--param is not valid with the <config> positional",
+			[]string{"--from-config", "prod", "--param", "K=V", "-d"},
+			"--param is not valid with --from-config",
 		},
 		{
 			"--param-file",
-			[]string{"prod", "--param-file", "/tmp/p", "-d"},
-			"--param-file is not valid with the <config> positional",
+			[]string{"--from-config", "prod", "--param-file", "/tmp/p", "-d"},
+			"--param-file is not valid with --from-config",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3352,12 +3020,11 @@ func TestRun_FromConfig_RejectsParamFlags(t *testing.T) {
 	}
 }
 
-// TestRun_PositionalConfig_MutexWithFlagSources covers issue #813's AC: the
-// <config> positional is rejected when combined with -b/-f; the rejection
-// message names the remaining sources so the operator sees the full set
-// without re-running with --help. The legacy `-p`/`--profile` form was
-// removed in #626 and is now intercepted at flag-parse time with a
-// migration pointer before the positional-mutex check runs.
+// TestRun_PositionalConfig_MutexWithFlagSources covers epic:cell-identity
+// #1025's AC: the <cell> positional (start an existing cell) is rejected when
+// combined with -f or the fused --from-* create sources; the rejection message
+// names the conflicting sources so the operator sees the full set without
+// re-running with --help.
 func TestRun_PositionalConfig_MutexWithFlagSources(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -3365,14 +3032,15 @@ func TestRun_PositionalConfig_MutexWithFlagSources(t *testing.T) {
 		want string
 	}{
 		{
-			"-b conflicts with positional",
-			[]string{"prod", "-b", "web", "--realm", "cfg-realm", "-d"},
-			"the <config> positional is mutually exclusive with -b/--blueprint",
+			"--from-blueprint conflicts with positional",
+			[]string{"prod", "--from-blueprint", "web", "--realm", "cfg-realm", "-d"},
+			"the <cell> positional (start an existing cell) is mutually exclusive with " +
+				"--from-blueprint/--from-config/--clone",
 		},
 		{
 			"-f conflicts with positional",
 			[]string{"prod", "-f", "/tmp/never-read.yaml", "-d"},
-			"the <config> positional is mutually exclusive with -f/--file",
+			"the <cell> positional is mutually exclusive with -f/--file",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3399,337 +3067,6 @@ func TestRun_PositionalConfig_TooManyArgs(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatalf("Execute err=nil want cobra rejection of >1 positional arg")
-	}
-}
-
-// TestRun_FromConfig_New_FreshCellPerInvocation covers AC of #833 (and the
-// inherited semantics from #754):
-// `kuke run <config> --new` materializes a fresh `<config-name>-<6hex>` cell
-// on each invocation, and the cell carries the kukeon.io/config=<config-name>
-// lineage label so `kuke get cells -l kukeon.io/config=<name>` still enumerates
-// every spawn.
-func TestRun_FromConfig_New_FreshCellPerInvocation(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	// Track every materialized cell name across two invocations. Reusing the
-	// same fakeClient across invocations would carry createDoc state but not
-	// names, so we capture them explicitly.
-	var names []string
-	getCell := func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-		// Each generated name is fresh, so GetCell never finds a live cell —
-		// returning ErrCellNotFound funnels both invocations through CreateCell.
-		return kukeonv1.GetCellResult{}, errdefs.ErrCellNotFound
-	}
-	createCell := func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-		names = append(names, doc.Metadata.Name)
-		return kukeonv1.CreateCellResult{
-			Cell: doc, Created: true, MetadataExistsPost: true,
-			CgroupCreated: true, CgroupExistsPost: true,
-			RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
-			Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
-		}, nil
-	}
-
-	for i := range 2 {
-		// viper persists module-globally; reset per invocation so the previous
-		// --new binding doesn't leak into the next Execute call.
-		viper.Reset()
-		fc := &fakeClient{
-			getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-				return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
-			},
-			getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-				return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
-			},
-			getCellFn:    getCell,
-			createCellFn: createCell,
-		}
-		cmd, _ := newCmd(t, fc)
-		cmd.SetArgs([]string{"prod", "--new", "--realm", "cfg-realm", "-d"})
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("Execute (iteration %d): %v", i, err)
-		}
-		if fc.createCalls != 1 {
-			t.Fatalf("CreateCell calls=%d want 1 on --new invocation %d", fc.createCalls, i)
-		}
-		// Back-reference label survives the generated-name path.
-		if got := fc.createDoc.Metadata.Labels["kukeon.io/config"]; got != "prod" {
-			t.Errorf("kukeon.io/config label=%q want prod (iteration %d)", got, i)
-		}
-	}
-
-	if len(names) != 2 {
-		t.Fatalf("captured %d names, want 2: %v", len(names), names)
-	}
-	for _, n := range names {
-		prefix := "prod-"
-		if len(n) != len(prefix)+6 || n[:len(prefix)] != prefix {
-			t.Errorf("cell name=%q does not match <config-name>-<6hex> shape", n)
-		}
-		for _, r := range n[len(prefix):] {
-			if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
-				t.Errorf("cell name suffix rune %q in %q not lowercase hex", r, n)
-				break
-			}
-		}
-	}
-	if names[0] == names[1] {
-		t.Errorf("two --new invocations produced the same name %q; expected distinct <prefix>-<6hex>", names[0])
-	}
-}
-
-// TestRun_FromConfig_NewAndName_CreatesPinnedCell covers the AC of #833:
-// `--new --name X` is a combinable form (the old `--name`/`--generate-name`
-// mutex was relaxed in #833), and the resulting cell uses the pinned name
-// verbatim — not `X-<6hex>`. The kukeon.io/config lineage label still lands
-// on the cell so `kuke get cells -l kukeon.io/config=<name>` enumerates
-// pinned-name spawns alongside hex-suffix ones.
-func TestRun_FromConfig_NewAndName_CreatesPinnedCell(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	fc := &fakeClient{
-		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
-		},
-		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
-		},
-		getCellFn: func(v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-			// X is free — runRun's --new path treats this as "create".
-			return kukeonv1.GetCellResult{}, errdefs.ErrCellNotFound
-		},
-		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-			return kukeonv1.CreateCellResult{
-				Cell: doc, Created: true, MetadataExistsPost: true,
-				CgroupCreated: true, CgroupExistsPost: true,
-				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
-				Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
-			}, nil
-		},
-	}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"prod", "--new", "--name", "pinned", "--realm", "cfg-realm", "-d"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if fc.createCalls != 1 {
-		t.Fatalf("CreateCell calls=%d want 1", fc.createCalls)
-	}
-	if got := fc.createDoc.Metadata.Name; got != "pinned" {
-		t.Errorf("cell name=%q want \"pinned\" (verbatim --name override, no hex suffix)", got)
-	}
-	if got := fc.createDoc.Spec.ID; got != "pinned" {
-		t.Errorf("cell spec.id=%q want \"pinned\"", got)
-	}
-	if got := fc.createDoc.Metadata.Labels["kukeon.io/config"]; got != "prod" {
-		t.Errorf("kukeon.io/config label=%q want prod (lineage preserved on pinned --new spawn)", got)
-	}
-}
-
-// TestRun_FromConfig_NewAndName_CollisionRejected covers the create-or-fail
-// half of `--new --name X` (#833 AC): when a cell named X already exists in
-// the target realm, the run aborts with a hard collision error rather than
-// attaching (which is the explicit difference from `--name X` alone). The
-// error points the operator at the attach-on-collision escape valve so the
-// distinction reads at the error message.
-func TestRun_FromConfig_NewAndName_CollisionRejected(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	existing := v1beta1.CellDoc{
-		Metadata: v1beta1.CellMetadata{Name: "pinned"},
-		Spec: v1beta1.CellSpec{
-			ID:      "pinned",
-			RealmID: "cfg-realm",
-		},
-		Status: v1beta1.CellStatus{State: v1beta1.CellStateReady},
-	}
-	fc := &fakeClient{
-		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
-		},
-		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
-		},
-		getCellFn: func(v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-			return kukeonv1.GetCellResult{Cell: existing, MetadataExists: true}, nil
-		},
-		// createCellFn intentionally unset: a successful guard returns before
-		// CreateCell, and the default returns "unexpected CreateCell call" to
-		// fail the test if the guard mis-fires.
-	}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"prod", "--new", "--name", "pinned", "--realm", "cfg-realm", "-d"})
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatalf("Execute err=nil want collision rejection on --new --name with existing cell")
-	}
-	if !strings.Contains(err.Error(), "already exists") ||
-		!strings.Contains(err.Error(), `--name pinned`) {
-		t.Errorf("err=%v missing collision wording or attach-on-collision pointer", err)
-	}
-	if fc.createCalls != 0 {
-		t.Errorf("CreateCell calls=%d want 0 on --new --name collision", fc.createCalls)
-	}
-}
-
-// TestRun_FromConfig_NameAlone_IdempotentAttach covers the AC's
-// attach-if-exists escape valve referenced by the `--new --name X` collision
-// error message: `<config> --name X` (without --new) sets the cell name to X
-// and walks the existing idempotent-attach path. When X exists, run attaches
-// (no CreateCell); when X is free, run materializes from the Config and
-// creates the cell. The kukeon.io/config lineage label is preserved either
-// way so `kuke get cells -l kukeon.io/config=<name>` still enumerates the
-// pinned-name cell alongside stable-name and hex-suffix spawns.
-func TestRun_FromConfig_NameAlone_IdempotentAttach(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	t.Run("creates_when_missing", func(t *testing.T) {
-		t.Cleanup(viper.Reset)
-		fc := &fakeClient{
-			getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-				return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
-			},
-			getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-				return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
-			},
-			getCellFn: func(v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-				return kukeonv1.GetCellResult{}, errdefs.ErrCellNotFound
-			},
-			createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-				return kukeonv1.CreateCellResult{
-					Cell: doc, Created: true, MetadataExistsPost: true,
-					CgroupCreated: true, CgroupExistsPost: true,
-					RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
-					Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
-				}, nil
-			},
-		}
-		cmd, _ := newCmd(t, fc)
-		cmd.SetArgs([]string{"prod", "--name", "pinned", "--realm", "cfg-realm", "-d"})
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("Execute: %v", err)
-		}
-		if fc.createCalls != 1 {
-			t.Fatalf("CreateCell calls=%d want 1", fc.createCalls)
-		}
-		if got := fc.createDoc.Metadata.Name; got != "pinned" {
-			t.Errorf("cell name=%q want \"pinned\" (verbatim --name override)", got)
-		}
-		if got := fc.createDoc.Metadata.Labels["kukeon.io/config"]; got != "prod" {
-			t.Errorf("kukeon.io/config label=%q want prod (lineage preserved)", got)
-		}
-	})
-
-	t.Run("attaches_when_present_and_matching", func(t *testing.T) {
-		t.Cleanup(viper.Reset)
-		fc := &fakeClient{
-			getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-				return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
-			},
-			getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-				return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
-			},
-			getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-				if doc.Metadata.Name != "pinned" {
-					t.Errorf("GetCell name=%q want pinned", doc.Metadata.Name)
-				}
-				// Echo the desired spec back so divergedFields reports no drift
-				// and runRun routes through runExistingCell's Ready short-circuit
-				// (same pattern as TestRun_FromConfig_LiveReadyCell_NoCreate).
-				live := doc
-				live.Status.State = v1beta1.CellStateReady
-				return kukeonv1.GetCellResult{
-					Cell: live, MetadataExists: true, CgroupExists: true,
-					RootContainerExists: true, RootContainerTaskRunning: true,
-				}, nil
-			},
-		}
-		cmd, _ := newCmd(t, fc)
-		cmd.SetArgs([]string{"prod", "--name", "pinned", "--realm", "cfg-realm", "-d"})
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("Execute: %v", err)
-		}
-		if fc.createCalls != 0 {
-			t.Errorf("CreateCell calls=%d want 0 on idempotent attach", fc.createCalls)
-		}
-	})
-}
-
-// TestRun_FromConfig_NewWithRm_SetsAutoDelete covers AC #5: `<config> --new
-// --rm` materializes an ephemeral generated cell from the Config. The
-// AutoDelete=true on the spec is the daemon-side trigger the reconcile loop
-// keys on after detach; cell + overlay cleanup is handled by the same
-// machinery exercised by TestRun_RmFlag_SetsAutoDeleteOnSpec.
-func TestRun_FromConfig_NewWithRm_SetsAutoDelete(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	fc := &fakeClient{
-		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
-		},
-		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
-		},
-		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-			return kukeonv1.CreateCellResult{
-				Cell: doc, Created: true, MetadataExistsPost: true,
-				CgroupCreated: true, CgroupExistsPost: true,
-				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
-				Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
-			}, nil
-		},
-	}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"prod", "--new", "--rm", "--realm", "cfg-realm", "-d"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if !fc.createDoc.Spec.AutoDelete {
-		t.Errorf("AutoDelete=false want true under --rm")
-	}
-	// Sanity-check the name path: --rm did not divert the --new materialization
-	// away from the generated <prefix>-<6hex> name.
-	prefix := "prod-"
-	got := fc.createDoc.Metadata.Name
-	if len(got) != len(prefix)+6 || got[:len(prefix)] != prefix {
-		t.Errorf("cell name=%q does not match <config-name>-<6hex> shape under --rm", got)
-	}
-}
-
-// TestRun_New_OnlyValidWithConfig covers the defensive UX guard: --new is a
-// CellConfig-only knob (only the <config> positional reaches the daemon-
-// stored CellConfig path). Allowing it silently on -f (where metadata.name is
-// authoritative) or -b (which already generates <prefix>-<6hex>) would seed
-// a wrong mental model that --new toggles a default that isn't actually
-// flipped.
-func TestRun_New_OnlyValidWithConfig(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		args []string
-		want string
-	}{
-		{
-			"-f rejects --new",
-			[]string{"-f", "/tmp/never-read.yaml", "--new", "-d"},
-			"--new is only valid with the <config> positional",
-		},
-		{
-			"-b rejects --new",
-			[]string{"-b", "web", "--new", "-d"},
-			"--new is only valid with the <config> positional",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Cleanup(viper.Reset)
-			fc := &fakeClient{}
-			cmd, _ := newCmd(t, fc)
-			cmd.SetArgs(tc.args)
-			err := cmd.Execute()
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("err=%v want substring %q", err, tc.want)
-			}
-		})
 	}
 }
 
@@ -3856,164 +3193,78 @@ func TestRun_EnvFlag_DuplicateKeyDifferentValue_RejectedAtCLI(t *testing.T) {
 // blueprint. Combines with --param to confirm the two knobs are
 // orthogonal (--param does render-time spec substitution into the
 // container image; --env injects at start-time into the OCI process env).
-func TestRun_EnvFlag_FromBlueprint_ThreadsRuntimeEnvOntoCreateDoc(t *testing.T) {
+// TestRun_EnvFlag_FromBlueprint_Rejected covers the per-path override symmetry
+// shared with `kuke create cell` (epic:cell-identity #1023/#1025): --env is
+// rejected on the --from-blueprint fused path (materialise from a Config to
+// layer env overrides). The symmetric --param-rejected-with-from-config case is
+// covered by TestRun_FromConfig_RejectsParamFlags.
+func TestRun_EnvFlag_FromBlueprint_Rejected(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
 	fc := &fakeClient{
 		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
 			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
 		},
-		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-			return kukeonv1.CreateCellResult{
-				Cell: doc, Created: true, MetadataExistsPost: true,
-				CgroupCreated: true, CgroupExistsPost: true,
-				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
-				Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
-			}, nil
-		},
 	}
 	cmd, _ := newCmd(t, fc)
 	cmd.SetArgs([]string{
-		"-b", "web",
+		"--from-blueprint", "web",
 		"--param", "TAG=v2",
 		"--env", "LABEL=bug",
 		"--realm", "my-realm",
 		"-d",
 	})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	want := []string{"LABEL=bug"}
-	if !reflect.DeepEqual(fc.createDoc.Spec.RuntimeEnv, want) {
-		t.Errorf("RuntimeEnv=%v, want %v", fc.createDoc.Spec.RuntimeEnv, want)
-	}
-	// --param still applied to the spec (orthogonal to --env).
-	if got := fc.createDoc.Spec.Containers[0].Image; got != "registry.example.com/web:v2" {
-		t.Errorf("image=%q want ${TAG} substituted to v2 (--param + --env are independent)", got)
-	}
-}
-
-// TestRun_EnvFlag_FromConfig_Bare_ThreadsRuntimeEnvOntoCreateDoc covers
-// the bare-positional `<config>` create path with --env: a brand-new cell
-// from a CellConfig receives RuntimeEnv on its CreateCell doc. The
-// `--new`-or-deterministic identity branch picks the deterministic name
-// here (Config's stable name); both branches thread RuntimeEnv identically
-// because the assignment is before the identity-flag branching.
-func TestRun_EnvFlag_FromConfig_Bare_ThreadsRuntimeEnvOntoCreateDoc(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	fc := &fakeClient{
-		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
-		},
-		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
-		},
-		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-			return kukeonv1.CreateCellResult{
-				Cell: doc, Created: true, MetadataExistsPost: true,
-				CgroupCreated: true, CgroupExistsPost: true,
-				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
-				Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
-			}, nil
-		},
-	}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"prod", "--env", "LABEL=bug", "--realm", "cfg-realm", "-d"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	want := []string{"LABEL=bug"}
-	if !reflect.DeepEqual(fc.createDoc.Spec.RuntimeEnv, want) {
-		t.Errorf("RuntimeEnv=%v, want %v (<cfg> positional source)", fc.createDoc.Spec.RuntimeEnv, want)
-	}
-}
-
-// TestRun_EnvFlag_New_ThreadsRuntimeEnvOntoCreateDoc covers the --new
-// identity branch on the <config> path: a fresh `<config-name>-<6hex>`
-// cell still carries RuntimeEnv on its CreateCell doc.
-func TestRun_EnvFlag_New_ThreadsRuntimeEnvOntoCreateDoc(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	fc := &fakeClient{
-		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
-		},
-		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
-		},
-		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
-			return kukeonv1.CreateCellResult{
-				Cell: doc, Created: true, MetadataExistsPost: true,
-				CgroupCreated: true, CgroupExistsPost: true,
-				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
-				Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
-			}, nil
-		},
-	}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"prod", "--new", "--env", "LABEL=bug", "--realm", "cfg-realm", "-d"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	want := []string{"LABEL=bug"}
-	if !reflect.DeepEqual(fc.createDoc.Spec.RuntimeEnv, want) {
-		t.Errorf("RuntimeEnv=%v, want %v (--new identity branch)", fc.createDoc.Spec.RuntimeEnv, want)
-	}
-	if !regexp.MustCompile(`^prod-[0-9a-f]{6}$`).MatchString(fc.createDoc.Metadata.Name) {
-		t.Errorf("cell name=%q want prod-<6hex> (--new identity)", fc.createDoc.Metadata.Name)
-	}
-}
-
-// TestRun_EnvFlag_DivergentCheckIgnoresRuntimeEnv is the AC-named
-// scenario: a Ready cell already exists from a prior `kuke run prod`
-// invocation; a second `kuke run prod --env LABEL=bug` against the same
-// Config must NOT trip the divergent-spec refusal — RuntimeEnv is
-// yaml:"-", so the persisted Containers[].Env on disk never carries the
-// injection, divergedFields compares only Containers[].Env, and both
-// sides come from the same Materialize(cfg, bp) pipeline. The
-// short-circuit on Ready then skips CreateCell/StartCell.
-func TestRun_EnvFlag_DivergentCheckIgnoresRuntimeEnv(t *testing.T) {
-	t.Cleanup(viper.Reset)
-
-	cfg := configDoc()
-	bp := configBlueprintDoc()
-	fc := &fakeClient{
-		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
-			return kukeonv1.GetConfigResult{Config: cfg, MetadataExists: true}, nil
-		},
-		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
-			return kukeonv1.GetBlueprintResult{Blueprint: bp, MetadataExists: true}, nil
-		},
-		getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
-			// Echo the desired spec back so divergedFields reports no drift
-			// — same shape as TestRun_FromConfig_LiveReadyCell_AttachesWithoutCreate
-			// but with --env on the second invocation. The on-disk persisted
-			// spec is `doc` itself (modulo RuntimeEnv, which yaml:"-" strips on
-			// the daemon's marshal-to-disk path).
-			live := doc
-			live.Spec.RuntimeEnv = nil // simulate the disk-strip — prior run's --env didn't persist
-			live.Status.State = v1beta1.CellStateReady
-			return kukeonv1.GetCellResult{
-				Cell: live, MetadataExists: true, CgroupExists: true,
-				RootContainerExists: true, RootContainerTaskRunning: true,
-			}, nil
-		},
-	}
-	cmd, _ := newCmd(t, fc)
-	cmd.SetArgs([]string{"prod", "--name", "prod", "--env", "LABEL=bug", "--realm", "cfg-realm", "-d"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v (divergent check tripped on --env — RuntimeEnv must be ignored)", err)
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "--env is not valid with --from-blueprint") {
+		t.Fatalf("err=%v want --env-rejected-with-from-blueprint", err)
 	}
 	if fc.createCalls != 0 {
-		t.Errorf("CreateCell calls=%d, want 0 (Ready short-circuit)", fc.createCalls)
+		t.Errorf("CreateCell calls=%d want 0 (rejected before create)", fc.createCalls)
 	}
-	if fc.startCalls != 0 {
-		t.Errorf("StartCell calls=%d, want 0 (Ready short-circuit; nothing to start)", fc.startCalls)
+}
+
+// TestRun_EnvFlag_FromConfig_BakesOverride covers the --from-config fused create
+// path with --env: the per-cell override is baked into the materialised CellDoc
+// (recorded in Spec.Provenance.EnvOverrides), NOT threaded as transport-only
+// RuntimeEnv. This is the persisted-override semantics `kuke create cell
+// --from-config --env` produces (epic:cell-identity #1023); run's fused form
+// inherits it via the shared cell.Materialize.
+func TestRun_EnvFlag_FromConfig_BakesOverride(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	fc := &fakeClient{
+		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
+		},
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
+		},
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return kukeonv1.CreateCellResult{
+				Cell: doc, Created: true, MetadataExistsPost: true,
+				CgroupCreated: true, CgroupExistsPost: true,
+				RootContainerCreated: true, RootContainerExistsPost: true, Started: true,
+				Containers: []kukeonv1.ContainerCreationOutcome{{Name: "main", ExistsPost: true, Created: true}},
+			}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"--from-config", "prod", "--env", "LABEL=bug", "--realm", "cfg-realm", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.createDoc.Spec.RuntimeEnv != nil {
+		t.Errorf("RuntimeEnv=%v want nil (--from-config --env is a baked override, not runtime injection)",
+			fc.createDoc.Spec.RuntimeEnv)
+	}
+	prov := fc.createDoc.Spec.Provenance
+	if prov == nil {
+		t.Fatalf("Provenance nil; want the --env override recorded")
+	}
+	if !reflect.DeepEqual(prov.EnvOverrides, []string{"LABEL=bug"}) {
+		t.Errorf("Provenance.EnvOverrides=%v want [LABEL=bug]", prov.EnvOverrides)
 	}
 }
 
@@ -4382,5 +3633,223 @@ func TestRun_Attach_StaleSocket_ENOENT_RetriesWithinBudget(t *testing.T) {
 	defer mu.Unlock()
 	if calls != 2 {
 		t.Errorf("attach loop calls=%d, want 2 (one ENOENT, one success)", calls)
+	}
+}
+
+// --- epic:cell-identity #1025: cell-positional + fused create+start+attach ---
+
+// sourceConfigCellForRun is a Config-lineage source cell (provenance points at
+// configDoc()) used to exercise `kuke run --clone <cell>`.
+func sourceConfigCellForRun() v1beta1.CellDoc {
+	return v1beta1.CellDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindCell,
+		Metadata: v1beta1.CellMetadata{
+			Name:   "prod-src",
+			Labels: map[string]string{"kukeon.io/config": "prod"},
+		},
+		Spec: v1beta1.CellSpec{
+			ID: "prod-src", RealmID: "cfg-realm", SpaceID: "cfg-space", StackID: "cfg-stack",
+			Containers: []v1beta1.ContainerSpec{
+				{ID: "main", Image: "registry.example.com/web:v2", Attachable: true},
+			},
+			Provenance: &v1beta1.CellProvenance{
+				BindingKind: v1beta1.BindingKindConfig,
+				BindingRef:  v1beta1.CellBindingRef{Name: "prod", Realm: "cfg-realm"},
+			},
+		},
+	}
+}
+
+// TestRun_Positional_NotFound_Errors covers `kuke run <cell>` against a cell
+// that does not exist: there is no source to materialise from, so the verb
+// errors (ErrCellNotFound) and points at the create paths rather than silently
+// creating anything.
+func TestRun_Positional_NotFound_Errors(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	fc := &fakeClient{} // getCellFn nil → ErrCellNotFound
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"ghost", "-d"})
+
+	err := cmd.Execute()
+	if err == nil || !errors.Is(err, errdefs.ErrCellNotFound) {
+		t.Fatalf("err=%v want ErrCellNotFound", err)
+	}
+	if fc.createCalls != 0 || fc.startCalls != 0 {
+		t.Errorf("CreateCell=%d StartCell=%d want both 0", fc.createCalls, fc.startCalls)
+	}
+}
+
+// TestRun_Positional_Ready_Attaches covers `kuke run <cell>` (no -d) against a
+// live Ready cell: no CreateCell/StartCell, just attach to its attachable
+// container.
+func TestRun_Positional_Ready_Attaches(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	fc := &fakeClient{
+		getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			if doc.Metadata.Name != "live" {
+				t.Errorf("GetCell name=%q want live", doc.Metadata.Name)
+			}
+			live := doc
+			live.Status.State = v1beta1.CellStateReady
+			live.Spec.Containers = []v1beta1.ContainerSpec{
+				{ID: "main", Image: "registry.example.com/web:v2", Attachable: true},
+			}
+			return kukeonv1.GetCellResult{
+				Cell: live, MetadataExists: true,
+				RootContainerExists: true, RootContainerTaskRunning: true,
+			}, nil
+		},
+		attachContainerFn: attachSuccessFn(),
+	}
+	run := &runCapture{}
+	cmd, _ := newCmdWithRun(t, fc, run)
+	cmd.SetArgs([]string{"live"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.createCalls != 0 || fc.startCalls != 0 {
+		t.Errorf("CreateCell=%d StartCell=%d want both 0 (Ready short-circuit)", fc.createCalls, fc.startCalls)
+	}
+	if run.calls != 1 {
+		t.Errorf("attach loop calls=%d want 1", run.calls)
+	}
+}
+
+// TestRun_FromClone_CreatesStartsAttaches covers `kuke run --clone <cell>`: the
+// fused form forks the source cell's recipe via the shared cell.Materialize and
+// create+starts the clone via CreateCell (the create cell verb would
+// MaterializeCell and leave it stopped). The materialisation details are
+// covered by cmd/kuke/create/cell's clone tests; here we verify run's dispatch.
+func TestRun_FromClone_CreatesStartsAttaches(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	src := sourceConfigCellForRun()
+	fc := &fakeClient{
+		getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			if doc.Metadata.Name == src.Metadata.Name {
+				return kukeonv1.GetCellResult{Cell: src, MetadataExists: true}, nil
+			}
+			return kukeonv1.GetCellResult{MetadataExists: false}, errdefs.ErrCellNotFound
+		},
+		getConfigFn: func(v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
+		},
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: configBlueprintDoc(), MetadataExists: true}, nil
+		},
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"--clone", src.Metadata.Name, "--realm", "cfg-realm", "-d"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fc.createCalls != 1 {
+		t.Fatalf("CreateCell calls=%d want 1 (fused clone create+start)", fc.createCalls)
+	}
+	// Auto-name <source>-<6hex>, source-cell annotation, lineage label inherited.
+	if got := fc.createDoc.Metadata.Name; !regexp.MustCompile(`^prod-src-[0-9a-f]{6}$`).MatchString(got) {
+		t.Errorf("clone name=%q want prod-src-<6hex>", got)
+	}
+	if got := fc.createDoc.Metadata.Annotations["kukeon.io/source-cell"]; got != src.Metadata.Name {
+		t.Errorf("source-cell annotation=%q want %q", got, src.Metadata.Name)
+	}
+	if got := fc.createDoc.Metadata.Labels["kukeon.io/config"]; got != "prod" {
+		t.Errorf("kukeon.io/config label=%q want prod (lineage inherited)", got)
+	}
+}
+
+// TestRun_Fused_NameCollision_Refuses covers the fused create path with an
+// explicit --name that collides with a live cell: the create form refuses
+// (parity with `kuke create cell`) and points at `kuke run <cell>` for the
+// start+attach-existing path. CreateCell must not fire.
+func TestRun_Fused_NameCollision_Refuses(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	fc := &fakeClient{
+		getBlueprintFn: func(v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		getCellFn: func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			// The explicit --name "pinned" already exists.
+			live := doc
+			live.Status.State = v1beta1.CellStateReady
+			return kukeonv1.GetCellResult{Cell: live, MetadataExists: true}, nil
+		},
+	}
+	cmd, _ := newCmd(t, fc)
+	cmd.SetArgs([]string{"--from-blueprint", "web", "--name", "pinned", "--realm", "my-realm", "-d"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("Execute err=nil want collision refusal")
+	}
+	for _, want := range []string{`cell "pinned" already exists`, "kuke run pinned", "kuke delete cell pinned"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err=%q missing substring %q", err, want)
+		}
+	}
+	if fc.createCalls != 0 {
+		t.Errorf("CreateCell calls=%d want 0 (refuse on collision)", fc.createCalls)
+	}
+}
+
+// TestRun_Name_RejectedWithPositionalAndFile covers validateSourceFlagCompat:
+// --name names the cell only on the fused create path; the existing-cell
+// positional and -f take their name from the positional / metadata.name.
+func TestRun_Name_RejectedWithPositionalAndFile(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			"positional",
+			[]string{"mycell", "--name", "foo", "-d"},
+			"--name is only valid with --from-blueprint/--from-config/--clone, not the <cell> positional",
+		},
+		{
+			"file",
+			[]string{"-f", "/tmp/never-read.yaml", "--name", "foo", "-d"},
+			"--name is only valid with --from-blueprint/--from-config/--clone, not -f/--file",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			fc := &fakeClient{}
+			cmd, _ := newCmd(t, fc)
+			cmd.SetArgs(tc.args)
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err=%v want substring %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestRun_RemovedFlags_Error covers AC#5: the retired sources -b/--blueprint,
+// --new, and --reuse no longer exist on `kuke run`; invoking them errors.
+func TestRun_RemovedFlags_Error(t *testing.T) {
+	for _, args := range [][]string{
+		{"-b", "web", "-d"},
+		{"--blueprint", "web", "-d"},
+		{"--new", "-d"},
+		{"--reuse", "-d"},
+	} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			t.Cleanup(viper.Reset)
+			fc := &fakeClient{}
+			cmd, _ := newCmd(t, fc)
+			cmd.SetArgs(args)
+			if err := cmd.Execute(); err == nil {
+				t.Fatalf("Execute err=nil want unknown-flag error for %v", args)
+			}
+			if fc.createCalls != 0 || fc.startCalls != 0 {
+				t.Errorf("CreateCell=%d StartCell=%d want both 0", fc.createCalls, fc.startCalls)
+			}
+		})
 	}
 }

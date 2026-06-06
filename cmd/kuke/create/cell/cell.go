@@ -89,28 +89,65 @@ func NewCellCmd() *cobra.Command {
 	cmd.Flags().String("stack", "", "Stack that owns the cell")
 	_ = viper.BindPFlag(config.KUKE_CREATE_CELL_STACK.ViperKey, cmd.Flags().Lookup("stack"))
 
+	// Source flags (--from-blueprint/--from-config/--clone/--param/--param-file/
+	// --env/--ignore-disk-pressure) live in one shared registration so `kuke run`
+	// and `kuke create cell` cannot drift (epic:cell-identity #1025, AC#4).
+	RegisterSourceFlags(cmd)
+
+	// `kuke create cell` additionally binds the source-name flags to viper for
+	// env-var fallback (KUKE_CREATE_CELL_*); `kuke run` reads its copies of the
+	// same flags directly via cmd.Flags() (no viper bind) so the two commands
+	// never race on a shared global viper key. param/env are intentionally not
+	// viper-bound here — StringArray flags don't round-trip viper cleanly (#834).
+	_ = viper.BindPFlag(config.KUKE_CREATE_CELL_FROM_BLUEPRINT.ViperKey, cmd.Flags().Lookup("from-blueprint"))
+	_ = viper.BindPFlag(config.KUKE_CREATE_CELL_FROM_CONFIG.ViperKey, cmd.Flags().Lookup("from-config"))
+	_ = viper.BindPFlag(config.KUKE_CREATE_CELL_CLONE.ViperKey, cmd.Flags().Lookup("clone"))
+	_ = viper.BindPFlag(config.KUKE_CREATE_CELL_PARAM_FILE.ViperKey, cmd.Flags().Lookup("param-file"))
+	_ = viper.BindPFlag(
+		config.KUKE_CREATE_CELL_IGNORE_DISK_PRESSURE.ViperKey,
+		cmd.Flags().Lookup("ignore-disk-pressure"),
+	)
+
+	// Register autocomplete functions for the scope flags. The source flags'
+	// completions are registered by RegisterSourceFlags.
+	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
+	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
+	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
+
+	return cmd
+}
+
+// RegisterSourceFlags registers the cell-source flag definitions
+// (--from-blueprint, --from-config, --clone, --param, --param-file, --env,
+// --ignore-disk-pressure), their mutual-exclusion, and their shell-completion
+// funcs on cmd. Both `kuke create cell` and `kuke run` call it so the two verbs
+// share one flag-definition set and cannot drift (epic:cell-identity #1025).
+//
+// It deliberately does NOT call viper.BindPFlag: viper is a process-global
+// singleton and two commands binding the same key would race (last-registered
+// wins). `kuke create cell` adds its own KUKE_CREATE_CELL_* binds after calling
+// this (for env-var fallback); `kuke run` reads the flags directly via
+// cmd.Flags(). Scope flags (--realm/--space/--stack) are NOT registered here —
+// they bind command-specific viper keys and each command owns its own.
+func RegisterSourceFlags(cmd *cobra.Command) {
 	cmd.Flags().String("from-blueprint", "",
 		"Materialise the cell from a daemon-stored CellBlueprint, resolved from the scope named "+
-			"by --realm/--space/--stack. The cell record is persisted in a stopped state; run "+
-			"`kuke start <name>` to start it. Mutually exclusive with --from-config.")
-	_ = viper.BindPFlag(config.KUKE_CREATE_CELL_FROM_BLUEPRINT.ViperKey, cmd.Flags().Lookup("from-blueprint"))
+			"by --realm/--space/--stack. Substitutes scalar --param values. "+
+			"Mutually exclusive with --from-config and --clone.")
 
 	cmd.Flags().String("from-config", "",
 		"Materialise the cell from a daemon-stored CellConfig (resolves the Config's referenced "+
-			"Blueprint, applies the Config's spec.values and repo/secret slot fills). The cell "+
-			"record is persisted in a stopped state; run `kuke start <name>` to start it. "+
-			"Mutually exclusive with --from-blueprint.")
-	_ = viper.BindPFlag(config.KUKE_CREATE_CELL_FROM_CONFIG.ViperKey, cmd.Flags().Lookup("from-config"))
+			"Blueprint, applies the Config's spec.values and repo/secret slot fills). "+
+			"Mutually exclusive with --from-blueprint and --clone.")
 
 	cmd.Flags().String("clone", "",
 		"Fork an existing cell's recipe into a new cell: read the source cell's "+
 			"Spec.Provenance (the binding it was materialised from plus any per-cell "+
-			"--param/--env overrides), re-materialise from that same binding, and persist a "+
-			"new stopped cell. The clone copies the source's Spec.Provenance verbatim, inherits "+
+			"--param/--env overrides) and re-materialise from that same binding. The clone "+
+			"copies the source's Spec.Provenance verbatim, inherits "+
 			"its kukeon.io/config or kukeon.io/blueprint lineage label, and carries a "+
 			"kukeon.io/source-cell=<src> annotation. Omitted name → <source-name>-<6hex>; "+
 			"explicit name used verbatim. Mutually exclusive with --from-blueprint/--from-config.")
-	_ = viper.BindPFlag(config.KUKE_CREATE_CELL_CLONE.ViperKey, cmd.Flags().Lookup("clone"))
 
 	cmd.Flags().StringArray("param", nil,
 		"Scalar parameter override as KEY=VALUE; repeatable. Valid with --from-blueprint. "+
@@ -122,7 +159,6 @@ func NewCellCmd() *cobra.Command {
 		"File of KEY=VALUE lines whose values seed scalar parameters; one per line, "+
 			"`#` starts a comment. Same declaration rules as --param. CLI --param wins on "+
 			"duplicate keys. Rejected with --from-config (same reason as --param).")
-	_ = viper.BindPFlag(config.KUKE_CREATE_CELL_PARAM_FILE.ViperKey, cmd.Flags().Lookup("param-file"))
 
 	cmd.Flags().StringArray("env", nil,
 		"Per-cell environment override as KEY=VALUE; repeatable. Valid with --from-config "+
@@ -136,49 +172,44 @@ func NewCellCmd() *cobra.Command {
 		"Bypass kukeond's data-volume disk-pressure guard for this cell's "+
 			"creation. The daemon normally refuses to provision a new cell once "+
 			"the data volume crosses the hard threshold. (issue #1035)")
-	_ = viper.BindPFlag(
-		config.KUKE_CREATE_CELL_IGNORE_DISK_PRESSURE.ViperKey,
-		cmd.Flags().Lookup("ignore-disk-pressure"),
-	)
 
 	cmd.MarkFlagsMutuallyExclusive("from-blueprint", "from-config", "clone")
 
-	// Register autocomplete functions for flags
-	_ = cmd.RegisterFlagCompletionFunc("realm", config.CompleteRealmNames)
-	_ = cmd.RegisterFlagCompletionFunc("space", config.CompleteSpaceNames)
-	_ = cmd.RegisterFlagCompletionFunc("stack", config.CompleteStackNames)
 	_ = cmd.RegisterFlagCompletionFunc("from-blueprint", config.CompleteBlueprintNames)
 	_ = cmd.RegisterFlagCompletionFunc("from-config", config.CompleteConfigNames)
 	_ = cmd.RegisterFlagCompletionFunc("clone", config.CompleteCellNames)
-
-	return cmd
 }
 
-// createCellFlags is the validated bundle of flag values runCreateCell consumes
-// after parseCreateCellFlags.
-type createCellFlags struct {
-	name          string
-	realm         string
-	space         string
-	stack         string
-	blueprintName string
-	configName    string
-	// cloneSource is the source cell name passed via `--clone <src>` (the
+// SourceFlags is the validated bundle of source-flag values the materialize
+// path consumes. It is shared between `kuke create cell` (which persists the
+// materialised doc stopped via MaterializeCell) and `kuke run` (which
+// create+starts it via CreateCell then attaches) — the two verbs build a
+// SourceFlags from their own flag surfaces and feed it to the single
+// Materialize entrypoint so the materialisation cannot drift (epic:cell-identity
+// #1025, AC#4). Fields are exported so the run package can populate them.
+type SourceFlags struct {
+	Name          string
+	Realm         string
+	Space         string
+	Stack         string
+	BlueprintName string
+	ConfigName    string
+	// CloneSource is the source cell name passed via `--clone <src>` (the
 	// third source kind, epic:cell-identity #1073). When set, the cell is
 	// forked from the source cell's Spec.Provenance rather than resolved from a
 	// Blueprint/Config named on the CLI.
-	cloneSource string
-	paramArgs   []string
-	paramFile   string
-	// envArgs holds the validated `--env KEY=VALUE` per-cell overrides. Valid
+	CloneSource string
+	ParamArgs   []string
+	ParamFile   string
+	// EnvArgs holds the validated `--env KEY=VALUE` per-cell overrides. Valid
 	// with --from-config only (parity with --param on --from-blueprint); baked
 	// into the attachable container's env and recorded in
 	// Spec.Provenance.EnvOverrides. Issue #1023.
-	envArgs []string
-	// ignoreDiskPressure threads `kuke create cell --ignore-disk-pressure`
-	// onto the transport-only Spec.IgnoreDiskPressure field so the daemon's
+	EnvArgs []string
+	// IgnoreDiskPressure threads `--ignore-disk-pressure` onto the
+	// transport-only Spec.IgnoreDiskPressure field so the daemon's
 	// CreateCell guard is bypassed for this invocation. Issue #1035.
-	ignoreDiskPressure bool
+	IgnoreDiskPressure bool
 }
 
 // parseCreateCellFlags validates the flag combinations and trims values. The
@@ -194,16 +225,16 @@ type createCellFlags struct {
 //
 // --env entries are validated here (parseEnvArgs) so a malformed override
 // fails before any daemon round-trip.
-func parseCreateCellFlags(cmd *cobra.Command, args []string) (createCellFlags, error) {
-	flags := createCellFlags{
-		blueprintName: strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_FROM_BLUEPRINT.ViperKey)),
-		configName:    strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_FROM_CONFIG.ViperKey)),
-		cloneSource:   strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_CLONE.ViperKey)),
-		paramFile:     strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_PARAM_FILE.ViperKey)),
+func parseCreateCellFlags(cmd *cobra.Command, args []string) (SourceFlags, error) {
+	flags := SourceFlags{
+		BlueprintName: strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_FROM_BLUEPRINT.ViperKey)),
+		ConfigName:    strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_FROM_CONFIG.ViperKey)),
+		CloneSource:   strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_CLONE.ViperKey)),
+		ParamFile:     strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_PARAM_FILE.ViperKey)),
 	}
 
-	if flags.blueprintName == "" && flags.configName == "" && flags.cloneSource == "" {
-		return createCellFlags{}, errors.New(
+	if flags.BlueprintName == "" && flags.ConfigName == "" && flags.CloneSource == "" {
+		return SourceFlags{}, errors.New(
 			"kuke create cell requires --from-blueprint, --from-config, or --clone " +
 				"(use 'kuke apply -f <file>' for a full manifest)",
 		)
@@ -213,8 +244,8 @@ func parseCreateCellFlags(cmd *cobra.Command, args []string) (createCellFlags, e
 	// `<source-name>-<6hex>`, AC#2 of #1073), so it does not require the
 	// positional/viper name the --from-blueprint / --from-config paths demand.
 	// finalizeCellName resolves the empty name to a generated one.
-	if flags.cloneSource != "" {
-		flags.name = optionalNameArgOrDefault(
+	if flags.CloneSource != "" {
+		flags.Name = optionalNameArgOrDefault(
 			args, viper.GetString(config.KUKE_CREATE_CELL_NAME.ViperKey),
 		)
 	} else {
@@ -225,62 +256,97 @@ func parseCreateCellFlags(cmd *cobra.Command, args []string) (createCellFlags, e
 			viper.GetString(config.KUKE_CREATE_CELL_NAME.ViperKey),
 		)
 		if err != nil {
-			return createCellFlags{}, err
+			return SourceFlags{}, err
 		}
-		flags.name = name
+		flags.Name = name
 	}
 
-	flags.realm = strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_REALM.ViperKey))
-	if flags.realm == "" {
-		flags.realm = strings.TrimSpace(config.KUKE_CREATE_CELL_REALM.ValueOrDefault())
+	flags.Realm = strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_REALM.ViperKey))
+	if flags.Realm == "" {
+		flags.Realm = strings.TrimSpace(config.KUKE_CREATE_CELL_REALM.ValueOrDefault())
 	}
 
-	flags.space = strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_SPACE.ViperKey))
-	if flags.space == "" {
-		flags.space = strings.TrimSpace(config.KUKE_CREATE_CELL_SPACE.ValueOrDefault())
+	flags.Space = strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_SPACE.ViperKey))
+	if flags.Space == "" {
+		flags.Space = strings.TrimSpace(config.KUKE_CREATE_CELL_SPACE.ValueOrDefault())
 	}
 
-	flags.stack = strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_STACK.ViperKey))
-	if flags.stack == "" {
-		flags.stack = strings.TrimSpace(config.KUKE_CREATE_CELL_STACK.ValueOrDefault())
+	flags.Stack = strings.TrimSpace(viper.GetString(config.KUKE_CREATE_CELL_STACK.ViperKey))
+	if flags.Stack == "" {
+		flags.Stack = strings.TrimSpace(config.KUKE_CREATE_CELL_STACK.ValueOrDefault())
 	}
 
 	paramArgs, err := cmd.Flags().GetStringArray("param")
 	if err != nil {
-		return createCellFlags{}, err
+		return SourceFlags{}, err
 	}
-	flags.paramArgs = paramArgs
+	flags.ParamArgs = paramArgs
 
 	rawEnv, err := cmd.Flags().GetStringArray("env")
 	if err != nil {
-		return createCellFlags{}, err
+		return SourceFlags{}, err
 	}
 	envArgs, err := parseEnvArgs(rawEnv)
 	if err != nil {
-		return createCellFlags{}, err
+		return SourceFlags{}, err
 	}
-	flags.envArgs = envArgs
+	flags.EnvArgs = envArgs
 
-	flags.ignoreDiskPressure = viper.GetBool(config.KUKE_CREATE_CELL_IGNORE_DISK_PRESSURE.ViperKey)
+	flags.IgnoreDiskPressure = viper.GetBool(config.KUKE_CREATE_CELL_IGNORE_DISK_PRESSURE.ViperKey)
 
-	if flags.configName != "" {
-		if len(flags.paramArgs) > 0 {
-			return createCellFlags{}, errors.New(
+	return flags, nil
+}
+
+// ValidateOverrideSymmetry enforces the per-path --param/--env override
+// symmetry shared by `kuke create cell` and `kuke run` (epic:cell-identity
+// #1023/#1025):
+//
+//   - --param/--param-file are rejected with --from-config (a CellConfig
+//     carries its own spec.values);
+//   - --env is rejected with --from-blueprint (its symmetric counterpart —
+//     materialise from a Config to layer env overrides).
+//
+// The clone source kind carries its own per-lineage variants of these checks
+// (cloneFromConfig / cloneFromBlueprint) because the rejected flag depends on
+// the source cell's recorded bindingKind, not on a CLI flag — so this validator
+// is a no-op for clone. Materialize calls it up front, which is why `kuke run`
+// (which feeds Materialize a SourceFlags it built itself) inherits the same
+// rules without re-implementing them.
+func ValidateOverrideSymmetry(flags SourceFlags) error {
+	if flags.CloneSource != "" {
+		return nil
+	}
+	if flags.ConfigName != "" {
+		if len(flags.ParamArgs) > 0 {
+			return errors.New(
 				"--param is not valid with --from-config; a CellConfig carries its own spec.values (edit the Config instead)",
 			)
 		}
-		if flags.paramFile != "" {
-			return createCellFlags{}, errors.New(
+		if flags.ParamFile != "" {
+			return errors.New(
 				"--param-file is not valid with --from-config; a CellConfig carries its own spec.values (edit the Config instead)",
 			)
 		}
 	}
-	if flags.blueprintName != "" && len(flags.envArgs) > 0 {
-		return createCellFlags{}, errors.New(
+	if flags.BlueprintName != "" && len(flags.EnvArgs) > 0 {
+		return errors.New(
 			"--env is not valid with --from-blueprint; materialise from a Config (kuke create cell --from-config) to layer env overrides",
 		)
 	}
-	return flags, nil
+	return nil
+}
+
+// ScopeVars names the command-specific scope viper Vars the materialize path
+// reads to resolve binding-lookup scope (so a realm-scoped Blueprint/Config
+// stays findable when --space/--stack are unset). `kuke create cell` passes its
+// KUKE_CREATE_CELL_* vars; `kuke run` passes its KUKE_RUN_* vars. Threading the
+// Vars in (rather than hard-coding KUKE_CREATE_CELL_*) is what lets the two
+// verbs share one Materialize entrypoint without colliding on a global viper
+// key (epic:cell-identity #1025).
+type ScopeVars struct {
+	Realm *config.Var
+	Space *config.Var
+	Stack *config.Var
 }
 
 func runCreateCell(cmd *cobra.Command, args []string) error {
@@ -295,44 +361,73 @@ func runCreateCell(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = client.Close() }()
 
+	// The scope-Var bundle `kuke create cell` feeds Materialize (built inline
+	// rather than as a package global per the gochecknoglobals lint).
+	cellDoc, err := Materialize(cmd, client, flags, ScopeVars{
+		Realm: &config.KUKE_CREATE_CELL_REALM,
+		Space: &config.KUKE_CREATE_CELL_SPACE,
+		Stack: &config.KUKE_CREATE_CELL_STACK,
+	})
+	if err != nil {
+		return err
+	}
+	return materialiseAndPersist(cmd, client, cellDoc)
+}
+
+// Materialize resolves the source binding named by flags (--from-blueprint /
+// --from-config / --clone) and returns the fully-finalized CellDoc — name
+// allocated, scope overlaid, provenance + overrides applied — WITHOUT persisting
+// it. `kuke create cell` persists the doc stopped via MaterializeCell; `kuke
+// run` create+starts it via CreateCell then attaches. This single entrypoint is
+// the shared materialization function of epic:cell-identity #1025 (AC#4): the
+// two verbs cannot drift because the materialised doc comes from the same code.
+// The caller is responsible for the existence pre-check + persist
+// (materialiseAndPersist for create cell; CreateCell for run).
+func Materialize(
+	cmd *cobra.Command, client kukeonv1.Client, flags SourceFlags, scope ScopeVars,
+) (v1beta1.CellDoc, error) {
+	if err := ValidateOverrideSymmetry(flags); err != nil {
+		return v1beta1.CellDoc{}, err
+	}
 	switch {
-	case flags.cloneSource != "":
-		return runClone(cmd, client, flags)
-	case flags.blueprintName != "":
-		return runFromBlueprint(cmd, client, flags)
+	case flags.CloneSource != "":
+		return materializeClone(cmd, client, flags)
+	case flags.BlueprintName != "":
+		return materializeFromBlueprint(cmd, client, flags, scope)
 	default:
-		return runFromConfig(cmd, client, flags)
+		return materializeFromConfig(cmd, client, flags, scope)
 	}
 }
 
-// runFromBlueprint resolves the named Blueprint, applies --param/--param-file,
-// materialises the Cell record, refuses on name collision against an existing
-// cell, then persists via MaterializeCell (no start). The operator runs
-// `kuke start <name>` to start it.
+// materializeFromBlueprint resolves the named Blueprint, applies
+// --param/--param-file, materialises the Cell record, overlays scope, and
+// finalizes the cell name — returning the doc without persisting it.
 //
 // Lookup scope follows the explicit-coordinate rule from
 // kukeshared.PickLookupRealm / ExplicitScope so realm-scoped Blueprints stay
 // findable when --space/--stack are not set.
-func runFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags createCellFlags) error {
+func materializeFromBlueprint(
+	cmd *cobra.Command, client kukeonv1.Client, flags SourceFlags, scope ScopeVars,
+) (v1beta1.CellDoc, error) {
 	cliParams, err := buildParamMap(flags)
 	if err != nil {
-		return err
+		return v1beta1.CellDoc{}, err
 	}
 
 	lookup := v1beta1.CellBlueprintDoc{
 		Metadata: v1beta1.CellBlueprintMetadata{
-			Name:  flags.blueprintName,
-			Realm: kukeshared.PickLookupRealm(cmd, &config.KUKE_CREATE_CELL_REALM),
-			Space: kukeshared.ExplicitScope(cmd, "space", &config.KUKE_CREATE_CELL_SPACE),
-			Stack: kukeshared.ExplicitScope(cmd, "stack", &config.KUKE_CREATE_CELL_STACK),
+			Name:  flags.BlueprintName,
+			Realm: kukeshared.PickLookupRealm(cmd, scope.Realm),
+			Space: kukeshared.ExplicitScope(cmd, "space", scope.Space),
+			Stack: kukeshared.ExplicitScope(cmd, "stack", scope.Stack),
 		},
 	}
 	bpRes, err := client.GetBlueprint(cmd.Context(), lookup)
 	if err != nil {
-		return err
+		return v1beta1.CellDoc{}, err
 	}
 	if !bpRes.MetadataExists {
-		return fmt.Errorf(
+		return v1beta1.CellDoc{}, fmt.Errorf(
 			"%w (blueprint %q in scope realm=%q space=%q stack=%q)",
 			errdefs.ErrBlueprintNotFound, lookup.Metadata.Name,
 			lookup.Metadata.Realm, lookup.Metadata.Space, lookup.Metadata.Stack,
@@ -341,45 +436,46 @@ func runFromBlueprint(cmd *cobra.Command, client kukeonv1.Client, flags createCe
 
 	resolved, err := cellblueprint.Resolve(bpRes.Blueprint, cliParams, os.LookupEnv)
 	if err != nil {
-		return err
+		return v1beta1.CellDoc{}, err
 	}
-	cellDoc, err := cellblueprint.MaterializeWithName(resolved, flags.name, cliParams)
+	cellDoc, err := cellblueprint.MaterializeWithName(resolved, flags.Name, cliParams)
 	if err != nil {
-		return err
+		return v1beta1.CellDoc{}, err
 	}
 	overlayScope(&cellDoc, flags)
-	if err := finalizeCellName(cmd, client, &cellDoc, flags.name, cellblueprint.Prefix(resolved)); err != nil {
-		return err
+	if err = finalizeCellName(cmd, client, &cellDoc, flags.Name, cellblueprint.Prefix(resolved)); err != nil {
+		return v1beta1.CellDoc{}, err
 	}
 	applyIgnoreDiskPressure(&cellDoc, flags)
-
-	return materialiseAndPersist(cmd, client, cellDoc)
+	return cellDoc, nil
 }
 
-// runFromConfig resolves the named Config and its referenced Blueprint,
+// materializeFromConfig resolves the named Config and its referenced Blueprint,
 // materialises the Cell record via cellconfig.Materialize (which applies
 // spec.values, repo/secret slot fills, and the kukeon.io/config back-reference
 // label), finalizes the cell name (explicit or generated <prefix>-<6hex> per
-// epic:cell-identity #1022), refuses on name collision, then persists via
-// MaterializeCell (no start). Mirrors runFromBlueprint's scope-resolution
+// epic:cell-identity #1022), applies --env overrides — returning the doc
+// without persisting it. Mirrors materializeFromBlueprint's scope-resolution
 // strategy.
-func runFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags createCellFlags) error {
+func materializeFromConfig(
+	cmd *cobra.Command, client kukeonv1.Client, flags SourceFlags, scope ScopeVars,
+) (v1beta1.CellDoc, error) {
 	cfgLookup := v1beta1.CellConfigDoc{
 		APIVersion: v1beta1.APIVersionV1Beta1,
 		Kind:       v1beta1.KindCellConfig,
 		Metadata: v1beta1.CellConfigMetadata{
-			Name:  flags.configName,
-			Realm: kukeshared.PickLookupRealm(cmd, &config.KUKE_CREATE_CELL_REALM),
-			Space: kukeshared.ExplicitScope(cmd, "space", &config.KUKE_CREATE_CELL_SPACE),
-			Stack: kukeshared.ExplicitScope(cmd, "stack", &config.KUKE_CREATE_CELL_STACK),
+			Name:  flags.ConfigName,
+			Realm: kukeshared.PickLookupRealm(cmd, scope.Realm),
+			Space: kukeshared.ExplicitScope(cmd, "space", scope.Space),
+			Stack: kukeshared.ExplicitScope(cmd, "stack", scope.Stack),
 		},
 	}
 	cfgRes, err := client.GetConfig(cmd.Context(), cfgLookup)
 	if err != nil {
-		return err
+		return v1beta1.CellDoc{}, err
 	}
 	if !cfgRes.MetadataExists {
-		return fmt.Errorf(
+		return v1beta1.CellDoc{}, fmt.Errorf(
 			"%w (config %q in scope realm=%q space=%q stack=%q)",
 			errdefs.ErrConfigNotFound, cfgLookup.Metadata.Name,
 			cfgLookup.Metadata.Realm, cfgLookup.Metadata.Space, cfgLookup.Metadata.Stack,
@@ -397,28 +493,27 @@ func runFromConfig(cmd *cobra.Command, client kukeonv1.Client, flags createCellF
 	}
 	bpRes, err := client.GetBlueprint(cmd.Context(), bpLookup)
 	if err != nil {
-		return err
+		return v1beta1.CellDoc{}, err
 	}
 	if !bpRes.MetadataExists {
-		return fmt.Errorf(
+		return v1beta1.CellDoc{}, fmt.Errorf(
 			"%w (blueprint %q referenced by config %q in scope realm=%q space=%q stack=%q)",
 			errdefs.ErrBlueprintNotFound, bpRef.Name, cfgRes.Config.Metadata.Name,
 			bpRef.Realm, bpRef.Space, bpRef.Stack,
 		)
 	}
 
-	cellDoc, err := cellconfig.MaterializeWithName(cfgRes.Config, bpRes.Blueprint, flags.name)
+	cellDoc, err := cellconfig.MaterializeWithName(cfgRes.Config, bpRes.Blueprint, flags.Name)
 	if err != nil {
-		return err
+		return v1beta1.CellDoc{}, err
 	}
 	overlayScope(&cellDoc, flags)
-	if err := finalizeCellName(cmd, client, &cellDoc, flags.name, cellconfig.Prefix(cfgRes.Config)); err != nil {
-		return err
+	if err = finalizeCellName(cmd, client, &cellDoc, flags.Name, cellconfig.Prefix(cfgRes.Config)); err != nil {
+		return v1beta1.CellDoc{}, err
 	}
-	cellconfig.ApplyEnvOverrides(&cellDoc, flags.envArgs)
+	cellconfig.ApplyEnvOverrides(&cellDoc, flags.EnvArgs)
 	applyIgnoreDiskPressure(&cellDoc, flags)
-
-	return materialiseAndPersist(cmd, client, cellDoc)
+	return cellDoc, nil
 }
 
 // finalizeCellName resolves the cell's final name via the unified generator
@@ -477,8 +572,8 @@ func materialiseAndPersist(cmd *cobra.Command, client kukeonv1.Client, cellDoc v
 // transport-only Spec.IgnoreDiskPressure field (yaml:"-" — never persisted) so
 // the daemon's CreateCell guard is bypassed for this invocation. The flag only
 // ever sets the override true. Issue #1035.
-func applyIgnoreDiskPressure(doc *v1beta1.CellDoc, flags createCellFlags) {
-	if flags.ignoreDiskPressure {
+func applyIgnoreDiskPressure(doc *v1beta1.CellDoc, flags SourceFlags) {
+	if flags.IgnoreDiskPressure {
 		doc.Spec.IgnoreDiskPressure = true
 	}
 }
@@ -488,15 +583,15 @@ func applyIgnoreDiskPressure(doc *v1beta1.CellDoc, flags createCellFlags) {
 // metadata left them empty (e.g., a realm-only blueprint materialised into a
 // fully-specified scope). The doc wins when it sets a value — mirrors
 // run.resolveCellLocation but scoped to the create flags' viper keys.
-func overlayScope(doc *v1beta1.CellDoc, flags createCellFlags) {
+func overlayScope(doc *v1beta1.CellDoc, flags SourceFlags) {
 	if strings.TrimSpace(doc.Spec.RealmID) == "" {
-		doc.Spec.RealmID = flags.realm
+		doc.Spec.RealmID = flags.Realm
 	}
 	if strings.TrimSpace(doc.Spec.SpaceID) == "" {
-		doc.Spec.SpaceID = flags.space
+		doc.Spec.SpaceID = flags.Space
 	}
 	if strings.TrimSpace(doc.Spec.StackID) == "" {
-		doc.Spec.StackID = flags.stack
+		doc.Spec.StackID = flags.Stack
 	}
 }
 
@@ -540,16 +635,16 @@ func parseEnvArgs(args []string) ([]string, error) {
 // buildParamMap layers --param flags on top of --param-file contents.
 // Mirrors cmd/kuke/run.buildParamMap; kept local to avoid a cross-package
 // import for ~10 lines.
-func buildParamMap(flags createCellFlags) (map[string]string, error) {
+func buildParamMap(flags SourceFlags) (map[string]string, error) {
 	var fileParams map[string]string
-	if flags.paramFile != "" {
-		fp, err := cellblueprint.ParseParamFile(flags.paramFile)
+	if flags.ParamFile != "" {
+		fp, err := cellblueprint.ParseParamFile(flags.ParamFile)
 		if err != nil {
 			return nil, err
 		}
 		fileParams = fp
 	}
-	cliParams, err := cellblueprint.ParseParamArgs(flags.paramArgs)
+	cliParams, err := cellblueprint.ParseParamArgs(flags.ParamArgs)
 	if err != nil {
 		return nil, err
 	}
