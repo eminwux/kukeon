@@ -28,13 +28,15 @@
 //     surfaces errdefs.ErrTeamImageNoMatch naming the first unmet
 //     capability + the operator-actionable "build/label an image" hint.
 //  3. render — load the harness's blueprint template (relative to the
-//     materialized cache dir), substitute `${KEY}` placeholders for
-//     `${ROLE}`, `${HARNESS}`, `${IMAGE}`, `${NEEDS}`, and the role's
-//     native per-harness config knobs (`${SETTINGS}` for claude,
-//     `${SANDBOX}`/`${APPROVAL}` for codex, `${PERMISSIONS}` for
-//     opencode), then yaml-parse into a CellBlueprintDoc. Per the
-//     umbrella's key decision the role's native per-harness config is
-//     wired verbatim — no transpile.
+//     harness's own directory under the materialized cache, see #1110),
+//     parse it as a Go text/template against a typed dot-context
+//     (`.role`, `.harness`, `.needs`, `.harnesses`, `.operator`,
+//     `.project`, `.image`, `.realm`/`.space`/`.stack`), pull in every
+//     sibling `*.tmpl.yaml` partial in the same dir so `{{ template
+//     "name" . }}` calls resolve against them, execute, and yaml-parse
+//     the result into a CellBlueprintDoc. Per the umbrella's key decision
+//     the role's native per-harness config is wired verbatim — no
+//     transpile.
 //  4. bind — produce a CellConfig that references the just-rendered
 //     blueprint and carries (a) operator facts pulled from
 //     `~/.kuke/kuketeams.yaml` (git author/committer/signingKey/registry
@@ -54,13 +56,14 @@
 package teamrender
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
+	"text/template"
 
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
@@ -88,6 +91,13 @@ const ProjectRepoSlotName = "project"
 // `TeamsConfig.spec.sources[<owner/repo>]` mapping when the blueprint
 // declares the slot.
 const AgentsRepoSlotName = "agents"
+
+// partialGlob is the pattern teamrender scans the blueprint template's
+// directory with to discover sibling partials. Every match (other than the
+// main template itself) is parsed into the same template set so a
+// `{{ template "name" . }}` call in the blueprint resolves against a
+// `{{ define "name" }}…{{ end }}` block in any sibling.
+const partialGlob = "*.tmpl.yaml"
 
 // Inputs collects the per-project facts that vary by `kuke team init`
 // invocation. Project is the rendered objects' team label and the basis
@@ -171,7 +181,7 @@ func Render(
 
 			bp, renderErr := RenderBlueprint(
 				bundle.CacheDir, harness, role, hname, ptRole.Ref,
-				merged, entry, project, realm, in.Build, in.SourceRef,
+				merged, entry, tc, project, realm, in.Build, in.SourceRef,
 			)
 			if renderErr != nil {
 				return nil, fmt.Errorf(
@@ -266,18 +276,37 @@ func SelectImage(
 	)
 }
 
-// RenderBlueprint loads the harness's blueprint template (resolved
-// relative to cacheDir), substitutes `${KEY}` placeholders for the
-// `(role × harness)` pair's facts, and yaml-parses into a
-// CellBlueprintDoc. The blueprint's metadata.labels are populated with
+// RenderBlueprint loads the harness's blueprint template, parses it as a
+// Go text/template (alongside every sibling `*.tmpl.yaml` partial in the
+// same directory), executes it against the typed dot-context the agents
+// repo's published blueprints are authored against, and yaml-parses the
+// result into a CellBlueprintDoc.
+//
+// Template path resolution: harness.Spec.Template resolves relative to the
+// harness's own directory (`<cacheDir>/harnesses/<harness>/`), not the
+// cache root. The agents repo's `harnesses/<name>/harness.yaml` declares
+// `template: blueprint.tmpl.yaml` as a sibling, so the bare-filename form
+// is the canonical shape.
+//
+// Sibling partials: every `*.tmpl.yaml` in the resolved template's
+// directory is parsed into the same `*template.Template` set so a
+// blueprint's `{{ template "mount_source" . }}` call resolves against a
+// `{{ define "mount_source" }}…{{ end }}` block in any sibling
+// (`partials.tmpl.yaml`, `mounts.tmpl.yaml`, …) without the renderer
+// owning a partials directory of its own.
+//
+// Dot-context: see renderContextValues for the full shape. The
+// `.operator.*` and `.project.*` leaves are partially bound here and
+// completed in #1115. The metadata.labels are populated with
 // `kukeon.io/team = project`. metadata.realm is forced to realm (the
 // template need not pre-fill it). If the template did not supply
 // metadata.name, the default `<role>-<harness>` is stamped so the
 // blueprint and its companion config share a deterministic identity.
 //
-// build + sourceRef drive the `${IMAGE}` bind decision (see blueprintVars):
-// in build mode the locally-built `kukeon.internal/<ref>:<sourceRef>` image is
-// bound; otherwise the catalog entry's published Image is.
+// build + sourceRef drive the `.image` bind decision (see
+// renderContextValues): in build mode the locally-built
+// `kukeon.internal/<ref>:<sourceRef>` image is bound; otherwise the
+// catalog entry's published Image is.
 func RenderBlueprint(
 	cacheDir string,
 	h *model.Harness,
@@ -285,6 +314,7 @@ func RenderBlueprint(
 	harness, roleRef string,
 	needs []string,
 	image *model.ImageCatalogEntry,
+	tc *model.TeamsConfig,
 	project, realm string,
 	build bool,
 	sourceRef string,
@@ -295,7 +325,8 @@ func RenderBlueprint(
 			errdefs.ErrTeamBlueprintTemplateMissing, harness,
 		)
 	}
-	tplPath := filepath.Join(cacheDir, h.Spec.Template)
+	harnessDir := teamsource.HarnessDir(cacheDir, harness)
+	tplPath := filepath.Join(harnessDir, h.Spec.Template)
 	raw, err := os.ReadFile(tplPath)
 	if err != nil {
 		return nil, fmt.Errorf(
@@ -303,11 +334,19 @@ func RenderBlueprint(
 		)
 	}
 
-	vars := blueprintVars(roleRef, harness, image, needs, r, build, sourceRef)
-	rendered := substitute(string(raw), vars)
+	tpl, err := parseBlueprintTemplate(tplPath, raw)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx := renderContextValues(roleRef, harness, image, needs, r, tc, project, realm, build, sourceRef)
+	var buf bytes.Buffer
+	if execErr := tpl.ExecuteTemplate(&buf, filepath.Base(tplPath), ctx); execErr != nil {
+		return nil, fmt.Errorf("execute blueprint template %q: %w", tplPath, execErr)
+	}
 
 	var bp v1beta1.CellBlueprintDoc
-	if unmarshalErr := yaml.Unmarshal([]byte(rendered), &bp); unmarshalErr != nil {
+	if unmarshalErr := yaml.Unmarshal(buf.Bytes(), &bp); unmarshalErr != nil {
 		return nil, fmt.Errorf("parse rendered blueprint %q: %w", tplPath, unmarshalErr)
 	}
 
@@ -505,77 +544,209 @@ func firstUnmet(ic *model.ImageCatalog, harness string, needs []string) string {
 	return ""
 }
 
-// substitutionPattern matches a `${KEY}` placeholder. KEY is the standard
-// shell-style identifier: a leading letter or underscore followed by
-// letters/digits/underscores. Unknown placeholders pass through verbatim
-// rather than substituting empty — a CellBlueprint may legitimately carry
-// $-prefixed literals (env-var defaults, shell snippets), and the
-// downstream CellBlueprintParameter resolver surfaces a truly missing var
-// at apply time with a clearer error than a silent empty.
-var substitutionPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
-
-// substitute applies render-time `${KEY}` substitution. The function
-// looks up keys in vars; an unknown key passes through the original
-// `${KEY}` literal unchanged.
-func substitute(in string, vars map[string]string) string {
-	return substitutionPattern.ReplaceAllStringFunc(in, func(match string) string {
-		key := match[2 : len(match)-1]
-		if v, ok := vars[key]; ok {
-			return v
-		}
-		return match
-	})
+// templateFuncs is the function map exposed to harness blueprint
+// templates. Kept small — a sprig subset (upper, replace) — to keep the
+// renderer's surface narrow per the umbrella's "no full sprig" decision.
+// `replace` mirrors sprig's `(old, new, src)` arg order so the pipe idiom
+// `{{ . | upper | replace "-" "_" }}` flows the chained value into src as
+// the last positional, matching what published blueprints expect.
+func templateFuncs() template.FuncMap {
+	return template.FuncMap{
+		"upper":   strings.ToUpper,
+		"replace": func(from, to, src string) string { return strings.ReplaceAll(src, from, to) },
+	}
 }
 
-// blueprintVars builds the `${KEY}` substitution dict the harness's
-// blueprint template is rendered against. The role's native per-harness
-// config is wired verbatim — a role that has no per-harness config for
-// `harness` still gets the per-harness keys, just bound to empty strings,
-// so a template that always references `${SETTINGS}` does not break for
-// roles that omit it.
+// parseBlueprintTemplate parses the blueprint at tplPath (already-read raw
+// body) as a Go text/template and pulls in every sibling *.tmpl.yaml in
+// the same directory as additional members of the template set. The
+// blueprint can then call `{{ template "name" . }}` against a
+// `{{ define "name" }}…{{ end }}` block defined in any sibling without
+// the renderer owning a partials directory layout of its own.
+func parseBlueprintTemplate(tplPath string, raw []byte) (*template.Template, error) {
+	mainName := filepath.Base(tplPath)
+	tpl := template.New(mainName).Funcs(templateFuncs())
+	if _, err := tpl.Parse(string(raw)); err != nil {
+		return nil, fmt.Errorf("parse blueprint template %q: %w", tplPath, err)
+	}
+
+	siblings, err := filepath.Glob(filepath.Join(filepath.Dir(tplPath), partialGlob))
+	if err != nil {
+		return nil, fmt.Errorf("scan partials next to %q: %w", tplPath, err)
+	}
+	// Deterministic order so a multi-partial set parses the same way every
+	// run — filepath.Glob already returns lexicographically sorted matches,
+	// but pinning the contract here makes the intent explicit for future
+	// readers.
+	sort.Strings(siblings)
+	for _, sib := range siblings {
+		if sib == tplPath {
+			continue
+		}
+		sibRaw, readErr := os.ReadFile(sib)
+		if readErr != nil {
+			return nil, fmt.Errorf("read partial %q: %w", sib, readErr)
+		}
+		if _, parseErr := tpl.New(filepath.Base(sib)).Parse(string(sibRaw)); parseErr != nil {
+			return nil, fmt.Errorf("parse partial %q: %w", sib, parseErr)
+		}
+	}
+	return tpl, nil
+}
+
+// renderContextValues builds the dot-context the harness blueprint template
+// is rendered against. The top-level shape (lowercase keys) matches the
+// `.role`, `.harness`, `.needs`, `.harnesses`, `.operator`, `.project`,
+// `.image`, `.image_ref`, `.realm`, `.space`, `.stack` contract the
+// agents-side blueprints reference. Inner leaves keep their authored case:
+// `.needs.repos` etc. stay lowercase (role.yaml field names), while
+// `.operator.GIT_USER_NAME` etc. stay uppercase (env-var protocol).
 //
-// The `${IMAGE}` bind is mode-dependent: in `--build` mode (build && a
-// non-empty sourceRef) it is the locally-built `kukeon.internal/<ref>:
-// <sourceRef>` ref — byte-identical to the tag teambuild produces, so the
-// runtime resolves the in-realm image without a network pull — otherwise it
-// is the catalog entry's published, registry-qualified `Image`. `${IMAGE_REF}`
-// always carries the catalog-local selector key (`image.Ref`) regardless of
-// mode; only the bound image reference flips.
-func blueprintVars(
+// All leaves are exposed as maps rather than typed structs because Go
+// text/template's struct-field lookup is case-sensitive against exported
+// (uppercase) field names, which would force every blueprint to write
+// `.Needs.Repos` instead of the lowercase `.needs.repos` the agents repo
+// templates are authored with.
+//
+// The `.image` bind is mode-dependent: in `--build` mode (build && a
+// non-empty sourceRef) it is the locally-built
+// `kukeon.internal/<ref>:<sourceRef>` ref — byte-identical to the tag
+// teambuild produces, so the runtime resolves the in-realm image without a
+// network pull — otherwise it is the catalog entry's published,
+// registry-qualified Image. `.image_ref` always carries the catalog-local
+// selector key (`image.Ref`) regardless of mode.
+//
+// The `.operator.*` and `.project.*` leaves are partially bound here and
+// completed in #1115 — the keys already backed by the operator's
+// TeamsConfig (GIT_USER_NAME, GIT_USER_EMAIL, REGISTRY) are populated;
+// the not-yet-bound keys (TEAM_ROOT, HOME_DIR, REPO_OWNER, PROJECT_DIR,
+// AGENTS_REPO) wait for that follow-up. A blueprint referencing an
+// unbound key gets an empty string at render time (Go template's default
+// for a missing map key), not an error.
+func renderContextValues(
 	roleRef, harness string,
 	image *model.ImageCatalogEntry,
 	needs []string,
 	r *model.Role,
+	tc *model.TeamsConfig,
+	project, realm string,
 	build bool,
 	sourceRef string,
-) map[string]string {
-	vars := map[string]string{
-		"ROLE":    roleRef,
-		"HARNESS": harness,
-		"NEEDS":   strings.Join(needs, ","),
-	}
+) map[string]any {
+	img := ""
+	imgRef := ""
 	if image != nil {
-		img := image.Image
+		img = image.Image
 		if build && strings.TrimSpace(sourceRef) != "" {
 			img = consts.InternalImageRef(image.Ref, sourceRef)
 		}
-		vars["IMAGE"] = img
-		vars["IMAGE_REF"] = image.Ref
+		imgRef = image.Ref
 	}
+
+	// .needs.image is the merged role+project capability set the renderer
+	// just used to pick an image; .needs.{repos,mounts,params,secrets} are
+	// the role.yaml-authored selector lists the agents-side blueprints
+	// iterate to wire repo and mount slots.
+	needsView := map[string]any{
+		"image":   needs,
+		"repos":   roleNeedsRepos(r),
+		"mounts":  roleNeedsMounts(r),
+		"params":  roleNeedsParams(r),
+		"secrets": roleNeedsSecrets(r),
+	}
+
+	// .harnesses.<h>.{settings,sandbox,approval,permissions} mirrors
+	// role.yaml's harnesses map verbatim — a blueprint may switch behaviour
+	// per harness (claude reads Settings; codex reads Sandbox/Approval;
+	// opencode reads Permissions) without the renderer transpiling.
+	harnessesView := map[string]map[string]string{}
 	if r != nil {
-		if rh, ok := r.Spec.Harnesses[harness]; ok {
-			vars["SETTINGS"] = rh.Settings
-			vars["SANDBOX"] = rh.Sandbox
-			vars["APPROVAL"] = rh.Approval
-			vars["PERMISSIONS"] = rh.Permissions
-		} else {
-			vars["SETTINGS"] = ""
-			vars["SANDBOX"] = ""
-			vars["APPROVAL"] = ""
-			vars["PERMISSIONS"] = ""
+		for name, rh := range r.Spec.Harnesses {
+			harnessesView[name] = map[string]string{
+				"settings":    rh.Settings,
+				"sandbox":     rh.Sandbox,
+				"approval":    rh.Approval,
+				"permissions": rh.Permissions,
+			}
 		}
 	}
-	return vars
+
+	operatorView := map[string]string{}
+	if tc != nil {
+		if v := strings.TrimSpace(tc.Spec.Registry); v != "" {
+			operatorView["REGISTRY"] = v
+		}
+		if tc.Spec.Git != nil && tc.Spec.Git.Author != nil {
+			if v := strings.TrimSpace(tc.Spec.Git.Author.Name); v != "" {
+				operatorView["GIT_USER_NAME"] = v
+			}
+			if v := strings.TrimSpace(tc.Spec.Git.Author.Email); v != "" {
+				operatorView["GIT_USER_EMAIL"] = v
+			}
+		}
+	}
+
+	projectView := map[string]string{
+		"NAME": project,
+	}
+
+	roleView := map[string]any{
+		"name": roleRef,
+		"ref":  roleRef,
+	}
+
+	return map[string]any{
+		"role":      roleView,
+		"harness":   harness,
+		"needs":     needsView,
+		"harnesses": harnessesView,
+		"operator":  operatorView,
+		"project":   projectView,
+		"image":     img,
+		"image_ref": imgRef,
+		"realm":     realm,
+		"space":     "",
+		"stack":     "",
+	}
+}
+
+// roleNeedsRepos, roleNeedsMounts, roleNeedsParams, roleNeedsSecrets
+// return the matching role.yaml needs slice, or an empty slice (never
+// nil) so a `{{ range .needs.<x> }}` over an absent slot iterates zero
+// times rather than tripping a nil-deref in the template engine.
+func roleNeedsRepos(r *model.Role) []string {
+	if r == nil {
+		return []string{}
+	}
+	return appendNonNil(r.Spec.Needs.Repos)
+}
+
+func roleNeedsMounts(r *model.Role) []string {
+	if r == nil {
+		return []string{}
+	}
+	return appendNonNil(r.Spec.Needs.Mounts)
+}
+
+func roleNeedsParams(r *model.Role) []string {
+	if r == nil {
+		return []string{}
+	}
+	return appendNonNil(r.Spec.Needs.Params)
+}
+
+func roleNeedsSecrets(r *model.Role) []string {
+	if r == nil {
+		return []string{}
+	}
+	return appendNonNil(r.Spec.Needs.Secrets)
+}
+
+func appendNonNil(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
 }
 
 // operatorValues builds the CellConfig.Values scalar map from operator

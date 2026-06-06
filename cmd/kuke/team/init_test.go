@@ -193,16 +193,16 @@ func buildClaudeBundle(t *testing.T) *teamsource.Bundle {
 	tpl := `apiVersion: v1beta1
 kind: CellBlueprint
 metadata:
-  name: ${ROLE}-${HARNESS}
+  name: {{ .role.name }}-{{ .harness }}
 spec:
   cell:
     containers:
-      - id: ${ROLE}
-        image: ${IMAGE}
+      - id: {{ .role.name }}
+        image: {{ .image }}
         env:
-          - "ROLE=${ROLE}"
-          - "NEEDS=${NEEDS}"
-          - "SETTINGS=${SETTINGS}"
+          - "ROLE={{ .role.name }}"
+          - "NEEDS={{ range $i, $n := .needs.image }}{{ if $i }},{{ end }}{{ $n }}{{ end }}"
+          - "SETTINGS={{ (index .harnesses .harness).settings }}"
         repos:
           - { name: project, target: /src/project }
         secrets:
@@ -244,7 +244,10 @@ spec:
 				Spec: model.HarnessSpec{
 					SkillPath:  "/.claude/skills",
 					MakeTarget: "harness-claude",
-					Template:   "harnesses/claude/blueprint.tmpl.yaml",
+					// Bare filename — the renderer resolves it relative to the
+					// harness's own dir (harnesses/claude/), matching the
+					// agents-repo canonical layout (#1110).
+					Template: "blueprint.tmpl.yaml",
 				},
 			},
 		},

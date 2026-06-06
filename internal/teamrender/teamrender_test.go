@@ -174,36 +174,47 @@ func TestSelectImageDistinguishesMultiImagePartialCoverage(t *testing.T) {
 	}
 }
 
-// buildClaudeTemplate writes a minimal claude blueprint template into
-// cacheDir/harnesses/claude/blueprint.tmpl.yaml.
-func buildClaudeTemplate(t *testing.T, cacheDir string) {
+// writeHarnessFile writes a file under <cacheDir>/harnesses/<name>/<file>
+// (the standard agents-source harness directory layout teamsource.HarnessDir
+// resolves to) so tests can colocate a blueprint template and its sibling
+// partials the way the renderer expects.
+func writeHarnessFile(t *testing.T, cacheDir, harnessName, filename, body string) {
 	t.Helper()
-	p := filepath.Join(cacheDir, "harnesses", "claude", "blueprint.tmpl.yaml")
+	p := filepath.Join(teamsource.HarnessDir(cacheDir, harnessName), filename)
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+}
+
+// buildClaudeTemplate writes a minimal claude blueprint template into
+// <cacheDir>/harnesses/claude/blueprint.tmpl.yaml using the Go
+// text/template dot-context the agents repo's published blueprints are
+// authored against (per AC: relative-to-harness-dir, text/template engine).
+func buildClaudeTemplate(t *testing.T, cacheDir string) {
+	t.Helper()
 	body := `apiVersion: v1beta1
 kind: CellBlueprint
 metadata:
-  name: ${ROLE}-${HARNESS}
+  name: {{ .role.name }}-{{ .harness }}
 spec:
   cell:
     containers:
-      - id: ${ROLE}
-        image: ${IMAGE}
+      - id: {{ .role.name }}
+        image: {{ .image }}
         env:
-          - "ROLE=${ROLE}"
-          - "NEEDS=${NEEDS}"
-          - "SETTINGS=${SETTINGS}"
+          - "ROLE={{ .role.name }}"
+          - "NEEDS={{ range $i, $n := .needs.image }}{{ if $i }},{{ end }}{{ $n }}{{ end }}"
+          - "SETTINGS={{ (index .harnesses .harness).settings }}"
         repos:
           - { name: project, target: /src/project }
           - { name: agents, target: /src/agents }
         secrets:
           - { name: ANTHROPIC_API_KEY, mode: env, envName: ANTHROPIC_API_KEY }
 `
-	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
-		t.Fatalf("write: %v", err)
-	}
+	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml", body)
 }
 
 // minimalRole returns a role declaring the listed image-needs plus an
@@ -220,6 +231,7 @@ func minimalRole() *model.Role {
 			},
 			Needs: model.RoleNeeds{
 				Image:   []string{"go", "git"},
+				Repos:   []string{"project", "agents"},
 				Secrets: []string{"ANTHROPIC_API_KEY"},
 			},
 		},
@@ -235,7 +247,7 @@ func TestRenderBlueprintSubstitutesAndStampsTeamLabel(t *testing.T) {
 		APIVersion: model.APIVersionV1,
 		Kind:       model.KindHarness,
 		Metadata:   model.Metadata{Name: "claude"},
-		Spec:       model.HarnessSpec{Template: "harnesses/claude/blueprint.tmpl.yaml"},
+		Spec:       model.HarnessSpec{Template: "blueprint.tmpl.yaml"},
 	}
 	image := &model.ImageCatalogEntry{
 		Ref:          "claude-base",
@@ -251,6 +263,7 @@ func TestRenderBlueprintSubstitutesAndStampsTeamLabel(t *testing.T) {
 		"dev",
 		[]string{"git", "go"},
 		image,
+		nil,
 		"sbsh",
 		"default",
 		false,
@@ -296,7 +309,7 @@ func TestRenderBlueprintBindsInternalRefInBuildMode(t *testing.T) {
 		APIVersion: model.APIVersionV1,
 		Kind:       model.KindHarness,
 		Metadata:   model.Metadata{Name: "claude"},
-		Spec:       model.HarnessSpec{Template: "harnesses/claude/blueprint.tmpl.yaml"},
+		Spec:       model.HarnessSpec{Template: "blueprint.tmpl.yaml"},
 	}
 	image := &model.ImageCatalogEntry{
 		Ref:          "claude-base",
@@ -312,6 +325,7 @@ func TestRenderBlueprintBindsInternalRefInBuildMode(t *testing.T) {
 		"dev",
 		[]string{"git", "go"},
 		image,
+		nil,
 		"sbsh",
 		"default",
 		true,
@@ -333,7 +347,7 @@ func TestRenderBlueprintBindsPublishedRefWithoutBuild(t *testing.T) {
 	cacheDir := t.TempDir()
 	buildClaudeTemplate(t, cacheDir)
 	r := minimalRole()
-	h := &model.Harness{Spec: model.HarnessSpec{Template: "harnesses/claude/blueprint.tmpl.yaml"}}
+	h := &model.Harness{Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}}
 	image := &model.ImageCatalogEntry{
 		Ref:          "claude-base",
 		Harness:      "claude",
@@ -360,6 +374,7 @@ func TestRenderBlueprintBindsPublishedRefWithoutBuild(t *testing.T) {
 				"dev",
 				[]string{"git", "go"},
 				image,
+				nil,
 				"sbsh",
 				"default",
 				tc.build,
@@ -379,8 +394,8 @@ func TestRenderBlueprintMissingTemplate(t *testing.T) {
 	t.Parallel()
 	cacheDir := t.TempDir()
 	r := minimalRole()
-	h := &model.Harness{Spec: model.HarnessSpec{Template: "harnesses/missing/blueprint.tmpl.yaml"}}
-	_, err := RenderBlueprint(cacheDir, h, r, "claude", "dev", nil, nil, "sbsh", "default", false, "")
+	h := &model.Harness{Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}}
+	_, err := RenderBlueprint(cacheDir, h, r, "missing", "dev", nil, nil, nil, "sbsh", "default", false, "")
 	if !errors.Is(err, errdefs.ErrTeamBlueprintTemplateMissing) {
 		t.Fatalf("err = %v, want ErrTeamBlueprintTemplateMissing", err)
 	}
@@ -391,42 +406,208 @@ func TestRenderBlueprintEmptyTemplatePathRejected(t *testing.T) {
 	cacheDir := t.TempDir()
 	r := minimalRole()
 	h := &model.Harness{Spec: model.HarnessSpec{}}
-	_, err := RenderBlueprint(cacheDir, h, r, "claude", "dev", nil, nil, "sbsh", "default", false, "")
+	_, err := RenderBlueprint(cacheDir, h, r, "claude", "dev", nil, nil, nil, "sbsh", "default", false, "")
 	if !errors.Is(err, errdefs.ErrTeamBlueprintTemplateMissing) {
 		t.Fatalf("err = %v, want ErrTeamBlueprintTemplateMissing", err)
 	}
 }
 
-// TestRenderBlueprintWiresCodexConfigVerbatim confirms the codex
-// sandbox/approval knobs land in the substitution dict verbatim — covers
-// the AC's "codex sandbox/approval knobs" wiring path.
-func TestRenderBlueprintWiresCodexConfigVerbatim(t *testing.T) {
+// TestRenderBlueprintResolvesTemplateRelativeToHarnessDir confirms the
+// bare-filename form (the agents repo's canonical layout: harness.yaml +
+// blueprint.tmpl.yaml as siblings under harnesses/<name>/) resolves under
+// the harness dir rather than the cache root. Regression guard for the
+// path-resolution AC: a template that references `blueprint.tmpl.yaml`
+// (no leading `harnesses/<name>/` prefix) must still render.
+func TestRenderBlueprintResolvesTemplateRelativeToHarnessDir(t *testing.T) {
 	t.Parallel()
 	cacheDir := t.TempDir()
-	p := filepath.Join(cacheDir, "harnesses", "codex", "blueprint.tmpl.yaml")
-	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		t.Fatalf("mkdir: %v", err)
+	buildClaudeTemplate(t, cacheDir)
+	// Deliberately *no* harnesses/claude/blueprint.tmpl.yaml at cache root —
+	// the file lives at <cacheDir>/harnesses/claude/blueprint.tmpl.yaml and
+	// Spec.Template names the bare sibling.
+	h := &model.Harness{Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}}
+	image := &model.ImageCatalogEntry{
+		Ref:          "claude-base",
+		Harness:      "claude",
+		Image:        "registry.local/claude:latest",
+		Capabilities: []string{"go", "git"},
 	}
-	body := `apiVersion: v1beta1
+	bp, err := RenderBlueprint(
+		cacheDir, h, minimalRole(), "claude", "dev",
+		[]string{"git", "go"}, image, nil, "sbsh", "default", false, "",
+	)
+	if err != nil {
+		t.Fatalf("RenderBlueprint with bare-filename template: %v", err)
+	}
+	if bp.Spec.Cell.Containers[0].Image != "registry.local/claude:latest" {
+		t.Errorf("image = %q, want resolved-via-harness-dir image",
+			bp.Spec.Cell.Containers[0].Image)
+	}
+}
+
+// TestRenderBlueprintLoadsSiblingPartials covers AC: a blueprint that calls
+// `{{ template "mount_source" . }}` against a sibling partial that defines
+// it renders successfully. The renderer must pick up every *.tmpl.yaml in
+// the same dir as the resolved template.
+func TestRenderBlueprintLoadsSiblingPartials(t *testing.T) {
+	t.Parallel()
+	cacheDir := t.TempDir()
+	mainBody := `apiVersion: v1beta1
 kind: CellBlueprint
 metadata:
-  name: ${ROLE}-${HARNESS}
+  name: {{ .role.name }}-{{ .harness }}
 spec:
   cell:
     containers:
-      - id: ${ROLE}
-        image: ${IMAGE}
+      - id: {{ .role.name }}
+        image: {{ .image }}
         env:
-          - "SANDBOX=${SANDBOX}"
-          - "APPROVAL=${APPROVAL}"
+          - "MOUNT_SOURCE={{ template "mount_source" .role.name }}"
 `
-	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
-		t.Fatalf("write: %v", err)
+	partialBody := `{{- define "mount_source" -}}
+/srv/{{ . | upper | replace "-" "_" }}
+{{- end -}}
+`
+	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml", mainBody)
+	writeHarnessFile(t, cacheDir, "claude", "partials.tmpl.yaml", partialBody)
+
+	h := &model.Harness{Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}}
+	image := &model.ImageCatalogEntry{Image: "registry.local/claude:latest"}
+	bp, err := RenderBlueprint(
+		cacheDir, h, minimalRole(), "claude", "my-dev",
+		[]string{"go"}, image, nil, "sbsh", "default", false, "",
+	)
+	if err != nil {
+		t.Fatalf("RenderBlueprint with sibling partials: %v", err)
 	}
+	wantEnv := []string{"MOUNT_SOURCE=/srv/MY_DEV"}
+	if !reflect.DeepEqual(bp.Spec.Cell.Containers[0].Env, wantEnv) {
+		t.Errorf("env = %v, want %v (partial + upper/replace funcs)",
+			bp.Spec.Cell.Containers[0].Env, wantEnv)
+	}
+}
+
+// TestRenderBlueprintNeedsAndOperatorContext covers the AC's fixture-template
+// requirement: `{{ range .needs.repos }}` and `{{ .operator.GIT_USER_NAME }}`
+// round-trip to a valid CellBlueprint. Both keys are wired by #1110 — the
+// renderer must iterate role.yaml's needs.repos and expose
+// tc.Spec.Git.Author.Name under .operator.GIT_USER_NAME.
+func TestRenderBlueprintNeedsAndOperatorContext(t *testing.T) {
+	t.Parallel()
+	cacheDir := t.TempDir()
+	body := `apiVersion: v1beta1
+kind: CellBlueprint
+metadata:
+  name: {{ .role.name }}-{{ .harness }}
+  labels:
+    kukeon.io/operator: {{ .operator.GIT_USER_NAME }}
+spec:
+  cell:
+    containers:
+      - id: {{ .role.name }}
+        image: {{ .image }}
+        repos:
+{{- range .needs.repos }}
+          - { name: {{ . }}, target: /src/{{ . }} }
+{{- end }}
+`
+	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml", body)
+
+	h := &model.Harness{Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}}
+	image := &model.ImageCatalogEntry{Image: "registry.local/claude:latest"}
+	tc := &model.TeamsConfig{Spec: model.TeamsConfigSpec{
+		Git: &model.TeamsConfigGit{
+			ContainerGit: v1beta1.ContainerGit{
+				Author: &v1beta1.GitIdentity{Name: "Operator Name", Email: "op@example.com"},
+			},
+		},
+	}}
+	bp, err := RenderBlueprint(
+		cacheDir, h, minimalRole(), "claude", "dev",
+		[]string{"go"}, image, tc, "sbsh", "default", false, "",
+	)
+	if err != nil {
+		t.Fatalf("RenderBlueprint: %v", err)
+	}
+	if got := bp.Metadata.Labels["kukeon.io/operator"]; got != "Operator Name" {
+		t.Errorf("operator label = %q, want %q", got, "Operator Name")
+	}
+	c := bp.Spec.Cell.Containers[0]
+	if len(c.Repos) != 2 {
+		t.Fatalf("repos = %d, want 2 (one per .needs.repos entry)", len(c.Repos))
+	}
+	wantRepos := map[string]string{"project": "/src/project", "agents": "/src/agents"}
+	for _, repo := range c.Repos {
+		want, ok := wantRepos[repo.Name]
+		if !ok {
+			t.Errorf("unexpected repo: %+v", repo)
+			continue
+		}
+		if repo.Target != want {
+			t.Errorf("repo %q target = %q, want %q", repo.Name, repo.Target, want)
+		}
+	}
+}
+
+// TestRenderBlueprintRunsUpperReplaceFuncs covers AC: `upper` and `replace`
+// template functions are wired and compose cleanly via the sprig-style pipe
+// idiom (`{{ . | upper | replace "-" "_" }}`).
+func TestRenderBlueprintRunsUpperReplaceFuncs(t *testing.T) {
+	t.Parallel()
+	cacheDir := t.TempDir()
+	body := `apiVersion: v1beta1
+kind: CellBlueprint
+metadata:
+  name: {{ .role.name }}-{{ .harness }}
+spec:
+  cell:
+    containers:
+      - id: {{ .role.name }}
+        image: {{ .image }}
+        env:
+          - "ENV_NAME={{ .role.name | upper | replace "-" "_" }}"
+`
+	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml", body)
+
+	h := &model.Harness{Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}}
+	image := &model.ImageCatalogEntry{Image: "x"}
+	bp, err := RenderBlueprint(
+		cacheDir, h, minimalRole(), "claude", "pr-reviewer",
+		nil, image, nil, "sbsh", "default", false, "",
+	)
+	if err != nil {
+		t.Fatalf("RenderBlueprint: %v", err)
+	}
+	wantEnv := []string{"ENV_NAME=PR_REVIEWER"}
+	if !reflect.DeepEqual(bp.Spec.Cell.Containers[0].Env, wantEnv) {
+		t.Errorf("env = %v, want %v", bp.Spec.Cell.Containers[0].Env, wantEnv)
+	}
+}
+
+// TestRenderBlueprintWiresCodexConfigVerbatim confirms the codex
+// sandbox/approval knobs land in the dot-context verbatim — covers the AC's
+// "codex sandbox/approval knobs" wiring path.
+func TestRenderBlueprintWiresCodexConfigVerbatim(t *testing.T) {
+	t.Parallel()
+	cacheDir := t.TempDir()
+	body := `apiVersion: v1beta1
+kind: CellBlueprint
+metadata:
+  name: {{ .role.name }}-{{ .harness }}
+spec:
+  cell:
+    containers:
+      - id: {{ .role.name }}
+        image: {{ .image }}
+        env:
+          - "SANDBOX={{ (index .harnesses .harness).sandbox }}"
+          - "APPROVAL={{ (index .harnesses .harness).approval }}"
+`
+	writeHarnessFile(t, cacheDir, "codex", "blueprint.tmpl.yaml", body)
 	r := minimalRole()
-	h := &model.Harness{Spec: model.HarnessSpec{Template: "harnesses/codex/blueprint.tmpl.yaml"}}
+	h := &model.Harness{Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}}
 	image := &model.ImageCatalogEntry{Image: "registry.local/codex:latest"}
-	bp, err := RenderBlueprint(cacheDir, h, r, "codex", "dev", nil, image, "sbsh", "default", false, "")
+	bp, err := RenderBlueprint(cacheDir, h, r, "codex", "dev", nil, image, nil, "sbsh", "default", false, "")
 	if err != nil {
 		t.Fatalf("RenderBlueprint: %v", err)
 	}
@@ -559,16 +740,15 @@ func TestRenderEndToEnd(t *testing.T) {
 	t.Parallel()
 	cacheDir := t.TempDir()
 	buildClaudeTemplate(t, cacheDir)
-	// Codex template — minimal.
-	codexPath := filepath.Join(cacheDir, "harnesses", "codex", "blueprint.tmpl.yaml")
-	if err := os.MkdirAll(filepath.Dir(codexPath), 0o700); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(codexPath, []byte(
-		"apiVersion: v1beta1\nkind: CellBlueprint\nmetadata: { name: \"${ROLE}-${HARNESS}\" }\nspec:\n  cell:\n    containers:\n      - { id: \"${ROLE}\", image: \"${IMAGE}\" }\n",
-	), 0o600); err != nil {
-		t.Fatalf("write: %v", err)
-	}
+	// Codex template — minimal, mirrors the published agents-side text/template
+	// shape (sibling of harness.yaml, dot-context references).
+	writeHarnessFile(
+		t,
+		cacheDir,
+		"codex",
+		"blueprint.tmpl.yaml",
+		"apiVersion: v1beta1\nkind: CellBlueprint\nmetadata: { name: \"{{ .role.name }}-{{ .harness }}\" }\nspec:\n  cell:\n    containers:\n      - { id: \"{{ .role.name }}\", image: \"{{ .image }}\" }\n",
+	)
 	bundle := &teamsource.Bundle{
 		Source: teamsource.Source{
 			Repo:      "github.com/eminwux/agents",
@@ -580,8 +760,8 @@ func TestRenderEndToEnd(t *testing.T) {
 		CacheDir: cacheDir,
 		Roles:    map[string]*model.Role{"dev": minimalRole()},
 		Harnesses: map[string]*model.Harness{
-			"claude": {Spec: model.HarnessSpec{Template: "harnesses/claude/blueprint.tmpl.yaml"}},
-			"codex":  {Spec: model.HarnessSpec{Template: "harnesses/codex/blueprint.tmpl.yaml"}},
+			"claude": {Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}},
+			"codex":  {Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}},
 		},
 		ImageCatalog: &model.ImageCatalog{
 			Spec: model.ImageCatalogSpec{
@@ -650,7 +830,7 @@ func TestRenderProjectPerRoleNeedsOverrideUnions(t *testing.T) {
 		CacheDir: cacheDir,
 		Roles:    map[string]*model.Role{"dev": role},
 		Harnesses: map[string]*model.Harness{
-			"claude": {Spec: model.HarnessSpec{Template: "harnesses/claude/blueprint.tmpl.yaml"}},
+			"claude": {Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}},
 		},
 		ImageCatalog: &model.ImageCatalog{Spec: model.ImageCatalogSpec{Images: []model.ImageCatalogEntry{
 			// First image has only go+git — should NOT satisfy go+git+rust merged needs.
@@ -770,7 +950,7 @@ func TestRenderDefaultRealmFallback(t *testing.T) {
 		CacheDir: cacheDir,
 		Roles:    map[string]*model.Role{"dev": minimalRole()},
 		Harnesses: map[string]*model.Harness{
-			"claude": {Spec: model.HarnessSpec{Template: "harnesses/claude/blueprint.tmpl.yaml"}},
+			"claude": {Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}},
 		},
 		ImageCatalog: minimalClaudeCatalog("go", "git"),
 	}
