@@ -713,11 +713,19 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 	// reset to the zero value on every pull. Issue #1137.
 	priorStartTime := make(map[string]time.Time, len(cell.Status.Containers))
 	priorFinishTime := make(map[string]time.Time, len(cell.Status.Containers))
+	// Snapshot prior ExitCode under the same contract as FinishTime: once a
+	// Stopped task's record is reaped, the ErrTaskNotFound -> Stopped branch
+	// reports a zero ExitCode/ExitTime, so a preserved FinishTime would otherwise
+	// pair with a reset ExitCode/ExitSignal (a SIGKILLed container showing
+	// FinishTime=T with exit code 0 / no signal — a self-contradictory status).
+	// Preserving ExitCode in lockstep keeps the exit triple consistent. Issue #1137.
+	priorExitCode := make(map[string]int, len(cell.Status.Containers))
 	for _, prev := range cell.Status.Containers {
 		priorStages[prev.ID] = prev.Stages
 		priorCreatedAt[prev.ID] = prev.CreatedAt
 		priorStartTime[prev.ID] = prev.StartTime
 		priorFinishTime[prev.ID] = prev.FinishTime
+		priorExitCode[prev.ID] = prev.ExitCode
 	}
 
 	statuses := make([]intmodel.ContainerStatus, 0, len(cell.Spec.Containers))
@@ -756,17 +764,24 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 			startTime = now
 		}
 
-		// FinishTime: the wall-clock time containerd recorded the task's death
-		// (obs.ExitTime, non-zero only once Stopped). Cleared when the container
-		// is Ready again (a running task has not finished); preserved across
-		// transient NotCreated/Unknown observations that would otherwise lose
-		// the reaped task's exit time. Issue #1137.
+		// FinishTime / ExitCode move in lockstep: the wall-clock time containerd
+		// recorded the task's death (obs.ExitTime, non-zero only once Stopped) and
+		// the matching exit code. Both are cleared when the container is Ready
+		// again (a running task has not finished and has no meaningful exit code);
+		// both are refreshed only on a genuine exit observation (non-zero ExitTime,
+		// i.e. the TaskStatus-success Stopped branch); otherwise both are preserved
+		// across transient NotCreated/Unknown/reaped-task observations. Preserving
+		// ExitCode here — not re-reading the obs value below — is what keeps a
+		// reaped SIGKILL from showing FinishTime=T with exit code 0. Issue #1137.
 		finishTime := priorFinishTime[containerSpec.ID]
+		exitCode := priorExitCode[containerSpec.ID]
 		switch {
 		case obs.State == intmodel.ContainerStateReady:
 			finishTime = time.Time{}
+			exitCode = 0
 		case !obs.ExitTime.IsZero():
 			finishTime = obs.ExitTime
+			exitCode = obs.ExitCode
 		}
 
 		// RestartCount/RestartTime require restart bookkeeping the runner does
@@ -781,8 +796,8 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 			RestartTime:  time.Time{}, // TODO(#1146): restart bookkeeping
 			StartTime:    startTime,
 			FinishTime:   finishTime,
-			ExitCode:     obs.ExitCode,
-			ExitSignal:   exitSignalName(obs.ExitCode),
+			ExitCode:     exitCode,
+			ExitSignal:   exitSignalName(exitCode),
 		}
 		// Pull per-repo clone/fetch and per-create-stage outcomes over the
 		// kuketty control socket (issues #642, #689) in a single dial.

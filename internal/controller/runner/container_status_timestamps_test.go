@@ -20,10 +20,13 @@
 package runner
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 )
 
@@ -117,5 +120,71 @@ func TestGetContainerObservation_ZeroExitTimeOnRunningTask(t *testing.T) {
 	}
 	if !obs.ExitTime.IsZero() {
 		t.Errorf("GetContainerObservation ExitTime = %v, want zero on a Running task", obs.ExitTime)
+	}
+}
+
+// TestPopulateCellContainerStatuses_PreservesExitInfoAcrossReap is the
+// kill->reap consistency guard (issue #1137): in the normal lifecycle a
+// SIGKILLed task is first observed Stopped with ExitStatus=137/ExitTime=T,
+// then — once containerd reaps the task record — the ErrTaskNotFound -> Stopped
+// branch reports a zero ExitCode/ExitTime while the container record survives.
+// FinishTime, ExitCode and ExitSignal must all be preserved in lockstep across
+// that reap; without the ExitCode preservation the status self-contradicts,
+// showing FinishTime=T with exit code 0 / no signal.
+func TestPopulateCellContainerStatuses_PreservesExitInfoAcrossReap(t *testing.T) {
+	realm, space, stack, cellName := "default", "kukeon", "kukeon", "web"
+	containerID, containerdID := "root", "kukeon_kukeon_web_root"
+
+	exitTime := time.Date(2026, 6, 7, 20, 35, 4, 0, time.UTC)
+
+	// Pull 1 reports the freshly-Stopped task with its exit info; pull 2 reports
+	// the same container with its task record reaped (ErrTaskNotFound -> Stopped,
+	// zero ExitCode/ExitTime).
+	pull := 0
+	fake := &deleteCellFakeClient{
+		existsContainerFn: func(_, _ string) (bool, error) { return true, nil },
+		taskStatusFn: func(_, _ string) (containerd.Status, error) {
+			pull++
+			if pull == 1 {
+				return containerd.Status{Status: containerd.Stopped, ExitStatus: 137, ExitTime: exitTime}, nil
+			}
+			return containerd.Status{}, fmt.Errorf("%w: %w", errdefs.ErrTaskNotFound, errors.New("task: not found"))
+		},
+	}
+	r := newDeleteCellTestExec(t, fake)
+	seedDeleteCellRealm(t, r, realm)
+
+	cell := containerStateCell(realm, space, stack, cellName, containerID, containerdID)
+
+	// Pull 1: Stopped with exit info — the exit triple is stamped from the obs.
+	if err := r.populateCellContainerStatuses(&cell); err != nil {
+		t.Fatalf("populateCellContainerStatuses (pull 1): unexpected error: %v", err)
+	}
+	if len(cell.Status.Containers) != 1 {
+		t.Fatalf("pull 1: got %d container statuses, want 1", len(cell.Status.Containers))
+	}
+	got := cell.Status.Containers[0]
+	if !got.FinishTime.Equal(exitTime) || got.ExitCode != 137 || got.ExitSignal != "SIGKILL" {
+		t.Fatalf("pull 1: FinishTime=%v ExitCode=%d ExitSignal=%q, want %v/137/SIGKILL",
+			got.FinishTime, got.ExitCode, got.ExitSignal, exitTime)
+	}
+
+	// Pull 2: task record reaped — FinishTime/ExitCode/ExitSignal must all
+	// survive rather than reset to T/0/"" (the self-contradictory status).
+	if err := r.populateCellContainerStatuses(&cell); err != nil {
+		t.Fatalf("populateCellContainerStatuses (pull 2): unexpected error: %v", err)
+	}
+	got = cell.Status.Containers[0]
+	if got.State != intmodel.ContainerStateStopped {
+		t.Errorf("pull 2: State = %v, want Stopped", got.State)
+	}
+	if !got.FinishTime.Equal(exitTime) {
+		t.Errorf("pull 2: FinishTime = %v, want preserved %v across the reap", got.FinishTime, exitTime)
+	}
+	if got.ExitCode != 137 {
+		t.Errorf("pull 2: ExitCode = %d, want preserved 137 across the reap (a reset 0 would contradict FinishTime=%v)", got.ExitCode, exitTime)
+	}
+	if got.ExitSignal != "SIGKILL" {
+		t.Errorf("pull 2: ExitSignal = %q, want preserved SIGKILL across the reap", got.ExitSignal)
 	}
 }
