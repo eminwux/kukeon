@@ -520,6 +520,75 @@ func TestComposeTeamRendersOnNonDryRun(t *testing.T) {
 	}
 }
 
+// TestComposeTeamApplyTotalFailureExitsNonZeroSkipsEntry confirms that when
+// every applied document comes back `failed`, composeTeam exits non-zero
+// (ErrTeamApplyFailed) and does not persist the drop-in entry for a team with
+// zero applied objects (#1123).
+func TestComposeTeamApplyTotalFailureExitsNonZeroSkipsEntry(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+
+	var (
+		mu    sync.Mutex
+		calls []applyCall
+	)
+	allFailed := kukeonv1.ApplyDocumentsResult{Resources: []kukeonv1.ApplyResourceResult{
+		{Index: 0, Kind: "CellBlueprint", Name: "dev-claude", Action: "failed", Error: "scope does not exist"},
+		{Index: 1, Kind: "CellConfig", Name: "dev-claude", Action: "failed", Error: "scope does not exist"},
+	}}
+	var out bytes.Buffer
+	err := composeTeam(
+		context.Background(), &out, io.Discard, projectDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
+		stubBundle(bundle),
+		recordingApply(&mu, &calls, allFailed), stubBuildErr(), false, false,
+	)
+	if !errors.Is(err, errdefs.ErrTeamApplyFailed) {
+		t.Fatalf("err = %v, want ErrTeamApplyFailed", err)
+	}
+	if _, statErr := os.Stat(layout.EntryPath("sbsh")); statErr == nil {
+		t.Errorf("entry must not be written when every document failed")
+	}
+	if strings.Contains(out.String(), "wrote team") {
+		t.Errorf("must not print entry-write line on total failure: %q", out.String())
+	}
+}
+
+// TestComposeTeamApplyPartialFailureExitsNonZeroWritesEntry confirms that a
+// partial apply (some documents succeed, some fail) still persists the entry —
+// the team partially exists — but exits non-zero so a scripted init detects
+// the gap (#1123).
+func TestComposeTeamApplyPartialFailureExitsNonZeroWritesEntry(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+
+	var (
+		mu    sync.Mutex
+		calls []applyCall
+	)
+	partial := kukeonv1.ApplyDocumentsResult{Resources: []kukeonv1.ApplyResourceResult{
+		{Index: 0, Kind: "CellBlueprint", Name: "dev-claude", Action: "created"},
+		{Index: 1, Kind: "CellConfig", Name: "dev-claude", Action: "failed", Error: "scope does not exist"},
+	}}
+	var out bytes.Buffer
+	err := composeTeam(
+		context.Background(), &out, io.Discard, projectDir, layout,
+		stubGit(nil), stubProjectURL("git@github.com:eminwux/sbsh.git"),
+		stubBundle(bundle),
+		recordingApply(&mu, &calls, partial), stubBuildErr(), false, false,
+	)
+	if !errors.Is(err, errdefs.ErrTeamApplyFailed) {
+		t.Fatalf("err = %v, want ErrTeamApplyFailed", err)
+	}
+	if _, statErr := os.Stat(layout.EntryPath("sbsh")); statErr != nil {
+		t.Errorf("entry should be written on partial apply: %v", statErr)
+	}
+}
+
 // TestComposeTeamImageSelectHardError confirms a missing capability hits
 // the operator-actionable error path with the unmet capability named.
 func TestComposeTeamImageSelectHardError(t *testing.T) {

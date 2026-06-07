@@ -594,9 +594,26 @@ func templateFuncs() template.FuncMap {
 // `{{ define "name" }}…{{ end }}` block defined in any sibling without
 // the renderer owning a partials directory layout of its own.
 func parseBlueprintTemplate(tplPath string, raw []byte) (*template.Template, error) {
+	return parseBlueprintTemplateBody(tplPath, raw, nil)
+}
+
+// parseBlueprintTemplateBody is parseBlueprintTemplate with an optional
+// pre-parse transform applied to the main body and to every sibling partial
+// before each is handed to text/template. A nil transform is identity — the
+// render path (RenderBlueprint) uses it so the generated YAML keeps its
+// documentation comments verbatim. The validate path passes stripYAMLComments
+// so a `{{ ... }}` action a template *documents* inside a YAML `#` comment is
+// dropped before the parser turns it into a live FieldNode / TemplateNode that
+// validateFacts / validatePartials would flag as a spurious gap (#1123).
+func parseBlueprintTemplateBody(
+	tplPath string, raw []byte, transform func([]byte) []byte,
+) (*template.Template, error) {
+	if transform == nil {
+		transform = func(b []byte) []byte { return b }
+	}
 	mainName := filepath.Base(tplPath)
 	tpl := template.New(mainName).Funcs(templateFuncs())
-	if _, err := tpl.Parse(string(raw)); err != nil {
+	if _, err := tpl.Parse(string(transform(raw))); err != nil {
 		return nil, fmt.Errorf("parse blueprint template %q: %w", tplPath, err)
 	}
 
@@ -617,7 +634,7 @@ func parseBlueprintTemplate(tplPath string, raw []byte) (*template.Template, err
 		if readErr != nil {
 			return nil, fmt.Errorf("read partial %q: %w", sib, readErr)
 		}
-		if _, parseErr := tpl.New(filepath.Base(sib)).Parse(string(sibRaw)); parseErr != nil {
+		if _, parseErr := tpl.New(filepath.Base(sib)).Parse(string(transform(sibRaw))); parseErr != nil {
 			return nil, fmt.Errorf("parse partial %q: %w", sib, parseErr)
 		}
 	}

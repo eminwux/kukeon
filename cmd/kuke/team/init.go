@@ -335,28 +335,58 @@ func composeTeam(
 		return err
 	}
 
-	source := pt.Spec.Source
-	entry := &model.TeamEntry{
-		APIVersion: model.APIVersionV1,
-		Kind:       model.KindTeamEntry,
-		Metadata:   model.Metadata{Name: project},
-		Spec: model.TeamEntrySpec{
-			Path:    projectDir,
-			TeamDir: teamDir,
-			Source:  &source,
-		},
+	// Per-document apply failures do not surface as a non-nil err — apply only
+	// errors when the RPC itself fails; a blueprint whose scope does not exist
+	// lands as a `failed` action in the result instead. Count them so a
+	// scripted/CI `kuke team init` exits non-zero on any failure, and so a
+	// *total* failure (every applied document failed, nothing landed) skips the
+	// drop-in entry write — persisting an entry for a team with zero applied
+	// objects misleads later `kuke team` reads (#1123). A partial failure still
+	// writes the entry (the team partially exists) but exits non-zero.
+	failed := failedResourceCount(applyResult)
+	totalFailure := applied && failed > 0 && failed == len(applyResult.Resources)
+
+	if !totalFailure {
+		source := pt.Spec.Source
+		entry := &model.TeamEntry{
+			APIVersion: model.APIVersionV1,
+			Kind:       model.KindTeamEntry,
+			Metadata:   model.Metadata{Name: project},
+			Spec: model.TeamEntrySpec{
+				Path:    projectDir,
+				TeamDir: teamDir,
+				Source:  &source,
+			},
+		}
+		if writeErr := teamhost.WriteEntry(layout, entry); writeErr != nil {
+			return fmt.Errorf("write team entry: %w", writeErr)
+		}
+		fmt.Fprintf(out, "wrote team %q to %s\n", project, layout.EntryPath(project))
 	}
-	if writeErr := teamhost.WriteEntry(layout, entry); writeErr != nil {
-		return fmt.Errorf("write team entry: %w", writeErr)
-	}
-	fmt.Fprintf(out, "wrote team %q to %s\n", project, layout.EntryPath(project))
 	if applied {
 		emitApplySummary(out, project, applyResult, len(res.Secrets), len(res.Blueprints), len(res.Configs))
 	} else {
 		fmt.Fprintf(out, "rendered %d secret/%d blueprint/%d config object(s) (no apply: no (role × harness) pairs)\n",
 			len(res.Secrets), len(res.Blueprints), len(res.Configs))
 	}
+	if failed > 0 {
+		return fmt.Errorf("%w (%d of %d documents failed)", errdefs.ErrTeamApplyFailed, failed, len(applyResult.Resources))
+	}
 	return nil
+}
+
+// failedResourceCount returns the number of apply documents that came back with
+// a `failed` action. applyTeam's returned error covers transport/RPC failures;
+// a per-document failure (an unresolvable blueprint scope, say) lands here
+// instead, so `kuke team init` inspects the result to detect it.
+func failedResourceCount(result kukeonv1.ApplyDocumentsResult) int {
+	n := 0
+	for _, r := range result.Resources {
+		if r.Action == "failed" {
+			n++
+		}
+	}
+	return n
 }
 
 // resolveTeamDir returns the per-team host-state root for `project`. The

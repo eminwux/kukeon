@@ -702,4 +702,12 @@ var (
 	ErrTeamValidateGaps = errors.New(
 		"team validate found one or more contract gaps",
 	)
+	// ErrTeamApplyFailed fires when `kuke team init` applies its rendered
+	// secret/blueprint/config set and one or more documents come back with a
+	// `failed` action. The per-document failures are printed to stdout; this
+	// sentinel drives the non-zero exit a scripted/CI init relies on to detect
+	// a partial or total apply failure.
+	ErrTeamApplyFailed = errors.New(
+		"team init: one or more documents failed to apply",
+	)
 )
