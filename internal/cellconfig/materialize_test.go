@@ -461,3 +461,47 @@ func TestMaterializeWithName_StampsConfigProvenance(t *testing.T) {
 		t.Errorf("params[TAG]=%q want v2", got)
 	}
 }
+
+// TestMaterialize_ToleratesUndeclaredValues is the #1124 end-to-end
+// regression: a team-rendered CellConfig carries operator facts (ROLE, GIT_*,
+// HARNESS, PROJECT) that the blueprint never declares as spec.parameters[].
+// Before the fix the first undeclared key aborted materialization with
+// ErrBlueprintInvalid, making every team-init config un-instantiable. The
+// Config channel now resolves leniently: undeclared keys are tolerated, the
+// declared param still substitutes, and an undeclared ${ROLE} the body
+// references resolves rather than surviving literal.
+func TestMaterialize_ToleratesUndeclaredValues(t *testing.T) {
+	bp := minimalBlueprint()
+	// Drop the structural slots so this test isolates the values channel.
+	bp.Spec.Cell.Containers[0].Repos = nil
+	bp.Spec.Cell.Containers[0].Secrets = nil
+	bp.Spec.Cell.Containers[0].WorkingDir = "/work/${ROLE}"
+
+	cfg := v1beta1.CellConfigDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindCellConfig,
+		Metadata:   v1beta1.CellConfigMetadata{Name: "dev-claude", Realm: "cfg-realm"},
+		Spec: v1beta1.CellConfigSpec{
+			Blueprint: v1beta1.CellConfigBlueprintRef{Name: "web", Realm: "bp-realm"},
+			Values: map[string]string{
+				"TAG":                 "v2",
+				"ROLE":                "dev",
+				"HARNESS":             "claude",
+				"PROJECT":             "kukeon",
+				"GIT_ALLOWED_SIGNERS": "/keys/allowed_signers",
+			},
+		},
+	}
+
+	cell, err := MaterializeWithName(cfg, bp, "dev-claude")
+	if err != nil {
+		t.Fatalf("MaterializeWithName: %v (undeclared values must not abort the Config channel)", err)
+	}
+	c := cell.Spec.Containers[0]
+	if c.Image != "registry.example.com/web:v2" {
+		t.Errorf("image=%q want declared ${TAG} substituted to v2", c.Image)
+	}
+	if c.WorkingDir != "/work/dev" {
+		t.Errorf("workingDir=%q want undeclared ${ROLE} substituted to dev", c.WorkingDir)
+	}
+}
