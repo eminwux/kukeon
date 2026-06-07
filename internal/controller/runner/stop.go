@@ -91,7 +91,7 @@ func (r *Exec) stopCellLocked(cell intmodel.Cell) (intmodel.Cell, error) {
 		stackName = specStack
 	}
 
-	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmName, spaceName)
+	cniConfigPath, cniErr := r.ResolveSpaceCNIConfigPath(realmName, spaceName)
 	if cniErr != nil {
 		return intmodel.Cell{}, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}

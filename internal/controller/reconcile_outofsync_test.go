@@ -82,6 +82,17 @@ func stubLineageRunner(
 			// against the same cell the harness fed in.
 			return c, runner.ReconcileOutcome{}, nil
 		},
+		// materializeCellFromConfig now reproduces the runner-injected
+		// space-derived container fields (#1136). The sample cell carries no
+		// container defaults and an empty cniConfigPath, so the defaults below
+		// are no-ops that keep the materialized "desired" byte-identical to the
+		// materialized "live" sample cell; divergence tests override them.
+		GetSpaceFn: func(s intmodel.Space) (intmodel.Space, error) {
+			return s, nil
+		},
+		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) {
+			return "", nil
+		},
 		ListRealmsFn: func() ([]intmodel.Realm, error) {
 			return []intmodel.Realm{buildTestRealm("kuke-system", "")}, nil
 		},
@@ -242,6 +253,73 @@ func TestReconcileCells_OutOfSync_MatchingCellStaysSynced(t *testing.T) {
 	}
 	if res.CellsErrored != 0 || len(res.Errors) != 0 {
 		t.Errorf("synced pass surfaced errors: %+v", res)
+	}
+}
+
+// TestReconcileCells_OutOfSync_RunnerInjectedContainerFieldsStaySynced pins
+// the #1136 fix: the runner bakes a space/runtime-derived cniConfigPath — and,
+// when the space declares them, container defaults (user, …) — onto every
+// persisted container spec at create/start, but cellconfig.MaterializeWithName
+// reproduces neither. Before the fix apply.DiffCell saw `"" != "/opt/.../
+// network.conflist"` (and the analogous space-default mismatch) and the cell
+// stuck on a permanent spurious OutOfSync. The detector now re-applies both
+// classes against the cell's space, so a cell that has only the runner-injected
+// fields stays Synced and skips the metadata write.
+func TestReconcileCells_OutOfSync_RunnerInjectedContainerFieldsStaySynced(t *testing.T) {
+	live := materializeSampleCell(t)
+	if len(live.Spec.Containers) == 0 {
+		t.Fatalf("test fixture has no containers — sampleConfig/sampleReferencedBlueprint changed?")
+	}
+
+	const cniPath = "/opt/kukeon/data/default/default/network.conflist"
+	const spaceDefaultUser = "1000:1000"
+	// Mimic provision.go: bake the space-derived cniConfigPath plus a space
+	// container default onto every non-root container. The root container is
+	// runner-synthesized and skipped by DiffCell, so it is left alone.
+	for i := range live.Spec.Containers {
+		if live.Spec.Containers[i].Root {
+			continue
+		}
+		live.Spec.Containers[i].CNIConfigPath = cniPath
+		live.Spec.Containers[i].User = spaceDefaultUser
+	}
+
+	var updateCalls atomic.Int32
+	mock := stubLineageRunner(
+		func(intmodel.CellConfig) (intmodel.CellConfig, error) {
+			return configCarrier(t, sampleConfig()), nil
+		},
+		func(intmodel.CellBlueprint) (intmodel.CellBlueprint, error) {
+			return blueprintCarrier(t, sampleReferencedBlueprint()), nil
+		},
+		func(intmodel.Cell) error {
+			updateCalls.Add(1)
+			return nil
+		},
+	)
+	// Reproduce what the runner resolved at create time: the same cniConfigPath
+	// and the same space container default. The re-materialized desired must
+	// then match the live cell.
+	mock.ResolveSpaceCNIConfigPathFn = func(string, string) (string, error) {
+		return cniPath, nil
+	}
+	mock.GetSpaceFn = func(s intmodel.Space) (intmodel.Space, error) {
+		s.Spec.Defaults = &intmodel.SpaceDefaults{
+			Container: &intmodel.SpaceContainerDefaults{User: spaceDefaultUser},
+		}
+		return s, nil
+	}
+
+	res, _ := runOutOfSyncHarness(t, live, mock)
+
+	if got := updateCalls.Load(); got != 0 {
+		t.Errorf("UpdateCellMetadata calls: got %d, want 0 (runner-injected container fields must not produce spurious OutOfSync)", got)
+	}
+	if res.CellsUpdated != 0 {
+		t.Errorf("CellsUpdated: got %d, want 0", res.CellsUpdated)
+	}
+	if res.CellsErrored != 0 || len(res.Errors) != 0 {
+		t.Errorf("runner-injected-field pass surfaced errors: %+v", res)
 	}
 }
 

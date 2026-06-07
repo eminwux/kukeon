@@ -255,7 +255,63 @@ func materializeCellFromConfig(
 	if convErr != nil {
 		return intmodel.Cell{}, fmt.Errorf("convert materialized cell: %w", convErr)
 	}
+
+	// Reproduce the runner-injected, space-derived container fields the
+	// re-materialization does not, so apply.DiffCell does not report them as
+	// spurious drift (#1136).
+	if err := applyRunnerInjectedContainerFields(r, &desired); err != nil {
+		return intmodel.Cell{}, err
+	}
+
 	return desired, nil
+}
+
+// applyRunnerInjectedContainerFields re-applies the space-derived container
+// fields the runner bakes onto every persisted container spec at create/start
+// but cellconfig.MaterializeWithName (Config + Blueprint only) never
+// reproduces. Without this, apply.DiffCell flags those runner-injected values
+// as spurious drift and a Config-lineage cell sticks on a permanent OutOfSync
+// even though nothing actually changed (#1136). Two field classes are
+// reproduced, mirroring provision.go's create/start path:
+//
+//   - Space container defaults (user, readOnlyRootFilesystem, capabilities,
+//     securityOpts, tmpfs, resources) via ApplySpaceDefaultsToContainer — the
+//     same helper applyCellContainerDefaults funnels every create flow
+//     through. The `default` space declares no container defaults, so this is
+//     dormant today but closes the latent class the moment a space sets one.
+//   - The space/runtime-derived cniConfigPath, resolved by the same
+//     ResolveSpaceCNIConfigPath the runner uses, set only on containers that
+//     do not already carry an explicit one (mirroring the `if == ""` guard in
+//     provision.go). This is the field firing today.
+//
+// The cell's own realm/space drive the lookups, matching the scope the runner
+// resolved against at create time. A GetSpace / ResolveSpaceCNIConfigPath error
+// surfaces (via the caller) as an undecidable OutOfSync (OutOfSyncError), the
+// same class materialization errors already use; the runner-synthesized root
+// container is untouched because DiffCell skips it.
+func applyRunnerInjectedContainerFields(r runner.Runner, cell *intmodel.Cell) error {
+	realm, space := cell.Spec.RealmName, cell.Spec.SpaceName
+
+	parentSpace, err := r.GetSpace(intmodel.Space{
+		Metadata: intmodel.SpaceMetadata{Name: space},
+		Spec:     intmodel.SpaceSpec{RealmName: realm},
+	})
+	if err != nil {
+		return fmt.Errorf("resolve space %q defaults: %w", space, err)
+	}
+
+	cniConfigPath, err := r.ResolveSpaceCNIConfigPath(realm, space)
+	if err != nil {
+		return fmt.Errorf("resolve space %q cni config path: %w", space, err)
+	}
+
+	for i := range cell.Spec.Containers {
+		intmodel.ApplySpaceDefaultsToContainer(parentSpace, &cell.Spec.Containers[i])
+		if cell.Spec.Containers[i].CNIConfigPath == "" {
+			cell.Spec.Containers[i].CNIConfigPath = cniConfigPath
+		}
+	}
+	return nil
 }
 
 // outOfSyncSpecDifferReason renders the DiffCell verdict as a stable,

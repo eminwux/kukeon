@@ -101,7 +101,7 @@ func seedRecreateCellSpace(t *testing.T, r *Exec, realm, space string) {
 		APIVersion: v1beta1.APIVersionV1Beta1,
 		Kind:       v1beta1.KindSpace,
 		Metadata:   v1beta1.SpaceMetadata{Name: space},
-		// An explicit CNIConfigPath short-circuits resolveSpaceCNIConfigPath's
+		// An explicit CNIConfigPath short-circuits ResolveSpaceCNIConfigPath's
 		// default-path build; the path is never read because the root is
 		// host-network (CNI ADD is skipped).
 		Spec: v1beta1.SpaceSpec{RealmID: realm, CNIConfigPath: filepath.Join(t.TempDir(), "cni.conflist")},

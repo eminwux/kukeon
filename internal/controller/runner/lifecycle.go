@@ -138,7 +138,13 @@ func (r *Exec) killContainerTask(realmNamespace, containerID string) error {
 	return nil
 }
 
-func (r *Exec) resolveSpaceCNIConfigPath(realmID, spaceID string) (string, error) {
+// ResolveSpaceCNIConfigPath resolves the CNI conflist path the runner bakes
+// onto every container spec it provisions in the given realm/space: the
+// space's explicit spec.cniConfigPath when set, otherwise the conventional
+// per-space default under the run path. Exported so the OutOfSync detector's
+// re-materialization (reconcile_outofsync.go) can reproduce the same
+// runner-injected value and avoid a spurious drift (#1136).
+func (r *Exec) ResolveSpaceCNIConfigPath(realmID, spaceID string) (string, error) {
 	lookupSpace := intmodel.Space{
 		Metadata: intmodel.SpaceMetadata{
 			Name: spaceID,

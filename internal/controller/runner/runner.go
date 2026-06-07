@@ -67,6 +67,13 @@ type Runner interface {
 	EnsureSpace(space intmodel.Space) (intmodel.Space, error)
 	UpdateSpace(space intmodel.Space) (intmodel.Space, error)
 	ExistsSpaceCNIConfig(space intmodel.Space) (bool, error)
+	// ResolveSpaceCNIConfigPath resolves the CNI conflist path the runner
+	// bakes onto every container spec it provisions in the given realm/space
+	// (space spec.cniConfigPath when set, else the per-space default under the
+	// run path). Exported for the OutOfSync detector so its re-materialization
+	// reproduces the same runner-injected value rather than flagging it as
+	// spurious drift (#1136).
+	ResolveSpaceCNIConfigPath(realmName, spaceName string) (string, error)
 	DeleteSpace(space intmodel.Space) error
 
 	GetCell(cell intmodel.Cell) (intmodel.Cell, error)

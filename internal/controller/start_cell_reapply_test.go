@@ -191,6 +191,13 @@ func TestStartCell_OutOfSyncReapply_CompatibleAppliesInPlace(t *testing.T) {
 		},
 		ExistsCgroupFn:            func(_ any) (bool, error) { return true, nil },
 		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) { return true, nil },
+		// #1136: materializeCellFromConfig now reproduces the runner-injected
+		// space-derived container fields. The reapply fixtures' containers carry
+		// neither an explicit cniConfigPath nor space defaults, so these stubs
+		// return empties — keeping the materialised desired diff to the intended
+		// image/hostNetwork drift only.
+		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
 		GetConfigFn: func(c intmodel.CellConfig) (intmodel.CellConfig, error) {
 			if c.Metadata.Name != "prod" || c.Metadata.Realm != "test-realm" {
 				t.Errorf("GetConfig lookup = %+v, want name=prod realm=test-realm", c.Metadata)
@@ -274,6 +281,13 @@ func TestStartCell_OutOfSyncReapply_BreakingRecreates(t *testing.T) {
 		GetCellFn:                 func(_ intmodel.Cell) (intmodel.Cell, error) { return live, nil },
 		ExistsCgroupFn:            func(_ any) (bool, error) { return true, nil },
 		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) { return true, nil },
+		// #1136: materializeCellFromConfig now reproduces the runner-injected
+		// space-derived container fields. The reapply fixtures' containers carry
+		// neither an explicit cniConfigPath nor space defaults, so these stubs
+		// return empties — keeping the materialised desired diff to the intended
+		// image/hostNetwork drift only.
+		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
 		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
 			return reapplySampleCellConfig("test-realm", "test-space", "test-stack"), nil
 		},
@@ -358,6 +372,13 @@ func TestStartCell_OutOfSyncReapply_EnvOverridePreserved(t *testing.T) {
 		GetCellFn:                 func(_ intmodel.Cell) (intmodel.Cell, error) { return live, nil },
 		ExistsCgroupFn:            func(_ any) (bool, error) { return true, nil },
 		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) { return true, nil },
+		// #1136: materializeCellFromConfig now reproduces the runner-injected
+		// space-derived container fields. The reapply fixtures' containers carry
+		// neither an explicit cniConfigPath nor space defaults, so these stubs
+		// return empties — keeping the materialised desired diff to the intended
+		// image/hostNetwork drift only.
+		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
 		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
 			return reapplySampleCellConfig("test-realm", "test-space", "test-stack"), nil
 		},
@@ -425,6 +446,13 @@ func TestStartCell_OutOfSyncReapply_CompatibleUpdateErrorStillReady(t *testing.T
 		GetCellFn:                 func(_ intmodel.Cell) (intmodel.Cell, error) { return live, nil },
 		ExistsCgroupFn:            func(_ any) (bool, error) { return true, nil },
 		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) { return true, nil },
+		// #1136: materializeCellFromConfig now reproduces the runner-injected
+		// space-derived container fields. The reapply fixtures' containers carry
+		// neither an explicit cniConfigPath nor space defaults, so these stubs
+		// return empties — keeping the materialised desired diff to the intended
+		// image/hostNetwork drift only.
+		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
 		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
 			return reapplySampleCellConfig("test-realm", "test-space", "test-stack"), nil
 		},
@@ -472,6 +500,13 @@ func TestStartCell_OutOfSyncReapply_NoLineageLabelSkipsReapply(t *testing.T) {
 		GetCellFn:                 func(_ intmodel.Cell) (intmodel.Cell, error) { return live, nil },
 		ExistsCgroupFn:            func(_ any) (bool, error) { return true, nil },
 		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) { return true, nil },
+		// #1136: materializeCellFromConfig now reproduces the runner-injected
+		// space-derived container fields. The reapply fixtures' containers carry
+		// neither an explicit cniConfigPath nor space defaults, so these stubs
+		// return empties — keeping the materialised desired diff to the intended
+		// image/hostNetwork drift only.
+		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
 		RecreateCellFn: func(intmodel.Cell) (intmodel.Cell, error) {
 			recreateCalled = true
 			return intmodel.Cell{}, nil
@@ -506,6 +541,13 @@ func TestStartCell_OutOfSyncReapply_OutOfSyncErrorSkipsReapply(t *testing.T) {
 		GetCellFn:                 func(_ intmodel.Cell) (intmodel.Cell, error) { return live, nil },
 		ExistsCgroupFn:            func(_ any) (bool, error) { return true, nil },
 		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) { return true, nil },
+		// #1136: materializeCellFromConfig now reproduces the runner-injected
+		// space-derived container fields. The reapply fixtures' containers carry
+		// neither an explicit cniConfigPath nor space defaults, so these stubs
+		// return empties — keeping the materialised desired diff to the intended
+		// image/hostNetwork drift only.
+		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
 		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
 			getConfigCalled = true
 			return intmodel.CellConfig{}, nil
@@ -540,6 +582,13 @@ func TestStartCell_OutOfSyncReapply_OutOfSyncFalseSkipsReapply(t *testing.T) {
 		GetCellFn:                 func(_ intmodel.Cell) (intmodel.Cell, error) { return live, nil },
 		ExistsCgroupFn:            func(_ any) (bool, error) { return true, nil },
 		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) { return true, nil },
+		// #1136: materializeCellFromConfig now reproduces the runner-injected
+		// space-derived container fields. The reapply fixtures' containers carry
+		// neither an explicit cniConfigPath nor space defaults, so these stubs
+		// return empties — keeping the materialised desired diff to the intended
+		// image/hostNetwork drift only.
+		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
 		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
 			getConfigCalled = true
 			return intmodel.CellConfig{}, nil
@@ -577,6 +626,13 @@ func TestStartCell_OutOfSyncReapply_LineageConfigDeletedFallsThrough(t *testing.
 		GetCellFn:                 func(_ intmodel.Cell) (intmodel.Cell, error) { return live, nil },
 		ExistsCgroupFn:            func(_ any) (bool, error) { return true, nil },
 		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) { return true, nil },
+		// #1136: materializeCellFromConfig now reproduces the runner-injected
+		// space-derived container fields. The reapply fixtures' containers carry
+		// neither an explicit cniConfigPath nor space defaults, so these stubs
+		// return empties — keeping the materialised desired diff to the intended
+		// image/hostNetwork drift only.
+		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
 		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
 			// The scope-narrowing walk probes (space, stack), (space, ""), ("", "").
 			// All three miss on a deleted Config.
@@ -620,6 +676,13 @@ func TestStartCell_OutOfSyncReapply_RecreateErrorFallsThrough(t *testing.T) {
 		GetCellFn:                 func(_ intmodel.Cell) (intmodel.Cell, error) { return live, nil },
 		ExistsCgroupFn:            func(_ any) (bool, error) { return true, nil },
 		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) { return true, nil },
+		// #1136: materializeCellFromConfig now reproduces the runner-injected
+		// space-derived container fields. The reapply fixtures' containers carry
+		// neither an explicit cniConfigPath nor space defaults, so these stubs
+		// return empties — keeping the materialised desired diff to the intended
+		// image/hostNetwork drift only.
+		GetSpaceFn:                  func(s intmodel.Space) (intmodel.Space, error) { return s, nil },
+		ResolveSpaceCNIConfigPathFn: func(string, string) (string, error) { return "", nil },
 		GetConfigFn: func(intmodel.CellConfig) (intmodel.CellConfig, error) {
 			return reapplySampleCellConfig("test-realm", "test-space", "test-stack"), nil
 		},
