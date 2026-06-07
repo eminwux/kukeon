@@ -272,8 +272,8 @@ func TestRenderBlueprintSubstitutesAndStampsTeamLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderBlueprint: %v", err)
 	}
-	if bp.Metadata.Name != "dev-claude" {
-		t.Errorf("blueprint name = %q, want dev-claude", bp.Metadata.Name)
+	if bp.Metadata.Name != "sbsh-dev-claude" {
+		t.Errorf("blueprint name = %q, want sbsh-dev-claude", bp.Metadata.Name)
 	}
 	if bp.Metadata.Realm != "default" {
 		t.Errorf("realm = %q, want default", bp.Metadata.Realm)
@@ -294,6 +294,81 @@ func TestRenderBlueprintSubstitutesAndStampsTeamLabel(t *testing.T) {
 	wantEnv := []string{"ROLE=dev", "NEEDS=git,go", "SETTINGS=agents/dev/settings.json"}
 	if !reflect.DeepEqual(c.Env, wantEnv) {
 		t.Errorf("env = %v, want %v (verbatim per-harness config wiring)", c.Env, wantEnv)
+	}
+}
+
+// TestRenderBlueprintScopesNameAndPrefixToProject pins the project-scoped
+// identity contract (#1129): a template producing the project-agnostic
+// `<role>-<harness>` shape lands on disk as `<project>-<role>-<harness>`,
+// any Spec.Prefix the template did set is project-scoped too (so the
+// cell-name prefix resolved via cellblueprint.Prefix stays distinct across
+// projects), and the prefix is idempotent — a template that already carries
+// the project prefix is not double-prefixed.
+func TestRenderBlueprintScopesNameAndPrefixToProject(t *testing.T) {
+	t.Parallel()
+	cacheDir := t.TempDir()
+	body := `apiVersion: v1beta1
+kind: CellBlueprint
+metadata:
+  name: {{ .role.name }}-{{ .harness }}
+spec:
+  prefix: {{ .role.name }}
+  cell:
+    containers:
+      - id: {{ .role.name }}
+        image: {{ .image }}
+`
+	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml", body)
+	r := &model.Role{
+		APIVersion: model.APIVersionV1,
+		Kind:       model.KindRole,
+		Metadata:   model.Metadata{Name: "pm"},
+		Spec: model.RoleSpec{
+			Harnesses: map[string]model.RoleHarness{"claude": {}},
+		},
+	}
+	h := &model.Harness{
+		APIVersion: model.APIVersionV1,
+		Kind:       model.KindHarness,
+		Metadata:   model.Metadata{Name: "claude"},
+		Spec:       model.HarnessSpec{Template: "blueprint.tmpl.yaml"},
+	}
+	image := &model.ImageCatalogEntry{Ref: "claude-base", Harness: "claude", Image: "registry.local/claude:latest"}
+
+	bp, err := RenderBlueprint(cacheDir, h, r, "claude", "pm", nil, image, nil, teamsource.Source{}, Inputs{}, "kukeon", "default")
+	if err != nil {
+		t.Fatalf("RenderBlueprint: %v", err)
+	}
+	if got, want := bp.Metadata.Name, "kukeon-pm-claude"; got != want {
+		t.Errorf("metadata.name = %q, want %q (project-scoped)", got, want)
+	}
+	if got, want := bp.Spec.Prefix, "kukeon-pm"; got != want {
+		t.Errorf("spec.prefix = %q, want %q (project-scoped)", got, want)
+	}
+
+	// Idempotence: a template that already produces a project-prefixed name
+	// must not double up to `kukeon-kukeon-...`.
+	idempotent := `apiVersion: v1beta1
+kind: CellBlueprint
+metadata:
+  name: kukeon-{{ .role.name }}-{{ .harness }}
+spec:
+  prefix: kukeon-{{ .role.name }}
+  cell:
+    containers:
+      - id: {{ .role.name }}
+        image: {{ .image }}
+`
+	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml", idempotent)
+	bp2, err := RenderBlueprint(cacheDir, h, r, "claude", "pm", nil, image, nil, teamsource.Source{}, Inputs{}, "kukeon", "default")
+	if err != nil {
+		t.Fatalf("RenderBlueprint (idempotent): %v", err)
+	}
+	if got, want := bp2.Metadata.Name, "kukeon-pm-claude"; got != want {
+		t.Errorf("metadata.name (idempotent) = %q, want %q", got, want)
+	}
+	if got, want := bp2.Spec.Prefix, "kukeon-pm"; got != want {
+		t.Errorf("spec.prefix (idempotent) = %q, want %q", got, want)
 	}
 }
 

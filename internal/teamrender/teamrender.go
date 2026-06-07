@@ -377,12 +377,35 @@ func RenderBlueprint(
 	if strings.TrimSpace(bp.Metadata.Name) == "" {
 		bp.Metadata.Name = defaultObjectName(roleRef, harness)
 	}
+	bp.Metadata.Name = scopeToProject(bp.Metadata.Name, project)
+	if p := strings.TrimSpace(bp.Spec.Prefix); p != "" {
+		bp.Spec.Prefix = scopeToProject(p, project)
+	}
 	bp.Metadata.Realm = realm
 	if bp.Metadata.Labels == nil {
 		bp.Metadata.Labels = map[string]string{}
 	}
 	bp.Metadata.Labels[v1beta1.LabelTeam] = project
 	return &bp, nil
+}
+
+// scopeToProject prefixes name with `<project>-` so the rendered
+// Blueprint/Config identity (and the cell-name prefix it seeds via
+// cellblueprint.Prefix) is project-scoped. Two projects sharing one
+// agents source then resolve to distinct `<project>-pm-claude`,
+// `<project>-dev-claude` records within the same realm instead of
+// colliding on the template-supplied `pm-claude` / `dev-claude`. Idempotent
+// on names already carrying the prefix so a future project-aware template
+// won't double up.
+func scopeToProject(name, project string) string {
+	project = strings.TrimSpace(project)
+	if project == "" {
+		return name
+	}
+	if name == project || strings.HasPrefix(name, project+"-") {
+		return name
+	}
+	return project + "-" + name
 }
 
 // BindConfig produces a CellConfig referencing bp. The operator-fact
