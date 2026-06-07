@@ -1950,6 +1950,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#kuke-create-registry-credential" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        kuke create registry-credential
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#imperative-vs-declarative" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3332,6 +3343,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#kuke-create-registry-credential" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        kuke create registry-credential
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#imperative-vs-declarative" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3378,7 +3400,7 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kuke create &lt;resource&gt; [NAME] [flags]
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>kuke c      &lt;resource&gt; [NAME] [flags]      # alias
 </code></pre></div>
-<p>Resources: <code>realm</code>, <code>space</code>, <code>stack</code>, <code>cell</code>, <code>blueprint</code>, <code>config</code>, <code>secret</code>. Each subcommand also has a short alias (<code>r</code>, <code>sp</code>, <code>st</code>, <code>ce</code>, <code>bp</code>, <code>cfg</code>, and <code>secret</code> has none).</p>
+<p>Resources: <code>realm</code>, <code>space</code>, <code>stack</code>, <code>cell</code>, <code>blueprint</code>, <code>config</code>, <code>secret</code>, <code>registry-credential</code>. Each subcommand also has a short alias (<code>r</code>, <code>sp</code>, <code>st</code>, <code>ce</code>, <code>bp</code>, <code>cfg</code>, <code>secret</code> has none, and <code>registry-credential</code> has <code>registry-cred</code>/<code>regcred</code>).</p>
 <h2 id="kuke-create-realm">kuke create realm<a class="headerlink" href="#kuke-create-realm" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kuke create realm [NAME] [--namespace &lt;ns&gt;]
 </code></pre></div>
@@ -3683,6 +3705,65 @@
 <a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="c1"># From file</span>
 <a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>tls-cert<span class="w"> </span>--from-file<span class="o">=</span>./tls.crt<span class="w"> </span>--realm<span class="w"> </span>default
 </code></pre></div>
+<h2 id="kuke-create-registry-credential">kuke create registry-credential<a class="headerlink" href="#kuke-create-registry-credential" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>kuke create registry-credential &lt;realm&gt; --username &lt;u&gt; (--password-stdin | --from-file &lt;path&gt;)
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>                                         [--server &lt;host&gt;]
+</code></pre></div>
+<p>Attach private-registry pull credentials to an <strong>existing</strong> realm. The command
+reads the realm, upserts an entry onto its <code>spec.registryCredentials</code> keyed by
+<code>--server</code>, and re-applies the realm. The reconciler converges the change as a
+<em>compatible</em> update — no realm recreate and no cell disruption — so cells in the
+realm can immediately pull images that previously returned <code>403 Forbidden</code>.</p>
+<p>Re-running with the same <code>--server</code> updates that entry in place (username +
+token) rather than appending a duplicate; a different <code>--server</code> appends a new
+entry. Existing entries for other servers are preserved.</p>
+<p>The token never enters argv: supply it via <code>--password-stdin</code> (read from stdin,
+docker-login style) or <code>--from-file</code> (read from a file). Exactly one of the two
+is required.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;realm&gt;</code> (positional)</td>
+<td><em>(required)</em></td>
+<td>The realm to attach the credential to</td>
+</tr>
+<tr>
+<td><code>--username</code></td>
+<td><em>(required)</em></td>
+<td>Registry username</td>
+</tr>
+<tr>
+<td><code>--password-stdin</code></td>
+<td><code>false</code></td>
+<td>Read the registry token from stdin</td>
+</tr>
+<tr>
+<td><code>--from-file</code></td>
+<td><code>""</code></td>
+<td>Read the registry token from a file</td>
+</tr>
+<tr>
+<td><code>--server</code></td>
+<td><code>""</code> (matches image's host)</td>
+<td>Registry host the credential applies to (e.g. <code>ghcr.io</code>); empty matches the registry extracted from the image reference at pull time</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Pipe a token in from stdin (no token in shell history)</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$GHCR_TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>registry-credential<span class="w"> </span>default<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">    </span>--server<span class="w"> </span>ghcr.io<span class="w"> </span>--username<span class="w"> </span>my-user<span class="w"> </span>--password-stdin
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="c1"># Or read it from a file</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>sudo<span class="w"> </span>kuke<span class="w"> </span>create<span class="w"> </span>registry-credential<span class="w"> </span>default<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">    </span>--server<span class="w"> </span>ghcr.io<span class="w"> </span>--username<span class="w"> </span>my-user<span class="w"> </span>--from-file<span class="w"> </span>./ghcr-token.txt
+</code></pre></div>
 <h2 id="imperative-vs-declarative">Imperative vs. declarative<a class="headerlink" href="#imperative-vs-declarative" title="Permanent link">&para;</a></h2>
 <p><code>kuke create</code> is useful for quick experiments and one-off resources. For anything you want to commit, diff, or apply repeatedly, write a YAML manifest and use <a href="../kuke-apply/"><code>kuke apply</code></a>. Manifests are the unit of version control; imperative commands are not.</p>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
@@ -3713,7 +3794,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 6, 2026 02:13:32 UTC">June 6, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="June 7, 2026 17:27:42 UTC">June 7, 2026</span>
   </span>
 
     
