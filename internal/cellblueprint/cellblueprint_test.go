@@ -114,6 +114,56 @@ func TestResolve_RequiredUnsetErrors(t *testing.T) {
 	}
 }
 
+// TestResolveConfig_ToleratesUndeclaredKeys is the #1124 regression: the
+// machine-generated CellConfig.Values channel carries operator facts the
+// blueprint never declares as parameters; ResolveConfig must not reject them
+// the way the interactive --param path (Resolve) does.
+func TestResolveConfig_ToleratesUndeclaredKeys(t *testing.T) {
+	out, err := cellblueprint.ResolveConfig(baseDoc(), map[string]string{
+		"TAG":                 "v3",
+		"ROLE":                "dev",
+		"GIT_ALLOWED_SIGNERS": "/keys/allowed_signers",
+		"HARNESS":             "claude",
+		"PROJECT":             "kukeon",
+	}, nil)
+	if err != nil {
+		t.Fatalf("ResolveConfig: %v", err)
+	}
+	// The declared parameter still resolves from the supplied value.
+	if got := out.Spec.Cell.Containers[0].Image; got != "registry.example.com/web:v3" {
+		t.Fatalf("image = %q, want declared param substituted", got)
+	}
+}
+
+// TestResolveConfig_SubstitutesUndeclaredBodyRef proves an undeclared key the
+// blueprint *body* references (a `${ROLE}` with no spec.parameters[] entry, as
+// the team-rendered dev-claude blueprint carries) is substituted rather than
+// left literal — dropping it would re-break the artifact a different way.
+func TestResolveConfig_SubstitutesUndeclaredBodyRef(t *testing.T) {
+	doc := baseDoc()
+	doc.Spec.Cell.Containers[0].WorkingDir = "/work/${ROLE}"
+	out, err := cellblueprint.ResolveConfig(doc, map[string]string{"ROLE": "dev"}, nil)
+	if err != nil {
+		t.Fatalf("ResolveConfig: %v", err)
+	}
+	if got := out.Spec.Cell.Containers[0].WorkingDir; got != "/work/dev" {
+		t.Fatalf("workingDir = %q, want undeclared ${ROLE} substituted", got)
+	}
+}
+
+// TestResolveConfig_StillEnforcesRequired confirms the lenient channel only
+// relaxes undeclared-key rejection — a declared-required parameter the values
+// map does not supply is still an error (the #1124 "second wall" stays a real
+// failure; its agents-repo template fix is out of scope here).
+func TestResolveConfig_StillEnforcesRequired(t *testing.T) {
+	doc := baseDoc()
+	doc.Spec.Parameters = []v1beta1.CellBlueprintParameter{{Name: "TAG", Required: true}}
+	_, err := cellblueprint.ResolveConfig(doc, map[string]string{"ROLE": "dev"}, nil)
+	if !errors.Is(err, errdefs.ErrBlueprintInvalid) {
+		t.Fatalf("err = %v, want ErrBlueprintInvalid for required-unset param", err)
+	}
+}
+
 var hexSuffixRE = regexp.MustCompile(`^web-[0-9a-f]{6}$`)
 
 func TestMaterialize_GeneratedNameAndScope(t *testing.T) {

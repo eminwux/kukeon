@@ -32,7 +32,11 @@ import (
 //
 //   - Scalar values come from cfg.Spec.Values (not --param CLI args); the env
 //     fallback is intentionally absent because a Config's values are the
-//     persistent record of what the operator chose at apply time.
+//     persistent record of what the operator chose at apply time. Resolution
+//     goes through cellblueprint.ResolveConfig (the lenient channel, #1124):
+//     a machine-generated Config carries operator facts the blueprint never
+//     declares as parameters, so undeclared keys are tolerated and substituted
+//     rather than rejected with the interactive `--param` typo-strictness.
 //   - Structural slot fills (repo URLs, secret sources) come from cfg.Spec.Repos
 //     and cfg.Spec.Secrets, keyed by slot name. Unknown fills and unfilled
 //     required slots are rejected via ValidateSlotFill; optional unfilled slots
@@ -62,7 +66,7 @@ func MaterializeWithName(
 		return v1beta1.CellDoc{}, err
 	}
 
-	resolved, err := cellblueprint.Resolve(bp, cfg.Spec.Values, nil)
+	resolved, err := cellblueprint.ResolveConfig(bp, cfg.Spec.Values, nil)
 	if err != nil {
 		return v1beta1.CellDoc{}, fmt.Errorf(
 			"config %q: resolve blueprint %q: %w",
@@ -295,4 +299,3 @@ func cloneCellTty(in *v1beta1.CellTty) *v1beta1.CellTty {
 	out := *in
 	return &out
 }
-

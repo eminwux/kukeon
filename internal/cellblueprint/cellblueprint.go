@@ -55,7 +55,41 @@ func Resolve(
 	cliParams map[string]string,
 	lookupEnv func(string) (string, bool),
 ) (v1beta1.CellBlueprintDoc, error) {
-	values, err := resolveValues(doc, cliParams, lookupEnv)
+	return resolve(doc, cliParams, lookupEnv, false)
+}
+
+// ResolveConfig is the lenient resolution entrypoint for the machine-generated
+// CellConfig.Values channel (issue #1124). It behaves exactly like Resolve —
+// same cliParams[k] > parameters[k].default > lookupEnv(k) order, same
+// required-parameter enforcement — except it does *not* reject value keys that
+// are absent from spec.parameters[]:
+//
+//   - undeclared keys do not error (the typo-strictness Resolve applies is
+//     correct for a human typing `--param FOO=…`, but wrong for a generated
+//     artifact: a rendered CellConfig carries operator facts — ROLE, GIT_*,
+//     HARNESS, PROJECT — that the blueprint never declares as parameters);
+//   - undeclared keys are still substituted into the body, so a `${ROLE}` the
+//     blueprint body references but never declares as a parameter resolves to
+//     the supplied value rather than surviving as a literal.
+//
+// A declared parameter the values map does not supply still follows the strict
+// rule (default → env → required-error), so a genuinely missing required
+// parameter is still caught.
+func ResolveConfig(
+	doc v1beta1.CellBlueprintDoc,
+	values map[string]string,
+	lookupEnv func(string) (string, bool),
+) (v1beta1.CellBlueprintDoc, error) {
+	return resolve(doc, values, lookupEnv, true)
+}
+
+func resolve(
+	doc v1beta1.CellBlueprintDoc,
+	cliParams map[string]string,
+	lookupEnv func(string) (string, bool),
+	lenient bool,
+) (v1beta1.CellBlueprintDoc, error) {
+	values, err := resolveValues(doc, cliParams, lookupEnv, lenient)
 	if err != nil {
 		return v1beta1.CellBlueprintDoc{}, err
 	}
@@ -85,26 +119,37 @@ func Resolve(
 // the substitution value map. The substitution leaves `default` declarations
 // themselves untouched (substituteScalars rewrites every scalar, but a missing
 // key is left literal; declared params are always in the map).
+//
+// When lenient is true (the CellConfig.Values channel, #1124) an undeclared key
+// is not an error and is carried into the value map so it still substitutes;
+// when false (the interactive `--param` channel) an undeclared key errors.
 func resolveValues(
 	doc v1beta1.CellBlueprintDoc,
 	cliParams map[string]string,
 	lookupEnv func(string) (string, bool),
+	lenient bool,
 ) (map[string]string, error) {
 	declared := make(map[string]v1beta1.CellBlueprintParameter, len(doc.Spec.Parameters))
 	for _, p := range doc.Spec.Parameters {
 		declared[p.Name] = p
 	}
 
-	for k := range cliParams {
-		if _, ok := declared[k]; !ok {
+	values := make(map[string]string, len(declared)+len(cliParams))
+	for k, v := range cliParams {
+		if _, ok := declared[k]; ok {
+			continue
+		}
+		if !lenient {
 			return nil, fmt.Errorf(
 				"blueprint %q: --param %q is not declared in spec.parameters[]: %w",
 				doc.Metadata.Name, k, errdefs.ErrBlueprintInvalid,
 			)
 		}
+		// Lenient: carry the undeclared key through so a `${KEY}` the body
+		// references but never declares still resolves.
+		values[k] = v
 	}
 
-	values := make(map[string]string, len(declared))
 	for _, p := range doc.Spec.Parameters {
 		if v, ok := cliParams[p.Name]; ok {
 			values[p.Name] = v
