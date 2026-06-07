@@ -810,6 +810,55 @@ func TestBindConfigStampsTeamLabelAndProjectRepoFill(t *testing.T) {
 	}
 }
 
+// TestBindConfigFillsSecretFromRoleNeedsWithoutTcSecrets is the #1145
+// regression guard: role.Needs.Secrets + a blueprint slot of the same
+// name must produce a CellConfig secret fill regardless of whether
+// tc.Spec.Secrets carries an entry. Production code (the secrets.env →
+// kind: Secret path from #1120) never populates tc.Spec.Secrets, so a
+// gate on it dropped every fill silently and no env var reached the
+// container.
+func TestBindConfigFillsSecretFromRoleNeedsWithoutTcSecrets(t *testing.T) {
+	t.Parallel()
+	bp := &v1beta1.CellBlueprintDoc{
+		Metadata: v1beta1.CellBlueprintMetadata{Name: "dev-claude", Realm: "default"},
+		Spec: v1beta1.CellBlueprintSpec{Cell: v1beta1.BlueprintCellSpec{
+			Containers: []v1beta1.BlueprintContainer{{
+				ID:    "dev",
+				Image: "x",
+				Secrets: []v1beta1.BlueprintSecretSlot{
+					{Name: "ANTHROPIC_API_KEY", Mode: v1beta1.BlueprintSecretModeEnv, EnvName: "ANTHROPIC_API_KEY"},
+				},
+			}},
+		}},
+	}
+	cfg := BindConfig(
+		bp,
+		minimalRole(),
+		"dev",
+		"claude",
+		&model.TeamsConfig{}, // no tc.spec.secrets — the production shape from #1120
+		teamsource.Source{},
+		Inputs{Project: "sbsh"},
+		"sbsh",
+		"default",
+		"default",
+		"default",
+	)
+	fill, ok := cfg.Spec.Secrets["ANTHROPIC_API_KEY"]
+	if !ok {
+		t.Fatalf("ANTHROPIC_API_KEY slot not filled: %+v", cfg.Spec.Secrets)
+	}
+	if fill.SecretRef == nil {
+		t.Fatalf("ANTHROPIC_API_KEY SecretRef nil: %+v", fill)
+	}
+	if fill.SecretRef.Name != "ANTHROPIC_API_KEY" {
+		t.Errorf("SecretRef.Name = %q, want ANTHROPIC_API_KEY", fill.SecretRef.Name)
+	}
+	if fill.SecretRef.Realm != "default" {
+		t.Errorf("SecretRef.Realm = %q, want default", fill.SecretRef.Realm)
+	}
+}
+
 func TestBindConfigSkipsUndeclaredSlots(t *testing.T) {
 	t.Parallel()
 	bp := &v1beta1.CellBlueprintDoc{

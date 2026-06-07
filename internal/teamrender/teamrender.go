@@ -41,8 +41,10 @@
 //     blueprint and carries (a) operator facts pulled from
 //     `~/.kuke/kuketeams.yaml` (git author/committer/signingKey/registry
 //     stamped into Values), (b) the project's cloned repo URL stamped
-//     into the `project` repo slot fill, and (c) any operator secret
-//     refs from `tc.spec.secrets` that the role declares it needs.
+//     into the `project` repo slot fill, and (c) for every secret the
+//     role declares it needs and the blueprint declares a slot for, an
+//     in-realm ContainerSecretRef pointing at the Secret of the same
+//     name (created out of `secrets.env`, #1120).
 //  5. label — every rendered CellBlueprint and CellConfig carries
 //     `metadata.labels[kukeon.io/team] = <project>` so the daemon-side
 //     prune-apply machinery from #1029 can converge the project's slice
@@ -453,10 +455,11 @@ func scopeToProject(name, project string) string {
 // the `agents` slot — both only when the blueprint actually declares the
 // slot, so a template that doesn't carry the slot produces a config
 // without a stray fill. role.Spec.Needs.Secrets entries are matched
-// against the blueprint's BlueprintSecretSlot declarations and filled
-// from tc.spec.secrets — when the operator has a matching entry, an
-// in-realm ContainerSecretRef points the slot at it (the runtime
-// resolves the actual bytes via the Secret kind from #623).
+// against the blueprint's BlueprintSecretSlot declarations and, when the
+// blueprint declares the slot, filled with an in-realm ContainerSecretRef
+// pointing at the secret of the same name — the runtime resolves the
+// actual bytes via the Secret kind (#623) created out of the two-layer
+// secrets.env path (#1120).
 func BindConfig(
 	bp *v1beta1.CellBlueprintDoc,
 	r *model.Role,
@@ -509,12 +512,9 @@ func BindConfig(
 		}
 	}
 
-	if len(declaredSecrets) > 0 && r != nil && len(r.Spec.Needs.Secrets) > 0 && tc != nil {
+	if len(declaredSecrets) > 0 && r != nil && len(r.Spec.Needs.Secrets) > 0 {
 		for _, secretName := range r.Spec.Needs.Secrets {
 			if !declaredSecrets[secretName] {
-				continue
-			}
-			if _, ok := tc.Spec.Secrets[secretName]; !ok {
 				continue
 			}
 			if cfg.Spec.Secrets == nil {
