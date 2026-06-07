@@ -695,4 +695,11 @@ var (
 	ErrTeamHarnessSeedPathEscapes = errors.New(
 		"harness seeds[].path escapes the per-team root after expansion",
 	)
+	// ErrTeamValidateGaps fires when `kuke team init --validate` finds one or
+	// more contract gaps (catalog miss, unresolved template path, unbound
+	// partial reference, or unbound fact reference). The gap report is printed
+	// to stdout; this sentinel drives the non-zero exit.
+	ErrTeamValidateGaps = errors.New(
+		"team validate found one or more contract gaps",
+	)
 )

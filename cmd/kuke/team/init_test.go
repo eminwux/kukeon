@@ -1539,3 +1539,96 @@ func TestEmitSourceKind(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateTeamCleanExitsZero covers `kuke team init --validate` on a
+// roster whose catalog, templates, partials, and facts all check out: the gap
+// report prints all four section headers, validateTeam returns nil (exit 0),
+// and nothing is written to disk (no global config, no drop-in entry).
+func TestValidateTeamCleanExitsZero(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+
+	var out bytes.Buffer
+	if err := validateTeam(
+		context.Background(), &out, projectDir, layout,
+		stubGit(nil), stubBundle(bundle),
+	); err != nil {
+		t.Fatalf("validateTeam: %v", err)
+	}
+
+	got := out.String()
+	for _, want := range []string{"== catalog ==", "== templates ==", "== partials ==", "== facts =="} {
+		if !strings.Contains(got, want) {
+			t.Errorf("report missing %q\n%s", want, got)
+		}
+	}
+	// Read-only: validate must not scaffold the global facts file or write the
+	// drop-in entry.
+	if _, err := os.Stat(layout.GlobalConfigPath()); !os.IsNotExist(err) {
+		t.Errorf("validate wrote global config (err=%v); must be read-only", err)
+	}
+	if _, err := os.Stat(layout.EntryPath("sbsh")); !os.IsNotExist(err) {
+		t.Errorf("validate wrote drop-in entry (err=%v); must be read-only", err)
+	}
+}
+
+// TestValidateTeamGapExitsNonZero covers the non-zero exit: a catalog gap
+// surfaces ErrTeamValidateGaps so the CLI exits 1, while the report still
+// prints.
+func TestValidateTeamGapExitsNonZero(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamWithHarnessYAML)
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+	bundle := buildClaudeBundle(t)
+	// Drop a capability the dev role needs (go,git) so SelectImage misses.
+	bundle.ImageCatalog.Spec.Images[0].Capabilities = []string{"go"}
+
+	var out bytes.Buffer
+	err := validateTeam(
+		context.Background(), &out, projectDir, layout,
+		stubGit(nil), stubBundle(bundle),
+	)
+	if !errors.Is(err, errdefs.ErrTeamValidateGaps) {
+		t.Fatalf("err = %v, want ErrTeamValidateGaps", err)
+	}
+	if !strings.Contains(out.String(), `capability "git" not provided by any claude image`) {
+		t.Errorf("report should name the unmet capability:\n%s", out.String())
+	}
+}
+
+// TestValidateTeamHarnessLessRosterSkipsResolve covers the harness-less
+// roster: there is nothing to validate, so resolve is never called (a clone is
+// not triggered) and the four empty sections still render at exit 0.
+func TestValidateTeamHarnessLessRosterSkipsResolve(t *testing.T) {
+	t.Parallel()
+	projectDir := writeProject(t, projectTeamYAML) // no defaults.harnesses
+	layout := teamhost.NewLayout(filepath.Join(t.TempDir(), ".kuke"))
+
+	var out bytes.Buffer
+	if err := validateTeam(
+		context.Background(), &out, projectDir, layout,
+		stubGit(nil), stubResolveErr(), // resolve must not be called
+	); err != nil {
+		t.Fatalf("validateTeam: %v", err)
+	}
+	for _, want := range []string{"== catalog ==", "== templates ==", "== partials ==", "== facts =="} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("report missing %q\n%s", want, out.String())
+		}
+	}
+}
+
+// TestInitValidateBuildMutuallyExclusive covers the cobra-level guard: passing
+// both --build and --validate is rejected before any side effect runs.
+func TestInitValidateBuildMutuallyExclusive(t *testing.T) {
+	t.Parallel()
+	cmd := NewInitCmd()
+	cmd.SetArgs([]string{"--build", "--validate"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected mutual-exclusion error for --build --validate, got nil")
+	}
+}
