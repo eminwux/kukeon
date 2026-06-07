@@ -706,9 +706,18 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 	// `kuke get container` survives the unconditional overwrite below.
 	// Issue #605.
 	priorCreatedAt := make(map[string]time.Time, len(cell.Status.Containers))
+	// Snapshot prior StartTime/FinishTime by container ID, same observe-and-
+	// preserve contract as CreatedAt: containerd's task status carries no start
+	// time, and a Stopped task's ExitTime is lost once its record is reaped, so
+	// both timestamps must survive the unconditional overwrite below rather than
+	// reset to the zero value on every pull. Issue #1137.
+	priorStartTime := make(map[string]time.Time, len(cell.Status.Containers))
+	priorFinishTime := make(map[string]time.Time, len(cell.Status.Containers))
 	for _, prev := range cell.Status.Containers {
 		priorStages[prev.ID] = prev.Stages
 		priorCreatedAt[prev.ID] = prev.CreatedAt
+		priorStartTime[prev.ID] = prev.StartTime
+		priorFinishTime[prev.ID] = prev.FinishTime
 	}
 
 	statuses := make([]intmodel.ContainerStatus, 0, len(cell.Spec.Containers))
@@ -737,19 +746,43 @@ func (r *Exec) populateCellContainerStatuses(cell *intmodel.Cell) error {
 			createdAt = now
 		}
 
-		// TODO: Get additional status fields (RestartCount, StartTime, etc.) from containerd
-		// For now, populate with basic state + exit code
+		// StartTime: containerd's task status exposes no start time, so stamp
+		// it the first time the container is observed Ready (Running) and
+		// preserve thereafter — the same observe-and-preserve contract as
+		// CreatedAt (#605). A container that has never been Ready keeps a zero
+		// StartTime. Issue #1137.
+		startTime := priorStartTime[containerSpec.ID]
+		if startTime.IsZero() && obs.State == intmodel.ContainerStateReady {
+			startTime = now
+		}
+
+		// FinishTime: the wall-clock time containerd recorded the task's death
+		// (obs.ExitTime, non-zero only once Stopped). Cleared when the container
+		// is Ready again (a running task has not finished); preserved across
+		// transient NotCreated/Unknown observations that would otherwise lose
+		// the reaped task's exit time. Issue #1137.
+		finishTime := priorFinishTime[containerSpec.ID]
+		switch {
+		case obs.State == intmodel.ContainerStateReady:
+			finishTime = time.Time{}
+		case !obs.ExitTime.IsZero():
+			finishTime = obs.ExitTime
+		}
+
+		// RestartCount/RestartTime require restart bookkeeping the runner does
+		// not yet track; deferred to #1146 per issue #1137's "scope that part
+		// separately". They stay at their zero values for now.
 		status := intmodel.ContainerStatus{
 			Name:         containerSpec.ID,
 			ID:           containerSpec.ID,
 			CreatedAt:    createdAt,
 			State:        obs.State,
-			RestartCount: 0,           // TODO: retrieve from containerd
-			RestartTime:  time.Time{}, // TODO: retrieve from containerd
-			StartTime:    time.Time{}, // TODO: retrieve from containerd
-			FinishTime:   time.Time{}, // TODO: retrieve from containerd
+			RestartCount: 0,           // TODO(#1146): restart bookkeeping
+			RestartTime:  time.Time{}, // TODO(#1146): restart bookkeeping
+			StartTime:    startTime,
+			FinishTime:   finishTime,
 			ExitCode:     obs.ExitCode,
-			ExitSignal:   "", // TODO: retrieve from containerd
+			ExitSignal:   exitSignalName(obs.ExitCode),
 		}
 		// Pull per-repo clone/fetch and per-create-stage outcomes over the
 		// kuketty control socket (issues #642, #689) in a single dial.

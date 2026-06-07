@@ -20,23 +20,57 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/ctr"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	intmodel "github.com/eminwux/kukeon/internal/modelhub"
 	"github.com/eminwux/kukeon/internal/util/naming"
+	"golang.org/x/sys/unix"
 )
+
+// exitSignalCodeBase is the offset runc/containerd (following the shell
+// convention) adds to a signal number when a task is terminated by a signal:
+// an exit code of 128+signum means the process was killed by signum. SIGKILL
+// (9) therefore surfaces as 137.
+const exitSignalCodeBase = 128
+
+// maxSignalNumber bounds the signal range exitSignalName will translate. Linux
+// real-time signals run up to SIGRTMAX (typically 64); anything past 128+64 is
+// an ordinary exit code that merely happens to be large, not a signal.
+const maxSignalNumber = 64
+
+// exitSignalName maps a containerd task exit code to the name of the signal
+// that terminated the task, or "" for an ordinary (non-signal) exit. runc and
+// containerd encode a signal-terminated task as 128+signum (the shell
+// convention), so an exit code in (128, 128+64] carries the signal number in
+// its low bits — e.g. 137 -> SIGKILL, 143 -> SIGTERM. The name is rendered via
+// unix.SignalName, which itself returns "" for an unrecognized signal number,
+// so an out-of-table value collapses to the no-signal result.
+func exitSignalName(exitCode int) string {
+	signum := exitCode - exitSignalCodeBase
+	if signum <= 0 || signum > maxSignalNumber {
+		return ""
+	}
+	return unix.SignalName(syscall.Signal(signum))
+}
 
 // ContainerObservation bundles the slice of containerd task state the runner
 // needs to surface in ContainerStatus and drive lifecycle decisions: the
-// internal-state mapping plus the exit code reported by the task. ExitCode is
-// only meaningful on the TaskStatus-success branch — on every other branch
-// (NotCreated, ErrTaskNotFound, transient error, fallback Unknown) it stays
-// zero.
+// internal-state mapping plus the exit code and exit time reported by the task.
+// ExitCode and ExitTime are only meaningful on the TaskStatus-success branch —
+// on every other branch (NotCreated, ErrTaskNotFound, transient error, fallback
+// Unknown) they stay zero. containerd's task status carries no start time, so
+// StartTime is stamped by observe-and-preserve in populateCellContainerStatuses
+// rather than read here (issue #1137).
 type ContainerObservation struct {
 	State    intmodel.ContainerState
 	ExitCode int
+	// ExitTime is the wall-clock time containerd recorded the task's death,
+	// surfaced as ContainerStatus.FinishTime. Zero until the task is Stopped.
+	ExitTime time.Time
 }
 
 // GetContainerState queries containerd for the actual task status of a container
@@ -206,8 +240,12 @@ func (r *Exec) GetContainerObservation(cell intmodel.Cell, containerID string) (
 			"namespace", namespace,
 			"taskStatus", taskStatus.Status,
 			"internalState", state,
-			"exitCode", exitCode)
-		return ContainerObservation{State: state, ExitCode: exitCode}, nil
+			"exitCode", exitCode,
+			"exitTime", taskStatus.ExitTime)
+		// ExitTime is only stamped by containerd once the task is Stopped; on a
+		// Running/Created/Paused task it is the zero time, which surfaces as a
+		// zero FinishTime (the container has not finished). Issue #1137.
+		return ContainerObservation{State: state, ExitCode: exitCode, ExitTime: taskStatus.ExitTime}, nil
 	}
 
 	// TaskStatus failed against an existing container: the container record
