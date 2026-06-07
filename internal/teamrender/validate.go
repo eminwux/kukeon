@@ -452,7 +452,7 @@ func knownFactKeys() (map[string]struct{}, map[string]struct{}) {
 	satSrc := teamsource.Source{Host: "_", OwnerRepo: "_/_"}
 	satIn := Inputs{ProjectDir: "_", TeamDir: "_"}
 
-	ctx := renderContextValues("_", "_", nil, nil, nil, satTC, satSrc, satIn, "_", DefaultRealm)
+	ctx := renderContextValues("_", "_", nil, nil, nil, satTC, satSrc, satIn, "_", DefaultRealm, DefaultSpace, DefaultStack)
 	op := keySet(ctx["operator"])
 	pr := keySet(ctx["project"])
 	return op, pr

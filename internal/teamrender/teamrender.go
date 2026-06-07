@@ -79,6 +79,20 @@ import (
 // `kuke-system`.
 const DefaultRealm = "default"
 
+// DefaultSpace and DefaultStack are the space/stack rendered objects bind
+// to when Inputs.Space / Inputs.Stack are empty. They mirror DefaultRealm
+// and the `default/default/default` coordinates the CLI create path
+// defaults an omitted scope to (cmd/kuke/run/run.go). Defaulting all three
+// here — rather than copying the (usually empty) template values — keeps
+// the rendered Config's scope identical to the live cell's persisted scope,
+// so the reconciler's re-materialization (internal/cellconfig/materialize.go)
+// produces matching spec.spaceName / spec.stackName and DiffCell reports no
+// spurious OutOfSync (#1133).
+const (
+	DefaultSpace = "default"
+	DefaultStack = "default"
+)
+
 // ProjectRepoSlotName is the convention for the structural repo slot that
 // carries the project's clone URL. The umbrella (epic #792) names `project`
 // and `agents` as the two repos a team cell typically clones; this package
@@ -117,7 +131,16 @@ type Inputs struct {
 	// blueprint templates as `.operator.TEAM_ROOT`. Per-team-scoped: two teams
 	// running on the same operator host see two different TEAM_ROOT values.
 	TeamDir string
-	Realm   string
+	// Realm, Space, and Stack are the scope coordinates the rendered
+	// Blueprints/Configs bind to. Each defaults to `default` when empty (see
+	// DefaultRealm / DefaultSpace / DefaultStack) so the rendered Config
+	// records an explicit scope matching the live cell the CLI create path
+	// persists, closing the defaulting asymmetry that caused spurious
+	// OutOfSync (#1133). Sourced from the project's kuketeam.yaml
+	// (ProjectTeamSpec) when declared.
+	Realm string
+	Space string
+	Stack string
 	// Build is true under `kuke team init --build`: the rendered blueprint
 	// binds the locally-built `kukeon.internal/<ref>:<version>` image (the tag
 	// teambuild produces) instead of the catalog entry's published `Image`.
@@ -175,6 +198,14 @@ func Render(
 	if realm == "" {
 		realm = DefaultRealm
 	}
+	space := strings.TrimSpace(in.Space)
+	if space == "" {
+		space = DefaultSpace
+	}
+	stack := strings.TrimSpace(in.Stack)
+	if stack == "" {
+		stack = DefaultStack
+	}
 
 	res := &Result{}
 	seenSelections := map[string]struct{}{}
@@ -199,14 +230,14 @@ func Render(
 
 			bp, renderErr := RenderBlueprint(
 				bundle.CacheDir, harness, role, hname, ptRole.Ref,
-				merged, entry, tc, bundle.Source, in, project, realm,
+				merged, entry, tc, bundle.Source, in, project, realm, space, stack,
 			)
 			if renderErr != nil {
 				return nil, fmt.Errorf(
 					"render %s/%s: %w", ptRole.Ref, hname, renderErr,
 				)
 			}
-			cfg := BindConfig(bp, role, ptRole.Ref, hname, tc, bundle.Source, in, project, realm)
+			cfg := BindConfig(bp, role, ptRole.Ref, hname, tc, bundle.Source, in, project, realm, space, stack)
 
 			res.Blueprints = append(res.Blueprints, bp)
 			res.Configs = append(res.Configs, cfg)
@@ -320,10 +351,13 @@ func SelectImage(
 // in.ProjectDir and in.TeamDir surface as `.project.PROJECT_DIR` and
 // `.operator.TEAM_ROOT` respectively; tc.spec.homeDir (or `$HOME` when
 // unset) fills `.operator.HOME_DIR`. The metadata.labels are populated
-// with `kukeon.io/team = project`. metadata.realm is forced to realm (the
-// template need not pre-fill it). If the template did not supply
-// metadata.name, the default `<role>-<harness>` is stamped so the
-// blueprint and its companion config share a deterministic identity.
+// with `kukeon.io/team = project`. metadata.realm/space/stack are forced to
+// the (defaulted) realm/space/stack scope (the template need not pre-fill
+// them) so the rendered Config records the same explicit scope the live
+// cell persists — closing the defaulting asymmetry behind the spurious
+// OutOfSync in #1133. If the template did not supply metadata.name, the
+// default `<role>-<harness>` is stamped so the blueprint and its companion
+// config share a deterministic identity.
 //
 // in.Build + in.SourceRef drive the `.image` bind decision (see
 // renderContextValues): in build mode the locally-built
@@ -339,7 +373,7 @@ func RenderBlueprint(
 	tc *model.TeamsConfig,
 	src teamsource.Source,
 	in Inputs,
-	project, realm string,
+	project, realm, space, stack string,
 ) (*v1beta1.CellBlueprintDoc, error) {
 	if h == nil || strings.TrimSpace(h.Spec.Template) == "" {
 		return nil, fmt.Errorf(
@@ -361,7 +395,7 @@ func RenderBlueprint(
 		return nil, err
 	}
 
-	ctx := renderContextValues(roleRef, harness, image, needs, r, tc, src, in, project, realm)
+	ctx := renderContextValues(roleRef, harness, image, needs, r, tc, src, in, project, realm, space, stack)
 	var buf bytes.Buffer
 	if execErr := tpl.ExecuteTemplate(&buf, filepath.Base(tplPath), ctx); execErr != nil {
 		return nil, fmt.Errorf("execute blueprint template %q: %w", tplPath, execErr)
@@ -382,6 +416,8 @@ func RenderBlueprint(
 		bp.Spec.Prefix = scopeToProject(p, project)
 	}
 	bp.Metadata.Realm = realm
+	bp.Metadata.Space = space
+	bp.Metadata.Stack = stack
 	if bp.Metadata.Labels == nil {
 		bp.Metadata.Labels = map[string]string{}
 	}
@@ -428,7 +464,7 @@ func BindConfig(
 	tc *model.TeamsConfig,
 	src teamsource.Source,
 	in Inputs,
-	project, realm string,
+	project, realm, space, stack string,
 ) *v1beta1.CellConfigDoc {
 	cfg := &v1beta1.CellConfigDoc{
 		APIVersion: v1beta1.APIVersionV1Beta1,
@@ -436,8 +472,8 @@ func BindConfig(
 		Metadata: v1beta1.CellConfigMetadata{
 			Name:  bp.Metadata.Name,
 			Realm: realm,
-			Space: bp.Metadata.Space,
-			Stack: bp.Metadata.Stack,
+			Space: space,
+			Stack: stack,
 			Labels: map[string]string{
 				v1beta1.LabelTeam: project,
 			},
@@ -446,8 +482,8 @@ func BindConfig(
 			Blueprint: v1beta1.CellConfigBlueprintRef{
 				Name:  bp.Metadata.Name,
 				Realm: realm,
-				Space: bp.Metadata.Space,
-				Stack: bp.Metadata.Stack,
+				Space: space,
+				Stack: stack,
 			},
 			Values: operatorValues(tc, roleRef, harness, project),
 		},
@@ -705,7 +741,7 @@ func renderContextValues(
 	tc *model.TeamsConfig,
 	src teamsource.Source,
 	in Inputs,
-	project, realm string,
+	project, realm, space, stack string,
 ) map[string]any {
 	img := ""
 	imgRef := ""
@@ -794,8 +830,8 @@ func renderContextValues(
 		"image":     img,
 		"image_ref": imgRef,
 		"realm":     realm,
-		"space":     "",
-		"stack":     "",
+		"space":     space,
+		"stack":     stack,
 	}
 }
 

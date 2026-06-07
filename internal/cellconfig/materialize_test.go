@@ -166,6 +166,44 @@ func TestMaterialize_HappyPath_FillsRepoAndSecretSlots(t *testing.T) {
 	}
 }
 
+// TestMaterialize_EmptyScopeDefaultsToDefault is the reconcile-path half of the
+// #1133 fix: a Config carrying empty realm/space/stack (e.g. one written before
+// the team renderer stamped explicit scope) must materialize the cell at
+// `default/default/default` — matching what the CLI create path persists — so a
+// reconcile re-materialization does not report a permanent spurious OutOfSync on
+// spec.spaceName / spec.stackName.
+func TestMaterialize_EmptyScopeDefaultsToDefault(t *testing.T) {
+	bp := minimalBlueprint()
+	cfg := v1beta1.CellConfigDoc{
+		APIVersion: v1beta1.APIVersionV1Beta1,
+		Kind:       v1beta1.KindCellConfig,
+		Metadata:   v1beta1.CellConfigMetadata{Name: "team-cell"}, // realm/space/stack empty
+		Spec: v1beta1.CellConfigSpec{
+			Blueprint: v1beta1.CellConfigBlueprintRef{Name: "web"},
+			Repos: map[string]v1beta1.CellConfigRepoFill{
+				"src": {URL: "https://example.com/src.git"},
+			},
+			Secrets: map[string]v1beta1.CellConfigSecretFill{
+				"token": {SecretRef: &v1beta1.ContainerSecretRef{Name: "api-token"}},
+			},
+		},
+	}
+
+	cell, err := MaterializeWithName(cfg, bp, "team-cell")
+	if err != nil {
+		t.Fatalf("MaterializeWithName: %v", err)
+	}
+	if got := cell.Spec.RealmID; got != "default" {
+		t.Errorf("RealmID=%q want default (empty config realm defaulted)", got)
+	}
+	if got := cell.Spec.SpaceID; got != "default" {
+		t.Errorf("SpaceID=%q want default (empty config space defaulted)", got)
+	}
+	if got := cell.Spec.StackID; got != "default" {
+		t.Errorf("StackID=%q want default (empty config stack defaulted)", got)
+	}
+}
+
 func TestMaterialize_RequiredRepoSlotUnfilled_Errors(t *testing.T) {
 	bp := minimalBlueprint()
 	cfg := v1beta1.CellConfigDoc{

@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/eminwux/kukeon/internal/cellblueprint"
+	"github.com/eminwux/kukeon/internal/consts"
 	"github.com/eminwux/kukeon/internal/errdefs"
 	v1beta1 "github.com/eminwux/kukeon/pkg/api/model/v1beta1"
 )
@@ -93,9 +94,9 @@ func MaterializeWithName(
 		},
 		Spec: v1beta1.CellSpec{
 			ID:                  cellName,
-			RealmID:             strings.TrimSpace(cfg.Metadata.Realm),
-			SpaceID:             strings.TrimSpace(cfg.Metadata.Space),
-			StackID:             strings.TrimSpace(cfg.Metadata.Stack),
+			RealmID:             defaultScope(cfg.Metadata.Realm, consts.KukeonDefaultRealmName),
+			SpaceID:             defaultScope(cfg.Metadata.Space, consts.KukeonDefaultSpaceName),
+			StackID:             defaultScope(cfg.Metadata.Stack, consts.KukeonDefaultStackName),
 			Tty:                 cloneCellTty(resolved.Spec.Cell.Tty),
 			Containers:          containers,
 			AutoDelete:          resolved.Spec.Cell.AutoDelete,
@@ -287,6 +288,21 @@ func mergeConfigLabel(in map[string]string, configName string) map[string]string
 	}
 	out[LabelConfig] = configName
 	return out
+}
+
+// defaultScope returns the trimmed scope coordinate, or def when it is empty.
+// The CLI create path (cmd/kuke/run/run.go) defaults an omitted realm/space/
+// stack to `default` before persisting the cell, so a Config that carries an
+// empty coordinate must materialize to the same `default` here — otherwise the
+// reconciler's re-materialization yields `"" != "default"` against the live
+// cell and apply.DiffCell reports a permanent spurious OutOfSync (#1133). This
+// hardens the reconcile path at its source, independent of whichever binding
+// produced the Config.
+func defaultScope(v, def string) string {
+	if trimmed := strings.TrimSpace(v); trimmed != "" {
+		return trimmed
+	}
+	return def
 }
 
 // cloneCellTty deep-copies a *CellTty so mutations on the materialized cell do

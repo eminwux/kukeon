@@ -666,6 +666,9 @@ func renderTeam(
 		ProjectRepoURL: strings.TrimSpace(projectURL),
 		ProjectDir:     projectDir,
 		TeamDir:        teamDir,
+		Realm:          pt.Spec.Realm,
+		Space:          pt.Spec.Space,
+		Stack:          pt.Spec.Stack,
 		Build:          doBuild,
 		SourceRef:      bundle.Source.Ref,
 	}
