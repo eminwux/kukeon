@@ -520,6 +520,69 @@ func TestComposeTeamRendersOnNonDryRun(t *testing.T) {
 	}
 }
 
+// TestPruneEmptySecretBindings is the #1149 regression: a role needs 3
+// secrets but the operator provided only 1, so secret creation skipped the 2
+// empty values while the post-#1147 binding bound all 3. The prune must leave
+// the CellConfig referencing only the single secret that was actually created,
+// so the cell starts instead of dying on the first missing ref.
+func TestPruneEmptySecretBindings(t *testing.T) {
+	t.Parallel()
+	secretFill := func(name string) v1beta1.CellConfigSecretFill {
+		return v1beta1.CellConfigSecretFill{
+			SecretRef: &v1beta1.ContainerSecretRef{Name: name, Realm: "default"},
+		}
+	}
+	cfg := &v1beta1.CellConfigDoc{
+		Spec: v1beta1.CellConfigSpec{
+			Secrets: map[string]v1beta1.CellConfigSecretFill{
+				"claude-code-oauth-token": secretFill("claude-code-oauth-token"),
+				"openai-api-key":          secretFill("openai-api-key"),
+				"openrouter-api-key":      secretFill("openrouter-api-key"),
+			},
+		},
+	}
+
+	// Only claude-code-oauth-token had a value; the other two were empty and
+	// never created.
+	pruneEmptySecretBindings(
+		[]*v1beta1.CellConfigDoc{cfg},
+		[]string{"openai-api-key", "openrouter-api-key"},
+	)
+
+	if len(cfg.Spec.Secrets) != 1 {
+		t.Fatalf("secrets after prune = %v, want only claude-code-oauth-token", cfg.Spec.Secrets)
+	}
+	if _, ok := cfg.Spec.Secrets["claude-code-oauth-token"]; !ok {
+		t.Errorf("provided secret was pruned: %v", cfg.Spec.Secrets)
+	}
+	for _, gone := range []string{"openai-api-key", "openrouter-api-key"} {
+		if _, ok := cfg.Spec.Secrets[gone]; ok {
+			t.Errorf("empty secret %q was not pruned: %v", gone, cfg.Spec.Secrets)
+		}
+	}
+}
+
+// TestPruneEmptySecretBindingsNoOps confirms the prune leaves a CellConfig
+// untouched when no keys are empty, and tolerates nil/empty inputs.
+func TestPruneEmptySecretBindingsNoOps(t *testing.T) {
+	t.Parallel()
+	cfg := &v1beta1.CellConfigDoc{
+		Spec: v1beta1.CellConfigSpec{
+			Secrets: map[string]v1beta1.CellConfigSecretFill{
+				"claude-code-oauth-token": {SecretRef: &v1beta1.ContainerSecretRef{Name: "claude-code-oauth-token", Realm: "default"}},
+			},
+		},
+	}
+	// Empty key set: nothing pruned.
+	pruneEmptySecretBindings([]*v1beta1.CellConfigDoc{cfg}, nil)
+	if len(cfg.Spec.Secrets) != 1 {
+		t.Errorf("empty emptyKeys pruned a binding: %v", cfg.Spec.Secrets)
+	}
+	// Nil configs and a nil entry must not panic.
+	pruneEmptySecretBindings(nil, []string{"x"})
+	pruneEmptySecretBindings([]*v1beta1.CellConfigDoc{nil}, []string{"x"})
+}
+
 // TestComposeTeamApplyTotalFailureExitsNonZeroSkipsEntry confirms that when
 // every applied document comes back `failed`, composeTeam exits non-zero
 // (ErrTeamApplyFailed) and does not persist the drop-in entry for a team with
