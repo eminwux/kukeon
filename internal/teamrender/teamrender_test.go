@@ -268,6 +268,8 @@ func TestRenderBlueprintSubstitutesAndStampsTeamLabel(t *testing.T) {
 		Inputs{},
 		"sbsh",
 		"default",
+		"default",
+		"default",
 	)
 	if err != nil {
 		t.Fatalf("RenderBlueprint: %v", err)
@@ -335,7 +337,7 @@ spec:
 	}
 	image := &model.ImageCatalogEntry{Ref: "claude-base", Harness: "claude", Image: "registry.local/claude:latest"}
 
-	bp, err := RenderBlueprint(cacheDir, h, r, "claude", "pm", nil, image, nil, teamsource.Source{}, Inputs{}, "kukeon", "default")
+	bp, err := RenderBlueprint(cacheDir, h, r, "claude", "pm", nil, image, nil, teamsource.Source{}, Inputs{}, "kukeon", "default", "default", "default")
 	if err != nil {
 		t.Fatalf("RenderBlueprint: %v", err)
 	}
@@ -360,7 +362,7 @@ spec:
         image: {{ .image }}
 `
 	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml", idempotent)
-	bp2, err := RenderBlueprint(cacheDir, h, r, "claude", "pm", nil, image, nil, teamsource.Source{}, Inputs{}, "kukeon", "default")
+	bp2, err := RenderBlueprint(cacheDir, h, r, "claude", "pm", nil, image, nil, teamsource.Source{}, Inputs{}, "kukeon", "default", "default", "default")
 	if err != nil {
 		t.Fatalf("RenderBlueprint (idempotent): %v", err)
 	}
@@ -404,6 +406,8 @@ func TestRenderBlueprintBindsInternalRefInBuildMode(t *testing.T) {
 		teamsource.Source{},
 		Inputs{Build: true, SourceRef: "v1.4.0"},
 		"sbsh",
+		"default",
+		"default",
 		"default",
 	)
 	if err != nil {
@@ -454,6 +458,8 @@ func TestRenderBlueprintBindsPublishedRefWithoutBuild(t *testing.T) {
 				Inputs{Build: tc.build, SourceRef: tc.sourceRef},
 				"sbsh",
 				"default",
+				"default",
+				"default",
 			)
 			if err != nil {
 				t.Fatalf("RenderBlueprint: %v", err)
@@ -483,6 +489,8 @@ func TestRenderBlueprintMissingTemplate(t *testing.T) {
 		Inputs{},
 		"sbsh",
 		"default",
+		"default",
+		"default",
 	)
 	if !errors.Is(err, errdefs.ErrTeamBlueprintTemplateMissing) {
 		t.Fatalf("err = %v, want ErrTeamBlueprintTemplateMissing", err)
@@ -506,6 +514,8 @@ func TestRenderBlueprintEmptyTemplatePathRejected(t *testing.T) {
 		teamsource.Source{},
 		Inputs{},
 		"sbsh",
+		"default",
+		"default",
 		"default",
 	)
 	if !errors.Is(err, errdefs.ErrTeamBlueprintTemplateMissing) {
@@ -536,6 +546,8 @@ func TestRenderBlueprintResolvesTemplateRelativeToHarnessDir(t *testing.T) {
 	bp, err := RenderBlueprint(
 		cacheDir, h, minimalRole(), "claude", "dev",
 		[]string{"git", "go"}, image, nil, teamsource.Source{}, Inputs{}, "sbsh", "default",
+		"default",
+		"default",
 	)
 	if err != nil {
 		t.Fatalf("RenderBlueprint with bare-filename template: %v", err)
@@ -577,6 +589,8 @@ spec:
 	bp, err := RenderBlueprint(
 		cacheDir, h, minimalRole(), "claude", "my-dev",
 		[]string{"go"}, image, nil, teamsource.Source{}, Inputs{}, "sbsh", "default",
+		"default",
+		"default",
 	)
 	if err != nil {
 		t.Fatalf("RenderBlueprint with sibling partials: %v", err)
@@ -626,6 +640,8 @@ spec:
 	bp, err := RenderBlueprint(
 		cacheDir, h, minimalRole(), "claude", "dev",
 		[]string{"go"}, image, tc, teamsource.Source{}, Inputs{}, "sbsh", "default",
+		"default",
+		"default",
 	)
 	if err != nil {
 		t.Fatalf("RenderBlueprint: %v", err)
@@ -675,6 +691,8 @@ spec:
 	bp, err := RenderBlueprint(
 		cacheDir, h, minimalRole(), "claude", "pr-reviewer",
 		nil, image, nil, teamsource.Source{}, Inputs{}, "sbsh", "default",
+		"default",
+		"default",
 	)
 	if err != nil {
 		t.Fatalf("RenderBlueprint: %v", err)
@@ -720,6 +738,8 @@ spec:
 		teamsource.Source{},
 		Inputs{},
 		"sbsh",
+		"default",
+		"default",
 		"default",
 	)
 	if err != nil {
@@ -769,7 +789,7 @@ func TestBindConfigStampsTeamLabelAndProjectRepoFill(t *testing.T) {
 	}
 	in := Inputs{Project: "sbsh", ProjectRepoURL: "git@github.com:eminwux/sbsh.git"}
 
-	cfg := BindConfig(bp, role, "dev", "claude", tc, src, in, "sbsh", "default")
+	cfg := BindConfig(bp, role, "dev", "claude", tc, src, in, "sbsh", "default", "default", "default")
 	if cfg.Metadata.Labels[v1beta1.LabelTeam] != "sbsh" {
 		t.Errorf("team label = %q, want sbsh", cfg.Metadata.Labels[v1beta1.LabelTeam])
 	}
@@ -809,6 +829,8 @@ func TestBindConfigSkipsUndeclaredSlots(t *testing.T) {
 		in,
 		"sbsh",
 		"default",
+		"default",
+		"default",
 	)
 	if len(cfg.Spec.Repos) != 0 {
 		t.Errorf("repos should stay empty when template declares no slots: %+v", cfg.Spec.Repos)
@@ -841,7 +863,7 @@ func TestBindConfigFillsAgentsSlotFromTeamsConfigSources(t *testing.T) {
 		Ref:       "v1.4.0",
 		Kind:      teamsource.RefTag,
 	}
-	cfg := BindConfig(bp, minimalRole(), "dev", "claude", tc, src, Inputs{Project: "sbsh"}, "sbsh", "default")
+	cfg := BindConfig(bp, minimalRole(), "dev", "claude", tc, src, Inputs{Project: "sbsh"}, "sbsh", "default", "default", "default")
 	if got := cfg.Spec.Repos["agents"].URL; got != "git@github.com:eminwux/agents.git" {
 		t.Errorf("agents slot fill URL = %q, want agents.git", got)
 	}
@@ -1101,6 +1123,8 @@ spec:
 	bp, err := RenderBlueprint(
 		cacheDir, h, minimalRole(), "claude", "dev",
 		[]string{"go"}, image, tc, src, in, "sbsh", "default",
+		"default",
+		"default",
 	)
 	if err != nil {
 		t.Fatalf("RenderBlueprint: %v", err)
@@ -1144,6 +1168,8 @@ spec:
 	bp, err := RenderBlueprint(
 		cacheDir, h, minimalRole(), "claude", "dev",
 		[]string{"go"}, image, tc, src, Inputs{Project: "sbsh"}, "sbsh", "default",
+		"default",
+		"default",
 	)
 	if err != nil {
 		t.Fatalf("RenderBlueprint: %v", err)
@@ -1182,6 +1208,8 @@ spec:
 		cacheDir, h, minimalRole(), "claude", "dev",
 		[]string{"go"}, image, &model.TeamsConfig{}, teamsource.Source{},
 		Inputs{Project: "sbsh"}, "sbsh", "default",
+		"default",
+		"default",
 	)
 	if err != nil {
 		t.Fatalf("RenderBlueprint: %v", err)
@@ -1277,5 +1305,94 @@ func TestRenderDefaultRealmFallback(t *testing.T) {
 	}
 	if res.Blueprints[0].Metadata.Realm != DefaultRealm {
 		t.Errorf("realm = %q, want %q", res.Blueprints[0].Metadata.Realm, DefaultRealm)
+	}
+}
+
+// TestRenderDefaultsSpaceStackOnBlueprintAndConfig is the regression guard for
+// #1133: with Inputs leaving space/stack empty, the rendered Blueprint AND its
+// companion Config (metadata + Spec.Blueprint ref) must all stamp an explicit
+// `default` space/stack — not the template's empty values — so the persisted
+// Config scope matches the live cell the CLI create path defaults to
+// `default/default/default`, and DiffCell reports no spurious OutOfSync.
+func TestRenderDefaultsSpaceStackOnBlueprintAndConfig(t *testing.T) {
+	t.Parallel()
+	cacheDir := t.TempDir()
+	buildClaudeTemplate(t, cacheDir)
+	bundle := &teamsource.Bundle{
+		CacheDir: cacheDir,
+		Roles:    map[string]*model.Role{"dev": minimalRole()},
+		Harnesses: map[string]*model.Harness{
+			"claude": {Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}},
+		},
+		ImageCatalog: minimalClaudeCatalog("go", "git"),
+	}
+	pt := &model.ProjectTeam{
+		Metadata: model.Metadata{Name: "sbsh"},
+		Spec: model.ProjectTeamSpec{
+			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
+			Roles:    []model.ProjectTeamRole{{Ref: "dev"}},
+		},
+	}
+	// Inputs carries no Realm/Space/Stack — exercises the all-defaults path.
+	res, err := Render(bundle, pt, nil, Inputs{Project: "sbsh"})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	bp := res.Blueprints[0]
+	if bp.Metadata.Space != DefaultSpace || bp.Metadata.Stack != DefaultStack {
+		t.Errorf("blueprint space/stack = %q/%q, want %q/%q",
+			bp.Metadata.Space, bp.Metadata.Stack, DefaultSpace, DefaultStack)
+	}
+	cfg := res.Configs[0]
+	if cfg.Metadata.Realm != DefaultRealm || cfg.Metadata.Space != DefaultSpace || cfg.Metadata.Stack != DefaultStack {
+		t.Errorf("config metadata realm/space/stack = %q/%q/%q, want %q/%q/%q",
+			cfg.Metadata.Realm, cfg.Metadata.Space, cfg.Metadata.Stack,
+			DefaultRealm, DefaultSpace, DefaultStack)
+	}
+	ref := cfg.Spec.Blueprint
+	if ref.Realm != DefaultRealm || ref.Space != DefaultSpace || ref.Stack != DefaultStack {
+		t.Errorf("config blueprint ref realm/space/stack = %q/%q/%q, want %q/%q/%q",
+			ref.Realm, ref.Space, ref.Stack, DefaultRealm, DefaultSpace, DefaultStack)
+	}
+}
+
+// TestRenderHonorsInputsScope confirms explicit Inputs.Realm/Space/Stack
+// (sourced from kuketeam.yaml's ProjectTeamSpec) flow through to both the
+// Blueprint and Config scope coordinates rather than being overridden by the
+// defaults.
+func TestRenderHonorsInputsScope(t *testing.T) {
+	t.Parallel()
+	cacheDir := t.TempDir()
+	buildClaudeTemplate(t, cacheDir)
+	bundle := &teamsource.Bundle{
+		CacheDir: cacheDir,
+		Roles:    map[string]*model.Role{"dev": minimalRole()},
+		Harnesses: map[string]*model.Harness{
+			"claude": {Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}},
+		},
+		ImageCatalog: minimalClaudeCatalog("go", "git"),
+	}
+	pt := &model.ProjectTeam{
+		Metadata: model.Metadata{Name: "sbsh"},
+		Spec: model.ProjectTeamSpec{
+			Defaults: model.ProjectTeamDefaults{Harnesses: []string{"claude"}},
+			Roles:    []model.ProjectTeamRole{{Ref: "dev"}},
+		},
+	}
+	res, err := Render(bundle, pt, nil, Inputs{
+		Project: "sbsh", Realm: "prod", Space: "platform", Stack: "agents",
+	})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	bp := res.Blueprints[0]
+	if bp.Metadata.Realm != "prod" || bp.Metadata.Space != "platform" || bp.Metadata.Stack != "agents" {
+		t.Errorf("blueprint realm/space/stack = %q/%q/%q, want prod/platform/agents",
+			bp.Metadata.Realm, bp.Metadata.Space, bp.Metadata.Stack)
+	}
+	cfg := res.Configs[0]
+	if cfg.Metadata.Realm != "prod" || cfg.Metadata.Space != "platform" || cfg.Metadata.Stack != "agents" {
+		t.Errorf("config realm/space/stack = %q/%q/%q, want prod/platform/agents",
+			cfg.Metadata.Realm, cfg.Metadata.Space, cfg.Metadata.Stack)
 	}
 }

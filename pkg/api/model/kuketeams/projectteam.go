@@ -35,6 +35,14 @@ type ProjectTeamSpec struct {
 	// `<owner>/<repo>@vX.Y.Z` string form is rejected at parse time with a
 	// migration error.
 	Source TeamSource `json:"source"             yaml:"source"`
+	// Realm, Space, and Stack are the optional scope coordinates the team's
+	// rendered cells bind to. Each defaults to `default` when omitted (the
+	// renderer stamps the defaulted value onto every rendered Blueprint/Config
+	// so the persisted Config scope matches the live cell — see teamrender
+	// DefaultRealm / DefaultSpace / DefaultStack and #1133).
+	Realm string `json:"realm,omitempty"    yaml:"realm,omitempty"`
+	Space string `json:"space,omitempty"    yaml:"space,omitempty"`
+	Stack string `json:"stack,omitempty"    yaml:"stack,omitempty"`
 	// Defaults supplies project-wide harness defaults applied to every role
 	// that does not pin its own.
 	Defaults ProjectTeamDefaults `json:"defaults,omitempty" yaml:"defaults,omitempty"`
