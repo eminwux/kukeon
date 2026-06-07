@@ -7,7 +7,7 @@ kuke create <resource> [NAME] [flags]
 kuke c      <resource> [NAME] [flags]      # alias
 ```
 
-Resources: `realm`, `space`, `stack`, `cell`, `blueprint`, `config`, `secret`. Each subcommand also has a short alias (`r`, `sp`, `st`, `ce`, `bp`, `cfg`, and `secret` has none).
+Resources: `realm`, `space`, `stack`, `cell`, `blueprint`, `config`, `secret`, `registry-credential`. Each subcommand also has a short alias (`r`, `sp`, `st`, `ce`, `bp`, `cfg`, `secret` has none, and `registry-credential` has `registry-cred`/`regcred`).
 
 ## kuke create realm
 
@@ -180,6 +180,45 @@ sudo kuke create secret api-key --from-literal=API_KEY=sk-... --realm default
 
 # From file
 sudo kuke create secret tls-cert --from-file=./tls.crt --realm default
+```
+
+## kuke create registry-credential
+
+```
+kuke create registry-credential <realm> --username <u> (--password-stdin | --from-file <path>)
+                                         [--server <host>]
+```
+
+Attach private-registry pull credentials to an **existing** realm. The command
+reads the realm, upserts an entry onto its `spec.registryCredentials` keyed by
+`--server`, and re-applies the realm. The reconciler converges the change as a
+*compatible* update — no realm recreate and no cell disruption — so cells in the
+realm can immediately pull images that previously returned `403 Forbidden`.
+
+Re-running with the same `--server` updates that entry in place (username +
+token) rather than appending a duplicate; a different `--server` appends a new
+entry. Existing entries for other servers are preserved.
+
+The token never enters argv: supply it via `--password-stdin` (read from stdin,
+docker-login style) or `--from-file` (read from a file). Exactly one of the two
+is required.
+
+| Flag                   | Default                     | Description                                                                  |
+| ---------------------- | --------------------------- | ---------------------------------------------------------------------------- |
+| `<realm>` (positional) | _(required)_                | The realm to attach the credential to                                        |
+| `--username`           | _(required)_                | Registry username                                                            |
+| `--password-stdin`     | `false`                     | Read the registry token from stdin                                           |
+| `--from-file`          | `""`                        | Read the registry token from a file                                          |
+| `--server`             | `""` (matches image's host) | Registry host the credential applies to (e.g. `ghcr.io`); empty matches the registry extracted from the image reference at pull time |
+
+```bash
+# Pipe a token in from stdin (no token in shell history)
+echo "$GHCR_TOKEN" | sudo kuke create registry-credential default \
+    --server ghcr.io --username my-user --password-stdin
+
+# Or read it from a file
+sudo kuke create registry-credential default \
+    --server ghcr.io --username my-user --from-file ./ghcr-token.txt
 ```
 
 ## Imperative vs. declarative
