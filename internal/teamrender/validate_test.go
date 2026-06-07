@@ -309,6 +309,84 @@ func TestValidateFactsAllKnownKeysClean(t *testing.T) {
 	}
 }
 
+// TestYAMLCommentIndex locks the quote-aware `#`-comment detection that the
+// validate-path comment strip relies on: a `#` at line start or after
+// whitespace begins a comment, but a `#` inside a quoted scalar (or one glued
+// to a preceding non-space char, as in a URL fragment) does not (#1123).
+func TestYAMLCommentIndex(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		line string
+		want int
+	}{
+		{"# whole line", 0},
+		{"key: value # trailing", 11},
+		{"key: value\t# tab-led", 11},
+		{"no comment here", -1},
+		{"url: http://x#frag", -1},                       // glued # is not a comment
+		{`note: "a # b" {{ .operator.REAL }}`, -1},       // # inside double quotes
+		{`note: 'a # b' after`, -1},                      // # inside single quotes
+		{`name: {{ .x }} # doc {{ .operator.X }}`, 15},   // comment after a live action
+		{`msg: "escaped \" # still in string" tail`, -1}, // escaped quote keeps string open
+	}
+	for _, tc := range cases {
+		if got := yamlCommentIndex(tc.line); got != tc.want {
+			t.Errorf("yamlCommentIndex(%q) = %d, want %d", tc.line, got, tc.want)
+		}
+	}
+}
+
+// TestValidateFactsIgnoresCommentedReferences confirms a template that
+// documents its fact contract with `{{ .operator.X }}` / `{{ .project.X }}`
+// inside YAML `#` comments produces no facts misses — the comment-stripping
+// pass drops those actions before the parser sees them (#1123). A real
+// unbound reference on a live (non-comment) line still surfaces.
+func TestValidateFactsIgnoresCommentedReferences(t *testing.T) {
+	t.Parallel()
+	cacheDir := t.TempDir()
+	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml",
+		"#   - {{ .operator.X }} pulls from TeamsConfig (REGISTRY, HOME_DIR, ...).\n"+
+			"#   - {{ .project.X }}  pulls from ProjectTeam (AGENTS_REPO, PROJECT_DIR).\n"+
+			"kind: CellBlueprint\n"+
+			"name: {{ .project.NAME }}  # {{ .operator.ALSO_COMMENTED }} ignored\n"+
+			"bad: {{ .operator.REAL_GAP }}\n")
+	writeHarnessFile(t, cacheDir, "opencode", "blueprint.tmpl.yaml", "kind: CellBlueprint\n")
+	bundle, pt := twoHarnessBundle(cacheDir, []string{"go"}, "blueprint.tmpl.yaml")
+
+	rep := Validate(bundle, pt)
+	facts := sectionByTitle(t, rep, SectionFacts)
+
+	for _, commented := range []string{".operator.X", ".project.X", ".operator.ALSO_COMMENTED"} {
+		if hasMissContaining(facts, commented) {
+			t.Errorf("commented reference %q must not be flagged: %+v", commented, facts.Lines)
+		}
+	}
+	// The genuine gap on a live line still surfaces.
+	if !hasMissContaining(facts, ".operator.REAL_GAP", "not bound") {
+		t.Errorf("live unbound reference must still be flagged: %+v", facts.Lines)
+	}
+}
+
+// TestValidatePartialsIgnoresCommentedTemplateInvocation confirms a
+// `{{ template "name" }}` invocation documented inside a YAML `#` comment is
+// not flagged as an unbound partial reference — the same comment-stripping pass
+// applies to the partials walk (#1123).
+func TestValidatePartialsIgnoresCommentedTemplateInvocation(t *testing.T) {
+	t.Parallel()
+	cacheDir := t.TempDir()
+	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml",
+		"# e.g. {{ template \"mount_source\" . }} wires a repo mount\n"+
+			"kind: CellBlueprint\n")
+	writeHarnessFile(t, cacheDir, "opencode", "blueprint.tmpl.yaml", "kind: CellBlueprint\n")
+	bundle, pt := twoHarnessBundle(cacheDir, []string{"go"}, "blueprint.tmpl.yaml")
+
+	rep := Validate(bundle, pt)
+	partials := sectionByTitle(t, rep, SectionPartials)
+	if hasMissContaining(partials, "mount_source") {
+		t.Errorf("commented template invocation must not be flagged: %+v", partials.Lines)
+	}
+}
+
 // TestKnownFactKeysCoverRendererContract pins the fact schema the validator
 // checks against, so a future renderContextValues key add/remove that this
 // derivation misses is caught here rather than silently passing validate.

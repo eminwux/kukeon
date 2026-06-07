@@ -306,7 +306,7 @@ func validatePartials(
 			// Unresolved path is reported by validateTemplates; skip.
 			continue
 		}
-		tpl, parseErr := parseBlueprintTemplate(full, raw)
+		tpl, parseErr := parseBlueprintTemplateBody(full, raw, stripYAMLComments)
 		if parseErr != nil {
 			sec.Lines = append(sec.Lines, ReportLine{
 				OK:     false,
@@ -376,7 +376,7 @@ func validateFacts(
 		if err != nil {
 			continue
 		}
-		tpl, parseErr := parseBlueprintTemplate(full, raw)
+		tpl, parseErr := parseBlueprintTemplateBody(full, raw, stripYAMLComments)
 		if parseErr != nil {
 			// Parse error already surfaces in the partials section.
 			continue
@@ -564,4 +564,55 @@ func walkBranch(pipe *parse.PipeNode, list, elseList *parse.ListNode, visit func
 	if elseList != nil {
 		walkNodes(elseList, visit)
 	}
+}
+
+// stripYAMLComments blanks the YAML `#`-comment tail of every line in a
+// blueprint template body, preserving line structure (and therefore parser
+// line numbers) by keeping each newline and dropping only the commented
+// remainder. Go's text/template parser does not honor YAML `#` comments, so a
+// template that *documents* its fact contract with `{{ .operator.X }}` inside a
+// comment would otherwise parse as a live FieldNode and surface as a spurious
+// fact/partial gap (#1123). Used only by the validate path; the renderer keeps
+// comments verbatim so the generated YAML is unchanged.
+func stripYAMLComments(raw []byte) []byte {
+	lines := strings.Split(string(raw), "\n")
+	for i, line := range lines {
+		if idx := yamlCommentIndex(line); idx >= 0 {
+			lines[i] = line[:idx]
+		}
+	}
+	return []byte(strings.Join(lines, "\n"))
+}
+
+// yamlCommentIndex returns the byte index at which a YAML `#` comment begins on
+// line, or -1 when the line carries none. A `#` starts a comment when it sits
+// at line start or follows whitespace and is not inside a single- or
+// double-quoted scalar — the YAML rule — so a `{{ ... }}` action inside a
+// quoted value that happens to contain `#` survives rather than being clipped.
+func yamlCommentIndex(line string) int {
+	var inSingle, inDouble bool
+	for i := 0; i < len(line); i++ {
+		switch c := line[i]; {
+		case inSingle:
+			if c == '\'' {
+				inSingle = false
+			}
+		case inDouble:
+			switch c {
+			case '\\':
+				i++ // skip the escaped char
+			case '"':
+				inDouble = false
+			}
+		case c == '\'':
+			inSingle = true
+		case c == '"':
+			inDouble = true
+		case c == '#':
+			if i == 0 || line[i-1] == ' ' || line[i-1] == '\t' {
+				return i
+			}
+		}
+	}
+	return -1
 }
