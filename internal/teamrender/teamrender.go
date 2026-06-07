@@ -41,8 +41,10 @@
 //     blueprint and carries (a) operator facts pulled from
 //     `~/.kuke/kuketeams.yaml` (git author/committer/signingKey/registry
 //     stamped into Values), (b) the project's cloned repo URL stamped
-//     into the `project` repo slot fill, and (c) any operator secret
-//     refs from `tc.spec.secrets` that the role declares it needs.
+//     into the `project` repo slot fill, and (c) for every secret the
+//     role declares it needs and the blueprint declares a slot for, an
+//     in-realm ContainerSecretRef pointing at the Secret of the same
+//     name (created out of `secrets.env`, #1120).
 //  5. label — every rendered CellBlueprint and CellConfig carries
 //     `metadata.labels[kukeon.io/team] = <project>` so the daemon-side
 //     prune-apply machinery from #1029 can converge the project's slice
