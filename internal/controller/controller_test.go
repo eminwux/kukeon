@@ -45,12 +45,13 @@ type fakeRunner struct {
 	DeleteRealmFn                    func(realm intmodel.Realm) error
 
 	// Space methods
-	GetSpaceFn             func(space intmodel.Space) (intmodel.Space, error)
-	ListSpacesFn           func(realmName string) ([]intmodel.Space, error)
-	CreateSpaceFn          func(space intmodel.Space) (intmodel.Space, error)
-	EnsureSpaceFn          func(space intmodel.Space) (intmodel.Space, error)
-	ExistsSpaceCNIConfigFn func(space intmodel.Space) (bool, error)
-	DeleteSpaceFn          func(space intmodel.Space) error
+	GetSpaceFn                  func(space intmodel.Space) (intmodel.Space, error)
+	ListSpacesFn                func(realmName string) ([]intmodel.Space, error)
+	CreateSpaceFn               func(space intmodel.Space) (intmodel.Space, error)
+	EnsureSpaceFn               func(space intmodel.Space) (intmodel.Space, error)
+	ExistsSpaceCNIConfigFn      func(space intmodel.Space) (bool, error)
+	ResolveSpaceCNIConfigPathFn func(realmName, spaceName string) (string, error)
+	DeleteSpaceFn               func(space intmodel.Space) error
 
 	// Stack methods
 	GetStackFn    func(stack intmodel.Stack) (intmodel.Stack, error)
@@ -202,6 +203,13 @@ func (f *fakeRunner) GetSpace(space intmodel.Space) (intmodel.Space, error) {
 		return f.GetSpaceFn(space)
 	}
 	return intmodel.Space{}, errors.New("unexpected call to GetSpace")
+}
+
+func (f *fakeRunner) ResolveSpaceCNIConfigPath(realmName, spaceName string) (string, error) {
+	if f.ResolveSpaceCNIConfigPathFn != nil {
+		return f.ResolveSpaceCNIConfigPathFn(realmName, spaceName)
+	}
+	return "", errors.New("unexpected call to ResolveSpaceCNIConfigPath")
 }
 
 func (f *fakeRunner) ListSpaces(realmName string) ([]intmodel.Space, error) {

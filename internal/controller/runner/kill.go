@@ -90,7 +90,7 @@ func (r *Exec) killCellLocked(cell intmodel.Cell) (intmodel.Cell, error) {
 		return intmodel.Cell{}, errdefs.ErrStackNameRequired
 	}
 
-	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmID, spaceID)
+	cniConfigPath, cniErr := r.ResolveSpaceCNIConfigPath(realmID, spaceID)
 	if cniErr != nil {
 		return intmodel.Cell{}, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}

@@ -214,7 +214,7 @@ func seedStopKillSpace(t *testing.T, r *Exec, realm, space string) {
 		Kind:       v1beta1.KindSpace,
 		Metadata:   v1beta1.SpaceMetadata{Name: space},
 		// An explicit CNIConfigPath short-circuits the default-path build in
-		// resolveSpaceCNIConfigPath; the file is never read because the
+		// ResolveSpaceCNIConfigPath; the file is never read because the
 		// stop/kill paths only forward it to detach calls the fake ignores.
 		Spec: v1beta1.SpaceSpec{RealmID: realm, CNIConfigPath: filepath.Join(t.TempDir(), "cni.conflist")},
 	}

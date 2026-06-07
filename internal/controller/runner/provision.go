@@ -1373,7 +1373,7 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		return nil, err
 	}
 
-	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmName, spaceName)
+	cniConfigPath, cniErr := r.ResolveSpaceCNIConfigPath(realmName, spaceName)
 	if cniErr != nil {
 		return nil, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
@@ -1683,7 +1683,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 		return nil, err
 	}
 
-	cniConfigPath, cniErr := r.resolveSpaceCNIConfigPath(realmName, spaceName)
+	cniConfigPath, cniErr := r.ResolveSpaceCNIConfigPath(realmName, spaceName)
 	if cniErr != nil {
 		return nil, fmt.Errorf("failed to resolve space CNI config: %w", cniErr)
 	}
@@ -2156,7 +2156,7 @@ func (r *Exec) ensureCellRootContainerSpec(cell intmodel.Cell) (intmodel.Contain
 	}
 
 	// Resolve CNI config path
-	cniConfigPath, err := r.resolveSpaceCNIConfigPath(realmName, spaceName)
+	cniConfigPath, err := r.ResolveSpaceCNIConfigPath(realmName, spaceName)
 	if err != nil {
 		return intmodel.ContainerSpec{}, fmt.Errorf("failed to resolve space CNI config: %w", err)
 	}

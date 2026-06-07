@@ -140,7 +140,7 @@ func (r *Exec) RecreateCell(desired intmodel.Cell) (_ intmodel.Cell, retErr erro
 	// the stop/kill/delete teardown paths; the name is a pure function of (realm,
 	// space).
 	cellName := strings.TrimSpace(existing.Metadata.Name)
-	cniConfigPath, _ := r.resolveSpaceCNIConfigPath(realmName, spaceName)
+	cniConfigPath, _ := r.ResolveSpaceCNIConfigPath(realmName, spaceName)
 	networkName := r.buildRootCNINetworkName(realmName, spaceName)
 	_ = teardownRootContainerCNI(
 		func() {
