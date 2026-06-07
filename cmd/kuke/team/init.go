@@ -134,7 +134,11 @@ func NewInitCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runInit(cmd, dryRun, build)
+			validate, err := cmd.Flags().GetBool("validate")
+			if err != nil {
+				return err
+			}
+			return runInit(cmd, dryRun, build, validate)
 		},
 	}
 
@@ -146,6 +150,13 @@ func NewInitCmd() *cobra.Command {
 		"build", false,
 		"Locally build the selected catalog images (kukebuild) into the target realm's containerd namespace; no registry push",
 	)
+	cmd.Flags().Bool(
+		"validate", false,
+		"Run every render-contract check (catalog, templates, partials, facts) once and print a single gap report; exit 1 on any gap. Applies nothing and writes nothing",
+	)
+	// --validate is a terminal contract-check mode; --build drives a local
+	// image build. They are mutually exclusive per #1116.
+	cmd.MarkFlagsMutuallyExclusive("build", "validate")
 
 	return cmd
 }
@@ -153,18 +164,79 @@ func NewInitCmd() *cobra.Command {
 // runInit gathers the cobra-coupled inputs (current directory, ~/.kuke layout,
 // git-config reader, project-repo-URL reader, daemon apply reader) and hands
 // them to composeTeam, which holds the testable lifecycle.
-func runInit(cmd *cobra.Command, dryRun, build bool) error {
+func runInit(cmd *cobra.Command, dryRun, build, validate bool) error {
 	projectDir, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("resolve current directory: %w", err)
 	}
 	layout := teamhost.NewLayout(config.DefaultKukeDir())
+	if validate {
+		return validateTeam(
+			cmd.Context(), cmd.OutOrStdout(), projectDir, layout,
+			gitConfigFromCmd(cmd), resolveFromCmd(cmd),
+		)
+	}
 	return composeTeam(
 		cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), projectDir, layout,
 		gitConfigFromCmd(cmd), projectRepoURLFromCmd(cmd), resolveFromCmd(cmd),
 		applyForTeamFromCmd(cmd), buildAllFromCmd(cmd),
 		dryRun, build,
 	)
+}
+
+// validateTeam runs the `kuke team init --validate` contract check: it reads
+// the project roster, loads (in-memory only — never scaffolds or writes) the
+// operator-global config so resolve can materialize the agents source under
+// the operator's identity, resolves the bundle, and hands it to
+// teamrender.Validate. The multi-section gap report is printed to out; a
+// non-empty gap set surfaces errdefs.ErrTeamValidateGaps so the command exits
+// non-zero. A harness-less roster has nothing to validate — the bundle is not
+// resolved (no clone) and the report is four empty sections (clean exit).
+//
+// validateTeam takes no cobra dependency so it is unit-testable with a temp
+// layout, a stub git-config reader, and a stub resolver — no live kukeond and
+// no network required.
+func validateTeam(
+	ctx context.Context,
+	out io.Writer,
+	projectDir string,
+	layout teamhost.Layout,
+	getGit GitConfigFunc,
+	resolve ResolveFunc,
+) error {
+	pt, err := readProjectTeam(projectDir)
+	if err != nil {
+		return err
+	}
+	project := strings.TrimSpace(pt.Metadata.Name)
+	if project == "" {
+		return errdefs.ErrTeamMetadataNameRequired
+	}
+
+	// dryRun=true holds the scaffold in memory: --validate must not write the
+	// operator-global facts file as a side effect of a read-only check.
+	tc, _, err := loadOrScaffoldGlobalConfig(ctx, layout, getGit, true)
+	if err != nil {
+		return err
+	}
+
+	var bundle *teamsource.Bundle
+	if len(pt.Spec.Defaults.Harnesses) > 0 && len(pt.Spec.Roles) > 0 {
+		cache := teamsource.NewCache(layout.CacheDir())
+		bundle, err = resolve(ctx, cache, tc, pt)
+		if err != nil {
+			return fmt.Errorf("resolve agents source: %w", err)
+		}
+	}
+
+	report := teamrender.Validate(bundle, pt)
+	if writeErr := report.Write(out); writeErr != nil {
+		return writeErr
+	}
+	if report.HasMiss() {
+		return fmt.Errorf("%w (%d)", errdefs.ErrTeamValidateGaps, report.MissCount())
+	}
+	return nil
 }
 
 // composeTeam runs the team-init lifecycle against explicit inputs:
