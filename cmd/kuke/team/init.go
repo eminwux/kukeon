@@ -460,7 +460,7 @@ func composeSecrets(
 	if bundle == nil || res == nil {
 		return nil
 	}
-	needs := teamsecrets.UnionNeedsSecrets(bundle.Roles, pt.Spec.Roles)
+	needs := teamsecrets.UnionSecretNames(bundle.Roles, pt.Spec.Roles, pt.Spec.Defaults.Harnesses)
 	if len(needs) == 0 {
 		return nil
 	}
@@ -488,8 +488,9 @@ func composeSecrets(
 	res.Secrets = composed.Secrets
 	// Reconcile the binding with the set of secrets actually created. Render
 	// skips empty merged values (no kind: Secret emitted), but the post-#1147
-	// binding in teamrender adds a CellConfigSecretFill for every
-	// role.needs.secrets entry regardless. Pruning the empty keys here — the
+	// binding in teamrender adds a CellConfigSecretFill for every effective
+	// secret name (per-harness harnesses.<h>.secrets unioned with the
+	// role.needs.secrets fallback) regardless. Pruning the empty keys here — the
 	// same keys warned about above — leaves each CellConfig referencing only
 	// secrets that exist, so a role declaring needs.secrets for credentials
 	// the operator hasn't provided no longer makes the whole cell unstartable
@@ -499,12 +500,14 @@ func composeSecrets(
 }
 
 // pruneEmptySecretBindings deletes the CellConfig secret bindings whose key is
-// in emptyKeys — the role.needs.secrets entries whose merged secrets.env value
-// was empty, which secret creation (teamsecrets.Render) skipped. Both the
-// binding map keys and emptyKeys are the raw role.needs.secrets strings (the
-// binding iterates role.Spec.Needs.Secrets; emptyKeys is the empty subset of
-// the same union), so a direct map delete is namespace-consistent. Mutates the
-// CellConfigs in place; a nil/empty input on either side is a no-op.
+// in emptyKeys — the effective secret names whose merged secrets.env value was
+// empty, which secret creation (teamsecrets.Render) skipped. Both the binding
+// map keys and emptyKeys are the raw effective secret-name strings (the binding
+// iterates teamrender.effectiveSecretNames — per-harness harnesses.<h>.secrets
+// unioned with role.Spec.Needs.Secrets; emptyKeys is the empty subset of the
+// same union, gathered by UnionSecretNames), so a direct map delete is
+// namespace-consistent. Mutates the CellConfigs in place; a nil/empty input on
+// either side is a no-op.
 func pruneEmptySecretBindings(configs []*v1beta1.CellConfigDoc, emptyKeys []string) {
 	if len(configs) == 0 || len(emptyKeys) == 0 {
 		return
