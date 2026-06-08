@@ -291,30 +291,96 @@ func TestRenderIsSortedByName(t *testing.T) {
 	}
 }
 
-func TestUnionNeedsSecrets(t *testing.T) {
+func TestUnionSecretNames(t *testing.T) {
 	t.Parallel()
-	roles := map[string]*model.Role{
-		"dev": {Spec: model.RoleSpec{Needs: model.RoleNeeds{Secrets: []string{"ANTHROPIC_AUTH_TOKEN"}}}},
-		"pm": {
-			Spec: model.RoleSpec{
-				Needs: model.RoleNeeds{Secrets: []string{"OPENROUTER_API_KEY", "ANTHROPIC_AUTH_TOKEN"}},
+	tests := []struct {
+		name      string
+		roles     map[string]*model.Role
+		roster    []model.ProjectTeamRole
+		harnesses []string
+		want      []string
+	}{
+		{
+			name: "needs.secrets only",
+			roles: map[string]*model.Role{
+				"dev": {Spec: model.RoleSpec{Needs: model.RoleNeeds{Secrets: []string{"ANTHROPIC_AUTH_TOKEN"}}}},
+				"pm": {
+					Spec: model.RoleSpec{
+						Needs: model.RoleNeeds{Secrets: []string{"OPENROUTER_API_KEY", "ANTHROPIC_AUTH_TOKEN"}},
+					},
+				},
 			},
+			roster: []model.ProjectTeamRole{
+				{Ref: "dev"},
+				{Ref: "pm"},
+				{Ref: "unknown-role"}, // skipped silently
+			},
+			harnesses: []string{"claude"},
+			want:      []string{"ANTHROPIC_AUTH_TOKEN", "OPENROUTER_API_KEY"},
+		},
+		{
+			// #1160: a role that declares a token ONLY under
+			// harnesses.<name>.secrets (no needs.secrets) must still be gathered
+			// so a kind: Secret is composed from secrets.env.
+			name: "per-harness secrets only",
+			roles: map[string]*model.Role{
+				"dev": {Spec: model.RoleSpec{
+					Harnesses: map[string]model.RoleHarness{
+						"claude": {Secrets: []string{"claude-code-oauth-token"}},
+					},
+				}},
+			},
+			roster:    []model.ProjectTeamRole{{Ref: "dev"}},
+			harnesses: []string{"claude"},
+			want:      []string{"claude-code-oauth-token"},
+		},
+		{
+			// The per-harness contribution is gated by the selected harness set:
+			// an OpenCode-only secret is not gathered when only claude is on.
+			name: "unselected harness secrets dropped",
+			roles: map[string]*model.Role{
+				"dev": {Spec: model.RoleSpec{
+					Harnesses: map[string]model.RoleHarness{
+						"claude":   {Secrets: []string{"claude-code-oauth-token"}},
+						"opencode": {Secrets: []string{"opencode-api-key"}},
+					},
+				}},
+			},
+			roster:    []model.ProjectTeamRole{{Ref: "dev"}},
+			harnesses: []string{"claude"},
+			want:      []string{"claude-code-oauth-token"},
+		},
+		{
+			// Per-harness and needs.secrets unioned; the same name declared in
+			// both locations collapses to one entry.
+			name: "per-harness and needs unioned and deduped",
+			roles: map[string]*model.Role{
+				"dev": {Spec: model.RoleSpec{
+					Harnesses: map[string]model.RoleHarness{
+						"claude": {Secrets: []string{"claude-code-oauth-token", "shared-token"}},
+					},
+					Needs: model.RoleNeeds{Secrets: []string{"shared-token", "ANTHROPIC_AUTH_TOKEN"}},
+				}},
+			},
+			roster:    []model.ProjectTeamRole{{Ref: "dev"}},
+			harnesses: []string{"claude"},
+			want:      []string{"ANTHROPIC_AUTH_TOKEN", "claude-code-oauth-token", "shared-token"},
 		},
 	}
-	roster := []model.ProjectTeamRole{
-		{Ref: "dev"},
-		{Ref: "pm"},
-		{Ref: "unknown-role"}, // skipped silently
-	}
-	got := UnionNeedsSecrets(roles, roster)
-	want := []string{"ANTHROPIC_AUTH_TOKEN", "OPENROUTER_API_KEY"}
-	if len(got) != len(want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-	for i, k := range want {
-		if got[i] != k {
-			t.Errorf("got[%d] = %q, want %q", i, got[i], k)
-		}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := UnionSecretNames(tt.roles, tt.roster, tt.harnesses)
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+			for i, k := range tt.want {
+				if got[i] != k {
+					t.Errorf("got[%d] = %q, want %q", i, got[i], k)
+				}
+			}
+		})
 	}
 }
 

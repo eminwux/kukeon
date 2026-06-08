@@ -70,7 +70,7 @@ const (
 // path so the override lands beside the rest of the per-team state.
 //
 // Needs is the union of secret names every role in the team references —
-// see UnionNeedsSecrets. The scaffold lines are written for every Needs
+// see UnionSecretNames. The scaffold lines are written for every Needs
 // entry; merged values for keys not in Needs are dropped so a hand-edited
 // override file with extra junk doesn't leak unrelated bytes into the
 // apply bundle.
@@ -321,27 +321,47 @@ func KebabCase(s string) string {
 	return strings.ReplaceAll(strings.ToLower(s), "_", "-")
 }
 
-// UnionNeedsSecrets walks the project roster and returns the
-// lexicographically-sorted set of secret names every referenced role's
-// `needs.secrets` declares. Roles missing from roles map are skipped
-// silently — Render would surface the missing reference, but at the
-// pre-compose secret-name discovery stage there's nothing to warn about
-// (the parent renderer already surfaces missing roles).
-func UnionNeedsSecrets(roles map[string]*model.Role, roster []model.ProjectTeamRole) []string {
+// UnionSecretNames walks the project roster and returns the
+// lexicographically-sorted set of secret names every referenced role declares,
+// unioning each role's per-harness lists (role.spec.harnesses.<h>.secrets, the
+// agents#750 location) for the selected harnesses with the role-level fallback
+// (role.spec.needs.secrets, the pre-migration location). This mirrors
+// teamrender.effectiveSecretNames so the secret-composition pipeline (which
+// creates the kind: Secret objects) and the render pipeline (which emits the
+// CellConfigs referencing them) draw from the same secret set — a role that
+// declares a token only under harnesses.<h>.secrets gets a Secret materialized
+// out of secrets.env, not just a dangling CellConfig fill (#1160).
+//
+// The per-harness contribution is gated by harnesses (the team's selected set,
+// ProjectTeam.spec.defaults.harnesses), so a role's Codex/OpenCode-only secret
+// is not gathered when those harnesses aren't selected. The role-level
+// needs.secrets fallback is harness-independent and always contributes. Roles
+// missing from roles map are skipped silently — Render would surface the
+// missing reference, but at the pre-compose secret-name discovery stage there's
+// nothing to warn about (the parent renderer already surfaces missing roles).
+func UnionSecretNames(roles map[string]*model.Role, roster []model.ProjectTeamRole, harnesses []string) []string {
 	if len(roster) == 0 || len(roles) == 0 {
 		return nil
 	}
 	set := map[string]struct{}{}
+	addNonEmpty := func(names []string) {
+		for _, s := range names {
+			if k := strings.TrimSpace(s); k != "" {
+				set[k] = struct{}{}
+			}
+		}
+	}
 	for _, ptRole := range roster {
 		role, ok := roles[ptRole.Ref]
 		if !ok {
 			continue
 		}
-		for _, s := range role.Spec.Needs.Secrets {
-			if k := strings.TrimSpace(s); k != "" {
-				set[k] = struct{}{}
+		for _, h := range harnesses {
+			if rh, ok := role.Spec.Harnesses[h]; ok {
+				addNonEmpty(rh.Secrets)
 			}
 		}
+		addNonEmpty(role.Spec.Needs.Secrets)
 	}
 	if len(set) == 0 {
 		return nil
