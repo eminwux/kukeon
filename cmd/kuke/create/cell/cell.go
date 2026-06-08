@@ -338,9 +338,11 @@ func ValidateOverrideSymmetry(flags SourceFlags) error {
 }
 
 // ScopeVars names the command-specific scope viper Vars the materialize path
-// reads to resolve binding-lookup scope (so a realm-scoped Blueprint/Config
-// stays findable when --space/--stack are unset). `kuke create cell` passes its
-// KUKE_CREATE_CELL_* vars; `kuke run` passes its KUKE_RUN_* vars. Threading the
+// reads to resolve binding-lookup scope. An unset --space/--stack defaults to
+// the var's "default" (issue #1156) so the lookup hits the full default scope;
+// a realm-scoped Blueprint/Config stays reachable via an explicit empty
+// `--space "" --stack ""`. `kuke create cell` passes its KUKE_CREATE_CELL_*
+// vars; `kuke run` passes its KUKE_RUN_* vars. Threading the
 // Vars in (rather than hard-coding KUKE_CREATE_CELL_*) is what lets the two
 // verbs share one Materialize entrypoint without colliding on a global viper
 // key (epic:cell-identity #1025).
@@ -404,9 +406,10 @@ func Materialize(
 // --param/--param-file, materialises the Cell record, overlays scope, and
 // finalizes the cell name — returning the doc without persisting it.
 //
-// Lookup scope follows the explicit-coordinate rule from
-// kukeshared.PickLookupRealm / ExplicitScope so realm-scoped Blueprints stay
-// findable when --space/--stack are not set.
+// Lookup scope follows the default-coordinate rule from
+// kukeshared.PickLookupRealm / ExplicitScope: an unset --space/--stack
+// resolves to "default" so the lookup hits the full default scope, while a
+// realm-scoped Blueprint stays reachable via an explicit empty --space/--stack.
 func materializeFromBlueprint(
 	cmd *cobra.Command, client kukeonv1.Client, flags SourceFlags, scope ScopeVars,
 ) (v1beta1.CellDoc, error) {

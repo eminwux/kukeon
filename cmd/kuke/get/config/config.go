@@ -75,10 +75,21 @@ func NewConfigCmd() *cobra.Command {
 
 			if name != "" {
 				// A single config is identified by its name plus its exact
-				// binding scope. Default the realm to the operator's current
-				// realm; deeper coordinates stay unset unless provided.
+				// binding scope. Default every coordinate to the operator's
+				// full default scope (realm/space/stack = "default") so a
+				// no-flag `kuke get config <name>` finds resources stored at
+				// the full default coordinate — how `kuke create config` and
+				// the team renderer actually store them. Mirrors `get cell`
+				// (issue #1156). A realm-scoped Config (space/stack unset) is
+				// reachable by passing an explicit `--space "" --stack ""`.
 				if realm == "" {
 					realm = strings.TrimSpace(config.KUKE_GET_CONFIG_REALM.ValueOrDefault())
+				}
+				if space == "" {
+					space = strings.TrimSpace(config.KUKE_GET_CONFIG_SPACE.ValueOrDefault())
+				}
+				if stack == "" {
+					stack = strings.TrimSpace(config.KUKE_GET_CONFIG_STACK.ValueOrDefault())
 				}
 				if realm == "" {
 					return fmt.Errorf("%w (--realm)", errdefs.ErrRealmNameRequired)
@@ -96,12 +107,12 @@ func NewConfigCmd() *cobra.Command {
 				result, getErr := client.GetConfig(cmd.Context(), lookup)
 				if getErr != nil {
 					if errors.Is(getErr, errdefs.ErrConfigNotFound) {
-						return fmt.Errorf("config %q not found", name)
+						return configNotFoundErr(cmd, client, name, realm, space, stack)
 					}
 					return getErr
 				}
 				if !result.MetadataExists {
-					return fmt.Errorf("config %q not found", name)
+					return configNotFoundErr(cmd, client, name, realm, space, stack)
 				}
 				return printConfig(cmd, &result.Config, outputFormat)
 			}
@@ -140,6 +151,34 @@ func resolveClient(cmd *cobra.Command) (kukeonv1.Client, error) {
 		return mockClient, nil
 	}
 	return kukeshared.ClientFromCmd(cmd)
+}
+
+// configNotFoundErr builds the single-get miss error. It surfaces the exact
+// scope searched and — best-effort — hints the coordinate where a Config of the
+// same name does live (probed realm-wide), so an operator who stored it at a
+// non-default space/stack sees where to look instead of a bare "not found"
+// (issue #1156). The realm-wide list is advisory: a list error is swallowed and
+// the base error returned unadorned.
+func configNotFoundErr(
+	cmd *cobra.Command, client kukeonv1.Client, name, realm, space, stack string,
+) error {
+	base := fmt.Sprintf(
+		"config %q not found (searched realm=%q space=%q stack=%q)", name, realm, space, stack,
+	)
+	configs, err := client.ListConfigs(cmd.Context(), realm, "", "")
+	if err != nil {
+		return errors.New(base)
+	}
+	for i := range configs {
+		m := &configs[i].Metadata
+		if m.Name == name && (m.Realm != realm || m.Space != space || m.Stack != stack) {
+			return fmt.Errorf(
+				"%s; a config %q exists at realm=%q space=%q stack=%q",
+				base, name, m.Realm, m.Space, m.Stack,
+			)
+		}
+	}
+	return errors.New(base)
 }
 
 func printConfig(cmd *cobra.Command, cfg *v1beta1.CellConfigDoc, format shared.OutputFormat) error {

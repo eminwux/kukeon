@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -64,6 +65,53 @@ func TestNewConfigCmd(t *testing.T) {
 			},
 		},
 		{
+			// No --space/--stack: the single-get lookup must resolve to the
+			// full default scope (realm/space/stack = "default") so a
+			// full-scoped Config is found (issue #1156).
+			name: "get single config defaults full scope when no flags",
+			args: []string{"web"},
+			fake: &fakeClient{
+				getConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+					m := doc.Metadata
+					if m.Realm != "default" || m.Space != "default" || m.Stack != "default" {
+						return kukeonv1.GetConfigResult{}, fmt.Errorf(
+							"lookup scope = realm=%q space=%q stack=%q, want all \"default\"",
+							m.Realm, m.Space, m.Stack,
+						)
+					}
+					return kukeonv1.GetConfigResult{
+						Config:         v1beta1.CellConfigDoc{Metadata: doc.Metadata},
+						MetadataExists: true,
+					}, nil
+				},
+			},
+		},
+		{
+			// An explicit empty --space/--stack stays empty so a realm-scoped
+			// Config remains findable (the escape hatch).
+			name: "get single config explicit empty space stays realm-scoped",
+			args: []string{"web"},
+			setup: func(_ *testing.T, cmd *cobra.Command) {
+				_ = cmd.Flags().Set("space", "")
+				_ = cmd.Flags().Set("stack", "")
+			},
+			fake: &fakeClient{
+				getConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+					m := doc.Metadata
+					if m.Realm != "default" || m.Space != "" || m.Stack != "" {
+						return kukeonv1.GetConfigResult{}, fmt.Errorf(
+							"lookup scope = realm=%q space=%q stack=%q, want realm=\"default\" space/stack empty",
+							m.Realm, m.Space, m.Stack,
+						)
+					}
+					return kukeonv1.GetConfigResult{
+						Config:         v1beta1.CellConfigDoc{Metadata: doc.Metadata},
+						MetadataExists: true,
+					}, nil
+				},
+			},
+		},
+		{
 			name: "get not found surfaces friendly error",
 			args: []string{"missing"},
 			setup: func(_ *testing.T, cmd *cobra.Command) {
@@ -75,6 +123,25 @@ func TestNewConfigCmd(t *testing.T) {
 				},
 			},
 			wantErr: `config "missing" not found`,
+		},
+		{
+			// On a miss, the realm-wide probe hints the coordinate where a
+			// Config of the same name does live (issue #1156).
+			name: "get not found hints other-scope coordinate",
+			args: []string{"web"},
+			fake: &fakeClient{
+				getConfigFn: func(_ v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+					return kukeonv1.GetConfigResult{MetadataExists: false}, nil
+				},
+				listConfigsFn: func(_, _, _ string) ([]v1beta1.CellConfigDoc, error) {
+					return []v1beta1.CellConfigDoc{
+						{Metadata: v1beta1.CellConfigMetadata{
+							Name: "web", Realm: "default", Space: "team-a", Stack: "core",
+						}},
+					}, nil
+				},
+			},
+			wantErr: `exists at realm="default" space="team-a" stack="core"`,
 		},
 		{
 			name: "get not found via MetadataExists=false",

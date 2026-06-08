@@ -145,15 +145,14 @@ func configLineage(cell intmodel.Cell) (string, bool) {
 // The `kukeon.io/config` lineage label records only the Config name, not
 // the scope it was bound at, so the lookup must probe progressively
 // shallower scopes: full (realm/space/stack) → space-only (realm/space) →
-// realm-only (realm). `kuke run <config>` resolves Config lookups via
-// cmd/kuke/shared.ExplicitScope (empty space/stack unless the operator
-// passed --space/--stack), so a `kuke run kukeon-dev-root-0` against a
-// realm-scoped Config materializes a cell at realm=default /
-// space=default / stack=default (resolveCellLocation fills the session
-// defaults). Without the widening here, that cell's reconciler tick
-// resolves to `/opt/kukeon/data/default/default/default/configs/<name>`
-// (which does not exist) and persists a permanent "lineage Config
-// deleted" OutOfSync verdict.
+// realm-only (realm). A realm-scoped Config (bound at realm-only via an
+// explicit empty `--space "" --stack ""`, or by the team renderer) can be
+// referenced by a cell materialized at the full default scope — `kuke run`
+// fills the cell at realm=default / space=default / stack=default via
+// resolveCellLocation regardless of the Config's binding scope. Without the
+// widening here, that cell's reconciler tick resolves to
+// `/opt/kukeon/data/default/default/default/configs/<name>` (which does not
+// exist) and persists a permanent "lineage Config deleted" OutOfSync verdict.
 //
 // Probes are deduplicated when the cell's space or stack is already empty
 // (a realm-scoped cell or a space-scoped cell only takes the one probe

@@ -125,9 +125,9 @@ func materializeClone(cmd *cobra.Command, client kukeonv1.Client, flags SourceFl
 }
 
 // resolveSourceCell fetches the cell named by --clone at the operator's
-// --realm/--space/--stack scope. Unlike the from-blueprint / from-config
-// binding lookups (which use ExplicitScope so a realm-scoped binding stays
-// findable with empty space/stack), a cell always lives at a full
+// --realm/--space/--stack scope. Like the from-blueprint / from-config binding
+// lookups (which default an unset --space/--stack to "default" via
+// ExplicitScope per issue #1156), a cell always lives at a full
 // realm/space/stack, so the source lookup uses the defaulted flags scope
 // (default/default/default when the operator passes no coordinate). A missing
 // source cell is a clear ErrCellNotFound.
