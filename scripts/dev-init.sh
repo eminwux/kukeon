@@ -456,6 +456,11 @@ ATTACH_SMOKE_SPACE="ds"
 ATTACH_SMOKE_STACK="dks"
 ATTACH_SMOKE_CELL="cattach"
 ATTACH_SMOKE_CONTAINER="work"
+# Local-only attach-smoke image ref, mirroring KUKEOND_IMAGE_REF above. Built
+# from hack/attach-smoke/Dockerfile into the attach realm below so the smoke
+# no longer pins the single-arch-amd64 external registry.eminwux.com/busybox
+# that broke on arm64 hosts (#1158).
+ATTACH_SMOKE_IMAGE_REF="kukeon.internal/attach-smoke:${KUKEOND_VERSION}"
 ATTACH_SMOKE_BASE="${METADATA_ROOT}/${ATTACH_SMOKE_REALM}/${ATTACH_SMOKE_SPACE}/${ATTACH_SMOKE_STACK}/${ATTACH_SMOKE_CELL}/${ATTACH_SMOKE_CONTAINER}"
 ATTACH_SMOKE_SOCKET="${ATTACH_SMOKE_BASE}/tty/socket"
 ATTACH_SMOKE_METADATA="${ATTACH_SMOKE_BASE}/kuketty-metadata.json"
@@ -480,11 +485,13 @@ teardown_attach_smoke_state() {
     # the purge and strands the next run's `kuke apply` image-pull→
     # snapshot-unpack with "parent snapshot ... does not exist". Removing
     # the namespace by hand makes the teardown idempotent across N runs.
-    # The attach smoke never targets this realm with `kuke build`, so no
-    # `/var/lib/kukebuild/<ns>/` cache exists to wipe alongside it
-    # (the #904 lane only applies to realms that have been a `kuke build`
-    # target).
     sudo ctr namespaces remove "${ATTACH_SMOKE_NS}" 2>/dev/null || true
+    # Since #1158 the attach smoke *is* a `kuke build` target (it builds
+    # kukeon.internal/attach-smoke into this realm), so the #904 lane now
+    # applies: wipe the per-namespace BuildKit cache at
+    # /var/lib/kukebuild/<ns>/ alongside the containerd namespace so the
+    # teardown stays idempotent across runs.
+    sudo rm -rf "/var/lib/kukebuild/${ATTACH_SMOKE_NS}" 2>/dev/null || true
 }
 
 cleanup_attach_smoke() {
@@ -509,6 +516,19 @@ sudo --preserve-env="${PRESERVE_ENV_WORKLOAD}" ./kuke create realm "${ATTACH_SMO
 sudo --preserve-env="${PRESERVE_ENV_WORKLOAD}" ./kuke create space "${ATTACH_SMOKE_SPACE}" --realm "${ATTACH_SMOKE_REALM}"
 sudo --preserve-env="${PRESERVE_ENV_WORKLOAD}" ./kuke create stack "${ATTACH_SMOKE_STACK}" --realm "${ATTACH_SMOKE_REALM}" --space "${ATTACH_SMOKE_SPACE}"
 
+# Build the attach-smoke image into the attach realm's containerd namespace,
+# mirroring the kukeon.internal/kukeond build above (the kuke-system realm at
+# line ~329). This replaces the former external registry.eminwux.com/busybox
+# pin, which was single-arch amd64 and broke the smoke on arm64 hosts (#1158).
+# docker.io/library/busybox is multi-arch, so `kuke build` resolves the host's
+# architecture and the resulting kukeon.internal/attach-smoke image matches the
+# build host automatically. Runs after the realm exists (its namespace must be
+# present for kukebuild to write into) and before the `kuke apply` below.
+step "Build ${ATTACH_SMOKE_IMAGE_REF} into the ${ATTACH_SMOKE_REALM} realm"
+sudo --preserve-env="${PRESERVE_ENV_WORKLOAD}" ./kuke build \
+    -t "${ATTACH_SMOKE_IMAGE_REF}" \
+    --realm "${ATTACH_SMOKE_REALM}" hack/attach-smoke
+
 cat > "${ATTACH_SMOKE_TMP}/cell.yaml" <<EOF
 apiVersion: v1beta1
 kind: Cell
@@ -522,11 +542,11 @@ spec:
   containers:
     - id: root
       root: true
-      image: registry.eminwux.com/busybox:latest
+      image: ${ATTACH_SMOKE_IMAGE_REF}
       command: sleep
       args: ["3600"]
     - id: ${ATTACH_SMOKE_CONTAINER}
-      image: registry.eminwux.com/busybox:latest
+      image: ${ATTACH_SMOKE_IMAGE_REF}
       command: sleep
       args: ["3600"]
       attachable: true
