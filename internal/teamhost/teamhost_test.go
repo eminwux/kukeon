@@ -246,7 +246,6 @@ func TestLayoutTeamsPaths(t *testing.T) {
 			l.HarnessSeedPath("dezot", "claude", "root"),
 			"/base/.kuke/teams/dezot/claude.json-root",
 		},
-		{"HostConfigDir", l.HostConfigDir("dezot"), "/base/.kuke/teams/dezot/config"},
 		{"SharedSecretsEnvPath", l.SharedSecretsEnvPath(), "/base/.kuke/teams/secrets.env"},
 		{"TeamSecretsEnvPath", l.TeamSecretsEnvPath("dezot"), "/base/.kuke/teams/dezot/secrets.env"},
 	}
@@ -272,7 +271,6 @@ func TestLayoutTeamsPathsRootedUnderTempBase(t *testing.T) {
 		l.RoleHarnessStateDir("alpha", "dev", "claude"),
 		l.HarnessSeedPath("alpha", "claude", ""),
 		l.HarnessSeedPath("alpha", "claude", "root"),
-		l.HostConfigDir("alpha"),
 		l.SharedSecretsEnvPath(),
 		l.TeamSecretsEnvPath("alpha"),
 	}

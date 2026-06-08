@@ -412,11 +412,10 @@ func resolveTeamDir(layout teamhost.Layout, project string) string {
 }
 
 // provisionHost runs the per-team host-state provisioning pass: per-(role
-// × harness) state dirs, harness seeds, and the one-shot host-config copy.
-// A harness-less roster (no harness defaults, no pairs) still flows through
-// teamhost.ProvisionTeam so the team root + a one-shot config seed are
-// materialized — `kuke team init` is the addressable point of contact for
-// every team, not just teams with rendered cells.
+// × harness) state dirs and harness seeds. A harness-less roster (no harness
+// defaults, no pairs) still flows through teamhost.ProvisionTeam so the team
+// root is materialized — `kuke team init` is the addressable point of
+// contact for every team, not just teams with rendered cells.
 func provisionHost(
 	out io.Writer, teamDir string,
 	pt *model.ProjectTeam, bundle *teamsource.Bundle, dryRun bool,
@@ -427,12 +426,11 @@ func provisionHost(
 		harnesses = bundle.Harnesses
 	}
 	in := teamhost.ProvisionInputs{
-		TeamRoot:      teamDir,
-		Pairs:         pairs,
-		Harnesses:     harnesses,
-		HomeConfigDir: hostUserConfigDir(),
-		DryRun:        dryRun,
-		Out:           out,
+		TeamRoot:  teamDir,
+		Pairs:     pairs,
+		Harnesses: harnesses,
+		DryRun:    dryRun,
+		Out:       out,
 	}
 	if err := teamhost.ProvisionTeam(in); err != nil {
 		return fmt.Errorf("provision team host state: %w", err)
@@ -545,19 +543,6 @@ func rosterPairs(pt *model.ProjectTeam) []teamhost.SeedPair {
 		}
 	}
 	return pairs
-}
-
-// hostUserConfigDir resolves the source of the one-shot config copy
-// (`$HOME/.config`) per the XDG-on-Linux convention. An unresolvable HOME
-// disables the copy by returning the empty string — ProvisionTeam treats
-// that as "no copy", which is the right behavior for a CI host that has no
-// operator config to seed.
-func hostUserConfigDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return ""
-	}
-	return filepath.Join(home, ".config")
 }
 
 // applyTeam marshals the rendered set and hands it to apply with the project

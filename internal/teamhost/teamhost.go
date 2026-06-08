@@ -50,8 +50,6 @@ const (
 	// teamsRootName is the shared root under Base that holds per-team
 	// host-state subtrees and the host-wide secrets.env default.
 	teamsRootName = "teams"
-	// hostConfigDirName is the per-team config dir name under TeamDir(team).
-	hostConfigDirName = "config"
 	// secretsEnvFileName is the shared/team secrets-env filename.
 	secretsEnvFileName = "secrets.env"
 
@@ -132,13 +130,6 @@ func (l Layout) HarnessSeedPath(team, harness, variant string) string {
 		name += "-" + v
 	}
 	return filepath.Join(l.TeamDir(team), name)
-}
-
-// HostConfigDir is the per-team host config dir (<base>/teams/<team>/config),
-// the destination of the one-shot `$HOME/.config/. → HostConfigDir(team)`
-// copy the provisioning pass performs on first init.
-func (l Layout) HostConfigDir(team string) string {
-	return filepath.Join(l.TeamDir(team), hostConfigDirName)
 }
 
 // SharedSecretsEnvPath is the host-wide secrets.env default
