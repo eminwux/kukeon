@@ -106,6 +106,18 @@ func TestComputeContainerSpecHash_BreakingFieldsChangeHash(t *testing.T) {
 			limit := int64(64 << 20)
 			s.Resources = &intmodel.ContainerResources{MemoryLimitBytes: &limit}
 		}},
+		// OCI-baked fields reclassified Breaking-on-root by issue #1154.
+		{"workingDir", func(s *intmodel.ContainerSpec) { s.WorkingDir = "/opt/app" }},
+		{"securityOpts", func(s *intmodel.ContainerSpec) { s.SecurityOpts = []string{"no-new-privileges"} }},
+		{"volumes", func(s *intmodel.ContainerSpec) {
+			s.Volumes = []intmodel.VolumeMount{{Source: "/host", Target: "/cell"}}
+		}},
+		{"secrets", func(s *intmodel.ContainerSpec) {
+			s.Secrets = []intmodel.ContainerSecret{{Name: "db", FromEnv: "DB_PASS"}}
+		}},
+		{"secretsRef", func(s *intmodel.ContainerSpec) {
+			s.Secrets = []intmodel.ContainerSecret{{Name: "db", SecretRef: &intmodel.ContainerSecretRef{Name: "creds", Realm: "prod"}}}
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -119,11 +131,12 @@ func TestComputeContainerSpecHash_BreakingFieldsChangeHash(t *testing.T) {
 }
 
 // TestComputeContainerSpecHash_CompatibleFieldsDoNotChangeHash locks that
-// fields `apply.DiffCell` classifies as Compatible (env, ports, volumes,
-// securityOpts, secrets, repos) are *not* part of the hash. Hashing them
-// would force a recreate-or-refuse on every `kuke apply -f` that only
-// tweaked a compatible field, defeating the in-place UpdateCell path the
-// apply layer already exercises for those fields.
+// fields `apply.DiffCell` classifies as Compatible (env, ports, repos) are
+// *not* part of the hash. Hashing them would force a recreate-or-refuse on
+// every `kuke apply -f` that only tweaked a compatible field, defeating the
+// in-place UpdateCell path the apply layer already exercises for those
+// fields. (volumes, securityOpts, and secrets moved to the Breaking set in
+// issue #1154 — they are OCI-baked at create and now change the hash.)
 func TestComputeContainerSpecHash_CompatibleFieldsDoNotChangeHash(t *testing.T) {
 	base := intmodel.ContainerSpec{
 		Image:   "alpine",
@@ -138,15 +151,6 @@ func TestComputeContainerSpecHash_CompatibleFieldsDoNotChangeHash(t *testing.T) 
 	}{
 		{"env", func(s *intmodel.ContainerSpec) { s.Env = []string{"FOO=bar"} }},
 		{"ports", func(s *intmodel.ContainerSpec) { s.Ports = []string{"8080:80"} }},
-		{"volumes", func(s *intmodel.ContainerSpec) {
-			s.Volumes = []intmodel.VolumeMount{{Source: "/host", Target: "/cell"}}
-		}},
-		{"securityOpts", func(s *intmodel.ContainerSpec) {
-			s.SecurityOpts = []string{"no-new-privileges"}
-		}},
-		{"secrets", func(s *intmodel.ContainerSpec) {
-			s.Secrets = []intmodel.ContainerSecret{{Name: "db", FromEnv: "DB_PASS"}}
-		}},
 		{"repos", func(s *intmodel.ContainerSpec) {
 			s.Repos = []intmodel.ContainerRepo{{Name: "app", URL: "https://example.com/app.git", Target: "/src"}}
 		}},
@@ -223,16 +227,19 @@ func TestSpecHashDomainPinsToDiffCellBreakingFields(t *testing.T) {
 			limit := int64(64 << 20)
 			s.Resources = &intmodel.ContainerResources{MemoryLimitBytes: &limit}
 		}, true},
+		// OCI-baked fields reclassified Breaking-on-root by issue #1154 —
+		// must change the hash so the bare-start drift guard catches them too.
+		{"workingDir", func(s *intmodel.ContainerSpec) { s.WorkingDir = "/opt/app" }, true},
+		{"securityOpts", func(s *intmodel.ContainerSpec) { s.SecurityOpts = []string{"no-new-privileges"} }, true},
+		{"volumes", func(s *intmodel.ContainerSpec) {
+			s.Volumes = []intmodel.VolumeMount{{Source: "/host", Target: "/cell"}}
+		}, true},
+		{"secrets", func(s *intmodel.ContainerSpec) {
+			s.Secrets = []intmodel.ContainerSecret{{Name: "db", FromEnv: "DB_PASS"}}
+		}, true},
 		// Compatible domain — must NOT change the hash.
 		{"env", func(s *intmodel.ContainerSpec) { s.Env = []string{"FOO=bar"} }, false},
 		{"ports", func(s *intmodel.ContainerSpec) { s.Ports = []string{"8080:80"} }, false},
-		{"volumes", func(s *intmodel.ContainerSpec) {
-			s.Volumes = []intmodel.VolumeMount{{Source: "/host", Target: "/cell"}}
-		}, false},
-		{"securityOpts", func(s *intmodel.ContainerSpec) { s.SecurityOpts = []string{"no-new-privileges"} }, false},
-		{"secrets", func(s *intmodel.ContainerSpec) {
-			s.Secrets = []intmodel.ContainerSecret{{Name: "db", FromEnv: "DB_PASS"}}
-		}, false},
 		{"repos", func(s *intmodel.ContainerSpec) {
 			s.Repos = []intmodel.ContainerRepo{{Name: "app", URL: "https://example.com/app.git", Target: "/src"}}
 		}, false},

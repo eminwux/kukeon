@@ -46,23 +46,31 @@ const SpecHashLabelKey = "kukeon.io/spec-hash"
 // definitions together so they cannot silently drift apart. Issues #867,
 // #990.
 //
-// Args is normalized to a non-nil empty slice on the in-payload side so a
-// nil-vs-empty distinction in the source spec does not change the hash —
-// containerd treats both as "no args". The Capabilities, Tmpfs, and
-// Resources projections normalize nil pointers / slices to zero values so
-// "field unset" and "field set to its zero value" hash identically
-// (matches the equality semantics in `internal/controller/apply/diff.go`'s
-// `capabilitiesEqual`, `tmpfsEqual`, and `resourcesEqual`).
+// Args (and SecurityOpts) is normalized to a non-nil empty slice on the
+// in-payload side so a nil-vs-empty distinction in the source spec does not
+// change the hash — containerd treats both as "no args". The Capabilities,
+// Tmpfs, Resources, Volumes, and Secrets projections normalize nil pointers /
+// slices to zero values so "field unset" and "field set to its zero value"
+// hash identically (matches the equality semantics in
+// `internal/controller/apply/diff.go`'s `capabilitiesEqual`, `tmpfsEqual`,
+// `resourcesEqual`, `volumeMountsEqual`, and `secretsEqual`).
+//
+// WorkingDir, SecurityOpts, Volumes, and Secrets were added by issue #1154
+// when their diff.go classification widened to Breaking-on-root.
 type containerSpecHashPayload struct {
 	Image                  string                  `json:"image"`
 	Command                string                  `json:"command"`
 	Args                   []string                `json:"args"`
+	WorkingDir             string                  `json:"workingDir"`
 	Privileged             bool                    `json:"privileged"`
 	User                   string                  `json:"user"`
 	ReadOnlyRootFilesystem bool                    `json:"readOnlyRootFilesystem"`
 	Capabilities           capabilitiesHashPayload `json:"capabilities"`
+	SecurityOpts           []string                `json:"securityOpts"`
 	Tmpfs                  []tmpfsHashPayload      `json:"tmpfs"`
 	Resources              resourcesHashPayload    `json:"resources"`
+	Volumes                []volumeHashPayload     `json:"volumes"`
+	Secrets                []secretHashPayload     `json:"secrets"`
 }
 
 type capabilitiesHashPayload struct {
@@ -82,6 +90,36 @@ type resourcesHashPayload struct {
 	PidsLimit        int64 `json:"pidsLimit"`
 }
 
+type volumeHashPayload struct {
+	Kind      string `json:"kind"`
+	Source    string `json:"source"`
+	Target    string `json:"target"`
+	ReadOnly  bool   `json:"readOnly"`
+	SizeBytes int64  `json:"sizeBytes"`
+	Mode      uint32 `json:"mode"`
+}
+
+// secretHashPayload flattens the intmodel.ContainerSecret reference set the
+// runner bakes into the OCI spec at create — the env-injected Process.Env
+// adds and the file-form Mounts. Only the reference is hashed (never the
+// resolved value), matching the equality semantics in
+// `internal/controller/apply/diff.go`'s `secretsEqual`. Issue #1154.
+type secretHashPayload struct {
+	Name      string                `json:"name"`
+	FromFile  string                `json:"fromFile"`
+	FromEnv   string                `json:"fromEnv"`
+	MountPath string                `json:"mountPath"`
+	SecretRef *secretRefHashPayload `json:"secretRef"`
+}
+
+type secretRefHashPayload struct {
+	Name  string `json:"name"`
+	Realm string `json:"realm"`
+	Space string `json:"space"`
+	Stack string `json:"stack"`
+	Cell  string `json:"cell"`
+}
+
 // ComputeContainerSpecHash returns a hex-encoded SHA-256 over the
 // containerSpecHashPayload projection of spec. Pure function; no
 // containerd access. Same hash for root and non-root containers — the
@@ -91,12 +129,16 @@ func ComputeContainerSpecHash(spec intmodel.ContainerSpec) string {
 		Image:                  spec.Image,
 		Command:                spec.Command,
 		Args:                   normalizeStrings(spec.Args),
+		WorkingDir:             spec.WorkingDir,
 		Privileged:             spec.Privileged,
 		User:                   spec.User,
 		ReadOnlyRootFilesystem: spec.ReadOnlyRootFilesystem,
 		Capabilities:           projectCapabilities(spec.Capabilities),
+		SecurityOpts:           normalizeStrings(spec.SecurityOpts),
 		Tmpfs:                  projectTmpfs(spec.Tmpfs),
 		Resources:              projectResources(spec.Resources),
+		Volumes:                projectVolumes(spec.Volumes),
+		Secrets:                projectSecrets(spec.Secrets),
 	}
 	// json.Marshal on a struct with a fixed field order is deterministic.
 	// Errors are not possible here (payload is plain comparable types).
@@ -153,6 +195,54 @@ func derefInt64(p *int64) int64 {
 		return 0
 	}
 	return *p
+}
+
+// projectVolumes flattens a VolumeMount slice in declaration order (the
+// equality semantics in diff.go's `volumeMountsEqual` are order-sensitive).
+// An empty Kind is left as-is so it hashes identically to the diff layer's
+// bare struct comparison.
+func projectVolumes(v []intmodel.VolumeMount) []volumeHashPayload {
+	out := make([]volumeHashPayload, len(v))
+	for i := range v {
+		out[i] = volumeHashPayload{
+			Kind:      string(v[i].Kind),
+			Source:    v[i].Source,
+			Target:    v[i].Target,
+			ReadOnly:  v[i].ReadOnly,
+			SizeBytes: v[i].SizeBytes,
+			Mode:      v[i].Mode,
+		}
+	}
+	return out
+}
+
+// projectSecrets flattens a ContainerSecret slice in declaration order,
+// mirroring `secretsEqual`'s order-sensitive, reference-only comparison.
+func projectSecrets(s []intmodel.ContainerSecret) []secretHashPayload {
+	out := make([]secretHashPayload, len(s))
+	for i := range s {
+		out[i] = secretHashPayload{
+			Name:      s[i].Name,
+			FromFile:  s[i].FromFile,
+			FromEnv:   s[i].FromEnv,
+			MountPath: s[i].MountPath,
+			SecretRef: projectSecretRef(s[i].SecretRef),
+		}
+	}
+	return out
+}
+
+func projectSecretRef(r *intmodel.ContainerSecretRef) *secretRefHashPayload {
+	if r == nil {
+		return nil
+	}
+	return &secretRefHashPayload{
+		Name:  r.Name,
+		Realm: r.Realm,
+		Space: r.Space,
+		Stack: r.Stack,
+		Cell:  r.Cell,
+	}
 }
 
 // stampSpecHashOnLabels writes the SpecHashLabelKey into labels (allocating
