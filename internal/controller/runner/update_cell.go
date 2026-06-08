@@ -278,11 +278,73 @@ func (r *Exec) UpdateCell(desired intmodel.Cell) (intmodel.Cell, error) {
 	return existing, nil
 }
 
-// containerSpecChanged checks if a container spec has breaking changes (image, command, args).
+// containerSpecChanged reports whether a non-root container must be
+// stop-removed and recreated for the change to take effect, rather than
+// updated in place. The gate covers the OCI-baked fields whose values the
+// runner fixes at container create and never re-resolves on the in-place
+// task-restart path: image/command/args (snapshot + Process), workingDir
+// (Process.Cwd), securityOpts (Process.NoNewPrivileges / Linux.Seccomp),
+// volumes (OCI Mounts), and secrets (env-injected Process.Env via
+// resolveSecrets, plus file-form Mounts). Without recreating, a secrets edit
+// on a workload container never reaches the running OCI Process.Env — the
+// defect issue #1154 fixes on the non-root side (the root side routes through
+// RecreateCell via the Breaking-on-root diff classification).
+//
+// Other Breaking-on-root fields (privileged, user, readOnlyRootFilesystem,
+// capabilities, tmpfs, resources) are not yet gated here; their non-root
+// in-place gap predates #1154 and is tracked separately.
 func containerSpecChanged(desired, actual *intmodel.ContainerSpec) bool {
 	return desired.Image != actual.Image ||
 		desired.Command != actual.Command ||
-		!stringSlicesEqual(desired.Args, actual.Args)
+		!stringSlicesEqual(desired.Args, actual.Args) ||
+		desired.WorkingDir != actual.WorkingDir ||
+		!stringSlicesEqual(desired.SecurityOpts, actual.SecurityOpts) ||
+		!volumeMountsEqual(desired.Volumes, actual.Volumes) ||
+		!containerSecretsEqual(desired.Secrets, actual.Secrets)
+}
+
+// volumeMountsEqual reports whether two VolumeMount slices are equal in
+// declaration order. VolumeMount is a flat struct of comparable fields, so
+// `==` matches the diff layer's `volumeMountsEqual` semantics.
+func volumeMountsEqual(a, b []intmodel.VolumeMount) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// containerSecretsEqual reports whether two ContainerSecret slices carry
+// the same references in declaration order, mirroring the diff layer's
+// `secretsEqual` (reference-only, never the resolved value).
+func containerSecretsEqual(a, b []intmodel.ContainerSecret) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Name != b[i].Name ||
+			a[i].FromFile != b[i].FromFile ||
+			a[i].FromEnv != b[i].FromEnv ||
+			a[i].MountPath != b[i].MountPath ||
+			!secretRefsEqual(a[i].SecretRef, b[i].SecretRef) {
+			return false
+		}
+	}
+	return true
+}
+
+func secretRefsEqual(a, b *intmodel.ContainerSecretRef) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
 }
 
 func stringSlicesEqual(a, b []string) bool {

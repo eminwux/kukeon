@@ -646,13 +646,13 @@ func diffContainerSpec(desired, actual *intmodel.ContainerSpec, rootContainer bo
 		recordSpecFieldChange(&result, rootContainer, false, "ports", "ports changed")
 	}
 
-	// volumes — Compatible on root and non-root. Root-container volume
-	// edits are treated as in-place updateable for now (the apply layer
-	// reports drift so the operator sees it; the runner's UpdateCell
-	// path applies the change on the next reconcile). If runner-side
-	// gaps surface, file a follow-up to widen the Breaking domain.
+	// volumes — Breaking on root (OCI Mounts table is baked into the
+	// cell root's runtime spec at StartCell; a volume edit only reaches
+	// the container by rebuilding the spec via RecreateCell). Compatible
+	// on non-root, where UpdateCell stop-removes and recreates the child
+	// with the new mounts. Issue #1154.
 	if !volumeMountsEqual(desired.Volumes, actual.Volumes) {
-		recordSpecFieldChange(&result, rootContainer, false, "volumes", "volumes changed")
+		recordSpecFieldChange(&result, rootContainer, true, "volumes", "volumes changed")
 	}
 
 	// privileged — Breaking on root (the cap-set is baked into the cell
@@ -684,13 +684,13 @@ func diffContainerSpec(desired, actual *intmodel.ContainerSpec, rootContainer bo
 		recordSpecFieldChange(&result, rootContainer, true, "capabilities", "capabilities changed")
 	}
 
-	// securityOpts — Compatible on root and non-root. Most security-opt
-	// values (selinux/apparmor/seccomp profile names) round-trip through
-	// the runner without a baked OCI field that demands a fresh
-	// container; a stricter classification can land in a follow-up if
-	// runner gaps surface.
+	// securityOpts — Breaking on root. Security-opt values bake into the
+	// cell root's OCI Process at StartCell (no-new-privileges →
+	// Process.NoNewPrivileges, seccomp=… → Linux.Seccomp), so a change
+	// only reaches the running container via RecreateCell. Compatible on
+	// non-root, where UpdateCell recreates the child. Issue #1154.
 	if !slicesEqual(desired.SecurityOpts, actual.SecurityOpts) {
-		recordSpecFieldChange(&result, rootContainer, false, "securityOpts", "securityOpts changed")
+		recordSpecFieldChange(&result, rootContainer, true, "securityOpts", "securityOpts changed")
 	}
 
 	// tmpfs — Breaking on root (OCI Mounts table is fixed at create).
@@ -707,12 +707,17 @@ func diffContainerSpec(desired, actual *intmodel.ContainerSpec, rootContainer bo
 		recordSpecFieldChange(&result, rootContainer, true, "resources", "resource limits changed")
 	}
 
-	// secrets — Compatible on root and non-root. Secrets either flow as
-	// env (re-evaluated at start) or as bind-mounted files (the
-	// staged-file path can be re-staged before restart); no OCI field
-	// is permanently baked.
+	// secrets — Breaking on root. Env-form secrets are resolved into the
+	// OCI Process.Env at container create (ctr.CreateContainerFromSpec →
+	// resolveSecrets → EnvAdds), and file-form secrets become OCI Mounts;
+	// both are baked at create with no re-resolution on the in-place
+	// task-restart path, so a secret change only reaches the running
+	// container via RecreateCell (delete + recreate, rebuilding the spec).
+	// Compatible on non-root, where UpdateCell stop-removes and recreates
+	// the child — which re-runs resolveSecrets (see containerSpecChanged
+	// in update_cell.go, extended to gate on secrets). Issue #1154.
 	if !secretsEqual(desired.Secrets, actual.Secrets) {
-		recordSpecFieldChange(&result, rootContainer, false, "secrets", "secrets changed")
+		recordSpecFieldChange(&result, rootContainer, true, "secrets", "secrets changed")
 	}
 
 	// repos — Compatible on root and non-root. Repos are handled by
@@ -722,17 +727,13 @@ func diffContainerSpec(desired, actual *intmodel.ContainerSpec, rootContainer bo
 		recordSpecFieldChange(&result, rootContainer, false, "repos", "repos changed")
 	}
 
+	// workingDir — Breaking on root (OCI Process.Cwd is baked at create
+	// via oci.WithProcessCwd; a change only reaches the running container
+	// by rebuilding the spec via RecreateCell). Compatible on non-root,
+	// where UpdateCell recreates the child. Issue #1154.
 	if desired.WorkingDir != actual.WorkingDir {
-		result.HasChanges = true
-		if result.ChangeType == ChangeTypeNone {
-			result.ChangeType = ChangeTypeCompatible
-		}
-		result.ChangedFields = append(result.ChangedFields, "workingDir")
-		result.Details["workingDir"] = fmt.Sprintf(
-			"workingDir changed from %q to %q",
-			actual.WorkingDir,
-			desired.WorkingDir,
-		)
+		recordSpecFieldChange(&result, rootContainer, true, "workingDir",
+			fmt.Sprintf("workingDir changed from %q to %q", actual.WorkingDir, desired.WorkingDir))
 	}
 
 	if !slicesEqual(desired.Networks, actual.Networks) {

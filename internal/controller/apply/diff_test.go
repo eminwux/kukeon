@@ -551,6 +551,110 @@ func TestDiffCell_RootContainerPrivileged_Breaking(t *testing.T) {
 	}
 }
 
+// TestDiffCell_RootContainerSecrets_Breaking pins issue #1154: a secrets
+// drift on the root container must classify as Breaking. Env-form secrets
+// resolve into the OCI Process.Env at container create (and file-form into
+// Mounts) with no re-resolution on the in-place task-restart path, so a
+// change can only reach the running container via RecreateCell. Prior to
+// #1154 secrets classified Compatible-on-root and the changed env var
+// silently never reached the container.
+func TestDiffCell_RootContainerSecrets_Breaking(t *testing.T) {
+	desired := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest",
+					Secrets: []intmodel.ContainerSecret{{Name: "tok", FromEnv: "CLAUDE_CODE_OAUTH_TOKEN"}}},
+			},
+		},
+	}
+	actual := intmodel.Cell{
+		Metadata: intmodel.CellMetadata{Name: "hello-world"},
+		Spec: intmodel.CellSpec{
+			RealmName: "default",
+			SpaceName: "default",
+			StackName: "default",
+			Containers: []intmodel.ContainerSpec{
+				{ID: "root", Root: true, Image: "busybox:latest"},
+			},
+		},
+	}
+
+	diff := apply.DiffCell(desired, actual)
+	if !diff.HasChanges {
+		t.Fatal("expected changes for root secrets edit")
+	}
+	if !diff.RootContainerChanged {
+		t.Error("expected RootContainerChanged=true for root secrets edit")
+	}
+	if diff.ChangeType != apply.ChangeTypeBreaking {
+		t.Errorf("expected breaking change for root secrets edit, got %v", diff.ChangeType)
+	}
+	foundBreaking := false
+	for _, f := range diff.BreakingChanges {
+		if f == "rootContainer.secrets" {
+			foundBreaking = true
+			break
+		}
+	}
+	if !foundBreaking {
+		t.Errorf("expected BreakingChanges to include %q, got %v", "rootContainer.secrets", diff.BreakingChanges)
+	}
+}
+
+// TestDiffCell_RootContainerWorkingDirVolumesSecurityOpts_Breaking pins the
+// remaining OCI-baked fields issue #1154 reclassifies Breaking-on-root:
+// workingDir (Process.Cwd), volumes (OCI Mounts), and securityOpts
+// (Process.NoNewPrivileges / Linux.Seccomp). Each must force a recreate.
+func TestDiffCell_RootContainerWorkingDirVolumesSecurityOpts_Breaking(t *testing.T) {
+	cases := []struct {
+		name  string
+		mut   func(s *intmodel.ContainerSpec)
+		field string
+	}{
+		{"workingDir", func(s *intmodel.ContainerSpec) { s.WorkingDir = "/opt/app" }, "rootContainer.workingDir"},
+		{"volumes", func(s *intmodel.ContainerSpec) {
+			s.Volumes = []intmodel.VolumeMount{{Source: "/host", Target: "/cell"}}
+		}, "rootContainer.volumes"},
+		{"securityOpts", func(s *intmodel.ContainerSpec) {
+			s.SecurityOpts = []string{"no-new-privileges"}
+		}, "rootContainer.securityOpts"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			base := intmodel.ContainerSpec{ID: "root", Root: true, Image: "busybox:latest"}
+			desiredRoot := base
+			tc.mut(&desiredRoot)
+			mk := func(root intmodel.ContainerSpec) intmodel.Cell {
+				return intmodel.Cell{
+					Metadata: intmodel.CellMetadata{Name: "hello-world"},
+					Spec: intmodel.CellSpec{
+						RealmName: "default", SpaceName: "default", StackName: "default",
+						Containers: []intmodel.ContainerSpec{root},
+					},
+				}
+			}
+			diff := apply.DiffCell(mk(desiredRoot), mk(base))
+			if diff.ChangeType != apply.ChangeTypeBreaking {
+				t.Errorf("expected breaking change for root %s edit, got %v", tc.name, diff.ChangeType)
+			}
+			found := false
+			for _, f := range diff.BreakingChanges {
+				if f == tc.field {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("expected BreakingChanges to include %q, got %v", tc.field, diff.BreakingChanges)
+			}
+		})
+	}
+}
+
 // TestDiffCell_RootContainerEnv_Compatible pins AC1/AC2/AC3/AC5 of issue
 // #990 on the Compatible-on-root branch: an Env edit on the root
 // container must surface as a Compatible change (not silently dropped,
