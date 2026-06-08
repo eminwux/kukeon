@@ -53,6 +53,14 @@ type RoleHarness struct {
 	Approval string `json:"approval,omitempty"    yaml:"approval,omitempty"`
 	// Permissions selects the permission mode (opencode, e.g. skip).
 	Permissions string `json:"permissions,omitempty" yaml:"permissions,omitempty"`
+	// Secrets are the secret NAMES (resolved against TeamsConfig.secrets) this
+	// harness needs, declared per-harness so a role's Claude cell no longer
+	// carries secret slots only its Codex/OpenCode cells use (agents#750). Each
+	// name is matched against the rendered blueprint's secret-slot declarations
+	// at bind time, the same way role-level RoleNeeds.Secrets is — the
+	// per-harness list is the new primary location, with RoleNeeds.Secrets kept
+	// as a transition-era fallback.
+	Secrets []string `json:"secrets,omitempty"     yaml:"secrets,omitempty"`
 }
 
 // RoleNeeds separates the role's dependencies by kind. Each list holds NAMES

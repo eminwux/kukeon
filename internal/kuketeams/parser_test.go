@@ -69,8 +69,8 @@ metadata: { name: dev }
 spec:
   skills: [skills/, ../common/skills/]
   harnesses:
-    claude:   { settings: config/claude.settings.json }
-    codex:    { sandbox: workspace-write, approval: on-request }
+    claude:   { settings: config/claude.settings.json, secrets: [claude-code-oauth-token] }
+    codex:    { sandbox: workspace-write, approval: on-request, secrets: [openai-api-key] }
     opencode: { permissions: skip }
   needs:
     image:   [git, gh]
@@ -219,6 +219,14 @@ func TestParseHappyPathFields(t *testing.T) {
 	if len(role.Role.Spec.Needs.Repos) != 2 || len(role.Role.Spec.Needs.Mounts) != 1 {
 		t.Errorf("needs repos/mounts split wrong: repos=%v mounts=%v",
 			role.Role.Spec.Needs.Repos, role.Role.Spec.Needs.Mounts)
+	}
+	// Per-harness secrets (agents#750) parse onto RoleHarness.Secrets, distinct
+	// from the role-level needs.secrets fallback.
+	if got := role.Role.Spec.Harnesses["claude"].Secrets; len(got) != 1 || got[0] != "claude-code-oauth-token" {
+		t.Errorf("harnesses.claude.secrets = %v, want [claude-code-oauth-token]", got)
+	}
+	if got := role.Role.Spec.Harnesses["codex"].Secrets; len(got) != 1 || got[0] != "openai-api-key" {
+		t.Errorf("harnesses.codex.secrets = %v, want [openai-api-key]", got)
 	}
 
 	h, err := Parse([]byte(harnessHappy))

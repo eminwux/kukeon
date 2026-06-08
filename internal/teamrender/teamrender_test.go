@@ -299,6 +299,68 @@ func TestRenderBlueprintSubstitutesAndStampsTeamLabel(t *testing.T) {
 	}
 }
 
+// TestRenderBlueprintRangesPerHarnessSecrets pins the agents#750 fix: a
+// blueprint ranging `(index .harnesses .harness).secrets` renders a secret
+// slot for each per-harness secret name. Before this change harnessesView
+// exposed no `secrets` key, so the range iterated nothing and the rendered
+// Claude blueprint carried no `secrets:` block — silently dropping
+// CLAUDE_CODE_OAUTH_TOKEN.
+func TestRenderBlueprintRangesPerHarnessSecrets(t *testing.T) {
+	t.Parallel()
+	cacheDir := t.TempDir()
+	body := `apiVersion: v1beta1
+kind: CellBlueprint
+metadata:
+  name: {{ .role.name }}-{{ .harness }}
+spec:
+  cell:
+    containers:
+      - id: {{ .role.name }}
+        image: {{ .image }}
+        secrets:
+{{- range (index .harnesses .harness).secrets }}
+          - { name: {{ . }}, mode: env, envName: {{ . | upper | replace "-" "_" }} }
+{{- end }}
+`
+	writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml", body)
+	r := &model.Role{
+		APIVersion: model.APIVersionV1,
+		Kind:       model.KindRole,
+		Metadata:   model.Metadata{Name: "dev"},
+		Spec: model.RoleSpec{
+			Harnesses: map[string]model.RoleHarness{
+				"claude": {Secrets: []string{"claude-code-oauth-token"}},
+			},
+		},
+	}
+	h := &model.Harness{
+		APIVersion: model.APIVersionV1,
+		Kind:       model.KindHarness,
+		Metadata:   model.Metadata{Name: "claude"},
+		Spec:       model.HarnessSpec{Template: "blueprint.tmpl.yaml"},
+	}
+	image := &model.ImageCatalogEntry{
+		Ref: "claude", Harness: "claude", Image: "registry.local/claude:latest",
+	}
+	bp, err := RenderBlueprint(
+		cacheDir, h, r, "claude", "dev", nil, image, nil,
+		teamsource.Source{}, Inputs{}, "sbsh", "default", "default", "default",
+	)
+	if err != nil {
+		t.Fatalf("RenderBlueprint: %v", err)
+	}
+	if len(bp.Spec.Cell.Containers) == 0 {
+		t.Fatalf("no containers in rendered blueprint")
+	}
+	slots := bp.Spec.Cell.Containers[0].Secrets
+	if len(slots) != 1 {
+		t.Fatalf("rendered secret slots = %+v, want exactly one", slots)
+	}
+	if slots[0].Name != "claude-code-oauth-token" || slots[0].EnvName != "CLAUDE_CODE_OAUTH_TOKEN" {
+		t.Errorf("rendered secret slot = %+v, want claude-code-oauth-token/CLAUDE_CODE_OAUTH_TOKEN", slots[0])
+	}
+}
+
 // TestRenderBlueprintScopesNameAndPrefixToProject pins the project-scoped
 // identity contract (#1129): a template producing the project-agnostic
 // `<role>-<harness>` shape lands on disk as `<project>-<role>-<harness>`,
@@ -856,6 +918,135 @@ func TestBindConfigFillsSecretFromRoleNeedsWithoutTcSecrets(t *testing.T) {
 	}
 	if fill.SecretRef.Realm != "default" {
 		t.Errorf("SecretRef.Realm = %q, want default", fill.SecretRef.Realm)
+	}
+}
+
+// TestBindConfigFillsSecretFromPerHarnessList is the agents#750 bind-side
+// guard: a secret declared per-harness
+// (role.spec.harnesses[harness].secrets) and matched by a blueprint slot of
+// the same name produces a CellConfig fill even when role-level
+// needs.secrets is empty.
+func TestBindConfigFillsSecretFromPerHarnessList(t *testing.T) {
+	t.Parallel()
+	bp := &v1beta1.CellBlueprintDoc{
+		Metadata: v1beta1.CellBlueprintMetadata{Name: "dev-claude", Realm: "default"},
+		Spec: v1beta1.CellBlueprintSpec{Cell: v1beta1.BlueprintCellSpec{
+			Containers: []v1beta1.BlueprintContainer{{
+				ID:    "dev",
+				Image: "x",
+				Secrets: []v1beta1.BlueprintSecretSlot{
+					{Name: "claude-code-oauth-token", Mode: v1beta1.BlueprintSecretModeEnv, EnvName: "CLAUDE_CODE_OAUTH_TOKEN"},
+				},
+			}},
+		}},
+	}
+	role := &model.Role{
+		Metadata: model.Metadata{Name: "dev"},
+		Spec: model.RoleSpec{
+			Harnesses: map[string]model.RoleHarness{
+				"claude": {Secrets: []string{"claude-code-oauth-token"}},
+			},
+			// No role-level needs.secrets — per-harness is the sole source.
+		},
+	}
+	cfg := BindConfig(
+		bp, role, "dev", "claude",
+		&model.TeamsConfig{}, teamsource.Source{},
+		Inputs{Project: "sbsh"}, "sbsh", "default", "default", "default",
+	)
+	fill, ok := cfg.Spec.Secrets["claude-code-oauth-token"]
+	if !ok || fill.SecretRef == nil {
+		t.Fatalf("claude-code-oauth-token slot not filled: %+v", cfg.Spec.Secrets)
+	}
+	if fill.SecretRef.Realm != "default" {
+		t.Errorf("SecretRef.Realm = %q, want default", fill.SecretRef.Realm)
+	}
+}
+
+// TestBindConfigPerHarnessSecretsAreHarnessScoped pins that rendering one
+// harness only sources that harness's per-harness secret list — a secret
+// another harness declares does not leak into this config even when the
+// blueprint declares a slot for it (the blueprint-slot gate is not what
+// keeps it out; effectiveSecretNames never sources the other harness).
+func TestBindConfigPerHarnessSecretsAreHarnessScoped(t *testing.T) {
+	t.Parallel()
+	bp := &v1beta1.CellBlueprintDoc{
+		Metadata: v1beta1.CellBlueprintMetadata{Name: "dev-claude", Realm: "default"},
+		Spec: v1beta1.CellBlueprintSpec{Cell: v1beta1.BlueprintCellSpec{
+			Containers: []v1beta1.BlueprintContainer{{
+				ID:    "dev",
+				Image: "x",
+				Secrets: []v1beta1.BlueprintSecretSlot{
+					{Name: "claude-code-oauth-token", Mode: v1beta1.BlueprintSecretModeEnv, EnvName: "CLAUDE_CODE_OAUTH_TOKEN"},
+					{Name: "openai-api-key", Mode: v1beta1.BlueprintSecretModeEnv, EnvName: "OPENAI_API_KEY"},
+				},
+			}},
+		}},
+	}
+	role := &model.Role{
+		Metadata: model.Metadata{Name: "dev"},
+		Spec: model.RoleSpec{
+			Harnesses: map[string]model.RoleHarness{
+				"claude": {Secrets: []string{"claude-code-oauth-token"}},
+				"codex":  {Secrets: []string{"openai-api-key"}},
+			},
+		},
+	}
+	cfg := BindConfig(
+		bp, role, "dev", "claude",
+		&model.TeamsConfig{}, teamsource.Source{},
+		Inputs{Project: "sbsh"}, "sbsh", "default", "default", "default",
+	)
+	if _, ok := cfg.Spec.Secrets["openai-api-key"]; ok {
+		t.Errorf("openai-api-key (codex's secret) leaked into claude config: %+v", cfg.Spec.Secrets)
+	}
+	if _, ok := cfg.Spec.Secrets["claude-code-oauth-token"]; !ok {
+		t.Errorf("claude-code-oauth-token not bound: %+v", cfg.Spec.Secrets)
+	}
+}
+
+// TestBindConfigMergesPerHarnessAndRoleLevelSecrets pins the transition-era
+// fallback contract: per-harness and role-level needs.secrets both bind,
+// with a name declared in both locations collapsing to a single fill.
+func TestBindConfigMergesPerHarnessAndRoleLevelSecrets(t *testing.T) {
+	t.Parallel()
+	bp := &v1beta1.CellBlueprintDoc{
+		Metadata: v1beta1.CellBlueprintMetadata{Name: "dev-claude", Realm: "default"},
+		Spec: v1beta1.CellBlueprintSpec{Cell: v1beta1.BlueprintCellSpec{
+			Containers: []v1beta1.BlueprintContainer{{
+				ID:    "dev",
+				Image: "x",
+				Secrets: []v1beta1.BlueprintSecretSlot{
+					{Name: "shared-token", Mode: v1beta1.BlueprintSecretModeEnv, EnvName: "SHARED_TOKEN"},
+					{Name: "legacy-token", Mode: v1beta1.BlueprintSecretModeEnv, EnvName: "LEGACY_TOKEN"},
+				},
+			}},
+		}},
+	}
+	role := &model.Role{
+		Metadata: model.Metadata{Name: "dev"},
+		Spec: model.RoleSpec{
+			Harnesses: map[string]model.RoleHarness{
+				"claude": {Secrets: []string{"shared-token"}},
+			},
+			Needs: model.RoleNeeds{
+				// shared-token also at role level (dedup); legacy-token role-only.
+				Secrets: []string{"shared-token", "legacy-token"},
+			},
+		},
+	}
+	cfg := BindConfig(
+		bp, role, "dev", "claude",
+		&model.TeamsConfig{}, teamsource.Source{},
+		Inputs{Project: "sbsh"}, "sbsh", "default", "default", "default",
+	)
+	if len(cfg.Spec.Secrets) != 2 {
+		t.Fatalf("secret fills = %+v, want exactly shared-token + legacy-token", cfg.Spec.Secrets)
+	}
+	for _, name := range []string{"shared-token", "legacy-token"} {
+		if fill, ok := cfg.Spec.Secrets[name]; !ok || fill.SecretRef == nil {
+			t.Errorf("%s slot not filled: %+v", name, cfg.Spec.Secrets)
+		}
 	}
 }
 

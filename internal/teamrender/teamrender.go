@@ -454,12 +454,14 @@ func scopeToProject(name, project string) string {
 // slot; the agents source URL (from tc.spec.sources[<owner/repo>]) fills
 // the `agents` slot — both only when the blueprint actually declares the
 // slot, so a template that doesn't carry the slot produces a config
-// without a stray fill. role.Spec.Needs.Secrets entries are matched
-// against the blueprint's BlueprintSecretSlot declarations and, when the
-// blueprint declares the slot, filled with an in-realm ContainerSecretRef
-// pointing at the secret of the same name — the runtime resolves the
-// actual bytes via the Secret kind (#623) created out of the two-layer
-// secrets.env path (#1120).
+// without a stray fill. The secret-slot fills are sourced from the role's
+// per-harness list (role.spec.harnesses[harness].secrets, the agents#750
+// location) merged with the role-level fallback (role.spec.needs.secrets) —
+// see effectiveSecretNames. Each declared secret name is matched against the
+// blueprint's BlueprintSecretSlot declarations and, when the blueprint
+// declares the slot, filled with an in-realm ContainerSecretRef pointing at
+// the secret of the same name — the runtime resolves the actual bytes via the
+// Secret kind (#623) created out of the two-layer secrets.env path (#1120).
 func BindConfig(
 	bp *v1beta1.CellBlueprintDoc,
 	r *model.Role,
@@ -512,8 +514,8 @@ func BindConfig(
 		}
 	}
 
-	if len(declaredSecrets) > 0 && r != nil && len(r.Spec.Needs.Secrets) > 0 {
-		for _, secretName := range r.Spec.Needs.Secrets {
+	if secretNames := effectiveSecretNames(r, harness); len(declaredSecrets) > 0 && len(secretNames) > 0 {
+		for _, secretName := range secretNames {
 			if !declaredSecrets[secretName] {
 				continue
 			}
@@ -765,18 +767,23 @@ func renderContextValues(
 		"secrets": roleNeedsSecrets(r),
 	}
 
-	// .harnesses.<h>.{settings,sandbox,approval,permissions} mirrors
+	// .harnesses.<h>.{settings,sandbox,approval,permissions,secrets} mirrors
 	// role.yaml's harnesses map verbatim — a blueprint may switch behaviour
 	// per harness (claude reads Settings; codex reads Sandbox/Approval;
-	// opencode reads Permissions) without the renderer transpiling.
-	harnessesView := map[string]map[string]string{}
+	// opencode reads Permissions) without the renderer transpiling. `secrets`
+	// is the per-harness secret-name list (agents#750) the blueprint ranges
+	// with `{{ range (index .harnesses .harness).secrets }}`; it is always a
+	// (possibly empty) []string so a `range` over an unset slot iterates zero
+	// times rather than nil-derefing.
+	harnessesView := map[string]map[string]any{}
 	if r != nil {
 		for name, rh := range r.Spec.Harnesses {
-			harnessesView[name] = map[string]string{
+			harnessesView[name] = map[string]any{
 				"settings":    rh.Settings,
 				"sandbox":     rh.Sandbox,
 				"approval":    rh.Approval,
 				"permissions": rh.Permissions,
+				"secrets":     appendNonNil(rh.Secrets),
 			}
 		}
 	}
@@ -996,6 +1003,42 @@ func collectSecretSlots(bp *v1beta1.CellBlueprintDoc) map[string]bool {
 			out[s.Name] = true
 		}
 	}
+	return out
+}
+
+// effectiveSecretNames returns the secret-slot names the role declares for
+// harness, merging the per-harness list (role.spec.harnesses.<harness>.secrets,
+// the agents#750 location) with the role-level fallback
+// (role.spec.needs.secrets, the pre-migration location) so both schemas bind a
+// CellConfig fill during the transition. Per-harness names come first in their
+// declared order; role-level names not already present are appended.
+// Whitespace-only entries are dropped and duplicates collapsed, so a role that
+// declares the same secret in both locations yields a single name. The result
+// is gated downstream by the blueprint's declared slots, so a fallback name the
+// harness's blueprint carries no slot for is pruned rather than over-bound.
+func effectiveSecretNames(r *model.Role, harness string) []string {
+	if r == nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(names []string) {
+		for _, n := range names {
+			n = strings.TrimSpace(n)
+			if n == "" {
+				continue
+			}
+			if _, dup := seen[n]; dup {
+				continue
+			}
+			seen[n] = struct{}{}
+			out = append(out, n)
+		}
+	}
+	if rh, ok := r.Spec.Harnesses[harness]; ok {
+		add(rh.Secrets)
+	}
+	add(r.Spec.Needs.Secrets)
 	return out
 }
 
