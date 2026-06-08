@@ -47,17 +47,24 @@ func PickLookupRealm(cmd *cobra.Command, kv *config.Var) string {
 }
 
 // ExplicitScope returns the named space/stack coordinate for a `kuke run`
-// / `kuke apply` blueprint or config lookup, but only when the operator
-// set it explicitly — via the named cobra flag or the kv.Key env var.
-// Returns "" otherwise so realm-scoped Blueprints/Configs (no space/stack
-// coordinate) stay findable; a missing flag must not narrow the lookup to
-// space="default" / stack="default" or it would hide realm-scoped
-// resources.
+// / `kuke apply` / `kuke create cell` blueprint or config lookup.
+// Precedence: an explicit value wins — the named cobra flag (--space /
+// --stack), else the kv.Key env var — and an explicitly-empty value is
+// honored as empty. When neither flag nor env is set at all, the lookup
+// falls back to kv.Default (operator-supplied default, "default" for the
+// KUKE_{RUN,CREATE_CELL}_{SPACE,STACK} vars) so a no-flag lookup resolves
+// to the full default scope (realm/space/stack = "default") and finds
+// resources stored at that coordinate — how `kuke create config/blueprint`
+// and the team renderer actually store them (issue #1156). A realm-scoped
+// Blueprint/Config (no space/stack coordinate) stays findable by passing
+// an explicit empty `--space "" --stack ""`, which the explicit branch
+// honors.
 //
 // Bypasses viper for the same reason as PickLookupRealm: DefineKV's
 // SetDefault on KUKE_RUN_SPACE / KUKE_RUN_STACK trips viper.IsSet, so a
-// viper-aware fallback would report "default" for an unset coordinate
-// even when the operator left the flag and env var empty.
+// viper-aware fallback could not distinguish an operator-pinned coordinate
+// from the registered default. Reading kv.Default directly keeps the
+// explicit-empty escape hatch intact.
 func ExplicitScope(cmd *cobra.Command, flagName string, kv *config.Var) string {
 	if cmd.Flags().Changed(flagName) {
 		v, _ := cmd.Flags().GetString(flagName)
@@ -66,5 +73,5 @@ func ExplicitScope(cmd *cobra.Command, flagName string, kv *config.Var) string {
 	if v, ok := os.LookupEnv(kv.Key); ok {
 		return strings.TrimSpace(v)
 	}
-	return ""
+	return kv.Default
 }

@@ -95,7 +95,34 @@ func TestExplicitScope_Precedence(t *testing.T) {
 		flag      string
 		want      string
 	}{
-		{name: "space: no flag, no env → empty", flag: "space", kv: &config.KUKE_RUN_SPACE, want: ""},
+		{
+			// No flag, no env → falls back to kv.Default ("default" for
+			// KUKE_RUN_SPACE) so a no-flag lookup resolves to the full
+			// default scope (issue #1156).
+			name: "space: no flag, no env → kv.Default",
+			flag: "space",
+			kv:   &config.KUKE_RUN_SPACE,
+			want: "default",
+		},
+		{
+			// Explicit empty flag is honored as empty — the escape hatch that
+			// keeps realm-scoped Blueprints/Configs (no space/stack) findable.
+			name:      "space: empty flag set explicitly → empty (escape hatch)",
+			flag:      "space",
+			kv:        &config.KUKE_RUN_SPACE,
+			flagValue: "",
+			flagSet:   true,
+			want:      "",
+		},
+		{
+			// Explicit empty env is likewise honored as empty.
+			name:   "space: empty env set explicitly → empty (escape hatch)",
+			flag:   "space",
+			kv:     &config.KUKE_RUN_SPACE,
+			env:    "",
+			envSet: true,
+			want:   "",
+		},
 		{
 			name:   "space: env only → env",
 			flag:   "space",

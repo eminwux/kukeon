@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -64,6 +65,53 @@ func TestNewBlueprintCmd(t *testing.T) {
 			},
 		},
 		{
+			// No --space/--stack: the single-get lookup must resolve to the
+			// full default scope (realm/space/stack = "default") so a
+			// full-scoped Blueprint is found (issue #1156).
+			name: "get single blueprint defaults full scope when no flags",
+			args: []string{"web"},
+			fake: &fakeClient{
+				getBlueprintFn: func(doc v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+					m := doc.Metadata
+					if m.Realm != "default" || m.Space != "default" || m.Stack != "default" {
+						return kukeonv1.GetBlueprintResult{}, fmt.Errorf(
+							"lookup scope = realm=%q space=%q stack=%q, want all \"default\"",
+							m.Realm, m.Space, m.Stack,
+						)
+					}
+					return kukeonv1.GetBlueprintResult{
+						Blueprint:      v1beta1.CellBlueprintDoc{Metadata: doc.Metadata},
+						MetadataExists: true,
+					}, nil
+				},
+			},
+		},
+		{
+			// An explicit empty --space/--stack stays empty so a realm-scoped
+			// Blueprint remains findable (the escape hatch).
+			name: "get single blueprint explicit empty space stays realm-scoped",
+			args: []string{"web"},
+			setup: func(_ *testing.T, cmd *cobra.Command) {
+				_ = cmd.Flags().Set("space", "")
+				_ = cmd.Flags().Set("stack", "")
+			},
+			fake: &fakeClient{
+				getBlueprintFn: func(doc v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+					m := doc.Metadata
+					if m.Realm != "default" || m.Space != "" || m.Stack != "" {
+						return kukeonv1.GetBlueprintResult{}, fmt.Errorf(
+							"lookup scope = realm=%q space=%q stack=%q, want realm=\"default\" space/stack empty",
+							m.Realm, m.Space, m.Stack,
+						)
+					}
+					return kukeonv1.GetBlueprintResult{
+						Blueprint:      v1beta1.CellBlueprintDoc{Metadata: doc.Metadata},
+						MetadataExists: true,
+					}, nil
+				},
+			},
+		},
+		{
 			name: "get not found surfaces friendly error",
 			args: []string{"missing"},
 			setup: func(_ *testing.T, cmd *cobra.Command) {
@@ -75,6 +123,25 @@ func TestNewBlueprintCmd(t *testing.T) {
 				},
 			},
 			wantErr: `blueprint "missing" not found`,
+		},
+		{
+			// On a miss, the realm-wide probe hints the coordinate where a
+			// Blueprint of the same name does live (issue #1156).
+			name: "get not found hints other-scope coordinate",
+			args: []string{"web"},
+			fake: &fakeClient{
+				getBlueprintFn: func(_ v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+					return kukeonv1.GetBlueprintResult{MetadataExists: false}, nil
+				},
+				listBlueprintsFn: func(_, _, _ string) ([]v1beta1.CellBlueprintDoc, error) {
+					return []v1beta1.CellBlueprintDoc{
+						{Metadata: v1beta1.CellBlueprintMetadata{
+							Name: "web", Realm: "default", Space: "team-a", Stack: "core",
+						}},
+					}, nil
+				},
+			},
+			wantErr: `exists at realm="default" space="team-a" stack="core"`,
 		},
 		{
 			name: "get not found via MetadataExists=false",

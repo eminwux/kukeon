@@ -755,6 +755,87 @@ func TestCreateCell_FromConfig_HappyPath(t *testing.T) {
 	}
 }
 
+// TestCreateCell_FromConfig_DefaultsLookupScope pins issue #1156: with no
+// --space/--stack, the Config lookup resolves to the full default scope
+// (realm/space/stack = "default") so `kuke run --from-config <cfg>` finds a
+// config stored at the full default coordinate and proceeds to materialize.
+func TestCreateCell_FromConfig_DefaultsLookupScope(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	var materializeCalled bool
+	fc := &fakeClient{
+		getConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			m := doc.Metadata
+			if m.Realm != "default" || m.Space != "default" || m.Stack != "default" {
+				t.Errorf(
+					"Config lookup scope = realm=%q space=%q stack=%q, want all \"default\"",
+					m.Realm, m.Space, m.Stack,
+				)
+			}
+			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
+		},
+		getBlueprintFn: func(_ v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		materializeCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			materializeCalled = true
+			return successResultFromDoc(doc), nil
+		},
+	}
+
+	cmd, _ := newTestExecCmd(t, fc)
+	setFlag(t, cmd, "from-config", "prod")
+	cmd.SetArgs([]string{"prod-1"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !materializeCalled {
+		t.Fatal("MaterializeCell was not called — no-flag from-config lookup missed the full default scope")
+	}
+}
+
+// TestCreateCell_FromConfig_ExplicitEmptyScope pins the escape hatch: an
+// explicit empty --space/--stack stays empty so a realm-scoped Config remains
+// findable (issue #1156).
+func TestCreateCell_FromConfig_ExplicitEmptyScope(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	var materializeCalled bool
+	fc := &fakeClient{
+		getConfigFn: func(doc v1beta1.CellConfigDoc) (kukeonv1.GetConfigResult, error) {
+			m := doc.Metadata
+			if m.Realm != "default" || m.Space != "" || m.Stack != "" {
+				t.Errorf(
+					"Config lookup scope = realm=%q space=%q stack=%q, want realm=\"default\" space/stack empty",
+					m.Realm, m.Space, m.Stack,
+				)
+			}
+			return kukeonv1.GetConfigResult{Config: configDoc(), MetadataExists: true}, nil
+		},
+		getBlueprintFn: func(_ v1beta1.CellBlueprintDoc) (kukeonv1.GetBlueprintResult, error) {
+			return kukeonv1.GetBlueprintResult{Blueprint: blueprintDoc(), MetadataExists: true}, nil
+		},
+		materializeCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			materializeCalled = true
+			return successResultFromDoc(doc), nil
+		},
+	}
+
+	cmd, _ := newTestExecCmd(t, fc)
+	setFlag(t, cmd, "from-config", "prod")
+	setFlag(t, cmd, "space", "")
+	setFlag(t, cmd, "stack", "")
+	cmd.SetArgs([]string{"prod-1"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !materializeCalled {
+		t.Fatal("MaterializeCell was not called — explicit-empty escape hatch did not preserve realm-scoped lookup")
+	}
+}
+
 func TestCreateCell_FromConfig_NotFound_Errors(t *testing.T) {
 	t.Cleanup(viper.Reset)
 
