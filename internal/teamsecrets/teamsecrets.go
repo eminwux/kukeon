@@ -112,8 +112,10 @@ type ComposeResult struct {
 // Compose runs the four-step pipeline: scaffold (skipped under DryRun),
 // load both layers, merge with per-team precedence, render every non-empty
 // entry as a SecretDoc. An empty Needs short-circuits the whole pipeline:
-// nothing is written, nothing is read, no warnings are surfaced — a team
-// whose roles declare no `needs.secrets` has no secret pipeline.
+// nothing is written, nothing is read, no warnings are surfaced — a team whose
+// roles reference no secret names (neither per-harness harnesses.<h>.secrets
+// nor the role-level needs.secrets fallback; see UnionSecretNames) has no
+// secret pipeline.
 func Compose(in ComposeInputs) (*ComposeResult, error) {
 	if len(in.Needs) == 0 {
 		return &ComposeResult{}, nil
