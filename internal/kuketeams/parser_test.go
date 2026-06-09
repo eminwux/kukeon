@@ -304,6 +304,26 @@ func TestParseFailureModes(t *testing.T) {
 			errdefs.ErrTeamSourceInvalid,
 		},
 		{
+			"ProjectTeam projectDir equals reserved agents slot",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: agents}\nspec: { source: {repo: eminwux/agents, branch: main}, projectDir: agents, roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamProjectDirInvalid,
+		},
+		{
+			"ProjectTeam projectDir has path separator",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, projectDir: \"a/b\", roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamProjectDirInvalid,
+		},
+		{
+			"ProjectTeam projectDir traverses parent",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, projectDir: \"../escape\", roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamProjectDirInvalid,
+		},
+		{
+			"ProjectTeam projectDir leading dot",
+			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, projectDir: \".hidden\", roles: [{ref: dev}] }\n",
+			errdefs.ErrTeamProjectDirInvalid,
+		},
+		{
 			"ProjectTeam empty role ref",
 			"apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\nspec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: \"\"}] }\n",
 			errdefs.ErrTeamRoleRefRequired,
@@ -565,6 +585,32 @@ func TestParseProjectTeamAcceptsSourceForms(t *testing.T) {
 				t.Errorf("Floating() = %v, want %v", got, tc.wantFloating)
 			}
 		})
+	}
+}
+
+func TestParseProjectTeamAcceptsProjectDir(t *testing.T) {
+	t.Parallel()
+	// A self-referential team gives the project clone a distinct in-cell dir so
+	// it never collides with the `agents` repo slot's fixed `/home/<user>/agents`.
+	raw := "apiVersion: kuketeams.io/v1\nkind: ProjectTeam\n" +
+		"metadata: {name: agents}\n" +
+		"spec: { source: {repo: eminwux/agents, branch: main}, projectDir: agents0, roles: [{ref: dev}] }\n"
+	doc, err := Parse([]byte(raw))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got := doc.ProjectTeam.Spec.ProjectDir; got != "agents0" {
+		t.Errorf("spec.projectDir = %q, want agents0", got)
+	}
+	// Omitting projectDir is valid — the renderer falls back to metadata.name.
+	bare := "apiVersion: kuketeams.io/v1\nkind: ProjectTeam\nmetadata: {name: x}\n" +
+		"spec: { source: {repo: eminwux/agents, tag: v1.4.0}, roles: [{ref: dev}] }\n"
+	doc, err = Parse([]byte(bare))
+	if err != nil {
+		t.Fatalf("Parse(bare): %v", err)
+	}
+	if got := doc.ProjectTeam.Spec.ProjectDir; got != "" {
+		t.Errorf("spec.projectDir = %q, want empty", got)
 	}
 }
 

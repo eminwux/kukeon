@@ -128,6 +128,16 @@ type Inputs struct {
 	// `.project.PROJECT_DIR` so the operator can reference the source-tree
 	// path without bouncing it through a CellConfig parameter.
 	ProjectDir string
+	// ProjectCloneDir overrides the in-cell project clone dir basename the
+	// renderer exposes as `.project.NAME` (the fact a blueprint's `project` repo
+	// target reads for its `/home/<user>/<dir>` clone path). Sourced from the
+	// project's kuketeam.yaml spec.projectDir; empty falls back to Project (the
+	// team label). Distinct from ProjectDir above — that is the on-host
+	// source-tree path (`.project.PROJECT_DIR`), this is the in-cell clone dir.
+	// Decoupling the two breaks the self-referential-team collision (#1166)
+	// where the `project` and `agents` slots otherwise both target
+	// `/home/<user>/agents`.
+	ProjectCloneDir string
 	// TeamDir is the per-team host-state root resolved by composeTeam
 	// (TeamEntry.spec.teamDir override, else Layout.TeamDir(team)). Exposed to
 	// blueprint templates as `.operator.TEAM_ROOT`. Per-team-scoped: two teams
@@ -812,8 +822,19 @@ func renderContextValues(
 		operatorView["REPO_OWNER"] = v
 	}
 
+	// .project.NAME is the in-cell project clone dir basename — the fact a
+	// blueprint's `project` repo target reads for `/home/<user>/<dir>`. It
+	// defaults to the team label (project) but spec.projectDir
+	// (in.ProjectCloneDir) overrides it so a self-referential team can give the
+	// project clone a distinct dir from the `agents` slot (#1166). The team
+	// label itself stays project — it drives LabelTeam and operatorValues PROJECT
+	// directly, not via this view.
+	projectName := project
+	if v := strings.TrimSpace(in.ProjectCloneDir); v != "" {
+		projectName = v
+	}
 	projectView := map[string]string{
-		"NAME": project,
+		"NAME": projectName,
 	}
 	if v := strings.TrimSpace(in.ProjectDir); v != "" {
 		projectView["PROJECT_DIR"] = v
