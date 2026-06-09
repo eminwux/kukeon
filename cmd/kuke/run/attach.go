@@ -227,17 +227,29 @@ func resolveRun(cmd *cobra.Command) runFn {
 //     is cancelled (returns ctx.Err), or attachPingRetryBudget is
 //     exhausted (returns the last runErr wrapped with the matching
 //     sentinel — errdefs.ErrAttachPingTimeout for the ping-deadline
-//     class, errdefs.ErrAttachStaleSocket for the EACCES/ENOENT
-//     class — so callers can errors.Is either class without
-//     string-matching sbsh's wrap or sniffing for raw errno values).
+//     class, errdefs.ErrAttachStaleSocket for the absent-socket
+//     EACCES/ENOENT class — so callers can errors.Is either class
+//     without string-matching sbsh's wrap or sniffing for raw errno
+//     values).
+//   - EACCES against a socket that is *present on disk* is a permanent
+//     wrong-mode condition, not a race: attachBootRaceSentinel returns
+//     errdefs.ErrAttachPermissionDenied with retry=false and the loop
+//     surfaces it immediately rather than burning the full budget
+//     (#1170).
 func runWithPingRetry(ctx context.Context, run runFn, opts attach.Options) error {
 	deadline := time.Now().Add(attachPingRetryBudget)
 	var lastErr error
 	for {
 		lastErr = run(ctx, opts)
-		sentinel := attachBootRaceSentinel(ctx, lastErr)
+		sentinel, retry := attachBootRaceSentinel(ctx, lastErr, opts.SocketPath)
 		if sentinel == nil {
 			return lastErr
+		}
+		if !retry {
+			// Permanent failure (e.g. a present socket with the wrong
+			// mode): retrying cannot resolve it, so surface the matching
+			// sentinel immediately instead of waiting out the budget.
+			return fmt.Errorf("%w: %w", sentinel, lastErr)
 		}
 		if !time.Now().Before(deadline) {
 			return fmt.Errorf("%w: %w", sentinel, lastErr)
@@ -250,34 +262,64 @@ func runWithPingRetry(ctx context.Context, run runFn, opts attach.Options) error
 	}
 }
 
-// attachBootRaceSentinel classifies err as one of the kuketty boot-race
-// classes runWithPingRetry treats as a readiness handshake rather than
-// a hard failure, returning the matching errdefs sentinel — or nil
-// when err is not retryable. The classifier is conservative on purpose:
+// attachBootRaceSentinel classifies err for runWithPingRetry, returning
+// the matching errdefs sentinel plus whether the failure is retryable.
+// A nil sentinel means err is not a recognised boot-race / socket class
+// and should propagate unchanged; a non-nil sentinel with retry=false
+// is a permanent failure runWithPingRetry surfaces immediately rather
+// than waiting out the budget. The classifier is conservative on purpose:
 //
 //   - err must be non-nil (a clean detach is not a retry condition);
 //   - ctx must not be done (a cancelled outer ctx surfaces as
 //     DeadlineExceeded on the inner WithTimeout child, but is the
 //     operator's ^C not kuketty's boot race — don't retry);
 //   - context.DeadlineExceeded in the chain maps to ErrAttachPingTimeout
-//     (the only bounded-timeout in sbsh's attach.Run setup is the 3 s
-//     ping window in clientrunner/io.go dialTerminalCtrlSocket);
-//   - syscall.EACCES / syscall.ENOENT in the chain map to
-//     ErrAttachStaleSocket (the stale pre-fix tty socket window —
-//     EACCES against a 0o640 stale inode, or ENOENT against the
-//     Remove→Listen gap inside kuketty's init path; #933).
-func attachBootRaceSentinel(ctx context.Context, err error) error {
+//     and retries (the only bounded-timeout in sbsh's attach.Run setup
+//     is the 3 s ping window in clientrunner/io.go dialTerminalCtrlSocket);
+//   - syscall.ENOENT in the chain maps to ErrAttachStaleSocket and
+//     retries (the Remove→Listen gap inside kuketty's init path; #933);
+//   - syscall.EACCES in the chain is split by stat(2) on socketPath
+//     (#1170): a stale/absent inode (stat ENOENT) is the transient
+//     pre-fix window — maps to ErrAttachStaleSocket and retries; a
+//     socket that is *present on disk* is a permanent wrong-mode
+//     condition retrying cannot fix — maps to ErrAttachPermissionDenied
+//     with retry=false so the loop fails fast with a message naming the
+//     actual cause instead of burning the 10 s budget blaming a stale
+//     socket.
+func attachBootRaceSentinel(ctx context.Context, err error, socketPath string) (error, bool) {
 	if err == nil {
-		return nil
+		return nil, false
 	}
 	if ctx.Err() != nil {
-		return nil
+		return nil, false
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return errdefs.ErrAttachPingTimeout
+		return errdefs.ErrAttachPingTimeout, true
 	}
-	if errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.ENOENT) {
-		return errdefs.ErrAttachStaleSocket
+	if errors.Is(err, syscall.ENOENT) {
+		return errdefs.ErrAttachStaleSocket, true
 	}
-	return nil
+	if errors.Is(err, syscall.EACCES) {
+		if socketPresent(socketPath) {
+			return errdefs.ErrAttachPermissionDenied, false
+		}
+		return errdefs.ErrAttachStaleSocket, true
+	}
+	return nil, false
+}
+
+// socketPresent reports whether socketPath currently resolves to an
+// existing inode. Used by attachBootRaceSentinel to tell a permanent
+// wrong-mode socket (present + EACCES on connect) from the transient
+// pre-fix stale-socket window (absent + EACCES/ENOENT). Any stat error
+// other than a clean success is treated as "not present" so the
+// classifier falls back to the conservative retry path rather than
+// failing fast on an ambiguous signal (e.g. EACCES walking the parent
+// directory).
+func socketPresent(socketPath string) bool {
+	if socketPath == "" {
+		return false
+	}
+	_, err := os.Stat(socketPath)
+	return err == nil
 }

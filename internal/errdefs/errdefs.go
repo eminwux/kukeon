@@ -330,6 +330,26 @@ var (
 	// without sniffing for raw errno values (#933).
 	ErrAttachStaleSocket = errors.New("attach stale socket: kuketty has not yet unlinked the pre-fix tty socket")
 
+	// ErrAttachPermissionDenied is returned by the post-StartCell attach
+	// loop in cmd/kuke/run when dial(2) fails with EACCES against a tty
+	// control socket that is *present on disk* — a permanent permission
+	// condition (the socket inode carries the wrong mode, e.g. 0o640
+	// without group-write for the operator), not the transient pre-fix
+	// stale-socket race ErrAttachStaleSocket covers. Retrying cannot
+	// resolve a wrong-mode inode, so the loop fails fast instead of
+	// burning the full retry budget on a 10 s hang followed by a
+	// misleading "stale socket" message. Split from ErrAttachStaleSocket
+	// by stat(2) at classification time — socket absent (stat ENOENT) is
+	// the transient class worth retrying; socket present + EACCES is this
+	// permanent class — so callers can errors.Is the permanent failure
+	// and operators get a message that names the socket mode and points
+	// at the heal (`kuke restart <cell>`) rather than a stale socket
+	// (#1170).
+	ErrAttachPermissionDenied = errors.New(
+		"attach permission denied: kuketty control socket is present but not accessible (wrong mode); " +
+			"retrying cannot fix this — heal the socket with `kuke restart <cell>`",
+	)
+
 	// ErrSocketPathTooLong fires when the resolved host-side path of a
 	// per-container kuketty control socket would overflow Linux's
 	// sockaddr_un.sun_path buffer (consts.KukeonMaxSocketPath bytes plus
