@@ -404,6 +404,105 @@ func TestDeleteCell_ReconcilesOrphanFromEmptyContainerdID(t *testing.T) {
 	}
 }
 
+// TestDeleteCell_SweepsOrphansWhenMetadataAbsent is the regression guard for
+// issue #1175. When the cell metadata is already gone (GetCell returns
+// ErrCellNotFound), DeleteCell used to bare-`return nil` and declare success
+// while the cell's containerd container, Active snapshot, and IPAM reservation
+// survived on the host. The idempotent path must now run the name-prefix
+// orphan scan and tear down any survivors using request-derived identifiers.
+func TestDeleteCell_SweepsOrphansWhenMetadataAbsent(t *testing.T) {
+	realm, space, stack, cellName := "default", "default", "default", "kukeon-pr-3"
+	rootID := space + "_" + stack + "_" + cellName + "_root"
+	workID := space + "_" + stack + "_" + cellName + "_work"
+
+	var deletedIDs []string
+	fake := &deleteCellFakeClient{
+		deleteContainerFn: func(_, id string, _ ctr.ContainerDeleteOptions) error {
+			deletedIDs = append(deletedIDs, id)
+			return nil
+		},
+		listContainersFn: func(string, ...string) ([]containerd.Container, error) {
+			return []containerd.Container{
+				stubContainer{id: rootID},
+				stubContainer{id: workID},
+			}, nil
+		},
+	}
+	r := newDeleteCellTestExec(t, fake)
+	seedDeleteCellRealm(t, r, realm)
+	// Deliberately do NOT seed the cell metadata — GetCell returns
+	// ErrCellNotFound, the exact entry point the fix targets.
+
+	if err := r.DeleteCell(buildDeleteCellRequest(realm, space, stack, cellName)); err != nil {
+		t.Fatalf("DeleteCell: unexpected error on metadata-absent path: %v", err)
+	}
+
+	for _, want := range []string{rootID, workID} {
+		var found bool
+		for _, id := range deletedIDs {
+			if id == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("orphan container %q was not swept on the metadata-absent path; DeleteContainer called for %v", want, deletedIDs)
+		}
+	}
+}
+
+// TestDeleteCell_MetadataAbsentSurfacesSweepFailure locks the host-resource
+// idempotency contract (issue #1175): when an orphan teardown fails on the
+// metadata-absent path, DeleteCell must surface a wrapped ErrDeleteCell rather
+// than silently declare success, so an operator (or the next reset) sees the
+// host is still dirty.
+func TestDeleteCell_MetadataAbsentSurfacesSweepFailure(t *testing.T) {
+	realm, space, stack, cellName := "default", "default", "default", "kukeon-dev-2"
+	rootID := space + "_" + stack + "_" + cellName + "_root"
+
+	fake := &deleteCellFakeClient{
+		deleteContainerFn: func(_, id string, _ ctr.ContainerDeleteOptions) error {
+			if id == rootID {
+				return errors.New("containerd busy")
+			}
+			return nil
+		},
+		listContainersFn: func(string, ...string) ([]containerd.Container, error) {
+			return []containerd.Container{stubContainer{id: rootID}}, nil
+		},
+	}
+	r := newDeleteCellTestExec(t, fake)
+	seedDeleteCellRealm(t, r, realm)
+
+	err := r.DeleteCell(buildDeleteCellRequest(realm, space, stack, cellName))
+	if err == nil {
+		t.Fatal("DeleteCell: want non-nil error when an orphan teardown fails on the metadata-absent path, got nil")
+	}
+	if !errors.Is(err, errdefs.ErrDeleteCell) {
+		t.Errorf("metadata-absent sweep failure must wrap ErrDeleteCell; got %v", err)
+	}
+}
+
+// TestDeleteCell_MetadataAndRealmAbsentIsIdempotent confirms the historical
+// idempotent success is preserved when both the cell and its realm are gone:
+// no realm means no containerd namespace, hence nothing to sweep (issue #1175).
+func TestDeleteCell_MetadataAndRealmAbsentIsIdempotent(t *testing.T) {
+	realm, space, stack, cellName := "default", "default", "default", "kukeon-pr-3"
+
+	fake := &deleteCellFakeClient{
+		listContainersFn: func(string, ...string) ([]containerd.Container, error) {
+			t.Fatal("ListContainers must not run when the realm is absent")
+			return nil, nil
+		},
+	}
+	r := newDeleteCellTestExec(t, fake)
+	// Seed neither realm nor cell metadata.
+
+	if err := r.DeleteCell(buildDeleteCellRequest(realm, space, stack, cellName)); err != nil {
+		t.Fatalf("DeleteCell: want nil (idempotent) when both cell and realm are gone, got %v", err)
+	}
+}
+
 // TestFindOrphanContainerIDs locks the prefix-filter behavior the orphan
 // scan relies on. The prefix is `<space>_<stack>_<cell>_` and must match
 // both `_root` and `_<workload>` IDs while excluding unrelated containers

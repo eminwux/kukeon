@@ -61,8 +61,20 @@ func (r *Exec) deleteCellLocked(cell intmodel.Cell) error {
 	internalCell, err := r.GetCell(cell)
 	if err != nil {
 		if errors.Is(err, errdefs.ErrCellNotFound) {
-			// Idempotent: cell doesn't exist, consider it deleted
-			return nil
+			// Idempotent at the host-resource level, not just metadata
+			// (issue #1175). The cell document is gone, but its containerd
+			// container, active overlay snapshot, and CNI/IPAM reservation
+			// can still be orphaned on the host — e.g. when a
+			// non-deleteCellLocked path (stack/space teardown, daemon reset,
+			// team teardown) removed metadata without per-cell teardown, or a
+			// prior deleteCellLocked partially progressed. A bare `return nil`
+			// here used to declare success and leak those resources
+			// permanently (surviving containerd ID blocks re-init, Active
+			// snapshot pins disk, IPAM reservation exhausts the subnet). The
+			// deterministic containerd ID prefix and network name are pure
+			// functions of the request, so sweep any survivors before
+			// returning.
+			return r.sweepOrphansForMissingCell(cell)
 		}
 		return fmt.Errorf("%w: %w", errdefs.ErrGetCell, err)
 	}
@@ -139,45 +151,13 @@ func (r *Exec) deleteCellLocked(cell intmodel.Cell) error {
 		}
 	}
 
-	// Root container.
-	rootContainerID, err := naming.BuildRootContainerdID(cellSpaceName, cellStackName, cellID)
-	if err != nil {
-		return fmt.Errorf("failed to build root container containerd ID: %w", err)
-	}
-	if delErr := r.stopAndDeleteContainer(namespace, rootContainerID, networkName, true); delErr != nil {
-		deleteErrors = append(deleteErrors,
-			fmt.Errorf("delete root container %q: %w", rootContainerID, delErr))
-	}
-
-	// Belt-and-suspenders: enumerate every containerd container in the realm
-	// namespace whose ID matches `<space>_<stack>_<cell>_*` and tear it down
-	// too. Catches the partial-init case where the cell spec was persisted
-	// with an empty ContainerdID, and the rare race where a non-NotFound
-	// DeleteContainer error above leaves a survivor we then mop up here.
-	namePrefix := fmt.Sprintf("%s_%s_%s_", cellSpaceName, cellStackName, cellID)
-	orphans, scanErr := r.findOrphanContainerIDs(namespace, namePrefix)
-	if scanErr != nil {
-		deleteErrors = append(deleteErrors,
-			fmt.Errorf("scan orphan containers with prefix %q: %w", namePrefix, scanErr))
-	}
-	for _, orphanID := range orphans {
-		r.logger.InfoContext(
-			r.ctx,
-			"reconciling orphan container left by partial init or prior failed delete",
-			"container", orphanID,
-			"namespace", namespace,
-		)
-		if delErr := r.stopAndDeleteContainer(namespace, orphanID, networkName, true); delErr != nil {
-			deleteErrors = append(deleteErrors,
-				fmt.Errorf("delete orphan container %q: %w", orphanID, delErr))
-		}
-	}
-
-	// Always run comprehensive CNI cleanup after root container deletion as a safety net.
-	// This ensures IPAM allocations are cleaned up even if earlier cleanup succeeded or failed.
-	if networkName != "" {
-		_ = r.purgeCNIForContainer(rootContainerID, "", networkName)
-	}
+	// Root container, name-prefix orphan scan, and the post-delete CNI/IPAM
+	// purge — all derivable from (space, stack, cellID, networkName), so the
+	// same sweep also runs on the metadata-absent idempotent path above.
+	deleteErrors = append(
+		deleteErrors,
+		r.sweepCellContainerResources(namespace, cellSpaceName, cellStackName, cellID, networkName)...,
+	)
 
 	// If any container-tier failure remains, refuse to remove the cell
 	// cgroup or metadata: leaving the metadata file in place is what makes
@@ -234,6 +214,113 @@ func (r *Exec) deleteCellLocked(cell intmodel.Cell) error {
 	}
 
 	return nil
+}
+
+// sweepOrphansForMissingCell runs the container/CNI/IPAM orphan sweep for a
+// cell whose metadata is already gone (GetCell returned ErrCellNotFound),
+// using only request-derived identifiers. It returns nil when the host is
+// clean (or when the realm itself is gone, since its containerd namespace —
+// and therefore any orphan it could have held — went with it) and a wrapped
+// ErrDeleteCell when any orphan teardown failed, so the idempotent delete path
+// is genuinely idempotent at the host-resource level (issue #1175).
+func (r *Exec) sweepOrphansForMissingCell(cell intmodel.Cell) error {
+	if err := r.ensureClientConnected(); err != nil {
+		return fmt.Errorf("%w: %w", errdefs.ErrConnectContainerd, err)
+	}
+
+	realmName := strings.TrimSpace(cell.Spec.RealmName)
+	spaceName := strings.TrimSpace(cell.Spec.SpaceName)
+	stackName := strings.TrimSpace(cell.Spec.StackName)
+	// The cell document is gone, so fall back to the request name for the ID
+	// the same way the metadata path falls back to internalCell.Metadata.Name.
+	cellID := strings.TrimSpace(cell.Spec.ID)
+	if cellID == "" {
+		cellID = strings.TrimSpace(cell.Metadata.Name)
+	}
+
+	lookupRealm := intmodel.Realm{Metadata: intmodel.RealmMetadata{Name: realmName}}
+	internalRealm, err := r.GetRealm(lookupRealm)
+	if err != nil {
+		if errors.Is(err, errdefs.ErrRealmNotFound) {
+			// No realm means no containerd namespace, hence no orphans to
+			// sweep — preserve the historical idempotent success.
+			return nil
+		}
+		return fmt.Errorf("failed to get realm: %w", err)
+	}
+	namespace := internalRealm.Spec.Namespace
+
+	// Resolve the network name deterministically from realm+space (issue #685);
+	// it's a pure function of (realm, space) and needs no cell metadata.
+	networkName := r.buildRootCNINetworkName(realmName, spaceName)
+
+	if deleteErrors := r.sweepCellContainerResources(
+		namespace, spaceName, stackName, cellID, networkName,
+	); len(deleteErrors) > 0 {
+		return fmt.Errorf("%w: %w", errdefs.ErrDeleteCell, errors.Join(deleteErrors...))
+	}
+	return nil
+}
+
+// sweepCellContainerResources tears down the root container, scans for and
+// reaps any orphan containerd containers matching the cell's deterministic
+// `<space>_<stack>_<cell>_*` ID prefix, and runs the post-delete CNI/IPAM
+// purge keyed on the root container ID. It returns the aggregated set of
+// container-tier failures (nil when the host is clean). Every input is a pure
+// function of the delete request, so this runs identically whether or not the
+// cell metadata still exists — that's what lets the ErrCellNotFound idempotent
+// path mop up orphans instead of declaring success on a still-dirty host
+// (issue #1175).
+func (r *Exec) sweepCellContainerResources(
+	namespace, spaceName, stackName, cellID, networkName string,
+) []error {
+	var deleteErrors []error
+
+	// Root container.
+	rootContainerID, err := naming.BuildRootContainerdID(spaceName, stackName, cellID)
+	if err != nil {
+		// Inputs are validated non-empty upstream, so this is effectively
+		// unreachable; aggregate rather than abort so the orphan scan below
+		// still runs and the caller still preserves any cell metadata.
+		deleteErrors = append(deleteErrors,
+			fmt.Errorf("build root container containerd ID: %w", err))
+	} else if delErr := r.stopAndDeleteContainer(namespace, rootContainerID, networkName, true); delErr != nil {
+		deleteErrors = append(deleteErrors,
+			fmt.Errorf("delete root container %q: %w", rootContainerID, delErr))
+	}
+
+	// Belt-and-suspenders: enumerate every containerd container in the realm
+	// namespace whose ID matches `<space>_<stack>_<cell>_*` and tear it down
+	// too. Catches the partial-init case where the cell spec was persisted
+	// with an empty ContainerdID, the rare race where a non-NotFound
+	// DeleteContainer error above leaves a survivor, and (issue #1175) the
+	// orphans left when metadata was removed without per-cell teardown.
+	namePrefix := fmt.Sprintf("%s_%s_%s_", spaceName, stackName, cellID)
+	orphans, scanErr := r.findOrphanContainerIDs(namespace, namePrefix)
+	if scanErr != nil {
+		deleteErrors = append(deleteErrors,
+			fmt.Errorf("scan orphan containers with prefix %q: %w", namePrefix, scanErr))
+	}
+	for _, orphanID := range orphans {
+		r.logger.InfoContext(
+			r.ctx,
+			"reconciling orphan container left by partial init or prior failed delete",
+			"container", orphanID,
+			"namespace", namespace,
+		)
+		if delErr := r.stopAndDeleteContainer(namespace, orphanID, networkName, true); delErr != nil {
+			deleteErrors = append(deleteErrors,
+				fmt.Errorf("delete orphan container %q: %w", orphanID, delErr))
+		}
+	}
+
+	// Always run comprehensive CNI cleanup after root container deletion as a safety net.
+	// This ensures IPAM allocations are cleaned up even if earlier cleanup succeeded or failed.
+	if networkName != "" && rootContainerID != "" {
+		_ = r.purgeCNIForContainer(rootContainerID, "", networkName)
+	}
+
+	return deleteErrors
 }
 
 // stopAndDeleteContainer purges CNI state, stops the task (best effort), then
