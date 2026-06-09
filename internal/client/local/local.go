@@ -1150,6 +1150,16 @@ func (c *Client) AttachContainer(_ context.Context, doc v1beta1.ContainerDoc) (k
 		return kukeonv1.AttachContainerResult{}, err
 	}
 	spec := container.Spec
+	// Heal a wrong-mode live tty socket in place before handing back its
+	// path (#1169). `kuke run` against an already-Ready cell short-circuits
+	// to attach without re-entering StartCell, so the #935 StartCell-skip
+	// heal never runs on the path run/attach take: a socket an old kuketty
+	// bound 0o640 (group-read only) stays undialable forever, while
+	// `kuke restart` heals it via its stop+start rebind. Re-chmod'ing the
+	// live inode here closes that asymmetry without bouncing the workload or
+	// re-entering the #630-prone start-on-running path. Best-effort and
+	// idempotent: a socket already at 0o660 is left untouched.
+	c.ctrl.ReapplyAttachableSocketPerms(spec)
 	return kukeonv1.AttachContainerResult{
 		HostSocketPath: fs.ContainerSocketSymlinkPath(
 			c.ctrl.RunPath(),

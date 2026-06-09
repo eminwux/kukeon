@@ -1022,6 +1022,105 @@ func TestReapplyAttachableSocketPerms_TolerantMissingSocket(t *testing.T) {
 	r.reapplyAttachableSocketPerms(cell)
 }
 
+// TestReapplyAttachableSocketPermsSpec_CorrectsWrongMode locks the #1169
+// fix: the per-spec attach-path heal (the path `kuke run` against an
+// already-Ready cell takes — it short-circuits past StartCell and so past
+// the #935 StartCell-skip heal) must re-chmod a live attach socket an old
+// kuketty bound 0o640 up to the connect(2)-able 0o660.
+func TestReapplyAttachableSocketPermsSpec_CorrectsWrongMode(t *testing.T) {
+	r := newTestRunner(t)
+	runPath := t.TempDir()
+	r.opts.RunPath = runPath
+
+	spec := intmodel.ContainerSpec{
+		ID: "work", RealmName: "r1", SpaceName: "s1", StackName: "st1", CellName: "c1",
+		Attachable: true,
+	}
+	socketPath := seedAttachableSocket(t, runPath, spec, 0o640)
+
+	r.ReapplyAttachableSocketPerms(spec)
+
+	info, err := os.Stat(socketPath)
+	if err != nil {
+		t.Fatalf("stat socket after reapply: %v", err)
+	}
+	if got := info.Mode().Perm(); got != attachableSocketReapplyMode {
+		t.Errorf("socket mode = %o, want %o (attach-path heal must correct the pre-#361 0o640 socket)",
+			got, attachableSocketReapplyMode)
+	}
+}
+
+// TestReapplyAttachableSocketPermsSpec_IdempotentOnCorrectMode locks the
+// idempotency contract for the per-spec attach-path heal: a socket a
+// post-sbsh#361 kuketty already bound at 0o660 is left at 0o660, so a
+// healthy `kuke run`/`kuke attach` never perturbs the live socket.
+func TestReapplyAttachableSocketPermsSpec_IdempotentOnCorrectMode(t *testing.T) {
+	r := newTestRunner(t)
+	runPath := t.TempDir()
+	r.opts.RunPath = runPath
+
+	spec := intmodel.ContainerSpec{
+		ID: "work", RealmName: "r1", SpaceName: "s1", StackName: "st1", CellName: "c1",
+		Attachable: true,
+	}
+	socketPath := seedAttachableSocket(t, runPath, spec, 0o660)
+
+	r.ReapplyAttachableSocketPerms(spec)
+
+	info, err := os.Stat(socketPath)
+	if err != nil {
+		t.Fatalf("stat socket after reapply: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o660 {
+		t.Errorf("socket mode = %o, want 0660 (already-correct socket must be left untouched)", got)
+	}
+}
+
+// TestReapplyAttachableSocketPermsSpec_SkipsNonAttachable locks the
+// !Attachable short-circuit on the exported per-spec heal: a non-sbsh
+// container has no tty control socket, so the deep socket path (even if a
+// stray inode exists there) must be left untouched.
+func TestReapplyAttachableSocketPermsSpec_SkipsNonAttachable(t *testing.T) {
+	r := newTestRunner(t)
+	runPath := t.TempDir()
+	r.opts.RunPath = runPath
+
+	spec := intmodel.ContainerSpec{
+		ID: "root", RealmName: "r1", SpaceName: "s1", StackName: "st1", CellName: "c1",
+		Root:       true,
+		Attachable: false,
+	}
+	socketPath := seedAttachableSocket(t, runPath, spec, 0o640)
+
+	r.ReapplyAttachableSocketPerms(spec)
+
+	info, err := os.Stat(socketPath)
+	if err != nil {
+		t.Fatalf("stat socket after reapply: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o640 {
+		t.Errorf("non-attachable socket mode = %o, want 0640 (per-spec heal must short-circuit on !Attachable)", got)
+	}
+}
+
+// TestReapplyAttachableSocketPermsSpec_TolerantMissingSocket locks the
+// best-effort contract for the per-spec attach-path heal: an Attachable
+// container whose kuketty has not yet bound the socket (ENOENT) must be a
+// silent no-op, not a panic.
+func TestReapplyAttachableSocketPermsSpec_TolerantMissingSocket(t *testing.T) {
+	r := newTestRunner(t)
+	r.opts.RunPath = t.TempDir()
+
+	spec := intmodel.ContainerSpec{
+		ID: "work", RealmName: "r1", SpaceName: "s1", StackName: "st1", CellName: "c1",
+		Attachable: true,
+	}
+
+	// No socket inode seeded — the deep path resolves to ENOENT. The call
+	// must complete without panicking; there is nothing on disk to assert.
+	r.ReapplyAttachableSocketPerms(spec)
+}
+
 func readDoc(t *testing.T, path string) extmodel.ContainerDoc {
 	t.Helper()
 	data, err := os.ReadFile(path)
