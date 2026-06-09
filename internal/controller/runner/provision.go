@@ -1573,9 +1573,7 @@ func (r *Exec) createCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
 			}
 			buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
-			buildOpts = append(buildOpts, ctr.WithExtraLabels(map[string]string{
-				SpecHashLabelKey: ComputeContainerSpecHash(containerSpec),
-			}))
+			buildOpts = append(buildOpts, ctr.WithExtraLabels(specHashLabels(containerSpec)))
 			// Merge `kuke run --env` runtime env into the attachable
 			// container's spec env (issue #834). Returns containerSpec
 			// unchanged for non-attachable containers or when
@@ -2051,9 +2049,7 @@ func (r *Exec) ensureCellContainers(cell *intmodel.Cell) (containerd.Container, 
 				return nil, fmt.Errorf("failed to prepare attachable container %s: %w", containerdID, attachErr)
 			}
 			buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
-			buildOpts = append(buildOpts, ctr.WithExtraLabels(map[string]string{
-				SpecHashLabelKey: ComputeContainerSpecHash(containerSpec),
-			}))
+			buildOpts = append(buildOpts, ctr.WithExtraLabels(specHashLabels(containerSpec)))
 			createdContainer, containerCreateErr := r.ctrClient.CreateContainerFromSpec(
 				internalRealm.Spec.Namespace,
 				containerSpec,

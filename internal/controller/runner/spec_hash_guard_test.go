@@ -24,6 +24,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"reflect"
+	"sort"
 	"testing"
 
 	cgroup2 "github.com/containerd/cgroups/v2/cgroup2"
@@ -45,12 +47,26 @@ type stubLabeledContainer struct {
 
 	id     string
 	labels map[string]string
+	// stamped, when non-nil, captures the labels written by SetLabels on the
+	// guard's re-stamp path so tests can assert the (hash, version) pair the
+	// reuse branch wrote. Issue #1171.
+	stamped *map[string]string
 }
 
 func (c stubLabeledContainer) ID() string { return c.id }
 
 func (c stubLabeledContainer) Labels(context.Context) (map[string]string, error) {
 	return c.labels, nil
+}
+
+// SetLabels records the re-stamp the guard performs on the reuse path. The
+// real containerd.Container merges and returns the full label set; the stub
+// echoes the written pair, which is all the guard tests assert. Issue #1171.
+func (c stubLabeledContainer) SetLabels(_ context.Context, labels map[string]string) (map[string]string, error) {
+	if c.stamped != nil {
+		*c.stamped = labels
+	}
+	return labels, nil
 }
 
 func (c stubLabeledContainer) Task(context.Context, cio.Attach) (containerd.Task, error) {
@@ -174,6 +190,7 @@ func (c *specHashFakeClient) DeleteImage(string, string) error                  
 func (c *specHashFakeClient) PruneImages(string) (ctr.PruneResult, error) {
 	return ctr.PruneResult{}, nil
 }
+
 func (c *specHashFakeClient) NamespaceStorage(string) (ctr.StorageStats, error) {
 	return ctr.StorageStats{}, nil
 }
@@ -218,11 +235,16 @@ func TestReuseOrRefuseExistingChildContainer_AbsentRecordFallsThrough(t *testing
 func TestReuseOrRefuseExistingChildContainer_MatchingHashReuses(t *testing.T) {
 	spec := intmodel.ContainerSpec{Image: "alpine", Command: "sleep", Args: []string{"infinity"}}
 	matchingHash := ComputeContainerSpecHash(spec)
+	var stamped map[string]string
 	fake := &specHashFakeClient{
 		getContainerFn: func(_, id string) (containerd.Container, error) {
 			return stubLabeledContainer{
-				id:     id,
-				labels: map[string]string{SpecHashLabelKey: matchingHash},
+				id: id,
+				labels: map[string]string{
+					SpecHashLabelKey:        matchingHash,
+					SpecHashVersionLabelKey: SpecHashDomainVersion,
+				},
+				stamped: &stamped,
 			}, nil
 		},
 	}
@@ -235,52 +257,74 @@ func TestReuseOrRefuseExistingChildContainer_MatchingHashReuses(t *testing.T) {
 	if !reuse {
 		t.Errorf("matching spec-hash must return reuse=true (overlay preserved); got reuse=false")
 	}
+	if stamped != nil {
+		t.Errorf(
+			"a record stamped under the current version with a matching hash must reuse untouched; got re-stamp %v",
+			stamped,
+		)
+	}
 }
 
-// TestReuseOrRefuseExistingChildContainer_LegacyRecordReuses locks the
-// backward-compatibility branch: a record with no SpecHashLabelKey label
-// (created by pre-#867 kukeon) is treated as a match so the operator's first
-// restart after the upgrade does not refuse with ErrCellSpecHashDrift on a
-// healthy cell.
-func TestReuseOrRefuseExistingChildContainer_LegacyRecordReuses(t *testing.T) {
+// TestReuseOrRefuseExistingChildContainer_LegacyRecordReusesAndRestamps locks
+// the legacy-absent branch: a record with no version label (created by a
+// pre-#1171 daemon, possibly carrying a bare hash from an older domain) is
+// reused AND re-stamped to the current (hash, version) pair, so the first
+// restart after the upgrade heals the record instead of refusing with
+// ErrCellSpecHashDrift. Issues #867, #1171.
+func TestReuseOrRefuseExistingChildContainer_LegacyRecordReusesAndRestamps(t *testing.T) {
+	spec := intmodel.ContainerSpec{Image: "alpine"}
+	var stamped map[string]string
 	fake := &specHashFakeClient{
 		getContainerFn: func(_, id string) (containerd.Container, error) {
 			return stubLabeledContainer{
-				id:     id,
-				labels: map[string]string{"kukeon.io/cell": "demo"}, // unrelated label
+				id: id,
+				// Bare pre-#1171 hash from an older domain + no version label —
+				// exactly the shape of the live-incident stranded cells.
+				labels:  map[string]string{SpecHashLabelKey: "6271df3bstale"},
+				stamped: &stamped,
 			}, nil
 		},
 	}
 	r := newSpecHashTestExec(fake)
 
-	reuse, err := r.reuseOrRefuseExistingChildContainer(
-		"ns", "id", "cell",
-		intmodel.ContainerSpec{Image: "alpine"},
-	)
+	reuse, err := r.reuseOrRefuseExistingChildContainer("ns", "id", "cell", spec)
 	if err != nil {
 		t.Fatalf("legacy record must not error; got %v", err)
 	}
 	if !reuse {
+		t.Errorf("legacy record (no version label) must be reused after re-stamp; got reuse=false")
+	}
+	if stamped[SpecHashVersionLabelKey] != SpecHashDomainVersion {
 		t.Errorf(
-			"legacy record (no kukeon.io/spec-hash label) must be treated as match (safe default for first post-upgrade restart); got reuse=false",
+			"legacy record must be re-stamped to the current domain version %q; got %v",
+			SpecHashDomainVersion,
+			stamped,
 		)
+	}
+	if stamped[SpecHashLabelKey] != ComputeContainerSpecHash(spec) {
+		t.Errorf("legacy record must be re-stamped to the current spec hash; got %v", stamped)
 	}
 }
 
 // TestReuseOrRefuseExistingChildContainer_DivergedHashRefuses is the
-// regression guard for AC #6 of issue #867: a containerd record whose
-// SpecHashLabelKey value disagrees with the freshly-computed hash must
-// refuse with ErrCellSpecHashDrift instead of silently resuming a stale
-// snapshot. The wrapped error must name both hashes and point at
-// `kuke apply -f` so the operator has an actionable next step.
+// regression guard for AC #6 of issue #867 and AC #2 of #1171: a containerd
+// record stamped under the *current* domain version whose SpecHashLabelKey
+// value disagrees with the freshly-computed hash is genuine out-of-band
+// tampering and must refuse with ErrCellSpecHashDrift instead of silently
+// resuming a stale snapshot. The wrapped error must name both hashes and point
+// at `kuke apply -f` so the operator has an actionable next step.
 func TestReuseOrRefuseExistingChildContainer_DivergedHashRefuses(t *testing.T) {
 	desired := intmodel.ContainerSpec{Image: "alpine", Command: "sleep"}
 	staleHash := "deadbeef" // intentionally not the hash of desired
 	fake := &specHashFakeClient{
 		getContainerFn: func(_, id string) (containerd.Container, error) {
 			return stubLabeledContainer{
-				id:     id,
-				labels: map[string]string{SpecHashLabelKey: staleHash},
+				id: id,
+				// Current version + diverged hash == within-version tamper.
+				labels: map[string]string{
+					SpecHashLabelKey:        staleHash,
+					SpecHashVersionLabelKey: SpecHashDomainVersion,
+				},
 			}, nil
 		},
 	}
@@ -304,6 +348,168 @@ func TestReuseOrRefuseExistingChildContainer_DivergedHashRefuses(t *testing.T) {
 	}
 	if !contains(msg, "kuke apply -f") {
 		t.Errorf("error message must point at `kuke apply -f` as the reconcile next step; got %q", msg)
+	}
+}
+
+// TestReuseOrRefuseExistingChildContainer_PriorDomainVersionRestamps locks the
+// upgrade path: a record stamped under a prior domain version — even when its
+// stale hash disagrees with the current spec — is re-stamped and reused, not
+// refused. This is the fix's core arm: a daemon upgrade that crosses a
+// hash-domain change must not strand pre-existing cells. Issue #1171.
+func TestReuseOrRefuseExistingChildContainer_PriorDomainVersionRestamps(t *testing.T) {
+	spec := intmodel.ContainerSpec{Image: "alpine", Command: "sleep"}
+	var stamped map[string]string
+	fake := &specHashFakeClient{
+		getContainerFn: func(_, id string) (containerd.Container, error) {
+			return stubLabeledContainer{
+				id: id,
+				labels: map[string]string{
+					// Older domain: a hash that would refuse under a bare guard.
+					SpecHashLabelKey:        "priordomainstalehash",
+					SpecHashVersionLabelKey: "2",
+				},
+				stamped: &stamped,
+			}, nil
+		},
+	}
+	r := newSpecHashTestExec(fake)
+
+	reuse, err := r.reuseOrRefuseExistingChildContainer("ns", "id", "cell", spec)
+	if err != nil {
+		t.Fatalf("prior-domain record must re-stamp + reuse, not error; got %v", err)
+	}
+	if !reuse {
+		t.Errorf("prior-domain record must be reused after re-stamp; got reuse=false")
+	}
+	if stamped[SpecHashVersionLabelKey] != SpecHashDomainVersion ||
+		stamped[SpecHashLabelKey] != ComputeContainerSpecHash(spec) {
+		t.Errorf("prior-domain record must be re-stamped to the current (hash, version) pair; got %v", stamped)
+	}
+}
+
+// TestClassifySpecHashReuse is the table-driven guard for the three-way reuse
+// decision at the heart of #1171: absent (legacy) / same-version-match /
+// same-version-mismatch / different-version.
+func TestClassifySpecHashReuse(t *testing.T) {
+	const desired = "currenthash"
+	cases := []struct {
+		name   string
+		labels map[string]string
+		want   specHashReuseAction
+	}{
+		{
+			name:   "absent legacy version re-stamps",
+			labels: map[string]string{SpecHashLabelKey: "anyoldhash"},
+			want:   specHashRestamp,
+		},
+		{
+			name:   "no labels at all re-stamps",
+			labels: map[string]string{},
+			want:   specHashRestamp,
+		},
+		{
+			name: "different version re-stamps even on hash mismatch",
+			labels: map[string]string{
+				SpecHashLabelKey:        "priorhash",
+				SpecHashVersionLabelKey: "2",
+			},
+			want: specHashRestamp,
+		},
+		{
+			name: "same version matching hash reuses as-is",
+			labels: map[string]string{
+				SpecHashLabelKey:        desired,
+				SpecHashVersionLabelKey: SpecHashDomainVersion,
+			},
+			want: specHashReuseAsIs,
+		},
+		{
+			name: "same version diverged hash refuses",
+			labels: map[string]string{
+				SpecHashLabelKey:        "tampered",
+				SpecHashVersionLabelKey: SpecHashDomainVersion,
+			},
+			want: specHashRefuse,
+		},
+		{
+			name: "same version empty hash reuses as-is",
+			labels: map[string]string{
+				SpecHashVersionLabelKey: SpecHashDomainVersion,
+			},
+			want: specHashReuseAsIs,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifySpecHashReuse(tc.labels, desired); got != tc.want {
+				t.Errorf("classifySpecHashReuse(%v) = %d, want %d", tc.labels, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSpecHashDomainVersionPinsToPayload forces a SpecHashDomainVersion bump in
+// the same edit as any change to containerSpecHashPayload's field set. The hash
+// domain *is* the payload's JSON field set, so this test reflects that set and
+// pins it to the current version: adding, removing, or renaming a payload field
+// changes the reflected set, fails this test, and the only green fix is to bump
+// SpecHashDomainVersion and register the new field set below. This is the
+// versioned counterpart of TestSpecHashDomainPinsToDiffCellBreakingFields (which
+// pins the payload to apply.DiffCell's breaking domain); kept in-package because
+// the payload struct is unexported. Issue #1171.
+func TestSpecHashDomainVersionPinsToPayload(t *testing.T) {
+	// domainFieldSets records, per version, the sorted JSON field set the hash
+	// domain carried at that version. Append a new entry whenever you bump
+	// SpecHashDomainVersion; never edit an existing entry (prior domains are
+	// historical fact, and the re-stamp path relies on old versions staying
+	// distinct from the current one).
+	domainFieldSets := map[string][]string{
+		"3": {
+			"args", "capabilities", "command", "image", "privileged",
+			"readOnlyRootFilesystem", "resources", "secrets", "securityOpts",
+			"tmpfs", "user", "volumes", "workingDir",
+		},
+	}
+
+	want, ok := domainFieldSets[SpecHashDomainVersion]
+	if !ok {
+		t.Fatalf(
+			"no domain field set registered for SpecHashDomainVersion %q — append one to domainFieldSets in the same edit that bumped the version",
+			SpecHashDomainVersion,
+		)
+	}
+
+	pt := reflect.TypeOf(containerSpecHashPayload{})
+	got := make([]string, 0, pt.NumField())
+	for i := range pt.NumField() {
+		tag := pt.Field(i).Tag.Get("json")
+		if tag == "" || tag == "-" {
+			t.Fatalf(
+				"containerSpecHashPayload field %q has no json tag — the hash domain must be fully tagged",
+				pt.Field(i).Name,
+			)
+		}
+		got = append(got, tag)
+	}
+	sort.Strings(got)
+
+	if len(got) != len(want) {
+		t.Fatalf(
+			"containerSpecHashPayload field set changed without a SpecHashDomainVersion bump: got %v, registered for version %q is %v — bump SpecHashDomainVersion and register the new set",
+			got,
+			SpecHashDomainVersion,
+			want,
+		)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf(
+				"containerSpecHashPayload field set changed without a SpecHashDomainVersion bump: got %v, registered for version %q is %v — bump SpecHashDomainVersion and register the new set",
+				got,
+				SpecHashDomainVersion,
+				want,
+			)
+		}
 	}
 }
 

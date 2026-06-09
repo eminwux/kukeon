@@ -38,6 +38,28 @@ import (
 // containerd state, so steady-state restarts always match. Issue #867.
 const SpecHashLabelKey = "kukeon.io/spec-hash"
 
+// SpecHashVersionLabelKey pins the *domain version* the SpecHashLabelKey value
+// was computed under — the field set in containerSpecHashPayload. A bare hash
+// cannot distinguish "the spec drifted" (genuine out-of-band tampering, which
+// must refuse) from "the hashing algorithm changed" (a daemon upgrade widened
+// the payload, which must NOT refuse). Without this label, any change to the
+// hash domain made every pre-existing cell look tampered and stranded the
+// whole fleet on the next start with no migration path. The guard now keys its
+// refuse-vs-re-stamp decision on whether this version matches the running
+// daemon's SpecHashDomainVersion. Issue #1171.
+const SpecHashVersionLabelKey = "kukeon.io/spec-hash-version"
+
+// SpecHashDomainVersion is the current hash-domain version. Bump it whenever
+// containerSpecHashPayload's field set changes — the
+// TestSpecHashDomainVersionPinsToPayload regression guard forces the bump in
+// the same edit by pinning the version to the payload's reflected field set.
+// History: "1" (issue #867, original domain) → "2" (#1001, widened the
+// root-container diff to all spec fields) → "3" (#1155, added Volumes,
+// Secrets, WorkingDir, SecurityOpts). A cell stamped under an older version
+// is re-stamped from its authoritative on-disk spec on the next start rather
+// than refused. Issue #1171.
+const SpecHashDomainVersion = "3"
+
 // containerSpecHashPayload is the deterministic projection of an
 // intmodel.ContainerSpec that ComputeContainerSpecHash hashes. The field set
 // must match exactly what `apply.DiffCell` classifies as "requires containerd
@@ -245,16 +267,103 @@ func projectSecretRef(r *intmodel.ContainerSecretRef) *secretRefHashPayload {
 	}
 }
 
-// stampSpecHashOnLabels writes the SpecHashLabelKey into labels (allocating
-// the map if nil) and returns it. Used by every root-container create path
-// where the runner builds the labels map up front and passes it through
-// ctr.BuildRootContainerSpec.
+// specHashLabels is the single source of truth for the (hash, version) label
+// pair every create and re-stamp path writes. Both labels move together so a
+// record can never carry a hash from one domain and a version from another.
+// Issue #1171.
+func specHashLabels(spec intmodel.ContainerSpec) map[string]string {
+	return map[string]string{
+		SpecHashLabelKey:        ComputeContainerSpecHash(spec),
+		SpecHashVersionLabelKey: SpecHashDomainVersion,
+	}
+}
+
+// stampSpecHashOnLabels writes the SpecHashLabelKey + SpecHashVersionLabelKey
+// pair into labels (allocating the map if nil) and returns it. Used by every
+// root-container create path where the runner builds the labels map up front
+// and passes it through ctr.BuildRootContainerSpec.
 func stampSpecHashOnLabels(labels map[string]string, spec intmodel.ContainerSpec) map[string]string {
 	if labels == nil {
-		labels = make(map[string]string, 1)
+		// specHashLabels already returns a fresh map carrying exactly the
+		// (hash, version) pair — reuse it rather than allocate-then-copy.
+		return specHashLabels(spec)
 	}
-	labels[SpecHashLabelKey] = ComputeContainerSpecHash(spec)
+	for k, v := range specHashLabels(spec) {
+		labels[k] = v
+	}
 	return labels
+}
+
+// specHashReuseAction is the verdict of the versioned spec-hash guard for an
+// existing containerd record on the reuse (stop/start) path. Issue #1171.
+type specHashReuseAction int
+
+const (
+	// specHashReuseAsIs: the stamped version matches the running daemon's
+	// domain and the stamped hash matches (or is absent) — reuse the snapshot
+	// without touching the labels.
+	specHashReuseAsIs specHashReuseAction = iota
+	// specHashRestamp: the stamped version is legacy-absent or from a prior
+	// hash domain. The on-disk spec (which `kuke apply -f` writes back) is
+	// authoritative, so there is nothing to recover — re-stamp the fresh
+	// (hash, version) pair and reuse. Tamper detection is suspended for this
+	// one start across the upgrade boundary; an upgrade is already a trust
+	// boundary, so that is acceptable. This arm turns a domain bump from a
+	// fleet-wide outage into a one-time silent re-stamp, and auto-heals cells
+	// stamped with a bare pre-#1171 hash.
+	specHashRestamp
+	// specHashRefuse: the stamped version matches the current domain but the
+	// hash diverges — genuine out-of-band tampering. The caller refuses with
+	// ErrCellSpecHashDrift.
+	specHashRefuse
+)
+
+// classifySpecHashReuse turns an existing record's labels and the freshly
+// computed desiredHash into the three-way reuse verdict. The version gate is
+// what distinguishes a changed hashing algorithm (re-stamp) from a changed
+// spec (refuse): a hash mismatch only refuses when the record was stamped
+// under the running daemon's own domain version. Issue #1171.
+func classifySpecHashReuse(labels map[string]string, desiredHash string) specHashReuseAction {
+	if labels[SpecHashVersionLabelKey] != SpecHashDomainVersion {
+		// Legacy-absent or prior-domain stamp — the on-disk spec is the
+		// source of truth, so re-stamp rather than refuse.
+		return specHashRestamp
+	}
+	stampedHash := labels[SpecHashLabelKey]
+	if stampedHash != "" && stampedHash != desiredHash {
+		return specHashRefuse
+	}
+	return specHashReuseAsIs
+}
+
+// restampSpecHashLabels writes the current (hash, version) label pair onto an
+// existing containerd record on the reuse path. Best-effort by contract: the
+// labels are a tripwire, not a source of truth, so a write failure is logged
+// and the start proceeds (the next start re-attempts the re-stamp). Issue
+// #1171.
+func (r *Exec) restampSpecHashLabels(
+	container containerd.Container,
+	namespace, ctrContainerID, cellName string,
+	spec intmodel.ContainerSpec,
+) {
+	nsCtx := namespaces.WithNamespace(r.ctx, namespace)
+	if _, err := container.SetLabels(nsCtx, specHashLabels(spec)); err != nil {
+		r.logger.WarnContext(
+			r.ctx,
+			"failed to re-stamp spec-hash labels on reuse path, continuing (labels are a tripwire, not source of truth)",
+			"id",
+			ctrContainerID,
+			"cell",
+			cellName,
+			"err",
+			err.Error(),
+		)
+		return
+	}
+	r.logger.InfoContext(r.ctx,
+		"re-stamped spec-hash to current domain version on reuse path",
+		"id", ctrContainerID, "cell", cellName,
+		"version", SpecHashDomainVersion, "spec-hash", ComputeContainerSpecHash(spec))
 }
 
 // reuseOrRefuseExistingChildContainer is the child-container counterpart of
@@ -291,13 +400,18 @@ func (r *Exec) reuseOrRefuseExistingChildContainer(
 			"failed to read existing container labels, treating as match for reuse",
 			"id", ctrContainerID, "cell", cellName, "err", labelErr.Error())
 	}
-	onDiskHash := existingLabels[SpecHashLabelKey]
-	if onDiskHash != "" && onDiskHash != desiredHash {
+	switch classifySpecHashReuse(existingLabels, desiredHash) {
+	case specHashRefuse:
+		onDiskHash := existingLabels[SpecHashLabelKey]
 		return false, fmt.Errorf(
 			"%w: cell %q: container %q carries spec-hash %q but cell spec hashes to %q — "+
 				"run `kuke apply -f` to reconcile",
 			errdefs.ErrCellSpecHashDrift, cellName, ctrContainerID, onDiskHash, desiredHash,
 		)
+	case specHashRestamp:
+		r.restampSpecHashLabels(container, namespace, ctrContainerID, cellName, spec)
+	case specHashReuseAsIs:
+		// Stamped (hash, version) match the running domain — reuse untouched.
 	}
 	// Drop any stale task so StartContainer can create a fresh one. The
 	// container's snapshot is preserved across the call — only the task
