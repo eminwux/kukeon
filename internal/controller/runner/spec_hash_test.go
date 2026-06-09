@@ -183,6 +183,13 @@ func TestComputeContainerSpecHash_CompatibleFieldsDoNotChangeHash(t *testing.T) 
 // refuse). Mirrors `apply.DiffCell`'s root-side classification — see
 // `diffContainerSpec`'s per-field Breaking-vs-Compatible calls in
 // `internal/controller/apply/diff.go`. Issues #867, #990.
+//
+// Companion guard: TestSpecHashDomainVersionPinsToPayload (in-package, beside
+// the unexported payload it reflects over) forces a SpecHashDomainVersion bump
+// in the same edit as any payload field-set change — together the two keep the
+// payload pinned to both the apply-layer breaking domain and a domain version,
+// so a domain widening can never strand pre-existing cells unversioned. Issue
+// #1171.
 func TestSpecHashDomainPinsToDiffCellBreakingFields(t *testing.T) {
 	makeCell := func(root intmodel.ContainerSpec) intmodel.Cell {
 		root.Root = true

@@ -698,13 +698,21 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 				"failed to read existing root container labels, treating as match for reuse",
 				fields...)
 		}
-		onDiskRootHash := existingLabels[SpecHashLabelKey]
-		if onDiskRootHash != "" && onDiskRootHash != desiredRootSpecHash {
+		switch classifySpecHashReuse(existingLabels, desiredRootSpecHash) {
+		case specHashRefuse:
+			onDiskRootHash := existingLabels[SpecHashLabelKey]
 			return intmodel.Cell{}, fmt.Errorf(
 				"%w: cell %q: containerd record carries spec-hash %q but cell spec hashes to %q — "+
 					"run `kuke apply -f` to reconcile",
 				internalerrdefs.ErrCellSpecHashDrift, cellName, onDiskRootHash, desiredRootSpecHash,
 			)
+		case specHashRestamp:
+			// Upgrade across a hash-domain change (or a bare pre-#1171 hash):
+			// the on-disk root spec is authoritative, so re-stamp rather than
+			// strand the cell. Issue #1171.
+			r.restampSpecHashLabels(container, namespace, containerID, cellName, rootContainerSpec)
+		case specHashReuseAsIs:
+			// Stamped (hash, version) match the running domain — reuse untouched.
 		}
 		reuseExistingRoot = true
 		// Drop any stale task on the existing record. Reaching this branch
@@ -1084,9 +1092,7 @@ func (r *Exec) startCellLocked(cell intmodel.Cell) (_ intmodel.Cell, retErr erro
 		}
 		if !reuseExistingChild {
 			buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
-			buildOpts = append(buildOpts, ctr.WithExtraLabels(map[string]string{
-				SpecHashLabelKey: ComputeContainerSpecHash(containerSpec),
-			}))
+			buildOpts = append(buildOpts, ctr.WithExtraLabels(specHashLabels(containerSpec)))
 			// `kuke run --env` runtime-env merge (issue #834). Same shape as the
 			// CreateCell-side merge in provision.go: returns containerSpec
 			// unchanged for non-attachable containers or when RuntimeEnv is
@@ -1399,9 +1405,7 @@ func (r *Exec) StartContainer(cell intmodel.Cell, containerID string) (_ intmode
 	}
 	if !reuseExistingChild {
 		buildOpts := append(r.daemonDefaultBuildOpts(), attachOpts...)
-		buildOpts = append(buildOpts, ctr.WithExtraLabels(map[string]string{
-			SpecHashLabelKey: ComputeContainerSpecHash(*foundContainerSpec),
-		}))
+		buildOpts = append(buildOpts, ctr.WithExtraLabels(specHashLabels(*foundContainerSpec)))
 		_, err = r.ctrClient.CreateContainerFromSpec(namespace, *foundContainerSpec, creds, buildOpts...)
 		if err != nil {
 			fields := appendCellLogFields([]any{"id", containerdID}, cellID, cellName)
