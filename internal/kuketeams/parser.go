@@ -194,6 +194,9 @@ func validateProjectTeam(pt *model.ProjectTeam) error {
 	if err := ValidateSource(pt.Spec.Source); err != nil {
 		return err
 	}
+	if err := validateProjectDir(pt.Spec.ProjectDir); err != nil {
+		return err
+	}
 	for _, h := range pt.Spec.Defaults.Harnesses {
 		if !model.IsKnownHarness(h) {
 			return fmt.Errorf("%w: %q (defaults.harnesses)", errdefs.ErrTeamHarnessUnknown, h)
@@ -372,6 +375,31 @@ func validateMetadataNameSafe(name string) error {
 	if strings.ContainsAny(trimmed, "/\\") || strings.ContainsRune(trimmed, 0) ||
 		strings.Contains(trimmed, "..") || strings.HasPrefix(trimmed, ".") {
 		return fmt.Errorf("%w (got %q)", errdefs.ErrTeamMetadataNameUnsafe, name)
+	}
+	return nil
+}
+
+// validateProjectDir enforces the ProjectTeam spec.projectDir contract: when
+// set, it must be a safe path basename (it flows into the in-cell
+// `/home/<user>/<dir>` clone path the renderer exposes as `.project.NAME`, so
+// the same traversal guard metadata.name carries applies) and must not equal
+// the reserved `agents` repo slot dir (teamrender.AgentsRepoSlotName) — the
+// `project`/`agents` clone-time collision spec.projectDir exists to break.
+// Empty is valid: the renderer falls back to metadata.name.
+func validateProjectDir(dir string) error {
+	trimmed := strings.TrimSpace(dir)
+	if trimmed == "" {
+		return nil
+	}
+	if strings.ContainsAny(trimmed, "/\\") || strings.ContainsRune(trimmed, 0) ||
+		strings.Contains(trimmed, "..") || strings.HasPrefix(trimmed, ".") {
+		return fmt.Errorf("%w (got %q)", errdefs.ErrTeamProjectDirInvalid, dir)
+	}
+	// "agents" mirrors teamrender.AgentsRepoSlotName — the fixed in-cell dir the
+	// `agents` repo slot clones to. Referenced as a literal to avoid a
+	// parser→renderer import dependency for a single conventional name.
+	if trimmed == "agents" {
+		return fmt.Errorf("%w (got %q)", errdefs.ErrTeamProjectDirInvalid, dir)
 	}
 	return nil
 }

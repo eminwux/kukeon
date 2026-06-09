@@ -1381,6 +1381,58 @@ spec:
 	}
 }
 
+// TestRenderBlueprintProjectNameOverride confirms spec.projectDir
+// (in.ProjectCloneDir) overrides the in-cell clone dir basename the renderer
+// exposes as `.project.NAME`, decoupling it from the team label (#1166). When
+// unset, NAME falls back to the team label so the historical default holds.
+func TestRenderBlueprintProjectNameOverride(t *testing.T) {
+	t.Parallel()
+	body := `apiVersion: v1beta1
+kind: CellBlueprint
+metadata:
+  name: {{ .role.name }}-{{ .harness }}
+spec:
+  cell:
+    containers:
+      - id: {{ .role.name }}
+        image: {{ .image }}
+        env:
+          - "CLONE_DIR=/home/claude/{{ .project.NAME }}"
+`
+	image := &model.ImageCatalogEntry{Image: "registry.local/claude:latest"}
+	src := teamsource.Source{
+		Repo:      "github.com/eminwux/agents",
+		Host:      "github.com",
+		OwnerRepo: "eminwux/agents",
+		Ref:       "main",
+		Kind:      teamsource.RefBranch,
+	}
+	render := func(t *testing.T, in Inputs) string {
+		t.Helper()
+		cacheDir := t.TempDir()
+		writeHarnessFile(t, cacheDir, "claude", "blueprint.tmpl.yaml", body)
+		h := &model.Harness{Spec: model.HarnessSpec{Template: "blueprint.tmpl.yaml"}}
+		bp, err := RenderBlueprint(
+			cacheDir, h, minimalRole(), "claude", "dev",
+			[]string{"go"}, image, nil, src, in, in.Project, "default", "default", "default",
+		)
+		if err != nil {
+			t.Fatalf("RenderBlueprint: %v", err)
+		}
+		return bp.Spec.Cell.Containers[0].Env[0]
+	}
+
+	// Self-referential team: project clone dir overridden, distinct from the
+	// `agents` slot's fixed /home/claude/agents.
+	if got := render(t, Inputs{Project: "agents", ProjectCloneDir: "agents0"}); got != "CLONE_DIR=/home/claude/agents0" {
+		t.Errorf("override: env = %q, want CLONE_DIR=/home/claude/agents0", got)
+	}
+	// No override: NAME falls back to the team label (historical default).
+	if got := render(t, Inputs{Project: "sbsh"}); got != "CLONE_DIR=/home/claude/sbsh" {
+		t.Errorf("fallback: env = %q, want CLONE_DIR=/home/claude/sbsh", got)
+	}
+}
+
 // TestRenderBlueprintRepoOwnerDerivesFromAgentsSource confirms the
 // REPO_OWNER fallback: when tc.spec.repoOwner is empty, the renderer
 // derives the owner segment from the agents source's `<owner>/<repo>`

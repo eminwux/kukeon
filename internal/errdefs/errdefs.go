@@ -608,6 +608,14 @@ var (
 	ErrTeamMetadataNameUnsafe = errors.New(
 		"metadata.name must not contain path separators, NUL, '..', or a leading '.'",
 	)
+	// ErrTeamProjectDirInvalid fires when a ProjectTeam spec.projectDir is not a
+	// safe path basename (it flows into the in-cell `/home/<user>/<dir>` clone
+	// path the same way metadata.name does, so the same traversal guard
+	// applies), or when it equals the reserved `agents` repo slot dir — the
+	// collision spec.projectDir exists to avoid in the first place.
+	ErrTeamProjectDirInvalid = errors.New(
+		"spec.projectDir must be a safe path basename and must not equal the reserved \"agents\" slot dir",
+	)
 	// ErrTeamProjectFileNotFound fires when `kuke team init` finds no
 	// kuketeam.yaml in the current project directory.
 	ErrTeamProjectFileNotFound = errors.New("no kuketeam.yaml found in the current directory")

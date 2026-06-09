@@ -35,6 +35,17 @@ type ProjectTeamSpec struct {
 	// `<owner>/<repo>@vX.Y.Z` string form is rejected at parse time with a
 	// migration error.
 	Source TeamSource `json:"source"             yaml:"source"`
+	// ProjectDir overrides the in-cell project clone dir basename, decoupling
+	// it from metadata.name (the team *label*). The renderer exposes it as
+	// `.project.NAME` — the fact a blueprint's `project` repo target reads for
+	// its `/home/<user>/<dir>` clone path — falling back to metadata.name when
+	// unset. The override exists for self-referential teams (the agents repo
+	// managing itself), where a role declares both the `project` and `agents`
+	// repo slots: without it both resolve to `/home/<user>/agents` and collide
+	// at clone time. Distinct from the on-host source-tree path the renderer
+	// surfaces as `.project.PROJECT_DIR`. Validated as a safe path basename
+	// that does not collide with the reserved `agents` repo slot dir.
+	ProjectDir string `json:"projectDir,omitempty" yaml:"projectDir,omitempty"`
 	// Realm, Space, and Stack are the optional scope coordinates the team's
 	// rendered cells bind to. Each defaults to `default` when omitted (the
 	// renderer stamps the defaulted value onto every rendered Blueprint/Config

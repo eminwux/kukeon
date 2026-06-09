@@ -686,15 +686,16 @@ func renderTeam(
 
 	projectURL, _ := getProjectURL(ctx, projectDir)
 	in := teamrender.Inputs{
-		Project:        project,
-		ProjectRepoURL: strings.TrimSpace(projectURL),
-		ProjectDir:     projectDir,
-		TeamDir:        teamDir,
-		Realm:          pt.Spec.Realm,
-		Space:          pt.Spec.Space,
-		Stack:          pt.Spec.Stack,
-		Build:          doBuild,
-		SourceRef:      bundle.Source.Ref,
+		Project:         project,
+		ProjectRepoURL:  strings.TrimSpace(projectURL),
+		ProjectDir:      projectDir,
+		ProjectCloneDir: strings.TrimSpace(pt.Spec.ProjectDir),
+		TeamDir:         teamDir,
+		Realm:           pt.Spec.Realm,
+		Space:           pt.Spec.Space,
+		Stack:           pt.Spec.Stack,
+		Build:           doBuild,
+		SourceRef:       bundle.Source.Ref,
 	}
 	res, err := teamrender.Render(bundle, pt, tc, in)
 	if err != nil {
