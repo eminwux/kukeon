@@ -200,3 +200,16 @@ func stageStatusesForContainer(cell intmodel.Cell, name string) []intmodel.Stage
 func (b *Exec) ListContainers(realmName, spaceName, stackName, cellName string) ([]intmodel.ContainerSpec, error) {
 	return b.runner.ListContainers(realmName, spaceName, stackName, cellName)
 }
+
+// ReapplyAttachableSocketPerms heals a single attachable container's live
+// tty control socket inode to the connect(2)-able mode/group on the attach
+// path (#1169). AttachContainer calls it before handing back the socket
+// path so a `kuke run` against an already-Ready cell — which short-circuits
+// past StartCell and so past the #935 StartCell-skip heal — still corrects a
+// wrong-mode (pre-sbsh#361 0o640) live socket in place, matching
+// `kuke restart` without reintroducing the #630 start-on-running hazard.
+// Best-effort and root-owned (the daemon runs as root); a chmod miss is
+// logged by the runner and never surfaced, so a healthy socket is untouched.
+func (b *Exec) ReapplyAttachableSocketPerms(spec intmodel.ContainerSpec) {
+	b.runner.ReapplyAttachableSocketPerms(spec)
+}

@@ -97,6 +97,16 @@ type Runner interface {
 	ExistsCellRootContainer(cell intmodel.Cell) (bool, error)
 	DeleteCell(cell intmodel.Cell) error
 
+	// ReapplyAttachableSocketPerms re-asserts the mode and group of a single
+	// live attachable container's tty control socket inode on the attach
+	// path (#1169). `kuke run` against an already-Ready cell short-circuits
+	// to attach without re-entering StartCell, so the #935 heal wired into
+	// StartCell's idempotent no-op path never runs on the path run/attach
+	// take; calling this from the daemon's AttachContainer RPC heals a
+	// wrong-mode (pre-sbsh#361 0o640) live socket in place. Non-Attachable
+	// specs are a no-op; best-effort (failures logged, never returned).
+	ReapplyAttachableSocketPerms(spec intmodel.ContainerSpec)
+
 	GetStack(stack intmodel.Stack) (intmodel.Stack, error)
 	ListStacks(realmName, spaceName string) ([]intmodel.Stack, error)
 	CreateStack(stack intmodel.Stack) (intmodel.Stack, error)

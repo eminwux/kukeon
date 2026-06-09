@@ -1006,3 +1006,36 @@ func TestListContainers_RunnerError(t *testing.T) {
 		t.Fatal("expected error but got none")
 	}
 }
+
+// TestReapplyAttachableSocketPerms_DelegatesToRunner locks the controller →
+// runner delegation for the #1169 attach-path socket heal: AttachContainer
+// calls (*Exec).ReapplyAttachableSocketPerms, which must forward the spec
+// verbatim to the runner so a wrong-mode live socket gets healed on the
+// `kuke run`-against-Ready path that skips StartCell (and so skips the #935
+// StartCell-skip heal).
+func TestReapplyAttachableSocketPerms_DelegatesToRunner(t *testing.T) {
+	mockRunner := &fakeRunner{}
+	var got intmodel.ContainerSpec
+	called := false
+	mockRunner.ReapplyAttachableSocketPermsFn = func(spec intmodel.ContainerSpec) {
+		called = true
+		got = spec
+	}
+
+	ctrl := setupTestController(t, mockRunner)
+
+	want := intmodel.ContainerSpec{
+		ID: "work", RealmName: "r1", SpaceName: "s1", StackName: "st1", CellName: "c1",
+		Attachable: true,
+	}
+	ctrl.ReapplyAttachableSocketPerms(want)
+
+	if !called {
+		t.Fatal("controller did not delegate to runner.ReapplyAttachableSocketPerms")
+	}
+	if got.ID != want.ID || got.RealmName != want.RealmName ||
+		got.SpaceName != want.SpaceName || got.StackName != want.StackName ||
+		got.CellName != want.CellName || got.Attachable != want.Attachable {
+		t.Errorf("runner received spec %+v, want %+v", got, want)
+	}
+}

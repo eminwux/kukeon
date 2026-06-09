@@ -91,6 +91,8 @@ type fakeRunner struct {
 	ExistsCellRootContainerFn func(cell intmodel.Cell) (bool, error)
 	UpdateCellMetadataFn      func(cell intmodel.Cell) error
 
+	ReapplyAttachableSocketPermsFn func(spec intmodel.ContainerSpec)
+
 	// Container methods
 	ListContainersFn    func(realmName, spaceName, stackName, cellName string) ([]intmodel.ContainerSpec, error)
 	CreateContainerFn   func(cell intmodel.Cell, container intmodel.ContainerSpec) (intmodel.Cell, error)
@@ -451,6 +453,12 @@ func (f *fakeRunner) UpdateCellMetadata(cell intmodel.Cell) error {
 		return f.UpdateCellMetadataFn(cell)
 	}
 	return errors.New("unexpected call to UpdateCellMetadata")
+}
+
+func (f *fakeRunner) ReapplyAttachableSocketPerms(spec intmodel.ContainerSpec) {
+	if f.ReapplyAttachableSocketPermsFn != nil {
+		f.ReapplyAttachableSocketPermsFn(spec)
+	}
 }
 
 // Container methods

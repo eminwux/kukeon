@@ -625,28 +625,67 @@ func (r *Exec) reapplyAttachableSocketPerms(cell intmodel.Cell) {
 		if !spec.Attachable {
 			continue
 		}
-		socketPath := fs.ContainerSocketPath(
-			r.opts.RunPath,
-			spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
-		)
-		if chmodErr := os.Chmod(socketPath, attachableSocketReapplyMode); chmodErr != nil {
-			if errors.Is(chmodErr, os.ErrNotExist) {
-				continue
-			}
-			r.logger.WarnContext(r.ctx,
-				"failed to re-chmod attachable socket on idempotent StartCell skip",
-				"socket", socketPath, "error", chmodErr)
-			continue
+		r.reapplyAttachableSocketPerm(spec, "idempotent StartCell skip")
+	}
+}
+
+// ReapplyAttachableSocketPerms re-asserts the mode and group of a single
+// live attachable container's tty socket inode on the attach path (#1169).
+//
+// `kuke run` against an already-Ready cell short-circuits straight to
+// attach without re-entering StartCell — that Ready branch exists to dodge
+// the #630 CNI duplicate-allocation re-entry — so the #935 heal wired into
+// StartCell's idempotent no-op path never runs on the path `run`/`attach`
+// actually take. A socket an old kuketty bound 0o640 (group-read only, the
+// pre-sbsh#361 mode) is therefore undialable forever on `kuke run`, while
+// `kuke restart` heals it because its stop+start rebinds the socket fresh
+// at 0o660. Healing the live inode in place at attach time — a root-owned
+// chmod+chown, no workload bounce — closes that asymmetry without
+// reintroducing the #630 start-on-running hazard.
+//
+// A non-Attachable spec is a no-op (only sbsh-wrapped containers bind a tty
+// control socket). Best-effort, mirroring the StartCell-skip heal: a
+// per-socket failure is logged and swallowed rather than surfaced to the
+// caller, because the attach path must not regress when the socket is
+// already healthy. A socket kuketty has not bound yet (ENOENT) is a benign
+// no-op — the normal startup chown sets the mode when the listener appears.
+func (r *Exec) ReapplyAttachableSocketPerms(spec intmodel.ContainerSpec) {
+	if !spec.Attachable {
+		return
+	}
+	r.reapplyAttachableSocketPerm(spec, "attach")
+}
+
+// reapplyAttachableSocketPerm re-chmods + re-chowns one attachable
+// container's live tty socket inode to attachableSocketReapplyMode and the
+// kukeon group. `via` labels the calling path in the warn log so an
+// operator can tell a StartCell-skip heal from an attach-path heal. ENOENT
+// is a benign no-op (the socket is not bound yet; the normal startup chown
+// will set the mode when the listener appears). connect(2) on a Unix socket
+// requires write permission on the inode, so this is what makes a wrong-mode
+// live listener dialable again without bouncing the workload.
+func (r *Exec) reapplyAttachableSocketPerm(spec intmodel.ContainerSpec, via string) {
+	socketPath := fs.ContainerSocketPath(
+		r.opts.RunPath,
+		spec.RealmName, spec.SpaceName, spec.StackName, spec.CellName, spec.ID,
+	)
+	if chmodErr := os.Chmod(socketPath, attachableSocketReapplyMode); chmodErr != nil {
+		if errors.Is(chmodErr, os.ErrNotExist) {
+			return
 		}
-		// Leave the owning uid untouched (-1); only re-assert the kukeon
-		// group when one is configured, mirroring attachablePostCreateChown.
-		if gid := r.opts.KukeonGroupGID; gid > 0 {
-			if chownErr := os.Chown(socketPath, -1, gid); chownErr != nil &&
-				!errors.Is(chownErr, os.ErrNotExist) {
-				r.logger.WarnContext(r.ctx,
-					"failed to re-chown attachable socket group on idempotent StartCell skip",
-					"socket", socketPath, "gid", gid, "error", chownErr)
-			}
+		r.logger.WarnContext(r.ctx,
+			"failed to re-chmod attachable socket",
+			"socket", socketPath, "via", via, "error", chmodErr)
+		return
+	}
+	// Leave the owning uid untouched (-1); only re-assert the kukeon
+	// group when one is configured, mirroring attachablePostCreateChown.
+	if gid := r.opts.KukeonGroupGID; gid > 0 {
+		if chownErr := os.Chown(socketPath, -1, gid); chownErr != nil &&
+			!errors.Is(chownErr, os.ErrNotExist) {
+			r.logger.WarnContext(r.ctx,
+				"failed to re-chown attachable socket group",
+				"socket", socketPath, "gid", gid, "via", via, "error", chownErr)
 		}
 	}
 }
