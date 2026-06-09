@@ -55,17 +55,19 @@ func (r *Exec) purgeCNIForContainer(containerID, netnsPath, networkName string) 
 			)
 			if err == nil {
 				if err = cniMgr.LoadNetworkConfigList(cniConfigPath); err == nil {
-					// Attempt CNI DEL even if netnsPath is empty (best-effort cleanup)
-					// Some CNI plugins may handle this gracefully
-					if netnsPath != "" {
-						if err = cniMgr.DelContainerFromNetwork(r.ctx, containerID, netnsPath); err == nil {
-							purged = append(purged, "cni-del")
-							r.logger.DebugContext(r.ctx, "called CNI DEL for container", "container", containerID)
-						} else {
-							r.logger.DebugContext(r.ctx, "CNI DEL failed (netns may be invalid)", "container", containerID, "error", err)
-						}
+					// Attempt CNI DEL even when netnsPath is empty. libcni's
+					// DelNetworkList is netns-optional: it reconstructs teardown
+					// (including the bridge plugin's ipMasq iptables chains/rules)
+					// from the cached CNI result, which the cache-removal block
+					// below only clears *after* this DEL has run. A stopped cell
+					// has no containerd task and thus no netns path, so gating DEL
+					// on netnsPath != "" permanently leaked the per-cell CNI-*
+					// masquerade chains on every delete-while-stopped (issue #1174).
+					if err = cniMgr.DelContainerFromNetwork(r.ctx, containerID, netnsPath); err == nil {
+						purged = append(purged, "cni-del")
+						r.logger.DebugContext(r.ctx, "called CNI DEL for container", "container", containerID)
 					} else {
-						r.logger.DebugContext(r.ctx, "skipping CNI DEL (no netns path available)", "container", containerID)
+						r.logger.DebugContext(r.ctx, "CNI DEL failed (netns may be invalid)", "container", containerID, "error", err)
 					}
 				}
 			}

@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -303,5 +304,62 @@ func TestPurgeCNIForContainer_RemovesOnlyMatchingIPAMFile(t *testing.T) {
 		if remaining[i] != want[i] {
 			t.Fatalf("remaining files = %v, want %v", remaining, want)
 		}
+	}
+}
+
+// TestPurgeCNIForContainer_CallsDelWithEmptyNetns is the regression guard for
+// issue #1174: deleting a cell whose containerd task was already stopped left
+// netnsPath == "", and the old `if netnsPath != ""` gate skipped CNI DEL
+// entirely — permanently leaking the bridge plugin's per-cell CNI-* iptables
+// masquerade chains (88 observed on one host). libcni's DelNetworkList is
+// netns-optional, so DEL must run unconditionally. This test wires a fake CNI
+// plugin that records its invocation and asserts DEL fires even with an empty
+// netnsPath.
+func TestPurgeCNIForContainer_CallsDelWithEmptyNetns(t *testing.T) {
+	const (
+		networkName = "default-myspace"
+		containerID = "cid-100"
+	)
+
+	binDir := t.TempDir()
+	confDir := t.TempDir()
+	cacheDir := t.TempDir()
+
+	// Fake CNI plugin: records each invocation's CNI_COMMAND to a marker file
+	// and exits 0. libcni execs it by the conflist's plugin "type".
+	markerPath := filepath.Join(t.TempDir(), "del-calls")
+	pluginScript := "#!/bin/sh\nprintf '%s\\n' \"$CNI_COMMAND\" >> \"" + markerPath + "\"\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(binDir, "recorddel"), []byte(pluginScript), 0o755); err != nil { //nolint:gosec // test fixture plugin must be executable
+		t.Fatalf("write fake plugin: %v", err)
+	}
+
+	// cniVersion 0.4.0+ makes a DEL cache miss non-fatal (libcni nils the
+	// cached result and still execs the plugin), so no cache seeding is needed.
+	conflist := `{
+  "cniVersion": "0.4.0",
+  "name": "` + networkName + `",
+  "plugins": [ { "type": "recorddel" } ]
+}`
+	if err := os.WriteFile(filepath.Join(confDir, networkName+".conflist"), []byte(conflist), 0o644); err != nil { //nolint:gosec // test fixture conflist
+		t.Fatalf("write conflist: %v", err)
+	}
+
+	r := &Exec{
+		ctx:     context.Background(),
+		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		cniConf: &cni.Conf{CniConfigDir: confDir, CniBinDir: binDir, CniCacheDir: cacheDir},
+	}
+
+	// Empty netnsPath: the already-stopped-task delete path that used to skip DEL.
+	if err := r.purgeCNIForContainer(containerID, "", networkName); err != nil {
+		t.Fatalf("purgeCNIForContainer returned error: %v", err)
+	}
+
+	calls, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("CNI DEL was not invoked with empty netns (marker file absent): %v", err)
+	}
+	if !strings.Contains(string(calls), "DEL") {
+		t.Fatalf("expected a DEL invocation recorded, got %q", string(calls))
 	}
 }
