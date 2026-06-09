@@ -3636,6 +3636,70 @@ func TestRun_Attach_StaleSocket_ENOENT_RetriesWithinBudget(t *testing.T) {
 	}
 }
 
+// TestRun_Attach_PermissionDenied_PresentSocket_FailsFast pins the
+// #1170 split: when dial(2) returns EACCES against a control socket
+// that is *present on disk* (a live listener with the wrong mode, e.g.
+// 0o640 without group-write), runWithPingRetry must fail fast with
+// errdefs.ErrAttachPermissionDenied on the first attempt instead of
+// retrying for the full budget. Pre-fix the classifier lumped every
+// EACCES into the transient stale-socket class, so this hung for the
+// 10 s budget and then surfaced a misleading "stale socket" message.
+func TestRun_Attach_PermissionDenied_PresentSocket_FailsFast(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	// A generous budget proves the fail-fast path does not depend on the
+	// budget elapsing: if the classifier wrongly retried, the test would
+	// either spin to >1 call or hang well past its own runtime.
+	restore := runcmd.SetAttachPingRetryForTest(10*time.Second, 10*time.Millisecond)
+	t.Cleanup(restore)
+
+	// A real on-disk path so attachBootRaceSentinel's stat(2) sees the
+	// socket as present and classifies the EACCES as permanent.
+	presentSocket := filepath.Join(t.TempDir(), "tty.socket")
+	if err := os.WriteFile(presentSocket, nil, 0o600); err != nil {
+		t.Fatalf("seed present socket: %v", err)
+	}
+
+	var calls int
+	var mu sync.Mutex
+	runFn := runcmd.RunFn(func(_ context.Context, _ sbshattach.Options) error {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		return fmt.Errorf("ping failed: dial unix %s: connect: %w", presentSocket, syscall.EACCES)
+	})
+
+	fc := &fakeClient{
+		createCellFn: func(doc v1beta1.CellDoc) (kukeonv1.CreateCellResult, error) {
+			return successCreateResult(doc), nil
+		},
+		attachContainerFn: func(_ v1beta1.ContainerDoc) (kukeonv1.AttachContainerResult, error) {
+			return kukeonv1.AttachContainerResult{HostSocketPath: presentSocket}, nil
+		},
+	}
+	cmd, _ := newCmdWithRunFn(t, fc, runFn)
+	cmd.SetArgs([]string{"-f", writeTempYAML(t, attachableCellYAML)})
+
+	err := cmd.Execute()
+	if !errors.Is(err, errdefs.ErrAttachPermissionDenied) {
+		t.Fatalf("err=%v, want chain to include errdefs.ErrAttachPermissionDenied", err)
+	}
+	if !errors.Is(err, syscall.EACCES) {
+		t.Errorf(
+			"err=%v, want chain to preserve syscall.EACCES so operators can still see the underlying cause",
+			err,
+		)
+	}
+	if errors.Is(err, errdefs.ErrAttachStaleSocket) {
+		t.Errorf("err=%v, must NOT be wrapped with ErrAttachStaleSocket — a present-socket EACCES is permanent, not the stale-socket race", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Errorf("attach loop calls=%d, want 1 (permanent EACCES must fail fast, no retry)", calls)
+	}
+}
+
 // --- epic:cell-identity #1025: cell-positional + fused create+start+attach ---
 
 // sourceConfigCellForRun is a Config-lineage source cell (provenance points at
