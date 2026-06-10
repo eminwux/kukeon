@@ -349,12 +349,14 @@ func (discardWriter) Write(p []byte) (int, error) { return len(p), nil }
 // constant ever moves.
 const defaultCniBinDir = "/opt/cni/bin"
 
-// requiredCNIPlugins lists the binaries `kuke init` provisions under
-// defaultCniBinDir on its bootstrap path. Sourced from
-// internal/cni/{bridge,types}.go — `bridge` lays the per-realm bridge
-// network and `loopback` populates the per-container lo interface (the
-// minimum a `kuke create container` netns needs). Any future required
-// plugin lands here so the host check fails fast when it disappears.
+// requiredCNIPlugins lists the binaries CNI execution needs under
+// defaultCniBinDir — the kukeond image bundles them in-image (Dockerfile
+// `cni-plugins` stage) and runs CNI from there; `kuke init` does not lay
+// them onto the host. Sourced from internal/cni/{bridge,types}.go —
+// `bridge` lays the per-realm bridge network and `loopback` populates the
+// per-container lo interface (the minimum a `kuke create container` netns
+// needs). Any future required plugin lands here so the host check surfaces
+// it when it disappears.
 //
 // Function rather than a package-level var so the list isn't mutable
 // post-init (gochecknoglobals) and tests can call it for parity with

@@ -81,8 +81,9 @@ func checkDaemon(ctx context.Context, rc *runCtx) []Result {
 
 // checkHost runs the three host-environment checks the gaps doc's
 // `kuke doctor` proposal absorbed into this single section: containerd
-// reachability, cgroup-v2 mountedness, and the presence of the CNI plugin
-// binaries `kuke init` would otherwise lay down. Each emits one Result.
+// reachability, cgroup-v2 mountedness, and the host-side CNI plugin
+// binaries (which the daemon bundles in-image and runs from there, so the
+// host copy is advisory — see checkHostCNIPlugins). Each emits one Result.
 //
 // No ctx: the host probes are filesystem stats and a ctr.Client.Connect()
 // whose cancellation surface is the client's own context. Adding a ctx
@@ -161,10 +162,26 @@ func checkHostCgroupV2(rc *runCtx) Result {
 }
 
 // checkHostCNIPlugins stats each requiredCNIPlugins under the configured
-// CNI bin dir. FAIL when any are missing — without bridge/loopback the
-// per-container netns wiring `kuke create container` does cannot
-// complete. Surfacing the specific missing plugin name in Detail keeps
-// the operator from having to ls the directory themselves.
+// CNI bin dir, then reconciles the host-side view against where CNI
+// actually executes. CNI exec happens inside the kukeond container, which
+// bundles its own plugins in the image's /opt/cni/bin (Dockerfile
+// `cni-plugins` stage → upstream CNI v1.5.1) — `kuke init` never lays
+// plugins onto the host (internal/cni.BootstrapCNI only MkdirAlls the
+// config/cache/bin dirs). So the host copy is not what cell networking
+// runs:
+//
+//   - All present on host → OK. Some setups install plugins host-side
+//     (e.g. running CNI outside the daemon); surface that cleanly.
+//   - Missing on host, daemon reachable → WARN. A reachable daemon runs
+//     CNI from its bundled in-image plugins, so cell networking has a
+//     working set regardless of the host copy. This is the fresh
+//     `make dev-init` host: it must not FAIL (issue #1180).
+//   - Missing on host, daemon unreachable → FAIL. With no host plugins and
+//     no daemon to provide its bundled set, there is genuinely no plugin
+//     set to run CNI; the remediation points at the real fix.
+//
+// Surfacing the specific missing plugin name in Detail keeps the operator
+// from having to ls the directory themselves.
 func checkHostCNIPlugins(rc *runCtx) Result {
 	r := Result{
 		Section: sectionHost,
@@ -180,15 +197,24 @@ func checkHostCNIPlugins(rc *runCtx) Result {
 		}
 	}
 
-	if len(missing) > 0 {
-		r.Status = StatusFAIL
-		r.Detail = fmt.Sprintf("%s (missing: %s)", rc.cniBinDir, strings.Join(missing, ", "))
-		r.Remediation = "install the CNI plugin binaries; `kuke init` lays them down on a fresh host"
+	if len(missing) == 0 {
+		r.Status = StatusOK
+		r.Detail = fmt.Sprintf("%s (%s present)", rc.cniBinDir, strings.Join(plugins, ", "))
 		return r
 	}
 
-	r.Status = StatusOK
-	r.Detail = fmt.Sprintf("%s (%s present)", rc.cniBinDir, strings.Join(plugins, ", "))
+	if rc.daemonClient != nil {
+		r.Status = StatusWARN
+		r.Detail = fmt.Sprintf("%s (missing: %s; daemon runs CNI from its bundled in-image plugins)",
+			rc.cniBinDir, strings.Join(missing, ", "))
+		r.Remediation = "no host plugins needed for daemon-run CNI; install them only if you run CNI outside the daemon"
+		return r
+	}
+
+	r.Status = StatusFAIL
+	r.Detail = fmt.Sprintf("%s (missing: %s; daemon unreachable, no bundled plugins to fall back on)",
+		rc.cniBinDir, strings.Join(missing, ", "))
+	r.Remediation = "bring up kukeond (`kuke init`) so cells use its bundled CNI plugins, or install plugins on the host"
 	return r
 }
 

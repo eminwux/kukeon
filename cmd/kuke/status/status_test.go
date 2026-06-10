@@ -226,9 +226,11 @@ func TestCheckHostCgroupV2(t *testing.T) {
 	})
 }
 
-// TestCheckHostCNIPlugins covers the binary-present / binary-missing
-// split. The status check stats each name in requiredCNIPlugins; a
-// missing one demotes the row to FAIL with the missing name surfaced.
+// TestCheckHostCNIPlugins covers the three-way verdict (issue #1180): host
+// plugins present → OK; host plugins missing but the daemon reachable →
+// WARN (the daemon runs CNI from its bundled in-image plugins, so the host
+// copy is advisory); host plugins missing and the daemon unreachable →
+// FAIL (no plugin set to run CNI at all).
 func TestCheckHostCNIPlugins(t *testing.T) {
 	plugins := requiredCNIPlugins()
 	t.Run("all present", func(t *testing.T) {
@@ -244,19 +246,41 @@ func TestCheckHostCNIPlugins(t *testing.T) {
 			t.Errorf("expected OK; got %s (%s)", r.Status, r.Detail)
 		}
 	})
-	t.Run("missing one", func(t *testing.T) {
+	t.Run("missing, daemon reachable", func(t *testing.T) {
 		dir := t.TempDir()
-		// Lay only the first plugin so the second is missing.
+		// Lay only the first plugin so the second is missing. A reachable
+		// daemon means cell networking runs on the bundled in-image
+		// plugins — this is the fresh `make dev-init` host that must not
+		// FAIL (issue #1180).
 		if err := os.WriteFile(filepath.Join(dir, plugins[0]), []byte(""), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		rc := &runCtx{cniBinDir: dir}
+		rc := &runCtx{cniBinDir: dir, daemonClient: newFakeClient()}
 		r := checkHostCNIPlugins(rc)
-		if r.Status != StatusFAIL {
-			t.Errorf("expected FAIL when a plugin is missing; got %s", r.Status)
+		if r.Status != StatusWARN {
+			t.Errorf("expected WARN when a plugin is missing but the daemon is reachable; got %s (%s)", r.Status, r.Detail)
 		}
 		if !strings.Contains(r.Detail, plugins[1]) {
 			t.Errorf("Detail should name the missing plugin; got %q", r.Detail)
+		}
+	})
+	t.Run("missing, daemon unreachable", func(t *testing.T) {
+		dir := t.TempDir()
+		// Lay only the first plugin so the second is missing, with no
+		// daemon to provide its bundled set: genuinely no working CNI.
+		if err := os.WriteFile(filepath.Join(dir, plugins[0]), []byte(""), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		rc := &runCtx{cniBinDir: dir, daemonClient: nil}
+		r := checkHostCNIPlugins(rc)
+		if r.Status != StatusFAIL {
+			t.Errorf("expected FAIL when a plugin is missing and the daemon is unreachable; got %s", r.Status)
+		}
+		if !strings.Contains(r.Detail, plugins[1]) {
+			t.Errorf("Detail should name the missing plugin; got %q", r.Detail)
+		}
+		if strings.Contains(r.Remediation, "lays them down") {
+			t.Errorf("remediation must not claim `kuke init` lays down plugins; got %q", r.Remediation)
 		}
 	})
 }
