@@ -87,6 +87,7 @@ func runStart(cmd *cobra.Command, _ []string) error {
 		return errdefs.ErrHostNotInitialized
 	}
 
+	staleReady := false
 	if lifecycle.IsCellRunning(getRes.Cell) {
 		probe := lifecycle.ResolveReachableProbe(cmd)
 		socketPath := lifecycle.ResolveSocketPath()
@@ -112,6 +113,7 @@ func runStart(cmd *cobra.Command, _ []string) error {
 			"cell", consts.KukeSystemCellName,
 			"realm", consts.KukeSystemRealmName,
 		)
+		staleReady = true
 	}
 
 	// Recreate /run/kukeon (the cell's bind-mount source) if a reboot wiped
@@ -119,6 +121,20 @@ func runStart(cmd *cobra.Command, _ []string) error {
 	// fails with "open /run/kukeon: no such file or directory".
 	if ensureErr := lifecycle.ResolveEnsureSocketDir(cmd)(); ensureErr != nil {
 		return fmt.Errorf("ensure kukeond socket dir: %w", ensureErr)
+	}
+
+	if staleReady {
+		// An external kill only takes down the kukeond process; the cell's
+		// other containers (root/pause) keep running in containerd. StartCell
+		// refuses on its "has running containers and must first be stopped"
+		// precondition while those survive, so the documented heal — `daemon
+		// start` brings an externally-killed daemon back up — needs the
+		// surviving containers cleaned first. Stop the cell (the same
+		// reconcile the manual `kuke daemon stop` workaround performed) before
+		// starting fresh (#1184).
+		if _, stopErr := client.StopCell(cmd.Context(), doc); stopErr != nil {
+			return fmt.Errorf("stop stale kukeond cell: %w", stopErr)
+		}
 	}
 
 	startRes, err := client.StartCell(cmd.Context(), doc)

@@ -157,6 +157,12 @@ func TestDaemonStart(t *testing.T) {
 						MetadataExists: true,
 					}, nil
 				},
+				// Surviving root/pause containers from the killed daemon are
+				// stopped before the restart so StartCell's running-containers
+				// precondition does not refuse (#1184).
+				stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+					return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
+				},
 				startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
 					return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
 				},
@@ -234,6 +240,122 @@ func TestDaemonStart(t *testing.T) {
 	}
 }
 
+// TestDaemonStart_StaleReadyStopsRunningContainersBeforeStart is the headline
+// fix for #1184: a `kill -9` of the kukeond process leaves the cell's other
+// containers (root/pause) running in containerd while the socket goes dead.
+// Without first stopping those survivors, StartCell refuses on its "has
+// running containers and must first be stopped" precondition and the daemon
+// stays down. The stale-Ready fall-through must StopCell (cleaning the
+// survivors) before StartCell, and only after printing the divergence notice.
+func TestDaemonStart_StaleReadyStopsRunningContainersBeforeStart(t *testing.T) {
+	var calls []string
+	fake := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell: v1beta1.CellDoc{
+					Status: v1beta1.CellStatus{
+						State: v1beta1.CellStateReady,
+						Containers: []v1beta1.ContainerStatus{
+							{State: v1beta1.ContainerStateReady},
+						},
+					},
+				},
+				MetadataExists: true,
+			}, nil
+		},
+		stopCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+			calls = append(calls, "stop")
+			return kukeonv1.StopCellResult{Cell: doc, Stopped: true}, nil
+		},
+		startCellFn: func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+			calls = append(calls, "start")
+			return kukeonv1.StartCellResult{Cell: doc, Started: true}, nil
+		},
+	}
+
+	buf := runStartWithFake(t, fake, fixedProbe(false))
+
+	if want := []string{"stop", "start"}; len(calls) != 2 || calls[0] != want[0] || calls[1] != want[1] {
+		t.Fatalf("call order: want %v, got %v", want, calls)
+	}
+	// The divergence notice must precede the reconciling action (AC item 3).
+	if !strings.Contains(buf.String(), "metadata reports Ready but socket") {
+		t.Errorf("missing stale-Ready divergence notice\nGot:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), `kukeond started (cell "kukeond" in realm "kuke-system")`) {
+		t.Errorf("missing started confirmation\nGot:\n%s", buf.String())
+	}
+}
+
+// TestDaemonStart_StaleReadyStopError surfaces a failure to clean the surviving
+// containers as a wrapped error rather than charging ahead into a StartCell
+// that would refuse on the running-containers precondition.
+func TestDaemonStart_StaleReadyStopError(t *testing.T) {
+	fake := &fakeClient{
+		getCellFn: func(_ v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
+			return kukeonv1.GetCellResult{
+				Cell: v1beta1.CellDoc{
+					Status: v1beta1.CellStatus{
+						State: v1beta1.CellStateReady,
+						Containers: []v1beta1.ContainerStatus{
+							{State: v1beta1.ContainerStateReady},
+						},
+					},
+				},
+				MetadataExists: true,
+			}, nil
+		},
+		stopCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+			return kukeonv1.StopCellResult{}, errors.New("containerd unreachable")
+		},
+		startCellFn: func(_ v1beta1.CellDoc) (kukeonv1.StartCellResult, error) {
+			t.Fatalf("StartCell must not run after StopCell failed")
+			return kukeonv1.StartCellResult{}, nil
+		},
+	}
+
+	cmd := start.NewStartCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, kukeonv1.Client(fake))
+	ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, lifecycle.ReachableProbeKey{}, fixedProbe(false))
+	cmd.SetContext(ctx)
+	cmd.SetArgs(nil)
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "stop stale kukeond cell:") {
+		t.Fatalf("want wrapped stop error, got %v", err)
+	}
+}
+
+// runStartWithFake executes `kuke daemon start` against the given fake client
+// and probe, returning the captured combined output buffer. It fails the test
+// on any execution error — callers that expect an error drive the command
+// inline instead.
+func runStartWithFake(t *testing.T, fake kukeonv1.Client, probe lifecycle.ReachableProbe) *bytes.Buffer {
+	t.Helper()
+	cmd := start.NewStartCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.WithValue(context.Background(), types.CtxLogger, logger)
+	ctx = context.WithValue(ctx, lifecycle.MockClientKey{}, fake)
+	ctx = context.WithValue(ctx, lifecycle.EnsureSocketDirKey{}, func() error { return nil })
+	ctx = context.WithValue(ctx, lifecycle.ReachableProbeKey{}, probe)
+	cmd.SetContext(ctx)
+	cmd.SetArgs(nil)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return buf
+}
+
 // TestDaemonStart_NonRootIsRejected confirms the fail-fast UID gate rejects
 // non-root invocations before any side effect (cell lookup, in-process
 // controller construction). Symmetric with the same guard on `kuke daemon
@@ -300,6 +422,7 @@ type fakeClient struct {
 
 	getCellFn   func(doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error)
 	startCellFn func(doc v1beta1.CellDoc) (kukeonv1.StartCellResult, error)
+	stopCellFn  func(doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error)
 }
 
 func (f *fakeClient) GetCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.GetCellResult, error) {
@@ -314,4 +437,11 @@ func (f *fakeClient) StartCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1
 		return kukeonv1.StartCellResult{}, errors.New("unexpected StartCell call")
 	}
 	return f.startCellFn(doc)
+}
+
+func (f *fakeClient) StopCell(_ context.Context, doc v1beta1.CellDoc) (kukeonv1.StopCellResult, error) {
+	if f.stopCellFn == nil {
+		return kukeonv1.StopCellResult{}, errors.New("unexpected StopCell call")
+	}
+	return f.stopCellFn(doc)
 }
