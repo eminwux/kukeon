@@ -190,7 +190,9 @@ var KukeonKnownSnapshotters = []string{
 //  3. snapshots — for every snapshotter when `snapshotter == ""` (the
 //     uninstall path's default), or just the named snapshotter when one is
 //     specified explicitly,
-//  4. blobs (content store).
+//  4. blobs (content store),
+//  5. a final forced synchronous GC sweep (a throwaway lease deleted with
+//     leases.SynchronousDelete).
 //
 // Leases run first because leases.SynchronousDelete triggers the containerd
 // GC scheduler's ScheduleAndWait sweep before returning. That sweep is what
@@ -201,6 +203,18 @@ var KukeonKnownSnapshotters = []string{
 // state (containerd v2 metadata/snapshot.go). Draining leases first lets the
 // GC sweep clear them, then the subsequent snapshotter walk handles whatever
 // the user/runtime layer still pinned directly.
+//
+// The trailing forced GC sweep (step 5) reclaims a snapshot the explicit
+// Walk+Remove pass could not remove directly — notably a BuildKit "Active"
+// snapshot left by `kuke build` whose Remove transiently fails, leaving the
+// snapshot multi-pass loop to log "made no progress, giving up". By that
+// point the straggler is fully unreferenced (its leases and image are gone),
+// so it is collectible — but only by a GC pass. The lease-first sweep above
+// ran before the image/snapshot drain, so it could not collect it; without a
+// sweep after the drain, the immediately-following DeleteNamespace races the
+// next periodic GC and fails with "namespace must be empty ... still has
+// snapshots on overlayfs". The straggler is collected a moment later, so a
+// re-run succeeds — the deterministic two-command failure from issue #1182.
 //
 // Each class logs a count summary at INFO and per-resource debug lines at
 // DEBUG, so a future "namespace not empty" failure points at the exact class
@@ -244,6 +258,50 @@ func (c *client) drainNamespaceResources(
 	}
 
 	c.drainBlobs(nsCtx, namespace, srv)
+	c.forceGCSweep(nsCtx, namespace, srv)
+}
+
+// forceGCSweep triggers a final synchronous containerd GC pass by creating a
+// throwaway lease and immediately deleting it with leases.SynchronousDelete,
+// which blocks on the GC scheduler's ScheduleAndWait sweep. The sweep reclaims
+// resources that became unreferenced during the drain above but that the
+// explicit Walk+Remove passes could not remove directly — notably a BuildKit
+// "Active" snapshot whose Remove transiently fails, which the snapshot loop
+// gives up on with "made no progress". Without this sweep the
+// immediately-following DeleteNamespace fails with "namespace must be empty
+// ... still has snapshots on overlayfs" even though the straggler is moments
+// from being collected by the next periodic GC — the issue #1182 first-pass
+// failure. Best-effort: a failure to create or delete the throwaway lease is
+// logged at WARN and does not surface as an error, mirroring the rest of the
+// drain. The lease is always deleted, so it never itself blocks the namespace
+// delete.
+func (c *client) forceGCSweep(nsCtx context.Context, namespace string, srv containerdNamespaceServices) {
+	c.logger.DebugContext(c.ctx, "forcing GC sweep before namespace delete", "namespace", namespace)
+	leaseManager := srv.LeasesService()
+	lease, err := leaseManager.Create(nsCtx, leases.WithRandomID())
+	if err != nil {
+		c.logger.WarnContext(
+			c.ctx,
+			"failed to create throwaway lease for GC sweep",
+			"namespace",
+			namespace,
+			"error",
+			err,
+		)
+		return
+	}
+	if deleteErr := leaseManager.Delete(nsCtx, lease, leases.SynchronousDelete); deleteErr != nil {
+		c.logger.WarnContext(
+			c.ctx,
+			"failed to delete throwaway lease for GC sweep",
+			"namespace",
+			namespace,
+			"lease",
+			lease.ID,
+			"error",
+			deleteErr,
+		)
+	}
 }
 
 // drainLeases releases every lease in the namespace using

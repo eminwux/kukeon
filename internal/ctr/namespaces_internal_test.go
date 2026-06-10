@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/containerd/containerd/v2/core/content"
@@ -118,6 +119,82 @@ func TestCleanupNamespaceResourcesDrainsLeasePinnedSnapshots(t *testing.T) {
 	}
 }
 
+// TestCleanupNamespaceResourcesForcedGCSweepReclaimsStraggler is the
+// regression guard for issue #1182 — `kuke daemon reset --purge-system`
+// followed by `kuke uninstall -y` failed first-pass with "namespace must be
+// empty ... still has snapshots on overlayfs". The drain leaves one BuildKit
+// "Active" straggler snapshot the explicit snapshotter.Remove pass cannot
+// reclaim (it logs "made no progress, giving up"); the straggler is fully
+// unreferenced and collectible only by a GC pass. The fix appends a forced
+// synchronous GC sweep (a throwaway lease deleted with leases.SynchronousDelete)
+// after the drain so the namespace ends genuinely empty in a single pass,
+// rather than relying on the next periodic GC the immediately-following
+// DeleteNamespace would race.
+//
+// The fake models the field semantic: snapshotter.Remove fails on the gcOnly
+// straggler, and a synchronous lease Delete reclaims it once the images are
+// drained. A drainNamespaceResources without the trailing sweep would strand
+// the straggler — which is what this test asserts is no longer the case.
+//
+// Real-containerd integration of this drain+delete path lives in the e2e
+// suite; CI's `make test` target intentionally avoids needing a containerd
+// socket, so a fake is the only viable substrate for a per-package guard.
+func TestCleanupNamespaceResourcesForcedGCSweepReclaimsStraggler(t *testing.T) {
+	srv := newFakeServices()
+	srv.addSnapshot("overlayfs", "sha256:base")
+	srv.addSnapshot("overlayfs", "sha256:layer")
+	srv.addGCOnlySnapshot("overlayfs", "buildkit-active-straggler")
+	srv.addImage("kukeon.internal/kukeond:v0.0.0-dev", "sha256:manifest")
+	srv.addBlob("sha256:blob-a")
+
+	c := &client{
+		ctx:    context.Background(),
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	c.drainNamespaceResources(context.Background(), "kuke-system.kukeon.io", "overlayfs", srv)
+
+	if got := len(srv.snaps["overlayfs"]); got != 0 {
+		remaining := make([]string, 0, got)
+		for k := range srv.snaps["overlayfs"] {
+			remaining = append(remaining, k)
+		}
+		t.Errorf(
+			"snapshots remaining after drain: got %d (%v), want 0 — forced GC sweep did not reclaim the straggler",
+			got,
+			remaining,
+		)
+	}
+	if got := len(srv.leases); got != 0 {
+		t.Errorf("leases remaining after drain: got %d, want 0 — throwaway GC-sweep lease leaked", got)
+	}
+
+	// The forced sweep must run AFTER the snapshot drain: a synchronous lease
+	// delete that fired before the image/snapshot drain (the early drainLeases
+	// pass) could not reclaim the straggler, so the sweep is only load-bearing
+	// as the trailing step. The forced sweep is the only path that *creates* a
+	// lease (drainLeases only lists+deletes existing ones), so a lease.Create
+	// after the last snapshot walk uniquely identifies it.
+	lastSnapWalk := -1
+	for i, op := range srv.callLog {
+		if op == "snapshotter.Walk(overlayfs)" {
+			lastSnapWalk = i
+		}
+	}
+	if lastSnapWalk == -1 {
+		t.Fatalf("call log missing snapshotter.Walk(overlayfs); got %v", srv.callLog)
+	}
+	forcedSweep := -1
+	for i, op := range srv.callLog {
+		if i > lastSnapWalk && strings.HasPrefix(op, "lease.Create(") {
+			forcedSweep = i
+			break
+		}
+	}
+	if forcedSweep == -1 {
+		t.Errorf("call log missing the trailing forced-GC-sweep lease.Create after the snapshot drain; got %v", srv.callLog)
+	}
+}
+
 // fakeServices models the subset of containerd surface drainNamespaceResources
 // uses. The pinning semantic — snapshotter.Remove fails while any lease
 // references the snapshot via a leases.Resource{Type:"snapshots/<name>",ID:<key>}
@@ -138,6 +215,14 @@ type fakeServices struct {
 
 type fakeSnapshot struct {
 	name string
+	// gcOnly models a snapshot the explicit snapshotter.Remove cannot reclaim
+	// (Remove returns FailedPrecondition with no lease pinning it) — the
+	// BuildKit "Active" straggler from issue #1182. It is reclaimed only by a
+	// synchronous GC sweep (a lease Delete with Synchronous set) once the
+	// namespace's images are drained, mirroring the field behavior where the
+	// straggler is collectible only after its transitive image reference is
+	// gone.
+	gcOnly bool
 }
 
 type fakeLease struct {
@@ -158,6 +243,29 @@ func (f *fakeServices) addSnapshot(snapshotter, key string) {
 		f.snaps[snapshotter] = map[string]*fakeSnapshot{}
 	}
 	f.snaps[snapshotter][key] = &fakeSnapshot{name: key}
+}
+
+// addGCOnlySnapshot adds a snapshot that the explicit snapshotter.Remove pass
+// cannot reclaim — only the trailing forced synchronous GC sweep collects it
+// (issue #1182).
+func (f *fakeServices) addGCOnlySnapshot(snapshotter, key string) {
+	if f.snaps[snapshotter] == nil {
+		f.snaps[snapshotter] = map[string]*fakeSnapshot{}
+	}
+	f.snaps[snapshotter][key] = &fakeSnapshot{name: key, gcOnly: true}
+}
+
+// reclaimGCOnlySnapshots removes every gcOnly snapshot across all
+// snapshotters. Invoked by a synchronous lease Delete once the namespace's
+// images are drained — the fake's stand-in for containerd's GC sweep.
+func (f *fakeServices) reclaimGCOnlySnapshots() {
+	for _, bucket := range f.snaps {
+		for key, snap := range bucket {
+			if snap.gcOnly {
+				delete(bucket, key)
+			}
+		}
+	}
 }
 
 func (f *fakeServices) addLease(id, resourceType string, keys ...string) {
@@ -219,9 +327,38 @@ func (m *fakeLeaseManager) List(_ context.Context, _ ...string) ([]leases.Lease,
 	return out, nil
 }
 
-func (m *fakeLeaseManager) Delete(_ context.Context, l leases.Lease, _ ...leases.DeleteOpt) error {
+func (m *fakeLeaseManager) Create(ctx context.Context, opts ...leases.Opt) (leases.Lease, error) {
+	var l leases.Lease
+	for _, opt := range opts {
+		if err := opt(&l); err != nil {
+			return leases.Lease{}, err
+		}
+	}
+	if l.ID == "" {
+		l.ID = fmt.Sprintf("fake-lease-%d", len(m.f.leases)+len(m.f.callLog))
+	}
+	m.f.callLog = append(m.f.callLog, "lease.Create("+l.ID+")")
+	m.f.leases[l.ID] = &fakeLease{id: l.ID}
+	return l, nil
+}
+
+func (m *fakeLeaseManager) Delete(ctx context.Context, l leases.Lease, opts ...leases.DeleteOpt) error {
+	var do leases.DeleteOptions
+	for _, opt := range opts {
+		if err := opt(ctx, &do); err != nil {
+			return err
+		}
+	}
 	m.f.callLog = append(m.f.callLog, "lease.Delete("+l.ID+")")
 	delete(m.f.leases, l.ID)
+	// A synchronous lease delete blocks on containerd's GC sweep. The sweep
+	// reclaims gcOnly stragglers once the namespace's images are drained —
+	// the issue #1182 forced-sweep behavior. While images are still present
+	// (the early drainLeases sweeps), the straggler stays transitively
+	// referenced and is left in place.
+	if do.Synchronous && len(m.f.imageList) == 0 {
+		m.f.reclaimGCOnlySnapshots()
+	}
 	return nil
 }
 
@@ -288,6 +425,12 @@ func (s *fakeSnapshotter) Remove(_ context.Context, key string) error {
 	s.f.callLog = append(s.f.callLog, "snapshotter.Remove("+s.name+","+key+")")
 	if pins := s.f.snapshotPinnedBy(s.name, key); len(pins) > 0 {
 		return fmt.Errorf("snapshot %q pinned by %v: %w", key, pins, errdefs.ErrFailedPrecondition)
+	}
+	if snap, ok := s.f.snaps[s.name][key]; ok && snap.gcOnly {
+		// Models the BuildKit "Active" straggler: the explicit Remove fails
+		// transiently and the snapshot multi-pass loop gives up on it. Only
+		// the trailing forced GC sweep reclaims it (issue #1182).
+		return fmt.Errorf("snapshot %q not removable directly: %w", key, errdefs.ErrFailedPrecondition)
 	}
 	delete(s.f.snaps[s.name], key)
 	return nil

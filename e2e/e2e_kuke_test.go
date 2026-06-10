@@ -389,6 +389,78 @@ func TestKuke_DaemonReset_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestKuke_DaemonResetPurgeSystem_ThenUninstall exercises issue #1182's AC:
+// `kuke init` → `kuke daemon reset --purge-system` → `kuke uninstall -y`
+// succeeds in a single invocation (exit 0) and leaves no `*.kukeon.io`
+// containerd namespaces behind.
+//
+// `daemon reset --purge-system` deletes the kukeond cell and the on-disk
+// kuke-system metadata tree, but the kuke-system containerd namespace (the
+// staged kukeond image layers / snapshots) survives. The bug was that the
+// subsequent uninstall drained that namespace but then raced the next
+// periodic GC on the immediately-following DeleteNamespace, failing the
+// first pass with "namespace must be empty ... still has snapshots on
+// overlayfs"; a re-run succeeded once GC caught up. The drain now forces a
+// synchronous GC sweep before DeleteNamespace, so the single invocation
+// suffices.
+//
+// Not run with t.Parallel(): like its siblings TestKuke_Uninstall_VerifyState
+// and TestKuke_DaemonReset_RoundTrip, it touches host-global state (every
+// kukeon-suffixed containerd namespace, /run/kukeon, /opt/kukeon, the kukeon
+// user/group) and must not race them.
+func TestKuke_DaemonResetPurgeSystem_ThenUninstall(t *testing.T) {
+	runPath := getRandomRunPath(t)
+	kukeondImage := loadKukeondImageIntoContainerd(t)
+
+	systemNS := consts.RealmNamespace(consts.KukeSystemRealmName)
+
+	t.Cleanup(func() {
+		// Best-effort: if the test exits before its own uninstall fires,
+		// re-run so the next test does not inherit kukeon-suffixed namespaces
+		// or the run path. Failures here are diagnostic only.
+		_, _, _ = runBinary(t, nil, kuke, append(
+			buildKukeRunPathArgs(runPath), "uninstall", "--yes",
+		)...)
+	})
+
+	// Step 1: init brings up both realms and the kukeond cell, staging the
+	// kukeond image into the kuke-system containerd namespace.
+	args := append(buildKukeRunPathArgs(runPath), "init", "--kukeond-image", kukeondImage)
+	exitCode, stdout, stderr := runBinary(t, nil, kuke, args...)
+	if exitCode != 0 {
+		t.Fatalf("kuke init failed: code=%d stdout=%s stderr=%s",
+			exitCode, string(stdout), string(stderr))
+	}
+
+	// Step 2: daemon reset --purge-system deletes the kukeond cell and the
+	// on-disk kuke-system metadata, but leaves the containerd namespace (with
+	// the staged image layers) in place — the precondition the bug needs.
+	args = append(buildKukeRunPathArgs(runPath), "daemon", "reset", "--purge-system")
+	exitCode, stdout, stderr = runBinary(t, nil, kuke, args...)
+	if exitCode != 0 {
+		t.Fatalf("kuke daemon reset --purge-system failed: code=%d stdout=%s stderr=%s",
+			exitCode, string(stdout), string(stderr))
+	}
+	if !verifyContainerdNamespace(t, systemNS) {
+		t.Fatalf("pre-uninstall: kuke-system namespace %q must survive daemon reset --purge-system "+
+			"(its image layers are what uninstall has to drain); got it already gone, "+
+			"so the single-invocation assertion below would pass vacuously", systemNS)
+	}
+
+	// Step 3: a SINGLE uninstall must succeed (exit 0) — issue #1182 AC #1.
+	args = append(buildKukeRunPathArgs(runPath), "uninstall", "--yes")
+	exitCode, stdout, stderr = runBinary(t, nil, kuke, args...)
+	if exitCode != 0 {
+		t.Fatalf("kuke uninstall failed on first pass (issue #1182 regression): "+
+			"code=%d stdout=%s stderr=%s", exitCode, string(stdout), string(stderr))
+	}
+
+	// Step 4: no kukeon-suffixed containerd namespaces survive — AC #2.
+	if surviving := listKukeonContainerdNamespaces(t); len(surviving) > 0 {
+		t.Fatalf("post-uninstall: kukeon-owned containerd namespaces survive: %v", surviving)
+	}
+}
+
 // TestKuke_Stop_Help tests kuke stop help.
 func TestKuke_Stop_Help(t *testing.T) {
 	t.Parallel()
