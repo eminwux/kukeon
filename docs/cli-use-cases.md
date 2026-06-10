@@ -296,6 +296,7 @@ sudo kuke run --clone <cell> --name custom                               # same,
 - `--container` is only valid in attach mode; passing both `--container` and `-d/--detach` exits non-zero.
 - `--rm` is processed by `kukeond`'s reconcile loop. `kuke run` is daemon-only after #566 — `KUKEON_NO_DAEMON=true` and `--run-path` promotion no longer reach an in-process branch for workload verbs, so `--rm` and `--run-path` are not mutually exclusive on `kuke run`. Cleanup latency is bounded by the daemon's reconcile interval (default 30s), not real-time.
 - A clean `^]^]` detach in attach mode does **not** trigger `--rm` cleanup; the cell stays alive for re-attach. Only workload termination, peer hangup, or an unrecoverable controller error fires cleanup.
+- `--rm` cleanup fires only on a **clean** workload exit (the cell settles `Stopped`). A workload that exits non-zero / crashes settles the cell `Failed` (#1206), which is excluded from auto-delete — the failed cell is preserved with its exit code/signal in `reason`/`message` so the failure can be inspected, and is cleaned up with an explicit `kuke delete cell`.
 - `kuke run -f /missing.yaml` exits non-zero with a `failed to open file` error.
 - A reference to an unavailable image surfaces the containerd resolver error verbatim (e.g. `pull access denied, repository does not exist or may require authorization`) and exits non-zero; the half-created cell may need `kuke purge cell` to clean up.
 

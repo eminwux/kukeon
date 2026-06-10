@@ -65,8 +65,8 @@ A cell's **identity is its own document** — the `CellDoc`. The CellDoc owns th
 | --------- | --------------------------------------------------------------- |
 | `Pending` | Cell metadata exists; containers not yet created                |
 | `Ready`   | Root container is running; non-root containers are running      |
-| `Stopped` | All containers have exited                                      |
-| `Failed`  | The root container failed to start or exited unexpectedly       |
+| `Stopped` | All containers have exited cleanly (every exit code zero)       |
+| `Failed`  | Startup failed, or a workload exited non-zero / crashed; `reason` + `message` carry the failing container and its exit code/signal. Preserved (not auto-deleted) so the failure can be inspected — clear with `kuke delete cell` |
 | `Unknown` | The daemon can't determine the state (e.g., containerd offline) |
 
 ## Operations

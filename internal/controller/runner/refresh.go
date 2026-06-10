@@ -393,6 +393,17 @@ func (r *Exec) RefreshCell(cell intmodel.Cell) (intmodel.Cell, int, error) {
 		newStatus.State = r.deriveCellState(cell)
 	}
 
+	// Stamp the runtime-failure breadcrumb on a fresh transition to
+	// CellStateFailed (#1206), same contract as ReconcileCell. carryCellLifecycle
+	// above already copied any prior Reason/Message forward, so an
+	// already-Failed cell (e.g. a startup markCellFailed) keeps its original
+	// reason; only a Stopped/Ready → Failed transition restamps here. cell's
+	// container snapshot was populated above, so the breadcrumb resolves the
+	// failing container even though the final write target is newStatus.
+	if newStatus.State == intmodel.CellStateFailed && originalStatus.State != intmodel.CellStateFailed {
+		newStatus.Reason, newStatus.Message = cellFailureBreadcrumb(cell)
+	}
+
 	// Run ReadyObserved through the same one-way latch ReconcileCell uses.
 	// Without this, `kuke refresh` racing a synchronous Ready write would
 	// wipe the latched ReadyObserved to false (newStatus is constructed
@@ -740,6 +751,16 @@ func (r *Exec) ReconcileCell(cell intmodel.Cell) (intmodel.Cell, ReconcileOutcom
 	cell.Status.ReadyObserved = latchReadyObserved(
 		originalStatus.ReadyObserved, originalStatus.State, newState)
 
+	// Surface the workload exit that drove a fresh runtime CellStateFailed
+	// (#1206) so `kuke get cell -o yaml` carries the failing container + exit
+	// code/signal, mirroring the startup-path breadcrumb markCellFailed
+	// writes. Only stamp on the fresh transition: an already-Failed cell is
+	// short-circuited by the cellStateIsSticky guard above and never reaches
+	// here, so its original Reason/Message is preserved.
+	if newState == intmodel.CellStateFailed && originalStatus.State != intmodel.CellStateFailed {
+		stampCellFailure(&cell)
+	}
+
 	// RestartPolicy gate (#1003): per-container restartPolicy can veto both
 	// the auto-delete and the wind-down kill so a workload authored with
 	// `restartPolicy: never` (or `on-failure` that exited cleanly) is left
@@ -1078,6 +1099,17 @@ func (r *Exec) deriveCellState(cell intmodel.Cell) intmodel.CellState {
 // NotCreated as a terminal state alongside Stopped/Failed, so a non-root
 // workload that exited and was reaped naturally still counts toward "all
 // stopped" here.
+//
+// Once every non-root workload is terminal, the exit triple decides between
+// the two terminal cell states (#1206): a workload that exited non-zero (or
+// landed in ContainerStateFailed) settles the cell in CellStateFailed so a
+// crash is distinguishable from a clean completion, which stays
+// CellStateStopped. ExitCode is preserved across task reaping by
+// populateCellContainerStatuses, so a failed-then-reaped (NotCreated)
+// workload still carries its non-zero code here. CellStateFailed is sticky
+// and excluded from auto-delete / wind-down (cellStateIsSticky,
+// cellStateAutoDeleteTriggers), so the crashed cell is preserved with its
+// exit code intact for the operator instead of being reaped to Stopped.
 func deriveCellStateFromNonRootContainerStatuses(
 	specs []intmodel.ContainerSpec,
 	statuses []intmodel.ContainerStatus,
@@ -1092,6 +1124,7 @@ func deriveCellStateFromNonRootContainerStatuses(
 	seen := 0
 	anyActive := false
 	anyUnknown := false
+	anyFailed := false
 	for i := range statuses {
 		if _, ok := nonRootIDs[statuses[i].ID]; !ok {
 			continue
@@ -1109,7 +1142,11 @@ func deriveCellStateFromNonRootContainerStatuses(
 			intmodel.ContainerStateFailed,
 			intmodel.ContainerStateNotCreated:
 			// terminal — does not contribute to active. A reaped/absent
-			// workload (NotCreated) counts the same as a clean stop here.
+			// workload (NotCreated) counts the same as a clean stop here,
+			// unless its preserved exit triple marks it a failure (#1206).
+			if containerExitedNonZero(statuses[i]) {
+				anyFailed = true
+			}
 		}
 	}
 
@@ -1125,7 +1162,21 @@ func deriveCellStateFromNonRootContainerStatuses(
 	if anyUnknown {
 		return intmodel.CellStateUnknown
 	}
+	if anyFailed {
+		return intmodel.CellStateFailed
+	}
 	return intmodel.CellStateStopped
+}
+
+// containerExitedNonZero reports whether a terminal container's observed exit
+// indicates a workload failure rather than a clean completion (#1206): a
+// non-zero exit code (the common case — populateCellContainerStatuses
+// preserves it across task reaping) or the explicit ContainerStateFailed
+// observation. A clean exit (code 0) — including a never-started container
+// reaped to NotCreated with a zero code — is not a failure. Callers must only
+// consult this for containers already known to be terminal.
+func containerExitedNonZero(status intmodel.ContainerStatus) bool {
+	return status.State == intmodel.ContainerStateFailed || status.ExitCode != 0
 }
 
 // hasNonRootContainerSpec reports whether the cell has at least one
@@ -1143,6 +1194,14 @@ func hasNonRootContainerSpec(specs []intmodel.ContainerSpec) bool {
 // deriveCellStateFromRootContainer resolves the cell's state from the root
 // container's task. Returns Ready when no root container is configured (a
 // cgroup-only cell counts as Ready by cgroup existence).
+//
+// When the root has terminally exited, the exit triple chooses between the
+// two terminal cell states the same way the non-root path does (#1206): a
+// non-zero root exit settles the cell Failed (preserving the crash + exit
+// code), a clean exit stays Stopped. The exit triple is read from the
+// container-status snapshot populateCellContainerStatuses just wrote (both
+// callers populate before deriving), which preserves the exit code across
+// task reaping.
 func (r *Exec) deriveCellStateFromRootContainer(cell intmodel.Cell) intmodel.CellState {
 	rootSpec := findRootContainerSpec(cell)
 	if rootSpec == nil {
@@ -1163,10 +1222,99 @@ func (r *Exec) deriveCellStateFromRootContainer(cell intmodel.Cell) intmodel.Cel
 	case intmodel.ContainerStateStopped,
 		intmodel.ContainerStateFailed,
 		intmodel.ContainerStateNotCreated:
+		if rootContainerExitedNonZero(rootSpec.ID, cell.Status.Containers) {
+			return intmodel.CellStateFailed
+		}
 		return intmodel.CellStateStopped
 	default:
 		return intmodel.CellStateUnknown
 	}
+}
+
+// rootContainerExitedNonZero looks up the root container's exit triple in the
+// freshly populated status snapshot and reports whether it marks a failure
+// (#1206). Returns false when the root's status is missing from the snapshot —
+// a partial populate must not flip the cell to Failed on absent data.
+func rootContainerExitedNonZero(rootID string, statuses []intmodel.ContainerStatus) bool {
+	for i := range statuses {
+		if statuses[i].ID == rootID {
+			return containerExitedNonZero(statuses[i])
+		}
+	}
+	return false
+}
+
+// reasonWorkloadFailed is the stable PascalCase Status.Reason label stamped
+// when a runtime workload exit (not a startup-path error — markCellFailed owns
+// those) drives a cell to CellStateFailed (#1206). Distinct from the
+// StartCellFailed / CreateCellFailed / StartContainerFailed startup reasons so
+// machine consumers can tell a post-Ready crash apart from a failed bring-up.
+const reasonWorkloadFailed = "WorkloadFailed"
+
+// cellFailureBreadcrumb returns the (Reason, Message) pair to stamp on a cell
+// transitioning to CellStateFailed from a runtime workload exit (#1206).
+// Reason is the stable machine label; Message names the failing container and
+// its exit code/signal, falling back to a generic line if the failing
+// container can't be pinpointed in the snapshot.
+func cellFailureBreadcrumb(cell intmodel.Cell) (string, string) {
+	msg := describeCellFailure(cell)
+	if msg == "" {
+		msg = "workload exited with a non-zero status"
+	}
+	return reasonWorkloadFailed, msg
+}
+
+// stampCellFailure writes the runtime-failure breadcrumb onto cell.Status in
+// place. The cell's container-status snapshot must already be populated.
+func stampCellFailure(cell *intmodel.Cell) {
+	cell.Status.Reason, cell.Status.Message = cellFailureBreadcrumb(*cell)
+}
+
+// describeCellFailure builds the operator-facing Status.Message for a cell that
+// derived CellStateFailed from a workload exit (#1206), naming the first
+// failing container and its exit code/signal. Mirrors deriveCellState's
+// dispatch so the reported container matches the one that drove the state:
+// non-root workloads for cells that have them, otherwise the root. Returns ""
+// when no failing container is found (defensive — callers only invoke this
+// after derivation returned Failed).
+func describeCellFailure(cell intmodel.Cell) string {
+	statusByID := make(map[string]intmodel.ContainerStatus, len(cell.Status.Containers))
+	for i := range cell.Status.Containers {
+		statusByID[cell.Status.Containers[i].ID] = cell.Status.Containers[i]
+	}
+
+	if hasNonRootContainerSpec(cell.Spec.Containers) {
+		for i := range cell.Spec.Containers {
+			spec := cell.Spec.Containers[i]
+			if spec.Root {
+				continue
+			}
+			if st, ok := statusByID[spec.ID]; ok &&
+				containerStateIsTerminal(st.State) && containerExitedNonZero(st) {
+				return formatContainerFailure(st)
+			}
+		}
+		return ""
+	}
+
+	rootSpec := findRootContainerSpec(cell)
+	if rootSpec != nil {
+		if st, ok := statusByID[rootSpec.ID]; ok && containerExitedNonZero(st) {
+			return formatContainerFailure(st)
+		}
+	}
+	return ""
+}
+
+// formatContainerFailure renders a single container's exit triple as a human
+// breadcrumb, surfacing the decoded signal when the exit code carries one
+// (128+signum, per ContainerStatus.ExitSignal).
+func formatContainerFailure(st intmodel.ContainerStatus) string {
+	if st.ExitSignal != "" {
+		return fmt.Sprintf("container %q terminated by %s (exit code %d)",
+			st.ID, st.ExitSignal, st.ExitCode)
+	}
+	return fmt.Sprintf("container %q exited with code %d", st.ID, st.ExitCode)
 }
 
 func findRootContainerSpec(cell intmodel.Cell) *intmodel.ContainerSpec {
