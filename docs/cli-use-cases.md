@@ -188,7 +188,7 @@ sudo kuke create realm myrealm
 sudo kuke create realm myrealm --namespace custom.kukeon.io
 sudo kuke create space myspace --realm myrealm
 sudo kuke create stack mystack --realm myrealm --space myspace
-sudo kuke create cell mycell --realm myrealm --space myspace --stack mystack
+sudo kuke create cell mycell --from-blueprint <bp> --realm myrealm --space myspace --stack mystack
 ```
 
 **Invariants.**
@@ -196,6 +196,7 @@ sudo kuke create cell mycell --realm myrealm --space myspace --stack mystack
 - Exit code 0 on success. Each phase (metadata, containerd namespace, cgroup) reports `created` or `already existed`.
 - Idempotent: re-running with the same arguments succeeds and reports `already existed` on every phase. The CLI does not re-create or mutate an existing object.
 - `kuke create realm myrealm` does **not** create a default space/stack inside the new realm; the operator builds the inner hierarchy explicitly. (Only `kuke init` creates the `default/default/default` triple in the `default` realm.)
+- Unlike realms/spaces/stacks, **cells require a source**: `kuke create cell` takes exactly one of `--from-blueprint`/`--from-config`/`--clone` (the bare scaffold form is retired). Omitting all three exits non-zero with `kuke create cell requires --from-blueprint, --from-config, or --clone (use 'kuke apply -f <file>' for a full manifest)`.
 - A child resource without its parent (e.g. `kuke create space x --realm does-not-exist`) errors with a parent-not-found message; exit code non-zero.
 
 ### Purging a realm / space / stack / cell
