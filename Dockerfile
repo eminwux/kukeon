@@ -47,8 +47,12 @@ ARG TARGETARCH
 # iptables: required by the bridge plugin's ipMasq rules and by
 # internal/netpolicy/enforcer's egress chains, which both shell out to
 # iptables in-process from the daemon container.
+# iproute2: provides `ip`, which internal/cni/bridge.go's DeleteBridge shells
+# out to (`ip link delete <bridge> type bridge`) on space/realm/network
+# teardown. Without it, daemon-driven CNI teardown fails and leaks the host
+# bridge (issue #1179).
 RUN DEBIAN_FRONTEND=noninteractive apt update \
- && apt install -y procps ca-certificates iptables \
+ && apt install -y procps ca-certificates iptables iproute2 \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=cni-plugins /opt/cni/bin /opt/cni/bin
