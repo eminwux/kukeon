@@ -93,6 +93,31 @@ if [ -e "${NESTED_PROBE}" ]; then
     echo "Routing the nested kukeond through ${NESTED_SOCKET_PATH} (per-nest socket)."
     echo "Parent host's /run/kukeon/tty bind is left untouched; verified on exit."
 
+    # Nested without the dev profile is not a supported configuration
+    # (issue #1191). The socket redirect above is automatic, but the
+    # default profile still reuses the parent host's canonical kukeon.io
+    # namespaces, /kukeon cgroup root, and 10.88.0.0/16 pod subnet — and
+    # that subnet's 10.88.0.1 gateway is *also* the dev-root cell's own
+    # default gateway, so a nested default-profile run shadows the gateway
+    # and blackholes the nested cells' egress (docs/dev-init.md "Nested
+    # egress: the dev profile's pod-CIDR redirect"). The lower-blast-radius
+    # default is to warn loudly and continue (preserving the historical
+    # behavior of this script) rather than force KUKEON_PROFILE=dev; the
+    # operator is told how to opt into the supported per-nest path.
+    if [ "${KUKEON_PROFILE}" != "dev" ]; then
+        cat >&2 <<EOF
+
+WARNING: nested 'make dev-init' without KUKEON_PROFILE=dev is not a supported
+         configuration (see docs/dev-init.md). The default profile reuses the
+         parent host's kukeon.io namespaces, /kukeon cgroup root, and
+         10.88.0.0/16 pod subnet; the shared 10.88.0.1 gateway is shadowed
+         inside this cell and the nested cells' egress is blackholed.
+         Re-run with 'KUKEON_PROFILE=dev make dev-init' for the supported
+         per-nest profile (dev.kukeon.io / /kukeon-dev / 10.89.0.0/16).
+
+EOF
+    fi
+
     # Snapshot the parent's per-container attach plumbing so the EXIT trap
     # can fail loud if anything we did clobbered it. The socket file and
     # metadata file are the parent's, populated by the parent's daemon at
