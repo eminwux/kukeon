@@ -31,7 +31,7 @@ sudo kuke init --kukeond-image docker.io/library/<img>:<tag>
 - Exit code 0 on success; non-zero with a message naming the failed phase otherwise.
 - Side effect: `/opt/kukeon/data/{default,kuke-system}/...` populated; `/run/kukeon/{kukeond.sock,kukeond.pid}` created; containerd namespaces `default.kukeon.io` and `kuke-system.kukeon.io` exist; cgroup subtree `/kukeon/...` populated.
 - After success, `kuke get realms` and `kuke get realms --no-daemon` both list **at least** `default` and `kuke-system` in `Ready` state with their canonical namespaces. The two outputs must agree — divergence indicates the daemon's view of `/opt/kukeon` is stale (the bind-mount regression AGENTS.md guards against).
-- Second invocation on a healthy host is idempotent: every phase reports "already existed", exit code 0, the daemon stays up.
+- Second invocation on a healthy host is idempotent: each provisioning phase reports "already existed" and the container-start phase reports "already running" (no bare "started" — that wording is reserved for a phase that actually created or transitioned something), exit code 0, the daemon stays up.
 - `kuke doctor cgroups` on the same host exits 0 once cgroup controllers are delegated; non-zero output names which controller is missing and whether the kernel lacks support or the parent didn't delegate.
 
 ### Lightweight teardown (dev loop)
@@ -523,7 +523,7 @@ These are the negative paths most likely to surface a UX regression. Each is ver
 
 **Invariants.**
 
-- Idempotent. Every phase reports `already existed`; exit code 0; daemon stays up.
+- Idempotent. Each provisioning phase reports `already existed` and the container-start phase reports `already running` (never a bare `started` on a healthy re-run); exit code 0; daemon stays up.
 
 ### Image references
 

@@ -95,6 +95,105 @@ func persistedKukeondCell(image string) intmodel.Cell {
 	}
 }
 
+// persistedKukeondCellWithState builds the same persisted cell record as
+// persistedKukeondCell but with the root container's live status populated to
+// the given state — simulating what fakeRunner.GetCell would observe off
+// containerd on the pre-StartCell lookup. Used to drive the issue #1186
+// container-start-phase wording: a Ready root means the daemon was already up
+// (StartCell no-ops → "already running"); a Stopped root means it must be
+// (re)started → "started".
+func persistedKukeondCellWithState(image string, state intmodel.ContainerState) intmodel.Cell {
+	cell := persistedKukeondCell(image)
+	cell.Status.Containers = []intmodel.ContainerStatus{
+		{
+			ID:    consts.KukeSystemContainerName,
+			Name:  consts.KukeSystemContainerName,
+			State: state,
+		},
+	}
+	return cell
+}
+
+// TestBootstrapCell_IdempotentRerunReportsAlreadyRunning covers issue #1186:
+// a healthy re-run where the persisted cell's containers are already running
+// must record CellStartedPre=true so the container-start phase renders
+// "already running" rather than a bare "started" (which would misstate the
+// no-op re-run as a (re)start of the daemon's containers).
+func TestBootstrapCell_IdempotentRerunReportsAlreadyRunning(t *testing.T) {
+	const image = "docker.io/library/kukeon-local:dev"
+
+	mockRunner := &fakeRunner{
+		GetCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
+			return persistedKukeondCellWithState(image, intmodel.ContainerStateReady), nil
+		},
+		ExistsCgroupFn: func(_ any) (bool, error) {
+			return true, nil
+		},
+		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) {
+			return true, nil
+		},
+		EnsureCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			return c, nil
+		},
+		StartCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			return c, nil
+		},
+	}
+
+	ctrl := setupTestController(t, mockRunner)
+	var section controller.CellSection
+	if err := ctrl.BootstrapCellForTest(&section, kukeondCellDocForTest(image)); err != nil {
+		t.Fatalf("BootstrapCellForTest: %v", err)
+	}
+
+	if !section.CellStartedPre {
+		t.Errorf("CellSection.CellStartedPre = false; want true (containers already running on a healthy re-run)")
+	}
+	if section.CellStarted {
+		t.Errorf("CellSection.CellStarted = true; want false (no-op re-run must render \"already running\", not \"started\")")
+	}
+}
+
+// TestBootstrapCell_RerunWithStoppedContainersReportsStarted is the contrast
+// to the already-running case (issue #1186): when the persisted cell's
+// containers are not running (a re-run after a crash/stop), StartCell genuinely
+// transitions them, so CellStartedPre stays false and the phase renders
+// "started".
+func TestBootstrapCell_RerunWithStoppedContainersReportsStarted(t *testing.T) {
+	const image = "docker.io/library/kukeon-local:dev"
+
+	mockRunner := &fakeRunner{
+		GetCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
+			return persistedKukeondCellWithState(image, intmodel.ContainerStateStopped), nil
+		},
+		ExistsCgroupFn: func(_ any) (bool, error) {
+			return true, nil
+		},
+		ExistsCellRootContainerFn: func(_ intmodel.Cell) (bool, error) {
+			return true, nil
+		},
+		EnsureCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			return c, nil
+		},
+		StartCellFn: func(c intmodel.Cell) (intmodel.Cell, error) {
+			return c, nil
+		},
+	}
+
+	ctrl := setupTestController(t, mockRunner)
+	var section controller.CellSection
+	if err := ctrl.BootstrapCellForTest(&section, kukeondCellDocForTest(image)); err != nil {
+		t.Fatalf("BootstrapCellForTest: %v", err)
+	}
+
+	if section.CellStartedPre {
+		t.Errorf("CellSection.CellStartedPre = true; want false (containers were not running pre-StartCell)")
+	}
+	if !section.CellStarted {
+		t.Errorf("CellSection.CellStarted = false; want true (StartCell transitioned stopped containers → \"started\")")
+	}
+}
+
 // TestBootstrapCell_ImageDriftRecreatesCell covers issue #868: a persisted
 // kukeond cell whose root container image diverges from the desired
 // `--kukeond-image` must be torn down and rebuilt rather than re-used in
@@ -112,7 +211,10 @@ func TestBootstrapCell_ImageDriftRecreatesCell(t *testing.T) {
 	)
 	mockRunner := &fakeRunner{
 		GetCellFn: func(_ intmodel.Cell) (intmodel.Cell, error) {
-			return persistedKukeondCell(priorImage), nil
+			// Root is Ready pre — the daemon was up before this drift re-run.
+			// The recreate path must still render "started" (issue #1186): the
+			// running container is torn down and a fresh one started.
+			return persistedKukeondCellWithState(priorImage, intmodel.ContainerStateReady), nil
 		},
 		ExistsCgroupFn: func(_ any) (bool, error) {
 			return true, nil
@@ -175,6 +277,12 @@ func TestBootstrapCell_ImageDriftRecreatesCell(t *testing.T) {
 	}
 	if !section.CellRootContainerCreated {
 		t.Errorf("CellSection.CellRootContainerCreated = false; want true (drift recreate is a rebuild)")
+	}
+	if section.CellStartedPre {
+		t.Errorf("CellSection.CellStartedPre = true; want false (recreate genuinely (re)starts → \"started\")")
+	}
+	if !section.CellStarted {
+		t.Errorf("CellSection.CellStarted = false; want true (drift recreate started a fresh container)")
 	}
 }
 
