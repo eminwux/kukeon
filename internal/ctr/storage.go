@@ -96,12 +96,11 @@ func (c *client) NamespaceStorage(namespace string) (StorageStats, error) {
 			return nil
 		})
 		if walkErr != nil {
-			// An unregistered snapshotter on the host surfaces as
-			// errdefs.ErrNotFound (or a wrapped variant) — skip it
-			// rather than fail the whole probe. Real users only ever
-			// populate one snapshotter, so the rest are misses on
-			// every healthy host.
-			if errors.Is(walkErr, errdefs.ErrNotFound) {
+			// A snapshotter that isn't present/loaded on this host —
+			// skip it rather than fail the whole probe. Real users
+			// only ever populate one snapshotter, so the rest are
+			// misses on every healthy host.
+			if snapshotterAbsent(walkErr) {
 				continue
 			}
 			return stats, fmt.Errorf("snapshots/%s: %w", snapshotter, walkErr)
@@ -110,4 +109,25 @@ func (c *client) NamespaceStorage(namespace string) (StorageStats, error) {
 	}
 
 	return stats, nil
+}
+
+// snapshotterAbsent reports whether a snapshotter Walk error means the
+// snapshotter simply isn't present on this host — and so should be
+// skipped — rather than a genuine probe failure worth surfacing.
+//
+// An unregistered snapshotter surfaces as errdefs.ErrNotFound (or a
+// wrapped variant). A snapshotter that is configured-known but not
+// loaded into containerd surfaces, on containerd v2, as an
+// ErrInvalidArgument-class error ("snapshotter not loaded: <name>:
+// invalid argument"); the typed-error filter at storage.go was
+// originally too narrow (ErrNotFound only), so the not-loaded case
+// failed the whole probe and degraded every realm row to WARN on a
+// healthy host. Both classes mean "absent here".
+//
+// Genuine failures (boltdb corruption, an I/O error walking the
+// metadata store) are neither class and fall through to a hard error,
+// keeping a real probe failure visible as WARN/FAIL.
+func snapshotterAbsent(err error) bool {
+	return errors.Is(err, errdefs.ErrNotFound) ||
+		errors.Is(err, errdefs.ErrInvalidArgument)
 }
